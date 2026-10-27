@@ -1,0 +1,6 @@
+apiVersion: v2
+name: iot-edge
+description: Passage plant edge connector (OPC-UA/MQTT to Kafka). Outbound-only; no Service by design.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

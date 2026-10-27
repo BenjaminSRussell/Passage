@@ -1,0 +1,51 @@
+{{- if empty .Values.site }}
+{{- fail "site is required: set --set site=<plant>" }}
+{{- end }}
+{{- if empty .Values.edgeId }}
+{{- fail "edgeId is required: set --set edgeId=<edge>" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-iot-edge
+  labels:
+    app.kubernetes.io/name: iot-edge
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    passage.dev/ring: {{ .Values.ring | quote }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: iot-edge
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: iot-edge
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: iot-edge
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: PASSAGE_ENV
+              value: {{ .Values.config.env | quote }}
+            - name: SERVICE_NAME
+              value: {{ .Values.config.serviceName | quote }}
+            - name: EDGE_SITE
+              value: {{ .Values.site | quote }}
+            - name: EDGE_ID
+              value: {{ .Values.edgeId | quote }}
+            - name: EDGE_ADMIN_ADDR
+              value: {{ .Values.config.adminAddr | quote }}
+            - name: IOT_BUFFER_HOURS
+              value: {{ .Values.config.bufferHours | quote }}
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

@@ -1,0 +1,104 @@
+asyncapi: 3.0.0
+info:
+  title: Passage Shop Floor events
+  version: 0.1.0
+  description: |
+    CloudEvents 1.0 published by the shopfloor service through the transactional
+    outbox (Debezium relays to Kafka), written in the same transaction as the
+    change. Source is `shopfloor`; the Kafka key is the aggregate id
+    (registration id, or worker id for payday events).
+    Schema evolution is additive only.
+defaultContentType: application/cloudevents+json
+channels:
+  registrationPosted:
+    address: passage.shopfloor.registration
+    messages:
+      registrationPosted:
+        $ref: "#/components/messages/RegistrationPosted"
+  paydayApproved:
+    address: passage.shopfloor.payday
+    messages:
+      paydayApproved:
+        $ref: "#/components/messages/PaydayApproved"
+operations:
+  publishRegistrationPosted:
+    action: send
+    channel:
+      $ref: "#/channels/registrationPosted"
+    messages:
+      - $ref: "#/channels/registrationPosted/messages/registrationPosted"
+  publishPaydayApproved:
+    action: send
+    channel:
+      $ref: "#/channels/paydayApproved"
+    messages:
+      - $ref: "#/channels/paydayApproved/messages/paydayApproved"
+components:
+  messages:
+    RegistrationPosted:
+      name: dev.passage.shopfloor.registration.posted.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/RegistrationPostedData"
+    PaydayApproved:
+      name: dev.passage.shopfloor.payday.approved.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/PaydayApprovedData"
+  schemas:
+    RegistrationPostedData:
+      type: object
+      required: [registrationId, workerId, kind, jobId, hours, qtyGood, qtyScrap, offline]
+      additionalProperties: false
+      properties:
+        registrationId:
+          type: string
+          format: uuid
+        workerId:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [clock-in, clock-out, job-start, job-stop, absence, indirect]
+        jobId:
+          type: [string, "null"]
+          format: uuid
+        hours:
+          type: [string, "null"]
+          description: Elapsed hours (decimal, 4 places) of a closed registration; null while open.
+        qtyGood:
+          type: string
+        qtyScrap:
+          type: string
+        offline:
+          type: boolean
+    PaydayApprovedData:
+      type: object
+      required: [workerId, workDate, payLines, approvedBy]
+      additionalProperties: false
+      properties:
+        workerId:
+          type: string
+          format: uuid
+        workDate:
+          type: string
+          format: date
+        payLines:
+          type: array
+          items:
+            type: object
+            required: [type, hours, multiplier, amount, currency]
+            properties:
+              type:
+                type: string
+              hours:
+                type: string
+              multiplier:
+                type: string
+              amount:
+                type: string
+              currency:
+                type: string
+                pattern: "^[A-Z]{3}$"
+        approvedBy:
+          type: string

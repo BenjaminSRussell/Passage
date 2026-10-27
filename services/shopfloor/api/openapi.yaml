@@ -1,0 +1,695 @@
+openapi: 3.1.0
+info:
+  title: Passage Shop Floor API
+  version: 0.1.0
+  description: |
+    Time and attendance core for PSG-25 (slice 1): workers, batch registrations
+    from the kiosk with client UUIDs, pay calculation per worker-day, approval,
+    and the lists the supervisor approval screen reads. Commands that change
+    state (except the registration batch, which is idempotent per item id)
+    require an `Idempotency-Key` header; a repeated key returns the stored
+    outcome with `Idempotent-Replayed: true`. Errors are RFC 9457 problem
+    details (application/problem+json) with a stable `code`; see README.md.
+servers:
+  - url: https://api.{env}.passage.dev
+    variables:
+      env:
+        default: dev
+paths:
+  /api/v1/shopfloor/workers:
+    post:
+      operationId: createWorker
+      summary: Register a worker (shop floor projection of an employee)
+      x-passage-duty: shopfloor.setup.maintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewWorker"
+      responses:
+        "201":
+          description: Created (or the stored outcome of a repeated key).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Worker"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+    get:
+      operationId: listWorkers
+      summary: List workers by name
+      x-passage-duty: shopfloor.view
+      parameters:
+        - name: active
+          in: query
+          schema:
+            type: boolean
+          description: true lists active workers only.
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Workers.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Worker"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /api/v1/shopfloor/workers/{id}:
+    get:
+      operationId: getWorker
+      summary: Get one worker
+      x-passage-duty: shopfloor.view
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The worker.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Worker"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /api/v1/shopfloor/registrations:
+    get:
+      operationId: listRegistrations
+      summary: A worker's registrations that start in a date range
+      x-passage-duty: shopfloor.view
+      parameters:
+        - name: workerId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/TimeZone"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Registrations, oldest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/StoredRegistration"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createRegistrations
+      summary: Create registrations (batch of 1 to 500, offline replay)
+      x-passage-duty: shopfloor.time.register
+      description: |
+        Each item carries a client-generated UUID `id`. An item whose id already
+        exists is ignored and reported as `duplicate` (BR-25.7). Items are stored
+        in client timestamp order; results are in request order. New items emit
+        dev.passage.shopfloor.registration.posted.v1 in the same transaction.
+        An unknown or inactive worker fails the whole batch (SF-0101).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegistrationBatch"
+      responses:
+        "200":
+          description: Per-item outcome in request order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegistrationResponse"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "500":
+          $ref: "#/components/responses/Problem"
+  /api/v1/shopfloor/pay:calculate:
+    post:
+      operationId: calculatePay
+      summary: Calculate pay lines for a worker over a date range
+      x-passage-duty: shopfloor.pay.calculate
+      description: |
+        Recomputes non-approved worker-days from the worker's clock registrations.
+        The weekly overtime threshold counts the earlier days of the pay week
+        (Monday start) even when they are outside the range; only days in the
+        range are saved. Approved days are never rewritten; a range that
+        contains one fails with SF-0102.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PayRange"
+      responses:
+        "200":
+          description: Calculated worker-days with pay lines.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayCalculateResponse"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "500":
+          $ref: "#/components/responses/Problem"
+  /api/v1/shopfloor/pay:approve:
+    post:
+      operationId: approvePay
+      summary: Approve calculated worker-days
+      x-passage-duty: shopfloor.pay.approve
+      description: |
+        Approves every calculated day in the range. Days already approved are
+        returned unchanged. Any open flag fails the request (SF-0006); a day whose
+        registrations changed after calculation fails with SF-0104; approving
+        your own day fails with SF-0106. Newly approved days emit
+        dev.passage.shopfloor.payday.approved.v1.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PayRange"
+      responses:
+        "200":
+          description: Approved worker-days.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayApproveResponse"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "500":
+          $ref: "#/components/responses/Problem"
+  /api/v1/shopfloor/worker-days:
+    get:
+      operationId: listWorkerDays
+      summary: Calculated and approved worker-days with pay lines (approval list)
+      x-passage-duty: shopfloor.view
+      parameters:
+        - name: workerId
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Omit to list every worker.
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [calculated, approved]
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Worker-days ordered by date and worker name.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WorkerDay"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /healthz:
+    get:
+      operationId: healthz
+      summary: Liveness
+      responses:
+        "200":
+          description: Alive.
+  /readyz:
+    get:
+      operationId: readyz
+      summary: Readiness (Postgres reachable within 500 ms)
+      responses:
+        "200":
+          description: Ready.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Status"
+        "503":
+          description: Not ready.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Status"
+components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+    From:
+      name: from
+      in: query
+      required: true
+      schema:
+        type: string
+        format: date
+    To:
+      name: to
+      in: query
+      required: true
+      schema:
+        type: string
+        format: date
+      description: Inclusive; at most 31 days after from.
+    TimeZone:
+      name: timeZone
+      in: query
+      schema:
+        type: string
+        default: UTC
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000
+  responses:
+    Problem:
+      description: RFC 9457 problem details.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+  schemas:
+    NewWorker:
+      type: object
+      required: [partyId, name, costRate, currency]
+      properties:
+        partyId:
+          type: string
+          format: uuid
+          description: Employee party (wave 7).
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        badgeId:
+          type: [string, "null"]
+          maxLength: 64
+          description: Unique per tenant (SF-0105).
+        userId:
+          type: [string, "null"]
+          maxLength: 200
+          description: Sign-in user; that user cannot approve this worker's days (SF-0106).
+        costRate:
+          type: string
+          description: Decimal money per hour, not negative.
+        currency:
+          type: string
+          pattern: "^[A-Z]{3}$"
+    Worker:
+      type: object
+      required: [id, partyId, name, badgeId, userId, costRate, currency, active, version, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        partyId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        badgeId:
+          type: [string, "null"]
+        userId:
+          type: [string, "null"]
+        costRate:
+          type: string
+        currency:
+          type: string
+        active:
+          type: boolean
+        version:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+    StoredRegistration:
+      type: object
+      required: [id, workerId, kind, jobId, bundleId, qtyGood, qtyScrap, scrapReasonId, startedAt, stoppedAt, hours, serverReceivedAt, deviceId, offline, note]
+      properties:
+        id:
+          type: string
+          format: uuid
+        workerId:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [clock-in, clock-out, job-start, job-stop, absence, indirect]
+        jobId:
+          type: [string, "null"]
+        bundleId:
+          type: [string, "null"]
+        qtyGood:
+          type: string
+        qtyScrap:
+          type: string
+        scrapReasonId:
+          type: [string, "null"]
+        startedAt:
+          type: string
+          format: date-time
+        stoppedAt:
+          type: [string, "null"]
+          format: date-time
+        hours:
+          type: [string, "null"]
+          description: Elapsed hours (4 places) of a closed registration.
+        serverReceivedAt:
+          type: string
+          format: date-time
+        deviceId:
+          type: [string, "null"]
+        offline:
+          type: boolean
+        note:
+          type: [string, "null"]
+    WorkerDay:
+      type: object
+      required: [workerId, workerName, workDate, hours, flags, status, timeZone, calculatedAt, approvedBy, approvedAt, payLines]
+      properties:
+        workerId:
+          type: string
+          format: uuid
+        workerName:
+          type: string
+        workDate:
+          type: string
+          format: date
+        hours:
+          type: string
+        flags:
+          type: array
+          items:
+            type: string
+            enum: [missing-clock-out, orphan-clock-out]
+        status:
+          type: string
+          enum: [calculated, approved]
+        timeZone:
+          type: string
+        calculatedAt:
+          type: string
+          format: date-time
+        approvedBy:
+          type: [string, "null"]
+        approvedAt:
+          type: [string, "null"]
+          format: date-time
+        payLines:
+          type: array
+          items:
+            $ref: "#/components/schemas/PayLine"
+    Status:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ready, unavailable]
+    RegistrationBatch:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            $ref: "#/components/schemas/Registration"
+    Registration:
+      type: object
+      required: [id, workerId, kind, startedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Client-generated UUID (idempotency key for the item).
+        workerId:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [clock-in, clock-out, job-start, job-stop, absence, indirect]
+        jobId:
+          type: [string, "null"]
+          format: uuid
+        bundleId:
+          type: [string, "null"]
+          format: uuid
+        qtyGood:
+          type: [string, "null"]
+          description: Decimal string, not negative.
+        qtyScrap:
+          type: [string, "null"]
+          description: Decimal string, not negative.
+        scrapReasonId:
+          type: [string, "null"]
+          description: Required when qtyScrap is above zero (FR-25.4).
+        startedAt:
+          type: string
+          format: date-time
+        stoppedAt:
+          type: [string, "null"]
+          format: date-time
+          description: At most 24 hours after startedAt.
+        deviceId:
+          type: [string, "null"]
+        offline:
+          type: boolean
+          default: false
+        note:
+          type: [string, "null"]
+          maxLength: 500
+    RegistrationResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [id, status]
+            properties:
+              id:
+                type: string
+                format: uuid
+              status:
+                type: string
+                enum: [accepted, duplicate]
+    PayRange:
+      type: object
+      required: [workerId, from, to]
+      properties:
+        workerId:
+          type: string
+          format: uuid
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+          description: Inclusive; at most 28 days after from.
+        timeZone:
+          type: string
+          default: UTC
+          description: IANA time zone name.
+    PayCalculateResponse:
+      type: object
+      required: [workerId, from, to, timeZone, days]
+      properties:
+        workerId:
+          type: string
+          format: uuid
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        timeZone:
+          type: string
+        days:
+          type: array
+          items:
+            $ref: "#/components/schemas/PayDay"
+    PayDay:
+      type: object
+      required: [workDate, hours, flags, payLines]
+      properties:
+        workDate:
+          type: string
+          format: date
+        hours:
+          type: string
+          description: Decimal hours, two places.
+        flags:
+          type: array
+          items:
+            type: string
+            enum: [missing-clock-out, orphan-clock-out]
+        payLines:
+          type: array
+          items:
+            $ref: "#/components/schemas/PayLine"
+    PayLine:
+      type: object
+      required: [type, hours, multiplier, amount, currency]
+      properties:
+        type:
+          type: string
+          enum: [base, overtime-1.5, overtime-2.0, shift-premium, flex-in, flex-out, absence-paid, absence-unpaid]
+        hours:
+          type: string
+        multiplier:
+          type: string
+        amount:
+          type: string
+          description: Decimal money, rounded to the currency's minor unit.
+        currency:
+          type: string
+          pattern: "^[A-Z]{3}$"
+    PayApproveResponse:
+      type: object
+      required: [workerId, from, to, days]
+      properties:
+        workerId:
+          type: string
+          format: uuid
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        days:
+          type: array
+          items:
+            type: object
+            required: [workDate, hours, status, newlyApproved, payLines]
+            properties:
+              workDate:
+                type: string
+                format: date
+              hours:
+                type: string
+              status:
+                type: string
+                enum: [calculated, approved]
+              newlyApproved:
+                type: boolean
+              payLines:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PayLine"
+    Problem:
+      type: object
+      description: RFC 9457 problem details with Passage extensions.
+      required: [type, title, status, code]
+      properties:
+        type:
+          type: string
+          format: uri
+          description: https://passage.dev/problems/<code>
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+        code:
+          type: string
+          description: Stable catalog code such as SF-0101, or a snake_case code.
+        traceId:
+          type: string
+        errors:
+          type: object
+          additionalProperties:
+            type: string

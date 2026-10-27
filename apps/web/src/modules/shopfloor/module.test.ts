@@ -1,0 +1,147 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { loadModules } from "../registry";
+import shopfloor from "./module";
+import {
+  approvePay,
+  calculatePay,
+  chunk,
+  createRegistrations,
+  describeProblem,
+  listWorkerDays,
+  MAX_BATCH,
+  ShopfloorApiError,
+  type RegistrationInput,
+} from "./api/client";
+import { fixed, formatPayTotal, sumDecimals } from "./format";
+
+const item: RegistrationInput = {
+  id: "0190a0b0-0000-7000-8000-000000000001",
+  workerId: "0190a0b0-0000-7000-8000-000000000002",
+  kind: "clock-in",
+  startedAt: "2026-10-21T07:00:00Z",
+};
+
+describe("shopfloor module", () => {
+  it("uses its folder name as id and keeps every route and nav entry under /shopfloor", () => {
+    expect(shopfloor.id).toBe("shopfloor");
+    expect(shopfloor.routes.every((r) => r.element != null && r.path?.startsWith("/shopfloor"))).toBe(true);
+    expect(shopfloor.nav.every((n) => n.to.startsWith("/shopfloor"))).toBe(true);
+  });
+
+  it("has a list, create and detail page for workers and the time approval page", () => {
+    expect(shopfloor.routes.map((r) => r.path)).toEqual([
+      "/shopfloor/workers",
+      "/shopfloor/workers/new",
+      "/shopfloor/workers/:id",
+      "/shopfloor/time",
+    ]);
+  });
+
+  it("guards the navigation with the duties the service enforces", () => {
+    expect(shopfloor.nav).toEqual([
+      { label: "Workers", to: "/shopfloor/workers", duty: "shopfloor.view" },
+      { label: "Time approval", to: "/shopfloor/time", duty: "shopfloor.pay.approve" },
+    ]);
+  });
+
+  it("is auto-discovered by the registry", () => {
+    expect(loadModules().map((m) => m.id)).toContain("shopfloor");
+  });
+});
+
+describe("shopfloor client", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  function reply(status: number, body: unknown) {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } }));
+  }
+
+  it("posts registrations as one batch without an Idempotency-Key (each item is keyed by its id)", async () => {
+    reply(200, { items: [{ id: item.id, status: "accepted" }] });
+    expect(await createRegistrations([item])).toEqual([{ id: item.id, status: "accepted" }]);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/v1/shopfloor/registrations");
+    expect(init.method).toBe("POST");
+    expect(new Headers(init.headers).get("Idempotency-Key")).toBeNull();
+    expect(JSON.parse(init.body as string)).toEqual({ items: [item] });
+  });
+
+  it("sends the caller's Idempotency-Key on pay commands", async () => {
+    const range = { workerId: item.workerId, from: "2026-10-19", to: "2026-10-25", timeZone: "Europe/Berlin" };
+    reply(200, { ...range, days: [] });
+    reply(200, { workerId: item.workerId, from: range.from, to: range.to, days: [] });
+    await calculatePay(range, "calc-key");
+    await approvePay(range, "approve-key");
+    const calls = fetchMock.mock.calls as [string, RequestInit][];
+    expect(calls.map(([url]) => url)).toEqual(["/api/v1/shopfloor/pay:calculate", "/api/v1/shopfloor/pay:approve"]);
+    expect(calls.map(([, init]) => new Headers(init.headers).get("Idempotency-Key"))).toEqual(["calc-key", "approve-key"]);
+    expect(JSON.parse(calls[0][1].body as string)).toEqual(range);
+  });
+
+  it("maps a problem response to the catalog code, detail and field errors", async () => {
+    reply(422, { code: "SF-0006", detail: "Day cannot be approved: 1 flags open.", errors: { workerId: "must be a UUID" } });
+    const err = await approvePay({ workerId: item.workerId, from: "2026-10-20", to: "2026-10-20" }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ShopfloorApiError);
+    expect(describeProblem(err)).toEqual({ code: "SF-0006", message: "Day cannot be approved: 1 flags open.", fields: { workerId: "must be a UUID" } });
+    expect((err as ShopfloorApiError).status).toBe(422);
+  });
+
+  it("falls back to the HTTP status when the body is not a problem", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("bad gateway", { status: 502 }));
+    const err = await listWorkerDays({ from: "2026-10-20", to: "2026-10-20" }).catch((e: unknown) => e);
+    expect(describeProblem(err)).toMatchObject({ code: "HTTP-502" });
+  });
+
+  it("drops empty filters from list queries", async () => {
+    reply(200, { items: [] });
+    await listWorkerDays({ from: "2026-10-20", to: "2026-10-26", status: "" });
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/shopfloor/worker-days?from=2026-10-20&to=2026-10-26");
+  });
+
+  it("refuses batches above the server limit before sending", async () => {
+    const many = Array.from({ length: MAX_BATCH + 1 }, () => item);
+    await expect(createRegistrations(many)).rejects.toBeInstanceOf(RangeError);
+    await expect(createRegistrations([])).rejects.toBeInstanceOf(RangeError);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("chunk", () => {
+  it("splits an offline queue into server-sized batches in order", () => {
+    const queue = Array.from({ length: 1201 }, (_, i) => i);
+    const batches = chunk(queue);
+    expect(batches.map((b) => b.length)).toEqual([500, 500, 201]);
+    expect(batches.flat()).toEqual(queue);
+  });
+
+  it("rejects a non-positive size", () => {
+    expect(() => chunk([1], 0)).toThrow(RangeError);
+  });
+});
+
+describe("decimal formatting", () => {
+  it("rounds decimal strings half away from zero without floats", () => {
+    expect(fixed("10.5", 2)).toBe("10.50");
+    expect(fixed("2.345", 2)).toBe("2.35");
+    expect(fixed("9.995", 2)).toBe("10.00");
+    expect(fixed("-1.005", 2)).toBe("-1.01");
+    expect(fixed("0.1", 0)).toBe("0");
+  });
+
+  it("sums amounts exactly where float addition would drift", () => {
+    expect(sumDecimals(["0.1", "0.2"], 2)).toBe("0.30");
+    expect(sumDecimals(["160.00", "60.00", "-0.01"], 2)).toBe("219.99");
+  });
+
+  it("totals pay lines per currency", () => {
+    const line = (amount: string, currency: string) => ({ type: "base", hours: "1", multiplier: "1", amount, currency });
+    expect(formatPayTotal([line("160.000000", "USD"), line("60.000000", "USD")])).toBe("220.00 USD");
+    expect(formatPayTotal([line("1", "USD"), line("2", "EUR")])).toBe("1.00 USD, 2.00 EUR");
+    expect(formatPayTotal([])).toBe("—");
+  });
+});

@@ -1,0 +1,26 @@
+image:
+  repository: ghcr.io/benjaminsrussell/passage/iot-edge
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+# Rollout ring for this plant: canary | ring1 | all (FR-25.19).
+ring: all
+
+# Plant identity. Both are required; the chart fails to render when empty.
+# Defaults target the demo plant; override per plant.
+site: "demo-plant"
+edgeId: "edge-demo-1"
+
+config:
+  env: dev
+  serviceName: iot-edge
+  adminAddr: "127.0.0.1:8081"
+  bufferHours: 24
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
