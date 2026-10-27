@@ -321,6 +321,34 @@ paths:
           description: LEAN-0102
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/lean/kanban-rules/{id}/count-check:
+    get:
+      operationId: checkKanbanRuleCount
+      summary: Fixed-kanban count check for one rule (PRD 4.24.16, BR-24.7)
+      description: >-
+        The weekly fixed-kanban count suggestion, run on demand for one fixed rule: the BR-24.7
+        suggestion ⌈dailyDemand × leadTimeH / 24 × (1 + safetyPct / 100) / fixedQty⌉ from the rule's
+        lead time and fixed quantity, against its number of kanbans. A deviation above 25 % is
+        reported. Advisory: it writes nothing and never changes the rule.
+      x-passage-duty: lean.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - { name: dailyDemand, in: query, required: true, schema: { $ref: '#/components/schemas/Decimal' }, description: 'Daily demand in the rule item''s unit, 0 or more, at most 6 decimals.' }
+        - { name: safetyPct, in: query, schema: { $ref: '#/components/schemas/Decimal' }, description: 'Safety stock in percent, 0 (default) to below 1000.' }
+      responses:
+        '200':
+          description: The configured and suggested counts and the deviation.
+          content: { application/json: { schema: { $ref: '#/components/schemas/CountCheck' } } }
+        '400':
+          description: COM-0001 for a malformed id, a missing, negative or malformed demand, or a malformed or out-of-range safety.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '404':
+          description: LEAN-0102
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: LEAN-0113 when the rule is not a fixed rule.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/lean/kanban-rules:fixed-count:
     post:
       operationId: suggestFixedKanbanCount
@@ -904,6 +932,23 @@ components:
         version: { type: integer }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    CountCheck:
+      type: object
+      required: [ruleId, ruleCode, dailyDemand, safetyPct, leadTimeH, fixedQty, configured, suggested, deviationPct, limitPct, reportable]
+      properties:
+        ruleId: { type: string, format: uuid }
+        ruleCode: { type: string }
+        dailyDemand: { $ref: '#/components/schemas/Decimal' }
+        safetyPct: { $ref: '#/components/schemas/Decimal' }
+        leadTimeH: { type: integer, description: 'The rule''s lead time in hours; the formula uses it in days (÷ 24).' }
+        fixedQty: { $ref: '#/components/schemas/Decimal' }
+        configured: { type: integer, description: 'The rule''s number of kanbans.' }
+        suggested: { type: integer, description: 'The BR-24.7 suggestion; never applied automatically.' }
+        deviationPct:
+          allOf: [{ $ref: '#/components/schemas/Decimal' }]
+          description: '|suggested − configured| ÷ configured × 100, to two places.'
+        limitPct: { type: integer, description: 'The deviation above which the check is reported (25).' }
+        reportable: { type: boolean, description: 'The deviation is above limitPct.' }
     RuleAnalysis:
       type: object
       required: [ruleId, ruleCode, from, to, cycles, timedCycles, avgLeadTimeH, targetLeadTimeH, dueCycles, lateCycles, latePct, activeKanbans, maxKanbans, overdueOpen]

@@ -81,6 +81,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(read).Get("/v1/lean/kanban-rules", a.listRules)
 	r.With(read).Get("/v1/lean/kanban-rules/{id}", a.getRule)
 	r.With(read).Get("/v1/lean/kanban-rules/{id}/analysis", a.ruleAnalysis)
+	r.With(read).Get("/v1/lean/kanban-rules/{id}/count-check", a.countCheck)
 	r.With(authz.RequireDuty(DutyRuleWrite)).Post("/v1/lean/kanban-rules:fixed-count", a.fixedCount)
 	r.With(authz.RequireDuty(DutyKanbanWrite)).Post("/v1/lean/kanbans:generate", a.generate)
 	r.With(read).Get("/v1/lean/kanbans/{id}", a.getKanban)

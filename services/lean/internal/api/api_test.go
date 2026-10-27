@@ -57,6 +57,7 @@ type fakeStore struct {
 	gotRange   [2]time.Time
 	gotPeriod  string
 	periods    []store.Period
+	rule       *store.Rule
 }
 
 func (f *fakeStore) CreateFlow(_ context.Context, in store.Flow, idem store.Idem) (store.Flow, bool, error) {
@@ -94,6 +95,9 @@ func (f *fakeStore) ListRules(_ context.Context, flow string, limit int) ([]stor
 }
 
 func (f *fakeStore) GetRule(context.Context, string) (store.Rule, error) {
+	if f.rule != nil {
+		return *f.rule, f.err
+	}
 	return store.Rule{ID: ruleID}, f.err
 }
 

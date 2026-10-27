@@ -476,6 +476,36 @@ export function getRuleAnalysis(id: string, period: { from?: string; to?: string
   return send<RuleAnalysis>(`/kanban-rules/${encodeURIComponent(id)}/analysis${query({ from: period.from, to: period.to })}`, {}, signal);
 }
 
+// Fixed-kanban count check (PRD 4.24.16, BR-24.7): a fixed rule's number of
+// kanbans against the suggestion for a daily demand. A read: nothing is stored.
+
+export interface CountCheck {
+  ruleId: string;
+  ruleCode: string;
+  dailyDemand: string;
+  safetyPct: string;
+  leadTimeH: number;
+  fixedQty: string;
+  /** The rule's number of kanbans. */
+  configured: number;
+  /** The BR-24.7 suggestion; never applied automatically. */
+  suggested: number;
+  /** |suggested − configured| ÷ configured × 100, to two places. */
+  deviationPct: string;
+  /** The deviation above which the check is reported (25). */
+  limitPct: number;
+  reportable: boolean;
+}
+
+/** Checks a fixed rule's count for a daily demand and safety percentage (default 0); LEAN-0113 for other rules. */
+export function checkRuleCount(id: string, demand: { dailyDemand: string; safetyPct?: string }, signal?: AbortSignal): Promise<CountCheck> {
+  return send<CountCheck>(
+    `/kanban-rules/${encodeURIComponent(id)}/count-check${query({ dailyDemand: demand.dailyDemand, safetyPct: demand.safetyPct })}`,
+    {},
+    signal,
+  );
+}
+
 // Backflush (FR-24.12): conversion cost of a costing period by activity, from
 // the jobs completed in it, cycle time per unit and the hourly rates given.
 // A preview: nothing is stored, so no Idempotency-Key.

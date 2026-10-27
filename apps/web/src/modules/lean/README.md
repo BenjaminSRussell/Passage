@@ -1,4 +1,4 @@
-# lean web module (PSG-24 slices 1, 2, 4, 5, 6 and 7)
+# lean web module (PSG-24 slices 1, 2, 4, 5, 6, 7 and 8)
 
 Front end for `services/lean`. Discovered by the shell through `module.ts`. Pages use the
 `shell/ui` primitives and `pages.module.css` (tokens only), as in `docs/design-system.md`.
@@ -13,7 +13,7 @@ Front end for `services/lean`. Discovered by the shell through `module.ts`. Page
 | `/lean/kanbans/:id` | Kanban detail: card facts with handling units, and its jobs with work cell (linked to its board), state, start and completion times and the reported quantities | `GET /api/v1/lean/kanbans/{id}` | `lean.read` |
 | `/lean/rules` | Kanban rule list, optionally for one flow | `GET /api/v1/lean/kanban-rules` | `lean.read` |
 | `/lean/rules/new` | Create a rule; fixed rules get the BR-24.7 suggestion for the number of cards, event rules an event source and exact-quantity flag | `GET /flows`, `POST /kanban-rules:fixed-count`, `POST /kanban-rules` | `lean.kanban-rule.write` |
-| `/lean/rules/:id` | Rule detail: facts, its cards, generate kanbans (fixed: count; event: demand and its reference, AC-24.6), and the rule analysis (PRD 4.24.14) for the last 30 days or a chosen period of at most 366 days: cycles, average lead time against the rule's, late share, active cards against the maximum and overdue cards, with loading, empty and error states | `GET /kanban-rules/{id}`, `GET /board?ruleId`, `POST /kanbans:generate`, `GET /kanban-rules/{id}/analysis` | `lean.read` / `lean.kanban.write` |
+| `/lean/rules/:id` | Rule detail: facts, its cards, generate kanbans (fixed: count; event: demand and its reference, AC-24.6), and the rule analysis (PRD 4.24.14) for the last 30 days or a chosen period of at most 366 days: cycles, average lead time against the rule's, late share, active cards against the maximum and overdue cards, with loading, empty and error states; for a fixed rule, the kanban count check (PRD 4.24.16, BR-24.7, slice 8): a daily demand and optional safety percentage (checked before sending) give the configured and suggested cards and the deviation, flagged above 25 %, with the formula shown; a suggestion only | `GET /kanban-rules/{id}`, `GET /board?ruleId`, `POST /kanbans:generate`, `GET /kanban-rules/{id}/analysis`, `GET /kanban-rules/{id}/count-check` | `lean.read` / `lean.kanban.write` |
 | `/lean/flows` | Production flow list with status filter | `GET /api/v1/lean/flows` | `lean.read` |
 | `/lean/flows/new` | Flow designer: activities with kind, cycle time, output location and predecessors (FR-24.8) | `POST /api/v1/lean/flows` | `lean.flow.write` |
 | `/lean/flows/:id` | Flow detail: activities (missing outputs flagged), activate from a date; LEAN-0004 shown when not connected; links to its rules, board and costing periods | `GET /flows/{id}`, `POST /flows/{id}:activate` | `lean.read` / `lean.flow.write` |
@@ -51,7 +51,9 @@ its empty and failed states, the backflush preview (rate checks, the refusal for
 no Idempotency-Key, the carried conversion cost) and the CSV export and its failure, and for
 slice 7 which failures keep a command's key, a start retried after a lost answer with the same
 key, a new key after a refusal, a completion retried with the same report (same key) and with
-another report (new key), and a card move retried after a 503, plus the in-repo WCAG checks.
+another report (new key), and a card move retried after a 503, and for slice 8 the count check
+inputs, a reported and a within-limit check with the query sent, the refusal and its recovery,
+and no count check on an event rule, plus the in-repo WCAG checks.
 
 ## Needs (for the shell owner, wave 5)
 

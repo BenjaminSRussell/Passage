@@ -1,6 +1,6 @@
 # lean
 
-Lean manufacturing for Passage (wave 24, PSG-24, slices 1, 2, 4, 5, 6 and 7). Production flows with their
+Lean manufacturing for Passage (wave 24, PSG-24, slices 1, 2, 4, 5, 6, 7 and 8). Production flows with their
 activities and activation, kanban rules (fixed, scheduled, event), kanban generation, the
 kanban card state machine and the kanban board (slice 1). Slice 2 adds takt vs cycle on the
 board (FR-24.14) and the lean subcontracting price rule as a preview of the purchase order
@@ -18,7 +18,10 @@ and job completion is recorded in an append-only history, so a reused fixed card
 cycles still count. Slice 7 makes the shop-floor commands retry-safe end to end: card moves and
 job starts and completions replay their stored first answer for a retried Idempotency-Key, also
 when the retry arrives while the first call still holds the lock, and both boards resend the
-same key after a lost answer.
+same key after a lost answer. Slice 8 adds the fixed-kanban count check (PRD 4.24.16, BR-24.7):
+for a fixed rule and a daily demand, the suggested number of kanbans from the rule's lead time
+and fixed quantity against its configured number, with deviations above 25 % reported. It is
+the weekly suggestion job run on demand; it writes nothing.
 
 Flows, activities, rules, cards and jobs are stored in Postgres (RLS on every table, outbox
 events in the same transaction). The subcontracting preview stores nothing. Deriving period
@@ -99,6 +102,10 @@ skipped when `PASSAGE_TEST_DATABASE_URL` is unset.
   fixed card reused once has two cycles, each timed from its planning; a jobless event card
   completed after its due time is late (100 %); an open card past due is overdue now; the period
   filter is by completion day (UTC); nothing measured is null, not zero.
+- PRD 4.24.16 fixed-kanban count check (domain table and rapid property: reported exactly when
+  the suggestion is more than 25 % away from the configured count): 5 cards against a demand
+  needing ⌈10 × 2 days × 1.1 / 20⌉ = 2 is 60 % and reported; 3 against 4 is exactly 25 % and
+  not reported; event and scheduled rules are LEAN-0113.
 - FR-24.12 backflush (domain table and rapid property: the total equals the sum of the activity
   costs at the minor unit; store): Mix 40 s × 45.5 units at 90/h and Fill 30 s × 45.5 at 60/h give
   68.25, counting the completions of a card reused since; service activities take no rate.
@@ -129,6 +136,7 @@ skipped when `PASSAGE_TEST_DATABASE_URL` is unset.
 | GET | `/v1/lean/flows/{id}/costing-periods` | `lean.read` | The flow's periods, latest first; `limit` |
 | POST | `/v1/lean/flows/{id}/costing-periods/{periodId}:settle` | `lean.flow.settle` | Settle after the last day with `materialCost`, `conversionCost`, `outputValue` (BR-24.9, AC-24.8); `version`; Idempotency-Key |
 | GET | `/v1/lean/kanban-rules/{id}/analysis` | `lean.read` | Rule KPI over `from`..`to` (default the last 30 days, at most 366): cycles, average lead time against the rule's, late share, active against maximum, overdue now (PRD 4.24.14) |
+| GET | `/v1/lean/kanban-rules/{id}/count-check` | `lean.read` | Fixed rule only (else LEAN-0113): the BR-24.7 suggestion for `dailyDemand` and `safetyPct` (default 0) from the rule's lead time and fixed quantity, against its number of kanbans; `reportable` above a 25 % deviation (PRD 4.24.16); writes nothing |
 | POST | `/v1/lean/flows/{id}/costing-periods/{periodId}:backflush` | `lean.flow.settle` | Conversion cost of the period by activity from the hourly `rates` given (FR-24.12); writes nothing |
 | GET | `/v1/lean/flows/{id}/costing-periods:export` | `lean.read` | The flow's periods as CSV, oldest first (PRD 4.24.14 flow costing period report) |
 | POST | `/v1/lean/subcontracting:preview` | `lean.flow.write` | PO lines for completed service jobs priced by purchase agreement (FR-24.20, BR-24.16); writes nothing |
@@ -168,6 +176,7 @@ Duties are enforced with the kernel `authz.RequireDuty`. The OPA entries are a h
 | `LEAN-0110` | 404 | Costing period not found on this flow |
 | `LEAN-0111` | 409 | Costing period is already settled |
 | `LEAN-0112` | 409 | Costing period has not ended (its last day, UTC, has not passed) |
+| `LEAN-0113` | 422 | Count check of a rule that is not fixed: only a fixed rule has a number of kanbans to check (BR-24.7) |
 | `idempotency_key_reuse` | 422 | Idempotency-Key reused with a different request |
 | `idempotency_key_in_flight` | 409 | A concurrent request with the same key committed first; retry for its answer |
 | `AUTH-0001` | 401 | No tenant or principal |

@@ -1,4 +1,4 @@
-# Not implemented in PSG-24 slices 1, 2, 4, 5, 6 and 7 (lean)
+# Not implemented in PSG-24 slices 1, 2, 4, 5, 6, 7 and 8 (lean)
 
 Built in slice 1: production flows with activities, connectivity check and activation
 (FR-24.8, LEAN-0004); kanban rules (FR-24.9); kanban generation for fixed rules with the
@@ -55,6 +55,17 @@ one event). Both web boards now keep a command's key until the service answers i
 after a lost answer is replayed instead of being refused as a stale version
 (`apps/web/src/modules/lean/commandKeys.ts`).
 
+Built in slice 8: the fixed-kanban count check of PRD 4.24.16, on demand:
+`GET /kanban-rules/{id}/count-check?dailyDemand&safetyPct` computes the BR-24.7 suggestion from
+the rule's lead time (hours ÷ 24) and fixed quantity and compares it with the rule's number of
+kanbans; a deviation above 25 % is `reportable`. It writes nothing and never changes the rule;
+event and scheduled rules are refused with LEAN-0113. The rule detail screen of a fixed rule runs
+the check. The swarm draft of this slice also added a `kanban_completion` ledger (migration 0006)
+and a separate `/lean/demand` page; both were dropped in review: the ledger duplicated
+`kanban_job_completion`, which slice 6 already writes with every job completion and the backflush
+already reads, and the demand page duplicated event-kanban generation on the rule detail screen
+and called a `kanbans:generate-preview` route the service does not serve.
+
 | Deliverable or AC | Status | Reason |
 |---|---|---|
 | Deliverable 3: flow versions (a new version of an active flow, expiry of the previous one) | later slice of PSG-24 | slice 1 creates draft flows and activates them; flows cannot be edited or versioned yet. `value_stream_id` refers to the wave-6 operating unit by id only |
@@ -78,7 +89,8 @@ after a lost answer is replayed instead of being refused as a stale version
 | Board load SLO (p95 < 500 ms), kanban generation SLO (p95 < 5 s), load tests | later slice of PSG-24 | no load path yet |
 | `/metrics`; feature flags `lean.kanban`, `lean.flow-costing` | later slice of PSG-24 | no counters yet (the chart's ServiceMonitor is off by default); flags need the deploy owner |
 | Second demo plant (food and chemicals line) with a kanban-driven cell, `lean-db` CloudNativePG | handoff | deploy/ and demo seed belong to the deployment owner |
-| Jobs: flow period auto-settle (monthly), fixed-kanban count suggestion (weekly Monday 05:00) | later slice of PSG-24 | need Temporal (wave 4); the suggestion itself is available on demand |
+| Jobs: flow period auto-settle (monthly), fixed-kanban count suggestion (weekly Monday 05:00) with its report of deviations above 25 % | later slice of PSG-24 | need Temporal (wave 4); the check itself is built on demand for one rule (`/kanban-rules/{id}/count-check`, slice 8), with the daily demand supplied by the caller |
+| Fixed-kanban count check: daily demand derived by the service (from sales or forecast consumption of the rule's item) | handoff | the demand history lives in sales (wave 27) and demand forecasting (wave 22); until they publish it, the caller enters the daily demand |
 | Duty entries for `lean.read`, `lean.flow.write`, `lean.kanban-rule.write`, `lean.kanban.write`, `lean.kanban.work`, `lean.flow.settle` in OPA data | handoff | policies/ is outside this wave's ownership; the service enforces duties from forwarded headers |
 | Fixture files `lean-flow-demo` and `lean-kanban-sim` under testdata/ (PRD 4.24.9) | deviation | both fixtures are built in Go where they are used: `demoFlow` in internal/store/store_test.go and the AC-24.6 simulation in internal/domain/kanban_test.go and internal/store/store_test.go |
 | Playwright board E2E (PRD 4.24.9) | later slice of PSG-24 | needs the end-to-end stack with RAF posting; the board is covered by vitest page tests |

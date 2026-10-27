@@ -16,6 +16,7 @@ import {
   type KanbanState,
   type Rule,
   type RuleAnalysis,
+  type CountCheck,
 } from "./api/client";
 import { REFRESH_MS } from "./BoardPage";
 import { validatePeriod } from "./CostingPage";
@@ -24,6 +25,7 @@ import { nextState, overdue, variance } from "./format";
 import { answered } from "./commandKeys";
 import lean from "./module";
 import { shiftDays, validateAnalysisPeriod } from "./RuleAnalysis";
+import { validateCountCheck } from "./RuleCountCheck";
 import { validateRule } from "./RulePages";
 import { validateCompletion, workCells } from "./WorkCellBoardPage";
 
@@ -1180,5 +1182,100 @@ describe("slice 7: retrying board commands", () => {
     const [first, second] = keysOf(`/api/v1/lean/kanbans/${K1}:move`);
     expect(first).toBeTruthy();
     expect(second).toBe(first);
+  });
+});
+
+describe("slice 8: fixed-kanban count check", () => {
+  const countPath = `/api/v1/lean/kanban-rules/${RULE}/count-check`;
+  const reported: CountCheck = {
+    ruleId: RULE,
+    ruleCode: "MIX-A",
+    dailyDemand: "10",
+    safetyPct: "10",
+    leadTimeH: 8,
+    fixedQty: "25",
+    configured: 3,
+    suggested: 1,
+    deviationPct: "66.67",
+    limitPct: 25,
+    reportable: true,
+  };
+
+  function countHandler(reply: (url: URL) => Reply, shown: Rule = rule): Handler {
+    return (url) => {
+      if (url.pathname === `/api/v1/lean/kanban-rules/${shown.id}`) return json(200, shown);
+      if (url.pathname === "/api/v1/lean/board") return json(200, boardOf([]));
+      if (url.pathname === countPath) return reply(url);
+      return quietAnalysis(url);
+    };
+  }
+
+  it("checks the inputs like the service", () => {
+    expect(validateCountCheck({ dailyDemand: "12.5", safetyPct: "" })).toEqual({});
+    expect(validateCountCheck({ dailyDemand: "0", safetyPct: "999.5" })).toEqual({});
+    expect(validateCountCheck({ dailyDemand: "", safetyPct: "" }).dailyDemand).toBeDefined();
+    expect(validateCountCheck({ dailyDemand: "-1", safetyPct: "" }).dailyDemand).toBeDefined();
+    expect(validateCountCheck({ dailyDemand: "1.1234567", safetyPct: "" }).dailyDemand).toBeDefined();
+    expect(validateCountCheck({ dailyDemand: "1", safetyPct: "1000" }).safetyPct).toBeDefined();
+    expect(validateCountCheck({ dailyDemand: "1", safetyPct: "abc" }).safetyPct).toBeDefined();
+  });
+
+  it("reports a fixed rule whose count is more than 25 % off the suggestion (PRD 4.24.16)", async () => {
+    handler = countHandler(() => json(200, reported));
+    const { container } = renderAt(`/lean/rules/${RULE}`);
+    expect(await screen.findByText(/Enter the expected daily demand/)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Daily demand"), { target: { value: "x" } });
+    fireEvent.click(screen.getByRole("button", { name: "Check count" }));
+    expect(await screen.findByText(/Enter the daily demand: 0 or more/)).toBeInTheDocument();
+    expect(calls.filter((c) => c.url.pathname === countPath)).toHaveLength(0);
+
+    fireEvent.change(screen.getByLabelText("Daily demand"), { target: { value: "10" } });
+    fireEvent.change(screen.getByLabelText(/Safety/), { target: { value: "10" } });
+    fireEvent.click(screen.getByRole("button", { name: "Check count" }));
+    const tiles = await screen.findByRole("list", { name: "Kanban count check" });
+    expect(tiles).toHaveTextContent("Configured cards 3");
+    expect(tiles).toHaveTextContent("Suggested cards 1");
+    expect(tiles).toHaveTextContent("Deviation 66.67 %");
+    expect(screen.getByRole("status")).toHaveTextContent("3 cards are 66.67 % away from the 1 suggested");
+    const sent = calls.find((c) => c.url.pathname === countPath)!;
+    expect(sent.method).toBe("GET");
+    expect(sent.url.searchParams.get("dailyDemand")).toBe("10");
+    expect(sent.url.searchParams.get("safetyPct")).toBe("10");
+    expect(header(sent, "Idempotency-Key")).toBeNull();
+    expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("says when the count is within the limit and leaves safety out when empty", async () => {
+    handler = countHandler(() => json(200, { ...reported, safetyPct: "0", suggested: 3, deviationPct: "0.00", reportable: false }));
+    renderAt(`/lean/rules/${RULE}`);
+    fireEvent.change(await screen.findByLabelText("Daily demand"), { target: { value: "40" } });
+    fireEvent.click(screen.getByRole("button", { name: "Check count" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("within 25 % of the 3 suggested");
+    const sent = calls.find((c) => c.url.pathname === countPath)!;
+    expect(sent.url.searchParams.has("safetyPct")).toBe(false);
+  });
+
+  it("shows a refused check and recovers on the next one", async () => {
+    let refuse = true;
+    handler = countHandler(() =>
+      refuse ? json(422, { code: "LEAN-0113", detail: "kanban rule MIX-A is not a fixed rule" }) : json(200, reported),
+    );
+    renderAt(`/lean/rules/${RULE}`);
+    fireEvent.change(await screen.findByLabelText("Daily demand"), { target: { value: "10" } });
+    fireEvent.click(screen.getByRole("button", { name: "Check count" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("kanban rule MIX-A is not a fixed rule (LEAN-0113)");
+    expect(screen.queryByRole("list", { name: "Kanban count check" })).toBeNull();
+    refuse = false;
+    fireEvent.click(screen.getByRole("button", { name: "Check count" }));
+    expect(await screen.findByRole("list", { name: "Kanban count check" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("offers no count check on an event rule", async () => {
+    handler = countHandler(() => json(200, reported), eventRule);
+    renderAt(`/lean/rules/${EVENT_RULE}`);
+    expect(await screen.findByRole("heading", { name: "FILL-EV" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Check count" })).toBeNull();
   });
 });
