@@ -1,0 +1,13 @@
+asyncapi: 3.0.0
+info:
+  title: Passage Consolidation events
+  version: 0.1.0
+  description: |
+    Wave 40, slice 1 publishes no events: the elimination and translation
+    previews change no state. dev.passage.consol.run.completed.v1, unit.released.v1 and
+    validation.failed.v1 (PRD 7.40.5) arrive with the run and monitor slices,
+    each with its schema in this file.
+channels: {}
+operations: {}
+components:
+  messages: {}

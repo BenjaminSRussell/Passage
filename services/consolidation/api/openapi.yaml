@@ -1,0 +1,219 @@
+openapi: 3.1.0
+info:
+  title: Passage Consolidation
+  version: 0.1.0
+  description: |
+    Wave 40, slice 1. Stateless consolidation calculators for one parent and
+    one subsidiary: the E1–E5 elimination entries (FR-40.9) and the IAS 21
+    unit translation with CTA and its NCI share (FR-40.8, BR-40.6). Nothing is
+    stored. Groups, collection, runs, consolidated trial balances,
+    reclassification, top-side journals and the monitor are later slices of
+    PSG-40 (see NOT-IMPLEMENTED.md). Browser calls go through the web BFF at
+    /api/v1/consol/..., which rewrites to these paths and sets the tenant and
+    duty headers.
+servers:
+  - url: https://api.{env}.passage.dev
+    variables:
+      env:
+        default: dev
+paths:
+  /v1/consol/eliminations:preview:
+    post:
+      operationId: previewEliminations
+      summary: Build the E1–E5 elimination entries for one parent and subsidiary pair, balanced per rule (AC-40.7)
+      x-passage-duty: ConsolidationRun
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EliminationRequest'
+      responses:
+        '200':
+          description: Entries, totals per rule and overall, and the balance result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EliminationPreview'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '422':
+          description: CNS-0920 bargain purchase, CNS-0903 an unbalanced rule
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /v1/consol/translations:preview:
+    post:
+      operationId: previewTranslation
+      summary: Translate a unit's net assets and net income under IAS 21 and derive the CTA with its NCI share (AC-40.6)
+      x-passage-duty: ConsolidationRun
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TranslationRequest'
+      responses:
+        '200':
+          description: Translated amounts and the CTA split, rounded to the group currency minor unit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TranslationPreview'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+  /healthz:
+    get:
+      operationId: healthz
+      x-passage-duty: public
+      responses:
+        '200':
+          description: Liveness
+  /readyz:
+    get:
+      operationId: readyz
+      x-passage-duty: public
+      responses:
+        '200':
+          description: Readiness (the stateless slice has no dependency to check)
+components:
+  parameters:
+    TenantHeader:
+      name: X-Passage-Tenant
+      in: header
+      required: true
+      description: Set by the gateway; UUIDv7 tenant id
+      schema:
+        type: string
+        format: uuid
+    DutiesHeader:
+      name: X-Passage-Duties
+      in: header
+      required: true
+      description: Set by the gateway; comma-separated duties of the caller
+      schema:
+        type: string
+  responses:
+    Problem:
+      description: RFC 9457 problem details (COM-0001 validation, AUTH-0001 no tenant, AUTH-0003 missing duty)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    Decimal:
+      type: string
+      pattern: '^-?[0-9]+(\.[0-9]+)?$'
+    Rates:
+      type: object
+      additionalProperties: false
+      properties:
+        closing: { $ref: '#/components/schemas/Decimal', description: Subsidiary-to-group closing rate }
+        average: { $ref: '#/components/schemas/Decimal', description: Average rate of the period }
+        opening: { $ref: '#/components/schemas/Decimal', description: Rate that translated opening net assets (translation only) }
+        historical: { $ref: '#/components/schemas/Decimal', description: Rate at acquisition (eliminations only) }
+    EliminationRequest:
+      type: object
+      additionalProperties: false
+      required: [currency, ownershipPct, rates]
+      description: Missing amounts default to 0. Subsidiary amounts are in its functional currency.
+      properties:
+        currency: { type: string, pattern: '^[A-Z]{3}$', description: Group currency }
+        ownershipPct: { $ref: '#/components/schemas/Decimal', description: Parent ownership, above 0 and at most 100 }
+        rates:
+          allOf:
+            - $ref: '#/components/schemas/Rates'
+          description: closing, average and historical are required
+        icSales: { $ref: '#/components/schemas/Decimal', description: Intercompany sales by the seller, not negative }
+        icCost: { $ref: '#/components/schemas/Decimal', description: Seller's cost of those sales, not negative }
+        unsoldShare: { $ref: '#/components/schemas/Decimal', description: Fraction of the IC goods still held by the buyer, 0 to 1 }
+        icReceivable: { $ref: '#/components/schemas/Decimal', description: Subsidiary receivable from the parent }
+        payableGroup: { $ref: '#/components/schemas/Decimal', description: Parent payable to the subsidiary as recorded in group currency }
+        shareCapital: { $ref: '#/components/schemas/Decimal', description: Subsidiary share capital at acquisition }
+        preAcqRe: { $ref: '#/components/schemas/Decimal', description: Subsidiary retained earnings at acquisition }
+        investmentCost: { $ref: '#/components/schemas/Decimal', description: Parent's investment in group currency }
+        netIncome: { $ref: '#/components/schemas/Decimal', description: Subsidiary current-year net income }
+        sellerIsSubsidiary: { type: boolean, description: Upstream sale; its unrealized profit is shared with the NCI }
+    Totals:
+      type: object
+      required: [debit, credit]
+      properties:
+        debit: { type: string }
+        credit: { type: string }
+    EliminationPreview:
+      type: object
+      required: [currency, entries, rules, totals, balanced]
+      properties:
+        currency: { type: string }
+        entries:
+          type: array
+          items:
+            type: object
+            required: [rule, account, debit, credit]
+            properties:
+              rule: { type: string, enum: [E1, E2, E3, E4, E5] }
+              account: { type: string }
+              debit: { type: string }
+              credit: { type: string }
+        rules:
+          type: object
+          description: Debit and credit totals per rule code
+          additionalProperties:
+            $ref: '#/components/schemas/Totals'
+        totals:
+          $ref: '#/components/schemas/Totals'
+        balanced: { type: boolean }
+    TranslationRequest:
+      type: object
+      additionalProperties: false
+      required: [currency, ownershipPct, rates, openingNetAssets, netIncome, closingNetAssets]
+      properties:
+        currency: { type: string, pattern: '^[A-Z]{3}$', description: Group currency }
+        ownershipPct: { $ref: '#/components/schemas/Decimal' }
+        rates:
+          allOf:
+            - $ref: '#/components/schemas/Rates'
+          description: opening, average and closing are required
+        openingNetAssets: { $ref: '#/components/schemas/Decimal' }
+        netIncome: { $ref: '#/components/schemas/Decimal' }
+        closingNetAssets: { $ref: '#/components/schemas/Decimal' }
+    TranslationPreview:
+      type: object
+      required: [currency, openingNetAssets, netIncome, closingNetAssets, cta, nciShareOfCta, groupShareOfCta]
+      properties:
+        currency: { type: string }
+        openingNetAssets: { type: string, description: At the opening rate }
+        netIncome: { type: string, description: At the average rate }
+        closingNetAssets: { type: string, description: At the closing rate }
+        cta: { type: string, description: closing − (opening + net income) }
+        nciShareOfCta: { type: string, description: (100 − ownership %) of the CTA, reclassified to NCI }
+        groupShareOfCta: { type: string, description: CTA − NCI share }
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri, description: 'https://passage.dev/problems/<code>' }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        traceId: { type: string }
+        errors:
+          type: object
+          additionalProperties: { type: string }

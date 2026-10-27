@@ -1,0 +1,13 @@
+asyncapi: 3.0.0
+info:
+  title: Passage Intercompany events
+  version: 0.1.0
+  description: |
+    Wave 40, slice 1 publishes no events: the journal preview and reconciliation classify endpoints change no state.
+    The events in PRD 7.40.5 (mirror created and compensated, journal posted,
+    reconciliation flagged, charge posted, planning completed) are added with
+    the store and saga slices, each with its schema in this file.
+channels: {}
+operations: {}
+components:
+  messages: {}

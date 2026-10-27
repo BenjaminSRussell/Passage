@@ -1,0 +1,6 @@
+apiVersion: v2
+name: intercompany
+description: Passage intercompany (wave 40, slice 1; stateless previews)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

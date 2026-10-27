@@ -1,0 +1,247 @@
+openapi: 3.1.0
+info:
+  title: Passage Intercompany
+  version: 0.1.0
+  description: |
+    Wave 40, slice 1. Stateless intercompany calculations: the caller supplies
+    the accounting matrix or the balances and the service returns the derived
+    due-to / due-from journal (BR-40.4) or the reconciliation classification
+    (FR-40.6, BR-40.5). Nothing is stored and no event is published, so no
+    endpoint takes an Idempotency-Key. Mirror sagas, persisted links,
+    reconciliation runs, centralized payments and planning are later slices of
+    PSG-40 (see NOT-IMPLEMENTED.md). Browser calls go through the web BFF at
+    /api/v1/interco/..., which rewrites to these paths and sets the tenant and
+    duty headers.
+servers:
+  - url: https://api.{env}.passage.dev
+    variables:
+      env:
+        default: dev
+paths:
+  /v1/interco/journals:preview:
+    post:
+      operationId: previewIntercompanyJournal
+      summary: Derive the balanced due-to / due-from journal for one intercompany line (BR-40.4, AC-40.4)
+      x-passage-duty: IntercompanyPost
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JournalPreviewRequest'
+      responses:
+        '200':
+          description: Derived legs, one pair id, balanced in each entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JournalPreview'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '422':
+          description: IC-0805 no accounting matrix row for the entity pair
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /v1/interco/reconciliations:classify:
+    post:
+      operationId: classifyReconciliationItems
+      summary: Classify IC balance pairs as Matched, Timing or Mismatch (FR-40.6, BR-40.5)
+      x-passage-duty: IntercompanyReconcile
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClassifyRequest'
+      responses:
+        '200':
+          description: Each item with its status and difference, plus counts per status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClassifyResult'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+  /healthz:
+    get:
+      operationId: healthz
+      x-passage-duty: public
+      responses:
+        '200':
+          description: Liveness
+  /readyz:
+    get:
+      operationId: readyz
+      x-passage-duty: public
+      responses:
+        '200':
+          description: Readiness (the stateless slice has no dependency to check)
+components:
+  parameters:
+    TenantHeader:
+      name: X-Passage-Tenant
+      in: header
+      required: true
+      description: Set by the gateway; UUIDv7 tenant id
+      schema:
+        type: string
+        format: uuid
+    DutiesHeader:
+      name: X-Passage-Duties
+      in: header
+      required: true
+      description: Set by the gateway; comma-separated duties of the caller
+      schema:
+        type: string
+  responses:
+    Problem:
+      description: RFC 9457 problem details (COM-0001 validation, AUTH-0001 no tenant, AUTH-0003 missing duty)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    Decimal:
+      type: string
+      pattern: '^-?[0-9]+(\.[0-9]{1,6})?$'
+    JournalPreviewRequest:
+      type: object
+      additionalProperties: false
+      required: [entity, account, side, amount, currency, offsetEntity, offsetAccount, matrix]
+      properties:
+        entity: { type: string, minLength: 1, description: Legal entity A that books the line }
+        account: { type: string, minLength: 1 }
+        side: { type: string, enum: [debit, credit] }
+        amount:
+          type: string
+          pattern: '^[0-9]+(\.[0-9]{1,6})?$'
+          description: Positive decimal in the entity currency; rounded to the currency minor unit
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        offsetEntity: { type: string, minLength: 1, description: Offset entity B; must differ from entity }
+        offsetAccount: { type: string, minLength: 1, description: Account in B that takes the opposite side }
+        counterCurrency: { type: string, pattern: '^[A-Z]{3}$', description: B's currency; defaults to currency }
+        rate:
+          type: string
+          pattern: '^[0-9]+(\.[0-9]{1,6})?$'
+          description: Positive document rate from currency to counterCurrency; required when they differ, else 1
+        matrix:
+          type: array
+          maxItems: 1000
+          items:
+            $ref: '#/components/schemas/MatrixRow'
+    MatrixRow:
+      type: object
+      additionalProperties: false
+      required: [entityA, entityB, dueFrom, dueTo]
+      properties:
+        entityA: { type: string, minLength: 1 }
+        entityB: { type: string, minLength: 1 }
+        dueFrom: { type: string, minLength: 1, description: Receivable account in entityA for entityB }
+        dueTo: { type: string, minLength: 1, description: Payable account in entityB for entityA }
+    JournalPreview:
+      type: object
+      required: [pairId, balanced, legs]
+      properties:
+        pairId: { type: string, format: uuid, description: Shared ic_pair_id for both entities' legs }
+        balanced: { type: boolean }
+        legs:
+          type: array
+          items:
+            type: object
+            required: [entity, account, side, amount, currency]
+            properties:
+              entity: { type: string }
+              account: { type: string }
+              side: { type: string, enum: [debit, credit] }
+              amount: { type: string }
+              currency: { type: string }
+    ClassifyRequest:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        fxTolerancePct:
+          type: string
+          pattern: '^[0-9]+(\.[0-9]{1,6})?$'
+          description: ic.fxTolerancePct, 0 to 5; defaults to 0.5
+        items:
+          type: array
+          minItems: 1
+          maxItems: 10000
+          items:
+            $ref: '#/components/schemas/ReconciliationItem'
+    ReconciliationItem:
+      type: object
+      additionalProperties: false
+      required: [entityA, entityB, period, currency, amountA, amountB]
+      properties:
+        id: { type: string, description: Echoed back; defaults to item-<n> }
+        icPairId: { type: string }
+        entityA: { type: string, minLength: 1 }
+        entityB: { type: string, minLength: 1, description: Must differ from entityA }
+        period: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        amountA: { $ref: '#/components/schemas/Decimal', description: Due-from booked in A in the period }
+        amountB: { $ref: '#/components/schemas/Decimal', description: Due-to booked in B in the period }
+        nextPeriodA: { $ref: '#/components/schemas/Decimal', description: What A booked for the pair in the next period }
+        nextPeriodB: { $ref: '#/components/schemas/Decimal', description: What B booked for the pair in the next period }
+        fxApplies: { type: boolean, description: The two sides were converted from different accounting currencies }
+    ClassifyResult:
+      type: object
+      required: [fxTolerancePct, items, summary]
+      properties:
+        fxTolerancePct: { type: string }
+        items:
+          type: array
+          items:
+            type: object
+            required: [id, entityA, entityB, period, currency, amountA, amountB, difference, status, toleranceApplied]
+            properties:
+              id: { type: string }
+              icPairId: { type: string }
+              entityA: { type: string }
+              entityB: { type: string }
+              period: { type: string }
+              currency: { type: string }
+              amountA: { type: string }
+              amountB: { type: string }
+              difference: { type: string, description: amountA − amountB in the period }
+              status: { type: string, enum: [Matched, Timing, Mismatch] }
+              toleranceApplied: { type: boolean, description: Only the FX tolerance made the sides agree }
+        summary:
+          type: object
+          required: [matched, timing, mismatch]
+          properties:
+            matched: { type: integer }
+            timing: { type: integer }
+            mismatch: { type: integer }
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri, description: 'https://passage.dev/problems/<code>' }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        traceId: { type: string }
+        errors:
+          type: object
+          additionalProperties: { type: string }
