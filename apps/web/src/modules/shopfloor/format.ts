@@ -106,3 +106,21 @@ export const FLAG_LABELS: Record<string, string> = {
   "missing-clock-out": "Missing clock-out",
   "orphan-clock-out": "Clock-out without clock-in",
 };
+
+/** A decimal ratio string as a percentage, e.g. "0.8750" -> "87.5 %", without floats. */
+export function percent(value?: string | null, places = 1): string {
+  if (value === undefined || value === null || value === "") return dash;
+  const negative = value.startsWith("-");
+  const [whole = "0", frac = ""] = (negative ? value.slice(1) : value).split(".");
+  const padded = frac.padEnd(2, "0");
+  const shifted = `${whole}${padded.slice(0, 2)}`.replace(/^0+(?=\d)/, "");
+  return `${negative ? "-" : ""}${fixed(`${shifted}.${padded.slice(2) || "0"}`, places)} %`;
+}
+
+/** Whole minutes from start to end (or to now while open), e.g. "22 min". */
+export function durationMinutes(start: string, end?: string | null, now: number = Date.now()): string {
+  const from = Date.parse(start);
+  const to = end ? Date.parse(end) : now;
+  if (Number.isNaN(from) || Number.isNaN(to)) return dash;
+  return `${Math.max(0, Math.floor((to - from) / 60_000))} min`;
+}

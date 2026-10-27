@@ -5,14 +5,20 @@ import {
   approvePay,
   calculatePay,
   chunk,
+  codeDowntime,
+  createMachine,
   createRegistrations,
+  exportPay,
+  getOee,
+  listAndon,
+  listDowntimes,
   describeProblem,
   listWorkerDays,
   MAX_BATCH,
   ShopfloorApiError,
   type RegistrationInput,
 } from "./api/client";
-import { fixed, formatPayTotal, sumDecimals } from "./format";
+import { durationMinutes, fixed, formatPayTotal, percent, sumDecimals } from "./format";
 
 const item: RegistrationInput = {
   id: "0190a0b0-0000-7000-8000-000000000001",
@@ -28,12 +34,19 @@ describe("shopfloor module", () => {
     expect(shopfloor.nav.every((n) => n.to.startsWith("/shopfloor"))).toBe(true);
   });
 
-  it("has a list, create and detail page for workers and the time approval page", () => {
+  it("has list and create or detail pages for workers, exports and machines, and the floor monitoring pages", () => {
     expect(shopfloor.routes.map((r) => r.path)).toEqual([
       "/shopfloor/workers",
       "/shopfloor/workers/new",
       "/shopfloor/workers/:id",
       "/shopfloor/time",
+      "/shopfloor/pay-exports",
+      "/shopfloor/pay-exports/:id",
+      "/shopfloor/machines",
+      "/shopfloor/machines/new",
+      "/shopfloor/downtimes",
+      "/shopfloor/andon",
+      "/shopfloor/oee",
     ]);
   });
 
@@ -41,6 +54,11 @@ describe("shopfloor module", () => {
     expect(shopfloor.nav).toEqual([
       { label: "Workers", to: "/shopfloor/workers", duty: "shopfloor.view" },
       { label: "Time approval", to: "/shopfloor/time", duty: "shopfloor.pay.approve" },
+      { label: "Payroll export", to: "/shopfloor/pay-exports", duty: "shopfloor.pay.export" },
+      { label: "Machines", to: "/shopfloor/machines", duty: "shopfloor.view" },
+      { label: "Downtimes", to: "/shopfloor/downtimes", duty: "shopfloor.view" },
+      { label: "Andon board", to: "/shopfloor/andon", duty: "shopfloor.view" },
+      { label: "OEE", to: "/shopfloor/oee", duty: "shopfloor.view" },
     ]);
   });
 
@@ -111,6 +129,40 @@ describe("shopfloor client", () => {
   });
 });
 
+describe("shopfloor floor client", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  beforeEach(() => {
+    fetchMock = vi.fn(async () => new Response(JSON.stringify({ items: [] }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("reads andon, downtimes and the OEE series with their query parameters", async () => {
+    await listAndon({ siteId: "s1" });
+    await listDowntimes({ open: true });
+    await getOee({ resourceIds: ["r1", "r2"], from: "2026-10-21T08:00:00.000Z", to: "2026-10-21T09:00:00.000Z", bucket: "60m" });
+    expect(fetchMock.mock.calls.map((c) => (c as unknown as [string])[0])).toEqual([
+      "/api/v1/shopfloor/andon?siteId=s1",
+      "/api/v1/shopfloor/downtimes?open=true",
+      "/api/v1/shopfloor/oee?resourceIds=r1%2Cr2&from=2026-10-21T08%3A00%3A00.000Z&to=2026-10-21T09%3A00%3A00.000Z&bucket=60m",
+    ]);
+  });
+
+  it("sends an Idempotency-Key on machine, downtime code and export commands", async () => {
+    await createMachine({ machineId: "M-101", resourceId: "r1", idealCycleSeconds: "60" }, "m-key");
+    await codeDowntime("d/1", { reasonCode: "JAM" }, "d-key");
+    await exportPay({ from: "2026-10-20", to: "2026-10-26" }, "e-key");
+    const calls = fetchMock.mock.calls as unknown as [string, RequestInit][];
+    expect(calls.map(([url]) => url)).toEqual([
+      "/api/v1/shopfloor/machines",
+      "/api/v1/shopfloor/downtimes/d%2F1:code",
+      "/api/v1/shopfloor/pay:export",
+    ]);
+    expect(calls.map(([, init]) => new Headers(init.headers).get("Idempotency-Key"))).toEqual(["m-key", "d-key", "e-key"]);
+    expect(JSON.parse(calls[1][1].body as string)).toEqual({ reasonCode: "JAM" });
+  });
+});
+
 describe("chunk", () => {
   it("splits an offline queue into server-sized batches in order", () => {
     const queue = Array.from({ length: 1201 }, (_, i) => i);
@@ -143,5 +195,22 @@ describe("decimal formatting", () => {
     expect(formatPayTotal([line("160.000000", "USD"), line("60.000000", "USD")])).toBe("220.00 USD");
     expect(formatPayTotal([line("1", "USD"), line("2", "EUR")])).toBe("1.00 USD, 2.00 EUR");
     expect(formatPayTotal([])).toBe("—");
+  });
+});
+
+describe("floor formatting", () => {
+  it("shows decimal ratios as percentages without floats", () => {
+    expect(percent("0.8750")).toBe("87.5 %");
+    expect(percent("0.7521", 2)).toBe("75.21 %");
+    expect(percent("1")).toBe("100.0 %");
+    expect(percent("0")).toBe("0.0 %");
+    expect(percent("0.00005", 2)).toBe("0.01 %");
+    expect(percent(null)).toBe("—");
+  });
+
+  it("measures downtime in whole minutes, to now while open", () => {
+    expect(durationMinutes("2026-10-21T08:00:00Z", "2026-10-21T08:22:59Z")).toBe("22 min");
+    expect(durationMinutes("2026-10-21T08:00:00Z", null, Date.parse("2026-10-21T08:11:00Z"))).toBe("11 min");
+    expect(durationMinutes("nope")).toBe("—");
   });
 });

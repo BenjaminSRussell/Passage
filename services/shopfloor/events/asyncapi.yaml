@@ -6,7 +6,8 @@ info:
     CloudEvents 1.0 published by the shopfloor service through the transactional
     outbox (Debezium relays to Kafka), written in the same transaction as the
     change. Source is `shopfloor`; the Kafka key is the aggregate id
-    (registration id, or worker id for payday events).
+    (registration id, worker id for payday approvals, batch id for payroll
+    exports, alert id for andon).
     Schema evolution is additive only.
 defaultContentType: application/cloudevents+json
 channels:
@@ -20,7 +21,29 @@ channels:
     messages:
       paydayApproved:
         $ref: "#/components/messages/PaydayApproved"
+  paydayExported:
+    address: passage.shopfloor.pay-export
+    messages:
+      paydayExported:
+        $ref: "#/components/messages/PaydayExported"
+  andonRaised:
+    address: passage.shopfloor.andon
+    messages:
+      andonRaised:
+        $ref: "#/components/messages/AndonRaised"
 operations:
+  publishPaydayExported:
+    action: send
+    channel:
+      $ref: "#/channels/paydayExported"
+    messages:
+      - $ref: "#/channels/paydayExported/messages/paydayExported"
+  publishAndonRaised:
+    action: send
+    channel:
+      $ref: "#/channels/andonRaised"
+    messages:
+      - $ref: "#/channels/andonRaised/messages/andonRaised"
   publishRegistrationPosted:
     action: send
     channel:
@@ -45,7 +68,84 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/PaydayApprovedData"
+    PaydayExported:
+      name: dev.passage.shopfloor.payday.exported.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/PaydayExportedData"
+    AndonRaised:
+      name: dev.passage.shopfloor.andon.raised.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/AndonRaisedData"
   schemas:
+    PaydayExportedData:
+      type: object
+      required: [batchId, fromDate, toDate, lineCount, createdBy, lines]
+      additionalProperties: false
+      description: One payroll export batch (FR-25.8) with every pay line it carries; consumed by payroll (w43).
+      properties:
+        batchId:
+          type: string
+          format: uuid
+        fromDate:
+          type: string
+          format: date
+        toDate:
+          type: string
+          format: date
+        lineCount:
+          type: integer
+          minimum: 1
+        createdBy:
+          type: string
+        lines:
+          type: array
+          items:
+            type: object
+            required: [workerId, workDate, type, hours, multiplier, amount, currency]
+            additionalProperties: false
+            properties:
+              workerId:
+                type: string
+                format: uuid
+              workDate:
+                type: string
+                format: date
+              type:
+                type: string
+              hours:
+                type: string
+              multiplier:
+                type: string
+              amount:
+                type: string
+              currency:
+                type: string
+                pattern: "^[A-Z]{3}$"
+    AndonRaisedData:
+      type: object
+      required: [alertId, resourceId, kind, severity, jobId, startedAt]
+      additionalProperties: false
+      properties:
+        alertId:
+          type: string
+          format: uuid
+        resourceId:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [downtime]
+        severity:
+          type: string
+          enum: [info, warning, error]
+        jobId:
+          type: [string, "null"]
+          format: uuid
+        startedAt:
+          type: string
+          format: date-time
     RegistrationPostedData:
       type: object
       required: [registrationId, workerId, kind, jobId, hours, qtyGood, qtyScrap, offline]

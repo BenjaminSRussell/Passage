@@ -1,6 +1,7 @@
 // Package api exposes the shop floor HTTP surface: workers, batch registrations
 // from the kiosk (client UUIDs), pay calculation, approval and the review lists
-// the supervisor approval screen reads.
+// the supervisor approval screen reads, plus machines, edge machine-event
+// ingest, downtimes, andon, OEE and payroll export (floor.go).
 package api
 
 import (
@@ -38,6 +39,9 @@ const (
 	DutyApprove   = "shopfloor.pay.approve"
 	DutyView      = "shopfloor.view"
 	DutySetup     = "shopfloor.setup.maintain"
+	DutyExport    = "shopfloor.pay.export"
+	// DutyIngest is held by the edge gateway's service identity, not by people.
+	DutyIngest = "shopfloor.machine.ingest"
 )
 
 const (
@@ -66,17 +70,32 @@ type Store interface {
 	SavePay(ctx context.Context, calc store.PayCalculation, idem store.Idem, response any) error
 	ApprovePay(ctx context.Context, workerID, fromDate, toDate, approvedBy string, idem store.Idem) (store.ApproveResult, error)
 	ListWorkerDays(ctx context.Context, f store.DayFilter) ([]store.WorkerDay, error)
+	RegisterMachine(ctx context.Context, m store.Machine, idem store.Idem) (store.Machine, error)
+	ListMachines(ctx context.Context, limit int) ([]store.Machine, error)
+	IngestMachineEvents(ctx context.Context, now time.Time, items []store.MachineEventIn) (store.IngestResult, error)
+	ListDowntimes(ctx context.Context, f store.DowntimeFilter) ([]store.Downtime, error)
+	CodeDowntime(ctx context.Context, id, reason, category string, idem store.Idem) (store.Downtime, error)
+	OpenAndon(ctx context.Context, siteID string) ([]store.Andon, error)
+	LoadOEEStreams(ctx context.Context, resourceIDs []string, from, to time.Time) (map[string]domain.OEEStream, error)
+	ExportPay(ctx context.Context, fromDate, toDate, createdBy string, idem store.Idem) (store.PayExport, error)
+	ListPayExports(ctx context.Context, limit int) ([]store.PayExport, error)
+	GetPayExport(ctx context.Context, id string) (store.PayExport, error)
 }
 
 // API holds the handlers and the counters served on the admin port.
 type API struct {
-	store         Store
-	registrations atomic.Int64
-	duplicates    atomic.Int64
-	calculations  atomic.Int64
-	approvedDays  atomic.Int64
-	replays       atomic.Int64
-	failed        atomic.Int64
+	store          Store
+	registrations  atomic.Int64
+	duplicates     atomic.Int64
+	calculations   atomic.Int64
+	approvedDays   atomic.Int64
+	replays        atomic.Int64
+	failed         atomic.Int64
+	eventsAccepted atomic.Int64
+	eventsDropped  atomic.Int64
+	seqGaps        atomic.Int64
+	andonsRaised   atomic.Int64
+	exportedLines  atomic.Int64
 }
 
 // New returns the API over s.
@@ -161,6 +180,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutyCalculate)).Post("/api/v1/shopfloor/pay:calculate", a.calculatePay)
 	r.With(authz.RequireDuty(DutyApprove)).Post("/api/v1/shopfloor/pay:approve", a.approvePay)
 	r.With(authz.RequireDuty(DutyView)).Get("/api/v1/shopfloor/worker-days", a.listWorkerDays)
+	a.registerFloor(r)
 }
 
 // Metrics serves the counters in Prometheus text format on the admin port.
@@ -174,6 +194,11 @@ func (a *API) Metrics() http.Handler {
 		counter("shopfloor_pay_calculations_total", "Pay calculations persisted.", a.calculations.Load())
 		counter("shopfloor_pay_days_approved_total", "Worker-days newly approved.", a.approvedDays.Load())
 		counter("shopfloor_idempotent_replays_total", "Commands answered from a stored Idempotency-Key outcome.", a.replays.Load())
+		counter("shopfloor_machine_events_accepted_total", "Machine events stored from edge batches.", a.eventsAccepted.Load())
+		counter("shopfloor_machine_events_dropped_total", "Machine events dropped as duplicate, regressed or older than 7 days (BR-25.4).", a.eventsDropped.Load())
+		counter("shopfloor_machine_seq_gaps_total", "Missing machine sequence runs reported to the edge (SF-0008).", a.seqGaps.Load())
+		counter("shopfloor_andons_raised_total", "Andon alerts raised from downtimes.", a.andonsRaised.Load())
+		counter("shopfloor_pay_export_lines_total", "Approved pay lines written to payroll export batches.", a.exportedLines.Load())
 		counter("shopfloor_failed_total", "Requests that failed in the store.", a.failed.Load())
 	})
 }

@@ -269,3 +269,129 @@ export function chunk<T>(list: readonly T[], size: number = MAX_BATCH): T[][] {
   }
   return out;
 }
+
+// --- Machines, downtime, andon, OEE and payroll export (slice 2) ---
+
+/** Longest window GET /oee accepts. */
+export const MAX_OEE_SPAN_HOURS = 7 * 24;
+
+/** Longest range pay:export accepts, in days. */
+export const MAX_EXPORT_RANGE_DAYS = 31;
+
+export type MachineState = "RUNNING" | "IDLE" | "DOWN" | "SETUP" | "OFF";
+
+export interface NewMachine {
+  /** Edge machine code, unique per tenant (e.g. M-101). */
+  machineId: string;
+  resourceId: string;
+  siteId?: string | null;
+  /** Decimal seconds per unit, above 0. */
+  idealCycleSeconds: string;
+}
+
+export interface Machine {
+  id: string;
+  machineId: string;
+  resourceId: string;
+  siteId: string | null;
+  idealCycleSeconds: string;
+  lastSeq: number;
+  createdAt: string;
+}
+
+export type DowntimeCategory = "planned" | "unplanned";
+
+export interface Downtime {
+  id: string;
+  machineId: string;
+  resourceId: string;
+  startedAt: string;
+  endedAt: string | null;
+  reasonCode: string | null;
+  category: DowntimeCategory;
+  andonRaised: boolean;
+}
+
+export interface Andon {
+  id: string;
+  resourceId: string;
+  siteId: string | null;
+  kind: "downtime";
+  severity: "info" | "warning" | "error";
+  downtimeId: string | null;
+  startedAt: string;
+}
+
+export type OeeBucketSize = "5m" | "15m" | "60m";
+
+export interface OeeBucket {
+  resourceId: string;
+  bucketStart: string;
+  plannedMinutes: string;
+  runMinutes: string;
+  downMinutes: string;
+  totalCount: number;
+  goodCount: number;
+  availability: string;
+  performance: string;
+  quality: string;
+  oee: string;
+  overRate: boolean;
+  sourceEvents: number;
+}
+
+export interface PayExport {
+  batchId: string;
+  fromDate: string;
+  toDate: string;
+  lineCount: number;
+  createdBy: string;
+  createdAt: string;
+  /** Present on create and when one batch is read. */
+  csv?: string;
+}
+
+export function listMachines(signal?: AbortSignal): Promise<Machine[]> {
+  return items<Machine>("/machines", signal);
+}
+
+/** Registers a machine; reuse one key per form so a retried submit cannot register twice. */
+export function createMachine(input: NewMachine, key: string = newKey()): Promise<Machine> {
+  return post<Machine>("/machines", input, key);
+}
+
+export function listDowntimes(filter: { open?: boolean; resourceId?: string } = {}, signal?: AbortSignal): Promise<Downtime[]> {
+  return items<Downtime>(`/downtimes${query({ open: filter.open, resourceId: filter.resourceId })}`, signal);
+}
+
+/** Assigns a reason code; the andon for the downtime stays open until it clears. */
+export function codeDowntime(id: string, input: { reasonCode: string; category?: DowntimeCategory }, key: string = newKey()): Promise<Downtime> {
+  return post<Downtime>(`/downtimes/${encodeURIComponent(id)}:code`, input, key);
+}
+
+export function listAndon(filter: { siteId?: string } = {}, signal?: AbortSignal): Promise<Andon[]> {
+  return items<Andon>(`/andon${query(filter)}`, signal);
+}
+
+export function getOee(
+  filter: { resourceIds: string[]; from: string; to: string; bucket?: OeeBucketSize },
+  signal?: AbortSignal,
+): Promise<OeeBucket[]> {
+  return items<OeeBucket>(
+    `/oee${query({ resourceIds: filter.resourceIds.join(","), from: filter.from, to: filter.to, bucket: filter.bucket })}`,
+    signal,
+  );
+}
+
+/** Exports approved, not yet exported pay lines in the range as one batch. */
+export function exportPay(range: { from: string; to: string }, key: string = newKey()): Promise<PayExport> {
+  return post<PayExport>("/pay:export", range, key);
+}
+
+export function listPayExports(signal?: AbortSignal): Promise<PayExport[]> {
+  return items<PayExport>("/pay-exports", signal);
+}
+
+export function getPayExport(id: string, signal?: AbortSignal): Promise<PayExport> {
+  return send<PayExport>(`/pay-exports/${encodeURIComponent(id)}`, {}, signal);
+}

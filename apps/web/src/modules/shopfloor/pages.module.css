@@ -75,3 +75,13 @@
   align-items: end;
   gap: var(--space-4);
 }
+
+.file {
+  margin: 0;
+  max-block-size: 24rem;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm-size);
+  line-height: var(--text-sm-leading);
+  white-space: pre;
+}

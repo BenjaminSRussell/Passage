@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
@@ -76,4 +78,68 @@ func canonical(t *testing.T, raw []byte) string {
 	}
 	out, _ := json.Marshal(v)
 	return string(out)
+}
+
+// End to end over HTTP and Postgres: a machine is registered once per
+// Idempotency-Key, the edge posts a DOWN that lasts past the andon threshold,
+// the supervisor sees the open downtime and andon, codes the reason, and the
+// OEE series reflects the stop.
+func TestHTTP_MachineDowntimeAndOEE(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	h := newRouter(store.New(app))
+	key := func(k string) map[string]string { return map[string]string{"Idempotency-Key": k} }
+
+	body := fmt.Sprintf(`{"machineId":"M-101","resourceId":%q,"siteId":%q,"idealCycleSeconds":"60"}`, resourceID, siteID)
+	first := callWith(t, h, http.MethodPost, "/api/v1/shopfloor/machines", body, floorDuty, key("m-1"))
+	again := callWith(t, h, http.MethodPost, "/api/v1/shopfloor/machines", body, floorDuty, key("m-1"))
+	if first.Code != http.StatusCreated || again.Code != http.StatusCreated || again.Header().Get("Idempotent-Replayed") != "true" {
+		t.Fatalf("machine: %d %d %s", first.Code, again.Code, again.Body.String())
+	}
+	if rec := callWith(t, h, http.MethodPost, "/api/v1/shopfloor/machines", body, floorDuty, key("m-2")); rec.Code != http.StatusConflict || problemCode(t, rec) != store.CodeMachineExists {
+		t.Fatalf("second machine on the resource: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// Recent device times, so nothing is older than the 7-day limit.
+	t0 := time.Now().UTC().Truncate(time.Hour).Add(-2 * time.Hour)
+	ts := func(min int) string { return t0.Add(time.Duration(min) * time.Minute).Format(time.RFC3339) }
+	events := fmt.Sprintf(`{"events":[
+		{"machineId":"M-101","seq":1,"kind":"state","ts":%q,"state":"RUNNING"},
+		{"machineId":"M-101","seq":2,"kind":"count","ts":%q,"goodCount":9,"rejectCount":1},
+		{"machineId":"M-101","seq":3,"kind":"state","ts":%q,"state":"DOWN"}]}`, ts(0), ts(10), ts(30))
+	rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/machine-events", events, floorDuty)
+	var res store.IngestResult
+	_ = json.Unmarshal(rec.Body.Bytes(), &res)
+	if rec.Code != http.StatusOK || res.Accepted != 3 || res.AndonsRaised != 1 || res.DowntimesOpen != 1 {
+		t.Fatalf("ingest %d %s", rec.Code, rec.Body.String())
+	}
+
+	var andon itemsResponse[store.Andon]
+	rec = call(t, h, http.MethodGet, "/api/v1/shopfloor/andon?siteId="+siteID, "", floorDuty)
+	_ = json.Unmarshal(rec.Body.Bytes(), &andon)
+	if len(andon.Items) != 1 || andon.Items[0].ResourceID != resourceID {
+		t.Fatalf("andon %s", rec.Body.String())
+	}
+	var downs itemsResponse[store.Downtime]
+	rec = call(t, h, http.MethodGet, "/api/v1/shopfloor/downtimes?open=true", "", floorDuty)
+	_ = json.Unmarshal(rec.Body.Bytes(), &downs)
+	if len(downs.Items) != 1 || !downs.Items[0].AndonRaised {
+		t.Fatalf("downtimes %s", rec.Body.String())
+	}
+	rec = callWith(t, h, http.MethodPost, "/api/v1/shopfloor/downtimes/"+downs.Items[0].ID+":code", `{"reasonCode":"JAM"}`, floorDuty, key("d-1"))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"reasonCode":"JAM"`) {
+		t.Fatalf("code %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec = call(t, h, http.MethodGet, "/api/v1/shopfloor/oee?resourceIds="+resourceID+"&from="+ts(0)+"&to="+ts(60)+"&bucket=60m", "", floorDuty)
+	var series itemsResponse[oeeItem]
+	_ = json.Unmarshal(rec.Body.Bytes(), &series)
+	if rec.Code != http.StatusOK || len(series.Items) != 1 {
+		t.Fatalf("oee %d %s", rec.Code, rec.Body.String())
+	}
+	if b := series.Items[0]; b.Availability.String() != "0.5" || b.TotalCount != 10 || b.Quality.String() != "0.9" {
+		t.Fatalf("bucket %+v", b)
+	}
 }

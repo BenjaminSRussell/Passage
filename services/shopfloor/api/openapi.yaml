@@ -3,9 +3,11 @@ info:
   title: Passage Shop Floor API
   version: 0.1.0
   description: |
-    Time and attendance core for PSG-25 (slice 1): workers, batch registrations
-    from the kiosk with client UUIDs, pay calculation per worker-day, approval,
-    and the lists the supervisor approval screen reads. Commands that change
+    Shop floor service for PSG-25. Slice 1: workers, batch registrations from
+    the kiosk with client UUIDs, pay calculation per worker-day, approval, and
+    the lists the supervisor approval screen reads. Slice 2: machines, edge
+    machine-event ingest, downtimes and reason codes, andon, the OEE series and
+    payroll export batches. Commands that change
     state (except the registration batch, which is idempotent per item id)
     require an `Idempotency-Key` header; a repeated key returns the stored
     outcome with `Idempotent-Replayed: true`. Errors are RFC 9457 problem
@@ -283,6 +285,344 @@ paths:
         "401":
           $ref: "#/components/responses/Problem"
         "403":
+          $ref: "#/components/responses/Problem"
+  /api/v1/shopfloor/machines:
+    post:
+      operationId: registerMachine
+      summary: Map an edge machine code to a resource with its ideal cycle time
+      description: One machine per resource and one resource per machine code in this slice (SF-0109).
+      x-passage-duty: shopfloor.setup.maintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewMachine"
+      responses:
+        "201":
+          description: Registered (or the stored outcome of a repeated key).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Machine"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+    get:
+      operationId: listMachines
+      summary: List registered machines by code
+      x-passage-duty: shopfloor.view
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Machines.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Machine"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /api/v1/shopfloor/machine-events:
+    post:
+      operationId: ingestMachineEvents
+      summary: Ingest a batch of edge machine events (BR-25.4)
+      description: |
+        Called by the iot-edge gateway with its service identity. Events are
+        classified per machine: seq at or below the last stored seq and events
+        older than 7 days are dropped and counted; missing seq runs are
+        reported in `gaps` (SF-0008). Each event is keyed by (machine, seq), so
+        a replayed batch is idempotent without an Idempotency-Key. A DOWN state
+        opens a downtime and any other state closes it; a downtime open for more
+        than 10 minutes raises one andon per resource. An unknown machine code
+        rejects the whole batch (SF-0108).
+      x-passage-duty: shopfloor.machine.ingest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MachineEventBatch"
+      responses:
+        "200":
+          description: Batch outcome.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestResult"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/shopfloor/downtimes:
+    get:
+      operationId: listDowntimes
+      summary: Machine downtimes, newest first
+      x-passage-duty: shopfloor.view
+      parameters:
+        - name: open
+          in: query
+          schema:
+            type: boolean
+          description: true lists downtimes that have not ended.
+        - name: resourceId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Downtimes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Downtime"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /api/v1/shopfloor/downtimes/{id}:code:
+    post:
+      operationId: codeDowntime
+      summary: Assign a downtime reason code (FR-25.11)
+      description: The andon raised for the downtime stays open until its condition clears (AC-25.6).
+      x-passage-duty: shopfloor.time.register
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DowntimeCode"
+      responses:
+        "200":
+          description: The coded downtime.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Downtime"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/shopfloor/andon:
+    get:
+      operationId: listAndon
+      summary: Open andon alerts, oldest first (BR-25.10)
+      x-passage-duty: shopfloor.view
+      parameters:
+        - name: siteId
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Open alerts.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Andon"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /api/v1/shopfloor/oee:
+    get:
+      operationId: getOee
+      summary: OEE series per resource and bucket (FR-25.10, BR-25.5)
+      description: |
+        Computed on read from stored machine events. Downtime coded as planned
+        is taken out of planned minutes. Buckets without planned time (no known
+        state, OFF, or wholly planned downtime) are omitted, as are resources
+        without a machine. Roll up to a shift by summing minutes and counts, never by
+        averaging ratios.
+      x-passage-duty: shopfloor.view
+      parameters:
+        - name: resourceIds
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Comma-separated resource UUIDs, 1 to 50.
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+          description: After from, at most 7 days later, and a whole number of buckets after it.
+        - name: bucket
+          in: query
+          schema:
+            type: string
+            enum: [5m, 15m, 60m]
+            default: 15m
+      responses:
+        "200":
+          description: Buckets ordered by resource (as requested) and start.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/OeeBucket"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /api/v1/shopfloor/pay:export:
+    post:
+      operationId: exportPay
+      summary: Export approved pay lines to payroll as one batch (FR-25.8)
+      description: |
+        Every approved pay line in the range that is not yet in a batch joins a
+        new batch. The response carries the CSV; the batch emits
+        dev.passage.shopfloor.payday.exported.v1 with its lines in the same
+        transaction. A range with nothing new fails with SF-0111.
+      x-passage-duty: shopfloor.pay.export
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PayExportRange"
+      responses:
+        "201":
+          description: The new batch (or the stored outcome of a repeated key).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayExport"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/shopfloor/pay-exports:
+    get:
+      operationId: listPayExports
+      summary: Payroll export batches, newest first (without CSV)
+      x-passage-duty: shopfloor.pay.export
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Batches.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PayExport"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /api/v1/shopfloor/pay-exports/{id}:
+    get:
+      operationId: getPayExport
+      summary: One payroll export batch with its CSV
+      x-passage-duty: shopfloor.pay.export
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The batch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayExport"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
           $ref: "#/components/responses/Problem"
   /healthz:
     get:
@@ -667,6 +1007,273 @@ components:
                 type: array
                 items:
                   $ref: "#/components/schemas/PayLine"
+    NewMachine:
+      type: object
+      required: [machineId, resourceId, idealCycleSeconds]
+      properties:
+        machineId:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Edge machine code, unique per tenant (e.g. M-101).
+        resourceId:
+          type: string
+          format: uuid
+        siteId:
+          type: [string, "null"]
+          format: uuid
+        idealCycleSeconds:
+          type: string
+          description: Decimal seconds per unit, above 0 and at most 86400, up to 3 decimals.
+          examples: ["60", "1.5"]
+    Machine:
+      type: object
+      required: [id, machineId, resourceId, siteId, idealCycleSeconds, lastSeq, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        machineId:
+          type: string
+        resourceId:
+          type: string
+          format: uuid
+        siteId:
+          type: [string, "null"]
+          format: uuid
+        idealCycleSeconds:
+          type: string
+        lastSeq:
+          type: integer
+          description: Highest sequence number stored for the machine.
+        createdAt:
+          type: string
+          format: date-time
+    MachineEventBatch:
+      type: object
+      required: [events]
+      properties:
+        events:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            $ref: "#/components/schemas/MachineEvent"
+    MachineEvent:
+      type: object
+      required: [machineId, seq, kind, ts]
+      properties:
+        machineId:
+          type: string
+          minLength: 1
+          maxLength: 64
+        seq:
+          type: integer
+          minimum: 1
+          description: Per-machine monotonic sequence from the edge.
+        kind:
+          type: string
+          enum: [count, state, downtime, alarm, measurement]
+        ts:
+          type: string
+          format: date-time
+          description: Device time.
+        goodCount:
+          type: integer
+          minimum: 0
+          description: Delta since the previous count event; count events only.
+        rejectCount:
+          type: integer
+          minimum: 0
+          description: Delta since the previous count event; count events only.
+        state:
+          type: string
+          enum: [RUNNING, IDLE, DOWN, SETUP, OFF]
+          description: Required for state events.
+        reasonCode:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 32
+        measurement:
+          type: [object, "null"]
+          required: [name, value]
+          properties:
+            name:
+              type: string
+            value:
+              type: number
+            unit:
+              type: [string, "null"]
+        jobId:
+          type: [string, "null"]
+          format: uuid
+    IngestResult:
+      type: object
+      required: [accepted, dropped, staleDropped, gaps, andonsRaised, downtimesOpen]
+      properties:
+        accepted:
+          type: integer
+        dropped:
+          type: integer
+          description: Duplicates, regressions and stale events.
+        staleDropped:
+          type: integer
+          description: The part of dropped that was older than 7 days.
+        gaps:
+          type: array
+          description: Missing sequence runs (SF-0008); replay them from the edge buffer.
+          items:
+            type: object
+            required: [machineId, from, to]
+            properties:
+              machineId:
+                type: string
+                description: Edge machine code.
+              from:
+                type: integer
+              to:
+                type: integer
+        andonsRaised:
+          type: integer
+        downtimesOpen:
+          type: integer
+    Downtime:
+      type: object
+      required: [id, machineId, resourceId, startedAt, endedAt, reasonCode, category, andonRaised]
+      properties:
+        id:
+          type: string
+          format: uuid
+        machineId:
+          type: string
+          format: uuid
+        resourceId:
+          type: string
+          format: uuid
+        startedAt:
+          type: string
+          format: date-time
+        endedAt:
+          type: [string, "null"]
+          format: date-time
+        reasonCode:
+          type: [string, "null"]
+        category:
+          type: string
+          enum: [planned, unplanned]
+        andonRaised:
+          type: boolean
+    DowntimeCode:
+      type: object
+      required: [reasonCode]
+      properties:
+        reasonCode:
+          type: string
+          minLength: 1
+          maxLength: 32
+        category:
+          type: string
+          enum: [planned, unplanned]
+          description: Omit to keep the current category.
+    Andon:
+      type: object
+      required: [id, resourceId, siteId, kind, severity, downtimeId, startedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        resourceId:
+          type: string
+          format: uuid
+        siteId:
+          type: [string, "null"]
+          format: uuid
+        kind:
+          type: string
+          enum: [downtime]
+        severity:
+          type: string
+          enum: [info, warning, error]
+        downtimeId:
+          type: [string, "null"]
+          format: uuid
+        startedAt:
+          type: string
+          format: date-time
+    OeeBucket:
+      type: object
+      required: [resourceId, bucketStart, plannedMinutes, runMinutes, downMinutes, totalCount, goodCount,
+        availability, performance, quality, oee, overRate, sourceEvents]
+      properties:
+        resourceId:
+          type: string
+          format: uuid
+        bucketStart:
+          type: string
+          format: date-time
+        plannedMinutes:
+          type: string
+        runMinutes:
+          type: string
+        downMinutes:
+          type: string
+          description: Unplanned downtime minutes (planned minutes less run minutes).
+        totalCount:
+          type: integer
+        goodCount:
+          type: integer
+        availability:
+          type: string
+          description: Decimal, 4 places.
+        performance:
+          type: string
+          description: Decimal, 4 places, capped at 1.
+        quality:
+          type: string
+        oee:
+          type: string
+        overRate:
+          type: boolean
+          description: Performance exceeded 1.0 and was capped.
+        sourceEvents:
+          type: integer
+    PayExportRange:
+      type: object
+      required: [from, to]
+      properties:
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+          description: Inclusive; at most 31 days after from.
+    PayExport:
+      type: object
+      required: [batchId, fromDate, toDate, lineCount, createdBy, createdAt]
+      properties:
+        batchId:
+          type: string
+          format: uuid
+        fromDate:
+          type: string
+          format: date
+        toDate:
+          type: string
+          format: date
+        lineCount:
+          type: integer
+          minimum: 1
+        createdBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        csv:
+          type: string
+          description: |
+            Present on create and on get. Header batchId,workerId,workDate,payType,hours,multiplier,amount,currency;
+            decimals keep their stored scale.
     Problem:
       type: object
       description: RFC 9457 problem details with Passage extensions.

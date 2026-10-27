@@ -59,19 +59,32 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 	})
 	declared := declaredOperations(string(spec))
 	duties := map[string]string{
-		"/api/v1/shopfloor/workers post":       DutySetup,
-		"/api/v1/shopfloor/workers get":        DutyView,
-		"/api/v1/shopfloor/workers/{id} get":   DutyView,
-		"/api/v1/shopfloor/registrations post": DutyRegister,
-		"/api/v1/shopfloor/registrations get":  DutyView,
-		"/api/v1/shopfloor/pay:calculate post": DutyCalculate,
-		"/api/v1/shopfloor/pay:approve post":   DutyApprove,
-		"/api/v1/shopfloor/worker-days get":    DutyView,
+		"/api/v1/shopfloor/workers post":             DutySetup,
+		"/api/v1/shopfloor/workers get":              DutyView,
+		"/api/v1/shopfloor/workers/{id} get":         DutyView,
+		"/api/v1/shopfloor/registrations post":       DutyRegister,
+		"/api/v1/shopfloor/registrations get":        DutyView,
+		"/api/v1/shopfloor/pay:calculate post":       DutyCalculate,
+		"/api/v1/shopfloor/pay:approve post":         DutyApprove,
+		"/api/v1/shopfloor/worker-days get":          DutyView,
+		"/api/v1/shopfloor/machines post":            DutySetup,
+		"/api/v1/shopfloor/machines get":             DutyView,
+		"/api/v1/shopfloor/machine-events post":      DutyIngest,
+		"/api/v1/shopfloor/downtimes get":            DutyView,
+		"/api/v1/shopfloor/downtimes/{id}:code post": DutyRegister,
+		"/api/v1/shopfloor/andon get":                DutyView,
+		"/api/v1/shopfloor/oee get":                  DutyView,
+		"/api/v1/shopfloor/pay:export post":          DutyExport,
+		"/api/v1/shopfloor/pay-exports get":          DutyExport,
+		"/api/v1/shopfloor/pay-exports/{id} get":     DutyExport,
 	}
 	keyed := map[string]bool{
-		"/api/v1/shopfloor/workers post":       true,
-		"/api/v1/shopfloor/pay:calculate post": true,
-		"/api/v1/shopfloor/pay:approve post":   true,
+		"/api/v1/shopfloor/workers post":             true,
+		"/api/v1/shopfloor/pay:calculate post":       true,
+		"/api/v1/shopfloor/pay:approve post":         true,
+		"/api/v1/shopfloor/machines post":            true,
+		"/api/v1/shopfloor/downtimes/{id}:code post": true,
+		"/api/v1/shopfloor/pay:export post":          true,
 	}
 	for op := range served {
 		d, ok := declared[op]

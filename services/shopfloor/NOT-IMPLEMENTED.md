@@ -1,9 +1,12 @@
-# NOT-IMPLEMENTED — PSG-25 (Wave 25) slice 1
+# NOT-IMPLEMENTED — PSG-25 (Wave 25) slices 1 and 2
 
-Every PSG-25 deliverable and acceptance criterion that slice 1 does not build, with its
+Every PSG-25 deliverable and acceptance criterion that slices 1 and 2 do not build, with its
 status and reason. Slice 1 covers the time and attendance core of the shopfloor service
 (workers, registrations, pay calculation, approval, review lists, OEE arithmetic), the
 supervisor web pages in `apps/web/src/modules/shopfloor/`, and the iot-edge domain core.
+Slice 2 adds machines, the HTTP machine-event ingest with BR-25.4 sequence rules, downtimes
+with reason codes, andon alerts, the OEE series endpoint, payroll export batches, and their
+web pages (machines, downtimes, andon board, OEE, payroll export).
 The edge connector's own gaps are in [../iot-edge/NOT-IMPLEMENTED.md](../iot-edge/NOT-IMPLEMENTED.md).
 
 ## Ticket deliverables
@@ -15,14 +18,14 @@ The edge connector's own gaps are in [../iot-edge/NOT-IMPLEMENTED.md](../iot-edg
 | D2a′ | Workers (shop floor projection of Party/Employee) | partial | Create, list and get with name, badge, sign-in user, cost rate and currency. Not built: `pin_hash` and kiosk login (FR-25.1), `default_resource_id`, `work_cell_id`, `profile_id`, `pay_agreement_id`, and update/deactivate (the `version` column is there for optimistic `If-Match` when update lands). |
 | D2b | Pay-type calculation: overtime, shift premium, flex | partial | Base, daily/weekly overtime and Sunday are built. Shift premium and flex balances are not (needs profile and pay agreement persistence, below). |
 | D2c | Approval | built | `pay:approve` locks days, refuses open flags (SF-0006), stale days (SF-0104) and approval of one's own day (SF-0106), returns already approved days unchanged, emits the payday event. Bulk approval by team is a loop over workers in the web page; a server-side team endpoint needs teams (w42). |
-| D2d | Export to payroll (CSV and event batch) | later slice of PSG-25 | `pay:export` and export batch ids are not built. The `payday.approved` event is emitted for wave 43. |
+| D2d | Export to payroll (CSV and event batch) | built | `pay:export` puts every approved, not yet exported pay line of a range (≤ 31 days) into one batch, returns the CSV and emits `payday.exported` with the lines in the same transaction; a line is exported once (SF-0111 when nothing is new); a repeated `Idempotency-Key` returns the same batch. Batches are listed and read back with their CSV. Not built: the per-pay-period export job and scoping by legal entity (PRD job table), and correction lines with reversal in a later batch (AC-25.8, needs D2g). |
 | D2e | Job bundling and split by quantity or equally (BR-25.1) | later slice of PSG-25 | Needs job and bundle tables from w23 and job-card posting. The `bundle_id` column is stored only. |
 | D2f | Profiles, pay agreements, worker profile link (ProfileDay, PayRule config) | later slice of PSG-25 | Calculation uses `domain.DefaultProfile()` and `domain.DefaultRules()`. Persisted profile and pay agreement tables and their admin endpoint are not built. |
 | D2g | Recalculate on edit with reversal, supervisor edit with reason, missing clock-out confirmation | later slice of PSG-25 | Approved days are immutable (trigger). Registration edits, correction lines and reversal are not built; a registration that arrives after calculation blocks approval until the day is recalculated (SF-0104). |
 | D2h | Auto clock-out job (hourly) and pay calculation nightly job | later slice of PSG-25 | Scheduler is not wired. Calculation runs on request only. |
-| D3a | IoT ingestion: OPC-UA and MQTT adapters, Kafka publish, MachineEvent store, sequence-gap monitor | later slice of PSG-25 | Adapters and publish are edge work (`iot-edge`, see its NOT-IMPLEMENTED). The shopfloor consumer and MachineEvent table are not built. |
-| D3b | OEE per resource per 15-minute bucket and shift; roll-up; OEE endpoint | partial | The ISO 22400 arithmetic (BR-25.5) is built in `domain/oee.go` and tested against the PRD example. The OeeBucket table, rollup job, and `GET /api/v1/shopfloor/oee` are not built. |
-| D4 | Andon alerts, downtime reason codes, operator feedback | later slice of PSG-25 | Needs machine events (D3a) and kiosk (D1). Endpoints `downtimes/{id}:code` and `andon` are not built. |
+| D3a | IoT ingestion: OPC-UA and MQTT adapters, Kafka publish, MachineEvent store, sequence-gap monitor | partial | Built: machines (machine code → resource, ideal cycle time), the MachineEvent table, and `POST machine-events` for the edge gateway (≤ 500 events, BR-25.4: seq at or below the last stored seq and events older than 7 days dropped and counted, gaps returned and counted as SF-0008, stored once per `(machine, seq)`). Not built: the Kafka consumer group `shopfloor-oee` on `shopfloor.machine-events` (the HTTP endpoint stands in for it), monthly range partitions and the 90-day partition drop, `resource_id`, `tags` and raw `payload` columns on MachineEvent (the resource comes from the machine), more than one machine per resource, machine tags and thresholds (FR-25.19 config documents), and the OPC-UA/MQTT adapters (`iot-edge`, see its NOT-IMPLEMENTED). |
+| D3b | OEE per resource per 15-minute bucket and shift; roll-up; OEE endpoint | partial | Built: `GET oee` computes 5, 15 or 60-minute buckets on read from machine events (BR-25.5), with planned downtime taken out of planned time and OFF time unscheduled. Not built: the OeeBucket table and 15-minute rollup job, shift and day roll-up endpoints (callers sum minutes and counts), planned time from the w23 calendar (known machine state stands in for it), idle detection from missing counts (BR-25.6, `SF_IDLE_THRESHOLD_S`), OEE per operator (FR-25.13), and the 5 s tile push (AC-25.4 lag; needs the BFF SSE stream). |
+| D4 | Andon alerts, downtime reason codes, operator feedback | partial | Built: DOWN opens a DowntimeRecord and the next other state ends it; a downtime open for more than 10 minutes at ingest raises one andon per (resource, kind) and emits `andon.raised`; the alert clears on a later ingest 5 minutes after the downtime ends (BR-25.10); downtimes are listed and coded with a reason and category (`downtimes/{id}:code`). Not built: a scheduled sweep (raising and clearing happen only when the machine sends events), andon on scrap rate over 5 % or quality fail, the configurable thresholds (`SF_ANDON_DOWNTIME_MIN`, site settings), notifications and the kiosk banner (D1), a reason code master list, `job_id`/`worker_id` on downtimes (FR-25.13), and operator feedback (needs jobs). |
 | D5 | Offline-tolerant kiosk (PWA) with sync | partial | Server side is built: client-UUID idempotent batch replay (≤ 500 items, duplicate reported, stored in client timestamp order). The IndexedDB queue and PWA are part of D1 (`apps/shopfloor/`), not built. `chunk()` in the web client splits offline queues. Clock-skew correction and `job-finished-conflict` (BR-25.7) need jobs. |
 | D6 | Control recipes (ISA-88) to kiosk or PCS, monitor with resend | later slice of PSG-25 | Needs batch orders (w24) and the edge write path (`iot-edge`). |
 | D7 | PI sheet designer, versioned StepLibrary, kiosk execution, PI sheet archive | later slice of PSG-25 | Not started. Depends on ECO (w9) for library release and on w5 document store for archives. |
@@ -35,7 +38,7 @@ The edge connector's own gaps are in [../iot-edge/NOT-IMPLEMENTED.md](../iot-edg
 | AC | Status | Reason |
 |---|---|---|
 | AC1 Kiosk E2E (Playwright), labor cost ties to order | later slice of PSG-25 | Needs D1 kiosk, job-card posting (w21) and order costing. The labor cost arithmetic (hours × rate per worker-day) is covered by unit tests. |
-| AC2 10k events/min, OEE tile < 5 s, no loss on broker restart | later slice of PSG-25 | Needs D3a and the Kafka path. Sequence logic (no duplicates, gap detection) is unit tested in iot-edge. |
+| AC2 10k events/min, OEE tile < 5 s, no loss on broker restart | later slice of PSG-25 | Needs the Kafka path (D3a) and the SSE push. Sequence logic (no duplicates, gap detection) is unit tested in iot-edge and, for the stored side, in shopfloor. |
 | AC3 Offline 30 min, 40 queued actions replay once in order | later slice of PSG-25 | Needs the PWA queue (D5 client). The server side replays by client UUID. |
 | AC4 Phase exit: demo plant from planned order to finished goods | later slice of PSG-25 | Depends on waves 21–24 and the whole of PSG-25. |
 | AC5 Every deliverable has code or is listed here | partial | This file lists every gap. Code exists only for the parts marked built or partial. |
@@ -47,10 +50,10 @@ The edge connector's own gaps are in [../iot-edge/NOT-IMPLEMENTED.md](../iot-edg
 |---|---|---|
 | AC-25.1 Labor cost ties to the cent after approval | partial | Pay-line arithmetic is built. Production order cost postings are not (D2e, job-card posting). |
 | AC-25.2 09:00–19:30 with 30-min break on a Tuesday → base 8.00 h, overtime-1.5 2.00 h | built | Covered by `TestCalculate_AC25_2_TuesdayOvertime` and `TestNetHours_BreakIsDeducted_AC25_2`. |
-| AC-25.3 Machine events, broker restart, no loss or duplicates | later slice of PSG-25 | Needs D3a. |
-| AC-25.4 OEE shift example 0.7522 | built (arithmetic) | `TestCompute_BR25_5_ShiftExample` asserts 0.7521, which is what the BR-25.5 formula gives (see "Requirements questions"). The tile update within 5 s needs D3b. |
+| AC-25.3 Machine events, broker restart, no loss or duplicates | partial | The store side holds: each `(machine, seq)` is stored once and a replay is dropped (property test `TestClassify_PropertyNoLossNoDuplicate`). The Kafka path and the 10k events/min load test need the consumer (D3a). |
+| AC-25.4 OEE shift example 0.7522 | built (arithmetic and endpoint) | `TestCompute_BR25_5_ShiftExample`, `TestBuildBuckets_ShiftExample` and `TestOEE_SeriesAndValidation` (eight 60-minute buckets rolled up by summing minutes and counts) give 0.7521, which is what the BR-25.5 formula gives (see "Requirements questions"). The tile update within 5 s needs the SSE push (D3b). |
 | AC-25.5 Offline replay of 40 actions, once and in order | partial | Server dedup by client UUID and storage in client timestamp order are built. Conflict flags (`job-finished-conflict`) are not. |
-| AC-25.6 Andon at 11 min DOWN | later slice of PSG-25 | Needs D3a and D4. |
+| AC-25.6 Andon at 11 min DOWN | partial | Server side built and tested (`TestFloor_IngestDowntimeAndonAndGaps`, `TestHTTP_MachineDowntimeAndOEE`): 10 minutes down raises nothing, 11 raises one alert, coding the reason keeps it, it clears 5 minutes after the machine runs again. The kiosk banner needs D1. |
 | AC-25.7 Clock-in rounds to shift start (06:53 → 07:00) | built | Tolerance rule in `domain/time.go`, covered by `TestRound_BR25_2`. |
 | AC-25.8 Approved day edit creates reversal and new line | later slice of PSG-25 | Needs D2g. Immutability is enforced by the trigger. |
 | AC-25.9 Mandatory check blocks `finished` | later slice of PSG-25 | Needs D1 quality checks and feedback endpoint. |
@@ -66,14 +69,15 @@ The edge connector's own gaps are in [../iot-edge/NOT-IMPLEMENTED.md](../iot-edg
 | Item | Status | Reason |
 |---|---|---|
 | `Idempotency-Key` on `workers`, `pay:calculate` and `pay:approve` | built | Stored in `idempotency_keys` in the command's transaction; a repeated key returns the stored outcome, a different request under the same key is `idempotency_key_reuse`. |
-| Remaining endpoints: `sessions:badge`, `jobs`, `jobs/{id}:feedback`, `operations/{id}/instructions`, `pay:export`, `oee`, `downtimes/{id}:code`, `andon`, `machines` | later slice of PSG-25 | Need the kiosk, machine events and job dispatch from w23/w24; export needs export batches (D2d). |
-| `ETag` and `If-Match` | not applicable in this slice | No PUT, PATCH, DELETE or update custom method exists yet; `worker.version` is ready for it. |
-| FR-25.14 supervisor workspace (who is clocked in, current jobs, open downtimes, OEE tiles, pending approvals) | partial | Pending approvals are built (time approval page, `GET worker-days?status=calculated`). Who-is-clocked-in, jobs, downtimes and OEE tiles need D1, D3 and D4. |
+| Remaining endpoints: `sessions:badge`, `jobs`, `jobs/{id}:feedback`, `operations/{id}/instructions` | later slice of PSG-25 | Need the kiosk and job dispatch from w23/w24. `pay:export`, `oee`, `downtimes/{id}:code`, `andon` and `machines` are built in slice 2. |
+| `shopfloor.machine.ingest` duty | added | The PRD duty table has no duty for the edge gateway; the ingest endpoint uses this service-identity duty, which no person role should hold. |
+| `ETag` and `If-Match` | not applicable yet | No PUT, PATCH or DELETE exists. `downtimes/{id}:code` overwrites the reason last-writer-wins under its `Idempotency-Key`; a `version` column with `If-Match` comes with the reason code master list. |
+| FR-25.14 supervisor workspace (who is clocked in, current jobs, open downtimes, OEE tiles, pending approvals) | partial | Built as separate pages: pending approvals (time approval), open downtimes, andon board and OEE by day. Not built: one combined board, who is clocked in and current jobs (need D1 and jobs), live updates (SSE). |
 | `legal_entity_scope` restrictive RLS policy | not applicable | No table in slice 1 carries `legal_entity_id`. Add when legal entity scoping reaches shop floor data. |
 | Migration `0001` applied to an empty database | verified in review | Applied to an empty PostgreSQL 16 schema, and the store and HTTP tests ran as `passage_app` with RLS forced. CI runs them when `PASSAGE_TEST_DATABASE_URL` is set; they skip without it. |
 | Access to `ProfileDay`, `PayRule`, `pay_agreement`, `flex_balance` tables | later slice of PSG-25 | Persisted configuration is not in slice 1. |
 | `shopfloor-bff` (TS, SSE) | handoff | Owned by the BFF wave (web-bff / device-bff). Not in this service's owned paths. |
-| Kafka consumer group `shopfloor-oee`, rollup and partition jobs | later slice of PSG-25 | Need D3a and D3b. |
+| Kafka consumer group `shopfloor-oee`, rollup and partition jobs | later slice of PSG-25 | Need D3a and D3b. The HTTP ingest is the only path in slice 2. |
 | Feature flags `shopfloor.iot`, `shopfloor.oee`, `shopfloor.pay-export` | later slice of PSG-25 | Flag service is not wired. |
 | Catalog codes SF-0001..SF-0020 (except SF-0006 and SF-0007, raised here) | later slice of PSG-25 | Each code is raised by the feature that needs it. |
 | Operator analytics switch `shopfloor.operator-analytics` | later slice of PSG-25 | Relevant when OEE per operator is built (FR-25.13). |
@@ -83,4 +87,6 @@ The edge connector's own gaps are in [../iot-edge/NOT-IMPLEMENTED.md](../iot-edg
 | Item | Question |
 |---|---|
 | BR-25.5 / AC-25.4 shift example | The PRD says OEE = 0.7522, but A × P × Q = 0.875 × 0.904762 × 0.95 = 0.752083, which rounds to 0.7521 (the rounded factors give 0.7521 as well). The code follows the formula; the requirements owner should correct the example. |
+| AC-25.6 "coding the reason closes the downtime" | Coding sets the reason and category and leaves the downtime open until the machine reports another state, so the downtime keeps measuring the real stop; the alert stays open until it clears, as the AC asks. Confirm that coding should not end the downtime record. |
+| Andon timing | The 10-minute andon threshold is checked against server receive time when the machine's events arrive; an edge that stops sending entirely gets no andon until the scheduled sweep exists. |
 | Pay week start | BR-25.8 says the pay week start is profile-defined. Until profiles are persisted (D2f) it is Monday (`domain.DefaultRules().WeekStart`). |
