@@ -19,18 +19,22 @@ const (
 )
 
 // BatchStock is the available quantity of one batch at one dimension set.
-// A nil Expiry means the batch never expires and sorts last under FEFO.
+// A nil Expiry means the batch never expires and sorts last under FEFO. Key
+// identifies the dimension set the stock sits in; it is carried through to the
+// allocation and is the final tie-break, so selection is deterministic.
 type BatchStock struct {
 	BatchID     string
+	Key         string
 	Expiry      *time.Time
 	ReceiptDate time.Time
 	Available   decimal.Decimal
 	Status      string // AVAILABLE, BLOCKED or QUARANTINE
 }
 
-// Allocation is the quantity taken from one batch.
+// Allocation is the quantity taken from one batch at one dimension set.
 type Allocation struct {
 	BatchID string
+	Key     string
 	Qty     decimal.Decimal
 }
 
@@ -51,7 +55,7 @@ func SelectBatches(policy ReservationPolicy, batches []BatchStock, qty decimal.D
 	eligible := make([]BatchStock, 0, len(batches))
 	cutoff := requiredDate.AddDate(0, 0, marginDays)
 	for _, b := range batches {
-		if b.Status != "AVAILABLE" || b.Available.Sign() <= 0 {
+		if b.Status != StockAvailable || b.Available.Sign() <= 0 {
 			continue
 		}
 		if policy == PolicyFEFO && b.Expiry != nil && b.Expiry.Before(cutoff) {
@@ -65,15 +69,15 @@ func SelectBatches(policy ReservationPolicy, batches []BatchStock, qty decimal.D
 			if c := compareExpiry(a.Expiry, b.Expiry); c != 0 {
 				return c
 			}
-			return cmp.Or(a.ReceiptDate.Compare(b.ReceiptDate), cmp.Compare(a.BatchID, b.BatchID))
+			return cmp.Or(a.ReceiptDate.Compare(b.ReceiptDate), cmp.Compare(a.BatchID, b.BatchID), cmp.Compare(a.Key, b.Key))
 		})
 	case PolicyLIFO:
 		slices.SortStableFunc(eligible, func(a, b BatchStock) int {
-			return cmp.Or(b.ReceiptDate.Compare(a.ReceiptDate), cmp.Compare(a.BatchID, b.BatchID))
+			return cmp.Or(b.ReceiptDate.Compare(a.ReceiptDate), cmp.Compare(a.BatchID, b.BatchID), cmp.Compare(a.Key, b.Key))
 		})
 	default:
 		slices.SortStableFunc(eligible, func(a, b BatchStock) int {
-			return cmp.Or(a.ReceiptDate.Compare(b.ReceiptDate), cmp.Compare(a.BatchID, b.BatchID))
+			return cmp.Or(a.ReceiptDate.Compare(b.ReceiptDate), cmp.Compare(a.BatchID, b.BatchID), cmp.Compare(a.Key, b.Key))
 		})
 	}
 	var sel Selection
@@ -83,7 +87,7 @@ func SelectBatches(policy ReservationPolicy, batches []BatchStock, qty decimal.D
 			break
 		}
 		take := decimal.Min(b.Available, remaining)
-		sel.Allocations = append(sel.Allocations, Allocation{BatchID: b.BatchID, Qty: take})
+		sel.Allocations = append(sel.Allocations, Allocation{BatchID: b.BatchID, Key: b.Key, Qty: take})
 		remaining = remaining.Sub(take)
 	}
 	if remaining.Sign() > 0 {

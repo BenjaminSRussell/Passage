@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: Passage Inventory events
-  version: 0.16.1
+  version: 0.16.2
   description: |
     Published through the transactional outbox in the same database transaction as the
     posting, relayed by Debezium. CloudEvents 1.0 envelope (tenantid, correlationid,
@@ -23,6 +23,20 @@ channels:
     messages:
       journalPosted:
         $ref: '#/components/messages/JournalPosted'
+  reservation:
+    address: passage.inventory.reservation
+    messages:
+      reservationCreated:
+        $ref: '#/components/messages/ReservationCreated'
+      reservationReleased:
+        $ref: '#/components/messages/ReservationReleased'
+  blocking:
+    address: passage.inventory.blocking
+    messages:
+      blockingCreated:
+        $ref: '#/components/messages/BlockingCreated'
+      blockingReleased:
+        $ref: '#/components/messages/BlockingReleased'
 operations:
   publishTransactionPosted:
     action: send
@@ -35,7 +49,15 @@ operations:
   publishJournalPosted:
     action: send
     channel: { $ref: '#/channels/journalPosted' }
-    summary: Journal reached POSTED with its balanced GL lines
+    summary: Journal reached POSTED with its balanced GL lines (a posted count sheet posts a COUNT journal)
+  publishReservation:
+    action: send
+    channel: { $ref: '#/channels/reservation' }
+    summary: One reservation allocation was created or released (FR-16.7)
+  publishBlocking:
+    action: send
+    channel: { $ref: '#/channels/blocking' }
+    summary: Stock was blocked or quarantined, or a blocking was released (FR-16.8)
 components:
   messages:
     TransactionPosted:
@@ -56,20 +78,46 @@ components:
       contentType: application/json
       payload:
         $ref: '#/components/schemas/JournalPostedData'
+    ReservationCreated:
+      name: dev.passage.inventory.reservation.created.v1
+      x-passage-type: dev.passage.inventory.reservation.created.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ReservationData'
+    ReservationReleased:
+      name: dev.passage.inventory.reservation.released.v1
+      x-passage-type: dev.passage.inventory.reservation.released.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ReservationData'
+    BlockingCreated:
+      name: dev.passage.inventory.blocking.created.v1
+      x-passage-type: dev.passage.inventory.blocking.created.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/BlockingData'
+    BlockingReleased:
+      name: dev.passage.inventory.blocking.released.v1
+      x-passage-type: dev.passage.inventory.blocking.released.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/BlockingData'
   schemas:
     TransactionPostedData:
       type: object
-      required: [transactionId, legalEntityId, journalId, originId, productId, dimensionSet, qty, issueStatus, receiptStatus, physicalDate, financialDate, currency, costAmountPhysical, costAmountPosted]
+      required: [transactionId, legalEntityId, sourceType, journalId, referenceId, originId, productId, dimensionSet, qty, issueStatus, receiptStatus, physicalDate, financialDate, currency, costAmountPhysical, costAmountPosted]
       properties:
         transactionId: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
-        journalId: { type: string, format: uuid }
+        sourceType: { type: string, enum: [INVENT_JOURNAL_LINE, BLOCKING], description: Origin type of the transaction }
+        journalId: { type: [string, 'null'], format: uuid, description: Inventory journal of a journal line; null for other origins }
+        referenceId: { type: [string, 'null'], format: uuid, description: Source document of a non-journal origin (the blocking id); null for journal lines }
         originId: { type: string, format: uuid }
         productId: { type: string, format: uuid }
         dimensionSet: { type: object, additionalProperties: { type: string } }
         qty: { type: string, description: Signed quantity; negative for issues }
-        issueStatus: { type: [string, 'null'], enum: [ON_ORDER, RESERVED_ORDERED, RESERVED_PHYSICAL, PICKED, DEDUCTED, SOLD, null], description: Set for issues; journals post SOLD }
-        receiptStatus: { type: [string, 'null'], enum: [ORDERED, ARRIVED, REGISTERED, RECEIVED, PURCHASED, null], description: Set for receipts; journals post PURCHASED }
+        issueStatus: { type: [string, 'null'], enum: [ON_ORDER, RESERVED_ORDERED, RESERVED_PHYSICAL, PICKED, DEDUCTED, SOLD, null], description: Set for issues; journals and blocking legs post SOLD }
+        receiptStatus: { type: [string, 'null'], enum: [ORDERED, ARRIVED, REGISTERED, RECEIVED, PURCHASED, null], description: Set for receipts; journals and blocking legs post PURCHASED }
         physicalDate: { type: string, format: date }
         financialDate: { type: string, format: date }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
@@ -85,15 +133,15 @@ components:
         availPhysical: { type: string }
         availOrdered: { type: string }
         physicalInvent: { type: string }
-        deltaBucket: { type: string, enum: [POSTED], description: Projection bucket the change moved (journals move posted quantity) }
-        deltaQty: { type: string, description: Net signed quantity change of the row }
+        deltaBucket: { type: string, enum: [POSTED, RESERVED_PHYSICAL], description: 'Projection bucket the change moved: POSTED for journals and blocking legs, RESERVED_PHYSICAL for reservations' }
+        deltaQty: { type: string, description: Net signed quantity change of that bucket }
     JournalPostedData:
       type: object
       required: [journalId, legalEntityId, journalType, postingDate, currency, lineCount, glLines, ledgerEntryId]
       properties:
         journalId: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
-        journalType: { type: string, enum: [MOVEMENT, ADJUSTMENT, OPENING_BALANCE] }
+        journalType: { type: string, enum: [MOVEMENT, ADJUSTMENT, OPENING_BALANCE, COUNT] }
         postingDate: { type: string, format: date }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         lineCount: { type: integer }
@@ -107,3 +155,29 @@ components:
               debit: { type: string }
               credit: { type: string }
         ledgerEntryId: { type: [string, 'null'], format: uuid, description: Null until the wave 11 ledger Post exists }
+    ReservationData:
+      type: object
+      required: [reservationId, legalEntityId, productId, dimensionSet, qty, demandType, demandId, policy, status]
+      properties:
+        reservationId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        dimensionSet: { type: object, additionalProperties: { type: string }, description: Dimension set the allocation reserves }
+        qty: { type: string, description: Reserved quantity of this allocation }
+        demandType: { type: string, enum: [MANUAL, SALES_ORDER, PRODUCTION_ORDER, TRANSFER_ORDER] }
+        demandId: { type: string }
+        policy: { type: string, enum: [MANUAL, FIFO, FEFO, LIFO] }
+        status: { type: string, enum: [ACTIVE, RELEASED, CONSUMED] }
+    BlockingData:
+      type: object
+      required: [blockingId, legalEntityId, productId, dimensionSet, qty, targetStatus, reason, state, disposition]
+      properties:
+        blockingId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        dimensionSet: { type: object, additionalProperties: { type: string }, description: Unrestricted source dimensions; blocked stock adds inventory_status = targetStatus }
+        qty: { type: string }
+        targetStatus: { type: string, enum: [BLOCKED, QUARANTINE] }
+        reason: { type: string, enum: [QUALITY, DAMAGE, RECALL, LEGAL, OTHER] }
+        state: { type: string, enum: [ACTIVE, RELEASED] }
+        disposition: { type: [string, 'null'], enum: [RELEASE, SCRAP, RETURN, null] }

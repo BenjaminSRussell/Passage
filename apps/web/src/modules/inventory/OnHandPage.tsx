@@ -30,6 +30,7 @@ const amountColumns: DataTableColumn<OnHandRow>[] = [
   { key: "availPhysical", header: "Available physical", align: "end", mono: true },
   { key: "availOrdered", header: "Available ordered", align: "end", mono: true },
   { key: "reservedPhysical", header: "Reserved", align: "end", mono: true },
+  { key: "blocked", header: "Blocked", align: "end", mono: true, render: (row) => row.blocked ?? "0" },
   { key: "postedValue", header: "Posted value", align: "end", mono: true, render: (row) => `${row.postedValue} ${row.currency}`.trim() },
   {
     key: "negative",

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -48,6 +49,21 @@ type Store interface {
 	ListJournals(ctx context.Context, f JournalFilter) (JournalPage, error)
 	PostJournal(ctx context.Context, id string, version int, p PostParams) (domain.Journal, error)
 	ListOnHand(ctx context.Context, f OnHandFilter) (OnHandResult, error)
+	ListTransactions(ctx context.Context, f TransactionFilter) ([]TransactionRow, error)
+	Reserve(ctx context.Context, in ReserveInput) (ReserveResult, error)
+	ReleaseReservation(ctx context.Context, id string) (domain.Reservation, error)
+	ListReservations(ctx context.Context, f ReservationFilter) ([]domain.Reservation, error)
+	UpsertBatchExpiry(ctx context.Context, productID, batchID string, expiry *time.Time) error
+	CreateBlocking(ctx context.Context, in BlockingInput) (domain.Blocking, bool, error)
+	ReleaseBlocking(ctx context.Context, id string, version int, disposition string, date time.Time) (domain.Blocking, error)
+	ListBlockings(ctx context.Context, f BlockingFilter) ([]domain.Blocking, error)
+	CreateCountPlan(ctx context.Context, key string, p domain.CountPlan) (domain.CountPlan, bool, error)
+	ListCountPlans(ctx context.Context) ([]domain.CountPlan, error)
+	GenerateCountSheet(ctx context.Context, planID, key string) (domain.CountSheet, bool, error)
+	ListCountSheets(ctx context.Context, f CountSheetFilter) ([]domain.CountSheet, error)
+	GetCountSheet(ctx context.Context, id string) (domain.CountSheet, error)
+	EnterCount(ctx context.Context, sheetID, lineID string, version int, counted decimal.Decimal) (domain.CountSheet, error)
+	PostCountSheet(ctx context.Context, sheetID string, version int, canApprove bool, p PostParams) (domain.CountSheet, error)
 	Ping(ctx context.Context) error
 }
 
@@ -109,6 +125,14 @@ func enqueue(ctx context.Context, tx pgx.Tx, aggregateType, aggregateID, typ, te
 		evt.Actor = p.UserID
 	}
 	return outbox.Enqueue(ctx, tx, aggregateType, aggregateID, evt)
+}
+
+// lockKey serializes requests that share an idempotency key within a scope
+// for the rest of the transaction, so a concurrent retry waits for the first
+// request and then replays it instead of failing on the unique key.
+func lockKey(ctx context.Context, tx pgx.Tx, scope, tenantID, key string) error {
+	_, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, "inventory."+scope+"|"+tenantID+"|"+key)
+	return err
 }
 
 // upsertDimensionSet stores a normalized dimension set once per tenant and
@@ -197,6 +221,9 @@ func loadJournal(ctx context.Context, tx pgx.Tx, id string, forUpdate bool) (dom
 func (s *Postgres) CreateJournal(ctx context.Context, j domain.Journal, idempotencyKey string) (domain.Journal, bool, error) {
 	if err := domain.ValidateHeader(j); err != nil {
 		return domain.Journal{}, false, domainProblem(err)
+	}
+	if !slices.Contains(domain.KeyedJournalTypes, j.Type) {
+		return domain.Journal{}, false, domainProblem(&domain.Error{Code: domain.CodeInvalid, Detail: string(j.Type) + " journals are created by their source document"})
 	}
 	p, _ := tenant.FromContext(ctx)
 	var out domain.Journal

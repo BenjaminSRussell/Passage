@@ -30,6 +30,29 @@ type fakeStore struct {
 	keys        map[string]domain.Journal
 	lines       []domain.JournalLine
 	err         error
+
+	reserveIn       store.ReserveInput
+	reserveOut      store.ReserveResult
+	reservations    store.ReservationFilter
+	txFilter        store.TransactionFilter
+	txRows          int
+	expiryProduct   string
+	expiryBatch     string
+	expiryDate      *time.Time
+	blockIn         store.BlockingInput
+	blockReplayed   bool
+	blockings       store.BlockingFilter
+	releaseVersion  int
+	releaseDispo    string
+	plan            domain.CountPlan
+	planKey         string
+	sheetKey        string
+	sheets          store.CountSheetFilter
+	sheet           domain.CountSheet
+	countVersion    int
+	counted         decimal.Decimal
+	countCanApprove bool
+	postedParams    store.PostParams
 }
 
 func (f *fakeStore) CreateJournal(_ context.Context, j domain.Journal, key string) (domain.Journal, bool, error) {
@@ -81,10 +104,106 @@ func (f *fakeStore) ListOnHand(_ context.Context, flt store.OnHandFilter) (store
 	// The group total is positive but an underlying row is negative: the API
 	// must pass the store's flag through rather than recompute it from the total.
 	return store.OnHandResult{Truncated: true, Rows: []store.OnHandRow{{Group: map[string]string{"site": "S1"}, PhysicalInvent: decimal.NewFromInt(3),
-		AvailPhysical: decimal.NewFromInt(3), AvailOrdered: decimal.NewFromInt(3), PostedValue: decimal.Zero, Currency: "USD", Negative: true}}}, nil
+		AvailPhysical: decimal.NewFromInt(3), AvailOrdered: decimal.NewFromInt(3), PostedValue: decimal.Zero, Blocked: decimal.NewFromInt(2), Currency: "USD", Negative: true}}}, nil
 }
 
 func (f *fakeStore) Ping(context.Context) error { return nil }
+
+func (f *fakeStore) ListTransactions(_ context.Context, flt store.TransactionFilter) ([]store.TransactionRow, error) {
+	f.txFilter = flt
+	out := []store.TransactionRow{}
+	for i := 0; i < flt.Limit && i < f.txRows; i++ {
+		out = append(out, store.TransactionRow{ID: ids.New(), SourceType: "INVENT_JOURNAL_LINE", Qty: decimal.NewFromInt(-2),
+			EnteredQty: decimal.NewFromInt(-2), IssueStatus: "SOLD", CostAmountPhysical: decimal.RequireFromString("-6.5")})
+	}
+	return out, nil
+}
+
+func (f *fakeStore) Reserve(_ context.Context, in store.ReserveInput) (store.ReserveResult, error) {
+	f.reserveIn = in
+	if f.err != nil {
+		return store.ReserveResult{}, f.err
+	}
+	return f.reserveOut, nil
+}
+
+func (f *fakeStore) ReleaseReservation(_ context.Context, id string) (domain.Reservation, error) {
+	if f.err != nil {
+		return domain.Reservation{}, f.err
+	}
+	return domain.Reservation{ID: id, Qty: decimal.NewFromInt(4), Status: domain.ReservationReleased}, nil
+}
+
+func (f *fakeStore) ListReservations(_ context.Context, flt store.ReservationFilter) ([]domain.Reservation, error) {
+	f.reservations = flt
+	out := []domain.Reservation{}
+	for i := 0; i < flt.Limit && i < 3; i++ {
+		out = append(out, domain.Reservation{ID: ids.New(), Qty: decimal.NewFromInt(1), Status: domain.ReservationActive})
+	}
+	return out, nil
+}
+
+func (f *fakeStore) UpsertBatchExpiry(_ context.Context, product, batch string, expiry *time.Time) error {
+	f.expiryProduct, f.expiryBatch, f.expiryDate = product, batch, expiry
+	return nil
+}
+
+func (f *fakeStore) CreateBlocking(_ context.Context, in store.BlockingInput) (domain.Blocking, bool, error) {
+	f.blockIn = in
+	if f.err != nil {
+		return domain.Blocking{}, false, f.err
+	}
+	return domain.Blocking{ID: ids.New(), ProductID: in.ProductID, Dims: in.Dims, Qty: in.Qty, Unit: in.Unit, Target: in.Target,
+		Reason: in.Reason, State: domain.BlockingActive, Version: 1}, f.blockReplayed, nil
+}
+
+func (f *fakeStore) ReleaseBlocking(_ context.Context, id string, version int, disposition string, _ time.Time) (domain.Blocking, error) {
+	f.releaseVersion, f.releaseDispo = version, disposition
+	return domain.Blocking{ID: id, State: domain.BlockingReleased, Disposition: domain.DispositionRelease, Version: version + 1}, nil
+}
+
+func (f *fakeStore) ListBlockings(_ context.Context, flt store.BlockingFilter) ([]domain.Blocking, error) {
+	f.blockings = flt
+	return []domain.Blocking{{ID: ids.New(), State: domain.BlockingActive, Target: domain.StockBlocked, Qty: decimal.NewFromInt(2)}}, nil
+}
+
+func (f *fakeStore) CreateCountPlan(_ context.Context, key string, p domain.CountPlan) (domain.CountPlan, bool, error) {
+	f.plan, f.planKey = p, key
+	p.ID = ids.New()
+	return p, true, nil
+}
+
+func (f *fakeStore) ListCountPlans(context.Context) ([]domain.CountPlan, error) {
+	return []domain.CountPlan{{ID: ids.New(), Name: "Weekly", TolerancePct: decimal.NewFromInt(5), ToleranceValue: decimal.NewFromInt(100)}}, nil
+}
+
+func (f *fakeStore) GenerateCountSheet(_ context.Context, _ string, key string) (domain.CountSheet, bool, error) {
+	f.sheetKey = key
+	return f.sheet, false, nil
+}
+
+func (f *fakeStore) ListCountSheets(_ context.Context, flt store.CountSheetFilter) ([]domain.CountSheet, error) {
+	f.sheets = flt
+	return []domain.CountSheet{f.sheet}, nil
+}
+
+func (f *fakeStore) GetCountSheet(context.Context, string) (domain.CountSheet, error) {
+	return f.sheet, nil
+}
+
+func (f *fakeStore) EnterCount(_ context.Context, _, _ string, version int, counted decimal.Decimal) (domain.CountSheet, error) {
+	f.countVersion, f.counted = version, counted
+	return f.sheet, nil
+}
+
+func (f *fakeStore) PostCountSheet(_ context.Context, _ string, version int, canApprove bool, p store.PostParams) (domain.CountSheet, error) {
+	f.countVersion, f.countCanApprove, f.postedParams = version, canApprove, p
+	if f.err != nil {
+		return domain.CountSheet{}, f.err
+	}
+	f.sheet.Status = domain.CountPosted
+	return f.sheet, nil
+}
 
 func newServer(t *testing.T, fs *fakeStore) http.Handler {
 	t.Helper()
@@ -358,14 +477,15 @@ func TestOnHandGroupsByAnyDimensionSubset(t *testing.T) {
 		Items []struct {
 			Negative bool   `json:"negative"`
 			Currency string `json:"currency"`
+			Blocked  string `json:"blocked"`
 		} `json:"items"`
 		Truncated bool `json:"truncated"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatal(err)
 	}
-	if len(out.Items) != 1 || !out.Items[0].Negative || out.Items[0].Currency != "USD" || !out.Truncated {
-		t.Fatalf("negative flag, currency or truncation not passed through: %s", rec.Body.String())
+	if len(out.Items) != 1 || !out.Items[0].Negative || out.Items[0].Currency != "USD" || out.Items[0].Blocked != "2" || !out.Truncated {
+		t.Fatalf("negative flag, currency, blocked quantity or truncation not passed through: %s", rec.Body.String())
 	}
 }
 
@@ -405,8 +525,8 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		served[route+" "+strings.ToLower(method)] = true
 		return nil
 	})
-	if len(served) != 6 {
-		t.Fatalf("router walk yielded %d operations, want 6: %v", len(served), served)
+	if len(served) != 21 {
+		t.Fatalf("router walk yielded %d operations, want 21: %v", len(served), served)
 	}
 	declared := declaredOperations(string(spec))
 	for op := range served {

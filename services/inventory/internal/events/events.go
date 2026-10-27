@@ -4,25 +4,40 @@ package events
 
 // Event types (dev.passage.<context>.<entity>.<verb>.v<n>).
 const (
-	TransactionPosted = "dev.passage.inventory.transaction.posted.v1"
-	OnhandChanged     = "dev.passage.inventory.onhand.changed.v1"
-	JournalPosted     = "dev.passage.inventory.journal.posted.v1"
+	TransactionPosted   = "dev.passage.inventory.transaction.posted.v1"
+	OnhandChanged       = "dev.passage.inventory.onhand.changed.v1"
+	JournalPosted       = "dev.passage.inventory.journal.posted.v1"
+	ReservationCreated  = "dev.passage.inventory.reservation.created.v1"
+	ReservationReleased = "dev.passage.inventory.reservation.released.v1"
+	BlockingCreated     = "dev.passage.inventory.blocking.created.v1"
+	BlockingReleased    = "dev.passage.inventory.blocking.released.v1"
 )
 
 // All lists every event type the service publishes.
-func All() []string { return []string{TransactionPosted, OnhandChanged, JournalPosted} }
+func All() []string {
+	return []string{TransactionPosted, OnhandChanged, JournalPosted, ReservationCreated, ReservationReleased, BlockingCreated, BlockingReleased}
+}
 
-// BucketPosted is the on-hand bucket a journal posting moves: posted quantity
-// and value (financial statuses SOLD / PURCHASED).
-const BucketPosted = "POSTED"
+// On-hand buckets an onhand.changed event names as moved. BucketPosted is
+// posted quantity and value (financial statuses SOLD / PURCHASED), moved by
+// journals and by blocking legs; BucketReservedPhysical is moved by
+// reservations.
+const (
+	BucketPosted           = "POSTED"
+	BucketReservedPhysical = "RESERVED_PHYSICAL"
+)
 
 // TransactionPostedData is one inventory transaction written by a posting.
 // Cost amounts are signed, in Currency (the accounting currency), rounded to
-// its minor unit.
+// its minor unit. SourceType is the origin type (INVENT_JOURNAL_LINE,
+// BLOCKING); JournalID is set for journal lines and ReferenceID for the other
+// documents (the blocking id).
 type TransactionPostedData struct {
 	TransactionID      string            `json:"transactionId"`
 	LegalEntityID      string            `json:"legalEntityId"`
-	JournalID          string            `json:"journalId"`
+	SourceType         string            `json:"sourceType"`
+	JournalID          *string           `json:"journalId"`
+	ReferenceID        *string           `json:"referenceId"`
 	OriginID           string            `json:"originId"`
 	ProductID          string            `json:"productId"`
 	DimensionSet       map[string]string `json:"dimensionSet"`
@@ -66,4 +81,33 @@ type JournalPostedData struct {
 	LineCount     int          `json:"lineCount"`
 	GLLines       []GLLineData `json:"glLines"`
 	LedgerEntryID *string      `json:"ledgerEntryId"`
+}
+
+// ReservationData is the payload of both reservation events: one allocation
+// of a reservation request.
+type ReservationData struct {
+	ReservationID string            `json:"reservationId"`
+	LegalEntityID string            `json:"legalEntityId"`
+	ProductID     string            `json:"productId"`
+	DimensionSet  map[string]string `json:"dimensionSet"`
+	Qty           string            `json:"qty"`
+	DemandType    string            `json:"demandType"`
+	DemandID      string            `json:"demandId"`
+	Policy        string            `json:"policy"`
+	Status        string            `json:"status"`
+}
+
+// BlockingData is the payload of both blocking events. DimensionSet is the
+// unrestricted source; the blocked stock sits at the same dimensions with
+// inventory_status = targetStatus. Disposition is null while ACTIVE.
+type BlockingData struct {
+	BlockingID    string            `json:"blockingId"`
+	LegalEntityID string            `json:"legalEntityId"`
+	ProductID     string            `json:"productId"`
+	DimensionSet  map[string]string `json:"dimensionSet"`
+	Qty           string            `json:"qty"`
+	TargetStatus  string            `json:"targetStatus"`
+	Reason        string            `json:"reason"`
+	State         string            `json:"state"`
+	Disposition   *string           `json:"disposition"`
 }

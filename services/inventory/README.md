@@ -1,10 +1,13 @@
 # inventory
 
-Passage inventory service. Wave 16 (PSG-16), slice 1: the immutable inventory
+Passage inventory service. Wave 16 (PSG-16). Slice 1: the immutable inventory
 ledger, the dimension hash, the on-hand projection, inventory journals
 (MOVEMENT, ADJUSTMENT, OPENING_BALANCE) with synchronous posting, the negative
 stock policy, serial uniqueness, the journal list and the on-hand inquiry grouped
-by any dimension subset. The web screens live in `apps/web/src/modules/inventory`.
+by any dimension subset. Slice 2: reservations (MANUAL, FIFO, FEFO, LIFO),
+blocking and quarantine, cycle counting with tolerance approval and blind count
+(posted as COUNT journals), and the transaction inquiry. The web screens live in
+`apps/web/src/modules/inventory`.
 
 Requirements source: `docs/prd/phase-3-procure-to-pay.md` section 3.16.
 What is not in this slice is listed in `NOT-IMPLEMENTED.md`.
@@ -13,11 +16,14 @@ What is not in this slice is listed in `NOT-IMPLEMENTED.md`.
 
 ```
 cmd/inventory/            entrypoint: config, connect, migrate, router, admin port, serve
-internal/domain/          journal rules, valuation, status model, dimensions, on-hand buckets, FEFO (pure, no I/O)
-internal/store/           pgx repositories: journals, posting, on-hand projection (RLS-aware)
+internal/domain/          journal rules, valuation, status model, dimensions, on-hand buckets, FEFO,
+                          reservation, blocking and count rules (pure, no I/O)
+internal/store/           pgx repositories: journals, posting, on-hand projection, transactions,
+                          reservations, blockings, counts (RLS-aware)
 internal/api/             HTTP handlers, DTOs, validation, Problem responses
 internal/events/          event type constants and payloads
-migrations/               0001_inventory_ledger.sql (embedded, applied by dbx.Migrate)
+migrations/               0001 ledger, 0002 reservations and batch expiry, 0003 blocking and counts
+                          (embedded, applied by dbx.Migrate)
 api/openapi.yaml          OpenAPI 3.1 for every endpoint (parity is tested)
 events/asyncapi.yaml      AsyncAPI 3 for every event published (payload parity is tested)
 charts/inventory/         Helm chart (Deployment, Service, HPA, ServiceMonitor toggle)
@@ -33,6 +39,21 @@ charts/inventory/         Helm chart (Deployment, Service, HPA, ServiceMonitor t
 | POST | `/v1/inventory/journals/{id}/lines:bulk` | `inventory.journal.write` | InventoryJournalMaintain |
 | POST | `/v1/inventory/journals/{id}:post` | `inventory.journal.post` | InventoryJournalPost |
 | GET | `/v1/inventory/onhand` | `inventory.read` | InventoryInquire |
+| GET | `/v1/inventory/transactions` | `inventory.read` | InventoryInquire |
+| POST | `/v1/inventory/reservations` | `inventory.reservation.write` | InventoryReserve |
+| GET | `/v1/inventory/reservations` | `inventory.read` | InventoryInquire |
+| DELETE | `/v1/inventory/reservations/{id}` | `inventory.reservation.write` | InventoryReserve |
+| PUT | `/v1/inventory/batch-expiries/{productId}/{batchId}` | `inventory.batch.write` | (interim FEFO input until wave 8 batches) |
+| POST | `/v1/inventory/blockings` | `inventory.blocking.write` | InventoryBlock |
+| GET | `/v1/inventory/blockings` | `inventory.read` | InventoryInquire |
+| POST | `/v1/inventory/blockings/{id}:release` | `inventory.blocking.write` | InventoryBlock |
+| POST | `/v1/inventory/count-plans` | `inventory.count.write` | CycleCountMaintain |
+| GET | `/v1/inventory/count-plans` | `inventory.read` | InventoryInquire |
+| POST | `/v1/inventory/count-plans/{id}:generate` | `inventory.count.write` | CycleCountMaintain |
+| GET | `/v1/inventory/count-sheets` | `inventory.read` | InventoryInquire |
+| GET | `/v1/inventory/count-sheets/{id}` | `inventory.read` | InventoryInquire |
+| PUT | `/v1/inventory/count-sheets/{id}/lines/{lineId}` | `inventory.count.write` | CycleCountMaintain |
+| POST | `/v1/inventory/count-sheets/{id}:post` | `inventory.count.post` (+ `inventory.count.approve` above tolerance) | CycleCountPost / CycleCountApprove |
 
 Duty names follow the repository's `<context>.<entity>.<action>` convention; the
 right-hand column is the PRD 3.16.17 name each one stands for.
@@ -68,6 +89,54 @@ right-hand column is the PRD 3.16.17 name each one stands for.
 The on-hand primary key is (tenant, legal entity, product, dimension set), so legal
 entities that reuse dimension values never share stock.
 
+## Reservations (FR-16.7)
+
+`POST /reservations` locks every on-hand row of the product in the legal entity, in
+ascending dimension-set order (the order postings use), then allocates:
+
+- MANUAL reserves one named dimension set (site required) and fails with `INV-RES-001`
+  beyond its available physical quantity;
+- FIFO, FEFO and LIFO spread the quantity over the unrestricted rows that match the
+  dimension filter: FEFO by batch expiry (`batch_expiry`), then earliest receipt, then
+  batch id (BR-16.7), skipping batches that expire before `requiredDate +
+  shelfLifeMarginDays`; FIFO / LIFO by earliest receipt date of the dimension set.
+
+Each allocation is one `inventory_reservation` row and adds to the row's
+`reserved_physical`, which lowers `avail_physical`: postings, blockings and other
+reservations then cannot take that stock (they fail the negative check or
+`INV-RES-001`). Without `allowPartial` a shortfall rejects the request; with it the
+shortfall is returned. `DELETE /reservations/{id}` releases (idempotent). Events:
+`reservation.created` / `.released` per allocation and `onhand.changed` with
+`deltaBucket = RESERVED_PHYSICAL`.
+
+## Blocking and quarantine (FR-16.8, BR-16.10)
+
+`POST /blockings` moves a quantity from unrestricted stock (source dimensions with no
+`inventory_status`) to the same dimensions with `inventory_status` BLOCKED or
+QUARANTINE. The move is a SOLD issue at the source valued at its running average and a
+PURCHASED receipt at the blocked set for the same value (origin `BLOCKING`,
+`reference_number` = blocking id), written in one transaction under both row locks.
+Physical stock and value summed over the product do not change; both legs are on the
+inventory account, so there is no GL entry. Restricted rows are left out of
+`availPhysical` / `availOrdered` in the on-hand inquiry (reported as `blocked`), out of
+policy reservations and out of manual reservations (`INV-BLK-002`). Release moves the
+stock back the same way; a quarantine needs an explicit disposition (`INV-BLK-001`),
+and SCRAP / RETURN are not built yet (`INV-BLK-005`).
+
+## Cycle counting (FR-16.9, BR-16.8)
+
+A count plan names a legal entity, optionally a warehouse, the counting unit and
+currency, the tolerances (default 5 % and 100.00) and whether counts are blind.
+`:generate` snapshots one sheet line per on-hand row with physical stock. Counters enter
+quantities line by line (`If-Match` on the sheet version); on a blind sheet the expected
+quantity is withheld from callers without `inventory.count.approve` until it is posted.
+`:post` locks the counted rows in lock order, takes the variance against the book
+quantity at that moment, and refuses with 403 `INV-CNT-001` when any variance exceeds
+the percent or value tolerance and the caller cannot approve. The variances are then
+written as a COUNT journal (gains valued at the running average) and posted through the
+journal path, so the negative policy, GL entry (inventory against the adjustment account)
+and events are those of any journal.
+
 ## Run
 
 ```
@@ -101,7 +170,7 @@ They skip without `PASSAGE_TEST_DATABASE_URL`. Domain property tests use `pgrego
 | Code | Status | Meaning |
 |---|---|---|
 | `COM-0001` | 400 | Validation failure (field errors in `errors[]`), malformed body or cursor, or an invalid line rule |
-| `COM-0428` | 428 | `If-Match` (journal version) missing on `:post` |
+| `COM-0428` | 428 | `If-Match` (resource version) missing on `:post`, `:release` or a count entry |
 | `COM-0500` | 500 | Unexpected error (detail hidden) |
 | `AUTH-0001` | 401 | Missing or malformed tenant on the request |
 | `AUTH-0003` | 403 | Missing duty, or a legal entity outside the caller's scope |
@@ -117,7 +186,20 @@ They skip without `PASSAGE_TEST_DATABASE_URL`. Domain property tests use `pgrego
 | `INV-DIM-001` | 422 | Mandatory dimension (site) missing |
 | `INV-UOM-002` | 422 | Quantity has more decimals than the inventory unit allows (6) |
 | `INV-CUR-001` | 422 | Posting currency differs from the currency the on-hand row is valued in |
-| `conflict_version` | 412 | `If-Match` does not match the journal version |
+| `INV-RES-001` | 422 | Over-reservation: less available than requested (no `allowPartial`) |
+| `INV-RES-002` | 422 | FEFO reservation found no eligible batch |
+| `INV-RES-003` | 404 | Reservation id not found |
+| `INV-BLK-001` | 422 | Quarantine release without a disposition |
+| `INV-BLK-002` | 422 | Reservation of BLOCKED or QUARANTINE stock |
+| `INV-BLK-003` | 422 | Blocked quantity exceeds the available quantity at the source |
+| `INV-BLK-004` | 404 | Blocking id not found |
+| `INV-BLK-005` | 422 | Disposition SCRAP or RETURN (not supported yet) |
+| `INV-BLK-006` | 422 | Blocking is no longer active |
+| `INV-CNT-001` | 403 | Count variance above tolerance and the caller lacks `inventory.count.approve` |
+| `INV-CNT-003` | 422 | Count sheet is not OPEN |
+| `INV-CNT-004` | 404 | Count plan, sheet or line not found |
+| `INV-CNT-005` | 422 | Count sheet posted with no counted line |
+| `conflict_version` | 412 | `If-Match` does not match the journal, blocking or count sheet version |
 | `idempotency_key_reuse` | 422 | Idempotency-Key (or a line `clientKey`) reused with a different body |
 
 Problems are RFC 9457 `application/problem+json` with `type` =
@@ -125,7 +207,7 @@ Problems are RFC 9457 `application/problem+json` with `type` =
 
 ## Wave reference
 
-- Wave 16 / PSG-16 slice 1. Dependencies: wave 6 (sites, warehouses, UoM), wave 8
+- Wave 16 / PSG-16 slices 1 and 2. Dependencies: wave 6 (sites, warehouses, UoM), wave 8
   (products, dimension groups, item model groups), wave 11 (`Post(JournalEntry)`),
   wave 14 (period control), wave 4 (Temporal, outbox), wave 10 (migration framework).
 - Slice 1 posts synchronously in the request. The Temporal `PostInventoryJournal`

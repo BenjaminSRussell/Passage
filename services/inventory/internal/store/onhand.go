@@ -56,6 +56,9 @@ type OnHandRow struct {
 	AvailOrdered     decimal.Decimal
 	PostedValue      decimal.Decimal
 	ReservedPhysical decimal.Decimal
+	// Blocked is the physical quantity held with inventory status BLOCKED or
+	// QUARANTINE; it is part of PhysicalInvent and left out of the avail sums.
+	Blocked decimal.Decimal
 	// Currency of PostedValue. Every group is split by currency, so value
 	// totals never mix currencies (legal entities may keep different ones).
 	Currency string
@@ -93,13 +96,18 @@ func (s *Postgres) ListOnHand(ctx context.Context, f OnHandFilter) (OnHandResult
 	}
 	selects = append(selects, "coalesce(o.currency::text, '')")
 	positions = append(positions, fmt.Sprint(len(groups)+1))
+	// Blocked and quarantined rows count in physical stock but not in
+	// availability (FR-16.8, BR-16.10); their physical quantity is reported
+	// as blocked.
 	const phys = "o.posted_qty + o.received + o.registered - o.deducted - o.picked"
+	const restricted = "coalesce(d.dims->>'inventory_status', '') in ('BLOCKED', 'QUARANTINE')"
 	selects = append(selects,
 		"sum("+phys+")::text",
-		"sum("+phys+" - o.reserved_physical)::text",
-		"sum("+phys+" - o.reserved_physical + o.ordered + o.arrived - o.on_order - o.reserved_ordered)::text",
+		"coalesce(sum("+phys+" - o.reserved_physical) filter (where not "+restricted+"), 0)::text",
+		"coalesce(sum("+phys+" - o.reserved_physical + o.ordered + o.arrived - o.on_order - o.reserved_ordered) filter (where not "+restricted+"), 0)::text",
 		"sum(o.posted_value)::text",
 		"sum(o.reserved_physical)::text",
+		"coalesce(sum("+phys+") filter (where "+restricted+"), 0)::text",
 		"bool_or(("+phys+") < 0)",
 	)
 	q := fmt.Sprintf(`select %s from on_hand o
@@ -118,19 +126,20 @@ func (s *Postgres) ListOnHand(ctx context.Context, f OnHandFilter) (OnHandResult
 		defer rows.Close()
 		for rows.Next() {
 			g := make([]string, len(groups))
-			var currency, phys, avail, ordered, value, reserved string
+			var currency, phys, avail, ordered, value, reserved, blocked string
 			var negative bool
-			dest := make([]any, 0, len(groups)+7)
+			dest := make([]any, 0, len(groups)+8)
 			for i := range g {
 				dest = append(dest, &g[i])
 			}
-			dest = append(dest, &currency, &phys, &avail, &ordered, &value, &reserved, &negative)
+			dest = append(dest, &currency, &phys, &avail, &ordered, &value, &reserved, &blocked, &negative)
 			if err := rows.Scan(dest...); err != nil {
 				return err
 			}
 			r := OnHandRow{Group: map[string]string{}, PhysicalInvent: decimal.RequireFromString(phys),
 				AvailPhysical: decimal.RequireFromString(avail), AvailOrdered: decimal.RequireFromString(ordered),
-				PostedValue: decimal.RequireFromString(value), ReservedPhysical: decimal.RequireFromString(reserved), Currency: currency, Negative: negative}
+				PostedValue: decimal.RequireFromString(value), ReservedPhysical: decimal.RequireFromString(reserved), Blocked: decimal.RequireFromString(blocked),
+				Currency: currency, Negative: negative}
 			for i, name := range groups {
 				r.Group[name] = g[i]
 			}

@@ -1,9 +1,10 @@
 openapi: 3.1.0
 info:
   title: Passage Inventory
-  version: 0.16.1
+  version: 0.16.2
   description: |
-    Inventory journals, posting and the on-hand inquiry (wave 16, slice 1). Quantities and
+    Inventory journals, posting, the on-hand and transaction inquiries, reservations, blocking
+    and quarantine, and cycle counting (wave 16, slices 1 and 2). Quantities and
     money are decimal strings; money is in the journal (accounting) currency, rounded to its
     minor unit. Browser calls use /api/v1/inventory/..., which the web BFF rewrites to these paths.
 servers:
@@ -191,8 +192,447 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/transactions:
+    get:
+      operationId: listInventoryTransactions
+      summary: Transaction inquiry (FR-16.13), newest first
+      description: |
+        Inventory transactions with their origin. status matches the issue or the receipt status;
+        from and to bound the physical date (inclusive). journalId is set for journal lines,
+        reference (the blocking id) for blocking legs.
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: product, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/TransactionStatus' } }
+        - { name: sourceType, in: query, schema: { type: string, enum: [INVENT_JOURNAL_LINE, BLOCKING] } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of transactions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Transaction' }
+                  nextCursor: { type: string, format: uuid }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/reservations:
+    post:
+      operationId: createInventoryReservation
+      summary: Reserve stock manually or by FIFO, FEFO or LIFO policy (FR-16.7)
+      description: |
+        MANUAL reserves one exact dimension set (site required). FIFO, FEFO and LIFO spread the
+        quantity over the unrestricted dimension sets matching the dimension filter, in policy order
+        (FEFO: expiry, then receipt date, then batch id; batches expiring before requiredDate +
+        shelfLifeMarginDays are skipped, BR-16.7). Every on-hand row of the product is locked first.
+        Over-reservation is INV-RES-001 unless allowPartial, which returns the shortfall; a FEFO
+        request with no eligible batch is INV-RES-002; a BLOCKED or QUARANTINE dimension set is
+        INV-BLK-002. One reservation row is written per allocation. A repeated Idempotency-Key returns
+        the stored allocations (200, Idempotent-Replayed: true).
+      x-passage-duty: inventory.reservation.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReserveRequest' }
+      responses:
+        '201':
+          description: Reserved
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReserveResponse' }
+        '200':
+          description: Idempotent replay
+          headers:
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReserveResponse' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listInventoryReservations
+      summary: Reservation inquiry, newest first
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: product, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [ACTIVE, RELEASED, CONSUMED] } }
+        - { name: demandId, in: query, schema: { type: string } }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of reservations
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Reservation' }
+                  nextCursor: { type: string, format: uuid }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/reservations/{id}:
+    delete:
+      operationId: releaseInventoryReservation
+      summary: Release a reservation (idempotent)
+      description: An ACTIVE reservation returns its quantity to availability; any other is returned unchanged.
+      x-passage-duty: inventory.reservation.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Reservation after the release
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Reservation' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/batch-expiries/{productId}/{batchId}:
+    put:
+      operationId: putInventoryBatchExpiry
+      summary: Set a batch's expiry date, the FEFO input
+      description: Local copy of the wave 8 batch expiry until batch master data is published. null means the batch never expires.
+      x-passage-duty: inventory.batch.write
+      parameters:
+        - { name: productId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: batchId, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 60 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expiryDate]
+              properties:
+                expiryDate: { type: [string, 'null'], format: date }
+      responses:
+        '200':
+          description: Stored
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [productId, batchId, expiryDate]
+                properties:
+                  productId: { type: string, format: uuid }
+                  batchId: { type: string }
+                  expiryDate: { type: [string, 'null'], format: date }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/blockings:
+    post:
+      operationId: createInventoryBlocking
+      summary: Block or quarantine stock (FR-16.8)
+      description: |
+        Moves qty from unrestricted stock at the source dimensions (site required, no
+        inventory_status) to the same dimensions with inventory_status = targetStatus, as a SOLD
+        issue and a PURCHASED receipt valued at the source's running average (no GL effect: both
+        legs are on the inventory account). Physical stock is unchanged and availability drops
+        (BR-16.10). The quantity must be available physical stock at the source (INV-BLK-003).
+      x-passage-duty: inventory.blocking.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BlockingRequest' }
+      responses:
+        '201':
+          description: Blocked
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Blocking' }
+        '200':
+          description: Idempotent replay
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Blocking' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listInventoryBlockings
+      summary: Blocking and quarantine inquiry, newest first (at most 200)
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: state, in: query, schema: { type: string, enum: [ACTIVE, RELEASED] } }
+        - { name: product, in: query, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 200 } }
+      responses:
+        '200':
+          description: Blockings
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Blocking' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/blockings/{id}:release:
+    post:
+      operationId: releaseInventoryBlocking
+      summary: End a blocking with a disposition
+      description: |
+        RELEASE moves the quantity back to unrestricted stock. A QUARANTINE blocking must name its
+        disposition (INV-BLK-001); a BLOCKED one without a disposition is released. SCRAP and RETURN
+        are not supported yet (INV-BLK-005). Requires If-Match. A released blocking is returned unchanged.
+      x-passage-duty: inventory.blocking.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                disposition: { type: string, enum: [RELEASE, SCRAP, RETURN] }
+      responses:
+        '200':
+          description: Blocking after the release
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Blocking' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/count-plans:
+    post:
+      operationId: createInventoryCountPlan
+      summary: Create a cycle count plan (FR-16.9)
+      description: tolerancePct defaults to 5 and toleranceValue to 100 (3.16.13). warehouse is a warehouse dimension value; empty counts every warehouse of the legal entity.
+      x-passage-duty: inventory.count.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CountPlanRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CountPlan' }
+        '200':
+          description: Idempotent replay
+          headers:
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CountPlan' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listInventoryCountPlans
+      summary: List count plans, newest first (at most 200)
+      x-passage-duty: inventory.read
+      responses:
+        '200':
+          description: Count plans
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/CountPlan' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/count-plans/{id}:generate:
+    post:
+      operationId: generateInventoryCountSheet
+      summary: Generate an OPEN count sheet from the plan's current stock
+      description: One line per on-hand row with physical stock, expected at its physical quantity now. The Idempotency-Key makes a retry return the same sheet.
+      x-passage-duty: inventory.count.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: Sheet generated
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CountSheet' }
+        '200':
+          description: Idempotent replay
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CountSheet' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/count-sheets:
+    get:
+      operationId: listInventoryCountSheets
+      summary: List count sheet headers, newest first (at most 200)
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: planId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [OPEN, POSTED] } }
+      responses:
+        '200':
+          description: Count sheets (no lines)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/CountSheetSummary' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/count-sheets/{id}:
+    get:
+      operationId: getInventoryCountSheet
+      summary: Read a count sheet with its lines
+      description: While a blind sheet is OPEN, expectedQty is null for callers without inventory.count.approve.
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Count sheet
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CountSheet' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/count-sheets/{id}/lines/{lineId}:
+    put:
+      operationId: enterInventoryCount
+      summary: Record the counted quantity of one line of an OPEN sheet
+      description: Requires If-Match with the sheet version; each entry moves the version on. A later entry replaces an earlier one.
+      x-passage-duty: inventory.count.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: lineId, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [countedQty]
+              properties:
+                countedQty: { $ref: '#/components/schemas/Decimal' }
+      responses:
+        '200':
+          description: Sheet after the entry
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CountSheet' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/count-sheets/{id}:post:
+    post:
+      operationId: postInventoryCountSheet
+      summary: Post the counted variances as a COUNT journal (FR-16.9, BR-16.8)
+      description: |
+        Variance = counted minus the book quantity at posting (read under the row lock). A variance
+        above the plan tolerance (percent of book or value at the running average) needs a caller with
+        inventory.count.approve; otherwise 403 INV-CNT-001 and nothing is written. Uncounted lines are
+        skipped; a sheet with no counted line is INV-CNT-005. The COUNT journal posts like an
+        ADJUSTMENT (inventory against the adjustment account) with the negative policy applied.
+        Requires If-Match. Posting a POSTED sheet returns it unchanged.
+      x-passage-duty: inventory.count.post
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Sheet posted (or already posted)
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CountSheet' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
 components:
   parameters:
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+    Cursor:
+      name: cursor
+      in: query
+      description: nextCursor of the previous page
+      schema: { type: string, format: uuid }
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -202,7 +642,7 @@ components:
       name: If-Match
       in: header
       required: true
-      description: Journal version from the ETag of the last read
+      description: Version (journal, blocking or count sheet) from the ETag of the last read
       schema: { type: string }
     JournalId:
       name: id
@@ -211,9 +651,172 @@ components:
       schema: { type: string, format: uuid }
   headers:
     ETag:
-      description: Journal version, quoted
+      description: Resource version, quoted
       schema: { type: string }
   responses:
+    TransactionStatus:
+      type: string
+      enum: [ON_ORDER, RESERVED_ORDERED, RESERVED_PHYSICAL, PICKED, DEDUCTED, SOLD, ORDERED, ARRIVED, REGISTERED, RECEIVED, PURCHASED]
+    Transaction:
+      type: object
+      required: [id, legalEntityId, originId, sourceType, sourceId, productId, dimensions, qty, enteredQty, enteredUnit, physicalDate, currency, costAmountPhysical, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        originId: { type: string, format: uuid }
+        sourceType: { type: string, enum: [INVENT_JOURNAL_LINE, BLOCKING] }
+        sourceId: { type: string, format: uuid }
+        journalId: { type: string, format: uuid, description: Set for journal lines }
+        reference: { type: string, description: Source document of other origins (the blocking id) }
+        productId: { type: string, format: uuid }
+        dimensions: { $ref: '#/components/schemas/Dimensions' }
+        qty: { $ref: '#/components/schemas/Decimal' }
+        enteredQty: { $ref: '#/components/schemas/Decimal' }
+        enteredUnit: { type: string }
+        issueStatus: { $ref: '#/components/schemas/TransactionStatus' }
+        receiptStatus: { $ref: '#/components/schemas/TransactionStatus' }
+        physicalDate: { type: string, format: date }
+        financialDate: { type: string, format: date }
+        currency: { type: string }
+        costAmountPhysical: { $ref: '#/components/schemas/Decimal' }
+        costAmountPosted: { $ref: '#/components/schemas/Decimal' }
+        createdAt: { type: string, format: date-time }
+    ReserveRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, productId, qty, demandType, demandId]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        qty: { $ref: '#/components/schemas/Decimal' }
+        demandType: { type: string, enum: [MANUAL, SALES_ORDER, PRODUCTION_ORDER, TRANSFER_ORDER] }
+        demandId: { type: string, minLength: 1, maxLength: 60 }
+        policy: { type: string, enum: [MANUAL, FIFO, FEFO, LIFO], default: FIFO }
+        requiredDate: { type: string, format: date, description: Defaults to today (UTC) }
+        shelfLifeMarginDays: { type: integer, minimum: 0, maximum: 365, default: 0 }
+        allowPartial: { type: boolean, default: false }
+        dimensions: { $ref: '#/components/schemas/Dimensions', description: 'MANUAL: the exact dimension set. Policies: a filter (every named dimension must match).' }
+    Reservation:
+      type: object
+      required: [id, legalEntityId, productId, dimensions, qty, demandType, demandId, policy, status, allocationNo, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        dimensions: { $ref: '#/components/schemas/Dimensions' }
+        qty: { $ref: '#/components/schemas/Decimal' }
+        demandType: { type: string }
+        demandId: { type: string }
+        policy: { type: string, enum: [MANUAL, FIFO, FEFO, LIFO] }
+        status: { type: string, enum: [ACTIVE, RELEASED, CONSUMED] }
+        allocationNo: { type: integer, description: Position of this allocation within its request }
+        createdAt: { type: string, format: date-time }
+        releasedAt: { type: string, format: date-time }
+    ReserveResponse:
+      type: object
+      required: [items, shortfall]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Reservation' }
+        shortfall: { $ref: '#/components/schemas/Decimal', description: Quantity that could not be reserved (allowPartial) }
+    BlockingRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, productId, dimensions, qty, unit, targetStatus, reason]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        dimensions: { $ref: '#/components/schemas/Dimensions', description: Unrestricted source dimensions (site required, no inventory_status) }
+        qty: { $ref: '#/components/schemas/Decimal' }
+        unit: { type: string, pattern: '^[A-Z0-9_-]{1,12}$' }
+        targetStatus: { type: string, enum: [BLOCKED, QUARANTINE] }
+        reason: { type: string, enum: [QUALITY, DAMAGE, RECALL, LEGAL, OTHER] }
+        note: { type: string, maxLength: 500 }
+        physicalDate: { type: string, format: date, description: Defaults to today (UTC) }
+    Blocking:
+      type: object
+      required: [id, legalEntityId, productId, dimensions, qty, unit, targetStatus, reason, state, physicalDate, version]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        dimensions: { $ref: '#/components/schemas/Dimensions' }
+        qty: { $ref: '#/components/schemas/Decimal' }
+        unit: { type: string }
+        targetStatus: { type: string, enum: [BLOCKED, QUARANTINE] }
+        reason: { type: string }
+        note: { type: string }
+        state: { type: string, enum: [ACTIVE, RELEASED] }
+        disposition: { type: string, enum: [RELEASE, SCRAP, RETURN] }
+        physicalDate: { type: string, format: date }
+        version: { type: integer }
+    CountPlanRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, name, currency, unit]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        warehouse: { type: string, maxLength: 60 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        unit: { type: string, pattern: '^[A-Z0-9_-]{1,12}$' }
+        tolerancePct: { $ref: '#/components/schemas/Decimal' }
+        toleranceValue: { $ref: '#/components/schemas/Decimal' }
+        blind: { type: boolean, default: false }
+    CountPlan:
+      type: object
+      required: [id, legalEntityId, name, currency, unit, tolerancePct, toleranceValue, blind, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        name: { type: string }
+        warehouse: { type: string }
+        currency: { type: string }
+        unit: { type: string }
+        tolerancePct: { $ref: '#/components/schemas/Decimal' }
+        toleranceValue: { $ref: '#/components/schemas/Decimal' }
+        blind: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    CountSheetSummary:
+      type: object
+      required: [id, legalEntityId, planId, planName, number, status, blind, version, lineCount, countedCount, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        planId: { type: string, format: uuid }
+        planName: { type: string }
+        number: { type: string, description: 'CNT- number (the wave 5 sequence replaces it)' }
+        status: { type: string, enum: [OPEN, POSTED] }
+        blind: { type: boolean }
+        approvedBy: { type: string, description: User who approved a variance above tolerance }
+        journalId: { type: string, format: uuid, description: COUNT journal of a posted sheet with variances }
+        version: { type: integer }
+        lineCount: { type: integer }
+        countedCount: { type: integer }
+        createdAt: { type: string, format: date-time }
+        postedAt: { type: string, format: date-time }
+    CountSheet:
+      allOf:
+        - $ref: '#/components/schemas/CountSheetSummary'
+        - type: object
+          required: [lines]
+          properties:
+            lines:
+              type: array
+              items:
+                type: object
+                required: [id, lineNo, productId, dimensions, expectedQty, countedQty, postedVariance]
+                properties:
+                  id: { type: string, format: uuid }
+                  lineNo: { type: integer }
+                  productId: { type: string, format: uuid }
+                  dimensions: { $ref: '#/components/schemas/Dimensions' }
+                  expectedQty: { type: [string, 'null'], description: Book quantity at generation; null while a blind sheet is open (unless approver) }
+                  countedQty: { type: [string, 'null'] }
+                  countedBy: { type: string }
+                  countedAt: { type: string, format: date-time }
+                  postedVariance: { type: [string, 'null'], description: Counted minus book at posting }
     Problem:
       description: RFC 9457 problem details
       content:
@@ -222,7 +825,8 @@ components:
   schemas:
     JournalType:
       type: string
-      enum: [MOVEMENT, ADJUSTMENT, OPENING_BALANCE]
+      description: COUNT journals are created by count-sheet posting, never by POST /journals.
+      enum: [MOVEMENT, ADJUSTMENT, OPENING_BALANCE, COUNT]
     JournalStatus:
       type: string
       enum: [DRAFT, SUBMITTED, APPROVED, POSTING, POSTED, REJECTED, CANCELLED]
@@ -323,7 +927,7 @@ components:
             glEntry: { $ref: '#/components/schemas/GLEntry' }
     OnHandItem:
       type: object
-      required: [group, physicalInvent, availPhysical, availOrdered, postedValue, reservedPhysical, currency, negative]
+      required: [group, physicalInvent, availPhysical, availOrdered, postedValue, reservedPhysical, blocked, currency, negative]
       properties:
         group: { type: object, additionalProperties: { type: string } }
         physicalInvent: { $ref: '#/components/schemas/Decimal' }
@@ -331,6 +935,7 @@ components:
         availOrdered: { $ref: '#/components/schemas/Decimal' }
         postedValue: { $ref: '#/components/schemas/Decimal' }
         reservedPhysical: { $ref: '#/components/schemas/Decimal' }
+        blocked: { $ref: '#/components/schemas/Decimal', description: 'Physical quantity with inventory_status BLOCKED or QUARANTINE; part of physicalInvent, left out of availPhysical and availOrdered (FR-16.8)' }
         currency: { type: string }
         negative: { type: boolean, description: True when any row in the group has negative physical stock }
     Problem:

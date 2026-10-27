@@ -1,12 +1,12 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
-import { createJournal, describeProblem, JOURNAL_TYPES, type JournalType, type Problem } from "./api/client";
+import { createJournal, describeProblem, KEYED_JOURNAL_TYPES, type KeyedJournalType, type Problem } from "./api/client";
 import { today, typeLabels, UUID } from "./format";
 import styles from "./pages.module.css";
 
 interface Values {
-  journalType: JournalType;
+  journalType: KeyedJournalType;
   legalEntityId: string;
   postingDate: string;
   currency: string;
@@ -15,7 +15,7 @@ interface Values {
 
 type Errors = Partial<Record<keyof Values, string>>;
 
-const typeHints: Record<JournalType, string> = {
+const typeHints: Record<KeyedJournalType, string> = {
   MOVEMENT: "Receipts and issues against an offset account you choose.",
   ADJUSTMENT: "Stock corrections posted to the inventory adjustment account.",
   OPENING_BALANCE: "Initial stock posted against the migration clearing account.",
@@ -103,7 +103,7 @@ export function NewJournalPage() {
           <FormField id="journal-type" label="Journal type" hint={typeHints[values.journalType]}>
             {(control) => (
               <Select {...control} value={values.journalType} onChange={set("journalType")}>
-                {JOURNAL_TYPES.map((t) => (
+                {KEYED_JOURNAL_TYPES.map((t) => (
                   <option key={t} value={t}>
                     {typeLabels[t]}
                   </option>

@@ -3,8 +3,12 @@
 
 export const base = "/api/v1/inventory";
 
-export const JOURNAL_TYPES = ["MOVEMENT", "ADJUSTMENT", "OPENING_BALANCE"] as const;
+export const JOURNAL_TYPES = ["MOVEMENT", "ADJUSTMENT", "OPENING_BALANCE", "COUNT"] as const;
 export type JournalType = (typeof JOURNAL_TYPES)[number];
+
+/** Types a user creates directly; COUNT journals come from posted count sheets. */
+export const KEYED_JOURNAL_TYPES = ["MOVEMENT", "ADJUSTMENT", "OPENING_BALANCE"] as const;
+export type KeyedJournalType = (typeof KEYED_JOURNAL_TYPES)[number];
 
 export const JOURNAL_STATUSES = ["DRAFT", "SUBMITTED", "APPROVED", "POSTING", "POSTED", "REJECTED", "CANCELLED"] as const;
 export type JournalStatus = (typeof JOURNAL_STATUSES)[number];
@@ -59,7 +63,7 @@ export interface JournalPage {
 }
 
 export interface CreateJournalInput {
-  journalType: JournalType;
+  journalType: KeyedJournalType;
   legalEntityId: string;
   postingDate: string;
   currency: string;
@@ -81,6 +85,8 @@ export interface OnHandRow {
   availOrdered: string;
   postedValue: string;
   reservedPhysical: string;
+  /** Physical quantity held as BLOCKED or QUARANTINE; not in the available columns. */
+  blocked: string;
   currency: string;
   negative: boolean;
 }
@@ -222,4 +228,316 @@ export async function addLines(journalId: string, lines: LineInput[]): Promise<J
 /** Posts the journal at the version the screen shows (If-Match). */
 export async function postJournal(journalId: string, version: number): Promise<Journal> {
   return (await send<Journal>(`/journals/${encodeURIComponent(journalId)}:post`, { method: "POST", headers: { "If-Match": `"${version}"` } })).body;
+}
+
+// ---- Transaction inquiry (FR-16.13) ----
+
+export const TRANSACTION_STATUSES = [
+  "ON_ORDER",
+  "RESERVED_ORDERED",
+  "RESERVED_PHYSICAL",
+  "PICKED",
+  "DEDUCTED",
+  "SOLD",
+  "ORDERED",
+  "ARRIVED",
+  "REGISTERED",
+  "RECEIVED",
+  "PURCHASED",
+] as const;
+export type TransactionStatus = (typeof TRANSACTION_STATUSES)[number];
+
+export const SOURCE_TYPES = ["INVENT_JOURNAL_LINE", "BLOCKING"] as const;
+export type SourceType = (typeof SOURCE_TYPES)[number];
+
+export interface Transaction {
+  id: string;
+  legalEntityId: string;
+  originId: string;
+  sourceType: SourceType;
+  sourceId: string;
+  journalId?: string;
+  reference?: string;
+  productId: string;
+  dimensions: Partial<Record<string, string>>;
+  qty: string;
+  enteredQty: string;
+  enteredUnit: string;
+  issueStatus?: TransactionStatus;
+  receiptStatus?: TransactionStatus;
+  physicalDate: string;
+  financialDate?: string;
+  currency: string;
+  costAmountPhysical: string;
+  costAmountPosted?: string;
+  createdAt: string;
+}
+
+export interface Page<T> {
+  items: T[];
+  nextCursor?: string;
+}
+
+export interface TransactionQuery {
+  product?: string;
+  status?: TransactionStatus | "";
+  sourceType?: SourceType | "";
+  from?: string;
+  to?: string;
+  cursor?: string;
+}
+
+function query(params: Record<string, string | undefined>): string {
+  const out = new URLSearchParams();
+  for (const [name, value] of Object.entries(params)) {
+    const v = value?.trim();
+    if (v) out.set(name, v);
+  }
+  const qs = out.toString();
+  return qs ? `?${qs}` : "";
+}
+
+export async function listTransactions(q: TransactionQuery = {}, signal?: AbortSignal): Promise<Page<Transaction>> {
+  const { body } = await send<Page<Transaction>>(`/transactions${query({ ...q })}`, {}, signal);
+  return { items: body.items ?? [], nextCursor: body.nextCursor };
+}
+
+// ---- Reservations (FR-16.7) ----
+
+export const RESERVATION_POLICIES = ["FIFO", "FEFO", "LIFO", "MANUAL"] as const;
+export type ReservationPolicy = (typeof RESERVATION_POLICIES)[number];
+
+export const DEMAND_TYPES = ["SALES_ORDER", "PRODUCTION_ORDER", "TRANSFER_ORDER", "MANUAL"] as const;
+export type DemandType = (typeof DEMAND_TYPES)[number];
+
+export const RESERVATION_STATUSES = ["ACTIVE", "RELEASED", "CONSUMED"] as const;
+export type ReservationStatus = (typeof RESERVATION_STATUSES)[number];
+
+export interface Reservation {
+  id: string;
+  legalEntityId: string;
+  productId: string;
+  dimensions: Partial<Record<string, string>>;
+  qty: string;
+  demandType: DemandType;
+  demandId: string;
+  policy: ReservationPolicy;
+  status: ReservationStatus;
+  allocationNo: number;
+  createdAt: string;
+  releasedAt?: string;
+}
+
+export interface ReserveInput {
+  legalEntityId: string;
+  productId: string;
+  qty: string;
+  demandType: DemandType;
+  demandId: string;
+  policy: ReservationPolicy;
+  requiredDate?: string;
+  shelfLifeMarginDays?: number;
+  allowPartial?: boolean;
+  dimensions: Partial<Record<string, string>>;
+}
+
+export interface ReserveResult {
+  items: Reservation[];
+  shortfall: string;
+}
+
+export interface ReservationQuery {
+  product?: string;
+  status?: ReservationStatus | "";
+  demandId?: string;
+  cursor?: string;
+}
+
+function cleanDimensions(dims: Partial<Record<string, string>>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(dims)) {
+    if (value && value.trim() !== "") out[name] = value.trim();
+  }
+  return out;
+}
+
+/** Reserves stock; the key makes a retried submit replay instead of reserving twice. */
+export async function createReservation(input: ReserveInput, key: string = newKey()): Promise<ReserveResult> {
+  const body = { ...input, dimensions: cleanDimensions(input.dimensions) };
+  if (!body.requiredDate) delete body.requiredDate;
+  const { body: out } = await send<ReserveResult>("/reservations", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) });
+  return { items: out.items ?? [], shortfall: out.shortfall ?? "0" };
+}
+
+export async function listReservations(q: ReservationQuery = {}, signal?: AbortSignal): Promise<Page<Reservation>> {
+  const { body } = await send<Page<Reservation>>(`/reservations${query({ ...q })}`, {}, signal);
+  return { items: body.items ?? [], nextCursor: body.nextCursor };
+}
+
+export async function releaseReservation(id: string): Promise<Reservation> {
+  return (await send<Reservation>(`/reservations/${encodeURIComponent(id)}`, { method: "DELETE" })).body;
+}
+
+// ---- Blocking and quarantine (FR-16.8) ----
+
+export const BLOCK_TARGETS = ["BLOCKED", "QUARANTINE"] as const;
+export type BlockTarget = (typeof BLOCK_TARGETS)[number];
+
+export const BLOCK_REASONS = ["QUALITY", "DAMAGE", "RECALL", "LEGAL", "OTHER"] as const;
+export type BlockReason = (typeof BLOCK_REASONS)[number];
+
+export type BlockingState = "ACTIVE" | "RELEASED";
+
+export interface Blocking {
+  id: string;
+  legalEntityId: string;
+  productId: string;
+  dimensions: Partial<Record<string, string>>;
+  qty: string;
+  unit: string;
+  targetStatus: BlockTarget;
+  reason: BlockReason;
+  note?: string;
+  state: BlockingState;
+  disposition?: "RELEASE" | "SCRAP" | "RETURN";
+  physicalDate: string;
+  version: number;
+}
+
+export interface BlockInput {
+  legalEntityId: string;
+  productId: string;
+  dimensions: Partial<Record<string, string>>;
+  qty: string;
+  unit: string;
+  targetStatus: BlockTarget;
+  reason: BlockReason;
+  note?: string;
+  physicalDate?: string;
+}
+
+export async function createBlocking(input: BlockInput, key: string = newKey()): Promise<Blocking> {
+  const body = { ...input, dimensions: cleanDimensions(input.dimensions) };
+  if (!body.note) delete body.note;
+  if (!body.physicalDate) delete body.physicalDate;
+  return (await send<Blocking>("/blockings", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) })).body;
+}
+
+export async function listBlockings(state: BlockingState | "" = "", signal?: AbortSignal): Promise<Blocking[]> {
+  const { body } = await send<{ items?: Blocking[] }>(`/blockings${query({ state })}`, {}, signal);
+  return body.items ?? [];
+}
+
+/** Releases a blocking back to available stock at the version the screen shows (If-Match). */
+export async function releaseBlocking(id: string, version: number): Promise<Blocking> {
+  return (
+    await send<Blocking>(`/blockings/${encodeURIComponent(id)}:release`, {
+      method: "POST",
+      headers: { "If-Match": `"${version}"` },
+      body: JSON.stringify({ disposition: "RELEASE" }),
+    })
+  ).body;
+}
+
+// ---- Cycle counting (FR-16.9) ----
+
+export type CountSheetStatus = "OPEN" | "POSTED";
+
+export interface CountPlan {
+  id: string;
+  legalEntityId: string;
+  name: string;
+  warehouse?: string;
+  currency: string;
+  unit: string;
+  tolerancePct: string;
+  toleranceValue: string;
+  blind: boolean;
+  createdAt: string;
+}
+
+export interface CountPlanInput {
+  legalEntityId: string;
+  name: string;
+  warehouse?: string;
+  currency: string;
+  unit: string;
+  tolerancePct?: string;
+  toleranceValue?: string;
+  blind: boolean;
+}
+
+export interface CountSheetSummary {
+  id: string;
+  legalEntityId: string;
+  planId: string;
+  planName: string;
+  number: string;
+  status: CountSheetStatus;
+  blind: boolean;
+  approvedBy?: string;
+  journalId?: string;
+  version: number;
+  lineCount: number;
+  countedCount: number;
+  createdAt: string;
+  postedAt?: string;
+}
+
+export interface CountLine {
+  id: string;
+  lineNo: number;
+  productId: string;
+  dimensions: Partial<Record<string, string>>;
+  /** Null while a blind sheet is open and the reader cannot approve. */
+  expectedQty: string | null;
+  countedQty: string | null;
+  countedBy?: string;
+  countedAt?: string;
+  postedVariance: string | null;
+}
+
+export interface CountSheet extends CountSheetSummary {
+  lines: CountLine[];
+}
+
+export async function createCountPlan(input: CountPlanInput, key: string = newKey()): Promise<CountPlan> {
+  const body: Record<string, unknown> = { ...input };
+  for (const name of ["warehouse", "tolerancePct", "toleranceValue"] as const) {
+    if (!input[name] || input[name]?.trim() === "") delete body[name];
+  }
+  return (await send<CountPlan>("/count-plans", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) })).body;
+}
+
+export async function listCountPlans(signal?: AbortSignal): Promise<CountPlan[]> {
+  const { body } = await send<{ items?: CountPlan[] }>("/count-plans", {}, signal);
+  return body.items ?? [];
+}
+
+export async function generateCountSheet(planId: string, key: string = newKey()): Promise<CountSheet> {
+  return (await send<CountSheet>(`/count-plans/${encodeURIComponent(planId)}:generate`, { method: "POST", headers: { "Idempotency-Key": key } })).body;
+}
+
+export async function listCountSheets(q: { planId?: string; status?: CountSheetStatus | "" } = {}, signal?: AbortSignal): Promise<CountSheetSummary[]> {
+  const { body } = await send<{ items?: CountSheetSummary[] }>(`/count-sheets${query({ ...q })}`, {}, signal);
+  return body.items ?? [];
+}
+
+export async function getCountSheet(id: string, signal?: AbortSignal): Promise<CountSheet> {
+  return (await send<CountSheet>(`/count-sheets/${encodeURIComponent(id)}`, {}, signal)).body;
+}
+
+/** Records one counted quantity at the sheet version the screen shows (If-Match). */
+export async function enterCount(sheetId: string, lineId: string, version: number, countedQty: string): Promise<CountSheet> {
+  return (
+    await send<CountSheet>(`/count-sheets/${encodeURIComponent(sheetId)}/lines/${encodeURIComponent(lineId)}`, {
+      method: "PUT",
+      headers: { "If-Match": `"${version}"` },
+      body: JSON.stringify({ countedQty }),
+    })
+  ).body;
+}
+
+export async function postCountSheet(sheetId: string, version: number): Promise<CountSheet> {
+  return (await send<CountSheet>(`/count-sheets/${encodeURIComponent(sheetId)}:post`, { method: "POST", headers: { "If-Match": `"${version}"` } })).body;
 }

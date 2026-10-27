@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
@@ -19,15 +20,21 @@ import (
 	invevents "github.com/BenjaminSRussell/passage/services/inventory/internal/events"
 )
 
+// Origin source types written by this service.
+const (
+	sourceJournalLine = "INVENT_JOURNAL_LINE"
+	sourceBlocking    = "BLOCKING"
+)
+
 // PostParams are the posting-profile and policy inputs of a journal post.
 type PostParams struct {
 	Negative          domain.NegativePolicy
 	InventoryAccount  string
-	AdjustmentAccount string // offset for ADJUSTMENT journals
+	AdjustmentAccount string // offset for ADJUSTMENT and COUNT journals
 	OpeningAccount    string // offset (migration clearing) for OPENING_BALANCE journals
 }
 
-// row is one projection row touched by a journal: the indexes of its plan
+// row is one projection row touched by a posting: the indexes of its plan
 // lines (in line order) and the projection state before and after the posting.
 type row struct {
 	product string
@@ -37,10 +44,24 @@ type row struct {
 	before  domain.OnHand
 	oh      domain.OnHand
 	seq     int64
+	// currency the row is valued in; empty for a row never valued.
+	currency string
 }
 
 // rowKey orders rows by product, then dimension hash, the lock order of BR-16.4.
 func rowKey(product string, hash []byte) string { return product + "|" + string(hash) }
+
+// document describes what a set of transactions belongs to: the legal entity,
+// the accounting currency, the physical and financial date, the origin source
+// type, and the journal or reference id carried on the events.
+type document struct {
+	legalEntityID string
+	currency      string
+	date          time.Time
+	sourceType    string
+	journalID     string // set for journal lines
+	referenceID   string // set for other documents (blocking id)
+}
 
 // PostJournal posts a DRAFT or APPROVED journal in one transaction: it locks the
 // projection rows in ascending order, values each line (receipts at their cost
@@ -70,58 +91,94 @@ func (s *Postgres) PostJournal(ctx context.Context, id string, version int, p Po
 		if j.Status != domain.JournalDraft && j.Status != domain.JournalApproved {
 			return problem(http.StatusConflict, CodeJournalState, "journal cannot be posted from status "+string(j.Status))
 		}
-		if err := domain.ValidateJournal(j, s.rules); err != nil {
-			return domainProblem(err)
-		}
-		offset := j.OffsetAccountID
-		switch j.Type {
-		case domain.JournalAdjustment:
-			offset = p.AdjustmentAccount
-		case domain.JournalOpeningBalance:
-			offset = p.OpeningAccount
-		}
-		plan := domain.PlanPosting(j)
-		rows, order, err := groupRows(plan)
-		if err != nil {
-			return err
-		}
-		serials := receiptSerials(plan)
-		if err := lockSerials(ctx, tx, tp.TenantID, j.LegalEntityID, serials); err != nil {
-			return err
-		}
-		for _, k := range order {
-			if err := lockAndApply(ctx, tx, tp.TenantID, j, rows[k], plan, p.Negative); err != nil {
-				return err
-			}
-		}
-		if err := checkSerials(ctx, tx, tp.TenantID, j.LegalEntityID, serials); err != nil {
-			return err
-		}
-		entry, err := domain.BuildEntry(plan, p.InventoryAccount, offset, j.Currency)
-		if err != nil {
-			return err
-		}
-		if !entry.Balanced() {
-			return errors.New("inventory: journal entry does not balance")
-		}
-		if err := writeTransactions(ctx, tx, tp.TenantID, j, plan, rows, order); err != nil {
-			return err
-		}
-		glJSON, err := json.Marshal(entry)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `update inventory_journal set status = 'POSTED', gl_entry = $3, posted_at = now(), version = version + 1, updated_at = now()
-			where tenant_id = $1 and id = $2`, tp.TenantID, id, glJSON); err != nil {
-			return err
-		}
-		if err := enqueue(ctx, tx, "journal", id, invevents.JournalPosted, tp.TenantID, journalPosted(j, entry)); err != nil {
+		if err := s.postLoaded(ctx, tx, tp.TenantID, j, p); err != nil {
 			return err
 		}
 		out, err = loadJournal(ctx, tx, id, false)
 		return err
 	})
 	return out, err
+}
+
+// postLoaded posts a journal already read (and locked) in tx: validation,
+// row locks, valuation, negative and serial checks, transactions, the GL
+// entry, the POSTED status and the events. Count sheets reuse it for their
+// COUNT journal.
+func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j domain.Journal, p PostParams) error {
+	if err := domain.ValidateJournal(j, s.rules); err != nil {
+		return domainProblem(err)
+	}
+	offset := j.OffsetAccountID
+	switch j.Type {
+	case domain.JournalAdjustment, domain.JournalCount:
+		offset = p.AdjustmentAccount
+	case domain.JournalOpeningBalance:
+		offset = p.OpeningAccount
+	}
+	plan := domain.PlanPosting(j)
+	rows, order, err := groupRows(plan)
+	if err != nil {
+		return err
+	}
+	serials := receiptSerials(plan)
+	if err := lockSerials(ctx, tx, tenantID, j.LegalEntityID, serials); err != nil {
+		return err
+	}
+	for _, k := range order {
+		r := rows[k]
+		if err := lockRow(ctx, tx, tenantID, j.LegalEntityID, j.Currency, r); err != nil {
+			return err
+		}
+		for _, i := range r.lines {
+			l := plan[i].Line
+			if l.Qty.Sign() > 0 {
+				plan[i].Value = domain.ReceiptValue(l.Qty, l.CostPrice, j.Currency)
+			} else {
+				plan[i].Value = r.oh.IssueValue(l.Qty, l.CostPrice, j.Currency)
+			}
+			if err := r.oh.Post(plan[i].Status, l.Qty, plan[i].Value, 1); err != nil {
+				return err
+			}
+		}
+		if err := checkNegative(r, p.Negative); err != nil {
+			return err
+		}
+		r.currency = j.Currency
+		if err := saveRow(ctx, tx, tenantID, j.LegalEntityID, r, len(r.lines)); err != nil {
+			return err
+		}
+	}
+	if err := checkSerials(ctx, tx, tenantID, j.LegalEntityID, serials); err != nil {
+		return err
+	}
+	entry, err := domain.BuildEntry(plan, p.InventoryAccount, offset, j.Currency)
+	if err != nil {
+		return err
+	}
+	if !entry.Balanced() {
+		return errors.New("inventory: journal entry does not balance")
+	}
+	doc := document{legalEntityID: j.LegalEntityID, currency: j.Currency, date: j.PostingDate, sourceType: sourceJournalLine, journalID: j.ID}
+	for _, k := range order {
+		r := rows[k]
+		for _, i := range r.lines {
+			if _, err := writeTransaction(ctx, tx, tenantID, doc, plan[i].Line.ID, r, plan[i]); err != nil {
+				return err
+			}
+		}
+		if err := enqueueOnHand(ctx, tx, tenantID, j.LegalEntityID, r, invevents.BucketPosted, r.oh.PostedQty.Sub(r.before.PostedQty)); err != nil {
+			return err
+		}
+	}
+	glJSON, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `update inventory_journal set status = 'POSTED', gl_entry = $3, posted_at = now(), version = version + 1, updated_at = now()
+		where tenant_id = $1 and id = $2`, tenantID, j.ID, glJSON); err != nil {
+		return err
+	}
+	return enqueue(ctx, tx, "journal", j.ID, invevents.JournalPosted, tenantID, journalPosted(j, entry))
 }
 
 // groupRows collects the plan into projection rows, sorted by lock key.
@@ -199,66 +256,77 @@ func checkSerials(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID string
 	return nil
 }
 
-// lockAndApply locks one projection row, values and applies the row's lines in
-// line order, and checks the negative policy while the lock is held (FR-16.4,
-// BR-16.4). Issue values come from the locked row, so concurrent issues see a
-// consistent running average.
-func lockAndApply(ctx context.Context, tx pgx.Tx, tenantID string, j domain.Journal, r *row, plan []domain.PostedLine, neg domain.NegativePolicy) error {
+// onHandColumns are the projection columns read under lock, in onHandFrom order.
+const onHandColumns = `posted_qty::text, posted_value::text, received::text, registered::text, arrived::text, ordered::text,
+	deducted::text, picked::text, reserved_physical::text, reserved_ordered::text, on_order::text`
+
+// lockRow makes sure the projection row exists, then reads it under FOR UPDATE
+// into r.before and r.oh (BR-16.4). A row valued in a currency other than
+// currency is rejected (INV-CUR-001); an empty currency accepts any and leaves
+// the row's own in r.currency. Callers lock rows in rowKey order.
+func lockRow(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID, currency string, r *row) error {
 	if _, _, err := upsertDimensionSet(ctx, tx, tenantID, r.dims); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `insert into on_hand (tenant_id, legal_entity_id, product_id, dimension_set_hash, currency) values ($1, $2, $3, $4, $5)
-		on conflict do nothing`, tenantID, j.LegalEntityID, r.product, r.hash, j.Currency); err != nil {
+	if _, err := tx.Exec(ctx, `insert into on_hand (tenant_id, legal_entity_id, product_id, dimension_set_hash) values ($1, $2, $3, $4)
+		on conflict do nothing`, tenantID, legalEntityID, r.product, r.hash); err != nil {
 		return scopeProblem(err)
 	}
 	var b [11]string
-	var currency *string
+	var cur *string
 	dest := make([]any, 0, 13)
 	for i := range b {
 		dest = append(dest, &b[i])
 	}
-	dest = append(dest, &currency, &r.seq)
-	if err := tx.QueryRow(ctx, `select posted_qty::text, posted_value::text, received::text, registered::text, arrived::text, ordered::text,
-		deducted::text, picked::text, reserved_physical::text, reserved_ordered::text, on_order::text, currency::text, last_txn_seq
+	dest = append(dest, &cur, &r.seq)
+	if err := tx.QueryRow(ctx, `select `+onHandColumns+`, currency::text, last_txn_seq
 		from on_hand where tenant_id = $1 and legal_entity_id = $2 and product_id = $3 and dimension_set_hash = $4 for update`,
-		tenantID, j.LegalEntityID, r.product, r.hash).Scan(dest...); err != nil {
+		tenantID, legalEntityID, r.product, r.hash).Scan(dest...); err != nil {
 		return err
 	}
-	if currency != nil && *currency != j.Currency {
+	if cur != nil && currency != "" && *cur != currency {
 		return problem(http.StatusUnprocessableEntity, CodeCurrencyMismatch,
-			fmt.Sprintf("on-hand for product %s at %s is valued in %s; the journal is in %s", r.product, describeDims(r.dims), *currency, j.Currency))
+			fmt.Sprintf("on-hand for product %s at %s is valued in %s; the posting is in %s", r.product, describeDims(r.dims), *cur, currency))
+	}
+	r.currency = currency
+	if cur != nil {
+		r.currency = *cur
 	}
 	r.before = onHandFrom(b)
 	r.oh = r.before
-	for _, i := range r.lines {
-		l := plan[i].Line
-		if l.Qty.Sign() > 0 {
-			plan[i].Value = domain.ReceiptValue(l.Qty, l.CostPrice, j.Currency)
-		} else {
-			plan[i].Value = r.oh.IssueValue(l.Qty, l.CostPrice, j.Currency)
-		}
-		if err := r.oh.Post(plan[i].Status, l.Qty, plan[i].Value, 1); err != nil {
-			return err
-		}
-	}
-	if err := r.oh.CheckNegative(r.before, neg); err != nil {
-		var ne *domain.NegativeError
-		if errors.As(err, &ne) {
-			what := "available physical"
-			if ne.Code == domain.CodeNegativeFinancial {
-				what = "financial (ordered)"
-			}
-			return problem(http.StatusUnprocessableEntity, ne.Code,
-				fmt.Sprintf("issue would make %s stock negative for product %s at %s (shortfall %s)", what, r.product, describeDims(r.dims), ne.Shortfall))
-		}
+	return nil
+}
+
+// checkNegative applies the negative policy to a row after its deltas
+// (FR-16.4), turning a violation into INV-NEG-001 / INV-NEG-002.
+func checkNegative(r *row, neg domain.NegativePolicy) error {
+	err := r.oh.CheckNegative(r.before, neg)
+	var ne *domain.NegativeError
+	if !errors.As(err, &ne) {
 		return err
 	}
+	what := "available physical"
+	if ne.Code == domain.CodeNegativeFinancial {
+		what = "financial (ordered)"
+	}
+	return problem(http.StatusUnprocessableEntity, ne.Code,
+		fmt.Sprintf("issue would make %s stock negative for product %s at %s (shortfall %s)", what, r.product, describeDims(r.dims), ne.Shortfall))
+}
+
+// saveRow writes r.oh back to the locked row; txns is the number of
+// transactions it absorbed (last_txn_seq moves by that much).
+func saveRow(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID string, r *row, txns int) error {
+	var currency *string
+	if r.currency != "" {
+		currency = &r.currency
+	}
 	_, err := tx.Exec(ctx, `update on_hand set posted_qty = $5, posted_value = $6, received = $7, registered = $8, arrived = $9, ordered = $10,
-		deducted = $11, picked = $12, reserved_physical = $13, reserved_ordered = $14, on_order = $15, currency = $16, last_txn_seq = $17, updated_at = now()
+		deducted = $11, picked = $12, reserved_physical = $13, reserved_ordered = $14, on_order = $15, currency = coalesce($16, currency),
+		last_txn_seq = $17, updated_at = now()
 		where tenant_id = $1 and legal_entity_id = $2 and product_id = $3 and dimension_set_hash = $4`,
-		tenantID, j.LegalEntityID, r.product, r.hash, r.oh.PostedQty.String(), r.oh.PostedValue.String(), r.oh.Received.String(), r.oh.Registered.String(),
+		tenantID, legalEntityID, r.product, r.hash, r.oh.PostedQty.String(), r.oh.PostedValue.String(), r.oh.Received.String(), r.oh.Registered.String(),
 		r.oh.Arrived.String(), r.oh.Ordered.String(), r.oh.Deducted.String(), r.oh.Picked.String(), r.oh.ReservedPhysical.String(),
-		r.oh.ReservedOrdered.String(), r.oh.OnOrder.String(), j.Currency, r.seq+int64(len(r.lines)))
+		r.oh.ReservedOrdered.String(), r.oh.OnOrder.String(), currency, r.seq+int64(txns))
 	return err
 }
 
@@ -276,67 +344,59 @@ func describeDims(d domain.Dimensions) string {
 	return strings.Join(parts, ", ")
 }
 
-// writeTransactions inserts one origin and one transaction per journal line and
-// enqueues the transaction and on-hand events in the same transaction.
-func writeTransactions(ctx context.Context, tx pgx.Tx, tenantID string, j domain.Journal, plan []domain.PostedLine, rows map[string]*row, order []string) error {
-	for _, k := range order {
-		r := rows[k]
-		for _, i := range r.lines {
-			if err := writeTransaction(ctx, tx, tenantID, j, r, plan[i]); err != nil {
-				return err
-			}
-		}
-	}
-	for _, k := range order {
-		r := rows[k]
-		delta := decimal.Zero
-		for _, i := range r.lines {
-			delta = delta.Add(plan[i].Line.Qty)
-		}
-		if err := enqueue(ctx, tx, "onhand", r.product, invevents.OnhandChanged, tenantID, invevents.OnhandChangedData{
-			LegalEntityID: j.LegalEntityID, ProductID: r.product, DimensionSet: map[string]string(r.dims),
-			AvailPhysical: r.oh.AvailPhysical().String(), AvailOrdered: r.oh.AvailOrdered().String(), PhysicalInvent: r.oh.PhysicalInvent().String(),
-			DeltaBucket: invevents.BucketPosted, DeltaQty: delta.String(),
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
+// enqueueOnHand emits onhand.changed for a row after a change of deltaQty in
+// bucket.
+func enqueueOnHand(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID string, r *row, bucket string, deltaQty decimal.Decimal) error {
+	return enqueue(ctx, tx, "onhand", r.product, invevents.OnhandChanged, tenantID, invevents.OnhandChangedData{
+		LegalEntityID: legalEntityID, ProductID: r.product, DimensionSet: map[string]string(r.dims),
+		AvailPhysical: r.oh.AvailPhysical().String(), AvailOrdered: r.oh.AvailOrdered().String(), PhysicalInvent: r.oh.PhysicalInvent().String(),
+		DeltaBucket: bucket, DeltaQty: deltaQty.String(),
+	})
 }
 
-// writeTransaction inserts the origin and the transaction for one journal line
-// and enqueues the transaction event.
-func writeTransaction(ctx context.Context, tx pgx.Tx, tenantID string, j domain.Journal, r *row, pl domain.PostedLine) error {
+// writeTransaction inserts the origin (sourceID under doc.sourceType) and the
+// transaction for one planned line, and enqueues the transaction event. It
+// returns the transaction id.
+func writeTransaction(ctx context.Context, tx pgx.Tx, tenantID string, doc document, sourceID string, r *row, pl domain.PostedLine) (string, error) {
 	originID, txnID := ids.New(), ids.New()
-	direction := string(domain.ReceiptDirection)
-	if pl.Status == domain.StatusSold {
-		direction = string(domain.IssueDirection)
+	dir, err := domain.DirectionFor(pl.Status)
+	if err != nil {
+		return "", err
 	}
-	if _, err := tx.Exec(ctx, `insert into inventory_transaction_origin (tenant_id, legal_entity_id, id, source_type, source_id, product_id, direction)
-		values ($1, $2, $3, 'INVENT_JOURNAL_LINE', $4, $5, $6)`, tenantID, j.LegalEntityID, originID, pl.Line.ID, r.product, direction); err != nil {
-		return err
+	var reference *string
+	if doc.referenceID != "" {
+		reference = &doc.referenceID
+	}
+	if _, err := tx.Exec(ctx, `insert into inventory_transaction_origin (tenant_id, legal_entity_id, id, source_type, source_id, product_id, reference_number, direction)
+		values ($1, $2, $3, $4, $5, $6, $7, $8)`, tenantID, doc.legalEntityID, originID, doc.sourceType, sourceID, r.product, reference, string(dir)); err != nil {
+		return "", err
 	}
 	status := string(pl.Status)
 	var issue, receipt *string
-	if direction == string(domain.IssueDirection) {
+	if dir == domain.IssueDirection {
 		issue = &status
 	} else {
 		receipt = &status
 	}
 	value := pl.Value.String()
-	posting := j.PostingDate.Format(dateLayout)
+	date := doc.date.Format(dateLayout)
 	if _, err := tx.Exec(ctx, `insert into inventory_transaction (tenant_id, legal_entity_id, id, origin_id, product_id, dimension_set_hash, qty, entered_qty,
 		entered_unit, issue_status, receipt_status, physical_date, financial_date, currency, cost_amount_physical, cost_amount_posted)
 		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12, $13, $14, $14)`,
-		tenantID, j.LegalEntityID, txnID, originID, r.product, r.hash, pl.Line.Qty.String(), pl.Line.EnteredQty.String(), pl.Line.EnteredUnit,
-		issue, receipt, posting, j.Currency, value); err != nil {
-		return err
+		tenantID, doc.legalEntityID, txnID, originID, r.product, r.hash, pl.Line.Qty.String(), pl.Line.EnteredQty.String(), pl.Line.EnteredUnit,
+		issue, receipt, date, doc.currency, value); err != nil {
+		return "", err
 	}
-	return enqueue(ctx, tx, "transaction", txnID, invevents.TransactionPosted, tenantID, invevents.TransactionPostedData{
-		TransactionID: txnID, LegalEntityID: j.LegalEntityID, JournalID: j.ID, OriginID: originID, ProductID: r.product,
+	data := invevents.TransactionPostedData{
+		TransactionID: txnID, LegalEntityID: doc.legalEntityID, SourceType: doc.sourceType, OriginID: originID, ProductID: r.product,
 		DimensionSet: map[string]string(r.dims), Qty: pl.Line.Qty.String(), IssueStatus: issue, ReceiptStatus: receipt,
-		PhysicalDate: posting, FinancialDate: posting, Currency: j.Currency, CostAmountPhysical: value, CostAmountPosted: value,
-	})
+		PhysicalDate: date, FinancialDate: date, Currency: doc.currency, CostAmountPhysical: value, CostAmountPosted: value,
+	}
+	if doc.journalID != "" {
+		data.JournalID = &doc.journalID
+	}
+	data.ReferenceID = reference
+	return txnID, enqueue(ctx, tx, "transaction", txnID, invevents.TransactionPosted, tenantID, data)
 }
 
 func onHandFrom(b [11]string) domain.OnHand {

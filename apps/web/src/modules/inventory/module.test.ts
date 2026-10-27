@@ -14,7 +14,29 @@ describe("inventory module", () => {
       "/inventory/onhand": "inventory.read",
       "/inventory/journals": "inventory.read",
       "/inventory/journals/new": "inventory.journal.write",
+      "/inventory/transactions": "inventory.read",
+      "/inventory/reservations": "inventory.read",
+      "/inventory/blockings": "inventory.read",
+      "/inventory/count-plans": "inventory.read",
+      "/inventory/count-sheets": "inventory.read",
     });
+  });
+
+  it("routes every slice 2 screen", () => {
+    const paths = inventory.routes.map((r) => r.path);
+    for (const path of [
+      "/inventory/transactions",
+      "/inventory/reservations",
+      "/inventory/reservations/new",
+      "/inventory/blockings",
+      "/inventory/blockings/new",
+      "/inventory/count-plans",
+      "/inventory/count-plans/new",
+      "/inventory/count-sheets",
+      "/inventory/count-sheets/:id",
+    ]) {
+      expect(paths).toContain(path);
+    }
   });
 
   it("is auto-discovered by the registry", () => {

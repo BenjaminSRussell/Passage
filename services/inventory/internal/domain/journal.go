@@ -34,18 +34,26 @@ func fail(code, format string, args ...any) *Error {
 	return &Error{Code: code, Detail: fmt.Sprintf(format, args...)}
 }
 
-// JournalType is the kind of inventory journal. Slice 1 posts the three
-// types that need no transfer or BOM explosion.
+// JournalType is the kind of inventory journal. TRANSFER and BOM need the
+// transfer aggregate and the BOM explosion and are not built yet.
 type JournalType string
 
 const (
 	JournalMovement       JournalType = "MOVEMENT"
 	JournalAdjustment     JournalType = "ADJUSTMENT"
 	JournalOpeningBalance JournalType = "OPENING_BALANCE"
+	// JournalCount carries the variances of a posted count sheet (FR-16.9). It
+	// is created only by count-sheet posting and offsets to the adjustment
+	// account like an ADJUSTMENT journal.
+	JournalCount JournalType = "COUNT"
 )
 
-// JournalTypes are the journal types this slice accepts.
-var JournalTypes = []JournalType{JournalMovement, JournalAdjustment, JournalOpeningBalance}
+// JournalTypes are the journal types stored and listed.
+var JournalTypes = []JournalType{JournalMovement, JournalAdjustment, JournalOpeningBalance, JournalCount}
+
+// KeyedJournalTypes are the journal types a user may create directly; COUNT
+// journals come from count sheets.
+var KeyedJournalTypes = []JournalType{JournalMovement, JournalAdjustment, JournalOpeningBalance}
 
 // JournalStatus is the journal state machine of BR-16.11.
 type JournalStatus string

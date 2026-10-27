@@ -1,0 +1,379 @@
+package api
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/shopspring/decimal"
+
+	"github.com/BenjaminSRussell/passage/platform/authz"
+	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/services/inventory/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/inventory/internal/store"
+)
+
+// Reservation, batch expiry and transaction inquiry routes (FR-16.7, FR-16.13).
+const (
+	dutyReserve       = "inventory.reservation.write"
+	dutyBatchWrite    = "inventory.batch.write"
+	reservationsPath  = "/v1/inventory/reservations"
+	batchExpiriesPath = "/v1/inventory/batch-expiries"
+	transactionsPath  = "/v1/inventory/transactions"
+	defaultPageSize   = 100
+	maxPageSize       = 500
+	maxShelfLifeDays  = 365
+	maxIdentifierLen  = 60
+	dateLayout        = "2006-01-02"
+)
+
+func (a *API) registerReservations(r chi.Router) {
+	r.With(authz.RequireDuty(dutyRead)).Get(transactionsPath, a.listTransactions)
+	r.With(authz.RequireDuty(dutyReserve)).Post(reservationsPath, a.createReservation)
+	r.With(authz.RequireDuty(dutyRead)).Get(reservationsPath, a.listReservations)
+	r.With(authz.RequireDuty(dutyReserve)).Delete(reservationsPath+"/{id}", a.releaseReservation)
+	r.With(authz.RequireDuty(dutyBatchWrite)).Put(batchExpiriesPath+"/{productId}/{batchId}", a.putBatchExpiry)
+}
+
+type reserveRequest struct {
+	LegalEntityID       string            `json:"legalEntityId"`
+	ProductID           string            `json:"productId"`
+	Qty                 string            `json:"qty"`
+	DemandType          string            `json:"demandType"`
+	DemandID            string            `json:"demandId"`
+	Policy              string            `json:"policy"`
+	RequiredDate        string            `json:"requiredDate"`
+	ShelfLifeMarginDays int               `json:"shelfLifeMarginDays"`
+	AllowPartial        bool              `json:"allowPartial"`
+	Dimensions          map[string]string `json:"dimensions"`
+}
+
+type reservationResponse struct {
+	ID            string            `json:"id"`
+	LegalEntityID string            `json:"legalEntityId"`
+	ProductID     string            `json:"productId"`
+	Dimensions    map[string]string `json:"dimensions"`
+	Qty           string            `json:"qty"`
+	DemandType    string            `json:"demandType"`
+	DemandID      string            `json:"demandId"`
+	Policy        string            `json:"policy"`
+	Status        string            `json:"status"`
+	AllocationNo  int               `json:"allocationNo"`
+	CreatedAt     time.Time         `json:"createdAt"`
+	ReleasedAt    *time.Time        `json:"releasedAt,omitempty"`
+}
+
+type reserveResponse struct {
+	Items     []reservationResponse `json:"items"`
+	Shortfall string                `json:"shortfall"`
+}
+
+type transactionResponse struct {
+	ID                 string            `json:"id"`
+	LegalEntityID      string            `json:"legalEntityId"`
+	OriginID           string            `json:"originId"`
+	SourceType         string            `json:"sourceType"`
+	SourceID           string            `json:"sourceId"`
+	JournalID          string            `json:"journalId,omitempty"`
+	Reference          string            `json:"reference,omitempty"`
+	ProductID          string            `json:"productId"`
+	Dimensions         map[string]string `json:"dimensions"`
+	Qty                string            `json:"qty"`
+	EnteredQty         string            `json:"enteredQty"`
+	EnteredUnit        string            `json:"enteredUnit"`
+	IssueStatus        string            `json:"issueStatus,omitempty"`
+	ReceiptStatus      string            `json:"receiptStatus,omitempty"`
+	PhysicalDate       string            `json:"physicalDate"`
+	FinancialDate      string            `json:"financialDate,omitempty"`
+	Currency           string            `json:"currency"`
+	CostAmountPhysical string            `json:"costAmountPhysical"`
+	CostAmountPosted   *string           `json:"costAmountPosted,omitempty"`
+	CreatedAt          time.Time         `json:"createdAt"`
+}
+
+// idempotencyKey reads a required Idempotency-Key into fields when missing or too long.
+func idempotencyKey(r *http.Request, fields map[string]string) string {
+	key := strings.TrimSpace(r.Header.Get(idempotencyHeader))
+	if key == "" || len(key) > maxKeyLength {
+		fields[idempotencyHeader] = fmt.Sprintf("is required (1 to %d characters)", maxKeyLength)
+	}
+	return key
+}
+
+// pageLimit reads ?limit= (1..max, default def) into fields when invalid.
+func pageLimit(r *http.Request, def, max int, fields map[string]string) int {
+	raw := r.URL.Query().Get("limit")
+	if raw == "" {
+		return def
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 || n > max {
+		fields["limit"] = fmt.Sprintf("must be an integer from 1 to %d", max)
+		return def
+	}
+	return n
+}
+
+// createReservation reserves a quantity manually (MANUAL, one exact dimension
+// set) or by policy (FIFO, FEFO, LIFO over the dimension sets matching the
+// dimension filter).
+func (a *API) createReservation(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	var req reserveRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	fields := map[string]string{}
+	if !ids.Valid(req.LegalEntityID) {
+		fields["legalEntityId"] = "must be a UUID"
+	}
+	if !ids.Valid(req.ProductID) {
+		fields["productId"] = "must be a UUID"
+	}
+	qty, err := decimal.NewFromString(req.Qty)
+	if err != nil || !qty.IsPositive() || !qty.Equal(qty.Truncate(domain.DefaultJournalRules.MaxScale)) {
+		fields["qty"] = "must be a positive decimal number with at most 6 decimals"
+	}
+	if !slices.Contains(domain.DemandTypes, domain.DemandType(req.DemandType)) {
+		fields["demandType"] = "must be MANUAL, SALES_ORDER, PRODUCTION_ORDER or TRANSFER_ORDER"
+	}
+	req.DemandID = strings.TrimSpace(req.DemandID)
+	if n := len(req.DemandID); n == 0 || n > maxIdentifierLen {
+		fields["demandId"] = "is required (1 to 60 characters)"
+	}
+	policy := domain.ReservationPolicy(strings.ToUpper(strings.TrimSpace(req.Policy)))
+	if policy == "" {
+		policy = domain.PolicyFIFO
+	}
+	if !slices.Contains(domain.ReservationPolicies, policy) {
+		fields["policy"] = "must be MANUAL, FIFO, FEFO or LIFO"
+	}
+	if req.ShelfLifeMarginDays < 0 || req.ShelfLifeMarginDays > maxShelfLifeDays {
+		fields["shelfLifeMarginDays"] = "must be between 0 and 365"
+	}
+	required := time.Now().UTC().Truncate(24 * time.Hour)
+	if req.RequiredDate != "" {
+		if required, err = time.Parse(dateLayout, req.RequiredDate); err != nil {
+			fields["requiredDate"] = "must be a date (YYYY-MM-DD)"
+		}
+	}
+	dims := domain.Dimensions(req.Dimensions)
+	if _, err := dims.Normalize(); err != nil {
+		fields["dimensions"] = err.Error()
+	} else if policy == domain.PolicyManual && strings.TrimSpace(dims[domain.DimSite]) == "" {
+		fields["dimensions"] = "a MANUAL reservation names the dimension set, including its site"
+	}
+	key := idempotencyKey(r, fields)
+	if len(fields) > 0 {
+		fieldProblem(w, r, fields)
+		return
+	}
+	out, err := a.store.Reserve(r.Context(), store.ReserveInput{
+		LegalEntityID: req.LegalEntityID, ProductID: req.ProductID, Qty: qty, DemandType: domain.DemandType(req.DemandType),
+		DemandID: req.DemandID, Policy: policy, Dims: dims, RequiredDate: required, ShelfLifeMarginDays: req.ShelfLifeMarginDays,
+		AllowPartial: req.AllowPartial, IdempotencyKey: key,
+	})
+	if err != nil {
+		a.failed(w, r, "create reservation", err)
+		return
+	}
+	status := http.StatusCreated
+	if out.Replayed {
+		status = http.StatusOK
+		w.Header().Set("Idempotent-Replayed", "true")
+	}
+	resp := reserveResponse{Items: []reservationResponse{}, Shortfall: out.Shortfall.String()}
+	for _, res := range out.Reservations {
+		resp.Items = append(resp.Items, toReservationResponse(res))
+	}
+	httpx.JSON(w, status, resp)
+}
+
+// listReservations is the reservation inquiry, newest first, with cursor paging.
+func (a *API) listReservations(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	q := r.URL.Query()
+	fields := map[string]string{}
+	f := store.ReservationFilter{ProductID: q.Get("product"), Status: domain.ReservationStatus(q.Get("status")), DemandID: q.Get("demandId"), Cursor: q.Get("cursor")}
+	if f.ProductID != "" && !ids.Valid(f.ProductID) {
+		fields["product"] = "must be a UUID"
+	}
+	if f.Status != "" && !slices.Contains(domain.ReservationStatuses, f.Status) {
+		fields["status"] = "must be ACTIVE, RELEASED or CONSUMED"
+	}
+	if f.Cursor != "" && !ids.Valid(f.Cursor) {
+		fields["cursor"] = "must be a cursor returned by a previous page"
+	}
+	f.Limit = pageLimit(r, defaultPageSize, maxPageSize, fields)
+	if len(fields) > 0 {
+		fieldProblem(w, r, fields)
+		return
+	}
+	limit := f.Limit
+	f.Limit++
+	found, err := a.store.ListReservations(r.Context(), f)
+	if err != nil {
+		a.failed(w, r, "list reservations", err)
+		return
+	}
+	body := map[string]any{}
+	if len(found) > limit {
+		found = found[:limit]
+		body["nextCursor"] = found[limit-1].ID
+	}
+	items := make([]reservationResponse, 0, len(found))
+	for _, res := range found {
+		items = append(items, toReservationResponse(res))
+	}
+	body["items"] = items
+	httpx.JSON(w, http.StatusOK, body)
+}
+
+// releaseReservation releases a reservation. It is idempotent: a reservation
+// that is no longer active is returned unchanged.
+func (a *API) releaseReservation(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, domain.CodeReservationNotFound, "reservation not found"))
+		return
+	}
+	res, err := a.store.ReleaseReservation(r.Context(), id)
+	if err != nil {
+		a.failed(w, r, "release reservation", err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, toReservationResponse(res))
+}
+
+// putBatchExpiry sets the expiry of a batch, the FEFO input. expiryDate is
+// required; null means the batch never expires.
+func (a *API) putBatchExpiry(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	productID, batchID := chi.URLParam(r, "productId"), chi.URLParam(r, "batchId")
+	fields := map[string]string{}
+	if !ids.Valid(productID) {
+		fields["productId"] = "must be a UUID"
+	}
+	if n := len([]rune(batchID)); n == 0 || n > maxIdentifierLen || strings.TrimSpace(batchID) != batchID {
+		fields["batchId"] = "is required (1 to 60 characters, no surrounding space)"
+	}
+	var body struct {
+		ExpiryDate json.RawMessage `json:"expiryDate"`
+	}
+	if err := httpx.Decode(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	var expiry *time.Time
+	var raw *string
+	if len(body.ExpiryDate) == 0 {
+		fields["expiryDate"] = "is required (YYYY-MM-DD or null)"
+	} else if err := json.Unmarshal(body.ExpiryDate, &raw); err != nil {
+		fields["expiryDate"] = "must be a date (YYYY-MM-DD) or null"
+	} else if raw != nil {
+		t, err := time.Parse(dateLayout, *raw)
+		if err != nil {
+			fields["expiryDate"] = "must be a date (YYYY-MM-DD) or null"
+		}
+		expiry = &t
+	}
+	if len(fields) > 0 {
+		fieldProblem(w, r, fields)
+		return
+	}
+	if err := a.store.UpsertBatchExpiry(r.Context(), productID, batchID, expiry); err != nil {
+		a.failed(w, r, "set batch expiry", err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"productId": productID, "batchId": batchID, "expiryDate": raw})
+}
+
+// listTransactions is the transaction inquiry (FR-16.13): filter by product,
+// status, origin type and physical date; newest first with cursor paging.
+func (a *API) listTransactions(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	q := r.URL.Query()
+	f := store.TransactionFilter{ProductID: q.Get("product"), Status: domain.Status(q.Get("status")), SourceType: q.Get("sourceType"), Cursor: q.Get("cursor")}
+	fields := map[string]string{}
+	if f.ProductID != "" && !ids.Valid(f.ProductID) {
+		fields["product"] = "must be a UUID"
+	}
+	if _, _, ok := domain.Lookup(f.Status); f.Status != "" && !ok {
+		fields["status"] = "must be an issue or receipt status"
+	}
+	if f.SourceType != "" && f.SourceType != "INVENT_JOURNAL_LINE" && f.SourceType != "BLOCKING" {
+		fields["sourceType"] = "must be INVENT_JOURNAL_LINE or BLOCKING"
+	}
+	for name, dst := range map[string]**time.Time{"from": &f.From, "to": &f.To} {
+		if v := q.Get(name); v != "" {
+			t, err := time.Parse(dateLayout, v)
+			if err != nil {
+				fields[name] = "must be a date (YYYY-MM-DD)"
+				continue
+			}
+			*dst = &t
+		}
+	}
+	if f.From != nil && f.To != nil && f.To.Before(*f.From) {
+		fields["to"] = "must not be before from"
+	}
+	if f.Cursor != "" && !ids.Valid(f.Cursor) {
+		fields["cursor"] = "must be a cursor returned by a previous page"
+	}
+	f.Limit = pageLimit(r, defaultPageSize, maxPageSize, fields)
+	if len(fields) > 0 {
+		fieldProblem(w, r, fields)
+		return
+	}
+	limit := f.Limit
+	f.Limit++ // one extra row tells whether another page exists
+	rows, err := a.store.ListTransactions(r.Context(), f)
+	if err != nil {
+		a.failed(w, r, "transaction inquiry", err)
+		return
+	}
+	body := map[string]any{}
+	if len(rows) > limit {
+		rows = rows[:limit]
+		body["nextCursor"] = rows[limit-1].ID
+	}
+	items := make([]transactionResponse, 0, len(rows))
+	for _, t := range rows {
+		item := transactionResponse{ID: t.ID, LegalEntityID: t.LegalEntityID, OriginID: t.OriginID, SourceType: t.SourceType, SourceID: t.SourceID,
+			JournalID: t.JournalID, Reference: t.Reference, ProductID: t.ProductID, Dimensions: t.Dims, Qty: t.Qty.String(),
+			EnteredQty: t.EnteredQty.String(), EnteredUnit: t.EnteredUnit, IssueStatus: t.IssueStatus, ReceiptStatus: t.ReceiptStatus,
+			PhysicalDate: t.PhysicalDate, FinancialDate: t.FinancialDate, Currency: t.Currency, CostAmountPhysical: t.CostAmountPhysical.String(),
+			CreatedAt: t.CreatedAt}
+		if t.CostAmountPosted != nil {
+			v := t.CostAmountPosted.String()
+			item.CostAmountPosted = &v
+		}
+		items = append(items, item)
+	}
+	body["items"] = items
+	httpx.JSON(w, http.StatusOK, body)
+}
+
+func toReservationResponse(res domain.Reservation) reservationResponse {
+	return reservationResponse{ID: res.ID, LegalEntityID: res.LegalEntityID, ProductID: res.ProductID, Dimensions: res.Dims, Qty: res.Qty.String(),
+		DemandType: string(res.DemandType), DemandID: res.DemandID, Policy: string(res.Policy), Status: string(res.Status),
+		AllocationNo: res.AllocationNo, CreatedAt: res.CreatedAt, ReleasedAt: res.ReleasedAt}
+}

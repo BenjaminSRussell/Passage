@@ -10,6 +10,7 @@ export const typeLabels: Record<JournalType, string> = {
   MOVEMENT: "Movement",
   ADJUSTMENT: "Adjustment",
   OPENING_BALANCE: "Opening balance",
+  COUNT: "Count",
 };
 
 const statusTones: Record<JournalStatus, BadgeTone> = {
@@ -51,4 +52,9 @@ export function formatDateTime(iso?: string): string {
 
 export function today(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+/** "-4" stays "-4"; "4" becomes "+4", so a variance reads as a change. */
+export function signed(value: string): string {
+  return value.startsWith("-") || Number(value) === 0 ? value : `+${value}`;
 }

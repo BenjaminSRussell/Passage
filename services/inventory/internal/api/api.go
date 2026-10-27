@@ -1,5 +1,6 @@
-// Package api is the HTTP layer of the inventory service: journals, posting and
-// the on-hand inquiry. Handlers decode, validate, read the tenant principal,
+// Package api is the HTTP layer of the inventory service: journals, posting,
+// the on-hand and transaction inquiries, reservations, blocking and cycle
+// counting. Handlers decode, validate, read the tenant principal,
 // call the store and answer with JSON or RFC 9457 problems.
 package api
 
@@ -70,6 +71,9 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyJournalWrite)).Post(journalsPath+"/{id}/lines:bulk", journalRoute(a.addLines))
 	r.With(authz.RequireDuty(dutyJournalPost)).Post(journalsPath+"/{id}:post", journalRoute(a.postJournal))
 	r.With(authz.RequireDuty(dutyRead)).Get(onHandPath, a.onHand)
+	a.registerReservations(r)
+	a.registerBlocking(r)
+	a.registerCount(r)
 }
 
 // Metrics serves the counters for the admin port.
@@ -148,6 +152,7 @@ type onHandItem struct {
 	AvailOrdered     string            `json:"availOrdered"`
 	PostedValue      string            `json:"postedValue"`
 	ReservedPhysical string            `json:"reservedPhysical"`
+	Blocked          string            `json:"blocked"`
 	Currency         string            `json:"currency"`
 	Negative         bool              `json:"negative"`
 }
@@ -195,7 +200,7 @@ func (a *API) createJournal(w http.ResponseWriter, r *http.Request) {
 	if !ids.Valid(req.LegalEntityID) {
 		fields["legalEntityId"] = "must be a UUID"
 	}
-	if !slices.Contains([]string{string(domain.JournalMovement), string(domain.JournalAdjustment), string(domain.JournalOpeningBalance)}, req.JournalType) {
+	if !slices.Contains(domain.KeyedJournalTypes, domain.JournalType(req.JournalType)) {
 		fields["journalType"] = "must be MOVEMENT, ADJUSTMENT or OPENING_BALANCE"
 	}
 	date, err := time.Parse("2006-01-02", req.PostingDate)
@@ -288,7 +293,7 @@ func (a *API) listJournals(w http.ResponseWriter, r *http.Request) {
 		fields["status"] = "unknown journal status"
 	}
 	if f.Type != "" && !slices.Contains(domain.JournalTypes, f.Type) {
-		fields["type"] = "must be MOVEMENT, ADJUSTMENT or OPENING_BALANCE"
+		fields["type"] = "must be MOVEMENT, ADJUSTMENT, OPENING_BALANCE or COUNT"
 	}
 	if raw := q.Get("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
@@ -372,15 +377,16 @@ func (a *API) postJournal(w http.ResponseWriter, r *http.Request, id string) {
 	writeJournal(w, http.StatusOK, j)
 }
 
-// ifMatchVersion reads the journal version from If-Match (required on custom methods).
+// ifMatchVersion reads the resource version (journal, blocking, count sheet)
+// from If-Match, required on the state-changing custom methods.
 func ifMatchVersion(r *http.Request) (int, error) {
 	raw := strings.Trim(strings.TrimSpace(r.Header.Get(ifMatchHeader)), `"`)
 	if raw == "" {
-		return 0, httpx.NewProblem(http.StatusPreconditionRequired, codePrecondition, "If-Match with the journal version is required")
+		return 0, httpx.NewProblem(http.StatusPreconditionRequired, codePrecondition, "If-Match with the version from the last read is required")
 	}
 	v, err := strconv.Atoi(raw)
 	if err != nil || v < 1 {
-		return 0, httpx.NewProblem(http.StatusBadRequest, codeValidation, "If-Match must be the journal version")
+		return 0, httpx.NewProblem(http.StatusBadRequest, codeValidation, "If-Match must be the version from the last read (the ETag)")
 	}
 	return v, nil
 }
@@ -415,7 +421,7 @@ func (a *API) onHand(w http.ResponseWriter, r *http.Request) {
 	for _, row := range res.Rows {
 		items = append(items, onHandItem{Group: row.Group, PhysicalInvent: row.PhysicalInvent.String(), AvailPhysical: row.AvailPhysical.String(),
 			AvailOrdered: row.AvailOrdered.String(), PostedValue: row.PostedValue.String(), ReservedPhysical: row.ReservedPhysical.String(),
-			Currency: row.Currency, Negative: row.Negative})
+			Blocked: row.Blocked.String(), Currency: row.Currency, Negative: row.Negative})
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"items": items, "truncated": res.Truncated})
 }
