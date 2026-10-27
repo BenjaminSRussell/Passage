@@ -127,6 +127,9 @@ export function AgreementDetailPage() {
           </Detail>
           <Detail term="Search next">{current.searchNext ? "Yes" : "No"}</Detail>
           <Detail term="Exclusive">{current.exclusive ? "Yes" : "No"}</Detail>
+          <Detail term="Campaign" mono>
+            {current.campaignId ? <Link to={`/pricing/campaigns/${current.campaignId}`}>{current.campaignId}</Link> : "None"}
+          </Detail>
           <Detail term="Legal entity" mono>
             {current.legalEntityId}
           </Detail>

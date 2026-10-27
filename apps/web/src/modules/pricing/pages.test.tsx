@@ -100,6 +100,14 @@ describe("Pricing workspace", () => {
     handler = (url) => {
       if (url.pathname.endsWith("/condition-records")) return json(200, { items: url.searchParams.get("status") === "DRAFT" ? [draft] : active });
       if (url.pathname.endsWith("/journals")) return json(200, { items: url.searchParams.get("status") === "OPEN" ? [{ id: "j1" }, { id: "j2" }] : [{ id: "j3" }] });
+      if (url.pathname.endsWith("/campaigns"))
+        return json(200, {
+          items: [
+            { id: "c1", killed: false, validFrom: addDays(day, -1), validTo: addDays(day, 5) },
+            { id: "c2", killed: true, validFrom: addDays(day, -1), validTo: addDays(day, 5) },
+            { id: "c3", killed: false, validFrom: addDays(day, 3), validTo: addDays(day, 9) },
+          ],
+        });
       return undefined;
     };
     const { container } = renderAt("/pricing");
@@ -109,10 +117,12 @@ describe("Pricing workspace", () => {
     expect(tiles).toHaveTextContent("Drafts to activate 1");
     expect(tiles).toHaveTextContent("Expiring in 30 days 1");
     expect(tiles).toHaveTextContent("Journals to post 3");
+    expect(tiles).toHaveTextContent("Live campaigns 1");
     const table = screen.getByRole("table", { name: "Expiring agreements" });
     expect(within(table).getByText("BOLT")).toBeInTheDocument();
     expect(within(table).queryByText("All products")).toBeNull();
     expect(calls.map((c) => `${c.url.pathname.split("/").at(-1)}:${c.url.searchParams.get("status")}`).sort()).toEqual([
+      "campaigns:null",
       "condition-records:ACTIVE",
       "condition-records:DRAFT",
       "journals:OPEN",
@@ -124,7 +134,7 @@ describe("Pricing workspace", () => {
   it("shows the error with a retry when the service fails", async () => {
     let fail = true;
     handler = (url) => {
-      if (!url.pathname.endsWith("/condition-records") && !url.pathname.endsWith("/journals")) return undefined;
+      if (!url.pathname.endsWith("/condition-records") && !url.pathname.endsWith("/journals") && !url.pathname.endsWith("/campaigns")) return undefined;
       return fail ? json(503, { code: "COM-0500", detail: "internal error" }) : json(200, { items: [] });
     };
     renderAt("/pricing");

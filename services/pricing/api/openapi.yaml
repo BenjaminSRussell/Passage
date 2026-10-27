@@ -88,6 +88,7 @@ paths:
         - {name: type, in: query, required: false, schema: {type: string, enum: [PRICE, LINE_DISC, MULTILINE_DISC, TOTAL_DISC, SURCHARGE]}}
         - {name: customer, in: query, required: false, description: "Exact customer or customer-group key.", schema: {type: string}}
         - {name: product, in: query, required: false, description: "Exact product or product-group key.", schema: {type: string}}
+        - {name: campaignId, in: query, required: false, description: "Records of one campaign (FR-26.10).", schema: {type: string, format: uuid}}
         - {name: asOf, in: query, required: false, description: "Records valid on this date (YYYY-MM-DD).", schema: {type: string, format: date}}
         - {name: limit, in: query, required: false, description: "Page size, ordered by id.", schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
       responses:
@@ -126,6 +127,7 @@ paths:
         "400": {$ref: "#/components/responses/Problem"}
         "401": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
+        "404": {description: "campaignId names no campaign the caller can see (PRC-0041).", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
         "422": {$ref: "#/components/responses/Problem"}
   /v1/pricing/condition-records/{id}:
     parameters:
@@ -934,6 +936,226 @@ paths:
         "403": {$ref: "#/components/responses/Problem"}
         "404": {$ref: "#/components/responses/Problem"}
         "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/campaigns:
+    get:
+      operationId: listCampaigns
+      summary: List campaigns, latest start first (FR-26.10).
+      x-passage-duty: pricing.view
+      parameters:
+        - {name: legalEntityId, in: query, required: false, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Campaigns (at most 100).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/Campaign"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    post:
+      operationId: createCampaign
+      summary: >
+        Create a live campaign with validity, target customer group, budget and currency
+        (FR-26.10). Condition records join it through their campaignId.
+      x-passage-duty: pricing.maintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CampaignInput"}
+      responses:
+        "201":
+          description: Created live at version 1.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Campaign"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/campaigns/{id}:
+    get:
+      operationId: getCampaign
+      summary: Read one campaign. 404 PRC-0041 when unknown.
+      x-passage-duty: pricing.view
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The campaign.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Campaign"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/campaigns/{id}:kill:
+    post:
+      operationId: killCampaign
+      summary: >
+        Set the kill switch: the campaign's records drop out of the next resolve
+        (campaign_kill_switch_effect NEXT_RESOLVE). 409 PRC-0031 when already killed; 412 on a
+        stale version. Writes dev.passage.pricing.campaign.killed.v1.
+      x-passage-duty: pricing.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/VersionRequest"}
+      responses:
+        "200":
+          description: Killed; version incremented.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Campaign"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/campaigns/{id}:restore:
+    post:
+      operationId: restoreCampaign
+      summary: >
+        Clear the kill switch: the records rejoin the next resolve inside the campaign validity.
+        409 PRC-0031 when not killed; 412 on a stale version. Writes dev.passage.pricing.campaign.restored.v1.
+      x-passage-duty: pricing.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/VersionRequest"}
+      responses:
+        "200":
+          description: Restored; version incremented.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Campaign"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/procedures:
+    get:
+      operationId: listProcedures
+      summary: List procedure versions by name, newest version first (FR-26.1).
+      x-passage-duty: pricing.view
+      parameters:
+        - {name: legalEntityId, in: query, required: false, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Procedure versions (at most 100).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/Procedure"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    post:
+      operationId: createProcedure
+      summary: Save a DRAFT version; its version number is the next one for the legal entity and name (FR-26.1).
+      x-passage-duty: pricing.admin
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ProcedureInput"}
+      responses:
+        "201":
+          description: Created DRAFT version at revision 1.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Procedure"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/procedures/{id}:
+    get:
+      operationId: getProcedure
+      summary: Read one procedure version. 404 PRC-0042 when unknown.
+      x-passage-duty: pricing.view
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The procedure version.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Procedure"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/procedures/{id}:revise:
+    post:
+      operationId: reviseProcedure
+      summary: >
+        Replace the steps of a DRAFT version at the expected revision (the Procedure designer's
+        save). 409 PRC-0008 when the version is ACTIVE or SUPERSEDED; 412 on a stale revision.
+      x-passage-duty: pricing.admin
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ProcedureRevision"}
+      responses:
+        "200":
+          description: Revised; revision incremented.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Procedure"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/procedures/{id}:activate:
+    post:
+      operationId: activateProcedure
+      summary: >
+        Activate a DRAFT version and supersede the ACTIVE version of the same legal entity and
+        name. 409 PRC-0008 when the version is not DRAFT. Writes dev.passage.pricing.procedure.activated.v1.
+      x-passage-duty: pricing.admin
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Activated.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Procedure"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
 components:
   parameters:
     IdempotencyKey:
@@ -949,6 +1171,71 @@ components:
         application/problem+json:
           schema: {$ref: "#/components/schemas/Problem"}
   schemas:
+    Campaign:
+      allOf:
+        - $ref: "#/components/schemas/CampaignInput"
+        - type: object
+          required: [id, killed, version]
+          properties:
+            id: {type: string, format: uuid}
+            killed: {type: boolean, description: "Kill switch; a killed campaign's records take no part in resolve."}
+            version: {type: integer, minimum: 1}
+    CampaignInput:
+      type: object
+      required: [legalEntityId, name, validFrom, validTo, budget, currency]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        name: {type: string, minLength: 1, maxLength: 120}
+        validFrom: {type: string, format: date}
+        validTo: {type: string, format: date, description: "Inclusive; not before validFrom."}
+        targetCustomerGroup: {type: string, maxLength: 64, description: "Customer group the campaign is for; empty means every customer. Resolve keeps the campaign's records only for a request with this customerGroupId."}
+        budget: {type: string, description: "Planned spend, decimal at least 0, in currency. Recorded; not enforced in resolve."}
+        currency: {type: string, pattern: "^[A-Z]{3}$"}
+    ProcedureStep:
+      type: object
+      required: [stepNo, conditionType]
+      properties:
+        stepNo: {type: integer, minimum: 10, maximum: 990, description: "Strictly increasing within a procedure."}
+        conditionType: {type: string, enum: [PRICE, LINE_DISC, MULTILINE_DISC, TOTAL_DISC, SURCHARGE, FREIGHT, REBATE_ACCRUAL, ROUNDING, FREE_GOODS], description: "Exactly one PRICE step per procedure."}
+        requirementCel: {type: string, maxLength: 512, description: "CEL requirement; stored, not yet evaluated."}
+        exclusionGroup: {type: string, maxLength: 64, description: "Exclusion group (FR-26.8); not allowed on the PRICE step."}
+        exclusionMode: {type: string, enum: [BEST, FIRST], description: "Required with an exclusion group; the same for every step of one group."}
+        statistical: {type: boolean}
+        accountKey: {type: string, maxLength: 32}
+    ProcedureInput:
+      type: object
+      required: [legalEntityId, name, steps]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        name: {type: string, pattern: "^[A-Z0-9][A-Z0-9_-]*$", maxLength: 64, description: "For example AX_STANDARD or SAP_RVAA01."}
+        steps:
+          type: array
+          minItems: 1
+          maxItems: 99
+          items: {$ref: "#/components/schemas/ProcedureStep"}
+    ProcedureRevision:
+      type: object
+      required: [revision, steps]
+      properties:
+        revision: {type: integer, minimum: 1}
+        steps:
+          type: array
+          minItems: 1
+          maxItems: 99
+          items: {$ref: "#/components/schemas/ProcedureStep"}
+    Procedure:
+      type: object
+      required: [id, legalEntityId, name, version, status, revision, steps]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        name: {type: string}
+        version: {type: integer, minimum: 1}
+        status: {type: string, enum: [DRAFT, ACTIVE, SUPERSEDED]}
+        revision: {type: integer, minimum: 1, description: "Optimistic version of a DRAFT's steps."}
+        steps:
+          type: array
+          items: {$ref: "#/components/schemas/ProcedureStep"}
     Fund:
       type: object
       required: [id, legalEntityId, name, type, currency, customerScope, owner, budgetPerPeriod, allowOverspend, closed, version]
@@ -1111,6 +1398,7 @@ components:
         validTo: {type: string, format: date}
         searchNext: {type: boolean}
         exclusive: {type: boolean}
+        campaignId: {type: string, format: uuid, description: "Optional campaign (FR-26.2, FR-26.10). On create the campaign must exist in the record's legal entity (404 PRC-0041, 422). In resolve the record applies only while the campaign is live and targets the customer's group; at one access a campaign record outranks a plain one (BR-26.1 step 4)."}
     SimulateRequest:
       allOf:
         - $ref: "#/components/schemas/ResolveRequest"

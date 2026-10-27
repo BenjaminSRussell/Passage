@@ -1,6 +1,7 @@
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, PageHeader, StatGroup, StatTile, StatusPill, type DataTableColumn } from "../../shell/ui";
-import { listConditionRecords, listPriceJournals, type ConditionRecord } from "./api/client";
+import { listCampaigns, listConditionRecords, listPriceJournals, type Campaign, type ConditionRecord } from "./api/client";
+import { campaignState } from "./campaignFormat";
 import { addDays, describeCustomer, describeProduct, today, TYPE_LABELS } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -13,6 +14,7 @@ interface Overview {
   drafts: ConditionRecord[];
   /** Journals waiting to be validated or posted (OPEN and VALIDATED). */
   journals: unknown[];
+  campaigns: Campaign[];
 }
 
 /** The count, with "+" when the list hit the page size and there may be more. */
@@ -33,22 +35,24 @@ export function WorkspacePage() {
   const navigate = useNavigate();
   const day = today();
   const state = useLoad<Overview>(async (signal) => {
-    const [active, drafts, open, validated] = await Promise.all([
+    const [active, drafts, open, validated, campaigns] = await Promise.all([
       listConditionRecords({ status: "ACTIVE", limit: PAGE }, signal),
       listConditionRecords({ status: "DRAFT", limit: PAGE }, signal),
       listPriceJournals({ status: "OPEN", limit: PAGE }, signal),
       listPriceJournals({ status: "VALIDATED", limit: PAGE }, signal),
+      listCampaigns("", signal),
     ]);
-    return { active, drafts, journals: [...open, ...validated] };
+    return { active, drafts, journals: [...open, ...validated], campaigns };
   }, day);
   const horizon = addDays(day, EXPIRY_WINDOW_DAYS);
+  const liveCampaigns = (state.data?.campaigns ?? []).filter((c) => campaignState(c, day) === "live");
   const expiring = (state.data?.active ?? []).filter((r) => r.validTo >= day && r.validTo <= horizon).sort((a, b) => a.validTo.localeCompare(b.validTo));
 
   return (
     <div className={styles.stack}>
       <PageHeader
         title="Pricing workspace"
-        description="Trade agreements that are live, waiting for activation or about to expire, and price journals waiting to post."
+        description="Trade agreements that are live, waiting for activation or about to expire, price journals waiting to post, and campaigns running today."
         actions={
           <div className={styles.actions}>
             <Link className={buttonClassName("primary")} to="/pricing/agreements/new">
@@ -74,6 +78,7 @@ export function WorkspacePage() {
             <StatTile label="Drafts to activate" value={state.data ? count(state.data.drafts) : "…"} tone="warning" />
             <StatTile label={`Expiring in ${EXPIRY_WINDOW_DAYS} days`} value={state.data ? expiring.length : "…"} tone="warning" />
             <StatTile label="Journals to post" value={state.data ? count(state.data.journals) : "…"} />
+            <StatTile label="Live campaigns" value={state.data ? liveCampaigns.length : "…"} />
           </StatGroup>
           <Card title="Expiring soon">
             <DataTable

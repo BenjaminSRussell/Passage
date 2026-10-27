@@ -156,14 +156,16 @@ func planLine(l *JournalLine, stored map[string]Record, smart bool, bands []Smar
 			}
 			rec.Amount = amount
 		}
-		rec.ID, rec.Status, rec.Version = l.RecordID, StatusActive, cur.Version+1
+		// The campaign is part of the record's identity: a journal never moves a record
+		// into or out of a campaign.
+		rec.ID, rec.Status, rec.Version, rec.CampaignID = l.RecordID, StatusActive, cur.Version+1, cur.CampaignID
 		return checkRecord(rec)
 	case OpRestore:
 		if cur.Status != StatusWithdrawn {
 			return nil, []LineError{{Code: CodeValidation, Detail: fmt.Sprintf("record %s is %s; only WITHDRAWN records restore", cur.ID, cur.Status)}}
 		}
 		rec := l.Record
-		rec.ID, rec.Status, rec.Version = l.RecordID, StatusActive, cur.Version+1
+		rec.ID, rec.Status, rec.Version, rec.CampaignID = l.RecordID, StatusActive, cur.Version+1, cur.CampaignID
 		return checkRecord(rec)
 	case OpDelete:
 		if cur.Status != StatusActive {
@@ -203,9 +205,9 @@ func fieldDetail(fields map[string]string) string {
 
 // keyIndex buckets records by every field sameKey compares, so overlap checks stay linear.
 func keyIndex(r Record) string {
-	return fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s",
+	return fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s",
 		r.Type, r.CustomerKind, r.CustomerKey, r.ProductKind, r.ProductKey, r.Variant,
-		r.Currency, r.Unit, r.FromQuantity.String())
+		r.Currency, r.Unit, r.FromQuantity.String(), r.CampaignID)
 }
 
 // Reverse builds the journal that undoes a posted journal (FR-26.9). Lines run in

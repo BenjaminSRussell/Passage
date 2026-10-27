@@ -11,7 +11,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
@@ -40,6 +39,7 @@ type fakeStore struct {
 	accruals   map[string]store.Accrual
 	comm       commissionState
 	fund       fundState
+	camp       campaignState
 }
 
 func newFake() *fakeStore {
@@ -50,6 +50,11 @@ func newFake() *fakeStore {
 func (f *fakeStore) CreateRecord(_ context.Context, in store.Entry, _ string) (store.Entry, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if in.CampaignID != "" {
+		if err := f.checkCampaign(in); err != nil {
+			return store.Entry{}, err
+		}
+	}
 	f.seq++
 	in.ID = fmt.Sprintf("00000000-0000-0000-0002-%012d", f.seq)
 	in.Status, in.Version = domain.StatusDraft, 1
@@ -69,7 +74,7 @@ func (f *fakeStore) ListRecords(_ context.Context, filter store.Filter) ([]store
 	f.lastList = filter
 	var out []store.Entry
 	for _, e := range f.records {
-		if filter.Status == "" || e.Status == filter.Status {
+		if (filter.Status == "" || e.Status == filter.Status) && (filter.CampaignID == "" || e.CampaignID == filter.CampaignID) {
 			out = append(out, e)
 		}
 	}
@@ -77,11 +82,13 @@ func (f *fakeStore) ListRecords(_ context.Context, filter store.Filter) ([]store
 	return out, nil
 }
 
-func (f *fakeStore) ActiveRecords(_ context.Context, le, currency string, asOf time.Time) ([]domain.Record, error) {
+func (f *fakeStore) ActiveRecords(_ context.Context, q store.ActiveQuery) ([]domain.Record, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	var out []domain.Record
 	for _, e := range f.records {
-		if e.LegalEntityID == le && e.Currency == currency && e.Status == domain.StatusActive &&
-			!asOf.Before(e.ValidFrom) && !asOf.After(e.ValidTo) {
+		if e.LegalEntityID == q.LegalEntityID && e.Currency == q.Currency && e.Status == domain.StatusActive &&
+			!q.AsOf.Before(e.ValidFrom) && !q.AsOf.After(e.ValidTo) && (e.CampaignID == "" || f.campaignUsable(e.CampaignID, q)) {
 			out = append(out, e.Record)
 		}
 	}

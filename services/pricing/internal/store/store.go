@@ -52,8 +52,20 @@ type Filter struct {
 	Type          string
 	Customer      string
 	Product       string
-	AsOf          *time.Time
-	Limit         int
+	// CampaignID keeps the records of one campaign (FR-26.10).
+	CampaignID string
+	AsOf       *time.Time
+	Limit      int
+}
+
+// ActiveQuery selects the records one resolve can use: ACTIVE in the legal entity and
+// currency on AsOf. CustomerGroupID is the document customer's group; a record of a
+// campaign that targets another group is left out (FR-26.10).
+type ActiveQuery struct {
+	LegalEntityID   string
+	Currency        string
+	CustomerGroupID string
+	AsOf            time.Time
 }
 
 // Store is what the API needs. Postgres implements it; tests use an in-memory fake.
@@ -61,7 +73,7 @@ type Store interface {
 	CreateRecord(ctx context.Context, in Entry, idempotencyKey string) (Entry, error)
 	GetRecord(ctx context.Context, id string) (Entry, error)
 	ListRecords(ctx context.Context, f Filter) ([]Entry, error)
-	ActiveRecords(ctx context.Context, legalEntityID, currency string, asOf time.Time) ([]domain.Record, error)
+	ActiveRecords(ctx context.Context, q ActiveQuery) ([]domain.Record, error)
 	ActivateRecord(ctx context.Context, id string, version int, idempotencyKey string) (Entry, error)
 	WithdrawRecord(ctx context.Context, id string, version int, reason, idempotencyKey string) (Entry, error)
 	CreateJournal(ctx context.Context, in JournalInput, idempotencyKey string) (Journal, error)
@@ -95,6 +107,15 @@ type Store interface {
 	GetPromotion(ctx context.Context, id string) (domain.PromotionPlan, error)
 	ListPromotions(ctx context.Context, legalEntityID string, limit int) ([]domain.PromotionPlan, error)
 	RecordPromotionActuals(ctx context.Context, id string, a domain.PromotionActuals) (domain.PromotionPlan, error)
+	CreateCampaign(ctx context.Context, c domain.Campaign, idempotencyKey string) (domain.Campaign, error)
+	GetCampaign(ctx context.Context, id string) (domain.Campaign, error)
+	ListCampaigns(ctx context.Context, legalEntityID string, limit int) ([]domain.Campaign, error)
+	SetCampaignKilled(ctx context.Context, id string, version int, killed bool, idempotencyKey string) (domain.Campaign, error)
+	CreateProcedure(ctx context.Context, p domain.Procedure, idempotencyKey string) (domain.Procedure, error)
+	GetProcedure(ctx context.Context, id string) (domain.Procedure, error)
+	ListProcedures(ctx context.Context, legalEntityID string, limit int) ([]domain.Procedure, error)
+	ReviseProcedure(ctx context.Context, id string, revision int, steps []domain.ProcedureStep, idempotencyKey string) (domain.Procedure, error)
+	ActivateProcedure(ctx context.Context, id string, idempotencyKey string) (domain.Procedure, error)
 	Ping(ctx context.Context) error
 }
 
@@ -109,11 +130,15 @@ func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
 const recordColumns = `id, legal_entity_id, condition_type, customer_kind, customer_key, product_kind, product_key, variant,
 	currency, unit, from_quantity::text, amount::text, disc_pct_1::text, disc_pct_2::text, valid_from, valid_to,
-	search_next, exclusive, status, version`
+	search_next, exclusive, status, version, coalesce(campaign_id::text, '')`
 
-// KeyHash is the lookup key for overlap checks; it mirrors the domain key tuple.
+// KeyHash is the lookup key for overlap checks; it mirrors the domain key tuple. The
+// campaign joins the tuple only when set, so records without one keep their hash.
 func KeyHash(r domain.Record) string {
 	parts := []string{string(r.Type), string(r.CustomerKind), r.CustomerKey, string(r.ProductKind), r.ProductKey, r.Variant, r.Currency, r.Unit, r.FromQuantity.String()}
+	if r.CampaignID != "" {
+		parts = append(parts, "campaign="+r.CampaignID)
+	}
 	sum := sha256.Sum256([]byte(strings.Join(parts, "|")))
 	return hex.EncodeToString(sum[:])
 }
@@ -123,7 +148,8 @@ func scanEntry(row pgx.Row) (Entry, error) {
 	var ctype, ckind, pkind string
 	var from, amount, p1, p2 string
 	err := row.Scan(&e.ID, &e.LegalEntityID, &ctype, &ckind, &e.CustomerKey, &pkind, &e.ProductKey, &e.Variant,
-		&e.Currency, &e.Unit, &from, &amount, &p1, &p2, &e.ValidFrom, &e.ValidTo, &e.SearchNext, &e.Exclusive, &e.Status, &e.Version)
+		&e.Currency, &e.Unit, &from, &amount, &p1, &p2, &e.ValidFrom, &e.ValidTo, &e.SearchNext, &e.Exclusive, &e.Status, &e.Version,
+		&e.CampaignID)
 	if err != nil {
 		return Entry{}, err
 	}
@@ -148,6 +174,11 @@ func (s *Postgres) CreateRecord(ctx context.Context, in Entry, idempotencyKey st
 	}
 	var out Entry
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if in.CampaignID != "" {
+			if err := checkRecordCampaign(ctx, tx, in); err != nil {
+				return err
+			}
+		}
 		created, err := insertDraft(ctx, tx, p.TenantID, in, key)
 		if err == nil {
 			out = created
@@ -172,13 +203,14 @@ func (s *Postgres) CreateRecord(ctx context.Context, in Entry, idempotencyKey st
 func insertDraft(ctx context.Context, tx pgx.Tx, tenantID string, in Entry, key *string) (Entry, error) {
 	return scanEntry(tx.QueryRow(ctx, `insert into condition_record (tenant_id, id, legal_entity_id, condition_type, customer_kind, customer_key,
 		product_kind, product_key, variant, currency, unit, from_quantity, amount, disc_pct_1, disc_pct_2, valid_from, valid_to,
-		search_next, exclusive, status, version, key_hash, idempotency_key)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::numeric, $13::numeric, $14::numeric, $15::numeric, $16, $17, $18, $19, 'DRAFT', 1, $20, $21)
+		search_next, exclusive, status, version, key_hash, idempotency_key, campaign_id)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::numeric, $13::numeric, $14::numeric, $15::numeric, $16, $17, $18, $19, 'DRAFT', 1, $20, $21,
+			nullif($22, '')::uuid)
 		on conflict (tenant_id, idempotency_key) do nothing
 		returning `+recordColumns,
 		tenantID, ids.New(), in.LegalEntityID, string(in.Type), string(in.CustomerKind), in.CustomerKey, string(in.ProductKind), in.ProductKey,
 		in.Variant, in.Currency, in.Unit, in.FromQuantity.String(), in.Amount.String(), in.DiscPct1.String(), in.DiscPct2.String(),
-		in.ValidFrom, in.ValidTo, in.SearchNext, in.Exclusive, KeyHash(in.Record), key))
+		in.ValidFrom, in.ValidTo, in.SearchNext, in.Exclusive, KeyHash(in.Record), key, in.CampaignID))
 }
 
 // sameBody reports whether a replayed key carries the same economic content.
@@ -219,7 +251,8 @@ func (s *Postgres) ListRecords(ctx context.Context, f Filter) ([]Entry, error) {
 			where ($1::text = '' or legal_entity_id::text = $1) and ($2::text = '' or status = $2)
 			and ($3::date is null or (valid_from <= $3::date and valid_to >= $3::date))
 			and ($5::text = '' or condition_type = $5) and ($6::text = '' or customer_key = $6) and ($7::text = '' or product_key = $7)
-			order by id limit $4`, f.LegalEntityID, f.Status, asOf, f.Limit, f.Type, f.Customer, f.Product)
+			and ($8::text = '' or campaign_id::text = $8)
+			order by id limit $4`, f.LegalEntityID, f.Status, asOf, f.Limit, f.Type, f.Customer, f.Product, f.CampaignID)
 		if err != nil {
 			return err
 		}
@@ -237,25 +270,56 @@ func (s *Postgres) ListRecords(ctx context.Context, f Filter) ([]Entry, error) {
 }
 
 // ActiveRecords loads the ACTIVE records a resolve needs: one legal entity, one
-// currency, valid on asOf. The engine applies the key and quantity filters.
-func (s *Postgres) ActiveRecords(ctx context.Context, legalEntityID, currency string, asOf time.Time) ([]domain.Record, error) {
+// currency, valid on AsOf. A record of a campaign stays only while the campaign is live
+// on AsOf and targets the customer's group (FR-26.10): the kill switch takes effect on
+// the next resolve (campaign_kill_switch_effect NEXT_RESOLVE). The engine applies the key
+// and quantity filters.
+func (s *Postgres) ActiveRecords(ctx context.Context, q ActiveQuery) ([]domain.Record, error) {
 	out := []domain.Record{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select `+recordColumns+` from condition_record
 			where legal_entity_id::text = $1 and currency = $2 and status = 'ACTIVE' and valid_from <= $3::date and valid_to >= $3::date`,
-			legalEntityID, currency, dayStr(asOf))
+			q.LegalEntityID, q.Currency, dayStr(q.AsOf))
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
+		var recs []domain.Record
+		campaignIDs := map[string]bool{}
 		for rows.Next() {
 			e, err := scanEntry(rows)
 			if err != nil {
+				rows.Close()
 				return err
 			}
-			out = append(out, e.Record)
+			recs = append(recs, e.Record)
+			if e.CampaignID != "" {
+				campaignIDs[e.CampaignID] = true
+			}
 		}
-		return rows.Err()
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		usable := map[string]bool{}
+		if len(campaignIDs) > 0 {
+			ids := make([]string, 0, len(campaignIDs))
+			for id := range campaignIDs {
+				ids = append(ids, id)
+			}
+			campaigns, err := campaignsByID(ctx, tx, ids)
+			if err != nil {
+				return err
+			}
+			for _, c := range campaigns {
+				usable[c.ID] = domain.CampaignLive(c, q.AsOf) && domain.CampaignTargets(c, q.CustomerGroupID)
+			}
+		}
+		for _, r := range recs {
+			if r.CampaignID == "" || usable[r.CampaignID] {
+				out = append(out, r)
+			}
+		}
+		return nil
 	})
 	return out, err
 }
@@ -391,7 +455,8 @@ func (s *Postgres) ActivateRecord(ctx context.Context, id string, version int, i
 		if err := enqueue(ctx, tx, out, pevents.ConditionRecordActivated, pevents.ConditionRecordData{ID: out.ID, LegalEntityID: out.LegalEntityID,
 			Type: string(out.Type), CustomerKind: string(out.CustomerKind), CustomerKey: out.CustomerKey, ProductKind: string(out.ProductKind),
 			ProductKey: out.ProductKey, Variant: out.Variant, Currency: out.Currency, Unit: out.Unit, FromQuantity: out.FromQuantity.String(),
-			ValidFrom: dayStr(out.ValidFrom), ValidTo: dayStr(out.ValidTo), Version: out.Version, Retroactive: retroactive}); err != nil {
+			ValidFrom: dayStr(out.ValidFrom), ValidTo: dayStr(out.ValidTo), Version: out.Version, Retroactive: retroactive,
+			CampaignID: out.CampaignID}); err != nil {
 			return err
 		}
 		return rememberCommand(ctx, tx, p.TenantID, idempotencyKey, hash, out)

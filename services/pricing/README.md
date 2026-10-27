@@ -4,7 +4,35 @@ Deterministic pricing engine for Passage: resolves net prices and discounts for 
 customer / product / date / quantity / currency tuple from condition records, and returns
 the ordered trace of conditions that produced the price. Ticket PSG-26, PRD §5.26.
 
-## Status (slices 1-4)
+## Status (slices 1-5)
+
+Built in slice 5:
+
+- **Campaigns** (FR-26.10): a campaign has a name, validity, an optional target customer group,
+  a budget and currency, and a kill switch. A condition record joins a campaign through
+  `campaignId` (same legal entity; 404 PRC-0041 when unknown); the campaign is part of the record
+  key, so a campaign record does not overlap the plain record of the same key, and at one access
+  it outranks the plain record (BR-26.1 step 4: most dimensions matched). Resolve keeps a campaign
+  record only while the campaign is live (not killed, pricing date inside its validity) and, for a
+  targeted campaign, only when the request's `customerGroupId` is the target group. `:kill` and
+  `:restore` (versioned, `Idempotency-Key`) take effect on the next resolve
+  (`campaign_kill_switch_effect` NEXT_RESOLVE) and write `campaign.killed` / `campaign.restored`.
+  The budget is recorded, not enforced (see NOT-IMPLEMENTED.md).
+- **Pricing procedures** (FR-26.1): versioned procedures per legal entity and name (AX_STANDARD,
+  SAP_RVAA01, ...). Each version holds steps 10–990 in increasing order with exactly one PRICE
+  step, the condition type (the five the engine prices plus FREIGHT, REBATE_ACCRUAL, ROUNDING and
+  FREE_GOODS), an optional CEL requirement (≤ 512 characters), an exclusion group with its mode
+  (BEST or FIRST, one mode per group), the statistical flag and the account key. Create numbers
+  the next version under an advisory lock; `:revise` replaces a DRAFT's steps at its `revision`;
+  `:activate` supersedes the ACTIVE version of the same name in one transaction and writes
+  `procedure.activated`. ACTIVE and SUPERSEDED versions are immutable (409 PRC-0008). Writes need
+  `pricing.admin` (PricingAdmin). The engine still runs the reference step order; resolution by
+  the stored procedure is listed in NOT-IMPLEMENTED.md.
+- Migration `0005_procedures_campaigns.sql` (campaign, pricing_procedure, condition_record.campaign_id
+  with a tenant-scoped foreign key; RLS and legal-entity scope on both new tables).
+- **Web**: campaign list, create and detail (kill and restore); procedure designer with the version
+  list, a step editor for new versions and DRAFT revisions, and activation; the trade agreement
+  form takes an optional campaign.
 
 Built in slice 4:
 
@@ -123,7 +151,7 @@ testdata/               fixtures
 |---|---|---|---|
 | POST | `/v1/pricing/resolve?explain=true` | pricing.view | up to `PRICING_MAX_LINES` (500) lines; the PRD's PricingResolve duty maps here until w27 |
 | POST | `/v1/pricing/simulate?explain=true` | pricing.view | inline records, nothing stored |
-| GET | `/v1/pricing/condition-records?legalEntityId=&status=&type=&customer=&product=&asOf=&limit=` | pricing.view | at most 100 rows, ordered by id |
+| GET | `/v1/pricing/condition-records?legalEntityId=&status=&type=&customer=&product=&campaignId=&asOf=&limit=` | pricing.view | at most 100 rows, ordered by id |
 | POST | `/v1/pricing/condition-records` | pricing.maintain | `Idempotency-Key` honoured; creates DRAFT |
 | GET | `/v1/pricing/condition-records/{id}` | pricing.view | |
 | POST | `/v1/pricing/condition-records/{id}:activate` | pricing.maintain | body `{version}`; overlap check; `Idempotency-Key` honoured |
@@ -159,6 +187,16 @@ testdata/               fixtures
 | POST | `/v1/pricing/promotions` | pricing.fund.maintain | `Idempotency-Key` honoured; fund must be open and match (PRC-0011, COM-0001) |
 | GET | `/v1/pricing/promotions/{id}` | pricing.view or pricing.fund.maintain | |
 | POST | `/v1/pricing/promotions/{id}:actuals` | pricing.fund.maintain | body `{units, weeks, spend}`; overwrites; stand-in for the nightly actuals job |
+| GET | `/v1/pricing/campaigns?legalEntityId=` | pricing.view | latest start first |
+| POST | `/v1/pricing/campaigns` | pricing.maintain | `Idempotency-Key` honoured; live at version 1 |
+| GET | `/v1/pricing/campaigns/{id}` | pricing.view | |
+| POST | `/v1/pricing/campaigns/{id}:kill` | pricing.maintain | body `{version}`; next resolve drops the campaign's records; `Idempotency-Key` honoured |
+| POST | `/v1/pricing/campaigns/{id}:restore` | pricing.maintain | body `{version}`; `Idempotency-Key` honoured |
+| GET | `/v1/pricing/procedures?legalEntityId=` | pricing.view | by name, newest version first |
+| POST | `/v1/pricing/procedures` | pricing.admin | DRAFT with the next version number; `Idempotency-Key` honoured |
+| GET | `/v1/pricing/procedures/{id}` | pricing.view | |
+| POST | `/v1/pricing/procedures/{id}:revise` | pricing.admin | body `{revision, steps}`; DRAFT only (PRC-0008); `Idempotency-Key` honoured |
+| POST | `/v1/pricing/procedures/{id}:activate` | pricing.admin | supersedes the ACTIVE version; `Idempotency-Key` honoured |
 | GET | `/healthz`, `/readyz`, `/metrics` | none | `/metrics` on the admin port |
 
 ## Error codes
@@ -169,6 +207,7 @@ testdata/               fixtures
 | PRC-0002 | 409 | Overlapping ACTIVE record for the same key, currency and unit; names the id |
 | PRC-0003 | 422 | Negative amount (BR-26.10) |
 | PRC-0005 | 422 | Journal has validation errors at post or reverse; nothing was posted (names up to five lines) |
+| PRC-0008 | 409 | Procedure version is ACTIVE or SUPERSEDED and immutable; create a new version |
 | PRC-0009 | 422 | Request exceeds `PRICING_MAX_LINES` |
 | PRC-0030 | 404 | Condition record not found (store) |
 | PRC-0031 | 409 | Invalid state transition (store) |
@@ -183,6 +222,8 @@ testdata/               fixtures
 | PRC-0038 | 409 | A commission rule already exists for the sales group, customer group and item group |
 | PRC-0039 | 404 | Trade fund not found |
 | PRC-0040 | 404 | Promotion plan not found |
+| PRC-0041 | 404 | Campaign not found (also when a condition record names an unknown campaign) |
+| PRC-0042 | 404 | Pricing procedure not found |
 | conflict_version | 412 | Body version does not match the stored version |
 | idempotency_key_reuse | 422 | Same `Idempotency-Key` with a different body, or an invoice line accrued again with a different date, value or quantity |
 | COM-0001 | 422 | Validation failure; `errors` maps each field to its message (percentages outside 0–100, a product-keyed TOTAL_DISC, bad dates, ...) |
@@ -193,13 +234,15 @@ testdata/               fixtures
 
 Written to `outbox` in the same transaction as the change (see `events/asyncapi.yaml`):
 
-- `dev.passage.pricing.conditionrecord.activated.v1` (activation and journal post; `journal_id` set by journals)
+- `dev.passage.pricing.conditionrecord.activated.v1` (activation and journal post; `journal_id` set by journals, `campaign_id` for a campaign record)
 - `dev.passage.pricing.conditionrecord.withdrawn.v1`
 - `dev.passage.pricing.journal.posted.v1` (post and reverse)
 - `dev.passage.pricing.rebateaccrual.posted.v1` (`retroactive=true` on a retroactive recompute delta)
 - `dev.passage.pricing.commission.calculated.v1` (one per rep per invoice line; rep id only, never a name)
 - `dev.passage.pricing.fund.closed.v1`, `dev.passage.pricing.fund.reopened.v1`
 - `dev.passage.pricing.fundusage.recorded.v1` (one per attribution, with the period usage and budget after it)
+- `dev.passage.pricing.campaign.killed.v1`, `dev.passage.pricing.campaign.restored.v1` (kill switch)
+- `dev.passage.pricing.procedure.activated.v1` (names the superseded version)
 
 The entity segments are `conditionrecord` and `rebateaccrual` (as in `internal/events`); the PRD
 writes `condition-record` and `rebate-accrual`. Naming is a handoff to the kernel owner (see NOT-IMPLEMENTED.md).

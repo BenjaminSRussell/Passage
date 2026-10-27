@@ -14,7 +14,32 @@ const (
 	FundClosed        = "dev.passage.pricing.fund.closed.v1"
 	FundReopened      = "dev.passage.pricing.fund.reopened.v1"
 	FundUsageRecorded = "dev.passage.pricing.fundusage.recorded.v1"
+	// Campaigns (FR-26.10): the kill switch set (killed) or cleared (restored).
+	CampaignKilled   = "dev.passage.pricing.campaign.killed.v1"
+	CampaignRestored = "dev.passage.pricing.campaign.restored.v1"
+	// Pricing procedures (FR-26.1): a version became ACTIVE.
+	ProcedureActivated = "dev.passage.pricing.procedure.activated.v1"
 )
+
+// CampaignStatusData is the payload of campaign.killed and campaign.restored. A killed
+// campaign's records leave the next resolve (NEXT_RESOLVE, §5.26.13); the sales cache
+// drops its snapshot for the legal entity on either event.
+type CampaignStatusData struct {
+	CampaignID    string `json:"campaign_id"`
+	LegalEntityID string `json:"legal_entity_id"`
+	Killed        bool   `json:"killed"`
+	Version       int    `json:"version"`
+}
+
+// ProcedureActivatedData is the payload of procedure.activated. SupersededID names the
+// version it replaced, when there was one.
+type ProcedureActivatedData struct {
+	ProcedureID   string `json:"procedure_id"`
+	LegalEntityID string `json:"legal_entity_id"`
+	Name          string `json:"name"`
+	Version       int    `json:"version"`
+	SupersededID  string `json:"superseded_id,omitempty"`
+}
 
 // FundStatusData is the payload of fund.closed and fund.reopened. Claims and
 // deductions (w30) stop attributing to a closed fund.
@@ -110,6 +135,8 @@ type ConditionRecordData struct {
 	Retroactive bool `json:"retroactive"`
 	// JournalID names the price journal that posted or reversed the record; empty for a single activation.
 	JournalID string `json:"journal_id,omitempty"`
+	// CampaignID names the campaign the record belongs to (FR-26.10); empty when it stands alone.
+	CampaignID string `json:"campaign_id,omitempty"`
 }
 
 // ConditionRecordWithdrawnData is the payload of conditionrecord.withdrawn.

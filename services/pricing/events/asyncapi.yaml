@@ -48,6 +48,20 @@ channels:
     messages:
       fundUsageRecorded:
         $ref: "#/components/messages/FundUsageRecorded"
+  campaign:
+    address: passage.pricing.campaign
+    description: Campaign kill switch set or cleared (FR-26.10).
+    messages:
+      campaignKilled:
+        $ref: "#/components/messages/CampaignKilled"
+      campaignRestored:
+        $ref: "#/components/messages/CampaignRestored"
+  procedure:
+    address: passage.pricing.procedure
+    description: Pricing procedure version activated (FR-26.1).
+    messages:
+      procedureActivated:
+        $ref: "#/components/messages/ProcedureActivated"
 operations:
   publishJournalPosted:
     action: send
@@ -97,6 +111,24 @@ operations:
     summary: Usage was attributed to a fund within its period budget (or with overspend allowed).
     messages:
       - {$ref: "#/channels/fundUsage/messages/fundUsageRecorded"}
+  publishCampaignKilled:
+    action: send
+    channel: {$ref: "#/channels/campaign"}
+    summary: A campaign's kill switch was set; its records leave the next resolve (NEXT_RESOLVE).
+    messages:
+      - {$ref: "#/channels/campaign/messages/campaignKilled"}
+  publishCampaignRestored:
+    action: send
+    channel: {$ref: "#/channels/campaign"}
+    summary: A killed campaign was restored; its records rejoin the next resolve within its validity.
+    messages:
+      - {$ref: "#/channels/campaign/messages/campaignRestored"}
+  publishProcedureActivated:
+    action: send
+    channel: {$ref: "#/channels/procedure"}
+    summary: A procedure version became ACTIVE and the previous ACTIVE version of the same name was superseded.
+    messages:
+      - {$ref: "#/channels/procedure/messages/procedureActivated"}
 components:
   messages:
     ConditionRecordActivated:
@@ -121,6 +153,7 @@ components:
           valid_to: {type: string, format: date}
           version: {type: integer}
           journal_id: {type: string, format: uuid, description: "Price journal that posted or reversed the record; absent for a single-record activation."}
+          campaign_id: {type: string, format: uuid, description: "Campaign the record belongs to (FR-26.10); absent when it stands alone."}
           retroactive: {type: boolean, description: "valid_from is before the activation or posting day (BR-26.7); consumers never re-price posted documents."}
     ConditionRecordWithdrawn:
       name: dev.passage.pricing.conditionrecord.withdrawn.v1
@@ -221,7 +254,43 @@ components:
           currency: {type: string, pattern: "^[A-Z]{3}$"}
           period_usage: {type: string, description: "Usage in the period including this attribution."}
           budget: {type: string, description: "Budget per period at the time of attribution."}
+    CampaignKilled:
+      name: dev.passage.pricing.campaign.killed.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/CampaignStatus"
+    CampaignRestored:
+      name: dev.passage.pricing.campaign.restored.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/CampaignStatus"
+    ProcedureActivated:
+      name: dev.passage.pricing.procedure.activated.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        description: >
+          A procedure version became ACTIVE (FR-26.1). Activated versions are immutable; the
+          ACTIVE version it replaced, if any, is now SUPERSEDED.
+        required: [procedure_id, legal_entity_id, name, version]
+        properties:
+          procedure_id: {type: string, format: uuid}
+          legal_entity_id: {type: string, format: uuid}
+          name: {type: string, description: "For example AX_STANDARD or SAP_RVAA01."}
+          version: {type: integer, minimum: 1}
+          superseded_id: {type: string, format: uuid, description: "The version this activation superseded; absent for the first."}
   schemas:
+    CampaignStatus:
+      type: object
+      description: >
+        A campaign's kill switch after kill or restore (FR-26.10). Records of a killed campaign
+        drop out of the next resolve; caches drop their snapshot for the legal entity.
+      required: [campaign_id, legal_entity_id, killed, version]
+      properties:
+        campaign_id: {type: string, format: uuid}
+        legal_entity_id: {type: string, format: uuid}
+        killed: {type: boolean}
+        version: {type: integer, minimum: 1}
     FundStatus:
       type: object
       description: A trade promotion fund's open/closed state after close or reopen (BR-26.15).

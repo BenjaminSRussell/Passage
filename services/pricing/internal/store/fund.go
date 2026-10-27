@@ -177,8 +177,8 @@ func usedInPeriod(ctx context.Context, tx pgx.Tx, fundID, period string) (decima
 	return decimal.RequireFromString(sum), nil
 }
 
-// enqueueFund writes a fund event into the outbox inside tx.
-func enqueueFund(ctx context.Context, tx pgx.Tx, aggregate, id, typ string, data any) error {
+// enqueueEvent writes an event into the outbox inside tx (same transaction as the change).
+func enqueueEvent(ctx context.Context, tx pgx.Tx, aggregate, id, typ string, data any) error {
 	p, _ := tenant.FromContext(ctx)
 	evt, err := events.New(typ, eventSource, id, p.TenantID, data)
 	if err != nil {
@@ -216,7 +216,7 @@ func (s *Postgres) AttributeFund(ctx context.Context, a FundAttribution, idempot
 			return err
 		}
 		out = FundPosition{Fund: f, Period: a.Period, Used: used.Add(a.Amount)}
-		if err := enqueueFund(ctx, tx, "fundusage", usageID, pevents.FundUsageRecorded, pevents.FundUsageRecordedData{
+		if err := enqueueEvent(ctx, tx, "fundusage", usageID, pevents.FundUsageRecorded, pevents.FundUsageRecordedData{
 			UsageID: usageID, FundID: f.ID, LegalEntityID: f.LegalEntityID, Period: a.Period, Source: a.Source,
 			Reference: a.Reference, Amount: a.Amount.String(), Currency: f.Currency, PeriodUsage: out.Used.String(),
 			Budget: f.BudgetPerPeriod.String()}); err != nil {
@@ -305,7 +305,7 @@ func (s *Postgres) setFundClosed(ctx context.Context, id string, version int, cl
 		if err != nil {
 			return err
 		}
-		if err := enqueueFund(ctx, tx, "fund", out.ID, typ, pevents.FundStatusData{FundID: out.ID, LegalEntityID: out.LegalEntityID,
+		if err := enqueueEvent(ctx, tx, "fund", out.ID, typ, pevents.FundStatusData{FundID: out.ID, LegalEntityID: out.LegalEntityID,
 			Closed: out.Closed, Version: out.Version}); err != nil {
 			return err
 		}

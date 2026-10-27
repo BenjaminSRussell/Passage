@@ -34,6 +34,8 @@ export interface ConditionRecordInput {
   validTo: string;
   searchNext: boolean;
   exclusive: boolean;
+  /** Optional campaign (FR-26.10); the record prices only while the campaign is live. */
+  campaignId?: string;
 }
 
 export interface ConditionRecord extends ConditionRecordInput {
@@ -48,6 +50,7 @@ export interface RecordFilter {
   type?: ConditionType | "";
   customer?: string;
   product?: string;
+  campaignId?: string;
   asOf?: string;
   limit?: number;
 }
@@ -656,4 +659,109 @@ export function createPromotion(body: PromotionInput, key: string = newKey()): P
 /** POST /promotions/{id}:actuals - overwrites the window's units, weeks and spend; returns the effectiveness. */
 export function recordPromotionActuals(id: string, body: PromotionActuals): Promise<Promotion> {
   return post<Promotion>(`/promotions/${encodeURIComponent(id)}:actuals`, body);
+}
+
+// ---- Campaigns (FR-26.10): validity, target customer group, budget and kill switch.
+
+export interface CampaignInput {
+  legalEntityId: string;
+  name: string;
+  validFrom: string;
+  validTo: string;
+  /** Customer group the campaign is for; empty means every customer. */
+  targetCustomerGroup: string;
+  budget: string;
+  currency: string;
+}
+
+export interface Campaign extends CampaignInput {
+  id: string;
+  killed: boolean;
+  version: number;
+}
+
+export function listCampaigns(legalEntityId = "", signal?: AbortSignal): Promise<Campaign[]> {
+  return items<Campaign>(`/campaigns${query({ legalEntityId })}`, signal);
+}
+
+export function getCampaign(id: string, signal?: AbortSignal): Promise<Campaign> {
+  return send<Campaign>(`/campaigns/${encodeURIComponent(id)}`, {}, signal);
+}
+
+export function createCampaign(body: CampaignInput, key: string = newKey()): Promise<Campaign> {
+  return post<Campaign>("/campaigns", body, key);
+}
+
+/** POST /campaigns/{id}:kill - the campaign's records drop out of the next resolve. */
+export function killCampaign(id: string, version: number, key: string = newKey()): Promise<Campaign> {
+  return post<Campaign>(`/campaigns/${encodeURIComponent(id)}:kill`, { version }, key);
+}
+
+/** POST /campaigns/{id}:restore - the records rejoin the next resolve inside the campaign validity. */
+export function restoreCampaign(id: string, version: number, key: string = newKey()): Promise<Campaign> {
+  return post<Campaign>(`/campaigns/${encodeURIComponent(id)}:restore`, { version }, key);
+}
+
+// ---- Pricing procedures (FR-26.1): versioned step sequences; ACTIVE and SUPERSEDED versions are immutable.
+
+export const PROCEDURE_STEP_TYPES = [
+  "PRICE",
+  "LINE_DISC",
+  "MULTILINE_DISC",
+  "TOTAL_DISC",
+  "SURCHARGE",
+  "FREIGHT",
+  "REBATE_ACCRUAL",
+  "ROUNDING",
+  "FREE_GOODS",
+] as const;
+export type ProcedureStepType = (typeof PROCEDURE_STEP_TYPES)[number];
+export type ProcedureStatus = "DRAFT" | "ACTIVE" | "SUPERSEDED";
+export type ExclusionMode = "" | "BEST" | "FIRST";
+
+export interface ProcedureStep {
+  stepNo: number;
+  conditionType: ProcedureStepType;
+  requirementCel: string;
+  exclusionGroup: string;
+  exclusionMode: ExclusionMode;
+  statistical: boolean;
+  accountKey: string;
+}
+
+export interface ProcedureInput {
+  legalEntityId: string;
+  name: string;
+  steps: ProcedureStep[];
+}
+
+export interface Procedure extends ProcedureInput {
+  id: string;
+  version: number;
+  status: ProcedureStatus;
+  /** Optimistic version of a DRAFT's steps. */
+  revision: number;
+}
+
+export function listProcedures(legalEntityId = "", signal?: AbortSignal): Promise<Procedure[]> {
+  return items<Procedure>(`/procedures${query({ legalEntityId })}`, signal);
+}
+
+export function getProcedure(id: string, signal?: AbortSignal): Promise<Procedure> {
+  return send<Procedure>(`/procedures/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** POST /procedures - saves a DRAFT with the next version number for the legal entity and name. */
+export function createProcedure(body: ProcedureInput, key: string = newKey()): Promise<Procedure> {
+  return post<Procedure>("/procedures", body, key);
+}
+
+/** POST /procedures/{id}:revise - replaces a DRAFT's steps; 409 PRC-0008 once activated, 412 on a stale revision. */
+export function reviseProcedure(id: string, revision: number, steps: ProcedureStep[], key: string = newKey()): Promise<Procedure> {
+  return post<Procedure>(`/procedures/${encodeURIComponent(id)}:revise`, { revision, steps }, key);
+}
+
+/** POST /procedures/{id}:activate - supersedes the ACTIVE version of the same name; 409 PRC-0008 when not DRAFT. */
+export function activateProcedure(id: string, key: string = newKey()): Promise<Procedure> {
+  return post<Procedure>(`/procedures/${encodeURIComponent(id)}:activate`, {}, key);
 }

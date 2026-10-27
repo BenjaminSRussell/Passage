@@ -92,6 +92,8 @@ func (a *API) Register(r chi.Router) {
 	a.registerRetroRoutes(r)
 	a.registerCommissionRoutes(r)
 	a.registerFundRoutes(r)
+	a.registerCampaignRoutes(r)
+	a.registerProcedureRoutes(r)
 }
 
 // Metrics serves the Prometheus text exposition of the service counters.
@@ -193,7 +195,8 @@ func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, problem)
 		return
 	}
-	records, err := a.store.ActiveRecords(r.Context(), req.LegalEntityID, req.Currency, header.PricingDate)
+	records, err := a.store.ActiveRecords(r.Context(), store.ActiveQuery{LegalEntityID: req.LegalEntityID, Currency: req.Currency,
+		CustomerGroupID: header.CustomerGroupID, AsOf: header.PricingDate})
 	if err != nil {
 		slog.Error("load active records failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
@@ -322,6 +325,8 @@ type recordDTO struct {
 	ValidTo       string `json:"validTo"`
 	SearchNext    bool   `json:"searchNext"`
 	Exclusive     bool   `json:"exclusive"`
+	// CampaignID optionally groups the record under a campaign (FR-26.2, FR-26.10).
+	CampaignID string `json:"campaignId"`
 }
 
 // recordView is the wire form of a stored condition record.
@@ -346,6 +351,7 @@ type recordView struct {
 	Exclusive     bool   `json:"exclusive"`
 	Status        string `json:"status"`
 	Version       int    `json:"version"`
+	CampaignID    string `json:"campaignId,omitempty"`
 }
 
 func viewOf(e store.Entry) recordView {
@@ -353,7 +359,7 @@ func viewOf(e store.Entry) recordView {
 		ProductKind: string(e.ProductKind), ProductKey: e.ProductKey, Variant: e.Variant, Currency: e.Currency, Unit: e.Unit,
 		FromQuantity: e.FromQuantity.String(), Amount: e.Amount.String(), DiscPct1: e.DiscPct1.String(), DiscPct2: e.DiscPct2.String(),
 		ValidFrom: e.ValidFrom.Format(dateLayout), ValidTo: e.ValidTo.Format(dateLayout), SearchNext: e.SearchNext, Exclusive: e.Exclusive,
-		Status: e.Status, Version: e.Version}
+		Status: e.Status, Version: e.Version, CampaignID: e.CampaignID}
 }
 
 // toRecord converts a request record to the domain form and validates it (FR-26.2, BR-26.10).
@@ -381,7 +387,10 @@ func toRecord(dto recordDTO) (domain.Record, *httpx.Problem) {
 	rec := domain.Record{ID: dto.ID, Type: domain.ConditionType(dto.Type), CustomerKind: domain.CustomerKind(dto.CustomerKind), CustomerKey: dto.CustomerKey,
 		ProductKind: domain.ProductKind(dto.ProductKind), ProductKey: dto.ProductKey, Variant: dto.Variant, Currency: dto.Currency, Unit: dto.Unit,
 		FromQuantity: from, Amount: amount, DiscPct1: p1, DiscPct2: p2, ValidFrom: validFrom, ValidTo: validTo,
-		SearchNext: dto.SearchNext, Exclusive: dto.Exclusive}
+		SearchNext: dto.SearchNext, Exclusive: dto.Exclusive, CampaignID: dto.CampaignID}
+	if dto.CampaignID != "" && !ids.Valid(dto.CampaignID) {
+		fields["campaignId"] = "must be a UUID"
+	}
 	if len(fields) > 0 {
 		return rec, validation(fields)
 	}
@@ -431,8 +440,12 @@ func (a *API) listRecords(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	f := store.Filter{LegalEntityID: q.Get("legalEntityId"), Status: q.Get("status"), Type: q.Get("type"), Customer: q.Get("customer"), Product: q.Get("product")}
+	f := store.Filter{LegalEntityID: q.Get("legalEntityId"), Status: q.Get("status"), Type: q.Get("type"), Customer: q.Get("customer"),
+		Product: q.Get("product"), CampaignID: q.Get("campaignId")}
 	fields := map[string]string{}
+	if f.CampaignID != "" && !ids.Valid(f.CampaignID) {
+		fields["campaignId"] = "must be a UUID"
+	}
 	if f.LegalEntityID != "" && !ids.Valid(f.LegalEntityID) {
 		fields["legalEntityId"] = "must be a UUID"
 	}

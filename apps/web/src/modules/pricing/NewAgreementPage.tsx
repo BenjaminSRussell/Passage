@@ -41,6 +41,7 @@ export const emptyAgreement: Values = {
   validTo: "",
   searchNext: false,
   exclusive: false,
+  campaignId: "",
 };
 
 /** Client checks that mirror the service (FR-26.2, BR-26.10); the service has the last word. */
@@ -62,6 +63,7 @@ export function validateAgreement(v: Values): Errors {
   }
   if (v.type !== "PRICE" && v.amount === "" && v.discPct1 === "" && v.discPct2 === "") errors.amount = "Enter an amount, a percentage or both.";
   if (v.type === "SURCHARGE" && v.discPct2 !== "" && Number(v.discPct2) !== 0) errors.discPct2 = "A surcharge takes one percentage; leave percentage 2 empty.";
+  if ((v.campaignId ?? "").trim() !== "" && !UUID.test((v.campaignId ?? "").trim())) errors.campaignId = "Enter the campaign id (a UUID) or leave it empty.";
   if (!DAY.test(v.validFrom)) errors.validFrom = "Enter the first valid day.";
   if (!DAY.test(v.validTo)) errors.validTo = "Enter the last valid day.";
   else if (DAY.test(v.validFrom) && v.validTo < v.validFrom) errors.validTo = "The last day must be on or after the first day.";
@@ -89,6 +91,7 @@ export function inputOf(r: ConditionRecord): Values {
     validTo: r.validTo,
     searchNext: r.searchNext,
     exclusive: r.exclusive,
+    campaignId: r.campaignId ?? "",
   };
 }
 
@@ -104,15 +107,19 @@ function toInput(v: Values): ConditionRecordInput {
     amount: v.amount || "0",
     discPct1: v.discPct1 || "0",
     discPct2: v.discPct2 || "0",
+    campaignId: (v.campaignId ?? "").trim(),
   };
 }
 
-/** Create a DRAFT trade agreement; ?copy=<id> starts from an existing record (grid "copy"). */
+/**
+ * Create a DRAFT trade agreement; ?copy=<id> starts from an existing record (grid "copy") and
+ * ?campaign=<id> puts the new agreement in that campaign (FR-26.10).
+ */
 export function NewAgreementPage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const copyFrom = params.get("copy");
-  const [values, setValues] = useState<Values>(emptyAgreement);
+  const [values, setValues] = useState<Values>(() => ({ ...emptyAgreement, campaignId: params.get("campaign") ?? "" }));
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
@@ -236,6 +243,11 @@ export function NewAgreementPage() {
           {text("ta-pct2", "discPct2", "Percentage 2", { optional: true, hint: "Applied after percentage 1.", mono: true })}
           {text("ta-valid-from", "validFrom", "Valid from", { type: "date" })}
           {text("ta-valid-to", "validTo", "Valid to", { type: "date", hint: "Inclusive." })}
+          {text("ta-campaign", "campaignId", "Campaign id", {
+            optional: true,
+            mono: true,
+            hint: "The agreement then prices only while the campaign is live and for its customer group.",
+          })}
           <div className={styles.formActions}>
             <span className={styles.check}>
               <Input id="ta-search-next" type="checkbox" checked={values.searchNext} onChange={(e) => update({ searchNext: e.target.checked })} />

@@ -72,6 +72,9 @@ type Record struct {
 	ValidTo      time.Time
 	SearchNext   bool
 	Exclusive    bool
+	// CampaignID is the optional campaign dimension of the key (FR-26.2, FR-26.10). The
+	// store drops records of a killed, expired or non-targeted campaign before resolve.
+	CampaignID string
 }
 
 // Header is the document-level part of a resolve request.

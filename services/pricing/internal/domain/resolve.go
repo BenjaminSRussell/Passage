@@ -242,7 +242,8 @@ func evaluate(t ConditionType, h Header, line Line, recs []Record, current decim
 }
 
 // candidates returns the matching ACTIVE records for one access, best first:
-// greatest from_quantity, then lowest value, then id (deterministic).
+// greatest from_quantity, then most dimensions matched (a campaign record before a
+// plain one, BR-26.1 step 4), then lowest value, then id (deterministic).
 func candidates(t ConditionType, h Header, line Line, recs []Record, acc Access, current decimal.Decimal) []*Record {
 	var out []*Record
 	for i := range recs {
@@ -266,6 +267,9 @@ func candidates(t ConditionType, h Header, line Line, recs []Record, acc Access,
 		a, b := out[i], out[j]
 		if c := a.FromQuantity.Cmp(b.FromQuantity); c != 0 {
 			return c > 0
+		}
+		if (a.CampaignID != "") != (b.CampaignID != "") {
+			return a.CampaignID != ""
 		}
 		if c := apply(t, current, a).Cmp(apply(t, current, b)); c != 0 {
 			return c < 0
@@ -324,7 +328,7 @@ func pctFactor(p1, p2 decimal.Decimal) decimal.Decimal {
 }
 
 // Conflict reports the first ACTIVE record that candidate c would overlap: same key,
-// currency, unit and from_quantity with intersecting validity (FR-26.2, BR-26.6).
+// currency, unit, from_quantity and campaign with intersecting validity (FR-26.2, BR-26.6).
 func Conflict(c Record, existing []Record) (Record, bool) {
 	for _, r := range existing {
 		if r.ID != c.ID && r.Status == StatusActive && sameKey(c, r) && validityOverlaps(c, r) {
@@ -337,7 +341,7 @@ func Conflict(c Record, existing []Record) (Record, bool) {
 func sameKey(a, b Record) bool {
 	return a.Type == b.Type && a.CustomerKind == b.CustomerKind && a.CustomerKey == b.CustomerKey &&
 		a.ProductKind == b.ProductKind && a.ProductKey == b.ProductKey && a.Variant == b.Variant &&
-		a.Currency == b.Currency && a.Unit == b.Unit && a.FromQuantity.Equal(b.FromQuantity)
+		a.Currency == b.Currency && a.Unit == b.Unit && a.FromQuantity.Equal(b.FromQuantity) && a.CampaignID == b.CampaignID
 }
 
 // validityOverlaps reports whether two inclusive day ranges intersect.

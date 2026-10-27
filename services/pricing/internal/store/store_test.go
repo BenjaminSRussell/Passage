@@ -146,7 +146,7 @@ func TestPostgres_ActivateRejectsOverlapAndWritesEvents(t *testing.T) {
 	if got, _ := s.GetRecord(ctx, second.ID); got.Status != domain.StatusDraft {
 		t.Fatalf("rejected record = %s; want it left in DRAFT", got.Status)
 	}
-	recs, err := s.ActiveRecords(ctx, legalEntity, "USD", day("2026-03-01"))
+	recs, err := s.ActiveRecords(ctx, store.ActiveQuery{LegalEntityID: legalEntity, Currency: "USD", AsOf: day("2026-03-01")})
 	if err != nil || len(recs) != 1 || recs[0].ID != first.ID {
 		t.Fatalf("active records = %v, %v; want the first record only", recs, err)
 	}
@@ -183,7 +183,7 @@ func TestPostgres_WithdrawLifecycle(t *testing.T) {
 	if _, err := s.WithdrawRecord(ctx, rec.ID, 2, "another reason", "wd-1"); problemCode(err) != store.CodeIdempotencyUse {
 		t.Fatalf("same key, different reason = %v; want %s", err, store.CodeIdempotencyUse)
 	}
-	if recs, _ := s.ActiveRecords(ctx, legalEntity, "USD", day("2026-03-01")); len(recs) != 0 {
+	if recs, _ := s.ActiveRecords(ctx, store.ActiveQuery{LegalEntityID: legalEntity, Currency: "USD", AsOf: day("2026-03-01")}); len(recs) != 0 {
 		t.Fatalf("a withdrawn record must not price, got %v", recs)
 	}
 	events := outboxRows(t, ctx, pool)
