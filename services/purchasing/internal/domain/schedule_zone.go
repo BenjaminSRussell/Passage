@@ -65,7 +65,7 @@ func CheckScheduleReduction(zone string, oldQty, newQty decimal.Decimal, reason 
 // decreases unless a cumulative reset (a new agreement year) is recorded.
 func CheckCumulativeRelease(previous, next decimal.Decimal, reset bool) error {
 	if next.LessThan(previous) && !reset {
-		return fail(CodeValidation, "cumulative released %s cannot decrease from %s without a recorded reset", next, previous)
+		return fail(CodeCumulativeDecrease, "cumulative released %s cannot decrease from %s without a recorded reset", next, previous)
 	}
 	return nil
 }

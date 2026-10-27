@@ -1,9 +1,9 @@
 asyncapi: 3.0.0
 info:
   title: Passage Purchasing events
-  version: 0.6.0
+  version: 0.8.0
   description: |
-    Events published by the purchasing service in wave 17 slices 1 to 6. Each is written to the
+    Events published by the purchasing service in wave 17 slices 1 to 8. Each is written to the
     outbox in the same transaction as the state change and relayed by Debezium to the topic
     passage.<context>.<entity>. Payload structs live in internal/events. Schema evolution is
     additive only (BACKWARD_TRANSITIVE).
@@ -47,6 +47,12 @@ channels:
         $ref: '#/components/messages/RFQSent'
       rfqAwarded:
         $ref: '#/components/messages/RFQAwarded'
+  sarelease:
+    address: passage.procurement.sarelease
+    description: Scheduling agreement releases (FR-17.15); the Kafka key is the scheduling agreement id so releases stay ordered.
+    messages:
+      saReleaseCreated:
+        $ref: '#/components/messages/SAReleaseCreated'
 operations:
   publishRequisitionSubmitted:
     action: send
@@ -102,8 +108,29 @@ operations:
       $ref: '#/channels/rfq'
     messages:
       - $ref: '#/channels/rfq/messages/rfqAwarded'
+  publishSAReleaseCreated:
+    action: send
+    channel:
+      $ref: '#/channels/sarelease'
+    messages:
+      - $ref: '#/channels/sarelease/messages/saReleaseCreated'
 components:
   messages:
+    SAReleaseCreated:
+      name: SAReleaseCreated
+      title: sarelease.created.v1
+      summary: >-
+        A scheduling agreement release run created release REL-<agreement>-<n> of kind FRC or JIT
+        (FR-17.15). The PRD's sa.release.created.v1, renamed to one entity segment. A run on an
+        unchanged schedule with the same kind and run date returns the existing release and writes no event.
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.sarelease.created.v1 }
+              data: { $ref: '#/components/schemas/SAReleaseCreatedData' }
     RequisitionSubmitted:
       name: RequisitionSubmitted
       title: requisition.submitted.v1
@@ -449,3 +476,38 @@ components:
               lead_time_days: { type: integer, minimum: 0 }
               purchase_order_id: { type: string, format: uuid }
               override_reason: { type: string, description: present when a late reply was awarded (BR-17.11) }
+    SAReleaseCreatedData:
+      type: object
+      required: [agreement_id, agreement_number, legal_entity_id, release_number, release_no, kind, run_date, vendor_id, product_id, site_id, unit, cumulative_reset, cumulative_released, cumulative_received, lines]
+      additionalProperties: false
+      properties:
+        agreement_id: { type: string, format: uuid }
+        agreement_number: { type: string, example: SA-00000001 }
+        legal_entity_id: { type: string, format: uuid }
+        release_number: { type: string, example: REL-SA-00000001-1 }
+        release_no: { type: integer, minimum: 1 }
+        kind: { type: string, enum: [FRC, JIT], description: "FRC goes out as EDI DELFOR and JIT as DELJIT (wave 35)" }
+        run_date: { type: string, format: date }
+        vendor_id: { type: string, format: uuid }
+        product_id: { type: string, format: uuid }
+        site_id: { type: string, format: uuid }
+        unit: { type: string }
+        cumulative_reset: { type: boolean, description: "true when the release recorded a cumulative reset, so cumulative_released may be below the previous release (BR-17.13)" }
+        cumulative_released: { type: string, description: "decimal string; Σ scheduled quantity" }
+        cumulative_received: { type: string, description: "decimal string; Σ received quantity (wave 18 receipts)" }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [line_no, schedule_line_no, product_id, delivery_date, qty, cumulative_released, cumulative_received, zone, in_horizon]
+            additionalProperties: false
+            properties:
+              line_no: { type: integer, description: "position in delivery-date order" }
+              schedule_line_no: { type: integer }
+              product_id: { type: string, format: uuid }
+              delivery_date: { type: string, format: date }
+              qty: { type: string, description: decimal string }
+              cumulative_released: { type: string, description: "decimal string; running Σ qty up to this line" }
+              cumulative_received: { type: string, description: "decimal string; running Σ received up to this line" }
+              zone: { type: string, enum: [FIRM, TRADEOFF, FORECAST], description: "zone on the run date (BR-17.13)" }
+              in_horizon: { type: boolean, description: "inside the FRC or JIT horizon of the kind" }

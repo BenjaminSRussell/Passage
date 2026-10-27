@@ -20,9 +20,13 @@ describe("purchasing module", () => {
 
   it("has a list, a create form and a detail page for each document", () => {
     const paths = purchasing.routes.map((r) => r.path);
-    for (const doc of ["requisitions", "rfqs", "purchase-orders", "agreements", "trade-agreements"]) {
+    for (const doc of ["requisitions", "rfqs", "purchase-orders", "agreements", "scheduling-agreements", "trade-agreements"]) {
       expect(paths).toEqual(expect.arrayContaining([`/purchasing/${doc}`, `/purchasing/${doc}/new`, `/purchasing/${doc}/:id`]));
     }
+  });
+
+  it("routes the release documentation of a scheduling agreement", () => {
+    expect(purchasing.routes.map((r) => r.path)).toContain("/purchasing/scheduling-agreements/:id/releases/:releaseNo");
   });
 
   it("routes the purchase order edit page", () => {

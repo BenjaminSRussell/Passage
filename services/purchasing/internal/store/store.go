@@ -79,6 +79,13 @@ type Store interface {
 	GetInvoicingPlan(ctx context.Context, poID string, lineNo int) (PlanResult, error)
 	ListInvoicingPlans(ctx context.Context, poID string) ([]domain.InvoicingPlan, error)
 	DeleteInvoicingPlan(ctx context.Context, poID string, lineNo, ifMatch int) (int, error)
+	CreateSchedulingAgreement(ctx context.Context, in domain.SchedulingAgreement, idem Idem) (SchedulingAgreementDetail, error)
+	GetSchedulingAgreement(ctx context.Context, id string) (SchedulingAgreementDetail, error)
+	ListSchedulingAgreements(ctx context.Context, f SchedulingAgreementFilter, after string, limit int) (Page[SAMonitorRow], error)
+	ReplaceSchedule(ctx context.Context, id string, ifMatch int, asOf domain.Day, changes []domain.ScheduleChange) (SchedulingAgreementDetail, []string, error)
+	RunSchedulingRelease(ctx context.Context, id, kind string, runDate domain.Day, reset bool, idem Idem) (domain.SARelease, bool, error)
+	ListSchedulingReleases(ctx context.Context, agreementID string) ([]domain.SARelease, error)
+	GetSchedulingRelease(ctx context.Context, agreementID string, releaseNo int) (domain.SARelease, error)
 	Ping(ctx context.Context) error
 }
 

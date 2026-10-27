@@ -966,3 +966,178 @@ export async function runReprice(input: RepriceRunInput, apply: boolean, idempot
   });
   return result;
 }
+
+// --- Scheduling agreements and releases (FR-17.15, BR-17.13) ---
+
+export type ReleaseKind = "FRC" | "JIT";
+export type ScheduleZone = "FIRM" | "TRADEOFF" | "FORECAST";
+export type ReleaseFrequency = "DAILY" | "WEEKLY" | "MONTHLY";
+
+export interface ReleaseProfile {
+  frcHorizonDays: number;
+  jitHorizonDays: number;
+  firmZoneDays: number;
+  tradeoffZoneDays: number;
+  releaseFrequency: ReleaseFrequency;
+}
+
+export interface ScheduleLine {
+  lineNo: number;
+  deliveryDate: string;
+  /** Zone on the agreement's zonesAsOf day. */
+  zone: ScheduleZone;
+  qty: string;
+  receivedQty: string;
+  openQty: string;
+  reductionReason?: string;
+}
+
+export interface SchedulingAgreement {
+  id: string;
+  number: string;
+  legalEntityId: string;
+  vendorId: string;
+  productId: string;
+  siteId: string;
+  currency: string;
+  unit: string;
+  unitPrice: string;
+  targetQty: string;
+  scheduledQty: string;
+  receivedQty: string;
+  validFrom: string;
+  validTo?: string;
+  profile: ReleaseProfile;
+  zonesAsOf: string;
+  version: number;
+  lines: ScheduleLine[];
+  /** After a schedule change: one per reduction inside the trade-off zone. */
+  warnings?: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SchedulingAgreementRow {
+  id: string;
+  number: string;
+  legalEntityId: string;
+  vendorId: string;
+  productId: string;
+  siteId: string;
+  unit: string;
+  validFrom: string;
+  validTo?: string;
+  releaseFrequency: ReleaseFrequency;
+  scheduledQty: string;
+  receivedQty: string;
+  openQty: string;
+  releaseCount: number;
+  lastReleaseNumber?: string;
+  lastReleaseKind?: ReleaseKind;
+  lastRunDate?: string;
+  nextReleaseDue?: string;
+  version: number;
+}
+
+export interface ScheduleLineInput {
+  /** Set to change an existing line; leave out to add one. */
+  lineNo?: number;
+  deliveryDate: string;
+  qty: string;
+  /** Required to reduce, move or remove a FIRM line (PRC-SA-001). */
+  reason?: string;
+}
+
+export interface SchedulingAgreementInput {
+  legalEntityId: string;
+  vendorId: string;
+  productId: string;
+  siteId: string;
+  currency: string;
+  unit: string;
+  unitPrice: string;
+  targetQty?: string;
+  validFrom: string;
+  validTo?: string;
+  profile?: Partial<ReleaseProfile>;
+  lines: ScheduleLineInput[];
+}
+
+export interface SchedulingReleaseLine {
+  lineNo: number;
+  scheduleLineNo: number;
+  deliveryDate: string;
+  zone: ScheduleZone;
+  inHorizon: boolean;
+  qty: string;
+  cumulativeReleased: string;
+  cumulativeReceived: string;
+}
+
+export interface SchedulingRelease {
+  id: string;
+  agreementId: string;
+  releaseNo: number;
+  number: string;
+  kind: ReleaseKind;
+  runDate: string;
+  agreementVersion: number;
+  cumulativeReset: boolean;
+  cumulativeReleased: string;
+  cumulativeReceived: string;
+  /** Absent in the release list. */
+  lines?: SchedulingReleaseLine[];
+}
+
+export interface ReleaseRunInput {
+  kind: ReleaseKind;
+  runDate?: string;
+  cumulativeReset?: boolean;
+}
+
+const saPath = (id: string) => `/scheduling-agreements/${encodeURIComponent(id)}`;
+
+/** The release monitor: open cumulative quantity, last release and next release due. */
+export function listSchedulingAgreements(filters: { vendorId?: string } = {}, options: ListOptions = {}) {
+  return list<SchedulingAgreementRow>("/scheduling-agreements", { vendorId: filters.vendorId }, options);
+}
+
+export function getSchedulingAgreement(id: string, signal?: AbortSignal) {
+  return send<SchedulingAgreement>("GET", saPath(id), { signal });
+}
+
+export function createSchedulingAgreement(input: SchedulingAgreementInput, idempotencyKey = newIdempotencyKey()) {
+  return send<SchedulingAgreement>("POST", "/scheduling-agreements", {
+    body: input,
+    headers: { "Idempotency-Key": idempotencyKey },
+  });
+}
+
+/**
+ * Replaces the whole schedule: lines with lineNo change that line, others are
+ * added, and lines left out are removed. version is the ETag read with the
+ * agreement; a stale one is 409 PRC-VERSION-CONFLICT.
+ */
+export function replaceSchedule(id: string, lines: ScheduleLineInput[], version: number) {
+  return send<SchedulingAgreement>("PUT", `${saPath(id)}/schedule`, {
+    body: { lines },
+    headers: { "If-Match": `"${version}"` },
+  });
+}
+
+/** Runs a release; 201 for a new release, 200 when the schedule did not change since the same run. */
+export function runSchedulingRelease(id: string, input: ReleaseRunInput, idempotencyKey = newIdempotencyKey()) {
+  return send<SchedulingRelease>("POST", `${saPath(id)}:release`, {
+    body: input,
+    headers: { "Idempotency-Key": idempotencyKey },
+  });
+}
+
+export async function listSchedulingReleases(id: string, signal?: AbortSignal) {
+  const { body } = await send<{ items: SchedulingRelease[] }>("GET", `${saPath(id)}/releases`, { signal });
+  return body.items;
+}
+
+export function getSchedulingRelease(id: string, releaseNo: number, signal?: AbortSignal) {
+  return send<SchedulingRelease>("GET", `${saPath(id)}/releases/${releaseNo}`, { signal });
+}

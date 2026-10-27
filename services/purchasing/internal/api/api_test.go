@@ -67,6 +67,9 @@ type fakeStore struct {
 
 	// Subsequent price change: what the reprice methods received.
 	reprice repriceLog
+
+	// Scheduling agreements: what the scheduling methods received.
+	sa saLog
 }
 
 func newFake() *fakeStore {

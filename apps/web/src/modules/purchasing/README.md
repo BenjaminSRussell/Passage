@@ -23,6 +23,10 @@ Procurement workspace for wave 17 (PSG-17), wired to `services/purchasing` throu
 | `/purchasing/agreements` | Purchase agreement list with status filter and highest release %, load more | `GET /agreements` |
 | `/purchasing/agreements/new` | Header, validity, start as draft or effective; commitment lines whose fields follow the commitment type | `POST /agreements` (Idempotency-Key) |
 | `/purchasing/agreements/:id` | Summary, lines with committed / released / remaining / %, releases linked to their POs, Activate / Put on hold / Close | `GET /agreements/{id}`, `POST /agreements/{id}:activate|hold|close` (If-Match + Idempotency-Key) |
+| `/purchasing/scheduling-agreements` | Monitor scheduling agreement releases: vendor, product, validity, open quantity, release count, last release and run date, next release due with the frequency, load more | `GET /scheduling-agreements` |
+| `/purchasing/scheduling-agreements/new` | Legal entity, vendor, product and site, currency, unit and unit price, target quantity, validity; release profile (firm and trade-off zones, JIT and FRC horizons, frequency, PRD defaults filled in); the dated deliveries | `POST /scheduling-agreements` (Idempotency-Key) |
+| `/purchasing/scheduling-agreements/:id` | Summary with price, zones and horizons; the schedule with each line's zone (Firm / Trade-off / Forecast), scheduled, received and open quantity and last reduction reason; Edit schedule (change date or quantity, add, remove; a firm line needs a reason code to be reduced, moved or removed; trade-off warnings shown after saving; PRC-VERSION-CONFLICT when someone else changed it); Run a release (FRC or JIT, run date, optional cumulative reset; says when an unchanged schedule returned the existing release; PRC-SA-003 shown); the releases linked to their documentation | `GET /scheduling-agreements/{id}`, `PUT /scheduling-agreements/{id}/schedule` (If-Match), `POST /scheduling-agreements/{id}:release` (Idempotency-Key), `GET /scheduling-agreements/{id}/releases` |
+| `/purchasing/scheduling-agreements/:id/releases/:releaseNo` | Release documentation: kind, run date, schedule version, cumulative released and received, reset flag; lines in date order with zone, in-horizon flag and cumulative quantities | `GET /scheduling-agreements/{id}/releases/{releaseNo}` |
 | `/purchasing/trade-agreements` | Price row journal, load more | `GET /trade-agreements` |
 | `/purchasing/trade-agreements/new` | New PRICE row; PRC-TA-002 overlap shown inline | `POST /trade-agreements` |
 | `/purchasing/trade-agreements/:id` | One price row | `GET /trade-agreements/{id}` |
@@ -35,5 +39,5 @@ floats. Ids are typed as UUIDs until the vendor, product and legal-entity picker
 waves 6 to 8 are available to modules.
 
 Tests: `npx vitest --run src/modules/purchasing` (`pages.test.tsx`, `agreements.test.tsx`,
-`consolidation.test.tsx`, `orderLifecycle.test.tsx`, `rfq.test.tsx`, `rfqSealed.test.tsx`, `invoicingPlan.test.tsx` and `reprice.test.tsx` drive every route against a stubbed `fetch` through
+`consolidation.test.tsx`, `orderLifecycle.test.tsx`, `rfq.test.tsx`, `rfqSealed.test.tsx`, `invoicingPlan.test.tsx`, `reprice.test.tsx` and `scheduling.test.tsx` drive every route against a stubbed `fetch` through
 `testHarness.tsx`).

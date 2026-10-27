@@ -51,10 +51,11 @@ func openAPIOperations(t *testing.T) map[string]bool {
 
 // customMethods lists the ":action" suffixes served by one POST route.
 var customMethods = map[string][]string{
-	"/v1/procurement/requisitions/{id}":    {"submit"},
-	"/v1/procurement/agreements/{id}":      {"activate", "hold", "close"},
-	"/v1/procurement/purchase-orders/{id}": {"submit", "approve", "reject", "confirm", "cancel", "reprice"},
-	"/v1/procurement/rfqs/{id}":            {"send", "close", "cancel", "award"},
+	"/v1/procurement/requisitions/{id}":          {"submit"},
+	"/v1/procurement/agreements/{id}":            {"activate", "hold", "close"},
+	"/v1/procurement/purchase-orders/{id}":       {"submit", "approve", "reject", "confirm", "cancel", "reprice"},
+	"/v1/procurement/rfqs/{id}":                  {"send", "close", "cancel", "award"},
+	"/v1/procurement/scheduling-agreements/{id}": {"release"},
 }
 
 func TestOpenAPI_MatchesRegisteredRoutes(t *testing.T) {

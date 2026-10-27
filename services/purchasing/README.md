@@ -1,13 +1,14 @@
 # purchasing
 
-Passage purchasing service. Wave 17 (PSG-17), slices 1 to 6 of the procurement
+Passage purchasing service. Wave 17 (PSG-17), slices 1 to 8 of the procurement
 context: purchase requisitions with amount/category approval routing,
 consolidation of approved requisition lines into purchase orders, purchase orders
 with persisted totals, the PO approval lifecycle with versioned change
 management, purchase agreements with release tracking, trade agreement
 price lookup with explain, the RFQ cycle (send, replies, compare, award to
 purchase orders) with sealed bids and weighted scoring, invoicing plans on PO
-lines, the subsequent price change (reprice) of confirmed POs, and the web
+lines, the subsequent price change (reprice) of confirmed POs, scheduling
+agreements with firm/trade-off zones and FRC/JIT releases, and the web
 workspace module at `apps/web/src/modules/purchasing`.
 
 Full ticket scope and the list of what is not yet built are in
@@ -21,7 +22,7 @@ internal/domain/       pure rules: approval bands, trade agreement lookup, PO to
                        PO state machine, version snapshots and RFC 6902 diffs, agreement releases (limits, validity, threshold), consolidation grouping,
                        RFQ state machine, reply ranking and award checks, sealed bids and weighted scoring,
                        invoicing plan generation and reproportioning, reprice planning,
-                       scheduling agreement zone rules (BR-17.13, rules only)
+                       scheduling agreements: zones (BR-17.13), schedule changes, FRC/JIT releases with cumulative quantities
 internal/store/        Postgres repositories (pgx), every transaction via dbx.WithTenantTx
 internal/api/          HTTP handlers under /v1/procurement, duties via authz.RequireDuty
 internal/events/       event types and payloads (dev.passage.procurement.*)
@@ -32,6 +33,7 @@ migrations/            0001_init.sql (tables, sequences, RLS, outbox, idempotenc
                        0005_rfq_sealed_scoring.sql (sealed flag and opening log, scoring criteria, vendor scores)
                        0006_invoicing_plan.sql (invoicing plans and their rows per PO line)
                        0007_reprice.sql (invoiced-line reprice hand-over mark, trade-priced line index)
+                       0008_scheduling_agreement.sql (scheduling agreements, schedule lines, releases and release lines)
 api/openapi.yaml       OpenAPI 3.1 for every route
 events/asyncapi.yaml   AsyncAPI 3 for every event emitted
 charts/purchasing/     Helm chart (probes on /healthz and /readyz, DATABASE_URL from a secret)
@@ -106,6 +108,13 @@ row-level-security test also needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-owner
 | GET `/rfqs/{id}/compare` | RFQMaintain or RFQAward | Ranking per line by the RFQ rule or `rule`, with each scored vendor's weighted score; late replies listed as excluded; 403 PRC-RFQ-004 for a sealed RFQ before its deadline |
 | PUT `/rfqs/{id}/scores/{vendorId}` | RFQAward | If-Match (version) required; `scores` (criterion, 1–10) of an invited vendor; bumps the version |
 | POST `/rfqs/{id}:award` | RFQAward | Idempotency-Key and If-Match required; `awards` (line, reply, override reason); answers the RFQ and the DRAFT POs created |
+| POST `/scheduling-agreements` | AgreementMaintain | Idempotency-Key required; vendor × product × site, currency, unit and unit price, target quantity, validity, release `profile` (PRD defaults), schedule lines (max 500) |
+| GET `/scheduling-agreements` | AgreementMaintain or PurchaseOrderInquire | Release monitor, newest first; `vendorId`, `productId`, `limit`, `cursor`; scheduled, received and open quantity, last release, next release due |
+| GET `/scheduling-agreements/{id}` | AgreementMaintain or PurchaseOrderInquire | Schedule with each line's zone today; ETag = version |
+| PUT `/scheduling-agreements/{id}/schedule` | AgreementMaintain | If-Match (version) required; the whole schedule (`lineNo` names a line, qty 0 removes it, no `lineNo` adds one); answers the agreement with trade-off `warnings` |
+| POST `/scheduling-agreements/{id}:release` | AgreementMaintain | Idempotency-Key required; `kind` FRC or JIT, `runDate` (default today), `cumulativeReset`; 201 for a new release, 200 for the release of the same kind, date and schedule version |
+| GET `/scheduling-agreements/{id}/releases` | AgreementMaintain or PurchaseOrderInquire | Release headers in release order |
+| GET `/scheduling-agreements/{id}/releases/{releaseNo}` | AgreementMaintain or PurchaseOrderInquire | Release documentation with every line |
 
 Writes for a legal entity outside the caller's `X-Passage-Legal-Entity` scope are
 refused with AUTH-0003 before they reach the database (RLS would refuse them too).
@@ -253,6 +262,27 @@ down). Metrics: `GET :9090/metrics` (Prometheus text counters).
   each PO and applies it in its own transaction at the row version it read; a
   failing PO is reported in its item and the others still apply, and the run's
   Idempotency-Key is claimed per PO so a retried page writes no PO twice.
+- **Scheduling agreements (FR-17.15, BR-17.13, AC-17.11).** An agreement is one
+  vendor × product × site with a unit price, a target quantity, validity and a
+  release profile copied at create time (FRC 90 / JIT 14 / firm 14 / trade-off 28
+  days, WEEKLY by default). Schedule lines carry a delivery date (inside the
+  validity), a quantity and the cumulative received quantity (written by wave 18).
+  A line dated on or before today + firm days is FIRM, on or before today +
+  trade-off days TRADEOFF, otherwise FORECAST. Replacing the schedule judges each
+  existing line in the zone of its current date: reducing, moving or removing a
+  FIRM line needs a reason code (PRC-SA-001, stored on the line), a TRADEOFF
+  reduction is accepted with a warning, and no line may drop below its receipts
+  (PRC-SA-002). A release run (`:release`) snapshots the whole schedule in date
+  order into release `REL-<agreement>-<n>` with per-line running cumulative
+  released and received quantities, the zone on the run date and whether the line
+  is inside the kind's horizon, and writes `sarelease.created.v1` in the same
+  transaction. The run date must be inside the validity. A run with the same
+  kind and run date on an unchanged schedule (same agreement version) returns the
+  existing release, so a repeated job writes nothing. Cumulative released never
+  goes below the previous release (PRC-SA-003) unless the run records a cumulative
+  reset (`cumulativeReset`, kept on the release). The monitor's next release due
+  is the validity start before any release, else the last run plus one release
+  period, and is empty after the validity ends.
 - **Idempotency.** Creates and custom methods store the key with a hash of the operation
   and body; a replay returns the original resource, a different body (or endpoint)
   with the same key is `idempotency_key_reuse`.
@@ -284,11 +314,11 @@ store codes are returned as the `code` field.
 | PRC-PO-VERSION-NOT-FOUND | 404 | The PO has no such version |
 | PRC-TA-NOT-FOUND | 404 | Trade agreement not found |
 | PRC-TA-002 | 409 | Overlapping ACTIVE trade agreement row with equal specificity and valid_from |
-| PRC-VERSION-CONFLICT | 409 | Requisition, agreement or RFQ is at another version than If-Match |
+| PRC-VERSION-CONFLICT | 409 | Requisition, agreement, scheduling agreement or RFQ is at another version than If-Match |
 | PRC-PRICE-001 | 422 | No trade agreement price for the line; enter a unit price |
 | PRC-PRICE-002 | 422 | Unknown tie rule |
 | PRC-PO-TOTAL | 500 (COM-0500) | Database total identity violated; the trigger refuses the write and the client sees COM-0500. Should not occur because totals come from `domain.Price` |
-| PRC-ACTION-001 | 404 | Unknown custom action on a requisition, purchase order, agreement or RFQ |
+| PRC-ACTION-001 | 404 | Unknown custom action on a requisition, purchase order, agreement, scheduling agreement or RFQ |
 | PRC-REQ-005 | 422 | A PO line names a requisition line of another legal entity |
 | PRC-REQ-LINE-NOT-FOUND | 404 | Requisition line not found |
 | PRC-CONS-001 | 422 | Consolidation window outside 1–60 days |
@@ -315,6 +345,11 @@ store codes are returned as the `code` field.
 | PRC-IP-003 | 422 | The PO is cancelled or finalized, or the line is cancelled |
 | PRC-IP-NOT-FOUND | 404 | The PO line has no invoicing plan |
 | PRC-PO-LINE-NOT-FOUND | 404 | The PO has no line with that number |
+| PRC-SA-001 | 422 | A firm-zone schedule line is reduced, moved or removed without a reason code |
+| PRC-SA-002 | 422 | A schedule line would drop below the quantity already received against it |
+| PRC-SA-003 | 422 | A release would lower cumulative released below the previous release without a cumulative reset |
+| PRC-SA-NOT-FOUND | 404 | Scheduling agreement not found (or outside the caller's legal entity scope) |
+| PRC-SA-REL-NOT-FOUND | 404 | The scheduling agreement has no release with that number |
 | idempotency_key_reuse | 422 | Idempotency key reused with a different body or on another endpoint |
 
 ## Dependencies
@@ -328,5 +363,7 @@ platform go.mod).
 `apps/web/src/modules/purchasing` gives the procurement workspace: requisition,
 RFQ, purchase order, purchase agreement and trade agreement lists with create forms
 and detail pages, the consolidation board, the price lookup with explain, sealed-bid
-and scoring screens on the RFQ, the invoicing plan page per PO line, and the price
-change pages (one PO, and the run over many). See its README.
+and scoring screens on the RFQ, the invoicing plan page per PO line, the price
+change pages (one PO, and the run over many), and the scheduling agreement
+monitor, create form, detail page (schedule editor, release run, releases) and
+release documentation. See its README.

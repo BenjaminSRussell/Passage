@@ -20,6 +20,7 @@ var allTypes = map[string]string{
 	events.PORepriced:           "po",
 	events.RFQSent:              "rfq",
 	events.RFQAwarded:           "rfq",
+	events.SAReleaseCreated:     "sarelease",
 }
 
 func TestEventTypesFollowTheNamingRule(t *testing.T) {
@@ -69,6 +70,7 @@ func TestPayloadFieldsAreInTheAsyncAPI(t *testing.T) {
 		events.PORepricedData{Lines: []events.PORepricedLine{{}}, InvoicedLines: []events.PORepricedLine{{}}},
 		events.RFQSentData{VendorIDs: []string{"v"}, Lines: []events.RFQLineData{{ProductID: "p", Description: "d", RequiredDate: "2026-11-01"}}},
 		events.RFQAwardedData{Awards: []events.RFQAwardedLine{{OverrideReason: "only bid"}}},
+		events.SAReleaseCreatedData{Lines: []events.SAReleaseLine{{}}},
 	} {
 		keys = append(keys, jsonKeys(t, v)...)
 	}

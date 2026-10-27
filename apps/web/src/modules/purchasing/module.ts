@@ -8,6 +8,12 @@ import { PurchaseOrderCreatePage, PurchaseOrderDetailPage, PurchaseOrderEditPage
 import { RepricePage, RepriceRunPage } from "./RepricePages";
 import { RequisitionCreatePage, RequisitionDetailPage, RequisitionsPage } from "./RequisitionPages";
 import { RFQCreatePage, RFQDetailPage, RFQsPage } from "./RfqPages";
+import {
+  SchedulingAgreementCreatePage,
+  SchedulingAgreementDetailPage,
+  SchedulingAgreementsPage,
+  SchedulingReleasePage,
+} from "./SchedulingPages";
 import { TradeAgreementCreatePage, TradeAgreementDetailPage, TradeAgreementsPage } from "./TradeAgreementPages";
 import { WorkspacePage } from "./WorkspacePage";
 
@@ -15,7 +21,7 @@ const purchasing: PassageModule = {
   id: "purchasing",
   title: "Purchasing",
   description:
-    "Requisitions, consolidation, requests for quotation with sealed bids and scoring, purchase orders with approval, change versions, invoicing plans and subsequent price changes, purchase and trade agreements, and price lookup.",
+    "Requisitions, consolidation, requests for quotation with sealed bids and scoring, purchase orders with approval, change versions, invoicing plans and subsequent price changes, purchase, scheduling and trade agreements with releases, and price lookup.",
   routes: [
     { path: "/purchasing", element: createElement(WorkspacePage) },
     { path: "/purchasing/requisitions", element: createElement(RequisitionsPage) },
@@ -39,6 +45,18 @@ const purchasing: PassageModule = {
     { path: "/purchasing/agreements", element: createElement(PurchaseAgreementsPage) },
     { path: "/purchasing/agreements/new", element: createElement(PurchaseAgreementCreatePage), handle: { title: "New purchase agreement" } },
     { path: "/purchasing/agreements/:id", element: createElement(PurchaseAgreementDetailPage), handle: { title: "Purchase agreement" } },
+    { path: "/purchasing/scheduling-agreements", element: createElement(SchedulingAgreementsPage) },
+    {
+      path: "/purchasing/scheduling-agreements/new",
+      element: createElement(SchedulingAgreementCreatePage),
+      handle: { title: "New scheduling agreement" },
+    },
+    { path: "/purchasing/scheduling-agreements/:id", element: createElement(SchedulingAgreementDetailPage), handle: { title: "Scheduling agreement" } },
+    {
+      path: "/purchasing/scheduling-agreements/:id/releases/:releaseNo",
+      element: createElement(SchedulingReleasePage),
+      handle: { title: "Scheduling agreement release" },
+    },
     { path: "/purchasing/trade-agreements", element: createElement(TradeAgreementsPage) },
     { path: "/purchasing/trade-agreements/new", element: createElement(TradeAgreementCreatePage), handle: { title: "New price row" } },
     { path: "/purchasing/trade-agreements/:id", element: createElement(TradeAgreementDetailPage), handle: { title: "Price row" } },
@@ -52,6 +70,7 @@ const purchasing: PassageModule = {
     { label: "Purchase orders", to: "/purchasing/purchase-orders", duty: "PurchaseOrderInquire" },
     { label: "Price changes", to: "/purchasing/reprice", duty: "PurchaseOrderInquire" },
     { label: "Purchase agreements", to: "/purchasing/agreements", duty: "AgreementMaintain" },
+    { label: "Scheduling agreements", to: "/purchasing/scheduling-agreements", duty: "AgreementMaintain" },
     { label: "Trade agreements", to: "/purchasing/trade-agreements", duty: "TradeAgreementMaintain" },
     { label: "Price lookup", to: "/purchasing/pricing", duty: "PurchaseOrderMaintain" },
   ],

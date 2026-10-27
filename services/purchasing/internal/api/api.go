@@ -106,6 +106,9 @@ type API struct {
 
 	invoicingPlansSaved atomic.Int64
 	repricesApplied     atomic.Int64
+
+	schedulingAgreementsCreated atomic.Int64
+	saReleasesCreated           atomic.Int64
 }
 
 // New returns the API over s using the default approval policy (FR-17.2) and
@@ -181,6 +184,19 @@ func (a *API) Register(r chi.Router) {
 		rfqRead.Get("/rfqs/{id}/compare", a.compareRFQ)
 		// Buyer scoring of a vendor's reply on the RFQ's criteria (FR-17.19).
 		r.With(authz.RequireDuty(dutyRFQAward)).Put("/rfqs/{id}/scores/{vendorId}", a.scoreRFQVendor)
+		// Scheduling agreements and releases (FR-17.15). Writes need
+		// AgreementMaintain; the release monitor and documentation are inquiries
+		// (3.17.14) open to PurchaseOrderInquire too. ":release" arrives as one
+		// path segment, see schedulingAgreementAction.
+		saRead := r.With(authz.Require(anyDuty{dutyAgreementMaintain, dutyPurchaseOrderInquire},
+			dutyAgreementMaintain+" or "+dutyPurchaseOrderInquire, ""))
+		pa.Post("/scheduling-agreements", a.createSchedulingAgreement)
+		saRead.Get("/scheduling-agreements", a.listSchedulingAgreements)
+		saRead.Get("/scheduling-agreements/{id}", a.getSchedulingAgreement)
+		pa.Post("/scheduling-agreements/{id}", a.schedulingAgreementAction)
+		pa.Put("/scheduling-agreements/{id}/schedule", a.replaceSchedule)
+		saRead.Get("/scheduling-agreements/{id}/releases", a.listSchedulingReleases)
+		saRead.Get("/scheduling-agreements/{id}/releases/{releaseNo}", a.getSchedulingRelease)
 	})
 }
 
@@ -209,6 +225,8 @@ func (a *API) Metrics() http.Handler {
 			{"purchasing_sealed_rfqs_opened_total", "Sealed RFQs whose replies were opened after the deadline.", a.sealedRFQsOpened.Load()},
 			{"purchasing_invoicing_plans_saved_total", "Invoicing plans written by PUT.", a.invoicingPlansSaved.Load()},
 			{"purchasing_purchase_orders_repriced_total", "Subsequent price changes applied to a purchase order.", a.repricesApplied.Load()},
+			{"purchasing_scheduling_agreements_created_total", "Scheduling agreements created; idempotent replays are counted.", a.schedulingAgreementsCreated.Load()},
+			{"purchasing_scheduling_agreement_releases_created_total", "Scheduling agreement releases created (FRC and JIT).", a.saReleasesCreated.Load()},
 		} {
 			fmt.Fprintf(w, "# HELP %[1]s %[2]s\n# TYPE %[1]s counter\n%[1]s %[3]d\n", c.name, c.help, c.value)
 		}
