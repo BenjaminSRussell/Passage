@@ -10,7 +10,35 @@ const (
 	JournalPosted            = "dev.passage.pricing.journal.posted.v1"
 	RebateAccrualPosted      = "dev.passage.pricing.rebateaccrual.posted.v1"
 	CommissionCalculated     = "dev.passage.pricing.commission.calculated.v1"
+	// Trade promotion funds (FR-26.19, BR-26.15).
+	FundClosed        = "dev.passage.pricing.fund.closed.v1"
+	FundReopened      = "dev.passage.pricing.fund.reopened.v1"
+	FundUsageRecorded = "dev.passage.pricing.fundusage.recorded.v1"
 )
+
+// FundStatusData is the payload of fund.closed and fund.reopened. Claims and
+// deductions (w30) stop attributing to a closed fund.
+type FundStatusData struct {
+	FundID        string `json:"fund_id"`
+	LegalEntityID string `json:"legal_entity_id"`
+	Closed        bool   `json:"closed"`
+	Version       int    `json:"version"`
+}
+
+// FundUsageRecordedData is the payload of fundusage.recorded: one usage attribution with
+// the period's usage and budget after it (BR-26.15; the Fund usage inquiry, §5.26.14).
+type FundUsageRecordedData struct {
+	UsageID       string `json:"usage_id"`
+	FundID        string `json:"fund_id"`
+	LegalEntityID string `json:"legal_entity_id"`
+	Period        string `json:"period"`
+	Source        string `json:"source"`
+	Reference     string `json:"reference"`
+	Amount        string `json:"amount"`
+	Currency      string `json:"currency"`
+	PeriodUsage   string `json:"period_usage"`
+	Budget        string `json:"budget"`
+}
 
 // JournalPostedData is the payload of journal.posted (post and reverse, FR-26.9).
 type JournalPostedData struct {

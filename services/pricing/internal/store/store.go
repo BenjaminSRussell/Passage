@@ -83,6 +83,18 @@ type Store interface {
 	ListCommissionRules(ctx context.Context, salesGroupID string, limit int) ([]CommissionRuleRow, error)
 	PostCommission(ctx context.Context, c CommissionPosting) ([]CommissionTxn, bool, error)
 	ListCommissionTransactions(ctx context.Context, f CommissionFilter) ([]CommissionTxn, error)
+	CreateFund(ctx context.Context, f domain.Fund, idempotencyKey string) (domain.Fund, error)
+	GetFund(ctx context.Context, id string) (domain.Fund, error)
+	ListFunds(ctx context.Context, legalEntityID string, limit int) ([]domain.Fund, error)
+	ReviseFund(ctx context.Context, rev FundRevision, idempotencyKey string) (domain.Fund, error)
+	AttributeFund(ctx context.Context, a FundAttribution, idempotencyKey string) (FundPosition, error)
+	CloseFund(ctx context.Context, id string, version int, idempotencyKey string) (domain.Fund, error)
+	ReopenFund(ctx context.Context, id string, version int, idempotencyKey string) (domain.Fund, error)
+	FundUsage(ctx context.Context, id string) (domain.Fund, []FundUsageLine, error)
+	CreatePromotion(ctx context.Context, p domain.PromotionPlan, idempotencyKey string) (domain.PromotionPlan, error)
+	GetPromotion(ctx context.Context, id string) (domain.PromotionPlan, error)
+	ListPromotions(ctx context.Context, legalEntityID string, limit int) ([]domain.PromotionPlan, error)
+	RecordPromotionActuals(ctx context.Context, id string, a domain.PromotionActuals) (domain.PromotionPlan, error)
 	Ping(ctx context.Context) error
 }
 

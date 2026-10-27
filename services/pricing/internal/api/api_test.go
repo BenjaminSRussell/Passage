@@ -22,7 +22,7 @@ import (
 
 const (
 	legalEntity = "00000000-0000-0000-0001-000000000001"
-	allDuties   = "pricing.view,pricing.maintain,pricing.journal.post,pricing.rebate.maintain,pricing.rebate.view,pricing.commission.maintain,pricing.commission.view"
+	allDuties   = "pricing.view,pricing.maintain,pricing.journal.post,pricing.rebate.maintain,pricing.rebate.view,pricing.commission.maintain,pricing.commission.view,pricing.fund.maintain"
 )
 
 // fakeStore mirrors the Postgres store's rules (overlap via domain.Conflict, state, version).
@@ -39,6 +39,7 @@ type fakeStore struct {
 	periods    map[string]*fakePeriod
 	accruals   map[string]store.Accrual
 	comm       commissionState
+	fund       fundState
 }
 
 func newFake() *fakeStore {

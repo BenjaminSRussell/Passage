@@ -513,3 +513,147 @@ export function createCommissionRule(body: CommissionRuleInput, key: string = ne
 export function listCommissionTransactions(filter: CommissionFilter = {}, signal?: AbortSignal): Promise<CommissionTransaction[]> {
   return items<CommissionTransaction>(`/commission/transactions${query({ ...filter })}`, signal);
 }
+
+// ---- Trade promotion funds (FR-26.19, BR-26.15) and promotion planning (FR-26.20).
+
+export const FUND_SOURCES = ["CAMPAIGN_ACCRUAL", "REBATE_ACCRUAL", "CLAIM", "DEDUCTION"] as const;
+export type FundSource = (typeof FUND_SOURCES)[number];
+
+export interface FundInput {
+  legalEntityId: string;
+  name: string;
+  type: string;
+  currency: string;
+  customerScope: string;
+  owner: string;
+  budgetPerPeriod: string;
+  allowOverspend: boolean;
+}
+
+export interface Fund extends FundInput {
+  id: string;
+  closed: boolean;
+  version: number;
+}
+
+export interface FundAttributionInput {
+  /** Fiscal period such as 2027-03. */
+  period: string;
+  source: FundSource;
+  reference: string;
+  amount: string;
+}
+
+/** Budget, usage and remaining budget of one fund in one period; remaining is negative only with overspend. */
+export interface FundPosition {
+  fundId: string;
+  period: string;
+  budget: string;
+  used: string;
+  remaining: string;
+  closed: boolean;
+}
+
+export interface FundUsageLine {
+  period: string;
+  source: FundSource;
+  amount: string;
+}
+
+export interface FundUsage {
+  fund: Fund;
+  items: FundUsageLine[];
+  periods: FundPosition[];
+}
+
+export interface PromotionInput {
+  legalEntityId: string;
+  name: string;
+  eventCategory: string;
+  eventType: string;
+  customerScope: string;
+  fundId?: string;
+  productId: string;
+  currency: string;
+  startDate: string;
+  endDate: string;
+  /** Units sold in each of the 13 weeks before the promotion, oldest first. */
+  baselineWeeklyUnits: string[];
+  liftPct: string;
+  plannedSpend: string;
+}
+
+export interface PromotionActuals {
+  units: string;
+  weeks: number;
+  spend: string;
+}
+
+export interface Promotion extends Omit<PromotionInput, "fundId"> {
+  id: string;
+  fundId?: string;
+  baseline: string;
+  forecastUnits: string;
+  actuals?: PromotionActuals;
+  effectivenessPct?: string;
+}
+
+export function listFunds(legalEntityId = "", signal?: AbortSignal): Promise<Fund[]> {
+  return items<Fund>(`/funds${query({ legalEntityId })}`, signal);
+}
+
+export function getFund(id: string, signal?: AbortSignal): Promise<Fund> {
+  return send<Fund>(`/funds/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** POST /funds - an open fund at version 1. */
+export function createFund(body: FundInput, key: string = newKey()): Promise<Fund> {
+  return post<Fund>("/funds", body, key);
+}
+
+/** POST /funds/{id}:attribute - 409 PRC-0011 when closed, 422 PRC-0012 when over the period budget. */
+export function attributeFund(id: string, body: FundAttributionInput, key: string = newKey()): Promise<FundPosition> {
+  return post<FundPosition>(`/funds/${encodeURIComponent(id)}:attribute`, body, key);
+}
+
+/** POST /funds/{id}:revise - new budget per period and overspend flag at the expected version. */
+export function reviseFund(id: string, body: { version: number; budgetPerPeriod: string; allowOverspend: boolean }, key: string = newKey()): Promise<Fund> {
+  return post<Fund>(`/funds/${encodeURIComponent(id)}:revise`, body, key);
+}
+
+/** POST /funds/{id}:close - freezes usage; new attribution fails with PRC-0011. */
+export function closeFund(id: string, version: number, key: string = newKey()): Promise<Fund> {
+  return post<Fund>(`/funds/${encodeURIComponent(id)}:close`, { version }, key);
+}
+
+/** POST /funds/{id}:reopen - lifts the close. */
+export function reopenFund(id: string, version: number, key: string = newKey()): Promise<Fund> {
+  return post<Fund>(`/funds/${encodeURIComponent(id)}:reopen`, { version }, key);
+}
+
+/** GET /funds/{id}/usage - the Fund usage inquiry: usage per period and source, and the position per period. */
+export async function getFundUsage(id: string, signal?: AbortSignal): Promise<FundUsage> {
+  const body = await send<Partial<FundUsage>>(`/funds/${encodeURIComponent(id)}/usage`, {}, signal);
+  if (!body.fund || !Array.isArray(body.items) || !Array.isArray(body.periods)) {
+    throw new PricingApiError(0, "COM-0001", "The fund usage response is incomplete");
+  }
+  return body as FundUsage;
+}
+
+export function listPromotions(legalEntityId = "", signal?: AbortSignal): Promise<Promotion[]> {
+  return items<Promotion>(`/promotions${query({ legalEntityId })}`, signal);
+}
+
+export function getPromotion(id: string, signal?: AbortSignal): Promise<Promotion> {
+  return send<Promotion>(`/promotions/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** POST /promotions - the fund, when named, must be open and in the same legal entity and currency. */
+export function createPromotion(body: PromotionInput, key: string = newKey()): Promise<Promotion> {
+  return post<Promotion>("/promotions", body, key);
+}
+
+/** POST /promotions/{id}:actuals - overwrites the window's units, weeks and spend; returns the effectiveness. */
+export function recordPromotionActuals(id: string, body: PromotionActuals): Promise<Promotion> {
+  return post<Promotion>(`/promotions/${encodeURIComponent(id)}:actuals`, body);
+}

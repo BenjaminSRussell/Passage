@@ -3,9 +3,11 @@ info:
   title: Passage Pricing API
   version: 0.1.0
   description: >
-    Slices 1-2 of wave 26 (PSG-26). Deterministic price resolution with explain, simulation,
-    condition-record lifecycle, atomic price journals with reversal, and customer rebate
-    agreements with accrual. The browser reaches these paths as /api/v1/pricing/...;
+    Slices 1-4 of wave 26 (PSG-26). Deterministic price resolution with explain, simulation,
+    condition-record lifecycle, atomic price journals with reversal, customer rebate
+    agreements with accrual and retroactive recompute, sales commissions, trade promotion
+    funds with budget and usage tracking, and promotion planning with baseline, lift and
+    actuals. The browser reaches these paths as /api/v1/pricing/...;
     the BFF rewrites them to /v1/pricing/... on this service.
 servers:
   - url: https://api.{env}.passage.dev
@@ -641,6 +643,297 @@ paths:
         "401": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/funds:
+    get:
+      operationId: listFunds
+      summary: List trade promotion funds (FR-26.19).
+      x-passage-duty: pricing.view or pricing.fund.maintain
+      parameters:
+        - {name: legalEntityId, in: query, required: false, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Funds by id (at most 100).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/Fund"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    post:
+      operationId: createFund
+      summary: Create an open trade promotion fund with a budget per period (FR-26.19).
+      x-passage-duty: pricing.fund.maintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/FundInput"}
+      responses:
+        "201":
+          description: Created at version 1.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Fund"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/funds/{id}:
+    get:
+      operationId: getFund
+      summary: Read one trade fund.
+      x-passage-duty: pricing.view or pricing.fund.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The fund.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Fund"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/funds/{id}:attribute:
+    post:
+      operationId: attributeFund
+      summary: >
+        Attribute usage (campaign or rebate accrual, claim, deduction) to the fund in a period
+        (BR-26.15). 409 PRC-0011 when the fund is closed; 422 PRC-0012 when usage would exceed the
+        period budget and overspend is off. Writes dev.passage.pricing.fundusage.recorded.v1.
+      x-passage-duty: pricing.fund.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/FundAttribution"}
+      responses:
+        "201":
+          description: Usage recorded; the period position after it.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/FundPosition"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/funds/{id}:revise:
+    post:
+      operationId: reviseFund
+      summary: >
+        Change the budget per period and the overspend flag at the expected version (the PRC-0012
+        remedy). Without overspend the budget must cover every period's usage (422 PRC-0012); a closed
+        fund is frozen (409 PRC-0011); a stale version is 412 conflict_version.
+      x-passage-duty: pricing.fund.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/FundRevision"}
+      responses:
+        "200":
+          description: Revised; version incremented.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Fund"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/funds/{id}:close:
+    post:
+      operationId: closeFund
+      summary: >
+        Close the fund: usage is frozen and new attribution fails with PRC-0011 (BR-26.15). 409
+        PRC-0031 when already closed; 412 on a stale version. Writes dev.passage.pricing.fund.closed.v1.
+      x-passage-duty: pricing.fund.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/VersionRequest"}
+      responses:
+        "200":
+          description: Closed.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Fund"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/funds/{id}:reopen:
+    post:
+      operationId: reopenFund
+      summary: >
+        Reopen a closed fund (the PRC-0011 remedy). 409 PRC-0031 when already open; 412 on a stale
+        version. Writes dev.passage.pricing.fund.reopened.v1.
+      x-passage-duty: pricing.fund.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/VersionRequest"}
+      responses:
+        "200":
+          description: Reopened.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Fund"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/funds/{id}/usage:
+    get:
+      operationId: fundUsage
+      summary: Fund usage inquiry (§5.26.14) - usage per period and source, and budget, used and remaining per period.
+      x-passage-duty: pricing.view or pricing.fund.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Usage, oldest period first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [fund, items, periods]
+                properties:
+                  fund: {$ref: "#/components/schemas/Fund"}
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [period, source, amount]
+                      properties:
+                        period: {type: string}
+                        source: {type: string, enum: [CAMPAIGN_ACCRUAL, REBATE_ACCRUAL, CLAIM, DEDUCTION]}
+                        amount: {type: string}
+                  periods:
+                    type: array
+                    items: {$ref: "#/components/schemas/FundPosition"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/promotions:
+    get:
+      operationId: listPromotions
+      summary: List promotion plans with baseline, forecast and effectiveness (FR-26.20).
+      x-passage-duty: pricing.view or pricing.fund.maintain
+      parameters:
+        - {name: legalEntityId, in: query, required: false, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Promotion plans by id (at most 100).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/Promotion"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    post:
+      operationId: createPromotion
+      summary: >
+        Plan a promotion with a 13-week baseline, forecast lift and planned spend (FR-26.20). A fund,
+        when named, must be open (409 PRC-0011) and in the same legal entity and currency (422).
+      x-passage-duty: pricing.fund.maintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/PromotionInput"}
+      responses:
+        "201":
+          description: Planned.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Promotion"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/promotions/{id}:
+    get:
+      operationId: getPromotion
+      summary: Read one promotion plan.
+      x-passage-duty: pricing.view or pricing.fund.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The promotion plan.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Promotion"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/promotions/{id}:actuals:
+    post:
+      operationId: recordPromotionActuals
+      summary: >
+        Record the units and spend posted in the promotion window (overwrites; the nightly actuals
+        job writes the same way) and return the effectiveness (FR-26.20).
+      x-passage-duty: pricing.fund.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [units, weeks]
+              properties:
+                units: {type: string, description: "Units invoiced in the window, at least 0."}
+                weeks: {type: integer, minimum: 1, maximum: 260}
+                spend: {type: string, description: "Spend in the window, at least 0; default 0."}
+      responses:
+        "200":
+          description: The promotion with actuals and effectiveness.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Promotion"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
 components:
   parameters:
     IdempotencyKey:
@@ -656,6 +949,108 @@ components:
         application/problem+json:
           schema: {$ref: "#/components/schemas/Problem"}
   schemas:
+    Fund:
+      type: object
+      required: [id, legalEntityId, name, type, currency, customerScope, owner, budgetPerPeriod, allowOverspend, closed, version]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        name: {type: string, maxLength: 120}
+        type: {type: string, maxLength: 32}
+        currency: {type: string, pattern: "^[A-Z]{3}$"}
+        customerScope: {type: string, maxLength: 64, description: "Customer or customer group the fund serves; empty means all."}
+        owner: {type: string, maxLength: 64}
+        budgetPerPeriod: {type: string, description: "Decimal budget applied to each period (YYYY-MM)."}
+        allowOverspend: {type: boolean}
+        closed: {type: boolean, description: "A closed fund rejects attribution with PRC-0011."}
+        version: {type: integer, minimum: 1}
+    FundInput:
+      type: object
+      required: [legalEntityId, name, type, currency, owner, budgetPerPeriod]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        name: {type: string, maxLength: 120}
+        type: {type: string, maxLength: 32}
+        currency: {type: string, pattern: "^[A-Z]{3}$"}
+        customerScope: {type: string, maxLength: 64}
+        owner: {type: string, maxLength: 64}
+        budgetPerPeriod: {type: string, description: "Decimal, at least 0."}
+        allowOverspend: {type: boolean, default: false}
+    FundRevision:
+      type: object
+      required: [version, budgetPerPeriod]
+      properties:
+        version: {type: integer, minimum: 1}
+        budgetPerPeriod: {type: string, description: "Decimal, at least 0."}
+        allowOverspend: {type: boolean, default: false}
+    FundAttribution:
+      type: object
+      required: [period, source, reference, amount]
+      properties:
+        period: {type: string, pattern: "^[0-9]{4}-(0[1-9]|1[0-2])$"}
+        source: {type: string, enum: [CAMPAIGN_ACCRUAL, REBATE_ACCRUAL, CLAIM, DEDUCTION]}
+        reference: {type: string, minLength: 1, maxLength: 128, description: "The accrual, claim or deduction the usage came from."}
+        amount: {type: string, description: "Decimal greater than zero, in the fund currency."}
+    FundPosition:
+      type: object
+      required: [fundId, period, budget, used, remaining, closed]
+      properties:
+        fundId: {type: string, format: uuid}
+        period: {type: string}
+        budget: {type: string}
+        used: {type: string}
+        remaining: {type: string, description: "Negative only when overspend is allowed."}
+        closed: {type: boolean}
+    PromotionInput:
+      type: object
+      required: [legalEntityId, name, productId, currency, startDate, endDate, baselineWeeklyUnits]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        name: {type: string, maxLength: 120}
+        eventCategory: {type: string, maxLength: 64, description: "Merchandising event category."}
+        eventType: {type: string, maxLength: 64, description: "Merchandising event type."}
+        customerScope: {type: string, maxLength: 64, description: "Customer or customer group; empty means all."}
+        fundId: {type: string, format: uuid}
+        productId: {type: string, maxLength: 64}
+        currency: {type: string, pattern: "^[A-Z]{3}$"}
+        startDate: {type: string, format: date}
+        endDate: {type: string, format: date}
+        baselineWeeklyUnits:
+          type: array
+          minItems: 13
+          maxItems: 13
+          items: {type: string}
+          description: Units sold in each of the prior 13 weeks, oldest first.
+        liftPct: {type: string, description: "Forecast lift in percent, at least -100; default 0."}
+        plannedSpend: {type: string, description: "Decimal, at least 0; default 0."}
+    Promotion:
+      type: object
+      required: [id, legalEntityId, name, eventCategory, eventType, customerScope, productId, currency, startDate, endDate, baselineWeeklyUnits, baseline, liftPct, plannedSpend, forecastUnits]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        name: {type: string}
+        eventCategory: {type: string}
+        eventType: {type: string}
+        customerScope: {type: string}
+        fundId: {type: string, format: uuid}
+        productId: {type: string}
+        currency: {type: string}
+        startDate: {type: string, format: date}
+        endDate: {type: string, format: date}
+        baselineWeeklyUnits: {type: array, items: {type: string}}
+        baseline: {type: string, description: "Average weekly units over the 13-week history."}
+        liftPct: {type: string}
+        plannedSpend: {type: string}
+        forecastUnits: {type: string, description: "baseline × started weeks in the window × (1 + lift%)."}
+        actuals:
+          type: object
+          required: [units, weeks, spend]
+          properties:
+            units: {type: string}
+            weeks: {type: integer}
+            spend: {type: string}
+        effectivenessPct: {type: string, description: "(actual weekly average − baseline) / baseline in percent; present once actuals exist and the baseline is above zero."}
     Problem:
       type: object
       required: [type, title, status]

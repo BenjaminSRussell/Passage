@@ -34,6 +34,20 @@ channels:
     messages:
       commissionCalculated:
         $ref: "#/components/messages/CommissionCalculated"
+  fund:
+    address: passage.pricing.fund
+    description: Trade promotion fund closed or reopened (FR-26.19, BR-26.15).
+    messages:
+      fundClosed:
+        $ref: "#/components/messages/FundClosed"
+      fundReopened:
+        $ref: "#/components/messages/FundReopened"
+  fundUsage:
+    address: passage.pricing.fundusage
+    description: Usage attributed to a trade promotion fund in a period (FR-26.19).
+    messages:
+      fundUsageRecorded:
+        $ref: "#/components/messages/FundUsageRecorded"
 operations:
   publishJournalPosted:
     action: send
@@ -65,6 +79,24 @@ operations:
     summary: A condition record was withdrawn.
     messages:
       - {$ref: "#/channels/conditionRecordActivated/messages/conditionRecordWithdrawn"}
+  publishFundClosed:
+    action: send
+    channel: {$ref: "#/channels/fund"}
+    summary: A fund was closed; its usage is frozen and new attribution fails with PRC-0011.
+    messages:
+      - {$ref: "#/channels/fund/messages/fundClosed"}
+  publishFundReopened:
+    action: send
+    channel: {$ref: "#/channels/fund"}
+    summary: A closed fund was reopened (FundMaintain).
+    messages:
+      - {$ref: "#/channels/fund/messages/fundReopened"}
+  publishFundUsageRecorded:
+    action: send
+    channel: {$ref: "#/channels/fundUsage"}
+    summary: Usage was attributed to a fund within its period budget (or with overspend allowed).
+    messages:
+      - {$ref: "#/channels/fundUsage/messages/fundUsageRecorded"}
 components:
   messages:
     ConditionRecordActivated:
@@ -159,3 +191,43 @@ components:
           period_id: {type: string, description: "Invoice month, such as 2027-03."}
           debit_account: {type: string, description: "Commission expense (6200)."}
           credit_account: {type: string, description: "Commission payable (2170)."}
+    FundClosed:
+      name: dev.passage.pricing.fund.closed.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/FundStatus"
+    FundReopened:
+      name: dev.passage.pricing.fund.reopened.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/FundStatus"
+    FundUsageRecorded:
+      name: dev.passage.pricing.fundusage.recorded.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        description: >
+          One usage attribution to a trade promotion fund (BR-26.15) with the period's usage and
+          budget after it. Amounts are decimal strings in the fund currency.
+        required: [usage_id, fund_id, legal_entity_id, period, source, reference, amount, currency, period_usage, budget]
+        properties:
+          usage_id: {type: string, format: uuid}
+          fund_id: {type: string, format: uuid}
+          legal_entity_id: {type: string, format: uuid}
+          period: {type: string, pattern: "^[0-9]{4}-(0[1-9]|1[0-2])$"}
+          source: {type: string, enum: [CAMPAIGN_ACCRUAL, REBATE_ACCRUAL, CLAIM, DEDUCTION]}
+          reference: {type: string, description: "The accrual, claim or deduction the usage came from."}
+          amount: {type: string}
+          currency: {type: string, pattern: "^[A-Z]{3}$"}
+          period_usage: {type: string, description: "Usage in the period including this attribution."}
+          budget: {type: string, description: "Budget per period at the time of attribution."}
+  schemas:
+    FundStatus:
+      type: object
+      description: A trade promotion fund's open/closed state after close or reopen (BR-26.15).
+      required: [fund_id, legal_entity_id, closed, version]
+      properties:
+        fund_id: {type: string, format: uuid}
+        legal_entity_id: {type: string, format: uuid}
+        closed: {type: boolean}
+        version: {type: integer, minimum: 1}

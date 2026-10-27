@@ -62,6 +62,8 @@ type API struct {
 	// commissionsPosted counts invoice lines that posted commission; retroRuns counts retroactive recomputes.
 	commissionsPosted atomic.Int64
 	retroRuns         atomic.Int64
+	// fundUsages counts usage attributions recorded against trade funds.
+	fundUsages atomic.Int64
 }
 
 // New builds the API; zero config values take the documented defaults.
@@ -89,6 +91,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerRebateRoutes(r)
 	a.registerRetroRoutes(r)
 	a.registerCommissionRoutes(r)
+	a.registerFundRoutes(r)
 }
 
 // Metrics serves the Prometheus text exposition of the service counters.
@@ -107,6 +110,7 @@ func (a *API) Metrics() http.Handler {
 			{"pricing_rebate_accruals_total", "Invoice lines accrued against a rebate agreement.", &a.accrualsPosted},
 			{"pricing_commission_postings_total", "Invoice lines that posted commission transactions.", &a.commissionsPosted},
 			{"pricing_rebate_retro_recomputes_total", "Retroactive rebate recomputes run.", &a.retroRuns},
+			{"pricing_fund_usages_total", "Usage attributions recorded against trade funds.", &a.fundUsages},
 		}
 		for _, c := range counters {
 			fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s counter\n%s %d\n", c.name, c.help, c.name, c.name, c.v.Load())
