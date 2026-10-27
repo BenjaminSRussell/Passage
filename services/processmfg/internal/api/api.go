@@ -86,6 +86,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(read).Post("/v1/production/catch-weight:validate", handle(validateCatchWeight))
 	r.With(authz.RequireDuty(DutyCoProductAllocate)).Post("/v1/production/co-products:allocate", handle(allocateCoProducts))
 	registerBatches(r)
+	registerQuality(r)
 }
 
 func (a *API) ready(w http.ResponseWriter, r *http.Request) {

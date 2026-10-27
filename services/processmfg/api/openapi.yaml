@@ -1,15 +1,17 @@
 openapi: 3.1.0
 info:
   title: Passage Process Manufacturing
-  version: 0.2.0
+  version: 0.3.0
   description: >
-    Process manufacturing (wave 24, PSG-24 slice 1): formulas, batch orders scaled
-    from a formula snapshot, and the potency, catch-weight and co-product
-    allocation calculators. Routes match the handlers in internal/api (checked by
-    internal/api/openapi_test.go). Errors are RFC 9457 problem details
-    (application/problem+json) with a stable `code`; see README.md. The gateway
-    routes /api/v1/production/formulas*, /batch-orders*, /potency*, /catch-weight*
-    and /co-products* to this service.
+    Process manufacturing (wave 24, PSG-24 slices 1 to 3): formulas, batch orders
+    scaled from a formula snapshot, the potency, catch-weight and co-product
+    allocation calculators (slice 1), the batch derivation, merge, consolidation,
+    customer requirement and EBR approval previews (slice 2), and the batch
+    attribute check, the picking proposal and the rework plan (slice 3). Routes
+    match the handlers in internal/api (checked by internal/api/openapi_test.go).
+    Errors are RFC 9457 problem details (application/problem+json) with a stable
+    `code`; see README.md. The gateway routes /api/v1/production/* paths listed
+    here to this service.
 servers:
   - url: https://api.{env}.passage.dev
     variables:
@@ -320,6 +322,56 @@ paths:
         '422':
           description: PMF-0014 while any exception lacks a disposition or a signature.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batch-attributes:check:
+    post:
+      operationId: checkBatchAttributes
+      summary: Check recorded batch attribute values against the item's definitions (FR-24.5)
+      description: Refuses (400) an attribute the item does not define, a value of the wrong type for its kind, an enum value that is not an option, and invalid definitions. A numeric value outside min/max is accepted with pass false and counted in exceptions, because it is recorded and becomes an EBR exception (BR-24.15). Stores nothing.
+      x-passage-duty: production.batch-attribute.write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AttributesRequest' } } }
+      responses:
+        '200':
+          description: One result per recorded value, sorted by attribute.
+          content: { application/json: { schema: { $ref: '#/components/schemas/AttributesResponse' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batch-picking:proposal:
+    post:
+      operationId: proposeBatchPicking
+      summary: Propose the batches a line consumes (FR-24.3, FR-24.5, FR-24.6, BR-24.10)
+      description: >-
+        Available batches only, expiry first (FEFO; batches without expiry last), with potency inside the line's band.
+        Excluded batches carry their code: PMF-0016 for a disposition other than available (AC-24.10), PMF-0003
+        (BATCH_EXPIRED) for an expiry before the posting date (AC-24.4), PMF-0005 for potency outside the band or not
+        recorded. Expired batches are eligible only when the caller holds production.batch.consume-expired and gives
+        overrideReason (at least 10 characters, else 400); they are flagged expiredOverride. Stores nothing.
+      x-passage-duty: production.batch-order.read
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PickingRequest' } } }
+      responses:
+        '200':
+          description: The picked batches with the quantity taken from each, the excluded batches and the shortfall.
+          content: { application/json: { schema: { $ref: '#/components/schemas/PickingResponse' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/rework-orders:preview:
+    post:
+      operationId: previewReworkOrder
+      summary: Plan a rework batch order for a batch (FR-24.18, AC-24.18)
+      description: The batch, or part of it, is the first ingredient. Omitted parameters take the FR-24.18 defaults (keepBatchNumber true, requireQualityOrder true, outputDisposition quarantine, capitalize false). The output cannot be available while a quality order is required. Stores nothing.
+      x-passage-duty: production.batch-order.write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ReworkRequest' } } }
+      responses:
+        '200':
+          description: The rework plan.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ReworkResponse' } } }
+        '400': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
   /healthz:
     get:
@@ -718,6 +770,98 @@ components:
       properties:
         approvable: { type: boolean }
         exceptions: { type: integer }
+    AttributeDefinition:
+      type: object
+      required: [name, kind]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 40 }
+        kind: { type: string, enum: [numeric, text, enum, date] }
+        target: { $ref: '#/components/schemas/Decimal' }
+        min: { $ref: '#/components/schemas/Decimal', description: Inclusive; numeric only. }
+        max: { $ref: '#/components/schemas/Decimal', description: Inclusive; numeric only. }
+        options: { type: array, maxItems: 50, items: { type: string }, description: Required for enum; enum only. }
+    AttributesRequest:
+      type: object
+      required: [definitions, values]
+      properties:
+        definitions: { type: array, maxItems: 100, items: { $ref: '#/components/schemas/AttributeDefinition' } }
+        values: { type: object, maxProperties: 100, additionalProperties: { $ref: '#/components/schemas/AttributeValue' } }
+    AttributesResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              attribute: { type: string }
+              pass: { type: boolean }
+              detail: { type: string, description: Why the value is outside its limits. }
+        exceptions: { type: integer, description: Values outside their limits. }
+    PickingRequest:
+      type: object
+      required: [postingDate, qty, batches]
+      properties:
+        postingDate: { type: string, format: date }
+        qty: { $ref: '#/components/schemas/Quantity' }
+        potency:
+          type: object
+          required: [attribute, min, max]
+          properties:
+            attribute: { type: string, minLength: 1, maxLength: 40 }
+            min: { $ref: '#/components/schemas/Decimal' }
+            max: { $ref: '#/components/schemas/Decimal' }
+        overrideReason: { type: string, maxLength: 500, description: Audit reason for consuming expired batches (BR-24.10). }
+        batches: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/Batch' } }
+    PickingResponse:
+      type: object
+      properties:
+        picked:
+          type: array
+          items:
+            type: object
+            properties:
+              batchId: { type: string }
+              qty: { $ref: '#/components/schemas/Decimal' }
+              expiry: { type: string, format: date }
+              expiredOverride: { type: boolean, description: Picked on the consume-expired override; an EBR exception (BR-24.15). }
+        excluded:
+          type: array
+          items:
+            type: object
+            properties:
+              batchId: { type: string }
+              code: { type: string, enum: [PMF-0003, PMF-0005, PMF-0016] }
+              detail: { type: string }
+        shortfall: { $ref: '#/components/schemas/Decimal' }
+        overrideHeld: { type: boolean }
+    ReworkRequest:
+      type: object
+      required: [batch, reworkQty, outputQty]
+      properties:
+        batch: { $ref: '#/components/schemas/Batch' }
+        reworkQty: { $ref: '#/components/schemas/Quantity' }
+        outputQty: { $ref: '#/components/schemas/Quantity' }
+        params:
+          type: object
+          additionalProperties: false
+          properties:
+            keepBatchNumber: { type: boolean, default: true }
+            requireQualityOrder: { type: boolean, default: true }
+            outputDisposition: { type: string, enum: [available, on-hold, quarantine], default: quarantine }
+            capitalize: { type: boolean, default: false }
+    ReworkResponse:
+      type: object
+      properties:
+        sourceBatchId: { type: string }
+        reworkQty: { $ref: '#/components/schemas/Decimal' }
+        outputBatchId: { type: [string, 'null'], description: The kept batch number, or null for a new number drawn at report as finished. }
+        outputQty: { $ref: '#/components/schemas/Decimal' }
+        outputDisposition: { $ref: '#/components/schemas/Disposition' }
+        qualityOrderRequired: { type: boolean }
+        varianceType: { type: string, enum: [rework, capitalized] }
+        parents: { type: array, items: { type: string } }
     Problem:
       type: object
       description: RFC 9457 problem details.

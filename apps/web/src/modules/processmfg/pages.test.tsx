@@ -124,7 +124,7 @@ describe("processmfg module", () => {
     const { container } = renderAt("/processmfg");
     const areas = screen.getByRole("list", { name: "Process manufacturing areas" });
     expect(within(areas).getByRole("link", { name: "Open batch orders" })).toHaveAttribute("href", "/processmfg/batch-orders");
-    expect(within(areas).getAllByRole("link")).toHaveLength(9);
+    expect(within(areas).getAllByRole("link")).toHaveLength(12);
     expect(within(areas).getByRole("link", { name: "Open bulk consolidation" })).toHaveAttribute("href", "/processmfg/consolidation");
     expect(pageViolations(container)).toEqual([]);
   });
@@ -492,5 +492,154 @@ describe("batch rules (slice 2)", () => {
     expect(await screen.findByRole("status")).toHaveTextContent("All 1 exceptions are dispositioned and signed.");
     expect(calls[1].body).toEqual({ exceptions: [{ id: "EXC-expired-batch", disposition: "accepted", signatureId: "SIG-1" }] });
     await waitFor(() => expect(pageViolations(container)).toEqual([]));
+  });
+});
+
+describe("batch attributes, picking and rework (slice 3)", () => {
+  it("checks recorded values and flags the one outside its limits (FR-24.5)", async () => {
+    handler = (url) =>
+      url.pathname === "/api/v1/production/batch-attributes:check"
+        ? json(200, {
+            results: [
+              { attribute: "grade", pass: true },
+              { attribute: "potency", pass: false, detail: "potency 38.5 is below the minimum 40" },
+            ],
+            exceptions: 1,
+          })
+        : undefined;
+    const { container } = renderAt("/processmfg/batch-attributes");
+    fireEvent.click(screen.getByRole("button", { name: "Check values" }));
+    const table = await screen.findByRole("table", { name: "Attribute results" });
+    expect(within(table).getByText("potency 38.5 is below the minimum 40")).toBeInTheDocument();
+    expect(within(table).getByText("Outside limits")).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Attribute check" })).toHaveTextContent("Exceptions 1");
+    expect(calls[0].body).toEqual({
+      definitions: [
+        { name: "potency", kind: "numeric", min: "40", max: "60" },
+        { name: "grade", kind: "enum", options: ["A", "B"] },
+      ],
+      values: { potency: { num: "38.5" }, grade: { text: "A" } },
+    });
+    await waitFor(() => expect(pageViolations(container)).toEqual([]));
+  });
+
+  it("validates attributes before calling and shows a refusal", async () => {
+    handler = () => json(400, { code: "COM-0001", detail: 'attribute "grade" value "Z" is not one of its options' });
+    renderAt("/processmfg/batch-attributes");
+    fireEvent.change(screen.getByLabelText("Recorded value", { selector: "#attr-0-value" }), { target: { value: "high" } });
+    fireEvent.change(screen.getByLabelText("Name", { selector: "#attr-1-name" }), { target: { value: "potency" } });
+    fireEvent.click(screen.getByRole("button", { name: "Check values" }));
+    expect(await screen.findByText("Enter a number with at most 6 decimals.")).toBeInTheDocument();
+    expect(screen.getByText("This attribute is already listed.")).toBeInTheDocument();
+    expect(calls).toHaveLength(0);
+    fireEvent.change(screen.getByLabelText("Recorded value", { selector: "#attr-0-value" }), { target: { value: "45" } });
+    fireEvent.change(screen.getByLabelText("Name", { selector: "#attr-1-name" }), { target: { value: "grade" } });
+    fireEvent.change(screen.getByLabelText("Recorded value", { selector: "#attr-1-value" }), { target: { value: "Z" } });
+    fireEvent.click(screen.getByRole("button", { name: "Check values" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent('attribute "grade" value "Z" is not one of its options (COM-0001)');
+  });
+
+  it("proposes batches and lists the expired and on-hold ones with their codes (AC-24.4, AC-24.10)", async () => {
+    handler = (url) =>
+      url.pathname === "/api/v1/production/batch-picking:proposal"
+        ? json(200, {
+            picked: [{ batchId: "B-403", qty: "80", expiry: "2027-06-01", expiredOverride: false }],
+            excluded: [
+              { batchId: "B-401", code: "PMF-0003", detail: "batch B-401 expired on 2027-01-10" },
+              { batchId: "B-402", code: "PMF-0016", detail: "batch B-402 is on-hold; not pickable" },
+            ],
+            shortfall: "0",
+            overrideHeld: false,
+          })
+        : undefined;
+    const { container } = renderAt("/processmfg/picking");
+    fireEvent.click(screen.getByRole("button", { name: "Propose batches" }));
+    const excluded = await screen.findByRole("table", { name: "Excluded batches" });
+    expect(within(excluded).getByText("batch B-401 expired on 2027-01-10")).toBeInTheDocument();
+    expect(within(excluded).getByText("Blocked by disposition")).toBeInTheDocument();
+    expect(within(screen.getByRole("table", { name: "Picked batches" })).getByText("B-403")).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Picking proposal" })).toHaveTextContent("Shortfall 0");
+    expect(calls[0].body).toEqual({
+      postingDate: "2027-01-15",
+      qty: "80",
+      potency: { attribute: "potency", min: "40", max: "60" },
+      batches: [
+        { id: "B-401", qty: "50", disposition: "available", values: { expiry: { date: "2027-01-10" }, potency: { num: "45" } } },
+        { id: "B-402", qty: "100", disposition: "on-hold", values: { expiry: { date: "2027-02-01" }, potency: { num: "45" } } },
+        { id: "B-403", qty: "100", disposition: "available", values: { expiry: { date: "2027-06-01" }, potency: { num: "50" } } },
+      ],
+    });
+    await waitFor(() => expect(pageViolations(container)).toEqual([]));
+  });
+
+  it("sends the override reason, flags overridden batches and warns when the duty is missing (BR-24.10)", async () => {
+    renderAt("/processmfg/picking");
+    fireEvent.change(screen.getByLabelText("Reason to consume expired batches"), { target: { value: "short" } });
+    fireEvent.click(screen.getByRole("button", { name: "Propose batches" }));
+    expect(await screen.findByText("Give at least 10 characters, or leave it empty.")).toBeInTheDocument();
+    expect(calls).toHaveLength(0);
+
+    handler = () =>
+      json(200, {
+        picked: [{ batchId: "B-401", qty: "50", expiry: "2027-01-10", expiredOverride: true }],
+        excluded: [],
+        shortfall: "30",
+        overrideHeld: true,
+      });
+    fireEvent.change(screen.getByLabelText("Reason to consume expired batches"), { target: { value: "QA approved use" } });
+    fireEvent.click(screen.getByRole("button", { name: "Propose batches" }));
+    expect(await screen.findByText("Expired, overridden")).toBeInTheDocument();
+    expect(screen.getByText("1 expired batch is used on your override; each becomes an exception in the batch record review.")).toBeInTheDocument();
+    expect((calls[0].body as { overrideReason: string }).overrideReason).toBe("QA approved use");
+
+    handler = () => json(200, { picked: [], excluded: [], shortfall: "80", overrideHeld: false });
+    fireEvent.click(screen.getByRole("button", { name: "Propose batches" }));
+    expect(await screen.findByText("No batch can be picked")).toBeInTheDocument();
+    expect(screen.getByText("You do not hold the Consume expired batch duty, so expired batches stay excluded.")).toBeInTheDocument();
+  });
+
+  it("plans the AC-24.18 rework with the default parameters", async () => {
+    handler = (url) =>
+      url.pathname === "/api/v1/production/rework-orders:preview"
+        ? json(200, {
+            sourceBatchId: "B-77",
+            reworkQty: "500",
+            outputBatchId: "B-77",
+            outputQty: "480",
+            outputDisposition: "quarantine",
+            qualityOrderRequired: true,
+            varianceType: "rework",
+            parents: ["B-77"],
+          })
+        : undefined;
+    const { container } = renderAt("/processmfg/rework");
+    fireEvent.click(screen.getByRole("button", { name: "Plan rework" }));
+    const plan = await screen.findByRole("list", { name: "Rework plan" });
+    expect(plan).toHaveTextContent("Output batch B-77");
+    expect(plan).toHaveTextContent("Output disposition quarantine");
+    expect(plan).toHaveTextContent("Cost posts as Rework variance");
+    expect(screen.getByRole("status")).toHaveTextContent("First ingredient: 500 of B-77. Genealogy parents: B-77");
+    expect(calls[0].body).toEqual({
+      batch: { id: "B-77", qty: "500", disposition: "on-hold" },
+      reworkQty: "500",
+      outputQty: "480",
+      params: { keepBatchNumber: true, requireQualityOrder: true, outputDisposition: "quarantine", capitalize: false },
+    });
+    await waitFor(() => expect(pageViolations(container)).toEqual([]));
+  });
+
+  it("refuses an available output behind a quality order and shows a server refusal", async () => {
+    renderAt("/processmfg/rework");
+    fireEvent.change(screen.getByLabelText("Output disposition"), { target: { value: "available" } });
+    fireEvent.click(screen.getByRole("button", { name: "Plan rework" }));
+    expect(await screen.findByText("With a quality order the output waits for quality release; choose quarantine or on hold.")).toBeInTheDocument();
+    expect(calls).toHaveLength(0);
+
+    handler = () => json(400, { code: "COM-0001", detail: "rework quantity must be positive and at most the batch quantity 500" });
+    fireEvent.click(screen.getByLabelText("Require a quality order"));
+    fireEvent.change(screen.getByLabelText("Quantity to rework"), { target: { value: "600" } });
+    fireEvent.click(screen.getByRole("button", { name: "Plan rework" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("rework quantity must be positive and at most the batch quantity 500 (COM-0001)");
+    expect(calls[0].body).toMatchObject({ reworkQty: "600", params: { requireQualityOrder: false, outputDisposition: "available" } });
   });
 });

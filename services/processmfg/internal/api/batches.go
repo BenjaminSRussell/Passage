@@ -200,8 +200,6 @@ type batchDTO struct {
 	Values      map[string]valueDTO `json:"values"`
 }
 
-var dispositions = map[string]bool{"available": true, "on-hold": true, "rejected": true, "quarantine": true}
-
 // toBatch validates one batch. An omitted disposition is available.
 func (b batchDTO) toBatch(field string) (domain.Batch, error) {
 	if !validRef(b.ID) {
@@ -210,7 +208,7 @@ func (b batchDTO) toBatch(field string) (domain.Batch, error) {
 	if b.Disposition == "" {
 		b.Disposition = domain.DispositionAvailable
 	}
-	if !dispositions[b.Disposition] {
+	if !domain.ValidDisposition(b.Disposition) {
 		return domain.Batch{}, invalidf("%s.disposition must be available, on-hold, rejected or quarantine", field)
 	}
 	if !validQty(b.Qty) {

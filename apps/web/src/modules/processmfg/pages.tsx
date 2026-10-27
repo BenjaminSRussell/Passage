@@ -12,6 +12,9 @@ const AREAS = [
   { to: "/processmfg/batch-requirements", title: "Customer batch requirements", text: "Which batches meet a customer's shelf-life, attribute and same-batch rules (FR-24.19)." },
   { to: "/processmfg/consolidation", title: "Bulk consolidation", text: "Bulk batch orders sized for packed orders and pegged by due date (FR-24.17)." },
   { to: "/processmfg/batch-record-check", title: "Batch record approval check", text: "Whether every review exception is dispositioned and signed (BR-24.15)." },
+  { to: "/processmfg/batch-attributes", title: "Batch attributes", text: "Recorded values checked against the item's attribute definitions; values outside limits are flagged (FR-24.5)." },
+  { to: "/processmfg/picking", title: "Batch picking", text: "Which batches a line consumes: disposition, expiry with the override, potency band, first expiry first (FR-24.6)." },
+  { to: "/processmfg/rework", title: "Rework batch order", text: "The plan for reworking a batch: output batch, disposition, quality order and cost (FR-24.18)." },
 ];
 
 /** Process manufacturing workspace: where each task lives. */
@@ -20,7 +23,7 @@ export function ProcessHome() {
     <div className={styles.stack}>
       <PageHeader
         title="Process manufacturing"
-        description="Formula-based batch orders: formulas, scaling to batch size, potency consumption, co-product cost allocation and the batch rules that judge derivation, merge, consolidation and customer requirements."
+        description="Formula-based batch orders: formulas, scaling to batch size, potency consumption, co-product cost allocation and the batch rules that judge derivation, merge, consolidation, customer requirements, attributes, picking and rework."
       />
       <CardGrid as="ul" label="Process manufacturing areas">
         {AREAS.map((a) => (

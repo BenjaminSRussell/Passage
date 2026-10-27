@@ -1,4 +1,4 @@
-# processmfg web module (PSG-24 slices 1 and 2)
+# processmfg web module (PSG-24 slices 1 to 3)
 
 Front end for `services/processmfg`. Discovered by the shell through `module.ts`. Pages use the
 `shell/ui` primitives and `pages.module.css` (tokens only), as in `docs/design-system.md`.
@@ -21,6 +21,9 @@ Front end for `services/processmfg`. Discovered by the shell through `module.ts`
 | `/processmfg/batch-requirements` | Customer batch requirement check: requirement rows by level, candidate batches; qualifying and excluded batches with reasons, same-batch pick or 409 PMF-0008 (FR-24.19, BR-24.13) | `POST /api/v1/production/batch-requirements:check` | `production.batch-order.read` |
 | `/processmfg/consolidation` | Bulk consolidation preview: bulk/pack relation and packed orders; bulk orders with the packing orders pegged to each (FR-24.17, BR-24.12) | `POST /api/v1/production/bulk-consolidation:preview` | `production.batch-order.write` |
 | `/processmfg/batch-record-check` | Batch record approval check: exceptions with disposition and signature; PMF-0014 while any is open (BR-24.15) | `POST /api/v1/production/batch-records:approve-check` | `production.batch-record.approve` |
+| `/processmfg/batch-attributes` | Batch attribute check: definitions (kind, min/max, enum options) with the recorded value; results with values outside limits flagged and counted as exceptions (FR-24.5) | `POST /api/v1/production/batch-attributes:check` | `production.batch-attribute.write` |
+| `/processmfg/picking` | Batch picking proposal: line (posting date, quantity, potency band, override reason) and candidate batches; picked batches FEFO with overridden ones flagged, excluded batches with PMF-0003, PMF-0005 or PMF-0016, shortfall, and a warning when the override duty is missing (FR-24.3, FR-24.5, FR-24.6, BR-24.10) | `POST /api/v1/production/batch-picking:proposal` | `production.batch-order.read` (override: `production.batch.consume-expired`) |
+| `/processmfg/rework` | Rework batch order plan: batch, quantity to rework, expected output and the FR-24.18 parameters; output batch, disposition, quality order, cost treatment and genealogy (AC-24.18) | `POST /api/v1/production/rework-orders:preview` | `production.batch-order.write` |
 
 Every command sends an `Idempotency-Key`, kept for the life of the form so a retried submit
 cannot create twice; it is renewed when the input changes. Quantities stay decimal strings, and
@@ -40,12 +43,16 @@ check, create with Idempotency-Key, the scale preview (AC-24.1), rescale with ve
 PMF-0104 path, the calculators (BR-24.2, BR-24.3), and the slice-2 previews: derivation
 (AC-24.11, PMF-0007, client-side validation), merge (AC-24.12, override, PMF-0006),
 requirements (AC-24.14, 409 PMF-0008), consolidation (AC-24.13) and the approval check
-(PMF-0014 then approvable), plus the in-repo WCAG checks.
+(PMF-0014 then approvable), the slice-3 pages: attribute check (exceptions, client-side
+validation, refusal), picking proposal (AC-24.4, AC-24.10 exclusions, the override reason and
+its missing-duty warning, the empty state) and rework plan (AC-24.18 defaults, the quality-order
+rule, refusal), plus the in-repo WCAG checks.
 
 ## Needs (for the shell owner, wave 5)
 
 - Item, site and legal-entity pickers: forms take item ids as UUIDs until a shared item lookup
   exists in the shell.
-- Batch attributes, disposition, the derivation monitor, EBR review and signature prompts wait
-  for their endpoints (see `services/processmfg/NOT-IMPLEMENTED.md`). The slice-2 pages take
-  batches as typed input until a wave-16 batch lookup exists.
+- Recording batch attributes and changing disposition (with history), the derivation monitor,
+  EBR review and signature prompts wait for their endpoints (see
+  `services/processmfg/NOT-IMPLEMENTED.md`). The slice-2 and slice-3 pages take batches as typed
+  input until a wave-16 batch lookup exists.

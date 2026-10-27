@@ -32,12 +32,12 @@ import { dash, QUANTITY } from "./format";
 import styles from "./pages.module.css";
 
 /** A signed decimal with at most 12 integer digits and 6 decimals. */
-const NUMBER = /^-?\d{1,12}(\.\d{1,6})?$/;
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
+export const NUMBER = /^-?\d{1,12}(\.\d{1,6})?$/;
+export const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const DAYS = /^\d{1,4}$/;
 
 /** Runs one preview call and keeps its busy, failure and result state. */
-function usePreview<Req, Res>(call: (req: Req) => Promise<Res>) {
+export function usePreview<Req, Res>(call: (req: Req) => Promise<Res>) {
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<Problem | null>(null);
   const [result, setResult] = useState<Res | null>(null);
@@ -57,7 +57,7 @@ function usePreview<Req, Res>(call: (req: Req) => Promise<Res>) {
 }
 
 /** Editable rows with add and remove. */
-function useRows<T>(initial: T[], blank: () => T) {
+export function useRows<T>(initial: T[], blank: () => T) {
   const [rows, setRows] = useState<T[]>(initial);
   return {
     rows,
@@ -95,7 +95,7 @@ function badValue(raw: string, kind: "num" | "date" | "any"): string | undefined
   return undefined;
 }
 
-function Refusal({ title, failure }: { title: string; failure: Problem | null }) {
+export function Refusal({ title, failure }: { title: string; failure: Problem | null }) {
   if (!failure) return null;
   return (
     <Alert tone="danger" title={title} live="alert">
@@ -104,7 +104,7 @@ function Refusal({ title, failure }: { title: string; failure: Problem | null })
   );
 }
 
-function RowCard({ title, addLabel, onAdd, children }: { title: string; addLabel: string; onAdd(): void; children: ReactNode }) {
+export function RowCard({ title, addLabel, onAdd, children }: { title: string; addLabel: string; onAdd(): void; children: ReactNode }) {
   return (
     <Card
       title={title}
@@ -119,7 +119,7 @@ function RowCard({ title, addLabel, onAdd, children }: { title: string; addLabel
   );
 }
 
-function RemoveRow({ label, show, onRemove }: { label: string; show: boolean; onRemove(): void }) {
+export function RemoveRow({ label, show, onRemove }: { label: string; show: boolean; onRemove(): void }) {
   if (!show) return null;
   return (
     <div className={styles.lineChecks}>

@@ -375,3 +375,76 @@ export function previewConsolidation(req: ConsolidateRequest): Promise<Consolida
 export function checkApproval(req: ApproveCheckRequest): Promise<ApproveCheckResult> {
   return post<ApproveCheckResult>("/batch-records:approve-check", req);
 }
+
+// Slice 3: batch attribute check, picking proposal and rework plan (FR-24.3,
+// FR-24.5, FR-24.6, FR-24.18, BR-24.10), previews over batches the caller passes in.
+
+export const ATTRIBUTE_KINDS = ["numeric", "text", "enum", "date"] as const;
+export type AttributeKind = (typeof ATTRIBUTE_KINDS)[number];
+
+export interface AttributeDefinition {
+  name: string;
+  kind: AttributeKind;
+  target?: string;
+  min?: string;
+  max?: string;
+  options?: string[];
+}
+
+export interface AttributesRequest {
+  definitions: AttributeDefinition[];
+  values: Record<string, AttributeValue>;
+}
+
+export interface AttributesResult {
+  results: { attribute: string; pass: boolean; detail?: string }[];
+  exceptions: number;
+}
+
+export interface PickingRequest {
+  postingDate: string;
+  qty: string;
+  potency?: { attribute: string; min: string; max: string };
+  overrideReason?: string;
+  batches: BatchInput[];
+}
+
+export interface PickingResult {
+  picked: { batchId: string; qty: string; expiry?: string; expiredOverride: boolean }[];
+  excluded: { batchId: string; code: string; detail: string }[];
+  shortfall: string;
+  overrideHeld: boolean;
+}
+
+export const REWORK_OUTPUT_DISPOSITIONS = ["quarantine", "on-hold", "available"] as const;
+export type ReworkOutputDisposition = (typeof REWORK_OUTPUT_DISPOSITIONS)[number];
+
+export interface ReworkRequest {
+  batch: BatchInput;
+  reworkQty: string;
+  outputQty: string;
+  params: { keepBatchNumber?: boolean; requireQualityOrder?: boolean; outputDisposition?: ReworkOutputDisposition; capitalize?: boolean };
+}
+
+export interface ReworkResult {
+  sourceBatchId: string;
+  reworkQty: string;
+  outputBatchId: string | null;
+  outputQty: string;
+  outputDisposition: Disposition;
+  qualityOrderRequired: boolean;
+  varianceType: "rework" | "capitalized";
+  parents: string[];
+}
+
+export function checkAttributes(req: AttributesRequest): Promise<AttributesResult> {
+  return post<AttributesResult>("/batch-attributes:check", req);
+}
+
+export function proposePicking(req: PickingRequest): Promise<PickingResult> {
+  return post<PickingResult>("/batch-picking:proposal", req);
+}
+
+export function previewRework(req: ReworkRequest): Promise<ReworkResult> {
+  return post<ReworkResult>("/rework-orders:preview", req);
+}

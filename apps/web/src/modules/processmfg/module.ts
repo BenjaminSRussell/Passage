@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
 import { BatchOrderDetailPage, BatchOrdersPage, NewBatchOrderPage } from "./BatchOrderPages";
+import { BatchAttributesPage, PickingPage, ReworkPage } from "./BatchQualityPages";
 import { ApprovalCheckPage, ConsolidationPage, DerivationPage, MergePage, RequirementCheckPage } from "./BatchRulePages";
 import { AllocationPage, PotencyPage } from "./CalculatorPages";
 import { FormulaDetailPage, FormulasPage, NewFormulaPage } from "./FormulaPages";
@@ -10,7 +11,7 @@ const processmfg: PassageModule = {
   id: "processmfg",
   title: "Process manufacturing",
   description:
-    "Formulas, batch orders scaled to batch size, potency consumption, co-product cost allocation, and batch derivation, merge, consolidation and customer requirements.",
+    "Formulas, batch orders scaled to batch size, potency consumption, co-product cost allocation, batch derivation, merge, consolidation and customer requirements, batch attributes, picking and rework.",
   routes: [
     { path: "/processmfg", element: createElement(ProcessHome), handle: { title: "Process manufacturing" } },
     { path: "/processmfg/formulas", element: createElement(FormulasPage), handle: { title: "Formulas" } },
@@ -26,6 +27,9 @@ const processmfg: PassageModule = {
     { path: "/processmfg/batch-requirements", element: createElement(RequirementCheckPage), handle: { title: "Customer batch requirements" } },
     { path: "/processmfg/consolidation", element: createElement(ConsolidationPage), handle: { title: "Bulk consolidation" } },
     { path: "/processmfg/batch-record-check", element: createElement(ApprovalCheckPage), handle: { title: "Batch record approval check" } },
+    { path: "/processmfg/batch-attributes", element: createElement(BatchAttributesPage), handle: { title: "Batch attributes" } },
+    { path: "/processmfg/picking", element: createElement(PickingPage), handle: { title: "Batch picking" } },
+    { path: "/processmfg/rework", element: createElement(ReworkPage), handle: { title: "Rework batch order" } },
   ],
   nav: [
     { label: "Overview", to: "/processmfg", duty: "production.batch-order.read" },
@@ -38,6 +42,9 @@ const processmfg: PassageModule = {
     { label: "Customer batch requirements", to: "/processmfg/batch-requirements", duty: "production.batch-order.read" },
     { label: "Bulk consolidation", to: "/processmfg/consolidation", duty: "production.batch-order.write" },
     { label: "Batch record approval", to: "/processmfg/batch-record-check", duty: "production.batch-record.approve" },
+    { label: "Batch attributes", to: "/processmfg/batch-attributes", duty: "production.batch-attribute.write" },
+    { label: "Batch picking", to: "/processmfg/picking", duty: "production.batch-order.read" },
+    { label: "Rework", to: "/processmfg/rework", duty: "production.batch-order.write" },
   ],
 };
 
