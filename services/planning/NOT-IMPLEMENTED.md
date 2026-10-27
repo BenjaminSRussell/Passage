@@ -1,6 +1,9 @@
-# NOT-IMPLEMENTED (PSG-22, planning service, slice 1)
+# NOT-IMPLEMENTED (PSG-22, planning service, slices 1 and 2)
 
-Every ticket deliverable and acceptance criterion that slice 1 does not build.
+Every ticket deliverable and acceptance criterion that slices 1 and 2 do not
+build. Slice 2 added the freeze, action and futures fences (BR-22.4),
+planned-order maintenance (FR-22.11) and forecast cells with reduction that a
+run nets as demand (FR-22.8, AC-22.6).
 Status is either `later slice of PSG-22` (planned work in this wave) or `handoff`
 (needs another wave or owner; the handoff is recorded here because this wave may
 not edit that code).
@@ -9,7 +12,9 @@ not edit that code).
 
 | # | Deliverable | Status | Reason |
 |---|---|---|---|
-| 1 | Planning horizons and time fences (firming, freeze, action, futures fence days) | later slice of PSG-22 | Slice 1 nets over the given horizon; fence rules of BR-22.4 are not applied yet. |
+| 1 | Freeze, action and futures time fences (BR-22.4) | built | `coverage.freezeFenceDays`, `actionFenceDays`, `futuresFenceDays` on the run input; tests in `domain/fences_test.go` (with a property test that frozen demand is pegged or reported short). |
+| 1 | Firming time fence: planned orders inside it are auto-firmed (BR-22.4) | later slice of PSG-22 | Depends on firming (deliverable 3). |
+| 1 | Coverage groups as persisted setup carrying the fences (FR-22.2) | later slice of PSG-22 | Fences travel per item on the run input, like the rest of the coverage. |
 | 1 | Coverage time fence (default 100 days) and `PLANNING_HORIZON_DAYS` | later slice of PSG-22 | Every requirement in the snapshot is netted; nothing beyond a horizon is ignored yet. |
 | 1 | Safety-stock policy `first-issue` (BR-22.1 step 4, BR-22.5) | later slice of PSG-22 | Only policy `today` is built: safety stock is a demand at today, replenished at today + lead time. |
 | 1 | Issue and reorder margins (FR-22.5) | later slice of PSG-22 | Only the receipt margin (`coverage.marginDays`) is applied. |
@@ -18,19 +23,24 @@ not edit that code).
 | 1 | Low-level-code recompute on BOM change (w9 event) | later slice of PSG-22 | LLCs are computed per run from the snapshot; no BOM event consumer yet. |
 | 1 | Route-based production lead time (Σ operation times, w21) | handoff (PSG-21) | Route data comes from the production context; slice 1 accepts `leadTimeDays`. |
 | 2 | Demand and supply loaded from source contexts: sales orders (w27), on-hand (w16), purchase orders (w17), production orders and transfers (w21) | handoff (PSG-27, PSG-16, PSG-17, PSG-21) | The run API takes its snapshot inline. Source contexts do not publish the events or read APIs the snapshot needs yet. |
-| 2 | Forecast with reduction principles (FR-22.8, BR-22.3) | later slice of PSG-22 | Forecast lines and reduction are not persisted by this service. The statistical baseline is in `services/forecast-py`. |
+| 2 | Forecast with reduction principles (FR-22.8, BR-22.3) | built | `forecast_model` and `forecast_line` with principles none, percent, transactions and transactions-dynamic; a run with `forecastModel` nets the reduced quantities as forecast demand. AC-22.6 is covered by the domain, store and API tests. |
+| 2 | Sales quantity per forecast period taken from open sales orders | handoff (PSG-27) | Until sales lines reach the planning service, `salesQty` is entered on each forecast cell; the run does not re-reduce the forecast against the sales lines in its snapshot. |
+| 2 | Forecast allocation keys (FR-22.8) and forecast UoM conversion (BR-22.10) | later slice of PSG-22 | Cells are per item, site and period in the inventory UoM. |
 | 2 | Dependent demand explosion from BOM and route versions (BR-22.1 step 9) | later slice of PSG-22 | Components are accepted on the run input; BOM and route version effectivity is not resolved. |
 | 3 | Firming into production, purchase and transfer orders (FR-22.10, BR-22.9) | later slice of PSG-22 | Needs production-order (PSG-21) and purchase-order (PSG-17) targets and the firming saga. |
-| 3 | Planned-order maintenance: PATCH change qty/date/vendor, approve, delete (FR-22.11) | later slice of PSG-22 | Endpoint and ETag/If-Match handling not built. |
+| 3 | Planned-order maintenance: PATCH change qty/date/vendor, approve, delete (FR-22.11) | built | `PATCH`/`DELETE /planned-orders/{id}` under If-Match on open orders of the current version; delete is a soft delete. A changed quantity is not re-pegged, so after an edit the explain tree shows the pegging of the planned quantity. |
+| 3 | Approved orders "become firmed on next run" (FR-22.11) | later slice of PSG-22 | A run replaces the whole version from its inline snapshot and does not carry approved or edited orders of the previous version forward; needs firming and the source-context snapshot. |
+| 3 | Vendor check against w17 vendors on PATCH | handoff (PSG-17) | `vendorId` is checked as a UUID and only on purchase orders; whether the vendor exists is not checked. |
 | 3 | Order grouping on firm (vendor, vendor-date, vendor-week) | later slice of PSG-22 | Depends on firming. |
-| 3 | Decrease, increase, cancel and derived action messages for existing supply, and the fence rules that gate advance and postpone messages (FR-22.7, BR-22.4) | later slice of PSG-22 | Built: delay (with propagation to parents and to the sales line or forecast), postpone, advance and shortage. Unpegged existing supply is pegged to `surplus` and gets no Cancel/Decrease message yet. |
+| 3 | Decrease, increase, cancel and derived action messages for existing supply (FR-22.7) | later slice of PSG-22 | Built: delay (with propagation to parents and to the sales line or forecast), postpone, advance and shortage, gated by the action and futures fences. Unpegged existing supply is pegged to `surplus` and gets no Cancel/Decrease message yet. |
 | 3 | Kanban planned-order type (FR-22.3) | later slice of PSG-22 | Order types purchase, production and transfer are planned; kanban needs wave 24 kanban rules. |
 | 3 | Planned transfer demand at the from-warehouse (BR-22.7) | later slice of PSG-22 | Transfer planned orders are proposed, but no issue demand is created at a source warehouse; warehouse scopes are not modelled (deliverable 8). |
 | 3 | Message catalog codes on messages (PLAN-0006, PLAN-0007, PLAN-0010 to PLAN-0015) | later slice of PSG-22 | Messages carry an action (`delay`, `postpone`, `advance`, `shortage`), not a catalog code; the user texts of 4.22.18 are not rendered yet. |
-| 4 | Statistical forecast via ETS and Croston/TSB (FR-22.9) | partly built | `services/forecast-py` implements ETS(A,N) by AICc, Croston, TSB, ADI selection and MAPE/wMAPE. Not built: ETS with trend and season, and the `statsforecast` library wrapper. |
+| 4 | Statistical forecast via ETS and Croston/TSB (FR-22.9) | partly built | `services/forecast-py` implements ETS A,N / A,A,N / A,A,A selected by AICc, Croston, TSB, ADI selection and holdout MAPE/wMAPE. Not built: the `statsforecast` library wrapper and `POST /forecasts/{modelId}:generate`, which would write statistical cells into a model. |
 | 4 | Forecast batch generation for 50k items under 15 min (FR-22.9) | later slice of PSG-22 | Forecast endpoint exists in Python; the batch job, item batching, and Temporal workflow are not built. |
-| 4 | Manual override per cell, consensus workflow (Temporal approval) and forecast publish event | later slice of PSG-22 | Forecast lines are not persisted in Go. Approval flow and `forecast.published.v1` not built. |
-| 4 | ForecastLine persistence and PUT lines API | later slice of PSG-22 | No forecast tables yet. |
+| 4 | Manual override per cell | built | `PUT /forecasts/{modelCode}/lines` with source `manual` (or `statistical` for a loader); the forecast screen in the web module edits cells. |
+| 4 | Consensus workflow (Temporal approval), version lock and `forecast.published.v1` | later slice of PSG-22 | Source `consensus` is reserved for that workflow and refused on PUT. Forecast models carry a write version (ETag), not published forecast versions. |
+| 4 | ForecastLine persistence and PUT lines API | built | Migration `0002`, RLS on both tables. |
 | 5 | Explain-this-plan pegging tree | built | `GET /v1/planning/planned-orders/{id}/pegging` and the planned-order screen. A bom-line demand expands through the planned order that drives it. The tree is returned in one response (depth up to 20), not lazy-loaded per node as the UI rule asks. |
 | 6 | Simulation plans and planning scenarios (FR-22.15, BR-22.14) | later slice of PSG-22 | Plan kind `simulation`, ScenarioOverride, rough-cut and purchase-volume evaluations and version diff are not built. |
 | 6 | Supplier forecast publishing through w20 | handoff (PSG-20) | Depends on scenarios. |
@@ -77,13 +87,14 @@ not edit that code).
 | AC-22.2 pegging explains every planned order | built | Property test over random snapshots (the 40-fixture set is AC1 above). |
 | AC-22.4 min/max 100/400 with PAB 90 gives one order of 310 | built | `TestRun_MinMaxOrdersUpToMax`. |
 | AC-22.5 early PO with positive days 5 gets Postpone to demand date − receipt margin | built | `TestRun_EarlyReceiptRaisesPostpone`. |
-| AC-22.6, AC-22.8, AC-22.10 to AC-22.16 | later slice of PSG-22 | Depend on forecast reduction, firming, net requirements, scenarios, DDMRP, quotas, strategies, shelf life and warehouse scopes above. |
+| AC-22.6 forecast 100, sales 30, `transactions` gives 70 | built | `TestReducePeriods_Principles`, `TestForecastLines` (store), `TestRun_NetsReducedForecastOfTheModel` (API). |
+| AC-22.8, AC-22.10 to AC-22.16 | later slice of PSG-22 | Depend on firming, net requirements, scenarios, DDMRP, quotas, strategies, shelf life and warehouse scopes above. |
 
 ## Verification
 
 | Item | Status | Reason |
 |---|---|---|
-| Database-backed tests and `0001_init.sql` on an empty database | built | Run in review against Postgres 16 with an admin URL and a non-superuser app role (`PASSAGE_TEST_DATABASE_URL`, `PASSAGE_TEST_APP_DATABASE_URL`). CI must set both. |
+| Database-backed tests and `0001_init.sql`, `0002_forecast_and_maintenance.sql` on an empty database | built | Run in review against Postgres 16 with an admin URL and a non-superuser app role (`PASSAGE_TEST_DATABASE_URL`, `PASSAGE_TEST_APP_DATABASE_URL`). CI must set both. |
 | Pytest run of `services/forecast-py` | built | Run in review with Python 3.12; CI wiring for Python services belongs to the platform owner. |
 
 ## Reconciliation and test plan (PRD 4.22.9)

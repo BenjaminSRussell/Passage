@@ -76,14 +76,18 @@ type Item struct {
 	PeriodDays                 int
 	MarginDays                 int
 	PositiveDays, NegativeDays int
-	ReorderMin, ReorderMax     decimal.Decimal
-	OnHand, SafetyStock        decimal.Decimal
-	OrderType                  string
-	LeadTimeDays               int
-	MinOrderQty, MultipleQty   decimal.Decimal
-	MaxOrderQty, StandardQty   decimal.Decimal
-	Demand, Receipts           []Requirement
-	Components                 []BOMLine
+	// FreezeDays, ActionDays and FuturesDays are the time fences of BR-22.4 in
+	// days from today. FreezeDays 0 freezes nothing; ActionDays and
+	// FuturesDays 0 mean the fence is unlimited.
+	FreezeDays, ActionDays, FuturesDays int
+	ReorderMin, ReorderMax              decimal.Decimal
+	OnHand, SafetyStock                 decimal.Decimal
+	OrderType                           string
+	LeadTimeDays                        int
+	MinOrderQty, MultipleQty            decimal.Decimal
+	MaxOrderQty, StandardQty            decimal.Decimal
+	Demand, Receipts                    []Requirement
+	Components                          []BOMLine
 }
 
 // PlannedOrder is a proposed purchase, production or transfer order.
@@ -207,6 +211,9 @@ func validate(it *Item) error {
 	}
 	if it.ID == "" || it.LeadTimeDays < 0 || it.MarginDays < 0 || it.OnHand.IsNegative() || it.SafetyStock.IsNegative() {
 		return fmt.Errorf("%w: %q lead time, margin, on-hand or safety stock", ErrInvalidItem, it.ID)
+	}
+	if it.FreezeDays < 0 || it.ActionDays < 0 || it.FuturesDays < 0 {
+		return fmt.Errorf("%w: %q time fences must not be negative", ErrInvalidItem, it.ID)
 	}
 	for _, d := range it.Demand {
 		if d.Ref == "" || !d.Qty.IsPositive() {
@@ -508,6 +515,16 @@ func (L *ledger) unmetSafetyOnly() bool {
 func (L *ledger) order(t int, need decimal.Decimal) error {
 	it := L.item
 	today := L.rs.today
+	if frozen(today, t, it.FreezeDays) {
+		// BR-22.4: a requirement inside the freeze fence gets no planned
+		// order. What is still uncovered is reported as a shortage, so every
+		// demand is either pegged in full or has a message for the rest.
+		for _, u := range L.unmet {
+			L.rs.res.Messages = append(L.rs.res.Messages, Message{Action: ActionShortage, ItemID: it.ID, DemandRef: u.ref, SuggestedDate: u.date, Qty: u.qty})
+		}
+		L.unmet = nil
+		return nil
+	}
 	lots, rule, err := LotSize(need, it.MinOrderQty, it.MultipleQty, it.MaxOrderQty, it.StandardQty)
 	if err != nil {
 		return err
@@ -576,6 +593,10 @@ func (L *ledger) finish(receipts []Requirement) {
 			}
 		}
 		if !found {
+			continue
+		}
+		if !withinFence(L.rs.today, r.Date, it.ActionDays) {
+			// BR-22.4: action messages only for supply inside the action fence.
 			continue
 		}
 		suggested := earliest - it.MarginDays
@@ -664,8 +685,10 @@ func (rs *runState) propagateFutures(levels []*Item) {
 			}
 		}
 	}
+	// BR-22.4: futures (delay) messages only for requirements inside the
+	// futures fence. The futures dates themselves still propagate.
 	for _, o := range orders {
-		if o.FuturesDate == nil || o.DelayDays <= 0 {
+		if o.FuturesDate == nil || o.DelayDays <= 0 || !withinFence(rs.today, o.DeliveryDate, rs.index[o.ItemID].FuturesDays) {
 			continue
 		}
 		demandRef := ""
@@ -677,9 +700,24 @@ func (rs *runState) propagateFutures(levels []*Item) {
 	}
 	for _, key := range lateKeys {
 		l := late[key]
+		if !withinFence(rs.today, l.peg.DemandDate, rs.index[l.peg.ItemID].FuturesDays) {
+			continue
+		}
 		rs.res.Messages = append(rs.res.Messages, Message{Action: ActionDelay, ItemID: l.peg.ItemID, SupplyRef: l.peg.SupplyRef, DemandRef: l.peg.DemandRef,
 			SuggestedDate: l.ready, DelayDays: l.ready - l.peg.DemandDate, Qty: l.peg.Qty})
 	}
+}
+
+// frozen reports whether day lies inside a freeze fence of n days from today.
+// A freeze of 0 days freezes nothing.
+func frozen(today, day, n int) bool {
+	return n > 0 && day-today < n
+}
+
+// withinFence reports whether day lies inside an action or futures fence of n
+// days from today. A fence of 0 days is unlimited.
+func withinFence(today, day, n int) bool {
+	return n == 0 || day-today < n
 }
 
 // LotSize applies minimum, standard, multiple and maximum order quantities

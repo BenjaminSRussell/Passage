@@ -18,6 +18,7 @@ const order: PlannedOrder = {
   delayDays: 7,
   lotRule: "lot-for-lot",
   status: "unprocessed",
+  version: 1,
 };
 
 const purchase: PlannedOrder = { ...order, id: "00000000-0000-0000-0000-0000000000a2", number: "PLN-000005", orderType: "purchase", qty: "500", futuresDate: null, delayDays: 0 };

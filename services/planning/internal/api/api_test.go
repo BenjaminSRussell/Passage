@@ -21,7 +21,8 @@ const (
 	fgID   = "00000000-0000-0000-0000-0000000000b1"
 )
 
-// fakeStore keeps runs in memory and honours the Idempotency-Key contract.
+// fakeStore keeps runs in memory and honours the Idempotency-Key contract. Its
+// maintenance and forecast methods are in maintain_test.go.
 type fakeStore struct {
 	runs    map[string]store.Version
 	inputs  map[string]string
@@ -29,6 +30,16 @@ type fakeStore struct {
 	runErr  error
 	pingErr error
 	orderID string
+
+	// One planned order for the maintenance tests; version 0 reads as 1.
+	orderVersion int
+	orderQty     string
+	orderStatus  string
+	lastPatch    store.OrderPatch
+	// Forecast models by code and the forecast demand a run reads.
+	models   map[string]store.ForecastModel
+	demand   []store.ForecastDemandLine
+	demandAt string
 }
 
 func (f *fakeStore) RunPlan(_ context.Context, req store.RunRequest) (store.Version, bool, error) {
@@ -80,7 +91,14 @@ func (f *fakeStore) GetPlannedOrder(_ context.Context, id string) (store.Planned
 	if f.orderID != "" && id != f.orderID {
 		return store.PlannedOrder{}, httpx.NewProblem(http.StatusNotFound, store.CodeOrderNotFound, "planned order not found")
 	}
-	return store.PlannedOrder{ID: id, VersionID: testkit.TenantID(9), Number: "PLN-000005", Qty: "500", Status: "unprocessed"}, nil
+	qty, status := f.orderQty, f.orderStatus
+	if qty == "" {
+		qty = "500"
+	}
+	if status == "" {
+		status = "unprocessed"
+	}
+	return store.PlannedOrder{ID: id, VersionID: testkit.TenantID(9), Number: "PLN-000005", Qty: qty, Status: status, Version: f.currentVersion()}, nil
 }
 
 // PegsOf models a purchase PLN-000005 that covers 300 of the bom-line demand of

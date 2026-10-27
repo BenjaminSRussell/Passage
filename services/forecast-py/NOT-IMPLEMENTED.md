@@ -1,12 +1,15 @@
-# NOT-IMPLEMENTED (PSG-22, forecast-py, slice 1)
+# NOT-IMPLEMENTED (PSG-22, forecast-py, slices 1 and 2)
 
 | Deliverable or AC | Status | Reason |
 |---|---|---|
-| FR-22.9 ETS with trend and seasonality (seasonal selection by AICc) | later slice of PSG-22 | Slice 1 implements ETS(A,N) only. |
-| FR-22.9 `statsforecast` wrapper | later slice of PSG-22 | Not added as a dependency; the in-house models cover the slice-1 selection rules. Adopt once the dependency review is done. |
+| FR-22.9 ETS with trend and seasonality (seasonal selection by AICc) | built | A,N / A,A,N / A,A,A by AICc on common residuals (`ets_fit`), `seasonLength` on the request, tests in `tests/test_trend_seasonal.py`. |
+| ETS damped trend and multiplicative error, trend or season | later slice of PSG-22 | Additive forms only; the smoothing grid for trend and season is coarse (0.1, 0.3, 0.6) rather than optimised. |
+| Automatic season-length detection | later slice of PSG-22 | The caller passes `seasonLength` (default 12 for monthly buckets). |
+| FR-22.9 `statsforecast` wrapper | later slice of PSG-22 | Not added as a dependency; the in-house models cover the selection rules. Adopt once the dependency review is done. |
 | FR-22.9 batch generation of 50k items in under 15 min, batches of 1,000, resumable per batch | later slice of PSG-22 | The endpoint takes up to 1,000 series per call. The Temporal batch job and the partial-version rule are not built. |
 | FR-22.9 forecast version per run, unpublished on partial failure | later slice of PSG-22 | No persistence in this service; the planning service owns versions. |
-| FR-22.9 manual override and consensus workflow | later slice of PSG-22 | Owned by the planning service and Temporal. |
+| FR-22.9 manual override | built in `services/planning` | Forecast cells with If-Match and reduction (`PUT /v1/planning/forecasts/{modelCode}/lines`). |
+| FR-22.9 consensus workflow | later slice of PSG-22 | Owned by the planning service and Temporal. |
 | AC-22.7 Croston/TSB chosen for ADI 2.1 history, MAPE reported | built | ADI > 1.32 selects TSB; each result carries `mape` and `wmape` from a holdout backtest (last min(12, n/4) periods). Test `test_ac_22_7_intermittent_history_picks_tsb_and_reports_mape` (24 months, ADI 2.18). |
 | PLAN-0012 model fallback message | built | Returned as a warning on short histories. |
 | Model selection parameter `forecast history months` (12 to 120) | later slice of PSG-22 | Window is set by the caller through the history length. |

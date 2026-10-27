@@ -34,6 +34,8 @@ interface Draft {
   plan: string;
   asOf: string;
   siteId: string;
+  /** Optional forecast model whose reduced forecast the run nets. */
+  forecastModel?: string;
   items: string;
 }
 
@@ -45,6 +47,8 @@ export function validateRun(d: Draft): { errors: Errors; items: unknown[] } {
   if (!PLAN_CODE.test(d.plan.trim())) errors.plan = "Use 2 to 20 capital letters, digits, _ or -.";
   if (!DATE.test(d.asOf)) errors.asOf = "Enter the plan date.";
   if (!UUID.test(d.siteId.trim())) errors.siteId = "Enter the site id as a UUID.";
+  const model = (d.forecastModel ?? "").trim();
+  if (model !== "" && !PLAN_CODE.test(model)) errors.forecastModel = "Use 2 to 20 capital letters, digits, _ or -, or leave empty.";
   let items: unknown[] = [];
   try {
     const parsed: unknown = JSON.parse(d.items);
@@ -63,7 +67,7 @@ export function validateRun(d: Draft): { errors: Errors; items: unknown[] } {
  */
 export function RunPlanPage({ today = new Date().toISOString().slice(0, 10) }: { today?: string }) {
   const [plan] = usePlanCode();
-  const [draft, setDraft] = useState<Draft>({ plan, asOf: today, siteId: "", items: SAMPLE_ITEMS });
+  const [draft, setDraft] = useState<Draft>({ plan, asOf: today, siteId: "", forecastModel: "", items: SAMPLE_ITEMS });
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<LoadError | null>(null);
   const [result, setResult] = useState<PlanVersion | null>(null);
@@ -86,7 +90,10 @@ export function RunPlanPage({ today = new Date().toISOString().slice(0, 10) }: {
     setResult(null);
     const code = draft.plan.trim();
     try {
-      setResult(await runPlan(code, key.current, { asOf: draft.asOf, siteId: draft.siteId.trim(), items }));
+      const forecastModel = (draft.forecastModel ?? "").trim();
+      setResult(
+        await runPlan(code, key.current, { asOf: draft.asOf, siteId: draft.siteId.trim(), ...(forecastModel ? { forecastModel } : {}), items }),
+      );
       key.current = newKey();
     } catch (err) {
       setFailure(describeError(err));
@@ -122,6 +129,17 @@ export function RunPlanPage({ today = new Date().toISOString().slice(0, 10) }: {
           </FormField>
           <FormField id="run-site" label="Site" hint="Site id (UUID) the snapshot belongs to." error={errors.siteId}>
             {(a11y) => <Input {...a11y} value={draft.siteId} onChange={(e) => set("siteId")(e.target.value)} />}
+          </FormField>
+          <FormField
+            id="run-forecast"
+            label="Forecast model"
+            optional
+            hint="Adds the model's reduced forecast at the site as demand of the items below."
+            error={errors.forecastModel}
+          >
+            {(a11y) => (
+              <Input {...a11y} value={draft.forecastModel ?? ""} maxLength={20} onChange={(e) => set("forecastModel")(e.target.value.toUpperCase())} />
+            )}
           </FormField>
           <div className={styles.wide}>
             <FormField

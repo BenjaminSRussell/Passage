@@ -17,6 +17,7 @@ const order: PlannedOrder = {
   delayDays: 7,
   lotRule: "lot-for-lot",
   status: "unprocessed",
+  version: 1,
 };
 
 const message: Message = {
@@ -39,6 +40,7 @@ describe("planning module", () => {
       "/planning/messages",
       "/planning/runs",
       "/planning/runs/new",
+      "/planning/forecast",
     ]);
     for (const route of planning.routes) {
       expect(route.element).not.toBeNull();
@@ -51,6 +53,7 @@ describe("planning module", () => {
     expect(duties["/planning"]).toBe("planning.read");
     expect(duties["/planning/planned-orders"]).toBe("planning.read");
     expect(duties["/planning/runs/new"]).toBe("planning.run");
+    expect(duties["/planning/forecast"]).toBe("planning.read");
   });
 
   it("is auto-discovered by the registry", () => {

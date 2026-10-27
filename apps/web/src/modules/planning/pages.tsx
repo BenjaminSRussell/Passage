@@ -31,6 +31,7 @@ import {
   type PlanVersion,
 } from "./api/client";
 import { PLAN_CODE, useLoad, usePlanCode, withPlan, type LoadError } from "./hooks";
+import { MaintainOrderCard } from "./MaintainOrder";
 import styles from "./pages.module.css";
 
 export { DEFAULT_PLAN_CODE } from "./hooks";
@@ -334,11 +335,15 @@ function ExplainCard({ orderId }: { orderId: string }) {
   );
 }
 
-/** One planned order with its explain tree. */
+/** One planned order with its maintenance form and explain tree. */
 export function PlannedOrderPage() {
   const { id = "" } = useParams();
   const [plan] = usePlanCode();
-  const state = useLoad((signal) => getPlannedOrder(id, { signal }), [id]);
+  const navigate = useNavigate();
+  const [reload, setReload] = useState(0);
+  // The order as the last write returned it; a reload goes back to the service.
+  const [edited, setEdited] = useState<PlannedOrder | null>(null);
+  const state = useLoad((signal) => getPlannedOrder(id, { signal }), [id, reload]);
   const back = (
     <Link className={buttonClassName("secondary")} to={withPlan("/planning/planned-orders", plan)}>
       Back to planned orders
@@ -356,7 +361,11 @@ export function PlannedOrderPage() {
       </Card>
     );
   }
-  const o = state.data;
+  const o = edited?.id === id ? edited : state.data;
+  const reloadOrder = () => {
+    setEdited(null);
+    setReload((n) => n + 1);
+  };
   return (
     <div className={styles.stack}>
       <PageHeader title={o ? `Planned order ${o.number}` : "Planned order"} meta={o ? <StatusPill status={o.status} /> : undefined} actions={back} />
@@ -379,10 +388,20 @@ export function PlannedOrderPage() {
               ["Expected", o.futuresDate ?? dash],
               ["Delay", o.delayDays > 0 ? `${o.delayDays} days` : dash],
               ["Lot rule", o.lotRule],
+              ...(o.orderType === "purchase" ? ([["Vendor", o.vendorId ?? dash, true]] as [string, ReactNode, boolean][]) : []),
             ]}
           />
         ) : null}
       </Card>
+      {o && !state.loading ? (
+        <MaintainOrderCard
+          key={o.id}
+          order={o}
+          onChanged={setEdited}
+          onDeleted={() => navigate(withPlan("/planning/planned-orders", plan))}
+          onReload={reloadOrder}
+        />
+      ) : null}
       {o ? <ExplainCard orderId={o.id} /> : null}
     </div>
   );

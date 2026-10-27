@@ -27,6 +27,10 @@ const (
 	CodeVersionNotFound  = "PLAN-VERSION-NOT-FOUND"
 	CodeOrderNotFound    = "PLAN-ORDER-NOT-FOUND"
 	CodeAlreadyRunning   = "PLAN-0001"
+	CodeOrderNotEditable = "PLAN-ORDER-NOT-EDITABLE"
+	CodeOrderInvalid     = "PLAN-ORDER-INVALID"
+	CodeForecastNotFound = "PLAN-FORECAST-NOT-FOUND"
+	CodeVersionConflict  = "conflict_version"
 	CodeIdempotencyReuse = "idempotency_key_reuse"
 
 	uniqueViolation = "23505"
@@ -46,6 +50,11 @@ type Store interface {
 	GetPlannedOrder(ctx context.Context, id string) (PlannedOrder, error)
 	PegsOf(ctx context.Context, versionID, supplyRef string) ([]domain.PegLine, error)
 	ListMessages(ctx context.Context, planCode, action string, limit int) ([]Message, error)
+	UpdatePlannedOrder(ctx context.Context, id string, expectedVersion int, patch OrderPatch) (PlannedOrder, error)
+	DeletePlannedOrder(ctx context.Context, id string, expectedVersion int) error
+	UpsertForecastLines(ctx context.Context, modelCode string, expectedVersion int, spec *ModelSpec, cells []ForecastCellInput) (ForecastModel, error)
+	ListForecastLines(ctx context.Context, modelCode, itemID, siteID string, limit int) (ForecastModel, []ForecastLine, error)
+	ForecastDemand(ctx context.Context, modelCode, siteID string, from time.Time) ([]ForecastDemandLine, error)
 	Ping(ctx context.Context) error
 }
 
@@ -87,7 +96,8 @@ type Version struct {
 	inputHash     string
 }
 
-// PlannedOrder is one planned order row of the current version.
+// PlannedOrder is one planned order row of a plan version. Status is
+// unprocessed, approved, firmed or deleted.
 type PlannedOrder struct {
 	ID           string  `json:"id"`
 	VersionID    string  `json:"versionId"`
@@ -101,6 +111,9 @@ type PlannedOrder struct {
 	DelayDays    int     `json:"delayDays"`
 	LotRule      string  `json:"lotRule"`
 	Status       string  `json:"status"`
+	// Version is the order's ETag: every maintenance write bumps it.
+	Version  int     `json:"version"`
+	VendorID *string `json:"vendorId,omitempty"`
 }
 
 // Message is one action or delay message of the current version.
@@ -291,23 +304,24 @@ func (s *Postgres) ListVersions(ctx context.Context, planCode string, limit int)
 
 const orderSelect = `select o.id::text, v.id::text, o.number, o.item_id::text, o.order_type, o.qty::text,
 	to_char(o.order_date, 'YYYY-MM-DD'), to_char(o.delivery_date, 'YYYY-MM-DD'), to_char(o.futures_date, 'YYYY-MM-DD'),
-	o.delay_days, o.lot_rule, o.status
+	o.delay_days, o.lot_rule, o.status, o.version, o.vendor_id::text
 	from planned_order o join plan_version v on v.tenant_id = o.tenant_id and v.id = o.plan_version_id
 	join plan p on p.tenant_id = v.tenant_id and p.id = v.plan_id`
 
 func scanOrder(row pgx.Row) (PlannedOrder, error) {
 	var o PlannedOrder
-	err := row.Scan(&o.ID, &o.VersionID, &o.Number, &o.ItemID, &o.OrderType, &o.Qty, &o.OrderDate, &o.DeliveryDate, &o.FuturesDate, &o.DelayDays, &o.LotRule, &o.Status)
+	err := row.Scan(&o.ID, &o.VersionID, &o.Number, &o.ItemID, &o.OrderType, &o.Qty, &o.OrderDate, &o.DeliveryDate, &o.FuturesDate, &o.DelayDays, &o.LotRule, &o.Status, &o.Version, &o.VendorID)
 	return o, err
 }
 
 // ListPlannedOrders reads the current version's planned orders of a plan.
+// Deleted orders are left out.
 func (s *Postgres) ListPlannedOrders(ctx context.Context, planCode string, f OrderFilter, limit int) ([]PlannedOrder, error) {
 	p, _ := tenant.FromContext(ctx)
 	out := []PlannedOrder{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, orderSelect+` where o.tenant_id = $1 and p.code = $2 and v.status = 'current'
-			and ($3::text = '' or o.status = $3) and ($4::text = '' or o.item_id::text = $4)
+			and (case when $3::text = '' then o.status <> 'deleted' else o.status = $3 end) and ($4::text = '' or o.item_id::text = $4)
 			order by o.number limit $5`, p.TenantID, planCode, f.Status, f.ItemID, limit)
 		if err != nil {
 			return err

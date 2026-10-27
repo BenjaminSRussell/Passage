@@ -1,9 +1,13 @@
-# forecast-py (wave 22, PSG-22, slice 1)
+# forecast-py (wave 22, PSG-22, slices 1 and 2)
 
 Statistical forecast baseline for master planning (PRD FR-22.9). Numeric work
 only, per the Python rules in the engineering conventions.
 
-- **ETS (A,N)**: simple exponential smoothing; alpha picked on a 0.05..1.00 grid by AICc.
+- **ETS** selected by AICc among A,N (simple smoothing, alpha on a 0.05..1.00
+  grid), A,A,N (additive trend) and A,A,A (additive trend and season of
+  `seasonLength` periods, eligible from two seasons plus one period). Trend and
+  season parameters are picked on a coarse 0.1/0.3/0.6 grid; all candidates are
+  scored on the same residuals. Paths are clipped at zero.
 - **Croston** and **TSB**: intermittent demand. Auto selection uses TSB when the
   average demand interval (ADI) is above 1.32.
 - **Naive**: last value, used when history is under 24 months (PLAN-0012 warning).
@@ -33,16 +37,18 @@ uvicorn forecast.api:app --port 8080
 
 `POST /v1/forecast/forecasts:generate` takes 1 to 1,000 series, each with a
 non-empty, non-negative, finite `history` (at most 600 periods), `model` (`auto` |
-`ets` | `croston` | `tsb` | `naive`) and `horizonPeriods` (1 to 104). It returns
-the model used, `shortHistory`, the flat forecast, `mape` and `wmape` (holdout
-backtest over the last min(12, n/4) periods; null when undefined) and warnings.
+`ets` | `croston` | `tsb` | `naive`), `horizonPeriods` (1 to 104) and
+`seasonLength` (1 to 24, default 12; 1 turns seasonality off). It returns the
+model used, `shortHistory`, the forecast per horizon period (flat for the level
+models, trend and season for ETS), `mape` and `wmape` (holdout backtest of the
+same path over the last min(12, n/4) periods; null when undefined) and warnings.
 Any schema violation (negative or non-finite history, unknown model) is a 422.
 
 ## Error codes
 
 | HTTP | Meaning |
 |---|---|
-| 422 | Request fails schema validation: empty batch or history, negative or non-finite value, unknown model, horizon out of range |
+| 422 | Request fails schema validation: empty batch or history, negative or non-finite value, unknown model, horizon or season length out of range |
 | warning `PLAN-0012` | History shorter than 24 periods; naive model used |
 
 ## Wave reference

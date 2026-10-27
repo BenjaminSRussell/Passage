@@ -27,8 +27,10 @@ import (
 )
 
 const (
-	dutyRun  = "planning.run"
-	dutyRead = "planning.read"
+	dutyRun              = "planning.run"
+	dutyRead             = "planning.read"
+	dutyMaintainOrders   = "planning.order.maintain"    // Maintain planned orders
+	dutyMaintainForecast = "planning.forecast.maintain" // Maintain forecasts
 
 	idempotencyKey = "Idempotency-Key"
 	dateLayout     = "2006-01-02"
@@ -71,8 +73,12 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/plans/{planCode}/versions/{number}", a.getVersion)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/planned-orders", a.listPlannedOrders)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/planned-orders/{id}", a.getPlannedOrder)
+	r.With(authz.RequireDuty(dutyMaintainOrders)).Patch("/v1/planning/planned-orders/{id}", a.patchPlannedOrder)
+	r.With(authz.RequireDuty(dutyMaintainOrders)).Delete("/v1/planning/planned-orders/{id}", a.deletePlannedOrder)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/planned-orders/{id}/pegging", a.pegging)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/messages", a.listMessages)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/forecasts/{modelCode}/lines", a.getForecastLines)
+	r.With(authz.RequireDuty(dutyMaintainForecast)).Put("/v1/planning/forecasts/{modelCode}/lines", a.putForecastLines)
 }
 
 // Metrics renders the counters in Prometheus text format.
@@ -111,9 +117,12 @@ func validationFailed(w http.ResponseWriter, r *http.Request, fields map[string]
 }
 
 type runRequest struct {
-	AsOf   string    `json:"asOf"`
-	SiteID string    `json:"siteId"`
-	Items  []itemDTO `json:"items"`
+	AsOf   string `json:"asOf"`
+	SiteID string `json:"siteId"`
+	// ForecastModel, when set, adds the model's reduced forecast at the site
+	// as forecast demand of the snapshot's items (FR-22.8).
+	ForecastModel string    `json:"forecastModel,omitempty"`
+	Items         []itemDTO `json:"items"`
 }
 
 type itemDTO struct {
@@ -137,6 +146,11 @@ type coverageDTO struct {
 	NegativeDays int             `json:"negativeDays"`
 	ReorderMin   decimal.Decimal `json:"reorderMin"`
 	ReorderMax   decimal.Decimal `json:"reorderMax"`
+	// Time fences in days from asOf (BR-22.4): freezeFenceDays 0 freezes
+	// nothing; actionFenceDays and futuresFenceDays 0 are unlimited.
+	FreezeFenceDays  int `json:"freezeFenceDays"`
+	ActionFenceDays  int `json:"actionFenceDays"`
+	FuturesFenceDays int `json:"futuresFenceDays"`
 }
 
 type lotDTO struct {
@@ -168,6 +182,9 @@ func (req runRequest) validate() map[string]string {
 	if !ids.Valid(req.SiteID) {
 		fields["siteId"] = "must be a UUID"
 	}
+	if req.ForecastModel != "" && !planCodePattern.MatchString(req.ForecastModel) {
+		fields["forecastModel"] = codeMessage
+	}
 	if len(req.Items) == 0 || len(req.Items) > maxItems {
 		fields["items"] = fmt.Sprintf("must hold 1 to %d items", maxItems)
 	}
@@ -182,6 +199,11 @@ func (req runRequest) validate() map[string]string {
 		c := it.Coverage
 		if c.PeriodDays < 0 || c.MarginDays < 0 || c.PositiveDays < 0 || c.NegativeDays < 0 {
 			fields[prefix+".coverage"] = "periodDays, marginDays, positiveDays and negativeDays must be 0 or more"
+		}
+		for name, days := range map[string]int{"freezeFenceDays": c.FreezeFenceDays, "actionFenceDays": c.ActionFenceDays, "futuresFenceDays": c.FuturesFenceDays} {
+			if days < 0 || days > 3650 {
+				fields[prefix+".coverage."+name] = "must be 0 to 3650"
+			}
 		}
 		if c.ReorderMin.IsNegative() || c.ReorderMax.IsNegative() || it.OnHand.IsNegative() || it.SafetyStock.IsNegative() ||
 			it.Lot.MinOrderQty.IsNegative() || it.Lot.MultipleQty.IsNegative() || it.Lot.MaxOrderQty.IsNegative() || it.Lot.StandardQty.IsNegative() {
@@ -217,6 +239,7 @@ func (req runRequest) toDomain(asOf time.Time) ([]domain.Item, error) {
 			ID: it.ItemID, Coverage: it.Coverage.Code, PeriodDays: it.Coverage.PeriodDays, MarginDays: it.Coverage.MarginDays,
 			PositiveDays: it.Coverage.PositiveDays, NegativeDays: it.Coverage.NegativeDays,
 			ReorderMin: it.Coverage.ReorderMin, ReorderMax: it.Coverage.ReorderMax,
+			FreezeDays: it.Coverage.FreezeFenceDays, ActionDays: it.Coverage.ActionFenceDays, FuturesDays: it.Coverage.FuturesFenceDays,
 			OnHand: it.OnHand, SafetyStock: it.SafetyStock, OrderType: it.OrderType, LeadTimeDays: it.LeadTimeDays,
 			MinOrderQty: it.Lot.MinOrderQty, MultipleQty: it.Lot.MultipleQty, MaxOrderQty: it.Lot.MaxOrderQty, StandardQty: it.Lot.StandardQty,
 		}
@@ -261,7 +284,7 @@ func (a *API) runPlan(w http.ResponseWriter, r *http.Request) {
 	}
 	code := chi.URLParam(r, "planCode")
 	if !planCodePattern.MatchString(code) {
-		validationFailed(w, r, map[string]string{"planCode": "must be 2 to 20 characters of A-Z, 0-9, _ or -"})
+		validationFailed(w, r, map[string]string{"planCode": codeMessage})
 		return
 	}
 	key := r.Header.Get(idempotencyKey)
@@ -283,6 +306,18 @@ func (a *API) runPlan(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		validationFailed(w, r, map[string]string{"items": err.Error()})
 		return
+	}
+	if req.ForecastModel != "" {
+		lines, err := a.store.ForecastDemand(r.Context(), req.ForecastModel, req.SiteID, asOf)
+		if err != nil {
+			var p *httpx.Problem
+			if errors.As(err, &p) && p.Code == store.CodeForecastNotFound {
+				err = httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeForecastNotFound, "forecast model "+req.ForecastModel+" does not exist")
+			}
+			httpx.Fail(w, r, err)
+			return
+		}
+		addForecastDemand(items, req.ForecastModel, asOf, lines)
 	}
 	// The idempotency fingerprint covers the plan code and the whole snapshot,
 	// so the same key on another plan or input is a reuse, not a replay.
@@ -319,6 +354,27 @@ func (a *API) runPlan(w http.ResponseWriter, r *http.Request) {
 	}
 	a.runsCompleted.Add(1)
 	httpx.JSON(w, http.StatusCreated, v)
+}
+
+// addForecastDemand appends each reduced forecast cell to the demand of its
+// item as a forecast requirement at the period start (FR-22.8, BR-22.3). Cells
+// of items outside the snapshot are not planned. A period that started before
+// asOf is due at asOf, like any past demand.
+func addForecastDemand(items []domain.Item, model string, asOf time.Time, lines []store.ForecastDemandLine) {
+	index := make(map[string]*domain.Item, len(items))
+	for i := range items {
+		index[items[i].ID] = &items[i]
+	}
+	for _, l := range lines {
+		it := index[l.ItemID]
+		if it == nil {
+			continue
+		}
+		start := l.PeriodStart.Format(dateLayout)
+		day := int(l.PeriodStart.Sub(asOf) / (24 * time.Hour))
+		it.Demand = append(it.Demand, domain.Requirement{Ref: "FC:" + model + ":" + start, RefType: domain.RefForecast,
+			Date: day, Qty: l.ReducedQty, Priority: domain.PriorityForecast})
+	}
 }
 
 func runProblem(err error) error {
@@ -439,6 +495,7 @@ func (a *API) getPlannedOrder(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
+	w.Header().Set("ETag", etagOf(order.Version))
 	httpx.JSON(w, http.StatusOK, order)
 }
 

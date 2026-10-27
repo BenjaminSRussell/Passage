@@ -1,12 +1,15 @@
-# planning (wave 22, PSG-22, slice 1)
+# planning (wave 22, PSG-22, slices 1 and 2)
 
 Master planning for Passage: nets demand against supply level by level through
 the BOM and writes planned purchase, production and transfer orders, each pegged
 to the demand it serves, with action and delay messages.
 
-This is **slice 1**. It contains the pure netting engine, a static plan run that
-persists a versioned, hashed result, the explain tree, and the message list. What
-is not built yet is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
+Slice 1 built the pure netting engine, a static plan run that persists a
+versioned, hashed result, the explain tree, and the message list. Slice 2 adds
+the time fences of BR-22.4, planned-order maintenance (change, approve, delete
+under If-Match, FR-22.11), and forecast cells with reduction (FR-22.8) that a
+run can net as forecast demand. What is not built yet is listed in
+[NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 
 ## Layout
 
@@ -17,6 +20,7 @@ internal/store/        Postgres repository (pgx); a plan run is one transaction 
 internal/api/          HTTP handlers under /v1/planning, RFC 9457 problems, /readyz with a database ping
 internal/events/       plan.completed.v1 type and payload
 migrations/            0001_init.sql (plan, plan_version, planned_order, pegging, action_message, outbox; RLS on all)
+                       0002_forecast_and_maintenance.sql (planned_order version/vendor/deleted, forecast_model, forecast_line; RLS)
 api/openapi.yaml       OpenAPI 3.1 for every exposed endpoint (kept in step by TestOpenAPI_MatchesRoutes)
 events/asyncapi.yaml   AsyncAPI 3 for every event published
 charts/planning/       Helm chart (deployment, service, servicemonitor toggle)
@@ -53,6 +57,17 @@ Dockerfile             distroless static image, built from the repository root
   planning a new order, and that late receipt gets Advance to the demand date.
   Read this way, step 10's "later than demand by more than negative_days" is
   the case that gets a new planned order rather than an Advance message.
+- Time fences (BR-22.4), per item in days from the plan date: a requirement
+  inside `freezeFenceDays` gets no planned order and what on-hand and
+  receipts do not cover is a shortage message; Advance/Postpone only for
+  receipts inside `actionFenceDays`; delay messages only for requirements
+  (the late order's delivery date, or the late demand's date) inside
+  `futuresFenceDays`. Futures dates still propagate outside the fence. 0 means
+  no freeze and unlimited action and futures fences.
+- Forecast demand (FR-22.8): with `forecastModel` on the run, the model's
+  reduced forecast at the site is added as `forecast` demand (priority 2) of
+  the snapshot's items at each period start; periods that ended before the
+  plan date are skipped and earlier starts are due today.
 - Plan hash: sha256 over orders, pegging and messages, each sorted by a total
   order over all fields (FR-22.14). Property tests check determinism, 100%
   pegging of planned orders, and that no non-manual demand is left short.
@@ -68,7 +83,27 @@ DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/planning   # HTTP
 ```
 
 Store tests cover persistence, replay and key reuse, version numbering, the
-outbox event, tenant isolation under RLS, and the 409 on a concurrent run.
+outbox event, tenant isolation under RLS, the 409 on a concurrent run,
+planned-order maintenance (versions, date and vendor rules, delete, superseded
+versions) and forecast cells (reduction, recompute on a principle change,
+forecast demand for a run).
+
+## Planned-order maintenance and forecasts
+
+- `GET /planned-orders/{id}` returns the order's `version` in the body and as
+  `ETag`. `PATCH` and `DELETE` require `If-Match` with it: missing is 428
+  `precondition_required`, stale is 412 `conflict_version`. Only open orders
+  (unprocessed or approved) of the plan's current version can be maintained.
+  `status: approved` approves; firming is a separate command (not built yet).
+  Delete keeps the row with status `deleted`, so the version's pegging still
+  resolves; lists leave it out.
+- `PUT /forecasts/{modelCode}/lines` upserts up to 1,000 cells (each replaces
+  the cell of its item, site and period start) under `If-Match` on the model;
+  a model that does not exist yet has ETag `"0"`. Reduction principles:
+  `none`, `percent` (keep 100 − percent), `transactions` (forecast − sales in
+  the period, never below 0, BR-22.3), `transactions-dynamic` (sales above a
+  period's forecast also consume the following periods). Until sales orders
+  (w27) feed the planning service, `salesQty` per cell is entered with it.
 
 ## API
 
@@ -79,8 +114,12 @@ outbox event, tenant isolation under RLS, and the 409 on a concurrent run.
 | GET | `/v1/planning/plans/{planCode}/versions/{number}` | `planning.read` |
 | GET | `/v1/planning/planned-orders?planCode=&status=&itemId=&limit=` | `planning.read` |
 | GET | `/v1/planning/planned-orders/{id}` | `planning.read` |
+| PATCH | `/v1/planning/planned-orders/{id}` | `planning.order.maintain` (If-Match required) |
+| DELETE | `/v1/planning/planned-orders/{id}` | `planning.order.maintain` (If-Match required) |
 | GET | `/v1/planning/planned-orders/{id}/pegging?depth=` | `planning.read` |
 | GET | `/v1/planning/messages?planCode=&action=&limit=` | `planning.read` |
+| GET | `/v1/planning/forecasts/{modelCode}/lines?itemId=&siteId=&limit=` | `planning.read` |
+| PUT | `/v1/planning/forecasts/{modelCode}/lines` | `planning.forecast.maintain` (If-Match required) |
 
 The web module calls these under `/api/v1/planning/...`; the BFF strips `/api`.
 A run is synchronous in slice 1: the engine runs in the request and the store
@@ -96,7 +135,12 @@ swaps the current pointer.
 | 403 | `AUTH-0003` | Missing duty |
 | 404 | `PLAN-VERSION-NOT-FOUND` | No such version for the plan |
 | 404 | `PLAN-ORDER-NOT-FOUND` | No such planned order |
+| 404 | `PLAN-FORECAST-NOT-FOUND` | No such forecast model (422 when a run names it) |
 | 409 | `PLAN-0001` | `PLAN_ALREADY_RUNNING`: a run of the plan is in progress |
+| 409 | `PLAN-ORDER-NOT-EDITABLE` | The planned order is firmed, deleted or not in the current version |
+| 412 | `conflict_version` | If-Match is not the current version of the order or forecast model |
+| 422 | `PLAN-ORDER-INVALID` | Order date after delivery date, or a vendor on a non-purchase order |
+| 428 | `precondition_required` | If-Match missing on a maintenance write |
 | 422 | `PLAN-0004` | BOM cycle; low-level codes cannot be assigned |
 | 422 | `PLAN-0005` | A requirement would split into more than 1,000 orders |
 | 422 | `PLAN-INPUT-INVALID` | Snapshot rejected by the engine (unknown coverage or order type, duplicate or unknown item); `detail` names it |

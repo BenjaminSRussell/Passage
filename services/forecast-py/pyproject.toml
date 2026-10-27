@@ -1,7 +1,7 @@
 [project]
 name = "passage-forecast"
 version = "0.1.0"
-description = "Passage statistical forecast baseline (FR-22.9): ETS (SES) and Croston/TSB by ADI"
+description = "Passage statistical forecast baseline (FR-22.9): ETS (A,N / A,A,N / A,A,A by AICc) and Croston/TSB by ADI"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.110",

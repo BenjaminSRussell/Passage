@@ -1,14 +1,16 @@
 openapi: 3.1.0
 info:
   title: Passage Planning API
-  version: 0.1.0
+  version: 0.2.0
   description: |
-    Master planning (wave 22, slice 1). Covers static plan runs, run history and
-    version status, planned orders, explain-tree pegging and action/delay
-    messages. Every planned order is pegged to the demand it serves. Browser
+    Master planning (wave 22, slices 1 and 2). Covers static plan runs with time
+    fences and forecast demand, run history and version status, planned orders
+    and their maintenance (change, approve, delete under If-Match),
+    explain-tree pegging, action/delay messages, and forecast cells with
+    reduction. Every planned order is pegged to the demand it serves. Browser
     clients call these paths under /api (the web BFF strips the prefix). Not yet
-    exposed (see NOT-IMPLEMENTED.md): planned-order PATCH, firming, net
-    requirements, coverage groups, forecasts.
+    exposed (see NOT-IMPLEMENTED.md): firming, net requirements, coverage
+    groups, statistical forecast generation.
 servers:
   - url: https://api.{env}.passage.dev
     variables:
@@ -137,11 +139,77 @@ paths:
           schema: {type: string, format: uuid}
       responses:
         '200':
-          description: Planned order
+          description: Planned order; the ETag header carries its version
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
           content:
             application/json:
               schema: {$ref: '#/components/schemas/PlannedOrder'}
         '404': {$ref: '#/components/responses/Problem'}
+    patch:
+      operationId: updatePlannedOrder
+      summary: Change quantity, dates or vendor of an open planned order of the current version, or approve it (FR-22.11)
+      x-passage-duty: planning.order.maintain
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PlannedOrderPatch'}
+      responses:
+        '200':
+          description: The changed order with its new ETag
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlannedOrder'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409':
+          description: PLAN-ORDER-NOT-EDITABLE (firmed, deleted or not in the current version)
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '412':
+          description: conflict_version (If-Match is not the current version)
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '422':
+          description: PLAN-ORDER-INVALID (order date after delivery date, vendor on a non-purchase order)
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '428':
+          description: precondition_required (If-Match missing)
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+    delete:
+      operationId: deletePlannedOrder
+      summary: Delete an open planned order of the current version (FR-22.11)
+      x-passage-duty: planning.order.maintain
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '204': {description: Deleted; the order no longer appears in lists}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '412': {$ref: '#/components/responses/Problem'}
+        '428': {$ref: '#/components/responses/Problem'}
   /v1/planning/planned-orders/{id}/pegging:
     get:
       operationId: getPegging
@@ -190,8 +258,87 @@ paths:
                     type: array
                     items: {$ref: '#/components/schemas/Message'}
         '400': {$ref: '#/components/responses/Problem'}
+  /v1/planning/forecasts/{modelCode}/lines:
+    get:
+      operationId: getForecastLines
+      summary: Forecast cells of a model with their reduced quantities (FR-22.8)
+      x-passage-duty: planning.read
+      parameters:
+        - $ref: '#/components/parameters/ModelCode'
+        - name: itemId
+          in: query
+          schema: {type: string, format: uuid}
+        - name: siteId
+          in: query
+          schema: {type: string, format: uuid}
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: The model and its cells, ordered by item, site and period; the ETag header carries the model version
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [model, items]
+                properties:
+                  model: {$ref: '#/components/schemas/ForecastModel'}
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/ForecastLine'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+    put:
+      operationId: putForecastLines
+      summary: Upsert forecast cells (each replaces the cell of its item, site and period) and recompute reduction
+      description: |
+        Creates the model on first write (send If-Match "0"). A reductionPrinciple
+        replaces the model's reduction setup and recomputes every series of the
+        model; otherwise only the series of the written cells are recomputed.
+      x-passage-duty: planning.forecast.maintain
+      parameters:
+        - $ref: '#/components/parameters/ModelCode'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ForecastLinesWrite'}
+      responses:
+        '200':
+          description: Written; the ETag header carries the new model version
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [model, updated]
+                properties:
+                  model: {$ref: '#/components/schemas/ForecastModel'}
+                  updated: {type: integer}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '412': {$ref: '#/components/responses/Problem'}
+        '428': {$ref: '#/components/responses/Problem'}
 components:
+  headers:
+    ETag:
+      description: 'Entity version as a quoted integer, e.g. "3"; send it back as If-Match'
+      schema: {type: string}
   parameters:
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: 'ETag of the version the change is based on, e.g. "3" (a new forecast model is "0")'
+      schema: {type: string}
+    ModelCode:
+      name: modelCode
+      in: path
+      required: true
+      schema: {type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,19}$'}
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -214,6 +361,10 @@ components:
       properties:
         asOf: {type: string, format: date, description: Day 0 of the plan}
         siteId: {type: string, format: uuid}
+        forecastModel:
+          type: string
+          pattern: '^[A-Z0-9][A-Z0-9_-]{1,19}$'
+          description: 'Adds the reduced forecast of this model at the site as forecast demand (ref FC:<model>:<period start>) of the snapshot items; periods that ended before asOf are skipped. 422 PLAN-FORECAST-NOT-FOUND when the model does not exist.'
         items:
           type: array
           minItems: 1
@@ -235,6 +386,9 @@ components:
             negativeDays: {type: integer, minimum: 0}
             reorderMin: {type: string, description: Decimal string}
             reorderMax: {type: string, description: Decimal string}
+            freezeFenceDays: {type: integer, minimum: 0, maximum: 3650, description: 'BR-22.4: no planned orders for requirements inside; the uncovered rest is a shortage message. 0 freezes nothing.'}
+            actionFenceDays: {type: integer, minimum: 0, maximum: 3650, description: 'BR-22.4: advance/postpone only for receipts inside. 0 is unlimited.'}
+            futuresFenceDays: {type: integer, minimum: 0, maximum: 3650, description: 'BR-22.4: delay messages only for requirements inside. 0 is unlimited.'}
         onHand: {type: string, description: Decimal string}
         safetyStock: {type: string, description: Decimal string}
         orderType: {type: string, enum: [purchase, production, transfer]}
@@ -292,7 +446,62 @@ components:
         futuresDate: {type: [string, 'null'], format: date}
         delayDays: {type: integer}
         lotRule: {type: string}
-        status: {type: string, enum: [unprocessed, approved, firmed]}
+        status: {type: string, enum: [unprocessed, approved, firmed, deleted]}
+        version: {type: integer, minimum: 1, description: Same as the ETag}
+        vendorId: {type: string, format: uuid, description: Set by maintenance on purchase orders}
+    PlannedOrderPatch:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        qty: {type: string, description: Positive decimal string, at most 6 decimals}
+        orderDate: {type: string, format: date}
+        deliveryDate: {type: string, format: date}
+        vendorId: {type: string, format: uuid, description: Planned purchase orders only}
+        status: {type: string, enum: [approved], description: Approve the order; firming is a separate command}
+    ForecastModel:
+      type: object
+      required: [code, version, reductionPrinciple, reductionPercent]
+      properties:
+        code: {type: string}
+        version: {type: integer, minimum: 0}
+        reductionPrinciple: {type: string, enum: [none, percent, transactions, transactions-dynamic]}
+        reductionPercent: {type: string, description: Decimal string, used by principle percent}
+    ForecastLine:
+      type: object
+      required: [itemId, siteId, periodStart, periodEnd, source, qty, salesQty, reducedQty]
+      properties:
+        itemId: {type: string, format: uuid}
+        siteId: {type: string, format: uuid}
+        periodStart: {type: string, format: date}
+        periodEnd: {type: string, format: date}
+        source: {type: string, enum: [statistical, manual, consensus]}
+        qty: {type: string}
+        salesQty: {type: string, description: Open sales quantity of the period used by the reduction}
+        reducedQty: {type: string, description: Forecast left after reduction; this is what a run nets}
+    ForecastLinesWrite:
+      type: object
+      required: [lines]
+      additionalProperties: false
+      properties:
+        reductionPrinciple: {type: string, enum: [none, percent, transactions, transactions-dynamic]}
+        reductionPercent: {type: string, description: '0 to 100 with at most 6 decimals; only with reductionPrinciple percent'}
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            type: object
+            required: [itemId, siteId, periodStart, periodEnd, qty]
+            additionalProperties: false
+            properties:
+              itemId: {type: string, format: uuid}
+              siteId: {type: string, format: uuid}
+              periodStart: {type: string, format: date}
+              periodEnd: {type: string, format: date}
+              qty: {type: string, description: 'Decimal string, 0 or more with at most 6 decimals; 0 clears the period'}
+              salesQty: {type: string, description: Decimal string, 0 or more}
+              source: {type: string, enum: [manual, statistical], default: manual}
     Pegging:
       type: object
       required: [orderId, number, qty, tree]

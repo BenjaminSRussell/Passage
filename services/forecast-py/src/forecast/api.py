@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from forecast import models
 
-app = FastAPI(title="Passage forecast", version="0.1.0")
+app = FastAPI(title="Passage forecast", version="0.2.0")
 
 
 # A history value is a non-negative, finite quantity; anything else is a 422.
@@ -22,6 +22,8 @@ class Series(BaseModel):
     history: list[Quantity] = Field(min_length=1, max_length=600)
     model: Literal["auto", "ets", "croston", "tsb", "naive"] = "auto"
     horizonPeriods: int = Field(default=12, ge=1, le=104)
+    # Periods per season for the seasonal ETS candidate; 1 turns seasonality off.
+    seasonLength: int = Field(default=models.DEFAULT_SEASON, ge=1, le=24)
 
 
 class GenerateRequest(BaseModel):
@@ -58,17 +60,16 @@ def readyz() -> dict[str, str]:
 def generate(req: GenerateRequest) -> GenerateResponse:
     results: list[SeriesResult] = []
     for s in req.series:
-        fc = models.select_model(s.history, s.model)
+        fc = models.select_model(s.history, s.model, horizon=s.horizonPeriods, season=s.seasonLength)
         warnings = ["PLAN-0012"] if fc.short_history else []
-        value = max(fc.value, 0.0)
-        mape, wmape = models.backtest(s.history, fc.model)
+        mape, wmape = models.backtest(s.history, fc.model, season=s.seasonLength)
         results.append(
             SeriesResult(
                 itemId=s.itemId,
                 siteId=s.siteId,
                 model=fc.model,
                 shortHistory=fc.short_history,
-                forecast=[value] * s.horizonPeriods,
+                forecast=list(fc.path),
                 mape=mape,
                 wmape=wmape,
                 warnings=warnings,

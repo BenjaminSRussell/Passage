@@ -1,12 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  deletePlannedOrder,
+  getForecastLines,
   getPegging,
   getPlannedOrder,
   listMessages,
   listPlannedOrders,
   listVersions,
   PlanningApiError,
+  putForecastLines,
   runPlan,
+  updatePlannedOrder,
 } from "./client";
 
 const runBody = { asOf: "2026-11-02", siteId: "00000000-0000-0000-0000-0000000000d1", items: [] };
@@ -33,6 +37,7 @@ const order = {
   delayDays: 0,
   lotRule: "min 500",
   status: "unprocessed",
+  version: 1,
 };
 
 afterEach(() => {
@@ -143,5 +148,57 @@ describe("planning api client", () => {
 
     expect(out.tree.children[0].ref).toBe("SO-1");
     expect(fetchMock.mock.calls[0][0]).toBe(`/api/v1/planning/planned-orders/${order.id}/pegging?depth=7`);
+  });
+
+  it("changes a planned order with PATCH and the version as If-Match", async () => {
+    const fetchMock = mockFetch(() => jsonResponse(200, { ...order, qty: "600", version: 4 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const out = await updatePlannedOrder(order.id, 3, { qty: "600" });
+
+    expect(out.version).toBe(4);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(`/api/v1/planning/planned-orders/${order.id}`);
+    expect(init?.method).toBe("PATCH");
+    expect((init?.headers as Record<string, string>)["If-Match"]).toBe('"3"');
+    expect(JSON.parse(init?.body as string)).toEqual({ qty: "600" });
+  });
+
+  it("deletes a planned order without reading a body from the 204", async () => {
+    const json = vi.fn(async () => {
+      throw new Error("no body");
+    });
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({ ok: true, status: 204, statusText: "", json }) as unknown as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await deletePlannedOrder(order.id, 2);
+
+    expect(fetchMock.mock.calls[0][1]?.method).toBe("DELETE");
+    expect((fetchMock.mock.calls[0][1]?.headers as Record<string, string>)["If-Match"]).toBe('"2"');
+    expect(json).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a stale version as 412 conflict_version", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(412, { code: "conflict_version", detail: "current version is 5" })));
+    const err = await updatePlannedOrder(order.id, 3, { status: "approved" }).catch((e: unknown) => e);
+    expect((err as PlanningApiError).status).toBe(412);
+    expect((err as PlanningApiError).code).toBe("conflict_version");
+  });
+
+  it("reads and writes forecast cells on the model path", async () => {
+    const model = { code: "BASE", version: 2, reductionPrinciple: "transactions", reductionPercent: "0" };
+    const read = mockFetch(() => jsonResponse(200, { model, items: [] }));
+    vi.stubGlobal("fetch", read);
+    expect((await getForecastLines("BASE", { siteId: "s-1", limit: 50 })).model.version).toBe(2);
+    expect(read.mock.calls[0][0]).toBe("/api/v1/planning/forecasts/BASE/lines?siteId=s-1&limit=50");
+
+    const write = mockFetch(() => jsonResponse(200, { model: { ...model, version: 3 }, updated: 1 }));
+    vi.stubGlobal("fetch", write);
+    const body = { lines: [{ itemId: "i", siteId: "s", periodStart: "2026-11-02", periodEnd: "2026-11-08", qty: "100" }] };
+    expect((await putForecastLines("BASE", 2, body)).version).toBe(3);
+    const init = write.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe("PUT");
+    expect((init.headers as Record<string, string>)["If-Match"]).toBe('"2"');
+    expect(JSON.parse(init.body as string)).toEqual(body);
   });
 });
