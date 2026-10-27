@@ -1,6 +1,6 @@
-# NOT-IMPLEMENTED (PSG-22, planning web module, slices 1 to 7)
+# NOT-IMPLEMENTED (PSG-22, planning web module, slices 1 to 9)
 
-Screens of slices 1 to 7, all registered in `module.ts` and built from the
+Screens of slices 1 to 9, all registered in `module.ts` and built from the
 shell primitives (`src/shell/ui`) with CSS Modules:
 
 - `/planning`: master planning workspace with plan picker, summary tiles
@@ -54,6 +54,19 @@ shell primitives (`src/shell/ui`) with CSS Modules:
   same draft, checks the service's rules first (code pattern, day ranges,
   period days for period coverage, auto-firm needs a firming fence) and shows
   409 `PLAN-COVERAGE-EXISTS`. Tests in `coverage.test.tsx`.
+- `/planning/item-coverages` (slice 9): item coverage of the tenant, filtered
+  by item (`?item=`): item, site, scope (with warehouse or subcontractor),
+  coverage group code, min, max ("No maximum" for 0), order type, strategy and
+  decoupling-point / priority badges, with loading, empty and error states; a
+  row opens `/planning/item-coverages/:id`, which edits it under If-Match
+  (reload offer on 412). `/planning/item-coverages/new` creates one with an
+  Idempotency-Key kept across retries of the same draft; the coverage group is
+  chosen from the tenant's groups (with a link to create one when there is
+  none), the warehouse field shows for a warehouse scope, and a subcontractor
+  scope switches the order type to transfer. The form checks the service's
+  rules first (UUIDs, decimal quantities with at most 6 decimals compared
+  without floats, max 0 or at least min, day ranges) and names 409
+  `PLAN-ITEM-COVERAGE-EXISTS`. Tests in `itemcoverage.test.tsx`.
 
 Each list has loading, empty and error states; the plan in view is kept in the
 `?plan=` query. Needs: none (uses only libraries already in `apps/web`).
@@ -65,7 +78,7 @@ Each list has loading, empty and error states; the plan in view is kept in the
 | Planned orders: firm (grouped) | built | Firm card on `/planning/planned-orders` (`Firming.tsx`). |
 | Planned orders: bulk approve, change and delete; keyboard range selection with `F` to firm | later slice of PSG-22 | Selection is by checkbox (or all open orders) and is used for firming only; maintenance stays one order at a time. |
 | Firming result report (PDF, email) | later slice of PSG-22 | The service renders no document yet; the card lists the orders created. |
-| Hide maintenance, firming, consensus and coverage-group controls from users without `planning.order.maintain`, `planning.order.firm`, `planning.forecast.maintain`, `planning.forecast.approve` or `planning.setup.maintain` | later slice of PSG-22 | The shell exposes no per-duty check to pages yet; the service refuses the write with 403 and the card shows the problem. |
+| Hide maintenance, firming, consensus, coverage-group and item-coverage controls from users without `planning.order.maintain`, `planning.order.firm`, `planning.forecast.maintain`, `planning.forecast.approve` or `planning.setup.maintain` | later slice of PSG-22 | The shell exposes no per-duty check to pages yet; the service refuses the write with 403 and the card shows the problem. |
 | Net requirements (MD04) list of one item with drill to pegging | built | `/planning/net-requirements` (`NetRequirementsPage.tsx`); the drill goes through the item's planned orders. |
 | Net requirements: what-if simulate, messages column, virtualized 365 x 20 grid, site or version choice | later slice of PSG-22 | The service has no simulate action, stores no messages per day, and reads the current version only; the list is a plain table of days with movement (at most 500). |
 | Site work calendar read from the site (w6) instead of entered on the run form | handoff (PSG-6) | The service takes the calendar on the run until site calendars are readable. |
@@ -75,7 +88,9 @@ Each list has loading, empty and error states; the plan in view is kept in the
 | Forecast: submit, publish and reject the consensus | built | Consensus card on `/planning/forecast` (`ForecastPage.tsx`, tests in `consensus.test.tsx`). Both buttons show for the model's status; the service decides who may press them (duty and segregation of duties). |
 | Forecast: generate statistical, MAPE badge | later slice of PSG-22 | `POST /forecasts/{model}:generate` is not built in the planning service. |
 | Coverage groups: list, create, edit | built | `CoverageGroupsPage.tsx` (slice 7). |
-| Item coverage setup and choosing a coverage group on the run form | later slice of PSG-22 | The service has no item coverage and the run does not resolve groups yet; the run form takes coverage (including `firmingFenceDays` and `autoFirm`) in the item JSON. |
+| Item coverage: list, create, edit | built | `ItemCoveragePage.tsx` (slice 9). |
+| Item, site, warehouse and vendor pickers by name instead of ids | handoff (PSG-6, PSG-9, PSG-16, PSG-17) | Items, sites, warehouses and vendors are read from their owning modules, which this module may not call yet; the form takes UUIDs. |
+| Choosing a coverage group on the run form | later slice of PSG-22 | The run does not resolve coverage groups or item coverage yet; the run form takes coverage (including `firmingFenceDays` and `autoFirm`) in the item JSON. |
 | Mark auto-firmed planned orders apart from those a planner firmed | later slice of PSG-22 | Both show as firmed with the order they became; the service does not return the firming batch on a planned order. |
 | Pegging tree lazy-loads children per node | later slice of PSG-22 | The API returns the tree to depth 20 in one response; it is rendered fully. |
 | Supply schedule and inventory forecast on entered figures | built | Calculator card on `/planning/calculators` (`calculators.tsx`). |

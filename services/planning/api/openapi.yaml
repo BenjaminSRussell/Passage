@@ -934,6 +934,117 @@ paths:
         '404': {$ref: '#/components/responses/Problem'}
         '412': {$ref: '#/components/responses/Problem'}
         '428': {$ref: '#/components/responses/Problem'}
+  /v1/planning/item-coverages:
+    get:
+      operationId: listItemCoverages
+      summary: Item coverages of the tenant, optionally of one item, ordered by item, site and planning scope
+      x-passage-duty: planning.read
+      parameters:
+        - name: itemId
+          in: query
+          schema: {type: string, format: uuid}
+          description: Only the coverages of this item
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Item coverages
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/ItemCoverage'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+    post:
+      operationId: createItemCoverage
+      summary: Set up how one item is planned at a site, warehouse (MRP area) or subcontractor (4.22.4, FR-22.16..FR-22.20)
+      description: |
+        Omitted fields take min 0, max 0 (no maximum), purchase orders, the
+        mts-net strategy and site scope. An item has one coverage per site and
+        scope: per warehouse for a warehouse scope, per vendor for a
+        subcontractor scope; another is 409 PLAN-ITEM-COVERAGE-EXISTS. A
+        coverage group the tenant does not have is 422
+        PLAN-COVERAGE-GROUP-UNKNOWN. With an Idempotency-Key, a retry of the
+        same body returns the created coverage with 200 and
+        Idempotent-Replayed: true; another body under the key is 422.
+      x-passage-duty: planning.setup.maintain
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: {type: string, maxLength: 255}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ItemCoverageInput'}
+      responses:
+        '201':
+          description: The created item coverage; the ETag header carries its version
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ItemCoverage'}
+        '200':
+          description: Idempotent replay of an earlier create
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ItemCoverage'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+  /v1/planning/item-coverages/{id}:
+    get:
+      operationId: getItemCoverage
+      summary: One item coverage by id
+      x-passage-duty: planning.read
+      parameters:
+        - $ref: '#/components/parameters/ItemCoverageId'
+      responses:
+        '200':
+          description: The item coverage; the ETag header carries its version
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ItemCoverage'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+    put:
+      operationId: updateItemCoverage
+      summary: Replace an item coverage under If-Match; omitted fields take the defaults, as on create
+      x-passage-duty: planning.setup.maintain
+      parameters:
+        - $ref: '#/components/parameters/ItemCoverageId'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ItemCoverageInput'}
+      responses:
+        '200':
+          description: The changed item coverage with its new ETag
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ItemCoverage'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '412': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+        '428': {$ref: '#/components/responses/Problem'}
 components:
   headers:
     ETag:
@@ -951,6 +1062,11 @@ components:
       in: path
       required: true
       schema: {type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,19}$'}
+    ItemCoverageId:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
     ModelCode:
       name: modelCode
       in: path
@@ -997,6 +1113,52 @@ components:
             version: {type: integer, minimum: 1, description: Same as the ETag}
             code: {type: string}
         - $ref: '#/components/schemas/CoverageSettings'
+    ItemCoverageInput:
+      type: object
+      required: [itemId, siteId, coverageGroupId]
+      description: Omitted fields (and explicit nulls) take the defaults below.
+      properties:
+        itemId: {type: string, format: uuid}
+        siteId: {type: string, format: uuid}
+        warehouseId: {type: [string, 'null'], format: uuid, description: Required for warehouse scope, absent otherwise}
+        coverageGroupId: {type: string, format: uuid}
+        minQty: {type: string, default: '0', description: 'Decimal string, at most 6 decimals'}
+        maxQty: {type: string, default: '0', description: Decimal string; 0 means no maximum, otherwise at least minQty}
+        safetyMarginReceiptDays: {type: integer, minimum: 0, maximum: 365, default: 0}
+        leadTimeDays: {type: [integer, 'null'], minimum: 0, maximum: 3650, description: Lead time override; null uses the item lead time}
+        vendorId: {type: [string, 'null'], format: uuid, description: Default vendor; the subcontractor for subcontractor scope}
+        plannedOrderType: {type: string, enum: [purchase, production, transfer], default: purchase, description: Must be transfer (provision) for subcontractor scope}
+        planningStrategy: {type: string, enum: [mts-net, mts-gross, mto, assemble-to-order-final, plan-without-final-assembly, subassembly], default: mts-net}
+        planningScope: {type: string, enum: [site, warehouse, subcontractor], default: site, description: MRP area (FR-22.18)}
+        decouplingPoint: {type: boolean, default: false, description: Strategic DDMRP buffer position (FR-22.16)}
+        bufferProfileId: {type: [string, 'null'], format: uuid}
+        requiredShelfLifeDays: {type: integer, minimum: 0, maximum: 3650, default: 0, description: Remaining shelf life a demand needs (FR-22.20)}
+        priorityBased: {type: boolean, default: false, description: Plan by planning priority instead of date (FR-22.16)}
+    ItemCoverage:
+      type: object
+      required: [id, version, itemId, siteId, warehouseId, coverageGroupId, coverageGroupCode, minQty, maxQty, safetyMarginReceiptDays,
+        leadTimeDays, vendorId, plannedOrderType, planningStrategy, planningScope, decouplingPoint, bufferProfileId,
+        requiredShelfLifeDays, priorityBased]
+      properties:
+        id: {type: string, format: uuid}
+        version: {type: integer, minimum: 1, description: Same as the ETag}
+        itemId: {type: string, format: uuid}
+        siteId: {type: string, format: uuid}
+        warehouseId: {type: [string, 'null'], format: uuid}
+        coverageGroupId: {type: string, format: uuid}
+        coverageGroupCode: {type: string, description: Code of the referenced coverage group}
+        minQty: {type: string, description: Decimal string in inventory UoM}
+        maxQty: {type: string, description: Decimal string; 0 means no maximum}
+        safetyMarginReceiptDays: {type: integer}
+        leadTimeDays: {type: [integer, 'null']}
+        vendorId: {type: [string, 'null'], format: uuid}
+        plannedOrderType: {type: string, enum: [purchase, production, transfer]}
+        planningStrategy: {type: string, enum: [mts-net, mts-gross, mto, assemble-to-order-final, plan-without-final-assembly, subassembly]}
+        planningScope: {type: string, enum: [site, warehouse, subcontractor]}
+        decouplingPoint: {type: boolean}
+        bufferProfileId: {type: [string, 'null'], format: uuid}
+        requiredShelfLifeDays: {type: integer}
+        priorityBased: {type: boolean}
     RunRequest:
       type: object
       required: [asOf, siteId, items]

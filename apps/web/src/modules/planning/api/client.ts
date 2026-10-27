@@ -483,3 +483,93 @@ export async function updateCoverageGroup(code: string, version: number, setting
     body: JSON.stringify(settings),
   });
 }
+
+/** The order a planned order becomes when firmed (FR-22.3). */
+export type OrderType = z.infer<typeof OrderType>;
+
+/** Planning strategies of FR-22.19 (SAP strategy groups 10, 11, 20, 40, 50/52, 70). */
+export const PlanningStrategy = z.enum(["mts-net", "mts-gross", "mto", "assemble-to-order-final", "plan-without-final-assembly", "subassembly"]);
+export type PlanningStrategy = z.infer<typeof PlanningStrategy>;
+
+/** Where an item is planned (FR-22.18): the site, a warehouse of its own (MRP area) or a subcontractor. */
+export const PlanningScope = z.enum(["site", "warehouse", "subcontractor"]);
+export type PlanningScope = z.infer<typeof PlanningScope>;
+
+/** The fields of an item coverage a create or update sends (ItemCoverageInput in the OpenAPI); null clears an optional field. */
+export interface ItemCoverageInput {
+  itemId: string;
+  siteId: string;
+  coverageGroupId: string;
+  warehouseId: string | null;
+  vendorId: string | null;
+  bufferProfileId: string | null;
+  minQty: string;
+  maxQty: string;
+  safetyMarginReceiptDays: number;
+  leadTimeDays: number | null;
+  plannedOrderType: z.infer<typeof OrderType>;
+  planningStrategy: PlanningStrategy;
+  planningScope: PlanningScope;
+  decouplingPoint: boolean;
+  requiredShelfLifeDays: number;
+  priorityBased: boolean;
+}
+
+/** How one item is planned at a site, warehouse or subcontractor (data model ItemCoverage, FR-22.16..FR-22.20). */
+export const ItemCoverage = z.object({
+  id: z.string(),
+  /** The coverage's ETag: send it back as If-Match on PUT. */
+  version: z.number().int().min(1),
+  itemId: z.string(),
+  siteId: z.string(),
+  warehouseId: z.string().nullable(),
+  coverageGroupId: z.string(),
+  coverageGroupCode: z.string(),
+  minQty: z.string(),
+  maxQty: z.string(),
+  safetyMarginReceiptDays: z.number().int(),
+  leadTimeDays: z.number().int().nullable(),
+  vendorId: z.string().nullable(),
+  plannedOrderType: OrderType,
+  planningStrategy: PlanningStrategy,
+  planningScope: PlanningScope,
+  decouplingPoint: z.boolean(),
+  bufferProfileId: z.string().nullable(),
+  requiredShelfLifeDays: z.number().int(),
+  priorityBased: z.boolean(),
+});
+export type ItemCoverage = z.infer<typeof ItemCoverage>;
+
+/** Item coverages of the tenant, optionally of one item, ordered by item, site and scope. */
+export async function listItemCoverages(itemId = "", init?: RequestInit): Promise<ItemCoverage[]> {
+  const params = new URLSearchParams({ limit: "500" });
+  if (itemId) params.set("itemId", itemId);
+  const out = await request(`/item-coverages?${params}`, z.object({ items: z.array(ItemCoverage) }), init);
+  return out.items;
+}
+
+export async function getItemCoverage(id: string, init?: RequestInit): Promise<ItemCoverage> {
+  return request(`/item-coverages/${encodeURIComponent(id)}`, ItemCoverage, init);
+}
+
+/**
+ * Creates an item coverage (Maintain planning setup). The Idempotency-Key makes a retry
+ * return the first result; 409 `PLAN-ITEM-COVERAGE-EXISTS` means the item already has a
+ * coverage for that site and scope, 422 `PLAN-COVERAGE-GROUP-UNKNOWN` an unknown group.
+ */
+export async function createItemCoverage(input: ItemCoverageInput, idempotencyKey: string): Promise<ItemCoverage> {
+  return request(`/item-coverages`, ItemCoverage, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(input),
+  });
+}
+
+/** Replaces an item coverage under If-Match; 412 means someone else changed it. */
+export async function updateItemCoverage(id: string, version: number, input: ItemCoverageInput): Promise<ItemCoverage> {
+  return request(`/item-coverages/${encodeURIComponent(id)}`, ItemCoverage, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", "If-Match": ifMatch(version) },
+    body: JSON.stringify(input),
+  });
+}

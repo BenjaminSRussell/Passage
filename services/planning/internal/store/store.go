@@ -67,6 +67,10 @@ type Store interface {
 	GetCoverageGroup(ctx context.Context, code string) (CoverageGroup, error)
 	CreateCoverageGroup(ctx context.Context, req CoverageCreate) (CoverageGroup, bool, error)
 	UpdateCoverageGroup(ctx context.Context, expectedVersion int, spec domain.CoverageGroupSpec) (CoverageGroup, error)
+	ListItemCoverages(ctx context.Context, itemID string, limit int) ([]ItemCoverage, error)
+	GetItemCoverage(ctx context.Context, id string) (ItemCoverage, error)
+	CreateItemCoverage(ctx context.Context, req ItemCoverageCreate) (ItemCoverage, bool, error)
+	UpdateItemCoverage(ctx context.Context, id string, expectedVersion int, spec domain.ItemCoverageSpec) (ItemCoverage, error)
 	Ping(ctx context.Context) error
 }
 

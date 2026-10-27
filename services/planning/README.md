@@ -30,7 +30,8 @@ What is not built yet is listed in
 cmd/planning/          entrypoint: dbx.Connect -> dbx.Migrate (MIGRATE_ON_START=true) -> httpx.NewRouter -> register -> httpx.Serve
 internal/domain/       pure engine: low-level codes, lot sizing, netting, pegging, messages, delay propagation, plan hash,
                        work calendar (calendar.go), net requirements view (netreq.go), forecast consensus
-                       (consensus.go), dynamic-plan reach set (reach.go), coverage group setup rules (coveragegroup.go);
+                       (consensus.go), dynamic-plan reach set (reach.go), coverage group setup rules (coveragegroup.go),
+                       item coverage setup rules (itemcoverage.go);
                        calculators: ddmrp.go, quota.go, strategy.go, shelflife.go, projection.go
 internal/store/        Postgres repository (pgx); a plan run is one transaction with its outbox events
 internal/api/          HTTP handlers under /v1/planning, RFC 9457 problems, /readyz with a database ping
@@ -41,6 +42,7 @@ migrations/            0001_init.sql (plan, plan_version, planned_order, pegging
                        0004_net_requirements.sql (net_requirement per version, item and day; RLS)
                        0005_increase_and_consensus.sql (increase action, forecast_model consensus status, forecast_line writer)
                        0006_coverage_groups.sql (coverage_group setup with the FR-22.2 defaults and checks; RLS)
+                       0007_item_coverage.sql (item_coverage per item, site and planning scope; RLS)
 api/openapi.yaml       OpenAPI 3.1 for every exposed endpoint (kept in step by TestOpenAPI_MatchesRoutes)
 events/asyncapi.yaml   AsyncAPI 3 for every event published
 charts/planning/       Helm chart (deployment, service, servicemonitor toggle)
@@ -217,6 +219,25 @@ fence of at least 1 day (also enforced by table checks). A run does not read
 the groups yet: coverage still travels per item on the run input
 (NOT-IMPLEMENTED.md).
 
+## Item coverage (slice 9)
+
+Item coverage (data model ItemCoverage, 4.22.4, with the FR-22.16..FR-22.20
+fields) says how one item is planned at a site, in a warehouse of its own (MRP
+area) or at a subcontractor, under `planning.setup.maintain`: `POST
+/item-coverages` (optional `Idempotency-Key`), `PUT /item-coverages/{id}` under
+`If-Match`, and `GET` lists (optionally `?itemId=`) or reads them. It carries
+the coverage group, min and max quantity (decimal strings; max 0 is no
+maximum, otherwise at least min), receipt margin, lead-time override, default
+vendor, planned order type, planning strategy, planning scope, decoupling
+point, buffer profile id, required shelf life and priority-based planning.
+Omitted fields take site scope, purchase orders, `mts-net` and no lot limits.
+A warehouse scope names its warehouse; a subcontractor scope names the vendor
+and plans provision transfers. An item has one coverage per site and scope
+(per warehouse, per subcontractor vendor): another is 409
+`PLAN-ITEM-COVERAGE-EXISTS`; a coverage group the tenant lacks is 422
+`PLAN-COVERAGE-GROUP-UNKNOWN`. A run does not read item coverage yet
+(NOT-IMPLEMENTED.md).
+
 Auto-firming (BR-22.4): an item whose run coverage has `firmingFenceDays` and
 `autoFirm` gets every planned order whose order date falls inside the fence
 (order date − plan date < fence; past-due orders included) firmed by the run
@@ -283,6 +304,10 @@ NOT-IMPLEMENTED.md):
 | POST | `/v1/planning/coverage-groups` | `planning.setup.maintain` (Idempotency-Key optional) |
 | GET | `/v1/planning/coverage-groups/{code}` | `planning.read` |
 | PUT | `/v1/planning/coverage-groups/{code}` | `planning.setup.maintain` (If-Match required) |
+| GET | `/v1/planning/item-coverages?itemId=&limit=` | `planning.read` |
+| POST | `/v1/planning/item-coverages` | `planning.setup.maintain` (Idempotency-Key optional) |
+| GET | `/v1/planning/item-coverages/{id}` | `planning.read` |
+| PUT | `/v1/planning/item-coverages/{id}` | `planning.setup.maintain` (If-Match required) |
 
 The web module calls these under `/api/v1/planning/...`; the BFF strips `/api`.
 A run is synchronous in slice 1: the engine runs in the request and the store
@@ -301,21 +326,24 @@ swaps the current pointer.
 | 404 | `PLAN-ORDER-NOT-FOUND` | No such planned order (on firming: an id unknown for the tenant) |
 | 404 | `PLAN-FORECAST-NOT-FOUND` | No such forecast model (422 when a run names it) |
 | 404 | `PLAN-COVERAGE-NOT-FOUND` | No such coverage group |
+| 404 | `PLAN-ITEM-COVERAGE-NOT-FOUND` | No such item coverage |
 | 409 | `PLAN-0001` | `PLAN_ALREADY_RUNNING`: a run of the plan is in progress |
 | 409 | `PLAN-0002` | BR-22.9: a planned order to firm is already firmed |
 | 409 | `PLAN-ORDER-NOT-EDITABLE` | The planned order is firmed, deleted or not in the current version |
 | 409 | `PLAN-FORECAST-LOCKED` | The forecast model is submitted or published; its cells are locked |
 | 409 | `PLAN-CONSENSUS-STATE` | The consensus step is not allowed from the model's status |
 | 409 | `PLAN-COVERAGE-EXISTS` | A coverage group with the code already exists |
+| 409 | `PLAN-ITEM-COVERAGE-EXISTS` | The item already has a coverage for that site and planning scope |
+| 422 | `PLAN-COVERAGE-GROUP-UNKNOWN` | An item coverage names a coverage group the tenant does not have |
 | 422 | `PLAN-CONSENSUS-EMPTY` | A forecast model without cells cannot be submitted |
-| 412 | `conflict_version` | If-Match is not the current version of the order, forecast model or coverage group |
+| 412 | `conflict_version` | If-Match is not the current version of the order, forecast model, coverage group or item coverage |
 | 422 | `PLAN-ORDER-INVALID` | Order date after delivery date, or a vendor on a non-purchase order |
 | 428 | `precondition_required` | If-Match missing on a maintenance write |
 | 422 | `PLAN-0004` | BOM cycle; low-level codes cannot be assigned |
 | 422 | `PLAN-0005` | A requirement would split into more than 1,000 orders |
 | 422 | `PLAN-0009` | Quota arrangement has no usable source (all blocked, or quota 0 with others blocked) |
 | 422 | `PLAN-INPUT-INVALID` | Snapshot rejected by the engine (unknown coverage or order type, duplicate or unknown item), or calculator input the domain rejects (empty ADU window); `detail` names it |
-| 422 | `idempotency_key_reuse` | Same Idempotency-Key with a different plan or snapshot, different orders or grouping on firming, or another coverage group body |
+| 422 | `idempotency_key_reuse` | Same Idempotency-Key with a different plan or snapshot, different orders or grouping on firming, or another coverage group or item coverage body |
 
 ## Wave reference
 

@@ -46,6 +46,9 @@ describe("planning module", () => {
       "/planning/coverage-groups",
       "/planning/coverage-groups/new",
       "/planning/coverage-groups/:code",
+      "/planning/item-coverages",
+      "/planning/item-coverages/new",
+      "/planning/item-coverages/:id",
     ]);
     for (const route of planning.routes) {
       expect(route.element).not.toBeNull();

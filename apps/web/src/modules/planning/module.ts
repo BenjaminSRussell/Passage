@@ -3,6 +3,7 @@ import type { PassageModule } from "../registry";
 import { CalculatorsPage } from "./calculators";
 import { CoverageGroupPage, CoverageGroupsPage, NewCoverageGroupPage } from "./CoverageGroupsPage";
 import { ForecastPage } from "./ForecastPage";
+import { ItemCoveragePage, ItemCoveragesPage, NewItemCoveragePage } from "./ItemCoveragePage";
 import { NetRequirementsPage } from "./NetRequirementsPage";
 import { MessagesPage, PlannedOrderPage, PlannedOrdersPage, PlanningHome, PlanRunsPage } from "./pages";
 import { RunPlanPage } from "./RunPlanPage";
@@ -11,7 +12,7 @@ const planning: PassageModule = {
   id: "planning",
   title: "Master planning",
   description:
-    "Run the plan in working days, review, change, approve and firm planned orders, read messages and net requirements, explain any planned order back to its demand, maintain the forecast and its consensus, and set up coverage groups with their fences and auto-firming.",
+    "Run the plan in working days, review, change, approve and firm planned orders, read messages and net requirements, explain any planned order back to its demand, maintain the forecast and its consensus, set up coverage groups with their fences and auto-firming, and set up how each item is planned per site, warehouse or subcontractor.",
   routes: [
     { path: "/planning", element: createElement(PlanningHome) },
     { path: "/planning/planned-orders", element: createElement(PlannedOrdersPage) },
@@ -25,6 +26,9 @@ const planning: PassageModule = {
     { path: "/planning/coverage-groups", element: createElement(CoverageGroupsPage) },
     { path: "/planning/coverage-groups/new", element: createElement(NewCoverageGroupPage) },
     { path: "/planning/coverage-groups/:code", element: createElement(CoverageGroupPage) },
+    { path: "/planning/item-coverages", element: createElement(ItemCoveragesPage) },
+    { path: "/planning/item-coverages/new", element: createElement(NewItemCoveragePage) },
+    { path: "/planning/item-coverages/:id", element: createElement(ItemCoveragePage) },
   ],
   nav: [
     { label: "Workspace", to: "/planning", duty: "planning.read" },
@@ -36,6 +40,7 @@ const planning: PassageModule = {
     { label: "Forecast", to: "/planning/forecast", duty: "planning.read" },
     { label: "Calculators", to: "/planning/calculators", duty: "planning.read" },
     { label: "Coverage groups", to: "/planning/coverage-groups", duty: "planning.read" },
+    { label: "Item coverage", to: "/planning/item-coverages", duty: "planning.read" },
   ],
 };
 

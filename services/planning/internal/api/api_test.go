@@ -54,6 +54,10 @@ type fakeStore struct {
 	// Idempotency-Key (coverage_test.go).
 	groups    []store.CoverageGroup
 	groupKeys map[string]string
+	// Item coverages in creation order and the input hash stored per
+	// Idempotency-Key (itemcoverage_test.go).
+	covs    []store.ItemCoverage
+	covKeys map[string]string
 }
 
 func (f *fakeStore) RunPlan(_ context.Context, req store.RunRequest) (store.Version, bool, error) {

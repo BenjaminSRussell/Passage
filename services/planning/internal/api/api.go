@@ -92,6 +92,10 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyMaintainSetup)).Post("/v1/planning/coverage-groups", a.createCoverageGroup)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/coverage-groups/{code}", a.getCoverageGroup)
 	r.With(authz.RequireDuty(dutyMaintainSetup)).Put("/v1/planning/coverage-groups/{code}", a.updateCoverageGroup)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/item-coverages", a.listItemCoverages)
+	r.With(authz.RequireDuty(dutyMaintainSetup)).Post("/v1/planning/item-coverages", a.createItemCoverage)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/item-coverages/{id}", a.getItemCoverage)
+	r.With(authz.RequireDuty(dutyMaintainSetup)).Put("/v1/planning/item-coverages/{id}", a.updateItemCoverage)
 	a.registerCalculators(r)
 }
 
