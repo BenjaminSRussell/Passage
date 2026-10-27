@@ -1,0 +1,15 @@
+image:
+  repository: ghcr.io/benjaminsrussell/finreport
+  digest: ""
+  tag: ""
+  pullPolicy: IfNotPresent
+databaseSecret: finreport-db
+migrateOnStart: false
+replicaCount: 3
+resources:
+  requests: { cpu: 100m, memory: 128Mi }
+  limits: { cpu: 500m, memory: 256Mi }
+serviceMonitor: { enabled: false }
+reporting:
+  maxLagSeconds: 30
+  cellKeyLimit: 50000

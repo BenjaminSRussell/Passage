@@ -1,0 +1,516 @@
+openapi: 3.1.0
+info:
+  title: Passage Financial Reporting API
+  version: 1.0.0
+  description: Report definitions, statement runs and drill-down (PSG-15, wave 15 slice 1).
+servers:
+  - url: https://api.{env}.passage.dev
+    variables:
+      env:
+        default: dev
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/reporting/definitions:
+    get:
+      operationId: listDefinitions
+      summary: One summary per definition code (designer list)
+      x-passage-duty: reporting.statement.view
+      responses:
+        '200':
+          description: Definition summaries ordered by code
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/DefinitionSummary'}
+  /api/v1/reporting/definitions/{code}:
+    parameters:
+      - $ref: '#/components/parameters/Code'
+    get:
+      operationId: getDefinition
+      summary: Read a definition (draft, latest published, or an exact version)
+      x-passage-duty: reporting.statement.view
+      parameters:
+        - name: version
+          in: query
+          required: false
+          schema:
+            type: string
+            description: draft, latest (default) or a positive published version number
+      responses:
+        '200':
+          description: The definition
+          headers:
+            ETag:
+              description: Draft revision (drafts only)
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Definition'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+    put:
+      operationId: putDraft
+      summary: Create or replace the draft of a definition (idempotent)
+      x-passage-duty: reporting.definition.maintain
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: Required when a draft exists; the ETag last read. Missing gives 428, stale gives 412 conflict_version.
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Definition'}
+      responses:
+        '200':
+          description: Saved draft
+          headers:
+            ETag:
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Definition'}
+        '412': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+        '428': {$ref: '#/components/responses/Problem'}
+  /api/v1/reporting/definitions/{code}/export:
+    parameters:
+      - $ref: '#/components/parameters/Code'
+    get:
+      operationId: exportDefinition
+      summary: Export the latest published version as schema-versioned JSON (FR-15.11)
+      x-passage-duty: reporting.definition.maintain
+      responses:
+        '200':
+          description: Definition JSON
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Definition'}
+        '404': {$ref: '#/components/responses/Problem'}
+  /api/v1/reporting/definitions/import:
+    post:
+      operationId: importDefinition
+      summary: Import an exported definition as a draft (FR-15.11)
+      x-passage-duty: reporting.definition.maintain
+      description: >-
+        A code that already has a draft or a published version is refused with
+        REPORT-0011 unless overwrite=true. An optional Idempotency-Key replays
+        the stored result (200); the same key with a different request is
+        refused with idempotency_key_reuse.
+      parameters:
+        - name: overwrite
+          in: query
+          required: false
+          schema: {type: boolean, default: false}
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: {type: string, maxLength: 255}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Definition'}
+      responses:
+        '201':
+          description: Imported draft
+          headers:
+            ETag:
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Definition'}
+        '200':
+          description: Replay of an earlier import with the same Idempotency-Key
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Definition'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+  /api/v1/reporting/definitions/{code}:publish:
+    parameters:
+      - $ref: '#/components/parameters/Code'
+    post:
+      operationId: publishDefinition
+      summary: Publish the draft as the next immutable version (BR-15.8)
+      x-passage-duty: reporting.definition.maintain
+      responses:
+        '200':
+          description: Published definition
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Definition'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+  /api/v1/reporting/definitions/{code}:validate:
+    parameters:
+      - $ref: '#/components/parameters/Code'
+    post:
+      operationId: validateDefinition
+      summary: Validate a definition's shape, expressions and references (stateless)
+      x-passage-duty: reporting.definition.maintain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Definition'}
+      responses:
+        '200':
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [valid, issues]
+                properties:
+                  valid: {type: boolean}
+                  issues:
+                    type: array
+                    items: {$ref: '#/components/schemas/Issue'}
+  /api/v1/reporting/runs:
+    get:
+      operationId: listRuns
+      summary: Report library - newest runs first
+      x-passage-duty: reporting.statement.view
+      parameters:
+        - name: definition
+          in: query
+          required: false
+          description: Only runs of this definition code
+          schema: {type: string}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 200, default: 200}
+      responses:
+        '200':
+          description: Runs, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/Run'}
+        '400': {$ref: '#/components/responses/Problem'}
+    post:
+      operationId: createRun
+      summary: Run a published definition over the reporting read model (FR-15.6)
+      x-passage-duty: reporting.statement.run
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RunRequest'}
+      responses:
+        '201':
+          description: Completed run
+          headers:
+            Location:
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Run'}
+        '200':
+          description: Replay - the run stored for this Idempotency-Key and the same request
+          headers:
+            Location:
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Run'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409':
+          description: idempotency_key_in_flight - the same key is being processed; retry
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+  /api/v1/reporting/runs/{id}:
+    parameters:
+      - $ref: '#/components/parameters/RunId'
+    get:
+      operationId: getRun
+      summary: Read a run
+      x-passage-duty: reporting.statement.view
+      responses:
+        '200':
+          description: The run
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Run'}
+        '404': {$ref: '#/components/responses/Problem'}
+  /api/v1/reporting/runs/{id}/cells:
+    parameters:
+      - $ref: '#/components/parameters/RunId'
+    get:
+      operationId: listCells
+      summary: All cells of a run
+      x-passage-duty: reporting.statement.view
+      responses:
+        '200':
+          description: Cells in evaluation order
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/Cell'}
+        '404': {$ref: '#/components/responses/Problem'}
+  /api/v1/reporting/runs/{id}/cells/{row}/{column}/balances:
+    parameters:
+      - $ref: '#/components/parameters/RunId'
+      - name: row
+        in: path
+        required: true
+        schema: {type: string}
+      - name: column
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      operationId: drillBalances
+      summary: Drill level 1 - balance keys whose sum equals the cell value (BR-15.4)
+      description: >-
+        Computed cells (calculation rows and CALC columns) answer computed=true
+        with no keys; drill into the cells they reference. A key sum that
+        differs from the cell value is an invariant failure (500 REPORT-0099)
+        and is never served.
+      x-passage-duty: reporting.statement.view
+      responses:
+        '200':
+          description: Balance keys and their sum
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [runId, row, column, value, blank, computed, sumOfKeys, keys]
+                properties:
+                  runId: {type: string, format: uuid}
+                  row: {type: string}
+                  column: {type: string}
+                  value: {$ref: '#/components/schemas/Decimal'}
+                  blank: {type: boolean}
+                  computed: {type: boolean}
+                  sumOfKeys: {$ref: '#/components/schemas/Decimal'}
+                  keys:
+                    type: array
+                    items: {$ref: '#/components/schemas/BalanceKey'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '500': {$ref: '#/components/responses/Problem'}
+  /api/v1/reporting/lag:
+    get:
+      operationId: getLag
+      summary: Read-model high-water mark per ledger (FR-15.1)
+      x-passage-duty: reporting.statement.view
+      responses:
+        '200':
+          description: Lag rows
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/LagRow'}
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    Code:
+      name: code
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[A-Z][A-Z0-9-]{1,29}$'
+    RunId:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: {type: string, maxLength: 255}
+  responses:
+    Problem:
+      description: RFC 9457 problem details
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+  schemas:
+    Decimal:
+      type: string
+      description: Decimal string, never a float
+      pattern: '^-?[0-9]+(\.[0-9]+)?$'
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: {type: string, format: uri, example: 'https://passage.dev/problems/REPORT-0001'}
+        title: {type: string}
+        status: {type: integer}
+        detail: {type: string}
+        instance: {type: string}
+        code: {type: string}
+        traceId: {type: string}
+    Issue:
+      type: object
+      required: [field, code, detail]
+      properties:
+        field: {type: string}
+        code: {type: string}
+        detail: {type: string}
+    DefinitionSummary:
+      type: object
+      required: [code, name, kind, latestVersion, hasDraft, updatedAt]
+      properties:
+        code: {type: string}
+        name: {type: string}
+        kind: {type: string, enum: [trial_balance, balance_sheet, income_statement, cash_flow, custom]}
+        latestVersion: {type: integer, description: 0 when never published}
+        hasDraft: {type: boolean}
+        updatedAt: {type: string, format: date-time}
+    Definition:
+      type: object
+      required: [code, name, kind, rows, columns]
+      properties:
+        schemaVersion: {type: string, enum: ['1']}
+        code: {type: string, pattern: '^[A-Z][A-Z0-9-]{1,29}$'}
+        name: {type: string, maxLength: 120}
+        version: {type: integer, description: 0 for drafts}
+        status: {type: string, enum: [draft, published, retired]}
+        kind: {type: string, enum: [trial_balance, balance_sheet, income_statement, cash_flow, custom]}
+        includeAdjustmentPeriods: {type: boolean}
+        rows:
+          type: array
+          maxItems: 2000
+          items: {$ref: '#/components/schemas/Row'}
+        columns:
+          type: array
+          maxItems: 60
+          items: {$ref: '#/components/schemas/Column'}
+    Row:
+      type: object
+      required: [code, kind, label, normalBalance]
+      properties:
+        code: {type: string}
+        kind: {type: string, enum: [header, account_range, dimension_filter, total, calculation]}
+        label: {type: string}
+        accountFrom: {type: string}
+        accountTo: {type: string}
+        dimensionFilter:
+          type: object
+          additionalProperties:
+            type: array
+            items: {type: string}
+        references: {type: array, items: {type: string}}
+        expression: {type: string, description: 'Calculation over row codes; prefix raw: to use stored net instead of displayed values (BR-15.3)'}
+        normalBalance: {type: string, enum: [debit, credit]}
+        cashFlowTag: {type: string, enum: ['', operating_adjustment, working_capital, investing, financing, cash]}
+        format:
+          type: object
+          properties:
+            bold: {type: boolean}
+            indent: {type: integer}
+            printZero: {type: boolean}
+            pageBreak: {type: boolean}
+    Column:
+      type: object
+      required: [code, label, periodExpr]
+      properties:
+        code: {type: string}
+        label: {type: string}
+        periodExpr: {type: string, pattern: '^(P|P-[0-9]+|YTD|PY|PYTD|Q|FY|CALC)$'}
+        currencyType: {type: string, enum: [acct, rpt, txn], description: Omitted means the run's currency type}
+        calcExpression: {type: string}
+    RunRequest:
+      type: object
+      required: [definition, ledgerId, currencyType, period, calendar]
+      properties:
+        definition: {type: string}
+        definitionVersion: {type: integer, minimum: 0, description: 0 or omitted means the latest published version}
+        ledgerId: {type: string, format: uuid}
+        currencyType: {type: string, enum: [acct, rpt, txn]}
+        period: {$ref: '#/components/schemas/Period'}
+        calendar:
+          type: array
+          description: The ledger's fiscal periods, used to place balances in columns. Replaced by the ledger calendar in a later slice.
+          items: {$ref: '#/components/schemas/Period'}
+        includeAdjustmentPeriods: {type: boolean, description: Counts adjustment periods in P-n, YTD, Q and FY even when the definition does not}
+    Period:
+      type: object
+      required: [year, no, quarter]
+      properties:
+        year: {type: integer, minimum: 1}
+        no: {type: integer, minimum: 0, description: 0 is the opening period that carries brought-forward balances}
+        quarter: {type: integer, minimum: 1, maximum: 4}
+        adjustment: {type: boolean}
+    Run:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        definitionCode: {type: string}
+        definitionVersion: {type: integer}
+        ledgerId: {type: string, format: uuid}
+        currencyType: {type: string}
+        periodYear: {type: integer}
+        periodNo: {type: integer}
+        status: {type: string, enum: [queued, running, completed, failed]}
+        hwmByLedger:
+          type: object
+          additionalProperties: {type: integer}
+        resultHash: {type: string, description: SHA-256 hex over cells}
+        cellCount: {type: integer}
+        requestedBy: {type: string}
+        startedAt: {type: string, format: date-time}
+        durationMs: {type: integer}
+    Cell:
+      type: object
+      properties:
+        row: {type: string}
+        column: {type: string}
+        value: {$ref: '#/components/schemas/Decimal'}
+        blank: {type: boolean}
+        computed: {type: boolean, description: Calculation row or CALC column; no balance keys}
+        note: {type: string, description: REPORT-0010 when a prior-year period is missing (BR-15.9)}
+        keyCount: {type: integer}
+    BalanceKey:
+      type: object
+      properties:
+        ledgerId: {type: string}
+        period: {type: string}
+        account: {type: string}
+        combination: {type: string}
+        currencyType: {type: string}
+        amount: {$ref: '#/components/schemas/Decimal'}
+    LagRow:
+      type: object
+      properties:
+        ledgerId: {type: string, format: uuid}
+        postingSequence: {type: integer, format: int64}
+        updatedAt: {type: string, format: date-time}

@@ -1,0 +1,30 @@
+import { describe, expect, it } from "vitest";
+import { loadModules } from "../registry";
+import finreport from "./module";
+
+describe("finreport module", () => {
+  it("uses its folder name as id and keeps every route and nav entry under /finreport", () => {
+    expect(finreport.id).toBe("finreport");
+    expect(finreport.routes.every((r) => r.element != null && r.path?.startsWith("/finreport"))).toBe(true);
+    expect(finreport.nav.every((n) => n.to.startsWith("/finreport"))).toBe(true);
+  });
+
+  it("has a list, a form and a detail page for statement runs and report definitions", () => {
+    expect(finreport.routes.map((r) => r.path)).toEqual([
+      "/finreport",
+      "/finreport/runs/new",
+      "/finreport/runs/:runId",
+      "/finreport/definitions",
+      "/finreport/definitions/new",
+      "/finreport/definitions/:code",
+    ]);
+  });
+
+  it("guards the navigation with the view duty the service enforces", () => {
+    expect(finreport.nav.map((n) => n.duty)).toEqual(["reporting.statement.view", "reporting.statement.view"]);
+  });
+
+  it("is auto-discovered by the registry", () => {
+    expect(loadModules().map((m) => m.id)).toContain("finreport");
+  });
+});

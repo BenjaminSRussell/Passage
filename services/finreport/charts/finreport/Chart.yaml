@@ -1,0 +1,6 @@
+apiVersion: v2
+name: finreport
+description: Passage financial reporting service (statement definitions, statement runs, drill-down)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

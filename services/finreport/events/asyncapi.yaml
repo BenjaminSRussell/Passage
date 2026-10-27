@@ -1,0 +1,73 @@
+asyncapi: 3.0.0
+info:
+  title: Passage Financial Reporting events
+  version: 1.0.0
+  description: Events published by the reporting service (PSG-15 slice 1). Written to the outbox in the same transaction as the change.
+defaultContentType: application/cloudevents+json
+channels:
+  statementGenerated:
+    address: passage.reporting.statement
+    messages:
+      statementGenerated:
+        $ref: '#/components/messages/StatementGenerated'
+  definitionPublished:
+    address: passage.reporting.definition
+    messages:
+      definitionPublished:
+        $ref: '#/components/messages/DefinitionPublished'
+operations:
+  publishStatementGenerated:
+    action: send
+    channel:
+      $ref: '#/channels/statementGenerated'
+    summary: A statement run completed (FR-15.6)
+    messages:
+      - $ref: '#/channels/statementGenerated/messages/statementGenerated'
+  publishDefinitionPublished:
+    action: send
+    channel:
+      $ref: '#/channels/definitionPublished'
+    summary: A definition version was published (BR-15.8)
+    messages:
+      - $ref: '#/channels/definitionPublished/messages/definitionPublished'
+components:
+  messages:
+    StatementGenerated:
+      name: dev.passage.reporting.statement.generated.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [run_id, definition_code, definition_version, ledger_id, period, currency_type, hwm_by_ledger, result_hash, outputs, parameters]
+        properties:
+          run_id: {type: string, format: uuid}
+          definition_code: {type: string}
+          definition_version: {type: integer}
+          ledger_id: {type: string, format: uuid}
+          period: {type: string, example: '2026-03'}
+          currency_type: {type: string, enum: [acct, rpt, txn]}
+          hwm_by_ledger:
+            type: object
+            additionalProperties: {type: integer}
+          result_hash: {type: string, description: SHA-256 hex over cells}
+          outputs:
+            type: array
+            items:
+              type: object
+              properties:
+                format: {type: string}
+                uri: {type: string}
+                size: {type: integer}
+          parameters:
+            type: object
+            additionalProperties: {type: string}
+    DefinitionPublished:
+      name: dev.passage.reporting.definition.published.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [code, version, actor, diff_summary]
+        properties:
+          code: {type: string}
+          version: {type: integer}
+          actor: {type: string, description: User id of the publisher}
+          diff_summary: {type: string}
