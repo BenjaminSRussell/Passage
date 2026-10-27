@@ -33,6 +33,7 @@ const (
 	dutyMaintainForecast = "planning.forecast.maintain" // Maintain forecasts
 	dutyFirmOrders       = "planning.order.firm"        // Firm planned orders
 	dutyApproveForecast  = "planning.forecast.approve"  // Approve forecast consensus
+	dutyMaintainSetup    = "planning.setup.maintain"    // Maintain planning setup (4.22.17)
 
 	idempotencyKey = "Idempotency-Key"
 	dateLayout     = "2006-01-02"
@@ -87,6 +88,10 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyMaintainForecast)).Post("/v1/planning/forecasts/{modelCode}:submit", a.submitForecast)
 	r.With(authz.RequireDuty(dutyApproveForecast)).Post("/v1/planning/forecasts/{modelCode}:publish", a.publishForecast)
 	r.With(authz.RequireDuty(dutyApproveForecast)).Post("/v1/planning/forecasts/{modelCode}:reject", a.rejectForecast)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/coverage-groups", a.listCoverageGroups)
+	r.With(authz.RequireDuty(dutyMaintainSetup)).Post("/v1/planning/coverage-groups", a.createCoverageGroup)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/coverage-groups/{code}", a.getCoverageGroup)
+	r.With(authz.RequireDuty(dutyMaintainSetup)).Put("/v1/planning/coverage-groups/{code}", a.updateCoverageGroup)
 	a.registerCalculators(r)
 }
 
@@ -213,6 +218,11 @@ type coverageDTO struct {
 	// CoverageFenceDays is the coverage time fence (FR-22.2): surplus
 	// existing supply at or beyond it raises Cancel or Decrease; 0 raises neither.
 	CoverageFenceDays int `json:"coverageFenceDays"`
+	// FirmingFenceDays is the firming time fence (FR-22.2); with AutoFirm,
+	// planned orders whose order date falls inside it are firmed by the run
+	// (BR-22.4). AutoFirm needs a fence of at least 1 day.
+	FirmingFenceDays int  `json:"firmingFenceDays"`
+	AutoFirm         bool `json:"autoFirm"`
 }
 
 type lotDTO struct {
@@ -268,10 +278,13 @@ func (req runRequest) validate() map[string]string {
 			fields[prefix+".coverage"] = "periodDays, marginDays, positiveDays and negativeDays must be 0 or more"
 		}
 		for name, days := range map[string]int{"freezeFenceDays": c.FreezeFenceDays, "actionFenceDays": c.ActionFenceDays,
-			"futuresFenceDays": c.FuturesFenceDays, "coverageFenceDays": c.CoverageFenceDays} {
+			"futuresFenceDays": c.FuturesFenceDays, "coverageFenceDays": c.CoverageFenceDays, "firmingFenceDays": c.FirmingFenceDays} {
 			if days < 0 || days > 3650 {
 				fields[prefix+".coverage."+name] = "must be 0 to 3650"
 			}
+		}
+		if c.AutoFirm && c.FirmingFenceDays < 1 {
+			fields[prefix+".coverage.autoFirm"] = "needs a firmingFenceDays of at least 1"
 		}
 		if c.ReorderMin.IsNegative() || c.ReorderMax.IsNegative() || it.OnHand.IsNegative() || it.SafetyStock.IsNegative() ||
 			it.Lot.MinOrderQty.IsNegative() || it.Lot.MultipleQty.IsNegative() || it.Lot.MaxOrderQty.IsNegative() || it.Lot.StandardQty.IsNegative() {
@@ -308,8 +321,8 @@ func (req runRequest) toDomain(asOf time.Time) ([]domain.Item, error) {
 			PositiveDays: it.Coverage.PositiveDays, NegativeDays: it.Coverage.NegativeDays,
 			ReorderMin: it.Coverage.ReorderMin, ReorderMax: it.Coverage.ReorderMax,
 			FreezeDays: it.Coverage.FreezeFenceDays, ActionDays: it.Coverage.ActionFenceDays, FuturesDays: it.Coverage.FuturesFenceDays,
-			CoverageDays: it.Coverage.CoverageFenceDays,
-			OnHand:       it.OnHand, SafetyStock: it.SafetyStock, OrderType: it.OrderType, LeadTimeDays: it.LeadTimeDays,
+			CoverageDays: it.Coverage.CoverageFenceDays, FirmingDays: it.Coverage.FirmingFenceDays, AutoFirm: it.Coverage.AutoFirm,
+			OnHand: it.OnHand, SafetyStock: it.SafetyStock, OrderType: it.OrderType, LeadTimeDays: it.LeadTimeDays,
 			MinOrderQty: it.Lot.MinOrderQty, MultipleQty: it.Lot.MultipleQty, MaxOrderQty: it.Lot.MaxOrderQty, StandardQty: it.Lot.StandardQty,
 		}
 		var err error

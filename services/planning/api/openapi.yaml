@@ -822,6 +822,115 @@ paths:
                         expiryDay: {type: integer}
         '400': {$ref: '#/components/responses/Problem'}
         '403': {$ref: '#/components/responses/Problem'}
+  /v1/planning/coverage-groups:
+    get:
+      operationId: listCoverageGroups
+      summary: Coverage groups of the tenant, ordered by code (FR-22.2)
+      x-passage-duty: planning.read
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Coverage groups
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/CoverageGroup'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+    post:
+      operationId: createCoverageGroup
+      summary: Create a coverage group (FR-22.2)
+      description: |
+        Omitted fields take the FR-22.2 defaults: coverage time fence 100 days,
+        negative days 1, positive days 0, freeze and firming fences 0,
+        auto-firm off, action and futures messages on. A code already in use
+        is 409 PLAN-COVERAGE-EXISTS. With an Idempotency-Key, a retry of the
+        same body returns the created group with 200 and
+        Idempotent-Replayed: true; another body under the key is 422.
+      x-passage-duty: planning.setup.maintain
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: {type: string, maxLength: 255}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - type: object
+                  required: [code]
+                  properties:
+                    code: {type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,19}$'}
+                - $ref: '#/components/schemas/CoverageSettings'
+      responses:
+        '201':
+          description: The created coverage group; the ETag header carries its version
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CoverageGroup'}
+        '200':
+          description: Idempotent replay of an earlier create
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CoverageGroup'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+  /v1/planning/coverage-groups/{code}:
+    get:
+      operationId: getCoverageGroup
+      summary: One coverage group by code
+      x-passage-duty: planning.read
+      parameters:
+        - $ref: '#/components/parameters/CoverageCode'
+      responses:
+        '200':
+          description: The coverage group; the ETag header carries its version
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CoverageGroup'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+    put:
+      operationId: updateCoverageGroup
+      summary: Replace the settings of a coverage group under If-Match; omitted fields take the FR-22.2 defaults
+      x-passage-duty: planning.setup.maintain
+      parameters:
+        - $ref: '#/components/parameters/CoverageCode'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CoverageSettings'}
+      responses:
+        '200':
+          description: The changed coverage group with its new ETag
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CoverageGroup'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '412': {$ref: '#/components/responses/Problem'}
+        '428': {$ref: '#/components/responses/Problem'}
 components:
   headers:
     ETag:
@@ -834,6 +943,11 @@ components:
       required: true
       description: 'ETag of the version the change is based on, e.g. "3" (a new forecast model is "0")'
       schema: {type: string}
+    CoverageCode:
+      name: code
+      in: path
+      required: true
+      schema: {type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,19}$'}
     ModelCode:
       name: modelCode
       in: path
@@ -855,6 +969,31 @@ components:
         application/problem+json:
           schema: {$ref: '#/components/schemas/Problem'}
   schemas:
+    CoverageSettings:
+      type: object
+      required: [coverageCode]
+      properties:
+        coverageCode: {type: string, enum: [requirement, period, minmax, manual]}
+        coverageTimeFenceDays: {type: integer, minimum: 1, maximum: 3650, default: 100}
+        negativeDays: {type: integer, minimum: 0, maximum: 365, default: 1}
+        positiveDays: {type: integer, minimum: 0, maximum: 365, default: 0}
+        periodDays: {type: integer, minimum: 0, maximum: 365, default: 0, description: 1 to 365 for period coverage}
+        freezeFenceDays: {type: integer, minimum: 0, maximum: 3650, default: 0}
+        actionFenceDays: {type: integer, minimum: 0, maximum: 3650, default: 0, description: 0 is unlimited}
+        futuresFenceDays: {type: integer, minimum: 0, maximum: 3650, default: 0, description: 0 is unlimited}
+        firmingFenceDays: {type: integer, minimum: 0, maximum: 3650, default: 0}
+        autoFirm: {type: boolean, default: false, description: Needs firmingFenceDays of at least 1}
+        generateActions: {type: boolean, default: true}
+        generateFutures: {type: boolean, default: true}
+    CoverageGroup:
+      allOf:
+        - type: object
+          required: [id, version, code]
+          properties:
+            id: {type: string, format: uuid}
+            version: {type: integer, minimum: 1, description: Same as the ETag}
+            code: {type: string}
+        - $ref: '#/components/schemas/CoverageSettings'
     RunRequest:
       type: object
       required: [asOf, siteId, items]
@@ -903,6 +1042,8 @@ components:
             actionFenceDays: {type: integer, minimum: 0, maximum: 3650, description: 'BR-22.4: advance/postpone only for receipts inside. 0 is unlimited.'}
             futuresFenceDays: {type: integer, minimum: 0, maximum: 3650, description: 'BR-22.4: delay messages only for requirements inside. 0 is unlimited.'}
             coverageFenceDays: {type: integer, minimum: 0, maximum: 3650, description: 'FR-22.2 coverage time fence: existing supply at or beyond it that demand does not need raises cancel (nothing pegged) or decrease (by the unpegged part), inside the action fence. 0 raises neither.'}
+            firmingFenceDays: {type: integer, minimum: 0, maximum: 3650, description: 'BR-22.4 firming time fence. With autoFirm, planned orders whose order date falls inside it are firmed by the run (grouping vendor-date, one plannedorder.firmed.v1 each). 0 firms nothing.'}
+            autoFirm: {type: boolean, default: false, description: Needs firmingFenceDays of at least 1}
         onHand: {type: string, description: Decimal string}
         safetyStock: {type: string, description: Decimal string}
         orderType: {type: string, enum: [purchase, production, transfer]}

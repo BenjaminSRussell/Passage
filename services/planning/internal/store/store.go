@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -62,6 +63,10 @@ type Store interface {
 	SubmitForecastConsensus(ctx context.Context, modelCode string, expectedVersion int) (ForecastModel, error)
 	DecideForecastConsensus(ctx context.Context, modelCode string, expectedVersion int, approve bool) (ForecastModel, *ForecastPublication, error)
 	ListNetRequirements(ctx context.Context, planCode, itemID string, limit int) ([]NetRequirement, error)
+	ListCoverageGroups(ctx context.Context, limit int) ([]CoverageGroup, error)
+	GetCoverageGroup(ctx context.Context, code string) (CoverageGroup, error)
+	CreateCoverageGroup(ctx context.Context, req CoverageCreate) (CoverageGroup, bool, error)
+	UpdateCoverageGroup(ctx context.Context, expectedVersion int, spec domain.CoverageGroupSpec) (CoverageGroup, error)
 	Ping(ctx context.Context) error
 }
 
@@ -235,7 +240,26 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 		// not used because it is not supported on tables with forced RLS.
 		batch := &pgx.Batch{}
 		counts := planevents.PlannedCounts{}
-		for _, o := range r.Orders {
+		orderIDs := make([]string, len(r.Orders))
+		for i := range r.Orders {
+			orderIDs[i] = ids.New()
+		}
+		// BR-22.4: orders inside the firming fence are firmed by the run. The
+		// firming batch row goes first, since the firmed orders reference it.
+		autoFirm, err := autoFirmBatch(req, versionID, orderIDs)
+		if err != nil {
+			return err
+		}
+		if autoFirm != nil {
+			body, err := json.Marshal(autoFirm.batch)
+			if err != nil {
+				return err
+			}
+			batch.Queue(`insert into firming_batch (tenant_id, id, idempotency_key, input_hash, grouping, firmed_count, response)
+				values ($1, $2, $3, $4, $5, $6, $7)`, p.TenantID, autoFirm.batch.ID, autoFirmKeyPrefix+versionID, r.Hash,
+				autoFirm.batch.Grouping, autoFirm.batch.Firmed, body)
+		}
+		for i, o := range r.Orders {
 			var futures *string
 			if o.FuturesDate != nil {
 				f := dayDate(req.AsOf, *o.FuturesDate)
@@ -249,9 +273,15 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 			case domain.OrderTransfer:
 				counts.Transfer++
 			}
-			batch.Queue(`insert into planned_order (tenant_id, id, plan_version_id, number, item_id, order_type, qty, order_date, delivery_date, futures_date, delay_days, lot_rule)
-				values ($1, $2, $3, $4, $5, $6, $7::numeric, $8::date, $9::date, $10::date, $11, $12)`,
-				p.TenantID, ids.New(), versionID, o.Number, o.ItemID, o.OrderType, o.Qty.String(), dayDate(req.AsOf, o.OrderDate), dayDate(req.AsOf, o.DeliveryDate), futures, o.DelayDays, o.LotRule)
+			status, batchID, targetType, targetID := "unprocessed", (*string)(nil), (*string)(nil), (*string)(nil)
+			if g, ok := autoFirm.groupOf(orderIDs[i]); ok {
+				status, batchID, targetType, targetID = "firmed", &autoFirm.batch.ID, &g.TargetType, &g.TargetID
+			}
+			batch.Queue(`insert into planned_order (tenant_id, id, plan_version_id, number, item_id, order_type, qty, order_date, delivery_date, futures_date, delay_days, lot_rule,
+				status, firmed_batch_id, firmed_target_type, firmed_target_id)
+				values ($1, $2, $3, $4, $5, $6, $7::numeric, $8::date, $9::date, $10::date, $11, $12, $13, $14, $15, $16)`,
+				p.TenantID, orderIDs[i], versionID, o.Number, o.ItemID, o.OrderType, o.Qty.String(), dayDate(req.AsOf, o.OrderDate), dayDate(req.AsOf, o.DeliveryDate), futures, o.DelayDays, o.LotRule,
+				status, batchID, targetType, targetID)
 		}
 		for _, pg := range r.Pegging {
 			batch.Queue(`insert into pegging (tenant_id, id, plan_version_id, item_id, supply_ref, demand_ref, demand_ref_type, demand_date, qty)
@@ -282,6 +312,25 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 				Action: m.Action, ItemID: m.ItemID, SupplyRef: m.SupplyRef, DemandRef: m.DemandRef,
 				SuggestedDate: dayDate(req.AsOf, m.SuggestedDate), DelayDays: m.DelayDays, Qty: m.Qty.String(),
 			}); err != nil {
+				return err
+			}
+		}
+		// One plannedorder.firmed.v1 per auto-firmed order, as a planner's
+		// firming writes, so the owning contexts create the target orders.
+		for i, o := range r.Orders {
+			g, ok := autoFirm.groupOf(orderIDs[i])
+			if !ok {
+				continue
+			}
+			evt, err := events.New(planevents.PlannedOrderFirmed, eventSource, orderIDs[i], p.TenantID, planevents.PlannedOrderFirmedData{
+				PlannedOrderID: orderIDs[i], PlanVersionID: versionID, BatchID: autoFirm.batch.ID, OrderType: g.OrderType,
+				TargetType: g.TargetType, TargetID: g.TargetID, ItemID: o.ItemID, SiteID: req.SiteID, Qty: o.Qty.String(),
+				OrderDate: dayDate(req.AsOf, o.OrderDate), DeliveryDate: dayDate(req.AsOf, o.DeliveryDate),
+			})
+			if err != nil {
+				return err
+			}
+			if err := outbox.Enqueue(ctx, tx, "planned-order", orderIDs[i], evt); err != nil {
 				return err
 			}
 		}

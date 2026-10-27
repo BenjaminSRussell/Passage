@@ -50,7 +50,7 @@ operations:
     action: send
     channel:
       $ref: '#/channels/plannedOrderFirmed'
-    summary: A planned order was firmed (FR-22.10). One event per planned order; the owning context creates the target order with target_id, and orders that share a target_id are the lines of one purchase order.
+    summary: A planned order was firmed (FR-22.10), by a planner's firming request or by a plan run inside the firming time fence (BR-22.4, in the run transaction; batch_id is then the run's firming batch). One event per planned order; the owning context creates the target order with target_id, and orders that share a target_id are the lines of one purchase order.
   publishForecastPublished:
     action: send
     channel:

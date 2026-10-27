@@ -1,6 +1,6 @@
-# NOT-IMPLEMENTED (PSG-22, planning service, slices 1 to 6)
+# NOT-IMPLEMENTED (PSG-22, planning service, slices 1 to 7)
 
-Every ticket deliverable and acceptance criterion that slices 1 to 6 do not
+Every ticket deliverable and acceptance criterion that slices 1 to 7 do not
 build. Slice 2 added the freeze, action and futures fences (BR-22.4),
 planned-order maintenance (FR-22.11) and forecast cells with reduction that a
 run nets as demand (FR-22.8, AC-22.6). Slice 3 added five stateless calculators
@@ -20,6 +20,9 @@ inside the freeze fence (FR-22.7), the forecast consensus workflow (submit,
 publish, reject) with the segregation of duties of 4.22.17 and
 `forecast.published.v1` (FR-22.9), the reach set of a dynamic net-change run
 (BR-22.6, domain only), and the forecast history window in `forecast-py`.
+Slice 7 added coverage groups as persisted setup (FR-22.2), auto-firming inside
+the firming time fence during a run (BR-22.4), and resumable batch generation
+in `forecast-py` (FR-22.9).
 Status is `later slice of PSG-22` (planned work in this wave), `partly built`
 (the stated part exists and is tested; the rest is named) or `handoff`
 (needs another wave or owner; the handoff is recorded here because this wave may
@@ -30,8 +33,8 @@ not edit that code).
 | # | Deliverable | Status | Reason |
 |---|---|---|---|
 | 1 | Freeze, action and futures time fences (BR-22.4) | built | `coverage.freezeFenceDays`, `actionFenceDays`, `futuresFenceDays` on the run input; tests in `domain/fences_test.go` (with a property test that frozen demand is pegged or reported short). |
-| 1 | Firming time fence: planned orders inside it are auto-firmed (BR-22.4) | later slice of PSG-22 | Firming exists as a command; auto-firming inside a run needs the run to carry firmed orders of the previous version forward as supply (see deliverable 3). |
-| 1 | Coverage groups as persisted setup carrying the fences (FR-22.2) | later slice of PSG-22 | Fences travel per item on the run input, like the rest of the coverage. |
+| 1 | Firming time fence: planned orders inside it are auto-firmed (BR-22.4) | partly built | `coverage.firmingFenceDays` and `coverage.autoFirm` on the run input: orders whose order date falls inside the fence are stored `firmed` in one firming batch per run (grouping `vendor-date`) with one `plannedorder.firmed.v1` each, in the run transaction (`domain/firming_fence_test.go`, `store/coverage_test.go` `TestRunPlan_AutoFirmsInsideTheFirmingFence`). Not built: carrying firmed orders of the previous version forward as supply (deliverable 3), so a rerun before the target orders reach the snapshot as receipts plans and firms the same demand again; the caller sends them as `receipts` until then. The legal-entity firming grouping parameter is not persisted (the default applies). |
+| 1 | Coverage groups as persisted setup carrying the fences (FR-22.2) | partly built | `coverage_group` (migration `0006`, RLS) with list, get, create (FR-22.2 defaults, optional Idempotency-Key, 409 `PLAN-COVERAGE-EXISTS`) and update under If-Match, duty `planning.setup.maintain`; the coverage-group screens in the web module. Not built: a run resolving an item's coverage group (coverage still travels per item on the run input), item coverage setup (ItemCoverage), the legal-entity default coverage group `REQ` (4.22.13), `safety_stock_policy`, `rescheduling_margin_days`, `priorityBased`, deleting a group, and the run honouring `generateActions`/`generateFutures` (the run input has no such switches; the fences decide). |
 | 1 | Coverage time fence (default 100 days) and `PLANNING_HORIZON_DAYS` | partly built | `coverage.coverageFenceDays` on the run input drives Cancel and Decrease (deliverable 3). Not built: requirements beyond the fence or the horizon are still netted, and the 100-day default is not applied (0 means off) because a default fence that raises Cancel without also limiting netting would flag supply the plan still counts on. |
 | 1 | Safety-stock policy `first-issue` (BR-22.1 step 4, BR-22.5) | later slice of PSG-22 | Only policy `today` is built: safety stock is a demand at today, replenished at today + lead time. |
 | 1 | Issue and reorder margins (FR-22.5) | later slice of PSG-22 | Only the receipt margin (`coverage.marginDays`) is applied. |
@@ -54,7 +57,7 @@ not edit that code).
 | 3 | Planned transfer demand at the from-warehouse (BR-22.7) | later slice of PSG-22 | Transfer planned orders are proposed, but no issue demand is created at a source warehouse; warehouse scopes are not modelled (deliverable 8). |
 | 3 | Message catalog codes on messages (PLAN-0006, PLAN-0007, PLAN-0010 to PLAN-0015) | later slice of PSG-22 | Messages carry an action (`delay`, `postpone`, `advance`, `shortage`), not a catalog code; the user texts of 4.22.18 are not rendered yet. |
 | 4 | Statistical forecast via ETS and Croston/TSB (FR-22.9) | partly built | `services/forecast-py` implements ETS A,N / A,A,N / A,A,A selected by AICc, Croston, TSB, ADI selection, holdout MAPE/wMAPE and (slice 6) the `historyMonths` window of the tenant parameter "forecast history months". Not built: the `statsforecast` library wrapper, `POST /forecasts/{modelId}:generate`, which would write statistical cells into a model, and the tenant parameter itself (default 36), which the generate job would send. |
-| 4 | Forecast batch generation for 50k items under 15 min (FR-22.9) | later slice of PSG-22 | Forecast endpoint exists in Python; the batch job, item batching, and Temporal workflow are not built. |
+| 4 | Forecast batch generation for 50k items under 15 min (FR-22.9) | partly built | `forecast-py` `POST /v1/forecast/forecasts:generate-batches` cuts up to 50,000 series into batches of up to 1,000, skips batches the caller holds and reports failed ones (a run is complete only with none failed). Not built: the weekly job here that calls it, persists completed batches into a forecast version, retries failed batches and withholds a partial version, the Temporal workflow, and the 15-minute benchmark. |
 | 4 | Manual override per cell | built | `PUT /forecasts/{modelCode}/lines` with source `manual` (or `statistical` for a loader); the forecast screen in the web module edits cells. |
 | 4 | Consensus workflow, version lock and `forecast.published.v1` (FR-22.9, 4.22.17) | partly built | `POST /forecasts/{modelCode}:submit` (Maintain forecasts) locks a draft with cells; `:publish` and `:reject` (duty `planning.forecast.approve`) decide it. The approver may be neither the submitter nor a writer of any cell of the model (403 `PLAN-CONSENSUS-SOD`); publish marks the cells `consensus`, locks the model and writes `forecast.published.v1` in the same transaction. Cell writes on a submitted or published model are 409 `PLAN-FORECAST-LOCKED`. Tests: `domain/consensus_test.go`, `api/consensus_test.go`, `store/consensus_test.go` (database). Not built: the Temporal approval step (the decision is a synchronous call), notifications to approvers, reopening a published model (the next forecast cycle uses a new model code), several published versions of one model, and restricting a run to published models (a run nets any model it names). |
 | 4 | ForecastLine persistence and PUT lines API | built | Migration `0002`, RLS on both tables. |
@@ -83,7 +86,7 @@ not edit that code).
 | Plan scope filters: site, item group, planner, LLC range, `mps` scope (FR-22.13) | later slice of PSG-22 | A run plans the whole snapshot it is given. |
 | Version-to-version diff API (FR-22.14) | later slice of PSG-22 | Each version stores its plan hash and input hash; the diff endpoint is not built. |
 | UoM conversion of forecast lines and inventory UoM (BR-22.10) | later slice of PSG-22 | Quantities are taken as given (decimal, 6 places in the database). |
-| Coverage groups API `GET /coverage-groups` and item coverage setup | later slice of PSG-22 | Setup entities are not persisted; coverage is passed on the run input. |
+| Coverage groups API `GET /coverage-groups` and item coverage setup | partly built | Coverage groups are persisted with list, get, create and update (deliverable 1). Item coverage setup is not built; coverage is passed on the run input. |
 | Events `plan.started.v1` and `message.raised.v1` | partly built | Both are written to the outbox in the run's transaction: `plan.started.v1` (plan, version, kind `static`, site, as-of, items) ahead of the run's other events, and one `message.raised.v1` per stored message (message id, action, item, supply and demand ref, suggested date, delay days, qty). Because runs are synchronous, `plan.started` reaches consumers together with `plan.completed`; it will lead it once the run is a Temporal job. The PRD's `requirementId`/`refType`/`refId` are carried as `supply_ref` and `demand_ref`, since Requirement rows are not stored. |
 | Event `forecast.published.v1` | built | Written to the outbox in the publish transaction (`store/consensus.go`) with model id and code, version, item series, horizon periods, first and last day, submitter and approver; declared in `events/asyncapi.yaml`. The PRD spells the firming event `planned-order.firmed.v1`, but the kernel's event type rule admits no hyphen in the entity segment, so it is `plannedorder.firmed.v1`. |
 | Feature flags `planning.dynamic`, `planning.statistical-forecast`, `planning.mps-scope` | later slice of PSG-22 | Not read yet. |
@@ -119,7 +122,7 @@ not edit that code).
 
 | Item | Status | Reason |
 |---|---|---|
-| Database-backed tests and `0001_init.sql` to `0005_increase_and_consensus.sql` on an empty database | built | Run in review against Postgres 16 with an admin URL and a non-superuser app role (`PASSAGE_TEST_DATABASE_URL`, `PASSAGE_TEST_APP_DATABASE_URL`). CI must set both. |
+| Database-backed tests and `0001_init.sql` to `0006_coverage_groups.sql` on an empty database | built | Run in review against Postgres 16 with an admin URL and a non-superuser app role (`PASSAGE_TEST_DATABASE_URL`, `PASSAGE_TEST_APP_DATABASE_URL`). CI must set both. |
 | Pytest run of `services/forecast-py` | built | Run in review with Python 3.12; CI wiring for Python services belongs to the platform owner. |
 
 ## Reconciliation and test plan (PRD 4.22.9)
@@ -145,4 +148,4 @@ not edit that code).
 - PSG-24 batch and shelf life: sellable shelf-life days (FR-24.19).
 - PSG-20 inventory costing: current item cost for the inventory forecast value (FR-22.22).
 - PSG-48 sanctions screening.
-- Policies (`policies/`, not owned by this wave): register the duty `planning.forecast.approve` (Approve forecast consensus) for the supply chain manager role, apart from `planning.forecast.maintain` (Demand planner).
+- Policies (`policies/`, not owned by this wave): register the duty `planning.forecast.approve` (Approve forecast consensus) for the supply chain manager role, apart from `planning.forecast.maintain` (Demand planner), and `planning.setup.maintain` (Maintain planning setup: coverage groups) for the planning administrator role.

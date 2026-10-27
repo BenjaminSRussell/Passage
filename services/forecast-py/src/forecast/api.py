@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from forecast import models
+from forecast import batches, models
 
-app = FastAPI(title="Passage forecast", version="0.2.0")
+app = FastAPI(title="Passage forecast", version="0.3.0")
 
 
 # A history value is a non-negative, finite quantity; anything else is a 422.
@@ -60,24 +60,67 @@ def readyz() -> dict[str, str]:
     return {"status": "ready"}
 
 
+def _compute(s: Series) -> SeriesResult:
+    """Forecast one validated series."""
+    history = s.history if s.historyMonths is None else s.history[-s.historyMonths :]
+    fc = models.select_model(history, s.model, horizon=s.horizonPeriods, season=s.seasonLength)
+    warnings = ["PLAN-0012"] if fc.short_history else []
+    mape, wmape = models.backtest(history, fc.model, season=s.seasonLength)
+    return SeriesResult(
+        itemId=s.itemId,
+        siteId=s.siteId,
+        model=fc.model,
+        shortHistory=fc.short_history,
+        forecast=list(fc.path),
+        mape=mape,
+        wmape=wmape,
+        warnings=warnings,
+    )
+
+
 @app.post("/v1/forecast/forecasts:generate", response_model=GenerateResponse)
 def generate(req: GenerateRequest) -> GenerateResponse:
-    results: list[SeriesResult] = []
-    for s in req.series:
-        history = s.history if s.historyMonths is None else s.history[-s.historyMonths :]
-        fc = models.select_model(history, s.model, horizon=s.horizonPeriods, season=s.seasonLength)
-        warnings = ["PLAN-0012"] if fc.short_history else []
-        mape, wmape = models.backtest(history, fc.model, season=s.seasonLength)
-        results.append(
-            SeriesResult(
-                itemId=s.itemId,
-                siteId=s.siteId,
-                model=fc.model,
-                shortHistory=fc.short_history,
-                forecast=list(fc.path),
-                mape=mape,
-                wmape=wmape,
-                warnings=warnings,
-            )
-        )
-    return GenerateResponse(results=results)
+    return GenerateResponse(results=[_compute(s) for s in req.series])
+
+
+class BatchGenerateRequest(BaseModel):
+    series: list[Series] = Field(min_length=1, max_length=batches.MAX_SERIES)
+    batchSize: int = Field(default=batches.MAX_BATCH_SIZE, ge=1, le=batches.MAX_BATCH_SIZE)
+    # Indexes of batches the caller already persisted from an earlier call over
+    # the same series and batch size; they are skipped, not recomputed.
+    completedBatches: list[Annotated[int, Field(ge=0)]] = Field(default_factory=list, max_length=batches.MAX_SERIES)
+
+
+class BatchOut(BaseModel):
+    index: int
+    status: Literal["completed", "skipped", "failed"]
+    resultCount: int
+    results: list[SeriesResult]
+    detail: str
+
+
+class BatchGenerateResponse(BaseModel):
+    batches: list[BatchOut]
+    totalBatches: int
+    # False when any batch failed; the caller must not publish a partial version.
+    complete: bool
+
+
+@app.post("/v1/forecast/forecasts:generate-batches", response_model=BatchGenerateResponse)
+def generate_batches(req: BatchGenerateRequest) -> BatchGenerateResponse:
+    """Generate a run of up to 50,000 series in batches (FR-22.9, 4.22.16).
+
+    A batch that fails is reported as failed while the others still run, and the
+    run is then not complete; the caller retries by sending the indexes of the
+    batches it holds as completedBatches.
+    """
+    total = batches.count(len(req.series), req.batchSize)
+    beyond = [i for i in req.completedBatches if i >= total]
+    if beyond:
+        raise HTTPException(status_code=422, detail=f"completedBatches {beyond} beyond the last batch index {total - 1}")
+    outcomes = batches.run(req.series, req.batchSize, req.completedBatches, _compute)
+    out = [
+        BatchOut(index=o.index, status=o.status, resultCount=len(o.results), results=o.results, detail=o.detail)
+        for o in outcomes
+    ]
+    return BatchGenerateResponse(batches=out, totalBatches=total, complete=batches.is_complete(outcomes))

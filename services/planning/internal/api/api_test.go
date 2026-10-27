@@ -50,6 +50,10 @@ type fakeStore struct {
 	// editors are the users who wrote cells of each forecast model
 	// (consensus_test.go).
 	editors map[string][]string
+	// Coverage groups in creation order and the input hash stored per
+	// Idempotency-Key (coverage_test.go).
+	groups    []store.CoverageGroup
+	groupKeys map[string]string
 }
 
 func (f *fakeStore) RunPlan(_ context.Context, req store.RunRequest) (store.Version, bool, error) {

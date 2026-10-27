@@ -98,3 +98,67 @@ def test_history_window_below_the_model_minimum_falls_back_to_naive():
 def test_history_months_out_of_range_is_rejected(months):
     body = {"series": [{"itemId": "I-1", "siteId": "S-1", "history": [10.0] * 30, "historyMonths": months}]}
     assert client.post("/v1/forecast/forecasts:generate", json=body).status_code == 422
+
+
+def _series(i: int) -> dict:
+    return {"itemId": f"I-{i}", "siteId": "S-1", "history": [10.0 + (i % 3)] * 24, "horizonPeriods": 2}
+
+
+def test_generate_batches_cuts_by_batch_size_and_reports_complete():
+    body = {"series": [_series(i) for i in range(5)], "batchSize": 2}
+    r = client.post("/v1/forecast/forecasts:generate-batches", json=body)
+    assert r.status_code == 200
+    out = r.json()
+    assert out["totalBatches"] == 3
+    assert out["complete"] is True
+    assert [b["resultCount"] for b in out["batches"]] == [2, 2, 1]
+    assert all(b["status"] == "completed" for b in out["batches"])
+    assert [res["itemId"] for b in out["batches"] for res in b["results"]] == [f"I-{i}" for i in range(5)]
+
+
+def test_generate_batches_results_equal_the_single_call():
+    series = [_series(i) for i in range(3)]
+    single = client.post("/v1/forecast/forecasts:generate", json={"series": series}).json()["results"]
+    out = client.post("/v1/forecast/forecasts:generate-batches", json={"series": series, "batchSize": 2}).json()
+    assert [res for b in out["batches"] for res in b["results"]] == single
+
+
+def test_generate_batches_skips_completed_batches():
+    body = {"series": [_series(i) for i in range(4)], "batchSize": 2, "completedBatches": [0]}
+    out = client.post("/v1/forecast/forecasts:generate-batches", json=body).json()
+    assert [b["status"] for b in out["batches"]] == ["skipped", "completed"]
+    assert out["batches"][0]["results"] == []
+    assert [res["itemId"] for res in out["batches"][1]["results"]] == ["I-2", "I-3"]
+    assert out["complete"] is True
+
+
+def test_generate_batches_failed_batch_marks_run_incomplete(monkeypatch):
+    real = models.select_model
+
+    def flaky(history, model, **kw):
+        if history[0] == 11.0:  # the history of I-1
+            raise ValueError("model did not converge")
+        return real(history, model, **kw)
+
+    monkeypatch.setattr(models, "select_model", flaky)
+    body = {"series": [_series(0), _series(1), _series(2)], "batchSize": 1}
+    out = client.post("/v1/forecast/forecasts:generate-batches", json=body).json()
+    assert [b["status"] for b in out["batches"]] == ["completed", "failed", "completed"]
+    assert out["batches"][1]["detail"] == "ValueError: model did not converge"
+    assert out["batches"][1]["results"] == []
+    assert out["complete"] is False
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"series": [_series(0)], "batchSize": 1001},
+        {"series": [_series(0)], "batchSize": 0},
+        {"series": []},
+        {"series": [_series(0)], "completedBatches": [-1]},
+        {"series": [_series(0), _series(1)], "batchSize": 1, "completedBatches": [2]},
+        {"series": [{"itemId": "I-1", "siteId": "S-1", "history": [1, -2, 3]}]},
+    ],
+)
+def test_generate_batches_rejects_invalid_requests(body):
+    assert client.post("/v1/forecast/forecasts:generate-batches", json=body).status_code == 422

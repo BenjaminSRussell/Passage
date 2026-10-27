@@ -407,3 +407,79 @@ export async function forecastConsensus(modelCode: string, step: ConsensusStep, 
     headers: { "If-Match": ifMatch(version) },
   });
 }
+
+/** Coverage codes of FR-22.2: lot-for-lot, period grouping, min/max reorder, or messages only. */
+export const CoverageCode = z.enum(["requirement", "period", "minmax", "manual"]);
+export type CoverageCode = z.infer<typeof CoverageCode>;
+
+/** The settings of a coverage group, as a create or update sends them (CoverageSettings in the OpenAPI). */
+export const CoverageSettings = z.object({
+  coverageCode: CoverageCode,
+  coverageTimeFenceDays: z.number().int(),
+  negativeDays: z.number().int(),
+  positiveDays: z.number().int(),
+  periodDays: z.number().int(),
+  freezeFenceDays: z.number().int(),
+  actionFenceDays: z.number().int(),
+  futuresFenceDays: z.number().int(),
+  firmingFenceDays: z.number().int(),
+  /** Firm planned orders inside the firming fence during the run (BR-22.4). */
+  autoFirm: z.boolean(),
+  generateActions: z.boolean(),
+  generateFutures: z.boolean(),
+});
+export type CoverageSettings = z.infer<typeof CoverageSettings>;
+
+export const CoverageGroup = CoverageSettings.extend({
+  id: z.string(),
+  code: z.string(),
+  /** The group's ETag: send it back as If-Match on PUT. */
+  version: z.number().int().min(1),
+});
+export type CoverageGroup = z.infer<typeof CoverageGroup>;
+
+/** The FR-22.2 defaults the service applies to omitted fields. */
+export const COVERAGE_DEFAULTS: CoverageSettings = {
+  coverageCode: "requirement",
+  coverageTimeFenceDays: 100,
+  negativeDays: 1,
+  positiveDays: 0,
+  periodDays: 0,
+  freezeFenceDays: 0,
+  actionFenceDays: 0,
+  futuresFenceDays: 0,
+  firmingFenceDays: 0,
+  autoFirm: false,
+  generateActions: true,
+  generateFutures: true,
+};
+
+export async function listCoverageGroups(init?: RequestInit): Promise<CoverageGroup[]> {
+  const out = await request(`/coverage-groups?limit=500`, z.object({ items: z.array(CoverageGroup) }), init);
+  return out.items;
+}
+
+export async function getCoverageGroup(code: string, init?: RequestInit): Promise<CoverageGroup> {
+  return request(`/coverage-groups/${encodeURIComponent(code)}`, CoverageGroup, init);
+}
+
+/**
+ * Creates a coverage group (Maintain planning setup). The Idempotency-Key makes
+ * a retry return the first result; 409 `PLAN-COVERAGE-EXISTS` means the code is taken.
+ */
+export async function createCoverageGroup(code: string, settings: CoverageSettings, idempotencyKey: string): Promise<CoverageGroup> {
+  return request(`/coverage-groups`, CoverageGroup, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ code, ...settings }),
+  });
+}
+
+/** Replaces the settings of a coverage group under If-Match; 412 means someone else changed it. */
+export async function updateCoverageGroup(code: string, version: number, settings: CoverageSettings): Promise<CoverageGroup> {
+  return request(`/coverage-groups/${encodeURIComponent(code)}`, CoverageGroup, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", "If-Match": ifMatch(version) },
+    body: JSON.stringify(settings),
+  });
+}

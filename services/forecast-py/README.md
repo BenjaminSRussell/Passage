@@ -17,7 +17,8 @@ only, per the Python rules in the engineering conventions.
 
 ```
 src/forecast/models.py   pure model functions and selection (no I/O)
-src/forecast/api.py      FastAPI app: GET /healthz, GET /readyz, POST /v1/forecast/forecasts:generate
+src/forecast/batches.py  resumable batching of a generation run (pure; compute passed in)
+src/forecast/api.py      FastAPI app: GET /healthz, GET /readyz, POST /v1/forecast/forecasts:generate and :generate-batches
 tests/                   table-driven unit tests, hypothesis property test, API tests
 charts/forecast/         Helm chart (2 replicas, probes on /healthz and /readyz, ServiceMonitor toggle)
 Dockerfile               python:3.12-slim image running uvicorn on :8080
@@ -47,15 +48,26 @@ models, trend and season for ETS), `mape` and `wmape` (holdout backtest of the
 same path over the last min(12, n/4) periods; null when undefined) and warnings.
 Any schema violation (negative or non-finite history, unknown model) is a 422.
 
+`POST /v1/forecast/forecasts:generate-batches` runs a weekly generation of up
+to 50,000 of the same series (FR-22.9, 4.22.16). The series are cut into
+batches of `batchSize` (1 to 1,000, default 1,000) in request order; each batch
+is computed on its own, so an error in one series fails its batch only
+(`status` `failed` with `detail`, no results) while the others complete.
+`completedBatches` lists the indexes of batches the caller already holds from
+an earlier call over the same series and batch size; they come back `skipped`
+and are not recomputed. `complete` is false while any batch failed: the caller
+retries with the batches it holds and must not publish a partial forecast
+version. An index at or beyond `totalBatches` is a 422.
+
 ## Error codes
 
 | HTTP | Meaning |
 |---|---|
-| 422 | Request fails schema validation: empty batch or history, negative or non-finite value, unknown model, horizon, season length or history months out of range |
+| 422 | Request fails schema validation: empty batch or history, negative or non-finite value, unknown model, horizon, season length or history months out of range, batch size out of 1 to 1,000, more than 50,000 series, or a completed batch index beyond the last batch |
 | warning `PLAN-0012` | History shorter than 24 periods; naive model used |
 
 ## Wave reference
 
-PSG-22 (Phase 4). The Go planning service will call this endpoint once the
+PSG-22 (Phase 4). The Go planning service will call these endpoints once the
 forecast batch job is built (see NOT-IMPLEMENTED.md). `statsforecast` is not a
 dependency yet; it is the planned replacement for the in-house ETS and Croston code.

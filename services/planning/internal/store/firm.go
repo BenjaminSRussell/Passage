@@ -216,3 +216,59 @@ func optional(s string) *string {
 	}
 	return &s
 }
+
+// autoFirmKeyPrefix keys the firming batch a run writes for its auto-firmed
+// orders (BR-22.4): "plan-run:<version id>".
+const autoFirmKeyPrefix = "plan-run:"
+
+// autoFirm is the firming a run does for its orders inside the firming fence.
+type autoFirm struct {
+	batch   FirmBatch
+	byOrder map[string]FirmedGroup
+}
+
+// groupOf returns the target group of an auto-firmed order; a nil autoFirm
+// firms nothing.
+func (a *autoFirm) groupOf(orderID string) (FirmedGroup, bool) {
+	if a == nil {
+		return FirmedGroup{}, false
+	}
+	g, ok := a.byOrder[orderID]
+	return g, ok
+}
+
+// autoFirmBatch groups the run's auto-firmed orders (orderIDs[i] is the id of
+// req.Result.Orders[i]) into target orders as a planner's firming would with
+// the default grouping vendor-date (4.22.13), and returns nil when the run
+// firms nothing. Planned orders of a run carry no vendor yet, so purchases of
+// the site merge per delivery date.
+func autoFirmBatch(req RunRequest, versionID string, orderIDs []string) (*autoFirm, error) {
+	epoch := int(req.AsOf.Unix() / 86400)
+	var cands []domain.FirmCandidate
+	for i, o := range req.Result.Orders {
+		if o.AutoFirmed {
+			cands = append(cands, domain.FirmCandidate{ID: orderIDs[i], OrderType: o.OrderType, SiteID: req.SiteID,
+				DeliveryDay: epoch + o.DeliveryDate, Qty: o.Qty})
+		}
+	}
+	if len(cands) == 0 {
+		return nil, nil
+	}
+	groups, err := domain.GroupForFirming(cands, domain.DefaultGrouping)
+	if err != nil {
+		return nil, err
+	}
+	out := &autoFirm{
+		batch:   FirmBatch{ID: ids.New(), Grouping: domain.DefaultGrouping, Firmed: len(cands), Groups: make([]FirmedGroup, 0, len(groups))},
+		byOrder: make(map[string]FirmedGroup, len(cands)),
+	}
+	for _, g := range groups {
+		fg := FirmedGroup{TargetType: targetTypes[g.OrderType], TargetID: ids.New(), OrderType: g.OrderType, SiteID: g.SiteID,
+			DeliveryDate: epochDate(g.DeliveryDay), Qty: g.Qty.String(), PlannedOrderIDs: g.IDs}
+		out.batch.Groups = append(out.batch.Groups, fg)
+		for _, id := range g.IDs {
+			out.byOrder[id] = fg
+		}
+	}
+	return out, nil
+}

@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
 import { CalculatorsPage } from "./calculators";
+import { CoverageGroupPage, CoverageGroupsPage, NewCoverageGroupPage } from "./CoverageGroupsPage";
 import { ForecastPage } from "./ForecastPage";
 import { NetRequirementsPage } from "./NetRequirementsPage";
 import { MessagesPage, PlannedOrderPage, PlannedOrdersPage, PlanningHome, PlanRunsPage } from "./pages";
@@ -10,7 +11,7 @@ const planning: PassageModule = {
   id: "planning",
   title: "Master planning",
   description:
-    "Run the plan in working days, review, change, approve and firm planned orders, read messages and net requirements, explain any planned order back to its demand, and maintain the forecast and its consensus.",
+    "Run the plan in working days, review, change, approve and firm planned orders, read messages and net requirements, explain any planned order back to its demand, maintain the forecast and its consensus, and set up coverage groups with their fences and auto-firming.",
   routes: [
     { path: "/planning", element: createElement(PlanningHome) },
     { path: "/planning/planned-orders", element: createElement(PlannedOrdersPage) },
@@ -21,6 +22,9 @@ const planning: PassageModule = {
     { path: "/planning/runs/new", element: createElement(RunPlanPage) },
     { path: "/planning/forecast", element: createElement(ForecastPage) },
     { path: "/planning/calculators", element: createElement(CalculatorsPage) },
+    { path: "/planning/coverage-groups", element: createElement(CoverageGroupsPage) },
+    { path: "/planning/coverage-groups/new", element: createElement(NewCoverageGroupPage) },
+    { path: "/planning/coverage-groups/:code", element: createElement(CoverageGroupPage) },
   ],
   nav: [
     { label: "Workspace", to: "/planning", duty: "planning.read" },
@@ -31,6 +35,7 @@ const planning: PassageModule = {
     { label: "Run plan", to: "/planning/runs/new", duty: "planning.run" },
     { label: "Forecast", to: "/planning/forecast", duty: "planning.read" },
     { label: "Calculators", to: "/planning/calculators", duty: "planning.read" },
+    { label: "Coverage groups", to: "/planning/coverage-groups", duty: "planning.read" },
   ],
 };
 

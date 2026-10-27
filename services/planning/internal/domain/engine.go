@@ -86,7 +86,12 @@ type Item struct {
 	// CoverageDays is the coverage time fence of FR-22.2 in days from today.
 	// Existing supply dated at or beyond it that is not (fully) pegged to
 	// demand raises Cancel or Decrease (BR-22.1 step 10). 0 raises neither.
-	CoverageDays             int
+	CoverageDays int
+	// FirmingDays is the firming time fence of FR-22.2 in days from today; 0
+	// means no fence. With AutoFirm set, a planned order whose order date
+	// falls inside it is firmed by the run itself (BR-22.4).
+	FirmingDays              int
+	AutoFirm                 bool
 	ReorderMin, ReorderMax   decimal.Decimal
 	OnHand, SafetyStock      decimal.Decimal
 	OrderType                string
@@ -108,6 +113,9 @@ type PlannedOrder struct {
 	FuturesDate  *int
 	DelayDays    int
 	LotRule      string
+	// AutoFirmed marks an order the firming time fence firms during the run
+	// (BR-22.4); the store firms it in the run's transaction.
+	AutoFirmed bool
 }
 
 // Peg links one unit of supply to the demand it covers (ReqTransCov).
@@ -243,7 +251,7 @@ func validate(it *Item) error {
 	if it.ID == "" || it.LeadTimeDays < 0 || it.MarginDays < 0 || it.OnHand.IsNegative() || it.SafetyStock.IsNegative() {
 		return fmt.Errorf("%w: %q lead time, margin, on-hand or safety stock", ErrInvalidItem, it.ID)
 	}
-	if it.FreezeDays < 0 || it.ActionDays < 0 || it.FuturesDays < 0 || it.CoverageDays < 0 {
+	if it.FreezeDays < 0 || it.ActionDays < 0 || it.FuturesDays < 0 || it.CoverageDays < 0 || it.FirmingDays < 0 {
 		return fmt.Errorf("%w: %q time fences must not be negative", ErrInvalidItem, it.ID)
 	}
 	for _, d := range it.Demand {
@@ -620,7 +628,8 @@ func (L *ledger) order(t int, need decimal.Decimal) error {
 			orderDate = L.rs.demandDate(today)
 			delivery = L.rs.forward(orderDate, it.LeadTimeDays)
 		}
-		po := PlannedOrder{Number: number, ItemID: it.ID, OrderType: it.OrderType, Qty: q, OrderDate: orderDate, DeliveryDate: delivery, LotRule: rule}
+		po := PlannedOrder{Number: number, ItemID: it.ID, OrderType: it.OrderType, Qty: q, OrderDate: orderDate, DeliveryDate: delivery, LotRule: rule,
+			AutoFirmed: it.AutoFirm && insideFirmingFence(today, orderDate, it.FirmingDays)}
 		if orderDate < today {
 			// BR-22.1 step 7: the order cannot be placed in the past, so it is
 			// expected at today + lead time. The delay message is raised by
@@ -852,6 +861,13 @@ func beyondFence(today, day, n int) bool {
 	return n > 0 && day-today >= n
 }
 
+// insideFirmingFence reports whether an order dated day must be placed inside
+// the firming time fence of n days from today (BR-22.4). An order already past
+// due is inside it; a fence of 0 days firms nothing.
+func insideFirmingFence(today, day, n int) bool {
+	return n > 0 && day-today < n
+}
+
 // withinFence reports whether day lies inside an action or futures fence of n
 // days from today. A fence of 0 days is unlimited.
 func withinFence(today, day, n int) bool {
@@ -1000,6 +1016,11 @@ func hashResult(r Result) string {
 			futures = fmt.Sprint(*o.FuturesDate)
 		}
 		fmt.Fprintf(h, "O|%s|%s|%s|%s|%d|%d|%s|%d|%s\n", o.Number, o.ItemID, o.OrderType, o.Qty, o.OrderDate, o.DeliveryDate, futures, o.DelayDays, o.LotRule)
+		if o.AutoFirmed {
+			// Only auto-firmed orders add a line, so hashes of runs without a
+			// firming fence are unchanged.
+			fmt.Fprintf(h, "F|%s\n", o.Number)
+		}
 	}
 	for _, p := range r.Pegging {
 		fmt.Fprintf(h, "P|%s|%s|%s|%d|%s\n", p.SupplyRef, p.DemandRef, p.DemandRefType, p.DemandDate, p.Qty)

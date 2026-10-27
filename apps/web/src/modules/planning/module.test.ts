@@ -43,6 +43,9 @@ describe("planning module", () => {
       "/planning/runs/new",
       "/planning/forecast",
       "/planning/calculators",
+      "/planning/coverage-groups",
+      "/planning/coverage-groups/new",
+      "/planning/coverage-groups/:code",
     ]);
     for (const route of planning.routes) {
       expect(route.element).not.toBeNull();
@@ -58,6 +61,7 @@ describe("planning module", () => {
     expect(duties["/planning/forecast"]).toBe("planning.read");
     expect(duties["/planning/calculators"]).toBe("planning.read");
     expect(duties["/planning/net-requirements"]).toBe("planning.read");
+    expect(duties["/planning/coverage-groups"]).toBe("planning.read");
   });
 
   it("is auto-discovered by the registry", () => {

@@ -1,4 +1,4 @@
-# planning (wave 22, PSG-22, slices 1 to 6)
+# planning (wave 22, PSG-22, slices 1 to 7)
 
 Master planning for Passage: nets demand against supply level by level through
 the BOM and writes planned purchase, production and transfer orders, each pegged
@@ -18,6 +18,9 @@ purge (`PLANNING_MAX_VERSIONS`). Slice 5 adds the site work calendar on a run
 the freeze fence (FR-22.7), the forecast consensus workflow with segregation of
 duties and `forecast.published.v1` (FR-22.9, 4.22.17), the dynamic-plan reach
 set (BR-22.6, domain only) and the forecast history window in `forecast-py`.
+Slice 7 adds coverage groups as persisted setup (FR-22.2), auto-firming of
+planned orders inside the firming time fence during a run (BR-22.4), and
+resumable batch generation in `forecast-py` (FR-22.9, 4.22.16).
 What is not built yet is listed in
 [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 
@@ -27,7 +30,7 @@ What is not built yet is listed in
 cmd/planning/          entrypoint: dbx.Connect -> dbx.Migrate (MIGRATE_ON_START=true) -> httpx.NewRouter -> register -> httpx.Serve
 internal/domain/       pure engine: low-level codes, lot sizing, netting, pegging, messages, delay propagation, plan hash,
                        work calendar (calendar.go), net requirements view (netreq.go), forecast consensus
-                       (consensus.go), dynamic-plan reach set (reach.go);
+                       (consensus.go), dynamic-plan reach set (reach.go), coverage group setup rules (coveragegroup.go);
                        calculators: ddmrp.go, quota.go, strategy.go, shelflife.go, projection.go
 internal/store/        Postgres repository (pgx); a plan run is one transaction with its outbox events
 internal/api/          HTTP handlers under /v1/planning, RFC 9457 problems, /readyz with a database ping
@@ -37,6 +40,7 @@ migrations/            0001_init.sql (plan, plan_version, planned_order, pegging
                        0003_firming.sql (firming_batch with RLS, firmed target on planned_order, cancel/decrease actions)
                        0004_net_requirements.sql (net_requirement per version, item and day; RLS)
                        0005_increase_and_consensus.sql (increase action, forecast_model consensus status, forecast_line writer)
+                       0006_coverage_groups.sql (coverage_group setup with the FR-22.2 defaults and checks; RLS)
 api/openapi.yaml       OpenAPI 3.1 for every exposed endpoint (kept in step by TestOpenAPI_MatchesRoutes)
 events/asyncapi.yaml   AsyncAPI 3 for every event published
 charts/planning/       Helm chart (deployment, service, servicemonitor toggle)
@@ -199,6 +203,35 @@ Each run keeps the newest `PLANNING_MAX_VERSIONS` versions of its plan and
 deletes older ones with their planned orders, pegging and messages, in the run
 transaction. A version holding a firmed planned order is kept.
 
+## Coverage groups and auto-firming (slice 7)
+
+Coverage groups (FR-22.2) are tenant setup under the duty
+`planning.setup.maintain` (Maintain planning setup, 4.22.17): `POST
+/coverage-groups` creates one (optional `Idempotency-Key`; a code in use is 409
+`PLAN-COVERAGE-EXISTS`), `PUT /coverage-groups/{code}` replaces its settings
+under `If-Match`, and `GET` lists or reads them. Omitted fields take the PRD
+defaults: coverage time fence 100 days, negative days 1, positive days 0,
+freeze and firming fences 0, auto-firm off, action and futures messages on.
+Period coverage needs `periodDays` 1 to 365, and `autoFirm` needs a firming
+fence of at least 1 day (also enforced by table checks). A run does not read
+the groups yet: coverage still travels per item on the run input
+(NOT-IMPLEMENTED.md).
+
+Auto-firming (BR-22.4): an item whose run coverage has `firmingFenceDays` and
+`autoFirm` gets every planned order whose order date falls inside the fence
+(order date − plan date < fence; past-due orders included) firmed by the run
+itself. In the run transaction the orders are grouped as a planner's firming
+would with the default grouping `vendor-date` (planned orders carry no vendor
+yet, so purchases of the site merge per delivery date), one `firming_batch`
+keyed `plan-run:<version id>` is stored, the orders are written `firmed` with
+their target ids, and one `plannedorder.firmed.v1` per order goes to the
+outbox. Auto-firming changes only which orders are firmed, never quantities or
+dates; the plan hash records it. A replay of the run's Idempotency-Key firms
+nothing again. As with manual firming, the next run does not carry firmed
+orders forward: until the target orders reach the snapshot as receipts, the
+caller sends them as `receipts`, or the next run would plan (and firm) the same
+demand again.
+
 ## Planning calculators (slice 3)
 
 Five POST endpoints compute a result from the request and store nothing, so they
@@ -246,6 +279,10 @@ NOT-IMPLEMENTED.md):
 | POST | `/v1/planning/strategies:consume-forecast` | `planning.read` (stateless calculator) |
 | POST | `/v1/planning/supply-schedule:project` | `planning.read` (stateless calculator) |
 | POST | `/v1/planning/shelf-life:allocate` | `planning.read` (stateless calculator) |
+| GET | `/v1/planning/coverage-groups?limit=` | `planning.read` |
+| POST | `/v1/planning/coverage-groups` | `planning.setup.maintain` (Idempotency-Key optional) |
+| GET | `/v1/planning/coverage-groups/{code}` | `planning.read` |
+| PUT | `/v1/planning/coverage-groups/{code}` | `planning.setup.maintain` (If-Match required) |
 
 The web module calls these under `/api/v1/planning/...`; the BFF strips `/api`.
 A run is synchronous in slice 1: the engine runs in the request and the store
@@ -263,20 +300,22 @@ swaps the current pointer.
 | 404 | `PLAN-VERSION-NOT-FOUND` | No such version for the plan |
 | 404 | `PLAN-ORDER-NOT-FOUND` | No such planned order (on firming: an id unknown for the tenant) |
 | 404 | `PLAN-FORECAST-NOT-FOUND` | No such forecast model (422 when a run names it) |
+| 404 | `PLAN-COVERAGE-NOT-FOUND` | No such coverage group |
 | 409 | `PLAN-0001` | `PLAN_ALREADY_RUNNING`: a run of the plan is in progress |
 | 409 | `PLAN-0002` | BR-22.9: a planned order to firm is already firmed |
 | 409 | `PLAN-ORDER-NOT-EDITABLE` | The planned order is firmed, deleted or not in the current version |
 | 409 | `PLAN-FORECAST-LOCKED` | The forecast model is submitted or published; its cells are locked |
 | 409 | `PLAN-CONSENSUS-STATE` | The consensus step is not allowed from the model's status |
+| 409 | `PLAN-COVERAGE-EXISTS` | A coverage group with the code already exists |
 | 422 | `PLAN-CONSENSUS-EMPTY` | A forecast model without cells cannot be submitted |
-| 412 | `conflict_version` | If-Match is not the current version of the order or forecast model |
+| 412 | `conflict_version` | If-Match is not the current version of the order, forecast model or coverage group |
 | 422 | `PLAN-ORDER-INVALID` | Order date after delivery date, or a vendor on a non-purchase order |
 | 428 | `precondition_required` | If-Match missing on a maintenance write |
 | 422 | `PLAN-0004` | BOM cycle; low-level codes cannot be assigned |
 | 422 | `PLAN-0005` | A requirement would split into more than 1,000 orders |
 | 422 | `PLAN-0009` | Quota arrangement has no usable source (all blocked, or quota 0 with others blocked) |
 | 422 | `PLAN-INPUT-INVALID` | Snapshot rejected by the engine (unknown coverage or order type, duplicate or unknown item), or calculator input the domain rejects (empty ADU window); `detail` names it |
-| 422 | `idempotency_key_reuse` | Same Idempotency-Key with a different plan or snapshot, or different orders or grouping on firming |
+| 422 | `idempotency_key_reuse` | Same Idempotency-Key with a different plan or snapshot, different orders or grouping on firming, or another coverage group body |
 
 ## Wave reference
 
