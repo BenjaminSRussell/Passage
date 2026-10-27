@@ -1,5 +1,6 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
+import { CalculatorsPage } from "./calculators";
 import { ForecastPage } from "./ForecastPage";
 import { MessagesPage, PlannedOrderPage, PlannedOrdersPage, PlanningHome, PlanRunsPage } from "./pages";
 import { RunPlanPage } from "./RunPlanPage";
@@ -17,6 +18,7 @@ const planning: PassageModule = {
     { path: "/planning/runs", element: createElement(PlanRunsPage) },
     { path: "/planning/runs/new", element: createElement(RunPlanPage) },
     { path: "/planning/forecast", element: createElement(ForecastPage) },
+    { path: "/planning/calculators", element: createElement(CalculatorsPage) },
   ],
   nav: [
     { label: "Workspace", to: "/planning", duty: "planning.read" },
@@ -25,6 +27,7 @@ const planning: PassageModule = {
     { label: "Plan runs", to: "/planning/runs", duty: "planning.read" },
     { label: "Run plan", to: "/planning/runs/new", duty: "planning.run" },
     { label: "Forecast", to: "/planning/forecast", duty: "planning.read" },
+    { label: "Calculators", to: "/planning/calculators", duty: "planning.read" },
   ],
 };
 

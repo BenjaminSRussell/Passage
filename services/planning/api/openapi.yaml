@@ -322,6 +322,352 @@ paths:
         '403': {$ref: '#/components/responses/Problem'}
         '412': {$ref: '#/components/responses/Problem'}
         '428': {$ref: '#/components/responses/Problem'}
+  /v1/planning/ddmrp/buffers:evaluate:
+    post:
+      operationId: evaluateBuffer
+      summary: DDMRP zones, net-flow position and planned quantity for one buffer (FR-22.16, BR-22.11)
+      description: |
+        Stateless calculator: nothing is stored, so no Idempotency-Key and no
+        event. Send `adu`, or a `history` to derive it from over the
+        pastDays/futureDays window (default 90/0). The planned quantity is
+        TOG - NFP, at least the profile's minOrderQty, rounded up to
+        orderMultiple; priority is NFP / TOG to 4 places.
+      x-passage-duty: planning.read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [profile, dltDays]
+              properties:
+                profile:
+                  type: object
+                  properties:
+                    leadTimeFactor: {type: string, description: Decimal, 0 or more}
+                    variabilityFactor: {type: string, description: Decimal, 0 or more}
+                    orderCycleDays: {type: integer, minimum: 0, maximum: 3650}
+                    minOrderQty: {type: string, description: Decimal, 0 or more}
+                    spikeThresholdPct: {type: string, description: 'Percent of the red zone, 0 to 500; default 50'}
+                adu: {type: string, description: Average daily usage; send adu or history}
+                history:
+                  type: array
+                  maxItems: 100000
+                  items: {$ref: '#/components/schemas/DayQty'}
+                pastDays: {type: integer, minimum: 0, maximum: 3650, default: 90}
+                futureDays: {type: integer, minimum: 0, maximum: 3650, default: 0}
+                daf: {type: string, description: 'Dynamic adjustment factor; default 1'}
+                dltDays: {type: string, description: Decoupled lead time in days, 0 to 3650}
+                onHand: {type: string}
+                openSupply: {type: string, description: Open supply inside the DLT, 0 or more}
+                demand:
+                  type: array
+                  maxItems: 10000
+                  items: {$ref: '#/components/schemas/DayQty'}
+                spikeHorizonDays: {type: integer, minimum: 0, maximum: 3650, description: Default is the DLT rounded up}
+                orderMultiple: {type: string, description: Decimal, 0 or more; 0 means none}
+      responses:
+        '200':
+          description: Zones, net flow, planned quantity and priority
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [adu, adjustedAdu, zones, qualifiedDemand, netFlow, plannedQty, priority, zone]
+                properties:
+                  adu: {type: string}
+                  adjustedAdu: {type: string}
+                  zones:
+                    type: object
+                    required: [redBase, redSafety, yellow, green, topOfRed, topOfYellow, topOfGreen]
+                    properties:
+                      redBase: {type: string}
+                      redSafety: {type: string}
+                      yellow: {type: string}
+                      green: {type: string}
+                      topOfRed: {type: string}
+                      topOfYellow: {type: string}
+                      topOfGreen: {type: string}
+                  qualifiedDemand: {type: string}
+                  netFlow: {type: string}
+                  plannedQty: {type: string, description: 0 when NFP is above the top of yellow}
+                  priority: {type: string, description: NFP / TOG, 4 decimals}
+                  zone: {type: string, enum: [red, yellow, green]}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+  /v1/planning/quota-arrangements:allocate:
+    post:
+      operationId: allocateQuota
+      summary: Quota-rating split of one requirement across sources (FR-22.17, BR-22.12)
+      description: |
+        Stateless calculator. Without split the whole quantity goes to the
+        source with the lowest (allocated + base) / quota (ties: priority, then
+        id). With split the quantity is divided so the receiving sources end at
+        equal ratings; shares below minSplitQty are dropped. Sources with quota
+        0 are used only when every other source is blocked; with none usable
+        the answer is 422 PLAN-0009.
+      x-passage-duty: planning.read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sources, qty]
+              properties:
+                sources:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    type: object
+                    required: [id, type, quota]
+                    properties:
+                      id: {type: string, maxLength: 64}
+                      type: {type: string, enum: [vendor, production, transfer]}
+                      quota: {type: string, description: Decimal, 0 or more}
+                      baseQty: {type: string}
+                      allocatedQty: {type: string}
+                      priority: {type: integer}
+                      blocked: {type: boolean}
+                qty: {type: string, description: Positive decimal}
+                split: {type: boolean, default: false}
+                minSplitQty: {type: string}
+      responses:
+        '200':
+          description: Assignments per source, sorted by source id; they sum to qty
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [assignments, qty]
+                properties:
+                  assignments:
+                    type: array
+                    items:
+                      type: object
+                      required: [sourceId, qty, ratingAfter]
+                      properties:
+                        sourceId: {type: string}
+                        qty: {type: string}
+                        ratingAfter: {type: string}
+                  qty: {type: string}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+  /v1/planning/strategies:consume-forecast:
+    post:
+      operationId: consumeForecast
+      summary: Forecast consumption by sales lines for assemble-to-order-final (FR-22.19, BR-22.13)
+      description: |
+        Stateless calculator. A sales line on day d consumes forecast in
+        [d - backwardDays, d] latest first, then in (d, d + forwardDays]
+        earliest first; the mode selects which windows apply. Forecast never
+        goes negative; unconsumed sales add on top (grossQty).
+      x-passage-duty: planning.read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode]
+              properties:
+                mode: {type: string, enum: [backward, forward, backward-forward]}
+                backwardDays: {type: integer, minimum: 0, maximum: 3650, default: 30}
+                forwardDays: {type: integer, minimum: 0, maximum: 3650, default: 0}
+                forecast:
+                  type: array
+                  maxItems: 1000
+                  items:
+                    type: object
+                    required: [id, startDate, endDate, qty]
+                    properties:
+                      id: {type: string}
+                      startDate: {type: string, format: date}
+                      endDate: {type: string, format: date}
+                      qty: {type: string}
+                sales:
+                  type: array
+                  maxItems: 10000
+                  items:
+                    type: object
+                    required: [id, date, qty]
+                    properties:
+                      id: {type: string}
+                      date: {type: string, format: date}
+                      qty: {type: string}
+      responses:
+        '200':
+          description: Remaining forecast per period and consumption per sales line, both in request order, and the gross requirement
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [forecast, sales, grossQty]
+                properties:
+                  forecast:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, remainingQty]
+                      properties:
+                        id: {type: string}
+                        remainingQty: {type: string}
+                  sales:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, consumedQty, unconsumedQty]
+                      properties:
+                        id: {type: string}
+                        consumedQty: {type: string}
+                        unconsumedQty: {type: string}
+                  grossQty: {type: string}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+  /v1/planning/supply-schedule:project:
+    post:
+      operationId: projectSupplySchedule
+      summary: Bucketed supply schedule with projected on-hand, value and days of supply for one item and site (FR-22.21, FR-22.22)
+      description: |
+        Stateless calculator. Days are offsets from day 0; past-due flows count
+        on day 0 and flows at or after the horizon are left out (demand after
+        the horizon still feeds days of supply). A month bucket is 30 days.
+        Value is closing on-hand x unitCost, rounded to the currency's minor
+        unit; daysOfSupply is closing on-hand over the average daily demand of
+        the 30 days after the bucket, null when there is none.
+      x-passage-duty: planning.read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [horizonDays, bucket, currency]
+              properties:
+                horizonDays: {type: integer, minimum: 1, maximum: 3650}
+                bucket: {type: string, enum: [day, week, month]}
+                openingOnHand: {type: string}
+                safetyStock: {type: string}
+                unitCost: {type: string, description: Current cost per inventory unit, 0 or more}
+                currency: {type: string, pattern: '^[A-Z]{3}$', description: ISO 4217 code of unitCost}
+                demand:
+                  type: array
+                  maxItems: 10000
+                  items: {$ref: '#/components/schemas/DayQty'}
+                supply:
+                  type: array
+                  maxItems: 10000
+                  description: Scheduled receipts
+                  items: {$ref: '#/components/schemas/DayQty'}
+                planned:
+                  type: array
+                  maxItems: 10000
+                  description: Planned supply
+                  items: {$ref: '#/components/schemas/DayQty'}
+      responses:
+        '200':
+          description: One row per bucket and totals over the horizon
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [bucket, horizonDays, currency, periods, totals]
+                properties:
+                  bucket: {type: string, enum: [day, week, month]}
+                  horizonDays: {type: integer}
+                  currency: {type: string}
+                  periods:
+                    type: array
+                    items:
+                      type: object
+                      required: [startDay, endDay, demand, supply, planned, closingOnHand, safetyStock, shortage, value, daysOfSupply]
+                      properties:
+                        startDay: {type: integer}
+                        endDay: {type: integer}
+                        demand: {type: string}
+                        supply: {type: string}
+                        planned: {type: string}
+                        closingOnHand: {type: string}
+                        safetyStock: {type: string}
+                        shortage: {type: boolean, description: Closing on-hand below safety stock}
+                        value: {type: string, description: Fixed to the currency's minor unit}
+                        daysOfSupply: {type: [string, 'null']}
+                  totals:
+                    type: object
+                    required: [demand, supply, planned, closingOnHand]
+                    properties:
+                      demand: {type: string}
+                      supply: {type: string}
+                      planned: {type: string}
+                      closingOnHand: {type: string}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+  /v1/planning/shelf-life:allocate:
+    post:
+      operationId: allocateShelfLife
+      summary: Shelf-life aware FEFO allocation of batches to one demand (FR-22.20, BR-22.15)
+      description: |
+        Stateless calculator. A batch serves the demand only when expiryDay -
+        demandDay >= requiredShelfLifeDays; usable batches are taken
+        first-expiry-first. With horizonDay set, batches that still have
+        quantity and expire by that day are listed (message PLAN-0011).
+      x-passage-duty: planning.read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [demandDay, demandQty, requiredShelfLifeDays, batches]
+              properties:
+                demandDay: {type: integer, minimum: 0, maximum: 3650}
+                demandQty: {type: string}
+                requiredShelfLifeDays: {type: integer, minimum: 0, maximum: 3650}
+                horizonDay: {type: integer, minimum: 0, maximum: 3650}
+                batches:
+                  type: array
+                  maxItems: 1000
+                  items:
+                    type: object
+                    required: [id, qty, expiryDay]
+                    properties:
+                      id: {type: string, maxLength: 64}
+                      qty: {type: string}
+                      expiryDay: {type: integer, minimum: -3650, maximum: 3650}
+      responses:
+        '200':
+          description: Allocations, shortfall to cover with planned supply, and expiring unpegged batches
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [allocations, shortfallQty, expiringUnpegged]
+                properties:
+                  allocations:
+                    type: array
+                    items:
+                      type: object
+                      required: [batchId, qty]
+                      properties:
+                        batchId: {type: string}
+                        qty: {type: string}
+                  shortfallQty: {type: string}
+                  expiringUnpegged:
+                    type: array
+                    items:
+                      type: object
+                      required: [batchId, qty, expiryDay]
+                      properties:
+                        batchId: {type: string}
+                        qty: {type: string}
+                        expiryDay: {type: integer}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
 components:
   headers:
     ETag:
@@ -502,6 +848,13 @@ components:
               qty: {type: string, description: 'Decimal string, 0 or more with at most 6 decimals; 0 clears the period'}
               salesQty: {type: string, description: Decimal string, 0 or more}
               source: {type: string, enum: [manual, statistical], default: manual}
+    DayQty:
+      type: object
+      required: [day, qty]
+      description: A quantity on a day offset from day 0 of a calculation; negative days are in the past
+      properties:
+        day: {type: integer, minimum: -3650, maximum: 3650}
+        qty: {type: string, description: Decimal string, 0 or more}
     Pegging:
       type: object
       required: [orderId, number, qty, tree]

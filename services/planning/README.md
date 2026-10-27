@@ -15,7 +15,8 @@ run can net as forecast demand. What is not built yet is listed in
 
 ```
 cmd/planning/          entrypoint: dbx.Connect -> dbx.Migrate (MIGRATE_ON_START=true) -> httpx.NewRouter -> register -> httpx.Serve
-internal/domain/       pure engine: low-level codes, lot sizing, netting, pegging, messages, delay propagation, plan hash
+internal/domain/       pure engine: low-level codes, lot sizing, netting, pegging, messages, delay propagation, plan hash;
+                       calculators: ddmrp.go, quota.go, strategy.go, shelflife.go, projection.go
 internal/store/        Postgres repository (pgx); a plan run is one transaction with its outbox event
 internal/api/          HTTP handlers under /v1/planning, RFC 9457 problems, /readyz with a database ping
 internal/events/       plan.completed.v1 type and payload
@@ -105,6 +106,29 @@ forecast demand for a run).
   period's forecast also consume the following periods). Until sales orders
   (w27) feed the planning service, `salesQty` per cell is entered with it.
 
+## Planning calculators (slice 3)
+
+Five POST endpoints compute a result from the request and store nothing, so they
+take no Idempotency-Key and emit no event. They hold the rules the engine will
+use once buffers, quotas, strategies and batches are persisted (see
+NOT-IMPLEMENTED.md):
+
+- DDMRP buffer (FR-22.16, BR-22.11): zones from ADU, DLT, LTF, VF, MOQ and order
+  cycle; qualified demand = due on or before day 0 plus days whose total demand
+  exceeds the spike threshold inside the spike horizon; NFP = on-hand + open
+  supply − qualified demand; at or below the top of yellow the planned quantity
+  is TOG − NFP (at least MOQ, rounded up to `orderMultiple`); priority NFP / TOG.
+- Quota allocation (FR-22.17, BR-22.12): lowest (allocated + base) / quota wins,
+  ties by priority then id; `split` water-fills to equal ratings, dropping
+  shares below `minSplitQty` but never the last source. Quota-0 sources are a
+  fallback when all others are blocked; none usable is 422 `PLAN-0009`.
+- Forecast consumption (FR-22.19, BR-22.13) for assemble-to-order-final.
+- Supply schedule and inventory forecast (FR-22.21, FR-22.22): day, week or
+  30-day month buckets; value is closing on-hand × unit cost as platform
+  `money`, rounded to the currency's minor unit.
+- Shelf-life allocation (FR-22.20, BR-22.15): FEFO over batches with
+  expiry − demand day ≥ required shelf life; the rest is the shortfall.
+
 ## API
 
 | Method | Path | Duty |
@@ -120,6 +144,11 @@ forecast demand for a run).
 | GET | `/v1/planning/messages?planCode=&action=&limit=` | `planning.read` |
 | GET | `/v1/planning/forecasts/{modelCode}/lines?itemId=&siteId=&limit=` | `planning.read` |
 | PUT | `/v1/planning/forecasts/{modelCode}/lines` | `planning.forecast.maintain` (If-Match required) |
+| POST | `/v1/planning/ddmrp/buffers:evaluate` | `planning.read` (stateless calculator) |
+| POST | `/v1/planning/quota-arrangements:allocate` | `planning.read` (stateless calculator) |
+| POST | `/v1/planning/strategies:consume-forecast` | `planning.read` (stateless calculator) |
+| POST | `/v1/planning/supply-schedule:project` | `planning.read` (stateless calculator) |
+| POST | `/v1/planning/shelf-life:allocate` | `planning.read` (stateless calculator) |
 
 The web module calls these under `/api/v1/planning/...`; the BFF strips `/api`.
 A run is synchronous in slice 1: the engine runs in the request and the store
@@ -143,7 +172,8 @@ swaps the current pointer.
 | 428 | `precondition_required` | If-Match missing on a maintenance write |
 | 422 | `PLAN-0004` | BOM cycle; low-level codes cannot be assigned |
 | 422 | `PLAN-0005` | A requirement would split into more than 1,000 orders |
-| 422 | `PLAN-INPUT-INVALID` | Snapshot rejected by the engine (unknown coverage or order type, duplicate or unknown item); `detail` names it |
+| 422 | `PLAN-0009` | Quota arrangement has no usable source (all blocked, or quota 0 with others blocked) |
+| 422 | `PLAN-INPUT-INVALID` | Snapshot rejected by the engine (unknown coverage or order type, duplicate or unknown item), or calculator input the domain rejects (empty ADU window); `detail` names it |
 | 422 | `idempotency_key_reuse` | Same Idempotency-Key with a different plan or snapshot |
 
 ## Wave reference

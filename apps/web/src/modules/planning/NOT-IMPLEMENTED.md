@@ -1,6 +1,6 @@
-# NOT-IMPLEMENTED (PSG-22, planning web module, slices 1 and 2)
+# NOT-IMPLEMENTED (PSG-22, planning web module, slices 1 to 3)
 
-Screens of slices 1 and 2, all registered in `module.ts` and built from the
+Screens of slices 1 to 3, all registered in `module.ts` and built from the
 shell primitives (`src/shell/ui`) with CSS Modules:
 
 - `/planning`: master planning workspace with plan picker, summary tiles
@@ -18,6 +18,11 @@ shell primitives (`src/shell/ui`) with CSS Modules:
 - `/planning/forecast` (slice 2): forecast cells of a model (`?model=`, default
   `BASE`) with forecast, open sales and reduced forecast, and a form that adds
   or changes a cell and the model's reduction principle under If-Match.
+- `/planning/calculators` (slice 3): one card per stateless calculator of the
+  service (DDMRP buffer, quota arrangement, forecast consumption, supply
+  schedule and inventory forecast, shelf-life check), each a form prefilled
+  with its PRD worked example and a result (details or table) with loading,
+  empty and error states.
 
 Each list has loading, empty and error states; the plan in view is kept in the
 `?plan=` query. Needs: none (uses only libraries already in `apps/web`).
@@ -35,6 +40,8 @@ Each list has loading, empty and error states; the plan in view is kept in the
 | Forecast: generate statistical, submit consensus, MAPE badge | later slice of PSG-22 | `POST /forecasts/{model}:generate` and the consensus workflow are not built in the planning service. |
 | Coverage groups and item coverage setup | later slice of PSG-22 | Setup API not built; coverage travels on the run snapshot. |
 | Pegging tree lazy-loads children per node | later slice of PSG-22 | The API returns the tree to depth 20 in one response; it is rendered fully. |
-| Supply schedule workbench and inventory forecast views | later slice of PSG-22 | FR-22.21 and FR-22.22 not built. |
+| Supply schedule and inventory forecast on entered figures | built | Calculator card on `/planning/calculators` (`calculators.tsx`). |
+| Supply schedule workbench over the stored plan (item selection, inline planned-order creation, quantity edits, firming, printable report) | later slice of PSG-22 | The service projects only the figures sent to it; requirements of a plan version are not readable per period yet. |
+| DDMRP buffer, quota and shelf-life screens on stored setup (buffer list by priority, quota arrangement maintenance and analysis, expiring-supply messages) | later slice of PSG-22 | Buffers, quota arrangements and batches are not persisted by the service yet; the calculators work on entered figures. |
 | Paging beyond 500 rows | later slice of PSG-22 | The list endpoints return at most 500 rows and no cursor yet; the workspace tiles say when they count only the first 500. |
 | Duty-gated visibility of nav entries | built | Reads and the forecast page declare `planning.read`, the run form `planning.run`; the shell enforces them. |

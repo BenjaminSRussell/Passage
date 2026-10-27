@@ -81,6 +81,11 @@ func TestOpenAPI_MatchesRoutes(t *testing.T) {
 		"DELETE /v1/planning/planned-orders/{id}":             dutyMaintainOrders,
 		"GET /v1/planning/forecasts/{modelCode}/lines":        dutyRead,
 		"PUT /v1/planning/forecasts/{modelCode}/lines":        dutyMaintainForecast,
+		"POST /v1/planning/ddmrp/buffers:evaluate":            dutyRead,
+		"POST /v1/planning/quota-arrangements:allocate":       dutyRead,
+		"POST /v1/planning/strategies:consume-forecast":       dutyRead,
+		"POST /v1/planning/supply-schedule:project":           dutyRead,
+		"POST /v1/planning/shelf-life:allocate":               dutyRead,
 	}
 	for op, want := range duties {
 		if got := documented[op]; got != want {
