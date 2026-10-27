@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -226,33 +227,37 @@ func (s *Postgres) CreateCapability(ctx context.Context, c domain.Capability, id
 	return created, err
 }
 
-func getResource(ctx context.Context, tx pgx.Tx, tenantID, id string) (ResourceRecord, error) {
-	var r domain.Resource
+func scanResource(row pgx.Row, extra ...any) (r domain.Resource, err error) {
 	var efficiency, capacity string
-	err := tx.QueryRow(ctx, `select `+resourceColumns+` from resource where tenant_id = $1 and id = $2::uuid`, tenantID, id).
-		Scan(&r.ID, &r.Code, &r.Name, &r.Type, &r.SiteID, &r.GroupID, &r.CalendarID, &efficiency, &capacity, &r.Exclusive, &r.VendorPartyID)
+	if err = row.Scan(append([]any{&r.ID, &r.Code, &r.Name, &r.Type, &r.SiteID, &r.GroupID, &r.CalendarID, &efficiency, &capacity, &r.Exclusive, &r.VendorPartyID}, extra...)...); err != nil {
+		return r, err
+	}
+	var failure error
+	r.EfficiencyPct, r.CapacityPerDayH = parseDecimal(efficiency, &failure), parseDecimal(capacity, &failure)
+	return r, failure
+}
+
+func scanResourceCapability(row pgx.Row, extra ...any) (c domain.ResourceCapability, err error) {
+	var to *time.Time
+	if err = row.Scan(append(append([]any{}, extra...), &c.CapabilityID, &c.Level, &c.EffectiveFrom, &to)...); err == nil {
+		c.EffectiveTo = valueOrZero(to)
+	}
+	return c, err
+}
+
+func getResource(ctx context.Context, tx pgx.Tx, tenantID, id string) (ResourceRecord, error) {
+	r, err := scanResource(tx.QueryRow(ctx, `select `+resourceColumns+` from resource where tenant_id = $1 and id = $2::uuid`, tenantID, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ResourceRecord{}, notFound(CodeResNotFound, "resource not found")
 	}
 	if err != nil {
 		return ResourceRecord{}, err
 	}
-	var failure error
-	r.EfficiencyPct, r.CapacityPerDayH = parseDecimal(efficiency, &failure), parseDecimal(capacity, &failure)
-	if failure != nil {
-		return ResourceRecord{}, failure
-	}
 	rows, err := tx.Query(ctx, `select capability_id::text, level, effective_from, effective_to from resource_capability where tenant_id = $1 and resource_id = $2::uuid order by capability_id, effective_from`, tenantID, id)
 	if err != nil {
 		return ResourceRecord{}, err
 	}
-	r.Capabilities, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (c domain.ResourceCapability, err error) {
-		var to *time.Time
-		if err = row.Scan(&c.CapabilityID, &c.Level, &c.EffectiveFrom, &to); err == nil {
-			c.EffectiveTo = valueOrZero(to)
-		}
-		return c, err
-	})
+	r.Capabilities, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.ResourceCapability, error) { return scanResourceCapability(row) })
 	if err != nil {
 		return ResourceRecord{}, err
 	}
@@ -344,4 +349,115 @@ func (s *Postgres) GetResource(ctx context.Context, id string) (ResourceRecord, 
 		return err
 	})
 	return rec, err
+}
+
+type ResourceFilter struct{ SiteID, Type, GroupID, CapabilityID string }
+
+func keysetAfter(table, afterID string, args []any) (string, []any) {
+	if afterID == "" {
+		return "", args
+	}
+	args = append(args, afterID)
+	return fmt.Sprintf(` and (code, id) > (select code, id from %s where tenant_id = $1 and id = $%d::uuid)`, table, len(args)), args
+}
+
+func (s *Postgres) ListResources(ctx context.Context, f ResourceFilter, afterID string, limit int) (Page[ResourceRecord], error) {
+	p, _ := tenant.FromContext(ctx)
+	args := []any{p.TenantID}
+	query := `select ` + resourceColumns + `, coalesce((select g.calendar_id::text from resource_group g where g.tenant_id = resource.tenant_id and g.id = resource.group_id), '')
+		from resource where tenant_id = $1`
+	for _, c := range []struct{ value, clause string }{
+		{f.SiteID, `site_id = $%d`},
+		{f.Type, `type = $%d`},
+		{f.GroupID, `group_id = $%d::uuid`},
+		{f.CapabilityID, `exists (select 1 from resource_capability rc where rc.tenant_id = resource.tenant_id and rc.resource_id = resource.id and rc.capability_id = $%d::uuid)`},
+	} {
+		if c.value != "" {
+			args = append(args, c.value)
+			query += ` and ` + fmt.Sprintf(c.clause, len(args))
+		}
+	}
+	keyset, args := keysetAfter("resource", afterID, args)
+	query += keyset + fmt.Sprintf(` order by code, id limit $%d`, len(args)+1)
+	var items []ResourceRecord
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, query, append(args, limit+1)...)
+		if err != nil {
+			return err
+		}
+		items, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (rec ResourceRecord, err error) {
+			var groupCalendar string
+			if rec.Resource, err = scanResource(row, &groupCalendar); err == nil {
+				rec.EffectiveCalendarID = domain.EffectiveCalendar(rec.Resource, domain.ResourceGroup{CalendarID: groupCalendar})
+			}
+			return rec, err
+		})
+		if err != nil || len(items) == 0 {
+			return err
+		}
+		return attachCapabilities(ctx, tx, p.TenantID, items[:min(len(items), limit)])
+	})
+	return trimPage(items, limit, func(r ResourceRecord) string { return r.Resource.ID }), err
+}
+
+func attachCapabilities(ctx context.Context, tx pgx.Tx, tenantID string, items []ResourceRecord) error {
+	at := make(map[string]int, len(items))
+	resourceIDs := make([]string, len(items))
+	for i, rec := range items {
+		at[rec.Resource.ID], resourceIDs[i] = i, rec.Resource.ID
+	}
+	rows, err := tx.Query(ctx, `select resource_id::text, capability_id::text, level, effective_from, effective_to from resource_capability
+		where tenant_id = $1 and resource_id = any($2::uuid[]) order by resource_id, capability_id, effective_from`, tenantID, resourceIDs)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var resourceID string
+		c, err := scanResourceCapability(rows, &resourceID)
+		if err != nil {
+			return err
+		}
+		r := &items[at[resourceID]].Resource
+		r.Capabilities = append(r.Capabilities, c)
+	}
+	return rows.Err()
+}
+
+func listByCode[T any](ctx context.Context, s *Postgres, table, columns, siteID, afterID string, limit int, scan func(pgx.Row) (T, error), id func(T) string) (Page[T], error) {
+	p, _ := tenant.FromContext(ctx)
+	args := []any{p.TenantID}
+	query := `select ` + columns + ` from ` + table + ` where tenant_id = $1`
+	if siteID != "" {
+		args = append(args, siteID)
+		query += fmt.Sprintf(` and site_id = $%d`, len(args))
+	}
+	keyset, args := keysetAfter(table, afterID, args)
+	query += keyset + fmt.Sprintf(` order by code, id limit $%d`, len(args)+1)
+	var items []T
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, query, append(args, limit+1)...)
+		if err != nil {
+			return err
+		}
+		items, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (T, error) { return scan(row) })
+		return err
+	})
+	return trimPage(items, limit, id), err
+}
+
+func (s *Postgres) ListResourceGroups(ctx context.Context, siteID, afterID string, limit int) (Page[domain.ResourceGroup], error) {
+	return listByCode(ctx, s, "resource_group", `id::text, code, name, site_id, coalesce(calendar_id::text, '')`, siteID, afterID, limit,
+		func(row pgx.Row) (g domain.ResourceGroup, err error) {
+			err = row.Scan(&g.ID, &g.Code, &g.Name, &g.SiteID, &g.CalendarID)
+			return g, err
+		}, func(g domain.ResourceGroup) string { return g.ID })
+}
+
+func (s *Postgres) ListCapabilities(ctx context.Context, afterID string, limit int) (Page[domain.Capability], error) {
+	return listByCode(ctx, s, "capability", `id::text, code, name`, "", afterID, limit,
+		func(row pgx.Row) (c domain.Capability, err error) {
+			err = row.Scan(&c.ID, &c.Code, &c.Name)
+			return c, err
+		}, func(c domain.Capability) string { return c.ID })
 }

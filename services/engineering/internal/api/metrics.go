@@ -66,7 +66,8 @@ func (a *API) Metrics() http.Handler {
 		{"engineering_calendars_created_total", "Work calendars created.", &a.calendarsCreated},
 		{"engineering_resources_created_total", "Resources created.", &a.resourcesCreated},
 		{"engineering_resource_requests_failed_total", "Resource and calendar requests that failed in the store or domain with an unexpected error.", &a.resourceFailed},
-		{"engineering_route_requests_failed_total", "Route version read requests that failed in the store with an unexpected error.", &a.routeFailed},
+		{"engineering_route_requests_failed_total", "Route version read and activate requests that failed in the store with an unexpected error.", &a.routeFailed},
+		{"engineering_route_versions_activated_total", "Route version activate requests that succeeded, including idempotent repeats.", &a.routeActivated},
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")

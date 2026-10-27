@@ -118,6 +118,76 @@ const detail = {
   operations: [op(20, "PACK", 0), op(10, "WELD", 20, { requirements: [{ kind: "capability", refId: "welding", level: 2, quantity: 1 }] })],
 };
 
+const draftDetail = { ...detail, status: "draft" };
+const activateButton = () => screen.queryByRole("button", { name: "Activate" });
+
+function stubActivation(respond: () => unknown) {
+  return stubRoutes((url, init) => (init?.method === "POST" && url.endsWith(":activate") ? respond() : ok(draftDetail)));
+}
+
+describe("RouteVersionPage activation", () => {
+  it("offers Activate only for a draft", async () => {
+    stubRoutes(() => ok(draftDetail));
+    const { unmount } = render(<RouteVersionPage id="a" />);
+    expect(await screen.findByRole("button", { name: "Activate" })).toBeEnabled();
+    unmount();
+    for (const status of ["active", "expired"]) {
+      stubRoutes(() => ok({ ...detail, status }));
+      const view = render(<RouteVersionPage id="a" />);
+      await screen.findByRole("table", { name: "Operations" });
+      expect(activateButton()).toBeNull();
+      view.unmount();
+    }
+  });
+
+  it("disables the button while pending, then shows the active status and announces it politely", async () => {
+    let finish: (value: unknown) => void = () => undefined;
+    const pending = new Promise((resolve) => (finish = resolve));
+    const fetchMock = stubActivation(() => pending);
+    render(<RouteVersionPage id="a" />);
+    const live = (await screen.findByRole("button", { name: "Activate" })).ownerDocument.querySelector('[aria-live="polite"]')!;
+    expect(live).toHaveTextContent("");
+    fireEvent.click(screen.getByRole("button", { name: "Activate" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Activate" })).toBeDisabled());
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/engineering/route-versions/a:activate", { method: "POST" });
+    finish(ok({ ...draftDetail, status: "active" }));
+    await waitFor(() => expect(activateButton()).toBeNull());
+    expect(screen.getByText("Active")).toBeInTheDocument();
+    expect(live).toHaveTextContent("Route RT-a version 1 is now active");
+    expect(screen.getByRole("alert")).toBeEmptyDOMElement();
+  });
+
+  it.each([
+    [409, "ENG-ROUTE-OVERLAP", "Conflict"],
+    [422, "ENG-ROUTE-UNSATISFIED", "Unprocessable Entity"],
+  ])("shows the server's problem title on %i and stays a draft", async (status, code, title) => {
+    stubActivation(() => problem(status, code, title));
+    render(<RouteVersionPage id="a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Activate" }));
+    expect(await screen.findByText(title)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(title);
+    expect(screen.getByRole("button", { name: "Activate" })).toBeEnabled();
+    expect(screen.getByText("Draft")).toBeInTheDocument();
+  });
+
+  it("explains a 403 and keeps the button visible", async () => {
+    stubActivation(() => problem(403, "AUTH-0003", "Forbidden"));
+    render(<RouteVersionPage id="a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Activate" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("You do not have permission to activate routes");
+    expect(screen.getByRole("button", { name: "Activate" })).toBeEnabled();
+  });
+
+  it("has unique ids and a labelled control on the draft screen", async () => {
+    stubRoutes(() => ok(draftDetail));
+    const { container } = render(<RouteVersionPage id="a" />);
+    await screen.findByRole("button", { name: "Activate" });
+    const idsInUse = [...container.querySelectorAll("[id]")].map((node) => node.id);
+    expect(new Set(idsInUse).size).toBe(idsInUse.length);
+    expect(container.querySelectorAll('[aria-live="polite"]')).toHaveLength(1);
+  });
+});
+
 describe("RouteVersionPage", () => {
   it("renders operations in sequence with their requirements and no Activate control", async () => {
     stubRoutes(() => ok(detail));

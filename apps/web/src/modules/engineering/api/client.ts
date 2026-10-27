@@ -123,6 +123,10 @@ export function getRouteVersion(id: string): Promise<RouteVersion> {
   return request(`/route-versions/${encodeURIComponent(id)}`);
 }
 
+export function activateRouteVersion(id: string): Promise<RouteVersion> {
+  return request(`/route-versions/${encodeURIComponent(id)}:activate`, { method: "POST" });
+}
+
 export function computeLeadTime(body: LeadTimeRequest): Promise<LeadTime> {
   return request("/routes:lead-time", {
     method: "POST",

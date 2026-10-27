@@ -89,6 +89,23 @@ func (f *fakeStore) GetRouteVersion(_ context.Context, id string) (domain.RouteV
 	return domain.RouteVersion{}, httpx.NewProblem(http.StatusNotFound, store.CodeRouteNotFound, "route version not found")
 }
 
+func (f *fakeStore) ActivateRouteVersion(_ context.Context, id string) (domain.RouteVersion, error) {
+	if f.err != nil {
+		return domain.RouteVersion{}, f.err
+	}
+	for i, v := range f.routes {
+		if v.ID != id {
+			continue
+		}
+		if v.Status != domain.StatusActive && f.activateErr != nil {
+			return domain.RouteVersion{}, f.activateErr
+		}
+		f.routes[i].Status = domain.StatusActive
+		return f.routes[i], nil
+	}
+	return domain.RouteVersion{}, httpx.NewProblem(http.StatusNotFound, store.CodeRouteNotFound, "route version not found")
+}
+
 func (f *fakeStore) GetBomVersion(_ context.Context, id string) (domain.BomVersion, error) {
 	if f.err != nil {
 		return domain.BomVersion{}, f.err
@@ -202,6 +219,73 @@ func TestGetRouteVersion(t *testing.T) {
 		if rec := do(r, http.MethodGet, path, "", allDuties, true); rec.Code != want {
 			t.Fatalf("%s = %d %s; want %d", path, rec.Code, rec.Body, want)
 		}
+	}
+}
+
+const routeWriter = "engineering.route.write"
+
+func activate(r http.Handler, id, duties string) *httptest.ResponseRecorder {
+	return do(r, http.MethodPost, routesPath+"/"+id+":activate", "", duties, true)
+}
+
+func TestActivateRouteVersion(t *testing.T) {
+	tests := []struct {
+		name   string
+		id     string
+		err    error
+		duties string
+		status int
+		want   string
+	}{
+		{"draft that satisfies the checks", rid(4), nil, routeWriter, http.StatusOK, `"status":"active"`},
+		{"already active is unchanged", rid(3), nil, routeWriter, http.StatusOK, `"status":"active"`},
+		{"unknown id", rid(99), nil, routeWriter, http.StatusNotFound, store.CodeRouteNotFound},
+		{"not a draft", rid(1), &domain.Error{Code: domain.CodeRouteState, Detail: "only a draft route version can be activated"}, routeWriter, http.StatusConflict, domain.CodeRouteState},
+		{"overlapping active version", rid(4), &domain.Error{Code: domain.CodeRouteOverlap, Detail: "overlaps"}, routeWriter, http.StatusConflict, domain.CodeRouteOverlap},
+		{"requirement cannot be met", rid(4), &domain.Error{Code: domain.CodeRouteUnsatisfied, Detail: "unsatisfied"}, routeWriter, http.StatusUnprocessableEntity, domain.CodeRouteUnsatisfied},
+		{"read duty alone is refused", rid(4), nil, "engineering.read", http.StatusForbidden, "AUTH-0003"},
+		{"not a uuid", "not-a-uuid", nil, routeWriter, http.StatusBadRequest, "COM-0001"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r, _ := newRouter(&fakeStore{routes: routeFixtures(), activateErr: tc.err}, approves)
+			rec := activate(r, tc.id, tc.duties)
+			if rec.Code != tc.status || !strings.Contains(rec.Body.String(), tc.want) {
+				t.Fatalf("activate = %d %s; want %d containing %s", rec.Code, rec.Body, tc.status, tc.want)
+			}
+		})
+	}
+}
+
+func TestActivateRouteVersion_RepeatReturnsSameBodyAndNoTenantIs401(t *testing.T) {
+	f := &fakeStore{routes: routeFixtures()}
+	r, a := newRouter(f, approves)
+	first, second := activate(r, rid(4), routeWriter), activate(r, rid(4), routeWriter)
+	if first.Code != http.StatusOK || second.Code != http.StatusOK || first.Body.String() != second.Body.String() || f.routes[3].Status != domain.StatusActive {
+		t.Fatalf("repeat = %d %s then %d %s; want identical 200 bodies", first.Code, first.Body, second.Code, second.Body)
+	}
+	if rec := do(r, http.MethodPost, routesPath+"/"+rid(4)+":activate", "", "", false); rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Body.String(), "AUTH-0001") {
+		t.Fatalf("no tenant = %d %s; want 401", rec.Code, rec.Body)
+	}
+	metrics := httptest.NewRecorder()
+	a.Metrics().ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	for _, want := range []string{"engineering_route_versions_activated_total 2", "engineering_route_requests_failed_total 0", `route="/v1/engineering/route-versions/{id}:activate"`} {
+		if !strings.Contains(metrics.Body.String(), want) {
+			t.Fatalf("metrics missing %q:\n%s", want, metrics.Body)
+		}
+	}
+}
+
+func TestActivateRouteVersion_UnexpectedFailureIsHiddenAndCounted(t *testing.T) {
+	r, a := newRouter(&fakeStore{err: errors.New("pg secret detail")}, approves)
+	rec := activate(r, rid(4), routeWriter)
+	if rec.Code != http.StatusInternalServerError || strings.Contains(rec.Body.String(), "secret") {
+		t.Fatalf("store error = %d %s; want 500 with hidden detail", rec.Code, rec.Body)
+	}
+	metrics := httptest.NewRecorder()
+	a.Metrics().ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(metrics.Body.String(), "engineering_route_requests_failed_total 1") || !strings.Contains(metrics.Body.String(), "engineering_route_versions_activated_total 0") {
+		t.Fatalf("metrics = %s; want one failure and no activation", metrics.Body)
 	}
 }
 

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, computeLeadTime, getRouteVersion, listRouteVersions } from "./client";
+import { activateRouteVersion, ApiError, computeLeadTime, getRouteVersion, listRouteVersions } from "./client";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -22,6 +22,17 @@ describe("engineering client", () => {
     const fetchMock = stub({ ok: true, json: async () => ({}) });
     await getRouteVersion("a/b");
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/engineering/route-versions/a%2Fb");
+  });
+
+  it("posts the activation to the encoded id and returns the version", async () => {
+    const fetchMock = stub({ ok: true, json: async () => ({ id: "a/b", status: "active" }) });
+    expect(await activateRouteVersion("a/b")).toEqual({ id: "a/b", status: "active" });
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/engineering/route-versions/a%2Fb:activate", { method: "POST" });
+  });
+
+  it("surfaces the code and status of a refused activation", async () => {
+    stub({ ok: false, status: 409, json: async () => ({ code: "ENG-ROUTE-OVERLAP", title: "Conflict" }) });
+    expect(await activateRouteVersion("x").catch((e: unknown) => e)).toMatchObject({ code: "ENG-ROUTE-OVERLAP", message: "Conflict", status: 409 });
   });
 
   it("posts the lead-time request as JSON", async () => {

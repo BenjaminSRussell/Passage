@@ -34,6 +34,7 @@ const (
 	dutyBomWrite      = "engineering.bom.write"
 	dutyEcoApprove    = "engineering.eco.approve"
 	dutyResourceWrite = "engineering.resource.write"
+	dutyRouteWrite    = "engineering.route.write"
 	dateLayout        = "2006-01-02"
 	validationDetail  = "request failed validation"
 	maxIDLength       = 64
@@ -64,6 +65,7 @@ type API struct {
 	resourcesCreated atomic.Int64
 	resourceFailed   atomic.Int64
 	routeFailed      atomic.Int64
+	routeActivated   atomic.Int64
 }
 
 func New(s store.Store, approver domain.Approver, now func() time.Time) *API {
@@ -80,6 +82,7 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/route-versions", a.listRouteVersions)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/route-versions:active", a.activeRouteVersion)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/route-versions/{id}", a.getRouteVersion)
+		r.With(authz.RequireDuty(dutyRouteWrite)).Post("/v1/engineering/route-versions/{id}:activate", a.activateRouteVersion)
 		r.With(authz.RequireDuty(dutyRead)).Post("/v1/engineering/boms:explode", a.explode)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/boms:where-used", a.whereUsed)
 		r.With(authz.RequireDuty(dutyRead)).Post("/v1/engineering/routes:lead-time", a.leadTime)
@@ -91,7 +94,10 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyResourceWrite)).Post("/v1/engineering/resource-groups", a.createResourceGroup)
 		r.With(authz.RequireDuty(dutyResourceWrite)).Post("/v1/engineering/capabilities", a.createCapability)
 		r.With(authz.RequireDuty(dutyResourceWrite)).Post("/v1/engineering/resources", a.createResource)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/resources", a.listResources)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/resources/{id}", a.getResource)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/resource-groups", a.listResourceGroups)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/capabilities", a.listCapabilities)
 	})
 }
 
@@ -672,7 +678,7 @@ func (a *API) fail(w http.ResponseWriter, r *http.Request, operation string, err
 func problemFrom(de *domain.Error) *httpx.Problem {
 	status := http.StatusUnprocessableEntity
 	switch de.Code {
-	case domain.CodeEcoState:
+	case domain.CodeEcoState, domain.CodeRouteState, domain.CodeRouteOverlap:
 		status = http.StatusConflict
 	case domain.CodeEcoApproverUnavailable:
 		status = http.StatusServiceUnavailable

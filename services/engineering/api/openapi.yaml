@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: engineering
   version: 0.1.0
-  description: Engineering data service. Covers BOM versions, explosion, where-used, routing lead time, engineering change orders, and (slice 4) work calendars, resource groups, capabilities and resources, and (slice 6) read APIs for route versions, the active route version as of a date, and BOM version detail.
+  description: Engineering data service. Covers BOM versions, explosion, where-used, routing lead time, engineering change orders, and (slice 4) work calendars, resource groups, capabilities and resources, and (slice 6) read APIs for route versions, the active route version as of a date, and BOM version detail, and (slice 8) resource, resource group and capability lists and route version activation.
 servers:
   - url: https://app.local.passage.dev
 paths:
@@ -88,6 +88,25 @@ paths:
           description: The route version with its operations and their requirements.
           content: { application/json: { schema: { $ref: '#/components/schemas/RouteVersion' } } }
         '404': { $ref: '#/components/responses/NotFound' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/route-versions/{id}:activate:
+    post:
+      operationId: activateRouteVersion
+      x-passage-duty: engineering.route.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The route version, now active. Activating an already active version returns it unchanged and emits no second routeversion.activated event.
+          content: { application/json: { schema: { $ref: '#/components/schemas/RouteVersion' } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: ENG-ROUTE-STATE, the version is not a draft, or ENG-ROUTE-OVERLAP, another active version of the same product and site overlaps its dates.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: ENG-ROUTE-UNSATISFIED, an operation requirement cannot be met by the resources of the site.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/engineering/boms:explode:
     post:
@@ -205,6 +224,21 @@ paths:
         '422': { $ref: '#/components/responses/Unprocessable' }
         default: { $ref: '#/components/responses/Problem' }
   /v1/engineering/resource-groups:
+    get:
+      operationId: listResourceGroups
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: siteId, in: query, description: Only groups on this site., schema: { type: string, format: uuid, maxLength: 64 } }
+      responses:
+        '200':
+          description: One page of resource groups. Ordered by code then id. Pass nextCursor as cursor for the next page.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/ResourceGroup' } }, nextCursor: { type: string } } }
+        '422': { $ref: '#/components/responses/InvalidQuery' }
+        default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: createResourceGroup
       x-passage-duty: engineering.resource.write
@@ -221,6 +255,20 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
         default: { $ref: '#/components/responses/Problem' }
   /v1/engineering/capabilities:
+    get:
+      operationId: listCapabilities
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of capabilities. Ordered by code then id. Pass nextCursor as cursor for the next page.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Capability' } }, nextCursor: { type: string } } }
+        '422': { $ref: '#/components/responses/InvalidQuery' }
+        default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: createCapability
       x-passage-duty: engineering.resource.write
@@ -236,6 +284,24 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
         default: { $ref: '#/components/responses/Problem' }
   /v1/engineering/resources:
+    get:
+      operationId: listResources
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: siteId, in: query, schema: { type: string, format: uuid, maxLength: 64 } }
+        - { name: type, in: query, schema: { type: string, enum: [machine, tool, labor, vendor, location] } }
+        - { name: groupId, in: query, schema: { type: string, format: uuid, maxLength: 64 } }
+        - { name: capabilityId, in: query, schema: { type: string, format: uuid, maxLength: 64 } }
+      responses:
+        '200':
+          description: One page of resources, each with its capabilities and effectiveCalendarId. capabilityId matches resources holding that capability. Ordered by code then id. Pass nextCursor as cursor for the next page.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Resource' } }, nextCursor: { type: string } } }
+        '422': { $ref: '#/components/responses/InvalidQuery' }
+        default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: createResource
       x-passage-duty: engineering.resource.write
@@ -491,6 +557,12 @@ components:
   responses:
     Problem:
       description: RFC 9457 problem details.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    Forbidden:
+      description: AUTH-0003, the caller lacks the duty this operation requires.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    InvalidQuery:
+      description: COM-0001 with an errors map naming each bad filter, limit or cursor.
       content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
     NotFound:
       description: ENG-CAL-NOTFOUND, ENG-RES-NOTFOUND, ENG-ROUTE-NOTFOUND or ENG-BOM-NOTFOUND as RFC 9457 problem details.

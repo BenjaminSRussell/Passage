@@ -13,6 +13,7 @@ import {
   type DataTableColumn,
 } from "../../shell/ui";
 import {
+  activateRouteVersion,
   ApiError,
   computeLeadTime,
   getRouteVersion,
@@ -204,6 +205,8 @@ const operationColumns: DataTableColumn<RouteVersionOperation>[] = [
 ];
 
 const notFoundCode = "ENG-ROUTE-NOTFOUND";
+const forbiddenStatus = 403;
+const activateForbiddenText = "You do not have permission to activate routes";
 
 export function RouteVersionPage({ id, onBack }: { id: string; onBack?: () => void }) {
   const [version, setVersion] = useState<RouteVersion | null>(null);
@@ -214,10 +217,15 @@ export function RouteVersionPage({ id, onBack }: { id: string; onBack?: () => vo
   const [calculating, setCalculating] = useState(false);
   const [leadTime, setLeadTime] = useState<LeadTime | null>(null);
   const [leadError, setLeadError] = useState("");
+  const [activating, setActivating] = useState(false);
+  const [activateError, setActivateError] = useState("");
+  const [announcement, setAnnouncement] = useState("");
 
   useEffect(() => {
     let current = true;
     setVersion(null);
+    setActivateError("");
+    setAnnouncement("");
     setLoadError(null);
     getRouteVersion(id)
       .then((loaded) => current && setVersion(loaded))
@@ -243,7 +251,22 @@ export function RouteVersionPage({ id, onBack }: { id: string; onBack?: () => vo
     : [];
   const operations = version ? [...version.operations].sort((a, b) => a.no - b.no) : [];
   const notFound = loadError instanceof ApiError && loadError.code === notFoundCode;
-  const alertText = loadError ? (notFound ? "This route version does not exist" : errorText(loadError)) : leadError;
+  const alertText = loadError ? (notFound ? "This route version does not exist" : errorText(loadError)) : activateError || leadError;
+
+  async function activate() {
+    setActivateError("");
+    setAnnouncement("");
+    setActivating(true);
+    try {
+      const activated = await activateRouteVersion(id);
+      setVersion(activated);
+      setAnnouncement(`Route ${activated.routeCode} version ${activated.versionNo} is now active`);
+    } catch (e) {
+      setActivateError(e instanceof ApiError && e.status === forbiddenStatus ? activateForbiddenText : errorText(e));
+    } finally {
+      setActivating(false);
+    }
+  }
 
   async function calculate(event: FormEvent) {
     event.preventDefault();
@@ -282,7 +305,15 @@ export function RouteVersionPage({ id, onBack }: { id: string; onBack?: () => vo
       <div className={styles.toolbar}>
         {onBack ? <Button size="sm" onClick={onBack}>Back to routings</Button> : null}
         {loadError && !notFound ? <Button size="sm" onClick={() => setAttempt((n) => n + 1)}>Retry</Button> : null}
+        {version?.status === "draft" ? (
+          <Button size="sm" onClick={activate} disabled={activating}>
+            Activate
+          </Button>
+        ) : null}
       </div>
+      <p className="visually-hidden" aria-live="polite">
+        {announcement}
+      </p>
       <div className={styles.alertSlot}>
         <Alert tone="danger" live="alert">
           {alertText || null}

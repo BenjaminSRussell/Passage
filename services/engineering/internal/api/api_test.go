@@ -57,6 +57,11 @@ type fakeStore struct {
 	released []releaseCall
 	res      *resourceState
 	routes   []domain.RouteVersion
+
+	activateErr error
+	resList     []store.ResourceRecord
+	groupList   []domain.ResourceGroup
+	capList     []domain.Capability
 }
 
 func (f *fakeStore) CreateBomVersion(_ context.Context, v domain.BomVersion, idem store.Idem, check func(store.Snapshot) error) (domain.BomVersion, error) {

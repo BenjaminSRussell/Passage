@@ -168,6 +168,23 @@ func (a *API) getRouteVersion(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, bodyFromRouteVersion(v))
 }
 
+func (a *API) activateRouteVersion(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	v, err := a.store.ActivateRouteVersion(r.Context(), id)
+	if err != nil {
+		a.fail(w, r, "activate route version", err, &a.routeFailed)
+		return
+	}
+	a.routeActivated.Add(1)
+	httpx.JSON(w, http.StatusOK, bodyFromRouteVersion(v))
+}
+
 func (a *API) getBomVersion(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
