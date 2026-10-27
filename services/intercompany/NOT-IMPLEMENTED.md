@@ -1,7 +1,8 @@
 # NOT-IMPLEMENTED: intercompany (PSG-40, wave 40)
 
-Slice 1 is stateless: pure domain rules, the journal preview and the
-reconciliation classify endpoint, and the web workspace for both. Every
+Slices 1 and 2 are stateless: pure domain rules, the journal, charge,
+centralized payment and planning previews, the reconciliation classify
+endpoint, and the web pages for each. Every
 deliverable and acceptance criterion not listed as built in the README is
 below, with its status and reason.
 
@@ -16,22 +17,22 @@ below, with its status and reason.
 | FR-40.4 IC pricing from policy and transfer-pricing evidence export (CSV) | later slice of PSG-40 | needs pricing policy persistence |
 | FR-40.5 IC journal posting (`POST /api/v1/interco/journals`, both sides atomic, FX difference to IC FX accounts, compensation on second-side failure) | later slice of PSG-40 | needs the wave-11 journal API; only the derivation is built |
 | FR-40.6 Stored reconciliation runs (`POST /api/v1/interco/reconciliations/run`), resolve (`/items/{id}/resolve`, status Resolved, resolution note), `ic-reconcile` job, `ic-recon-planted-50` testdata file | later slice of PSG-40 | the classifier and a stateless classify endpoint are built and the web page calls it; runs and resolve need persistence. The 50 planted mismatches are generated in `recon_test.go`, not loaded from a testdata file |
-| FR-40.12 Centralized payments setup and posting (`/api/v1/interco/centralized-payments/setup`) | later slice of PSG-40 | needs wave 19 payment proposals and wave 30 payments |
-| FR-40.13 IC charge submission (`POST /api/v1/interco/charges`), Journal and Invoice settlement, IC-0821 transfer price lookup | later slice of PSG-40 | only cost-plus pricing is built; transfer price table and posting need persistence |
+| FR-40.12 Centralized payments: stored `CentralizedPaymentSetup` (`POST /api/v1/interco/centralized-payments/setup`, effective-from), posting through the journal API, settling the open item in the owning entity, payment proposal selection across owning entities (wave 19), cash discount in the owning entity, FX difference when the currencies differ, reversal of both entities on a returned bank payment (BR-40.11), IC-0811 | later slice of PSG-40 | needs persistence, wave 19 payment proposals and wave 30 payments. The pay and receive legs and the `centralized-payments:preview` endpoint are built; the preview books both entities in the payment currency |
+| FR-40.13 IC charge submission (`POST /api/v1/interco/charges`, `sourceId+version` idempotency), stored `IcChargeRequest` and `IcTransferPrice`, posting both entities, suspense IC account when the price is missing (BR-40.12), Invoice settlement mode through FR-40.2, cross-border tax (wave 13), `ic.chargeSettlementMode` | later slice of PSG-40 | needs persistence, the journal API and the mirror saga. Transfer price resolution (IC-0821), Cost / CostPlus / Table pricing, the Journal-mode legs and the `charges:preview` endpoint are built; transfer prices are sent with the request |
 | FR-40.14 Intercompany on-hand read model (`/api/v1/interco/onhand`) | later slice of PSG-40 | needs the wave-16 on-hand events |
-| FR-40.15 Planning groups and sequenced planning run (IC-0815, IC-0816) | later slice of PSG-40 | needs wave 22 MRP |
+| FR-40.15 Stored `IcPlanningGroup` (`ic.planningGroups`), run endpoint `POST /api/v1/interco/planning-groups/{id}/run` inside one Temporal workflow, nightly 01:00 `ic-planning-run` job, planning each entity with the wave-22 engine, firming IC demand into mirror documents, marking stale plans, `planning.completed` event | later slice of PSG-40 | needs wave 22 MRP, the saga and persistence. Run order with cycle break (IC-0816), demand dates, stale suppliers (IC-0815) and the `planning-groups:sequence` endpoint are built |
 | Events `dev.passage.interco.mirror.created.v1`, `mirror.compensated.v1`, `journal.posted.v1`, `reconciliation.flagged.v1`, `charge.posted.v1`, `planning.completed.v1` | later slice of PSG-40 | published with the store and saga slices; `events/asyncapi.yaml` currently has no channels |
 | Sweeper job `ic-saga-sweeper`, scheduled `ic-reconcile` | later slice of PSG-40 | Temporal and store dependencies |
-| Message catalog codes IC-0802, IC-0803, IC-0806, IC-0810, IC-0811, IC-0825 | later slice of PSG-40 | raised by the saga, reconciliation and on-hand paths not yet built |
+| Message catalog codes IC-0802, IC-0803, IC-0806, IC-0810, IC-0811, IC-0825 | later slice of PSG-40 | raised by the saga, reconciliation, payment posting and on-hand paths not yet built |
 | AC-40.1 end-to-end (sales order in A creates a linked PO in B) | later slice of PSG-40 | needs the sales and procurement APIs; the balance property is covered by the domain test |
 | AC-40.2 under planted number-sequence failures, no orphan documents | later slice of PSG-40 | needs the sequence service and saga persistence; the domain property test covers the saga state logic only |
 | AC-40.3 direct-delivery chain posts receipt and packing slip in one saga | later slice of PSG-40 | depends on FR-40.3 |
 | AC-40.5 planted 50 mismatches flagged | partial | `TestClassify_PlantedMismatches` flags all 50 planted (missing mirror, wrong amount, wrong period) and none of 50 clean pairs; the end-to-end run over stored items is later |
-| AC-40.10 P pays S's vendor invoice, due-to / due-from in both entities with one ic_pair_id | later slice of PSG-40 | depends on FR-40.12 |
-| AC-40.11 IC charge with cost-plus 10% on 8 h at 60.00 (528.00 / 480.00 / 48.00 split) | partial | the cost-plus arithmetic is built (`PriceCharge`); posting in both entities is later |
-| AC-40.16 planning group sequence with lead time | later slice of PSG-40 | FR-40.15 not built |
+| AC-40.10 P pays S's vendor invoice, due-to / due-from in both entities with one ic_pair_id, invoice settled | partial | the legs and the shared pair id are built and tested (`TestCentralPaymentJournal_AC40_10`, `TestPreviewCentralPayment_AC4010`); settling the invoice in S needs the wave-19 / wave-30 payment APIs |
+| AC-40.11 IC charge with cost-plus 10% on 8 h at 60.00 (528.00 / 480.00 / 48.00 split) | partial | pricing and the Journal-mode legs are built and tested (`TestChargeJournal_AC40_11`, `TestPreviewCharge_AC4011`); posting in both entities is later |
+| AC-40.16 planning group runs supplier B after buyer A with IC demand on 2026-12-07 | partial | the sequence and the demand date are built and tested (`TestICDemandFor_LeadTime`, `TestSequencePlanning_AC4016`); planning B with the wave-22 engine is later |
 | `GET /api/v1/interco/links`, `POST /api/v1/interco/reconciliations/run`, `/reconciliations/items/{id}/resolve` and every other PRD 7.40.5 endpoint | later slice of PSG-40 | persistence and idempotency first |
-| Workspaces: pending sagas and failed mirrors, chain view with keyboard graph navigation, side-by-side reconciliation grid with resolve, partner setup | later slice of PSG-40 | the web module has the workspace landing page, the journal preview and the reconciliation classifier pages; the other screens need the stored endpoints above |
+| Workspaces: pending sagas and failed mirrors, chain view with keyboard graph navigation, side-by-side reconciliation grid with resolve, partner setup, stored transfer prices and centralized payment setups, IC charges and centralized payments logs (7.40.14) | later slice of PSG-40 | the web module has the workspace landing page and the journal, reconciliation, charges, centralized payments and planning pages over the previews; the other screens need the stored endpoints above |
 | Performance budgets (7.40.19), `IC_SAGA_TIMEOUT_S`, `ic.fxTolerancePct` parameter | later slice of PSG-40 | parameters come with persistence and config |
 | Migration from AX / SAP (7.40.11) | later slice of PSG-40 | needs the migration framework (integration DB) |
 | Feature flag `interco.payment-mirroring` | later slice of PSG-40 | no payment mirroring yet |

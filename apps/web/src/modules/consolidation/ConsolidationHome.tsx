@@ -17,6 +17,34 @@ const tools = [
     description:
       "Translate a unit's net assets and net income into group currency under IAS 21 and see the translation difference (CTA) with the share that belongs to the non-controlling interest.",
   },
+  {
+    title: "Profit in inventory",
+    to: "/consolidation/profit-in-inventory",
+    action: "Compute unrealized profit",
+    description:
+      "List the intercompany receipt layers an entity still holds and see the unrealized profit to eliminate per layer, from the supplier's group cost or the seller's margin.",
+  },
+  {
+    title: "Intercompany differences",
+    to: "/consolidation/ic-differences",
+    action: "Eliminate partner pairs",
+    description:
+      "Eliminate each partner pair's receivables against its payables and see which differences go to the intercompany difference account and which stop the task.",
+  },
+  {
+    title: "Investments",
+    to: "/consolidation/investments",
+    action: "Apply the equity method",
+    description:
+      "Take an associate's share of profit and dividends into the investment, and compute the gain or loss when a subsidiary is sold.",
+  },
+  {
+    title: "Unit validation",
+    to: "/consolidation/validation",
+    action: "Validate units",
+    description:
+      "Check each unit's balance sheet, retained earnings roll and intercompany partners, and see whether the group translation task is blocked.",
+  },
 ];
 
 /** Landing page of the consolidation workspace (wave 40). */
@@ -25,7 +53,7 @@ export function ConsolidationHome() {
     <div className={styles.stack}>
       <PageHeader
         title="Consolidation workspace"
-        description="Check the translation and elimination arithmetic of a group consolidation. Group structures, versioned runs, the consolidated trial balance and the monitor arrive with the next slices."
+        description="Check the translation, elimination, profit-in-inventory, investment and validation arithmetic of a group consolidation. Group structures, versioned runs, the consolidated trial balance and the stored monitor arrive with the next slices."
       />
       <CardGrid as="ul" label="Consolidation tools">
         {tools.map((tool) => (

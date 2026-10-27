@@ -17,6 +17,27 @@ const tools = [
     description:
       "Compare what each side booked for an entity pair, period and currency, and see which pairs match, which are timing differences closed in the next period and which are mismatches.",
   },
+  {
+    title: "Intercompany charges",
+    to: "/intercompany/charges",
+    action: "Price a charge",
+    description:
+      "Price an expense, hour, item or fee that another entity bears by the transfer price effective on its date, and see the cost, price, IC margin and the legs both entities post.",
+  },
+  {
+    title: "Centralized payments",
+    to: "/intercompany/centralized-payments",
+    action: "Preview a payment",
+    description:
+      "Pay a vendor invoice or receive a customer payment on behalf of another entity, and see the bank, due-to and due-from postings in both entities.",
+  },
+  {
+    title: "Intercompany planning",
+    to: "/intercompany/planning",
+    action: "Sequence a planning group",
+    description:
+      "Order a planning group so buyers run before their suppliers, and see the intercompany demand each supplier receives after the transport lead time.",
+  },
 ];
 
 /** Landing page of the intercompany workspace (wave 40). */
@@ -25,7 +46,7 @@ export function IntercompanyHome() {
     <div className={styles.stack}>
       <PageHeader
         title="Intercompany workspace"
-        description="Derive intercompany journals and reconcile due-to and due-from balances between legal entities. Partner setup, mirror documents, posting and the stored reconciliation workspace arrive with the next slices."
+        description="Derive intercompany journals, reconcile due-to and due-from balances, price intercompany charges, preview centralized payments and sequence planning groups. Partner setup, mirror documents, posting and the stored reconciliation workspace arrive with the next slices."
       />
       <CardGrid as="ul" label="Intercompany tools">
         {tools.map((tool) => (

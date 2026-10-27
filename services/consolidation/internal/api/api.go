@@ -1,8 +1,11 @@
-// Package api exposes the consolidation HTTP surface. Slice 1 is stateless:
-// the caller supplies one parent and subsidiary pair or one unit statement,
-// and the service returns the E1–E5 elimination entries (FR-40.9) or the
-// IAS 21 translation with CTA (FR-40.8, BR-40.6). Nothing is stored; runs,
-// versions and the consolidated dataset are later slices.
+// Package api exposes the consolidation HTTP surface. Slices 1 and 2 are
+// stateless: the caller supplies the inputs and the service returns the E1–E5
+// elimination entries (FR-40.9), the IAS 21 translation with CTA (FR-40.8,
+// BR-40.6), unrealized profit per IC receipt layer (FR-40.16), the equity
+// method and divestiture gain (FR-40.18), the two-sided IC elimination with
+// threshold (BR-40.15) or the unit validation rules with the monitor gate
+// (FR-40.20). Nothing is stored; runs, versions and the consolidated dataset
+// are later slices.
 package api
 
 import (
@@ -40,8 +43,13 @@ var (
 
 // API serves the consolidation routes and counts what it computes for /metrics.
 type API struct {
-	eliminationPreviews atomic.Int64
-	translationPreviews atomic.Int64
+	eliminationPreviews  atomic.Int64
+	translationPreviews  atomic.Int64
+	profitPreviews       atomic.Int64
+	equityPreviews       atomic.Int64
+	divestiturePreviews  atomic.Int64
+	icDifferencePreviews atomic.Int64
+	validationPreviews   atomic.Int64
 }
 
 // New returns the API.
@@ -57,6 +65,11 @@ func (a *API) routes() []route {
 	return []route{
 		{http.MethodPost, "/v1/consol/eliminations:preview", DutyRun, a.previewEliminations},
 		{http.MethodPost, "/v1/consol/translations:preview", DutyRun, a.previewTranslation},
+		{http.MethodPost, "/v1/consol/profit-in-inventory:preview", DutyRun, a.previewProfitInInventory},
+		{http.MethodPost, "/v1/consol/equity-method:preview", DutyRun, a.previewEquityMethod},
+		{http.MethodPost, "/v1/consol/divestitures:preview", DutyRun, a.previewDivestiture},
+		{http.MethodPost, "/v1/consol/ic-differences:preview", DutyRun, a.previewICDifferences},
+		{http.MethodPost, "/v1/consol/validations:preview", DutyRun, a.previewValidation},
 	}
 }
 
@@ -76,6 +89,11 @@ func (a *API) Metrics() http.Handler {
 		}
 		counter("consolidation_elimination_previews_total", "Elimination previews computed.", a.eliminationPreviews.Load())
 		counter("consolidation_translation_previews_total", "Unit translation previews computed.", a.translationPreviews.Load())
+		counter("consolidation_profit_in_inventory_previews_total", "Unrealized profit layer previews computed.", a.profitPreviews.Load())
+		counter("consolidation_equity_method_previews_total", "Equity-method previews computed.", a.equityPreviews.Load())
+		counter("consolidation_divestiture_previews_total", "Divestiture gain previews computed.", a.divestiturePreviews.Load())
+		counter("consolidation_ic_difference_previews_total", "Two-sided IC elimination previews computed.", a.icDifferencePreviews.Load())
+		counter("consolidation_validation_previews_total", "Unit validation previews computed.", a.validationPreviews.Load())
 	})
 }
 

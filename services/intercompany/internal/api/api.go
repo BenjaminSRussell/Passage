@@ -1,8 +1,10 @@
-// Package api exposes the intercompany HTTP surface. Slice 1 is stateless:
-// the caller supplies the accounting matrix or the balances, and the service
-// returns the derived IC journal (BR-40.4) or the reconciliation
-// classification (FR-40.6, BR-40.5). Nothing is stored and no event is
-// published, so neither endpoint takes an Idempotency-Key.
+// Package api exposes the intercompany HTTP surface. Slices 1 and 2 are
+// stateless: the caller supplies the accounting matrix, balances, transfer
+// prices or planning group, and the service returns the derived IC journal
+// (BR-40.4), the reconciliation classification (FR-40.6, BR-40.5), the priced
+// IC charge with its Journal-mode legs (FR-40.13), the centralized payment legs
+// (FR-40.12) or the planning run sequence with IC demand (FR-40.15). Nothing is
+// stored and no event is published, so no endpoint takes an Idempotency-Key.
 package api
 
 import (
@@ -27,8 +29,10 @@ import (
 // Duties from PRD section 7.40.17.
 const (
 	DutyView      = "IntercompanyView"
+	DutyConfigure = "IntercompanyConfigure"
 	DutyPost      = "IntercompanyPost"
 	DutyReconcile = "IntercompanyReconcile"
+	DutyPlan      = "IntercompanyPlan"
 )
 
 const (
@@ -37,6 +41,12 @@ const (
 	MaxMatrixRows = 1000
 	// MaxReconItems bounds one classification request.
 	MaxReconItems = 10000
+	// MaxPlanningMembers bounds the entities of one planning group.
+	MaxPlanningMembers = 200
+	// MaxPlanningRows bounds the edges and the planned orders of one sequencing request.
+	MaxPlanningRows = 10000
+	// MaxTransferPrices bounds the transfer price rows sent with one charge preview.
+	MaxTransferPrices = 1000
 )
 
 var (
@@ -47,9 +57,12 @@ var (
 
 // API serves the intercompany routes and counts what it computes for /metrics.
 type API struct {
-	journalPreviews atomic.Int64
-	reconItems      atomic.Int64
-	reconMismatches atomic.Int64
+	journalPreviews        atomic.Int64
+	reconItems             atomic.Int64
+	reconMismatches        atomic.Int64
+	chargePreviews         atomic.Int64
+	centralPaymentPreviews atomic.Int64
+	planningSequences      atomic.Int64
 }
 
 // New returns the API.
@@ -65,6 +78,9 @@ func (a *API) routes() []route {
 	return []route{
 		{http.MethodPost, "/v1/interco/journals:preview", DutyPost, a.previewJournal},
 		{http.MethodPost, "/v1/interco/reconciliations:classify", DutyReconcile, a.classify},
+		{http.MethodPost, "/v1/interco/charges:preview", DutyPost, a.previewCharge},
+		{http.MethodPost, "/v1/interco/centralized-payments:preview", DutyConfigure, a.previewCentralPayment},
+		{http.MethodPost, "/v1/interco/planning-groups:sequence", DutyPlan, a.sequencePlanning},
 	}
 }
 
@@ -85,6 +101,9 @@ func (a *API) Metrics() http.Handler {
 		counter("intercompany_journal_previews_total", "IC journals derived by the preview.", a.journalPreviews.Load())
 		counter("intercompany_recon_items_classified_total", "Reconciliation items classified.", a.reconItems.Load())
 		counter("intercompany_recon_mismatches_total", "Reconciliation items classified as Mismatch.", a.reconMismatches.Load())
+		counter("intercompany_charge_previews_total", "IC charges priced by the preview.", a.chargePreviews.Load())
+		counter("intercompany_central_payment_previews_total", "Centralized payment journals derived by the preview.", a.centralPaymentPreviews.Load())
+		counter("intercompany_planning_sequences_total", "Planning group run sequences computed.", a.planningSequences.Load())
 	})
 }
 
@@ -164,12 +183,7 @@ func (a *API) previewJournal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.journalPreviews.Add(1)
-	out := previewResponse{PairID: pairID, Balanced: j.Balanced() == nil, Legs: make([]leg, 0, len(j.Legs))}
-	for _, l := range j.Legs {
-		out.Legs = append(out.Legs, leg{Entity: l.Entity, Account: l.Account, Side: string(l.Side),
-			Amount: l.Amount.Value.StringFixed(money.MinorUnits(l.Amount.Currency)), Currency: l.Amount.Currency})
-	}
-	httpx.JSON(w, http.StatusOK, out)
+	httpx.JSON(w, http.StatusOK, previewResponse{PairID: pairID, Balanced: j.Balanced() == nil, Legs: legsOf(j)})
 }
 
 // parsePreview validates the request and converts it to domain values.
@@ -219,21 +233,41 @@ func parsePreview(req previewRequest) (domain.Line, domain.Matrix, string, decim
 	} else if counter != req.Currency {
 		fields["rate"] = "is required when counterCurrency differs from currency"
 	}
-	if len(req.Matrix) > MaxMatrixRows {
-		fields["matrix"] = fmt.Sprintf("must contain at most %d rows", MaxMatrixRows)
-	}
-	var matrix domain.Matrix
-	for i, row := range req.Matrix {
-		for name, v := range map[string]string{"entityA": row.EntityA, "entityB": row.EntityB, "dueFrom": row.DueFrom, "dueTo": row.DueTo} {
-			need(fmt.Sprintf("matrix[%d].%s", i, name), v)
-		}
-		matrix = append(matrix, domain.MatrixRow{EntityA: row.EntityA, EntityB: row.EntityB, DueFrom: row.DueFrom, DueTo: row.DueTo})
-	}
+	matrix := parseMatrix(req.Matrix, fields)
 	if len(fields) > 0 {
 		return domain.Line{}, nil, "", decimal.Zero, fields
 	}
 	line := domain.Line{Entity: req.Entity, Account: req.Account, Side: side, Amount: money.Amount{Value: amount, Currency: req.Currency}}
 	return line, matrix, counter, rate, nil
+}
+
+// parseMatrix converts the accounting matrix rows and records a field error for
+// each missing value.
+func parseMatrix(rows []matrixRow, fields map[string]string) domain.Matrix {
+	if len(rows) > MaxMatrixRows {
+		fields["matrix"] = fmt.Sprintf("must contain at most %d rows", MaxMatrixRows)
+		return nil
+	}
+	matrix := make(domain.Matrix, 0, len(rows))
+	for i, row := range rows {
+		for name, v := range map[string]string{"entityA": row.EntityA, "entityB": row.EntityB, "dueFrom": row.DueFrom, "dueTo": row.DueTo} {
+			if strings.TrimSpace(v) == "" {
+				fields[fmt.Sprintf("matrix[%d].%s", i, name)] = "is required"
+			}
+		}
+		matrix = append(matrix, domain.MatrixRow{EntityA: row.EntityA, EntityB: row.EntityB, DueFrom: row.DueFrom, DueTo: row.DueTo})
+	}
+	return matrix
+}
+
+// legsOf renders journal legs with each amount at its currency's minor unit.
+func legsOf(j domain.Journal) []leg {
+	out := make([]leg, 0, len(j.Legs))
+	for _, l := range j.Legs {
+		out = append(out, leg{Entity: l.Entity, Account: l.Account, Side: string(l.Side),
+			Amount: l.Amount.Value.StringFixed(money.MinorUnits(l.Amount.Currency)), Currency: l.Amount.Currency})
+	}
+	return out
 }
 
 // ---- reconciliation classification ----

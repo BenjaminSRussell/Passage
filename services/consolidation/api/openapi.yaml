@@ -1,11 +1,14 @@
 openapi: 3.1.0
 info:
   title: Passage Consolidation
-  version: 0.1.0
+  version: 0.2.0
   description: |
-    Wave 40, slice 1. Stateless consolidation calculators for one parent and
-    one subsidiary: the E1–E5 elimination entries (FR-40.9) and the IAS 21
-    unit translation with CTA and its NCI share (FR-40.8, BR-40.6). Nothing is
+    Wave 40, slices 1 and 2. Stateless consolidation calculators: the E1–E5
+    elimination entries for one parent and subsidiary (FR-40.9), the IAS 21
+    unit translation with CTA and its NCI share (FR-40.8, BR-40.6), unrealized
+    profit per IC receipt layer (FR-40.16), the equity method and divestiture
+    gain (FR-40.18), the two-sided IC elimination with threshold (BR-40.15)
+    and the unit validation rules with the monitor gate (FR-40.20). Nothing is
     stored. Groups, collection, runs, consolidated trial balances,
     reclassification, top-side journals and the monitor are later slices of
     PSG-40 (see NOT-IMPLEMENTED.md). Browser calls go through the web BFF at
@@ -71,6 +74,141 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TranslationPreview'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+  /v1/consol/profit-in-inventory:preview:
+    post:
+      operationId: previewProfitInInventory
+      summary: Unrealized profit in inventory per IC receipt layer by group cost, with the seller-margin fallback (FR-40.16, BR-40.7, AC-40.12)
+      x-passage-duty: ConsolidationRun
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfitInInventoryRequest'
+      responses:
+        '200':
+          description: Profit per layer with its basis, the total, and CNS-0908 when a layer used the fallback
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfitInInventoryPreview'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+  /v1/consol/equity-method:preview:
+    post:
+      operationId: previewEquityMethod
+      summary: Share of profit, dividends and closing carrying amount of an associate under the equity method (FR-40.18, AC-40.14)
+      x-passage-duty: ConsolidationRun
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EquityMethodRequest'
+      responses:
+        '200':
+          description: Share of profit, unrecognized loss, closing carrying amount and the EQ entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EquityMethodPreview'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+  /v1/consol/divestitures:preview:
+    post:
+      operationId: previewDivestiture
+      summary: Deconsolidation gain or loss of a full divestiture with CTA recycled from OCI (FR-40.18)
+      x-passage-duty: ConsolidationRun
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DivestitureRequest'
+      responses:
+        '200':
+          description: Group carrying amount disposed and the gain (negative for a loss)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DivestiturePreview'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+  /v1/consol/ic-differences:preview:
+    post:
+      operationId: previewIcDifferences
+      summary: Two-sided IC elimination per partner pair with the difference to the IC difference account up to the threshold (BR-40.15)
+      x-passage-duty: ConsolidationRun
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IcDifferenceRequest'
+      responses:
+        '200':
+          description: Entries per pair; a pair above the threshold carries CNS-0905 and the task ends in Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IcDifferencePreview'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+  /v1/consol/validations:preview:
+    post:
+      operationId: previewValidations
+      summary: Evaluate the seeded validation rules per unit and gate the group translation task (FR-40.20, AC-40.15)
+      x-passage-duty: ConsolidationRun
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/DutiesHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ValidationRequest'
+      responses:
+        '200':
+          description: Rule results and task status per unit; group translation is Blocked when a unit ends in Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationPreview'
         '400':
           $ref: '#/components/responses/Problem'
         '401':
@@ -203,6 +341,193 @@ components:
         cta: { type: string, description: closing − (opening + net income) }
         nciShareOfCta: { type: string, description: (100 − ownership %) of the CTA, reclassified to NCI }
         groupShareOfCta: { type: string, description: CTA − NCI share }
+    Entry:
+      type: object
+      required: [rule, account, debit, credit]
+      properties:
+        rule: { type: string }
+        account: { type: string }
+        debit: { type: string }
+        credit: { type: string }
+    Warning:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string }
+        message: { type: string }
+    ProfitInInventoryRequest:
+      type: object
+      additionalProperties: false
+      required: [currency, layers]
+      properties:
+        currency: { type: string, pattern: '^[A-Z]{3}$', description: Receipt currency of the layers }
+        sellerMarginPct: { $ref: '#/components/schemas/Decimal', description: 'Seller''s average margin, 0 to 100; required when a layer has no group cost (BR-40.7)' }
+        layers:
+          type: array
+          minItems: 1
+          maxItems: 10000
+          items:
+            type: object
+            additionalProperties: false
+            required: [quantity, legalUnitCost]
+            properties:
+              id: { type: string, description: Receipt layer reference for drill; defaults to layer-<n> }
+              quantity: { $ref: '#/components/schemas/Decimal', description: Remaining quantity, not negative }
+              legalUnitCost: { $ref: '#/components/schemas/Decimal', description: Holder's Legal-view unit cost }
+              groupUnitCost: { $ref: '#/components/schemas/Decimal', description: 'Supplier''s Group-view unit cost (FR-39.17); absent means groupCostUnknown' }
+    ProfitInInventoryPreview:
+      type: object
+      required: [currency, layers, total, fallbackCount, warnings]
+      properties:
+        currency: { type: string }
+        layers:
+          type: array
+          items:
+            type: object
+            required: [id, basis, profit]
+            properties:
+              id: { type: string }
+              basis: { type: string, enum: [GroupCost, MarginFallback] }
+              profit: { type: string, description: 'quantity × (legal − group unit cost), or quantity × legal unit cost × margin' }
+        total: { type: string }
+        fallbackCount: { type: integer }
+        warnings:
+          type: array
+          items:
+            $ref: '#/components/schemas/Warning'
+    EquityMethodRequest:
+      type: object
+      additionalProperties: false
+      required: [currency, ownershipPct, openingCarrying, netIncome]
+      properties:
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        ownershipPct: { $ref: '#/components/schemas/Decimal', description: Above 0 and at most 50 }
+        openingCarrying: { $ref: '#/components/schemas/Decimal', description: Investment carrying amount at the start of the period, not negative }
+        netIncome: { $ref: '#/components/schemas/Decimal', description: Associate net income; negative for a loss }
+        dividendsReceived: { $ref: '#/components/schemas/Decimal', description: Dividends paid to the investor, not negative }
+    EquityMethodPreview:
+      type: object
+      required: [currency, shareOfProfit, unrecognizedLoss, closingCarrying, entries, balanced]
+      properties:
+        currency: { type: string }
+        shareOfProfit: { type: string, description: 'ownership % × net income, a loss limited to the carrying amount' }
+        unrecognizedLoss: { type: string, description: Share of a loss beyond the carrying amount (IAS 28.38) }
+        closingCarrying: { type: string }
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/Entry'
+        balanced: { type: boolean }
+    DivestitureRequest:
+      type: object
+      additionalProperties: false
+      required: [currency, proceeds, netAssetsCarrying]
+      properties:
+        currency: { type: string, pattern: '^[A-Z]{3}$', description: Group currency }
+        proceeds: { $ref: '#/components/schemas/Decimal', description: Not negative }
+        netAssetsCarrying: { $ref: '#/components/schemas/Decimal', description: Group carrying amount of the net assets disposed }
+        goodwill: { $ref: '#/components/schemas/Decimal', description: Not negative }
+        nciCarrying: { $ref: '#/components/schemas/Decimal', description: Not negative }
+        ctaRecycled: { $ref: '#/components/schemas/Decimal', description: CTA recycled from OCI; positive is a gain }
+    DivestiturePreview:
+      type: object
+      required: [currency, carryingAmount, gain]
+      properties:
+        currency: { type: string }
+        carryingAmount: { type: string, description: net assets + goodwill − NCI }
+        gain: { type: string, description: proceeds − carrying amount + CTA recycled }
+    IcDifferenceRequest:
+      type: object
+      additionalProperties: false
+      required: [currency, pairs]
+      properties:
+        currency: { type: string, pattern: '^[A-Z]{3}$', description: Group currency }
+        threshold: { $ref: '#/components/schemas/Decimal', description: 'consol.icThreshold, not negative; defaults to 1000.00' }
+        pairs:
+          type: array
+          minItems: 1
+          maxItems: 10000
+          items:
+            type: object
+            additionalProperties: false
+            required: [pair, receivable, payable]
+            properties:
+              pair: { type: string, minLength: 1, description: Partner pair and FS item group }
+              receivable: { $ref: '#/components/schemas/Decimal', description: Σ receivable side after translation }
+              payable: { $ref: '#/components/schemas/Decimal', description: Σ payable side after translation }
+    IcDifferencePreview:
+      type: object
+      required: [currency, threshold, taskStatus, pairs]
+      properties:
+        currency: { type: string }
+        threshold: { type: string }
+        taskStatus: { type: string, enum: [Completed, Error] }
+        pairs:
+          type: array
+          items:
+            type: object
+            required: [pair, receivable, payable, difference, status, entries]
+            properties:
+              pair: { type: string }
+              receivable: { type: string }
+              payable: { type: string }
+              difference: { type: string, description: receivable − payable }
+              status: { type: string, enum: [Eliminated, Error] }
+              code: { type: string, enum: [CNS-0905] }
+              message: { type: string }
+              entries:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Entry'
+    ValidationRequest:
+      type: object
+      additionalProperties: false
+      required: [units]
+      properties:
+        units:
+          type: array
+          minItems: 1
+          maxItems: 2000
+          items:
+            type: object
+            additionalProperties: false
+            required: [unitId, totalAssets, totalLiabilities, totalEquity, openingRetained, netIncome, closingRetained]
+            properties:
+              unitId: { type: string, minLength: 1 }
+              totalAssets: { $ref: '#/components/schemas/Decimal' }
+              totalLiabilities: { $ref: '#/components/schemas/Decimal' }
+              totalEquity: { $ref: '#/components/schemas/Decimal' }
+              openingRetained: { $ref: '#/components/schemas/Decimal' }
+              netIncome: { $ref: '#/components/schemas/Decimal' }
+              dividends: { $ref: '#/components/schemas/Decimal' }
+              closingRetained: { $ref: '#/components/schemas/Decimal' }
+              icItemsWithoutPartner: { type: integer, minimum: 0 }
+    ValidationPreview:
+      type: object
+      required: [units, groupTranslation]
+      properties:
+        units:
+          type: array
+          items:
+            type: object
+            required: [unitId, status, rules]
+            properties:
+              unitId: { type: string }
+              status: { type: string, enum: [Completed, CompletedWithWarnings, Error] }
+              rules:
+                type: array
+                items:
+                  type: object
+                  required: [rule, severity, tolerance, difference, failed]
+                  properties:
+                    rule: { type: string, enum: [BS_BALANCES, RE_ROLL, IC_PARTNER_PRESENT] }
+                    severity: { type: string, enum: [Error, Warning] }
+                    tolerance: { type: string }
+                    difference: { type: string }
+                    failed: { type: boolean }
+                    code: { type: string, enum: [CNS-0906] }
+                    message: { type: string }
+        groupTranslation: { type: string, enum: [NotStarted, Blocked] }
     Problem:
       type: object
       required: [type, title, status]

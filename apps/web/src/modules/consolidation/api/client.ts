@@ -133,3 +133,132 @@ export function previewEliminations(req: EliminationRequest, signal?: AbortSigna
 export function previewTranslation(req: TranslationRequest, signal?: AbortSignal): Promise<TranslationPreview> {
   return post<TranslationPreview>("/translations:preview", req, signal);
 }
+
+/** One consolidation line with its rule code (E2 for IC differences, EQ for the equity method). */
+export interface Entry {
+  rule: string;
+  account: string;
+  debit: string;
+  credit: string;
+}
+
+export interface Warning {
+  code: string;
+  message: string;
+}
+
+export interface ProfitInInventoryRequest {
+  currency: string;
+  sellerMarginPct?: string;
+  layers: { id?: string; quantity: string; legalUnitCost: string; groupUnitCost?: string }[];
+}
+
+export interface ProfitInInventoryPreview {
+  currency: string;
+  layers: { id: string; basis: "GroupCost" | "MarginFallback"; profit: string }[];
+  total: string;
+  fallbackCount: number;
+  warnings: Warning[];
+}
+
+export interface EquityMethodRequest {
+  currency: string;
+  ownershipPct: string;
+  openingCarrying: string;
+  netIncome: string;
+  dividendsReceived?: string;
+}
+
+export interface EquityMethodPreview {
+  currency: string;
+  shareOfProfit: string;
+  unrecognizedLoss: string;
+  closingCarrying: string;
+  entries: Entry[];
+  balanced: boolean;
+}
+
+export interface DivestitureRequest {
+  currency: string;
+  proceeds: string;
+  netAssetsCarrying: string;
+  goodwill?: string;
+  nciCarrying?: string;
+  ctaRecycled?: string;
+}
+
+export interface DivestiturePreview {
+  currency: string;
+  carryingAmount: string;
+  gain: string;
+}
+
+export interface IcDifferenceRequest {
+  currency: string;
+  threshold?: string;
+  pairs: { pair: string; receivable: string; payable: string }[];
+}
+
+export interface IcDifferencePreview {
+  currency: string;
+  threshold: string;
+  taskStatus: "Completed" | "Error";
+  pairs: {
+    pair: string;
+    receivable: string;
+    payable: string;
+    difference: string;
+    status: "Eliminated" | "Error";
+    code?: string;
+    message?: string;
+    entries: Entry[];
+  }[];
+}
+
+export interface UnitStatement {
+  unitId: string;
+  totalAssets: string;
+  totalLiabilities: string;
+  totalEquity: string;
+  openingRetained: string;
+  netIncome: string;
+  dividends?: string;
+  closingRetained: string;
+  icItemsWithoutPartner?: number;
+}
+
+export type TaskStatus = "NotStarted" | "Running" | "Completed" | "CompletedWithWarnings" | "Error" | "Blocked";
+
+export interface ValidationPreview {
+  units: {
+    unitId: string;
+    status: TaskStatus;
+    rules: { rule: string; severity: "Error" | "Warning"; tolerance: string; difference: string; failed: boolean; code?: string; message?: string }[];
+  }[];
+  groupTranslation: TaskStatus;
+}
+
+/** Unrealized profit per IC receipt layer with the margin fallback (FR-40.16, AC-40.12). Nothing is posted. */
+export function previewProfitInInventory(req: ProfitInInventoryRequest, signal?: AbortSignal): Promise<ProfitInInventoryPreview> {
+  return post<ProfitInInventoryPreview>("/profit-in-inventory:preview", req, signal);
+}
+
+/** Share of profit and carrying amount of an associate under the equity method (FR-40.18, AC-40.14). */
+export function previewEquityMethod(req: EquityMethodRequest, signal?: AbortSignal): Promise<EquityMethodPreview> {
+  return post<EquityMethodPreview>("/equity-method:preview", req, signal);
+}
+
+/** Deconsolidation gain or loss of a full divestiture (FR-40.18). */
+export function previewDivestiture(req: DivestitureRequest, signal?: AbortSignal): Promise<DivestiturePreview> {
+  return post<DivestiturePreview>("/divestitures:preview", req, signal);
+}
+
+/** Two-sided IC elimination per partner pair with the difference threshold (BR-40.15). */
+export function previewIcDifferences(req: IcDifferenceRequest, signal?: AbortSignal): Promise<IcDifferencePreview> {
+  return post<IcDifferencePreview>("/ic-differences:preview", req, signal);
+}
+
+/** Evaluate the seeded validation rules per unit and the group translation gate (FR-40.20, AC-40.15). */
+export function previewValidations(req: { units: UnitStatement[] }, signal?: AbortSignal): Promise<ValidationPreview> {
+  return post<ValidationPreview>("/validations:preview", req, signal);
+}

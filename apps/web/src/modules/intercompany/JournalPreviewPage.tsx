@@ -1,20 +1,10 @@
 import { useState, type FormEvent } from "react";
-import { Alert, Button, Card, DataTable, EmptyState, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
-import {
-  describeProblem,
-  previewJournal,
-  type JournalLeg,
-  type JournalPreview,
-  type JournalPreviewRequest,
-  type MatrixRow,
-  type Problem,
-  type Side,
-} from "./api/client";
-import { amount, dash, isCurrency, isPositive } from "./format";
-import { RowGrid, type RowField } from "./RowGrid";
+import { Alert, Button, Card, DataTable, EmptyState, FormField, Input, PageHeader, Select } from "../../shell/ui";
+import { describeProblem, previewJournal, type JournalPreview, type JournalPreviewRequest, type Problem, type Side } from "./api/client";
+import { isCurrency, isPositive } from "./format";
+import { checkMatrix, emptyMatrixRow, legColumns, matrixFields, type MatrixKey } from "./matrix";
+import { RowGrid } from "./RowGrid";
 import styles from "./pages.module.css";
-
-type MatrixKey = keyof MatrixRow;
 
 export interface JournalValues {
   entity: string;
@@ -28,15 +18,6 @@ export interface JournalValues {
   rate: string;
   matrix: Record<MatrixKey, string>[];
 }
-
-const matrixFields: RowField<MatrixKey>[] = [
-  { name: "entityA", label: "Entity A", mono: true },
-  { name: "entityB", label: "Entity B", mono: true },
-  { name: "dueFrom", label: "Due from B (in A)", mono: true },
-  { name: "dueTo", label: "Due to A (in B)", mono: true },
-];
-
-const emptyRow = (): Record<MatrixKey, string> => ({ entityA: "", entityB: "", dueFrom: "", dueTo: "" });
 
 /** AC-40.4: a USD 1,000.00 expense in entity A offset to entity B's cash. */
 export const ac404: JournalValues = {
@@ -70,12 +51,7 @@ export function validateJournal(values: JournalValues): { errors: Record<string,
   if (counter !== "" && !isCurrency(counter)) errors.counterCurrency = "Enter a three-letter currency code, or leave it empty.";
   if (rate !== "" && !isPositive(rate)) errors.rate = "Enter a rate above 0.";
   if (rate === "" && counter !== "" && counter !== currency) errors.rate = "Enter the document rate when the offset entity's currency differs.";
-  const matrix = values.matrix.map((row, i) => {
-    for (const f of matrixFields) {
-      if (row[f.name].trim() === "") errors[`matrix[${i}].${f.name}`] = `Enter ${f.label.toLowerCase()}.`;
-    }
-    return { entityA: row.entityA.trim(), entityB: row.entityB.trim(), dueFrom: row.dueFrom.trim(), dueTo: row.dueTo.trim() };
-  });
+  const matrix = checkMatrix(values.matrix, errors);
   if (Object.keys(errors).length > 0) return { errors };
   return {
     errors,
@@ -93,14 +69,6 @@ export function validateJournal(values: JournalValues): { errors: Record<string,
     },
   };
 }
-
-const legColumns: DataTableColumn<JournalLeg>[] = [
-  { key: "entity", header: "Entity", mono: true },
-  { key: "account", header: "Account", mono: true },
-  { key: "debit", header: "Debit", align: "end", render: (l) => (l.side === "debit" ? amount(l.amount) : dash) },
-  { key: "credit", header: "Credit", align: "end", render: (l) => (l.side === "credit" ? amount(l.amount) : dash) },
-  { key: "currency", header: "Currency", mono: true },
-];
 
 type TextKey = Exclude<keyof JournalValues, "side" | "matrix">;
 
@@ -180,7 +148,7 @@ export function JournalPreviewPage() {
             fields={matrixFields}
             rows={values.matrix}
             errors={errors}
-            newRow={emptyRow}
+            newRow={emptyMatrixRow}
             onChange={(matrix) => setValues({ ...values, matrix })}
           />
           {failure ? (

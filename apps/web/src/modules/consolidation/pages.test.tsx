@@ -51,8 +51,16 @@ describe("consolidation module", () => {
   it("is discovered by the shell and keeps every route and nav entry under /consolidation with PRD duties", () => {
     expect(loadModules().some((m) => m.id === "consolidation")).toBe(true);
     expect(consolidation.routes.every((r) => r.element != null && r.path?.startsWith("/consolidation"))).toBe(true);
-    expect(consolidation.nav.map((n) => n.to)).toEqual(["/consolidation", "/consolidation/eliminations", "/consolidation/translation"]);
-    expect(consolidation.nav.map((n) => n.duty)).toEqual(["ConsolidationView", "ConsolidationRun", "ConsolidationRun"]);
+    expect(consolidation.nav.map((n) => n.to)).toEqual([
+      "/consolidation",
+      "/consolidation/eliminations",
+      "/consolidation/translation",
+      "/consolidation/profit-in-inventory",
+      "/consolidation/ic-differences",
+      "/consolidation/investments",
+      "/consolidation/validation",
+    ]);
+    expect(consolidation.nav.map((n) => n.duty)).toEqual(["ConsolidationView", ...Array(6).fill("ConsolidationRun")]);
   });
 
   it("links the workspace to each tool", () => {
@@ -60,6 +68,10 @@ describe("consolidation module", () => {
     expect(screen.getByRole("heading", { level: 2, name: "Consolidation workspace" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Preview eliminations" })).toHaveAttribute("href", "/consolidation/eliminations");
     expect(screen.getByRole("link", { name: "Translate a unit" })).toHaveAttribute("href", "/consolidation/translation");
+    expect(screen.getByRole("link", { name: "Compute unrealized profit" })).toHaveAttribute("href", "/consolidation/profit-in-inventory");
+    expect(screen.getByRole("link", { name: "Eliminate partner pairs" })).toHaveAttribute("href", "/consolidation/ic-differences");
+    expect(screen.getByRole("link", { name: "Apply the equity method" })).toHaveAttribute("href", "/consolidation/investments");
+    expect(screen.getByRole("link", { name: "Validate units" })).toHaveAttribute("href", "/consolidation/validation");
     expect(pageViolations(container)).toEqual([]);
   });
 });

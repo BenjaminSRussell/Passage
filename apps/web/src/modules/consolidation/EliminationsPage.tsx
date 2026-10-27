@@ -23,6 +23,7 @@ import {
   type RuleCode,
 } from "./api/client";
 import { amount, dash, isCurrency, isDecimal, isNonZero, isPositive, isSignedDecimal } from "./format";
+import { accountNames } from "./entries";
 import styles from "./pages.module.css";
 
 type AmountKey =
@@ -158,21 +159,6 @@ const ruleNames: Record<RuleCode, string> = {
   E5: "Non-controlling share of profit",
 };
 
-const accountNames: Record<string, string> = {
-  IC_REVENUE: "Intercompany revenue",
-  IC_COGS: "Intercompany cost of sales",
-  IC_PAYABLE: "Intercompany payable",
-  IC_RECEIVABLE: "Intercompany receivable",
-  CTA: "Translation difference (CTA)",
-  COGS: "Cost of sales",
-  INVENTORY: "Inventory",
-  NCI_EQUITY: "Non-controlling interest (equity)",
-  NCI_PROFIT: "Profit attributable to NCI",
-  SHARE_CAPITAL: "Share capital",
-  PRE_ACQ_RE: "Pre-acquisition retained earnings",
-  GOODWILL: "Goodwill",
-  INVESTMENT: "Investment in subsidiary",
-};
 
 const money = (v: string) => (isNonZero(v) ? amount(v) : dash);
 

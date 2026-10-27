@@ -1,6 +1,7 @@
 // Package domain holds the pure intercompany rules: trading partners, the
 // accounting matrix and journal derivation, the mirror-document saga, the
-// reconciliation classifier and IC charge pricing. It performs no I/O.
+// reconciliation classifier, IC charge pricing and settlement, centralized
+// payments and the IC planning sequence. It performs no I/O.
 package domain
 
 import "fmt"
@@ -18,6 +19,8 @@ const (
 	CodeInvalid       = "COM-0001"
 	CodeNoPolicy      = "IC-0801"
 	CodeNoMatrix      = "IC-0805"
+	CodeStalePlan     = "IC-0815"
+	CodePlanningCycle = "IC-0816"
 	CodeTransferPrice = "IC-0821"
 	CodeUnbalanced    = "IC-0830"
 )

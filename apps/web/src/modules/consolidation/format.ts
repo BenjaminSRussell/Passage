@@ -38,3 +38,8 @@ export function isCurrency(value: string): boolean {
 export function isNonZero(value: string): boolean {
   return DECIMAL.test(value) && !/^-?0+(\.0+)?$/.test(value);
 }
+
+/** True for a whole number from 0 up, such as a count of items. */
+export function isCount(value: string): boolean {
+  return /^\d{1,6}$/.test(value.trim());
+}

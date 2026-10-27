@@ -7,6 +7,7 @@ export interface RowField<K extends string> {
   mono?: boolean;
   decimal?: boolean;
   optional?: boolean;
+  type?: "date";
   /** When set, the field is a select with these options. */
   options?: { value: string; label: string }[];
 }
@@ -53,6 +54,7 @@ export function RowGrid<K extends string>({ idPrefix, path, noun, fields, rows, 
                   ) : (
                     <Input
                       {...control}
+                      type={f.type}
                       inputMode={f.decimal ? "decimal" : undefined}
                       className={f.mono ? styles.mono : undefined}
                       value={row[f.name]}

@@ -38,3 +38,14 @@ export function isCurrency(value: string): boolean {
 export function isNonZero(value: string): boolean {
   return DECIMAL.test(value) && !/^-?0+(\.0+)?$/.test(value);
 }
+
+/** True for an ISO 8601 calendar date such as 2026-12-10. */
+export function isDate(value: string): boolean {
+  const v = value.trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`));
+}
+
+/** True for a whole number from 0 up, such as a lead time in days. */
+export function isCount(value: string): boolean {
+  return /^\d{1,6}$/.test(value.trim());
+}

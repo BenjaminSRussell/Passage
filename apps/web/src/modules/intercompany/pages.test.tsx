@@ -52,8 +52,22 @@ describe("intercompany module", () => {
   it("is discovered by the shell and keeps every route and nav entry under /intercompany with PRD duties", () => {
     expect(loadModules().some((m) => m.id === "intercompany")).toBe(true);
     expect(intercompany.routes.every((r) => r.element != null && r.path?.startsWith("/intercompany"))).toBe(true);
-    expect(intercompany.nav.map((n) => n.to)).toEqual(["/intercompany", "/intercompany/journal", "/intercompany/reconciliation"]);
-    expect(intercompany.nav.map((n) => n.duty)).toEqual(["IntercompanyView", "IntercompanyPost", "IntercompanyReconcile"]);
+    expect(intercompany.nav.map((n) => n.to)).toEqual([
+      "/intercompany",
+      "/intercompany/journal",
+      "/intercompany/reconciliation",
+      "/intercompany/charges",
+      "/intercompany/centralized-payments",
+      "/intercompany/planning",
+    ]);
+    expect(intercompany.nav.map((n) => n.duty)).toEqual([
+      "IntercompanyView",
+      "IntercompanyPost",
+      "IntercompanyReconcile",
+      "IntercompanyPost",
+      "IntercompanyConfigure",
+      "IntercompanyPlan",
+    ]);
   });
 
   it("links the workspace to each tool", () => {
@@ -61,6 +75,9 @@ describe("intercompany module", () => {
     expect(screen.getByRole("heading", { level: 2, name: "Intercompany workspace" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Preview a journal" })).toHaveAttribute("href", "/intercompany/journal");
     expect(screen.getByRole("link", { name: "Classify balances" })).toHaveAttribute("href", "/intercompany/reconciliation");
+    expect(screen.getByRole("link", { name: "Price a charge" })).toHaveAttribute("href", "/intercompany/charges");
+    expect(screen.getByRole("link", { name: "Preview a payment" })).toHaveAttribute("href", "/intercompany/centralized-payments");
+    expect(screen.getByRole("link", { name: "Sequence a planning group" })).toHaveAttribute("href", "/intercompany/planning");
     expect(pageViolations(container)).toEqual([]);
   });
 

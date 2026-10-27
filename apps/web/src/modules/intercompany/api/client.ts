@@ -143,3 +143,86 @@ export function previewJournal(req: JournalPreviewRequest, signal?: AbortSignal)
 export function classifyItems(req: { fxTolerancePct?: string; items: ReconItem[] }, signal?: AbortSignal): Promise<ClassifyResult> {
   return post<ClassifyResult>("/reconciliations:classify", req, signal);
 }
+
+export type ChargeCategory = "Expense" | "Hour" | "Item" | "Fee";
+export type TransferMethod = "Cost" | "CostPlus" | "Table";
+
+/** One ic.transferPrices row for the charge's lender and borrower, in the charge currency. */
+export interface TransferPriceRow {
+  category: ChargeCategory;
+  resourceRole?: string;
+  method: TransferMethod;
+  markupPct?: string;
+  unitPrice?: string;
+  effectiveFrom: string;
+}
+
+export interface ChargePreviewRequest {
+  lendingEntity: string;
+  borrowingEntity: string;
+  category: ChargeCategory;
+  resourceRole?: string;
+  transactionDate: string;
+  quantity: string;
+  unitCost: string;
+  currency: string;
+  transferPrices: TransferPriceRow[];
+  costAccount: string;
+  recoveryAccount: string;
+  marginAccount: string;
+  matrix: MatrixRow[];
+}
+
+export interface ChargePreview {
+  pairId: string;
+  currency: string;
+  transferPrice: { method: TransferMethod; markupPct?: string; unitPrice?: string; effectiveFrom: string };
+  cost: string;
+  price: string;
+  margin: string;
+  balanced: boolean;
+  legs: JournalLeg[];
+}
+
+export type PaymentDirection = "Pay" | "Receive";
+
+export interface CentralPaymentRequest {
+  payingEntity: string;
+  owningEntity: string;
+  paymentMethod: string;
+  direction: PaymentDirection;
+  amount: string;
+  currency: string;
+  bankAccount: string;
+  owningAccount: string;
+  matrix: MatrixRow[];
+}
+
+export interface PlanningRequest {
+  members: { entityId: string; sequence?: number }[];
+  edges: { buyer: string; supplier: string; leadTimeDays?: number }[];
+  plannedOrders: { buyer: string; supplier: string; item: string; quantity: string; requestedDate: string }[];
+  replannedBuyer?: string;
+}
+
+export interface PlanningSequence {
+  order: string[];
+  demand: { buyer: string; supplier: string; item: string; quantity: string; dueDate: string }[];
+  staleSuppliers: string[];
+  warnings: { code: string; message: string }[];
+}
+
+/** Price an IC charge by its effective transfer price and derive its Journal-mode legs (FR-40.13, AC-40.11). Nothing is posted. */
+export function previewCharge(req: ChargePreviewRequest, signal?: AbortSignal): Promise<ChargePreview> {
+  return post<ChargePreview>("/charges:preview", req, signal);
+}
+
+/** Derive the legs of one pay- or receive-on-behalf payment (FR-40.12, AC-40.10). Nothing is posted. */
+export function previewCentralPayment(req: CentralPaymentRequest, signal?: AbortSignal): Promise<JournalPreview> {
+  return post<JournalPreview>("/centralized-payments:preview", req, signal);
+}
+
+/** Run order, IC demand and stale suppliers of a planning group (FR-40.15, AC-40.16). Nothing is planned. */
+export function sequencePlanning(req: PlanningRequest, signal?: AbortSignal): Promise<PlanningSequence> {
+  return post<PlanningSequence>("/planning-groups:sequence", req, signal);
+}
