@@ -40,6 +40,20 @@ type fakeStore struct {
 	idems       []store.Idem
 	billFilter  store.FreightBillFilter
 	registered  domain.CarrierInvoice
+
+	// Slice 2: tenders, tracking and voyages (tender_test.go).
+	tender        domain.Tender
+	tenderErr     error
+	tenderNow     time.Time
+	tenderFilter  store.TenderFilter
+	responded     []string
+	tracking      []domain.TrackingEvent
+	trackFilter   store.TrackingFilter
+	recorded      domain.TrackingEvent
+	replayed      bool
+	voyage        domain.Voyage
+	voyageErr     error
+	createdVoyage domain.Voyage
 }
 
 func (f *fakeStore) CreateRateCard(_ context.Context, in domain.RateCard, idem store.Idem) (domain.RateCard, error) {

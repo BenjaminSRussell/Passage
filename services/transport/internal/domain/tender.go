@@ -3,6 +3,8 @@ package domain
 import (
 	"errors"
 	"time"
+
+	"github.com/shopspring/decimal"
 )
 
 // Tender statuses (BR-34.3). A tender is ACCEPTED by one carrier or fails after
@@ -38,6 +40,7 @@ type Attempt struct {
 // to every call, so the cascade is testable with a fake clock; a Temporal
 // TenderWorkflow timer drives the same calls in production.
 type Tender struct {
+	ID              string
 	LoadID          string
 	Carriers        []string
 	Timeout         time.Duration
@@ -45,6 +48,14 @@ type Tender struct {
 	Status          string
 	PlannerTask     bool
 	AcceptedCarrier string
+	// Currency and Rates carry the rate quoted to each carrier (rate_quoted),
+	// usually the carrier's rate-shop total. A carrier without a rate is tendered
+	// at the contract rate and its events carry no rate.
+	Currency string
+	Rates    map[string]decimal.Decimal
+	// Version and CreatedAt are set by the store.
+	Version   int
+	CreatedAt time.Time
 }
 
 // NewTender starts a tender over the ranked carriers. Each carrier gets timeout to respond.
@@ -100,6 +111,72 @@ func (t *Tender) Respond(carrierID string, accept bool, now time.Time) error {
 	a.Response = ResponseDeclined
 	t.next(now)
 	return nil
+}
+
+// TickAt is Tick that returns the attempts it expired, in cascade order, so the
+// caller can publish one tender.expired event for each.
+func (t *Tender) TickAt(now time.Time) []Attempt {
+	before := t.responses()
+	t.Tick(now)
+	return t.newlyExpired(before)
+}
+
+// RespondAt is Respond that also returns the attempts whose deadline passed
+// before the response was applied. The expiry happened even when the response
+// is rejected, so callers persist the tender before they report the error.
+func (t *Tender) RespondAt(carrierID string, accept bool, now time.Time) ([]Attempt, error) {
+	before := t.responses()
+	err := t.Respond(carrierID, accept, now)
+	return t.newlyExpired(before), err
+}
+
+// Pending returns the attempt the tender is waiting on, if any.
+func (t *Tender) Pending() (Attempt, bool) {
+	if a := t.pending(); a != nil {
+		return *a, true
+	}
+	return Attempt{}, false
+}
+
+// Overdue reports whether the pending attempt's deadline has passed at now, so
+// a sweep (or the Temporal timer) should cascade it.
+func (t *Tender) Overdue(now time.Time) bool {
+	a := t.pending()
+	return t.Status == TenderPending && a != nil && !now.Before(a.ExpiresAt)
+}
+
+// Responded reports whether carrierID's most recent attempt already carries
+// the given response, which makes a repeated response a safe replay.
+func (t *Tender) Responded(carrierID string, accept bool) bool {
+	want := ResponseDeclined
+	if accept {
+		want = ResponseAccepted
+	}
+	for i := len(t.Attempts) - 1; i >= 0; i-- {
+		if t.Attempts[i].CarrierID == carrierID {
+			return t.Attempts[i].Response == want
+		}
+	}
+	return false
+}
+
+func (t *Tender) responses() []string {
+	out := make([]string, len(t.Attempts))
+	for i, a := range t.Attempts {
+		out[i] = a.Response
+	}
+	return out
+}
+
+// newlyExpired returns the attempts that are EXPIRED now but were not in before.
+func (t *Tender) newlyExpired(before []string) []Attempt {
+	out := []Attempt{}
+	for i, a := range t.Attempts {
+		if a.Response == ResponseExpired && (i >= len(before) || before[i] != ResponseExpired) {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 func (t *Tender) next(now time.Time) {

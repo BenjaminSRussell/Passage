@@ -1,5 +1,5 @@
 // Package api exposes the transport HTTP routes: rate cards, rate shopping,
-// freight bills and carrier invoices.
+// freight bills, carrier invoices, tenders, tracking events and landed-cost voyages.
 package api
 
 import (
@@ -35,6 +35,10 @@ const (
 	DutyRate         = "TMS_RATE"
 	DutyRateApprove  = "TMS_RATE_APPROVE"
 	DutyReconcile    = "TMS_RECONCILE"
+	DutyTender       = "TMS_TENDER"
+	DutyRespond      = "TMS_CARRIER_RESPOND"
+	DutyTrackIngest  = "TMS_TRACK_INGEST"
+	DutyLandedCost   = "TMS_LANDED_COST"
 	idempotencyKey   = "Idempotency-Key"
 	validationDetail = "request failed validation"
 	maxCodeLength    = 20
@@ -55,6 +59,7 @@ var invoiceStatuses = []string{domain.MatchMatched, domain.MatchVariance, domain
 // admin /metrics endpoint.
 type API struct {
 	store store.Store
+	clock func() time.Time
 
 	rateShops        atomic.Int64
 	rateCardsCreated atomic.Int64
@@ -62,11 +67,24 @@ type API struct {
 	invoicesMatched  atomic.Int64
 	invoicesVariance atomic.Int64
 	invoicesUnexpect atomic.Int64
+	tendersStarted   atomic.Int64
+	tenderResponses  atomic.Int64
+	tendersExpired   atomic.Int64
+	trackingIngested atomic.Int64
+	voyagesPosted    atomic.Int64
 	serverErrors     atomic.Int64
 }
 
-// New returns the API over st.
-func New(st store.Store) *API { return &API{store: st} }
+// New returns the API over st, reading time from the system clock.
+func New(st store.Store) *API { return &API{store: st, clock: time.Now} }
+
+// WithClock replaces the time source; tests use it to step through tender deadlines.
+func (a *API) WithClock(now func() time.Time) *API {
+	a.clock = now
+	return a
+}
+
+func (a *API) now() time.Time { return a.clock().UTC().Truncate(time.Microsecond) }
 
 // Register mounts every route with its duty check. Browser calls arrive through
 // the web BFF at /api/v1/transport/..., rewritten to these /v1/transport/... paths.
@@ -80,6 +98,18 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutyReconcile)).Post(prefix+"/carrier-invoices", a.registerCarrierInvoice)
 	r.With(authz.RequireDuty(DutyReconcile)).Get(prefix+"/carrier-invoices", a.listCarrierInvoices)
 	r.With(authz.RequireDuty(DutyReconcile)).Get(prefix+"/carrier-invoices/{id}", a.getCarrierInvoice)
+	r.With(authz.RequireDuty(DutyTender)).Post(prefix+"/loads/{id}:tender", a.startTender)
+	r.With(authz.RequireDuty(DutyTender)).Get(prefix+"/tenders", a.listTenders)
+	r.With(authz.RequireDuty(DutyTender)).Post(prefix+"/tenders:expire", a.expireTenders)
+	r.With(authz.RequireDuty(DutyTender)).Get(prefix+"/tenders/{id}", a.getTender)
+	r.With(authz.RequireDuty(DutyRespond)).Post(prefix+"/tenders/{id}:respond", a.respondTender)
+	r.With(authz.RequireDuty(DutyTrackIngest)).Post(prefix+"/tracking-events", a.ingestTracking)
+	r.With(authz.RequireDuty(DutyView)).Get(prefix+"/tracking-events", a.listTracking)
+	r.With(authz.RequireDuty(DutyView)).Get(prefix+"/loads/{id}/tracking", a.loadTracking)
+	r.With(authz.RequireDuty(DutyLandedCost)).Post(prefix+"/voyages", a.createVoyage)
+	r.With(authz.RequireDuty(DutyLandedCost)).Get(prefix+"/voyages", a.listVoyages)
+	r.With(authz.RequireDuty(DutyLandedCost)).Get(prefix+"/voyages/{id}", a.getVoyage)
+	r.With(authz.RequireDuty(DutyLandedCost)).Post(prefix+"/landed-cost/voyages/{id}:allocate", a.allocateVoyage)
 }
 
 type rateCardRequest struct {
@@ -492,6 +522,11 @@ func (a *API) Metrics() http.Handler {
 			{"transport_carrier_invoices_matched_total", "Carrier invoices matched within tolerance.", a.invoicesMatched.Load()},
 			{"transport_carrier_invoices_variance_total", "Carrier invoices matched with a variance outside tolerance.", a.invoicesVariance.Load()},
 			{"transport_carrier_invoices_unexpected_total", "Carrier invoices without a freight bill (UNEXPECTED_INVOICE).", a.invoicesUnexpect.Load()},
+			{"transport_tenders_started_total", "Tender start requests answered with a tender, replays included.", a.tendersStarted.Load()},
+			{"transport_tender_responses_total", "Carrier accept or decline responses applied or replayed.", a.tenderResponses.Load()},
+			{"transport_tenders_expired_total", "Tenders cascaded by the expiry sweep.", a.tendersExpired.Load()},
+			{"transport_tracking_events_total", "Tracking events stored (replays excluded).", a.trackingIngested.Load()},
+			{"transport_voyages_posted_total", "Voyage allocate requests answered with a posted voyage, replays included.", a.voyagesPosted.Load()},
 			{"transport_server_errors_total", "Requests that failed with a server error.", a.serverErrors.Load()},
 		} {
 			fmt.Fprintf(w, "# HELP %[1]s %[2]s\n# TYPE %[1]s counter\n%[1]s %[3]d\n", m.name, m.help, m.value)

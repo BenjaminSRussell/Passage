@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { loadModules } from "../registry";
 import { validateRate } from "./RateShopPage";
-import { fixed, matchTone, money } from "./format";
+import { fixed, matchTone, money, stateTone, sumAmounts } from "./format";
+import { validateTender } from "./NewTenderPage";
+import { validateTracking } from "./NewTrackingEventPage";
+import { validateVoyage, type VoyageValues } from "./NewVoyagePage";
 import transport from "./module";
 import { validateCard, type CardValues } from "./NewRateCardPage";
 
@@ -21,10 +24,21 @@ describe("transport module", () => {
       "/transport/freight-bills/:id",
       "/transport/carrier-invoices",
       "/transport/carrier-invoices/new",
+      "/transport/tenders",
+      "/transport/tenders/new",
+      "/transport/tenders/:id",
+      "/transport/tracking",
+      "/transport/tracking/new",
+      "/transport/tracking/:loadId",
+      "/transport/voyages",
+      "/transport/voyages/new",
+      "/transport/voyages/:id",
     ]);
     expect(transport.routes.every((r) => r.element !== null && r.element !== undefined)).toBe(true);
     expect(transport.nav.every((n) => n.to.startsWith("/transport") && n.duty?.startsWith("TMS_"))).toBe(true);
     expect(transport.nav.find((n) => n.to === "/transport/carrier-invoices")?.duty).toBe("TMS_RECONCILE");
+    expect(transport.nav.find((n) => n.to === "/transport/tenders")?.duty).toBe("TMS_TENDER");
+    expect(transport.nav.find((n) => n.to === "/transport/voyages")?.duty).toBe("TMS_LANDED_COST");
   });
 
   it("is auto-discovered by the registry", () => {
@@ -40,6 +54,21 @@ describe("format", () => {
     expect(fixed("999.999", 2)).toBe("1000.00");
     expect(money(undefined, "USD")).toBe("—");
     expect(money("418", "USD")).toBe("418.00 USD");
+  });
+
+  it("sums decimal strings exactly", () => {
+    expect(sumAmounts(["0.1", "0.2"])).toBe("0.300000");
+    expect(sumAmounts(["1000.00", "45.55", "-0.01"])).toBe("1045.540000");
+    expect(sumAmounts([])).toBe("0.000000");
+    expect(money(sumAmounts(["333.33", "333.33", "333.34"]), "USD")).toBe("1000.00 USD");
+  });
+
+  it("maps tender, stop and voyage states to tones", () => {
+    expect(stateTone("ACCEPTED")).toBe("success");
+    expect(stateTone("TENDER_FAILED")).toBe("danger");
+    expect(stateTone("EXPIRED")).toBe("warning");
+    expect(stateTone("PICKED_UP")).toBe("info");
+    expect(stateTone("POSTED")).toBe("success");
   });
 
   it("maps match states to tones", () => {
@@ -121,5 +150,86 @@ describe("rate shop validation", () => {
       shipDate: "2026-06-01",
       accessorialCodes: ["LIFTGATE", "RESI"],
     });
+  });
+});
+
+const LOAD = "0195f0a0-0000-7000-8000-0000000000a1";
+
+describe("tender validation", () => {
+  it("builds the request with quoted rates and the default response time", () => {
+    const { input, loadId } = validateTender({
+      loadId: ` ${LOAD} `,
+      carriers: [{ carrierId: CARRIER, rateQuoted: "412.50" }, { carrierId: SERVICE, rateQuoted: "" }],
+      currency: "USD",
+      timeoutMin: "",
+    });
+    expect(loadId).toBe(LOAD);
+    expect(input).toEqual({ carriers: [{ carrierId: CARRIER, rateQuoted: "412.50" }, { carrierId: SERVICE }], currency: "USD", timeoutMin: 120 });
+  });
+
+  it("leaves the currency out without rates and reports what the service would reject", () => {
+    expect(validateTender({ loadId: LOAD, carriers: [{ carrierId: CARRIER, rateQuoted: "" }], currency: "USD", timeoutMin: "30" }).input).toEqual({
+      carriers: [{ carrierId: CARRIER }],
+      timeoutMin: 30,
+    });
+    const { errors, input } = validateTender({
+      loadId: "load-1",
+      carriers: [{ carrierId: CARRIER, rateQuoted: "1.005" }, { carrierId: CARRIER, rateQuoted: "" }],
+      currency: "",
+      timeoutMin: "4",
+    });
+    expect(input).toBeUndefined();
+    expect(Object.keys(errors).sort()).toEqual(["carriers[0]", "carriers[1]", "currency", "loadId", "timeoutMin"]);
+  });
+});
+
+describe("tracking validation", () => {
+  it("reads the time as UTC and drops an empty location", () => {
+    const { input } = validateTracking({ loadId: LOAD, stopNo: "2", code: "D1", occurredAt: "2026-06-01T11:00", location: " ", source: "DRIVER", ref: " call-7 " });
+    expect(input).toEqual({ loadId: LOAD, stopNo: 2, code: "D1", occurredAt: "2026-06-01T11:00:00Z", source: "DRIVER", ref: "call-7" });
+  });
+
+  it("requires a stop, a time and a reference", () => {
+    const { errors } = validateTracking({ loadId: LOAD, stopNo: "0", code: "AF", occurredAt: "", location: "", source: "API", ref: "" });
+    expect(Object.keys(errors).sort()).toEqual(["occurredAt", "ref", "stopNo"]);
+  });
+});
+
+describe("voyage validation", () => {
+  const valid: VoyageValues = {
+    reference: " MAEU-2611E ",
+    currency: "USD",
+    legs: [{ from: "CNSHA", to: "USLAX", mode: "OCEAN" }],
+    containers: [{ number: "CSQU3054383", type: "40HC", seal: "" }],
+    folios: [{ folioNo: "F-1", forwarder: "Kuehne", containers: "CSQU3054383, " }],
+    costLines: [{ costType: "FREIGHT", amount: "1000.00", allocationMethod: "WEIGHT" }],
+    receiptLines: [{ line: "1", value: "100", weight: "1", volume: "", quantity: "" }],
+  };
+
+  it("builds the request the service expects", () => {
+    expect(validateVoyage(valid).input).toEqual({
+      reference: "MAEU-2611E",
+      currency: "USD",
+      legs: [{ from: "CNSHA", to: "USLAX", mode: "OCEAN" }],
+      containers: [{ number: "CSQU3054383", type: "40HC" }],
+      folios: [{ folioNo: "F-1", forwarder: "Kuehne", containers: ["CSQU3054383"] }],
+      costLines: [{ costType: "FREIGHT", amount: "1000.00", allocationMethod: "WEIGHT" }],
+      receiptLines: [{ line: 1, value: "100", weight: "1", volume: "0", quantity: "0" }],
+    });
+  });
+
+  it("reports the rows the service would reject", () => {
+    const { errors, input } = validateVoyage({
+      ...valid,
+      containers: [{ number: "CSQU305438", type: "40HC", seal: "" }],
+      folios: [{ folioNo: "F-1", forwarder: "Kuehne", containers: "TGHU0000013" }],
+      costLines: [{ costType: "FREIGHT", amount: "10.005", allocationMethod: "WEIGHT" }],
+      receiptLines: [
+        { line: "1", value: "100", weight: "1", volume: "", quantity: "" },
+        { line: "1", value: "100", weight: "1", volume: "", quantity: "" },
+      ],
+    });
+    expect(input).toBeUndefined();
+    expect(Object.keys(errors).sort()).toEqual(["containers[0]", "costLines[0]", "folios[0]", "receiptLines[1]"]);
   });
 });

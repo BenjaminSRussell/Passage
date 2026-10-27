@@ -40,6 +40,22 @@ export function fixed(value: string, places: number): string {
   return `${negative ? "-" : ""}${w}${places > 0 ? `.${s.slice(s.length - places)}` : ""}`;
 }
 
+const SCALE = 6;
+
+/** Sums decimal strings exactly (scaled BigInt, never floats) and returns a decimal string. */
+export function sumAmounts(values: string[]): string {
+  let total = 0n;
+  for (const value of values) {
+    const negative = value.startsWith("-");
+    const [whole = "0", frac = ""] = (negative ? value.slice(1) : value).split(".");
+    const scaled = BigInt(`${whole || "0"}${frac.slice(0, SCALE).padEnd(SCALE, "0")}`);
+    total += negative ? -scaled : scaled;
+  }
+  const negative = total < 0n;
+  const digits = (negative ? -total : total).toString().padStart(SCALE + 1, "0");
+  return `${negative ? "-" : ""}${digits.slice(0, -SCALE)}.${digits.slice(-SCALE)}`;
+}
+
 /** "412.50 USD"; a missing amount shows a dash. */
 export function money(value: string | undefined | null, currency: string): string {
   return value === undefined || value === null || value === "" ? dash : `${fixed(value, 2)} ${currency}`;
@@ -74,6 +90,28 @@ export function matchTone(status: string): BadgeTone {
   }
 }
 
+/** Badge tone for a tender, tender attempt, stop or voyage state. */
+export function stateTone(status: string): BadgeTone {
+  switch (status) {
+    case "ACCEPTED":
+    case "DELIVERED":
+    case "POSTED":
+      return "success";
+    case "PENDING":
+    case "ARRIVED":
+    case "PICKED_UP":
+      return "info";
+    case "DECLINED":
+    case "EXPIRED":
+    case "ESTIMATED":
+      return "warning";
+    case "TENDER_FAILED":
+      return "danger";
+    default:
+      return "neutral";
+  }
+}
+
 const labels: Record<string, string> = {
   UNMATCHED: "Unmatched",
   MATCHED: "Matched",
@@ -85,6 +123,24 @@ const labels: Record<string, string> = {
   OK: "Rated",
   NO_VALID_RATE_CARD: "No valid rate card",
   NO_LANE_RATE: "No lane rate",
+  PENDING: "Pending",
+  ACCEPTED: "Accepted",
+  DECLINED: "Declined",
+  EXPIRED: "Expired",
+  TENDER_FAILED: "Tender failed",
+  ARRIVED: "Arrived",
+  PICKED_UP: "Picked up",
+  DELIVERED: "Delivered",
+  ESTIMATED: "Estimated",
+  POSTED: "Posted",
+};
+
+/** EDI 214 status codes the service accepts (FR-34.6). */
+export const trackingCodeLabels: Record<string, string> = {
+  X3: "X3 arrived at pickup",
+  AF: "AF departed with the freight",
+  X1: "X1 arrived at delivery",
+  D1: "D1 delivered",
 };
 
 export function statusLabel(status: string): string {

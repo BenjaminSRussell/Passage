@@ -23,6 +23,21 @@ const areas = [
     to: "/transport/carrier-invoices",
     text: "Register invoices from EDI 210, the carrier API or by hand; invoices without a bill wait in the exception queue.",
   },
+  {
+    title: "Tenders",
+    to: "/transport/tenders",
+    text: "Offer loads to carriers in route-guide order; declines and missed deadlines move the load to the next carrier.",
+  },
+  {
+    title: "Tracking",
+    to: "/transport/tracking",
+    text: "Status reports from EDI 214, carrier APIs and drivers, and each load's stop-by-stop timeline.",
+  },
+  {
+    title: "Landed cost voyages",
+    to: "/transport/voyages",
+    text: "Containers, folios and the freight, duty and other costs of inbound shipments, allocated to receipt lines.",
+  },
 ];
 
 /** Transportation workspace landing page (PRD 6.34.6). */
@@ -31,7 +46,7 @@ export function TransportHome() {
     <div className={styles.stack}>
       <PageHeader
         title="Transportation"
-        description="Rate carriers, keep their rate cards, and reconcile carrier invoices against the freight you expected to pay. Load planning, tendering and tracking come in later releases."
+        description="Rate and tender loads to carriers, track them to delivery, reconcile carrier invoices against the freight you expected to pay, and put landed cost onto inventory. Load planning comes in a later release."
       />
       <CardGrid as="ul" label="Transportation areas">
         {areas.map((area) => (

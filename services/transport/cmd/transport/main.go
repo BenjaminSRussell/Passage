@@ -1,5 +1,5 @@
 // Command transport serves the wave-34 transportation API: rate cards, rate
-// shopping, freight bills and carrier invoices.
+// shopping, freight bills, carrier invoices, tenders, tracking and landed-cost voyages.
 package main
 
 import (

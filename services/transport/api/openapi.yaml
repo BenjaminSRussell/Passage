@@ -1,10 +1,10 @@
 openapi: 3.1.0
 info:
   title: Passage Transport (TMS) API
-  version: 0.1.0
+  version: 0.2.0
   description: |
-    Wave 34 slice 1: rate cards, rate shopping, freight bills and carrier
-    invoices. Errors are RFC 9457 problem details (application/problem+json)
+    Wave 34 slices 1 and 2: rate cards, rate shopping, freight bills, carrier
+    invoices, tenders, tracking events and landed-cost voyages. Errors are RFC 9457 problem details (application/problem+json)
     with a stable `code`; see README.md for the error code list. Browsers call
     /api/v1/transport/..., which the web BFF rewrites to these /v1/transport/...
     paths. Amounts are decimal strings, never floats. Identifiers are lower-case
@@ -235,6 +235,308 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+  /v1/transport/loads/{id}:tender:
+    post:
+      operationId: startTender
+      summary: Start a tender cascade for a load (FR-34.5, BR-34.3)
+      description: |
+        Sends the load to the first carrier in route-guide rank order; each
+        carrier has `timeoutMin` (default 120, 5 to 1,440) to respond. A load
+        with an ACCEPTED tender, or a PENDING tender still inside its deadline,
+        is refused with TMS-0114; a PENDING tender past its deadline is
+        cascaded first and no longer blocks once it has failed.
+      x-passage-duty: TMS_TENDER
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Load id
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TenderRequest' }
+      responses:
+        '201':
+          description: Tender started (or the replayed tender for a repeated Idempotency-Key)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tender' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/transport/tenders:
+    get:
+      operationId: listTenders
+      summary: List tenders, newest first (at most 500); the tender board
+      x-passage-duty: TMS_TENDER
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [PENDING, ACCEPTED, TENDER_FAILED] }
+        - name: loadId
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Tenders
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Tender' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/transport/tenders:expire:
+    post:
+      operationId: expireTenders
+      summary: Cascade every overdue tender of the tenant (expiry sweep)
+      description: |
+        Expires each pending attempt whose deadline has passed, offers the load
+        to the next carrier or fails the tender with a planner task (TMS-0106)
+        after the last one, and publishes one tender.expired event per expired
+        attempt. At most 500 tenders per call. A Temporal TenderWorkflow timer
+        will drive the same rule; until then a scheduler or the tender board calls this.
+      x-passage-duty: TMS_TENDER
+      responses:
+        '200':
+          description: The tenders the sweep advanced
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Tender' } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/transport/tenders/{id}:
+    get:
+      operationId: getTender
+      summary: Get a tender with its cascade attempts
+      x-passage-duty: TMS_TENDER
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Tender as stored; `overdue` is true when the pending attempt is past its deadline
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tender' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/transport/tenders/{id}:respond:
+    post:
+      operationId: respondTender
+      summary: Carrier accepts or declines a tender
+      description: |
+        Deadlines that have passed are cascaded first. A response after the
+        carrier's deadline is 409 TMS-0105 (the cascade it uncovered is still
+        saved); a carrier the tender is not waiting on is 409 TMS-0113. A
+        decline offers the load to the next carrier. The same carrier repeating
+        its last response gets the tender back unchanged (natural idempotency).
+      x-passage-duty: TMS_CARRIER_RESPOND
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [carrierId, accept]
+              properties:
+                carrierId: { type: string, format: uuid }
+                accept: { type: boolean, description: true to accept, false to decline }
+      responses:
+        '200':
+          description: The tender after the response
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tender' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /v1/transport/tracking-events:
+    post:
+      operationId: ingestTrackingEvent
+      summary: Ingest one shipment status report (EDI 214, carrier API, telematics, driver)
+      description: |
+        Source and ref are the idempotency key: the same report again is 200 with
+        `Idempotent-Replayed: true`; a different report under the same source and
+        ref is 422 idempotency_key_reuse. Supported codes: X3 arrived at pickup,
+        AF departed with the freight, X1 arrived at delivery, D1 delivered.
+      x-passage-duty: TMS_TRACK_INGEST
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TrackingEventRequest' }
+      responses:
+        '201':
+          description: Stored
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TrackingEvent' }
+        '200':
+          description: Replay of a stored report
+          headers:
+            Idempotent-Replayed: { schema: { type: string, const: 'true' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TrackingEvent' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listTrackingEvents
+      summary: Tracking events; with loadId that load's events in occurred_at order, else the newest 500 received
+      x-passage-duty: TMS_VIEW
+      parameters:
+        - name: loadId
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Tracking events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/TrackingEvent' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/transport/loads/{id}/tracking:
+    get:
+      operationId: getLoadTracking
+      summary: Tracking timeline of a load with the projected stop states (BR-34.9)
+      x-passage-duty: TMS_VIEW
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Events in occurred_at order and one state per reported stop
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoadTracking' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/transport/voyages:
+    post:
+      operationId: createVoyage
+      summary: Create a landed-cost voyage with legs, containers, folios, cost lines and receipt lines
+      description: |
+        Container numbers are checked with the ISO 6346 check digit (BR-34.12);
+        a failure is 422 TMS-0124 with the container in `errors`. The voyage
+        starts ESTIMATED; status and allocations sent by the client are ignored.
+      x-passage-duty: TMS_LANDED_COST
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VoyageRequest' }
+      responses:
+        '201':
+          description: Created (or the replayed voyage for a repeated Idempotency-Key)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Voyage' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listVoyages
+      summary: List voyages, newest first (at most 500), without their documents
+      x-passage-duty: TMS_LANDED_COST
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [ESTIMATED, POSTED] }
+      responses:
+        '200':
+          description: Voyages
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/VoyageSummary' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/transport/voyages/{id}:
+    get:
+      operationId: getVoyage
+      summary: Get a voyage with its documents and, once posted, its allocations
+      x-passage-duty: TMS_LANDED_COST
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Voyage
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Voyage' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/transport/landed-cost/voyages/{id}:allocate:
+    post:
+      operationId: allocateVoyage
+      summary: Allocate the voyage's landed cost to its receipt lines and post it (FR-34.9, BR-34.6)
+      description: |
+        Each cost line is split by its method with shares rounded to cents and
+        the residual on the highest-value receipt line (TMS-0110), so the
+        allocations sum to the cost total exactly. Publishes
+        dev.passage.tms.landedcost.posted.v1. A POSTED voyage is returned
+        unchanged with 200, so a retry is safe.
+      x-passage-duty: TMS_LANDED_COST
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The posted voyage
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Voyage' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
 components:
   parameters:
     IdempotencyKey:
@@ -446,3 +748,194 @@ components:
       properties:
         invoice: { $ref: '#/components/schemas/CarrierInvoice' }
         freightBill: { $ref: '#/components/schemas/FreightBill' }
+    TenderRequest:
+      type: object
+      required: [carriers]
+      properties:
+        carriers:
+          type: array
+          minItems: 1
+          maxItems: 20
+          description: Route-guide carriers in rank order, each listed once
+          items:
+            type: object
+            required: [carrierId]
+            properties:
+              carrierId: { type: string, format: uuid }
+              rateQuoted: { type: string, description: 'Decimal rate offered, at most two decimals' }
+        currency: { type: string, pattern: '^[A-Z]{3}$', description: Required with quoted rates, not allowed without }
+        timeoutMin: { type: integer, minimum: 5, maximum: 1440, default: 120 }
+    TenderAttempt:
+      type: object
+      required: [rank, carrierId, sentAt, expiresAt, response]
+      properties:
+        rank: { type: integer, minimum: 1 }
+        carrierId: { type: string, format: uuid }
+        sentAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        response: { type: string, enum: [PENDING, ACCEPTED, DECLINED, EXPIRED] }
+        rateQuoted: { type: string }
+    Tender:
+      type: object
+      required: [id, loadId, status, carriers, timeoutMin, attempts, plannerTask, overdue, version, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        loadId: { type: string, format: uuid }
+        status: { type: string, enum: [PENDING, ACCEPTED, TENDER_FAILED] }
+        carriers: { type: array, items: { type: string, format: uuid } }
+        currency: { type: string }
+        timeoutMin: { type: integer }
+        attempts: { type: array, items: { $ref: '#/components/schemas/TenderAttempt' } }
+        acceptedCarrierId: { type: string, format: uuid }
+        plannerTask: { type: boolean, description: True once every carrier declined or timed out (TMS-0106) }
+        pendingCarrierId: { type: string, format: uuid }
+        pendingExpiresAt: { type: string, format: date-time }
+        overdue: { type: boolean, description: The pending attempt is past its deadline and waits for the sweep }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+    TrackingEventRequest:
+      type: object
+      required: [loadId, stopNo, code, occurredAt, source, ref]
+      properties:
+        loadId: { type: string, format: uuid }
+        stopNo: { type: integer, minimum: 1, maximum: 999 }
+        code: { type: string, enum: [X3, AF, X1, D1], description: EDI 214 shipment status code }
+        occurredAt: { type: string, format: date-time, description: RFC 3339 with a zone; at most a day ahead }
+        location: { type: string, maxLength: 100 }
+        source: { type: string, enum: [EDI214, API, TELEMATICS, DRIVER] }
+        ref: { type: string, minLength: 1, maxLength: 64, description: The sender's reference; with source the idempotency key }
+    TrackingEvent:
+      allOf:
+        - $ref: '#/components/schemas/TrackingEventRequest'
+        - type: object
+          required: [id, receivedAt]
+          properties:
+            id: { type: string, format: uuid }
+            receivedAt: { type: string, format: date-time }
+    StopState:
+      type: object
+      required: [stopNo, status, pickupInferred]
+      properties:
+        stopNo: { type: integer }
+        status: { type: string, enum: [PENDING, ARRIVED, PICKED_UP, DELIVERED] }
+        arrivedAt: { type: string, format: date-time }
+        pickedUpAt: { type: string, format: date-time }
+        deliveredAt: { type: string, format: date-time }
+        pickupInferred: { type: boolean, description: A delivery arrived with no earlier pickup; pickedUpAt is the delivery time (BR-34.9) }
+    LoadTracking:
+      type: object
+      required: [loadId, events, stops]
+      properties:
+        loadId: { type: string, format: uuid }
+        events: { type: array, items: { $ref: '#/components/schemas/TrackingEvent' } }
+        stops: { type: array, items: { $ref: '#/components/schemas/StopState' } }
+    VoyageRequest:
+      type: object
+      required: [reference, currency, legs, costLines, receiptLines]
+      properties:
+        reference: { type: string, minLength: 1, maxLength: 40 }
+        currency: { type: string, pattern: '^[A-Za-z]{3}$' }
+        legs:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items:
+            type: object
+            required: [from, to, mode]
+            properties:
+              seq: { type: integer, description: Assigned by the server in the order given }
+              from: { type: string, maxLength: 40 }
+              to: { type: string, maxLength: 40 }
+              mode: { type: string, enum: [OCEAN, AIR, ROAD, RAIL] }
+        containers:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            required: [number, type]
+            properties:
+              number: { type: string, description: ISO 6346 number with check digit, such as CSQU3054383 }
+              type: { type: string, enum: [20GP, 40GP, 40HC, 45HC, REEFER] }
+              seal: { type: string, maxLength: 40 }
+        folios:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            required: [folioNo, forwarder]
+            properties:
+              folioNo: { type: string, maxLength: 40 }
+              forwarder: { type: string, maxLength: 40, description: Vendor or forwarder }
+              containers: { type: array, items: { type: string }, description: Container numbers on this voyage }
+        costLines:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items: { $ref: '#/components/schemas/VoyageCostLine' }
+        receiptLines:
+          type: array
+          minItems: 1
+          maxItems: 3000
+          items:
+            type: object
+            required: [line]
+            properties:
+              line: { type: integer, minimum: 1 }
+              value: { type: string, description: Decimal receipt value; decides the residual line }
+              weight: { type: string }
+              volume: { type: string }
+              quantity: { type: string }
+    VoyageCostLine:
+      type: object
+      required: [costType, amount, allocationMethod]
+      properties:
+        costType: { type: string, maxLength: 20, description: Such as FREIGHT, DUTY, BROKERAGE, INSURANCE }
+        amount: { type: string, description: Decimal, at most two decimals }
+        allocationMethod: { type: string, enum: [WEIGHT, VOLUME, VALUE, QUANTITY, EQUAL] }
+    Allocation:
+      type: object
+      required: [line, amount]
+      properties:
+        line: { type: integer }
+        amount: { type: string }
+    Voyage:
+      allOf:
+        - $ref: '#/components/schemas/VoyageRequest'
+        - type: object
+          required: [id, status, costAllocations, allocations, version, createdAt]
+          properties:
+            id: { type: string, format: uuid }
+            status: { type: string, enum: [ESTIMATED, POSTED] }
+            costAllocations:
+              type: array
+              description: One entry per cost line once posted; shares sum to the amount to the cent
+              items:
+                type: object
+                required: [costType, allocationMethod, amount, shares, residual, residualLine]
+                properties:
+                  costType: { type: string }
+                  allocationMethod: { type: string }
+                  amount: { type: string }
+                  shares: { type: array, items: { $ref: '#/components/schemas/Allocation' } }
+                  residual: { type: string, description: Rounding residual (TMS-0110) }
+                  residualLine: { type: integer }
+            allocations:
+              type: array
+              description: Landed cost per receipt line once posted; sums to the cost total
+              items: { $ref: '#/components/schemas/Allocation' }
+            version: { type: integer }
+            createdAt: { type: string, format: date-time }
+            postedAt: { type: string, format: date-time }
+    VoyageSummary:
+      type: object
+      required: [id, reference, currency, status, costTotal, containers, receiptLines, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        reference: { type: string }
+        currency: { type: string }
+        status: { type: string, enum: [ESTIMATED, POSTED] }
+        costTotal: { type: string }
+        containers: { type: integer }
+        receiptLines: { type: integer }
+        createdAt: { type: string, format: date-time }
+        postedAt: { type: string, format: date-time }

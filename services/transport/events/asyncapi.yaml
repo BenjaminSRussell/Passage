@@ -1,8 +1,8 @@
 asyncapi: 3.0.0
 info:
   title: Passage Transport events
-  version: 0.1.0
-  description: CloudEvents 1.0 envelope; amounts are decimal strings. Slice 1 publishes one event.
+  version: 0.2.0
+  description: CloudEvents 1.0 envelope; amounts are decimal strings. Each event is written to the outbox in the transaction that makes the change; the Debezium outbox router sends it to the topic of its aggregate.
 defaultContentType: application/cloudevents+json
 channels:
   freightBillMatched:
@@ -11,6 +11,28 @@ channels:
     messages:
       freightBillMatched:
         $ref: '#/components/messages/FreightBillMatched'
+  tender:
+    address: passage.tms.tender
+    description: Topic for tender outcomes (BR-34.3); subject is the tender id.
+    messages:
+      tenderAccepted:
+        $ref: '#/components/messages/TenderAccepted'
+      tenderDeclined:
+        $ref: '#/components/messages/TenderDeclined'
+      tenderExpired:
+        $ref: '#/components/messages/TenderExpired'
+  tracking:
+    address: passage.tms.tracking
+    description: Topic for shipment status reports (FR-34.6); subject is the load id, so per-load order is kept.
+    messages:
+      trackingEvent:
+        $ref: '#/components/messages/TrackingEvent'
+  landedCost:
+    address: passage.tms.landedcost
+    description: Topic for landed cost postings (FR-34.9); subject is the voyage id.
+    messages:
+      landedCostPosted:
+        $ref: '#/components/messages/LandedCostPosted'
 operations:
   publishFreightBillMatched:
     action: send
@@ -19,6 +41,29 @@ operations:
     summary: A carrier invoice was matched to a freight bill.
     messages:
       - $ref: '#/channels/freightBillMatched/messages/freightBillMatched'
+  publishTenderOutcome:
+    action: send
+    channel:
+      $ref: '#/channels/tender'
+    summary: A carrier accepted or declined a tender, or its attempt expired. Consumers wms, edi (204/990), analytics.
+    messages:
+      - $ref: '#/channels/tender/messages/tenderAccepted'
+      - $ref: '#/channels/tender/messages/tenderDeclined'
+      - $ref: '#/channels/tender/messages/tenderExpired'
+  publishTrackingEvent:
+    action: send
+    channel:
+      $ref: '#/channels/tracking'
+    summary: A status report was stored (replays are not published). Consumers sales fulfilment, customer portal.
+    messages:
+      - $ref: '#/channels/tracking/messages/trackingEvent'
+  publishLandedCostPosted:
+    action: send
+    channel:
+      $ref: '#/channels/landedCost'
+    summary: A voyage's landed cost was allocated and posted. Consumer costing (wave 20).
+    messages:
+      - $ref: '#/channels/landedCost/messages/landedCostPosted'
 components:
   messages:
     FreightBillMatched:
@@ -56,3 +101,122 @@ components:
                     invoiced: { type: string }
                     variance: { type: string, description: invoiced minus expected }
                     withinTolerance: { type: boolean }
+    TenderAccepted:
+      name: dev.passage.tms.tender.accepted.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, id, specversion, tenantid, data]
+        properties:
+          specversion: { type: string, const: '1.0' }
+          type: { type: string, const: dev.passage.tms.tender.accepted.v1 }
+          source: { type: string, const: /passage/tms/transport }
+          id: { type: string }
+          tenantid: { type: string, format: uuid }
+          subject: { type: string, description: tender id }
+          time: { type: string, format: date-time }
+          datacontenttype: { type: string, const: application/json }
+          data:
+            $ref: '#/components/schemas/TenderOutcome'
+    TenderDeclined:
+      name: dev.passage.tms.tender.declined.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, id, specversion, tenantid, data]
+        properties:
+          specversion: { type: string, const: '1.0' }
+          type: { type: string, const: dev.passage.tms.tender.declined.v1 }
+          source: { type: string, const: /passage/tms/transport }
+          id: { type: string }
+          tenantid: { type: string, format: uuid }
+          subject: { type: string, description: tender id }
+          time: { type: string, format: date-time }
+          datacontenttype: { type: string, const: application/json }
+          data:
+            $ref: '#/components/schemas/TenderOutcome'
+    TenderExpired:
+      name: dev.passage.tms.tender.expired.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, id, specversion, tenantid, data]
+        properties:
+          specversion: { type: string, const: '1.0' }
+          type: { type: string, const: dev.passage.tms.tender.expired.v1 }
+          source: { type: string, const: /passage/tms/transport }
+          id: { type: string }
+          tenantid: { type: string, format: uuid }
+          subject: { type: string, description: tender id }
+          time: { type: string, format: date-time }
+          datacontenttype: { type: string, const: application/json }
+          data:
+            $ref: '#/components/schemas/TenderOutcome'
+    TrackingEvent:
+      name: dev.passage.tms.tracking.event.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, id, specversion, tenantid, data]
+        properties:
+          specversion: { type: string, const: '1.0' }
+          type: { type: string, const: dev.passage.tms.tracking.event.v1 }
+          source: { type: string, const: /passage/tms/transport }
+          id: { type: string }
+          tenantid: { type: string, format: uuid }
+          subject: { type: string, description: load id }
+          time: { type: string, format: date-time }
+          datacontenttype: { type: string, const: application/json }
+          data:
+            type: object
+            required: [loadId, stopNo, code, occurredAt, source]
+            properties:
+              loadId: { type: string, format: uuid }
+              stopNo: { type: integer }
+              code: { type: string, enum: [X3, AF, X1, D1] }
+              occurredAt: { type: string, format: date-time }
+              location: { type: string }
+              source: { type: string, enum: [EDI214, API, TELEMATICS, DRIVER] }
+    LandedCostPosted:
+      name: dev.passage.tms.landedcost.posted.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, id, specversion, tenantid, data]
+        properties:
+          specversion: { type: string, const: '1.0' }
+          type: { type: string, const: dev.passage.tms.landedcost.posted.v1 }
+          source: { type: string, const: /passage/tms/transport }
+          id: { type: string }
+          tenantid: { type: string, format: uuid }
+          subject: { type: string, description: voyage id }
+          time: { type: string, format: date-time }
+          datacontenttype: { type: string, const: application/json }
+          data:
+            type: object
+            required: [voyageId, reference, currency, total, receiptLines]
+            properties:
+              voyageId: { type: string, format: uuid }
+              reference: { type: string }
+              currency: { type: string }
+              total: { type: string, description: Voyage cost total; equals the sum of receiptLines.amount to the cent }
+              receiptLines:
+                type: array
+                items:
+                  type: object
+                  required: [line, amount]
+                  properties:
+                    line: { type: integer }
+                    amount: { type: string }
+  schemas:
+    TenderOutcome:
+      type: object
+      required: [tenderId, loadId, carrierId, rank, response]
+      properties:
+        tenderId: { type: string, format: uuid }
+        loadId: { type: string, format: uuid }
+        carrierId: { type: string, format: uuid }
+        rank: { type: integer, description: Route-guide rank of the attempt }
+        response: { type: string, enum: [ACCEPTED, DECLINED, EXPIRED] }
+        rate: { type: string, description: Rate quoted to the carrier; absent when the tender named none }
+        currency: { type: string }

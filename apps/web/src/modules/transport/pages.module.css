@@ -127,3 +127,18 @@
   font-size: var(--text-sm-size);
   line-height: var(--text-sm-leading);
 }
+
+/* One row of a RowsEditor with its row-level error underneath. */
+.rowGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/* Inline action form on a detail page (tender response, timeline lookup). */
+.inlineForm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--space-3);
+}

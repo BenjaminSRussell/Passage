@@ -1,5 +1,6 @@
-// Package store persists rate cards, freight bills and carrier invoices. Every
-// query runs inside dbx.WithTenantTx so row-level security applies.
+// Package store persists rate cards, freight bills, carrier invoices, tenders,
+// tracking events and landed-cost voyages. Every query runs inside
+// dbx.WithTenantTx so row-level security applies.
 package store
 
 import (
@@ -77,6 +78,17 @@ type Store interface {
 	RegisterCarrierInvoice(ctx context.Context, in domain.CarrierInvoice) (domain.CarrierInvoice, *domain.FreightBill, error)
 	GetCarrierInvoice(ctx context.Context, id string) (domain.CarrierInvoice, error)
 	ListCarrierInvoices(ctx context.Context, f InvoiceFilter) ([]domain.CarrierInvoice, error)
+	CreateTender(ctx context.Context, in domain.Tender, idem Idem, now time.Time) (domain.Tender, error)
+	GetTender(ctx context.Context, id string) (domain.Tender, error)
+	ListTenders(ctx context.Context, f TenderFilter) ([]domain.Tender, error)
+	RespondTender(ctx context.Context, id, carrierID string, accept bool, now time.Time) (domain.Tender, error)
+	ExpireTenders(ctx context.Context, now time.Time) ([]domain.Tender, error)
+	RecordTrackingEvent(ctx context.Context, in domain.TrackingEvent) (domain.TrackingEvent, bool, error)
+	ListTrackingEvents(ctx context.Context, f TrackingFilter) ([]domain.TrackingEvent, error)
+	CreateVoyage(ctx context.Context, in domain.Voyage, idem Idem) (domain.Voyage, error)
+	GetVoyage(ctx context.Context, id string) (domain.Voyage, error)
+	ListVoyages(ctx context.Context, f VoyageFilter) ([]VoyageSummary, error)
+	AllocateVoyage(ctx context.Context, id string, now time.Time) (domain.Voyage, error)
 	Ping(ctx context.Context) error
 }
 

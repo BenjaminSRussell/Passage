@@ -269,3 +269,234 @@ export function listCarrierInvoices(
 export function registerCarrierInvoice(input: NewCarrierInvoice): Promise<InvoiceResponse> {
   return post<InvoiceResponse>("/carrier-invoices", input);
 }
+
+// ---- Tenders (FR-34.5, BR-34.3) ---------------------------------------------
+
+export type TenderStatus = "PENDING" | "ACCEPTED" | "TENDER_FAILED";
+export const TENDER_STATUSES: TenderStatus[] = ["PENDING", "ACCEPTED", "TENDER_FAILED"];
+
+export type AttemptResponse = "PENDING" | "ACCEPTED" | "DECLINED" | "EXPIRED";
+
+export interface TenderAttempt {
+  rank: number;
+  carrierId: string;
+  sentAt: string;
+  expiresAt: string;
+  response: AttemptResponse;
+  rateQuoted?: string;
+}
+
+export interface Tender {
+  id: string;
+  loadId: string;
+  status: TenderStatus;
+  carriers: string[];
+  currency?: string;
+  timeoutMin: number;
+  attempts: TenderAttempt[];
+  acceptedCarrierId?: string;
+  plannerTask: boolean;
+  pendingCarrierId?: string;
+  pendingExpiresAt?: string;
+  overdue: boolean;
+  version: number;
+  createdAt: string;
+}
+
+export interface TenderCarrier {
+  carrierId: string;
+  rateQuoted?: string;
+}
+
+export interface NewTender {
+  carriers: TenderCarrier[];
+  currency?: string;
+  timeoutMin?: number;
+}
+
+/** Starts a tender cascade for a load; reuse one key per form so a retried submit cannot start two. */
+export function startTender(loadId: string, input: NewTender, key: string = newKey()): Promise<Tender> {
+  return post<Tender>(`/loads/${encodeURIComponent(loadId)}:tender`, input, key);
+}
+
+export function listTenders(filter: { status?: TenderStatus | ""; loadId?: string } = {}, signal?: AbortSignal): Promise<Tender[]> {
+  return items<Tender>(`/tenders${query(filter)}`, signal);
+}
+
+export function getTender(id: string, signal?: AbortSignal): Promise<Tender> {
+  return send<Tender>(`/tenders/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Records a carrier's accept or decline; repeating the same response returns the tender unchanged. */
+export function respondTender(id: string, body: { carrierId: string; accept: boolean }): Promise<Tender> {
+  return post<Tender>(`/tenders/${encodeURIComponent(id)}:respond`, body);
+}
+
+/** Runs the expiry sweep and returns the tenders it cascaded. */
+export async function expireTenders(): Promise<Tender[]> {
+  const body = await post<{ items?: Tender[] }>("/tenders:expire", {});
+  return Array.isArray(body.items) ? body.items : [];
+}
+
+// ---- Tracking (FR-34.6, BR-34.9) --------------------------------------------
+
+export type TrackingCode = "X3" | "AF" | "X1" | "D1";
+export const TRACKING_CODES: TrackingCode[] = ["X3", "AF", "X1", "D1"];
+
+export type TrackingSource = "EDI214" | "API" | "TELEMATICS" | "DRIVER";
+export const TRACKING_SOURCES: TrackingSource[] = ["EDI214", "API", "TELEMATICS", "DRIVER"];
+
+export interface NewTrackingEvent {
+  loadId: string;
+  stopNo: number;
+  code: TrackingCode;
+  occurredAt: string;
+  location?: string;
+  source: TrackingSource;
+  ref: string;
+}
+
+export interface TrackingEvent extends NewTrackingEvent {
+  id: string;
+  receivedAt: string;
+}
+
+export type StopStatus = "PENDING" | "ARRIVED" | "PICKED_UP" | "DELIVERED";
+
+export interface StopState {
+  stopNo: number;
+  status: StopStatus;
+  arrivedAt?: string;
+  pickedUpAt?: string;
+  deliveredAt?: string;
+  pickupInferred: boolean;
+}
+
+export interface LoadTracking {
+  loadId: string;
+  events: TrackingEvent[];
+  stops: StopState[];
+}
+
+/** Ingests one status report; source and ref are its idempotency key. */
+export function recordTrackingEvent(input: NewTrackingEvent): Promise<TrackingEvent> {
+  return post<TrackingEvent>("/tracking-events", input);
+}
+
+export function listTrackingEvents(filter: { loadId?: string } = {}, signal?: AbortSignal): Promise<TrackingEvent[]> {
+  return items<TrackingEvent>(`/tracking-events${query(filter)}`, signal);
+}
+
+export function getLoadTracking(loadId: string, signal?: AbortSignal): Promise<LoadTracking> {
+  return send<LoadTracking>(`/loads/${encodeURIComponent(loadId)}/tracking`, {}, signal);
+}
+
+// ---- Landed-cost voyages (FR-34.9, FR-34.12) ---------------------------------
+
+export type VoyageStatus = "ESTIMATED" | "POSTED";
+export const VOYAGE_STATUSES: VoyageStatus[] = ["ESTIMATED", "POSTED"];
+
+export type LegMode = "OCEAN" | "AIR" | "ROAD" | "RAIL";
+export const LEG_MODES: LegMode[] = ["OCEAN", "AIR", "ROAD", "RAIL"];
+
+export type ContainerType = "20GP" | "40GP" | "40HC" | "45HC" | "REEFER";
+export const CONTAINER_TYPES: ContainerType[] = ["20GP", "40GP", "40HC", "45HC", "REEFER"];
+
+export type AllocationMethod = "WEIGHT" | "VOLUME" | "VALUE" | "QUANTITY" | "EQUAL";
+export const ALLOCATION_METHODS: AllocationMethod[] = ["WEIGHT", "VOLUME", "VALUE", "QUANTITY", "EQUAL"];
+
+export interface Leg {
+  seq?: number;
+  from: string;
+  to: string;
+  mode: LegMode;
+}
+
+export interface Container {
+  number: string;
+  type: ContainerType;
+  seal?: string;
+}
+
+export interface Folio {
+  folioNo: string;
+  forwarder: string;
+  containers: string[];
+}
+
+export interface VoyageCostLine {
+  costType: string;
+  amount: string;
+  allocationMethod: AllocationMethod;
+}
+
+export interface VoyageReceiptLine {
+  line: number;
+  value: string;
+  weight: string;
+  volume: string;
+  quantity: string;
+}
+
+export interface NewVoyage {
+  reference: string;
+  currency: string;
+  legs: Leg[];
+  containers: Container[];
+  folios: Folio[];
+  costLines: VoyageCostLine[];
+  receiptLines: VoyageReceiptLine[];
+}
+
+export interface Allocation {
+  line: number;
+  amount: string;
+}
+
+export interface CostAllocation {
+  costType: string;
+  allocationMethod: AllocationMethod;
+  amount: string;
+  shares: Allocation[];
+  residual: string;
+  residualLine: number;
+}
+
+export interface Voyage extends NewVoyage {
+  id: string;
+  status: VoyageStatus;
+  costAllocations: CostAllocation[];
+  allocations: Allocation[];
+  version: number;
+  createdAt: string;
+  postedAt?: string;
+}
+
+export interface VoyageSummary {
+  id: string;
+  reference: string;
+  currency: string;
+  status: VoyageStatus;
+  costTotal: string;
+  containers: number;
+  receiptLines: number;
+  createdAt: string;
+  postedAt?: string;
+}
+
+export function createVoyage(input: NewVoyage, key: string = newKey()): Promise<Voyage> {
+  return post<Voyage>("/voyages", input, key);
+}
+
+export function listVoyages(filter: { status?: VoyageStatus | "" } = {}, signal?: AbortSignal): Promise<VoyageSummary[]> {
+  return items<VoyageSummary>(`/voyages${query(filter)}`, signal);
+}
+
+export function getVoyage(id: string, signal?: AbortSignal): Promise<Voyage> {
+  return send<Voyage>(`/voyages/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Allocates and posts the voyage's landed cost; a posted voyage comes back unchanged. */
+export function allocateVoyage(id: string): Promise<Voyage> {
+  return post<Voyage>(`/landed-cost/voyages/${encodeURIComponent(id)}:allocate`, {});
+}
