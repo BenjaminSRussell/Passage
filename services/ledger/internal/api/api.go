@@ -51,6 +51,7 @@ const (
 	dutyPost         = "ledger.journal.post"
 	dutyReverse      = "ledger.journal.reverse"
 	dutyRebuild      = "ledger.balance.rebuild"
+	dutyReasonWrite  = "ledger.reason.write"
 )
 
 var (
@@ -91,6 +92,9 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyPost)).Post("/validate", a.validateEntry)
 		r.With(authz.RequireDuty(dutyBalanceRead)).Get("/balances", a.trialBalance)
 		r.With(authz.RequireDuty(dutyRebuild)).Post("/balances:rebuild", a.rebuildBalances)
+		r.With(authz.RequireDuty(dutyRead)).Get("/reason-codes", a.listReasonCodes)
+		r.With(authz.RequireDuty(dutyRead)).Get("/reason-codes/{code}", a.getReasonCode)
+		r.With(authz.RequireDuty(dutyReasonWrite)).Put("/reason-codes/{code}", a.putReasonCode)
 	})
 }
 
@@ -216,6 +220,9 @@ type createLedgerRequest struct {
 	DimensionAttributes []string `json:"dimensionAttributes"`
 	FirstOpenDate       *string  `json:"firstOpenDate"`
 	FuturePostingDays   *int     `json:"futurePostingDays"`
+	// ReversalReasonRequired defaults to true (FR-11.15); NegativePostingEnabled to false (BR-11.16).
+	ReversalReasonRequired *bool `json:"reversalReasonRequired"`
+	NegativePostingEnabled *bool `json:"negativePostingEnabled"`
 }
 
 func (a *API) createLedger(w http.ResponseWriter, r *http.Request) {
@@ -276,9 +283,17 @@ func (a *API) createLedger(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "the caller is scoped to another legal entity"))
 		return
 	}
+	reasonRequired, negativeEnabled := true, false
+	if req.ReversalReasonRequired != nil {
+		reasonRequired = *req.ReversalReasonRequired
+	}
+	if req.NegativePostingEnabled != nil {
+		negativeEnabled = *req.NegativePostingEnabled
+	}
 	created, err := a.store.CreateLedger(r.Context(), store.Ledger{LegalEntityID: req.LegalEntityID, Code: req.Code,
 		Name: req.Name, ChartCode: req.ChartCode, Currency: req.Currency, DimensionAttributes: req.DimensionAttributes,
-		FirstOpenDate: firstOpen, FuturePostingDays: future})
+		FirstOpenDate: firstOpen, FuturePostingDays: future, ReversalReasonRequired: reasonRequired,
+		NegativePostingEnabled: negativeEnabled})
 	if err != nil {
 		a.fail(w, r, err)
 		return
@@ -551,8 +566,10 @@ func (a *API) getEntry(w http.ResponseWriter, r *http.Request) {
 }
 
 type reverseRequest struct {
-	PostingDate *string `json:"postingDate"`
-	Description string  `json:"description"`
+	PostingDate   *string `json:"postingDate"`
+	Description   string  `json:"description"`
+	ReasonCode    string  `json:"reasonCode"`
+	ReasonComment string  `json:"reasonComment"`
 }
 
 func (a *API) reverseEntry(w http.ResponseWriter, r *http.Request) {
@@ -573,7 +590,8 @@ func (a *API) reverseEntry(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	fields := map[string]string{}
-	in := store.ReverseInput{EntryID: id, Description: req.Description, Actor: p.UserID, TraceID: traceID(r), Today: a.today()}
+	in := store.ReverseInput{EntryID: id, Description: req.Description, Actor: p.UserID, TraceID: traceID(r), Today: a.today(),
+		ReasonCode: req.ReasonCode, ReasonComment: req.ReasonComment}
 	if req.PostingDate != nil {
 		d, ok := parseDate(*req.PostingDate)
 		if !ok {
@@ -583,6 +601,12 @@ func (a *API) reverseEntry(w http.ResponseWriter, r *http.Request) {
 	}
 	if utf8.RuneCountInString(req.Description) > maxTextLength {
 		fields["description"] = fmt.Sprintf("must be at most %d characters", maxTextLength)
+	}
+	if req.ReasonCode != "" && !domain.ValidReasonCode(req.ReasonCode) {
+		fields["reasonCode"] = "must be 1 to 10 characters of A-Z, 0-9 or underscore"
+	}
+	if utf8.RuneCountInString(req.ReasonComment) > domain.MaxReasonCommentLength {
+		fields["reasonComment"] = fmt.Sprintf("must be at most %d characters", domain.MaxReasonCommentLength)
 	}
 	key := idempotencyKey(r, fields)
 	if len(fields) > 0 {

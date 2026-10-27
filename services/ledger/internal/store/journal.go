@@ -29,18 +29,20 @@ type writeLine struct {
 
 // newEntry is everything writeEntry needs to insert one entry.
 type newEntry struct {
-	ledger       Ledger
-	documentID   string
-	postingDate  time.Time
-	documentDate *time.Time
-	description  string
-	source       ledgerevents.Source
-	key          string
-	hash         []byte
-	actor        string
-	traceID      string
-	reversalOf   *string
-	lines        []writeLine
+	ledger        Ledger
+	documentID    string
+	postingDate   time.Time
+	documentDate  *time.Time
+	description   string
+	source        ledgerevents.Source
+	key           string
+	hash          []byte
+	actor         string
+	traceID       string
+	reversalOf    *string
+	reasonCode    string
+	reasonComment string
+	lines         []writeLine
 }
 
 // PostEntry validates and posts one entry atomically. The ledger row lock taken
@@ -137,10 +139,18 @@ func (s *Postgres) ReverseEntry(ctx context.Context, in ReverseInput) (EntryResu
 		if in.PostingDate != nil {
 			postingDate = *in.PostingDate
 		}
-		if v := domain.CheckReversalDate(ledger.Rules(), origDate, postingDate, in.Today); len(v) > 0 {
+		v := domain.CheckReversalDate(ledger.Rules(), origDate, postingDate, in.Today)
+		reason, err := loadReason(ctx, tx, p.TenantID, in.ReasonCode)
+		if err != nil {
+			return err
+		}
+		negative, reasonViolations := domain.CheckReversal(ledger.ReversalPolicy(), reason, domain.ReversalRequest{
+			ReasonCode: in.ReasonCode, ReasonComment: in.ReasonComment, OriginalDate: origDate, ReversalDate: postingDate,
+		})
+		if v = append(v, reasonViolations...); len(v) > 0 {
 			return &domain.RejectedError{Violations: v}
 		}
-		lines, err := reversalLines(ctx, tx, p.TenantID, in.EntryID)
+		lines, err := reversalLines(ctx, tx, p.TenantID, in.EntryID, negative)
 		if err != nil {
 			return err
 		}
@@ -153,12 +163,14 @@ func (s *Postgres) ReverseEntry(ctx context.Context, in ReverseInput) (EntryResu
 			ledger: ledger, documentID: orig.documentID, postingDate: postingDate, description: description,
 			source: ledgerevents.Source{System: "ledger", Type: "reversal", ID: orig.voucher, URI: "passage://ledger/journal-entries/" + origID},
 			key:    in.Key, hash: in.Hash, actor: in.Actor, traceID: in.TraceID, reversalOf: &origID, lines: lines,
+			reasonCode: in.ReasonCode, reasonComment: in.ReasonComment,
 		})
 		if err != nil {
 			return err
 		}
 		if err := enqueue(ctx, tx, origID, ledgerevents.JournalReversed, p.TenantID, ledgerevents.JournalReversedData{
 			OriginalEntryID: origID, ReversingEntryID: entry.ID, LedgerID: ledger.ID, PostingDate: entry.PostingDate,
+			ReasonCode: in.ReasonCode, ReasonComment: in.ReasonComment,
 		}); err != nil {
 			return err
 		}
@@ -169,10 +181,12 @@ func (s *Postgres) ReverseEntry(ctx context.Context, in ReverseInput) (EntryResu
 }
 
 // reversalLines loads the original lines with swapped sides and the same
-// accounts, combinations and amounts.
-func reversalLines(ctx context.Context, tx pgx.Tx, tenantID, entryID string) ([]writeLine, error) {
+// accounts, combinations and amounts. When negative is true the reversing lines
+// are negative postings (BR-11.16), except that reversing a negative line
+// restores the original side (re-instatement), so it is not negative again.
+func reversalLines(ctx context.Context, tx pgx.Tx, tenantID, entryID string, negative bool) ([]writeLine, error) {
 	rows, err := tx.Query(ctx, `select l.id, l.main_account_id, a.account_number, l.dimension_combination_id, l.debit_credit, l.amount_acct::text,
-			coalesce(l.line_text, ''), coalesce(l.source_line_ref, ''), c.display_name, c.dimensions
+			coalesce(l.line_text, ''), coalesce(l.source_line_ref, ''), c.display_name, c.dimensions, l.negative_posting
 		from journal_line l
 		join main_account a on a.tenant_id = l.tenant_id and a.id = l.main_account_id
 		join dimension_combination c on c.tenant_id = l.tenant_id and c.id = l.dimension_combination_id
@@ -186,7 +200,8 @@ func reversalLines(ctx context.Context, tx pgx.Tx, tenantID, entryID string) ([]
 		var origID, accountID, accountNumber, side, amountText, text, ref, display string
 		var combo []byte
 		var dims map[string]string
-		if err := rows.Scan(&origID, &accountID, &accountNumber, &combo, &side, &amountText, &text, &ref, &display, &dims); err != nil {
+		var origNegative bool
+		if err := rows.Scan(&origID, &accountID, &accountNumber, &combo, &side, &amountText, &text, &ref, &display, &dims, &origNegative); err != nil {
 			return nil, err
 		}
 		amount, err := decimal.NewFromString(amountText)
@@ -197,6 +212,7 @@ func reversalLines(ctx context.Context, tx pgx.Tx, tenantID, entryID string) ([]
 		out = append(out, writeLine{id: ids.New(), reversalOfLineID: &orig, valid: domain.ValidLine{
 			Index: len(out), Account: domain.Account{ID: accountID, Number: accountNumber}, Dimensions: dims, Side: domain.ReversalSide(side),
 			Amount: amount, Text: text, SourceLineRef: ref, CombinationID: combo, DisplayName: display,
+			Negative: negative && !origNegative,
 		}})
 	}
 	return out, rows.Err()
@@ -220,10 +236,13 @@ func writeEntry(ctx context.Context, tx pgx.Tx, tenantID string, ne newEntry) (E
 		docDate = ne.documentDate.Format(time.DateOnly)
 	}
 	if _, err := tx.Exec(ctx, `insert into journal_entry (tenant_id, id, legal_entity_id, ledger_id, document_id, voucher, posting_sequence, posting_date, period_key,
-			document_date, description, source_system, source_type, source_id, source_uri, idempotency_key, payload_hash, reversal_of_entry_id, posted_by, trace_id)
-		values ($1, $2, $3, $4, $5, $6, $7, $8::text::date, $9, nullif($10::text, '')::date, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
+			document_date, description, source_system, source_type, source_id, source_uri, idempotency_key, payload_hash, reversal_of_entry_id, posted_by, trace_id,
+			reason_code, reason_comment)
+		values ($1, $2, $3, $4, $5, $6, $7, $8::text::date, $9, nullif($10::text, '')::date, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+			nullif($21::text, ''), nullif($22::text, ''))`,
 		tenantID, entryID, l.LegalEntityID, l.ID, ne.documentID, voucher, seq, postingDate, period, docDate, ne.description,
-		ne.source.System, ne.source.Type, ne.source.ID, ne.source.URI, ne.key, ne.hash, ne.reversalOf, ne.actor, ne.traceID); err != nil {
+		ne.source.System, ne.source.Type, ne.source.ID, ne.source.URI, ne.key, ne.hash, ne.reversalOf, ne.actor, ne.traceID,
+		ne.reasonCode, ne.reasonComment); err != nil {
 		return Entry{}, err
 	}
 
@@ -243,9 +262,10 @@ func writeEntry(ctx context.Context, tx pgx.Tx, tenantID string, ne newEntry) (E
 	for i, wl := range ne.lines {
 		batch.Queue(`insert into journal_line (tenant_id, id, legal_entity_id, entry_id, line_number, main_account_id, dimension_combination_id,
 				debit_credit, currency_txn, amount_txn, amount_acct, negative_posting, line_text, source_line_ref, reversal_of_line_id)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::text::numeric, $10::text::numeric, false, nullif($11, ''), nullif($12, ''), $13)`,
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::text::numeric, $10::text::numeric, $14, nullif($11, ''), nullif($12, ''), $13)`,
 			tenantID, wl.id, l.LegalEntityID, entryID, i+1, wl.valid.Account.ID, wl.valid.CombinationID,
-			wl.valid.Side, l.Currency, wl.valid.Amount.String(), wl.valid.Text, wl.valid.SourceLineRef, wl.reversalOfLineID)
+			wl.valid.Side, l.Currency, wl.valid.Amount.String(), wl.valid.Text, wl.valid.SourceLineRef, wl.reversalOfLineID,
+			wl.valid.Negative)
 	}
 	valid := make([]domain.ValidLine, 0, len(ne.lines))
 	for _, wl := range ne.lines {
@@ -275,6 +295,12 @@ func writeEntry(ctx context.Context, tx pgx.Tx, tenantID string, ne newEntry) (E
 	}
 	if docDate != "" {
 		entry.DocumentDate = &docDate
+	}
+	if ne.reasonCode != "" {
+		entry.ReasonCode = &ne.reasonCode
+	}
+	if ne.reasonComment != "" {
+		entry.ReasonComment = &ne.reasonComment
 	}
 	for i, wl := range ne.lines {
 		entry.Lines = append(entry.Lines, lineView(wl, i+1, l.Currency))
@@ -307,7 +333,7 @@ func lineView(wl writeLine, number int, currency string) Line {
 		ID: wl.id, LineNumber: number, Account: v.Account.Number, DimensionCombinationID: hex.EncodeToString(v.CombinationID),
 		DisplayName: v.DisplayName, Dimensions: v.Dimensions, DebitCredit: v.Side,
 		Amount: v.Amount.StringFixed(money.MinorUnits(currency)), Text: v.Text, SourceLineRef: v.SourceLineRef,
-		ReversalOfLineID: wl.reversalOfLineID,
+		ReversalOfLineID: wl.reversalOfLineID, NegativePosting: v.Negative,
 	}
 }
 
@@ -336,14 +362,14 @@ func (s *Postgres) GetEntry(ctx context.Context, id string) (Entry, error) {
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		row := tx.QueryRow(ctx, `select e.id, e.ledger_id, e.document_id, e.voucher, e.posting_sequence, e.posting_date::text, e.period_key,
 				e.document_date::text, coalesce(e.description, ''), e.source_system, e.source_type, e.source_id, coalesce(e.source_uri, ''),
-				e.reversal_of_entry_id::text, e.posted_at, e.posted_by, e.trace_id, l.currency
+				e.reversal_of_entry_id::text, e.posted_at, e.posted_by, e.trace_id, e.reason_code, e.reason_comment, l.currency
 			from journal_entry e join ledger l on l.tenant_id = e.tenant_id and l.id = e.ledger_id
 			where e.tenant_id = $1 and e.id = $2`, p.TenantID, id)
 		var currency string
 		var src ledgerevents.Source
 		err := row.Scan(&e.ID, &e.LedgerID, &e.DocumentID, &e.Voucher, &e.PostingSequence, &e.PostingDate, &e.PeriodKey,
 			&e.DocumentDate, &e.Description, &src.System, &src.Type, &src.ID, &src.URI, &e.ReversalOfEntryID, &e.PostedAt,
-			&e.PostedBy, &e.TraceID, &currency)
+			&e.PostedBy, &e.TraceID, &e.ReasonCode, &e.ReasonComment, &currency)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return httpx.NewProblem(http.StatusNotFound, "LEDGER_ENTRY_NOT_FOUND", "journal entry not found")
 		}
@@ -363,7 +389,8 @@ func (s *Postgres) GetEntry(ctx context.Context, id string) (Entry, error) {
 
 func loadLines(ctx context.Context, tx pgx.Tx, tenantID, entryID, currency string) ([]Line, error) {
 	rows, err := tx.Query(ctx, `select l.id, l.line_number, a.account_number, l.dimension_combination_id, c.display_name, c.dimensions,
-			l.debit_credit, l.amount_acct::text, coalesce(l.line_text, ''), coalesce(l.source_line_ref, ''), l.reversal_of_line_id::text
+			l.debit_credit, l.amount_acct::text, coalesce(l.line_text, ''), coalesce(l.source_line_ref, ''), l.reversal_of_line_id::text,
+			l.negative_posting
 		from journal_line l
 		join main_account a on a.tenant_id = l.tenant_id and a.id = l.main_account_id
 		join dimension_combination c on c.tenant_id = l.tenant_id and c.id = l.dimension_combination_id
@@ -378,7 +405,7 @@ func loadLines(ctx context.Context, tx pgx.Tx, tenantID, entryID, currency strin
 		var combo []byte
 		var amountText string
 		if err := rows.Scan(&ln.ID, &ln.LineNumber, &ln.Account, &combo, &ln.DisplayName, &ln.Dimensions, &ln.DebitCredit,
-			&amountText, &ln.Text, &ln.SourceLineRef, &ln.ReversalOfLineID); err != nil {
+			&amountText, &ln.Text, &ln.SourceLineRef, &ln.ReversalOfLineID, &ln.NegativePosting); err != nil {
 			return nil, err
 		}
 		amount, err := decimal.NewFromString(amountText)

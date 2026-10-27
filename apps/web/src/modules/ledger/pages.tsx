@@ -1,16 +1,30 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
-import { useParams } from "react-router-dom";
-import { fetchEntry, fetchTrialBalance, type TrialBalanceQuery } from "./api/client";
+import { Link, useParams } from "react-router-dom";
+import { Alert, Badge, Card, DataTable, FormField, Input, PageHeader, Button, type DataTableColumn } from "../../shell/ui";
+import { fetchEntry, fetchTrialBalance, type Entry, type TrialBalance, type TrialBalanceQuery } from "./api/client";
+import styles from "./pages.module.css";
+import { ReverseEntryForm } from "./ReverseEntryForm";
 
-const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+export const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const PERIOD = /^\d{4}-\d{2}$/;
+
+type Row = TrialBalance["rows"][number];
+
+const balanceColumns: DataTableColumn<Row>[] = [
+  { key: "account", header: "Account", mono: true },
+  { key: "name", header: "Name" },
+  { key: "debit", header: "Debit", align: "end" },
+  { key: "credit", header: "Credit", align: "end" },
+  { key: "net", header: "Net", align: "end" },
+  { key: "lineCount", header: "Lines", align: "end" },
+];
 
 /** Trial balance: account rows from the balance projection, with the balanced check. */
 export function TrialBalanceScreen() {
   const [draft, setDraft] = useState<TrialBalanceQuery>({ ledgerId: "" });
   const [query, setQuery] = useState<TrialBalanceQuery | null>(null);
-  const [formError, setFormError] = useState<string | null>(null);
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
   const result = useQuery({
     queryKey: ["ledger", "trial-balance", query],
@@ -20,143 +34,177 @@ export function TrialBalanceScreen() {
 
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!UUID.test(draft.ledgerId)) {
-      setFormError("Enter the ledger id as a UUID.");
-      return;
-    }
-    if ((draft.periodFrom && !PERIOD.test(draft.periodFrom)) || (draft.periodTo && !PERIOD.test(draft.periodTo))) {
-      setFormError("Periods use the form YYYY-MM.");
-      return;
-    }
-    setFormError(null);
+    const found: Record<string, string> = {};
+    if (!UUID.test(draft.ledgerId.trim())) found.ledgerId = "Enter the ledger id as a UUID.";
+    if (draft.periodFrom && !PERIOD.test(draft.periodFrom)) found.periodFrom = "Periods use the form YYYY-MM.";
+    if (draft.periodTo && !PERIOD.test(draft.periodTo)) found.periodTo = "Periods use the form YYYY-MM.";
+    setErrors(found);
+    if (Object.keys(found).length > 0) return;
     setQuery({ ...draft, ledgerId: draft.ledgerId.trim() });
   }
 
   return (
-    <section aria-labelledby="tb-heading">
-      <h1 id="tb-heading">Trial balance</h1>
-      <form onSubmit={submit} aria-label="Trial balance filters">
-        <label>
-          Ledger id
-          <input name="ledger" value={draft.ledgerId} onChange={(e) => setDraft({ ...draft, ledgerId: e.target.value })} />
-        </label>
-        <label>
-          Period from
-          <input name="periodFrom" placeholder="2026-01" value={draft.periodFrom ?? ""} onChange={(e) => setDraft({ ...draft, periodFrom: e.target.value || undefined })} />
-        </label>
-        <label>
-          Period to
-          <input name="periodTo" placeholder="2026-12" value={draft.periodTo ?? ""} onChange={(e) => setDraft({ ...draft, periodTo: e.target.value || undefined })} />
-        </label>
-        <button type="submit">Show trial balance</button>
-      </form>
-      {formError && <p role="alert">{formError}</p>}
-      {result.isPending && query && <p role="status">Loading trial balance…</p>}
-      {result.isError && <p role="alert">{(result.error as Error).message}</p>}
-      {result.data && (
+    <div className={styles.stack}>
+      <PageHeader title="Trial balance" description="Debit and credit turnover per account from the balance projection. Storno reversals reduce the original side." />
+      <Card>
+        <form className={styles.form} onSubmit={submit} noValidate aria-label="Trial balance filters">
+          <FormField id="tb-ledger" label="Ledger id" error={errors.ledgerId}>
+            {(c) => <Input {...c} className={styles.mono} value={draft.ledgerId} onChange={(e) => setDraft({ ...draft, ledgerId: e.target.value })} invalid={Boolean(errors.ledgerId)} />}
+          </FormField>
+          <FormField id="tb-from" label="Period from" optional error={errors.periodFrom}>
+            {(c) => <Input {...c} placeholder="2026-01" value={draft.periodFrom ?? ""} onChange={(e) => setDraft({ ...draft, periodFrom: e.target.value || undefined })} invalid={Boolean(errors.periodFrom)} />}
+          </FormField>
+          <FormField id="tb-to" label="Period to" optional error={errors.periodTo}>
+            {(c) => <Input {...c} placeholder="2026-12" value={draft.periodTo ?? ""} onChange={(e) => setDraft({ ...draft, periodTo: e.target.value || undefined })} invalid={Boolean(errors.periodTo)} />}
+          </FormField>
+          <div className={styles.formActions}>
+            <Button type="submit" variant="primary">
+              Show trial balance
+            </Button>
+          </div>
+        </form>
+      </Card>
+      {query === null ? (
+        <p className={styles.note}>Enter a ledger id to see its trial balance.</p>
+      ) : result.isError ? (
+        <Alert tone="danger" title="Could not load the trial balance" live="alert" action={<Button size="sm" onClick={() => void result.refetch()}>Try again</Button>}>
+          {(result.error as Error).message}
+        </Alert>
+      ) : (
         <>
-          <p data-testid="tb-balanced">{result.data.balanced ? "Balanced" : "Not balanced"}</p>
-          <table>
-            <caption>Accounts in {result.data.currency}</caption>
-            <thead>
-              <tr>
-                <th scope="col">Account</th>
-                <th scope="col">Name</th>
-                <th scope="col">Debit</th>
-                <th scope="col">Credit</th>
-                <th scope="col">Net</th>
-                <th scope="col">Lines</th>
-              </tr>
-            </thead>
-            <tbody>
-              {result.data.rows.map((r) => (
-                <tr key={r.account}>
-                  <th scope="row">{r.account}</th>
-                  <td>{r.name}</td>
-                  <td>{r.debit}</td>
-                  <td>{r.credit}</td>
-                  <td>{r.net}</td>
-                  <td>{r.lineCount}</td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr>
-                <th scope="row" colSpan={2}>Total</th>
-                <td>{result.data.debit}</td>
-                <td>{result.data.credit}</td>
-                <td>{result.data.net}</td>
-                <td />
-              </tr>
-            </tfoot>
-          </table>
+          {result.data ? (
+            <dl className={styles.totals}>
+              <div className={styles.entry}>
+                <dt className={styles.term}>Check</dt>
+                <dd className={styles.value} data-testid="tb-balanced">
+                  {result.data.balanced ? "Balanced" : "Not balanced"}
+                </dd>
+              </div>
+              <div className={styles.entry}>
+                <dt className={styles.term}>Total debit ({result.data.currency})</dt>
+                <dd className={styles.value}>{result.data.debit}</dd>
+              </div>
+              <div className={styles.entry}>
+                <dt className={styles.term}>Total credit ({result.data.currency})</dt>
+                <dd className={styles.value}>{result.data.credit}</dd>
+              </div>
+              <div className={styles.entry}>
+                <dt className={styles.term}>Net</dt>
+                <dd className={styles.value}>{result.data.net}</dd>
+              </div>
+            </dl>
+          ) : null}
+          <DataTable
+            label="Trial balance"
+            columns={balanceColumns}
+            rows={result.data?.rows ?? []}
+            getRowKey={(row) => row.account}
+            loading={result.isPending}
+            empty={{ title: "No balances", description: "Nothing has been posted to this ledger in the selected periods." }}
+          />
         </>
       )}
-    </section>
+    </div>
   );
 }
 
-/** One posted entry with its lines and totals (drill-down from the trial balance). */
+type Line = Entry["lines"][number];
+
+const lineColumns: DataTableColumn<Line>[] = [
+  { key: "lineNumber", header: "Line", align: "end" },
+  { key: "account", header: "Account", mono: true },
+  { key: "displayName", header: "Dimensions", mono: true },
+  {
+    key: "debitCredit",
+    header: "D/C",
+    render: (l) => (
+      <>
+        {l.debitCredit}
+        {l.negativePosting ? (
+          <>
+            {" "}
+            <Badge tone="warning">Storno</Badge>
+          </>
+        ) : null}
+      </>
+    ),
+  },
+  { key: "amount", header: "Amount", align: "end" },
+  { key: "text", header: "Text", render: (l) => l.text ?? "" },
+];
+
+/** One posted entry with its lines and totals, and the reverse form (FR-11.8, FR-11.15). */
 export function EntryScreen() {
   const { id = "" } = useParams();
+  const valid = UUID.test(id);
   const result = useQuery({
     queryKey: ["ledger", "entry", id],
     queryFn: () => fetchEntry(id),
-    enabled: UUID.test(id),
+    enabled: valid,
   });
 
-  if (!UUID.test(id)) return <p role="alert">The entry id in the link is not valid.</p>;
-  if (result.isPending) return <p role="status">Loading entry…</p>;
-  if (result.isError) return <p role="alert">{(result.error as Error).message}</p>;
-
+  if (!valid) {
+    return (
+      <div className={styles.stack}>
+        <PageHeader title="Journal entry" />
+        <Alert tone="danger" title="The entry id in the link is not valid" live="alert" />
+      </div>
+    );
+  }
+  if (result.isError) {
+    return (
+      <div className={styles.stack}>
+        <PageHeader title="Journal entry" />
+        <Alert tone="danger" title="Could not load the entry" live="alert" action={<Button size="sm" onClick={() => void result.refetch()}>Try again</Button>}>
+          {(result.error as Error).message}
+        </Alert>
+      </div>
+    );
+  }
   const entry = result.data;
   return (
-    <section aria-labelledby="entry-heading">
-      <h1 id="entry-heading">Journal entry {entry.voucher}</h1>
-      <dl>
-        <dt>Posting sequence</dt>
-        <dd>{entry.postingSequence}</dd>
-        <dt>Posting date</dt>
-        <dd>{entry.postingDate}</dd>
-        <dt>Period</dt>
-        <dd>{entry.periodKey}</dd>
-        <dt>Description</dt>
-        <dd>{entry.description ?? ""}</dd>
-        <dt>Trace</dt>
-        <dd>{entry.traceId}</dd>
-      </dl>
-      <table>
-        <caption>Lines</caption>
-        <thead>
-          <tr>
-            <th scope="col">Line</th>
-            <th scope="col">Account</th>
-            <th scope="col">Dimensions</th>
-            <th scope="col">D/C</th>
-            <th scope="col">Amount</th>
-            <th scope="col">Text</th>
-          </tr>
-        </thead>
-        <tbody>
-          {entry.lines.map((l) => (
-            <tr key={l.id}>
-              <td>{l.lineNumber}</td>
-              <td>{l.account}</td>
-              <td>{l.displayName}</td>
-              <td>{l.debitCredit}</td>
-              <td>{l.amount}</td>
-              <td>{l.text ?? ""}</td>
-            </tr>
-          ))}
-        </tbody>
-        <tfoot>
-          <tr>
-            <th scope="row" colSpan={4}>Totals ({entry.totals.currency})</th>
-            <td>{entry.totals.debit} / {entry.totals.credit}</td>
-            <td />
-          </tr>
-        </tfoot>
-      </table>
-    </section>
+    <div className={styles.stack}>
+      <PageHeader title={entry ? `Journal entry ${entry.voucher}` : "Journal entry"} description={entry?.description} />
+      {entry ? (
+        <Card title="Details">
+          <dl className={styles.details}>
+            <Detail term="Posting date" value={entry.postingDate} />
+            <Detail term="Period" value={entry.periodKey} />
+            <Detail term="Posting sequence" value={String(entry.postingSequence)} />
+            <Detail term={`Debit (${entry.totals.currency})`} value={entry.totals.debit} />
+            <Detail term={`Credit (${entry.totals.currency})`} value={entry.totals.credit} />
+            {entry.reversalOfEntryId ? (
+              <div className={styles.entry}>
+                <dt className={styles.term}>Reverses</dt>
+                <dd className={styles.value}>
+                  <Link to={`/ledger/entries/${entry.reversalOfEntryId}`}>Original entry</Link>
+                </dd>
+              </div>
+            ) : null}
+            {entry.reasonCode ? <Detail term="Reason code" value={entry.reasonCode} mono /> : null}
+            {entry.reasonComment ? <Detail term="Reason comment" value={entry.reasonComment} /> : null}
+            <Detail term="Trace" value={entry.traceId} mono />
+          </dl>
+        </Card>
+      ) : null}
+      <DataTable
+        label="Lines"
+        columns={lineColumns}
+        rows={entry?.lines ?? []}
+        getRowKey={(l) => l.id}
+        loading={result.isPending}
+        empty={{ title: "No lines" }}
+      />
+      {entry ? <ReverseEntryForm entry={entry} /> : null}
+    </div>
+  );
+}
+
+function Detail({ term, value, mono = false }: { term: string; value: string; mono?: boolean }) {
+  return (
+    <div className={styles.entry}>
+      <dt className={styles.term}>{term}</dt>
+      <dd className={mono ? `${styles.value} ${styles.mono}` : styles.value}>{value}</dd>
+    </div>
   );
 }

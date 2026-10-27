@@ -1,9 +1,11 @@
-# NOT-IMPLEMENTED — ledger (PSG-11, wave 11, slice 1)
+# NOT-IMPLEMENTED — ledger (PSG-11, wave 11, after slice 2)
 
-Every PSG-11 deliverable and acceptance criterion that slice 1 does not fully
-build. Status is either `later slice of PSG-11` (owned by this service, next
-slices) or `handoff` (needs another owner or a path outside `services/ledger/`
-and `apps/web/src/modules/ledger/`).
+Every PSG-11 deliverable and acceptance criterion not yet fully built. Slice 2
+added shared reason codes (D6, FR-11.15), reversal reason rules, negative
+(storno) postings in the balance projection (BR-11.16), the reason-code API and
+the reason-code and reverse screens. Status is either `later slice of PSG-11`
+(owned by this service, next slices) or `handoff` (needs another owner or a
+path outside `services/ledger/` and `apps/web/src/modules/ledger/`).
 
 ## Deliverables (ticket items 1–10)
 
@@ -11,10 +13,10 @@ and `apps/web/src/modules/ledger/`).
 |---|---|---|---|
 | D1 | Accounts, account structures with dimension validation rules | partial | Accounts, ledgers, atomic immutable idempotent posting are built. Account structures, constraint rows and versioning (FR-11.3, `LEDGER_STRUCTURE_NOT_FOUND`, `LEDGER_DIMENSION_REQUIRED`) are a later slice of PSG-11. |
 | D2 | Financial dimensions (up to 20 per ledger), default dimensions on master data, dimension validation | partial | Ledger holds the attribute names (max 20) and values are checked by format only. Dimension attribute/value CRUD, effective dating (`LEDGER_DIMENSION_INACTIVE`), default dimensions on party/product/site, and the precedence merge (FR-11.2) are a later slice. Value sync from backing entities consumes wave 7/8 events (handoff). |
-| D3 | Posting API with source linkage and reversal | partial | `POST /journal-entries` (source object, idempotency, 422 violations) and reversal (optional later date, never before the original; reversing a reversal re-instates) are built. Reason codes on reversal (FR-11.15) are not. |
+| D3 | Posting API with source linkage and reversal | partial | `POST /journal-entries` (source object, idempotency, 422 violations) and reversal (optional later date, never before the original; reversing a reversal re-instates) with reason codes (FR-11.15) are built. The reinstatement flag (`allow_reinstate`) is not. |
 | D4 | Balance projection rebuilt from the journal | partial | Projection is upserted in the posting transaction; rebuild recomputes and reports `rowsDiffering`. BR-11.7 shadow table, chunking per period, catch-up loop and 2-second advisory swap are not built; rebuild writes in place. |
 | D5 | Journal workspace: manual and recurring journals, templates, approval workflow, attachments | later slice of PSG-11 | Batches, names, status machine (BR-11.10), Temporal approval (wave 4) and attachments (FR-11.9–11.11) are not built. The web module contains no batch screens. |
-| D6 | Reason codes with required reversal reasons and negative-posting reversal | later slice of PSG-11 | `ReasonCode` CRUD (`/reason-codes`), `reversal_reason_required`, and negative posting `Balance` semantics (BR-11.16) are not built. Reversal currently writes the opposite side as a normal entry. |
+| D6 | Reason codes with required reversal reasons and negative-posting reversal | partial | Built: tenant `reason_code` catalogue (migration 0006, RLS), `GET/PUT /api/v1/ledger/reason-codes[/{code}]`, ledger parameters `reversalReasonRequired`/`negativePostingEnabled`, reason rules on reversal, reason fields on the reversing entry and `journal.reversed`, storno lines (BR-11.16) in the projection and its rebuild, and the web list/edit and reverse screens. Not built: see the FR-11.15 row. |
 | D7 | Advanced rule structures, default description templates, voucher attachments with document types and retention | later slice of PSG-11 | FR-11.16, FR-11.17 (`%n` templates, `LEDGER_DESCRIPTION_TRUNCATED`), FR-11.18 (document types, retention, `LEDGER_ATTACHMENT_RETAINED`) not built. Attachment storage waits on the wave 5 document framework (handoff). |
 | D8 | Open-item managed G/L accounts, clearing, residuals, activation runs, auto-clearing rules, tolerance groups | later slice of PSG-11 | FR-11.19 and FR-11.20 are not built. `open_item_managed` is not on the account yet. The `dev.passage.ledger.open-item.cleared.v1` event is not emitted. Wave 12 CurrencyPolicy is needed for clearing FX (handoff). |
 | D9 | User-defined validation rules (CEL), derivation/substitution strategy engine, functional area `FUNC_AREA` | later slice of PSG-11 | FR-11.21 and FR-11.22 are not built. The posting pipeline runs only the stages listed in the README; default descriptions, derivation, splitting and validation rules are absent. CEL evaluation needs a library decision (not in the allowed dependency list). |
@@ -32,15 +34,15 @@ and `apps/web/src/modules/ledger/`).
 | FR-11.6 gap-free `posting_sequence` from the wave 5 number sequence service | partial | Sequence and voucher are allocated gap-free from `ledger.next_sequence` inside the posting transaction (BR-11.5). The kernel `sequence` package is not available yet, so the allocation is local. Handoff to platform owner for the shared service; `check_voucher_used` is not built. |
 | FR-11.6 append-only enforcement | built | Triggers reject UPDATE, DELETE and TRUNCATE on `journal_entry`/`journal_line` for every role (0003); `passage_app` holds SELECT and INSERT only (0005, applied when the role exists). Store test `TestPostgres_JournalIsAppendOnly` asserts both. |
 | FR-11.7 balance fields and period-to-date | partial | `debit`, `credit`, `net`, `line_count`, `last_posting_sequence` are built. Opening balances in period 0 (wave 14) are not. |
-| FR-11.8 reversal: once-only, line links, reinstatement | partial | Once-only (`LEDGER_REVERSAL_ALREADY_REVERSED`), line links, reversal date ≥ original (`LEDGER_DATE_INVALID`) and reinstatement by reversing the reversal are built. Reason codes (FR-11.15) are not. |
+| FR-11.8 reversal: once-only, line links, reinstatement | partial | Once-only (`LEDGER_REVERSAL_ALREADY_REVERSED`), line links, reversal date ≥ original (`LEDGER_DATE_INVALID`), reason codes (FR-11.15) and reinstatement by reversing the reversal are built. `allow_reinstate` (reversing a reversal is allowed by default here) is not a flag yet. |
 | BR-11.1 balance re-checked inside the database | built | Deferred constraint trigger `journal_entry_balanced` re-sums each entry's lines at commit. |
 | BR-11.2 statistical zero-amount lines (`quantity` ≠ 0) | later slice of PSG-11 | `quantity`/`unit` are not on `journal_line` yet; a zero line is accepted only with `text`. |
 | BR-11.8 `allow_recon_accounts` journal-name override | later slice of PSG-11 | Manual journals (source `ledger`/`manual_journal`) are refused on reconciliation accounts; the per-journal-name override waits on journal names (D5). |
 | `amount_rpt` and `Balance.currency_type` txn/rpt rows | later slice of PSG-11 | Wave 11 is single-currency: lines store `amount_txn` = `amount_acct`, and the projection keeps `acct` rows only. Reporting currency arrives with wave 12. |
+| FR-11.15 shared reason codes | partial | Built: catalogue, CRUD API, ledger-level `reversal_reason_required` and `negative_posting_enabled`, active / `applies_to` ledger / `requires_comment` / `alternative_posting_date_allowed` checks, storno lines, reason fields on the entry and on `journal.reversed`. Not built: the journal-name level `reversal_reason_required` (waits on journal names, D5); the parameters live on the ledger rather than the legal entity (PRD §2.11 parameter table) until legal-entity parameters exist; translatable `name` (single-language until the wave 5 translation service, handoff); the "Reason code usage" report; reason codes on clearing reset and realignment (D8, D10). Other modules (bank, customer, vendor, fixed asset, counting) read the shared table in their own waves. |
 | FR-11.12 source object and `source_line_ref` | built | — |
 | FR-11.13 opening balances via the migration framework | handoff | Needs wave 10 migration framework and the conversion-suspense account; the demo chart and opening balances (deploy) are also not loaded. |
 | FR-11.14 query API: line query (keyset), balance filters by dimension, `group_by` | partial | Trial balance over account and period range is built. Line query with keyset cursor, `dim.{attr}` filters, `group_by`, and the account × dimension inquiries are not built. |
-| FR-11.15 reason codes | later slice of PSG-11 | See D6. |
 | FR-11.16 – FR-11.24 | later slice of PSG-11 | See D7–D10. |
 
 ## API and contract items
@@ -52,7 +54,7 @@ and `apps/web/src/modules/ledger/`).
 | `GET /v1/ledger/openapi.yaml`, `/asyncapi.yaml`, `/error-codes` (kernel-standard endpoints) | handoff | Served by the kernel for every service; not in this service's code. |
 | `RateLimit-*`, `Retry-After`, `X-Passage-Api-Build`, `Deprecation`/`Sunset` headers | handoff | Gateway (edge-identity) and kernel responsibilities. |
 | Problem `serviceCode` (`LED-xxxx`) and `errors[]` catalogue | later slice of PSG-11 | Ledger problems carry the `LEDGER_*` code; the `serviceCode` mapping is not yet in `api/openapi.yaml` or the README. |
-| `dev.passage.ledger.batch.status-changed.v1`, `account.changed.v1`, `rules.changed.v1`, `open-item.cleared.v1`, `realignment.completed.v1` | later slice of PSG-11 | Their producing features are not built. `journal.reversed` omits `reason_code` (see D6). `journal.posted` carries a single-currency `totals` object instead of `txn[]/acct/rpt` (multi-currency is wave 12). |
+| `dev.passage.ledger.batch.status-changed.v1`, `account.changed.v1`, `rules.changed.v1`, `open-item.cleared.v1`, `realignment.completed.v1` | later slice of PSG-11 | Their producing features are not built. `journal.posted` carries a single-currency `totals` object instead of `txn[]/acct/rpt` (multi-currency is wave 12). |
 | Authorization against OPA (`allow`, `legalEntityScopes`, obligations) | handoff | The service uses the kernel's local `authz.RequireDuty` (DutyPolicy). Wave 2 platform owns the OPA decision point. Legal-entity scope via `passage.legal_entity_scopes` is set by the kernel's `dbx.WithTenantTx`. |
 
 ## Readiness, operations and deployment
@@ -79,6 +81,7 @@ and `apps/web/src/modules/ledger/`).
 | AC3 duplicate `Post` with the same key is a no-op | built | Store test covers replay returning the same entry. |
 | AC4 throughput 5,000 lines/s, p99 < 200 ms | later slice of PSG-11 | Performance test on the dev cluster; needs the deployed stack. |
 | AC5 reversal is an exact negating entry linked to the original | built | Store test asserts swapped D/C, reversal line links and single reversal. |
+| PRD AC-11.11 reason required on reversal; storno restores turnover | partial | Built at ledger level: `TestPostgres_ReversalRequiresReasonWhenConfigured` (422 `LEDGER_REASON_REQUIRED`) and `TestPostgres_NegativeReversalRestoresTurnover` (trial balance debit and credit back to their pre-posting values, rebuild agrees, re-instatement restores them). The journal-name trigger waits on D5. |
 | AC6 every deliverable has code or a reason | built | This file. |
 | AC7 `go vet ./... && go test ./...`; web `vitest` and `tsc --noEmit`; OpenAPI/AsyncAPI match code; chart lints | built | All pass. Store tests skip without `PASSAGE_TEST_DATABASE_URL`; at review they were run against Postgres 16 with `PASSAGE_TEST_APP_DATABASE_URL` as `passage_app`. `internal/api/openapi_test.go` fails on route or duty drift from `api/openapi.yaml`; `internal/events` tests that every event type is in `events/asyncapi.yaml`. |
 
@@ -90,6 +93,6 @@ and `apps/web/src/modules/ledger/`).
 | Error-code table (120 cases) | later slice of PSG-11 | Only the codes raised today are covered. |
 | Idempotency contract tests (OpenAPI + Pact) | later slice of PSG-11 | Pact not set up; behaviour is covered by store tests. |
 | Rebuild equivalence after concurrent load | later slice of PSG-11 | Needs the shadow-table rebuild (D4). |
-| Journal workspace E2E (Playwright + axe) | later slice of PSG-11 | No journal workspace yet; the web module has only a trial balance and posting client. |
+| Journal workspace E2E (Playwright + axe) | later slice of PSG-11 | No journal workspace yet; the web module has the trial balance, the entry screen with its reverse form and the reason-code screens, covered by vitest with an axe AA check, not by Playwright. |
 | Append-only SQL test for app role and owner | built | `TestPostgres_JournalIsAppendOnly` (needs the test database). |
 | Reconciliation checks: subledger ⇄ journal, projection ⇄ events | later slice of PSG-11 | Subledgers arrive in waves 16+; projection ⇄ events needs the event consumer. |

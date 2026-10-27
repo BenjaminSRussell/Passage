@@ -42,6 +42,7 @@ export const entryLineSchema = z.object({
   amount: z.string(),
   text: z.string().optional(),
   reversalOfLineId: z.string().optional(),
+  negativePosting: z.boolean().optional(),
 });
 
 export const entrySchema = z.object({
@@ -53,11 +54,44 @@ export const entrySchema = z.object({
   periodKey: z.string(),
   description: z.string().optional(),
   reversalOfEntryId: z.string().optional(),
+  reasonCode: z.string().optional(),
+  reasonComment: z.string().optional(),
   traceId: z.string(),
   totals: z.object({ currency: z.string(), debit: z.string(), credit: z.string() }),
   lines: z.array(entryLineSchema),
 });
 export type Entry = z.infer<typeof entrySchema>;
+
+/** Shared financial reason code (FR-11.15). */
+export const reasonCodeSchema = z.object({
+  code: z.string(),
+  name: z.string(),
+  appliesTo: z.array(z.string()),
+  requiresComment: z.boolean(),
+  negativePostingAllowed: z.boolean(),
+  alternativePostingDateAllowed: z.boolean(),
+  active: z.boolean(),
+  updatedAt: z.string(),
+});
+export type ReasonCode = z.infer<typeof reasonCodeSchema>;
+
+/** Body of PUT /api/v1/ledger/reason-codes/{code}. */
+export interface ReasonCodeInput {
+  name: string;
+  appliesTo: string[];
+  requiresComment: boolean;
+  negativePostingAllowed: boolean;
+  alternativePostingDateAllowed: boolean;
+  active: boolean;
+}
+
+/** Body of POST /api/v1/ledger/journal-entries/{id}/reverse. */
+export interface ReverseInput {
+  reasonCode?: string;
+  reasonComment?: string;
+  postingDate?: string;
+  description?: string;
+}
 
 /** Error raised for any non-2xx response. `violations` is set for 422 rule rejections. */
 export class LedgerApiError extends Error {
@@ -114,4 +148,73 @@ export function fetchTrialBalance(q: TrialBalanceQuery, fetchImpl: FetchLike = d
 /** GET /api/v1/ledger/journal-entries/{id} (entry with lines). */
 export function fetchEntry(id: string, fetchImpl: FetchLike = defaultFetch): Promise<Entry> {
   return getJSON(`/api/v1/ledger/journal-entries/${encodeURIComponent(id)}`, entrySchema, fetchImpl);
+}
+
+const reasonCodeListSchema = z.object({ items: z.array(reasonCodeSchema) });
+
+/** GET /api/v1/ledger/reason-codes (shared reason codes, ordered by code). */
+export async function fetchReasonCodes(fetchImpl: FetchLike = defaultFetch): Promise<ReasonCode[]> {
+  const body = await getJSON("/api/v1/ledger/reason-codes", reasonCodeListSchema, fetchImpl);
+  return body.items;
+}
+
+/** GET /api/v1/ledger/reason-codes/{code}; 404 LEDGER_REASON_NOT_FOUND when missing. */
+export function fetchReasonCode(code: string, fetchImpl: FetchLike = defaultFetch): Promise<ReasonCode> {
+  return getJSON(`/api/v1/ledger/reason-codes/${encodeURIComponent(code)}`, reasonCodeSchema, fetchImpl);
+}
+
+/** The modules a shared reason code can apply to (FR-11.15), in PRD order. */
+export const REASON_MODULES = [
+  "ledger",
+  "bank",
+  "customer",
+  "vendor",
+  "fixed_asset",
+  "inventory_counting",
+  "tax",
+  "project",
+] as const;
+
+/** Reason code format enforced by the service: ^[A-Z0-9_]{1,10}$. */
+export const REASON_CODE = /^[A-Z0-9_]{1,10}$/;
+
+/** A fresh Idempotency-Key for one user-intended reversal. */
+export function newKey(): string {
+  return crypto.randomUUID();
+}
+
+/** PUT /api/v1/ledger/reason-codes/{code}: creates or replaces a reason code. */
+export async function putReasonCode(
+  code: string,
+  input: ReasonCodeInput,
+  fetchImpl: FetchLike = defaultFetch,
+): Promise<ReasonCode> {
+  const res = await fetchImpl(`/api/v1/ledger/reason-codes/${encodeURIComponent(code)}`, {
+    method: "PUT",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw await readProblem(res);
+  return reasonCodeSchema.parse(await res.json());
+}
+
+const reverseResultSchema = z.object({ entries: z.array(entrySchema) });
+
+/**
+ * POST /api/v1/ledger/journal-entries/{id}/reverse. The caller supplies a fresh
+ * Idempotency-Key per attempt so a retry after a timeout replays instead of double-reversing.
+ */
+export async function reverseEntry(
+  id: string,
+  input: ReverseInput,
+  idempotencyKey: string,
+  fetchImpl: FetchLike = defaultFetch,
+): Promise<Entry[]> {
+  const res = await fetchImpl(`/api/v1/ledger/journal-entries/${encodeURIComponent(id)}/reverse`, {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw await readProblem(res);
+  return reverseResultSchema.parse(await res.json()).entries;
 }

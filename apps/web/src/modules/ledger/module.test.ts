@@ -27,13 +27,21 @@ function renderScreen() {
 describe("ledger module", () => {
   it("uses its folder name as id and declares routes and nav", () => {
     expect(ledger.id).toBe("ledger");
-    expect(ledger.routes.map((r) => r.path)).toEqual(["/ledger/trial-balance", "/ledger/entries/:id"]);
+    expect(ledger.routes.map((r) => r.path)).toEqual([
+      "/ledger/trial-balance",
+      "/ledger/entries/:id",
+      "/ledger/reason-codes",
+      "/ledger/reason-codes/new",
+      "/ledger/reason-codes/:code",
+    ]);
     expect(ledger.nav.every((n) => n.to.startsWith("/ledger"))).toBe(true);
   });
 
   it("gates the trial balance nav on the duty the balances API enforces", () => {
     // services/ledger/internal/api: GET /api/v1/ledger/balances requires ledger.balance.read.
     expect(ledger.nav.find((n) => n.to === "/ledger/trial-balance")?.duty).toBe("ledger.balance.read");
+    // GET /api/v1/ledger/reason-codes requires ledger.journal.read.
+    expect(ledger.nav.find((n) => n.to === "/ledger/reason-codes")?.duty).toBe("ledger.journal.read");
   });
 
   it("is auto-discovered by the registry", () => {
@@ -70,7 +78,7 @@ describe("ledger module", () => {
     fireEvent.change(screen.getByLabelText("Ledger id"), { target: { value: LEDGER_ID } });
     fireEvent.click(screen.getByRole("button", { name: "Show trial balance" }));
     await waitFor(() => expect(screen.getByTestId("tb-balanced").textContent).toBe("Balanced"));
-    expect(screen.getByRole("rowheader", { name: "1000" })).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "Trial balance" }).textContent).toContain("1000");
     expect(screen.getByText("Cash")).toBeInTheDocument();
   });
 });

@@ -149,6 +149,7 @@ components:
         text: { type: string }
         sourceLineRef: { type: string }
         reversalOfLineId: { type: string, format: uuid }
+        negativePosting: { type: boolean, description: Storno line; the projection reduces the original side (BR-11.16) }
     Entry:
       type: object
       properties:
@@ -163,6 +164,8 @@ components:
         description: { type: string }
         source: { $ref: "#/components/schemas/Source" }
         reversalOfEntryId: { type: string, format: uuid }
+        reasonCode: { type: string }
+        reasonComment: { type: string }
         postedAt: { type: string, format: date-time }
         postedBy: { type: string }
         traceId: { type: string }
@@ -197,7 +200,25 @@ components:
           items: { type: string }
         firstOpenDate: { type: string, format: date }
         futurePostingDays: { type: integer, minimum: 0, maximum: 730 }
+        reversalReasonRequired: { type: boolean }
+        negativePostingEnabled: { type: boolean }
         createdAt: { type: string, format: date-time }
+    ReasonCode:
+      type: object
+      properties:
+        code: { type: string, pattern: '^[A-Z0-9_]{1,10}$' }
+        name: { type: string, maxLength: 60 }
+        appliesTo:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum: [ledger, bank, customer, vendor, fixed_asset, inventory_counting, tax, project]
+        requiresComment: { type: boolean }
+        negativePostingAllowed: { type: boolean }
+        alternativePostingDateAllowed: { type: boolean }
+        active: { type: boolean }
+        updatedAt: { type: string, format: date-time }
     Account:
       type: object
       properties:
@@ -317,6 +338,8 @@ paths:
                 dimensionAttributes: { type: array, maxItems: 20, items: { type: string } }
                 firstOpenDate: { type: string, format: date }
                 futurePostingDays: { type: integer, minimum: 0, maximum: 730, default: 366 }
+                reversalReasonRequired: { type: boolean, default: true, description: FR-11.15 }
+                negativePostingEnabled: { type: boolean, default: false, description: BR-11.16 }
       responses:
         "201":
           description: Ledger created
@@ -487,7 +510,12 @@ paths:
         reversalOfLineId). An entry can be reversed once (LEDGER_REVERSAL_ALREADY_REVERSED); a
         reversal can itself be reversed to re-instate the original. The reversal date defaults to
         the original posting date and may not precede it (LEDGER_DATE_INVALID).
-        Reason codes (FR-11.15) are not yet accepted; see NOT-IMPLEMENTED.md.
+        A reason code (FR-11.15) is required when the ledger's reversalReasonRequired is true; it must
+        be active and apply to the ledger module, and a comment is required when the code says so. A
+        code with alternativePostingDateAllowed = false refuses any date other than the original. A code
+        flagged negativePostingAllowed posts storno lines (negativePosting = true, BR-11.16) when the
+        ledger's negativePostingEnabled is true. Violations (422): LEDGER_REASON_REQUIRED,
+        LEDGER_REASON_INVALID_MODULE, LEDGER_DATE_INVALID, LEDGER_NEGATIVE_POSTING_DISABLED.
       parameters:
         - $ref: "#/components/parameters/EntryId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -500,6 +528,8 @@ paths:
               properties:
                 postingDate: { type: string, format: date, description: Defaults to the original posting date }
                 description: { type: string, maxLength: 255 }
+                reasonCode: { type: string, pattern: '^[A-Z0-9_]{1,10}$', description: Shared reason code (ledger applies_to) }
+                reasonComment: { type: string, maxLength: 255 }
       responses:
         "201":
           description: Reversal posted
@@ -600,6 +630,89 @@ paths:
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
         "404": { $ref: "#/components/responses/Problem404" }
+  /api/v1/ledger/reason-codes:
+    get:
+      tags: [reasons]
+      operationId: listReasonCodes
+      x-passage-duty: ledger.journal.read
+      description: Shared financial reason codes of the tenant (FR-11.15), ordered by code.
+      responses:
+        "200":
+          description: Reason codes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/ReasonCode" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+  /api/v1/ledger/reason-codes/{code}:
+    get:
+      tags: [reasons]
+      operationId: getReasonCode
+      x-passage-duty: ledger.journal.read
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[A-Z0-9_]{1,10}$' }
+      responses:
+        "200":
+          description: Reason code
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReasonCode" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+    put:
+      tags: [reasons]
+      operationId: putReasonCode
+      x-passage-duty: ledger.reason.write
+      description: |
+        Creates (201) or replaces (200) a reason code. Naturally idempotent. Codes are deactivated
+        with active = false, never deleted, because journal entries reference them.
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[A-Z0-9_]{1,10}$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, appliesTo]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 60 }
+                appliesTo:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: string
+                    enum: [ledger, bank, customer, vendor, fixed_asset, inventory_counting, tax, project]
+                requiresComment: { type: boolean, default: false }
+                negativePostingAllowed: { type: boolean, default: false }
+                alternativePostingDateAllowed: { type: boolean, default: true }
+                active: { type: boolean, default: true }
+      responses:
+        "200":
+          description: Reason code replaced
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReasonCode" }
+        "201":
+          description: Reason code created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReasonCode" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
   /readyz:
     get:
       tags: [ops]

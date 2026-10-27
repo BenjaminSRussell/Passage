@@ -2,7 +2,7 @@
 
 The ledger is the universal journal: one append-only, double-entry journal per
 ledger, the chart of accounts, the posting API every subledger calls, and the
-balance projection that trial balances read. Wave 11 (PSG-11, slice 1).
+balance projection that trial balances read. Wave 11 (PSG-11, slices 1 and 2).
 
 Reference: `docs/prd/phase-2-financial-core.md` section 2.11. What is built and
 what is not is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
@@ -38,6 +38,29 @@ what is not is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
   holds only SELECT and INSERT on them; a deferred constraint trigger re-checks at
   commit that each entry's debits equal its credits.
 
+## What slice 2 adds
+
+- Shared financial reason codes (FR-11.15): one list per tenant,
+  `GET /api/v1/ledger/reason-codes`, `GET`/`PUT /api/v1/ledger/reason-codes/{code}`
+  (201 created, 200 replaced). Codes are `^[A-Z0-9_]{1,10}$` with a name,
+  `appliesTo` modules, `requiresComment`, `negativePostingAllowed`,
+  `alternativePostingDateAllowed` and `active`. Codes are deactivated, never
+  deleted, because reversing entries reference them.
+- Ledger parameters `reversalReasonRequired` (default true) and
+  `negativePostingEnabled` (default false), set when the ledger is created.
+- Reversal reasons: the reverse request takes `reasonCode` and `reasonComment`
+  (at most 255 characters). The code must exist, be active and apply to `ledger`;
+  a comment is needed when the code requires one; a code that forbids an
+  alternative posting date refuses any date but the original. Both fields are
+  stored on the reversing entry and carried by `journal.reversed`.
+- Negative postings (storno, BR-11.16): when the code allows negative posting and
+  the ledger enables it, the reversing lines keep D/C with positive amounts and
+  `negativePosting = true`, and the balance projection (and its rebuild) reduces
+  the original side, so trial balance debit and credit turnover return to their
+  pre-posting values (AC-11.11). Re-instating a storno writes ordinary lines.
+- Web: a reason-code list and edit form, and a reverse form with reason on the
+  journal entry screen (`apps/web/src/modules/ledger`).
+
 ## Layout
 
 ```
@@ -46,7 +69,7 @@ internal/domain/       pure rules: validation, combination hashing, balance aggr
 internal/store/        Postgres repositories (pgx, RLS through dbx.WithTenantTx)
 internal/api/          HTTP handlers, DTOs, duties (authz.RequireDuty)
 internal/events/       event type constants and payloads
-migrations/            0001..0005 SQL, applied in order by dbx.Migrate (0005: passage_app grants)
+migrations/            0001..0006 SQL, applied in order by dbx.Migrate (0005: passage_app grants; 0006: reason codes)
 api/openapi.yaml       OpenAPI 3.1 for every route
 events/asyncapi.yaml   AsyncAPI 3 for every event
 charts/ledger/         Helm chart (ports 8080 http, 9090 admin; readiness on admin /readyz)
@@ -88,11 +111,12 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
 |---|---|
 | `ledger.ledger.write` | `POST /ledgers` |
 | `ledger.account.write` | `PUT /charts/{chart}/accounts/{number}` |
-| `ledger.journal.read` | `GET /ledgers/{id}`, `GET /charts/{chart}/accounts`, `GET /journal-entries/{id}` |
+| `ledger.journal.read` | `GET /ledgers/{id}`, `GET /charts/{chart}/accounts`, `GET /journal-entries/{id}`, `GET /reason-codes[/{code}]` |
 | `ledger.journal.post` | `POST /journal-entries`, `POST /validate` |
 | `ledger.journal.reverse` | `POST /journal-entries/{id}/reverse` |
 | `ledger.balance.read` | `GET /balances` |
 | `ledger.balance.rebuild` | `POST /balances:rebuild` |
+| `ledger.reason.write` | `PUT /reason-codes/{code}` (PRD duty "Maintain reason codes") |
 
 ## Error codes
 
@@ -112,13 +136,17 @@ today:
 | `LEDGER_ACCOUNT_SUSPENDED` | Posting date on or after `suspended_from` (FR-11.1) |
 | `LEDGER_RECON_ACCOUNT_MANUAL` | Manual line on a reconciliation account (BR-11.8) |
 | `LEDGER_DIMENSION_INVALID` | Dimension not defined on the ledger, or value malformed (FR-11.2) |
-| `LEDGER_DATE_INVALID` | Posting date more than `futurePostingDays` ahead (BR-11.4), or a reversal dated before the original (FR-11.8) |
+| `LEDGER_DATE_INVALID` | Posting date more than `futurePostingDays` ahead (BR-11.4), a reversal dated before the original (FR-11.8), or a reversal on another date with a reason code that forbids it (FR-11.15) |
 | `LEDGER_PERIOD_CLOSED` | Posting date before the ledger's `firstOpenDate` (BR-11.4; full period status is wave 14) |
 | `LEDGER_REVERSAL_ALREADY_REVERSED` | Entry already has a reversing entry (FR-11.8) |
+| `LEDGER_REASON_REQUIRED` | Reversal without a reason code on a ledger that requires one, an unknown or inactive code, or a missing comment the code requires (FR-11.15) |
+| `LEDGER_REASON_INVALID_MODULE` | Reason code does not apply to `ledger` (FR-11.15) |
+| `LEDGER_NEGATIVE_POSTING_DISABLED` | Reason code allows negative posting but the ledger does not (BR-11.16) |
 | `LEDGER_IDEMPOTENCY_CONFLICT` | 409: key reused with a different payload (BR-11.6) |
 | `LEDGER_IDEMPOTENCY_IN_PROGRESS` | 409 with `Retry-After: 1`: the same key is being committed by another request (FR-11.5) |
 | `LEDGER_NOT_FOUND` | 404: ledger does not exist or is outside the caller's tenant or legal-entity scope |
 | `LEDGER_ENTRY_NOT_FOUND` | 404: journal entry does not exist or is outside the caller's scope |
+| `LEDGER_REASON_NOT_FOUND` | 404: reason code does not exist in the tenant |
 | `LEDGER_CODE_DUPLICATE` | 409: a ledger with this code already exists in the tenant |
 
 Platform codes: `AUTH-0001` (401, missing or malformed tenant), `AUTH-0003`

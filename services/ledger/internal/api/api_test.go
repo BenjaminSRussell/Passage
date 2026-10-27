@@ -21,7 +21,7 @@ const (
 	testLedger = "0190a000-0000-7000-8000-000000000001"
 	testDoc    = "0190a000-0000-7000-8000-000000000002"
 	testEntry  = "0190a000-0000-7000-8000-000000000003"
-	allDuties  = dutyLedgerWrite + "," + dutyAccountWrite + "," + dutyRead + "," + dutyBalanceRead + "," + dutyPost + "," + dutyReverse + "," + dutyRebuild
+	allDuties  = dutyLedgerWrite + "," + dutyAccountWrite + "," + dutyRead + "," + dutyBalanceRead + "," + dutyPost + "," + dutyReverse + "," + dutyRebuild + "," + dutyReasonWrite
 )
 
 // fakeStore records the inputs the handlers pass down and answers with the
@@ -33,6 +33,10 @@ type fakeStore struct {
 	replay   bool
 	accounts []store.Account
 	validate domain.Result
+	reasons  []store.ReasonCode
+	created  bool
+	// putReasons records the reason codes the handlers wrote.
+	putReasons []store.ReasonCode
 }
 
 func (f *fakeStore) PutAccount(_ context.Context, chart, number string, in store.Account) (store.Account, bool, error) {
@@ -84,6 +88,25 @@ func (f *fakeStore) TrialBalance(context.Context, store.BalanceFilter) (store.Tr
 
 func (f *fakeStore) RebuildBalances(context.Context, string) (store.RebuildResult, error) {
 	return store.RebuildResult{}, f.err
+}
+
+func (f *fakeStore) ListReasonCodes(context.Context) ([]store.ReasonCode, error) {
+	return f.reasons, f.err
+}
+
+func (f *fakeStore) GetReasonCode(_ context.Context, code string) (store.ReasonCode, error) {
+	for _, r := range f.reasons {
+		if r.Code == code {
+			return r, f.err
+		}
+	}
+	return store.ReasonCode{}, httpx.NewProblem(http.StatusNotFound, "LEDGER_REASON_NOT_FOUND", "reason code not found")
+}
+
+func (f *fakeStore) PutReasonCode(_ context.Context, code string, in store.ReasonCode) (store.ReasonCode, bool, error) {
+	in.Code = code
+	f.putReasons = append(f.putReasons, in)
+	return in, f.created, f.err
 }
 
 func (f *fakeStore) Ping(context.Context) error { return f.err }
@@ -264,6 +287,9 @@ func TestRoutes_RequireDuties(t *testing.T) {
 		{http.MethodPost, "/api/v1/ledger/balances:rebuild", `{"ledgerId":"` + testLedger + `"}`, dutyRebuild},
 		{http.MethodPost, "/api/v1/ledger/ledgers", `{}`, dutyLedgerWrite},
 		{http.MethodPut, "/api/v1/ledger/charts/STD/accounts/6010", `{}`, dutyAccountWrite},
+		{http.MethodGet, "/api/v1/ledger/reason-codes", "", dutyRead},
+		{http.MethodGet, "/api/v1/ledger/reason-codes/ERR01", "", dutyRead},
+		{http.MethodPut, "/api/v1/ledger/reason-codes/ERR01", `{"name":"x","appliesTo":["ledger"]}`, dutyReasonWrite},
 	}
 	for _, rt := range routes {
 		others := strings.ReplaceAll(allDuties, rt.duty, "")

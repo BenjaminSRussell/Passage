@@ -49,6 +49,8 @@ type JournalReversedData struct {
 	ReversingEntryID string `json:"reversingEntryId"`
 	LedgerID         string `json:"ledgerId"`
 	PostingDate      string `json:"postingDate"`
+	ReasonCode       string `json:"reasonCode,omitempty"`
+	ReasonComment    string `json:"reasonComment,omitempty"`
 }
 
 // BalanceRebuiltData is the payload of dev.passage.ledger.balance.rebuilt.v1.

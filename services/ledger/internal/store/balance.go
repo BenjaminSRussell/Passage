@@ -64,8 +64,11 @@ func (s *Postgres) TrialBalance(ctx context.Context, f BalanceFilter) (TrialBala
 // rebuiltCTE recomputes the projection from the journal for one ledger.
 const rebuiltCTE = `with built as (
 	select l.main_account_id, l.dimension_combination_id, e.period_key,
-		sum(case when l.debit_credit = 'D' then l.amount_acct else 0 end) as debit,
-		sum(case when l.debit_credit = 'C' then l.amount_acct else 0 end) as credit,
+		-- A negative posting (BR-11.16) reduces the original side, so its contribution is negated.
+		sum(case when l.debit_credit = 'D' and not l.negative_posting then l.amount_acct
+			when l.debit_credit = 'C' and l.negative_posting then -l.amount_acct else 0 end) as debit,
+		sum(case when l.debit_credit = 'C' and not l.negative_posting then l.amount_acct
+			when l.debit_credit = 'D' and l.negative_posting then -l.amount_acct else 0 end) as credit,
 		count(*) as line_count, max(e.posting_sequence) as last_seq
 	from journal_line l join journal_entry e on e.tenant_id = l.tenant_id and e.id = l.entry_id
 	where l.tenant_id = $1 and e.ledger_id = $2

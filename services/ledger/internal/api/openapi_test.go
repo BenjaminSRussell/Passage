@@ -77,6 +77,9 @@ func TestOpenAPI_MatchesRoutes(t *testing.T) {
 		"POST /api/v1/ledger/validate":                        dutyPost,
 		"GET /api/v1/ledger/balances":                         dutyBalanceRead,
 		"POST /api/v1/ledger/balances:rebuild":                dutyRebuild,
+		"GET /api/v1/ledger/reason-codes":                     dutyRead,
+		"GET /api/v1/ledger/reason-codes/{code}":              dutyRead,
+		"PUT /api/v1/ledger/reason-codes/{code}":              dutyReasonWrite,
 	}
 	for op, want := range duties {
 		if got := documented[op]; got != want {

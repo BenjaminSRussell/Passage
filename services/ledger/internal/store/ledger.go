@@ -92,11 +92,12 @@ func (s *Postgres) CreateLedger(ctx context.Context, in Ledger) (Ledger, error) 
 	var out Ledger
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var scanErr error
-		out, scanErr = scanLedger(tx.QueryRow(ctx, `insert into ledger (tenant_id, id, legal_entity_id, code, name, chart_code, currency, dimension_attributes, first_open_date, future_posting_days)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, nullif($9::text, '')::date, $10)
-			returning id, legal_entity_id, code, name, chart_code, currency, dimension_attributes, first_open_date::text, future_posting_days, next_sequence, created_at`,
+		out, scanErr = scanLedger(tx.QueryRow(ctx, `insert into ledger (tenant_id, id, legal_entity_id, code, name, chart_code, currency, dimension_attributes,
+			first_open_date, future_posting_days, reversal_reason_required, negative_posting_enabled)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, nullif($9::text, '')::date, $10, $11, $12)
+			returning `+ledgerFields,
 			p.TenantID, in.ID, in.LegalEntityID, in.Code, in.Name, in.ChartCode, in.Currency, in.DimensionAttributes,
-			derefString(in.FirstOpenDate), in.FuturePostingDays))
+			derefString(in.FirstOpenDate), in.FuturePostingDays, in.ReversalReasonRequired, in.NegativePostingEnabled))
 		return scanErr
 	})
 	if isUnique(err) {

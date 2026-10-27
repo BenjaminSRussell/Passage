@@ -319,6 +319,7 @@ func TestPostgres_TenantAndLegalEntityIsolation(t *testing.T) {
 		t.Fatalf("post: %v", err)
 	}
 	id := posted.Entries[0].ID
+	putReason(t, e, "ISO01", ReasonCode{Name: "Isolation", AppliesTo: []string{"ledger"}, AlternativePostingDateAllowed: true, Active: true})
 	otherTenant := principalCtx(testkit.TenantID(2), "")
 	if _, err := e.store.GetEntry(otherTenant, id); problemCode(err) != "LEDGER_ENTRY_NOT_FOUND" {
 		t.Fatalf("another tenant must not see the entry, got %v", err)
@@ -334,7 +335,7 @@ func TestPostgres_TenantAndLegalEntityIsolation(t *testing.T) {
 		t.Fatalf("a caller scoped to another legal entity must not see the entry, got %v", err)
 	}
 	// Direct table reads through RLS: the other tenant sees no rows at all.
-	for _, table := range []string{"journal_entry", "journal_line", "balance", "outbox", "idempotency_keys", "ledger", "main_account", "dimension_combination"} {
+	for _, table := range []string{"journal_entry", "journal_line", "balance", "outbox", "idempotency_keys", "ledger", "main_account", "dimension_combination", "reason_code"} {
 		var n int
 		err := dbx.WithTenantTx(otherTenant, e.pool, func(tx pgx.Tx) error {
 			return tx.QueryRow(otherTenant, `select count(*) from `+table).Scan(&n)

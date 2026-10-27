@@ -41,6 +41,9 @@ type Store interface {
 	ValidateEntry(ctx context.Context, in PostInput) (domain.Result, error)
 	TrialBalance(ctx context.Context, f BalanceFilter) (TrialBalance, error)
 	RebuildBalances(ctx context.Context, ledgerID string) (RebuildResult, error)
+	ListReasonCodes(ctx context.Context) ([]ReasonCode, error)
+	GetReasonCode(ctx context.Context, code string) (ReasonCode, error)
+	PutReasonCode(ctx context.Context, code string, in ReasonCode) (ReasonCode, bool, error)
 	Ping(ctx context.Context) error
 }
 
@@ -66,18 +69,22 @@ type Account struct {
 }
 
 // Ledger is one accounting ledger of a legal entity.
+// ReversalReasonRequired makes a reason code mandatory on reversal (FR-11.15);
+// NegativePostingEnabled permits reason codes that allow storno postings (BR-11.16).
 type Ledger struct {
-	ID                  string    `json:"id"`
-	LegalEntityID       string    `json:"legalEntityId"`
-	Code                string    `json:"code"`
-	Name                string    `json:"name"`
-	ChartCode           string    `json:"chartCode"`
-	Currency            string    `json:"currency"`
-	DimensionAttributes []string  `json:"dimensionAttributes"`
-	FirstOpenDate       *string   `json:"firstOpenDate,omitempty"`
-	FuturePostingDays   int       `json:"futurePostingDays"`
-	NextSequence        int64     `json:"-"`
-	CreatedAt           time.Time `json:"createdAt"`
+	ID                     string    `json:"id"`
+	LegalEntityID          string    `json:"legalEntityId"`
+	Code                   string    `json:"code"`
+	Name                   string    `json:"name"`
+	ChartCode              string    `json:"chartCode"`
+	Currency               string    `json:"currency"`
+	DimensionAttributes    []string  `json:"dimensionAttributes"`
+	FirstOpenDate          *string   `json:"firstOpenDate,omitempty"`
+	FuturePostingDays      int       `json:"futurePostingDays"`
+	ReversalReasonRequired bool      `json:"reversalReasonRequired"`
+	NegativePostingEnabled bool      `json:"negativePostingEnabled"`
+	NextSequence           int64     `json:"-"`
+	CreatedAt              time.Time `json:"createdAt"`
 }
 
 // Rules returns the posting rules this ledger imposes.
@@ -89,6 +96,11 @@ func (l Ledger) Rules() domain.Rules {
 		}
 	}
 	return r
+}
+
+// ReversalPolicy returns the reversal parameters this ledger imposes (FR-11.15, BR-11.16).
+func (l Ledger) ReversalPolicy() domain.ReversalPolicy {
+	return domain.ReversalPolicy{ReasonRequired: l.ReversalReasonRequired, NegativeEnabled: l.NegativePostingEnabled}
 }
 
 // PostInput is one entry to post or validate.
@@ -117,14 +129,16 @@ func (in PostInput) rules(l Ledger) domain.Rules {
 
 // ReverseInput is a reversal request for one posted entry.
 type ReverseInput struct {
-	EntryID     string
-	PostingDate *time.Time
-	Description string
-	Key         string
-	Hash        []byte
-	Actor       string
-	TraceID     string
-	Today       time.Time
+	EntryID       string
+	PostingDate   *time.Time
+	Description   string
+	ReasonCode    string
+	ReasonComment string
+	Key           string
+	Hash          []byte
+	Actor         string
+	TraceID       string
+	Today         time.Time
 }
 
 // Idempotency reports the replay state of a keyed request.
@@ -153,6 +167,8 @@ type Entry struct {
 	Description       string               `json:"description"`
 	Source            ledgerevents.Source  `json:"source"`
 	ReversalOfEntryID *string              `json:"reversalOfEntryId,omitempty"`
+	ReasonCode        *string              `json:"reasonCode,omitempty"`
+	ReasonComment     *string              `json:"reasonComment,omitempty"`
 	PostedAt          time.Time            `json:"postedAt"`
 	PostedBy          string               `json:"postedBy"`
 	TraceID           string               `json:"traceId"`
@@ -173,6 +189,7 @@ type Line struct {
 	Text                   string            `json:"text,omitempty"`
 	SourceLineRef          string            `json:"sourceLineRef,omitempty"`
 	ReversalOfLineID       *string           `json:"reversalOfLineId,omitempty"`
+	NegativePosting        bool              `json:"negativePosting,omitempty"`
 }
 
 // BalanceFilter selects balances for a trial balance.
@@ -339,12 +356,14 @@ func accountNumbers(lines []domain.LineInput) []string {
 	return out
 }
 
-const ledgerColumns = `select id, legal_entity_id, code, name, chart_code, currency, dimension_attributes, first_open_date::text, future_posting_days, next_sequence, created_at`
+const ledgerFields = `id, legal_entity_id, code, name, chart_code, currency, dimension_attributes, first_open_date::text, future_posting_days, next_sequence, created_at, reversal_reason_required, negative_posting_enabled`
+
+const ledgerColumns = `select ` + ledgerFields
 
 func scanLedger(row pgx.Row) (Ledger, error) {
 	var l Ledger
 	err := row.Scan(&l.ID, &l.LegalEntityID, &l.Code, &l.Name, &l.ChartCode, &l.Currency, &l.DimensionAttributes,
-		&l.FirstOpenDate, &l.FuturePostingDays, &l.NextSequence, &l.CreatedAt)
+		&l.FirstOpenDate, &l.FuturePostingDays, &l.NextSequence, &l.CreatedAt, &l.ReversalReasonRequired, &l.NegativePostingEnabled)
 	if l.DimensionAttributes == nil {
 		l.DimensionAttributes = []string{}
 	}

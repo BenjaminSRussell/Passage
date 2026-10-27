@@ -105,6 +105,9 @@ type ValidLine struct {
 	SourceLineRef string
 	CombinationID []byte
 	DisplayName   string
+	// Negative marks a negative posting (storno, BR-11.16): the projection
+	// reduces the original side instead of adding to the opposite side.
+	Negative bool
 }
 
 // Result is the outcome of validating an entry. Debit and Credit are the sums
@@ -284,10 +287,14 @@ func AggregateBalances(periodKey string, lines []ValidLine) []BalanceDelta {
 			byKey[k] = &d
 		}
 		agg := byKey[k]
-		if l.Side == SideCredit {
-			agg.Credit = agg.Credit.Add(l.Amount)
+		side, amount := l.Side, l.Amount
+		if l.Negative {
+			side, amount = ReversalSide(side), amount.Neg()
+		}
+		if side == SideCredit {
+			agg.Credit = agg.Credit.Add(amount)
 		} else {
-			agg.Debit = agg.Debit.Add(l.Amount)
+			agg.Debit = agg.Debit.Add(amount)
 		}
 		agg.LineCount++
 	}

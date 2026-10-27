@@ -97,6 +97,8 @@ components:
               reversingEntryId: { type: string, format: uuid }
               ledgerId: { type: string, format: uuid }
               postingDate: { type: string, format: date }
+              reasonCode: { type: string, description: Shared reason code (FR-11.15); present when the reversal carried one }
+              reasonComment: { type: string, maxLength: 255 }
     BalanceRebuilt:
       name: dev.passage.ledger.balance.rebuilt.v1
       contentType: application/cloudevents+json
