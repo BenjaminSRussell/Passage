@@ -1,0 +1,284 @@
+openapi: 3.1.0
+info:
+  title: Passage Analytics API
+  version: 1.0.0
+  description: Governed metric catalog, row-scoped query planning and daily metric reconciliation (wave 46).
+servers:
+  - url: https://api.{env}.passage.dev
+    variables:
+      env:
+        default: dev
+paths:
+  /api/v1/analytics/metrics:
+    get:
+      operationId: listMetrics
+      summary: List published governed metrics with their formulas
+      x-passage-duty: AnalyticsView
+      responses:
+        "200":
+          description: Published metrics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetricsResponse"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /api/v1/analytics/query:
+    post:
+      operationId: planQuery
+      summary: Validate a metric query and return the Cube plan with the caller's scope filters applied
+      description: Read-only. Measures must be published and share one grain. Ranges are day grain, at most five years.
+      x-passage-duty: AnalyticsView
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QueryRequest"
+      responses:
+        "200":
+          description: Compiled plan. An empty result with reason NO_SCOPE when the caller has no legal-entity scope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueryResponse"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          description: Duty missing, or the model has no security mapping (ANA-0103)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /api/v1/analytics/reconciliation:
+    get:
+      operationId: listReconciliations
+      summary: Reconciliation results for one day
+      x-passage-duty: FinanceView
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: metric
+          in: query
+          required: false
+          description: Restrict to one metric id. Malformed ids are rejected with COM-0001.
+          schema:
+            type: string
+            pattern: "^[a-z][a-z0-9_]{1,62}$"
+      responses:
+        "200":
+          description: Results for the day, ordered by metric and legal entity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReconciliationResponse"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /healthz:
+    get:
+      operationId: healthz
+      summary: Liveness, no dependency checks
+      responses:
+        "200":
+          description: Alive
+  /readyz:
+    get:
+      operationId: readyz
+      summary: Readiness, checks the analytics database
+      responses:
+        "200":
+          description: Ready
+        "503":
+          description: Database unavailable
+components:
+  responses:
+    Problem:
+      description: RFC 9457 problem details
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type:
+          type: string
+          format: uri
+          example: https://passage.dev/problems/COM-0001
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+        code:
+          type: string
+        serviceCode:
+          type: string
+        traceId:
+          type: string
+        errors:
+          type: object
+          description: Field-level messages keyed by request field (measures, dimensions, from, to).
+          additionalProperties:
+            type: string
+    Metric:
+      type: object
+      required: [metricId, version, name, formula, grain, allowedDimensions, nonFinancial, status]
+      properties:
+        metricId:
+          type: string
+        version:
+          type: integer
+        name:
+          type: string
+        formula:
+          type: string
+        grain:
+          type: string
+          enum: [journal_line, sales_line, resource_shift]
+        allowedDimensions:
+          type: array
+          items:
+            type: string
+        reconciliationSource:
+          type: string
+        nonFinancial:
+          type: boolean
+        status:
+          type: string
+          enum: [DRAFT, PUBLISHED, DEPRECATED]
+    MetricsResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Metric"
+    QueryRequest:
+      type: object
+      required: [measures, from, to]
+      properties:
+        measures:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items:
+            type: string
+        dimensions:
+          type: array
+          maxItems: 8
+          items:
+            type: string
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+    Filter:
+      type: object
+      required: [member, operator, values]
+      properties:
+        member:
+          type: string
+        operator:
+          type: string
+        values:
+          type: array
+          items:
+            type: string
+    Plan:
+      type: object
+      required: [model, grain, measures, dimensions, from, to, filters]
+      properties:
+        model:
+          type: string
+        grain:
+          type: string
+        measures:
+          type: array
+          items:
+            type: string
+        dimensions:
+          type: array
+          items:
+            type: string
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        filters:
+          type: array
+          items:
+            $ref: "#/components/schemas/Filter"
+        reason:
+          type: string
+          enum: [NO_SCOPE]
+    QueryResponse:
+      type: object
+      required: [plan]
+      properties:
+        plan:
+          $ref: "#/components/schemas/Plan"
+    Reconciliation:
+      type: object
+      description: One metric compared with its source for one legal entity on one day. Amounts are decimal strings.
+      required: [metricId, legalEntityId, date, currency, semanticValue, sourceValue, delta, tolerance, status, consecutiveOkDays, trusted]
+      properties:
+        metricId:
+          type: string
+        legalEntityId:
+          type: string
+        date:
+          type: string
+          format: date
+        currency:
+          type: string
+        semanticValue:
+          type: string
+        sourceValue:
+          type: string
+        delta:
+          type: string
+        tolerance:
+          type: string
+        status:
+          type: string
+          enum: [OK, FAILED, BLOCKED]
+        consecutiveOkDays:
+          type: integer
+        trusted:
+          type: boolean
+    ReconciliationResponse:
+      type: object
+      required: [date, failedCount, items]
+      properties:
+        date:
+          type: string
+          format: date
+        failedCount:
+          type: integer
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Reconciliation"

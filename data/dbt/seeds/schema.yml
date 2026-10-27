@@ -1,0 +1,19 @@
+version: 2
+
+seeds:
+  - name: account_category_map
+    description: >
+      Per-tenant overrides of the metric account category, for categories the
+      ledger account type does not carry (COGS). Loaded per tenant during
+      setup; empty in the repository.
+    config:
+      column_types:
+        tenant_id: varchar
+        chart_code: varchar
+        account_number: varchar
+        account_category: varchar
+    columns:
+      - name: account_category
+        tests:
+          - accepted_values:
+              values: [REVENUE, COGS, ASSET, LIABILITY, EQUITY, EXPENSE, OTHER]

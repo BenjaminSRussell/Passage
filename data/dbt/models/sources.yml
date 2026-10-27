@@ -1,0 +1,37 @@
+version: 2
+
+# Iceberg landing tables written by the CDC sink (FR-46.2): one per captured
+# Postgres table, raw.<domain>.<table>. Every row carries the CDC metadata
+# columns _op (c/u/d), _source_lsn, _source_ts and _ingested_at, plus late for
+# rows that arrived more than 30 days after _source_ts (FR-46.4). Business
+# columns are those of the source table in services/ledger/migrations.
+sources:
+  - name: raw_ledger
+    schema: raw_ledger
+    description: CDC landing tables for the ledger domain.
+    freshness:
+      warn_after: { count: 60, period: second }
+      error_after: { count: 300, period: second }
+    loaded_at_field: _ingested_at
+    tables:
+      - name: journal_line
+        columns: &cdc_columns
+          - name: tenant_id
+            tests: [not_null]
+          - name: id
+            tests: [not_null]
+          - name: _op
+            tests:
+              - accepted_values:
+                  values: [c, u, d, r]
+          - name: _source_lsn
+            tests: [not_null]
+          - name: _source_ts
+          - name: _ingested_at
+          - name: late
+      - name: journal_entry
+        columns: *cdc_columns
+      - name: main_account
+        columns: *cdc_columns
+      - name: ledger
+        columns: *cdc_columns

@@ -1,0 +1,24 @@
+name: passage_analytics
+version: "1.0.0"
+config-version: 2
+profile: passage_trino
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+
+models:
+  passage_analytics:
+    core:
+      +schema: core
+      +materialized: incremental
+      +incremental_strategy: merge
+      +on_schema_change: append_new_columns
+    mart:
+      +schema: mart
+      +materialized: table
+
+seeds:
+  passage_analytics:
+    +schema: core

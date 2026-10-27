@@ -1,0 +1,62 @@
+version: 2
+
+models:
+  - name: core_journal_line
+    description: Current state of ledger journal lines, one row per (tenant_id, id).
+    columns: &core_key
+      - name: tenant_id
+        tests: [not_null]
+      - name: id
+        tests: [not_null]
+      - name: _is_deleted
+        tests:
+          - accepted_values:
+              values: [false]
+              quote: false
+    tests: &unique_key
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [tenant_id, id]
+
+  - name: core_journal_entry
+    description: Current state of ledger journal entries, one row per (tenant_id, id).
+    columns: *core_key
+    tests: *unique_key
+
+  - name: core_main_account
+    description: Current state of main accounts, one row per (tenant_id, id).
+    columns: *core_key
+    tests: *unique_key
+
+  - name: core_ledger
+    description: Current state of ledgers, one row per (tenant_id, id).
+    columns: *core_key
+    tests: *unique_key
+
+  - name: fin_journal_line
+    description: Monetary source for every governed financial metric (FR-46.5, FR-46.6).
+    columns:
+      - name: journal_line_id
+        tests: [not_null]
+      - name: legal_entity_id
+        tests: [not_null]
+      - name: journal_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('core_journal_entry')
+              field: id
+      - name: account_category
+        tests:
+          - accepted_values:
+              values: [REVENUE, COGS, ASSET, LIABILITY, EQUITY, EXPENSE, OTHER]
+      - name: status
+        tests:
+          - accepted_values:
+              values: [POSTED]
+      - name: currency
+        tests: [not_null]
+      - name: amount_reporting
+        tests: [not_null]
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [tenant_id, journal_line_id]

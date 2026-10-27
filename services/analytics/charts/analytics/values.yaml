@@ -1,0 +1,28 @@
+image:
+  repository: ghcr.io/benjaminsrussell/passage-analytics
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+service:
+  port: 8080
+
+# DATABASE_URL is read from this secret key (Vault via External Secrets).
+database:
+  secretName: analytics-db
+  secretKey: DATABASE_URL
+
+migrateOnStart: false
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi

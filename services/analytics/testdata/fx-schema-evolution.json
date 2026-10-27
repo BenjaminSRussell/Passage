@@ -1,0 +1,14 @@
+[
+  {"name": "add nullable column memo2 to sales_line", "change": {"kind": "add_column", "nullable": true}, "expect": "AUTO"},
+  {"name": "add NOT NULL column without default", "change": {"kind": "add_column"}, "expect": "PAUSE"},
+  {"name": "add column with default", "change": {"kind": "add_column", "hasDefault": true}, "expect": "AUTO"},
+  {"name": "widen int to bigint", "change": {"kind": "widen_type", "from": "int", "to": "bigint"}, "expect": "AUTO"},
+  {"name": "widen decimal(18,4) to decimal(28,6)", "change": {"kind": "widen_type", "from": "decimal(18,4)", "to": "decimal(28,6)"}, "expect": "AUTO"},
+  {"name": "narrow decimal(28,6) to decimal(18,4)", "change": {"kind": "narrow_type", "from": "decimal(28,6)", "to": "decimal(18,4)"}, "expect": "PAUSE"},
+  {"name": "drop column retained as deprecated", "change": {"kind": "drop_column"}, "expect": "AUTO"},
+  {"name": "rename column adds renamed_from", "change": {"kind": "rename_column"}, "expect": "AUTO"},
+  {"name": "set NOT NULL on existing column", "change": {"kind": "set_not_null"}, "expect": "PAUSE"},
+  {"name": "drop NOT NULL", "change": {"kind": "drop_not_null"}, "expect": "AUTO"},
+  {"name": "widen varchar(50) to varchar(100)", "change": {"kind": "widen_type", "from": "varchar(50)", "to": "varchar(100)"}, "expect": "AUTO"},
+  {"name": "narrow varchar(100) to varchar(50)", "change": {"kind": "narrow_type", "from": "varchar(100)", "to": "varchar(50)"}, "expect": "PAUSE"}
+]

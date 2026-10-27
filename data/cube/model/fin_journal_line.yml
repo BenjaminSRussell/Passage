@@ -1,0 +1,54 @@
+# Cube model for the governed financial metrics (FR-46.6).
+# Every measure here must match a published semantic_metric row in
+# services/analytics (domain.GovernedMetrics). Formulas are Cube SQL over
+# mart.fin_journal_line, which is the only monetary source.
+cubes:
+  - name: fin_journal_line
+    description: Reporting-currency journal lines, one row per posted line.
+    sql_table: mart.fin_journal_line
+
+    dimensions:
+      - name: legal_entity_id
+        sql: legal_entity_id
+        type: string
+      - name: account_code
+        sql: account_code
+        type: string
+      - name: account_category
+        sql: account_category
+        type: string
+      - name: currency
+        sql: currency
+        type: string
+      - name: fiscal_period
+        sql: fiscal_period
+        type: string
+      - name: posting_date
+        sql: posting_date
+        type: time
+
+    measures:
+      # revenue = -SUM(amount_reporting) WHERE REVENUE and POSTED (credit shown positive)
+      - name: revenue
+        sql: "-{CUBE}.amount_reporting"
+        type: sum
+        filters:
+          - sql: "{CUBE}.account_category = 'REVENUE' AND {CUBE}.status = 'POSTED'"
+
+      # cogs = SUM(amount_reporting) WHERE COGS
+      - name: cogs
+        sql: "{CUBE}.amount_reporting"
+        type: sum
+        filters:
+          - sql: "{CUBE}.account_category = 'COGS' AND {CUBE}.status = 'POSTED'"
+
+      # gross_margin = revenue - cogs
+      - name: gross_margin
+        sql: "{revenue} - {cogs}"
+        type: number
+
+      # gross_margin_pct = gross_margin / NULLIF(revenue, 0)
+      - name: gross_margin_pct
+        sql: "{gross_margin} / NULLIF({revenue}, 0)"
+        type: number
+        format: percent

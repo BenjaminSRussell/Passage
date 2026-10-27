@@ -1,0 +1,91 @@
+asyncapi: 3.0.0
+info:
+  title: Passage Analytics events
+  version: 1.0.0
+  description: Events published by the analytics service. Only implemented events are listed; the rest of the wave-46 catalog is tracked in NOT-IMPLEMENTED.md.
+defaultContentType: application/cloudevents+json
+channels:
+  analyticsMetric:
+    address: passage.analytics.metric
+    messages:
+      metricReconciled:
+        $ref: "#/components/messages/MetricReconciled"
+operations:
+  publishMetricReconciled:
+    action: send
+    channel:
+      $ref: "#/channels/analyticsMetric"
+    summary: A daily reconciliation result was recorded or changed (FR-46.13)
+    messages:
+      - $ref: "#/channels/analyticsMetric/messages/metricReconciled"
+components:
+  messages:
+    MetricReconciled:
+      name: dev.passage.analytics.metric.reconciled.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        description: CloudEvents 1.0 envelope (platform/go/events) with the Passage tenantid, correlationid, causationid and actor extensions. Written to the outbox in the transaction that stores the result.
+        required: [specversion, id, source, type, subject, time, datacontenttype, tenantid, data]
+        properties:
+          specversion:
+            type: string
+            const: "1.0"
+          id:
+            type: string
+          source:
+            type: string
+            const: analytics
+          type:
+            type: string
+            const: dev.passage.analytics.metric.reconciled.v1
+          subject:
+            type: string
+            description: metricId/legalEntityId/date
+          time:
+            type: string
+            format: date-time
+          datacontenttype:
+            type: string
+            const: application/json
+          tenantid:
+            type: string
+          correlationid:
+            type: string
+          causationid:
+            type: string
+          actor:
+            type: string
+          data:
+            type: object
+            required: [metric_id, tenant_id, legal_entity_id, date, currency, semantic_value, source_value, delta, tolerance, status, trusted]
+            properties:
+              metric_id:
+                type: string
+              tenant_id:
+                type: string
+                format: uuid
+              legal_entity_id:
+                type: string
+                format: uuid
+              date:
+                type: string
+                format: date
+              currency:
+                type: string
+                pattern: "^[A-Z]{3}$"
+              semantic_value:
+                type: string
+                description: Decimal string, never a float
+              source_value:
+                type: string
+              delta:
+                type: string
+                description: semantic_value - source_value
+              tolerance:
+                type: string
+              status:
+                type: string
+                enum: [OK, FAILED, BLOCKED]
+              trusted:
+                type: boolean
