@@ -29,6 +29,7 @@ const (
 	readyTimeout = 500 * time.Millisecond
 	// Duties from PRD section 7.39.17.
 	dutyView         = "CostingView"
+	dutyMaintain     = "CostingMaintain"
 	dutyCalculate    = "CostingCalculate"
 	dutyActivate     = "CostingActivate"
 	dutySystem       = "CostingSystem"
@@ -97,6 +98,11 @@ func (a *API) routes() []route {
 		{http.MethodPost, "/v1/costing/sales-order-estimates", dutyCalculate, a.salesOrderEstimate},
 		{http.MethodPost, "/v1/costing/comparisons", dutyView, a.compare},
 		{http.MethodPost, "/v1/costing/reconciliations", dutyView, a.reconcile},
+		// Slice 3 (lifecycle.go).
+		{http.MethodPost, "/v1/costing/versions:transition", dutyMaintain, a.transitionVersion},
+		{http.MethodPost, "/v1/costing/versions:activate", dutyActivate, a.activateVersion},
+		{http.MethodPost, "/v1/costing/conversions:validate", dutyActivate, a.validateConversion},
+		{http.MethodPost, "/v1/costing/conversions:advance", dutyActivate, a.advanceConversion},
 	}
 }
 
@@ -224,8 +230,8 @@ func catalog(items []domain.Item, fields map[string]string) domain.Catalog {
 }
 
 // checkItem validates the numbers and node types of one item. Costs, hours
-// and lot sizes must not be negative; sheet nodes must be a type slice 1
-// evaluates, so a Basis or Total node is refused instead of being ignored.
+// and lot sizes must not be negative; sheet nodes must be a known type, and a
+// basisRef or refs must name an earlier Basis or Total node of the same sheet.
 func checkItem(i int, it domain.Item, fields map[string]string) {
 	at := func(format string, args ...any) string {
 		return fmt.Sprintf("items[%d].", i) + fmt.Sprintf(format, args...)
@@ -237,6 +243,10 @@ func checkItem(i int, it domain.Item, fields map[string]string) {
 	}
 	negative("price", it.Price)
 	negative("activePrice", it.ActivePrice)
+	negative("legalCost", it.LegalCost)
+	if it.Kind != domain.KindPurchased && (it.Intercompany || it.LegalCost != nil) {
+		fields[at("intercompany")] = "only a Purchased item is bought from an intercompany partner"
+	}
 	negative("costingLot", &it.CostingLot)
 	for c, v := range it.ActiveSplit {
 		if v.IsNegative() {
@@ -274,27 +284,67 @@ func checkItem(i int, it domain.Item, fields map[string]string) {
 			fields[at("costingLot")] = "is required when an operation has setup hours and no lotSize"
 		}
 	}
-	for j, node := range it.Sheet {
-		if node.Component == "" {
-			fields[at("sheet[%d].component", j)] = "is required"
+	checkSheet(it.Sheet, func(j int, key string) string { return at("sheet[%d].%s", j, key) }, fields)
+}
+
+// checkSheet validates the costing sheet nodes (FR-39.2). Surcharge and Rate
+// nodes charge a component; Basis and Total nodes report subtotals and charge
+// none. Node ids are unique, and references point to earlier subtotal nodes.
+func checkSheet(sheet []domain.SheetNode, at func(j int, key string) string, fields map[string]string) {
+	subtotal := map[string]bool{}
+	seen := map[string]bool{}
+	for j, node := range sheet {
+		if node.ID == "" {
+			fields[at(j, "id")] = "is required"
+		} else if seen[node.ID] {
+			fields[at(j, "id")] = "must be unique within the sheet"
+		}
+		seen[node.ID] = true
+		charges := node.Type == domain.NodeSurcharge || node.Type == domain.NodeRate
+		if charges && node.Component == "" {
+			fields[at(j, "component")] = "is required"
+		}
+		if !charges && node.Component != "" {
+			fields[at(j, "component")] = "a Basis or Total node charges no component"
 		}
 		switch node.Type {
 		case domain.NodeSurcharge:
-			if len(node.Basis) == 0 {
-				fields[at("sheet[%d].basis", j)] = "must name at least one cost component"
+			switch {
+			case node.BasisRef != "" && len(node.Basis) > 0:
+				fields[at(j, "basisRef")] = "set either basis or basisRef, not both"
+			case node.BasisRef != "" && !subtotal[node.BasisRef]:
+				fields[at(j, "basisRef")] = "must name an earlier Basis or Total node"
+			case node.BasisRef == "" && len(node.Basis) == 0:
+				fields[at(j, "basis")] = "must name at least one cost component, or set basisRef"
 			}
 			if node.Percentage.IsNegative() {
-				fields[at("sheet[%d].percentage", j)] = "must not be negative"
+				fields[at(j, "percentage")] = "must not be negative"
 			}
 		case domain.NodeRate:
 			if node.Rate.IsNegative() {
-				fields[at("sheet[%d].rate", j)] = "must not be negative"
+				fields[at(j, "rate")] = "must not be negative"
 			}
 			if node.RateUnit != "" && node.RateUnit != "Hour" && node.RateUnit != "Unit" {
-				fields[at("sheet[%d].rateUnit", j)] = "must be Hour or Unit"
+				fields[at(j, "rateUnit")] = "must be Hour or Unit"
+			}
+		case domain.NodeBasis:
+			if len(node.Basis) == 0 {
+				fields[at(j, "basis")] = "must name at least one cost component"
+			}
+		case domain.NodeTotal:
+			if len(node.Refs) == 0 {
+				fields[at(j, "refs")] = "must name at least one earlier Basis or Total node"
+			}
+			for k, ref := range node.Refs {
+				if !subtotal[ref] {
+					fields[at(j, fmt.Sprintf("refs[%d]", k))] = "must name an earlier Basis or Total node"
+				}
 			}
 		default:
-			fields[at("sheet[%d].type", j)] = "must be Surcharge or Rate (Basis and Total nodes come with the persisted costing sheet)"
+			fields[at(j, "type")] = "must be Basis, Surcharge, Rate or Total"
+		}
+		if node.Type == domain.NodeBasis || node.Type == domain.NodeTotal {
+			subtotal[node.ID] = true
 		}
 	}
 }

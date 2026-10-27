@@ -178,7 +178,15 @@ func TestRoll_RejectsInvalidStructure(t *testing.T) {
 		name, items, field string
 	}{
 		{"negative price", `[{"id":"X","kind":"Purchased","price":"-1"}]`, "items[0].price"},
-		{"basis node is not evaluated in slice 1", `[{"id":"X","kind":"Manufactured","sheet":[{"id":"B","type":"Basis","component":"DM"}]}]`, "items[0].sheet[0].type"},
+		{"unknown node type", `[{"id":"X","kind":"Manufactured","sheet":[{"id":"W","type":"Weird","component":"DM"}]}]`, "items[0].sheet[0].type"},
+		{"basis node charges no component", `[{"id":"X","kind":"Manufactured","sheet":[{"id":"B","type":"Basis","basis":["DM"],"component":"DM"}]}]`, "items[0].sheet[0].component"},
+		{"basis node without components", `[{"id":"X","kind":"Manufactured","sheet":[{"id":"B","type":"Basis"}]}]`, "items[0].sheet[0].basis"},
+		{"surcharge refers to a later basis", `[{"id":"X","kind":"Manufactured","sheet":[{"id":"S","type":"Surcharge","component":"IND","basisRef":"B","percentage":"10"},{"id":"B","type":"Basis","basis":["DM"]}]}]`, "items[0].sheet[0].basisRef"},
+		{"surcharge with basis and basisRef", `[{"id":"X","kind":"Manufactured","sheet":[{"id":"B","type":"Basis","basis":["DM"]},{"id":"S","type":"Surcharge","component":"IND","basis":["DM"],"basisRef":"B","percentage":"10"}]}]`, "items[0].sheet[1].basisRef"},
+		{"total refers to a rate node", `[{"id":"X","kind":"Manufactured","sheet":[{"id":"R","type":"Rate","component":"IND","rate":"1"},{"id":"T","type":"Total","refs":["R"]}]}]`, "items[0].sheet[1].refs[0]"},
+		{"duplicate node id", `[{"id":"X","kind":"Manufactured","sheet":[{"id":"B","type":"Basis","basis":["DM"]},{"id":"B","type":"Basis","basis":["DL"]}]}]`, "items[0].sheet[1].id"},
+		{"intercompany manufactured item", `[{"id":"X","kind":"Manufactured","intercompany":true}]`, "items[0].intercompany"},
+		{"negative legal cost", `[{"id":"X","kind":"Purchased","price":"1","intercompany":true,"legalCost":"-1"}]`, "items[0].legalCost"},
 		{"surcharge without basis", `[{"id":"X","kind":"Manufactured","sheet":[{"id":"S","type":"Surcharge","component":"IND-MAT","percentage":"10"}]}]`, "items[0].sheet[0].basis"},
 		{"setup without a lot size", `[{"id":"X","kind":"Manufactured","operations":[{"setupHours":"1","runHours":"0.5","rate":"40"}]}]`, "items[0].costingLot"},
 		{"negative run hours", `[{"id":"X","kind":"Manufactured","costingLot":"1","operations":[{"runHours":"-0.5","rate":"40"}]}]`, "items[0].operations[0].runHours"},

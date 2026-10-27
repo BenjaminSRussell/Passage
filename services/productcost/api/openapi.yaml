@@ -213,6 +213,85 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
+  /v1/costing/versions:transition:
+    post:
+      operationId: transitionCostingVersion
+      summary: Block, unblock or close a costing version (BR-39.2, FR-39.3); stateless, the caller supplies the current version
+      x-passage-duty: CostingMaintain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TransitionRequest" }
+      responses:
+        "200":
+          description: The version in its next state
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VersionResponse" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem", description: "CST-0711 simulation version Active, CST-0715 transition not allowed, CST-0716 fallback version" }
+  /v1/costing/versions:activate:
+    post:
+      operationId: activateCostingVersion
+      summary: Move an Open or Blocked version to Active (BR-39.2); segregated from CostingMaintain. Stateless; no revaluation is posted
+      x-passage-duty: CostingActivate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VersionResponse" }
+      responses:
+        "200":
+          description: The version, now Active
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VersionResponse" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem", description: "CST-0711 simulation versions cannot be activated, CST-0715 not Open or Blocked, CST-0716 fallback version" }
+  /v1/costing/conversions:validate:
+    post:
+      operationId: validateStandardCostConversion
+      summary: Validate a standard cost conversion and preview its revaluation (FR-39.12); nothing is posted
+      x-passage-duty: CostingActivate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ConversionInput" }
+      responses:
+        "200":
+          description: Validation outcome and revaluation preview
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConversionReport" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/costing/conversions:advance:
+    post:
+      operationId: advanceStandardCostConversion
+      summary: Record the next checklist step as done by the calling user (FR-39.12); stateless, the caller supplies the checklist so far
+      x-passage-duty: CostingActivate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ConversionAdvanceRequest" }
+      responses:
+        "200":
+          description: The run with the step recorded, and the report the step was checked against
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConversionAdvanceResponse" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem", description: "No tenant, or no user on the principal" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem", description: "CST-0731 inventory close missing (close, activate), CST-0735 blocked (validate, activate), CST-0736 step out of order or checklist complete" }
 components:
   responses:
     Problem:
@@ -271,12 +350,14 @@ components:
         scrapPct: { $ref: "#/components/schemas/Money", description: "Operation scrap in percent, 0 to below 100; compounds backward through the route and scales the BOM material by the first operation's factor (BR-39.6)" }
     SheetNode:
       type: object
-      required: [id, type, component]
+      required: [id, type]
       properties:
         id: { type: string }
-        type: { type: string, enum: [Surcharge, Rate], description: "Basis and Total nodes arrive with the persisted costing sheet and are refused with 400" }
-        component: { type: string }
-        basis: { type: array, items: { type: string } }
+        type: { type: string, enum: [Basis, Surcharge, Rate, Total], description: "Evaluated in sheet order. Basis and Total report subtotals and add no cost to the split (FR-39.2); an unknown type is 400" }
+        component: { type: string, description: "Required for Surcharge and Rate; not allowed on Basis and Total" }
+        basis: { type: array, items: { type: string }, description: "Cost components summed by a Basis node, or a Surcharge's basis when basisRef is not set" }
+        basisRef: { type: string, description: "Surcharge: id of an earlier Basis or Total node used as its basis instead of basis" }
+        refs: { type: array, items: { type: string }, description: "Total: ids of earlier Basis or Total nodes to add" }
         percentage: { $ref: "#/components/schemas/Money" }
         rate: { $ref: "#/components/schemas/Money" }
         rateUnit: { type: string, enum: [Hour, Unit], description: "Rate driver: routing hours per unit (run plus setup over the lot) or units; default Unit" }
@@ -294,6 +375,8 @@ components:
         bom: { type: array, items: { $ref: "#/components/schemas/BOMLine" } }
         operations: { type: array, items: { $ref: "#/components/schemas/Operation" } }
         sheet: { type: array, items: { $ref: "#/components/schemas/SheetNode" } }
+        intercompany: { type: boolean, description: "Purchased item bought from an intercompany partner (FR-39.17); only on Purchased items" }
+        legalCost: { $ref: "#/components/schemas/Money", description: "Supplier entity's Legal-view unit cost, converted at the receipt's rate; the Group view rolls it instead of the intercompany price (BR-39.15). Without it the Group view uses the price and warns CST-0761" }
     RollOptions:
       type: object
       properties:
@@ -309,6 +392,7 @@ components:
             and ByLineType rolls none, the others taking their active standard. Phantom
             lines are exploded in place in every mode.
         fallbackToActive: { type: boolean }
+        view: { type: string, enum: [Legal, Group], description: "Valuation view (FR-39.17); default Legal. ProfitCenter is not built yet" }
     RollOneRequest:
       type: object
       required: [items, itemId]
@@ -331,6 +415,10 @@ components:
         unitCost: { $ref: "#/components/schemas/Money" }
         own: { $ref: "#/components/schemas/Split" }
         rolled: { $ref: "#/components/schemas/Split" }
+        subtotals:
+          type: object
+          description: Value of each Basis and Total sheet node by node id (FR-39.2)
+          additionalProperties: { $ref: "#/components/schemas/Money" }
         diagnostics: { type: array, items: { $ref: "#/components/schemas/Diagnostic" } }
     CalculationResponse:
       type: object
@@ -576,3 +664,96 @@ components:
         currency: { type: string }
         sites: { type: array, items: { $ref: "#/components/schemas/SiteReconciliation" } }
         differences: { type: integer }
+    Version:
+      type: object
+      required: [id, type, status, fallback]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [Standard, Planned, Simulation, Conversion] }
+        status: { type: string, enum: [Open, Blocked, Active, Closed] }
+        fallback: { type: string, enum: [None, Active, SpecifiedVersion] }
+        fallbackVersionId: { type: string, description: "Required with SpecifiedVersion and must differ from id; not allowed otherwise (CST-0716)" }
+        siteIds: { type: array, items: { type: string } }
+    TransitionRequest:
+      type: object
+      required: [version, action]
+      properties:
+        version: { $ref: "#/components/schemas/Version" }
+        action: { type: string, enum: [block, unblock, close] }
+    VersionResponse:
+      type: object
+      required: [version]
+      properties:
+        version: { $ref: "#/components/schemas/Version" }
+    ConversionPosition:
+      type: object
+      required: [itemId, siteId]
+      properties:
+        itemId: { type: string }
+        siteId: { type: string }
+        onHand: { $ref: "#/components/schemas/Money", description: "Physical on-hand; negative is CST-0732" }
+        standardUnit: { $ref: "#/components/schemas/Money", description: "Pending standard in the conversion version" }
+        actualValue: { $ref: "#/components/schemas/Money", description: "On-hand value at the actual method after the inventory close" }
+        inTransit: { type: integer, minimum: 0, description: "Open in-transit transfers (CST-0733)" }
+        startedOrders: { type: integer, minimum: 0, description: "Production orders started but not ended (CST-0734)" }
+    ConversionInput:
+      type: object
+      required: [conversionDate, positions]
+      properties:
+        conversionDate: { type: string, format: date }
+        closeThrough: { type: string, format: date, description: "End date of the last completed inventory close; the close step and activation need the day before conversionDate (BR-39.11, CST-0731)" }
+        currency: { type: string, pattern: "^[A-Z]{3}$", description: "Posting precision of the revaluation (BR-39.1); default two decimals" }
+        blockers:
+          type: array
+          items: { type: string, enum: [NegativeOnHand, InTransit, StartedOrders] }
+          description: "costing.conversionBlockers. Omitted means all three; a condition whose blocker is not listed is a warning"
+        positions:
+          type: array
+          minItems: 1
+          maxItems: 50000
+          description: "One per item and site"
+          items: { $ref: "#/components/schemas/ConversionPosition" }
+    ConversionPreviewLine:
+      type: object
+      properties:
+        itemId: { type: string }
+        siteId: { type: string }
+        onHand: { $ref: "#/components/schemas/Money" }
+        actualValue: { $ref: "#/components/schemas/Money" }
+        standardUnit: { $ref: "#/components/schemas/Money" }
+        amount: { $ref: "#/components/schemas/Money", description: "onHand × standardUnit − actualValue, rounded to the currency's minor unit" }
+    ConversionReport:
+      type: object
+      properties:
+        currency: { type: string }
+        blocked: { type: boolean, description: "An enabled blocker matched; validate and activate refuse (CST-0735)" }
+        closeComplete: { type: boolean, description: "closeThrough is the day before the conversion date; close and activate need it (CST-0731)" }
+        diagnostics: { type: array, items: { $ref: "#/components/schemas/Diagnostic" } }
+        lines: { type: array, items: { $ref: "#/components/schemas/ConversionPreviewLine" } }
+        revaluation: { $ref: "#/components/schemas/Money", description: "Sum of the lines; positive debits Inventory and credits the cost change variance" }
+        journal: { type: array, items: { $ref: "#/components/schemas/JournalLine" } }
+    ChecklistStep:
+      type: object
+      required: [step, status, user, at]
+      properties:
+        step: { type: string, enum: [select, roll, validate, preview, close, activate] }
+        status: { type: string, enum: [Done] }
+        user: { type: string, description: "Principal that ran the step" }
+        at: { type: string, format: date-time, description: "Server time of the step" }
+    ConversionRun:
+      type: object
+      properties:
+        status: { type: string, enum: [Draft, Validated, Closed, Activated], description: "Derived from the checklist; the value sent is ignored" }
+        checklist: { type: array, description: "The steps done so far, in checklist order", items: { $ref: "#/components/schemas/ChecklistStep" } }
+    ConversionAdvanceRequest:
+      type: object
+      required: [run, step, input]
+      properties:
+        run: { $ref: "#/components/schemas/ConversionRun" }
+        step: { type: string, enum: [select, roll, validate, preview, close, activate] }
+        input: { $ref: "#/components/schemas/ConversionInput" }
+    ConversionAdvanceResponse:
+      type: object
+      properties:
+        run: { $ref: "#/components/schemas/ConversionRun" }
+        report: { $ref: "#/components/schemas/ConversionReport" }

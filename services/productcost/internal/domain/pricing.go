@@ -155,15 +155,18 @@ type ConversionLine struct {
 	ActualValue decimal.Decimal `json:"actualValue"`
 }
 
-// ConversionAdjustment returns Σ qty × standard − Σ actual value and the
-// journal that books it (AC-39.10).
-func ConversionAdjustment(lines []ConversionLine) (decimal.Decimal, []JournalLine) {
+// ConversionAdjustment returns, per line, qty × standard − actual value rounded
+// to the minor unit of currency (BR-39.1), their total and the journal that
+// books it (FR-39.12, AC-39.10). The journal equals the sum of the rows.
+func ConversionAdjustment(lines []ConversionLine, currency string) ([]decimal.Decimal, decimal.Decimal, []JournalLine) {
+	scale := PostingScale(currency)
+	amounts := make([]decimal.Decimal, len(lines))
 	total := decimal.Zero
-	for _, ln := range lines {
-		total = total.Add(ln.Qty.Mul(ln.StdUnit)).Sub(ln.ActualValue)
+	for i, ln := range lines {
+		amounts[i] = ln.Qty.Mul(ln.StdUnit).Sub(ln.ActualValue).Round(scale)
+		total = total.Add(amounts[i])
 	}
-	total = total.Round(MoneyScale)
-	return total, journal(total)
+	return amounts, total, journal(total)
 }
 
 // journal books a revaluation: a positive amount debits Inventory.

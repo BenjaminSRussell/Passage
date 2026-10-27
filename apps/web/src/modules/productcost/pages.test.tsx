@@ -76,6 +76,8 @@ describe("productcost module", () => {
       ["/productcost/postings", "CostingCalculate"],
       ["/productcost/reconciliation", "CostingView"],
       ["/productcost/activation-preview", "CostingActivate"],
+      ["/productcost/versions", "CostingMaintain"],
+      ["/productcost/conversion", "CostingActivate"],
     ]);
     expect(productcost.routes.map((r) => r.path)).toEqual(productcost.nav.map((n) => n.to));
   });
@@ -175,7 +177,7 @@ describe("cost roll-up page", () => {
     const body = calls[0].body as { itemId: string; items: { id: string }[]; options: unknown };
     expect(body.itemId).toBe("FG-100");
     expect(body.items.map((i) => i.id)).toEqual(["RM-300", "RM-301", "RM-302", "SA-200", "FG-100"]);
-    expect(body.options).toEqual({ mode: "Multilevel", fallbackToActive: false });
+    expect(body.options).toEqual({ mode: "Multilevel", fallbackToActive: false, view: "Legal" });
     expect(Array.from((screen.getByLabelText("Explosion mode") as HTMLSelectElement).options).map((o) => o.value)).toEqual([
       "Multilevel",
       "SingleLevel",
@@ -411,7 +413,7 @@ describe("cost roll-up page explosion modes", () => {
     fireEvent.change(screen.getByLabelText("Explosion mode"), { target: { value: "MakeToOrder" } });
     fireEvent.click(screen.getByRole("button", { name: "Mass roll" }));
     await screen.findByRole("table", { name: "Roll results" });
-    expect((calls[0].body as { options: unknown }).options).toEqual({ mode: "MakeToOrder", fallbackToActive: false });
+    expect((calls[0].body as { options: unknown }).options).toEqual({ mode: "MakeToOrder", fallbackToActive: false, view: "Legal" });
   });
 });
 

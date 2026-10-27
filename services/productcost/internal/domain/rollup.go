@@ -47,6 +47,11 @@ const (
 	CodeDepth            = "CST-0704"
 	CodeMissingComponent = "CST-0706"
 	CodeBlocked          = "CST-0707"
+	// CodeSheetNode extends the catalog for this slice: a costing sheet node of
+	// an unknown type, or one that refers to a node that is not an earlier Basis
+	// or Total node (see README).
+	CodeSheetNode        = "CST-0708"
+	CodeGroupCostUnknown = "CST-0761"
 )
 
 // Diagnostic statuses for Result.Status.
@@ -86,17 +91,28 @@ type NodeType string
 const (
 	NodeSurcharge NodeType = "Surcharge"
 	NodeRate      NodeType = "Rate"
+	// NodeBasis reports the sum of its Basis components as a subtotal. It adds
+	// nothing to the split; a later surcharge names it in BasisRef.
+	NodeBasis NodeType = "Basis"
+	// NodeTotal reports the sum of the subtotals of the earlier Basis or Total
+	// nodes named in Refs. It adds nothing to the split.
+	NodeTotal NodeType = "Total"
 )
 
-// SheetNode is an indirect cost node evaluated after the direct costs of its
-// level. A surcharge takes Percentage of the basis components; a rate takes
-// Rate per routing hour (RateUnit "Hour": run time plus setup spread over the
-// costing lot, per unit) or per unit ("Unit", the default).
+// SheetNode is a costing sheet node evaluated after the direct costs of its
+// level, in sheet order. A surcharge takes Percentage of the basis components,
+// or of the earlier Basis or Total node named in BasisRef; a rate takes Rate
+// per routing hour (RateUnit "Hour": run time plus setup spread over the
+// costing lot, per unit) or per unit ("Unit", the default). A Basis or Total
+// node is a subtotal taken at its position, so it includes the surcharges and
+// rates of the nodes before it when they charge one of its components.
 type SheetNode struct {
 	ID            string          `json:"id"`
 	Type          NodeType        `json:"type"`
-	Component     string          `json:"component"`
+	Component     string          `json:"component,omitempty"`
 	Basis         []string        `json:"basis,omitempty"`
+	BasisRef      string          `json:"basisRef,omitempty"`
+	Refs          []string        `json:"refs,omitempty"`
 	Percentage    decimal.Decimal `json:"percentage"`
 	Rate          decimal.Decimal `json:"rate"`
 	RateUnit      string          `json:"rateUnit,omitempty"`
@@ -104,20 +120,33 @@ type SheetNode struct {
 }
 
 // Item is the costing input for one item at one site and version.
+// Intercompany marks a purchased item bought from an intercompany partner
+// (FR-39.17); LegalCost is the supplying entity's Legal-view unit cost, already
+// converted at the receipt's rate, which the Group view rolls instead of the
+// intercompany price (BR-39.15).
 type Item struct {
-	ID          string           `json:"id"`
-	Kind        ItemKind         `json:"kind"`
-	Price       *decimal.Decimal `json:"price,omitempty"`
-	ActivePrice *decimal.Decimal `json:"activePrice,omitempty"`
-	ActiveSplit Split            `json:"activeSplit,omitempty"`
-	CostingLot  decimal.Decimal  `json:"costingLot"`
-	BOM         []BOMLine        `json:"bom,omitempty"`
-	Operations  []Operation      `json:"operations,omitempty"`
-	Sheet       []SheetNode      `json:"sheet,omitempty"`
+	ID           string           `json:"id"`
+	Kind         ItemKind         `json:"kind"`
+	Price        *decimal.Decimal `json:"price,omitempty"`
+	ActivePrice  *decimal.Decimal `json:"activePrice,omitempty"`
+	ActiveSplit  Split            `json:"activeSplit,omitempty"`
+	CostingLot   decimal.Decimal  `json:"costingLot"`
+	BOM          []BOMLine        `json:"bom,omitempty"`
+	Operations   []Operation      `json:"operations,omitempty"`
+	Sheet        []SheetNode      `json:"sheet,omitempty"`
+	Intercompany bool             `json:"intercompany,omitempty"`
+	LegalCost    *decimal.Decimal `json:"legalCost,omitempty"`
 }
 
 // Catalog is the set of items being rolled, keyed by item id.
 type Catalog map[string]Item
+
+// Valuation views a roll can run under (FR-39.17, costing.valuationViews).
+// ProfitCenter needs the transfer-price table and is not built yet.
+const (
+	ViewLegal = "Legal"
+	ViewGroup = "Group"
+)
 
 // RollOptions controls one roll. Zero values take the defaults.
 type RollOptions struct {
@@ -125,6 +154,7 @@ type RollOptions struct {
 	MaxLevels        int           `json:"maxLevels"`
 	FallbackToActive bool          `json:"fallbackToActive"`
 	Workers          int           `json:"workers"`
+	View             string        `json:"view,omitempty"`
 }
 
 func (o RollOptions) normalized() RollOptions {
@@ -136,6 +166,9 @@ func (o RollOptions) normalized() RollOptions {
 	}
 	if o.Workers == 0 {
 		o.Workers = DefaultWorkers
+	}
+	if o.View == "" {
+		o.View = ViewLegal
 	}
 	return o
 }
@@ -154,6 +187,9 @@ func (o RollOptions) Validate() error {
 	if n.Workers < 1 || n.Workers > maxWorkers {
 		return fmt.Errorf("workers must be 1 to %d", maxWorkers)
 	}
+	if n.View != ViewLegal && n.View != ViewGroup {
+		return fmt.Errorf("view must be Legal or Group (ProfitCenter needs transfer prices)")
+	}
 	return nil
 }
 
@@ -168,15 +204,17 @@ type Diagnostic struct {
 // Result is the rolled standard of one item per unit. Own holds the costs that
 // arise at this level (purchases, operations, sheet nodes, phantoms exploded in
 // place); Rolled holds the split carried up from manufactured children
-// (FR-39.4 step 4).
+// (FR-39.4 step 4). Subtotals holds the value of each Basis and Total sheet
+// node by node id, per unit.
 type Result struct {
-	ItemID      string          `json:"itemId"`
-	Status      string          `json:"status"`
-	Level       int             `json:"level"`
-	Own         Split           `json:"own"`
-	Rolled      Split           `json:"rolled"`
-	Unit        decimal.Decimal `json:"unitCost"`
-	Diagnostics []Diagnostic    `json:"diagnostics,omitempty"`
+	ItemID      string                     `json:"itemId"`
+	Status      string                     `json:"status"`
+	Level       int                        `json:"level"`
+	Own         Split                      `json:"own"`
+	Rolled      Split                      `json:"rolled"`
+	Unit        decimal.Decimal            `json:"unitCost"`
+	Subtotals   map[string]decimal.Decimal `json:"subtotals,omitempty"`
+	Diagnostics []Diagnostic               `json:"diagnostics,omitempty"`
 
 	// direct and hours are the own-level costs before the costing sheet and
 	// the routing hours per unit. A parent exploding this item as a phantom
@@ -315,6 +353,22 @@ func purchasePrice(it Item, fallback bool) (decimal.Decimal, *Diagnostic) {
 	return decimal.Zero, &d
 }
 
+// groupCost returns the Group-view cost of an intercompany item (BR-39.15):
+// its supplier's Legal-view cost when known. ok is false for an item the view
+// does not change; unknown is true when the item is intercompany but the
+// supplier has no Legal-view cost, so the intercompany price applies with
+// CST-0761.
+func groupCost(it Item, opts RollOptions) (cost decimal.Decimal, ok bool, unknown *Diagnostic) {
+	if opts.View != ViewGroup || !it.Intercompany {
+		return decimal.Zero, false, nil
+	}
+	if it.LegalCost != nil {
+		return *it.LegalCost, true, nil
+	}
+	d := warnDiag(CodeGroupCostUnknown, "group cost unknown for intercompany item "+it.ID+"; intercompany price used", it.ID)
+	return decimal.Zero, false, &d
+}
+
 // explodes reports whether a BOM line takes the child's result from this run
 // rather than the child's active standard (FR-39.4 step 3). A phantom
 // manufactured child is always exploded (BR-39.3). A purchased child has no
@@ -338,15 +392,30 @@ func explodes(mode ExplosionMode, line BOMLine, child Item) bool {
 // activeStandard is the split a child contributes when it is not exploded: its
 // active split, or for a purchased child its active price as material. A child
 // with neither fails the parent with CST-0702 (BR-39.4).
-func activeStandard(child Item, parentID string) (Split, *Diagnostic) {
+//
+// In the Group view an intercompany purchased child takes its supplier's
+// Legal-view cost; without one its active price applies and CST-0761 warns
+// (BR-39.15).
+func activeStandard(child Item, parentID string, opts RollOptions) (Split, []Diagnostic, *Diagnostic) {
+	var warns []Diagnostic
+	if child.Kind == KindPurchased {
+		cost, ok, unknown := groupCost(child, opts)
+		if ok {
+			return Split{CompDM: cost}, nil, nil
+		}
+		if unknown != nil {
+			unknown.Ref = parentID
+			warns = append(warns, *unknown)
+		}
+	}
 	if child.ActiveSplit != nil {
-		return child.ActiveSplit, nil
+		return child.ActiveSplit, warns, nil
 	}
 	if child.Kind == KindPurchased && child.ActivePrice != nil {
-		return Split{CompDM: *child.ActivePrice}, nil
+		return Split{CompDM: *child.ActivePrice}, warns, nil
 	}
 	d := errDiag(CodeNoPrice, "no active standard for "+child.ID, parentID)
-	return nil, &d
+	return nil, nil, &d
 }
 
 // scrapFactors returns, per operation, the quantity processed there for one
@@ -372,6 +441,12 @@ func rollItem(cat Catalog, it Item, done map[string]Result, opts RollOptions) Re
 		return res
 	}
 	if it.Kind == KindPurchased {
+		if cost, ok, unknown := groupCost(it, opts); ok {
+			res.Own.Add(CompDM, cost)
+			return finish(res)
+		} else if unknown != nil {
+			res.Diagnostics = append(res.Diagnostics, *unknown)
+		}
 		price, diag := purchasePrice(it, opts.FallbackToActive)
 		if diag != nil {
 			if diag.Severity == "error" {
@@ -398,10 +473,11 @@ func rollItem(cat Catalog, it Item, done map[string]Result, opts RollOptions) Re
 		}
 		qty := line.Qty.Mul(decimal.NewFromInt(100).Add(line.ScrapPct).Div(decimal.NewFromInt(100))).Mul(routeFactor)
 		if !explodes(opts.Mode, line, child) {
-			split, diag := activeStandard(child, it.ID)
+			split, warns, diag := activeStandard(child, it.ID, opts)
 			if diag != nil {
 				return fail(*diag)
 			}
+			res.Diagnostics = append(res.Diagnostics, warns...)
 			if child.Kind == KindPurchased {
 				res.Own.AddScaled(split, qty)
 			} else {
@@ -449,15 +525,64 @@ func rollItem(cat Catalog, it Item, done map[string]Result, opts RollOptions) Re
 	}
 
 	res.direct = res.Own.Clone()
+	subtotals, diag := applySheet(&res, it, hours)
+	if diag != nil {
+		return fail(*diag)
+	}
+	if len(subtotals) > 0 {
+		res.Subtotals = make(map[string]decimal.Decimal, len(subtotals))
+		for id, v := range subtotals {
+			res.Subtotals[id] = v.Round(UnitScale)
+		}
+	}
+	res.hours = hours
+	return finish(res)
+}
+
+// basisOf sums the named components of the result so far; rolled components
+// count only when includeRolled is set (FR-39.2 include-rolled-subassemblies).
+func basisOf(res *Result, components []string, includeRolled bool) decimal.Decimal {
+	basis := decimal.Zero
+	for _, c := range components {
+		basis = basis.Add(res.Own[c])
+		if includeRolled {
+			basis = basis.Add(res.Rolled[c])
+		}
+	}
+	return basis
+}
+
+// applySheet evaluates the costing sheet in order (FR-39.2) and returns the
+// Basis and Total subtotals. A reference to a node that is not an earlier
+// Basis or Total node, or an unknown node type, is CST-0708.
+func applySheet(res *Result, it Item, hours decimal.Decimal) (map[string]decimal.Decimal, *Diagnostic) {
+	subtotals := map[string]decimal.Decimal{}
+	sheetErr := func(msg string) (map[string]decimal.Decimal, *Diagnostic) {
+		d := errDiag(CodeSheetNode, msg, it.ID)
+		return nil, &d
+	}
 	for _, node := range it.Sheet {
 		switch node.Type {
-		case NodeSurcharge:
-			basis := decimal.Zero
-			for _, c := range node.Basis {
-				basis = basis.Add(res.Own[c])
-				if node.IncludeRolled {
-					basis = basis.Add(res.Rolled[c])
+		case NodeBasis:
+			subtotals[node.ID] = basisOf(res, node.Basis, node.IncludeRolled)
+		case NodeTotal:
+			sum := decimal.Zero
+			for _, ref := range node.Refs {
+				v, ok := subtotals[ref]
+				if !ok {
+					return sheetErr("total node " + node.ID + " refers to " + ref + ", which is not an earlier Basis or Total node")
 				}
+				sum = sum.Add(v)
+			}
+			subtotals[node.ID] = sum
+		case NodeSurcharge:
+			basis := basisOf(res, node.Basis, node.IncludeRolled)
+			if node.BasisRef != "" {
+				v, ok := subtotals[node.BasisRef]
+				if !ok {
+					return sheetErr("surcharge node " + node.ID + " refers to " + node.BasisRef + ", which is not an earlier Basis or Total node")
+				}
+				basis = v
 			}
 			res.Own.Add(node.Component, basis.Mul(node.Percentage).Div(decimal.NewFromInt(100)))
 		case NodeRate:
@@ -466,10 +591,11 @@ func rollItem(cat Catalog, it Item, done map[string]Result, opts RollOptions) Re
 				driver = hours
 			}
 			res.Own.Add(node.Component, node.Rate.Mul(driver))
+		default:
+			return sheetErr("sheet node " + node.ID + " has unknown type " + string(node.Type))
 		}
 	}
-	res.hours = hours
-	return finish(res)
+	return subtotals, nil
 }
 
 // finish rounds components to the unit scale and sets the unit cost to their sum,

@@ -85,8 +85,10 @@ routing hours are charged on that quantity, and the BOM material, issued before 
 operation, is scaled by the first operation's factor. Setup is per lot and is not scaled
 (BR-39.5). BOM line scrap multiplies the line quantity as before.
 
-Costing sheet nodes: `Surcharge` (percentage of named components) and `Rate` (per routing
-hour or per unit); `Basis` and `Total` nodes are refused until the persisted sheet arrives.
+Costing sheet nodes (FR-39.2) are evaluated in sheet order: `Surcharge` (percentage of named
+components, or of an earlier `Basis` or `Total` subtotal named in `basisRef`), `Rate` (per
+routing hour or per unit), `Basis` (subtotal of named components) and `Total` (sum of earlier
+subtotals named in `refs`). See slice 3 below.
 
 ## Duties
 
@@ -95,7 +97,8 @@ hour or per unit); `Basis` and `Total` nodes are refused until the persisted she
 | `POST /v1/costing/calculations`, `/rolls`, `/mixed-costs`, `/sales-order-estimates`, `/postings:cogs`, `/postings:price-difference` | `CostingCalculate` |
 | `POST /v1/costing/comparisons`, `/reconciliations` | `CostingView` |
 | `POST /v1/costing/variances/compute` | `CostingSystem` |
-| `POST /v1/costing/activations:preview` | `CostingActivate` |
+| `POST /v1/costing/activations:preview`, `/versions:activate`, `/conversions:validate`, `/conversions:advance` | `CostingActivate` |
+| `POST /v1/costing/versions:transition` (block, unblock, close) | `CostingMaintain` |
 
 The comparison and the reconciliation compute an inquiry without changing anything, so they
 take the PRD's read duty `CostingView` (the PRD's `GET /costing/compare` and the inventory
@@ -107,16 +110,64 @@ value report).
 (`/productcost/roll`), production variances (`/productcost/variances`), activation
 preview (`/productcost/activation-preview`), mixed cost (`/productcost/mixed-cost`), sales
 order estimate (`/productcost/sales-order-estimate`), component postings
-(`/productcost/postings`), estimate comparison (`/productcost/compare`) and standard
-reconciliation (`/productcost/reconciliation`).
+(`/productcost/postings`), estimate comparison (`/productcost/compare`), standard
+reconciliation (`/productcost/reconciliation`) and, from slice 3, costing versions
+(`/productcost/versions`) and the standard cost conversion checklist
+(`/productcost/conversion`). The roll-up page offers the valuation view and shows the
+costing sheet subtotals.
+
+## Slice 3 (stateless)
+
+- **Costing sheet Basis and Total nodes** (FR-39.2): a `Basis` node reports the sum of its
+  `basis` components (rolled ones too with `includeRolled`) at its position in the sheet; a
+  `Total` node sums the earlier `Basis` or `Total` nodes named in `refs`; a `Surcharge` with
+  `basisRef` takes such a subtotal as its basis instead of `basis`. Subtotals are returned per
+  node id in `result.subtotals` and add nothing to the split. Node ids are unique in a sheet,
+  `component` is required on Surcharge and Rate and not allowed on Basis and Total, and every
+  reference must name an earlier subtotal node; the API refuses violations with 400 and the
+  domain fails an item that reaches it anyway with `CST-0708` (new code).
+- **Group valuation view** (FR-39.17, BR-39.15, AC-39.14): `options.view` = `Legal`
+  (default) or `Group`. In the Group view a purchased item flagged `intercompany` costs its
+  supplier's Legal-view cost (`legalCost`, already converted at the receipt's rate) instead of
+  the intercompany price, both when it is rolled and when a mode takes it at its active
+  standard. Without `legalCost` the price applies and `CST-0761` warns (`groupCostUnknown`).
+  `ProfitCenter` is refused until transfer prices exist. A comparison can roll the same
+  selection in both views (the valuation view comparison).
+- **Version lifecycle** (FR-39.3, BR-39.2): `POST /v1/costing/versions:transition`
+  (`CostingMaintain`) blocks, unblocks or closes a version: Open ⇄ Blocked, Active → Closed.
+  `POST /v1/costing/versions:activate` (`CostingActivate`) moves Open or Blocked to Active;
+  the maintain route refuses `activate` because the two duties are segregated (section
+  7.39.17). Simulation versions cannot activate (`CST-0711`). `SpecifiedVersion` fallback
+  needs a fallback version other than the version itself (`CST-0716`). Other moves are
+  `CST-0715`. CST-0715 and CST-0716 are new codes. Activation here changes the status only;
+  the revaluation posting is still the preview (`/activations:preview`).
+- **Standard cost conversion checklist** (FR-39.12): `POST /v1/costing/conversions:validate`
+  returns the blockers and the revaluation preview per position
+  (on-hand × standard − actual value, rounded to the currency's minor unit; the journal equals
+  the sum of the rows, AC-39.10). Negative on-hand (`CST-0732`), open in-transit transfers
+  (`CST-0733`) and started production orders (`CST-0734`) are errors when their blocker is in
+  `blockers` (all three when it is omitted, the parameter default) and warnings otherwise.
+  The inventory close (`closeThrough` = the day before the conversion date, BR-39.11) is a
+  later checklist step, so validation reports it as `closeComplete` with a `CST-0731`
+  warning. `POST /v1/costing/conversions:advance` records the next step (`select`, `roll`,
+  `validate`, `preview`, `close`, `activate`) for the calling user at the server's time:
+  `validate` refuses a blocked report (`CST-0735`), `close` refuses a missing close
+  (`CST-0731`), `activate` refuses either, and an out-of-order step is `CST-0736`. The
+  checklist sent must be the steps so far in order, each with a user; the run status is
+  derived from it. CST-0733 to CST-0736 are new codes.
+
+The service stays stateless: the caller sends the current version or checklist and receives
+the next state. Nothing is stored and no event is published until the persistence slice.
 
 ## Layout
 
 ```
 cmd/productcost/        entrypoint: dbx.Connect -> dbx.Migrate -> httpx.NewRouter -> register -> serve
 internal/domain/        roll-up, planner, mass roll, variances, pricing, mixed cost, postings,
-                        sales estimate, comparison and reconciliation (pure, no I/O)
-internal/api/           HTTP handlers, DTOs, validation (commercial.go holds the slice-2 routes)
+                        sales estimate, comparison, reconciliation, version lifecycle and
+                        conversion checklist (pure, no I/O)
+internal/api/           HTTP handlers, DTOs, validation (commercial.go holds the slice-2 routes,
+                        lifecycle.go the slice-3 version and conversion routes)
 migrations/             costing schema (costing_version, cost_calculation, cost_component_split,
                         cost_component, variance_entry) with RLS; not yet written to by slices 1-2;
                         migrations_test.go applies it and checks RLS when a database is set
@@ -159,8 +210,19 @@ Problem `type` is `https://passage.dev/problems/<code>`.
 | CST-0704 | item error | BOM depth exceeds `maxLevels` |
 | CST-0706 | item error | component is not in the catalog |
 | CST-0707 | item error | blocked: a component is in error (cascade, the rest of the run continues) |
+| CST-0708 | item error | costing sheet node of an unknown type, or a reference to a node that is not an earlier Basis or Total node (new code) |
+| CST-0711 | 422 | simulation versions cannot be activated |
+| CST-0715 | 422 | version transition not allowed from the current status (new code) |
+| CST-0716 | 422 | `SpecifiedVersion` fallback without a fallback version, or pointing to itself (new code) |
 | CST-0720 | 422 | variance identity failed for the order (residual above the rounding bound) |
+| CST-0731 | 422 / warning | inventory close through the day before the conversion date is required (warning in validation; 422 on the close and activate steps) |
+| CST-0732 | diagnostic | negative on-hand (error when the `NegativeOnHand` blocker is enabled) |
+| CST-0733 | diagnostic | open in-transit transfers (error with `InTransit`; new code) |
+| CST-0734 | diagnostic | production orders started but not ended (error with `StartedOrders`; new code) |
+| CST-0735 | 422 | conversion checklist blocked by an enabled blocker (new code) |
+| CST-0736 | 422 | conversion checklist step out of order, or checklist complete (new code) |
 | CST-0741 | 422 | mixing ratios do not total 100.00% |
+| CST-0761 | warning | Group view: no supplier Legal-view cost for an intercompany item; intercompany price used |
 
 Problem codes for the mass roll, the activation preview, the postings, the comparison and
 the reconciliation are not in the catalog; their failures are per-item diagnostics or

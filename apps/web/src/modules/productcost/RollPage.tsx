@@ -9,6 +9,7 @@ import {
   FormField,
   Input,
   PageHeader,
+  Select,
   StatGroup,
   StatTile,
   Textarea,
@@ -25,6 +26,7 @@ import {
   type Problem,
   type RollRun,
   type Split,
+  type ValuationView,
 } from "./api/client";
 import { amount, dash } from "./format";
 import { ExplosionModeField } from "./shared";
@@ -72,6 +74,7 @@ interface Values {
   itemId: string;
   mode: ExplosionMode;
   fallbackToActive: boolean;
+  view: ValuationView;
 }
 
 type Errors = Partial<Record<"items" | "itemId", string>>;
@@ -135,6 +138,24 @@ const diagnosticColumns: DataTableColumn<Diagnostic>[] = [
   { key: "ref", header: "Item", mono: true, render: (d) => d.ref ?? dash },
 ];
 
+interface SubtotalRow {
+  node: string;
+  value: string;
+}
+
+/** Basis and Total sheet node values in node id order (FR-39.2). */
+export function subtotalRows(result: CostResult): SubtotalRow[] {
+  const subtotals = result.subtotals ?? {};
+  return Object.keys(subtotals)
+    .sort()
+    .map((node) => ({ node, value: subtotals[node] }));
+}
+
+const subtotalColumns: DataTableColumn<SubtotalRow>[] = [
+  { key: "node", header: "Sheet node", mono: true },
+  { key: "value", header: "Subtotal per unit", align: "end", render: (row) => amount(row.value) },
+];
+
 function StatusBadge({ status }: { status: CostResult["status"] }) {
   return status === "Error" ? <Badge tone="danger">Error</Badge> : <Badge tone="success">Pending price</Badge>;
 }
@@ -185,6 +206,14 @@ function ResultDetail({ result, split }: { result: CostResult; split: Split }) {
             empty={{ title: "No cost components", description: "The item has no priced lines, operations or sheet nodes." }}
           />
         )}
+        {result.status !== "Error" && subtotalRows(result).length > 0 ? (
+          <DataTable
+            label={`Costing sheet subtotals of ${result.itemId}`}
+            columns={subtotalColumns}
+            rows={subtotalRows(result)}
+            getRowKey={(row) => row.node}
+          />
+        ) : null}
         {diagnostics.length > 0 ? (
           <DataTable
             label={`Diagnostics of ${result.itemId}`}
@@ -212,7 +241,13 @@ const runColumns: DataTableColumn<CostResult>[] = [
 
 /** Roll one item or a whole selection from BOMs, routings and costing sheets (FR-39.4, FR-39.5). */
 export function RollPage() {
-  const [values, setValues] = useState<Values>({ items: exampleText, itemId: "FG-100", mode: "Multilevel", fallbackToActive: false });
+  const [values, setValues] = useState<Values>({
+    items: exampleText,
+    itemId: "FG-100",
+    mode: "Multilevel",
+    fallbackToActive: false,
+    view: "Legal",
+  });
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState<"one" | "mass" | null>(null);
@@ -236,7 +271,7 @@ export function RollPage() {
     setErrors(found);
     setFailure(null);
     if (!items || Object.keys(found).length > 0) return;
-    const options = { mode: values.mode, fallbackToActive: values.fallbackToActive };
+    const options = { mode: values.mode, fallbackToActive: values.fallbackToActive, view: values.view };
     setBusy(kind);
     try {
       if (kind === "one") {
@@ -270,7 +305,7 @@ export function RollPage() {
             <FormField
               id="roll-items"
               label="Items"
-              hint="A JSON array of items: id, kind, price or costingLot, bom lines (childId, qty, scrapPct, phantom, makeToOrder), operations (setupHours, runHours, rate, scrapPct) and sheet nodes (Surcharge or Rate)."
+              hint="A JSON array of items: id, kind, price or costingLot, bom lines (childId, qty, scrapPct, phantom, makeToOrder), operations (setupHours, runHours, rate, scrapPct), sheet nodes (Basis, Surcharge, Rate, Total) and, for intercompany purchases, intercompany and legalCost."
               error={errors.items}
             >
               {(control) => (
@@ -298,6 +333,18 @@ export function RollPage() {
             )}
           </FormField>
           <ExplosionModeField id="roll-mode" value={values.mode} onChange={(mode) => update({ mode })} />
+          <FormField
+            id="roll-view"
+            label="Valuation view"
+            hint="Group costs an intercompany purchase at its supplier's Legal-view cost instead of the intercompany price."
+          >
+            {(control) => (
+              <Select {...control} value={values.view} onChange={(e) => update({ view: e.target.value as ValuationView })}>
+                <option value="Legal">Legal</option>
+                <option value="Group">Group</option>
+              </Select>
+            )}
+          </FormField>
           <div className={styles.check}>
             <Input
               id="roll-fallback"

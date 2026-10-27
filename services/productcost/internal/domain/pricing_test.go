@@ -113,7 +113,7 @@ func TestRevalue_JournalIsBalancedAndEmptyWhenNoChange(t *testing.T) {
 }
 
 func TestConversionAdjustment_AC3910(t *testing.T) {
-	total, journal := ConversionAdjustment([]ConversionLine{{ItemID: "X", Qty: d("500"), StdUnit: d("10.00"), ActualValue: d("4925.00")}})
+	_, total, journal := ConversionAdjustment([]ConversionLine{{ItemID: "X", Qty: d("500"), StdUnit: d("10.00"), ActualValue: d("4925.00")}}, "USD")
 	if !total.Equal(d("75.00")) {
 		t.Fatalf("adjustment = %s, want 75.00", total)
 	}

@@ -56,6 +56,19 @@ const tools = [
     description:
       "See what activating new standards would do to on-hand inventory: the revaluation per item and site and the journal it would post.",
   },
+  {
+    title: "Costing versions",
+    to: "/productcost/versions",
+    action: "Manage versions",
+    description: "Set up standard, planned, simulation and conversion versions with their fallback principle, then block, activate or close them.",
+  },
+  {
+    title: "Standard cost conversion",
+    to: "/productcost/conversion",
+    action: "Convert to standard",
+    description:
+      "Move items from actual costing to standard cost through the checklist: validate the blockers, preview the revaluation and record each step.",
+  },
 ];
 
 /** Landing page of the costing workspace (wave 39). */
@@ -64,7 +77,7 @@ export function CostingHome() {
     <div className={styles.stack}>
       <PageHeader
         title="Costing workspace"
-        description="Compute and compare standard costs, cost sales lines, explain production variances, preview component postings, reconcile inventory at standard and check a revaluation before activating new standards. Costing versions, stored calculations and posting arrive with the next slices."
+        description="Compute and compare standard costs, cost sales lines, explain production variances, preview component postings, reconcile inventory at standard, check a revaluation before activating new standards, manage costing versions and convert items to standard cost. Stored versions, calculations and posting arrive with the persistence slice."
       />
       <CardGrid as="ul" label="Costing tools">
         {tools.map((tool) => (
