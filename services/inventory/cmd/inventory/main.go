@@ -1,0 +1,134 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"os"
+	"strconv"
+
+	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/services/inventory/internal/api"
+	"github.com/BenjaminSRussell/passage/services/inventory/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/inventory/internal/store"
+	"github.com/BenjaminSRussell/passage/services/inventory/migrations"
+)
+
+const (
+	defaultHTTPAddr  = ":8080"
+	defaultAdminAddr = ":9090"
+)
+
+func main() {
+	slog.SetDefault(newLogger(os.Stdout))
+	if err := run(context.Background(), os.Getenv); err != nil {
+		slog.Error("inventory stopped", "err", err)
+		os.Exit(1)
+	}
+}
+
+func newLogger(w io.Writer) *slog.Logger {
+	renamed := map[string]string{slog.TimeKey: "timestamp", slog.MessageKey: "message"}
+	handler := slog.NewJSONHandler(w, &slog.HandlerOptions{ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
+		if name, ok := renamed[a.Key]; ok {
+			a.Key = name
+		}
+		return a
+	}})
+	return slog.New(handler).With("service", "inventory")
+}
+
+// config is the validated runtime configuration.
+type config struct {
+	databaseURL string
+	rules       domain.JournalRules
+	negative    domain.NegativePolicy
+	post        store.PostParams
+}
+
+// loadConfig reads and validates the environment. Invalid values stop startup.
+func loadConfig(getenv func(string) string) (config, error) {
+	var c config
+	c.databaseURL = getenv("DATABASE_URL")
+	if c.databaseURL == "" {
+		return c, errors.New("DATABASE_URL is required")
+	}
+	c.rules = domain.DefaultJournalRules
+	if raw := getenv("INV_JOURNAL_MAX_LINES"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1000 || n > 50000 {
+			return c, fmt.Errorf("INV_JOURNAL_MAX_LINES must be an integer from 1000 to 50000, got %q", raw)
+		}
+		c.rules.MaxLines = n
+	}
+	switch raw := getenv("INV_NEGATIVE_DEFAULT"); raw {
+	case "", "forbid":
+		c.negative = domain.NegativePolicy{}
+	case "allow":
+		c.negative = domain.NegativePolicy{PhysicalAllowed: true, FinancialAllowed: true}
+	default:
+		return c, fmt.Errorf("INV_NEGATIVE_DEFAULT must be forbid or allow, got %q", raw)
+	}
+	for name, target := range map[string]*string{
+		"INV_INVENTORY_ACCOUNT":        &c.post.InventoryAccount,
+		"INV_ADJUSTMENT_ACCOUNT":       &c.post.AdjustmentAccount,
+		"INV_OPENING_CLEARING_ACCOUNT": &c.post.OpeningAccount,
+	} {
+		*target = getenv(name)
+		if *target == "" {
+			return c, fmt.Errorf("%s is required", name)
+		}
+	}
+	c.post.Negative = c.negative
+	return c, nil
+}
+
+func run(ctx context.Context, getenv func(string) string) error {
+	cfg, err := loadConfig(getenv)
+	if err != nil {
+		return err
+	}
+	pool, err := dbx.Connect(ctx, cfg.databaseURL)
+	if err != nil {
+		return fmt.Errorf("connect database: %w", err)
+	}
+	defer pool.Close()
+	if getenv("MIGRATE_ON_START") == "true" {
+		if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+			return fmt.Errorf("migrate: %w", err)
+		}
+	}
+	s := store.New(pool).WithRules(cfg.rules)
+	a := api.New(s, cfg.post)
+	router := httpx.NewRouter()
+	a.Register(router)
+	admin := http.NewServeMux()
+	admin.Handle("/metrics", a.Metrics())
+	// The kernel router's /readyz is static; this one checks Postgres. The chart
+	// probes it on the admin port.
+	admin.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		if err := s.Ping(r.Context()); err != nil {
+			httpx.JSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unavailable"})
+			return
+		}
+		httpx.JSON(w, http.StatusOK, map[string]string{"status": "ready"})
+	})
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	errs := make(chan error, 2)
+	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), router) }()
+	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()
+	return <-errs
+}
+
+func addr(getenv func(string) string, key, fallback string) string {
+	if v := getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}

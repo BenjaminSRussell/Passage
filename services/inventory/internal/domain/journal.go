@@ -1,0 +1,335 @@
+package domain
+
+import (
+	"fmt"
+	"slices"
+	"time"
+
+	"github.com/shopspring/decimal"
+
+	"github.com/BenjaminSRussell/passage/platform/money"
+)
+
+// Journal and validation error codes (message catalog 3.16.18).
+const (
+	CodeInvalid            = "COM-0001"
+	CodeJournalMax         = "INV-JNL-001"
+	CodeOffsetRequired     = "INV-JNL-002"
+	CodeJournalNotReady    = "INV-JNL-003"
+	CodeUOMPrecision       = "INV-UOM-002"
+	CodeDuplicateSerial    = "INV-SER-001"
+	CodeSerialQty          = "INV-SER-002"
+	CodeDimensionMandatory = "INV-DIM-001"
+)
+
+// Error is a domain rule violation with a stable code.
+type Error struct {
+	Code   string
+	Detail string
+}
+
+func (e *Error) Error() string { return e.Code + ": " + e.Detail }
+
+func fail(code, format string, args ...any) *Error {
+	return &Error{Code: code, Detail: fmt.Sprintf(format, args...)}
+}
+
+// JournalType is the kind of inventory journal. Slice 1 posts the three
+// types that need no transfer or BOM explosion.
+type JournalType string
+
+const (
+	JournalMovement       JournalType = "MOVEMENT"
+	JournalAdjustment     JournalType = "ADJUSTMENT"
+	JournalOpeningBalance JournalType = "OPENING_BALANCE"
+)
+
+// JournalTypes are the journal types this slice accepts.
+var JournalTypes = []JournalType{JournalMovement, JournalAdjustment, JournalOpeningBalance}
+
+// JournalStatus is the journal state machine of BR-16.11.
+type JournalStatus string
+
+const (
+	JournalDraft     JournalStatus = "DRAFT"
+	JournalSubmitted JournalStatus = "SUBMITTED"
+	JournalApproved  JournalStatus = "APPROVED"
+	JournalPosting   JournalStatus = "POSTING"
+	JournalPosted    JournalStatus = "POSTED"
+	JournalRejected  JournalStatus = "REJECTED"
+	JournalCancelled JournalStatus = "CANCELLED"
+)
+
+// JournalStatuses lists every journal status.
+var JournalStatuses = []JournalStatus{JournalDraft, JournalSubmitted, JournalApproved, JournalPosting, JournalPosted, JournalRejected, JournalCancelled}
+
+var journalNext = map[JournalStatus][]JournalStatus{
+	JournalDraft:     {JournalSubmitted, JournalCancelled},
+	JournalSubmitted: {JournalApproved, JournalRejected},
+	JournalRejected:  {JournalDraft, JournalCancelled},
+	JournalApproved:  {JournalPosting},
+	JournalPosting:   {JournalPosted},
+}
+
+// CanMoveJournal reports whether the journal state machine allows from -> to.
+func CanMoveJournal(from, to JournalStatus) bool {
+	return slices.Contains(journalNext[from], to)
+}
+
+// JournalLine is one keyed line. Qty is in the inventory unit; EnteredQty and
+// EnteredUnit record what the user typed (equal to Qty until wave 6/8 unit
+// conversion is wired in). ClientKey is the optional per-line idempotency key
+// of lines:bulk.
+type JournalLine struct {
+	ID          string
+	LineNo      int
+	ClientKey   string
+	ProductID   string
+	Dims        Dimensions
+	Qty         decimal.Decimal
+	EnteredQty  decimal.Decimal
+	EnteredUnit string
+	CostPrice   decimal.Decimal
+}
+
+// SameContent reports whether two lines carry the same keyed values; it is the
+// replay check for a repeated per-line client key.
+func (l JournalLine) SameContent(o JournalLine) bool {
+	a, errA := l.Dims.Normalize()
+	b, errB := o.Dims.Normalize()
+	return errA == nil && errB == nil && l.ProductID == o.ProductID && a.Canonical() == b.Canonical() &&
+		l.Qty.Equal(o.Qty) && l.EnteredQty.Equal(o.EnteredQty) && l.EnteredUnit == o.EnteredUnit && l.CostPrice.Equal(o.CostPrice)
+}
+
+// Journal is an inventory journal with its lines.
+type Journal struct {
+	ID              string
+	LegalEntityID   string
+	Type            JournalType
+	Status          JournalStatus
+	PostingDate     time.Time
+	OffsetAccountID string
+	Currency        string
+	Lines           []JournalLine
+	LineCount       int
+	Version         int
+	GLEntry         *JournalEntry
+	CreatedAt       time.Time
+	PostedAt        *time.Time
+}
+
+// JournalRules are the tenant limits applied during validation.
+type JournalRules struct {
+	MaxLines int
+	MaxScale int32
+}
+
+// DefaultJournalRules are the configured defaults (INV_JOURNAL_MAX_LINES=10000).
+// MaxScale is the largest inventory unit precision (FR-16.10: max 6); the
+// product's own unit decimals arrive with the wave 6/8 UoM lookup.
+var DefaultJournalRules = JournalRules{MaxLines: 10000, MaxScale: 6}
+
+// maxCostScale is the precision of cost_price (numeric(20,6)).
+const maxCostScale = 6
+
+// reservedDimensions are hashed but not yet accepted on a line: license_plate
+// belongs to wave 31 and owner to the consignment slice (FR-16.17), which must
+// keep vendor-owned stock free of value (BR-16.14).
+var reservedDimensions = []string{DimLicensePlate, DimOwner}
+
+// ValidateHeader checks the journal header: a supported type, a currency, and an
+// offset account exactly when the journal is a MOVEMENT (FR-16.6: ADJUSTMENT
+// and OPENING_BALANCE take their offset from the posting profile).
+func ValidateHeader(j Journal) error {
+	if !slices.Contains(JournalTypes, j.Type) {
+		return fail(CodeInvalid, "journal type %q is not supported", j.Type)
+	}
+	if len(j.Currency) != 3 {
+		return fail(CodeInvalid, "currency %q is not an ISO 4217 code", j.Currency)
+	}
+	if j.Type == JournalMovement && j.OffsetAccountID == "" {
+		return fail(CodeOffsetRequired, "movement journal requires an offset account")
+	}
+	if j.Type != JournalMovement && j.OffsetAccountID != "" {
+		return fail(CodeInvalid, "%s journals post to the posting profile account; leave the offset account empty", j.Type)
+	}
+	return nil
+}
+
+// ValidateLine checks the rules of one line that need no database: product,
+// non-zero quantity within precision, entered quantity on the same side, a
+// non-negative cost, known dimensions with a site (FR-16.5), no reserved
+// dimension, and ±1 for a serial (BR-16.9).
+func ValidateLine(l JournalLine, maxScale int32) error {
+	if l.ProductID == "" {
+		return fail(CodeInvalid, "line %d has no product", l.LineNo)
+	}
+	if l.Qty.IsZero() {
+		return fail(CodeInvalid, "line %d has zero quantity", l.LineNo)
+	}
+	if !l.Qty.Equal(l.Qty.Truncate(maxScale)) {
+		return fail(CodeUOMPrecision, "line %d quantity %s has more than %d decimals", l.LineNo, l.Qty, maxScale)
+	}
+	if l.EnteredQty.Sign() != l.Qty.Sign() {
+		return fail(CodeInvalid, "line %d entered quantity %s must have the sign of quantity %s", l.LineNo, l.EnteredQty, l.Qty)
+	}
+	if l.CostPrice.Sign() < 0 || !l.CostPrice.Equal(l.CostPrice.Truncate(maxCostScale)) {
+		return fail(CodeInvalid, "line %d cost price must be non-negative with at most %d decimals", l.LineNo, maxCostScale)
+	}
+	dims, err := l.Dims.Normalize()
+	if err != nil {
+		return fail(CodeInvalid, "line %d: %v", l.LineNo, err)
+	}
+	for _, name := range reservedDimensions {
+		if dims[name] != "" {
+			return fail(CodeInvalid, "line %d: dimension %s is reserved and cannot be set yet", l.LineNo, name)
+		}
+	}
+	if dims[DimSite] == "" {
+		return fail(CodeDimensionMandatory, "dimension %s is mandatory for product %s (line %d)", DimSite, l.ProductID, l.LineNo)
+	}
+	if dims[DimSerial] != "" && !l.Qty.Abs().Equal(decimal.NewFromInt(1)) {
+		return fail(CodeSerialQty, "serial-tracked product %s requires quantity ±1 per transaction (line %d)", l.ProductID, l.LineNo)
+	}
+	return nil
+}
+
+// ValidateJournal checks the rules that do not need the database: header,
+// line count and every line.
+func ValidateJournal(j Journal, r JournalRules) error {
+	if err := ValidateHeader(j); err != nil {
+		return err
+	}
+	if len(j.Lines) == 0 {
+		return fail(CodeInvalid, "journal has no lines")
+	}
+	if len(j.Lines) > r.MaxLines {
+		return fail(CodeJournalMax, "journal exceeds %d lines", r.MaxLines)
+	}
+	for _, l := range j.Lines {
+		if err := ValidateLine(l, r.MaxScale); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// PostedLine is a journal line planned as one inventory transaction. Value is
+// the signed cost in the accounting currency, rounded to its minor unit; it is
+// set by the posting once the on-hand row is locked (issues are valued at the
+// row's running average).
+type PostedLine struct {
+	Line   JournalLine
+	Status Status
+	Value  decimal.Decimal
+}
+
+// PlanPosting turns journal lines into transactions. Each line is posted in one
+// step at its financial status: receipts become PURCHASED, issues become SOLD,
+// so posted quantity and value move with the journal's GL entry. Physical
+// statuses other than these are reached by later slices (receiving, shipping).
+func PlanPosting(j Journal) []PostedLine {
+	out := make([]PostedLine, 0, len(j.Lines))
+	for _, l := range j.Lines {
+		st := StatusSold
+		if l.Qty.Sign() > 0 {
+			st = StatusPurchased
+		}
+		out = append(out, PostedLine{Line: l, Status: st})
+	}
+	return out
+}
+
+// ReceiptValue is a receipt's value: quantity times the entered cost price,
+// rounded to the currency's minor unit (BR-16.5).
+func ReceiptValue(qty, costPrice decimal.Decimal, currency string) decimal.Decimal {
+	return money.Amount{Value: qty.Mul(costPrice), Currency: currency}.Round().Value
+}
+
+// IssueValue values an issue of qty (negative) against the row's running
+// average, posted_value / posted_qty (PRD 3.16.1: issues at the running
+// average until wave 20). An issue that empties the row takes its whole posted
+// value, so no rounding residue stays behind. Quantity beyond the posted
+// quantity (negative stock where the policy allows it), or an issue from a row
+// with no positive posted quantity, is valued at fallbackCost. The result is
+// negative or zero, rounded to the currency's minor unit.
+func (o OnHand) IssueValue(qty, fallbackCost decimal.Decimal, currency string) decimal.Decimal {
+	out := qty.Abs()
+	if o.PostedQty.Sign() <= 0 {
+		return ReceiptValue(out, fallbackCost, currency).Neg()
+	}
+	if out.LessThan(o.PostedQty) {
+		avg := o.PostedValue.Div(o.PostedQty)
+		return ReceiptValue(out, avg, currency).Neg()
+	}
+	beyond := ReceiptValue(out.Sub(o.PostedQty), fallbackCost, currency)
+	return o.PostedValue.Add(beyond).Neg()
+}
+
+// GLLine is one ledger line of a journal entry, in journal currency.
+type GLLine struct {
+	Account string          `json:"account"`
+	Debit   decimal.Decimal `json:"debit"`
+	Credit  decimal.Decimal `json:"credit"`
+}
+
+// JournalEntry is the balanced GL entry a posted inventory journal produces.
+type JournalEntry struct {
+	Currency string   `json:"currency"`
+	Lines    []GLLine `json:"lines"`
+}
+
+// Balanced reports whether total debits equal total credits.
+func (e JournalEntry) Balanced() bool {
+	dr, cr := decimal.Zero, decimal.Zero
+	for _, l := range e.Lines {
+		dr = dr.Add(l.Debit)
+		cr = cr.Add(l.Credit)
+	}
+	return dr.Equal(cr)
+}
+
+// BuildEntry builds the GL entry for a valued plan: receipts debit the
+// inventory account and credit the offset, issues debit the offset and credit
+// inventory. Each side is one line per account, zero lines are left out, and
+// every amount is already rounded, so the entry balances exactly and the net
+// on the inventory account equals the change in posted value.
+func BuildEntry(plan []PostedLine, inventoryAccount, offsetAccount, currency string) (JournalEntry, error) {
+	if len(currency) != 3 {
+		return JournalEntry{}, fmt.Errorf("invalid currency %q", currency)
+	}
+	if inventoryAccount == "" || offsetAccount == "" {
+		return JournalEntry{}, fmt.Errorf("inventory and offset accounts are required")
+	}
+	receipts, issues := decimal.Zero, decimal.Zero
+	for _, p := range plan {
+		if p.Value.Sign() >= 0 {
+			receipts = receipts.Add(p.Value)
+		} else {
+			issues = issues.Add(p.Value.Neg())
+		}
+	}
+	entry := JournalEntry{Currency: currency, Lines: []GLLine{}}
+	if receipts.Sign() > 0 {
+		entry.Lines = append(entry.Lines,
+			GLLine{Account: inventoryAccount, Debit: receipts, Credit: decimal.Zero},
+			GLLine{Account: offsetAccount, Debit: decimal.Zero, Credit: receipts})
+	}
+	if issues.Sign() > 0 {
+		entry.Lines = append(entry.Lines,
+			GLLine{Account: offsetAccount, Debit: issues, Credit: decimal.Zero},
+			GLLine{Account: inventoryAccount, Debit: decimal.Zero, Credit: issues})
+	}
+	return entry, nil
+}
+
+// Net returns debits minus credits on account.
+func (e JournalEntry) Net(account string) decimal.Decimal {
+	net := decimal.Zero
+	for _, l := range e.Lines {
+		if l.Account == account {
+			net = net.Add(l.Debit).Sub(l.Credit)
+		}
+	}
+	return net
+}

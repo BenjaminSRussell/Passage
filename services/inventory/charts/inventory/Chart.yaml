@@ -1,0 +1,6 @@
+apiVersion: v2
+name: inventory
+description: Passage inventory ledger, dimensions, journals and on-hand projection (wave 16)
+type: application
+version: 0.1.0
+appVersion: "0.16.0"

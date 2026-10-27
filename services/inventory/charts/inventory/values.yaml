@@ -1,0 +1,28 @@
+image:
+  repository: ghcr.io/benjaminsrussell/inventory
+  digest: ""
+  tag: ""
+  pullPolicy: IfNotPresent
+databaseSecret: inventory-db
+migrateOnStart: false
+replicaCount: 3
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 12
+  targetCPUUtilizationPercentage: 70
+resources:
+  requests: { cpu: 100m, memory: 128Mi }
+  limits: { cpu: 500m, memory: 256Mi }
+serviceMonitor:
+  enabled: false
+inventory:
+  negativeDefault: forbid
+  reservationTTLHours: 0
+  journalMaxLines: 10000
+  reconCron: "0 2 * * *"
+  # Posting-profile accounts (ledger account ids). Required: the service exits at
+  # startup when any is empty. Per-legal-entity posting profiles arrive with wave 11.
+  inventoryAccount: ""
+  adjustmentAccount: ""
+  openingClearingAccount: ""

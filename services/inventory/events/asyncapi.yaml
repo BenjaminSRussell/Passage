@@ -1,0 +1,109 @@
+asyncapi: 3.0.0
+info:
+  title: Passage Inventory events
+  version: 0.16.1
+  description: |
+    Published through the transactional outbox in the same database transaction as the
+    posting, relayed by Debezium. CloudEvents 1.0 envelope (tenantid, correlationid,
+    causationid, traceparent, actor, sequence, dataschema). Additive-only evolution.
+defaultContentType: application/json
+channels:
+  transactionPosted:
+    address: passage.inventory.transaction
+    messages:
+      transactionPosted:
+        $ref: '#/components/messages/TransactionPosted'
+  onhandChanged:
+    address: passage.inventory.onhand
+    messages:
+      onhandChanged:
+        $ref: '#/components/messages/OnhandChanged'
+  journalPosted:
+    address: passage.inventory.journal
+    messages:
+      journalPosted:
+        $ref: '#/components/messages/JournalPosted'
+operations:
+  publishTransactionPosted:
+    action: send
+    channel: { $ref: '#/channels/transactionPosted' }
+    summary: One inventory transaction written by a journal posting
+  publishOnhandChanged:
+    action: send
+    channel: { $ref: '#/channels/onhandChanged' }
+    summary: On-hand projection row changed by a posting
+  publishJournalPosted:
+    action: send
+    channel: { $ref: '#/channels/journalPosted' }
+    summary: Journal reached POSTED with its balanced GL lines
+components:
+  messages:
+    TransactionPosted:
+      name: dev.passage.inventory.transaction.posted.v1
+      x-passage-type: dev.passage.inventory.transaction.posted.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/TransactionPostedData'
+    OnhandChanged:
+      name: dev.passage.inventory.onhand.changed.v1
+      x-passage-type: dev.passage.inventory.onhand.changed.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/OnhandChangedData'
+    JournalPosted:
+      name: dev.passage.inventory.journal.posted.v1
+      x-passage-type: dev.passage.inventory.journal.posted.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/JournalPostedData'
+  schemas:
+    TransactionPostedData:
+      type: object
+      required: [transactionId, legalEntityId, journalId, originId, productId, dimensionSet, qty, issueStatus, receiptStatus, physicalDate, financialDate, currency, costAmountPhysical, costAmountPosted]
+      properties:
+        transactionId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        journalId: { type: string, format: uuid }
+        originId: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        dimensionSet: { type: object, additionalProperties: { type: string } }
+        qty: { type: string, description: Signed quantity; negative for issues }
+        issueStatus: { type: [string, 'null'], enum: [ON_ORDER, RESERVED_ORDERED, RESERVED_PHYSICAL, PICKED, DEDUCTED, SOLD, null], description: Set for issues; journals post SOLD }
+        receiptStatus: { type: [string, 'null'], enum: [ORDERED, ARRIVED, REGISTERED, RECEIVED, PURCHASED, null], description: Set for receipts; journals post PURCHASED }
+        physicalDate: { type: string, format: date }
+        financialDate: { type: string, format: date }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        costAmountPhysical: { type: string, description: Signed value in currency, rounded to its minor unit }
+        costAmountPosted: { type: string }
+    OnhandChangedData:
+      type: object
+      required: [legalEntityId, productId, dimensionSet, availPhysical, availOrdered, physicalInvent, deltaBucket, deltaQty]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        dimensionSet: { type: object, additionalProperties: { type: string } }
+        availPhysical: { type: string }
+        availOrdered: { type: string }
+        physicalInvent: { type: string }
+        deltaBucket: { type: string, enum: [POSTED], description: Projection bucket the change moved (journals move posted quantity) }
+        deltaQty: { type: string, description: Net signed quantity change of the row }
+    JournalPostedData:
+      type: object
+      required: [journalId, legalEntityId, journalType, postingDate, currency, lineCount, glLines, ledgerEntryId]
+      properties:
+        journalId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        journalType: { type: string, enum: [MOVEMENT, ADJUSTMENT, OPENING_BALANCE] }
+        postingDate: { type: string, format: date }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        lineCount: { type: integer }
+        glLines:
+          type: array
+          items:
+            type: object
+            required: [account, debit, credit]
+            properties:
+              account: { type: string }
+              debit: { type: string }
+              credit: { type: string }
+        ledgerEntryId: { type: [string, 'null'], format: uuid, description: Null until the wave 11 ledger Post exists }

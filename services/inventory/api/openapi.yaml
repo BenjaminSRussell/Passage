@@ -1,0 +1,349 @@
+openapi: 3.1.0
+info:
+  title: Passage Inventory
+  version: 0.16.1
+  description: |
+    Inventory journals, posting and the on-hand inquiry (wave 16, slice 1). Quantities and
+    money are decimal strings; money is in the journal (accounting) currency, rounded to its
+    minor unit. Browser calls use /api/v1/inventory/..., which the web BFF rewrites to these paths.
+servers:
+  - url: https://api.{env}.passage.dev
+    variables:
+      env:
+        default: dev
+paths:
+  /v1/inventory/journals:
+    post:
+      operationId: createInventoryJournal
+      summary: Create a journal header (DRAFT)
+      description: |
+        MOVEMENT journals require offsetAccountId (INV-JNL-002); ADJUSTMENT and OPENING_BALANCE
+        post to the posting-profile account and must leave it empty. A repeated Idempotency-Key
+        with the same body returns the original journal (200, Idempotent-Replayed: true); with a
+        different body it is idempotency_key_reuse (422). A legal entity outside the caller's
+        scope is AUTH-0003 (403).
+      x-passage-duty: inventory.journal.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateJournalRequest' }
+      responses:
+        '201':
+          description: Journal created
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Journal' }
+        '200':
+          description: Idempotent replay of a previous create
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Journal' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listInventoryJournals
+      summary: List journal headers, newest first (posted journals by type, PRD 3.16.14)
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/JournalStatus' } }
+        - { name: type, in: query, schema: { $ref: '#/components/schemas/JournalType' } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, description: nextCursor of the previous page, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of journal headers (no lines)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/JournalSummary' }
+                  nextCursor: { type: string }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/journals/{id}:
+    get:
+      operationId: getInventoryJournal
+      summary: Read a journal with its lines and, once posted, its GL entry
+      x-passage-duty: inventory.read
+      parameters:
+        - $ref: '#/components/parameters/JournalId'
+      responses:
+        '200':
+          description: Journal
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Journal' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/journals/{id}/lines:bulk:
+    post:
+      operationId: addInventoryJournalLines
+      summary: Add up to 10,000 lines to a DRAFT journal
+      description: |
+        Each line needs a site dimension (INV-DIM-001), a non-zero quantity with at most 6
+        decimals (INV-UOM-002) and, for a serial, quantity ±1 (INV-SER-002). owner and
+        license_plate are reserved and rejected. A line with a clientKey already on the journal is
+        a replay: skipped when identical, idempotency_key_reuse (422) when different.
+      x-passage-duty: inventory.journal.write
+      parameters:
+        - $ref: '#/components/parameters/JournalId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddLinesRequest' }
+      responses:
+        '201':
+          description: Lines added; journal returned with the new version
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Journal' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/journals/{id}:post:
+    post:
+      operationId: postInventoryJournal
+      summary: Post a journal to inventory, on-hand and the GL entry (synchronous in slice 1)
+      description: |
+        Requires If-Match with the journal version (428 COM-0428 when absent, 412 on mismatch).
+        Locks each on-hand row in ascending (product, dimension set) order, values receipts at
+        their cost price and issues at the row's running average, applies the negative-stock
+        policy (INV-NEG-001 / INV-NEG-002), rejects a serial already in stock (INV-SER-001) and a
+        currency other than the row's (INV-CUR-001), writes transactions and origins, updates the
+        projection, stores a balanced GL entry and enqueues the outbox events in the same
+        transaction. Rejections roll everything back. Posting a POSTED journal returns it
+        unchanged.
+      x-passage-duty: inventory.journal.post
+      parameters:
+        - $ref: '#/components/parameters/JournalId'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Journal posted (or already posted)
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Journal' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/onhand:
+    get:
+      operationId: queryInventoryOnHand
+      summary: On-hand by any subset of dimensions
+      description: |
+        Aggregates the on-hand projection with the FR-16.3 formulas. Every group is also split by
+        currency so posted values never mix currencies. At most 10,000 groups are returned;
+        truncated is true when more matched.
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: product, in: query, schema: { type: string, format: uuid } }
+        - { name: site, in: query, schema: { type: string } }
+        - { name: warehouse, in: query, schema: { type: string } }
+        - { name: batch, in: query, schema: { type: string } }
+        - name: groupBy
+          in: query
+          description: Comma-separated groupings (product, legal_entity, site, warehouse, location, batch, serial, inventory_status, config, size, color, style, license_plate, owner). Default product.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Grouped on-hand rows
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, truncated]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/OnHandItem' }
+                  truncated: { type: boolean }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 255 }
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: Journal version from the ETag of the last read
+      schema: { type: string }
+    JournalId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  headers:
+    ETag:
+      description: Journal version, quoted
+      schema: { type: string }
+  responses:
+    Problem:
+      description: RFC 9457 problem details
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    JournalType:
+      type: string
+      enum: [MOVEMENT, ADJUSTMENT, OPENING_BALANCE]
+    JournalStatus:
+      type: string
+      enum: [DRAFT, SUBMITTED, APPROVED, POSTING, POSTED, REJECTED, CANCELLED]
+    Decimal:
+      type: string
+      pattern: '^-?[0-9]+(\.[0-9]+)?$'
+    CreateJournalRequest:
+      type: object
+      additionalProperties: false
+      required: [journalType, legalEntityId, postingDate, currency]
+      properties:
+        journalType: { $ref: '#/components/schemas/JournalType' }
+        legalEntityId: { type: string, format: uuid }
+        postingDate: { type: string, format: date }
+        offsetAccountId:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'
+          description: Ledger account id. Required for MOVEMENT, rejected for the other types.
+        currency: { type: string, pattern: '^[A-Z]{3}$', description: Accounting currency of the legal entity }
+    AddLinesRequest:
+      type: object
+      additionalProperties: false
+      required: [lines]
+      properties:
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 10000
+          items: { $ref: '#/components/schemas/JournalLineRequest' }
+    Dimensions:
+      type: object
+      description: Dimension values by name (site, warehouse, location, batch, serial, inventory_status, config, size, color, style). site is mandatory; owner and license_plate are reserved.
+      additionalProperties: { type: string, maxLength: 60 }
+    JournalLineRequest:
+      type: object
+      additionalProperties: false
+      required: [productId, qty, enteredUnit]
+      properties:
+        clientKey: { type: string, maxLength: 255, description: Per-line idempotency key }
+        productId: { type: string, format: uuid }
+        dimensions: { $ref: '#/components/schemas/Dimensions' }
+        qty: { $ref: '#/components/schemas/Decimal', description: 'Signed quantity in the inventory unit (receipt > 0, issue < 0)' }
+        enteredQty: { $ref: '#/components/schemas/Decimal', description: 'Quantity as keyed; defaults to qty and must have its sign' }
+        enteredUnit: { type: string, pattern: '^[A-Z0-9_-]{1,12}$' }
+        costPrice: { $ref: '#/components/schemas/Decimal', description: 'Non-negative cost per inventory unit, up to 6 decimals; receipts are valued at it, issues at the running average (it is the fallback when none exists)' }
+    JournalLine:
+      type: object
+      required: [id, lineNo, productId, dimensions, qty, enteredQty, enteredUnit, costPrice]
+      properties:
+        id: { type: string, format: uuid }
+        lineNo: { type: integer }
+        clientKey: { type: string }
+        productId: { type: string, format: uuid }
+        dimensions: { $ref: '#/components/schemas/Dimensions' }
+        qty: { $ref: '#/components/schemas/Decimal' }
+        enteredQty: { $ref: '#/components/schemas/Decimal' }
+        enteredUnit: { type: string }
+        costPrice: { $ref: '#/components/schemas/Decimal' }
+    GLEntry:
+      type: object
+      required: [currency, lines, ledgerEntryId]
+      properties:
+        currency: { type: string }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [account, debit, credit]
+            properties:
+              account: { type: string }
+              debit: { $ref: '#/components/schemas/Decimal' }
+              credit: { $ref: '#/components/schemas/Decimal' }
+        ledgerEntryId: { type: [string, 'null'], format: uuid, description: Null until the wave 11 ledger Post exists }
+    JournalSummary:
+      type: object
+      required: [id, legalEntityId, journalType, status, postingDate, currency, version, lineCount, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        journalType: { $ref: '#/components/schemas/JournalType' }
+        status: { $ref: '#/components/schemas/JournalStatus' }
+        postingDate: { type: string, format: date }
+        offsetAccountId: { type: string }
+        currency: { type: string }
+        version: { type: integer }
+        lineCount: { type: integer }
+        createdAt: { type: string, format: date-time }
+        postedAt: { type: string, format: date-time }
+    Journal:
+      allOf:
+        - $ref: '#/components/schemas/JournalSummary'
+        - type: object
+          required: [lines]
+          properties:
+            lines:
+              type: array
+              items: { $ref: '#/components/schemas/JournalLine' }
+            glEntry: { $ref: '#/components/schemas/GLEntry' }
+    OnHandItem:
+      type: object
+      required: [group, physicalInvent, availPhysical, availOrdered, postedValue, reservedPhysical, currency, negative]
+      properties:
+        group: { type: object, additionalProperties: { type: string } }
+        physicalInvent: { $ref: '#/components/schemas/Decimal' }
+        availPhysical: { $ref: '#/components/schemas/Decimal' }
+        availOrdered: { $ref: '#/components/schemas/Decimal' }
+        postedValue: { $ref: '#/components/schemas/Decimal' }
+        reservedPhysical: { $ref: '#/components/schemas/Decimal' }
+        currency: { type: string }
+        negative: { type: boolean, description: True when any row in the group has negative physical stock }
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri, example: 'https://passage.dev/problems/INV-NEG-001' }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string, example: INV-NEG-001 }
+        traceId: { type: string }
+        errors:
+          type: object
+          additionalProperties: { type: string }

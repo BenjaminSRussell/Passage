@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app.kubernetes.io/name: inventory
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: inventory
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: inventory
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: inventory
+          image: {{ include "inventory.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.databaseSecret }}
+                  key: DATABASE_URL
+            - name: MIGRATE_ON_START
+              value: {{ .Values.migrateOnStart | quote }}
+            - name: INV_NEGATIVE_DEFAULT
+              value: {{ .Values.inventory.negativeDefault | quote }}
+            - name: INV_RESERVATION_TTL_HOURS
+              value: {{ .Values.inventory.reservationTTLHours | quote }}
+            - name: INV_JOURNAL_MAX_LINES
+              value: {{ .Values.inventory.journalMaxLines | quote }}
+            - name: INV_RECON_CRON
+              value: {{ .Values.inventory.reconCron | quote }}
+            - name: INV_INVENTORY_ACCOUNT
+              value: {{ .Values.inventory.inventoryAccount | quote }}
+            - name: INV_ADJUSTMENT_ACCOUNT
+              value: {{ .Values.inventory.adjustmentAccount | quote }}
+            - name: INV_OPENING_CLEARING_ACCOUNT
+              value: {{ .Values.inventory.openingClearingAccount | quote }}
+          ports:
+            - { name: http, containerPort: 8080 }
+            - { name: admin, containerPort: 9090 }
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            failureThreshold: 30
+            periodSeconds: 2
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+          readinessProbe:
+            httpGet: { path: /readyz, port: admin }
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
