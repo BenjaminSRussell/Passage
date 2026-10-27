@@ -1,0 +1,44 @@
+asyncapi: 3.0.0
+info:
+  title: Passage EDI events
+  version: 0.1.0
+  description: Events published by the edi service through the transactional outbox (CloudEvents 1.0).
+defaultContentType: application/cloudevents+json
+channels:
+  messageReceived:
+    address: passage.edi.message
+    messages:
+      messageReceived:
+        $ref: '#/components/messages/MessageReceived'
+operations:
+  publishMessageReceived:
+    action: send
+    channel: { $ref: '#/channels/messageReceived' }
+    summary: One inbound transaction set has been recorded (FR-35.4)
+components:
+  messages:
+    MessageReceived:
+      name: dev.passage.edi.message.received.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, id, tenantid, data]
+        properties:
+          type: { const: dev.passage.edi.message.received.v1 }
+          source: { const: edi }
+          id: { type: string, format: uuid }
+          tenantid: { type: string, format: uuid }
+          subject: { type: string, description: message id }
+          data:
+            type: object
+            required: [message_id, interchange_id, partner_id, standard, transaction_set, control_number, st_control, status]
+            properties:
+              message_id: { type: string, format: uuid }
+              interchange_id: { type: string, format: uuid }
+              partner_id: { type: string, format: uuid }
+              standard: { type: string, enum: [X12, EDIFACT, UBL, CXML] }
+              transaction_set: { type: string }
+              control_number: { type: string }
+              st_control: { type: string }
+              status: { type: string, enum: [RECEIVED, MAPPED, POSTED, FAILED, SENT, ACKED] }
+              canonical_ref: { type: string }

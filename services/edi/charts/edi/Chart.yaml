@@ -1,0 +1,6 @@
+apiVersion: v2
+name: edi
+description: Passage EDI engine (X12/EDIFACT partner exchange, PSG-35 slice 1)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
