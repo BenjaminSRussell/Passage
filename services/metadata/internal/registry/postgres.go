@@ -5,15 +5,51 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/outbox"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/metadata/internal/domain"
 )
+
+const (
+	EntityPublished = "dev.passage.metadata.entity.published.v1"
+	eventSource     = "metadata"
+)
+
+type DiffSummary struct {
+	Added   int `json:"added"`
+	Changed int `json:"changed"`
+	Removed int `json:"removed"`
+}
+
+type EntityPublishedData struct {
+	Entity      string      `json:"entity"`
+	Domain      string      `json:"domain"`
+	Version     int         `json:"version"`
+	DiffSummary DiffSummary `json:"diff_summary"`
+}
+
+func summarize(changes []domain.Change) DiffSummary {
+	var summary DiffSummary
+	for _, change := range changes {
+		switch {
+		case strings.HasSuffix(change.Kind, ".added") || strings.HasSuffix(change.Kind, ".value_added"):
+			summary.Added++
+		case strings.HasSuffix(change.Kind, ".removed") || strings.HasSuffix(change.Kind, ".value_removed"):
+			summary.Removed++
+		default:
+			summary.Changed++
+		}
+	}
+	return summary
+}
 
 type Postgres struct {
 	pool *pgxpool.Pool
@@ -64,6 +100,15 @@ func publishTx(ctx context.Context, tx pgx.Tx, tenantID string, entity *domain.E
 		tenantID, entity.Name, version.Number, definition, changes, actor)
 	if err != nil {
 		return Version{}, fmt.Errorf("publish metadata version: %w", err)
+	}
+	evt, err := events.New(EntityPublished, eventSource, entity.Name, tenantID, EntityPublishedData{
+		Entity: entity.Name, Domain: entity.Domain, Version: version.Number, DiffSummary: summarize(version.Changes),
+	})
+	if err != nil {
+		return Version{}, fmt.Errorf("build metadata event: %w", err)
+	}
+	if err := outbox.Enqueue(ctx, tx, "entity", entity.Name, evt); err != nil {
+		return Version{}, fmt.Errorf("enqueue metadata event: %w", err)
 	}
 	return version, nil
 }
