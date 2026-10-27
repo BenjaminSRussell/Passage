@@ -6,6 +6,16 @@ const (
 	CodeBSStd  = "BS-STD"
 	CodePLStd  = "PL-STD"
 	CodePLFunc = "PL-FUNC"
+	CodeCFStd  = "CF-STD"
+)
+
+// Cash flow tags (BR-15.5, PRD §2.15.4 row.cash_flow_tag).
+const (
+	tagOperating  = "operating_adjustment"
+	tagWorkingCap = "working_capital"
+	tagInvesting  = "investing"
+	tagFinancing  = "financing"
+	tagCash       = "cash"
 )
 
 // PLFuncCheckRow is the check row of PL-FUNC: expense lines without FUNC_AREA.
@@ -29,12 +39,58 @@ const (
 	funcAreaCostOfSale = "COS"
 )
 
-// StandardDefinitions returns the designs of TB-STD, BS-STD, PL-STD and PL-FUNC.
-// They are unpublished templates; the install action publishes them as version
-// 1. Columns leave the currency type empty, so every run chooses it (FR-15.5:
-// standard statements are parameterized by ledger, period and currency type).
+// StandardDefinitions returns the designs of TB-STD, BS-STD, PL-STD, PL-FUNC
+// and CF-STD. They are unpublished templates; the install action publishes them
+// as version 1. Columns leave the currency type empty, so every run chooses it
+// (FR-15.5: standard statements are parameterized by ledger, period and
+// currency type).
 func StandardDefinitions() []Definition {
-	return []Definition{trialBalanceStd(), balanceSheetStd(), incomeStatementStd(), incomeStatementByFunction()}
+	return []Definition{trialBalanceStd(), balanceSheetStd(), incomeStatementStd(), incomeStatementByFunction(), cashFlowStd()}
+}
+
+// cashFlowStd is the indirect cash flow of FR-15.5 and BR-15.5 for the run
+// period and the year to date. Cash flow statements are not cumulative, so each
+// account row shows the movement of its accounts, and closing entries are left
+// out. Balance-sheet rows are credit-normal, so they show minus the movement:
+// the cash effect (an increase in an asset uses cash, an increase in a
+// liability provides it). Cash is debit-normal and shows the change in cash.
+// The ranges together cover every balance-sheet account of the default chart
+// once; CheckCashFlow enforces the reconciliation on every run and CF_CHK shows
+// it (must be 0.00).
+func cashFlowStd() Definition {
+	tagged := func(r Row, tag string) Row { r.CashFlowTag = tag; return r }
+	total := func(code, label string, refs ...string) Row {
+		return Row{Code: code, Kind: RowTotal, Label: label, NormalBalance: "credit", References: refs}
+	}
+	return Definition{Code: CodeCFStd, Name: "Cash flow statement (indirect)", Kind: KindCashFlow,
+		Rows: []Row{
+			account("REV", "Revenue", rangeRevenueFrom, rangeRevenueTo, "credit"),
+			account("EXP", "Expenses", rangeExpenseFrom, rangeExpenseTo, "debit"),
+			{Code: "NI", Kind: RowCalculation, Label: "Net income", Expression: "REV-EXP", NormalBalance: "credit"},
+			tagged(account("ADJ_DEP", "Accumulated depreciation and amortisation", "155000", "159999", "credit"), tagOperating),
+			tagged(account("ADJ_PROV", "Provisions", "230000", "239999", "credit"), tagOperating),
+			total("CF_ADJ", "Adjustments for non-cash items", "ADJ_DEP", "ADJ_PROV"),
+			tagged(account("WC_REC", "Receivables and inventories", "110000", "149999", "credit"), tagWorkingCap),
+			tagged(account("WC_PAY", "Trade payables", "200000", "219999", "credit"), tagWorkingCap),
+			tagged(account("WC_ACC", "Accruals and other liabilities", "240000", "299999", "credit"), tagWorkingCap),
+			total("CF_WC", "Working capital changes", "WC_REC", "WC_PAY", "WC_ACC"),
+			{Code: "CF_OP", Kind: RowCalculation, Label: "Cash flow from operating activities", Expression: "NI+CF_ADJ+CF_WC", NormalBalance: "credit"},
+			tagged(account("INV_PPE", "Property, plant and equipment", "150000", "154999", "credit"), tagInvesting),
+			tagged(account("INV_OTH", "Other non-current assets", "160000", "199999", "credit"), tagInvesting),
+			total("CF_INV", "Cash flow from investing activities", "INV_PPE", "INV_OTH"),
+			tagged(account("FIN_DEBT", "Borrowings", "220000", "229999", "credit"), tagFinancing),
+			tagged(account("FIN_EQ", "Equity", rangeEquityFrom, rangeEquityTo, "credit"), tagFinancing),
+			total("CF_FIN", "Cash flow from financing activities", "FIN_DEBT", "FIN_EQ"),
+			{Code: "CF_NET", Kind: RowCalculation, Label: "Net change in cash", Expression: "CF_OP+CF_INV+CF_FIN", NormalBalance: "credit"},
+			tagged(account("CASH", "Change in cash and cash equivalents", "100000", "109999", "debit"), tagCash),
+			{Code: "CF_CHK", Kind: RowCalculation, Label: "Check: net change in cash less change in cash (must be 0.00)",
+				Expression: "CF_NET-CASH", NormalBalance: "debit"},
+		},
+		Columns: []Column{
+			{Code: "P", Label: "Period", PeriodExpr: "P"},
+			{Code: "YTD", Label: "Year to date", PeriodExpr: "YTD"},
+		},
+	}
 }
 
 func account(code, label, from, to, normal string) Row {

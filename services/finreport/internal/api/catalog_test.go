@@ -92,7 +92,7 @@ func TestStandardDefinitions_ListAndInstall(t *testing.T) {
 	for _, it := range list.Items {
 		got[it.Code] = it.Rows > 0 && it.Columns > 0
 	}
-	for _, code := range []string{"TB-STD", "BS-STD", "PL-STD", "PL-FUNC"} {
+	for _, code := range []string{"TB-STD", "BS-STD", "PL-STD", "PL-FUNC", "CF-STD"} {
 		if !got[code] {
 			t.Errorf("standard list misses %s or its shape: %s", code, w.Body.String())
 		}
@@ -102,8 +102,8 @@ func TestStandardDefinitions_ListAndInstall(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("install status %d: %s", w.Code, w.Body.String())
 	}
-	if len(c.installed) != 4 || c.actor != "u1" {
-		t.Fatalf("installed %d definitions as %q, want 4 as u1", len(c.installed), c.actor)
+	if len(c.installed) != 5 || c.actor != "u1" {
+		t.Fatalf("installed %d definitions as %q, want 5 as u1", len(c.installed), c.actor)
 	}
 }
 

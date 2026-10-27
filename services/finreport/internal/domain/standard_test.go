@@ -48,7 +48,7 @@ func evaluateStd(t *testing.T, code string, withUnassigned bool) Result {
 }
 
 func TestStandardDefinitions_ValidateAndCodes(t *testing.T) {
-	want := map[string]bool{CodeTBStd: true, CodeBSStd: true, CodePLStd: true, CodePLFunc: true}
+	want := map[string]bool{CodeTBStd: true, CodeBSStd: true, CodePLStd: true, CodePLFunc: true, CodeCFStd: true}
 	for _, def := range StandardDefinitions() {
 		if !want[def.Code] {
 			t.Errorf("unexpected standard definition %s", def.Code)

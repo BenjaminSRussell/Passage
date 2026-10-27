@@ -18,7 +18,10 @@ const (
 	CodeHierUnassigned = "REPORT-0013"
 	CodeHierOverlap    = "REPORT-0014"
 	CodePLFuncMissing  = "REPORT-0015"
-	CodeTooLarge       = "REPORT-0026"
+	// CodeScheduleInvalid is a slice-local code for a malformed distribution
+	// schedule (FR-15.8); it is not in the PRD catalog yet.
+	CodeScheduleInvalid = "REPORT-0018"
+	CodeTooLarge        = "REPORT-0026"
 )
 
 // Error is a domain rule violation carrying a catalog code.

@@ -50,7 +50,10 @@ type Run struct {
 	RequestedBy       string           `json:"requestedBy"`
 	StartedAt         time.Time        `json:"startedAt"`
 	DurationMS        int              `json:"durationMs"`
-	Replayed          bool             `json:"-"`
+	// Checks are the warnings recorded with the run, such as REPORT-0015 for
+	// PL-FUNC lines without a functional area (FR-15.14). Never nil.
+	Checks   []domain.Check `json:"checks"`
+	Replayed bool           `json:"-"`
 }
 
 // LagRow reports how far the read model has advanced for one ledger (FR-15.1).
@@ -99,8 +102,9 @@ func (s *Postgres) CreateRun(ctx context.Context, spec RunSpec) (Run, error) {
 		if err != nil {
 			return err
 		}
-		res, err := domain.Evaluate(domain.Input{Definition: def, LedgerID: spec.LedgerID, CurrencyType: spec.CurrencyType,
-			IncludeAdjustmentPeriods: spec.IncludeAdjustment, Calendar: cal, At: at, Balances: balances})
+		in := domain.Input{Definition: def, LedgerID: spec.LedgerID, CurrencyType: spec.CurrencyType,
+			IncludeAdjustmentPeriods: spec.IncludeAdjustment, Calendar: cal, At: at, Balances: balances}
+		res, err := domain.Evaluate(in)
 		if err != nil {
 			return err
 		}
@@ -108,6 +112,16 @@ func (s *Postgres) CreateRun(ctx context.Context, spec RunSpec) (Run, error) {
 			if err := c.CheckDrill(); err != nil {
 				return fmt.Errorf("cell %s/%s: %w", c.Row, c.Column, err)
 			}
+		}
+		// A cash flow that does not reconcile fails the run (BR-15.5); warnings
+		// are stored with it (FR-15.14).
+		if err := domain.CheckCashFlow(in, res); err != nil {
+			return err
+		}
+		checks := domain.RunChecks(def, res)
+		checksJSON, err := json.Marshal(checks)
+		if err != nil {
+			return err
 		}
 		hwmJSON, err := json.Marshal(hwm)
 		if err != nil {
@@ -121,14 +135,15 @@ func (s *Postgres) CreateRun(ctx context.Context, spec RunSpec) (Run, error) {
 			ID: ids.New(), DefinitionCode: def.Code, DefinitionVersion: def.Version, LedgerID: spec.LedgerID,
 			CurrencyType: spec.CurrencyType, PeriodYear: spec.PeriodYear, PeriodNo: spec.PeriodNo, Status: "completed",
 			HWMByLedger: hwm, ResultHash: res.Hash, CellCount: len(res.Cells), RequestedBy: spec.RequestedBy, StartedAt: started,
+			Checks: checks,
 		}
 		_, err = tx.Exec(ctx, `insert into statement_run(tenant_id, id, definition_code, definition_version, ledger_id, currency_type,
 			period_year, period_no, include_adjustment, status, hwm, result_hash, cell_count, requested_by, request_hash, idempotency_key,
-			started_at, completed_at, duration_ms)
-			values($1,$2,$3,$4,$5,$6,$7,$8,$9,'completed',$10,$11,$12,$13,$14,$15,$16,now(),$17)`,
+			started_at, completed_at, duration_ms, checks)
+			values($1,$2,$3,$4,$5,$6,$7,$8,$9,'completed',$10,$11,$12,$13,$14,$15,$16,now(),$17,$18)`,
 			tenantID(ctx), run.ID, def.Code, def.Version, spec.LedgerID, spec.CurrencyType, spec.PeriodYear, spec.PeriodNo,
 			spec.IncludeAdjustment, hwmJSON, hash, len(res.Cells), spec.RequestedBy, spec.RequestHash, nullable(spec.IdempotencyKey),
-			started, int(time.Since(started).Milliseconds()))
+			started, int(time.Since(started).Milliseconds()), checksJSON)
 		if err != nil {
 			return err
 		}
@@ -205,22 +220,29 @@ func (s *Postgres) ListRuns(ctx context.Context, definition string, limit int) (
 func (s *Postgres) ListCells(ctx context.Context, runID string) ([]domain.Cell, error) {
 	var out []domain.Cell
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select row_code, column_code, value::text, blank, computed, note, balance_keys::text
-			from statement_cell where run_id=$1 order by position`, runID)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			c, err := scanCell(rows)
-			if err != nil {
-				return err
-			}
-			out = append(out, c)
-		}
-		return rows.Err()
+		var err error
+		out, err = listCellsTx(ctx, tx, runID)
+		return err
 	})
 	return out, err
+}
+
+func listCellsTx(ctx context.Context, tx pgx.Tx, runID string) ([]domain.Cell, error) {
+	rows, err := tx.Query(ctx, `select row_code, column_code, value::text, blank, computed, note, balance_keys::text
+		from statement_cell where run_id=$1 order by position`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.Cell
+	for rows.Next() {
+		c, err := scanCell(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
 // GetCell returns one cell of a run (drill level 1 input, BR-15.4).
@@ -334,7 +356,7 @@ func loadBalancesTx(ctx context.Context, tx pgx.Tx, ledgerID string, currencies 
 }
 
 const runColumns = `id::text, definition_code, definition_version, ledger_id::text, currency_type, period_year, period_no,
-	status, hwm, result_hash, cell_count, requested_by, started_at, duration_ms`
+	status, hwm, result_hash, cell_count, requested_by, started_at, duration_ms, checks`
 
 func getRunTx(ctx context.Context, tx pgx.Tx, id string) (Run, error) {
 	run, err := scanRun(tx.QueryRow(ctx, `select `+runColumns+` from statement_run where id=$1::uuid`, id))
@@ -346,10 +368,14 @@ func getRunTx(ctx context.Context, tx pgx.Tx, id string) (Run, error) {
 
 func scanRun(r rowScanner) (Run, error) {
 	var run Run
-	var hwm, hash []byte
+	var hwm, hash, checks []byte
 	var duration *int
 	if err := r.Scan(&run.ID, &run.DefinitionCode, &run.DefinitionVersion, &run.LedgerID, &run.CurrencyType, &run.PeriodYear, &run.PeriodNo,
-		&run.Status, &hwm, &hash, &run.CellCount, &run.RequestedBy, &run.StartedAt, &duration); err != nil {
+		&run.Status, &hwm, &hash, &run.CellCount, &run.RequestedBy, &run.StartedAt, &duration, &checks); err != nil {
+		return run, err
+	}
+	run.Checks = []domain.Check{}
+	if err := json.Unmarshal(checks, &run.Checks); err != nil {
 		return run, err
 	}
 	if err := json.Unmarshal(hwm, &run.HWMByLedger); err != nil {

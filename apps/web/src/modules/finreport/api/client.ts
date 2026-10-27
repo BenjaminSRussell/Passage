@@ -73,6 +73,13 @@ export interface Issue {
   detail: string;
 }
 
+/** A warning recorded with a completed run, such as REPORT-0015 (FR-15.14). Blocking checks fail the run instead. */
+export interface RunCheck {
+  code: string;
+  severity: "warning";
+  detail: string;
+}
+
 export interface RunSummary {
   id: string;
   definitionCode: string;
@@ -88,6 +95,8 @@ export interface RunSummary {
   requestedBy: string;
   startedAt: string;
   durationMs?: number;
+  /** Absent on runs stored before checks were recorded. */
+  checks?: RunCheck[];
 }
 
 export interface CellSummary {
@@ -387,4 +396,54 @@ export async function publishHierarchy(code: string, members: HierarchyMember[])
 
 export function getHierarchyMembers(code: string, signal?: AbortSignal): Promise<Membership & { version: number }> {
   return get<Membership & { version: number }>(`/hierarchies/${seg(code)}/members`, signal);
+}
+
+/** Output formats a schedule can send (FR-15.8). Only CSV is rendered so far. */
+export const OUTPUT_FORMATS = ["pdf", "xlsx", "csv", "html"] as const;
+export type OutputFormat = (typeof OUTPUT_FORMATS)[number];
+
+/** Where a run's file output is served. The browser downloads it with the session cookie. */
+export function runOutputUrl(runId: string, format: OutputFormat): string {
+  return `${base}/runs/${seg(runId)}/outputs/${format}`;
+}
+
+/** A distribution schedule as it is saved (FR-15.8). */
+export interface ScheduleInput {
+  code: string;
+  name: string;
+  definition: string;
+  cron: string;
+  timezone: string;
+  ledgerIds: string[];
+  currencyType: CurrencyType;
+  formats: OutputFormat[];
+  recipients: string[];
+  attachmentLimitMb: number;
+  enabled: boolean;
+}
+
+/** A distribution schedule as the service returns it. */
+export interface Schedule extends ScheduleInput {
+  /** Read-only: the user who saved the schedule last. */
+  updatedBy?: string;
+  /** Read-only: the next firing; absent when the schedule is paused. */
+  nextRunAt?: string;
+}
+
+export async function listSchedules(signal?: AbortSignal): Promise<Schedule[]> {
+  return (await get<{ items: Schedule[] }>("/schedules", signal)).items;
+}
+
+/** One schedule and its revision, which a replace echoes in If-Match. */
+export async function getSchedule(code: string, signal?: AbortSignal): Promise<{ schedule: Schedule; etag: string | null }> {
+  const sent = await send<Schedule>(`/schedules/${seg(code)}`, {}, signal);
+  return { schedule: sent.body, etag: sent.etag };
+}
+
+/** Creates (etag null) or replaces a schedule. A stale etag answers 412 conflict_version. */
+export async function saveSchedule(schedule: ScheduleInput, etag: string | null): Promise<{ schedule: Schedule; etag: string | null }> {
+  const headers: Record<string, string> = {};
+  if (etag) headers["If-Match"] = etag;
+  const sent = await send<Schedule>(`/schedules/${seg(schedule.code)}`, { method: "PUT", headers, body: JSON.stringify(schedule) });
+  return { schedule: sent.body, etag: sent.etag };
 }

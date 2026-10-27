@@ -180,3 +180,16 @@
   line-height: var(--text-sm-leading);
   font-weight: 600;
 }
+
+.checkList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+}
+
+.error {
+  margin: var(--space-2) 0 0;
+  color: var(--color-danger);
+  font-size: var(--text-sm-size);
+  line-height: var(--text-sm-leading);
+}

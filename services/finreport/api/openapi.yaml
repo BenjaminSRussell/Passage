@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: Passage Financial Reporting API
   version: 1.0.0
-  description: Report definitions, standard statements, derived hierarchies, statement runs and drill-down (PSG-15, wave 15 slices 1-2).
+  description: Report definitions, standard statements, derived hierarchies, statement runs and drill-down, CSV outputs and distribution schedules (PSG-15, wave 15 slices 1-3).
 servers:
   - url: https://api.{env}.passage.dev
     variables:
@@ -315,6 +315,34 @@ paths:
                     items: {$ref: '#/components/schemas/BalanceKey'}
         '404': {$ref: '#/components/responses/Problem'}
         '500': {$ref: '#/components/responses/Problem'}
+  /api/v1/reporting/runs/{id}/outputs/{format}:
+    parameters:
+      - $ref: '#/components/parameters/RunId'
+      - name: format
+        in: path
+        required: true
+        schema: {type: string, enum: [csv, pdf, xlsx, html]}
+    get:
+      operationId: getRunOutput
+      summary: The run rendered as a file (FR-15.6)
+      description: >-
+        Rendered from the stored cells and the definition version of the run, so
+        the same run always gives the same bytes. The file carries a header
+        (statement, definition version, ledger, period, currency type) and the
+        "as of" footer (posting sequence per ledger, result hash, generated at
+        and by, run id). Only csv is rendered so far; pdf, xlsx and html answer
+        404 COM-0404.
+      x-passage-duty: reporting.statement.view
+      responses:
+        '200':
+          description: The file
+          headers:
+            Content-Disposition:
+              schema: {type: string}
+          content:
+            text/csv:
+              schema: {type: string}
+        '404': {$ref: '#/components/responses/Problem'}
   /api/v1/reporting/lag:
     get:
       operationId: getLag
@@ -509,6 +537,75 @@ paths:
                       version: {type: integer}
         '400': {$ref: '#/components/responses/Problem'}
         '404': {$ref: '#/components/responses/Problem'}
+  /api/v1/reporting/schedules:
+    get:
+      operationId: listSchedules
+      summary: Distribution schedules ordered by code (FR-15.8)
+      x-passage-duty: reporting.statement.schedule
+      responses:
+        '200':
+          description: Schedules
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/Schedule'}
+  /api/v1/reporting/schedules/{code}:
+    parameters:
+      - $ref: '#/components/parameters/Code'
+    get:
+      operationId: getSchedule
+      summary: Read a distribution schedule
+      x-passage-duty: reporting.statement.schedule
+      responses:
+        '200':
+          description: The schedule
+          headers:
+            ETag:
+              description: Schedule revision, echoed in If-Match to replace it
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Schedule'}
+        '404': {$ref: '#/components/responses/Problem'}
+    put:
+      operationId: putSchedule
+      summary: Create or replace a distribution schedule (idempotent)
+      description: >-
+        The definition must have a published version (REPORT-0001). Field
+        errors answer 422 REPORT-0018. Omitted attachmentLimitMb defaults to
+        20 and currencyType to acct; recipients are lower-cased. nextRunAt and
+        updatedBy are read-only and ignored when sent.
+      x-passage-duty: reporting.statement.schedule
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: Required when the schedule exists; the ETag last read. Missing gives 428, stale gives 412 conflict_version.
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Schedule'}
+      responses:
+        '200':
+          description: Saved schedule
+          headers:
+            ETag:
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Schedule'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '412': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+        '428': {$ref: '#/components/responses/Problem'}
 components:
   securitySchemes:
     bearerAuth:
@@ -667,6 +764,48 @@ components:
         requestedBy: {type: string}
         startedAt: {type: string, format: date-time}
         durationMs: {type: integer}
+        checks:
+          type: array
+          description: Warnings recorded with the run, such as REPORT-0015 for PL-FUNC lines without a functional area (FR-15.14). A cash flow that does not reconcile fails the run with 422 REPORT-0008 or REPORT-0009 instead (BR-15.5).
+          items: {$ref: '#/components/schemas/RunCheck'}
+    RunCheck:
+      type: object
+      required: [code, severity, detail]
+      properties:
+        code: {type: string}
+        severity: {type: string, enum: [warning]}
+        detail: {type: string}
+    Schedule:
+      type: object
+      required: [name, definition, cron, timezone, ledgerIds, formats, recipients, enabled]
+      properties:
+        code: {type: string, pattern: '^[A-Z][A-Z0-9-]{1,29}$', description: defaults to the path code}
+        name: {type: string, minLength: 1, maxLength: 120}
+        definition: {type: string, description: code of a definition with a published version; runs use the latest published version}
+        cron: {type: string, description: 'five fields: minute hour day-of-month month day-of-week; *, n, a-b, lists and steps', example: '0 23 * * *'}
+        timezone: {type: string, description: IANA time zone the cron is evaluated in, example: UTC}
+        ledgerIds:
+          type: array
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          items: {type: string, format: uuid}
+        currencyType: {type: string, enum: [txn, acct, rpt], default: acct}
+        formats:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: {type: string, enum: [pdf, xlsx, csv, html]}
+        recipients:
+          type: array
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          items: {type: string, format: email}
+        attachmentLimitMb: {type: integer, minimum: 1, maximum: 25, default: 20, description: larger outputs are sent as a link (FR-15.8)}
+        enabled: {type: boolean}
+        updatedBy: {type: string, readOnly: true}
+        nextRunAt: {type: string, format: date-time, readOnly: true, description: next firing in the schedule time zone; absent when disabled}
     Cell:
       type: object
       properties:

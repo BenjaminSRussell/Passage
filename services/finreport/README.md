@@ -5,9 +5,43 @@ the reporting read model, and drill-down from a statement cell to its balance
 keys. Phase 2 exit wave. Reads from its own `reporting` database, fed by ledger
 events.
 
-## Status: slice 2
+## Status: slice 3
 
-Slice 2 adds (on top of slice 1, below):
+Slice 3 adds (on top of slices 1 and 2, below):
+
+- `CF-STD`, the indirect cash flow (FR-15.5, BR-15.5): net income, non-cash
+  adjustments, working capital, operating, investing and financing sections,
+  the change in cash and a check row, for the period and the year to date. It
+  installs with the other standard definitions. Cash flow statements show
+  movements: closing entries and opening periods (period 0) are left out. Every
+  run of a `cash_flow` definition with tagged rows is reconciled per column:
+  an untagged balance-sheet account that moved fails the run with REPORT-0009
+  (naming the accounts), a net cash flow that differs from the change in cash
+  fails it with REPORT-0008; nothing is stored. The domain property test
+  reconciles CF-STD over random balanced ledgers (AC-15.2).
+- Run checks: warnings stored with a completed run and returned as
+  `checks[]` on every run read. PL-FUNC with expense lines without
+  `FUNC_AREA` carries REPORT-0015 (FR-15.14).
+- `GET /runs/{id}/outputs/csv` (FR-15.6, PRD §2.15.15): the run as CSV with a
+  header (statement, definition version, ledger, period, currency type) and the
+  "as of" footer (posting sequence per ledger, result hash, generated at and
+  by, run id), rendered from the stored cells and the run's definition version,
+  so it is byte-for-byte reproducible. Labels that a spreadsheet would read as
+  formulas are prefixed with an apostrophe. pdf, xlsx and html answer 404.
+- Distribution schedules (FR-15.8): `GET /schedules`, `GET/PUT
+  /schedules/{code}` with the duty `reporting.statement.schedule`. A schedule
+  names a published definition (REPORT-0001 otherwise, checked in the save
+  transaction), a five-field cron evaluated in an IANA time zone (expressions
+  that can never fire, such as 30 February, are refused), 1 to 50 ledgers, the
+  currency type, formats, 1 to 50 recipients and the attachment limit (1 to 25
+  MB, default 20). Field errors are REPORT-0018. Replacing needs If-Match like
+  drafts (428, 412). Reads return `nextRunAt` in the schedule's zone. Firing
+  the schedules and sending email are not built (NOT-IMPLEMENTED.md).
+- Row indent is validated (0 to 10).
+- Web module: Download CSV and the run's warnings on the statement page, the
+  schedule list (next run, paused) and the schedule form.
+
+Slice 2 built:
 
 - Derived hierarchies (FR-15.13, BR-15.13): `GET /hierarchies` list,
   revision-checked drafts (`GET/PUT /hierarchies/{code}`, ETag / If-Match),
@@ -76,7 +110,7 @@ internal/domain/        definitions, expressions, periods, evaluation, cash flow
 internal/store/         Postgres store (pgx), tenant transactions, outbox writes
 internal/api/           HTTP handlers under /api/v1/reporting
 internal/events/        event types and payloads
-migrations/             SQL applied in order; FS embedded in migrations.go
+migrations/             SQL applied in order (0003 run checks, 0004 schedules); FS embedded in migrations.go
 api/openapi.yaml        OpenAPI 3.1 for every endpoint
 events/asyncapi.yaml    AsyncAPI 3 for every event
 charts/finreport/       Helm chart
@@ -115,7 +149,8 @@ tests check that `api/openapi.yaml` lists exactly the registered routes and that
 | --- | --- |
 | `reporting.definition.maintain` | definition PUT, publish, retire, validate, export, import; standard definition list and install; hierarchy list, GET, PUT, publish and members |
 | `reporting.statement.run` | `POST /runs` |
-| `reporting.statement.view` | definition list and GET, run list and reads, cells, drill level 1, lag |
+| `reporting.statement.view` | definition list and GET, run list and reads, cells, drill level 1, CSV output, lag |
+| `reporting.statement.schedule` | schedule list, GET and PUT |
 
 ## Error codes
 
@@ -126,8 +161,11 @@ Problem details use `type` `https://passage.dev/problems/<code>`.
 | REPORT-0001 | 422 | Definition has no published version (`REPORT_DEFINITION_NOT_PUBLISHED`) |
 | REPORT-0002 | 422 | Expression or reference invalid; body code mismatches the path |
 | REPORT-0003 | 422 | Period does not exist in the supplied calendar (`REPORT_PERIOD_NOT_FOUND`) |
-| REPORT-0008 | 422 | Cash flow does not reconcile (`CF_UNRECONCILED`), raised by the cash-flow derivation |
-| REPORT-0009 | 422 | Balance-sheet accounts without a cash-flow tag (`CF_UNCLASSIFIED_ACCOUNTS`) |
+| REPORT-0008 | 422 | Cash flow run does not reconcile (`CF_UNRECONCILED`); the run is not stored |
+| REPORT-0009 | 422 | Cash flow run has moved balance-sheet accounts without a cash-flow tag (`CF_UNCLASSIFIED_ACCOUNTS`); the run is not stored |
+| REPORT-0015 | warning | Stored in a run's `checks[]`: PL-FUNC expense lines without a functional area |
+| REPORT-0018 | 422 | Schedule field invalid (code, name, cron, time zone, ledgers, currency type, formats, recipients, attachment limit); body code mismatches the path |
+| REPORT-0019 | 404 | Schedule not found |
 | REPORT-0011 | 409 | Import of an existing code without `overwrite=true` (`REPORT_IMPORT_DUPLICATE`) |
 | REPORT-0013 | 422 | Strict hierarchy has unassigned members at publish (`REPORT_HIERARCHY_UNASSIGNED`) |
 | REPORT-0014 | 422 | A member matches two leaves at publish (`REPORT_HIERARCHY_OVERLAP`) |
@@ -136,8 +174,8 @@ Problem details use `type` `https://passage.dev/problems/<code>`.
 | REPORT-0024 | 404 | Statement run not found (also for a run id that is not a UUID) |
 | REPORT-0025 | 404 | Cell not found in the run |
 | REPORT-0099 | 500 | Drill invariant failed: balance keys do not sum to the cell (never served) |
-| conflict_version | 412 | Draft revision in `If-Match` is stale |
-| precondition_required | 428 | Draft exists and `If-Match` was not sent |
+| conflict_version | 412 | Draft or schedule revision in `If-Match` is stale (409 when two creates race) |
+| precondition_required | 428 | Draft or schedule exists and `If-Match` was not sent |
 | idempotency_key_reuse | 422 | Idempotency-Key reused for a different run or import request |
 | idempotency_key_in_flight | 409 | A concurrent request with the same Idempotency-Key won; retry to get the replay |
 | COM-0001 | 422 | Shape violation in a definition or hierarchy (codes, names, labels, rules, members without id or key); hierarchy body code mismatches the path |
@@ -145,7 +183,7 @@ Problem details use `type` `https://passage.dev/problems/<code>`.
 | COM-0003 | 400 | `Idempotency-Key` header missing on `POST /runs` |
 | REPORT-0026 | 422 | Definition has no rows or columns, or more than 2,000 rows or 60 columns; hierarchy has no nodes, more than 20,000 nodes, more than 12 levels or a cycle |
 | REPORT-0027 | 404 | Hierarchy, its draft or a published version not found |
-| COM-0404 | 404 | Unknown definition or hierarchy action |
+| COM-0404 | 404 | Unknown definition or hierarchy action; output format not rendered (pdf, xlsx, html) |
 | AUTH-0001 | 401 | Missing tenant |
 | AUTH-0003 | 403 | Missing duty (authz middleware) |
 

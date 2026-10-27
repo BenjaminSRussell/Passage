@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 
@@ -202,14 +203,15 @@ func TestInstallStandard(t *testing.T) {
 	for _, r := range res {
 		got[r.Code] = r.Action
 	}
-	if got[domain.CodeTBStd] != "installed" || got[domain.CodePLStd] != "installed" || got[domain.CodePLFunc] != "installed" || got[domain.CodeBSStd] != "skipped" {
+	if got[domain.CodeTBStd] != "installed" || got[domain.CodePLStd] != "installed" || got[domain.CodePLFunc] != "installed" ||
+		got[domain.CodeCFStd] != "installed" || got[domain.CodeBSStd] != "skipped" {
 		t.Fatalf("install = %+v", res)
 	}
 	if draft, _, err := st.GetDefinition(ctx, domain.CodeBSStd, Draft); err != nil || draft.Name != "Our own balance sheet" {
 		t.Fatalf("install touched the tenant's draft: %+v %v", draft, err)
 	}
-	if n := countType(outboxTypes(t, ctx, st.pool), events.DefinitionPublished); n != 3 {
-		t.Fatalf("definition.published events = %d, want 3", n)
+	if n := countType(outboxTypes(t, ctx, st.pool), events.DefinitionPublished); n != 4 {
+		t.Fatalf("definition.published events = %d, want 4", n)
 	}
 	again, err := st.InstallStandard(ctx, domain.StandardDefinitions(), "admin")
 	if err != nil {
@@ -246,5 +248,58 @@ func TestInstallStandard(t *testing.T) {
 	}
 	if values["TOTAL/CLOSE"] != "0.00" || values["ASSETS/OPEN"] != "1000.00" || values["ASSETS/CLOSE"] != "1180.00" || values["ASSETS/MOVE"] != "180.00" {
 		t.Fatalf("trial balance cells = %v", values)
+	}
+	if len(run.Checks) != 0 {
+		t.Fatalf("trial balance checks = %+v, want none", run.Checks)
+	}
+
+	// AC-15.2: the installed CF-STD reconciles; the opening period is not a
+	// cash flow, so the year to date equals the period.
+	cal := []domain.Period{{Year: 2026, No: 0, Quarter: 1}, {Year: 2026, No: 1, Quarter: 1}}
+	cf, err := st.CreateRun(ctx, RunSpec{Code: domain.CodeCFStd, LedgerID: ledger, CurrencyType: "rpt", PeriodYear: 2026, PeriodNo: 1,
+		Calendar: cal, IdempotencyKey: "cf", RequestHash: "h"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cells, err = st.ListCells(ctx, cf.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values = map[string]string{}
+	for _, c := range cells {
+		values[c.Row+"/"+c.Column] = c.Value.StringFixed(2)
+	}
+	if values["NI/P"] != "100.00" || values["CASH/P"] != "180.00" || values["CASH/YTD"] != "180.00" || values["CF_CHK/P"] != "0.00" || values["CF_CHK/YTD"] != "0.00" {
+		t.Fatalf("cash flow cells = %v", values)
+	}
+
+	// PL-FUNC: the expense line carries no FUNC_AREA, so the run completes with
+	// a REPORT-0015 warning that GetRun and ListRuns return too (FR-15.14).
+	fn, err := st.CreateRun(ctx, RunSpec{Code: domain.CodePLFunc, LedgerID: ledger, CurrencyType: "rpt", PeriodYear: 2026, PeriodNo: 1,
+		Calendar: cal, IdempotencyKey: "fn", RequestHash: "h"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fn.Checks) != 1 || fn.Checks[0].Code != domain.CodePLFuncMissing || fn.Checks[0].Severity != domain.SeverityWarning {
+		t.Fatalf("PL-FUNC checks = %+v, want one REPORT-0015 warning", fn.Checks)
+	}
+	if again, err := st.GetRun(ctx, fn.ID); err != nil || len(again.Checks) != 1 || again.Checks[0].Detail != fn.Checks[0].Detail {
+		t.Fatalf("stored checks = %+v, %v", again.Checks, err)
+	}
+	if list, err := st.ListRuns(ctx, domain.CodePLFunc, 10); err != nil || len(list) != 1 || len(list[0].Checks) != 1 {
+		t.Fatalf("listed PL-FUNC runs = %+v, %v", list, err)
+	}
+
+	// BR-15.5: cash that moves with no other entry fails the cash flow run, and
+	// nothing is stored.
+	seedBalance(t, ctx, st.pool, ledger, 2026, 1, "100200", "rpt", "50", 10)
+	_, err = st.CreateRun(ctx, RunSpec{Code: domain.CodeCFStd, LedgerID: ledger, CurrencyType: "rpt", PeriodYear: 2026, PeriodNo: 1,
+		Calendar: cal, IdempotencyKey: "cf-2", RequestHash: "h"})
+	var de *domain.Error
+	if !errors.As(err, &de) || de.Code != domain.CodeCashFlow {
+		t.Fatalf("unreconciled cash flow = %v, want %s", err, domain.CodeCashFlow)
+	}
+	if list, _ := st.ListRuns(ctx, domain.CodeCFStd, 10); len(list) != 1 {
+		t.Fatalf("cash flow runs = %d, want only the reconciled one", len(list))
 	}
 }

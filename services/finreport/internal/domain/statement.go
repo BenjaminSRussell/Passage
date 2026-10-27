@@ -128,7 +128,8 @@ type evaluator struct {
 }
 
 // Evaluate computes every cell of a definition for one ledger and run period.
-// Income statements exclude closing entries; balance sheets and trial balances
+// Income and cash flow statements exclude closing entries, and cash flow
+// statements leave out opening periods; balance sheets and trial balances
 // are cumulative from the opening period (period 0, which carries the year-end
 // brought-forward entries) of the fiscal year of the column's last period
 // through that period (BR-15.2), so a trial balance shows balances, not
@@ -139,47 +140,18 @@ func Evaluate(in Input) (Result, error) {
 	if issues := def.Validate(); len(issues) > 0 {
 		return Result{}, &Error{Code: issues[0].Code, Detail: issues[0].Field + ": " + issues[0].Detail}
 	}
+	plans, err := planColumns(in)
+	if err != nil {
+		return Result{}, err
+	}
 	periods := in.Calendar.Periods()
-	includeAdj := def.IncludeAdjustmentPeriods || in.IncludeAdjustmentPeriods
-	counted := func(i int) bool { return includeAdj || !periods[i].Adjustment }
 	e := &evaluator{
-		def: def, cal: in.Calendar, plans: make([]colPlan, len(def.Columns)),
+		def: def, cal: in.Calendar, plans: plans,
 		index: map[slot][]Balance{}, rowIdx: map[string]int{}, colIdx: map[string]int{},
 		memo: map[[2]int]cellVal{}, busy: map[[2]int]bool{},
 	}
 	for j, c := range def.Columns {
 		e.colIdx[c.Code] = j
-		if c.PeriodExpr == "CALC" {
-			e.plans[j].calc = true
-			continue
-		}
-		sel, found, err := Select(c.PeriodExpr, in.At, in.Calendar, includeAdj)
-		if err != nil {
-			return Result{}, err
-		}
-		if !found {
-			continue
-		}
-		include := map[int]bool{}
-		hi := -1
-		for _, i := range sel {
-			include[i] = true
-			if i > hi {
-				hi = i
-			}
-		}
-		if (def.Kind == KindBalanceSheet || def.Kind == KindTrialBalance) && hi >= 0 {
-			for i := 0; i <= hi; i++ {
-				if counted(i) && periods[i].Year == periods[hi].Year {
-					include[i] = true
-				}
-			}
-		}
-		currency := c.CurrencyType
-		if currency == "" {
-			currency = in.CurrencyType
-		}
-		e.plans[j] = colPlan{found: true, currency: currency, include: include}
 	}
 	for i, r := range def.Rows {
 		e.rowIdx[r.Code] = i
@@ -217,6 +189,56 @@ func Evaluate(in Input) (Result, error) {
 		}
 	}
 	return Result{Cells: cells, Hash: hashCells(cells)}, nil
+}
+
+// planColumns resolves, for each column, the calendar periods it sums and its
+// currency type. Balance sheets and trial balances are cumulative from the
+// opening period of the fiscal year (BR-15.2). Cash flow statements show
+// movements, so they leave out opening periods (period number 0): the
+// brought-forward balances there are not cash flows of the year.
+func planColumns(in Input) ([]colPlan, error) {
+	def := in.Definition
+	periods := in.Calendar.Periods()
+	includeAdj := def.IncludeAdjustmentPeriods || in.IncludeAdjustmentPeriods
+	counted := func(i int) bool { return includeAdj || !periods[i].Adjustment }
+	plans := make([]colPlan, len(def.Columns))
+	for j, c := range def.Columns {
+		if c.PeriodExpr == "CALC" {
+			plans[j].calc = true
+			continue
+		}
+		sel, found, err := Select(c.PeriodExpr, in.At, in.Calendar, includeAdj)
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			continue
+		}
+		include := map[int]bool{}
+		hi := -1
+		for _, i := range sel {
+			if def.Kind == KindCashFlow && periods[i].No == 0 {
+				continue
+			}
+			include[i] = true
+			if i > hi {
+				hi = i
+			}
+		}
+		if (def.Kind == KindBalanceSheet || def.Kind == KindTrialBalance) && hi >= 0 {
+			for i := 0; i <= hi; i++ {
+				if counted(i) && periods[i].Year == periods[hi].Year {
+					include[i] = true
+				}
+			}
+		}
+		currency := c.CurrencyType
+		if currency == "" {
+			currency = in.CurrencyType
+		}
+		plans[j] = colPlan{found: true, currency: currency, include: include}
+	}
+	return plans, nil
 }
 
 func (e *evaluator) cell(ri, ci int) (cellVal, error) {
@@ -310,7 +332,10 @@ func (e *evaluator) calcColumn(ri, ci int) (cellVal, error) {
 func (e *evaluator) sumBalances(row Row, ci int) cellVal {
 	plan := e.plans[ci]
 	credit := row.NormalBalance == "credit"
-	pl := e.def.Kind == KindIncomeStatement
+	// Closing entries are left out of income statements and of cash flow
+	// movements, so the year-end transfer to equity is not a cash flow (BR-15.2,
+	// BR-15.5).
+	excludeClosing := e.def.Kind == KindIncomeStatement || e.def.Kind == KindCashFlow
 	periods := e.cal.Periods()
 	var out cellVal
 	for i := range periods {
@@ -328,7 +353,7 @@ func (e *evaluator) sumBalances(row Row, ci int) cellVal {
 				continue
 			}
 			net := b.Net
-			if pl {
+			if excludeClosing {
 				net = net.Sub(b.ClosingNet)
 			}
 			amt := net

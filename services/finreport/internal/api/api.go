@@ -33,6 +33,7 @@ const (
 	DutyMaintain = "reporting.definition.maintain"
 	DutyRun      = "reporting.statement.run"
 	DutyView     = "reporting.statement.view"
+	DutySchedule = "reporting.statement.schedule"
 )
 
 const (
@@ -60,6 +61,10 @@ type Store interface {
 	GetHierarchy(ctx context.Context, code string, version int) (domain.Hierarchy, int, error)
 	PublishHierarchy(ctx context.Context, code, actor string, members []domain.Member) (domain.Hierarchy, domain.Membership, error)
 	HierarchyMembership(ctx context.Context, code string, version int) (domain.Membership, int, error)
+	RunOutput(ctx context.Context, runID string) (store.Run, domain.Definition, []domain.Cell, error)
+	ListSchedules(ctx context.Context) ([]domain.Schedule, error)
+	GetSchedule(ctx context.Context, code string) (domain.Schedule, int, error)
+	SaveSchedule(ctx context.Context, sc domain.Schedule, ifMatch *int) (domain.Schedule, int, error)
 }
 
 // API holds the handlers.
@@ -82,6 +87,7 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyView)).Get("/runs/{id}", a.getRun)
 		r.With(authz.RequireDuty(DutyView)).Get("/runs/{id}/cells", a.listCells)
 		r.With(authz.RequireDuty(DutyView)).Get("/runs/{id}/cells/{row}/{column}/balances", a.drillBalances)
+		r.With(authz.RequireDuty(DutyView)).Get("/runs/{id}/outputs/{format}", a.runOutput)
 		r.With(authz.RequireDuty(DutyView)).Get("/lag", a.lag)
 		r.With(authz.RequireDuty(DutyMaintain)).Get("/standard-definitions", a.listStandard)
 		r.With(authz.RequireDuty(DutyMaintain)).Post("/standard-definitions:install", a.installStandard)
@@ -90,6 +96,9 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyMaintain)).Put("/hierarchies/{code}", a.putHierarchy)
 		r.With(authz.RequireDuty(DutyMaintain)).Get("/hierarchies/{code}/members", a.hierarchyMembers)
 		r.With(authz.RequireDuty(DutyMaintain)).Post("/hierarchies/*", a.hierarchyAction)
+		r.With(authz.RequireDuty(DutySchedule)).Get("/schedules", a.listSchedules)
+		r.With(authz.RequireDuty(DutySchedule)).Get("/schedules/{code}", a.getSchedule)
+		r.With(authz.RequireDuty(DutySchedule)).Put("/schedules/{code}", a.putSchedule)
 	})
 }
 

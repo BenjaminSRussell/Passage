@@ -17,6 +17,8 @@ const SchemaVersion = "1"
 const (
 	MaxRows    = 2000
 	MaxColumns = 60
+	// MaxIndent bounds the row indent level (presentation only).
+	MaxIndent = 10
 )
 
 // ShapeCode is the generic validation code for malformed fields.
@@ -148,6 +150,9 @@ func (d Definition) Validate() []Issue {
 		}
 		if !cashFlowTags[r.CashFlowTag] {
 			add(field+".cashFlowTag", ShapeCode, "unknown cash flow tag")
+		}
+		if r.Format.Indent < 0 || r.Format.Indent > MaxIndent {
+			add(field+".format.indent", ShapeCode, "indent must be 0 to "+strconv.Itoa(MaxIndent))
 		}
 		switch r.Kind {
 		case RowAccountRange:

@@ -1,7 +1,18 @@
 import { useParams } from "react-router-dom";
 import { useState } from "react";
-import { Alert, Badge, Button, Card, DataTable, PageHeader, Skeleton, StatusPill, type DataTableColumn } from "../../shell/ui";
-import { drillBalances, getDefinition, getRun, listCells, type BalanceKey, type CellSummary, type Definition, type DefinitionRow, type RunSummary } from "./api/client";
+import { Alert, Badge, Button, buttonClassName, Card, DataTable, PageHeader, Skeleton, StatusPill, type DataTableColumn } from "../../shell/ui";
+import {
+  drillBalances,
+  getDefinition,
+  getRun,
+  listCells,
+  runOutputUrl,
+  type BalanceKey,
+  type CellSummary,
+  type Definition,
+  type DefinitionRow,
+  type RunSummary,
+} from "./api/client";
 import { checkDrill, displayAmount } from "./drill";
 import { CURRENCY_TYPE_LABELS, periodLabel } from "./format";
 import styles from "./pages.module.css";
@@ -18,6 +29,10 @@ async function loadStatement(runId: string, signal: AbortSignal): Promise<Statem
   const { definition } = await getDefinition(run.definitionCode, run.definitionVersion, signal);
   return { run, definition, cells: new Map(cells.map((c) => [`${c.row}/${c.column}`, c])) };
 }
+
+const CHECK_TITLES: Record<string, string> = {
+  "REPORT-0015": "Some expense lines have no functional area",
+};
 
 const indentClass = [undefined, styles.indent1, styles.indent2, styles.indent3];
 
@@ -96,7 +111,17 @@ export function RunPage() {
         title={definition.name}
         description={`${run.definitionCode} version ${run.definitionVersion}, period ${periodLabel(run.periodYear, run.periodNo)}, ${CURRENCY_TYPE_LABELS[run.currencyType as keyof typeof CURRENCY_TYPE_LABELS] ?? run.currencyType} currency.`}
         meta={<StatusPill status={run.status} />}
+        actions={
+          <a className={buttonClassName("secondary")} href={runOutputUrl(run.id, "csv")} download>
+            Download CSV
+          </a>
+        }
       />
+      {(run.checks ?? []).map((check) => (
+        <Alert key={`${check.code}/${check.detail}`} tone="warning" title={CHECK_TITLES[check.code] ?? "This statement has a warning"}>
+          {check.detail} ({check.code})
+        </Alert>
+      ))}
       <Card title="As of">
         <dl className={styles.details}>
           <div className={styles.entry}>

@@ -69,6 +69,8 @@ func TestValidate(t *testing.T) {
 		{"account range reversed", func(d *Definition) { d.Rows[0].AccountTo = "099999" }, []string{ShapeCode}},
 		{"bad normal balance", func(d *Definition) { d.Rows[0].NormalBalance = "both" }, []string{ShapeCode}},
 		{"unknown cash flow tag", func(d *Definition) { d.Rows[0].CashFlowTag = "misc" }, []string{ShapeCode}},
+		{"negative indent", func(d *Definition) { d.Rows[0].Format.Indent = -1 }, []string{ShapeCode}},
+		{"indent too deep", func(d *Definition) { d.Rows[0].Format.Indent = MaxIndent + 1 }, []string{ShapeCode}},
 		{"total references a missing row", func(d *Definition) { d.Rows[2].References = []string{"A", "Z"} }, []string{CodeExpression}},
 		{"total without references", func(d *Definition) { d.Rows[2].References = nil }, []string{ShapeCode}},
 		{"calculation with bad syntax", func(d *Definition) {

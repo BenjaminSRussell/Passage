@@ -366,6 +366,23 @@ func TestTenantIsolation(t *testing.T) {
 	if list, err := st.ListDefinitions(ctx2); err != nil || len(list) != 0 {
 		t.Fatalf("tenant 2 definitions = %+v, %v", list, err)
 	}
+	sc := nightly()
+	sc.Definition = "TENANT-ONE"
+	if _, _, err := st.SaveSchedule(ctx1, sc, nil); err != nil {
+		t.Fatal(err)
+	}
+	if list, err := st.ListSchedules(ctx2); err != nil || len(list) != 0 {
+		t.Fatalf("tenant 2 schedules = %+v, %v", list, err)
+	}
+	if _, _, err := st.GetSchedule(ctx2, sc.Code); problemCode(err) != CodeScheduleNotFound {
+		t.Fatalf("tenant 2 reading tenant 1's schedule = %v", err)
+	}
+	if _, _, err := st.SaveSchedule(ctx2, sc, nil); problemCode(err) != CodeNotPublished {
+		t.Fatalf("tenant 2 cannot schedule tenant 1's definition, got %v", err)
+	}
+	if _, _, _, err := st.RunOutput(ctx2, run.ID); problemCode(err) != CodeRunNotFound {
+		t.Fatalf("tenant 2 rendering tenant 1's run = %v", err)
+	}
 	if _, _, err := st.SaveHierarchy(ctx1, accountTree(true), nil, "a"); err != nil {
 		t.Fatal(err)
 	}
