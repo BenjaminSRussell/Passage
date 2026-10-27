@@ -97,12 +97,16 @@ paths:
           in: query
           description: Only the credit notes of this invoice.
           schema: { type: string, format: uuid }
+        - name: cursor
+          in: query
+          description: The nextCursor of the previous page (opaque).
+          schema: { type: string }
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 200, default: 100 }
       responses:
         "200":
-          description: Invoice headers without lines.
+          description: At most `limit` invoice headers without lines; nextCursor is present when more follow.
           content:
             application/json:
               schema:
@@ -113,6 +117,9 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/InvoiceSummary"
+                  nextCursor:
+                    type: string
+                    description: Pass as cursor for the next page; absent on the last page.
         "400":
           $ref: "#/components/responses/Problem"
         "401":

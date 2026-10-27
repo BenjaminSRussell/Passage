@@ -26,6 +26,7 @@ const contract: RevenueContract = {
   recognized: "7200.00",
   remaining: "3600.00",
   residualRule: "LARGEST",
+  ratableBasis: "DAILY",
   contractDate: "2027-03-10",
   status: "OPEN",
   version: 1,
@@ -85,6 +86,25 @@ const satisfied: RevenueContract = {
   ),
 };
 
+/** The contract's own March 2027 roll-forward (AC-29.4 for one contract). */
+const contractMarch: RollForward = {
+  legalEntityId: LE,
+  contractId: CONTRACT,
+  currency: "USD",
+  period: "2027-03",
+  start: "2027-03-01",
+  end: "2027-03-31",
+  opening: "0.00",
+  additions: "3600.00",
+  recognized: "1483.06",
+  adjustments: "0.00",
+  closing: "2116.94",
+};
+
+function isRollForward(url: URL) {
+  return url.pathname === "/api/v1/revrec/roll-forward";
+}
+
 function fill(label: string, value: string) {
   fireEvent.change(screen.getByLabelText(label), { target: { value } });
 }
@@ -123,6 +143,24 @@ describe("Revenue contracts list", () => {
     await waitFor(() => expect(server.calls.at(-1)?.url.searchParams.get("customerId")).toBe(CUST));
   });
 
+  it("filters by obligation method and loads the next page through the cursor", async () => {
+    const older = { ...contract, id: "0190f0a0-0000-7000-8000-000000000c00", contractDate: "2027-02-01", transactionPrice: "500.00" };
+    server.handler = (url) =>
+      url.searchParams.get("cursor") === "next" ? json(200, { items: [older] }) : json(200, { items: [contract], nextCursor: "next" });
+    const { container } = renderAt("/billing/revenue-contracts");
+    const table = await screen.findByRole("table", { name: "Revenue contracts" });
+    await waitFor(() => expect(table).toHaveTextContent("10800.00 USD"));
+    fireEvent.change(screen.getByLabelText("Obligation method"), { target: { value: "RATABLE" } });
+    await waitFor(() => expect(server.calls.at(-1)?.url.searchParams.get("method")).toBe("RATABLE"));
+    fireEvent.click(await screen.findByRole("button", { name: "Load more contracts" }));
+    await waitFor(() => expect(table).toHaveTextContent("500.00 USD"));
+    const more = server.calls.at(-1)!.url.searchParams;
+    expect(more.get("cursor")).toBe("next");
+    expect(more.get("method")).toBe("RATABLE");
+    expect(screen.queryByRole("button", { name: "Load more contracts" })).not.toBeInTheDocument();
+    expect(pageViolations(container)).toEqual([]);
+  });
+
   it("shows the error state with a retry", async () => {
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty revrec.view" });
     renderAt("/billing/revenue-contracts");
@@ -137,6 +175,7 @@ describe("Revenue contract detail", () => {
   it("shows the allocation and schedules and satisfies a milestone with If-Match", async () => {
     let reads = 0;
     server.handler = (url, init) => {
+      if (isRollForward(url)) return json(200, contractMarch);
       if (url.pathname === `/api/v1/revrec/milestones/${INSTALL}:satisfy` && init.method === "POST") {
         return json(200, { contractId: CONTRACT, contractVersion: 2, obligationId: INSTALL, scheduleId: "s2", amount: "1350.00", recognizedOn: "2027-03-25" });
       }
@@ -167,6 +206,7 @@ describe("Revenue contract detail", () => {
 
   it("explains a refused satisfaction and reloads a changed contract", async () => {
     server.handler = (url, init) => {
+      if (isRollForward(url)) return json(200, contractMarch);
       if (init.method === "POST") return json(412, { code: "REV-0103", detail: "the contract changed since it was read; reload and review it" });
       if (url.pathname === `/api/v1/revrec/contracts/${CONTRACT}`) return json(200, contract);
       return undefined;
@@ -176,11 +216,12 @@ describe("Revenue contract detail", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("The contract changed since you opened it");
     expect(alert).toHaveTextContent("(REV-0103)");
-    await waitFor(() => expect(server.calls.filter((c) => c.method === "GET").length).toBe(2));
+    await waitFor(() => expect(server.calls.filter((c) => c.method === "GET" && c.url.pathname === `/api/v1/revrec/contracts/${CONTRACT}`).length).toBe(2));
   });
 
   it("shows a date error next to the field", async () => {
-    server.handler = (_url, init) => {
+    server.handler = (url, init) => {
+      if (isRollForward(url)) return json(200, contractMarch);
       if (init.method === "POST") return json(422, { code: "REV-0006", detail: "a milestone cannot be satisfied before the contract date 2027-03-10" });
       return json(200, contract);
     };
@@ -196,7 +237,8 @@ describe("Revenue contract detail", () => {
   });
 
   it("warns about a residual SSP and shows a load failure with a retry", async () => {
-    server.handler = () => json(200, { ...contract, warnings: [{ code: "BIL-0009", detail: "SSP missing for line 2; residual method used" }] });
+    server.handler = (url) =>
+      isRollForward(url) ? json(200, contractMarch) : json(200, { ...contract, warnings: [{ code: "BIL-0009", detail: "SSP missing for line 2; residual method used" }] });
     renderAt(`/billing/revenue-contracts/${CONTRACT}`);
     expect(await screen.findByText("SSP missing for line 2; residual method used (BIL-0009)")).toBeInTheDocument();
 
@@ -204,6 +246,47 @@ describe("Revenue contract detail", () => {
     renderAt(`/billing/revenue-contracts/${CONTRACT}`);
     const alerts = await screen.findAllByRole("alert");
     expect(alerts.at(-1)).toHaveTextContent("contract not found (REV-0100)");
+  });
+});
+
+describe("Revenue contract roll-forward", () => {
+  it("opens on the contract's month, shows its basis and changes month", async () => {
+    server.handler = (url) => {
+      if (isRollForward(url)) {
+        const period = url.searchParams.get("period") ?? "";
+        return json(200, period === "2027-04" ? { ...contractMarch, period, opening: "2116.94", additions: "0.00", recognized: "187.50", closing: "1929.44" } : contractMarch);
+      }
+      return json(200, { ...contract, ratableBasis: "MONTHLY" });
+    };
+    const { container } = renderAt(`/billing/revenue-contracts/${CONTRACT}`);
+    const march = await screen.findByRole("list", { name: "Deferred revenue 2027-03" });
+    expect(march).toHaveTextContent("3600.00 USD");
+    expect(march).toHaveTextContent("2116.94 USD");
+    const call = server.calls.find((c) => isRollForward(c.url));
+    expect(Object.fromEntries(call!.url.searchParams)).toEqual({ contractId: CONTRACT, period: "2027-03" });
+    expect(screen.getByText("Monthly (equal per month)")).toBeInTheDocument();
+    expect(pageViolations(container)).toEqual([]);
+
+    fill("Month", "2027-4");
+    fireEvent.click(screen.getByRole("button", { name: "Show month" }));
+    expect(screen.getByText("Enter the month as YYYY-MM, for example 2027-03.")).toBeInTheDocument();
+    fill("Month", "2027-04");
+    fireEvent.click(screen.getByRole("button", { name: "Show month" }));
+    expect(await screen.findByRole("list", { name: "Deferred revenue 2027-04" })).toHaveTextContent("1929.44 USD");
+  });
+
+  it("shows a roll-forward failure with a retry while the contract stays readable", async () => {
+    let fail = true;
+    server.handler = (url) => {
+      if (isRollForward(url)) return fail ? json(503, { code: "HTTP-503", detail: "revrec unavailable" }) : json(200, contractMarch);
+      return json(200, contract);
+    };
+    renderAt(`/billing/revenue-contracts/${CONTRACT}`);
+    expect(await screen.findByRole("alert")).toHaveTextContent("revrec unavailable (HTTP-503)");
+    expect(screen.getByRole("table", { name: "Performance obligations" })).toHaveTextContent("7200.00 USD");
+    fail = false;
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("list", { name: "Deferred revenue 2027-03" })).toHaveTextContent("1483.06 USD");
   });
 });
 
@@ -255,9 +338,32 @@ describe("New revenue contract", () => {
       currency: "USD",
       transactionPrice: "10800.00",
       residualRule: "LARGEST",
+      ratableBasis: "DAILY",
       contractDate: "2027-03-10",
       obligations: [{ productId: PRODUCT, ssp: "8000", sspSource: "EXPLICIT", method: "POINT_IN_TIME", satisfiedOn: "2027-03-10" }],
     });
+  });
+
+  it("sends the monthly ratable basis when chosen", async () => {
+    server.handler = (url, init) => {
+      if (url.pathname === "/api/v1/revrec/contracts" && init.method === "POST") return json(201, contract);
+      if (isRollForward(url)) return json(200, contractMarch);
+      return json(200, contract);
+    };
+    renderAt("/billing/revenue-contracts/new");
+    fill("Legal entity id", LE);
+    fill("Sales order id", ORDER);
+    fill("Customer id", CUST);
+    fill("Contract price", "2250");
+    fill("Product id", PRODUCT);
+    fill("Standalone selling price", "2500");
+    fireEvent.change(screen.getByLabelText("Recognition"), { target: { value: "RATABLE" } });
+    fill("Term start", "2027-03-10");
+    fill("Term end", "2028-03-09");
+    fireEvent.change(screen.getByLabelText("Ratable basis"), { target: { value: "MONTHLY" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create contract" }));
+    expect(await screen.findByRole("heading", { name: "Revenue contract" })).toBeInTheDocument();
+    expect(server.calls.find((c) => c.method === "POST")?.body).toMatchObject({ ratableBasis: "MONTHLY", obligations: [{ method: "RATABLE", termStart: "2027-03-10" }] });
   });
 
   it("shows service field errors next to the fields and a rule violation as an alert", async () => {

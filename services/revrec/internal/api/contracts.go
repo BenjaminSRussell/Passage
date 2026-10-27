@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -38,11 +39,12 @@ type Store interface {
 	FindContractByKey(ctx context.Context, key string) (store.Contract, bool, error)
 	CreateContract(ctx context.Context, c store.Contract) (store.Contract, error)
 	GetContract(ctx context.Context, id string) (store.Contract, error)
-	ListContracts(ctx context.Context, f store.ContractFilter) ([]store.Contract, error)
+	ListContracts(ctx context.Context, f store.ContractFilter) (store.ContractPage, error)
 	SatisfyMilestone(ctx context.Context, obligationID string, on time.Time, expectedVersion int) (store.Satisfaction, error)
 	RunRecognition(ctx context.Context, legalEntityID string, periodEnd time.Time) (store.Run, bool, error)
 	ListRuns(ctx context.Context, legalEntityID string, limit int) ([]store.Run, error)
 	RollForward(ctx context.Context, legalEntityID, currency string, start, end time.Time) (domain.RollForward, error)
+	ContractRollForward(ctx context.Context, contractID string, start, end time.Time) (store.ContractRoll, error)
 }
 
 type contractObligationDTO struct {
@@ -62,6 +64,7 @@ type contractRequest struct {
 	Currency         string                  `json:"currency"`
 	TransactionPrice string                  `json:"transactionPrice"`
 	ResidualRule     string                  `json:"residualRule,omitempty"`
+	RatableBasis     string                  `json:"ratableBasis,omitempty"`
 	ContractDate     string                  `json:"contractDate"`
 	Obligations      []contractObligationDTO `json:"obligations"`
 }
@@ -105,6 +108,7 @@ type contractSummaryOut struct {
 	Recognized       string `json:"recognized"`
 	Remaining        string `json:"remaining"`
 	ResidualRule     string `json:"residualRule"`
+	RatableBasis     string `json:"ratableBasis"`
 	ContractDate     string `json:"contractDate"`
 	Status           string `json:"status"`
 	Version          int    `json:"version"`
@@ -144,6 +148,7 @@ type runOut struct {
 
 type rollForwardOut struct {
 	LegalEntityID string `json:"legalEntityId"`
+	ContractID    string `json:"contractId,omitempty"`
 	Currency      string `json:"currency"`
 	Period        string `json:"period"`
 	Start         string `json:"start"`
@@ -209,11 +214,21 @@ func (a *API) createContract(w http.ResponseWriter, r *http.Request) {
 }
 
 // listContracts is the revenue contracts inquiry (§5.29.14): headers with the
-// revenue recognized and remaining, newest first.
+// revenue recognized and remaining, newest first, filtered by legal entity,
+// customer, status and obligation method. A page holds at most `limit` items;
+// nextCursor, when present, is passed back as `cursor` for the next page.
 func (a *API) listContracts(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	f := store.ContractFilter{LegalEntityID: q.Get("legalEntityId"), CustomerID: q.Get("customerId"), Status: q.Get("status")}
+	f := store.ContractFilter{LegalEntityID: q.Get("legalEntityId"), CustomerID: q.Get("customerId"), Status: q.Get("status"), Method: q.Get("method")}
 	fields := map[string]string{}
+	if f.Method != "" && !domain.ValidMethod(f.Method) {
+		fields["method"] = "must be POINT_IN_TIME, RATABLE, MILESTONE or USAGE"
+	}
+	after, ok := decodeCursor(q.Get("cursor"))
+	if !ok {
+		fields["cursor"] = "must be a nextCursor returned by a previous page"
+	}
+	f.After = after
 	if f.LegalEntityID != "" && !ids.Valid(f.LegalEntityID) {
 		fields["legalEntityId"] = "must be a UUID"
 	}
@@ -232,16 +247,37 @@ func (a *API) listContracts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.Limit = limit
-	items, err := a.store.ListContracts(r.Context(), f)
+	page, err := a.store.ListContracts(r.Context(), f)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
-	out := make([]contractSummaryOut, 0, len(items))
-	for _, c := range items {
-		out = append(out, toSummary(c))
+	out := contractListOut{Items: make([]contractSummaryOut, 0, len(page.Items))}
+	for _, c := range page.Items {
+		out.Items = append(out.Items, toSummary(c))
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": out})
+	if page.NextAfter != "" {
+		out.NextCursor = base64.RawURLEncoding.EncodeToString([]byte(page.NextAfter))
+	}
+	httpx.JSON(w, http.StatusOK, out)
+}
+
+type contractListOut struct {
+	Items      []contractSummaryOut `json:"items"`
+	NextCursor string               `json:"nextCursor,omitempty"`
+}
+
+// decodeCursor reads an opaque list cursor (base64url of the last contract id).
+// An absent cursor is the first page.
+func decodeCursor(raw string) (string, bool) {
+	if raw == "" {
+		return "", true
+	}
+	b, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil || !ids.Valid(string(b)) {
+		return "", false
+	}
+	return strings.ToLower(string(b)), true
 }
 
 func (a *API) getContract(w http.ResponseWriter, r *http.Request) {
@@ -376,16 +412,27 @@ func (a *API) listRuns(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]any{"items": out})
 }
 
-// rollForward reports one currency's deferred revenue for a calendar month (FR-29.9).
+// rollForward reports deferred revenue for a calendar month (FR-29.9): one
+// currency of a legal entity (legalEntityId and currency), or with contractId
+// the drill-down to one contract, stated in that contract's currency.
 func (a *API) rollForward(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	fields := map[string]string{}
-	le, cur, period := q.Get("legalEntityId"), q.Get("currency"), q.Get("period")
-	if !ids.Valid(le) {
-		fields["legalEntityId"] = "must be a UUID"
-	}
-	if !currencyCode.MatchString(cur) {
-		fields["currency"] = "must be an ISO 4217 alpha-3 code"
+	contractID, le, cur, period := q.Get("contractId"), q.Get("legalEntityId"), q.Get("currency"), q.Get("period")
+	if contractID != "" {
+		if !ids.Valid(contractID) {
+			fields["contractId"] = "must be a UUID"
+		}
+		if le != "" || cur != "" {
+			fields["contractId"] = "is used without legalEntityId and currency; the contract fixes both"
+		}
+	} else {
+		if !ids.Valid(le) {
+			fields["legalEntityId"] = "must be a UUID"
+		}
+		if !currencyCode.MatchString(cur) {
+			fields["currency"] = "must be an ISO 4217 alpha-3 code"
+		}
 	}
 	start, err := time.Parse(periodLayout, period)
 	if err != nil {
@@ -395,22 +442,37 @@ func (a *API) rollForward(w http.ResponseWriter, r *http.Request) {
 		writeFields(w, r, fields)
 		return
 	}
+	end := start.AddDate(0, 1, -1)
+	if contractID != "" {
+		// Row-level security hides a contract of another tenant or another
+		// legal-entity scope, so it answers 404 like an unknown id.
+		cr, err := a.store.ContractRollForward(r.Context(), contractID, start, end)
+		if err != nil {
+			httpx.Fail(w, r, err)
+			return
+		}
+		httpx.JSON(w, http.StatusOK, toRollForwardOut(cr.RollForward, cr.LegalEntityID, contractID, cr.Currency, period, start, end))
+		return
+	}
 	if !inScope(r, le) {
 		httpx.Fail(w, r, outOfScope())
 		return
 	}
-	end := start.AddDate(0, 1, -1)
 	rf, err := a.store.RollForward(r.Context(), le, cur, start, end)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, rollForwardOut{
-		LegalEntityID: le, Currency: cur, Period: period,
+	httpx.JSON(w, http.StatusOK, toRollForwardOut(rf, le, "", cur, period, start, end))
+}
+
+func toRollForwardOut(rf domain.RollForward, le, contractID, cur, period string, start, end time.Time) rollForwardOut {
+	return rollForwardOut{
+		LegalEntityID: le, ContractID: contractID, Currency: cur, Period: period,
 		Start: start.Format(dateLayout), End: end.Format(dateLayout),
 		Opening: fixed(rf.Opening, cur), Additions: fixed(rf.Additions, cur), Recognized: fixed(rf.Recognized, cur),
 		Adjustments: fixed(rf.Adjustments, cur), Closing: fixed(rf.Closing, cur),
-	})
+	}
 }
 
 // buildContract validates the request and allocates it. Field errors go into
@@ -418,6 +480,13 @@ func (a *API) rollForward(w http.ResponseWriter, r *http.Request) {
 func buildContract(req contractRequest, fields map[string]string) (store.Contract, error) {
 	if req.ResidualRule == "" {
 		req.ResidualRule = domain.ResidualLargest
+	}
+	basis := req.RatableBasis
+	if basis == "" {
+		basis = domain.BasisDaily
+	}
+	if !domain.ValidRatableBasis(basis) {
+		fields["ratableBasis"] = "must be DAILY or MONTHLY"
 	}
 	for name, v := range map[string]string{"legalEntityId": req.LegalEntityID, "orderId": req.OrderID, "customerId": req.CustomerID} {
 		if !ids.Valid(v) {
@@ -478,7 +547,8 @@ func buildContract(req contractRequest, fields map[string]string) (store.Contrac
 	}
 	c := store.Contract{
 		ID: ids.New(), LegalEntityID: req.LegalEntityID, OrderID: req.OrderID, CustomerID: req.CustomerID,
-		Currency: req.Currency, TransactionPrice: price.Value, ResidualRule: req.ResidualRule, ContractDate: contractDate,
+		Currency: req.Currency, TransactionPrice: price.Value, ResidualRule: req.ResidualRule, RatableBasis: basis,
+		ContractDate: contractDate,
 	}
 	for i, o := range allocated {
 		ob := store.Obligation{
@@ -489,7 +559,7 @@ func buildContract(req contractRequest, fields map[string]string) (store.Contrac
 			start, end := t[0], t[1]
 			ob.TermStart, ob.TermEnd = &start, &end
 		}
-		lines, err := domain.ScheduleLines(o, req.Currency, ob.TermStart, ob.TermEnd, ob.SatisfiedOn)
+		lines, err := domain.ScheduleLines(o, req.Currency, basis, ob.TermStart, ob.TermEnd, ob.SatisfiedOn)
 		if err != nil {
 			return store.Contract{}, problemFrom(err)
 		}
@@ -520,7 +590,7 @@ func toSummary(c store.Contract) contractSummaryOut {
 	return contractSummaryOut{
 		ID: c.ID, LegalEntityID: c.LegalEntityID, OrderID: c.OrderID, CustomerID: c.CustomerID, Currency: c.Currency,
 		TransactionPrice: fixed(c.TransactionPrice, c.Currency), Recognized: fixed(c.Recognized, c.Currency),
-		Remaining: fixed(c.TransactionPrice.Sub(c.Recognized), c.Currency), ResidualRule: c.ResidualRule,
+		Remaining: fixed(c.TransactionPrice.Sub(c.Recognized), c.Currency), ResidualRule: c.ResidualRule, RatableBasis: c.RatableBasis,
 		ContractDate: c.ContractDate.Format(dateLayout), Status: c.Status, Version: c.Version,
 	}
 }

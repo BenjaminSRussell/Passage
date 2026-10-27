@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, DataTable, FormField, PageHeader, Select, StatusPill, type DataTableColumn } from "../../shell/ui";
-import { INVOICE_STATUSES, listInvoices, type InvoiceStatus, type InvoiceSummary } from "./api/client";
+import { INVOICE_STATUSES, listInvoicePage, type InvoiceStatus, type InvoiceSummary } from "./api/client";
 import { invoiceName, STATUS_LABELS, TYPE_LABELS } from "./format";
+import { MoreRows } from "./MoreRows";
 import styles from "./pages.module.css";
-import { useLoad } from "./useLoad";
+import { usePaged } from "./usePaged";
 
 const LIMIT = 100;
 
@@ -18,11 +19,11 @@ const columns: DataTableColumn<InvoiceSummary>[] = [
   { key: "gross", header: "Gross", mono: true, align: "end", render: (row) => `${row.totals.gross} ${row.currency}` },
 ];
 
-/** Invoices list inquiry (§5.29.14): proposals and posted invoices, newest first. */
+/** Invoices list inquiry (§5.29.14): proposals and posted invoices, newest first, paged by the service cursor. */
 export function InvoicesPage() {
   const navigate = useNavigate();
   const [status, setStatus] = useState<InvoiceStatus | "">("");
-  const state = useLoad((signal) => listInvoices({ status, limit: LIMIT }, signal), status);
+  const state = usePaged((cursor, signal) => listInvoicePage({ status, limit: LIMIT, cursor }, signal), status);
 
   return (
     <div className={styles.stack}>
@@ -62,7 +63,7 @@ export function InvoicesPage() {
         <DataTable
           label="Invoices"
           columns={columns}
-          rows={state.data ?? []}
+          rows={state.rows}
           getRowKey={(row) => row.id}
           loading={state.loading}
           empty={{
@@ -72,7 +73,7 @@ export function InvoicesPage() {
           onRowOpen={(row) => navigate(`/billing/invoices/${row.id}`)}
         />
       )}
-      {state.data && state.data.length >= LIMIT ? <p className={styles.note}>{`Showing the newest ${LIMIT} invoices.`}</p> : null}
+      <MoreRows state={state} noun="invoices" />
     </div>
   );
 }

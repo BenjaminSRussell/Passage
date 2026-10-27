@@ -5,6 +5,7 @@ import {
   describeProblem,
   METHODS,
   previewAllocation,
+  RATABLE_BASES,
   RESIDUAL_RULES,
   SSP_SOURCES,
   type AllocatedObligation,
@@ -12,12 +13,13 @@ import {
   type AllocationPreviewInput,
   type ObligationInput,
   type Problem,
+  type RatableBasis,
   type RecognitionMethod,
   type ResidualRule,
   type SchedulePeriod,
   type SspSource,
 } from "./api/client";
-import { CURRENCY, DAY, DECIMAL, METHOD_LABELS, SSP_SOURCE_LABELS } from "./format";
+import { BASIS_HINT, BASIS_LABELS, CURRENCY, DAY, DECIMAL, METHOD_LABELS, SSP_SOURCE_LABELS } from "./format";
 import styles from "./pages.module.css";
 
 type Errors = Record<string, string>;
@@ -35,13 +37,14 @@ export interface PreviewValues {
   currency: string;
   transactionPrice: string;
   residualRule: ResidualRule;
+  ratableBasis: RatableBasis;
   obligations: ObligationValues[];
 }
 
 const MAX_OBLIGATIONS = 50;
 const emptyObligation: ObligationValues = { id: "", ssp: "", sspSource: "EXPLICIT", method: "POINT_IN_TIME", termStart: "", termEnd: "" };
 
-export const emptyPreview: PreviewValues = { currency: "USD", transactionPrice: "", residualRule: "LARGEST", obligations: [{ ...emptyObligation }] };
+export const emptyPreview: PreviewValues = { currency: "USD", transactionPrice: "", residualRule: "LARGEST", ratableBasis: "DAILY", obligations: [{ ...emptyObligation }] };
 
 /** Client checks that mirror the revrec preview; the service has the last word. */
 export function validatePreview(v: PreviewValues): Errors {
@@ -67,6 +70,7 @@ export function toPreviewInput(v: PreviewValues): AllocationPreviewInput {
     currency: v.currency.trim(),
     transactionPrice: v.transactionPrice.trim(),
     residualRule: v.residualRule,
+    ratableBasis: v.ratableBasis,
     obligations: v.obligations.map((o): ObligationInput => ({
       id: o.id.trim(),
       ssp: o.ssp.trim(),
@@ -186,6 +190,17 @@ export function AllocationPreviewPage() {
               </Select>
             )}
           </FormField>
+          <FormField id="rr-basis" label="Ratable basis" hint={BASIS_HINT} error={errors.ratableBasis}>
+            {(c) => (
+              <Select {...c} value={values.ratableBasis} onChange={(e) => update({ ratableBasis: e.target.value as RatableBasis })}>
+                {RATABLE_BASES.map((b) => (
+                  <option key={b} value={b}>
+                    {BASIS_LABELS[b]}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </FormField>
           {values.obligations.map((o, i) => (
             <fieldset key={i} className={styles.lineSet}>
               <legend className={styles.groupsLegend}>{`Obligation ${i + 1}`}</legend>
@@ -251,7 +266,7 @@ export function AllocationPreviewPage() {
         <>
           <Card title="Allocation">
             <div className={styles.stack}>
-              <p className={styles.note}>{`Contract price ${result.transactionPrice} ${currency}; the rounding residual goes to the ${result.residualRule.toLowerCase()} obligation.`}</p>
+              <p className={styles.note}>{`Contract price ${result.transactionPrice} ${currency}; the rounding residual goes to the ${result.residualRule.toLowerCase()} obligation; ratable schedules use the ${result.ratableBasis.toLowerCase()} basis.`}</p>
               <DataTable label="Allocation" columns={allocationColumns} rows={result.obligations} getRowKey={(o) => o.id} />
             </div>
           </Card>

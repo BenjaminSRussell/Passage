@@ -257,6 +257,20 @@ describe("Credit notes list", () => {
     expect(server.calls.at(-1)?.url.searchParams.get("status")).toBe("PROPOSAL");
   });
 
+  it("pages credit notes through the cursor, keeping the credit-note filter", async () => {
+    server.handler = (url) =>
+      url.searchParams.get("cursor") === "c1"
+        ? json(200, { items: [{ ...creditPosted, id: "cn-older", number: "CN-2027-0000001" }] })
+        : json(200, { items: [creditPosted], nextCursor: "c1" });
+    renderAt("/billing/credit-notes");
+    const table = await screen.findByRole("table", { name: "Credit notes" });
+    fireEvent.click(await screen.findByRole("button", { name: "Load more credit notes" }));
+    await waitFor(() => expect(table).toHaveTextContent("CN-2027-0000001"));
+    expect(table).toHaveTextContent("CN-2027-0000002");
+    const next = server.calls.at(-1)!.url.searchParams;
+    expect([next.get("type"), next.get("cursor")]).toEqual(["CREDIT_NOTE", "c1"]);
+  });
+
   it("shows the error state with a retry", async () => {
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty billing.invoice.view" });
     renderAt("/billing/credit-notes");

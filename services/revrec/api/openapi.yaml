@@ -94,10 +94,12 @@ paths:
         - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
         - { name: customerId, in: query, schema: { type: string, format: uuid } }
         - { name: status, in: query, schema: { type: string, enum: [OPEN, COMPLETE, CANCELLED] } }
+        - { name: method, in: query, description: "Contracts with at least one obligation of this recognition method.", schema: { type: string, enum: [POINT_IN_TIME, RATABLE, MILESTONE, USAGE] } }
+        - { name: cursor, in: query, description: "The nextCursor of the previous page (opaque).", schema: { type: string } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 100 } }
       responses:
         "200":
-          description: At most `limit` contract headers.
+          description: At most `limit` contract headers; nextCursor is present when more follow.
           content:
             application/json:
               schema:
@@ -107,6 +109,7 @@ paths:
                   items:
                     type: array
                     items: { $ref: "#/components/schemas/ContractSummary" }
+                  nextCursor: { type: string, description: "Pass as cursor for the next page; absent on the last page." }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
@@ -230,17 +233,22 @@ paths:
   /v1/revrec/roll-forward:
     get:
       operationId: getRollForward
-      summary: Deferred revenue roll-forward of one legal entity, currency and calendar month (FR-29.9).
+      summary: Deferred revenue roll-forward of one legal entity and currency, or of one contract, for a calendar month (FR-29.9).
       x-passage-duty: revrec.view (RevRecView)
       description: >
         Opening + additions − recognized ± adjustments = closing. Additions are
         the RATABLE and MILESTONE allocations of contracts dated in the month;
         recognized are their lines recognized in it. Adjustments stay 0.00
         until credit notes reverse schedules (BR-29.6, later slice). The tie to
-        GL 2400 needs the ledger (wave 11).
+        GL 2400 needs the ledger (wave 11). Send legalEntityId and currency for
+        the entity roll-forward, or contractId alone for the drill-down to one
+        contract, stated in the contract's currency (404 REV-0100 when the
+        contract is unknown or outside the caller's scope). The contracts of an
+        entity's roll-forward sum to it.
       parameters:
-        - { name: legalEntityId, in: query, required: true, schema: { type: string, format: uuid } }
-        - { name: currency, in: query, required: true, schema: { type: string, pattern: "^[A-Z]{3}$" } }
+        - { name: legalEntityId, in: query, description: "Required without contractId.", schema: { type: string, format: uuid } }
+        - { name: currency, in: query, description: "Required without contractId.", schema: { type: string, pattern: "^[A-Z]{3}$" } }
+        - { name: contractId, in: query, description: "The drill-down to one contract; excludes legalEntityId and currency.", schema: { type: string, format: uuid } }
         - { name: period, in: query, required: true, schema: { type: string, pattern: "^[0-9]{4}-[0-9]{2}$" }, description: "YYYY-MM" }
       responses:
         "200":
@@ -251,6 +259,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
 components:
   parameters:
     IdempotencyKey:
@@ -278,6 +287,7 @@ components:
         currency: { type: string, pattern: "^[A-Z]{3}$" }
         transactionPrice: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$" }
         residualRule: { type: string, enum: [LARGEST, FIRST, LAST], default: LARGEST }
+        ratableBasis: { type: string, enum: [DAILY, MONTHLY], default: DAILY, description: "§5.29.13 ratable_basis. DAILY weighs each month by the days the term covers; MONTHLY gives every month the term touches an equal share. The residual is on the last line." }
         obligations:
           type: array
           minItems: 1
@@ -297,11 +307,12 @@ components:
         termEnd: { type: string, format: date, description: "Required for RATABLE; on or after termStart." }
     PreviewResponse:
       type: object
-      required: [currency, transactionPrice, residualRule, obligations]
+      required: [currency, transactionPrice, residualRule, ratableBasis, obligations]
       properties:
         currency: { type: string }
         transactionPrice: { type: string }
         residualRule: { type: string }
+        ratableBasis: { type: string, enum: [DAILY, MONTHLY] }
         obligations:
           type: array
           items:
@@ -335,6 +346,7 @@ components:
         currency: { type: string, pattern: "^[A-Z]{3}$" }
         transactionPrice: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$" }
         residualRule: { type: string, enum: [LARGEST, FIRST, LAST], default: LARGEST }
+        ratableBasis: { type: string, enum: [DAILY, MONTHLY], default: DAILY, description: "§5.29.13 ratable_basis. DAILY weighs each month by the days the term covers; MONTHLY gives every month the term touches an equal share. The residual is on the last line." }
         contractDate: { type: string, format: date, description: "The invoice date that opens the deferral." }
         obligations:
           type: array
@@ -354,7 +366,7 @@ components:
               satisfiedOn: { type: string, format: date, description: "Required for POINT_IN_TIME (the transfer date); refused for other methods." }
     ContractSummary:
       type: object
-      required: [id, legalEntityId, orderId, customerId, currency, transactionPrice, recognized, remaining, residualRule, contractDate, status, version]
+      required: [id, legalEntityId, orderId, customerId, currency, transactionPrice, recognized, remaining, residualRule, ratableBasis, contractDate, status, version]
       properties:
         id: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
@@ -365,6 +377,7 @@ components:
         recognized: { type: string, description: "Revenue recognized so far, every method." }
         remaining: { type: string, description: "transactionPrice − recognized." }
         residualRule: { type: string, enum: [LARGEST, FIRST, LAST] }
+        ratableBasis: { type: string, enum: [DAILY, MONTHLY] }
         contractDate: { type: string, format: date }
         status: { type: string, enum: [OPEN, COMPLETE, CANCELLED] }
         version: { type: integer }
@@ -436,6 +449,7 @@ components:
       required: [legalEntityId, currency, period, start, end, opening, additions, recognized, adjustments, closing]
       properties:
         legalEntityId: { type: string, format: uuid }
+        contractId: { type: string, format: uuid, description: "Present on the drill-down to one contract." }
         currency: { type: string }
         period: { type: string }
         start: { type: string, format: date }

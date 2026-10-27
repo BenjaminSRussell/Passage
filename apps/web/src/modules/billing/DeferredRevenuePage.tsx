@@ -38,7 +38,8 @@ const runColumns: DataTableColumn<RecognitionRun>[] = [
   { key: "createdAt", header: "Run at", mono: true, render: (r) => r.createdAt.replace("T", " ").replace("Z", " UTC") },
 ];
 
-function RollForwardTiles({ rf }: { rf: RollForward }) {
+/** The five roll-forward figures of one month, for an entity or one contract. */
+export function RollForwardTiles({ rf }: { rf: RollForward }) {
   const money = (v: string) => `${v} ${rf.currency}`;
   return (
     <StatGroup label={`Deferred revenue ${rf.period}`}>

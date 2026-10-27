@@ -11,6 +11,17 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/money"
 )
 
+// Ratable bases (§5.29.13 ratable_basis, FR-29.8 "RATABLE (daily or monthly)").
+// DAILY weighs each calendar month by the share of its days the term covers;
+// MONTHLY gives every calendar month the term touches the same share.
+const (
+	BasisDaily   = "DAILY"
+	BasisMonthly = "MONTHLY"
+)
+
+// ValidRatableBasis reports whether b is a known ratable basis.
+func ValidRatableBasis(b string) bool { return b == BasisDaily || b == BasisMonthly }
+
 // Residual rules decide which obligation absorbs the rounding residual (BR-29.1).
 const (
 	ResidualLargest = "LARGEST"
@@ -111,10 +122,15 @@ type Period struct {
 }
 
 // RatableSchedule spreads amount over the inclusive term [start, end] by calendar
-// month (FR-29.8, BR-29.1). A month weighs the days it covers divided by the
-// days in that month; each period takes amount × weight / Σweights rounded
-// half-even to the minor unit, and the last period absorbs the residual.
-func RatableSchedule(amount money.Amount, start, end time.Time) ([]Period, error) {
+// month (FR-29.8, BR-29.1). On the DAILY basis a month weighs the days it covers
+// divided by the days in that month; on the MONTHLY basis every month the term
+// touches weighs 1, so a partial first or last month gets a full share. Each
+// period takes amount × weight / Σweights rounded half-even to the minor unit,
+// and the last period absorbs the residual.
+func RatableSchedule(amount money.Amount, start, end time.Time, basis string) ([]Period, error) {
+	if !ValidRatableBasis(basis) {
+		return nil, &Error{Code: "COM-0001", Detail: "ratable basis must be DAILY or MONTHLY"}
+	}
 	start, end = dateOnly(start), dateOnly(end)
 	if end.Before(start) {
 		return nil, &Error{Code: "REV-0002", Detail: "term end is before term start"}
@@ -129,7 +145,11 @@ func RatableSchedule(amount money.Amount, start, end time.Time) ([]Period, error
 			segEnd = end
 		}
 		days := int64(segEnd.Sub(cur)/(24*time.Hour)) + 1
-		weights = append(weights, decimal.NewFromInt(days).Div(decimal.NewFromInt(int64(monthEnd.Day()))))
+		weight := decimal.NewFromInt(1)
+		if basis == BasisDaily {
+			weight = decimal.NewFromInt(days).Div(decimal.NewFromInt(int64(monthEnd.Day())))
+		}
+		weights = append(weights, weight)
 		periods = append(periods, Period{Start: cur, End: segEnd})
 		cur = segEnd.AddDate(0, 0, 1)
 	}

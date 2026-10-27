@@ -7,16 +7,18 @@ import {
   describeProblem,
   METHODS,
   newKey,
+  RATABLE_BASES,
   RESIDUAL_RULES,
   SSP_SOURCES,
   type ContractObligationInput,
   type Problem,
+  type RatableBasis,
   type RecognitionMethod,
   type ResidualRule,
   type RevenueContractInput,
   type SspSource,
 } from "./api/client";
-import { CURRENCY, DAY, DECIMAL, METHOD_LABELS, SSP_SOURCE_LABELS, today, UUID } from "./format";
+import { BASIS_HINT, BASIS_LABELS, CURRENCY, DAY, DECIMAL, METHOD_LABELS, SSP_SOURCE_LABELS, today, UUID } from "./format";
 import styles from "./pages.module.css";
 
 type Errors = Record<string, string>;
@@ -38,6 +40,7 @@ export interface ContractValues {
   currency: string;
   transactionPrice: string;
   residualRule: ResidualRule;
+  ratableBasis: RatableBasis;
   contractDate: string;
   obligations: ContractObligationValues[];
 }
@@ -56,6 +59,7 @@ export function emptyContract(day = today()): ContractValues {
     currency: "USD",
     transactionPrice: "",
     residualRule: "LARGEST",
+    ratableBasis: "DAILY",
     contractDate: day,
     obligations: [emptyObligation(day)],
   };
@@ -93,6 +97,7 @@ export function toContractInput(v: ContractValues): RevenueContractInput {
     currency: v.currency.trim(),
     transactionPrice: v.transactionPrice.trim(),
     residualRule: v.residualRule,
+    ratableBasis: v.ratableBasis,
     contractDate: v.contractDate,
     obligations: v.obligations.map(
       (o): ContractObligationInput => ({
@@ -107,7 +112,7 @@ export function toContractInput(v: ContractValues): RevenueContractInput {
   };
 }
 
-type HeaderField = Exclude<keyof ContractValues, "obligations" | "residualRule">;
+type HeaderField = Exclude<keyof ContractValues, "obligations" | "residualRule" | "ratableBasis">;
 type ObligationText = "productId" | "ssp" | "termStart" | "termEnd" | "satisfiedOn";
 
 /** Revenue contract (FR-29.7): allocate a contract price across its obligations by SSP and plan their recognition. */
@@ -206,6 +211,17 @@ export function NewRevenueContractPage() {
                 {RESIDUAL_RULES.map((r) => (
                   <option key={r} value={r}>
                     {r === "LARGEST" ? "Largest obligation" : r === "FIRST" ? "First obligation" : "Last obligation"}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </FormField>
+          <FormField id="rc-basis" label="Ratable basis" hint={BASIS_HINT} error={errors.ratableBasis}>
+            {(c) => (
+              <Select {...c} value={values.ratableBasis} onChange={(e) => update({ ratableBasis: e.target.value as RatableBasis })}>
+                {RATABLE_BASES.map((b) => (
+                  <option key={b} value={b}>
+                    {BASIS_LABELS[b]}
                   </option>
                 ))}
               </Select>

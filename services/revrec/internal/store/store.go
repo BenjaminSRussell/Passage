@@ -62,11 +62,14 @@ type Contract struct {
 	Currency         string
 	TransactionPrice decimal.Decimal
 	ResidualRule     string
-	ContractDate     time.Time
-	Status           string
-	Version          int
-	IdempotencyKey   string
-	RequestHash      string
+	// RatableBasis is DAILY or MONTHLY (§5.29.13); it shaped the RATABLE lines.
+	RatableBasis   string
+	ContractDate   time.Time
+	Status         string
+	Version        int
+	IdempotencyKey string
+	RequestHash    string
+	CreatedAt      time.Time
 	// Recognized is the revenue recognized so far (all methods); the list
 	// shows it with the remaining amount (§5.29.14 revenue contracts inquiry).
 	Recognized  decimal.Decimal
@@ -99,12 +102,23 @@ type Schedule struct {
 	RecognizedOn *time.Time
 }
 
-// ContractFilter narrows ListContracts; empty fields do not filter.
+// ContractFilter narrows ListContracts; empty fields do not filter. Method
+// keeps contracts with at least one obligation of that recognition method.
+// After is the id of the last contract of the previous page (keyset cursor).
 type ContractFilter struct {
 	LegalEntityID string
 	CustomerID    string
 	Status        string
+	Method        string
+	After         string
 	Limit         int
+}
+
+// ContractPage is one page of contract headers; NextAfter is the id to pass as
+// After for the next page, empty on the last page.
+type ContractPage struct {
+	Items     []Contract
+	NextAfter string
 }
 
 // Run is one recognition run: one per legal entity and period end.
@@ -153,12 +167,15 @@ func (s *Postgres) CreateContract(ctx context.Context, c Contract) (Contract, er
 		c.Status = domain.ContractComplete
 	}
 	c.Version = 1
+	if c.RatableBasis == "" {
+		c.RatableBasis = domain.BasisDaily
+	}
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `insert into revenue_contract (tenant_id, id, legal_entity_id, order_id, customer_id, currency,
-			transaction_price, residual_rule, contract_date, status, version, idempotency_key, request_hash)
-			values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+		if err := tx.QueryRow(ctx, `insert into revenue_contract (tenant_id, id, legal_entity_id, order_id, customer_id, currency,
+			transaction_price, residual_rule, ratable_basis, contract_date, status, version, idempotency_key, request_hash)
+			values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning created_at`,
 			p.TenantID, c.ID, c.LegalEntityID, c.OrderID, c.CustomerID, c.Currency, c.TransactionPrice.String(), c.ResidualRule,
-			c.ContractDate.Format(dateLayout), c.Status, c.Version, c.IdempotencyKey, c.RequestHash); err != nil {
+			c.RatableBasis, c.ContractDate.Format(dateLayout), c.Status, c.Version, c.IdempotencyKey, c.RequestHash).Scan(&c.CreatedAt); err != nil {
 			return writeErr(err)
 		}
 		for _, o := range c.Obligations {
@@ -204,9 +221,14 @@ func (s *Postgres) GetContract(ctx context.Context, id string) (Contract, error)
 	return c, err
 }
 
-// ListContracts returns contract headers (without obligations) with the revenue
-// recognized so far, newest first.
-func (s *Postgres) ListContracts(ctx context.Context, f ContractFilter) ([]Contract, error) {
+// ListContracts returns one page of contract headers (without obligations) with
+// the revenue recognized so far, newest first. The page is keyed on (created_at,
+// id) of the After contract, so rows created while the caller pages are neither
+// repeated nor skipped; an After the caller cannot see yields an empty page.
+func (s *Postgres) ListContracts(ctx context.Context, f ContractFilter) (ContractPage, error) {
+	if f.Limit < 1 {
+		return ContractPage{}, errors.New("store: list limit must be at least 1")
+	}
 	var out []Contract
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select `+contractColumns+`,
@@ -215,7 +237,10 @@ func (s *Postgres) ListContracts(ctx context.Context, f ContractFilter) ([]Contr
 			    where o.tenant_id = c.tenant_id and o.contract_id = c.id and s.status = 'RECOGNIZED')
 			from revenue_contract c
 			where ($1 = '' or c.legal_entity_id::text = $1) and ($2 = '' or c.customer_id::text = $2) and ($3 = '' or c.status = $3)
-			order by c.created_at desc, c.id desc limit $4`, f.LegalEntityID, f.CustomerID, f.Status, f.Limit)
+			  and ($5 = '' or exists (select 1 from performance_obligation o
+			        where o.tenant_id = c.tenant_id and o.contract_id = c.id and o.method = $5))
+			  and ($6 = '' or (c.created_at, c.id) < (select a.created_at, a.id from revenue_contract a where a.id = nullif($6, '')::uuid))
+			order by c.created_at desc, c.id desc limit $4`, f.LegalEntityID, f.CustomerID, f.Status, f.Limit+1, f.Method, f.After)
 		if err != nil {
 			return err
 		}
@@ -236,7 +261,15 @@ func (s *Postgres) ListContracts(ctx context.Context, f ContractFilter) ([]Contr
 		}
 		return rows.Err()
 	})
-	return out, err
+	if err != nil {
+		return ContractPage{}, err
+	}
+	page := ContractPage{Items: out}
+	if len(out) > f.Limit {
+		page.Items = out[:f.Limit]
+		page.NextAfter = page.Items[f.Limit-1].ID
+	}
+	return page, nil
 }
 
 // SatisfyMilestone recognizes the single schedule line of a MILESTONE obligation
@@ -406,40 +439,77 @@ func (s *Postgres) ListRuns(ctx context.Context, legalEntityID string, limit int
 func (s *Postgres) RollForward(ctx context.Context, legalEntityID, currency string, start, end time.Time) (domain.RollForward, error) {
 	var out domain.RollForward
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		from, to := start.Format(dateLayout), end.Format(dateLayout)
-		var raw [4]string
-		if err := tx.QueryRow(ctx, rollForwardAdditions, legalEntityID, currency, from, to, domain.DeferredMethods()).Scan(&raw[0], &raw[1]); err != nil {
-			return err
-		}
-		if err := tx.QueryRow(ctx, rollForwardRecognized, legalEntityID, currency, from, to, domain.DeferredMethods()).Scan(&raw[2], &raw[3]); err != nil {
-			return err
-		}
-		var v [4]decimal.Decimal
-		for i, r := range raw {
-			d, err := decimal.NewFromString(r)
-			if err != nil {
-				return err
-			}
-			v[i] = d
-		}
-		out = domain.NewRollForward(v[0].Sub(v[2]), v[1], v[3])
-		return nil
+		var err error
+		out, err = rollForward(ctx, tx, legalEntityID, "", currency, start, end)
+		return err
 	})
 	return out, err
+}
+
+// ContractRollForward is the roll-forward of one contract for the window
+// (FR-29.9 "per period and contract", the drill-down of the entity
+// roll-forward). It is stated in the contract's currency, returned with it; the
+// contract's lines for the window are its schedule by period.
+func (s *Postgres) ContractRollForward(ctx context.Context, contractID string, start, end time.Time) (ContractRoll, error) {
+	var out ContractRoll
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `select legal_entity_id::text, currency::text from revenue_contract where id = $1::uuid`, contractID).
+			Scan(&out.LegalEntityID, &out.Currency)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return notFound("contract")
+		}
+		if err != nil {
+			return err
+		}
+		out.RollForward, err = rollForward(ctx, tx, out.LegalEntityID, contractID, out.Currency, start, end)
+		return err
+	})
+	return out, err
+}
+
+// ContractRoll is one contract's roll-forward with the entity and currency it is stated in.
+type ContractRoll struct {
+	LegalEntityID string
+	Currency      string
+	domain.RollForward
+}
+
+// rollForward sums the deferred obligations of the entity's contracts in the
+// currency, or of the one contract when contractID is set.
+func rollForward(ctx context.Context, tx pgx.Tx, legalEntityID, contractID, currency string, start, end time.Time) (domain.RollForward, error) {
+	from, to := start.Format(dateLayout), end.Format(dateLayout)
+	var raw [4]string
+	if err := tx.QueryRow(ctx, rollForwardAdditions, legalEntityID, currency, from, to, domain.DeferredMethods(), contractID).Scan(&raw[0], &raw[1]); err != nil {
+		return domain.RollForward{}, err
+	}
+	if err := tx.QueryRow(ctx, rollForwardRecognized, legalEntityID, currency, from, to, domain.DeferredMethods(), contractID).Scan(&raw[2], &raw[3]); err != nil {
+		return domain.RollForward{}, err
+	}
+	var v [4]decimal.Decimal
+	for i, r := range raw {
+		d, err := decimal.NewFromString(r)
+		if err != nil {
+			return domain.RollForward{}, err
+		}
+		v[i] = d
+	}
+	return domain.NewRollForward(v[0].Sub(v[2]), v[1], v[3]), nil
 }
 
 const rollForwardAdditions = `select coalesce(sum(o.allocated_amount) filter (where c.contract_date < $3::date), 0)::text,
        coalesce(sum(o.allocated_amount) filter (where c.contract_date between $3::date and $4::date), 0)::text
 from performance_obligation o
 join revenue_contract c on c.tenant_id = o.tenant_id and c.id = o.contract_id
-where c.legal_entity_id = $1::uuid and c.currency = $2 and o.method = any($5::text[])`
+where c.legal_entity_id = $1::uuid and c.currency = $2 and o.method = any($5::text[])
+  and ($6 = '' or c.id = nullif($6, '')::uuid)`
 
 const rollForwardRecognized = `select coalesce(sum(s.amount) filter (where s.recognized_on < $3::date), 0)::text,
        coalesce(sum(s.amount) filter (where s.recognized_on between $3::date and $4::date), 0)::text
 from revenue_schedule s
 join performance_obligation o on o.tenant_id = s.tenant_id and o.id = s.obligation_id
 join revenue_contract c on c.tenant_id = o.tenant_id and c.id = o.contract_id
-where c.legal_entity_id = $1::uuid and c.currency = $2 and o.method = any($5::text[]) and s.status = 'RECOGNIZED'`
+where c.legal_entity_id = $1::uuid and c.currency = $2 and o.method = any($5::text[]) and s.status = 'RECOGNIZED'
+  and ($6 = '' or c.id = nullif($6, '')::uuid)`
 
 type recognizedLine struct {
 	scheduleID   string
@@ -508,11 +578,12 @@ func touchContracts(ctx context.Context, tx pgx.Tx, contractIDs []string) (map[s
 }
 
 const contractColumns = `c.id::text, c.legal_entity_id::text, c.order_id::text, c.customer_id::text, c.currency::text,
-  c.transaction_price::text, c.residual_rule, c.contract_date, c.status, c.version, c.idempotency_key, c.request_hash`
+  c.transaction_price::text, c.residual_rule, c.ratable_basis, c.contract_date, c.status, c.version, c.idempotency_key, c.request_hash,
+  c.created_at`
 
 func contractDest(c *Contract, price *string) []any {
-	return []any{&c.ID, &c.LegalEntityID, &c.OrderID, &c.CustomerID, &c.Currency, price, &c.ResidualRule, &c.ContractDate,
-		&c.Status, &c.Version, &c.IdempotencyKey, &c.RequestHash}
+	return []any{&c.ID, &c.LegalEntityID, &c.OrderID, &c.CustomerID, &c.Currency, price, &c.ResidualRule, &c.RatableBasis,
+		&c.ContractDate, &c.Status, &c.Version, &c.IdempotencyKey, &c.RequestHash, &c.CreatedAt}
 }
 
 func loadTree(ctx context.Context, tx pgx.Tx, where string, arg any) (Contract, error) {

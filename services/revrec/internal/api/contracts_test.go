@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -85,16 +87,49 @@ func (f *fakeStore) GetContract(_ context.Context, id string) (store.Contract, e
 	return c, nil
 }
 
-func (f *fakeStore) ListContracts(_ context.Context, filter store.ContractFilter) ([]store.Contract, error) {
-	var out []store.Contract
+// ListContracts filters like the store and pages newest first; contract ids are
+// UUIDv7, so descending id order stands in for (created_at, id).
+func (f *fakeStore) ListContracts(_ context.Context, filter store.ContractFilter) (store.ContractPage, error) {
+	var all []store.Contract
 	for _, c := range f.contracts {
-		if filter.CustomerID == "" || filter.CustomerID == c.CustomerID {
-			c.Obligations = nil
-			c.Recognized = decimal.RequireFromString("7200")
-			out = append(out, c)
+		if filter.CustomerID != "" && filter.CustomerID != c.CustomerID {
+			continue
+		}
+		if filter.Method != "" && !hasMethod(c, filter.Method) {
+			continue
+		}
+		if filter.After != "" && c.ID >= filter.After {
+			continue
+		}
+		c.Obligations = nil
+		c.Recognized = decimal.RequireFromString("7200")
+		all = append(all, c)
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].ID > all[j].ID })
+	page := store.ContractPage{Items: all}
+	if len(all) > filter.Limit {
+		page.Items = all[:filter.Limit]
+		page.NextAfter = page.Items[filter.Limit-1].ID
+	}
+	return page, nil
+}
+
+func hasMethod(c store.Contract, method string) bool {
+	for _, o := range c.Obligations {
+		if o.Method == method {
+			return true
 		}
 	}
-	return out, nil
+	return false
+}
+
+func (f *fakeStore) ContractRollForward(_ context.Context, contractID string, start, end time.Time) (store.ContractRoll, error) {
+	c, ok := f.contracts[contractID]
+	if !ok {
+		return store.ContractRoll{}, httpx.NewProblem(http.StatusNotFound, store.CodeNotFound, "contract not found")
+	}
+	rf, _ := f.RollForward(context.Background(), c.LegalEntityID, c.Currency, start, end)
+	return store.ContractRoll{LegalEntityID: c.LegalEntityID, Currency: c.Currency, RollForward: rf}, nil
 }
 
 func (f *fakeStore) SatisfyMilestone(_ context.Context, obligationID string, on time.Time, expected int) (store.Satisfaction, error) {
@@ -532,5 +567,132 @@ func TestReadyz_ReflectsDatabase(t *testing.T) {
 	newHandler(downStore{newFakeStore()}).ServeHTTP(down, httptest.NewRequest(http.MethodGet, "/readyz", nil))
 	if up.Code != http.StatusOK || down.Code != http.StatusServiceUnavailable {
 		t.Errorf("readyz up %d down %d, want 200 and 503", up.Code, down.Code)
+	}
+}
+
+// TestListContracts_PagesAndFiltersByMethod pages three contracts one at a
+// time through nextCursor (newest first, none repeated), filters by obligation
+// method (§5.29.14) and refuses a malformed cursor or method.
+func TestListContracts_PagesAndFiltersByMethod(t *testing.T) {
+	h := newHandler(newFakeStore())
+	var created []string
+	for i, body := range []string{bundleContract, bundleContract, pointInTimeOnly} {
+		rec := postContract(t, h, body, fmt.Sprintf("list-key-%d", i))
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("create %d: %d %s", i, rec.Code, rec.Body)
+		}
+		created = append(created, decodeContract(t, rec).ID)
+	}
+	type page struct {
+		Items      []contractSummaryOut `json:"items"`
+		NextCursor string               `json:"nextCursor"`
+	}
+	get := func(path string) page {
+		t.Helper()
+		rec := call(t, h, http.MethodGet, path, "", nil)
+		var p page
+		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &p) != nil {
+			t.Fatalf("%s: %d %s", path, rec.Code, rec.Body)
+		}
+		return p
+	}
+	var seen []string
+	cursor := ""
+	for i := 0; i < 3; i++ {
+		path := "/v1/revrec/contracts?limit=1"
+		if cursor != "" {
+			path += "&cursor=" + cursor
+		}
+		p := get(path)
+		if len(p.Items) != 1 {
+			t.Fatalf("page %d has %d items, want 1", i, len(p.Items))
+		}
+		seen = append(seen, p.Items[0].ID)
+		cursor = p.NextCursor
+		if (i < 2) != (cursor != "") {
+			t.Fatalf("page %d nextCursor %q: want one on every page but the last", i, cursor)
+		}
+	}
+	want := append([]string(nil), created...)
+	sort.Sort(sort.Reverse(sort.StringSlice(want)))
+	if strings.Join(seen, ",") != strings.Join(want, ",") {
+		t.Errorf("paged %v, want every contract once, newest first %v", seen, want)
+	}
+
+	if p := get("/v1/revrec/contracts?method=RATABLE"); len(p.Items) != 2 || p.NextCursor != "" {
+		t.Errorf("RATABLE filter: %d items cursor %q, want the two bundles and no cursor", len(p.Items), p.NextCursor)
+	}
+	if p := get("/v1/revrec/contracts?method=POINT_IN_TIME"); len(p.Items) != 3 {
+		t.Errorf("POINT_IN_TIME filter: %d items, want 3", len(p.Items))
+	}
+
+	bad := call(t, h, http.MethodGet, "/v1/revrec/contracts?cursor=bm9wZQ&method=BARTER", "", nil)
+	if p := decodeProblem(t, bad); bad.Code != http.StatusBadRequest || p.Errors["cursor"] == "" || p.Errors["method"] == "" {
+		t.Errorf("bad cursor and method %d %+v, want 400 with both field errors", bad.Code, p.Errors)
+	}
+}
+
+// pointInTimeOnly is a single goods obligation recognized at transfer.
+const pointInTimeOnly = `{
+  "legalEntityId": "` + entityID + `",
+  "orderId": "018f0000-0000-7000-8000-0000000000f2",
+  "customerId": "` + customerID + `",
+  "currency": "USD",
+  "transactionPrice": "500.00",
+  "contractDate": "2027-03-10",
+  "obligations": [
+    {"productId": "018f0000-0000-7000-8000-0000000000a1", "ssp": "500", "sspSource": "LIST", "method": "POINT_IN_TIME", "satisfiedOn": "2027-03-10"}
+  ]
+}`
+
+// TestCreateContract_MonthlyBasis plans the BR-29.1 support (2,250.00 over
+// 2027-03-10 .. 2028-03-09) on the MONTHLY basis: 13 equal shares of 173.08
+// with the residual 173.04 last, where the DAILY default starts with 133.06.
+// The basis is stored and returned; an unknown basis is a field error.
+func TestCreateContract_MonthlyBasis(t *testing.T) {
+	h := newHandler(newFakeStore())
+	monthly := strings.Replace(bundleContract, `"contractDate"`, `"ratableBasis": "MONTHLY", "contractDate"`, 1)
+	rec := postContract(t, h, monthly, "monthly-key")
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	c := decodeContract(t, rec)
+	if c.RatableBasis != domain.BasisMonthly {
+		t.Errorf("ratableBasis %q, want MONTHLY", c.RatableBasis)
+	}
+	sup := c.Obligations[2].Schedule
+	if len(sup) != 13 || sup[0].Amount != "173.08" || sup[11].Amount != "173.08" || sup[12].Amount != "173.04" {
+		t.Errorf("monthly support schedule %+v, want 12 x 173.08 and 173.04", sup)
+	}
+	if d := decodeContract(t, postContract(t, h, bundleContract, "daily-key")); d.RatableBasis != domain.BasisDaily || d.Obligations[2].Schedule[0].Amount != "133.06" {
+		t.Errorf("default basis %q first line %s, want DAILY and 133.06", d.RatableBasis, d.Obligations[2].Schedule[0].Amount)
+	}
+	bad := postContract(t, h, strings.Replace(bundleContract, `"contractDate"`, `"ratableBasis": "WEEKLY", "contractDate"`, 1), "weekly-key")
+	if p := decodeProblem(t, bad); bad.Code != http.StatusBadRequest || p.Errors["ratableBasis"] == "" {
+		t.Errorf("unknown basis %d %+v, want 400 with a ratableBasis error", bad.Code, p.Errors)
+	}
+}
+
+// TestRollForward_ContractDrillDown reports one contract's movement in its own
+// currency (FR-29.9 per contract), answers 404 for an unknown contract and
+// refuses mixing contractId with the entity parameters.
+func TestRollForward_ContractDrillDown(t *testing.T) {
+	h := newHandler(newFakeStore())
+	created := decodeContract(t, postContract(t, h, bundleContract, idemKey))
+	rec := call(t, h, http.MethodGet, "/v1/revrec/roll-forward?contractId="+created.ID+"&period=2027-03", "", nil)
+	var rf rollForwardOut
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &rf) != nil {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	if rf.ContractID != created.ID || rf.LegalEntityID != entityID || rf.Currency != "USD" || rf.Additions != "3600.00" || rf.Closing != "2116.94" {
+		t.Errorf("contract roll-forward %+v", rf)
+	}
+	missing := call(t, h, http.MethodGet, "/v1/revrec/roll-forward?contractId="+ids.New()+"&period=2027-03", "", nil)
+	if p := decodeProblem(t, missing); missing.Code != http.StatusNotFound || p.Code != store.CodeNotFound {
+		t.Errorf("unknown contract %d %s, want 404 %s", missing.Code, p.Code, store.CodeNotFound)
+	}
+	mixed := call(t, h, http.MethodGet, "/v1/revrec/roll-forward?contractId="+created.ID+"&currency=EUR&period=2027-03", "", nil)
+	if p := decodeProblem(t, mixed); mixed.Code != http.StatusBadRequest || p.Errors["contractId"] == "" {
+		t.Errorf("contractId with currency %d %+v, want 400 with a contractId error", mixed.Code, p.Errors)
 	}
 }

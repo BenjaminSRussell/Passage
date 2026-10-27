@@ -4,13 +4,15 @@ import { Alert, Button, buttonClassName, Card, DataTable, FormField, Input, Page
 import {
   describeProblem,
   getContract,
+  getContractRollForward,
   satisfyMilestone,
   type ContractObligation,
   type Problem,
   type RevenueContract,
   type ScheduleLine,
 } from "./api/client";
-import { CONTRACT_STATUS_LABELS, DAY, METHOD_LABELS, SCHEDULE_STATUS_LABELS, SSP_SOURCE_LABELS, today } from "./format";
+import { RollForwardTiles } from "./DeferredRevenuePage";
+import { BASIS_LABELS, CONTRACT_STATUS_LABELS, DAY, METHOD_LABELS, PERIOD, SCHEDULE_STATUS_LABELS, SSP_SOURCE_LABELS, today } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -65,6 +67,15 @@ export function RevenueContractDetailPage() {
   const [busy, setBusy] = useState("");
   const [failure, setFailure] = useState<Problem | null>(null);
   const [done, setDone] = useState("");
+  // The contract's roll-forward for one month (FR-29.9 drill-down); it opens on the contract's month.
+  const [month, setMonth] = useState<string | null>(null);
+  const [monthError, setMonthError] = useState("");
+  const [shownMonth, setShownMonth] = useState("");
+  const period = shownMonth || (state.data?.contractDate.slice(0, 7) ?? "");
+  const rollForward = useLoad(
+    (signal) => (period ? getContractRollForward(id, period, signal) : Promise.resolve(null)),
+    `${id}|${period}|${state.data?.version ?? 0}`,
+  );
 
   if (state.error) {
     return (
@@ -110,6 +121,17 @@ export function RevenueContractDetailPage() {
     } finally {
       setBusy("");
     }
+  }
+
+  function showMonth(event: FormEvent) {
+    event.preventDefault();
+    const m = (month ?? period).trim();
+    if (!PERIOD.test(m)) {
+      setMonthError("Enter the month as YYYY-MM, for example 2027-03.");
+      return;
+    }
+    setMonthError("");
+    setShownMonth(m);
   }
 
   const currency = contract.currency;
@@ -173,6 +195,7 @@ export function RevenueContractDetailPage() {
             {contract.legalEntityId}
           </Detail>
           <Detail term="Rounding residual to">{`${contract.residualRule.toLowerCase()} obligation`}</Detail>
+          <Detail term="Ratable basis">{BASIS_LABELS[contract.ratableBasis] ?? contract.ratableBasis}</Detail>
         </dl>
       </Card>
       <Card title="Obligations">
@@ -205,6 +228,31 @@ export function RevenueContractDetailPage() {
           </form>
         </Card>
       ))}
+      <Card title="Deferred revenue of this contract">
+        <div className={styles.stack}>
+          <form className={styles.toolbar} onSubmit={showMonth} noValidate>
+            <FormField id="rc-rf-month" label="Month" hint="YYYY-MM" error={monthError || undefined}>
+              {(c) => <Input {...c} className={styles.mono} value={month ?? period} onChange={(e) => setMonth(e.target.value)} invalid={Boolean(monthError)} />}
+            </FormField>
+            <Button type="submit" variant="secondary">
+              Show month
+            </Button>
+          </form>
+          {rollForward.error ? (
+            <Alert tone="danger" title="Could not load the contract's roll-forward" live="alert" action={<Button size="sm" onClick={rollForward.reload}>Try again</Button>}>
+              {rollForward.error.message} ({rollForward.error.code})
+            </Alert>
+          ) : rollForward.data && !rollForward.loading ? (
+            <RollForwardTiles rf={rollForward.data} />
+          ) : (
+            <div aria-busy="true">
+              <span className="visually-hidden">Loading the contract's roll-forward…</span>
+              <Skeleton height="tile" />
+            </div>
+          )}
+          <p className={styles.note}>Only ratable and milestone obligations are deferred. The schedules below show each line by date.</p>
+        </div>
+      </Card>
       {contract.obligations
         .filter((o) => o.schedule.length > 0)
         .map((o) => (

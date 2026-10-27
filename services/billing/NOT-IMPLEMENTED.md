@@ -1,4 +1,4 @@
-# NOT-IMPLEMENTED — billing (PSG-29, wave 29, slices 1–3)
+# NOT-IMPLEMENTED — billing (PSG-29, wave 29, slices 1–4)
 
 Slice 1 builds free-text invoice proposal, posting, read and list, the totals and
 tax-recheck rules, the schema and event contract, and the billing web screens
@@ -10,6 +10,9 @@ invoices (whole or by line quantity, BIL-0005 remaining-amount check at proposal
 again under the original's lock at post, gap-free `CN-` numbers, `creditnote.posted`)
 and installment plans on free-text proposals (BR-29.11 split, stored, shown and
 carried on `invoice.posted`), with the credit-note and installment screens.
+Slice 4 adds cursor pagination to the invoices list (`nextCursor` / `cursor`, keyset
+on creation time and id) with "Load more" on the invoices and credit-notes screens;
+its revenue work (ratable basis, per-contract roll-forward) is in `services/revrec`.
 Everything below is outstanding. Status is `later slice of PSG-29` (same service, later build) or
 `handoff` (needs another owner, outside this wave's paths).
 
@@ -58,4 +61,3 @@ Everything below is outstanding. Status is `later slice of PSG-29` (same service
 | 38 | §5.29.4 partitioning of invoices by posting month | later slice of PSG-29 | Volumes of slice 1 do not need it; indexes on (invoice_account_id, status, due_date) and the newest-first list exist |
 | 39 | BR-29.9 fiscal year from the entity's fiscal calendar; numbering through the wave-5 sequence service | later slice of PSG-29 | The number series is per (entity, posting calendar year) in billing's own serialized `number_sequence_counter` row, drawn in the posting transaction; the org fiscal calendar (wave 6) and the numbering service are not read yet |
 | 40 | §5.29.6 Billing workspace tiles (ready to invoice, failed posts, deferred balance, subscriptions due), due list, multi-select post, tax and journal preview before post, print action | later slice of PSG-29 | Slices 1 and 3 ship the invoices and credit-notes lists, free-text form with installment plan, invoice detail with post and credit actions, the credit-note form and the revenue allocation preview; the rest needs items 1, 5, 6 and 15 |
-| 41 | Invoices list cursor pagination | later slice of PSG-29 | `GET /invoices` returns the newest `limit` (≤ 200) headers with status and customer filters; no cursor yet |

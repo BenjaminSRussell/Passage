@@ -65,6 +65,36 @@ describe("Invoices", () => {
     expect(server.calls.at(-1)?.url.searchParams.get("status")).toBe("POSTED");
   });
 
+  it("loads the next page through the service cursor and stops on the last page", async () => {
+    const second = { ...posted, id: "inv-2", number: "INV-2027-0000002" };
+    server.handler = (url) => {
+      if (url.pathname !== "/api/v1/billing/invoices") return undefined;
+      return url.searchParams.get("cursor") === "c1" ? json(200, { items: [second] }) : json(200, { items: [proposal], nextCursor: "c1" });
+    };
+    const { container } = renderAt("/billing");
+    const table = await screen.findByRole("table", { name: "Invoices" });
+    await waitFor(() => expect(table).toHaveTextContent("Proposal"));
+    expect(pageViolations(container)).toEqual([]);
+    fireEvent.click(await screen.findByRole("button", { name: "Load more invoices" }));
+    await waitFor(() => expect(table).toHaveTextContent("INV-2027-0000002"));
+    expect(table).toHaveTextContent("Proposal");
+    expect(server.calls.at(-1)?.url.searchParams.get("cursor")).toBe("c1");
+    expect(screen.queryByRole("button", { name: "Load more invoices" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the rows and offers a retry when the next page fails", async () => {
+    server.handler = (url) =>
+      url.searchParams.get("cursor") ? json(503, { code: "HTTP-503", detail: "billing unavailable" }) : json(200, { items: [proposal], nextCursor: "c1" });
+    renderAt("/billing");
+    fireEvent.click(await screen.findByRole("button", { name: "Load more invoices" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("billing unavailable (HTTP-503)");
+    expect(screen.getByRole("table", { name: "Invoices" })).toHaveTextContent("Proposal");
+    server.handler = () => json(200, { items: [{ ...posted, id: "inv-3" }] });
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(screen.getByRole("table", { name: "Invoices" })).toHaveTextContent("INV-2027-0000001"));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("shows the error state with a retry", async () => {
     server.handler = () => json(403, { code: "AUTH-0003", detail: "missing duty billing.invoice.view" });
     renderAt("/billing");
@@ -217,6 +247,7 @@ describe("Revenue allocation", () => {
     currency: "USD",
     transactionPrice: "10800.00",
     residualRule: "LARGEST",
+    ratableBasis: "DAILY",
     obligations: [
       { id: "hardware", ssp: "8000.00", sspSource: "EXPLICIT", method: "POINT_IN_TIME", allocated: "7200.00" },
       { id: "installation", ssp: "1500.00", sspSource: "EXPLICIT", method: "MILESTONE", allocated: "1350.00" },
@@ -265,9 +296,31 @@ describe("Revenue allocation", () => {
       currency: "USD",
       transactionPrice: "10800.00",
       residualRule: "LARGEST",
+      ratableBasis: "DAILY",
       obligations: [{ id: "support", ssp: "2500", method: "RATABLE", termStart: "2027-03-10", termEnd: "2028-03-09" }],
     });
     expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("previews on the monthly basis when chosen", async () => {
+    const monthly: AllocationPreview = {
+      ...preview,
+      ratableBasis: "MONTHLY",
+      obligations: [{ ...preview.obligations[2], schedule: [{ start: "2027-03-10", end: "2027-03-31", amount: "173.08" }] }],
+    };
+    server.handler = () => json(200, monthly);
+    renderAt("/billing/revenue-allocation");
+    fill("Contract price", "2250");
+    fill("Name", "support");
+    fill("Standalone selling price", "2500");
+    fireEvent.change(screen.getByLabelText("Recognition"), { target: { value: "RATABLE" } });
+    fill("Term start", "2027-03-10");
+    fill("Term end", "2028-03-09");
+    fireEvent.change(screen.getByLabelText("Ratable basis"), { target: { value: "MONTHLY" } });
+    fireEvent.click(screen.getByRole("button", { name: "Allocate" }));
+    expect(await screen.findByRole("table", { name: "Schedule for support" })).toHaveTextContent("173.08");
+    expect(screen.getByText(/ratable schedules use the monthly basis/)).toBeInTheDocument();
+    expect(server.calls[0].body).toMatchObject({ ratableBasis: "MONTHLY" });
   });
 
   it("shows a refused preview", async () => {

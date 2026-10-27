@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -120,16 +121,25 @@ func (f *fakeStore) PostCreditNote(_ context.Context, id string, postingDate tim
 	return cn, nil
 }
 
-func (f *fakeStore) ListInvoices(_ context.Context, filter store.ListFilter) ([]store.Invoice, error) {
+// ListInvoices filters like the store and pages newest first; invoice ids are
+// UUIDv7, so descending id order stands in for (created_at, id).
+func (f *fakeStore) ListInvoices(_ context.Context, filter store.ListFilter) (store.InvoicePage, error) {
 	f.lastFilter = filter
 	var out []store.Invoice
 	for _, inv := range f.invoices {
 		if (filter.Status == "" || inv.Status == filter.Status) && (filter.Type == "" || inv.Type == filter.Type) &&
-			(filter.OriginalInvoiceID == "" || inv.OriginalInvoiceID == filter.OriginalInvoiceID) {
+			(filter.OriginalInvoiceID == "" || inv.OriginalInvoiceID == filter.OriginalInvoiceID) &&
+			(filter.After == "" || inv.ID < filter.After) {
 			out = append(out, inv)
 		}
 	}
-	return out, nil
+	sort.Slice(out, func(i, j int) bool { return out[i].ID > out[j].ID })
+	page := store.InvoicePage{Items: out}
+	if len(out) > filter.Limit {
+		page.Items = out[:filter.Limit]
+		page.NextAfter = page.Items[filter.Limit-1].ID
+	}
+	return page, nil
 }
 
 func (f *fakeStore) PostProposal(_ context.Context, id string, postingDate time.Time, expectedVersion int) (store.Invoice, error) {
@@ -470,11 +480,47 @@ func TestListInvoices(t *testing.T) {
 	if empty.Code != http.StatusOK || !strings.Contains(empty.Body.String(), `"items":[]`) {
 		t.Errorf("empty list must be an empty array: %s", empty.Body)
 	}
-	bad := do(h, http.MethodGet, "/v1/billing/invoices?status=OPEN&limit=0&customerId=x", "", "")
+	bad := do(h, http.MethodGet, "/v1/billing/invoices?status=OPEN&limit=0&customerId=x&cursor=bm9wZQ", "", "")
 	var p httpx.Problem
 	decode(t, bad, &p)
-	if bad.Code != http.StatusBadRequest || p.Errors["status"] == "" || p.Errors["limit"] == "" || p.Errors["customerId"] == "" {
+	if bad.Code != http.StatusBadRequest || p.Errors["status"] == "" || p.Errors["limit"] == "" || p.Errors["customerId"] == "" || p.Errors["cursor"] == "" {
 		t.Errorf("bad filter: status %d errors %v", bad.Code, p.Errors)
+	}
+}
+
+// TestListInvoices_CursorPages walks three proposals one per page through
+// nextCursor: newest first, each once, and no cursor on the last page.
+func TestListInvoices_CursorPages(t *testing.T) {
+	s := newFakeStore()
+	h := setup(t, s, &fakeTax{perLine: "19.00"})
+	var want []string
+	for i := 0; i < 3; i++ {
+		var created invoiceDTO
+		decode(t, do(h, http.MethodPost, "/v1/billing/free-text-invoices", fmt.Sprintf("page-key-%d", i), proposal("1", "100", "4900")), &created)
+		want = append(want, created.ID)
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(want)))
+	var seen []string
+	cursor := ""
+	for i := 0; i < 3; i++ {
+		path := "/v1/billing/invoices?limit=1"
+		if cursor != "" {
+			path += "&cursor=" + cursor
+		}
+		var page listDTO
+		rec := do(h, http.MethodGet, path, "", "")
+		decode(t, rec, &page)
+		if rec.Code != http.StatusOK || len(page.Items) != 1 {
+			t.Fatalf("page %d: status %d body %s", i, rec.Code, rec.Body)
+		}
+		seen = append(seen, page.Items[0].ID)
+		cursor = page.NextCursor
+		if (i < 2) != (cursor != "") {
+			t.Fatalf("page %d nextCursor %q: want one on every page but the last", i, cursor)
+		}
+	}
+	if strings.Join(seen, ",") != strings.Join(want, ",") {
+		t.Errorf("paged %v, want %v", seen, want)
 	}
 }
 

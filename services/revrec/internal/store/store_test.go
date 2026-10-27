@@ -64,7 +64,7 @@ func bundleContract(t *testing.T, legalEntityID string) Contract {
 		if o.Method == domain.MethodRatable {
 			ob.TermStart, ob.TermEnd = &start, &end
 		}
-		lines, err := domain.ScheduleLines(o, "USD", ob.TermStart, ob.TermEnd, ob.SatisfiedOn)
+		lines, err := domain.ScheduleLines(o, "USD", domain.BasisDaily, ob.TermStart, ob.TermEnd, ob.SatisfiedOn)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -249,19 +249,34 @@ func TestContracts_CompleteListAndIsolation(t *testing.T) {
 		t.Errorf("bundle after the last run: status %s recognized %s err %v, want COMPLETE and 10800.00", closed.Status, closed.Recognized, err)
 	}
 
-	all, err := s.ListContracts(ctx, ContractFilter{Limit: 10})
-	if err != nil || len(all) != 2 || all[0].ID != done.ID {
-		t.Fatalf("list %+v err %v, want both contracts newest first", all, err)
+	page, err := s.ListContracts(ctx, ContractFilter{Limit: 10})
+	all := page.Items
+	if err != nil || len(all) != 2 || all[0].ID != done.ID || page.NextAfter != "" {
+		t.Fatalf("list %+v err %v, want both contracts newest first on one page", page, err)
 	}
-	if !all[1].Recognized.Equal(decimal.RequireFromString("10800")) || len(all[1].Obligations) != 0 {
-		t.Errorf("list row %+v, want recognized 10800 and no obligations loaded", all[1])
+	if !all[1].Recognized.Equal(decimal.RequireFromString("10800")) || len(all[1].Obligations) != 0 || all[1].RatableBasis != domain.BasisDaily {
+		t.Errorf("list row %+v, want recognized 10800, the DAILY basis and no obligations loaded", all[1])
+	}
+	// Keyset pages of one: the first ends at the newest contract, the second
+	// holds the older one and is the last.
+	first, err := s.ListContracts(ctx, ContractFilter{Limit: 1})
+	if err != nil || len(first.Items) != 1 || first.Items[0].ID != done.ID || first.NextAfter != done.ID {
+		t.Fatalf("first page %+v err %v, want the newest contract and a cursor", first, err)
+	}
+	second, err := s.ListContracts(ctx, ContractFilter{Limit: 1, After: first.NextAfter})
+	if err != nil || len(second.Items) != 1 || second.Items[0].ID != bundle.ID || second.NextAfter != "" {
+		t.Errorf("second page %+v err %v, want the bundle and no cursor", second, err)
+	}
+	ratable, err := s.ListContracts(ctx, ContractFilter{Method: domain.MethodRatable, Limit: 10})
+	if err != nil || len(ratable.Items) != 1 || ratable.Items[0].ID != bundle.ID {
+		t.Errorf("RATABLE method filter %+v err %v, want the bundle only", ratable, err)
 	}
 	byCustomer, err := s.ListContracts(ctx, ContractFilter{CustomerID: bundle.CustomerID, Limit: 10})
-	if err != nil || len(byCustomer) != 1 || byCustomer[0].ID != bundle.ID {
+	if err != nil || len(byCustomer.Items) != 1 || byCustomer.Items[0].ID != bundle.ID {
 		t.Errorf("customer filter %+v err %v", byCustomer, err)
 	}
 	open, err := s.ListContracts(ctx, ContractFilter{Status: domain.ContractOpen, Limit: 10})
-	if err != nil || len(open) != 0 {
+	if err != nil || len(open.Items) != 0 {
 		t.Errorf("open filter %+v err %v, want none", open, err)
 	}
 
@@ -269,8 +284,11 @@ func TestContracts_CompleteListAndIsolation(t *testing.T) {
 		t.Errorf("tenant 2 read tenant 1's contract: %v", err)
 	}
 	other := tenantCtx(1, ids.New())
-	if list, err := s.ListContracts(other, ContractFilter{Limit: 10}); err != nil || len(list) != 0 {
-		t.Errorf("another legal-entity scope listed %d contracts (err %v)", len(list), err)
+	if list, err := s.ListContracts(other, ContractFilter{Limit: 10}); err != nil || len(list.Items) != 0 {
+		t.Errorf("another legal-entity scope listed %d contracts (err %v)", len(list.Items), err)
+	}
+	if _, err := s.ContractRollForward(other, bundle.ID, day(2027, time.March, 1), day(2027, time.March, 31)); problemCode(err) != CodeNotFound {
+		t.Errorf("another legal-entity scope drilled into the contract: %v", err)
 	}
 	if _, err := s.SatisfyMilestone(other, bundle.Obligations[1].ID, day(2027, time.March, 25), 0); problemCode(err) != CodeNotFound {
 		t.Errorf("another legal-entity scope reached the obligation: %v", err)
@@ -293,5 +311,72 @@ func TestCreateContract_DuplicateKeyIs409(t *testing.T) {
 	var p *httpx.Problem
 	if !errors.As(err, &p) || p.Status != http.StatusConflict || p.Code != CodeKeyInFlight {
 		t.Errorf("duplicate key: %v, want 409 %s", err, CodeKeyInFlight)
+	}
+}
+
+// TestContractRollForward_DrillDownSumsToEntity runs the AC-29.4 month for two
+// contracts of one entity: each contract's roll-forward is its own movement in
+// its currency, and the two add up to the entity roll-forward (FR-29.9).
+func TestContractRollForward_DrillDownSumsToEntity(t *testing.T) {
+	s, _ := testStore(t)
+	ctx := tenantCtx(1, "")
+	le := ids.New()
+	a, err := s.CreateContract(ctx, bundleContract(t, le))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := s.CreateContract(ctx, bundleContract(t, le))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SatisfyMilestone(ctx, a.Obligations[1].ID, day(2027, time.March, 25), 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.RunRecognition(ctx, le, day(2027, time.March, 31)); err != nil {
+		t.Fatal(err)
+	}
+	from, to := day(2027, time.March, 1), day(2027, time.March, 31)
+	ra, err := s.ContractRollForward(ctx, a.ID, from, to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ra.Currency != "USD" || ra.LegalEntityID != le || ra.Additions.StringFixed(2) != "3600.00" || ra.Recognized.StringFixed(2) != "1483.06" || ra.Closing.StringFixed(2) != "2116.94" {
+		t.Errorf("contract A %+v, want USD additions 3600.00 recognized 1483.06 closing 2116.94 (AC-29.4)", ra)
+	}
+	rb, err := s.ContractRollForward(ctx, b.ID, from, to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rb.Recognized.StringFixed(2) != "133.06" || rb.Closing.StringFixed(2) != "3466.94" {
+		t.Errorf("contract B %+v, want recognized 133.06 (support only) and closing 3466.94", rb)
+	}
+	entity, err := s.RollForward(ctx, le, "USD", from, to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !entity.Closing.Equal(ra.Closing.Add(rb.Closing)) || !entity.Recognized.Equal(ra.Recognized.Add(rb.Recognized)) {
+		t.Errorf("entity %+v is not the sum of contracts %+v and %+v", entity, ra.RollForward, rb.RollForward)
+	}
+	april, err := s.ContractRollForward(ctx, a.ID, day(2027, time.April, 1), day(2027, time.April, 30))
+	if err != nil || !april.Opening.Equal(ra.Closing) || !april.Additions.IsZero() {
+		t.Errorf("April opening %+v err %v, want March closing %s and no additions", april, err, ra.Closing)
+	}
+	if _, err := s.ContractRollForward(ctx, ids.New(), from, to); problemCode(err) != CodeNotFound {
+		t.Errorf("unknown contract: %v, want %s", err, CodeNotFound)
+	}
+}
+
+// TestCreateContract_StoresMonthlyBasis keeps the basis that planned the lines.
+func TestCreateContract_StoresMonthlyBasis(t *testing.T) {
+	s, _ := testStore(t)
+	ctx := tenantCtx(1, "")
+	c := bundleContract(t, ids.New())
+	c.RatableBasis = domain.BasisMonthly
+	if _, err := s.CreateContract(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetContract(ctx, c.ID)
+	if err != nil || got.RatableBasis != domain.BasisMonthly || got.CreatedAt.IsZero() {
+		t.Errorf("stored basis %q created %v err %v, want MONTHLY and a creation time", got.RatableBasis, got.CreatedAt, err)
 	}
 }

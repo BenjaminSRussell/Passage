@@ -107,6 +107,9 @@ export const METHODS = ["POINT_IN_TIME", "RATABLE", "MILESTONE", "USAGE"] as con
 export type RecognitionMethod = (typeof METHODS)[number];
 export const RESIDUAL_RULES = ["LARGEST", "FIRST", "LAST"] as const;
 export type ResidualRule = (typeof RESIDUAL_RULES)[number];
+/** How a RATABLE obligation spreads over its term (§5.29.13 ratable_basis). */
+export const RATABLE_BASES = ["DAILY", "MONTHLY"] as const;
+export type RatableBasis = (typeof RATABLE_BASES)[number];
 
 export interface ObligationInput {
   id: string;
@@ -121,6 +124,7 @@ export interface AllocationPreviewInput {
   currency: string;
   transactionPrice: string;
   residualRule: ResidualRule;
+  ratableBasis: RatableBasis;
   obligations: ObligationInput[];
 }
 
@@ -143,6 +147,7 @@ export interface AllocationPreview {
   currency: string;
   transactionPrice: string;
   residualRule: ResidualRule;
+  ratableBasis: RatableBasis;
   obligations: AllocatedObligation[];
 }
 
@@ -206,17 +211,24 @@ export interface InvoiceFilter {
   customerId?: string;
   originalInvoiceId?: string;
   limit?: number;
+  /** The nextCursor of the previous page. */
+  cursor?: string;
 }
 
-/** GET /invoices: headers only, newest first, at most `limit` (default 100). */
+/** One page of a list; nextCursor is absent on the last page. */
+export interface Page<T> {
+  items: T[];
+  nextCursor?: string;
+}
+
+/** GET /invoices: one page of headers, newest first, at most `limit` (default 100). */
+export function listInvoicePage(filter: InvoiceFilter = {}, signal?: AbortSignal): Promise<Page<InvoiceSummary>> {
+  return send<Page<InvoiceSummary>>(`${billingBase}/invoices${query({ ...filter })}`, {}, signal);
+}
+
+/** GET /invoices: the first page's headers only. */
 export async function listInvoices(filter: InvoiceFilter = {}, signal?: AbortSignal): Promise<InvoiceSummary[]> {
-  const q = new URLSearchParams();
-  for (const [name, value] of Object.entries(filter)) {
-    if (value !== undefined && value !== "") q.set(name, String(value));
-  }
-  const query = q.toString();
-  const page = await send<{ items: InvoiceSummary[] }>(`${billingBase}/invoices${query ? `?${query}` : ""}`, {}, signal);
-  return page.items;
+  return (await listInvoicePage(filter, signal)).items;
 }
 
 /** GET /invoices/{id}: the invoice with its lines. */
@@ -280,6 +292,7 @@ export interface RevenueContractSummary {
   recognized: string;
   remaining: string;
   residualRule: ResidualRule;
+  ratableBasis: RatableBasis;
   contractDate: string;
   status: ContractStatus;
   version: number;
@@ -331,6 +344,7 @@ export interface RevenueContractInput {
   currency: string;
   transactionPrice: string;
   residualRule: ResidualRule;
+  ratableBasis: RatableBasis;
   contractDate: string;
   obligations: ContractObligationInput[];
 }
@@ -354,6 +368,8 @@ export interface RecognitionRun {
 
 export interface RollForward {
   legalEntityId: string;
+  /** Present on the drill-down to one contract. */
+  contractId?: string;
   currency: string;
   period: string;
   start: string;
@@ -369,7 +385,11 @@ export interface ContractFilter {
   status?: ContractStatus | "";
   customerId?: string;
   legalEntityId?: string;
+  /** Contracts with at least one obligation of this method. */
+  method?: RecognitionMethod | "";
   limit?: number;
+  /** The nextCursor of the previous page. */
+  cursor?: string;
 }
 
 function query(params: Record<string, string | number | undefined>): string {
@@ -381,10 +401,9 @@ function query(params: Record<string, string | number | undefined>): string {
   return s ? `?${s}` : "";
 }
 
-/** GET /revrec/contracts: headers with recognized and remaining, newest first. */
-export async function listContracts(filter: ContractFilter = {}, signal?: AbortSignal): Promise<RevenueContractSummary[]> {
-  const page = await send<{ items: RevenueContractSummary[] }>(`${revrecBase}/contracts${query({ ...filter })}`, {}, signal);
-  return page.items;
+/** GET /revrec/contracts: one page of headers with recognized and remaining, newest first. */
+export function listContracts(filter: ContractFilter = {}, signal?: AbortSignal): Promise<Page<RevenueContractSummary>> {
+  return send<Page<RevenueContractSummary>>(`${revrecBase}/contracts${query({ ...filter })}`, {}, signal);
 }
 
 /** GET /revrec/contracts/{id}: obligations with their schedule lines. */
@@ -424,6 +443,11 @@ export async function listRuns(legalEntityId: string, signal?: AbortSignal): Pro
 /** GET /revrec/roll-forward: one entity, currency and month. */
 export function getRollForward(legalEntityId: string, currency: string, period: string, signal?: AbortSignal): Promise<RollForward> {
   return send<RollForward>(`${revrecBase}/roll-forward${query({ legalEntityId, currency, period })}`, {}, signal);
+}
+
+/** GET /revrec/roll-forward?contractId=: one contract's month, in the contract's currency (drill-down). */
+export function getContractRollForward(contractId: string, period: string, signal?: AbortSignal): Promise<RollForward> {
+  return send<RollForward>(`${revrecBase}/roll-forward${query({ contractId, period })}`, {}, signal);
 }
 
 /** The last day of a YYYY-MM month as YYYY-MM-DD. */

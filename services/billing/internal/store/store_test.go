@@ -154,19 +154,26 @@ func TestListInvoices_Filters(t *testing.T) {
 	if _, err := s.PostProposal(t1, a.ID, time.Date(2027, 3, 12, 0, 0, 0, 0, time.UTC), 0); err != nil {
 		t.Fatal(err)
 	}
-	all, err := s.ListInvoices(t1, ListFilter{Limit: 10})
-	if err != nil || len(all) != 2 || all[0].Lines != nil {
-		t.Fatalf("list all: %d rows, err %v (headers only, no lines)", len(all), err)
+	page, err := s.ListInvoices(t1, ListFilter{Limit: 10})
+	all := page.Items
+	if err != nil || len(all) != 2 || all[0].Lines != nil || page.NextAfter != "" {
+		t.Fatalf("list all: %d rows, next %q, err %v (headers only, no lines, one page)", len(all), page.NextAfter, err)
 	}
 	posted, err := s.ListInvoices(t1, ListFilter{Status: domain.StatusPosted, Limit: 10})
-	if err != nil || len(posted) != 1 || posted[0].ID != a.ID || posted[0].Number == "" {
+	if err != nil || len(posted.Items) != 1 || posted.Items[0].ID != a.ID || posted.Items[0].Number == "" {
 		t.Fatalf("list posted: %+v %v", posted, err)
 	}
-	if one, err := s.ListInvoices(t1, ListFilter{Limit: 1}); err != nil || len(one) != 1 {
-		t.Fatalf("limit 1: %d rows, err %v", len(one), err)
+	// Keyset pages of one walk both invoices newest first, each once.
+	one, err := s.ListInvoices(t1, ListFilter{Limit: 1})
+	if err != nil || len(one.Items) != 1 || one.Items[0].ID != all[0].ID || one.NextAfter != all[0].ID {
+		t.Fatalf("limit 1: %+v, err %v, want the newest invoice and a cursor", one, err)
 	}
-	if byCustomer, err := s.ListInvoices(t1, ListFilter{CustomerID: a.CustomerID, Limit: 10}); err != nil || len(byCustomer) != 1 {
-		t.Fatalf("by customer: %d rows, err %v", len(byCustomer), err)
+	two, err := s.ListInvoices(t1, ListFilter{Limit: 1, After: one.NextAfter})
+	if err != nil || len(two.Items) != 1 || two.Items[0].ID != all[1].ID || two.NextAfter != "" {
+		t.Fatalf("second page: %+v, err %v, want the older invoice and no cursor", two, err)
+	}
+	if byCustomer, err := s.ListInvoices(t1, ListFilter{CustomerID: a.CustomerID, Limit: 10}); err != nil || len(byCustomer.Items) != 1 {
+		t.Fatalf("by customer: %d rows, err %v", len(byCustomer.Items), err)
 	}
 }
 
@@ -190,18 +197,18 @@ func TestRLS_TenantAndLegalEntityIsolation(t *testing.T) {
 	if _, err := s.PostProposal(t1, a.ID, time.Date(2027, 3, 12, 0, 0, 0, 0, time.UTC), 0); err != nil {
 		t.Fatal(err)
 	}
-	if other, err := s.ListInvoices(t2, ListFilter{Limit: 10}); err != nil || len(other) != 0 {
-		t.Fatalf("tenant 2 lists %d of tenant 1's invoices, err %v", len(other), err)
+	if other, err := s.ListInvoices(t2, ListFilter{Limit: 10}); err != nil || len(other.Items) != 0 {
+		t.Fatalf("tenant 2 lists %d of tenant 1's invoices, err %v", len(other.Items), err)
 	}
 	if _, err := s.GetInvoice(t2, a.ID); err == nil {
 		t.Fatal("tenant 2 read tenant 1's invoice")
 	}
 	scoped := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: ids.New(), UserID: "u", Duties: map[string]struct{}{}})
-	if rows, err := s.ListInvoices(scoped, ListFilter{Limit: 10}); err != nil || len(rows) != 0 {
-		t.Fatalf("a caller scoped to another legal entity lists %d invoices, err %v", len(rows), err)
+	if rows, err := s.ListInvoices(scoped, ListFilter{Limit: 10}); err != nil || len(rows.Items) != 0 {
+		t.Fatalf("a caller scoped to another legal entity lists %d invoices, err %v", len(rows.Items), err)
 	}
-	if mine, err := s.ListInvoices(t1, ListFilter{Limit: 10}); err != nil || len(mine) != 1 {
-		t.Fatalf("tenant 1 lists %d invoices, err %v", len(mine), err)
+	if mine, err := s.ListInvoices(t1, ListFilter{Limit: 10}); err != nil || len(mine.Items) != 1 {
+		t.Fatalf("tenant 1 lists %d invoices, err %v", len(mine.Items), err)
 	}
 	// Tenant 2 cannot credit tenant 1's invoice: the original is invisible to it.
 	foreign := newProposal(t, le)
@@ -349,7 +356,8 @@ func TestCreditNote_PostNumbersChecksRemainderAndPublishes(t *testing.T) {
 		d.Reason != "Damaged in transit" || d.Totals.Gross != "23.80" || len(d.Lines) != 1 || d.Lines[0].OriginalLineNo != 2 || d.Lines[0].Qty != "2" || d.Lines[0].Tax != "3.80" {
 		t.Errorf("creditnote.posted payload %s %+v", payload.Type, d)
 	}
-	cns, err := s.ListInvoices(tctx, ListFilter{Type: domain.TypeCreditNote, OriginalInvoiceID: orig.ID, Limit: 10})
+	cnPage, err := s.ListInvoices(tctx, ListFilter{Type: domain.TypeCreditNote, OriginalInvoiceID: orig.ID, Limit: 10})
+	cns := cnPage.Items
 	if err != nil || len(cns) != 3 || cns[0].OriginalNumber != orig.Number {
 		t.Fatalf("credit notes of the original: %d, err %v", len(cns), err)
 	}

@@ -92,3 +92,8 @@
   border-radius: var(--radius-md);
 }
 
+
+.more {
+  display: flex;
+  justify-content: center;
+}

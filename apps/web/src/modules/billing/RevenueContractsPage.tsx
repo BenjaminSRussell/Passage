@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, DataTable, FormField, Input, PageHeader, Select, StatusPill, type DataTableColumn } from "../../shell/ui";
-import { CONTRACT_STATUSES, listContracts, type ContractStatus, type RevenueContractSummary } from "./api/client";
-import { CONTRACT_STATUS_LABELS, UUID } from "./format";
+import { CONTRACT_STATUSES, listContracts, METHODS, type ContractStatus, type RecognitionMethod, type RevenueContractSummary } from "./api/client";
+import { CONTRACT_STATUS_LABELS, METHOD_LABELS, UUID } from "./format";
+import { MoreRows } from "./MoreRows";
 import styles from "./pages.module.css";
-import { useLoad } from "./useLoad";
+import { usePaged } from "./usePaged";
 
 const LIMIT = 100;
 
@@ -18,14 +19,18 @@ const columns: DataTableColumn<RevenueContractSummary>[] = [
   { key: "remaining", header: "Remaining", mono: true, align: "end", render: (c) => `${c.remaining} ${c.currency}` },
 ];
 
-/** Revenue contracts inquiry (§5.29.14): price, recognized and remaining per contract, newest first. */
+/**
+ * Revenue contracts inquiry (§5.29.14): price, recognized and remaining per contract, newest first,
+ * filtered by status, customer and obligation method and paged by the service cursor.
+ */
 export function RevenueContractsPage() {
   const navigate = useNavigate();
   const [status, setStatus] = useState<ContractStatus | "">("");
   const [customer, setCustomer] = useState("");
+  const [method, setMethod] = useState<RecognitionMethod | "">("");
   const customerId = UUID.test(customer.trim()) ? customer.trim() : "";
   const customerInvalid = customer.trim() !== "" && customerId === "";
-  const state = useLoad((signal) => listContracts({ status, customerId, limit: LIMIT }, signal), `${status}|${customerId}`);
+  const state = usePaged((cursor, signal) => listContracts({ status, customerId, method, limit: LIMIT, cursor }, signal), `${status}|${customerId}|${method}`);
 
   return (
     <div className={styles.stack}>
@@ -56,6 +61,18 @@ export function RevenueContractsPage() {
             </Select>
           )}
         </FormField>
+        <FormField id="rc-method" label="Obligation method">
+          {(c) => (
+            <Select {...c} value={method} onChange={(e) => setMethod(e.target.value as RecognitionMethod | "")}>
+              <option value="">Any method</option>
+              {METHODS.map((m) => (
+                <option key={m} value={m}>
+                  {METHOD_LABELS[m]}
+                </option>
+              ))}
+            </Select>
+          )}
+        </FormField>
         <FormField id="rc-customer" label="Customer id" optional error={customerInvalid ? "Enter a full customer id (a UUID) to filter." : undefined}>
           {(c) => <Input {...c} className={styles.mono} value={customer} onChange={(e) => setCustomer(e.target.value)} invalid={customerInvalid} />}
         </FormField>
@@ -68,17 +85,17 @@ export function RevenueContractsPage() {
         <DataTable
           label="Revenue contracts"
           columns={columns}
-          rows={state.data ?? []}
+          rows={state.rows}
           getRowKey={(c) => c.id}
           loading={state.loading}
           empty={{
-            title: status || customerId ? "No contracts match these filters" : "No revenue contracts yet",
+            title: status || customerId || method ? "No contracts match these filters" : "No revenue contracts yet",
             description: "Create a revenue contract to allocate a bundle's price across its obligations and plan when the revenue is recognized.",
           }}
           onRowOpen={(c) => navigate(`/billing/revenue-contracts/${c.id}`)}
         />
       )}
-      {state.data && state.data.length >= LIMIT ? <p className={styles.note}>{`Showing the newest ${LIMIT} contracts.`}</p> : null}
+      <MoreRows state={state} noun="contracts" />
     </div>
   );
 }

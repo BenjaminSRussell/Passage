@@ -6,6 +6,7 @@ package api
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -71,7 +72,7 @@ type Store interface {
 	CreateProposal(ctx context.Context, inv store.Invoice) (store.Invoice, error)
 	CreateCreditNote(ctx context.Context, cn store.Invoice) (store.Invoice, error)
 	GetInvoice(ctx context.Context, id string) (store.Invoice, error)
-	ListInvoices(ctx context.Context, f store.ListFilter) ([]store.Invoice, error)
+	ListInvoices(ctx context.Context, f store.ListFilter) (store.InvoicePage, error)
 	PostProposal(ctx context.Context, id string, postingDate time.Time, expectedVersion int) (store.Invoice, error)
 	PostCreditNote(ctx context.Context, id string, postingDate time.Time, expectedVersion int) (store.Invoice, error)
 }
@@ -222,7 +223,8 @@ type invoiceDTO struct {
 }
 
 type listDTO struct {
-	Items []summaryDTO `json:"items"`
+	Items      []summaryDTO `json:"items"`
+	NextCursor string       `json:"nextCursor,omitempty"`
 }
 
 func toSummary(inv store.Invoice) summaryDTO {
@@ -465,6 +467,9 @@ func lineField(detail string) string {
 	return "line"
 }
 
+// listInvoices lists invoice headers newest first (§5.29.14 invoice register),
+// filtered by status, type, customer and original invoice. A page holds at most
+// `limit` items; nextCursor, when present, is passed back as `cursor`.
 func (a *API) listInvoices(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	f := store.ListFilter{Status: q.Get("status"), Type: q.Get("type"), CustomerID: q.Get("customerId"),
@@ -482,6 +487,13 @@ func (a *API) listInvoices(w http.ResponseWriter, r *http.Request) {
 	if f.OriginalInvoiceID != "" && !ids.Valid(f.OriginalInvoiceID) {
 		fields["originalInvoiceId"] = "must be a UUID"
 	}
+	if raw := q.Get("cursor"); raw != "" {
+		b, err := base64.RawURLEncoding.DecodeString(raw)
+		if err != nil || !ids.Valid(string(b)) {
+			fields["cursor"] = "must be a nextCursor returned by a previous page"
+		}
+		f.After = strings.ToLower(string(b))
+	}
 	if raw := q.Get("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 1 || n > maxListLimit {
@@ -493,14 +505,17 @@ func (a *API) listInvoices(w http.ResponseWriter, r *http.Request) {
 		writeFields(w, r, fields)
 		return
 	}
-	invoices, err := a.store.ListInvoices(r.Context(), f)
+	page, err := a.store.ListInvoices(r.Context(), f)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
-	out := listDTO{Items: make([]summaryDTO, 0, len(invoices))}
-	for _, inv := range invoices {
+	out := listDTO{Items: make([]summaryDTO, 0, len(page.Items))}
+	for _, inv := range page.Items {
 		out.Items = append(out.Items, toSummary(inv))
+	}
+	if page.NextAfter != "" {
+		out.NextCursor = base64.RawURLEncoding.EncodeToString([]byte(page.NextAfter))
 	}
 	httpx.JSON(w, http.StatusOK, out)
 }

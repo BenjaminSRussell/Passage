@@ -73,17 +73,18 @@ func CheckSSPSources(obs []Obligation) error {
 }
 
 // ScheduleLines plans the recognition of one allocated obligation (FR-29.8):
-// RATABLE spreads Allocated over the term by RatableSchedule, each line dated at
+// RATABLE spreads Allocated over the term by RatableSchedule on the contract's
+// ratable basis (ignored by the other methods), each line dated at
 // the end of its period; POINT_IN_TIME is a single line dated at satisfiedOn,
 // the transfer date; MILESTONE is a single undated line awaiting satisfaction;
 // USAGE has no line until usage posts (later slice).
-func ScheduleLines(o Obligation, currency string, termStart, termEnd, satisfiedOn *time.Time) ([]ScheduleLine, error) {
+func ScheduleLines(o Obligation, currency, basis string, termStart, termEnd, satisfiedOn *time.Time) ([]ScheduleLine, error) {
 	switch o.Method {
 	case MethodRatable:
 		if termStart == nil || termEnd == nil {
 			return nil, &Error{Code: "REV-0002", Detail: "a RATABLE obligation needs a term start and end"}
 		}
-		periods, err := RatableSchedule(money.Amount{Value: o.Allocated, Currency: currency}, *termStart, *termEnd)
+		periods, err := RatableSchedule(money.Amount{Value: o.Allocated, Currency: currency}, *termStart, *termEnd, basis)
 		if err != nil {
 			return nil, err
 		}

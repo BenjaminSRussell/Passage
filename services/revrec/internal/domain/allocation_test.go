@@ -129,7 +129,7 @@ func TestAllocate_SumsToPriceAcrossCurrencies(t *testing.T) {
 
 func TestRatableSchedule_SupportObligation(t *testing.T) {
 	// 2250.00 over 2027-03-10 .. 2028-03-09: partial March, eleven full months, partial March 2028.
-	periods, err := RatableSchedule(money.Must("2250", "USD"), date("2027-03-10"), date("2028-03-09"))
+	periods, err := RatableSchedule(money.Must("2250", "USD"), date("2027-03-10"), date("2028-03-09"), BasisDaily)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,12 +157,54 @@ func TestRatableSchedule_SupportObligation(t *testing.T) {
 }
 
 func TestRatableSchedule_LeapFebruaryAndInvalidTerm(t *testing.T) {
-	periods, err := RatableSchedule(money.Must("29", "USD"), date("2028-02-29"), date("2028-02-29"))
+	periods, err := RatableSchedule(money.Must("29", "USD"), date("2028-02-29"), date("2028-02-29"), BasisDaily)
 	if err != nil || len(periods) != 1 || !periods[0].Amount.Equal(d("29")) {
 		t.Fatalf("single leap day: %v %v", periods, err)
 	}
-	if _, err := RatableSchedule(money.Must("1", "USD"), date("2027-03-02"), date("2027-03-01")); err == nil {
+	if _, err := RatableSchedule(money.Must("1", "USD"), date("2027-03-02"), date("2027-03-01"), BasisDaily); err == nil {
 		t.Fatal("end before start must fail")
+	}
+}
+
+// TestRatableSchedule_MonthlyBasis gives every month the term touches the same
+// share (FR-29.8 monthly): 2250.00 over 2027-03-10 .. 2028-03-09 touches 13
+// months, so twelve lines of 173.08 and the last absorbs the residual (173.04);
+// the DAILY basis of the same term starts with a partial 133.06.
+func TestRatableSchedule_MonthlyBasis(t *testing.T) {
+	periods, err := RatableSchedule(money.Must("2250", "USD"), date("2027-03-10"), date("2028-03-09"), BasisMonthly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(periods) != 13 {
+		t.Fatalf("got %d periods, want 13", len(periods))
+	}
+	for _, p := range periods[:12] {
+		if !p.Amount.Equal(d("173.08")) {
+			t.Errorf("period %s..%s %s, want 173.08", p.Start.Format("2006-01-02"), p.End.Format("2006-01-02"), p.Amount)
+		}
+	}
+	if !periods[12].Amount.Equal(d("173.04")) {
+		t.Errorf("last period %s, want 173.04 (the residual)", periods[12].Amount)
+	}
+	if !periods[0].Start.Equal(date("2027-03-10")) || !periods[12].End.Equal(date("2028-03-09")) {
+		t.Errorf("periods span %v..%v, want the term", periods[0].Start, periods[12].End)
+	}
+	// A whole year from the first of a month is 12 equal shares on both bases.
+	for _, basis := range []string{BasisDaily, BasisMonthly} {
+		year, err := RatableSchedule(money.Must("1200", "USD"), date("2027-01-01"), date("2027-12-31"), basis)
+		if err != nil || len(year) != 12 {
+			t.Fatalf("%s year: %d periods, err %v", basis, len(year), err)
+		}
+		for _, p := range year {
+			if basis == BasisMonthly && !p.Amount.Equal(d("100")) {
+				t.Errorf("%s month %s, want 100.00", basis, p.Amount)
+			}
+		}
+	}
+	if _, err := RatableSchedule(money.Must("1", "USD"), date("2027-03-01"), date("2027-03-31"), "WEEKLY"); err == nil {
+		t.Fatal("an unknown basis must fail")
+	} else if de, ok := err.(*Error); !ok || de.Code != "COM-0001" {
+		t.Fatalf("unknown basis: %v, want COM-0001", err)
 	}
 }
 
@@ -171,7 +213,8 @@ func TestRatableSchedule_SumsToAmount(t *testing.T) {
 		start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, rapid.IntRange(0, 900).Draw(t, "offset"))
 		end := start.AddDate(0, 0, rapid.IntRange(0, 800).Draw(t, "length"))
 		amount := money.Must(decimal.New(rapid.Int64Range(1, 999_999_999).Draw(t, "minor"), -2).String(), "EUR")
-		periods, err := RatableSchedule(amount, start, end)
+		basis := rapid.SampledFrom([]string{BasisDaily, BasisMonthly}).Draw(t, "basis")
+		periods, err := RatableSchedule(amount, start, end, basis)
 		if err != nil {
 			t.Fatal(err)
 		}

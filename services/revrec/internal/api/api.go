@@ -111,6 +111,7 @@ type previewRequest struct {
 	Currency         string          `json:"currency"`
 	TransactionPrice string          `json:"transactionPrice"`
 	ResidualRule     string          `json:"residualRule,omitempty"`
+	RatableBasis     string          `json:"ratableBasis,omitempty"`
 	Obligations      []obligationDTO `json:"obligations"`
 }
 
@@ -133,6 +134,7 @@ type previewResponse struct {
 	Currency         string          `json:"currency"`
 	TransactionPrice string          `json:"transactionPrice"`
 	ResidualRule     string          `json:"residualRule"`
+	RatableBasis     string          `json:"ratableBasis"`
 	Obligations      []allocationDTO `json:"obligations"`
 }
 
@@ -145,6 +147,12 @@ func (a *API) preview(w http.ResponseWriter, r *http.Request) {
 	fields := map[string]string{}
 	if req.ResidualRule == "" {
 		req.ResidualRule = domain.ResidualLargest
+	}
+	if req.RatableBasis == "" {
+		req.RatableBasis = domain.BasisDaily
+	}
+	if !domain.ValidRatableBasis(req.RatableBasis) {
+		fields["ratableBasis"] = "must be DAILY or MONTHLY"
 	}
 	if !currencyCode.MatchString(req.Currency) {
 		fields["currency"] = "must be an ISO 4217 alpha-3 code"
@@ -169,11 +177,11 @@ func (a *API) preview(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, problemFrom(err))
 		return
 	}
-	resp := previewResponse{Currency: req.Currency, TransactionPrice: fixed(price.Value, req.Currency), ResidualRule: req.ResidualRule}
+	resp := previewResponse{Currency: req.Currency, TransactionPrice: fixed(price.Value, req.Currency), ResidualRule: req.ResidualRule, RatableBasis: req.RatableBasis}
 	for i, o := range allocated {
 		item := allocationDTO{ID: o.ID, SSP: fixed(o.SSP, req.Currency), SSPSource: o.SSPSource, Method: o.Method, Allocated: fixed(o.Allocated, req.Currency)}
 		if t := terms[i]; t != nil {
-			periods, err := domain.RatableSchedule(money.Amount{Value: o.Allocated, Currency: req.Currency}, t[0], t[1])
+			periods, err := domain.RatableSchedule(money.Amount{Value: o.Allocated, Currency: req.Currency}, t[0], t[1], req.RatableBasis)
 			if err != nil {
 				httpx.Fail(w, r, problemFrom(err))
 				return

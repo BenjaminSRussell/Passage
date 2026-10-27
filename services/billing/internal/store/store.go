@@ -48,13 +48,22 @@ const (
 // original's remaining creditable amount.
 const postedStatuses = `('POSTED', 'PARTIALLY_SETTLED', 'SETTLED')`
 
-// ListFilter narrows ListInvoices; empty fields do not filter.
+// ListFilter narrows ListInvoices; empty fields do not filter. After is the id
+// of the last invoice of the previous page (keyset cursor).
 type ListFilter struct {
 	Status            string
 	Type              string
 	CustomerID        string
 	OriginalInvoiceID string
+	After             string
 	Limit             int
+}
+
+// InvoicePage is one page of invoice headers; NextAfter is the id to pass as
+// After for the next page, empty on the last page.
+type InvoicePage struct {
+	Items     []Invoice
+	NextAfter string
 }
 
 // Line is a stored invoice line with its rounded net and tax. OriginalLineNo
@@ -366,14 +375,21 @@ func (s *Postgres) GetInvoice(ctx context.Context, id string) (Invoice, error) {
 	return inv, notFoundOr(err)
 }
 
-// ListInvoices returns invoice headers (without lines), newest first.
-func (s *Postgres) ListInvoices(ctx context.Context, f ListFilter) ([]Invoice, error) {
+// ListInvoices returns one page of invoice headers (without lines), newest
+// first. The page is keyed on (created_at, id) of the After invoice, so rows
+// created while the caller pages are neither repeated nor skipped; an After the
+// caller cannot see yields an empty page.
+func (s *Postgres) ListInvoices(ctx context.Context, f ListFilter) (InvoicePage, error) {
+	if f.Limit < 1 {
+		return InvoicePage{}, errors.New("store: list limit must be at least 1")
+	}
 	var out []Invoice
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select `+invoiceColumns+` from invoice
 			where ($1 = '' or status = $1) and ($2 = '' or customer_id::text = $2)
 			  and ($4 = '' or invoice_type = $4) and ($5 = '' or original_invoice_id::text = $5)
-			order by created_at desc, id desc limit $3`, f.Status, f.CustomerID, f.Limit, f.Type, f.OriginalInvoiceID)
+			  and ($6 = '' or (created_at, id) < (select a.created_at, a.id from invoice a where a.id = nullif($6, '')::uuid))
+			order by created_at desc, id desc limit $3`, f.Status, f.CustomerID, f.Limit+1, f.Type, f.OriginalInvoiceID, f.After)
 		if err != nil {
 			return err
 		}
@@ -387,7 +403,15 @@ func (s *Postgres) ListInvoices(ctx context.Context, f ListFilter) ([]Invoice, e
 		}
 		return rows.Err()
 	})
-	return out, err
+	if err != nil {
+		return InvoicePage{}, err
+	}
+	page := InvoicePage{Items: out}
+	if len(out) > f.Limit {
+		page.Items = out[:f.Limit]
+		page.NextAfter = page.Items[f.Limit-1].ID
+	}
+	return page, nil
 }
 
 // PostProposal turns a proposal into a posted invoice. It draws the next number

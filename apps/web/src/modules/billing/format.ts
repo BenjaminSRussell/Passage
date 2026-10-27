@@ -1,4 +1,4 @@
-import type { ContractStatus, InvoiceStatus, RecognitionMethod, ScheduleStatus, SspSource } from "./api/client";
+import type { ContractStatus, InvoiceStatus, RatableBasis, RecognitionMethod, ScheduleStatus, SspSource } from "./api/client";
 
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -51,6 +51,14 @@ export function lastMonth(now: Date = new Date()): string {
   const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
+
+export const BASIS_LABELS: Record<RatableBasis, string> = {
+  DAILY: "Daily (by the days of each month)",
+  MONTHLY: "Monthly (equal per month)",
+};
+
+/** The field hint under a ratable basis choice. */
+export const BASIS_HINT = "How ratable obligations spread over their term. Daily weighs a partial month by its days; monthly gives every month the term touches the same share.";
 
 export const METHOD_LABELS: Record<RecognitionMethod, string> = {
   POINT_IN_TIME: "Point in time",

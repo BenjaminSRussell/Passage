@@ -65,6 +65,26 @@ func TestPreview_BundleAllocatesAndSchedules(t *testing.T) {
 	}
 }
 
+// TestPreview_MonthlyBasis previews the support on the MONTHLY basis: every
+// month the term touches takes 173.08, the residual 173.04 goes last.
+func TestPreview_MonthlyBasis(t *testing.T) {
+	rec := serve(t, strings.Replace(bundleBody, `"currency": "USD",`, `"currency": "USD", "ratableBasis": "MONTHLY",`, 1))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	var got previewBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	sup := got.Obligations[2].Schedule
+	if len(sup) != 13 || sup[0].Amount != "173.08" || sup[12].Amount != "173.04" {
+		t.Errorf("monthly schedule %+v, want 13 lines from 173.08 to 173.04", sup)
+	}
+	if !strings.Contains(rec.Body.String(), `"ratableBasis":"MONTHLY"`) {
+		t.Errorf("response does not echo the basis: %s", rec.Body)
+	}
+}
+
 func TestPreview_ValidationProblems(t *testing.T) {
 	tests := []struct {
 		name string
@@ -80,6 +100,7 @@ func TestPreview_ValidationProblems(t *testing.T) {
 		{"duplicate id", strings.Replace(bundleBody, `"id": "installation"`, `"id": "hardware"`, 1), "COM-0001", "obligations[1].id"},
 		{"bad residual rule", strings.Replace(bundleBody, `"currency": "USD",`, `"currency": "USD", "residualRule": "MIDDLE",`, 1), "COM-0001", "residualRule"},
 		{"no obligations", `{"currency":"USD","transactionPrice":"1","obligations":[]}`, "COM-0001", "obligations"},
+		{"bad ratable basis", strings.Replace(bundleBody, `"currency": "USD",`, `"currency": "USD", "ratableBasis": "WEEKLY",`, 1), "COM-0001", "ratableBasis"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -10,6 +10,9 @@ schedules, and reports the deferred revenue roll-forward (FR-29.7 to FR-29.9).
   milestone satisfaction, idempotent period recognition runs, the roll-forward
   (AC-29.4 reproduced against Postgres), events through the outbox, and the
   billing web module's revenue screens.
+- **Slice 4**: the ratable basis (DAILY or MONTHLY), the roll-forward drill-down to
+  one contract, the obligation-method filter and cursor pagination on the
+  contracts list, and the screens for them.
 
 What is still missing is listed in `NOT-IMPLEMENTED.md`.
 
@@ -22,6 +25,7 @@ internal/store/         Postgres repository (pgx, RLS through dbx.WithTenantTx, 
 internal/api/           HTTP handlers, DTOs, validation, duties
 internal/events/        event types and payloads
 migrations/             0001_revrec_init.sql: revenue_contract, performance_obligation, revenue_schedule, recognition_run, outbox
+                        0002_ratable_basis.sql: revenue_contract.ratable_basis (DAILY | MONTHLY)
 api/openapi.yaml        OpenAPI 3.1 for every endpoint
 events/asyncapi.yaml    AsyncAPI 3 for contract.allocated and schedule.recognized
 charts/revrec/          Helm chart (DATABASE_URL from the revrec-db secret, admin port, ServiceMonitor toggle)
@@ -33,12 +37,13 @@ charts/revrec/          Helm chart (DATABASE_URL from the revrec-db secret, admi
 |---|---|---|---|
 | POST | `/v1/revrec/allocations:preview` | `revrec.view` (RevRecView) | pure computation; stores nothing |
 | POST | `/v1/revrec/contracts` | `revrec.maintain` (RevRecMaintain) | `Idempotency-Key` required; 201, or 200 replay; emits `contract.allocated` |
-| GET | `/v1/revrec/contracts` | `revrec.view` | newest first; filters `legalEntityId`, `customerId`, `status`, `limit` ≤ 200; recognized and remaining per contract |
+| GET | `/v1/revrec/contracts` | `revrec.view` | newest first; filters `legalEntityId`, `customerId`, `status`, `method` (contracts with an obligation of that method); `limit` ≤ 200 and `cursor` = the previous page's `nextCursor`; recognized and remaining per contract |
 | GET | `/v1/revrec/contracts/{id}` | `revrec.view` | obligations with their schedule lines; `ETag` = version |
 | POST | `/v1/revrec/milestones/{obligationId}:satisfy` | `revrec.maintain` | recognizes a MILESTONE; optional `If-Match`; same-date retry replays; emits `schedule.recognized` |
 | POST | `/v1/revrec/recognition-runs` | `revrec.post` (RevRecPost) | key = (legal entity, period end); 201, or 200 replay; emits `schedule.recognized` per line |
 | GET | `/v1/revrec/recognition-runs` | `revrec.view` | latest period first |
 | GET | `/v1/revrec/roll-forward?legalEntityId=&currency=&period=YYYY-MM` | `revrec.view` | opening, additions, recognized, adjustments, closing |
+| GET | `/v1/revrec/roll-forward?contractId=&period=YYYY-MM` | `revrec.view` | the same for one contract, in its currency (drill-down); 404 when unknown or out of scope |
 
 Duties are enforced with `platform/authz` (401 without a principal, 403 `AUTH-0003`
 without the duty). A principal scoped to one legal entity (`X-Passage-Legal-Entity`)
@@ -60,8 +65,12 @@ contracts and runs from its reads.
   revenue to 4000, so no `schedule.recognized` is emitted for it. MILESTONE is
   one undated line recognized by `:satisfy` (on or after the contract date,
   REV-0006). RATABLE is one line per calendar month of the term, dated at the
-  period end, each month weighted by its days; the last line absorbs the
-  residual. USAGE has no line until usage posts (later slice).
+  period end; the last line absorbs the residual. On the contract's
+  `ratableBasis` DAILY (default) each month weighs the share of its days the term
+  covers; on MONTHLY every month the term touches takes an equal share (2,250.00
+  over 2027-03-10 .. 2028-03-09: 133.06 first on DAILY, 12 × 173.08 + 173.04 on
+  MONTHLY). The PRD makes the basis a legal-entity setting; until that is
+  readable the caller sends it and it is stored on the contract. USAGE has no line until usage posts (later slice).
 - **Recognition run**: recognizes every SCHEDULED RATABLE line of the entity
   dated on or before the period end, on the period end. One run per (entity,
   period end); a rerun returns the recorded run. A period end after today is
@@ -72,7 +81,8 @@ contracts and runs from its reads.
   their lines recognized in the month; opening is everything before the month.
   Adjustments are 0.00 until credit notes reverse schedules (BR-29.6). AC-29.4:
   March 2027 additions 3,600.00, recognized 1,483.06 (1,350.00 + 133.06),
-  closing 2,116.94.
+  closing 2,116.94. With `contractId` the same sums cover one contract; the
+  contracts of an entity add up to its roll-forward.
 - **Versions**: a contract starts at version 1; every satisfaction and every run
   that recognizes one of its lines bumps it. A contract becomes COMPLETE when no
   line is SCHEDULED and it has no USAGE obligation.
@@ -105,7 +115,10 @@ plan, the satisfaction rules and the roll-forward arithmetic. The API tests use 
 in-memory store and cover validation, idempotent replays, If-Match, scope, duties
 and readiness. The store tests (Postgres, non-superuser role so RLS applies)
 reproduce AC-29.4 end to end, April's carry-forward, contract completion, the
-outbox payloads, tenant and legal-entity isolation and the duplicate-key race.
+outbox payloads, tenant and legal-entity isolation, the duplicate-key race, keyset
+pages, the method filter and the per-contract roll-forward summing to the entity.
+`TestOpenAPI_MatchesRoutes` keeps `api/openapi.yaml` and the mounted routes and
+duties in step.
 
 ## Error codes
 
