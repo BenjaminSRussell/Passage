@@ -106,6 +106,10 @@ export function OrderDetailPage() {
             <dd className={`${styles.value} ${styles.mono}`}>{`${shortId(order.siteId)} / ${shortId(order.warehouseId)}`}</dd>
           </div>
           <div className={styles.entry}>
+            <dt className={styles.term}>Batch</dt>
+            <dd className={`${styles.value} ${styles.mono}`}>{order.dims?.batch || dash}</dd>
+          </div>
+          <div className={styles.entry}>
             <dt className={styles.term}>Test group</dt>
             <dd className={styles.value}>{`${order.testGroup.code} v${order.testGroupVersion}`}</dd>
           </div>

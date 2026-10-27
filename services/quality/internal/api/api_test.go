@@ -579,3 +579,37 @@ func TestCalibrateInstrument_MovesDueDateAndRefusesFuture(t *testing.T) {
 		t.Fatalf("calibration needs QM_SETUP_MAINTAIN: %d", rec.Code)
 	}
 }
+
+func TestOrderAndNCR_DimsAreBounded(t *testing.T) {
+	f := newFake()
+	h := newHandler(f)
+	groupID, _, _ := createGroup(t, h, true)
+	order := func(dims string) string {
+		return `{"trigger":"MANUAL","sourceRef":{"type":"manual","id":"` + ids.New() + `"},"itemId":"` + ids.New() +
+			`","siteId":"` + ids.New() + `","warehouseId":"` + ids.New() + `","dims":` + dims + `,"lotQty":"10","uom":"EA","testGroupId":"` + groupID +
+			`","samplingPlan":{"method":"FIXED","fixedQty":"2"}}`
+	}
+	for name, dims := range map[string]string{
+		"batch over 60":  `{"batch":"` + strings.Repeat("B", 61) + `"}`,
+		"empty value":    `{"batch":" "}`,
+		"empty name":     `{"":"B-1"}`,
+		"too many names": `{"a":"1","b":"1","c":"1","d":"1","e":"1","f":"1","g":"1","h":"1","i":"1","j":"1","k":"1"}`,
+	} {
+		rec := call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/quality-orders", body: order(dims), duties: allDuties, key: ids.New()})
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"dims"`) {
+			t.Fatalf("%s: %d %s", name, rec.Code, rec.Body.String())
+		}
+	}
+	if len(f.orders) != 0 {
+		t.Fatalf("a refused order was stored: %d", len(f.orders))
+	}
+	rec := call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/quality-orders", body: order(`{"batch":"` + strings.Repeat("B", 60) + `"}`), duties: allDuties, key: ids.New()})
+	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), strings.Repeat("B", 60)) {
+		t.Fatalf("60-character batch: %d %s", rec.Code, rec.Body.String())
+	}
+	ncr := `{"source":"INTERNAL","itemId":"` + ids.New() + `","dims":{"batch":"` + strings.Repeat("B", 61) + `"},"qty":"1","uom":"EA","problemType":"DAMAGE","severity":"MINOR","description":"dented"}`
+	rec = call(h, reqSpec{method: http.MethodPost, path: "/v1/quality/nonconformances", body: ncr, duties: "QM_NCR_MAINTAIN", key: ids.New()})
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"dims"`) || len(f.ncrs) != 0 {
+		t.Fatalf("NCR with long batch: %d %s", rec.Code, rec.Body.String())
+	}
+}

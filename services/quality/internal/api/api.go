@@ -442,7 +442,33 @@ func validateOrder(req orderRequest) map[string]string {
 	if req.UOM == "" || len(req.UOM) > 10 {
 		fields["uom"] = "must be 1 to 10 characters"
 	}
+	for k, v := range dimsFields(req.Dims) {
+		fields[k] = v
+	}
 	return fields
+}
+
+// maxDims, maxDimKey and maxDimValue bound the inventory dimensions an order or
+// NCR carries. A batch is at most 60 characters, the limit the receipt check
+// matches source inspections on (BR-33.16), so a longer one could never be found.
+const (
+	maxDims     = 10
+	maxDimKey   = 40
+	maxDimValue = 60
+)
+
+// dimsFields reports the dims map when it is too large or holds an empty or
+// over-long name or value.
+func dimsFields(dims map[string]string) map[string]string {
+	if len(dims) > maxDims {
+		return map[string]string{"dims": "must have at most 10 entries"}
+	}
+	for k, v := range dims {
+		if k == "" || len(k) > maxDimKey || strings.TrimSpace(v) == "" || len(v) > maxDimValue {
+			return map[string]string{"dims": "names must be 1 to 40 characters and values 1 to 60"}
+		}
+	}
+	return nil
 }
 
 func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {

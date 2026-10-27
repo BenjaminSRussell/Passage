@@ -1,6 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
-import { useSearchParams } from "react-router-dom";
-import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
+import { Link, useSearchParams } from "react-router-dom";
+import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { checkReceipt, describeProblem, listReceiptChecks, newKey, type NewReceiptCheck, type Problem, type ReceiptCheck } from "./api/client";
 import { DECIMAL, dash, formatDateTime, pickFields, qty, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
@@ -20,6 +20,16 @@ const columns: DataTableColumn<ReceiptCheck>[] = [
   },
   { key: "checkedAt", header: "Checked", render: (row) => `${row.checkedBy || dash}, ${formatDateTime(row.checkedAt)}` },
 ];
+
+/**
+ * The new-order link for what a receipt check left to inspect: a purchase-receipt
+ * order for the receipt line, the batch and the normal quantity, matched to its
+ * quality association like any receipt (FR-33.19).
+ */
+export function receivingOrderLink(check: Pick<ReceiptCheck, "receiptLineId" | "batch" | "normalQty">): string {
+  const params = new URLSearchParams({ trigger: "PURCHASE_RECEIPT", sourceType: "receipt_line", sourceId: check.receiptLineId, batch: check.batch, lotQty: qty(check.normalQty) });
+  return `/quality/orders/new?${params.toString()}`;
+}
 
 export interface ReceiptValues {
   poLineId: string;
@@ -168,6 +178,13 @@ function ReceiptCheckForm({ onChecked }: { onChecked(): void }) {
             {result ? (
               <Alert tone={result.skip ? "success" : "warning"} title={result.skip ? "Receiving inspection skipped" : "Create a receiving quality order"} live="status">
                 {`${result.message} Accepted at source ${qty(result.acceptedQty)}, used by earlier receipts ${qty(result.coveredBefore)}.`}
+                {result.skip ? null : (
+                  <div className={styles.spaced}>
+                    <Link className={buttonClassName("secondary", "sm")} to={receivingOrderLink(result)}>
+                      {`Create the receiving quality order for ${qty(result.normalQty)}`}
+                    </Link>
+                  </div>
+                )}
               </Alert>
             ) : null}
           </div>

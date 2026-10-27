@@ -1,5 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
 import { createOrder, describeProblem, listTestGroups, newKey, type CertRequirement, type NewOrder, type Problem, type Trigger } from "./api/client";
 import { CERT_LABELS, CERT_REQUIREMENTS, DECIMAL, pickFields, TRIGGER_LABELS, UUID } from "./format";
@@ -16,6 +16,7 @@ interface Values {
   partyId: string;
   siteId: string;
   warehouseId: string;
+  batch: string;
   lotQty: string;
   uom: string;
   testGroupId: string;
@@ -26,6 +27,9 @@ type Field = Exclude<keyof Values, "certificateRequired">;
 type Errors = Partial<Record<Field | "sourceRef", string>>;
 
 const FIELDS = ["trigger", "itemId", "itemGroupId", "partyId", "siteId", "warehouseId", "lotQty", "uom", "testGroupId", "sourceRef"] as const;
+
+/** The longest batch the service takes, the length receipt checks match on (BR-33.16). */
+const MAX_BATCH = 60;
 
 /** Checks that mirror the service, and the request the form sends. */
 export function validateOrder(values: Values, plan: PlanValues): { errors: Errors; planErrors: PlanErrors; input?: NewOrder } {
@@ -39,6 +43,9 @@ export function validateOrder(values: Values, plan: PlanValues): { errors: Error
   for (const name of ["itemGroupId", "partyId"] as const) {
     if (values[name].trim() !== "" && !UUID.test(values[name].trim())) errors[name] = "Enter a UUID, or leave it empty.";
   }
+  const batch = values.batch.trim();
+  if (batch.length > MAX_BATCH) errors.batch = `Keep the batch to ${MAX_BATCH} characters.`;
+  else if (values.trigger === "SOURCE_INSPECTION" && batch === "") errors.batch = "A source inspection names the batch it inspects at the vendor.";
   const lot = values.lotQty.trim();
   if (!DECIMAL.test(lot) || Number(lot) <= 0) errors.lotQty = "Enter the lot quantity, above 0.";
   const uom = values.uom.trim();
@@ -58,6 +65,7 @@ export function validateOrder(values: Values, plan: PlanValues): { errors: Error
   };
   if (values.itemGroupId.trim()) input.itemGroupId = values.itemGroupId.trim();
   if (values.partyId.trim()) input.partyId = values.partyId.trim();
+  if (batch) input.dims = { batch };
   if (manual && "plan" in checked) {
     input.testGroupId = values.testGroupId;
     input.samplingPlan = checked.plan;
@@ -75,6 +83,7 @@ const initial: Values = {
   partyId: "",
   siteId: "",
   warehouseId: "",
+  batch: "",
   lotQty: "",
   uom: "EA",
   testGroupId: "",
@@ -82,13 +91,29 @@ const initial: Values = {
 };
 
 /**
+ * The form's starting values: a link may prefill the trigger, source, batch and lot
+ * quantity, as the receiving page does for the excess a source inspection does not cover.
+ */
+export function prefill(params: URLSearchParams): Values {
+  const values = { ...initial };
+  const trigger = params.get("trigger");
+  if (trigger && trigger in TRIGGER_LABELS) values.trigger = trigger as Trigger;
+  for (const name of ["sourceType", "sourceId", "batch", "lotQty", "uom"] as const) {
+    const value = params.get(name);
+    if (value) values[name] = value;
+  }
+  return values;
+}
+
+/**
  * Create a quality order. A manual order names its test group and sampling plan; any
  * other trigger takes them from the best matching quality association (BR-33.3).
  */
 export function NewOrderPage() {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
   const groups = useLoad((signal) => listTestGroups(signal), "test-groups");
-  const [values, setValues] = useState<Values>(initial);
+  const [values, setValues] = useState<Values>(() => prefill(params));
   const [plan, setPlan] = useState<PlanValues>(emptyPlan);
   const [errors, setErrors] = useState<Errors>({});
   const [planErrors, setPlanErrors] = useState<PlanErrors>({});
@@ -114,7 +139,8 @@ export function NewOrderPage() {
       navigate(`/quality/orders/${order.id}`);
     } catch (error) {
       const problem = describeProblem(error);
-      const fieldErrors = pickFields(problem.fields, FIELDS);
+      const fieldErrors: Errors = pickFields(problem.fields, FIELDS);
+      if (problem.fields.dims) fieldErrors.batch = problem.fields.dims;
       const fromPlan = planFieldErrors(problem.fields);
       if (Object.keys(fieldErrors).length > 0 || Object.keys(fromPlan).length > 0) {
         setErrors({ ...fieldErrors, sourceId: fieldErrors.sourceRef });
@@ -160,6 +186,14 @@ export function NewOrderPage() {
           {text("partyId", "Vendor or customer id", "Matches party associations.", true)}
           {text("siteId", "Site id")}
           {text("warehouseId", "Warehouse id")}
+          {text(
+            "batch",
+            "Batch",
+            values.trigger === "SOURCE_INSPECTION"
+              ? "The batch inspected at the vendor; with the PO line as source id, receipts of this batch skip receiving inspection once it is accepted."
+              : "Printed on the certificate of analysis and carried to any nonconformance.",
+            values.trigger !== "SOURCE_INSPECTION",
+          )}
           {text("lotQty", "Lot quantity")}
           {text("uom", "Unit")}
           {manual ? (

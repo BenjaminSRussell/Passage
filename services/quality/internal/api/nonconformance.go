@@ -67,6 +67,9 @@ func (a *API) createNonconformance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields := linkFields(req)
+	for k, v := range dimsFields(req.Dims) {
+		fields[k] = v
+	}
 	n := domain.Nonconformance{Source: req.Source, ItemID: req.ItemID, Dims: req.Dims, Qty: req.Qty, UOM: strings.TrimSpace(req.UOM),
 		ProblemType: req.ProblemType, Severity: req.Severity, Description: strings.TrimSpace(req.Description),
 		QualityOrderID: req.QualityOrderID, VendorID: req.VendorID, CustomerID: req.CustomerID,

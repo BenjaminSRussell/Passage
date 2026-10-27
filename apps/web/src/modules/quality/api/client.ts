@@ -144,6 +144,8 @@ export interface NewOrder {
   partyId?: string;
   siteId: string;
   warehouseId: string;
+  /** Inventory dimensions; a source inspection names its batch as `dims.batch` (BR-33.16). */
+  dims?: Record<string, string>;
   lotQty: string;
   uom: string;
   testGroupId?: string;

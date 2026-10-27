@@ -1404,7 +1404,12 @@ components:
         partyId: { type: string, format: uuid }
         siteId: { type: string, format: uuid }
         warehouseId: { type: string, format: uuid }
-        dims: { type: object, additionalProperties: { type: string } }
+        dims:
+          type: object
+          maxProperties: 10
+          propertyNames: { minLength: 1, maxLength: 40 }
+          additionalProperties: { type: string, minLength: 1, maxLength: 60 }
+          description: Inventory dimensions such as batch; a source inspection names its batch here (BR-33.16).
         lotQty: { $ref: "#/components/schemas/Decimal" }
         uom: { type: string, maxLength: 10 }
         testGroupId: { type: string, format: uuid, description: Required for MANUAL. }
@@ -1832,7 +1837,12 @@ components:
       properties:
         source: { $ref: "#/components/schemas/NcrSource" }
         itemId: { type: string, format: uuid, description: Required unless qualityOrderId is given. }
-        dims: { type: object, additionalProperties: { type: string } }
+        dims:
+          type: object
+          maxProperties: 10
+          propertyNames: { minLength: 1, maxLength: 40 }
+          additionalProperties: { type: string, minLength: 1, maxLength: 60 }
+          description: Inventory dimensions such as batch; taken from the quality order when left out.
         qty: { $ref: "#/components/schemas/Decimal" }
         uom: { type: string, minLength: 1, maxLength: 10, description: Required unless qualityOrderId is given. }
         problemType: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{1,31}$" }
