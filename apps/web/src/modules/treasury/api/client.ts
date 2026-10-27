@@ -246,3 +246,214 @@ export interface ForecastQuery {
 export function getCashForecast(q: ForecastQuery, signal?: AbortSignal): Promise<Forecast> {
   return send<Forecast>(`/cash-forecast${query({ legalEntityId: q.legalEntityId, layout: q.layout, asOf: q.asOf, currency: q.currency })}`, {}, signal);
 }
+
+// ---- Checks (FR-36.6) ----
+
+export const CHECK_STATUSES = ["created", "printed", "sent", "cleared", "voided", "stopped"] as const;
+export type CheckStatus = (typeof CHECK_STATUSES)[number];
+
+export interface Check {
+  id: string;
+  legalEntityId: string;
+  bankAccountId: string;
+  checkNumber: number;
+  payee: string;
+  amount: string;
+  currency: string;
+  status: CheckStatus;
+  voidReason?: string | null;
+  replacesId?: string | null;
+  replacedById?: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CheckInput {
+  bankAccountId: string;
+  payee: string;
+  amount: string;
+  currency: string;
+}
+
+/** Custom methods on a check; void and reprint need a reason. */
+export type CheckAction = "print" | "send" | "clear" | "stop" | "void" | "reprint";
+
+/** GET /checks?bankAccountId= - the check register of one account, newest number first. */
+export function listChecks(bankAccountId: string, signal?: AbortSignal): Promise<Check[]> {
+  return items<Check>(`/checks${query({ bankAccountId })}`, signal);
+}
+
+export function getCheck(id: string, signal?: AbortSignal): Promise<Check> {
+  return send<Check>(`/checks/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** POST /checks - takes the account's next gap-free number; the key makes a retry return the same check. */
+export function issueCheck(input: CheckInput, key: string = newKey()): Promise<Check> {
+  return send<Check>("/checks", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(input) });
+}
+
+/**
+ * POST /checks/{id}:<action> under If-Match. Void returns the voided check;
+ * reprint returns the new, printed check on the next number.
+ */
+export function runCheckAction(id: string, action: CheckAction, version: number, reason?: string): Promise<Check> {
+  const init: RequestInit = { method: "POST", headers: { "If-Match": `"${version}"` } };
+  if (action === "void" || action === "reprint") init.body = JSON.stringify({ reason: reason ?? "" });
+  return send<Check>(`/checks/${encodeURIComponent(id)}:${action}`, init);
+}
+
+// ---- Facilities, letters of credit and guarantees (FR-36.7) ----
+
+export const INSTRUMENT_KINDS = ["lc_import", "lc_export", "guarantee"] as const;
+export type InstrumentKind = (typeof INSTRUMENT_KINDS)[number];
+
+export interface Facility {
+  id: string;
+  legalEntityId: string;
+  code: string;
+  bankName: string;
+  currency: string;
+  limit: string;
+  utilized: string;
+  headroom: string;
+  expiryDate: string;
+  status: "active" | "closed";
+  version: number;
+  createdAt: string;
+}
+
+export interface FacilityInput {
+  legalEntityId: string;
+  code: string;
+  bankName: string;
+  currency: string;
+  limit: string;
+  expiryDate: string;
+}
+
+export interface FacilityInstrument {
+  id: string;
+  facilityId: string;
+  legalEntityId: string;
+  kind: InstrumentKind;
+  reference: string;
+  beneficiary: string;
+  currency: string;
+  amount: string;
+  issueDate: string;
+  expiryDate: string;
+  linkedOrderRef?: string | null;
+  status: "open" | "closed";
+  limitOverride: boolean;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface InstrumentInput {
+  kind: InstrumentKind;
+  reference: string;
+  beneficiary: string;
+  currency: string;
+  amount: string;
+  issueDate: string;
+  expiryDate: string;
+  linkedOrderRef?: string;
+  overrideLimit?: boolean;
+}
+
+export function listFacilities(legalEntityId: string, signal?: AbortSignal): Promise<Facility[]> {
+  return items<Facility>(`/facilities${query({ legalEntityId })}`, signal);
+}
+
+export function getFacility(id: string, signal?: AbortSignal): Promise<Facility> {
+  return send<Facility>(`/facilities/${encodeURIComponent(id)}`, {}, signal);
+}
+
+export function createFacility(input: FacilityInput, key: string = newKey()): Promise<Facility> {
+  return send<Facility>("/facilities", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(input) });
+}
+
+export function listInstruments(facilityId: string, signal?: AbortSignal): Promise<FacilityInstrument[]> {
+  return items<FacilityInstrument>(`/facilities/${encodeURIComponent(facilityId)}/instruments`, signal);
+}
+
+/** POST /facilities/{id}/instruments - TRS-0415 when the limit would be exceeded and no override was asked for. */
+export function createInstrument(facilityId: string, input: InstrumentInput, key: string = newKey()): Promise<FacilityInstrument> {
+  return send<FacilityInstrument>(`/facilities/${encodeURIComponent(facilityId)}/instruments`, {
+    method: "POST",
+    headers: { "Idempotency-Key": key },
+    body: JSON.stringify(input),
+  });
+}
+
+export function closeInstrument(id: string, version: number): Promise<FacilityInstrument> {
+  return send<FacilityInstrument>(`/facility-instruments/${encodeURIComponent(id)}:close`, { method: "POST", headers: { "If-Match": `"${version}"` } });
+}
+
+// ---- Loan contracts (FR-36.19) ----
+
+export const SCHEDULE_TYPES = ["Annuity", "Linear", "Bullet"] as const;
+export type ScheduleType = (typeof SCHEDULE_TYPES)[number];
+export const DAY_COUNTS = ["ACT/360", "ACT/365", "30/360"] as const;
+export type DayCount = (typeof DAY_COUNTS)[number];
+export const PERIOD_MONTHS = [1, 3, 6, 12] as const;
+export type PeriodMonths = (typeof PERIOD_MONTHS)[number];
+
+export interface ScheduleLine {
+  periodNo: number;
+  periodStart: string;
+  periodEnd: string;
+  days: number;
+  openingPrincipal: string;
+  interest: string;
+  principalRepayment: string;
+  closingPrincipal: string;
+}
+
+export interface Loan {
+  id: string;
+  legalEntityId: string;
+  role: "borrower" | "lender";
+  counterpartyName: string;
+  principal: string;
+  currency: string;
+  startDate: string;
+  maturityDate: string;
+  scheduleType: ScheduleType;
+  fixedRate: string;
+  dayCount: DayCount;
+  periodMonths: PeriodMonths;
+  status: "draft" | "active" | "repaid" | "terminated";
+  version: number;
+  createdAt: string;
+  schedule?: ScheduleLine[];
+}
+
+export interface LoanInput {
+  legalEntityId: string;
+  role: "borrower" | "lender";
+  counterpartyName: string;
+  principal: string;
+  currency: string;
+  startDate: string;
+  maturityDate: string;
+  scheduleType: ScheduleType;
+  fixedRate: string;
+  dayCount: DayCount;
+  periodMonths: PeriodMonths;
+}
+
+export function listLoans(legalEntityId: string, signal?: AbortSignal): Promise<Loan[]> {
+  return items<Loan>(`/loans${query({ legalEntityId })}`, signal);
+}
+
+export function getLoan(id: string, signal?: AbortSignal): Promise<Loan> {
+  return send<Loan>(`/loans/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** POST /loans - stores the contract and its generated schedule (TRS-0446 when the terms cannot produce one). */
+export function createLoan(input: LoanInput, key: string = newKey()): Promise<Loan> {
+  return send<Loan>("/loans", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(input) });
+}

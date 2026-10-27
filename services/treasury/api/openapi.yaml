@@ -1,12 +1,12 @@
 openapi: 3.1.0
 info:
-  title: Passage Treasury (slice 1, PSG-36)
-  version: 0.1.0
-  summary: Bank accounts, statement import, statement lines and cash forecast entries.
+  title: Passage Treasury (slices 1 and 3, PSG-36)
+  version: 0.3.0
+  summary: Bank accounts, statement import, cash forecast, checks, facilities with LCs and guarantees, and loan contracts.
   description: |
-    Wave 36 slice 1. Matching, reconciliation close, checks, instruments, deals,
-    loans, payment requests, bank connectivity and IHC endpoints are later slices
-    (see NOT-IMPLEMENTED.md). Errors are RFC 9457 problem details with a stable `code`.
+    Wave 36 slices 1 and 3. Matching, reconciliation close, bills of exchange, promissory
+    notes, postdated checks, deals, payment requests, bank connectivity and IHC endpoints
+    are later slices (see NOT-IMPLEMENTED.md). Errors are RFC 9457 problem details with a stable `code`.
 servers:
   - url: https://api.{env}.passage.dev
     variables:
@@ -289,6 +289,389 @@ paths:
               schema: {$ref: "#/components/schemas/Forecast"}
         "400": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/checks:
+    post:
+      operationId: issueCheck
+      summary: Issue a check on the next gap-free number of an active bank account (FR-36.6)
+      description: The check starts as created. Its currency must equal the account currency (TRS-0426); the account must be active (TRS-0412).
+      x-passage-duty: treasury.check.write
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/IssueCheckRequest"}
+      responses:
+        "201":
+          description: Check issued (or the stored check for a repeated key)
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Check"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    get:
+      operationId: listChecks
+      summary: Check register of a bank account, newest number first (at most 200)
+      x-passage-duty: treasury.view
+      parameters:
+        - name: bankAccountId
+          in: query
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Checks
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/Check"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/checks/{id}:
+    get:
+      operationId: getCheck
+      summary: Read a check
+      x-passage-duty: treasury.view
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Check
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Check"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/checks/{id}:print:
+    post:
+      operationId: printCheck
+      summary: Mark a created check printed
+      description: Allowed from created only (TRS-0420 otherwise).
+      x-passage-duty: treasury.check.write
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200": {$ref: "#/components/responses/CheckChanged"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/checks/{id}:send:
+    post:
+      operationId: sendCheck
+      summary: Record that a printed check left the company
+      description: Allowed from printed only (TRS-0420 otherwise). From here on a void also voids the positive pay record (BR-36.5).
+      x-passage-duty: treasury.check.write
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200": {$ref: "#/components/responses/CheckChanged"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/checks/{id}:clear:
+    post:
+      operationId: clearCheck
+      summary: Record that the bank paid a sent check
+      description: Allowed from sent only (TRS-0420 otherwise). A cleared check can no longer be voided (TRS-0414). Statement matching will clear checks automatically in a later slice.
+      x-passage-duty: treasury.check.write
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200": {$ref: "#/components/responses/CheckChanged"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/checks/{id}:stop:
+    post:
+      operationId: stopCheck
+      summary: Record a stop-payment order on a sent check
+      description: Allowed from sent only (TRS-0420 otherwise); a check still in hand is voided instead.
+      x-passage-duty: treasury.check.write
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200": {$ref: "#/components/responses/CheckChanged"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/checks/{id}:void:
+    post:
+      operationId: voidCheck
+      summary: Void a check; the number stays consumed
+      description: |
+        Allowed from created, printed, sent and stopped. A cleared check is TRS-0414 (BR-36.5).
+        Writes dev.passage.treasury.check.voided.v1 to the outbox in the same transaction;
+        positivePayVoid is true when the check was sent or stopped.
+      x-passage-duty: treasury.check.write
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CheckReasonRequest"}
+      responses:
+        "200": {$ref: "#/components/responses/CheckChanged"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/checks/{id}:reprint:
+    post:
+      operationId: reprintCheck
+      summary: Void a check and issue a printed replacement on the next number (AC-36.5)
+      description: |
+        One transaction: the old check is voided (check.voided.v1 written), and a new check with the
+        same payee, amount and currency is printed on the next number and points back with replacesId.
+        If-Match is the old check's ETag; the response is the new check.
+      x-passage-duty: treasury.check.write
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CheckReasonRequest"}
+      responses:
+        "201":
+          description: The new, printed check
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Check"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/facilities:
+    post:
+      operationId: createFacility
+      summary: Register a bank facility with its limit and expiry (FR-36.7)
+      x-passage-duty: treasury.facility.write
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateFacilityRequest"}
+      responses:
+        "201":
+          description: Facility stored (or the stored facility for a repeated key)
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Facility"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    get:
+      operationId: listFacilities
+      summary: Facilities of a legal entity with utilization and headroom
+      x-passage-duty: treasury.view
+      parameters:
+        - name: legalEntityId
+          in: query
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Facilities
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/Facility"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/facilities/{id}:
+    get:
+      operationId: getFacility
+      summary: Read a facility with utilization and headroom
+      x-passage-duty: treasury.view
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Facility
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Facility"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/facilities/{id}/instruments:
+    post:
+      operationId: createFacilityInstrument
+      summary: Book a letter of credit or guarantee on a facility (FR-36.7, AC-36.6)
+      description: |
+        Refused with TRS-0415 when utilization + amount exceeds the limit, unless overrideLimit is true
+        and the caller holds treasury.facility.override (403 AUTH-0003 without it). The facility must be
+        active and not expired on the issue date (TRS-0429); the currency must equal the facility currency (TRS-0430).
+      x-passage-duty: treasury.facility.write
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateInstrumentRequest"}
+      responses:
+        "201":
+          description: Instrument booked as open (or the stored instrument for a repeated key)
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/FacilityInstrument"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    get:
+      operationId: listFacilityInstruments
+      summary: Instruments booked on a facility, oldest first
+      x-passage-duty: treasury.view
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Instruments
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/FacilityInstrument"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/facility-instruments/{id}:close:
+    post:
+      operationId: closeFacilityInstrument
+      summary: Close an open instrument and release it from utilization
+      description: Allowed from open only (TRS-0434 otherwise).
+      x-passage-duty: treasury.facility.write
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: Instrument closed; the version (ETag) is incremented
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/FacilityInstrument"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/loans:
+    post:
+      operationId: createLoan
+      summary: Record a fixed-rate loan contract and generate its schedule (FR-36.19)
+      description: |
+        Maturity must fall a whole number of periods after the start date (month ends clamp, so
+        31 January plus one month is 28/29 February); otherwise TRS-0446. Interest per period =
+        opening principal x rate x days / basis, rounded half-up to the currency minor unit (BR-36.15).
+      x-passage-duty: treasury.loan.write
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateLoanRequest"}
+      responses:
+        "201":
+          description: Loan and schedule stored (or the stored loan for a repeated key)
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Loan"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    get:
+      operationId: listLoans
+      summary: Loan contracts of a legal entity, newest start first (without schedules)
+      x-passage-duty: treasury.view
+      parameters:
+        - name: legalEntityId
+          in: query
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Loans
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/Loan"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+  /v1/treasury/loans/{id}:
+    get:
+      operationId: getLoan
+      summary: Read a loan contract with its schedule
+      x-passage-duty: treasury.view
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Loan
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Loan"}
+        "404": {$ref: "#/components/responses/Problem"}
 components:
   parameters:
     Id:
@@ -306,13 +689,20 @@ components:
       name: If-Match
       in: header
       required: true
-      description: ETag of the account as last read (428 when absent, 412 when stale)
+      description: ETag of the resource as last read (428 when absent, 412 when stale)
       schema: {type: string}
   headers:
     ETag:
       description: Version of the resource, quoted integer
       schema: {type: string}
   responses:
+    CheckChanged:
+      description: New status stored; the version (ETag) is incremented
+      headers:
+        ETag: {$ref: "#/components/headers/ETag"}
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Check"}
     Problem:
       description: RFC 9457 problem
       content:
@@ -439,6 +829,155 @@ components:
               net: {$ref: "#/components/schemas/Money"}
               cumulative: {$ref: "#/components/schemas/Money"}
         outOfHorizon: {type: integer, minimum: 0}
+    PositiveMoney:
+      type: string
+      pattern: "^[0-9]{1,14}(\\.[0-9]{1,4})?$"
+      description: Positive decimal string with at most the currency's minor-unit places (two for EUR, none for JPY)
+    IssueCheckRequest:
+      type: object
+      required: [bankAccountId, payee, amount, currency]
+      additionalProperties: false
+      properties:
+        bankAccountId: {type: string, format: uuid}
+        payee: {type: string, minLength: 1, maxLength: 140}
+        amount: {$ref: "#/components/schemas/PositiveMoney"}
+        currency: {type: string, pattern: "^[A-Z]{3}$"}
+    CheckReasonRequest:
+      type: object
+      required: [reason]
+      additionalProperties: false
+      properties:
+        reason: {type: string, minLength: 1, maxLength: 200}
+    Check:
+      type: object
+      required: [id, legalEntityId, bankAccountId, checkNumber, payee, amount, currency, status, version, createdAt, updatedAt]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        bankAccountId: {type: string, format: uuid}
+        checkNumber: {type: integer, minimum: 1, description: Gap-free per bank account}
+        payee: {type: string}
+        amount: {$ref: "#/components/schemas/Money"}
+        currency: {type: string}
+        status: {type: string, enum: [created, printed, sent, cleared, voided, stopped]}
+        voidReason: {type: string}
+        replacesId: {type: string, format: uuid, description: The voided check this reprint replaces}
+        replacedById: {type: string, format: uuid, description: The reprint that replaced this voided check}
+        version: {type: integer, minimum: 1}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    CreateFacilityRequest:
+      type: object
+      required: [legalEntityId, code, bankName, currency, limit, expiryDate]
+      additionalProperties: false
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        code: {type: string, pattern: "^[A-Z0-9-]{1,20}$"}
+        bankName: {type: string, minLength: 1, maxLength: 120}
+        currency: {type: string, pattern: "^[A-Z]{3}$"}
+        limit: {$ref: "#/components/schemas/PositiveMoney"}
+        expiryDate: {type: string, format: date}
+    Facility:
+      type: object
+      required: [id, legalEntityId, code, bankName, currency, limit, utilized, headroom, expiryDate, status, version, createdAt]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        code: {type: string}
+        bankName: {type: string}
+        currency: {type: string}
+        limit: {$ref: "#/components/schemas/Money"}
+        utilized: {$ref: "#/components/schemas/Money", description: Sum of open instruments}
+        headroom: {$ref: "#/components/schemas/Money", description: Limit minus utilization, never below zero}
+        expiryDate: {type: string, format: date}
+        status: {type: string, enum: [active, closed]}
+        version: {type: integer, minimum: 1}
+        createdAt: {type: string, format: date-time}
+    CreateInstrumentRequest:
+      type: object
+      required: [kind, reference, beneficiary, currency, amount, issueDate, expiryDate]
+      additionalProperties: false
+      properties:
+        kind: {type: string, enum: [lc_import, lc_export, guarantee]}
+        reference: {type: string, minLength: 1, maxLength: 64}
+        beneficiary: {type: string, minLength: 1, maxLength: 140}
+        currency: {type: string, pattern: "^[A-Z]{3}$"}
+        amount: {$ref: "#/components/schemas/PositiveMoney"}
+        issueDate: {type: string, format: date}
+        expiryDate: {type: string, format: date, description: Not before issueDate}
+        linkedOrderRef: {type: string, maxLength: 64, description: Purchase or sales order the instrument secures}
+        overrideLimit: {type: boolean, default: false, description: Book past the limit; needs treasury.facility.override}
+    FacilityInstrument:
+      type: object
+      required: [id, facilityId, legalEntityId, kind, reference, beneficiary, currency, amount, issueDate, expiryDate, status, limitOverride, version, createdAt, updatedAt]
+      properties:
+        id: {type: string, format: uuid}
+        facilityId: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        kind: {type: string, enum: [lc_import, lc_export, guarantee]}
+        reference: {type: string}
+        beneficiary: {type: string}
+        currency: {type: string}
+        amount: {$ref: "#/components/schemas/Money"}
+        issueDate: {type: string, format: date}
+        expiryDate: {type: string, format: date}
+        linkedOrderRef: {type: string}
+        status: {type: string, enum: [open, closed]}
+        limitOverride: {type: boolean, description: True when the instrument was booked past the limit under the override duty}
+        version: {type: integer, minimum: 1}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    CreateLoanRequest:
+      type: object
+      required: [legalEntityId, role, counterpartyName, principal, currency, startDate, maturityDate, scheduleType, fixedRate, dayCount, periodMonths]
+      additionalProperties: false
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        role: {type: string, enum: [borrower, lender]}
+        counterpartyName: {type: string, minLength: 1, maxLength: 140}
+        principal: {$ref: "#/components/schemas/PositiveMoney"}
+        currency: {type: string, pattern: "^[A-Z]{3}$"}
+        startDate: {type: string, format: date}
+        maturityDate: {type: string, format: date}
+        scheduleType: {type: string, enum: [Annuity, Linear, Bullet]}
+        fixedRate: {type: string, pattern: "^(0(\\.[0-9]{1,6})?|1(\\.0{1,6})?)$", description: Annual rate as a fraction, 0.03 for 3.00%}
+        dayCount: {type: string, enum: ["ACT/360", "ACT/365", "30/360"]}
+        periodMonths: {type: integer, enum: [1, 3, 6, 12]}
+    LoanScheduleLine:
+      type: object
+      required: [periodNo, periodStart, periodEnd, days, openingPrincipal, interest, principalRepayment, closingPrincipal]
+      properties:
+        periodNo: {type: integer, minimum: 1}
+        periodStart: {type: string, format: date}
+        periodEnd: {type: string, format: date}
+        days: {type: integer, minimum: 1, description: Accrual days under the day-count convention}
+        openingPrincipal: {$ref: "#/components/schemas/Money"}
+        interest: {$ref: "#/components/schemas/Money"}
+        principalRepayment: {$ref: "#/components/schemas/Money"}
+        closingPrincipal: {$ref: "#/components/schemas/Money"}
+    Loan:
+      type: object
+      required: [id, legalEntityId, role, counterpartyName, principal, currency, startDate, maturityDate, scheduleType, fixedRate, dayCount, periodMonths, status, version, createdAt]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        role: {type: string, enum: [borrower, lender]}
+        counterpartyName: {type: string}
+        principal: {$ref: "#/components/schemas/Money"}
+        currency: {type: string}
+        startDate: {type: string, format: date}
+        maturityDate: {type: string, format: date}
+        scheduleType: {type: string, enum: [Annuity, Linear, Bullet]}
+        fixedRate: {type: string}
+        dayCount: {type: string, enum: ["ACT/360", "ACT/365", "30/360"]}
+        periodMonths: {type: integer, enum: [1, 3, 6, 12]}
+        status: {type: string, enum: [draft, active, repaid, terminated]}
+        version: {type: integer, minimum: 1}
+        createdAt: {type: string, format: date-time}
+        schedule:
+          type: array
+          description: Present on create and get; omitted in the list
+          items: {$ref: "#/components/schemas/LoanScheduleLine"}
     Problem:
       type: object
       required: [type, title, status, code]

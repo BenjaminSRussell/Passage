@@ -8,31 +8,38 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/treasury/internal/store"
 )
 
 const (
-	readyTimeout       = 500 * time.Millisecond
-	idempotencyKey     = "Idempotency-Key"
-	dutyView           = "treasury.view"
-	dutyAccountWrite   = "treasury.bank-account.write"
-	dutyAccountApprove = "treasury.bank-account.approve"
-	dutyStatement      = "treasury.statement.import"
-	dutyForecast       = "treasury.forecast.write"
-	validationDetail   = "request failed validation"
-	defaultMaxFileMB   = 50
-	maxFileMBLimit     = 200
+	readyTimeout         = 500 * time.Millisecond
+	idempotencyKey       = "Idempotency-Key"
+	dutyView             = "treasury.view"
+	dutyAccountWrite     = "treasury.bank-account.write"
+	dutyAccountApprove   = "treasury.bank-account.approve"
+	dutyStatement        = "treasury.statement.import"
+	dutyForecast         = "treasury.forecast.write"
+	dutyCheckWrite       = "treasury.check.write"
+	dutyFacilityWrite    = "treasury.facility.write"
+	dutyFacilityOverride = "treasury.facility.override"
+	dutyLoanWrite        = "treasury.loan.write"
+	validationDetail     = "request failed validation"
+	defaultMaxFileMB     = 50
+	maxFileMBLimit       = 200
 )
 
 // API holds the handlers' dependencies and counters for /metrics.
@@ -48,6 +55,11 @@ type API struct {
 	statementsRejected   atomic.Int64
 	forecastEntries      atomic.Int64
 	forecastsBuilt       atomic.Int64
+	checksIssued         atomic.Int64
+	checksVoided         atomic.Int64
+	instrumentsBooked    atomic.Int64
+	limitOverrides       atomic.Int64
+	loansCreated         atomic.Int64
 }
 
 // New returns the API over s with the default 50 MB statement upload limit.
@@ -80,6 +92,24 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/treasury/statements/{id}/lines", a.listStatementLines)
 	r.With(authz.RequireDuty(dutyForecast)).Post("/v1/treasury/cash-forecast-entries", a.createForecastEntry)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/treasury/cash-forecast", a.cashForecast)
+	r.With(authz.RequireDuty(dutyCheckWrite)).Post("/v1/treasury/checks", a.issueCheck)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/treasury/checks", a.listChecks)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/treasury/checks/{id}", a.getCheck)
+	r.With(authz.RequireDuty(dutyCheckWrite)).Post("/v1/treasury/checks/{id}:print", a.printCheck)
+	r.With(authz.RequireDuty(dutyCheckWrite)).Post("/v1/treasury/checks/{id}:send", a.sendCheck)
+	r.With(authz.RequireDuty(dutyCheckWrite)).Post("/v1/treasury/checks/{id}:clear", a.clearCheck)
+	r.With(authz.RequireDuty(dutyCheckWrite)).Post("/v1/treasury/checks/{id}:void", a.voidCheck)
+	r.With(authz.RequireDuty(dutyCheckWrite)).Post("/v1/treasury/checks/{id}:reprint", a.reprintCheck)
+	r.With(authz.RequireDuty(dutyCheckWrite)).Post("/v1/treasury/checks/{id}:stop", a.stopCheck)
+	r.With(authz.RequireDuty(dutyFacilityWrite)).Post("/v1/treasury/facilities", a.createFacility)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/treasury/facilities", a.listFacilities)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/treasury/facilities/{id}", a.getFacility)
+	r.With(authz.RequireDuty(dutyFacilityWrite)).Post("/v1/treasury/facilities/{id}/instruments", a.createInstrument)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/treasury/facilities/{id}/instruments", a.listInstruments)
+	r.With(authz.RequireDuty(dutyFacilityWrite)).Post("/v1/treasury/facility-instruments/{id}:close", a.closeInstrument)
+	r.With(authz.RequireDuty(dutyLoanWrite)).Post("/v1/treasury/loans", a.createLoan)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/treasury/loans", a.listLoans)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/treasury/loans/{id}", a.getLoan)
 }
 
 // Metrics serves the counters in Prometheus text format on the admin port.
@@ -97,6 +127,11 @@ func (a *API) Metrics() http.Handler {
 			{"treasury_statements_rejected_total", "Statement uploads rejected by parsing or rules.", a.statementsRejected.Load()},
 			{"treasury_forecast_entries_total", "Cash forecast entries created.", a.forecastEntries.Load()},
 			{"treasury_forecasts_built_total", "Cash forecasts computed.", a.forecastsBuilt.Load()},
+			{"treasury_checks_issued_total", "Checks issued or reprinted on a new number.", a.checksIssued.Load()},
+			{"treasury_checks_voided_total", "Checks voided, including the old check of a reprint.", a.checksVoided.Load()},
+			{"treasury_facility_instruments_total", "Letters of credit and guarantees booked on a facility.", a.instrumentsBooked.Load()},
+			{"treasury_facility_limit_overrides_total", "Instrument requests that asked to override the facility limit.", a.limitOverrides.Load()},
+			{"treasury_loans_created_total", "Loan contracts created with their schedule.", a.loansCreated.Load()},
 		} {
 			fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s counter\n%s %d\n", m.name, m.help, m.name, m.name, m.value)
 		}
@@ -129,6 +164,32 @@ func validTenant(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	return true
+}
+
+// outsideScope refuses (403) a create for a legal entity other than the one a
+// scoped caller works in. Row-level security would refuse the insert anyway,
+// but as an unhandled SQLSTATE 42501 that reached the client as a 500.
+func outsideScope(w http.ResponseWriter, r *http.Request, legalEntityID string) bool {
+	if p, _ := tenant.FromContext(r.Context()); p.LegalEntityID != "" && p.LegalEntityID != legalEntityID {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "the legal entity is outside the caller's scope"))
+		return true
+	}
+	return false
+}
+
+// maxAmount bounds amounts to the 14 integer digits of numeric(20,6).
+var maxAmount = decimal.New(1, 14)
+
+// parseAmount reads a positive decimal string with no more places than the
+// currency's minor unit (two for EUR, none for JPY), so a check or facility
+// amount is never silently rounded by the database. An unknown currency is
+// checked against two places; the currency itself is validated separately.
+func parseAmount(raw, currency string) (decimal.Decimal, bool) {
+	d, err := decimal.NewFromString(strings.TrimSpace(raw))
+	if err != nil || !d.IsPositive() || !d.LessThan(maxAmount) {
+		return decimal.Zero, false
+	}
+	return d, d.Equal(d.Round(money.MinorUnits(currency)))
 }
 
 func validationFailed(w http.ResponseWriter, r *http.Request, fields map[string]string) {

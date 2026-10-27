@@ -314,6 +314,9 @@ export function BankAccountDetailPage() {
                 Import statement
               </Link>
             ) : null}
+            <Link className={buttonClassName("secondary")} to={`/treasury/checks?bankAccountId=${acct.id}`}>
+              Checks
+            </Link>
             <Link className={buttonClassName("ghost")} to={`/treasury?legalEntityId=${acct.legalEntityId}`}>
               All accounts
             </Link>

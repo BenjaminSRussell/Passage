@@ -93,6 +93,9 @@ func (a *API) createBankAccount(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
+	if outsideScope(w, r, req.LegalEntityID) {
+		return
+	}
 	if err := domain.ValidateIBAN(req.IBAN); err != nil {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, "TRS-0401", "IBAN fails the mod-97 check or has an invalid shape"))
 		return
@@ -397,6 +400,9 @@ func (a *API) createForecastEntry(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
+		return
+	}
+	if outsideScope(w, r, req.LegalEntityID) {
 		return
 	}
 	entry, err := a.store.CreateForecastEntry(r.Context(), store.ForecastEntry{

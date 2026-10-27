@@ -1,9 +1,11 @@
 # treasury
 
-Treasury bounded context (Go). Wave 36, slice 1 (PSG-36): bank accounts and
+Treasury bounded context (Go). Wave 36 (PSG-36), slice 1: bank accounts and
 their lifecycle, bank statement import (camt.053), the cash forecast, and the
-pure matching-score engine (domain only, not yet behind an API). Screens live
-in `apps/web/src/modules/treasury`.
+pure matching-score engine (domain only, not yet behind an API). Slice 3:
+checks with gap-free numbers, void and reprint; bank facilities with letters
+of credit and guarantees under a limit; fixed-rate loan contracts with their
+schedules. Screens live in `apps/web/src/modules/treasury`.
 
 ## Run
 
@@ -31,12 +33,16 @@ always run, including the OpenAPI-matches-routes contract test.
 
 ## Layout
 
-- `internal/domain`: bank accounts, statement and forecast invariants (pure, no I/O).
+- `internal/domain`: bank accounts, statement and forecast invariants, the check
+  lifecycle, the facility limit rule, day counts and loan schedules (pure, no I/O).
 - `internal/store`: pgx repositories, tenant-scoped transactions (RLS).
 - `internal/api`: HTTP handlers, RFC 9457 problems, idempotency and `If-Match`.
 - `internal/events`: event type constants and payloads.
 - `migrations/0001_init.sql`: tables `bank_account`, `bank_statement`,
   `bank_statement_line`, `cash_forecast_entry`, `idempotency_keys`, `outbox`.
+- `migrations/0002_checks_facilities_loans.sql`: `bank_account.next_check_number`
+  and tables `bank_check`, `treasury_facility`, `treasury_facility_instrument`,
+  `treasury_loan`, `treasury_loan_schedule_line`.
   Every tenant table has `tenant_id` first, RLS enabled and forced, and the
   legal-entity scope policy where it carries `legal_entity_id`.
 - `api/openapi.yaml`, `events/asyncapi.yaml`: contracts.
@@ -44,19 +50,41 @@ always run, including the OpenAPI-matches-routes contract test.
 
 ## Routes
 
-Bank accounts, statements, and cash forecast under `/v1/treasury/...`. See
-`api/openapi.yaml` for the full list. `POST bank-accounts` and
-`POST cash-forecast-entries` require `Idempotency-Key` (stored in
-`idempotency_keys` in the same transaction as the insert). `:activate`,
-`:deactivate` and `:close` require `If-Match` with the account ETag and the
-`treasury.bank-account.approve` duty. Statement import is idempotent on the
-file's SHA-256 (BR-36.8).
+Bank accounts, statements, cash forecast, checks, facilities and loans under
+`/v1/treasury/...`. See `api/openapi.yaml` for the full list. Every `POST` that
+creates something (`bank-accounts`, `cash-forecast-entries`, `checks`,
+`facilities`, `facilities/{id}/instruments`, `loans`) requires
+`Idempotency-Key` (stored in `idempotency_keys` in the same transaction as the
+insert). Custom methods (`:activate`, `:deactivate`, `:close` on accounts;
+`:print`, `:send`, `:clear`, `:stop`, `:void`, `:reprint` on checks; `:close`
+on facility instruments) require `If-Match` with the resource ETag. Statement
+import is idempotent on the file's SHA-256 (BR-36.8).
+
+Checks: the number comes from `bank_account.next_check_number` under a row
+lock, so numbers are gap-free per account; a void keeps the number, a reprint
+voids the old check and prints a new one on the next number in one
+transaction. Every void writes `dev.passage.treasury.check.voided.v1` to the
+outbox; `positivePayVoid` is true when the check was sent or stopped (BR-36.5).
+
+Facilities: utilization is the sum of open instruments; an instrument that
+would take utilization past the limit is refused (TRS-0415) unless the
+request sets `overrideLimit` and the caller holds `treasury.facility.override`
+(AC-36.6). The facility row is locked while booking, so concurrent instruments
+cannot both pass the limit.
+
+Loans: the handler builds the schedule (`domain.BuildSchedule`) and the store
+keeps it with the contract. Interest per period is opening principal × rate ×
+days / basis (ACT/360, ACT/365 or 30E/360), rounded half-up to the currency
+minor unit; the last period repays the remaining principal (BR-36.15).
 
 Duties: `treasury.view`, `treasury.bank-account.write`,
 `treasury.bank-account.approve`, `treasury.statement.import`,
-`treasury.forecast.write` (the PRD's `TreasuryView`,
-`TreasuryBankAccountMaintain` and `TreasuryStatementImport` in the kernel's
-dotted naming).
+`treasury.forecast.write`, `treasury.check.write`, `treasury.facility.write`,
+`treasury.facility.override`, `treasury.loan.write` (the PRD's `TreasuryView`,
+`TreasuryBankAccountMaintain`, `TreasuryStatementImport`,
+`TreasuryCheckMaintain`, `TreasuryFacilityMaintain`,
+`TreasuryFacilityOverride` and `TreasuryLoanMaintain` in the kernel's dotted
+naming).
 
 ## Error codes
 
@@ -76,15 +104,29 @@ Problems use `type` `https://passage.dev/problems/<code>` and carry `code` and
 | `TRS-0407` | 201 (warning) | electronic sequence number skips numbers; returned in `warnings`, the statement is stored |
 | `TRS-0408` | 422 | statement currency differs from the account currency |
 | `TRS-0409` | 422 | statement IBAN is not the bank account it was uploaded to |
-| `TRS-0412` | 422 | statements can only be imported into an active account |
+| `TRS-0412` | 422 | statements can only be imported into, and checks issued on, an active account |
 | `TRS-0413` | 404 | statement not found |
+| `TRS-0414` | 422 | a cleared check cannot be voided or reprinted (BR-36.5) |
+| `TRS-0415` | 422 | facility limit exceeded by the amount in `detail` (FR-36.7) |
 | `TRS-0417` | 422 | account status does not allow the requested transition |
+| `TRS-0420` | 422 | check status does not allow the requested action |
+| `TRS-0423` | 404 | check not found |
+| `TRS-0426` | 422 | check currency differs from the bank account currency |
+| `TRS-0427` | 409 | duplicate facility code for the legal entity |
+| `TRS-0428` | 404 | facility not found |
+| `TRS-0429` | 422 | facility is not active, or expired before the instrument's issue date |
+| `TRS-0430` | 422 | instrument currency differs from the facility currency |
+| `TRS-0434` | 422 | instrument is not open |
+| `TRS-0435` | 404 | facility instrument not found |
+| `TRS-0446` | 422 | loan terms cannot produce a schedule (maturity not a whole number of periods, instalment below interest) |
+| `TRS-0447` | 404 | loan contract not found |
 | `TRS-0490` | 413 | statement file exceeds `TREASURY_MAX_FILE_MB` |
 | `TRS-0491` | 400 | statement file could not be read |
 | `TRS-0493` | 422 | statement cannot be parsed (camt.053 only; one Stmt per file) |
 | `TRS-0494` | 422 | opening balance plus lines does not equal closing balance |
 | `conflict_version` | 412 | `If-Match` does not match the current ETag |
-| `precondition_required` | 428 | `If-Match` is required on activate, deactivate and close |
+| `precondition_required` | 428 | `If-Match` is required on every custom method |
+| `AUTH-0003` | 403 | missing duty, including `treasury.facility.override` when `overrideLimit` is set; or a legal-entity-scoped caller creating a bank account, forecast entry, facility or loan for another legal entity |
 | `idempotency_key_reuse` | 422 | `Idempotency-Key` reused with a different body |
 
 ## Dependencies

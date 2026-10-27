@@ -47,3 +47,47 @@ export function dateTime(iso: string | undefined): string {
 export function today(now: Date = new Date()): string {
   return now.toISOString().slice(0, 10);
 }
+
+/** A positive decimal with up to six places; the service also refuses more places than the currency's minor unit. */
+export const POSITIVE_DECIMAL = /^(?!0+(\.0+)?$)\d{1,14}(\.\d{1,6})?$/;
+
+/** ISO 4217 exponents that differ from two, the same table as platform/go/money. */
+const MINOR_UNITS: Record<string, number> = {
+  BHD: 3, IQD: 3, JOD: 3, KWD: 3, LYD: 3, OMR: 3, TND: 3,
+  BIF: 0, CLP: 0, DJF: 0, GNF: 0, ISK: 0, JPY: 0, KMF: 0, KRW: 0, PYG: 0, RWF: 0, UGX: 0, UYI: 0, VND: 0, VUV: 0, XAF: 0, XOF: 0, XPF: 0,
+  CLF: 4, UYW: 4,
+};
+
+export function minorUnits(currency: string): number {
+  return MINOR_UNITS[currency] ?? 2;
+}
+
+/** A positive amount with no more places than the currency allows (two for EUR, none for JPY). */
+export function validAmount(amount: string, currency: string): boolean {
+  const value = amount.trim();
+  if (!POSITIVE_DECIMAL.test(value)) return false;
+  const places = value.includes(".") ? value.split(".")[1].replace(/0+$/, "").length : 0;
+  return places <= minorUnits(currency.trim());
+}
+
+/** "3.125%" from the service's fraction "0.03125", by moving the decimal point; no float arithmetic. */
+export function percent(fraction: string): string {
+  const [whole, frac = ""] = fraction.trim().split(".");
+  const point = whole.length + 2;
+  const padded = whole + frac.padEnd(2, "0");
+  const intPart = padded.slice(0, point).replace(/^0+(?=\d)/, "");
+  const fracPart = padded.slice(point).replace(/0+$/, "");
+  return `${intPart}${fracPart ? `.${fracPart}` : ""}%`;
+}
+
+/** A rate in percent with up to four places (the service stores the fraction with six). */
+export const PERCENT = /^\d{1,3}(\.\d{1,4})?$/;
+
+/** "0.03125" from "3.125" (percent to the service's fraction), by moving the decimal point. */
+export function fractionFromPercent(pct: string): string {
+  const [whole, frac = ""] = pct.trim().split(".");
+  const padded = whole.padStart(3, "0");
+  const intPart = padded.slice(0, -2).replace(/^0+(?=\d)/, "");
+  const fracPart = (padded.slice(-2) + frac).replace(/0+$/, "");
+  return fracPart ? `${intPart}.${fracPart}` : intPart;
+}

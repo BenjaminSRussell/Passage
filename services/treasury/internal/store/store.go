@@ -1,4 +1,5 @@
-// Package store persists bank accounts, statements and forecast entries.
+// Package store persists bank accounts, statements, forecast entries, checks,
+// facilities with their instruments, and loan contracts.
 // Every query runs inside dbx.WithTenantTx, so row-level security scopes
 // rows to the caller's tenant and legal entities.
 package store
@@ -145,6 +146,24 @@ type Store interface {
 	ListStatementLines(ctx context.Context, statementID string, afterLineNo, limit int) ([]StatementLine, error)
 	CreateForecastEntry(ctx context.Context, in ForecastEntry, idempotencyKey string) (ForecastEntry, error)
 	ListForecastEntries(ctx context.Context, legalEntityID, currency, from, to string) ([]ForecastEntry, error)
+	IssueCheck(ctx context.Context, in NewCheck, idempotencyKey string) (Check, error)
+	ListChecks(ctx context.Context, bankAccountID string) ([]Check, error)
+	GetCheck(ctx context.Context, id string) (Check, error)
+	PrintCheck(ctx context.Context, id string, version int) (Check, error)
+	SendCheck(ctx context.Context, id string, version int) (Check, error)
+	ClearCheck(ctx context.Context, id string, version int) (Check, error)
+	VoidCheck(ctx context.Context, id string, version int, reason string) (Check, error)
+	ReprintCheck(ctx context.Context, id string, version int, reason string) (Check, error)
+	StopCheck(ctx context.Context, id string, version int) (Check, error)
+	CreateFacility(ctx context.Context, in NewFacility, idempotencyKey string) (Facility, error)
+	ListFacilities(ctx context.Context, legalEntityID string) ([]Facility, error)
+	GetFacility(ctx context.Context, id string) (Facility, error)
+	CreateInstrument(ctx context.Context, in NewInstrument, overrideLimit bool, idempotencyKey string) (Instrument, error)
+	ListInstruments(ctx context.Context, facilityID string) ([]Instrument, error)
+	CloseInstrument(ctx context.Context, id string, version int) (Instrument, error)
+	CreateLoan(ctx context.Context, in NewLoan, idempotencyKey string) (Loan, error)
+	ListLoans(ctx context.Context, legalEntityID string) ([]Loan, error)
+	GetLoan(ctx context.Context, id string) (Loan, error)
 	Ping(ctx context.Context) error
 }
 

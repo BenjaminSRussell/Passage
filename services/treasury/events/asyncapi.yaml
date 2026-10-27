@@ -1,13 +1,13 @@
 asyncapi: 3.0.0
 info:
-  title: Passage Treasury events (slice 1, PSG-36)
-  version: 0.1.0
+  title: Passage Treasury events (slices 1 and 3, PSG-36)
+  version: 0.3.0
   description: |
     CloudEvents 1.0 structured envelope from platform/go/events (extensions
     tenantid, correlationid, causationid, actor). Written to the transactional
     outbox in the same transaction as the state change; the outbox aggregate is
-    the statement id, so events of one statement stay ordered. Other event types of the treasury context
-    (reconciled, check.voided, cashposition, instrument, deal, ...) are later slices.
+    the statement or check id, so events of one aggregate stay ordered. Other event types of the
+    treasury context (reconciled, cashposition, instrument, pdc, deal, ...) are later slices.
 defaultContentType: application/json
 channels:
   statementImported:
@@ -16,7 +16,20 @@ channels:
     messages:
       statementImported:
         $ref: "#/components/messages/StatementImported"
+  checkVoided:
+    address: passage.treasury.check
+    description: Topic for treasury check events (Debezium outbox router).
+    messages:
+      checkVoided:
+        $ref: "#/components/messages/CheckVoided"
 operations:
+  publishCheckVoided:
+    action: send
+    channel:
+      $ref: "#/channels/checkVoided"
+    summary: A check was voided (directly or by a reprint); AP positive pay consumes it.
+    messages:
+      - $ref: "#/channels/checkVoided/messages/checkVoided"
   publishStatementImported:
     action: send
     channel:
@@ -56,3 +69,31 @@ components:
               lineCount: {type: integer, minimum: 0}
               openingBalance: {type: string, description: decimal string}
               closingBalance: {type: string, description: decimal string}
+    CheckVoided:
+      name: dev.passage.treasury.check.voided.v1
+      title: Check voided
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [specversion, id, source, type, time, datacontenttype, tenantid, data]
+        properties:
+          specversion: {type: string, const: "1.0"}
+          type: {type: string, const: dev.passage.treasury.check.voided.v1}
+          source: {type: string, const: /passage/treasury/treasury}
+          id: {type: string}
+          subject: {type: string, description: check id}
+          time: {type: string, format: date-time}
+          datacontenttype: {type: string, const: application/json}
+          tenantid: {type: string, format: uuid}
+          correlationid: {type: string}
+          causationid: {type: string}
+          actor: {type: string}
+          data:
+            type: object
+            required: [checkId, bankAccountId, number, reason, positivePayVoid]
+            properties:
+              checkId: {type: string, format: uuid}
+              bankAccountId: {type: string, format: uuid}
+              number: {type: integer, minimum: 1, description: check number, which stays consumed}
+              reason: {type: string}
+              positivePayVoid: {type: boolean, description: "true when the check was sent or stopped, so the bank's positive pay file needs a void record (BR-36.5)"}
