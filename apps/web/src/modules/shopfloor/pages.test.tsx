@@ -200,6 +200,7 @@ describe("Worker detail", () => {
       offline: true,
       note: null,
       clockOffsetSeconds: null,
+      flags: [],
     },
     {
       id: "0195f0a0-0000-7000-8000-0000000000a2",
@@ -218,6 +219,7 @@ describe("Worker detail", () => {
       offline: true,
       note: null,
       clockOffsetSeconds: 420,
+      flags: [],
     },
   ];
 
@@ -399,6 +401,7 @@ describe("Bundle detail", () => {
     offline: offset !== null,
     note: null,
     clockOffsetSeconds: offset,
+    flags: [],
   });
 
   it("shows the jobs with their hours share and the bundle total, worked once", async () => {
@@ -419,6 +422,19 @@ describe("Bundle detail", () => {
     expect(screen.getByRole("link", { name: "Ana Silva" })).toHaveAttribute("href", `/shopfloor/workers/${ANA}`);
     expect(screen.getByRole("link", { name: "Back to Ana Silva" })).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("marks the job-stops the server wrote when the worker started another job (FR-25.3)", async () => {
+    const stopped = { ...job("0195f0a0-0000-7000-8000-0000000000d4", JOB1, "0", "24.00", null), flags: ["auto-stopped", "auto-stop-capped"] as Registration["flags"] };
+    handler = (url) => {
+      if (url.pathname.endsWith("/registrations")) return json(200, { items: [stopped] });
+      if (url.pathname.endsWith(`/workers/${ANA}`)) return json(200, workers[0]);
+      return undefined;
+    };
+    renderAt(`/shopfloor/bundles/${BUNDLE}`);
+    const table = await screen.findByRole("table", { name: "Bundle jobs" });
+    expect(table).toHaveTextContent("Auto-stopped");
+    expect(table).toHaveTextContent("Capped at 24 h");
   });
 
   it("shows a running bundle without a total", async () => {

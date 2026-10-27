@@ -71,10 +71,16 @@ type Registration struct {
 	ClockOffsetSeconds *int64
 }
 
-// RegistrationResult reports whether an item was stored or was a replay.
+// RegistrationResult reports whether an item was stored or was a replay. For an
+// accepted job-start it also carries the review flags stored on it, the jobs it
+// stopped automatically and the matching catalog warnings (FR-25.3, BR-25.7). A
+// replay changes nothing, so it carries none of them.
 type RegistrationResult struct {
-	ID     string `json:"id"`
-	Status string `json:"status"`
+	ID          string     `json:"id"`
+	Status      string     `json:"status"`
+	Flags       []string   `json:"flags"`
+	AutoStopped []AutoStop `json:"autoStopped"`
+	Warnings    []Warning  `json:"warnings"`
 }
 
 // PunchInput is what a pay calculation reads for one worker and window.
@@ -147,6 +153,9 @@ func mapForeignKey(err error) error {
 // the order the work happened; results come back in request order. An item
 // whose client UUID already exists is a no-op reported as duplicate; a new item
 // emits dev.passage.shopfloor.registration.posted.v1 in the same transaction.
+// A new job-start drives dispatch (FR-25.3): it is flagged job-finished-conflict
+// when its job is already finished (BR-25.7), moves a released job to started,
+// and, when open, auto-stops the worker's other open job or bundle.
 func (s *Postgres) CreateRegistrations(ctx context.Context, items []Registration) ([]RegistrationResult, error) {
 	p, _ := tenant.FromContext(ctx)
 	order := make([]int, len(items))
@@ -159,20 +168,27 @@ func (s *Postgres) CreateRegistrations(ctx context.Context, items []Registration
 		if err := guardBundles(ctx, tx, p.TenantID, items); err != nil {
 			return err
 		}
+		if err := lockJobWorkers(ctx, tx, p.TenantID, items); err != nil {
+			return err
+		}
 		for _, i := range order {
 			in := items[i]
+			jobStatus, flags, err := jobStartFlags(ctx, tx, p.TenantID, in)
+			if err != nil {
+				return err
+			}
 			var hours *string
 			if in.Hours != nil {
 				h := in.Hours.String()
 				hours = &h
 			}
 			var id string
-			err := tx.QueryRow(ctx, `insert into time_registration (tenant_id, id, worker_id, kind, job_id, bundle_id, qty_good, qty_scrap, scrap_reason_id, started_at, stopped_at, device_id, offline, hours, note, clock_offset_s)
-				select $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+			err = tx.QueryRow(ctx, `insert into time_registration (tenant_id, id, worker_id, kind, job_id, bundle_id, qty_good, qty_scrap, scrap_reason_id, started_at, stopped_at, device_id, offline, hours, note, clock_offset_s, flags)
+				select $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
 				where exists (select 1 from worker where tenant_id = $1 and id = $3 and active)
 				on conflict (tenant_id, id) do nothing returning id::text`,
 				p.TenantID, in.ID, in.WorkerID, in.Kind, in.JobID, in.BundleID, in.QtyGood.String(), in.QtyScrap.String(), in.ScrapReasonID,
-				in.StartedAt, in.StoppedAt, in.DeviceID, in.Offline, hours, in.Note, in.ClockOffsetSeconds).Scan(&id)
+				in.StartedAt, in.StoppedAt, in.DeviceID, in.Offline, hours, in.Note, in.ClockOffsetSeconds, flags).Scan(&id)
 			if errors.Is(err, pgx.ErrNoRows) {
 				// Either a replayed client UUID or an unknown/inactive worker.
 				var exists bool
@@ -182,19 +198,29 @@ func (s *Postgres) CreateRegistrations(ctx context.Context, items []Registration
 				if !exists {
 					return workerNotFound()
 				}
-				results[i] = RegistrationResult{ID: in.ID, Status: StatusDuplicate}
+				results[i] = newResult(in.ID, StatusDuplicate, []string{})
 				continue
 			}
 			if err != nil {
 				return mapForeignKey(err)
 			}
-			results[i] = RegistrationResult{ID: in.ID, Status: StatusAccepted}
+			res := newResult(in.ID, StatusAccepted, flags)
 			if err := enqueue(ctx, tx, "registration", in.ID, sfevents.RegistrationPosted, p.TenantID, sfevents.RegistrationPostedData{
 				RegistrationID: in.ID, WorkerID: in.WorkerID, Kind: in.Kind, JobID: in.JobID, BundleID: in.BundleID, Hours: in.Hours,
-				QtyGood: in.QtyGood, QtyScrap: in.QtyScrap, Offline: in.Offline,
+				QtyGood: in.QtyGood, QtyScrap: in.QtyScrap, Offline: in.Offline, Flags: flags,
 			}); err != nil {
 				return err
 			}
+			if len(flags) > 0 {
+				res.Warnings = append(res.Warnings, Warning{Code: domain.CodeJobFinishedOffline,
+					Message: fmt.Sprintf("Job %s was finished on the server while you were offline.", *in.JobID)})
+			}
+			if in.Kind == KindJobStart && in.JobID != nil {
+				if err := applyJobStart(ctx, tx, p.TenantID, in, jobStatus, &res); err != nil {
+					return err
+				}
+			}
+			results[i] = res
 		}
 		return nil
 	})
@@ -202,6 +228,10 @@ func (s *Postgres) CreateRegistrations(ctx context.Context, items []Registration
 		return nil, err
 	}
 	return results, nil
+}
+
+func newResult(id, status string, flags []string) RegistrationResult {
+	return RegistrationResult{ID: id, Status: status, Flags: flags, AutoStopped: []AutoStop{}, Warnings: []Warning{}}
 }
 
 // guardBundles refuses closed bundle jobs when the bundle already holds closed

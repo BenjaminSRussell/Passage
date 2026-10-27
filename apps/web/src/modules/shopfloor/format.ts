@@ -102,6 +102,13 @@ export function describeLines(lines: PayLine[]): string {
   return lines.map((l) => `${l.type} ${fixed(l.hours, 2)} h`).join(", ");
 }
 
+/** Review flags on a registration (BR-25.7, FR-25.3), for the Source column. */
+export const REGISTRATION_FLAG_LABELS: Record<string, string> = {
+  "job-finished-conflict": "Started after finish",
+  "auto-stopped": "Auto-stopped",
+  "auto-stop-capped": "Capped at 24 h",
+};
+
 export const FLAG_LABELS: Record<string, string> = {
   "missing-clock-out": "Missing clock-out",
   "orphan-clock-out": "Clock-out without clock-in",

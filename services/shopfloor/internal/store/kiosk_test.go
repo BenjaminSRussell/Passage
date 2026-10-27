@@ -34,10 +34,11 @@ func TestKiosk_BadgeLoginAndClockedInBoard(t *testing.T) {
 	half := decimal.RequireFromString("0.5")
 	closedStop := day(8, 30)
 	if _, err := s.CreateRegistrations(ctx, []Registration{
-		{ID: ids.New(), WorkerID: in.ID, Kind: "job-start", JobID: &before, StartedAt: day(6, 0)},
+		// Every open start is in one bundle: a start outside it would auto-stop the others (FR-25.3).
+		{ID: ids.New(), WorkerID: in.ID, Kind: "job-start", JobID: &before, BundleID: &bundle, StartedAt: day(6, 0)},
 		clock(in.ID, "clock-in", day(7, 0)),
 		{ID: ids.New(), WorkerID: in.ID, Kind: "job-start", JobID: &open, BundleID: &bundle, StartedAt: day(7, 30)},
-		{ID: ids.New(), WorkerID: in.ID, Kind: "job-start", JobID: &stopped, StartedAt: day(7, 30)},
+		{ID: ids.New(), WorkerID: in.ID, Kind: "job-start", JobID: &stopped, BundleID: &bundle, StartedAt: day(7, 30)},
 		{ID: ids.New(), WorkerID: in.ID, Kind: "job-stop", JobID: &stopped, StartedAt: day(9, 0)},
 		{ID: ids.New(), WorkerID: in.ID, Kind: "job-start", JobID: &closed, StartedAt: day(8, 0), StoppedAt: &closedStop, Hours: &half},
 		clock(out.ID, "clock-in", day(7, 0)),
@@ -55,6 +56,10 @@ func TestKiosk_BadgeLoginAndClockedInBoard(t *testing.T) {
 	sess, err = s.BadgeLogin(ctx, "IN-1")
 	if err != nil || sess.ClockedInAt == nil || !sess.ClockedInAt.Equal(day(7, 0)) {
 		t.Fatalf("clocked-in badge = %+v, %v", sess, err)
+	}
+	// The session lists every open job of the worker, also one started before the clock-in.
+	if len(sess.OpenJobs) != 2 || sess.OpenJobs[0].JobID != before || sess.OpenJobs[1].JobID != open {
+		t.Fatalf("open jobs = %+v", sess.OpenJobs)
 	}
 	if sess, err := s.BadgeLogin(ctx, "OUT-1"); err != nil || sess.ClockedInAt != nil {
 		t.Fatalf("clocked-out badge = %+v, %v", sess, err)

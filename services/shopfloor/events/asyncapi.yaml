@@ -481,6 +481,16 @@ components:
           type: string
         offline:
           type: boolean
+        flags:
+          type: array
+          items:
+            type: string
+            enum: [job-finished-conflict, auto-stopped, auto-stop-capped]
+          description: |
+            Review flags. `job-finished-conflict` on a job-start for a job the
+            server had already finished (BR-25.7); `auto-stopped` (and
+            `auto-stop-capped` past 24 hours) on a closed job-stop the server
+            wrote when the worker started another job (FR-25.3). Empty otherwise.
     PaydayApprovedData:
       type: object
       required: [workerId, workDate, payLines, approvedBy]

@@ -26,7 +26,7 @@ import {
   type Worker,
   type WorkerDay,
 } from "./api/client";
-import { addDays, browserZone, dash, daysBetween, fixed, formatDateTime, formatHours, formatOffset, today } from "./format";
+import { addDays, browserZone, dash, daysBetween, fixed, formatDateTime, formatHours, formatOffset, today, REGISTRATION_FLAG_LABELS } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { dayColumns } from "./dayColumns";
@@ -59,6 +59,11 @@ const registrationColumns: DataTableColumn<Registration>[] = [
       <span className={styles.flags}>
         {row.offline ? <Badge tone="info">Offline replay</Badge> : "Online"}
         {row.clockOffsetSeconds !== null ? <Badge tone="warning">{`Clock corrected ${formatOffset(row.clockOffsetSeconds)}`}</Badge> : null}
+        {(row.flags ?? []).map((flag) => (
+          <Badge key={flag} tone="warning">
+            {REGISTRATION_FLAG_LABELS[flag] ?? flag}
+          </Badge>
+        ))}
       </span>
     ),
   },

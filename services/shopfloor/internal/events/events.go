@@ -173,6 +173,10 @@ type RegistrationPostedData struct {
 	QtyGood        decimal.Decimal  `json:"qtyGood"`
 	QtyScrap       decimal.Decimal  `json:"qtyScrap"`
 	Offline        bool             `json:"offline"`
+	// Flags are the registration's review flags: job-finished-conflict on a
+	// job-start (BR-25.7), auto-stopped and auto-stop-capped on a job-stop the
+	// server wrote when the worker started another job (FR-25.3).
+	Flags []string `json:"flags"`
 }
 
 // PayLineData is one pay line inside a payday approval.

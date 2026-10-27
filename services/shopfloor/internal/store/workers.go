@@ -121,6 +121,9 @@ type RegistrationView struct {
 	Note             *string          `json:"note"`
 	// ClockOffsetSeconds is the device clock correction applied (BR-25.7).
 	ClockOffsetSeconds *int64 `json:"clockOffsetSeconds"`
+	// Flags are review flags: job-finished-conflict (BR-25.7), auto-stopped and
+	// auto-stop-capped (FR-25.3).
+	Flags []string `json:"flags"`
 }
 
 // ListRegistrations returns a worker's registrations that start in [start, end),
@@ -141,7 +144,7 @@ func (s *Postgres) listRegistrations(ctx context.Context, where string, limit in
 	out := []RegistrationView{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, fmt.Sprintf(`select id::text, worker_id::text, kind, job_id::text, bundle_id::text, qty_good::text, qty_scrap::text,
-				scrap_reason_id, started_at, stopped_at, hours::text, server_received_at, device_id, offline, note, clock_offset_s
+				scrap_reason_id, started_at, stopped_at, hours::text, server_received_at, device_id, offline, note, clock_offset_s, flags
 			from time_registration where %s
 			order by started_at, id limit $%d`, where, len(args)+1), append(args, limit)...)
 		if err != nil {
@@ -153,7 +156,7 @@ func (s *Postgres) listRegistrations(ctx context.Context, where string, limit in
 			var good, scrap string
 			var hours *string
 			if err := rows.Scan(&r.ID, &r.WorkerID, &r.Kind, &r.JobID, &r.BundleID, &good, &scrap, &r.ScrapReasonID,
-				&r.StartedAt, &r.StoppedAt, &hours, &r.ServerReceivedAt, &r.DeviceID, &r.Offline, &r.Note, &r.ClockOffsetSeconds); err != nil {
+				&r.StartedAt, &r.StoppedAt, &hours, &r.ServerReceivedAt, &r.DeviceID, &r.Offline, &r.Note, &r.ClockOffsetSeconds, &r.Flags); err != nil {
 				return err
 			}
 			if r.QtyGood, err = decimal.NewFromString(good); err != nil {

@@ -51,9 +51,34 @@ export interface RegistrationInput {
   note?: string | null;
 }
 
+/** Review flags on a registration (BR-25.7, FR-25.3). */
+export type RegistrationFlag = "job-finished-conflict" | "auto-stopped" | "auto-stop-capped";
+
+/** A job the server stopped because the worker started another one (FR-25.3, SF-0002). */
+export interface AutoStop {
+  /** The job-stop registration the server wrote. */
+  registrationId: string;
+  jobId: string;
+  bundleId: string | null;
+  startedAt: string;
+  stoppedAt: string;
+  /** Decimal string; a bundled job's share in 0.01 h (BR-25.1). */
+  hours: string;
+  flags: RegistrationFlag[];
+}
+
+export interface RegistrationWarning {
+  code: "SF-0002" | "SF-0004";
+  message: string;
+}
+
 export interface RegistrationResult {
   id: string;
   status: "accepted" | "duplicate";
+  /** job-finished-conflict on a start for a job the server already finished (SF-0004). */
+  flags: RegistrationFlag[];
+  autoStopped: AutoStop[];
+  warnings: RegistrationWarning[];
 }
 
 export interface Registration {
@@ -74,6 +99,7 @@ export interface Registration {
   note: string | null;
   /** Device clock correction applied to the times, server minus device, in seconds (BR-25.7); null when none. */
   clockOffsetSeconds: number | null;
+  flags: RegistrationFlag[];
 }
 
 export interface PayRange {
@@ -562,6 +588,8 @@ export interface KioskSession {
   userId: string | null;
   /** The open clock-in, or null when the worker is clocked out. */
   clockedInAt: string | null;
+  /** The worker's open job-starts: one job, or the jobs of one bundle (FR-25.3). */
+  openJobs: CurrentJob[];
   /** Sign the worker out after this many minutes without input. */
   idleTimeoutMinutes: number;
 }

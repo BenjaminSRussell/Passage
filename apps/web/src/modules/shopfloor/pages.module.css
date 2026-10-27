@@ -116,3 +116,17 @@
   min-block-size: var(--space-12);
   inline-size: 100%;
 }
+
+/* Kiosk job actions: the open jobs as a plain list, and one line per notice line. */
+.plainList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.block {
+  display: block;
+}

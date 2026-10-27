@@ -1,7 +1,7 @@
 import { Link, useParams } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, EmptyState, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
 import { getWorker, listBundle, type Registration, type Worker } from "./api/client";
-import { dash, fixed, formatDateTime, formatHours, formatOffset, sumDecimals } from "./format";
+import { dash, fixed, formatDateTime, formatHours, formatOffset, sumDecimals, REGISTRATION_FLAG_LABELS } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -26,6 +26,11 @@ const columns: DataTableColumn<Registration>[] = [
       <span className={styles.flags}>
         {row.offline ? <Badge tone="info">Offline replay</Badge> : "Online"}
         {row.clockOffsetSeconds !== null ? <Badge tone="warning">{`Clock corrected ${formatOffset(row.clockOffsetSeconds)}`}</Badge> : null}
+        {(row.flags ?? []).map((flag) => (
+          <Badge key={flag} tone="warning">
+            {REGISTRATION_FLAG_LABELS[flag] ?? flag}
+          </Badge>
+        ))}
       </span>
     ),
   },

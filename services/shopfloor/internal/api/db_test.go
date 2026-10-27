@@ -433,3 +433,61 @@ func TestHTTP_JobDispatchFeedbackAndOverride(t *testing.T) {
 		t.Fatalf("detail: %d %s", detail.Code, detail.Body.String())
 	}
 }
+
+// FR-25.3 and BR-25.7 over HTTP and Postgres: a kiosk job-start moves the job to
+// started; the next start answers with the auto-stopped job and SF-0002; the badge
+// session lists the open job; a start for a finished job is flagged with SF-0004.
+func TestHTTP_JobStartAutoStopAndFinishedConflict(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	h := newRouter(store.New(app))
+	duties := allDuty + "," + DutyKioskLogin + "," + DutyJobSchedule
+	rec := callWith(t, h, http.MethodPost, "/api/v1/shopfloor/workers", `{"partyId":"`+jobID+`","name":"Ana Silva","badgeId":"B-7","costRate":"20","currency":"USD"}`,
+		duties, map[string]string{"Idempotency-Key": "w-7"})
+	var w store.Worker
+	_ = json.Unmarshal(rec.Body.Bytes(), &w)
+	second := "0195f0a0-0000-7000-8000-0000000000e2"
+	for _, id := range []string{jobID, second} {
+		body := strings.Replace(upsertBody, jobID, id, 1)
+		if rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/jobs", body, duties); rec.Code != http.StatusCreated {
+			t.Fatalf("plan %s: %d %s", id, rec.Code, rec.Body.String())
+		}
+	}
+	start := func(regID, job, at string) registrationResponse {
+		body := fmt.Sprintf(`{"items":[{"id":%q,"workerId":%q,"kind":"job-start","jobId":%q,"startedAt":%q}]}`, regID, w.ID, job, at)
+		rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/registrations", body, duties)
+		var out registrationResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != http.StatusOK || len(out.Items) != 1 {
+			t.Fatalf("start %s: %d %s", job, rec.Code, rec.Body.String())
+		}
+		return out
+	}
+	first := start("0195f0a0-0000-7000-8000-0000000000d1", jobID, "2026-10-21T08:00:00Z")
+	if first.Items[0].Status != store.StatusAccepted || len(first.Items[0].AutoStopped) != 0 {
+		t.Fatalf("first start %+v", first.Items[0])
+	}
+	if rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/jobs/"+jobID, "", duties); !strings.Contains(rec.Body.String(), `"status":"started"`) {
+		t.Fatalf("job after start %s", rec.Body.String())
+	}
+	next := start("0195f0a0-0000-7000-8000-0000000000d2", second, "2026-10-21T09:15:00Z")
+	got := next.Items[0]
+	if len(got.AutoStopped) != 1 || got.AutoStopped[0].JobID != jobID || got.AutoStopped[0].Hours.String() != "1.25" ||
+		len(got.Warnings) != 1 || got.Warnings[0].Code != "SF-0002" {
+		t.Fatalf("auto-stop %+v", got)
+	}
+	rec = call(t, h, http.MethodPost, "/api/v1/shopfloor/sessions:badge", `{"badgeId":"B-7"}`, duties)
+	if !strings.Contains(rec.Body.String(), `"openJobs":[{"jobId":"`+second+`"`) {
+		t.Fatalf("session %s", rec.Body.String())
+	}
+
+	finish := `{"feedbackId":"0195f0a0-0000-7000-8000-0000000000f9","finished":true,"checks":[{"code":"len","value":"11"}]}`
+	if rec := call(t, h, http.MethodPost, feedbackPath(), finish, duties); rec.Code != http.StatusCreated {
+		t.Fatalf("finish %d %s", rec.Code, rec.Body.String())
+	}
+	conflict := start("0195f0a0-0000-7000-8000-0000000000d3", jobID, "2026-10-21T10:00:00Z").Items[0]
+	if len(conflict.Flags) != 1 || conflict.Flags[0] != "job-finished-conflict" || conflict.Warnings[0].Code != "SF-0004" {
+		t.Fatalf("conflict %+v", conflict)
+	}
+}

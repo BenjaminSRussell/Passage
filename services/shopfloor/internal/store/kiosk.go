@@ -11,6 +11,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 )
 
 // CodeBadgeUnknown is PRD catalog SF-0001: the badge matches no active worker.
@@ -25,6 +26,9 @@ type KioskSession struct {
 	Name        string     `json:"name"`
 	UserID      *string    `json:"userId"`
 	ClockedInAt *time.Time `json:"clockedInAt"`
+	// OpenJobs are the worker's open job-starts (one job, or the jobs of one
+	// bundle), so the kiosk can offer to stop them (FR-25.3).
+	OpenJobs []CurrentJob `json:"openJobs"`
 }
 
 // CurrentJob is an open job registration of a clocked-in worker.
@@ -69,6 +73,20 @@ func (s *Postgres) BadgeLogin(ctx context.Context, badge string) (KioskSession, 
 		}
 		if kind != nil && *kind == "clock-in" {
 			out.ClockedInAt = at
+		}
+		p, _ := tenant.FromContext(ctx)
+		open, err := openStarts(ctx, tx, p.TenantID, out.WorkerID)
+		if err != nil {
+			return err
+		}
+		out.OpenJobs = make([]CurrentJob, 0, len(open))
+		for _, o := range open {
+			job := CurrentJob{JobID: o.JobID, StartedAt: o.StartedAt}
+			if o.BundleID != "" {
+				b := o.BundleID
+				job.BundleID = &b
+			}
+			out.OpenJobs = append(out.OpenJobs, job)
 		}
 		return nil
 	})

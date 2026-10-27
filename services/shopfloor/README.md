@@ -3,6 +3,38 @@
 Shop floor execution service. Wave reference: **PSG-25 / Wave 25**
 (Shop Floor Execution, Time Registration & IoT), PRD section 4.25.
 
+## Slice 8: job start and stop from registrations
+
+- Job-start dispatch (FR-25.3) in `POST registrations`: a new `job-start` for a job on the
+  dispatch list moves a `released` job to `started` (version + 1). A worker has one open
+  unit of work, one job or the jobs of one bundle: an open `job-start` (no `stoppedAt`)
+  stops the worker's other open job, or every open job of another bundle, by writing a
+  closed `job-stop` per job from that job's start to the new start, with its hours, the
+  note "Stopped automatically..." and flag `auto-stopped`. An auto-stopped bundle's time
+  runs from its earliest start and is split by the good quantity on its starts, or equally
+  (BR-25.1, `domain.SplitBundleHours`). Starts sharing the incoming `bundleId` stay open,
+  so a bundle starts in one batch. A start older than an open unit (a late offline replay)
+  is itself closed at that unit's start. A unit open for more than 24 hours is stopped at
+  24 hours and also flagged `auto-stop-capped`. Each auto-stop emits
+  `registration.posted` (kind `job-stop`, `hours`, `flags`) in the same transaction and
+  comes back in the item's `autoStopped` with warning SF-0002. The worker row is locked
+  for the batch, so two batches cannot leave two open units.
+- Finished-job conflict (BR-25.7): a `job-start` for a job the server already finished is
+  stored with flag `job-finished-conflict` (new `flags` column, migration 0008), returned
+  with warning SF-0004 and carried in `registration.posted`; the job stays finished. A job
+  the dispatch list does not hold yet is accepted without dispatch effects, so an offline
+  replay never loses a start. A duplicate item has no flags, auto-stops or warnings.
+- Stopping work: the kiosk sends a closed `job-stop` per open job (startedAt = the job's
+  start, stoppedAt = now), one batch per bundle, which the slice 3 bundle split covers.
+- `sessions:badge` returns the worker's `openJobs`; stored registrations carry `flags`.
+- Pure rules in `internal/domain/dispatch.go` (`PlanAutoStop`, `StopUnit.Hours`) with a
+  property test that at most one unit stays open. Store tests in `store/dispatch_test.go`,
+  HTTP test `TestHTTP_JobStartAutoStopAndFinishedConflict`.
+- Web: on the kiosk (`/shopfloor/kiosk`), a clocked-in worker sees the current job or
+  bundle with *Stop job* or *Stop bundle*, and the dispatch list with *Start job* and
+  *Start as bundle*; auto-stops and finished-job starts are reported with their codes. The
+  worker and bundle pages show the registration flags.
+
 ## Slice 7: dispatch list, job feedback and quality checks
 
 - Dispatch projection (`POST jobs`, duty `shopfloor.job.schedule`, the w23 schedule's
@@ -242,6 +274,7 @@ migrations/            0001_init.sql (worker, time_registration, worker_day, pay
                        0005_process_message_delete.sql (deletion audit columns, monitor keyset index)
                        0006_idle_oee_buckets.sql (machine idle threshold, oee_bucket, process message grants)
                        0007_jobs.sql (shop_job, job_feedback, job_check_result)
+                       0008_job_dispatch.sql (registration flags, open job index)
 api/openapi.yaml       OpenAPI 3.1 for every endpoint
 events/asyncapi.yaml   AsyncAPI 3 for every event
 charts/shopfloor       Helm chart (3 replicas, /healthz and /readyz probes, ServiceMonitor toggle)
@@ -336,6 +369,13 @@ Problem details use `application/problem+json` with `type` `https://passage.dev/
 | `SF-0124` | 422 | The `feedbackId` was already used for another job |
 | `SF-0125` | 422 | A check value cannot be evaluated (not a number, not pass or fail, or blank); `errors` names it |
 | `idempotency_key_reuse` | 422 | `Idempotency-Key` already used with a different request |
+
+Warnings on an accepted registration (`items[].warnings`, the request succeeds):
+
+| Code | Meaning |
+|---|---|
+| `SF-0002` | Previous job was stopped automatically (FR-25.3); one per auto-stopped job |
+| `SF-0004` | The job was finished on the server while the kiosk was offline (BR-25.7, flag `job-finished-conflict`) |
 
 Catalog entries SF-0001..SF-0020 (PRD 4.25.18) are reserved; only the codes above are raised.
 SF-0008 (sequence gap) is reported in the ingest response `gaps` and counted in

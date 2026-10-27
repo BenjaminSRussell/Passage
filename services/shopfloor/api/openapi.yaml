@@ -185,6 +185,23 @@ paths:
         Clock skew (BR-25.7): when the batch carries `deviceSentAt`, the server
         measures its clock minus the device clock. An offset above 5 minutes is
         added to every item's times and recorded on the stored registrations.
+
+        Job dispatch (FR-25.3): a new `job-start` moves a released job to
+        `started`. A worker has one open unit of work: an open `job-start` (no
+        `stoppedAt`) stops the worker's other open job, or every open job of
+        another bundle, with a closed `job-stop` the server writes from each
+        job's start to the new start (flag `auto-stopped`, warning SF-0002). An
+        auto-stopped bundle's time is split by the good quantity on its starts,
+        or equally (BR-25.1). Starts sharing the incoming `bundleId` stay open.
+        A start older than an open unit (a late offline replay) is itself
+        closed at that unit's start. A unit open for more than 24 hours is
+        stopped at 24 hours with flag `auto-stop-capped`. A `job-start` for a
+        job the server already finished is stored with flag
+        `job-finished-conflict` and warning SF-0004, and the job stays finished
+        (BR-25.7). A job the dispatch list does not hold yet is accepted without
+        dispatch effects. To stop work without starting another, send a closed
+        `job-stop` (startedAt = the job's start, stoppedAt = now), one per job of
+        a bundle in one batch. A duplicate item has no flags or auto-stops.
       requestBody:
         required: true
         content:
@@ -1344,7 +1361,7 @@ components:
           format: date-time
     StoredRegistration:
       type: object
-      required: [id, workerId, kind, jobId, bundleId, qtyGood, qtyScrap, scrapReasonId, startedAt, stoppedAt, hours, serverReceivedAt, deviceId, offline, note, clockOffsetSeconds]
+      required: [id, workerId, kind, jobId, bundleId, qtyGood, qtyScrap, scrapReasonId, startedAt, stoppedAt, hours, serverReceivedAt, deviceId, offline, note, clockOffsetSeconds, flags]
       properties:
         id:
           type: string
@@ -1386,6 +1403,12 @@ components:
         clockOffsetSeconds:
           type: [integer, "null"]
           description: Device clock correction applied to the times, server minus device (BR-25.7); null when none was needed.
+        flags:
+          type: array
+          items:
+            type: string
+            enum: [job-finished-conflict, auto-stopped, auto-stop-capped]
+          description: Review flags (BR-25.7, FR-25.3).
     WorkerDay:
       type: object
       required: [workerId, workerName, workDate, hours, flags, status, timeZone, calculatedAt, approvedBy, approvedAt, payLines]
@@ -1494,15 +1517,7 @@ components:
         items:
           type: array
           items:
-            type: object
-            required: [id, status]
-            properties:
-              id:
-                type: string
-                format: uuid
-              status:
-                type: string
-                enum: [accepted, duplicate]
+            $ref: "#/components/schemas/RegistrationResult"
         clockOffsetSeconds:
           type: integer
           description: Server clock minus device clock, present when the batch carried deviceSentAt (BR-25.7).
@@ -1899,9 +1914,70 @@ components:
           minLength: 1
           maxLength: 64
           description: The scanned badge; surrounding blanks are ignored.
+    RegistrationResult:
+      type: object
+      required: [id, status, flags, autoStopped, warnings]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [accepted, duplicate]
+        flags:
+          type: array
+          items:
+            type: string
+            enum: [job-finished-conflict]
+          description: Review flags stored on the item (BR-25.7).
+        autoStopped:
+          type: array
+          description: Jobs this job-start stopped automatically (FR-25.3).
+          items:
+            $ref: "#/components/schemas/AutoStop"
+        warnings:
+          type: array
+          description: Catalog warnings for the kiosk, SF-0002 per auto-stopped job and SF-0004 for a finished job.
+          items:
+            type: object
+            required: [code, message]
+            properties:
+              code:
+                type: string
+                enum: [SF-0002, SF-0004]
+              message:
+                type: string
+    AutoStop:
+      type: object
+      required: [registrationId, jobId, bundleId, startedAt, stoppedAt, hours, flags]
+      properties:
+        registrationId:
+          type: string
+          format: uuid
+          description: The job-stop registration the server wrote.
+        jobId:
+          type: string
+          format: uuid
+        bundleId:
+          type: [string, "null"]
+          format: uuid
+        startedAt:
+          type: string
+          format: date-time
+        stoppedAt:
+          type: string
+          format: date-time
+        hours:
+          type: string
+          description: Elapsed hours, or the job's share of the bundle in 0.01 h (BR-25.1).
+        flags:
+          type: array
+          items:
+            type: string
+            enum: [auto-stopped, auto-stop-capped]
     KioskSession:
       type: object
-      required: [workerId, partyId, name, userId, clockedInAt, idleTimeoutMinutes]
+      required: [workerId, partyId, name, userId, clockedInAt, openJobs, idleTimeoutMinutes]
       properties:
         workerId:
           type: string
@@ -1917,6 +1993,11 @@ components:
           type: [string, "null"]
           format: date-time
           description: The open clock-in, or null when the worker is clocked out.
+        openJobs:
+          type: array
+          description: The worker's open job-starts, one job or the jobs of one bundle (FR-25.3).
+          items:
+            $ref: "#/components/schemas/CurrentJob"
         idleTimeoutMinutes:
           type: integer
           description: Site parameter "Kiosk idle timeout min" (default 10).

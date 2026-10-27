@@ -2,16 +2,17 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { Alert, Button, Card, FormField, Input, PageHeader } from "../../shell/ui";
 import { badgeLogin, createRegistrations, describeProblem, newKey, type KioskSession, type Problem, type RegistrationInput } from "./api/client";
 import { formatDateTime } from "./format";
+import { KIOSK_DEVICE_ID, KioskJobs } from "./KioskJobs";
 import styles from "./pages.module.css";
 
-/** The kiosk's device id on registrations, so a supervisor can tell where a punch came from. */
-export const KIOSK_DEVICE_ID = "web-kiosk";
+export { KIOSK_DEVICE_ID };
 
 type Notice = { tone: "success" | "info"; text: string } | null;
 
 /**
  * Shared kiosk: a worker scans a badge (FR-25.1), clocks in or out (FR-25.2),
- * and is signed out after the idle timeout the service returns.
+ * starts and stops jobs and bundles while clocked in (FR-25.3), and is signed
+ * out after the idle timeout the service returns.
  */
 export function KioskPage() {
   const [badge, setBadge] = useState("");
@@ -107,7 +108,7 @@ export function KioskPage() {
           {failure.message} ({failure.code}){session ? " Press the button again to retry the same punch." : ""}
         </Alert>
       ) : null}
-      <div className={styles.kiosk}>
+      <div className={`${styles.kiosk} ${styles.stack}`}>
         {session ? (
           <Card title={session.name} actions={<Button variant="ghost" onClick={() => signOut()}>Sign out</Button>}>
             <div className={styles.stack}>
@@ -123,6 +124,7 @@ export function KioskPage() {
                   Clock in
                 </Button>
               )}
+              {session.clockedInAt ? null : <p className={styles.value}>Clock in to start jobs.</p>}
             </div>
           </Card>
         ) : (
@@ -146,6 +148,14 @@ export function KioskPage() {
             </form>
           </Card>
         )}
+        {session?.clockedInAt ? (
+          <KioskJobs
+            key={session.workerId}
+            workerId={session.workerId}
+            openJobs={session.openJobs ?? []}
+            onOpenJobsChange={(openJobs) => setSession((s) => (s ? { ...s, openJobs } : s))}
+          />
+        ) : null}
       </div>
     </div>
   );

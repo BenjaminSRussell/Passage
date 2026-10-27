@@ -64,6 +64,7 @@ const session = (extra: Partial<KioskSession> = {}): KioskSession => ({
   name: "Ana Silva",
   userId: null,
   clockedInAt: null,
+  openJobs: [],
   idleTimeoutMinutes: 10,
   ...extra,
 });
@@ -117,6 +118,7 @@ describe("Kiosk", () => {
     handler = (url) => {
       if (url.pathname.endsWith("/sessions:badge")) return json(200, session({ clockedInAt: "2026-10-21T07:00:00Z" }));
       if (url.pathname.endsWith("/registrations")) return fail ? json(503, { code: "COM-0503", detail: "Service unavailable" }) : json(200, { items: [] });
+      if (url.pathname.endsWith("/jobs")) return json(200, { items: [] });
       return undefined;
     };
     renderAt("/shopfloor/kiosk");
