@@ -1,9 +1,13 @@
 package api
 
 import (
+	"context"
+	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -13,8 +17,9 @@ import (
 )
 
 const (
-	dutyRead  = "fx.read"
-	dutyWrite = "fx.write"
+	dutyRead     = "View exchange rates"
+	dutyWrite    = "Maintain exchange rates"
+	readyTimeout = 500 * time.Millisecond
 )
 
 type API struct {
@@ -24,9 +29,25 @@ type API struct {
 func New(s store.Store) *API { return &API{store: s} }
 
 func (a *API) Register(r chi.Router) {
+	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/fx/rate-types", a.listRateTypes)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/fx/rate-types/{code}", a.getRateType)
 	r.With(authz.RequireDuty(dutyWrite)).Put("/v1/fx/rate-types/{code}", a.putRateType)
+	r.With(authz.RequireDuty(dutyWrite)).Post("/v1/fx/rates", a.idempotent(a.publishRates))
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/fx/rates", a.lookupRate)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/fx/rates/history", a.rateHistory)
+	r.With(authz.RequireDuty(dutyRead)).Post("/v1/fx/convert", a.convert)
+}
+
+func (a *API) ready(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), readyTimeout)
+	defer cancel()
+	if err := a.store.Ping(ctx); err != nil {
+		slog.Error("readiness check failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.JSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unavailable"})
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]string{"status": "ready"})
 }
 
 func validTenant(w http.ResponseWriter, r *http.Request) bool {

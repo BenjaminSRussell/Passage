@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
@@ -591,5 +593,41 @@ func TestRLSHidesOtherTenantRunsAndIdempotencyKeys(t *testing.T) {
 	}
 	if rec, ok, err := s.GetIdempotency(ctx, "k1"); err != nil || !ok || rec.RequestHash != "h1" {
 		t.Fatalf("tenant 1 key was overwritten: %+v ok=%v err=%v", rec, ok, err)
+	}
+}
+
+func TestMigrationGrantsKeepRatesAppendOnlyForAppRole(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	ctx := ctxFor(1)
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	s := store.New(app)
+	if _, err := s.PutRateType(ctx, store.RateType{Code: "CLOSING", Name: "Closing", AllowInverse: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PostRates(ctx, []store.RateInput{in("ecb", "1.1")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PostRates(ctx, []store.RateInput{in("manual", "1.2")}); err != nil {
+		t.Fatalf("correction must be able to set superseded_by: %v", err)
+	}
+	if err := s.PutIdempotency(ctx, store.IdempotencyRecord{Key: "k", RequestHash: "h", ResponseStatus: 201, ResponseBody: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		"delete from exchange_rate",
+		"update exchange_rate set rate = 2",
+		"delete from idempotency_keys",
+		"update idempotency_keys set response_status = 200",
+	} {
+		err := dbx.WithTenantTx(ctx, app, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, statement)
+			return err
+		})
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
+			t.Fatalf("%q must be denied for passage_app, got %v", statement, err)
+		}
 	}
 }
