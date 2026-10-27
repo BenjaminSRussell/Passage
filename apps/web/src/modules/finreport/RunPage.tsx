@@ -7,6 +7,7 @@ import {
   getRun,
   listCells,
   runOutputUrl,
+  DOWNLOAD_FORMATS,
   type BalanceKey,
   type CellSummary,
   type Definition,
@@ -111,11 +112,11 @@ export function RunPage() {
         title={definition.name}
         description={`${run.definitionCode} version ${run.definitionVersion}, period ${periodLabel(run.periodYear, run.periodNo)}, ${CURRENCY_TYPE_LABELS[run.currencyType as keyof typeof CURRENCY_TYPE_LABELS] ?? run.currencyType} currency.`}
         meta={<StatusPill status={run.status} />}
-        actions={
-          <a className={buttonClassName("secondary")} href={runOutputUrl(run.id, "csv")} download>
-            Download CSV
+        actions={DOWNLOAD_FORMATS.map((format) => (
+          <a key={format} className={buttonClassName("secondary")} href={runOutputUrl(run.id, format)} download>
+            Download {format.toUpperCase()}
           </a>
-        }
+        ))}
       />
       {(run.checks ?? []).map((check) => (
         <Alert key={`${check.code}/${check.detail}`} tone="warning" title={CHECK_TITLES[check.code] ?? "This statement has a warning"}>

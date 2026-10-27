@@ -227,15 +227,20 @@ describe("RunPage", () => {
     expect(pageViolations(container)).toEqual([]);
   });
 
-  it("offers the CSV download and shows the warnings recorded with the run", async () => {
+  it("offers the CSV, XLSX and HTML downloads and shows the warnings recorded with the run", async () => {
     statementServer(() => json(404, {}));
     const checked = { ...run, checks: [{ code: "REPORT-0015", severity: "warning" as const, detail: "P&L lines totaling 10.00 have no functional area." }] };
     const plain = server.handler;
     server.handler = (url, init) => (url.pathname === `/api/v1/reporting/runs/${RUN}` ? json(200, checked) : plain(url, init));
     const { container } = renderAt(`/finreport/runs/${RUN}`);
-    const download = await screen.findByRole("link", { name: "Download CSV" });
-    expect(download).toHaveAttribute("href", `/api/v1/reporting/runs/${RUN}/outputs/csv`);
-    expect(download).toHaveAttribute("download");
+    await screen.findByRole("link", { name: "Download CSV" });
+    for (const format of ["csv", "xlsx", "html"]) {
+      const download = screen.getByRole("link", { name: `Download ${format.toUpperCase()}` });
+      expect(download).toHaveAttribute("href", `/api/v1/reporting/runs/${RUN}/outputs/${format}`);
+      expect(download).toHaveAttribute("download");
+    }
+    // pdf is not rendered yet, so the page does not offer it.
+    expect(screen.queryByRole("link", { name: "Download PDF" })).not.toBeInTheDocument();
     expect(screen.getByText("Some expense lines have no functional area")).toBeInTheDocument();
     expect(screen.getByText(/P&L lines totaling 10\.00 have no functional area\. \(REPORT-0015\)/)).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/services/finreport/internal/api"
@@ -44,5 +45,15 @@ func TestNewHandler_ServesHealthAndTenantRoutes(t *testing.T) {
 func TestRun_RequiresDatabaseURL(t *testing.T) {
 	if err := run(context.Background(), func(string) string { return "" }); err == nil {
 		t.Fatal("run without DATABASE_URL must fail")
+	}
+}
+
+// An out-of-range tunable stops startup before any database connection, so the
+// error names the variable even when DATABASE_URL is also missing.
+func TestRun_RejectsInvalidReportingConfigBeforeConnecting(t *testing.T) {
+	env := map[string]string{"REPORTING_MAX_LAG_S": "9999"}
+	err := run(context.Background(), func(k string) string { return env[k] })
+	if err == nil || !strings.Contains(err.Error(), "REPORTING_MAX_LAG_S must be between 0 and 600") {
+		t.Fatalf("run error = %v, want the REPORTING_MAX_LAG_S range", err)
 	}
 }

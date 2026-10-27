@@ -398,9 +398,12 @@ export function getHierarchyMembers(code: string, signal?: AbortSignal): Promise
   return get<Membership & { version: number }>(`/hierarchies/${seg(code)}/members`, signal);
 }
 
-/** Output formats a schedule can send (FR-15.8). Only CSV is rendered so far. */
+/** Output formats a schedule can send (FR-15.8). */
 export const OUTPUT_FORMATS = ["pdf", "xlsx", "csv", "html"] as const;
 export type OutputFormat = (typeof OUTPUT_FORMATS)[number];
+
+/** Formats the service renders for download today; pdf needs the renderer sidecar. */
+export const DOWNLOAD_FORMATS = ["csv", "xlsx", "html"] as const satisfies readonly OutputFormat[];
 
 /** Where a run's file output is served. The browser downloads it with the session cookie. */
 export function runOutputUrl(runId: string, format: OutputFormat): string {

@@ -53,7 +53,7 @@ export function SchedulesPage() {
         />
       )}
       <p className={styles.note}>
-        Schedules are stored and checked now. Running them and sending the email follow in a later release; until then, run the statement and download it as CSV.
+        Schedules are stored and checked now. Running them and sending the email follow in a later release; until then, run the statement and download it as CSV, XLSX or HTML.
       </p>
     </div>
   );

@@ -5,9 +5,30 @@ the reporting read model, and drill-down from a statement cell to its balance
 keys. Phase 2 exit wave. Reads from its own `reporting` database, fed by ledger
 events.
 
-## Status: slice 3
+## Status: slice 4
 
-Slice 3 adds (on top of slices 1 and 2, below):
+Slice 4 adds (on top of slices 1 to 3, below):
+
+- Run outputs as HTML and XLSX (FR-15.6, PRD §2.15.15):
+  `GET /runs/{id}/outputs/html` is one self-contained HTML document (inline
+  styles, no scripts, every label escaped by `html/template`);
+  `GET /runs/{id}/outputs/xlsx` is a workbook with one sheet, `Statement`,
+  amounts as numeric cells and text as inline strings (never formulas). CSV,
+  HTML and XLSX are built from one layout (`domain.buildLayout`), so the three
+  files of a run carry the same header, grid (`n/a` for a missing prior-year
+  period) and "as of" footer, and the same run always yields the same bytes.
+  A renderer error answers 500 REPORT-0016. pdf still answers 404 (renderer
+  sidecar).
+- Startup configuration (`internal/config`): every `REPORTING_*` variable
+  below has a default and an allowed range from PRD §2.15.13. An out-of-range
+  or non-integer value stops the process, naming every bad variable, before it
+  connects to the database. The effective values are logged at startup.
+- Helm: a ServiceMonitor template behind `serviceMonitor.enabled` (scrapes
+  `/metrics` on the admin port), and every `REPORTING_*` variable set from the
+  `reporting` values.
+- Web module: Download CSV, HTML and XLSX on the statement page.
+
+Slice 3 built:
 
 - `CF-STD`, the indirect cash flow (FR-15.5, BR-15.5): net income, non-cash
   adjustments, working capital, operating, investing and financing sections,
@@ -27,7 +48,7 @@ Slice 3 adds (on top of slices 1 and 2, below):
   "as of" footer (posting sequence per ledger, result hash, generated at and
   by, run id), rendered from the stored cells and the run's definition version,
   so it is byte-for-byte reproducible. Labels that a spreadsheet would read as
-  formulas are prefixed with an apostrophe. pdf, xlsx and html answer 404.
+  formulas are prefixed with an apostrophe.
 - Distribution schedules (FR-15.8): `GET /schedules`, `GET/PUT
   /schedules/{code}` with the duty `reporting.statement.schedule`. A schedule
   names a published definition (REPORT-0001 otherwise, checked in the save
@@ -110,6 +131,7 @@ internal/domain/        definitions, expressions, periods, evaluation, cash flow
 internal/store/         Postgres store (pgx), tenant transactions, outbox writes
 internal/api/           HTTP handlers under /api/v1/reporting
 internal/events/        event types and payloads
+internal/config/        REPORTING_* tunables, validated at startup
 migrations/             SQL applied in order (0003 run checks, 0004 schedules); FS embedded in migrations.go
 api/openapi.yaml        OpenAPI 3.1 for every endpoint
 events/asyncapi.yaml    AsyncAPI 3 for every event
@@ -143,13 +165,31 @@ cells (AC-15.5) and hash reproducibility at the same HWM (AC-15.7). Contract
 tests check that `api/openapi.yaml` lists exactly the registered routes and that
 `events/asyncapi.yaml` lists every published event.
 
+## Configuration
+
+| Variable | Default | Allowed | Meaning (PRD §2.15.13) |
+| --- | --- | --- | --- |
+| `REPORTING_MAX_LAG_S` | 30 | 0-600 | Lag above which a run is blocked unless `allow_stale` |
+| `REPORTING_PAGE_SIZE` | 500 | 100-1000 | Drill level 2 page size |
+| `REPORTING_CELL_KEY_LIMIT` | 50000 | 1000-200000 | Keys stored before a cell becomes a query spec |
+| `REPORTING_RETENTION_CLOSED_YEARS` | 7 | 1-30 | Library retention for closed-period runs |
+| `REPORTING_RETENTION_ADHOC_DAYS` | 90 | 7-730 | Ad-hoc run retention |
+| `REPORTING_EMAIL_ATTACHMENT_LIMIT_MB` | 20 | 1-25 | Attach versus link |
+| `REPORTING_SHARE_LINK_EXPIRY_DAYS` | 14 | 1-90 | Shared link lifetime |
+| `REPORTING_PDF_CONCURRENCY_PER_POD` | 4 | 1-16 | Renderer queue width |
+| `REPORTING_OPA_CACHE_SECONDS` | 60 | 5-600 | Dimension security cache |
+
+The values are validated and logged, but nothing reads them yet: the lag gate,
+drill level 2, large cells, the report library, distribution, the PDF renderer
+and dimension security that use them are later slices (NOT-IMPLEMENTED.md).
+
 ## Duties
 
 | Duty | Routes |
 | --- | --- |
 | `reporting.definition.maintain` | definition PUT, publish, retire, validate, export, import; standard definition list and install; hierarchy list, GET, PUT, publish and members |
 | `reporting.statement.run` | `POST /runs` |
-| `reporting.statement.view` | definition list and GET, run list and reads, cells, drill level 1, CSV output, lag |
+| `reporting.statement.view` | definition list and GET, run list and reads, cells, drill level 1, CSV, HTML and XLSX output, lag |
 | `reporting.statement.schedule` | schedule list, GET and PUT |
 
 ## Error codes
@@ -163,6 +203,7 @@ Problem details use `type` `https://passage.dev/problems/<code>`.
 | REPORT-0003 | 422 | Period does not exist in the supplied calendar (`REPORT_PERIOD_NOT_FOUND`) |
 | REPORT-0008 | 422 | Cash flow run does not reconcile (`CF_UNRECONCILED`); the run is not stored |
 | REPORT-0009 | 422 | Cash flow run has moved balance-sheet accounts without a cash-flow tag (`CF_UNCLASSIFIED_ACCOUNTS`); the run is not stored |
+| REPORT-0016 | 500 | Rendering a run output failed for one format (`REPORT_RENDER_FAILED`); other formats are unaffected |
 | REPORT-0015 | warning | Stored in a run's `checks[]`: PL-FUNC expense lines without a functional area |
 | REPORT-0018 | 422 | Schedule field invalid (code, name, cron, time zone, ledgers, currency type, formats, recipients, attachment limit); body code mismatches the path |
 | REPORT-0019 | 404 | Schedule not found |
@@ -183,7 +224,7 @@ Problem details use `type` `https://passage.dev/problems/<code>`.
 | COM-0003 | 400 | `Idempotency-Key` header missing on `POST /runs` |
 | REPORT-0026 | 422 | Definition has no rows or columns, or more than 2,000 rows or 60 columns; hierarchy has no nodes, more than 20,000 nodes, more than 12 levels or a cycle |
 | REPORT-0027 | 404 | Hierarchy, its draft or a published version not found |
-| COM-0404 | 404 | Unknown definition or hierarchy action; output format not rendered (pdf, xlsx, html) |
+| COM-0404 | 404 | Unknown definition or hierarchy action; output format not rendered (pdf) |
 | AUTH-0001 | 401 | Missing tenant |
 | AUTH-0003 | 403 | Missing duty (authz middleware) |
 

@@ -10,6 +10,14 @@ resources:
   requests: { cpu: 100m, memory: 128Mi }
   limits: { cpu: 500m, memory: 256Mi }
 serviceMonitor: { enabled: false }
+# Tunables are validated at startup (internal/config); defaults follow PRD §2.15.13.
 reporting:
   maxLagSeconds: 30
   cellKeyLimit: 50000
+  pageSize: 500
+  retentionClosedYears: 7
+  retentionAdhocDays: 90
+  attachmentLimitMb: 20
+  shareLinkExpiryDays: 14
+  pdfConcurrencyPerPod: 4
+  opaCacheSeconds: 60

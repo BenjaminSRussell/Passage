@@ -5,6 +5,7 @@
 //	DATABASE_URL       required, Postgres URL for the passage_reporting database
 //	MIGRATE_ON_START   "true" applies migrations at startup (dev only)
 //	HTTP_ADDR          listen address, default :8080
+//	REPORTING_*        tunables, validated at startup (see internal/config)
 package main
 
 import (
@@ -20,6 +21,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 
 	"github.com/BenjaminSRussell/passage/services/finreport/internal/api"
+	"github.com/BenjaminSRussell/passage/services/finreport/internal/config"
 	"github.com/BenjaminSRussell/passage/services/finreport/internal/store"
 	"github.com/BenjaminSRussell/passage/services/finreport/migrations"
 )
@@ -35,6 +37,13 @@ func main() {
 }
 
 func run(ctx context.Context, getenv func(string) string) error {
+	// Reporting tunables are validated before any connection is made, so an
+	// out-of-range REPORTING_* value stops the pod at startup (PRD §2.15.13).
+	cfg, err := config.FromEnv(getenv)
+	if err != nil {
+		return err
+	}
+	slog.Info("reporting configuration", "config", cfg)
 	url := getenv("DATABASE_URL")
 	if url == "" {
 		return errors.New("DATABASE_URL is required")

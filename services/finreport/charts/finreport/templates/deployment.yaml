@@ -39,6 +39,20 @@ spec:
               value: {{ .Values.reporting.maxLagSeconds | quote }}
             - name: REPORTING_CELL_KEY_LIMIT
               value: {{ .Values.reporting.cellKeyLimit | quote }}
+            - name: REPORTING_PAGE_SIZE
+              value: {{ .Values.reporting.pageSize | quote }}
+            - name: REPORTING_RETENTION_CLOSED_YEARS
+              value: {{ .Values.reporting.retentionClosedYears | quote }}
+            - name: REPORTING_RETENTION_ADHOC_DAYS
+              value: {{ .Values.reporting.retentionAdhocDays | quote }}
+            - name: REPORTING_EMAIL_ATTACHMENT_LIMIT_MB
+              value: {{ .Values.reporting.attachmentLimitMb | quote }}
+            - name: REPORTING_SHARE_LINK_EXPIRY_DAYS
+              value: {{ .Values.reporting.shareLinkExpiryDays | quote }}
+            - name: REPORTING_PDF_CONCURRENCY_PER_POD
+              value: {{ .Values.reporting.pdfConcurrencyPerPod | quote }}
+            - name: REPORTING_OPA_CACHE_SECONDS
+              value: {{ .Values.reporting.opaCacheSeconds | quote }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }

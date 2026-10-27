@@ -7,7 +7,7 @@ Financial statements workspace over the `services/finreport` API
 | --- | --- | --- |
 | `/finreport` | Statement runs (report library list) and read-model lag | `GET /runs`, `GET /lag` |
 | `/finreport/runs/new` | Run a published definition for a ledger and period | `GET /definitions`, `POST /runs` (Idempotency-Key) |
-| `/finreport/runs/:runId` | Statement grid with the "as of" stamp and the run's warnings (REPORT-0015); select an amount to drill to its balance keys; Download CSV | `GET /runs/{id}`, `GET /runs/{id}/cells`, `GET /definitions/{code}?version=n`, `GET .../balances`, `GET /runs/{id}/outputs/csv` (link) |
+| `/finreport/runs/:runId` | Statement grid with the "as of" stamp and the run's warnings (REPORT-0015); select an amount to drill to its balance keys; Download CSV, XLSX and HTML | `GET /runs/{id}`, `GET /runs/{id}/cells`, `GET /definitions/{code}?version=n`, `GET .../balances`, `GET /runs/{id}/outputs/{csv,xlsx,html}` (links) |
 | `/finreport/definitions` | Report definitions list with status, standard definitions with install, and JSON import | `GET /definitions`, `GET /standard-definitions`, `POST /standard-definitions:install`, `POST /definitions/import` |
 | `/finreport/definitions/new`, `/finreport/definitions/:code` | Designer: rows, columns, validate, save draft (If-Match), publish, export, retire (with confirmation) | `GET/PUT /definitions/{code}`, `:validate`, `:publish`, `:retire`, `/export` |
 | `/finreport/hierarchies` | Derived hierarchies list: version, members, unassigned count, open draft | `GET /hierarchies` |
