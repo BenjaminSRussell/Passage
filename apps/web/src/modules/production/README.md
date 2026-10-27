@@ -5,15 +5,19 @@ by the shell through `module.ts`.
 
 | Route | Page | Duty (nav) | API |
 |---|---|---|---|
-| `/production` | `ProductionOrdersPage` (`OrdersPage.tsx`): newest first, status filter, cursor paging, planned cost | `production.order.read` | `GET /api/v1/production/orders` |
+| `/production` | `ProductionOrdersPage` (`OrdersPage.tsx`): newest first, status filter, cursor paging, planned and actual cost | `production.order.read` | `GET /api/v1/production/orders` |
 | `/production/new` | `CreateProductionOrderPage` (`CreateOrderPage.tsx`): header, BOM lines and route, client-side checks that mirror the service, server field errors mapped back to the fields | `production.order.write` | `POST /api/v1/production/orders` |
-| `/production/:id` | `ProductionOrderDetail` (`OrderDetailPage.tsx`): header, status actions (the commands BR-21.1 allows, report as finished with good and error quantities, reset to any earlier status), components, route, planned cost by group, status log | `production.order.read` | `GET …/{id}`, `…/{id}/costs`, `…/{id}/status-log`, `POST …/{id}:{command}` |
+| `/production/:id` | `ProductionOrderDetail` (`OrderDetailPage.tsx`): header, status actions (the commands BR-21.1 allows, report as finished with good and error quantities, reset to any earlier status), components with flushing and consumed quantity, route with reported hours, the journals panel, costs (planned and actual by group, WIP balance, planned against actual, variances after End), status log | `production.order.read` | `GET …/{id}`, `…/{id}/costs`, `…/{id}/status-log`, `POST …/{id}:{command}` |
+| (on the detail page) | `JournalsPanel` (`JournalsPanel.tsx`): journals of the order with Draft / Posted / Reversal / Reversed status and value; open one to see its lines and postings, post it or delete the draft (with confirmation); create a picking list, route card or report as finished with a proposal or with lines entered per component or operation | `production.journal.post` to change | `GET/POST …/{id}/journals`, `POST /api/v1/production/journals/{id}:post`, `DELETE …/journals/{id}` |
+| `/production/posting-profiles` | `PostingProfilesPage` (`PostingProfilesPage.tsx`): profiles by item group × site, create, edit under If-Match | `production.setup.read` | `GET/PUT /api/v1/production/posting-profiles` |
 
 - `api/client.ts`: typed fetch client over `services/production/api/openapi.yaml`. Commands send
   `If-Match` with the order version and an `Idempotency-Key`; the detail page keeps one key per
   command, version and body so a retry after a lost response replays instead of applying twice,
   and the create form keeps one key per unchanged form.
-- Amounts stay decimal strings end to end (`labels.ts` `amount` only pads to cents).
+- Amounts stay decimal strings end to end: `labels.ts` `amount` only pads to cents, and
+  `addDecimals`/`negate` add exactly with `BigInt` (journal values, actual − planned); no floats.
+- Journals: one Idempotency-Key per create body and per journal post, so a retry replays.
 - Pages use the shell primitives (`PageHeader`, `Card`, `DataTable`, `FormField`, `Input`, `Select`,
   `Button`, `Badge`, `Alert`, `EmptyState`, `Skeleton`) and `pages.module.css` tokens. Every page has
   loading, empty and error states.
@@ -27,6 +31,8 @@ tests render the module routes inside a stand-in shell frame and run the in-repo
   and route versions (wave 9). Until then the create form takes ids and the BOM and route lines
   by hand.
 - Bulk status update with multi-select (FR-21.12), saved views, the `Ctrl+Shift+S` status menu,
-  the journal editor, actual cost and variances on the cost card, and the SSE live update of the
-  costs (PRD 4.21.6) arrive with the later PSG-21 slices that build them in the service.
+  `localStorage` drafts in the journal editor, the drill-down from a variance to the GL journal
+  entry (wave 11) and the SSE live update of the costs (PRD 4.21.6) are later work.
+- A checkbox primitive in the shell (wave 5) to offer the route-card `finished` flag; the API
+  accepts it today.
 - No npm dependencies added.

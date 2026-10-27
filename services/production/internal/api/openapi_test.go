@@ -11,6 +11,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/services/production/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/production/internal/store"
 )
 
 var specOperation = regexp.MustCompile(`^    (get|put|post|patch|delete):$`)
@@ -52,6 +54,9 @@ func servedOperations(t *testing.T) map[string]bool {
 		if route == "/v1/production/orders/{id}" && method == http.MethodPost {
 			route = "/v1/production/orders/{id}:{command}"
 		}
+		if route == "/v1/production/journals/{id}" && method == http.MethodPost {
+			route = "/v1/production/journals/{id}:post"
+		}
 		served[route+" "+strings.ToLower(method)] = true
 		return nil
 	})
@@ -65,7 +70,7 @@ func TestOpenAPIMatchesTheRouter(t *testing.T) {
 	}
 	declared := declaredOperations(string(raw))
 	served := servedOperations(t)
-	if len(served) != 7 {
+	if len(served) != 14 {
 		t.Fatalf("router walk found %d operations: %v", len(served), served)
 	}
 	var problems []string
@@ -95,6 +100,10 @@ func TestOpenAPINamesDutiesAndCodes(t *testing.T) {
 	}
 	spec := string(raw)
 	for _, name := range []string{DutyRead, DutyWrite, DutyRelease, DutyJournalPost, DutyEnd, DutyZeroOutput, DutyCostRead,
+		DutyOverConsume, DutySetupRead, DutySetupWrite, store.CodeJournalNotFound, store.CodeJournalNotAllowed, store.CodeJournalPosted,
+		store.CodeJournalEmpty, store.CodeInvalidJournalLine, store.CodeOperationFinished, store.CodePostingBeforeOrder,
+		store.CodeUnpostedJournals, store.CodeEndBeforeLastPosted, domain.CodeNoPostingProfile, domain.CodeOverConsumption,
+		domain.CodeUnbalanced, domain.CodeInvalidHours,
 		unknownActionCode, "PRODUCTION_ILLEGAL_TRANSITION", "PRODUCTION_RAF_EXCEEDS_REMAINING", "PRODUCTION_FIELD_NOT_EDITABLE",
 		"PRODUCTION_END_REQUIRES_RAF", "PRODUCTION_ZERO_OUTPUT_NOT_PERMITTED", "PRODUCTION_ORDER_NOT_FOUND", "conflict_version",
 		"precondition_required", "idempotency_key_reuse"} {

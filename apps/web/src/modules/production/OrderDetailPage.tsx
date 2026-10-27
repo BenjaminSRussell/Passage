@@ -34,8 +34,10 @@ import {
   type ProductionOrder,
   type ProductionStatus,
   type StatusLogEntry,
+  type Variance,
 } from "./api/client";
-import { amount, commandLabel, costGroupLabel, dash, statusLabel, statusTone } from "./labels";
+import { JournalsPanel } from "./JournalsPanel";
+import { addDecimals, amount, commandLabel, costGroupLabel, dash, flushingLabel, negate, statusLabel, statusTone, varianceLabel } from "./labels";
 import styles from "./pages.module.css";
 
 const quantityPattern = /^[0-9]{1,12}(\.[0-9]{1,6})?$/;
@@ -52,6 +54,8 @@ const lineColumns: DataTableColumn<OrderLine>[] = [
   { key: "qtyPer", header: "Per unit", align: "end" },
   { key: "scrapPct", header: "Scrap %", align: "end" },
   { key: "qtyRequired", header: "Required", align: "end" },
+  { key: "qtyConsumed", header: "Consumed", align: "end", render: (row) => row.qtyConsumed ?? "0" },
+  { key: "flushing", header: "Flushing", render: (row) => flushingLabel[row.flushing ?? "manual"] },
   { key: "unitCost", header: "Unit cost", align: "end" },
 ];
 
@@ -62,6 +66,8 @@ const operationColumns: DataTableColumn<Operation>[] = [
   { key: "runTimeHPer", header: "Run h per unit", align: "end" },
   { key: "processQty", header: "Process qty", align: "end" },
   { key: "scrapPct", header: "Scrap %", align: "end" },
+  { key: "hoursReported", header: "Reported h", align: "end", render: (row) => row.hoursReported ?? "0" },
+  { key: "status", header: "Feedback", render: (row) => row.status ?? "open" },
   { key: "subcontract", header: "Subcontract", render: (row) => (row.subcontract ? "Yes" : "No") },
 ];
 
@@ -83,6 +89,25 @@ const logColumns: DataTableColumn<StatusLogEntry>[] = [
 ];
 
 const costGroups: CostGroup[] = ["material", "labor", "overhead", "subcontract"];
+
+interface Comparison {
+  group: CostGroup;
+  planned: string;
+  actual: string;
+}
+
+const comparisonColumns: DataTableColumn<Comparison>[] = [
+  { key: "group", header: "Cost group", render: (row) => costGroupLabel[row.group] },
+  { key: "planned", header: "Planned", align: "end", render: (row) => amount(row.planned) },
+  { key: "actual", header: "Actual", align: "end", render: (row) => amount(row.actual) },
+  { key: "difference", header: "Actual − planned", align: "end", render: (row) => amount(addDecimals([row.actual, negate(row.planned)])) },
+];
+
+const varianceColumns: DataTableColumn<Variance>[] = [
+  { key: "type", header: "Variance", render: (row) => varianceLabel[row.type] ?? row.type },
+  { key: "costGroup", header: "Cost group", render: (row) => costGroupLabel[row.costGroup] ?? row.costGroup },
+  { key: "amount", header: "Amount (debit +)", align: "end", render: (row) => amount(row.amount) },
+];
 
 /** Commands that cannot be undone (BR-21.1: no reset from Ended or Cancelled) ask for confirmation. */
 const irreversible: ProductionCommand[] = ["cancel", "end"];
@@ -144,6 +169,15 @@ export function ProductionOrderDetail({ orderId, onBack }: ProductionOrderDetail
     );
     loadSide(controller.signal);
     return () => controller.abort();
+  }, [orderId, loadSide]);
+
+  // A posted journal changes consumption, status and costs: read them again.
+  const reload = useCallback(() => {
+    getOrder(orderId).then(
+      (value) => setOrder({ value, loading: false, error: null }),
+      (failure) => setCommandError(describeProblem(failure)),
+    );
+    loadSide();
   }, [orderId, loadSide]);
 
   const current = order.value;
@@ -350,6 +384,7 @@ export function ProductionOrderDetail({ orderId, onBack }: ProductionOrderDetail
             {current.warehouseId}
           </Detail>
           <Detail term="Origin">{current.originType}</Detail>
+          <Detail term="Item group">{current.itemGroup || dash}</Detail>
         </dl>
       </Card>
 
@@ -367,9 +402,11 @@ export function ProductionOrderDetail({ orderId, onBack }: ProductionOrderDetail
         <DataTable label="Order operations" columns={operationColumns} rows={current.operations} getRowKey={(row) => String(row.operNumber)} />
       </Card>
 
-      <Card title="Planned cost">
+      <JournalsPanel order={current} onChanged={reload} />
+
+      <Card title="Costs">
         {costs.error ? (
-          <Alert tone={costs.error.status === 403 ? "info" : "danger"} title="Planned cost is not available">
+          <Alert tone={costs.error.status === 403 ? "info" : "danger"} title="Costs are not available">
             {costs.error.status === 403 ? "You need the View production costs duty to see costs." : `${costs.error.message} (${costs.error.code})`}
           </Alert>
         ) : costs.loading ? (
@@ -390,6 +427,42 @@ export function ProductionOrderDetail({ orderId, onBack }: ProductionOrderDetail
                 <span className={styles.totalValue}>{unit(amount(costs.value.total))}</span>
               </li>
             </ul>
+            <ul className={styles.totals} aria-label="Actual cost by group">
+              {costGroups
+                .filter((g) => costs.value?.actualTotals[g] !== undefined)
+                .map((g) => (
+                  <li key={g} className={styles.total}>
+                    <span className={styles.term}>Actual {costGroupLabel[g].toLowerCase()}</span>{" "}
+                    <span className={styles.totalValue}>{unit(amount(costs.value?.actualTotals[g]))}</span>
+                  </li>
+                ))}
+              <li className={styles.total}>
+                <span className={styles.term}>Actual total</span>{" "}
+                <span className={styles.totalValue}>{unit(amount(costs.value.actualTotal))}</span>
+              </li>
+              <li className={styles.total}>
+                <span className={styles.term}>WIP balance</span>{" "}
+                <span className={styles.totalValue}>{unit(amount(costs.value.wipBalance))}</span>
+              </li>
+            </ul>
+            <DataTable
+              label="Planned against actual cost"
+              columns={comparisonColumns}
+              rows={costGroups
+                .filter((g) => costs.value?.totals[g] !== undefined || costs.value?.actualTotals[g] !== undefined)
+                .map((g) => ({ group: g, planned: costs.value?.totals[g] ?? "0", actual: costs.value?.actualTotals[g] ?? "0" }))}
+              getRowKey={(row) => row.group}
+            />
+            {costs.value.variances.length > 0 ? (
+              <DataTable
+                label="Variances posted at End"
+                columns={varianceColumns}
+                rows={costs.value.variances}
+                getRowKey={(row) => `${row.type}/${row.costGroup}`}
+              />
+            ) : (
+              <p className={styles.hint}>Variances are posted when the order ends; the WIP balance is then cleared to zero.</p>
+            )}
             <DataTable label="Planned cost rows" columns={costColumns} rows={costs.value.rows} getRowKey={(row) => `${row.group}/${row.key}`} />
           </>
         ) : (

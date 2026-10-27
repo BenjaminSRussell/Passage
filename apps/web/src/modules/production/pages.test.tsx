@@ -376,6 +376,8 @@ describe("New production order form", () => {
     const component = screen.getByRole("group", { name: "Component 1" });
     fill("Item", v.lines[0].itemId, component);
     fill("Quantity per unit", "3", component);
+    await userEvent.selectOptions(within(component).getByLabelText("Flushing"), "finish");
+    fill("Item group", "FG");
     const operation = screen.getByRole("group", { name: "Operation 1" });
     fill("Resource", v.operations[0].resourceId, operation);
     fill("Run hours per unit", "0.5", operation);
@@ -389,7 +391,8 @@ describe("New production order form", () => {
     expect(url).toBe("/api/v1/production/orders");
     expect((init?.headers as Record<string, string>)["Idempotency-Key"]).toMatch(/.+/);
     const body = JSON.parse(String(init?.body));
-    expect(body.bom).toEqual([{ lineNo: "10", itemId: v.lines[0].itemId, qtyPer: "3" }]);
+    expect(body.bom).toEqual([{ lineNo: "10", itemId: v.lines[0].itemId, qtyPer: "3", flushing: "finish" }]);
+    expect(body.itemGroup).toBe("FG");
     expect(body.operations).toEqual([{ operNumber: 10, resourceId: v.operations[0].resourceId, runTimeHPer: "0.5" }]);
   });
 

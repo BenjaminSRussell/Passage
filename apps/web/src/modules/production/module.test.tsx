@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadModules } from "../registry";
 import {
   allowedCommands,
+  journalTypesFor,
   createOrder,
   getCosts,
   listOrders,
@@ -23,12 +24,23 @@ const calls = (mock: ReturnType<typeof vi.fn>) => mock.mock.calls as unknown as 
 describe("production module", () => {
   it("registers list, create and detail routes and is discovered by the shell", () => {
     expect(production.id).toBe("production");
-    expect(production.routes.map((r) => r.path)).toEqual(["/production", "/production/new", "/production/:id"]);
+    expect(production.routes.map((r) => r.path)).toEqual(["/production", "/production/new", "/production/posting-profiles", "/production/:id"]);
     expect(production.nav).toEqual([
       { label: "Production orders", to: "/production", duty: "production.order.read" },
       { label: "New production order", to: "/production/new", duty: "production.order.write" },
+      { label: "Posting profiles", to: "/production/posting-profiles", duty: "production.setup.read" },
     ]);
     expect(loadModules().some((m) => m.id === "production")).toBe(true);
+  });
+});
+
+describe("journal helpers", () => {
+  it("offers route cards on Released orders and every journal once Started (FR-21.5 to FR-21.7)", () => {
+    expect(journalTypesFor("Estimated")).toEqual([]);
+    expect(journalTypesFor("Released")).toEqual(["route-card"]);
+    expect(journalTypesFor("Started")).toEqual(["picking-list", "route-card", "report-as-finished"]);
+    expect(journalTypesFor("ReportedAsFinished")).toHaveLength(3);
+    expect(journalTypesFor("Ended")).toEqual([]);
   });
 });
 

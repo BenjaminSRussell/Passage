@@ -7,6 +7,8 @@ autoscaling: { enabled: true, minReplicas: 3, maxReplicas: 10, targetCPUUtilizat
 # PRD 4.21.13 parameters read by the service.
 config:
   rafTolerancePct: "0"
+  overConsumptionPct: "10"
+  autoStartOnFeedback: "true"
 resources:
   requests: { cpu: 100m, memory: 128Mi }
   limits: { cpu: 500m, memory: 256Mi }

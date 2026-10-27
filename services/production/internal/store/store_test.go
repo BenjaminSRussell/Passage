@@ -8,6 +8,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
@@ -189,7 +190,9 @@ func TestStore_CreateAndIdempotency(t *testing.T) {
 func TestStore_Lifecycle(t *testing.T) {
 	pool, s := migrated(t)
 	ctx := tenantCtx(testkit.TenantID(21))
-	o, _, err := s.CreateOrder(ctx, sampleOrder(t, "key-life", ids.New()))
+	in := sampleOrder(t, "key-life", ids.New())
+	allProfile(t, s, ctx, in.LegalEntityID)
+	o, _, err := s.CreateOrder(ctx, in)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,22 +288,25 @@ func TestStore_Lifecycle(t *testing.T) {
 		}
 	}
 
-	// Events: created, then one statuschanged per status change and per RAF; re-estimates emit none.
+	// Events: created, one statuschanged per status change and per RAF (re-estimates emit none),
+	// one journal.posted per RAF journal, and order.settled at End.
+	counts := map[string]int{}
 	types := outboxTypes(t, pool, o.ID)
-	if len(types) != 1+7 || types[0] != prodevents.OrderCreated {
-		t.Fatalf("outbox: %v", types)
+	for _, typ := range types {
+		counts[typ]++
 	}
-	for _, typ := range types[1:] {
-		if typ != prodevents.OrderStatusChanged {
-			t.Fatalf("outbox: %v", types)
-		}
+	if types[0] != prodevents.OrderCreated || counts[prodevents.OrderCreated] != 1 || counts[prodevents.OrderStatusChanged] != 7 ||
+		counts[prodevents.JournalPosted] != 2 || counts[prodevents.OrderSettled] != 1 || len(types) != 11 {
+		t.Fatalf("outbox: %v", types)
 	}
 }
 
 func TestStore_ResetAndZeroOutput(t *testing.T) {
 	_, s := migrated(t)
 	ctx := tenantCtx(testkit.TenantID(22))
-	o, _, err := s.CreateOrder(ctx, sampleOrder(t, "key-reset", ids.New()))
+	in := sampleOrder(t, "key-reset", ids.New())
+	allProfile(t, s, ctx, in.LegalEntityID)
+	o, _, err := s.CreateOrder(ctx, in)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -465,7 +471,8 @@ func TestStore_RowLevelSecurity(t *testing.T) {
 		t.Fatalf("the app role must be subject to RLS: super=%v bypass=%v err=%v", super, bypass, err)
 	}
 	for _, table := range []string{"production_order_sequence", "production_order", "production_bom_line", "production_operation",
-		"production_cost_estimate", "production_status_log", "outbox"} {
+		"production_cost_estimate", "production_status_log", "outbox", "production_posting_profile", "production_journal_sequence",
+		"production_journal", "production_journal_line", "production_wip_posting", "production_variance"} {
 		var enabled, forced bool
 		if err := admin.QueryRow(context.Background(), `select relrowsecurity, relforcerowsecurity from pg_class
 			where relname = $1 and relnamespace = current_schema()::regnamespace`, table).Scan(&enabled, &forced); err != nil || !enabled || !forced {
@@ -504,5 +511,31 @@ func TestStore_RowLevelSecurity(t *testing.T) {
 	expectProblem(t, err, http.StatusNotFound, CodeOrderNotFound)
 	if _, _, err := s.CreateOrder(scoped, sampleOrder(t, "rls-c", leB)); err == nil {
 		t.Fatal("an order was created outside the caller's legal-entity scope")
+	}
+
+	// Journals, WIP postings and posting profiles are tenant- and legal-entity-scoped too.
+	allProfile(t, s, ctxA, leA)
+	st := &stepper{t: t, s: s, ctx: ctxA, orderID: inA.ID, version: inA.Version}
+	for _, cmd := range []domain.Command{domain.CmdEstimate, domain.CmdSchedule, domain.CmdRelease, domain.CmdStart} {
+		st.must(cmd, nil)
+	}
+	j := st.mustPost(st.mustJournal(NewJournal{Type: domain.JournalPickingList, Issues: []IssueInput{{LineNo: "10", Qty: d("1")}}}).ID)
+	_, err = s.GetJournal(ctxOther, j.ID)
+	expectProblem(t, err, http.StatusNotFound, CodeJournalNotFound)
+	_, err = s.GetJournal(scopedCtx(tenantA, leB), j.ID)
+	expectProblem(t, err, http.StatusNotFound, CodeJournalNotFound)
+	_, err = s.Costs(ctxOther, inA.ID)
+	expectProblem(t, err, http.StatusNotFound, CodeOrderNotFound)
+	if ps, err := s.ListPostingProfiles(ctxOther, leA); err != nil || len(ps) != 0 {
+		t.Fatalf("another tenant sees %d profiles (%v)", len(ps), err)
+	}
+	if _, _, err := s.SavePostingProfile(scoped, ProfileSave{LegalEntityID: leB, Profile: testProfile(domain.AllKey, domain.AllKey, "1450"), Actor: "x"}); err == nil {
+		t.Fatal("a posting profile was saved outside the caller's legal-entity scope")
+	}
+	var leaked int
+	if err := dbx.WithTenantTx(ctxOther, app, func(tx pgx.Tx) error {
+		return tx.QueryRow(context.Background(), `select (select count(*) from production_wip_posting) + (select count(*) from production_journal_line)`).Scan(&leaked)
+	}); err != nil || leaked != 0 {
+		t.Fatalf("another tenant sees %d WIP or journal rows (%v)", leaked, err)
 	}
 }

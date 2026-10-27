@@ -42,16 +42,38 @@ func newLogger(w io.Writer) *slog.Logger {
 	return slog.New(handler).With("service", "production")
 }
 
-// config reads the service parameters (PRD 4.21.10). PRODUCTION_RAF_TOLERANCE_PCT
-// is the over-delivery allowed on report as finished, 0 to 100, default 0.
+// config reads the service parameters (PRD 4.21.10, 4.21.13):
+// PRODUCTION_RAF_TOLERANCE_PCT, the over-delivery allowed on report as
+// finished, 0 to 100, default 0; PRODUCTION_OVERCONSUMPTION_PCT, the picking
+// beyond the requirement allowed without the over-consumption duty, 0 to
+// 1000, default 10; PRODUCTION_AUTOSTART_ON_FEEDBACK, whether a route card
+// starts a Released order, default true.
 func config(getenv func(string) string) (api.Config, error) {
-	cfg := api.Config{RAFTolerancePct: decimal.Zero}
-	if raw := getenv("PRODUCTION_RAF_TOLERANCE_PCT"); raw != "" {
-		v, err := decimal.NewFromString(raw)
-		if err != nil || v.IsNegative() || v.GreaterThan(decimal.NewFromInt(100)) {
-			return cfg, fmt.Errorf("PRODUCTION_RAF_TOLERANCE_PCT must be a number from 0 to 100, got %q", raw)
+	cfg := api.Config{RAFTolerancePct: decimal.Zero, OverConsumptionPct: decimal.NewFromInt(10), AutoStartOnFeedback: true}
+	pct := func(name string, max int64, into *decimal.Decimal) error {
+		raw := getenv(name)
+		if raw == "" {
+			return nil
 		}
-		cfg.RAFTolerancePct = v
+		v, err := decimal.NewFromString(raw)
+		if err != nil || v.IsNegative() || v.GreaterThan(decimal.NewFromInt(max)) {
+			return fmt.Errorf("%s must be a number from 0 to %d, got %q", name, max, raw)
+		}
+		*into = v
+		return nil
+	}
+	if err := pct("PRODUCTION_RAF_TOLERANCE_PCT", 100, &cfg.RAFTolerancePct); err != nil {
+		return cfg, err
+	}
+	if err := pct("PRODUCTION_OVERCONSUMPTION_PCT", 1000, &cfg.OverConsumptionPct); err != nil {
+		return cfg, err
+	}
+	switch raw := getenv("PRODUCTION_AUTOSTART_ON_FEEDBACK"); raw {
+	case "", "true":
+	case "false":
+		cfg.AutoStartOnFeedback = false
+	default:
+		return cfg, fmt.Errorf("PRODUCTION_AUTOSTART_ON_FEEDBACK must be true or false, got %q", raw)
 	}
 	return cfg, nil
 }

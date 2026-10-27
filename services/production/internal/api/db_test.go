@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -25,7 +26,7 @@ func TestHTTP_OrderThroughTheDatabase(t *testing.T) {
 	}
 	r := httpx.NewRouter()
 	New(store.New(pool), Config{RAFTolerancePct: decimal.Zero}).Register(r)
-	all := []string{DutyRead, DutyWrite, DutyRelease, DutyJournalPost, DutyEnd, DutyCostRead}
+	all := []string{DutyRead, DutyWrite, DutyRelease, DutyJournalPost, DutyEnd, DutyCostRead, DutySetupWrite, DutySetupRead}
 
 	rec := do(r, call{method: http.MethodPost, path: "/v1/production/orders", body: createBody(nil), duties: all,
 		headers: map[string]string{idempotencyName: "http-create"}})
@@ -71,5 +72,40 @@ func TestHTTP_OrderThroughTheDatabase(t *testing.T) {
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &log); err != nil || len(log.Items) != 1 || log.Items[0].TraceID == "" {
 		t.Fatalf("status log: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// FR-21.13, FR-21.5, FR-21.11: a posting profile, then a picking list proposed, posted and costed.
+	if rec := do(r, call{method: http.MethodPut, path: "/v1/production/posting-profiles", body: profileBody(nil), duties: all}); rec.Code != http.StatusCreated {
+		t.Fatalf("profile: %d %s", rec.Code, rec.Body.String())
+	}
+	version := 2
+	for i, cmd := range []string{"schedule", "release", "start"} {
+		c := commandCall(order.ID, cmd, "", all...)
+		c.headers["If-Match"] = fmt.Sprintf(`"%d"`, version)
+		c.headers[idempotencyName] = fmt.Sprintf("http-%d", i)
+		if rec := do(r, c); rec.Code != http.StatusOK {
+			t.Fatalf("%s: %d %s", cmd, rec.Code, rec.Body.String())
+		}
+		version++
+	}
+	rec = do(r, journalCall(order.ID, `{"type":"picking-list"}`, all...))
+	var j store.Journal
+	if err := json.Unmarshal(rec.Body.Bytes(), &j); err != nil || rec.Code != http.StatusCreated || len(j.Lines) != 2 || j.Posted {
+		t.Fatalf("create journal: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(r, call{method: http.MethodPost, path: "/v1/production/journals/" + j.ID + ":post", duties: all, headers: map[string]string{idempotencyName: "http-post"}})
+	if err := json.Unmarshal(rec.Body.Bytes(), &j); err != nil || rec.Code != http.StatusOK || !j.Posted || len(j.Postings) != 4 {
+		t.Fatalf("post journal: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(r, call{method: http.MethodGet, path: "/v1/production/orders/" + order.ID + "/costs", duties: all})
+	if err := json.Unmarshal(rec.Body.Bytes(), &costs); err != nil || costs.ActualTotal != "3950.00" || costs.WIPBalance != "3950.00" {
+		t.Fatalf("costs after picking: %s", rec.Body.String())
+	}
+	rec = do(r, call{method: http.MethodGet, path: "/v1/production/orders/" + order.ID + "/journals", duties: all})
+	var journals struct {
+		Items []store.Journal `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &journals); err != nil || len(journals.Items) != 1 || journals.Items[0].ID != j.ID {
+		t.Fatalf("journals: %s", rec.Body.String())
 	}
 }

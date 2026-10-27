@@ -1,7 +1,9 @@
 # production
 
 Production orders for Passage (wave 21, ticket PSG-21, PRD section 4.21). Slice 1 covers the
-order itself, up to the point where journals would post:
+order itself; slice 2 adds journals, WIP postings and settlement.
+
+Slice 1:
 
 - Order creation with BOM explosion (FR-21.1): phantom lines flattened in place with `30.1`
   numbering, BR-21.2 quantity rounding (6 decimals, or a whole unit with `roundUp`), BR-21.8
@@ -13,10 +15,10 @@ order itself, up to the point where journals would post:
   labor and overhead (setup + run × process quantity at the resource rates, setup kept as the
   fixed part) and subcontract (vendor unit price × process quantity), 4 decimals internally.
   Re-estimate is allowed until Started and keeps the status.
-- Report as finished at header level (FR-21.7 quantities): good and error quantities within
-  quantity × (1 + `PRODUCTION_RAF_TOLERANCE_PCT`); further reports on a ReportedAsFinished order
-  add to them. Reset status to any earlier status (FR-21.9) reverses the reported quantities, and
-  a reset to Created drops the estimate. End checks the zero-output duty (BR-21.1).
+- Report as finished (FR-21.7 quantities): good and error quantities within quantity × (1 +
+  `PRODUCTION_RAF_TOLERANCE_PCT`); further reports on a ReportedAsFinished order add to them.
+  Reset status to any earlier status (FR-21.9); a reset to Created drops the estimate. End checks
+  the zero-output duty (BR-21.1).
 - Header edits (PATCH): quantity while Created or Estimated (re-explodes, re-plans and
   re-estimates in one transaction), delivery date until Released.
 - The order list (keyset paging, filters), order read, planned-cost read and status-log read.
@@ -26,21 +28,61 @@ order itself, up to the point where journals would post:
 - Events `order.created`, `order.updated` and `order.statuschanged`, written to the outbox in the
   same transaction as the change.
 
-Inventory and GL postings (picking lists, route and job cards, WIP, RAF receipts, settlement
-journals) need the wave 11 posting API and wave 16 inventory, and belong to later slices of
-PSG-21. Everything not built is listed in `NOT-IMPLEMENTED.md`.
+Slice 2:
+
+- Posting profiles (FR-21.13): ledger accounts per legal entity × item group × site, with `All`
+  as the wildcard; resolution item group × site, item group × All, All × site, All × All. Read
+  and maintained (`PUT`, If-Match to replace) through `/v1/production/posting-profiles`. The
+  order carries an optional `itemGroup`.
+- Production journals (FR-21.5 to FR-21.7): `picking-list`, `route-card` and
+  `report-as-finished`, created as drafts with proposed lines (`remaining`, `proportional`,
+  `none`) or explicit lines, then posted with `:post` (Idempotency-Key) or deleted. Posting runs
+  under the order row lock (BR-21.4), checks the posting date against the order's creation date
+  (BR-21.3), the over-consumption tolerance (`PRODUCTION_OVERCONSUMPTION_PCT`, duty
+  `production.journal.over-consume`) and the RAF tolerance, and writes a balanced set of WIP
+  subledger rows: issues Dr WIP / Cr inventory at the line's unit cost, route-card hours Dr WIP /
+  Cr labor and overhead absorption at the operation's rates, RAF Dr finished goods / Cr WIP at the
+  planned unit cost (cumulative rounding, so receipts never drift). Amounts round to the
+  currency's minor unit with `platform/go/money`.
+- Flushing principles on BOM lines: `start` lines are issued for their remaining quantity by a
+  picking list that `:start` posts; `finish` lines are consumed in proportion to each report as
+  finished (AC-21.4: the full quantity consumes exactly qty per × quantity × (1 + scrap%));
+  `manual` and `available-at-location` lines are picked. A route card on a Released order starts
+  it (`PRODUCTION_AUTOSTART_ON_FEEDBACK`); `finished` closes an operation to further feedback.
+- `:report-finished` posts a RAF journal; a RAF journal posted through `:post` moves a Started
+  order to ReportedAsFinished the same way.
+- End and settlement (FR-21.8, BR-21.6): `:end` refuses unposted journals and an end date before
+  the last posting, computes actual cost from the posted journals, decomposes it against the
+  estimate into lot-size, quantity, price and substitution variances that clear the WIP balance
+  exactly, posts the clearing to the variance accounts and stores the variances. Ending with zero
+  output sends all cost to variance. The BR-21.7 worked example ends with four variances of
+  −49.00 and WIP 0.00 (`TestJournals_WorkedSettlementExample`).
+- Reset reversals (FR-21.9): leaving ReportedAsFinished reverses the RAF journals; going back
+  before Started reverses every journal. Each reversal is a posted journal with negated lines
+  and swapped postings, linked to its original.
+- Reads: the journal list and journal (lines and postings), the cost view (planned and actual by
+  group, WIP balance, variances) and the actual cost on the order list (FR-21.11).
+- Events `journal.posted` and `order.settled` carry the ledger lines for the general ledger
+  (wave 11) to book.
+
+Inventory transactions (wave 16), GL booking (wave 11) and period control (wave 14) are
+handoffs. Everything not built is listed in `NOT-IMPLEMENTED.md`.
 
 ## Layout
 
 ```
 cmd/production/        entrypoint: config, dbx.Connect, optional dbx.Migrate, httpx router, admin /metrics
 internal/domain/       pure rules: status.go (BR-21.1 state machine, reset, RAF and edit guards),
-                       quantity.go (BR-21.2, BR-21.8), explode.go (FR-21.1), cost.go (FR-21.3, BR-21.6)
+                       quantity.go (BR-21.2, BR-21.8), explode.go (FR-21.1), cost.go (FR-21.3, BR-21.6),
+                       journal.go (proposals, tolerances, posting profiles, postings, settlement)
 internal/domain/testdata/  prod-orders-50.json and the exact-fraction generator that computed it
-internal/store/        Postgres repositories (pgx), tenant-scoped transactions, row locks, outbox writes
+internal/store/        Postgres repositories (pgx), tenant-scoped transactions, row locks, outbox writes:
+                       store.go (orders, commands), journal.go (journals, postings, settlement, reversals),
+                       profile.go (posting profiles)
 internal/api/          HTTP handlers, request validation, platform authz duties
 internal/events/       event types and payloads
-migrations/            0001_init.sql (tables, indexes, RLS, app-role grants), migrations.go (embed)
+migrations/            0001_init.sql (orders), 0002_journals.sql (profiles, journals, WIP postings,
+                       variances), each with RLS and app-role grants; migrations.go (embed)
 api/openapi.yaml       OpenAPI 3.1 for every route (a test checks it against the router)
 events/asyncapi.yaml   AsyncAPI 3 for every event (a test checks it against the payloads)
 charts/production/     Helm chart (deployment, service, HPA on CPU 70%, optional ServiceMonitor)
@@ -58,6 +100,8 @@ DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/production
 | `MIGRATE_ON_START` | `false` | apply `migrations/` at start |
 | `HTTP_ADDR` / `ADMIN_ADDR` | `:8080` / `:9090` | API and admin (`/metrics`) listeners |
 | `PRODUCTION_RAF_TOLERANCE_PCT` | `0` | over-delivery allowed on report as finished, 0 to 100 (PRD 4.21.13) |
+| `PRODUCTION_OVERCONSUMPTION_PCT` | `10` | picking beyond the required quantity allowed without the over-consumption duty, 0 to 1000 |
+| `PRODUCTION_AUTOSTART_ON_FEEDBACK` | `true` | a route card on a Released order starts it |
 
 The gateway supplies the principal through the `X-Passage-Tenant`, `X-Passage-Legal-Entity`,
 `X-Passage-User` and `X-Passage-Duties` headers until wave 2 replaces them with JWT validation.
@@ -75,17 +119,21 @@ python3 internal/domain/testdata/gen_prod_orders_50.py                     # reg
 Database tests skip when `PASSAGE_TEST_DATABASE_URL` is unset; the RLS test also needs a
 non-superuser `passage_app` role (`PASSAGE_TEST_APP_DATABASE_URL`). The domain tests are pure and
 include `pgregory.net/rapid` property tests for the state machine, report-as-finished limits,
-phantom explosion, backflush rounding and the settlement identity.
+phantom explosion, backflush rounding, the settlement identity, proportional consumption,
+drift-free RAF receipts and the variances clearing the posted WIP in every currency precision.
 
 ## Duties
 
 | Duty (PRD 4.21.17) | Key | Used by |
 |---|---|---|
-| View production orders | `production.order.read` | list, read, status log |
+| View production orders | `production.order.read` | list, read, status log, journal list and read |
 | View production costs | `production.cost.read` | `GET …/{id}/costs` |
 | Maintain production orders | `production.order.write` | create, PATCH, `:estimate`, `:schedule` |
 | Release production orders | `production.order.release` | `:release`, `:start`, `:cancel`, `:reset-status` |
-| Post production journals | `production.journal.post` | `:report-finished` |
+| Post production journals | `production.journal.post` | `:report-finished`, create, `:post` and delete journals |
+| Post production over-consumption | `production.journal.over-consume` | posting beyond the requirement plus `PRODUCTION_OVERCONSUMPTION_PCT` |
+| View production setup | `production.setup.read` | `GET /v1/production/posting-profiles` |
+| Maintain production setup | `production.setup.write` | `PUT /v1/production/posting-profiles` |
 | End production orders | `production.order.end` | `:end` |
 | End production order with zero output | `production.order.zero-output` | `:end` from Started with no output |
 
@@ -105,10 +153,23 @@ Problems are RFC 9457 with `type` `https://passage.dev/problems/<code>`.
 | `PRODUCTION_ZERO_OUTPUT_NOT_PERMITTED` | 422 | Ending with zero output without the zero-output duty (PROD-0013) |
 | `PRODUCTION_INVALID_INPUT` | 422 | Explosion or planning rule failed (quantities, scrap, series, operation order) |
 | `PRODUCTION_ORDER_NOT_FOUND` | 404 | No order with that id in the caller's tenant and legal-entity scope |
-| `PRODUCTION_UNKNOWN_ACTION` | 404 | The `:command` is not one of the eight |
+| `PRODUCTION_UNKNOWN_ACTION` | 404 | The `:command` is not one of the eight, or a journal action is not `:post` |
+| `PRODUCTION_JOURNAL_NOT_FOUND` | 404 | No journal with that id in the caller's scope |
+| `PRODUCTION_JOURNAL_NOT_ALLOWED` | 409 | The journal type cannot post on the order's status |
+| `PRODUCTION_JOURNAL_ALREADY_POSTED` | 409 | Posting or deleting a posted journal |
+| `PRODUCTION_OPERATION_FINISHED` | 409 | Feedback on a finished operation |
+| `PRODUCTION_UNPOSTED_JOURNALS` | 409 | End with draft journals (PROD-0012) |
+| `PRODUCTION_JOURNAL_EMPTY` | 422 | The proposal found nothing to post |
+| `PRODUCTION_INVALID_JOURNAL_LINE` | 422 | A line names an unknown BOM line or operation, or a subcontracted operation |
+| `PRODUCTION_OVER_CONSUMPTION` | 422 | Consumption beyond the requirement plus tolerance without the duty (PROD-0007) |
+| `PRODUCTION_POSTING_DATE_BEFORE_ORDER` | 422 | Posting date before the order was created (BR-21.3) |
+| `PRODUCTION_POSTING_PROFILE_MISSING` | 422 | No posting profile resolves for the order's item group and site |
+| `PRODUCTION_END_BEFORE_LAST_JOURNAL` | 422 | The end date is before the last journal posting date (FR-21.8) |
+| `PRODUCTION_POSTING_NOT_BALANCED` | 422 | The settlement variances do not clear the WIP balance (an internal invariant) |
+| `PRODUCTION_INVALID_HOURS` | 422 | Hours below 0.01 or with more than 2 decimals |
 | `idempotency_key_reuse` | 422 | The Idempotency-Key was used for a different body, command or order |
-| `conflict_version` | 412 | If-Match does not match the order version (PROD-0003) |
-| `precondition_required` | 428 | If-Match is missing on a command or PATCH |
+| `conflict_version` | 412 | If-Match does not match the order or profile version (PROD-0003) |
+| `precondition_required` | 428 | If-Match is missing on a command, PATCH or profile replacement |
 | `COM-0001` | 400 | Request failed validation; `errors` lists the fields |
 | `AUTH-0001` / `AUTH-0003` | 401 / 403 | No tenant / missing duty |
 
@@ -117,7 +178,6 @@ The stable PROD-00nn service codes are not yet carried in the problem body, beca
 
 ## Wave reference
 
-PSG-21 (wave 21). Depends on PSG-20 (costing). Later slices: picking lists, route and job cards
-and RAF journals with inventory and GL postings, WIP and settlement postings, subcontracting,
-split and merge, order change management, trigger points, rework orders and as-built genealogy.
-See `NOT-IMPLEMENTED.md`.
+PSG-21 (wave 21), slices PSG-2101 and PSG-2102. Depends on PSG-20 (costing). Later slices: job
+cards, subcontracting, bulk status, split and merge, order change management, trigger points,
+rework orders and as-built genealogy. See `NOT-IMPLEMENTED.md`.

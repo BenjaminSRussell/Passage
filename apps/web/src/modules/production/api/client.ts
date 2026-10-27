@@ -1,6 +1,7 @@
 /** Client for the production order API (services/production, wave 21). Paths follow api/openapi.yaml. */
 
-export const base = "/api/v1/production/orders";
+export const root = "/api/v1/production";
+export const base = `${root}/orders`;
 
 export type ProductionStatus =
   | "Created"
@@ -35,6 +36,15 @@ export type ProductionCommand =
 
 export type CostGroup = "material" | "labor" | "overhead" | "subcontract";
 
+/** When a BOM line's material is consumed (FR-21.5). */
+export type Flushing = "manual" | "start" | "finish" | "available-at-location";
+
+export type JournalType = "picking-list" | "route-card" | "report-as-finished";
+
+export type Proposal = "remaining" | "proportional" | "none";
+
+export type VarianceType = "lot-size" | "production-quantity" | "production-price" | "production-substitution";
+
 export interface OrderLine {
   lineNo: string;
   itemId: string;
@@ -44,6 +54,8 @@ export interface OrderLine {
   roundUp: boolean;
   qtyRequired: string;
   unitCost: string;
+  flushing?: Flushing;
+  qtyConsumed?: string;
 }
 
 export interface Operation {
@@ -57,6 +69,10 @@ export interface Operation {
   subcontract: boolean;
   subcontractPrice: string;
   processQty: string;
+  hoursReported?: string;
+  qtyGood?: string;
+  qtyError?: string;
+  status?: "open" | "started" | "finished";
 }
 
 export interface CostRow {
@@ -75,6 +91,7 @@ export interface ProductionOrder {
   siteId: string;
   warehouseId: string;
   currency: string;
+  itemGroup?: string;
   quantity: string;
   qtyRaf: string;
   qtyError: string;
@@ -105,6 +122,7 @@ export interface OrderSummary {
   status: ProductionStatus;
   deliveryDate?: string;
   plannedCost: string;
+  actualCost?: string;
   version: number;
   createdAt: string;
 }
@@ -131,6 +149,7 @@ export interface BOMComponentInput {
   seriesSize?: string;
   unitCost?: string;
   roundUp?: boolean;
+  flushing?: Flushing;
 }
 
 export interface OperationInput {
@@ -144,6 +163,7 @@ export interface OperationInput {
 }
 
 export interface CreateOrderInput {
+  itemGroup?: string;
   productId: string;
   siteId: string;
   warehouseId: string;
@@ -154,13 +174,120 @@ export interface CreateOrderInput {
   operations: OperationInput[];
 }
 
-/** Planned cost read (FR-21.11): totals per group and overall to cents, and the 4-decimal rows. */
+export interface Variance {
+  type: VarianceType;
+  costGroup: CostGroup;
+  amount: string;
+}
+
+/**
+ * Cost read (FR-21.11): planned and actual totals per group and overall in the currency's minor
+ * unit, the 4-decimal rows, the WIP balance and the variances posted at End.
+ */
 export interface CostView {
   orderId: string;
   currency: string;
   totals: Partial<Record<CostGroup, string>>;
   total: string;
   rows: CostRow[];
+  actualTotals: Partial<Record<CostGroup, string>>;
+  actualTotal: string;
+  actualRows: CostRow[];
+  wipBalance: string;
+  variances: Variance[];
+  varianceTotal: string;
+}
+
+export interface JournalLine {
+  kind: "issue" | "hours" | "receipt";
+  lineNo?: string;
+  operNumber?: number;
+  itemId?: string;
+  qty: string;
+  qtyGood: string;
+  qtyError: string;
+  finished: boolean;
+  unitCost: string;
+  amount: string;
+  overheadAmount: string;
+}
+
+export interface Posting {
+  postingType: string;
+  account: string;
+  dr: string;
+  cr: string;
+  wip: boolean;
+}
+
+export interface Journal {
+  id: string;
+  orderId: string;
+  type: JournalType;
+  journalNumber: string;
+  postingDate: string;
+  posted: boolean;
+  postedAt?: string;
+  postedBy?: string;
+  qtyGood: string;
+  qtyError: string;
+  reversalOf?: string;
+  reversedBy?: string;
+  journalEntryId?: string;
+  createdBy: string;
+  createdAt: string;
+  lines: JournalLine[];
+  postings: Posting[];
+}
+
+export interface IssueInput {
+  lineNo: string;
+  quantity: string;
+  unitCost?: string;
+}
+
+export interface HoursInput {
+  operNumber: number;
+  hours: string;
+  qtyGood?: string;
+  qtyError?: string;
+  finished?: boolean;
+}
+
+/** CreateJournal: without issues or hours the service proposes the lines. */
+export interface CreateJournalInput {
+  type: JournalType;
+  postingDate?: string;
+  proposal?: Proposal;
+  quantity?: string;
+  errorQuantity?: string;
+  issues?: IssueInput[];
+  hours?: HoursInput[];
+}
+
+export interface PostingProfileAccounts {
+  wipAccount: string;
+  inventoryAccount: string;
+  finishedGoodsAccount: string;
+  laborAbsorptionAccount: string;
+  overheadAbsorptionAccount: string;
+  lotSizeVarianceAccount: string;
+  quantityVarianceAccount: string;
+  priceVarianceAccount: string;
+  substitutionVarianceAccount: string;
+}
+
+export interface PostingProfileInput extends PostingProfileAccounts {
+  legalEntityId?: string;
+  itemGroup: string;
+  siteId: string;
+}
+
+export interface PostingProfile extends PostingProfileInput {
+  legalEntityId: string;
+  version: number;
+  updatedBy: string;
+  updatedAt: string;
 }
 
 export interface CommandBody {
@@ -210,12 +337,19 @@ async function toError(res: Response): Promise<ProductionApiError> {
   return new ProductionApiError(res.status, code, message, errors);
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${base}${path}`, init);
+async function requestAt<T>(url: string, init: RequestInit = {}): Promise<T> {
+  const res = await fetch(url, init);
   if (!res.ok) {
     throw await toError(res);
   }
+  if (res.status === 204) {
+    return undefined as T;
+  }
   return (await res.json()) as T;
+}
+
+function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  return requestAt<T>(`${base}${path}`, init);
 }
 
 /** A fresh Idempotency-Key. Keep one per user intent so a retry replays instead of duplicating. */
@@ -261,7 +395,66 @@ export async function getCosts(id: string, signal?: AbortSignal): Promise<CostVi
     totals: body.totals ?? {},
     total: body.total ?? "0",
     rows: Array.isArray(body.rows) ? body.rows : [],
+    actualTotals: body.actualTotals ?? {},
+    actualTotal: body.actualTotal ?? "0",
+    actualRows: Array.isArray(body.actualRows) ? body.actualRows : [],
+    wipBalance: body.wipBalance ?? "0",
+    variances: Array.isArray(body.variances) ? body.variances : [],
+    varianceTotal: body.varianceTotal ?? "0",
   };
+}
+
+export async function listJournals(orderId: string, signal?: AbortSignal): Promise<Journal[]> {
+  const body = await request<{ items?: Journal[] }>(`/${encodeURIComponent(orderId)}/journals`, { signal });
+  return Array.isArray(body.items) ? body.items : [];
+}
+
+/** Creates a draft journal on an order (FR-21.5 to FR-21.7). */
+export function createJournal(orderId: string, input: CreateJournalInput, idempotencyKey: string): Promise<Journal> {
+  return request<Journal>(`/${encodeURIComponent(orderId)}/journals`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(input),
+  });
+}
+
+/** Posts a draft journal; a retry with the same key replays. */
+export function postJournal(journalId: string, idempotencyKey: string): Promise<Journal> {
+  return requestAt<Journal>(`${root}/journals/${encodeURIComponent(journalId)}:post`, {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
+  });
+}
+
+export function deleteJournal(journalId: string): Promise<void> {
+  return requestAt<void>(`${root}/journals/${encodeURIComponent(journalId)}`, { method: "DELETE" });
+}
+
+export async function listPostingProfiles(signal?: AbortSignal): Promise<PostingProfile[]> {
+  const body = await requestAt<{ items?: PostingProfile[] }>(`${root}/posting-profiles`, { signal });
+  return Array.isArray(body.items) ? body.items : [];
+}
+
+/** Creates a profile (no version) or replaces it under If-Match (FR-21.13). */
+export function savePostingProfile(input: PostingProfileInput, version?: number): Promise<PostingProfile> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (version !== undefined) {
+    headers["If-Match"] = `"${version}"`;
+  }
+  return requestAt<PostingProfile>(`${root}/posting-profiles`, { method: "PUT", headers, body: JSON.stringify(input) });
+}
+
+/** Journal types an order in this status can take (FR-21.5 to FR-21.7; a route card starts a Released order). */
+export function journalTypesFor(status: ProductionStatus): JournalType[] {
+  switch (status) {
+    case "Released":
+      return ["route-card"];
+    case "Started":
+    case "ReportedAsFinished":
+      return ["picking-list", "route-card", "report-as-finished"];
+    default:
+      return [];
+  }
 }
 
 export function createOrder(input: CreateOrderInput, idempotencyKey: string): Promise<ProductionOrder> {

@@ -25,6 +25,22 @@ func TestConfig(t *testing.T) {
 	}
 }
 
+func TestConfig_JournalParameters(t *testing.T) {
+	cfg, err := config(env(nil))
+	if err != nil || cfg.OverConsumptionPct.String() != "10" || !cfg.AutoStartOnFeedback {
+		t.Fatalf("defaults: over %s autostart %v, %v", cfg.OverConsumptionPct, cfg.AutoStartOnFeedback, err)
+	}
+	cfg, err = config(env(map[string]string{"PRODUCTION_OVERCONSUMPTION_PCT": "250", "PRODUCTION_AUTOSTART_ON_FEEDBACK": "false"}))
+	if err != nil || cfg.OverConsumptionPct.String() != "250" || cfg.AutoStartOnFeedback {
+		t.Fatalf("overrides: over %s autostart %v, %v", cfg.OverConsumptionPct, cfg.AutoStartOnFeedback, err)
+	}
+	for name, bad := range map[string]string{"PRODUCTION_OVERCONSUMPTION_PCT": "1000.5", "PRODUCTION_AUTOSTART_ON_FEEDBACK": "yes"} {
+		if _, err := config(env(map[string]string{name: bad})); err == nil {
+			t.Errorf("%s=%q accepted", name, bad)
+		}
+	}
+}
+
 func TestRunRequiresDatabaseURL(t *testing.T) {
 	if err := run(context.Background(), env(nil)); err == nil {
 		t.Fatal("run without DATABASE_URL succeeded")

@@ -33,13 +33,16 @@ import (
 
 // Duties checked on the routes (PRD 4.21.17). Bundles and OPA data live in policies/ (wave 2).
 const (
-	DutyRead        = "production.order.read"        // View production orders
-	DutyWrite       = "production.order.write"       // Maintain production orders
-	DutyRelease     = "production.order.release"     // Release production orders
-	DutyJournalPost = "production.journal.post"      // Post production journals (report as finished)
-	DutyEnd         = "production.order.end"         // End production orders
-	DutyZeroOutput  = "production.order.zero-output" // End production order with zero output
-	DutyCostRead    = "production.cost.read"         // View production costs
+	DutyRead        = "production.order.read"           // View production orders
+	DutyWrite       = "production.order.write"          // Maintain production orders
+	DutyRelease     = "production.order.release"        // Release production orders
+	DutyJournalPost = "production.journal.post"         // Post production journals (report as finished)
+	DutyEnd         = "production.order.end"            // End production orders
+	DutyZeroOutput  = "production.order.zero-output"    // End production order with zero output
+	DutyCostRead    = "production.cost.read"            // View production costs
+	DutyOverConsume = "production.journal.over-consume" // Post production over-consumption
+	DutySetupRead   = "production.setup.read"           // View production setup
+	DutySetupWrite  = "production.setup.write"          // Maintain production setup
 )
 
 const (
@@ -79,6 +82,12 @@ type Config struct {
 	// RAFTolerancePct is the over-delivery allowed on report as finished
 	// (PRODUCTION_RAF_TOLERANCE_PCT, default 0).
 	RAFTolerancePct decimal.Decimal
+	// OverConsumptionPct is the picking beyond the required quantity allowed
+	// without the over-consumption duty (PRODUCTION_OVERCONSUMPTION_PCT, default 10).
+	OverConsumptionPct decimal.Decimal
+	// AutoStartOnFeedback lets a route card start a Released order
+	// (PRODUCTION_AUTOSTART_ON_FEEDBACK, default true).
+	AutoStartOnFeedback bool
 }
 
 // API holds the handlers and their counters.
@@ -89,6 +98,7 @@ type API struct {
 	replayed atomic.Int64
 	moved    atomic.Int64
 	refused  atomic.Int64
+	posted   atomic.Int64
 }
 
 // New returns the API over st.
@@ -106,6 +116,13 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/orders/{id}/status-log", a.getStatusLog)
 	r.With(authz.RequireDuty(DutyCostRead)).Get("/v1/production/orders/{id}/costs", a.getCosts)
 	r.Post("/v1/production/orders/{id}", a.transition)
+	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/orders/{id}/journals", a.listJournals)
+	r.With(authz.RequireDuty(DutyJournalPost)).Post("/v1/production/orders/{id}/journals", a.createJournal)
+	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/journals/{id}", a.getJournal)
+	r.With(authz.RequireDuty(DutyJournalPost)).Delete("/v1/production/journals/{id}", a.deleteJournal)
+	r.With(authz.RequireDuty(DutyJournalPost)).Post("/v1/production/journals/{id}", a.postJournal)
+	r.With(authz.RequireDuty(DutySetupRead)).Get("/v1/production/posting-profiles", a.listProfiles)
+	r.With(authz.RequireDuty(DutySetupWrite)).Put("/v1/production/posting-profiles", a.saveProfile)
 }
 
 // Metrics serves Prometheus text for the admin port.
@@ -115,7 +132,8 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP production_orders_created_total Production orders created; idempotent replays are not counted.\n# TYPE production_orders_created_total counter\nproduction_orders_created_total %d\n", a.created.Load())
 		fmt.Fprintf(w, "# HELP production_transitions_total Status commands applied.\n# TYPE production_transitions_total counter\nproduction_transitions_total %d\n", a.moved.Load())
 		fmt.Fprintf(w, "# HELP production_idempotent_replays_total Requests answered from a stored Idempotency-Key.\n# TYPE production_idempotent_replays_total counter\nproduction_idempotent_replays_total %d\n", a.replayed.Load())
-		fmt.Fprintf(w, "# HELP production_transitions_refused_total Commands refused by the state machine, a guard or a precondition.\n# TYPE production_transitions_refused_total counter\nproduction_transitions_refused_total %d\n", a.refused.Load())
+		fmt.Fprintf(w, "# HELP production_transitions_refused_total Commands and journal posts refused by the state machine, a guard or a precondition.\n# TYPE production_transitions_refused_total counter\nproduction_transitions_refused_total %d\n", a.refused.Load())
+		fmt.Fprintf(w, "# HELP production_journals_posted_total Production journals posted through :post.\n# TYPE production_journals_posted_total counter\nproduction_journals_posted_total %d\n", a.posted.Load())
 	})
 }
 
@@ -137,6 +155,7 @@ type createRequest struct {
 	ProductID     string                `json:"productId"`
 	SiteID        string                `json:"siteId"`
 	WarehouseID   string                `json:"warehouseId"`
+	ItemGroup     string                `json:"itemGroup"`
 	Currency      string                `json:"currency"`
 	Quantity      decimal.Decimal       `json:"quantity"`
 	DeliveryDate  *string               `json:"deliveryDate"`
@@ -188,7 +207,7 @@ func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	order, created, err := a.store.CreateOrder(r.Context(), store.NewOrder{
-		LegalEntityID: req.LegalEntityID, ProductID: req.ProductID, SiteID: req.SiteID, WarehouseID: req.WarehouseID,
+		LegalEntityID: req.LegalEntityID, ProductID: req.ProductID, SiteID: req.SiteID, WarehouseID: req.WarehouseID, ItemGroup: req.ItemGroup,
 		Currency: req.Currency, Quantity: req.Quantity, DeliveryDate: req.DeliveryDate, OriginType: req.OriginType, OriginID: req.OriginID,
 		Lines: lines, Operations: ops, IdempotencyKey: key, RequestHash: hashOf(req),
 	})
@@ -265,35 +284,6 @@ func (a *API) getStatusLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"orderId": id, "items": entries})
-}
-
-// costView is the planned-cost read (FR-21.11): totals by cost group to cents,
-// the grand total, and the 4-decimal rows behind them. Actual cost and
-// variances arrive with journal posting and settlement.
-type costView struct {
-	OrderID  string                      `json:"orderId"`
-	Currency string                      `json:"currency"`
-	Totals   map[domain.CostGroup]string `json:"totals"`
-	Total    string                      `json:"total"`
-	Rows     []domain.CostRow            `json:"rows"`
-}
-
-func (a *API) getCosts(w http.ResponseWriter, r *http.Request) {
-	order, ok := a.loadByID(w, r)
-	if !ok {
-		return
-	}
-	sums := map[domain.CostGroup]decimal.Decimal{}
-	total := decimal.Zero
-	for _, c := range order.Costs {
-		sums[c.Group] = sums[c.Group].Add(c.Amount)
-		total = total.Add(c.Amount)
-	}
-	totals := map[domain.CostGroup]string{}
-	for g, v := range sums {
-		totals[g] = v.StringFixed(2)
-	}
-	httpx.JSON(w, http.StatusOK, costView{OrderID: order.ID, Currency: order.Currency, Totals: totals, Total: total.StringFixed(2), Rows: order.Costs})
 }
 
 // ---- PATCH ----
@@ -588,6 +578,9 @@ func validateCreate(req createRequest, fields map[string]string) {
 	if req.DeliveryDate != nil && !isDate(*req.DeliveryDate) {
 		fields["deliveryDate"] = "must be a date (YYYY-MM-DD)"
 	}
+	if len(req.ItemGroup) > maxItemGroup || req.ItemGroup == domain.AllKey {
+		fields["itemGroup"] = fmt.Sprintf("at most %d characters; All is reserved for posting profiles", maxItemGroup)
+	}
 	switch {
 	case len(req.Operations) == 0:
 		fields["operations"] = "at least one operation is required"
@@ -608,6 +601,9 @@ func validateCreate(req createRequest, fields map[string]string) {
 		}
 		if !op.ProcessQty.IsZero() {
 			fields[at+".processQty"] = "is computed by the service"
+		}
+		if !op.HoursReported.IsZero() || !op.QtyGood.IsZero() || !op.QtyError.IsZero() || op.Status != "" {
+			fields[at+".status"] = "hours, quantities and status are reported by route cards"
 		}
 	}
 	count := 0
@@ -640,6 +636,9 @@ func validateBOM(comps []domain.BOMComponent, path string, depth int, count *int
 		at := fmt.Sprintf("%s[%d]", path, i)
 		checkQuantity(at+".qtyPer", c.QtyPer, false, fields)
 		checkQuantity(at+".scrapPct", c.ScrapPct, false, fields)
+		if c.Flushing != "" && !c.Flushing.Valid() {
+			fields[at+".flushing"] = "must be manual, start, finish or available-at-location"
+		}
 		if c.Phantom {
 			if c.ItemID != "" && !ids.Valid(c.ItemID) {
 				fields[at+".itemId"] = "must be a UUID"

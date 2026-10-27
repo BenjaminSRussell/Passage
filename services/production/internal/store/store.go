@@ -42,6 +42,7 @@ type Order struct {
 	SiteID        string             `json:"siteId"`
 	WarehouseID   string             `json:"warehouseId"`
 	Currency      string             `json:"currency"`
+	ItemGroup     string             `json:"itemGroup,omitempty"`
 	Quantity      decimal.Decimal    `json:"quantity"`
 	QtyRAF        decimal.Decimal    `json:"qtyRaf"`
 	QtyError      decimal.Decimal    `json:"qtyError"`
@@ -73,6 +74,7 @@ type OrderSummary struct {
 	Status        domain.Status   `json:"status"`
 	DeliveryDate  *string         `json:"deliveryDate,omitempty"`
 	PlannedCost   decimal.Decimal `json:"plannedCost"`
+	ActualCost    decimal.Decimal `json:"actualCost"`
 	Version       int             `json:"version"`
 	CreatedAt     time.Time       `json:"createdAt"`
 }
@@ -111,6 +113,7 @@ type NewOrder struct {
 	ProductID      string
 	SiteID         string
 	WarehouseID    string
+	ItemGroup      string
 	Currency       string
 	Quantity       decimal.Decimal
 	DeliveryDate   *string
@@ -135,7 +138,8 @@ type OrderUpdate struct {
 
 // Transition is one `:command` request. ResetTo is the target of
 // `:reset-status` (empty for the previous status). Good and Error are the
-// quantities of `:report-finished`; RAFTolerancePct bounds them (FR-21.7).
+// quantities of `:report-finished`, which posts a report-as-finished journal;
+// RAFTolerancePct bounds them (FR-21.7).
 type Transition struct {
 	OrderID         string
 	IfMatch         int
@@ -160,6 +164,14 @@ type Store interface {
 	StatusLog(ctx context.Context, orderID string) ([]StatusLogEntry, error)
 	UpdateOrder(ctx context.Context, u OrderUpdate) (Order, error)
 	Transition(ctx context.Context, t Transition) (Order, bool, error)
+	Costs(ctx context.Context, orderID string) (CostSummary, error)
+	CreateJournal(ctx context.Context, in NewJournal) (Journal, bool, error)
+	PostJournal(ctx context.Context, r PostRequest) (Journal, bool, error)
+	GetJournal(ctx context.Context, id string) (Journal, error)
+	ListJournals(ctx context.Context, orderID string) ([]Journal, error)
+	DeleteJournal(ctx context.Context, id string) error
+	ListPostingProfiles(ctx context.Context, legalEntityID string) ([]PostingProfile, error)
+	SavePostingProfile(ctx context.Context, in ProfileSave) (PostingProfile, bool, error)
 }
 
 // Postgres is the production store.
@@ -231,10 +243,10 @@ func (s *Postgres) CreateOrder(ctx context.Context, in NewOrder) (Order, bool, e
 		id := ids.New()
 		number := fmt.Sprintf("PO-%06d", seq)
 		if _, err := tx.Exec(ctx, `insert into production_order (tenant_id, id, legal_entity_id, order_number, product_id, site_id, warehouse_id, currency,
-			quantity, delivery_date, origin_type, origin_id, idempotency_key, request_hash)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::date, $11, $12, $13, $14)`,
+			quantity, delivery_date, origin_type, origin_id, idempotency_key, request_hash, item_group)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::date, $11, $12, $13, $14, $15)`,
 			p.TenantID, id, in.LegalEntityID, number, in.ProductID, in.SiteID, in.WarehouseID, in.Currency,
-			in.Quantity.String(), in.DeliveryDate, in.OriginType, in.OriginID, in.IdempotencyKey, in.RequestHash); err != nil {
+			in.Quantity.String(), in.DeliveryDate, in.OriginType, in.OriginID, in.IdempotencyKey, in.RequestHash, in.ItemGroup); err != nil {
 			return err
 		}
 		if err := insertLines(ctx, tx, p.TenantID, id, in.Lines); err != nil {
@@ -258,9 +270,15 @@ func (s *Postgres) CreateOrder(ctx context.Context, in NewOrder) (Order, bool, e
 
 func insertLines(ctx context.Context, tx pgx.Tx, tenantID, orderID string, lines []domain.OrderLine) error {
 	for i, l := range lines {
-		if _, err := tx.Exec(ctx, `insert into production_bom_line (tenant_id, order_id, line_number, line_seq, item_id, qty_per, series_size, scrap_pct, round_up, qty_required, unit_cost_est)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-			tenantID, orderID, l.LineNo, i+1, l.ItemID, l.QtyPer.String(), l.SeriesSize.String(), l.ScrapPct.String(), l.RoundUp, l.QtyRequired.String(), l.UnitCost.String()); err != nil {
+		flushing := l.Flushing
+		if flushing == "" {
+			flushing = domain.FlushManual
+		}
+		if _, err := tx.Exec(ctx, `insert into production_bom_line (tenant_id, order_id, line_number, line_seq, item_id, qty_per, series_size, scrap_pct, round_up,
+				qty_required, unit_cost_est, flushing_principle)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+			tenantID, orderID, l.LineNo, i+1, l.ItemID, l.QtyPer.String(), l.SeriesSize.String(), l.ScrapPct.String(), l.RoundUp,
+			l.QtyRequired.String(), l.UnitCost.String(), string(flushing)); err != nil {
 			return err
 		}
 	}
@@ -304,7 +322,10 @@ func (s *Postgres) ListOrders(ctx context.Context, f ListFilter) (OrderPage, err
 				o.warehouse_id::text, o.currency::text, o.quantity::text, o.qty_raf::text, o.qty_error::text, o.status,
 				o.delivery_date::text, o.version, o.created_at,
 				coalesce((select sum(c.planned_amount) from production_cost_estimate c
-				          where c.tenant_id = o.tenant_id and c.order_id = o.id), 0)::text
+				          where c.tenant_id = o.tenant_id and c.order_id = o.id), 0)::text,
+				coalesce((select sum(w.amount_dr - w.amount_cr) from production_wip_posting w
+				          where w.tenant_id = o.tenant_id and w.order_id = o.id
+				            and w.posting_type in ('wip-material', 'wip-labor', 'wip-overhead')), 0)::text
 			from production_order o
 			where o.tenant_id = $1
 			  and ($2 = '' or o.status = $2)
@@ -321,15 +342,16 @@ func (s *Postgres) ListOrders(ctx context.Context, f ListFilter) (OrderPage, err
 		defer rows.Close()
 		for rows.Next() {
 			var o OrderSummary
-			var status, qty, raf, qerr, planned string
+			var status, qty, raf, qerr, planned, actual string
 			if err := rows.Scan(&o.ID, &o.LegalEntityID, &o.OrderNumber, &o.ProductID, &o.SiteID, &o.WarehouseID, &o.Currency,
-				&qty, &raf, &qerr, &status, &o.DeliveryDate, &o.Version, &o.CreatedAt, &planned); err != nil {
+				&qty, &raf, &qerr, &status, &o.DeliveryDate, &o.Version, &o.CreatedAt, &planned, &actual); err != nil {
 				return err
 			}
 			o.Status = domain.Status(status)
 			o.Quantity, o.QtyRAF, o.QtyError = dec(qty), dec(raf), dec(qerr)
 			o.Remaining = decimal.Max(o.Quantity.Sub(o.QtyRAF).Sub(o.QtyError), decimal.Zero)
-			o.PlannedCost = dec(planned).Round(2)
+			o.PlannedCost = domain.RoundMoney(dec(planned), o.Currency)
+			o.ActualCost = domain.RoundMoney(dec(actual), o.Currency)
 			page.Items = append(page.Items, o)
 		}
 		return rows.Err()
@@ -376,30 +398,39 @@ func (s *Postgres) StatusLog(ctx context.Context, orderID string) ([]StatusLogEn
 	return out, err
 }
 
-// orderHead is the locked header row a command or edit works on.
+// orderHead is the locked header row a command, edit or journal post works on.
 type orderHead struct {
+	id            string
 	status        domain.Status
 	version       int
 	quantity      decimal.Decimal
 	qtyRAF        decimal.Decimal
 	qtyError      decimal.Decimal
 	legalEntityID string
+	productID     string
+	siteID        string
+	itemGroup     string
+	currency      string
+	createdOn     string
 }
 
-// lockOrder takes the row lock that serializes commands on one order
-// (BR-21.4) and checks If-Match against the version.
+// lockOrder takes the row lock that serializes commands and journal posts on
+// one order (BR-21.4) and checks If-Match against the version; ifMatch 0
+// skips the check (journal posts carry no If-Match).
 func lockOrder(ctx context.Context, tx pgx.Tx, tenantID, orderID string, ifMatch int) (orderHead, error) {
-	var h orderHead
+	h := orderHead{id: orderID}
 	var status, qty, raf, qerr string
-	err := tx.QueryRow(ctx, `select status, version, quantity::text, qty_raf::text, qty_error::text, legal_entity_id::text from production_order
-		where tenant_id = $1 and id = $2 for update`, tenantID, orderID).Scan(&status, &h.version, &qty, &raf, &qerr, &h.legalEntityID)
+	err := tx.QueryRow(ctx, `select status, version, quantity::text, qty_raf::text, qty_error::text, legal_entity_id::text,
+			product_id::text, site_id::text, item_group, currency::text, (created_at at time zone 'UTC')::date::text
+		from production_order where tenant_id = $1 and id = $2 for update`, tenantID, orderID).Scan(&status, &h.version, &qty, &raf, &qerr,
+		&h.legalEntityID, &h.productID, &h.siteID, &h.itemGroup, &h.currency, &h.createdOn)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return h, notFound()
 	}
 	if err != nil {
 		return h, err
 	}
-	if h.version != ifMatch {
+	if ifMatch != 0 && h.version != ifMatch {
 		return h, httpx.NewProblem(http.StatusPreconditionFailed, CodeVersionConflict, fmt.Sprintf("order was changed by another user; current version is %d", h.version))
 	}
 	h.status = domain.Status(status)
@@ -484,10 +515,13 @@ func requantify(ctx context.Context, tx pgx.Tx, tenantID, orderID string, qty de
 }
 
 // Transition applies a `:command` to an order. It locks the order row, checks
-// If-Match against the version, applies the state machine and its guards,
-// re-estimates on :estimate (replacing the cost rows atomically), books the
-// reported quantities on :report-finished, undoes them and the estimate on a
-// reset past them, writes the status log and the event, and bumps the version.
+// If-Match against the version, applies the state machine and its guards and
+// the posting effects of BR-21.1 in the same transaction: :estimate replaces
+// the cost rows, :start backflushes the start-flushed lines, :report-finished
+// posts a report-as-finished journal, :end settles WIP into variances, and a
+// reset reverses the journals of the statuses it leaves (FR-21.9) and drops
+// the estimate on the way back to Created. It writes the status log and the
+// event, and bumps the version.
 // A replay of the same Idempotency-Key and request returns the current order
 // with replayed=true and changes nothing.
 func (s *Postgres) Transition(ctx context.Context, t Transition) (Order, bool, error) {
@@ -524,25 +558,36 @@ func (s *Postgres) Transition(ctx context.Context, t Transition) (Order, bool, e
 		if err != nil {
 			return domainProblem(err)
 		}
-		raf, qerr := h.qtyRAF, h.qtyError
 		switch t.Command {
 		case domain.CmdEnd:
-			if err := domain.CheckEnd(from, raf, t.ZeroOutputDuty); err != nil {
+			if err := domain.CheckEnd(from, h.qtyRAF, t.ZeroOutputDuty); err != nil {
 				return domainProblem(err)
+			}
+			if err := settleOrder(ctx, tx, p.TenantID, h, t.Actor); err != nil {
+				return err
+			}
+		case domain.CmdStart:
+			if err := startOrder(ctx, tx, p.TenantID, &h, t.Actor, "sys:start:"+t.IdempotencyKey); err != nil {
+				return err
 			}
 		case domain.CmdReportFinished:
-			if err := domain.CheckReportFinished(h.quantity, raf, qerr, t.Good, t.Error, t.RAFTolerancePct); err != nil {
+			if err := domain.CheckReportFinished(h.quantity, h.qtyRAF, h.qtyError, t.Good, t.Error, t.RAFTolerancePct); err != nil {
 				return domainProblem(err)
 			}
-			raf, qerr = raf.Add(t.Good), qerr.Add(t.Error)
+			raf := NewJournal{Type: domain.JournalReportFinished, Proposal: domain.ProposeProportional, QtyGood: t.Good, QtyError: t.Error}
+			if err := autoPost(ctx, tx, p.TenantID, &h, raf, t.Actor, "sys:raf:"+t.IdempotencyKey, t.RAFTolerancePct); err != nil {
+				return err
+			}
 		case domain.CmdEstimate:
 			if err := replaceEstimate(ctx, tx, p.TenantID, t.OrderID); err != nil {
 				return err
 			}
 		case domain.CmdResetStatus:
-			// FR-21.9: a reset reverses what the statuses it leaves booked.
-			if from == domain.ReportedAsFinished {
-				raf, qerr = decimal.Zero, decimal.Zero
+			// FR-21.9: a reset reverses what the statuses it leaves posted.
+			if types := reversedBy(from, to); len(types) > 0 {
+				if err := reverseJournals(ctx, tx, p.TenantID, &h, types, t.Actor, "sys:reset:"+t.IdempotencyKey); err != nil {
+					return err
+				}
 			}
 			if to == domain.Created {
 				if _, err := tx.Exec(ctx, `delete from production_cost_estimate where tenant_id = $1 and order_id = $2`, p.TenantID, t.OrderID); err != nil {
@@ -551,7 +596,7 @@ func (s *Postgres) Transition(ctx context.Context, t Transition) (Order, bool, e
 			}
 		}
 		if _, err := tx.Exec(ctx, `update production_order set status = $3, qty_raf = $4, qty_error = $5, version = version + 1, updated_at = now()
-			where tenant_id = $1 and id = $2`, p.TenantID, t.OrderID, string(to), raf.String(), qerr.String()); err != nil {
+			where tenant_id = $1 and id = $2`, p.TenantID, t.OrderID, string(to), h.qtyRAF.String(), h.qtyError.String()); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `insert into production_status_log (tenant_id, id, legal_entity_id, order_id, command, from_status, to_status, actor, trace_id, idempotency_key, request_hash)
@@ -572,6 +617,20 @@ func (s *Postgres) Transition(ctx context.Context, t Transition) (Order, bool, e
 		})
 	})
 	return out, replayed, err
+}
+
+// reversedBy lists the journal types a reset from `from` to `to` reverses:
+// leaving ReportedAsFinished reverses the reports as finished, and going back
+// before Started reverses every journal.
+func reversedBy(from, to domain.Status) []domain.JournalType {
+	started := from == domain.Started || from == domain.ReportedAsFinished
+	switch {
+	case started && to != domain.Started && to != domain.ReportedAsFinished:
+		return []domain.JournalType{domain.JournalPickingList, domain.JournalRouteCard, domain.JournalReportFinished}
+	case from == domain.ReportedAsFinished:
+		return []domain.JournalType{domain.JournalReportFinished}
+	}
+	return nil
 }
 
 // replaceEstimate recomputes planned cost from the stored lines and operations
@@ -616,10 +675,11 @@ func loadOrder(ctx context.Context, q querier, tenantID, id string) (Order, erro
 	var o Order
 	var status, qty, raf, qerr string
 	err := q.QueryRow(ctx, `select id::text, legal_entity_id::text, order_number, product_id::text, site_id::text, warehouse_id::text, currency::text,
-		quantity::text, qty_raf::text, qty_error::text, status, delivery_date::text, origin_type, origin_id::text, version, created_at, updated_at
+		quantity::text, qty_raf::text, qty_error::text, status, delivery_date::text, origin_type, origin_id::text, version, created_at, updated_at,
+		item_group
 		from production_order where tenant_id = $1 and id = $2`, tenantID, id).Scan(&o.ID, &o.LegalEntityID, &o.OrderNumber, &o.ProductID,
 		&o.SiteID, &o.WarehouseID, &o.Currency, &qty, &raf, &qerr, &status, &o.DeliveryDate, &o.OriginType, &o.OriginID, &o.Version,
-		&o.CreatedAt, &o.UpdatedAt)
+		&o.CreatedAt, &o.UpdatedAt, &o.ItemGroup)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Order{}, notFound()
 	}
@@ -641,7 +701,8 @@ func loadOrder(ctx context.Context, q querier, tenantID, id string) (Order, erro
 // loadLines returns the BOM lines in explosion order (the BOM's line order,
 // phantom children in place of their parent).
 func loadLines(ctx context.Context, q querier, tenantID, orderID string) ([]domain.OrderLine, error) {
-	rows, err := q.Query(ctx, `select line_number, item_id::text, qty_per::text, series_size::text, scrap_pct::text, round_up, qty_required::text, unit_cost_est::text
+	rows, err := q.Query(ctx, `select line_number, item_id::text, qty_per::text, series_size::text, scrap_pct::text, round_up, qty_required::text, unit_cost_est::text,
+		flushing_principle, qty_consumed::text
 		from production_bom_line where tenant_id = $1 and order_id = $2 order by line_seq`, tenantID, orderID)
 	if err != nil {
 		return nil, err
@@ -650,11 +711,12 @@ func loadLines(ctx context.Context, q querier, tenantID, orderID string) ([]doma
 	out := []domain.OrderLine{}
 	for rows.Next() {
 		var l domain.OrderLine
-		var qtyPer, series, scrap, req, cost string
-		if err := rows.Scan(&l.LineNo, &l.ItemID, &qtyPer, &series, &scrap, &l.RoundUp, &req, &cost); err != nil {
+		var qtyPer, series, scrap, req, cost, flushing, consumed string
+		if err := rows.Scan(&l.LineNo, &l.ItemID, &qtyPer, &series, &scrap, &l.RoundUp, &req, &cost, &flushing, &consumed); err != nil {
 			return nil, err
 		}
 		l.QtyPer, l.SeriesSize, l.ScrapPct, l.QtyRequired, l.UnitCost = dec(qtyPer), dec(series), dec(scrap), dec(req), dec(cost)
+		l.Flushing, l.QtyConsumed = domain.Flushing(flushing), dec(consumed)
 		out = append(out, l)
 	}
 	return out, rows.Err()
@@ -662,7 +724,7 @@ func loadLines(ctx context.Context, q querier, tenantID, orderID string) ([]doma
 
 func loadOperations(ctx context.Context, q querier, tenantID, orderID string) ([]domain.Operation, error) {
 	rows, err := q.Query(ctx, `select oper_number, resource_id::text, setup_time_h::text, run_time_h_per::text, process_qty::text, scrap_pct::text,
-		labor_rate::text, overhead_rate::text, subcontract, subcontract_price::text
+		labor_rate::text, overhead_rate::text, subcontract, subcontract_price::text, hours_reported::text, qty_good::text, qty_error::text, status
 		from production_operation where tenant_id = $1 and order_id = $2 order by oper_number`, tenantID, orderID)
 	if err != nil {
 		return nil, err
@@ -671,10 +733,12 @@ func loadOperations(ctx context.Context, q querier, tenantID, orderID string) ([
 	out := []domain.Operation{}
 	for rows.Next() {
 		var op domain.Operation
-		var setup, run, proc, scrap, labor, oh, sub string
-		if err := rows.Scan(&op.OperNumber, &op.ResourceID, &setup, &run, &proc, &scrap, &labor, &oh, &op.Subcontract, &sub); err != nil {
+		var setup, run, proc, scrap, labor, oh, sub, hours, good, bad, status string
+		if err := rows.Scan(&op.OperNumber, &op.ResourceID, &setup, &run, &proc, &scrap, &labor, &oh, &op.Subcontract, &sub,
+			&hours, &good, &bad, &status); err != nil {
 			return nil, err
 		}
+		op.HoursReported, op.QtyGood, op.QtyError, op.Status = dec(hours), dec(good), dec(bad), domain.OperStatus(status)
 		op.SetupH, op.RunHPer, op.ProcessQty, op.ScrapPct = dec(setup), dec(run), dec(proc), dec(scrap)
 		op.LaborRate, op.OverheadRate, op.SubcontractPrice = dec(labor), dec(oh), dec(sub)
 		out = append(out, op)

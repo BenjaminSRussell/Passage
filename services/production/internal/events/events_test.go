@@ -19,8 +19,12 @@ func TestEventTypesFollowTheKernelRule(t *testing.T) {
 			t.Errorf("%s listed twice", typ)
 		}
 		seen[typ] = true
-		if events.Topic(typ) != "passage.production.order" {
-			t.Errorf("%s routes to %s, want the order topic", typ, events.Topic(typ))
+		want := "passage.production.order"
+		if typ == JournalPosted {
+			want = "passage.production.journal"
+		}
+		if events.Topic(typ) != want {
+			t.Errorf("%s routes to %s, want %s", typ, events.Topic(typ), want)
 		}
 	}
 }
@@ -39,6 +43,8 @@ func TestAsyncAPIMatchesThePayloads(t *testing.T) {
 		{"orderCreated", OrderCreated, OrderCreatedData{}},
 		{"orderUpdated", OrderUpdated, OrderUpdatedData{}},
 		{"orderStatusChanged", OrderStatusChanged, OrderStatusChangedData{}},
+		{"orderSettled", OrderSettled, OrderSettledData{}},
+		{"journalPosted", JournalPosted, JournalPostedData{}},
 	}
 	if len(cases) != len(All()) {
 		t.Fatalf("%d cases for %d event types", len(cases), len(All()))

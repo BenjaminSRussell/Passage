@@ -34,6 +34,7 @@ const columns: DataTableColumn<OrderSummary>[] = [
   { key: "status", header: "Status", render: (row) => <Badge tone={statusTone[row.status]}>{statusLabel[row.status]}</Badge> },
   { key: "deliveryDate", header: "Delivery date", render: (row) => row.deliveryDate ?? dash },
   { key: "plannedCost", header: "Planned cost", align: "end", render: (row) => `${amount(row.plannedCost)} ${row.currency}` },
+  { key: "actualCost", header: "Actual cost", align: "end", render: (row) => `${amount(row.actualCost ?? "0")} ${row.currency}` },
 ];
 
 /** Production orders list (PRD 4.21.6): newest first, filtered by status, paged by cursor. */

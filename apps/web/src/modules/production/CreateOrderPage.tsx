@@ -1,13 +1,15 @@
 import { useRef, useState, type FormEvent } from "react";
-import { Alert, Button, Card, FormField, Input, PageHeader } from "../../shell/ui";
+import { Alert, Button, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
 import {
   createOrder,
   describeProblem,
   newIdempotencyKey,
   type CreateOrderInput,
+  type Flushing,
   type Problem,
   type ProductionOrder,
 } from "./api/client";
+import { flushingLabel } from "./labels";
 import styles from "./pages.module.css";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -21,6 +23,8 @@ export interface LineValues {
   qtyPer: string;
   scrapPct: string;
   unitCost: string;
+  /** Empty means manual (FR-21.5). */
+  flushing?: Flushing | "";
 }
 
 export interface OperationValues {
@@ -33,6 +37,7 @@ export interface OperationValues {
 }
 
 export interface OrderValues {
+  itemGroup: string;
   productId: string;
   siteId: string;
   warehouseId: string;
@@ -56,6 +61,7 @@ const emptyOperation = (n: number): OperationValues => ({
 });
 
 export const initialValues = (): OrderValues => ({
+  itemGroup: "",
   productId: "",
   siteId: "",
   warehouseId: "",
@@ -85,6 +91,9 @@ export function validateOrder(values: OrderValues): OrderErrors {
   }
   if (values.deliveryDate !== "" && !datePattern.test(values.deliveryDate)) {
     errors.deliveryDate = "Enter a date (YYYY-MM-DD).";
+  }
+  if (values.itemGroup.length > 40 || values.itemGroup.trim() === "All") {
+    errors.itemGroup = "Enter up to 40 characters; All is reserved for posting profiles.";
   }
   const seen = new Set<string>();
   values.lines.forEach((line, i) => {
@@ -136,6 +145,7 @@ const optional = (v: string) => (v === "" ? undefined : v);
 /** Maps the form to the CreateOrder body of api/openapi.yaml. */
 export function toInput(values: OrderValues): CreateOrderInput {
   return {
+    itemGroup: optional(values.itemGroup.trim()),
     productId: values.productId.trim(),
     siteId: values.siteId.trim(),
     warehouseId: values.warehouseId.trim(),
@@ -148,6 +158,7 @@ export function toInput(values: OrderValues): CreateOrderInput {
       qtyPer: line.qtyPer,
       scrapPct: optional(line.scrapPct),
       unitCost: optional(line.unitCost),
+      flushing: line.flushing || undefined,
     })),
     operations: values.operations.map((op) => ({
       operNumber: Number.parseInt(op.operNumber, 10),
@@ -252,6 +263,7 @@ export function CreateProductionOrderPage({ onCreated, onCancel }: CreateProduct
             {text("po-deliveryDate", "Delivery date", values.deliveryDate, (v) => set({ deliveryDate: v }), { optional: true, type: "date" })}
             {text("po-siteId", "Site", values.siteId, (v) => set({ siteId: v }))}
             {text("po-warehouseId", "Warehouse", values.warehouseId, (v) => set({ warehouseId: v }))}
+            {text("po-itemGroup", "Item group", values.itemGroup, (v) => set({ itemGroup: v }), { optional: true, hint: "Selects the posting profile with the site." })}
           </div>
         </Card>
 
@@ -273,6 +285,16 @@ export function CreateProductionOrderPage({ onCreated, onCancel }: CreateProduct
                 {text(`po-lines-${i}-qtyPer`, "Quantity per unit", line.qtyPer, (v) => setLine(i, { qtyPer: v }), { inputMode: "decimal" })}
                 {text(`po-lines-${i}-scrapPct`, "Scrap %", line.scrapPct, (v) => setLine(i, { scrapPct: v }), { optional: true, inputMode: "decimal" })}
                 {text(`po-lines-${i}-unitCost`, "Unit cost", line.unitCost, (v) => setLine(i, { unitCost: v }), { optional: true, inputMode: "decimal" })}
+                <FormField id={`po-lines-${i}-flushing`} label="Flushing" error={errors[`lines.${i}.flushing`]}>
+                  {(control) => (
+                    <Select {...control} value={line.flushing ?? ""} onChange={(event) => setLine(i, { flushing: event.target.value as Flushing | "" })}>
+                      <option value="">{flushingLabel.manual} (picking list)</option>
+                      <option value="start">{flushingLabel.start}</option>
+                      <option value="finish">{flushingLabel.finish}</option>
+                      <option value="available-at-location">{flushingLabel["available-at-location"]}</option>
+                    </Select>
+                  )}
+                </FormField>
                 <Button variant="ghost" size="sm" onClick={() => set({ lines: values.lines.filter((_, j) => j !== i) })}>
                   Remove component {i + 1}
                 </Button>

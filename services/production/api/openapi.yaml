@@ -1,14 +1,17 @@
 openapi: 3.1.0
 info:
   title: Passage production orders
-  version: 0.21.1
+  version: 0.21.2
   description: |
-    Wave 21 slice 1 of PSG-21. Creates production orders with BOM and route explosion,
-    lists and reads them, edits the header, runs the status state machine (BR-21.1), records
-    report-as-finished quantities and estimates planned cost. Picking lists, route and job
-    cards, inventory and GL postings, settlement journals and the other FR-21 items are later
-    slices (see NOT-IMPLEMENTED.md). Problems are RFC 9457 with a stable `code` (see README).
-    The gateway serves these paths under `/api`.
+    Wave 21 slices 1 and 2 of PSG-21. Creates production orders with BOM and route
+    explosion, lists and reads them, edits the header, runs the status state machine
+    (BR-21.1) and estimates planned cost. Slice 2 adds posting profiles (FR-21.13), picking
+    lists, route cards and report-as-finished journals with their WIP postings (FR-21.5 to
+    FR-21.7), the posting effects of :start, :report-finished, :end (settlement, FR-21.8) and
+    :reset-status (reversal journals, FR-21.9), and the actual-cost read (FR-21.11). Job
+    cards, subcontracting and the other FR-21 items are later slices (see NOT-IMPLEMENTED.md).
+    Problems are RFC 9457 with a stable `code` (see README). The gateway serves these paths
+    under `/api`.
 servers:
   - url: https://api.{env}.passage.dev/api
     variables:
@@ -22,6 +25,11 @@ components:
       scheme: bearer
   parameters:
     OrderId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    JournalId:
       name: id
       in: path
       required: true
@@ -71,6 +79,24 @@ components:
     CostGroup:
       type: string
       enum: [material, labor, overhead, subcontract]
+    Flushing:
+      type: string
+      description: |
+        When a BOM line's material is consumed (FR-21.5): manual and available-at-location
+        lines by picking lists, start lines by :start, finish lines by report as finished.
+      enum: [manual, start, finish, available-at-location]
+    JournalType:
+      type: string
+      enum: [picking-list, route-card, report-as-finished]
+    Proposal:
+      type: string
+      description: |
+        remaining proposes what is left; proportional proposes the requirement × reported
+        quantity ÷ order quantity, less what is booked; none proposes nothing.
+      enum: [remaining, proportional, none]
+    VarianceType:
+      type: string
+      enum: [lot-size, production-quantity, production-price, production-substitution]
     BOMComponent:
       type: object
       description: |
@@ -87,6 +113,7 @@ components:
         scrapPct: { $ref: '#/components/schemas/Decimal', description: 'From 0 up to but excluding 100.' }
         roundUp: { type: boolean, description: Round the required quantity up to a whole unit (BR-21.2). }
         unitCost: { $ref: '#/components/schemas/Decimal', description: Unit cost from the active costing version (wave 20). }
+        flushing: { $ref: '#/components/schemas/Flushing', description: 'Default manual; a phantom''s children inherit its principle.' }
         phantom: { type: boolean }
         children:
           type: array
@@ -111,6 +138,10 @@ components:
         - type: object
           properties:
             processQty: { $ref: '#/components/schemas/Decimal', description: 'Quantity to start at the operation (BR-21.8).' }
+            hoursReported: { $ref: '#/components/schemas/Decimal', description: Hours posted by route cards. }
+            qtyGood: { $ref: '#/components/schemas/Decimal' }
+            qtyError: { $ref: '#/components/schemas/Decimal' }
+            status: { type: string, enum: [open, started, finished] }
     OrderLine:
       type: object
       properties:
@@ -122,6 +153,8 @@ components:
         roundUp: { type: boolean }
         qtyRequired: { $ref: '#/components/schemas/Decimal' }
         unitCost: { $ref: '#/components/schemas/Decimal' }
+        flushing: { $ref: '#/components/schemas/Flushing' }
+        qtyConsumed: { $ref: '#/components/schemas/Decimal', description: Issued by posted journals. }
     CostRow:
       type: object
       properties:
@@ -139,6 +172,7 @@ components:
         productId: { type: string, format: uuid }
         siteId: { type: string, format: uuid }
         warehouseId: { type: string, format: uuid }
+        itemGroup: { type: string, maxLength: 40, description: 'The product''s item group, the posting-profile key with the site (FR-21.13). All is reserved.' }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         quantity: { $ref: '#/components/schemas/Decimal' }
         deliveryDate: { type: [string, 'null'], format: date }
@@ -182,6 +216,7 @@ components:
         siteId: { type: string, format: uuid }
         warehouseId: { type: string, format: uuid }
         currency: { type: string }
+        itemGroup: { type: string }
         quantity: { $ref: '#/components/schemas/Decimal' }
         qtyRaf: { $ref: '#/components/schemas/Decimal' }
         qtyError: { $ref: '#/components/schemas/Decimal' }
@@ -218,6 +253,7 @@ components:
         status: { $ref: '#/components/schemas/Status' }
         deliveryDate: { type: string, format: date }
         plannedCost: { $ref: '#/components/schemas/Decimal' }
+        actualCost: { $ref: '#/components/schemas/Decimal', description: Material, labor and overhead posted to WIP. }
         version: { type: integer }
         createdAt: { type: string, format: date-time }
     StatusLogEntry:
@@ -229,6 +265,154 @@ components:
         actor: { type: string }
         traceId: { type: string }
         occurredAt: { type: string, format: date-time }
+    Variance:
+      type: object
+      properties:
+        type: { $ref: '#/components/schemas/VarianceType' }
+        costGroup: { $ref: '#/components/schemas/CostGroup' }
+        amount: { $ref: '#/components/schemas/Decimal', description: Positive is unfavourable (debit). }
+    CostView:
+      type: object
+      description: |
+        FR-21.11. Totals are per cost group and overall in the currency's minor unit; rows keep
+        4 decimals. wipBalance is Σ debit − Σ credit on the order's WIP account; it is 0 once
+        the order is Ended, when variances hold the settlement (BR-21.6).
+      properties:
+        orderId: { type: string, format: uuid }
+        currency: { type: string }
+        totals: { type: object, additionalProperties: { $ref: '#/components/schemas/Decimal' } }
+        total: { $ref: '#/components/schemas/Decimal' }
+        rows:
+          type: array
+          items: { $ref: '#/components/schemas/CostRow' }
+        actualTotals: { type: object, additionalProperties: { $ref: '#/components/schemas/Decimal' } }
+        actualTotal: { $ref: '#/components/schemas/Decimal' }
+        actualRows:
+          type: array
+          items: { $ref: '#/components/schemas/CostRow' }
+        wipBalance: { $ref: '#/components/schemas/Decimal' }
+        variances:
+          type: array
+          items: { $ref: '#/components/schemas/Variance' }
+        varianceTotal: { $ref: '#/components/schemas/Decimal' }
+    IssueInput:
+      type: object
+      required: [lineNo, quantity]
+      additionalProperties: false
+      properties:
+        lineNo: { type: string, maxLength: 20, description: A BOM line of the order, for example 30.1. }
+        quantity: { $ref: '#/components/schemas/Decimal' }
+        unitCost: { $ref: '#/components/schemas/Decimal', description: 'Actual unit cost; defaults to the line''s estimated cost until inventory (wave 16) supplies it.' }
+    HoursInput:
+      type: object
+      required: [operNumber]
+      additionalProperties: false
+      description: Hours (0.01 minimum, 2 decimals) or quantities, or finished, must be reported.
+      properties:
+        operNumber: { type: integer, minimum: 1 }
+        hours: { $ref: '#/components/schemas/Decimal' }
+        qtyGood: { $ref: '#/components/schemas/Decimal' }
+        qtyError: { $ref: '#/components/schemas/Decimal' }
+        finished: { type: boolean, description: Closes the operation to further feedback. }
+    CreateJournal:
+      type: object
+      required: [type]
+      additionalProperties: false
+      description: |
+        Without issues or hours the lines are proposed: a picking list over manual and
+        available-at-location lines (default remaining), a route card over open in-house
+        operations (default remaining), a report as finished over finish-flushed lines
+        (default proportional). quantity (good, > 0) and errorQuantity belong to
+        report-as-finished, which may also list issues for its finish-flushed lines.
+      properties:
+        type: { $ref: '#/components/schemas/JournalType' }
+        postingDate: { type: string, format: date, description: Default today (UTC). }
+        proposal: { $ref: '#/components/schemas/Proposal' }
+        quantity: { $ref: '#/components/schemas/Decimal' }
+        errorQuantity: { $ref: '#/components/schemas/Decimal' }
+        issues:
+          type: array
+          maxItems: 5000
+          items: { $ref: '#/components/schemas/IssueInput' }
+        hours:
+          type: array
+          maxItems: 5000
+          items: { $ref: '#/components/schemas/HoursInput' }
+    JournalLine:
+      type: object
+      properties:
+        kind: { type: string, enum: [issue, hours, receipt] }
+        lineNo: { type: string }
+        operNumber: { type: integer }
+        itemId: { type: string, format: uuid }
+        qty: { $ref: '#/components/schemas/Decimal', description: 'Issued quantity, hours, or received good quantity; negative on a reversal.' }
+        qtyGood: { $ref: '#/components/schemas/Decimal' }
+        qtyError: { $ref: '#/components/schemas/Decimal' }
+        finished: { type: boolean }
+        unitCost: { $ref: '#/components/schemas/Decimal' }
+        amount: { $ref: '#/components/schemas/Decimal', description: 'Material, labor or receipt value, set on posting.' }
+        overheadAmount: { $ref: '#/components/schemas/Decimal' }
+    Posting:
+      type: object
+      properties:
+        postingType:
+          type: string
+          enum: [wip-material, inventory-issue, wip-labor, labor-absorption, wip-overhead, overhead-absorption, raf-receipt, wip-raf-offset, wip-settlement,
+            variance-lot-size, variance-production-quantity, variance-production-price, variance-production-substitution]
+        account: { type: string }
+        dr: { $ref: '#/components/schemas/Decimal' }
+        cr: { $ref: '#/components/schemas/Decimal' }
+        wip: { type: boolean, description: The line is on the order's WIP account. }
+    Journal:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        type: { $ref: '#/components/schemas/JournalType' }
+        journalNumber: { type: string, description: 'PJ-000001, per legal entity.' }
+        postingDate: { type: string, format: date }
+        posted: { type: boolean }
+        postedAt: { type: string, format: date-time }
+        postedBy: { type: string }
+        qtyGood: { $ref: '#/components/schemas/Decimal' }
+        qtyError: { $ref: '#/components/schemas/Decimal' }
+        reversalOf: { type: string, format: uuid, description: Set on a reversal journal written by a reset (FR-21.9). }
+        reversedBy: { type: string, format: uuid }
+        journalEntryId: { type: string, format: uuid, description: The general-ledger entry (wave 11); absent until the ledger books it. }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        lines:
+          type: array
+          items: { $ref: '#/components/schemas/JournalLine' }
+        postings:
+          type: array
+          items: { $ref: '#/components/schemas/Posting' }
+    PostingProfileInput:
+      type: object
+      additionalProperties: false
+      required: [wipAccount, inventoryAccount, finishedGoodsAccount, laborAbsorptionAccount, overheadAbsorptionAccount,
+        lotSizeVarianceAccount, quantityVarianceAccount, priceVarianceAccount, substitutionVarianceAccount]
+      properties:
+        legalEntityId: { type: string, format: uuid, description: Defaults to the caller's legal entity and must equal it when the caller has one. }
+        itemGroup: { type: string, maxLength: 40, default: All }
+        siteId: { type: string, description: 'A site UUID or All.', default: All }
+        wipAccount: { type: string, maxLength: 64 }
+        inventoryAccount: { type: string, maxLength: 64, description: Picking-list offset. }
+        finishedGoodsAccount: { type: string, maxLength: 64, description: Report-as-finished receipt. }
+        laborAbsorptionAccount: { type: string, maxLength: 64 }
+        overheadAbsorptionAccount: { type: string, maxLength: 64 }
+        lotSizeVarianceAccount: { type: string, maxLength: 64 }
+        quantityVarianceAccount: { type: string, maxLength: 64 }
+        priceVarianceAccount: { type: string, maxLength: 64 }
+        substitutionVarianceAccount: { type: string, maxLength: 64 }
+    PostingProfile:
+      allOf:
+        - $ref: '#/components/schemas/PostingProfileInput'
+        - type: object
+          properties:
+            version: { type: integer }
+            updatedBy: { type: string }
+            updatedAt: { type: string, format: date-time }
     Problem:
       type: object
       description: RFC 9457 problem details, application/problem+json.
@@ -368,28 +552,16 @@ paths:
   /v1/production/orders/{id}/costs:
     get:
       operationId: getProductionOrderCosts
-      summary: Planned cost by cost group and the rows behind it
+      summary: Planned against actual cost by cost group, the WIP balance and the variances (FR-21.11)
       x-passage-duty: production.cost.read
       parameters:
         - { $ref: '#/components/parameters/OrderId' }
       responses:
         '200':
-          description: Planned cost. Actual cost and variances arrive with journal posting and settlement.
+          description: The cost view.
           content:
             application/json:
-              schema:
-                type: object
-                properties:
-                  orderId: { type: string, format: uuid }
-                  currency: { type: string }
-                  totals:
-                    type: object
-                    description: Per cost group, 2 decimals.
-                    additionalProperties: { $ref: '#/components/schemas/Decimal' }
-                  total: { $ref: '#/components/schemas/Decimal' }
-                  rows:
-                    type: array
-                    items: { $ref: '#/components/schemas/CostRow' }
+              schema: { $ref: '#/components/schemas/CostView' }
         '404': { $ref: '#/components/responses/Problem' }
   /v1/production/orders/{id}:{command}:
     post:
@@ -404,6 +576,17 @@ paths:
         PRODUCTION_ILLEGAL_TRANSITION (PROD-0001). Each applied command writes a status-log
         row; a status change (and every report-as-finished) emits
         dev.passage.production.order.statuschanged.v1.
+
+        Posting effects (BR-21.1), in the same transaction: start posts a picking list for
+        the start-flushed lines; report-finished posts a report-as-finished journal (Dr
+        finished goods at the planned unit cost / Cr WIP, finish-flushed lines consumed in
+        proportion); end refuses unposted journals (409 PRODUCTION_UNPOSTED_JOURNALS) and
+        settles: the WIP balance is cleared into the variance accounts and
+        dev.passage.production.order.settled.v1 is emitted; reset-status reverses the
+        report-as-finished journals when it leaves ReportedAsFinished, and every journal when
+        it goes back before Started. Each posted journal emits
+        dev.passage.production.journal.posted.v1. Postings need a posting profile (422
+        PRODUCTION_POSTING_PROFILE_MISSING).
       x-passage-duty: production.order.write | production.order.release | production.journal.post | production.order.end
       parameters:
         - { $ref: '#/components/parameters/OrderId' }
@@ -427,7 +610,177 @@ paths:
         '400': { description: Body, Idempotency-Key or If-Match malformed (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { description: Unknown order or command (PRODUCTION_ORDER_NOT_FOUND, PRODUCTION_UNKNOWN_ACTION), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '409': { description: PRODUCTION_ILLEGAL_TRANSITION, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: 'PRODUCTION_ILLEGAL_TRANSITION; PRODUCTION_UNPOSTED_JOURNALS on end', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: conflict_version, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: 'Guard failed (PRODUCTION_END_REQUIRES_RAF, PRODUCTION_ZERO_OUTPUT_NOT_PERMITTED, PRODUCTION_RAF_EXCEEDS_REMAINING, PRODUCTION_INVALID_INPUT) or key reused (idempotency_key_reuse)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'Guard failed (PRODUCTION_END_REQUIRES_RAF, PRODUCTION_ZERO_OUTPUT_NOT_PERMITTED, PRODUCTION_RAF_EXCEEDS_REMAINING, PRODUCTION_INVALID_INPUT, PRODUCTION_POSTING_PROFILE_MISSING, PRODUCTION_END_BEFORE_LAST_JOURNAL, PRODUCTION_POSTING_NOT_BALANCED) or key reused (idempotency_key_reuse)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: precondition_required, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/production/orders/{id}/journals:
+    get:
+      operationId: listProductionJournals
+      summary: The journals of an order, oldest first, with lines and postings (FR-21.11)
+      x-passage-duty: production.order.read
+      parameters:
+        - { $ref: '#/components/parameters/OrderId' }
+      responses:
+        '200':
+          description: Drafts, posted journals and reversals.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  orderId: { type: string, format: uuid }
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Journal' }
+        '404': { description: PRODUCTION_ORDER_NOT_FOUND, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    post:
+      operationId: createProductionJournal
+      summary: Create a draft journal, proposed or with explicit lines (FR-21.5 to FR-21.7)
+      description: |
+        Picking lists and reports as finished need a Started or ReportedAsFinished order; a
+        route card may also be created on a Released order, which its posting starts (FR-21.6,
+        PRODUCTION_AUTOSTART_ON_FEEDBACK).
+      x-passage-duty: production.journal.post
+      parameters:
+        - { $ref: '#/components/parameters/OrderId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateJournal' }
+      responses:
+        '201':
+          description: The draft.
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Journal' }
+        '200':
+          description: Replay of an earlier request with the same Idempotency-Key and body.
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Journal' }
+        '400': { description: COM-0001, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: PRODUCTION_ORDER_NOT_FOUND, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: 'PRODUCTION_JOURNAL_NOT_ALLOWED (order status), PRODUCTION_OPERATION_FINISHED', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'PRODUCTION_INVALID_JOURNAL_LINE, PRODUCTION_INVALID_HOURS, PRODUCTION_JOURNAL_EMPTY (nothing to propose), idempotency_key_reuse', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/production/journals/{id}:
+    get:
+      operationId: getProductionJournal
+      summary: Read a journal with its lines and postings
+      x-passage-duty: production.order.read
+      parameters:
+        - { $ref: '#/components/parameters/JournalId' }
+      responses:
+        '200':
+          description: The journal.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Journal' }
+        '404': { description: PRODUCTION_JOURNAL_NOT_FOUND, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    delete:
+      operationId: deleteProductionJournal
+      summary: Delete a draft journal (PROD-0012 "post or delete the journals")
+      x-passage-duty: production.journal.post
+      parameters:
+        - { $ref: '#/components/parameters/JournalId' }
+      responses:
+        '204': { description: Deleted. }
+        '404': { description: PRODUCTION_JOURNAL_NOT_FOUND, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: PRODUCTION_JOURNAL_ALREADY_POSTED; reset the order status to reverse a posted journal, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/production/journals/{id}:post:
+    post:
+      operationId: postProductionJournal
+      summary: Post a draft journal
+      description: |
+        One transaction under the order's row lock (BR-21.4): values each line (issues at their
+        unit cost, hours at the operation's labor and overhead rates, the finished receipt at
+        the planned unit cost), writes balanced WIP postings from the order's posting profile,
+        books consumption, operation feedback and the reported quantities, and emits
+        dev.passage.production.journal.posted.v1. A route card on a Released order starts it; a
+        report as finished moves a Started order to ReportedAsFinished (both write the status
+        log and emit dev.passage.production.order.statuschanged.v1). Consumption beyond the
+        requirement plus PRODUCTION_OVERCONSUMPTION_PCT needs production.journal.over-consume.
+      x-passage-duty: production.journal.post
+      parameters:
+        - { $ref: '#/components/parameters/JournalId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      responses:
+        '200':
+          description: The posted journal. A replay with the same key returns it with Idempotent-Replayed.
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Journal' }
+        '400': { description: COM-0001 (Idempotency-Key missing), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: 'PRODUCTION_JOURNAL_NOT_FOUND, PRODUCTION_UNKNOWN_ACTION', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: 'PRODUCTION_JOURNAL_ALREADY_POSTED, PRODUCTION_JOURNAL_NOT_ALLOWED, PRODUCTION_OPERATION_FINISHED', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'PRODUCTION_OVER_CONSUMPTION (PROD-0007), PRODUCTION_RAF_EXCEEDS_REMAINING (PROD-0008), PRODUCTION_POSTING_DATE_BEFORE_ORDER (BR-21.3), PRODUCTION_POSTING_PROFILE_MISSING, PRODUCTION_INVALID_JOURNAL_LINE, idempotency_key_reuse', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/production/posting-profiles:
+    get:
+      operationId: listProductionPostingProfiles
+      summary: The posting profiles of a legal entity, and the one that resolves for an item group and site (FR-21.13)
+      description: |
+        Resolution order: item group × site, item group × All, All × site, All × All. With
+        siteId (and optionally itemGroup) the response carries `resolved`, or 422
+        PRODUCTION_POSTING_PROFILE_MISSING when none applies.
+      x-passage-duty: production.setup.read
+      parameters:
+        - { name: legalEntityId, in: query, description: Defaults to the caller's legal entity., schema: { type: string, format: uuid } }
+        - { name: itemGroup, in: query, schema: { type: string } }
+        - { name: siteId, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The profiles.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  legalEntityId: { type: string, format: uuid }
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/PostingProfile' }
+                  resolved: { $ref: '#/components/schemas/PostingProfileInput' }
+        '400': { description: COM-0001, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { description: PRODUCTION_POSTING_PROFILE_MISSING, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    put:
+      operationId: saveProductionPostingProfile
+      summary: Create or replace the profile of a legal entity × item group × site
+      description: Creating takes no If-Match; replacing needs If-Match with the profile version.
+      x-passage-duty: production.setup.write
+      parameters:
+        - { name: If-Match, in: header, required: false, description: 'The profile version, quoted; required to replace.', schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PostingProfileInput' }
+      responses:
+        '201':
+          description: Created.
+          headers:
+            ETag: { description: 'The profile version, quoted.', schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PostingProfile' }
+        '200':
+          description: Replaced.
+          headers:
+            ETag: { description: 'The profile version, quoted.', schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PostingProfile' }
+        '400': { description: COM-0001, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '412': { description: 'conflict_version (stale If-Match, or If-Match on a profile that does not exist)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: precondition_required (replacing without If-Match), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }

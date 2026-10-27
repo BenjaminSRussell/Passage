@@ -31,6 +31,14 @@ type fakeStore struct {
 	transErr    error
 	updates     []store.OrderUpdate
 	log         []store.StatusLogEntry
+	costs       store.CostSummary
+	journals    []store.NewJournal
+	posts       []store.PostRequest
+	journal     store.Journal
+	journalErr  error
+	deleted     []string
+	profiles    []store.PostingProfile
+	saved       []store.ProfileSave
 }
 
 func (f *fakeStore) Ping(context.Context) error { return f.pingErr }
@@ -74,6 +82,45 @@ func (f *fakeStore) Transition(_ context.Context, t store.Transition) (store.Ord
 	return store.Order{ID: t.OrderID, Version: t.IfMatch + 1}, false, nil
 }
 
+func (f *fakeStore) Costs(context.Context, string) (store.CostSummary, error) {
+	return f.costs, f.getErr
+}
+
+func (f *fakeStore) CreateJournal(_ context.Context, in store.NewJournal) (store.Journal, bool, error) {
+	f.journals = append(f.journals, in)
+	return store.Journal{ID: ids.New(), OrderID: in.OrderID, Type: in.Type}, true, f.journalErr
+}
+
+func (f *fakeStore) PostJournal(_ context.Context, r store.PostRequest) (store.Journal, bool, error) {
+	f.posts = append(f.posts, r)
+	if f.journalErr != nil {
+		return store.Journal{}, false, f.journalErr
+	}
+	return store.Journal{ID: r.JournalID, Posted: true}, len(f.posts) > 1, nil
+}
+
+func (f *fakeStore) GetJournal(context.Context, string) (store.Journal, error) {
+	return f.journal, f.journalErr
+}
+
+func (f *fakeStore) ListJournals(context.Context, string) ([]store.Journal, error) {
+	return []store.Journal{f.journal}, f.journalErr
+}
+
+func (f *fakeStore) DeleteJournal(_ context.Context, id string) error {
+	f.deleted = append(f.deleted, id)
+	return f.journalErr
+}
+
+func (f *fakeStore) ListPostingProfiles(context.Context, string) ([]store.PostingProfile, error) {
+	return f.profiles, nil
+}
+
+func (f *fakeStore) SavePostingProfile(_ context.Context, in store.ProfileSave) (store.PostingProfile, bool, error) {
+	f.saved = append(f.saved, in)
+	return store.PostingProfile{LegalEntityID: in.LegalEntityID, Profile: in.Profile, Version: in.IfMatch + 1}, in.IfMatch == 0, nil
+}
+
 var (
 	tenantID = "00000000-0000-0000-0000-000000000021"
 	entityID = "00000000-0000-0000-0000-0000000000e1"
@@ -81,7 +128,7 @@ var (
 
 func newServer(t *testing.T, f *fakeStore) (*API, http.Handler) {
 	t.Helper()
-	a := New(f, Config{RAFTolerancePct: decimal.NewFromInt(5)})
+	a := New(f, Config{RAFTolerancePct: decimal.NewFromInt(5), OverConsumptionPct: decimal.NewFromInt(10), AutoStartOnFeedback: true})
 	r := httpx.NewRouter()
 	a.Register(r)
 	return a, r
@@ -286,8 +333,15 @@ func TestRoutes_EnforceDuties(t *testing.T) {
 		{http.MethodPost, "/v1/production/orders/" + id + ":reset-status", DutyRelease},
 		{http.MethodPost, "/v1/production/orders/" + id + ":report-finished", DutyJournalPost},
 		{http.MethodPost, "/v1/production/orders/" + id + ":end", DutyEnd},
+		{http.MethodGet, "/v1/production/orders/" + id + "/journals", DutyRead},
+		{http.MethodPost, "/v1/production/orders/" + id + "/journals", DutyJournalPost},
+		{http.MethodGet, "/v1/production/journals/" + id, DutyRead},
+		{http.MethodDelete, "/v1/production/journals/" + id, DutyJournalPost},
+		{http.MethodPost, "/v1/production/journals/" + id + ":post", DutyJournalPost},
+		{http.MethodGet, "/v1/production/posting-profiles", DutySetupRead},
+		{http.MethodPut, "/v1/production/posting-profiles", DutySetupWrite},
 	}
-	others := []string{DutyRead, DutyWrite, DutyRelease, DutyJournalPost, DutyEnd, DutyCostRead}
+	others := []string{DutyRead, DutyWrite, DutyRelease, DutyJournalPost, DutyEnd, DutyCostRead, DutySetupRead, DutySetupWrite, DutyOverConsume}
 	for _, tt := range tests {
 		t.Run(tt.method+" "+tt.path, func(t *testing.T) {
 			var without []string
@@ -302,7 +356,7 @@ func TestRoutes_EnforceDuties(t *testing.T) {
 			if !strings.Contains(p.Detail, tt.duty) {
 				t.Fatalf("detail %q does not name %s", p.Detail, tt.duty)
 			}
-			if len(f.transitions)+len(f.created)+len(f.updates) != 0 {
+			if len(f.transitions)+len(f.created)+len(f.updates)+len(f.journals)+len(f.posts)+len(f.deleted)+len(f.saved) != 0 {
 				t.Fatal("a refused request reached the store")
 			}
 		})
@@ -497,22 +551,37 @@ func TestGetOrder_ETagAndStoreProblem(t *testing.T) {
 	expectProblem(t, do(h, call{method: http.MethodGet, path: "/v1/production/orders/" + id, duties: []string{DutyRead}}), http.StatusNotFound, store.CodeOrderNotFound)
 }
 
-// AC-21.3: planned material per group is the sum of the 4-decimal rows, shown to cents.
+// AC-21.3: planned material per group is the sum of the 4-decimal rows, shown
+// to the currency's minor unit; actual cost, WIP and variances come alongside (FR-21.11).
 func TestCosts_TotalsByGroup(t *testing.T) {
 	d := decimal.RequireFromString
-	f := &fakeStore{order: store.Order{ID: ids.New(), Currency: "USD", Costs: []domain.CostRow{
-		{Group: domain.GroupMaterial, Key: "a", Amount: d("1000.1250")},
-		{Group: domain.GroupMaterial, Key: "b", Amount: d("2000.0050")},
-		{Group: domain.GroupLabor, Key: "r@10", Amount: d("1500")},
-	}}}
+	id := ids.New()
+	f := &fakeStore{costs: store.CostSummary{Currency: "USD",
+		Planned: []domain.CostRow{
+			{Group: domain.GroupMaterial, Key: "a", Amount: d("1000.1250")},
+			{Group: domain.GroupMaterial, Key: "b", Amount: d("2000.0050")},
+			{Group: domain.GroupLabor, Key: "r@10", Amount: d("1500")},
+		},
+		Actual:     []domain.CostRow{{Group: domain.GroupMaterial, Key: "a", Qty: d("305"), Amount: d("3111")}},
+		WIPBalance: d("-49"),
+		Variances:  []domain.Variance{{Type: domain.VarPrice, Group: domain.GroupMaterial, Amount: d("61")}, {Type: domain.VarQuantity, Group: domain.GroupLabor, Amount: d("-120")}},
+	}}
 	_, h := newServer(t, f)
-	rec := do(h, call{method: http.MethodGet, path: "/v1/production/orders/" + f.order.ID + "/costs", duties: []string{DutyCostRead}})
+	rec := do(h, call{method: http.MethodGet, path: "/v1/production/orders/" + id + "/costs", duties: []string{DutyCostRead}})
 	var view costView
 	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil || rec.Code != http.StatusOK {
 		t.Fatalf("costs: %d %s", rec.Code, rec.Body.String())
 	}
-	if view.Totals[domain.GroupMaterial] != "3000.13" || view.Totals[domain.GroupLabor] != "1500.00" || view.Total != "4500.13" || view.Currency != "USD" {
-		t.Fatalf("totals: %+v", view)
+	if view.OrderID != id || view.Totals[domain.GroupMaterial] != "3000.13" || view.Totals[domain.GroupLabor] != "1500.00" || view.Total != "4500.13" || view.Currency != "USD" {
+		t.Fatalf("planned totals: %+v", view)
+	}
+	if view.ActualTotals[domain.GroupMaterial] != "3111.00" || view.ActualTotal != "3111.00" || view.WIPBalance != "-49.00" || view.VarianceTotal != "-59.00" {
+		t.Fatalf("actual, WIP and variances: %+v", view)
+	}
+	f.costs = store.CostSummary{Currency: "JPY", Planned: []domain.CostRow{{Group: domain.GroupMaterial, Key: "a", Amount: d("1234.5")}}, WIPBalance: d("7")}
+	rec = do(h, call{method: http.MethodGet, path: "/v1/production/orders/" + id + "/costs", duties: []string{DutyCostRead}})
+	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil || view.Total != "1235" || view.WIPBalance != "7" {
+		t.Fatalf("JPY has no minor unit: %s", rec.Body.String())
 	}
 }
 

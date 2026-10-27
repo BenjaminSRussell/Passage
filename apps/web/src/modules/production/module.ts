@@ -4,6 +4,7 @@ import type { PassageModule } from "../registry";
 import { CreateProductionOrderPage } from "./CreateOrderPage";
 import { ProductionOrderDetail } from "./OrderDetailPage";
 import { ProductionOrdersPage } from "./OrdersPage";
+import { PostingProfilesPage } from "./PostingProfilesPage";
 
 const list = "/production";
 
@@ -32,15 +33,18 @@ function DetailRoute() {
 const production: PassageModule = {
   id: "production",
   title: "Production",
-  description: "Production orders: create, estimate, release, start, report as finished and end, with planned cost.",
+  description:
+    "Production orders: create, estimate, release, start, post picking lists, route cards and reports as finished, end with settlement; posting profiles.",
   routes: [
     { path: list, element: createElement(OrdersRoute) },
     { path: `${list}/new`, element: createElement(CreateRoute), handle: { title: "New production order" } },
+    { path: `${list}/posting-profiles`, element: createElement(PostingProfilesPage), handle: { title: "Posting profiles" } },
     { path: `${list}/:id`, element: createElement(DetailRoute), handle: { title: "Production order" } },
   ],
   nav: [
     { label: "Production orders", to: list, duty: "production.order.read" },
     { label: "New production order", to: `${list}/new`, duty: "production.order.write" },
+    { label: "Posting profiles", to: `${list}/posting-profiles`, duty: "production.setup.read" },
   ],
 };
 

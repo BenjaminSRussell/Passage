@@ -39,6 +39,10 @@ spec:
               value: {{ .Values.migrateOnStart | quote }}
             - name: PRODUCTION_RAF_TOLERANCE_PCT
               value: {{ .Values.config.rafTolerancePct | quote }}
+            - name: PRODUCTION_OVERCONSUMPTION_PCT
+              value: {{ .Values.config.overConsumptionPct | quote }}
+            - name: PRODUCTION_AUTOSTART_ON_FEEDBACK
+              value: {{ .Values.config.autoStartOnFeedback | quote }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }
