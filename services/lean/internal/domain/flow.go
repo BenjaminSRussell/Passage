@@ -88,3 +88,35 @@ func cycle(acts []Activity) string {
 	}
 	return ""
 }
+
+// ActivityCycle is one activity's name and cycle time in seconds.
+type ActivityCycle struct {
+	Name       string
+	CycleTimeS int
+}
+
+// TaktCheck is the FR-24.14 "takt vs cycle" figure of a flow: the slowest
+// activity (the bottleneck) sets the flow's cycle time, and the flow keeps up
+// with demand when that cycle time is at most the takt time.
+type TaktCheck struct {
+	TaktTimeS  int
+	CycleTimeS int
+	Bottleneck string
+	WithinTakt bool
+}
+
+// TaktVsCycle compares a flow's takt time with its bottleneck cycle time. ok is
+// false when the flow has no takt time or no activities; between activities
+// with the same cycle time the first is the bottleneck.
+func TaktVsCycle(taktS int, acts []ActivityCycle) (TaktCheck, bool) {
+	if taktS <= 0 || len(acts) == 0 {
+		return TaktCheck{}, false
+	}
+	slow := acts[0]
+	for _, a := range acts[1:] {
+		if a.CycleTimeS > slow.CycleTimeS {
+			slow = a
+		}
+	}
+	return TaktCheck{TaktTimeS: taktS, CycleTimeS: slow.CycleTimeS, Bottleneck: slow.Name, WithinTakt: slow.CycleTimeS <= taktS}, true
+}

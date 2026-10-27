@@ -150,7 +150,7 @@ describe("lean module", () => {
 
   it("links every area from the overview", () => {
     const { container } = renderAt("/lean");
-    expect(within(screen.getByRole("list", { name: "Lean manufacturing areas" })).getAllByRole("link")).toHaveLength(3);
+    expect(within(screen.getByRole("list", { name: "Lean manufacturing areas" })).getAllByRole("link")).toHaveLength(4);
     expect(pageViolations(container)).toEqual([]);
   });
 
@@ -422,5 +422,56 @@ describe("kanban board", () => {
       await vi.advanceTimersByTimeAsync(REFRESH_MS);
     });
     await waitFor(() => expect(loads()).toBe(before + 1));
+  });
+});
+
+describe("slice 2", () => {
+  it("shows takt vs cycle on a board filtered to a flow (FR-24.14)", async () => {
+    handler = (url) => {
+      if (url.pathname === "/api/v1/lean/flows" || url.pathname === "/api/v1/lean/kanban-rules") return json(200, { items: [] });
+      if (url.pathname === "/api/v1/lean/board")
+        return json(200, { ...boardOf([card(K1, "MIX-A-0001", "planned")]), takt: { taktTimeS: 60, cycleTimeS: 75, bottleneckActivity: "Fill", withinTakt: false } });
+      return undefined;
+    };
+    renderAt(`/lean/board?flowId=${FLOW}`);
+    const metrics = await screen.findByRole("list", { name: "Board metrics" });
+    expect(metrics).toHaveTextContent("Takt vs cycle 60 s / 75 s");
+    expect(metrics).toHaveTextContent("Fill is slower than takt.");
+    expect(calls.find((c) => c.url.pathname === "/api/v1/lean/board")?.url.searchParams.get("flowId")).toBe(FLOW);
+  });
+
+  it("previews subcontract PO lines for AC-24.17", async () => {
+    handler = (url) =>
+      url.pathname === "/api/v1/lean/subcontracting:preview"
+        ? json(200, {
+            mode: "po-per-kanban",
+            lines: [{ vendorId: "V-PLATING", itemId: "SVC-PLATING", qty: "20", unitPrice: "4.5", currency: "USD", priceDate: "2027-03-10", amount: "90", jobIds: ["KJ-0001"] }],
+          })
+        : undefined;
+    const { container } = renderAt("/lean/subcontracting");
+    fireEvent.click(screen.getByRole("button", { name: "Preview PO lines" }));
+    const table = await screen.findByRole("table", { name: "Purchase order lines" });
+    expect(within(table).getByText("90 USD")).toBeInTheDocument();
+    expect(within(table).getByText("KJ-0001")).toBeInTheDocument();
+    expect(calls[0].body).toEqual({
+      mode: "po-per-kanban",
+      agreements: [{ vendorId: "V-PLATING", itemId: "SVC-PLATING", unitPrice: "4.50", currency: "USD", validFrom: "2027-01-01", validTo: null }],
+      jobs: [{ jobId: "KJ-0001", vendorId: "V-PLATING", itemId: "SVC-PLATING", qty: "20", completedOn: "2027-03-10" }],
+    });
+    await waitFor(() => expect(pageViolations(container)).toEqual([]));
+  });
+
+  it("shows LEAN-0005 and checks input before calling", async () => {
+    handler = () => json(422, { code: "LEAN-0005", detail: "no valid purchase agreement for service SVC-PLATING on 2027-03-10" });
+    renderAt("/lean/subcontracting");
+    fireEvent.change(screen.getByLabelText("Completed quantity"), { target: { value: "0" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview PO lines" }));
+    expect(await screen.findByText("Enter the completed quantity.")).toBeInTheDocument();
+    expect(calls).toHaveLength(0);
+    fireEvent.change(screen.getByLabelText("Completed quantity"), { target: { value: "20" } });
+    fireEvent.change(screen.getByLabelText("Mode"), { target: { value: "periodic-po" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview PO lines" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("no valid purchase agreement for service SVC-PLATING on 2027-03-10 (LEAN-0005)");
+    expect((calls[0].body as { mode: string }).mode).toBe("periodic-po");
   });
 });

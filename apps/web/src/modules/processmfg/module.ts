@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
 import { BatchOrderDetailPage, BatchOrdersPage, NewBatchOrderPage } from "./BatchOrderPages";
+import { ApprovalCheckPage, ConsolidationPage, DerivationPage, MergePage, RequirementCheckPage } from "./BatchRulePages";
 import { AllocationPage, PotencyPage } from "./CalculatorPages";
 import { FormulaDetailPage, FormulasPage, NewFormulaPage } from "./FormulaPages";
 import { ProcessHome } from "./pages";
@@ -8,7 +9,8 @@ import { ProcessHome } from "./pages";
 const processmfg: PassageModule = {
   id: "processmfg",
   title: "Process manufacturing",
-  description: "Formulas, batch orders scaled to batch size, potency consumption and co-product cost allocation.",
+  description:
+    "Formulas, batch orders scaled to batch size, potency consumption, co-product cost allocation, and batch derivation, merge, consolidation and customer requirements.",
   routes: [
     { path: "/processmfg", element: createElement(ProcessHome), handle: { title: "Process manufacturing" } },
     { path: "/processmfg/formulas", element: createElement(FormulasPage), handle: { title: "Formulas" } },
@@ -19,6 +21,11 @@ const processmfg: PassageModule = {
     { path: "/processmfg/batch-orders/:id", element: createElement(BatchOrderDetailPage), handle: { title: "Batch order" } },
     { path: "/processmfg/potency", element: createElement(PotencyPage), handle: { title: "Potency consumption" } },
     { path: "/processmfg/allocation", element: createElement(AllocationPage), handle: { title: "Co-product allocation" } },
+    { path: "/processmfg/derivation", element: createElement(DerivationPage), handle: { title: "Batch derivation" } },
+    { path: "/processmfg/merge", element: createElement(MergePage), handle: { title: "Batch merge" } },
+    { path: "/processmfg/batch-requirements", element: createElement(RequirementCheckPage), handle: { title: "Customer batch requirements" } },
+    { path: "/processmfg/consolidation", element: createElement(ConsolidationPage), handle: { title: "Bulk consolidation" } },
+    { path: "/processmfg/batch-record-check", element: createElement(ApprovalCheckPage), handle: { title: "Batch record approval check" } },
   ],
   nav: [
     { label: "Overview", to: "/processmfg", duty: "production.batch-order.read" },
@@ -26,6 +33,11 @@ const processmfg: PassageModule = {
     { label: "Batch orders", to: "/processmfg/batch-orders", duty: "production.batch-order.read" },
     { label: "Potency", to: "/processmfg/potency", duty: "production.batch-order.read" },
     { label: "Co-product allocation", to: "/processmfg/allocation", duty: "production.journal.post" },
+    { label: "Batch derivation", to: "/processmfg/derivation", duty: "production.batch-attribute.write" },
+    { label: "Batch merge", to: "/processmfg/merge", duty: "production.batch.merge" },
+    { label: "Customer batch requirements", to: "/processmfg/batch-requirements", duty: "production.batch-order.read" },
+    { label: "Bulk consolidation", to: "/processmfg/consolidation", duty: "production.batch-order.write" },
+    { label: "Batch record approval", to: "/processmfg/batch-record-check", duty: "production.batch-record.approve" },
   ],
 };
 

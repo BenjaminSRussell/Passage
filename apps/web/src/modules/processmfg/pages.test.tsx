@@ -124,7 +124,8 @@ describe("processmfg module", () => {
     const { container } = renderAt("/processmfg");
     const areas = screen.getByRole("list", { name: "Process manufacturing areas" });
     expect(within(areas).getByRole("link", { name: "Open batch orders" })).toHaveAttribute("href", "/processmfg/batch-orders");
-    expect(within(areas).getAllByRole("link")).toHaveLength(4);
+    expect(within(areas).getAllByRole("link")).toHaveLength(9);
+    expect(within(areas).getByRole("link", { name: "Open bulk consolidation" })).toHaveAttribute("href", "/processmfg/consolidation");
     expect(pageViolations(container)).toEqual([]);
   });
 });
@@ -358,6 +359,138 @@ describe("calculators", () => {
       main: { itemId: "A", rafQty: "200", standardCost: "40" },
       byProducts: [{ itemId: "C", costType: "per-quantity", qty: "50", rate: "1.50" }],
     });
+    await waitFor(() => expect(pageViolations(container)).toEqual([]));
+  });
+});
+
+describe("batch rules (slice 2)", () => {
+  it("derives potency for AC-24.11 and sends the senders as typed", async () => {
+    handler = (url) =>
+      url.pathname === "/api/v1/production/batch-derivation:preview"
+        ? json(200, { attribute: "potency", value: { num: "43" }, missingSenders: [] })
+        : undefined;
+    const { container } = renderAt("/processmfg/derivation");
+    fireEvent.click(screen.getByRole("button", { name: "Preview derivation" }));
+    const tiles = await screen.findByRole("list", { name: "Derived value" });
+    expect(tiles).toHaveTextContent("potency 43");
+    expect(calls[0].body).toEqual({
+      rule: { attribute: "potency", aggregation: "weighted-average" },
+      senders: [
+        { batchId: "B-101", value: { num: "40" }, qty: "200" },
+        { batchId: "B-102", value: { num: "45" }, qty: "300" },
+      ],
+    });
+    await waitFor(() => expect(pageViolations(container)).toEqual([]));
+  });
+
+  it("warns about a sender without a value (PMF-0007) and validates input before calling", async () => {
+    handler = () => json(200, { attribute: "potency", value: { num: "45" }, missingSenders: ["B-101"], warningCode: "PMF-0007" });
+    renderAt("/processmfg/derivation");
+    fireEvent.change(screen.getByLabelText("Consumed quantity", { selector: "#sender-0-qty" }), { target: { value: "abc" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview derivation" }));
+    expect(await screen.findByText("Enter a quantity with at most 6 decimals.")).toBeInTheDocument();
+    expect(calls).toHaveLength(0);
+    fireEvent.change(screen.getByLabelText("Consumed quantity", { selector: "#sender-0-qty" }), { target: { value: "200" } });
+    fireEvent.change(screen.getByLabelText("Value", { selector: "#sender-0-value" }), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview derivation" }));
+    expect(await screen.findByText("No potency recorded on B-101. Record it and derive again.")).toBeInTheDocument();
+    expect((calls[0].body as { senders: { value: unknown }[] }).senders[0].value).toEqual({});
+  });
+
+  it("previews the AC-24.12 merge and shows the PMF-0006 refusal", async () => {
+    handler = (url) =>
+      url.pathname === "/api/v1/production/batch-merge:preview"
+        ? json(200, { qty: "150", unitCost: "2", disposition: "available", values: { expiry: { date: "2027-02-01" } }, parents: ["B-201", "B-202"] })
+        : undefined;
+    const { container } = renderAt("/processmfg/merge");
+    fireEvent.click(screen.getByRole("button", { name: "Preview merge" }));
+    const table = await screen.findByRole("table", { name: "Target attributes" });
+    expect(within(table).getByText("2027-02-01")).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Target batch" })).toHaveTextContent("Quantity 150");
+    expect(screen.getByRole("status")).toHaveTextContent("Genealogy parents: B-201, B-202");
+    const body = calls[0].body as { batches: { id: string; values: unknown }[]; mergeOverride: string[] };
+    expect(body.batches[1]).toMatchObject({ id: "B-202", qty: "50", values: { expiry: { date: "2027-02-01" } } });
+    expect(body.mergeOverride).toEqual([]);
+    await waitFor(() => expect(pageViolations(container)).toEqual([]));
+
+    handler = () => json(422, { code: "PMF-0006", detail: "merge refused: attribute grade differs (A vs B)" });
+    fireEvent.click(screen.getByLabelText("Grade may differ (merge override)"));
+    fireEvent.click(screen.getByRole("button", { name: "Preview merge" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("merge refused: attribute grade differs (A vs B) (PMF-0006)");
+    expect((calls[1].body as { mergeOverride: string[] }).mergeOverride).toEqual(["grade"]);
+  });
+
+  it("checks the AC-24.14 customer requirement and lists excluded batches", async () => {
+    handler = (url) =>
+      url.pathname === "/api/v1/production/batch-requirements:check"
+        ? json(200, {
+            requirement: { sellableDays: 60, sameBatch: false, ranges: {} },
+            qualifying: [{ batchId: "B-302", qty: "100", expiry: "2027-04-01" }],
+            excluded: [{ batchId: "B-301", reason: "45 days of shelf life left at shipment, 60 required", warningCode: "PMF-0009" }],
+            qtyAvailable: "100",
+            sameBatchId: null,
+          })
+        : undefined;
+    const { container } = renderAt("/processmfg/batch-requirements");
+    fireEvent.click(screen.getByRole("button", { name: "Check batches" }));
+    const excluded = await screen.findByRole("table", { name: "Excluded batches" });
+    expect(within(excluded).getByText("45 days of shelf life left at shipment, 60 required")).toBeInTheDocument();
+    expect(within(screen.getByRole("table", { name: "Qualifying batches" })).getByText("B-302")).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Requirement check" })).toHaveTextContent("Same batch Not required");
+    expect(calls[0].body).toMatchObject({ shipDate: "2027-01-01", qty: "80", requirements: [{ level: 3, sellableDays: 60 }] });
+    await waitFor(() => expect(pageViolations(container)).toEqual([]));
+  });
+
+  it("shows the same-batch shortfall (409 PMF-0008)", async () => {
+    handler = () => json(409, { code: "PMF-0008", detail: "no single batch can supply 500 (largest 100)" });
+    renderAt("/processmfg/batch-requirements");
+    fireEvent.click(screen.getByLabelText("Same batch"));
+    fireEvent.click(screen.getByRole("button", { name: "Check batches" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("no single batch can supply 500 (largest 100) (PMF-0008)");
+    expect(calls[0].body).toMatchObject({ requirements: [{ level: 3, sellableDays: 60, sameBatch: true }] });
+  });
+
+  it("previews AC-24.13 consolidation with pegged packing orders", async () => {
+    handler = (url) =>
+      url.pathname === "/api/v1/production/bulk-consolidation:preview"
+        ? json(200, {
+            bulkOrders: [
+              {
+                qty: "500",
+                pegs: [
+                  { orderId: "PK-1", itemId: "BOTTLE-500G", bulkQty: "200" },
+                  { orderId: "PK-2", itemId: "BOTTLE-500G", bulkQty: "300" },
+                ],
+              },
+            ],
+          })
+        : undefined;
+    const { container } = renderAt("/processmfg/consolidation");
+    fireEvent.click(screen.getByRole("button", { name: "Preview consolidation" }));
+    const table = await screen.findByRole("table", { name: "Pegged packing orders" });
+    expect(within(table).getAllByText("Bulk 1 (500)")).toHaveLength(2);
+    expect(screen.getByRole("list", { name: "Consolidation" })).toHaveTextContent("Bulk orders 1");
+    expect(calls[0].body).toEqual({
+      relation: { packQtyPerUnit: "0.5", multiple: "100", max: "0" },
+      packedOrders: [
+        { orderId: "PK-1", itemId: "BOTTLE-500G", units: "400", due: "2027-01-05" },
+        { orderId: "PK-2", itemId: "BOTTLE-500G", units: "600", due: "2027-01-06" },
+      ],
+    });
+    await waitFor(() => expect(pageViolations(container)).toEqual([]));
+  });
+
+  it("refuses EBR approval with open exceptions (PMF-0014) and confirms when signed", async () => {
+    handler = () => json(422, { code: "PMF-0014", detail: "batch record cannot be approved: 1 exceptions without disposition and signature" });
+    const { container } = renderAt("/processmfg/batch-record-check");
+    fireEvent.click(screen.getByRole("button", { name: "Check approval" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("(PMF-0014)");
+    handler = () => json(200, { approvable: true, exceptions: 1 });
+    fireEvent.change(screen.getByLabelText("Disposition"), { target: { value: "accepted" } });
+    fireEvent.change(screen.getByLabelText("Signature"), { target: { value: "SIG-1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Check approval" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("All 1 exceptions are dispositioned and signed.");
+    expect(calls[1].body).toEqual({ exceptions: [{ id: "EXC-expired-batch", disposition: "accepted", signatureId: "SIG-1" }] });
     await waitFor(() => expect(pageViolations(container)).toEqual([]));
   });
 });

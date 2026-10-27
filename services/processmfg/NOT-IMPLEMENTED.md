@@ -1,4 +1,4 @@
-# Not implemented in PSG-24 slice 1 (processmfg)
+# Not implemented in PSG-24 slices 1 and 2 (processmfg)
 
 Built in slice 1: formulas with their lines (FR-24.1, PMF-0001), batch orders from a formula
 snapshot scaled to the batch size (FR-24.2, BR-24.1), rescale before Started with optimistic
@@ -6,6 +6,15 @@ versioning, Idempotency-Key on every command, per-legal-entity batch-order numbe
 events, RLS with legal-entity scope; the potency (BR-24.2), co-product allocation (BR-24.3),
 catch-weight (BR-24.5), shelf-life (FR-24.6, BR-24.4) and weighted-average (BR-24.11) rules;
 and the web screens in `apps/web/src/modules/processmfg`.
+
+Built in slice 2, as stateless previews over batches the caller passes in (no tables, no
+events): batch derivation with every FR-24.15 aggregation and the missing-sender warning
+(PMF-0007); batch merge with attribute recomputation, weighted cost and parents (FR-24.16,
+PMF-0006); bulk consolidation sizing with due-date pegging of packing orders (FR-24.17,
+BR-24.12); the customer batch requirement check with field-by-field precedence, exclusion
+reasons (PMF-0009) and same-batch selection (FR-24.19, BR-24.13, 409 PMF-0008); the EBR
+approval gate (BR-24.15, PMF-0014); the domain checks of the signature service (BR-24.14,
+PMF-0010 to PMF-0013); and their screens in `apps/web/src/modules/processmfg`.
 
 | Deliverable or AC | Status | Reason |
 |---|---|---|
@@ -16,14 +25,14 @@ and the web screens in `apps/web/src/modules/processmfg`.
 | Deliverable 2: shelf life at RAF, FEFO on batch orders, expired-batch override duty (FR-24.6, BR-24.10, AC-24.4 `BATCH_EXPIRED`) | partial | `ShelfDates` and `ShortestExpiry` are built and tested; RAF, picking and the override belong with the order engine and inventory batches; the shelf-advice job is not built |
 | Deliverable 2: catch-weight dual UoM on inventory and production transactions (FR-24.7, AC-24.4 of the ticket) | partial | `ValidateCatchWeight` (BR-24.5) is built and exposed as a calculator; `cw_qty` on InventoryTransaction and journal lines is a handoff to wave 16 (inventory) and wave 21 (production) |
 | Deliverable 5: recipe and formula version control through ECO | handoff | `formula.bom_version_id` points at the wave-9 BOM version and orders snapshot the formula version; formula versioning and ECO submit belong to services/engineering (wave 9). Formulas cannot be edited in slice 1 |
-| Deliverable 6: inheritance rules, derivation log and monitor (FR-24.15, AC-24.11) | partial | `WeightedAverage` (BR-24.11) and `ShortestExpiry` (BR-24.4) are built; InheritanceRule, DerivationLog, the re-derivation job and the monitor are later slices |
-| Deliverable 6: batch merge `:merge` (FR-24.16, AC-24.12) | later slice of PSG-24 | needs the batch store and the transfer posting |
+| Deliverable 6: inheritance rules, derivation log and monitor (FR-24.15, AC-24.11) | partial | the derivation rule (`domain.Derive`, every aggregation, PMF-0007) is built and served as `POST /v1/production/batch-derivation:preview`. The InheritanceRule and DerivationLog tables, derivation at RAF, manual re-derivation with forward propagation (max depth 10), the derivation monitor, the `inheritance active` parameter and the nightly re-derivation job need the wave-16 batch store and RAF on the order engine, so they are later slices |
+| Deliverable 6: batch merge `:merge` (FR-24.16, AC-24.12) | partial | the target computation (`domain.Merge`) is built and served as `POST /v1/production/batch-merge:preview`. Posting the transfers from each source batch, writing genealogy and the `merge-override` attribute setting need the wave-16 batch store; the PRD command path `/inventory/batches:merge` is routed to services/inventory, so the command lands there or under `/v1/production` with the store slice |
 | Deliverable 6: documentary batches, tracking policy `batch-record-only` (FR-24.24) | handoff | the tracking dimension group is wave 16 |
-| Deliverable 7: consolidated bulk and packed orders, BulkPackRelation, consolidation job (FR-24.17, BR-24.12, AC-24.13) | later slice of PSG-24 | needs planned and firmed orders from wave 22 |
+| Deliverable 7: consolidated bulk and packed orders, BulkPackRelation, consolidation job (FR-24.17, BR-24.12, AC-24.13) | partial | sizing and due-date pegging (`domain.Consolidate`) are built and served as `POST /v1/production/bulk-consolidation:preview`. The BulkPackRelation table, reading planned and firmed packed orders from wave 22 within the consolidation window (default 7 days), creating the bulk and packing orders, the same-batch reservation of the bulk batch and the daily 21:00 job are later slices |
 | Deliverable 7: rework batch orders (FR-24.18, AC-24.18) | later slice of PSG-24 | needs the batch store and the wave-33 quality order link |
-| Deliverable 7: same-batch reservation, customer sellable days and batch requirements (FR-24.19, BR-24.13, AC-24.14, `SAME_BATCH_UNAVAILABLE`) | handoff | sales lines arrive in wave 27; the rules apply in the wave-27 reservation and the wave-28 picking |
-| Deliverable 9: electronic batch record, review by exception, sealed PDF/A and JSON archive (FR-24.21, AC-24.16) | later slice of PSG-24 | needs the document service (wave 5), the PI sheets (wave 25) and the signature service |
-| Deliverable 9: 21 CFR Part 11 electronic signature service (FR-24.22, BR-24.14, AC-24.15) | later slice of PSG-24 | cross-module service (wave 33 and wave 48 reuse it) that needs Keycloak step-up re-authentication (wave 2); not built in slice 1 |
+| Deliverable 7: same-batch reservation, customer sellable days and batch requirements (FR-24.19, BR-24.13, AC-24.14, `SAME_BATCH_UNAVAILABLE`) | partial | the rules are built (`domain.Resolve`, `domain.Check`, `domain.SelectSameBatch`) and served as `POST /v1/production/batch-requirements:check` (409 PMF-0008). The CustomerBatchRequirement table, the override with duty *Override customer batch requirements* and a reason, and enforcement in reservation (wave 27), picking (wave 28) and shelf-life aware planning (wave 22) are handoffs to those waves; the same-batch flag on the item is wave 16 |
+| Deliverable 9: electronic batch record, review by exception, sealed PDF/A and JSON archive (FR-24.21, AC-24.16) | partial | the approval gate (`domain.CheckApprove`, PMF-0014) is built and served as `POST /v1/production/batch-records:approve-check`; the release gate (`domain.CheckRelease`, PMF-0015) is a domain rule only. ElectronicBatchRecord, EbrException and BatchRecordProfile tables, incremental compilation, exception creation (BR-24.15 triggers), review stages, sealing, the PDF/A-2b and JSON archive (wave-5 documents), addenda and the compile and seal jobs are later slices |
+| Deliverable 9: 21 CFR Part 11 electronic signature service (FR-24.22, BR-24.14, AC-24.15) | partial | the domain checks are built and tested: lockout after three failures for 15 minutes (PMF-0011), session continuity (10 minutes idle), the factors a signing needs, signer equals session subject (PMF-0010), signer differs from author (PMF-0012), the SHA-256 of canonical JSON and hash invalidation (PMF-0013). `POST /api/v1/signatures`, Keycloak step-up re-authentication (wave 2), the Signature and SignatureStrategy tables, the append-only signature log to Iceberg, the security event on lockout and signature manifestation are later slices; the PRD catalog codes are kept, so no endpoint answers them yet |
 | Deliverable 10: characteristic-dependent planning (FR-24.23) | handoff | the planning engine is services/planning (wave 22) |
 | Deliverable 8 (lean subcontracting) | handoff | services/lean (see its NOT-IMPLEMENTED.md) |
 | AC-24.5 numeric example | deviation | AC-24.5 says a 10-case RAF at 95 kg fails for nominal 10 kg, min 9, max 11. BR-24.5 (min × cw ≤ qty ≤ max × cw) accepts 95 kg with min 9 (90 ≤ 95). The test uses a per-unit minimum of 9.8 kg, which reproduces the AC outcome; the rule follows BR-24.5. The PRD example needs fixing |
@@ -31,8 +40,8 @@ and the web screens in `apps/web/src/modules/processmfg`.
 | Formula lines: `potency_base_item`, `unit_id`, `scrap_pct`, `allocation_pct`, `by_product_cost_type` (PRD 4.24.4) | later slice of PSG-24 | the columns arrive with potency proposals and order-level co-product allocation, which use them |
 | `/metrics` on an admin port | later slice of PSG-24 | no counters yet; the chart's ServiceMonitor is off by default |
 | Deploy: second demo plant (food and chemicals line), flags `prod.process`, `prod.catch-weight` | handoff | deploy/ and the Helm umbrella belong to the deployment owner |
-| Jobs: shelf-advice notification, consolidation, inheritance re-derivation, EBR sweeps | later slice of PSG-24 | need Temporal (wave 4) and the entities above |
-| Duty entries for `production.formula.write`, `production.batch-order.read`, `production.batch-order.write` in OPA data | handoff | policies/ is outside this wave's ownership; the service enforces duties from forwarded headers |
+| Jobs: shelf-advice notification, consolidation, inheritance re-derivation, EBR compilation sweep and seal | later slice of PSG-24 | need Temporal (wave 4) and the entities above |
+| Duty entries for `production.formula.write`, `production.batch-order.read`, `production.batch-order.write`, `production.batch-attribute.write`, `production.batch.merge`, `production.batch-record.approve` in OPA data | handoff | policies/ is outside this wave's ownership; the service enforces duties from forwarded headers |
 | Label, CoA and batch ticket documents (PRD 4.24.15) | handoff | w5 document service, w32 print service, w48 country packs |
 | Performance budgets and load tests (PRD 4.24.19) | later slice of PSG-24 | no load path yet |
-| Web: formula designer with ECO submit, batch attributes and disposition screens, EBR review, signature prompts | later slice of PSG-24 | the backing endpoints are not built (see above); the module's README lists the screens that exist |
+| Web: formula designer with ECO submit, batch attributes and disposition screens, derivation monitor, EBR review and signature prompts | later slice of PSG-24 | the backing endpoints are not built (see above); slice 2 adds screens for the five previews, and the module README lists every screen that exists |

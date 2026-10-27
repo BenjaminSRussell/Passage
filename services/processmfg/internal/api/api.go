@@ -85,6 +85,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(read).Post("/v1/production/potency:consume", handle(consume))
 	r.With(read).Post("/v1/production/catch-weight:validate", handle(validateCatchWeight))
 	r.With(authz.RequireDuty(DutyCoProductAllocate)).Post("/v1/production/co-products:allocate", handle(allocateCoProducts))
+	registerBatches(r)
 }
 
 func (a *API) ready(w http.ResponseWriter, r *http.Request) {
@@ -99,13 +100,17 @@ func (a *API) ready(w http.ResponseWriter, r *http.Request) {
 }
 
 // fail maps domain errors to problems (malformed input 400, a rule violation
-// 422 with its PMF- code) and writes the result.
+// 422 with its PMF- code, the same-batch shortfall 409 as FR-24.19 asks) and
+// writes the result.
 func fail(w http.ResponseWriter, r *http.Request, err error) {
 	var de *domain.Error
 	if errors.As(err, &de) {
 		status := http.StatusUnprocessableEntity
-		if de.Code == domain.CodeInvalid {
+		switch de.Code {
+		case domain.CodeInvalid:
 			status = http.StatusBadRequest
+		case domain.CodeSameBatch:
+			status = http.StatusConflict
 		}
 		err = httpx.NewProblem(status, de.Code, de.Detail)
 	}

@@ -1,12 +1,18 @@
 # processmfg
 
-Process manufacturing for Passage (wave 24, PSG-24, slice 1). Formulas, batch orders created
-from a formula snapshot and scaled to the batch size, rescale before the order starts, and
-the potency, catch-weight and co-product allocation rules.
+Process manufacturing for Passage (wave 24, PSG-24, slices 1 and 2). Formulas, batch orders
+created from a formula snapshot and scaled to the batch size, rescale before the order starts,
+and the potency, catch-weight and co-product allocation rules (slice 1). Slice 2 adds the batch
+rules as stateless previews: batch derivation (FR-24.15), batch merge (FR-24.16), bulk
+consolidation sizing and pegging (FR-24.17), the customer batch requirement check with
+same-batch (FR-24.19), and the batch-record approval gate (BR-24.15); and the domain checks of
+the electronic-signature service (FR-24.22, BR-24.14).
 
 Slice 1 persists formulas and batch orders (Postgres, RLS on every table, outbox events in
-the same transaction). Batch attributes, disposition, co-product allocation on an order and
-the other wave-24 process entities are later slices; see `NOT-IMPLEMENTED.md`.
+the same transaction). The slice-2 previews store nothing and emit no events: the batches they
+judge are wave-16 InventoryBatch rows that the caller passes in. Batch attributes, disposition,
+co-product allocation on an order, the derivation log, the EBR store and the signature log are
+later slices; see `NOT-IMPLEMENTED.md`.
 
 ## Layout
 
@@ -14,7 +20,10 @@ the other wave-24 process entities are later slices; see `NOT-IMPLEMENTED.md`.
 cmd/processmfg        entrypoint: dbx.Connect, optional dbx.Migrate, httpx router, serve
 internal/domain       pure rules (no I/O): scale.go (FR-24.1 validation, BR-24.1 scaling),
                       potency.go (BR-24.2), coproduct.go (BR-24.3), catchweight.go (BR-24.5),
-                      shelflife.go (FR-24.6, BR-24.4, BR-24.11); property tests use rapid
+                      shelflife.go (FR-24.6, BR-24.4, BR-24.11), inherit.go (FR-24.15),
+                      merge.go (FR-24.16), consolidate.go (BR-24.12), customer.go (FR-24.19,
+                      BR-24.13), ebr.go (BR-24.15), signature.go (FR-24.22, BR-24.14);
+                      property tests use rapid
 internal/store        Postgres repository: formulas, batch orders, rescale, idempotency, outbox
 internal/api          HTTP handlers: decode → validate → tenant → store/domain → JSON/problem
 internal/events       event types and payloads
@@ -55,6 +64,19 @@ skipped when `PASSAGE_TEST_DATABASE_URL` is unset.
 - AC-24.5 catch weight. The fixture uses a per-unit minimum of 9.8 kg; see NOT-IMPLEMENTED.md.
 - AC-24.9 a percent-controlled formula summing to 99.5% is refused (PMF-0001).
 - BR-24.11 weighted average (43.0000%).
+- AC-24.11 derivation: weighted-average potency of 200 kg at 40% and 300 kg at 45% is 43.0000%
+  (domain and API); senders without a value are reported (PMF-0007); a rapid property keeps the
+  average between the sender values.
+- AC-24.12 merge of 100 kg (expiry 2027-03-01) and 50 kg (2027-02-01) into 150 kg expiring
+  2027-02-01 with both parents; PMF-0006 refusals (text, disposition, item, mixed kinds).
+- AC-24.13 consolidation: 400 + 600 bottles at 0.5 kg with a 100 kg multiple give one 500 kg
+  bulk order with both packing orders pegged; a rapid property checks sums, multiples, the
+  maximum and that every packing order is pegged in full.
+- AC-24.14 customer sellable days 60: only the 90-day batch qualifies; precedence customer over
+  group over item (BR-24.13); on-hold batches are excluded (AC-24.10); same-batch shortfall is
+  409 PMF-0008 with the largest batch quantity.
+- AC-24.15 lockout after three failed re-authentications (domain); AC-24.16 approval refused
+  while an exception lacks disposition or signature (PMF-0014).
 
 ## Endpoints
 
@@ -71,6 +93,15 @@ skipped when `PASSAGE_TEST_DATABASE_URL` is unset.
 | POST | `/v1/production/potency:consume` | `production.batch-order.read` | Potency consumption and filler adjustment (BR-24.2) |
 | POST | `/v1/production/catch-weight:validate` | `production.batch-order.read` | Catch-weight range check (BR-24.5) |
 | POST | `/v1/production/co-products:allocate` | `production.journal.post` | Co-product allocation preview (BR-24.3) |
+| POST | `/v1/production/batch-derivation:preview` | `production.batch-attribute.write` | Derive a receiver attribute from sender batches (FR-24.15, BR-24.11) |
+| POST | `/v1/production/batch-merge:preview` | `production.batch.merge` | Target batch of a merge: quantity, cost, attributes, parents (FR-24.16) |
+| POST | `/v1/production/batch-requirements:check` | `production.batch-order.read` | Customer batch requirement check and same-batch pick (FR-24.19, BR-24.13) |
+| POST | `/v1/production/bulk-consolidation:preview` | `production.batch-order.write` | Bulk batch orders for packed orders, pegged by due date (FR-24.17, BR-24.12) |
+| POST | `/v1/production/batch-records:approve-check` | `production.batch-record.approve` | Whether every EBR exception is dispositioned and signed (BR-24.15) |
+
+The slice-2 previews live under `/v1/production` because `/v1/inventory` is routed to
+services/inventory (wave 16); the PRD's `/inventory/batches/{id}/...` commands arrive with the
+batch store.
 
 Duties are enforced with the kernel `authz.RequireDuty`. The OPA entries are a handoff to
 `policies/`.
@@ -91,6 +122,11 @@ Duties are enforced with the kernel `authz.RequireDuty`. The OPA entries are a h
 | `PMF-0001` | 422 | Percent-controlled lines do not sum to 100 within ±0.01 (FR-24.1) |
 | `PMF-0002` | 422 | Compensating line would become negative; alias `POTENCY_COMPENSATION_NEGATIVE` (BR-24.2) |
 | `PMF-0004` | 422 | Catch weight outside min × units to max × units (BR-24.5) |
+| `PMF-0006` | 422 | Merge refused: item, warehouse, catch-weight unit, disposition or attribute kind differs, or a text attribute differs without merge-override (FR-24.16) |
+| `PMF-0007` | 200 (warning) | `warningCode` of a derivation whose senders lack a value (FR-24.15) |
+| `PMF-0008` | 409 | No single qualifying batch holds a same-batch line; PRD alias `SAME_BATCH_UNAVAILABLE` (FR-24.19) |
+| `PMF-0009` | 200 (warning) | `warningCode` of a batch excluded by the customer's requirements (FR-24.19) |
+| `PMF-0014` | 422 | Batch record cannot be approved: exceptions without disposition and signature (BR-24.15) |
 | `PMF-0021` | 422 | Allocation weights sum to zero, or by-product burden exceeds batch cost (not in the PRD catalog) |
 | `PMF-0101` | 404 | Formula not found |
 | `PMF-0102` | 404 | Batch order not found |

@@ -1,6 +1,8 @@
 // Package domain holds the pure process-manufacturing rules of wave 24:
 // formula scaling, potency consumption, co-product cost allocation, catch
-// weight validation and shelf-life derivation. It performs no I/O.
+// weight validation, shelf-life derivation, batch derivation and merge, bulk
+// consolidation, customer batch requirements, the batch-record approval gate
+// and the electronic-signature checks. It performs no I/O.
 package domain
 
 import "fmt"

@@ -122,9 +122,19 @@ export interface BoardColumn {
   kanbans: Kanban[];
 }
 
+/** FR-24.14: takt time against the slowest activity of the board's flow. */
+export interface Takt {
+  taktTimeS: number;
+  cycleTimeS: number;
+  bottleneckActivity: string;
+  withinTakt: boolean;
+}
+
 export interface Board {
   columns: BoardColumn[];
   truncated: boolean;
+  /** Present when the board is filtered to a flow with a takt time. */
+  takt?: Takt | null;
 }
 
 export interface FixedCountRequest {
@@ -257,4 +267,48 @@ export function moveKanban(id: string, input: { to: KanbanState; version: number
 
 export function fetchBoard(filter: { siteId?: string; flowId?: string; ruleId?: string } = {}, signal?: AbortSignal): Promise<Board> {
   return send<Board>(`/board${query(filter)}`, {}, signal);
+}
+
+// Lean subcontracting (FR-24.20, BR-24.16): a preview of the purchase order
+// lines for completed service jobs; nothing is stored.
+
+export const SUBCONTRACT_MODES = ["po-per-kanban", "periodic-po"] as const;
+export type SubcontractMode = (typeof SUBCONTRACT_MODES)[number];
+
+export interface Agreement {
+  vendorId: string;
+  itemId: string;
+  unitPrice: string;
+  currency: string;
+  validFrom: string;
+  validTo?: string | null;
+}
+
+export interface ServiceJob {
+  jobId: string;
+  vendorId: string;
+  itemId: string;
+  qty: string;
+  completedOn: string;
+}
+
+export interface SubcontractRequest {
+  mode: SubcontractMode;
+  agreements: Agreement[];
+  jobs: ServiceJob[];
+}
+
+export interface PoLine {
+  vendorId: string;
+  itemId: string;
+  qty: string;
+  unitPrice: string;
+  currency: string;
+  priceDate: string;
+  amount: string;
+  jobIds: string[];
+}
+
+export function previewSubcontract(req: SubcontractRequest): Promise<{ mode: SubcontractMode; lines: PoLine[] }> {
+  return post<{ mode: SubcontractMode; lines: PoLine[] }>("/subcontracting:preview", req);
 }

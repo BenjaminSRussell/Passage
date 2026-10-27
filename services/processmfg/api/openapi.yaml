@@ -239,6 +239,88 @@ paths:
           description: PMF-0021 when weights sum to zero or burdens exceed the batch cost.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batch-derivation:preview:
+    post:
+      operationId: previewBatchDerivation
+      summary: Preview a batch attribute or shelf-life derivation from sender batches (FR-24.15, BR-24.11)
+      description: Stores nothing. Senders without a value of the rule's kind are left out of the aggregation and listed in missingSenders with warningCode PMF-0007.
+      x-passage-duty: production.batch-attribute.write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/DeriveRequest' } } }
+      responses:
+        '200':
+          description: The derived receiver value and the senders without a value.
+          content: { application/json: { schema: { $ref: '#/components/schemas/DeriveResponse' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batch-merge:preview:
+    post:
+      operationId: previewBatchMerge
+      summary: Preview the target batch of a merge (FR-24.16)
+      description: Numeric attributes become the quantity-weighted average, dates the earliest, text must agree unless listed in mergeOverride (then the largest batch's text wins). Cost per unit is the weighted average. Stores nothing.
+      x-passage-duty: production.batch.merge
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/MergeRequest' } } }
+      responses:
+        '200':
+          description: The target batch.
+          content: { application/json: { schema: { $ref: '#/components/schemas/MergeResponse' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '422':
+          description: PMF-0006 when the batches differ in item, warehouse, catch-weight unit, disposition, the kind of an attribute, or a text attribute that is not merge-override.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batch-requirements:check:
+    post:
+      operationId: checkBatchRequirements
+      summary: Customer batch requirement check for a line (FR-24.19, BR-24.13)
+      description: Resolves the requirement rows by precedence (customer over customer group over item default, field by field), then splits the batches into qualifying and excluded (PMF-0009 with a reason). Only available batches that are not expired on the ship date qualify.
+      x-passage-duty: production.batch-order.read
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CheckRequest' } } }
+      responses:
+        '200':
+          description: The resolved requirement, qualifying and excluded batches, and the same-batch pick.
+          content: { application/json: { schema: { $ref: '#/components/schemas/CheckResponse' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: PMF-0008 (SAME_BATCH_UNAVAILABLE) when the line is same-batch and no qualifying batch holds its whole quantity; the detail names the largest available quantity.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/bulk-consolidation:preview:
+    post:
+      operationId: previewBulkConsolidation
+      summary: Size the bulk batch orders for packed orders and peg them by due date (FR-24.17, BR-24.12)
+      x-passage-duty: production.batch-order.write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ConsolidateRequest' } } }
+      responses:
+        '200':
+          description: The bulk orders, each with the packing orders pegged to it.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ConsolidateResponse' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batch-records:approve-check:
+    post:
+      operationId: checkBatchRecordApproval
+      summary: Whether a batch record can be approved (BR-24.15 review by exception)
+      x-passage-duty: production.batch-record.approve
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ApproveCheckRequest' } } }
+      responses:
+        '200':
+          description: Every exception has a disposition and a signature.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ApproveCheckResponse' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '422':
+          description: PMF-0014 while any exception lacks a disposition or a signature.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /healthz:
     get:
       operationId: healthz
@@ -454,6 +536,188 @@ components:
         coProducts: { type: array, items: { $ref: '#/components/schemas/Allocated' } }
         byProductBurdens: { type: array, items: { $ref: '#/components/schemas/Allocated' } }
         total: { $ref: '#/components/schemas/Decimal' }
+    AttributeValue:
+      type: object
+      description: One attribute value; at most one of num, text and date. An empty object is a missing value.
+      additionalProperties: false
+      properties:
+        num: { $ref: '#/components/schemas/Decimal' }
+        text: { type: string, maxLength: 200 }
+        date: { type: string, format: date }
+    Aggregation:
+      type: string
+      enum: [copy, min, max, weighted-average, earliest-date, latest-date, fixed]
+    DeriveRequest:
+      type: object
+      required: [rule, senders]
+      properties:
+        rule:
+          type: object
+          required: [attribute, aggregation]
+          properties:
+            attribute: { type: string, minLength: 1, maxLength: 40 }
+            aggregation: { $ref: '#/components/schemas/Aggregation' }
+            decimals: { type: integer, minimum: 0, maximum: 10, description: Rounding of a weighted average; default 4. }
+            fixed: { $ref: '#/components/schemas/AttributeValue' }
+        senders:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            required: [batchId, value]
+            properties:
+              batchId: { type: string, minLength: 1, maxLength: 80 }
+              value: { $ref: '#/components/schemas/AttributeValue' }
+              qty: { $ref: '#/components/schemas/Decimal', description: Consumed quantity; the weight of a weighted average. }
+    DeriveResponse:
+      type: object
+      properties:
+        attribute: { type: string }
+        value: { $ref: '#/components/schemas/AttributeValue' }
+        missingSenders: { type: array, items: { type: string } }
+        warningCode: { type: string, enum: [PMF-0007] }
+    Disposition:
+      type: string
+      enum: [available, on-hold, rejected, quarantine]
+    Batch:
+      type: object
+      required: [id, qty]
+      properties:
+        id: { type: string, minLength: 1, maxLength: 80 }
+        itemId: { type: string }
+        warehouseId: { type: string }
+        cwUnit: { type: string }
+        disposition: { $ref: '#/components/schemas/Disposition' }
+        qty: { $ref: '#/components/schemas/Quantity' }
+        unitCost: { $ref: '#/components/schemas/Decimal' }
+        values:
+          type: object
+          description: Attribute values by name; the shelf-life dates are expiry and best-before.
+          additionalProperties: { $ref: '#/components/schemas/AttributeValue' }
+    MergeRequest:
+      type: object
+      required: [batches]
+      properties:
+        batches: { type: array, minItems: 2, maxItems: 200, items: { $ref: '#/components/schemas/Batch' } }
+        mergeOverride: { type: array, items: { type: string }, description: Text attributes allowed to differ. }
+    MergeResponse:
+      type: object
+      properties:
+        qty: { $ref: '#/components/schemas/Decimal' }
+        unitCost: { $ref: '#/components/schemas/Decimal' }
+        disposition: { $ref: '#/components/schemas/Disposition' }
+        values: { type: object, additionalProperties: { $ref: '#/components/schemas/AttributeValue' } }
+        parents: { type: array, items: { type: string } }
+    Requirement:
+      type: object
+      required: [level]
+      properties:
+        level: { type: integer, enum: [1, 2, 3], description: 1 item default, 2 customer group, 3 customer. }
+        sellableDays: { type: integer, minimum: 0, maximum: 3650 }
+        attribute: { type: string, maxLength: 40 }
+        min: { $ref: '#/components/schemas/Decimal' }
+        max: { $ref: '#/components/schemas/Decimal' }
+        sameBatch: { type: boolean }
+    CheckRequest:
+      type: object
+      required: [requirements, shipDate, qty, batches]
+      properties:
+        requirements: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/Requirement' } }
+        shipDate: { type: string, format: date }
+        qty: { $ref: '#/components/schemas/Quantity' }
+        batches: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/Batch' } }
+    CheckResponse:
+      type: object
+      properties:
+        requirement:
+          type: object
+          properties:
+            sellableDays: { type: integer }
+            sameBatch: { type: boolean }
+            ranges:
+              type: object
+              additionalProperties:
+                type: object
+                properties:
+                  min: { $ref: '#/components/schemas/Decimal' }
+                  max: { $ref: '#/components/schemas/Decimal' }
+        qualifying:
+          type: array
+          items:
+            type: object
+            properties:
+              batchId: { type: string }
+              qty: { $ref: '#/components/schemas/Decimal' }
+              expiry: { type: string, format: date }
+        excluded:
+          type: array
+          items:
+            type: object
+            properties:
+              batchId: { type: string }
+              reason: { type: string }
+              warningCode: { type: string, enum: [PMF-0009] }
+        qtyAvailable: { $ref: '#/components/schemas/Decimal' }
+        sameBatchId: { type: string, nullable: true }
+    ConsolidateRequest:
+      type: object
+      required: [relation, packedOrders]
+      properties:
+        relation:
+          type: object
+          required: [packQtyPerUnit, multiple]
+          properties:
+            packQtyPerUnit: { $ref: '#/components/schemas/Quantity', description: Bulk UoM per packed unit. }
+            multiple: { $ref: '#/components/schemas/Quantity', description: Formula multiple. }
+            max: { $ref: '#/components/schemas/Decimal', description: Formula maximum (a multiple of multiple); 0 means none. }
+        packedOrders:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            type: object
+            required: [orderId, units, due]
+            properties:
+              orderId: { type: string, minLength: 1, maxLength: 80 }
+              itemId: { type: string }
+              units: { $ref: '#/components/schemas/Quantity' }
+              due: { type: string, format: date }
+    ConsolidateResponse:
+      type: object
+      properties:
+        bulkOrders:
+          type: array
+          items:
+            type: object
+            properties:
+              qty: { $ref: '#/components/schemas/Decimal' }
+              pegs:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    orderId: { type: string }
+                    itemId: { type: string }
+                    bulkQty: { $ref: '#/components/schemas/Decimal' }
+    ApproveCheckRequest:
+      type: object
+      required: [exceptions]
+      properties:
+        exceptions:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            required: [id]
+            properties:
+              id: { type: string, minLength: 1, maxLength: 80 }
+              disposition: { type: string, enum: ['', accepted, deviation-raised, rejected] }
+              signatureId: { type: string }
+    ApproveCheckResponse:
+      type: object
+      properties:
+        approvable: { type: boolean }
+        exceptions: { type: integer }
     Problem:
       type: object
       description: RFC 9457 problem details.

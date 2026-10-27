@@ -304,7 +304,89 @@ paths:
                         state: { $ref: '#/components/schemas/KanbanState' }
                         kanbans: { type: array, items: { $ref: '#/components/schemas/Kanban' } }
                   truncated: { type: boolean }
+                  takt:
+                    nullable: true
+                    description: >
+                      Takt vs cycle (FR-24.14) when the board is filtered to a flow that has a takt time
+                      and activities: the slowest activity's cycle time against the takt time.
+                    type: object
+                    properties:
+                      taktTimeS: { type: integer }
+                      cycleTimeS: { type: integer }
+                      bottleneckActivity: { type: string }
+                      withinTakt: { type: boolean }
         '400': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/lean/subcontracting:preview:
+    post:
+      operationId: previewSubcontractLines
+      summary: Purchase order lines for completed service jobs on vendor work cells (FR-24.20, BR-24.16)
+      description: >
+        Stores nothing. po-per-kanban gives one line per job; periodic-po one line per vendor,
+        service item and price. Each job is priced by the purchase agreement valid on its
+        completion date (the newest when several overlap); amounts round to the currency's
+        minor unit.
+      x-passage-duty: lean.flow.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode, agreements, jobs]
+              properties:
+                mode: { type: string, enum: [po-per-kanban, periodic-po] }
+                agreements:
+                  type: array
+                  maxItems: 500
+                  items:
+                    type: object
+                    required: [vendorId, itemId, unitPrice, currency, validFrom]
+                    properties:
+                      vendorId: { type: string, minLength: 1, maxLength: 80 }
+                      itemId: { type: string, minLength: 1, maxLength: 80 }
+                      unitPrice: { $ref: '#/components/schemas/Decimal' }
+                      currency: { type: string, pattern: '^[A-Z]{3}$' }
+                      validFrom: { type: string, format: date }
+                      validTo: { type: string, format: date, nullable: true, description: Inclusive; null is open-ended. }
+                jobs:
+                  type: array
+                  maxItems: 500
+                  items:
+                    type: object
+                    required: [jobId, vendorId, itemId, qty, completedOn]
+                    properties:
+                      jobId: { type: string, minLength: 1, maxLength: 80 }
+                      vendorId: { type: string, minLength: 1, maxLength: 80 }
+                      itemId: { type: string, minLength: 1, maxLength: 80 }
+                      qty: { $ref: '#/components/schemas/Decimal' }
+                      completedOn: { type: string, format: date }
+      responses:
+        '200':
+          description: The purchase order lines.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mode: { type: string }
+                  lines:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        vendorId: { type: string }
+                        itemId: { type: string }
+                        qty: { $ref: '#/components/schemas/Decimal' }
+                        unitPrice: { $ref: '#/components/schemas/Decimal' }
+                        currency: { type: string }
+                        priceDate: { type: string, format: date }
+                        amount: { $ref: '#/components/schemas/Decimal' }
+                        jobIds: { type: array, items: { type: string } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '422':
+          description: LEAN-0005 when no purchase agreement prices a job's service item on its completion date.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
   /healthz:
     get:

@@ -34,6 +34,7 @@ type fakeStore struct {
 	err        error
 	replay     bool
 	cards      []store.Kanban
+	flow       *store.Flow
 	gotFlow    store.Flow
 	gotRule    store.Rule
 	gotGen     store.Generate
@@ -60,6 +61,9 @@ func (f *fakeStore) ListFlows(_ context.Context, status string, limit int) ([]st
 }
 
 func (f *fakeStore) GetFlow(context.Context, string) (store.Flow, error) {
+	if f.flow != nil {
+		return *f.flow, f.err
+	}
 	return store.Flow{ID: flowID}, f.err
 }
 

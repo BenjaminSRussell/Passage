@@ -1,12 +1,15 @@
 # lean
 
-Lean manufacturing for Passage (wave 24, PSG-24, slice 1). Production flows with their
+Lean manufacturing for Passage (wave 24, PSG-24, slices 1 and 2). Production flows with their
 activities and activation, kanban rules (fixed, scheduled, event), kanban generation, the
-kanban card state machine and the kanban board.
+kanban card state machine and the kanban board (slice 1). Slice 2 adds takt vs cycle on the
+board (FR-24.14) and the lean subcontracting price rule as a preview of the purchase order
+lines for completed service jobs (FR-24.20, BR-24.16).
 
 Slice 1 persists flows, activities, rules and cards (Postgres, RLS on every table, outbox
-events in the same transaction). Kanban jobs per activity, flow costing periods and lean
-subcontracting are later slices; see `NOT-IMPLEMENTED.md`.
+events in the same transaction). The subcontracting preview stores nothing. Kanban jobs per
+activity, flow costing periods, and PO creation and receipt in purchasing are later slices;
+see `NOT-IMPLEMENTED.md`.
 
 ## Layout
 
@@ -14,7 +17,8 @@ subcontracting are later slices; see `NOT-IMPLEMENTED.md`.
 cmd/lean              entrypoint: dbx.Connect, optional dbx.Migrate, httpx router, serve
 internal/domain       pure rules (no I/O): kanban.go (BR-24.6 state machine, event cards),
                       rules.go (FR-24.9 rule check, BR-24.7 count and capacity, BR-24.8
-                      quantities), flow.go (FR-24.8 connectivity), flowcost.go (BR-24.9)
+                      quantities), flow.go (FR-24.8 connectivity, FR-24.14 takt vs cycle),
+                      flowcost.go (BR-24.9), subcontract.go (FR-24.20, BR-24.16)
 internal/store        Postgres repository: flows, rules, generation, moves, board
 internal/api          HTTP handlers: decode → validate → tenant → store/domain → JSON/problem
 internal/events       event types and payloads
@@ -54,6 +58,11 @@ skipped when `PASSAGE_TEST_DATABASE_URL` is unset.
   card reuse and under concurrent generation.
 - FR-24.8 (`lean-flow-demo`): a process activity without an output cannot be activated
   (LEAN-0004); predecessor cycles are refused.
+- FR-24.14: the board filtered to a flow reports takt time against the slowest activity.
+- AC-24.17: a service job of 20 on vendor V in `po-per-kanban` mode gives one PO line of 20 at
+  the agreement price; periodic-po accumulates per vendor, item and price (rapid property:
+  quantity and amount are conserved); the agreement valid on the completion date prices the
+  job, a newer overlapping one wins, ValidTo is inclusive; LEAN-0005 without an agreement.
 
 ## Endpoints
 
@@ -70,7 +79,8 @@ skipped when `PASSAGE_TEST_DATABASE_URL` is unset.
 | POST | `/v1/lean/kanbans:generate` | `lean.kanban.write` | Cards for a fixed rule (count) or an event rule (demand); Idempotency-Key |
 | GET | `/v1/lean/kanbans/{id}` | `lean.read` | One card |
 | POST | `/v1/lean/kanbans/{id}:move` | `lean.kanban.work` | Move a card one step (BR-24.6); `version`; Idempotency-Key |
-| GET | `/v1/lean/board` | `lean.kanban.work` | Board columns by state; `siteId`, `flowId`, `ruleId` |
+| GET | `/v1/lean/board` | `lean.kanban.work` | Board columns by state; `siteId`, `flowId`, `ruleId`; with `flowId`, `takt` compares takt time and the bottleneck cycle time (FR-24.14) |
+| POST | `/v1/lean/subcontracting:preview` | `lean.flow.write` | PO lines for completed service jobs priced by purchase agreement (FR-24.20, BR-24.16); writes nothing |
 
 Duties are enforced with the kernel `authz.RequireDuty`. The OPA entries are a handoff to
 `policies/`.
@@ -91,6 +101,7 @@ Duties are enforced with the kernel `authz.RequireDuty`. The OPA entries are a h
 | `LEAN-0001` | 409 | Kanban move not allowed (BR-24.6, AC-24.7) |
 | `LEAN-0002` | 409 | Rule would exceed its number of kanbans (BR-24.7) |
 | `LEAN-0004` | 422 | Process activity has no output location (FR-24.8) |
+| `LEAN-0005` | 422 | No valid purchase agreement for a service item on the job's completion date (FR-24.20) |
 | `LEAN-0101` | 404 | Production flow not found |
 | `LEAN-0102` | 404 | Kanban rule not found |
 | `LEAN-0103` | 404 | Kanban not found |

@@ -254,3 +254,124 @@ export function consumePotency(req: PotencyRequest): Promise<PotencyResult> {
 export function allocateCoProducts(req: AllocateRequest): Promise<AllocateResult> {
   return post<AllocateResult>("/co-products:allocate", req);
 }
+
+// Slice 2: batch rules as previews over batches the caller passes in (FR-24.15
+// to FR-24.21). Nothing is stored; see services/processmfg/NOT-IMPLEMENTED.md.
+
+/** One attribute value: at most one of num, text and date (yyyy-mm-dd); {} is a missing value. */
+export interface AttributeValue {
+  num?: string;
+  text?: string;
+  date?: string;
+}
+
+export const AGGREGATIONS = ["weighted-average", "min", "max", "copy", "earliest-date", "latest-date", "fixed"] as const;
+export type Aggregation = (typeof AGGREGATIONS)[number];
+
+export interface DeriveRequest {
+  rule: { attribute: string; aggregation: Aggregation; decimals?: number; fixed?: AttributeValue };
+  senders: { batchId: string; value: AttributeValue; qty: string }[];
+}
+
+export interface DeriveResult {
+  attribute: string;
+  value: AttributeValue;
+  missingSenders: string[];
+  warningCode?: string;
+}
+
+export const DISPOSITIONS = ["available", "on-hold", "rejected", "quarantine"] as const;
+export type Disposition = (typeof DISPOSITIONS)[number];
+
+export interface BatchInput {
+  id: string;
+  itemId?: string;
+  warehouseId?: string;
+  cwUnit?: string;
+  disposition?: Disposition;
+  qty: string;
+  unitCost?: string;
+  values?: Record<string, AttributeValue>;
+}
+
+export interface MergeRequest {
+  batches: BatchInput[];
+  mergeOverride?: string[];
+}
+
+export interface MergeResult {
+  qty: string;
+  unitCost: string;
+  disposition: Disposition;
+  values: Record<string, AttributeValue>;
+  parents: string[];
+}
+
+/** 1 item default, 2 customer group, 3 customer: the most specific level wins (BR-24.13). */
+export const REQUIREMENT_LEVELS = [3, 2, 1] as const;
+export type RequirementLevel = (typeof REQUIREMENT_LEVELS)[number];
+
+export interface RequirementInput {
+  level: RequirementLevel;
+  sellableDays?: number;
+  attribute?: string;
+  min?: string;
+  max?: string;
+  sameBatch?: boolean;
+}
+
+export interface CheckRequest {
+  requirements: RequirementInput[];
+  shipDate: string;
+  qty: string;
+  batches: BatchInput[];
+}
+
+export interface CheckResult {
+  requirement: { sellableDays: number; sameBatch: boolean; ranges: Record<string, { min?: string; max?: string }> };
+  qualifying: { batchId: string; qty: string; expiry?: string }[];
+  excluded: { batchId: string; reason: string; warningCode: string }[];
+  qtyAvailable: string;
+  sameBatchId: string | null;
+}
+
+export interface ConsolidateRequest {
+  relation: { packQtyPerUnit: string; multiple: string; max: string };
+  packedOrders: { orderId: string; itemId: string; units: string; due: string }[];
+}
+
+export interface ConsolidateResult {
+  bulkOrders: { qty: string; pegs: { orderId: string; itemId: string; bulkQty: string }[] }[];
+}
+
+export const EXCEPTION_DISPOSITIONS = ["", "accepted", "deviation-raised", "rejected"] as const;
+export type ExceptionDisposition = (typeof EXCEPTION_DISPOSITIONS)[number];
+
+export interface ApproveCheckRequest {
+  exceptions: { id: string; disposition: ExceptionDisposition; signatureId: string }[];
+}
+
+export interface ApproveCheckResult {
+  approvable: boolean;
+  exceptions: number;
+}
+
+export function previewDerivation(req: DeriveRequest): Promise<DeriveResult> {
+  return post<DeriveResult>("/batch-derivation:preview", req);
+}
+
+export function previewMerge(req: MergeRequest): Promise<MergeResult> {
+  return post<MergeResult>("/batch-merge:preview", req);
+}
+
+export function checkRequirements(req: CheckRequest): Promise<CheckResult> {
+  return post<CheckResult>("/batch-requirements:check", req);
+}
+
+export function previewConsolidation(req: ConsolidateRequest): Promise<ConsolidateResult> {
+  return post<ConsolidateResult>("/bulk-consolidation:preview", req);
+}
+
+export function checkApproval(req: ApproveCheckRequest): Promise<ApproveCheckResult> {
+  return post<ApproveCheckResult>("/batch-records:approve-check", req);
+}

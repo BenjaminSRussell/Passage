@@ -78,6 +78,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(read).Get("/v1/lean/kanbans/{id}", a.getKanban)
 	r.With(work).Post("/v1/lean/kanbans/{id}:move", a.move)
 	r.With(work).Get("/v1/lean/board", a.board)
+	r.With(authz.RequireDuty(DutyFlowWrite)).Post("/v1/lean/subcontracting:preview", handle(subcontractLines))
 }
 
 func (a *API) ready(w http.ResponseWriter, r *http.Request) {
@@ -93,7 +94,8 @@ func (a *API) ready(w http.ResponseWriter, r *http.Request) {
 
 // fail maps domain errors to problems and writes the result. Malformed input
 // is 400; a move, capacity or settlement rule the card or rule state refuses is
-// 409 (BR-24.6, BR-24.7, BR-24.9); a flow that is not connected is 422 (FR-24.8).
+// 409 (BR-24.6, BR-24.7, BR-24.9); a flow that is not connected (FR-24.8) or a
+// service job without a purchase agreement (FR-24.20, LEAN-0005) is 422.
 func fail(w http.ResponseWriter, r *http.Request, err error) {
 	var de *domain.Error
 	if errors.As(err, &de) {
@@ -101,7 +103,7 @@ func fail(w http.ResponseWriter, r *http.Request, err error) {
 		switch de.Code {
 		case domain.CodeInvalid:
 			status = http.StatusBadRequest
-		case domain.CodeNoOutput:
+		case domain.CodeNoOutput, domain.CodeNoAgreement:
 			status = http.StatusUnprocessableEntity
 		}
 		err = httpx.NewProblem(status, de.Code, de.Detail)
@@ -663,6 +665,13 @@ func (a *API) board(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
+	var takt *taktDTO
+	if q["flowId"] != "" {
+		if takt, err = a.flowTakt(r.Context(), q["flowId"]); err != nil {
+			fail(w, r, err)
+			return
+		}
+	}
 	cols := []column{}
 	for _, s := range []domain.State{domain.NotPlanned, domain.Planned, domain.Prepared, domain.InProgress, domain.Completed, domain.Emptied} {
 		c := column{State: s, Kanbans: []store.Kanban{}}
@@ -673,5 +682,34 @@ func (a *API) board(w http.ResponseWriter, r *http.Request) {
 		}
 		cols = append(cols, c)
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"columns": cols, "truncated": len(cards) == store.MaxBoard})
+	httpx.JSON(w, http.StatusOK, map[string]any{"columns": cols, "truncated": len(cards) == store.MaxBoard, "takt": takt})
+}
+
+// taktDTO is the board's takt vs cycle figure (FR-24.14).
+type taktDTO struct {
+	TaktTimeS          int    `json:"taktTimeS"`
+	CycleTimeS         int    `json:"cycleTimeS"`
+	BottleneckActivity string `json:"bottleneckActivity"`
+	WithinTakt         bool   `json:"withinTakt"`
+}
+
+// flowTakt compares the flow's takt time with its slowest activity; nil when
+// the flow has no takt time or no activities.
+func (a *API) flowTakt(ctx context.Context, flowID string) (*taktDTO, error) {
+	f, err := a.store.GetFlow(ctx, flowID)
+	if err != nil {
+		return nil, err
+	}
+	if f.TaktTimeS == nil {
+		return nil, nil
+	}
+	acts := make([]domain.ActivityCycle, len(f.Activities))
+	for i, act := range f.Activities {
+		acts[i] = domain.ActivityCycle{Name: act.Name, CycleTimeS: act.CycleTimeS}
+	}
+	c, ok := domain.TaktVsCycle(*f.TaktTimeS, acts)
+	if !ok {
+		return nil, nil
+	}
+	return &taktDTO{TaktTimeS: c.TaktTimeS, CycleTimeS: c.CycleTimeS, BottleneckActivity: c.Bottleneck, WithinTakt: c.WithinTakt}, nil
 }

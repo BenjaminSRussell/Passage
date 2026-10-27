@@ -195,6 +195,17 @@ export function BoardPage() {
             <StatTile label="Cards" value={cards.length} />
             <StatTile label="Work in progress" value={wip} />
             <StatTile label="Overdue" value={late} tone="warning" />
+            {board.data.takt ? (
+              <StatTile
+                label="Takt vs cycle"
+                value={`${board.data.takt.taktTimeS} s / ${board.data.takt.cycleTimeS} s`}
+                hint={
+                  board.data.takt.withinTakt
+                    ? `The slowest activity, ${board.data.takt.bottleneckActivity}, keeps up with takt.`
+                    : `${board.data.takt.bottleneckActivity} is slower than takt.`
+                }
+              />
+            ) : null}
           </StatGroup>
           {board.data.truncated ? (
             <Alert tone="warning" title="Showing the first 500 cards">
