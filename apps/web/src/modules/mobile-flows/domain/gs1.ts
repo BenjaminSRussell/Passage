@@ -269,10 +269,11 @@ export function classifyScan(
 const LP_FORMAT = /^LP[0-9A-Z-]{3,20}$/;
 const LOCATION_FORMAT = /^[A-Z0-9]{1,4}(-[A-Z0-9]{1,4}){1,3}$/;
 
-const CLASS_LABEL: Record<ScanClass, string> = { LP: "LP", GTIN: "GTIN", LOCATION: "location", ANY: "any barcode" };
+/** Scan class names as the MOB-0101 message words them. */
+export const CLASS_LABEL: Record<ScanClass, string> = { LP: "LP", GTIN: "GTIN", LOCATION: "location", ANY: "any barcode" };
 
 /** What the worker scanned, in the words of the MOB-0101 message. */
-function describeScan(c: Classified): string {
+export function describeScan(c: Classified): string {
   if (c.gs1) {
     if (c.gs1.fields["00"]) return "LP";
     if (c.gs1.fields["01"]) return "GTIN";

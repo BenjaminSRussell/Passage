@@ -14,6 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/print/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/print/internal/jobs"
 	"github.com/BenjaminSRussell/passage/services/print/internal/store"
 	"github.com/BenjaminSRussell/passage/services/print/migrations"
 )
@@ -367,5 +368,36 @@ func TestMigrationsApplyWithForcedRLS(t *testing.T) {
 	// The same code is free in another tenant: uniqueness is per tenant.
 	if _, _, err := s.CreatePrinter(other, dock("DOCK-1", 1), "k-1"); err != nil {
 		t.Fatalf("tenant 2 register: %v", err)
+	}
+}
+
+func TestScheduledPurge_RunsForEachListedTenant(t *testing.T) {
+	s, pool := migrated(t)
+	for n, key := range map[int]string{1: "sp-1", 2: "sp-2", 3: "sp-3"} {
+		ctx := tenantCtx(n)
+		job := queuedJob(t, s, ctx, key)
+		if err := job.Complete(domain.Outcome{Printer: domain.Printer{ID: ids.New(), Code: "DOCK-1"}, Attempts: 1}, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.CompleteJob(ctx, job); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := pool.Exec(tenantCtx(1), `update print_job set created_at = now() - interval '40 days'`); err != nil {
+		t.Fatal(err)
+	}
+	// Tenant 3 is not listed, so the schedule leaves its job for an on-demand purge.
+	deleted, err := jobs.PurgeTenants(context.Background(), s, []string{testkit.TenantID(1), testkit.TenantID(2)}, time.Now(), domain.DefaultRetentionDays)
+	if err != nil || deleted != 2 {
+		t.Fatalf("scheduled purge deleted %d err=%v, want 2", deleted, err)
+	}
+	left, err := s.ListJobs(tenantCtx(3), store.JobFilter{Limit: 10})
+	if err != nil || len(left) != 1 {
+		t.Fatalf("tenant 3 jobs after the scheduled purge: %+v %v, want 1", left, err)
+	}
+	for _, n := range []int{1, 2} {
+		if left, err := s.ListJobs(tenantCtx(n), store.JobFilter{Limit: 10}); err != nil || len(left) != 0 {
+			t.Fatalf("tenant %d jobs after the scheduled purge: %+v %v, want none", n, left, err)
+		}
 	}
 }

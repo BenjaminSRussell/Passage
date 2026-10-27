@@ -121,7 +121,7 @@ paths:
     post:
       operationId: createPrintJob
       summary: Render a built-in template and print it on the first reachable ZPL device of the queue
-      description: A job that no device accepts is recorded as FAILED with lastError MOB-0111 (unreachable) or MOB-0112 (empty queue) and returned with 201. A documentType with no matching routing rule is refused with 422 MOB-0112 before anything is stored. A repeated key returns the stored job with Idempotent-Replayed true and prints nothing. reprintOf reuses the stored ZPL.
+      description: A job that no device accepts is recorded as FAILED with lastError MOB-0111 (unreachable) or MOB-0112 (empty queue) and returned with 201. A documentType with no matching routing rule is refused with 422 MOB-0112 before anything is stored. A repeated key returns the stored job with Idempotent-Replayed true and prints nothing. reprintOf reuses the stored ZPL. ITEM_LABEL and GS1_CARTON_LABEL compose their GS1-128 element string (AI 00, 01, 10, 17, 21, 400, 420) from the data fields; a bad check digit, date, length or set-82 character is refused with 400 PRN-0001 before anything is stored.
       x-passage-duty: WMS_PRINT
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -149,7 +149,7 @@ paths:
     post:
       operationId: purgePrintJobs
       summary: Delete the tenant's finished job log rows older than the retention window (§6.32.19)
-      description: Removes the tenant's PRINTED and FAILED jobs created before now minus PRINT_JOB_RETENTION_DAYS (default 30). QUEUED jobs are kept. The key is required but not stored; calling it again deletes nothing new.
+      description: Removes the tenant's PRINTED and FAILED jobs created before now minus PRINT_JOB_RETENTION_DAYS (default 30). QUEUED jobs are kept. The key is required but not stored; calling it again deletes nothing new. The service also runs this purge daily at 01:00 UTC for each tenant in PRINT_PURGE_TENANT_IDS.
       x-passage-duty: WMS_PRINT_ADMIN
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -233,7 +233,7 @@ components:
         deviceType: { type: string, enum: [ZPL_II, PDF_IPP, PCL_6] }
         dpi: { type: integer, enum: [203, 300, 600] }
         host: { type: string, minLength: 1, maxLength: 253 }
-        port: { type: integer, minimum: 1, maximum: 65535, description: Defaults to 9100 for ZPL_II. }
+        port: { type: integer, minimum: 1, maximum: 65535, description: Defaults to 9100 (raw TCP) for ZPL_II and PCL_6 and to 631 (IPP) for PDF_IPP. }
         queueCode: { type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,39}$' }
         failoverRank: { type: integer, minimum: 1, description: Unique within the queue; jobs try devices in rank order. }
     Printer:
@@ -255,7 +255,13 @@ components:
       description: Give queueCode, or documentType (with optional zone and warehouseId) to resolve the queue by routing rule (BR-32.12).
       additionalProperties: false
       properties:
-        templateCode: { type: string, enum: [LP_LABEL, LOCATION_LABEL], description: Required unless reprintOf is set. }
+        templateCode:
+          type: string
+          enum: [LP_LABEL, LOCATION_LABEL, ITEM_LABEL, GS1_CARTON_LABEL]
+          description: >-
+            Required unless reprintOf is set. LP_LABEL needs lp, item, lot, expiry and sscc; LOCATION_LABEL needs location;
+            ITEM_LABEL needs gtin and takes optional lot, expiry (YYMMDD, DD=00 is month end) and serial;
+            GS1_CARTON_LABEL needs sscc and shipToName and takes optional poNumber and shipToPostal.
         queueCode: { type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,39}$' }
         documentType: { $ref: '#/components/schemas/DocumentType' }
         zone: { type: string }

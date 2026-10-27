@@ -5,7 +5,9 @@ package config
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/print/internal/domain"
 )
 
@@ -20,6 +22,9 @@ type Config struct {
 	Retries int
 	// RetentionDays is PRINT_JOB_RETENTION_DAYS: age after which finished jobs are purged.
 	RetentionDays int
+	// PurgeTenantIDs is PRINT_PURGE_TENANT_IDS: the tenants the daily job-log purge runs
+	// for, as comma-separated UUIDs. Empty disables the schedule; POST /jobs:purge still works.
+	PurgeTenantIDs []string
 }
 
 // AttemptsPerDevice is the number of sends a device gets before failover.
@@ -35,7 +40,30 @@ func Load(getenv func(string) string) (Config, error) {
 	if cfg.RetentionDays, err = intSetting(getenv, "PRINT_JOB_RETENTION_DAYS", domain.DefaultRetentionDays, 1, domain.MaxRetentionDays); err != nil {
 		return Config{}, err
 	}
+	if cfg.PurgeTenantIDs, err = tenantList(getenv, "PRINT_PURGE_TENANT_IDS"); err != nil {
+		return Config{}, err
+	}
 	return cfg, nil
+}
+
+// tenantList parses a comma-separated list of tenant UUIDs. A malformed or repeated id
+// stops startup rather than silently skipping a tenant's purge.
+func tenantList(getenv func(string) string, key string) ([]string, error) {
+	raw := strings.TrimSpace(getenv(key))
+	if raw == "" {
+		return nil, nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		id := strings.ToLower(strings.TrimSpace(part))
+		if !ids.Valid(id) || seen[id] {
+			return nil, fmt.Errorf("%s must be a comma-separated list of distinct tenant UUIDs", key)
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out, nil
 }
 
 func intSetting(getenv func(string) string, key string, fallback, lo, hi int) (int, error) {

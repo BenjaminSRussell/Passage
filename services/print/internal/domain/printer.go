@@ -5,16 +5,26 @@ import (
 	"time"
 )
 
-// Device types (FR-32.13). Only ZPL_II is delivered by the raw TCP sender in
-// this slice; the others are accepted in the registry and fail at dispatch.
+// Device types (FR-32.13). ZPL_II and PCL_6 are sent over raw TCP, PDF_IPP over IPP
+// (internal/transport). Every built-in template is ZPL, so job dispatch only offers
+// labels to ZPL_II devices (see Accepting).
 const (
 	DeviceZPL    = "ZPL_II"
 	DevicePDFIPP = "PDF_IPP"
 	DevicePCL6   = "PCL_6"
 
-	DefaultRawPort   = 9100
-	FailoverAttempts = 2 // attempts per device before failover (FR-32.13)
+	DefaultRawPort   = 9100 // raw TCP (JetDirect) for ZPL II and PCL 6
+	DefaultIPPPort   = 631  // IPP (RFC 8011)
+	FailoverAttempts = 2    // attempts per device before failover (FR-32.13)
 )
+
+// DefaultPort is the port a registration without one gets: 631 for IPP, 9100 otherwise.
+func DefaultPort(deviceType string) int {
+	if deviceType == DevicePDFIPP {
+		return DefaultIPPPort
+	}
+	return DefaultRawPort
+}
 
 // Printer is an output device registered for a site queue.
 type Printer struct {

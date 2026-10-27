@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
 import type { PrintJob, Printer, RoutingRule } from "./api/print";
 import mobileFlows from "./module";
-import { validateJob } from "./NewPrintJobPage";
+import { validateJob, validYYMMDD } from "./NewPrintJobPage";
 import { validatePrinter } from "./NewPrinterPage";
 import { validateRule } from "./NewRoutingRulePage";
 
@@ -106,10 +106,12 @@ describe("printers", () => {
     expect(await screen.findByText("DOCK-1")).toBeInTheDocument();
   });
 
-  it("validates the registration like the service and defaults the ZPL port", () => {
+  it("validates the registration like the service and leaves the default port to it", () => {
     const base = { code: "DOCK-1", name: "Dock", deviceType: "ZPL_II" as const, dpi: "203", host: "10.0.4.20", port: "", queueCode: "DOCK", failoverRank: "1" };
     expect(validatePrinter(base).input).toEqual({ code: "DOCK-1", name: "Dock", deviceType: "ZPL_II", dpi: 203, host: "10.0.4.20", queueCode: "DOCK", failoverRank: 1 });
-    expect(validatePrinter({ ...base, deviceType: "PDF_IPP" }).errors.port).toMatch(/only ZPL II/);
+    // Every device type has a service default port (9100 raw TCP, 631 IPP), so the port may be left empty.
+    expect(validatePrinter({ ...base, deviceType: "PDF_IPP" }).input).not.toHaveProperty("port");
+    expect(validatePrinter({ ...base, deviceType: "PCL_6", port: "9101" }).input).toMatchObject({ deviceType: "PCL_6", port: 9101 });
     expect(Object.keys(validatePrinter({ ...base, code: "dock", queueCode: "", failoverRank: "0", port: "70000" }).errors).sort()).toEqual([
       "code",
       "failoverRank",
@@ -254,6 +256,66 @@ describe("print jobs", () => {
       zone: "COLD",
       data: values.data,
     });
+  });
+
+  it("validates the GS1 item and carton labels like the service (BR-32.1, BR-32.10)", () => {
+    const item = {
+      templateCode: "ITEM_LABEL" as const,
+      target: "queue" as const,
+      queueCode: "DOCK",
+      zone: "",
+      warehouseId: "",
+      data: { gtin: "09501101020917", lot: "", expiry: "260200", serial: "SN0007" },
+    };
+    // Empty optional fields are left out of the request, and so out of the barcode.
+    expect(validateJob(item).input).toEqual({ templateCode: "ITEM_LABEL", queueCode: "DOCK", data: { gtin: "09501101020917", expiry: "260200", serial: "SN0007" } });
+    const bad = validateJob({ ...item, data: { gtin: "09501101020918", lot: "AB C", expiry: "261301", serial: "S>8" } }).errors;
+    expect(bad).toEqual({
+      gtin: "Enter the 14-digit GTIN with a valid check digit.",
+      lot: "Use letters, digits and GS1 punctuation only, without spaces or >.",
+      expiry: "Enter the expiry as YYMMDD, such as 261231 (DD 00 means the month end).",
+      serial: "Use letters, digits and GS1 punctuation only, without spaces or >.",
+    });
+    expect(validateJob({ ...item, data: { expiry: "250229" } }).errors).toEqual({ gtin: "Enter the GTIN.", expiry: expect.stringMatching(/YYMMDD/) });
+
+    const carton = { ...item, templateCode: "GS1_CARTON_LABEL" as const, data: { sscc: "340123456789012340", shipToName: "", poNumber: "x".repeat(31) } };
+    expect(validateJob(carton).errors).toEqual({ shipToName: "Enter the ship-to name.", poNumber: "Use at most 30 characters." });
+  });
+
+  it("accepts leap days and the month-end day 00 in YYMMDD", () => {
+    expect(validYYMMDD("280229")).toBe(true);
+    expect(validYYMMDD("270229")).toBe(false);
+    expect(validYYMMDD("261100")).toBe(true);
+    expect(validYYMMDD("260431")).toBe(false);
+    expect(validYYMMDD("26123")).toBe(false);
+  });
+
+  it("prints an item label with only the GS1 fields that were filled in", async () => {
+    handler = (url, init) => {
+      if (init.method === "POST") return json(201, { ...job, templateCode: "ITEM_LABEL" });
+      if (url.pathname === `/api/v1/print/jobs/${JOB}`) return json(200, { ...job, templateCode: "ITEM_LABEL" });
+      return undefined;
+    };
+    const { container } = renderAt("/mobile-flows/print-jobs/new");
+    fireEvent.change(screen.getByLabelText("Template"), { target: { value: "ITEM_LABEL" } });
+    expect(pageViolations(container)).toEqual([]);
+    fireEvent.change(screen.getByLabelText("Queue"), { target: { value: "DOCK" } });
+    fireEvent.change(screen.getByLabelText("GTIN"), { target: { value: "09501101020917" } });
+    fireEvent.change(screen.getByLabelText(/^Lot/), { target: { value: "123ABC" } });
+    fireEvent.click(screen.getByRole("button", { name: "Print label" }));
+    expect(await screen.findByText("ITEM_LABEL")).toBeInTheDocument();
+    expect(calls.find((c) => c.method === "POST")?.body).toEqual({ templateCode: "ITEM_LABEL", queueCode: "DOCK", data: { gtin: "09501101020917", lot: "123ABC" } });
+  });
+
+  it("shows the service's GS1 refusal on the form", async () => {
+    handler = (_url, init) => (init.method === "POST" ? json(400, { code: "PRN-0001", detail: "AI 01: check digit invalid" }) : undefined);
+    renderAt("/mobile-flows/print-jobs/new");
+    fireEvent.change(screen.getByLabelText("Template"), { target: { value: "GS1_CARTON_LABEL" } });
+    fireEvent.change(screen.getByLabelText("Queue"), { target: { value: "SHIP" } });
+    fireEvent.change(screen.getByLabelText("SSCC"), { target: { value: "340123456789012340" } });
+    fireEvent.change(screen.getByLabelText("Ship-to name"), { target: { value: "ACME DC" } });
+    fireEvent.click(screen.getByRole("button", { name: "Print label" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("AI 01: check digit invalid (PRN-0001)");
   });
 
   it("prints a location label and opens the recorded job", async () => {

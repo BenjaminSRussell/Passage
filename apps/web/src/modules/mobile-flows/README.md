@@ -25,6 +25,23 @@ Flow designer for warehouse handheld flows, plus the pure domain shared with
   non-extractable device key kept in IndexedDB; the whole queue, with its next seq, is one sealed
   document. `saveQueue` and `loadQueue` refuse another device's or a newer-format document.
   The device app does not call it yet (see `apps/warehouse-mobile/NOT-IMPLEMENTED.md`).
+- `domain/scanRouting.ts`: scan acceptance (FR-32.10, BR-32.2, AC-32.7). A scan counts only
+  on the focused scan step; on any other step it is ignored for the caller to log. A step with
+  several expected classes accepts the first one the scan satisfies.
+- `domain/flowRunner.ts`: the runner the device and the designer simulator share (FR-32.4).
+  `startFlow` refuses a graph that fails validation; `submitStep` takes a scan, a typed value,
+  a branch outcome or a confirmation and returns the next state and a `StepTiming`; `goBack`
+  returns one step. GS1 fields of scanned labels are kept per step.
+- `domain/coreFlows.ts`: the bundled receive/put-away flow and the `ConfirmWorkLine` payload.
+- `domain/telemetry.ts`: step timing (FR-32.11): validation, nearest-rank median and p95
+  rollups by flow and step (by user only on request, §6.32.20), and the 30 to 365 day
+  retention (90 by default).
+- `domain/exceptions.ts`: on-device exceptions (FR-32.8) and the supervisor override
+  (BR-32.7): one action, one worker, 60 s, never for the supervisor's own work (MOB-0110).
+- `domain/scanBridge.ts`: the page side of the scanner intent bridge (`passage:scan` events
+  from the Android shell, DataWedge and Honeywell extras, keyboard wedge).
+- `domain/layout.ts`: device layout rules (320 px, 16 px font floor, 48 and 64 px targets,
+  RTL locales), applied by `apps/warehouse-mobile`.
 - `domain/cluster.ts`: cluster picking (BR-32.5). At most 8 works, one order's LP per cart
   position, MOB-0109 on a wrong position, and a short pick that leaves the other positions open.
 - `domain/session.ts`: session lock (BR-32.6, AC-32.8). A session is STALE after the idle
@@ -35,12 +52,20 @@ Flow designer for warehouse handheld flows, plus the pure domain shared with
   `GET /api/v1/mobile/offline/conflicts` and `POST .../offline/conflicts/{key}:resolve`. The
   mobile service is a handoff, so these pages report that it is unavailable.
 - `api/print.ts`: client for `services/print` through the BFF at `/api/v1/print`.
-- `pages.tsx`: designer screen. It edits the flow as JSON, validates, saves a draft, and runs
-  a virtual scanner that uses the GS1 parser.
+- `pages.tsx`: designer screen. It opens on the bundled receive/put-away flow, edits the flow
+  as JSON, validates, saves a draft, and runs a virtual scanner that uses the GS1 parser.
+- `FlowSimulator.tsx`: on the designer screen, runs the edited flow step by step with the
+  device runner (§6.32.6 "designer simulation"): a virtual scanner feeds every step (scans on
+  non-scan steps are listed as ignored), values and branch outcomes are entered on their steps,
+  and a step timing table shows attempts, errors, median and p95.
 - Print management (FR-32.7, FR-32.13): `PrintersPage` and `NewPrinterPage`,
   `RoutingRulesPage` and `NewRoutingRulePage`, `PrintJobsPage` (job log with status and queue
   filters), `NewPrintJobPage` (print a built-in label on a queue or by routing rule) and
   `PrintJobDetailPage` (outcome, MOB-0111/0112 explanation, "Print again" with `reprintOf`).
+  The label form covers the LP, location, GS1 item (GTIN, optional lot, expiry and serial) and
+  GS1 carton labels, with the service's check-digit, YYMMDD and set-82 rules; empty optional
+  fields are left out of the request. Printers may leave the port empty: the service uses
+  9100 for ZPL II and PCL 6 and 631 for PDF over IPP.
 - `PrinterStatusPage` (§6.32.14): state, queue depth, last error and last job per printer.
 - `OfflineConflictsPage` (BR-32.4, AC-32.6): the supervisor queue of CONFLICT transactions.
   Opening a row shows the transaction and a resolution choice ("Apply as movement" or
@@ -73,8 +98,8 @@ already present in `apps/web`. No npm dependencies were added.
 
 ## Not yet (see also `apps/warehouse-mobile/NOT-IMPLEMENTED.md` and `services/print/NOT-IMPLEMENTED.md`)
 
-- The designer does not yet simulate a full flow over every core path (BR-32.9 smoke scripts);
-  it validates the graph and runs single scans only.
+- The simulator runs a flow by hand; smoke scripts that replay every core path before publish
+  (BR-32.9) are not built.
 - Flow list, version history, diff, and the four-eyes approval UI are not built (§6.32.14).
 - GS1 AIs 420 and 710 to 715 are not in the parser table yet.
   Unknown AIs report MOB-0103 with their position. The GS1 AI test suite vectors (the external

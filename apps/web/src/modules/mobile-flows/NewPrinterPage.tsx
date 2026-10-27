@@ -10,7 +10,7 @@ export interface PrinterValues {
   deviceType: DeviceType;
   dpi: string;
   host: string;
-  /** Empty means 9100 for ZPL II. */
+  /** Empty means the service default: 9100 for ZPL II and PCL 6, 631 for PDF over IPP. */
   port: string;
   queueCode: string;
   failoverRank: string;
@@ -32,7 +32,6 @@ export function validatePrinter(values: PrinterValues): { errors: Errors; input?
   if (values.name.trim() === "" || values.name.trim().length > 120) errors.name = "Enter a name of up to 120 characters.";
   if (!DPIS.includes(Number(values.dpi) as (typeof DPIS)[number])) errors.dpi = "Choose 203, 300 or 600 dpi.";
   if (host === "" || host.length > 253) errors.host = "Enter the printer's host name or IP address.";
-  if (port === "" && values.deviceType !== "ZPL_II") errors.port = "Enter the port; only ZPL II printers default to 9100.";
   if (port !== "" && (!WHOLE.test(port) || Number(port) < 1 || Number(port) > 65535)) errors.port = "Enter a port from 1 to 65535.";
   if (!CODE.test(queue)) errors.queueCode = "Use 2 to 40 capital letters, digits, _ or -, such as DOCK.";
   if (!WHOLE.test(values.failoverRank.trim()) || Number(values.failoverRank) < 1) errors.failoverRank = "Enter a whole number of 1 or more.";
@@ -123,7 +122,7 @@ export function NewPrinterPage() {
         <form className={styles.form} onSubmit={submit} noValidate>
           {text("code", "Printer code", "Unique per tenant, e.g. DOCK-1.", false, { maxLength: 40 })}
           {text("name", "Name", undefined, false, { maxLength: 120 })}
-          <FormField id="printer-deviceType" label="Device type" hint="Labels print on ZPL II devices only.">
+          <FormField id="printer-deviceType" label="Device type" hint="Labels print on ZPL II devices; PDF and PCL 6 devices take office documents.">
             {(control) => (
               <Select {...control} value={values.deviceType} onChange={(event) => update({ deviceType: event.target.value as DeviceType })}>
                 {DEVICE_TYPES.map((t) => (
@@ -146,7 +145,7 @@ export function NewPrinterPage() {
             )}
           </FormField>
           {text("host", "Host", "Host name or IP address on the site network.", false, { maxLength: 253 })}
-          {text("port", "Port", "Empty means raw TCP 9100 for ZPL II.", true, { inputMode: "numeric" })}
+          {text("port", "Port", values.deviceType === "PDF_IPP" ? "Empty means IPP port 631." : "Empty means raw TCP port 9100.", true, { inputMode: "numeric" })}
           {text("queueCode", "Queue", "Printers that share a queue back each other up.", false, { maxLength: 40 })}
           {text("failoverRank", "Failover rank", "1 is tried first; unique within the queue.", false, { inputMode: "numeric" })}
           {failure ? (

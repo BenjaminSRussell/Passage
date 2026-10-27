@@ -7,6 +7,9 @@ replicaCount: 2
 printRetry: 1
 # PRINT_JOB_RETENTION_DAYS: job log retention before purge, in days (1-365).
 jobRetentionDays: 30
+# PRINT_PURGE_TENANT_IDS: tenants whose job log is purged daily at 01:00 UTC. Empty
+# disables the schedule; POST /print/v1/jobs:purge still works on demand.
+purgeTenantIds: []
 resources:
   requests: { cpu: 50m, memory: 64Mi }
   limits: { cpu: 250m, memory: 128Mi }

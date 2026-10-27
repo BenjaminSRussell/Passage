@@ -1,23 +1,18 @@
 import { useState } from "react";
 import { Alert, Button, Card, FormField, Input, PageHeader, Select, Textarea } from "../../shell/ui";
 import { describeFlowError, saveDraft } from "./api/client";
+import { RECEIVE_PUTAWAY_FLOW } from "./domain/coreFlows";
 import { type FlowDraft, type GraphIssue, validateFlow } from "./domain/flowGraph";
 import { checkScan, type Classified, classifyScan, type ScanClass, type ScanVerdict } from "./domain/gs1";
+import { FlowSimulator } from "./FlowSimulator";
 import styles from "./pages.module.css";
 
-const SAMPLE: FlowDraft = {
-  code: "PUT_AWAY",
-  entryStepId: "scan_lp",
-  steps: [
-    { id: "scan_lp", type: "scan", prompt: "Scan the LP", expectedScan: ["LP"], next: { default: "scan_loc" } },
-    { id: "scan_loc", type: "scan", prompt: "Scan the location", expectedScan: ["LOCATION"], next: { default: "confirm" } },
-    { id: "confirm", type: "confirm", prompt: "Confirm put-away", next: { default: null } },
-  ],
-};
+/** The designer opens on the bundled receive/put-away flow, the graph devices run today. */
+const SAMPLE: FlowDraft = RECEIVE_PUTAWAY_FLOW;
 
 const SCAN_CLASS_LABELS: Record<ScanClass, string> = { LP: "LP", GTIN: "GTIN", LOCATION: "Location", ANY: "Any barcode" };
 
-/** Flow designer: edit the graph as JSON, validate it (MOB-0113), save a draft, and simulate scans. */
+/** Flow designer: edit the graph as JSON, validate it (MOB-0113), save a draft, test single scans and run the whole flow. */
 export function FlowDesigner() {
   const [text, setText] = useState(() => JSON.stringify(SAMPLE, null, 2));
   const [issues, setIssues] = useState<GraphIssue[]>([]);
@@ -148,6 +143,8 @@ export function FlowDesigner() {
           </div>
         ) : null}
       </Card>
+
+      <FlowSimulator flowText={text} />
     </div>
   );
 }

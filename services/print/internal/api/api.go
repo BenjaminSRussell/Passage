@@ -162,8 +162,8 @@ func (a *API) createPrinter(w http.ResponseWriter, r *http.Request) {
 	}
 	in := domain.Printer{Code: req.Code, Name: req.Name, DeviceType: req.DeviceType, Dpi: req.Dpi, Host: req.Host, Port: req.Port,
 		QueueCode: req.QueueCode, FailoverRank: req.FailoverRank}
-	if in.Port == 0 && in.DeviceType == domain.DeviceZPL {
-		in.Port = domain.DefaultRawPort
+	if in.Port == 0 {
+		in.Port = domain.DefaultPort(in.DeviceType)
 	}
 	if fields := in.Validate(); len(fields) > 0 {
 		validationFailed(w, r, fields)
@@ -254,7 +254,13 @@ func (a *API) createJob(w http.ResponseWriter, r *http.Request) {
 			httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, domain.CodeUnknownTemplate, "template "+req.TemplateCode+" is not built in"))
 			return
 		}
-		rendered, err := domain.Render(tpl, req.Data)
+		// ITEM_LABEL and GS1_CARTON_LABEL compose their GS1-128 element string from the fields.
+		data, err := domain.PrepareLabelData(req.TemplateCode, req.Data)
+		if err != nil {
+			httpx.Fail(w, r, problemFrom(err))
+			return
+		}
+		rendered, err := domain.Render(tpl, data)
 		if err != nil {
 			httpx.Fail(w, r, problemFrom(err))
 			return

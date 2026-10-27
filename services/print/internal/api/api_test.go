@@ -377,3 +377,56 @@ func httptestGet(h http.Handler, path string) string {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 	return rec.Body.String()
 }
+
+func TestCreateJob_ItemLabelComposesGS1FromFields(t *testing.T) {
+	ms := newMemStore()
+	h := router(ms, &fakeSender{down: map[string]bool{}})
+	seedDock(t, h)
+	item := `{"templateCode":"ITEM_LABEL","queueCode":"DOCK","data":{"gtin":"09501101020917","lot":"123ABC","expiry":"261231","serial":"SN0007"}}`
+	j := decodeJob(t, call(t, h, http.MethodPost, "/print/v1/jobs", item, "WMS_PRINT", "item-1"))
+	if j.Status != domain.JobPrinted || j.TemplateCode != domain.TemplateItem {
+		t.Fatalf("item label job = %+v", j)
+	}
+	if want := ">:>8" + "0109501101020917" + "10123ABC>817261231" + "21SN0007"; !strings.Contains(ms.jobs[j.ID].ZPL, want) {
+		t.Fatalf("stored ZPL lacks the GS1 element string %q:\n%s", want, ms.jobs[j.ID].ZPL)
+	}
+	bad := strings.Replace(item, "09501101020917", "09501101020918", 1)
+	rec := call(t, h, http.MethodPost, "/print/v1/jobs", bad, "WMS_PRINT", "item-2")
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), domain.CodeInvalid) {
+		t.Fatalf("bad GTIN: %d %s, want 400 %s", rec.Code, rec.Body, domain.CodeInvalid)
+	}
+}
+
+func TestCreateJob_CartonLabelNeedsShipTo(t *testing.T) {
+	h := router(newMemStore(), &fakeSender{down: map[string]bool{}})
+	seedDock(t, h)
+	carton := `{"templateCode":"GS1_CARTON_LABEL","queueCode":"DOCK","data":{"sscc":"340123456789012340","poNumber":"PO-7781","shipToPostal":"60601"}}`
+	if rec := call(t, h, http.MethodPost, "/print/v1/jobs", carton, "WMS_PRINT", "carton-1"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("carton without shipToName: %d %s, want 400", rec.Code, rec.Body)
+	}
+	carton = strings.Replace(carton, `"sscc"`, `"shipToName":"ACME DC","sscc"`, 1)
+	if j := decodeJob(t, call(t, h, http.MethodPost, "/print/v1/jobs", carton, "WMS_PRINT", "carton-2")); j.Status != domain.JobPrinted {
+		t.Fatalf("carton label status %s, want PRINTED", j.Status)
+	}
+}
+
+func TestCreatePrinter_DefaultsPortByDeviceType(t *testing.T) {
+	h := router(newMemStore(), &fakeSender{down: map[string]bool{}})
+	for _, c := range []struct {
+		deviceType string
+		port       int
+	}{{"ZPL_II", 9100}, {"PCL_6", 9100}, {"PDF_IPP", 631}} {
+		body := fmt.Sprintf(`{"code":"P-%s","name":"Office","deviceType":%q,"dpi":600,"host":"10.0.9.1","queueCode":"OFFICE-%s","failoverRank":1}`, c.deviceType, c.deviceType, c.deviceType)
+		rec := call(t, h, http.MethodPost, "/print/v1/printers", body, "WMS_PRINT_ADMIN", "port-"+c.deviceType)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("%s: %d %s", c.deviceType, rec.Code, rec.Body)
+		}
+		var p domain.Printer
+		if err := json.Unmarshal(rec.Body.Bytes(), &p); err != nil {
+			t.Fatal(err)
+		}
+		if p.Port != c.port {
+			t.Errorf("%s port = %d, want %d", c.deviceType, p.Port, c.port)
+		}
+	}
+}

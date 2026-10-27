@@ -39,6 +39,8 @@ spec:
               value: {{ .Values.printRetry | quote }}
             - name: PRINT_JOB_RETENTION_DAYS
               value: {{ .Values.jobRetentionDays | quote }}
+            - name: PRINT_PURGE_TENANT_IDS
+              value: {{ join "," .Values.purgeTenantIds | quote }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }

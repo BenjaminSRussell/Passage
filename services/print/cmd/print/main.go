@@ -14,6 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/print/internal/api"
 	"github.com/BenjaminSRussell/passage/services/print/internal/config"
+	"github.com/BenjaminSRussell/passage/services/print/internal/jobs"
 	"github.com/BenjaminSRussell/passage/services/print/internal/store"
 	"github.com/BenjaminSRussell/passage/services/print/internal/transport"
 	"github.com/BenjaminSRussell/passage/services/print/migrations"
@@ -62,8 +63,9 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
-	a := api.New(store.New(pool), transport.TCP{Timeout: 2 * time.Second},
-		api.WithAttemptsPerDevice(cfg.AttemptsPerDevice()), api.WithRetentionDays(cfg.RetentionDays))
+	st := store.New(pool)
+	sender := transport.Router{TCP: transport.TCP{Timeout: 2 * time.Second}, IPP: transport.IPP{Timeout: 2 * time.Second}}
+	a := api.New(st, sender, api.WithAttemptsPerDevice(cfg.AttemptsPerDevice()), api.WithRetentionDays(cfg.RetentionDays))
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
@@ -71,6 +73,18 @@ func run(ctx context.Context, getenv func(string) string) error {
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	if len(cfg.PurgeTenantIDs) > 0 {
+		go jobs.RunDaily(ctx, st, cfg.PurgeTenantIDs, cfg.RetentionDays, func(deleted int64, err error) {
+			a.RecordPurged(deleted)
+			if err != nil {
+				slog.Error("scheduled job-log purge failed", "err", err, "deleted", deleted)
+				return
+			}
+			slog.Info("scheduled job-log purge", "deleted", deleted, "tenants", len(cfg.PurgeTenantIDs))
+		})
+	} else {
+		slog.Info("scheduled job-log purge disabled", "reason", "PRINT_PURGE_TENANT_IDS is empty")
+	}
 	errs := make(chan error, 2)
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), router) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()

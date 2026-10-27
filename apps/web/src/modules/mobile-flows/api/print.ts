@@ -20,11 +20,19 @@ export const DOCUMENT_TYPES = [
 ] as const;
 export type DocumentType = (typeof DOCUMENT_TYPES)[number];
 
-/** Built-in ZPL templates and the data fields each one needs. */
+export interface TemplateField {
+  name: string;
+  /** Optional GS1 fields are left out of the barcode when empty. */
+  optional?: boolean;
+}
+
+/** Built-in ZPL templates and the data fields each one takes, in form order (§6.32.15). */
 export const TEMPLATES = {
-  LP_LABEL: ["lp", "item", "lot", "expiry", "sscc"],
-  LOCATION_LABEL: ["location"],
-} as const;
+  LP_LABEL: [{ name: "lp" }, { name: "item" }, { name: "lot" }, { name: "expiry" }, { name: "sscc" }],
+  LOCATION_LABEL: [{ name: "location" }],
+  ITEM_LABEL: [{ name: "gtin" }, { name: "lot", optional: true }, { name: "expiry", optional: true }, { name: "serial", optional: true }],
+  GS1_CARTON_LABEL: [{ name: "sscc" }, { name: "shipToName" }, { name: "poNumber", optional: true }, { name: "shipToPostal", optional: true }],
+} as const satisfies Record<string, readonly TemplateField[]>;
 export type TemplateCode = keyof typeof TEMPLATES;
 
 export const JOB_STATUSES = ["QUEUED", "PRINTED", "FAILED"] as const;
@@ -52,7 +60,7 @@ export interface NewPrinter {
   deviceType: DeviceType;
   dpi: number;
   host: string;
-  /** Omitted for ZPL_II, which defaults to raw TCP 9100. */
+  /** Omitted to use the default: raw TCP 9100 for ZPL_II and PCL_6, IPP 631 for PDF_IPP. */
   port?: number;
   queueCode: string;
   failoverRank: number;

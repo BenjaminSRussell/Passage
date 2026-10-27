@@ -1,0 +1,82 @@
+/* Device layout (§6.32.6, §6.32.20): 320 px screens and up, text never below 16 px, and a
+   large-target mode for gloved hands. App.tsx sets --font-base and --target from
+   domain/layout.ts, so the numbers live in one tested place. Logical properties keep the
+   layout right for right-to-left locales without separate rules. */
+
+:root {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: #1a1a1a;
+  background: #ffffff;
+}
+
+body {
+  margin: 0;
+}
+
+.app {
+  box-sizing: border-box;
+  min-inline-size: 320px;
+  max-inline-size: 640px;
+  margin-inline: auto;
+  padding: 12px;
+  font-size: var(--font-base, 18px);
+}
+
+.app__header,
+.app__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.app__header h1 {
+  margin-block: 8px;
+  font-size: 1.25em;
+  text-transform: capitalize;
+}
+
+.app__status {
+  font-size: max(16px, 0.9em);
+}
+
+.app__prompt {
+  font-size: 1.2em;
+  font-weight: 600;
+}
+
+.app__step label {
+  display: block;
+  margin-block-end: 4px;
+}
+
+.app__step input {
+  box-sizing: border-box;
+  inline-size: 100%;
+  min-block-size: var(--target, 48px);
+  padding: 8px;
+  font-size: 1.1em;
+}
+
+.app__button {
+  min-inline-size: var(--target, 48px);
+  min-block-size: var(--target, 48px);
+  margin-block-start: 8px;
+  margin-inline-end: 8px;
+  padding: 8px 16px;
+  font-size: 1em;
+}
+
+.app__button--secondary {
+  background: #eeeeee;
+}
+
+.app__alert {
+  font-weight: 600;
+  color: #8a1c1c;
+}
+
+.app__message {
+  font-size: 1em;
+}

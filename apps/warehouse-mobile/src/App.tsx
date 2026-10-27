@@ -1,6 +1,23 @@
-import { useRef, useState, type KeyboardEvent } from "react";
-import { checkScan, classifyScan, type ScanClass } from "../../web/src/modules/mobile-flows/domain/gs1";
-import { type ApplyOutcome, OfflineQueue, type QueuedTx, type ReplaySummary } from "../../web/src/modules/mobile-flows/domain/offlineQueue";
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import "./app.css";
+import { CONFIRM_WORK_LINE, confirmationPayload, RECEIVE_PUTAWAY_FLOW } from "../../web/src/modules/mobile-flows/domain/coreFlows";
+import type { FlowDraft } from "../../web/src/modules/mobile-flows/domain/flowGraph";
+import { goBack, startFlow, submitStep, type RunnerResult, type RunnerState } from "../../web/src/modules/mobile-flows/domain/flowRunner";
+import { CLASS_LABEL } from "../../web/src/modules/mobile-flows/domain/gs1";
+import { fontSizePx, targetSizePx, textDirection } from "../../web/src/modules/mobile-flows/domain/layout";
+import { type ApplyOutcome, DEFAULT_LIMITS, OfflineQueue, type QueuedTx } from "../../web/src/modules/mobile-flows/domain/offlineQueue";
+import {
+  AesGcmSealer,
+  IndexedDbStore,
+  loadOrCreateDeviceKey,
+  loadQueue,
+  saveQueue,
+  type KeyValueStore,
+  type SealCipher,
+} from "../../web/src/modules/mobile-flows/domain/offlineStore";
+import { listenForScans } from "../../web/src/modules/mobile-flows/domain/scanBridge";
+import type { ScanSource } from "../../web/src/modules/mobile-flows/domain/scanRouting";
+import { appendTiming, type StepTiming } from "../../web/src/modules/mobile-flows/domain/telemetry";
 
 const REPLAY_URL = "/api/v1/mobile/offline:replay";
 
@@ -9,7 +26,7 @@ async function applyOne(tx: QueuedTx): Promise<ApplyOutcome> {
   const res = await fetch(REPLAY_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", "Idempotency-Key": tx.idempotencyKey },
-    body: JSON.stringify({ idempotencyKey: tx.idempotencyKey, command: tx.command, payload: tx.payload }),
+    body: JSON.stringify({ idempotencyKey: tx.idempotencyKey, command: tx.command, payload: tx.payload, capturedAt: tx.capturedAt }),
   });
   if (res.ok) return { status: "APPLIED" };
   if (res.status === 409) return { status: "CONFLICT", reason: "conflict reported by the server" };
@@ -17,68 +34,259 @@ async function applyOne(tx: QueuedTx): Promise<ApplyOutcome> {
   return { status: "REJECTED", reason: `rejected with ${res.status}` };
 }
 
-/** One scan step: one input per screen, Enter or scan advances (§6.32.6). */
-export function App({ deviceId }: { deviceId: string }) {
-  const [queue] = useState(() => new OfflineQueue(deviceId));
-  const [expected] = useState<ScanClass>("LP");
-  const [value, setValue] = useState("");
-  const [notice, setNotice] = useState("Scan the LP.");
-  const [, bump] = useState(0);
-  const input = useRef<HTMLInputElement>(null);
+interface DeviceStorage {
+  store: KeyValueStore<string>;
+  cipher: SealCipher;
+}
 
-  function onScan(e: KeyboardEvent<HTMLInputElement>) {
-    if (e.key !== "Enter") return;
-    e.preventDefault();
-    const raw = value.trim();
-    setValue("");
-    if (raw === "") return;
-    // Scans are GS1 when they carry a symbology identifier or start with a known AI on a step expecting GS1.
-    const classified = classifyScan(raw, { expectGs1: true });
-    // A label that fails GS1 parsing (MOB-0102..0104) is reported before a class mismatch (MOB-0101).
-    const verdict = checkScan(expected, classified);
-    if (verdict) {
-      setNotice(`${verdict.code} ${verdict.message}`);
-      return;
-    }
+interface Notice {
+  tone: "error" | "info";
+  text: string;
+}
+
+/** A scan that arrived while no scan step had focus (AC-32.7): kept on the device for support. */
+interface IgnoredScan {
+  at: number;
+  source: ScanSource;
+  stepId: string | null;
+  reason: string;
+}
+
+function readFlag(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === "true";
+  } catch {
+    return false;
+  }
+}
+
+export interface AppProps {
+  deviceId: string;
+  userId: string;
+  flow?: FlowDraft;
+}
+
+/**
+ * Device shell for one flow (FR-32.1, FR-32.4). The shared runner decides every step: one input
+ * per screen, Enter or a hardware scan advances, Back returns one step (§6.32.6). A finished
+ * flow is queued as ConfirmWorkLine in the offline queue, which is sealed with the device key
+ * in IndexedDB after every change (FR-32.5) and replayed in order on Sync (BR-32.3).
+ */
+export function App({ deviceId, userId, flow = RECEIVE_PUTAWAY_FLOW }: AppProps) {
+  const [storage, setStorage] = useState<DeviceStorage | null>(null);
+  const [queue, setQueue] = useState<OfflineQueue | null>(null);
+  const [runner, setRunner] = useState<RunnerState | null>(null);
+  const [timings, setTimings] = useState<StepTiming[]>([]);
+  const [ignored, setIgnored] = useState<IgnoredScan[]>([]);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const [fatal, setFatal] = useState<string | null>(null);
+  const [typed, setTyped] = useState("");
+  const [syncing, setSyncing] = useState(false);
+  const [, bump] = useState(0);
+  const onScanRef = useRef<(raw: string, source: ScanSource) => void>(() => undefined);
+
+  // Open the sealed queue and the device key once per device.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const key = await loadOrCreateDeviceKey(new IndexedDbStore<CryptoKey>(), crypto.subtle);
+      const cipher = new AesGcmSealer(crypto.subtle, key);
+      const store = new IndexedDbStore<string>();
+      const loaded = await loadQueue(store, cipher, deviceId, DEFAULT_LIMITS, Date.now);
+      if (cancelled) return;
+      const started = startFlow(flow, Date.now());
+      if (!started.ok) {
+        setFatal(started.issues.map((i) => `${i.code} ${i.message}`).join("; "));
+        return;
+      }
+      setStorage({ store, cipher });
+      setQueue(loaded);
+      setRunner(started.state);
+    })().catch((e: unknown) => {
+      if (!cancelled) setFatal(e instanceof Error ? `Device storage could not be opened: ${e.message}` : "Device storage could not be opened.");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [deviceId, flow]);
+
+  // Hardware scans forwarded by the native shell's intent bridge (FR-32.10).
+  useEffect(
+    () =>
+      listenForScans(window, (r) => {
+        if (r.ok) onScanRef.current(r.raw, r.source);
+        else setNotice({ tone: "error", text: `Scanner: ${r.reason}` });
+      }),
+    [],
+  );
+
+  async function persist(q: OfflineQueue) {
+    if (storage) await saveQueue(storage.store, storage.cipher, q);
+  }
+
+  function restart() {
+    const started = startFlow(flow, Date.now());
+    if (started.ok) setRunner(started.state);
+  }
+
+  async function queueConfirmation(done: RunnerState) {
+    if (!queue) return;
     try {
-      queue.enqueue("ConfirmWorkLine", { scan: raw, fields: classified.gs1?.fields ?? { plain: raw } });
-      setNotice(`Queued. ${queue.pending().length} waiting to sync.`);
-    } catch (err) {
-      setNotice((err as Error).message);
+      queue.enqueue(CONFIRM_WORK_LINE, confirmationPayload(done));
+      await persist(queue);
+      restart();
+      setNotice({ tone: "info", text: "Confirmation queued." });
+    } catch (e) {
+      // MOB-0106: the queue is full or too old; the worker must reconnect and sync first.
+      setNotice({ tone: "error", text: e instanceof Error ? e.message : "The confirmation could not be queued." });
     }
     bump((n) => n + 1);
-    input.current?.focus();
+  }
+
+  function apply(result: RunnerResult, source?: ScanSource) {
+    if (!result.ok && result.ignored) {
+      const entry: IgnoredScan = { at: Date.now(), source: source ?? "KEYBOARD_WEDGE", stepId: result.state.stepId, reason: result.message };
+      console.info("scan ignored", entry);
+      setIgnored((log) => [...log.slice(-49), entry]);
+      return;
+    }
+    const t = result.timing;
+    if (t) {
+      setTimings((log) => {
+        const next = appendTiming(log, t, Date.now());
+        return "log" in next ? next.log : log;
+      });
+    }
+    if (!result.ok) {
+      setNotice({ tone: "error", text: result.code ? `${result.code} ${result.message}` : result.message });
+      return;
+    }
+    setNotice(null);
+    setRunner(result.state);
+    if (result.finished) void queueConfirmation(result.state);
+  }
+
+  onScanRef.current = (raw, source) => {
+    if (runner) apply(submitStep(flow, runner, { kind: "scan", raw, source }, { deviceId, userId }, Date.now()), source);
+  };
+
+  function onKeyboardScan(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const value = typed.trim();
+    setTyped("");
+    if (value) onScanRef.current(value, "KEYBOARD_WEDGE");
+  }
+
+  function onValue(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (runner) apply(submitStep(flow, runner, { kind: "value", value: typed }, { deviceId, userId }, Date.now()));
+    setTyped("");
+  }
+
+  function onOutcome(outcome: string) {
+    if (runner) apply(submitStep(flow, runner, { kind: "value", value: outcome }, { deviceId, userId }, Date.now()));
+  }
+
+  function onConfirm() {
+    if (runner) apply(submitStep(flow, runner, { kind: "confirm" }, { deviceId, userId }, Date.now()));
+  }
+
+  function onBack() {
+    setRunner((r) => (r ? goBack(r, Date.now()) : r));
+    setNotice(null);
   }
 
   async function onSync() {
-    // replay() never throws: transport failures stop the run and leave the rest PENDING.
-    const summary: ReplaySummary = await queue.replay(applyOne);
-    setNotice(
-      summary.stoppedBecause === "transport"
-        ? "Offline: sync paused, will retry."
-        : `Synced ${summary.applied}; ${summary.pending} pending (${summary.stoppedBecause}).`,
-    );
-    bump((n) => n + 1);
+    if (!queue) return;
+    setSyncing(true);
+    try {
+      // replay() never throws on transport errors: they stop the run and leave the rest PENDING.
+      const summary = await queue.replay(applyOne);
+      queue.prune();
+      await persist(queue);
+      setNotice(
+        summary.stoppedBecause === "transport"
+          ? { tone: "error", text: "Offline: sync paused, it will retry." }
+          : { tone: summary.stoppedBecause === "drained" ? "info" : "error", text: `Synced ${summary.applied}; ${summary.pending} waiting (${summary.stoppedBecause}).` },
+      );
+    } catch (e) {
+      setNotice({ tone: "error", text: e instanceof Error ? e.message : "Sync failed." });
+    } finally {
+      setSyncing(false);
+      bump((n) => n + 1);
+    }
   }
 
+  const step = runner?.stepId ? flow.steps.find((s) => s.id === runner.stepId) : undefined;
+  const waiting = queue ? queue.snapshot().filter((t) => t.replayStatus !== "APPLIED" && !t.resolved).length : 0;
+  const largeTargets = readFlag("passage.largeTargets");
+  const layout = { "--font-base": `${fontSizePx(18, largeTargets)}px`, "--target": `${targetSizePx(largeTargets)}px` } as CSSProperties;
+
   return (
-    <main style={{ fontSize: 18, padding: 16, maxWidth: 480, margin: "0 auto" }}>
-      <h1 style={{ fontSize: 22 }}>Receive / put-away</h1>
-      <p role="status" aria-live="polite">{notice}</p>
-      <label htmlFor="scan">Scan</label>
-      <input
-        id="scan"
-        ref={input}
-        autoFocus
-        autoComplete="off"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={onScan}
-        style={{ fontSize: 20, width: "100%", minHeight: 48 }}
-      />
-      <button type="button" onClick={onSync} style={{ fontSize: 18, minHeight: 48, marginTop: 16, width: "100%" }}>
-        Sync {queue.pending().length} queued
-      </button>
+    <main className="app" dir={textDirection(navigator.language)} style={layout}>
+      <header className="app__header">
+        <h1>{flow.code.replace(/_/g, " ").toLowerCase()}</h1>
+        <span className="app__status">
+          {waiting} queued, {DEFAULT_LIMITS.maxTx - waiting} left
+        </span>
+      </header>
+
+      {fatal ? (
+        <p role="alert" className="app__alert">
+          {fatal}
+        </p>
+      ) : null}
+      {!queue && !fatal ? <p>Opening device storage…</p> : null}
+
+      {queue && runner && step ? (
+        <section className="app__step" aria-label="Current step">
+          <p className="app__prompt">{step.prompt}</p>
+          {step.type === "scan" ? (
+            <form onSubmit={onKeyboardScan}>
+              <label htmlFor="scan-input">Scan {(step.expectedScan ?? ["ANY"]).map((c) => CLASS_LABEL[c]).join(" or ")}</label>
+              <input id="scan-input" autoFocus autoComplete="off" value={typed} onChange={(e) => setTyped(e.target.value)} />
+            </form>
+          ) : null}
+          {step.type === "input" || step.type === "select" ? (
+            <form onSubmit={onValue}>
+              <label htmlFor="value-input">Value</label>
+              <input id="value-input" autoFocus autoComplete="off" value={typed} onChange={(e) => setTyped(e.target.value)} />
+            </form>
+          ) : null}
+          {step.type === "branch"
+            ? Object.keys(step.next).map((outcome) => (
+                <button key={outcome} type="button" className="app__button" onClick={() => onOutcome(outcome)}>
+                  {outcome}
+                </button>
+              ))
+            : null}
+          {step.type === "confirm" || step.type === "display" || step.type === "call" ? (
+            <button type="button" className="app__button" onClick={onConfirm}>
+              Confirm
+            </button>
+          ) : null}
+          <button type="button" className="app__button app__button--secondary" onClick={onBack} disabled={runner.history.length === 0}>
+            Back
+          </button>
+        </section>
+      ) : null}
+
+      {notice ? (
+        <p role={notice.tone === "error" ? "alert" : "status"} className={notice.tone === "error" ? "app__alert" : "app__message"}>
+          {notice.text}
+        </p>
+      ) : null}
+
+      {queue ? (
+        <footer className="app__footer">
+          <button type="button" className="app__button" onClick={onSync} disabled={syncing}>
+            {syncing ? "Syncing…" : `Sync ${waiting} queued`}
+          </button>
+          <span className="app__status">
+            {timings.length} steps timed{ignored.length > 0 ? `, ${ignored.length} scans ignored` : ""}
+          </span>
+        </footer>
+      ) : null}
     </main>
   );
 }

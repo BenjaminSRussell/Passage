@@ -51,6 +51,10 @@ func (a *API) purgeJobs(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, purgeResult{Deleted: deleted, Cutoff: cutoff, Days: a.retentionDays})
 }
 
+// RecordPurged adds rows removed by the scheduled purge (internal/jobs) to
+// print_jobs_purged_total, so on-demand and scheduled purges share one counter.
+func (a *API) RecordPurged(n int64) { a.purged.Add(n) }
+
 // Metrics serves the Prometheus text format on the admin port. The print failure alert
 // (§6.32.10, print failures > 5 per 15 min) reads print_jobs_failed_total.
 func (a *API) Metrics() http.Handler {
