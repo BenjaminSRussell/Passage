@@ -785,3 +785,115 @@ export function moveDownPayment(id: string, version: number, command: DownPaymen
     body: JSON.stringify(body),
   });
 }
+
+
+// ---- camt.053 bank statements (FR-30.5) and the deductions workbench (FR-30.17, BR-30.12) ----
+
+export interface BankStatementImportInput {
+  legalEntityId: string;
+  content: string;
+}
+
+export interface BankStatementBatch {
+  id: string;
+  legalEntityId: string;
+  fileSha256: string;
+  statementCount: number;
+  paymentCount: number;
+  duplicateCount: number;
+  skippedCount: number;
+  importedAt?: string;
+  payments?: Payment[];
+}
+
+export function listBankStatementImports(signal?: AbortSignal): Promise<BankStatementBatch[]> {
+  return items<BankStatementBatch>("/bank-statements/imports", signal);
+}
+
+/** POST /bank-statements/imports - a repeated file is 409 AR-0003; a malformed one 400 AR-0004 with the line. */
+export function importBankStatement(input: BankStatementImportInput): Promise<BankStatementBatch> {
+  return send<BankStatementBatch>("/bank-statements/imports", { method: "POST", body: JSON.stringify(input) });
+}
+
+export const DEDUCTION_TYPES = ["PROMO", "PRICE", "SHORT_SHIP", "DAMAGE", "UNKNOWN"] as const;
+export type DeductionType = (typeof DEDUCTION_TYPES)[number];
+export const DEDUCTION_STATUSES = ["OPEN", "MATCHED", "APPROVED", "DENIED", "SPLIT", "WRITTEN_OFF"] as const;
+export type DeductionStatus = (typeof DEDUCTION_STATUSES)[number];
+export const CLAIM_TYPES = ["REBATE_ACCRUAL", "PROMOTION_FUND", "CHARGEBACK"] as const;
+export type ClaimType = (typeof CLAIM_TYPES)[number];
+export const DENIAL_REASONS = ["NOT_AUTHORIZED", "EXPIRED", "DUPLICATE"] as const;
+export type DenialReason = (typeof DENIAL_REASONS)[number];
+
+export interface Deduction {
+  id: string;
+  legalEntityId: string;
+  customerId: string;
+  openItemId: string;
+  documentNumber: string;
+  paymentId?: string | null;
+  parentId?: string | null;
+  type: DeductionType;
+  reasonCode: string;
+  currency: string;
+  amount: string;
+  status: DeductionStatus;
+  claimType?: ClaimType | null;
+  claimRef?: string | null;
+  claimRemaining?: string | null;
+  denialReason?: DenialReason | null;
+  decisionNote?: string | null;
+  rebillItemId?: string | null;
+  createdAt: string;
+  resolvedAt?: string | null;
+  version: number;
+  children?: Deduction[];
+}
+
+export interface DeductionInput {
+  legalEntityId: string;
+  openItemId: string;
+  paymentId: string | null;
+  type: DeductionType;
+  reasonCode: string;
+  amount: string;
+}
+
+export interface DeductionFilter {
+  status?: DeductionStatus | "";
+  type?: DeductionType | "";
+  customer?: string;
+  limit?: number;
+}
+
+export function listDeductions(filter: DeductionFilter = {}, signal?: AbortSignal): Promise<Deduction[]> {
+  return items<Deduction>(
+    `/deductions${query({ status: filter.status, type: filter.type, customer: filter.customer, limit: filter.limit })}`,
+    signal,
+  );
+}
+
+export function getDeduction(id: string, signal?: AbortSignal): Promise<Deduction> {
+  return send<Deduction>(`/deductions/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** POST /deductions - moves the amount off the short-paid item; the key makes a retry return the same deduction. */
+export function createDeduction(input: DeductionInput, key: string = newKey()): Promise<Deduction> {
+  return send<Deduction>("/deductions", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(input) });
+}
+
+export type DeductionAction =
+  | { action: "match"; claimType: ClaimType; claimRef: string; claimRemaining: string }
+  | { action: "approve"; note?: string }
+  | { action: "deny"; reason: DenialReason; note?: string }
+  | { action: "split"; parts: string[] }
+  | { action: "write-off"; note?: string };
+
+/** POST /deductions/{id}:match|:approve|:deny|:split|:write-off with If-Match; 412 when it changed. */
+export function moveDeduction(id: string, version: number, command: DeductionAction): Promise<Deduction> {
+  const { action, ...body } = command;
+  return send<Deduction>(`/deductions/${encodeURIComponent(id)}:${action}`, {
+    method: "POST",
+    headers: { "If-Match": `"${version}"` },
+    body: JSON.stringify(body),
+  });
+}

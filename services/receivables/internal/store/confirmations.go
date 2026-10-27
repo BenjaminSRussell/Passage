@@ -210,15 +210,21 @@ func (s *Postgres) CreateConfirmationRun(ctx context.Context, in ConfirmationRun
 
 // asOfBalances is each customer's balance per currency as of the key date: every
 // item documented on or before it, less the settlements and down payment
-// clearings made on or before it. Later settlements are added back, so a run
-// dated in the past reports the balance the customer had on that day.
+// clearings made on or before it, and less the deductions taken off it that
+// were approved, written off, denied (the re-bill item carries the amount on)
+// or split (the children carry it on) by then; a deduction still being worked
+// is owed. Later movements are added back, so a run dated in the past reports
+// the balance the customer had on that day.
 // The balance is in the item currency; open_item has no entity-currency amount yet.
 func asOfBalances(ctx context.Context, tx pgx.Tx, legalEntityID, asOf string) ([]domain.CustomerBalance, error) {
 	rows, err := tx.Query(ctx, `select oi.customer_id::text, oi.currency, sum(oi.amount
 			- coalesce((select sum(st.settled_amount + st.cash_discount_taken + st.write_off_amount) from settlement st
 				where st.tenant_id = oi.tenant_id and st.open_item_id = oi.id and st.settled_at::date <= $2::date), 0)
 			- coalesce((select sum(cl.amount) from down_payment_clearing cl
-				where cl.tenant_id = oi.tenant_id and cl.open_item_id = oi.id and cl.cleared_at::date <= $2::date), 0))::text
+				where cl.tenant_id = oi.tenant_id and cl.open_item_id = oi.id and cl.cleared_at::date <= $2::date), 0)
+			- coalesce((select coalesce(sum(dd.amount) filter (where dd.parent_id is null), 0)
+				- coalesce(sum(dd.amount) filter (where dd.resolved_at is null or dd.resolved_at::date > $2::date), 0)
+				from deduction dd where dd.tenant_id = oi.tenant_id and dd.open_item_id = oi.id and dd.created_at::date <= $2::date), 0))::text
 		from open_item oi
 		where oi.legal_entity_id = $1 and oi.document_date <= $2::date and oi.status <> 'REVERSED'
 		group by oi.customer_id, oi.currency`, legalEntityID, asOf)

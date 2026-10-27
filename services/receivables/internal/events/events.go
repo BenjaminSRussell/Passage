@@ -175,3 +175,45 @@ type DownPaymentData struct {
 	OpenItemID    *string          `json:"open_item_id"`
 	Postings      []domain.Posting `json:"postings"`
 }
+
+// Deductions workbench (FR-30.17). A camt.053 import publishes payment.received.v1
+// with source CAMT053; it has no event of its own.
+var (
+	DeductionOpened   = events.Type(Context, "deduction", "opened", 1)
+	DeductionResolved = events.Type(Context, "deduction", "resolved", 1)
+)
+
+// DeductionOpenedData is the payload of dev.passage.receivables.deduction.opened.v1:
+// the amount moved off the short-paid open item into the workbench.
+type DeductionOpenedData struct {
+	DeductionID   string          `json:"deduction_id"`
+	LegalEntityID string          `json:"legal_entity_id"`
+	CustomerID    string          `json:"customer_id"`
+	OpenItemID    string          `json:"open_item_id"`
+	PaymentID     *string         `json:"payment_id"`
+	ParentID      *string         `json:"parent_id"`
+	Type          string          `json:"type"`
+	ReasonCode    string          `json:"reason_code"`
+	Amount        decimal.Decimal `json:"amount"`
+	Currency      string          `json:"currency"`
+}
+
+// DeductionResolvedData is the payload of dev.passage.receivables.deduction.resolved.v1.
+// Resolution is APPROVED (billing issues the credit note against the claim, which
+// consumes the fund or accrual), DENIED (RebillItemID is the debit item re-billed
+// to the customer), WRITTEN_OFF (Postings carry Dr 6110 / Cr 1200) or SPLIT
+// (ChildIDs are the new OPEN deductions).
+type DeductionResolvedData struct {
+	DeductionID   string           `json:"deduction_id"`
+	LegalEntityID string           `json:"legal_entity_id"`
+	CustomerID    string           `json:"customer_id"`
+	Resolution    string           `json:"resolution"`
+	Amount        decimal.Decimal  `json:"amount"`
+	Currency      string           `json:"currency"`
+	ClaimType     *string          `json:"claim_type"`
+	ClaimRef      *string          `json:"claim_ref"`
+	DenialReason  *string          `json:"denial_reason"`
+	RebillItemID  *string          `json:"rebill_item_id"`
+	ChildIDs      []string         `json:"child_ids"`
+	Postings      []domain.Posting `json:"postings"`
+}

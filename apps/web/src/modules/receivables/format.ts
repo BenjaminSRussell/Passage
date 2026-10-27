@@ -5,6 +5,10 @@ import type { BadgeTone } from "../../shell/ui";
 import type {
   CaseCategory,
   CasePriority,
+  ClaimType,
+  DeductionStatus,
+  DeductionType,
+  DenialReason,
   DisputeStatus,
   DownPaymentKind,
   DownPaymentStatus,
@@ -198,3 +202,48 @@ export const DOWN_PAYMENT_TONES: Record<DownPaymentStatus, BadgeTone> = {
   RELEASED: "success",
   CANCELLED: "neutral",
 };
+
+export const DEDUCTION_TYPE_LABELS: Record<DeductionType, string> = {
+  PROMO: "Promotion",
+  PRICE: "Price",
+  SHORT_SHIP: "Short shipment",
+  DAMAGE: "Damage",
+  UNKNOWN: "Unknown",
+};
+
+export const DEDUCTION_LABELS: Record<DeductionStatus, string> = {
+  OPEN: "Open",
+  MATCHED: "Matched",
+  APPROVED: "Approved",
+  DENIED: "Denied",
+  SPLIT: "Split",
+  WRITTEN_OFF: "Written off",
+};
+
+export const DEDUCTION_TONES: Record<DeductionStatus, BadgeTone> = {
+  OPEN: "warning",
+  MATCHED: "info",
+  APPROVED: "success",
+  DENIED: "danger",
+  SPLIT: "neutral",
+  WRITTEN_OFF: "neutral",
+};
+
+export const CLAIM_TYPE_LABELS: Record<ClaimType, string> = {
+  REBATE_ACCRUAL: "Rebate accrual",
+  PROMOTION_FUND: "Promotion fund",
+  CHARGEBACK: "Chargeback",
+};
+
+export const DENIAL_LABELS: Record<DenialReason, string> = {
+  NOT_AUTHORIZED: "Not authorized",
+  EXPIRED: "Expired",
+  DUPLICATE: "Duplicate",
+};
+
+/** Whole days from an ISO timestamp to now: a deduction's age, aged apart from invoices. */
+export function ageDays(iso: string, now: Date = new Date()): number {
+  const start = Date.parse(iso);
+  if (Number.isNaN(start)) return 0;
+  return Math.max(0, Math.floor((now.getTime() - start) / 86_400_000));
+}

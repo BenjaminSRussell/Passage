@@ -36,6 +36,9 @@ const columns: DataTableColumn<OpenItem>[] = [
           <Link className={buttonClassName("ghost", "sm")} to={`/receivables/promises/new?${collectionParams(row)}`} aria-label={`Promise for ${row.documentNumber}`}>
             Promise
           </Link>
+          <Link className={buttonClassName("ghost", "sm")} to={`/receivables/deductions/new?${collectionParams(row)}`} aria-label={`Deduction on ${row.documentNumber}`}>
+            Deduction
+          </Link>
         </span>
       ) : null,
   },

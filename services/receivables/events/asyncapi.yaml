@@ -48,6 +48,13 @@ channels:
         $ref: "#/components/messages/DownPaymentCleared"
       downPaymentReleased:
         $ref: "#/components/messages/DownPaymentReleased"
+  deductionEvents:
+    address: passage.receivables.deduction
+    messages:
+      deductionOpened:
+        $ref: "#/components/messages/DeductionOpened"
+      deductionResolved:
+        $ref: "#/components/messages/DeductionResolved"
 operations:
   publishDisputeOpened:
     action: send
@@ -104,6 +111,16 @@ operations:
     channel: { $ref: "#/channels/downPaymentEvents" }
     messages:
       - { $ref: "#/channels/downPaymentEvents/messages/downPaymentReleased" }
+  publishDeductionOpened:
+    action: send
+    channel: { $ref: "#/channels/deductionEvents" }
+    messages:
+      - { $ref: "#/channels/deductionEvents/messages/deductionOpened" }
+  publishDeductionResolved:
+    action: send
+    channel: { $ref: "#/channels/deductionEvents" }
+    messages:
+      - { $ref: "#/channels/deductionEvents/messages/deductionResolved" }
 components:
   messages:
     PaymentReceived:
@@ -167,6 +184,23 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/DownPaymentData"
+    DeductionOpened:
+      name: dev.passage.receivables.deduction.opened.v1
+      summary: >-
+        A deduction moved off a short-paid open item into the workbench, or a split created it (parent_id) (FR-30.17).
+        Consumers: collections, analytics.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/DeductionOpenedData"
+    DeductionResolved:
+      name: dev.passage.receivables.deduction.resolved.v1
+      summary: >-
+        A deduction was approved (billing issues the credit note against the claim; pricing consumes the fund or
+        accrual), denied (re-billed as rebill_item_id), written off (postings Dr 6110 / Cr 1200) or split (child_ids)
+        (BR-30.12).
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/DeductionResolvedData"
   schemas:
     CaseOpenedData:
       type: object
@@ -313,3 +347,42 @@ components:
               write_off: { type: string }
         residual: { type: string, description: "amount placed on account" }
         status: { type: string, enum: [APPLIED, ON_ACCOUNT] }
+    DeductionOpenedData:
+      type: object
+      required: [deduction_id, legal_entity_id, customer_id, open_item_id, payment_id, parent_id, type, reason_code, amount, currency]
+      properties:
+        deduction_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        customer_id: { type: string, format: uuid }
+        open_item_id: { type: string, format: uuid, description: "the short-paid item the amount moved off" }
+        payment_id: { type: [string, "null"], format: uuid }
+        parent_id: { type: [string, "null"], format: uuid, description: "the split parent, for a child" }
+        type: { type: string, enum: [PROMO, PRICE, SHORT_SHIP, DAMAGE, UNKNOWN] }
+        reason_code: { type: string }
+        amount: { type: string, description: "decimal string" }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+    DeductionResolvedData:
+      type: object
+      required: [deduction_id, legal_entity_id, customer_id, resolution, amount, currency, claim_type, claim_ref, denial_reason, rebill_item_id, child_ids, postings]
+      properties:
+        deduction_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        customer_id: { type: string, format: uuid }
+        resolution: { type: string, enum: [APPROVED, DENIED, WRITTEN_OFF, SPLIT] }
+        amount: { type: string, description: "decimal string; the whole deduction" }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        claim_type: { type: [string, "null"], enum: [REBATE_ACCRUAL, PROMOTION_FUND, CHARGEBACK, null] }
+        claim_ref: { type: [string, "null"] }
+        denial_reason: { type: [string, "null"], enum: [NOT_AUTHORIZED, EXPIRED, DUPLICATE, null] }
+        rebill_item_id: { type: [string, "null"], format: uuid, description: "the DEDUCTION debit item a denial created" }
+        child_ids: { type: array, items: { type: string, format: uuid }, description: "the OPEN deductions a split created" }
+        postings:
+          type: array
+          description: Ledger lines (write-off only); the ledger client posts them once it exists (NOT-IMPLEMENTED.md).
+          items:
+            type: object
+            required: [account, debit, credit]
+            properties:
+              account: { type: string, description: "6110 deductions written off, 1200 receivables" }
+              debit: { type: string, description: "decimal string" }
+              credit: { type: string, description: "decimal string" }

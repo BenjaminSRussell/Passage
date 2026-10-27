@@ -72,6 +72,8 @@ func (a *API) Register(r chi.Router) {
 		a.caseRoutes(r)
 		a.confirmationRoutes(r)
 		a.downPaymentRoutes(r)
+		a.bankStatementRoutes(r)
+		a.deductionRoutes(r)
 		r.With(authz.RequireDuty(dutyImport)).Post("/lockbox/imports", a.importLockbox)
 		r.With(authz.RequireDuty(dutyView)).Get("/lockbox/imports", a.listLockboxBatches)
 		r.With(authz.RequireDuty(dutyView)).Get("/worklist", a.worklist)

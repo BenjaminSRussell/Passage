@@ -171,6 +171,16 @@ type Store interface {
 	CancelDownPayment(ctx context.Context, id string, version int) (DownPayment, error)
 	ClearDownPayment(ctx context.Context, id string, version int, openItemID string, amount *decimal.Decimal) (DownPayment, error)
 	ReleaseDownPayment(ctx context.Context, id string, version int) (DownPayment, error)
+	ImportBankStatement(ctx context.Context, in BankStatementImport) (BankStatementBatch, error)
+	ListBankStatementImports(ctx context.Context, limit int) ([]BankStatementBatch, error)
+	CreateDeduction(ctx context.Context, in Deduction, idempotencyKey string) (Deduction, error)
+	ListDeductions(ctx context.Context, f DeductionFilter, limit int) ([]Deduction, error)
+	GetDeduction(ctx context.Context, id string) (Deduction, error)
+	MatchDeduction(ctx context.Context, id string, version int, claim ClaimMatch) (Deduction, error)
+	ApproveDeduction(ctx context.Context, id string, version int, note *string) (Deduction, error)
+	DenyDeduction(ctx context.Context, id string, version int, reason string, note *string) (Deduction, error)
+	SplitDeduction(ctx context.Context, id string, version int, parts []decimal.Decimal) (Deduction, error)
+	WriteOffDeduction(ctx context.Context, id string, version int, mayApprove bool, note *string) (Deduction, error)
 	Ping(ctx context.Context) error
 }
 

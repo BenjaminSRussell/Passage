@@ -1,13 +1,15 @@
 # passage-receivables
 
-Accounts receivable for Passage, wave 30 (PSG-30), slices 1 to 3. Slice 1 is
+Accounts receivable for Passage, wave 30 (PSG-30), slices 1 to 4. Slice 1 is
 the cash-application core: open items, aging, manual payments, the scored
 matcher (BR-30.1) and settlement validation (BR-30.4). Slice 2 adds BAI2 lockbox
 import (FR-30.3) and collections: the risk-ranked worklist (FR-30.6, FR-30.10),
 disputes and promises to pay (FR-30.9), dunning runs (FR-30.7, BR-30.2) and
 interest notes (FR-30.8, BR-30.5). Slice 3 adds minimal collection cases
 (FR-30.18), customer balance confirmations (FR-30.20, BR-30.13) and down
-payments and security deposits (FR-30.21, BR-30.14). Everything else in the wave is listed in
+payments and security deposits (FR-30.21, BR-30.14). Slice 4 adds camt.053 bank
+statement import (FR-30.5, BR-30.7) and the deductions workbench (FR-30.17,
+BR-30.12). Everything else in the wave is listed in
 [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 
 ## What it does now
@@ -17,6 +19,8 @@ payments and security deposits (FR-30.21, BR-30.14). Everything else in the wave
 - **Payments**: record a manual payment (`POST /payments`, idempotent), list them (`GET /payments?status=&customer=&limit=`), read one (`GET /payments/{id}`, ETag = version), score candidate settlements (`POST /payments/{id}:match`, changes nothing) and apply (`POST /payments/{id}:apply`, requires `If-Match`; an optional `Idempotency-Key` replays the first response).
 - **Apply rules**: settlements plus on-account residual equal the unapplied amount; every item is in the payment's legal entity and currency (no cross-currency settlement yet) and belongs to the payment's customer; an unidentified payment takes the customer of the items it settles; a cash discount needs the value date on or before the discount date and may not exceed the item's discount; write-off tolerance is the larger of 5.00 and 0.5% of the original item amount.
 - **Lockbox** (`POST /lockbox/imports`, duty ARImport; `GET /lockbox/imports`): a BAI2 file (records 01, 02, 03, 16 with S/V/D funds-type detail, 88, 49, 98, 99; trailer counts checked; first error named by line, AR-0004). Each 16 detail with a check credit type code (default 116, Item in Lockbox Deposit; a bank profile may name other credit codes 100-399) becomes one unidentified CHECK payment with source LOCKBOX, the customer reference as remittance, and `payment.received.v1`. The same file content twice is refused by SHA-256 (AR-0003); a check re-sent in another file is refused by (source, bank reference).
+- **Bank statements** (`POST /bank-statements/imports`, duty ARImport; `GET /bank-statements/imports`): an ISO 20022 camt.053 file (.001.02 to .001.08; the first malformed entry named by line, AR-0004). Each booked (`Sts` BOOK or absent), non-reversal CRDT entry becomes one unidentified WIRE payment with source CAMT053, `source_ref` = statement `Id` : `NtryRef` (or `AcctSvcrRef`), the debtor name as payer, the structured creditor reference (else the first unstructured line) as remittance, the value date (else the booking date), and `payment.received.v1`. Debits, pending entries and reversals are counted as skipped. The same file twice is refused by SHA-256 (AR-0003); an entry already imported from an overlapping statement is counted as a duplicate and not created again (BR-30.7). The clerk matches each payment with `:match`, as for lockbox payments.
+- **Deductions** (`POST /deductions`, `GET /deductions?status=&type=&customer=`, `GET /deductions/{id}`, `POST /deductions/{id}:match`, `:approve`, `:deny`, `:split`, `:write-off`; duty DeductionMaintain to change, ARView to read; every move needs `If-Match`): a deduction moves the unexplained part of a short payment off the short-paid item (locked NOWAIT; open, undisputed, at least the amount) with a type (PROMO, PRICE, SHORT_SHIP, DAMAGE, UNKNOWN) and the customer's reason, so it is aged in the workbench apart from invoices and never dunned (FR-30.17). OPEN → MATCHED (to a rebate accrual, promotion fund or chargeback claim; the whole deduction must fit the claim's remaining amount, AR-0014) → APPROVED; DENIED (with NOT_AUTHORIZED, EXPIRED or DUPLICATE) from OPEN or MATCHED re-bills the amount as a DEDUCTION debit open item due today; SPLIT from OPEN creates 2 to 20 OPEN children that sum to it; WRITTEN_OFF from OPEN or MATCHED within `deduction_write_off_limit` (50.00 USD, 45.00 EUR, zero elsewhere) or above it with ARWriteOffApprove (AR-0006), publishing Dr 6110 / Cr 1200 (BR-30.12). A deduction still being worked counts in the customer's balance-confirmation balance; an approved or written-off one does not.
 - **Worklist** (`GET /worklist?legalEntityId=&asOf=`): one row per customer and currency with total open, overdue, oldest days, open-amount-weighted days late, dunning level, open disputes, broken promises and a 0-100 risk score (overdue share 40, days late 20, dunning level 20, disputes 15, broken promises 5), riskiest first. The open amounts are summed in SQL, so the read is complete for any number of items.
 - **Disputes** (`POST /disputes`, `GET /disputes?status=active|<status>&customer=&openItem=`, `GET /disputes/{id}`, `POST /disputes/{id}:review`, `:resolve`; duty CollectionsMaintain to change): one active dispute per item, amount at most the open amount, SLA 120 hours. OPEN → UNDER_REVIEW → RESOLVED_CREDIT | RESOLVED_PAID | RESOLVED_WRITE_OFF, REJECTED from OPEN or UNDER_REVIEW (BR-30.6). While active the item carries `dispute_id` and is left out of dunning and interest.
 - **Promises to pay** (`POST /promises`, `GET /promises`): amount at most the open amount, date today or later; one holding promise per item. A promise holds until its date plus 2 days (BR-30.2); after that it counts as broken on the worklist and the item is dunnable again.
@@ -25,7 +29,7 @@ payments and security deposits (FR-30.21, BR-30.14). Everything else in the wave
 - **Collection cases** (`POST /cases`, `GET /cases?status=&category=&customer=`, `GET /cases/{id}`, `POST /cases/{id}:assign`, `:close`; duty CollectionsMaintain to change, ARView to read): category COLLECTION, DISPUTE or DEDUCTION with its SLA (72, 120, 240 hours), owner, priority, reason, an optional linked open item (same customer and legal entity; the case takes its currency) and an attached amount. `slaBreached` is computed on read (AR-0018). Assign and close need `If-Match`; a closed case cannot change.
 - **Balance confirmations** (`POST /balance-confirmations`, `GET /balance-confirmations`, `GET /balance-confirmations/{id}`, `GET /balance-confirmations/{id}/differences`, `POST /balance-confirmations/{id}:reply`; duty BalanceConfirmationRun to run and record, ARView to read): a run selects each customer and currency whose balance on the key date reaches the threshold (default 10,000.00, debit or credit), zero balances only with `includeZeroBalances`, optionally a sample of n ranked by a hash seeded with the `Idempotency-Key`. The balance on the key date is every item documented by then less the settlements and down payment clearings made by then, so later payments are added back. A reply is AGREED or DISAGREED (with the customer's balance); it is immutable, a repeat of the recorded reply returns it, and a DISAGREED reply opens a 120-hour DISPUTE case with reason BALANCE_DIFFERENCE and the customer's balance attached, in the same transaction (BR-30.13). The difference list holds every DISAGREED row with both balances, the difference and the case.
 - **Down payments and security deposits** (`POST /down-payments`, `GET /down-payments?customer=&status=&kind=`, `GET /down-payments/{id}`, `POST /down-payments/{id}:receive`, `:cancel` (ARPaymentPost), `:clear` (ARSettle), `:release` (ARRefund); all moves need `If-Match`): a request posts nothing; receipt records the received date and publishes Dr bank / Cr 2190 (down payment) or 2195 (deposit). `:clear` locks the item (NOWAIT), clears min(remaining, item open) or a smaller given amount (more is 422 AR-0017), lowers the item's open amount, records a clearing row and publishes Dr 2190 or 2195 / Cr 1200 (AC-30.15). A down payment clears invoices only; a deposit may offset invoice, fee and interest items. `:release` refunds what remains of a deposit (Dr 2195 / Cr bank). An unpaid request can be cancelled.
-- **Events** via the transactional outbox: `dev.passage.receivables.payment.received.v1`, `payment.applied.v1`, `dispute.opened.v1`, `dispute.resolved.v1`, `dunningletter.issued.v1` (the PRD's `dunning-letter.issued.v1`; the kernel type rule allows no hyphen), `case.opened.v1`, `case.closed.v1`, `confirmation.replied.v1` and `downpayment.received.v1`, `.cleared.v1`, `.released.v1` (one `downpayment` entity for both kinds; the postings ride on the event until the ledger client exists). See `events/asyncapi.yaml`.
+- **Events** via the transactional outbox: `dev.passage.receivables.payment.received.v1`, `payment.applied.v1`, `dispute.opened.v1`, `dispute.resolved.v1`, `dunningletter.issued.v1` (the PRD's `dunning-letter.issued.v1`; the kernel type rule allows no hyphen), `case.opened.v1`, `case.closed.v1`, `confirmation.replied.v1`, `downpayment.received.v1`, `.cleared.v1`, `.released.v1` (one `downpayment` entity for both kinds; the postings ride on the event until the ledger client exists), and `deduction.opened.v1` and `deduction.resolved.v1` (APPROVED, DENIED, WRITTEN_OFF with its postings, or SPLIT with the child ids). See `events/asyncapi.yaml`.
 
 The API contract is `api/openapi.yaml`. Every operation names its duty in
 `x-passage-duty`.
@@ -38,14 +42,16 @@ internal/domain/       pure rules: match.go (BR-30.1), settle.go (BR-30.4), agin
                        bai2.go (FR-30.3), dunning.go (BR-30.2), interest.go (BR-30.5),
                        collections.go (FR-30.9, BR-30.6), risk.go and worklist.go (FR-30.10),
                        cases.go (FR-30.18), confirmations.go (FR-30.20, BR-30.13),
-                       down_payments.go (FR-30.21, BR-30.14)
+                       down_payments.go (FR-30.21, BR-30.14), camt053.go (FR-30.5),
+                       deduction.go (FR-30.17, BR-30.12)
 internal/store/        pgx repositories, RLS via dbx.WithTenantTx, outbox writes
 internal/api/          HTTP handlers, DTOs, validation
 internal/events/       event types and payloads
 migrations/            0001 tables and RLS, 0002 outbox, 0003 idempotency_keys,
                        0004 dispute, promise_to_pay, dunning_run, dunning_letter, interest_note,
                        0005 lockbox_batch, 0006 collection_case, balance_confirmation_run,
-                       balance_confirmation, 0007 down_payment, down_payment_clearing
+                       balance_confirmation, 0007 down_payment, down_payment_clearing,
+                       0008 bank_statement_import, deduction
 api/openapi.yaml       REST contract
 events/asyncapi.yaml   event contract
 charts/receivables/    Helm chart (passage-receivables)
@@ -100,8 +106,8 @@ The `type` is `https://passage.dev/problems/<code>`.
 | `AR-0001` | 400 | Settlements plus residual must equal the payment amount, or the plan is invalid (other legal entity, currency or customer; discount not available or above terms) |
 | `AR-0002` | 409 | Open item is locked by another settlement (BR-30.7) |
 | `AR-0006` | 422 | Write-off exceeds tolerance |
-| `AR-0003` | 409 | Lockbox file already imported (same SHA-256) |
-| `AR-0004` | 400 | BAI2 file malformed; `detail` names the line |
+| `AR-0003` | 409 | Lockbox or bank statement file already imported (same SHA-256) |
+| `AR-0004` | 400 | BAI2 or camt.053 file malformed; `detail` names the line |
 | `AR-0007` | 409 | Dunning run must be REVIEWED before issue |
 | `AR-DUNNING-STATE` | 409 | Dunning run status does not allow the move |
 | `AR-DUNNING-RUN-NOT-FOUND` | 404 | Dunning run id unknown or unknown action |
@@ -121,6 +127,12 @@ The `type` is `https://passage.dev/problems/<code>`.
 | `AR-DOWN-PAYMENT-STATE` | 409 | The status does not allow the move, or the item is no longer open |
 | `AR-DOWN-PAYMENT-MISMATCH` | 400 | The item is another customer's, legal entity's or currency's, or of a type the kind cannot clear |
 | `AR-0017` | 422 | Clearing exceeds the remaining down payment or the item's open amount |
+| `AR-DEDUCTION-NOT-FOUND` | 404 | Deduction id unknown or unknown action |
+| `AR-DEDUCTION-STATE` | 409 | The deduction's status does not allow the move, or the item is not open |
+| `AR-DEDUCTION-MISMATCH` | 400 | The item is another legal entity's, or the payment is another legal entity's, currency's or customer's |
+| `AR-DEDUCTION-SPLIT` | 422 | Fewer than two parts, a part not above zero, or parts not summing to the deduction |
+| `AR-0014` | 422 | The deduction exceeds the claim's remaining amount; split or deny the remainder |
+| `AR-0006` | 403 | (deductions) Write-off above `deduction_write_off_limit` without ARWriteOffApprove |
 
 `Idempotency-Key` is enforced on create by storing the key on the payment row
 (unique per tenant). On apply the key and the response are stored in
@@ -130,16 +142,20 @@ retry replays the first response instead of failing with 412.
 ## Web
 
 `apps/web/src/modules/receivables/`: the AR workspace (aging by currency and
-bucket, payments waiting, active disputes), open items (with dispute and promise
-actions), payments, record payment, the payment page with match candidates and
-the apply plan; lockbox imports and the import form; the collections worklist;
+bucket, payments waiting, active disputes), open items (with dispute, promise and
+deduction actions), payments, record payment, the payment page with match candidates and
+the apply plan; lockbox imports and the import form; bank statement imports and
+the camt.053 import form with the payments it created; the collections worklist;
 disputes (list, open, detail with review and resolve); promises to pay (list,
 record); dunning runs (list, propose, detail with the letter preview, exclusions
 and review, issue, cancel); interest notes (list, calculate and post);
 collection cases (list, open, detail with assign and close); balance
 confirmations (runs, new run, run detail with reply recording, counts and the
 difference list); down payments and deposits (list, request, detail with
-receive, cancel, clear or offset, release, and the clearings).
+receive, cancel, clear or offset, release, and the clearings); the deductions
+workbench (list with status and type filters and the age of each, record from
+an open item, detail with match, approve, deny and re-bill, split, write-off
+with the approval limit, and the parts of a split).
 
 ## Dependencies
 

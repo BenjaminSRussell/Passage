@@ -1,7 +1,9 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
+import { BankStatementImportPage, BankStatementsPage } from "./BankStatements";
 import { CaseDetailPage, CasesPage, NewCasePage } from "./Cases";
 import { ConfirmationRunDetailPage, ConfirmationRunsPage, NewConfirmationRunPage } from "./Confirmations";
+import { DeductionDetailPage, DeductionsPage, NewDeductionPage } from "./Deductions";
 import { DisputeDetailPage, DisputesPage, NewDisputePage } from "./Disputes";
 import { DownPaymentDetailPage, DownPaymentsPage, NewDownPaymentPage } from "./DownPayments";
 import { DunningRunDetailPage, DunningRunsPage, NewDunningRunPage } from "./Dunning";
@@ -19,7 +21,7 @@ const receivables: PassageModule = {
   id: "receivables",
   title: "Accounts receivable",
   description:
-    "Open items, aging and cash application (manual and lockbox), collections (worklist, cases, disputes, promises to pay, dunning and interest), balance confirmations, and down payments and security deposits.",
+    "Open items, aging and cash application (manual, lockbox and camt.053 bank statements), collections (worklist, cases, disputes, promises to pay, dunning and interest), the deductions workbench, balance confirmations, and down payments and security deposits.",
   routes: [
     { path: "/receivables", element: createElement(WorkspacePage), handle: { title: "AR workspace" } },
     { path: "/receivables/open-items", element: createElement(OpenItemsPage), handle: { title: "Open items" } },
@@ -28,6 +30,8 @@ const receivables: PassageModule = {
     { path: "/receivables/payments/:id", element: createElement(PaymentDetailPage), handle: { title: "Payment" } },
     { path: "/receivables/lockbox", element: createElement(LockboxPage), handle: { title: "Lockbox imports" } },
     { path: "/receivables/lockbox/new", element: createElement(LockboxImportPage), handle: { title: "Import lockbox file" } },
+    { path: "/receivables/bank-statements", element: createElement(BankStatementsPage), handle: { title: "Bank statements" } },
+    { path: "/receivables/bank-statements/new", element: createElement(BankStatementImportPage), handle: { title: "Import bank statement" } },
     { path: "/receivables/worklist", element: createElement(WorklistPage), handle: { title: "Collections worklist" } },
     { path: "/receivables/disputes", element: createElement(DisputesPage), handle: { title: "Disputes" } },
     { path: "/receivables/disputes/new", element: createElement(NewDisputePage), handle: { title: "Open dispute" } },
@@ -48,6 +52,9 @@ const receivables: PassageModule = {
     { path: "/receivables/down-payments", element: createElement(DownPaymentsPage), handle: { title: "Down payments and deposits" } },
     { path: "/receivables/down-payments/new", element: createElement(NewDownPaymentPage), handle: { title: "Request down payment" } },
     { path: "/receivables/down-payments/:id", element: createElement(DownPaymentDetailPage), handle: { title: "Down payment" } },
+    { path: "/receivables/deductions", element: createElement(DeductionsPage), handle: { title: "Deductions" } },
+    { path: "/receivables/deductions/new", element: createElement(NewDeductionPage), handle: { title: "Record deduction" } },
+    { path: "/receivables/deductions/:id", element: createElement(DeductionDetailPage), handle: { title: "Deduction" } },
   ],
   nav: [
     { label: "AR workspace", to: "/receivables", duty: "ARView" },
@@ -55,6 +62,7 @@ const receivables: PassageModule = {
     { label: "Payments", to: "/receivables/payments", duty: "ARView" },
     { label: "Record payment", to: "/receivables/payments/new", duty: "ARPaymentPost" },
     { label: "Lockbox imports", to: "/receivables/lockbox", duty: "ARView" },
+    { label: "Bank statements", to: "/receivables/bank-statements", duty: "ARView" },
     { label: "Collections worklist", to: "/receivables/worklist", duty: "ARView" },
     { label: "Disputes", to: "/receivables/disputes", duty: "ARView" },
     { label: "Promises to pay", to: "/receivables/promises", duty: "ARView" },
@@ -63,6 +71,7 @@ const receivables: PassageModule = {
     { label: "Collection cases", to: "/receivables/cases", duty: "ARView" },
     { label: "Balance confirmations", to: "/receivables/balance-confirmations", duty: "ARView" },
     { label: "Down payments", to: "/receivables/down-payments", duty: "ARView" },
+    { label: "Deductions", to: "/receivables/deductions", duty: "ARView" },
   ],
 };
 

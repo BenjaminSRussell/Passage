@@ -29,6 +29,8 @@ describe("receivables module", () => {
       "/receivables/payments/:id",
       "/receivables/lockbox",
       "/receivables/lockbox/new",
+      "/receivables/bank-statements",
+      "/receivables/bank-statements/new",
       "/receivables/worklist",
       "/receivables/disputes",
       "/receivables/disputes/new",
@@ -49,6 +51,9 @@ describe("receivables module", () => {
       "/receivables/down-payments",
       "/receivables/down-payments/new",
       "/receivables/down-payments/:id",
+      "/receivables/deductions",
+      "/receivables/deductions/new",
+      "/receivables/deductions/:id",
     ]);
     // Every nav entry points at a registered route; each route has a title for the shell.
     const paths = new Set(receivables.routes.map((r) => r.path));

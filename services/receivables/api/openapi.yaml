@@ -3,9 +3,10 @@ info:
   title: Passage Receivables API
   version: 1.0.0
   description: |
-    Wave 30 receivables context: open items, aging, manual and BAI2 lockbox cash
+    Wave 30 receivables context: open items, aging, manual, BAI2 lockbox and camt.053 cash
     application, the collections worklist with risk scores, dunning runs, interest
-    notes, promises and disputes. Errors are RFC 9457 problem details with a stable `code`
+    notes, promises, disputes, cases, balance confirmations, down payments and the
+    deductions workbench. Errors are RFC 9457 problem details with a stable `code`
     (see README). Every operation names its duty in `x-passage-duty`.
 servers:
   - url: https://api.{env}.passage.dev
@@ -956,6 +957,255 @@ paths:
         "409": { $ref: "#/components/responses/Problem" }
         "412": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/bank-statements/imports:
+    get:
+      operationId: listBankStatementImports
+      summary: Imported camt.053 statement files, newest first
+      x-passage-duty: ARView
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: Statement imports (without their payments)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/BankStatementBatch" } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: importBankStatement
+      summary: Import a camt.053 statement; one unidentified CAMT053 payment per booked customer credit (FR-30.5)
+      description: |
+        Only booked (`Sts` BOOK or absent), non-reversal CRDT entries become payments; debits,
+        pending entries and reversals are counted in `skippedCount`. A payment is keyed by
+        (statement Id, NtryRef or AcctSvcrRef), so an entry already imported from an
+        overlapping statement is counted in `duplicateCount` and not created again
+        (BR-30.7). A file whose SHA-256 is already stored is refused (409 AR-0003); a
+        malformed entry is refused with 400 AR-0004 and its line in `detail`. Each
+        payment publishes payment.received.v1; the clerk matches it with `:match`.
+      x-passage-duty: ARImport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BankStatementImportRequest" }
+      responses:
+        "201":
+          description: File imported
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BankStatementBatch" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/deductions:
+    get:
+      operationId: listDeductions
+      summary: Deductions, open and matched first, oldest first within them (FR-30.17)
+      x-passage-duty: ARView
+      parameters:
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/DeductionStatus" } }
+        - { name: type, in: query, schema: { $ref: "#/components/schemas/DeductionType" } }
+        - { name: customer, in: query, schema: { type: string, format: uuid } }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: Deductions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Deduction" } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createDeduction
+      summary: Move the unexplained part of a short payment off its open item into the workbench
+      description: |
+        The open item is locked NOWAIT (409 AR-0002 when another clerk holds it); it must be
+        OPEN or PARTIALLY_SETTLED, undisputed (409 AR-DISPUTE-EXISTS) and hold at least the
+        amount (422 AR-AMOUNT-RANGE). Its open amount drops by the deduction, which takes the
+        item's customer and currency; the deduction is aged apart from invoices and never
+        dunned. A payment, when given, must share the item's legal entity, currency and
+        customer (400 AR-DEDUCTION-MISMATCH). Publishes deduction.opened.v1. A repeated
+        Idempotency-Key returns the stored deduction; with another body it is 422.
+      x-passage-duty: DeductionMaintain
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateDeductionRequest" }
+      responses:
+        "201":
+          description: Deduction recorded
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Deduction" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/deductions/{id}:
+    get:
+      operationId: getDeduction
+      summary: Read one deduction, with its children when it was split
+      x-passage-duty: ARView
+      parameters:
+        - { $ref: "#/components/parameters/DeductionId" }
+      responses:
+        "200": { $ref: "#/components/responses/Deduction" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/deductions/{id}:match:
+    post:
+      operationId: matchDeduction
+      summary: >-
+        Match an OPEN deduction to a wave 26 claim (rebate accrual, promotion fund or chargeback). The whole
+        deduction must fit the claim's remaining amount, else 422 AR-0014 (split it first). Requires If-Match.
+      x-passage-duty: DeductionMaintain
+      parameters:
+        - { $ref: "#/components/parameters/DeductionId" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [claimType, claimRef, claimRemaining]
+              properties:
+                claimType: { $ref: "#/components/schemas/ClaimType" }
+                claimRef: { type: string, minLength: 1, maxLength: 200 }
+                claimRemaining: { allOf: [{ $ref: "#/components/schemas/Money" }], description: "The claim's remaining amount, as the clerk reads it in pricing until the claims API exists." }
+      responses:
+        "200": { $ref: "#/components/responses/Deduction" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/deductions/{id}:approve:
+    post:
+      operationId: approveDeduction
+      summary: >-
+        Approve a MATCHED deduction; billing issues the credit note against the claim, which consumes the fund or
+        accrual (deduction.resolved.v1, APPROVED). Requires If-Match.
+      x-passage-duty: DeductionMaintain
+      parameters:
+        - { $ref: "#/components/parameters/DeductionId" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeductionNote" }
+      responses:
+        "200": { $ref: "#/components/responses/Deduction" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/deductions/{id}:deny:
+    post:
+      operationId: denyDeduction
+      summary: >-
+        Deny an OPEN or MATCHED deduction with a denial reason; its amount is re-billed to the customer as a
+        DEDUCTION debit open item due today (rebillItemId). Requires If-Match.
+      x-passage-duty: DeductionMaintain
+      parameters:
+        - { $ref: "#/components/parameters/DeductionId" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: string, enum: [NOT_AUTHORIZED, EXPIRED, DUPLICATE] }
+                note: { type: [string, "null"], maxLength: 1000 }
+      responses:
+        "200": { $ref: "#/components/responses/Deduction" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/deductions/{id}:split:
+    post:
+      operationId: splitDeduction
+      summary: >-
+        Split an OPEN deduction into 2 to 20 OPEN children whose amounts sum to it (else 422 AR-DEDUCTION-SPLIT).
+        The parent becomes SPLIT and is returned with its children. Requires If-Match.
+      x-passage-duty: DeductionMaintain
+      parameters:
+        - { $ref: "#/components/parameters/DeductionId" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [parts]
+              properties:
+                parts: { type: array, minItems: 2, maxItems: 20, items: { $ref: "#/components/schemas/Money" } }
+      responses:
+        "200": { $ref: "#/components/responses/Deduction" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /api/v1/receivables/deductions/{id}:write-off:
+    post:
+      operationId: writeOffDeduction
+      summary: >-
+        Write off an OPEN or MATCHED deduction to 6110 (Dr 6110 / Cr 1200 on deduction.resolved.v1). Above
+        deduction_write_off_limit (50.00 USD, 45.00 EUR, zero in other currencies) the caller also needs
+        ARWriteOffApprove, else 403 AR-0006. Requires If-Match.
+      x-passage-duty: DeductionMaintain
+      parameters:
+        - { $ref: "#/components/parameters/DeductionId" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeductionNote" }
+      responses:
+        "200": { $ref: "#/components/responses/Deduction" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
 components:
   securitySchemes:
     bearerAuth:
@@ -1018,11 +1268,24 @@ components:
       required: true
       description: Down payment or security deposit id.
       schema: { type: string, format: uuid }
+    DeductionId:
+      name: id
+      in: path
+      required: true
+      description: Deduction id.
+      schema: { type: string, format: uuid }
   headers:
     ETag:
       description: Resource version, quoted.
       schema: { type: string }
   responses:
+    Deduction:
+      description: The deduction after the command
+      headers:
+        ETag: { $ref: "#/components/headers/ETag" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Deduction" }
     DownPayment:
       description: The down payment after the command, with its clearings
       headers:
@@ -1508,3 +1771,74 @@ components:
       properties:
         resolution: { type: string, enum: [CREDIT, PAID, WRITE_OFF, REJECTED] }
         note: { type: [string, "null"], maxLength: 2000 }
+    BankStatementImportRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, content]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        content: { type: string, minLength: 1, maxLength: 3145728, description: "The camt.053 XML document (.001.02 to .001.08) as received from the bank." }
+    BankStatementBatch:
+      type: object
+      required: [id, legalEntityId, fileSha256, statementCount, paymentCount, duplicateCount, skippedCount]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        fileSha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+        statementCount: { type: integer, minimum: 1 }
+        paymentCount: { type: integer, description: CAMT053 payments created. }
+        duplicateCount: { type: integer, description: Credits whose statement id and entry reference were imported before. }
+        skippedCount: { type: integer, description: Entries that are not booked customer credits (debits, pending, reversals). }
+        importedAt: { type: string, format: date-time }
+        payments:
+          type: array
+          description: The payments created; returned by the import, omitted from the list.
+          items: { $ref: "#/components/schemas/Payment" }
+    DeductionType: { type: string, enum: [PROMO, PRICE, SHORT_SHIP, DAMAGE, UNKNOWN] }
+    DeductionStatus: { type: string, enum: [OPEN, MATCHED, APPROVED, DENIED, SPLIT, WRITTEN_OFF] }
+    ClaimType: { type: string, enum: [REBATE_ACCRUAL, PROMOTION_FUND, CHARGEBACK] }
+    DeductionNote:
+      type: object
+      additionalProperties: false
+      properties:
+        note: { type: [string, "null"], maxLength: 1000 }
+    CreateDeductionRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, openItemId, type, reasonCode, amount]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        openItemId: { type: string, format: uuid, description: The short-paid debit item the amount moves off. }
+        paymentId: { type: [string, "null"], format: uuid, description: The short payment. }
+        type: { $ref: "#/components/schemas/DeductionType" }
+        reasonCode: { type: string, minLength: 1, maxLength: 60, description: "The customer's stated reason, such as a promotion number." }
+        amount: { $ref: "#/components/schemas/Money" }
+    Deduction:
+      type: object
+      required: [id, legalEntityId, customerId, openItemId, documentNumber, type, reasonCode, currency, amount, status, createdAt, version]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        openItemId: { type: string, format: uuid }
+        documentNumber: { type: string, description: The short-paid item's document number. }
+        paymentId: { type: string, format: uuid }
+        parentId: { type: string, format: uuid, description: The deduction this one was split from. }
+        type: { $ref: "#/components/schemas/DeductionType" }
+        reasonCode: { type: string }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        amount: { $ref: "#/components/schemas/Money" }
+        status: { $ref: "#/components/schemas/DeductionStatus" }
+        claimType: { $ref: "#/components/schemas/ClaimType" }
+        claimRef: { type: string }
+        claimRemaining: { $ref: "#/components/schemas/Money" }
+        denialReason: { type: string, enum: [NOT_AUTHORIZED, EXPIRED, DUPLICATE] }
+        decisionNote: { type: string }
+        rebillItemId: { type: string, format: uuid, description: The DEDUCTION debit item a denial re-billed. }
+        createdAt: { type: string, format: date-time }
+        resolvedAt: { type: string, format: date-time }
+        version: { type: integer }
+        children:
+          type: array
+          description: The OPEN deductions a split created; present on a single read of a SPLIT deduction.
+          items: { $ref: "#/components/schemas/Deduction" }
