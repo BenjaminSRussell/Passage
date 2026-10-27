@@ -13,7 +13,7 @@ import {
   type ConditionRecordInput,
   type Problem,
 } from "./api/client";
-import { DAY, DECIMAL, TYPE_LABELS, UUID } from "./format";
+import { amountLabel, DAY, DECIMAL, isOrderLevel, TYPE_LABELS, UUID } from "./format";
 import styles from "./pages.module.css";
 
 type Values = ConditionRecordInput;
@@ -48,7 +48,9 @@ export function validateAgreement(v: Values): Errors {
   const errors: Errors = {};
   if (!UUID.test(v.legalEntityId.trim())) errors.legalEntityId = "Enter the legal entity id (a UUID).";
   if (v.customerKind !== "all" && v.customerKey.trim() === "") errors.customerKey = "Enter the customer or customer group.";
-  if (v.type === "TOTAL_DISC" && v.productKind !== "all") errors.productKind = "A total discount applies to the whole order: choose All products.";
+  if (isOrderLevel(v.type) && v.productKind !== "all") errors.productKind = `A ${TYPE_LABELS[v.type].toLowerCase()} applies to the whole order: choose All products.`;
+  else if (v.type === "MULTILINE_DISC" && v.productKind !== "product_group" && v.productKind !== "all")
+    errors.productKind = "A multiline discount sums the lines of a product group: choose Product group or All products.";
   else if (v.productKind !== "all" && v.productKey.trim() === "") errors.productKey = "Enter the product or product group.";
   if (v.productKind === "variant" && v.variant.trim() === "") errors.variant = "Enter the variant.";
   if (!/^[A-Z]{3}$/.test(v.currency)) errors.currency = "Use a three-letter ISO 4217 code, such as USD.";
@@ -59,6 +61,7 @@ export function validateAgreement(v: Values): Errors {
     if (v[name] !== "" && (!DECIMAL.test(v[name]) || Number(v[name]) > 100)) errors[name] = "Enter a percentage from 0 to 100.";
   }
   if (v.type !== "PRICE" && v.amount === "" && v.discPct1 === "" && v.discPct2 === "") errors.amount = "Enter an amount, a percentage or both.";
+  if (v.type === "SURCHARGE" && v.discPct2 !== "" && Number(v.discPct2) !== 0) errors.discPct2 = "A surcharge takes one percentage; leave percentage 2 empty.";
   if (!DAY.test(v.validFrom)) errors.validFrom = "Enter the first valid day.";
   if (!DAY.test(v.validTo)) errors.validTo = "Enter the last valid day.";
   else if (DAY.test(v.validFrom) && v.validTo < v.validFrom) errors.validTo = "The last day must be on or after the first day.";
@@ -228,7 +231,7 @@ export function NewAgreementPage() {
           {text("ta-currency", "currency", "Currency", { hint: "Documents in other currencies never use this agreement.", mono: true })}
           {text("ta-unit", "unit", "Unit", { optional: true, hint: "Leave empty to apply to any unit.", mono: true })}
           {text("ta-from-qty", "fromQuantity", "From quantity", { hint: "Quantity break: applies from this quantity up.", mono: true })}
-          {text("ta-amount", "amount", values.type === "PRICE" ? "Price" : "Amount off", { optional: values.type !== "PRICE", mono: true })}
+          {text("ta-amount", "amount", amountLabel(values.type), { optional: values.type !== "PRICE", mono: true })}
           {text("ta-pct1", "discPct1", "Percentage 1", { optional: true, mono: true })}
           {text("ta-pct2", "discPct2", "Percentage 2", { optional: true, hint: "Applied after percentage 1.", mono: true })}
           {text("ta-valid-from", "validFrom", "Valid from", { type: "date" })}

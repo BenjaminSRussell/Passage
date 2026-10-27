@@ -57,6 +57,8 @@ type API struct {
 	recordsCreated   atomic.Int64
 	recordsActivated atomic.Int64
 	recordsWithdrawn atomic.Int64
+	journalsPosted   atomic.Int64
+	accrualsPosted   atomic.Int64
 }
 
 // New builds the API; zero config values take the documented defaults.
@@ -80,6 +82,8 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyView)).Get(recordsPath+"/{id}", a.getRecord)
 	r.With(authz.RequireDuty(dutyMaintain)).Post(recordsPath+"/{id}:activate", a.activateRecord)
 	r.With(authz.RequireDuty(dutyMaintain)).Post(recordsPath+"/{id}:withdraw", a.withdrawRecord)
+	a.registerJournalRoutes(r)
+	a.registerRebateRoutes(r)
 }
 
 // Metrics serves the Prometheus text exposition of the service counters.
@@ -94,6 +98,8 @@ func (a *API) Metrics() http.Handler {
 			{"pricing_records_created_total", "Condition records created as DRAFT.", &a.recordsCreated},
 			{"pricing_records_activated_total", "Condition records activated.", &a.recordsActivated},
 			{"pricing_records_withdrawn_total", "Condition records withdrawn.", &a.recordsWithdrawn},
+			{"pricing_journals_posted_total", "Price journals posted or reversed.", &a.journalsPosted},
+			{"pricing_rebate_accruals_total", "Invoice lines accrued against a rebate agreement.", &a.accrualsPosted},
 		}
 		for _, c := range counters {
 			fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s counter\n%s %d\n", c.name, c.help, c.name, c.name, c.v.Load())
@@ -146,6 +152,7 @@ type resolveResponse struct {
 	Lines           []lineView         `json:"lines"`
 	Subtotal        decimal.Decimal    `json:"subtotal"`
 	TotalDiscount   decimal.Decimal    `json:"totalDiscount"`
+	Surcharge       decimal.Decimal    `json:"surcharge"`
 	OrderNet        decimal.Decimal    `json:"orderNet"`
 	Applied         []domain.Applied   `json:"applied"`
 	ExplainRef      string             `json:"explainRef"`
@@ -183,7 +190,8 @@ func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
 	}
 	a.resolves.Add(1)
 	a.linesPriced.Add(int64(len(lines)))
-	res := domain.Resolve(domain.Input{Header: header, Lines: lines, Records: records})
+	res := domain.Resolve(domain.Input{Header: header, Lines: lines, Records: records,
+		SmallOrderThreshold: domain.SmallOrderThreshold(header.Currency)})
 	a.respond(w, r, res, r.URL.Query().Get("explain") == "true")
 }
 
@@ -216,7 +224,8 @@ func (a *API) simulate(w http.ResponseWriter, r *http.Request) {
 		}
 		records = append(records, rec)
 	}
-	res := domain.Resolve(domain.Input{Header: header, Lines: lines, Records: records})
+	res := domain.Resolve(domain.Input{Header: header, Lines: lines, Records: records,
+		SmallOrderThreshold: domain.SmallOrderThreshold(header.Currency)})
 	a.respond(w, r, res, r.URL.Query().Get("explain") != "false")
 }
 
@@ -266,7 +275,7 @@ func (a *API) respond(w http.ResponseWriter, r *http.Request, res domain.Result,
 		return
 	}
 	out := resolveResponse{Currency: res.Currency, Lines: make([]lineView, len(res.Lines)), Subtotal: res.Subtotal,
-		TotalDiscount: res.TotalDiscount, OrderNet: res.OrderNet, Applied: res.Applied, ExplainRef: ref}
+		TotalDiscount: res.TotalDiscount, Surcharge: res.Surcharge, OrderNet: res.OrderNet, Applied: res.Applied, ExplainRef: ref}
 	for i, lr := range res.Lines {
 		out.Lines[i] = lineView{LineResult: lr}
 	}
@@ -420,7 +429,7 @@ func (a *API) listRecords(w http.ResponseWriter, r *http.Request) {
 		fields["status"] = "must be DRAFT, ACTIVE, EXPIRED or WITHDRAWN"
 	}
 	if f.Type != "" && !domain.ValidType(domain.ConditionType(f.Type)) {
-		fields["type"] = "must be PRICE, LINE_DISC or TOTAL_DISC"
+		fields["type"] = "must be PRICE, LINE_DISC, MULTILINE_DISC, TOTAL_DISC or SURCHARGE"
 	}
 	if raw := q.Get("asOf"); raw != "" {
 		day, err := time.Parse(dateLayout, raw)

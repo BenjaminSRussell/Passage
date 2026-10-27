@@ -16,7 +16,31 @@ channels:
         $ref: "#/components/messages/ConditionRecordActivated"
       conditionRecordWithdrawn:
         $ref: "#/components/messages/ConditionRecordWithdrawn"
+  journal:
+    address: passage.pricing.journal
+    description: Price journal post and reversal (FR-26.9).
+    messages:
+      journalPosted:
+        $ref: "#/components/messages/JournalPosted"
+  rebateAccrual:
+    address: passage.pricing.rebateaccrual
+    description: Rebate accrual posted on an invoice line (FR-26.11).
+    messages:
+      rebateAccrualPosted:
+        $ref: "#/components/messages/RebateAccrualPosted"
 operations:
+  publishJournalPosted:
+    action: send
+    channel: {$ref: "#/channels/journal"}
+    summary: A price journal posted or reversed.
+    messages:
+      - {$ref: "#/channels/journal/messages/journalPosted"}
+  publishRebateAccrualPosted:
+    action: send
+    channel: {$ref: "#/channels/rebateAccrual"}
+    summary: A rebate accrual posted; the ledger books Dr 4150 / Cr 2150.
+    messages:
+      - {$ref: "#/channels/rebateAccrual/messages/rebateAccrualPosted"}
   publishConditionRecordActivated:
     action: send
     channel: {$ref: "#/channels/conditionRecordActivated"}
@@ -40,7 +64,7 @@ components:
         properties:
           id: {type: string, format: uuid}
           legal_entity_id: {type: string, format: uuid}
-          type: {type: string, enum: [PRICE, LINE_DISC, TOTAL_DISC]}
+          type: {type: string, enum: [PRICE, LINE_DISC, MULTILINE_DISC, TOTAL_DISC, SURCHARGE]}
           customer_kind: {type: string, enum: [customer, customer_group, all]}
           customer_key: {type: string}
           product_kind: {type: string, enum: [product, product_group, variant, all]}
@@ -52,7 +76,8 @@ components:
           valid_from: {type: string, format: date}
           valid_to: {type: string, format: date}
           version: {type: integer}
-          retroactive: {type: boolean, description: "valid_from is before the activation day (BR-26.7); consumers never re-price posted documents."}
+          journal_id: {type: string, format: uuid, description: "Price journal that posted or reversed the record; absent for a single-record activation."}
+          retroactive: {type: boolean, description: "valid_from is before the activation or posting day (BR-26.7); consumers never re-price posted documents."}
     ConditionRecordWithdrawn:
       name: dev.passage.pricing.conditionrecord.withdrawn.v1
       contentType: application/cloudevents+json
@@ -63,3 +88,34 @@ components:
           id: {type: string, format: uuid}
           version: {type: integer}
           reason: {type: string}
+    JournalPosted:
+      name: dev.passage.pricing.journal.posted.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [journal_id, legal_entity_id, line_count]
+        properties:
+          journal_id: {type: string, format: uuid}
+          legal_entity_id: {type: string, format: uuid}
+          line_count: {type: integer}
+          reversed_journal_id: {type: string, format: uuid, description: "Set when this journal reverses another."}
+    RebateAccrualPosted:
+      name: dev.passage.pricing.rebateaccrual.posted.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        description: >
+          One invoice line's accrual. The ledger (w11) posts Dr debit_account / Cr credit_account
+          (4150 / 2150 by default) for amount. amount is negative when a credit note or a tier
+          recompute lowers the period. journal_posting_id (PRD 5.26.5) is assigned by the ledger.
+        required: [accrual_id, legal_entity_id, agreement_id, period_id, invoice_line_id, amount, currency, debit_account, credit_account]
+        properties:
+          accrual_id: {type: string, format: uuid}
+          legal_entity_id: {type: string, format: uuid}
+          agreement_id: {type: string, format: uuid}
+          period_id: {type: string, description: "2027-03, 2027-Q1 or 2027."}
+          invoice_line_id: {type: string}
+          amount: {type: string, description: "Decimal string in the agreement currency's minor units."}
+          currency: {type: string, pattern: "^[A-Z]{3}$"}
+          debit_account: {type: string, description: "Rebate expense account (default 4150)."}
+          credit_account: {type: string, description: "Rebate accrual account (default 2150)."}

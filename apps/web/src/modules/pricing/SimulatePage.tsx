@@ -174,6 +174,7 @@ export function SimulatePage() {
           <StatGroup label="Simulation totals">
             <StatTile label="Subtotal" value={`${result.subtotal} ${result.currency}`} />
             <StatTile label="Total discount" value={`${result.totalDiscount} ${result.currency}`} />
+            {Number(result.surcharge) !== 0 ? <StatTile label="Small-order surcharge" value={`${result.surcharge} ${result.currency}`} /> : null}
             <StatTile label="Order net" value={`${result.orderNet} ${result.currency}`} />
           </StatGroup>
           <Card title="Priced lines">
@@ -191,7 +192,7 @@ export function SimulatePage() {
             ) : null,
           )}
           {result.trace && result.trace.length > 0 ? (
-            <Card title="Why the order has this total discount" headingLevel={3}>
+            <Card title="How the order-level conditions were chosen" headingLevel={3}>
               <DataTable label="Explain order" columns={traceColumns} rows={traceRows(result.trace)} getRowKey={(r) => `${r.condition}-${r.seq}`} />
             </Card>
           ) : null}

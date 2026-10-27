@@ -22,8 +22,10 @@ func TestEventsMatchAsyncAPI(t *testing.T) {
 		typ     string
 		payload any
 	}{
-		{events.ConditionRecordActivated, events.ConditionRecordData{}},
+		{events.ConditionRecordActivated, events.ConditionRecordData{JournalID: "x"}},
 		{events.ConditionRecordWithdrawn, events.ConditionRecordWithdrawnData{}},
+		{events.JournalPosted, events.JournalPostedData{ReversedJournalID: "x"}},
+		{events.RebateAccrualPosted, events.RebateAccrualPostedData{}},
 	}
 	for _, c := range cases {
 		if !pevents.ValidType(c.typ) {

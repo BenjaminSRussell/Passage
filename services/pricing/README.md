@@ -4,9 +4,30 @@ Deterministic pricing engine for Passage: resolves net prices and discounts for 
 customer / product / date / quantity / currency tuple from condition records, and returns
 the ordered trace of conditions that produced the price. Ticket PSG-26, PRD §5.26.
 
-## Slice 1 status
+## Status (slices 1-2)
 
-Built in this slice:
+Built in slice 2:
+
+- **Multiline discounts and surcharges** (FR-26.5, FR-26.6, BR-26.4): `MULTILINE_DISC` records
+  (keyed by product group or all products) match on the summed quantity of the lines sharing a
+  product group and unit; `SURCHARGE` records (order level) apply when the subtotal is below the
+  small-order threshold (250 USD, 200 EUR) and are reported as `surcharge` as well as added to
+  `orderNet`. Migration `0002_journals_rebates.sql` widens the condition type check.
+- **Price journals** (FR-26.9, AC-26.7, AC-26.10): `internal/domain/journal.go` validates a journal
+  as a whole (rules, stale versions, overlaps with active records and with other lines, one line per
+  record) and builds the reversal; `internal/store/journal.go` posts it in one transaction under the
+  legal entity's journal lock (activations take the same lock in shared mode), writes one
+  activated/withdrawn event per record plus `journal.posted`, and reverses into a new journal.
+  Post and reverse replay on a repeated `Idempotency-Key`.
+- **Rebate agreements and accruals** (FR-26.11, BR-26.8, AC-26.8): tiered agreements by customer or
+  customer group; `domain.Accrue` moves a period to its target at the new cumulative basis and books
+  the difference on the invoice line, so a tier crossing recomputes the period. The store serialises
+  accruals per (agreement, period), ignores a redelivered invoice line and writes
+  `rebateaccrual.posted` (Dr 4150 / Cr 2150 by default) for the ledger.
+- **Web**: price journal list, create and detail (validate, post, reverse, before/after per line);
+  rebate agreement list, create (tiers) and detail (accruals by period); journals-to-post tile.
+
+Built in slice 1:
 
 - **Condition records** (FR-26.2): create (DRAFT), read, list, activate and withdraw, with
   the overlap check (BR-26.6, 409 PRC-0002 naming the conflicting id) and an outbox event in
@@ -36,11 +57,11 @@ Not yet built: see `NOT-IMPLEMENTED.md`.
 
 ```
 cmd/pricing/            entrypoint (dbx.Connect -> dbx.Migrate -> httpx.NewRouter -> Serve)
-internal/domain/        pure engine: types, resolve, calc, smart rounding, rebate, commission, free goods
+internal/domain/        pure engine: types, resolve, calc, journal validation and reversal, rebate tiers and accrual
 internal/store/         Postgres repository (pgx, tenant-scoped transactions, outbox)
 internal/api/           HTTP handlers and validation
 internal/events/        event type constants and payloads
-migrations/             0001_init.sql (condition_record, outbox, idempotency_keys, RLS)
+migrations/             0001_init.sql (condition_record, outbox, idempotency_keys), 0002 (journals, rebates); all with RLS
 api/openapi.yaml        OpenAPI 3.1 for every endpoint
 events/asyncapi.yaml    AsyncAPI 3 for every published event
 charts/pricing/         Helm chart
@@ -58,6 +79,17 @@ testdata/               fixtures
 | GET | `/v1/pricing/condition-records/{id}` | pricing.view | |
 | POST | `/v1/pricing/condition-records/{id}:activate` | pricing.maintain | body `{version}`; overlap check; `Idempotency-Key` honoured |
 | POST | `/v1/pricing/condition-records/{id}:withdraw` | pricing.maintain | body `{version, reason}`; `Idempotency-Key` honoured |
+| GET | `/v1/pricing/journals?legalEntityId=&status=&limit=` | pricing.view | price journal log, newest first, no lines |
+| POST | `/v1/pricing/journals` | pricing.journal.post | up to 100,000 CREATE / UPDATE / DELETE lines; creates OPEN; `Idempotency-Key` honoured |
+| GET | `/v1/pricing/journals/{id}` | pricing.view | with up to 1,000 lines (before / after) and every line error |
+| POST | `/v1/pricing/journals/{id}:validate` | pricing.journal.post | VALIDATED when clean, else OPEN with line errors |
+| POST | `/v1/pricing/journals/{id}:post` | pricing.journal.post | all lines or none (PRC-0005); `Idempotency-Key` honoured |
+| POST | `/v1/pricing/journals/{id}:reverse` | pricing.journal.post | 201 with the reversing journal; `Idempotency-Key` honoured |
+| GET | `/v1/pricing/rebates/agreements?legalEntityId=` | pricing.rebate.view | |
+| POST | `/v1/pricing/rebates/agreements` | pricing.rebate.maintain | `Idempotency-Key` honoured |
+| GET | `/v1/pricing/rebates/agreements/{id}` | pricing.rebate.view | |
+| GET | `/v1/pricing/rebates/accruals?agreementId=&period=` | pricing.rebate.view | period such as 2027-03, 2027-Q1 or 2027 |
+| POST | `/v1/pricing/rebates/accruals` | pricing.rebate.maintain | one posted invoice line; 201 new, 200 already accrued (stand-in for the invoice.posted consumer) |
 | GET | `/healthz`, `/readyz`, `/metrics` | none | `/metrics` on the admin port |
 
 ## Error codes
@@ -67,11 +99,14 @@ testdata/               fixtures
 | PRC-0001 | 200 (line) / 422 | No price for a product on the pricing date (reported on the line) |
 | PRC-0002 | 409 | Overlapping ACTIVE record for the same key, currency and unit; names the id |
 | PRC-0003 | 422 | Negative amount (BR-26.10) |
+| PRC-0005 | 422 | Journal has validation errors at post or reverse; nothing was posted (names up to five lines) |
 | PRC-0009 | 422 | Request exceeds `PRICING_MAX_LINES` |
 | PRC-0030 | 404 | Condition record not found (store) |
 | PRC-0031 | 409 | Invalid state transition (store) |
+| PRC-0034 | 404 | Price journal not found |
+| PRC-0035 | 404 | Rebate agreement not found |
 | conflict_version | 412 | Body version does not match the stored version |
-| idempotency_key_reuse | 422 | Same `Idempotency-Key` with a different body |
+| idempotency_key_reuse | 422 | Same `Idempotency-Key` with a different body, or an invoice line accrued again with a different date, value or quantity |
 | COM-0001 | 422 | Validation failure; `errors` maps each field to its message (percentages outside 0–100, a product-keyed TOTAL_DISC, bad dates, ...) |
 | AUTH-0001 | 401 | Missing or malformed tenant |
 | AUTH-0003 | 403 | Missing duty (kernel `authz`) |
@@ -80,11 +115,13 @@ testdata/               fixtures
 
 Written to `outbox` in the same transaction as the change (see `events/asyncapi.yaml`):
 
-- `dev.passage.pricing.conditionrecord.activated.v1`
+- `dev.passage.pricing.conditionrecord.activated.v1` (activation and journal post; `journal_id` set by journals)
 - `dev.passage.pricing.conditionrecord.withdrawn.v1`
+- `dev.passage.pricing.journal.posted.v1` (post and reverse)
+- `dev.passage.pricing.rebateaccrual.posted.v1`
 
-The entity segment is `conditionrecord` (as in `internal/events`); the PRD writes
-`condition-record`. Naming is a handoff to the kernel owner (see NOT-IMPLEMENTED.md).
+The entity segments are `conditionrecord` and `rebateaccrual` (as in `internal/events`); the PRD
+writes `condition-record` and `rebate-accrual`. Naming is a handoff to the kernel owner (see NOT-IMPLEMENTED.md).
 
 ## Configuration
 

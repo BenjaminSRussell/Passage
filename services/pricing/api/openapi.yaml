@@ -3,8 +3,9 @@ info:
   title: Passage Pricing API
   version: 0.1.0
   description: >
-    Slice 1 of wave 26 (PSG-26). Deterministic price resolution with explain, simulation,
-    and condition-record lifecycle. The browser reaches these paths as /api/v1/pricing/...;
+    Slices 1-2 of wave 26 (PSG-26). Deterministic price resolution with explain, simulation,
+    condition-record lifecycle, atomic price journals with reversal, and customer rebate
+    agreements with accrual. The browser reaches these paths as /api/v1/pricing/...;
     the BFF rewrites them to /v1/pricing/... on this service.
 servers:
   - url: https://api.{env}.passage.dev
@@ -19,7 +20,10 @@ paths:
       description: >
         Stateless with respect to the request. Loads ACTIVE condition records of the legal
         entity valid on pricingDate for the currency, then applies the reference procedure
-        (PRICE, LINE_DISC, TOTAL_DISC). A line without a price carries errorCode PRC-0001 and
+        (PRICE, LINE_DISC, MULTILINE_DISC, TOTAL_DISC, SURCHARGE). MULTILINE_DISC matches on the
+        summed quantity of the lines sharing a product group and unit (BR-26.4). SURCHARGE applies
+        when the subtotal is below the small-order threshold (250 USD, 200 EUR; none for other
+        currencies) and is reported in surcharge as well as added to orderNet. A line without a price carries errorCode PRC-0001 and
         is left out of the totals; the request itself still answers 200. The explain trace is returned only when ?explain=true; traces above
         PRICING_EXPLAIN_MAX_BYTES are replaced by explainTruncated=true. explainRef is the
         sha256 content address of the trace body.
@@ -79,7 +83,7 @@ paths:
       parameters:
         - {name: legalEntityId, in: query, required: false, schema: {type: string, format: uuid}}
         - {name: status, in: query, required: false, schema: {type: string, enum: [DRAFT, ACTIVE, EXPIRED, WITHDRAWN]}}
-        - {name: type, in: query, required: false, schema: {type: string, enum: [PRICE, LINE_DISC, TOTAL_DISC]}}
+        - {name: type, in: query, required: false, schema: {type: string, enum: [PRICE, LINE_DISC, MULTILINE_DISC, TOTAL_DISC, SURCHARGE]}}
         - {name: customer, in: query, required: false, description: "Exact customer or customer-group key.", schema: {type: string}}
         - {name: product, in: query, required: false, description: "Exact product or product-group key.", schema: {type: string}}
         - {name: asOf, in: query, required: false, description: "Records valid on this date (YYYY-MM-DD).", schema: {type: string, format: date}}
@@ -200,6 +204,249 @@ paths:
         "409": {$ref: "#/components/responses/Problem"}
         "412": {$ref: "#/components/responses/Problem"}
         "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/journals:
+    get:
+      operationId: listPriceJournals
+      summary: Price journal log (PRD 5.26.14), newest first, without lines.
+      x-passage-duty: pricing.view
+      parameters:
+        - {name: legalEntityId, in: query, required: false, schema: {type: string, format: uuid}}
+        - {name: status, in: query, required: false, schema: {type: string, enum: [OPEN, VALIDATED, POSTED, REVERSED]}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
+      responses:
+        "200":
+          description: Journal headers.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/Journal"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    post:
+      operationId: createPriceJournal
+      summary: Create an OPEN price journal of up to 100,000 mass create, update or delete lines.
+      description: >
+        Each line is checked when the journal is created. Field errors are keyed lines[i].field.
+        Nothing is written to condition records until :post (FR-26.9).
+      x-passage-duty: pricing.journal.post
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/JournalRequest"}
+      responses:
+        "201":
+          description: Created as OPEN.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Journal"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/journals/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getPriceJournal
+      summary: Read a price journal with its lines (op, before and after snapshots) and per-line errors.
+      description: At most 1,000 lines are returned (linesTruncated=true when there are more); errors are always complete.
+      x-passage-duty: pricing.view
+      responses:
+        "200":
+          description: The journal.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Journal"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/journals/{id}:validate:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: validatePriceJournal
+      summary: Validate every line of an OPEN journal against the stored record versions.
+      x-passage-duty: pricing.journal.post
+      responses:
+        "200":
+          description: Validated, or still OPEN with errors listed per line.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Journal"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/journals/{id}:post:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: postPriceJournal
+      summary: Post a VALIDATED journal in one transaction.
+      description: >
+        Requires status VALIDATED (409 otherwise). Validates again under the legal entity's
+        journal lock and refuses with 422 PRC-0005 naming the failing lines if anything changed
+        since validation; nothing is written then. Otherwise writes every line in one transaction
+        with dev.passage.pricing.conditionrecord.activated.v1 (or .withdrawn.v1) per record plus
+        dev.passage.pricing.journal.posted.v1 to the outbox (FR-26.9). A retry with the same
+        Idempotency-Key replays the first response.
+      x-passage-duty: pricing.journal.post
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Posted.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Journal"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/journals/{id}:reverse:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: reversePriceJournal
+      summary: Reverse a POSTED journal into a new journal that references the original.
+      description: >
+        Restores the content every line replaced, in one transaction (AC4, AC-26.7); records created
+        by the journal are withdrawn. A record changed since the post fails the reversal with 422
+        PRC-0005 and nothing is written. A retry with the same Idempotency-Key replays the first response.
+      x-passage-duty: pricing.journal.post
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "201":
+          description: The new reversing journal (POSTED).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Journal"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/rebates/agreements:
+    get:
+      operationId: listRebateAgreements
+      summary: List customer rebate agreements.
+      x-passage-duty: pricing.rebate.view
+      parameters:
+        - {name: legalEntityId, in: query, required: false, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Agreements, oldest validity first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/RebateAgreement"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    post:
+      operationId: createRebateAgreement
+      summary: Create a customer rebate agreement with tiers (FR-26.11).
+      x-passage-duty: pricing.rebate.maintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RebateAgreementInput"}
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RebateAgreement"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/rebates/agreements/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getRebateAgreement
+      summary: Read one rebate agreement with its tiers.
+      x-passage-duty: pricing.rebate.view
+      responses:
+        "200":
+          description: The agreement.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RebateAgreement"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/rebates/accruals:
+    get:
+      operationId: listRebateAccruals
+      summary: List accruals by agreement and period.
+      x-passage-duty: pricing.rebate.view
+      parameters:
+        - {name: agreementId, in: query, required: false, schema: {type: string, format: uuid}}
+        - {name: period, in: query, required: false, description: "Period key such as 2027-03, 2027-Q1 or 2027.", schema: {type: string, pattern: "^[0-9]{4}(-(0[1-9]|1[0-2])|-Q[1-4])?$"}}
+      responses:
+        "200":
+          description: Accrual rows.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/RebateAccrual"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    post:
+      operationId: accrueRebateInvoiceLine
+      summary: Accrue one posted invoice line against an agreement (invoice.posted consumer).
+      description: >
+        Stand-in for the invoice.posted consumer (w30). Locks the (agreement, period) row, moves the
+        period to its target at the new cumulative basis and accrues the difference on this line, so a
+        tier crossing recomputes the whole period (BR-26.8). 201 when a new accrual posted, 200 when the
+        invoice line was already accrued with the same date, value and quantity, 422
+        idempotency_key_reuse when it was accrued with different ones.
+      x-passage-duty: pricing.rebate.maintain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RebateAccrualInput"}
+      responses:
+        "200":
+          description: Already accrued (redelivery).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RebateAccrual"}
+        "201":
+          description: Accrued; dev.passage.pricing.rebateaccrual.posted.v1 written to the outbox.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RebateAccrual"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
 components:
   parameters:
     IdempotencyKey:
@@ -256,18 +503,21 @@ components:
       required: [type, customerKind, productKind, currency, validFrom, validTo]
       properties:
         id: {type: string}
-        type: {type: string, enum: [PRICE, LINE_DISC, TOTAL_DISC]}
+        type: {type: string, enum: [PRICE, LINE_DISC, MULTILINE_DISC, TOTAL_DISC, SURCHARGE]}
         customerKind: {type: string, enum: [customer, customer_group, all]}
         customerKey: {type: string}
-        productKind: {type: string, enum: [product, product_group, variant, all], description: "Must be all for TOTAL_DISC (an order-level discount)."}
+        productKind:
+          type: string
+          enum: [product, product_group, variant, all]
+          description: "Must be all for TOTAL_DISC and SURCHARGE (order-level conditions); product_group or all for MULTILINE_DISC."
         productKey: {type: string}
         variant: {type: string}
         currency: {type: string, pattern: "^[A-Z]{3}$"}
         unit: {type: string}
         fromQuantity: {type: string}
         amount: {type: string}
-        discPct1: {type: string}
-        discPct2: {type: string}
+        discPct1: {type: string, description: "0-100. For SURCHARGE, the percentage of the order net added."}
+        discPct2: {type: string, description: "0-100; must be 0 for SURCHARGE."}
         validFrom: {type: string, format: date}
         validTo: {type: string, format: date}
         searchNext: {type: boolean}
@@ -304,7 +554,7 @@ components:
         reason: {type: string, description: "Optional, recorded on withdraw."}
     ResolveResponse:
       type: object
-      required: [currency, lines, subtotal, totalDiscount, orderNet, applied, explainRef]
+      required: [currency, lines, subtotal, totalDiscount, surcharge, orderNet, applied, explainRef]
       properties:
         currency: {type: string}
         lines:
@@ -330,7 +580,8 @@ components:
                 items: {$ref: "#/components/schemas/TraceStep"}
         subtotal: {type: string}
         totalDiscount: {type: string}
-        orderNet: {type: string}
+        surcharge: {type: string, description: "Small-order surcharge included in orderNet (FR-26.6); 0 when none applied."}
+        orderNet: {type: string, description: "subtotal - totalDiscount + surcharge."}
         applied:
           type: array
           items: {$ref: "#/components/schemas/Applied"}
@@ -343,7 +594,7 @@ components:
       type: object
       required: [type, recordId, access]
       properties:
-        type: {type: string, enum: [PRICE, LINE_DISC, TOTAL_DISC]}
+        type: {type: string, enum: [PRICE, LINE_DISC, MULTILINE_DISC, TOTAL_DISC, SURCHARGE]}
         recordId: {type: string}
         access: {type: integer, description: "Access sequence number that produced the winner."}
     TraceStep:
@@ -364,3 +615,128 @@ components:
               candidates: {type: array, items: {type: string}}
               winner: {type: string}
               reason: {type: string}
+    JournalLineInput:
+      type: object
+      required: [op]
+      description: "CREATE takes record; UPDATE takes recordId, expectedVersion and either record or adjustPct; DELETE takes recordId and expectedVersion. RESTORE is internal to reversal."
+      properties:
+        op: {type: string, enum: [CREATE, UPDATE, DELETE]}
+        recordId: {type: string, format: uuid}
+        expectedVersion: {type: integer, minimum: 0}
+        adjustPct: {type: string, description: "Percentage change applied to the stored amount; greater than -100."}
+        record: {$ref: "#/components/schemas/ConditionRecordInput"}
+    JournalRequest:
+      type: object
+      required: [legalEntityId, name, lines]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        name: {type: string, minLength: 1, maxLength: 120}
+        smartRound: {type: boolean, description: "Apply smart rounding bands to adjusted amounts (FR-26.7)."}
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 100000
+          items: {$ref: "#/components/schemas/JournalLineInput"}
+    JournalLineError:
+      type: object
+      required: [lineNo, code, detail]
+      properties:
+        lineNo: {type: integer}
+        code: {type: string}
+        detail: {type: string}
+    Journal:
+      type: object
+      required: [id, legalEntityId, name, status, smartRound, lineCount, errorCount, createdAt, errors]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        name: {type: string}
+        status: {type: string, enum: [OPEN, VALIDATED, POSTED, REVERSED]}
+        smartRound: {type: boolean}
+        lineCount: {type: integer}
+        errorCount: {type: integer}
+        reversesJournalId: {type: string, format: uuid}
+        reversedByJournalId: {type: string, format: uuid}
+        postedAt: {type: string, format: date-time}
+        createdAt: {type: string, format: date-time}
+        errors:
+          type: array
+          items: {$ref: "#/components/schemas/JournalLineError"}
+        lines:
+          type: array
+          description: Set on GET /journals/{id} only.
+          items: {$ref: "#/components/schemas/JournalLine"}
+        linesTruncated: {type: boolean}
+    JournalLine:
+      type: object
+      required: [lineNo, op, recordId, expectedVersion, adjustPct, errors]
+      properties:
+        lineNo: {type: integer}
+        op: {type: string, enum: [CREATE, UPDATE, DELETE, RESTORE]}
+        recordId: {type: string, format: uuid}
+        expectedVersion: {type: integer}
+        adjustPct: {type: string}
+        before: {$ref: "#/components/schemas/ConditionRecord"}
+        after: {$ref: "#/components/schemas/ConditionRecord"}
+        errors:
+          type: array
+          items: {$ref: "#/components/schemas/JournalLineError"}
+    Tier:
+      type: object
+      required: [from]
+      properties:
+        from: {type: string, description: "Threshold: cumulative basis value or quantity."}
+        ratePct: {type: string, description: "NET_AMOUNT tiers: percent of net value."}
+        amountPerUnit: {type: string, description: "QUANTITY tiers: amount per unit."}
+    RebateAgreementInput:
+      type: object
+      required: [legalEntityId, name, basis, period, tiers, currency, validFrom, validTo]
+      description: Exactly one of customerId or customerGroupId is required.
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        name: {type: string, minLength: 1, maxLength: 120}
+        customerId: {type: string, format: uuid}
+        customerGroupId: {type: string, format: uuid}
+        basis: {type: string, enum: [NET_AMOUNT, QUANTITY]}
+        period: {type: string, enum: [MONTH, QUARTER, YEAR]}
+        tiers:
+          type: array
+          minItems: 1
+          items: {$ref: "#/components/schemas/Tier"}
+        currency: {type: string, pattern: "^[A-Z]{3}$"}
+        validFrom: {type: string, format: date}
+        validTo: {type: string, format: date}
+        accrualAccount: {type: string, default: "2150"}
+        expenseAccount: {type: string, default: "4150"}
+    RebateAgreement:
+      allOf:
+        - $ref: "#/components/schemas/RebateAgreementInput"
+        - type: object
+          required: [id, status]
+          properties:
+            id: {type: string, format: uuid}
+            status: {type: string, enum: [ACTIVE]}
+    RebateAccrualInput:
+      type: object
+      required: [agreementId, invoiceLineId, invoiceDate, value, quantity, currency]
+      properties:
+        agreementId: {type: string, format: uuid}
+        invoiceLineId: {type: string, minLength: 1, maxLength: 128}
+        invoiceDate: {type: string, format: date}
+        value: {type: string, description: "Invoice line net value."}
+        quantity: {type: string}
+        currency: {type: string, pattern: "^[A-Z]{3}$"}
+    RebateAccrual:
+      type: object
+      required: [id, agreementId, periodId, invoiceLineId, invoiceDate, basisValue, basisQuantity, amount, currency, status]
+      properties:
+        id: {type: string, format: uuid}
+        agreementId: {type: string, format: uuid}
+        periodId: {type: string}
+        invoiceLineId: {type: string}
+        invoiceDate: {type: string, format: date}
+        basisValue: {type: string}
+        basisQuantity: {type: string}
+        amount: {type: string, description: "Accrued amount; posts Dr 4150 / Cr 2150."}
+        currency: {type: string}
+        status: {type: string, enum: [ACCRUED, ADJUSTED, SETTLED, REVERSED]}

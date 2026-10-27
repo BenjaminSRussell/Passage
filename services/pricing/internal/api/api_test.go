@@ -22,20 +22,28 @@ import (
 
 const (
 	legalEntity = "00000000-0000-0000-0001-000000000001"
-	allDuties   = "pricing.view,pricing.maintain"
+	allDuties   = "pricing.view,pricing.maintain,pricing.journal.post,pricing.rebate.maintain,pricing.rebate.view"
 )
 
 // fakeStore mirrors the Postgres store's rules (overlap via domain.Conflict, state, version).
+// Journal and rebate behaviour lives in fake_journal_test.go.
 type fakeStore struct {
-	mu       sync.Mutex
-	records  map[string]store.Entry
-	seq      int
-	keys     []string // Idempotency-Key values received by lifecycle commands
-	lastList store.Filter
-	pingErr  error
+	mu         sync.Mutex
+	records    map[string]store.Entry
+	seq        int
+	keys       []string // Idempotency-Key values received by lifecycle commands
+	lastList   store.Filter
+	pingErr    error
+	journals   map[string]*store.Journal
+	agreements map[string]domain.RebateAgreement
+	periods    map[string]*fakePeriod
+	accruals   map[string]store.Accrual
 }
 
-func newFake() *fakeStore { return &fakeStore{records: map[string]store.Entry{}} }
+func newFake() *fakeStore {
+	return &fakeStore{records: map[string]store.Entry{}, journals: map[string]*store.Journal{},
+		agreements: map[string]domain.RebateAgreement{}, periods: map[string]*fakePeriod{}, accruals: map[string]store.Accrual{}}
+}
 
 func (f *fakeStore) CreateRecord(_ context.Context, in store.Entry, _ string) (store.Entry, error) {
 	f.mu.Lock()

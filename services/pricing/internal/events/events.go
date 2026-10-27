@@ -7,7 +7,34 @@ package events
 const (
 	ConditionRecordActivated = "dev.passage.pricing.conditionrecord.activated.v1"
 	ConditionRecordWithdrawn = "dev.passage.pricing.conditionrecord.withdrawn.v1"
+	JournalPosted            = "dev.passage.pricing.journal.posted.v1"
+	RebateAccrualPosted      = "dev.passage.pricing.rebateaccrual.posted.v1"
 )
+
+// JournalPostedData is the payload of journal.posted (post and reverse, FR-26.9).
+type JournalPostedData struct {
+	JournalID     string `json:"journal_id"`
+	LegalEntityID string `json:"legal_entity_id"`
+	LineCount     int    `json:"line_count"`
+	// ReversedJournalID is set when this journal reverses another.
+	ReversedJournalID string `json:"reversed_journal_id,omitempty"`
+}
+
+// RebateAccrualPostedData is the payload of rebateaccrual.posted. The ledger (w11) posts
+// Dr DebitAccount / Cr CreditAccount for Amount when it consumes the event (FR-26.11;
+// 4150 / 2150 unless the agreement names other accounts). Amount is negative for a
+// credit note or a tier recompute that lowers the period.
+type RebateAccrualPostedData struct {
+	AccrualID     string `json:"accrual_id"`
+	LegalEntityID string `json:"legal_entity_id"`
+	AgreementID   string `json:"agreement_id"`
+	PeriodID      string `json:"period_id"`
+	InvoiceLineID string `json:"invoice_line_id"`
+	Amount        string `json:"amount"`
+	Currency      string `json:"currency"`
+	DebitAccount  string `json:"debit_account"`
+	CreditAccount string `json:"credit_account"`
+}
 
 // ConditionRecordData is the payload of conditionrecord.activated. Keys are
 // carried, never customer names or personal data.
@@ -28,6 +55,8 @@ type ConditionRecordData struct {
 	Version       int    `json:"version"`
 	// Retroactive is true when valid_from is before the activation day (BR-26.7).
 	Retroactive bool `json:"retroactive"`
+	// JournalID names the price journal that posted or reversed the record; empty for a single activation.
+	JournalID string `json:"journal_id,omitempty"`
 }
 
 // ConditionRecordWithdrawnData is the payload of conditionrecord.withdrawn.

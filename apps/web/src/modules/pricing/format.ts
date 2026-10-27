@@ -3,8 +3,22 @@ import type { ConditionRecord, ConditionType } from "./api/client";
 export const TYPE_LABELS: Record<ConditionType, string> = {
   PRICE: "Price",
   LINE_DISC: "Line discount",
+  MULTILINE_DISC: "Multiline discount",
   TOTAL_DISC: "Total discount",
+  SURCHARGE: "Surcharge",
 };
+
+/** Label of the amount field for a condition type: a price, a surcharge, or an amount off. */
+export function amountLabel(type: ConditionType): string {
+  if (type === "PRICE") return "Price";
+  if (type === "SURCHARGE") return "Surcharge amount";
+  return "Amount off";
+}
+
+/** Order-level conditions apply to the whole order, so they take All products. */
+export function isOrderLevel(type: ConditionType): boolean {
+  return type === "TOTAL_DISC" || type === "SURCHARGE";
+}
 
 /** Who a record applies to, in words. */
 export function describeCustomer(r: Pick<ConditionRecord, "customerKind" | "customerKey">): string {
@@ -45,3 +59,21 @@ export function addDays(day: string, days: number): string {
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const DAY = /^\d{4}-\d{2}-\d{2}$/;
 export const DECIMAL = /^\d+(\.\d+)?$/;
+export const SIGNED_DECIMAL = /^-?\d+(\.\d+)?$/;
+
+const SCALE = 6;
+
+/** Exact sum of decimal strings (up to 6 places, as the service sends them); no floating point. */
+export function sumDecimals(values: string[]): string {
+  let total = 0n;
+  for (const raw of values) {
+    const negative = raw.startsWith("-");
+    const [whole, fraction = ""] = raw.replace(/^[-+]/, "").split(".");
+    const scaled = BigInt((whole || "0") + fraction.padEnd(SCALE, "0").slice(0, SCALE));
+    total += negative ? -scaled : scaled;
+  }
+  const negative = total < 0n;
+  const digits = (negative ? -total : total).toString().padStart(SCALE + 1, "0");
+  const fraction = digits.slice(-SCALE).replace(/0+$/, "");
+  return `${negative ? "-" : ""}${digits.slice(0, -SCALE)}${fraction ? `.${fraction}` : ""}`;
+}

@@ -64,6 +64,17 @@ type Store interface {
 	ActiveRecords(ctx context.Context, legalEntityID, currency string, asOf time.Time) ([]domain.Record, error)
 	ActivateRecord(ctx context.Context, id string, version int, idempotencyKey string) (Entry, error)
 	WithdrawRecord(ctx context.Context, id string, version int, reason, idempotencyKey string) (Entry, error)
+	CreateJournal(ctx context.Context, in JournalInput, idempotencyKey string) (Journal, error)
+	ListJournals(ctx context.Context, f JournalFilter) ([]Journal, error)
+	GetJournal(ctx context.Context, id string) (Journal, error)
+	ValidateJournal(ctx context.Context, id string) (Journal, error)
+	PostJournal(ctx context.Context, id, idempotencyKey string) (Journal, error)
+	ReverseJournal(ctx context.Context, id, idempotencyKey string) (Journal, error)
+	CreateAgreement(ctx context.Context, a domain.RebateAgreement, idempotencyKey string) (domain.RebateAgreement, error)
+	GetAgreement(ctx context.Context, id string) (domain.RebateAgreement, error)
+	ListAgreements(ctx context.Context, legalEntityID string, limit int) ([]domain.RebateAgreement, error)
+	AccrueInvoiceLine(ctx context.Context, in AccrualInput) (Accrual, bool, error)
+	ListAccruals(ctx context.Context, f AccrualFilter) ([]Accrual, error)
 	Ping(ctx context.Context) error
 }
 
@@ -248,34 +259,43 @@ func commandHash(parts ...string) string {
 // command, and idempotency_key_reuse when it was used for a different one. It runs
 // after lockRecord, so a concurrent retry waits for the first call and then replays it.
 func replayCommand(ctx context.Context, tx pgx.Tx, tenantID, key, hash string) (Entry, bool, error) {
+	var e Entry
+	ok, err := replayJSON(ctx, tx, tenantID, key, hash, &e)
+	return e, ok, err
+}
+
+// rememberCommand stores the response of a lifecycle command under its key.
+func rememberCommand(ctx context.Context, tx pgx.Tx, tenantID, key, hash string, e Entry) error {
+	return rememberJSON(ctx, tx, tenantID, key, hash, e)
+}
+
+// replayJSON decodes the response stored under key into out and reports whether one
+// existed. A key stored for a different command hash is idempotency_key_reuse.
+func replayJSON(ctx context.Context, tx pgx.Tx, tenantID, key, hash string, out any) (bool, error) {
 	if key == "" {
-		return Entry{}, false, nil
+		return false, nil
 	}
 	var stored string
 	var body []byte
 	err := tx.QueryRow(ctx, `select request_hash, response_body from idempotency_keys where tenant_id = $1 and key = $2`, tenantID, key).Scan(&stored, &body)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return Entry{}, false, nil
+		return false, nil
 	}
 	if err != nil {
-		return Entry{}, false, err
+		return false, err
 	}
 	if stored != hash {
-		return Entry{}, false, httpx.NewProblem(http.StatusUnprocessableEntity, CodeIdempotencyUse, "Idempotency-Key was already used with a different request")
+		return false, httpx.NewProblem(http.StatusUnprocessableEntity, CodeIdempotencyUse, "Idempotency-Key was already used with a different request")
 	}
-	var e Entry
-	if err := json.Unmarshal(body, &e); err != nil {
-		return Entry{}, false, err
-	}
-	return e, true, nil
+	return true, json.Unmarshal(body, out)
 }
 
-// rememberCommand stores the response of a lifecycle command under its key.
-func rememberCommand(ctx context.Context, tx pgx.Tx, tenantID, key, hash string, e Entry) error {
+// rememberJSON stores a command's response under its key, in the command's transaction.
+func rememberJSON(ctx context.Context, tx pgx.Tx, tenantID, key, hash string, v any) error {
 	if key == "" {
 		return nil
 	}
-	body, err := json.Marshal(e)
+	body, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
@@ -306,6 +326,12 @@ func (s *Postgres) ActivateRecord(ctx context.Context, id string, version int, i
 		}
 		if cur.Status != domain.StatusDraft {
 			return httpx.NewProblem(http.StatusConflict, CodeStateInvalid, "only DRAFT records can be activated")
+		}
+		// A price journal posting for this legal entity holds the entity lock exclusively and
+		// checks overlaps against every ACTIVE record; activations share it, so the two never
+		// validate against each other's uncommitted state.
+		if err := lockEntityShared(ctx, tx, p.TenantID, cur.LegalEntityID); err != nil {
+			return err
 		}
 		key := KeyHash(cur.Record)
 		if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, p.TenantID+"|"+key); err != nil {

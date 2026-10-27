@@ -3,7 +3,7 @@
 
 export const base = "/api/v1/pricing";
 
-export const CONDITION_TYPES = ["PRICE", "LINE_DISC", "TOTAL_DISC"] as const;
+export const CONDITION_TYPES = ["PRICE", "LINE_DISC", "MULTILINE_DISC", "TOTAL_DISC", "SURCHARGE"] as const;
 export type ConditionType = (typeof CONDITION_TYPES)[number];
 
 export const RECORD_STATUSES = ["DRAFT", "ACTIVE", "EXPIRED", "WITHDRAWN"] as const;
@@ -109,6 +109,8 @@ export interface ResolveResponse {
   lines: ResolvedLine[];
   subtotal: string;
   totalDiscount: string;
+  /** Small-order surcharge included in orderNet (FR-26.6); "0" when none applied. */
+  surcharge: string;
   orderNet: string;
   applied: AppliedCondition[];
   explainRef: string;
@@ -210,4 +212,175 @@ export function withdrawConditionRecord(id: string, version: number, reason: str
 /** POST /resolve - price a document against the stored ACTIVE records, with the explain trace. */
 export function resolvePrice(body: ResolveRequest, explain = true): Promise<ResolveResponse> {
   return post<ResolveResponse>(`/resolve?explain=${explain ? "true" : "false"}`, body);
+}
+
+function query(params: Record<string, string | number | undefined>): string {
+  const q = new URLSearchParams();
+  for (const [name, value] of Object.entries(params)) {
+    if (value !== undefined && value !== "") q.set(name, String(value));
+  }
+  const text = q.toString();
+  return text ? `?${text}` : "";
+}
+
+async function items<T>(path: string, signal?: AbortSignal): Promise<T[]> {
+  const body = await send<{ items?: T[] }>(path, {}, signal);
+  if (!Array.isArray(body.items)) {
+    throw new PricingApiError(0, "COM-0001", "The response has no items");
+  }
+  return body.items;
+}
+
+// ---- Price journals (FR-26.9): mass create, update and delete; validate, post atomically, reverse.
+
+export const JOURNAL_STATUSES = ["OPEN", "VALIDATED", "POSTED", "REVERSED"] as const;
+export type JournalStatus = (typeof JOURNAL_STATUSES)[number];
+export type JournalOp = "CREATE" | "UPDATE" | "DELETE";
+
+/** One journal line as sent (OpenAPI JournalLineInput). UPDATE takes adjustPct or record. */
+export interface JournalLineInput {
+  op: JournalOp;
+  recordId?: string;
+  expectedVersion?: number;
+  adjustPct?: string;
+  record?: ConditionRecordInput;
+}
+
+export interface JournalRequest {
+  legalEntityId: string;
+  name: string;
+  smartRound: boolean;
+  lines: JournalLineInput[];
+}
+
+export interface JournalLineError {
+  lineNo: number;
+  code: string;
+  detail: string;
+}
+
+export interface JournalLine {
+  lineNo: number;
+  op: JournalOp | "RESTORE";
+  recordId: string;
+  expectedVersion: number;
+  adjustPct: string;
+  before?: ConditionRecord;
+  after?: ConditionRecord;
+  errors: JournalLineError[];
+}
+
+export interface Journal {
+  id: string;
+  legalEntityId: string;
+  name: string;
+  status: JournalStatus;
+  smartRound: boolean;
+  lineCount: number;
+  errorCount: number;
+  reversesJournalId?: string;
+  reversedByJournalId?: string;
+  postedAt?: string;
+  createdAt: string;
+  errors: JournalLineError[];
+  lines?: JournalLine[];
+  linesTruncated?: boolean;
+}
+
+export interface JournalFilter {
+  legalEntityId?: string;
+  status?: JournalStatus | "";
+  limit?: number;
+}
+
+/** GET /journals - the price journal log, newest first, without lines. */
+export function listPriceJournals(filter: JournalFilter = {}, signal?: AbortSignal): Promise<Journal[]> {
+  return items<Journal>(`/journals${query({ ...filter })}`, signal);
+}
+
+/** GET /journals/{id} - the journal with its first 1,000 lines and every line error. */
+export function getPriceJournal(id: string, signal?: AbortSignal): Promise<Journal> {
+  return send<Journal>(`/journals/${encodeURIComponent(id)}`, {}, signal);
+}
+
+export function createPriceJournal(body: JournalRequest, key: string = newKey()): Promise<Journal> {
+  return post<Journal>("/journals", body, key);
+}
+
+/** POST /journals/{id}:validate - checks every line; the journal stays OPEN with line errors when any fail. */
+export function validatePriceJournal(id: string): Promise<Journal> {
+  return post<Journal>(`/journals/${encodeURIComponent(id)}:validate`, {});
+}
+
+/** POST /journals/{id}:post - 422 PRC-0005 names the lines when something changed since validation. */
+export function postPriceJournal(id: string, key: string = newKey()): Promise<Journal> {
+  return post<Journal>(`/journals/${encodeURIComponent(id)}:post`, {}, key);
+}
+
+/** POST /journals/{id}:reverse - returns the new reversing journal. */
+export function reversePriceJournal(id: string, key: string = newKey()): Promise<Journal> {
+  return post<Journal>(`/journals/${encodeURIComponent(id)}:reverse`, {}, key);
+}
+
+// ---- Rebate agreements and accruals (FR-26.11, BR-26.8).
+
+export type RebateBasis = "NET_AMOUNT" | "QUANTITY";
+export type RebatePeriod = "MONTH" | "QUARTER" | "YEAR";
+
+export interface RebateTier {
+  from: string;
+  ratePct?: string;
+  amountPerUnit?: string;
+}
+
+export interface RebateAgreementInput {
+  legalEntityId: string;
+  name: string;
+  customerId?: string;
+  customerGroupId?: string;
+  basis: RebateBasis;
+  period: RebatePeriod;
+  tiers: RebateTier[];
+  currency: string;
+  validFrom: string;
+  validTo: string;
+  accrualAccount?: string;
+  expenseAccount?: string;
+}
+
+export interface RebateAgreement extends RebateAgreementInput {
+  id: string;
+  status: "ACTIVE";
+  accrualAccount: string;
+  expenseAccount: string;
+}
+
+export interface RebateAccrual {
+  id: string;
+  agreementId: string;
+  periodId: string;
+  invoiceLineId: string;
+  invoiceDate: string;
+  basisValue: string;
+  basisQuantity: string;
+  amount: string;
+  currency: string;
+  status: "ACCRUED" | "ADJUSTED" | "SETTLED" | "REVERSED";
+}
+
+export function listRebateAgreements(legalEntityId = "", signal?: AbortSignal): Promise<RebateAgreement[]> {
+  return items<RebateAgreement>(`/rebates/agreements${query({ legalEntityId })}`, signal);
+}
+
+export function getRebateAgreement(id: string, signal?: AbortSignal): Promise<RebateAgreement> {
+  return send<RebateAgreement>(`/rebates/agreements/${encodeURIComponent(id)}`, {}, signal);
+}
+
+export function createRebateAgreement(body: RebateAgreementInput, key: string = newKey()): Promise<RebateAgreement> {
+  return post<RebateAgreement>("/rebates/agreements", body, key);
+}
+
+/** GET /rebates/accruals - accrual rows of an agreement, optionally for one period (2027-03, 2027-Q1, 2027). */
+export function listRebateAccruals(filter: { agreementId?: string; period?: string } = {}, signal?: AbortSignal): Promise<RebateAccrual[]> {
+  return items<RebateAccrual>(`/rebates/accruals${query(filter)}`, signal);
 }

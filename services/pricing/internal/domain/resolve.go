@@ -68,9 +68,11 @@ type Result struct {
 	Lines         []LineResult    `json:"lines"`
 	Subtotal      decimal.Decimal `json:"subtotal"`
 	TotalDiscount decimal.Decimal `json:"totalDiscount"`
-	OrderNet      decimal.Decimal `json:"orderNet"`
-	Applied       []Applied       `json:"applied"`
-	Trace         []TraceStep     `json:"trace"`
+	// Surcharge is the small-order surcharge added to the order net (FR-26.6); zero when none applied.
+	Surcharge decimal.Decimal `json:"surcharge"`
+	OrderNet  decimal.Decimal `json:"orderNet"`
+	Applied   []Applied       `json:"applied"`
+	Trace     []TraceStep     `json:"trace"`
 }
 
 // Resolve prices every line and then the order. It is a pure function of its input.
@@ -82,15 +84,17 @@ func Resolve(in Input) Result {
 		steps = DefaultSteps()
 	}
 	recs := sortedRecords(in.Records)
+	groups := groupQuantities(in.Lines)
 	res := Result{Currency: in.Header.Currency, Lines: make([]LineResult, 0, len(in.Lines)), Applied: []Applied{}, Trace: []TraceStep{}}
-	sum, base, qty := decimal.Zero, decimal.Zero, decimal.Zero
+	sum, base, qty, allQty := decimal.Zero, decimal.Zero, decimal.Zero, decimal.Zero
 	for _, line := range in.Lines {
-		lr := resolveLine(in.Header, line, recs, steps)
+		lr := resolveLine(in.Header, line, recs, steps, groups[groupKey(line)])
 		res.Lines = append(res.Lines, lr)
 		if lr.Error != "" {
 			continue
 		}
 		sum = sum.Add(lr.LineNet)
+		allQty = allQty.Add(line.Quantity)
 		if !lr.Exclusive {
 			base = base.Add(lr.LineNet)
 			qty = qty.Add(line.Quantity)
@@ -107,10 +111,55 @@ func Resolve(in Input) Result {
 			res.Applied = append(res.Applied, Applied{Type: TypeTotalDisc, RecordID: rec.ID, Access: access})
 		}
 	}
+	// Small-order surcharge (FR-26.6): a separate order-level condition, applied when the
+	// subtotal of priced lines is positive and below the threshold. It is reported on its
+	// own (Surcharge) so the caller can post it to its revenue account, and added to OrderNet.
+	if hasStep(steps, TypeSurcharge) && in.SmallOrderThreshold.IsPositive() && sum.IsPositive() && sum.LessThan(in.SmallOrderThreshold) {
+		rec, value, access, step := evaluate(TypeSurcharge, in.Header, Line{Quantity: allQty}, recs, res.OrderNet)
+		res.Trace = append(res.Trace, step)
+		if rec != nil {
+			surcharged := roundMinor(value, in.Header.Currency)
+			res.Surcharge = surcharged.Sub(res.OrderNet)
+			res.OrderNet = surcharged
+			res.Applied = append(res.Applied, Applied{Type: TypeSurcharge, RecordID: rec.ID, Access: access})
+		}
+	}
 	return res
 }
 
-func resolveLine(h Header, line Line, recs []Record, steps []ConditionType) LineResult {
+// orderLevel reports whether t prices the whole order rather than one line.
+func orderLevel(t ConditionType) bool { return t == TypeTotalDisc || t == TypeSurcharge }
+
+// groupKey identifies one multiline group: lines sharing product group and unit (BR-26.4).
+func groupKey(l Line) string { return l.ProductGroupID + "\x00" + l.Unit }
+
+// groupQuantities sums quantities per multiline group over the whole document.
+// Lines without a product group are their own group and are not summed.
+func groupQuantities(lines []Line) map[string]decimal.Decimal {
+	out := map[string]decimal.Decimal{}
+	for _, l := range lines {
+		if l.ProductGroupID == "" {
+			continue
+		}
+		k := groupKey(l)
+		out[k] = out[k].Add(l.Quantity)
+	}
+	return out
+}
+
+// SmallOrderThreshold is the reference small-order threshold per currency (FR-26.6): 250 USD, 200 EUR.
+// Other currencies have none (zero).
+func SmallOrderThreshold(currency string) decimal.Decimal {
+	switch currency {
+	case "USD":
+		return decimal.NewFromInt(250)
+	case "EUR":
+		return decimal.NewFromInt(200)
+	}
+	return decimal.Zero
+}
+
+func resolveLine(h Header, line Line, recs []Record, steps []ConditionType, groupQty decimal.Decimal) LineResult {
 	lr := LineResult{No: line.No, Unit: line.Unit, Quantity: line.Quantity, Applied: []Applied{}, Trace: []TraceStep{}}
 	rec, value, access, step := evaluate(TypePrice, h, line, recs, decimal.Zero)
 	lr.Trace = append(lr.Trace, step)
@@ -123,10 +172,15 @@ func resolveLine(h Header, line Line, recs []Record, steps []ConditionType) Line
 	lr.UnitPrice = value
 	net, suppressed := value, rec.Exclusive
 	for _, t := range steps {
-		if t == TypePrice || t == TypeTotalDisc || suppressed {
+		if t == TypePrice || t == TypeTotalDisc || t == TypeSurcharge || suppressed {
 			continue
 		}
-		rec, v, access, step := evaluate(t, h, line, recs, net)
+		l := line
+		if t == TypeMultiline && line.ProductGroupID != "" {
+			// Multiline records match on the summed group quantity, not the line quantity.
+			l.Quantity = groupQty
+		}
+		rec, v, access, step := evaluate(t, h, l, recs, net)
 		lr.Trace = append(lr.Trace, step)
 		if rec == nil {
 			continue
@@ -196,9 +250,9 @@ func candidates(t ConditionType, h Header, line Line, recs []Record, acc Access,
 		if r.Type != t || r.Status != StatusActive || r.Currency != h.Currency || !inValidity(*r, h.PricingDate) {
 			continue
 		}
-		// TOTAL_DISC is an order-level condition: the order has no single unit, so the
-		// record's unit is not compared (its from_quantity applies to the summed quantity).
-		if t != TypeTotalDisc && r.Unit != "" && r.Unit != line.Unit {
+		// TOTAL_DISC and SURCHARGE are order-level conditions: the order has no single unit,
+		// so the record's unit is not compared (its from_quantity applies to the summed quantity).
+		if !orderLevel(t) && r.Unit != "" && r.Unit != line.Unit {
 			continue
 		}
 		if r.FromQuantity.GreaterThan(line.Quantity) {
@@ -252,6 +306,10 @@ func apply(t ConditionType, current decimal.Decimal, r *Record) decimal.Decimal 
 	f := pctFactor(r.DiscPct1, r.DiscPct2)
 	if t == TypePrice {
 		return r.Amount.Mul(f).RoundBank(6)
+	}
+	if t == TypeSurcharge {
+		// Surcharge: current + fixed amount + DiscPct1 percent of current (FR-26.6).
+		return current.Add(r.Amount).Add(current.Mul(r.DiscPct1).Shift(-2)).RoundBank(6)
 	}
 	base := current.Sub(r.Amount)
 	if base.IsNegative() {
@@ -341,7 +399,7 @@ func (e *Error) Error() string { return e.Code + ": " + e.Detail }
 func ValidateRecord(r Record) *Error {
 	fields := map[string]string{}
 	if !ValidType(r.Type) {
-		fields["type"] = "must be PRICE, LINE_DISC or TOTAL_DISC"
+		fields["type"] = "must be PRICE, LINE_DISC, MULTILINE_DISC, TOTAL_DISC or SURCHARGE"
 	}
 	if !isCurrencyCode(r.Currency) {
 		fields["currency"] = "must be an ISO 4217 code in capitals"
@@ -368,10 +426,19 @@ func ValidateRecord(r Record) *Error {
 	default:
 		fields["productKind"] = "must be product, product_group, variant or all"
 	}
-	// TOTAL_DISC prices the order, which has no product: a product-keyed total
-	// discount could never apply, so it is refused instead of stored silently.
-	if r.Type == TypeTotalDisc && r.ProductKind != ProductKindAll {
-		fields["productKind"] = "must be all for TOTAL_DISC (an order-level discount)"
+	// TOTAL_DISC and SURCHARGE price the order, which has no product: a product-keyed
+	// order condition could never apply, so it is refused instead of stored silently.
+	if orderLevel(r.Type) && r.ProductKind != ProductKindAll {
+		fields["productKind"] = "must be all for " + string(r.Type) + " (an order-level condition)"
+	}
+	// MULTILINE_DISC sums the quantity of lines sharing a product group (BR-26.4), so it is
+	// keyed by product group or applies to all products.
+	if r.Type == TypeMultiline && r.ProductKind != ProductKindGroup && r.ProductKind != ProductKindAll {
+		fields["productKind"] = "must be product_group or all for MULTILINE_DISC"
+	}
+	// A surcharge adds a fixed amount and one percentage; a second percentage has no meaning.
+	if r.Type == TypeSurcharge && !r.DiscPct2.IsZero() {
+		fields["discPct2"] = "must be 0 for SURCHARGE"
 	}
 	if r.Amount.IsNegative() {
 		fields["amount"] = "must not be negative"
@@ -397,9 +464,13 @@ func ValidateRecord(r Record) *Error {
 	return &Error{Code: code, Detail: "condition record is invalid", Fields: fields}
 }
 
-// ValidType reports whether t is a condition type this slice supports.
+// ValidType reports whether t is a condition type this service supports.
 func ValidType(t ConditionType) bool {
-	return t == TypePrice || t == TypeLineDisc || t == TypeTotalDisc
+	switch t {
+	case TypePrice, TypeLineDisc, TypeTotalDisc, TypeMultiline, TypeSurcharge:
+		return true
+	}
+	return false
 }
 
 func isCurrencyCode(c string) bool {

@@ -11,7 +11,7 @@ import {
   type ConditionRecord,
   type Problem,
 } from "./api/client";
-import { describeCustomer, describePercent, describeProduct, TYPE_LABELS } from "./format";
+import { amountLabel, describeCustomer, describePercent, describeProduct, TYPE_LABELS } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -116,7 +116,7 @@ export function AgreementDetailPage() {
           <Detail term="From quantity" mono>
             {current.fromQuantity}
           </Detail>
-          <Detail term={current.type === "PRICE" ? "Price" : "Amount off"} mono>
+          <Detail term={amountLabel(current.type)} mono>
             {current.amount}
           </Detail>
           <Detail term="Percentages" mono>

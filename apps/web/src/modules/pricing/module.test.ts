@@ -9,18 +9,30 @@ describe("pricing module", () => {
     expect(pricing.nav.every((n) => n.to.startsWith("/pricing"))).toBe(true);
   });
 
-  it("has a list, a create form and a detail page for trade agreements, plus the workspace and simulation", () => {
+  it("has a list, a create form and a detail page for trade agreements, price journals and rebates, plus the workspace and simulation", () => {
     expect(pricing.routes.map((r) => r.path)).toEqual([
       "/pricing",
       "/pricing/agreements",
       "/pricing/agreements/new",
       "/pricing/agreements/:id",
+      "/pricing/journals",
+      "/pricing/journals/new",
+      "/pricing/journals/:id",
+      "/pricing/rebates",
+      "/pricing/rebates/new",
+      "/pricing/rebates/:id",
       "/pricing/simulate",
     ]);
   });
 
-  it("guards the navigation with the view duty", () => {
-    expect(new Set(pricing.nav.map((n) => n.duty))).toEqual(new Set(["pricing.view"]));
+  it("guards the navigation with the view duties the service enforces", () => {
+    expect(Object.fromEntries(pricing.nav.map((n) => [n.to, n.duty]))).toEqual({
+      "/pricing": "pricing.view",
+      "/pricing/agreements": "pricing.view",
+      "/pricing/journals": "pricing.view",
+      "/pricing/rebates": "pricing.rebate.view",
+      "/pricing/simulate": "pricing.view",
+    });
   });
 
   it("is auto-discovered by the registry", () => {

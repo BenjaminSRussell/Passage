@@ -16,6 +16,12 @@ const (
 	TypePrice     ConditionType = "PRICE"
 	TypeLineDisc  ConditionType = "LINE_DISC"
 	TypeTotalDisc ConditionType = "TOTAL_DISC"
+	// TypeMultiline discounts every line of a product group once the summed quantity
+	// of the group reaches the record's from_quantity (FR-26.5, BR-26.4).
+	TypeMultiline ConditionType = "MULTILINE_DISC"
+	// TypeSurcharge adds a fixed amount and/or DiscPct1 percent to the order net
+	// when the subtotal is below the small-order threshold (FR-26.6).
+	TypeSurcharge ConditionType = "SURCHARGE"
 )
 
 // Record lifecycle states (BR-26.9). Only ACTIVE records take part in resolution.
@@ -92,11 +98,13 @@ type Input struct {
 	Lines   []Line
 	Records []Record
 	Steps   []ConditionType
+	// SmallOrderThreshold is the subtotal below which SURCHARGE applies. Zero disables it.
+	SmallOrderThreshold decimal.Decimal
 }
 
 // DefaultSteps is the reference pricing procedure (AX_STANDARD subset).
 func DefaultSteps() []ConditionType {
-	return []ConditionType{TypePrice, TypeLineDisc, TypeTotalDisc}
+	return []ConditionType{TypePrice, TypeLineDisc, TypeMultiline, TypeTotalDisc, TypeSurcharge}
 }
 
 // Access is one step of an access sequence (BR-26.1 step 2), most specific first.

@@ -96,9 +96,10 @@ const active = [
 const draft = record({ id: R3, status: "DRAFT", version: 1, productKey: "SHIRT", currency: "EUR", fromQuantity: "500", amount: "9" });
 
 describe("Pricing workspace", () => {
-  it("counts active and draft agreements and lists those expiring within 30 days", async () => {
+  it("counts active and draft agreements, journals to post, and lists agreements expiring within 30 days", async () => {
     handler = (url) => {
       if (url.pathname.endsWith("/condition-records")) return json(200, { items: url.searchParams.get("status") === "DRAFT" ? [draft] : active });
+      if (url.pathname.endsWith("/journals")) return json(200, { items: url.searchParams.get("status") === "OPEN" ? [{ id: "j1" }, { id: "j2" }] : [{ id: "j3" }] });
       return undefined;
     };
     const { container } = renderAt("/pricing");
@@ -107,17 +108,23 @@ describe("Pricing workspace", () => {
     await waitFor(() => expect(tiles).toHaveTextContent("Active agreements 2"));
     expect(tiles).toHaveTextContent("Drafts to activate 1");
     expect(tiles).toHaveTextContent("Expiring in 30 days 1");
+    expect(tiles).toHaveTextContent("Journals to post 3");
     const table = screen.getByRole("table", { name: "Expiring agreements" });
     expect(within(table).getByText("BOLT")).toBeInTheDocument();
     expect(within(table).queryByText("All products")).toBeNull();
-    expect(calls.map((c) => c.url.searchParams.get("status")).sort()).toEqual(["ACTIVE", "DRAFT"]);
+    expect(calls.map((c) => `${c.url.pathname.split("/").at(-1)}:${c.url.searchParams.get("status")}`).sort()).toEqual([
+      "condition-records:ACTIVE",
+      "condition-records:DRAFT",
+      "journals:OPEN",
+      "journals:VALIDATED",
+    ]);
     expect(pageViolations(container)).toEqual([]);
   });
 
   it("shows the error with a retry when the service fails", async () => {
     let fail = true;
     handler = (url) => {
-      if (!url.pathname.endsWith("/condition-records")) return undefined;
+      if (!url.pathname.endsWith("/condition-records") && !url.pathname.endsWith("/journals")) return undefined;
       return fail ? json(503, { code: "COM-0500", detail: "internal error" }) : json(200, { items: [] });
     };
     renderAt("/pricing");
@@ -325,6 +332,7 @@ const resolved: ResolveResponse = {
   ],
   subtotal: "256.5",
   totalDiscount: "0",
+  surcharge: "0",
   orderNet: "256.5",
   applied: [],
   explainRef: `sha256:${"a".repeat(64)}`,
@@ -398,6 +406,10 @@ describe("form validation", () => {
     expect(validateAgreement({ ...ok, type: "LINE_DISC", amount: "", discPct1: "10" })).toEqual({});
     expect(validateAgreement({ ...ok, productKind: "variant" }).variant).toBeDefined();
     expect(validateAgreement({ ...ok, type: "TOTAL_DISC", discPct1: "2" }).productKind).toMatch(/All products/);
+    expect(validateAgreement({ ...ok, type: "SURCHARGE", amount: "15" }).productKind).toMatch(/surcharge applies to the whole order/);
+    expect(validateAgreement({ ...ok, type: "SURCHARGE", productKind: "all", productKey: "", amount: "15", discPct2: "5" }).discPct2).toMatch(/one percentage/);
+    expect(validateAgreement({ ...ok, type: "MULTILINE_DISC", discPct1: "3" }).productKind).toMatch(/Product group/);
+    expect(validateAgreement({ ...ok, type: "MULTILINE_DISC", productKind: "product_group", productKey: "PG-A", amount: "", discPct1: "3" })).toEqual({});
     expect(validateAgreement({ ...ok, type: "TOTAL_DISC", discPct1: "2", productKind: "all", productKey: "" })).toEqual({});
   });
 
