@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: Passage Inventory events
-  version: 0.16.2
+  version: 0.16.3
   description: |
     Published through the transactional outbox in the same database transaction as the
     posting, relayed by Debezium. CloudEvents 1.0 envelope (tenantid, correlationid,
@@ -37,6 +37,13 @@ channels:
         $ref: '#/components/messages/BlockingCreated'
       blockingReleased:
         $ref: '#/components/messages/BlockingReleased'
+  transfer:
+    address: passage.inventory.transfer
+    messages:
+      transferShipped:
+        $ref: '#/components/messages/TransferShipped'
+      transferReceived:
+        $ref: '#/components/messages/TransferReceived'
 operations:
   publishTransactionPosted:
     action: send
@@ -58,6 +65,10 @@ operations:
     action: send
     channel: { $ref: '#/channels/blocking' }
     summary: Stock was blocked or quarantined, or a blocking was released (FR-16.8)
+  publishTransfer:
+    action: send
+    channel: { $ref: '#/channels/transfer' }
+    summary: A transfer order was shipped, or a receipt was booked against it (FR-16.15)
 components:
   messages:
     TransactionPosted:
@@ -102,22 +113,65 @@ components:
       contentType: application/json
       payload:
         $ref: '#/components/schemas/BlockingData'
+    TransferShipped:
+      name: dev.passage.inventory.transfer.shipped.v1
+      x-passage-type: dev.passage.inventory.transfer.shipped.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/TransferData'
+    TransferReceived:
+      name: dev.passage.inventory.transfer.received.v1
+      x-passage-type: dev.passage.inventory.transfer.received.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/TransferData'
   schemas:
+    TransferData:
+      type: object
+      required: [transferOrderId, legalEntityId, number, status, fromWarehouse, toWarehouse, transitWarehouse, shipDate, receiptDate, lines]
+      description: |
+        Lines are the lines this event moved; qty is the quantity moved on the line by this event,
+        shippedQty and receivedQty the line totals after it. Each movement is also a valued SOLD /
+        PURCHASED transaction pair (sourceType TRANSFER_LINE) with no GL effect.
+      properties:
+        transferOrderId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        number: { type: string }
+        status: { type: string, enum: [CREATED, SHIPPED, PARTIALLY_RECEIVED, RECEIVED, CANCELLED], description: Order status after the event }
+        fromWarehouse: { type: string }
+        toWarehouse: { type: string }
+        transitWarehouse: { type: [string, 'null'], description: Null for a one-step transfer }
+        shipDate: { type: string, format: date }
+        receiptDate: { type: [string, 'null'], format: date, description: Date of this receipt; the ship date of a one-step shipment; null on a two-step shipment }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [lineId, productId, dimensionSet, unit, qty, shippedQty, receivedQty, closed]
+            properties:
+              lineId: { type: string, format: uuid }
+              productId: { type: string, format: uuid }
+              dimensionSet: { type: object, additionalProperties: { type: string }, description: Source dimensions (shipping warehouse) }
+              unit: { type: string }
+              qty: { type: string }
+              shippedQty: { type: string }
+              receivedQty: { type: string }
+              closed: { type: boolean }
     TransactionPostedData:
       type: object
       required: [transactionId, legalEntityId, sourceType, journalId, referenceId, originId, productId, dimensionSet, qty, issueStatus, receiptStatus, physicalDate, financialDate, currency, costAmountPhysical, costAmountPosted]
       properties:
         transactionId: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
-        sourceType: { type: string, enum: [INVENT_JOURNAL_LINE, BLOCKING], description: Origin type of the transaction }
+        sourceType: { type: string, enum: [INVENT_JOURNAL_LINE, BLOCKING, TRANSFER_LINE], description: Origin type of the transaction }
         journalId: { type: [string, 'null'], format: uuid, description: Inventory journal of a journal line; null for other origins }
-        referenceId: { type: [string, 'null'], format: uuid, description: Source document of a non-journal origin (the blocking id); null for journal lines }
+        referenceId: { type: [string, 'null'], format: uuid, description: Source document of a non-journal origin (the blocking or transfer order id); null for journal lines }
         originId: { type: string, format: uuid }
         productId: { type: string, format: uuid }
         dimensionSet: { type: object, additionalProperties: { type: string } }
         qty: { type: string, description: Signed quantity; negative for issues }
-        issueStatus: { type: [string, 'null'], enum: [ON_ORDER, RESERVED_ORDERED, RESERVED_PHYSICAL, PICKED, DEDUCTED, SOLD, null], description: Set for issues; journals and blocking legs post SOLD }
-        receiptStatus: { type: [string, 'null'], enum: [ORDERED, ARRIVED, REGISTERED, RECEIVED, PURCHASED, null], description: Set for receipts; journals and blocking legs post PURCHASED }
+        issueStatus: { type: [string, 'null'], enum: [ON_ORDER, RESERVED_ORDERED, RESERVED_PHYSICAL, PICKED, DEDUCTED, SOLD, null], description: Set for issues; journals, blocking and transfer legs post SOLD }
+        receiptStatus: { type: [string, 'null'], enum: [ORDERED, ARRIVED, REGISTERED, RECEIVED, PURCHASED, null], description: Set for receipts; journals, blocking and transfer legs post PURCHASED }
         physicalDate: { type: string, format: date }
         financialDate: { type: string, format: date }
         currency: { type: string, pattern: '^[A-Z]{3}$' }

@@ -1,6 +1,6 @@
 # Inventory module (web)
 
-Wave 16 slice 1 and 2 screens for `services/inventory` (`/api/v1/inventory/...`, rewritten by the
+Wave 16 slice 1 to 3 screens for `services/inventory` (`/api/v1/inventory/...`, rewritten by the
 web BFF to the service's `/v1/inventory/...`). Built from the shell primitives in
 `src/shell/ui` and `pages.module.css`, following `apps/web/docs/design-system.md`.
 
@@ -19,6 +19,13 @@ web BFF to the service's `/v1/inventory/...`). Built from the shell primitives i
 | `/inventory/count-plans/new` | New count plan: legal entity, warehouse, currency, unit, tolerances, blind | `inventory.count.write` |
 | `/inventory/count-sheets` | Count sheets by status | `inventory.read` |
 | `/inventory/count-sheets/:id` | Count sheet: expected (hidden on blind sheets), inline count entry per line (If-Match), post; variance and count journal once posted | `inventory.read` (entry / post need `inventory.count.write` / `.post`, approval above tolerance `.approve`) |
+| `/inventory/transfer-orders` | Transfer orders by status with route and received progress | `inventory.read` |
+| `/inventory/transfer-orders/new` | New transfer order: legal entity, shipping / receiving / transit warehouse (or one-step), receiving site, planned ship date, one or more lines with source dimensions and under / over-delivery % | `inventory.transfer.write` |
+| `/inventory/transfer-orders/:id` | Transfer order: route, lines (ordered, shipped, received, in transit), Ship with date, Receive per open line with close-short, Cancel (If-Match) | `inventory.read` (ship / receive need `inventory.transfer.post`, cancel `inventory.transfer.write`) |
+| `/inventory/in-transit` | Stock in transit by order line with days in transit; lines closed short flagged for investigation | `inventory.read` |
+| `/inventory/abc-runs` | ABC classification runs with class counts | `inventory.read` |
+| `/inventory/abc-runs/new` | Run classification: legal entity, A / B / C shares (sum 100), class for zero-value products | `inventory.abc.write` |
+| `/inventory/abc-runs/:id` | ABC report: product, site, value, cumulative %, class | `inventory.read` |
 
 Every screen has loading (skeleton rows or a busy region), empty and error states; errors
 show the service's problem code.
@@ -30,8 +37,8 @@ show the service's problem code.
 - `format.ts` — labels, tones and small formatters.
 - `parts.tsx` — shared detail entry, problem alert, row action button and field-error mapping.
 
-Tests: `api/client.test.ts`, `module.test.ts`, `pages.test.tsx`, `slice2.test.tsx` (`npx vitest --run src/modules/inventory`).
+Tests: `api/client.test.ts`, `module.test.ts`, `pages.test.tsx`, `slice2.test.tsx`, `slice3.test.tsx` (`npx vitest --run src/modules/inventory`).
 
 Needs: none. No npm dependencies were added. Product and legal-entity pickers (the forms take
-ids), the workspace tiles, the quarantine disposition choice, the offline count PWA and the
-transfer screens are later slices (see `services/inventory/NOT-IMPLEMENTED.md`).
+ids), the workspace tiles, the quarantine disposition choice and the offline count PWA are later
+slices (see `services/inventory/NOT-IMPLEMENTED.md`).

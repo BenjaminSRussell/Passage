@@ -247,7 +247,7 @@ export const TRANSACTION_STATUSES = [
 ] as const;
 export type TransactionStatus = (typeof TRANSACTION_STATUSES)[number];
 
-export const SOURCE_TYPES = ["INVENT_JOURNAL_LINE", "BLOCKING"] as const;
+export const SOURCE_TYPES = ["INVENT_JOURNAL_LINE", "BLOCKING", "TRANSFER_LINE"] as const;
 export type SourceType = (typeof SOURCE_TYPES)[number];
 
 export interface Transaction {
@@ -540,4 +540,187 @@ export async function enterCount(sheetId: string, lineId: string, version: numbe
 
 export async function postCountSheet(sheetId: string, version: number): Promise<CountSheet> {
   return (await send<CountSheet>(`/count-sheets/${encodeURIComponent(sheetId)}:post`, { method: "POST", headers: { "If-Match": `"${version}"` } })).body;
+}
+
+// ---- Transfer orders and stock in transit (FR-16.15, FR-16.16) ----
+
+export const TRANSFER_STATUSES = ["CREATED", "SHIPPED", "PARTIALLY_RECEIVED", "RECEIVED", "CANCELLED"] as const;
+export type TransferStatus = (typeof TRANSFER_STATUSES)[number];
+
+export interface TransferLine {
+  id: string;
+  lineNo: number;
+  productId: string;
+  dimensions: Partial<Record<string, string>>;
+  unit: string;
+  qty: string;
+  shippedQty: string;
+  receivedQty: string;
+  inTransit: string;
+  underdeliveryPct: string;
+  overdeliveryPct: string;
+  closed: boolean;
+}
+
+export interface TransferOrder {
+  id: string;
+  legalEntityId: string;
+  number: string;
+  status: TransferStatus;
+  fromWarehouseId: string;
+  toWarehouseId: string;
+  toSiteId?: string;
+  transitWarehouseId?: string;
+  useTransit: boolean;
+  shipDate: string;
+  receiptDate?: string;
+  version: number;
+  createdAt: string;
+  lines: TransferLine[];
+}
+
+export interface TransferLineInput {
+  productId: string;
+  dimensions: Partial<Record<string, string>>;
+  unit: string;
+  qty: string;
+  underdeliveryPct?: string;
+  overdeliveryPct?: string;
+}
+
+export interface TransferInput {
+  legalEntityId: string;
+  fromWarehouseId: string;
+  toWarehouseId: string;
+  toSiteId?: string;
+  transitWarehouseId?: string;
+  useTransit: boolean;
+  shipDate: string;
+  lines: TransferLineInput[];
+}
+
+export interface ReceiptInput {
+  lineId: string;
+  qty: string;
+  closeShort: boolean;
+}
+
+export interface InTransitItem {
+  orderId: string;
+  number: string;
+  lineId: string;
+  productId: string;
+  dimensions: Partial<Record<string, string>>;
+  unit: string;
+  fromWarehouseId: string;
+  toWarehouseId: string;
+  transitWarehouseId: string;
+  shipDate: string;
+  daysInTransit: number;
+  inTransitQty: string;
+  closedShort: boolean;
+}
+
+/** Creates a CREATED transfer order; the key makes a retried submit replay instead of creating twice. */
+export async function createTransfer(input: TransferInput, key: string = newKey()): Promise<TransferOrder> {
+  const body: Record<string, unknown> = {
+    legalEntityId: input.legalEntityId,
+    fromWarehouseId: input.fromWarehouseId,
+    toWarehouseId: input.toWarehouseId,
+    useTransit: input.useTransit,
+    shipDate: input.shipDate,
+    lines: input.lines.map((line) => {
+      const out: Record<string, unknown> = { productId: line.productId, dimensions: cleanDimensions(line.dimensions), unit: line.unit, qty: line.qty };
+      if (line.underdeliveryPct?.trim()) out.underdeliveryPct = line.underdeliveryPct.trim();
+      if (line.overdeliveryPct?.trim()) out.overdeliveryPct = line.overdeliveryPct.trim();
+      return out;
+    }),
+  };
+  if (input.toSiteId?.trim()) body.toSiteId = input.toSiteId.trim();
+  if (input.useTransit && input.transitWarehouseId?.trim()) body.transitWarehouseId = input.transitWarehouseId.trim();
+  return (await send<TransferOrder>("/transfer-orders", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) })).body;
+}
+
+export async function listTransfers(status: TransferStatus | "" = "", signal?: AbortSignal): Promise<TransferOrder[]> {
+  const { body } = await send<{ items?: TransferOrder[] }>(`/transfer-orders${query({ status })}`, {}, signal);
+  return body.items ?? [];
+}
+
+export async function getTransfer(id: string, signal?: AbortSignal): Promise<TransferOrder> {
+  return (await send<TransferOrder>(`/transfer-orders/${encodeURIComponent(id)}`, {}, signal)).body;
+}
+
+/** Ships the whole order on shipDate at the version the screen shows (If-Match). */
+export async function shipTransfer(id: string, version: number, shipDate: string): Promise<TransferOrder> {
+  return (
+    await send<TransferOrder>(`/transfer-orders/${encodeURIComponent(id)}:ship`, {
+      method: "POST",
+      headers: { "If-Match": `"${version}"` },
+      body: JSON.stringify({ shipDate }),
+    })
+  ).body;
+}
+
+export async function receiveTransfer(id: string, version: number, receiptDate: string, lines: ReceiptInput[]): Promise<TransferOrder> {
+  return (
+    await send<TransferOrder>(`/transfer-orders/${encodeURIComponent(id)}:receive`, {
+      method: "POST",
+      headers: { "If-Match": `"${version}"` },
+      body: JSON.stringify({ receiptDate, lines }),
+    })
+  ).body;
+}
+
+export async function cancelTransfer(id: string, version: number): Promise<TransferOrder> {
+  return (await send<TransferOrder>(`/transfer-orders/${encodeURIComponent(id)}:cancel`, { method: "POST", headers: { "If-Match": `"${version}"` } })).body;
+}
+
+export async function listInTransit(signal?: AbortSignal): Promise<InTransitItem[]> {
+  const { body } = await send<{ items?: InTransitItem[] }>("/transfers/in-transit", {}, signal);
+  return body.items ?? [];
+}
+
+// ---- ABC classification (FR-16.19) ----
+
+export const ABC_CLASSES = ["A", "B", "C", "N"] as const;
+export type AbcClass = (typeof ABC_CLASSES)[number];
+
+export interface AbcItem {
+  productId: string;
+  site: string;
+  value: string;
+  cumPct: string;
+  class: AbcClass;
+}
+
+export interface AbcRun {
+  id: string;
+  legalEntityId: string;
+  criterion: "VALUE";
+  thresholds: { a: string; b: string; c: string };
+  zeroClass: "C" | "N";
+  createdAt: string;
+  classCounts: Partial<Record<AbcClass, number>>;
+  /** Present on a single run, absent in the list. */
+  items?: AbcItem[];
+}
+
+export interface AbcRunInput {
+  legalEntityId: string;
+  zeroClass: "C" | "N";
+  thresholds: { a: string; b: string; c: string };
+}
+
+export async function runAbc(input: AbcRunInput, key: string = newKey()): Promise<AbcRun> {
+  const body = { ...input, criterion: "VALUE" };
+  return (await send<AbcRun>("/abc-runs", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) })).body;
+}
+
+export async function listAbcRuns(signal?: AbortSignal): Promise<AbcRun[]> {
+  const { body } = await send<{ items?: AbcRun[] }>("/abc-runs", {}, signal);
+  return body.items ?? [];
+}
+
+export async function getAbcRun(id: string, signal?: AbortSignal): Promise<AbcRun> {
+  return (await send<AbcRun>(`/abc-runs/${encodeURIComponent(id)}`, {}, signal)).body;
 }

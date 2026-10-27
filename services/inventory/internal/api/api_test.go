@@ -31,28 +31,36 @@ type fakeStore struct {
 	lines       []domain.JournalLine
 	err         error
 
-	reserveIn       store.ReserveInput
-	reserveOut      store.ReserveResult
-	reservations    store.ReservationFilter
-	txFilter        store.TransactionFilter
-	txRows          int
-	expiryProduct   string
-	expiryBatch     string
-	expiryDate      *time.Time
-	blockIn         store.BlockingInput
-	blockReplayed   bool
-	blockings       store.BlockingFilter
-	releaseVersion  int
-	releaseDispo    string
-	plan            domain.CountPlan
-	planKey         string
-	sheetKey        string
-	sheets          store.CountSheetFilter
-	sheet           domain.CountSheet
-	countVersion    int
-	counted         decimal.Decimal
-	countCanApprove bool
-	postedParams    store.PostParams
+	reserveIn        store.ReserveInput
+	reserveOut       store.ReserveResult
+	reservations     store.ReservationFilter
+	txFilter         store.TransactionFilter
+	txRows           int
+	expiryProduct    string
+	expiryBatch      string
+	expiryDate       *time.Time
+	blockIn          store.BlockingInput
+	blockReplayed    bool
+	blockings        store.BlockingFilter
+	releaseVersion   int
+	releaseDispo     string
+	plan             domain.CountPlan
+	planKey          string
+	sheetKey         string
+	sheets           store.CountSheetFilter
+	sheet            domain.CountSheet
+	countVersion     int
+	counted          decimal.Decimal
+	countCanApprove  bool
+	postedParams     store.PostParams
+	transferVersion  int
+	transferIn       domain.TransferOrder
+	transferKey      string
+	shipDate         time.Time
+	receipts         []store.TransferReceipt
+	receiptDate      time.Time
+	abcIn            store.AbcRunInput
+	transferNegative domain.NegativePolicy
 }
 
 func (f *fakeStore) CreateJournal(_ context.Context, j domain.Journal, key string) (domain.Journal, bool, error) {
@@ -525,8 +533,8 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		served[route+" "+strings.ToLower(method)] = true
 		return nil
 	})
-	if len(served) != 21 {
-		t.Fatalf("router walk yielded %d operations, want 21: %v", len(served), served)
+	if len(served) != 31 {
+		t.Fatalf("router walk yielded %d operations, want 31: %v", len(served), served)
 	}
 	declared := declaredOperations(string(spec))
 	for op := range served {

@@ -6,7 +6,10 @@ ledger, the dimension hash, the on-hand projection, inventory journals
 stock policy, serial uniqueness, the journal list and the on-hand inquiry grouped
 by any dimension subset. Slice 2: reservations (MANUAL, FIFO, FEFO, LIFO),
 blocking and quarantine, cycle counting with tolerance approval and blind count
-(posted as COUNT journals), and the transaction inquiry. The web screens live in
+(posted as COUNT journals), and the transaction inquiry. Slice 3: transfer orders
+through an in-transit warehouse (ship, receive with tolerances and close-short,
+cancel), the stock-in-transit inquiry and ABC classification by on-hand value. The
+web screens live in
 `apps/web/src/modules/inventory`.
 
 Requirements source: `docs/prd/phase-3-procure-to-pay.md` section 3.16.
@@ -17,12 +20,13 @@ What is not in this slice is listed in `NOT-IMPLEMENTED.md`.
 ```
 cmd/inventory/            entrypoint: config, connect, migrate, router, admin port, serve
 internal/domain/          journal rules, valuation, status model, dimensions, on-hand buckets, FEFO,
-                          reservation, blocking and count rules (pure, no I/O)
+                          reservation, blocking, count, transfer and ABC rules (pure, no I/O)
 internal/store/           pgx repositories: journals, posting, on-hand projection, transactions,
-                          reservations, blockings, counts (RLS-aware)
+                          reservations, blockings, counts, transfer orders, ABC runs (RLS-aware)
 internal/api/             HTTP handlers, DTOs, validation, Problem responses
 internal/events/          event type constants and payloads
-migrations/               0001 ledger, 0002 reservations and batch expiry, 0003 blocking and counts
+migrations/               0001 ledger, 0002 reservations and batch expiry, 0003 blocking and counts,
+                          0004 transfer orders, 0005 ABC runs
                           (embedded, applied by dbx.Migrate)
 api/openapi.yaml          OpenAPI 3.1 for every endpoint (parity is tested)
 events/asyncapi.yaml      AsyncAPI 3 for every event published (payload parity is tested)
@@ -54,6 +58,16 @@ charts/inventory/         Helm chart (Deployment, Service, HPA, ServiceMonitor t
 | GET | `/v1/inventory/count-sheets/{id}` | `inventory.read` | InventoryInquire |
 | PUT | `/v1/inventory/count-sheets/{id}/lines/{lineId}` | `inventory.count.write` | CycleCountMaintain |
 | POST | `/v1/inventory/count-sheets/{id}:post` | `inventory.count.post` (+ `inventory.count.approve` above tolerance) | CycleCountPost / CycleCountApprove |
+| POST | `/v1/inventory/transfer-orders` | `inventory.transfer.write` | TransferOrderMaintain |
+| GET | `/v1/inventory/transfer-orders` | `inventory.read` | InventoryInquire |
+| GET | `/v1/inventory/transfer-orders/{id}` | `inventory.read` | InventoryInquire |
+| POST | `/v1/inventory/transfer-orders/{id}:ship` | `inventory.transfer.post` | TransferOrderPost |
+| POST | `/v1/inventory/transfer-orders/{id}:receive` | `inventory.transfer.post` | TransferOrderPost |
+| POST | `/v1/inventory/transfer-orders/{id}:cancel` | `inventory.transfer.write` | TransferOrderMaintain |
+| GET | `/v1/inventory/transfers/in-transit` | `inventory.read` | InventoryInquire |
+| POST | `/v1/inventory/abc-runs` | `inventory.abc.write` | InventorySetupMaintain (ABC setup) |
+| GET | `/v1/inventory/abc-runs` | `inventory.read` | InventoryInquire |
+| GET | `/v1/inventory/abc-runs/{id}` | `inventory.read` | InventoryInquire |
 
 Duty names follow the repository's `<context>.<entity>.<action>` convention; the
 right-hand column is the PRD 3.16.17 name each one stands for.
@@ -218,3 +232,14 @@ Problems are RFC 9457 `application/problem+json` with `type` =
 
 No dependency beyond the platform module and what it already pulls in (chi, pgx/v5,
 shopspring/decimal, rapid for tests).
+
+## Transfer model
+
+A transfer order ships in full and receives in one or more receipts. Every movement of a
+line (shipping warehouse to transit, transit to destination, or shipping warehouse to
+destination for a one-step order or an allowed over-delivery) is a valued SOLD / PURCHASED
+transaction pair with origin `TRANSFER_LINE` and the order id as reference, written in the
+same transaction as the order update and the `transfer.shipped` / `transfer.received` event.
+All on-hand rows a step touches are locked first in ascending (product, dimension set) order;
+each issue is valued at its row's running average and the receipt carries that value, so
+physical stock and value summed over the product never change and there is no GL entry.

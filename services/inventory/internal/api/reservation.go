@@ -319,8 +319,8 @@ func (a *API) listTransactions(w http.ResponseWriter, r *http.Request) {
 	if _, _, ok := domain.Lookup(f.Status); f.Status != "" && !ok {
 		fields["status"] = "must be an issue or receipt status"
 	}
-	if f.SourceType != "" && f.SourceType != "INVENT_JOURNAL_LINE" && f.SourceType != "BLOCKING" {
-		fields["sourceType"] = "must be INVENT_JOURNAL_LINE or BLOCKING"
+	if f.SourceType != "" && f.SourceType != "INVENT_JOURNAL_LINE" && f.SourceType != "BLOCKING" && f.SourceType != "TRANSFER_LINE" {
+		fields["sourceType"] = "must be INVENT_JOURNAL_LINE, BLOCKING or TRANSFER_LINE"
 	}
 	for name, dst := range map[string]**time.Time{"from": &f.From, "to": &f.To} {
 		if v := q.Get(name); v != "" {

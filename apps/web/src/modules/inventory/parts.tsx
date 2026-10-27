@@ -48,6 +48,11 @@ export const stateTones: Record<string, BadgeTone> = {
   POSTED: "success",
   BLOCKED: "danger",
   QUARANTINE: "warning",
+  CREATED: "info",
+  SHIPPED: "warning",
+  PARTIALLY_RECEIVED: "warning",
+  RECEIVED: "success",
+  CANCELLED: "neutral",
 };
 
 export function money(amount: string | undefined, currency: string): string {

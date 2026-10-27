@@ -64,6 +64,16 @@ type Store interface {
 	GetCountSheet(ctx context.Context, id string) (domain.CountSheet, error)
 	EnterCount(ctx context.Context, sheetID, lineID string, version int, counted decimal.Decimal) (domain.CountSheet, error)
 	PostCountSheet(ctx context.Context, sheetID string, version int, canApprove bool, p PostParams) (domain.CountSheet, error)
+	CreateTransfer(ctx context.Context, key string, o domain.TransferOrder) (domain.TransferOrder, bool, error)
+	GetTransfer(ctx context.Context, id string) (domain.TransferOrder, error)
+	ListTransfers(ctx context.Context, status string) ([]domain.TransferOrder, error)
+	ShipTransfer(ctx context.Context, id string, version int, shipDate time.Time, neg domain.NegativePolicy) (domain.TransferOrder, error)
+	ReceiveTransfer(ctx context.Context, id string, version int, receipts []TransferReceipt, receiptDate time.Time, neg domain.NegativePolicy) (domain.TransferOrder, error)
+	CancelTransfer(ctx context.Context, id string, version int) (domain.TransferOrder, error)
+	ListInTransit(ctx context.Context) ([]InTransitRow, error)
+	RunABC(ctx context.Context, in AbcRunInput) (domain.AbcRun, bool, error)
+	GetABCRun(ctx context.Context, id string) (domain.AbcRun, error)
+	ListABCRuns(ctx context.Context) ([]AbcRunSummary, error)
 	Ping(ctx context.Context) error
 }
 

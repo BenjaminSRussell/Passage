@@ -19,6 +19,9 @@ describe("inventory module", () => {
       "/inventory/blockings": "inventory.read",
       "/inventory/count-plans": "inventory.read",
       "/inventory/count-sheets": "inventory.read",
+      "/inventory/transfer-orders": "inventory.read",
+      "/inventory/in-transit": "inventory.read",
+      "/inventory/abc-runs": "inventory.read",
     });
   });
 
@@ -34,6 +37,21 @@ describe("inventory module", () => {
       "/inventory/count-plans/new",
       "/inventory/count-sheets",
       "/inventory/count-sheets/:id",
+    ]) {
+      expect(paths).toContain(path);
+    }
+  });
+
+  it("routes every slice 3 screen", () => {
+    const paths = inventory.routes.map((r) => r.path);
+    for (const path of [
+      "/inventory/transfer-orders",
+      "/inventory/transfer-orders/new",
+      "/inventory/transfer-orders/:id",
+      "/inventory/in-transit",
+      "/inventory/abc-runs",
+      "/inventory/abc-runs/new",
+      "/inventory/abc-runs/:id",
     ]) {
       expect(paths).toContain(path);
     }

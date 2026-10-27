@@ -74,6 +74,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerReservations(r)
 	a.registerBlocking(r)
 	a.registerCount(r)
+	a.registerTransfers(r)
 }
 
 // Metrics serves the counters for the admin port.

@@ -1,12 +1,13 @@
 openapi: 3.1.0
 info:
   title: Passage Inventory
-  version: 0.16.2
+  version: 0.16.3
   description: |
     Inventory journals, posting, the on-hand and transaction inquiries, reservations, blocking
-    and quarantine, and cycle counting (wave 16, slices 1 and 2). Quantities and
-    money are decimal strings; money is in the journal (accounting) currency, rounded to its
-    minor unit. Browser calls use /api/v1/inventory/..., which the web BFF rewrites to these paths.
+    and quarantine, cycle counting (wave 16, slices 1 and 2), transfer orders with stock in
+    transit and ABC classification (slice 3). Quantities and money are decimal strings; money
+    is in the journal (accounting) currency, rounded to its minor unit. Browser calls use
+    /api/v1/inventory/..., which the web BFF rewrites to these paths.
 servers:
   - url: https://api.{env}.passage.dev
     variables:
@@ -204,7 +205,7 @@ paths:
       parameters:
         - { name: product, in: query, schema: { type: string, format: uuid } }
         - { name: status, in: query, schema: { $ref: '#/components/schemas/TransactionStatus' } }
-        - { name: sourceType, in: query, schema: { type: string, enum: [INVENT_JOURNAL_LINE, BLOCKING] } }
+        - { name: sourceType, in: query, schema: { type: string, enum: [INVENT_JOURNAL_LINE, BLOCKING, TRANSFER_LINE] } }
         - { name: from, in: query, schema: { type: string, format: date } }
         - { name: to, in: query, schema: { type: string, format: date } }
         - $ref: '#/components/parameters/Limit'
@@ -622,6 +623,277 @@ paths:
         '412': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/transfer-orders:
+    post:
+      operationId: createTransferOrder
+      summary: Create a transfer order (CREATED); nothing is posted until it ships (FR-16.15)
+      description: |
+        useTransit (default true) routes the order through transitWarehouseId, which is then
+        required (INV-TRF-001); false makes a one-step transfer. Lines follow the journal line rules
+        at the shipping warehouse: site required (INV-DIM-001), at most 6 decimals (INV-UOM-002),
+        serial quantity 1 (INV-SER-002), owner and license_plate reserved; a warehouse dimension
+        other than fromWarehouseId is rejected. toSiteId sets the receiving site when it differs
+        from the lines' site. A repeated Idempotency-Key with the same body returns the stored order
+        (200, Idempotent-Replayed: true); with a different body it is idempotency_key_reuse (422). A
+        legal entity outside the caller's scope is AUTH-0003 (403).
+      x-passage-duty: inventory.transfer.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTransferRequest' }
+      responses:
+        '201':
+          description: Transfer order created
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransferOrder' }
+        '200':
+          description: Idempotent replay
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransferOrder' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listTransferOrders
+      summary: Transfer orders with their lines, newest first (at most 200)
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/TransferStatus' } }
+      responses:
+        '200':
+          description: Transfer orders
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/TransferOrder' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/transfer-orders/{id}:
+    get:
+      operationId: getTransferOrder
+      summary: Read a transfer order with its lines
+      x-passage-duty: inventory.read
+      parameters:
+        - $ref: '#/components/parameters/TransferId'
+      responses:
+        '200':
+          description: Transfer order
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransferOrder' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/transfer-orders/{id}:ship:
+    post:
+      operationId: shipTransferOrder
+      summary: Ship a CREATED order in full
+      description: |
+        Moves every line from the shipping warehouse to the transit warehouse (two-step) or to the
+        receiving warehouse (one-step, which also receives and closes the lines) in one transaction:
+        a SOLD issue valued at the source's running average and a PURCHASED receipt carrying the
+        same value (BR-16.3), so there is no GL entry. Every on-hand row is locked in ascending order
+        first. The shipping warehouse follows the negative-stock policy (INV-NEG-001). shipDate
+        (default today) becomes the order's ship date and the transactions' date. Emits
+        dev.passage.inventory.transfer.shipped.v1. Requires If-Match (428 when absent, 412 on
+        mismatch); an order not CREATED is INV-TRF-006.
+      x-passage-duty: inventory.transfer.post
+      parameters:
+        - $ref: '#/components/parameters/TransferId'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                shipDate: { type: string, format: date }
+      responses:
+        '200':
+          description: Order after shipment
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransferOrder' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/transfer-orders/{id}:receive:
+    post:
+      operationId: receiveTransferOrder
+      summary: Book receipts against a shipped order
+      description: |
+        Each receipt moves its quantity from the transit warehouse to the receiving warehouse as a
+        valued pair. A line closes when its shipped quantity is reached, or short with closeShort
+        when the shortfall is within underdeliveryPct (INV-TRF-005 otherwise); the shortfall stays
+        in transit for investigation. Receiving more than shipped plus overdeliveryPct is
+        INV-TRF-002; an allowed over-delivery moves straight from the shipping warehouse and raises
+        the line's shipped quantity. A closed line is INV-TRF-006, an unknown line INV-TRF-004.
+        Emits dev.passage.inventory.transfer.received.v1. Requires If-Match.
+      x-passage-duty: inventory.transfer.post
+      parameters:
+        - $ref: '#/components/parameters/TransferId'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReceiveTransferRequest' }
+      responses:
+        '200':
+          description: Order after the receipt
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransferOrder' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/transfer-orders/{id}:cancel:
+    post:
+      operationId: cancelTransferOrder
+      summary: Cancel a CREATED order (BR-16.13)
+      description: |
+        Nothing has moved, so nothing is reversed. A shipped order with quantity in transit is
+        INV-TRF-003; a received or cancelled order is INV-TRF-006. Requires If-Match.
+      x-passage-duty: inventory.transfer.write
+      parameters:
+        - $ref: '#/components/parameters/TransferId'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Cancelled order
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransferOrder' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/transfers/in-transit:
+    get:
+      operationId: listStockInTransit
+      summary: Stock in transit by transfer order line, oldest shipment first (FR-16.16, SAP MB5T)
+      description: Two-step lines with shipped quantity not yet received, including lines closed short (closedShort, for investigation). At most 1,000 rows.
+      x-passage-duty: inventory.read
+      responses:
+        '200':
+          description: Lines in transit
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/InTransitItem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/abc-runs:
+    post:
+      operationId: runAbcClassification
+      summary: Classify a legal entity's products per site by on-hand value (FR-16.19)
+      description: |
+        Ranks product x site by posted on-hand value and assigns A, B and C by cumulative
+        percentage (default 80 / 15 / 5; they must sum to 100, INV-ABC-001). An item whose
+        cumulative share before it is at or below a boundary takes the higher class (BR-16.16);
+        zero-value items take zeroClass (C, or N for not classified). Runs are immutable. Only
+        criterion VALUE is available. A repeated Idempotency-Key returns the stored run (200); with a
+        different body it is idempotency_key_reuse (422).
+      x-passage-duty: inventory.abc.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AbcRunRequest' }
+      responses:
+        '201':
+          description: Run stored with its items
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AbcRun' }
+        '200':
+          description: Idempotent replay
+          headers:
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AbcRun' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listAbcRuns
+      summary: Latest ABC runs, newest first, with class counts and no items (at most 100)
+      x-passage-duty: inventory.read
+      responses:
+        '200':
+          description: ABC runs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/AbcRun' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/abc-runs/{id}:
+    get:
+      operationId: getAbcRun
+      summary: Read an ABC run with its items, highest value first (ABC classification report)
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: ABC run
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AbcRun' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
 components:
   parameters:
     Limit:
@@ -642,9 +914,14 @@ components:
       name: If-Match
       in: header
       required: true
-      description: Version (journal, blocking or count sheet) from the ETag of the last read
+      description: Version (journal, blocking, count sheet or transfer order) from the ETag of the last read
       schema: { type: string }
     JournalId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    TransferId:
       name: id
       in: path
       required: true
@@ -654,6 +931,127 @@ components:
       description: Resource version, quoted
       schema: { type: string }
   responses:
+    Problem:
+      description: RFC 9457 problem details
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    JournalType:
+      type: string
+      description: COUNT journals are created by count-sheet posting, never by POST /journals.
+      enum: [MOVEMENT, ADJUSTMENT, OPENING_BALANCE, COUNT]
+    JournalStatus:
+      type: string
+      enum: [DRAFT, SUBMITTED, APPROVED, POSTING, POSTED, REJECTED, CANCELLED]
+    Decimal:
+      type: string
+      pattern: '^-?[0-9]+(\.[0-9]+)?$'
+    CreateJournalRequest:
+      type: object
+      additionalProperties: false
+      required: [journalType, legalEntityId, postingDate, currency]
+      properties:
+        journalType: { $ref: '#/components/schemas/JournalType' }
+        legalEntityId: { type: string, format: uuid }
+        postingDate: { type: string, format: date }
+        offsetAccountId:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'
+          description: Ledger account id. Required for MOVEMENT, rejected for the other types.
+        currency: { type: string, pattern: '^[A-Z]{3}$', description: Accounting currency of the legal entity }
+    AddLinesRequest:
+      type: object
+      additionalProperties: false
+      required: [lines]
+      properties:
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 10000
+          items: { $ref: '#/components/schemas/JournalLineRequest' }
+    Dimensions:
+      type: object
+      description: Dimension values by name (site, warehouse, location, batch, serial, inventory_status, config, size, color, style). site is mandatory; owner and license_plate are reserved.
+      additionalProperties: { type: string, maxLength: 60 }
+    JournalLineRequest:
+      type: object
+      additionalProperties: false
+      required: [productId, qty, enteredUnit]
+      properties:
+        clientKey: { type: string, maxLength: 255, description: Per-line idempotency key }
+        productId: { type: string, format: uuid }
+        dimensions: { $ref: '#/components/schemas/Dimensions' }
+        qty: { $ref: '#/components/schemas/Decimal', description: 'Signed quantity in the inventory unit (receipt > 0, issue < 0)' }
+        enteredQty: { $ref: '#/components/schemas/Decimal', description: 'Quantity as keyed; defaults to qty and must have its sign' }
+        enteredUnit: { type: string, pattern: '^[A-Z0-9_-]{1,12}$' }
+        costPrice: { $ref: '#/components/schemas/Decimal', description: 'Non-negative cost per inventory unit, up to 6 decimals; receipts are valued at it, issues at the running average (it is the fallback when none exists)' }
+    JournalLine:
+      type: object
+      required: [id, lineNo, productId, dimensions, qty, enteredQty, enteredUnit, costPrice]
+      properties:
+        id: { type: string, format: uuid }
+        lineNo: { type: integer }
+        clientKey: { type: string }
+        productId: { type: string, format: uuid }
+        dimensions: { $ref: '#/components/schemas/Dimensions' }
+        qty: { $ref: '#/components/schemas/Decimal' }
+        enteredQty: { $ref: '#/components/schemas/Decimal' }
+        enteredUnit: { type: string }
+        costPrice: { $ref: '#/components/schemas/Decimal' }
+    GLEntry:
+      type: object
+      required: [currency, lines, ledgerEntryId]
+      properties:
+        currency: { type: string }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [account, debit, credit]
+            properties:
+              account: { type: string }
+              debit: { $ref: '#/components/schemas/Decimal' }
+              credit: { $ref: '#/components/schemas/Decimal' }
+        ledgerEntryId: { type: [string, 'null'], format: uuid, description: Null until the wave 11 ledger Post exists }
+    JournalSummary:
+      type: object
+      required: [id, legalEntityId, journalType, status, postingDate, currency, version, lineCount, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        journalType: { $ref: '#/components/schemas/JournalType' }
+        status: { $ref: '#/components/schemas/JournalStatus' }
+        postingDate: { type: string, format: date }
+        offsetAccountId: { type: string }
+        currency: { type: string }
+        version: { type: integer }
+        lineCount: { type: integer }
+        createdAt: { type: string, format: date-time }
+        postedAt: { type: string, format: date-time }
+    Journal:
+      allOf:
+        - $ref: '#/components/schemas/JournalSummary'
+        - type: object
+          required: [lines]
+          properties:
+            lines:
+              type: array
+              items: { $ref: '#/components/schemas/JournalLine' }
+            glEntry: { $ref: '#/components/schemas/GLEntry' }
+    OnHandItem:
+      type: object
+      required: [group, physicalInvent, availPhysical, availOrdered, postedValue, reservedPhysical, blocked, currency, negative]
+      properties:
+        group: { type: object, additionalProperties: { type: string } }
+        physicalInvent: { $ref: '#/components/schemas/Decimal' }
+        availPhysical: { $ref: '#/components/schemas/Decimal' }
+        availOrdered: { $ref: '#/components/schemas/Decimal' }
+        postedValue: { $ref: '#/components/schemas/Decimal' }
+        reservedPhysical: { $ref: '#/components/schemas/Decimal' }
+        blocked: { $ref: '#/components/schemas/Decimal', description: 'Physical quantity with inventory_status BLOCKED or QUARANTINE; part of physicalInvent, left out of availPhysical and availOrdered (FR-16.8)' }
+        currency: { type: string }
+        negative: { type: boolean, description: True when any row in the group has negative physical stock }
     TransactionStatus:
       type: string
       enum: [ON_ORDER, RESERVED_ORDERED, RESERVED_PHYSICAL, PICKED, DEDUCTED, SOLD, ORDERED, ARRIVED, REGISTERED, RECEIVED, PURCHASED]
@@ -817,127 +1215,154 @@ components:
                   countedBy: { type: string }
                   countedAt: { type: string, format: date-time }
                   postedVariance: { type: [string, 'null'], description: Counted minus book at posting }
-    Problem:
-      description: RFC 9457 problem details
-      content:
-        application/problem+json:
-          schema: { $ref: '#/components/schemas/Problem' }
-  schemas:
-    JournalType:
+    TransferStatus:
       type: string
-      description: COUNT journals are created by count-sheet posting, never by POST /journals.
-      enum: [MOVEMENT, ADJUSTMENT, OPENING_BALANCE, COUNT]
-    JournalStatus:
-      type: string
-      enum: [DRAFT, SUBMITTED, APPROVED, POSTING, POSTED, REJECTED, CANCELLED]
-    Decimal:
-      type: string
-      pattern: '^-?[0-9]+(\.[0-9]+)?$'
-    CreateJournalRequest:
+      enum: [CREATED, SHIPPED, PARTIALLY_RECEIVED, RECEIVED, CANCELLED]
+    CreateTransferRequest:
       type: object
       additionalProperties: false
-      required: [journalType, legalEntityId, postingDate, currency]
+      required: [legalEntityId, fromWarehouseId, toWarehouseId, shipDate, lines]
       properties:
-        journalType: { $ref: '#/components/schemas/JournalType' }
         legalEntityId: { type: string, format: uuid }
-        postingDate: { type: string, format: date }
-        offsetAccountId:
-          type: string
-          pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'
-          description: Ledger account id. Required for MOVEMENT, rejected for the other types.
-        currency: { type: string, pattern: '^[A-Z]{3}$', description: Accounting currency of the legal entity }
-    AddLinesRequest:
+        fromWarehouseId: { type: string, maxLength: 60 }
+        toWarehouseId: { type: string, maxLength: 60 }
+        toSiteId: { type: string, maxLength: 60, description: Receiving site when it differs from the lines' site }
+        transitWarehouseId: { type: string, maxLength: 60, description: Required when useTransit is true; ignored otherwise }
+        useTransit: { type: boolean, default: true }
+        shipDate: { type: string, format: date, description: Planned ship date }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            type: object
+            additionalProperties: false
+            required: [productId, unit, qty]
+            properties:
+              productId: { type: string, format: uuid }
+              dimensions: { $ref: '#/components/schemas/Dimensions' }
+              unit: { type: string, pattern: '^[A-Z0-9_-]{1,12}$' }
+              qty: { $ref: '#/components/schemas/Decimal' }
+              underdeliveryPct: { $ref: '#/components/schemas/Decimal' }
+              overdeliveryPct: { $ref: '#/components/schemas/Decimal' }
+    ReceiveTransferRequest:
       type: object
       additionalProperties: false
       required: [lines]
       properties:
+        receiptDate: { type: string, format: date, description: Default today }
         lines:
           type: array
           minItems: 1
-          maxItems: 10000
-          items: { $ref: '#/components/schemas/JournalLineRequest' }
-    Dimensions:
+          maxItems: 1000
+          items:
+            type: object
+            additionalProperties: false
+            required: [lineId, qty]
+            properties:
+              lineId: { type: string, format: uuid }
+              qty: { $ref: '#/components/schemas/Decimal' }
+              closeShort: { type: boolean, default: false }
+    TransferLine:
       type: object
-      description: Dimension values by name (site, warehouse, location, batch, serial, inventory_status, config, size, color, style). site is mandatory; owner and license_plate are reserved.
-      additionalProperties: { type: string, maxLength: 60 }
-    JournalLineRequest:
-      type: object
-      additionalProperties: false
-      required: [productId, qty, enteredUnit]
-      properties:
-        clientKey: { type: string, maxLength: 255, description: Per-line idempotency key }
-        productId: { type: string, format: uuid }
-        dimensions: { $ref: '#/components/schemas/Dimensions' }
-        qty: { $ref: '#/components/schemas/Decimal', description: 'Signed quantity in the inventory unit (receipt > 0, issue < 0)' }
-        enteredQty: { $ref: '#/components/schemas/Decimal', description: 'Quantity as keyed; defaults to qty and must have its sign' }
-        enteredUnit: { type: string, pattern: '^[A-Z0-9_-]{1,12}$' }
-        costPrice: { $ref: '#/components/schemas/Decimal', description: 'Non-negative cost per inventory unit, up to 6 decimals; receipts are valued at it, issues at the running average (it is the fallback when none exists)' }
-    JournalLine:
-      type: object
-      required: [id, lineNo, productId, dimensions, qty, enteredQty, enteredUnit, costPrice]
+      required: [id, lineNo, productId, dimensions, unit, qty, shippedQty, receivedQty, inTransit, underdeliveryPct, overdeliveryPct, closed]
       properties:
         id: { type: string, format: uuid }
         lineNo: { type: integer }
-        clientKey: { type: string }
         productId: { type: string, format: uuid }
         dimensions: { $ref: '#/components/schemas/Dimensions' }
+        unit: { type: string }
         qty: { $ref: '#/components/schemas/Decimal' }
-        enteredQty: { $ref: '#/components/schemas/Decimal' }
-        enteredUnit: { type: string }
-        costPrice: { $ref: '#/components/schemas/Decimal' }
-    GLEntry:
+        shippedQty: { $ref: '#/components/schemas/Decimal' }
+        receivedQty: { $ref: '#/components/schemas/Decimal' }
+        inTransit: { $ref: '#/components/schemas/Decimal' }
+        underdeliveryPct: { $ref: '#/components/schemas/Decimal' }
+        overdeliveryPct: { $ref: '#/components/schemas/Decimal' }
+        closed: { type: boolean }
+    TransferOrder:
       type: object
-      required: [currency, lines, ledgerEntryId]
-      properties:
-        currency: { type: string }
-        lines:
-          type: array
-          items:
-            type: object
-            required: [account, debit, credit]
-            properties:
-              account: { type: string }
-              debit: { $ref: '#/components/schemas/Decimal' }
-              credit: { $ref: '#/components/schemas/Decimal' }
-        ledgerEntryId: { type: [string, 'null'], format: uuid, description: Null until the wave 11 ledger Post exists }
-    JournalSummary:
-      type: object
-      required: [id, legalEntityId, journalType, status, postingDate, currency, version, lineCount, createdAt]
+      required: [id, legalEntityId, number, status, fromWarehouseId, toWarehouseId, useTransit, shipDate, version, createdAt, lines]
       properties:
         id: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
-        journalType: { $ref: '#/components/schemas/JournalType' }
-        status: { $ref: '#/components/schemas/JournalStatus' }
-        postingDate: { type: string, format: date }
-        offsetAccountId: { type: string }
-        currency: { type: string }
+        number: { type: string, example: TO-1A2B3C4D5E6F }
+        status: { $ref: '#/components/schemas/TransferStatus' }
+        fromWarehouseId: { type: string }
+        toWarehouseId: { type: string }
+        toSiteId: { type: string }
+        transitWarehouseId: { type: string }
+        useTransit: { type: boolean }
+        shipDate: { type: string, format: date, description: Planned until shipped, then the actual ship date }
+        receiptDate: { type: string, format: date, description: Set when every line is closed }
         version: { type: integer }
-        lineCount: { type: integer }
         createdAt: { type: string, format: date-time }
-        postedAt: { type: string, format: date-time }
-    Journal:
-      allOf:
-        - $ref: '#/components/schemas/JournalSummary'
-        - type: object
-          required: [lines]
-          properties:
-            lines:
-              type: array
-              items: { $ref: '#/components/schemas/JournalLine' }
-            glEntry: { $ref: '#/components/schemas/GLEntry' }
-    OnHandItem:
+        lines:
+          type: array
+          items: { $ref: '#/components/schemas/TransferLine' }
+    InTransitItem:
       type: object
-      required: [group, physicalInvent, availPhysical, availOrdered, postedValue, reservedPhysical, blocked, currency, negative]
+      required: [orderId, number, lineId, productId, dimensions, unit, fromWarehouseId, toWarehouseId, transitWarehouseId, shipDate, daysInTransit, inTransitQty, closedShort]
       properties:
-        group: { type: object, additionalProperties: { type: string } }
-        physicalInvent: { $ref: '#/components/schemas/Decimal' }
-        availPhysical: { $ref: '#/components/schemas/Decimal' }
-        availOrdered: { $ref: '#/components/schemas/Decimal' }
-        postedValue: { $ref: '#/components/schemas/Decimal' }
-        reservedPhysical: { $ref: '#/components/schemas/Decimal' }
-        blocked: { $ref: '#/components/schemas/Decimal', description: 'Physical quantity with inventory_status BLOCKED or QUARANTINE; part of physicalInvent, left out of availPhysical and availOrdered (FR-16.8)' }
-        currency: { type: string }
-        negative: { type: boolean, description: True when any row in the group has negative physical stock }
+        orderId: { type: string, format: uuid }
+        number: { type: string }
+        lineId: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        dimensions: { $ref: '#/components/schemas/Dimensions' }
+        unit: { type: string }
+        fromWarehouseId: { type: string }
+        toWarehouseId: { type: string }
+        transitWarehouseId: { type: string }
+        shipDate: { type: string, format: date }
+        daysInTransit: { type: integer }
+        inTransitQty: { $ref: '#/components/schemas/Decimal' }
+        closedShort: { type: boolean, description: The line was closed short; the quantity is left in transit for investigation }
+    AbcRunRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        criterion: { type: string, enum: [VALUE], default: VALUE }
+        zeroClass: { type: string, enum: [C, N], default: C }
+        thresholds:
+          type: object
+          additionalProperties: false
+          required: [a, b, c]
+          properties:
+            a: { $ref: '#/components/schemas/Decimal' }
+            b: { $ref: '#/components/schemas/Decimal' }
+            c: { $ref: '#/components/schemas/Decimal' }
+    AbcRun:
+      type: object
+      required: [id, legalEntityId, criterion, thresholds, zeroClass, createdAt, classCounts]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        criterion: { type: string, enum: [VALUE] }
+        thresholds:
+          type: object
+          properties:
+            a: { $ref: '#/components/schemas/Decimal' }
+            b: { $ref: '#/components/schemas/Decimal' }
+            c: { $ref: '#/components/schemas/Decimal' }
+        zeroClass: { type: string, enum: [C, N] }
+        createdAt: { type: string, format: date-time }
+        classCounts:
+          type: object
+          additionalProperties: { type: integer }
+          description: Items per class (A, B, C, N)
+        items:
+          type: array
+          description: Present on create and read, absent in the list
+          items:
+            type: object
+            required: [productId, site, value, cumPct, class]
+            properties:
+              productId: { type: string, format: uuid }
+              site: { type: string }
+              value: { $ref: '#/components/schemas/Decimal' }
+              cumPct: { type: string, description: Cumulative share of the value up to and including the item, percent with 2 decimals }
+              class: { type: string, enum: [A, B, C, N] }
     Problem:
       type: object
       required: [type, title, status]
