@@ -230,6 +230,7 @@ func TestPostgres_ListFilters(t *testing.T) {
 		t.Fatal(err)
 	}
 	asOf := day("2026-03-01")
+	june, june30, year := day("2026-06-01"), day("2026-06-30"), day("2026-12-31")
 	cases := []struct {
 		name string
 		f    store.Filter
@@ -240,6 +241,11 @@ func TestPostgres_ListFilters(t *testing.T) {
 		{"as of", store.Filter{AsOf: &asOf}, []string{a.ID}},
 		{"customer and type", store.Filter{Customer: "C1", Type: string(domain.TypePrice), Limit: 1}, []string{min(a.ID, b.ID)}},
 		{"other legal entity", store.Filter{LegalEntityID: otherLegalEntity}, nil},
+		{"valid to on June 30", store.Filter{ValidToFrom: &june30, ValidToTo: &june30}, []string{a.ID}},
+		{"valid to before June", store.Filter{ValidToTo: &asOf}, nil},
+		{"valid to from June", store.Filter{ValidToFrom: &june}, []string{a.ID, b.ID}},
+		{"valid to up to year end, soonest first", store.Filter{ValidToTo: &year, Limit: 1}, []string{a.ID}},
+		{"valid to from July", store.Filter{ValidToFrom: &year}, []string{b.ID}},
 	}
 	for _, c := range cases {
 		got, err := s.ListRecords(ctx, c.f)

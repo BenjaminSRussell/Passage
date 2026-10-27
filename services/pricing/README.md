@@ -182,7 +182,7 @@ testdata/               fixtures
 |---|---|---|---|
 | POST | `/v1/pricing/resolve?explain=true` | pricing.view | up to `PRICING_MAX_LINES` (500) lines; the PRD's PricingResolve duty maps here until w27 |
 | POST | `/v1/pricing/simulate?explain=true` | pricing.view | inline records, nothing stored |
-| GET | `/v1/pricing/condition-records?legalEntityId=&status=&type=&customer=&product=&campaignId=&asOf=&limit=` | pricing.view | at most 100 rows, ordered by id |
+| GET | `/v1/pricing/condition-records?legalEntityId=&status=&type=&customer=&product=&campaignId=&asOf=&validToFrom=&validToTo=&limit=` | pricing.view | at most 100 rows, ordered by id; with a `validToFrom` / `validToTo` range (last valid day, inclusive) ordered by valid to, then id |
 | POST | `/v1/pricing/condition-records` | pricing.maintain | `Idempotency-Key` honoured; creates DRAFT |
 | GET | `/v1/pricing/condition-records/{id}` | pricing.view | |
 | POST | `/v1/pricing/condition-records/{id}:activate` | pricing.maintain | body `{version}`; overlap check; `Idempotency-Key` honoured |

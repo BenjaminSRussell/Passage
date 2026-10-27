@@ -133,7 +133,9 @@ paths:
         - {name: product, in: query, required: false, description: "Exact product or product-group key.", schema: {type: string}}
         - {name: campaignId, in: query, required: false, description: "Records of one campaign (FR-26.10).", schema: {type: string, format: uuid}}
         - {name: asOf, in: query, required: false, description: "Records valid on this date (YYYY-MM-DD).", schema: {type: string, format: date}}
-        - {name: limit, in: query, required: false, description: "Page size, ordered by id.", schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
+        - {name: validToFrom, in: query, required: false, description: "Records whose last valid day is on or after this date. With validToFrom or validToTo the list is ordered by validTo, then id (the workspace's expiring list).", schema: {type: string, format: date}}
+        - {name: validToTo, in: query, required: false, description: "Records whose last valid day is on or before this date; must not be before validToFrom.", schema: {type: string, format: date}}
+        - {name: limit, in: query, required: false, description: "Page size, ordered by id unless a validTo range is given.", schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
       responses:
         "200":
           description: Matching records.

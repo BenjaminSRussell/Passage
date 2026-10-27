@@ -466,6 +466,22 @@ func (a *API) listRecords(w http.ResponseWriter, r *http.Request) {
 			f.AsOf = &day
 		}
 	}
+	for _, p := range []struct {
+		name string
+		into **time.Time
+	}{{"validToFrom", &f.ValidToFrom}, {"validToTo", &f.ValidToTo}} {
+		if raw := q.Get(p.name); raw != "" {
+			day, err := time.Parse(dateLayout, raw)
+			if err != nil {
+				fields[p.name] = "must be a date in YYYY-MM-DD form"
+				continue
+			}
+			*p.into = &day
+		}
+	}
+	if f.ValidToFrom != nil && f.ValidToTo != nil && f.ValidToTo.Before(*f.ValidToFrom) {
+		fields["validToTo"] = "must not be before validToFrom"
+	}
 	if raw := q.Get("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 1 || n > store.MaxListLimit {

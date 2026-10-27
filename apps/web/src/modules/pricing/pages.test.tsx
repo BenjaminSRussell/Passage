@@ -115,7 +115,11 @@ describe("Pricing workspace", () => {
   it("shows the service's exact tile counts and accruals per currency, and lists agreements expiring within 30 days", async () => {
     handler = (url) => {
       if (url.pathname.endsWith("/workspace")) return json(200, tiles);
-      if (url.pathname.endsWith("/condition-records")) return json(200, { items: active });
+      if (url.pathname.endsWith("/condition-records")) {
+        const from = url.searchParams.get("validToFrom") ?? "";
+        const to = url.searchParams.get("validToTo") ?? "9999-12-31";
+        return json(200, { items: active.filter((r) => r.validTo >= from && r.validTo <= to) });
+      }
       return undefined;
     };
     const { container } = renderAt("/pricing");
@@ -132,11 +136,28 @@ describe("Pricing workspace", () => {
     const table = await screen.findByRole("table", { name: "Expiring agreements" });
     expect(within(table).getByText("BOLT")).toBeInTheDocument();
     expect(within(table).queryByText("All products")).toBeNull();
-    expect(screen.getByText(/covers the first 100 active agreements/)).toBeInTheDocument();
+    // Fewer rows than a page: the list is complete, so no "first 100" note.
+    expect(screen.queryByText(/agreements that end soonest/)).toBeNull();
     const workspaceCall = calls.find((c) => c.url.pathname === "/api/v1/pricing/workspace");
     expect(workspaceCall?.url.searchParams.get("asOf")).toBe(day);
-    expect(calls.find((c) => c.url.pathname.endsWith("/condition-records"))?.url.searchParams.get("status")).toBe("ACTIVE");
+    const listCall = calls.find((c) => c.url.pathname.endsWith("/condition-records"))?.url.searchParams;
+    expect(listCall?.get("status")).toBe("ACTIVE");
+    expect(listCall?.get("validToFrom")).toBe(day);
+    expect(listCall?.get("validToTo")).toBe(addDays(day, 30));
     expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("says when the expiring list is one page of a longer count", async () => {
+    const page = Array.from({ length: 100 }, (_, i) =>
+      record({ id: `0190f0a0-0000-7000-8000-${String(1000 + i).padStart(12, "0")}`, productKey: `P${i}`, validTo: addDays(day, 1 + (i % 30)) }),
+    );
+    handler = (url) => {
+      if (url.pathname.endsWith("/workspace")) return json(200, { ...tiles, expiringIn30Days: 140 });
+      if (url.pathname.endsWith("/condition-records")) return json(200, { items: page });
+      return undefined;
+    };
+    renderAt("/pricing");
+    expect(await screen.findByText(/shows the 100 agreements that end soonest; the tile counts all 140/)).toBeInTheDocument();
   });
 
   it("shows zero accruals when nothing accrued this month", async () => {
@@ -191,6 +212,25 @@ describe("Trade agreements", () => {
 
     fireEvent.click(within(table).getByRole("button", { name: "Price" }));
     expect(await screen.findByRole("heading", { name: "Price: SHIRT" })).toBeInTheDocument();
+  });
+
+  it("filters by the last valid day and shows the service's refusal of a reversed range", async () => {
+    handler = (url) => {
+      if (!url.pathname.endsWith("/condition-records")) return undefined;
+      const from = url.searchParams.get("validToFrom");
+      const to = url.searchParams.get("validToTo");
+      if (from && to && to < from) return json(422, { code: "COM-0422", detail: "validation failed", errors: { validToTo: "must not be before validToFrom" } });
+      return json(200, { items: to ? active.filter((r) => r.validTo <= to) : active });
+    };
+    renderAt("/pricing/agreements");
+    const table = await screen.findByRole("table", { name: "Trade agreements" });
+    await waitFor(() => expect(table).toHaveTextContent("Group PG-A"));
+    fireEvent.change(screen.getByLabelText(/Ends on or before/), { target: { value: addDays(day, 30) } });
+    await waitFor(() => expect(calls.at(-1)?.url.searchParams.get("validToTo")).toBe(addDays(day, 30)));
+    await waitFor(() => expect(table).not.toHaveTextContent("Group PG-A"));
+    expect(table).toHaveTextContent("BOLT");
+    fireEvent.change(screen.getByLabelText(/Ends on or after/), { target: { value: addDays(day, 60) } });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load the trade agreements");
   });
 
   it("shows the empty state when nothing matches", async () => {

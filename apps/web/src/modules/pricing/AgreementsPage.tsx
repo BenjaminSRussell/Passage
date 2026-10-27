@@ -26,7 +26,9 @@ export function AgreementsPage() {
   const [customer, setCustomer] = useState("");
   const [product, setProduct] = useState("");
   const [asOf, setAsOf] = useState("");
-  const filter = { status, type, customer: customer.trim(), product: product.trim(), asOf };
+  const [validToFrom, setValidToFrom] = useState("");
+  const [validToTo, setValidToTo] = useState("");
+  const filter = { status, type, customer: customer.trim(), product: product.trim(), asOf, validToFrom, validToTo };
   const state = useLoad((signal) => listConditionRecords(filter, signal), JSON.stringify(filter));
 
   return (
@@ -73,6 +75,12 @@ export function AgreementsPage() {
         </FormField>
         <FormField id="ta-asof" label="Valid on" optional>
           {(c) => <Input {...c} type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} />}
+        </FormField>
+        <FormField id="ta-ends-from" label="Ends on or after" optional>
+          {(c) => <Input {...c} type="date" value={validToFrom} onChange={(e) => setValidToFrom(e.target.value)} />}
+        </FormField>
+        <FormField id="ta-ends-by" label="Ends on or before" optional>
+          {(c) => <Input {...c} type="date" value={validToTo} onChange={(e) => setValidToTo(e.target.value)} />}
         </FormField>
       </div>
       {state.error ? (

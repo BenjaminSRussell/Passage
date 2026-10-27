@@ -52,6 +52,10 @@ export interface RecordFilter {
   product?: string;
   campaignId?: string;
   asOf?: string;
+  /** Last valid day on or after this date; with validToTo, the list comes soonest-ending first. */
+  validToFrom?: string;
+  /** Last valid day on or before this date. */
+  validToTo?: string;
   limit?: number;
 }
 

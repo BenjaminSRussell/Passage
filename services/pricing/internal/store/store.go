@@ -55,7 +55,12 @@ type Filter struct {
 	// CampaignID keeps the records of one campaign (FR-26.10).
 	CampaignID string
 	AsOf       *time.Time
-	Limit      int
+	// ValidToFrom and ValidToTo keep records whose last valid day falls in the range
+	// (both inclusive). With either set the list is ordered by valid_to, then id, so
+	// the first page is the records that end soonest (the workspace's expiring list).
+	ValidToFrom *time.Time
+	ValidToTo   *time.Time
+	Limit       int
 }
 
 // ActiveQuery selects the records one resolve can use: ACTIVE in the legal entity and
@@ -243,16 +248,20 @@ func (s *Postgres) GetRecord(ctx context.Context, id string) (Entry, error) {
 	return e, err
 }
 
-// ListRecords returns records ordered by id, optionally filtered by status and validity.
+// ListRecords returns records ordered by id (by valid_to, then id, when a valid-to range
+// is given), optionally filtered by status, validity and the last valid day.
 func (s *Postgres) ListRecords(ctx context.Context, f Filter) ([]Entry, error) {
 	if f.Limit <= 0 || f.Limit > MaxListLimit {
 		f.Limit = MaxListLimit
 	}
-	var asOf *string
-	if f.AsOf != nil {
-		day := dayStr(*f.AsOf)
-		asOf = &day
+	optDay := func(t *time.Time) *string {
+		if t == nil {
+			return nil
+		}
+		day := dayStr(*t)
+		return &day
 	}
+	asOf, validToFrom, validToTo := optDay(f.AsOf), optDay(f.ValidToFrom), optDay(f.ValidToTo)
 	out := []Entry{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select `+recordColumns+` from condition_record
@@ -260,7 +269,9 @@ func (s *Postgres) ListRecords(ctx context.Context, f Filter) ([]Entry, error) {
 			and ($3::date is null or (valid_from <= $3::date and valid_to >= $3::date))
 			and ($5::text = '' or condition_type = $5) and ($6::text = '' or customer_key = $6) and ($7::text = '' or product_key = $7)
 			and ($8::text = '' or campaign_id::text = $8)
-			order by id limit $4`, f.LegalEntityID, f.Status, asOf, f.Limit, f.Type, f.Customer, f.Product, f.CampaignID)
+			and ($9::date is null or valid_to >= $9::date) and ($10::date is null or valid_to <= $10::date)
+			order by case when $9::date is not null or $10::date is not null then valid_to end, id limit $4`,
+			f.LegalEntityID, f.Status, asOf, f.Limit, f.Type, f.Customer, f.Product, f.CampaignID, validToFrom, validToTo)
 		if err != nil {
 			return err
 		}

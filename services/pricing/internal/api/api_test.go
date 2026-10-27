@@ -75,7 +75,8 @@ func (f *fakeStore) ListRecords(_ context.Context, filter store.Filter) ([]store
 	f.lastList = filter
 	var out []store.Entry
 	for _, e := range f.records {
-		if (filter.Status == "" || e.Status == filter.Status) && (filter.CampaignID == "" || e.CampaignID == filter.CampaignID) {
+		if (filter.Status == "" || e.Status == filter.Status) && (filter.CampaignID == "" || e.CampaignID == filter.CampaignID) &&
+			(filter.ValidToFrom == nil || !e.ValidTo.Before(*filter.ValidToFrom)) && (filter.ValidToTo == nil || !e.ValidTo.After(*filter.ValidToTo)) {
 			out = append(out, e)
 		}
 	}
@@ -319,10 +320,37 @@ func TestListRecords_FiltersAndValidation(t *testing.T) {
 	if f.LegalEntityID != legalEntity || f.Status != "DRAFT" || f.Type != "PRICE" || f.Customer != "C1" || f.Product != "P1" || f.Limit != 10 || f.AsOf == nil {
 		t.Fatalf("filter = %+v; want every query parameter passed to the store", f)
 	}
-	code, out = call(t, h, http.MethodGet, "/v1/pricing/condition-records?status=OPEN&type=FREIGHT&asOf=03/01/2026&limit=0&legalEntityId=x", "pricing.view", "")
+	code, out = call(t, h, http.MethodGet, "/v1/pricing/condition-records?status=OPEN&type=FREIGHT&asOf=03/01/2026&limit=0&legalEntityId=x&validToFrom=soon", "pricing.view", "")
 	errs, _ := out["errors"].(map[string]any)
-	if code != http.StatusUnprocessableEntity || len(errs) != 5 {
-		t.Fatalf("bad filters = %d %v; want 422 with five field errors", code, out)
+	if code != http.StatusUnprocessableEntity || len(errs) != 6 || errs["validToFrom"] == nil {
+		t.Fatalf("bad filters = %d %v; want 422 with six field errors", code, out)
+	}
+}
+
+// The workspace's expiring list asks for the records whose last valid day falls in a
+// window; the range reaches the store and a reversed range is refused.
+func TestListRecords_ValidToRange(t *testing.T) {
+	fs := newFake()
+	h := router(fs)
+	call(t, h, http.MethodPost, "/v1/pricing/condition-records", allDuties, fmt.Sprintf(recordBody, legalEntity, "5"))
+	var validTo string
+	for _, e := range fs.records {
+		validTo = e.ValidTo.Format("2006-01-02")
+	}
+	code, out := call(t, h, http.MethodGet, "/v1/pricing/condition-records?validToFrom="+validTo+"&validToTo="+validTo, "pricing.view", "")
+	if code != http.StatusOK || len(out["items"].([]any)) != 1 {
+		t.Fatalf("range on the record's last day = %d %v; want the record", code, out)
+	}
+	if f := fs.lastList; f.ValidToFrom == nil || f.ValidToTo == nil || f.ValidToFrom.Format("2006-01-02") != validTo {
+		t.Fatalf("filter = %+v; want the valid-to range passed to the store", f)
+	}
+	code, out = call(t, h, http.MethodGet, "/v1/pricing/condition-records?validToFrom=1999-01-01&validToTo=1999-01-31", "pricing.view", "")
+	if code != http.StatusOK || len(out["items"].([]any)) != 0 {
+		t.Fatalf("range before the record ends = %d %v; want no items", code, out)
+	}
+	code, out = call(t, h, http.MethodGet, "/v1/pricing/condition-records?validToFrom=2026-02-01&validToTo=2026-01-01", "pricing.view", "")
+	if errs, _ := out["errors"].(map[string]any); code != http.StatusUnprocessableEntity || errs["validToTo"] == nil {
+		t.Fatalf("reversed range = %d %v; want 422 on validToTo", code, out)
 	}
 }
 

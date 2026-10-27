@@ -21,8 +21,8 @@ const PAGE = 100;
 
 interface Overview {
   tiles: PricingWorkspace;
-  /** The first page of ACTIVE records, for the expiring-soon list. */
-  active: ConditionRecord[];
+  /** ACTIVE records ending within the window, soonest first (at most one page). */
+  expiring: ConditionRecord[];
 }
 
 /** "200.00 USD", or each currency in turn; "0" when nothing accrued. */
@@ -111,12 +111,14 @@ export function WorkspacePage() {
   const navigate = useNavigate();
   const day = today();
   const state = useLoad<Overview>(async (signal) => {
-    const [tiles, active] = await Promise.all([getPricingWorkspace({ asOf: day }, signal), listConditionRecords({ status: "ACTIVE", limit: PAGE }, signal)]);
-    return { tiles, active };
+    const [tiles, expiring] = await Promise.all([
+      getPricingWorkspace({ asOf: day }, signal),
+      listConditionRecords({ status: "ACTIVE", validToFrom: day, validToTo: addDays(day, EXPIRY_WINDOW_DAYS), limit: PAGE }, signal),
+    ]);
+    return { tiles, expiring };
   }, day);
-  const horizon = addDays(day, EXPIRY_WINDOW_DAYS);
   const tiles = state.data?.tiles;
-  const expiring = (state.data?.active ?? []).filter((r) => r.validTo >= day && r.validTo <= horizon).sort((a, b) => a.validTo.localeCompare(b.validTo));
+  const expiring = state.data?.expiring ?? [];
   const value = (n: number | undefined) => (n === undefined ? "…" : n);
 
   return (
@@ -164,8 +166,10 @@ export function WorkspacePage() {
               empty={{ title: "Nothing expires in the next 30 days", description: "Active agreements whose validity ends soon appear here." }}
               onRowOpen={(row) => navigate(`/pricing/agreements/${row.id}`)}
             />
-            {tiles && tiles.activeRecords > PAGE ? (
-              <p className={styles.note}>The list covers the first {PAGE} active agreements; the tile counts all of them. Filter the trade agreements to see the rest.</p>
+            {tiles && tiles.expiringIn30Days > expiring.length && expiring.length === PAGE ? (
+              <p className={styles.note}>
+                The list shows the {PAGE} agreements that end soonest; the tile counts all {tiles.expiringIn30Days}. Filter the trade agreements to see the rest.
+              </p>
             ) : null}
           </Card>
         </>
