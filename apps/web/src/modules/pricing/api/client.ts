@@ -845,3 +845,144 @@ export function reviseProcedure(id: string, revision: number, steps: ProcedureSt
 export function activateProcedure(id: string, key: string = newKey()): Promise<Procedure> {
   return post<Procedure>(`/procedures/${encodeURIComponent(id)}:activate`, {}, key);
 }
+
+// ---- Workspace tiles, record expiry, price journal CSV import and commission settlement export.
+
+/** Rebate accrued on invoices dated in the month, per party role and currency (never added across them). */
+export interface AccrualTotal {
+  partyRole: RebatePartyRole;
+  currency: string;
+  amount: string;
+}
+
+/** GET /workspace (PRD §5.26.6): exact tile counts for one legal entity or every entity in scope. */
+export interface PricingWorkspace {
+  legalEntityId?: string;
+  asOf: string;
+  month: string;
+  activeRecords: number;
+  draftRecords: number;
+  expiringIn30Days: number;
+  journalsToPost: number;
+  liveCampaigns: number;
+  claimsAwaitingApproval: number;
+  accrualsThisMonth: AccrualTotal[];
+}
+
+export function getPricingWorkspace(filter: { legalEntityId?: string; asOf?: string } = {}, signal?: AbortSignal): Promise<PricingWorkspace> {
+  return send<PricingWorkspace>(`/workspace${query({ ...filter })}`, {}, signal);
+}
+
+export interface ExpiryResult {
+  legalEntityId: string;
+  asOf: string;
+  expired: number;
+  recordIds: string[];
+}
+
+/** POST /condition-records:expire - the nightly expiry job (BR-26.9) run on demand; a rerun expires nothing more. */
+export function expireConditionRecords(legalEntityId: string, asOf: string): Promise<ExpiryResult> {
+  return post<ExpiryResult>("/condition-records:expire", { legalEntityId, asOf });
+}
+
+async function sendRaw(path: string, init: RequestInit, signal?: AbortSignal): Promise<Response> {
+  const res = await fetch(`${base}${path}`, { ...init, credentials: "same-origin", signal });
+  if (!res.ok) {
+    throw await toError(res);
+  }
+  return res;
+}
+
+/**
+ * POST /journals:import-csv - creates an OPEN journal from a CSV file (FR-26.9). Row faults come
+ * back keyed rows[n].column (n = data row from 1); journal faults keep the JSON keys lines[i].field.
+ */
+export async function importPriceJournalCsv(
+  header: { legalEntityId: string; name: string; smartRound: boolean },
+  csv: string,
+  key: string = newKey(),
+): Promise<Journal> {
+  const res = await sendRaw(`/journals:import-csv${query({ legalEntityId: header.legalEntityId, name: header.name, smartRound: header.smartRound ? "true" : "" })}`, {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "text/csv", "Idempotency-Key": key },
+    body: csv,
+  });
+  return (await res.json()) as Journal;
+}
+
+export const SETTLEMENT_TARGETS = ["AP", "PAYROLL"] as const;
+export type SettlementTarget = (typeof SETTLEMENT_TARGETS)[number];
+
+export interface SettlementRow {
+  repId: string;
+  currency: string;
+  amount: string;
+  transactions: number;
+}
+
+export interface SettlementExport {
+  /** The file exactly as the service wrote it, for download. */
+  csv: string;
+  filename: string;
+  rows: SettlementRow[];
+}
+
+/** Splits RFC 4180 CSV text into records (quoted fields, doubled quotes, CRLF or LF). */
+export function parseCsv(text: string): string[][] {
+  const records: string[][] = [];
+  let record: string[] = [];
+  let field = "";
+  let quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (quoted) {
+      if (ch === '"' && text[i + 1] === '"') {
+        field += '"';
+        i++;
+      } else if (ch === '"') {
+        quoted = false;
+      } else {
+        field += ch;
+      }
+    } else if (ch === '"') {
+      quoted = true;
+    } else if (ch === ",") {
+      record.push(field);
+      field = "";
+    } else if (ch === "\n" || ch === "\r") {
+      if (ch === "\r" && text[i + 1] === "\n") i++;
+      record.push(field);
+      records.push(record);
+      record = [];
+      field = "";
+    } else {
+      field += ch;
+    }
+  }
+  if (field !== "" || record.length > 0) {
+    record.push(field);
+    records.push(record);
+  }
+  return records;
+}
+
+/**
+ * GET /commission/settlement-export (FR-26.18): commission per rep and currency for invoices dated
+ * from..to, as the CSV payroll (w43) or AP (w19) reads, plus the parsed rows for a preview.
+ */
+export async function exportCommissionSettlement(
+  filter: { legalEntityId: string; from: string; to: string; target: SettlementTarget },
+  signal?: AbortSignal,
+): Promise<SettlementExport> {
+  const res = await sendRaw(`/commission/settlement-export${query({ ...filter })}`, { headers: { Accept: "text/csv" } }, signal);
+  const csv = await res.text();
+  const [head, ...data] = parseCsv(csv);
+  const col = (name: string) => head?.indexOf(name) ?? -1;
+  const [rep, currency, amount, count] = [col("rep_id"), col("currency"), col("amount"), col("transactions")];
+  if (rep < 0 || currency < 0 || amount < 0 || count < 0) {
+    throw new PricingApiError(0, "COM-0001", "The settlement file has an unexpected header");
+  }
+  const rows = data.map((r) => ({ repId: r[rep] ?? "", currency: r[currency] ?? "", amount: r[amount] ?? "", transactions: Number(r[count] ?? 0) }));
+  const disposition = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "");
+  return { csv, filename: disposition?.[1] ?? `commission-settlement-${filter.target}-${filter.from}-${filter.to}.csv`, rows };
+}

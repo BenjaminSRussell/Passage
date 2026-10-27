@@ -4,9 +4,11 @@ import { AgreementDetailPage } from "./AgreementDetailPage";
 import { AgreementsPage } from "./AgreementsPage";
 import { CampaignDetailPage } from "./CampaignDetailPage";
 import { CampaignsPage } from "./CampaignsPage";
+import { CommissionSettlementPage } from "./CommissionSettlementPage";
 import { CommissionTransactionsPage } from "./CommissionTransactionsPage";
 import { FundDetailPage } from "./FundDetailPage";
 import { FundsPage } from "./FundsPage";
+import { ImportJournalPage } from "./ImportJournalPage";
 import { JournalDetailPage } from "./JournalDetailPage";
 import { JournalsPage } from "./JournalsPage";
 import { NewAgreementPage } from "./NewAgreementPage";
@@ -34,7 +36,7 @@ const pricing: PassageModule = {
   id: "pricing",
   title: "Pricing",
   description:
-    "Trade agreements, campaigns, pricing procedures, price journals, customer and vendor rebates, commissions, trade funds, promotions and the explanation behind every price.",
+    "Trade agreements, campaigns, pricing procedures, price journals, customer and vendor rebates, commissions, trade funds, promotions, journal CSV import, commission settlement and the explanation behind every price.",
   routes: [
     { path: "/pricing", element: createElement(WorkspacePage), handle: { title: "Pricing workspace" } },
     { path: "/pricing/agreements", element: createElement(AgreementsPage), handle: { title: "Trade agreements" } },
@@ -48,6 +50,7 @@ const pricing: PassageModule = {
     { path: "/pricing/procedures/:id", element: createElement(ProcedureDetailPage), handle: { title: "Pricing procedure" } },
     { path: "/pricing/journals", element: createElement(JournalsPage), handle: { title: "Price journals" } },
     { path: "/pricing/journals/new", element: createElement(NewJournalPage), handle: { title: "New price journal" } },
+    { path: "/pricing/journals/import", element: createElement(ImportJournalPage), handle: { title: "Import price journal" } },
     { path: "/pricing/journals/:id", element: createElement(JournalDetailPage), handle: { title: "Price journal" } },
     { path: "/pricing/rebates", element: createElement(RebatesPage), handle: { title: "Rebate agreements" } },
     { path: "/pricing/rebates/new", element: createElement(NewRebatePage), handle: { title: "New rebate agreement" } },
@@ -58,6 +61,7 @@ const pricing: PassageModule = {
     { path: "/pricing/commission/sales-groups/new", element: createElement(NewSalesGroupPage), handle: { title: "New sales group" } },
     { path: "/pricing/commission/sales-groups/:id", element: createElement(SalesGroupDetailPage), handle: { title: "Sales group" } },
     { path: "/pricing/commission/transactions", element: createElement(CommissionTransactionsPage), handle: { title: "Commission transactions" } },
+    { path: "/pricing/commission/settlement", element: createElement(CommissionSettlementPage), handle: { title: "Commission settlement" } },
     { path: "/pricing/funds", element: createElement(FundsPage), handle: { title: "Trade funds" } },
     { path: "/pricing/funds/new", element: createElement(NewFundPage), handle: { title: "New trade fund" } },
     { path: "/pricing/funds/:id", element: createElement(FundDetailPage), handle: { title: "Trade fund" } },
@@ -76,6 +80,7 @@ const pricing: PassageModule = {
     { label: "Vendor rebate claims", to: "/pricing/rebates/claims", duty: "pricing.rebate.view" },
     { label: "Sales groups", to: "/pricing/commission/sales-groups", duty: "pricing.commission.view" },
     { label: "Commission transactions", to: "/pricing/commission/transactions", duty: "pricing.commission.view" },
+    { label: "Commission settlement", to: "/pricing/commission/settlement", duty: "pricing.commission.view" },
     { label: "Trade funds", to: "/pricing/funds", duty: "pricing.view" },
     { label: "Promotions", to: "/pricing/promotions", duty: "pricing.view" },
     { label: "Price simulation", to: "/pricing/simulate", duty: "pricing.view" },

@@ -19,7 +19,7 @@ const maxCacheEntries = 1024
 // (RLS decides what a caller may read, so callers of different scopes never share a
 // snapshot), legal entity, currency, customer group (campaign targeting) and pricing day.
 // It lives for the TTL. Every change this process makes to the ACTIVE set (activate,
-// withdraw, journal post and reverse, campaign kill and restore) empties the cache once the
+// withdraw, expiry, journal post and reverse, campaign kill and restore) empties the cache once the
 // change has committed; other replicas see it within the TTL, which bounds staleness until
 // the conditionrecord.activated consumer exists (NOT-IMPLEMENTED.md).
 type Cache struct {
@@ -98,6 +98,12 @@ func (c *Cache) ActivateRecord(ctx context.Context, id string, version int, idem
 func (c *Cache) WithdrawRecord(ctx context.Context, id string, version int, reason, idempotencyKey string) (Entry, error) {
 	defer c.Flush()
 	return c.Store.WithdrawRecord(ctx, id, version, reason, idempotencyKey)
+}
+
+// ExpireRecords flushes after the store call: expired records left the ACTIVE set.
+func (c *Cache) ExpireRecords(ctx context.Context, legalEntityID string, asOf time.Time) ([]Entry, error) {
+	defer c.Flush()
+	return c.Store.ExpireRecords(ctx, legalEntityID, asOf)
 }
 
 // PostJournal flushes after the store call: a posted journal activates and withdraws records.

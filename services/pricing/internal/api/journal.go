@@ -166,6 +166,12 @@ func (a *API) createJournal(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
+	a.submitJournal(w, r, req)
+}
+
+// submitJournal validates a journal and stores it. The JSON route and the CSV import share it,
+// so both reject the same faults with the same field keys.
+func (a *API) submitJournal(w http.ResponseWriter, r *http.Request, req journalRequest) {
 	fields := map[string]string{}
 	if !ids.Valid(req.LegalEntityID) {
 		fields["legalEntityId"] = "must be a UUID"

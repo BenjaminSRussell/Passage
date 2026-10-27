@@ -98,7 +98,7 @@ operations:
   publishConditionRecordWithdrawn:
     action: send
     channel: {$ref: "#/channels/conditionRecordActivated"}
-    summary: A condition record was withdrawn.
+    summary: A condition record left the ACTIVE set - withdrawn by a user or a journal, or expired by the nightly job (reason EXPIRED).
     messages:
       - {$ref: "#/channels/conditionRecordActivated/messages/conditionRecordWithdrawn"}
   publishFundClosed:
@@ -184,7 +184,7 @@ components:
         properties:
           id: {type: string, format: uuid}
           version: {type: integer}
-          reason: {type: string}
+          reason: {type: string, description: "The withdrawal reason; EXPIRED when the record expiry job (BR-26.9) ended it."}
     JournalPosted:
       name: dev.passage.pricing.journal.posted.v1
       contentType: application/cloudevents+json

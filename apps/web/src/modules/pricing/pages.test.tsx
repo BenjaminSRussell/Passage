@@ -95,47 +95,70 @@ const active = [
 ];
 const draft = record({ id: R3, status: "DRAFT", version: 1, productKey: "SHIRT", currency: "EUR", fromQuantity: "500", amount: "9" });
 
+const tiles = {
+  asOf: day,
+  month: day.slice(0, 7),
+  activeRecords: 140,
+  draftRecords: 1,
+  expiringIn30Days: 3,
+  journalsToPost: 3,
+  liveCampaigns: 1,
+  claimsAwaitingApproval: 2,
+  accrualsThisMonth: [
+    { partyRole: "CUSTOMER", currency: "USD", amount: "200" },
+    { partyRole: "CUSTOMER", currency: "EUR", amount: "12.5" },
+    { partyRole: "VENDOR", currency: "USD", amount: "600" },
+  ],
+};
+
 describe("Pricing workspace", () => {
-  it("counts active and draft agreements, journals to post, and lists agreements expiring within 30 days", async () => {
+  it("shows the service's exact tile counts and accruals per currency, and lists agreements expiring within 30 days", async () => {
     handler = (url) => {
-      if (url.pathname.endsWith("/condition-records")) return json(200, { items: url.searchParams.get("status") === "DRAFT" ? [draft] : active });
-      if (url.pathname.endsWith("/journals")) return json(200, { items: url.searchParams.get("status") === "OPEN" ? [{ id: "j1" }, { id: "j2" }] : [{ id: "j3" }] });
-      if (url.pathname.endsWith("/campaigns"))
-        return json(200, {
-          items: [
-            { id: "c1", killed: false, validFrom: addDays(day, -1), validTo: addDays(day, 5) },
-            { id: "c2", killed: true, validFrom: addDays(day, -1), validTo: addDays(day, 5) },
-            { id: "c3", killed: false, validFrom: addDays(day, 3), validTo: addDays(day, 9) },
-          ],
-        });
+      if (url.pathname.endsWith("/workspace")) return json(200, tiles);
+      if (url.pathname.endsWith("/condition-records")) return json(200, { items: active });
       return undefined;
     };
     const { container } = renderAt("/pricing");
     expect(screen.getByRole("heading", { name: "Pricing workspace" })).toBeInTheDocument();
-    const tiles = screen.getByRole("list", { name: "Pricing tiles" });
-    await waitFor(() => expect(tiles).toHaveTextContent("Active agreements 2"));
-    expect(tiles).toHaveTextContent("Drafts to activate 1");
-    expect(tiles).toHaveTextContent("Expiring in 30 days 1");
-    expect(tiles).toHaveTextContent("Journals to post 3");
-    expect(tiles).toHaveTextContent("Live campaigns 1");
-    const table = screen.getByRole("table", { name: "Expiring agreements" });
+    const list = screen.getByRole("list", { name: "Pricing tiles" });
+    await waitFor(() => expect(list).toHaveTextContent("Active agreements 140"));
+    expect(list).toHaveTextContent("Drafts to activate 1");
+    expect(list).toHaveTextContent("Expiring in 30 days 3");
+    expect(list).toHaveTextContent("Journals to post 3");
+    expect(list).toHaveTextContent("Live campaigns 1");
+    expect(list).toHaveTextContent("Vendor claims to approve 2");
+    expect(list).toHaveTextContent("Customer rebates accrued this month 200 USD · 12.5 EUR");
+    expect(list).toHaveTextContent("Vendor rebates accrued this month 600 USD");
+    const table = await screen.findByRole("table", { name: "Expiring agreements" });
     expect(within(table).getByText("BOLT")).toBeInTheDocument();
     expect(within(table).queryByText("All products")).toBeNull();
-    expect(calls.map((c) => `${c.url.pathname.split("/").at(-1)}:${c.url.searchParams.get("status")}`).sort()).toEqual([
-      "campaigns:null",
-      "condition-records:ACTIVE",
-      "condition-records:DRAFT",
-      "journals:OPEN",
-      "journals:VALIDATED",
-    ]);
+    expect(screen.getByText(/covers the first 100 active agreements/)).toBeInTheDocument();
+    const workspaceCall = calls.find((c) => c.url.pathname === "/api/v1/pricing/workspace");
+    expect(workspaceCall?.url.searchParams.get("asOf")).toBe(day);
+    expect(calls.find((c) => c.url.pathname.endsWith("/condition-records"))?.url.searchParams.get("status")).toBe("ACTIVE");
     expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("shows zero accruals when nothing accrued this month", async () => {
+    handler = (url) => {
+      if (url.pathname.endsWith("/workspace")) return json(200, { ...tiles, activeRecords: 2, accrualsThisMonth: [] });
+      if (url.pathname.endsWith("/condition-records")) return json(200, { items: [] });
+      return undefined;
+    };
+    renderAt("/pricing");
+    const list = screen.getByRole("list", { name: "Pricing tiles" });
+    await waitFor(() => expect(list).toHaveTextContent("Customer rebates accrued this month 0"));
+    expect(list).toHaveTextContent("Vendor rebates accrued this month 0");
+    expect(await screen.findByText("Nothing expires in the next 30 days")).toBeInTheDocument();
+    expect(screen.queryByText(/covers the first 100/)).toBeNull();
   });
 
   it("shows the error with a retry when the service fails", async () => {
     let fail = true;
     handler = (url) => {
-      if (!url.pathname.endsWith("/condition-records") && !url.pathname.endsWith("/journals") && !url.pathname.endsWith("/campaigns")) return undefined;
-      return fail ? json(503, { code: "COM-0500", detail: "internal error" }) : json(200, { items: [] });
+      if (url.pathname.endsWith("/workspace")) return fail ? json(503, { code: "COM-0500", detail: "internal error" }) : json(200, { ...tiles, accrualsThisMonth: [] });
+      if (url.pathname.endsWith("/condition-records")) return json(200, { items: [] });
+      return undefined;
     };
     renderAt("/pricing");
     expect(await screen.findByRole("alert")).toHaveTextContent("internal error (COM-0500)");

@@ -4,7 +4,7 @@ Routes, all on the pricing service API (`services/pricing/api/openapi.yaml`):
 
 | Route | Page | Calls |
 |---|---|---|
-| `/pricing` | Workspace: active, draft, expiring-in-30-days, journals-to-post and live-campaign tiles, expiring list | `GET /condition-records?status=`, `GET /journals?status=`, `GET /campaigns` |
+| `/pricing` | Workspace: exact tiles (active, drafts, expiring in 30 days, journals to post, live campaigns, vendor claims to approve, customer and vendor rebates accrued this month per currency), the expiring list, and the record expiry run (BR-26.9) for a legal entity and day | `GET /workspace`, `GET /condition-records?status=ACTIVE`, `POST /condition-records:expire` |
 | `/pricing/agreements` | Trade agreements grid with status, type, customer, product and as-of filters | `GET /condition-records` |
 | `/pricing/agreements/new` | Create a DRAFT agreement, optionally in a campaign; `?copy=<id>` starts from an existing one, `?campaign=<id>` fills the campaign | `POST /condition-records` |
 | `/pricing/agreements/:id` | Detail with its campaign, activate (overlap 409 shown) and withdraw | `GET`, `:activate`, `:withdraw` |
@@ -16,6 +16,7 @@ Routes, all on the pricing service API (`services/pricing/api/openapi.yaml`):
 | `/pricing/procedures/:id` | A DRAFT's step editor (step, type, CEL requirement, exclusion group and mode, statistical, account key), save at its revision and activate; other versions read-only (PRC-0008 shown) | `GET /procedures/{id}`, `:revise`, `:activate` |
 | `/pricing/journals` | Price journal log with a status filter | `GET /journals` |
 | `/pricing/journals/new` | Create an OPEN journal from pasted `UPDATE, id, version, percent` / `DELETE, id, version` rows | `POST /journals` |
+| `/pricing/journals/import` | Import a CSV file (header row, op first; up to 100,000 rows) as an OPEN journal; row faults listed by row number | `POST /journals:import-csv` |
 | `/pricing/journals/:id` | Lines with before and after values; validate, post (PRC-0005 shown) and reverse | `GET`, `:validate`, `:post`, `:reverse` |
 | `/pricing/rebates` | Customer and vendor rebate agreements with type, basis, period and tiers; type filter | `GET /rebates/agreements?partyRole=` |
 | `/pricing/rebates/new` | Create a tiered agreement for a customer, a customer group or (vendor rebate) a vendor; accounts follow the type (2150 / 4150 or 2160 / 5100) | `POST /rebates/agreements` |
@@ -26,6 +27,7 @@ Routes, all on the pricing service API (`services/pricing/api/openapi.yaml`):
 | `/pricing/commission/sales-groups/new` | Create a sales group; reps with shares that add up to 100 | `POST /commission/sales-groups` |
 | `/pricing/commission/sales-groups/:id` | Reps, commission rules in search order, add a rule (409 PRC-0038 shown) | `GET /commission/sales-groups/{id}`, `GET`/`POST /commission/rules` |
 | `/pricing/commission/transactions` | Commission inquiry by sales group, rep, month, customer and invoice line, with an exact total | `GET /commission/transactions` |
+| `/pricing/commission/settlement` | Commission settlement export (FR-26.18): totals per rep and currency for invoices dated in a period (previous month by default), preview and download the CSV for accounts payable or payroll | `GET /commission/settlement-export` |
 | `/pricing/funds` | Trade funds with budget per period, overspend and open/closed status | `GET /funds` |
 | `/pricing/funds/new` | Create a fund with its budget per period and overspend flag | `POST /funds` |
 | `/pricing/funds/:id` | Fund usage inquiry (per period: budget, used, remaining; per source), attribute usage (PRC-0011 / PRC-0012 shown), revise the budget, close and reopen | `GET /funds/{id}/usage`, `:attribute`, `:revise`, `:close`, `:reopen` |
@@ -41,7 +43,8 @@ Routes, all on the pricing service API (`services/pricing/api/openapi.yaml`):
   loading, empty and error states.
 - Tests: `npx vitest --run src/modules/pricing` and `npx tsc --noEmit` from `apps/web`. `testServer.tsx`
   holds the fetch stub and router used by `journals.test.tsx`, `rebates.test.tsx`, `vendorRebates.test.tsx`, `commission.test.tsx`, `funds.test.tsx`,
-  `promotions.test.tsx`, `campaigns.test.tsx` and `procedures.test.tsx`.
+  `promotions.test.tsx`, `campaigns.test.tsx`, `procedures.test.tsx` and `operations.test.tsx` (workspace expiry,
+  journal CSV import, commission settlement); `text()` answers with a non-JSON body such as CSV.
 
 Needs: nothing from the shell beyond the existing `shell/ui` components. No npm
 dependencies were added.

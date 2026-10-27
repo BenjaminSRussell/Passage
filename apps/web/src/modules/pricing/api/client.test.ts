@@ -1,5 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { activateConditionRecord, describeProblem, listConditionRecords, PricingApiError, resolvePrice, withdrawConditionRecord } from "./client";
+import {
+  activateConditionRecord,
+  describeProblem,
+  exportCommissionSettlement,
+  importPriceJournalCsv,
+  listConditionRecords,
+  parseCsv,
+  PricingApiError,
+  resolvePrice,
+  withdrawConditionRecord,
+} from "./client";
 
 const LE = "0190f0a0-0000-7000-8000-000000000001";
 const body = {
@@ -71,5 +81,42 @@ describe("pricing api client", () => {
     expect(withdrawUrl).toBe("/api/v1/pricing/condition-records/r1:withdraw");
     expect(new Headers(withdraw.headers).get("Idempotency-Key")).toBe("key-w");
     expect(JSON.parse(withdraw.body as string)).toEqual({ version: 2, reason: "superseded" });
+  });
+
+  it("parses quoted CSV fields, doubled quotes and CRLF line ends", () => {
+    expect(parseCsv('a,"b,c","d ""e"""\r\n1,,3\n')).toEqual([
+      ["a", "b,c", 'd "e"'],
+      ["1", "", "3"],
+    ]);
+    expect(parseCsv("x,y")).toEqual([["x", "y"]]);
+    expect(parseCsv("")).toEqual([]);
+  });
+
+  it("reads the settlement CSV into rows and keeps the file for download", async () => {
+    const csv = "target,rep_id,currency,amount,transactions,from,to\nAP,R1,USD,300.00,2,2027-03-01,2027-03-31\n";
+    const fetchMock = vi.fn().mockResolvedValue(new Response(csv, { status: 200, headers: { "Content-Type": "text/csv" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const out = await exportCommissionSettlement({ legalEntityId: LE, from: "2027-03-01", to: "2027-03-31", target: "AP" });
+    expect(out.rows).toEqual([{ repId: "R1", currency: "USD", amount: "300.00", transactions: 2 }]);
+    expect(out.csv).toBe(csv);
+    expect(out.filename).toBe("commission-settlement-AP-2027-03-01-2027-03-31.csv");
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url).toBe(`/api/v1/pricing/commission/settlement-export?legalEntityId=${LE}&from=2027-03-01&to=2027-03-31&target=AP`);
+  });
+
+  it("refuses a settlement file without the expected columns", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("a,b\n1,2\n", { status: 200 })));
+    await expect(exportCommissionSettlement({ legalEntityId: LE, from: "2027-03-01", to: "2027-03-31", target: "AP" })).rejects.toThrow("unexpected header");
+  });
+
+  it("posts a CSV import as text/csv and omits smartRound when off", async () => {
+    const fetchMock = reply(201, { id: "j1" });
+    vi.stubGlobal("fetch", fetchMock);
+    await importPriceJournalCsv({ legalEntityId: LE, name: "A & B", smartRound: false }, "op\n", "key-i");
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`/api/v1/pricing/journals:import-csv?legalEntityId=${LE}&name=A+%26+B`);
+    expect(new Headers(init.headers).get("Content-Type")).toBe("text/csv");
+    expect(new Headers(init.headers).get("Idempotency-Key")).toBe("key-i");
+    expect(init.body).toBe("op\n");
   });
 });

@@ -26,9 +26,14 @@ export function JournalsPage() {
         title="Price journals"
         description="Mass price changes validate in full, post in one transaction and reverse with one action."
         actions={
-          <Link className={buttonClassName("primary")} to="/pricing/journals/new">
-            New journal
-          </Link>
+          <div className={styles.actions}>
+            <Link className={buttonClassName("primary")} to="/pricing/journals/new">
+              New journal
+            </Link>
+            <Link className={buttonClassName("secondary")} to="/pricing/journals/import">
+              Import CSV
+            </Link>
+          </div>
         }
       />
       <div className={styles.toolbar}>

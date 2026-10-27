@@ -15,6 +15,49 @@ servers:
       env:
         default: dev
 paths:
+  /v1/pricing/workspace:
+    get:
+      operationId: getPricingWorkspace
+      summary: Pricing workspace tiles (§5.26.6) - expiring in 30 days, draft journals, campaigns and accrual this period.
+      description: >
+        Exact counts for one legal entity, or for every legal entity in the caller's scope when
+        legalEntityId is omitted. Accruals are the rebate accrued on invoices dated in the
+        calendar month of asOf, per party role and currency (customer rebates and vendor rebates
+        are never added together).
+      x-passage-duty: pricing.view
+      parameters:
+        - {name: legalEntityId, in: query, required: false, schema: {type: string, format: uuid}}
+        - {name: asOf, in: query, required: false, description: "Defaults to today (UTC).", schema: {type: string, format: date}}
+      responses:
+        "200":
+          description: The tiles.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [asOf, month, activeRecords, draftRecords, expiringIn30Days, journalsToPost, liveCampaigns, claimsAwaitingApproval, accrualsThisMonth]
+                properties:
+                  legalEntityId: {type: string, format: uuid}
+                  asOf: {type: string, format: date}
+                  month: {type: string, pattern: "^[0-9]{4}-(0[1-9]|1[0-2])$"}
+                  activeRecords: {type: integer}
+                  draftRecords: {type: integer}
+                  expiringIn30Days: {type: integer, description: "ACTIVE records whose valid_to is asOf to asOf + 30 days."}
+                  journalsToPost: {type: integer, description: "Price journals OPEN or VALIDATED."}
+                  liveCampaigns: {type: integer, description: "Campaigns valid on asOf and not killed."}
+                  claimsAwaitingApproval: {type: integer, description: "Vendor rebate claims OPEN."}
+                  accrualsThisMonth:
+                    type: array
+                    items:
+                      type: object
+                      required: [partyRole, currency, amount]
+                      properties:
+                        partyRole: {type: string, enum: [CUSTOMER, VENDOR]}
+                        currency: {type: string, pattern: "^[A-Z]{3}$"}
+                        amount: {type: string, description: "Decimal string."}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
   /v1/pricing/resolve:
     post:
       operationId: resolvePrice
@@ -208,6 +251,44 @@ paths:
         "409": {$ref: "#/components/responses/Problem"}
         "412": {$ref: "#/components/responses/Problem"}
         "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/condition-records:expire:
+    post:
+      operationId: expireConditionRecords
+      summary: Record expiry job (BR-26.9, §5.26.16) for one legal entity, called by the scheduler at 00:10 entity-local.
+      description: >
+        ACTIVE records of the legal entity whose valid_to is before asOf become EXPIRED with the
+        next version; a record whose valid_to equals asOf stays ACTIVE (validity is inclusive).
+        Each expired record writes dev.passage.pricing.conditionrecord.withdrawn.v1 with reason
+        EXPIRED in the same transaction. Running it again for the same day expires nothing more.
+        asOf may be at most one day after today (UTC), so validity that is still running is never ended.
+      x-passage-duty: pricing.maintain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [legalEntityId, asOf]
+              properties:
+                legalEntityId: {type: string, format: uuid}
+                asOf: {type: string, format: date, description: "The entity-local day the job runs for."}
+      responses:
+        "200":
+          description: The records this run expired.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [legalEntityId, asOf, expired, recordIds]
+                properties:
+                  legalEntityId: {type: string, format: uuid}
+                  asOf: {type: string, format: date}
+                  expired: {type: integer}
+                  recordIds: {type: array, items: {type: string, format: uuid}}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
   /v1/pricing/journals:
     get:
       operationId: listPriceJournals
@@ -254,6 +335,42 @@ paths:
               schema: {$ref: "#/components/schemas/Journal"}
         "401": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/journals:import-csv:
+    post:
+      operationId: importPriceJournalCsv
+      summary: Create an OPEN price journal from a CSV file of up to 100,000 rows (FR-26.9, §5.26.6 "import CSV").
+      description: >
+        The first row is the header and must name the op column; the other columns are any of
+        recordId, expectedVersion, adjustPct, type, customerKind, customerKey, productKind,
+        productKey, variant, currency, unit, fromQuantity, amount, discPct1, discPct2, validFrom,
+        validTo, searchNext, exclusive and campaignId, in any order. An unknown or repeated column
+        is refused (csv.header). Data row n becomes journal line n; record columns are read for
+        CREATE and for UPDATE without adjustPct, as in the JSON route. Faults found while reading
+        a row are keyed rows[n].column (at most 100 rows are listed, csv says how many have
+        faults); faults of the journal itself use the JSON route's keys (lines[n-1].field). The
+        journal is then validated and posted like any other.
+      x-passage-duty: pricing.journal.post
+      parameters:
+        - {name: legalEntityId, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: name, in: query, required: true, schema: {type: string, minLength: 1, maxLength: 120}}
+        - {name: smartRound, in: query, required: false, schema: {type: boolean, default: false}}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          text/csv:
+            schema: {type: string, maxLength: 33554432}
+      responses:
+        "201":
+          description: Created as OPEN.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Journal"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "413": {$ref: "#/components/responses/Problem"}
         "422": {$ref: "#/components/responses/Problem"}
   /v1/pricing/journals/{id}:
     parameters:
@@ -791,6 +908,32 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/CommissionTransactionList"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/commission/settlement-export:
+    get:
+      operationId: exportCommissionSettlement
+      summary: Commission settlement export per rep and currency for payroll (w43) or AP (w19) (FR-26.18, §5.26.15).
+      description: >
+        Sums the commission transactions of invoices dated from..to (inclusive, at most 366
+        days), credit notes included, per rep and currency, ordered by rep then currency. Only
+        rep ids are exported, never names. A rep id a spreadsheet would read as a formula is
+        written with a leading apostrophe.
+      x-passage-duty: pricing.commission.view
+      parameters:
+        - {name: legalEntityId, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: from, in: query, required: true, schema: {type: string, format: date}}
+        - {name: to, in: query, required: true, schema: {type: string, format: date}}
+        - {name: target, in: query, required: false, description: "commission_settlement_target; NONE has no export.", schema: {type: string, enum: [AP, PAYROLL], default: AP}}
+      responses:
+        "200":
+          description: >
+            CSV with the header target,rep_id,currency,amount,transactions,from,to; amount has the
+            currency's minor units (300.00 USD). A period without commission has only the header.
+          content:
+            text/csv:
+              schema: {type: string}
         "401": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "422": {$ref: "#/components/responses/Problem"}

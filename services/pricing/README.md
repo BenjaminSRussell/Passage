@@ -151,8 +151,12 @@ Built in slice 1:
   `property_test.go` resolves 10,000 seeded random requests and checks byte-identical output (AC2).
 - **Contract tests**: `internal/api/contract_test.go` (router = OpenAPI paths) and
   `internal/events/events_test.go` (event types and payload fields = AsyncAPI).
-- **Web module**: `apps/web/src/modules/pricing` (workspace tiles, trade agreements grid,
-  create/copy form, detail with activate and withdraw, simulation / explain), all on the API.
+- **Web module**: `apps/web/src/modules/pricing` (workspace tiles and record expiry, trade agreements grid,
+  create/copy form, detail with activate and withdraw, simulation / explain, journals with CSV import,
+  commission settlement export, and the screens listed in its README), all on the API.
+- **Slice 7 operations** (`internal/api/ops.go`, `internal/api/journal_csv.go`, `internal/store/ops.go`,
+  `internal/domain/settlement.go`): the record expiry job endpoint (BR-26.9), the workspace tiles
+  (§5.26.6), the price journal CSV import (FR-26.9) and the commission settlement export (FR-26.18).
 - **Chart**: `charts/pricing` (Deployment, Service, HPA 70% CPU, ServiceMonitor toggle).
 
 Not yet built: see `NOT-IMPLEMENTED.md`.
@@ -183,9 +187,12 @@ testdata/               fixtures
 | GET | `/v1/pricing/condition-records/{id}` | pricing.view | |
 | POST | `/v1/pricing/condition-records/{id}:activate` | pricing.maintain | body `{version}`; overlap check; `Idempotency-Key` honoured |
 | POST | `/v1/pricing/condition-records/{id}:withdraw` | pricing.maintain | body `{version, reason}`; `Idempotency-Key` honoured |
+| POST | `/v1/pricing/condition-records:expire` | pricing.maintain | record expiry job for the scheduler: body `{legalEntityId, asOf}`; ACTIVE records with valid_to before asOf become EXPIRED and write `conditionrecord.withdrawn` with reason EXPIRED; a rerun expires nothing; asOf at most tomorrow (UTC) |
+| GET | `/v1/pricing/workspace?legalEntityId=&asOf=` | pricing.view | workspace tiles: exact record, journal, campaign and open-claim counts, and the month's rebate accruals per party role and currency; all entities in scope without legalEntityId |
 | GET | `/v1/pricing/journals?legalEntityId=&status=&limit=` | pricing.view | price journal log, newest first, no lines |
 | POST | `/v1/pricing/journals` | pricing.journal.post | up to 100,000 CREATE / UPDATE / DELETE lines; creates OPEN; `Idempotency-Key` honoured |
 | GET | `/v1/pricing/journals/{id}` | pricing.view | with up to 1,000 lines (before / after) and every line error |
+| POST | `/v1/pricing/journals:import-csv?legalEntityId=&name=&smartRound=` | pricing.journal.post | `text/csv` body (≤ 32 MB, ≤ 100,000 rows, header row with op); same checks as `POST /journals`; row faults keyed `rows[n].column`; `Idempotency-Key` honoured |
 | POST | `/v1/pricing/journals/{id}:validate` | pricing.journal.post | VALIDATED when clean, else OPEN with line errors |
 | POST | `/v1/pricing/journals/{id}:post` | pricing.journal.post | all lines or none (PRC-0005); `Idempotency-Key` honoured |
 | POST | `/v1/pricing/journals/{id}:reverse` | pricing.journal.post | 201 with the reversing journal; `Idempotency-Key` honoured |
@@ -208,6 +215,7 @@ testdata/               fixtures
 | POST | `/v1/pricing/commission/rules` | pricing.commission.maintain | `Idempotency-Key` honoured; 409 PRC-0038 for a second rule on the same groups |
 | POST | `/v1/pricing/commission/postings` | pricing.commission.maintain | one posted invoice or credit note line; 201 new, 200 already posted (stand-in for the invoice.posted consumer) |
 | GET | `/v1/pricing/commission/transactions?legalEntityId=&salesGroupId=&repId=&customerId=&invoiceLineId=&period=` | pricing.commission.view | commission inquiry; period is a month |
+| GET | `/v1/pricing/commission/settlement-export?legalEntityId=&from=&to=&target=` | pricing.commission.view | `text/csv` per rep and currency for invoices dated from..to (≤ 366 days), credit notes netted; target AP (default) or PAYROLL |
 | GET | `/v1/pricing/funds?legalEntityId=` | pricing.view or pricing.fund.maintain | |
 | POST | `/v1/pricing/funds` | pricing.fund.maintain | `Idempotency-Key` honoured; open at version 1 |
 | GET | `/v1/pricing/funds/{id}` | pricing.view or pricing.fund.maintain | |

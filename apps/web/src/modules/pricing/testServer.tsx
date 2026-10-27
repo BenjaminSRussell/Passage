@@ -6,7 +6,8 @@ import { afterEach, beforeEach, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
 import pricing from "./module";
 
-export type Reply = { status: number; body: unknown };
+/** A JSON reply, or a text reply (such as CSV) when text is set. */
+export type Reply = { status: number; body: unknown; text?: string; headers?: Record<string, string> };
 export type Handler = (url: URL, init: RequestInit) => Reply | undefined;
 export interface Call {
   method: string;
@@ -21,6 +22,20 @@ export function json(status: number, body: unknown): Reply {
   return { status, body };
 }
 
+export function text(status: number, body: string, headers: Record<string, string>): Reply {
+  return { status, body: undefined, text: body, headers };
+}
+
+/** A request body as the test sees it: parsed JSON, or the raw text (a CSV upload). */
+function readBody(raw: BodyInit | null | undefined): unknown {
+  if (raw == null) return undefined;
+  try {
+    return JSON.parse(String(raw));
+  } catch {
+    return String(raw);
+  }
+}
+
 /** Installs the fetch stub for the calling test file. */
 export function useFakeServer() {
   beforeEach(() => {
@@ -30,8 +45,9 @@ export function useFakeServer() {
       "fetch",
       vi.fn(async (input: string, init: RequestInit = {}) => {
         const url = new URL(input, "http://localhost");
-        server.calls.push({ method: init.method ?? "GET", url, init, body: init.body ? JSON.parse(String(init.body)) : undefined });
+        server.calls.push({ method: init.method ?? "GET", url, init, body: readBody(init.body) });
         const reply = server.handler(url, init) ?? json(404, { code: "TEST-404", detail: `no fake for ${init.method ?? "GET"} ${url.pathname}` });
+        if (reply.text !== undefined) return new Response(reply.text, { status: reply.status, headers: reply.headers });
         return new Response(JSON.stringify(reply.body), { status: reply.status, headers: { "Content-Type": "application/json" } });
       }),
     );

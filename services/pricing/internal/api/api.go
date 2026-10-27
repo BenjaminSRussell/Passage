@@ -57,6 +57,7 @@ type API struct {
 	recordsCreated   atomic.Int64
 	recordsActivated atomic.Int64
 	recordsWithdrawn atomic.Int64
+	recordsExpired   atomic.Int64
 	journalsPosted   atomic.Int64
 	accrualsPosted   atomic.Int64
 	// commissionsPosted counts invoice lines that posted commission; retroRuns counts retroactive recomputes.
@@ -94,6 +95,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerFundRoutes(r)
 	a.registerCampaignRoutes(r)
 	a.registerProcedureRoutes(r)
+	a.registerOpsRoutes(r)
 }
 
 // Metrics serves the Prometheus text exposition of the service counters.
@@ -108,6 +110,7 @@ func (a *API) Metrics() http.Handler {
 			{"pricing_records_created_total", "Condition records created as DRAFT.", &a.recordsCreated},
 			{"pricing_records_activated_total", "Condition records activated.", &a.recordsActivated},
 			{"pricing_records_withdrawn_total", "Condition records withdrawn.", &a.recordsWithdrawn},
+			{"pricing_records_expired_total", "Condition records the expiry job moved to EXPIRED.", &a.recordsExpired},
 			{"pricing_journals_posted_total", "Price journals posted or reversed.", &a.journalsPosted},
 			{"pricing_rebate_accruals_total", "Invoice lines accrued against a rebate agreement.", &a.accrualsPosted},
 			{"pricing_commission_postings_total", "Invoice lines that posted commission transactions.", &a.commissionsPosted},

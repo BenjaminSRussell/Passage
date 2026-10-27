@@ -74,9 +74,14 @@ export function CommissionTransactionsPage() {
         title="Commission transactions"
         description="One row per rep for every posted invoice line. Credit notes post the negative of the line they reverse."
         actions={
-          <Link className={buttonClassName("ghost")} to="/pricing/commission/sales-groups">
-            Sales groups
-          </Link>
+          <div className={styles.actions}>
+            <Link className={buttonClassName("secondary")} to="/pricing/commission/settlement">
+              Settlement export
+            </Link>
+            <Link className={buttonClassName("ghost")} to="/pricing/commission/sales-groups">
+              Sales groups
+            </Link>
+          </div>
         }
       />
       <form className={styles.toolbar} onSubmit={filter} noValidate>
