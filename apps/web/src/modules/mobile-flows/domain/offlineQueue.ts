@@ -83,6 +83,38 @@ export class OfflineQueue {
     return tx;
   }
 
+  /** The seq the next enqueue will take. Persist it with the queue: pruning drops applied
+   * transactions, so the stored transactions alone cannot tell which seqs were already used. */
+  get nextSequence(): number {
+    return this.nextSeq;
+  }
+
+  /**
+   * Reloads a persisted queue (FR-32.5). Refuses anything that would break the invariants:
+   * seqs are consecutive (a pruned queue starts after 1, but never skips one), every key is
+   * `device:seq` of this device, and nextSeq is past the last stored seq so a key is never
+   * issued twice (a reused key would make the server treat a new confirmation as a replay).
+   * Returns the number of transactions restored.
+   */
+  restore(txs: QueuedTx[], nextSeq?: number): number {
+    const first = txs[0]?.seq ?? 1;
+    if (!Number.isInteger(first) || first < 1) throw new RangeError(`restore: seq ${first} is not a positive integer`);
+    txs.forEach((t, i) => {
+      if (t.seq !== first + i) throw new RangeError(`restore: sequence gap at ${first + i}, found seq ${t.seq}`);
+      if (t.deviceId !== this.deviceId || t.idempotencyKey !== `${this.deviceId}:${t.seq}`) {
+        throw new RangeError(`restore: key ${t.idempotencyKey} does not belong to device ${this.deviceId}`);
+      }
+    });
+    const after = txs.length > 0 ? txs[txs.length - 1].seq + 1 : 1;
+    const next = nextSeq ?? after;
+    if (!Number.isInteger(next) || next < after) {
+      throw new RangeError(`restore: next seq ${next} would reuse a stored seq (last stored is ${after - 1})`);
+    }
+    this.txs.splice(0, this.txs.length, ...txs.map((t) => ({ ...t })));
+    this.nextSeq = next;
+    return txs.length;
+  }
+
   /** All transactions in seq order, including applied ones until pruned. */
   snapshot(): QueuedTx[] {
     return this.txs.map((t) => ({ ...t }));

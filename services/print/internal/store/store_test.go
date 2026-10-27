@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -154,6 +155,124 @@ func TestJobs_LogNewestFirstWithFilters(t *testing.T) {
 	}
 }
 
+// queuedJob inserts a QUEUED job on the DOCK queue under key.
+func queuedJob(t *testing.T, s *store.Postgres, ctx context.Context, key string) domain.Job {
+	t.Helper()
+	j := domain.Job{ID: ids.New(), TemplateCode: domain.TemplateLP, QueueCode: "DOCK", Status: domain.JobQueued, ZPL: "^XA^XZ"}
+	created, inserted, err := s.CreateJob(ctx, store.NewJob{Job: j, RequestHash: "h", IdempotencyKey: key})
+	if err != nil || !inserted {
+		t.Fatalf("create %s: %v %v", key, inserted, err)
+	}
+	return created
+}
+
+func TestPrinterStatuses_QueueDepthAndLastJob(t *testing.T) {
+	s, _ := migrated(t)
+	ctx := tenantCtx(1)
+	p1, _, err := s.CreatePrinter(ctx, dock("DOCK-1", 1), "p-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.CreatePrinter(ctx, dock("DOCK-2", 2), "p-2"); err != nil {
+		t.Fatal(err)
+	}
+	printed := queuedJob(t, s, ctx, "st-1")
+	queuedJob(t, s, ctx, "st-2") // stays QUEUED
+
+	statuses, err := s.PrinterStatuses(ctx)
+	if err != nil || len(statuses) != 2 {
+		t.Fatalf("statuses: %+v %v", statuses, err)
+	}
+	for _, st := range statuses {
+		if st.QueueDepth != 2 || st.State != domain.StateIdle || st.LastJobAt != nil {
+			t.Fatalf("before dispatch: %+v", st)
+		}
+	}
+
+	if err := printed.Complete(domain.Outcome{Printer: p1, Attempts: 1}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CompleteJob(ctx, printed); err != nil {
+		t.Fatal(err)
+	}
+	statuses, err = s.PrinterStatuses(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st := statuses[0]; st.Code != "DOCK-1" || st.State != domain.StateReady || st.QueueDepth != 1 || st.LastJobAt == nil {
+		t.Fatalf("DOCK-1 after print: %+v", st)
+	}
+	if st := statuses[1]; st.Code != "DOCK-2" || st.State != domain.StateIdle || st.QueueDepth != 1 {
+		t.Fatalf("DOCK-2 after print: %+v", st)
+	}
+
+	failed := queuedJob(t, s, ctx, "st-3")
+	if err := failed.Complete(domain.Outcome{Printer: p1, Attempts: 2}, &domain.Error{Code: domain.CodeUnreachable}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CompleteJob(ctx, failed); err != nil {
+		t.Fatal(err)
+	}
+	statuses, err = s.PrinterStatuses(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st := statuses[0]; st.State != domain.StateError || st.LastError != domain.CodeUnreachable {
+		t.Fatalf("DOCK-1 after failure: %+v", st)
+	}
+	if other, err := s.PrinterStatuses(tenantCtx(2)); err != nil || len(other) != 0 {
+		t.Fatalf("tenant 2 statuses: %+v %v", other, err)
+	}
+}
+
+func TestPurgeJobs_KeepsQueuedRecentAndOtherTenants(t *testing.T) {
+	s, pool := migrated(t)
+	ctx := tenantCtx(1)
+	done := queuedJob(t, s, ctx, "pg-1")
+	queued := queuedJob(t, s, ctx, "pg-2")
+	recent := queuedJob(t, s, ctx, "pg-3")
+	otherTenant := queuedJob(t, s, tenantCtx(2), "pg-4")
+	for _, j := range []struct {
+		ctx context.Context
+		job domain.Job
+	}{{ctx, done}, {ctx, recent}, {tenantCtx(2), otherTenant}} {
+		job := j.job
+		if err := job.Complete(domain.Outcome{Printer: domain.Printer{ID: ids.New(), Code: "DOCK-1"}, Attempts: 1}, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.CompleteJob(j.ctx, job); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Age every row but the recent one past the cutoff.
+	if _, err := pool.Exec(ctx, `update print_job set created_at = now() - interval '40 days' where id <> $1`, recent.ID); err != nil {
+		t.Fatal(err)
+	}
+	cutoff := domain.RetentionCutoff(time.Now(), domain.DefaultRetentionDays)
+	deleted, err := s.PurgeJobs(ctx, cutoff)
+	if err != nil || deleted != 1 {
+		t.Fatalf("purge deleted %d err=%v, want 1", deleted, err)
+	}
+	left, err := s.ListJobs(ctx, store.JobFilter{Limit: 10})
+	if err != nil || len(left) != 2 {
+		t.Fatalf("remaining: %+v %v", left, err)
+	}
+	for _, j := range left {
+		if j.ID == done.ID {
+			t.Fatal("the old printed job survived the purge")
+		}
+	}
+	if _, err := s.GetJob(ctx, queued.ID); err != nil {
+		t.Fatalf("old QUEUED job was purged: %v", err)
+	}
+	if _, err := s.GetJob(tenantCtx(2), otherTenant.ID); err != nil {
+		t.Fatalf("tenant 2's job was purged by tenant 1: %v", err)
+	}
+	if again, err := s.PurgeJobs(ctx, cutoff); err != nil || again != 0 {
+		t.Fatalf("second purge deleted %d err=%v", again, err)
+	}
+}
+
 func TestRoutingRules_StoreReplayAndOrder(t *testing.T) {
 	s, _ := migrated(t)
 	ctx := tenantCtx(1)
@@ -228,6 +347,22 @@ func TestMigrationsApplyWithForcedRLS(t *testing.T) {
 	rules, err := s.ListRoutingRules(other)
 	if err != nil || len(rules) != 0 {
 		t.Fatalf("tenant 2 rules: %+v %v", rules, err)
+	}
+	done := queuedJob(t, s, ctx, "rls-job")
+	if err := done.Complete(domain.Outcome{Printer: domain.Printer{ID: ids.New(), Code: "DOCK-1"}, Attempts: 1}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CompleteJob(ctx, done); err != nil {
+		t.Fatal(err)
+	}
+	if statuses, err := s.PrinterStatuses(other); err != nil || len(statuses) != 0 {
+		t.Fatalf("tenant 2 printer statuses: %+v %v", statuses, err)
+	}
+	if deleted, err := s.PurgeJobs(other, time.Now().Add(time.Hour)); err != nil || deleted != 0 {
+		t.Fatalf("tenant 2 purge removed %d rows of tenant 1 (err %v)", deleted, err)
+	}
+	if _, err := s.GetJob(ctx, done.ID); err != nil {
+		t.Fatalf("tenant 1 job gone after tenant 2 purge: %v", err)
 	}
 	// The same code is free in another tenant: uniqueness is per tenant.
 	if _, _, err := s.CreatePrinter(other, dock("DOCK-1", 1), "k-1"); err != nil {

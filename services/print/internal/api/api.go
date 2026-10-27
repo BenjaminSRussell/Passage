@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -41,12 +42,47 @@ type Sender interface {
 
 // API groups the handlers over a store and a sender.
 type API struct {
-	store  store.Store
-	sender Sender
+	store         store.Store
+	sender        Sender
+	attempts      int // sends per device before failover (PRINT_RETRY + 1)
+	retentionDays int // PRINT_JOB_RETENTION_DAYS
+
+	printed atomic.Int64
+	failed  atomic.Int64
+	purged  atomic.Int64
+}
+
+// Option tunes an API instance. Defaults come from the domain package.
+type Option func(*API)
+
+// WithAttemptsPerDevice sets how many sends a device gets before the queue fails over
+// (PRINT_RETRY + 1, FR-32.7 and FR-32.13). Values below 1 keep the default.
+func WithAttemptsPerDevice(n int) Option {
+	return func(a *API) {
+		if n >= 1 {
+			a.attempts = n
+		}
+	}
+}
+
+// WithRetentionDays sets PRINT_JOB_RETENTION_DAYS, the age at which finished jobs are
+// purged. Values below 1 keep the default.
+func WithRetentionDays(days int) Option {
+	return func(a *API) {
+		if days >= 1 {
+			a.retentionDays = days
+		}
+	}
 }
 
 // New returns the API.
-func New(s store.Store, sender Sender) *API { return &API{store: s, sender: sender} }
+func New(s store.Store, sender Sender, opts ...Option) *API {
+	a := &API{store: s, sender: sender, attempts: domain.FailoverAttempts, retentionDays: domain.DefaultRetentionDays}
+	for _, opt := range opts {
+		opt(a)
+	}
+	return a
+}
 
 // Register mounts the /print/v1 routes on r.
 func (a *API) Register(r chi.Router) {
@@ -54,10 +90,12 @@ func (a *API) Register(r chi.Router) {
 	r.Route("/print/v1", func(r chi.Router) {
 		r.With(authz.RequireDuty(dutyPrintAdmin)).Post("/printers", a.createPrinter)
 		r.With(authz.RequireDuty(dutyPrint)).Get("/printers", a.listPrinters)
+		r.With(authz.RequireDuty(dutyPrint)).Get("/printers/status", a.printerStatuses)
 		r.With(authz.RequireDuty(dutyPrintAdmin)).Post("/routing-rules", a.createRoutingRule)
 		r.With(authz.RequireDuty(dutyPrint)).Get("/routing-rules", a.listRoutingRules)
 		r.With(authz.RequireDuty(dutyPrint)).Post("/jobs", a.createJob)
 		r.With(authz.RequireDuty(dutyPrint)).Get("/jobs", a.listJobs)
+		r.With(authz.RequireDuty(dutyPrintAdmin)).Post("/jobs:purge", a.purgeJobs)
 		r.With(authz.RequireDuty(dutyPrint)).Get("/jobs/{id}", a.getJob)
 	})
 }
@@ -258,7 +296,7 @@ func (a *API) createJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Every built-in template is ZPL; PDF and PCL devices in the queue are skipped.
-	out, dispatchErr := domain.Dispatch(domain.Accepting(devices, domain.DeviceZPL), domain.FailoverAttempts, func(d domain.Printer) error {
+	out, dispatchErr := domain.Dispatch(domain.Accepting(devices, domain.DeviceZPL), a.attempts, func(d domain.Printer) error {
 		return a.sender.Send(ctx, d, zpl)
 	})
 	if err := created.Complete(out, dispatchErr); err != nil {
@@ -268,6 +306,11 @@ func (a *API) createJob(w http.ResponseWriter, r *http.Request) {
 	if err := a.store.CompleteJob(ctx, created); err != nil {
 		httpx.Fail(w, r, err)
 		return
+	}
+	if created.Status == domain.JobPrinted {
+		a.printed.Add(1)
+	} else {
+		a.failed.Add(1)
 	}
 	httpx.JSON(w, http.StatusCreated, created)
 }

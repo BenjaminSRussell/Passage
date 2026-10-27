@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -56,6 +57,8 @@ type Store interface {
 	ListJobs(ctx context.Context, f JobFilter) ([]domain.Job, error)
 	CompleteJob(ctx context.Context, j domain.Job) error
 	GetJob(ctx context.Context, id string) (domain.Job, error)
+	PrinterStatuses(ctx context.Context) ([]domain.PrinterStatus, error)
+	PurgeJobs(ctx context.Context, cutoff time.Time) (int64, error)
 }
 
 // Postgres implements Store.

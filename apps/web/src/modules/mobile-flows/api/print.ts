@@ -86,6 +86,21 @@ export interface PrintJob {
   updatedAt: string;
 }
 
+/** Printer state from its last job (§6.32.14): no device probe is made. */
+export const PRINTER_STATES = ["IDLE", "BUSY", "READY", "ERROR"] as const;
+export type PrinterState = (typeof PRINTER_STATES)[number];
+
+export interface PrinterStatus {
+  printerId: string;
+  code: string;
+  queueCode: string;
+  state: PrinterState;
+  /** QUEUED jobs on the printer's queue. */
+  queueDepth: number;
+  lastError?: string;
+  lastJobAt?: string;
+}
+
 export interface NewPrintJob {
   templateCode?: TemplateCode;
   queueCode?: string;
@@ -165,6 +180,11 @@ export function listPrinters(signal?: AbortSignal): Promise<Printer[]> {
 /** Registers a printer. Reuse one key per form so a retried submit cannot register twice. */
 export function createPrinter(input: NewPrinter, key: string): Promise<Printer> {
   return post<Printer>("/printers", input, key);
+}
+
+/** Printer status report (§6.32.14): state, queue depth and last error per printer. */
+export function listPrinterStatuses(signal?: AbortSignal): Promise<PrinterStatus[]> {
+  return items<PrinterStatus>("/printers/status", signal);
 }
 
 export function listRoutingRules(signal?: AbortSignal): Promise<RoutingRule[]> {

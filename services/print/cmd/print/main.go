@@ -6,18 +6,23 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/print/internal/api"
+	"github.com/BenjaminSRussell/passage/services/print/internal/config"
 	"github.com/BenjaminSRussell/passage/services/print/internal/store"
 	"github.com/BenjaminSRussell/passage/services/print/internal/transport"
 	"github.com/BenjaminSRussell/passage/services/print/migrations"
 )
 
-const defaultHTTPAddr = ":8080"
+const (
+	defaultHTTPAddr  = ":8080"
+	defaultAdminAddr = ":9090"
+)
 
 func main() {
 	slog.SetDefault(newLogger(os.Stdout))
@@ -39,6 +44,10 @@ func newLogger(w io.Writer) *slog.Logger {
 }
 
 func run(ctx context.Context, getenv func(string) string) error {
+	cfg, err := config.Load(getenv)
+	if err != nil {
+		return err
+	}
 	databaseURL := getenv("DATABASE_URL")
 	if databaseURL == "" {
 		return errors.New("DATABASE_URL is required")
@@ -53,9 +62,19 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
+	a := api.New(store.New(pool), transport.TCP{Timeout: 2 * time.Second},
+		api.WithAttemptsPerDevice(cfg.AttemptsPerDevice()), api.WithRetentionDays(cfg.RetentionDays))
 	router := httpx.NewRouter()
-	api.New(store.New(pool), transport.TCP{Timeout: 2 * time.Second}).Register(router)
-	return httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), router)
+	a.Register(router)
+	admin := http.NewServeMux()
+	admin.Handle("/metrics", a.Metrics())
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	errs := make(chan error, 2)
+	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), router) }()
+	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()
+	return <-errs
 }
 
 func addr(getenv func(string) string, key, fallback string) string {

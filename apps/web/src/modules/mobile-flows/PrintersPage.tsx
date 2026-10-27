@@ -25,7 +25,7 @@ export function PrintersPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Printers"
-        description="Label and document printers on the site network, grouped into queues. A job tries each device of its queue twice, in failover-rank order, before moving to the next."
+        description="Label and document printers on the site network, grouped into queues. A job tries each device of its queue in failover-rank order, twice by default (the site’s PRINT_RETRY setting), before moving to the next."
         actions={
           <Link className={buttonClassName("primary")} to="/mobile-flows/printers/new">
             Register printer

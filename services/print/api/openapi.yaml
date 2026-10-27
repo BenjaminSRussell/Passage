@@ -145,6 +145,41 @@ paths:
               schema: { $ref: '#/components/schemas/PrintJob' }
         '400': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /print/v1/jobs:purge:
+    post:
+      operationId: purgePrintJobs
+      summary: Delete the tenant's finished job log rows older than the retention window (§6.32.19)
+      description: Removes the tenant's PRINTED and FAILED jobs created before now minus PRINT_JOB_RETENTION_DAYS (default 30). QUEUED jobs are kept. The key is required but not stored; calling it again deletes nothing new.
+      x-passage-duty: WMS_PRINT_ADMIN
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Purge completed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PurgeResult' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /print/v1/printers/status:
+    get:
+      operationId: listPrinterStatus
+      summary: Operational status of every printer of the tenant (§6.32.14)
+      description: State is derived from the printer's most recent job (IDLE with no job, BUSY while QUEUED, READY when PRINTED, ERROR when FAILED). No device probe is made, so the state is what the service last observed.
+      x-passage-duty: WMS_PRINT
+      responses:
+        '200':
+          description: Printers ordered by code
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/PrinterStatus' } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
   /print/v1/jobs/{id}:
     get:
       operationId: getPrintJob
@@ -270,3 +305,21 @@ components:
         createdBy: { type: string }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    PurgeResult:
+      type: object
+      required: [deleted, cutoff, retentionDays]
+      properties:
+        deleted: { type: integer, minimum: 0 }
+        cutoff: { type: string, format: date-time, description: Jobs created before this instant were eligible. }
+        retentionDays: { type: integer, minimum: 1 }
+    PrinterStatus:
+      type: object
+      required: [printerId, code, queueCode, state, queueDepth]
+      properties:
+        printerId: { type: string, format: uuid }
+        code: { type: string }
+        queueCode: { type: string }
+        state: { type: string, enum: [IDLE, BUSY, READY, ERROR] }
+        queueDepth: { type: integer, minimum: 0, description: QUEUED jobs on the printer's queue. }
+        lastError: { type: string }
+        lastJobAt: { type: string, format: date-time }

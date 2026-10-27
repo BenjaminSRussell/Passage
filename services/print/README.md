@@ -16,16 +16,24 @@ from this pod; nothing connects inbound to the cluster.
 - **Print jobs** (`POST /print/v1/jobs`, `GET /print/v1/jobs/{id}`): give a `queueCode`, or a
   `documentType` (with optional `zone`/`warehouseId`) and the rules pick the queue. The job
   renders ZPL from a built-in template, is sent to the queue's ZPL II devices in failover order
-  (two attempts each; PDF and PCL devices in the queue are skipped), and ends PRINTED or FAILED.
+  (`PRINT_RETRY` + 1 attempts each, two by default; PDF and PCL devices in the queue are
+  skipped), and ends PRINTED or FAILED.
   The LP label's SSCC barcode is GS1-128: FNC1, AI 00, then the 18 digits. Completion writes `dev.passage.print.job.completed.v1` to the outbox
   in the same transaction.
 - **Reprints**: `reprintOf` reuses the stored ZPL and records the source job.
 - **Job log** (`GET /print/v1/jobs?status=&queueCode=&printerCode=&limit=`): newest first (§6.32.14).
+- **Printer status** (`GET /print/v1/printers/status`): per printer, the state from its last job
+  (IDLE, BUSY, READY, ERROR), the queue depth (QUEUED jobs on its queue) and the last error
+  (§6.32.14). No device is probed.
+- **Retention purge** (`POST /print/v1/jobs:purge`, WMS_PRINT_ADMIN): deletes the tenant's
+  PRINTED and FAILED jobs older than `PRINT_JOB_RETENTION_DAYS`; QUEUED jobs are kept (§6.32.19).
+- **Metrics** on the admin port (`ADMIN_ADDR`, default `:9090`, `GET /metrics`):
+  `print_jobs_printed_total`, `print_jobs_failed_total`, `print_jobs_purged_total`.
 - Multi-tenant: every table, the outbox included, carries `tenant_id` with ENABLE and FORCE
-  row-level security (`0001`, `0002`).
+  row-level security (`0001`, `0002`); `0003` adds the partial index for queue depth.
 
-The web screens (printers, routing rules, print job log, print label, job detail with "print
-again") live in `apps/web/src/modules/mobile-flows`.
+The web screens (printers, printer status, routing rules, print job log, print label, job
+detail with "print again") live in `apps/web/src/modules/mobile-flows`.
 
 ## Run
 
@@ -33,8 +41,16 @@ again") live in `apps/web/src/modules/mobile-flows`.
 export DATABASE_URL=postgres://passage_app:...@localhost:5432/passage_print
 export MIGRATE_ON_START=true     # dev only; stage and prod run migrations as a PreSync Job
 export HTTP_ADDR=:8080           # default
+export ADMIN_ADDR=:9090          # default, serves /metrics
+export PRINT_RETRY=1             # retries per printer before failover, 0-10 (default 1)
+export PRINT_JOB_RETENTION_DAYS=30  # job log retention, 1-365 (default 30)
 go run ./cmd/print
 ```
+
+An invalid `PRINT_RETRY` or `PRINT_JOB_RETENTION_DAYS` stops the process at startup.
+`PRINT_RETRY` counts retries after the first attempt, so the default of 1 gives the two
+attempts per printer of FR-32.13; the PRD's "default 3" conflicts with that (see
+NOT-IMPLEMENTED.md).
 
 Health: `GET /healthz` (liveness), `GET /readyz` (database ping). Contract: `api/openapi.yaml`.
 Events: `events/asyncapi.yaml`.

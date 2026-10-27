@@ -19,9 +19,21 @@ Flow designer for warehouse handheld flows, plus the pure domain shared with
   monotonic with no gaps. Idempotency key is `device:seq`. Caps are 500 transactions and 24 h
   (MOB-0106). Replay stops at the first failure, and an unresolved CONFLICT blocks every later
   transaction until a supervisor resolves it. Applied transactions are never resent.
+  `restore(txs, nextSeq)` reloads a persisted queue and refuses gaps, foreign keys and a
+  `nextSeq` that would reissue a used key.
+- `domain/offlineStore.ts`: encrypted persistence for the queue (FR-32.5). AES-256-GCM under a
+  non-extractable device key kept in IndexedDB; the whole queue, with its next seq, is one sealed
+  document. `saveQueue` and `loadQueue` refuse another device's or a newer-format document.
+  The device app does not call it yet (see `apps/warehouse-mobile/NOT-IMPLEMENTED.md`).
+- `domain/cluster.ts`: cluster picking (BR-32.5). At most 8 works, one order's LP per cart
+  position, MOB-0109 on a wrong position, and a short pick that leaves the other positions open.
+- `domain/session.ts`: session lock (BR-32.6, AC-32.8). A session is STALE after the idle
+  timeout (30 min by default) and no longer holds its work; OPEN work, or ASSIGNED work whose
+  holder went stale (BR-31.3), is assignable; resuming re-locks only if nobody else took it.
 - `api/client.ts`: calls to `POST /api/v1/mobile/flows` and `POST .../flows/{id}:publish`
-  (both mobile service endpoints, §6.32.5; the service is a handoff, so a save reports that it
-  is unavailable).
+  (both mobile service endpoints, §6.32.5), and the supervisor conflict calls
+  `GET /api/v1/mobile/offline/conflicts` and `POST .../offline/conflicts/{key}:resolve`. The
+  mobile service is a handoff, so these pages report that it is unavailable.
 - `api/print.ts`: client for `services/print` through the BFF at `/api/v1/print`.
 - `pages.tsx`: designer screen. It edits the flow as JSON, validates, saves a draft, and runs
   a virtual scanner that uses the GS1 parser.
@@ -29,8 +41,13 @@ Flow designer for warehouse handheld flows, plus the pure domain shared with
   `RoutingRulesPage` and `NewRoutingRulePage`, `PrintJobsPage` (job log with status and queue
   filters), `NewPrintJobPage` (print a built-in label on a queue or by routing rule) and
   `PrintJobDetailPage` (outcome, MOB-0111/0112 explanation, "Print again" with `reprintOf`).
+- `PrinterStatusPage` (§6.32.14): state, queue depth, last error and last job per printer.
+- `OfflineConflictsPage` (BR-32.4, AC-32.6): the supervisor queue of CONFLICT transactions.
+  Opening a row shows the transaction and a resolution choice ("Apply as movement" or
+  "Reject") that needs an explicit confirm; the call sends `If-Match` with the conflict version
+  and one Idempotency-Key per conflict and choice.
 - `module.ts`: registered as `mobile-flows`. The designer is gated by `WMS_MOBILE_ADMIN`, the
-  print pages by `WMS_PRINT`.
+  print pages by `WMS_PRINT`, and the conflict queue by `WMS_WORK_SUPERVISE`.
 
 ## Run and test
 

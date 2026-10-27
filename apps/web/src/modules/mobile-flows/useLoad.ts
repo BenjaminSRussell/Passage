@@ -12,12 +12,18 @@ export interface LoadState<T> {
  * Loads data for a page and reloads when key changes. A newer request wins:
  * an older response that arrives late is ignored, and the old fetch is aborted.
  */
-export function useLoad<T>(load: (signal: AbortSignal) => Promise<T>, key: string): LoadState<T> {
+export function useLoad<T>(
+  load: (signal: AbortSignal) => Promise<T>,
+  key: string,
+  describe: (failure: unknown) => Problem = describeProblem,
+): LoadState<T> {
   const [state, setState] = useState<Omit<LoadState<T>, "reload">>({ data: null, loading: true, error: null });
   const [attempt, setAttempt] = useState(0);
   const latest = useRef(0);
   const loader = useRef(load);
   loader.current = load;
+  const describer = useRef(describe);
+  describer.current = describe;
 
   useEffect(() => {
     const token = ++latest.current;
@@ -29,7 +35,7 @@ export function useLoad<T>(load: (signal: AbortSignal) => Promise<T>, key: strin
       },
       (failure: unknown) => {
         if (token === latest.current && !controller.signal.aborted) {
-          setState({ data: null, loading: false, error: describeProblem(failure) });
+          setState({ data: null, loading: false, error: describer.current(failure) });
         }
       },
     );

@@ -37,3 +37,11 @@ func TestLogger_UsesPlatformFieldNames(t *testing.T) {
 		t.Fatalf("log line = %v", line)
 	}
 }
+
+func TestRun_RejectsInvalidPrintSettingsBeforeConnecting(t *testing.T) {
+	env := map[string]string{"DATABASE_URL": "postgres://unused", "PRINT_RETRY": "11"}
+	err := run(context.Background(), func(k string) string { return env[k] })
+	if err == nil || !strings.Contains(err.Error(), "PRINT_RETRY") {
+		t.Fatalf("err = %v", err)
+	}
+}

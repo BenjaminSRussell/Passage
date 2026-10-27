@@ -35,8 +35,13 @@ spec:
                   key: DATABASE_URL
             - name: MIGRATE_ON_START
               value: {{ .Values.migrateOnStart | quote }}
+            - name: PRINT_RETRY
+              value: {{ .Values.printRetry | quote }}
+            - name: PRINT_JOB_RETENTION_DAYS
+              value: {{ .Values.jobRetentionDays | quote }}
           ports:
             - { name: http, containerPort: 8080 }
+            - { name: admin, containerPort: 9090 }
           startupProbe:
             httpGet: { path: /healthz, port: http }
             failureThreshold: 30

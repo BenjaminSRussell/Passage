@@ -1,5 +1,5 @@
 import { Badge, type BadgeTone } from "../../shell/ui";
-import type { DocumentType, JobStatus, RoutingRule } from "./api/print";
+import type { DocumentType, JobStatus, PrinterState, RoutingRule } from "./api/print";
 
 export const dash = "—";
 
@@ -28,6 +28,18 @@ const STATUS: Record<JobStatus, { label: string; tone: BadgeTone }> = {
 
 export function JobStatusBadge({ status }: { status: JobStatus }) {
   const s = STATUS[status] ?? { label: status, tone: "neutral" as const };
+  return <Badge tone={s.tone}>{s.label}</Badge>;
+}
+
+const PRINTER_STATE: Record<PrinterState, { label: string; tone: BadgeTone }> = {
+  IDLE: { label: "Idle", tone: "neutral" },
+  BUSY: { label: "Busy", tone: "info" },
+  READY: { label: "Ready", tone: "success" },
+  ERROR: { label: "Error", tone: "danger" },
+};
+
+export function PrinterStateBadge({ state }: { state: PrinterState }) {
+  const s = PRINTER_STATE[state] ?? { label: state, tone: "neutral" as const };
   return <Badge tone={s.tone}>{s.label}</Badge>;
 }
 

@@ -13,8 +13,10 @@ describe("mobile-flows module", () => {
     expect(mobileFlows.nav).toEqual([
       { label: "Flow designer", to: "/mobile-flows", duty: "WMS_MOBILE_ADMIN" },
       { label: "Printers", to: "/mobile-flows/printers", duty: "WMS_PRINT" },
+      { label: "Printer status", to: "/mobile-flows/printer-status", duty: "WMS_PRINT" },
       { label: "Routing rules", to: "/mobile-flows/routing-rules", duty: "WMS_PRINT" },
       { label: "Print jobs", to: "/mobile-flows/print-jobs", duty: "WMS_PRINT" },
+      { label: "Offline conflicts", to: "/mobile-flows/conflicts", duty: "WMS_WORK_SUPERVISE" },
     ]);
   });
 

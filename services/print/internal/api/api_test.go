@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
@@ -79,6 +80,8 @@ func (m *memStore) CreateJob(_ context.Context, in store.NewJob) (domain.Job, bo
 	}
 	m.keys[in.IdempotencyKey] = in.Job.ID
 	m.hashes[in.IdempotencyKey] = in.RequestHash
+	in.Job.CreatedAt = time.Now()
+	in.Job.UpdatedAt = in.Job.CreatedAt
 	m.jobs[in.Job.ID] = in.Job
 	m.order = append(m.order, in.Job.ID)
 	return in.Job, true, nil
@@ -89,13 +92,71 @@ func (m *memStore) ListJobs(_ context.Context, f store.JobFilter) ([]domain.Job,
 	defer m.mu.Unlock()
 	out := []domain.Job{}
 	for i := len(m.order) - 1; i >= 0 && len(out) < f.Limit; i-- {
-		j := m.jobs[m.order[i]]
+		j, ok := m.jobs[m.order[i]]
+		if !ok {
+			continue // purged
+		}
 		if (f.Status == "" || j.Status == f.Status) && (f.QueueCode == "" || j.QueueCode == f.QueueCode) &&
 			(f.PrinterCode == "" || j.PrinterCode == f.PrinterCode) {
 			out = append(out, j)
 		}
 	}
 	return out, nil
+}
+
+// PrinterStatuses mirrors the Postgres query: queue depth is QUEUED jobs on the printer's
+// queue, state comes from the newest job the printer handled.
+func (m *memStore) PrinterStatuses(context.Context) ([]domain.PrinterStatus, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []domain.PrinterStatus{}
+	for _, p := range m.printers {
+		st := domain.PrinterStatus{PrinterID: p.ID, Code: p.Code, QueueCode: p.QueueCode, State: domain.StateIdle}
+		var last *domain.Job
+		for _, id := range m.order {
+			j, ok := m.jobs[id]
+			if !ok {
+				continue
+			}
+			if j.QueueCode == p.QueueCode && j.Status == domain.JobQueued {
+				st.QueueDepth++
+			}
+			if j.PrinterCode == p.Code {
+				job := j
+				last = &job
+			}
+		}
+		if last != nil {
+			st.State = domain.PrinterState(last.Status)
+			st.LastError = last.LastError
+			at := last.UpdatedAt
+			st.LastJobAt = &at
+		}
+		out = append(out, st)
+	}
+	return out, nil
+}
+
+func (m *memStore) PurgeJobs(_ context.Context, cutoff time.Time) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var n int64
+	for id, j := range m.jobs {
+		if j.CreatedAt.Before(cutoff) && j.Status != domain.JobQueued {
+			delete(m.jobs, id)
+			n++
+		}
+	}
+	return n, nil
+}
+
+// backdate moves a stored job into the past so retention tests can age it.
+func (m *memStore) backdate(id string, at time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	j := m.jobs[id]
+	j.CreatedAt = at
+	m.jobs[id] = j
 }
 
 func (m *memStore) CompleteJob(_ context.Context, j domain.Job) error {
@@ -135,9 +196,9 @@ func (f *fakeSender) Send(_ context.Context, p domain.Printer, zpl string) error
 	return nil
 }
 
-func router(s store.Store, sender api.Sender) http.Handler {
+func router(s store.Store, sender api.Sender, opts ...api.Option) http.Handler {
 	r := httpx.NewRouter()
-	api.New(s, sender).Register(r)
+	api.New(s, sender, opts...).Register(r)
 	return r
 }
 
@@ -303,4 +364,16 @@ func TestPrinterRegistration_ValidatesAndDefaultsRawPort(t *testing.T) {
 	if rec := call(t, h, http.MethodGet, "/print/v1/printers", "", "WMS_PRINT", ""); rec.Code != http.StatusOK {
 		t.Fatalf("list status %d", rec.Code)
 	}
+}
+
+func newRouterFor(a *api.API) http.Handler {
+	r := httpx.NewRouter()
+	a.Register(r)
+	return r
+}
+
+func httptestGet(h http.Handler, path string) string {
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+	return rec.Body.String()
 }
