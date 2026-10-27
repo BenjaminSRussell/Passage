@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/api"
@@ -19,6 +21,7 @@ import (
 const (
 	defaultHTTPAddr  = ":8080"
 	defaultAdminAddr = ":9090"
+	pendingPoolConns = 2
 )
 
 func main() {
@@ -59,7 +62,16 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
-	a := api.New(store.New(pool), ports)
+	pendingConfig, err := smallPoolConfig(databaseURL)
+	if err != nil {
+		return fmt.Errorf("parse pending-posting pool config: %w", err)
+	}
+	pendingPool, err := pgxpool.NewWithConfig(ctx, pendingConfig)
+	if err != nil {
+		return fmt.Errorf("connect pending-posting pool: %w", err)
+	}
+	defer pendingPool.Close()
+	a := api.New(store.New(pool).WithPendingPool(pendingPool), ports)
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
@@ -71,6 +83,15 @@ func run(ctx context.Context, getenv func(string) string) error {
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), a.Instrument(router)) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()
 	return <-errs
+}
+
+func smallPoolConfig(databaseURL string) (*pgxpool.Config, error) {
+	cfg, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, err
+	}
+	cfg.MaxConns = pendingPoolConns
+	return cfg, nil
 }
 
 func addr(getenv func(string) string, key, fallback string) string {

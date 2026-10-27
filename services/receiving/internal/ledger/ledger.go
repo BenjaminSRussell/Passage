@@ -9,6 +9,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -20,11 +22,17 @@ import (
 )
 
 const (
-	Timeout         = 3 * time.Second
-	periodClosed    = "period_closed"
-	maxResponseSize = 1 << 20
-	dateFormat      = "2006-01-02"
+	Timeout             = 3 * time.Second
+	idempotencyConflict = "LEDGER_IDEMPOTENCY_CONFLICT"
+	maxResponseSize     = 1 << 20
+	dateFormat          = "2006-01-02"
+	sourceSystem        = "receiving"
+	sideDebit           = "D"
+	sideCredit          = "C"
+	reversalDescription = "reversal of a receiving posting that was never confirmed locally"
 )
+
+var periodClosedCodes = []string{"period_closed", "LEDGER_PERIOD_CLOSED"}
 
 type Client struct {
 	baseURL string
@@ -38,34 +46,71 @@ func New(baseURL string, httpClient *http.Client) *Client {
 	return &Client{baseURL: strings.TrimRight(baseURL, "/"), http: httpClient}
 }
 
-type moneyBody struct {
-	Amount   string `json:"amount"`
+type sourceBody struct {
+	System string `json:"system"`
+	Type   string `json:"type"`
+	ID     string `json:"id"`
+}
+
+type amountBody struct {
 	Currency string `json:"currency"`
+	Value    string `json:"value"`
 }
 
 type lineBody struct {
-	LineNo  int        `json:"lineNo"`
-	Account string     `json:"account"`
-	Debit   *moneyBody `json:"debit,omitempty"`
-	Credit  *moneyBody `json:"credit,omitempty"`
+	Account     string     `json:"account"`
+	DebitCredit string     `json:"debitCredit"`
+	Amount      amountBody `json:"amount"`
 }
 
 type requestBody struct {
-	LegalEntityID string                `json:"legalEntityId"`
-	PostingDate   string                `json:"postingDate"`
-	DocumentDate  string                `json:"documentDate"`
-	Source        domain.DocumentSource `json:"source"`
-	Currency      string                `json:"currency"`
-	RateType      string                `json:"rateType"`
-	Lines         []lineBody            `json:"lines"`
+	LedgerID     string     `json:"ledgerId"`
+	DocumentID   string     `json:"documentId"`
+	PostingDate  string     `json:"postingDate"`
+	DocumentDate string     `json:"documentDate,omitempty"`
+	Source       sourceBody `json:"source"`
+	Lines        []lineBody `json:"lines"`
+}
+
+type reverseBody struct {
+	PostingDate string `json:"postingDate"`
+	Description string `json:"description"`
 }
 
 type responseBody struct {
 	JournalEntryID string `json:"journalEntryId"`
+	Entries        []struct {
+		ID string `json:"id"`
+	} `json:"entries"`
+}
+
+func (r responseBody) entryID() string {
+	if r.JournalEntryID != "" {
+		return r.JournalEntryID
+	}
+	if len(r.Entries) > 0 {
+		return r.Entries[0].ID
+	}
+	return ""
 }
 
 type problemBody struct {
-	Code string `json:"code"`
+	Code       string `json:"code"`
+	Violations []struct {
+		Code string `json:"code"`
+	} `json:"violations"`
+}
+
+func (p problemBody) periodClosed() bool {
+	if slices.Contains(periodClosedCodes, p.Code) {
+		return true
+	}
+	for _, v := range p.Violations {
+		if slices.Contains(periodClosedCodes, v.Code) {
+			return true
+		}
+	}
+	return false
 }
 
 func buildBody(entry domain.JournalEntry) (requestBody, error) {
@@ -74,83 +119,132 @@ func buildBody(entry domain.JournalEntry) (requestBody, error) {
 	}
 	currency := entry.Lines[0].Amount.Currency
 	body := requestBody{
-		LegalEntityID: entry.LegalEntityID,
-		PostingDate:   entry.PostingDate.Format(dateFormat),
-		DocumentDate:  entry.DocumentDate.Format(dateFormat),
-		Source:        entry.Source,
-		Currency:      currency,
-		RateType:      entry.RateType,
-		Lines:         make([]lineBody, 0, len(entry.Lines)),
+		LedgerID:    entry.LedgerID,
+		DocumentID:  entry.Source.DocumentID,
+		PostingDate: entry.PostingDate.Format(dateFormat),
+		Source:      sourceBody{System: sourceSystem, Type: entry.Source.DocumentType, ID: entry.Source.DocumentID},
+		Lines:       make([]lineBody, 0, len(entry.Lines)),
+	}
+	if !entry.DocumentDate.IsZero() {
+		body.DocumentDate = entry.DocumentDate.Format(dateFormat)
 	}
 	for i, l := range entry.Lines {
 		if l.Account == "" || l.Amount.Currency != currency {
 			return requestBody{}, fmt.Errorf("journal line %d needs an account and currency %s", i+1, currency)
 		}
-		line := lineBody{LineNo: i + 1, Account: l.Account}
-		abs := money.Amount{Value: l.Amount.Value.Abs(), Currency: currency}
-		wire := &moneyBody{Amount: abs.Value.StringFixed(money.MinorUnits(currency)), Currency: currency}
+		side := sideDebit
 		if l.Amount.Value.IsNegative() {
-			line.Credit = wire
-		} else {
-			line.Debit = wire
+			side = sideCredit
 		}
-		body.Lines = append(body.Lines, line)
+		abs := money.Amount{Value: l.Amount.Value.Abs(), Currency: currency}
+		body.Lines = append(body.Lines, lineBody{
+			Account:     l.Account,
+			DebitCredit: side,
+			Amount:      amountBody{Currency: currency, Value: abs.Value.StringFixed(money.MinorUnits(currency))},
+		})
 	}
 	return body, nil
 }
 
-func (c *Client) Post(ctx context.Context, entry domain.JournalEntry) (string, error) {
+func (c *Client) newRequest(ctx context.Context, path, idempotencyKey string, payload any) (*http.Request, error) {
 	principal, ok := tenant.FromContext(ctx)
 	if !ok {
-		return "", errors.New("ledger post: no principal in context")
+		return nil, errors.New("no principal in context")
 	}
-	body, err := buildBody(entry)
+	raw, err := json.Marshal(payload)
 	if err != nil {
-		return "", fmt.Errorf("ledger post %s: %w", entry.IdempotencyKey, err)
+		return nil, err
 	}
-	payload, err := json.Marshal(body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(raw))
 	if err != nil {
-		return "", fmt.Errorf("ledger post %s: %w", entry.IdempotencyKey, err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+domain.LedgerPostPath, bytes.NewReader(payload))
-	if err != nil {
-		return "", fmt.Errorf("ledger post %s: %w", entry.IdempotencyKey, err)
+		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Idempotency-Key", entry.IdempotencyKey)
+	req.Header.Set("Idempotency-Key", idempotencyKey)
 	req.Header.Set(tenant.HeaderTenant, principal.TenantID)
 	if id := middleware.GetReqID(ctx); id != "" {
 		req.Header.Set(middleware.RequestIDHeader, id)
 	}
+	return req, nil
+}
 
+func (c *Client) do(ctx context.Context, op, subject string, req *http.Request) (int, []byte, error) {
 	resp, err := c.http.Do(req)
 	if err != nil {
-		slog.ErrorContext(ctx, "ledger post transport failed", "err", err, "idempotencyKey", entry.IdempotencyKey, "correlationId", middleware.GetReqID(ctx))
-		return "", fmt.Errorf("ledger post %s: %w", entry.IdempotencyKey, err)
+		slog.ErrorContext(ctx, "ledger "+op+" transport failed", "err", err, "subject", subject, "correlationId", middleware.GetReqID(ctx))
+		return 0, nil, fmt.Errorf("ledger %s %s: %w", op, subject, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
 	if err != nil {
-		slog.ErrorContext(ctx, "ledger post read failed", "err", err, "idempotencyKey", entry.IdempotencyKey, "correlationId", middleware.GetReqID(ctx))
+		slog.ErrorContext(ctx, "ledger "+op+" read failed", "err", err, "subject", subject, "correlationId", middleware.GetReqID(ctx))
+		return 0, nil, fmt.Errorf("ledger %s %s: %w", op, subject, err)
+	}
+	return resp.StatusCode, raw, nil
+}
+
+func classify(status int, raw []byte) error {
+	var problem problemBody
+	_ = json.Unmarshal(raw, &problem)
+	switch {
+	case status == http.StatusUnprocessableEntity && problem.periodClosed():
+		return domain.ErrPeriodClosed
+	case status == http.StatusConflict && problem.Code == idempotencyConflict:
+		return domain.ErrLedgerConflict
+	case status >= 400 && status < 500 && status != http.StatusConflict && status != http.StatusRequestTimeout:
+		return domain.ErrLedgerRejected
+	}
+	return nil
+}
+
+func (c *Client) Post(ctx context.Context, entry domain.JournalEntry) (string, error) {
+	body, err := buildBody(entry)
+	if err != nil {
 		return "", fmt.Errorf("ledger post %s: %w", entry.IdempotencyKey, err)
 	}
-
-	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated {
+	req, err := c.newRequest(ctx, domain.LedgerPostPath, entry.IdempotencyKey, body)
+	if err != nil {
+		return "", fmt.Errorf("ledger post %s: %w", entry.IdempotencyKey, err)
+	}
+	status, raw, err := c.do(ctx, "post", entry.IdempotencyKey, req)
+	if err != nil {
+		return "", err
+	}
+	if status == http.StatusOK || status == http.StatusCreated {
 		var out responseBody
-		if err := json.Unmarshal(raw, &out); err != nil || out.JournalEntryID == "" {
-			slog.ErrorContext(ctx, "ledger post response unusable", "err", err, "status", resp.StatusCode, "idempotencyKey", entry.IdempotencyKey, "correlationId", middleware.GetReqID(ctx))
+		if err := json.Unmarshal(raw, &out); err != nil || out.entryID() == "" {
+			slog.ErrorContext(ctx, "ledger post response unusable", "err", err, "status", status, "idempotencyKey", entry.IdempotencyKey, "correlationId", middleware.GetReqID(ctx))
 			return "", fmt.Errorf("ledger post %s: response has no journalEntryId", entry.IdempotencyKey)
 		}
-		return out.JournalEntryID, nil
+		return out.entryID(), nil
 	}
+	return "", c.rejection(ctx, "post", entry.IdempotencyKey, status, raw)
+}
 
-	if resp.StatusCode == http.StatusUnprocessableEntity {
-		var problem problemBody
-		if json.Unmarshal(raw, &problem) == nil && problem.Code == periodClosed {
-			return "", fmt.Errorf("ledger post %s: %w", entry.IdempotencyKey, domain.ErrPeriodClosed)
-		}
+func (c *Client) rejection(ctx context.Context, op, subject string, status int, raw []byte) error {
+	kind := classify(status, raw)
+	err := fmt.Errorf("ledger %s %s: unexpected status %d", op, subject, status)
+	if kind != nil {
+		err = fmt.Errorf("ledger %s %s: status %d: %w", op, subject, status, kind)
 	}
-	err = fmt.Errorf("ledger post %s: unexpected status %d", entry.IdempotencyKey, resp.StatusCode)
-	slog.ErrorContext(ctx, "ledger post rejected", "err", err, "status", resp.StatusCode, "idempotencyKey", entry.IdempotencyKey, "correlationId", middleware.GetReqID(ctx))
-	return "", err
+	if !errors.Is(kind, domain.ErrPeriodClosed) && !errors.Is(kind, domain.ErrLedgerConflict) {
+		slog.ErrorContext(ctx, "ledger "+op+" rejected", "err", err, "status", status, "subject", subject, "correlationId", middleware.GetReqID(ctx))
+	}
+	return err
+}
+
+func (c *Client) Reverse(ctx context.Context, entryID, idempotencyKey string, postingDate time.Time) error {
+	body := reverseBody{PostingDate: postingDate.Format(dateFormat), Description: reversalDescription}
+	req, err := c.newRequest(ctx, fmt.Sprintf(domain.LedgerReversePathTmpl, url.PathEscape(entryID)), idempotencyKey, body)
+	if err != nil {
+		return fmt.Errorf("ledger reverse %s: %w", entryID, err)
+	}
+	status, raw, err := c.do(ctx, "reverse", entryID, req)
+	if err != nil {
+		return err
+	}
+	if status == http.StatusOK || status == http.StatusCreated {
+		return nil
+	}
+	return c.rejection(ctx, "reverse", entryID, status, raw)
 }

@@ -79,6 +79,7 @@ type receiptBody struct {
 	ID              string            `json:"id"`
 	ReceiptNumber   string            `json:"receiptNumber"`
 	State           string            `json:"state"`
+	Version         int               `json:"version"`
 	VendorID        string            `json:"vendorId"`
 	PurchaseOrderID string            `json:"purchaseOrderId"`
 	LegalEntityID   string            `json:"legalEntityId"`
@@ -104,7 +105,7 @@ func nullableString(d decimal.NullDecimal) *string {
 
 func toReceiptBody(r store.Receipt) receiptBody {
 	out := receiptBody{
-		ID: r.ID, ReceiptNumber: r.Number, State: string(r.State), VendorID: r.VendorID, PurchaseOrderID: r.PurchaseOrderID,
+		ID: r.ID, ReceiptNumber: r.Number, State: string(r.State), Version: r.Version, VendorID: r.VendorID, PurchaseOrderID: r.PurchaseOrderID,
 		LegalEntityID: r.LegalEntityID, PackingSlip: r.PackingSlip, Carrier: r.Carrier, PalletCount: r.PalletCount,
 		ReceiptDate: r.Date.Format(dateLayout), Currency: r.Currency, ExchangeRate: r.ExchangeRate.String(),
 		LedgerEntryID: r.LedgerEntryID, CreatedAt: r.CreatedAt.UTC().Format(time.RFC3339), Lines: make([]receiptLineBody, 0, len(r.Lines)),
@@ -244,8 +245,8 @@ func (a *API) arrive(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, problem)
 		return
 	}
-	if p.LegalEntityID != "" && p.LegalEntityID != req.LegalEntityID {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "legal entity is outside the caller's scope"))
+	if err := inScope(p, req.LegalEntityID); err != nil {
+		writeError(w, r, err)
 		return
 	}
 	created, err := a.store.CreateArrival(r.Context(), in)

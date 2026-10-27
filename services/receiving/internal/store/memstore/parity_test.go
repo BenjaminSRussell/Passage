@@ -14,6 +14,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/events"
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
@@ -125,6 +126,25 @@ func registered(t *testing.T, st store.Store, p tenant.Principal, slip string, s
 		t.Fatal(err)
 	}
 	return r
+}
+
+func wantPending(t *testing.T, err error, key string) {
+	t.Helper()
+	var pe *store.PendingError
+	if !errors.As(err, &pe) || pe.Key != key || pe.CreatedAt.IsZero() {
+		t.Fatalf("err=%v, want a PendingError naming %s with its start time", err, key)
+	}
+}
+
+func claim(t *testing.T, b backend, p tenant.Principal, key string) {
+	t.Helper()
+	if _, err := b.st.ClaimPending(ctxOf(p), key, 0, time.Hour); err != nil {
+		t.Fatalf("claim %s: %v", key, err)
+	}
+}
+
+func reservation(base string, hash string, subjects ...string) store.PendingPosting {
+	return store.PendingPosting{BaseKey: base, Subjects: subjects, Hash: hash, Journal: []byte(`{}`)}
 }
 
 func wantCode(t *testing.T, err error, code string) {
@@ -451,6 +471,343 @@ var cases = []struct {
 		b.expireKey(one, "k")
 		if got, err := b.st.ClaimKey(ctxOf(one), "k", "other", time.Minute); err != nil || got.State != store.ClaimNew {
 			t.Fatalf("expired=%+v err=%v, want new", got, err)
+		}
+	}},
+	{"correct rewrites lines and the grir item, bumps versions and emits once", func(t *testing.T, b backend) {
+		p := principal(1)
+		r := registered(t, b.st, p, "PS-1", "S1", "S2", "S3")
+		posted, err := b.st.Post(ctxOf(p), r.ID, postWith(t, p, "entry-1"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		correction := func(qty, amount string) store.AdjustFunc {
+			return func(cur store.Receipt) (store.Adjustment, error) {
+				evt, err := events.New(events.Type("receiving", "receipt", "corrected", 1), "/passage/receiving/receiving", cur.ID, p.TenantID, map[string]string{"receiptId": cur.ID})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return store.Adjustment{LedgerEntryID: "c1", Event: &evt, Lines: []store.LineChange{{
+					LineNo: 1, Qty: decimal.RequireFromString(qty), Amount: decimal.RequireFromString(amount), AmountAcct: decimal.RequireFromString("5.5"),
+				}}}, nil
+			}
+		}
+		boom := errors.New("boom")
+		if _, err := b.st.Correct(ctxOf(p), r.ID, func(store.Receipt) (store.Adjustment, error) { return store.Adjustment{}, boom }); !errors.Is(err, boom) {
+			t.Fatalf("err=%v, want boom", err)
+		}
+		got, err := b.st.Correct(ctxOf(p), r.ID, correction("2", "5"))
+		if err != nil || !got.Lines[0].Qty.Equal(decimal.NewFromInt(2)) || !got.Lines[0].Amount.Decimal.Equal(decimal.NewFromInt(5)) ||
+			got.CorrectionSeq != 1 || got.Version != posted.Version+1 || got.State != domain.Posted {
+			t.Fatalf("corrected=%+v err=%v", got, err)
+		}
+		page, err := b.st.ListGrir(ctxOf(p), store.GrirFilter{})
+		if err != nil || len(page.Items) != 1 || !page.Items[0].ReceivedQty.Equal(decimal.NewFromInt(2)) || !page.Items[0].OpenAmount.Equal(decimal.NewFromInt(5)) || page.Items[0].Status != "OPEN" {
+			t.Fatalf("grir=%+v err=%v", page, err)
+		}
+		if b.events(p) != 2 {
+			t.Fatalf("events=%d, want 2", b.events(p))
+		}
+		if _, err = b.st.Correct(ctxOf(principal(2)), r.ID, correction("1", "2.5")); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("other tenant err=%v, want ErrNotFound", err)
+		}
+		second := registered(t, b.st, p, "PS-2", "S4", "S5", "S6")
+		_, err = b.st.Correct(ctxOf(p), second.ID, correction("1", "2.5"))
+		wantCode(t, err, domain.CodeInvalidTransition)
+	}},
+	{"cancel releases serials of a registered receipt and zeroes a posted one", func(t *testing.T, b backend) {
+		p := principal(1)
+		noEvent := func(store.Receipt) (store.Adjustment, error) { return store.Adjustment{}, nil }
+		reg := registered(t, b.st, p, "PS-1", "S1", "S2", "S3")
+		cancelled, err := b.st.Cancel(ctxOf(p), reg.ID, noEvent)
+		if err != nil || cancelled.State != domain.Cancelled || cancelled.Version != reg.Version+1 {
+			t.Fatalf("cancelled=%+v err=%v", cancelled, err)
+		}
+		if got, _ := b.st.RecordedSerials(ctxOf(p), []string{productID}); len(got) != 0 {
+			t.Fatalf("recorded serials %d after cancel, want 0", len(got))
+		}
+		_, err = b.st.Cancel(ctxOf(p), reg.ID, noEvent)
+		wantCode(t, err, domain.CodeInvalidTransition)
+
+		posted, err := b.st.Post(ctxOf(p), registered(t, b.st, p, "PS-2", "S1", "S2", "S3").ID, postWith(t, p, "entry-1"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		evt, _ := events.New(events.Type("receiving", "receipt", "corrected", 1), "/passage/receiving/receiving", posted.ID, p.TenantID, map[string]string{"kind": "CANCELLATION"})
+		if _, err = b.st.Cancel(ctxOf(p), posted.ID, func(store.Receipt) (store.Adjustment, error) { return store.Adjustment{Event: &evt}, nil }); err != nil {
+			t.Fatal(err)
+		}
+		page, err := b.st.ListGrir(ctxOf(p), store.GrirFilter{Status: "CLEARED"})
+		if err != nil || len(page.Items) != 1 || !page.Items[0].ReceivedQty.IsZero() || !page.Items[0].OpenAmount.IsZero() {
+			t.Fatalf("grir=%+v err=%v", page, err)
+		}
+		if b.events(p) != 2 {
+			t.Fatalf("events=%d, want 2", b.events(p))
+		}
+	}},
+	{"post invoice updates the grir item and receipt line, rolls back on error and rejects a duplicate number", func(t *testing.T, b backend) {
+		p := principal(1)
+		r := registered(t, b.st, p, "PS-1", "S1", "S2", "S3")
+		if _, err := b.st.Post(ctxOf(p), r.ID, postWith(t, p, "entry-1")); err != nil {
+			t.Fatal(err)
+		}
+		invoice := func(number string, qty int64) store.Invoice {
+			return store.Invoice{
+				ID: ids.New(), LegalEntityID: p.LegalEntityID, VendorID: vendorID, InvoiceNumber: number, InvoiceDate: day(3, 2), PostingDate: day(3, 2),
+				Currency: "USD", LedgerID: locationA, FiscalPeriodID: locationA,
+				Lines: []store.InvoiceLine{{ReceiptID: r.ID, ReceiptLineNo: 1, Qty: decimal.NewFromInt(qty), UnitPrice: decimal.RequireFromString("2.5"), Amount: decimal.RequireFromString("2.5")}},
+			}
+		}
+		clear := func(qty, amount string) store.InvoiceFunc {
+			return func(items []*domain.GrirItem) (store.InvoiceOutcome, error) {
+				items[0].InvoicedQty = items[0].InvoicedQty.Add(decimal.RequireFromString(qty))
+				items[0].ClearedAmount.Value = items[0].ClearedAmount.Value.Add(decimal.RequireFromString(amount))
+				evt, err := events.New(events.Type("payables", "invoice", "posted", 1), "/passage/receiving/receiving", r.ID, p.TenantID, map[string]string{"invoice": "x"})
+				return store.InvoiceOutcome{LedgerEntryID: "inv-entry", Total: decimal.RequireFromString("2.5"), Event: evt}, err
+			}
+		}
+		boom := errors.New("ledger down")
+		if _, err := b.st.PostInvoice(ctxOf(p), invoice("INV-1", 1), func([]*domain.GrirItem) (store.InvoiceOutcome, error) { return store.InvoiceOutcome{}, boom }); !errors.Is(err, boom) {
+			t.Fatalf("err=%v, want boom", err)
+		}
+		if b.events(p) != 1 {
+			t.Fatalf("failed invoice emitted: events=%d", b.events(p))
+		}
+		posted, err := b.st.PostInvoice(ctxOf(p), invoice("INV-1", 1), clear("1", "2.5"))
+		if err != nil || posted.LedgerEntryID != "inv-entry" || posted.CreatedAt.IsZero() {
+			t.Fatalf("posted=%+v err=%v", posted, err)
+		}
+		page, _ := b.st.ListGrir(ctxOf(p), store.GrirFilter{})
+		if g := page.Items[0]; g.Status != "PARTIAL" || !g.InvoicedQty.Equal(decimal.NewFromInt(1)) || !g.OpenAmount.Equal(decimal.RequireFromString("5")) {
+			t.Fatalf("grir=%+v", g)
+		}
+		if got, _ := b.st.GetReceipt(ctxOf(p), r.ID); !got.Lines[0].InvoicedQty.Equal(decimal.NewFromInt(1)) {
+			t.Fatalf("line invoiced=%s, want 1", got.Lines[0].InvoicedQty)
+		}
+		_, err = b.st.PostInvoice(ctxOf(p), invoice("inv-1", 1), clear("1", "2.5"))
+		wantCode(t, err, domain.CodeDuplicateInvoice)
+		if _, err = b.st.PostInvoice(ctxOf(p), invoice("INV-2", 2), clear("2", "5")); err != nil {
+			t.Fatal(err)
+		}
+		if page, _ = b.st.ListGrir(ctxOf(p), store.GrirFilter{Status: "CLEARED"}); len(page.Items) != 1 {
+			t.Fatalf("cleared items=%d, want 1", len(page.Items))
+		}
+		other := invoice("INV-3", 1)
+		other.VendorID = otherVendorID
+		_, err = b.st.PostInvoice(ctxOf(p), other, clear("1", "2.5"))
+		wantCode(t, err, domain.CodeInvalidReceipt)
+		missing := invoice("INV-4", 1)
+		missing.Lines[0].ReceiptLineNo = 9
+		if _, err = b.st.PostInvoice(ctxOf(p), missing, clear("1", "2.5")); !errors.Is(err, store.ErrGrirNotFound) {
+			t.Fatalf("err=%v, want ErrGrirNotFound", err)
+		}
+		if _, err = b.st.PostInvoice(ctxOf(principal(2)), invoice("INV-5", 1), clear("1", "2.5")); !errors.Is(err, store.ErrGrirNotFound) {
+			t.Fatalf("other tenant err=%v, want ErrGrirNotFound", err)
+		}
+	}},
+	{"pending postings block other keys and changed bodies until the subject's command completes", func(t *testing.T, b backend) {
+		p := principal(1)
+		r := registered(t, b.st, p, "PS-1", "S1", "S2", "S3")
+		reserve := func(key, hash string) error {
+			_, err := b.st.ReservePosting(ctxOf(p), store.PendingPosting{BaseKey: key, Subjects: []string{r.ID}, Hash: hash, Journal: []byte(`{"k":1}`)})
+			return err
+		}
+		if err := reserve("k1", "h1"); err != nil {
+			t.Fatal(err)
+		}
+		if err := reserve("k1", "h1"); err != nil {
+			t.Fatalf("the same key and body must be accepted again: %v", err)
+		}
+		wantPending(t, reserve("k1", "h2"), "k1")
+		wantPending(t, reserve("k2", "h1"), "k1")
+		wantPending(t, b.st.EnsureNoPending(ctxOf(p), r.ID), "k1")
+		if err := b.st.EnsureNoPending(ctxOf(p), "someone-else"); err != nil {
+			t.Fatalf("another subject is unaffected: %v", err)
+		}
+		if err := b.st.ReleasePosting(ctxOf(p), "k1"); err != nil {
+			t.Fatal(err)
+		}
+		if err := reserve("k2", "h9"); err != nil {
+			t.Fatalf("a released posting must not block: %v", err)
+		}
+		if _, err := b.st.Post(ctxOf(p), r.ID, postWith(t, p, "entry-1")); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.st.EnsureNoPending(ctxOf(p), r.ID); err != nil {
+			t.Fatalf("completing the command must mark the posting done: %v", err)
+		}
+		page, _ := b.st.ListGrir(ctxOf(p), store.GrirFilter{})
+		if !page.Items[0].UnitPrice.Equal(decimal.RequireFromString("2.5")) {
+			t.Fatalf("grir unit price %s, want the receipt line price 2.5", page.Items[0].UnitPrice)
+		}
+	}},
+	{"a released key can be reserved again with a new body, and a posted key keeps its body", func(t *testing.T, b backend) {
+		p := principal(1)
+		reserve := func(key, hash string) error {
+			_, err := b.st.ReservePosting(ctxOf(p), store.PendingPosting{BaseKey: key, Subjects: []string{"subject-a"}, Hash: hash, Journal: []byte(`{}`)})
+			return err
+		}
+		if err := reserve("k", "h1"); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.st.ReleasePosting(ctxOf(p), "k"); err != nil {
+			t.Fatal(err)
+		}
+		if err := reserve("k", "h2"); err != nil {
+			t.Fatalf("re-arming a rejected key with a new hash must succeed: %v", err)
+		}
+		wantPending(t, reserve("k", "h3"), "k")
+		row, err := b.st.GetPending(ctxOf(p), "k")
+		if err != nil || row.Hash != "h2" || row.DoneAt != nil || len(row.Subjects) != 1 {
+			t.Fatalf("row=%+v err=%v, want the re-armed open row with hash h2", row, err)
+		}
+		if err := b.st.FinishPending(ctxOf(p), "k", store.OutcomeReversed); !errors.Is(err, store.ErrPendingNotClaimed) {
+			t.Fatalf("finishing an unclaimed posting: err=%v, want ErrPendingNotClaimed", err)
+		}
+		claim(t, b, p, "k")
+		if err := b.st.FinishPending(ctxOf(p), "k", store.OutcomeReversed); err != nil {
+			t.Fatal(err)
+		}
+		if key, err := b.st.ReservePosting(ctxOf(p), store.PendingPosting{BaseKey: "k", Subjects: []string{"subject-a"}, Hash: "h2", Journal: []byte(`{}`)}); err != nil || key != "k:r1" {
+			t.Fatalf("key=%q err=%v, want the next generation k:r1 after a reversal", key, err)
+		}
+		if err := b.st.ReleasePosting(ctxOf(p), "k:r1"); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.st.EnsureNoPending(ctxOf(p), "subject-a"); err != nil {
+			t.Fatalf("a reversed posting frees its subject: %v", err)
+		}
+		if _, err := b.st.GetPending(ctxOf(p), "missing"); !errors.Is(err, store.ErrPendingNotFound) {
+			t.Fatalf("err=%v, want ErrPendingNotFound", err)
+		}
+	}},
+	{"a posting over several subjects blocks each of them and completes them all together", func(t *testing.T, b backend) {
+		p := principal(1)
+		invoice := store.PendingPosting{BaseKey: "inv", Subjects: []string{"receipt-2", "invoice-1", "receipt-1"}, Hash: "h", Journal: []byte(`{}`)}
+		if _, err := b.st.ReservePosting(ctxOf(p), invoice); err != nil {
+			t.Fatal(err)
+		}
+		for _, subject := range []string{"receipt-1", "receipt-2", "invoice-1"} {
+			wantPending(t, b.st.EnsureNoPending(ctxOf(p), subject), "inv")
+		}
+		other := store.PendingPosting{BaseKey: "corr", Subjects: []string{"receipt-2"}, Hash: "h", Journal: []byte(`{}`)}
+		_, err := b.st.ReservePosting(ctxOf(p), other)
+		wantPending(t, err, "inv")
+		rows, err := b.st.ListPending(ctxOf(p))
+		if err != nil || len(rows) != 1 || len(rows[0].Subjects) != 3 || rows[0].Subjects[0] != "invoice-1" {
+			t.Fatalf("rows=%+v err=%v, want one open row with three sorted subjects", rows, err)
+		}
+		claim(t, b, p, "inv")
+		if err := b.st.FinishPending(ctxOf(p), "inv", store.OutcomeReversed); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := b.st.ReservePosting(ctxOf(p), other); err != nil {
+			t.Fatalf("finishing the invoice posting must free the receipts: %v", err)
+		}
+		if _, err := b.st.ReservePosting(ctxOf(principal(2)), invoice); err != nil {
+			t.Fatalf("another tenant is unaffected: %v", err)
+		}
+	}},
+	{"a resolve that claims the posting first makes the original command's commit fail and leave the receipt unposted", func(t *testing.T, b backend) {
+		p := principal(1)
+		r := registered(t, b.st, p, "PS-1", "S1", "S2", "S3")
+		if _, err := b.st.ReservePosting(ctxOf(p), reservation("race", "h", r.ID)); err != nil {
+			t.Fatal(err)
+		}
+		claim(t, b, p, "race")
+		if _, err := b.st.ClaimPending(ctxOf(p), "race", 0, time.Hour); !errors.Is(err, store.ErrPendingClaimed) {
+			t.Fatalf("second claim err=%v, want ErrPendingClaimed", err)
+		}
+		if _, err := b.st.ReservePosting(ctxOf(p), reservation("race", "h", r.ID)); err == nil {
+			t.Fatal("the original command must not re-reserve a claimed posting")
+		}
+		if err := b.st.ReleasePosting(ctxOf(p), "race"); err != nil {
+			t.Fatalf("releasing a claimed posting must be a no-op: %v", err)
+		}
+		if row, _ := b.st.GetPending(ctxOf(p), "race"); row.DoneAt != nil {
+			t.Fatalf("a command's release finished a claimed row: %+v", row)
+		}
+		if _, err := b.st.Post(ctxOf(p), r.ID, postWith(t, p, "entry-1")); !errors.Is(err, store.ErrPostingSuperseded) {
+			t.Fatalf("post err=%v, want ErrPostingSuperseded", err)
+		}
+		if got, _ := b.st.GetReceipt(ctxOf(p), r.ID); got.State != domain.Registered {
+			t.Fatalf("receipt is %s after the failed commit, want REGISTERED", got.State)
+		}
+		if err := b.st.ReleaseClaim(ctxOf(p), "race"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := b.st.Post(ctxOf(p), r.ID, postWith(t, p, "entry-1")); err != nil {
+			t.Fatalf("with the claim released the command commits: %v", err)
+		}
+	}},
+	{"a command that commits first makes a later resolve fail with the finished outcome", func(t *testing.T, b backend) {
+		p := principal(1)
+		r := registered(t, b.st, p, "PS-1", "S1", "S2", "S3")
+		if _, err := b.st.ReservePosting(ctxOf(p), reservation("first", "h", r.ID)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := b.st.Post(ctxOf(p), r.ID, postWith(t, p, "entry-1")); err != nil {
+			t.Fatal(err)
+		}
+		row, err := b.st.ClaimPending(ctxOf(p), "first", 0, time.Hour)
+		if !errors.Is(err, store.ErrPendingFinished) || row.Outcome != store.OutcomePosted {
+			t.Fatalf("claim row=%+v err=%v, want ErrPendingFinished with outcome POSTED", row, err)
+		}
+		if err := b.st.FinishPending(ctxOf(p), "first", store.OutcomeReversed); !errors.Is(err, store.ErrPendingNotClaimed) {
+			t.Fatalf("finish err=%v, want ErrPendingNotClaimed, not a silent success", err)
+		}
+		if got, _ := b.st.GetReceipt(ctxOf(p), r.ID); got.State != domain.Posted {
+			t.Fatalf("receipt is %s, want POSTED", got.State)
+		}
+	}},
+	{"a claim older than the lease can be taken over, a fresh one cannot", func(t *testing.T, b backend) {
+		p := principal(1)
+		if _, err := b.st.ReservePosting(ctxOf(p), reservation("lease", "h", "subject-l")); err != nil {
+			t.Fatal(err)
+		}
+		claim(t, b, p, "lease")
+		if _, err := b.st.ClaimPending(ctxOf(p), "lease", 0, time.Hour); !errors.Is(err, store.ErrPendingClaimed) {
+			t.Fatalf("within the lease: err=%v, want ErrPendingClaimed", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+		if _, err := b.st.ClaimPending(ctxOf(p), "lease", 0, 10*time.Millisecond); err != nil {
+			t.Fatalf("after the lease expired: %v", err)
+		}
+		if err := b.st.FinishPending(ctxOf(p), "lease", store.OutcomeReversed); err != nil {
+			t.Fatal(err)
+		}
+	}},
+	{"a posting younger than the minimum age cannot be claimed", func(t *testing.T, b backend) {
+		p := principal(1)
+		if _, err := b.st.ReservePosting(ctxOf(p), reservation("young", "h", "subject-y")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := b.st.ClaimPending(ctxOf(p), "young", time.Hour, time.Hour); !errors.Is(err, store.ErrPendingTooRecent) {
+			t.Fatalf("err=%v, want ErrPendingTooRecent", err)
+		}
+		claim(t, b, p, "young")
+	}},
+	{"a reversed key is never reused: each reservation derives the next generation", func(t *testing.T, b backend) {
+		p := principal(1)
+		for generation, want := range []string{"g", "g:r1", "g:r2"} {
+			key, err := b.st.ReservePosting(ctxOf(p), reservation("g", "h", "subject-g"))
+			if err != nil || key != want {
+				t.Fatalf("generation %d: key=%q err=%v, want %q", generation, key, err, want)
+			}
+			claim(t, b, p, key)
+			if err := b.st.FinishPending(ctxOf(p), key, store.OutcomeReversed); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}},
+	{"a conflict names the subject the two postings share", func(t *testing.T, b backend) {
+		p := principal(1)
+		if _, err := b.st.ReservePosting(ctxOf(p), reservation("one", "h", "a", "b")); err != nil {
+			t.Fatal(err)
+		}
+		_, err := b.st.ReservePosting(ctxOf(p), reservation("two", "h", "c", "b"))
+		var pe *store.PendingError
+		if !errors.As(err, &pe) || pe.Subject != "b" || pe.Key != "one" {
+			t.Fatalf("err=%v, want a PendingError for subject b held by one", err)
 		}
 	}},
 	{"ping succeeds on a healthy store", func(t *testing.T, b backend) {

@@ -3,9 +3,11 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"sync/atomic"
 	"time"
 
@@ -19,6 +21,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/ledger"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
 )
 
@@ -26,6 +29,9 @@ const (
 	readyTimeout       = 500 * time.Millisecond
 	dutyMatchingPolicy = "MatchingPolicyMaintain"
 	dutyReceiving      = "ReceivingMaintain"
+	dutyReceivingPost  = "ReceivingPost"
+	dutyInvoicePost    = "VendorInvoicePost"
+	dutyAPInquire      = "APInquire"
 	maxLines           = 500
 	maxMagnitude       = 1e12
 	maxExponent        = 12
@@ -36,42 +42,90 @@ const (
 type Ports struct {
 	Periods domain.PeriodControl
 	Ledger  domain.LedgerPoster
+	Profile domain.PostingProfile
+
+	ResolveMinAge time.Duration
+	ResolveLease  time.Duration
 }
 
 type API struct {
-	store      store.Store
-	ports      Ports
-	evaluated  atomic.Int64
-	rejected   atomic.Int64
-	arrived    atomic.Int64
-	registered atomic.Int64
-	http       requestMetrics
+	store         store.Store
+	ports         Ports
+	resolveMinAge time.Duration
+	resolveLease  time.Duration
+	evaluated     atomic.Int64
+	rejected      atomic.Int64
+	arrived       atomic.Int64
+	registered    atomic.Int64
+	posted        atomic.Int64
+	adjusted      atomic.Int64
+	invoiced      atomic.Int64
+
+	pendingPostings pendingTracker
+	http            requestMetrics
 }
 
 func New(s store.Store, ports Ports) *API {
 	if ports.Periods == nil || ports.Ledger == nil {
 		panic("api.New: Ports.Periods and Ports.Ledger are required")
 	}
-	return &API{store: s, ports: ports, http: newRequestMetrics()}
+	minAge := ports.ResolveMinAge
+	if minAge == 0 {
+		minAge = ledger.Timeout + httpx.RequestTimeout
+	}
+	lease := ports.ResolveLease
+	if lease == 0 {
+		lease = 2*ledger.Timeout + httpx.RequestTimeout
+	}
+	return &API{store: s, ports: ports, resolveMinAge: minAge, resolveLease: lease, http: newRequestMetrics()}
 }
 
 func (a *API) PostInvoice(ctx context.Context, in domain.VendorInvoice, profile domain.PostingProfile) (domain.JournalEntry, error) {
-	return domain.PostInvoice(ctx, in, a.ports.Periods, a.ports.Ledger, profile)
+	subjects := []string{in.ID}
+	for _, l := range in.Lines {
+		subjects = append(subjects, l.Item.ReceiptID)
+	}
+	return domain.PostInvoice(ctx, in, a.ports.Periods, a.ledgerFor(subjects...), profile)
 }
 
 func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutyMatchingPolicy)).Post("/v1/receiving/matching:evaluate", a.evaluate)
 	r.With(authz.RequireDuty(dutyReceiving)).Post("/v1/receiving/arrivals", a.idempotent(a.arrive))
+	r.With(authz.RequireDuty(dutyReceiving)).Post("/v1/receiving/receipts", a.idempotent(a.directReceipt))
+	r.With(authz.RequireDuty(dutyReceiving)).Get("/v1/receiving/receipts", a.listReceipts)
+	r.With(authz.RequireDuty(dutyReceiving)).Get("/v1/receiving/receipts/{id}", a.getReceipt)
+	r.With(authz.RequireDuty(dutyReceiving)).Post("/v1/receiving/receipts/{id}:register", a.idempotent(a.registerReceipt))
+	r.With(authz.RequireDuty(dutyReceivingPost)).Post("/v1/receiving/receipts/{id}:post", a.idempotent(a.postReceipt))
+	r.With(authz.RequireDuty(dutyReceivingPost)).Post("/v1/receiving/receipts/{id}:correct", a.idempotent(a.correctReceipt))
+	r.With(authz.RequireDuty(dutyReceivingPost)).Post("/v1/receiving/receipts/{id}:cancel", a.idempotent(a.cancelReceipt))
+	r.With(authz.RequireDuty(dutyAPInquire)).Get("/v1/receiving/grir", a.listGrir)
+	r.With(authz.RequireDuty(dutyReceivingAdmin)).Get("/v1/receiving/pending-postings", a.listPending)
+	r.With(authz.RequireDuty(dutyReceivingAdmin)).Post("/v1/receiving/pending-postings/{key}/resolve", a.idempotent(a.resolvePending))
+	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/invoices:post", a.idempotent(a.postVendorInvoice))
 }
 
 func (a *API) Metrics() http.Handler {
+	counters := []struct {
+		name, help string
+		value      *atomic.Int64
+	}{
+		{"receiving_matches_evaluated_total", "Invoices evaluated by the matching engine.", &a.evaluated},
+		{"receiving_evaluate_rejected_total", "Evaluate requests rejected by validation.", &a.rejected},
+		{"receiving_receipts_arrived_total", "Receipts recorded at arrival.", &a.arrived},
+		{"receiving_receipts_registered_total", "Receipts registered, including direct receipts.", &a.registered},
+		{"receiving_receipts_posted_total", "Receipts posted to the ledger.", &a.posted},
+		{"receiving_receipts_adjusted_total", "Posted receipts corrected or cancelled.", &a.adjusted},
+		{"receiving_invoices_posted_total", "Vendor invoices posted against GR/IR items.", &a.invoiced},
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-		_, _ = fmt.Fprintf(w, "# HELP receiving_matches_evaluated_total Invoices evaluated by the matching engine.\n# TYPE receiving_matches_evaluated_total counter\nreceiving_matches_evaluated_total %d\n", a.evaluated.Load())
-		_, _ = fmt.Fprintf(w, "# HELP receiving_evaluate_rejected_total Evaluate requests rejected by validation.\n# TYPE receiving_evaluate_rejected_total counter\nreceiving_evaluate_rejected_total %d\n", a.rejected.Load())
-		_, _ = fmt.Fprintf(w, "# HELP receiving_receipts_arrived_total Receipts recorded at arrival.\n# TYPE receiving_receipts_arrived_total counter\nreceiving_receipts_arrived_total %d\n", a.arrived.Load())
-		_, _ = fmt.Fprintf(w, "# HELP receiving_receipts_registered_total Receipts registered, including direct receipts.\n# TYPE receiving_receipts_registered_total counter\nreceiving_receipts_registered_total %d\n", a.registered.Load())
+		for _, c := range counters {
+			_, _ = fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s counter\n%s %d\n", c.name, c.help, c.name, c.name, c.value.Load())
+		}
+		open, oldest := a.pendingPostings.stats()
+		_, _ = fmt.Fprintf(w, "# HELP receiving_pending_postings_open Ledger postings this process recorded and has not seen complete.\n# TYPE receiving_pending_postings_open gauge\nreceiving_pending_postings_open %d\n", open)
+		_, _ = fmt.Fprintf(w, "# HELP receiving_pending_postings_oldest_age_seconds Age of the oldest unfinished ledger posting.\n# TYPE receiving_pending_postings_oldest_age_seconds gauge\nreceiving_pending_postings_oldest_age_seconds %d\n", int64(oldest.Seconds()))
 		a.http.write(w)
 	})
 }
@@ -87,13 +141,20 @@ func (a *API) ready(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]string{"status": "ready"})
 }
 
+var decimalText = regexp.MustCompile(`^-?\d+(\.\d+)?$`)
+
 type wireDecimal struct{ decimal.Decimal }
 
 func (d *wireDecimal) UnmarshalJSON(b []byte) error {
-	if len(b) == 0 || (b[0] != '-' && (b[0] < '0' || b[0] > '9')) {
-		return fmt.Errorf("must be a JSON number")
+	text := string(b)
+	if len(b) > 1 && b[0] == '"' {
+		if err := json.Unmarshal(b, &text); err != nil || !decimalText.MatchString(text) {
+			return fmt.Errorf("must be a decimal number or a decimal string")
+		}
+	} else if len(b) == 0 || (b[0] != '-' && (b[0] < '0' || b[0] > '9')) {
+		return fmt.Errorf("must be a decimal number or a decimal string")
 	}
-	v, err := decimal.NewFromString(string(b))
+	v, err := decimal.NewFromString(text)
 	if err != nil {
 		return err
 	}

@@ -57,6 +57,7 @@ func PostInvoice(ctx context.Context, in VendorInvoice, periods PeriodControl, l
 	entry := JournalEntry{
 		IdempotencyKey: fmt.Sprintf(invoiceKeyFormat, in.ID),
 		LegalEntityID:  in.LegalEntityID,
+		LedgerID:       in.LedgerID,
 		PostingDate:    in.PostingDate,
 		DocumentDate:   in.InvoiceDate,
 		Source:         DocumentSource{Context: "receiving", DocumentType: "vendorinvoice", DocumentID: in.ID, Purpose: "invoice"},
@@ -92,12 +93,20 @@ func PostInvoice(ctx context.Context, in VendorInvoice, periods PeriodControl, l
 		}
 	}
 	entry.Lines = append(entry.Lines, JournalLine{Account: profile.VendorControl, Amount: payable.Neg()})
-	if _, err := ledger.Post(ctx, entry); err != nil {
+	entryID, err := ledger.Post(ctx, entry)
+	if err != nil {
 		if errors.Is(err, ErrPeriodClosed) {
 			return JournalEntry{}, fail(CodePeriodClosed, "ledger rejected invoice %s: period closed", in.ID)
 		}
+		if errors.Is(err, ErrLedgerConflict) {
+			return JournalEntry{}, fail(CodePostingPending, "ledger holds a different posting under the key for invoice %s", in.ID)
+		}
 		slog.ErrorContext(ctx, "invoice ledger post failed", "err", err, "invoiceId", in.ID)
 		return JournalEntry{}, fmt.Errorf("post invoice %s: %w", in.ID, err)
+	}
+	entry.LedgerEntryID = entryID
+	for _, c := range clearings {
+		entry.GrirCleared = append(entry.GrirCleared, c.Value)
 	}
 	for i, l := range in.Lines {
 		l.Item.InvoicedQty = l.Item.InvoicedQty.Add(l.Qty)

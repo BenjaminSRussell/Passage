@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -19,8 +20,14 @@ const (
 	CodeInvalidTransition = "RCV-STA-001"
 	CodePeriodClosed      = "PER-AP-001"
 	CodeOverInvoice       = "AP-QTY-001"
+	CodeDuplicateInvoice  = "AP-DUP-001"
+	CodeCorrectionBelow   = "RCV-COR-001"
+	CodePostingPending    = "RCV-IDM-001"
+	CodeLedgerRejected    = "RCV-LDG-001"
 
-	receiptKeyFormat = "post:receiving:productreceipt:%s:receipt"
+	receiptKeyFormat    = "post:receiving:productreceipt:%s:receipt"
+	correctionKeyFormat = "post:receiving:productreceipt:%s:correction:%d"
+	cancelKeyFormat     = "post:receiving:productreceipt:%s:cancel"
 )
 
 type Error struct{ Code, Detail string }
@@ -58,6 +65,8 @@ type ReceiptLine struct {
 	LineNo           int
 	ProductID        string
 	Qty              decimal.Decimal
+	InvoicedQty      decimal.Decimal
+	ClearedAmount    decimal.Decimal
 	OrderedRemaining decimal.Decimal
 	OverDeliveryPct  decimal.Decimal
 	UnitPrice        money.Amount
@@ -147,6 +156,7 @@ func (r Receipt) Post(ctx context.Context, ledger LedgerPoster, profile PostingP
 	entry := JournalEntry{
 		IdempotencyKey: fmt.Sprintf(receiptKeyFormat, r.ID),
 		LegalEntityID:  r.LegalEntityID,
+		LedgerID:       profile.LedgerID,
 		PostingDate:    r.Date,
 		DocumentDate:   r.Date,
 		Source:         DocumentSource{Context: "receiving", DocumentType: "productreceipt", DocumentID: r.ID, Purpose: "receipt"},
@@ -163,11 +173,124 @@ func (r Receipt) Post(ctx context.Context, ledger LedgerPoster, profile PostingP
 			ReceivedAmount: amount, ClearedAmount: money.Amount{Value: decimal.Zero, Currency: amount.Currency},
 		})
 	}
-	entryID, err := ledger.Post(ctx, entry)
+	entryID, err := postReceiptEntry(ctx, ledger, entry, r.ID)
 	if err != nil {
-		slog.ErrorContext(ctx, "receipt ledger post failed", "err", err, "receiptId", r.ID)
-		return r, nil, fmt.Errorf("post receipt %s: %w", r.ID, err)
+		return r, nil, err
 	}
 	next.LedgerEntryID = entryID
 	return next, items, nil
+}
+
+func postReceiptEntry(ctx context.Context, ledger LedgerPoster, entry JournalEntry, receiptID string) (string, error) {
+	entryID, err := ledger.Post(ctx, entry)
+	if errors.Is(err, ErrPeriodClosed) {
+		return "", fail(CodePeriodClosed, "ledger rejected receipt %s: period closed", receiptID)
+	}
+	if errors.Is(err, ErrLedgerConflict) {
+		return "", fail(CodePostingPending, "ledger holds a different posting under the key for receipt %s", receiptID)
+	}
+	if err != nil {
+		slog.ErrorContext(ctx, "receipt ledger post failed", "err", err, "receiptId", receiptID)
+		return "", fmt.Errorf("post receipt %s: %w", receiptID, err)
+	}
+	return entryID, nil
+}
+
+type LineChange struct {
+	LineNo int
+	Qty    decimal.Decimal
+	Amount money.Amount
+}
+
+func (r Receipt) adjustmentEntry(key string, postingDate time.Time, changes []LineChange, profile PostingProfile) JournalEntry {
+	entry := JournalEntry{
+		IdempotencyKey: key, LegalEntityID: r.LegalEntityID, LedgerID: profile.LedgerID, PostingDate: postingDate, DocumentDate: r.Date,
+		Source:   DocumentSource{Context: "receiving", DocumentType: "productreceipt", DocumentID: r.ID, Purpose: "receipt"},
+		RateType: "spot",
+	}
+	byLine := map[int]ReceiptLine{}
+	for _, l := range r.Lines {
+		byLine[l.LineNo] = l
+	}
+	for _, c := range changes {
+		delta := money.Amount{Value: c.Amount.Value.Sub(amountOf(byLine[c.LineNo].UnitPrice, byLine[c.LineNo].Qty).Value), Currency: c.Amount.Currency}
+		if delta.Value.IsZero() {
+			continue
+		}
+		entry.Lines = append(entry.Lines, JournalLine{Account: profile.Inventory, Amount: delta}, JournalLine{Account: profile.GRIR, Amount: delta.Neg()})
+	}
+	return entry
+}
+
+func (r Receipt) adjustmentDate(postingDate time.Time) (time.Time, error) {
+	if postingDate.IsZero() {
+		return r.Date, nil
+	}
+	if postingDate.Before(r.Date) {
+		return time.Time{}, fail(CodeInvalidReceipt, "posting date %s is before the receipt date %s", postingDate.Format(time.DateOnly), r.Date.Format(time.DateOnly))
+	}
+	return postingDate, nil
+}
+
+func (r Receipt) Correct(ctx context.Context, ledger LedgerPoster, profile PostingProfile, seq int, postingDate time.Time, deltas map[int]decimal.Decimal) (string, []LineChange, error) {
+	date, err := r.adjustmentDate(postingDate)
+	if err != nil {
+		return "", nil, err
+	}
+	if r.State != Posted {
+		return "", nil, fail(CodeInvalidTransition, "receipt %s is %s, only a POSTED receipt can be corrected", r.ID, r.State)
+	}
+	if len(deltas) == 0 {
+		return "", nil, fail(CodeInvalidReceipt, "a correction needs at least one line delta")
+	}
+	var changes []LineChange
+	for _, l := range r.Lines {
+		delta, ok := deltas[l.LineNo]
+		if !ok {
+			continue
+		}
+		next := l.Qty.Add(delta)
+		allowance := l.OrderedRemaining.Mul(decimal.NewFromInt(1).Add(l.OverDeliveryPct.Div(decimal.NewFromInt(100))))
+		switch {
+		case delta.IsZero():
+			return "", nil, fail(CodeInvalidReceipt, "line %d delta must not be zero", l.LineNo)
+		case next.Sign() <= 0:
+			return "", nil, fail(CodeInvalidReceipt, "line %d corrected quantity must stay positive, cancel the receipt instead", l.LineNo)
+		case next.LessThan(l.InvoicedQty):
+			return "", nil, fail(CodeCorrectionBelow, "line %d has %s invoiced and cannot go below it", l.LineNo, l.InvoicedQty)
+		case delta.Sign() > 0 && next.GreaterThan(allowance):
+			return "", nil, fail(CodeOverDelivery, "line %d quantity %s exceeds allowance %s", l.LineNo, next, allowance)
+		case l.SerialTracked:
+			return "", nil, fail(CodeInvalidReceipt, "line %d is serial tracked and cannot be corrected by quantity", l.LineNo)
+		}
+		amount := amountOf(l.UnitPrice, next)
+		if l.InvoicedQty.Sign() > 0 && next.Equal(l.InvoicedQty) {
+			amount = money.Amount{Value: l.ClearedAmount, Currency: l.UnitPrice.Currency}
+		}
+		changes = append(changes, LineChange{LineNo: l.LineNo, Qty: next, Amount: amount})
+	}
+	if len(changes) != len(deltas) {
+		return "", nil, fail(CodeInvalidReceipt, "correction names lines the receipt does not have")
+	}
+	entryID, err := postReceiptEntry(ctx, ledger, r.adjustmentEntry(fmt.Sprintf(correctionKeyFormat, r.ID, seq), date, changes, profile), r.ID)
+	return entryID, changes, err
+}
+
+func (r Receipt) Cancel(ctx context.Context, ledger LedgerPoster, profile PostingProfile, postingDate time.Time) (string, error) {
+	invoiced := slices.ContainsFunc(r.Lines, func(l ReceiptLine) bool { return l.InvoicedQty.Sign() > 0 })
+	if _, err := r.Transition(Cancelled, invoiced); err != nil {
+		return "", err
+	}
+	if r.State != Posted {
+		return "", nil
+	}
+	date, err := r.adjustmentDate(postingDate)
+	if err != nil {
+		return "", err
+	}
+	changes := make([]LineChange, len(r.Lines))
+	for i, l := range r.Lines {
+		changes[i] = LineChange{LineNo: l.LineNo, Qty: decimal.Zero, Amount: money.Amount{Value: decimal.Zero, Currency: l.UnitPrice.Currency}}
+	}
+	return postReceiptEntry(ctx, ledger, r.adjustmentEntry(fmt.Sprintf(cancelKeyFormat, r.ID), date, changes, profile), r.ID)
 }

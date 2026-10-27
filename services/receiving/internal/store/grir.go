@@ -33,6 +33,7 @@ type GrirItem struct {
 	ClearedAmount  decimal.Decimal
 	OpenAmount     decimal.Decimal
 	Currency       string
+	UnitPrice      decimal.Decimal
 	Status         string
 	AgeDays        int
 	CreatedAt      time.Time
@@ -77,9 +78,10 @@ func (s *Postgres) ListGrir(ctx context.Context, f GrirFilter) (GrirPage, error)
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT g.id::text, g.receipt_id::text, COALESCE(r.receipt_number, ''), g.line_no, COALESCE(g.vendor_id::text, ''),
 			COALESCE(g.po_line_id::text, ''), g.received_qty, g.invoiced_qty, g.received_amount, g.cleared_amount,
-			g.received_amount - g.cleared_amount, g.currency, g.status, EXTRACT(DAY FROM now() - g.created_at)::int, g.created_at
+			g.received_amount - g.cleared_amount, g.currency, g.status, EXTRACT(DAY FROM now() - g.created_at)::int, g.created_at, l.unit_price
 			FROM receiving_grir_open_item g
 			JOIN receiving_receipt r ON r.tenant_id = g.tenant_id AND r.id = g.receipt_id
+			JOIN receiving_receipt_line l ON l.tenant_id = g.tenant_id AND l.receipt_id = g.receipt_id AND l.line_no = g.line_no
 			WHERE `+grirFilter+`
 			AND ($6::timestamptz IS NULL OR (g.created_at, g.id) < ($6::timestamptz, $7::uuid))
 			ORDER BY g.created_at DESC, g.id DESC LIMIT $8`,
@@ -91,7 +93,7 @@ func (s *Postgres) ListGrir(ctx context.Context, f GrirFilter) (GrirPage, error)
 		for rows.Next() {
 			var g GrirItem
 			if err := rows.Scan(&g.ID, &g.ReceiptID, &g.ReceiptNumber, &g.LineNo, &g.VendorID, &g.POLineID, &g.ReceivedQty, &g.InvoicedQty,
-				&g.ReceivedAmount, &g.ClearedAmount, &g.OpenAmount, &g.Currency, &g.Status, &g.AgeDays, &g.CreatedAt); err != nil {
+				&g.ReceivedAmount, &g.ClearedAmount, &g.OpenAmount, &g.Currency, &g.Status, &g.AgeDays, &g.CreatedAt, &g.UnitPrice); err != nil {
 				return err
 			}
 			page.Items = append(page.Items, g)

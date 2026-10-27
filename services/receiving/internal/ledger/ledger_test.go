@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -16,16 +18,98 @@ import (
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 )
 
-const tenantID = "00000000-0000-0000-0000-000000000001"
+const (
+	tenantID   = "00000000-0000-0000-0000-000000000001"
+	ledgerID   = "00000000-0000-4000-8000-0000000000a1"
+	documentID = "00000000-0000-4000-8000-0000000000d1"
+)
+
+// ledgerPostEntryRequest mirrors postEntryRequest, sourceDTO, lineDTO and amountDTO
+// in services/ledger/internal/api/api.go, which is internal to another module.
+type ledgerPostEntryRequest struct {
+	LedgerID     string  `json:"ledgerId"`
+	DocumentID   string  `json:"documentId"`
+	PostingDate  string  `json:"postingDate"`
+	DocumentDate *string `json:"documentDate"`
+	Description  string  `json:"description"`
+	Source       struct {
+		System string `json:"system"`
+		Type   string `json:"type"`
+		ID     string `json:"id"`
+		URI    string `json:"uri"`
+	} `json:"source"`
+	Lines []struct {
+		Account       string            `json:"account"`
+		Dimensions    map[string]string `json:"dimensions"`
+		DebitCredit   string            `json:"debitCredit"`
+		Amount        struct{ Currency, Value string }
+		Text          string `json:"text"`
+		SourceLineRef string `json:"sourceLineRef"`
+	} `json:"lines"`
+}
+
+// ledgerReverseRequest mirrors reverseRequest in services/ledger/internal/api/api.go.
+type ledgerReverseRequest struct {
+	PostingDate   *string `json:"postingDate"`
+	Description   string  `json:"description"`
+	ReasonCode    string  `json:"reasonCode"`
+	ReasonComment string  `json:"reasonComment"`
+}
+
+func strictDecode(t *testing.T, raw []byte, into any) {
+	t.Helper()
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(into); err != nil {
+		t.Fatalf("the ledger would reject this body (%v): %s", err, raw)
+	}
+}
+
+func TestPostBodyDecodesIntoTheLedgersRequestShape(t *testing.T) {
+	client, _, raw := serve(t, http.StatusCreated, `{"entries":[{"id":"E1"}]}`)
+	if _, err := client.Post(testCtx(), testEntry()); err != nil {
+		t.Fatal(err)
+	}
+	var got ledgerPostEntryRequest
+	strictDecode(t, *raw, &got)
+	if got.LedgerID != ledgerID || got.DocumentID != documentID || got.PostingDate != "2026-09-01" || got.DocumentDate == nil || *got.DocumentDate != "2026-09-01" {
+		t.Fatalf("header fields %+v", got)
+	}
+	if got.Source.System != "receiving" || got.Source.Type != "productreceipt" || got.Source.ID != documentID {
+		t.Fatalf("source %+v", got.Source)
+	}
+	if len(got.Lines) != 2 || got.Lines[0].DebitCredit != "D" || got.Lines[0].Amount.Value != "12.50" || got.Lines[0].Amount.Currency != "USD" ||
+		got.Lines[1].DebitCredit != "C" || got.Lines[1].Amount.Value != "12.50" || got.Lines[1].Account != "2100" {
+		t.Fatalf("lines %+v", got.Lines)
+	}
+}
+
+func TestReverseBodyDecodesIntoTheLedgersRequestShape(t *testing.T) {
+	var raw []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	t.Cleanup(srv.Close)
+	if err := New(srv.URL, nil).Reverse(testCtx(), "E1", "k:reverse", time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	var got ledgerReverseRequest
+	strictDecode(t, raw, &got)
+	if got.PostingDate == nil || *got.PostingDate != "2026-09-01" || got.Description == "" {
+		t.Fatalf("reverse body %+v", got)
+	}
+}
 
 func testEntry() domain.JournalEntry {
 	day := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
 	return domain.JournalEntry{
 		IdempotencyKey: "post:receiving:productreceipt:r-1:receipt",
 		LegalEntityID:  "le-1",
+		LedgerID:       ledgerID,
 		PostingDate:    day,
 		DocumentDate:   day,
-		Source:         domain.DocumentSource{Context: "receiving", DocumentType: "productreceipt", DocumentID: "r-1", Purpose: "receipt"},
+		Source:         domain.DocumentSource{Context: "receiving", DocumentType: "productreceipt", DocumentID: documentID, Purpose: "receipt"},
 		RateType:       "spot",
 		Lines: []domain.JournalLine{
 			{Account: "1400", Amount: money.Must("12.5", "USD")},
@@ -65,19 +149,6 @@ func TestPost_SendsHeadersAndBodyAndReturnsID(t *testing.T) {
 		if got.Header.Get("Idempotency-Key") != "post:receiving:productreceipt:r-1:receipt" || got.Header.Get("X-Passage-Tenant") != tenantID {
 			t.Fatalf("headers %v", got.Header)
 		}
-		var body requestBody
-		if err := json.Unmarshal(*raw, &body); err != nil {
-			t.Fatal(err)
-		}
-		if body.Currency != "USD" || body.PostingDate != "2026-09-01" || len(body.Lines) != 2 {
-			t.Fatalf("body %+v", body)
-		}
-		if body.Lines[0].Debit == nil || body.Lines[0].Debit.Amount != "12.50" || body.Lines[0].Credit != nil {
-			t.Fatalf("line 1 %+v", body.Lines[0])
-		}
-		if body.Lines[1].Credit == nil || body.Lines[1].Credit.Amount != "12.50" || body.Lines[1].Debit != nil {
-			t.Fatalf("line 2 %+v", body.Lines[1])
-		}
 		if strings.Contains(string(*raw), "post:receiving") {
 			t.Fatal("idempotency key must travel in the header only")
 		}
@@ -92,6 +163,8 @@ func TestPost_Failures(t *testing.T) {
 		wantPeriod bool
 	}{
 		{"period closed", http.StatusUnprocessableEntity, `{"code":"period_closed"}`, true},
+		{"ledger period closed code", http.StatusUnprocessableEntity, `{"code":"LEDGER_PERIOD_CLOSED"}`, true},
+		{"period closed among violations", http.StatusUnprocessableEntity, `{"code":"LEDGER_UNBALANCED","violations":[{"code":"LEDGER_UNBALANCED"},{"code":"LEDGER_PERIOD_CLOSED"}]}`, true},
 		{"other 422", http.StatusUnprocessableEntity, `{"code":"unbalanced_entry"}`, false},
 		{"422 not json", http.StatusUnprocessableEntity, `nope`, false},
 		{"server error", http.StatusInternalServerError, `{"code":"period_closed"}`, false},
@@ -154,6 +227,101 @@ func TestPost_RejectsBeforeSending(t *testing.T) {
 			defer srv.Close()
 			if _, err := New(srv.URL, nil).Post(tc.ctx, tc.entry); err == nil || called {
 				t.Fatalf("err %v called %v", err, called)
+			}
+		})
+	}
+}
+
+func TestPathsMatchTheLedgerServiceRouteTable(t *testing.T) {
+	src, err := os.ReadFile("../../../ledger/internal/api/api.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`r.Route("/api/v1/ledger"`, `Post("/journal-entries", a.postEntry)`, `Post("/journal-entries/{id}/reverse", a.reverseEntry)`} {
+		if !strings.Contains(string(src), want) {
+			t.Fatalf("ledger route table no longer contains %s; update domain.LedgerPostPath and LedgerReversePathTmpl", want)
+		}
+	}
+	if domain.LedgerPostPath != "/api/v1/ledger/journal-entries" || fmt.Sprintf(domain.LedgerReversePathTmpl, "E1") != "/api/v1/ledger/journal-entries/E1/reverse" {
+		t.Fatalf("paths %s %s do not match the ledger routes", domain.LedgerPostPath, domain.LedgerReversePathTmpl)
+	}
+}
+
+func TestPostReadsTheLedgerEntriesResponseAndClassifiesRejections(t *testing.T) {
+	entry := domain.JournalEntry{IdempotencyKey: "k", LegalEntityID: "le", Lines: []domain.JournalLine{{Account: "1400", Amount: money.Must("5.00", "USD")}, {Account: "2100", Amount: money.Must("-5.00", "USD")}}}
+	tests := []struct {
+		name     string
+		status   int
+		body     string
+		wantID   string
+		rejected bool
+		conflict bool
+	}{
+		{"entries array", http.StatusCreated, `{"entries":[{"id":"E7"}]}`, "E7", false, false},
+		{"validation rejection is definite", http.StatusBadRequest, `{"code":"COM-0001"}`, "", true, false},
+		{"forbidden is definite", http.StatusForbidden, `{}`, "", true, false},
+		{"server error is unknown", http.StatusInternalServerError, `{}`, "", false, false},
+		{"gateway timeout is unknown", http.StatusGatewayTimeout, `{}`, "", false, false},
+		{"request timeout is unknown", http.StatusRequestTimeout, `{}`, "", false, false},
+		{"idempotency conflict", http.StatusConflict, `{"code":"LEDGER_IDEMPOTENCY_CONFLICT"}`, "", false, true},
+		{"in progress is unknown", http.StatusConflict, `{"code":"LEDGER_IDEMPOTENCY_IN_PROGRESS"}`, "", false, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			client, _, _ := serve(t, tc.status, tc.body)
+			id, err := client.Post(testCtx(), entry)
+			if errors.Is(err, domain.ErrLedgerRejected) != tc.rejected || errors.Is(err, domain.ErrLedgerConflict) != tc.conflict || id != tc.wantID {
+				t.Fatalf("id=%q err=%v, want id %q rejected=%v conflict=%v", id, err, tc.wantID, tc.rejected, tc.conflict)
+			}
+		})
+	}
+}
+
+func TestReverseCallsTheReverseRouteWithItsOwnKey(t *testing.T) {
+	var got *http.Request
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(srv.Close)
+	day := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	if err := New(srv.URL, nil).Reverse(testCtx(), "E1", "k:reverse", day); err != nil {
+		t.Fatal(err)
+	}
+	if got.URL.Path != "/api/v1/ledger/journal-entries/E1/reverse" || got.Header.Get("Idempotency-Key") != "k:reverse" {
+		t.Fatalf("reverse sent %s with key %q", got.URL.Path, got.Header.Get("Idempotency-Key"))
+	}
+	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusBadGateway) }))
+	t.Cleanup(failing.Close)
+	if err := New(failing.URL, nil).Reverse(testCtx(), "E1", "k", day); err == nil {
+		t.Fatal("a failed reversal must surface")
+	}
+}
+
+func TestReverseClassifiesLedgerRejectionsApartFromOutages(t *testing.T) {
+	day := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name     string
+		status   int
+		body     string
+		closed   bool
+		rejected bool
+		conflict bool
+	}{
+		{"period closed", http.StatusUnprocessableEntity, `{"code":"LEDGER_PERIOD_CLOSED"}`, true, false, false},
+		{"other 422 is definite", http.StatusUnprocessableEntity, `{"code":"LEDGER_REASON_REQUIRED"}`, false, true, false},
+		{"not found is definite", http.StatusNotFound, `{}`, false, true, false},
+		{"server error is unknown", http.StatusInternalServerError, `{}`, false, false, false},
+		{"timeout status is unknown", http.StatusRequestTimeout, `{}`, false, false, false},
+		{"idempotency conflict", http.StatusConflict, `{"code":"LEDGER_IDEMPOTENCY_CONFLICT"}`, false, false, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			client, _, _ := serve(t, tc.status, tc.body)
+			err := client.Reverse(testCtx(), "E1", "k", day)
+			if err == nil || errors.Is(err, domain.ErrPeriodClosed) != tc.closed || errors.Is(err, domain.ErrLedgerRejected) != tc.rejected || errors.Is(err, domain.ErrLedgerConflict) != tc.conflict {
+				t.Fatalf("err=%v, want closed=%v rejected=%v conflict=%v", err, tc.closed, tc.rejected, tc.conflict)
 			}
 		})
 	}

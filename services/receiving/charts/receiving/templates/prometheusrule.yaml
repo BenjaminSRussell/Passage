@@ -48,4 +48,14 @@ spec:
           annotations:
             summary: A receiving pod has been not ready for 5 minutes
             description: At least one running receiving pod failed its readiness probe (/readyz) for 5 minutes.
+        - alert: ReceivingPendingPostingStuck
+          expr: |
+            max(receiving_pending_postings_oldest_age_seconds{namespace="{{ .Release.Namespace }}"}) > 900
+          for: 1m
+          labels:
+            severity: {{ .Values.alerts.severity | quote }}
+            service: receiving
+          annotations:
+            summary: A ledger posting has been unconfirmed for more than 15 minutes
+            description: The ledger accepted (or may have accepted) an entry but receiving has not committed it, so commands on that receipt or invoice return RCV-IDM-001. Follow the pending-posting runbook in services/receiving/README.md.
 {{- end }}

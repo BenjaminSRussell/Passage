@@ -1,0 +1,130 @@
+package api
+
+import (
+	"github.com/shopspring/decimal"
+
+	"github.com/BenjaminSRussell/passage/platform/events"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
+)
+
+const (
+	eventSource  = "/passage/receiving/receiving"
+	acctRounding = 4
+)
+
+type postedLineData struct {
+	LineNo          int      `json:"line_no"`
+	POLineID        string   `json:"po_line_id"`
+	ProductID       string   `json:"product_id"`
+	Unit            string   `json:"unit"`
+	Qty             string   `json:"qty"`
+	Batch           string   `json:"batch"`
+	Serials         []string `json:"serials"`
+	LocationID      string   `json:"location_id"`
+	InventoryStatus string   `json:"inventory_status"`
+	Amount          string   `json:"amount"`
+	AmountAcct      string   `json:"amount_acct"`
+}
+
+type receiptPostedData struct {
+	ReceiptID     string           `json:"receipt_id"`
+	ReceiptNumber string           `json:"receipt_number"`
+	POID          string           `json:"po_id"`
+	LegalEntityID string           `json:"legal_entity_id"`
+	VendorID      string           `json:"vendor_id"`
+	PostingDate   string           `json:"posting_date"`
+	Currency      string           `json:"currency"`
+	LedgerEntryID string           `json:"ledger_entry_id"`
+	Lines         []postedLineData `json:"lines"`
+}
+
+type correctedLineData struct {
+	LineNo          int    `json:"line_no"`
+	POLineID        string `json:"po_line_id"`
+	ProductID       string `json:"product_id"`
+	QtyDelta        string `json:"qty_delta"`
+	AmountDelta     string `json:"amount_delta"`
+	AmountAcctDelta string `json:"amount_acct_delta"`
+}
+
+type receiptCorrectedData struct {
+	ReceiptID     string              `json:"receipt_id"`
+	ReceiptNumber string              `json:"receipt_number"`
+	Kind          string              `json:"kind"`
+	CorrectionSeq int                 `json:"correction_seq"`
+	LedgerEntryID string              `json:"ledger_entry_id"`
+	Currency      string              `json:"currency"`
+	Lines         []correctedLineData `json:"lines"`
+}
+
+type invoicePostedLineData struct {
+	LineNo        int    `json:"line_no"`
+	ReceiptID     string `json:"receipt_id"`
+	ReceiptLineNo int    `json:"receipt_line_no"`
+	Qty           string `json:"qty"`
+	UnitPrice     string `json:"unit_price"`
+	Amount        string `json:"amount"`
+	GrirCleared   string `json:"grir_cleared_amount"`
+}
+
+type invoicePostedData struct {
+	InvoiceID     string                  `json:"invoice_id"`
+	LegalEntityID string                  `json:"legal_entity_id"`
+	VendorID      string                  `json:"vendor_id"`
+	InvoiceNumber string                  `json:"invoice_number"`
+	InvoiceDate   string                  `json:"invoice_date"`
+	PostingDate   string                  `json:"posting_date"`
+	Currency      string                  `json:"currency"`
+	Total         string                  `json:"total"`
+	LedgerEntryID string                  `json:"ledger_entry_id"`
+	Lines         []invoicePostedLineData `json:"lines"`
+}
+
+func newEvent(context, entity, verb, subject, tenantID string, data any) (events.Event, error) {
+	return events.New(events.Type(context, entity, verb, 1), eventSource, subject, tenantID, data)
+}
+
+func acct(v, rate decimal.Decimal) decimal.Decimal { return v.Mul(rate).RoundBank(acctRounding) }
+
+func receiptPostedEvent(tenantID string, r store.Receipt, amounts []store.LineAmount, ledgerEntryID string) (events.Event, error) {
+	data := receiptPostedData{
+		ReceiptID: r.ID, ReceiptNumber: r.Number, POID: r.PurchaseOrderID, LegalEntityID: r.LegalEntityID, VendorID: r.VendorID,
+		PostingDate: r.Date.Format(dateLayout), Currency: r.Currency, LedgerEntryID: ledgerEntryID, Lines: make([]postedLineData, 0, len(r.Lines)),
+	}
+	byLine := map[int]store.LineAmount{}
+	for _, a := range amounts {
+		byLine[a.LineNo] = a
+	}
+	for _, l := range r.Lines {
+		serials := l.Serials
+		if serials == nil {
+			serials = []string{}
+		}
+		a := byLine[l.LineNo]
+		data.Lines = append(data.Lines, postedLineData{
+			LineNo: l.LineNo, POLineID: l.POLineID, ProductID: l.ProductID, Unit: l.Unit, Qty: l.Qty.String(), Batch: l.Batch, Serials: serials,
+			LocationID: l.LocationID, InventoryStatus: l.InventoryStatus, Amount: a.Amount.String(), AmountAcct: a.AmountAcct.String(),
+		})
+	}
+	return newEvent("receiving", "receipt", "posted", r.ID, tenantID, data)
+}
+
+func receiptCorrectedEvent(tenantID, kind string, r store.Receipt, seq int, ledgerEntryID string, lines []correctedLineData) (events.Event, error) {
+	return newEvent("receiving", "receipt", "corrected", r.ID, tenantID, receiptCorrectedData{
+		ReceiptID: r.ID, ReceiptNumber: r.Number, Kind: kind, CorrectionSeq: seq, LedgerEntryID: ledgerEntryID, Currency: r.Currency, Lines: lines,
+	})
+}
+
+func invoicePostedEvent(tenantID string, in store.Invoice, ledgerEntryID string, total decimal.Decimal, cleared []decimal.Decimal) (events.Event, error) {
+	data := invoicePostedData{
+		InvoiceID: in.ID, LegalEntityID: in.LegalEntityID, VendorID: in.VendorID, InvoiceNumber: in.InvoiceNumber,
+		InvoiceDate: in.InvoiceDate.Format(dateLayout), PostingDate: in.PostingDate.Format(dateLayout), Currency: in.Currency,
+		Total: total.String(), LedgerEntryID: ledgerEntryID, Lines: make([]invoicePostedLineData, 0, len(in.Lines)),
+	}
+	for i, l := range in.Lines {
+		data.Lines = append(data.Lines, invoicePostedLineData{
+			LineNo: i + 1, ReceiptID: l.ReceiptID, ReceiptLineNo: l.ReceiptLineNo, Qty: l.Qty.String(), UnitPrice: l.UnitPrice.String(), Amount: l.Amount.String(), GrirCleared: cleared[i].String(),
+		})
+	}
+	return newEvent("payables", "invoice", "posted", in.ID, tenantID, data)
+}
