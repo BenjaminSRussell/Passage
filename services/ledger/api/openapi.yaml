@@ -19,6 +19,7 @@ tags:
   - name: ledgers
   - name: journal
   - name: balances
+  - name: structures
   - name: ops
 components:
   parameters:
@@ -281,6 +282,71 @@ components:
         rowsWritten: { type: integer, format: int64 }
         rowsDiffering: { type: integer, format: int64 }
         durationMs: { type: integer, format: int64 }
+    StructureConstraint:
+      type: object
+      description: |
+        One constraint row (FR-11.3). Of the rows for a segment whose `under` conditions match
+        the line, the most specific (most conditions other than `*`) governs; a segment with no
+        matching row is free. A blank the row does not allow is LEDGER_DIMENSION_REQUIRED; a value
+        outside `allowed` is LEDGER_DIMENSION_INVALID.
+      required: [segment, allowed]
+      properties:
+        segment: { type: string, description: Dimension attribute (a listed segment) the row constrains }
+        under:
+          type: object
+          additionalProperties: { type: string }
+          description: |
+            Conditions on MAIN_ACCOUNT or earlier segments: an exact value, a `from..to` range,
+            `blank`, or `*` (any value, blank included). The row applies only when all match.
+        allowed:
+          type: array
+          minItems: 1
+          items: { type: string, description: "An exact value, a from..to range, * (any non-blank value) or blank" }
+    StructureBody:
+      type: object
+      required: [name, version, effectiveFrom]
+      properties:
+        name: { type: string, pattern: '^[A-Za-z0-9_.-]{1,60}$' }
+        version: { type: integer, minimum: 1, description: "Unique per (ledger, name)" }
+        priority: { type: integer, minimum: 0, default: 0, description: Structures are tried by priority (lowest first), then name }
+        effectiveFrom: { type: string, format: date, description: "Of a structure's active versions, the one with the latest effectiveFrom on or before the posting date applies" }
+        status: { type: string, enum: [draft, active, retired], default: draft }
+        segments:
+          type: array
+          maxItems: 20
+          description: Dimension segments after the implicit MAIN_ACCOUNT; a line may carry only these dimensions
+          items: { type: string, pattern: '^[A-Z][A-Z0-9_]{0,19}$' }
+        accountFilter:
+          type: array
+          description: Main accounts the structure covers; empty covers every account
+          items: { type: string, description: "Account number, range from..to, or *" }
+        constraints:
+          type: array
+          maxItems: 500
+          items: { $ref: "#/components/schemas/StructureConstraint" }
+    Structure:
+      allOf:
+        - $ref: "#/components/schemas/StructureBody"
+        - type: object
+          properties:
+            id: { type: string, format: uuid }
+            ledgerId: { type: string, format: uuid }
+    DimensionValueBody:
+      type: object
+      required: [name, suspended]
+      properties:
+        name: { type: string, maxLength: 60 }
+        activeFrom: { type: [string, "null"], format: date }
+        activeTo: { type: [string, "null"], format: date }
+        suspended: { type: boolean }
+    DimensionValue:
+      allOf:
+        - $ref: "#/components/schemas/DimensionValueBody"
+        - type: object
+          required: [attribute, value]
+          properties:
+            attribute: { type: string, pattern: '^[A-Z][A-Z0-9_]{0,19}$' }
+            value: { type: string, pattern: '^[A-Za-z0-9._-]{1,20}$' }
   responses:
     Problem400:
       description: Validation failed (COM-0001 with errors map)
@@ -317,6 +383,156 @@ components:
         application/problem+json:
           schema: { $ref: "#/components/schemas/ViolationProblem" }
 paths:
+  /api/v1/ledger/ledgers/{ledger}/account-structures:
+    parameters:
+      - name: ledger
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [structures]
+      operationId: listAccountStructures
+      x-passage-duty: ledger.journal.read
+      responses:
+        "200":
+          description: Every version of the ledger's account structures, by name then version
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Structure" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+  /api/v1/ledger/ledgers/{ledger}/account-structures/{id}:
+    parameters:
+      - name: ledger
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [structures]
+      operationId: getAccountStructure
+      x-passage-duty: ledger.journal.read
+      responses:
+        "200":
+          description: One structure version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Structure" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+    put:
+      tags: [structures]
+      operationId: putAccountStructure
+      x-passage-duty: ledger.structure.write
+      description: |
+        Creates (201) or replaces (200) a version. Drafts change freely; setting status to
+        active activates the version. An active version is immutable except that it may be
+        retired with identical content; a retired version is final (409 LEDGER_STRUCTURE_LOCKED).
+        A duplicate (name, version) on the ledger is 409 LEDGER_STRUCTURE_VERSION_EXISTS.
+        Segments are checked against the ledger's dimension attributes; every violation is
+        returned together (422 LEDGER_STRUCTURE_INVALID).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StructureBody" }
+      responses:
+        "200":
+          description: Replaced
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Structure" }
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Structure" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409":
+          description: LEDGER_STRUCTURE_LOCKED or LEDGER_STRUCTURE_VERSION_EXISTS
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "422": { $ref: "#/components/responses/Problem422" }
+  /api/v1/ledger/ledgers/{ledger}/dimension-values:
+    parameters:
+      - name: ledger
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [structures]
+      operationId: listDimensionValues
+      x-passage-duty: ledger.journal.read
+      responses:
+        "200":
+          description: Registered financial dimension values, by attribute then value
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/DimensionValue" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+  /api/v1/ledger/ledgers/{ledger}/dimension-values/{attribute}/{value}:
+    parameters:
+      - name: ledger
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: attribute
+        in: path
+        required: true
+        schema: { type: string, pattern: '^[A-Z][A-Z0-9_]{0,19}$' }
+      - name: value
+        in: path
+        required: true
+        schema: { type: string, pattern: '^[A-Za-z0-9._-]{1,20}$' }
+    put:
+      tags: [structures]
+      operationId: putDimensionValue
+      x-passage-duty: ledger.dimension.write
+      description: Creates (201) or replaces (200) a registered value. Suspended or out-of-date values are refused by posting (LEDGER_DIMENSION_INACTIVE).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DimensionValueBody" }
+      responses:
+        "200":
+          description: Replaced
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DimensionValue" }
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DimensionValue" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "422": { $ref: "#/components/responses/Problem422" }
   /api/v1/ledger/ledgers:
     post:
       tags: [ledgers]

@@ -198,6 +198,154 @@ export async function putReasonCode(
   return reasonCodeSchema.parse(await res.json());
 }
 
+/** The ledger header the structure and dimension screens read (dimension attribute names). */
+export const ledgerSchema = z.object({
+  id: z.string(),
+  code: z.string(),
+  name: z.string(),
+  chartCode: z.string(),
+  currency: z.string(),
+  dimensionAttributes: z.array(z.string()),
+});
+export type Ledger = z.infer<typeof ledgerSchema>;
+
+/** GET /api/v1/ledger/ledgers/{id}; 404 LEDGER_NOT_FOUND when missing or out of scope. */
+export function fetchLedger(id: string, fetchImpl: FetchLike = defaultFetch): Promise<Ledger> {
+  return getJSON(`/api/v1/ledger/ledgers/${encodeURIComponent(id)}`, ledgerSchema, fetchImpl);
+}
+
+/** The implicit first segment of every account structure; constraint rows may be conditioned on it. */
+export const MAIN_ACCOUNT = "MAIN_ACCOUNT";
+
+/**
+ * One constraint row of an account structure (FR-11.3): the tokens `allowed` for `segment`
+ * when the `under` conditions (on MAIN_ACCOUNT or earlier segments) match the line.
+ */
+export const constraintSchema = z.object({
+  segment: z.string(),
+  under: z.record(z.string()).optional(),
+  allowed: z.array(z.string()),
+});
+export type Constraint = z.infer<typeof constraintSchema>;
+
+/** Account structure version (FR-11.3). Active and retired versions are immutable. */
+export const structureSchema = z.object({
+  id: z.string(),
+  ledgerId: z.string(),
+  name: z.string(),
+  version: z.number().int(),
+  priority: z.number().int(),
+  effectiveFrom: z.string(),
+  status: z.enum(["draft", "active", "retired"]),
+  segments: z.array(z.string()),
+  accountFilter: z.array(z.string()),
+  constraints: z.array(constraintSchema),
+});
+export type Structure = z.infer<typeof structureSchema>;
+
+/** Body of PUT /api/v1/ledger/ledgers/{ledger}/account-structures/{id}. */
+export interface StructureInput {
+  name: string;
+  version: number;
+  priority: number;
+  effectiveFrom: string;
+  status: Structure["status"];
+  segments: string[];
+  accountFilter: string[];
+  constraints: Constraint[];
+}
+
+/** Registered financial dimension value (FR-11.2). */
+export const dimensionValueSchema = z.object({
+  attribute: z.string(),
+  value: z.string(),
+  name: z.string(),
+  activeFrom: z.string().optional(),
+  activeTo: z.string().optional(),
+  suspended: z.boolean(),
+});
+export type DimensionValue = z.infer<typeof dimensionValueSchema>;
+
+/** Body of PUT /api/v1/ledger/ledgers/{ledger}/dimension-values/{attribute}/{value}. */
+export interface DimensionValueInput {
+  name: string;
+  activeFrom: string | null;
+  activeTo: string | null;
+  suspended: boolean;
+}
+
+const structureListSchema = z.object({ items: z.array(structureSchema) });
+const dimensionValueListSchema = z.object({ items: z.array(dimensionValueSchema) });
+
+/** GET /api/v1/ledger/ledgers/{ledger}/account-structures: every version, by name then version. */
+export async function fetchStructures(ledgerId: string, fetchImpl: FetchLike = defaultFetch): Promise<Structure[]> {
+  const body = await getJSON(
+    `/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/account-structures`,
+    structureListSchema,
+    fetchImpl,
+  );
+  return body.items;
+}
+
+/** GET /api/v1/ledger/ledgers/{ledger}/account-structures/{id}; 404 LEDGER_STRUCTURE_NOT_FOUND when missing. */
+export function fetchStructure(ledgerId: string, id: string, fetchImpl: FetchLike = defaultFetch): Promise<Structure> {
+  return getJSON(
+    `/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/account-structures/${encodeURIComponent(id)}`,
+    structureSchema,
+    fetchImpl,
+  );
+}
+
+/** PUT /api/v1/ledger/ledgers/{ledger}/account-structures/{id}: creates or replaces a version (status active activates it). */
+export async function putStructure(
+  ledgerId: string,
+  id: string,
+  input: StructureInput,
+  fetchImpl: FetchLike = defaultFetch,
+): Promise<Structure> {
+  const res = await fetchImpl(
+    `/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/account-structures/${encodeURIComponent(id)}`,
+    {
+      method: "PUT",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  if (!res.ok) throw await readProblem(res);
+  return structureSchema.parse(await res.json());
+}
+
+/** GET /api/v1/ledger/ledgers/{ledger}/dimension-values: registered values, by attribute then value. */
+export async function fetchDimensionValues(
+  ledgerId: string,
+  fetchImpl: FetchLike = defaultFetch,
+): Promise<DimensionValue[]> {
+  const body = await getJSON(
+    `/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/dimension-values`,
+    dimensionValueListSchema,
+    fetchImpl,
+  );
+  return body.items;
+}
+
+/** PUT /api/v1/ledger/ledgers/{ledger}/dimension-values/{attribute}/{value}. */
+export async function putDimensionValue(
+  ledgerId: string,
+  attribute: string,
+  value: string,
+  input: DimensionValueInput,
+  fetchImpl: FetchLike = defaultFetch,
+): Promise<DimensionValue> {
+  const path = [attribute, value].map(encodeURIComponent).join("/");
+  const res = await fetchImpl(`/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/dimension-values/${path}`, {
+    method: "PUT",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw await readProblem(res);
+  return dimensionValueSchema.parse(await res.json());
+}
+
 const reverseResultSchema = z.object({ entries: z.array(entrySchema) });
 
 /**

@@ -93,3 +93,10 @@
 .wide {
   grid-column: 1 / -1;
 }
+
+.problems {
+  margin: 0;
+  padding-inline-start: var(--space-5);
+  font-size: var(--text-sm-size);
+  line-height: var(--text-sm-leading);
+}

@@ -75,6 +75,11 @@ type Rules struct {
 	// Manual is true when the entry is a manual journal (BR-11.8): lines on
 	// reconciliation accounts are then refused.
 	Manual bool
+	// Structures are the ledger's active account structure versions (FR-11.3).
+	// When the ledger has none it is open: only the format checks apply.
+	Structures []Structure
+	// DimensionValues are the registered values, keyed by ValueKey (FR-11.2).
+	DimensionValues map[string]DimensionValue
 }
 
 // IsManualSource reports whether a source system/type pair is a manual journal.
@@ -105,6 +110,8 @@ type ValidLine struct {
 	SourceLineRef string
 	CombinationID []byte
 	DisplayName   string
+	// StructureID is the account structure version that validated the line.
+	StructureID string
 	// Negative marks a negative posting (storno, BR-11.16): the projection
 	// reduces the original side instead of adding to the opposite side.
 	Negative bool
@@ -211,14 +218,39 @@ func ValidateEntry(r Rules, accounts map[string]Account, postingDate, today time
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
+		dimsOK := true
 		for _, k := range keys {
 			v := dims[k]
 			switch {
 			case !allowed[k]:
-				fail("LEDGER_DIMENSION_INVALID", "lines.dimensions."+k, fmt.Sprintf("dimension %s is not defined on this ledger", k))
-				ok = false
+				fail(CodeDimensionInvalid, "lines.dimensions."+k, fmt.Sprintf("dimension %s is not defined on this ledger", k))
+				dimsOK = false
 			case !dimValueRe.MatchString(v):
-				fail("LEDGER_DIMENSION_INVALID", "lines.dimensions."+k, fmt.Sprintf("value %q is not a valid %s", v, k))
+				fail(CodeDimensionInvalid, "lines.dimensions."+k, fmt.Sprintf("value %q is not a valid %s", v, k))
+				dimsOK = false
+			default:
+				// A registered value must be active on the posting date (FR-11.2).
+				if reg, known := r.DimensionValues[ValueKey(k, v)]; known && !reg.ActiveOn(postingDate) {
+					fail(CodeDimensionInactive, "lines.dimensions."+k, fmt.Sprintf("value %s of %s is not active on %s", v, k, postingDate.Format(time.DateOnly)))
+					ok = false
+				}
+			}
+		}
+		if !dimsOK {
+			ok = false
+		}
+		// Structure validation (FR-11.3) needs the account and well-formed,
+		// defined dimensions; it runs even when another line rule (an inactive
+		// value included) failed so the caller
+		// sees every violation in one response.
+		structureID := ""
+		if found && dimsOK && len(r.Structures) > 0 {
+			faults, sid := checkStructure(r.Structures, acct.Number, dims, postingDate)
+			for _, f := range faults {
+				fail(f.Code, f.Field, f.Message)
+			}
+			structureID = sid
+			if len(faults) > 0 {
 				ok = false
 			}
 		}
@@ -230,9 +262,10 @@ func ValidateEntry(r Rules, accounts map[string]Account, postingDate, today time
 		if !ok {
 			continue
 		}
-		id, display := CombinationID(r.DimensionAttributes, r.ChartCode, acct.Number, dims)
+		id, display := CombinationIDFor(structureID, r.DimensionAttributes, r.ChartCode, acct.Number, dims)
 		res.Lines = append(res.Lines, ValidLine{Index: idx, Account: acct, Dimensions: dims, Side: in.Side,
-			Amount: in.Amount, Text: in.Text, SourceLineRef: in.SourceLineRef, CombinationID: id, DisplayName: display})
+			Amount: in.Amount, Text: in.Text, SourceLineRef: in.SourceLineRef, CombinationID: id, DisplayName: display,
+			StructureID: structureID})
 	}
 	if !res.Debit.Equal(res.Credit) {
 		res.Violations = append(res.Violations, Violation{Code: "LEDGER_UNBALANCED", Field: "lines",
@@ -246,9 +279,22 @@ func ValidateEntry(r Rules, accounts map[string]Account, postingDate, today time
 // each ledger attribute name=value in ledger order; blanks are empty) and a
 // display name such as 1010-D100-C200 (FR-11.4). Attribute names and the chart
 // are part of the hash, so the same values under different attribute lists or
-// charts never collide on dimension_combination.
+// charts never collide on dimension_combination. It is the combination of a
+// line on a ledger without account structures.
 func CombinationID(attrs []string, chart, account string, dims map[string]string) ([]byte, string) {
+	return CombinationIDFor("", attrs, chart, account, dims)
+}
+
+// CombinationIDFor is CombinationID for a line validated under the account
+// structure version structureID (FR-11.4): the version leads the tuple, so the
+// same values under another version are a different, immutable combination.
+// An empty structureID gives the structure-less hash.
+func CombinationIDFor(structureID string, attrs []string, chart, account string, dims map[string]string) ([]byte, string) {
 	h := sha256.New()
+	if structureID != "" {
+		h.Write([]byte("structure=" + structureID))
+		h.Write([]byte{0x1e})
+	}
 	h.Write([]byte(chart + "|" + account))
 	parts := []string{account}
 	for _, a := range attrs {

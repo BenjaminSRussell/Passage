@@ -44,6 +44,11 @@ type Store interface {
 	ListReasonCodes(ctx context.Context) ([]ReasonCode, error)
 	GetReasonCode(ctx context.Context, code string) (ReasonCode, error)
 	PutReasonCode(ctx context.Context, code string, in ReasonCode) (ReasonCode, bool, error)
+	ListStructures(ctx context.Context, ledgerID string) ([]domain.Structure, error)
+	GetStructure(ctx context.Context, ledgerID, id string) (domain.Structure, error)
+	PutStructure(ctx context.Context, ledgerID, id string, in domain.Structure) (domain.Structure, bool, error)
+	ListDimensionValues(ctx context.Context, ledgerID string) ([]domain.DimensionValue, error)
+	PutDimensionValue(ctx context.Context, ledgerID string, in domain.DimensionValue) (domain.DimensionValue, bool, error)
 	Ping(ctx context.Context) error
 }
 

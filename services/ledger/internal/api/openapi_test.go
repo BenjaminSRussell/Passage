@@ -67,19 +67,24 @@ func TestOpenAPI_MatchesRoutes(t *testing.T) {
 	}
 
 	duties := map[string]string{
-		"POST /api/v1/ledger/ledgers":                         dutyLedgerWrite,
-		"GET /api/v1/ledger/ledgers/{id}":                     dutyRead,
-		"PUT /api/v1/ledger/charts/{chart}/accounts/{number}": dutyAccountWrite,
-		"GET /api/v1/ledger/charts/{chart}/accounts":          dutyRead,
-		"POST /api/v1/ledger/journal-entries":                 dutyPost,
-		"GET /api/v1/ledger/journal-entries/{id}":             dutyRead,
-		"POST /api/v1/ledger/journal-entries/{id}/reverse":    dutyReverse,
-		"POST /api/v1/ledger/validate":                        dutyPost,
-		"GET /api/v1/ledger/balances":                         dutyBalanceRead,
-		"POST /api/v1/ledger/balances:rebuild":                dutyRebuild,
-		"GET /api/v1/ledger/reason-codes":                     dutyRead,
-		"GET /api/v1/ledger/reason-codes/{code}":              dutyRead,
-		"PUT /api/v1/ledger/reason-codes/{code}":              dutyReasonWrite,
+		"POST /api/v1/ledger/ledgers":                                              dutyLedgerWrite,
+		"GET /api/v1/ledger/ledgers/{id}":                                          dutyRead,
+		"PUT /api/v1/ledger/charts/{chart}/accounts/{number}":                      dutyAccountWrite,
+		"GET /api/v1/ledger/charts/{chart}/accounts":                               dutyRead,
+		"POST /api/v1/ledger/journal-entries":                                      dutyPost,
+		"GET /api/v1/ledger/journal-entries/{id}":                                  dutyRead,
+		"POST /api/v1/ledger/journal-entries/{id}/reverse":                         dutyReverse,
+		"POST /api/v1/ledger/validate":                                             dutyPost,
+		"GET /api/v1/ledger/balances":                                              dutyBalanceRead,
+		"POST /api/v1/ledger/balances:rebuild":                                     dutyRebuild,
+		"GET /api/v1/ledger/reason-codes":                                          dutyRead,
+		"GET /api/v1/ledger/reason-codes/{code}":                                   dutyRead,
+		"PUT /api/v1/ledger/reason-codes/{code}":                                   dutyReasonWrite,
+		"GET /api/v1/ledger/ledgers/{ledger}/account-structures":                   dutyRead,
+		"GET /api/v1/ledger/ledgers/{ledger}/account-structures/{id}":              dutyRead,
+		"PUT /api/v1/ledger/ledgers/{ledger}/account-structures/{id}":              dutyStructureWrite,
+		"GET /api/v1/ledger/ledgers/{ledger}/dimension-values":                     dutyRead,
+		"PUT /api/v1/ledger/ledgers/{ledger}/dimension-values/{attribute}/{value}": dutyDimensionWrite,
 	}
 	for op, want := range duties {
 		if got := documented[op]; got != want {

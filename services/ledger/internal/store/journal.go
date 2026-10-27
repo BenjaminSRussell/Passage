@@ -67,7 +67,11 @@ func (s *Postgres) PostEntry(ctx context.Context, in PostInput) (EntryResult, er
 		if err != nil {
 			return err
 		}
-		res := domain.ValidateEntry(in.rules(ledger), accounts, in.PostingDate, in.Today, in.Lines)
+		rules, err := withStructures(ctx, tx, p.TenantID, ledger.ID, in.rules(ledger), in.Lines)
+		if err != nil {
+			return err
+		}
+		res := domain.ValidateEntry(rules, accounts, in.PostingDate, in.Today, in.Lines)
 		if !res.Valid() {
 			return &domain.RejectedError{Violations: res.Violations}
 		}
@@ -256,8 +260,10 @@ func writeEntry(ctx context.Context, tx pgx.Tx, tenantID string, ne newEntry) (E
 		if err != nil {
 			return Entry{}, err
 		}
-		batch.Queue(`insert into dimension_combination (tenant_id, id, main_account_id, display_name, dimensions) values ($1, $2, $3, $4, $5)
-			on conflict (tenant_id, id) do nothing`, tenantID, wl.valid.CombinationID, wl.valid.Account.ID, wl.valid.DisplayName, string(raw))
+		batch.Queue(`insert into dimension_combination (tenant_id, id, main_account_id, display_name, dimensions, account_structure_id)
+			values ($1, $2, $3, $4, $5, nullif($6, '')::uuid)
+			on conflict (tenant_id, id) do nothing`, tenantID, wl.valid.CombinationID, wl.valid.Account.ID, wl.valid.DisplayName, string(raw),
+			wl.valid.StructureID)
 	}
 	for i, wl := range ne.lines {
 		batch.Queue(`insert into journal_line (tenant_id, id, legal_entity_id, entry_id, line_number, main_account_id, dimension_combination_id,
@@ -435,7 +441,11 @@ func (s *Postgres) ValidateEntry(ctx context.Context, in PostInput) (domain.Resu
 		if err != nil {
 			return err
 		}
-		res = domain.ValidateEntry(in.rules(ledger), accounts, in.PostingDate, in.Today, in.Lines)
+		rules, err := withStructures(ctx, tx, p.TenantID, ledger.ID, in.rules(ledger), in.Lines)
+		if err != nil {
+			return err
+		}
+		res = domain.ValidateEntry(rules, accounts, in.PostingDate, in.Today, in.Lines)
 		return nil
 	})
 	return res, err

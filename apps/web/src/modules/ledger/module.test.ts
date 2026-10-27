@@ -33,6 +33,10 @@ describe("ledger module", () => {
       "/ledger/reason-codes",
       "/ledger/reason-codes/new",
       "/ledger/reason-codes/:code",
+      "/ledger/structures",
+      "/ledger/structures/new",
+      "/ledger/structures/:id",
+      "/ledger/dimension-values",
     ]);
     expect(ledger.nav.every((n) => n.to.startsWith("/ledger"))).toBe(true);
   });
@@ -42,6 +46,9 @@ describe("ledger module", () => {
     expect(ledger.nav.find((n) => n.to === "/ledger/trial-balance")?.duty).toBe("ledger.balance.read");
     // GET /api/v1/ledger/reason-codes requires ledger.journal.read.
     expect(ledger.nav.find((n) => n.to === "/ledger/reason-codes")?.duty).toBe("ledger.journal.read");
+    // GET .../account-structures and .../dimension-values require ledger.journal.read.
+    expect(ledger.nav.find((n) => n.to === "/ledger/structures")?.duty).toBe("ledger.journal.read");
+    expect(ledger.nav.find((n) => n.to === "/ledger/dimension-values")?.duty).toBe("ledger.journal.read");
   });
 
   it("is auto-discovered by the registry", () => {

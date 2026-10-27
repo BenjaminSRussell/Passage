@@ -2,7 +2,7 @@
 
 The ledger is the universal journal: one append-only, double-entry journal per
 ledger, the chart of accounts, the posting API every subledger calls, and the
-balance projection that trial balances read. Wave 11 (PSG-11, slices 1 and 2).
+balance projection that trial balances read. Wave 11 (PSG-11, slices 1 to 3).
 
 Reference: `docs/prd/phase-2-financial-core.md` section 2.11. What is built and
 what is not is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
@@ -61,6 +61,39 @@ what is not is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 - Web: a reason-code list and edit form, and a reverse form with reason on the
   journal entry screen (`apps/web/src/modules/ledger`).
 
+## What slice 3 adds
+
+- Account structures (FR-11.3): `GET /api/v1/ledger/ledgers/{ledger}/account-structures`,
+  `GET`/`PUT .../account-structures/{id}` (201 created, 200 replaced). A version has a
+  name, version number, priority, `effectiveFrom`, status (`draft`, `active`, `retired`),
+  ordered dimension segments after the implicit `MAIN_ACCOUNT`, a main-account filter
+  (exact numbers, `from..to` ranges, `*`; empty covers every account) and constraint rows.
+  A row restricts one segment to `allowed` tokens (exact, range, `*` any non-blank,
+  `blank`) under conditions on `MAIN_ACCOUNT` or earlier segments (`under`); the most
+  specific matching row governs, and a segment with no matching row is free.
+- Versioning and activation: drafts change freely; `PUT` with `status: active` activates.
+  An active version can only be retired and a retired one is final (409
+  `LEDGER_STRUCTURE_LOCKED`); `(name, version)` is unique per ledger (409
+  `LEDGER_STRUCTURE_VERSION_EXISTS`); malformed definitions are 422
+  `LEDGER_STRUCTURE_INVALID` with every violation.
+- Posting and `POST /validate` check every line against the structures (pipeline stage
+  after account checks): per structure name the active version with the latest
+  `effectiveFrom` on or before the posting date is in effect; structures are tried by
+  priority then name and the first whose filter admits the account governs. No match is
+  `LEDGER_STRUCTURE_NOT_FOUND`; a dimension that is not a segment of the governing
+  structure, or a value a row does not allow, is `LEDGER_DIMENSION_INVALID`; a blank a row
+  does not allow is `LEDGER_DIMENSION_REQUIRED` (AC-11.4). A ledger with no active
+  structure is open: only the format checks apply, as before.
+- Combinations (FR-11.4): a line validated under a structure is interned under a
+  combination whose hash leads with the structure version id;
+  `dimension_combination.account_structure_id` records it.
+- Dimension value register (FR-11.2): `GET /api/v1/ledger/ledgers/{ledger}/dimension-values`
+  and `PUT .../dimension-values/{attribute}/{value}` with a name, `activeFrom`/`activeTo`
+  (inclusive) and `suspended`. Posting a registered value that is suspended or outside its
+  dates is `LEDGER_DIMENSION_INACTIVE`; unregistered values are format-checked only.
+- Web: account structure list and editor (segments, filter, constraint grid, activate,
+  retire) and a dimension value list and form.
+
 ## Layout
 
 ```
@@ -69,7 +102,7 @@ internal/domain/       pure rules: validation, combination hashing, balance aggr
 internal/store/        Postgres repositories (pgx, RLS through dbx.WithTenantTx)
 internal/api/          HTTP handlers, DTOs, duties (authz.RequireDuty)
 internal/events/       event type constants and payloads
-migrations/            0001..0006 SQL, applied in order by dbx.Migrate (0005: passage_app grants; 0006: reason codes)
+migrations/            0001..0007 SQL, applied in order by dbx.Migrate (0005: passage_app grants; 0006: reason codes; 0007: account structures, dimension values)
 api/openapi.yaml       OpenAPI 3.1 for every route
 events/asyncapi.yaml   AsyncAPI 3 for every event
 charts/ledger/         Helm chart (ports 8080 http, 9090 admin; readiness on admin /readyz)
@@ -111,12 +144,14 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
 |---|---|
 | `ledger.ledger.write` | `POST /ledgers` |
 | `ledger.account.write` | `PUT /charts/{chart}/accounts/{number}` |
-| `ledger.journal.read` | `GET /ledgers/{id}`, `GET /charts/{chart}/accounts`, `GET /journal-entries/{id}`, `GET /reason-codes[/{code}]` |
+| `ledger.journal.read` | `GET /ledgers/{id}`, `GET /charts/{chart}/accounts`, `GET /journal-entries/{id}`, `GET /reason-codes[/{code}]`, `GET /ledgers/{ledger}/account-structures[/{id}]`, `GET /ledgers/{ledger}/dimension-values` |
 | `ledger.journal.post` | `POST /journal-entries`, `POST /validate` |
 | `ledger.journal.reverse` | `POST /journal-entries/{id}/reverse` |
 | `ledger.balance.read` | `GET /balances` |
 | `ledger.balance.rebuild` | `POST /balances:rebuild` |
 | `ledger.reason.write` | `PUT /reason-codes/{code}` (PRD duty "Maintain reason codes") |
+| `ledger.structure.write` | `PUT /ledgers/{ledger}/account-structures/{id}` (PRD duty "Maintain account structures") |
+| `ledger.dimension.write` | `PUT /ledgers/{ledger}/dimension-values/{attribute}/{value}` (PRD duty "Maintain financial dimensions") |
 
 ## Error codes
 
@@ -135,7 +170,13 @@ today:
 | `LEDGER_ACCOUNT_NOT_POSTABLE` | Total or reporting account (FR-11.1) |
 | `LEDGER_ACCOUNT_SUSPENDED` | Posting date on or after `suspended_from` (FR-11.1) |
 | `LEDGER_RECON_ACCOUNT_MANUAL` | Manual line on a reconciliation account (BR-11.8) |
-| `LEDGER_DIMENSION_INVALID` | Dimension not defined on the ledger, or value malformed (FR-11.2) |
+| `LEDGER_DIMENSION_INVALID` | Dimension not defined on the ledger, value malformed (FR-11.2), dimension not a segment of the governing structure, or value not allowed by its constraint row (FR-11.3); also a malformed or unknown dimension value register entry |
+| `LEDGER_DIMENSION_REQUIRED` | Blank segment the governing constraint row does not allow (FR-11.3, AC-11.4) |
+| `LEDGER_DIMENSION_INACTIVE` | Registered value suspended or outside `activeFrom`..`activeTo` on the posting date (FR-11.2) |
+| `LEDGER_STRUCTURE_NOT_FOUND` | No active structure in effect covers the account on the posting date (FR-11.3); 404 for an unknown structure id |
+| `LEDGER_STRUCTURE_INVALID` | Malformed account structure definition |
+| `LEDGER_STRUCTURE_LOCKED` | 409: change to an active or retired structure version |
+| `LEDGER_STRUCTURE_VERSION_EXISTS` | 409: the structure name and version already exist on the ledger |
 | `LEDGER_DATE_INVALID` | Posting date more than `futurePostingDays` ahead (BR-11.4), a reversal dated before the original (FR-11.8), or a reversal on another date with a reason code that forbids it (FR-11.15) |
 | `LEDGER_PERIOD_CLOSED` | Posting date before the ledger's `firstOpenDate` (BR-11.4; full period status is wave 14) |
 | `LEDGER_REVERSAL_ALREADY_REVERSED` | Entry already has a reversing entry (FR-11.8) |

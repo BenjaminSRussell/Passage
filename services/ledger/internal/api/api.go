@@ -52,6 +52,10 @@ const (
 	dutyReverse      = "ledger.journal.reverse"
 	dutyRebuild      = "ledger.balance.rebuild"
 	dutyReasonWrite  = "ledger.reason.write"
+
+	// Maintain account structures (§2.11.17) and the dimension register.
+	dutyStructureWrite = "ledger.structure.write"
+	dutyDimensionWrite = "ledger.dimension.write"
 )
 
 var (
@@ -95,6 +99,11 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyRead)).Get("/reason-codes", a.listReasonCodes)
 		r.With(authz.RequireDuty(dutyRead)).Get("/reason-codes/{code}", a.getReasonCode)
 		r.With(authz.RequireDuty(dutyReasonWrite)).Put("/reason-codes/{code}", a.putReasonCode)
+		r.With(authz.RequireDuty(dutyRead)).Get("/ledgers/{ledger}/account-structures", a.listStructures)
+		r.With(authz.RequireDuty(dutyRead)).Get("/ledgers/{ledger}/account-structures/{id}", a.getStructure)
+		r.With(authz.RequireDuty(dutyStructureWrite)).Put("/ledgers/{ledger}/account-structures/{id}", a.putStructure)
+		r.With(authz.RequireDuty(dutyRead)).Get("/ledgers/{ledger}/dimension-values", a.listDimensionValues)
+		r.With(authz.RequireDuty(dutyDimensionWrite)).Put("/ledgers/{ledger}/dimension-values/{attribute}/{value}", a.putDimensionValue)
 	})
 }
 

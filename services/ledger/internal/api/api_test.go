@@ -37,6 +37,17 @@ type fakeStore struct {
 	created  bool
 	// putReasons records the reason codes the handlers wrote.
 	putReasons []store.ReasonCode
+	// structures and dimValues answer the structure reads; putStructures and
+	// putValues record the writes with the ledger they were addressed to.
+	structures    []domain.Structure
+	putStructures []putStructureCall
+	dimValues     []domain.DimensionValue
+	putValues     []domain.DimensionValue
+}
+
+type putStructureCall struct {
+	ledgerID, id string
+	in           domain.Structure
 }
 
 func (f *fakeStore) PutAccount(_ context.Context, chart, number string, in store.Account) (store.Account, bool, error) {
@@ -106,6 +117,34 @@ func (f *fakeStore) GetReasonCode(_ context.Context, code string) (store.ReasonC
 func (f *fakeStore) PutReasonCode(_ context.Context, code string, in store.ReasonCode) (store.ReasonCode, bool, error) {
 	in.Code = code
 	f.putReasons = append(f.putReasons, in)
+	return in, f.created, f.err
+}
+
+func (f *fakeStore) ListStructures(context.Context, string) ([]domain.Structure, error) {
+	return f.structures, f.err
+}
+
+func (f *fakeStore) GetStructure(_ context.Context, _, id string) (domain.Structure, error) {
+	for _, s := range f.structures {
+		if s.ID == id {
+			return s, f.err
+		}
+	}
+	return domain.Structure{}, httpx.NewProblem(http.StatusNotFound, domain.CodeStructureNotFound, "account structure not found")
+}
+
+func (f *fakeStore) PutStructure(_ context.Context, ledgerID, id string, in domain.Structure) (domain.Structure, bool, error) {
+	f.putStructures = append(f.putStructures, putStructureCall{ledgerID: ledgerID, id: id, in: in})
+	in.ID = id
+	return in, f.created, f.err
+}
+
+func (f *fakeStore) ListDimensionValues(context.Context, string) ([]domain.DimensionValue, error) {
+	return f.dimValues, f.err
+}
+
+func (f *fakeStore) PutDimensionValue(_ context.Context, _ string, in domain.DimensionValue) (domain.DimensionValue, bool, error) {
+	f.putValues = append(f.putValues, in)
 	return in, f.created, f.err
 }
 
