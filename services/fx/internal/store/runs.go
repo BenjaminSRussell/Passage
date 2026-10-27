@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -26,7 +27,12 @@ const (
 	FallbackNone      = "none"
 )
 
-var ErrRunNotFound = errors.New("import run not found")
+const staleRunAfter = "10 minutes"
+
+var (
+	ErrRunNotFound   = errors.New("import run not found")
+	ErrLostOwnership = errors.New("import run was taken over by another replica")
+)
 
 type Run struct {
 	ID             string     `json:"id"`
@@ -83,6 +89,7 @@ func (s *Postgres) StartRun(ctx context.Context, provider, rateType string, runD
 			on conflict (tenant_id, provider, rate_type_id, run_date) do update
 			set status='running', attempts=0, error=null, started_at=excluded.started_at, finished_at=null
 			where provider_import_run.status <> 'succeeded'
+			  and (provider_import_run.status <> 'running' or provider_import_run.started_at <= $6 - interval '`+staleRunAfter+`')
 			returning id`, p.TenantID, ids.New(), provider, typeID, day, s.now()).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			done = true
@@ -95,7 +102,49 @@ func (s *Postgres) StartRun(ctx context.Context, provider, rateType string, runD
 		run, err = scanRun(tx.QueryRow(ctx, `select `+runColumns+` where r.tenant_id=$1 and r.id=$2`, p.TenantID, id))
 		return err
 	})
+	if err == nil && !done {
+		s.owners.Store(ownerKey{p.TenantID, run.ID}, run.StartedAt)
+	}
 	return run, done, err
+}
+
+type ownerKey struct{ tenantID, runID string }
+
+func (s *Postgres) token(ctx context.Context, runID string) (time.Time, error) {
+	p, _ := tenant.FromContext(ctx)
+	v, ok := s.owners.Load(ownerKey{p.TenantID, runID})
+	if !ok {
+		return time.Time{}, ErrRunNotFound
+	}
+	return v.(time.Time), nil
+}
+
+func (s *Postgres) lost(ctx context.Context, runID string) error {
+	p, _ := tenant.FromContext(ctx)
+	s.owners.Delete(ownerKey{p.TenantID, runID})
+	slog.Warn("fx import run lost ownership; skipping update", "runId", runID)
+	return ErrLostOwnership
+}
+
+func (s *Postgres) release(ctx context.Context, runID string) {
+	p, _ := tenant.FromContext(ctx)
+	s.owners.Delete(ownerKey{p.TenantID, runID})
+}
+
+func (s *Postgres) ownedUpdate(ctx context.Context, runID, query string, args ...any) error {
+	token, err := s.token(ctx, runID)
+	if err != nil {
+		return err
+	}
+	p, _ := tenant.FromContext(ctx)
+	all := append([]any{p.TenantID, runID, token}, args...)
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		return exactlyOne(tx.Exec(ctx, query, all...))
+	})
+	if errors.Is(err, ErrRunNotFound) {
+		return s.lost(ctx, runID)
+	}
+	return err
 }
 
 func exactlyOne(tag interface{ RowsAffected() int64 }, err error) error {
@@ -109,20 +158,17 @@ func exactlyOne(tag interface{ RowsAffected() int64 }, err error) error {
 }
 
 func (s *Postgres) RecordAttempt(ctx context.Context, runID string, attempts int) error {
-	p, _ := tenant.FromContext(ctx)
-	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		return exactlyOne(tx.Exec(ctx, `update provider_import_run set attempts=$3 where tenant_id=$1 and id=$2`, p.TenantID, runID, attempts))
-	})
+	return s.ownedUpdate(ctx, runID, `update provider_import_run set attempts=$4 where tenant_id=$1 and id=$2 and status='running' and started_at=$3`, attempts)
 }
 
 func (s *Postgres) FinishRunSucceeded(ctx context.Context, runID string, imported, unchanged int) error {
-	p, _ := tenant.FromContext(ctx)
-	now := s.now()
-	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		return exactlyOne(tx.Exec(ctx, `update provider_import_run
-			set status='succeeded', pairs_imported=$3, pairs_unchanged=$4, error=null, finished_at=$5, last_success_at=$5
-			where tenant_id=$1 and id=$2`, p.TenantID, runID, imported, unchanged, now))
-	})
+	err := s.ownedUpdate(ctx, runID, `update provider_import_run
+		set status='succeeded', pairs_imported=$4, pairs_unchanged=$5, error=null, finished_at=$6, last_success_at=$6
+		where tenant_id=$1 and id=$2 and status='running' and started_at=$3`, imported, unchanged, s.now())
+	if err == nil {
+		s.release(ctx, runID)
+	}
+	return err
 }
 
 func (s *Postgres) FinishRunFailed(ctx context.Context, runID string, attempts int, cause error, retryable bool) error {
@@ -134,11 +180,12 @@ func (s *Postgres) FinishRunDegraded(ctx context.Context, runID string, attempts
 }
 
 func (s *Postgres) FinishRunAborted(ctx context.Context, runID string, attempts int, cause error) error {
-	p, _ := tenant.FromContext(ctx)
-	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		return exactlyOne(tx.Exec(ctx, `update provider_import_run set status='failed', attempts=$3, error=$4, finished_at=$5
-			where tenant_id=$1 and id=$2`, p.TenantID, runID, attempts, errorMessage(cause), s.now()))
-	})
+	err := s.ownedUpdate(ctx, runID, `update provider_import_run set status='failed', attempts=$4, error=$5, finished_at=$6
+		where tenant_id=$1 and id=$2 and status='running' and started_at=$3`, attempts, errorMessage(cause), s.now())
+	if err == nil {
+		s.release(ctx, runID)
+	}
+	return err
 }
 
 func errorMessage(cause error) string {
@@ -149,12 +196,16 @@ func errorMessage(cause error) string {
 }
 
 func (s *Postgres) finishUnhealthy(ctx context.Context, runID string, attempts int, cause error, status, fallback string, retryable bool) error {
+	token, err := s.token(ctx, runID)
+	if err != nil {
+		return err
+	}
 	p, _ := tenant.FromContext(ctx)
 	message := errorMessage(cause)
-	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var provider, typeID string
 		err := tx.QueryRow(ctx, `update provider_import_run set status=$6, attempts=$3, error=$4, finished_at=$5
-			where tenant_id=$1 and id=$2 returning provider, rate_type_id`, p.TenantID, runID, attempts, message, s.now(), status).Scan(&provider, &typeID)
+			where tenant_id=$1 and id=$2 and status='running' and started_at=$7 returning provider, rate_type_id`, p.TenantID, runID, attempts, message, s.now(), status, token).Scan(&provider, &typeID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrRunNotFound
 		}
@@ -177,6 +228,13 @@ func (s *Postgres) finishUnhealthy(ctx context.Context, runID string, attempts i
 		}
 		return outbox.Enqueue(ctx, tx, "provider_import_run", runID, evt)
 	})
+	if errors.Is(err, ErrRunNotFound) {
+		return s.lost(ctx, runID)
+	}
+	if err == nil {
+		s.release(ctx, runID)
+	}
+	return err
 }
 
 func (s *Postgres) ListRuns(ctx context.Context, provider string) ([]Run, error) {

@@ -59,6 +59,12 @@ func (m *Metrics) record(ctx context.Context, provider, rateType string, degrade
 	}
 }
 
+func (m *Metrics) Seed(ctx context.Context, provider, rateType string, lastSuccess *time.Time) {
+	if lastSuccess != nil {
+		m.record(ctx, provider, rateType, false, lastSuccess)
+	}
+}
+
 type aggregate struct {
 	degraded    bool
 	runs        int

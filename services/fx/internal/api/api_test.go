@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -23,6 +24,14 @@ type fakeStore struct {
 	err   error
 	types map[string]store.RateType
 	puts  int
+
+	posts   [][]store.RateInput
+	book    *domain.Book
+	history []store.HistoryEntry
+	idem    map[string]store.IdempotencyRecord
+	pingErr error
+	mu      sync.Mutex
+	locks   map[string]*sync.Mutex
 }
 
 func (f *fakeStore) PutRateType(_ context.Context, in store.RateType) (store.RateType, error) {
@@ -85,7 +94,7 @@ const (
 	typesPath   = "/v1/fx/rate-types"
 	closingPath = "/v1/fx/rate-types/CLOSING"
 	closingBody = `{"name":"Closing","allowInverse":true,"provider":"ecb"}`
-	allDuties   = "fx.read,fx.write"
+	allDuties   = "View exchange rates,Maintain exchange rates"
 )
 
 func TestRateTypes(t *testing.T) {
@@ -98,13 +107,13 @@ func TestRateTypes(t *testing.T) {
 		wantPuts                                 int
 	}{
 		{"put ok", http.MethodPut, closingPath, closingBody, allDuties, tenantID, &fakeStore{}, 200, `"code":"CLOSING"`, 1},
-		{"put without fx.write", http.MethodPut, closingPath, closingBody, "fx.read", tenantID, &fakeStore{}, 403, "AUTH-0003", 0},
+		{"put without Maintain exchange rates", http.MethodPut, closingPath, closingBody, "View exchange rates", tenantID, &fakeStore{}, 403, "AUTH-0003", 0},
 		{"put unknown field", http.MethodPut, closingPath, `{"name":"x","extra":1}`, allDuties, tenantID, &fakeStore{}, 400, "COM-0001", 0},
 		{"put wrong type", http.MethodPut, closingPath, `{"name":"x","allowInverse":"yes"}`, allDuties, tenantID, &fakeStore{}, 400, "COM-0001", 0},
 		{"put empty name", http.MethodPut, closingPath, `{}`, allDuties, tenantID, &fakeStore{}, 400, "FX_RATE_INVALID", 1},
 		{"put store failure", http.MethodPut, closingPath, closingBody, allDuties, tenantID, &fakeStore{err: errors.New("pg secret")}, 500, "COM-0500", 1},
 		{"get unknown", http.MethodGet, "/v1/fx/rate-types/NOPE", "", allDuties, tenantID, &fakeStore{}, 404, "FX_RATE_TYPE_UNKNOWN", 0},
-		{"get without fx.read", http.MethodGet, closingPath, "", "fx.write", tenantID, &fakeStore{}, 403, "AUTH-0003", 0},
+		{"get without View exchange rates", http.MethodGet, closingPath, "", "Maintain exchange rates", tenantID, &fakeStore{}, 403, "AUTH-0003", 0},
 		{"list without tenant", http.MethodGet, typesPath, "", "", "", &fakeStore{}, 401, "AUTH-0001", 0},
 		{"list malformed tenant", http.MethodGet, typesPath, "", allDuties, "not-a-uuid", &fakeStore{}, 401, "AUTH-0001", 0},
 	}

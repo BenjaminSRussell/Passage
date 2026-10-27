@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app.kubernetes.io/name: fx
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fx
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fx
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: fx
+          image: {{ include "fx.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.databaseSecret }}
+                  key: DATABASE_URL
+            - name: MIGRATE_ON_START
+              value: {{ .Values.migrateOnStart | quote }}
+            {{- if .Values.import.tenantId }}
+            - name: FX_IMPORT_TENANT_ID
+              value: {{ .Values.import.tenantId | quote }}
+            - name: FX_IMPORT_PROVIDER
+              value: {{ .Values.import.provider | quote }}
+            - name: FX_IMPORT_RATE_TYPE
+              value: {{ required "import.rateType is required when import.tenantId is set" .Values.import.rateType | quote }}
+            - name: FX_IMPORT_INTERVAL
+              value: {{ .Values.import.interval | quote }}
+            - name: FX_PROVIDER_TIMEOUT_S
+              value: {{ .Values.import.providerTimeoutSeconds | quote }}
+            {{- end }}
+            {{- if and .Values.import.tenantId (eq .Values.import.provider "openexchangerates") }}
+            {{- $_ := required "import.oxrSecret is required when import.provider is openexchangerates" .Values.import.oxrSecret }}
+            {{- end }}
+            {{- if .Values.import.oxrSecret }}
+            - name: FX_OXR_APP_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.import.oxrSecret }}
+                  key: FX_OXR_APP_ID
+            {{- end }}
+          ports:
+            - { name: http, containerPort: 8080 }
+            - { name: admin, containerPort: 9090 }
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            failureThreshold: 30
+            periodSeconds: 2
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
