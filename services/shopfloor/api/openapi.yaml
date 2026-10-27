@@ -10,9 +10,12 @@ info:
     payroll export batches. Slice 4: process messages (record, monitor, delivery
     reports from the consuming contexts, reprocess). Slice 6: per-machine idle
     threshold (BR-25.6), the OEE rollup that stores buckets, kiosk badge login
-    and the "Who is clocked in" inquiry. Commands that change state
+    and the "Who is clocked in" inquiry. Slice 7: the job dispatch projection
+    and list, job detail, and operator feedback with quality checks (FR-25.3 to
+    FR-25.5). Commands that change state
     (except the registration batch, idempotent per item id, process message
-    creation, idempotent per source and sourceMessageId, and the scheduler jobs
+    creation, idempotent per source and sourceMessageId, job plans keyed by job id,
+    job feedback idempotent per feedbackId, and the scheduler jobs
     that are safe to repeat) require an
     `Idempotency-Key` header; a repeated key returns the stored
     outcome with `Idempotent-Replayed: true`. Errors are RFC 9457 problem
@@ -1062,6 +1065,160 @@ paths:
           $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
+  /api/v1/shopfloor/jobs:
+    post:
+      operationId: upsertJob
+      summary: Write a job's plan into the dispatch projection (FR-25.3, w23 schedule)
+      description: |
+        Called by the w23 schedule's service identity. The job id is the key, so a resend
+        is naturally idempotent and takes no Idempotency-Key: 201 when the job is new, 200
+        when it updates the plan. Plan fields (order, operation, resource, planned quantity,
+        sequence start, check definitions) are last-writer-wins; reported quantities,
+        status and check results are never overwritten. Not in the PRD API table.
+      x-passage-duty: shopfloor.job.schedule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JobPlan"
+      responses:
+        "200":
+          description: The plan of an existing job was updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "201":
+          description: The job was added to the projection.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+    get:
+      operationId: listJobs
+      summary: Dispatch list (FR-25.3)
+      description: |
+        Jobs in sequence-start order. Finished jobs are hidden unless `status=finished`
+        asks for them. `results` is empty in the list; read one job for its results. The
+        PRD `workerId` filter needs the worker's default resource and is not built yet.
+      x-passage-duty: shopfloor.time.register
+      parameters:
+        - name: resourceId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [released, started, finished]
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Jobs in start order.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Job"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /api/v1/shopfloor/jobs/{id}:
+    get:
+      operationId: getJob
+      summary: Job detail with its quality check results (kiosk job detail)
+      x-passage-duty: shopfloor.time.register
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The job.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /api/v1/shopfloor/jobs/{id}:feedback:
+    post:
+      operationId: recordJobFeedback
+      summary: Report good and scrap quantities, check values and finished (FR-25.4, FR-25.5)
+      description: |
+        Quantities are increments added to the job's totals; scrap above zero needs a
+        `scrapReasonId`. Check values are evaluated against the job's check definitions
+        (unknown code SF-0123, value that cannot be evaluated SF-0125) and the latest value
+        per check is kept. `finished: true` is refused with SF-0005 while a mandatory check
+        has no passing result (AC-25.9), unless the posting carries `override.reason`,
+        which needs the duty `shopfloor.check.override` and an authenticated user; a
+        refused posting stores nothing. A finished job takes no feedback (SF-0122). The
+        client `feedbackId` is the idempotency key (offline replay): a resend returns 200
+        with `duplicate: true` and changes nothing; the same id on another job is SF-0124.
+        Each stored posting publishes `dev.passage.shopfloor.job.reported.v1`.
+      x-passage-duty: shopfloor.time.register
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JobFeedback"
+      responses:
+        "200":
+          description: Replay of a stored feedbackId; nothing changed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobFeedbackResult"
+        "201":
+          description: Feedback stored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobFeedbackResult"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
   /healthz:
     get:
       operationId: healthz
@@ -1776,6 +1933,166 @@ components:
         startedAt:
           type: string
           format: date-time
+    JobCheck:
+      type: object
+      required: [code, name, kind, mandatory]
+      properties:
+        code:
+          type: string
+          minLength: 1
+          maxLength: 32
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        kind:
+          type: string
+          enum: [numeric, pass-fail, text]
+          description: Numeric passes within [min, max]; pass-fail takes "pass" or "fail"; text passes once a value is recorded.
+        min:
+          type: [string, "null"]
+          description: Decimal, inclusive; numeric checks only.
+        max:
+          type: [string, "null"]
+          description: Decimal, inclusive; numeric checks only.
+        mandatory:
+          type: boolean
+          description: A mandatory check without a passing result blocks finished (SF-0005).
+    JobCheckResult:
+      type: object
+      required: [code, value, pass]
+      properties:
+        code:
+          type: string
+        value:
+          type: string
+        pass:
+          type: boolean
+    JobPlan:
+      type: object
+      required: [id, orderRef, operationRef, resourceId, plannedQuantity, sequenceStart]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The w23 scheduled job id.
+        orderRef:
+          type: string
+          minLength: 1
+          maxLength: 64
+        operationRef:
+          type: string
+          minLength: 1
+          maxLength: 64
+        resourceId:
+          type: string
+          format: uuid
+        plannedQuantity:
+          type: string
+          description: Decimal, not negative, at most 4 decimal places.
+        sequenceStart:
+          type: string
+          format: date-time
+        checks:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/JobCheck"
+    Job:
+      type: object
+      required: [id, orderRef, operationRef, resourceId, status, plannedQuantity, goodQuantity, scrapQuantity, sequenceStart, checks, results, finishedAt, version, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        orderRef:
+          type: string
+        operationRef:
+          type: string
+        resourceId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [released, started, finished]
+        plannedQuantity:
+          type: string
+        goodQuantity:
+          type: string
+        scrapQuantity:
+          type: string
+        sequenceStart:
+          type: string
+          format: date-time
+        checks:
+          type: array
+          items:
+            $ref: "#/components/schemas/JobCheck"
+        results:
+          type: array
+          description: Latest value per check; empty in the dispatch list.
+          items:
+            $ref: "#/components/schemas/JobCheckResult"
+        finishedAt:
+          type: [string, "null"]
+          format: date-time
+        version:
+          type: integer
+        updatedAt:
+          type: string
+          format: date-time
+    JobFeedback:
+      type: object
+      required: [feedbackId]
+      properties:
+        feedbackId:
+          type: string
+          format: uuid
+          description: Client-generated; a resend is a no-op.
+        goodQuantity:
+          type: [string, "null"]
+          description: Decimal increment, not negative, at most 4 decimal places.
+        scrapQuantity:
+          type: [string, "null"]
+          description: Decimal increment; above zero needs scrapReasonId.
+        scrapReasonId:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 64
+          description: Scrap reason code, as on registrations.
+        finished:
+          type: boolean
+          default: false
+        checks:
+          type: array
+          maxItems: 50
+          items:
+            type: object
+            required: [code, value]
+            properties:
+              code:
+                type: string
+              value:
+                type: string
+                minLength: 1
+                maxLength: 64
+        override:
+          type: [object, "null"]
+          description: Supervisor override of failed mandatory checks; only with finished true.
+          required: [reason]
+          properties:
+            reason:
+              type: string
+              minLength: 1
+              maxLength: 500
+    JobFeedbackResult:
+      type: object
+      required: [job, duplicate]
+      properties:
+        job:
+          $ref: "#/components/schemas/Job"
+        duplicate:
+          type: boolean
     ClockedWorker:
       type: object
       required: [workerId, name, badgeId, active, clockedInAt, jobs]

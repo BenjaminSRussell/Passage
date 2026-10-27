@@ -25,12 +25,15 @@ var (
 	// platform naming rule allows one [a-z0-9] word per segment.
 	OEEBucketUpdated = events.Type(Context, "oeebucket", "updated", 1)
 	OEEBucketRemoved = events.Type(Context, "oeebucket", "removed", 1)
+	// JobReported is not in the PRD event table: production (w21) needs the reported
+	// quantities and the finish of an operation, quality (w33) the failed checks.
+	JobReported = events.Type(Context, "job", "reported", 1)
 )
 
 // All lists every event type the service publishes (used by the startup registry check).
 func All() []string {
 	return []string{RegistrationPosted, PaydayApproved, PaydayExported, AndonRaised, ProcessMessageReceived, ProcessMessageDelivered, ProcessMessageDeleted,
-		OEEBucketUpdated, OEEBucketRemoved}
+		OEEBucketUpdated, OEEBucketRemoved, JobReported}
 }
 
 // ProcessMessageReceivedData is the payload of dev.passage.shopfloor.processmessage.received.v1,
@@ -92,6 +95,30 @@ type OEEBucketUpdatedData struct {
 	Quality        decimal.Decimal `json:"quality"`
 	OEE            decimal.Decimal `json:"oee"`
 	OverRate       bool            `json:"overRate"`
+}
+
+// JobReportedData is the payload of dev.passage.shopfloor.job.reported.v1, published
+// once per stored operator feedback on a job (FR-25.4, FR-25.5); a replayed feedbackId
+// publishes nothing. QtyGood and QtyScrap are this posting's increments, GoodQuantity
+// and ScrapQuantity the job's totals after it. FailedChecks lists the checks whose
+// latest result fails; OverrideReason is set when a supervisor finished the job over
+// failed mandatory checks (SF-0005).
+type JobReportedData struct {
+	JobID          string          `json:"jobId"`
+	FeedbackID     string          `json:"feedbackId"`
+	OrderRef       string          `json:"orderRef"`
+	OperationRef   string          `json:"operationRef"`
+	ResourceID     string          `json:"resourceId"`
+	QtyGood        decimal.Decimal `json:"qtyGood"`
+	QtyScrap       decimal.Decimal `json:"qtyScrap"`
+	ScrapReasonID  *string         `json:"scrapReasonId"`
+	GoodQuantity   decimal.Decimal `json:"goodQuantity"`
+	ScrapQuantity  decimal.Decimal `json:"scrapQuantity"`
+	Finished       bool            `json:"finished"`
+	FailedChecks   []string        `json:"failedChecks"`
+	OverrideReason *string         `json:"overrideReason"`
+	RecordedBy     string          `json:"recordedBy"`
+	RecordedAt     time.Time       `json:"recordedAt"`
 }
 
 // OEEBucketRemovedData is the payload of dev.passage.shopfloor.oeebucket.removed.v1,

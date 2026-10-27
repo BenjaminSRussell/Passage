@@ -32,6 +32,15 @@ channels:
     messages:
       andonRaised:
         $ref: "#/components/messages/AndonRaised"
+  jobReported:
+    address: passage.shopfloor.job
+    description: |
+      Operator feedback on a job (FR-25.4, FR-25.5): reported quantities, the finish of
+      the operation and failed quality checks. Not in the PRD event table; production
+      (w21) and quality (w33) consume it.
+    messages:
+      jobReported:
+        $ref: "#/components/messages/JobReported"
   oeeBuckets:
     address: passage.shopfloor.oee
     description: |
@@ -59,6 +68,12 @@ channels:
       processMessageDeleted:
         $ref: "#/components/messages/ProcessMessageDeleted"
 operations:
+  publishJobReported:
+    action: send
+    channel:
+      $ref: "#/channels/jobReported"
+    messages:
+      - $ref: "#/channels/jobReported/messages/jobReported"
   publishOEEBucketUpdated:
     action: send
     channel:
@@ -115,6 +130,12 @@ operations:
       - $ref: "#/channels/paydayApproved/messages/paydayApproved"
 components:
   messages:
+    JobReported:
+      name: dev.passage.shopfloor.job.reported.v1
+      contentType: application/cloudevents+json
+      description: Published once per stored feedback posting on a job, in the same transaction; a replayed feedbackId publishes nothing.
+      payload:
+        $ref: "#/components/schemas/JobReportedData"
     OEEBucketUpdated:
       name: dev.passage.shopfloor.oeebucket.updated.v1
       contentType: application/cloudevents+json
@@ -355,6 +376,53 @@ components:
           type: integer
           enum: [5, 15, 60]
         bucketStart:
+          type: string
+          format: date-time
+    JobReportedData:
+      type: object
+      required: [jobId, feedbackId, orderRef, operationRef, resourceId, qtyGood, qtyScrap, scrapReasonId, goodQuantity, scrapQuantity, finished, failedChecks, overrideReason, recordedBy, recordedAt]
+      additionalProperties: false
+      properties:
+        jobId:
+          type: string
+          format: uuid
+        feedbackId:
+          type: string
+          format: uuid
+        orderRef:
+          type: string
+        operationRef:
+          type: string
+        resourceId:
+          type: string
+          format: uuid
+        qtyGood:
+          type: string
+          description: Decimal; this posting's good quantity.
+        qtyScrap:
+          type: string
+          description: Decimal; this posting's scrap quantity.
+        scrapReasonId:
+          type: [string, "null"]
+        goodQuantity:
+          type: string
+          description: Decimal; the job's good total after this posting.
+        scrapQuantity:
+          type: string
+          description: Decimal; the job's scrap total after this posting.
+        finished:
+          type: boolean
+        failedChecks:
+          type: array
+          description: Codes of checks whose latest result fails.
+          items:
+            type: string
+        overrideReason:
+          type: [string, "null"]
+          description: Set when a supervisor finished the job over failed mandatory checks (SF-0005).
+        recordedBy:
+          type: string
+        recordedAt:
           type: string
           format: date-time
     AndonRaisedData:

@@ -2,7 +2,8 @@
 // from the kiosk (client UUIDs), pay calculation, approval and the review lists
 // the supervisor approval screen reads, plus machines, edge machine-event
 // ingest, downtimes, andon, OEE and payroll export (floor.go), and process
-// messages with their per-destination deliveries (process.go).
+// messages with their per-destination deliveries (process.go), kiosk login
+// (kiosk.go), and the job dispatch list with feedback and checks (job.go).
 package api
 
 import (
@@ -48,6 +49,12 @@ const (
 	// DutyOEERollup is held by the platform scheduler's service identity that runs
 	// the OEE rollup job; no person role should hold it.
 	DutyOEERollup = "shopfloor.oee.rollup"
+	// DutyJobSchedule is held by the service identity of the w23 schedule that writes
+	// the dispatch projection; no person role should hold it.
+	DutyJobSchedule = "shopfloor.job.schedule"
+	// DutyCheckOverride lets a shop floor supervisor finish a job over a failed
+	// mandatory quality check with a reason (FR-25.5, SF-0005).
+	DutyCheckOverride = "shopfloor.check.override"
 )
 
 const (
@@ -97,6 +104,10 @@ type Store interface {
 	SaveOEEBuckets(ctx context.Context, r store.OEERollup) (store.OEERollupResult, error)
 	BadgeLogin(ctx context.Context, badge string) (store.KioskSession, error)
 	ClockedIn(ctx context.Context, limit int) ([]store.ClockedWorker, error)
+	UpsertJob(ctx context.Context, j store.Job) (store.Job, bool, error)
+	GetJob(ctx context.Context, id string) (store.Job, error)
+	ListJobs(ctx context.Context, f store.JobFilter) ([]store.Job, error)
+	RecordFeedback(ctx context.Context, jobID string, in store.FeedbackInput) (store.FeedbackResult, error)
 }
 
 // API holds the handlers and the counters served on the admin port.
@@ -127,6 +138,11 @@ type API struct {
 	oeeRemoved atomic.Int64
 	// badgeRejected counts kiosk badge logins refused with SF-0001.
 	badgeRejected atomic.Int64
+	// feedbackStored and feedbackReplays count job feedback stored and replayed by
+	// feedbackId; finishBlocked counts finishes refused by a mandatory check (SF-0005).
+	feedbackStored  atomic.Int64
+	feedbackReplays atomic.Int64
+	finishBlocked   atomic.Int64
 }
 
 // New returns the API over s.
@@ -221,6 +237,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerFloor(r)
 	a.registerProcess(r)
 	a.registerKiosk(r)
+	a.registerJobs(r)
 }
 
 // Metrics serves the counters in Prometheus text format on the admin port.
@@ -247,6 +264,9 @@ func (a *API) Metrics() http.Handler {
 		counter("shopfloor_oee_buckets_changed_total", "Stored OEE buckets the rollup inserted or changed (FR-25.10).", a.oeeChanged.Load())
 		counter("shopfloor_oee_buckets_removed_total", "Stored OEE buckets the rollup removed because their planned time is gone.", a.oeeRemoved.Load())
 		counter("shopfloor_kiosk_badge_rejected_total", "Kiosk badge logins refused as not recognized (SF-0001).", a.badgeRejected.Load())
+		counter("shopfloor_job_feedback_stored_total", "Job feedback postings stored (FR-25.4).", a.feedbackStored.Load())
+		counter("shopfloor_job_feedback_replays_total", "Job feedback replayed by feedbackId and not stored again.", a.feedbackReplays.Load())
+		counter("shopfloor_job_finish_blocked_total", "Job finishes refused because a mandatory check has no passing result (SF-0005).", a.finishBlocked.Load())
 		counter("shopfloor_failed_total", "Requests that failed in the store.", a.failed.Load())
 	})
 }

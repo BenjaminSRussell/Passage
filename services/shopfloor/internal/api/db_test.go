@@ -386,3 +386,50 @@ func TestHTTP_KioskBoardAndRollup(t *testing.T) {
 		t.Fatalf("oee %s", rec.Body.String())
 	}
 }
+
+// FR-25.3 to FR-25.5 over HTTP and Postgres: the schedule writes a job with a mandatory
+// numeric check, the operator sees it on the dispatch list, a finish with 13 against
+// limits 10 to 12 is SF-0005 (AC-25.9), the supervisor's override finishes it, and a
+// resend of the operator's feedback is a 200 replay.
+func TestHTTP_JobDispatchFeedbackAndOverride(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	h := newRouter(store.New(app))
+	operator := DutyRegister
+	supervisor := DutyRegister + "," + DutyCheckOverride
+	if rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/jobs", upsertBody, DutyJobSchedule); rec.Code != http.StatusCreated {
+		t.Fatalf("plan: %d %s", rec.Code, rec.Body.String())
+	}
+	list := call(t, h, http.MethodGet, "/api/v1/shopfloor/jobs?resourceId="+jobResource, "", operator)
+	var jobs struct{ Items []store.Job }
+	_ = json.Unmarshal(list.Body.Bytes(), &jobs)
+	if list.Code != http.StatusOK || len(jobs.Items) != 1 || jobs.Items[0].Status != store.JobReleased || jobs.Items[0].PlannedQty.String() != "100" {
+		t.Fatalf("dispatch list: %d %s", list.Code, list.Body.String())
+	}
+
+	report := `{"feedbackId":"0195f0a0-0000-7000-8000-0000000000f1","goodQuantity":"40.25"}`
+	if rec := call(t, h, http.MethodPost, feedbackPath(), report, operator); rec.Code != http.StatusCreated {
+		t.Fatalf("report: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := call(t, h, http.MethodPost, feedbackPath(), report, operator); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"duplicate":true`) {
+		t.Fatalf("replay: %d %s", rec.Code, rec.Body.String())
+	}
+	finish := `{"feedbackId":"0195f0a0-0000-7000-8000-0000000000f2","finished":true,"checks":[{"code":"len","value":"13"}]%s}`
+	rec := call(t, h, http.MethodPost, feedbackPath(), fmt.Sprintf(finish, ""), operator)
+	if code, _ := problemOf(t, rec.Body.Bytes()); rec.Code != http.StatusUnprocessableEntity || code != "SF-0005" {
+		t.Fatalf("blocked finish: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = call(t, h, http.MethodPost, feedbackPath(), fmt.Sprintf(finish, `,"override":{"reason":"Customer deviation D-17 approved"}`), supervisor)
+	var out store.FeedbackResult
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	if rec.Code != http.StatusCreated || out.Job.Status != store.JobFinished || out.Job.GoodQty.String() != "40.25" ||
+		len(out.Job.Results) != 1 || out.Job.Results[0].Pass {
+		t.Fatalf("override: %d %s", rec.Code, rec.Body.String())
+	}
+	detail := call(t, h, http.MethodGet, "/api/v1/shopfloor/jobs/"+jobID, "", operator)
+	if detail.Code != http.StatusOK || !strings.Contains(detail.Body.String(), `"status":"finished"`) {
+		t.Fatalf("detail: %d %s", detail.Code, detail.Body.String())
+	}
+}

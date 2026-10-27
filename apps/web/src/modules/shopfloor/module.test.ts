@@ -39,13 +39,15 @@ describe("shopfloor module", () => {
     expect(shopfloor.nav.every((n) => n.to.startsWith("/shopfloor"))).toBe(true);
   });
 
-  it("has list and create or detail pages for workers, bundles, exports and machines, the kiosk, and the floor monitoring pages", () => {
+  it("has list and create or detail pages for workers, jobs, bundles, exports and machines, the kiosk, and the floor monitoring pages", () => {
     expect(shopfloor.routes.map((r) => r.path)).toEqual([
       "/shopfloor/workers",
       "/shopfloor/workers/new",
       "/shopfloor/workers/:id",
       "/shopfloor/bundles/:id",
       "/shopfloor/kiosk",
+      "/shopfloor/jobs",
+      "/shopfloor/jobs/:id",
       "/shopfloor/clocked-in",
       "/shopfloor/time",
       "/shopfloor/pay-exports",
@@ -64,6 +66,7 @@ describe("shopfloor module", () => {
   it("guards the navigation with the duties the service enforces", () => {
     expect(shopfloor.nav).toEqual([
       { label: "Kiosk", to: "/shopfloor/kiosk", duty: "shopfloor.kiosk.login" },
+      { label: "Dispatch list", to: "/shopfloor/jobs", duty: "shopfloor.time.register" },
       { label: "Workers", to: "/shopfloor/workers", duty: "shopfloor.view" },
       { label: "Who is clocked in", to: "/shopfloor/clocked-in", duty: "shopfloor.view" },
       { label: "Time approval", to: "/shopfloor/time", duty: "shopfloor.pay.approve" },

@@ -3,6 +3,42 @@
 Shop floor execution service. Wave reference: **PSG-25 / Wave 25**
 (Shop Floor Execution, Time Registration & IoT), PRD section 4.25.
 
+## Slice 7: dispatch list, job feedback and quality checks
+
+- Dispatch projection (`POST jobs`, duty `shopfloor.job.schedule`, the w23 schedule's
+  service identity): writes a job's plan (order and operation references, resource,
+  planned quantity, sequence start and the operation's check definitions). The job id is
+  the key: 201 when new, 200 when the plan changes; plan fields are last-writer-wins and
+  reported quantities, status and check results are never overwritten.
+- Dispatch list (`GET jobs?resourceId&status&limit`, duty `shopfloor.time.register`,
+  FR-25.3): jobs in sequence-start order; finished jobs are hidden unless `status=finished`.
+  Job detail (`GET jobs/{id}`) adds the latest result per check.
+- Feedback (`POST jobs/{id}:feedback`, duty `shopfloor.time.register`, FR-25.4): good and
+  scrap quantities are increments (numeric(18,4), at most 4 decimal places); scrap above
+  zero needs a `scrapReasonId`; something must be reported (a quantity, a check value or
+  `finished`). The client `feedbackId` is the idempotency key: a resend returns 200 with
+  `duplicate: true` and changes nothing; the same id on another job is SF-0124. A finished
+  job takes no feedback (SF-0122). Each stored posting writes
+  `dev.passage.shopfloor.job.reported.v1` to the outbox in the same transaction, with the
+  posting's quantities, the job's totals, the finish and the failed checks.
+- Quality checks (FR-25.5, AC-25.9): a check is numeric (inclusive `min`/`max`),
+  pass-fail or text. Values are evaluated against the job's definitions (unknown code
+  SF-0123, a value that cannot be evaluated SF-0125); the latest value per check is kept
+  in `job_check_result` and every posting's values stay on `job_feedback` for audit.
+  `finished: true` is refused with SF-0005 while a mandatory check has no passing result;
+  the refused posting stores nothing, so the same `feedbackId` can be resent with
+  `override.reason`, which needs the duty `shopfloor.check.override` and an authenticated
+  user (recorded as `recorded_by`). Counted in `shopfloor_job_feedback_stored_total`,
+  `shopfloor_job_feedback_replays_total` and `shopfloor_job_finish_blocked_total`.
+- Pure rules in `internal/domain/checks.go` (`ValidateCheck`, `EvaluateCheck`,
+  `FinishBlockers`), with a property test that a numeric check passes exactly within its
+  limits. Tables `shop_job`, `job_feedback`, `job_check_result` (migration 0007, forced RLS,
+  granted to `passage_app`).
+- Web: the dispatch list (`/shopfloor/jobs`, resource and status filters) and the job
+  detail (`/shopfloor/jobs/:id`) with checks and their results, the report form (quantities,
+  scrap reason, check values, *Save report* and *Report and finish*) and the supervisor
+  override form shown when a finish is blocked.
+
 ## Slice 6: idle detection, OEE rollup, kiosk badge login, who is clocked in
 
 - Idle detection (BR-25.6): each machine has an idle threshold (`idleThresholdSeconds` on
@@ -205,6 +241,7 @@ migrations/            0001_init.sql (worker, time_registration, worker_day, pay
                        0004_process_messages.sql (process_message, process_message_delivery)
                        0005_process_message_delete.sql (deletion audit columns, monitor keyset index)
                        0006_idle_oee_buckets.sql (machine idle threshold, oee_bucket, process message grants)
+                       0007_jobs.sql (shop_job, job_feedback, job_check_result)
 api/openapi.yaml       OpenAPI 3.1 for every endpoint
 events/asyncapi.yaml   AsyncAPI 3 for every event
 charts/shopfloor       Helm chart (3 replicas, /healthz and /readyz probes, ServiceMonitor toggle)
@@ -251,6 +288,8 @@ OpenAPI and AsyncAPI files in step with the router and the published event types
 | POST `/api/v1/shopfloor/machine-events` | `shopfloor.machine.ingest` (edge gateway service identity) |
 | POST `/api/v1/shopfloor/downtimes/{id}:code` | `shopfloor.time.register` |
 | POST `/api/v1/shopfloor/pay:export`, GET `/pay-exports`, `/pay-exports/{id}` | `shopfloor.pay.export` (Export time to payroll) |
+| POST `/api/v1/shopfloor/jobs` | `shopfloor.job.schedule` (w23 schedule service identity; not in the PRD duty table) |
+| GET `/api/v1/shopfloor/jobs`, `/jobs/{id}`; POST `/jobs/{id}:feedback` | `shopfloor.time.register`; an `override` also needs `shopfloor.check.override` (shop floor supervisor; not in the PRD duty table) |
 | POST `/api/v1/shopfloor/process-messages`, `/process-messages/{id}:reprocess`, `/process-messages/{id}:delete` | `shopfloor.process.create` (Create process messages: manual, reprocess/delete with reason) |
 | GET `/api/v1/shopfloor/process-messages`, `/process-messages/{id}` | `shopfloor.view` |
 | POST `/api/v1/shopfloor/process-messages/{id}/deliveries/{destination}:report`, `/process-messages:retry-due` | `shopfloor.process.deliver` (consuming context and scheduler service identities) |
@@ -268,6 +307,7 @@ Problem details use `application/problem+json` with `type` `https://passage.dev/
 | `COM-0001` | 400 | Request failed validation (or no `Idempotency-Key`); `errors` lists the fields |
 | `AUTH-0003` | 403 | Missing duty |
 | `SF-0001` | 422 | Badge is not recognized (unknown, or the worker is deactivated) |
+| `SF-0005` | 422 | Mandatory check failed or not recorded; the job cannot be finished without a supervisor override |
 | `SF-0006` | 422 | Day cannot be approved: flags are open |
 | `SF-0007` | 422 | Worker-day exceeds 24.00 hours |
 | `SF-0101` | 422 (404 on GET) | Worker not found or inactive |
@@ -290,6 +330,11 @@ Problem details use `application/problem+json` with `type` `https://passage.dev/
 | `SF-0118` | 404 | The message has no delivery to that destination |
 | `SF-0119` | 422 | Only a message with a destination in `error` can be deleted |
 | `SF-0120` | 422 | The process message was deleted; it takes no report, reprocess or second delete |
+| `SF-0121` | 404 | Job not found |
+| `SF-0122` | 422 | The job is finished; it takes no more feedback |
+| `SF-0123` | 422 | A check value names a check that is not defined on the job |
+| `SF-0124` | 422 | The `feedbackId` was already used for another job |
+| `SF-0125` | 422 | A check value cannot be evaluated (not a number, not pass or fail, or blank); `errors` names it |
 | `idempotency_key_reuse` | 422 | `Idempotency-Key` already used with a different request |
 
 Catalog entries SF-0001..SF-0020 (PRD 4.25.18) are reserved; only the codes above are raised.

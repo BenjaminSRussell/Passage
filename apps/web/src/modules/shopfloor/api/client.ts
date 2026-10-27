@@ -590,3 +590,88 @@ export function badgeLogin(badgeId: string): Promise<KioskSession> {
 export function listClockedIn(signal?: AbortSignal): Promise<ClockedWorker[]> {
   return items<ClockedWorker>("/clocked-in", signal);
 }
+
+// --- Job dispatch list, feedback and quality checks (slice 7, FR-25.3 to FR-25.5) ---
+
+export type JobStatus = "released" | "started" | "finished";
+
+export type CheckKind = "numeric" | "pass-fail" | "text";
+
+/** A quality check attached to the operation. */
+export interface JobCheck {
+  code: string;
+  name: string;
+  kind: CheckKind;
+  /** Decimal strings, inclusive; numeric checks only. */
+  min?: string | null;
+  max?: string | null;
+  /** A mandatory check without a passing result blocks finished (SF-0005). */
+  mandatory: boolean;
+}
+
+export interface JobCheckResult {
+  code: string;
+  value: string;
+  pass: boolean;
+}
+
+export interface Job {
+  id: string;
+  orderRef: string;
+  operationRef: string;
+  resourceId: string;
+  status: JobStatus;
+  /** Decimal strings. */
+  plannedQuantity: string;
+  goodQuantity: string;
+  scrapQuantity: string;
+  sequenceStart: string;
+  checks: JobCheck[];
+  /** Latest value per check; empty in the dispatch list. */
+  results: JobCheckResult[];
+  finishedAt: string | null;
+  version: number;
+  updatedAt: string;
+}
+
+export interface JobFilter {
+  resourceId?: string;
+  /** Omit to hide finished jobs (the dispatch view). */
+  status?: JobStatus | "";
+}
+
+export interface JobFeedbackInput {
+  /** Client UUID; a resend with the same id changes nothing on the server. */
+  feedbackId: string;
+  /** Decimal increments. */
+  goodQuantity?: string;
+  scrapQuantity?: string;
+  scrapReasonId?: string;
+  finished: boolean;
+  checks?: { code: string; value: string }[];
+  /** Supervisor override of failed mandatory checks; only with finished. */
+  override?: { reason: string };
+}
+
+export interface JobFeedbackResult {
+  job: Job;
+  duplicate: boolean;
+}
+
+/** Dispatch list in start order; finished jobs are hidden unless status asks for them. */
+export function listJobs(filter: JobFilter = {}, signal?: AbortSignal): Promise<Job[]> {
+  return items<Job>(`/jobs${query({ resourceId: filter.resourceId, status: filter.status })}`, signal);
+}
+
+export function getJob(id: string, signal?: AbortSignal): Promise<Job> {
+  return send<Job>(`/jobs/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/**
+ * Reports quantities, check values and finished. No Idempotency-Key: feedbackId is the
+ * key, so keep one id per form and a retried submit is a replay. SF-0005 refuses a
+ * finish while a mandatory check has no passing result.
+ */
+export function recordJobFeedback(jobId: string, input: JobFeedbackInput): Promise<JobFeedbackResult> {
+  return post<JobFeedbackResult>(`/jobs/${encodeURIComponent(jobId)}:feedback`, input);
+}
