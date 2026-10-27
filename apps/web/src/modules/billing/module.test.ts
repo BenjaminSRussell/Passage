@@ -8,7 +8,9 @@ describe("billing module", () => {
     expect(billing.routes.map((r) => r.path)).toEqual([
       "/billing",
       "/billing/free-text-invoices/new",
+      "/billing/proposals/new",
       "/billing/invoices/:id",
+      "/billing/invoices/:id/trace",
       "/billing/credit-notes",
       "/billing/credit-notes/new",
       "/billing/revenue-allocation",
@@ -23,6 +25,7 @@ describe("billing module", () => {
   it("guards each nav entry with the service duty that serves it", () => {
     expect(Object.fromEntries(billing.nav.map((n) => [n.to, n.duty]))).toEqual({
       "/billing": "billing.invoice.view",
+      "/billing/proposals/new": "billing.invoice.maintain",
       "/billing/free-text-invoices/new": "billing.invoice.maintain",
       "/billing/credit-notes": "billing.invoice.view",
       "/billing/revenue-contracts": "revrec.view",

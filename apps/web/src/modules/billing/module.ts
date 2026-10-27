@@ -7,6 +7,8 @@ import { InvoiceDetailPage } from "./InvoiceDetailPage";
 import { InvoicesPage } from "./InvoicesPage";
 import { NewCreditNotePage } from "./NewCreditNotePage";
 import { NewFreeTextInvoicePage } from "./NewFreeTextInvoicePage";
+import { NewShipmentProposalPage } from "./NewShipmentProposalPage";
+import { InvoiceTracePage } from "./InvoiceTracePage";
 import { NewRevenueContractPage } from "./NewRevenueContractPage";
 import { RevenueContractDetailPage } from "./RevenueContractDetailPage";
 import { RevenueContractsPage } from "./RevenueContractsPage";
@@ -15,11 +17,13 @@ const billing: PassageModule = {
   id: "billing",
   title: "Billing",
   description:
-    "Free-text invoices with installment plans, invoice posting with gap-free numbers, credit notes, revenue contracts with milestones and schedules, and the deferred revenue roll-forward.",
+    "Invoices from posted packing slips (per order or consolidated) with their audit trace, free-text invoices with installment plans, invoice posting with gap-free numbers, credit notes, revenue contracts with milestones and schedules, and the deferred revenue roll-forward.",
   routes: [
     { path: "/billing", element: createElement(InvoicesPage), handle: { title: "Invoices" } },
     { path: "/billing/free-text-invoices/new", element: createElement(NewFreeTextInvoicePage), handle: { title: "New free-text invoice" } },
+    { path: "/billing/proposals/new", element: createElement(NewShipmentProposalPage), handle: { title: "Invoice shipments" } },
     { path: "/billing/invoices/:id", element: createElement(InvoiceDetailPage), handle: { title: "Invoice" } },
+    { path: "/billing/invoices/:id/trace", element: createElement(InvoiceTracePage), handle: { title: "Invoice trace" } },
     { path: "/billing/credit-notes", element: createElement(CreditNotesPage), handle: { title: "Credit notes" } },
     { path: "/billing/credit-notes/new", element: createElement(NewCreditNotePage), handle: { title: "New credit note" } },
     { path: "/billing/revenue-allocation", element: createElement(AllocationPreviewPage), handle: { title: "Revenue allocation" } },
@@ -30,6 +34,7 @@ const billing: PassageModule = {
   ],
   nav: [
     { label: "Invoices", to: "/billing", duty: "billing.invoice.view" },
+    { label: "Invoice shipments", to: "/billing/proposals/new", duty: "billing.invoice.maintain" },
     { label: "New free-text invoice", to: "/billing/free-text-invoices/new", duty: "billing.invoice.maintain" },
     { label: "Credit notes", to: "/billing/credit-notes", duty: "billing.invoice.view" },
     { label: "Revenue contracts", to: "/billing/revenue-contracts", duty: "revrec.view" },

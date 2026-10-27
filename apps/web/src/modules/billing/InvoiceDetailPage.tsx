@@ -191,6 +191,9 @@ export function InvoiceDetailPage() {
                 Original invoice
               </Link>
             ) : null}
+            <Link className={buttonClassName("ghost")} to={`/billing/invoices/${invoice.id}/trace`}>
+              Trace
+            </Link>
             <Link className={buttonClassName("ghost")} to={creditNote ? "/billing/credit-notes" : "/billing"}>
               {creditNote ? "All credit notes" : "All invoices"}
             </Link>

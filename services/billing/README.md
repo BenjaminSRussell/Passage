@@ -6,7 +6,10 @@ engine, post it (re-quote tax, gap-free `INV-` number, `invoice.posted` in the
 outbox), read it back and list invoices. Slice 3 adds installment plans on the
 proposal (FR-29.18) and credit notes against posted invoices (FR-29.5): whole or
 by line quantity, checked against the remaining creditable amount (`BIL-0005`),
-posted with a gap-free `CN-` number and `creditnote.posted`. The screens are in
+posted with a gap-free `CN-` number and `creditnote.posted`. Slice 5 builds invoices
+from posted packing slips (FR-29.1): one per order or one consolidated invoice
+(FR-29.2), each line keeping its packing slip, order line, product and price
+explanation, a slip line invoiced once (BR-29.5), and the audit trace (FR-29.12). The screens are in
 `apps/web/src/modules/billing`. The wider wave is listed in `NOT-IMPLEMENTED.md`.
 
 ## Layout
@@ -15,16 +18,20 @@ posted with a gap-free `CN-` number and `creditnote.posted`. The screens are in
 cmd/billing/            entrypoint: dbx.Connect -> dbx.Migrate (optional) -> httpx router -> Serve
 internal/domain/        pure rules: line validation, totals (per-line rounding), tax recheck,
                         reversal rule (BR-29.7), installment split (BR-29.11), proration (BR-29.8),
-                        credit planning and the remaining-creditable check (credit.go, FR-29.5)
+                        credit planning and the remaining-creditable check (credit.go, FR-29.5),
+                        shipment proposal planning: per order, consolidation, line-limit split,
+                        BIL-0006 (shipment.go)
 internal/store/         Postgres persistence under RLS; post = one transaction
 internal/api/           HTTP handlers, DTOs, validation, idempotency, duties, metrics;
                         tax.go holds the TaxEngine seam (rate table or fail-closed);
-                        credit.go the credit-note handlers
+                        credit.go the credit-note handlers; shipment.go the proposals and trace
 internal/events/        event types and payloads (invoice.posted, creditnote.posted)
 migrations/             0001_billing_init.sql (invoice, invoice_line, number_sequence_counter, outbox)
                         0002_credit_notes_and_installments.sql (original reference, reason,
                         original line, invoice_installment)
-api/openapi.yaml        OpenAPI 3.1 for the six endpoints
+                        0003_shipment_proposals.sql (proposal_batch, line source references,
+                        unique packing slip line)
+api/openapi.yaml        OpenAPI 3.1 for the eight endpoints
 events/asyncapi.yaml    AsyncAPI 3 for invoice.posted and creditnote.posted
 charts/billing/         Helm chart (deployment, service with admin port, ServiceMonitor toggle)
 ```
@@ -34,6 +41,8 @@ charts/billing/         Helm chart (deployment, service with admin port, Service
 | Method | Path | Duty | Notes |
 |---|---|---|---|
 | POST | `/v1/billing/free-text-invoices` | `billing.invoice.maintain` (InvoiceMaintain) | `Idempotency-Key` required; 201 on create, 200 on replay; a legal-entity-scoped caller may only invoice its own entity; optional `installmentTerms` |
+| POST | `/v1/billing/proposals` | `billing.invoice.maintain` (InvoiceMaintain) | `Idempotency-Key` names the request; posted packing slips with their lines (one invoice account, currency and terms); one SHIPMENT invoice per order, or `consolidate: true` for one invoice (CONSOLIDATED when it spans orders); split at slip boundaries above `BILLING_MAX_LINES`; stored atomically (201 `{items}`), a replay returns every invoice (200) |
+| GET | `/v1/billing/invoices/{id}/trace` | `billing.invoice.view` (InvoiceView) | invoice → packing slips → order lines → price explanation reference; a credit note resolves through its original |
 | GET | `/v1/billing/invoices` | `billing.invoice.view` (InvoiceView) | headers only, newest first; `status`, `type`, `customerId`, `originalInvoiceId`, `limit` (1 to 200, default 100), `cursor` (the previous page's `nextCursor`) |
 | GET | `/v1/billing/invoices/{id}` | `billing.invoice.view` (InvoiceView) | invoice or credit note; returns `ETag` (version); a creditable invoice carries `credited` and per-line `creditedQty` |
 | POST | `/v1/billing/invoices/{id}:post` | `billing.invoice.post` (InvoicePost) | tax re-quote; idempotent by state; optional `If-Match`; refuses credit notes (409 `BIL-0101`) |
@@ -84,6 +93,8 @@ needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-superuser role) and skips without i
 | `AUTH-0003` | 403 | Missing duty, or a legal-entity-scoped caller invoicing another entity |
 | `BIL-0001` | 503 | Tax engine unavailable; nothing stored or posted |
 | `BIL-0002` | 409 | Tax moved beyond the 0.01 tolerance since the proposal |
+| `BIL-0006` | 422 | Invoice date precedes a packing slip's date (BR-29.4) |
+| `BIL-0007` | 422 | One packing slip alone holds more lines than `BILLING_MAX_LINES`; larger groups are split automatically |
 | `BIL-0005` | 422 | Credit exceeds the remaining creditable amount (per line quantity, net, tax, charges and gross), or the original is not a posted invoice |
 | `BIL-0004` | 400 | A line has no revenue account; reported as `COM-0001` with the field error `lines[n].revenueAccount` ending "(BIL-0004)" |
 | `BIL-0008` | 422 | Reversal not allowed (BR-29.7); domain rule, reversal not yet exposed over HTTP |
@@ -92,6 +103,7 @@ needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-superuser role) and skips without i
 | `BIL-0101` | 409 | Not a proposal, or a credit note sent to the invoice post (or the reverse) |
 | `BIL-0102` | 422 | A line's tax code is not known to the tax engine; nothing stored or posted |
 | `BIL-0103` | 412 | `If-Match` names a version the invoice no longer has |
+| `BIL-0104` | 409 | A packing slip line of the request is already on an invoice or proposal (BR-29.5); nothing of the request is stored |
 | `idempotency_key_reuse` | 422 | Same `Idempotency-Key` with a different body |
 | `idempotency_in_progress` | 409 | A concurrent request holds the key |
 
@@ -99,7 +111,12 @@ needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-superuser role) and skips without i
 
 - `domain.TaxRecheckTolerance()` returns 0.01 (parameter `tax_recheck_tolerance`);
   it moves to legal-entity configuration later.
-- `BIL-0100` to `BIL-0103` are service codes beyond the PRD catalog (§5.29.18).
+- `BIL-0100` to `BIL-0104` are service codes beyond the PRD catalog (§5.29.18).
+- Shipment proposals take the packing slip lines from the caller until the
+  `packing-slip.posted` consumer exists: fulfillment and sales own those rows, and
+  billing keeps only their ids. A slip line is unique per tenant across all invoices
+  and proposals (`invoice_line_slip_line_unique`); credit notes do not copy the
+  references, so a credit never frees or re-takes a slip line.
 - The invoice number is `INV-<posting year>-<7 digits>`, drawn from a serialized
   counter row per (tenant, entity, year) inside the posting transaction, so a
   failed or refused post consumes no number (BR-29.9).

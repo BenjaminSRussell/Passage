@@ -1,6 +1,8 @@
 // Package api serves the billing HTTP surface: free-text invoice proposals
-// with optional installment plans, their posting (tax, gap-free number,
-// invoice.posted), credit notes against posted invoices and invoice reads.
+// with optional installment plans, invoice proposals from posted packing slips
+// (one per order or consolidated), their posting (tax, gap-free number,
+// invoice.posted), credit notes against posted invoices, invoice reads and the
+// invoice audit trace.
 package api
 
 import (
@@ -71,6 +73,8 @@ type Store interface {
 	FindByIdempotencyKey(ctx context.Context, key string) (store.Invoice, bool, error)
 	CreateProposal(ctx context.Context, inv store.Invoice) (store.Invoice, error)
 	CreateCreditNote(ctx context.Context, cn store.Invoice) (store.Invoice, error)
+	FindProposalBatch(ctx context.Context, key string) (store.ProposalBatch, []store.Invoice, bool, error)
+	CreateShipmentProposals(ctx context.Context, b store.ProposalBatch, invs []store.Invoice) ([]store.Invoice, error)
 	GetInvoice(ctx context.Context, id string) (store.Invoice, error)
 	ListInvoices(ctx context.Context, f store.ListFilter) (store.InvoicePage, error)
 	PostProposal(ctx context.Context, id string, postingDate time.Time, expectedVersion int) (store.Invoice, error)
@@ -89,6 +93,7 @@ type API struct {
 	postsRefused       atomic.Int64
 	creditNotesCreated atomic.Int64
 	creditNotesPosted  atomic.Int64
+	shipmentProposals  atomic.Int64
 }
 
 // New returns the handlers. maxLines bounds a proposal (BILLING_MAX_LINES).
@@ -100,8 +105,10 @@ func New(s Store, tax TaxEngine, maxLines int) *API {
 func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/free-text-invoices", a.createProposal)
+	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/proposals", a.createShipmentProposals)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/billing/invoices", a.listInvoices)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/billing/invoices/{id}", a.getInvoice)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/billing/invoices/{id}/trace", a.invoiceTrace)
 	r.With(authz.RequireDuty(dutyPost)).Post("/v1/billing/invoices/{id}:post", a.postInvoice)
 	r.With(authz.RequireDuty(dutyMaintain)).Post("/v1/billing/credit-notes", a.createCreditNote)
 	r.With(authz.RequireDuty(dutyCreditPost)).Post("/v1/billing/credit-notes/{id}:post", a.postCreditNote)
@@ -116,6 +123,7 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP billing_posts_refused_total Posts refused because tax was unavailable, unknown or moved.\n# TYPE billing_posts_refused_total counter\nbilling_posts_refused_total %d\n", a.postsRefused.Load())
 		fmt.Fprintf(w, "# HELP billing_credit_notes_created_total Credit note proposals created; idempotent replays are not counted.\n# TYPE billing_credit_notes_created_total counter\nbilling_credit_notes_created_total %d\n", a.creditNotesCreated.Load())
 		fmt.Fprintf(w, "# HELP billing_credit_notes_posted_total Credit notes posted with a number.\n# TYPE billing_credit_notes_posted_total counter\nbilling_credit_notes_posted_total %d\n", a.creditNotesPosted.Load())
+		fmt.Fprintf(w, "# HELP billing_shipment_proposals_created_total Shipment and consolidated invoice proposals created from packing slips; replays are not counted.\n# TYPE billing_shipment_proposals_created_total counter\nbilling_shipment_proposals_created_total %d\n", a.shipmentProposals.Load())
 	})
 }
 
@@ -178,6 +186,13 @@ type lineOutDTO struct {
 	TaxCode        string `json:"taxCode"`
 	OriginalLineNo int    `json:"originalLineNo,omitempty"`
 	CreditedQty    string `json:"creditedQty,omitempty"`
+	// Source references, set on shipment and consolidated invoice lines (FR-29.1).
+	PackingSlipID     string `json:"packingSlipId,omitempty"`
+	PackingSlipLineID string `json:"packingSlipLineId,omitempty"`
+	OrderID           string `json:"orderId,omitempty"`
+	OrderLineID       string `json:"orderLineId,omitempty"`
+	ProductID         string `json:"productId,omitempty"`
+	PriceExplainRef   string `json:"priceExplainRef,omitempty"`
 }
 
 type installmentOutDTO struct {
@@ -247,7 +262,9 @@ func toDTO(inv store.Invoice) invoiceDTO {
 	for _, l := range inv.Lines {
 		line := lineOutDTO{LineNo: l.No, Description: l.Description, Qty: l.Qty.String(), UnitPrice: l.UnitPrice.String(),
 			DiscountPct: l.DiscountPct.String(), Net: fixed(l.Net, exp), Tax: fixed(l.Tax, exp), RevenueAccount: l.RevenueAccount,
-			TaxCode: l.TaxCode, OriginalLineNo: l.OriginalLineNo}
+			TaxCode: l.TaxCode, OriginalLineNo: l.OriginalLineNo, PackingSlipID: l.Source.PackingSlipID,
+			PackingSlipLineID: l.Source.PackingSlipLineID, OrderID: l.Source.OrderID, OrderLineID: l.Source.OrderLineID,
+			ProductID: l.Source.ProductID, PriceExplainRef: l.Source.PriceExplainRef}
 		if creditable {
 			line.CreditedQty = decimal.Zero.String()
 			if c, ok := inv.Credited.Lines[l.No]; ok {
@@ -413,8 +430,13 @@ func toTerms(in []installmentTermDTO, fields map[string]string) []domain.Install
 
 // toLine converts line i, recording each problem under its field name.
 func toLine(i int, l lineDTO, fields map[string]string) domain.Line {
-	field := func(name string) string { return fmt.Sprintf("lines[%d].%s", i, name) }
-	out := domain.Line{No: i + 1, Description: strings.TrimSpace(l.Description), RevenueAccount: l.RevenueAccount, TaxCode: l.TaxCode, DiscountPct: decimal.Zero}
+	return toLineAt(fmt.Sprintf("lines[%d]", i), i+1, l, fields)
+}
+
+// toLineAt converts one line numbered no whose request fields sit under prefix.
+func toLineAt(prefix string, no int, l lineDTO, fields map[string]string) domain.Line {
+	field := func(name string) string { return prefix + "." + name }
+	out := domain.Line{No: no, Description: strings.TrimSpace(l.Description), RevenueAccount: l.RevenueAccount, TaxCode: l.TaxCode, DiscountPct: decimal.Zero}
 	parse := func(name, raw string, dst *decimal.Decimal) bool {
 		if !decimalText.MatchString(raw) {
 			fields[field(name)] = "must be a non-negative decimal with at most 6 fraction digits"

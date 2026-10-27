@@ -37,6 +37,11 @@ type fakeStore struct {
 	creditPosts   int
 	postedVersion int
 	lastFilter    store.ListFilter
+	// Shipment proposal batches by key, their invoice ids and the slip lines invoiced.
+	batches       map[string]store.ProposalBatch
+	batchInvoices map[string][]string
+	slipLines     map[string]bool
+	batchCreates  int
 }
 
 func newFakeStore() *fakeStore { return &fakeStore{invoices: map[string]store.Invoice{}} }

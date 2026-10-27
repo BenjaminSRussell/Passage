@@ -1,13 +1,15 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, buttonClassName, DataTable, FormField, PageHeader, Select, StatusPill, type DataTableColumn } from "../../shell/ui";
-import { INVOICE_STATUSES, listInvoicePage, type InvoiceStatus, type InvoiceSummary } from "./api/client";
+import { INVOICE_STATUSES, listInvoicePage, type InvoiceStatus, type InvoiceSummary, type InvoiceType } from "./api/client";
 import { invoiceName, STATUS_LABELS, TYPE_LABELS } from "./format";
 import { MoreRows } from "./MoreRows";
 import styles from "./pages.module.css";
 import { usePaged } from "./usePaged";
 
 const LIMIT = 100;
+/** The invoice types the list filters by; credit notes have their own list. */
+const LIST_TYPES: InvoiceType[] = ["FREE_TEXT", "SHIPMENT", "CONSOLIDATED"];
 
 const columns: DataTableColumn<InvoiceSummary>[] = [
   { key: "number", header: "Invoice", mono: true, render: (row) => invoiceName(row) },
@@ -23,20 +25,25 @@ const columns: DataTableColumn<InvoiceSummary>[] = [
 export function InvoicesPage() {
   const navigate = useNavigate();
   const [status, setStatus] = useState<InvoiceStatus | "">("");
-  const state = usePaged((cursor, signal) => listInvoicePage({ status, limit: LIMIT, cursor }, signal), status);
+  const [type, setType] = useState<InvoiceType | "">("");
+  const filterWords = [status && STATUS_LABELS[status].toLowerCase(), type && TYPE_LABELS[type].toLowerCase()].filter(Boolean).join(" ");
+  const state = usePaged((cursor, signal) => listInvoicePage({ status, type, limit: LIMIT, cursor }, signal), `${status}|${type}`);
 
   return (
     <div className={styles.stack}>
       <PageHeader
         title="Invoices"
-        description="Free-text invoice proposals and posted invoices. Open a proposal to review its tax and post it."
+        description="Invoice proposals and posted invoices, from shipments and free text. Open a proposal to review its tax and post it."
         actions={
           <>
             <Link className={buttonClassName("secondary")} to="/billing/revenue-allocation">
               Revenue allocation
             </Link>
-            <Link className={buttonClassName("primary")} to="/billing/free-text-invoices/new">
+            <Link className={buttonClassName("secondary")} to="/billing/free-text-invoices/new">
               New free-text invoice
+            </Link>
+            <Link className={buttonClassName("primary")} to="/billing/proposals/new">
+              Invoice shipments
             </Link>
           </>
         }
@@ -49,6 +56,18 @@ export function InvoicesPage() {
               {INVOICE_STATUSES.map((s) => (
                 <option key={s} value={s}>
                   {STATUS_LABELS[s]}
+                </option>
+              ))}
+            </Select>
+          )}
+        </FormField>
+        <FormField id="inv-type" label="Type">
+          {(c) => (
+            <Select {...c} value={type} onChange={(e) => setType(e.target.value as InvoiceType | "")}>
+              <option value="">Any type</option>
+              {LIST_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {TYPE_LABELS[t]}
                 </option>
               ))}
             </Select>
@@ -67,8 +86,8 @@ export function InvoicesPage() {
           getRowKey={(row) => row.id}
           loading={state.loading}
           empty={{
-            title: status ? `No ${STATUS_LABELS[status].toLowerCase()} invoices` : "No invoices yet",
-            description: "Create a free-text invoice to bill a customer for services or other charges.",
+            title: filterWords ? `No ${filterWords} invoices` : "No invoices yet",
+            description: "Invoice the shipments of a customer's posted packing slips, or create a free-text invoice for services or other charges.",
           }}
           onRowOpen={(row) => navigate(`/billing/invoices/${row.id}`)}
         />

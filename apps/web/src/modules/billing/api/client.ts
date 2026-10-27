@@ -51,6 +51,13 @@ export interface InvoiceLine {
   originalLineNo?: number;
   /** On a creditable invoice: the quantity posted credit notes took. */
   creditedQty?: string;
+  /** On a shipment or consolidated invoice: the documents the line came from (FR-29.1). */
+  packingSlipId?: string;
+  packingSlipLineId?: string;
+  orderId?: string;
+  orderLineId?: string;
+  productId?: string;
+  priceExplainRef?: string;
 }
 
 /** One open item of the installment plan (FR-29.18). */
@@ -90,6 +97,65 @@ export interface FreeTextInvoiceInput {
   chargeAmount?: string;
   installmentTerms?: { percent: string; offsetDays: number }[];
   lines: FreeTextLineInput[];
+}
+
+/** One posted packing slip line offered for billing: the shipped quantity with the order line's price. */
+export interface PackingSlipLineInput {
+  id: string;
+  orderLineId: string;
+  productId: string;
+  description: string;
+  qty: string;
+  unitPrice: string;
+  discountPct?: string;
+  revenueAccount: string;
+  taxCode: string;
+  priceExplainRef?: string;
+}
+
+export interface PackingSlipInput {
+  id: string;
+  orderId: string;
+  /** The slip's posting date; the invoice date may not precede it (BIL-0006). */
+  date: string;
+  chargeAmount?: string;
+  lines: PackingSlipLineInput[];
+}
+
+/** POST /proposals: invoices from posted packing slips of one invoice account, one per order or consolidated. */
+export interface ShipmentProposalInput {
+  legalEntityId: string;
+  customerId: string;
+  invoiceAccountId: string;
+  currency: string;
+  invoiceDate: string;
+  paymentTermDays: number;
+  consolidate: boolean;
+  slips: PackingSlipInput[];
+}
+
+export interface TraceLine {
+  lineNo: number;
+  description: string;
+  qty: string;
+  net: string;
+  revenueAccount: string;
+  originalLineNo?: number;
+  packingSlipId?: string;
+  packingSlipLineId?: string;
+  orderId?: string;
+  orderLineId?: string;
+  productId?: string;
+  priceExplainRef?: string;
+}
+
+/** GET /invoices/{id}/trace (FR-29.12): invoice → packing slips → order lines → price explanations. */
+export interface InvoiceTrace {
+  invoice: InvoiceSummary;
+  /** On a credit note: the invoice it credits, through whose lines the trace resolves. */
+  original?: InvoiceSummary;
+  packingSlips: { id: string; date: string; orderId: string }[];
+  lines: TraceLine[];
 }
 
 /** A credit note request: without lines the whole remainder of the original is credited. */
@@ -251,6 +317,21 @@ export function createFreeTextInvoice(input: FreeTextInvoiceInput, idempotencyKe
     headers: { "Idempotency-Key": idempotencyKey },
     body: JSON.stringify(input),
   });
+}
+
+/** POST /proposals: one or more invoice proposals from packing slips, stored together; the key makes retries return the same invoices. */
+export async function createShipmentProposals(input: ShipmentProposalInput, idempotencyKey: string): Promise<Invoice[]> {
+  const batch = await send<{ items: Invoice[] }>(`${billingBase}/proposals`, {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(input),
+  });
+  return batch.items;
+}
+
+/** GET /invoices/{id}/trace: the documents behind each invoice line. */
+export function getInvoiceTrace(id: string, signal?: AbortSignal): Promise<InvoiceTrace> {
+  return send<InvoiceTrace>(`${billingBase}/invoices/${encodeURIComponent(id)}/trace`, {}, signal);
 }
 
 /** POST /credit-notes: a credit note proposal against a posted invoice; the key makes retries return the same proposal. */

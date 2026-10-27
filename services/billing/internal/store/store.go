@@ -42,6 +42,11 @@ const (
 	CodeKeyInFlight = "idempotency_in_progress"
 	// CodeVersion is returned when If-Match names a version the invoice no longer has.
 	CodeVersion = "BIL-0103"
+	// CodeSlipLineInvoiced is returned when a packing slip line is already on an
+	// invoice or proposal (BR-29.5: a slip belongs to at most one invoice).
+	CodeSlipLineInvoiced = "BIL-0104"
+	// slipLineIndex is the unique index that enforces BR-29.5.
+	slipLineIndex = "invoice_line_slip_line_unique"
 )
 
 // postedStatuses are the states in which a credit note counts against its
@@ -68,11 +73,13 @@ type InvoicePage struct {
 
 // Line is a stored invoice line with its rounded net and tax. OriginalLineNo
 // is the credited line of the original invoice on a credit note, else zero.
+// Source is set on shipment and consolidated invoice lines only (FR-29.12).
 type Line struct {
 	domain.Line
 	Net            decimal.Decimal
 	Tax            decimal.Decimal
 	OriginalLineNo int
+	Source         domain.Source
 }
 
 // Installment is one stored open item of an installment plan with the term
@@ -110,6 +117,19 @@ type Invoice struct {
 	IdempotencyKey string
 	RequestHash    string
 	Version        int
+	// ProposalBatchID and ProposalBatchSeq place a shipment proposal in the
+	// POST /proposals request that created it; empty on every other invoice.
+	ProposalBatchID  string
+	ProposalBatchSeq int
+}
+
+// ProposalBatch is one POST /v1/billing/proposals request: its key, the hash of
+// its body and the legal entity it invoices.
+type ProposalBatch struct {
+	ID             string
+	LegalEntityID  string
+	IdempotencyKey string
+	RequestHash    string
 }
 
 // Postgres is the billing repository.
@@ -177,7 +197,10 @@ func scanInvoice(row pgx.Row) (Invoice, error) {
 
 func loadLines(ctx context.Context, tx pgx.Tx, invoiceID string) ([]Line, error) {
 	rows, err := tx.Query(ctx, `select line_no, description, qty::text, unit_price::text, disc_pct::text, line_net::text,
-		tax_amount::text, revenue_account, tax_code, coalesce(original_line_no, 0) from invoice_line where invoice_id = $1 order by line_no`, invoiceID)
+		tax_amount::text, revenue_account, tax_code, coalesce(original_line_no, 0), coalesce(packing_slip_id::text, ''),
+		coalesce(packing_slip_line_id::text, ''), coalesce(packing_slip_date::text, ''), coalesce(order_id::text, ''),
+		coalesce(order_line_id::text, ''), coalesce(product_id::text, ''), coalesce(price_explain_ref, '')
+		from invoice_line where invoice_id = $1 order by line_no`, invoiceID)
 	if err != nil {
 		return nil, err
 	}
@@ -185,9 +208,16 @@ func loadLines(ctx context.Context, tx pgx.Tx, invoiceID string) ([]Line, error)
 	var out []Line
 	for rows.Next() {
 		var l Line
-		var qty, price, disc, net, tax string
-		if err := rows.Scan(&l.No, &l.Description, &qty, &price, &disc, &net, &tax, &l.RevenueAccount, &l.TaxCode, &l.OriginalLineNo); err != nil {
+		var qty, price, disc, net, tax, slipDate string
+		src := &l.Source
+		if err := rows.Scan(&l.No, &l.Description, &qty, &price, &disc, &net, &tax, &l.RevenueAccount, &l.TaxCode, &l.OriginalLineNo,
+			&src.PackingSlipID, &src.PackingSlipLineID, &slipDate, &src.OrderID, &src.OrderLineID, &src.ProductID, &src.PriceExplainRef); err != nil {
 			return nil, err
+		}
+		if slipDate != "" {
+			if src.PackingSlipDate, err = time.Parse(dateLayout, slipDate); err != nil {
+				return nil, err
+			}
 		}
 		v, err := parseDecimals(qty, price, disc, net, tax)
 		if err != nil {
@@ -313,55 +343,156 @@ func (s *Postgres) CreateCreditNote(ctx context.Context, cn Invoice) (Invoice, e
 }
 
 func (s *Postgres) insertProposal(ctx context.Context, inv Invoice, before func(pgx.Tx) error) (Invoice, error) {
-	p, _ := tenant.FromContext(ctx)
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if before != nil {
 			if err := before(tx); err != nil {
 				return err
 			}
 		}
-		_, err := tx.Exec(ctx, `insert into invoice (tenant_id, id, legal_entity_id, customer_id, invoice_account_id, invoice_type, status,
-			invoice_date, due_date, payment_term_days, currency, net_amount, charge_amount, tax_amount, gross_amount, idempotency_key, request_hash,
-			original_invoice_id, credit_reason)
-			values ($1, $2, $3, $4, $5, $6, 'PROPOSAL', $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
-			p.TenantID, inv.ID, inv.LegalEntityID, inv.CustomerID, inv.InvoiceAccountID, inv.Type,
-			inv.InvoiceDate.Format(dateLayout), inv.DueDate.Format(dateLayout), inv.PaymentTermDays, inv.Currency,
-			inv.Totals.Net.String(), inv.Totals.Charges.String(), inv.Totals.Tax.String(), inv.Totals.Gross.String(),
-			inv.IdempotencyKey, inv.RequestHash, nullable(inv.OriginalInvoiceID), nullable(inv.Reason))
-		if err != nil {
-			return err
-		}
-		for _, l := range inv.Lines {
-			var originalLine any
-			if l.OriginalLineNo > 0 {
-				originalLine = l.OriginalLineNo
-			}
-			if _, err := tx.Exec(ctx, `insert into invoice_line (tenant_id, invoice_id, line_no, description, qty, unit_price, disc_pct,
-				line_net, tax_amount, revenue_account, tax_code, original_line_no) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-				p.TenantID, inv.ID, l.No, l.Description, l.Qty.String(), l.UnitPrice.String(), l.DiscountPct.String(),
-				l.Net.String(), l.Tax.String(), l.RevenueAccount, l.TaxCode, originalLine); err != nil {
-				return err
-			}
-		}
-		for _, in := range inv.Installments {
-			if _, err := tx.Exec(ctx, `insert into invoice_installment (tenant_id, invoice_id, installment_no, percent, offset_days, amount, due_date)
-				values ($1, $2, $3, $4, $5, $6, $7)`, p.TenantID, inv.ID, in.No, in.Term.Percent.String(), in.Term.OffsetDays,
-				in.Amount.String(), in.DueDate.Format(dateLayout)); err != nil {
-				return err
-			}
-		}
-		return nil
+		return writeProposal(ctx, tx, inv)
 	})
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
-		return Invoice{}, httpx.NewProblem(http.StatusConflict, CodeKeyInFlight, "a request with this Idempotency-Key is already in progress")
-	}
 	if err != nil {
-		return Invoice{}, err
+		return Invoice{}, writeProblem(err)
 	}
 	inv.Version = 1
 	inv.Status = domain.StatusProposal
 	return inv, nil
+}
+
+// writeProposal inserts a proposal header, its lines with their source
+// references, and its installments inside tx.
+func writeProposal(ctx context.Context, tx pgx.Tx, inv Invoice) error {
+	p, _ := tenant.FromContext(ctx)
+	var batchSeq any
+	if inv.ProposalBatchSeq > 0 {
+		batchSeq = inv.ProposalBatchSeq
+	}
+	_, err := tx.Exec(ctx, `insert into invoice (tenant_id, id, legal_entity_id, customer_id, invoice_account_id, invoice_type, status,
+		invoice_date, due_date, payment_term_days, currency, net_amount, charge_amount, tax_amount, gross_amount, idempotency_key, request_hash,
+		original_invoice_id, credit_reason, proposal_batch_id, proposal_batch_seq)
+		values ($1, $2, $3, $4, $5, $6, 'PROPOSAL', $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
+		p.TenantID, inv.ID, inv.LegalEntityID, inv.CustomerID, inv.InvoiceAccountID, inv.Type,
+		inv.InvoiceDate.Format(dateLayout), inv.DueDate.Format(dateLayout), inv.PaymentTermDays, inv.Currency,
+		inv.Totals.Net.String(), inv.Totals.Charges.String(), inv.Totals.Tax.String(), inv.Totals.Gross.String(),
+		inv.IdempotencyKey, inv.RequestHash, nullable(inv.OriginalInvoiceID), nullable(inv.Reason),
+		nullable(inv.ProposalBatchID), batchSeq)
+	if err != nil {
+		return err
+	}
+	for _, l := range inv.Lines {
+		var originalLine, slipDate any
+		if l.OriginalLineNo > 0 {
+			originalLine = l.OriginalLineNo
+		}
+		src := l.Source
+		if !src.PackingSlipDate.IsZero() {
+			slipDate = src.PackingSlipDate.Format(dateLayout)
+		}
+		if _, err := tx.Exec(ctx, `insert into invoice_line (tenant_id, invoice_id, line_no, description, qty, unit_price, disc_pct,
+			line_net, tax_amount, revenue_account, tax_code, original_line_no, packing_slip_id, packing_slip_line_id, packing_slip_date,
+			order_id, order_line_id, product_id, price_explain_ref)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
+			p.TenantID, inv.ID, l.No, l.Description, l.Qty.String(), l.UnitPrice.String(), l.DiscountPct.String(),
+			l.Net.String(), l.Tax.String(), l.RevenueAccount, l.TaxCode, originalLine, nullable(src.PackingSlipID),
+			nullable(src.PackingSlipLineID), slipDate, nullable(src.OrderID), nullable(src.OrderLineID), nullable(src.ProductID),
+			nullable(src.PriceExplainRef)); err != nil {
+			return err
+		}
+	}
+	for _, in := range inv.Installments {
+		if _, err := tx.Exec(ctx, `insert into invoice_installment (tenant_id, invoice_id, installment_no, percent, offset_days, amount, due_date)
+			values ($1, $2, $3, $4, $5, $6, $7)`, p.TenantID, inv.ID, in.No, in.Term.Percent.String(), in.Term.OffsetDays,
+			in.Amount.String(), in.DueDate.Format(dateLayout)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// writeProblem maps a failed proposal write: a packing slip line already on an
+// invoice is 409 BIL-0104 (BR-29.5); any other duplicate is a concurrent
+// request holding the same Idempotency-Key.
+func writeProblem(err error) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != uniqueViolation {
+		return err
+	}
+	if pgErr.ConstraintName == slipLineIndex {
+		return httpx.NewProblem(http.StatusConflict, CodeSlipLineInvoiced,
+			"a packing slip line of this request is already on an invoice or proposal; a slip line is invoiced once")
+	}
+	return httpx.NewProblem(http.StatusConflict, CodeKeyInFlight, "a request with this Idempotency-Key is already in progress")
+}
+
+// CreateShipmentProposals stores one POST /proposals request (FR-29.1, FR-29.2):
+// the batch row and every invoice it planned, in one transaction, so either all
+// invoices exist or none does. Each invoice is numbered in the batch in the
+// given order. A packing slip line already on an invoice fails the whole batch
+// with 409 BIL-0104 (BR-29.5).
+func (s *Postgres) CreateShipmentProposals(ctx context.Context, b ProposalBatch, invs []Invoice) ([]Invoice, error) {
+	if len(invs) == 0 {
+		return nil, errors.New("store: a proposal batch needs at least one invoice")
+	}
+	p, _ := tenant.FromContext(ctx)
+	out := make([]Invoice, len(invs))
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `insert into proposal_batch (tenant_id, id, legal_entity_id, idempotency_key, request_hash)
+			values ($1, $2, $3, $4, $5)`, p.TenantID, b.ID, b.LegalEntityID, b.IdempotencyKey, b.RequestHash); err != nil {
+			return err
+		}
+		for i, inv := range invs {
+			if inv.Type != domain.TypeShipment && inv.Type != domain.TypeConsolidated {
+				return fmt.Errorf("store: a proposal batch holds shipment invoices only, got %s", inv.Type)
+			}
+			inv.ProposalBatchID, inv.ProposalBatchSeq = b.ID, i+1
+			if err := writeProposal(ctx, tx, inv); err != nil {
+				return err
+			}
+			inv.Version, inv.Status = 1, domain.StatusProposal
+			out[i] = inv
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, writeProblem(err)
+	}
+	return out, nil
+}
+
+// FindProposalBatch returns the batch created under key with its invoices in
+// batch order, if any.
+func (s *Postgres) FindProposalBatch(ctx context.Context, key string) (ProposalBatch, []Invoice, bool, error) {
+	var b ProposalBatch
+	var invs []Invoice
+	found := false
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `select id::text, legal_entity_id::text, idempotency_key, request_hash from proposal_batch
+			where idempotency_key = $1`, key).Scan(&b.ID, &b.LegalEntityID, &b.IdempotencyKey, &b.RequestHash)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		found = true
+		rows, err := tx.Query(ctx, `select id::text from invoice where proposal_batch_id = $1 order by proposal_batch_seq`, b.ID)
+		if err != nil {
+			return err
+		}
+		ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			inv, err := loadInvoice(ctx, tx, `where id = $1`, id)
+			if err != nil {
+				return err
+			}
+			invs = append(invs, inv)
+		}
+		return nil
+	})
+	return b, invs, found, err
 }
 
 // GetInvoice returns one invoice with its lines.
@@ -557,7 +688,8 @@ func postedLines(currency string, in []Line) []billingevents.InvoicePostedLine {
 	lines := make([]billingevents.InvoicePostedLine, len(in))
 	for i, l := range in {
 		lines[i] = billingevents.InvoicePostedLine{LineNo: l.No, Description: l.Description, Qty: l.Qty.String(),
-			Net: l.Net.StringFixed(exp), Tax: l.Tax.StringFixed(exp), TaxCode: l.TaxCode, RevenueAccount: l.RevenueAccount}
+			Net: l.Net.StringFixed(exp), Tax: l.Tax.StringFixed(exp), TaxCode: l.TaxCode, RevenueAccount: l.RevenueAccount,
+			OrderLineID: l.Source.OrderLineID, Product: l.Source.ProductID, PackingSlipLineID: l.Source.PackingSlipLineID}
 	}
 	return lines
 }

@@ -6,8 +6,9 @@ info:
     Invoice proposals, posting and reads for the billing context (PSG-29).
     Slice 1 covers free-text invoices; slice 3 adds installment plans on the
     free-text proposal (FR-29.18) and credit notes against posted invoices
-    (FR-29.5). Shipment, consolidated and subscription flows arrive in later
-    slices (see NOT-IMPLEMENTED.md).
+    (FR-29.5); slice 5 adds invoice proposals from posted packing slips, one
+    per order or consolidated (FR-29.1, FR-29.2), and the invoice audit trace
+    (FR-29.12). Subscription flows arrive in later slices (see NOT-IMPLEMENTED.md).
 servers:
   - url: https://api.{env}.passage.dev
     variables:
@@ -72,6 +73,74 @@ paths:
           description: >
             Idempotency-Key reused with another body (idempotency_key_reuse), unknown
             tax code (BIL-0102) or installment percentages not totalling 100 (BIL-0011).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /v1/billing/proposals:
+    post:
+      operationId: createShipmentProposals
+      summary: Build invoice proposals from posted packing slips (one per order, or consolidated).
+      description: >
+        The slips all bill one invoice account in one currency and terms. Without
+        `consolidate` there is one SHIPMENT invoice per order; with it every slip
+        goes on one invoice, CONSOLIDATED when it spans more than one order
+        (FR-29.1, FR-29.2, BR-29.5). An invoice over BILLING_MAX_LINES lines is
+        split at slip boundaries; a slip alone over the limit is refused (422
+        BIL-0007). The invoice date may not precede a slip's date (422 BIL-0006).
+        Each invoice line keeps its packing slip, slip line, order, order line,
+        product and price explanation. Tax is quoted per invoice; when the engine
+        is unavailable nothing is stored (503 BIL-0001). The batch is stored in one
+        transaction. The Idempotency-Key names the whole request: a replay returns
+        every invoice (200). A packing slip line is invoiced once: a request naming
+        a slip line already on an invoice or proposal is refused whole (409 BIL-0104).
+      x-passage-duty: billing.invoice.maintain (InvoiceMaintain)
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ShipmentProposalRequest"
+      responses:
+        "201":
+          description: Proposals created with tax quoted per line, in batch order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProposalBatch"
+        "200":
+          description: Idempotent replay of an earlier completed request with the same body.
+          headers:
+            Idempotent-Replayed:
+              description: Always true on a replay.
+              schema: { type: string, enum: ["true"] }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProposalBatch"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          description: >
+            A packing slip line is already on an invoice or proposal (BIL-0104), or a
+            concurrent request holds the same Idempotency-Key (idempotency_in_progress).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: >
+            Idempotency-Key reused with another body (idempotency_key_reuse), invoice
+            date before a slip date (BIL-0006), a slip over the line limit (BIL-0007)
+            or an unknown tax code (BIL-0102).
           content:
             application/problem+json:
               schema:
@@ -147,6 +216,32 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Invoice"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/billing/invoices/{id}/trace:
+    get:
+      operationId: getInvoiceTrace
+      summary: Audit trace of an invoice to its packing slips, order lines and price explanations.
+      description: >
+        FR-29.12 (§5.29.14 invoice trace). Every line with the packing slip, slip
+        line, order, order line, product and price explanation it came from, and
+        the packing slips once each with their date and order. A credit note's
+        lines resolve through the original invoice's lines; a free-text invoice has
+        no documents behind its lines. Revenue schedules are not on the trace yet.
+      x-passage-duty: billing.invoice.view (InvoiceView)
+      parameters:
+        - $ref: "#/components/parameters/InvoiceId"
+      responses:
+        "200":
+          description: The trace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoiceTrace"
         "401":
           $ref: "#/components/responses/Problem"
         "403":
@@ -388,6 +483,97 @@ components:
         discountPct: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$", description: "Percent 0 to 100." }
         revenueAccount: { type: string, pattern: "^[A-Za-z0-9._-]{1,20}$", description: "Ledger account; missing returns the field error ending (BIL-0004)." }
         taxCode: { type: string, pattern: "^[A-Z0-9_-]{1,20}$", description: "Tax code quoted by the tax engine (FR-29.4)." }
+    ShipmentProposalRequest:
+      type: object
+      required: [legalEntityId, customerId, invoiceAccountId, currency, invoiceDate, paymentTermDays, slips]
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        invoiceAccountId: { type: string, format: uuid }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        invoiceDate: { type: string, format: date, description: "Not before any slip's date (BIL-0006)." }
+        paymentTermDays: { type: integer, minimum: 0, maximum: 365 }
+        consolidate: { type: boolean, default: false, description: "One invoice for all slips instead of one per order." }
+        slips:
+          type: array
+          minItems: 1
+          maxItems: 200
+          description: Posted packing slips; at most 10000 slip lines in all.
+          items:
+            $ref: "#/components/schemas/PackingSlip"
+    PackingSlip:
+      type: object
+      required: [id, orderId, date, lines]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        date: { type: string, format: date, description: "The slip's posting date." }
+        chargeAmount: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$", description: "Freight or handling of the slip, added to the invoice charges." }
+        lines:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/PackingSlipLine"
+    PackingSlipLine:
+      type: object
+      required: [id, orderLineId, productId, description, qty, unitPrice, revenueAccount, taxCode]
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid, description: "Packing slip line; invoiced once (BIL-0104)." }
+        orderLineId: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        description: { type: string, minLength: 1, maxLength: 200 }
+        qty: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$", description: "Shipped quantity; positive." }
+        unitPrice: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$", description: "The order line's price." }
+        discountPct: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$", description: "Percent 0 to 100." }
+        revenueAccount: { type: string, pattern: "^[A-Za-z0-9._-]{1,20}$", description: "Missing returns the field error ending (BIL-0004)." }
+        taxCode: { type: string, pattern: "^[A-Z0-9_-]{1,20}$" }
+        priceExplainRef: { type: string, maxLength: 200, description: "The pricing explanation (wave 26) behind the price." }
+    ProposalBatch:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Invoice"
+    InvoiceTrace:
+      type: object
+      required: [invoice, packingSlips, lines]
+      properties:
+        invoice: { $ref: "#/components/schemas/InvoiceSummary" }
+        original:
+          $ref: "#/components/schemas/InvoiceSummary"
+          description: On a credit note, the invoice it credits.
+        packingSlips:
+          type: array
+          items:
+            type: object
+            required: [id, date, orderId]
+            properties:
+              id: { type: string, format: uuid }
+              date: { type: string, format: date }
+              orderId: { type: string, format: uuid }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [lineNo, description, qty, net, revenueAccount]
+            properties:
+              lineNo: { type: integer }
+              description: { type: string }
+              qty: { type: string }
+              net: { $ref: "#/components/schemas/Money" }
+              revenueAccount: { type: string }
+              originalLineNo: { type: integer, description: "On a credit note: the credited line of the original." }
+              packingSlipId: { type: string, format: uuid }
+              packingSlipLineId: { type: string, format: uuid }
+              orderId: { type: string, format: uuid }
+              orderLineId: { type: string, format: uuid }
+              productId: { type: string, format: uuid }
+              priceExplainRef: { type: string }
     CreditNoteRequest:
       type: object
       required: [originalInvoiceId, creditDate, reason]
@@ -458,6 +644,12 @@ components:
                   taxCode: { type: string }
                   originalLineNo: { type: integer, description: "On a credit note: the credited line of the original." }
                   creditedQty: { type: string, description: "On a creditable invoice: quantity credited by posted credit notes." }
+                  packingSlipId: { type: string, format: uuid, description: "Shipment and consolidated lines: the packing slip billed." }
+                  packingSlipLineId: { type: string, format: uuid }
+                  orderId: { type: string, format: uuid }
+                  orderLineId: { type: string, format: uuid }
+                  productId: { type: string, format: uuid }
+                  priceExplainRef: { type: string }
     InvoiceSummary:
       type: object
       required: [id, legalEntityId, customerId, invoiceAccountId, type, status, currency, invoiceDate, dueDate, paymentTermDays, totals, version]
@@ -466,7 +658,7 @@ components:
         legalEntityId: { type: string, format: uuid }
         customerId: { type: string, format: uuid }
         invoiceAccountId: { type: string, format: uuid }
-        type: { type: string, enum: [SHIPMENT, CONSOLIDATED, FREE_TEXT, SUBSCRIPTION, MILESTONE, CREDIT_NOTE], description: "Slices 1 and 3 create FREE_TEXT and CREDIT_NOTE." }
+        type: { type: string, enum: [SHIPMENT, CONSOLIDATED, FREE_TEXT, SUBSCRIPTION, MILESTONE, CREDIT_NOTE], description: "FREE_TEXT, SHIPMENT, CONSOLIDATED and CREDIT_NOTE are created so far." }
         status: { type: string, enum: [PROPOSAL, POSTED, PARTIALLY_SETTLED, SETTLED, REVERSED], description: "PROPOSAL and POSTED are reached so far." }
         number: { type: string, description: "INV-<year>-<7 digits> for an invoice, CN-<year>-<7 digits> for a credit note; present once posted." }
         currency: { type: string }

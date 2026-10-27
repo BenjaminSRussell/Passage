@@ -12,15 +12,21 @@ var InvoicePosted = events.Type("billing", "invoice", "posted", 1)
 // letters and digits only, so the entity is "creditnote" (like "packingslip").
 var CreditNotePosted = events.Type("billing", "creditnote", "posted", 1)
 
-// InvoicePostedLine is one posted line.
+// InvoicePostedLine is one posted line. A shipment or consolidated invoice line
+// also names its order line, product and packing slip line, so sales and
+// fulfillment can mark them invoiced (AC-29.5) and revrec can find the
+// contract; the fields are absent on free-text lines and credit notes.
 type InvoicePostedLine struct {
-	LineNo         int    `json:"line_no"`
-	Description    string `json:"description"`
-	Qty            string `json:"qty"`
-	Net            string `json:"net"`
-	Tax            string `json:"tax"`
-	TaxCode        string `json:"tax_code"`
-	RevenueAccount string `json:"revenue_account"`
+	LineNo            int    `json:"line_no"`
+	Description       string `json:"description"`
+	Qty               string `json:"qty"`
+	Net               string `json:"net"`
+	Tax               string `json:"tax"`
+	TaxCode           string `json:"tax_code"`
+	RevenueAccount    string `json:"revenue_account"`
+	OrderLineID       string `json:"order_line_id,omitempty"`
+	Product           string `json:"product,omitempty"`
+	PackingSlipLineID string `json:"packing_slip_line_id,omitempty"`
 }
 
 // InvoicePostedTotals are the header amounts as decimal strings.
