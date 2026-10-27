@@ -7,9 +7,33 @@ const Context = "planning"
 // PlanCompleted is published when a version becomes the current version of its plan.
 var PlanCompleted = events.Type(Context, "plan", "completed", 1)
 
+// PlannedOrderFirmed is published once per planned order when it is firmed
+// (FR-22.10). The PRD names it planned-order.firmed.v1; the kernel's type rule
+// admits only lowercase letters and digits in the entity segment.
+var PlannedOrderFirmed = events.Type(Context, "plannedorder", "firmed", 1)
+
 // All lists the event types this service publishes.
 func All() []string {
-	return []string{PlanCompleted}
+	return []string{PlanCompleted, PlannedOrderFirmed}
+}
+
+// PlannedOrderFirmedData is the data member of plannedorder.firmed.v1. The
+// owning context (purchasing for purchase, production for production and
+// transfer orders) creates the target order with target_id; planned orders of
+// one group share it and become the lines of one purchase order.
+type PlannedOrderFirmedData struct {
+	PlannedOrderID string  `json:"planned_order_id"`
+	PlanVersionID  string  `json:"plan_version_id"`
+	BatchID        string  `json:"batch_id"`
+	OrderType      string  `json:"order_type"`
+	TargetType     string  `json:"target_type"`
+	TargetID       string  `json:"target_id"`
+	ItemID         string  `json:"item_id"`
+	SiteID         string  `json:"site_id"`
+	VendorID       *string `json:"vendor_id"`
+	Qty            string  `json:"qty"`
+	OrderDate      string  `json:"order_date"`
+	DeliveryDate   string  `json:"delivery_date"`
 }
 
 // PlanCompletedData is the data member of plan.completed.v1.

@@ -5,7 +5,8 @@ export const PLANNING_API = "/api/v1/planning";
 
 export const OrderType = z.enum(["purchase", "production", "transfer"]);
 export const OrderStatus = z.enum(["unprocessed", "approved", "firmed", "deleted"]);
-export const MessageAction = z.enum(["delay", "postpone", "advance", "shortage"]);
+export const MessageAction = z.enum(["delay", "postpone", "advance", "shortage", "cancel", "decrease"]);
+export const TargetType = z.enum(["purchase-order", "production-order", "transfer-order"]);
 
 export const PlannedOrder = z.object({
   id: z.string(),
@@ -23,6 +24,9 @@ export const PlannedOrder = z.object({
   /** The order's ETag: send it back as If-Match on PATCH and DELETE. */
   version: z.number().int().min(1),
   vendorId: z.string().nullish(),
+  /** Set once the order is firmed: the purchase, production or transfer order it became (FR-22.10). */
+  firmedTargetType: TargetType.nullish(),
+  firmedTargetId: z.string().nullish(),
 });
 export type PlannedOrder = z.infer<typeof PlannedOrder>;
 
@@ -242,6 +246,48 @@ export async function updatePlannedOrder(id: string, version: number, patch: Pla
 /** Deletes an open planned order under If-Match; the service answers 204. */
 export async function deletePlannedOrder(id: string, version: number): Promise<void> {
   await send(`/planned-orders/${encodeURIComponent(id)}`, { method: "DELETE", headers: { "If-Match": ifMatch(version) } });
+}
+
+/** How planned purchase orders of one site and vendor merge into purchase orders when firmed (4.22.13). */
+export const FirmGrouping = z.enum(["vendor-date", "vendor-week", "vendor", "none"]);
+export type FirmGrouping = z.infer<typeof FirmGrouping>;
+
+/** The service accepts at most this many planned orders in one firming (4.22.5). */
+export const MAX_FIRM_BATCH = 1000;
+
+export const FirmedGroup = z.object({
+  targetType: TargetType,
+  targetId: z.string(),
+  orderType: OrderType,
+  siteId: z.string(),
+  vendorId: z.string().nullish(),
+  deliveryDate: z.string(),
+  qty: z.string(),
+  plannedOrderIds: z.array(z.string()),
+});
+export type FirmedGroup = z.infer<typeof FirmedGroup>;
+
+export const FirmBatch = z.object({
+  id: z.string(),
+  grouping: FirmGrouping,
+  firmed: z.number().int(),
+  groups: z.array(FirmedGroup),
+});
+export type FirmBatch = z.infer<typeof FirmBatch>;
+
+/**
+ * Firms planned orders of the current version into purchase, production and
+ * transfer orders (FR-22.10). All or none are firmed. Send the same
+ * Idempotency-Key when retrying the same firming; 409 `PLAN-0002` means an
+ * order is already firmed, 409 `PLAN-ORDER-NOT-EDITABLE` that one is deleted or
+ * superseded.
+ */
+export async function firmPlannedOrders(plannedOrderIds: string[], grouping: FirmGrouping, idempotencyKey: string): Promise<FirmBatch> {
+  return request(`/planned-orders:firm`, FirmBatch, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ plannedOrderIds, grouping }),
+  });
 }
 
 export interface ForecastQuery {

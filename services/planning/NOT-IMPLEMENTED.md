@@ -1,6 +1,6 @@
-# NOT-IMPLEMENTED (PSG-22, planning service, slices 1 to 3)
+# NOT-IMPLEMENTED (PSG-22, planning service, slices 1 to 4)
 
-Every ticket deliverable and acceptance criterion that slices 1 to 3 do not
+Every ticket deliverable and acceptance criterion that slices 1 to 4 do not
 build. Slice 2 added the freeze, action and futures fences (BR-22.4),
 planned-order maintenance (FR-22.11) and forecast cells with reduction that a
 run nets as demand (FR-22.8, AC-22.6). Slice 3 added five stateless calculators
@@ -9,7 +9,10 @@ run nets as demand (FR-22.8, AC-22.6). Slice 3 added five stateless calculators
 forecast consumption, the supply schedule with inventory projection, and
 shelf-life FEFO allocation. They hold the rules; persistence of buffers, quota
 arrangements, strategies and batches and their use inside a plan run are the
-open part of deliverables 7 to 9 below.
+open part of deliverables 7 to 9 below. Slice 4 added firming with grouping and
+the `plannedorder.firmed.v1` event (FR-22.10, BR-22.9, AC-22.8), Cancel and
+Decrease messages beyond the coverage time fence (FR-22.7), and the version
+purge (`PLANNING_MAX_VERSIONS`).
 Status is `later slice of PSG-22` (planned work in this wave), `partly built`
 (the stated part exists and is tested; the rest is named) or `handoff`
 (needs another wave or owner; the handoff is recorded here because this wave may
@@ -20,9 +23,9 @@ not edit that code).
 | # | Deliverable | Status | Reason |
 |---|---|---|---|
 | 1 | Freeze, action and futures time fences (BR-22.4) | built | `coverage.freezeFenceDays`, `actionFenceDays`, `futuresFenceDays` on the run input; tests in `domain/fences_test.go` (with a property test that frozen demand is pegged or reported short). |
-| 1 | Firming time fence: planned orders inside it are auto-firmed (BR-22.4) | later slice of PSG-22 | Depends on firming (deliverable 3). |
+| 1 | Firming time fence: planned orders inside it are auto-firmed (BR-22.4) | later slice of PSG-22 | Firming exists as a command; auto-firming inside a run needs the run to carry firmed orders of the previous version forward as supply (see deliverable 3). |
 | 1 | Coverage groups as persisted setup carrying the fences (FR-22.2) | later slice of PSG-22 | Fences travel per item on the run input, like the rest of the coverage. |
-| 1 | Coverage time fence (default 100 days) and `PLANNING_HORIZON_DAYS` | later slice of PSG-22 | Every requirement in the snapshot is netted; nothing beyond a horizon is ignored yet. |
+| 1 | Coverage time fence (default 100 days) and `PLANNING_HORIZON_DAYS` | partly built | `coverage.coverageFenceDays` on the run input drives Cancel and Decrease (deliverable 3). Not built: requirements beyond the fence or the horizon are still netted, and the 100-day default is not applied (0 means off) because a default fence that raises Cancel without also limiting netting would flag supply the plan still counts on. |
 | 1 | Safety-stock policy `first-issue` (BR-22.1 step 4, BR-22.5) | later slice of PSG-22 | Only policy `today` is built: safety stock is a demand at today, replenished at today + lead time. |
 | 1 | Issue and reorder margins (FR-22.5) | later slice of PSG-22 | Only the receipt margin (`coverage.marginDays`) is applied. |
 | 1 | Vendor-specific purchase lead time from trade agreements (FR-22.5) and default vendor on planned purchases (`PLAN-0008`) | handoff (PSG-17) | Vendors and trade agreements are not modelled; the item lead time applies. |
@@ -34,12 +37,12 @@ not edit that code).
 | 2 | Sales quantity per forecast period taken from open sales orders | handoff (PSG-27) | Until sales lines reach the planning service, `salesQty` is entered on each forecast cell; the run does not re-reduce the forecast against the sales lines in its snapshot. |
 | 2 | Forecast allocation keys (FR-22.8) and forecast UoM conversion (BR-22.10) | later slice of PSG-22 | Cells are per item, site and period in the inventory UoM. |
 | 2 | Dependent demand explosion from BOM and route versions (BR-22.1 step 9) | later slice of PSG-22 | Components are accepted on the run input; BOM and route version effectivity is not resolved. |
-| 3 | Firming into production, purchase and transfer orders (FR-22.10, BR-22.9) | later slice of PSG-22 | Needs production-order (PSG-21) and purchase-order (PSG-17) targets and the firming saga. |
+| 3 | Firming into production, purchase and transfer orders (FR-22.10, BR-22.9) | partly built | `POST /planned-orders:firm` (1 to 1,000 ids, Idempotency-Key, all or nothing) marks each order `firmed` with the id and type of its target order, stores the batch for replay, and writes one `plannedorder.firmed.v1` per order (item, site, vendor, qty, dates, target id) to the outbox in the same transaction; 409 `PLAN-0002` on an order firmed before. Not built: the target orders themselves and the saga compensation of BR-22.9 (handoff PSG-17 purchase orders, PSG-21 production and transfer orders: they create the order with the given id from the event; planning does not yet consume a failure event to un-firm), production `:estimate`, and re-pointing pegging to the created order (a firmed planned order keeps the pegging of its version). |
 | 3 | Planned-order maintenance: PATCH change qty/date/vendor, approve, delete (FR-22.11) | built | `PATCH`/`DELETE /planned-orders/{id}` under If-Match on open orders of the current version; delete is a soft delete. A changed quantity is not re-pegged, so after an edit the explain tree shows the pegging of the planned quantity. |
-| 3 | Approved orders "become firmed on next run" (FR-22.11) | later slice of PSG-22 | A run replaces the whole version from its inline snapshot and does not carry approved or edited orders of the previous version forward; needs firming and the source-context snapshot. |
+| 3 | Approved orders "become firmed on next run" (FR-22.11), and firmed orders as supply of the next run (FR-22.1) | later slice of PSG-22 | A run replaces the whole version from its inline snapshot and does not carry approved, edited or firmed orders of the previous version forward. Until the target orders reach the snapshot as receipts (source contexts, see deliverable 2), send them as `receipts` on the run. |
 | 3 | Vendor check against w17 vendors on PATCH | handoff (PSG-17) | `vendorId` is checked as a UUID and only on purchase orders; whether the vendor exists is not checked. |
-| 3 | Order grouping on firm (vendor, vendor-date, vendor-week) | later slice of PSG-22 | Depends on firming. |
-| 3 | Decrease, increase, cancel and derived action messages for existing supply (FR-22.7) | later slice of PSG-22 | Built: delay (with propagation to parents and to the sales line or forecast), postpone, advance and shortage, gated by the action and futures fences. Unpegged existing supply is pegged to `surplus` and gets no Cancel/Decrease message yet. |
+| 3 | Order grouping on firm (vendor, vendor-date, vendor-week) | built | `domain.GroupForFirming`: planned purchases of one site and vendor merge per grouping (weeks run Monday to Sunday); production and transfer orders never merge. AC-22.8 is `TestGroupForFirming_AC228` and the store test `TestFirmPlannedOrders`. The legal-entity default is the request default `vendor-date`; the parameter itself is not persisted (setup, see "Coverage groups API"). |
+| 3 | Decrease, increase, cancel and derived action messages for existing supply (FR-22.7) | partly built | Built: delay (with propagation to parents and to the sales line or forecast), postpone, advance, shortage, and Cancel/Decrease for receipts at or beyond the coverage time fence whose quantity is not (fully) pegged, inside the action fence. Not built: Increase (a receipt is never raised; the shortfall becomes a new planned order) and Derived (a parent's message passed to its components). |
 | 3 | Kanban planned-order type (FR-22.3) | later slice of PSG-22 | Order types purchase, production and transfer are planned; kanban needs wave 24 kanban rules. |
 | 3 | Planned transfer demand at the from-warehouse (BR-22.7) | later slice of PSG-22 | Transfer planned orders are proposed, but no issue demand is created at a source warehouse; warehouse scopes are not modelled (deliverable 8). |
 | 3 | Message catalog codes on messages (PLAN-0006, PLAN-0007, PLAN-0010 to PLAN-0015) | later slice of PSG-22 | Messages carry an action (`delay`, `postpone`, `advance`, `shortage`), not a catalog code; the user texts of 4.22.18 are not rendered yet. |
@@ -66,17 +69,18 @@ not edit that code).
 | Dynamic net-change plan with 60 s debounce (FR-22.1, BR-22.6) | later slice of PSG-22 | Needs the event consumer and reach-set computation. |
 | Plan run as a Temporal batch job; nightly 01:00 static plan | later slice of PSG-22 | Slice 1 runs synchronously in the request, which is not the target for 50k items. |
 | Pointer swap on success, partitions per PlanVersion | partly built | Slice 1 runs in one transaction, marks the new version current and demotes the old one. Per-version partitions are not built. |
-| Version purge beyond `PLANNING_MAX_VERSIONS` (20) | later slice of PSG-22 | Nightly purge job not built. |
-| Firm and run plan API: `POST /planned-orders:firm` | later slice of PSG-22 | See deliverable 3. |
+| Version purge beyond `PLANNING_MAX_VERSIONS` (20) | partly built | Each run deletes versions beyond the newest `PLANNING_MAX_VERSIONS` (env, 2 to 100, default 20) with their rows, in the run transaction; versions holding a firmed planned order are kept. Not built: the daily 03:00 job, partition drops (no partitions yet) and the per-plan parameter (one setting per deployment). |
+| Firm planned orders API: `POST /planned-orders:firm` | built | Duty `planning.order.firm`. The PRD's segregation-of-duties rule (with *Approve purchase orders* above the w17 approval limit) is a handoff to PSG-17, which owns approval limits. |
+| `:firm` on a simulation version refused with 409 `PLAN-0003` | later slice of PSG-22 | Simulation versions (deliverable 6) do not exist yet, so every version is operational. |
 | Net requirements MD04 view `GET /net-requirements` (FR-22.12, AC-22.10) | later slice of PSG-22 | Requirement (ReqTrans) rows and PAB per period are not persisted yet; only planned orders, pegging and messages are. |
 | Plan scope filters: site, item group, planner, LLC range, `mps` scope (FR-22.13) | later slice of PSG-22 | A run plans the whole snapshot it is given. |
 | Version-to-version diff API (FR-22.14) | later slice of PSG-22 | Each version stores its plan hash and input hash; the diff endpoint is not built. |
 | UoM conversion of forecast lines and inventory UoM (BR-22.10) | later slice of PSG-22 | Quantities are taken as given (decimal, 6 places in the database). |
 | Coverage groups API `GET /coverage-groups` and item coverage setup | later slice of PSG-22 | Setup entities are not persisted; coverage is passed on the run input. |
-| Events `plan.started.v1`, `planned-order.firmed.v1`, `message.raised.v1`, `forecast.published.v1` | later slice of PSG-22 | Only `plan.completed.v1` is emitted (in the outbox, same transaction). |
+| Events `plan.started.v1`, `message.raised.v1`, `forecast.published.v1` | later slice of PSG-22 | `plan.completed.v1` and `plannedorder.firmed.v1` are emitted (outbox, same transaction). The PRD spells the latter `planned-order.firmed.v1`; the kernel's event type rule admits no hyphen in the entity segment. |
 | Feature flags `planning.dynamic`, `planning.statistical-forecast`, `planning.mps-scope` | later slice of PSG-22 | Not read yet. |
-| Plan run summary email and firming report | later slice of PSG-22 | Depends on firming. |
-| Sanctions screening block on firming (w48) | handoff (PSG-48) | Depends on firming. |
+| Plan run summary email and firming result report (PDF, email; 4.22.15) | later slice of PSG-22 | The firming response and the web module list the target orders of a batch; no document or email is rendered. |
+| Sanctions screening block on firming (w48) | handoff (PSG-48) | Firming does not consult screening; PSG-48 owns the screening status of vendors. |
 
 ## Acceptance criteria
 
@@ -87,7 +91,7 @@ not edit that code).
 | AC3: pegging explains 100% of each planned order | built | Property test `TestRun_PropertyPeggingExplainsSupply`. |
 | AC4: match frePPLe on a shared dataset | later slice of PSG-22 | Optional; needs the 50k dataset and a frePPLe export. |
 | AC5: every deliverable has code or a reason here | built | This file. |
-| AC6: `go vet`, `go test`, OpenAPI and AsyncAPI match, chart lints | built | Verified in this slice; the calculators emit no event, so AsyncAPI is unchanged. |
+| AC6: `go vet`, `go test`, OpenAPI and AsyncAPI match, chart lints | built | Verified in this slice. `TestOpenAPI_MatchesRoutes` checks routes and duties, `TestAsyncAPIDeclaresEveryEvent` the published event types. |
 | AC-22.3 identical hash across three runs of the 50k dataset | later slice of PSG-22 | Determinism of the hash is covered at unit scale. |
 | AC-22.9 second run returns 409 `PLAN-0001` while one is running | built (synchronous form) | The store takes `FOR UPDATE NOWAIT` on the plan row; a run that cannot take it gets 409 `PLAN-0001` (`TestRunPlan_RefusesConcurrentRun`). With runs synchronous in slice 1, "running" means a run transaction in flight; the `running` version status arrives with the Temporal job. |
 | AC-22.1 BR-22.2 worked example, including the 7-day delay message on the sales line | built | `TestRun_BR222WorkedExample`, `TestRun_BR222DelayPropagatesToSalesLine`. |
@@ -99,13 +103,14 @@ not edit that code).
 | AC-22.13 BR-22.12 quota picks vendor B, B's allocated qty 200 after firming | partly built | `TestAllocateWhole_LowestRatingWins` and `TestQuotaAllocate_WholeGoesToLowestRating` (B chosen, rating 5.00 after). Allocated qty after firming needs firming and persisted arrangements. |
 | AC-22.14 assemble-to-order gross requirement 100, not 140 | partly built | `TestConsumeForecast_AC2214AssembleToOrder` and the API test; the plan run does not apply strategies yet. |
 | AC-22.15 short shelf-life batch not pegged, planned order covers the demand | partly built | `TestAllocateBatches_AC2215ShortShelfLifeNotPegged` and `TestShelfLife_AC2215` (no allocation, shortfall 30); the planned order for the shortfall needs engine integration. |
-| AC-22.8, AC-22.10, AC-22.11, AC-22.16 | later slice of PSG-22 | Depend on firming, net requirements, scenarios and warehouse scopes above. |
+| AC-22.8 three approved purchases of one vendor and date firm into one PO with three lines, each firmed with the target id | built | `TestGroupForFirming_AC228` (domain) and `TestFirmPlannedOrders` (store, database). The PO itself is created by PSG-17 from the events. |
+| AC-22.10, AC-22.11, AC-22.16 | later slice of PSG-22 | Depend on net requirements, scenarios and warehouse scopes above. |
 
 ## Verification
 
 | Item | Status | Reason |
 |---|---|---|
-| Database-backed tests and `0001_init.sql`, `0002_forecast_and_maintenance.sql` on an empty database | built | Run in review against Postgres 16 with an admin URL and a non-superuser app role (`PASSAGE_TEST_DATABASE_URL`, `PASSAGE_TEST_APP_DATABASE_URL`). CI must set both. |
+| Database-backed tests and `0001_init.sql`, `0002_forecast_and_maintenance.sql`, `0003_firming.sql` on an empty database | built | Run in review against Postgres 16 with an admin URL and a non-superuser app role (`PASSAGE_TEST_DATABASE_URL`, `PASSAGE_TEST_APP_DATABASE_URL`). CI must set both. |
 | Pytest run of `services/forecast-py` | built | Run in review with Python 3.12; CI wiring for Python services belongs to the platform owner. |
 
 ## Reconciliation and test plan (PRD 4.22.9)
@@ -113,7 +118,7 @@ not edit that code).
 | Test | Status | Reason |
 |---|---|---|
 | PAB identity property per item and day | partly built | `TestProperty_ProjectionPABIdentity` holds the recurrence per bucket of the supply-schedule projection; the same check over a stored plan version waits for net-requirements persistence. |
-| Firming saga contract tests | later slice of PSG-22 | Depends on firming. |
+| Firming saga contract tests (compensation on injected failure) | handoff (PSG-17, PSG-21) | Planning's half is tested (one event per order in the outbox, all-or-nothing refusal). The consumers that create the target orders and report a failure are not built. |
 | Forecast model unit tests (Python) | built | `services/forecast-py/tests`. |
 | frePPLe comparison | later slice of PSG-22 | Optional. |
 | Reconciliation Σ supply − Σ demand = closing PAB | later slice of PSG-22 | Pending net-requirements persistence. |
@@ -122,8 +127,8 @@ not edit that code).
 ## Handoffs to other waves
 
 - PSG-16 inventory: on-hand by dimension, batch expiry (FR-22.20), warehouse stock segregation (FR-22.19).
-- PSG-17 procurement: purchase order target for firming; trade-agreement lead times and vendor price.
-- PSG-21 manufacturing: production order target; route lead times; subcontractor operations.
+- PSG-17 procurement: create the purchase order (lines = planned orders sharing `target_id`) from `plannedorder.firmed.v1`, report a failure for the saga compensation, approval limits on firming; trade-agreement lead times and vendor price.
+- PSG-21 manufacturing: create the production or transfer order from `plannedorder.firmed.v1` (saga as above); route lead times; subcontractor operations.
 - PSG-27 sales: sales-line demand events (ref type `sales-line`).
 - PSG-9 product: BOM versions and low-level code change events.
 - PSG-6 calendars: site working calendar.

@@ -31,6 +31,7 @@ const (
 	dutyRead             = "planning.read"
 	dutyMaintainOrders   = "planning.order.maintain"    // Maintain planned orders
 	dutyMaintainForecast = "planning.forecast.maintain" // Maintain forecasts
+	dutyFirmOrders       = "planning.order.firm"        // Firm planned orders
 
 	idempotencyKey = "Idempotency-Key"
 	dateLayout     = "2006-01-02"
@@ -75,6 +76,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/planned-orders/{id}", a.getPlannedOrder)
 	r.With(authz.RequireDuty(dutyMaintainOrders)).Patch("/v1/planning/planned-orders/{id}", a.patchPlannedOrder)
 	r.With(authz.RequireDuty(dutyMaintainOrders)).Delete("/v1/planning/planned-orders/{id}", a.deletePlannedOrder)
+	r.With(authz.RequireDuty(dutyFirmOrders)).Post("/v1/planning/planned-orders:firm", a.firmPlannedOrders)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/planned-orders/{id}/pegging", a.pegging)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/messages", a.listMessages)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/forecasts/{modelCode}/lines", a.getForecastLines)
@@ -152,6 +154,9 @@ type coverageDTO struct {
 	FreezeFenceDays  int `json:"freezeFenceDays"`
 	ActionFenceDays  int `json:"actionFenceDays"`
 	FuturesFenceDays int `json:"futuresFenceDays"`
+	// CoverageFenceDays is the coverage time fence (FR-22.2): surplus
+	// existing supply at or beyond it raises Cancel or Decrease; 0 raises neither.
+	CoverageFenceDays int `json:"coverageFenceDays"`
 }
 
 type lotDTO struct {
@@ -201,7 +206,8 @@ func (req runRequest) validate() map[string]string {
 		if c.PeriodDays < 0 || c.MarginDays < 0 || c.PositiveDays < 0 || c.NegativeDays < 0 {
 			fields[prefix+".coverage"] = "periodDays, marginDays, positiveDays and negativeDays must be 0 or more"
 		}
-		for name, days := range map[string]int{"freezeFenceDays": c.FreezeFenceDays, "actionFenceDays": c.ActionFenceDays, "futuresFenceDays": c.FuturesFenceDays} {
+		for name, days := range map[string]int{"freezeFenceDays": c.FreezeFenceDays, "actionFenceDays": c.ActionFenceDays,
+			"futuresFenceDays": c.FuturesFenceDays, "coverageFenceDays": c.CoverageFenceDays} {
 			if days < 0 || days > 3650 {
 				fields[prefix+".coverage."+name] = "must be 0 to 3650"
 			}
@@ -241,7 +247,8 @@ func (req runRequest) toDomain(asOf time.Time) ([]domain.Item, error) {
 			PositiveDays: it.Coverage.PositiveDays, NegativeDays: it.Coverage.NegativeDays,
 			ReorderMin: it.Coverage.ReorderMin, ReorderMax: it.Coverage.ReorderMax,
 			FreezeDays: it.Coverage.FreezeFenceDays, ActionDays: it.Coverage.ActionFenceDays, FuturesDays: it.Coverage.FuturesFenceDays,
-			OnHand: it.OnHand, SafetyStock: it.SafetyStock, OrderType: it.OrderType, LeadTimeDays: it.LeadTimeDays,
+			CoverageDays: it.Coverage.CoverageFenceDays,
+			OnHand:       it.OnHand, SafetyStock: it.SafetyStock, OrderType: it.OrderType, LeadTimeDays: it.LeadTimeDays,
 			MinOrderQty: it.Lot.MinOrderQty, MultipleQty: it.Lot.MultipleQty, MaxOrderQty: it.Lot.MaxOrderQty, StandardQty: it.Lot.StandardQty,
 		}
 		var err error
@@ -570,9 +577,9 @@ func (a *API) listMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch action {
-	case "", domain.ActionDelay, domain.ActionPostpone, domain.ActionAdvance, domain.ActionShortage:
+	case "", domain.ActionDelay, domain.ActionPostpone, domain.ActionAdvance, domain.ActionShortage, domain.ActionCancel, domain.ActionDecrease:
 	default:
-		validationFailed(w, r, map[string]string{"action": "must be delay, postpone, advance or shortage"})
+		validationFailed(w, r, map[string]string{"action": "must be delay, postpone, advance, shortage, cancel or decrease"})
 		return
 	}
 	limit, ok := limitParam(w, r)

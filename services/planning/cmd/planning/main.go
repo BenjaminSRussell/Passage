@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -45,6 +46,10 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if databaseURL == "" {
 		return errors.New("DATABASE_URL is required")
 	}
+	maxVersions, err := intEnv(getenv, "PLANNING_MAX_VERSIONS", store.DefaultMaxVersions, store.MinMaxVersions, store.MaxMaxVersions)
+	if err != nil {
+		return err
+	}
 	pool, err := dbx.Connect(ctx, databaseURL)
 	if err != nil {
 		return fmt.Errorf("connect database: %w", err)
@@ -55,7 +60,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
-	a := api.New(store.New(pool))
+	a := api.New(store.New(pool).WithMaxVersions(maxVersions))
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
@@ -74,4 +79,17 @@ func addr(getenv func(string) string, key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// intEnv reads an integer setting in [lo, hi], or fallback when it is unset.
+func intEnv(getenv func(string) string, key string, fallback, lo, hi int) (int, error) {
+	raw := getenv(key)
+	if raw == "" {
+		return fallback, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < lo || n > hi {
+		return 0, fmt.Errorf("%s must be an integer from %d to %d, got %q", key, lo, hi, raw)
+	}
+	return n, nil
 }

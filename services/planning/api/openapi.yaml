@@ -210,6 +210,52 @@ paths:
         '409': {$ref: '#/components/responses/Problem'}
         '412': {$ref: '#/components/responses/Problem'}
         '428': {$ref: '#/components/responses/Problem'}
+  /v1/planning/planned-orders:firm:
+    post:
+      operationId: firmPlannedOrders
+      summary: Firm up to 1,000 planned orders of current plan versions into purchase, production and transfer orders (FR-22.10, BR-22.9)
+      description: >-
+        All orders are firmed or none. Planned purchase orders of one site and vendor merge into one purchase order per
+        grouping; production and transfer orders are never merged. Each order becomes firmed with the id of its target
+        order and one dev.passage.planning.plannedorder.firmed.v1 per order is published through the outbox; the owning
+        context creates the target order with that id.
+      x-passage-duty: planning.order.firm
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/FirmRequest'}
+      responses:
+        '201':
+          description: Orders firmed; the target orders to create
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FirmBatch'}
+        '200':
+          description: 'Replay of an earlier firming with the same Idempotency-Key (Idempotent-Replayed: true)'
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FirmBatch'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404':
+          description: PLAN-ORDER-NOT-FOUND (an id is not a planned order of the tenant)
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '409':
+          description: PLAN-0002 (an order is already firmed) or PLAN-ORDER-NOT-EDITABLE (deleted, or not in the current version)
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+        '422':
+          description: idempotency_key_reuse (the key was used with another request)
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
   /v1/planning/planned-orders/{id}/pegging:
     get:
       operationId: getPegging
@@ -243,7 +289,7 @@ paths:
           schema: {type: string}
         - name: action
           in: query
-          schema: {type: string, enum: [delay, postpone, advance, shortage]}
+          schema: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease]}
         - $ref: '#/components/parameters/Limit'
       responses:
         '200':
@@ -735,6 +781,7 @@ components:
             freezeFenceDays: {type: integer, minimum: 0, maximum: 3650, description: 'BR-22.4: no planned orders for requirements inside; the uncovered rest is a shortage message. 0 freezes nothing.'}
             actionFenceDays: {type: integer, minimum: 0, maximum: 3650, description: 'BR-22.4: advance/postpone only for receipts inside. 0 is unlimited.'}
             futuresFenceDays: {type: integer, minimum: 0, maximum: 3650, description: 'BR-22.4: delay messages only for requirements inside. 0 is unlimited.'}
+            coverageFenceDays: {type: integer, minimum: 0, maximum: 3650, description: 'FR-22.2 coverage time fence: existing supply at or beyond it that demand does not need raises cancel (nothing pegged) or decrease (by the unpegged part), inside the action fence. 0 raises neither.'}
         onHand: {type: string, description: Decimal string}
         safetyStock: {type: string, description: Decimal string}
         orderType: {type: string, enum: [purchase, production, transfer]}
@@ -795,6 +842,40 @@ components:
         status: {type: string, enum: [unprocessed, approved, firmed, deleted]}
         version: {type: integer, minimum: 1, description: Same as the ETag}
         vendorId: {type: string, format: uuid, description: Set by maintenance on purchase orders}
+        firmedTargetType: {type: string, enum: [purchase-order, production-order, transfer-order], description: Set once the order is firmed}
+        firmedTargetId: {type: string, format: uuid, description: Id of the order it became (FR-22.10); orders of one purchase group share it}
+    FirmRequest:
+      type: object
+      required: [plannedOrderIds]
+      properties:
+        plannedOrderIds:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          uniqueItems: true
+          items: {type: string, format: uuid}
+        grouping: {type: string, enum: [none, vendor, vendor-date, vendor-week], default: vendor-date, description: 'How planned purchase orders of one site and vendor merge: not at all, all, per delivery date, or per Monday-to-Sunday week'}
+    FirmBatch:
+      type: object
+      required: [id, grouping, firmed, groups]
+      properties:
+        id: {type: string, format: uuid}
+        grouping: {type: string, enum: [none, vendor, vendor-date, vendor-week]}
+        firmed: {type: integer, description: Planned orders firmed}
+        groups:
+          type: array
+          items:
+            type: object
+            required: [targetType, targetId, orderType, siteId, vendorId, deliveryDate, qty, plannedOrderIds]
+            properties:
+              targetType: {type: string, enum: [purchase-order, production-order, transfer-order]}
+              targetId: {type: string, format: uuid}
+              orderType: {type: string, enum: [purchase, production, transfer]}
+              siteId: {type: string, format: uuid}
+              vendorId: {type: [string, 'null'], format: uuid}
+              deliveryDate: {type: string, format: date, description: Earliest delivery date of the group}
+              qty: {type: string, description: Sum of the grouped planned quantities}
+              plannedOrderIds: {type: array, items: {type: string, format: uuid}}
     PlannedOrderPatch:
       type: object
       minProperties: 1
@@ -876,11 +957,11 @@ components:
     Message:
       type: object
       properties:
-        action: {type: string, enum: [delay, postpone, advance, shortage]}
+        action: {type: string, enum: [delay, postpone, advance, shortage, cancel, decrease]}
         itemId: {type: string, format: uuid}
         supplyRef: {type: string, description: Planned order number or receipt ref; empty for a shortage}
         demandRef: {type: string, description: Demand the message is about; empty when none}
-        suggestedDate: {type: string, format: date, description: 'delay: expected date; postpone/advance: suggested receipt date; shortage: demand date'}
+        suggestedDate: {type: string, format: date, description: 'delay: expected date; postpone/advance: suggested receipt date; shortage: demand date; cancel/decrease: receipt date'}
         delayDays: {type: integer}
         qty: {type: string}
     Problem:

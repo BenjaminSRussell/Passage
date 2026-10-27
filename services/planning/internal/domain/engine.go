@@ -38,6 +38,8 @@ const (
 	ActionPostpone = "postpone"
 	ActionAdvance  = "advance"
 	ActionShortage = "shortage"
+	ActionCancel   = "cancel"
+	ActionDecrease = "decrease"
 
 	PrioritySales     = 1
 	PriorityForecast  = 2
@@ -80,14 +82,18 @@ type Item struct {
 	// days from today. FreezeDays 0 freezes nothing; ActionDays and
 	// FuturesDays 0 mean the fence is unlimited.
 	FreezeDays, ActionDays, FuturesDays int
-	ReorderMin, ReorderMax              decimal.Decimal
-	OnHand, SafetyStock                 decimal.Decimal
-	OrderType                           string
-	LeadTimeDays                        int
-	MinOrderQty, MultipleQty            decimal.Decimal
-	MaxOrderQty, StandardQty            decimal.Decimal
-	Demand, Receipts                    []Requirement
-	Components                          []BOMLine
+	// CoverageDays is the coverage time fence of FR-22.2 in days from today.
+	// Existing supply dated at or beyond it that is not (fully) pegged to
+	// demand raises Cancel or Decrease (BR-22.1 step 10). 0 raises neither.
+	CoverageDays             int
+	ReorderMin, ReorderMax   decimal.Decimal
+	OnHand, SafetyStock      decimal.Decimal
+	OrderType                string
+	LeadTimeDays             int
+	MinOrderQty, MultipleQty decimal.Decimal
+	MaxOrderQty, StandardQty decimal.Decimal
+	Demand, Receipts         []Requirement
+	Components               []BOMLine
 }
 
 // PlannedOrder is a proposed purchase, production or transfer order.
@@ -212,7 +218,7 @@ func validate(it *Item) error {
 	if it.ID == "" || it.LeadTimeDays < 0 || it.MarginDays < 0 || it.OnHand.IsNegative() || it.SafetyStock.IsNegative() {
 		return fmt.Errorf("%w: %q lead time, margin, on-hand or safety stock", ErrInvalidItem, it.ID)
 	}
-	if it.FreezeDays < 0 || it.ActionDays < 0 || it.FuturesDays < 0 {
+	if it.FreezeDays < 0 || it.ActionDays < 0 || it.FuturesDays < 0 || it.CoverageDays < 0 {
 		return fmt.Errorf("%w: %q time fences must not be negative", ErrInvalidItem, it.ID)
 	}
 	for _, d := range it.Demand {
@@ -574,7 +580,9 @@ func (L *ledger) order(t int, need decimal.Decimal) error {
 	return nil
 }
 
-// finish pegs leftover supply to surplus and raises receipt postpone/advance messages.
+// finish pegs leftover supply to surplus and raises the receipt messages:
+// postpone/advance for pegged supply, cancel/decrease for surplus supply
+// beyond the coverage time fence.
 func (L *ledger) finish(receipts []Requirement) {
 	it := L.item
 	for _, a := range L.avail {
@@ -584,19 +592,31 @@ func (L *ledger) finish(receipts []Requirement) {
 	}
 	for _, r := range receipts {
 		earliest, earliestRef, found := 0, "", false
+		pegged := decimal.Zero
 		for _, p := range L.pegs {
 			if p.SupplyRef != r.Ref || p.DemandRefType == RefSurplus {
 				continue
 			}
+			pegged = pegged.Add(p.Qty)
 			if !found || p.DemandDate < earliest {
 				earliest, earliestRef, found = p.DemandDate, p.DemandRef, true
 			}
 		}
-		if !found {
-			continue
-		}
 		if !withinFence(L.rs.today, r.Date, it.ActionDays) {
 			// BR-22.4: action messages only for supply inside the action fence.
+			continue
+		}
+		// BR-22.1 step 10: unpegged supply beyond the coverage time fence
+		// raises Cancel (nothing pegged) or Decrease (by the unpegged part).
+		// Inside the fence surplus stays as it is (BR-22.2: PO-1's 400).
+		if surplus := r.Qty.Sub(pegged); surplus.IsPositive() && beyondFence(L.rs.today, r.Date, it.CoverageDays) {
+			if found {
+				L.rs.res.Messages = append(L.rs.res.Messages, Message{Action: ActionDecrease, ItemID: it.ID, SupplyRef: r.Ref, DemandRef: earliestRef, SuggestedDate: r.Date, Qty: surplus})
+			} else {
+				L.rs.res.Messages = append(L.rs.res.Messages, Message{Action: ActionCancel, ItemID: it.ID, SupplyRef: r.Ref, SuggestedDate: r.Date, Qty: surplus})
+			}
+		}
+		if !found {
 			continue
 		}
 		suggested := earliest - it.MarginDays
@@ -712,6 +732,12 @@ func (rs *runState) propagateFutures(levels []*Item) {
 // A freeze of 0 days freezes nothing.
 func frozen(today, day, n int) bool {
 	return n > 0 && day-today < n
+}
+
+// beyondFence reports whether day lies at or beyond a coverage time fence of n
+// days from today. A fence of 0 days is off: nothing lies beyond it.
+func beyondFence(today, day, n int) bool {
+	return n > 0 && day-today >= n
 }
 
 // withinFence reports whether day lies inside an action or futures fence of n

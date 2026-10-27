@@ -1,6 +1,6 @@
-# NOT-IMPLEMENTED (PSG-22, planning web module, slices 1 to 3)
+# NOT-IMPLEMENTED (PSG-22, planning web module, slices 1 to 4)
 
-Screens of slices 1 to 3, all registered in `module.ts` and built from the
+Screens of slices 1 to 4, all registered in `module.ts` and built from the
 shell primitives (`src/shell/ui`) with CSS Modules:
 
 - `/planning`: master planning workspace with plan picker, summary tiles
@@ -9,8 +9,14 @@ shell primitives (`src/shell/ui`) with CSS Modules:
   status filter; a row opens `/planning/planned-orders/:id`, which shows the
   order, its maintenance card (slice 2: change quantity, dates and vendor,
   approve, delete after confirmation, all under If-Match with a reload offer
-  on 412) and its explain-this-plan pegging tree.
-- `/planning/messages`: action and delay messages with an action filter.
+  on 412) and its explain-this-plan pegging tree. Since slice 4 the list has a
+  firm card: tick open orders (or select all open), choose the purchase order
+  grouping and firm them; the card shows the orders created (type, id, vendor,
+  delivery, quantity), keeps the Idempotency-Key across a retry of the same
+  selection, shows the 409 problem, and reloads the list. A firmed order's page
+  shows the order it became.
+- `/planning/messages`: action and delay messages with an action filter
+  (slice 4 adds cancel and decrease).
 - `/planning/runs`: plan run history (versions, counts, plan hash).
 - `/planning/runs/new`: run-plan form that posts a snapshot with an
   Idempotency-Key (kept across retries of the same input) and, since slice 2,
@@ -31,8 +37,10 @@ Each list has loading, empty and error states; the plan in view is kept in the
 |---|---|---|
 | Run plan from source data (no pasted snapshot) | later slice of PSG-22 | The run API takes its snapshot inline until sales, inventory and purchasing feed the planning service (see the service NOT-IMPLEMENTED.md). The form takes the snapshot as JSON. |
 | Planned orders: change, approve, delete one order | built | Maintenance card on the planned-order page (`MaintainOrder.tsx`). |
-| Planned orders: firm (grouped), bulk actions, keyboard range selection with `F` | later slice of PSG-22 | Firming endpoint not built; maintenance is one order at a time. |
-| Hide maintenance controls from users without `planning.order.maintain` | later slice of PSG-22 | The shell exposes no per-duty check to pages yet; the service refuses the write with 403 and the card shows the problem. |
+| Planned orders: firm (grouped) | built | Firm card on `/planning/planned-orders` (`Firming.tsx`). |
+| Planned orders: bulk approve, change and delete; keyboard range selection with `F` to firm | later slice of PSG-22 | Selection is by checkbox (or all open orders) and is used for firming only; maintenance stays one order at a time. |
+| Firming result report (PDF, email) | later slice of PSG-22 | The service renders no document yet; the card lists the orders created. |
+| Hide maintenance and firming controls from users without `planning.order.maintain` or `planning.order.firm` | later slice of PSG-22 | The shell exposes no per-duty check to pages yet; the service refuses the write with 403 and the card shows the problem. |
 | Net requirements (MD04) grid, what-if simulate, virtualized 365 x 20 grid | later slice of PSG-22 | Net-requirements API not built. |
 | Action messages: apply action to the source order, dismiss | later slice of PSG-22 | Action endpoints not built. |
 | Forecast: list cells and edit one cell with source badge | built | `/planning/forecast` (`ForecastPage.tsx`); a row opens in the form. |

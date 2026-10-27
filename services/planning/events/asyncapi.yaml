@@ -1,8 +1,8 @@
 asyncapi: 3.0.0
 info:
   title: Passage Planning events
-  version: 0.1.0
-  description: CloudEvents 1.0 with Passage extensions (tenantid, correlationid, causationid, actor). Published through the outbox in the same transaction as the plan version change.
+  version: 0.2.0
+  description: CloudEvents 1.0 with Passage extensions (tenantid, correlationid, causationid, actor). Published through the outbox in the same transaction as the plan version change or the firming.
 defaultContentType: application/cloudevents+json
 channels:
   planCompleted:
@@ -10,12 +10,22 @@ channels:
     messages:
       planCompletedV1:
         $ref: '#/components/messages/PlanCompletedV1'
+  plannedOrderFirmed:
+    address: passage.planning.plannedorder
+    messages:
+      plannedOrderFirmedV1:
+        $ref: '#/components/messages/PlannedOrderFirmedV1'
 operations:
   publishPlanCompleted:
     action: send
     channel:
       $ref: '#/channels/planCompleted'
     summary: A plan version became the current version of its plan.
+  publishPlannedOrderFirmed:
+    action: send
+    channel:
+      $ref: '#/channels/plannedOrderFirmed'
+    summary: A planned order was firmed (FR-22.10). One event per planned order; the owning context creates the target order with target_id, and orders that share a target_id are the lines of one purchase order.
 components:
   messages:
     PlanCompletedV1:
@@ -23,6 +33,11 @@ components:
       contentType: application/json
       payload:
         $ref: '#/components/schemas/PlanCompletedData'
+    PlannedOrderFirmedV1:
+      name: dev.passage.planning.plannedorder.firmed.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/PlannedOrderFirmedData'
   schemas:
     PlanCompletedData:
       type: object
@@ -43,3 +58,19 @@ components:
         messages: {type: integer}
         duration_ms: {type: integer}
         plan_hash: {type: string, description: sha256 hex (FR-22.14)}
+    PlannedOrderFirmedData:
+      type: object
+      required: [planned_order_id, plan_version_id, batch_id, order_type, target_type, target_id, item_id, site_id, vendor_id, qty, order_date, delivery_date]
+      properties:
+        planned_order_id: {type: string, format: uuid}
+        plan_version_id: {type: string, format: uuid}
+        batch_id: {type: string, format: uuid, description: The firming request; its Idempotency-Key replays return the same batch}
+        order_type: {type: string, enum: [purchase, production, transfer]}
+        target_type: {type: string, enum: [purchase-order, production-order, transfer-order]}
+        target_id: {type: string, format: uuid, description: Id of the order to create; planned orders of one group share it}
+        item_id: {type: string, format: uuid}
+        site_id: {type: string, format: uuid}
+        vendor_id: {type: [string, 'null'], format: uuid}
+        qty: {type: string, description: Decimal string in the inventory unit}
+        order_date: {type: string, format: date}
+        delivery_date: {type: string, format: date}

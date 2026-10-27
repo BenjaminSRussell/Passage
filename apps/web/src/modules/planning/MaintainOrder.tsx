@@ -120,7 +120,7 @@ export function MaintainOrderCard({ order, onChanged, onDeleted, onReload }: Pro
   const approve = () =>
     act("approve", async () => {
       onChanged(await updatePlannedOrder(order.id, order.version, { status: "approved" }));
-      setDone("Order approved. It is firmed with the next firming run.");
+      setDone("Order approved. Firm it from the planned orders list.");
     });
 
   const remove = () =>

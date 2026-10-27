@@ -1,4 +1,4 @@
-# planning (wave 22, PSG-22, slices 1 and 2)
+# planning (wave 22, PSG-22, slices 1 to 4)
 
 Master planning for Passage: nets demand against supply level by level through
 the BOM and writes planned purchase, production and transfer orders, each pegged
@@ -8,7 +8,10 @@ Slice 1 built the pure netting engine, a static plan run that persists a
 versioned, hashed result, the explain tree, and the message list. Slice 2 adds
 the time fences of BR-22.4, planned-order maintenance (change, approve, delete
 under If-Match, FR-22.11), and forecast cells with reduction (FR-22.8) that a
-run can net as forecast demand. What is not built yet is listed in
+run can net as forecast demand. Slice 3 adds stateless planning calculators.
+Slice 4 adds firming into target orders with grouping (FR-22.10), Cancel and
+Decrease messages beyond the coverage time fence (FR-22.7), and the version
+purge (`PLANNING_MAX_VERSIONS`). What is not built yet is listed in
 [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 
 ## Layout
@@ -19,9 +22,10 @@ internal/domain/       pure engine: low-level codes, lot sizing, netting, peggin
                        calculators: ddmrp.go, quota.go, strategy.go, shelflife.go, projection.go
 internal/store/        Postgres repository (pgx); a plan run is one transaction with its outbox event
 internal/api/          HTTP handlers under /v1/planning, RFC 9457 problems, /readyz with a database ping
-internal/events/       plan.completed.v1 type and payload
+internal/events/       plan.completed.v1 and plannedorder.firmed.v1 types and payloads
 migrations/            0001_init.sql (plan, plan_version, planned_order, pegging, action_message, outbox; RLS on all)
                        0002_forecast_and_maintenance.sql (planned_order version/vendor/deleted, forecast_model, forecast_line; RLS)
+                       0003_firming.sql (firming_batch with RLS, firmed target on planned_order, cancel/decrease actions)
 api/openapi.yaml       OpenAPI 3.1 for every exposed endpoint (kept in step by TestOpenAPI_MatchesRoutes)
 events/asyncapi.yaml   AsyncAPI 3 for every event published
 charts/planning/       Helm chart (deployment, service, servicemonitor toggle)
@@ -58,6 +62,13 @@ Dockerfile             distroless static image, built from the repository root
   planning a new order, and that late receipt gets Advance to the demand date.
   Read this way, step 10's "later than demand by more than negative_days" is
   the case that gets a new planned order rather than an Advance message.
+- Cancel and Decrease (FR-22.7, BR-22.1 step 10): a receipt dated at or beyond
+  `coverageFenceDays` from the plan date whose quantity demand does not peg
+  gets Cancel (nothing pegged; qty = the receipt) or Decrease (qty = the
+  unpegged part), inside the action fence. Inside the coverage fence surplus
+  stays as it is (BR-22.2: PO-1's 400 surplus raises no Cancel). 0 disables
+  them; the PRD default of 100 days is not applied because the fence does not
+  yet limit netting (NOT-IMPLEMENTED.md).
 - Time fences (BR-22.4), per item in days from the plan date: a requirement
   inside `freezeFenceDays` gets no planned order and what on-hand and
   receipts do not cover is a shortage message; Advance/Postpone only for
@@ -80,14 +91,17 @@ cd services/planning
 go test ./...                # domain + API; store tests skip without a database
 PASSAGE_TEST_DATABASE_URL=postgres://admin@host/db \
 PASSAGE_TEST_APP_DATABASE_URL=postgres://app@host/db go test ./...   # store tests as the RLS-bound app role
-DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/planning   # HTTP_ADDR (:8080), ADMIN_ADDR (:9090, /metrics)
+DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/planning   # HTTP_ADDR (:8080), ADMIN_ADDR (:9090, /metrics), PLANNING_MAX_VERSIONS (20, 2 to 100)
 ```
 
 Store tests cover persistence, replay and key reuse, version numbering, the
 outbox event, tenant isolation under RLS, the 409 on a concurrent run,
 planned-order maintenance (versions, date and vendor rules, delete, superseded
 versions) and forecast cells (reduction, recompute on a principle change,
-forecast demand for a run).
+forecast demand for a run), firming (AC-22.8 grouping, target ids, ETag bump,
+one outbox event per order, replay, key reuse, 409 `PLAN-0002`, all-or-nothing
+refusal of unknown, foreign, deleted and superseded orders), stored Cancel and
+Decrease messages, and the version purge.
 
 ## Planned-order maintenance and forecasts
 
@@ -95,7 +109,7 @@ forecast demand for a run).
   `ETag`. `PATCH` and `DELETE` require `If-Match` with it: missing is 428
   `precondition_required`, stale is 412 `conflict_version`. Only open orders
   (unprocessed or approved) of the plan's current version can be maintained.
-  `status: approved` approves; firming is a separate command (not built yet).
+  `status: approved` approves; firming is the separate command below.
   Delete keeps the row with status `deleted`, so the version's pegging still
   resolves; lists leave it out.
 - `PUT /forecasts/{modelCode}/lines` upserts up to 1,000 cells (each replaces
@@ -105,6 +119,32 @@ forecast demand for a run).
   the period, never below 0, BR-22.3), `transactions-dynamic` (sales above a
   period's forecast also consume the following periods). Until sales orders
   (w27) feed the planning service, `salesQty` per cell is entered with it.
+
+## Firming (slice 4)
+
+`POST /planned-orders:firm` takes 1 to 1,000 distinct planned-order ids and a
+`grouping` (default `vendor-date`) and requires `Idempotency-Key`. In one
+transaction it locks the orders in id order, refuses the whole batch when any
+id is unknown for the tenant (404), firmed (409 `PLAN-0002`), deleted or of a
+superseded version (409 `PLAN-ORDER-NOT-EDITABLE`), groups them, and marks each
+`firmed` with `firmedTargetType`, `firmedTargetId` and a new ETag. Planned
+purchase orders of one site and vendor merge into one purchase order: all of
+them (`vendor`), per delivery date (`vendor-date`), per Monday-to-Sunday week
+(`vendor-week`), or not at all (`none`); production and transfer orders never
+merge. One `dev.passage.planning.plannedorder.firmed.v1` per order goes to the
+outbox in the same transaction (the PRD's `planned-order` entity is spelled
+without the hyphen the kernel's type rule refuses). The response, stored in
+`firming_batch`, lists the target orders; a replay of the key returns it with
+`Idempotent-Replayed: true`.
+
+BR-22.9 describes firming as a saga that creates the target order first. Here
+planning firms and publishes; purchasing (PSG-17) and production (PSG-21)
+create the orders with the given ids from the event, and the compensation on
+their failure is a handoff (NOT-IMPLEMENTED.md).
+
+Each run keeps the newest `PLANNING_MAX_VERSIONS` versions of its plan and
+deletes older ones with their planned orders, pegging and messages, in the run
+transaction. A version holding a firmed planned order is kept.
 
 ## Planning calculators (slice 3)
 
@@ -140,6 +180,7 @@ NOT-IMPLEMENTED.md):
 | GET | `/v1/planning/planned-orders/{id}` | `planning.read` |
 | PATCH | `/v1/planning/planned-orders/{id}` | `planning.order.maintain` (If-Match required) |
 | DELETE | `/v1/planning/planned-orders/{id}` | `planning.order.maintain` (If-Match required) |
+| POST | `/v1/planning/planned-orders:firm` | `planning.order.firm` (Idempotency-Key required) |
 | GET | `/v1/planning/planned-orders/{id}/pegging?depth=` | `planning.read` |
 | GET | `/v1/planning/messages?planCode=&action=&limit=` | `planning.read` |
 | GET | `/v1/planning/forecasts/{modelCode}/lines?itemId=&siteId=&limit=` | `planning.read` |
@@ -163,9 +204,10 @@ swaps the current pointer.
 | 401 | `AUTH-0001` | No or malformed tenant |
 | 403 | `AUTH-0003` | Missing duty |
 | 404 | `PLAN-VERSION-NOT-FOUND` | No such version for the plan |
-| 404 | `PLAN-ORDER-NOT-FOUND` | No such planned order |
+| 404 | `PLAN-ORDER-NOT-FOUND` | No such planned order (on firming: an id unknown for the tenant) |
 | 404 | `PLAN-FORECAST-NOT-FOUND` | No such forecast model (422 when a run names it) |
 | 409 | `PLAN-0001` | `PLAN_ALREADY_RUNNING`: a run of the plan is in progress |
+| 409 | `PLAN-0002` | BR-22.9: a planned order to firm is already firmed |
 | 409 | `PLAN-ORDER-NOT-EDITABLE` | The planned order is firmed, deleted or not in the current version |
 | 412 | `conflict_version` | If-Match is not the current version of the order or forecast model |
 | 422 | `PLAN-ORDER-INVALID` | Order date after delivery date, or a vendor on a non-purchase order |
@@ -174,7 +216,7 @@ swaps the current pointer.
 | 422 | `PLAN-0005` | A requirement would split into more than 1,000 orders |
 | 422 | `PLAN-0009` | Quota arrangement has no usable source (all blocked, or quota 0 with others blocked) |
 | 422 | `PLAN-INPUT-INVALID` | Snapshot rejected by the engine (unknown coverage or order type, duplicate or unknown item), or calculator input the domain rejects (empty ADU window); `detail` names it |
-| 422 | `idempotency_key_reuse` | Same Idempotency-Key with a different plan or snapshot |
+| 422 | `idempotency_key_reuse` | Same Idempotency-Key with a different plan or snapshot, or different orders or grouping on firming |
 
 ## Wave reference
 

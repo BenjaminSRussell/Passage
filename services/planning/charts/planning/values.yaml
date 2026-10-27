@@ -1,6 +1,8 @@
 image: { repository: ghcr.io/benjaminsrussell/planning, digest: "", tag: "", pullPolicy: IfNotPresent }
 databaseSecret: planning-db
 migrateOnStart: false
+# PLANNING_MAX_VERSIONS: plan versions a run keeps (2 to 100).
+maxVersions: 20
 replicaCount: 2
 resources:
   requests: { cpu: 500m, memory: 1Gi }

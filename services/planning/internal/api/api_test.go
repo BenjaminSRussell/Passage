@@ -40,6 +40,11 @@ type fakeStore struct {
 	models   map[string]store.ForecastModel
 	demand   []store.ForecastDemandLine
 	demandAt string
+	// Firming batches by Idempotency-Key and the planned orders firmed so far
+	// (firm_test.go).
+	firms    map[string]fakeFirm
+	firmed   map[string]bool
+	lastFirm store.FirmRequest
 }
 
 func (f *fakeStore) RunPlan(_ context.Context, req store.RunRequest) (store.Version, bool, error) {

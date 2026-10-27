@@ -30,6 +30,7 @@ import {
   type PlannedOrder,
   type PlanVersion,
 } from "./api/client";
+import { FirmCard, isFirmable } from "./Firming";
 import { PLAN_CODE, useLoad, usePlanCode, withPlan, type LoadError } from "./hooks";
 import { MaintainOrderCard } from "./MaintainOrder";
 import styles from "./pages.module.css";
@@ -42,7 +43,7 @@ export const PAGE_LIMIT = 500;
 const dash = "—";
 
 const ORDER_STATUSES = ["unprocessed", "approved", "firmed"] as const;
-const MESSAGE_ACTIONS = ["delay", "postpone", "advance", "shortage"] as const;
+const MESSAGE_ACTIONS = ["delay", "postpone", "advance", "shortage", "cancel", "decrease"] as const;
 
 const orderTypeLabel: Record<PlannedOrder["orderType"], string> = {
   purchase: "Purchase",
@@ -55,6 +56,14 @@ const actionTone: Record<Message["action"], BadgeTone> = {
   shortage: "warning",
   advance: "info",
   postpone: "info",
+  cancel: "warning",
+  decrease: "warning",
+};
+
+const targetLabel: Record<NonNullable<PlannedOrder["firmedTargetType"]>, string> = {
+  "purchase-order": "Purchase order",
+  "production-order": "Production order",
+  "transfer-order": "Transfer order",
 };
 
 const sentence = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).replace(/-/g, " ");
@@ -212,17 +221,26 @@ export function PlanningHome() {
 
 /* ----------------------------------------------------------- Planned orders */
 
-/** Planned orders of the current version, filterable by status; a row opens its explain tree. */
+/**
+ * Planned orders of the current version, filterable by status; a row opens its
+ * explain tree, and selected open orders can be firmed (FR-22.10).
+ */
 export function PlannedOrdersPage() {
   const [plan] = usePlanCode();
   const [params, setParams] = useSearchParams();
   const rawStatus = params.get("status") ?? "";
   const status = (ORDER_STATUSES as readonly string[]).includes(rawStatus) ? (rawStatus as PlannedOrder["status"]) : undefined;
   const navigate = useNavigate();
+  const [reload, setReload] = useState(0);
+  const [selected, setSelected] = useState<string[]>([]);
   const state = useLoad(
     (signal) => listPlannedOrders({ planCode: plan, status, limit: PAGE_LIMIT }, { signal }),
-    [plan, status],
+    [plan, status, reload],
   );
+  const open = (state.data ?? []).filter(isFirmable);
+  // Only orders still listed and open stay selected when the list changes.
+  const picked = selected.filter((id) => open.some((o) => o.id === id));
+  const toggle = (id: string, on: boolean) => setSelected((cur) => (on ? [...cur.filter((x) => x !== id), id] : cur.filter((x) => x !== id)));
   const columns: DataTableColumn<PlannedOrder>[] = [
     { key: "number", header: "Number", mono: true },
     { key: "itemId", header: "Item", mono: true },
@@ -239,6 +257,22 @@ export function PlannedOrdersPage() {
     },
     { key: "lotRule", header: "Lot rule" },
     { key: "status", header: "Status", render: (o) => <StatusPill status={o.status} /> },
+    {
+      key: "select",
+      header: "Firm",
+      render: (o) =>
+        isFirmable(o) ? (
+          <Input
+            type="checkbox"
+            aria-label={`Select ${o.number} for firming`}
+            checked={picked.includes(o.id)}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => toggle(o.id, e.target.checked)}
+          />
+        ) : (
+          dash
+        ),
+    },
   ];
   const setStatus = (value: string) => {
     const next = new URLSearchParams(params);
@@ -266,6 +300,18 @@ export function PlannedOrdersPage() {
         </div>
       </PlanPicker>
       <LoadAlert what="planned orders" error={state.error} />
+      {state.error ? null : (
+        <FirmCard
+          selected={picked}
+          openCount={open.length}
+          onSelectAllOpen={() => setSelected(open.map((o) => o.id))}
+          onClear={() => setSelected([])}
+          onFirmed={() => {
+            setSelected([]);
+            setReload((n) => n + 1);
+          }}
+        />
+      )}
       {state.error ? null : (
         <DataTable
           label="Planned orders"
@@ -389,6 +435,12 @@ export function PlannedOrderPage() {
               ["Delay", o.delayDays > 0 ? `${o.delayDays} days` : dash],
               ["Lot rule", o.lotRule],
               ...(o.orderType === "purchase" ? ([["Vendor", o.vendorId ?? dash, true]] as [string, ReactNode, boolean][]) : []),
+              ...(o.firmedTargetType && o.firmedTargetId
+                ? ([
+                    ["Became", targetLabel[o.firmedTargetType]],
+                    ["Order id", o.firmedTargetId, true],
+                  ] as [string, ReactNode, boolean?][])
+                : []),
             ]}
           />
         ) : null}
@@ -433,7 +485,7 @@ export function MessagesPage() {
   };
   return (
     <div className={styles.stack}>
-      <PageHeader title="Action messages" description={`Delays, early and late receipts and shortages in the current version of plan ${plan}.`} />
+      <PageHeader title="Action messages" description={`Delays, early and late receipts, shortages and supply to cancel or decrease in the current version of plan ${plan}.`} />
       <PlanPicker>
         <div className={styles.toolbarField}>
           <FormField id="planning-action" label="Action">

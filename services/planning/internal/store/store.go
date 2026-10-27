@@ -52,19 +52,37 @@ type Store interface {
 	ListMessages(ctx context.Context, planCode, action string, limit int) ([]Message, error)
 	UpdatePlannedOrder(ctx context.Context, id string, expectedVersion int, patch OrderPatch) (PlannedOrder, error)
 	DeletePlannedOrder(ctx context.Context, id string, expectedVersion int) error
+	FirmPlannedOrders(ctx context.Context, req FirmRequest) (FirmBatch, bool, error)
 	UpsertForecastLines(ctx context.Context, modelCode string, expectedVersion int, spec *ModelSpec, cells []ForecastCellInput) (ForecastModel, error)
 	ListForecastLines(ctx context.Context, modelCode, itemID, siteID string, limit int) (ForecastModel, []ForecastLine, error)
 	ForecastDemand(ctx context.Context, modelCode, siteID string, from time.Time) ([]ForecastDemandLine, error)
 	Ping(ctx context.Context) error
 }
 
+// DefaultMaxVersions is the default of PLANNING_MAX_VERSIONS (4.22.13 "Max
+// retained versions"); MinMaxVersions and MaxMaxVersions are its range.
+const (
+	DefaultMaxVersions = 20
+	MinMaxVersions     = 2
+	MaxMaxVersions     = 100
+)
+
 // Postgres implements Store.
 type Postgres struct {
-	pool *pgxpool.Pool
+	pool        *pgxpool.Pool
+	maxVersions int
 }
 
-// New returns a Postgres store over pool.
-func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
+// New returns a Postgres store over pool that keeps DefaultMaxVersions
+// versions per plan.
+func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool, maxVersions: DefaultMaxVersions} }
+
+// WithMaxVersions sets how many versions of a plan a run keeps; values outside
+// MinMaxVersions to MaxMaxVersions are clamped into that range.
+func (s *Postgres) WithMaxVersions(n int) *Postgres {
+	s.maxVersions = min(max(n, MinMaxVersions), MaxMaxVersions)
+	return s
+}
 
 // Ping checks the database is reachable.
 func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
@@ -114,6 +132,10 @@ type PlannedOrder struct {
 	// Version is the order's ETag: every maintenance write bumps it.
 	Version  int     `json:"version"`
 	VendorID *string `json:"vendorId,omitempty"`
+	// FirmedTargetType and FirmedTargetID name the purchase, production or
+	// transfer order a firmed planned order became (FR-22.10).
+	FirmedTargetType *string `json:"firmedTargetType,omitempty"`
+	FirmedTargetID   *string `json:"firmedTargetId,omitempty"`
 }
 
 // Message is one action or delay message of the current version.
@@ -227,6 +249,9 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 		if err := tx.SendBatch(ctx, batch).Close(); err != nil {
 			return err
 		}
+		if err := purgeVersions(ctx, tx, p.TenantID, planID, number-s.maxVersions); err != nil {
+			return err
+		}
 		v = Version{ID: versionID, PlanCode: req.PlanCode, Number: number, Status: "current", AsOf: asOf, ItemsPlanned: req.ItemsPlanned,
 			PlannedOrders: len(r.Orders), Messages: len(r.Messages), DurationMs: req.DurationMs, PlanHash: r.Hash, inputHash: req.InputHash}
 		return enqueue(ctx, tx, planID, p.TenantID, versionID, planevents.PlanCompletedData{
@@ -239,6 +264,26 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 		return Version{}, false, idempotencyReuse()
 	}
 	return v, replayed, err
+}
+
+// purgeVersions deletes the versions of a plan numbered at or below cut with
+// their planned orders, pegging and messages (FR-22.1: 20 retained versions by
+// default). It runs inside the run transaction that holds the plan lock. A
+// version that holds a firmed planned order is kept: the order records which
+// target order it became, and its batch's replay still names it.
+func purgeVersions(ctx context.Context, tx pgx.Tx, tenantID, planID string, cut int) error {
+	if cut < 1 {
+		return nil
+	}
+	const doomed = `select v.id from plan_version v where v.tenant_id = $1 and v.plan_id = $2 and v.number <= $3 and v.status <> 'current'
+		and not exists (select 1 from planned_order o where o.tenant_id = v.tenant_id and o.plan_version_id = v.id and o.status = 'firmed')`
+	for _, table := range []string{"pegging", "action_message", "planned_order"} {
+		if _, err := tx.Exec(ctx, `delete from `+table+` where tenant_id = $1 and plan_version_id in (`+doomed+`)`, tenantID, planID, cut); err != nil {
+			return err
+		}
+	}
+	_, err := tx.Exec(ctx, `delete from plan_version where tenant_id = $1 and id in (`+doomed+`)`, tenantID, planID, cut)
+	return err
 }
 
 // lockPlan creates the plan on first use and locks its row for the run; a second
@@ -304,13 +349,14 @@ func (s *Postgres) ListVersions(ctx context.Context, planCode string, limit int)
 
 const orderSelect = `select o.id::text, v.id::text, o.number, o.item_id::text, o.order_type, o.qty::text,
 	to_char(o.order_date, 'YYYY-MM-DD'), to_char(o.delivery_date, 'YYYY-MM-DD'), to_char(o.futures_date, 'YYYY-MM-DD'),
-	o.delay_days, o.lot_rule, o.status, o.version, o.vendor_id::text
+	o.delay_days, o.lot_rule, o.status, o.version, o.vendor_id::text, o.firmed_target_type, o.firmed_target_id::text
 	from planned_order o join plan_version v on v.tenant_id = o.tenant_id and v.id = o.plan_version_id
 	join plan p on p.tenant_id = v.tenant_id and p.id = v.plan_id`
 
 func scanOrder(row pgx.Row) (PlannedOrder, error) {
 	var o PlannedOrder
-	err := row.Scan(&o.ID, &o.VersionID, &o.Number, &o.ItemID, &o.OrderType, &o.Qty, &o.OrderDate, &o.DeliveryDate, &o.FuturesDate, &o.DelayDays, &o.LotRule, &o.Status, &o.Version, &o.VendorID)
+	err := row.Scan(&o.ID, &o.VersionID, &o.Number, &o.ItemID, &o.OrderType, &o.Qty, &o.OrderDate, &o.DeliveryDate, &o.FuturesDate, &o.DelayDays, &o.LotRule, &o.Status, &o.Version, &o.VendorID,
+		&o.FirmedTargetType, &o.FirmedTargetID)
 	return o, err
 }
 
