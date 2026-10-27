@@ -9,7 +9,6 @@ import {
   FormField,
   Input,
   PageHeader,
-  Select,
   StatGroup,
   StatTile,
   Textarea,
@@ -28,6 +27,7 @@ import {
   type Split,
 } from "./api/client";
 import { amount, dash } from "./format";
+import { ExplosionModeField } from "./shared";
 import styles from "./pages.module.css";
 
 /** The FR-39.4 worked example: SA-200 under FG-100 rolls to 104.32. */
@@ -270,7 +270,7 @@ export function RollPage() {
             <FormField
               id="roll-items"
               label="Items"
-              hint="A JSON array of items: id, kind, price or costingLot, bom lines (childId, qty, scrapPct), operations (setupHours, runHours, rate) and sheet nodes (Surcharge or Rate)."
+              hint="A JSON array of items: id, kind, price or costingLot, bom lines (childId, qty, scrapPct, phantom, makeToOrder), operations (setupHours, runHours, rate, scrapPct) and sheet nodes (Surcharge or Rate)."
               error={errors.items}
             >
               {(control) => (
@@ -297,14 +297,7 @@ export function RollPage() {
               />
             )}
           </FormField>
-          <FormField id="roll-mode" label="Explosion mode" hint="Single level takes each child at its active standard.">
-            {(control) => (
-              <Select {...control} value={values.mode} onChange={(e) => update({ mode: e.target.value as ExplosionMode })}>
-                <option value="Multilevel">Multilevel</option>
-                <option value="SingleLevel">Single level</option>
-              </Select>
-            )}
-          </FormField>
+          <ExplosionModeField id="roll-mode" value={values.mode} onChange={(mode) => update({ mode })} />
           <div className={styles.check}>
             <Input
               id="roll-fallback"

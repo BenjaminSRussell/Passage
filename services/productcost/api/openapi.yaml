@@ -1,11 +1,13 @@
 openapi: 3.1.0
 info:
-  title: Passage product costing (wave 39, slice 1)
-  version: 0.1.0
+  title: Passage product costing (wave 39, slices 1-2)
+  version: 0.2.0
   description: >
     Stateless costing computations. The caller supplies items, prices and
     actuals; the service returns rolled standards, mass-roll runs, variance
-    decompositions and activation previews. Nothing is persisted in slice 1.
+    decompositions, activation previews, mixed costs, component postings,
+    sales order estimates, comparisons and standard reconciliations. Nothing is
+    persisted yet.
 servers:
   - url: https://api.{env}.passage.dev
     variables:
@@ -96,6 +98,121 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
+  /v1/costing/mixed-costs:
+    post:
+      summary: Cost an item mixed from procurement alternatives (FR-39.14)
+      operationId: mixedCost
+      x-passage-duty: CostingCalculate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MixedCostRequest" }
+      responses:
+        "200":
+          description: Ratio-weighted cost with the weighted split. A failed alternative returns status Error, not a 4xx.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MixedRoll" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem", description: "CST-0741: ratios do not total 100.00%" }
+  /v1/costing/postings:cogs:
+    post:
+      summary: Book the cost of goods sold of an issue by cost component (FR-39.15)
+      operationId: cogsPosting
+      x-passage-duty: CostingCalculate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CogsPostingRequest" }
+      responses:
+        "200":
+          description: Balanced journal preview; component debits sum to the total credit to Inventory
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PostingResponse" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/costing/postings:price-difference:
+    post:
+      summary: Book a purchase price variance by cost component (FR-39.7, FR-39.15)
+      operationId: priceDifferencePosting
+      x-passage-duty: CostingCalculate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PriceDifferencePostingRequest" }
+      responses:
+        "200":
+          description: Balanced journal preview of the purchase price variance
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PostingResponse" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/costing/sales-order-estimates:
+    post:
+      summary: Cost a configured or make-to-order line and show its margin (FR-39.16)
+      operationId: salesOrderEstimate
+      x-passage-duty: CostingCalculate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SalesOrderEstimateRequest" }
+      responses:
+        "200":
+          description: Estimate of type SalesOrder with cost, split, margin and margin percent
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SalesEstimate" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/costing/comparisons:
+    post:
+      summary: Compare a baseline run with a candidate run item by item (FR-39.10 what-if)
+      operationId: compareRuns
+      x-passage-duty: CostingView
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComparisonRequest" }
+      responses:
+        "200":
+          description: Rows by item with deltas and component deltas; errored items carry no delta
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Comparison" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/costing/reconciliations:
+    post:
+      summary: Reconcile inventory at standard to the GL per site (FR-39.11)
+      operationId: reconcileStandard
+      x-passage-duty: CostingView
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReconcileRequest" }
+      responses:
+        "200":
+          description: Per-site reconciliation; differences counts sites with a non-zero difference
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReconcileResponse" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
 components:
   responses:
     Problem:
@@ -141,6 +258,8 @@ components:
         childId: { type: string }
         qty: { $ref: "#/components/schemas/Money" }
         scrapPct: { $ref: "#/components/schemas/Money", description: "Percent, 0 to below 100; multiplies the quantity (BR-39.6)" }
+        phantom: { type: boolean, description: "Phantom line (BR-39.3); the child must be Manufactured and is exploded in place in every mode" }
+        makeToOrder: { type: boolean, description: "Make-to-order sub-assembly; exploded by the MakeToOrder mode. Not combinable with phantom" }
     Operation:
       type: object
       properties:
@@ -149,6 +268,7 @@ components:
         rate: { $ref: "#/components/schemas/Money" }
         lotSize: { $ref: "#/components/schemas/Money", description: "Overrides costingLot for this operation (BR-39.5)" }
         component: { type: string, description: "Cost component the operation charges; default DL" }
+        scrapPct: { $ref: "#/components/schemas/Money", description: "Operation scrap in percent, 0 to below 100; compounds backward through the route and scales the BOM material by the first operation's factor (BR-39.6)" }
     SheetNode:
       type: object
       required: [id, type, component]
@@ -179,7 +299,15 @@ components:
       properties:
         maxLevels: { type: integer, minimum: 1, maximum: 40, description: "Default 20 (COSTING_MAX_LEVELS)" }
         workers: { type: integer, minimum: 1, maximum: 32, description: "Default 4 (COSTING_ROLL_WORKERS)" }
-        mode: { type: string, enum: [Multilevel, SingleLevel], description: "MakeToOrder and ByLineType are later slices" }
+        mode:
+          type: string
+          enum: [Multilevel, SingleLevel, MakeToOrder, ByLineType]
+          description: >
+            Multilevel rolls every child. SingleLevel takes every child at its active
+            standard. MakeToOrder and ByLineType take purchased children at their
+            version price; MakeToOrder rolls manufactured children on makeToOrder lines
+            and ByLineType rolls none, the others taking their active standard. Phantom
+            lines are exploded in place in every mode.
         fallbackToActive: { type: boolean }
     RollOneRequest:
       type: object
@@ -299,3 +427,152 @@ components:
               account: { type: string }
               debit: { $ref: "#/components/schemas/Money" }
               credit: { $ref: "#/components/schemas/Money" }
+    JournalLine:
+      type: object
+      required: [account]
+      properties:
+        account: { type: string }
+        debit: { $ref: "#/components/schemas/Money" }
+        credit: { $ref: "#/components/schemas/Money" }
+    AltRef:
+      type: object
+      required: [source, percent, itemId]
+      properties:
+        source: { type: string, description: "Vendor, production version or source site" }
+        percent: { $ref: "#/components/schemas/Money", description: "Mixing ratio in percent; 0 excludes the alternative from the roll (BR-39.12)" }
+        itemId: { type: string, description: "Catalog item rolled for this alternative" }
+    MixedCostRequest:
+      type: object
+      required: [items, itemId, alternatives]
+      properties:
+        items: { type: array, minItems: 1, maxItems: 50000, items: { $ref: "#/components/schemas/Item" } }
+        itemId: { type: string }
+        alternatives: { type: array, minItems: 1, maxItems: 50, items: { $ref: "#/components/schemas/AltRef" }, description: "Sources are unique; no alternative may be the mixed item itself" }
+        options: { $ref: "#/components/schemas/RollOptions" }
+    AltRoll:
+      type: object
+      properties:
+        source: { type: string }
+        percent: { $ref: "#/components/schemas/Money" }
+        itemId: { type: string }
+        status: { type: string, enum: [Pending, Error, Excluded] }
+        unitCost: { $ref: "#/components/schemas/Money" }
+        split: { $ref: "#/components/schemas/Split" }
+        diagnostics: { type: array, items: { $ref: "#/components/schemas/Diagnostic" } }
+    MixedRoll:
+      type: object
+      properties:
+        itemId: { type: string }
+        status: { type: string, enum: [Pending, Error] }
+        unitCost: { $ref: "#/components/schemas/Money" }
+        split: { $ref: "#/components/schemas/Split" }
+        alternatives: { type: array, items: { $ref: "#/components/schemas/AltRoll" } }
+        diagnostics: { type: array, items: { $ref: "#/components/schemas/Diagnostic" } }
+    CogsPostingRequest:
+      type: object
+      required: [quantity, unitCost]
+      properties:
+        currency: { type: string, pattern: "^[A-Z]{3}$", description: "Posting precision is its ISO 4217 minor unit; default two decimals" }
+        quantity: { $ref: "#/components/schemas/Money" }
+        unitCost: { $ref: "#/components/schemas/Split", description: "Unit standard by cost component" }
+    PriceDifferencePostingRequest:
+      type: object
+      required: [quantity, receiptUnitCost, standard]
+      properties:
+        currency: { type: string, pattern: "^[A-Z]{3}$", description: "Posting precision is its ISO 4217 minor unit; default two decimals" }
+        quantity: { $ref: "#/components/schemas/Money" }
+        receiptUnitCost: { $ref: "#/components/schemas/Money" }
+        standard: { $ref: "#/components/schemas/Split", description: "Standard split of the purchased item" }
+    PostingResponse:
+      type: object
+      properties:
+        currency: { type: string }
+        total: { $ref: "#/components/schemas/Money" }
+        journal: { type: array, items: { $ref: "#/components/schemas/JournalLine" } }
+    SalesOrderEstimateRequest:
+      type: object
+      required: [items, itemId, quantity, netAmount]
+      properties:
+        currency: { type: string, pattern: "^[A-Z]{3}$", description: "Posting precision is its ISO 4217 minor unit; default two decimals" }
+        items: { type: array, minItems: 1, maxItems: 50000, items: { $ref: "#/components/schemas/Item" } }
+        itemId: { type: string }
+        quantity: { $ref: "#/components/schemas/Money", description: "Order quantity; the root item's costing lot is set to it (BR-39.5)" }
+        netAmount: { $ref: "#/components/schemas/Money", description: "Net line amount; must be positive" }
+        options: { $ref: "#/components/schemas/RollOptions" }
+    SalesEstimate:
+      type: object
+      properties:
+        itemId: { type: string }
+        calculationType: { type: string, enum: [SalesOrder] }
+        status: { type: string, enum: [Pending, Error] }
+        quantity: { $ref: "#/components/schemas/Money" }
+        unitCost: { $ref: "#/components/schemas/Money" }
+        cost: { $ref: "#/components/schemas/Money" }
+        split: { $ref: "#/components/schemas/Split" }
+        netAmount: { $ref: "#/components/schemas/Money" }
+        margin: { $ref: "#/components/schemas/Money" }
+        marginPct: { $ref: "#/components/schemas/Money" }
+        diagnostics: { type: array, items: { $ref: "#/components/schemas/Diagnostic" } }
+    ComparisonSide:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, minItems: 1, maxItems: 50000, items: { $ref: "#/components/schemas/Item" } }
+        options: { $ref: "#/components/schemas/RollOptions" }
+    ComparisonRequest:
+      type: object
+      required: [baseline, candidate]
+      properties:
+        baseline: { $ref: "#/components/schemas/ComparisonSide" }
+        candidate: { $ref: "#/components/schemas/ComparisonSide", description: "Overridden prices, rates or routes make this the what-if run" }
+    ComparisonRow:
+      type: object
+      properties:
+        itemId: { type: string }
+        status: { type: string, enum: [Compared, BaselineOnly, CandidateOnly, Error] }
+        baseline: { $ref: "#/components/schemas/Money" }
+        candidate: { $ref: "#/components/schemas/Money" }
+        delta: { $ref: "#/components/schemas/Money" }
+        deltaPct: { $ref: "#/components/schemas/Money" }
+        byComponent: { $ref: "#/components/schemas/Split", description: "Candidate minus baseline by component" }
+    Comparison:
+      type: object
+      properties:
+        rows: { type: array, items: { $ref: "#/components/schemas/ComparisonRow" } }
+        totalDelta: { $ref: "#/components/schemas/Money" }
+    StandardOnHand:
+      type: object
+      required: [siteId, itemId, qty, stdUnit]
+      properties:
+        siteId: { type: string }
+        itemId: { type: string }
+        qty: { $ref: "#/components/schemas/Money" }
+        stdUnit: { $ref: "#/components/schemas/Money" }
+    SiteBalance:
+      type: object
+      required: [siteId, amount]
+      properties:
+        siteId: { type: string }
+        amount: { $ref: "#/components/schemas/Money" }
+    ReconcileRequest:
+      type: object
+      description: At least one on-hand line or GL balance.
+      properties:
+        currency: { type: string, pattern: "^[A-Z]{3}$", description: "Posting precision is its ISO 4217 minor unit; default two decimals" }
+        onHand: { type: array, maxItems: 50000, items: { $ref: "#/components/schemas/StandardOnHand" } }
+        glBalances: { type: array, maxItems: 50000, items: { $ref: "#/components/schemas/SiteBalance" } }
+    SiteReconciliation:
+      type: object
+      properties:
+        siteId: { type: string }
+        lines: { type: integer }
+        standardValue: { $ref: "#/components/schemas/Money" }
+        glBalance: { $ref: "#/components/schemas/Money" }
+        difference: { $ref: "#/components/schemas/Money", description: "Standard minus GL; zero when reconciled" }
+        status: { type: string, enum: [Reconciled, Difference] }
+    ReconcileResponse:
+      type: object
+      properties:
+        currency: { type: string }
+        sites: { type: array, items: { $ref: "#/components/schemas/SiteReconciliation" } }
+        differences: { type: integer }

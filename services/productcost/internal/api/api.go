@@ -1,7 +1,9 @@
-// Package api exposes the wave-39 costing computations over HTTP. Slice 1 is
+// Package api exposes the wave-39 costing computations over HTTP. The routes are
 // stateless: the caller supplies the structure, prices and actuals, and the
 // service returns the rolled standard, the mass-roll run, the variance
-// decomposition or the activation preview. Nothing is stored yet.
+// decomposition, the activation preview, the mixed cost, component postings,
+// sales order estimates, comparisons or the standard reconciliation. Nothing is
+// stored yet.
 package api
 
 import (
@@ -26,6 +28,7 @@ import (
 const (
 	readyTimeout = 500 * time.Millisecond
 	// Duties from PRD section 7.39.17.
+	dutyView         = "CostingView"
 	dutyCalculate    = "CostingCalculate"
 	dutyActivate     = "CostingActivate"
 	dutySystem       = "CostingSystem"
@@ -60,6 +63,8 @@ type API struct {
 	rollErrors       atomic.Int64
 	varianceComputes atomic.Int64
 	previews         atomic.Int64
+
+	reconciliationDifferences atomic.Int64
 }
 
 // New builds the API. pinger may be nil, in which case readiness only reports the process.
@@ -85,6 +90,13 @@ func (a *API) routes() []route {
 		{http.MethodPost, "/v1/costing/rolls", dutyCalculate, a.massRoll},
 		{http.MethodPost, "/v1/costing/variances/compute", dutySystem, a.computeVariance},
 		{http.MethodPost, "/v1/costing/activations:preview", dutyActivate, a.previewActivation},
+		// Slice 2 (commercial.go).
+		{http.MethodPost, "/v1/costing/mixed-costs", dutyCalculate, a.mixedCost},
+		{http.MethodPost, "/v1/costing/postings:cogs", dutyCalculate, a.cogsPosting},
+		{http.MethodPost, "/v1/costing/postings:price-difference", dutyCalculate, a.priceDifferencePosting},
+		{http.MethodPost, "/v1/costing/sales-order-estimates", dutyCalculate, a.salesOrderEstimate},
+		{http.MethodPost, "/v1/costing/comparisons", dutyView, a.compare},
+		{http.MethodPost, "/v1/costing/reconciliations", dutyView, a.reconcile},
 	}
 }
 
@@ -109,6 +121,7 @@ func (a *API) Metrics() http.Handler {
 		counter("productcost_roll_errors_total", "Items that failed to roll.", a.rollErrors.Load())
 		counter("productcost_variance_computes_total", "Production order variance decompositions computed.", a.varianceComputes.Load())
 		counter("productcost_activation_previews_total", "Activation revaluation previews computed.", a.previews.Load())
+		counter("productcost_reconciliation_differences_total", "Sites whose standard value differs from the GL balance.", a.reconciliationDifferences.Load())
 	})
 }
 
@@ -200,6 +213,13 @@ func catalog(items []domain.Item, fields map[string]string) domain.Catalog {
 		checkItem(i, it, fields)
 		cat[it.ID] = it
 	}
+	for i, it := range items {
+		for j, line := range it.BOM {
+			if child, ok := cat[line.ChildID]; ok && line.Phantom && child.Kind != domain.KindManufactured {
+				fields[fmt.Sprintf("items[%d].bom[%d].phantom", i, j)] = "a phantom line must name a Manufactured item"
+			}
+		}
+	}
 	return cat
 }
 
@@ -236,12 +256,18 @@ func checkItem(i int, it domain.Item, fields map[string]string) {
 		if line.ScrapPct.IsNegative() || line.ScrapPct.GreaterThanOrEqual(decimalHundred) {
 			fields[at("bom[%d].scrapPct", j)] = "must be from 0 to below 100"
 		}
+		if line.Phantom && line.MakeToOrder {
+			fields[at("bom[%d].makeToOrder", j)] = "a phantom line cannot also be make-to-order"
+		}
 	}
 	for j, op := range it.Operations {
 		for key, v := range map[string]decimal.Decimal{"setupHours": op.SetupHours, "runHours": op.RunHours, "rate": op.Rate, "lotSize": op.LotSize} {
 			if v.IsNegative() {
 				fields[at("operations[%d].%s", j, key)] = "must not be negative"
 			}
+		}
+		if op.ScrapPct.IsNegative() || op.ScrapPct.GreaterThanOrEqual(decimalHundred) {
+			fields[at("operations[%d].scrapPct", j)] = "must be from 0 to below 100"
 		}
 		// BR-39.5: setup is spread over the costing lot, so it needs one.
 		if op.SetupHours.IsPositive() && !op.LotSize.IsPositive() && !it.CostingLot.IsPositive() {

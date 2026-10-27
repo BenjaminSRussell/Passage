@@ -18,12 +18,13 @@ const CodeMixingRatioTotal = "CST-0741"
 const mixingRatioTotalWanted = 100
 
 // PPV returns the purchase price variance of a receipt (FR-39.7):
-// (receipt unit cost − standard unit cost) × quantity, rounded to the cent.
-// The total is split over the standard's components in proportion to their
-// share of the standard; the rounding residual goes to the largest component.
-func PPV(qty, receiptUnit decimal.Decimal, standard Split) (decimal.Decimal, Split) {
+// (receipt unit cost − standard unit cost) × quantity, rounded to scale
+// decimals (PostingScale). The total is split over the standard's components
+// in proportion to their share of the standard; the rounding residual goes to
+// the largest component (FR-39.15).
+func PPV(qty, receiptUnit decimal.Decimal, standard Split, scale int32) (decimal.Decimal, Split) {
 	stdUnit := standard.Total()
-	total := receiptUnit.Sub(stdUnit).Mul(qty).Round(MoneyScale)
+	total := receiptUnit.Sub(stdUnit).Mul(qty).Round(scale)
 	out := Split{}
 	if stdUnit.IsZero() {
 		out.Add(CompDM, total)
@@ -32,7 +33,7 @@ func PPV(qty, receiptUnit decimal.Decimal, standard Split) (decimal.Decimal, Spl
 	largest := ""
 	sum := decimal.Zero
 	for _, c := range standard.Components() {
-		part := total.Mul(standard[c]).Div(stdUnit).Round(MoneyScale)
+		part := total.Mul(standard[c]).Div(stdUnit).Round(scale)
 		out.Add(c, part)
 		sum = sum.Add(part)
 		if largest == "" || standard[c].GreaterThan(standard[largest]) {
@@ -79,14 +80,15 @@ func MixedCost(alts []Alternative) (Split, error) {
 }
 
 // IssueCOGS splits the cost of goods sold of an issue by cost component
-// (FR-39.15). Each component is rounded to the cent and the total is the
-// issue quantity times the unit cost; the rounding residual goes to DM.
-func IssueCOGS(qty decimal.Decimal, unit Split) (Split, decimal.Decimal) {
-	total := qty.Mul(unit.Total()).Round(MoneyScale)
+// (FR-39.15). Each component is rounded to scale decimals (PostingScale) and
+// the total is the issue quantity times the unit cost; the rounding residual
+// goes to the material component DM (BR-39.13).
+func IssueCOGS(qty decimal.Decimal, unit Split, scale int32) (Split, decimal.Decimal) {
+	total := qty.Mul(unit.Total()).Round(scale)
 	out := Split{}
 	sum := decimal.Zero
 	for _, c := range unit.Components() {
-		part := qty.Mul(unit[c]).Round(MoneyScale)
+		part := qty.Mul(unit[c]).Round(scale)
 		out.Add(c, part)
 		sum = sum.Add(part)
 	}

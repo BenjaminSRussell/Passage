@@ -7,7 +7,7 @@ import (
 )
 
 func TestPPV_AC397PostsToDM(t *testing.T) {
-	total, split := PPV(d("10"), d("5.20"), Split{CompDM: d("5.00")})
+	total, split := PPV(d("10"), d("5.20"), Split{CompDM: d("5.00")}, MoneyScale)
 	if !total.Equal(d("2.00")) {
 		t.Errorf("PPV = %s, want 2.00", total)
 	}
@@ -19,7 +19,7 @@ func TestPPV_AC397PostsToDM(t *testing.T) {
 func TestPPV_SplitsByStandardComponentRatio(t *testing.T) {
 	// Standard 10.00 split 92% material, 5% freight, 3% duty; receipt 1.00 over.
 	std := Split{CompDM: d("9.20"), "FREIGHT": d("0.50"), "DUTY": d("0.30")}
-	total, split := PPV(d("100"), d("11.00"), std)
+	total, split := PPV(d("100"), d("11.00"), std, MoneyScale)
 	if !total.Equal(d("100.00")) {
 		t.Fatalf("total = %s", total)
 	}
@@ -63,7 +63,7 @@ func TestMixedCost_RatiosMustTotal100AndZeroRatioIsExcluded(t *testing.T) {
 
 func TestIssueCOGS_AC3912ByComponent(t *testing.T) {
 	unit := Split{CompDM: d("21.20"), CompDL: d("54.00"), CompIndMat: d("2.12"), CompIndLab: d("27.00")}
-	lines, total := IssueCOGS(d("10"), unit)
+	lines, total := IssueCOGS(d("10"), unit, MoneyScale)
 	if !total.Equal(d("1043.20")) {
 		t.Fatalf("total = %s, want 1043.20", total)
 	}
@@ -77,7 +77,7 @@ func TestIssueCOGS_AC3912ByComponent(t *testing.T) {
 
 func TestIssueCOGS_ResidualGoesToMaterial(t *testing.T) {
 	unit := Split{CompDM: d("0.333"), CompDL: d("0.333"), CompIndLab: d("0.334")}
-	lines, total := IssueCOGS(d("1"), unit)
+	lines, total := IssueCOGS(d("1"), unit, MoneyScale)
 	sum := decimal.Zero
 	for _, v := range lines {
 		sum = sum.Add(v)

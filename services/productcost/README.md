@@ -3,9 +3,9 @@
 Wave 39 (PSG-39): product costing, cost roll-up and variance analysis.
 Bounded context `costing`, Postgres schema `costing` (per-context database).
 
-## Slice 1 (this build)
+## Slices 1 and 2
 
-The service is **stateless** in slice 1. The caller sends the structure, prices and
+The service is **stateless** in slices 1 and 2. The caller sends the structure, prices and
 actuals in the request; the service computes and returns:
 
 - **Cost roll-up** (`POST /v1/costing/calculations`): one item rolled from its BOM and
@@ -22,22 +22,39 @@ actuals in the request; the service computes and returns:
 - **Activation preview** (`POST /v1/costing/activations:preview`): the on-hand
   revaluation per line, the total and the balanced journal. Nothing is posted.
 
-The variance compute and the activation preview take an optional ISO 4217 `currency`;
-amounts round to its minor unit (`platform/money`), two decimals when it is omitted.
+Slice 2 adds:
 
-## Duties
+- **Mixed cost** (`POST /v1/costing/mixed-costs`, FR-39.14): each procurement alternative
+  with a non-zero ratio is rolled with its own structure; the item cost and split are the
+  ratio-weighted mix (AC-39.11). Ratios must total 100.00 (`CST-0741`, 422); a 0.00 ratio
+  is reported as `Excluded` and left out (BR-39.12). An alternative that fails to roll fails
+  the item unless fallback applies. Sources are unique per item. `DeriveRatios` (domain only)
+  turns receipt quantities per source into ratios at 0.01%, the shortfall going to the
+  largest remainders.
+- **COGS posting preview** (`POST /v1/costing/postings:cogs`, FR-39.15): Dr `COGS-<component>`
+  per component of the unit split, Cr `Inventory` for the total. Components sum to the
+  total; the rounding residual goes to DM (BR-39.13).
+- **Price difference posting preview** (`POST /v1/costing/postings:price-difference`,
+  FR-39.7, FR-39.15): the PPV `(receipt unit cost − standard) × quantity` split over the
+  standard's components by their share, residual to the largest component; Dr (unfavourable)
+  or Cr (favourable) `PPV-<component>`, offset to `PriceDifferenceClearing`.
+- **Sales order estimate** (`POST /v1/costing/sales-order-estimates`, FR-39.16): rolls the
+  configured or make-to-order item at the order quantity (the order is the root's costing
+  lot) and returns calculation type `SalesOrder`, the cost, its split (summing to the cost,
+  residual to DM), margin = net − cost and margin % on the net amount (AC-39.13). Nothing is
+  stored, so freezing at confirmation is not built (see NOT-IMPLEMENTED D16).
+- **Comparison** (`POST /v1/costing/comparisons`, FR-39.10): a baseline run and a candidate
+  (what-if) run item by item, with delta, delta % and component deltas. Items on one side
+  only are reported; items in error on either side carry no delta.
+- **Standard reconciliation** (`POST /v1/costing/reconciliations`, FR-39.11, AC-39.9):
+  Σ on-hand × standard per site against the GL inventory balance; sites with a non-zero
+  difference are counted in `differences` and in the
+  `productcost_reconciliation_differences_total` metric (alert: difference ≠ 0).
 
-| Route | Duty (PRD 7.39.17) |
-|---|---|
-| `POST /v1/costing/calculations`, `POST /v1/costing/rolls` | `CostingCalculate` |
-| `POST /v1/costing/variances/compute` | `CostingSystem` |
-| `POST /v1/costing/activations:preview` | `CostingActivate` |
+Every route that posts money takes an optional ISO 4217 `currency`; amounts round to its
+minor unit (`platform/money`), two decimals when it is omitted (BR-39.1).
 
-## Web
-
-`apps/web/src/modules/productcost/`: the costing workspace (`/productcost`), cost roll-up
-(`/productcost/roll`), production variances (`/productcost/variances`) and activation
-preview (`/productcost/activation-preview`).
+## Roll-up rules
 
 The worked example of FR-39.4 is an exact test: FG-100 = 104.32 with split
 DM 21.20 / DL 54.00 / IND-MAT 2.12 / IND-LAB 27.00.
@@ -45,21 +62,66 @@ DM 21.20 / DL 54.00 / IND-MAT 2.12 / IND-LAB 27.00.
 Costs are decimal strings (never floats). Unit costs are stored and returned at six
 decimals; splits always sum to the unit cost.
 
-Explosion modes in slice 1: `Multilevel` (default) and `SingleLevel`. Costing sheet nodes:
-`Surcharge` (percentage of named components) and `Rate` (per routing hour or per unit);
-`Basis` and `Total` nodes are refused until the persisted sheet arrives.
+Explosion modes (`options.mode`, FR-39.4 step 3):
+
+| Mode | Purchased child | Manufactured child | Phantom line |
+|---|---|---|---|
+| `Multilevel` (default) | version price (fallback per BR-39.4) | rolled in this run | in place |
+| `SingleLevel` | active standard (`activeSplit` or `activePrice`) | active standard (`activeSplit`) | in place |
+| `MakeToOrder` | version price | rolled when the line is `makeToOrder`, else active standard | in place |
+| `ByLineType` | version price | active standard | in place |
+
+A child without the active standard a mode needs fails the parent with `CST-0702`.
+
+A **phantom** line (`phantom: true`, BR-39.3) must name a manufactured item. It is exploded
+in place in every mode: the phantom's direct costs (its purchased lines, operations and any
+phantoms below it) and its routing hours join the parent's own level, its rolled
+sub-assemblies stay rolled, and the parent's costing sheet applies to them; the phantom's
+own sheet does not. A line cannot be both `phantom` and `makeToOrder`.
+
+**Route scrap** (`operations[].scrapPct`, BR-39.6) compounds backward: an operation
+processes `Π (1 + scrap%)` over itself and every later operation, so its run time and
+routing hours are charged on that quantity, and the BOM material, issued before the first
+operation, is scaled by the first operation's factor. Setup is per lot and is not scaled
+(BR-39.5). BOM line scrap multiplies the line quantity as before.
+
+Costing sheet nodes: `Surcharge` (percentage of named components) and `Rate` (per routing
+hour or per unit); `Basis` and `Total` nodes are refused until the persisted sheet arrives.
+
+## Duties
+
+| Route | Duty (PRD 7.39.17) |
+|---|---|
+| `POST /v1/costing/calculations`, `/rolls`, `/mixed-costs`, `/sales-order-estimates`, `/postings:cogs`, `/postings:price-difference` | `CostingCalculate` |
+| `POST /v1/costing/comparisons`, `/reconciliations` | `CostingView` |
+| `POST /v1/costing/variances/compute` | `CostingSystem` |
+| `POST /v1/costing/activations:preview` | `CostingActivate` |
+
+The comparison and the reconciliation compute an inquiry without changing anything, so they
+take the PRD's read duty `CostingView` (the PRD's `GET /costing/compare` and the inventory
+value report).
+
+## Web
+
+`apps/web/src/modules/productcost/`: the costing workspace (`/productcost`), cost roll-up
+(`/productcost/roll`), production variances (`/productcost/variances`), activation
+preview (`/productcost/activation-preview`), mixed cost (`/productcost/mixed-cost`), sales
+order estimate (`/productcost/sales-order-estimate`), component postings
+(`/productcost/postings`), estimate comparison (`/productcost/compare`) and standard
+reconciliation (`/productcost/reconciliation`).
 
 ## Layout
 
 ```
 cmd/productcost/        entrypoint: dbx.Connect -> dbx.Migrate -> httpx.NewRouter -> register -> serve
-internal/domain/        roll-up, planner, mass roll, variances, pricing helpers (pure, no I/O)
-internal/api/           HTTP handlers, DTOs, validation
+internal/domain/        roll-up, planner, mass roll, variances, pricing, mixed cost, postings,
+                        sales estimate, comparison and reconciliation (pure, no I/O)
+internal/api/           HTTP handlers, DTOs, validation (commercial.go holds the slice-2 routes)
 migrations/             costing schema (costing_version, cost_calculation, cost_component_split,
-                        cost_component, variance_entry) with RLS; not yet written to by slice 1;
+                        cost_component, variance_entry) with RLS; not yet written to by slices 1-2;
                         migrations_test.go applies it and checks RLS when a database is set
 api/openapi.yaml        OpenAPI 3.1 for every endpoint
-events/asyncapi.yaml    AsyncAPI 3 (no channels in slice 1)
+events/asyncapi.yaml    AsyncAPI 3 (no channels in slices 1-2)
 charts/productcost/     Helm chart
 ```
 
@@ -98,9 +160,11 @@ Problem `type` is `https://passage.dev/problems/<code>`.
 | CST-0706 | item error | component is not in the catalog |
 | CST-0707 | item error | blocked: a component is in error (cascade, the rest of the run continues) |
 | CST-0720 | 422 | variance identity failed for the order (residual above the rounding bound) |
+| CST-0741 | 422 | mixing ratios do not total 100.00% |
 
-Problem codes for the mass roll and the activation preview are not in the catalog;
-their failures are per-item diagnostics or request validation (COM-0001).
+Problem codes for the mass roll, the activation preview, the postings, the comparison and
+the reconciliation are not in the catalog; their failures are per-item diagnostics or
+request validation (COM-0001).
 
 ## Wave reference
 

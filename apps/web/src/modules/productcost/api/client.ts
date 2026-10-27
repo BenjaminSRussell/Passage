@@ -9,12 +9,16 @@ export const base = "/api/v1/costing";
 export type Split = Record<string, string>;
 
 export type ItemKind = "Purchased" | "Manufactured";
-export type ExplosionMode = "Multilevel" | "SingleLevel";
+export type ExplosionMode = "Multilevel" | "SingleLevel" | "MakeToOrder" | "ByLineType";
 
 export interface BOMLine {
   childId: string;
   qty: string;
   scrapPct?: string;
+  /** Phantom line, exploded in place in every mode (BR-39.3). */
+  phantom?: boolean;
+  /** Make-to-order sub-assembly, exploded by the MakeToOrder mode. */
+  makeToOrder?: boolean;
 }
 
 export interface Operation {
@@ -23,6 +27,8 @@ export interface Operation {
   runHours?: string;
   rate?: string;
   lotSize?: string;
+  /** Operation scrap in percent; compounds backward through the route (BR-39.6). */
+  scrapPct?: string;
 }
 
 export interface SheetNode {
@@ -213,4 +219,138 @@ export function computeVariance(order: Order, signal?: AbortSignal): Promise<Dec
 /** Preview the on-hand revaluation an activation would post (FR-39.6). Nothing is posted. */
 export function previewActivation(req: { currency?: string; lines: RevalLine[] }, signal?: AbortSignal): Promise<ActivationPreview> {
   return post<ActivationPreview>("/activations:preview", req, signal);
+}
+
+// Slice 2: mixed cost, component postings, sales order estimates, comparison and reconciliation.
+
+export interface Alternative {
+  /** Vendor, production version or source site. */
+  source: string;
+  /** Mixing ratio in percent; 0 keeps it for reporting but leaves it out (BR-39.12). */
+  percent: string;
+  /** Catalog item rolled for this alternative. */
+  itemId: string;
+}
+
+export interface AlternativeRoll extends Alternative {
+  status: "Pending" | "Error" | "Excluded";
+  unitCost: string;
+  split: Split;
+  diagnostics?: Diagnostic[];
+}
+
+export interface MixedRoll {
+  itemId: string;
+  status: "Pending" | "Error";
+  unitCost: string;
+  split: Split;
+  alternatives: AlternativeRoll[];
+  diagnostics?: Diagnostic[];
+}
+
+export interface PostingPreview {
+  currency?: string;
+  total: string;
+  journal: JournalLine[];
+}
+
+export interface SalesEstimate {
+  itemId: string;
+  calculationType: "SalesOrder";
+  status: "Pending" | "Error";
+  quantity: string;
+  unitCost: string;
+  cost: string;
+  split: Split;
+  netAmount: string;
+  margin: string;
+  marginPct: string;
+  diagnostics?: Diagnostic[];
+}
+
+export interface ComparisonRow {
+  itemId: string;
+  status: "Compared" | "BaselineOnly" | "CandidateOnly" | "Error";
+  baseline: string;
+  candidate: string;
+  delta: string;
+  deltaPct: string;
+  byComponent: Split;
+}
+
+export interface Comparison {
+  rows: ComparisonRow[];
+  totalDelta: string;
+}
+
+export interface StandardOnHand {
+  siteId: string;
+  itemId: string;
+  qty: string;
+  stdUnit: string;
+}
+
+export interface SiteBalance {
+  siteId: string;
+  amount: string;
+}
+
+export interface SiteReconciliation {
+  siteId: string;
+  lines: number;
+  standardValue: string;
+  glBalance: string;
+  difference: string;
+  status: "Reconciled" | "Difference";
+}
+
+export interface Reconciliation {
+  currency?: string;
+  sites: SiteReconciliation[];
+  differences: number;
+}
+
+/** Cost an item mixed from procurement alternatives by ratio (FR-39.14). */
+export function mixedCost(
+  req: { items: CostItem[]; itemId: string; alternatives: Alternative[]; options?: RollOptions },
+  signal?: AbortSignal,
+): Promise<MixedRoll> {
+  return post<MixedRoll>("/mixed-costs", req, signal);
+}
+
+/** Preview the COGS of an issue by cost component (FR-39.15). Nothing is posted. */
+export function cogsPosting(req: { currency?: string; quantity: string; unitCost: Split }, signal?: AbortSignal): Promise<PostingPreview> {
+  return post<PostingPreview>("/postings:cogs", req, signal);
+}
+
+/** Preview a purchase price variance split by the standard's components (FR-39.7, FR-39.15). Nothing is posted. */
+export function priceDifferencePosting(
+  req: { currency?: string; quantity: string; receiptUnitCost: string; standard: Split },
+  signal?: AbortSignal,
+): Promise<PostingPreview> {
+  return post<PostingPreview>("/postings:price-difference", req, signal);
+}
+
+/** Cost a configured or make-to-order line at its order quantity and show the margin (FR-39.16). */
+export function salesOrderEstimate(
+  req: { currency?: string; items: CostItem[]; itemId: string; quantity: string; netAmount: string; options?: RollOptions },
+  signal?: AbortSignal,
+): Promise<SalesEstimate> {
+  return post<SalesEstimate>("/sales-order-estimates", req, signal);
+}
+
+/** Roll a baseline and a candidate selection and compare them item by item (FR-39.10). */
+export function compareRuns(
+  req: { baseline: { items: CostItem[]; options?: RollOptions }; candidate: { items: CostItem[]; options?: RollOptions } },
+  signal?: AbortSignal,
+): Promise<Comparison> {
+  return post<Comparison>("/comparisons", req, signal);
+}
+
+/** Reconcile on-hand at standard to the GL inventory balance per site (FR-39.11). */
+export function reconcileStandard(
+  req: { currency?: string; onHand: StandardOnHand[]; glBalances: SiteBalance[] },
+  signal?: AbortSignal,
+): Promise<Reconciliation> {
+  return post<Reconciliation>("/reconciliations", req, signal);
 }

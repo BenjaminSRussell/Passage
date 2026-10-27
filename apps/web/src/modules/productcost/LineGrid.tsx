@@ -19,6 +19,8 @@ export interface LineGridProps<K extends string> {
   lines: Record<K, string>[];
   /** Errors keyed by the service's paths, such as lines[0].stdUnitCost. */
   errors: Record<string, string>;
+  /** Request field the lines are sent as, which prefixes the error paths. Default "lines". */
+  path?: string;
   newLine(): Record<K, string>;
   onChange(lines: Record<K, string>[]): void;
   /** Hides fields that do not apply to a line (for example estimate per lot on a variable line). */
@@ -26,7 +28,17 @@ export interface LineGridProps<K extends string> {
 }
 
 /** An editable list of lines, one fieldset per line, built from the shell form primitives. */
-export function LineGrid<K extends string>({ idPrefix, noun, fields, lines, errors, newLine, onChange, applies }: LineGridProps<K>) {
+export function LineGrid<K extends string>({
+  idPrefix,
+  noun,
+  fields,
+  lines,
+  errors,
+  path: listPath = "lines",
+  newLine,
+  onChange,
+  applies,
+}: LineGridProps<K>) {
   const updateLine = (i: number, patch: Partial<Record<K, string>>) =>
     onChange(lines.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
   return (
@@ -39,7 +51,7 @@ export function LineGrid<K extends string>({ idPrefix, noun, fields, lines, erro
           {fields
             .filter((f) => !applies || applies(line, f.name))
             .map((f) => {
-              const path = `lines[${i}].${f.name}`;
+              const path = `${listPath}[${i}].${f.name}`;
               const id = `${idPrefix}-${i}-${f.name}`;
               return (
                 <FormField key={f.name} id={id} label={f.label} error={errors[path]}>
@@ -79,9 +91,9 @@ export function LineGrid<K extends string>({ idPrefix, noun, fields, lines, erro
           ) : null}
         </fieldset>
       ))}
-      {errors.lines ? (
+      {errors[listPath] ? (
         <p role="alert" className={styles.unfavourable}>
-          {errors.lines}
+          {errors[listPath]}
         </p>
       ) : null}
       <div>

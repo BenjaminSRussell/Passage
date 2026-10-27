@@ -16,13 +16,19 @@ const (
 )
 
 // ExplosionMode says how child items contribute to a parent (FR-39.4 step 3).
-// Multilevel rolls children from their own BOMs; SingleLevel takes each child
-// at its active standard without exploding it.
+// Multilevel rolls every child in this run. SingleLevel takes every child at
+// its active standard. MakeToOrder rolls purchased children at their version
+// price and explodes the manufactured children on make-to-order lines;
+// ByLineType does the same but explodes no make-to-order line, so those
+// sub-assemblies are costed at their active standard. Phantom lines are
+// exploded in place in every mode (BR-39.3); see explodes.
 type ExplosionMode string
 
 const (
 	ModeMultilevel  ExplosionMode = "Multilevel"
 	ModeSingleLevel ExplosionMode = "SingleLevel"
+	ModeMakeToOrder ExplosionMode = "MakeToOrder"
+	ModeByLineType  ExplosionMode = "ByLineType"
 )
 
 // Defaults from the parameter table (costing.maxLevels, costing.rollWorkers).
@@ -50,20 +56,28 @@ const (
 )
 
 // BOMLine is one component of a manufactured item. ScrapPct is in percent.
+// A Phantom line's child is exploded in place (BR-39.3): its own-level costs
+// and routing hours join the parent's own level. MakeToOrder marks the
+// make-to-order sub-assemblies that the MakeToOrder mode explodes.
 type BOMLine struct {
-	ChildID  string          `json:"childId"`
-	Qty      decimal.Decimal `json:"qty"`
-	ScrapPct decimal.Decimal `json:"scrapPct"`
+	ChildID     string          `json:"childId"`
+	Qty         decimal.Decimal `json:"qty"`
+	ScrapPct    decimal.Decimal `json:"scrapPct"`
+	Phantom     bool            `json:"phantom,omitempty"`
+	MakeToOrder bool            `json:"makeToOrder,omitempty"`
 }
 
 // Operation is one routing step. Setup is spread over the costing lot size
-// (BR-39.5); run time is charged per unit. Component defaults to DL.
+// (BR-39.5); run time is charged per unit. Component defaults to DL. ScrapPct
+// is the operation's scrap in percent; it compounds backward through the route
+// (BR-39.6).
 type Operation struct {
 	Component  string          `json:"component,omitempty"`
 	SetupHours decimal.Decimal `json:"setupHours"`
 	RunHours   decimal.Decimal `json:"runHours"`
 	Rate       decimal.Decimal `json:"rate"`
 	LotSize    decimal.Decimal `json:"lotSize"`
+	ScrapPct   decimal.Decimal `json:"scrapPct,omitempty"`
 }
 
 // NodeType is a costing sheet node kind (FR-39.2).
@@ -129,8 +143,10 @@ func (o RollOptions) normalized() RollOptions {
 // Validate rejects option values outside the parameter ranges.
 func (o RollOptions) Validate() error {
 	n := o.normalized()
-	if n.Mode != ModeMultilevel && n.Mode != ModeSingleLevel {
-		return fmt.Errorf("mode must be Multilevel or SingleLevel")
+	switch n.Mode {
+	case ModeMultilevel, ModeSingleLevel, ModeMakeToOrder, ModeByLineType:
+	default:
+		return fmt.Errorf("mode must be Multilevel, SingleLevel, MakeToOrder or ByLineType")
 	}
 	if n.MaxLevels < 1 || n.MaxLevels > maxLevelsCeiling {
 		return fmt.Errorf("maxLevels must be 1 to %d", maxLevelsCeiling)
@@ -150,8 +166,9 @@ type Diagnostic struct {
 }
 
 // Result is the rolled standard of one item per unit. Own holds the costs that
-// arise at this level (purchases, operations, sheet nodes); Rolled holds the
-// split carried up from manufactured children (FR-39.4 step 4).
+// arise at this level (purchases, operations, sheet nodes, phantoms exploded in
+// place); Rolled holds the split carried up from manufactured children
+// (FR-39.4 step 4).
 type Result struct {
 	ItemID      string          `json:"itemId"`
 	Status      string          `json:"status"`
@@ -160,6 +177,12 @@ type Result struct {
 	Rolled      Split           `json:"rolled"`
 	Unit        decimal.Decimal `json:"unitCost"`
 	Diagnostics []Diagnostic    `json:"diagnostics,omitempty"`
+
+	// direct and hours are the own-level costs before the costing sheet and
+	// the routing hours per unit. A parent exploding this item as a phantom
+	// takes them into its own level and applies its own sheet (BR-39.3).
+	direct Split
+	hours  decimal.Decimal
 }
 
 // Combined returns Own plus Rolled, rounded to the stored unit scale.
@@ -292,6 +315,53 @@ func purchasePrice(it Item, fallback bool) (decimal.Decimal, *Diagnostic) {
 	return decimal.Zero, &d
 }
 
+// explodes reports whether a BOM line takes the child's result from this run
+// rather than the child's active standard (FR-39.4 step 3). A phantom
+// manufactured child is always exploded (BR-39.3). A purchased child has no
+// structure to explode, so rolling it means taking its price in this version
+// (with fallback, BR-39.4); only SingleLevel takes it at its active standard.
+func explodes(mode ExplosionMode, line BOMLine, child Item) bool {
+	if line.Phantom && child.Kind == KindManufactured {
+		return true
+	}
+	switch mode {
+	case ModeMultilevel:
+		return true
+	case ModeMakeToOrder:
+		return child.Kind == KindPurchased || line.MakeToOrder
+	case ModeByLineType:
+		return child.Kind == KindPurchased
+	}
+	return false
+}
+
+// activeStandard is the split a child contributes when it is not exploded: its
+// active split, or for a purchased child its active price as material. A child
+// with neither fails the parent with CST-0702 (BR-39.4).
+func activeStandard(child Item, parentID string) (Split, *Diagnostic) {
+	if child.ActiveSplit != nil {
+		return child.ActiveSplit, nil
+	}
+	if child.Kind == KindPurchased && child.ActivePrice != nil {
+		return Split{CompDM: *child.ActivePrice}, nil
+	}
+	d := errDiag(CodeNoPrice, "no active standard for "+child.ID, parentID)
+	return nil, &d
+}
+
+// scrapFactors returns, per operation, the quantity processed there for one
+// unit of finished output (BR-39.6): 1 + scrap% of that operation times the
+// factors of every later operation, so scrap compounds backward.
+func scrapFactors(ops []Operation) []decimal.Decimal {
+	out := make([]decimal.Decimal, len(ops))
+	f := decimal.NewFromInt(1)
+	for k := len(ops) - 1; k >= 0; k-- {
+		f = f.Mul(decimal.NewFromInt(100).Add(ops[k].ScrapPct).Div(decimal.NewFromInt(100)))
+		out[k] = f
+	}
+	return out
+}
+
 // rollItem computes one item from the already-rolled results of its children.
 // It reads done but never writes it, so items of one level can run in parallel.
 func rollItem(cat Catalog, it Item, done map[string]Result, opts RollOptions) Result {
@@ -314,34 +384,51 @@ func rollItem(cat Catalog, it Item, done map[string]Result, opts RollOptions) Re
 	}
 
 	hours := decimal.Zero
+	// Route scrap compounds backward to the start of the route (BR-39.6), so
+	// the material issued before the first operation is scaled by its factor.
+	factors := scrapFactors(it.Operations)
+	routeFactor := decimal.NewFromInt(1)
+	if len(factors) > 0 {
+		routeFactor = factors[0]
+	}
 	for _, line := range it.BOM {
 		child, known := cat[line.ChildID]
 		if !known {
 			return fail(errDiag(CodeMissingComponent, "component "+line.ChildID+" is not in the catalog", it.ID))
 		}
-		qty := line.Qty.Mul(decimal.NewFromInt(100).Add(line.ScrapPct).Div(decimal.NewFromInt(100)))
-		var childSplit Split
-		if opts.Mode == ModeSingleLevel {
-			if child.ActiveSplit == nil {
-				return fail(errDiag(CodeNoPrice, "no active standard for "+child.ID, it.ID))
+		qty := line.Qty.Mul(decimal.NewFromInt(100).Add(line.ScrapPct).Div(decimal.NewFromInt(100))).Mul(routeFactor)
+		if !explodes(opts.Mode, line, child) {
+			split, diag := activeStandard(child, it.ID)
+			if diag != nil {
+				return fail(*diag)
 			}
-			childSplit = child.ActiveSplit
-		} else {
-			r, ok := done[child.ID]
-			if !ok || r.Status != StatusPending {
-				return fail(errDiag(CodeBlocked, "component "+child.ID+" did not roll", it.ID))
+			if child.Kind == KindPurchased {
+				res.Own.AddScaled(split, qty)
+			} else {
+				res.Rolled.AddScaled(split, qty)
 			}
-			childSplit = r.Combined()
+			continue
 		}
-		if child.Kind == KindPurchased {
-			res.Own.AddScaled(childSplit, qty)
-		} else {
-			res.Rolled.AddScaled(childSplit, qty)
+		r, ok := done[child.ID]
+		if !ok || r.Status != StatusPending {
+			return fail(errDiag(CodeBlocked, "component "+child.ID+" did not roll", it.ID))
+		}
+		switch {
+		case child.Kind == KindPurchased:
+			res.Own.AddScaled(r.Combined(), qty)
+		case line.Phantom:
+			// In place (BR-39.3): the phantom's direct costs and hours join this
+			// level, and this level's sheet (not the phantom's) applies to them.
+			res.Own.AddScaled(r.direct, qty)
+			res.Rolled.AddScaled(r.Rolled, qty)
+			hours = hours.Add(r.hours.Mul(qty))
+		default:
+			res.Rolled.AddScaled(r.Combined(), qty)
 		}
 	}
 
 	lot := it.CostingLot
-	for _, op := range it.Operations {
+	for k, op := range it.Operations {
 		comp := op.Component
 		if comp == "" {
 			comp = CompDL
@@ -353,12 +440,15 @@ func rollItem(cat Catalog, it Item, done map[string]Result, opts RollOptions) Re
 		if l.IsZero() {
 			l = decimal.NewFromInt(1)
 		}
-		// Routing hours per unit: run time plus setup spread over the lot (BR-39.5).
+		// Run time is charged on the quantity the operation processes, which
+		// route scrap compounds backward (BR-39.6); setup is per lot and is not
+		// scaled by scrap (BR-39.5). Routing hours follow the same rule.
 		setupPerUnit := op.SetupHours.Mul(op.Rate).Div(l)
-		res.Own.Add(comp, op.RunHours.Mul(op.Rate).Add(setupPerUnit))
-		hours = hours.Add(op.RunHours).Add(op.SetupHours.Div(l))
+		res.Own.Add(comp, op.RunHours.Mul(op.Rate).Mul(factors[k]).Add(setupPerUnit))
+		hours = hours.Add(op.RunHours.Mul(factors[k])).Add(op.SetupHours.Div(l))
 	}
 
+	res.direct = res.Own.Clone()
 	for _, node := range it.Sheet {
 		switch node.Type {
 		case NodeSurcharge:
@@ -378,6 +468,7 @@ func rollItem(cat Catalog, it Item, done map[string]Result, opts RollOptions) Re
 			res.Own.Add(node.Component, node.Rate.Mul(driver))
 		}
 	}
+	res.hours = hours
 	return finish(res)
 }
 

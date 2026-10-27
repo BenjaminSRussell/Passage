@@ -13,7 +13,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 )
 
-const allDuties = "CostingCalculate,CostingActivate,CostingSystem"
+const allDuties = "CostingView,CostingCalculate,CostingActivate,CostingSystem"
 
 // workedItems is the FR-39.4 example as the API receives it.
 const workedItems = `[
