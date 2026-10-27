@@ -366,6 +366,15 @@ func TestTenantIsolation(t *testing.T) {
 	if list, err := st.ListDefinitions(ctx2); err != nil || len(list) != 0 {
 		t.Fatalf("tenant 2 definitions = %+v, %v", list, err)
 	}
+	if _, _, err := st.SaveHierarchy(ctx1, accountTree(true), nil, "a"); err != nil {
+		t.Fatal(err)
+	}
+	if list, err := st.ListHierarchies(ctx2); err != nil || len(list) != 0 {
+		t.Fatalf("tenant 2 hierarchies = %+v, %v", list, err)
+	}
+	if _, _, err := st.GetHierarchy(ctx2, "HIER-BS", Draft); problemCode(err) != CodeHierarchyNotFound {
+		t.Fatalf("tenant 2 reading tenant 1's hierarchy = %v", err)
+	}
 	if _, err := st.GetRun(ctx2, run.ID); problemCode(err) != CodeRunNotFound {
 		t.Fatalf("tenant 2 reading tenant 1's run = %v", err)
 	}

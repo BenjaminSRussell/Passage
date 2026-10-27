@@ -128,10 +128,11 @@ type evaluator struct {
 }
 
 // Evaluate computes every cell of a definition for one ledger and run period.
-// Income statements exclude closing entries; balance sheets are cumulative from
-// the opening period (period 0, which carries the year-end brought-forward
-// entries) of the fiscal year of the column's last period through that period
-// (BR-15.2). Missing prior-year periods leave cells blank with REPORT-0010
+// Income statements exclude closing entries; balance sheets and trial balances
+// are cumulative from the opening period (period 0, which carries the year-end
+// brought-forward entries) of the fiscal year of the column's last period
+// through that period (BR-15.2), so a trial balance shows balances, not
+// movements. Missing prior-year periods leave cells blank with REPORT-0010
 // (BR-15.9).
 func Evaluate(in Input) (Result, error) {
 	def := in.Definition
@@ -167,7 +168,7 @@ func Evaluate(in Input) (Result, error) {
 				hi = i
 			}
 		}
-		if def.Kind == KindBalanceSheet && hi >= 0 {
+		if (def.Kind == KindBalanceSheet || def.Kind == KindTrialBalance) && hi >= 0 {
 			for i := 0; i <= hi; i++ {
 				if counted(i) && periods[i].Year == periods[hi].Year {
 					include[i] = true

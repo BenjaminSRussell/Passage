@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import type { Definition, DefinitionSummary } from "./api/client";
+import type { Definition, DefinitionSummary, StandardDefinition } from "./api/client";
 import { cleanColumn, cleanRow } from "./DefinitionEditorPage";
 import { header, json, pageViolations, problem, renderAt, server, useFakeServer } from "./testServer";
 
@@ -10,6 +10,7 @@ const summary: DefinitionSummary = {
   code: "BS-STD",
   name: "Balance sheet",
   kind: "balance_sheet",
+  status: "published",
   latestVersion: 3,
   hasDraft: true,
   updatedAt: "2026-04-01T09:00:00Z",
@@ -30,15 +31,68 @@ const bs: Definition = {
   columns: [{ code: "C1", label: "Closing", periodExpr: "P", currencyType: "rpt" }],
 };
 
+const standard: StandardDefinition[] = [
+  { code: "TB-STD", name: "Trial balance", kind: "trial_balance", rows: 6, columns: 3 },
+  { code: "BS-STD", name: "Balance sheet", kind: "balance_sheet", rows: 6, columns: 3 },
+];
+
 describe("DefinitionsPage", () => {
-  it("lists definitions with their published version and open draft", async () => {
-    server.handler = (url) => (url.pathname === "/api/v1/reporting/definitions" ? json(200, { items: [summary] }) : undefined);
+  it("lists definitions with their status, published version and open draft", async () => {
+    server.handler = (url) => {
+      if (url.pathname === "/api/v1/reporting/definitions") {
+        return json(200, { items: [summary, { ...summary, code: "OLD-PL", status: "retired", latestVersion: 0, hasDraft: false }] });
+      }
+      if (url.pathname === "/api/v1/reporting/standard-definitions") return json(200, { items: standard });
+      return undefined;
+    };
     const { container } = renderAt("/finreport/definitions");
     const table = await screen.findByRole("table", { name: "Report definitions" });
     expect(await within(table).findByRole("button", { name: "BS-STD" })).toBeInTheDocument();
     expect(within(table).getByText("v3")).toBeInTheDocument();
     expect(within(table).getByText("Open draft")).toBeInTheDocument();
+    expect(within(table).getByText("Published")).toBeInTheDocument();
+    expect(within(table).getByText("Retired")).toBeInTheDocument();
+    expect(await within(screen.getByRole("table", { name: "Standard definitions" })).findByText("TB-STD")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("installs the standard definitions, reports skipped codes and refreshes the list", async () => {
+    let installed = false;
+    server.handler = (url, init) => {
+      if (url.pathname === "/api/v1/reporting/definitions") return json(200, { items: installed ? [summary] : [] });
+      if (url.pathname === "/api/v1/reporting/standard-definitions") return json(200, { items: standard });
+      if (url.pathname === "/api/v1/reporting/standard-definitions:install" && init.method === "POST") {
+        installed = true;
+        return json(200, {
+          items: [
+            { code: "TB-STD", action: "installed", version: 1 },
+            { code: "BS-STD", action: "skipped", reason: "the code already has a draft version" },
+          ],
+        });
+      }
+      return undefined;
+    };
+    renderAt("/finreport/definitions");
+    expect(await screen.findByText("No report definitions yet")).toBeInTheDocument();
+    await screen.findByText("TB-STD");
+    fireEvent.click(screen.getByRole("button", { name: "Install standard definitions" }));
+    expect(await screen.findByText("Installed TB-STD")).toBeInTheDocument();
+    expect(screen.getByText(/skipped, the code already has a draft version/)).toBeInTheDocument();
+    expect(await within(screen.getByRole("table", { name: "Report definitions" })).findByRole("button", { name: "BS-STD" })).toBeInTheDocument();
+  });
+
+  it("explains a refused install", async () => {
+    server.handler = (url) => {
+      if (url.pathname === "/api/v1/reporting/definitions") return json(200, { items: [] });
+      if (url.pathname === "/api/v1/reporting/standard-definitions") return json(200, { items: standard });
+      if (url.pathname === "/api/v1/reporting/standard-definitions:install") return problem(403, "AUTH-0003", "missing duty reporting.definition.maintain");
+      return undefined;
+    };
+    renderAt("/finreport/definitions");
+    await screen.findByText("TB-STD");
+    fireEvent.click(screen.getByRole("button", { name: "Install standard definitions" }));
+    expect(await screen.findByText("The standard definitions were not installed")).toBeInTheDocument();
+    expect(screen.getByText(/missing duty reporting.definition.maintain/)).toBeInTheDocument();
   });
 
   it("shows an empty state and a load error", async () => {
@@ -49,7 +103,9 @@ describe("DefinitionsPage", () => {
     server.handler = () => problem(403, "AUTH-0003", "missing duty reporting.statement.view");
     renderAt("/finreport/definitions");
     expect(await screen.findByText("Could not load the report definitions")).toBeInTheDocument();
-    expect(screen.getByText(/AUTH-0003/)).toBeInTheDocument();
+    expect(await screen.findByText("Could not load the standard definitions")).toBeInTheDocument();
+    expect(screen.getAllByText(/AUTH-0003/)).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Install standard definitions" })).toBeDisabled();
   });
 
   it("imports pasted JSON, refusing a duplicate code until overwrite is ticked", async () => {
@@ -156,6 +212,42 @@ describe("DefinitionEditorPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Publish" }));
     expect(await screen.findByText("Published version 4. Runs can use it now.")).toBeInTheDocument();
     expect(screen.getByText("v4 published")).toBeInTheDocument();
+  });
+
+  it("retires a published definition after confirmation", async () => {
+    server.handler = (url, init) => {
+      const p = url.pathname;
+      if (p === "/api/v1/reporting/definitions/BS-STD:retire" && init.method === "POST") return json(200, { code: "BS-STD", status: "retired", retiredVersions: 3 });
+      if (p === "/api/v1/reporting/definitions/BS-STD") {
+        return url.searchParams.get("version") === "draft" ? problem(404, "REPORT-0020", "no draft") : json(200, { ...bs, version: 3, status: "published" });
+      }
+      return undefined;
+    };
+    const { container } = renderAt("/finreport/definitions/BS-STD");
+    fireEvent.click(await screen.findByRole("button", { name: "Retire" }));
+    expect(screen.getByText("Retire BS-STD?")).toBeInTheDocument();
+    expect(pageViolations(container)).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Keep it" }));
+    expect(server.calls.some((c) => c.url.pathname.endsWith(":retire"))).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Retire" }));
+    fireEvent.click(screen.getByRole("button", { name: "Retire definition" }));
+    expect(await screen.findByText(/Retired BS-STD. New runs can no longer use it/)).toBeInTheDocument();
+    expect(screen.getByText("v3 retired")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Run this statement" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Retire" })).toBeNull();
+  });
+
+  it("shows a retired definition without the run link", async () => {
+    server.handler = (url) => {
+      if (url.pathname !== "/api/v1/reporting/definitions/OLD-PL") return undefined;
+      return url.searchParams.get("version") === "draft" ? problem(404, "REPORT-0020", "no draft") : json(200, { ...bs, code: "OLD-PL", version: 2, status: "retired" });
+    };
+    renderAt("/finreport/definitions/OLD-PL");
+    expect(await screen.findByText("v2 retired")).toBeInTheDocument();
+    expect(screen.getByText(/Saving starts a draft from retired version 2/)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Run this statement" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Export JSON" })).toBeInTheDocument();
   });
 
   it("starts from the latest published version when no draft is open", async () => {

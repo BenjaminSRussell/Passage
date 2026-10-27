@@ -2,6 +2,8 @@ import { createElement } from "react";
 import type { PassageModule } from "../registry";
 import { DefinitionEditorPage } from "./DefinitionEditorPage";
 import { DefinitionsPage } from "./DefinitionsPage";
+import { HierarchiesPage } from "./HierarchiesPage";
+import { HierarchyEditorPage } from "./HierarchyEditorPage";
 import { NewRunPage } from "./NewRunPage";
 import { RunPage } from "./RunPage";
 import { RunsPage } from "./RunsPage";
@@ -17,10 +19,14 @@ const finreport: PassageModule = {
     { path: "/finreport/definitions", element: createElement(DefinitionsPage), handle: { title: "Report definitions" } },
     { path: "/finreport/definitions/new", element: createElement(DefinitionEditorPage), handle: { title: "New report definition" } },
     { path: "/finreport/definitions/:code", element: createElement(DefinitionEditorPage), handle: { title: "Report definition" } },
+    { path: "/finreport/hierarchies", element: createElement(HierarchiesPage), handle: { title: "Derived hierarchies" } },
+    { path: "/finreport/hierarchies/new", element: createElement(HierarchyEditorPage), handle: { title: "New derived hierarchy" } },
+    { path: "/finreport/hierarchies/:code", element: createElement(HierarchyEditorPage), handle: { title: "Derived hierarchy" } },
   ],
   nav: [
     { label: "Statements", to: "/finreport", duty: "reporting.statement.view" },
     { label: "Report definitions", to: "/finreport/definitions", duty: "reporting.statement.view" },
+    { label: "Derived hierarchies", to: "/finreport/hierarchies", duty: "reporting.definition.maintain" },
   ],
 };
 

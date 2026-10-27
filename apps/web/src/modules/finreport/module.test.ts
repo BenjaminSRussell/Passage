@@ -9,7 +9,7 @@ describe("finreport module", () => {
     expect(finreport.nav.every((n) => n.to.startsWith("/finreport"))).toBe(true);
   });
 
-  it("has a list, a form and a detail page for statement runs and report definitions", () => {
+  it("has a list, a form and a detail page for statement runs, report definitions and derived hierarchies", () => {
     expect(finreport.routes.map((r) => r.path)).toEqual([
       "/finreport",
       "/finreport/runs/new",
@@ -17,11 +17,14 @@ describe("finreport module", () => {
       "/finreport/definitions",
       "/finreport/definitions/new",
       "/finreport/definitions/:code",
+      "/finreport/hierarchies",
+      "/finreport/hierarchies/new",
+      "/finreport/hierarchies/:code",
     ]);
   });
 
-  it("guards the navigation with the view duty the service enforces", () => {
-    expect(finreport.nav.map((n) => n.duty)).toEqual(["reporting.statement.view", "reporting.statement.view"]);
+  it("guards the navigation with the duty the service enforces for each list", () => {
+    expect(finreport.nav.map((n) => n.duty)).toEqual(["reporting.statement.view", "reporting.statement.view", "reporting.definition.maintain"]);
   });
 
   it("is auto-discovered by the registry", () => {

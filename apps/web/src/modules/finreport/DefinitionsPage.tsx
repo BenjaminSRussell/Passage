@@ -1,7 +1,18 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, FormField, Input, PageHeader, Textarea, type DataTableColumn } from "../../shell/ui";
-import { describeProblem, importDefinition, listDefinitions, newKey, type DefinitionSummary, type Problem } from "./api/client";
+import {
+  describeProblem,
+  importDefinition,
+  installStandardDefinitions,
+  listDefinitions,
+  listStandardDefinitions,
+  newKey,
+  type DefinitionSummary,
+  type InstallResult,
+  type Problem,
+  type StandardDefinition,
+} from "./api/client";
 import { KIND_LABELS } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -10,15 +21,20 @@ const columns: DataTableColumn<DefinitionSummary>[] = [
   { key: "code", header: "Code", mono: true },
   { key: "name", header: "Name" },
   { key: "kind", header: "Kind", render: (d) => KIND_LABELS[d.kind] ?? d.kind },
+  { key: "status", header: "Status", render: (d) => <Badge tone={STATUS_TONES[d.status]}>{STATUS_LABELS[d.status]}</Badge> },
   { key: "latestVersion", header: "Published version", mono: true, align: "end", render: (d) => (d.latestVersion > 0 ? `v${d.latestVersion}` : "—") },
   { key: "hasDraft", header: "Draft", render: (d) => (d.hasDraft ? <Badge tone="info">Open draft</Badge> : null) },
   { key: "updatedAt", header: "Updated", mono: true, render: (d) => <time dateTime={d.updatedAt}>{d.updatedAt}</time> },
 ];
 
-/** Report definitions (FR-15.2, FR-15.3): every code with its newest published version and open draft. */
+const STATUS_LABELS: Record<DefinitionSummary["status"], string> = { draft: "Draft only", published: "Published", retired: "Retired" };
+const STATUS_TONES = { draft: "neutral", published: "success", retired: "warning" } as const;
+
+/** Report definitions (FR-15.2, FR-15.3): every code with its status, newest published version and open draft. */
 export function DefinitionsPage() {
   const navigate = useNavigate();
-  const state = useLoad((signal) => listDefinitions(signal), "definitions");
+  const [reloads, setReloads] = useState(0);
+  const state = useLoad((signal) => listDefinitions(signal), `definitions-${reloads}`);
   return (
     <div className={styles.stack}>
       <PageHeader
@@ -45,8 +61,91 @@ export function DefinitionsPage() {
           onRowOpen={(d) => navigate(`/finreport/definitions/${encodeURIComponent(d.code)}`)}
         />
       )}
+      <StandardCard onInstalled={() => setReloads((n) => n + 1)} />
       <ImportCard onImported={(code) => navigate(`/finreport/definitions/${encodeURIComponent(code)}`)} />
     </div>
+  );
+}
+
+const standardColumns: DataTableColumn<StandardDefinition>[] = [
+  { key: "code", header: "Code", mono: true },
+  { key: "name", header: "Name" },
+  { key: "kind", header: "Kind", render: (d) => KIND_LABELS[d.kind] ?? d.kind },
+  { key: "rows", header: "Rows", mono: true, align: "end" },
+  { key: "columns", header: "Columns", mono: true, align: "end" },
+];
+
+/**
+ * The statutory definitions the service ships (FR-15.5, FR-15.14) and the
+ * install action. Install publishes version 1 of each code the tenant does not
+ * use yet and skips the others, so clicking it twice is harmless.
+ */
+export function StandardCard({ onInstalled }: { onInstalled(): void }) {
+  const state = useLoad((signal) => listStandardDefinitions(signal), "standard-definitions");
+  const [results, setResults] = useState<InstallResult[] | null>(null);
+  const [failure, setFailure] = useState<Problem | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function install() {
+    setBusy(true);
+    setFailure(null);
+    try {
+      setResults(await installStandardDefinitions());
+      onInstalled();
+    } catch (e) {
+      setFailure(describeProblem(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const installed = results?.filter((r) => r.action === "installed") ?? [];
+  return (
+    <Card
+      title="Standard statements"
+      actions={
+        <Button size="sm" onClick={install} loading={busy} disabled={state.loading || state.error !== null}>
+          Install standard definitions
+        </Button>
+      }
+    >
+      <div className={styles.stack}>
+        <p className={styles.note}>
+          Trial balance, balance sheet and income statements (also by function of expense) over the default account ranges. Installing publishes
+          version 1 of each code you do not use yet; codes you already have are left as they are.
+        </p>
+        {state.error ? (
+          <Alert tone="danger" title="Could not load the standard definitions" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
+            {state.error.message} ({state.error.code})
+          </Alert>
+        ) : (
+          <DataTable
+            label="Standard definitions"
+            columns={standardColumns}
+            rows={state.data ?? []}
+            getRowKey={(d) => d.code}
+            loading={state.loading}
+            empty={{ title: "No standard definitions", description: "This service version ships none." }}
+          />
+        )}
+        {results ? (
+          <Alert tone="success" title={installed.length > 0 ? `Installed ${installed.map((r) => r.code).join(", ")}` : "Nothing to install"} live="status">
+            <ul className={styles.issues}>
+              {results.map((r) => (
+                <li key={r.code}>
+                  <span className={styles.mono}>{r.code}</span>: {r.action === "installed" ? `published as version ${r.version ?? 1}` : `skipped, ${r.reason ?? "already in use"}`}
+                </li>
+              ))}
+            </ul>
+          </Alert>
+        ) : null}
+        {failure ? (
+          <Alert tone="danger" title="The standard definitions were not installed" live="alert">
+            {failure.message} ({failure.code})
+          </Alert>
+        ) : null}
+      </div>
+    </Card>
   );
 }
 

@@ -1,21 +1,21 @@
-# NOT-IMPLEMENTED: PSG-15 (wave 15), slice 1
+# NOT-IMPLEMENTED: PSG-15 (wave 15), after slice 2
 
-Every deliverable bullet of PSG-15, and every acceptance criterion that slice 1
-does not fully meet, is listed here. Status is either **later slice of PSG-15**
+Every deliverable bullet of PSG-15, and every acceptance criterion that slices 1
+and 2 do not fully meet, is listed here. Status is either **later slice of PSG-15**
 (work this service still owes) or **handoff** (needs another owner or a
 platform change outside the wave's owned paths).
 
 ## Deliverables (PSG-15 "Deliverables" 1-7)
 
-| # | Deliverable | Built in slice 1 | Status | Reason |
+| # | Deliverable | Built so far | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 1 | Report designer: row/column/tree over account structures and dimensions | Rows (header, account_range, dimension_filter, total, calculation), columns (P, P-n, YTD, PY, PYTD, Q, FY, CALC), validation via `:validate`, JSON import/export, definition list. Web designer form (`apps/web/src/modules/finreport`): rows and columns with add, remove and move up/down, validate, save draft with If-Match, publish, export, JSON import. | Partial. Reporting trees, row-set/column-set/tree endpoints, split-pane layout, live preview, drag reorder, multi-select indent and "insert total of selection" are **later slice of PSG-15**. | Slice 1 is the evaluation core, the API and a form-based designer; the tree model and the richer editor follow. |
-| 2 | Standard statements: TB, BS, P&L, CF indirect, comparative, consolidated-by-entity | Evaluator and CF derivation in the domain; no shipped standard definitions or entity-column view | **later slice of PSG-15** | Needs seeded `TB-STD`, `BS-STD`, `PL-STD`, `CF-STD`, `TB-DIM` definitions and the entity-column run mode. CF derivation (`cashflow.go`) is not yet called from the run endpoint. |
+| 2 | Standard statements: TB, BS, P&L, CF indirect, comparative, consolidated-by-entity | Slice 2: `TB-STD` (opening, closing, movement per account class), `BS-STD` (current, prior year, variance, check row), `PL-STD` and `PL-FUNC` (period, YTD, prior year) ship in `domain/standard.go`; `GET /standard-definitions` lists them and `POST /standard-definitions:install` publishes version 1 of each code the tenant does not use, in one transaction. Web: install card on the definitions list. | Partial. `CF-STD`, `TB-DIM`, per-account rows, the entity-column (consolidated-by-entity) run mode and comparative templates are **later slice of PSG-15**. CF derivation (`cashflow.go`) is not yet called from the run endpoint. | The standard rows group accounts by the first digit of the account number (1 assets, 2 liabilities, 3 equity, 4 revenue, 5-6 expenses). That is an assumption standing in for `MainAccountCategory` (**handoff** to wave 11); a tenant with another chart edits the installed drafts. |
 | 3 | Drill-down: statement, balance, journal lines, source document, trace id | Drill level 1 (balance keys of a cell, sum checked, REPORT-0099 on mismatch; computed cells answer `computed: true`), with the statement grid and drill panel in the web module | Level 2 (lines, keyset pages, `sum_of_lines`, `filtered_amount`), `source_uri`, trace id links to Tempo are **later slice of PSG-15**. Line data is a **handoff** to the ledger line API (wave 11). | The journal line API is not available to this service yet. |
 | 4 | Scheduled distribution (PDF/XLSX/email), row-level security on dimensions | Nothing | **later slice of PSG-15** for schedules, library, share links and retention. **Handoff** for SMTP (wave 4), the Chromium renderer sidecar (deploy/ + platform), and OPA dimension-value decisions (wave 2 `authz` Policy). | Requires the outputs pipeline, the email transport and the OPA decision for dimension values. |
 | 5 | Audit trail report: who posted, approvals, reversals, period overrides | Nothing | **later slice of PSG-15**; **handoff** to wave 5 (audit store) and waves 11, 13, 14 (`journal.posted`, approval, period events). | Source events and audit rows are owned by other waves. |
-| 6 | Derived financial hierarchies (main account categories, dimension values) | Nothing | **later slice of PSG-15** (tables, membership, publish checks REPORT-0013/0014, `hierarchy.unassigned`). **Handoff** to wave 11 for `MainAccountCategory` and `MainAccount.category_id`. | The category model is owned by wave 11. |
-| 7 | P&L by function of expense (PL-FUNC) | Nothing | **later slice of PSG-15**; **handoff** to wave 11 for the `FUNC_AREA` dimension (FR-11.22). | Depends on the dimension. |
+| 6 | Derived financial hierarchies (main account categories, dimension values) | Slice 2: `report_hierarchy` table (RLS), domain rules (ranges, values, prefix wildcards, attribute tests; depth 12, 20,000 nodes, cycles), list, revision-checked drafts, publish with REPORT-0013 (strict) and REPORT-0014 (overlap), materialized membership per version, `hierarchy.unassigned.v1` per unassigned member of a non-strict publish, owner recorded. Web: hierarchy list and editor with publish and membership view. | Partial. Using a hierarchy as a row set or reporting tree in runs (one row per node, "Unassigned" node last with a footnote, version recorded on the run, effective-date resolution), `follow_master_data`, retiring a hierarchy and a member-level membership table (membership is one JSON document per version) are **later slice of PSG-15**. The members to classify are passed in the publish request: the account master, `MainAccountCategory` / `MainAccount.category_id` and dimension values are a **handoff** to wave 11 and wave 6. Re-evaluation on `ledger.account.changed` and dimension events within 60 s (`hierarchy-membership-refresh`) and the owner notification are **later slice of PSG-15** after those events exist. | Master data is owned by waves 6 and 11. |
+| 7 | P&L by function of expense (PL-FUNC) | Slice 2: `PL-FUNC` ships with revenue, cost of sales, distribution, administrative, other operating and financial rows filtered on `FUNC_AREA`, and a check row of expense lines without `FUNC_AREA`. `domain.PLFuncCheck` returns REPORT-0015. | Partial. REPORT-0015 is not yet attached to runs as a warning (**later slice of PSG-15**). Expense lines whose `FUNC_AREA` is a value other than COS, DIST, ADMIN, OTHER or FIN fall out of the functional rows without showing in the check row (**later slice of PSG-15**, needs a "not in" filter). **Handoff** to wave 11 for the `FUNC_AREA` dimension (FR-11.22). | Depends on the dimension. |
 
 ## Functional requirements
 
@@ -27,7 +27,7 @@ platform change outside the wave's owned paths).
 | BR-15.3 sign presentation and `raw:` calculations | Done (credit rows show `-net`; `raw:` uses stored net). | n/a |
 | FR-15.3 columns: currency type, ledger override, variance/percent, comparative templates | Period expressions, CALC (variance and percent as expressions such as `C2-C1` or `(C2-C1)/C1*100`) and per-column currency type (empty = the run's) done. Currency filter within a currency type, column dimension filter, column format, `ledger_code_override` (BR-15.10, REPORT-0005), comparative templates and variance presets are **later slice of PSG-15**. | Multi-ledger columns need the chart-of-accounts compatibility check; the read model has no transaction currency code yet. |
 | FR-15.4 reporting trees and per-unit runs with roll-up | **later slice of PSG-15**; **handoff** to wave 6 for dimension hierarchies | Depends on wave 6 hierarchies. |
-| FR-15.5 standard definitions and `is_closing_entry` / `is_opening_entry` handling | Closing entries are excluded from income statements (`closing_net`) and balance sheets start at the fiscal year's opening period 0 (brought-forward entries), per BR-15.2. Seeded standard definitions, TB-STD opening/debit/credit/closing columns (the read model holds net only) and the consolidated-by-entity view are **later slice of PSG-15**. | Requires seeded definitions (see deliverable 2) and debit/credit in the read model. |
+| FR-15.5 standard definitions and `is_closing_entry` / `is_opening_entry` handling | Closing entries are excluded from income statements (`closing_net`); balance sheets and trial balances start at the fiscal year's opening period 0 (brought-forward entries), per BR-15.2. `TB-STD`, `BS-STD`, `PL-STD` ship (slice 2). `TB-STD` debit and credit columns (the read model holds net only), `CF-STD`, `TB-DIM`, the tree parameter and the consolidated-by-entity view are **later slice of PSG-15**. | Requires debit/credit in the read model and the tree model. |
 | FR-15.6 run outputs: HTML, PDF, XLSX, CSV; `outputs[]` is empty | Runs and cells stored with SHA-256 result hash and HWM (done); the interactive HTML statement is the web module's run page. File outputs and renderers are **later slice of PSG-15**; PDF sidecar is a **handoff** to deploy/. | Rendering is out of slice 1. |
 | FR-15.6 performance: 2,000 x 12 over 200k balances < 20 s | Not measured | Needs a benchmark fixture under `testdata/` (later). |
 | FR-15.6 queued / running / failed states and 202 + `statusUrl` for long work | Runs are synchronous; `status` is always `completed`. **later slice of PSG-15** | Async execution needs the job runner (platform). |
@@ -38,8 +38,8 @@ platform change outside the wave's owned paths).
 | FR-15.10 audit trail report and hashed export | **later slice of PSG-15**; **handoff** to wave 5 | See deliverable 5. |
 | FR-15.11 definition import/export as JSON | Done: `GET .../export`, `POST .../import` (schema v1, REPORT-0011 when the code has a draft or a published version and `overwrite` is not set, REPORT-0012 schema, optional Idempotency-Key stored in `idempotency_keys`). Store test exports, re-imports under a new code and compares cells. | n/a |
 | FR-15.12 MR and FSV converters | **later slice of PSG-15**; the migration packs belong to the migration-framework owner (**handoff**). | Converters need the MR and FSV extracts. |
-| FR-15.13 derived hierarchies | **later slice of PSG-15** (see deliverable 6). | n/a |
-| FR-15.14 PL-FUNC | **later slice of PSG-15** (see deliverable 7). | n/a |
+| FR-15.13 derived hierarchies | Partial (slice 2), see deliverable 6. JSON export and import use `GET` and `PUT /hierarchies/{code}` (the published body is accepted as a draft). | Runs over hierarchies and master-data refresh are later. |
+| FR-15.14 PL-FUNC | Partial (slice 2), see deliverable 7. | REPORT-0015 on runs is later. |
 
 ## Data, events, jobs
 
@@ -48,11 +48,13 @@ platform change outside the wave's owned paths).
 | `reporting.max_lag_seconds` gate, `allow_stale`, REPORT-0004 | **later slice of PSG-15** | Needs the ledger HWM to compare against. `GET /lag` reports the reporting HWM only. |
 | Fiscal calendar used for period placement | Slice 1 takes the calendar in the run request body; the web run form generates whole fiscal years (opening period 0 plus N periods, quarters spread evenly). **Handoff** to wave 14 (period calendar API). | No calendar service exists yet. |
 | BR-15.11 large cells (> 50,000 keys become a query spec) | **later slice of PSG-15** | Keys are stored in full for now. |
-| Events: `statement.failed`, `distribution.sent`, `lag.exceeded`, `hierarchy.unassigned` | **later slice of PSG-15** | Their producers are not built yet. |
-| `statement.generated.v1` and `definition.published.v1` | Done: written to the outbox in the same transaction. | n/a |
+| Events: `statement.failed`, `distribution.sent`, `lag.exceeded` | **later slice of PSG-15** | Their producers are not built yet. |
+| `statement.generated.v1`, `definition.published.v1`, `hierarchy.unassigned.v1` | Done: written to the outbox in the same transaction. `hierarchy.unassigned.v1` is raised at publish of a non-strict hierarchy; raising it when a new account or dimension value arrives needs the master-data events (see deliverable 6). | n/a |
+| Retire event | Retire writes no event; PRD §2.15.5 names none. | Add one with the audit trail work (deliverable 5) if audit needs it. |
 | Jobs: `reporting-balance-consumer`, `reporting-balance-verify`, `statement-schedules`, `library-retention-sweep`, `audit-completeness-check`, `hierarchy-membership-refresh` | **later slice of PSG-15** | Depend on the consumer and the schedule model. |
-| `POST` publish and validate: `Idempotency-Key` | Not taken. Validate is stateless. Publish is safe to repeat: a second call finds no draft and answers 404, so it never creates a second version. Import and run creation persist the key (`idempotency_keys` table and `statement_run.idempotency_key`). | PRD §2.15.5 asks for a key on import and runs only. |
-| Retire endpoint, row-set / column-set / tree endpoints | **later slice of PSG-15** | Not needed by the first evaluation path. The definition list (`GET /definitions`) and run list (`GET /runs`, newest first, no cursor) are built. |
+| `POST` publish, validate, retire, install and hierarchy publish: `Idempotency-Key` | Not taken. Validate is stateless. Publish (definitions and hierarchies) is safe to repeat: a second call finds no draft and answers 404, so it never creates a second version. Retire succeeds again on a retired code. Install skips codes already in use. Import and run creation persist the key (`idempotency_keys` table and `statement_run.idempotency_key`). | PRD §2.15.5 asks for a key on import and runs only. |
+| Row-set / column-set / tree endpoints | **later slice of PSG-15** | Not needed by the first evaluation path. The definition list (`GET /definitions`), retire (slice 2) and run list (`GET /runs`, newest first, no cursor) are built. |
+| `GET/PUT /api/v1/ledger/main-account-categories` | **handoff** to wave 11 | Path and entity belong to the ledger service. |
 | Run list keyset pagination and report library filters (entity, period) | **later slice of PSG-15** | `GET /runs` returns at most 200 runs, filterable by definition code. |
 | Ad-hoc balances query `GET /reporting/balances` | **later slice of PSG-15** | Needs the dimension security filter. |
 | Audit view `AuditTrailEntry` | **later slice of PSG-15** | See deliverable 5. |
@@ -74,7 +76,7 @@ platform change outside the wave's owned paths).
 
 | AC | Status | Reason |
 | --- | --- | --- |
-| AC1 statements tie to the trial balance to the cent (demo dataset) | **later slice of PSG-15** | Needs the `demo-fy2026-closed` fixture from waves 11-14 and the standard definitions. The store test seeds three balances only. |
+| AC1 statements tie to the trial balance to the cent (demo dataset) | Partial. `TestStatements_TieOutToTrialBalance` (domain) ties BS-STD (check row 0.00), PL-STD and TB-STD on a balanced ledger; `TestInstallStandard` (store) runs the installed TB-STD with total 0.00. The demo dataset run is **later slice of PSG-15**. | Needs the `demo-fy2026-closed` fixture from waves 11-14. |
 | AC2 designer round-trips a 200-row definition through JSON export/import | Done. `internal/domain/designer_roundtrip_test.go` covers 200 x 12 `Marshal`, `Parse` and identical cell values; `TestExportImportRoundTripAndReproducibleHash` (store) exports, imports under a new code, publishes and runs both with identical cells. | n/a |
 | AC3 drill sum property over random cells | Done for the evaluator (rapid, 20 rows x 12 columns, random balances). Line-level sum (level 2) is **later slice of PSG-15**. | Level 2 is not built. |
 | AC4 phase exit sign-off by finance stakeholders | **handoff** to the finance stakeholders and the wave 15 issue | Process, not code. |
@@ -88,13 +90,14 @@ platform change outside the wave's owned paths).
 | AC-15.9 reopen and re-close appear in the audit trail | **later slice of PSG-15** | See deliverable 5. |
 | AC-15.10 2,000 x 12 over 200k balances < 20 s | Not measured | See FR-15.6 performance. |
 | AC-15.11 phase exit comparison to AX and SAP expectations | **handoff** to finance stakeholders | Process. |
-| AC-15.12 derived hierarchy strict publish and `REPORT_HIERARCHY_UNASSIGNED` | **later slice of PSG-15** | See deliverable 6. |
-| AC-15.13 PL-FUNC equals PL-STD net | **later slice of PSG-15** | See deliverable 7. |
+| AC-15.12 derived hierarchy strict publish and `REPORT_HIERARCHY_UNASSIGNED` | Partial. A strict publish with an unassigned member is refused with REPORT-0013 naming it (store test); a non-strict publish emits `hierarchy.unassigned`. Emitting it when the account is created, and the BS-STD run with the hierarchy as row set, are **later slice of PSG-15**; categories are a **handoff** to wave 11. | See deliverable 6. |
+| AC-15.13 PL-FUNC equals PL-STD net | Done at domain level (`TestPLFunc_EqualsPLStdWhenEveryLineHasFunctionalArea`, check row 0.00; a line without `FUNC_AREA` shows in the check row). On the demo dataset: **later slice of PSG-15**. | Needs the demo fixture and `FUNC_AREA` (wave 11). |
 
 ## Notes
 
-- `REPORT-0099` (drill invariant) is a slice-local code. It is not yet in the
-  message catalog (PRD §2.15.18) and should be added there with the owner.
+- `REPORT-0099` (drill invariant) and `REPORT-0027` (hierarchy not found) are
+  slice-local codes. They are not yet in the message catalog (PRD §2.15.18)
+  and should be added there with the owner.
 - Codes `COM-0001`, `COM-0002`, `COM-0003`, `COM-0404` and `AUTH-0001` are used
   for shape, body, header and auth errors. They match the shared catalog
   pattern. Confirm them against the platform error catalog.

@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: Passage Financial Reporting API
   version: 1.0.0
-  description: Report definitions, statement runs and drill-down (PSG-15, wave 15 slice 1).
+  description: Report definitions, standard statements, derived hierarchies, statement runs and drill-down (PSG-15, wave 15 slices 1-2).
 servers:
   - url: https://api.{env}.passage.dev
     variables:
@@ -332,6 +332,183 @@ paths:
                   items:
                     type: array
                     items: {$ref: '#/components/schemas/LagRow'}
+  /api/v1/reporting/definitions/{code}:retire:
+    parameters:
+      - $ref: '#/components/parameters/Code'
+    post:
+      operationId: retireDefinition
+      summary: Retire every published version (BR-15.8). Runs can no longer use the code; its versions and past runs stay readable and an open draft is kept. Repeating the call on a retired code succeeds with retiredVersions 0.
+      x-passage-duty: reporting.definition.maintain
+      responses:
+        '200':
+          description: Retired
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, status, retiredVersions]
+                properties:
+                  code: {type: string}
+                  status: {type: string, enum: [retired]}
+                  retiredVersions: {type: integer, description: published versions retired by this call}
+        '404': {$ref: '#/components/responses/Problem'}
+  /api/v1/reporting/standard-definitions:
+    get:
+      operationId: listStandardDefinitions
+      summary: The statutory definitions the service ships (TB-STD, BS-STD, PL-STD, PL-FUNC; FR-15.5, FR-15.14)
+      x-passage-duty: reporting.definition.maintain
+      responses:
+        '200':
+          description: Shipped definitions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/StandardDefinition'}
+  /api/v1/reporting/standard-definitions:install:
+    post:
+      operationId: installStandardDefinitions
+      summary: Publish, as version 1 and in one transaction, every shipped definition whose code the tenant does not use yet. Codes with any draft, published or retired version are skipped, so repeating the call is safe.
+      x-passage-duty: reporting.definition.maintain
+      responses:
+        '200':
+          description: Per-code result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/InstallResult'}
+  /api/v1/reporting/hierarchies:
+    get:
+      operationId: listHierarchies
+      summary: One summary per derived hierarchy code (FR-15.13)
+      x-passage-duty: reporting.definition.maintain
+      responses:
+        '200':
+          description: Hierarchy summaries ordered by code
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/HierarchySummary'}
+  /api/v1/reporting/hierarchies/{code}:
+    parameters:
+      - $ref: '#/components/parameters/Code'
+    get:
+      operationId: getHierarchy
+      summary: Read a derived hierarchy (draft, latest published or an exact version) (FR-15.13)
+      x-passage-duty: reporting.definition.maintain
+      parameters:
+        - name: version
+          in: query
+          required: false
+          schema: {type: string, description: draft, latest (default) or a positive version}
+      responses:
+        '200':
+          description: The hierarchy
+          headers:
+            ETag:
+              description: Draft revision (drafts only)
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Hierarchy'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+    put:
+      operationId: putHierarchy
+      summary: Create or replace the draft hierarchy (idempotent). The body is the JSON a GET returns, so this is also the import path. Omitted strict defaults to true for account and category hierarchies.
+      x-passage-duty: reporting.definition.maintain
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: Required when a draft exists; the ETag last read. Missing gives 428, stale gives 412 conflict_version.
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Hierarchy'}
+      responses:
+        '200':
+          description: Saved draft
+          headers:
+            ETag:
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Hierarchy'}
+        '412': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+        '428': {$ref: '#/components/responses/Problem'}
+  /api/v1/reporting/hierarchies/{code}:publish:
+    parameters:
+      - $ref: '#/components/parameters/Code'
+    post:
+      operationId: publishHierarchy
+      summary: Publish the draft as the next version and materialize its membership over the supplied members. Refuses overlapping members (REPORT-0014) and, for strict hierarchies, unassigned members (REPORT-0013); a non-strict publish emits hierarchy.unassigned.v1 per unassigned member.
+      x-passage-duty: reporting.definition.maintain
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                members:
+                  type: array
+                  items: {$ref: '#/components/schemas/Member'}
+      responses:
+        '200':
+          description: Published hierarchy and its membership
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hierarchy: {$ref: '#/components/schemas/Hierarchy'}
+                  membership: {$ref: '#/components/schemas/Membership'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+  /api/v1/reporting/hierarchies/{code}/members:
+    parameters:
+      - $ref: '#/components/parameters/Code'
+    get:
+      operationId: getHierarchyMembers
+      summary: Materialized membership of a published version (latest by default)
+      x-passage-duty: reporting.definition.maintain
+      parameters:
+        - name: version
+          in: query
+          required: false
+          schema: {type: string, description: latest (default) or a positive published version}
+      responses:
+        '200':
+          description: Membership of the version
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Membership'
+                  - type: object
+                    required: [version]
+                    properties:
+                      version: {type: integer}
+        '400': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
 components:
   securitySchemes:
     bearerAuth:
@@ -387,12 +564,13 @@ components:
         detail: {type: string}
     DefinitionSummary:
       type: object
-      required: [code, name, kind, latestVersion, hasDraft, updatedAt]
+      required: [code, name, kind, status, latestVersion, hasDraft, updatedAt]
       properties:
         code: {type: string}
         name: {type: string}
         kind: {type: string, enum: [trial_balance, balance_sheet, income_statement, cash_flow, custom]}
-        latestVersion: {type: integer, description: 0 when never published}
+        status: {type: string, enum: [draft, published, retired], description: published when a version can run, retired when every version was retired, draft otherwise}
+        latestVersion: {type: integer, description: newest published version, 0 when none}
         hasDraft: {type: boolean}
         updatedAt: {type: string, format: date-time}
     Definition:
@@ -514,3 +692,88 @@ components:
         ledgerId: {type: string, format: uuid}
         postingSequence: {type: integer, format: int64}
         updatedAt: {type: string, format: date-time}
+    StandardDefinition:
+      type: object
+      required: [code, name, kind, rows, columns]
+      properties:
+        code: {type: string}
+        name: {type: string}
+        kind: {type: string}
+        rows: {type: integer}
+        columns: {type: integer}
+    InstallResult:
+      type: object
+      required: [code, action]
+      properties:
+        code: {type: string}
+        action: {type: string, enum: [installed, skipped]}
+        version: {type: integer, description: published version, when installed}
+        reason: {type: string, description: why the code was skipped}
+    HierarchySummary:
+      type: object
+      required: [code, name, subject, strict, latestVersion, hasDraft, assignedCount, unassignedCount, updatedAt]
+      properties:
+        code: {type: string}
+        name: {type: string}
+        subject: {type: string, enum: [main_account_category, main_account, dimension_value]}
+        strict: {type: boolean}
+        latestVersion: {type: integer, description: 0 when never published}
+        hasDraft: {type: boolean}
+        assignedCount: {type: integer, description: members assigned in the latest published version}
+        unassignedCount: {type: integer}
+        updatedAt: {type: string, format: date-time}
+    Hierarchy:
+      type: object
+      required: [code, name, subject, strict, nodes]
+      properties:
+        schemaVersion: {type: string, enum: ['1']}
+        code: {type: string, pattern: '^[A-Z][A-Z0-9-]{1,29}$'}
+        name: {type: string, maxLength: 120}
+        version: {type: integer, description: 0 for drafts}
+        status: {type: string, enum: [draft, published, retired]}
+        subject: {type: string, enum: [main_account_category, main_account, dimension_value]}
+        dimensionAttribute: {type: string, description: required only for dimension_value}
+        strict: {type: boolean}
+        effectiveFrom: {type: string, format: date}
+        ownerUserId: {type: string, description: notified about unassigned members; defaults to the user who first saves the draft}
+        nodes:
+          type: array
+          maxItems: 20000
+          items: {$ref: '#/components/schemas/HierarchyNode'}
+    HierarchyNode:
+      type: object
+      required: [code, label]
+      properties:
+        code: {type: string}
+        label: {type: string}
+        parent: {type: string, description: parent node code; empty for roots}
+        rules:
+          type: array
+          description: membership rules, leaves only; a leaf matches a member when any rule matches
+          items:
+            type: object
+            properties:
+              attribute: {type: string, description: member attribute to test; empty tests the member key}
+              from: {type: string, description: inclusive range start (text comparison)}
+              to: {type: string}
+              values: {type: array, items: {type: string}, description: exact values; a trailing * is a prefix wildcard}
+    Member:
+      type: object
+      required: [id, key]
+      properties:
+        id: {type: string}
+        key: {type: string, description: account number, category id or dimension value}
+        attributes:
+          type: object
+          additionalProperties: {type: string}
+    Membership:
+      type: object
+      required: [assigned, unassigned]
+      properties:
+        assigned:
+          type: object
+          description: member id to leaf node code
+          additionalProperties: {type: string}
+        unassigned:
+          type: array
+          items: {type: string}

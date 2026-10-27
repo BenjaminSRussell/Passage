@@ -8,11 +8,24 @@ const Context = "reporting"
 var (
 	StatementGenerated  = events.Type(Context, "statement", "generated", 1)
 	DefinitionPublished = events.Type(Context, "definition", "published", 1)
+	HierarchyUnassigned = events.Type(Context, "hierarchy", "unassigned", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{StatementGenerated, DefinitionPublished}
+	return []string{StatementGenerated, DefinitionPublished, HierarchyUnassigned}
+}
+
+// HierarchyUnassignedData is the payload of hierarchy.unassigned.v1: a member
+// of a published non-strict hierarchy matched no leaf (FR-15.13, BR-15.13).
+// OwnerUserID is the hierarchy owner the notification goes to.
+type HierarchyUnassignedData struct {
+	Code        string `json:"code"`
+	Version     int    `json:"version"`
+	MemberID    string `json:"member_id"`
+	MemberKind  string `json:"member_kind"`
+	OwnerUserID string `json:"owner_user_id"`
+	Actor       string `json:"actor"`
 }
 
 // OutputRef describes a rendered output file. Slice 1 renders no files, so

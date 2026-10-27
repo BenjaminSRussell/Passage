@@ -9,6 +9,7 @@ import {
   getDefinition,
   publishDefinition,
   ReportingApiError,
+  retireDefinition,
   ROW_KINDS,
   saveDraft,
   validateDefinition,
@@ -98,7 +99,10 @@ function move<T>(list: T[], from: number, to: number): T[] {
 interface Loaded {
   def: Definition;
   etag: string | null;
+  /** Newest non-draft version (0 when never published). */
   basedOn: number;
+  /** Status of that version: published (runnable) or retired (BR-15.8). */
+  basedOnStatus: "published" | "retired" | null;
 }
 
 /**
@@ -109,7 +113,7 @@ export function DefinitionEditorPage() {
   const { code: routeCode } = useParams();
   const isNew = routeCode === undefined;
   const navigate = useNavigate();
-  const [loaded, setLoaded] = useState<Loaded | null>(isNew ? { def: blankDefinition(), etag: null, basedOn: 0 } : null);
+  const [loaded, setLoaded] = useState<Loaded | null>(isNew ? { def: blankDefinition(), etag: null, basedOn: 0, basedOnStatus: null } : null);
   const [loadError, setLoadError] = useState<Problem | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [def, setDef] = useState<Definition>(blankDefinition());
@@ -118,7 +122,8 @@ export function DefinitionEditorPage() {
   const [issues, setIssues] = useState<Issue[] | null>(null);
   const [failure, setFailure] = useState<Problem | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"save" | "validate" | "publish" | "export" | null>(null);
+  const [busy, setBusy] = useState<"save" | "validate" | "publish" | "export" | "retire" | null>(null);
+  const [confirmRetire, setConfirmRetire] = useState(false);
 
   useEffect(() => {
     if (isNew) {
@@ -139,8 +144,9 @@ export function DefinitionEditorPage() {
         getDefinition(code, "latest", controller.signal).catch(notFound),
       ]);
       const basedOn = latest?.definition.version ?? 0;
-      if (draft) return { def: draft.definition, etag: draft.etag, basedOn };
-      if (latest) return { def: { ...latest.definition, version: 0, status: "draft" }, etag: null, basedOn };
+      const basedOnStatus = latest ? (latest.definition.status === "retired" ? "retired" : "published") : null;
+      if (draft) return { def: draft.definition, etag: draft.etag, basedOn, basedOnStatus };
+      if (latest) return { def: { ...latest.definition, version: 0, status: "draft" }, etag: null, basedOn, basedOnStatus };
       throw notFoundProblem(code);
     })().then(
       (result) => {
@@ -209,11 +215,28 @@ export function DefinitionEditorPage() {
     setFailure(null);
     try {
       const published = await publishDefinition(def.code.trim());
-      setLoaded({ def: { ...published, version: 0, status: "draft" }, etag: null, basedOn: published.version });
+      setLoaded({ def: { ...published, version: 0, status: "draft" }, etag: null, basedOn: published.version, basedOnStatus: "published" });
       setDef({ ...published, version: 0, status: "draft" });
       setEtag(null);
       setDirty(false);
       setNotice(`Published version ${published.version}. Runs can use it now.`);
+    } catch (error) {
+      setFailure(describeProblem(error));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function retire() {
+    setBusy("retire");
+    setFailure(null);
+    try {
+      const result = await retireDefinition(def.code.trim());
+      setLoaded((prev) => (prev ? { ...prev, basedOnStatus: "retired" } : prev));
+      setConfirmRetire(false);
+      setNotice(
+        `Retired ${result.code}. New runs can no longer use it; earlier runs stay readable.${hasDraft ? " Publishing the open draft makes it runnable again." : ""}`,
+      );
     } catch (error) {
       setFailure(describeProblem(error));
     } finally {
@@ -272,7 +295,8 @@ export function DefinitionEditorPage() {
   }
 
   const hasDraft = etag !== null;
-  const published = loaded.basedOn > 0;
+  const published = loaded.basedOn > 0 && loaded.basedOnStatus === "published";
+  const retired = loaded.basedOnStatus === "retired";
   return (
     <div className={styles.stack}>
       <PageHeader
@@ -281,13 +305,14 @@ export function DefinitionEditorPage() {
           hasDraft
             ? `You are editing the draft. Publishing turns it into version ${loaded.basedOn + 1}.`
             : loaded.basedOn > 0
-              ? `No draft is open. Saving starts a draft from published version ${loaded.basedOn}.`
+              ? `No draft is open. Saving starts a draft from ${retired ? "retired" : "published"} version ${loaded.basedOn}.`
               : "Saving creates the first draft of this definition."
         }
         meta={
           <>
             {hasDraft ? <Badge tone="info">Draft</Badge> : null}
             {published ? <Badge tone="success">{`v${loaded.basedOn} published`}</Badge> : null}
+            {retired ? <Badge tone="warning">{`v${loaded.basedOn} retired`}</Badge> : null}
           </>
         }
         actions={
@@ -307,7 +332,7 @@ export function DefinitionEditorPage() {
             <FormField id="fr-def-name" label="Name">
               {(c) => <Input {...c} value={def.name} onChange={(e) => change({ name: e.target.value })} />}
             </FormField>
-            <FormField id="fr-def-kind" label="Statement kind" hint="Balance sheets are cumulative; income statements leave out closing entries.">
+            <FormField id="fr-def-kind" label="Statement kind" hint="Balance sheets and trial balances are cumulative; income statements leave out closing entries.">
               {(c) => (
                 <Select {...c} value={def.kind} onChange={(e) => change({ kind: e.target.value as DefinitionKind })}>
                   {DEFINITION_KINDS.map((k) => (
@@ -501,15 +526,39 @@ export function DefinitionEditorPage() {
           <Button onClick={publish} loading={busy === "publish"} disabled={!hasDraft || dirty}>
             Publish
           </Button>
-          {published ? (
+          {loaded.basedOn > 0 ? (
             <Button variant="ghost" onClick={download} loading={busy === "export"}>
               Export JSON
+            </Button>
+          ) : null}
+          {published ? (
+            <Button variant="ghost" onClick={() => setConfirmRetire(true)} disabled={busy !== null}>
+              Retire
             </Button>
           ) : null}
           {dirty ? <span className={styles.note}>Unsaved changes. Save the draft before publishing.</span> : null}
         </div>
       </form>
 
+      {confirmRetire ? (
+        <Alert
+          tone="warning"
+          title={`Retire ${def.code}?`}
+          live="alert"
+          action={
+            <span className={styles.lineActions}>
+              <Button size="sm" variant="primary" onClick={retire} loading={busy === "retire"}>
+                Retire definition
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setConfirmRetire(false)}>
+                Keep it
+              </Button>
+            </span>
+          }
+        >
+          Runs and schedules can no longer use any published version. Earlier runs stay readable.
+        </Alert>
+      ) : null}
       {notice ? (
         <Alert tone="success" live="status">
           {notice}

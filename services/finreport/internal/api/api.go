@@ -53,6 +53,13 @@ type Store interface {
 	ListCells(ctx context.Context, runID string) ([]domain.Cell, error)
 	GetCell(ctx context.Context, runID, row, column string) (domain.Cell, error)
 	Lag(ctx context.Context) ([]store.LagRow, error)
+	RetireDefinition(ctx context.Context, code string) (int, error)
+	InstallStandard(ctx context.Context, defs []domain.Definition, actor string) ([]store.InstallResult, error)
+	ListHierarchies(ctx context.Context) ([]store.HierarchySummary, error)
+	SaveHierarchy(ctx context.Context, h domain.Hierarchy, ifMatch *int, owner string) (domain.Hierarchy, int, error)
+	GetHierarchy(ctx context.Context, code string, version int) (domain.Hierarchy, int, error)
+	PublishHierarchy(ctx context.Context, code, actor string, members []domain.Member) (domain.Hierarchy, domain.Membership, error)
+	HierarchyMembership(ctx context.Context, code string, version int) (domain.Membership, int, error)
 }
 
 // API holds the handlers.
@@ -76,6 +83,13 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyView)).Get("/runs/{id}/cells", a.listCells)
 		r.With(authz.RequireDuty(DutyView)).Get("/runs/{id}/cells/{row}/{column}/balances", a.drillBalances)
 		r.With(authz.RequireDuty(DutyView)).Get("/lag", a.lag)
+		r.With(authz.RequireDuty(DutyMaintain)).Get("/standard-definitions", a.listStandard)
+		r.With(authz.RequireDuty(DutyMaintain)).Post("/standard-definitions:install", a.installStandard)
+		r.With(authz.RequireDuty(DutyMaintain)).Get("/hierarchies", a.listHierarchies)
+		r.With(authz.RequireDuty(DutyMaintain)).Get("/hierarchies/{code}", a.getHierarchy)
+		r.With(authz.RequireDuty(DutyMaintain)).Put("/hierarchies/{code}", a.putHierarchy)
+		r.With(authz.RequireDuty(DutyMaintain)).Get("/hierarchies/{code}/members", a.hierarchyMembers)
+		r.With(authz.RequireDuty(DutyMaintain)).Post("/hierarchies/*", a.hierarchyAction)
 	})
 }
 
@@ -153,7 +167,7 @@ func (a *API) putDefinition(w http.ResponseWriter, r *http.Request) {
 }
 
 // definitionAction dispatches the colon custom methods on a definition:
-// POST /definitions/{code}:publish and POST /definitions/{code}:validate.
+// POST /definitions/{code}:publish, :retire and :validate.
 func (a *API) definitionAction(w http.ResponseWriter, r *http.Request) {
 	if !principal(r) {
 		httpx.Fail(w, r, unauthenticated())
@@ -175,6 +189,13 @@ func (a *API) definitionAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		httpx.JSON(w, http.StatusOK, def)
+	case "retire":
+		n, err := a.store.RetireDefinition(r.Context(), code)
+		if err != nil {
+			fail(w, r, err)
+			return
+		}
+		httpx.JSON(w, http.StatusOK, map[string]any{"code": code, "status": "retired", "retiredVersions": n})
 	case "validate":
 		def, ok := decodeDefinition(w, r)
 		if !ok {

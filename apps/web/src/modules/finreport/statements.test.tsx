@@ -156,8 +156,8 @@ describe("NewRunPage", () => {
       if (url.pathname === "/api/v1/reporting/definitions") {
         return json(200, {
           items: [
-            { code: "PL-STD", name: "Income statement", kind: "income_statement", latestVersion: 2, hasDraft: false, updatedAt: "2026-04-01T00:00:00Z" },
-            { code: "DRAFT-ONLY", name: "Draft", kind: "custom", latestVersion: 0, hasDraft: true, updatedAt: "2026-04-01T00:00:00Z" },
+            { code: "PL-STD", name: "Income statement", kind: "income_statement", status: "published", latestVersion: 2, hasDraft: false, updatedAt: "2026-04-01T00:00:00Z" },
+            { code: "DRAFT-ONLY", name: "Draft", kind: "custom", status: "draft", latestVersion: 0, hasDraft: true, updatedAt: "2026-04-01T00:00:00Z" },
           ],
         });
       }
@@ -185,7 +185,7 @@ describe("NewRunPage", () => {
   it("shows field errors without calling the service, and service errors after", async () => {
     server.handler = (url, init) => {
       if (url.pathname === "/api/v1/reporting/definitions") {
-        return json(200, { items: [{ code: "PL-STD", name: "Income statement", kind: "income_statement", latestVersion: 2, hasDraft: false, updatedAt: "" }] });
+        return json(200, { items: [{ code: "PL-STD", name: "Income statement", kind: "income_statement", status: "published", latestVersion: 2, hasDraft: false, updatedAt: "" }] });
       }
       if (url.pathname === "/api/v1/reporting/runs" && init.method === "POST") return problem(422, "REPORT-0001", "Definition PL-STD has no published version.");
       return undefined;

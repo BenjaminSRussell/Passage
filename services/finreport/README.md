@@ -5,9 +5,39 @@ the reporting read model, and drill-down from a statement cell to its balance
 keys. Phase 2 exit wave. Reads from its own `reporting` database, fed by ledger
 events.
 
-## Status: slice 1
+## Status: slice 2
 
-Built in this slice:
+Slice 2 adds (on top of slice 1, below):
+
+- Derived hierarchies (FR-15.13, BR-15.13): `GET /hierarchies` list,
+  revision-checked drafts (`GET/PUT /hierarchies/{code}`, ETag / If-Match),
+  `POST /hierarchies/{code}:publish` with the members to classify, and
+  `GET /hierarchies/{code}/members` for the materialized membership of a
+  version. Leaves carry rules (key or attribute ranges, values, prefix
+  wildcards such as `61*`). Publish refuses overlaps (REPORT-0014) and, for
+  strict hierarchies, unassigned members (REPORT-0013); a non-strict publish
+  writes one `hierarchy.unassigned.v1` per unassigned member to the outbox in
+  the same transaction, addressed to the hierarchy owner. `strict` defaults to
+  true for account and category hierarchies. Up to 12 levels and 20,000 nodes.
+- `POST /definitions/{code}:retire` (BR-15.8): new runs are refused
+  (REPORT-0001), retired versions and the runs that used them stay readable, an
+  open draft is kept, and a later publish takes the next version number.
+  Repeating the call succeeds. The definition list carries a `status`
+  (published, retired or draft).
+- Standard definitions `TB-STD`, `BS-STD`, `PL-STD` and `PL-FUNC` (FR-15.5,
+  FR-15.14): `GET /standard-definitions` and `POST /standard-definitions:install`,
+  which publishes version 1 of every code the tenant does not use yet, in one
+  transaction, and skips the rest. Standard columns take the run's currency
+  type. Trial balances are now cumulative like balance sheets (balances, not
+  movements). The domain tests tie BS-STD, PL-STD and TB-STD out on a balanced
+  ledger and show PL-FUNC equal to PL-STD when every expense line has a
+  `FUNC_AREA` (AC-15.1 and AC-15.13 at domain level).
+- Web module `finreport`: status column and the standard-definition install
+  card on the definitions list, retire (with confirmation) in the designer, and
+  the derived hierarchy list and editor (nodes, rules, publish with members,
+  membership per leaf and unassigned members).
+
+Slice 1 built:
 
 - Definition model: rows (header, account_range, dimension_filter, total,
   calculation), columns (period expressions P, P-1, YTD, PY, PYTD, Q, FY, CALC),
@@ -42,7 +72,7 @@ See `NOT-IMPLEMENTED.md` for what is deferred.
 
 ```
 cmd/finreport/          entrypoint (dbx.Connect, optional Migrate, httpx.Serve)
-internal/domain/        definitions, expressions, periods, evaluation, cash flow (pure, no I/O)
+internal/domain/        definitions, expressions, periods, evaluation, cash flow, standard definitions, derived hierarchies (pure, no I/O)
 internal/store/         Postgres store (pgx), tenant transactions, outbox writes
 internal/api/           HTTP handlers under /api/v1/reporting
 internal/events/        event types and payloads
@@ -83,7 +113,7 @@ tests check that `api/openapi.yaml` lists exactly the registered routes and that
 
 | Duty | Routes |
 | --- | --- |
-| `reporting.definition.maintain` | definition PUT, publish, validate, export, import |
+| `reporting.definition.maintain` | definition PUT, publish, retire, validate, export, import; standard definition list and install; hierarchy list, GET, PUT, publish and members |
 | `reporting.statement.run` | `POST /runs` |
 | `reporting.statement.view` | definition list and GET, run list and reads, cells, drill level 1, lag |
 
@@ -99,8 +129,10 @@ Problem details use `type` `https://passage.dev/problems/<code>`.
 | REPORT-0008 | 422 | Cash flow does not reconcile (`CF_UNRECONCILED`), raised by the cash-flow derivation |
 | REPORT-0009 | 422 | Balance-sheet accounts without a cash-flow tag (`CF_UNCLASSIFIED_ACCOUNTS`) |
 | REPORT-0011 | 409 | Import of an existing code without `overwrite=true` (`REPORT_IMPORT_DUPLICATE`) |
+| REPORT-0013 | 422 | Strict hierarchy has unassigned members at publish (`REPORT_HIERARCHY_UNASSIGNED`) |
+| REPORT-0014 | 422 | A member matches two leaves at publish (`REPORT_HIERARCHY_OVERLAP`) |
 | REPORT-0012 | 422 | Unsupported schema version on import (`REPORT_IMPORT_SCHEMA`) |
-| REPORT-0020 | 404 | Definition or version not found |
+| REPORT-0020 | 404 | Definition or version not found; retire of a code that was never published |
 | REPORT-0024 | 404 | Statement run not found (also for a run id that is not a UUID) |
 | REPORT-0025 | 404 | Cell not found in the run |
 | REPORT-0099 | 500 | Drill invariant failed: balance keys do not sum to the cell (never served) |
@@ -108,11 +140,12 @@ Problem details use `type` `https://passage.dev/problems/<code>`.
 | precondition_required | 428 | Draft exists and `If-Match` was not sent |
 | idempotency_key_reuse | 422 | Idempotency-Key reused for a different run or import request |
 | idempotency_key_in_flight | 409 | A concurrent request with the same Idempotency-Key won; retry to get the replay |
-| COM-0001 | 422 | Shape violation in a definition (code, name, kind, row and column fields) |
+| COM-0001 | 422 | Shape violation in a definition or hierarchy (codes, names, labels, rules, members without id or key); hierarchy body code mismatches the path |
 | COM-0002 | 400/422 | Malformed body, bad If-Match, bad list limit or run parameters (ledgerId not a UUID, calendar quarter not 1-4) |
 | COM-0003 | 400 | `Idempotency-Key` header missing on `POST /runs` |
-| REPORT-0026 | 422 | Definition has no rows or columns, or more than 2,000 rows or 60 columns |
-| COM-0404 | 404 | Unknown definition action |
+| REPORT-0026 | 422 | Definition has no rows or columns, or more than 2,000 rows or 60 columns; hierarchy has no nodes, more than 20,000 nodes, more than 12 levels or a cycle |
+| REPORT-0027 | 404 | Hierarchy, its draft or a published version not found |
+| COM-0404 | 404 | Unknown definition or hierarchy action |
 | AUTH-0001 | 401 | Missing tenant |
 | AUTH-0003 | 403 | Missing duty (authz middleware) |
 

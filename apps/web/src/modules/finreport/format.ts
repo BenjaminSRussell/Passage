@@ -1,4 +1,4 @@
-import type { CalendarPeriod, DefinitionKind, RowKind } from "./api/client";
+import type { CalendarPeriod, DefinitionKind, HierarchySubject, RowKind } from "./api/client";
 
 export const KIND_LABELS: Record<DefinitionKind, string> = {
   trial_balance: "Trial balance",
@@ -14,6 +14,12 @@ export const ROW_KIND_LABELS: Record<RowKind, string> = {
   dimension_filter: "Dimension filter",
   total: "Total",
   calculation: "Calculation",
+};
+
+export const SUBJECT_LABELS: Record<HierarchySubject, string> = {
+  main_account: "Main accounts",
+  main_account_category: "Main account categories",
+  dimension_value: "Dimension values",
 };
 
 export const CURRENCY_TYPE_LABELS = { acct: "Accounting", rpt: "Reporting", txn: "Transaction" } as const;

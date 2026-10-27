@@ -15,7 +15,19 @@ channels:
     messages:
       definitionPublished:
         $ref: '#/components/messages/DefinitionPublished'
+  hierarchyUnassigned:
+    address: passage.reporting.hierarchy
+    messages:
+      hierarchyUnassigned:
+        $ref: '#/components/messages/HierarchyUnassigned'
 operations:
+  publishHierarchyUnassigned:
+    action: send
+    channel:
+      $ref: '#/channels/hierarchyUnassigned'
+    summary: A member of a published non-strict hierarchy matched no leaf (FR-15.13, BR-15.13); one event per member, written to the outbox in the publish transaction
+    messages:
+      - $ref: '#/channels/hierarchyUnassigned/messages/hierarchyUnassigned'
   publishStatementGenerated:
     action: send
     channel:
@@ -71,3 +83,16 @@ components:
           version: {type: integer}
           actor: {type: string, description: User id of the publisher}
           diff_summary: {type: string}
+    HierarchyUnassigned:
+      name: dev.passage.reporting.hierarchy.unassigned.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [code, version, member_id, member_kind, owner_user_id, actor]
+        properties:
+          code: {type: string, description: Hierarchy code}
+          version: {type: integer, description: Published hierarchy version}
+          member_id: {type: string}
+          member_kind: {type: string, enum: [main_account_category, main_account, dimension_value]}
+          owner_user_id: {type: string, description: Hierarchy owner to notify}
+          actor: {type: string, description: User id of the publisher}

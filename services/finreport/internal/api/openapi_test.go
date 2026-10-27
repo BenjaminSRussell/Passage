@@ -54,9 +54,13 @@ func TestOpenAPIMatchesRoutes(t *testing.T) {
 	err := chi.Walk(r, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
 		route = strings.ReplaceAll(route, "/*/", "/")
 		if strings.HasSuffix(route, "/definitions/*") {
-			for _, action := range []string{"publish", "validate"} {
+			for _, action := range []string{"publish", "retire", "validate"} {
 				registered[method+" "+strings.TrimSuffix(route, "*")+"{code}:"+action] = true
 			}
+			return nil
+		}
+		if strings.HasSuffix(route, "/hierarchies/*") {
+			registered[method+" "+strings.TrimSuffix(route, "*")+"{code}:publish"] = true
 			return nil
 		}
 		registered[method+" "+route] = true

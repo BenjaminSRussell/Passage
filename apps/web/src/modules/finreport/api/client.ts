@@ -60,6 +60,8 @@ export interface DefinitionSummary {
   code: string;
   name: string;
   kind: DefinitionKind;
+  /** published: a version can run; retired: every version was retired (BR-15.8); draft: never published. */
+  status: "draft" | "published" | "retired";
   latestVersion: number;
   hasDraft: boolean;
   updatedAt: string;
@@ -267,4 +269,122 @@ export async function getLag(signal?: AbortSignal): Promise<LagRow[]> {
 /** Starts a run. The key makes a retried click return the same run. */
 export async function createRun(req: RunRequest, key: string): Promise<RunSummary> {
   return (await send<RunSummary>("/runs", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(req) })).body;
+}
+
+/** A statutory definition the service ships (FR-15.5, FR-15.14). */
+export interface StandardDefinition {
+  code: string;
+  name: string;
+  kind: DefinitionKind;
+  rows: number;
+  columns: number;
+}
+
+export interface InstallResult {
+  code: string;
+  action: "installed" | "skipped";
+  version?: number;
+  reason?: string;
+}
+
+export async function listStandardDefinitions(signal?: AbortSignal): Promise<StandardDefinition[]> {
+  return (await get<{ items: StandardDefinition[] }>("/standard-definitions", signal)).items;
+}
+
+/** Publishes every shipped definition whose code is not in use yet; safe to repeat. */
+export async function installStandardDefinitions(): Promise<InstallResult[]> {
+  return (await send<{ items: InstallResult[] }>("/standard-definitions:install", { method: "POST" })).body.items;
+}
+
+/** Retires every published version of a definition: runs can no longer use it (BR-15.8). */
+export async function retireDefinition(code: string): Promise<{ code: string; status: "retired"; retiredVersions: number }> {
+  return (await send<{ code: string; status: "retired"; retiredVersions: number }>(`/definitions/${seg(code)}:retire`, { method: "POST" })).body;
+}
+
+// --- derived hierarchies (FR-15.13) -------------------------------------------
+
+export const HIERARCHY_SUBJECTS = ["main_account", "main_account_category", "dimension_value"] as const;
+export type HierarchySubject = (typeof HIERARCHY_SUBJECTS)[number];
+
+/** One membership rule of a leaf: exact values (a trailing * is a prefix wildcard) or a from..to range. */
+export interface HierarchyRule {
+  attribute?: string;
+  from?: string;
+  to?: string;
+  values?: string[];
+}
+
+export interface HierarchyNode {
+  code: string;
+  label: string;
+  parent?: string;
+  rules?: HierarchyRule[];
+}
+
+export interface Hierarchy {
+  schemaVersion: string;
+  code: string;
+  name: string;
+  version: number;
+  status: "draft" | "published" | "retired";
+  subject: HierarchySubject;
+  dimensionAttribute?: string;
+  strict: boolean;
+  effectiveFrom?: string;
+  ownerUserId?: string;
+  nodes: HierarchyNode[];
+}
+
+export interface HierarchySummary {
+  code: string;
+  name: string;
+  subject: HierarchySubject;
+  strict: boolean;
+  latestVersion: number;
+  hasDraft: boolean;
+  assignedCount: number;
+  unassignedCount: number;
+  updatedAt: string;
+}
+
+/** An account, category or dimension value the hierarchy classifies. */
+export interface HierarchyMember {
+  id: string;
+  key: string;
+  attributes?: Record<string, string>;
+}
+
+export interface Membership {
+  /** member id to leaf node code */
+  assigned: Record<string, string>;
+  unassigned: string[];
+}
+
+export async function listHierarchies(signal?: AbortSignal): Promise<HierarchySummary[]> {
+  return (await get<{ items: HierarchySummary[] }>("/hierarchies", signal)).items;
+}
+
+export async function getHierarchy(
+  code: string,
+  version: "draft" | "latest" | number,
+  signal?: AbortSignal,
+): Promise<{ hierarchy: Hierarchy; etag: string | null }> {
+  const sent = await send<Hierarchy>(`/hierarchies/${seg(code)}?version=${seg(String(version))}`, {}, signal);
+  return { hierarchy: sent.body, etag: sent.etag };
+}
+
+/** Saves the draft. etag is the draft revision last read; omit it when no draft exists yet. */
+export async function saveHierarchy(h: Hierarchy, etag: string | null): Promise<{ hierarchy: Hierarchy; etag: string | null }> {
+  const headers: Record<string, string> = {};
+  if (etag) headers["If-Match"] = etag;
+  const sent = await send<Hierarchy>(`/hierarchies/${seg(h.code)}`, { method: "PUT", headers, body: JSON.stringify(h) });
+  return { hierarchy: sent.body, etag: sent.etag };
+}
+
+export async function publishHierarchy(code: string, members: HierarchyMember[]): Promise<{ hierarchy: Hierarchy; membership: Membership }> {
+  return (await send<{ hierarchy: Hierarchy; membership: Membership }>(`/hierarchies/${seg(code)}:publish`, { method: "POST", body: JSON.stringify({ members }) })).body;
+}
+
+export function getHierarchyMembers(code: string, signal?: AbortSignal): Promise<Membership & { version: number }> {
+  return get<Membership & { version: number }>(`/hierarchies/${seg(code)}/members`, signal);
 }

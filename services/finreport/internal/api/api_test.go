@@ -282,7 +282,7 @@ func TestValidate_ReportsExpressionErrors(t *testing.T) {
 	if out.Valid || len(out.Issues) == 0 || out.Issues[0].Code != domain.CodeExpression {
 		t.Fatalf("expected REPORT-0002 finding, got %+v", out)
 	}
-	if w := call(router(&fakeStore{}), http.MethodPost, "/api/v1/reporting/definitions/BADDEF:retire", body, nil, DutyMaintain); w.Code != http.StatusNotFound {
+	if w := call(router(&fakeStore{}), http.MethodPost, "/api/v1/reporting/definitions/BADDEF:archive", body, nil, DutyMaintain); w.Code != http.StatusNotFound {
 		t.Fatalf("unknown action = %d, want 404", w.Code)
 	}
 }

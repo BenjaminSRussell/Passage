@@ -23,12 +23,14 @@ const (
 )
 
 // DefinitionSummary is one definition code in the designer list: its newest
-// name and kind, the newest published version (0 when never published) and
-// whether a draft is open.
+// name and kind, the newest published version (0 when never published),
+// whether a draft is open, and the code's status: published when a version can
+// run, retired when every version was retired (BR-15.8), draft otherwise.
 type DefinitionSummary struct {
 	Code          string    `json:"code"`
 	Name          string    `json:"name"`
 	Kind          string    `json:"kind"`
+	Status        string    `json:"status"`
 	LatestVersion int       `json:"latestVersion"`
 	HasDraft      bool      `json:"hasDraft"`
 	UpdatedAt     time.Time `json:"updatedAt"`
@@ -43,6 +45,8 @@ func (s *Postgres) ListDefinitions(ctx context.Context) ([]DefinitionSummary, er
 				(array_agg(kind order by (status = 'draft') desc, version desc))[1],
 				coalesce(max(version) filter (where status = 'published'), 0),
 				bool_or(status = 'draft'),
+				case when bool_or(status = 'published') then 'published'
+					when bool_or(status = 'retired') then 'retired' else 'draft' end,
 				max(updated_at)
 			from report_definition group by code order by code`)
 		if err != nil {
@@ -51,7 +55,7 @@ func (s *Postgres) ListDefinitions(ctx context.Context) ([]DefinitionSummary, er
 		defer rows.Close()
 		for rows.Next() {
 			var d DefinitionSummary
-			if err := rows.Scan(&d.Code, &d.Name, &d.Kind, &d.LatestVersion, &d.HasDraft, &d.UpdatedAt); err != nil {
+			if err := rows.Scan(&d.Code, &d.Name, &d.Kind, &d.LatestVersion, &d.HasDraft, &d.Status, &d.UpdatedAt); err != nil {
 				return err
 			}
 			out = append(out, d)
@@ -172,20 +176,23 @@ func (s *Postgres) ImportDefinition(ctx context.Context, def domain.Definition, 
 	return saved, revision, replayed, err
 }
 
-// GetDefinition returns version (Draft, Latest or an exact published version)
-// of a definition and the draft revision (0 for published versions).
+// GetDefinition returns version (Draft, Latest or an exact version) of a
+// definition and the draft revision (0 for other versions). Latest is the
+// newest non-draft version. Retired versions stay readable, so the runs that
+// used them still render (BR-15.8); their Status says retired.
 func (s *Postgres) GetDefinition(ctx context.Context, code string, version int) (domain.Definition, int, error) {
 	var def domain.Definition
 	var body []byte
 	var revision int
+	var status string
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		switch version {
 		case Draft:
-			return tx.QueryRow(ctx, `select body, revision from report_definition where code=$1 and status='draft'`, code).Scan(&body, &revision)
+			return tx.QueryRow(ctx, `select body, revision, status from report_definition where code=$1 and status='draft'`, code).Scan(&body, &revision, &status)
 		case Latest:
-			return tx.QueryRow(ctx, `select body, 0 from report_definition where code=$1 and status='published' order by version desc limit 1`, code).Scan(&body, &revision)
+			return tx.QueryRow(ctx, `select body, 0, status from report_definition where code=$1 and status<>'draft' order by version desc limit 1`, code).Scan(&body, &revision, &status)
 		default:
-			return tx.QueryRow(ctx, `select body, 0 from report_definition where code=$1 and status='published' and version=$2`, code, version).Scan(&body, &revision)
+			return tx.QueryRow(ctx, `select body, 0, status from report_definition where code=$1 and status<>'draft' and version=$2`, code, version).Scan(&body, &revision, &status)
 		}
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -204,6 +211,7 @@ func (s *Postgres) GetDefinition(ctx context.Context, code string, version int) 
 	if err := json.Unmarshal(body, &def); err != nil {
 		return def, 0, err
 	}
+	def.Status = status
 	return def, revision, nil
 }
 
@@ -212,6 +220,19 @@ func (s *Postgres) GetDefinition(ctx context.Context, code string, version int) 
 func (s *Postgres) Publish(ctx context.Context, code, actor string) (domain.Definition, error) {
 	var out domain.Definition
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		out, err = publishTx(ctx, tx, code, actor)
+		return err
+	})
+	return out, err
+}
+
+// publishTx publishes the draft of code inside tx. Version numbers count
+// retired versions too, so a code published again after retiring gets a new
+// number instead of colliding with its history.
+func publishTx(ctx context.Context, tx pgx.Tx, code, actor string) (domain.Definition, error) {
+	var out domain.Definition
+	err := func() error {
 		var draftID string
 		var body []byte
 		err := tx.QueryRow(ctx, `select id::text, body from report_definition where code=$1 and status='draft' for update`, code).Scan(&draftID, &body)
@@ -228,7 +249,7 @@ func (s *Postgres) Publish(ctx context.Context, code, actor string) (domain.Defi
 			return problem(422, issues[0].Code, issues[0].Field+": "+issues[0].Detail)
 		}
 		var next int
-		if err := tx.QueryRow(ctx, `select coalesce(max(version),0)+1 from report_definition where code=$1 and status='published'`, code).Scan(&next); err != nil {
+		if err := tx.QueryRow(ctx, `select coalesce(max(version),0)+1 from report_definition where code=$1 and status<>'draft'`, code).Scan(&next); err != nil {
 			return err
 		}
 		out.Version = next
@@ -245,6 +266,75 @@ func (s *Postgres) Publish(ctx context.Context, code, actor string) (domain.Defi
 		return enqueue(ctx, tx, "definition", code, events.DefinitionPublished, tenantID(ctx), events.DefinitionPublishedData{
 			Code: code, Version: next, Actor: actor, DiffSummary: fmt.Sprintf("%d rows, %d columns", len(out.Rows), len(out.Columns)),
 		})
+	}()
+	return out, err
+}
+
+// RetireDefinition retires every published version of code (BR-15.8): runs
+// can no longer use them, while the versions and the runs that used them stay
+// readable. An open draft is kept; publishing it later makes the code runnable
+// again under the next version number. Retiring a code that is already retired
+// succeeds again (the action is safe to repeat); a code that was never
+// published is REPORT-0020.
+func (s *Postgres) RetireDefinition(ctx context.Context, code string) (retired int, err error) {
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `update report_definition set status='retired', updated_at=now() where code=$1 and status='published'`, code)
+		if err != nil {
+			return err
+		}
+		if retired = int(tag.RowsAffected()); retired > 0 {
+			return nil
+		}
+		var already bool
+		if err := tx.QueryRow(ctx, `select exists(select 1 from report_definition where code=$1 and status='retired')`, code).Scan(&already); err != nil {
+			return err
+		}
+		if !already {
+			return problem(404, CodeDefinitionNotFound, "definition "+code+" has no published version to retire")
+		}
+		return nil
+	})
+	return retired, err
+}
+
+// InstallResult reports what InstallStandard did with one standard definition.
+type InstallResult struct {
+	Code    string `json:"code"`
+	Action  string `json:"action"` // installed or skipped
+	Version int    `json:"version,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+}
+
+// InstallStandard publishes each definition as version 1 of its code in one
+// transaction, so either every missing definition is installed or none is.
+// A code that already has any version (draft, published or retired) is
+// skipped and left untouched: install never overwrites a tenant's own edits
+// or brings back a retired statement. Repeating the call is therefore safe.
+func (s *Postgres) InstallStandard(ctx context.Context, defs []domain.Definition, actor string) ([]InstallResult, error) {
+	out := make([]InstallResult, 0, len(defs))
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		out = out[:0]
+		for _, def := range defs {
+			var status string
+			err := tx.QueryRow(ctx, `select status from report_definition where code=$1
+				order by (status = 'published') desc, (status = 'draft') desc limit 1`, def.Code).Scan(&status)
+			switch {
+			case err == nil:
+				out = append(out, InstallResult{Code: def.Code, Action: "skipped", Reason: "the code already has a " + status + " version"})
+				continue
+			case !errors.Is(err, pgx.ErrNoRows):
+				return err
+			}
+			if _, _, err := saveDraftTx(ctx, tx, def, nil, false); err != nil {
+				return err
+			}
+			pub, err := publishTx(ctx, tx, def.Code, actor)
+			if err != nil {
+				return err
+			}
+			out = append(out, InstallResult{Code: def.Code, Action: "installed", Version: pub.Version})
+		}
+		return nil
 	})
 	return out, err
 }

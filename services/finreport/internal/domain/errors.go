@@ -15,6 +15,9 @@ const (
 	CodePYMissing      = "REPORT-0010"
 	CodeImportDup      = "REPORT-0011"
 	CodeImportSchema   = "REPORT-0012"
+	CodeHierUnassigned = "REPORT-0013"
+	CodeHierOverlap    = "REPORT-0014"
+	CodePLFuncMissing  = "REPORT-0015"
 	CodeTooLarge       = "REPORT-0026"
 )
 
