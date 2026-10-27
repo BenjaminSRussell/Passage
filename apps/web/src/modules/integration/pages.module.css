@@ -106,3 +106,58 @@
   padding: 0;
   list-style: none;
 }
+
+/* Raw payload segment tree (RawPayloadCard). */
+.tree {
+  max-block-size: 32rem;
+  overflow: auto;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-input);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-muted);
+}
+
+.levels {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.level > .levels {
+  margin-block-start: var(--space-2);
+  padding-inline-start: var(--space-5);
+  border-inline-start: 1px solid var(--color-border);
+}
+
+.segments {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm-size);
+  line-height: var(--text-sm-leading);
+}
+
+.segment {
+  overflow-wrap: anywhere;
+}
+
+.segmentId {
+  font-weight: var(--weight-semibold);
+  color: var(--color-accent-strong);
+}
+
+.separator {
+  color: var(--color-text-muted);
+}
+
+.element {
+  cursor: help;
+}
+
+.masked {
+  color: var(--color-text-muted);
+}

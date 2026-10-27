@@ -12,6 +12,7 @@ import {
   type MonitorMessage,
   type Problem,
 } from "./api/client";
+import { BulkReprocessCard } from "./BulkReprocessCard";
 import { dash, formatDateTime, MESSAGE_LABELS, UUID } from "./format";
 import { MessagePill } from "./parts";
 import styles from "./pages.module.css";
@@ -46,7 +47,7 @@ const asStatus = (value: string | null): MessageStatus | "" => (MESSAGE_STATUSES
 /** Only complete values reach the service, so typing a set or control number never shows a validation error. */
 const digitsOrEmpty = (value: string, min: number, max: number) => (new RegExp(`^\\d{${min},${max}}$`).test(value) ? value : "");
 
-/** Message monitor (FR-35.10): every stored transaction, newest first, with filters and paging. */
+/** Message monitor (FR-35.10): every stored transaction, newest first, with filters, paging and bulk reprocess. */
 export function MessagesPage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
@@ -95,7 +96,7 @@ export function MessagesPage() {
     <div className={styles.stack}>
       <PageHeader
         title="Message monitor"
-        description="Every transaction received from or sent to a partner, newest first, with the rule it failed. Open one to see its canonical document; reprocess failed inbound transactions from their interchange."
+        description="Every transaction received from or sent to a partner, newest first, with the rule it failed. Open one to see its canonical document and raw payload; reprocess failed inbound transactions from their interchange, or all of those in the list at once."
         actions={
           <Link className={buttonClassName("secondary")} to="/integration/partner-sla">
             Partner SLA
@@ -149,6 +150,13 @@ export function MessagesPage() {
         </Alert>
       ) : (
         <>
+          <BulkReprocessCard
+            rows={rows}
+            onDone={() => {
+              setMore(noMorePages);
+              first.reload();
+            }}
+          />
           <DataTable
             label="Messages"
             columns={columns}

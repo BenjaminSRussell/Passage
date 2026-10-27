@@ -236,6 +236,60 @@ export interface MonitorMessage {
 /** One message with its canonical document (GET /messages/{id}). The raw payload is never returned. */
 export interface MonitorMessageDetail extends MonitorMessage {
   canonical?: CanonicalDocument;
+  /** True when party names in the document are "***" because the user lacks EDI_PII_VIEW (BR-35.12). */
+  piiMasked: boolean;
+}
+
+/** The value the service puts in place of personal data the user may not see (BR-35.12). */
+export const MASKED = "***";
+
+/** One data element of the raw viewer. */
+export interface SegmentElement {
+  /** X12 reference: segment id plus position, for example N102. */
+  ref: string;
+  /** X12 dictionary name, shown on hover; absent when the element is not in the dictionary. */
+  name?: string;
+  value: string;
+  /** True when the value was replaced by "***" (BR-35.12). */
+  masked?: boolean;
+}
+
+/** One node of the segment tree: interchange (ISA), group (GS), transaction (ST) or segment. */
+export interface SegmentNode {
+  kind: "interchange" | "group" | "transaction" | "segment";
+  name: string;
+  elements?: SegmentElement[];
+  children?: SegmentNode[];
+}
+
+/** GET /interchanges/{id}/payload: the raw payload as a segment tree. The raw text is never returned. */
+export interface PayloadTree {
+  interchangeId: string;
+  direction: Direction;
+  piiMasked: boolean;
+  tree: SegmentNode;
+}
+
+/** The service reprocesses at most this many interchanges in one bulk request. */
+export const MAX_BULK_REPROCESS = 200;
+
+export type BulkOutcome = "REPROCESSED" | "NOT_FOUND" | "NOT_INBOUND" | "UNREADABLE";
+
+export interface BulkReprocessItem {
+  interchangeId: string;
+  outcome: BulkOutcome;
+  error?: string;
+  changed: number;
+  /** Empty unless the outcome is REPROCESSED. */
+  messages: ReprocessedMessage[];
+}
+
+/** POST /interchanges:reprocess: one item per requested interchange, in request order. */
+export interface BulkReprocessResult {
+  dryRun: boolean;
+  requested: number;
+  changed: number;
+  items: BulkReprocessItem[];
 }
 
 export interface MessagePage {
@@ -452,6 +506,26 @@ export function reprocessInterchange(id: string, options: { dryRun: boolean; key
   return send<ReprocessResult>(`/interchanges/${encodeURIComponent(id)}:reprocess${query({ dryRun: options.dryRun ? "true" : undefined })}`, {
     method: "POST",
     headers,
+  });
+}
+
+/** The raw payload of one interchange as a segment tree, masked unless the user holds EDI_PII_VIEW. */
+export function getPayload(id: string, signal?: AbortSignal): Promise<PayloadTree> {
+  return send<PayloadTree>(`/interchanges/${encodeURIComponent(id)}/payload`, {}, signal);
+}
+
+/**
+ * Reprocesses up to 200 inbound interchanges in one request. A dry run writes
+ * nothing and sends no key; otherwise reuse one key per attempt so a retried
+ * click cannot run twice.
+ */
+export function bulkReprocess(interchangeIds: string[], options: { dryRun: boolean; key?: string }): Promise<BulkReprocessResult> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (!options.dryRun) headers["Idempotency-Key"] = options.key ?? newKey();
+  return send<BulkReprocessResult>(`/interchanges:reprocess${query({ dryRun: options.dryRun ? "true" : undefined })}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ interchangeIds }),
   });
 }
 

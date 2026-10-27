@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
-import type { InterchangeDetail, MonitorMessage, MonitorMessageDetail, Partner, PartnerSlaReport, ReprocessResult } from "./api/client";
+import type { InterchangeDetail, MonitorMessage, MonitorMessageDetail, Partner, PartnerSlaReport, PayloadTree, ReprocessResult } from "./api/client";
 import integration from "./module";
 
 const PARTNER_ID = "0195f0a0-0000-7000-8000-000000000001";
@@ -173,6 +173,7 @@ describe("message monitor", () => {
   it("shows one message with its failing rule and links to its interchange to reprocess", async () => {
     const detail: MonitorMessageDetail = {
       ...failed,
+      piiMasked: true,
       canonical: { purpose: "00", orderType: "SA", poNumber: "PO-1001", poDate: "20261021", lines: [{ lineNo: "1", quantity: "10", uom: "EA", unitPrice: "2.5" }] },
     };
     handler = (url) => (url.pathname === `/api/v1/edi/messages/${FAILED_ID}` ? json(200, detail) : undefined);
@@ -206,6 +207,12 @@ describe("reprocess", () => {
     failedCount: 1,
     ack997: "ISA*00*~",
     messages: [{ id: FAILED_ID, transactionSet: "850", stControl: "0001", status: "FAILED", error: failed.error }],
+  };
+  const payload: PayloadTree = {
+    interchangeId: INTERCHANGE_ID,
+    direction: "IN",
+    piiMasked: true,
+    tree: { kind: "interchange", name: "ISA", elements: [{ ref: "ISA13", name: "Interchange Control Number", value: "000000905" }] },
   };
   const result = (dryRun: boolean): ReprocessResult => ({
     interchangeId: INTERCHANGE_ID,
@@ -249,6 +256,7 @@ describe("reprocess", () => {
     let attempts = 0;
     handler = (url, init) => {
       if (url.pathname === `/api/v1/edi/interchanges/${INTERCHANGE_ID}`) return json(200, interchange);
+      if (url.pathname === `/api/v1/edi/interchanges/${INTERCHANGE_ID}/payload`) return json(200, payload);
       if (url.pathname.endsWith(":reprocess") && init.method === "POST") {
         attempts += 1;
         return attempts === 1 ? json(503, { code: "COM-0503", detail: "database unavailable" }) : json(200, result(false));

@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 
 	"github.com/BenjaminSRussell/passage/services/edi/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/edi/internal/store"
@@ -91,8 +92,14 @@ func (a *API) listMessages(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, page)
 }
 
+type messageDetailView struct {
+	store.MessageRecord
+	PIIMasked bool `json:"piiMasked"`
+}
+
 // getMessage returns one message with its envelope and canonical document.
-// The raw payload is not returned (BR-35.12 masking viewer is not built).
+// Party names in the document are masked without EDI_PII_VIEW (BR-35.12); the
+// raw payload is served only as the masked segment tree (getPayload).
 func (a *API) getMessage(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if !validID(id) {
@@ -108,7 +115,11 @@ func (a *API) getMessage(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, m)
+	masked := !piiView(r)
+	if masked {
+		m.Canonical = domain.MaskCanonical(m.Canonical)
+	}
+	httpx.JSON(w, http.StatusOK, messageDetailView{MessageRecord: m, PIIMasked: masked})
 }
 
 // digits reports whether s is between min and max ASCII digits long.
@@ -148,8 +159,8 @@ func decodeCursor(s string) (store.Cursor, error) {
 }
 
 // errStoredPayload means the raw payload recorded at receipt no longer parses
-// (the parser became stricter since).
-var errStoredPayload = errors.New("the stored interchange no longer parses")
+// (the parser became stricter since). Bulk reprocess reports it per item.
+var errStoredPayload = store.ErrUnreadable
 
 // reprocessPlan maps each failed message again from the raw interchange. A
 // message is found by transaction set and ST02 among the non-997 groups. A
@@ -194,18 +205,8 @@ func reprocessPlan(raw string, failed []store.Message) ([]store.Message, error) 
 // interchange (POST /interchanges/{id}:reprocess). With dryRun=true it returns
 // the outcome without writing anything and needs no Idempotency-Key.
 func (a *API) reprocessInterchange(w http.ResponseWriter, r *http.Request) {
-	dryRun := false
-	switch r.URL.Query().Get("dryRun") {
-	case "", "false":
-	case "true":
-		dryRun = true
-	default:
-		httpx.Fail(w, r, validation(map[string]string{"dryRun": "must be true or false"}))
-		return
-	}
-	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
-	if !dryRun && (key == "" || len(key) > 255) {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, CodeIdempotencyKey, "Idempotency-Key header is required (max 255 characters)"))
+	dryRun, key, ok := reprocessParams(w, r)
+	if !ok {
 		return
 	}
 	id := chi.URLParam(r, "id")
@@ -229,6 +230,133 @@ func (a *API) reprocessInterchange(w http.ResponseWriter, r *http.Request) {
 	default:
 		httpx.JSON(w, http.StatusOK, res)
 	}
+}
+
+// reprocessParams reads the dryRun query parameter and, unless it is a dry
+// run, the required Idempotency-Key. It writes the problem and returns false
+// when either is invalid.
+func reprocessParams(w http.ResponseWriter, r *http.Request) (dryRun bool, key string, ok bool) {
+	switch r.URL.Query().Get("dryRun") {
+	case "", "false":
+	case "true":
+		dryRun = true
+	default:
+		httpx.Fail(w, r, validation(map[string]string{"dryRun": "must be true or false"}))
+		return false, "", false
+	}
+	key = strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if !dryRun && (key == "" || len(key) > 255) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, CodeIdempotencyKey, "Idempotency-Key header is required (max 255 characters)"))
+		return false, "", false
+	}
+	return dryRun, key, true
+}
+
+type bulkReprocessRequest struct {
+	InterchangeIDs []string `json:"interchangeIds"`
+}
+
+// validateBulkIDs checks the id list before any work starts: 1 to 200 ids,
+// each a UUID, none repeated.
+func validateBulkIDs(list []string) map[string]string {
+	if len(list) == 0 || len(list) > store.MaxBulkReprocess {
+		return map[string]string{"interchangeIds": fmt.Sprintf("must hold 1 to %d interchange ids", store.MaxBulkReprocess)}
+	}
+	fields := map[string]string{}
+	seen := make(map[string]bool, len(list))
+	for i, id := range list {
+		key := fmt.Sprintf("interchangeIds[%d]", i)
+		switch {
+		case !validID(id):
+			fields[key] = "must be a UUID"
+		case seen[id]:
+			fields[key] = "is repeated"
+		}
+		seen[id] = true
+	}
+	return fields
+}
+
+// bulkReprocessHash fingerprints a bulk request: the same ids in the same
+// order. The dry-run flag is not part of it because a dry run claims no key.
+func bulkReprocessHash(list []string) string {
+	sum := sha256.Sum256([]byte("bulk-reprocess\x00" + strings.Join(list, ",")))
+	return hex.EncodeToString(sum[:])
+}
+
+// bulkReprocess re-runs mapping for the failed messages of up to 200 inbound
+// interchanges (POST /interchanges:reprocess, PRD §6.35.6 "bulk reprocess (≤
+// 200) with a dry run"). The whole request is one transaction under one
+// Idempotency-Key; an unknown, outbound or unreadable interchange is reported
+// in its item and does not stop the others.
+func (a *API) bulkReprocess(w http.ResponseWriter, r *http.Request) {
+	dryRun, key, ok := reprocessParams(w, r)
+	if !ok {
+		return
+	}
+	var req bulkReprocessRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if fields := validateBulkIDs(req.InterchangeIDs); len(fields) > 0 {
+		httpx.Fail(w, r, validation(fields))
+		return
+	}
+	res, _, err := a.store.ReprocessInterchanges(r.Context(), key, bulkReprocessHash(req.InterchangeIDs), req.InterchangeIDs, dryRun, reprocessPlan)
+	switch {
+	case errors.Is(err, store.ErrIdempotencyReuse):
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeIdempotencyReuse, "Idempotency-Key was already used with a different request"))
+	case err != nil:
+		httpx.Fail(w, r, err)
+	default:
+		httpx.JSON(w, http.StatusOK, res)
+	}
+}
+
+// piiView reports whether the caller may see personal data unmasked
+// (EDI_PII_VIEW, BR-35.12). Without a principal the data stays masked.
+func piiView(r *http.Request) bool {
+	p, ok := tenant.FromContext(r.Context())
+	return ok && p.HasDuty(dutyPIIView)
+}
+
+// dutyPIIView unmasks party names, addresses and contacts (PRD §6.35.17).
+const dutyPIIView = "EDI_PII_VIEW"
+
+type payloadView struct {
+	InterchangeID string      `json:"interchangeId"`
+	Direction     string      `json:"direction"`
+	PIIMasked     bool        `json:"piiMasked"`
+	Tree          domain.Node `json:"tree"`
+}
+
+// getPayload serves the raw payload of one interchange as the segment tree of
+// the monitor's raw viewer, with X12 dictionary names for hover (§6.35.6).
+// Party names, addresses and contacts are masked unless the caller holds
+// EDI_PII_VIEW (BR-35.12). The raw text itself is never returned.
+func (a *API) getPayload(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if !validID(id) {
+		httpx.Fail(w, r, notFound("interchange"))
+		return
+	}
+	p, err := a.store.GetPayload(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		httpx.Fail(w, r, notFound("interchange"))
+		return
+	}
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	ic, err := domain.Parse(p.Raw)
+	if err != nil {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeSyntax, fmt.Sprintf("%v: %v", errStoredPayload, err)))
+		return
+	}
+	masked := !piiView(r)
+	httpx.JSON(w, http.StatusOK, payloadView{InterchangeID: p.InterchangeID, Direction: p.Direction, PIIMasked: masked, Tree: domain.Tree(ic, masked)})
 }
 
 // SLA dashboard window in days: default and maximum.

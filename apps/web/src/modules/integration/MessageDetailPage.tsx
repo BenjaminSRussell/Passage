@@ -1,5 +1,5 @@
 import { Link, useParams } from "react-router-dom";
-import { Alert, Button, buttonClassName, Card, PageHeader, Skeleton } from "../../shell/ui";
+import { Alert, Badge, Button, buttonClassName, Card, PageHeader, Skeleton } from "../../shell/ui";
 import { getMessage, type MonitorMessageDetail } from "./api/client";
 import { formatDateTime } from "./format";
 import { AckPill, CanonicalView, MessagePill } from "./parts";
@@ -77,14 +77,18 @@ export function MessageDetailPage() {
           </div>
         </dl>
       </Card>
-      <Card title="Canonical document">
+      <Card title="Canonical document" actions={m.piiMasked ? <Badge tone="neutral">Personal data masked</Badge> : null}>
         {m.canonical ? (
           <CanonicalView transactionSet={m.transactionSet} document={m.canonical} label={`Lines of ${m.transactionSet} ${m.stControl}`} />
         ) : (
           <p className={styles.note}>No canonical document: the transaction failed before it could be mapped, or its set is not mapped yet.</p>
         )}
       </Card>
-      <p className={styles.note}>The raw payload is not shown: it carries partner address data, and the masked raw viewer is not built yet.</p>
+      <p className={styles.note}>
+        {m.piiMasked
+          ? "Party names are shown as *** because you do not hold EDI_PII_VIEW. The raw payload, masked the same way, is on the interchange."
+          : "The raw payload is on the interchange."}
+      </p>
     </div>
   );
 }

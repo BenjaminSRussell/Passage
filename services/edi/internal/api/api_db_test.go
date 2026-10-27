@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -408,5 +409,166 @@ func TestMonitorAPI_ReprocessAndSLA(t *testing.T) {
 	if r := sla.Items[0]; r.PartnerID != partner.ID || r.Messages != 3 || r.Failed != 0 || r.FailureRatePct != 0 ||
 		r.Outbound != 1 || r.Acked != 1 || r.LateAcks != 0 || r.OverdueAcks != 0 || r.P95AckMinutes == nil || *r.P95AckMinutes > 1 {
 		t.Fatalf("sla row: %s", rec.Body.String())
+	}
+}
+
+// receiveFixture posts one testdata/x12 interchange and returns the receipt.
+func receiveFixture(t *testing.T, h http.Handler, name string) receiveResponse {
+	t.Helper()
+	raw, err := os.ReadFile("../../testdata/x12/" + name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := do(t, h, http.MethodPost, "/edi/v1/inbound/x12?environment=TEST", string(raw), "EDI_OPERATE", nil)
+	var out receiveResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != http.StatusCreated {
+		t.Fatalf("receive %s: %d %s", name, rec.Code, rec.Body.String())
+	}
+	return out
+}
+
+// BR-35.12: the raw viewer and the canonical documents hide party names,
+// addresses and contacts from operators without EDI_PII_VIEW.
+func TestMonitorAPI_PayloadTreeAndPIIMasking(t *testing.T) {
+	h := dbHandler(t)
+	if rec := do(t, h, http.MethodPost, "/edi/v1/partners", distributor, "EDI_ADMIN", map[string]string{"Idempotency-Key": "p"}); rec.Code != http.StatusCreated {
+		t.Fatalf("create partner: %d %s", rec.Code, rec.Body.String())
+	}
+	got := receiveFixture(t, h, "850-basic.x12")
+	if got.Messages[0].Status != "MAPPED" {
+		t.Fatalf("fixture 850 must map: %+v", got)
+	}
+
+	var view payloadView
+	rec := do(t, h, http.MethodGet, "/edi/v1/interchanges/"+got.InterchangeID+"/payload", "", "EDI_OPERATE", nil)
+	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("payload: %d %s", rec.Code, rec.Body.String())
+	}
+	for _, secret := range []string{"ACME DC", "100 MAIN ST", "ANYTOWN", "JANE BUYER", "5551234"} {
+		if strings.Contains(rec.Body.String(), secret) {
+			t.Fatalf("masked payload leaks %q: %s", secret, rec.Body.String())
+		}
+	}
+	if !view.PIIMasked || view.Direction != "IN" || view.Tree.Name != "ISA" || !strings.Contains(rec.Body.String(), "0012345000007") {
+		t.Fatalf("masked view: %s", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "BEG*00") {
+		t.Fatal("the raw text must never be returned")
+	}
+	rec = do(t, h, http.MethodGet, "/edi/v1/interchanges/"+got.InterchangeID+"/payload", "", "EDI_OPERATE,EDI_PII_VIEW", nil)
+	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil || view.PIIMasked || !strings.Contains(rec.Body.String(), "JANE BUYER") {
+		t.Fatalf("unmasked view: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// The canonical order on the message and on the interchange detail.
+	msg := "/edi/v1/messages/" + got.Messages[0].MessageID
+	rec = do(t, h, http.MethodGet, msg, "", "EDI_OPERATE", nil)
+	if strings.Contains(rec.Body.String(), "ACME DC") || !strings.Contains(rec.Body.String(), `"shipToName":"***"`) ||
+		!strings.Contains(rec.Body.String(), `"piiMasked":true`) || !strings.Contains(rec.Body.String(), "PO-88001") {
+		t.Fatalf("masked message: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, http.MethodGet, msg, "", "EDI_OPERATE,EDI_PII_VIEW", nil)
+	if !strings.Contains(rec.Body.String(), `"shipToName":"ACME DC"`) || !strings.Contains(rec.Body.String(), `"piiMasked":false`) {
+		t.Fatalf("unmasked message: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, http.MethodGet, "/edi/v1/interchanges/"+got.InterchangeID, "", "EDI_OPERATE", nil)
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "ACME DC") {
+		t.Fatalf("masked interchange detail: %d %s", rec.Code, rec.Body.String())
+	}
+
+	if rec := do(t, h, http.MethodGet, "/edi/v1/interchanges/"+someID+"/payload", "", "EDI_OPERATE", nil); rec.Code != http.StatusNotFound || problemCode(t, rec) != CodeNotFound {
+		t.Fatalf("unknown interchange: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// PRD §6.35.6: bulk reprocess with a dry run. Unknown and outbound
+// interchanges are reported per item; the real run is idempotent.
+func TestMonitorAPI_BulkReprocess(t *testing.T) {
+	h, pool := dbHandlerPool(t)
+	rec := do(t, h, http.MethodPost, "/edi/v1/partners", distributor, "EDI_ADMIN", map[string]string{"Idempotency-Key": "p"})
+	var partner store.Partner
+	if err := json.Unmarshal(rec.Body.Bytes(), &partner); err != nil || rec.Code != http.StatusCreated {
+		t.Fatalf("create partner: %d %s", rec.Code, rec.Body.String())
+	}
+	fixed := receiveFixture(t, h, "850-basic.x12")
+	broken := receiveFixture(t, h, "850-ctt-mismatch.x12")
+	if broken.Messages[0].Status != "FAILED" {
+		t.Fatalf("CTT mismatch must fail: %+v", broken)
+	}
+	fixedMsg := fixed.Messages[0].MessageID
+	// Stand-in for a map that failed at receipt and has since been fixed.
+	if _, err := pool.Exec(context.Background(), `update message set status = 'FAILED', error = 'EDI-0105: no item cross-reference', canonical = null where id = $1`, fixedMsg); err != nil {
+		t.Fatal(err)
+	}
+	rec = do(t, h, http.MethodPost, "/edi/v1/partners/"+partner.ID+"/outbound", `{"transactionSet":"856","document":`+asnDocument+`}`, "EDI_OPERATE",
+		map[string]string{"Idempotency-Key": "asn-1"})
+	var out store.OutboundResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != http.StatusCreated {
+		t.Fatalf("outbound: %d %s", rec.Code, rec.Body.String())
+	}
+	list := []string{fixed.InterchangeID, someID, broken.InterchangeID, out.InterchangeID}
+	body := bulkBody(t, list)
+
+	check := func(name string, res store.BulkReprocessResult, dryRun bool) {
+		t.Helper()
+		if res.DryRun != dryRun || res.Requested != 4 || res.Changed != 1 || len(res.Items) != 4 {
+			t.Fatalf("%s: %+v", name, res)
+		}
+		want := []struct {
+			id, outcome string
+			changed     int
+		}{
+			{fixed.InterchangeID, store.BulkReprocessed, 1},
+			{someID, store.BulkNotFound, 0},
+			{broken.InterchangeID, store.BulkReprocessed, 0}, // still fails with the same error
+			{out.InterchangeID, store.BulkNotInbound, 0},
+		}
+		for i, w := range want {
+			if it := res.Items[i]; it.InterchangeID != w.id || it.Outcome != w.outcome || it.Changed != w.changed {
+				t.Fatalf("%s item %d = %+v, want %+v", name, i, it, w)
+			}
+		}
+		if m := res.Items[0].Messages; len(m) != 1 || m[0].Status != "MAPPED" || m[0].PreviousError == "" {
+			t.Fatalf("%s: fixed message outcome %+v", name, m)
+		}
+	}
+
+	rec = do(t, h, http.MethodPost, "/edi/v1/interchanges:reprocess?dryRun=true", body, "EDI_OPERATE", nil)
+	var res store.BulkReprocessResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("dry run: %d %s", rec.Code, rec.Body.String())
+	}
+	check("dry run", res, true)
+	var status string
+	if err := pool.QueryRow(context.Background(), `select status from message where id = $1`, fixedMsg).Scan(&status); err != nil || status != "FAILED" {
+		t.Fatalf("a dry run must not write: status %q err %v", status, err)
+	}
+
+	key := map[string]string{"Idempotency-Key": "bulk-1"}
+	rec = do(t, h, http.MethodPost, "/edi/v1/interchanges:reprocess", body, "EDI_OPERATE", key)
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("run: %d %s", rec.Code, rec.Body.String())
+	}
+	check("run", res, false)
+	if err := pool.QueryRow(context.Background(), `select status from message where id = $1`, fixedMsg).Scan(&status); err != nil || status != "MAPPED" {
+		t.Fatalf("after the run: status %q err %v", status, err)
+	}
+
+	// Replay returns the first result and publishes nothing more.
+	rec = do(t, h, http.MethodPost, "/edi/v1/interchanges:reprocess", body, "EDI_OPERATE", key)
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("replay: %d %s", rec.Code, rec.Body.String())
+	}
+	check("replay", res, false)
+	var mapped int
+	if err := pool.QueryRow(context.Background(), `select count(*) from outbox where type = $1 and aggregate_id = $2 and payload->'data'->>'status' = 'MAPPED'`,
+		ediev.MessageReceived, fixedMsg).Scan(&mapped); err != nil || mapped != 2 {
+		t.Fatalf("message.received MAPPED events = %d (receipt and one reprocess), err=%v", mapped, err)
+	}
+
+	// The same key with another list is refused.
+	rec = do(t, h, http.MethodPost, "/edi/v1/interchanges:reprocess", bulkBody(t, list[:2]), "EDI_OPERATE", key)
+	if rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != CodeIdempotencyReuse {
+		t.Fatalf("reuse: %d %s", rec.Code, rec.Body.String())
 	}
 }

@@ -83,13 +83,36 @@ Built in this slice:
 - Web: message monitor, message detail, a reprocess card with preview on inbound
   interchange details, and the partner SLA dashboard.
 
+## Slice 4 scope
+
+- **Raw payload viewer** (`GET /edi/v1/interchanges/{id}/payload`, PRD §6.35.6): the
+  stored X12 text of an interchange in either direction, parsed into interchange (ISA),
+  group (GS), transaction (ST) and segment nodes (`internal/domain/tree.go`). Every element
+  carries its X12 reference (for example `N102`) and its 004010 dictionary name for hover;
+  trailers are left out. The raw text itself is never returned.
+- **PII masking** (BR-35.12): without `EDI_PII_VIEW` the party name (N102), N2 names, every
+  N3 and N4 element and the PER contact name and numbers come back as `***` and are flagged
+  `masked`; entity codes, qualifiers and the GLN stay visible. Party names in canonical
+  documents (`shipToName`, `billToName`, location `name`) are masked the same way on
+  `GET /messages/{id}` and `GET /interchanges/{id}`; the message says `piiMasked`.
+- **Bulk reprocess** (`POST /edi/v1/interchanges:reprocess?dryRun=`, §6.35.6 "≤ 200 with a
+  dry run"): body `{"interchangeIds": [...]}`, 1 to 200 distinct ids. Each interchange
+  follows the single-reprocess rules; the whole request is one transaction under one
+  `Idempotency-Key` (not needed for a dry run), and interchanges are locked in id order.
+  An unknown (`NOT_FOUND`), outbound (`NOT_INBOUND`) or unreadable (`UNREADABLE`)
+  interchange is reported in its item and does not stop the others.
+- **Fixtures**: `testdata/x12/850-basic.x12` and `850-ctt-mismatch.x12`, used by the domain
+  and API tests.
+- Web: the raw payload card on the interchange detail, the masking badge on the message,
+  and a bulk reprocess card (preview and run) on the message monitor.
+
 Not built yet: see `NOT-IMPLEMENTED.md`.
 
 ## Layout
 
 ```
 cmd/edi/            entrypoint (dbx.Connect, optional dbx.Migrate, httpx.Serve)
-internal/domain/    X12 codec, 997 out and in, 850 mapping, 855/856/810 builders, SSCC, partner rules, UBL arithmetic (pure)
+internal/domain/    X12 codec, 997 out and in, 850 mapping, 855/856/810 builders, SSCC, segment tree and PII masking, partner rules, UBL arithmetic (pure)
 internal/store/     Postgres repositories (RLS via dbx.WithTenantTx, outbox in the same tx)
 internal/api/       HTTP handlers, DTOs, duty checks
 internal/events/    event type constants and payloads
@@ -97,6 +120,7 @@ migrations/         0001_init.sql (trading_partner, control_number_counter, inte
 api/openapi.yaml    OpenAPI 3.1 for the routes above
 events/asyncapi.yaml AsyncAPI 3 for dev.passage.edi.message.received.v1, message.acked.v1 and message.failed.v1
 charts/edi/         Helm chart (api deployment, service, optional ServiceMonitor)
+testdata/x12/       X12 fixtures for the domain and API tests
 ```
 
 ## Endpoints
@@ -110,14 +134,17 @@ charts/edi/         Helm chart (api deployment, service, optional ServiceMonitor
 | POST | /edi/v1/maps:test | EDI_ADMIN | Body `{"raw": "<X12>"}`; nothing is stored |
 | POST | /edi/v1/inbound/x12?environment=TEST\|PROD | EDI_OPERATE | `text/plain` interchange; returns 201 with 997 text (none for an interchange of 997s) |
 | GET | /edi/v1/interchanges?partnerId=&ackStatus=&direction=&limit= | EDI_OPERATE | `{items}` newest first, limit 1 to 200 (default 50) |
-| GET | /edi/v1/interchanges/{id} | EDI_OPERATE | Messages with canonical documents and the 997 |
+| GET | /edi/v1/interchanges/{id} | EDI_OPERATE | Messages with canonical documents (party names masked without `EDI_PII_VIEW`) and the 997 |
+| GET | /edi/v1/interchanges/{id}/payload | EDI_OPERATE | Raw payload as a segment tree; PII masked without `EDI_PII_VIEW` |
 | POST | /edi/v1/interchanges/{id}:reprocess?dryRun= | EDI_OPERATE | Re-map FAILED inbound transactions from the raw payload; `Idempotency-Key` unless `dryRun=true` |
+| POST | /edi/v1/interchanges:reprocess?dryRun= | EDI_OPERATE | Bulk reprocess of 1 to 200 distinct interchange ids; `Idempotency-Key` unless `dryRun=true` |
 | GET | /edi/v1/messages?partnerId=&direction=&status=&transactionSet=&controlNumber=&limit=&cursor= | EDI_OPERATE | `{items, nextCursor}` newest first, limit 1 to 200 (default 50) |
-| GET | /edi/v1/messages/{id} | EDI_OPERATE | One message with envelope and canonical document |
+| GET | /edi/v1/messages/{id} | EDI_OPERATE | One message with envelope and canonical document (party names masked without `EDI_PII_VIEW`) |
 | GET | /edi/v1/partners/sla?days= | EDI_OPERATE | `{days, items}`, days 1 to 365 (default 30) |
 
 The web screens live in `apps/web/src/modules/integration` (partners, interchanges,
-receive, send EDI document, message monitor with reprocess, partner SLA, map tester).
+receive, send EDI document, message monitor with single and bulk reprocess, raw
+payload viewer, partner SLA, map tester).
 
 ## Run and test
 

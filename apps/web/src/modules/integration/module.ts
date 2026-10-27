@@ -16,7 +16,7 @@ const integration: PassageModule = {
   id: "integration",
   title: "Integration",
   description:
-    "EDI trading partners, received and sent interchanges with their 997s, the message monitor with reprocess, the partner SLA dashboard, outbound 856/810/855 documents and the map tester.",
+    "EDI trading partners, received and sent interchanges with their 997s and masked raw payload, the message monitor with single and bulk reprocess, the partner SLA dashboard, outbound 856/810/855 documents and the map tester.",
   routes: [
     { path: "/integration/partners", element: createElement(PartnersPage), handle: { title: "Trading partners" } },
     { path: "/integration/partners/new", element: createElement(NewPartnerPage), handle: { title: "New trading partner" } },

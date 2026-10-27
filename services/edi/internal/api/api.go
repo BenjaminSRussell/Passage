@@ -1,7 +1,8 @@
 // Package api exposes the edi HTTP surface: partner profiles, the dry-run map
 // tester, inbound X12 receipt (850s mapped, 997s matched to outbound
 // documents), outbound 855/856/810 generation, and the message monitor with
-// reprocess and the partner SLA dashboard. Handlers decode, validate,
+// single and bulk reprocess, the masked raw segment-tree viewer and the
+// partner SLA dashboard. Handlers decode, validate,
 // check duties, then call the domain and store.
 package api
 
@@ -83,7 +84,9 @@ func (a *API) Routes() http.Handler {
 		r.With(authz.RequireDuty("EDI_OPERATE")).Post("/inbound/x12", a.receiveX12)
 		r.With(authz.RequireDuty("EDI_OPERATE")).Get("/interchanges", a.listInterchanges)
 		r.With(authz.RequireDuty("EDI_OPERATE")).Get("/interchanges/{id}", a.getInterchange)
+		r.With(authz.RequireDuty("EDI_OPERATE")).Get("/interchanges/{id}/payload", a.getPayload)
 		r.With(authz.RequireDuty("EDI_OPERATE")).Post("/interchanges/{id}:reprocess", a.reprocessInterchange)
+		r.With(authz.RequireDuty("EDI_OPERATE")).Post("/interchanges:reprocess", a.bulkReprocess)
 		r.With(authz.RequireDuty("EDI_OPERATE")).Get("/messages", a.listMessages)
 		r.With(authz.RequireDuty("EDI_OPERATE")).Get("/messages/{id}", a.getMessage)
 		r.With(authz.RequireDuty("EDI_OPERATE")).Get("/partners/sla", a.partnerSLA)
@@ -244,6 +247,11 @@ func (a *API) getInterchange(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
+	}
+	if !piiView(r) {
+		for i := range d.Messages {
+			d.Messages[i].Canonical = domain.MaskCanonical(d.Messages[i].Canonical)
+		}
 	}
 	httpx.JSON(w, http.StatusOK, d)
 }

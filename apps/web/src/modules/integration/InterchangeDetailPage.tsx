@@ -5,10 +5,11 @@ import { getInterchange, type InterchangeDetail } from "./api/client";
 import { formatDateTime } from "./format";
 import { AckPill, CanonicalView, MessagePill } from "./parts";
 import styles from "./pages.module.css";
+import { RawPayloadCard } from "./RawPayloadCard";
 import { ReprocessCard } from "./ReprocessCard";
 import { useLoad } from "./useLoad";
 
-/** One interchange: envelope, each transaction with its canonical document, and the 997 either way. */
+/** One interchange: envelope, each transaction with its canonical document, the 997 either way and the masked raw payload. */
 export function InterchangeDetailPage() {
   const { id = "" } = useParams();
   const state = useLoad<InterchangeDetail>((signal) => getInterchange(id, signal), `interchange:${id}`);
@@ -117,7 +118,7 @@ export function InterchangeDetailPage() {
           )}
         </Card>
       )}
-      <p className={styles.note}>The raw interchange is not shown here: it carries partner address data, and the masked raw viewer is not built yet.</p>
+      <RawPayloadCard interchangeId={ic.id} />
     </div>
   );
 }
