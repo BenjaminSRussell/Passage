@@ -68,7 +68,7 @@ func Estimate(lines []OrderLine, ops []Operation) []CostRow {
 	return rows
 }
 
-// VarianceType is one of the four variance types of BR-21.6.
+// VarianceType is one of the four variance types of BR-21.6, or rework (FR-21.20, rework.go).
 type VarianceType string
 
 const (

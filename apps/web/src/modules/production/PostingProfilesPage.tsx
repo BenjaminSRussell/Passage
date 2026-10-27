@@ -26,6 +26,11 @@ export const accountFields: { key: keyof PostingProfileAccounts; label: string }
   { key: "substitutionVarianceAccount", label: "Substitution variance" },
 ];
 
+/** Optional accounts: the rework variance (FR-21.20) is needed only to end a rework order. */
+export const optionalAccountFields: { key: keyof PostingProfileAccounts; label: string; hint: string }[] = [
+  { key: "reworkVarianceAccount", label: "Rework variance", hint: "Needed to end a rework order." },
+];
+
 export const blankProfile = (): PostingProfileInput => ({
   itemGroup: "All",
   siteId: "All",
@@ -38,6 +43,7 @@ export const blankProfile = (): PostingProfileInput => ({
   quantityVarianceAccount: "",
   priceVarianceAccount: "",
   substitutionVarianceAccount: "",
+  reworkVarianceAccount: "",
 });
 
 /** Validates a profile like the service: item group, site (UUID or All) and every account. */
@@ -50,8 +56,15 @@ export function validateProfile(p: PostingProfileInput): Record<string, string> 
     errors.siteId = "Enter the site id (a UUID) or All.";
   }
   for (const { key } of accountFields) {
-    if (p[key].trim() === "" || p[key].length > 64) {
+    const value = p[key] ?? "";
+    if (value.trim() === "" || value.length > 64) {
       errors[key] = "Enter the ledger account (up to 64 characters).";
+    }
+  }
+  for (const { key } of optionalAccountFields) {
+    const value = p[key] ?? "";
+    if (value.trim() !== value || value.length > 64) {
+      errors[key] = "Enter up to 64 characters without surrounding spaces, or leave it empty.";
     }
   }
   return errors;
@@ -65,6 +78,7 @@ const columns: DataTableColumn<PostingProfile>[] = [
   { key: "finishedGoodsAccount", header: "Finished goods", mono: true },
   { key: "laborAbsorptionAccount", header: "Labor absorption", mono: true },
   { key: "overheadAbsorptionAccount", header: "Overhead absorption", mono: true },
+  { key: "reworkVarianceAccount", header: "Rework variance", mono: true, render: (row) => row.reworkVarianceAccount || "—" },
   { key: "version", header: "Version", align: "end" },
 ];
 
@@ -97,7 +111,9 @@ export function PostingProfilesPage() {
   const edit = (profile: PostingProfile) => {
     setEditing(profile);
     const { itemGroup, siteId } = profile;
-    const accounts = Object.fromEntries(accountFields.map(({ key }) => [key, profile[key]])) as unknown as PostingProfileAccounts;
+    const accounts = Object.fromEntries(
+      [...accountFields, ...optionalAccountFields].map(({ key }) => [key, profile[key] ?? ""]),
+    ) as unknown as PostingProfileAccounts;
     setForm({ itemGroup, siteId, ...accounts });
     setErrors({});
     setFailure(null);
@@ -135,8 +151,8 @@ export function PostingProfilesPage() {
     }
   };
 
-  const field = (key: keyof PostingProfileInput, label: string, hint?: string) => (
-    <FormField key={key} id={`profile-${key}`} label={label} hint={hint} error={errors[key]}>
+  const field = (key: keyof PostingProfileInput, label: string, hint?: string, optional = false) => (
+    <FormField key={key} id={`profile-${key}`} label={label} hint={hint} error={errors[key]} optional={optional}>
       {(control) => (
         <Input
           {...control}
@@ -188,7 +204,10 @@ export function PostingProfilesPage() {
             {field("itemGroup", "Item group", "All matches every item group.")}
             {field("siteId", "Site", "A site id, or All.")}
           </div>
-          <div className={styles.fields}>{accountFields.map(({ key, label }) => field(key, label))}</div>
+          <div className={styles.fields}>
+            {accountFields.map(({ key, label }) => field(key, label))}
+            {optionalAccountFields.map(({ key, label, hint }) => field(key, label, hint, true))}
+          </div>
           <div className={styles.formActions}>
             <Button type="submit" variant="primary" loading={saving}>
               Save posting profile

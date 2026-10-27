@@ -35,27 +35,29 @@ const (
 // Order is the order view served by the API: header, exploded BOM, route,
 // planned cost. Decimals serialize as strings.
 type Order struct {
-	ID            string             `json:"id"`
-	LegalEntityID string             `json:"legalEntityId"`
-	OrderNumber   string             `json:"orderNumber"`
-	ProductID     string             `json:"productId"`
-	SiteID        string             `json:"siteId"`
-	WarehouseID   string             `json:"warehouseId"`
-	Currency      string             `json:"currency"`
-	ItemGroup     string             `json:"itemGroup,omitempty"`
-	Quantity      decimal.Decimal    `json:"quantity"`
-	QtyRAF        decimal.Decimal    `json:"qtyRaf"`
-	QtyError      decimal.Decimal    `json:"qtyError"`
-	Status        domain.Status      `json:"status"`
-	DeliveryDate  *string            `json:"deliveryDate,omitempty"`
-	OriginType    string             `json:"originType"`
-	OriginID      *string            `json:"originId,omitempty"`
-	Version       int                `json:"version"`
-	Lines         []domain.OrderLine `json:"lines"`
-	Operations    []domain.Operation `json:"operations"`
-	Costs         []domain.CostRow   `json:"costs"`
-	CreatedAt     time.Time          `json:"createdAt"`
-	UpdatedAt     time.Time          `json:"updatedAt"`
+	ID            string          `json:"id"`
+	LegalEntityID string          `json:"legalEntityId"`
+	OrderNumber   string          `json:"orderNumber"`
+	ProductID     string          `json:"productId"`
+	SiteID        string          `json:"siteId"`
+	WarehouseID   string          `json:"warehouseId"`
+	Currency      string          `json:"currency"`
+	ItemGroup     string          `json:"itemGroup,omitempty"`
+	Quantity      decimal.Decimal `json:"quantity"`
+	QtyRAF        decimal.Decimal `json:"qtyRaf"`
+	QtyError      decimal.Decimal `json:"qtyError"`
+	Status        domain.Status   `json:"status"`
+	DeliveryDate  *string         `json:"deliveryDate,omitempty"`
+	OriginType    string          `json:"originType"`
+	OriginID      *string         `json:"originId,omitempty"`
+	// ReworkReference is the original order, batch or serial of a rework order (FR-21.20).
+	ReworkReference *domain.ReworkRef  `json:"reworkReference,omitempty"`
+	Version         int                `json:"version"`
+	Lines           []domain.OrderLine `json:"lines"`
+	Operations      []domain.Operation `json:"operations"`
+	Costs           []domain.CostRow   `json:"costs"`
+	CreatedAt       time.Time          `json:"createdAt"`
+	UpdatedAt       time.Time          `json:"updatedAt"`
 }
 
 // OrderSummary is one row of the order list (PRD 4.21.14 "Production orders list").
@@ -73,10 +75,13 @@ type OrderSummary struct {
 	Remaining     decimal.Decimal `json:"remaining"`
 	Status        domain.Status   `json:"status"`
 	DeliveryDate  *string         `json:"deliveryDate,omitempty"`
-	PlannedCost   decimal.Decimal `json:"plannedCost"`
-	ActualCost    decimal.Decimal `json:"actualCost"`
-	Version       int             `json:"version"`
-	CreatedAt     time.Time       `json:"createdAt"`
+	OriginType    string          `json:"originType"`
+	// ReworkReference is set on a rework order that names its original (FR-21.20).
+	ReworkReference *domain.ReworkRef `json:"reworkReference,omitempty"`
+	PlannedCost     decimal.Decimal   `json:"plannedCost"`
+	ActualCost      decimal.Decimal   `json:"actualCost"`
+	Version         int               `json:"version"`
+	CreatedAt       time.Time         `json:"createdAt"`
 }
 
 // OrderPage is a keyset page of the order list, newest first.
@@ -85,13 +90,16 @@ type OrderPage struct {
 	NextCursor string         `json:"nextCursor,omitempty"`
 }
 
-// ListFilter narrows the order list. Empty fields do not filter. Cursor is the
-// id of the last order of the previous page.
+// ListFilter narrows the order list. Empty fields do not filter. ReworkOf is
+// an order id: only the rework orders that reference it (FR-21.20). Cursor is
+// the id of the last order of the previous page.
 type ListFilter struct {
 	Status        domain.Status
 	LegalEntityID string
 	SiteID        string
 	ProductID     string
+	OriginType    string
+	ReworkOf      string
 	Cursor        string
 	Limit         int
 }
@@ -109,20 +117,22 @@ type StatusLogEntry struct {
 // NewOrder is a validated order to create, with its exploded snapshot.
 // RequestHash identifies the request body for Idempotency-Key replays.
 type NewOrder struct {
-	LegalEntityID  string
-	ProductID      string
-	SiteID         string
-	WarehouseID    string
-	ItemGroup      string
-	Currency       string
-	Quantity       decimal.Decimal
-	DeliveryDate   *string
-	OriginType     string
-	OriginID       *string
-	Lines          []domain.OrderLine
-	Operations     []domain.Operation
-	IdempotencyKey string
-	RequestHash    string
+	LegalEntityID string
+	ProductID     string
+	SiteID        string
+	WarehouseID   string
+	ItemGroup     string
+	Currency      string
+	Quantity      decimal.Decimal
+	DeliveryDate  *string
+	OriginType    string
+	OriginID      *string
+	// ReworkReference names the original of a rework order (OriginType Rework), or is nil.
+	ReworkReference *domain.ReworkRef
+	Lines           []domain.OrderLine
+	Operations      []domain.Operation
+	IdempotencyKey  string
+	RequestHash     string
 }
 
 // OrderUpdate is a PATCH of the header. A nil Quantity leaves it; SetDeliveryDate
@@ -172,6 +182,9 @@ type Store interface {
 	DeleteJournal(ctx context.Context, id string) error
 	ListPostingProfiles(ctx context.Context, legalEntityID string) ([]PostingProfile, error)
 	SavePostingProfile(ctx context.Context, in ProfileSave) (PostingProfile, bool, error)
+	AssignAsBuilt(ctx context.Context, in NewAsBuilt) (AsBuiltRecord, bool, error)
+	ListAsBuilt(ctx context.Context, f AsBuiltFilter) ([]AsBuiltRecord, error)
+	DetachAsBuilt(ctx context.Context, id, actor string) (AsBuiltRecord, error)
 }
 
 // Postgres is the production store.
@@ -240,13 +253,21 @@ func (s *Postgres) CreateOrder(ctx context.Context, in NewOrder) (Order, bool, e
 			returning next_value - 1`, p.TenantID, in.LegalEntityID).Scan(&seq); err != nil {
 			return err
 		}
+		var refType, refID *string
+		if ref := in.ReworkReference; ref != nil {
+			if err := checkReworkSource(ctx, tx, p.TenantID, in, *ref); err != nil {
+				return err
+			}
+			t := string(ref.Type)
+			refType, refID = &t, &ref.ID
+		}
 		id := ids.New()
 		number := fmt.Sprintf("PO-%06d", seq)
 		if _, err := tx.Exec(ctx, `insert into production_order (tenant_id, id, legal_entity_id, order_number, product_id, site_id, warehouse_id, currency,
-			quantity, delivery_date, origin_type, origin_id, idempotency_key, request_hash, item_group)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::date, $11, $12, $13, $14, $15)`,
+			quantity, delivery_date, origin_type, origin_id, idempotency_key, request_hash, item_group, rework_reference_type, rework_reference_id)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::date, $11, $12, $13, $14, $15, $16, $17)`,
 			p.TenantID, id, in.LegalEntityID, number, in.ProductID, in.SiteID, in.WarehouseID, in.Currency,
-			in.Quantity.String(), in.DeliveryDate, in.OriginType, in.OriginID, in.IdempotencyKey, in.RequestHash, in.ItemGroup); err != nil {
+			in.Quantity.String(), in.DeliveryDate, in.OriginType, in.OriginID, in.IdempotencyKey, in.RequestHash, in.ItemGroup, refType, refID); err != nil {
 			return err
 		}
 		if err := insertLines(ctx, tx, p.TenantID, id, in.Lines); err != nil {
@@ -260,12 +281,36 @@ func (s *Postgres) CreateOrder(ctx context.Context, in NewOrder) (Order, bool, e
 			return err
 		}
 		created = true
-		return enqueue(ctx, tx, id, prodevents.OrderCreated, p.TenantID, p.UserID, prodevents.OrderCreatedData{
+		data := prodevents.OrderCreatedData{
 			OrderID: id, OrderNumber: number, ProductID: in.ProductID, Quantity: in.Quantity.String(), SiteID: in.SiteID,
 			DeliveryDate: in.DeliveryDate, OriginType: in.OriginType, OriginID: in.OriginID,
-		})
+		}
+		if ref := in.ReworkReference; ref != nil {
+			data.ReworkReference = &prodevents.ReworkReference{Type: string(ref.Type), ID: ref.ID}
+		}
+		return enqueue(ctx, tx, id, prodevents.OrderCreated, p.TenantID, p.UserID, data)
 	})
 	return out, created, err
+}
+
+// checkReworkSource checks a rework order's reference to an original order
+// (FR-21.20): the order exists for the caller, made the same product and
+// reported at least the rework quantity as finished. Batch and serial
+// references are kept as entered until tracking (wave 16) can resolve them.
+func checkReworkSource(ctx context.Context, tx pgx.Tx, tenantID string, in NewOrder, ref domain.ReworkRef) error {
+	if ref.Type != domain.ReworkRefOrder {
+		return nil
+	}
+	var product, raf string
+	err := tx.QueryRow(ctx, `select product_id::text, qty_raf::text from production_order where tenant_id = $1 and id = $2`,
+		tenantID, ref.ID).Scan(&product, &raf)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeReworkReference, "the referenced production order does not exist")
+	}
+	if err != nil {
+		return err
+	}
+	return domainProblem(domain.CheckReworkSource(in.ProductID, in.Quantity, product, dec(raf)))
 }
 
 func insertLines(ctx context.Context, tx pgx.Tx, tenantID, orderID string, lines []domain.OrderLine) error {
@@ -320,7 +365,7 @@ func (s *Postgres) ListOrders(ctx context.Context, f ListFilter) (OrderPage, err
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select o.id::text, o.legal_entity_id::text, o.order_number, o.product_id::text, o.site_id::text,
 				o.warehouse_id::text, o.currency::text, o.quantity::text, o.qty_raf::text, o.qty_error::text, o.status,
-				o.delivery_date::text, o.version, o.created_at,
+				o.delivery_date::text, o.version, o.created_at, o.origin_type, o.rework_reference_type, o.rework_reference_id,
 				coalesce((select sum(c.planned_amount) from production_cost_estimate c
 				          where c.tenant_id = o.tenant_id and c.order_id = o.id), 0)::text,
 				coalesce((select sum(w.amount_dr - w.amount_cr) from production_wip_posting w
@@ -333,9 +378,11 @@ func (s *Postgres) ListOrders(ctx context.Context, f ListFilter) (OrderPage, err
 			  and ($4 = '' or o.site_id = nullif($4, '')::uuid)
 			  and ($5 = '' or o.product_id = nullif($5, '')::uuid)
 			  and ($6 = '' or o.id < nullif($6, '')::uuid)
+			  and ($8 = '' or o.origin_type = $8)
+			  and ($9 = '' or (o.rework_reference_type = 'order' and o.rework_reference_id = $9))
 			order by o.id desc
 			limit $7`,
-			p.TenantID, string(f.Status), f.LegalEntityID, f.SiteID, f.ProductID, f.Cursor, f.Limit+1)
+			p.TenantID, string(f.Status), f.LegalEntityID, f.SiteID, f.ProductID, f.Cursor, f.Limit+1, f.OriginType, f.ReworkOf)
 		if err != nil {
 			return err
 		}
@@ -343,10 +390,12 @@ func (s *Postgres) ListOrders(ctx context.Context, f ListFilter) (OrderPage, err
 		for rows.Next() {
 			var o OrderSummary
 			var status, qty, raf, qerr, planned, actual string
+			var refType, refID *string
 			if err := rows.Scan(&o.ID, &o.LegalEntityID, &o.OrderNumber, &o.ProductID, &o.SiteID, &o.WarehouseID, &o.Currency,
-				&qty, &raf, &qerr, &status, &o.DeliveryDate, &o.Version, &o.CreatedAt, &planned, &actual); err != nil {
+				&qty, &raf, &qerr, &status, &o.DeliveryDate, &o.Version, &o.CreatedAt, &o.OriginType, &refType, &refID, &planned, &actual); err != nil {
 				return err
 			}
+			o.ReworkReference = reworkRef(refType, refID)
 			o.Status = domain.Status(status)
 			o.Quantity, o.QtyRAF, o.QtyError = dec(qty), dec(raf), dec(qerr)
 			o.Remaining = decimal.Max(o.Quantity.Sub(o.QtyRAF).Sub(o.QtyError), decimal.Zero)
@@ -412,7 +461,11 @@ type orderHead struct {
 	itemGroup     string
 	currency      string
 	createdOn     string
+	originType    string
 }
+
+// rework reports whether the order is a rework order (FR-21.20).
+func (h orderHead) rework() bool { return h.originType == domain.OriginRework }
 
 // lockOrder takes the row lock that serializes commands and journal posts on
 // one order (BR-21.4) and checks If-Match against the version; ifMatch 0
@@ -421,9 +474,9 @@ func lockOrder(ctx context.Context, tx pgx.Tx, tenantID, orderID string, ifMatch
 	h := orderHead{id: orderID}
 	var status, qty, raf, qerr string
 	err := tx.QueryRow(ctx, `select status, version, quantity::text, qty_raf::text, qty_error::text, legal_entity_id::text,
-			product_id::text, site_id::text, item_group, currency::text, (created_at at time zone 'UTC')::date::text
+			product_id::text, site_id::text, item_group, currency::text, (created_at at time zone 'UTC')::date::text, origin_type
 		from production_order where tenant_id = $1 and id = $2 for update`, tenantID, orderID).Scan(&status, &h.version, &qty, &raf, &qerr,
-		&h.legalEntityID, &h.productID, &h.siteID, &h.itemGroup, &h.currency, &h.createdOn)
+		&h.legalEntityID, &h.productID, &h.siteID, &h.itemGroup, &h.currency, &h.createdOn, &h.originType)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return h, notFound()
 	}
@@ -588,6 +641,11 @@ func (s *Postgres) Transition(ctx context.Context, t Transition) (Order, bool, e
 				if err := reverseJournals(ctx, tx, p.TenantID, &h, types, t.Actor, "sys:reset:"+t.IdempotencyKey); err != nil {
 					return err
 				}
+				// BR-21.14: the reversal takes back the reports as finished (and, before
+				// Started, the consumption), so the as-built records detach.
+				if err := detachOrderAsBuilt(ctx, tx, p.TenantID, t.OrderID, t.Actor); err != nil {
+					return err
+				}
 			}
 			if to == domain.Created {
 				if _, err := tx.Exec(ctx, `delete from production_cost_estimate where tenant_id = $1 and order_id = $2`, p.TenantID, t.OrderID); err != nil {
@@ -657,15 +715,15 @@ func replaceEstimate(ctx context.Context, tx pgx.Tx, tenantID, orderID string) e
 }
 
 // domainProblem maps a domain rule violation to a problem: an illegal
-// transition or a locked field is a 409 conflict with the order's state, the
-// other rules are 422.
+// transition, a locked field or an as-built change in the wrong status is a
+// 409 conflict with the order's state, the other rules are 422.
 func domainProblem(err error) error {
 	var de *domain.Error
 	if !errors.As(err, &de) {
 		return err
 	}
 	status := http.StatusUnprocessableEntity
-	if de.Code == domain.CodeIllegalTransition || de.Code == domain.CodeNotEditable {
+	if de.Code == domain.CodeIllegalTransition || de.Code == domain.CodeNotEditable || de.Code == domain.CodeAsBuiltState {
 		status = http.StatusConflict
 	}
 	return httpx.NewProblem(status, de.Code, de.Detail)
@@ -674,12 +732,13 @@ func domainProblem(err error) error {
 func loadOrder(ctx context.Context, q querier, tenantID, id string) (Order, error) {
 	var o Order
 	var status, qty, raf, qerr string
+	var refType, refID *string
 	err := q.QueryRow(ctx, `select id::text, legal_entity_id::text, order_number, product_id::text, site_id::text, warehouse_id::text, currency::text,
 		quantity::text, qty_raf::text, qty_error::text, status, delivery_date::text, origin_type, origin_id::text, version, created_at, updated_at,
-		item_group
+		item_group, rework_reference_type, rework_reference_id
 		from production_order where tenant_id = $1 and id = $2`, tenantID, id).Scan(&o.ID, &o.LegalEntityID, &o.OrderNumber, &o.ProductID,
 		&o.SiteID, &o.WarehouseID, &o.Currency, &qty, &raf, &qerr, &status, &o.DeliveryDate, &o.OriginType, &o.OriginID, &o.Version,
-		&o.CreatedAt, &o.UpdatedAt, &o.ItemGroup)
+		&o.CreatedAt, &o.UpdatedAt, &o.ItemGroup, &refType, &refID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Order{}, notFound()
 	}
@@ -688,6 +747,7 @@ func loadOrder(ctx context.Context, q querier, tenantID, id string) (Order, erro
 	}
 	o.Status = domain.Status(status)
 	o.Quantity, o.QtyRAF, o.QtyError = dec(qty), dec(raf), dec(qerr)
+	o.ReworkReference = reworkRef(refType, refID)
 	if o.Lines, err = loadLines(ctx, q, tenantID, id); err != nil {
 		return Order{}, err
 	}
@@ -764,4 +824,11 @@ func loadCosts(ctx context.Context, q querier, tenantID, orderID string) ([]doma
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+func reworkRef(refType, refID *string) *domain.ReworkRef {
+	if refType == nil || refID == nil {
+		return nil
+	}
+	return &domain.ReworkRef{Type: domain.ReworkRefType(*refType), ID: *refID}
 }

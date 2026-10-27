@@ -130,6 +130,9 @@ type Profile struct {
 	VarQuantity        string `json:"quantityVarianceAccount"`
 	VarPrice           string `json:"priceVarianceAccount"`
 	VarSubstitution    string `json:"substitutionVarianceAccount"`
+	// VarRework is the account of the rework variance (FR-21.20). It may stay
+	// empty until the legal entity runs rework orders; ending one needs it.
+	VarRework string `json:"reworkVarianceAccount"`
 }
 
 // ResolveProfile picks the most specific profile for an item group and site.
@@ -158,6 +161,8 @@ func (p Profile) varianceAccount(t VarianceType) string {
 		return p.VarQuantity
 	case VarPrice:
 		return p.VarPrice
+	case VarRework:
+		return p.VarRework
 	}
 	return p.VarSubstitution
 }
@@ -233,6 +238,9 @@ func SettlementPostings(p Profile, balance decimal.Decimal, vars []Variance) ([]
 	}
 	for _, v := range vars {
 		typ, acct := postVariancePrefix+string(v.Type), p.varianceAccount(v.Type)
+		if acct == "" && !v.Amount.IsZero() {
+			return nil, &Error{Code: CodeNoPostingProfile, Detail: fmt.Sprintf("the posting profile %s × %s has no %s variance account", p.ItemGroup, p.SiteID, v.Type)}
+		}
 		switch {
 		case v.Amount.IsPositive():
 			out = append(out, Posting{Type: typ, Account: acct, Dr: v.Amount})

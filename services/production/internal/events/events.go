@@ -14,11 +14,13 @@ var (
 	OrderStatusChanged = events.Type(Context, "order", "statuschanged", 1)
 	OrderSettled       = events.Type(Context, "order", "settled", 1)
 	JournalPosted      = events.Type(Context, "journal", "posted", 1)
+	AsBuiltAssigned    = events.Type(Context, "asbuilt", "assigned", 1)
+	AsBuiltDetached    = events.Type(Context, "asbuilt", "detached", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{OrderCreated, OrderUpdated, OrderStatusChanged, OrderSettled, JournalPosted}
+	return []string{OrderCreated, OrderUpdated, OrderStatusChanged, OrderSettled, JournalPosted, AsBuiltAssigned, AsBuiltDetached}
 }
 
 // OrderCreatedData is the payload of order.created.v1.
@@ -31,6 +33,15 @@ type OrderCreatedData struct {
 	DeliveryDate *string `json:"deliveryDate"`
 	OriginType   string  `json:"originType"`
 	OriginID     *string `json:"originId"`
+	// ReworkReference is the original order, batch or serial of a rework order (FR-21.20); null otherwise.
+	ReworkReference *ReworkReference `json:"reworkReference"`
+}
+
+// ReworkReference names what a rework order reports against: type order with
+// the order id, or batch or serial with its number.
+type ReworkReference struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
 }
 
 // OrderUpdatedData is the payload of order.updated.v1: the header after a PATCH.
@@ -121,4 +132,22 @@ type OrderSettledData struct {
 	ActualCost  CostByGroup      `json:"actualCost"`
 	Variances   []VarianceAmount `json:"variances"`
 	Postings    []Posting        `json:"postings"`
+}
+
+// AsBuiltData is the payload of asbuilt.assigned.v1 and asbuilt.detached.v1
+// (FR-21.19): one component serial or batch consumed into a finished serial or
+// batch, for the trace inquiry (wave 16) and nonconformance (wave 33).
+// DetachedAt is null on assigned.
+type AsBuiltData struct {
+	RecordID               string  `json:"recordId"`
+	OrderID                string  `json:"orderId"`
+	FinishedItemID         string  `json:"finishedItemId"`
+	FinishedSerialOrBatch  string  `json:"finishedSerialOrBatch"`
+	ComponentItemID        string  `json:"componentItemId"`
+	Tracking               string  `json:"tracking"`
+	ComponentSerialOrBatch string  `json:"componentSerialOrBatch"`
+	Qty                    string  `json:"qty"`
+	AssignedBy             string  `json:"assignedBy"`
+	AssignedAt             string  `json:"assignedAt"`
+	DetachedAt             *string `json:"detachedAt"`
 }

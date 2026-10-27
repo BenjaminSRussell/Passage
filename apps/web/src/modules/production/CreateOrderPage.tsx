@@ -1,6 +1,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Alert, Button, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
 import {
+  REWORK,
   createOrder,
   describeProblem,
   newIdempotencyKey,
@@ -8,8 +9,9 @@ import {
   type Flushing,
   type Problem,
   type ProductionOrder,
+  type ReworkRefType,
 } from "./api/client";
-import { flushingLabel } from "./labels";
+import { flushingLabel, reworkRefLabel } from "./labels";
 import styles from "./pages.module.css";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -46,6 +48,12 @@ export interface OrderValues {
   deliveryDate: string;
   lines: LineValues[];
   operations: OperationValues[];
+  /** A rework order (FR-21.20): no BOM explosion by default, cost settles as rework. */
+  rework: boolean;
+  /** What the rework order reports against; empty for none. */
+  referenceType: ReworkRefType | "";
+  /** The original order's id, or the batch or serial number. */
+  referenceId: string;
 }
 
 export type OrderErrors = Record<string, string>;
@@ -70,6 +78,9 @@ export const initialValues = (): OrderValues => ({
   deliveryDate: "",
   lines: [emptyLine(1)],
   operations: [emptyOperation(1)],
+  rework: false,
+  referenceType: "",
+  referenceId: "",
 });
 
 const positive = (v: string) => decimalPattern.test(v) && /[1-9]/.test(v);
@@ -119,6 +130,15 @@ export function validateOrder(values: OrderValues): OrderErrors {
   if (values.operations.length === 0) {
     errors.operations = "Add at least one operation.";
   }
+  if (values.rework && values.referenceType === "order" && !uuidPattern.test(values.referenceId)) {
+    errors.referenceId = "Enter the original production order's id (a UUID).";
+  } else if (
+    values.rework &&
+    values.referenceType !== "" &&
+    (values.referenceId === "" || values.referenceId.trim() !== values.referenceId || values.referenceId.length > 100)
+  ) {
+    errors.referenceId = "Enter the batch or serial number (up to 100 characters, no surrounding spaces).";
+  }
   let previous = 0;
   values.operations.forEach((op, i) => {
     const n = Number.parseInt(op.operNumber, 10);
@@ -144,7 +164,14 @@ const optional = (v: string) => (v === "" ? undefined : v);
 
 /** Maps the form to the CreateOrder body of api/openapi.yaml. */
 export function toInput(values: OrderValues): CreateOrderInput {
+  const rework: Partial<CreateOrderInput> = values.rework
+    ? {
+        originType: REWORK,
+        ...(values.referenceType ? { reworkReference: { type: values.referenceType, id: values.referenceId } } : {}),
+      }
+    : {};
   return {
+    ...rework,
     itemGroup: optional(values.itemGroup.trim()),
     productId: values.productId.trim(),
     siteId: values.siteId.trim(),
@@ -173,17 +200,25 @@ export function toInput(values: OrderValues): CreateOrderInput {
 
 /** Maps a server field path (bom[0].itemId, operations[1].resourceId) to the form's key. */
 export function formKey(serverField: string): string {
+  if (serverField === "reworkReference.id") {
+    return "referenceId";
+  }
+  if (serverField.startsWith("reworkReference")) {
+    return "referenceType";
+  }
   return serverField.replace(/^bom\[(\d+)\]/, "lines.$1").replace(/^operations\[(\d+)\]/, "operations.$1");
 }
 
 export interface CreateProductionOrderPageProps {
   onCreated?(order: ProductionOrder): void;
   onCancel?(): void;
+  /** Prefilled values, for example a rework order started from its original order. */
+  initial?: Partial<OrderValues>;
 }
 
 /** Create a production order (FR-21.1): header, BOM lines and route; the service explodes and plans them. */
-export function CreateProductionOrderPage({ onCreated, onCancel }: CreateProductionOrderPageProps) {
-  const [values, setValues] = useState<OrderValues>(initialValues);
+export function CreateProductionOrderPage({ onCreated, onCancel, initial }: CreateProductionOrderPageProps) {
+  const [values, setValues] = useState<OrderValues>(() => ({ ...initialValues(), ...initial }));
   const [errors, setErrors] = useState<OrderErrors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
@@ -234,8 +269,12 @@ export function CreateProductionOrderPage({ onCreated, onCancel }: CreateProduct
   return (
     <div className={styles.stack}>
       <PageHeader
-        title="New production order"
-        description="Enter the product, quantity, the BOM lines and the route. Passage explodes phantoms, applies scrap and rounding, and numbers the order."
+        title={values.rework ? "New rework order" : "New production order"}
+        description={
+          values.rework
+            ? "A rework order brings finished units back through rework operations. Add the product itself as a component to issue the units at their cost; the rework cost settles as a rework variance."
+            : "Enter the product, quantity, the BOM lines and the route. Passage explodes phantoms, applies scrap and rounding, and numbers the order."
+        }
         actions={onCancel ? <Button variant="ghost" onClick={onCancel}>Back to production orders</Button> : undefined}
       />
       <Alert tone="danger" live="alert" title={failure ? "The order was not created" : undefined}>
@@ -255,6 +294,41 @@ export function CreateProductionOrderPage({ onCreated, onCancel }: CreateProduct
         ) : null}
       </Alert>
       <form className={styles.form} onSubmit={submit} noValidate aria-label="New production order">
+        <Card title="Order type">
+          <div className={styles.fields}>
+            <FormField id="po-kind" label="Order type">
+              {(control) => (
+                <Select
+                  {...control}
+                  value={values.rework ? "rework" : "standard"}
+                  onChange={(event) => set({ rework: event.target.value === "rework", referenceType: "", referenceId: "" })}
+                >
+                  <option value="standard">Production order</option>
+                  <option value="rework">Rework order</option>
+                </Select>
+              )}
+            </FormField>
+            {values.rework ? (
+              <FormField id="po-referenceType" label="Rework of" error={errors.referenceType} hint="Optional: what the rework reports against.">
+                {(control) => (
+                  <Select {...control} value={values.referenceType} onChange={(event) => set({ referenceType: event.target.value as ReworkRefType | "", referenceId: "" })}>
+                    <option value="">No reference</option>
+                    <option value="order">{reworkRefLabel.order}</option>
+                    <option value="batch">{reworkRefLabel.batch}</option>
+                    <option value="serial">{reworkRefLabel.serial}</option>
+                  </Select>
+                )}
+              </FormField>
+            ) : null}
+            {values.rework && values.referenceType
+              ? text("po-referenceId", "Reference", values.referenceId, (v) => set({ referenceId: v }), {
+                  hint: values.referenceType === "order" ? "The original order's id." : `The ${reworkRefLabel[values.referenceType].toLowerCase()}.`,
+                })
+              : null}
+          </div>
+          {values.rework ? <p className={styles.hint}>Creating a rework order needs the Create rework orders duty.</p> : null}
+        </Card>
+
         <Card title="Order">
           <div className={styles.fields}>
             {text("po-productId", "Product", values.productId, (v) => set({ productId: v }), { hint: "Released product id (wave 8)." })}

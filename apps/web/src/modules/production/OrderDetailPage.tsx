@@ -19,6 +19,7 @@ import {
   getCosts,
   getOrder,
   getStatusLog,
+  listOrders,
   newIdempotencyKey,
   nextCommand,
   resetTargets,
@@ -29,6 +30,7 @@ import {
   type CostView,
   type Operation,
   type OrderLine,
+  type OrderSummary,
   type Problem,
   type ProductionCommand,
   type ProductionOrder,
@@ -36,8 +38,22 @@ import {
   type StatusLogEntry,
   type Variance,
 } from "./api/client";
+import { AsBuiltPanel } from "./AsBuiltPanel";
 import { JournalsPanel } from "./JournalsPanel";
-import { addDecimals, amount, commandLabel, costGroupLabel, dash, flushingLabel, negate, statusLabel, statusTone, varianceLabel } from "./labels";
+import {
+  addDecimals,
+  amount,
+  commandLabel,
+  costGroupLabel,
+  dash,
+  describeReference,
+  flushingLabel,
+  isZero,
+  negate,
+  statusLabel,
+  statusTone,
+  varianceLabel,
+} from "./labels";
 import styles from "./pages.module.css";
 
 const quantityPattern = /^[0-9]{1,12}(\.[0-9]{1,6})?$/;
@@ -46,7 +62,18 @@ export interface ProductionOrderDetailProps {
   orderId: string;
   /** Returns to the order list. */
   onBack?(): void;
+  /** Starts a rework order for this order's output (FR-21.20); the action is hidden without it. */
+  onCreateRework?(order: ProductionOrder): void;
+  /** Opens another production order, such as a rework order or the original of one. */
+  onOpenOrder?(orderId: string): void;
 }
+
+const reworkColumns: DataTableColumn<OrderSummary>[] = [
+  { key: "orderNumber", header: "Rework order", mono: true },
+  { key: "quantity", header: "Quantity", align: "end" },
+  { key: "status", header: "Status", render: (row) => <Badge tone={statusTone[row.status]}>{statusLabel[row.status]}</Badge> },
+  { key: "actualCost", header: "Actual cost", align: "end", render: (row) => `${amount(row.actualCost ?? "0")} ${row.currency}` },
+];
 
 const lineColumns: DataTableColumn<OrderLine>[] = [
   { key: "lineNo", header: "Line", mono: true },
@@ -130,8 +157,9 @@ interface Loaded<T> {
 const idle = <T,>(): Loaded<T> => ({ value: null, loading: true, error: null });
 
 /** Production order detail (PRD 4.21.6): header, status actions, BOM lines, route, planned cost and status log. */
-export function ProductionOrderDetail({ orderId, onBack }: ProductionOrderDetailProps) {
+export function ProductionOrderDetail({ orderId, onBack, onCreateRework, onOpenOrder }: ProductionOrderDetailProps) {
   const [order, setOrder] = useState<Loaded<ProductionOrder>>(idle);
+  const [reworks, setReworks] = useState<Loaded<OrderSummary[]>>(idle);
   const [log, setLog] = useState<Loaded<StatusLogEntry[]>>(idle);
   const [costs, setCosts] = useState<Loaded<CostView>>(idle);
   const [busy, setBusy] = useState<ProductionCommand | null>(null);
@@ -154,6 +182,11 @@ export function ProductionOrderDetail({ orderId, onBack }: ProductionOrderDetail
         (value) => setCosts({ value, loading: false, error: null }),
         (failure) => !signal?.aborted && setCosts({ value: null, loading: false, error: describeProblem(failure) }),
       );
+      // FR-21.20: rework orders report against their original order.
+      listOrders({ reworkOf: orderId, signal }).then(
+        (page) => setReworks({ value: page.items, loading: false, error: null }),
+        (failure) => !signal?.aborted && setReworks({ value: null, loading: false, error: describeProblem(failure) }),
+      );
     },
     [orderId],
   );
@@ -163,6 +196,7 @@ export function ProductionOrderDetail({ orderId, onBack }: ProductionOrderDetail
     setOrder(idle);
     setLog(idle);
     setCosts(idle);
+    setReworks(idle);
     getOrder(orderId, controller.signal).then(
       (value) => setOrder({ value, loading: false, error: null }),
       (failure) => !controller.signal.aborted && setOrder({ value: null, loading: false, error: describeProblem(failure) }),
@@ -269,7 +303,20 @@ export function ProductionOrderDetail({ orderId, onBack }: ProductionOrderDetail
         title={`Production order ${current.orderNumber}`}
         description={`Version ${current.version}${current.createdAt ? ` · created ${current.createdAt.slice(0, 10)}` : ""}`}
         meta={<Badge tone={statusTone[current.status]}>{statusLabel[current.status]}</Badge>}
-        actions={onBack ? <Button variant="ghost" onClick={onBack}>Back to production orders</Button> : undefined}
+        actions={
+          <div className={styles.actions}>
+            {onCreateRework && !isZero(current.qtyRaf) && current.status !== "Cancelled" ? (
+              <Button icon="box" onClick={() => onCreateRework(current)}>
+                Create rework order
+              </Button>
+            ) : null}
+            {onBack ? (
+              <Button variant="ghost" onClick={onBack}>
+                Back to production orders
+              </Button>
+            ) : null}
+          </div>
+        }
       />
 
       <Alert tone="success" live="status">
@@ -384,6 +431,17 @@ export function ProductionOrderDetail({ orderId, onBack }: ProductionOrderDetail
             {current.warehouseId}
           </Detail>
           <Detail term="Origin">{current.originType}</Detail>
+          {current.reworkReference ? (
+            <Detail term="Rework of" mono={current.reworkReference.type !== "order"}>
+              {current.reworkReference.type === "order" && onOpenOrder ? (
+                <Button variant="ghost" size="sm" onClick={() => onOpenOrder(current.reworkReference?.id ?? "")}>
+                  Open the original order
+                </Button>
+              ) : (
+                describeReference(current.reworkReference)
+              )}
+            </Detail>
+          ) : null}
           <Detail term="Item group">{current.itemGroup || dash}</Detail>
         </dl>
       </Card>
@@ -403,6 +461,26 @@ export function ProductionOrderDetail({ orderId, onBack }: ProductionOrderDetail
       </Card>
 
       <JournalsPanel order={current} onChanged={reload} />
+
+      <AsBuiltPanel order={current} />
+
+      <Card title="Rework orders" padded={false}>
+        {reworks.error ? (
+          <Alert tone="danger" title="Could not load the rework orders">
+            {reworks.error.message} ({reworks.error.code})
+          </Alert>
+        ) : (
+          <DataTable
+            label="Rework orders of this order"
+            columns={reworkColumns}
+            rows={reworks.value ?? []}
+            loading={reworks.loading}
+            getRowKey={(row) => row.id}
+            onRowOpen={onOpenOrder ? (row) => onOpenOrder(row.id) : undefined}
+            empty={{ title: "No rework orders", description: "Rework orders that reference this order are listed here with their cost." }}
+          />
+        )}
+      </Card>
 
       <Card title="Costs">
         {costs.error ? (

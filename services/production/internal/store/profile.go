@@ -35,12 +35,12 @@ type ProfileSave struct {
 
 const profileColumns = `legal_entity_id::text, item_group, site_key, wip_account, inventory_account, finished_goods_account,
 	labor_absorption_account, overhead_absorption_account, lot_size_variance_account, quantity_variance_account,
-	price_variance_account, substitution_variance_account, version, updated_by, updated_at`
+	price_variance_account, substitution_variance_account, rework_variance_account, version, updated_by, updated_at`
 
 func scanProfile(row pgx.Row) (PostingProfile, error) {
 	var p PostingProfile
 	err := row.Scan(&p.LegalEntityID, &p.ItemGroup, &p.SiteID, &p.WIP, &p.Inventory, &p.FinishedGoods, &p.LaborAbsorption,
-		&p.OverheadAbsorption, &p.VarLotSize, &p.VarQuantity, &p.VarPrice, &p.VarSubstitution, &p.Version, &p.UpdatedBy, &p.UpdatedAt)
+		&p.OverheadAbsorption, &p.VarLotSize, &p.VarQuantity, &p.VarPrice, &p.VarSubstitution, &p.VarRework, &p.Version, &p.UpdatedBy, &p.UpdatedAt)
 	return p, err
 }
 
@@ -110,10 +110,10 @@ func (s *Postgres) SavePostingProfile(ctx context.Context, in ProfileSave) (Post
 			created = true
 			_, err = tx.Exec(ctx, `insert into production_posting_profile (tenant_id, legal_entity_id, item_group, site_key, wip_account,
 					inventory_account, finished_goods_account, labor_absorption_account, overhead_absorption_account, lot_size_variance_account,
-					quantity_variance_account, price_variance_account, substitution_variance_account, updated_by)
-				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+					quantity_variance_account, price_variance_account, substitution_variance_account, updated_by, rework_variance_account)
+				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
 				p.TenantID, in.LegalEntityID, pr.ItemGroup, pr.SiteID, pr.WIP, pr.Inventory, pr.FinishedGoods, pr.LaborAbsorption,
-				pr.OverheadAbsorption, pr.VarLotSize, pr.VarQuantity, pr.VarPrice, pr.VarSubstitution, in.Actor)
+				pr.OverheadAbsorption, pr.VarLotSize, pr.VarQuantity, pr.VarPrice, pr.VarSubstitution, in.Actor, pr.VarRework)
 		case err != nil:
 			return err
 		case in.IfMatch == 0:
@@ -124,10 +124,10 @@ func (s *Postgres) SavePostingProfile(ctx context.Context, in ProfileSave) (Post
 			_, err = tx.Exec(ctx, `update production_posting_profile set wip_account = $5, inventory_account = $6, finished_goods_account = $7,
 					labor_absorption_account = $8, overhead_absorption_account = $9, lot_size_variance_account = $10,
 					quantity_variance_account = $11, price_variance_account = $12, substitution_variance_account = $13,
-					updated_by = $14, updated_at = now(), version = version + 1
+					updated_by = $14, rework_variance_account = $15, updated_at = now(), version = version + 1
 				where tenant_id = $1 and legal_entity_id = $2 and item_group = $3 and site_key = $4`,
 				p.TenantID, in.LegalEntityID, pr.ItemGroup, pr.SiteID, pr.WIP, pr.Inventory, pr.FinishedGoods, pr.LaborAbsorption,
-				pr.OverheadAbsorption, pr.VarLotSize, pr.VarQuantity, pr.VarPrice, pr.VarSubstitution, in.Actor)
+				pr.OverheadAbsorption, pr.VarLotSize, pr.VarQuantity, pr.VarPrice, pr.VarSubstitution, in.Actor, pr.VarRework)
 		}
 		if err != nil {
 			return err

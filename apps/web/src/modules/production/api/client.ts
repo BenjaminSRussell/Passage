@@ -43,7 +43,22 @@ export type JournalType = "picking-list" | "route-card" | "report-as-finished";
 
 export type Proposal = "remaining" | "proportional" | "none";
 
-export type VarianceType = "lot-size" | "production-quantity" | "production-price" | "production-substitution";
+/** The four variance types of BR-21.6, and rework for a rework order (FR-21.20). */
+export type VarianceType = "lot-size" | "production-quantity" | "production-price" | "production-substitution" | "rework";
+
+/** What a rework order reports against (FR-21.20): an order by id, a batch or a serial by number. */
+export type ReworkRefType = "order" | "batch" | "serial";
+
+export interface ReworkReference {
+  type: ReworkRefType;
+  id: string;
+}
+
+/** The origin type of a rework order. */
+export const REWORK = "Rework";
+
+/** How an as-built component is identified (FR-21.19): a serial in quantity 1, or a batch. */
+export type Tracking = "serial" | "batch";
 
 export interface OrderLine {
   lineNo: string;
@@ -99,6 +114,7 @@ export interface ProductionOrder {
   deliveryDate?: string;
   originType: string;
   originId?: string;
+  reworkReference?: ReworkReference;
   version: number;
   lines: OrderLine[];
   operations: Operation[];
@@ -121,6 +137,8 @@ export interface OrderSummary {
   remaining: string;
   status: ProductionStatus;
   deliveryDate?: string;
+  originType?: string;
+  reworkReference?: ReworkReference;
   plannedCost: string;
   actualCost?: string;
   version: number;
@@ -164,6 +182,9 @@ export interface OperationInput {
 
 export interface CreateOrderInput {
   itemGroup?: string;
+  /** Rework makes a rework order; it needs the Create rework orders duty. */
+  originType?: string;
+  reworkReference?: ReworkReference;
   productId: string;
   siteId: string;
   warehouseId: string;
@@ -275,6 +296,8 @@ export interface PostingProfileAccounts {
   quantityVarianceAccount: string;
   priceVarianceAccount: string;
   substitutionVarianceAccount: string;
+  /** Optional until the legal entity runs rework orders; ending one with rework cost needs it. */
+  reworkVarianceAccount?: string;
 }
 
 export interface PostingProfileInput extends PostingProfileAccounts {
@@ -288,6 +311,41 @@ export interface PostingProfile extends PostingProfileInput {
   version: number;
   updatedBy: string;
   updatedAt: string;
+}
+
+/** One component serial or batch consumed into a finished serial or batch (FR-21.19). */
+export interface AsBuiltRecord {
+  id: string;
+  orderId: string;
+  orderNumber: string;
+  finishedItemId: string;
+  finishedSerialOrBatch: string;
+  componentItemId: string;
+  tracking: Tracking;
+  componentSerialOrBatch: string;
+  qty: string;
+  journalId?: string;
+  rafJournalId?: string;
+  assignedBy: string;
+  assignedAt: string;
+  detachedBy?: string;
+  detachedAt?: string;
+}
+
+export interface AssignAsBuiltInput {
+  finishedSerialOrBatch: string;
+  componentItemId: string;
+  tracking: Tracking;
+  componentSerialOrBatch: string;
+  /** Defaults to 1; a serial is always 1. */
+  qty?: string;
+}
+
+/** The as-built inquiry: as-built of a finished serial, or where-used of a component serial. */
+export interface AsBuiltQuery {
+  finishedSerialOrBatch?: string;
+  componentSerialOrBatch?: string;
+  orderId?: string;
 }
 
 export interface CommandBody {
@@ -362,20 +420,31 @@ export function newIdempotencyKey(): string {
 
 export interface ListOptions {
   status?: ProductionStatus | "";
+  /** Only orders of this origin, for example Rework. */
+  originType?: string;
+  /** Only the rework orders that reference this order id (FR-21.20). */
+  reworkOf?: string;
   cursor?: string;
   limit?: number;
   signal?: AbortSignal;
 }
 
-export function listOrders({ status, cursor, limit = 50, signal }: ListOptions = {}): Promise<OrderPage> {
+export async function listOrders({ status, originType, reworkOf, cursor, limit = 50, signal }: ListOptions = {}): Promise<OrderPage> {
   const params = new URLSearchParams({ limit: String(limit) });
   if (status) {
     params.set("status", status);
   }
+  if (originType) {
+    params.set("originType", originType);
+  }
+  if (reworkOf) {
+    params.set("reworkOf", reworkOf);
+  }
   if (cursor) {
     params.set("cursor", cursor);
   }
-  return request<OrderPage>(`?${params}`, { signal });
+  const page = await request<Partial<OrderPage>>(`?${params}`, { signal });
+  return { items: Array.isArray(page.items) ? page.items : [], nextCursor: page.nextCursor };
 }
 
 export function getOrder(id: string, signal?: AbortSignal): Promise<ProductionOrder> {
@@ -442,6 +511,38 @@ export function savePostingProfile(input: PostingProfileInput, version?: number)
     headers["If-Match"] = `"${version}"`;
   }
   return requestAt<PostingProfile>(`${root}/posting-profiles`, { method: "PUT", headers, body: JSON.stringify(input) });
+}
+
+/** The attached as-built records of an order, oldest first (FR-21.19). */
+export async function listOrderAsBuilt(orderId: string, signal?: AbortSignal): Promise<AsBuiltRecord[]> {
+  const body = await request<{ items?: AsBuiltRecord[] }>(`/${encodeURIComponent(orderId)}/as-built`, { signal });
+  return Array.isArray(body.items) ? body.items : [];
+}
+
+/** Assigns a component serial or batch to a finished serial or batch; a retry with the same key replays. */
+export function assignAsBuilt(orderId: string, input: AssignAsBuiltInput, idempotencyKey: string): Promise<AsBuiltRecord> {
+  return request<AsBuiltRecord>(`/${encodeURIComponent(orderId)}/as-built`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(input),
+  });
+}
+
+/** Detaches an as-built record (a wrong assignment); detaching twice returns it unchanged. */
+export function detachAsBuilt(recordId: string): Promise<AsBuiltRecord> {
+  return requestAt<AsBuiltRecord>(`${root}/as-built/${encodeURIComponent(recordId)}:detach`, { method: "POST" });
+}
+
+/** The as-built of a finished serial or the where-used of a component serial (4.21.14). */
+export async function queryAsBuilt(query: AsBuiltQuery, signal?: AbortSignal): Promise<AsBuiltRecord[]> {
+  const params = new URLSearchParams();
+  for (const [name, value] of Object.entries(query)) {
+    if (value) {
+      params.set(name, value);
+    }
+  }
+  const body = await requestAt<{ items?: AsBuiltRecord[] }>(`${root}/as-built?${params}`, { signal });
+  return Array.isArray(body.items) ? body.items : [];
 }
 
 /** Journal types an order in this status can take (FR-21.5 to FR-21.7; a route card starts a Released order). */

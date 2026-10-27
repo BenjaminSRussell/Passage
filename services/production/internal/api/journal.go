@@ -355,6 +355,9 @@ func (a *API) saveProfile(w http.ResponseWriter, r *http.Request) {
 			fields[name] = fmt.Sprintf("is required, at most %d characters", maxAccount)
 		}
 	}
+	if req.VarRework != strings.TrimSpace(req.VarRework) || len(req.VarRework) > maxAccount {
+		fields["reworkVarianceAccount"] = fmt.Sprintf("at most %d characters without surrounding spaces; needed to end a rework order", maxAccount)
+	}
 	if len(fields) > 0 {
 		invalid(w, r, fields)
 		return

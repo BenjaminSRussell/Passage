@@ -498,8 +498,14 @@ func postJournal(ctx context.Context, tx pgx.Tx, tenantID string, h *orderHead, 
 		if err != nil {
 			return err
 		}
-		for _, c := range costs {
-			plannedTotal = plannedTotal.Add(c.Amount)
+		if h.rework() {
+			// FR-21.20: the reworked units come back at their existing cost; the
+			// rework itself stays in WIP and settles as a rework variance.
+			plannedTotal = domain.ReworkReceiptBase(costs, h.productID)
+		} else {
+			for _, c := range costs {
+				plannedTotal = plannedTotal.Add(c.Amount)
+			}
 		}
 	}
 	consumed := map[string]decimal.Decimal{}
@@ -803,8 +809,15 @@ func settleOrder(ctx context.Context, tx pgx.Tx, tenantID string, h orderHead, a
 	if err != nil {
 		return err
 	}
-	vars, err := domain.SettleWIP(h.quantity, h.qtyRAF, planned, actual, balance, h.currency)
-	if err != nil {
+	var vars []domain.Variance
+	if h.rework() {
+		// FR-21.20, AC-21.15: rework is not capitalized; the WIP balance is rework cost.
+		byGroup, err := wipBalanceByGroup(ctx, tx, tenantID, h.id)
+		if err != nil {
+			return err
+		}
+		vars = domain.ReworkVariances(byGroup)
+	} else if vars, err = domain.SettleWIP(h.quantity, h.qtyRAF, planned, actual, balance, h.currency); err != nil {
 		return domainProblem(err)
 	}
 	var postings []domain.Posting
@@ -875,6 +888,27 @@ func loadActual(ctx context.Context, q querier, tenantID, orderID string) ([]dom
 		return nil, err
 	}
 	return domain.ActualRows(lines), nil
+}
+
+// wipBalanceByGroup is the order's WIP balance by cost group (domain.WIPGroup).
+func wipBalanceByGroup(ctx context.Context, q querier, tenantID, orderID string) (map[domain.CostGroup]decimal.Decimal, error) {
+	rows, err := q.Query(ctx, `select posting_type, sum(amount_dr - amount_cr)::text from production_wip_posting
+		where tenant_id = $1 and order_id = $2 and wip group by posting_type`, tenantID, orderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[domain.CostGroup]decimal.Decimal{}
+	for rows.Next() {
+		var typ, amount string
+		if err := rows.Scan(&typ, &amount); err != nil {
+			return nil, err
+		}
+		if g, ok := domain.WIPGroup(typ); ok {
+			out[g] = out[g].Add(dec(amount))
+		}
+	}
+	return out, rows.Err()
 }
 
 func wipBalance(ctx context.Context, q querier, tenantID, orderID string) (decimal.Decimal, error) {

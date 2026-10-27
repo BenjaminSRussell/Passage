@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Alert, Badge, Button, DataTable, FormField, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import {
+  REWORK,
   STATUSES,
   describeProblem,
   listOrders,
@@ -32,6 +33,11 @@ const columns: DataTableColumn<OrderSummary>[] = [
   { key: "quantity", header: "Quantity", align: "end" },
   { key: "remaining", header: "Remaining", align: "end" },
   { key: "status", header: "Status", render: (row) => <Badge tone={statusTone[row.status]}>{statusLabel[row.status]}</Badge> },
+  {
+    key: "originType",
+    header: "Origin",
+    render: (row) => (row.originType === REWORK ? <Badge tone="warning">Rework</Badge> : row.originType ?? dash),
+  },
   { key: "deliveryDate", header: "Delivery date", render: (row) => row.deliveryDate ?? dash },
   { key: "plannedCost", header: "Planned cost", align: "end", render: (row) => `${amount(row.plannedCost)} ${row.currency}` },
   { key: "actualCost", header: "Actual cost", align: "end", render: (row) => `${amount(row.actualCost ?? "0")} ${row.currency}` },
@@ -40,6 +46,8 @@ const columns: DataTableColumn<OrderSummary>[] = [
 /** Production orders list (PRD 4.21.6): newest first, filtered by status, paged by cursor. */
 export function ProductionOrdersPage({ onOpen, onCreate }: ProductionOrdersPageProps) {
   const [status, setStatus] = useState<ProductionStatus | "">("");
+  // FR-21.20: rework orders can be listed on their own.
+  const [originType, setOriginType] = useState("");
   const [state, setState] = useState<ListState>({ rows: [], loading: true, loadingMore: false, error: null });
   const latest = useRef(0);
 
@@ -47,7 +55,7 @@ export function ProductionOrdersPage({ onOpen, onCreate }: ProductionOrdersPageP
     const token = ++latest.current;
     const controller = new AbortController();
     setState({ rows: [], loading: true, loadingMore: false, error: null });
-    listOrders({ status, signal: controller.signal }).then(
+    listOrders({ status, originType, signal: controller.signal }).then(
       (page) => {
         if (token === latest.current) {
           setState({ rows: page.items ?? [], nextCursor: page.nextCursor, loading: false, loadingMore: false, error: null });
@@ -60,13 +68,13 @@ export function ProductionOrdersPage({ onOpen, onCreate }: ProductionOrdersPageP
       },
     );
     return () => controller.abort();
-  }, [status]);
+  }, [status, originType]);
 
   const loadMore = async () => {
     const token = latest.current;
     setState((s) => ({ ...s, loadingMore: true }));
     try {
-      const page = await listOrders({ status, cursor: state.nextCursor });
+      const page = await listOrders({ status, originType, cursor: state.nextCursor });
       if (token === latest.current) {
         setState((s) => ({ ...s, rows: [...s.rows, ...(page.items ?? [])], nextCursor: page.nextCursor, loadingMore: false }));
       }
@@ -105,6 +113,20 @@ export function ProductionOrdersPage({ onOpen, onCreate }: ProductionOrdersPageP
             )}
           </FormField>
         </div>
+        <div className={styles.filter}>
+          <FormField id="production-origin-filter" label="Origin">
+            {(control) => (
+              <Select {...control} value={originType} onChange={(event) => setOriginType(event.target.value)}>
+                <option value="">All origins</option>
+                <option value="Manual">Manual</option>
+                <option value="PlannedOrder">Planned order</option>
+                <option value="SalesOrderLine">Sales order line</option>
+                <option value="Kanban">Kanban</option>
+                <option value={REWORK}>Rework orders</option>
+              </Select>
+            )}
+          </FormField>
+        </div>
       </div>
       {state.error ? (
         <Alert tone="danger" title="Could not load production orders" live="alert">
@@ -119,8 +141,15 @@ export function ProductionOrdersPage({ onOpen, onCreate }: ProductionOrdersPageP
         loading={state.loading}
         onRowOpen={onOpen}
         empty={{
-          title: status ? `No ${statusLabel[status].toLowerCase()} orders` : "No production orders yet",
-          description: status ? "Choose another status to see more orders." : "Orders you create appear here, newest first.",
+          title: status
+            ? `No ${statusLabel[status].toLowerCase()} orders`
+            : originType === REWORK
+              ? "No rework orders"
+              : originType
+                ? "No orders of this origin"
+                : "No production orders yet",
+          description:
+            status || originType ? "Choose another filter to see more orders." : "Orders you create appear here, newest first.",
         }}
       />
       {state.nextCursor && !state.loading ? (

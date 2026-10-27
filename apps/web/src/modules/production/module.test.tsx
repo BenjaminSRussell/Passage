@@ -24,10 +24,17 @@ const calls = (mock: ReturnType<typeof vi.fn>) => mock.mock.calls as unknown as 
 describe("production module", () => {
   it("registers list, create and detail routes and is discovered by the shell", () => {
     expect(production.id).toBe("production");
-    expect(production.routes.map((r) => r.path)).toEqual(["/production", "/production/new", "/production/posting-profiles", "/production/:id"]);
+    expect(production.routes.map((r) => r.path)).toEqual([
+      "/production",
+      "/production/new",
+      "/production/posting-profiles",
+      "/production/as-built",
+      "/production/:id",
+    ]);
     expect(production.nav).toEqual([
       { label: "Production orders", to: "/production", duty: "production.order.read" },
       { label: "New production order", to: "/production/new", duty: "production.order.write" },
+      { label: "As-built and where-used", to: "/production/as-built", duty: "production.order.read" },
       { label: "Posting profiles", to: "/production/posting-profiles", duty: "production.setup.read" },
     ]);
     expect(loadModules().some((m) => m.id === "production")).toBe(true);

@@ -20,8 +20,11 @@ func TestEventTypesFollowTheKernelRule(t *testing.T) {
 		}
 		seen[typ] = true
 		want := "passage.production.order"
-		if typ == JournalPosted {
+		switch typ {
+		case JournalPosted:
 			want = "passage.production.journal"
+		case AsBuiltAssigned, AsBuiltDetached:
+			want = "passage.production.asbuilt"
 		}
 		if events.Topic(typ) != want {
 			t.Errorf("%s routes to %s, want %s", typ, events.Topic(typ), want)
@@ -45,6 +48,8 @@ func TestAsyncAPIMatchesThePayloads(t *testing.T) {
 		{"orderStatusChanged", OrderStatusChanged, OrderStatusChangedData{}},
 		{"orderSettled", OrderSettled, OrderSettledData{}},
 		{"journalPosted", JournalPosted, JournalPostedData{}},
+		{"asBuiltAssigned", AsBuiltAssigned, AsBuiltData{}},
+		{"asBuiltDetached", AsBuiltDetached, AsBuiltData{}},
 	}
 	if len(cases) != len(All()) {
 		t.Fatalf("%d cases for %d event types", len(cases), len(All()))

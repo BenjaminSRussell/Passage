@@ -1,5 +1,16 @@
 import type { BadgeTone } from "../../shell/ui";
-import type { CostGroup, Flushing, JournalType, ProductionCommand, ProductionStatus, Proposal, VarianceType } from "./api/client";
+import type {
+  CostGroup,
+  Flushing,
+  JournalType,
+  ProductionCommand,
+  ProductionStatus,
+  Proposal,
+  ReworkReference,
+  ReworkRefType,
+  Tracking,
+  VarianceType,
+} from "./api/client";
 
 export const commandLabel: Record<ProductionCommand, string> = {
   estimate: "Estimate",
@@ -65,7 +76,24 @@ export const varianceLabel: Record<VarianceType, string> = {
   "production-quantity": "Quantity",
   "production-price": "Price",
   "production-substitution": "Substitution",
+  rework: "Rework",
 };
+
+export const reworkRefLabel: Record<ReworkRefType, string> = {
+  order: "Production order",
+  batch: "Batch",
+  serial: "Serial number",
+};
+
+export const trackingLabel: Record<Tracking, string> = {
+  serial: "Serial",
+  batch: "Batch",
+};
+
+/** "Batch B-7", "Serial number S-1"; an order reference shows the order's id. */
+export function describeReference(ref: ReworkReference): string {
+  return `${reworkRefLabel[ref.type] ?? ref.type} ${ref.id}`;
+}
 
 /** Pads a decimal string to at least two fraction digits without converting it to a float. */
 export function amount(value: string | undefined): string {

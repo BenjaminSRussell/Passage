@@ -1,7 +1,8 @@
 # production
 
 Production orders for Passage (wave 21, ticket PSG-21, PRD section 4.21). Slice 1 covers the
-order itself; slice 2 adds journals, WIP postings and settlement.
+order itself; slice 2 adds journals, WIP postings and settlement; slice 3 adds rework orders and
+as-built genealogy.
 
 Slice 1:
 
@@ -65,6 +66,30 @@ Slice 2:
 - Events `journal.posted` and `order.settled` carry the ledger lines for the general ledger
   (wave 11) to book.
 
+Slice 3:
+
+- Rework orders (FR-21.20): `originType` `Rework` with an optional `reworkReference` to the
+  original order (by id), batch or serial (by number), and the duty `production.order.rework`.
+  An order reference must name an order of the same product that reported at least the rework
+  quantity as finished (`PRODUCTION_REWORK_REFERENCE_INVALID`). A rework order has no BOM
+  explosion by default: the request lists the components, and the product itself as a line to
+  issue the reworked units into WIP at their existing cost. Its reports as finished receive the
+  units back at that cost (the planned cost of the order's line for its own product, zero without
+  one), so the rework (replacement parts, labor, overhead) stays in WIP; End posts the WIP
+  balance as variances of type `rework`, one per cost group, to the profile's
+  `reworkVarianceAccount` (AC-21.15: 2.00 h at 30.00 settles as a 60.00 rework variance). The
+  order list filters by `originType` and `reworkOf`, so an original order lists its rework orders.
+- As-built genealogy (FR-21.19, BR-21.14): `POST …/orders/{id}/as-built` assigns a component
+  serial (quantity 1) or batch to a finished serial or batch while the order is Started or
+  ReportedAsFinished, with the component on the order's BOM, the assigned quantity of the
+  component within what the order consumed of it, the distinct finished serials within the order
+  quantity, and a component serial attached to one finished serial only across the tenant
+  (`SERIAL_DUPLICATE`, enforced by a partial unique index too). `:detach` corrects a wrong
+  assignment and keeps the record for the audit trail; a reset that reverses the reports as
+  finished detaches the order's records. `GET /v1/production/as-built` answers as-built of a
+  finished serial and where-used of a component serial (AC-21.14). Events `asbuilt.assigned` and
+  `asbuilt.detached`.
+
 Inventory transactions (wave 16), GL booking (wave 11) and period control (wave 14) are
 handoffs. Everything not built is listed in `NOT-IMPLEMENTED.md`.
 
@@ -74,15 +99,17 @@ handoffs. Everything not built is listed in `NOT-IMPLEMENTED.md`.
 cmd/production/        entrypoint: config, dbx.Connect, optional dbx.Migrate, httpx router, admin /metrics
 internal/domain/       pure rules: status.go (BR-21.1 state machine, reset, RAF and edit guards),
                        quantity.go (BR-21.2, BR-21.8), explode.go (FR-21.1), cost.go (FR-21.3, BR-21.6),
-                       journal.go (proposals, tolerances, posting profiles, postings, settlement)
+                       journal.go (proposals, tolerances, posting profiles, postings, settlement),
+                       rework.go (FR-21.20), asbuilt.go (FR-21.19, BR-21.14)
 internal/domain/testdata/  prod-orders-50.json and the exact-fraction generator that computed it
 internal/store/        Postgres repositories (pgx), tenant-scoped transactions, row locks, outbox writes:
                        store.go (orders, commands), journal.go (journals, postings, settlement, reversals),
-                       profile.go (posting profiles)
+                       profile.go (posting profiles), asbuilt.go (as-built genealogy)
 internal/api/          HTTP handlers, request validation, platform authz duties
 internal/events/       event types and payloads
 migrations/            0001_init.sql (orders), 0002_journals.sql (profiles, journals, WIP postings,
-                       variances), each with RLS and app-role grants; migrations.go (embed)
+                       variances), 0003_rework_asbuilt.sql (rework reference, rework variance account,
+                       as-built records), each with RLS and app-role grants; migrations.go (embed)
 api/openapi.yaml       OpenAPI 3.1 for every route (a test checks it against the router)
 events/asyncapi.yaml   AsyncAPI 3 for every event (a test checks it against the payloads)
 charts/production/     Helm chart (deployment, service, HPA on CPU 70%, optional ServiceMonitor)
@@ -126,11 +153,12 @@ drift-free RAF receipts and the variances clearing the posted WIP in every curre
 
 | Duty (PRD 4.21.17) | Key | Used by |
 |---|---|---|
-| View production orders | `production.order.read` | list, read, status log, journal list and read |
+| View production orders | `production.order.read` | list, read, status log, journal list and read, as-built and where-used |
 | View production costs | `production.cost.read` | `GET …/{id}/costs` |
 | Maintain production orders | `production.order.write` | create, PATCH, `:estimate`, `:schedule` |
+| Create rework orders | `production.order.rework` | create with `originType` `Rework` (with `production.order.write`) |
 | Release production orders | `production.order.release` | `:release`, `:start`, `:cancel`, `:reset-status` |
-| Post production journals | `production.journal.post` | `:report-finished`, create, `:post` and delete journals |
+| Post production journals | `production.journal.post` | `:report-finished`, create, `:post` and delete journals, assign and `:detach` as-built records |
 | Post production over-consumption | `production.journal.over-consume` | posting beyond the requirement plus `PRODUCTION_OVERCONSUMPTION_PCT` |
 | View production setup | `production.setup.read` | `GET /v1/production/posting-profiles` |
 | Maintain production setup | `production.setup.write` | `PUT /v1/production/posting-profiles` |
@@ -153,7 +181,7 @@ Problems are RFC 9457 with `type` `https://passage.dev/problems/<code>`.
 | `PRODUCTION_ZERO_OUTPUT_NOT_PERMITTED` | 422 | Ending with zero output without the zero-output duty (PROD-0013) |
 | `PRODUCTION_INVALID_INPUT` | 422 | Explosion or planning rule failed (quantities, scrap, series, operation order) |
 | `PRODUCTION_ORDER_NOT_FOUND` | 404 | No order with that id in the caller's tenant and legal-entity scope |
-| `PRODUCTION_UNKNOWN_ACTION` | 404 | The `:command` is not one of the eight, or a journal action is not `:post` |
+| `PRODUCTION_UNKNOWN_ACTION` | 404 | The `:command` is not one of the eight, a journal action is not `:post`, or an as-built action is not `:detach` |
 | `PRODUCTION_JOURNAL_NOT_FOUND` | 404 | No journal with that id in the caller's scope |
 | `PRODUCTION_JOURNAL_NOT_ALLOWED` | 409 | The journal type cannot post on the order's status |
 | `PRODUCTION_JOURNAL_ALREADY_POSTED` | 409 | Posting or deleting a posted journal |
@@ -163,10 +191,17 @@ Problems are RFC 9457 with `type` `https://passage.dev/problems/<code>`.
 | `PRODUCTION_INVALID_JOURNAL_LINE` | 422 | A line names an unknown BOM line or operation, or a subcontracted operation |
 | `PRODUCTION_OVER_CONSUMPTION` | 422 | Consumption beyond the requirement plus tolerance without the duty (PROD-0007) |
 | `PRODUCTION_POSTING_DATE_BEFORE_ORDER` | 422 | Posting date before the order was created (BR-21.3) |
-| `PRODUCTION_POSTING_PROFILE_MISSING` | 422 | No posting profile resolves for the order's item group and site |
+| `PRODUCTION_POSTING_PROFILE_MISSING` | 422 | No posting profile resolves for the order's item group and site, or ending a rework order whose profile has no rework variance account |
 | `PRODUCTION_END_BEFORE_LAST_JOURNAL` | 422 | The end date is before the last journal posting date (FR-21.8) |
 | `PRODUCTION_POSTING_NOT_BALANCED` | 422 | The settlement variances do not clear the WIP balance (an internal invariant) |
 | `PRODUCTION_INVALID_HOURS` | 422 | Hours below 0.01 or with more than 2 decimals |
+| `PRODUCTION_REWORK_REFERENCE_INVALID` | 422 | The rework order's order reference is unknown, another product, or more than it reported as finished |
+| `PRODUCTION_AS_BUILT_ORDER_STATE` | 409 | As-built change on an order that is not Started or ReportedAsFinished |
+| `PRODUCTION_AS_BUILT_COMPONENT_NOT_ON_BOM` | 422 | The component is not on the order's BOM |
+| `PRODUCTION_AS_BUILT_EXCEEDS_CONSUMED` | 422 | More of the component assigned than the order consumed (BR-21.14) |
+| `PRODUCTION_AS_BUILT_TOO_MANY_FINISHED` | 422 | More finished serials or batches than the order quantity |
+| `PRODUCTION_AS_BUILT_NOT_FOUND` | 404 | No as-built record with that id in the caller's scope |
+| `SERIAL_DUPLICATE` | 422 | The component serial is already attached to a finished serial (PROD-0009, BR-21.14) |
 | `idempotency_key_reuse` | 422 | The Idempotency-Key was used for a different body, command or order |
 | `conflict_version` | 412 | If-Match does not match the order or profile version (PROD-0003) |
 | `precondition_required` | 428 | If-Match is missing on a command, PATCH or profile replacement |
@@ -178,6 +213,6 @@ The stable PROD-00nn service codes are not yet carried in the problem body, beca
 
 ## Wave reference
 
-PSG-21 (wave 21), slices PSG-2101 and PSG-2102. Depends on PSG-20 (costing). Later slices: job
-cards, subcontracting, bulk status, split and merge, order change management, trigger points,
-rework orders and as-built genealogy. See `NOT-IMPLEMENTED.md`.
+PSG-21 (wave 21), slices PSG-2101, PSG-2102 and PSG-2103. Depends on PSG-20 (costing). Later
+slices: job cards, subcontracting, bulk status, split and merge, order change management and
+trigger points. See `NOT-IMPLEMENTED.md`.

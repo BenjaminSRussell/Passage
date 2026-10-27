@@ -1,15 +1,19 @@
 openapi: 3.1.0
 info:
   title: Passage production orders
-  version: 0.21.2
+  version: 0.21.3
   description: |
-    Wave 21 slices 1 and 2 of PSG-21. Creates production orders with BOM and route
+    Wave 21 slices 1 to 3 of PSG-21. Creates production orders with BOM and route
     explosion, lists and reads them, edits the header, runs the status state machine
     (BR-21.1) and estimates planned cost. Slice 2 adds posting profiles (FR-21.13), picking
     lists, route cards and report-as-finished journals with their WIP postings (FR-21.5 to
     FR-21.7), the posting effects of :start, :report-finished, :end (settlement, FR-21.8) and
     :reset-status (reversal journals, FR-21.9), and the actual-cost read (FR-21.11). Job
     cards, subcontracting and the other FR-21 items are later slices (see NOT-IMPLEMENTED.md).
+    Slice 3 adds rework orders (FR-21.20: originType Rework with a reworkReference, receipts
+    at the reworked units' existing cost, End settles the rest as variances of type rework)
+    and as-built genealogy (FR-21.19, BR-21.14: assign, detach, and the as-built / where-used
+    inquiry).
     Problems are RFC 9457 with a stable `code` (see README). The gateway serves these paths
     under `/api`.
 servers:
@@ -30,6 +34,11 @@ components:
       required: true
       schema: { type: string, format: uuid }
     JournalId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    AsBuiltId:
       name: id
       in: path
       required: true
@@ -96,7 +105,56 @@ components:
       enum: [remaining, proportional, none]
     VarianceType:
       type: string
-      enum: [lot-size, production-quantity, production-price, production-substitution]
+      description: The four of BR-21.6, and rework for a rework order (FR-21.20).
+      enum: [lot-size, production-quantity, production-price, production-substitution, rework]
+    ReworkReference:
+      type: object
+      additionalProperties: false
+      required: [type, id]
+      description: |
+        The original a rework order reports against (FR-21.20). For type order, id is the
+        original order's id; that order must exist, make the same product and have reported
+        at least the rework quantity as finished (422 PRODUCTION_REWORK_REFERENCE_INVALID).
+        For batch or serial, id is the number, kept as entered until tracking (wave 16).
+      properties:
+        type: { type: string, enum: [order, batch, serial] }
+        id: { type: string, minLength: 1, maxLength: 100 }
+    Tracking:
+      type: string
+      description: A serial component is consumed in quantity 1; a batch in any positive quantity.
+      enum: [serial, batch]
+    AssignAsBuilt:
+      type: object
+      additionalProperties: false
+      required: [finishedSerialOrBatch, componentItemId, tracking, componentSerialOrBatch]
+      properties:
+        finishedSerialOrBatch: { type: string, minLength: 1, maxLength: 100 }
+        componentItemId: { type: string, format: uuid, description: A component on the order's BOM. }
+        tracking: { $ref: '#/components/schemas/Tracking' }
+        componentSerialOrBatch: { type: string, minLength: 1, maxLength: 100 }
+        qty: { $ref: '#/components/schemas/Decimal', description: 'Default 1; must be 1 for a serial.' }
+    AsBuiltRecord:
+      type: object
+      description: |
+        One component serial or batch consumed into one finished serial or batch of an order
+        (PRD 4.21.4 AsBuiltRecord). journalId and rafJournalId stay null until tracking
+        dimensions (wave 16) capture serials on picking and RAF lines.
+      properties:
+        id: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        orderNumber: { type: string }
+        finishedItemId: { type: string, format: uuid, description: The order's product. }
+        finishedSerialOrBatch: { type: string }
+        componentItemId: { type: string, format: uuid }
+        tracking: { $ref: '#/components/schemas/Tracking' }
+        componentSerialOrBatch: { type: string }
+        qty: { $ref: '#/components/schemas/Decimal' }
+        journalId: { type: string, format: uuid }
+        rafJournalId: { type: string, format: uuid }
+        assignedBy: { type: string }
+        assignedAt: { type: string, format: date-time }
+        detachedBy: { type: string }
+        detachedAt: { type: string, format: date-time }
     BOMComponent:
       type: object
       description: |
@@ -176,8 +234,17 @@ components:
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         quantity: { $ref: '#/components/schemas/Decimal' }
         deliveryDate: { type: [string, 'null'], format: date }
-        originType: { type: string, enum: [PlannedOrder, SalesOrderLine, Manual, Kanban], default: Manual }
+        originType:
+          type: string
+          enum: [PlannedOrder, SalesOrderLine, Manual, Kanban, Rework]
+          default: Manual
+          description: |
+            Rework makes a rework order (FR-21.20) and needs the duty production.order.rework.
+            A rework order has no BOM explosion by default: list the components to add, and the
+            product itself as a line to issue the reworked units into WIP at their cost.
+            Defaults to Rework when reworkReference is set.
         originId: { type: [string, 'null'], format: uuid }
+        reworkReference: { $ref: '#/components/schemas/ReworkReference' }
         bom:
           type: array
           maxItems: 5000
@@ -224,6 +291,7 @@ components:
         deliveryDate: { type: string, format: date }
         originType: { type: string }
         originId: { type: string, format: uuid }
+        reworkReference: { $ref: '#/components/schemas/ReworkReference' }
         version: { type: integer }
         lines:
           type: array
@@ -252,6 +320,8 @@ components:
         remaining: { $ref: '#/components/schemas/Decimal' }
         status: { $ref: '#/components/schemas/Status' }
         deliveryDate: { type: string, format: date }
+        originType: { type: string }
+        reworkReference: { $ref: '#/components/schemas/ReworkReference' }
         plannedCost: { $ref: '#/components/schemas/Decimal' }
         actualCost: { $ref: '#/components/schemas/Decimal', description: Material, labor and overhead posted to WIP. }
         version: { type: integer }
@@ -405,6 +475,7 @@ components:
         quantityVarianceAccount: { type: string, maxLength: 64 }
         priceVarianceAccount: { type: string, maxLength: 64 }
         substitutionVarianceAccount: { type: string, maxLength: 64 }
+        reworkVarianceAccount: { type: string, maxLength: 64, description: 'Optional; ending a rework order with a rework cost needs it (422 PRODUCTION_POSTING_PROFILE_MISSING).' }
     PostingProfile:
       allOf:
         - $ref: '#/components/schemas/PostingProfileInput'
@@ -439,6 +510,8 @@ paths:
         - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
         - { name: siteId, in: query, schema: { type: string, format: uuid } }
         - { name: productId, in: query, schema: { type: string, format: uuid } }
+        - { name: originType, in: query, schema: { type: string, enum: [PlannedOrder, SalesOrderLine, Manual, Kanban, Rework] } }
+        - { name: reworkOf, in: query, description: 'An order id: only the rework orders that reference it (FR-21.20).', schema: { type: string, format: uuid } }
         - { name: cursor, in: query, description: nextCursor of the previous page, schema: { type: string, format: uuid } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
       responses:
@@ -486,8 +559,8 @@ paths:
               schema: { $ref: '#/components/schemas/Order' }
         '400': { description: 'Validation failed or Idempotency-Key missing (COM-0001)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '401': { $ref: '#/components/responses/Problem' }
-        '403': { $ref: '#/components/responses/Problem' }
-        '422': { description: 'Explosion or operation rule failed (PRODUCTION_INVALID_INPUT); key reused with another body (idempotency_key_reuse)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: 'AUTH-0003: a missing route duty, or originType Rework without production.order.rework', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'Explosion or operation rule failed (PRODUCTION_INVALID_INPUT); the rework reference does not name an order of the same product with enough output (PRODUCTION_REWORK_REFERENCE_INVALID); key reused with another body (idempotency_key_reuse)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/production/orders/{id}:
     get:
       operationId: getProductionOrder
@@ -587,6 +660,12 @@ paths:
         it goes back before Started. Each posted journal emits
         dev.passage.production.journal.posted.v1. Postings need a posting profile (422
         PRODUCTION_POSTING_PROFILE_MISSING).
+
+        Rework orders (originType Rework, FR-21.20): report as finished receives the
+        reworked units at their existing cost (the planned cost of the order's line for its
+        own product, zero without one); end posts the rest of the WIP balance as variances of
+        type rework, one per cost group, to the profile's reworkVarianceAccount. A reset that
+        reverses the reports as finished detaches the order's as-built records (BR-21.14).
       x-passage-duty: production.order.write | production.order.release | production.journal.post | production.order.end
       parameters:
         - { $ref: '#/components/parameters/OrderId' }
@@ -784,3 +863,111 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '412': { description: 'conflict_version (stale If-Match, or If-Match on a profile that does not exist)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: precondition_required (replacing without If-Match), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/production/orders/{id}/as-built:
+    get:
+      operationId: listProductionOrderAsBuilt
+      summary: The attached as-built records of an order (FR-21.19)
+      x-passage-duty: production.order.read
+      parameters:
+        - { $ref: '#/components/parameters/OrderId' }
+      responses:
+        '200':
+          description: Oldest first, at most 500.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  orderId: { type: string, format: uuid }
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/AsBuiltRecord' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: PRODUCTION_ORDER_NOT_FOUND (malformed id), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    post:
+      operationId: assignProductionAsBuilt
+      summary: Assign a component serial or batch to a finished serial or batch (FR-21.19, BR-21.14)
+      description: |
+        Under the order's row lock: the order is Started or ReportedAsFinished (409
+        PRODUCTION_AS_BUILT_ORDER_STATE), the component is on its BOM (422
+        PRODUCTION_AS_BUILT_COMPONENT_NOT_ON_BOM), the quantity assigned of the component stays
+        within what the order consumed of it (422 PRODUCTION_AS_BUILT_EXCEEDS_CONSUMED), the
+        distinct finished serials or batches stay within the order quantity rounded up (422
+        PRODUCTION_AS_BUILT_TOO_MANY_FINISHED), and a serialized component serial is attached
+        to one finished serial only across the tenant (422 SERIAL_DUPLICATE, PROD-0009). Emits
+        dev.passage.production.asbuilt.assigned.v1.
+      x-passage-duty: production.journal.post
+      parameters:
+        - { $ref: '#/components/parameters/OrderId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AssignAsBuilt' }
+      responses:
+        '201':
+          description: Assigned.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsBuiltRecord' }
+        '200':
+          description: Replay of an earlier request with the same Idempotency-Key and body.
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsBuiltRecord' }
+        '400': { description: COM-0001, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: PRODUCTION_ORDER_NOT_FOUND, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: PRODUCTION_AS_BUILT_ORDER_STATE, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'PRODUCTION_AS_BUILT_COMPONENT_NOT_ON_BOM, PRODUCTION_AS_BUILT_EXCEEDS_CONSUMED, PRODUCTION_AS_BUILT_TOO_MANY_FINISHED, SERIAL_DUPLICATE, idempotency_key_reuse', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/production/as-built:
+    get:
+      operationId: queryProductionAsBuilt
+      summary: As-built of a finished serial, or where-used of a component serial (4.21.14)
+      description: |
+        Attached records only, oldest first, at most 500. At least one of
+        finishedSerialOrBatch, componentSerialOrBatch and orderId is required.
+      x-passage-duty: production.order.read
+      parameters:
+        - { name: finishedSerialOrBatch, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: componentSerialOrBatch, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: componentItemId, in: query, schema: { type: string, format: uuid } }
+        - { name: orderId, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The matching records.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/AsBuiltRecord' }
+        '400': { description: COM-0001, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/production/as-built/{id}:detach:
+    post:
+      operationId: detachProductionAsBuilt
+      summary: Detach an as-built record to correct a wrong assignment
+      description: |
+        Allowed while the order is Started or ReportedAsFinished (409
+        PRODUCTION_AS_BUILT_ORDER_STATE). The record stays for the audit trail with detachedAt
+        and detachedBy and frees its component serial; a detached record is returned as it is.
+        A :reset-status that reverses the reports as finished detaches the order's records
+        (BR-21.14). Emits dev.passage.production.asbuilt.detached.v1.
+      x-passage-duty: production.journal.post
+      parameters:
+        - { $ref: '#/components/parameters/AsBuiltId' }
+      responses:
+        '200':
+          description: The detached record.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsBuiltRecord' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: 'PRODUCTION_AS_BUILT_NOT_FOUND, PRODUCTION_UNKNOWN_ACTION', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: PRODUCTION_AS_BUILT_ORDER_STATE, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }

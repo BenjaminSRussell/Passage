@@ -39,6 +39,10 @@ type fakeStore struct {
 	deleted     []string
 	profiles    []store.PostingProfile
 	saved       []store.ProfileSave
+	assigned    []store.NewAsBuilt
+	asBuiltF    []store.AsBuiltFilter
+	detached    []string
+	asBuiltErr  error
 }
 
 func (f *fakeStore) Ping(context.Context) error { return f.pingErr }
@@ -119,6 +123,33 @@ func (f *fakeStore) ListPostingProfiles(context.Context, string) ([]store.Postin
 func (f *fakeStore) SavePostingProfile(_ context.Context, in store.ProfileSave) (store.PostingProfile, bool, error) {
 	f.saved = append(f.saved, in)
 	return store.PostingProfile{LegalEntityID: in.LegalEntityID, Profile: in.Profile, Version: in.IfMatch + 1}, in.IfMatch == 0, nil
+}
+
+func (f *fakeStore) AssignAsBuilt(_ context.Context, in store.NewAsBuilt) (store.AsBuiltRecord, bool, error) {
+	if f.asBuiltErr != nil {
+		return store.AsBuiltRecord{}, false, f.asBuiltErr
+	}
+	for _, prev := range f.assigned {
+		if prev.IdempotencyKey == in.IdempotencyKey {
+			if prev.RequestHash != in.RequestHash {
+				return store.AsBuiltRecord{}, false, httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeIdempotencyReuse, "reused")
+			}
+			return store.AsBuiltRecord{OrderID: in.OrderID}, false, nil
+		}
+	}
+	f.assigned = append(f.assigned, in)
+	return store.AsBuiltRecord{ID: ids.New(), OrderID: in.OrderID, FinishedSerialOrBatch: in.AsBuilt.FinishedSerial,
+		ComponentSerialOrBatch: in.AsBuilt.ComponentSerial, Tracking: in.AsBuilt.Tracking, Qty: in.AsBuilt.Qty}, true, nil
+}
+
+func (f *fakeStore) ListAsBuilt(_ context.Context, af store.AsBuiltFilter) ([]store.AsBuiltRecord, error) {
+	f.asBuiltF = append(f.asBuiltF, af)
+	return []store.AsBuiltRecord{}, f.asBuiltErr
+}
+
+func (f *fakeStore) DetachAsBuilt(_ context.Context, id, _ string) (store.AsBuiltRecord, error) {
+	f.detached = append(f.detached, id)
+	return store.AsBuiltRecord{ID: id}, f.asBuiltErr
 }
 
 var (
@@ -340,6 +371,10 @@ func TestRoutes_EnforceDuties(t *testing.T) {
 		{http.MethodPost, "/v1/production/journals/" + id + ":post", DutyJournalPost},
 		{http.MethodGet, "/v1/production/posting-profiles", DutySetupRead},
 		{http.MethodPut, "/v1/production/posting-profiles", DutySetupWrite},
+		{http.MethodGet, "/v1/production/orders/" + id + "/as-built", DutyRead},
+		{http.MethodPost, "/v1/production/orders/" + id + "/as-built", DutyJournalPost},
+		{http.MethodGet, "/v1/production/as-built?finishedSerialOrBatch=S-1", DutyRead},
+		{http.MethodPost, "/v1/production/as-built/" + id + ":detach", DutyJournalPost},
 	}
 	others := []string{DutyRead, DutyWrite, DutyRelease, DutyJournalPost, DutyEnd, DutyCostRead, DutySetupRead, DutySetupWrite, DutyOverConsume}
 	for _, tt := range tests {
@@ -356,7 +391,8 @@ func TestRoutes_EnforceDuties(t *testing.T) {
 			if !strings.Contains(p.Detail, tt.duty) {
 				t.Fatalf("detail %q does not name %s", p.Detail, tt.duty)
 			}
-			if len(f.transitions)+len(f.created)+len(f.updates)+len(f.journals)+len(f.posts)+len(f.deleted)+len(f.saved) != 0 {
+			if len(f.transitions)+len(f.created)+len(f.updates)+len(f.journals)+len(f.posts)+len(f.deleted)+len(f.saved)+
+				len(f.assigned)+len(f.asBuiltF)+len(f.detached) != 0 {
 				t.Fatal("a refused request reached the store")
 			}
 		})

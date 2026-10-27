@@ -43,6 +43,7 @@ const (
 	DutyOverConsume = "production.journal.over-consume" // Post production over-consumption
 	DutySetupRead   = "production.setup.read"           // View production setup
 	DutySetupWrite  = "production.setup.write"          // Maintain production setup
+	DutyRework      = "production.order.rework"         // Create rework orders (FR-21.20)
 )
 
 const (
@@ -63,7 +64,7 @@ const (
 
 var (
 	currencyCode = regexp.MustCompile(`^[A-Z]{3}$`)
-	originTypes  = map[string]bool{"PlannedOrder": true, "SalesOrderLine": true, "Manual": true, "Kanban": true}
+	originTypes  = map[string]bool{"PlannedOrder": true, "SalesOrderLine": true, "Manual": true, "Kanban": true, domain.OriginRework: true}
 	commands     = map[string]domain.Command{
 		"estimate": domain.CmdEstimate, "schedule": domain.CmdSchedule, "release": domain.CmdRelease, "start": domain.CmdStart,
 		"report-finished": domain.CmdReportFinished, "end": domain.CmdEnd, "cancel": domain.CmdCancel, "reset-status": domain.CmdResetStatus,
@@ -123,6 +124,10 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutyJournalPost)).Post("/v1/production/journals/{id}", a.postJournal)
 	r.With(authz.RequireDuty(DutySetupRead)).Get("/v1/production/posting-profiles", a.listProfiles)
 	r.With(authz.RequireDuty(DutySetupWrite)).Put("/v1/production/posting-profiles", a.saveProfile)
+	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/orders/{id}/as-built", a.orderAsBuilt)
+	r.With(authz.RequireDuty(DutyJournalPost)).Post("/v1/production/orders/{id}/as-built", a.assignAsBuilt)
+	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/as-built", a.listAsBuilt)
+	r.With(authz.RequireDuty(DutyJournalPost)).Post("/v1/production/as-built/{id}", a.detachAsBuilt)
 }
 
 // Metrics serves Prometheus text for the admin port.
@@ -163,6 +168,9 @@ type createRequest struct {
 	OriginID      *string               `json:"originId"`
 	BOM           []domain.BOMComponent `json:"bom"`
 	Operations    []domain.Operation    `json:"operations"`
+	// ReworkReference names the original order, batch or serial of a rework
+	// order (FR-21.20); it implies originType Rework.
+	ReworkReference *domain.ReworkRef `json:"reworkReference"`
 }
 
 func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {
@@ -180,6 +188,9 @@ func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.OriginType == "" {
 		req.OriginType = "Manual"
+		if req.ReworkReference != nil {
+			req.OriginType = domain.OriginRework
+		}
 	}
 	key, fields := idempotencyKey(r)
 	validateCreate(req, fields)
@@ -188,6 +199,10 @@ func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(fields) > 0 {
 		invalid(w, r, fields)
+		return
+	}
+	if req.OriginType == domain.OriginRework && !p.HasDuty(DutyRework) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "missing duty "+DutyRework+" (Create rework orders)"))
 		return
 	}
 	lines, err := domain.Explode(req.BOM, req.Quantity)
@@ -209,7 +224,7 @@ func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {
 	order, created, err := a.store.CreateOrder(r.Context(), store.NewOrder{
 		LegalEntityID: req.LegalEntityID, ProductID: req.ProductID, SiteID: req.SiteID, WarehouseID: req.WarehouseID, ItemGroup: req.ItemGroup,
 		Currency: req.Currency, Quantity: req.Quantity, DeliveryDate: req.DeliveryDate, OriginType: req.OriginType, OriginID: req.OriginID,
-		Lines: lines, Operations: ops, IdempotencyKey: key, RequestHash: hashOf(req),
+		ReworkReference: req.ReworkReference, Lines: lines, Operations: ops, IdempotencyKey: key, RequestHash: hashOf(req),
 	})
 	if err != nil {
 		a.fail(w, r, "create production order", err)
@@ -235,12 +250,15 @@ func (a *API) listOrders(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	f := store.ListFilter{Status: domain.Status(q.Get("status")), LegalEntityID: q.Get("legalEntityId"), SiteID: q.Get("siteId"),
-		ProductID: q.Get("productId"), Cursor: q.Get("cursor"), Limit: defaultPageSize}
+		ProductID: q.Get("productId"), OriginType: q.Get("originType"), ReworkOf: q.Get("reworkOf"), Cursor: q.Get("cursor"), Limit: defaultPageSize}
 	fields := map[string]string{}
+	if f.OriginType != "" && !originTypes[f.OriginType] {
+		fields["originType"] = "must be PlannedOrder, SalesOrderLine, Manual, Kanban or Rework"
+	}
 	if f.Status != "" && !f.Status.Valid() {
 		fields["status"] = "must be one of Created, Estimated, Scheduled, Released, Started, ReportedAsFinished, Ended, Cancelled"
 	}
-	for name, v := range map[string]string{"legalEntityId": f.LegalEntityID, "siteId": f.SiteID, "productId": f.ProductID, "cursor": f.Cursor} {
+	for name, v := range map[string]string{"legalEntityId": f.LegalEntityID, "siteId": f.SiteID, "productId": f.ProductID, "reworkOf": f.ReworkOf, "cursor": f.Cursor} {
 		if v != "" && !ids.Valid(v) {
 			fields[name] = "must be a UUID"
 		}
@@ -570,7 +588,19 @@ func validateCreate(req createRequest, fields map[string]string) {
 	}
 	checkQuantity("quantity", req.Quantity, true, fields)
 	if !originTypes[req.OriginType] {
-		fields["originType"] = "must be PlannedOrder, SalesOrderLine, Manual or Kanban"
+		fields["originType"] = "must be PlannedOrder, SalesOrderLine, Manual, Kanban or Rework"
+	}
+	if ref := req.ReworkReference; ref != nil {
+		switch {
+		case req.OriginType != domain.OriginRework:
+			fields["reworkReference"] = "is accepted only on a rework order (originType Rework)"
+		case !ref.Type.Valid():
+			fields["reworkReference.type"] = "must be order, batch or serial"
+		case ref.Type == domain.ReworkRefOrder && !ids.Valid(ref.ID):
+			fields["reworkReference.id"] = "must be the id of the original production order"
+		case ref.Type != domain.ReworkRefOrder && !domain.ValidTrackingID(ref.ID):
+			fields["reworkReference.id"] = fmt.Sprintf("must be the batch or serial number, 1 to %d characters without surrounding spaces", domain.MaxTrackingID)
+		}
 	}
 	if req.OriginID != nil && !ids.Valid(*req.OriginID) {
 		fields["originId"] = "must be a UUID"

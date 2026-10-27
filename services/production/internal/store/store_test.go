@@ -472,7 +472,7 @@ func TestStore_RowLevelSecurity(t *testing.T) {
 	}
 	for _, table := range []string{"production_order_sequence", "production_order", "production_bom_line", "production_operation",
 		"production_cost_estimate", "production_status_log", "outbox", "production_posting_profile", "production_journal_sequence",
-		"production_journal", "production_journal_line", "production_wip_posting", "production_variance"} {
+		"production_journal", "production_journal_line", "production_wip_posting", "production_variance", "production_as_built"} {
 		var enabled, forced bool
 		if err := admin.QueryRow(context.Background(), `select relrowsecurity, relforcerowsecurity from pg_class
 			where relname = $1 and relnamespace = current_schema()::regnamespace`, table).Scan(&enabled, &forced); err != nil || !enabled || !forced {
@@ -532,9 +532,21 @@ func TestStore_RowLevelSecurity(t *testing.T) {
 	if _, _, err := s.SavePostingProfile(scoped, ProfileSave{LegalEntityID: leB, Profile: testProfile(domain.AllKey, domain.AllKey, "1450"), Actor: "x"}); err == nil {
 		t.Fatal("a posting profile was saved outside the caller's legal-entity scope")
 	}
+	// As-built records (FR-21.19) are tenant- and legal-entity-scoped too.
+	motor := st.refresh().Lines[0].ItemID
+	if _, _, err := s.AssignAsBuilt(ctxA, NewAsBuilt{OrderID: inA.ID, Actor: "x", IdempotencyKey: "rls-ab", RequestHash: "rls-ab",
+		AsBuilt: domain.AsBuilt{FinishedSerial: "S-1", ComponentItemID: motor, Tracking: domain.TrackSerial, ComponentSerial: "M-1", Qty: d("1")}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, ctx := range []context.Context{ctxOther, scopedCtx(tenantA, leB)} {
+		if rows, err := s.ListAsBuilt(ctx, AsBuiltFilter{ComponentSerialOrBatch: "M-1"}); err != nil || len(rows) != 0 {
+			t.Fatalf("as-built leaked outside its tenant or legal entity: %d rows (%v)", len(rows), err)
+		}
+	}
 	var leaked int
 	if err := dbx.WithTenantTx(ctxOther, app, func(tx pgx.Tx) error {
-		return tx.QueryRow(context.Background(), `select (select count(*) from production_wip_posting) + (select count(*) from production_journal_line)`).Scan(&leaked)
+		return tx.QueryRow(context.Background(), `select (select count(*) from production_wip_posting) + (select count(*) from production_journal_line)
+			+ (select count(*) from production_as_built)`).Scan(&leaked)
 	}); err != nil || leaked != 0 {
 		t.Fatalf("another tenant sees %d WIP or journal rows (%v)", leaked, err)
 	}

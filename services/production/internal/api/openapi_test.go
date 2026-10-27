@@ -57,6 +57,9 @@ func servedOperations(t *testing.T) map[string]bool {
 		if route == "/v1/production/journals/{id}" && method == http.MethodPost {
 			route = "/v1/production/journals/{id}:post"
 		}
+		if route == "/v1/production/as-built/{id}" && method == http.MethodPost {
+			route = "/v1/production/as-built/{id}:detach"
+		}
 		served[route+" "+strings.ToLower(method)] = true
 		return nil
 	})
@@ -70,7 +73,7 @@ func TestOpenAPIMatchesTheRouter(t *testing.T) {
 	}
 	declared := declaredOperations(string(raw))
 	served := servedOperations(t)
-	if len(served) != 14 {
+	if len(served) != 18 {
 		t.Fatalf("router walk found %d operations: %v", len(served), served)
 	}
 	var problems []string
@@ -103,7 +106,9 @@ func TestOpenAPINamesDutiesAndCodes(t *testing.T) {
 		DutyOverConsume, DutySetupRead, DutySetupWrite, store.CodeJournalNotFound, store.CodeJournalNotAllowed, store.CodeJournalPosted,
 		store.CodeJournalEmpty, store.CodeInvalidJournalLine, store.CodeOperationFinished, store.CodePostingBeforeOrder,
 		store.CodeUnpostedJournals, store.CodeEndBeforeLastPosted, domain.CodeNoPostingProfile, domain.CodeOverConsumption,
-		domain.CodeUnbalanced, domain.CodeInvalidHours,
+		domain.CodeUnbalanced, domain.CodeInvalidHours, DutyRework, domain.OriginRework, domain.CodeReworkReference,
+		domain.CodeAsBuiltState, domain.CodeAsBuiltNotOnBOM, domain.CodeAsBuiltExceedsConsumed, domain.CodeAsBuiltFinishedCount,
+		domain.CodeSerialDuplicate, store.CodeAsBuiltNotFound,
 		unknownActionCode, "PRODUCTION_ILLEGAL_TRANSITION", "PRODUCTION_RAF_EXCEEDS_REMAINING", "PRODUCTION_FIELD_NOT_EDITABLE",
 		"PRODUCTION_END_REQUIRES_RAF", "PRODUCTION_ZERO_OUTPUT_NOT_PERMITTED", "PRODUCTION_ORDER_NOT_FOUND", "conflict_version",
 		"precondition_required", "idempotency_key_reuse"} {
