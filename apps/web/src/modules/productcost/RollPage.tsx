@@ -336,12 +336,13 @@ export function RollPage() {
           <FormField
             id="roll-view"
             label="Valuation view"
-            hint="Group costs an intercompany purchase at its supplier's Legal-view cost instead of the intercompany price."
+            hint="Group costs an intercompany purchase at its supplier's Legal-view cost instead of the intercompany price. Profit center costs a purchase from another profit center at its transfer price, or its cost plus the cost-plus percent."
           >
             {(control) => (
               <Select {...control} value={values.view} onChange={(e) => update({ view: e.target.value as ValuationView })}>
                 <option value="Legal">Legal</option>
                 <option value="Group">Group</option>
+                <option value="ProfitCenter">Profit center</option>
               </Select>
             )}
           </FormField>

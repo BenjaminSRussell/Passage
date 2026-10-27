@@ -24,6 +24,20 @@ const tools = [
     description: "Cost a configured or make-to-order line at its order quantity, by component, and see its margin against the net amount.",
   },
   {
+    title: "Sales order estimate versions",
+    to: "/productcost/sales-order-versions",
+    action: "Version a sales line",
+    description:
+      "Recompute a line's estimate when its configuration changes, keep the version history and freeze the current estimate when the line is confirmed.",
+  },
+  {
+    title: "Ad-hoc estimate",
+    to: "/productcost/estimates",
+    action: "Estimate from a model",
+    description:
+      "Cost a quote, internal order or project task from a costing model whose characteristics drive item, activity, subcontract and overhead lines.",
+  },
+  {
     title: "Estimate comparison",
     to: "/productcost/compare",
     action: "Compare estimates",
@@ -77,7 +91,7 @@ export function CostingHome() {
     <div className={styles.stack}>
       <PageHeader
         title="Costing workspace"
-        description="Compute and compare standard costs, cost sales lines, explain production variances, preview component postings, reconcile inventory at standard, check a revaluation before activating new standards, manage costing versions and convert items to standard cost. Stored versions, calculations and posting arrive with the persistence slice."
+        description="Compute and compare standard costs, cost and version sales lines, estimate quotes from costing models, explain production variances, preview component postings, reconcile inventory at standard, check a revaluation before activating new standards, manage costing versions and convert items to standard cost. Stored versions, calculations and posting arrive with the persistence slice."
       />
       <CardGrid as="ul" label="Costing tools">
         {tools.map((tool) => (

@@ -71,6 +71,8 @@ describe("productcost module", () => {
       ["/productcost/roll", "CostingCalculate"],
       ["/productcost/mixed-cost", "CostingCalculate"],
       ["/productcost/sales-order-estimate", "CostingCalculate"],
+      ["/productcost/sales-order-versions", "CostingCalculate"],
+      ["/productcost/estimates", "CostingCalculate"],
       ["/productcost/compare", "CostingView"],
       ["/productcost/variances", "CostingSystem"],
       ["/productcost/postings", "CostingCalculate"],

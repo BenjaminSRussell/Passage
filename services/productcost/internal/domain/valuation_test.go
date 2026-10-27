@@ -88,8 +88,11 @@ func TestValuationView_NonInterCompanyItemsAreUnaffected(t *testing.T) {
 }
 
 func TestValuationView_OptionValidation(t *testing.T) {
-	if err := (RollOptions{View: "ProfitCenter"}).Validate(); err == nil {
-		t.Error("ProfitCenter is not built yet and must be rejected")
+	if err := (RollOptions{View: ViewProfitCenter}).Validate(); err != nil {
+		t.Errorf("ProfitCenter view rejected: %v", err)
+	}
+	if err := (RollOptions{View: "Tax"}).Validate(); err == nil {
+		t.Error("unknown view must be rejected")
 	}
 	if err := (RollOptions{View: ViewGroup}).Validate(); err != nil {
 		t.Errorf("Group view rejected: %v", err)

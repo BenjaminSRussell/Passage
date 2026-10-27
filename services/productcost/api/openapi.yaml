@@ -1,13 +1,14 @@
 openapi: 3.1.0
 info:
-  title: Passage product costing (wave 39, slices 1-2)
-  version: 0.2.0
+  title: Passage product costing (wave 39, slices 1-4)
+  version: 0.4.0
   description: >
     Stateless costing computations. The caller supplies items, prices and
     actuals; the service returns rolled standards, mass-roll runs, variance
     decompositions, activation previews, mixed costs, component postings,
-    sales order estimates, comparisons and standard reconciliations. Nothing is
-    persisted yet.
+    sales order estimates and their versions, ad-hoc estimates from costing
+    models, comparisons, standard reconciliations, the costing version
+    lifecycle and the conversion checklist. Nothing is persisted yet.
 servers:
   - url: https://api.{env}.passage.dev
     variables:
@@ -292,6 +293,76 @@ paths:
         "401": { $ref: "#/components/responses/Problem", description: "No tenant, or no user on the principal" }
         "403": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem", description: "CST-0731 inventory close missing (close, activate), CST-0735 blocked (validate, activate), CST-0736 step out of order or checklist complete" }
+  /v1/costing/estimates:
+    post:
+      operationId: adHocEstimate
+      summary: Ad-hoc estimate of a quote, internal order or project task from a costing model (FR-39.13)
+      description: >
+        Stateless: the caller sends the costing model, the characteristic values and
+        the prices resolved from the selected costing version. Each line costs
+        quantity × price; the costing sheet applies to the priced split. The
+        PRD's Idempotency-Key arrives with stored estimates.
+      x-passage-duty: CostingCalculate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdHocEstimateRequest" }
+      responses:
+        "200":
+          description: Estimate lines, cost by component and total
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdHocEstimate" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem", description: "CST-0764 invalid model, formula, characteristic value, or negative quantity or price; CST-0702 no price for a line; CST-0708 costing sheet reference" }
+  /v1/costing/sales-order-estimates:refresh:
+    post:
+      operationId: refreshSalesOrderEstimate
+      summary: Recompute a sales order line's estimate for its configuration and version it (FR-39.16, BR-39.14)
+      description: >
+        Stateless: the caller sends the versions it holds for the line. The same
+        (lineId, configHash) returns the current version unchanged (changed false).
+        A new configuration hash supersedes the Pending and Frozen versions,
+        appends a Pending version and warns CST-0751.
+      x-passage-duty: CostingCalculate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RefreshEstimateRequest" }
+      responses:
+        "200":
+          description: The current version after the refresh and the full history
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RefreshResult" }
+        "400": { $ref: "#/components/responses/Problem", description: "Validation, including a version of another line, a duplicate version number or an unknown status" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/costing/sales-order-estimates:freeze:
+    post:
+      operationId: freezeSalesOrderEstimate
+      summary: Freeze the line's current estimate at confirmation (BR-39.14)
+      description: Freezing a Frozen version returns it unchanged.
+      x-passage-duty: CostingCalculate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FreezeEstimateRequest" }
+      responses:
+        "200":
+          description: The history with the confirmed version Frozen
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FreezeEstimateResponse" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem", description: "CST-0763 no estimate to freeze, or the current estimate failed to roll" }
 components:
   responses:
     Problem:
@@ -376,7 +447,10 @@ components:
         operations: { type: array, items: { $ref: "#/components/schemas/Operation" } }
         sheet: { type: array, items: { $ref: "#/components/schemas/SheetNode" } }
         intercompany: { type: boolean, description: "Purchased item bought from an intercompany partner (FR-39.17); only on Purchased items" }
-        legalCost: { $ref: "#/components/schemas/Money", description: "Supplier entity's Legal-view unit cost, converted at the receipt's rate; the Group view rolls it instead of the intercompany price (BR-39.15). Without it the Group view uses the price and warns CST-0761" }
+        legalCost: { $ref: "#/components/schemas/Money", description: "Supplier entity's Legal-view unit cost, converted at the receipt's rate; the Group view rolls it instead of the intercompany price (BR-39.15). Without it the Group view uses the price and warns CST-0761. For a profitCenterSource item it is the supplying profit center's cost, the base of costPlusPct" }
+        profitCenterSource: { type: boolean, description: "Purchased item supplied by another profit center of the same entity (FR-39.17); only on Purchased items, not with intercompany" }
+        transferPrice: { $ref: "#/components/schemas/Money", description: "Transfer price for the profit-center pair; the ProfitCenter view rolls it" }
+        costPlusPct: { $ref: "#/components/schemas/Money", description: "Cost-plus percent on legalCost, used by the ProfitCenter view when there is no transferPrice. With neither the item fails with CST-0762" }
     RollOptions:
       type: object
       properties:
@@ -392,7 +466,7 @@ components:
             and ByLineType rolls none, the others taking their active standard. Phantom
             lines are exploded in place in every mode.
         fallbackToActive: { type: boolean }
-        view: { type: string, enum: [Legal, Group], description: "Valuation view (FR-39.17); default Legal. ProfitCenter is not built yet" }
+        view: { type: string, enum: [Legal, Group, ProfitCenter], description: "Valuation view (FR-39.17); default Legal. Group rolls intercompany items at legalCost; ProfitCenter rolls profitCenterSource items at transferPrice or legalCost plus costPlusPct" }
     RollOneRequest:
       type: object
       required: [items, itemId]
@@ -757,3 +831,103 @@ components:
       properties:
         run: { $ref: "#/components/schemas/ConversionRun" }
         report: { $ref: "#/components/schemas/ConversionReport" }
+    Characteristic:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, pattern: "^[A-Za-z_][A-Za-z0-9_]*$", description: "Name the formulas read" }
+        unit: { type: string }
+        default: { $ref: "#/components/schemas/Money" }
+    ModelLine:
+      type: object
+      required: [type, ref, component, quantityFormula]
+      properties:
+        type: { type: string, enum: [Item, Activity, Subcontract, Overhead] }
+        ref: { type: string, description: "Item, activity, subcontract service or overhead the line prices; the key into prices" }
+        component: { type: string, description: "Cost component the line's amount goes to" }
+        quantityFormula: { type: string, maxLength: 500, description: "Arithmetic over numbers and characteristic names with + - * /, parentheses and unary minus" }
+        priceFormula: { type: string, maxLength: 500, description: "Unit price formula; when absent the price of ref comes from prices" }
+    CostingModel:
+      type: object
+      required: [code, lines]
+      properties:
+        code: { type: string }
+        characteristics: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/Characteristic" } }
+        lines: { type: array, minItems: 1, maxItems: 500, items: { $ref: "#/components/schemas/ModelLine" } }
+    Price:
+      type: object
+      required: [amount]
+      properties:
+        amount: { $ref: "#/components/schemas/Money" }
+        source: { type: string, description: "Price source; Fallback (the active standard) warns CST-0703" }
+    AdHocEstimateRequest:
+      type: object
+      required: [model, objectType, objectId]
+      properties:
+        currency: { type: string, pattern: "^[A-Z]{3}$", description: "Posting precision is its ISO 4217 minor unit; default two decimals" }
+        model: { $ref: "#/components/schemas/CostingModel" }
+        objectType: { type: string, enum: [Quote, InternalOrder, ProjectTask] }
+        objectId: { type: string }
+        characteristics: { type: object, additionalProperties: { $ref: "#/components/schemas/Money" }, description: "Values by characteristic name; a missing value takes the default" }
+        prices: { type: object, additionalProperties: { $ref: "#/components/schemas/Price" }, description: "Unit prices by line ref, resolved from the selected costing version" }
+        sheet: { type: array, items: { $ref: "#/components/schemas/SheetNode" } }
+        routingHours: { $ref: "#/components/schemas/Money", description: "Hours driving Rate nodes with rateUnit Hour" }
+    EstimateLine:
+      type: object
+      properties:
+        type: { type: string }
+        ref: { type: string }
+        component: { type: string }
+        quantity: { $ref: "#/components/schemas/Money" }
+        price: { $ref: "#/components/schemas/Money" }
+        amount: { $ref: "#/components/schemas/Money" }
+        source: { type: string, description: "Price source: the caller's, Fallback or Formula" }
+    AdHocEstimate:
+      type: object
+      properties:
+        modelCode: { type: string }
+        objectType: { type: string, enum: [Quote, InternalOrder, ProjectTask] }
+        objectId: { type: string }
+        currency: { type: string }
+        characteristics: { type: object, additionalProperties: { $ref: "#/components/schemas/Money" }, description: "Values used, defaults applied" }
+        lines: { type: array, items: { $ref: "#/components/schemas/EstimateLine" } }
+        split: { $ref: "#/components/schemas/Split", description: "Cost by component after the costing sheet, at the posting scale; sums to total" }
+        total: { $ref: "#/components/schemas/Money" }
+        subtotals: { type: object, additionalProperties: { $ref: "#/components/schemas/Money" }, description: "Basis and Total sheet node values by node id" }
+        diagnostics: { type: array, items: { $ref: "#/components/schemas/Diagnostic" } }
+    EstimateVersion:
+      type: object
+      required: [lineId, version, configHash, status]
+      properties:
+        lineId: { type: string }
+        version: { type: integer, minimum: 1 }
+        configHash: { type: string }
+        status: { type: string, enum: [Pending, Frozen, Superseded] }
+        estimate: { $ref: "#/components/schemas/SalesEstimate" }
+    RefreshEstimateRequest:
+      allOf:
+        - $ref: "#/components/schemas/SalesOrderEstimateRequest"
+        - type: object
+          required: [lineId, configHash]
+          properties:
+            lineId: { type: string }
+            configHash: { type: string, description: "Hash of the line's configuration (wave 27 configurator output)" }
+            versions: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/EstimateVersion" } }
+    RefreshResult:
+      type: object
+      properties:
+        current: { $ref: "#/components/schemas/EstimateVersion" }
+        versions: { type: array, items: { $ref: "#/components/schemas/EstimateVersion" } }
+        changed: { type: boolean }
+        diagnostics: { type: array, items: { $ref: "#/components/schemas/Diagnostic" }, description: "CST-0751 when a version was superseded" }
+    FreezeEstimateRequest:
+      type: object
+      required: [lineId]
+      properties:
+        lineId: { type: string }
+        versions: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/EstimateVersion" } }
+    FreezeEstimateResponse:
+      type: object
+      properties:
+        versions: { type: array, items: { $ref: "#/components/schemas/EstimateVersion" } }
+        confirmed: { $ref: "#/components/schemas/EstimateVersion" }

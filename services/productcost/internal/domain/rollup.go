@@ -52,6 +52,9 @@ const (
 	// or Total node (see README).
 	CodeSheetNode        = "CST-0708"
 	CodeGroupCostUnknown = "CST-0761"
+	// CodeNoTransferPrice extends the catalog: in the ProfitCenter view a
+	// profit-center-sourced item has no transfer price and no cost-plus basis.
+	CodeNoTransferPrice = "CST-0762"
 )
 
 // Diagnostic statuses for Result.Status.
@@ -124,6 +127,12 @@ type SheetNode struct {
 // (FR-39.17); LegalCost is the supplying entity's Legal-view unit cost, already
 // converted at the receipt's rate, which the Group view rolls instead of the
 // intercompany price (BR-39.15).
+//
+// ProfitCenterSource marks a purchased item supplied by another profit center
+// of the same legal entity. The ProfitCenter view prices it at TransferPrice
+// (the transfer-price table entry for the profit-center pair) or, without one,
+// at the supplying profit center's cost (LegalCost) plus CostPlusPct percent
+// (FR-39.17). The Legal and Group views ignore these fields.
 type Item struct {
 	ID           string           `json:"id"`
 	Kind         ItemKind         `json:"kind"`
@@ -136,16 +145,20 @@ type Item struct {
 	Sheet        []SheetNode      `json:"sheet,omitempty"`
 	Intercompany bool             `json:"intercompany,omitempty"`
 	LegalCost    *decimal.Decimal `json:"legalCost,omitempty"`
+
+	ProfitCenterSource bool             `json:"profitCenterSource,omitempty"`
+	TransferPrice      *decimal.Decimal `json:"transferPrice,omitempty"`
+	CostPlusPct        *decimal.Decimal `json:"costPlusPct,omitempty"`
 }
 
 // Catalog is the set of items being rolled, keyed by item id.
 type Catalog map[string]Item
 
 // Valuation views a roll can run under (FR-39.17, costing.valuationViews).
-// ProfitCenter needs the transfer-price table and is not built yet.
 const (
-	ViewLegal = "Legal"
-	ViewGroup = "Group"
+	ViewLegal        = "Legal"
+	ViewGroup        = "Group"
+	ViewProfitCenter = "ProfitCenter"
 )
 
 // RollOptions controls one roll. Zero values take the defaults.
@@ -187,8 +200,10 @@ func (o RollOptions) Validate() error {
 	if n.Workers < 1 || n.Workers > maxWorkers {
 		return fmt.Errorf("workers must be 1 to %d", maxWorkers)
 	}
-	if n.View != ViewLegal && n.View != ViewGroup {
-		return fmt.Errorf("view must be Legal or Group (ProfitCenter needs transfer prices)")
+	switch n.View {
+	case ViewLegal, ViewGroup, ViewProfitCenter:
+	default:
+		return fmt.Errorf("view must be Legal, Group or ProfitCenter")
 	}
 	return nil
 }
@@ -353,20 +368,25 @@ func purchasePrice(it Item, fallback bool) (decimal.Decimal, *Diagnostic) {
 	return decimal.Zero, &d
 }
 
-// groupCost returns the Group-view cost of an intercompany item (BR-39.15):
-// its supplier's Legal-view cost when known. ok is false for an item the view
-// does not change; unknown is true when the item is intercompany but the
-// supplier has no Legal-view cost, so the intercompany price applies with
-// CST-0761.
-func groupCost(it Item, opts RollOptions) (cost decimal.Decimal, ok bool, unknown *Diagnostic) {
-	if opts.View != ViewGroup || !it.Intercompany {
-		return decimal.Zero, false, nil
+// viewCost returns the cost a valuation view puts on a purchased item in place
+// of its price (FR-39.17). ok is false when the view does not change the item.
+// diag is a CST-0761 warning (Group view, intercompany item without a supplier
+// Legal-view cost: the intercompany price applies, BR-39.15) or a CST-0762
+// error (ProfitCenter view, profit-center-sourced item with neither a transfer
+// price nor a cost-plus basis). diag.Ref is the item; activeStandard points
+// it at the parent instead.
+func viewCost(it Item, opts RollOptions) (cost decimal.Decimal, ok bool, diag *Diagnostic) {
+	switch {
+	case opts.View == ViewGroup && it.Intercompany:
+		if it.LegalCost != nil {
+			return *it.LegalCost, true, nil
+		}
+		d := warnDiag(CodeGroupCostUnknown, "group cost unknown for intercompany item "+it.ID+"; intercompany price used", it.ID)
+		return decimal.Zero, false, &d
+	case opts.View == ViewProfitCenter && it.ProfitCenterSource:
+		return profitCenterCost(it)
 	}
-	if it.LegalCost != nil {
-		return *it.LegalCost, true, nil
-	}
-	d := warnDiag(CodeGroupCostUnknown, "group cost unknown for intercompany item "+it.ID+"; intercompany price used", it.ID)
-	return decimal.Zero, false, &d
+	return decimal.Zero, false, nil
 }
 
 // explodes reports whether a BOM line takes the child's result from this run
@@ -395,17 +415,21 @@ func explodes(mode ExplosionMode, line BOMLine, child Item) bool {
 //
 // In the Group view an intercompany purchased child takes its supplier's
 // Legal-view cost; without one its active price applies and CST-0761 warns
-// (BR-39.15).
+// (BR-39.15). In the ProfitCenter view a profit-center-sourced child takes its
+// transfer price, or fails the parent with CST-0762 (see viewCost).
 func activeStandard(child Item, parentID string, opts RollOptions) (Split, []Diagnostic, *Diagnostic) {
 	var warns []Diagnostic
 	if child.Kind == KindPurchased {
-		cost, ok, unknown := groupCost(child, opts)
+		cost, ok, diag := viewCost(child, opts)
 		if ok {
 			return Split{CompDM: cost}, nil, nil
 		}
-		if unknown != nil {
-			unknown.Ref = parentID
-			warns = append(warns, *unknown)
+		if diag != nil {
+			diag.Ref = parentID
+			if diag.Severity == "error" {
+				return nil, nil, diag
+			}
+			warns = append(warns, *diag)
 		}
 	}
 	if child.ActiveSplit != nil {
@@ -441,11 +465,15 @@ func rollItem(cat Catalog, it Item, done map[string]Result, opts RollOptions) Re
 		return res
 	}
 	if it.Kind == KindPurchased {
-		if cost, ok, unknown := groupCost(it, opts); ok {
+		cost, ok, diag := viewCost(it, opts)
+		switch {
+		case ok:
 			res.Own.Add(CompDM, cost)
 			return finish(res)
-		} else if unknown != nil {
-			res.Diagnostics = append(res.Diagnostics, *unknown)
+		case diag != nil && diag.Severity == "error":
+			return fail(*diag)
+		case diag != nil:
+			res.Diagnostics = append(res.Diagnostics, *diag)
 		}
 		price, diag := purchasePrice(it, opts.FallbackToActive)
 		if diag != nil {

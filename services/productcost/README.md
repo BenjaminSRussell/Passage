@@ -94,7 +94,7 @@ subtotals named in `refs`). See slice 3 below.
 
 | Route | Duty (PRD 7.39.17) |
 |---|---|
-| `POST /v1/costing/calculations`, `/rolls`, `/mixed-costs`, `/sales-order-estimates`, `/postings:cogs`, `/postings:price-difference` | `CostingCalculate` |
+| `POST /v1/costing/calculations`, `/rolls`, `/mixed-costs`, `/sales-order-estimates`, `/sales-order-estimates:refresh`, `/sales-order-estimates:freeze`, `/estimates`, `/postings:cogs`, `/postings:price-difference` | `CostingCalculate` |
 | `POST /v1/costing/comparisons`, `/reconciliations` | `CostingView` |
 | `POST /v1/costing/variances/compute` | `CostingSystem` |
 | `POST /v1/costing/activations:preview`, `/versions:activate`, `/conversions:validate`, `/conversions:advance` | `CostingActivate` |
@@ -113,8 +113,10 @@ order estimate (`/productcost/sales-order-estimate`), component postings
 (`/productcost/postings`), estimate comparison (`/productcost/compare`), standard
 reconciliation (`/productcost/reconciliation`) and, from slice 3, costing versions
 (`/productcost/versions`) and the standard cost conversion checklist
-(`/productcost/conversion`). The roll-up page offers the valuation view and shows the
-costing sheet subtotals.
+(`/productcost/conversion`), and from slice 4 ad-hoc estimates (`/productcost/estimates`) and
+sales order estimate versions with refresh and freeze (`/productcost/sales-order-versions`).
+The roll-up page offers the valuation view (Legal, Group, ProfitCenter) and shows the costing
+sheet subtotals.
 
 ## Slice 3 (stateless)
 
@@ -131,8 +133,8 @@ costing sheet subtotals.
   supplier's Legal-view cost (`legalCost`, already converted at the receipt's rate) instead of
   the intercompany price, both when it is rolled and when a mode takes it at its active
   standard. Without `legalCost` the price applies and `CST-0761` warns (`groupCostUnknown`).
-  `ProfitCenter` is refused until transfer prices exist. A comparison can roll the same
-  selection in both views (the valuation view comparison).
+  `ProfitCenter` is built in slice 4 (below). A comparison can roll the same selection in
+  different views (the valuation view comparison).
 - **Version lifecycle** (FR-39.3, BR-39.2): `POST /v1/costing/versions:transition`
   (`CostingMaintain`) blocks, unblocks or closes a version: Open ⇄ Blocked, Active → Closed.
   `POST /v1/costing/versions:activate` (`CostingActivate`) moves Open or Blocked to Active;
@@ -159,15 +161,58 @@ costing sheet subtotals.
 The service stays stateless: the caller sends the current version or checklist and receives
 the next state. Nothing is stored and no event is published until the persistence slice.
 
+## Slice 4 (stateless)
+
+- **ProfitCenter valuation view** (FR-39.17, `options.view` = `ProfitCenter`): a purchased
+  item flagged `profitCenterSource` (supplied by another profit center of the same legal
+  entity) costs its `transferPrice` (the transfer-price table entry for the profit-center
+  pair) or, without one, the supplying profit center's cost `legalCost` plus `costPlusPct`
+  percent, rounded to six decimals. This applies when the item is rolled and when a mode takes
+  it at its active standard. With neither basis the item fails with `CST-0762` (new code), and
+  a parent that takes it at its active standard fails with the same code. Items without the
+  flag keep their price; the Legal and Group views ignore the flag. `profitCenterSource`,
+  `transferPrice` and `costPlusPct` are only allowed on Purchased items, and an item cannot be
+  both `intercompany` and `profitCenterSource`.
+- **Ad-hoc estimates** (`POST /v1/costing/estimates`, FR-39.13, `CostingCalculate`): a
+  costing model (`code`, `characteristics` with an optional `default`, and `lines` of type
+  `Item`, `Activity`, `Subcontract` or `Overhead`) is priced for a `Quote`, `InternalOrder` or
+  `ProjectTask`. Each line's `quantityFormula` and optional `priceFormula` are arithmetic over
+  numbers and characteristic names (`+ - * /`, parentheses, unary minus; at most 500
+  characters and 32 levels of nesting). A line without `priceFormula` takes the price of its
+  `ref` from `prices` (the prices resolved from the selected costing version; `source`
+  `Fallback` warns `CST-0703`, a missing price is `CST-0702`). Line amounts are quantity × price
+  at six decimals; the costing `sheet` is applied to the split (`routingHours` drives Hour
+  rates), and the split and total are rounded to the currency's minor unit with the residual
+  to DM, so the split sums to the total. A characteristic without a value or default, a value
+  for a characteristic the model does not have, a bad formula, division by zero, or a negative
+  quantity or price is `CST-0764` (new code, 422). The formula grammar is local to this
+  service until the wave-38 grammar (FR-38.17) is shared.
+- **Sales order estimate versions** (FR-39.16, BR-39.14, `CostingCalculate`):
+  - `POST /v1/costing/sales-order-estimates:refresh` costs the line like
+    `/sales-order-estimates` and versions the result against `configHash`. The current version
+    is the highest that is not Superseded. The same (`lineId`, `configHash`), the PRD's
+    idempotency key, returns it unchanged (`changed: false`). A new hash marks every Pending and
+    Frozen version Superseded, appends a Pending version, and warns `CST-0751` when a version was
+    superseded. A roll that fails is still versioned, so the line has no usable estimate until
+    the next refresh.
+  - `POST /v1/costing/sales-order-estimates:freeze` freezes the current version at line
+    confirmation. Freezing a Frozen version returns it unchanged. No current version, or one
+    whose roll failed, is `CST-0763` (new code, 422): the "estimate missing at confirmation"
+    alert of the refresh job.
+  - The caller sends the versions it holds; versions of another line, duplicate version
+    numbers or an unknown status are 400.
+
 ## Layout
 
 ```
 cmd/productcost/        entrypoint: dbx.Connect -> dbx.Migrate -> httpx.NewRouter -> register -> serve
 internal/domain/        roll-up, planner, mass roll, variances, pricing, mixed cost, postings,
-                        sales estimate, comparison, reconciliation, version lifecycle and
+                        sales estimate and its versions, ad-hoc estimates and their formula
+                        grammar, comparison, reconciliation, version lifecycle and
                         conversion checklist (pure, no I/O)
 internal/api/           HTTP handlers, DTOs, validation (commercial.go holds the slice-2 routes,
-                        lifecycle.go the slice-3 version and conversion routes)
+                        lifecycle.go the slice-3 version and conversion routes, estimates.go
+                        the slice-4 ad-hoc and sales order estimate version routes)
 migrations/             costing schema (costing_version, cost_calculation, cost_component_split,
                         cost_component, variance_entry) with RLS; not yet written to by slices 1-2;
                         migrations_test.go applies it and checks RLS when a database is set
@@ -222,7 +267,11 @@ Problem `type` is `https://passage.dev/problems/<code>`.
 | CST-0735 | 422 | conversion checklist blocked by an enabled blocker (new code) |
 | CST-0736 | 422 | conversion checklist step out of order, or checklist complete (new code) |
 | CST-0741 | 422 | mixing ratios do not total 100.00% |
+| CST-0751 | warning | sales order estimate superseded by a configuration change |
 | CST-0761 | warning | Group view: no supplier Legal-view cost for an intercompany item; intercompany price used |
+| CST-0762 | item error | ProfitCenter view: no transfer price and no cost-plus basis for a profit-center item (new code) |
+| CST-0763 | 422 | no usable sales order estimate to freeze (new code) |
+| CST-0764 | 422 | ad-hoc estimate refused: invalid model, formula or characteristic value, or a negative quantity or price (new code) |
 
 Problem codes for the mass roll, the activation preview, the postings, the comparison and
 the reconciliation are not in the catalog; their failures are per-item diagnostics or

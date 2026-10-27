@@ -63,12 +63,21 @@ export interface CostItem {
   sheet?: SheetNode[];
   /** Purchased from an intercompany partner (FR-39.17). */
   intercompany?: boolean;
-  /** The supplier's Legal-view unit cost, which the Group view rolls (BR-39.15). */
+  /**
+   * The supplier's Legal-view unit cost, which the Group view rolls (BR-39.15);
+   * for a profit-center item, the supplying profit center's cost under costPlusPct.
+   */
   legalCost?: string;
+  /** Supplied by another profit center of the same entity (FR-39.17). */
+  profitCenterSource?: boolean;
+  /** Transfer price for the profit-center pair, rolled by the ProfitCenter view. */
+  transferPrice?: string;
+  /** Cost-plus percent on legalCost when there is no transfer price. */
+  costPlusPct?: string;
 }
 
-/** Valuation view of a roll (FR-39.17). ProfitCenter is not built yet. */
-export type ValuationView = "Legal" | "Group";
+/** Valuation view of a roll (FR-39.17). */
+export type ValuationView = "Legal" | "Group" | "ProfitCenter";
 
 export interface RollOptions {
   mode?: ExplosionMode;
@@ -461,4 +470,123 @@ export function advanceConversion(
   signal?: AbortSignal,
 ): Promise<{ run: ConversionRun; report: ConversionReport }> {
   return post<{ run: ConversionRun; report: ConversionReport }>("/conversions:advance", req, signal);
+}
+
+// Slice 4: ad-hoc estimates from costing models and sales order estimate versions.
+
+export type EstimateObjectType = "Quote" | "InternalOrder" | "ProjectTask";
+export type ModelLineType = "Item" | "Activity" | "Subcontract" | "Overhead";
+
+export interface Characteristic {
+  name: string;
+  unit?: string;
+  default?: string;
+}
+
+export interface ModelLine {
+  type: ModelLineType;
+  ref: string;
+  component: string;
+  quantityFormula: string;
+  /** Unit price formula; without it the price of ref comes from prices. */
+  priceFormula?: string;
+}
+
+export interface CostingModel {
+  code: string;
+  characteristics: Characteristic[];
+  lines: ModelLine[];
+}
+
+/** A unit price resolved from the costing version; source Fallback warns CST-0703. */
+export interface Price {
+  amount: string;
+  source?: string;
+}
+
+export interface AdHocEstimateRequest {
+  currency?: string;
+  model: CostingModel;
+  objectType: EstimateObjectType;
+  objectId: string;
+  characteristics: Record<string, string>;
+  prices: Record<string, Price>;
+  sheet?: SheetNode[];
+  routingHours?: string;
+}
+
+export interface EstimateLine {
+  type: ModelLineType;
+  ref: string;
+  component: string;
+  quantity: string;
+  price: string;
+  amount: string;
+  source?: string;
+}
+
+export interface AdHocEstimate {
+  modelCode: string;
+  objectType: EstimateObjectType;
+  objectId: string;
+  currency?: string;
+  characteristics: Record<string, string>;
+  lines: EstimateLine[];
+  total: string;
+  split: Split;
+  subtotals?: Record<string, string>;
+  diagnostics: Diagnostic[];
+}
+
+/** Price a costing model for a quote, internal order or project task (FR-39.13). */
+export function adHocEstimate(req: AdHocEstimateRequest, signal?: AbortSignal): Promise<AdHocEstimate> {
+  return post<AdHocEstimate>("/estimates", req, signal);
+}
+
+export type EstimateVersionStatus = "Pending" | "Frozen" | "Superseded";
+
+/** One version of a sales order line's estimate (BR-39.14). */
+export interface EstimateVersion {
+  lineId: string;
+  version: number;
+  configHash: string;
+  status: EstimateVersionStatus;
+  estimate: SalesEstimate;
+}
+
+export interface RefreshResult {
+  current: EstimateVersion;
+  versions: EstimateVersion[];
+  changed: boolean;
+  diagnostics: Diagnostic[];
+}
+
+/**
+ * Recompute a line's estimate for its configuration (FR-39.16). The same
+ * configuration hash returns the current version unchanged; a new one
+ * supersedes it (CST-0751). The service is stateless: send the versions held.
+ */
+export function refreshSalesEstimate(
+  req: {
+    currency?: string;
+    items: CostItem[];
+    itemId: string;
+    quantity: string;
+    netAmount: string;
+    options?: RollOptions;
+    lineId: string;
+    configHash: string;
+    versions: EstimateVersion[];
+  },
+  signal?: AbortSignal,
+): Promise<RefreshResult> {
+  return post<RefreshResult>("/sales-order-estimates:refresh", req, signal);
+}
+
+/** Freeze the line's current estimate at confirmation (BR-39.14); CST-0763 without a usable estimate. */
+export function freezeSalesEstimate(
+  req: { lineId: string; versions: EstimateVersion[] },
+  signal?: AbortSignal,
+): Promise<{ versions: EstimateVersion[]; confirmed: EstimateVersion }> {
+  return post<{ versions: EstimateVersion[]; confirmed: EstimateVersion }>("/sales-order-estimates:freeze", req, signal);
 }

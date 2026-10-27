@@ -2,8 +2,8 @@
 // stateless: the caller supplies the structure, prices and actuals, and the
 // service returns the rolled standard, the mass-roll run, the variance
 // decomposition, the activation preview, the mixed cost, component postings,
-// sales order estimates, comparisons or the standard reconciliation. Nothing is
-// stored yet.
+// sales order estimates and their versions, ad-hoc estimates, comparisons or
+// the standard reconciliation. Nothing is stored yet.
 package api
 
 import (
@@ -64,6 +64,7 @@ type API struct {
 	rollErrors       atomic.Int64
 	varianceComputes atomic.Int64
 	previews         atomic.Int64
+	estimates        atomic.Int64
 
 	reconciliationDifferences atomic.Int64
 }
@@ -103,6 +104,10 @@ func (a *API) routes() []route {
 		{http.MethodPost, "/v1/costing/versions:activate", dutyActivate, a.activateVersion},
 		{http.MethodPost, "/v1/costing/conversions:validate", dutyActivate, a.validateConversion},
 		{http.MethodPost, "/v1/costing/conversions:advance", dutyActivate, a.advanceConversion},
+		// Slice 4 (estimates.go).
+		{http.MethodPost, "/v1/costing/estimates", dutyCalculate, a.adHocEstimate},
+		{http.MethodPost, "/v1/costing/sales-order-estimates:refresh", dutyCalculate, a.refreshSalesEstimate},
+		{http.MethodPost, "/v1/costing/sales-order-estimates:freeze", dutyCalculate, a.freezeSalesEstimate},
 	}
 }
 
@@ -127,6 +132,7 @@ func (a *API) Metrics() http.Handler {
 		counter("productcost_roll_errors_total", "Items that failed to roll.", a.rollErrors.Load())
 		counter("productcost_variance_computes_total", "Production order variance decompositions computed.", a.varianceComputes.Load())
 		counter("productcost_activation_previews_total", "Activation revaluation previews computed.", a.previews.Load())
+		counter("productcost_adhoc_estimates_total", "Ad-hoc estimates computed from costing models.", a.estimates.Load())
 		counter("productcost_reconciliation_differences_total", "Sites whose standard value differs from the GL balance.", a.reconciliationDifferences.Load())
 	})
 }
@@ -244,8 +250,16 @@ func checkItem(i int, it domain.Item, fields map[string]string) {
 	negative("price", it.Price)
 	negative("activePrice", it.ActivePrice)
 	negative("legalCost", it.LegalCost)
+	negative("transferPrice", it.TransferPrice)
+	negative("costPlusPct", it.CostPlusPct)
 	if it.Kind != domain.KindPurchased && (it.Intercompany || it.LegalCost != nil) {
 		fields[at("intercompany")] = "only a Purchased item is bought from an intercompany partner"
+	}
+	if it.Kind != domain.KindPurchased && (it.ProfitCenterSource || it.TransferPrice != nil || it.CostPlusPct != nil) {
+		fields[at("profitCenterSource")] = "only a Purchased item is supplied by another profit center"
+	}
+	if it.Intercompany && it.ProfitCenterSource {
+		fields[at("profitCenterSource")] = "an item is bought from an intercompany partner or from another profit center, not both"
 	}
 	negative("costingLot", &it.CostingLot)
 	for c, v := range it.ActiveSplit {

@@ -210,6 +210,8 @@ func TestRoll_GroupViewAndSheetSubtotals(t *testing.T) {
 	for view, want := range map[string][]string{
 		"Legal": {`"unitCost":"154"`, `"DM":"120"`, `"T":"140"`, `"IND":"14"`},
 		"Group": {`"unitCost":"132"`, `"DM":"100"`, `"T":"120"`, `"IND":"12"`},
+		// Not sourced from another profit center: the ProfitCenter view keeps the price.
+		"ProfitCenter": {`"unitCost":"154"`, `"DM":"120"`},
 	} {
 		body := `{"itemId":"FG","options":{"view":"` + view + `"},"items":` + items + `}`
 		rec := do(r, http.MethodPost, "/v1/costing/calculations", body, allDuties, true)
@@ -218,8 +220,8 @@ func TestRoll_GroupViewAndSheetSubtotals(t *testing.T) {
 		}
 		expectAll(t, rec.Body.String(), want...)
 	}
-	rec := do(r, http.MethodPost, "/v1/costing/calculations", `{"itemId":"FG","options":{"view":"ProfitCenter"},"items":`+items+`}`, allDuties, true)
+	rec := do(r, http.MethodPost, "/v1/costing/calculations", `{"itemId":"FG","options":{"view":"Tax"},"items":`+items+`}`, allDuties, true)
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"options"`) {
-		t.Errorf("ProfitCenter view: %d %s", rec.Code, rec.Body.String())
+		t.Errorf("unknown view: %d %s", rec.Code, rec.Body.String())
 	}
 }
