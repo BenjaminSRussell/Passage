@@ -362,6 +362,9 @@ func TestFinishRunFailedEnqueuesDegradedEventAndAllowsRestart(t *testing.T) {
 		and payload->'data'->>'error' = 'ecb: request failed: timeout' and payload->'data'->'last_success_at' = 'null'::jsonb`); n != 1 {
 		t.Fatalf("degraded payload rows = %d, want 1", n)
 	}
+	if n := count(t, ctx, pool, `select count(*) from outbox where aggregate_id = '`+run.ID+`' and payload->'data'->>'fallback' = 'none' and payload->'data'->>'status' = 'failed'`); n != 1 {
+		t.Fatalf("failed fallback rows = %d, want 1", n)
+	}
 	if got := count(t, ctx, pool, `select count(*) from exchange_rate`); got != rates {
 		t.Fatalf("rates changed from %d to %d", rates, got)
 	}
@@ -415,12 +418,33 @@ func TestFinishRunDegradedMarksRunAndEnqueuesDegradedEvent(t *testing.T) {
 		t.Fatalf("runs = %+v, %v", runs, err)
 	}
 	if n := count(t, ctx, pool, `select count(*) from outbox where type = 'dev.passage.fx.provider.degraded.v1' and aggregate_id = '`+run.ID+`'
-		and payload->'data'->>'last_success_at' is not null`); n != 1 {
+		and payload->'data'->>'last_success_at' is not null and payload->'data'->>'fallback' = 'last_known' and payload->'data'->>'status' = 'degraded'`); n != 1 {
 		t.Fatalf("degraded events = %d, want 1", n)
 	}
 	restarted, done, err := s.StartRun(ctx, "ecb", "CLOSING", valid.AddDate(0, 0, 1))
 	if err != nil || done || restarted.Status != store.RunRunning {
 		t.Fatalf("restart = %+v done=%v err=%v", restarted, done, err)
+	}
+}
+
+func TestFinishRunAbortedMarksFailedWithoutDegradedEvent(t *testing.T) {
+	s, pool, ctx := migrated(t)
+	run, _, err := s.StartRun(ctx, "ecb", "CLOSING", valid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FinishRunAborted(ctx, run.ID, 2, errors.New("context canceled")); err != nil {
+		t.Fatal(err)
+	}
+	runs, err := s.ListRuns(ctx, "ecb")
+	if err != nil || len(runs) != 1 || runs[0].Status != store.RunFailed || runs[0].Attempts != 2 || runs[0].Error != "context canceled" || runs[0].FinishedAt == nil {
+		t.Fatalf("runs = %+v, %v", runs, err)
+	}
+	if n := count(t, ctx, pool, `select count(*) from outbox where type = 'dev.passage.fx.provider.degraded.v1'`); n != 0 {
+		t.Fatalf("degraded events = %d, want 0", n)
+	}
+	if err := s.FinishRunAborted(ctx, ids.New(), 1, errors.New("x")); !errors.Is(err, store.ErrRunNotFound) {
+		t.Fatalf("aborted unknown run err = %v", err)
 	}
 }
 

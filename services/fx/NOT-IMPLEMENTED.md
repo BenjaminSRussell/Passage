@@ -15,7 +15,7 @@
 | Deliverable 6: market data series | PSG-1202 slice 2d | migration `0002`, domain, store and API |
 | Temporal schedule for provider imports | PSG-1202 slice 2c | needs provider adapters; CronJob fallback is in slice 2e |
 | ECB SDW market data series adapter | PSG-1202 slice 2d | deferred with the market data series |
-| AC4: provider outage fallback and alert | built (issue #92) | `internal/importer` (retry, last-known fallback, degraded run, outbox event, `fx_provider_degraded` metric), `deploy/prometheusrule.yaml` |
+| AC4: provider outage fallback and alert | built, unwired (see #93) | `internal/importer` (retry, last-known fallback, degraded run, outbox event, `fx_provider_degraded` metric), `deploy/prometheusrule.yaml` |
 | AC4: importer wiring (`cmd/fx` scheduler, `/metrics` mount via `importer.Metrics.Handler`), PrometheusRule in the Helm chart | issue #93 | `deploy/prometheusrule.yaml` is a plain manifest; the chart must escape the `$labels` annotations as `{{ "{{ $labels.x }}" }}` when templating it |
 | Demo entity with EUR reporting currency | handoff | needs `services/ledger` and `services/org` waves |
 | OpenAPI, AsyncAPI, route/event contract test, Helm chart `passage-fx`, CronJobs, PrometheusRule, Dockerfile, `cmd/fx` | PSG-1202 slice 2e | no HTTP surface yet |

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"time"
 
 	"github.com/BenjaminSRussell/passage/services/fx/internal/provider"
@@ -20,6 +21,7 @@ type RunStore interface {
 	FinishRunSucceeded(ctx context.Context, runID string, imported, unchanged int) error
 	FinishRunFailed(ctx context.Context, runID string, attempts int, cause error) error
 	FinishRunDegraded(ctx context.Context, runID string, attempts int, cause error) error
+	FinishRunAborted(ctx context.Context, runID string, attempts int, cause error) error
 	LastSuccess(ctx context.Context, provider, rateType string) (*time.Time, error)
 }
 
@@ -46,11 +48,32 @@ type Importer struct {
 	store    RunStore
 	cfg      Config
 	sleep    func(context.Context, time.Duration) error
+	now      func() time.Time
 	metrics  *Metrics
 }
 
 func New(p provider.Provider, s RunStore, cfg Config, m *Metrics) *Importer {
-	return &Importer{provider: p, store: s, cfg: cfg, sleep: sleepContext, metrics: m}
+	if cfg.MaxAttempts <= 0 {
+		cfg.MaxAttempts = DefaultConfig.MaxAttempts
+	}
+	if cfg.BaseBackoff <= 0 {
+		cfg.BaseBackoff = DefaultConfig.BaseBackoff
+	}
+	if cfg.MaxBackoff <= 0 {
+		cfg.MaxBackoff = DefaultConfig.MaxBackoff
+	}
+	return &Importer{provider: p, store: s, cfg: cfg, sleep: sleepContext, now: time.Now, metrics: m}
+}
+
+func retryable(err error) bool {
+	if errors.Is(err, provider.ErrDisabled) || errors.Is(err, provider.ErrMalformed) {
+		return false
+	}
+	var se *provider.StatusError
+	if errors.As(err, &se) {
+		return se.Code >= http.StatusInternalServerError || se.Code == http.StatusTooManyRequests
+	}
+	return true
 }
 
 func sleepContext(ctx context.Context, d time.Duration) error {
@@ -72,28 +95,26 @@ func (i *Importer) backoff(attempt int) time.Duration {
 	return d
 }
 
-func (i *Importer) fetch(ctx context.Context, rateType string, date time.Time, run store.Run) ([]provider.RatePoint, int, error) {
-	var lastErr error
-	attempts := 0
+func (i *Importer) fetch(ctx context.Context, rateType string, date time.Time, run store.Run) (points []provider.RatePoint, attempts int, fetchErr, storeErr error) {
 	for attempts < i.cfg.MaxAttempts {
 		attempts++
 		if err := i.store.RecordAttempt(ctx, run.ID, attempts); err != nil {
-			return nil, attempts, err
+			return nil, attempts, nil, fmt.Errorf("record attempt: %w", err)
 		}
-		points, err := i.provider.Fetch(ctx, rateType, date)
+		pts, err := i.provider.Fetch(ctx, rateType, date)
 		if err == nil {
-			return points, attempts, nil
+			return pts, attempts, nil, nil
 		}
-		lastErr = err
+		fetchErr = err
 		slog.Warn("fx provider fetch failed", "provider", i.provider.Name(), "rateType", rateType, "attempt", attempts, "err", err)
-		if ctx.Err() != nil || errors.Is(err, provider.ErrDisabled) || attempts == i.cfg.MaxAttempts {
+		if ctx.Err() != nil || !retryable(err) || attempts == i.cfg.MaxAttempts {
 			break
 		}
 		if err := i.sleep(ctx, i.backoff(attempts)); err != nil {
 			break
 		}
 	}
-	return nil, attempts, lastErr
+	return nil, attempts, fetchErr, nil
 }
 
 func (i *Importer) Run(ctx context.Context, rateType string, date time.Time) (Result, error) {
@@ -103,12 +124,19 @@ func (i *Importer) Run(ctx context.Context, rateType string, date time.Time) (Re
 		return Result{}, fmt.Errorf("start run: %w", err)
 	}
 	if done {
+		i.metrics.record(ctx, name, rateType, false, run.LastSuccessAt)
 		return Result{RunID: run.ID, AlreadyDone: true, Attempts: run.Attempts, Imported: run.PairsImported, Unchanged: run.PairsUnchanged}, nil
 	}
-	points, attempts, fetchErr := i.fetch(ctx, rateType, date, run)
+	points, attempts, fetchErr, storeErr := i.fetch(ctx, rateType, date, run)
+	if storeErr != nil {
+		return Result{RunID: run.ID, Attempts: attempts}, storeErr
+	}
 	finishCtx := context.WithoutCancel(ctx)
 	res := Result{RunID: run.ID, Attempts: attempts}
 	if fetchErr != nil {
+		if ctx.Err() != nil {
+			return res, i.abort(finishCtx, res, fmt.Errorf("import aborted: %w", ctx.Err()))
+		}
 		return i.fallBack(finishCtx, name, rateType, res, fetchErr)
 	}
 	inputs := make([]store.RateInput, len(points))
@@ -120,11 +148,7 @@ func (i *Importer) Run(ctx context.Context, rateType string, date time.Time) (Re
 	}
 	posted, err := i.store.PostRates(ctx, inputs)
 	if err != nil {
-		err = fmt.Errorf("post %s rates: %w", name, err)
-		if ferr := i.store.FinishRunFailed(finishCtx, run.ID, attempts, err); ferr != nil {
-			slog.Error("fx finish failed run", "runId", run.ID, "err", ferr)
-		}
-		return res, err
+		return res, i.abort(finishCtx, res, fmt.Errorf("post %s rates: %w", name, err))
 	}
 	for _, p := range posted {
 		if p.Unchanged {
@@ -136,8 +160,16 @@ func (i *Importer) Run(ctx context.Context, rateType string, date time.Time) (Re
 	if err := i.store.FinishRunSucceeded(finishCtx, run.ID, res.Imported, res.Unchanged); err != nil {
 		return res, fmt.Errorf("finish run: %w", err)
 	}
-	i.metrics.set(name, rateType, false)
+	now := i.now()
+	i.metrics.record(ctx, name, rateType, false, &now)
 	return res, nil
+}
+
+func (i *Importer) abort(ctx context.Context, res Result, cause error) error {
+	if err := i.store.FinishRunAborted(ctx, res.RunID, res.Attempts, cause); err != nil {
+		slog.Error("fx finish aborted run", "runId", res.RunID, "err", err)
+	}
+	return cause
 }
 
 func (i *Importer) fallBack(ctx context.Context, name, rateType string, res Result, cause error) (Result, error) {
@@ -150,13 +182,13 @@ func (i *Importer) fallBack(ctx context.Context, name, rateType string, res Resu
 		if ferr := i.store.FinishRunFailed(ctx, res.RunID, res.Attempts, err); ferr != nil {
 			slog.Error("fx finish failed run", "runId", res.RunID, "err", ferr)
 		}
-		i.metrics.set(name, rateType, true)
+		i.metrics.record(ctx, name, rateType, true, nil)
 		return res, err
 	}
 	if err := i.store.FinishRunDegraded(ctx, res.RunID, res.Attempts, cause); err != nil {
 		return res, fmt.Errorf("finish degraded run: %w", err)
 	}
-	i.metrics.set(name, rateType, true)
+	i.metrics.record(ctx, name, rateType, true, last)
 	slog.Error("fx provider outage, serving last-known rates", "provider", name, "rateType", rateType, "lastSuccessAt", last, "err", cause)
 	res.Degraded = true
 	res.LastSuccessAt = last

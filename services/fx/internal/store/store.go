@@ -86,6 +86,7 @@ type Store interface {
 	FinishRunSucceeded(ctx context.Context, runID string, imported, unchanged int) error
 	FinishRunFailed(ctx context.Context, runID string, attempts int, cause error) error
 	FinishRunDegraded(ctx context.Context, runID string, attempts int, cause error) error
+	FinishRunAborted(ctx context.Context, runID string, attempts int, cause error) error
 	ListRuns(ctx context.Context, provider string) ([]Run, error)
 	LastSuccess(ctx context.Context, provider, rateType string) (*time.Time, error)
 	GetIdempotency(ctx context.Context, key string) (IdempotencyRecord, bool, error)
