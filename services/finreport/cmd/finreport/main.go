@@ -62,13 +62,13 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if addr == "" {
 		addr = ":8080"
 	}
-	return httpx.Serve(ctx, addr, newHandler(store.New(pool)))
+	return httpx.Serve(ctx, addr, newHandler(store.New(pool), cfg))
 }
 
 // newHandler mounts the reporting API on the platform router, which already
 // installs the tenant middleware and the health endpoints.
-func newHandler(st api.Store) http.Handler {
+func newHandler(st api.Store, cfg config.Reporting) http.Handler {
 	router := httpx.NewRouter()
-	api.New(st).Register(router)
+	api.New(st).WithConfig(cfg).Register(router)
 	return router
 }

@@ -102,3 +102,26 @@ func TestFromEnv_EveryBoundIsInclusive(t *testing.T) {
 		}
 	}
 }
+
+// The trace link template must be an http(s) URL with a {traceId} slot; the
+// id is escaped into it, and no template (the default) means no link.
+func TestFromEnv_TraceURL(t *testing.T) {
+	cfg, err := FromEnv(env(map[string]string{"REPORTING_TRACE_URL": " https://grafana.example/explore?traceId={traceId} "}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.TraceLink("4bf92f35 77b3"); got != "https://grafana.example/explore?traceId=4bf92f35+77b3" {
+		t.Fatalf("TraceLink = %q", got)
+	}
+	if got := cfg.TraceLink(""); got != "" {
+		t.Fatalf("empty trace id must give no link, got %q", got)
+	}
+	if got := (Reporting{}).TraceLink("abc"); got != "" {
+		t.Fatalf("no template must give no link, got %q", got)
+	}
+	for _, bad := range []string{"javascript:alert({traceId})", "https://grafana.example/explore", "/tempo/{traceId}"} {
+		if _, err := FromEnv(env(map[string]string{"REPORTING_TRACE_URL": bad})); err == nil || !strings.Contains(err.Error(), "REPORTING_TRACE_URL") {
+			t.Errorf("%q: error %v, want a REPORTING_TRACE_URL problem", bad, err)
+		}
+	}
+}

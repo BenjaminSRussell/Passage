@@ -24,6 +24,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 
+	"github.com/BenjaminSRussell/passage/services/finreport/internal/config"
 	"github.com/BenjaminSRussell/passage/services/finreport/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/finreport/internal/store"
 )
@@ -34,6 +35,10 @@ const (
 	DutyRun      = "reporting.statement.run"
 	DutyView     = "reporting.statement.view"
 	DutySchedule = "reporting.statement.schedule"
+	// DutyLines is the ledger's "View ledger transactions" duty (wave 11,
+	// ledger.journal.read): PRD §2.15.5 and §2.15.17 put drill level 2 under
+	// it, separately from viewing statements.
+	DutyLines = "ledger.journal.read"
 )
 
 const (
@@ -53,6 +58,7 @@ type Store interface {
 	GetRun(ctx context.Context, id string) (store.Run, error)
 	ListCells(ctx context.Context, runID string) ([]domain.Cell, error)
 	GetCell(ctx context.Context, runID, row, column string) (domain.Cell, error)
+	DrillLines(ctx context.Context, runID, row, column string, q store.LineQuery) (store.LinePage, error)
 	Lag(ctx context.Context) ([]store.LagRow, error)
 	RetireDefinition(ctx context.Context, code string) (int, error)
 	InstallStandard(ctx context.Context, defs []domain.Definition, actor string) ([]store.InstallResult, error)
@@ -68,10 +74,25 @@ type Store interface {
 }
 
 // API holds the handlers.
-type API struct{ store Store }
+type API struct {
+	store     Store
+	linePage  int                    // drill level 2 default page size (REPORTING_PAGE_SIZE)
+	traceLink func(id string) string // trace viewer link of a line (REPORTING_TRACE_URL)
+}
 
-// New returns the API over st.
-func New(st Store) *API { return &API{store: st} }
+// New returns the API over st with the default reporting tunables.
+func New(st Store) *API {
+	return &API{store: st, linePage: domain.DefaultLinePage, traceLink: config.Reporting{}.TraceLink}
+}
+
+// WithConfig applies the reporting tunables the handlers use.
+func (a *API) WithConfig(cfg config.Reporting) *API {
+	if cfg.PageSize > 0 {
+		a.linePage = cfg.PageSize
+	}
+	a.traceLink = cfg.TraceLink
+	return a
+}
 
 // Register mounts the reporting routes on r.
 func (a *API) Register(r chi.Router) {
@@ -87,6 +108,7 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyView)).Get("/runs/{id}", a.getRun)
 		r.With(authz.RequireDuty(DutyView)).Get("/runs/{id}/cells", a.listCells)
 		r.With(authz.RequireDuty(DutyView)).Get("/runs/{id}/cells/{row}/{column}/balances", a.drillBalances)
+		r.With(authz.RequireDuty(DutyLines)).Get("/runs/{id}/cells/{row}/{column}/lines", a.drillLines)
 		r.With(authz.RequireDuty(DutyView)).Get("/runs/{id}/outputs/{format}", a.runOutput)
 		r.With(authz.RequireDuty(DutyView)).Get("/lag", a.lag)
 		r.With(authz.RequireDuty(DutyMaintain)).Get("/standard-definitions", a.listStandard)
@@ -479,6 +501,91 @@ func (a *API) drillBalances(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"runId": id, "row": cell.Row, "column": cell.Column, "value": cell.Value.StringFixed(6),
 		"blank": cell.Blank, "computed": cell.Computed, "sumOfKeys": sum.StringFixed(6), "keys": keys,
+	})
+}
+
+type lineDTO struct {
+	Key             int    `json:"key"`
+	PostingDate     string `json:"postingDate"`
+	PostingSequence int64  `json:"postingSequence"`
+	LineNumber      int    `json:"lineNumber"`
+	Voucher         string `json:"voucher"`
+	Period          string `json:"period"`
+	Account         string `json:"account"`
+	Combination     string `json:"combination"`
+	CurrencyType    string `json:"currencyType"`
+	Debit           string `json:"debit"`
+	Credit          string `json:"credit"`
+	Amount          string `json:"amount"`
+	ClosingEntry    bool   `json:"closingEntry"`
+	SourceURI       string `json:"sourceUri,omitempty"`
+	TraceID         string `json:"traceId,omitempty"`
+	TraceURL        string `json:"traceUrl,omitempty"`
+}
+
+// drillLines is drill level 2 (FR-15.7, BR-15.4): the journal lines behind one
+// cell, or behind one of its balance keys (?key=, the position in the level 1
+// list), keyset paged in (posting date, posting sequence, line number) order.
+// Every page carries its own sum, the running sum and the reconciliation of
+// all the lines against the balance keys; when they do not tie the response
+// says so (reconciled false, difference) instead of hiding it.
+func (a *API) drillLines(w http.ResponseWriter, r *http.Request) {
+	id, ok := runID(w, r)
+	if !ok {
+		return
+	}
+	q := store.LineQuery{Key: -1, Limit: a.linePage}
+	query := r.URL.Query()
+	if v := query.Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > domain.MaxLinePage {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0002", fmt.Sprintf("limit must be 1 to %d", domain.MaxLinePage)))
+			return
+		}
+		q.Limit = n
+	}
+	if v := query.Get("key"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0002", "key must be a balance key position (0 or more)"))
+			return
+		}
+		q.Key = n
+	}
+	if v := query.Get("cursor"); v != "" {
+		c, err := domain.DecodeLineCursor(v)
+		if err != nil {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0002", "cursor is not one this endpoint returned"))
+			return
+		}
+		q.After = &c
+	}
+	page, err := a.store.DrillLines(r.Context(), id, chi.URLParam(r, "row"), chi.URLParam(r, "column"), q)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	items := make([]lineDTO, 0, len(page.Items))
+	for _, l := range page.Items {
+		items = append(items, lineDTO{Key: l.Key, PostingDate: l.PostingDate, PostingSequence: l.PostingSequence, LineNumber: l.LineNumber,
+			Voucher: l.Voucher, Period: l.Period(), Account: l.Account, Combination: l.Combination, CurrencyType: l.CurrencyType,
+			Debit: l.Debit.StringFixed(6), Credit: l.Credit.StringFixed(6), Amount: l.Amount.StringFixed(6), ClosingEntry: l.ClosingEntry,
+			SourceURI: l.SourceURI, TraceID: l.TraceID, TraceURL: a.traceLink(l.TraceID)})
+	}
+	var key, next any
+	if page.Key >= 0 {
+		key = page.Key
+	}
+	if page.Next != nil {
+		next = page.Next.Encode()
+	}
+	rec := page.Reconciliation
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"runId": id, "row": page.Cell.Row, "column": page.Cell.Column, "key": key, "blank": page.Cell.Blank, "computed": page.Cell.Computed,
+		"value": page.Value.StringFixed(6), "hwm": page.HWM, "limit": q.Limit, "items": items,
+		"sumOfLines": page.SumOfLines.StringFixed(6), "cumulativeSum": page.CumulativeSum.StringFixed(6), "nextCursor": next,
+		"linesTotal": rec.LinesTotal.StringFixed(6), "difference": rec.Difference.StringFixed(6),
+		"unreconciledKeys": rec.UnreconciledKeys, "reconciled": rec.Reconciled(),
 	})
 }
 

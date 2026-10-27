@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/services/finreport/internal/api"
+	"github.com/BenjaminSRussell/passage/services/finreport/internal/config"
 	"github.com/BenjaminSRussell/passage/services/finreport/internal/store"
 )
 
@@ -18,7 +19,7 @@ func (emptyStore) Lag(context.Context) ([]store.LagRow, error) { return nil, nil
 // The handler must build without panicking (chi refuses middleware added after
 // routes) and serve health plus a tenant-scoped reporting route.
 func TestNewHandler_ServesHealthAndTenantRoutes(t *testing.T) {
-	h := newHandler(emptyStore{})
+	h := newHandler(emptyStore{}, config.Reporting{})
 	for _, tc := range []struct {
 		path    string
 		headers map[string]string

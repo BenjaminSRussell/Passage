@@ -2,12 +2,45 @@
 
 Report definitions (row, column and tree designer model), statement runs over
 the reporting read model, and drill-down from a statement cell to its balance
-keys. Phase 2 exit wave. Reads from its own `reporting` database, fed by ledger
+keys and on to the journal lines, their source documents and traces. Phase 2
+exit wave. Reads from its own `reporting` database, fed by ledger
 events.
 
-## Status: slice 4
+## Status: slice 5
 
-Slice 4 adds (on top of slices 1 to 3, below):
+Slice 5 adds drill level 2 (FR-15.7, BR-15.4; on top of slices 1 to 4, below):
+
+- `reporting_journal_line` (migration 0005, RLS): one row per ledger line with
+  posting sequence, line number, posting date, period, account, combination,
+  currency type, voucher, debit, credit (net generated as debit - credit),
+  closing flag, source document link and trace id. `PutJournalLines` writes it
+  (validated: a source link must be a Passage route or an http(s) URL, never
+  `javascript:` or `//host`; a stored line is a replay and is kept). The ledger
+  consumer that will feed it is a later slice; tests load lines through it.
+- `GET /runs/{id}/cells/{row}/{column}/lines?key=&cursor=&limit=`: the lines of
+  the cell's balance keys (or of one key, `key` = its position in the level 1
+  list) at the run's HWM, closing entries left out for income statements and
+  cash flows, ordered by (posting date, posting sequence, line number, key) and
+  keyset paged (default `REPORTING_PAGE_SIZE`, at most 1,000). Each line shows
+  debit, credit and the amount as the cell shows it: every balance key now
+  records its row's sign (`credit`), so a total mixing credit and debit rows
+  signs each line correctly. Every page carries `sumOfLines`, `cumulativeSum`
+  (the final page's equals the cell value when the lines reconcile) and the
+  reconciliation of all the lines against the keys (`reconciled`,
+  `linesTotal`, `difference`, `unreconciledKeys`): a gap in the read model is
+  reported, never hidden. Needs the ledger's "View ledger transactions" duty
+  (`ledger.journal.read`, PRD §2.15.5).
+- `traceUrl` on each line from `REPORTING_TRACE_URL` (an http(s) template with
+  `{traceId}`, validated at startup; empty shows the id without a link).
+- AC-15.3: a domain property test (random lines aggregated into balances,
+  every cell's lines sum to it) and a Postgres property test that walks every
+  cell's pages at random page sizes and ends on the cell value.
+- Web: "Show all journal lines" and per-balance "Lines" in the drill panel open
+  a journal lines panel (breadcrumb Statement › cell › Balances › Lines) with
+  load more, the reconciliation note or warning, source document links (in-app
+  route or new tab) and trace links.
+
+Slice 4 added:
 
 - Run outputs as HTML and XLSX (FR-15.6, PRD §2.15.15):
   `GET /runs/{id}/outputs/html` is one self-contained HTML document (inline
@@ -132,7 +165,7 @@ internal/store/         Postgres store (pgx), tenant transactions, outbox writes
 internal/api/           HTTP handlers under /api/v1/reporting
 internal/events/        event types and payloads
 internal/config/        REPORTING_* tunables, validated at startup
-migrations/             SQL applied in order (0003 run checks, 0004 schedules); FS embedded in migrations.go
+migrations/             SQL applied in order (0003 run checks, 0004 schedules, 0005 journal lines); FS embedded in migrations.go
 api/openapi.yaml        OpenAPI 3.1 for every endpoint
 events/asyncapi.yaml    AsyncAPI 3 for every event
 charts/finreport/       Helm chart
@@ -178,10 +211,12 @@ tests check that `api/openapi.yaml` lists exactly the registered routes and that
 | `REPORTING_SHARE_LINK_EXPIRY_DAYS` | 14 | 1-90 | Shared link lifetime |
 | `REPORTING_PDF_CONCURRENCY_PER_POD` | 4 | 1-16 | Renderer queue width |
 | `REPORTING_OPA_CACHE_SECONDS` | 60 | 5-600 | Dimension security cache |
+| `REPORTING_TRACE_URL` | empty | http(s) URL containing `{traceId}` | Trace viewer link of a drill-down line (Tempo through Grafana) |
 
-The values are validated and logged, but nothing reads them yet: the lag gate,
-drill level 2, large cells, the report library, distribution, the PDF renderer
-and dimension security that use them are later slices (NOT-IMPLEMENTED.md).
+The values are validated and logged. Drill level 2 reads `REPORTING_PAGE_SIZE`
+and `REPORTING_TRACE_URL`; the lag gate, large cells, the report library,
+distribution, the PDF renderer and dimension security that use the others are
+later slices (NOT-IMPLEMENTED.md).
 
 ## Duties
 
@@ -191,6 +226,7 @@ and dimension security that use them are later slices (NOT-IMPLEMENTED.md).
 | `reporting.statement.run` | `POST /runs` |
 | `reporting.statement.view` | definition list and GET, run list and reads, cells, drill level 1, CSV, HTML and XLSX output, lag |
 | `reporting.statement.schedule` | schedule list, GET and PUT |
+| `ledger.journal.read` (wave 11, "View ledger transactions") | drill level 2 (`.../lines`) |
 
 ## Error codes
 
@@ -213,14 +249,15 @@ Problem details use `type` `https://passage.dev/problems/<code>`.
 | REPORT-0012 | 422 | Unsupported schema version on import (`REPORT_IMPORT_SCHEMA`) |
 | REPORT-0020 | 404 | Definition or version not found; retire of a code that was never published |
 | REPORT-0024 | 404 | Statement run not found (also for a run id that is not a UUID) |
-| REPORT-0025 | 404 | Cell not found in the run |
+| REPORT-0025 | 404 | Cell not found in the run; balance key position past the cell's keys, or a key of a computed cell (drill level 2) |
+| REPORT-0028 | 422 | Journal line refused by the read model (date, period, amounts beyond six places, currency type, unsafe source link) |
 | REPORT-0099 | 500 | Drill invariant failed: balance keys do not sum to the cell (never served) |
 | conflict_version | 412 | Draft or schedule revision in `If-Match` is stale (409 when two creates race) |
 | precondition_required | 428 | Draft or schedule exists and `If-Match` was not sent |
 | idempotency_key_reuse | 422 | Idempotency-Key reused for a different run or import request |
 | idempotency_key_in_flight | 409 | A concurrent request with the same Idempotency-Key won; retry to get the replay |
 | COM-0001 | 422 | Shape violation in a definition or hierarchy (codes, names, labels, rules, members without id or key); hierarchy body code mismatches the path |
-| COM-0002 | 400/422 | Malformed body, bad If-Match, bad list limit or run parameters (ledgerId not a UUID, calendar quarter not 1-4) |
+| COM-0002 | 400/422 | Malformed body, bad If-Match, bad list or line page limit, key or cursor, or run parameters (ledgerId not a UUID, calendar quarter not 1-4) |
 | COM-0003 | 400 | `Idempotency-Key` header missing on `POST /runs` |
 | REPORT-0026 | 422 | Definition has no rows or columns, or more than 2,000 rows or 60 columns; hierarchy has no nodes, more than 20,000 nodes, more than 12 levels or a cycle |
 | REPORT-0027 | 404 | Hierarchy, its draft or a published version not found |

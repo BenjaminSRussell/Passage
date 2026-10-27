@@ -53,6 +53,8 @@ spec:
               value: {{ .Values.reporting.pdfConcurrencyPerPod | quote }}
             - name: REPORTING_OPA_CACHE_SECONDS
               value: {{ .Values.reporting.opaCacheSeconds | quote }}
+            - name: REPORTING_TRACE_URL
+              value: {{ .Values.reporting.traceUrl | quote }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }

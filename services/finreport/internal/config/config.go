@@ -6,6 +6,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 )
@@ -23,6 +24,20 @@ type Reporting struct {
 	ShareLinkExpiryDays  int // shared link lifetime
 	PDFConcurrencyPerPod int // renderer queue width
 	OPACacheSeconds      int // dimension security cache (BR-15.7)
+	// TraceURL is the link a drill-down line's trace id opens (FR-15.7: "trace
+	// id link to Tempo"), an http(s) URL template containing {traceId}, for
+	// example https://grafana.example/explore?traceId={traceId}. Empty means
+	// trace ids are shown without a link.
+	TraceURL string
+}
+
+// TraceLink returns the trace viewer link for id, or "" when no template is
+// configured or id is empty.
+func (cfg Reporting) TraceLink(id string) string {
+	if cfg.TraceURL == "" || id == "" {
+		return ""
+	}
+	return strings.ReplaceAll(cfg.TraceURL, "{traceId}", url.QueryEscape(id))
 }
 
 // setting is one variable: its name, default and inclusive range.
@@ -66,6 +81,13 @@ func FromEnv(getenv func(string) string) (Reporting, error) {
 			problems = append(problems, fmt.Sprintf("%s must be between %d and %d, got %d", s.env, s.min, s.max, n))
 		default:
 			*s.dst = n
+		}
+	}
+	cfg.TraceURL = strings.TrimSpace(getenv("REPORTING_TRACE_URL"))
+	if cfg.TraceURL != "" {
+		u, err := url.Parse(cfg.TraceURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || !strings.Contains(cfg.TraceURL, "{traceId}") {
+			problems = append(problems, fmt.Sprintf("REPORTING_TRACE_URL must be an http(s) URL containing {traceId}, got %q", cfg.TraceURL))
 		}
 	}
 	if len(problems) > 0 {

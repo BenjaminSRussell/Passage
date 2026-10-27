@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -403,6 +404,30 @@ func TestTenantIsolation(t *testing.T) {
 	}
 	if got := outboxTypes(t, ctx2, app); len(got) != 0 {
 		t.Fatalf("tenant 2 outbox = %v", got)
+	}
+	// Journal lines and drill level 2 are tenant-scoped.
+	if err := st.PutJournalLines(ctx1, []domain.JournalLine{{LedgerID: ledger, PostingSequence: 1, LineNumber: 1, PostingDate: "2026-03-01",
+		PeriodYear: 2026, PeriodNo: 3, Account: "1000", Combination: "-", CurrencyType: "acct", Debit: decimal.NewFromInt(10)}}); err != nil {
+		t.Fatal(err)
+	}
+	if page, err := st.DrillLines(ctx1, run.ID, "R001", "C01", LineQuery{Key: -1, Limit: 10}); err != nil || len(page.Items) != 1 || !page.Reconciliation.Reconciled() {
+		t.Fatalf("tenant 1 drilling its own run = %+v, %v", page, err)
+	}
+	if _, err := st.DrillLines(ctx2, run.ID, "R001", "C01", LineQuery{Key: -1, Limit: 10}); problemCode(err) != CodeRunNotFound {
+		t.Fatalf("tenant 2 drilling tenant 1's run = %v", err)
+	}
+	err = dbx.WithTenantTx(ctx2, app, func(tx pgx.Tx) error {
+		var n int
+		if err := tx.QueryRow(ctx2, `select count(*) from reporting_journal_line`).Scan(&n); err != nil {
+			return err
+		}
+		if n != 0 {
+			return fmt.Errorf("tenant 2 sees %d of tenant 1's journal lines", n)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	// The same code and Idempotency-Key are independent per tenant.
 	if _, _, err := st.SaveDraft(ctx2, storeFixtureDefinition("TENANT-ONE"), nil); err != nil {

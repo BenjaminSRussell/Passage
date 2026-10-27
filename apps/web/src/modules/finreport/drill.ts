@@ -58,3 +58,30 @@ export function displayAmount(value: string, places = 2): string {
   const frac = places > 0 ? `.${(rounded % scale).toString().padStart(places, "0")}` : "";
   return `${negative && rounded !== BigInt(0) ? "-" : ""}${whole}${frac}`;
 }
+
+export type SourceLink = { kind: "route"; to: string } | { kind: "external"; href: string };
+
+/**
+ * Resolves a journal line's source document link (FR-15.7): an absolute
+ * Passage route opens in the app, an http(s) URL opens outside it, and
+ * anything else (javascript:, data:, protocol-relative "//host") gets no link.
+ */
+export function sourceLink(uri: string | undefined): SourceLink | null {
+  if (!uri) return null;
+  if (uri.startsWith("/")) {
+    return uri.startsWith("//") || uri.includes("\\") ? null : { kind: "route", to: uri };
+  }
+  const href = httpUrl(uri);
+  return href ? { kind: "external", href } : null;
+}
+
+/** Returns the URL when it is an absolute http or https URL, otherwise null. */
+export function httpUrl(value: string | undefined): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return (url.protocol === "http:" || url.protocol === "https:") && url.host ? url.href : null;
+  } catch {
+    return null;
+  }
+}

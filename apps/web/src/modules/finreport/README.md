@@ -1,4 +1,4 @@
-# finreport web module (PSG-15, wave 15 slices 1-3)
+# finreport web module (PSG-15, wave 15 slices 1-5)
 
 Financial statements workspace over the `services/finreport` API
 (`/api/v1/reporting`). Pages use the shell primitives and `pages.module.css`.
@@ -7,7 +7,7 @@ Financial statements workspace over the `services/finreport` API
 | --- | --- | --- |
 | `/finreport` | Statement runs (report library list) and read-model lag | `GET /runs`, `GET /lag` |
 | `/finreport/runs/new` | Run a published definition for a ledger and period | `GET /definitions`, `POST /runs` (Idempotency-Key) |
-| `/finreport/runs/:runId` | Statement grid with the "as of" stamp and the run's warnings (REPORT-0015); select an amount to drill to its balance keys; Download CSV, XLSX and HTML | `GET /runs/{id}`, `GET /runs/{id}/cells`, `GET /definitions/{code}?version=n`, `GET .../balances`, `GET /runs/{id}/outputs/{csv,xlsx,html}` (links) |
+| `/finreport/runs/:runId` | Statement grid with the "as of" stamp and the run's warnings (REPORT-0015); select an amount to drill to its balance keys, then to the journal lines of all of them or of one, with source document and trace links; Download CSV, XLSX and HTML | `GET /runs/{id}`, `GET /runs/{id}/cells`, `GET /definitions/{code}?version=n`, `GET .../balances`, `GET .../lines?key=&cursor=`, `GET /runs/{id}/outputs/{csv,xlsx,html}` (links) |
 | `/finreport/definitions` | Report definitions list with status, standard definitions with install, and JSON import | `GET /definitions`, `GET /standard-definitions`, `POST /standard-definitions:install`, `POST /definitions/import` |
 | `/finreport/definitions/new`, `/finreport/definitions/:code` | Designer: rows, columns, validate, save draft (If-Match), publish, export, retire (with confirmation) | `GET/PUT /definitions/{code}`, `:validate`, `:publish`, `:retire`, `/export` |
 | `/finreport/hierarchies` | Derived hierarchies list: version, members, unassigned count, open draft | `GET /hierarchies` |
@@ -19,6 +19,16 @@ The drill panel checks exactly that the keys sum to the cell value (decimal
 strings summed as integer micro-units, no floats) and warns otherwise.
 Computed cells (calculation rows, CALC columns) explain that they have no
 balances behind them.
+
+Drill level 2 (`LinesPanel.tsx`) opens from "Show all journal lines" or a
+balance's "Lines" button. It loads a page at a time ("Load more lines"), shows
+the running sum and the HWM, and states whether the lines add up to the amount;
+when the service reports `reconciled: false` it shows a warning with the
+difference instead of the "sum to" note. Source links open a Passage route in
+the app or an http(s) document in a new tab; any other link (`javascript:`,
+`//host`) is shown as "None" (`sourceLink` in `drill.ts`). The trace opens
+`traceUrl` when the service is configured with `REPORTING_TRACE_URL`. A 403
+explains that the View ledger transactions duty is needed.
 
 The run form builds the fiscal calendar from whole years (opening period 0 plus
 N periods) until the ledger calendar API exists (wave 14 handoff).
@@ -34,7 +44,8 @@ would refuse (code, UUID ledgers, email recipients, formats, limit) before
 sending; the service checks the cron and time zone (REPORT-0018).
 
 Not yet here: reporting trees, hierarchies as statement row sets, live preview and drag reorder in the designer,
-PDF and XLSX downloads, the schedule run history, share links, audit trail and
-drill level 2 (journal lines). See `services/finreport/NOT-IMPLEMENTED.md`.
+PDF downloads, the schedule run history, share links, audit trail, keyboard
+cell-by-cell navigation of the statement and the dimension-security
+"filtered amount" warning. See `services/finreport/NOT-IMPLEMENTED.md`.
 
 Needs: nothing outside the module. No npm dependencies were added.

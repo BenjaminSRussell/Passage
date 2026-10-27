@@ -21,3 +21,7 @@ reporting:
   shareLinkExpiryDays: 14
   pdfConcurrencyPerPod: 4
   opaCacheSeconds: 60
+  # Trace viewer link for drill-down lines (FR-15.7), an http(s) URL with a
+  # {traceId} slot, e.g. https://grafana.example/explore?traceId={traceId}.
+  # Empty shows trace ids without a link.
+  traceUrl: ""

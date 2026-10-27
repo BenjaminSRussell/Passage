@@ -315,6 +315,79 @@ paths:
                     items: {$ref: '#/components/schemas/BalanceKey'}
         '404': {$ref: '#/components/responses/Problem'}
         '500': {$ref: '#/components/responses/Problem'}
+  /api/v1/reporting/runs/{id}/cells/{row}/{column}/lines:
+    parameters:
+      - $ref: '#/components/parameters/RunId'
+      - name: row
+        in: path
+        required: true
+        schema: {type: string}
+      - name: column
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      operationId: drillLines
+      summary: Drill level 2 - journal lines behind a cell or one of its balance keys (FR-15.7, BR-15.4)
+      description: >-
+        Lines of the cell's balances at the run's high-water mark, closing
+        entries left out for income statements and cash flows, ordered by
+        (postingDate, postingSequence, lineNumber, key) and keyset paged.
+        amount is the line as the cell shows it (credit keys show -net). Every
+        page carries sumOfLines (this page), cumulativeSum (through this page;
+        on the final page it equals linesTotal) and the reconciliation of all
+        the lines against the balance keys: reconciled is false, with the
+        difference, when the read model is missing lines - never hidden.
+        Computed cells answer computed=true with no lines.
+      x-passage-duty: ledger.journal.read
+      parameters:
+        - name: key
+          in: query
+          required: false
+          description: Position of one balance key in the drill level 1 list; omitted means the whole cell
+          schema: {type: integer, minimum: 0}
+        - name: cursor
+          in: query
+          required: false
+          description: nextCursor of the previous page
+          schema: {type: string}
+        - name: limit
+          in: query
+          required: false
+          description: Lines per page, 1 to 1000; default REPORTING_PAGE_SIZE (500)
+          schema: {type: integer, minimum: 1, maximum: 1000}
+      responses:
+        '200':
+          description: One page of lines with page and running sums and the reconciliation
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [runId, row, column, key, blank, computed, value, hwm, limit, items, sumOfLines, cumulativeSum, nextCursor,
+                  linesTotal, difference, unreconciledKeys, reconciled]
+                properties:
+                  runId: {type: string, format: uuid}
+                  row: {type: string}
+                  column: {type: string}
+                  key: {type: [integer, 'null'], description: The selected balance key, null for the whole cell}
+                  blank: {type: boolean}
+                  computed: {type: boolean}
+                  value: {$ref: '#/components/schemas/Decimal'}
+                  hwm: {type: integer, format: int64, description: Posting sequence the run reflects; later lines are not listed}
+                  limit: {type: integer}
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/DrillLine'}
+                  sumOfLines: {$ref: '#/components/schemas/Decimal'}
+                  cumulativeSum: {$ref: '#/components/schemas/Decimal'}
+                  nextCursor: {type: [string, 'null']}
+                  linesTotal: {$ref: '#/components/schemas/Decimal'}
+                  difference: {$ref: '#/components/schemas/Decimal'}
+                  unreconciledKeys: {type: integer}
+                  reconciled: {type: boolean}
+        '400': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
   /api/v1/reporting/runs/{id}/outputs/{format}:
     parameters:
       - $ref: '#/components/parameters/RunId'
@@ -839,6 +912,26 @@ components:
         combination: {type: string}
         currencyType: {type: string}
         amount: {$ref: '#/components/schemas/Decimal'}
+    DrillLine:
+      type: object
+      required: [key, postingDate, postingSequence, lineNumber, voucher, period, account, combination, currencyType, debit, credit, amount, closingEntry]
+      properties:
+        key: {type: integer, description: Position of the line's balance key in the drill level 1 list}
+        postingDate: {type: string, format: date}
+        postingSequence: {type: integer, format: int64}
+        lineNumber: {type: integer}
+        voucher: {type: string}
+        period: {type: string, pattern: '^[0-9]{4}-[0-9]{2}$'}
+        account: {type: string}
+        combination: {type: string}
+        currencyType: {type: string, enum: [acct, rpt, txn]}
+        debit: {$ref: '#/components/schemas/Decimal'}
+        credit: {$ref: '#/components/schemas/Decimal'}
+        amount: {$ref: '#/components/schemas/Decimal'}
+        closingEntry: {type: boolean}
+        sourceUri: {type: string, description: Passage route (/...) or http(s) URL of the source document}
+        traceId: {type: string}
+        traceUrl: {type: string, description: Trace viewer link when REPORTING_TRACE_URL is set}
     LagRow:
       type: object
       properties:

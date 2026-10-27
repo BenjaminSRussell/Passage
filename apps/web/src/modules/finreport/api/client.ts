@@ -129,6 +129,48 @@ export interface DrillResponse {
   keys: BalanceKey[];
 }
 
+/** One journal line under a cell (drill level 2, BR-15.4). amount is the line as the cell shows it. */
+export interface DrillLine {
+  /** Position of the line's balance key in the drill level 1 list. */
+  key: number;
+  postingDate: string;
+  postingSequence: number;
+  lineNumber: number;
+  voucher: string;
+  period: string;
+  account: string;
+  combination: string;
+  currencyType: string;
+  debit: string;
+  credit: string;
+  amount: string;
+  closingEntry: boolean;
+  sourceUri?: string;
+  traceId?: string;
+  traceUrl?: string;
+}
+
+/** One page of drill level 2 with its sums and the reconciliation of every line against the balance keys. */
+export interface LinePage {
+  runId: string;
+  row: string;
+  column: string;
+  key: number | null;
+  blank: boolean;
+  computed: boolean;
+  value: string;
+  hwm: number;
+  limit: number;
+  items: DrillLine[];
+  sumOfLines: string;
+  cumulativeSum: string;
+  nextCursor: string | null;
+  linesTotal: string;
+  difference: string;
+  unreconciledKeys: number;
+  reconciled: boolean;
+}
+
 export interface LagRow {
   ledgerId: string;
   postingSequence: number;
@@ -269,6 +311,22 @@ export async function listCells(runId: string, signal?: AbortSignal): Promise<Ce
 /** Drill level 1: the balance keys behind one cell. */
 export function drillBalances(runId: string, row: string, column: string, signal?: AbortSignal): Promise<DrillResponse> {
   return get<DrillResponse>(`/runs/${seg(runId)}/cells/${seg(row)}/${seg(column)}/balances`, signal);
+}
+
+/** Drill level 2: one page of the journal lines behind a cell, or behind one of its balance keys. */
+export function drillLines(
+  runId: string,
+  row: string,
+  column: string,
+  opts: { key?: number; cursor?: string; limit?: number } = {},
+  signal?: AbortSignal,
+): Promise<LinePage> {
+  const query = new URLSearchParams();
+  if (opts.key !== undefined) query.set("key", String(opts.key));
+  if (opts.cursor) query.set("cursor", opts.cursor);
+  if (opts.limit !== undefined) query.set("limit", String(opts.limit));
+  const qs = query.toString();
+  return get<LinePage>(`/runs/${seg(runId)}/cells/${seg(row)}/${seg(column)}/lines${qs ? `?${qs}` : ""}`, signal);
 }
 
 export async function getLag(signal?: AbortSignal): Promise<LagRow[]> {

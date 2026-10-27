@@ -13,7 +13,7 @@ import { SchedulesPage } from "./SchedulesPage";
 const finreport: PassageModule = {
   id: "finreport",
   title: "Financial statements",
-  description: "Report definitions, statement runs over the journal with drill-down to the balances behind every amount, CSV exports and distribution schedules.",
+  description: "Report definitions, statement runs over the journal with drill-down to the balances and journal lines behind every amount, downloads and distribution schedules.",
   routes: [
     { path: "/finreport", element: createElement(RunsPage), handle: { title: "Financial statements" } },
     { path: "/finreport/runs/new", element: createElement(NewRunPage), handle: { title: "Run a statement" } },

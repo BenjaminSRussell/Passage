@@ -16,6 +16,7 @@ import {
 } from "./api/client";
 import { checkDrill, displayAmount } from "./drill";
 import { CURRENCY_TYPE_LABELS, periodLabel } from "./format";
+import { LinesPanel } from "./LinesPanel";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -153,7 +154,13 @@ export function RunPage() {
         empty={{ title: "This statement has no rows" }}
       />
       {selected && selectedRow && selectedCol ? (
-        <DrillPanel runId={run.id} row={selected.row} column={selected.column} title={`${selectedRow.label}, ${selectedCol.label}`} />
+        <DrillPanel
+          key={`${selected.row}/${selected.column}`}
+          runId={run.id}
+          row={selected.row}
+          column={selected.column}
+          title={`${selectedRow.label}, ${selectedCol.label}`}
+        />
       ) : (
         <p className={styles.note}>Select an amount to see the balances that make it up.</p>
       )}
@@ -161,17 +168,37 @@ export function RunPage() {
   );
 }
 
-const keyColumns: DataTableColumn<BalanceKey>[] = [
-  { key: "account", header: "Account", mono: true },
-  { key: "period", header: "Period", mono: true },
-  { key: "combination", header: "Dimensions", mono: true },
-  { key: "currencyType", header: "Currency type", mono: true },
-  { key: "amount", header: "Amount", mono: true, align: "end", render: (k) => displayAmount(k.amount) },
-];
+type IndexedKey = BalanceKey & { index: number };
 
-/** Drill level 1: the balances behind a cell, with the exact-sum check shown (BR-15.4). */
+function keyLabel(k: BalanceKey): string {
+  return `account ${k.account}, ${k.period}`;
+}
+
+/**
+ * Drill level 1: the balances behind a cell, with the exact-sum check shown
+ * (BR-15.4), and the way into level 2: every balance, or all of them, opens
+ * its journal lines.
+ */
 export function DrillPanel({ runId, row, column, title }: { runId: string; row: string; column: string; title: string }) {
   const drill = useLoad((signal) => drillBalances(runId, row, column, signal), `${runId}/${row}/${column}`);
+  const [lines, setLines] = useState<{ key: number | null } | null>(null);
+
+  const keyColumns: DataTableColumn<IndexedKey>[] = [
+    { key: "account", header: "Account", mono: true },
+    { key: "period", header: "Period", mono: true },
+    { key: "combination", header: "Dimensions", mono: true },
+    { key: "currencyType", header: "Currency type", mono: true },
+    { key: "amount", header: "Amount", mono: true, align: "end", render: (k) => displayAmount(k.amount) },
+    {
+      key: "lines",
+      header: "Journal lines",
+      render: (k) => (
+        <Button size="sm" variant="ghost" aria-pressed={lines?.key === k.index} onClick={() => setLines({ key: k.index })} aria-label={`Show journal lines of ${keyLabel(k)}`}>
+          Lines
+        </Button>
+      ),
+    },
+  ];
 
   let body;
   if (drill.error) {
@@ -181,7 +208,7 @@ export function DrillPanel({ runId, row, column, title }: { runId: string; row: 
       </Alert>
     );
   } else if (!drill.data || drill.loading) {
-    body = <DataTable label="Balances" columns={keyColumns} rows={[]} getRowKey={(k) => k.account} loading />;
+    body = <DataTable label="Balances" columns={keyColumns} rows={[]} getRowKey={(k) => String(k.index)} loading />;
   } else if (drill.data.computed) {
     body = (
       <p className={styles.note}>
@@ -204,16 +231,44 @@ export function DrillPanel({ runId, row, column, title }: { runId: string; row: 
         <DataTable
           label="Balances"
           columns={keyColumns}
-          rows={drill.data.keys}
-          getRowKey={(k) => `${k.ledgerId}/${k.period}/${k.account}/${k.combination}/${k.currencyType}`}
+          rows={drill.data.keys.map((k, index) => ({ ...k, index }))}
+          getRowKey={(k) => String(k.index)}
           empty={{ title: "No balances", description: "No posting falls in this row and column." }}
         />
       </>
     );
   }
+  const keys = drill.data?.keys ?? [];
+  const canShowLines = Boolean(drill.data && !drill.data.computed && keys.length > 0);
+  const selectedKey = lines?.key !== null && lines?.key !== undefined ? keys[lines.key] : undefined;
   return (
-    <Card title={`Balances for ${title}`} actions={<Badge tone="neutral">Drill level 1</Badge>}>
-      {body}
-    </Card>
+    <>
+      <Card
+        title={`Balances for ${title}`}
+        actions={
+          <>
+            <Badge tone="neutral">Drill level 1</Badge>
+            {canShowLines ? (
+              <Button size="sm" aria-pressed={lines?.key === null} onClick={() => setLines({ key: null })}>
+                Show all journal lines
+              </Button>
+            ) : null}
+          </>
+        }
+      >
+        {body}
+      </Card>
+      {lines && canShowLines ? (
+        <LinesPanel
+          runId={runId}
+          row={row}
+          column={column}
+          keyIndex={lines.key}
+          title={title}
+          keyLabel={selectedKey ? keyLabel(selectedKey) : undefined}
+          onClose={() => setLines(null)}
+        />
+      ) : null}
+    </>
   );
 }

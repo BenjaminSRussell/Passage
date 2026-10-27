@@ -29,6 +29,9 @@ type Balance struct {
 
 // Key is one balance that contributed to a cell, with its displayed amount
 // (sign presentation applied, BR-15.3). Level 1 drill-down returns these.
+// Credit records that the amount is -net because the row the balance came
+// from shows credits positive; a total row mixes keys of both signs, so drill
+// level 2 signs each line by its key, not by the cell's row.
 type Key struct {
 	LedgerID     string          `json:"ledger"`
 	Period       string          `json:"period"`
@@ -36,7 +39,13 @@ type Key struct {
 	Combination  string          `json:"combination"`
 	CurrencyType string          `json:"currencyType"`
 	Amount       decimal.Decimal `json:"amount"`
+	Credit       bool            `json:"credit,omitempty"`
 }
+
+// ExcludesClosing reports whether a statement kind leaves closing entries out:
+// income statements, and cash flows so the year-end transfer to equity is not
+// a cash flow (BR-15.2, BR-15.5). Evaluation and drill level 2 share it.
+func ExcludesClosing(k Kind) bool { return k == KindIncomeStatement || k == KindCashFlow }
 
 // Cell is one row x column value of a statement run. Computed cells (calculation
 // rows and CALC columns) are derived from other cells and carry no balance keys.
@@ -335,7 +344,7 @@ func (e *evaluator) sumBalances(row Row, ci int) cellVal {
 	// Closing entries are left out of income statements and of cash flow
 	// movements, so the year-end transfer to equity is not a cash flow (BR-15.2,
 	// BR-15.5).
-	excludeClosing := e.def.Kind == KindIncomeStatement || e.def.Kind == KindCashFlow
+	excludeClosing := ExcludesClosing(e.def.Kind)
 	periods := e.cal.Periods()
 	var out cellVal
 	for i := range periods {
@@ -362,7 +371,7 @@ func (e *evaluator) sumBalances(row Row, ci int) cellVal {
 			}
 			out.v = out.v.Add(amt)
 			out.keys = append(out.keys, Key{LedgerID: b.LedgerID, Period: periods[i].Label(), Account: b.Account,
-				Combination: b.Combination, CurrencyType: b.CurrencyType, Amount: amt})
+				Combination: b.Combination, CurrencyType: b.CurrencyType, Amount: amt, Credit: credit})
 		}
 	}
 	return out
