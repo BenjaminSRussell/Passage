@@ -349,13 +349,13 @@ func TestSeedReference_RejectsMalformedFilesBeforeAnyWrite(t *testing.T) {
 }
 
 func TestSeedReference_PlatformRowsAreSeededOnceAndReadOnlyForTenants(t *testing.T) {
-	pool := testkit.DB(t)
+	admin, pool := testkit.DBWithApp(t)
 	ctx := principalContext(1)
-	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 2; i++ {
-		if err := store.SeedReference(ctx, pool, migrations.Reference); err != nil {
+		if err := store.SeedReference(ctx, admin, migrations.Reference); err != nil {
 			t.Fatalf("seed run %d: %v", i+1, err)
 		}
 	}
@@ -369,7 +369,7 @@ func TestSeedReference_PlatformRowsAreSeededOnceAndReadOnlyForTenants(t *testing
 	}
 
 	var secured int
-	if err := pool.QueryRow(ctx, `select count(*) from pg_class where relname = any('{country,currency,region,language,reference_status,unit_of_measure,uom_conversion}')
+	if err := admin.QueryRow(ctx, `select count(*) from pg_class where relname = any('{country,currency,region,language,reference_status,unit_of_measure,uom_conversion}')
 		and relnamespace = current_schema()::regnamespace and relrowsecurity and relforcerowsecurity`).Scan(&secured); err != nil || secured != 7 {
 		t.Fatalf("tables with forced RLS = %d, %v; want 7", secured, err)
 	}

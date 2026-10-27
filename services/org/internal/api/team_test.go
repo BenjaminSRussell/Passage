@@ -133,7 +133,7 @@ func TestIdempotencyKeyLengthIsBounded(t *testing.T) {
 	if atLimit.Code != http.StatusCreated {
 		t.Fatalf("at limit = %d %s", atLimit.Code, atLimit.Body)
 	}
-	if tooLong.Code != http.StatusBadRequest || !strings.Contains(tooLong.Body.String(), "idempotency_key_too_long") {
+	if tooLong.Code != http.StatusBadRequest || !strings.Contains(tooLong.Body.String(), "COM-0001") || !strings.Contains(tooLong.Body.String(), "Idempotency-Key") {
 		t.Fatalf("too long = %d %s", tooLong.Code, tooLong.Body)
 	}
 }

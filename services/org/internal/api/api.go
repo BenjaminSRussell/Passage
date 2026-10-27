@@ -150,18 +150,16 @@ func New(s store.Store) *API {
 	return &API{store: s, geocoder: domain.NullGeocoder{}, postings: noPostings{}, now: time.Now}
 }
 
-func boundIdempotencyKey(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if len(r.Header.Get(idempotencyKey)) > maxIdempotencyKeyLength {
-			httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "idempotency_key_too_long", "Idempotency-Key must be at most 200 characters"))
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+func idempotencyKeyOf(w http.ResponseWriter, r *http.Request) (string, bool) {
+	key := r.Header.Get(idempotencyKey)
+	if len(key) > maxIdempotencyKeyLength {
+		badQuery(w, r, idempotencyKey, "at most 200 bytes")
+		return "", false
+	}
+	return key, true
 }
 
 func (a *API) Register(r chi.Router) {
-	r = r.With(boundIdempotencyKey)
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutyLegalEntity)).Post("/v1/org/legal-entities", a.createLegalEntity)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/org/legal-entities", a.listLegalEntities)
@@ -275,7 +273,11 @@ func (a *API) createLegalEntity(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, p)
 		return
 	}
-	entity, err := a.store.CreateLegalEntity(r.Context(), in, r.Header.Get(idempotencyKey))
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
+		return
+	}
+	entity, err := a.store.CreateLegalEntity(r.Context(), in, idemKey)
 	if err != nil {
 		a.failed.Add(1)
 		slog.Error("create legal entity failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))

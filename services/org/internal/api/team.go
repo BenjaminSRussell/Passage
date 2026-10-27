@@ -114,7 +114,11 @@ func (a *API) createTeamType(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	created, inserted, err := a.store.CreateTeamType(r.Context(), in, r.Header.Get(idempotencyKey))
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
+		return
+	}
+	created, inserted, err := a.store.CreateTeamType(r.Context(), in, idemKey)
 	if err != nil {
 		slog.Error("create team type failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
@@ -232,7 +236,11 @@ func (a *API) createTeam(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	created, inserted, err := a.store.CreateTeam(r.Context(), in, r.Header.Get(idempotencyKey))
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
+		return
+	}
+	created, inserted, err := a.store.CreateTeam(r.Context(), in, idemKey)
 	if err != nil {
 		slog.Error("create team failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
@@ -472,7 +480,11 @@ func (a *API) addTeamMember(w http.ResponseWriter, r *http.Request, teamID strin
 		validationFailed(w, r, fields)
 		return
 	}
-	created, inserted, err := a.store.AddTeamMember(r.Context(), teamID, in, a.now(), r.Header.Get(idempotencyKey))
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
+		return
+	}
+	created, inserted, err := a.store.AddTeamMember(r.Context(), teamID, in, a.now(), idemKey)
 	if err != nil {
 		slog.Error("add team member failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)

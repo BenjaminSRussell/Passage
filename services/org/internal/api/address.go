@@ -175,7 +175,11 @@ func (a *API) createAddress(w http.ResponseWriter, r *http.Request) {
 	}
 	in := req.toAddress()
 	a.geocodeAddress(r, req, &in)
-	address, err := a.store.CreateAddress(r.Context(), in, r.Header.Get(idempotencyKey))
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
+		return
+	}
+	address, err := a.store.CreateAddress(r.Context(), in, idemKey)
 	if err != nil {
 		slog.Error("create address failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)

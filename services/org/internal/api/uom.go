@@ -159,7 +159,11 @@ func (a *API) createUnit(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	unit, err := a.store.CreateUnit(r.Context(), in, r.Header.Get(idempotencyKey))
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
+		return
+	}
+	unit, err := a.store.CreateUnit(r.Context(), in, idemKey)
 	if err != nil {
 		slog.Error("create unit failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
@@ -251,7 +255,11 @@ func (a *API) createConversion(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	conv, created, err := a.store.CreateConversion(r.Context(), store.Conversion{FromCode: req.FromCode, ToCode: req.ToCode, Factor: factor, Offset: offset}, r.Header.Get(idempotencyKey))
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
+		return
+	}
+	conv, created, err := a.store.CreateConversion(r.Context(), store.Conversion{FromCode: req.FromCode, ToCode: req.ToCode, Factor: factor, Offset: offset}, idemKey)
 	if err != nil {
 		slog.Error("create conversion failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)

@@ -3,22 +3,24 @@ GO_MODULES := $(shell find platform/go services -name go.mod -not -path '*/node_
 TS_PACKAGES := $(shell find apps services -maxdepth 2 -name package.json -not -path '*/node_modules/*' -exec dirname {} \; 2>/dev/null)
 PY_PACKAGES := $(shell find services -maxdepth 2 -name pyproject.toml -exec dirname {} \; 2>/dev/null)
 
-# Packages whose Postgres tests fail against the migrations as shipped: the app role
-# gets no schema USAGE/table grants (a grants migration like metadata's is missing),
-# or row-level scoping leaks. Skipped by testkit until each service closes its gap;
-# remove an entry when its package passes with PASSAGE_TEST_APP_DATABASE_URL set.
-PASSAGE_TEST_DB_SKIP_PACKAGES := \
+# Packages whose Postgres tests fail against the migrations as shipped. Skipped by
+# testkit until each gap closes; remove an entry when its package passes with
+# PASSAGE_TEST_APP_DATABASE_URL set.
+# #195: no passage_app grants migration (schema USAGE and table grants).
+SKIP_MISSING_GRANTS := \
 	services/billing/internal/store \
 	services/costing/internal/store \
 	services/fieldservice/internal/store \
 	services/fulfillment/internal/store \
-	services/org/internal/store \
 	services/planning/internal/store \
 	services/projects/internal/store \
+	services/treasury/internal/store
+# #194: tenant/legal-entity isolation leaks.
+SKIP_ISOLATION_LEAKS := \
 	services/purchasing/internal/store \
 	services/receivables/internal/store \
-	services/revrec/internal/store \
-	services/treasury/internal/store
+	services/revrec/internal/store
+PASSAGE_TEST_DB_SKIP_PACKAGES := $(SKIP_MISSING_GRANTS) $(SKIP_ISOLATION_LEAKS)
 export PASSAGE_TEST_DB_SKIP_PACKAGES
 
 .PHONY: test test-go test-ts test-py test-e2e vet lint-charts roadmap prd deploy-local destroy-local check-deploy-local

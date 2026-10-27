@@ -1,3 +1,6 @@
+# Same-namespace pods reach the API; Prometheus reaches the admin port. A caller or
+# ingress controller in another namespace is denied until it is listed in
+# networkPolicy.ingressNamespaces.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -12,6 +15,11 @@ spec:
   ingress:
     - from:
         - podSelector: {}
+        {{- range .Values.networkPolicy.ingressNamespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+        {{- end }}
       ports:
         - { protocol: TCP, port: 8080 }
     - from:

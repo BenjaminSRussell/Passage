@@ -98,7 +98,11 @@ func (a *API) createOperatingUnit(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	unit, err := a.store.CreateOperatingUnit(r.Context(), in, r.Header.Get(idempotencyKey))
+	idemKey, keyOK := idempotencyKeyOf(w, r)
+	if !keyOK {
+		return
+	}
+	unit, err := a.store.CreateOperatingUnit(r.Context(), in, idemKey)
 	if err != nil {
 		slog.Error("create operating unit failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
