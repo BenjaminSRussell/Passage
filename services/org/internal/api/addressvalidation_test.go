@@ -33,6 +33,7 @@ func TestAddressNormalize(t *testing.T) {
 		{"rules return formatted text and no suggestions", domain.RuleAddressValidator{}, `{"countryCode":"FR","city":"Paris","postalCode":"75001","street1":"1 Rue de Rivoli"}`, "org.read", true, http.StatusOK, `"formatted":"1 Rue de Rivoli\n75001 Paris\nFR","suggestions":[]`},
 		{"null default echoes the input", domain.NullAddressValidator{}, `{"countryCode":"GB","postalCode":"sw1a1aa"}`, "org.read", true, http.StatusOK, `"postalCode":"sw1a1aa"`},
 		{"missing country", domain.RuleAddressValidator{}, `{"postalCode":"75001"}`, "org.read", true, http.StatusBadRequest, `"countryCode"`},
+		{"61-character city", domain.RuleAddressValidator{}, `{"countryCode":"US","city":"` + strings.Repeat("c", 61) + `"}`, "org.read", true, http.StatusBadRequest, `"city"`},
 		{"unknown field", domain.RuleAddressValidator{}, `{"countryCode":"US","surprise":1}`, "org.read", true, http.StatusBadRequest, "COM-0001"},
 		{"adapter failure", failingValidator{}, `{"countryCode":"US"}`, "org.read", true, http.StatusInternalServerError, ""},
 		{"without duty", domain.RuleAddressValidator{}, `{"countryCode":"US"}`, "", true, http.StatusForbidden, "AUTH-0003"},

@@ -46,7 +46,7 @@ func countryRules(t *testing.T) map[string]domain.CountryRule {
 func TestRuleAddressValidator_SevenCountryFixture(t *testing.T) {
 	rules := countryRules(t)
 	rows := fixtureRows(t, "../../testdata/addresses-7-countries.csv")
-	valid, invalid := 0, 0
+	valid, invalid, suggested := 0, 0, 0
 	for _, r := range rows {
 		in := domain.PostalAddress{CountryCode: r[0], RegionCode: r[1], City: r[2], Street1: r[3], PostalCode: r[4]}
 		normalized, err := domain.RuleAddressValidator{}.Normalize(context.Background(), in)
@@ -54,6 +54,23 @@ func TestRuleAddressValidator_SevenCountryFixture(t *testing.T) {
 			t.Fatal(err)
 		}
 		problems := domain.CheckCountryRules(normalized, rules[r[0]])
+		known, adapterValid := domain.PostalValid(normalized.CountryCode, normalized.PostalCode)
+		if !known || adapterValid != (len(problems) == 0) {
+			t.Errorf("%s %q: adapter says known %v valid %v but the country rule reports %v", r[0], r[4], known, adapterValid, problems)
+		}
+		suggestions, err := domain.RuleAddressValidator{}.Suggest(context.Background(), in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(suggestions) > 0 && r[6] == "true" {
+			t.Errorf("%s %q: valid address got suggestions %v", r[0], r[4], suggestions)
+		}
+		for _, s := range suggestions {
+			suggested++
+			if p := domain.CheckCountryRules(s.Address, rules[r[0]]); len(p) != 0 {
+				t.Errorf("%s %q: suggestion %q fails the country rule %v", r[0], r[4], s.Address.PostalCode, p)
+			}
+		}
 		switch r[6] {
 		case "true":
 			valid++
@@ -70,6 +87,9 @@ func TestRuleAddressValidator_SevenCountryFixture(t *testing.T) {
 	if valid != 140 || invalid != 70 {
 		t.Fatalf("fixture has %d valid and %d invalid rows, want 140 and 70", valid, invalid)
 	}
+	if suggested < 3 {
+		t.Fatalf("invalid rows produced %d suggestions, want at least 3", suggested)
+	}
 }
 
 func TestRuleAddressValidator_Normalize(t *testing.T) {
@@ -82,6 +102,7 @@ func TestRuleAddressValidator_Normalize(t *testing.T) {
 			domain.PostalAddress{CountryCode: "GB", City: "London", PostalCode: "SW1A 1AA", Street1: "10 Downing St"}},
 		{"us zip plus four", domain.PostalAddress{CountryCode: "us", RegionCode: "ca", PostalCode: "941051234"},
 			domain.PostalAddress{CountryCode: "US", RegionCode: "CA", PostalCode: "94105-1234"}},
+		{"iso3 aliases", domain.PostalAddress{CountryCode: "can", PostalCode: "k1a0b1"}, domain.PostalAddress{CountryCode: "CA", PostalCode: "K1A 0B1"}},
 		{"unknown country keeps shape", domain.PostalAddress{CountryCode: "NL", PostalCode: " 1011 ab "},
 			domain.PostalAddress{CountryCode: "NL", PostalCode: "1011 AB"}},
 	}

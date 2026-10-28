@@ -1632,7 +1632,7 @@ components:
       type: object
       required: [countryCode]
       additionalProperties: false
-      properties: { countryCode: { type: string }, regionCode: { type: string }, city: { type: string }, postalCode: { type: string }, street1: { type: string }, street2: { type: string }, street3: { type: string }, building: { type: string }, poBox: { type: string } }
+      properties: { countryCode: { type: string, maxLength: 3 }, regionCode: { type: string, maxLength: 3 }, city: { type: string, maxLength: 60 }, postalCode: { type: string, maxLength: 12 }, street1: { type: string, maxLength: 100 }, street2: { type: string, maxLength: 100 }, street3: { type: string, maxLength: 100 }, building: { type: string, maxLength: 20 }, poBox: { type: string, maxLength: 20 } }
     NormalizedAddress:
       type: object
       required: [address, formatted, suggestions]

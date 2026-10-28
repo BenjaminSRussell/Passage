@@ -78,10 +78,11 @@ func run(ctx context.Context, getenv func(string) string) error {
 	}
 	st := store.New(pool).WithTreeLimits(limits)
 	if seedPackage != "" {
-		if err := seed.Run(ctx, st, seedTenant, seedPackage); err != nil {
+		result, err := seed.Run(ctx, st, seedTenant, seedPackage)
+		if err != nil {
 			return fmt.Errorf("seed %s: %w", seedPackage, err)
 		}
-		slog.Info("seed package applied", "package", seedPackage, "tenantId", seedTenant)
+		slog.Info("seed package applied", "package", seedPackage, "tenantId", seedTenant, "created", result.Created, "present", result.Present)
 	}
 	a := api.New(st)
 	a.SetAddressValidator(validator)

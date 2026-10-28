@@ -1,10 +1,9 @@
 package api
 
 import (
-	"log/slog"
+	"fmt"
 	"net/http"
-
-	"github.com/go-chi/chi/v5/middleware"
+	"unicode/utf8"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/org/internal/domain"
@@ -33,6 +32,21 @@ type normalizedAddress struct {
 	Suggestions []addressSuggestionBody `json:"suggestions"`
 }
 
+func (b postalAddressBody) tooLong() map[string]string {
+	fields := map[string]string{}
+	for field, value := range map[string]string{"city": b.City, "postalCode": b.PostalCode, "street1": b.Street1, "street2": b.Street2, "street3": b.Street3, "building": b.Building, "poBox": b.POBox} {
+		if utf8.RuneCountInString(value) > addressFieldMax[field] {
+			fields[field] = fmt.Sprintf("must be at most %d characters", addressFieldMax[field])
+		}
+	}
+	for field, value := range map[string]string{"countryCode": b.CountryCode, "regionCode": b.RegionCode} {
+		if utf8.RuneCountInString(value) > 3 {
+			fields[field] = "must be at most 3 characters"
+		}
+	}
+	return fields
+}
+
 func (b postalAddressBody) postal() domain.PostalAddress {
 	return domain.PostalAddress{CountryCode: b.CountryCode, RegionCode: b.RegionCode, City: b.City, PostalCode: b.PostalCode,
 		Street1: b.Street1, Street2: b.Street2, Street3: b.Street3, Building: b.Building, POBox: b.POBox}
@@ -49,9 +63,12 @@ func (a *API) normalizeAddress(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
+	if fields := req.tooLong(); len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return
+	}
 	normalized, err := a.validator.Normalize(r.Context(), req.postal())
 	if err != nil {
-		slog.Error("normalize address failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
 		return
 	}
@@ -61,7 +78,6 @@ func (a *API) normalizeAddress(w http.ResponseWriter, r *http.Request) {
 	}
 	suggestions, err := a.validator.Suggest(r.Context(), normalized)
 	if err != nil {
-		slog.Error("suggest address failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
 		return
 	}

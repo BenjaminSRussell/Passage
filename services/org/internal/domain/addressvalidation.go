@@ -44,7 +44,7 @@ var (
 			}
 			return c
 		}},
-		"CA": {regexp.MustCompile(`^[A-Z][0-9][A-Z] [0-9][A-Z][0-9]$`), func(c string) string {
+		"CA": {regexp.MustCompile(`^[ABCEGHJ-NPRSTVXY][0-9][ABCEGHJ-NPRSTV-Z] [0-9][ABCEGHJ-NPRSTV-Z][0-9]$`), func(c string) string {
 			if len(c) == 6 {
 				return c[:3] + " " + c[3:]
 			}
@@ -61,10 +61,15 @@ var (
 		"IN": {regexp.MustCompile(`^[1-9][0-9]{5}$`), identity},
 		"MX": {regexp.MustCompile(`^[0-9]{5}$`), identity},
 	}
-	countryAliases = map[string]string{"UK": "GB", "USA": "US"}
+	countryAliases = map[string]string{"UK": "GB", "USA": "US", "GBR": "GB", "CAN": "CA", "DEU": "DE", "FRA": "FR", "MEX": "MX", "IND": "IN"}
 	leadingZero    = map[string]bool{"US": true, "DE": true, "FR": true, "MX": true}
 	digitLookalike = strings.NewReplacer("O", "0", "I", "1")
 )
+
+func PostalValid(country, postal string) (known, valid bool) {
+	rule, known := postalRules[country]
+	return known, known && rule.valid.MatchString(postal)
+}
 
 func squeeze(s string) string { return strings.Join(strings.Fields(s), " ") }
 
