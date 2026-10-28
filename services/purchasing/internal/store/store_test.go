@@ -30,11 +30,11 @@ func principalContext(n int) context.Context {
 
 func migrated(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	pool := testkit.DB(t)
-	if err := dbx.Migrate(context.Background(), pool, migrations.FS); err != nil {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	return pool
+	return app
 }
 
 func dec(s string) decimal.Decimal { return decimal.RequireFromString(s) }

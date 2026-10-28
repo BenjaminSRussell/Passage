@@ -15,12 +15,7 @@ SKIP_MISSING_GRANTS := \
 	services/planning/internal/store \
 	services/projects/internal/store \
 	services/treasury/internal/store
-# #194: tenant/legal-entity isolation leaks.
-SKIP_ISOLATION_LEAKS := \
-	services/purchasing/internal/store \
-	services/receivables/internal/store \
-	services/revrec/internal/store
-PASSAGE_TEST_DB_SKIP_PACKAGES := $(SKIP_MISSING_GRANTS) $(SKIP_ISOLATION_LEAKS)
+PASSAGE_TEST_DB_SKIP_PACKAGES := $(SKIP_MISSING_GRANTS)
 export PASSAGE_TEST_DB_SKIP_PACKAGES
 
 .PHONY: test test-go test-ts test-py test-e2e vet lint-charts roadmap prd deploy-local destroy-local check-deploy-local

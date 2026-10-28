@@ -24,11 +24,11 @@ func tenantCtx(n int) context.Context {
 
 func setup(t *testing.T) *Postgres {
 	t.Helper()
-	pool := testkit.DB(t)
-	if err := dbx.Migrate(context.Background(), pool, migrations.FS); err != nil {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	return New(pool)
+	return New(app)
 }
 
 func ptr[T any](v T) *T { return &v }
