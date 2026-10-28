@@ -2,9 +2,12 @@ package store
 
 import (
 	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
@@ -185,8 +188,139 @@ func TestPostgres_SetTablesAreAppendOnlyForTheAppRole(t *testing.T) {
 		`update ledger_account_mapping set target_account = 'x'`,
 		`delete from ledger_account_mapping`,
 	} {
-		if _, err := e.pool.Exec(e.ctx, stmt); err == nil {
-			t.Errorf("passage_app must not run %q", stmt)
+		err := dbx.WithTenantTx(e.ctx, e.pool, func(tx pgx.Tx) error {
+			_, err := tx.Exec(e.ctx, stmt)
+			return err
+		})
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
+			t.Errorf("passage_app must get insufficient_privilege for %q, got %v", stmt, err)
 		}
+	}
+}
+
+func TestPostgres_SetPostingLeavesLeadingLedgerAccountsUnmapped(t *testing.T) {
+	e := setupLedgerSet(t)
+	if _, err := e.store.CreateAccountMapping(e.ctx, AccountMapping{LedgerID: e.ledger.ID, SourceAccount: "6010", TargetAccount: "2110", EffectiveFrom: "2026-01-01"}); err != nil {
+		t.Fatalf("mapping on the leading ledger: %v", err)
+	}
+	out, err := e.store.PostSetEntry(e.ctx, e.set.ID, vendorInvoice("", "SET-LEAD", "15.00"))
+	if err != nil {
+		t.Fatalf("post set: %v", err)
+	}
+	for _, entry := range out.Entries {
+		if entry.LedgerID == e.ledger.ID && entry.Lines[0].Account != "6010" {
+			t.Fatalf("the leading ledger keeps the original account, got %s", entry.Lines[0].Account)
+		}
+	}
+}
+
+func TestPostgres_SetPostingMappingDateBoundary(t *testing.T) {
+	e := setupLedgerSet(t)
+	if _, err := e.store.CreateAccountMapping(e.ctx, AccountMapping{LedgerID: e.tax.ID, SourceAccount: "6010", TargetAccount: "2100", EffectiveFrom: "2026-03-10"}); err != nil {
+		t.Fatalf("mapping: %v", err)
+	}
+	taxAccount := func(key string, date time.Time) string {
+		in := vendorInvoice("", key, "9.00")
+		in.PostingDate = date
+		out, err := e.store.PostSetEntry(e.ctx, e.set.ID, in)
+		if err != nil {
+			t.Fatalf("post %s: %v", key, err)
+		}
+		for _, entry := range out.Entries {
+			if entry.LedgerID == e.tax.ID {
+				return entry.Lines[0].Account
+			}
+		}
+		t.Fatal("no tax entry")
+		return ""
+	}
+	if got := taxAccount("B-1", time.Date(2026, 3, 9, 0, 0, 0, 0, time.UTC)); got != "6010" {
+		t.Errorf("the day before effectiveFrom must not map, got %s", got)
+	}
+	if got := taxAccount("B-2", time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC)); got != "2100" {
+		t.Errorf("effectiveFrom itself must map, got %s", got)
+	}
+}
+
+func TestPostgres_LedgerSetNeedsOneLeadingLedgerPerLegalEntity(t *testing.T) {
+	e := setupLedgerSet(t)
+	alt, err := e.store.CreateLedger(e.ctx, Ledger{LegalEntityID: e.le, Code: "ALT", Name: "Alt", ChartCode: "STD", Currency: "USD", FuturePostingDays: 366})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.store.CreateLedgerSet(e.ctx, LedgerSetInput{Code: "ALT", Name: "alt", LeadingLedgerID: alt.ID, ParallelLedgerIDs: []string{e.tax.ID}})
+	var rej *domain.RejectedError
+	if !errors.As(err, &rej) || rej.Violations[0].Code != CodeSetLeadingConflict {
+		t.Fatalf("a second leading ledger must be refused, got %v", err)
+	}
+	if _, err := e.store.CreateLedgerSet(e.ctx, LedgerSetInput{Code: "ALT2", Name: "alt", LeadingLedgerID: e.ledger.ID, ParallelLedgerIDs: []string{alt.ID}}); err != nil {
+		t.Fatalf("a second set under the same leading ledger is allowed: %v", err)
+	}
+}
+
+func TestPostgres_AccountMappingTargetMustBePostableInTheLedgerChart(t *testing.T) {
+	e := setupLedgerSet(t)
+	if _, _, err := e.store.PutAccount(e.ctx, "LOC", "7999", Account{Name: "Total", Type: "reporting", Postable: false}); err != nil {
+		t.Fatal(err)
+	}
+	for target, code := range map[string]string{"9999": "LEDGER_ACCOUNT_NOT_FOUND", "7999": "LEDGER_ACCOUNT_NOT_POSTABLE", "2110": "LEDGER_ACCOUNT_NOT_FOUND"} {
+		_, err := e.store.CreateAccountMapping(e.ctx, AccountMapping{LedgerID: e.local.ID, SourceAccount: "2100", TargetAccount: target, EffectiveFrom: "2026-01-01"})
+		var rej *domain.RejectedError
+		if !errors.As(err, &rej) || rej.Violations[0].Code != code {
+			t.Errorf("target %s: want %s, got %v", target, code, err)
+		}
+	}
+}
+
+func TestPostgres_LedgerSetTablesRespectLegalEntityScope(t *testing.T) {
+	e := setupLedgerSet(t)
+	other := principalCtx(e.tenant, ids.New())
+	if _, err := e.store.GetLedgerSet(other, e.set.ID); problemCode(err) != CodeSetNotFound {
+		t.Errorf("a caller scoped to another legal entity must not see the set: %v", err)
+	}
+	if _, err := e.store.PostSetEntry(other, e.set.ID, vendorInvoice("", "SCOPE", "1.00")); problemCode(err) != CodeSetNotFound {
+		t.Errorf("a caller scoped to another legal entity must not post the set: %v", err)
+	}
+	for _, table := range []string{"ledger_set", "ledger_set_member", "ledger_account_mapping"} {
+		var n int
+		err := dbx.WithTenantTx(other, e.pool, func(tx pgx.Tx) error {
+			return tx.QueryRow(other, `select count(*) from `+table).Scan(&n)
+		})
+		if err != nil || n != 0 {
+			t.Errorf("%s: other legal entity sees %d rows (err %v)", table, n, err)
+		}
+	}
+}
+
+func TestPostgres_ConcurrentSetPostsWithOneKeyPostOnce(t *testing.T) {
+	e := setupLedgerSet(t)
+	in := vendorInvoice("", "SET-RACE", "33.00")
+	const workers = 6
+	results := make([]EntryResult, workers)
+	errs := make([]error, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[i], errs[i] = e.store.PostSetEntry(e.ctx, e.set.ID, in)
+		}()
+	}
+	wg.Wait()
+	fresh := 0
+	for i := range results {
+		if errs[i] != nil {
+			t.Fatalf("worker %d: %v", i, errs[i])
+		}
+		if !results[i].Idempotency.Replayed {
+			fresh++
+		}
+		if len(results[i].Entries) != 3 || results[i].Entries[0].ID != results[0].Entries[0].ID {
+			t.Fatalf("worker %d saw different entries", i)
+		}
+	}
+	if fresh != 1 || e.entryCount(t) != 3 {
+		t.Fatalf("want one fresh post and 3 entries, got %d fresh, %d entries", fresh, e.entryCount(t))
 	}
 }

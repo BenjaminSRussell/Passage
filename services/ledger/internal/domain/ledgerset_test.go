@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shopspring/decimal"
 	"pgregory.net/rapid"
 )
 
@@ -36,28 +35,39 @@ func TestApplyMappings_LatestEffectiveMappingWins(t *testing.T) {
 	}
 }
 
-func TestProperty_MappedEntriesStayBalanced(t *testing.T) {
-	pd := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+func TestProperty_MappingFollowsGreatestEffectiveDateOnOrBeforePosting(t *testing.T) {
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	day := func(t *rapid.T, label string) time.Time {
+		return base.AddDate(0, 0, rapid.IntRange(0, 60).Draw(t, label))
+	}
 	rapid.Check(t, func(t *rapid.T) {
 		lines := balancedEntry(t)
-		targets := []string{"1000", "2000", "5000"}
+		for i := range lines {
+			lines[i].Dimensions = map[string]string{"DEPT": rapid.SampledFrom([]string{"D1", "D2"}).Draw(t, "dept")}
+			lines[i].Text = rapid.StringMatching(`[a-z]{0,8}`).Draw(t, "text")
+		}
 		var mappings []AccountMapping
-		for _, src := range []string{"1000", "2000"} {
-			if rapid.Bool().Draw(t, "map "+src) {
-				mappings = append(mappings, AccountMapping{Source: src, Target: rapid.SampledFrom(targets).Draw(t, "target "+src), EffectiveFrom: pd})
-			}
+		for n := rapid.IntRange(0, 6).Draw(t, "mappings"); n > 0; n-- {
+			mappings = append(mappings, AccountMapping{Source: rapid.SampledFrom([]string{"1000", "2000"}).Draw(t, "source"),
+				Target: rapid.SampledFrom([]string{"3000", "4000", "5000"}).Draw(t, "target"), EffectiveFrom: day(t, "from")})
 		}
-		mapped := ApplyMappings(lines, mappings, pd)
-		debit, credit := decimal.Zero, decimal.Zero
-		for _, l := range mapped {
-			if l.Side == SideDebit {
-				debit = debit.Add(l.Amount)
-			} else {
-				credit = credit.Add(l.Amount)
-			}
+		posting := day(t, "posting")
+		mapped := ApplyMappings(lines, mappings, posting)
+		if len(mapped) != len(lines) {
+			t.Fatalf("line count changed: %d != %d", len(mapped), len(lines))
 		}
-		if !debit.Equal(credit) || len(mapped) != len(lines) {
-			t.Fatalf("mapping changed totals: debit %s credit %s", debit, credit)
+		for i, l := range lines {
+			want := l.Account
+			var best time.Time
+			for _, m := range mappings {
+				if m.Source == l.Account && !m.EffectiveFrom.After(posting) && (best.IsZero() || m.EffectiveFrom.After(best)) {
+					want, best = m.Target, m.EffectiveFrom
+				}
+			}
+			got := mapped[i]
+			if got.Account != want || got.Side != l.Side || !got.Amount.Equal(l.Amount) || got.Text != l.Text || got.Dimensions["DEPT"] != l.Dimensions["DEPT"] {
+				t.Fatalf("line %d: got %+v, want account %s with %+v otherwise", i, got, want, l)
+			}
 		}
 	})
 }

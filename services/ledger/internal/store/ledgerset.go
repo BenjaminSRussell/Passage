@@ -23,6 +23,7 @@ const (
 	CodeSetCodeDuplicate    = "LEDGER_SET_CODE_DUPLICATE"
 	CodeMappingDuplicate    = "LEDGER_MAPPING_DUPLICATE"
 	CodeSetEntityMismatch   = "LEDGER_SET_LEGAL_ENTITY_MISMATCH"
+	CodeSetLeadingConflict  = "LEDGER_SET_LEADING_CONFLICT"
 	CodeSetCurrencyMismatch = "LEDGER_SET_CURRENCY_MISMATCH"
 )
 
@@ -87,6 +88,17 @@ func (s *Postgres) CreateLedgerSet(ctx context.Context, in LedgerSetInput) (Ledg
 				return setViolation(CodeSetCurrencyMismatch, "parallelLedgerIds", "every ledger of a set has the same accounting currency")
 			}
 		}
+		if _, err := loadLedger(ctx, tx, p.TenantID, in.LeadingLedgerID, true); err != nil {
+			return err
+		}
+		var conflicting int
+		if err := tx.QueryRow(ctx, `select count(*) from ledger_set where tenant_id = $1 and legal_entity_id = $2 and leading_ledger_id <> $3`,
+			p.TenantID, loaded[0].LegalEntityID, in.LeadingLedgerID).Scan(&conflicting); err != nil {
+			return err
+		}
+		if conflicting > 0 {
+			return setViolation(CodeSetLeadingConflict, "leadingLedgerId", "a legal entity has exactly one leading ledger; its sets must all use it")
+		}
 		out = LedgerSet{ID: ids.New(), LegalEntityID: loaded[0].LegalEntityID, Code: in.Code, Name: in.Name,
 			LeadingLedgerID: in.LeadingLedgerID, LedgerIDs: sorted}
 		if err := tx.QueryRow(ctx, `insert into ledger_set (tenant_id, id, legal_entity_id, code, name, leading_ledger_id)
@@ -143,6 +155,17 @@ func (s *Postgres) CreateAccountMapping(ctx context.Context, in AccountMapping) 
 		ledger, err := loadLedger(ctx, tx, p.TenantID, in.LedgerID, false)
 		if err != nil {
 			return err
+		}
+		targets, err := loadAccounts(ctx, tx, p.TenantID, ledger.ChartCode, []string{in.TargetAccount})
+		if err != nil {
+			return err
+		}
+		target, found := targets[in.TargetAccount]
+		if !found {
+			return setViolation("LEDGER_ACCOUNT_NOT_FOUND", "targetAccount", "account "+in.TargetAccount+" does not exist in chart "+ledger.ChartCode)
+		}
+		if !target.Postable {
+			return setViolation("LEDGER_ACCOUNT_NOT_POSTABLE", "targetAccount", "account "+in.TargetAccount+" is not postable")
 		}
 		_, err = tx.Exec(ctx, `insert into ledger_account_mapping (tenant_id, id, legal_entity_id, ledger_id, source_account, target_account, effective_from)
 			values ($1, $2, $3, $4, $5, $6, $7::text::date)`,
@@ -206,13 +229,15 @@ func postSetTx(ctx context.Context, tx pgx.Tx, tenantID, setID string, in PostIn
 	}
 	out = EntryResult{Idempotency: Idempotency{Key: in.Key}, TraceID: in.TraceID}
 	for _, ledger := range ledgers {
-		mappings, err := loadMappings(ctx, tx, tenantID, ledger.ID, in.PostingDate)
-		if err != nil {
-			return EntryResult{}, err
-		}
 		li := in
 		li.LedgerID = ledger.ID
-		li.Lines = domain.ApplyMappings(in.Lines, mappings, in.PostingDate)
+		if ledger.ID != set.LeadingLedgerID {
+			mappings, err := loadMappings(ctx, tx, tenantID, ledger.ID, in.PostingDate)
+			if err != nil {
+				return EntryResult{}, err
+			}
+			li.Lines = domain.ApplyMappings(in.Lines, mappings, in.PostingDate)
+		}
 		li.Key = setEntryKey(in.Key, ledger.ID)
 		entry, notices, err := postToLedger(ctx, tx, tenantID, ledger, li)
 		var rej *domain.RejectedError
@@ -225,11 +250,16 @@ func postSetTx(ctx context.Context, tx pgx.Tx, tenantID, setID string, in PostIn
 			return EntryResult{}, err
 		}
 		out.Entries = append(out.Entries, entry)
-		out.Notices = append(out.Notices, notices...)
+		for _, n := range notices {
+			n.Message = "ledger " + ledger.Code + ": " + n.Message
+			out.Notices = append(out.Notices, n)
+		}
 	}
 	return out, storeIdempotent(ctx, tx, tenantID, set.LegalEntityID, in.Key, in.Hash, out)
 }
 
+// Each set entry needs its own journal_entry.idempotency_key (unique per legal entity), so the
+// request key is hashed with the ledger id; the request key itself is stored once in idempotency_keys.
 func setEntryKey(key, ledgerID string) string {
 	sum := sha256.Sum256([]byte(key + "|" + ledgerID))
 	return hex.EncodeToString(sum[:])

@@ -17,8 +17,8 @@ const maxParallelLedgers = 20
 
 func (a *API) registerLedgerSets(r chi.Router) {
 	r.With(authz.RequireDuty(dutySetupWrite)).Post("/ledger-sets", a.createLedgerSet)
-	r.With(authz.RequireDuty(dutyRead)).Get("/ledger-sets/{id}", a.getLedgerSet)
-	r.With(authz.RequireDuty(dutyPost)).Post("/ledger-sets/{id}/journal-entries", a.postSetEntry)
+	r.With(authz.RequireDuty(dutyRead)).Get("/ledger-sets/{setId}", a.getLedgerSet)
+	r.With(authz.RequireDuty(dutyPost)).Post("/ledger-sets/{setId}/journal-entries", a.postSetEntry)
 	r.With(authz.RequireDuty(dutySetupWrite)).Post("/ledgers/{id}/account-mappings", a.createAccountMapping)
 }
 
@@ -73,7 +73,7 @@ func (a *API) getLedgerSet(w http.ResponseWriter, r *http.Request) {
 	if _, ok := principal(w, r); !ok {
 		return
 	}
-	id := chi.URLParam(r, "id")
+	id := chi.URLParam(r, "setId")
 	if !ids.Valid(id) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeSetNotFound, "ledger set not found"))
 		return
@@ -132,22 +132,32 @@ func (a *API) createAccountMapping(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, m)
 }
 
+type setEntryRequest struct {
+	DocumentID   string    `json:"documentId"`
+	PostingDate  string    `json:"postingDate"`
+	DocumentDate *string   `json:"documentDate"`
+	Description  string    `json:"description"`
+	Source       sourceDTO `json:"source"`
+	Lines        []lineDTO `json:"lines"`
+}
+
 func (a *API) postSetEntry(w http.ResponseWriter, r *http.Request) {
 	p, ok := principal(w, r)
 	if !ok {
 		return
 	}
-	setID := chi.URLParam(r, "id")
+	setID := chi.URLParam(r, "setId")
 	if !ids.Valid(setID) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeSetNotFound, "ledger set not found"))
 		return
 	}
-	var req postEntryRequest
-	if err := httpx.Decode(r, &req); err != nil {
+	var body setEntryRequest
+	if err := httpx.Decode(r, &body); err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
-	req.LedgerID = setID
+	req := postEntryRequest{LedgerID: setID, DocumentID: body.DocumentID, PostingDate: body.PostingDate,
+		DocumentDate: body.DocumentDate, Description: body.Description, Source: body.Source, Lines: body.Lines}
 	in, fields := a.toPostInput(req, r)
 	key := idempotencyKey(r, fields)
 	if len(fields) > 0 {

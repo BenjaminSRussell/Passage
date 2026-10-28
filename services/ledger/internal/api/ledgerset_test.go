@@ -26,6 +26,7 @@ func TestPostSetEntry_PassesSetAndCountsEveryEntry(t *testing.T) {
 		name, key, body string
 	}{
 		{"missing key", "", setEntryBody},
+		{"ledgerId sent", "k", strings.Replace(setEntryBody, `{"documentId"`, `{"ledgerId":"`+testLedger+`","documentId"`, 1)},
 		{"bad date", "k", strings.Replace(setEntryBody, "2026-03-31", "nope", 1)},
 	} {
 		headers := map[string]string{}

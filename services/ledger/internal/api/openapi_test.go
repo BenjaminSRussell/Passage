@@ -102,8 +102,8 @@ func TestOpenAPI_MatchesRoutes(t *testing.T) {
 		"POST /v1/ledger/journal-batches/{id}/post":                            dutyPost,
 		"POST /v1/ledger/journal-batches/{id}/cancel":                          dutyJournalWrite,
 		"POST /v1/ledger/ledger-sets":                                          dutySetupWrite,
-		"GET /v1/ledger/ledger-sets/{id}":                                      dutyRead,
-		"POST /v1/ledger/ledger-sets/{id}/journal-entries":                     dutyPost,
+		"GET /v1/ledger/ledger-sets/{setId}":                                   dutyRead,
+		"POST /v1/ledger/ledger-sets/{setId}/journal-entries":                  dutyPost,
 		"POST /v1/ledger/ledgers/{id}/account-mappings":                        dutySetupWrite,
 	}
 	for op, want := range duties {
