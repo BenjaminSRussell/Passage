@@ -26,6 +26,7 @@ internal/api/           HTTP handlers, DTOs, validation, duties
 internal/events/        event types and payloads
 migrations/             0001_revrec_init.sql: revenue_contract, performance_obligation, revenue_schedule, recognition_run, outbox
                         0002_ratable_basis.sql: revenue_contract.ratable_basis (DAILY | MONTHLY)
+                        0004_outbox_and_child_scope.sql: outbox tenant RLS and legal-entity scope inherited by child rows
 api/openapi.yaml        OpenAPI 3.1 for every endpoint
 events/asyncapi.yaml    AsyncAPI 3 for contract.allocated and schedule.recognized
 charts/revrec/          Helm chart (DATABASE_URL from the revrec-db secret, admin port, ServiceMonitor toggle)
@@ -116,7 +117,7 @@ in-memory store and cover validation, idempotent replays, If-Match, scope, dutie
 and readiness. The store tests (Postgres, non-superuser role so RLS applies)
 reproduce AC-29.4 end to end, April's carry-forward, contract completion, the
 outbox payloads, tenant and legal-entity isolation, the duplicate-key race, keyset
-pages, the method filter and the per-contract roll-forward summing to the entity.
+pages, the method filter, child-row scope and rejected cross-tenant outbox writes.
 `TestOpenAPI_MatchesRoutes` keeps `api/openapi.yaml` and the mounted routes and
 duties in step.
 

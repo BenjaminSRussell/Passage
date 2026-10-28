@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
@@ -35,6 +36,63 @@ func testStore(t *testing.T) (*Postgres, *pgxpool.Pool) {
 		t.Fatalf("migrate: %v", err)
 	}
 	return New(app), admin
+}
+
+func testAppStore(t *testing.T) (*Postgres, *pgxpool.Pool) {
+	t.Helper()
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	return New(app), app
+}
+
+func TestLegalEntityScopeRestrictsRevenueChildren(t *testing.T) {
+	s, app := testAppStore(t)
+	entityA, entityB := ids.New(), ids.New()
+	created, err := s.CreateContract(tenantCtx(1, entityA), bundleContract(t, entityA))
+	if err != nil {
+		t.Fatalf("create contract: %v", err)
+	}
+	if len(created.Obligations) == 0 || len(created.Obligations[len(created.Obligations)-1].Schedule) == 0 {
+		t.Fatal("fixture must contain obligations and schedule rows")
+	}
+	rows := []struct {
+		table string
+		id    string
+	}{
+		{table: "performance_obligation", id: created.Obligations[0].ID},
+		{table: "revenue_schedule", id: created.Obligations[len(created.Obligations)-1].Schedule[0].ID},
+	}
+	for _, row := range rows {
+		t.Run(row.table, func(t *testing.T) {
+			var count int
+			err := dbx.WithTenantTx(tenantCtx(1, entityB), app, func(tx pgx.Tx) error {
+				return tx.QueryRow(context.Background(), "SELECT count(*) FROM "+row.table+" WHERE tenant_id = $1 AND id = $2", testkit.TenantID(1), row.id).Scan(&count)
+			})
+			if err != nil {
+				t.Fatalf("query child row: %v", err)
+			}
+			if count != 0 {
+				t.Errorf("entity %s can see %s row %s owned by entity %s", entityB, row.table, row.id, entityA)
+			}
+		})
+	}
+}
+
+func TestOutboxRejectsTenantMismatch(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	err := dbx.WithTenantTx(tenantCtx(1, ""), app, func(tx pgx.Tx) error {
+		_, err := tx.Exec(context.Background(), `INSERT INTO outbox (id, tenant_id, aggregate_type, aggregate_id, type, payload)
+			VALUES ($1, $2, 'customer', $3, 'test', '{}'::jsonb)`, ids.New(), testkit.TenantID(2), ids.New())
+		return err
+	})
+	if err == nil {
+		t.Fatal("outbox accepted a row for a tenant outside the transaction scope")
+	}
 }
 
 // bundleContract builds the BR-29.1 bundle the way the API does: allocate, then
