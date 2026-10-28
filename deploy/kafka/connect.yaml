@@ -13,6 +13,8 @@ spec:
     acls:
       - resource: {type: topic, name: passage.platform., patternType: prefix}
         operations: [Create, Describe, Write, DescribeConfigs]
+      - resource: {type: topic, name: passage.metadata.entity, patternType: literal}
+        operations: [Create, Describe, Write, DescribeConfigs]
       - resource: {type: topic, name: passage-connect-, patternType: prefix}
         operations: [Create, Describe, Read, Write, DescribeConfigs]
       - resource: {type: group, name: passage-connect, patternType: literal}
@@ -102,6 +104,52 @@ spec:
     transforms.outbox.table.field.event.payload: payload
     transforms.outbox.route.by.field: aggregate_type
     transforms.outbox.route.topic.replacement: passage.platform.${routedByValue}
+    key.converter: org.apache.kafka.connect.storage.StringConverter
+    value.converter: io.debezium.converters.CloudEventsConverter
+    value.converter.serializer.type: json
+    value.converter.data.serializer.type: json
+    producer.override.acks: all
+    producer.override.enable.idempotence: true
+---
+# Topic naming: services/metadata writes aggregate_type "entity" and events.Topic
+# maps dev.passage.metadata.entity.published.v1 to passage.metadata.entity, which
+# is also the AsyncAPI channel. The PRD names dev.passage.metadata.entity.v1 in
+# AC-4.5; that is the CloudEvents type namespace, not a Kafka topic, and is wrong.
+# The metadata outbox has no partition_key column, so the key is aggregate_id.
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaConnector
+metadata:
+  name: outbox-metadata
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: passage-connect
+spec:
+  class: io.debezium.connector.postgresql.PostgresConnector
+  tasksMax: 1
+  config:
+    plugin.name: pgoutput
+    database.hostname: postgres.metadata.svc
+    database.port: 5432
+    database.user: ${secrets:kafka/debezium-cdc:username}
+    database.password: ${secrets:kafka/debezium-cdc:password}
+    database.dbname: passage_metadata
+    topic.prefix: passage.metadata
+    slot.name: passage_outbox_metadata
+    publication.name: passage_outbox_metadata
+    publication.autocreate.mode: filtered
+    table.include.list: public.outbox
+    tombstones.on.delete: false
+    topic.creation.default.replication.factor: 3
+    topic.creation.default.partitions: 12
+    topic.creation.default.cleanup.policy: delete
+    topic.creation.default.retention.ms: 2592000000
+    transforms: outbox
+    transforms.outbox.type: io.debezium.transforms.outbox.EventRouter
+    transforms.outbox.table.field.event.id: id
+    transforms.outbox.table.field.event.key: aggregate_id
+    transforms.outbox.table.field.event.payload: payload
+    transforms.outbox.route.by.field: aggregate_type
+    transforms.outbox.route.topic.replacement: passage.metadata.${routedByValue}
     key.converter: org.apache.kafka.connect.storage.StringConverter
     value.converter: io.debezium.converters.CloudEventsConverter
     value.converter.serializer.type: json

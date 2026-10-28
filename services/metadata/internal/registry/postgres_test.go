@@ -89,6 +89,25 @@ func outboxRows(ctx context.Context, t *testing.T, app *pgxpool.Pool, tenantID s
 	return rows
 }
 
+func TestOutboxReadWithoutTenantReturnsNoRows(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	tenantID := testkit.TenantID(3)
+	ctx := testkit.Ctx(tenantID)
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.NewPostgres(app).Publish(ctx, tenantID, baseEntity()); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := app.QueryRow(context.Background(), `select count(*) from outbox`).Scan(&n); err != nil {
+		t.Fatalf("select without tenant: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("rows visible without tenant = %d", n)
+	}
+}
+
 func TestPostgresPublishAndExtendWriteOutboxEvents(t *testing.T) {
 	admin, app := testkit.DBWithApp(t)
 	tenantID := testkit.TenantID(2)
