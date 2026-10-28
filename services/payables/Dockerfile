@@ -5,7 +5,8 @@ COPY services/payables services/payables
 WORKDIR /src/services/payables
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -buildid=" -o /out/payables ./cmd/payables
 
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM alpine:3.22
+RUN apk add --no-cache libxml2-utils
 COPY --from=build /out/payables /payables
 USER 65532:65532
 EXPOSE 8080 9090

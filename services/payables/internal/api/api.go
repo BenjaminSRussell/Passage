@@ -31,7 +31,10 @@ type Pinger interface {
 
 type API struct {
 	db           Pinger
+	files        FileValidator
 	now          func() time.Time
+	filePreviews atomic.Int64
+	statusParses atomic.Int64
 	previews     atomic.Int64
 	clientErrors atomic.Int64
 	serverFaults atomic.Int64
@@ -51,19 +54,30 @@ type problemBody struct {
 }
 
 var problemSlugs = map[string]string{
-	domain.CodeValidation: "validation_failed",
-	domain.CodeCurrency:   "validation_failed",
-	"COM-0001":            "validation_failed",
-	"AUTH-0001":           "forbidden_tenant",
+	domain.CodeValidation:  "validation_failed",
+	domain.CodeCurrency:    "validation_failed",
+	"COM-0001":             "validation_failed",
+	"AUTH-0001":            "forbidden_tenant",
+	domain.CodeRunInvalid:  "validation_failed",
+	domain.CodeFileInvalid: "validation_failed",
+	codeBodyTooLarge:       "payload_too_large",
 }
 
-func New(db Pinger, now func() time.Time) *API {
-	return &API{db: db, now: now, http: newRequestMetrics()}
+var unprocessableCodes = map[string]bool{
+	domain.CodeCurrency:    true,
+	domain.CodeRunInvalid:  true,
+	domain.CodeFileInvalid: true,
+}
+
+func New(db Pinger, files FileValidator, now func() time.Time) *API {
+	return &API{db: db, files: files, now: now, http: newRequestMetrics()}
 }
 
 func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutySettleRead)).Post("/v1/payables/settlements:preview", a.preview)
+	r.With(authz.RequireDuty(dutyPaymentFilePreview)).Post(pathPaymentFilePreview, a.previewPaymentFile)
+	r.With(authz.RequireDuty(dutyPaymentStatusParse)).Post(pathPaymentStatusParse, a.parsePaymentStatus)
 }
 
 func (a *API) ready(w http.ResponseWriter, r *http.Request) {
@@ -104,11 +118,11 @@ func (a *API) preview(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) reject(w http.ResponseWriter, r *http.Request, err error) {
 	a.clientErrors.Add(1)
-	slog.Warn("settlement preview rejected", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+	slog.Warn("request rejected", "err", err, "path", r.URL.Path, "correlationId", middleware.GetReqID(r.Context()))
 	var de *domain.Error
 	if errors.As(err, &de) {
 		status := http.StatusBadRequest
-		if de.Code == domain.CodeCurrency {
+		if unprocessableCodes[de.Code] {
 			status = http.StatusUnprocessableEntity
 		}
 		err = httpx.NewProblem(status, de.Code, de.Detail)
@@ -155,6 +169,8 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP payables_settlement_previews_total Successful settlement previews.\n# TYPE payables_settlement_previews_total counter\npayables_settlement_previews_total %d\n", a.previews.Load())
 		fmt.Fprintf(w, "# HELP payables_settlement_preview_client_errors_total Previews rejected as invalid input (4xx).\n# TYPE payables_settlement_preview_client_errors_total counter\npayables_settlement_preview_client_errors_total %d\n", a.clientErrors.Load())
 		fmt.Fprintf(w, "# HELP payables_settlement_preview_server_faults_total Previews that failed on a server fault (5xx).\n# TYPE payables_settlement_preview_server_faults_total counter\npayables_settlement_preview_server_faults_total %d\n", a.serverFaults.Load())
+		fmt.Fprintf(w, "# HELP payables_payment_file_previews_total Successful pain.001 previews.\n# TYPE payables_payment_file_previews_total counter\npayables_payment_file_previews_total %d\n", a.filePreviews.Load())
+		fmt.Fprintf(w, "# HELP payables_payment_status_parses_total Successful pain.002 status parses.\n# TYPE payables_payment_status_parses_total counter\npayables_payment_status_parses_total %d\n", a.statusParses.Load())
 		a.http.write(w)
 	})
 }

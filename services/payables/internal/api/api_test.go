@@ -35,7 +35,7 @@ func (f fakeDB) Ping(context.Context) error { return f.err }
 func fixedNow() time.Time { return time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC) }
 
 func newRouter(db fakeDB) (*chi.Mux, *api.API) {
-	a := api.New(db, fixedNow)
+	a := api.New(db, fakeValidator{}, fixedNow)
 	r := httpx.NewRouter()
 	a.Register(r)
 	return r, a
@@ -204,7 +204,7 @@ func scrape(a *api.API) string {
 }
 
 func TestMetricsSeparateClientErrorsFromServerFaults(t *testing.T) {
-	a := api.New(fakeDB{}, fixedNow)
+	a := api.New(fakeDB{}, fakeValidator{}, fixedNow)
 	r := httpx.NewRouter()
 	a.Register(r)
 	h := a.Instrument(r)
