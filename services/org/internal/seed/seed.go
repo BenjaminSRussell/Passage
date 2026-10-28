@@ -171,24 +171,27 @@ func (r *runner) operatingUnits(entityIDs map[string]string) (map[string]string,
 	if err != nil {
 		return nil, err
 	}
-	idsByCode := map[string]string{}
+	idsByTypeAndCode := map[string]string{}
 	for _, u := range page.Items {
-		idsByCode[u.Code] = u.ID
+		idsByTypeAndCode[operatingUnitKey(u.Type, u.Code)] = u.ID
 	}
 	for _, u := range demoOperatingUnits() {
-		_, existed := idsByCode[u.code]
+		key := operatingUnitKey(u.kind, u.code)
+		_, existed := idsByTypeAndCode[key]
 		if !existed {
 			entity := entityIDs[u.legalEntity]
 			created, err := r.st.CreateOperatingUnit(r.ctx, store.OperatingUnit{Code: u.code, Name: u.name, Type: u.kind, DefaultLegalEntityID: &entity}, keyPrefix+"ou:"+u.code)
 			if err != nil {
 				return nil, fmt.Errorf("operating unit %s: %w", u.code, err)
 			}
-			idsByCode[u.code] = created.ID
+			idsByTypeAndCode[key] = created.ID
 		}
 		r.tally(existed)
 	}
-	return idsByCode, nil
+	return idsByTypeAndCode, nil
 }
+
+func operatingUnitKey(kind, code string) string { return kind + "/" + code }
 
 func (r *runner) sites(entityIDs map[string]string) error {
 	page, err := r.st.ListSites(r.ctx, store.SiteFilter{}, store.SiteKey{}, listAll)
@@ -196,8 +199,10 @@ func (r *runner) sites(entityIDs map[string]string) error {
 		return err
 	}
 	existing := map[string]store.Site{}
+	legalEntityBySite := map[string]string{}
 	for _, s := range page.Items {
 		existing[s.LegalEntityID+"/"+s.Code] = s
+		legalEntityBySite[s.ID] = s.LegalEntityID
 	}
 	warehousePage, err := r.st.ListWarehouses(r.ctx, store.WarehouseFilter{}, store.SiteKey{}, listAll)
 	if err != nil {
@@ -205,7 +210,7 @@ func (r *runner) sites(entityIDs map[string]string) error {
 	}
 	warehouseIDs := map[string]string{}
 	for _, w := range warehousePage.Items {
-		warehouseIDs[w.Code] = w.ID
+		warehouseIDs[legalEntityBySite[w.SiteID]+"/"+w.Code] = w.ID
 	}
 	locationPage, err := r.st.ListLocations(r.ctx, store.LocationFilter{}, store.SiteKey{}, listAll)
 	if err != nil {
@@ -227,7 +232,7 @@ func (r *runner) sites(entityIDs map[string]string) error {
 			}
 			if site.DefaultWarehouseID != nil {
 				newDefault = *site.DefaultWarehouseID
-				warehouseIDs[first.code] = newDefault
+				warehouseIDs[site.LegalEntityID+"/"+first.code] = newDefault
 			}
 		}
 		r.tally(existed)
@@ -243,14 +248,15 @@ func (r *runner) sites(entityIDs map[string]string) error {
 
 func (r *runner) warehouses(site store.Site, s siteSeed, newDefault string, warehouseIDs map[string]string, locations map[string]bool) error {
 	for _, w := range s.warehouses {
-		id, existed := warehouseIDs[w.code]
+		key := site.LegalEntityID + "/" + w.code
+		id, existed := warehouseIDs[key]
 		if !existed {
 			created, err := r.st.CreateWarehouse(r.ctx, store.Warehouse{SiteID: site.ID, Code: w.code, Name: w.name, Type: w.kind}, keyPrefix+"wh:"+w.code)
 			if err != nil {
 				return fmt.Errorf("warehouse %s: %w", w.code, err)
 			}
 			id = created.ID
-			warehouseIDs[w.code] = id
+			warehouseIDs[key] = id
 		}
 		r.tally(existed && id != newDefault)
 		for _, l := range w.locations {
@@ -272,6 +278,18 @@ func (r *runner) siteAddress(site store.Site, s siteSeed) error {
 		return err
 	}
 	if current.AddressID != nil {
+		r.tally(true)
+		return nil
+	}
+	addresses, err := r.st.ListAddresses(r.ctx, store.AddressFilter{OwnerType: "site", OwnerID: site.ID}, "", 2)
+	if err != nil {
+		return err
+	}
+	if len(addresses.Items) > 0 {
+		addressID := addresses.Items[0].ID
+		if _, err := r.st.UpdateSite(r.ctx, site.ID, current.Version, store.SitePatch{AddressID: &addressID}); err != nil {
+			return fmt.Errorf("site %s address pointer: %w", s.code, err)
+		}
 		r.tally(true)
 		return nil
 	}
@@ -341,7 +359,7 @@ func (r *runner) teams(unitIDs map[string]string) error {
 		if !existing[t.code] {
 			team := store.Team{Code: t.code, Name: t.name, TeamTypeID: typeIDs[t.teamType], EffectiveFrom: validFrom}
 			if t.operatingUnit != "" {
-				unit := unitIDs[t.operatingUnit]
+				unit := unitIDs[operatingUnitKey("value_stream", t.operatingUnit)]
 				team.OperatingUnitID = &unit
 			}
 			if _, _, err := r.st.CreateTeam(r.ctx, team, keyPrefix+"team:"+t.code); err != nil {
