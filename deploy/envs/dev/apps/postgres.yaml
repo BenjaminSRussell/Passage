@@ -34,10 +34,9 @@ data:
     SQL
   40-org-db.sh: |
     psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" <<SQL
-    SELECT 'CREATE DATABASE passage_org' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'passage_org')\gexec
-    GRANT CONNECT, CREATE ON DATABASE passage_org TO passage_app;
-    \c passage_org
-    GRANT ALL ON SCHEMA public TO passage_app;
+    CREATE ROLE passage_org_owner LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD '$ORG_OWNER_PASSWORD';
+    SELECT 'CREATE DATABASE passage_org OWNER passage_org_owner' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'passage_org')\gexec
+    GRANT CONNECT ON DATABASE passage_org TO passage_app;
     SQL
 ---
 apiVersion: apps/v1
@@ -84,6 +83,9 @@ spec:
             - name: APP_PASSWORD
               valueFrom:
                 secretKeyRef: { name: hello-ledger-db, key: APP_PASSWORD }
+            - name: ORG_OWNER_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: hello-ledger-db, key: ORG_OWNER_PASSWORD, optional: true }
           ports:
             - { name: pg, containerPort: 5432 }
           readinessProbe:

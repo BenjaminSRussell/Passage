@@ -17,6 +17,8 @@ spec:
           repository: ghcr.io/benjaminsrussell/org
           digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
         migrateOnStart: true
+        migrateDatabaseSecret: org-db-owner
+        replicaCount: 1
   destination:
     server: https://kubernetes.default.svc
     namespace: hello-ledger
