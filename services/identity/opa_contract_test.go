@@ -23,7 +23,7 @@ import (
 
 const (
 	contractTenant   = "tenant-a"
-	seededDutyCount  = 94
+	seededDutyCount  = 97
 	unassignedUserID = "user-without-duty"
 )
 
@@ -316,9 +316,10 @@ func TestDutyContractExpectations(t *testing.T) {
 	}
 }
 
-var coveredServices = []string{"ledger", "fx", "tax", "close", "finreport", "inventory", "purchasing", "receiving", "payables"}
+var coveredServices = []string{"ledger", "fx", "tax", "close", "finreport", "inventory", "purchasing", "receiving", "payables", "party"}
 
 var dutyConstant = regexp.MustCompile(`(?m)\b[dD]uty[A-Za-z0-9]*\s*(?:string\s*)?=\s*"([^"]+)"`)
+var dutyLiteralCall = regexp.MustCompile(`(?:RequireDuty|HasDuty)\s*\(\s*"([^"]+)"`)
 
 func TestEveryServiceDutyIsSeeded(t *testing.T) {
 	raw, err := os.ReadFile("../../policies/authz/data.json")
@@ -332,15 +333,23 @@ func TestEveryServiceDutyIsSeeded(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, service := range coveredServices {
-		files, err := filepath.Glob(filepath.Join("..", service, "internal", "*", "*.go"))
+		root := filepath.Join("..", service, "internal")
+		var files []string
+		err := filepath.WalkDir(root, func(file string, entry os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() || !strings.HasSuffix(file, ".go") || strings.HasSuffix(file, "_test.go") {
+				return nil
+			}
+			files = append(files, file)
+			return nil
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		found := 0
 		for _, file := range files {
-			if strings.HasSuffix(file, "_test.go") {
-				continue
-			}
 			src, err := os.ReadFile(file)
 			if err != nil {
 				t.Fatal(err)
@@ -349,6 +358,12 @@ func TestEveryServiceDutyIsSeeded(t *testing.T) {
 				found++
 				if _, ok := seeded.Duties[match[1]]; !ok {
 					t.Errorf("%s: duty %q (%s) is not seeded in policies/authz/data.json", service, match[1], file)
+				}
+			}
+			for _, match := range dutyLiteralCall.FindAllStringSubmatch(string(src), -1) {
+				found++
+				if _, ok := seeded.Duties[match[1]]; !ok {
+					t.Errorf("%s: duty %q passed directly to RequireDuty/HasDuty is not seeded in policies/authz/data.json", service, match[1])
 				}
 			}
 		}
