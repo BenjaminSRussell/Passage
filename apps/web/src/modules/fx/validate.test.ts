@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { formatRate } from "./validate";
+import { deviationBeyondLimit, formatRate } from "./validate";
+
+describe("deviationBeyondLimit", () => {
+  it("is silent up to and including 10 percent and reports the size beyond it", () => {
+    expect(deviationBeyondLimit("1.0000", "1.1000")).toBeNull();
+    expect(deviationBeyondLimit("1.0000", "0.9000")).toBeNull();
+    expect(deviationBeyondLimit("1.0000", "1.1001")).toEqual({ percent: "10.0", direction: "above" });
+    expect(deviationBeyondLimit("1", "0.5")).toEqual({ percent: "50.0", direction: "below" });
+    expect(deviationBeyondLimit("0", "1")).toBeNull();
+  });
+});
 
 describe("formatRate", () => {
   it.each([

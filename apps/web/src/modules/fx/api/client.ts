@@ -119,6 +119,44 @@ export function lookupRate(q: LookupQuery, fetchImpl: FetchLike = defaultFetch):
   return send(`/api/v1/fx/rates?${params.toString()}`, GET, resolutionSchema, fetchImpl);
 }
 
+export interface RateTypeInput {
+  name: string;
+  allowInverse: boolean;
+  provider?: string;
+}
+
+export function putRateType(code: string, input: RateTypeInput, fetchImpl: FetchLike = defaultFetch): Promise<RateType> {
+  return send(
+    `/api/v1/fx/rate-types/${encodeURIComponent(code)}`,
+    { method: "PUT", headers: { Accept: "application/json", "Content-Type": "application/json" }, body: JSON.stringify(input) },
+    rateTypeSchema,
+    fetchImpl,
+  );
+}
+
+export interface RateEntryInput extends PairQuery {
+  validFrom: string;
+  rate: string;
+}
+
+const publishResponseSchema = z.object({
+  rates: z.array(z.object({ id: z.string(), version: z.number().int(), superseded: z.boolean(), unchanged: z.boolean() })),
+});
+export type PublishResponse = z.infer<typeof publishResponseSchema>;
+
+export function publishRate(input: RateEntryInput, idempotencyKey: string, fetchImpl: FetchLike = defaultFetch): Promise<PublishResponse> {
+  return send(
+    "/api/v1/fx/rates",
+    {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify({ rates: [input] }),
+    },
+    publishResponseSchema,
+    fetchImpl,
+  );
+}
+
 export interface ConvertInput {
   rateType: string;
   to: string;
