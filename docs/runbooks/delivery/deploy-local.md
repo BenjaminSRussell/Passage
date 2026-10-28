@@ -75,3 +75,24 @@ only if one is provisioned for internal/local proof. The stage cluster must be
 registered in Argo CD as `stage`, provide the `passage-stage-ca` ClusterIssuer
 and `hello-ledger-db` Secret outside Git, and use a trusted certificate issuer
 for real deployments.
+
+## Promote or roll back prod
+
+Prod is the Argo CD root application at `deploy/argocd/root-prod.yaml`, reading
+`deploy/envs/prod/apps`. Its Applications have no `automated` sync policy: nothing
+syncs or prunes until an operator runs `argocd app sync` after the PR merges.
+Prod promotes only the digest stage currently pins, so stage and prod consume the
+same signed release artifact; the soak check (at least 60 minutes in stage with no
+`SLOBurnRateHigh` alert) is a manual gate until the Release table lands.
+
+```sh
+make -C deploy promote-prod IMAGE_DIGEST=<digest pinned in deploy/envs/stage>
+# Commit the prod manifest change on a branch, merge its PR, then:
+argocd app sync hello-ledger-prod
+argocd app history hello-ledger-prod
+
+make -C deploy rollback-prod
+```
+
+The prod cluster must be registered in Argo CD as `prod` and provide the
+`passage-prod-ca` ClusterIssuer and `hello-ledger-db` Secret outside Git.

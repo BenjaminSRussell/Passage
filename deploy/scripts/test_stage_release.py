@@ -13,6 +13,7 @@ import stage_release
 INITIAL_DIGEST = "sha256:" + "a" * 64
 PROMOTED_DIGEST = "sha256:" + "b" * 64
 STAGE_MANIFEST = Path("deploy/envs/stage/apps/hello-ledger.yaml")
+PROD_MANIFEST = Path("deploy/envs/prod/apps/hello-ledger.yaml")
 
 
 class StageReleaseTests(unittest.TestCase):
@@ -226,6 +227,76 @@ class StageReleaseTests(unittest.TestCase):
         )
         self.assertEqual(result, 2)
         self.assertEqual(self.digest(), INITIAL_DIGEST)
+
+    def test_prod_application_is_manual_sync_with_placeholder_digest(self):
+        repository_root = Path(__file__).resolve().parents[2]
+        root_app = (repository_root / "deploy/argocd/root-prod.yaml").read_text(encoding="utf-8")
+        prod_app = (repository_root / PROD_MANIFEST).read_text(encoding="utf-8")
+
+        self.assertIn("path: deploy/envs/prod/apps", root_app)
+        self.assertIn("name: hello-ledger-prod", prod_app)
+        self.assertIn("name: prod", prod_app)
+        self.assertEqual(stage_release.read_digest(prod_app), stage_release.PLACEHOLDER_DIGEST)
+        for app in (root_app, prod_app):
+            self.assertNotIn("automated", app)
+            self.assertNotIn("prune", app)
+
+    def add_prod_manifest(self, stage_digest):
+        prod = self.root / PROD_MANIFEST
+        prod.parent.mkdir(parents=True)
+        prod.write_text(
+            self.manifest.read_text(encoding="utf-8").replace(INITIAL_DIGEST, stage_release.PLACEHOLDER_DIGEST),
+            encoding="utf-8",
+        )
+        self.manifest.write_text(
+            self.manifest.read_text(encoding="utf-8").replace(INITIAL_DIGEST, stage_digest),
+            encoding="utf-8",
+        )
+        self.run_git("add", str(STAGE_MANIFEST), str(PROD_MANIFEST))
+        self.run_git("commit", "-m", "Add prod")
+        return prod
+
+    def test_prod_promotes_the_digest_stage_pins(self):
+        prod = self.add_prod_manifest(PROMOTED_DIGEST)
+
+        result = stage_release.main(
+            ["promote", "--to", "prod", "--digest", PROMOTED_DIGEST], repo_root=self.root
+        )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(stage_release.read_digest(prod.read_text(encoding="utf-8")), PROMOTED_DIGEST)
+        self.assertEqual(self.digest(), PROMOTED_DIGEST)
+
+    def test_prod_refuses_a_digest_stage_does_not_pin(self):
+        prod = self.add_prod_manifest(PROMOTED_DIGEST)
+
+        result = stage_release.main(
+            ["promote", "--to", "prod", "--digest", "sha256:" + "c" * 64], repo_root=self.root
+        )
+
+        self.assertEqual(result, 2)
+        self.assertEqual(
+            stage_release.read_digest(prod.read_text(encoding="utf-8")), stage_release.PLACEHOLDER_DIGEST
+        )
+
+    def test_prod_rollback_restores_prior_prod_digest(self):
+        prod = self.add_prod_manifest(PROMOTED_DIGEST)
+        prod.write_text(
+            prod.read_text(encoding="utf-8").replace(stage_release.PLACEHOLDER_DIGEST, INITIAL_DIGEST),
+            encoding="utf-8",
+        )
+        self.run_git("add", str(PROD_MANIFEST))
+        self.run_git("commit", "-m", "Prod first")
+        prod.write_text(
+            prod.read_text(encoding="utf-8").replace(INITIAL_DIGEST, PROMOTED_DIGEST), encoding="utf-8"
+        )
+        self.run_git("add", str(PROD_MANIFEST))
+        self.run_git("commit", "-m", "Prod second")
+
+        result = stage_release.main(["rollback", "--env", "prod"], repo_root=self.root)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(stage_release.read_digest(prod.read_text(encoding="utf-8")), INITIAL_DIGEST)
 
     def test_rollback_refuses_without_prior_real_digest(self):
         self.manifest.write_text(
