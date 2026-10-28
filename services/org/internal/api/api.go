@@ -77,6 +77,7 @@ type API struct {
 	addressRevised    atomic.Int64
 	addressSearches   atomic.Int64
 	geocoder          domain.Geocoder
+	validator         domain.AddressValidator
 
 	siteDefaultWarehouses atomic.Int64
 
@@ -147,7 +148,7 @@ type convertResponse struct {
 }
 
 func New(s store.Store) *API {
-	return &API{store: s, geocoder: domain.NullGeocoder{}, postings: noPostings{}, now: time.Now}
+	return &API{store: s, geocoder: domain.NullGeocoder{}, validator: domain.NullAddressValidator{}, postings: noPostings{}, now: time.Now}
 }
 
 func idempotencyKeyOf(w http.ResponseWriter, r *http.Request) (string, bool) {

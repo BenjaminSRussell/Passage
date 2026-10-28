@@ -19,6 +19,9 @@ func TestRun(t *testing.T) {
 		{"missing database url", map[string]string{}, "DATABASE_URL is required"},
 		{"max nodes below range", map[string]string{"DATABASE_URL": "postgres://unreachable.invalid/x", "ORG_HIERARCHY_MAX_NODES": "999"}, "ORG_HIERARCHY_MAX_NODES"},
 		{"max depth above range", map[string]string{"DATABASE_URL": "postgres://unreachable.invalid/x", "ORG_HIERARCHY_MAX_DEPTH": "26"}, "ORG_HIERARCHY_MAX_DEPTH"},
+		{"unknown address validator", map[string]string{"DATABASE_URL": "postgres://unreachable.invalid/x", "ORG_ADDRESS_VALIDATOR": "google"}, "ORG_ADDRESS_VALIDATOR"},
+		{"unknown seed package", map[string]string{"DATABASE_URL": "postgres://unreachable.invalid/x", "ORG_SEED_PACKAGE": "other"}, "ORG_SEED_PACKAGE"},
+		{"seed package without tenant", map[string]string{"DATABASE_URL": "postgres://unreachable.invalid/x", "ORG_SEED_PACKAGE": "demo-manufacturer"}, "ORG_SEED_TENANT_ID"},
 		{"unparseable database url", map[string]string{"DATABASE_URL": "://bad"}, "connect database"},
 	}
 	for _, tc := range tests {
