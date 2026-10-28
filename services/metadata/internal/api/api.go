@@ -31,11 +31,6 @@ type API struct {
 func New(store registry.Store) *API { return &API{store: store} }
 
 func (api *API) Register(router chi.Router) {
-	api.registerRoutes(router)
-	router.Route("/api", api.registerRoutes)
-}
-
-func (api *API) registerRoutes(router chi.Router) {
 	router.Get("/readyz", api.ready)
 	router.With(authz.RequireDuty(dutyWrite)).Post("/v1/metadata/entities", api.publish)
 	router.With(authz.RequireDuty(dutyRead)).Get("/v1/metadata/entities/{entity}/schema", api.schema)

@@ -26,7 +26,7 @@ type backorderItem struct {
 	Open      bool            `json:"open"`
 }
 
-// listBackorders answers GET /api/v1/fulfillment/backorders, the short picks
+// listBackorders answers GET /v1/fulfillment/backorders, the short picks
 // and backorders report (FR-28.2, section 5.28.14): lines a pick confirmed
 // below plan, newest short pick first, by warehouse and short-pick date.
 // Only open backorders are listed unless status=all. nextCursor is the last
@@ -115,7 +115,7 @@ type agingItem struct {
 	ChargeDue         bool    `json:"chargeDue"`
 }
 
-// returnableAging answers GET /api/v1/fulfillment/returnable-packaging/aging
+// returnableAging answers GET /v1/fulfillment/returnable-packaging/aging
 // (FR-28.16, section 5.28.14 "Returnable packaging balances ... days
 // outstanding"): every balance above zero, aged first in, first out as of
 // today, and flagged chargeDue once older than chargeDays (rtp_charge_days,

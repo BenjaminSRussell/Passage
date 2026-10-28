@@ -47,7 +47,7 @@ func TestDeliveredNotInvoiced_TotalsPerCurrencyAndAging(t *testing.T) {
 		dniRow("PS-0000003", "USD", "7.50", time.Date(2026, 10, 21, 0, 0, 0, 0, time.UTC)),
 	}}
 	h := newServer(t, fs)
-	rec := do(t, h, http.MethodGet, "/api/v1/fulfillment/delivered-not-invoiced?legalEntityId="+le+"&customerId="+customer+"&asOf=2026-10-21", "", nil)
+	rec := do(t, h, http.MethodGet, "/v1/fulfillment/delivered-not-invoiced?legalEntityId="+le+"&customerId="+customer+"&asOf=2026-10-21", "", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
 	}
@@ -75,7 +75,7 @@ func TestDeliveredNotInvoiced_LimitCutsLinesNotTotals(t *testing.T) {
 	fs := &fakeStore{dniRows: []domain.DNIRow{
 		dniRow("PS-0000001", "USD", "10", day), dniRow("PS-0000002", "USD", "20", day), dniRow("PS-0000003", "USD", "30", day),
 	}}
-	rec := do(t, newServer(t, fs), http.MethodGet, "/api/v1/fulfillment/delivered-not-invoiced?legalEntityId="+ids.New()+"&limit=2", "", nil)
+	rec := do(t, newServer(t, fs), http.MethodGet, "/v1/fulfillment/delivered-not-invoiced?legalEntityId="+ids.New()+"&limit=2", "", nil)
 	var out dniBody
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
@@ -88,7 +88,7 @@ func TestDeliveredNotInvoiced_LimitCutsLinesNotTotals(t *testing.T) {
 func TestDeliveredNotInvoiced_DefaultsToTodayAndEmptyLists(t *testing.T) {
 	fs := &fakeStore{}
 	h := newServer(t, fs)
-	rec := do(t, h, http.MethodGet, "/api/v1/fulfillment/delivered-not-invoiced?legalEntityId="+ids.New(), "", nil)
+	rec := do(t, h, http.MethodGet, "/v1/fulfillment/delivered-not-invoiced?legalEntityId="+ids.New(), "", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
 	}
@@ -114,7 +114,7 @@ func TestDeliveredNotInvoiced_Validation(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			fs := &fakeStore{}
-			rec := do(t, newServer(t, fs), http.MethodGet, "/api/v1/fulfillment/delivered-not-invoiced"+query, "", nil)
+			rec := do(t, newServer(t, fs), http.MethodGet, "/v1/fulfillment/delivered-not-invoiced"+query, "", nil)
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d body = %s, want 400", rec.Code, rec.Body.String())
 			}
@@ -134,7 +134,7 @@ func TestDeliveredNotInvoiced_Validation(t *testing.T) {
 }
 
 func TestDeliveredNotInvoiced_NeedsWarehouseView(t *testing.T) {
-	rec := do(t, newServer(t, &fakeStore{}), http.MethodGet, "/api/v1/fulfillment/delivered-not-invoiced?legalEntityId="+ids.New(), "",
+	rec := do(t, newServer(t, &fakeStore{}), http.MethodGet, "/v1/fulfillment/delivered-not-invoiced?legalEntityId="+ids.New(), "",
 		map[string]string{"X-Passage-Duties": "WarehousePick"})
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", rec.Code)

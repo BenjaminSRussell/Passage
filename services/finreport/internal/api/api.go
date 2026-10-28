@@ -1,4 +1,4 @@
-// Package api exposes the reporting HTTP API under /api/v1/reporting.
+// Package api exposes the reporting HTTP API under /v1/reporting.
 // Every handler: decode -> validate -> tenant.FromContext -> store/domain ->
 // httpx.JSON or httpx.Fail.
 package api
@@ -100,7 +100,7 @@ func (a *API) WithConfig(cfg config.Reporting) *API {
 
 // Register mounts the reporting routes on r.
 func (a *API) Register(r chi.Router) {
-	r.Route("/api/v1/reporting", func(r chi.Router) {
+	r.Route("/v1/reporting", func(r chi.Router) {
 		r.With(authz.RequireDuty(DutyView)).Get("/definitions", a.listDefinitions)
 		r.With(authz.RequireDuty(DutyView)).Get("/definitions/{code}", a.getDefinition)
 		r.With(authz.RequireDuty(DutyMaintain)).Put("/definitions/{code}", a.putDefinition)
@@ -363,7 +363,7 @@ func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
-	w.Header().Set("Location", "/api/v1/reporting/runs/"+run.ID)
+	w.Header().Set("Location", "/v1/reporting/runs/"+run.ID)
 	status := http.StatusCreated
 	if run.Replayed {
 		status = http.StatusOK

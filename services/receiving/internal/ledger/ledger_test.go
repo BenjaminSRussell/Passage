@@ -237,12 +237,12 @@ func TestPathsMatchTheLedgerServiceRouteTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`r.Route("/api/v1/ledger"`, `Post("/journal-entries", a.postEntry)`, `Post("/journal-entries/{id}/reverse", a.reverseEntry)`} {
+	for _, want := range []string{`r.Route("/v1/ledger"`, `Post("/journal-entries", a.postEntry)`, `Post("/journal-entries/{id}/reverse", a.reverseEntry)`} {
 		if !strings.Contains(string(src), want) {
 			t.Fatalf("ledger route table no longer contains %s; update domain.LedgerPostPath and LedgerReversePathTmpl", want)
 		}
 	}
-	if domain.LedgerPostPath != "/api/v1/ledger/journal-entries" || fmt.Sprintf(domain.LedgerReversePathTmpl, "E1") != "/api/v1/ledger/journal-entries/E1/reverse" {
+	if domain.LedgerPostPath != "/v1/ledger/journal-entries" || fmt.Sprintf(domain.LedgerReversePathTmpl, "E1") != "/v1/ledger/journal-entries/E1/reverse" {
 		t.Fatalf("paths %s %s do not match the ledger routes", domain.LedgerPostPath, domain.LedgerReversePathTmpl)
 	}
 }
@@ -289,7 +289,7 @@ func TestReverseCallsTheReverseRouteWithItsOwnKey(t *testing.T) {
 	if err := New(srv.URL, nil).Reverse(testCtx(), "E1", "k:reverse", day); err != nil {
 		t.Fatal(err)
 	}
-	if got.URL.Path != "/api/v1/ledger/journal-entries/E1/reverse" || got.Header.Get("Idempotency-Key") != "k:reverse" {
+	if got.URL.Path != "/v1/ledger/journal-entries/E1/reverse" || got.Header.Get("Idempotency-Key") != "k:reverse" {
 		t.Fatalf("reverse sent %s with key %q", got.URL.Path, got.Header.Get("Idempotency-Key"))
 	}
 	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusBadGateway) }))

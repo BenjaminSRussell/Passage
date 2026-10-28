@@ -129,7 +129,7 @@ func expectField(t *testing.T, rec interface {
 func TestSaveContainerType_ValidatesAndPassesMaterial(t *testing.T) {
 	fs := &fakeStore{}
 	h := newServer(t, fs)
-	path := "/api/v1/fulfillment/container-types"
+	path := "/v1/fulfillment/container-types"
 	rec := do(t, h, http.MethodPost, path, `{"code":"","tareKg":"0.5"}`, withKey("ct-1", nil))
 	expectField(t, rec, rec.Body.String(), "code")
 	rec = do(t, h, http.MethodPost, path, `{"code":"PALLET","tareKg":"-1"}`, withKey("ct-2", nil))
@@ -154,7 +154,7 @@ func TestSaveContainerType_ValidatesAndPassesMaterial(t *testing.T) {
 func TestSavePackingRule_ValidatesIdsAndQuantities(t *testing.T) {
 	fs := &fakeStore{}
 	h := newServer(t, fs)
-	path := "/api/v1/fulfillment/packing-rules"
+	path := "/v1/fulfillment/packing-rules"
 	product := ids.New()
 	cases := []struct{ body, field string }{
 		{`{"productId":"nope","containerType":"C12","qtyPerContainer":"12","maxWeightKg":"15"}`, "productId"},
@@ -180,12 +180,12 @@ func TestSavePackingRule_ValidatesIdsAndQuantities(t *testing.T) {
 func TestPackingRuleMaintainIsRequired(t *testing.T) {
 	h := newServer(t, &fakeStore{})
 	body := `{"productId":"` + ids.New() + `","containerType":"C12","qtyPerContainer":"12","maxWeightKg":"15"}`
-	rec := do(t, h, http.MethodPost, "/api/v1/fulfillment/packing-rules", body,
+	rec := do(t, h, http.MethodPost, "/v1/fulfillment/packing-rules", body,
 		map[string]string{"Idempotency-Key": "k", "X-Passage-Duties": "WarehouseView,WarehousePack"})
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403 without PackingRuleMaintain", rec.Code)
 	}
-	rec = do(t, h, http.MethodPost, "/api/v1/fulfillment/returnable-packaging:return", `{"customerId":"`+ids.New()+`","containerType":"PALLET","qty":"1"}`,
+	rec = do(t, h, http.MethodPost, "/v1/fulfillment/returnable-packaging:return", `{"customerId":"`+ids.New()+`","containerType":"PALLET","qty":"1"}`,
 		map[string]string{"Idempotency-Key": "k2", "X-Passage-Duties": "WarehouseView"})
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403 without WarehouseReceive", rec.Code)
@@ -196,23 +196,23 @@ func TestLists_FilterAndValidate(t *testing.T) {
 	fs := &fakeStore{}
 	h := newServer(t, fs)
 	product := ids.New()
-	rec := do(t, h, http.MethodGet, "/api/v1/fulfillment/packing-rules?productId="+product+"&limit=5", "", packingHeaders)
+	rec := do(t, h, http.MethodGet, "/v1/fulfillment/packing-rules?productId="+product+"&limit=5", "", packingHeaders)
 	if rec.Code != http.StatusOK || fs.packing.listProduct != product || fs.packing.listLimit != 5 || !strings.Contains(rec.Body.String(), `"items":[]`) {
 		t.Fatalf("status = %d body = %s filter = %+v", rec.Code, rec.Body.String(), fs.packing)
 	}
 	for _, path := range []string{
-		"/api/v1/fulfillment/packing-rules?productId=x",
-		"/api/v1/fulfillment/product-packaging?productId=x",
-		"/api/v1/fulfillment/packaging-fee-rates?countryCode=deu",
-		"/api/v1/fulfillment/returnable-packaging?customerId=x",
-		"/api/v1/fulfillment/container-types?limit=0",
+		"/v1/fulfillment/packing-rules?productId=x",
+		"/v1/fulfillment/product-packaging?productId=x",
+		"/v1/fulfillment/packaging-fee-rates?countryCode=deu",
+		"/v1/fulfillment/returnable-packaging?customerId=x",
+		"/v1/fulfillment/container-types?limit=0",
 	} {
 		rec := do(t, h, http.MethodGet, path, "", packingHeaders)
 		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), CodeValidation) {
 			t.Fatalf("%s: status = %d body = %s, want 400", path, rec.Code, rec.Body.String())
 		}
 	}
-	rec = do(t, h, http.MethodGet, "/api/v1/fulfillment/container-types", "", packingHeaders)
+	rec = do(t, h, http.MethodGet, "/v1/fulfillment/container-types", "", packingHeaders)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"code":"PALLET"`) || fs.packing.listLimit != 100 {
 		t.Fatalf("status = %d body = %s limit = %d", rec.Code, rec.Body.String(), fs.packing.listLimit)
 	}
@@ -221,7 +221,7 @@ func TestLists_FilterAndValidate(t *testing.T) {
 func TestAutoPack_RequiresIfMatchValidatesWeightsAndSetsETag(t *testing.T) {
 	fs := &fakeStore{}
 	h := newServer(t, fs)
-	path := "/api/v1/fulfillment/shipments/" + ids.New() + ":auto-pack"
+	path := "/v1/fulfillment/shipments/" + ids.New() + ":auto-pack"
 	rec := do(t, h, http.MethodPost, path, `{}`, withKey("ap-1", nil))
 	if rec.Code != http.StatusPreconditionRequired {
 		t.Fatalf("status = %d, want 428", rec.Code)
@@ -247,7 +247,7 @@ func TestAutoPack_RequiresIfMatchValidatesWeightsAndSetsETag(t *testing.T) {
 func TestProductPackaging_Validates(t *testing.T) {
 	fs := &fakeStore{}
 	h := newServer(t, fs)
-	path := "/api/v1/fulfillment/product-packaging"
+	path := "/v1/fulfillment/product-packaging"
 	product := ids.New()
 	rec := do(t, h, http.MethodPost, path, `{"productId":"`+product+`","materialCode":"","weightPerUnitKg":"0.2"}`, withKey("pp-1", nil))
 	expectField(t, rec, rec.Body.String(), "materialCode")
@@ -262,7 +262,7 @@ func TestProductPackaging_Validates(t *testing.T) {
 func TestFeeRate_ValidatesCountryCurrencyAndDate(t *testing.T) {
 	fs := &fakeStore{}
 	h := newServer(t, fs)
-	path := "/api/v1/fulfillment/packaging-fee-rates"
+	path := "/v1/fulfillment/packaging-fee-rates"
 	base := func(country, cur, from string) string {
 		return `{"countryCode":"` + country + `","materialCode":"CARDBOARD","currency":"` + cur +
 			`","ratePerKg":"0.50","validFrom":"` + from + `"}`
@@ -285,12 +285,12 @@ func TestFeeRate_ValidatesCountryCurrencyAndDate(t *testing.T) {
 func TestPackagingReport_RequiresCountryAndMonth(t *testing.T) {
 	fs := &fakeStore{}
 	h := newServer(t, fs)
-	rec := do(t, h, http.MethodGet, "/api/v1/fulfillment/packaging-report?countryCode=DE&period=2026-13", "", packingHeaders)
+	rec := do(t, h, http.MethodGet, "/v1/fulfillment/packaging-report?countryCode=DE&period=2026-13", "", packingHeaders)
 	expectField(t, rec, rec.Body.String(), "period")
-	rec = do(t, h, http.MethodGet, "/api/v1/fulfillment/packaging-report?period=2026-10", "", packingHeaders)
+	rec = do(t, h, http.MethodGet, "/v1/fulfillment/packaging-report?period=2026-10", "", packingHeaders)
 	expectField(t, rec, rec.Body.String(), "countryCode")
 	le := ids.New()
-	rec = do(t, h, http.MethodGet, "/api/v1/fulfillment/packaging-report?countryCode=DE&period=2026-10&legalEntityId="+le, "", packingHeaders)
+	rec = do(t, h, http.MethodGet, "/v1/fulfillment/packaging-report?countryCode=DE&period=2026-10&legalEntityId="+le, "", packingHeaders)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
 	}
@@ -317,11 +317,11 @@ func TestReturnPackaging_ValidatesAndRejectsNegative(t *testing.T) {
 	fs := &fakeStore{}
 	h := newServer(t, fs)
 	cust := ids.New()
-	rec := do(t, h, http.MethodGet, "/api/v1/fulfillment/returnable-packaging?customerId="+cust, "", packingHeaders)
+	rec := do(t, h, http.MethodGet, "/v1/fulfillment/returnable-packaging?customerId="+cust, "", packingHeaders)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"balance":"6"`) || fs.packing.balancesOf != cust {
 		t.Fatalf("status = %d body = %s, want 200 with balance 6", rec.Code, rec.Body.String())
 	}
-	path := "/api/v1/fulfillment/returnable-packaging:return"
+	path := "/v1/fulfillment/returnable-packaging:return"
 	body := func(qty string) string {
 		return `{"customerId":"` + cust + `","containerType":"PALLET","qty":"` + qty + `"}`
 	}
@@ -345,7 +345,7 @@ func TestReturnPackaging_ValidatesAndRejectsNegative(t *testing.T) {
 func TestPostPackingSlip_CountryCode(t *testing.T) {
 	fs := &fakeStore{}
 	h := newServer(t, fs)
-	path := "/api/v1/fulfillment/shipments/" + ids.New() + ":post-packing-slip"
+	path := "/v1/fulfillment/shipments/" + ids.New() + ":post-packing-slip"
 	body := `{"postingDate":"2026-10-21","currency":"USD","countryCode":"usa","costs":[]}`
 	rec := do(t, h, http.MethodPost, path, body, withKey("pps-1", map[string]string{"If-Match": `"3"`}))
 	expectField(t, rec, rec.Body.String(), "countryCode")

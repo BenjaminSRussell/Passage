@@ -307,25 +307,25 @@ OpenAPI and AsyncAPI files in step with the router and the published event types
 
 | Route | Duty (PRD 4.25.17) |
 |---|---|
-| POST `/api/v1/shopfloor/workers` | `shopfloor.setup.maintain` (Maintain shop floor setup) |
-| GET `/api/v1/shopfloor/workers`, `/workers/{id}` | `shopfloor.view` (View shop floor) |
-| POST `/api/v1/shopfloor/registrations` | `shopfloor.time.register` (Register time) |
-| GET `/api/v1/shopfloor/registrations` | `shopfloor.view` |
-| POST `/api/v1/shopfloor/pay:calculate` | `shopfloor.pay.calculate` (Calculate time registrations) |
-| POST `/api/v1/shopfloor/pay:approve` | `shopfloor.pay.approve` (Approve time registrations) |
-| GET `/api/v1/shopfloor/worker-days` | `shopfloor.view` |
-| POST `/api/v1/shopfloor/machines` | `shopfloor.setup.maintain` |
-| GET `/api/v1/shopfloor/machines`, `/downtimes`, `/andon`, `/oee`, `/clocked-in` | `shopfloor.view` |
-| POST `/api/v1/shopfloor/oee:rollup` | `shopfloor.oee.rollup` (scheduler service identity; not in the PRD duty table) |
-| POST `/api/v1/shopfloor/sessions:badge` | `shopfloor.kiosk.login` (Kiosk login) |
-| POST `/api/v1/shopfloor/machine-events` | `shopfloor.machine.ingest` (edge gateway service identity) |
-| POST `/api/v1/shopfloor/downtimes/{id}:code` | `shopfloor.time.register` |
-| POST `/api/v1/shopfloor/pay:export`, GET `/pay-exports`, `/pay-exports/{id}` | `shopfloor.pay.export` (Export time to payroll) |
-| POST `/api/v1/shopfloor/jobs` | `shopfloor.job.schedule` (w23 schedule service identity; not in the PRD duty table) |
-| GET `/api/v1/shopfloor/jobs`, `/jobs/{id}`; POST `/jobs/{id}:feedback` | `shopfloor.time.register`; an `override` also needs `shopfloor.check.override` (shop floor supervisor; not in the PRD duty table) |
-| POST `/api/v1/shopfloor/process-messages`, `/process-messages/{id}:reprocess`, `/process-messages/{id}:delete` | `shopfloor.process.create` (Create process messages: manual, reprocess/delete with reason) |
-| GET `/api/v1/shopfloor/process-messages`, `/process-messages/{id}` | `shopfloor.view` |
-| POST `/api/v1/shopfloor/process-messages/{id}/deliveries/{destination}:report`, `/process-messages:retry-due` | `shopfloor.process.deliver` (consuming context and scheduler service identities) |
+| POST `/v1/shopfloor/workers` | `shopfloor.setup.maintain` (Maintain shop floor setup) |
+| GET `/v1/shopfloor/workers`, `/workers/{id}` | `shopfloor.view` (View shop floor) |
+| POST `/v1/shopfloor/registrations` | `shopfloor.time.register` (Register time) |
+| GET `/v1/shopfloor/registrations` | `shopfloor.view` |
+| POST `/v1/shopfloor/pay:calculate` | `shopfloor.pay.calculate` (Calculate time registrations) |
+| POST `/v1/shopfloor/pay:approve` | `shopfloor.pay.approve` (Approve time registrations) |
+| GET `/v1/shopfloor/worker-days` | `shopfloor.view` |
+| POST `/v1/shopfloor/machines` | `shopfloor.setup.maintain` |
+| GET `/v1/shopfloor/machines`, `/downtimes`, `/andon`, `/oee`, `/clocked-in` | `shopfloor.view` |
+| POST `/v1/shopfloor/oee:rollup` | `shopfloor.oee.rollup` (scheduler service identity; not in the PRD duty table) |
+| POST `/v1/shopfloor/sessions:badge` | `shopfloor.kiosk.login` (Kiosk login) |
+| POST `/v1/shopfloor/machine-events` | `shopfloor.machine.ingest` (edge gateway service identity) |
+| POST `/v1/shopfloor/downtimes/{id}:code` | `shopfloor.time.register` |
+| POST `/v1/shopfloor/pay:export`, GET `/pay-exports`, `/pay-exports/{id}` | `shopfloor.pay.export` (Export time to payroll) |
+| POST `/v1/shopfloor/jobs` | `shopfloor.job.schedule` (w23 schedule service identity; not in the PRD duty table) |
+| GET `/v1/shopfloor/jobs`, `/jobs/{id}`; POST `/jobs/{id}:feedback` | `shopfloor.time.register`; an `override` also needs `shopfloor.check.override` (shop floor supervisor; not in the PRD duty table) |
+| POST `/v1/shopfloor/process-messages`, `/process-messages/{id}:reprocess`, `/process-messages/{id}:delete` | `shopfloor.process.create` (Create process messages: manual, reprocess/delete with reason) |
+| GET `/v1/shopfloor/process-messages`, `/process-messages/{id}` | `shopfloor.view` |
+| POST `/v1/shopfloor/process-messages/{id}/deliveries/{destination}:report`, `/process-messages:retry-due` | `shopfloor.process.deliver` (consuming context and scheduler service identities) |
 
 Duties are checked by the platform `authz` middleware. The OPA decision point replaces the
 local check in a later wave, behind the same interface.

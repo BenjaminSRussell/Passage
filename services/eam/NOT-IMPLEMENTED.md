@@ -32,7 +32,7 @@ work outside the owned paths).
 | D4 | p95 < 5 s latency target (AC3) and 10 readings/s performance test | later slice of PSG-44 | The breach path is synchronous and tested for correctness. Load test is not run. |
 | D4 | Predictive hooks (`eam.predictive-hooks` flag) | later slice of PSG-44 | Hooks only; no model in v1. |
 | D5 | Asset KPIs by location, type and criticality; cost per asset; backlog hours (FR-44.13) | later slice of PSG-44 | Only MTBF, MTTR and availability per asset exist. Cost and backlog need the GL and the WO list views. |
-| D5 | `eam-kpi-rollup` hourly job, `/reports/eam/kpis` path | later slice of PSG-44 | KPI is computed on request at `GET /api/v1/eam/kpis`. |
+| D5 | `eam-kpi-rollup` hourly job, `/reports/eam/kpis` path | later slice of PSG-44 | KPI is computed on request at `GET /v1/eam/kpis`. |
 | D6 | Fault analysis (FR-44.16 analysis by asset, type, symptom, cause and period; 8.44.14 Fault analysis with Pareto and 30-day repeat rate; Fault report document) | later slice of PSG-44 | Slice 2 builds the catalog designer, fault registration and the completion gate. The analysis needs a reporting projection (`eam_faults`). |
 | D6 | Fault registration required per work order type as a parameter (8.44.13) | later slice of PSG-44 | Hard-coded to the default: required for CORRECTIVE and EMERGENCY. |
 | D6 | Warranty duration in counter units (`counter_id`, `counter_limit`), warranty check at each part issue, per-line coverage flags (BR-44.14) | later slice of PSG-44 (part issue: handoff to wave 16) | Slice 2 checks at work order creation on the order date and flags the whole order. Part issue is not built (D3 wave 16 row), so claims carry the order's parts cost when parts are covered. |

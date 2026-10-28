@@ -30,7 +30,7 @@ func (f *lineStore) DrillLines(_ context.Context, _ string, row, _ string, q sto
 	return f.page, f.err
 }
 
-const linesPath = "/api/v1/reporting/runs/" + runUUID + "/cells/REV/P/lines"
+const linesPath = "/v1/reporting/runs/" + runUUID + "/cells/REV/P/lines"
 
 func linesRouter(f *lineStore, cfg config.Reporting) chi.Router {
 	r := chi.NewRouter()
@@ -131,7 +131,7 @@ func TestDrillLines_Refusals(t *testing.T) {
 		{"limit not a number", linesPath + "?limit=all", []string{DutyLines}, nil, http.StatusBadRequest, "COM-0002"},
 		{"negative key", linesPath + "?key=-1", []string{DutyLines}, nil, http.StatusBadRequest, "COM-0002"},
 		{"forged cursor", linesPath + "?cursor=bm90LWEtY3Vyc29y", []string{DutyLines}, nil, http.StatusBadRequest, "COM-0002"},
-		{"run id not a uuid", "/api/v1/reporting/runs/nope/cells/REV/P/lines", []string{DutyLines}, nil, http.StatusNotFound, store.CodeRunNotFound},
+		{"run id not a uuid", "/v1/reporting/runs/nope/cells/REV/P/lines", []string{DutyLines}, nil, http.StatusNotFound, store.CodeRunNotFound},
 		{"unknown cell", linesPath, []string{DutyLines}, httpx.NewProblem(http.StatusNotFound, store.CodeCellNotFound, "no cell"), http.StatusNotFound, store.CodeCellNotFound},
 	}
 	for _, tc := range cases {

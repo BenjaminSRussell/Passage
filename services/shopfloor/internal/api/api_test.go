@@ -164,7 +164,7 @@ func clock(id, kind, at string) string {
 
 func TestRegistrations_BatchAcceptedAndIdempotencyKeysKept(t *testing.T) {
 	fs := &fakeStore{}
-	rec := call(t, newRouter(fs), http.MethodPost, "/api/v1/shopfloor/registrations",
+	rec := call(t, newRouter(fs), http.MethodPost, "/v1/shopfloor/registrations",
 		registrationBody(clock(regID, "clock-in", "2026-10-20T09:00:00Z")), allDuty)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
@@ -183,7 +183,7 @@ func TestRegistrations_BatchAcceptedAndIdempotencyKeysKept(t *testing.T) {
 
 func TestRegistrations_ValidationNamesEveryField(t *testing.T) {
 	bad := fmt.Sprintf(`{"id":"nope","workerId":%q,"kind":"job-start","startedAt":"2026-10-20T09:00:00Z","qtyGood":"-1"}`, workerID)
-	rec := call(t, newRouter(&fakeStore{}), http.MethodPost, "/api/v1/shopfloor/registrations", registrationBody(bad), allDuty)
+	rec := call(t, newRouter(&fakeStore{}), http.MethodPost, "/v1/shopfloor/registrations", registrationBody(bad), allDuty)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d", rec.Code)
 	}
@@ -198,20 +198,20 @@ func TestRegistrations_ValidationNamesEveryField(t *testing.T) {
 
 func TestRegistrations_BatchLimitAndEmpty(t *testing.T) {
 	h := newRouter(&fakeStore{})
-	if rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/registrations", `{"items":[]}`, allDuty); rec.Code != http.StatusBadRequest {
+	if rec := call(t, h, http.MethodPost, "/v1/shopfloor/registrations", `{"items":[]}`, allDuty); rec.Code != http.StatusBadRequest {
 		t.Fatalf("empty batch status %d", rec.Code)
 	}
 	items := make([]string, maxBatch+1)
 	for i := range items {
 		items[i] = clock(regID, "clock-in", "2026-10-20T09:00:00Z")
 	}
-	if rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/registrations", registrationBody(items...), allDuty); rec.Code != http.StatusBadRequest {
+	if rec := call(t, h, http.MethodPost, "/v1/shopfloor/registrations", registrationBody(items...), allDuty); rec.Code != http.StatusBadRequest {
 		t.Fatalf("501-item batch status %d", rec.Code)
 	}
 }
 
 func TestRegistrations_DutyRequired(t *testing.T) {
-	rec := call(t, newRouter(&fakeStore{}), http.MethodPost, "/api/v1/shopfloor/registrations",
+	rec := call(t, newRouter(&fakeStore{}), http.MethodPost, "/v1/shopfloor/registrations",
 		registrationBody(clock(regID, "clock-in", "2026-10-20T09:00:00Z")), "shopfloor.pay.approve")
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status %d, want 403", rec.Code)
@@ -219,7 +219,7 @@ func TestRegistrations_DutyRequired(t *testing.T) {
 }
 
 func TestMissingTenantIsUnauthorized(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/shopfloor/pay:approve", strings.NewReader(`{}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/shopfloor/pay:approve", strings.NewReader(`{}`))
 	rec := httptest.NewRecorder()
 	newRouter(&fakeStore{}).ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
@@ -234,7 +234,7 @@ func TestPayCalculate_ComputesAndPersistsLines(t *testing.T) {
 		{ID: "out", Kind: domain.KindClockOut, At: time.Date(2026, 10, 20, 19, 30, 0, 0, time.UTC)},
 	}}
 	body := fmt.Sprintf(`{"workerId":%q,"from":"2026-10-20","to":"2026-10-20"}`, workerID)
-	rec := call(t, newRouter(fs), http.MethodPost, "/api/v1/shopfloor/pay:calculate", body, allDuty)
+	rec := call(t, newRouter(fs), http.MethodPost, "/v1/shopfloor/pay:calculate", body, allDuty)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -274,7 +274,7 @@ func TestPayCalculate_FlagsAndRules(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			rec := call(t, newRouter(c.fs), http.MethodPost, "/api/v1/shopfloor/pay:calculate", c.body, allDuty)
+			rec := call(t, newRouter(c.fs), http.MethodPost, "/v1/shopfloor/pay:calculate", c.body, allDuty)
 			if rec.Code != c.want {
 				t.Fatalf("status %d want %d: %s", rec.Code, c.want, rec.Body.String())
 			}
@@ -289,7 +289,7 @@ func TestPayApprove_RequiresAuthenticatedUser(t *testing.T) {
 	fs := &fakeStore{}
 	body := fmt.Sprintf(`{"workerId":%q,"from":"2026-10-20","to":"2026-10-20"}`, workerID)
 	h := newRouter(fs)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/shopfloor/pay:approve", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/shopfloor/pay:approve", strings.NewReader(body))
 	req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
 	req.Header.Set("X-Passage-Duties", allDuty)
 	rec := httptest.NewRecorder()
@@ -305,7 +305,7 @@ func TestPayApprove_RequiresAuthenticatedUser(t *testing.T) {
 func TestPayApprove_ReturnsDays(t *testing.T) {
 	fs := &fakeStore{}
 	body := fmt.Sprintf(`{"workerId":%q,"from":"2026-10-20","to":"2026-10-20"}`, workerID)
-	rec := call(t, newRouter(fs), http.MethodPost, "/api/v1/shopfloor/pay:approve", body, allDuty)
+	rec := call(t, newRouter(fs), http.MethodPost, "/v1/shopfloor/pay:approve", body, allDuty)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -324,9 +324,9 @@ func TestReadyz_UsesStore(t *testing.T) {
 func TestCommands_RequireIdempotencyKey(t *testing.T) {
 	rangeBody := fmt.Sprintf(`{"workerId":%q,"from":"2026-10-20","to":"2026-10-20"}`, workerID)
 	cases := map[string]string{
-		"/api/v1/shopfloor/pay:calculate": rangeBody,
-		"/api/v1/shopfloor/pay:approve":   rangeBody,
-		"/api/v1/shopfloor/workers":       `{"partyId":"` + jobID + `","name":"Ana","costRate":"20","currency":"USD"}`,
+		"/v1/shopfloor/pay:calculate": rangeBody,
+		"/v1/shopfloor/pay:approve":   rangeBody,
+		"/v1/shopfloor/workers":       `{"partyId":"` + jobID + `","name":"Ana","costRate":"20","currency":"USD"}`,
 	}
 	for path, body := range cases {
 		fs := &fakeStore{}
@@ -344,7 +344,7 @@ func TestCommands_RequireIdempotencyKey(t *testing.T) {
 func TestPayCalculate_ReplayReturnsStoredOutcome(t *testing.T) {
 	fs := &fakeStore{replays: map[string]*store.Replay{"key-1": {Status: http.StatusOK, Body: []byte(`{"workerId":"stored"}`)}}}
 	body := fmt.Sprintf(`{"workerId":%q,"from":"2026-10-20","to":"2026-10-20"}`, workerID)
-	rec := call(t, newRouter(fs), http.MethodPost, "/api/v1/shopfloor/pay:calculate", body, allDuty)
+	rec := call(t, newRouter(fs), http.MethodPost, "/v1/shopfloor/pay:calculate", body, allDuty)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"stored"`) || rec.Header().Get("Idempotent-Replayed") != "true" {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 	}
@@ -366,7 +366,7 @@ func TestPayCalculate_ReadsWholePayWeekButSavesRange(t *testing.T) {
 	}
 	fs := &fakeStore{punches: punches}
 	body := fmt.Sprintf(`{"workerId":%q,"from":"2026-10-21","to":"2026-10-21"}`, workerID)
-	rec := call(t, newRouter(fs), http.MethodPost, "/api/v1/shopfloor/pay:calculate", body, allDuty)
+	rec := call(t, newRouter(fs), http.MethodPost, "/v1/shopfloor/pay:calculate", body, allDuty)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -389,7 +389,7 @@ func TestPayCalculate_ReadsWholePayWeekButSavesRange(t *testing.T) {
 func TestPayApprove_ResponseIsTheApproveResult(t *testing.T) {
 	fs := &fakeStore{}
 	body := fmt.Sprintf(`{"workerId":%q,"from":"2026-10-20","to":"2026-10-20"}`, workerID)
-	rec := call(t, newRouter(fs), http.MethodPost, "/api/v1/shopfloor/pay:approve", body, allDuty)
+	rec := call(t, newRouter(fs), http.MethodPost, "/v1/shopfloor/pay:approve", body, allDuty)
 	var out store.ApproveResult
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatal(err)
@@ -402,7 +402,7 @@ func TestPayApprove_ResponseIsTheApproveResult(t *testing.T) {
 func TestRegistrations_ScrapNeedsReasonAndDuplicateIDsRefused(t *testing.T) {
 	scrap := fmt.Sprintf(`{"id":%q,"workerId":%q,"kind":"job-stop","jobId":%q,"startedAt":"2026-10-20T09:00:00Z","stoppedAt":"2026-10-20T10:00:00Z","qtyScrap":"2"}`, regID, workerID, jobID)
 	again := clock(regID, "clock-in", "2026-10-20T09:00:00Z")
-	rec := call(t, newRouter(&fakeStore{}), http.MethodPost, "/api/v1/shopfloor/registrations", registrationBody(scrap, again), allDuty)
+	rec := call(t, newRouter(&fakeStore{}), http.MethodPost, "/v1/shopfloor/registrations", registrationBody(scrap, again), allDuty)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d", rec.Code)
 	}
@@ -418,7 +418,7 @@ func TestRegistrations_ScrapNeedsReasonAndDuplicateIDsRefused(t *testing.T) {
 func TestRegistrations_ClosedJobCarriesElapsedHours(t *testing.T) {
 	fs := &fakeStore{}
 	item := fmt.Sprintf(`{"id":%q,"workerId":%q,"kind":"job-stop","jobId":%q,"startedAt":"2026-10-20T09:00:00Z","stoppedAt":"2026-10-20T10:30:00Z","qtyGood":"12"}`, regID, workerID, jobID)
-	rec := call(t, newRouter(fs), http.MethodPost, "/api/v1/shopfloor/registrations", registrationBody(item), allDuty)
+	rec := call(t, newRouter(fs), http.MethodPost, "/v1/shopfloor/registrations", registrationBody(item), allDuty)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -429,7 +429,7 @@ func TestRegistrations_ClosedJobCarriesElapsedHours(t *testing.T) {
 
 func TestRegistrations_LongerThan24HoursIsRefused(t *testing.T) {
 	item := fmt.Sprintf(`{"id":%q,"workerId":%q,"kind":"indirect","startedAt":"2026-10-20T09:00:00Z","stoppedAt":"2026-10-21T09:00:01Z"}`, regID, workerID)
-	rec := call(t, newRouter(&fakeStore{}), http.MethodPost, "/api/v1/shopfloor/registrations", registrationBody(item), allDuty)
+	rec := call(t, newRouter(&fakeStore{}), http.MethodPost, "/v1/shopfloor/registrations", registrationBody(item), allDuty)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d", rec.Code)
 	}
@@ -437,7 +437,7 @@ func TestRegistrations_LongerThan24HoursIsRefused(t *testing.T) {
 
 func TestWorkers_CreateValidatesAndReturns201(t *testing.T) {
 	h := newRouter(&fakeStore{})
-	bad := call(t, h, http.MethodPost, "/api/v1/shopfloor/workers", `{"partyId":"x","name":" ","costRate":"-1","currency":"usd"}`, allDuty)
+	bad := call(t, h, http.MethodPost, "/v1/shopfloor/workers", `{"partyId":"x","name":" ","costRate":"-1","currency":"usd"}`, allDuty)
 	if bad.Code != http.StatusBadRequest {
 		t.Fatalf("invalid worker status %d", bad.Code)
 	}
@@ -449,7 +449,7 @@ func TestWorkers_CreateValidatesAndReturns201(t *testing.T) {
 		}
 	}
 	fs := &fakeStore{}
-	rec := call(t, newRouter(fs), http.MethodPost, "/api/v1/shopfloor/workers", `{"partyId":"`+jobID+`","name":" Ana Silva ","badgeId":"B-17","costRate":"21.50","currency":"USD"}`, allDuty)
+	rec := call(t, newRouter(fs), http.MethodPost, "/v1/shopfloor/workers", `{"partyId":"`+jobID+`","name":" Ana Silva ","badgeId":"B-17","costRate":"21.50","currency":"USD"}`, allDuty)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -460,13 +460,13 @@ func TestWorkers_CreateValidatesAndReturns201(t *testing.T) {
 
 func TestWorkers_DutiesAndNotFound(t *testing.T) {
 	h := newRouter(&fakeStore{})
-	if rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/workers", `{}`, "shopfloor.view"); rec.Code != http.StatusForbidden {
+	if rec := call(t, h, http.MethodPost, "/v1/shopfloor/workers", `{}`, "shopfloor.view"); rec.Code != http.StatusForbidden {
 		t.Fatalf("create without setup duty: %d", rec.Code)
 	}
-	if rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/workers", "", "shopfloor.time.register"); rec.Code != http.StatusForbidden {
+	if rec := call(t, h, http.MethodGet, "/v1/shopfloor/workers", "", "shopfloor.time.register"); rec.Code != http.StatusForbidden {
 		t.Fatalf("list without view duty: %d", rec.Code)
 	}
-	rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/workers/not-a-uuid", "", allDuty)
+	rec := call(t, h, http.MethodGet, "/v1/shopfloor/workers/not-a-uuid", "", allDuty)
 	if rec.Code != http.StatusNotFound || problemCode(t, rec) != store.CodeWorkerNotFound {
 		t.Fatalf("bad id: %d %s", rec.Code, rec.Body.String())
 	}
@@ -475,7 +475,7 @@ func TestWorkers_DutiesAndNotFound(t *testing.T) {
 func TestWorkerDays_FiltersAndValidation(t *testing.T) {
 	fs := &fakeStore{days: []store.WorkerDay{}}
 	h := newRouter(fs)
-	rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/worker-days?from=2026-10-19&to=2026-10-25&status=calculated", "", allDuty)
+	rec := call(t, h, http.MethodGet, "/v1/shopfloor/worker-days?from=2026-10-19&to=2026-10-25&status=calculated", "", allDuty)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"items":[]`) {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 	}
@@ -483,7 +483,7 @@ func TestWorkerDays_FiltersAndValidation(t *testing.T) {
 		t.Fatalf("filter %+v", fs.dayFilter)
 	}
 	for _, q := range []string{"from=2026-10-19&to=2026-12-25", "from=2026-10-19&to=2026-10-20&status=exported", "from=x&to=2026-10-20", "from=2026-10-19&to=2026-10-20&workerId=nope"} {
-		if rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/worker-days?"+q, "", allDuty); rec.Code != http.StatusBadRequest {
+		if rec := call(t, h, http.MethodGet, "/v1/shopfloor/worker-days?"+q, "", allDuty); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: status %d", q, rec.Code)
 		}
 	}
@@ -491,10 +491,10 @@ func TestWorkerDays_FiltersAndValidation(t *testing.T) {
 
 func TestRegistrationsList_NeedsWorker(t *testing.T) {
 	h := newRouter(&fakeStore{})
-	if rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/registrations?from=2026-10-19&to=2026-10-20", "", allDuty); rec.Code != http.StatusBadRequest {
+	if rec := call(t, h, http.MethodGet, "/v1/shopfloor/registrations?from=2026-10-19&to=2026-10-20", "", allDuty); rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d", rec.Code)
 	}
-	rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/registrations?workerId="+workerID+"&from=2026-10-19&to=2026-10-20", "", allDuty)
+	rec := call(t, h, http.MethodGet, "/v1/shopfloor/registrations?workerId="+workerID+"&from=2026-10-19&to=2026-10-20", "", allDuty)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -515,7 +515,7 @@ func bundled(id, job, start, stop, good string) string {
 // carries the time worked once instead of once per job.
 func TestRegistrations_BundleHoursSplitByGoodQuantity(t *testing.T) {
 	fs := &fakeStore{}
-	rec := call(t, newRouter(fs), http.MethodPost, "/api/v1/shopfloor/registrations", registrationBody(
+	rec := call(t, newRouter(fs), http.MethodPost, "/v1/shopfloor/registrations", registrationBody(
 		bundled(regID, jobID, "2026-10-20T09:00:00Z", "2026-10-20T11:00:00Z", "30"),
 		bundled(regID2, jobID2, "2026-10-20T09:00:00Z", "2026-10-20T11:00:00Z", "10"),
 	), allDuty)
@@ -552,7 +552,7 @@ func TestRegistrations_BundleRulesNameTheItem(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			fs := &fakeStore{}
-			rec := call(t, newRouter(fs), http.MethodPost, "/api/v1/shopfloor/registrations", registrationBody(tc.items...), allDuty)
+			rec := call(t, newRouter(fs), http.MethodPost, "/v1/shopfloor/registrations", registrationBody(tc.items...), allDuty)
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 			}
@@ -589,7 +589,7 @@ func TestRegistrations_ClockSkewCorrectedAndRecorded(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fs := &fakeStore{}
 			body := fmt.Sprintf(`{"deviceSentAt":%q,"items":[%s]}`, tc.deviceAt.Format(time.RFC3339), item)
-			rec := call(t, newRouterAt(fs, func() time.Time { return server }), http.MethodPost, "/api/v1/shopfloor/registrations", body, allDuty)
+			rec := call(t, newRouterAt(fs, func() time.Time { return server }), http.MethodPost, "/v1/shopfloor/registrations", body, allDuty)
 			if rec.Code != http.StatusOK {
 				t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 			}
@@ -618,7 +618,7 @@ func TestRegistrations_ClockSkewCorrectedAndRecorded(t *testing.T) {
 func TestRegistrations_SkewCorrectionKeepsMissingStartInvalid(t *testing.T) {
 	server := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
 	body := fmt.Sprintf(`{"deviceSentAt":"2026-10-20T11:00:00Z","items":[{"id":%q,"workerId":%q,"kind":"clock-in"}]}`, regID, workerID)
-	rec := call(t, newRouterAt(&fakeStore{}, func() time.Time { return server }), http.MethodPost, "/api/v1/shopfloor/registrations", body, allDuty)
+	rec := call(t, newRouterAt(&fakeStore{}, func() time.Time { return server }), http.MethodPost, "/v1/shopfloor/registrations", body, allDuty)
 	var p httpx.Problem
 	_ = json.Unmarshal(rec.Body.Bytes(), &p)
 	if _, ok := p.Errors["items[0].startedAt"]; rec.Code != http.StatusBadRequest || !ok {
@@ -628,7 +628,7 @@ func TestRegistrations_SkewCorrectionKeepsMissingStartInvalid(t *testing.T) {
 
 func TestRegistrations_WithoutDeviceClockNothingIsMeasured(t *testing.T) {
 	fs := &fakeStore{}
-	rec := call(t, newRouter(fs), http.MethodPost, "/api/v1/shopfloor/registrations",
+	rec := call(t, newRouter(fs), http.MethodPost, "/v1/shopfloor/registrations",
 		registrationBody(clock(regID, "clock-in", "2026-10-20T09:00:00Z")), allDuty)
 	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "clockOffsetSeconds") || fs.registered[0].ClockOffsetSeconds != nil {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
@@ -638,14 +638,14 @@ func TestRegistrations_WithoutDeviceClockNothingIsMeasured(t *testing.T) {
 func TestRegistrationsList_ByBundle(t *testing.T) {
 	fs := &fakeStore{}
 	h := newRouter(fs)
-	if rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/registrations?bundleId=nope", "", allDuty); rec.Code != http.StatusBadRequest {
+	if rec := call(t, h, http.MethodGet, "/v1/shopfloor/registrations?bundleId=nope", "", allDuty); rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad bundle id: status %d", rec.Code)
 	}
-	rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/registrations?bundleId="+bundleID, "", allDuty)
+	rec := call(t, h, http.MethodGet, "/v1/shopfloor/registrations?bundleId="+bundleID, "", allDuty)
 	if rec.Code != http.StatusOK || fs.bundleRead != bundleID {
 		t.Fatalf("status %d, read %q: %s", rec.Code, fs.bundleRead, rec.Body.String())
 	}
-	if rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/registrations?bundleId="+bundleID, "", "shopfloor.time.register"); rec.Code != http.StatusForbidden {
+	if rec := call(t, h, http.MethodGet, "/v1/shopfloor/registrations?bundleId="+bundleID, "", "shopfloor.time.register"); rec.Code != http.StatusForbidden {
 		t.Fatalf("without view duty: status %d", rec.Code)
 	}
 }

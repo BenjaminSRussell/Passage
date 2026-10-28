@@ -13,6 +13,6 @@ import { devProxy } from "./src/shell/devProxy";
 export default defineConfig(({ mode }) => ({
   plugins: [react()],
   define: { __PASSAGE_REMOTES__: JSON.stringify(federationRemotes) },
-  server: { port: 5173, proxy: devProxy(loadEnv(mode, ".", "PASSAGE_")) },
+  server: { port: 5173, proxy: devProxy(loadEnv(mode, decodeURIComponent(new URL(".", import.meta.url).pathname), "PASSAGE_")) },
   test: { environment: "jsdom", globals: true, setupFiles: ["./src/test-setup.ts"], exclude: [...configDefaults.exclude, "e2e/**"] },
 }));

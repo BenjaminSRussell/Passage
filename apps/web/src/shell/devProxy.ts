@@ -3,7 +3,7 @@ import type { ProxyOptions } from "vite";
 type Env = Record<string, string | undefined>;
 
 const DEFAULT_TARGET = "http://localhost:8080";
-const SERVICE_URL = /^PASSAGE_SVC_([A-Z0-9_]+)_URL$/;
+const SERVICE_URL = /^PASSAGE_SVC_(?!DEFAULT_URL$)([A-Z0-9_]+)_URL$/;
 
 export function stripApi(path: string): string {
   return path.replace(/^\/api(?=\/)/, "");
@@ -24,7 +24,7 @@ export function devProxy(env: Env): Record<string, ProxyOptions> {
   const proxy: Record<string, ProxyOptions> = {};
   for (const [key, url] of Object.entries(env)) {
     const match = SERVICE_URL.exec(key);
-    if (match && url) proxy[`^/api/v1/${match[1].toLowerCase().replaceAll("_", "-")}(/|$)`] = entry(url);
+    if (match && url) proxy[`^/api/v1/${match[1].toLowerCase().replaceAll("_", "-")}(/|\\?|$)`] = entry(url);
   }
   proxy["/api"] = entry(env.PASSAGE_SVC_DEFAULT_URL ?? DEFAULT_TARGET);
   return proxy;

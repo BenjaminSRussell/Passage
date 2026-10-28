@@ -68,7 +68,7 @@ func (h *Handler) router() chi.Router {
 	r := httpx.NewRouter()
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) { httpx.JSON(w, 200, map[string]string{"status": "ok"}) })
 	r.Get("/readyz", h.readyz)
-	r.Route("/api/v1/eam", func(r chi.Router) {
+	r.Route("/v1/eam", func(r chi.Router) {
 		r.With(authz.RequireDuty(DutyInquire)).Get("/workspace", h.workspace)
 		r.With(authz.RequireDuty(DutyInquire)).Get("/assets", h.listAssets)
 		r.With(authz.RequireDuty(DutyInquire)).Get("/assets/{id}", h.getAsset)

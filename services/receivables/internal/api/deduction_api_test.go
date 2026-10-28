@@ -122,7 +122,7 @@ func fieldErrors(t *testing.T, body []byte) map[string]string {
 func TestBankStatementImport_ValidatesParsesAndForwards(t *testing.T) {
 	f := &deductionFake{}
 	h := router(f)
-	path := "/api/v1/receivables/bank-statements/imports"
+	path := "/v1/receivables/bank-statements/imports"
 	body := func(le, content string) string {
 		return `{"legalEntityId":"` + le + `","content":` + jsonString(content) + `}`
 	}
@@ -182,7 +182,7 @@ func TestCreateDeduction_Validation(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &deductionFake{}
-			rec := do(router(f), http.MethodPost, "/api/v1/receivables/deductions", tc.body, tc.duties, tc.headers)
+			rec := do(router(f), http.MethodPost, "/v1/receivables/deductions", tc.body, tc.duties, tc.headers)
 			if rec.Code != tc.status {
 				t.Fatalf("status = %d, want %d: %s", rec.Code, tc.status, rec.Body.String())
 			}
@@ -204,7 +204,7 @@ func TestCreateDeduction_Validation(t *testing.T) {
 func TestListDeductions_Filters(t *testing.T) {
 	f := &deductionFake{}
 	h := router(f)
-	base := "/api/v1/receivables/deductions"
+	base := "/v1/receivables/deductions"
 	if rec := do(h, http.MethodGet, base, "", "", nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("without ARView: %d", rec.Code)
 	}
@@ -223,7 +223,7 @@ func TestListDeductions_Filters(t *testing.T) {
 }
 
 func TestDeductionActions_ValidateAndForward(t *testing.T) {
-	base := "/api/v1/receivables/deductions/" + testDeduction
+	base := "/v1/receivables/deductions/" + testDeduction
 	v3 := map[string]string{"If-Match": `"3"`}
 	tests := []struct {
 		name   string

@@ -96,13 +96,13 @@ func decodeCursor(s string) (store.ProcessCursor, bool) {
 
 // registerProcess mounts the process message routes (FR-25.17).
 func (a *API) registerProcess(r chi.Router) {
-	r.With(authz.RequireDuty(DutyProcessCreate)).Post("/api/v1/shopfloor/process-messages", a.createProcessMessage)
-	r.With(authz.RequireDuty(DutyView)).Get("/api/v1/shopfloor/process-messages", a.listProcessMessages)
-	r.With(authz.RequireDuty(DutyView)).Get("/api/v1/shopfloor/process-messages/{id}", a.getProcessMessage)
-	r.With(authz.RequireDuty(DutyProcessDeliver)).Post("/api/v1/shopfloor/process-messages/{id}/deliveries/{destination}:report", a.reportDelivery)
-	r.With(authz.RequireDuty(DutyProcessCreate)).Post("/api/v1/shopfloor/process-messages/{id}:reprocess", a.reprocessDelivery)
-	r.With(authz.RequireDuty(DutyProcessCreate)).Post("/api/v1/shopfloor/process-messages/{id}:delete", a.deleteProcessMessage)
-	r.With(authz.RequireDuty(DutyProcessDeliver)).Post("/api/v1/shopfloor/process-messages:retry-due", a.retryDueProcessMessages)
+	r.With(authz.RequireDuty(DutyProcessCreate)).Post("/v1/shopfloor/process-messages", a.createProcessMessage)
+	r.With(authz.RequireDuty(DutyView)).Get("/v1/shopfloor/process-messages", a.listProcessMessages)
+	r.With(authz.RequireDuty(DutyView)).Get("/v1/shopfloor/process-messages/{id}", a.getProcessMessage)
+	r.With(authz.RequireDuty(DutyProcessDeliver)).Post("/v1/shopfloor/process-messages/{id}/deliveries/{destination}:report", a.reportDelivery)
+	r.With(authz.RequireDuty(DutyProcessCreate)).Post("/v1/shopfloor/process-messages/{id}:reprocess", a.reprocessDelivery)
+	r.With(authz.RequireDuty(DutyProcessCreate)).Post("/v1/shopfloor/process-messages/{id}:delete", a.deleteProcessMessage)
+	r.With(authz.RequireDuty(DutyProcessDeliver)).Post("/v1/shopfloor/process-messages:retry-due", a.retryDueProcessMessages)
 }
 
 // createProcessMessage stores a message from a kiosk PI sheet, the edge or manual

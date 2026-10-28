@@ -152,7 +152,7 @@ func TestCreateRun(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &fakeStore{runReplayed: tc.replayed}
-			w := call(router(f), http.MethodPost, "/api/v1/reporting/runs", tc.body, tc.headers, tc.duties...)
+			w := call(router(f), http.MethodPost, "/v1/reporting/runs", tc.body, tc.headers, tc.duties...)
 			if w.Code != tc.want {
 				t.Fatalf("status %d, want %d: %s", w.Code, tc.want, w.Body.String())
 			}
@@ -165,7 +165,7 @@ func TestCreateRun(t *testing.T) {
 				}
 				return
 			}
-			if w.Header().Get("Location") != "/api/v1/reporting/runs/"+runUUID {
+			if w.Header().Get("Location") != "/v1/reporting/runs/"+runUUID {
 				t.Fatalf("Location = %q", w.Header().Get("Location"))
 			}
 			if f.runSpec.LedgerID != ledgerUUID || f.runSpec.IdempotencyKey != "k1" || f.runSpec.RequestedBy != "u1" || len(f.runSpec.RequestHash) != 64 {
@@ -180,20 +180,20 @@ func TestCreateRun_SameBodySameHash(t *testing.T) {
 	r := router(f)
 	key := map[string]string{"Idempotency-Key": "k1"}
 	body := runBody("")
-	call(r, http.MethodPost, "/api/v1/reporting/runs", body, key, DutyRun)
+	call(r, http.MethodPost, "/v1/reporting/runs", body, key, DutyRun)
 	first := f.runSpec.RequestHash
-	call(r, http.MethodPost, "/api/v1/reporting/runs", body, key, DutyRun)
+	call(r, http.MethodPost, "/v1/reporting/runs", body, key, DutyRun)
 	if f.runSpec.RequestHash != first {
 		t.Fatal("identical requests must hash identically so the key replays")
 	}
-	call(r, http.MethodPost, "/api/v1/reporting/runs", runBody(`currencyType="rpt"`), key, DutyRun)
+	call(r, http.MethodPost, "/v1/reporting/runs", runBody(`currencyType="rpt"`), key, DutyRun)
 	if f.runSpec.RequestHash == first {
 		t.Fatal("a different request must hash differently so key reuse is detected")
 	}
 }
 
 func TestRunReads_RejectNonUUIDWithoutStore(t *testing.T) {
-	for _, path := range []string{"/api/v1/reporting/runs/R1", "/api/v1/reporting/runs/R1/cells", "/api/v1/reporting/runs/R1/cells/A/B/balances"} {
+	for _, path := range []string{"/v1/reporting/runs/R1", "/v1/reporting/runs/R1/cells", "/v1/reporting/runs/R1/cells/A/B/balances"} {
 		w := call(router(&fakeStore{}), http.MethodGet, path, "", nil, DutyView)
 		if w.Code != http.StatusNotFound || problemCode(t, w) != store.CodeRunNotFound {
 			t.Fatalf("GET %s = %d %s, want 404 %s", path, w.Code, w.Body.String(), store.CodeRunNotFound)
@@ -203,28 +203,28 @@ func TestRunReads_RejectNonUUIDWithoutStore(t *testing.T) {
 
 func TestListRuns(t *testing.T) {
 	f := &fakeStore{}
-	w := call(router(f), http.MethodGet, "/api/v1/reporting/runs?definition=BS-STD&limit=25", "", nil, DutyView)
+	w := call(router(f), http.MethodGet, "/v1/reporting/runs?definition=BS-STD&limit=25", "", nil, DutyView)
 	if w.Code != http.StatusOK || f.listDef != "BS-STD" || f.listLimit != 25 || !strings.Contains(w.Body.String(), runUUID) {
 		t.Fatalf("status %d def %q limit %d body %s", w.Code, f.listDef, f.listLimit, w.Body.String())
 	}
-	w = call(router(f), http.MethodGet, "/api/v1/reporting/runs?limit=999", "", nil, DutyView)
+	w = call(router(f), http.MethodGet, "/v1/reporting/runs?limit=999", "", nil, DutyView)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("limit above maximum = %d, want 400", w.Code)
 	}
 }
 
 func TestListDefinitions(t *testing.T) {
-	w := call(router(&fakeStore{}), http.MethodGet, "/api/v1/reporting/definitions", "", nil, DutyView)
+	w := call(router(&fakeStore{}), http.MethodGet, "/v1/reporting/definitions", "", nil, DutyView)
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"latestVersion":2`) {
 		t.Fatalf("status %d body %s", w.Code, w.Body.String())
 	}
-	if w := call(router(&fakeStore{}), http.MethodGet, "/api/v1/reporting/definitions", "", nil); w.Code != http.StatusForbidden {
+	if w := call(router(&fakeStore{}), http.MethodGet, "/v1/reporting/definitions", "", nil); w.Code != http.StatusForbidden {
 		t.Fatalf("without the view duty = %d, want 403", w.Code)
 	}
 }
 
 func TestDrillBalances(t *testing.T) {
-	path := "/api/v1/reporting/runs/" + runUUID + "/cells/CASH/C1/balances"
+	path := "/v1/reporting/runs/" + runUUID + "/cells/CASH/C1/balances"
 	t.Run("keys sum to the cell", func(t *testing.T) {
 		f := &fakeStore{cell: domain.Cell{Row: "CASH", Column: "C1", Value: decimal.RequireFromString("15.75"), Keys: []domain.Key{
 			{Account: "1000", Period: "2026-02", Amount: decimal.RequireFromString("5.25")},
@@ -266,7 +266,7 @@ func TestValidate_ReportsExpressionErrors(t *testing.T) {
 	body := `{"schemaVersion":"1","name":"Bad","kind":"custom",
 		"rows":[{"code":"R1","kind":"calculation","label":"x","normalBalance":"debit","expression":"R9 +"}],
 		"columns":[{"code":"C1","label":"P","periodExpr":"P","currencyType":"acct"}]}`
-	w := call(router(&fakeStore{}), http.MethodPost, "/api/v1/reporting/definitions/BADDEF:validate", body, nil, DutyMaintain)
+	w := call(router(&fakeStore{}), http.MethodPost, "/v1/reporting/definitions/BADDEF:validate", body, nil, DutyMaintain)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", w.Code, w.Body.String())
 	}
@@ -282,32 +282,32 @@ func TestValidate_ReportsExpressionErrors(t *testing.T) {
 	if out.Valid || len(out.Issues) == 0 || out.Issues[0].Code != domain.CodeExpression {
 		t.Fatalf("expected REPORT-0002 finding, got %+v", out)
 	}
-	if w := call(router(&fakeStore{}), http.MethodPost, "/api/v1/reporting/definitions/BADDEF:archive", body, nil, DutyMaintain); w.Code != http.StatusNotFound {
+	if w := call(router(&fakeStore{}), http.MethodPost, "/v1/reporting/definitions/BADDEF:archive", body, nil, DutyMaintain); w.Code != http.StatusNotFound {
 		t.Fatalf("unknown action = %d, want 404", w.Code)
 	}
 }
 
 func TestPutDefinition(t *testing.T) {
 	f := &fakeStore{}
-	w := call(router(f), http.MethodPut, "/api/v1/reporting/definitions/OTHER", validDefinition, nil, DutyMaintain)
+	w := call(router(f), http.MethodPut, "/v1/reporting/definitions/OTHER", validDefinition, nil, DutyMaintain)
 	if w.Code != http.StatusUnprocessableEntity || problemCode(t, w) != domain.CodeExpression || f.saved != nil {
 		t.Fatalf("code mismatch = %d %s", w.Code, w.Body.String())
 	}
 	bad := strings.Replace(validDefinition, `"periodExpr":"P"`, `"periodExpr":"MTD"`, 1)
-	if w := call(router(f), http.MethodPut, "/api/v1/reporting/definitions/BS-STD", bad, nil, DutyMaintain); w.Code != http.StatusUnprocessableEntity || f.saved != nil {
+	if w := call(router(f), http.MethodPut, "/v1/reporting/definitions/BS-STD", bad, nil, DutyMaintain); w.Code != http.StatusUnprocessableEntity || f.saved != nil {
 		t.Fatalf("invalid definition = %d %s", w.Code, w.Body.String())
 	}
-	if w := call(router(f), http.MethodPut, "/api/v1/reporting/definitions/BS-STD", validDefinition, map[string]string{"If-Match": "abc"}, DutyMaintain); w.Code != http.StatusBadRequest {
+	if w := call(router(f), http.MethodPut, "/v1/reporting/definitions/BS-STD", validDefinition, map[string]string{"If-Match": "abc"}, DutyMaintain); w.Code != http.StatusBadRequest {
 		t.Fatalf("malformed If-Match = %d", w.Code)
 	}
-	w = call(router(f), http.MethodPut, "/api/v1/reporting/definitions/BS-STD", validDefinition, map[string]string{"If-Match": `"3"`}, DutyMaintain)
+	w = call(router(f), http.MethodPut, "/v1/reporting/definitions/BS-STD", validDefinition, map[string]string{"If-Match": `"3"`}, DutyMaintain)
 	if w.Code != http.StatusOK || w.Header().Get("ETag") != `"7"` || f.ifMatch == nil || *f.ifMatch != 3 {
 		t.Fatalf("save = %d etag %q ifMatch %v", w.Code, w.Header().Get("ETag"), f.ifMatch)
 	}
 }
 
 func TestImportDefinition(t *testing.T) {
-	path := "/api/v1/reporting/definitions/import"
+	path := "/v1/reporting/definitions/import"
 	t.Run("unsupported schema", func(t *testing.T) {
 		f := &fakeStore{}
 		body := strings.Replace(validDefinition, `"schemaVersion":"1"`, `"schemaVersion":"9"`, 1)

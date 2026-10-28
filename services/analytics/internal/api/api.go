@@ -43,10 +43,10 @@ func New(st *store.Postgres) *API {
 func (a *API) Register(r *chi.Mux) {
 	r.Group(func(g chi.Router) {
 		g.Use(authz.RequireDuty(DutyView))
-		g.Get("/api/v1/analytics/metrics", a.listMetrics)
-		g.Post("/api/v1/analytics/query", a.query)
+		g.Get("/v1/analytics/metrics", a.listMetrics)
+		g.Post("/v1/analytics/query", a.query)
 	})
-	r.With(authz.RequireDuty(DutyFinance)).Get("/api/v1/analytics/reconciliation", a.reconciliation)
+	r.With(authz.RequireDuty(DutyFinance)).Get("/v1/analytics/reconciliation", a.reconciliation)
 }
 
 // MetricsResponse lists published metrics.
@@ -64,7 +64,7 @@ func (a *API) listMetrics(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, MetricsResponse{Items: items})
 }
 
-// QueryRequest is the body of POST /api/v1/analytics/query. Dates are YYYY-MM-DD.
+// QueryRequest is the body of POST /v1/analytics/query. Dates are YYYY-MM-DD.
 type QueryRequest struct {
 	Measures   []string `json:"measures"`
 	Dimensions []string `json:"dimensions"`

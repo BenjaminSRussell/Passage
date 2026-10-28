@@ -29,8 +29,8 @@ type kioskSessionResponse struct {
 
 // registerKiosk mounts kiosk login and the "Who is clocked in" inquiry.
 func (a *API) registerKiosk(r chi.Router) {
-	r.With(authz.RequireDuty(DutyKioskLogin)).Post("/api/v1/shopfloor/sessions:badge", a.badgeLogin)
-	r.With(authz.RequireDuty(DutyView)).Get("/api/v1/shopfloor/clocked-in", a.clockedIn)
+	r.With(authz.RequireDuty(DutyKioskLogin)).Post("/v1/shopfloor/sessions:badge", a.badgeLogin)
+	r.With(authz.RequireDuty(DutyView)).Get("/v1/shopfloor/clocked-in", a.clockedIn)
 }
 
 // badgeLogin resolves a scanned badge (GS1 barcode or NFC payload) to an active

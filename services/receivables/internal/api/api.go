@@ -62,7 +62,7 @@ func New(s store.Store) *API { return &API{store: s} }
 
 // Register mounts the receivables routes on r.
 func (a *API) Register(r chi.Router) {
-	r.Route("/api/v1/receivables", func(r chi.Router) {
+	r.Route("/v1/receivables", func(r chi.Router) {
 		r.With(authz.RequireDuty(dutyView)).Get("/open-items", a.listOpenItems)
 		r.With(authz.RequireDuty(dutyView)).Get("/aging", a.aging)
 		r.With(authz.RequireDuty(dutyPayment)).Post("/payments", a.createPayment)

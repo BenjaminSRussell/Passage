@@ -192,7 +192,7 @@ See `NOT-IMPLEMENTED.md` for what is deferred.
 cmd/finreport/          entrypoint (dbx.Connect, optional Migrate, httpx.Serve)
 internal/domain/        definitions, expressions, periods, evaluation, cash flow, standard definitions, derived hierarchies (pure, no I/O)
 internal/store/         Postgres store (pgx), tenant transactions, outbox writes
-internal/api/           HTTP handlers under /api/v1/reporting
+internal/api/           HTTP handlers under /v1/reporting
 internal/events/        event types and payloads
 internal/config/        REPORTING_* tunables, validated at startup
 migrations/             SQL applied in order (0003 run checks, 0004 schedules, 0005 journal lines, 0006 audit trail); FS embedded in migrations.go

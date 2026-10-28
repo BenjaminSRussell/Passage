@@ -34,14 +34,14 @@ var (
 // workbench and waves (FR-28.13, BR-28.14), carrier tracking (FR-28.10) and the
 // GS1-128 container label (FR-28.3).
 func (a *API) routesWorkbench(r chi.Router) {
-	r.With(authz.RequireDuty("WarehouseRelease")).Post("/api/v1/fulfillment/shipments/{id}:cancel", a.cancelShipment)
-	r.With(authz.RequireDuty("WarehouseRelease")).Post("/api/v1/fulfillment/waves:preview", a.previewWaves)
-	r.With(authz.RequireDuty("WarehouseRelease")).Post("/api/v1/fulfillment/waves", a.createWaves)
-	r.With(authz.RequireDuty("WarehouseView")).Get("/api/v1/fulfillment/waves", a.listWaves)
-	r.With(authz.RequireDuty("WarehouseView")).Get("/api/v1/fulfillment/waves/{id}", a.getWave)
-	r.With(authz.RequireDuty("WarehouseView")).Get("/api/v1/fulfillment/shipments/{id}/tracking", a.listTracking)
-	r.With(authz.RequireDuty("WarehouseShip")).Post("/api/v1/fulfillment/shipments/{id}/tracking", a.recordTracking)
-	r.With(authz.RequireDuty("WarehouseView")).Get("/api/v1/fulfillment/shipments/{id}/containers/{cid}/label", a.containerLabel)
+	r.With(authz.RequireDuty("WarehouseRelease")).Post("/v1/fulfillment/shipments/{id}:cancel", a.cancelShipment)
+	r.With(authz.RequireDuty("WarehouseRelease")).Post("/v1/fulfillment/waves:preview", a.previewWaves)
+	r.With(authz.RequireDuty("WarehouseRelease")).Post("/v1/fulfillment/waves", a.createWaves)
+	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/waves", a.listWaves)
+	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/waves/{id}", a.getWave)
+	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/shipments/{id}/tracking", a.listTracking)
+	r.With(authz.RequireDuty("WarehouseShip")).Post("/v1/fulfillment/shipments/{id}/tracking", a.recordTracking)
+	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/shipments/{id}/containers/{cid}/label", a.containerLabel)
 }
 
 // ---- DTOs ----------------------------------------------------------------------

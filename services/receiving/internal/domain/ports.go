@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	LedgerPostPath        = "/api/v1/ledger/journal-entries"
-	LedgerReversePathTmpl = "/api/v1/ledger/journal-entries/%s/reverse"
+	LedgerPostPath        = "/v1/ledger/journal-entries"
+	LedgerReversePathTmpl = "/v1/ledger/journal-entries/%s/reverse"
 )
 
 var (

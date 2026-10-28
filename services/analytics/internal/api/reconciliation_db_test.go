@@ -42,7 +42,7 @@ func TestReconciliation_ReturnsDayWithFailedCount(t *testing.T) {
 	h := tenant.Middleware(router)
 	finance := map[string]string{tenant.HeaderDuties: DutyFinance}
 
-	rec := do(t, h, http.MethodGet, "/api/v1/analytics/reconciliation?date=2026-10-26", "", finance)
+	rec := do(t, h, http.MethodGet, "/v1/analytics/reconciliation?date=2026-10-26", "", finance)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -58,11 +58,11 @@ func TestReconciliation_ReturnsDayWithFailedCount(t *testing.T) {
 		t.Fatalf("delta must be a decimal string: %s", rec.Body.String())
 	}
 
-	rec = do(t, h, http.MethodGet, "/api/v1/analytics/reconciliation?date=2026-10-26&metric=cogs", "", finance)
+	rec = do(t, h, http.MethodGet, "/v1/analytics/reconciliation?date=2026-10-26&metric=cogs", "", finance)
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || len(got.Items) != 0 || got.FailedCount != 0 {
 		t.Fatalf("cogs only = %+v, %v", got, err)
 	}
-	rec = do(t, h, http.MethodGet, "/api/v1/analytics/reconciliation?date=2026-10-26&metric=Revenue%27--", "", finance)
+	rec = do(t, h, http.MethodGet, "/v1/analytics/reconciliation?date=2026-10-26&metric=Revenue%27--", "", finance)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad metric: status %d", rec.Code)
 	}
