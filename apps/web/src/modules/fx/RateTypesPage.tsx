@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { fetchRateTypes, putRateType, type RateType } from "./api/client";
 import { ApiFailure, fieldsOwnFailure, mapServerFields, useFocusFirstInvalid, withoutFields } from "./formSupport";
@@ -36,6 +36,11 @@ export function RateTypesPage() {
     onError: (error) => setErrors(mapServerFields(error, "", FIELDS)),
   });
   useFocusFirstInvalid(form, errors);
+  useEffect(() => {
+    if (types.isSuccess && errors.code?.startsWith("The existing rate types could not be checked yet.")) {
+      setErrors((current) => withoutFields(current, ["code"]));
+    }
+  }, [types.isSuccess, errors.code]);
 
   function change(next: Partial<RateTypeValues>) {
     setValues({ ...values, ...next });
@@ -55,6 +60,7 @@ export function RateTypesPage() {
   }
 
   function startNew() {
+    if (save.isPending) return;
     setValues(emptyRateType);
     setEditing(false);
     setErrors({});
@@ -81,7 +87,7 @@ export function RateTypesPage() {
         description="A rate type groups rates that are used for the same purpose, such as closing or average rates. Open a row to change it."
         actions={
           editing ? (
-            <Button variant="secondary" onClick={startNew}>
+            <Button variant="secondary" disabled={save.isPending} onClick={startNew}>
               New rate type
             </Button>
           ) : null
