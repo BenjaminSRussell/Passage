@@ -107,10 +107,11 @@ interface PublishPanelProps {
   canBackdate: boolean;
   reason: string;
   onReasonChange(reason: string): void;
+  onBackdateChange(backdated: boolean): void;
   onPublished(effectiveFrom: string): void;
 }
 
-function PublishPanel({ versionId, versionNo, lock, type, canBackdate, reason, onReasonChange, onPublished }: PublishPanelProps) {
+function PublishPanel({ versionId, versionNo, lock, type, canBackdate, reason, onReasonChange, onBackdateChange, onPublished }: PublishPanelProps) {
   const [effectiveFrom, setEffectiveFrom] = useState(todayIso);
   const [submitted, setSubmitted] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -118,6 +119,7 @@ function PublishPanel({ versionId, versionNo, lock, type, canBackdate, reason, o
 
   const validDate = dayNumber(effectiveFrom) !== null;
   const backdated = validDate && effectiveFrom < todayIso();
+  useEffect(() => onBackdateChange(backdated), [backdated, onBackdateChange]);
   const reasonLength = [...reason.trim()].length;
   const dateError = !validDate
     ? "Enter a valid date."
@@ -221,6 +223,7 @@ export function HierarchyDraftEditor({
   const [failure, setFailure] = useState<Problem | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
   const [publishReason, setPublishReason] = useState("");
+  const [publishBackdated, setPublishBackdated] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const discardOnReload = useRef(false);
 
@@ -348,6 +351,7 @@ export function HierarchyDraftEditor({
   };
 
   const discard = () => {
+    if (saving) return;
     setNodes(base.nodes);
     setFailure(null);
     setSelectedId(base.nodes.some((node) => node.orgUnitId === selectedId) ? selectedId : (base.nodes.find((node) => node.parentOrgUnitId === null)?.orgUnitId ?? null));
@@ -364,12 +368,12 @@ export function HierarchyDraftEditor({
   const onKeyDown = (event: KeyboardEvent) => {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
       event.preventDefault();
-      if (dirty && !saving) {
+      if (dirty && !saving && !confirmDiscard) {
         void save();
       }
     } else if (event.key === "Escape") {
       if (publishOpen) {
-        if (publishReason === "") {
+        if (!publishBackdated || publishReason === "") {
           setPublishOpen(false);
         }
       } else if (dirty && !saving) {
@@ -464,6 +468,7 @@ export function HierarchyDraftEditor({
             canBackdate={canBackdate}
             reason={publishReason}
             onReasonChange={setPublishReason}
+            onBackdateChange={setPublishBackdated}
             onPublished={onPublished}
           />
         ) : null}
