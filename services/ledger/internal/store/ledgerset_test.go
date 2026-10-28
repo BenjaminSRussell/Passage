@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -199,19 +200,12 @@ func TestPostgres_SetTablesAreAppendOnlyForTheAppRole(t *testing.T) {
 	}
 }
 
-func TestPostgres_SetPostingLeavesLeadingLedgerAccountsUnmapped(t *testing.T) {
+func TestPostgres_AccountMappingOnLeadingLedgerIsRejected(t *testing.T) {
 	e := setupLedgerSet(t)
-	if _, err := e.store.CreateAccountMapping(e.ctx, AccountMapping{LedgerID: e.ledger.ID, SourceAccount: "6010", TargetAccount: "2110", EffectiveFrom: "2026-01-01"}); err != nil {
-		t.Fatalf("mapping on the leading ledger: %v", err)
-	}
-	out, err := e.store.PostSetEntry(e.ctx, e.set.ID, vendorInvoice("", "SET-LEAD", "15.00"))
-	if err != nil {
-		t.Fatalf("post set: %v", err)
-	}
-	for _, entry := range out.Entries {
-		if entry.LedgerID == e.ledger.ID && entry.Lines[0].Account != "6010" {
-			t.Fatalf("the leading ledger keeps the original account, got %s", entry.Lines[0].Account)
-		}
+	_, err := e.store.CreateAccountMapping(e.ctx, AccountMapping{LedgerID: e.ledger.ID, SourceAccount: "6010", TargetAccount: "2110", EffectiveFrom: "2026-01-01"})
+	var rej *domain.RejectedError
+	if !errors.As(err, &rej) || rej.Violations[0].Code != CodeMappingOnLeading {
+		t.Fatalf("mapping on the leading ledger must be rejected, got %v", err)
 	}
 }
 
@@ -256,6 +250,62 @@ func TestPostgres_LedgerSetNeedsOneLeadingLedgerPerLegalEntity(t *testing.T) {
 	}
 	if _, err := e.store.CreateLedgerSet(e.ctx, LedgerSetInput{Code: "ALT2", Name: "alt", LeadingLedgerID: e.ledger.ID, ParallelLedgerIDs: []string{alt.ID}}); err != nil {
 		t.Fatalf("a second set under the same leading ledger is allowed: %v", err)
+	}
+}
+
+func TestPostgres_LedgerSetConcurrentLeadingLedgerIsSerialized(t *testing.T) {
+	e, _ := setup(t)
+	parallel, err := e.store.CreateLedger(e.ctx, Ledger{LegalEntityID: e.le, Code: "PAR", Name: "Parallel", ChartCode: "STD", Currency: "USD", FuturePostingDays: 366})
+	if err != nil {
+		t.Fatal(err)
+	}
+	leading, err := e.store.CreateLedger(e.ctx, Ledger{LegalEntityID: e.le, Code: "ALT", Name: "Alternative", ChartCode: "STD", Currency: "USD", FuturePostingDays: 366})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for i, lead := range []string{e.ledger.ID, leading.ID} {
+		go func(i int, lead string) {
+			<-start
+			_, err := e.store.CreateLedgerSet(e.ctx, LedgerSetInput{Code: fmt.Sprintf("RACE%d", i), Name: "Concurrent", LeadingLedgerID: lead, ParallelLedgerIDs: []string{parallel.ID}})
+			results <- err
+		}(i, lead)
+	}
+	close(start)
+	success, rejected := 0, 0
+	for range 2 {
+		err := <-results
+		if err == nil {
+			success++
+			continue
+		}
+		var rej *domain.RejectedError
+		if errors.As(err, &rej) && rej.Violations[0].Code == CodeSetLeadingConflict {
+			rejected++
+			continue
+		}
+		t.Fatalf("unexpected concurrent create error: %v", err)
+	}
+	if success != 1 || rejected != 1 {
+		t.Fatalf("concurrent creates: %d succeeded, %d rejected", success, rejected)
+	}
+}
+
+func TestPostgres_LedgerSetCodeIsUniquePerLegalEntity(t *testing.T) {
+	e := setupLedgerSet(t)
+	wide := principalCtx(e.tenant, "")
+	otherLE := ids.New()
+	lead, err := e.store.CreateLedger(wide, Ledger{LegalEntityID: otherLE, Code: "OLEAD", Name: "Other leading", ChartCode: "STD", Currency: "USD", FuturePostingDays: 366})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parallel, err := e.store.CreateLedger(wide, Ledger{LegalEntityID: otherLE, Code: "OPAR", Name: "Other parallel", ChartCode: "STD", Currency: "USD", FuturePostingDays: 366})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.store.CreateLedgerSet(wide, LedgerSetInput{Code: e.set.Code, Name: "Other entity set", LeadingLedgerID: lead.ID, ParallelLedgerIDs: []string{parallel.ID}}); err != nil {
+		t.Fatalf("same set code in another legal entity: %v", err)
 	}
 }
 

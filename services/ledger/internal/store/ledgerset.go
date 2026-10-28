@@ -24,6 +24,7 @@ const (
 	CodeMappingDuplicate    = "LEDGER_MAPPING_DUPLICATE"
 	CodeSetEntityMismatch   = "LEDGER_SET_LEGAL_ENTITY_MISMATCH"
 	CodeSetLeadingConflict  = "LEDGER_SET_LEADING_CONFLICT"
+	CodeMappingOnLeading    = "LEDGER_MAPPING_ON_LEADING_LEDGER"
 	CodeSetCurrencyMismatch = "LEDGER_SET_CURRENCY_MISMATCH"
 )
 
@@ -91,6 +92,9 @@ func (s *Postgres) CreateLedgerSet(ctx context.Context, in LedgerSetInput) (Ledg
 		if _, err := loadLedger(ctx, tx, p.TenantID, in.LeadingLedgerID, true); err != nil {
 			return err
 		}
+		if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, p.TenantID+"/"+loaded[0].LegalEntityID); err != nil {
+			return err
+		}
 		var conflicting int
 		if err := tx.QueryRow(ctx, `select count(*) from ledger_set where tenant_id = $1 and legal_entity_id = $2 and leading_ledger_id <> $3`,
 			p.TenantID, loaded[0].LegalEntityID, in.LeadingLedgerID).Scan(&conflicting); err != nil {
@@ -155,6 +159,13 @@ func (s *Postgres) CreateAccountMapping(ctx context.Context, in AccountMapping) 
 		ledger, err := loadLedger(ctx, tx, p.TenantID, in.LedgerID, false)
 		if err != nil {
 			return err
+		}
+		var isLeading bool
+		if err := tx.QueryRow(ctx, `select exists(select 1 from ledger_set where tenant_id = $1 and leading_ledger_id = $2)`, p.TenantID, in.LedgerID).Scan(&isLeading); err != nil {
+			return err
+		}
+		if isLeading {
+			return setViolation(CodeMappingOnLeading, "ledgerId", "account mappings are not applied to a set's leading ledger")
 		}
 		targets, err := loadAccounts(ctx, tx, p.TenantID, ledger.ChartCode, []string{in.TargetAccount})
 		if err != nil {

@@ -54,6 +54,10 @@ func TestCreateLedgerSet_Validation(t *testing.T) {
 		t.Fatalf("status %d, store calls %d", rec.Code, len(fs.setInputs))
 	}
 	good := `{"code":"IFRS","name":"Parallel","leadingLedgerId":"` + testLedger + `","parallelLedgerIds":["` + testDoc + `"]}`
+	empty := `{"code":"IFRS","name":"Parallel","leadingLedgerId":"` + testLedger + `","parallelLedgerIds":[]}`
+	if rec := call(h, http.MethodPost, "/v1/ledger/ledger-sets", empty, dutySetupWrite, nil); rec.Code != http.StatusBadRequest || len(fs.setInputs) != 0 {
+		t.Fatalf("empty parallelLedgerIds: status %d, store calls %d", rec.Code, len(fs.setInputs))
+	}
 	if rec := call(h, http.MethodPost, "/v1/ledger/ledger-sets", good, dutyRead, nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("without the setup duty: status %d", rec.Code)
 	}
