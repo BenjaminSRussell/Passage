@@ -5,7 +5,7 @@ import { afterEach, beforeEach, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
 import fx from "./module";
 
-export type Reply = { status: number; body: unknown };
+export type Reply = { status: number; body: unknown; headers?: Record<string, string> };
 export interface Call {
   method: string;
   url: URL;
@@ -30,7 +30,7 @@ export function useFakeServer() {
         const method = init.method ?? "GET";
         server.calls.push({ method, url, body: init.body ? JSON.parse(String(init.body)) : undefined, headers: (init.headers ?? {}) as Record<string, string> });
         const reply = server.handler(url, method) ?? json(404, { code: "TEST-404", detail: `no fake for ${method} ${url.pathname}` });
-        return new Response(JSON.stringify(reply.body), { status: reply.status, headers: { "Content-Type": "application/json" } });
+        return new Response(JSON.stringify(reply.body), { status: reply.status, headers: { "Content-Type": "application/json", ...reply.headers } });
       }),
     );
   });

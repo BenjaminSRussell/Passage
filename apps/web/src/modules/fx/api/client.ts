@@ -58,13 +58,15 @@ export class FxApiError extends Error {
   readonly status: number;
   readonly code: string;
   readonly fields: Record<string, string>;
+  readonly retryAfter?: number;
 
-  constructor(status: number, code: string, message: string, fields: Record<string, string> = {}) {
+  constructor(status: number, code: string, message: string, fields: Record<string, string> = {}, retryAfter?: number) {
     super(message);
     this.name = "FxApiError";
     this.status = status;
     this.code = code;
     this.fields = fields;
+    this.retryAfter = retryAfter;
   }
 }
 
@@ -78,7 +80,8 @@ async function readProblem(res: Response): Promise<FxApiError> {
   const code = typeof body.code === "string" ? body.code : "COM-0500";
   const detail = typeof body.detail === "string" ? body.detail : `request failed with status ${res.status}`;
   const fields = z.record(z.string()).safeParse(body.errors ?? {});
-  return new FxApiError(res.status, code, detail, fields.success ? fields.data : {});
+  const retryAfter = Number.parseInt(res.headers.get("Retry-After") ?? "", 10);
+  return new FxApiError(res.status, code, detail, fields.success ? fields.data : {}, Number.isFinite(retryAfter) ? retryAfter : undefined);
 }
 
 async function send<T>(url: string, init: RequestInit, schema: z.ZodType<T>, fetchImpl: FetchLike): Promise<T> {

@@ -11,6 +11,13 @@
   align-items: start;
 }
 
+.fields {
+  display: contents;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
 .formActions {
   display: flex;
   flex-wrap: wrap;

@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { json, pageViolations, renderAt, server, useFakeServer, type Reply } from "./testServer";
 
 useFakeServer();
@@ -22,7 +22,7 @@ function answer(routes: { history?: Reply; publish?: Reply; put?: Reply; list?: 
   };
 }
 
-const posted = (version = 2, unchanged = false) => json(200, { rates: [{ id: "r1", version, superseded: false, unchanged }] });
+const posted = (version = 2, unchanged = false) => json(201, { rates: [{ id: "r1", version, superseded: false, unchanged }] });
 
 async function fillEntry(user: ReturnType<typeof userEvent.setup>, rate: string) {
   await screen.findByRole("option", { name: "CLOSING – Closing" });
@@ -57,36 +57,95 @@ describe("rate entry page", () => {
     await fillEntry(user, "1.1000");
     await user.click(screen.getByRole("button", { name: "Save rate" }));
     expect(await screen.findByText("Stored as version 2.")).toBeInTheDocument();
-    expect(screen.queryByText(/of the previous rate/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/the previous rate/)).not.toBeInTheDocument();
   });
 
-  it("asks for confirmation above 10 percent and saves only after it is given", async () => {
-    answer({ history: json(200, { entries: [history("1.0000")] }), publish: posted() });
+  it("asks for confirmation above 10 percent, moves focus to Confirm, and saves only after it is given", async () => {
+    answer({ history: json(200, { entries: [history("1")] }), publish: posted() });
     const user = userEvent.setup();
     const { container } = renderAt("/fx/rate-entry");
     await fillEntry(user, "1.1200");
     await user.click(screen.getByRole("button", { name: "Save rate" }));
-    const warning = await screen.findByRole("alert");
-    expect(warning.textContent).toContain("12.0% above the previous rate");
-    expect(warning.textContent).toContain("EUR to USD was 1.0000 from 2026-01-02");
+    expect(await screen.findByText("This rate is 12.00% above the previous rate")).toBeInTheDocument();
+    expect(screen.getByText(/EUR to USD was 1.000000 from 2026-01-02/)).toBeInTheDocument();
+    const confirm = screen.getByRole("button", { name: "Confirm and save" });
+    await waitFor(() => expect(confirm).toHaveFocus());
     expect(publishCalls()).toHaveLength(0);
     expect(pageViolations(container)).toEqual([]);
-    await user.click(within(warning).getByRole("button", { name: "Confirm and save" }));
+    await user.click(confirm);
     expect(await screen.findByText("Stored as version 2.")).toBeInTheDocument();
     expect(publishCalls()).toHaveLength(1);
   });
 
-  it("flags a drop of more than 10 percent and lets the user go back without saving", async () => {
-    answer({ history: json(200, { entries: [history("1.0000")] }), publish: posted() });
+  it("keeps Save rate aria-disabled, not natively disabled, while the warning shows", async () => {
+    answer({ history: json(200, { entries: [history("1")] }), publish: posted() });
+    const user = userEvent.setup();
+    renderAt("/fx/rate-entry");
+    await fillEntry(user, "1.5");
+    const save = screen.getByRole("button", { name: "Save rate" });
+    await user.click(save);
+    await screen.findByText(/above the previous rate/);
+    expect(save).toHaveAttribute("aria-disabled", "true");
+    expect(save).not.toBeDisabled();
+    await user.click(save);
+    expect(server.calls.filter((c) => c.url.pathname.endsWith("/history"))).toHaveLength(1);
+  });
+
+  it("flags a drop of more than 10 percent and returns focus to the rate field on Go back", async () => {
+    answer({ history: json(200, { entries: [history("1")] }), publish: posted() });
     const user = userEvent.setup();
     renderAt("/fx/rate-entry");
     await fillEntry(user, "0.8000");
     await user.click(screen.getByRole("button", { name: "Save rate" }));
-    expect((await screen.findByRole("alert")).textContent).toContain("20.0% below the previous rate");
+    expect(await screen.findByText("This rate is 20.00% below the previous rate")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Go back and edit" }));
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText(/the previous rate/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Rate")).toHaveFocus();
     expect(screen.getByLabelText("Rate")).toHaveValue("0.8000");
     expect(publishCalls()).toHaveLength(0);
+  });
+
+  it("compares a backdated correction with the rate in force on its own date, not a later one", async () => {
+    answer({
+      history: json(200, { entries: [history("1.08", { id: "jan", validFrom: "2026-01-05" }), history("1.1", { id: "feb", validFrom: "2026-02-01" })] }),
+      publish: posted(),
+    });
+    const user = userEvent.setup();
+    renderAt("/fx/rate-entry");
+    await screen.findByRole("option", { name: "CLOSING – Closing" });
+    await user.selectOptions(screen.getByLabelText("Rate type"), "CLOSING");
+    await user.type(screen.getByLabelText("From currency"), "EUR");
+    await user.type(screen.getByLabelText("To currency"), "USD");
+    await user.type(screen.getByLabelText("Valid from"), "2026-01-05");
+    await user.type(screen.getByLabelText("Rate"), "1.20");
+    await user.click(screen.getByRole("button", { name: "Save rate" }));
+    expect(await screen.findByText("This rate is 11.11% above the previous rate")).toBeInTheDocument();
+    expect(screen.getByText(/was 1.080000 from 2026-01-05/)).toBeInTheDocument();
+    expect(publishCalls()).toHaveLength(0);
+  });
+
+  it("disables the fields while a save is in flight so the posted values cannot change", async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    answer({});
+    const base = server.handler;
+    server.handler = (url, method) => (method === "POST" ? posted(1) : base(url, method));
+    const stub = globalThis.fetch;
+    vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
+      if (init?.method === "POST") await gate;
+      return stub(input, init);
+    });
+    const user = userEvent.setup();
+    renderAt("/fx/rate-entry");
+    await fillEntry(user, "1.2");
+    await user.click(screen.getByRole("button", { name: "Save rate" }));
+    await waitFor(() => expect(screen.getByLabelText("Rate")).toBeDisabled());
+    expect(screen.getByLabelText("From currency")).toBeDisabled();
+    expect(screen.getByLabelText("Rate type")).toBeDisabled();
+    release();
+    expect(await screen.findByText("Stored as version 1.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Rate")).toBeEnabled();
+    expect(publishCalls()).toHaveLength(1);
   });
 
   it("compares against the newest rate that is not superseded", async () => {
@@ -154,14 +213,16 @@ describe("rate entry page", () => {
     answer({});
     const base = server.handler;
     server.handler = (url, method) => {
-      if (method === "POST") return ++attempts === 1 ? json(409, { code: "FX_IDEMPOTENCY_IN_PROGRESS", detail: "in progress" }) : posted();
+      if (method === "POST") return ++attempts === 1 ? { ...json(409, { code: "FX_IDEMPOTENCY_IN_PROGRESS", detail: "in progress" }), headers: { "Retry-After": "1" } } : posted();
       return base(url, method);
     };
     const user = userEvent.setup();
     renderAt("/fx/rate-entry");
     await fillEntry(user, "1.2");
     await user.click(screen.getByRole("button", { name: "Save rate" }));
-    expect((await screen.findByRole("alert")).textContent).toContain("Another change is still in progress");
+    const conflict = await screen.findByRole("alert");
+    expect(conflict.textContent).toContain("This rate is still being saved");
+    expect(conflict.textContent).toContain("Wait 1 second and save again");
     await user.click(screen.getByRole("button", { name: "Save rate" }));
     expect(await screen.findByText("Stored as version 2.")).toBeInTheDocument();
     const [first, second] = publishCalls();
@@ -170,6 +231,47 @@ describe("rate entry page", () => {
     await user.click(screen.getByRole("button", { name: "Save rate" }));
     await waitFor(() => expect(publishCalls()).toHaveLength(3));
     expect(publishCalls()[2].headers["Idempotency-Key"]).not.toBe(first.headers["Idempotency-Key"]);
+  });
+
+  it("reports a version conflict on the confirm path and a changed-body replay as a plain failure", async () => {
+    let status = 409;
+    answer({ history: json(200, { entries: [history("1")] }) });
+    const base = server.handler;
+    server.handler = (url, method) =>
+      method === "POST"
+        ? status === 409
+          ? json(409, { code: "FX_RATE_CONFLICT", detail: "a concurrent write already created this rate version" })
+          : json(422, { code: "COM-0409", detail: "idempotency key reused with a different request" })
+        : base(url, method);
+    const user = userEvent.setup();
+    renderAt("/fx/rate-entry");
+    await fillEntry(user, "1.5");
+    await user.click(screen.getByRole("button", { name: "Save rate" }));
+    await user.click(await screen.findByRole("button", { name: "Confirm and save" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Someone else saved this rate first");
+    expect(screen.queryByRole("button", { name: "Confirm and save" })).not.toBeInTheDocument();
+    status = 422;
+    await user.click(screen.getByRole("button", { name: "Save rate" }));
+    await user.click(await screen.findByRole("button", { name: "Confirm and save" }));
+    const failure = await screen.findByText("Could not save the rate");
+    expect(failure.closest('[role="alert"]')?.textContent).toContain("idempotency key reused");
+  });
+
+  it("rejects the same currency on both sides and rates the database cannot hold", async () => {
+    answer({});
+    const user = userEvent.setup();
+    renderAt("/fx/rate-entry");
+    await fillEntry(user, "1.12345678901");
+    await user.clear(screen.getByLabelText("To currency"));
+    await user.type(screen.getByLabelText("To currency"), "EUR");
+    await user.click(screen.getByRole("button", { name: "Save rate" }));
+    expect(await screen.findByText("Choose a different currency from the first one.")).toBeInTheDocument();
+    expect(screen.getByText("Use at most 10 decimal places.")).toBeInTheDocument();
+    await user.clear(screen.getByLabelText("Rate"));
+    await user.type(screen.getByLabelText("Rate"), "12345678901");
+    await user.click(screen.getByRole("button", { name: "Save rate" }));
+    expect(await screen.findByText("Use at most 10 digits before the decimal point.")).toBeInTheDocument();
+    expect(server.calls.some((c) => c.method === "POST")).toBe(false);
   });
 
   it("reports that an identical rate was already stored", async () => {
@@ -292,6 +394,37 @@ describe("rate types page", () => {
     await user.type(screen.getByLabelText("Name"), "Xtra");
     await user.click(screen.getByRole("button", { name: "Create rate type" }));
     expect((await screen.findByRole("alert")).textContent).toContain("rate type code and name are required");
+  });
+
+  it("refuses to create a code that already exists instead of overwriting it", async () => {
+    answer({});
+    const user = userEvent.setup();
+    renderAt("/fx/rate-types");
+    await screen.findByRole("button", { name: "CLOSING" });
+    await user.type(screen.getByLabelText("Code"), "closing");
+    await user.type(screen.getByLabelText("Name"), "Other");
+    await user.click(screen.getByRole("button", { name: "Create rate type" }));
+    expect(await screen.findByText("A rate type with this code already exists. Open it in the table to edit it.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Code")).toHaveFocus();
+    expect(server.calls.some((c) => c.method === "PUT")).toBe(false);
+  });
+
+  it("moves focus to the name when a row is opened", async () => {
+    answer({});
+    const user = userEvent.setup();
+    renderAt("/fx/rate-types");
+    await user.click(await screen.findByRole("button", { name: "CLOSING" }));
+    expect(screen.getByLabelText("Name")).toHaveFocus();
+  });
+
+  it("offers Try again when the list fails and recovers", async () => {
+    answer({ list: json(500, { code: "COM-0500", detail: "internal error" }) });
+    const user = userEvent.setup();
+    renderAt("/fx/rate-types");
+    await screen.findByText("Could not load the rate types");
+    answer({});
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("button", { name: "AVERAGE" })).toBeInTheDocument();
   });
 
   it("returns to an empty form with New rate type", async () => {

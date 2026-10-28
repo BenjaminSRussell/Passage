@@ -10,7 +10,7 @@ describe("fx module", () => {
   });
 
   it("gates every entry on the duty the fx read routes enforce", () => {
-    // services/fx/internal/api: GET /v1/fx/rates, /rates/history and POST /v1/fx/convert require "View exchange rates".
+    // services/fx/internal/api: the read routes require "View exchange rates"; POST /v1/fx/rates and PUT /v1/fx/rate-types/{code} require "Maintain exchange rates".
     expect(fx.nav.map((n) => n.duty)).toEqual(["View exchange rates", "View exchange rates", "View exchange rates", "Maintain exchange rates", "Maintain exchange rates"]);
   });
 

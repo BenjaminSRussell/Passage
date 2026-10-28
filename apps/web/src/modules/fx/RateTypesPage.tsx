@@ -2,11 +2,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState, type FormEvent } from "react";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { fetchRateTypes, putRateType, type RateType } from "./api/client";
-import { ApiFailure, mapServerFields, useFocusFirstInvalid } from "./formSupport";
+import { ApiFailure, fieldsOwnFailure, mapServerFields, useFocusFirstInvalid } from "./formSupport";
 import styles from "./pages.module.css";
-import { emptyRateType, normalizeCurrency, validateRateType, type Errors, type RateTypeValues } from "./validate";
+import { emptyRateType, normalizeCode, validateRateType, type Errors, type RateTypeValues } from "./validate";
 
 const DUTY = "Maintain exchange rates";
+const FIELDS = ["code", "name", "provider"] as const;
 
 const columns: DataTableColumn<RateType>[] = [
   { key: "code", header: "Code", mono: true },
@@ -18,6 +19,7 @@ const columns: DataTableColumn<RateType>[] = [
 export function RateTypesPage() {
   const queryClient = useQueryClient();
   const form = useRef<HTMLFormElement>(null);
+  const nameField = useRef<HTMLInputElement>(null);
   const [values, setValues] = useState<RateTypeValues>(emptyRateType);
   const [editing, setEditing] = useState(false);
   const [errors, setErrors] = useState<Errors>({});
@@ -31,7 +33,7 @@ export function RateTypesPage() {
       setEditing(false);
       await queryClient.invalidateQueries({ queryKey: ["fx", "rate-types"] });
     },
-    onError: (error) => setErrors(mapServerFields(error, "", ["code", "name", "provider"])),
+    onError: (error) => setErrors(mapServerFields(error, "", FIELDS)),
   });
   useFocusFirstInvalid(form, errors);
 
@@ -47,6 +49,7 @@ export function RateTypesPage() {
     setErrors({});
     setSaved(null);
     save.reset();
+    nameField.current?.focus();
   }
 
   function startNew() {
@@ -59,17 +62,20 @@ export function RateTypesPage() {
   function submit(event: FormEvent) {
     event.preventDefault();
     const found = validateRateType(values);
+    if (!editing && !found.code && types.data?.some((t) => t.code === values.code.trim())) {
+      found.code = "A rate type with this code already exists. Open it in the table to edit it.";
+    }
     setErrors(found);
     if (Object.keys(found).length === 0) save.mutate({ ...values, code: values.code.trim() });
   }
 
-  const fieldFailure = save.isError && Object.keys(mapServerFields(save.error, "", ["code", "name", "provider"])).length === 0;
+  const saveFailure = save.isError && !fieldsOwnFailure(save.error, "", FIELDS);
 
   return (
     <div className={styles.stack}>
       <PageHeader
         title="Rate types"
-        description="A rate type groups rates that are used for the same purpose, such as closing or average rates. Saving a code that already exists updates it."
+        description="A rate type groups rates that are used for the same purpose, such as closing or average rates. Open a row to change it."
         actions={
           editing ? (
             <Button variant="secondary" onClick={startNew}>
@@ -81,10 +87,10 @@ export function RateTypesPage() {
       <Card title={editing ? `Edit ${values.code}` : "New rate type"}>
         <form className={styles.form} onSubmit={submit} noValidate aria-label={editing ? "Edit rate type" : "New rate type"} ref={form}>
           <FormField id="type-code" label="Code" hint={editing ? "The code cannot be changed." : undefined} error={errors.code}>
-            {(c) => <Input {...c} value={values.code} maxLength={32} placeholder="CLOSING" readOnly={editing} onChange={(e) => change({ code: normalizeCurrency(e.target.value) })} invalid={Boolean(errors.code)} />}
+            {(c) => <Input {...c} value={values.code} maxLength={32} placeholder="CLOSING" readOnly={editing} onChange={(e) => change({ code: normalizeCode(e.target.value) })} invalid={Boolean(errors.code)} />}
           </FormField>
           <FormField id="type-name" label="Name" error={errors.name}>
-            {(c) => <Input {...c} value={values.name} placeholder="Month-end closing" onChange={(e) => change({ name: e.target.value })} invalid={Boolean(errors.name)} />}
+            {(c) => <Input {...c} ref={nameField} value={values.name} placeholder="Month-end closing" onChange={(e) => change({ name: e.target.value })} invalid={Boolean(errors.name)} />}
           </FormField>
           <FormField id="type-provider" label="Provider" optional hint="Name of the provider that imports this type. Leave empty for manual entry." error={errors.provider}>
             {(c) => <Input {...c} value={values.provider} placeholder="ecb" onChange={(e) => change({ provider: e.target.value })} invalid={Boolean(errors.provider)} />}
@@ -99,12 +105,19 @@ export function RateTypesPage() {
           </div>
         </form>
       </Card>
-      {saved ? (
-        <Alert tone="success" title={`Rate type ${saved} saved`} live="status" />
-      ) : null}
-      {fieldFailure ? <ApiFailure error={save.error} title="Could not save the rate type" duty={DUTY} /> : null}
+      <Alert tone="success" live="status" title={saved ? `Rate type ${saved} saved` : undefined} />
+      {saveFailure ? <ApiFailure error={save.error} title="Could not save the rate type" duty={DUTY} /> : null}
       {types.isError ? (
-        <ApiFailure error={types.error} title="Could not load the rate types" duty="View exchange rates" />
+        <ApiFailure
+          error={types.error}
+          title="Could not load the rate types"
+          duty="View exchange rates"
+          action={
+            <Button variant="secondary" loading={types.isFetching} onClick={() => void types.refetch()}>
+              Try again
+            </Button>
+          }
+        />
       ) : (
         <DataTable
           label="Rate types"

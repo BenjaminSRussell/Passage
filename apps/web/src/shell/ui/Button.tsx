@@ -27,7 +27,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       ref={ref}
       type={type}
       disabled={disabled}
-      aria-disabled={loading || undefined}
+      aria-disabled={loading || rest["aria-disabled"] || undefined}
       aria-busy={loading || undefined}
       onClick={(event) => {
         if (loading) {
