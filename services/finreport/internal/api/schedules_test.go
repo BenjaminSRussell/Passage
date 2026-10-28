@@ -71,7 +71,7 @@ func scheduleRouter(st Store) http.Handler {
 
 func TestPutSchedule_AppliesDefaultsAndRecordsTheEditor(t *testing.T) {
 	st := &scheduleStore{}
-	out, status, tag := putSchedule(st, "/api/v1/reporting/schedules/NIGHTLY", scheduleBody, nil, DutySchedule)
+	out, status, tag := putSchedule(st, "/v1/reporting/schedules/NIGHTLY", scheduleBody, nil, DutySchedule)
 	if status != http.StatusOK {
 		t.Fatalf("status %d: %s", status, tag)
 	}
@@ -96,7 +96,7 @@ func TestPutSchedule_AppliesDefaultsAndRecordsTheEditor(t *testing.T) {
 func TestPutSchedule_PassesIfMatchAndIgnoresReadOnlyFields(t *testing.T) {
 	st := &scheduleStore{}
 	body := strings.Replace(scheduleBody, `"enabled":true`, `"enabled":true,"nextRunAt":"2026-01-01T23:00:00Z","updatedBy":"someone-else"`, 1)
-	_, status, msg := putSchedule(st, "/api/v1/reporting/schedules/NIGHTLY", body, map[string]string{"If-Match": `"2"`}, DutySchedule)
+	_, status, msg := putSchedule(st, "/v1/reporting/schedules/NIGHTLY", body, map[string]string{"If-Match": `"2"`}, DutySchedule)
 	if status != http.StatusOK {
 		t.Fatalf("status %d: %s", status, msg)
 	}
@@ -115,15 +115,15 @@ func TestPutSchedule_Errors(t *testing.T) {
 		status           int
 		code             string
 	}{
-		{"needs the schedule duty", "/api/v1/reporting/schedules/NIGHTLY", scheduleBody, DutyView, http.StatusForbidden, ""},
-		{"cron that never fires", "/api/v1/reporting/schedules/NIGHTLY", strings.Replace(scheduleBody, "0 23 * * *", "0 0 30 2 *", 1),
+		{"needs the schedule duty", "/v1/reporting/schedules/NIGHTLY", scheduleBody, DutyView, http.StatusForbidden, ""},
+		{"cron that never fires", "/v1/reporting/schedules/NIGHTLY", strings.Replace(scheduleBody, "0 23 * * *", "0 0 30 2 *", 1),
 			DutySchedule, http.StatusUnprocessableEntity, domain.CodeScheduleInvalid},
-		{"unknown time zone", "/api/v1/reporting/schedules/NIGHTLY", strings.Replace(scheduleBody, `"UTC"`, `"Mars/Olympus"`, 1),
+		{"unknown time zone", "/v1/reporting/schedules/NIGHTLY", strings.Replace(scheduleBody, `"UTC"`, `"Mars/Olympus"`, 1),
 			DutySchedule, http.StatusUnprocessableEntity, domain.CodeScheduleInvalid},
-		{"definition not published", "/api/v1/reporting/schedules/NIGHTLY", strings.Replace(scheduleBody, `"BS-STD"`, `"DRAFT-ONLY"`, 1),
+		{"definition not published", "/v1/reporting/schedules/NIGHTLY", strings.Replace(scheduleBody, `"BS-STD"`, `"DRAFT-ONLY"`, 1),
 			DutySchedule, http.StatusUnprocessableEntity, store.CodeNotPublished},
-		{"body code differs from path", "/api/v1/reporting/schedules/OTHER", scheduleBody, DutySchedule, http.StatusUnprocessableEntity, domain.CodeScheduleInvalid},
-		{"unknown field", "/api/v1/reporting/schedules/NIGHTLY", strings.Replace(scheduleBody, `"enabled"`, `"enabeld"`, 1),
+		{"body code differs from path", "/v1/reporting/schedules/OTHER", scheduleBody, DutySchedule, http.StatusUnprocessableEntity, domain.CodeScheduleInvalid},
+		{"unknown field", "/v1/reporting/schedules/NIGHTLY", strings.Replace(scheduleBody, `"enabled"`, `"enabeld"`, 1),
 			DutySchedule, http.StatusBadRequest, "COM-0002"},
 	}
 	for _, tc := range tests {
@@ -146,14 +146,14 @@ func TestPutSchedule_Errors(t *testing.T) {
 func TestGetSchedule_ETagAndNotFound(t *testing.T) {
 	sc := domain.Schedule{Code: "NIGHTLY", Name: "Nightly", Definition: "BS-STD", Cron: "0 23 * * *", Timezone: "Europe/Berlin", Enabled: false}
 	st := &scheduleStore{items: []domain.Schedule{sc}}
-	w := call(scheduleRouter(st), http.MethodGet, "/api/v1/reporting/schedules/NIGHTLY", "", nil, DutySchedule)
+	w := call(scheduleRouter(st), http.MethodGet, "/v1/reporting/schedules/NIGHTLY", "", nil, DutySchedule)
 	if w.Code != http.StatusOK || w.Header().Get("ETag") != `"2"` {
 		t.Fatalf("status %d ETag %q", w.Code, w.Header().Get("ETag"))
 	}
 	if strings.Contains(w.Body.String(), "nextRunAt") {
 		t.Fatalf("a paused schedule has no next run: %s", w.Body.String())
 	}
-	w = call(scheduleRouter(st), http.MethodGet, "/api/v1/reporting/schedules/MISSING", "", nil, DutySchedule)
+	w = call(scheduleRouter(st), http.MethodGet, "/v1/reporting/schedules/MISSING", "", nil, DutySchedule)
 	if w.Code != http.StatusNotFound || problemCode(t, w) != store.CodeScheduleNotFound {
 		t.Fatalf("status %d: %s", w.Code, w.Body.String())
 	}
@@ -165,7 +165,7 @@ func TestListSchedules_NextRunInTheScheduleZone(t *testing.T) {
 	st := &scheduleStore{items: []domain.Schedule{
 		{Code: "BERLIN", Cron: "0 23 * * *", Timezone: "Europe/Berlin", Enabled: true},
 	}}
-	w := call(scheduleRouter(st), http.MethodGet, "/api/v1/reporting/schedules", "", nil, DutySchedule)
+	w := call(scheduleRouter(st), http.MethodGet, "/v1/reporting/schedules", "", nil, DutySchedule)
 	var body struct {
 		Items []scheduleDTO `json:"items"`
 	}
@@ -198,7 +198,7 @@ func (outputStore) RunOutput(_ context.Context, id string) (store.Run, domain.De
 }
 
 func TestRunOutput_CSV(t *testing.T) {
-	w := call(scheduleRouter(outputStore{}), http.MethodGet, "/api/v1/reporting/runs/"+runUUID+"/outputs/csv", "", nil, DutyView)
+	w := call(scheduleRouter(outputStore{}), http.MethodGet, "/v1/reporting/runs/"+runUUID+"/outputs/csv", "", nil, DutyView)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", w.Code, w.Body.String())
 	}
@@ -238,15 +238,15 @@ func TestRunOutput_CSV(t *testing.T) {
 }
 
 func TestRunOutput_OtherFormatsAndBadIDs(t *testing.T) {
-	w := call(scheduleRouter(outputStore{}), http.MethodGet, "/api/v1/reporting/runs/"+runUUID+"/outputs/pdf", "", nil, DutyView)
+	w := call(scheduleRouter(outputStore{}), http.MethodGet, "/v1/reporting/runs/"+runUUID+"/outputs/pdf", "", nil, DutyView)
 	if w.Code != http.StatusNotFound || problemCode(t, w) != "COM-0404" {
 		t.Fatalf("pdf: status %d %s", w.Code, w.Body.String())
 	}
-	w = call(scheduleRouter(outputStore{}), http.MethodGet, "/api/v1/reporting/runs/not-a-uuid/outputs/csv", "", nil, DutyView)
+	w = call(scheduleRouter(outputStore{}), http.MethodGet, "/v1/reporting/runs/not-a-uuid/outputs/csv", "", nil, DutyView)
 	if w.Code != http.StatusNotFound || problemCode(t, w) != store.CodeRunNotFound {
 		t.Fatalf("bad id: status %d %s", w.Code, w.Body.String())
 	}
-	w = call(scheduleRouter(outputStore{}), http.MethodGet, "/api/v1/reporting/runs/"+runUUID+"/outputs/csv", "", nil, DutySchedule)
+	w = call(scheduleRouter(outputStore{}), http.MethodGet, "/v1/reporting/runs/"+runUUID+"/outputs/csv", "", nil, DutySchedule)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("without the view duty: status %d", w.Code)
 	}

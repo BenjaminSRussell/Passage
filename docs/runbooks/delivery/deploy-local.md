@@ -75,3 +75,44 @@ only if one is provisioned for internal/local proof. The stage cluster must be
 registered in Argo CD as `stage`, provide the `passage-stage-ca` ClusterIssuer
 and `hello-ledger-db` Secret outside Git, and use a trusted certificate issuer
 for real deployments.
+
+## Promote or roll back prod
+
+Prod is the Argo CD root application at `deploy/argocd/root-prod.yaml`, reading
+`deploy/envs/prod/apps`. Like stage, it syncs automatically with prune and
+self-heal; the reviewed PR merge is the approval gate. Prod promotes only the
+digest stage pins on `origin/main`, once stage has pinned it for at least 60
+minutes (the script refuses otherwise), so stage and prod consume the same signed
+release artifact. `--skip-verify` is refused for prod. The check for zero
+`SLOBurnRateHigh` alerts remains manual until the Release table lands.
+
+Prerequisite: register the prod cluster in Argo CD only after a repo admin enables
+branch protection on `main` (required review plus code-owner review).
+`.github/CODEOWNERS` already covers everything via `*`. Until then any push to
+`main` auto-deploys prod.
+
+The 60-minute soak is measured from the committer date of the `origin/main`
+commit that pinned the digest in stage. That is reliable for GitHub merges but not
+for direct pushes of old commits, which keep their original committer date.
+
+```sh
+make -C deploy promote-prod IMAGE_DIGEST=<digest pinned in deploy/envs/stage on main>
+# Commit the prod manifest change on a branch and merge its PR.
+# Argo syncs on merge: watch root-prod -> hello-ledger-prod until Healthy.
+argocd app get hello-ledger-prod
+argocd app history hello-ledger-prod
+```
+
+To roll back, restore the prior distinct digest from the prod manifest history on
+`origin/main` (its signature is re-verified first):
+
+```sh
+make -C deploy rollback-prod
+# Commit the rollback manifest change on a branch and merge its PR; Argo syncs on merge.
+argocd app history hello-ledger-prod
+```
+
+The FR-1.10 target is the prior digest active within 5 minutes of the merge.
+
+The prod cluster must be registered in Argo CD as `prod` and provide the
+`passage-prod-ca` ClusterIssuer and `hello-ledger-db` Secret outside Git.

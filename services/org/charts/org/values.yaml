@@ -1,5 +1,6 @@
 image: { repository: ghcr.io/benjaminsrussell/org, digest: "", tag: "", pullPolicy: IfNotPresent }
 databaseSecret: org-db
+migrateDatabaseSecret: ""
 migrateOnStart: false
 replicaCount: 2
 resources:
@@ -8,3 +9,5 @@ resources:
 serviceMonitor: { enabled: false }
 networkPolicy: { metricsNamespace: observability, ingressNamespaces: [] }
 hierarchy: { maxNodes: 50000, maxDepth: 15 }
+addressValidator: "null"
+seed: { package: "", tenantId: "" }

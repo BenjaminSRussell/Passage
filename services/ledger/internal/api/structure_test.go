@@ -11,7 +11,7 @@ import (
 
 const testStructure = "0190a000-0000-7000-8000-000000000010"
 
-const structurePath = "/api/v1/ledger/ledgers/" + testLedger + "/account-structures/" + testStructure
+const structurePath = "/v1/ledger/ledgers/" + testLedger + "/account-structures/" + testStructure
 
 func TestPutStructure_CreatedThenReplacedWithDefaults(t *testing.T) {
 	fs := &fakeStore{created: true}
@@ -57,8 +57,8 @@ func TestPutStructure_RequestErrors(t *testing.T) {
 	}{
 		{"missing duty", structurePath, `{"name":"A","version":1,"effectiveFrom":"2026-01-01"}`, dutyRead, http.StatusForbidden},
 		{"malformed effectiveFrom", structurePath, `{"name":"A","version":1,"effectiveFrom":"01/01/2026"}`, dutyStructureWrite, http.StatusBadRequest},
-		{"structure id not a UUID", "/api/v1/ledger/ledgers/" + testLedger + "/account-structures/abc", `{"name":"A","version":1,"effectiveFrom":"2026-01-01"}`, dutyStructureWrite, http.StatusBadRequest},
-		{"ledger id not a UUID", "/api/v1/ledger/ledgers/nope/account-structures/" + testStructure, `{"name":"A","version":1,"effectiveFrom":"2026-01-01"}`, dutyStructureWrite, http.StatusNotFound},
+		{"structure id not a UUID", "/v1/ledger/ledgers/" + testLedger + "/account-structures/abc", `{"name":"A","version":1,"effectiveFrom":"2026-01-01"}`, dutyStructureWrite, http.StatusBadRequest},
+		{"ledger id not a UUID", "/v1/ledger/ledgers/nope/account-structures/" + testStructure, `{"name":"A","version":1,"effectiveFrom":"2026-01-01"}`, dutyStructureWrite, http.StatusNotFound},
 		{"unknown field", structurePath, `{"name":"A","version":1,"effectiveFrom":"2026-01-01","colour":"red"}`, dutyStructureWrite, http.StatusBadRequest},
 	}
 	for _, tc := range tests {
@@ -109,11 +109,11 @@ func TestGetStructure_NotFoundAndFound(t *testing.T) {
 	if v := decode(t, rec); v["version"] != float64(2) || v["effectiveFrom"] != "2026-02-01" {
 		t.Fatalf("view %v", v)
 	}
-	rec = call(h, http.MethodGet, "/api/v1/ledger/ledgers/"+testLedger+"/account-structures/not-a-uuid", "", dutyRead, nil)
+	rec = call(h, http.MethodGet, "/v1/ledger/ledgers/"+testLedger+"/account-structures/not-a-uuid", "", dutyRead, nil)
 	if rec.Code != http.StatusNotFound || decode(t, rec)["code"] != domain.CodeStructureNotFound {
 		t.Fatalf("malformed id: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = call(h, http.MethodGet, "/api/v1/ledger/ledgers/"+testLedger+"/account-structures/0190a000-0000-7000-8000-0000000000ff", "", dutyRead, nil)
+	rec = call(h, http.MethodGet, "/v1/ledger/ledgers/"+testLedger+"/account-structures/0190a000-0000-7000-8000-0000000000ff", "", dutyRead, nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown id: %d", rec.Code)
 	}
@@ -121,20 +121,20 @@ func TestGetStructure_NotFoundAndFound(t *testing.T) {
 
 func TestListStructures_ItemsAndLedgerNotFound(t *testing.T) {
 	fs := &fakeStore{structures: []domain.Structure{{ID: testStructure, Name: "A", Version: 1, Status: domain.StructureDraft}}}
-	rec := call(server(fs), http.MethodGet, "/api/v1/ledger/ledgers/"+testLedger+"/account-structures", "", dutyRead, nil)
+	rec := call(server(fs), http.MethodGet, "/v1/ledger/ledgers/"+testLedger+"/account-structures", "", dutyRead, nil)
 	items, _ := decode(t, rec)["items"].([]any)
 	if rec.Code != http.StatusOK || len(items) != 1 {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
 	fs.err = httpx.NewProblem(http.StatusNotFound, "LEDGER_NOT_FOUND", "ledger not found")
-	rec = call(server(fs), http.MethodGet, "/api/v1/ledger/ledgers/"+testLedger+"/account-structures", "", dutyRead, nil)
+	rec = call(server(fs), http.MethodGet, "/v1/ledger/ledgers/"+testLedger+"/account-structures", "", dutyRead, nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status %d", rec.Code)
 	}
 }
 
 func TestPutDimensionValue(t *testing.T) {
-	path := "/api/v1/ledger/ledgers/" + testLedger + "/dimension-values/DEPT/D100"
+	path := "/v1/ledger/ledgers/" + testLedger + "/dimension-values/DEPT/D100"
 	fs := &fakeStore{created: true}
 	rec := call(server(fs), http.MethodPut, path, `{"name":"Sales","activeFrom":"2026-01-01","activeTo":null,"suspended":true}`, dutyDimensionWrite, nil)
 	if rec.Code != http.StatusCreated {
@@ -170,7 +170,7 @@ func TestPutDimensionValue(t *testing.T) {
 func TestPostEntry_StructureViolationsCarryLineIndex(t *testing.T) {
 	idx := 0
 	fs := &fakeStore{err: &domain.RejectedError{Violations: []domain.Violation{{Code: domain.CodeDimensionRequired, Field: "lines.dimensions.DEPT", LineIndex: &idx, Message: "x"}}}}
-	rec := call(server(fs), http.MethodPost, "/api/v1/ledger/journal-entries", entryBody, dutyPost, map[string]string{idempotencyHeader: "k-1"})
+	rec := call(server(fs), http.MethodPost, "/v1/ledger/journal-entries", entryBody, dutyPost, map[string]string{idempotencyHeader: "k-1"})
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}

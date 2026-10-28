@@ -30,11 +30,11 @@ func tenantCtx(n int, scope string) context.Context {
 
 func testStore(t *testing.T) (*Postgres, *pgxpool.Pool) {
 	t.Helper()
-	pool := testkit.DB(t)
-	if err := dbx.Migrate(context.Background(), pool, migrations.FS); err != nil {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	return New(pool), pool
+	return New(app), admin
 }
 
 // bundleContract builds the BR-29.1 bundle the way the API does: allocate, then

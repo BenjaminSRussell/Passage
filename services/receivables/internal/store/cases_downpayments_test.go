@@ -154,7 +154,7 @@ func TestBalanceConfirmation_AsOfBalanceAndZeroBalances(t *testing.T) {
 	if _, err := s.ApplyPayment(ctx, pay.ID, pay.Version, ApplyRequest{Allocations: []domain.Allocation{{OpenItemID: item.ID, Amount: amt("12000.00")}}}, ""); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
-	execTenant(t, s, ctx, `update settlement set settled_at = '2027-04-05T10:00:00Z' where open_item_id = $1`, item.ID)
+	execAdmin(t, s, `update settlement set settled_at = '2027-04-05T10:00:00Z' where open_item_id = $1`, item.ID)
 
 	march, err := s.CreateConfirmationRun(ctx, ConfirmationRun{LegalEntityID: legalEntity, AsOfDate: "2027-03-31", Threshold: amt("10000"), ReminderDays: 14}, "asof-1")
 	if err != nil || len(march.Confirmations) != 1 || !march.Confirmations[0].OurBalance.Equal(amt("12000")) {

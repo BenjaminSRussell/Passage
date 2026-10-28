@@ -73,11 +73,14 @@ type addressVersionList struct {
 
 func (a *API) SetGeocoder(g domain.Geocoder) { a.geocoder = g }
 
+func (a *API) SetAddressValidator(v domain.AddressValidator) { a.validator = v }
+
 func (a *API) SetClock(now func() time.Time) { a.now = now }
 
 func (a *API) registerAddresses(r chi.Router) {
 	r.With(authz.RequireDuty(dutyAddress)).Post(addresses, a.createAddress)
 	r.With(authz.RequireDuty(dutyAddress)).Patch(addresses+"/{id}", addressRoute(a.updateAddress))
+	r.With(authz.RequireDuty(dutyRead)).Post(addresses+":normalize", a.normalizeAddress)
 	r.With(authz.RequireDuty(dutyRead)).Get(addresses, a.listAddresses)
 	r.With(authz.RequireDuty(dutyRead)).Get(addresses+"/{id}", addressRoute(a.getAddress))
 	r.With(authz.RequireDuty(dutyRead)).Get(addresses+"/{id}/versions", addressRoute(a.listAddressVersions))

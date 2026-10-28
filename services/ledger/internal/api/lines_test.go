@@ -18,7 +18,7 @@ func (f *fakeStore) ListLines(_ context.Context, in store.LineFilter) (store.Lin
 }
 
 const (
-	linesPath = "/api/v1/ledger/journal-lines"
+	linesPath = "/v1/ledger/journal-lines"
 	lineTrace = "4bf92f3577b34da6a3ce929d0e0e4736"
 )
 

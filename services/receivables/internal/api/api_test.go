@@ -206,7 +206,7 @@ func TestCreatePayment_Validation(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			rec := do(h, http.MethodPost, "/api/v1/receivables/payments", tc.body, tc.duties, tc.headers)
+			rec := do(h, http.MethodPost, "/v1/receivables/payments", tc.body, tc.duties, tc.headers)
 			if rec.Code != tc.status {
 				t.Fatalf("status = %d, want %d: %s", rec.Code, tc.status, rec.Body.String())
 			}
@@ -228,7 +228,7 @@ func TestCreatePayment_Validation(t *testing.T) {
 func TestApplyPayment_RequiresIfMatchAndForwardsPlan(t *testing.T) {
 	fs := &fakeStore{}
 	h := router(fs)
-	path := "/api/v1/receivables/payments/" + testPay + ":apply"
+	path := "/v1/receivables/payments/" + testPay + ":apply"
 	body := `{"settlements":[{"openItemId":"` + testItem + `","amount":"1000.00","cashDiscount":"20.00"}],"onAccount":"0"}`
 
 	if rec := do(h, http.MethodPost, path, body, "ARPaymentPost", nil); rec.Code != http.StatusPreconditionRequired {
@@ -258,11 +258,11 @@ func TestApplyPayment_RequiresIfMatchAndForwardsPlan(t *testing.T) {
 
 func TestCustomMethods_UnknownActionIsNotFound(t *testing.T) {
 	h := router(&fakeStore{})
-	rec := do(h, http.MethodPost, "/api/v1/receivables/payments/"+testPay+":refund", `{}`, "ARPaymentPost", nil)
+	rec := do(h, http.MethodPost, "/v1/receivables/payments/"+testPay+":refund", `{}`, "ARPaymentPost", nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
 	}
-	rec = do(h, http.MethodPost, "/api/v1/receivables/payments/"+testPay, `{}`, "ARPaymentPost", nil)
+	rec = do(h, http.MethodPost, "/v1/receivables/payments/"+testPay, `{}`, "ARPaymentPost", nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("no action: status = %d, want 404", rec.Code)
 	}
@@ -271,7 +271,7 @@ func TestCustomMethods_UnknownActionIsNotFound(t *testing.T) {
 // The PRD (§5.30.5, §5.30.17) puts :match under ARPaymentPost, not ARView.
 func TestMatch_NeedsPaymentPostDuty(t *testing.T) {
 	h := router(&fakeStore{})
-	path := "/api/v1/receivables/payments/" + testPay + ":match"
+	path := "/v1/receivables/payments/" + testPay + ":match"
 	if rec := do(h, http.MethodPost, path, "", "ARView", nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", rec.Code)
 	}
@@ -284,26 +284,26 @@ func TestMatch_NeedsPaymentPostDuty(t *testing.T) {
 func TestReads_ValidateQueryParameters(t *testing.T) {
 	h := router(&fakeStore{})
 	for _, path := range []string{
-		"/api/v1/receivables/open-items?status=sometimes",
-		"/api/v1/receivables/open-items?customer=nope",
-		"/api/v1/receivables/open-items?limit=0",
-		"/api/v1/receivables/aging?asOf=yesterday",
-		"/api/v1/receivables/payments?status=PAID",
-		"/api/v1/receivables/payments?customer=nope",
-		"/api/v1/receivables/payments?limit=501",
+		"/v1/receivables/open-items?status=sometimes",
+		"/v1/receivables/open-items?customer=nope",
+		"/v1/receivables/open-items?limit=0",
+		"/v1/receivables/aging?asOf=yesterday",
+		"/v1/receivables/payments?status=PAID",
+		"/v1/receivables/payments?customer=nope",
+		"/v1/receivables/payments?limit=501",
 	} {
 		if rec := do(h, http.MethodGet, path, "", "ARView", nil); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: status = %d, want 400", path, rec.Code)
 		}
 	}
-	rec := do(h, http.MethodGet, "/api/v1/receivables/aging?asOf=2027-03-31", "", "ARView", nil)
+	rec := do(h, http.MethodGet, "/v1/receivables/aging?asOf=2027-03-31", "", "ARView", nil)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"bucket":"1-30"`) {
 		t.Fatalf("aging: status = %d body %s", rec.Code, rec.Body.String())
 	}
 }
 
 func TestMissingTenantIsUnauthorized(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/receivables/aging", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/receivables/aging", nil)
 	rec := httptest.NewRecorder()
 	router(&fakeStore{}).ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
@@ -314,7 +314,7 @@ func TestMissingTenantIsUnauthorized(t *testing.T) {
 func TestListPayments_ForwardsFiltersAndNeedsView(t *testing.T) {
 	fs := &fakeStore{}
 	h := router(fs)
-	path := "/api/v1/receivables/payments?status=ON_ACCOUNT&customer=" + testItem
+	path := "/v1/receivables/payments?status=ON_ACCOUNT&customer=" + testItem
 	if rec := do(h, http.MethodGet, path, "", "", nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("without ARView: status = %d, want 403", rec.Code)
 	}

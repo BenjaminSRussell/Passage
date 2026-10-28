@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -28,13 +29,16 @@ func principalContext(n int) context.Context {
 	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), UserID: ids.New()})
 }
 
+var adminPools sync.Map
+
 func migrated(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	pool := testkit.DB(t)
-	if err := dbx.Migrate(context.Background(), pool, migrations.FS); err != nil {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	return pool
+	adminPools.Store(app, admin)
+	return app
 }
 
 func dec(s string) decimal.Decimal { return decimal.RequireFromString(s) }

@@ -27,7 +27,7 @@ type ssccItem struct {
 	NoReuseUntil string `json:"noReuseUntil"`
 }
 
-// listSSCCs answers GET /api/v1/fulfillment/sscc-register (section 5.28.14):
+// listSSCCs answers GET /v1/fulfillment/sscc-register (section 5.28.14):
 // issued SSCCs ordered by SSCC, filtered by GS1 company prefix, customer and
 // issue-date range, one page of limit rows at a time. nextCursor is the last
 // SSCC of the page when another page exists.

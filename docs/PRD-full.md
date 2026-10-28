@@ -1538,7 +1538,7 @@ AX runs approvals through the workflow framework (`WorkflowTable`, `WorkflowVers
 
 ### 0.4.3 Functional requirements
 
-- **FR-4.1 Kafka and topics** — Must. The system shall run Strimzi-managed Kafka (3 brokers in cloud, 1 in k3d, KRaft) with topics named `passage.<domain>.<aggregate>.v<n>`, partition key = aggregate id, 12 partitions default, retention 7 days (entity-state topics compacted), and CloudEvents 1.0 JSON envelopes with extensions `tenantid`, `legalentityid`, `traceparent`, `actor`.
+- **FR-4.1 Kafka and topics** — Must. The system shall run Strimzi-managed Kafka (3 brokers in cloud, 1 in k3d, KRaft) with topics named `passage.<domain>.<aggregate>` (the version lives in the CloudEvents type), partition key = aggregate id, 12 partitions default, retention 7 days (entity-state topics compacted), and CloudEvents 1.0 JSON envelopes with extensions `tenantid`, `legalentityid`, `traceparent`, `actor`.
   - Notes: no per-tenant topics; consumers filter by `tenantid` header; max message 1 MB, larger payloads use a claim-check reference (object storage URL).
 - **FR-4.2 Transactional outbox** — Must. Every service shall write domain changes and an `outbox_event` row in the same transaction; Debezium (one connector per domain database, pgoutput) with the outbox event router publishes and never writes to Kafka from application code.
   - Notes: outbox columns id, aggregate_type, aggregate_id, event_type, payload (jsonb), headers (jsonb), created_at; rows deleted after 24 h by a sweep; publish lag p95 ≤ 500 ms.
@@ -1727,7 +1727,7 @@ Rules: bulk approve is limited to 100 items per action and requires a confirmati
 - **AC-4.2** Given a 3-level chain (role → user → expression) with 4-hour SLAs, When step 2's assignee delegates and step 3 times out with `delegate_to admin`, Then the instance completes approved after simulated clock advance and the timeline shows 5 work items. (FR-4.7)
 - **AC-4.3** Given a batch job over 1,000,000 synthetic rows in 16 hash partitions, When the worker pod is killed at ~40%, Then the run resumes and ends with rows_done = 1,000,000 and no duplicate side effects. (FR-4.9)
 - **AC-4.4** Given a schema change that removes a required field, When CI registers it, Then the registry rejects it with the incompatible path. (FR-4.3)
-- **AC-4.5** Given an entity publish in the registry, When the outbox is captured, Then a topic `dev.passage.metadata.entity.v1` message with type `dev.passage.metadata.entity.published.v1` exists within 1 s. (FR-4.11)
+- **AC-4.5** Given an entity publish in the registry, When the outbox is captured, Then a message on topic `passage.metadata.entity` with type `dev.passage.metadata.entity.published.v1` exists within 1 s. (FR-4.11)
 - **AC-4.6** Given a submitter recalls after step 1 approved, When the action is sent, Then 409 `RECALL_NOT_ALLOWED`. (BR-4.1)
 - **AC-4.7** Given a consumer group replay from `T-1h`, When executed, Then events are redelivered and the dedupe table suppresses side effects for already-processed ids. (FR-4.12)
 - **AC-4.8** Given an exclusive job with a running instance, When a second run is requested, Then 409 `RUN_OVERLAP`. (FR-4.9)

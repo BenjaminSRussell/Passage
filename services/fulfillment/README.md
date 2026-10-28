@@ -123,28 +123,28 @@ and `npx tsc --noEmit` in `apps/web`.
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
-| POST | `/api/v1/fulfillment/releases:run` | WarehouseRelease | Idempotency-Key. Creates shipments per (order, warehouse, ship date); a line already on an open shipment is skipped as `already_released`; runs per warehouse are serialised |
-| GET | `/api/v1/fulfillment/shipments` | WarehouseView | Delivery monitor; filters `status`, `warehouseId`, `orderId`, `limit` (1 to 500, default 100) |
-| GET | `/api/v1/fulfillment/shipments/{id}` | WarehouseView | ETag carries the version |
-| POST | `/api/v1/fulfillment/shipments/{id}:confirm-pick` | WarehousePick | Idempotency-Key, If-Match |
-| POST | `/api/v1/fulfillment/shipments/{id}/containers` | WarehousePack | Packs and closes a container with an SSCC; Idempotency-Key, If-Match |
-| POST | `/api/v1/fulfillment/shipments/{id}:post-packing-slip` | PackingSlipPost | Slip, journal, containers SHIPPED and outbox in one transaction; Idempotency-Key, If-Match |
-| GET | `/api/v1/fulfillment/packing-slips` | WarehouseView | Packing slip journal; filters `shipmentId`, `orderId`, `status`, `limit` |
-| GET | `/api/v1/fulfillment/packing-slips/{id}` | WarehouseView | Slip with lines and journal |
-| POST | `/api/v1/fulfillment/packing-slips/{id}:cancel` | PackingSlipPost | Reversing slip with mirror lines, journal and packaging fee lines; takes returnable containers back off the customer's balance; Idempotency-Key |
+| POST | `/v1/fulfillment/releases:run` | WarehouseRelease | Idempotency-Key. Creates shipments per (order, warehouse, ship date); a line already on an open shipment is skipped as `already_released`; runs per warehouse are serialised |
+| GET | `/v1/fulfillment/shipments` | WarehouseView | Delivery monitor; filters `status`, `warehouseId`, `orderId`, `limit` (1 to 500, default 100) |
+| GET | `/v1/fulfillment/shipments/{id}` | WarehouseView | ETag carries the version |
+| POST | `/v1/fulfillment/shipments/{id}:confirm-pick` | WarehousePick | Idempotency-Key, If-Match |
+| POST | `/v1/fulfillment/shipments/{id}/containers` | WarehousePack | Packs and closes a container with an SSCC; Idempotency-Key, If-Match |
+| POST | `/v1/fulfillment/shipments/{id}:post-packing-slip` | PackingSlipPost | Slip, journal, containers SHIPPED and outbox in one transaction; Idempotency-Key, If-Match |
+| GET | `/v1/fulfillment/packing-slips` | WarehouseView | Packing slip journal; filters `shipmentId`, `orderId`, `status`, `limit` |
+| GET | `/v1/fulfillment/packing-slips/{id}` | WarehouseView | Slip with lines and journal |
+| POST | `/v1/fulfillment/packing-slips/{id}:cancel` | PackingSlipPost | Reversing slip with mirror lines, journal and packaging fee lines; takes returnable containers back off the customer's balance; Idempotency-Key |
 
 ## Endpoints (slice 2)
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
-| GET / POST | `/api/v1/fulfillment/container-types` | WarehouseView / PackingRuleMaintain | Code, tare, returnable, packaging material; POST replaces by code |
-| GET / POST | `/api/v1/fulfillment/packing-rules` | WarehouseView / PackingRuleMaintain | Per product and optional customer; POST replaces the rule of that scope and keeps its id; unknown container type is FUL-0050 (422) |
-| GET / POST | `/api/v1/fulfillment/product-packaging` | WarehouseView / PackingRuleMaintain | kg of a material per product unit |
-| POST | `/api/v1/fulfillment/shipments/{id}:auto-pack` | WarehousePack | Idempotency-Key, If-Match; optional `unitWeights` per line; FUL-0012 warnings, FUL-0013 |
-| GET / POST | `/api/v1/fulfillment/packaging-fee-rates` | PackagingFeeMaintain | Rate per kg per country and material, valid from a date |
-| GET | `/api/v1/fulfillment/packaging-report` | PackagingFeeMaintain | `countryCode`, `period` (YYYY-MM), optional `legalEntityId`; net of reversals |
-| GET | `/api/v1/fulfillment/returnable-packaging` | WarehouseView | Balances, optional `customerId` |
-| POST | `/api/v1/fulfillment/returnable-packaging:return` | WarehouseReceive | Standalone return receipt, whole containers; FUL-0015 below zero |
+| GET / POST | `/v1/fulfillment/container-types` | WarehouseView / PackingRuleMaintain | Code, tare, returnable, packaging material; POST replaces by code |
+| GET / POST | `/v1/fulfillment/packing-rules` | WarehouseView / PackingRuleMaintain | Per product and optional customer; POST replaces the rule of that scope and keeps its id; unknown container type is FUL-0050 (422) |
+| GET / POST | `/v1/fulfillment/product-packaging` | WarehouseView / PackingRuleMaintain | kg of a material per product unit |
+| POST | `/v1/fulfillment/shipments/{id}:auto-pack` | WarehousePack | Idempotency-Key, If-Match; optional `unitWeights` per line; FUL-0012 warnings, FUL-0013 |
+| GET / POST | `/v1/fulfillment/packaging-fee-rates` | PackagingFeeMaintain | Rate per kg per country and material, valid from a date |
+| GET | `/v1/fulfillment/packaging-report` | PackagingFeeMaintain | `countryCode`, `period` (YYYY-MM), optional `legalEntityId`; net of reversals |
+| GET | `/v1/fulfillment/returnable-packaging` | WarehouseView | Balances, optional `customerId` |
+| POST | `/v1/fulfillment/returnable-packaging:return` | WarehouseReceive | Standalone return receipt, whole containers; FUL-0015 below zero |
 
 The post takes an optional `countryCode` (ship-to); with it, the slip carries
 the packaging fee lines and a shipped material without a rate is FUL-0014.
@@ -153,13 +153,13 @@ the packaging fee lines and a shipped material without a rate is FUL-0014.
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
-| POST | `/api/v1/fulfillment/shipments/{id}:cancel` | WarehouseRelease | Idempotency-Key, If-Match; nothing shipped and no container (BR-28.6) |
-| POST | `/api/v1/fulfillment/waves:preview` | WarehouseRelease | Read-only workbench preview; filter, `groupBy`, `maxLines` (200), `maxOrders` (50) |
-| POST | `/api/v1/fulfillment/waves` | WarehouseRelease | Idempotency-Key; creates the waves, shipments to PICKING; FUL-0016 message; FUL-0053 when stale |
-| GET | `/api/v1/fulfillment/waves`, `/waves/{id}` | WarehouseView | Waves newest first (`warehouseId`, `limit`); one wave with its shipments |
-| GET | `/api/v1/fulfillment/shipments/{id}/tracking` | WarehouseView | Tracking events, newest first |
-| POST | `/api/v1/fulfillment/shipments/{id}/tracking` | WarehouseShip | One event per provider event key (201, or 200 `created: false`); DELIVERED moves SHIPPED to DELIVERED |
-| GET | `/api/v1/fulfillment/shipments/{id}/containers/{cid}/label` | WarehouseView | GS1-128 SSCC label as ZPL (`application/zpl`) |
+| POST | `/v1/fulfillment/shipments/{id}:cancel` | WarehouseRelease | Idempotency-Key, If-Match; nothing shipped and no container (BR-28.6) |
+| POST | `/v1/fulfillment/waves:preview` | WarehouseRelease | Read-only workbench preview; filter, `groupBy`, `maxLines` (200), `maxOrders` (50) |
+| POST | `/v1/fulfillment/waves` | WarehouseRelease | Idempotency-Key; creates the waves, shipments to PICKING; FUL-0016 message; FUL-0053 when stale |
+| GET | `/v1/fulfillment/waves`, `/waves/{id}` | WarehouseView | Waves newest first (`warehouseId`, `limit`); one wave with its shipments |
+| GET | `/v1/fulfillment/shipments/{id}/tracking` | WarehouseView | Tracking events, newest first |
+| POST | `/v1/fulfillment/shipments/{id}/tracking` | WarehouseShip | One event per provider event key (201, or 200 `created: false`); DELIVERED moves SHIPPED to DELIVERED |
+| GET | `/v1/fulfillment/shipments/{id}/containers/{cid}/label` | WarehouseView | GS1-128 SSCC label as ZPL (`application/zpl`) |
 
 Release lines take an optional `carrierCode` (one per order) and `zone`. The
 post takes `asnEnabled` to publish `asn.issued`. Confirm-pick also works on a
@@ -170,15 +170,15 @@ not be below what is packed (FUL-0031).
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
-| GET | `/api/v1/fulfillment/delivered-not-invoiced` | WarehouseView | `legalEntityId` (required), `customerId`, `asOf` (default today), `limit`; open 1405 per currency (`totals`, `lineCount`) and the slips with days outstanding |
-| GET | `/api/v1/fulfillment/sscc-register` | WarehouseView | `companyPrefix`, `customerId`, `from`, `to` (issue dates, UTC), `limit`, `cursor`; issued SSCCs in SSCC order with container, shipment, slip, `issuedAt` and `noReuseUntil` (BR-28.5), `nextCursor` when more exist |
+| GET | `/v1/fulfillment/delivered-not-invoiced` | WarehouseView | `legalEntityId` (required), `customerId`, `asOf` (default today), `limit`; open 1405 per currency (`totals`, `lineCount`) and the slips with days outstanding |
+| GET | `/v1/fulfillment/sscc-register` | WarehouseView | `companyPrefix`, `customerId`, `from`, `to` (issue dates, UTC), `limit`, `cursor`; issued SSCCs in SSCC order with container, shipment, slip, `issuedAt` and `noReuseUntil` (BR-28.5), `nextCursor` when more exist |
 
 ## Endpoints (slice 6)
 
 | Method | Path | Duty | Notes |
 |---|---|---|---|
-| GET | `/api/v1/fulfillment/backorders` | WarehouseView | Short picks and backorders (FR-28.2): `warehouseId`, `status` (`open` default, `all`), `from`, `to` (first short-pick date, UTC), `limit`, `cursor`; each line with `qtyRemainder` (planned - picked) and `open`, newest short pick first |
-| GET | `/api/v1/fulfillment/returnable-packaging/aging` | WarehouseView | Returnable aging (FR-28.16): `customerId`, `chargeDays` (30 to 365, default 90), `chargeDue=true`, `limit`; every balance above zero with `oldestOutstandingDate`, `daysOutstanding` (FIFO from the slip posting dates, as of today UTC) and `chargeDue` (older than `chargeDays`); `count` and `chargeDueCount` cover all, `items` the oldest `limit` |
+| GET | `/v1/fulfillment/backorders` | WarehouseView | Short picks and backorders (FR-28.2): `warehouseId`, `status` (`open` default, `all`), `from`, `to` (first short-pick date, UTC), `limit`, `cursor`; each line with `qtyRemainder` (planned - picked) and `open`, newest short pick first |
+| GET | `/v1/fulfillment/returnable-packaging/aging` | WarehouseView | Returnable aging (FR-28.16): `customerId`, `chargeDays` (30 to 365, default 90), `chargeDue=true`, `limit`; every balance above zero with `oldestOutstandingDate`, `daysOutstanding` (FIFO from the slip posting dates, as of today UTC) and `chargeDue` (older than `chargeDays`); `count` and `chargeDueCount` cover all, `items` the oldest `limit` |
 
 A pick confirmation that leaves a line below plan stamps the line's first
 short-pick time (migration 0005); the remainder is the backorder until a re-pick

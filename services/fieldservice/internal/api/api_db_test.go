@@ -22,13 +22,13 @@ import (
 // service duty and no legal-entity scope.
 func dbRouter(t *testing.T) (http.Handler, context.Context) {
 	t.Helper()
-	pool := testkit.DB(t)
+	admin, pool := testkit.DBWithApp(t)
 	duties := map[string]struct{}{}
 	for _, d := range []string{dutyAgreement, dutyCaseCreate, dutyWorkOrder, dutyBilling, dutyInquire} {
 		duties[d] = struct{}{}
 	}
 	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), UserID: "u", Duties: duties})
-	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
 	r := chi.NewRouter()

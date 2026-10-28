@@ -88,7 +88,7 @@ func New(s store.Store) *API { return &API{store: s, now: time.Now} }
 
 // Register mounts the routes on r.
 func (a *API) Register(r chi.Router) {
-	r.Route("/api/v1/ledger", func(r chi.Router) {
+	r.Route("/v1/ledger", func(r chi.Router) {
 		r.With(authz.RequireDuty(dutyLedgerWrite)).Post("/ledgers", a.createLedger)
 		r.With(authz.RequireDuty(dutyRead)).Get("/ledgers/{id}", a.getLedger)
 		r.With(authz.RequireDuty(dutyAccountWrite)).Put("/charts/{chart}/accounts/{number}", a.putAccount)
@@ -112,6 +112,7 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyRead)).Get("/description-templates/{id}", a.getDescriptionTemplate)
 		r.With(authz.RequireDuty(dutySetupWrite)).Put("/description-templates/{id}", a.putDescriptionTemplate)
 		a.registerBatches(r)
+		a.registerLedgerSets(r)
 	})
 }
 

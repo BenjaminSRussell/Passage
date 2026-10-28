@@ -72,7 +72,7 @@ const upsertBody = `{"id":"` + jobID + `","orderRef":"MO-1","operationRef":"OP-1
 "plannedQuantity":"100","sequenceStart":"2026-10-20T08:00:00Z",
 "checks":[{"code":"len","name":"Length","kind":"numeric","min":"10","max":"12","mandatory":true}]}`
 
-func feedbackPath() string { return "/api/v1/shopfloor/jobs/" + jobID + ":feedback" }
+func feedbackPath() string { return "/v1/shopfloor/jobs/" + jobID + ":feedback" }
 
 func problemOf(t *testing.T, body []byte) (code string, fields map[string]string) {
 	t.Helper()
@@ -90,8 +90,8 @@ func problemOf(t *testing.T, body []byte) (code string, fields map[string]string
 func TestUpsertJob_CreatedThenUpdated(t *testing.T) {
 	f := &jobFake{}
 	h := newRouter(f)
-	first := call(t, h, http.MethodPost, "/api/v1/shopfloor/jobs", upsertBody, jobDuties)
-	second := call(t, h, http.MethodPost, "/api/v1/shopfloor/jobs", upsertBody, jobDuties)
+	first := call(t, h, http.MethodPost, "/v1/shopfloor/jobs", upsertBody, jobDuties)
+	second := call(t, h, http.MethodPost, "/v1/shopfloor/jobs", upsertBody, jobDuties)
 	if first.Code != http.StatusCreated || second.Code != http.StatusOK {
 		t.Fatalf("status %d then %d: %s", first.Code, second.Code, second.Body.String())
 	}
@@ -105,7 +105,7 @@ func TestUpsertJob_ValidationFailures(t *testing.T) {
 	bad := `{"id":"nope","orderRef":" ","operationRef":"OP","resourceId":"` + jobResource + `","plannedQuantity":"1.00001",
 "checks":[{"code":"len","name":"L","kind":"numeric","min":"5","max":"1"},{"code":"len","name":"L","kind":"pass-fail"}]}`
 	f := &jobFake{}
-	rec := call(t, newRouter(f), http.MethodPost, "/api/v1/shopfloor/jobs", bad, jobDuties)
+	rec := call(t, newRouter(f), http.MethodPost, "/v1/shopfloor/jobs", bad, jobDuties)
 	code, fields := problemOf(t, rec.Body.Bytes())
 	if rec.Code != http.StatusBadRequest || code != "COM-0001" {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
@@ -122,7 +122,7 @@ func TestUpsertJob_ValidationFailures(t *testing.T) {
 
 // Writing the projection is the schedule's service duty, not the operator's.
 func TestUpsertJob_RequiresScheduleDuty(t *testing.T) {
-	rec := call(t, newRouter(&jobFake{}), http.MethodPost, "/api/v1/shopfloor/jobs", upsertBody, registerDut)
+	rec := call(t, newRouter(&jobFake{}), http.MethodPost, "/v1/shopfloor/jobs", upsertBody, registerDut)
 	if code, _ := problemOf(t, rec.Body.Bytes()); rec.Code != http.StatusForbidden || code != "AUTH-0003" {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -130,7 +130,7 @@ func TestUpsertJob_RequiresScheduleDuty(t *testing.T) {
 
 func TestListJobs_FiltersAndValidation(t *testing.T) {
 	f := &jobFake{}
-	rec := call(t, newRouter(f), http.MethodGet, "/api/v1/shopfloor/jobs?resourceId="+jobResource+"&status=started&limit=20", "", registerDut)
+	rec := call(t, newRouter(f), http.MethodGet, "/v1/shopfloor/jobs?resourceId="+jobResource+"&status=started&limit=20", "", registerDut)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"items":[]`) {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 	}
@@ -138,7 +138,7 @@ func TestListJobs_FiltersAndValidation(t *testing.T) {
 		t.Fatalf("filter = %+v", f.listed)
 	}
 	for _, q := range []string{"status=paused", "resourceId=r1", "limit=0"} {
-		if rec := call(t, newRouter(f), http.MethodGet, "/api/v1/shopfloor/jobs?"+q, "", registerDut); rec.Code != http.StatusBadRequest {
+		if rec := call(t, newRouter(f), http.MethodGet, "/v1/shopfloor/jobs?"+q, "", registerDut); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: status %d", q, rec.Code)
 		}
 	}
@@ -146,11 +146,11 @@ func TestListJobs_FiltersAndValidation(t *testing.T) {
 
 func TestGetJob_NotFoundAndBadID(t *testing.T) {
 	h := newRouter(&jobFake{})
-	rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/jobs/"+jobID, "", registerDut)
+	rec := call(t, h, http.MethodGet, "/v1/shopfloor/jobs/"+jobID, "", registerDut)
 	if code, _ := problemOf(t, rec.Body.Bytes()); rec.Code != http.StatusNotFound || code != store.CodeJobNotFound {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
-	if rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/jobs/nope", "", registerDut); rec.Code != http.StatusBadRequest {
+	if rec := call(t, h, http.MethodGet, "/v1/shopfloor/jobs/nope", "", registerDut); rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad id: %d", rec.Code)
 	}
 }

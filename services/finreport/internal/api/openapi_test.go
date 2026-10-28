@@ -13,7 +13,7 @@ import (
 )
 
 var (
-	pathLine   = regexp.MustCompile(`^  (/api/\S+):$`)
+	pathLine   = regexp.MustCompile(`^  (/v1/\S+):$`)
 	methodLine = regexp.MustCompile(`^    (get|put|post|patch|delete):$`)
 )
 

@@ -46,6 +46,4 @@ duty_permission_count(duty) := total if {
 	total := sum(counts)
 }
 
-path_matches(prefix, path) if path == prefix
-
-path_matches(prefix, path) if startswith(path, sprintf("%s/", [prefix]))
+path_matches(pattern, path) if glob.match(pattern, ["/", ":"], path)

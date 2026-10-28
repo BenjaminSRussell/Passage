@@ -27,6 +27,49 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /v1/payables/payment-files:preview:
+    post:
+      operationId: previewPaymentFile
+      x-passage-duty: payment-file.preview
+      description: Builds a pain.001.001.09 file from the request, validates it against the vendored XSD and returns it with a summary. XSD violations are reported in validation.errors (AP-FIL-002) with status 200. Writes nothing. Bodies over 4 MiB are rejected with 413 and requests over 2000 payments with 400 (PAY-0001). An xmllint failure other than an invalid document is a 500.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PaymentFileRequest' }
+      responses:
+        '200':
+          description: Generated file, summary and XSD validation result.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentFilePreview' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/payables/payments/status:parse:
+    post:
+      operationId: parsePaymentStatus
+      x-passage-duty: payment-status.parse
+      description: Parses a pain.002.001.10 status report into structured outcomes against the caller-supplied known message and payment ids. Writes nothing. Bodies over 16 MiB or status files over 10 MiB are rejected with 413.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PaymentStatusRequest' }
+      responses:
+        '200':
+          description: Per-payment outcomes and unknown references.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentStatusReport' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /healthz:
     get:
       operationId: liveness
@@ -57,6 +100,175 @@ components:
       type: string
       pattern: '^[0-9]+(\.[0-9]+)?$'
       maxLength: 28
+    PostalAddress:
+      type: object
+      additionalProperties: false
+      required: [country]
+      properties:
+        streetName: { type: string }
+        postCode: { type: string }
+        townName: { type: string }
+        country: { type: string, pattern: '^[A-Z]{2}$' }
+    Party:
+      type: object
+      additionalProperties: false
+      required: [name, address]
+      properties:
+        name: { type: string }
+        address: { $ref: '#/components/schemas/PostalAddress' }
+    Account:
+      type: object
+      additionalProperties: false
+      properties:
+        iban: { type: string }
+        otherId: { type: string, maxLength: 34 }
+    PaymentFileRequest:
+      type: object
+      additionalProperties: false
+      required: [fileNumber, debtor, debtorAccount, debtorBic, profile, payments]
+      properties:
+        fileNumber: { type: string, maxLength: 35 }
+        created: { type: string, format: date-time, description: Defaults to the server clock. }
+        debtor: { $ref: '#/components/schemas/Party' }
+        debtorAccount: { $ref: '#/components/schemas/Account' }
+        debtorBic: { type: string }
+        profile:
+          type: object
+          additionalProperties: false
+          required: [variant]
+          properties:
+            variant: { type: string, enum: [SEPA, US, UK, CH] }
+            pain001Version: { type: string, enum: ['001.001.09'] }
+            overrides: { type: object, additionalProperties: true }
+        payments:
+          type: array
+          minItems: 1
+          maxItems: 2000
+          items:
+            type: object
+            additionalProperties: false
+            required: [method, executionDate, number, amount, currency, creditor]
+            properties:
+              method:
+                type: object
+                additionalProperties: false
+                required: [type, format]
+                properties:
+                  type: { type: string, enum: [TRANSFER, WIRE] }
+                  format: { type: string, enum: [PAIN001] }
+                  minPayment: { $ref: '#/components/schemas/DecimalString' }
+                  maxPayment: { $ref: '#/components/schemas/DecimalString' }
+                  cutoffTime: { type: string }
+              executionDate: { type: string, format: date }
+              number: { type: string, maxLength: 35 }
+              amount: { $ref: '#/components/schemas/DecimalString' }
+              currency: { type: string, pattern: '^[A-Z]{3}$' }
+              creditor:
+                type: object
+                additionalProperties: false
+                required: [name, address]
+                properties:
+                  name: { type: string }
+                  address: { $ref: '#/components/schemas/PostalAddress' }
+                  iban: { type: string }
+                  otherId: { type: string }
+                  bic: { type: string }
+                  routingNumber: { type: string }
+              invoices:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [number, amount]
+                  properties:
+                    number: { type: string }
+                    amount: { $ref: '#/components/schemas/DecimalString' }
+    PaymentFilePreview:
+      type: object
+      required: [format, fileNumber, content, summary, validation]
+      properties:
+        format: { type: string, enum: [PAIN001] }
+        fileNumber: { type: string }
+        content: { type: string, description: The pain.001.001.09 XML document. }
+        summary:
+          type: object
+          required: [paymentCount, controlSum, sha256]
+          properties:
+            paymentCount: { type: integer }
+            controlSum: { $ref: '#/components/schemas/DecimalString' }
+            sha256: { type: string }
+        validation:
+          type: object
+          required: [valid, errors]
+          properties:
+            valid: { type: boolean }
+            errors:
+              type: array
+              items:
+                type: object
+                required: [code, path, reason]
+                properties:
+                  code: { type: string, enum: [AP-FIL-002] }
+                  path: { type: string }
+                  reason: { type: string }
+    PaymentStatusRequest:
+      type: object
+      additionalProperties: false
+      required: [content]
+      properties:
+        content: { type: string, description: The pain.002.001.10 XML document, at most 10485760 bytes (UTF-8; the server counts bytes, not characters). }
+        messages:
+          type: object
+          description: Original message id to the end-to-end ids it carried.
+          additionalProperties: { type: array, items: { type: string } }
+        payments:
+          type: object
+          description: End-to-end id to the payment's current status and method.
+          additionalProperties:
+            type: object
+            additionalProperties: false
+            properties:
+              status: { type: string }
+              method: { type: string }
+    PaymentStatusReport:
+      type: object
+      required: [messageId, originalMessageId, outcomes, unknown]
+      properties:
+        messageId: { type: string }
+        originalMessageId: { type: string }
+        outcomes:
+          type: array
+          items:
+            type: object
+            required: [endToEndId, bankStatus]
+            properties:
+              endToEndId: { type: string }
+              bankStatus: { type: string }
+              reasonCode: { type: string }
+              reasonText: { type: string }
+              from: { type: string }
+              to: { type: string }
+              hold: { type: string }
+              transitionError:
+                type: object
+                properties:
+                  code: { type: string }
+                  detail: { type: string }
+              warning:
+                type: object
+                properties:
+                  payment: { type: string }
+                  code: { type: string }
+                  text: { type: string }
+        unknown:
+          type: array
+          items:
+            type: object
+            required: [code, kind, id]
+            properties:
+              code: { type: string, enum: [AP-STS-002] }
+              kind: { type: string, enum: [message, payment] }
+              id: { type: string }
     SettlementRequest:
       type: object
       additionalProperties: false
@@ -178,7 +390,7 @@ components:
           schema: { $ref: '#/components/schemas/TenantRejection' }
           example: '{"type":"https://passage.dev/problems/AUTH-0001","title":"Unauthorized","status":401,"code":"AUTH-0001","detail":"missing tenant"}'
     Forbidden:
-      description: Principal lacks the settlement.read duty. Written by authz.RequireDuty through httpx.Fail.
+      description: Principal lacks the duty the route requires (see x-passage-duty). Written by authz.RequireDuty through httpx.Fail.
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/KernelProblem' }

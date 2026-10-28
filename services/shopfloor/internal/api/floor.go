@@ -89,17 +89,17 @@ type oeeItem struct {
 
 // registerFloor mounts the machine, downtime, andon, OEE, OEE rollup and payroll export routes.
 func (a *API) registerFloor(r chi.Router) {
-	r.With(authz.RequireDuty(DutySetup)).Post("/api/v1/shopfloor/machines", a.createMachine)
-	r.With(authz.RequireDuty(DutyView)).Get("/api/v1/shopfloor/machines", a.listMachines)
-	r.With(authz.RequireDuty(DutyIngest)).Post("/api/v1/shopfloor/machine-events", a.ingestMachineEvents)
-	r.With(authz.RequireDuty(DutyView)).Get("/api/v1/shopfloor/downtimes", a.listDowntimes)
-	r.With(authz.RequireDuty(DutyRegister)).Post("/api/v1/shopfloor/downtimes/{id}:code", a.codeDowntime)
-	r.With(authz.RequireDuty(DutyView)).Get("/api/v1/shopfloor/andon", a.listAndon)
-	r.With(authz.RequireDuty(DutyView)).Get("/api/v1/shopfloor/oee", a.oee)
-	r.With(authz.RequireDuty(DutyOEERollup)).Post("/api/v1/shopfloor/oee:rollup", a.rollupOEE)
-	r.With(authz.RequireDuty(DutyExport)).Post("/api/v1/shopfloor/pay:export", a.exportPay)
-	r.With(authz.RequireDuty(DutyExport)).Get("/api/v1/shopfloor/pay-exports", a.listPayExports)
-	r.With(authz.RequireDuty(DutyExport)).Get("/api/v1/shopfloor/pay-exports/{id}", a.getPayExport)
+	r.With(authz.RequireDuty(DutySetup)).Post("/v1/shopfloor/machines", a.createMachine)
+	r.With(authz.RequireDuty(DutyView)).Get("/v1/shopfloor/machines", a.listMachines)
+	r.With(authz.RequireDuty(DutyIngest)).Post("/v1/shopfloor/machine-events", a.ingestMachineEvents)
+	r.With(authz.RequireDuty(DutyView)).Get("/v1/shopfloor/downtimes", a.listDowntimes)
+	r.With(authz.RequireDuty(DutyRegister)).Post("/v1/shopfloor/downtimes/{id}:code", a.codeDowntime)
+	r.With(authz.RequireDuty(DutyView)).Get("/v1/shopfloor/andon", a.listAndon)
+	r.With(authz.RequireDuty(DutyView)).Get("/v1/shopfloor/oee", a.oee)
+	r.With(authz.RequireDuty(DutyOEERollup)).Post("/v1/shopfloor/oee:rollup", a.rollupOEE)
+	r.With(authz.RequireDuty(DutyExport)).Post("/v1/shopfloor/pay:export", a.exportPay)
+	r.With(authz.RequireDuty(DutyExport)).Get("/v1/shopfloor/pay-exports", a.listPayExports)
+	r.With(authz.RequireDuty(DutyExport)).Get("/v1/shopfloor/pay-exports/{id}", a.getPayExport)
 }
 
 func (a *API) createMachine(w http.ResponseWriter, r *http.Request) {

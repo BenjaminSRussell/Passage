@@ -73,21 +73,30 @@ func postEntryTx(ctx context.Context, tx pgx.Tx, tenantID string, in PostInput) 
 	if err != nil || replayed {
 		return out, err
 	}
-	accounts, err := loadAccounts(ctx, tx, tenantID, ledger.ChartCode, accountNumbers(in.Lines))
+	entry, notices, err := postToLedger(ctx, tx, tenantID, ledger, in)
 	if err != nil {
 		return out, err
+	}
+	out = EntryResult{Entries: []Entry{entry}, Idempotency: Idempotency{Key: in.Key}, TraceID: in.TraceID, Notices: notices}
+	return out, storeIdempotent(ctx, tx, tenantID, ledger.LegalEntityID, in.Key, in.Hash, out)
+}
+
+func postToLedger(ctx context.Context, tx pgx.Tx, tenantID string, ledger Ledger, in PostInput) (Entry, []Notice, error) {
+	accounts, err := loadAccounts(ctx, tx, tenantID, ledger.ChartCode, accountNumbers(in.Lines))
+	if err != nil {
+		return Entry{}, nil, err
 	}
 	rules, err := withStructures(ctx, tx, tenantID, ledger.ID, in.rules(ledger), in.Lines)
 	if err != nil {
-		return out, err
+		return Entry{}, nil, err
 	}
 	res := domain.ValidateEntry(rules, accounts, in.PostingDate, in.Today, in.Lines)
 	if !res.Valid() {
-		return out, &domain.RejectedError{Violations: res.Violations}
+		return Entry{}, nil, &domain.RejectedError{Violations: res.Violations}
 	}
 	description, notices, err := applyDefaultDescriptions(ctx, tx, tenantID, ledger, in, res.Lines)
 	if err != nil {
-		return out, err
+		return Entry{}, nil, err
 	}
 	lines := make([]writeLine, 0, len(res.Lines))
 	for _, v := range res.Lines {
@@ -98,11 +107,7 @@ func postEntryTx(ctx context.Context, tx pgx.Tx, tenantID string, in PostInput) 
 		description: description, source: in.Source, key: in.Key, hash: in.Hash, actor: in.Actor,
 		traceID: in.TraceID, lines: lines,
 	})
-	if err != nil {
-		return out, err
-	}
-	out = EntryResult{Entries: []Entry{entry}, Idempotency: Idempotency{Key: in.Key}, TraceID: in.TraceID, Notices: notices}
-	return out, storeIdempotent(ctx, tx, tenantID, ledger.LegalEntityID, in.Key, in.Hash, out)
+	return entry, notices, err
 }
 
 // ReverseEntry posts an exact negating entry for a posted entry (FR-11.8). An

@@ -26,10 +26,10 @@ func TestNewHandler_ServesHealthAndTenantRoutes(t *testing.T) {
 		want    int
 	}{
 		{"/healthz", nil, http.StatusOK},
-		{"/api/v1/reporting/lag", map[string]string{
+		{"/v1/reporting/lag", map[string]string{
 			"X-Passage-Tenant": "00000000-0000-0000-0000-000000000001", "X-Passage-User": "u1", "X-Passage-Duties": "reporting.statement.view",
 		}, http.StatusOK},
-		{"/api/v1/reporting/lag", nil, http.StatusUnauthorized},
+		{"/v1/reporting/lag", nil, http.StatusUnauthorized},
 	} {
 		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
 		for k, v := range tc.headers {

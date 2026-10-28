@@ -16,7 +16,7 @@ servers:
 security:
   - bearerAuth: []
 paths:
-  /api/v1/receivables/open-items:
+  /v1/receivables/open-items:
     get:
       operationId: listOpenItems
       summary: Open items (FBL5N style)
@@ -39,7 +39,7 @@ paths:
                     items: { $ref: "#/components/schemas/OpenItem" }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/aging:
+  /v1/receivables/aging:
     get:
       operationId: agingSnapshot
       summary: Aging snapshot by currency and bucket
@@ -61,7 +61,7 @@ paths:
                     items: { $ref: "#/components/schemas/AgingTotal" }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/payments:
+  /v1/receivables/payments:
     get:
       operationId: listPayments
       summary: Payments, newest received first
@@ -108,7 +108,7 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/payments/{id}:
+  /v1/receivables/payments/{id}:
     get:
       operationId: getPayment
       summary: Read a payment
@@ -124,7 +124,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Payment" }
         "404": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/payments/{id}:match:
+  /v1/receivables/payments/{id}:match:
     post:
       operationId: matchPayment
       summary: Score candidate settlements for a payment (BR-30.1); changes no state
@@ -139,7 +139,7 @@ paths:
               schema: { $ref: "#/components/schemas/MatchResult" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/payments/{id}:apply:
+  /v1/receivables/payments/{id}:apply:
     post:
       operationId: applyPayment
       summary: Apply a payment to open items; requires If-Match
@@ -176,7 +176,7 @@ paths:
         "412": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/lockbox/imports:
+  /v1/receivables/lockbox/imports:
     get:
       operationId: listLockboxImports
       summary: Imported lockbox files, newest first
@@ -216,7 +216,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/worklist:
+  /v1/receivables/worklist:
     get:
       operationId: collectionsWorklist
       summary: Customers ranked by risk score as of a date (FR-30.6, FR-30.10)
@@ -239,7 +239,7 @@ paths:
                     items: { $ref: "#/components/schemas/CustomerRisk" }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/statements:
+  /v1/receivables/statements:
     get:
       operationId: getStatement
       summary: Customer account statement as of a date, by currency, with running balance and aging footer (FR-30.13)
@@ -262,7 +262,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/aging-snapshots:
+  /v1/receivables/aging-snapshots:
     post:
       operationId: runAgingSnapshot
       summary: Store dated customer balances and emit customerbalance.changed.v1 for moved balances (§5.30.16)
@@ -311,7 +311,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/dunning-runs:
+  /v1/receivables/dunning-runs:
     get:
       operationId: listDunningRuns
       summary: Dunning runs, latest run date first, with the count of letters not skipped
@@ -354,7 +354,7 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/dunning-runs/{id}:
+  /v1/receivables/dunning-runs/{id}:
     get:
       operationId: getDunningRun
       summary: Read a dunning run with its letters and exclusions
@@ -370,7 +370,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/DunningRun" }
         "404": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/dunning-runs/{id}:review:
+  /v1/receivables/dunning-runs/{id}:review:
     post:
       operationId: reviewDunningRun
       summary: Mark a DRAFT run REVIEWED; requires If-Match
@@ -391,7 +391,7 @@ paths:
         "409": { $ref: "#/components/responses/Problem" }
         "412": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/dunning-runs/{id}:issue:
+  /v1/receivables/dunning-runs/{id}:issue:
     post:
       operationId: issueDunningRun
       summary: Issue a REVIEWED run; only issue posts fees and raises levels (AR-0007 unless reviewed)
@@ -412,7 +412,7 @@ paths:
         "409": { $ref: "#/components/responses/Problem" }
         "412": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/dunning-runs/{id}:cancel:
+  /v1/receivables/dunning-runs/{id}:cancel:
     post:
       operationId: cancelDunningRun
       summary: Cancel a run that has not been issued; requires If-Match
@@ -433,7 +433,7 @@ paths:
         "409": { $ref: "#/components/responses/Problem" }
         "412": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/interest-notes:
+  /v1/receivables/interest-notes:
     get:
       operationId: listInterestNotes
       summary: Posted interest notes, latest calculation first
@@ -453,7 +453,7 @@ paths:
                   items: { type: array, items: { $ref: "#/components/schemas/InterestNote" } }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/interest-notes:calculate:
+  /v1/receivables/interest-notes:calculate:
     post:
       operationId: calculateInterest
       summary: Preview interest on overdue items (BR-30.5); writes nothing
@@ -471,7 +471,7 @@ paths:
               schema: { $ref: "#/components/schemas/InterestResult" }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/interest-notes:post:
+  /v1/receivables/interest-notes:post:
     post:
       operationId: postInterest
       summary: Post interest notes as INTEREST open items; once per item and month, charging only days after the last note
@@ -496,7 +496,7 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/promises:
+  /v1/receivables/promises:
     get:
       operationId: listPromises
       summary: Promises to pay, latest promise date first
@@ -539,7 +539,7 @@ paths:
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/disputes:
+  /v1/receivables/disputes:
     get:
       operationId: listDisputes
       summary: Disputes, nearest SLA first
@@ -588,7 +588,7 @@ paths:
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/disputes/{id}:
+  /v1/receivables/disputes/{id}:
     get:
       operationId: getDispute
       summary: Read one dispute
@@ -605,7 +605,7 @@ paths:
               schema: { $ref: "#/components/schemas/Dispute" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/disputes/{id}:review:
+  /v1/receivables/disputes/{id}:review:
     post:
       operationId: reviewDispute
       summary: Move an OPEN dispute to UNDER_REVIEW; requires If-Match
@@ -626,7 +626,7 @@ paths:
         "409": { $ref: "#/components/responses/Problem" }
         "412": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/disputes/{id}:resolve:
+  /v1/receivables/disputes/{id}:resolve:
     post:
       operationId: resolveDispute
       summary: Resolve a dispute as CREDIT, PAID, WRITE_OFF or REJECTED; requires If-Match
@@ -653,7 +653,7 @@ paths:
         "409": { $ref: "#/components/responses/Problem" }
         "412": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/cases:
+  /v1/receivables/cases:
     get:
       operationId: listCases
       summary: Collection cases, open first and nearest SLA first (FR-30.18)
@@ -699,7 +699,7 @@ paths:
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/cases/{id}:
+  /v1/receivables/cases/{id}:
     get:
       operationId: getCase
       summary: Read one collection case
@@ -716,7 +716,7 @@ paths:
               schema: { $ref: "#/components/schemas/CollectionCase" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/cases/{id}:assign:
+  /v1/receivables/cases/{id}:assign:
     post:
       operationId: assignCase
       summary: Hand an open case to another owner; requires If-Match
@@ -748,7 +748,7 @@ paths:
         "409": { $ref: "#/components/responses/Problem" }
         "412": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/cases/{id}:close:
+  /v1/receivables/cases/{id}:close:
     post:
       operationId: closeCase
       summary: Close an open case with an optional note; requires If-Match. Publishes case.closed.v1.
@@ -779,7 +779,7 @@ paths:
         "409": { $ref: "#/components/responses/Problem" }
         "412": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/balance-confirmations:
+  /v1/receivables/balance-confirmations:
     get:
       operationId: listConfirmationRuns
       summary: Balance confirmation runs with their reply counts, newest first (FR-30.20)
@@ -822,7 +822,7 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/balance-confirmations/{id}:
+  /v1/receivables/balance-confirmations/{id}:
     get:
       operationId: getConfirmationRun
       summary: Read a run with its confirmations
@@ -837,7 +837,7 @@ paths:
               schema: { $ref: "#/components/schemas/ConfirmationRun" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/balance-confirmations/{id}/differences:
+  /v1/receivables/balance-confirmations/{id}/differences:
     get:
       operationId: confirmationDifferences
       summary: The difference list for audit; every DISAGREED reply with both balances and its DISPUTE case
@@ -856,7 +856,7 @@ paths:
                   items: { type: array, items: { $ref: "#/components/schemas/Confirmation" } }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/balance-confirmations/{id}:reply:
+  /v1/receivables/balance-confirmations/{id}:reply:
     post:
       operationId: recordConfirmationReply
       summary: >-
@@ -881,7 +881,7 @@ paths:
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/down-payments:
+  /v1/receivables/down-payments:
     get:
       operationId: listDownPayments
       summary: Down payments and security deposits, newest first (FR-30.21)
@@ -926,7 +926,7 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/down-payments/{id}:
+  /v1/receivables/down-payments/{id}:
     get:
       operationId: getDownPayment
       summary: Read one down payment or deposit with its clearings
@@ -943,7 +943,7 @@ paths:
               schema: { $ref: "#/components/schemas/DownPayment" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/down-payments/{id}:receive:
+  /v1/receivables/down-payments/{id}:receive:
     post:
       operationId: receiveDownPayment
       summary: Record the money as received (Dr bank / Cr 2190 or 2195 on downpayment.received.v1); requires If-Match
@@ -968,7 +968,7 @@ paths:
         "409": { $ref: "#/components/responses/Problem" }
         "412": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/down-payments/{id}:cancel:
+  /v1/receivables/down-payments/{id}:cancel:
     post:
       operationId: cancelDownPayment
       summary: Withdraw a request that was never paid; requires If-Match
@@ -983,7 +983,7 @@ paths:
         "409": { $ref: "#/components/responses/Problem" }
         "412": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/down-payments/{id}:clear:
+  /v1/receivables/down-payments/{id}:clear:
     post:
       operationId: clearDownPayment
       summary: >-
@@ -1014,7 +1014,7 @@ paths:
         "412": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/down-payments/{id}:release:
+  /v1/receivables/down-payments/{id}:release:
     post:
       operationId: releaseDownPayment
       summary: Refund what remains of a received security deposit (Dr 2195 / Cr bank on downpayment.released.v1); requires If-Match
@@ -1029,7 +1029,7 @@ paths:
         "409": { $ref: "#/components/responses/Problem" }
         "412": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/bank-statements/imports:
+  /v1/receivables/bank-statements/imports:
     get:
       operationId: listBankStatementImports
       summary: Imported camt.053 statement files, newest first
@@ -1074,7 +1074,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/deductions:
+  /v1/receivables/deductions:
     get:
       operationId: listDeductions
       summary: Deductions, open and matched first, oldest first within them (FR-30.17)
@@ -1128,7 +1128,7 @@ paths:
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/deductions/{id}:
+  /v1/receivables/deductions/{id}:
     get:
       operationId: getDeduction
       summary: Read one deduction, with its children when it was split
@@ -1139,7 +1139,7 @@ paths:
         "200": { $ref: "#/components/responses/Deduction" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/deductions/{id}:match:
+  /v1/receivables/deductions/{id}:match:
     post:
       operationId: matchDeduction
       summary: >-
@@ -1170,7 +1170,7 @@ paths:
         "412": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/deductions/{id}:approve:
+  /v1/receivables/deductions/{id}:approve:
     post:
       operationId: approveDeduction
       summary: >-
@@ -1194,7 +1194,7 @@ paths:
         "412": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/deductions/{id}:deny:
+  /v1/receivables/deductions/{id}:deny:
     post:
       operationId: denyDeduction
       summary: >-
@@ -1224,7 +1224,7 @@ paths:
         "412": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/deductions/{id}:split:
+  /v1/receivables/deductions/{id}:split:
     post:
       operationId: splitDeduction
       summary: >-
@@ -1253,7 +1253,7 @@ paths:
         "412": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
-  /api/v1/receivables/deductions/{id}:write-off:
+  /v1/receivables/deductions/{id}:write-off:
     post:
       operationId: writeOffDeduction
       summary: >-

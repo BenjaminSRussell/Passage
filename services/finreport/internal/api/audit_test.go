@@ -45,7 +45,7 @@ func auditRouter(f *auditFake, cfg config.Reporting) http.Handler {
 	return r
 }
 
-const auditPath = "/api/v1/reporting/audit-trail"
+const auditPath = "/v1/reporting/audit-trail"
 
 func TestAuditTrail_NeedsTheAuditDuty(t *testing.T) {
 	f := &auditFake{}

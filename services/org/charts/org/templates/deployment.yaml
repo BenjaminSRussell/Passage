@@ -33,12 +33,25 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.databaseSecret }}
                   key: DATABASE_URL
+            {{- if .Values.migrateDatabaseSecret }}
+            - name: MIGRATE_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.migrateDatabaseSecret }}
+                  key: DATABASE_URL
+            {{- end }}
             - name: MIGRATE_ON_START
               value: {{ .Values.migrateOnStart | quote }}
             - name: ORG_HIERARCHY_MAX_NODES
               value: {{ .Values.hierarchy.maxNodes | quote }}
             - name: ORG_HIERARCHY_MAX_DEPTH
               value: {{ .Values.hierarchy.maxDepth | quote }}
+            - name: ORG_ADDRESS_VALIDATOR
+              value: {{ .Values.addressValidator | quote }}
+            - name: ORG_SEED_PACKAGE
+              value: {{ .Values.seed.package | quote }}
+            - name: ORG_SEED_TENANT_ID
+              value: {{ .Values.seed.tenantId | quote }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }

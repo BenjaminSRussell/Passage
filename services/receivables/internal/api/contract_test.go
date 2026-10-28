@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	specPath      = regexp.MustCompile(`^  (/api/v1/receivables[^ ]*):$`)
+	specPath      = regexp.MustCompile(`^  (/v1/receivables[^ ]*):$`)
 	specOperation = regexp.MustCompile(`^    (get|post|put|patch|delete):$`)
 	// A custom method on an id ({id}:apply) is served by the {ref} route that dispatches it.
 	idAction = regexp.MustCompile(`\{id\}(:[a-z-]+)?`)

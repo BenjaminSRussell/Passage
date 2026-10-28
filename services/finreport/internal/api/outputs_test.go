@@ -47,7 +47,7 @@ func TestRunOutput_HTMLAndXLSX(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.format, func(t *testing.T) {
-			w := call(scheduleRouter(outputStore{}), http.MethodGet, "/api/v1/reporting/runs/"+runUUID+"/outputs/"+tc.format, "", nil, DutyView)
+			w := call(scheduleRouter(outputStore{}), http.MethodGet, "/v1/reporting/runs/"+runUUID+"/outputs/"+tc.format, "", nil, DutyView)
 			if w.Code != http.StatusOK {
 				t.Fatalf("status %d: %s", w.Code, w.Body.String())
 			}
@@ -69,7 +69,7 @@ func TestRunOutput_RenderFailure(t *testing.T) {
 	outputFormats["html"] = outputFormat{saved.contentType, func(domain.Definition, []domain.Cell, domain.Stamp) ([]byte, error) {
 		return nil, errors.New("template broke")
 	}}
-	w := call(scheduleRouter(outputStore{}), http.MethodGet, "/api/v1/reporting/runs/"+runUUID+"/outputs/html", "", nil, DutyView)
+	w := call(scheduleRouter(outputStore{}), http.MethodGet, "/v1/reporting/runs/"+runUUID+"/outputs/html", "", nil, DutyView)
 	if w.Code != http.StatusInternalServerError || problemCode(t, w) != CodeRenderFailed {
 		t.Fatalf("status %d: %s", w.Code, w.Body.String())
 	}

@@ -150,7 +150,7 @@ func TestRunRelease_ReleasesEligibleLinesAndReportsSkips(t *testing.T) {
 			`","confirmedShipDate":"` + date + `","atpOk":true,"held":` + boolStr(held) + `}`
 	}
 	body := `{"warehouseId":"` + ids.New() + `","lines":[` + line("10", today, false) + `,` + line("5", far, false) + `,` + line("1", today, true) + `]}`
-	rec := do(t, h, http.MethodPost, "/api/v1/fulfillment/releases:run", body, map[string]string{"Idempotency-Key": "rel-1"})
+	rec := do(t, h, http.MethodPost, "/v1/fulfillment/releases:run", body, map[string]string{"Idempotency-Key": "rel-1"})
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -168,7 +168,7 @@ func TestRunRelease_ReleasesEligibleLinesAndReportsSkips(t *testing.T) {
 
 func TestCommands_RequireIdempotencyKey(t *testing.T) {
 	h := newServer(t, &fakeStore{})
-	rec := do(t, h, http.MethodPost, "/api/v1/fulfillment/packing-slips/"+ids.New()+":cancel", "", nil)
+	rec := do(t, h, http.MethodPost, "/v1/fulfillment/packing-slips/"+ids.New()+":cancel", "", nil)
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "FUL-0051") {
 		t.Fatalf("status = %d body = %s, want 400 FUL-0051", rec.Code, rec.Body.String())
 	}
@@ -176,7 +176,7 @@ func TestCommands_RequireIdempotencyKey(t *testing.T) {
 
 func TestConfirmPick_RequiresIfMatch(t *testing.T) {
 	h := newServer(t, &fakeStore{})
-	path := "/api/v1/fulfillment/shipments/" + ids.New() + ":confirm-pick"
+	path := "/v1/fulfillment/shipments/" + ids.New() + ":confirm-pick"
 	body := `{"picks":[{"shipmentLineId":"` + ids.New() + `","picked":"90"}]}`
 	rec := do(t, h, http.MethodPost, path, body, map[string]string{"Idempotency-Key": "pick-1"})
 	if rec.Code != http.StatusPreconditionRequired {
@@ -186,7 +186,7 @@ func TestConfirmPick_RequiresIfMatch(t *testing.T) {
 
 func TestConfirmPick_StaleVersionIsRejected(t *testing.T) {
 	h := newServer(t, &fakeStore{})
-	path := "/api/v1/fulfillment/shipments/" + ids.New() + ":confirm-pick"
+	path := "/v1/fulfillment/shipments/" + ids.New() + ":confirm-pick"
 	body := `{"picks":[{"shipmentLineId":"` + ids.New() + `","picked":"90"}]}`
 	rec := do(t, h, http.MethodPost, path, body, map[string]string{"Idempotency-Key": "pick-2", "If-Match": `"2"`})
 	if rec.Code != http.StatusPreconditionFailed || !strings.Contains(rec.Body.String(), store.CodeVersion) {
@@ -196,7 +196,7 @@ func TestConfirmPick_StaleVersionIsRejected(t *testing.T) {
 
 func TestConfirmPick_HappyPathReturnsETag(t *testing.T) {
 	h := newServer(t, &fakeStore{})
-	path := "/api/v1/fulfillment/shipments/" + ids.New() + ":confirm-pick"
+	path := "/v1/fulfillment/shipments/" + ids.New() + ":confirm-pick"
 	body := `{"picks":[{"shipmentLineId":"` + ids.New() + `","picked":"90"}]}`
 	rec := do(t, h, http.MethodPost, path, body, map[string]string{"Idempotency-Key": "pick-3", "If-Match": `"3"`})
 	if rec.Code != http.StatusOK {
@@ -209,7 +209,7 @@ func TestConfirmPick_HappyPathReturnsETag(t *testing.T) {
 
 func TestConfirmPick_RejectsNegativePick(t *testing.T) {
 	h := newServer(t, &fakeStore{})
-	path := "/api/v1/fulfillment/shipments/" + ids.New() + ":confirm-pick"
+	path := "/v1/fulfillment/shipments/" + ids.New() + ":confirm-pick"
 	body := `{"picks":[{"shipmentLineId":"` + ids.New() + `","picked":"-1"}]}`
 	rec := do(t, h, http.MethodPost, path, body, map[string]string{"Idempotency-Key": "pick-4", "If-Match": `"3"`})
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "picks[0].picked") {
@@ -219,7 +219,7 @@ func TestConfirmPick_RejectsNegativePick(t *testing.T) {
 
 func TestPostPackingSlip_ValidatesDateAndCurrency(t *testing.T) {
 	h := newServer(t, &fakeStore{})
-	path := "/api/v1/fulfillment/shipments/" + ids.New() + ":post-packing-slip"
+	path := "/v1/fulfillment/shipments/" + ids.New() + ":post-packing-slip"
 	bad := `{"postingDate":"21/10/2026","currency":"USD","costs":[]}`
 	rec := do(t, h, http.MethodPost, path, bad, map[string]string{"Idempotency-Key": "post-1", "If-Match": `"3"`})
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "postingDate") {
@@ -235,12 +235,12 @@ func TestPostPackingSlip_ValidatesDateAndCurrency(t *testing.T) {
 
 func TestGetShipment_NotFoundAndETag(t *testing.T) {
 	h := newServer(t, &fakeStore{notFound: true})
-	rec := do(t, h, http.MethodGet, "/api/v1/fulfillment/shipments/not-a-uuid", "", nil)
+	rec := do(t, h, http.MethodGet, "/v1/fulfillment/shipments/not-a-uuid", "", nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
 	}
 	h = newServer(t, &fakeStore{})
-	rec = do(t, h, http.MethodGet, "/api/v1/fulfillment/shipments/"+ids.New(), "", nil)
+	rec = do(t, h, http.MethodGet, "/v1/fulfillment/shipments/"+ids.New(), "", nil)
 	if rec.Code != http.StatusOK || rec.Header().Get("ETag") != `"3"` {
 		t.Fatalf("status = %d etag = %q, want 200 \"3\"", rec.Code, rec.Header().Get("ETag"))
 	}
@@ -249,7 +249,7 @@ func TestGetShipment_NotFoundAndETag(t *testing.T) {
 func TestDuty_MissingDutyIsForbidden(t *testing.T) {
 	h := newServer(t, &fakeStore{})
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/fulfillment/shipments/"+ids.New(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/fulfillment/shipments/"+ids.New(), nil)
 	req.Header.Set("X-Passage-Tenant", tenant)
 	req.Header.Set("X-Passage-Duties", "SomethingElse")
 	h.ServeHTTP(rec, req)
@@ -260,7 +260,7 @@ func TestDuty_MissingDutyIsForbidden(t *testing.T) {
 
 func TestMalformedBodyIsRejected(t *testing.T) {
 	h := newServer(t, &fakeStore{})
-	rec := do(t, h, http.MethodPost, "/api/v1/fulfillment/releases:run", `{"warehouseId": 5`, map[string]string{"Idempotency-Key": "r"})
+	rec := do(t, h, http.MethodPost, "/v1/fulfillment/releases:run", `{"warehouseId": 5`, map[string]string{"Idempotency-Key": "r"})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
 	}
@@ -280,7 +280,7 @@ func TestRunRelease_MergesStoreSkipsAndPassesWarehouse(t *testing.T) {
 	h := newServer(t, fs)
 	wh := ids.New()
 	body := `{"warehouseId":"` + wh + `","lines":[` + relLine(ids.New(), ids.New(), ids.New(), already) + `]}`
-	rec := do(t, h, http.MethodPost, "/api/v1/fulfillment/releases:run", body, map[string]string{"Idempotency-Key": "rel-merge"})
+	rec := do(t, h, http.MethodPost, "/v1/fulfillment/releases:run", body, map[string]string{"Idempotency-Key": "rel-merge"})
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
 	}
@@ -307,7 +307,7 @@ func TestRunRelease_RejectsDuplicateLinesAndMixedOrderParties(t *testing.T) {
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
 			body := `{"warehouseId":"` + ids.New() + `","lines":[` + c.lines + `]}`
-			rec := do(t, h, http.MethodPost, "/api/v1/fulfillment/releases:run", body, map[string]string{"Idempotency-Key": "rel-" + name})
+			rec := do(t, h, http.MethodPost, "/v1/fulfillment/releases:run", body, map[string]string{"Idempotency-Key": "rel-" + name})
 			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), c.field) || !strings.Contains(rec.Body.String(), CodeValidation) {
 				t.Fatalf("status = %d body = %s, want 400 %s naming %s", rec.Code, rec.Body.String(), CodeValidation, c.field)
 			}
@@ -318,7 +318,7 @@ func TestRunRelease_RejectsDuplicateLinesAndMixedOrderParties(t *testing.T) {
 func TestCommands_RejectRepeatedLinesAndExcessScale(t *testing.T) {
 	h := newServer(t, &fakeStore{})
 	line := ids.New()
-	shipment := "/api/v1/fulfillment/shipments/" + ids.New()
+	shipment := "/v1/fulfillment/shipments/" + ids.New()
 	cases := map[string]struct{ path, body, field string }{
 		"pick twice": {shipment + ":confirm-pick",
 			`{"picks":[{"shipmentLineId":"` + line + `","picked":"1"},{"shipmentLineId":"` + line + `","picked":"2"}]}`, "picks[1].shipmentLineId"},
@@ -344,9 +344,9 @@ func TestCommands_RejectRepeatedLinesAndExcessScale(t *testing.T) {
 func TestIdempotencyHashCoversThePath(t *testing.T) {
 	fs := &fakeStore{}
 	h := newServer(t, fs)
-	do(t, h, http.MethodPost, "/api/v1/fulfillment/packing-slips/"+ids.New()+":cancel", "", map[string]string{"Idempotency-Key": "same"})
+	do(t, h, http.MethodPost, "/v1/fulfillment/packing-slips/"+ids.New()+":cancel", "", map[string]string{"Idempotency-Key": "same"})
 	first := fs.lastIdem.Hash
-	do(t, h, http.MethodPost, "/api/v1/fulfillment/packing-slips/"+ids.New()+":cancel", "", map[string]string{"Idempotency-Key": "same"})
+	do(t, h, http.MethodPost, "/v1/fulfillment/packing-slips/"+ids.New()+":cancel", "", map[string]string{"Idempotency-Key": "same"})
 	if first == "" || fs.lastIdem.Hash == first {
 		t.Fatalf("hashes for two slips are equal (%q); a reused key would replay the wrong slip", first)
 	}
@@ -356,7 +356,7 @@ func TestListShipments_FiltersAndValidation(t *testing.T) {
 	fs := &fakeStore{}
 	h := newServer(t, fs)
 	wh := ids.New()
-	rec := do(t, h, http.MethodGet, "/api/v1/fulfillment/shipments?status=PACKED&warehouseId="+wh+"&limit=20", "", nil)
+	rec := do(t, h, http.MethodGet, "/v1/fulfillment/shipments?status=PACKED&warehouseId="+wh+"&limit=20", "", nil)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"items":[{`) {
 		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
 	}
@@ -364,7 +364,7 @@ func TestListShipments_FiltersAndValidation(t *testing.T) {
 		t.Fatalf("filter = %+v", fs.shipmentFilter)
 	}
 	for query, field := range map[string]string{"status=LOST": "status", "warehouseId=x": "warehouseId", "limit=0": "limit", "limit=501": "limit"} {
-		rec := do(t, h, http.MethodGet, "/api/v1/fulfillment/shipments?"+query, "", nil)
+		rec := do(t, h, http.MethodGet, "/v1/fulfillment/shipments?"+query, "", nil)
 		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"`+field+`"`) {
 			t.Fatalf("%s: status = %d body = %s, want 400 naming %s", query, rec.Code, rec.Body.String(), field)
 		}
@@ -375,19 +375,19 @@ func TestPackingSlips_ListAndGet(t *testing.T) {
 	fs := &fakeStore{}
 	h := newServer(t, fs)
 	sh := ids.New()
-	rec := do(t, h, http.MethodGet, "/api/v1/fulfillment/packing-slips?shipmentId="+sh, "", nil)
+	rec := do(t, h, http.MethodGet, "/v1/fulfillment/packing-slips?shipmentId="+sh, "", nil)
 	if rec.Code != http.StatusOK || rec.Body.String() != "{\"items\":[]}\n" {
 		t.Fatalf("status = %d body = %q, want an empty items list", rec.Code, rec.Body.String())
 	}
 	if fs.slipFilter.ShipmentID != sh || fs.slipFilter.Limit != 100 {
 		t.Fatalf("filter = %+v", fs.slipFilter)
 	}
-	rec = do(t, h, http.MethodGet, "/api/v1/fulfillment/packing-slips/"+ids.New(), "", nil)
+	rec = do(t, h, http.MethodGet, "/v1/fulfillment/packing-slips/"+ids.New(), "", nil)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"journal":[{"account":"1405","amount":"125","currency":"USD"`) {
 		t.Fatalf("status = %d body = %s, want the flat journal shape", rec.Code, rec.Body.String())
 	}
 	h = newServer(t, &fakeStore{notFound: true})
-	rec = do(t, h, http.MethodGet, "/api/v1/fulfillment/packing-slips/"+ids.New(), "", nil)
+	rec = do(t, h, http.MethodGet, "/v1/fulfillment/packing-slips/"+ids.New(), "", nil)
 	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), store.CodeSlipNotFound) {
 		t.Fatalf("status = %d body = %s, want 404 %s", rec.Code, rec.Body.String(), store.CodeSlipNotFound)
 	}

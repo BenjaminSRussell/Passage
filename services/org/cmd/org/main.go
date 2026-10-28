@@ -10,10 +10,14 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/org/internal/api"
 	"github.com/BenjaminSRussell/passage/services/org/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/org/internal/seed"
 	"github.com/BenjaminSRussell/passage/services/org/internal/store"
 	"github.com/BenjaminSRussell/passage/services/org/migrations"
 )
@@ -51,20 +55,37 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err != nil {
 		return err
 	}
+	validator, err := addressValidator(getenv("ORG_ADDRESS_VALIDATOR"))
+	if err != nil {
+		return err
+	}
+	seedPackage, seedTenant := getenv("ORG_SEED_PACKAGE"), getenv("ORG_SEED_TENANT_ID")
+	if seedPackage != "" && seedPackage != seed.DemoManufacturer {
+		return fmt.Errorf("ORG_SEED_PACKAGE must be %q, got %q", seed.DemoManufacturer, seedPackage)
+	}
+	if seedPackage != "" && !ids.Valid(seedTenant) {
+		return errors.New("ORG_SEED_TENANT_ID must be a UUID when ORG_SEED_PACKAGE is set")
+	}
 	pool, err := dbx.Connect(ctx, databaseURL)
 	if err != nil {
 		return fmt.Errorf("connect database: %w", err)
 	}
 	defer pool.Close()
 	if getenv("MIGRATE_ON_START") == "true" {
-		if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
-			return fmt.Errorf("migrate: %w", err)
-		}
-		if err := store.SeedReference(ctx, pool, migrations.Reference); err != nil {
-			return fmt.Errorf("seed reference data: %w", err)
+		if err := migrateAndSeed(ctx, pool, getenv("MIGRATE_DATABASE_URL")); err != nil {
+			return err
 		}
 	}
-	a := api.New(store.New(pool).WithTreeLimits(limits))
+	st := store.New(pool).WithTreeLimits(limits)
+	if seedPackage != "" {
+		result, err := seed.Run(ctx, st, seedTenant, seedPackage)
+		if err != nil {
+			return fmt.Errorf("seed %s: %w", seedPackage, err)
+		}
+		slog.Info("seed package applied", "package", seedPackage, "tenantId", seedTenant, "created", result.Created, "present", result.Present)
+	}
+	a := api.New(st)
+	a.SetAddressValidator(validator)
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
@@ -76,6 +97,34 @@ func run(ctx context.Context, getenv func(string) string) error {
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), router) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()
 	return <-errs
+}
+
+func migrateAndSeed(ctx context.Context, servePool *pgxpool.Pool, ownerURL string) error {
+	pool := servePool
+	if ownerURL != "" {
+		var err error
+		if pool, err = dbx.Connect(ctx, ownerURL); err != nil {
+			return fmt.Errorf("connect migration database: %w", err)
+		}
+		defer pool.Close()
+	}
+	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+		return fmt.Errorf("migrate: %w", err)
+	}
+	if err := store.SeedReference(ctx, pool, migrations.Reference); err != nil {
+		return fmt.Errorf("seed reference data: %w", err)
+	}
+	return nil
+}
+
+func addressValidator(name string) (domain.AddressValidator, error) {
+	switch name {
+	case "", "null":
+		return domain.NullAddressValidator{}, nil
+	case "rules":
+		return domain.RuleAddressValidator{}, nil
+	}
+	return nil, fmt.Errorf("ORG_ADDRESS_VALIDATOR must be null or rules, got %q", name)
 }
 
 func addr(getenv func(string) string, key, fallback string) string {

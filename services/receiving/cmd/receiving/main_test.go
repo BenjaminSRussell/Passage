@@ -8,8 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/ledger"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/periods"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/purchasing"
 )
 
 func TestRun(t *testing.T) {
@@ -104,8 +106,9 @@ func TestBuildPorts(t *testing.T) {
 		env     map[string]string
 		wantErr string
 	}{
-		{"both urls and accounts", withAccounts(map[string]string{"LEDGER_URL": "http://ledger", "CLOSE_URL": "http://close"}), ""},
-		{"both urls without accounts", map[string]string{"LEDGER_URL": "http://ledger", "CLOSE_URL": "http://close"}, "POSTING_LEDGER_ID is required"},
+		{"both urls and accounts", withAccounts(map[string]string{"LEDGER_URL": "http://ledger", "CLOSE_URL": "http://close", "PURCHASING_URL": "http://purchasing"}), ""},
+		{"purchasing url empty without the flag", withAccounts(map[string]string{"LEDGER_URL": "http://ledger", "CLOSE_URL": "http://close"}), "PURCHASING_URL is required"},
+		{"both urls without accounts", map[string]string{"LEDGER_URL": "http://ledger", "CLOSE_URL": "http://close", "PURCHASING_URL": "http://purchasing"}, "POSTING_LEDGER_ID is required"},
 		{"fakes allowed with both urls empty", map[string]string{"PASSAGE_ALLOW_FAKES": "1"}, ""},
 		{"empty urls without the flag", map[string]string{}, "LEDGER_URL is required"},
 		{"flag must be exactly 1", map[string]string{"PASSAGE_ALLOW_FAKES": "true"}, "LEDGER_URL is required"},
@@ -130,7 +133,7 @@ func TestBuildPorts(t *testing.T) {
 
 func TestBuildPortsUsesRealAdaptersWhenConfigured(t *testing.T) {
 	ports, err := buildPorts(func(k string) string {
-		return map[string]string{"LEDGER_URL": "http://l", "CLOSE_URL": "http://c", "PASSAGE_ALLOW_FAKES": "1"}[k]
+		return map[string]string{"LEDGER_URL": "http://l", "CLOSE_URL": "http://c", "PURCHASING_URL": "http://p", "PASSAGE_ALLOW_FAKES": "1"}[k]
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -140,6 +143,16 @@ func TestBuildPortsUsesRealAdaptersWhenConfigured(t *testing.T) {
 	}
 	if _, real := ports.Periods.(*periods.Client); !real {
 		t.Fatalf("periods is %T despite CLOSE_URL", ports.Periods)
+	}
+	fakes, err := buildPorts(func(k string) string { return map[string]string{"PASSAGE_ALLOW_FAKES": "1"}[k] })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, fake := fakes.PurchaseOrders.(domain.FakePurchaseOrders); !fake {
+		t.Fatalf("purchase orders is %T with an empty PURCHASING_URL and fakes allowed", fakes.PurchaseOrders)
+	}
+	if _, real := ports.PurchaseOrders.(*purchasing.Client); !real {
+		t.Fatalf("purchase orders is %T despite PURCHASING_URL", ports.PurchaseOrders)
 	}
 }
 

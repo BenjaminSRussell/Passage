@@ -30,7 +30,21 @@ npm ci
 npm run dev        # http://localhost:5173
 ```
 
-The shell, navigation and screens render. Calls to `/api/*` are proxied to `localhost:8080`, but data screens will show errors even with a service running there: the browser doesn't send the identity headers that services require until the gateway lands (see step 2).
+The shell, navigation and screens render. API convention: the browser calls `/api/v1/<svc>/...`, services serve `/v1/<svc>/...`, and the edge strips `/api`. In dev the Vite proxy ([src/shell/devProxy.ts](apps/web/src/shell/devProxy.ts)) does that: it forwards `/api/v1/<svc>/...` to `http://localhost:8080/v1/<svc>/...` and adds the identity headers the gateway would set.
+
+Every service listens on :8080 by default, so run one at a time or give each its own `HTTP_ADDR` and point the proxy at it with `PASSAGE_SVC_<NAME>_URL` (`<NAME>` is the path segment upper-cased, `-` as `_`; `PASSAGE_SVC_DEFAULT_URL` replaces the :8080 fallback). Set these in the shell or in `apps/web/.env.local`:
+
+```sh
+PASSAGE_SVC_LEDGER_URL=http://localhost:8081   # ledger started with HTTP_ADDR=:8081
+PASSAGE_DEV_TENANT=00000000-0000-0000-0000-000000000001
+PASSAGE_DEV_LEGAL_ENTITY=00000000-0000-0000-0000-0000000000e1
+PASSAGE_DEV_USER=dev
+PASSAGE_DEV_DUTIES=ledger.journal.read,ledger.journal.post   # comma-separated; each service lists its duties in internal/api/api.go
+```
+
+`PASSAGE_DEV_DUTIES` defaults to empty, so any duty-guarded call returns 403 until you set the duties the service checks.
+
+The gateway ([#82](https://github.com/BenjaminSRussell/Passage/issues/82)) is expected to do the same: its HTTPRoutes match `/api/v1/<svc>` and rewrite to `/v1/<svc>` (strip `/api`), and set the `X-Passage-*` headers from the verified token.
 
 ### 2. One backend service
 
@@ -53,7 +67,7 @@ curl localhost:9090/readyz
 curl -H 'X-Passage-Tenant: 00000000-0000-0000-0000-000000000001' \
      -H 'X-Passage-User: dev' \
      -H 'X-Passage-Duties: ledger.journal.read' \
-     localhost:8080/api/v1/ledger/ledgers/00000000-0000-0000-0000-0000000000aa
+     localhost:8080/v1/ledger/ledgers/00000000-0000-0000-0000-0000000000aa
 # → 404 "ledger not found": the service, database and auth are working
 ```
 

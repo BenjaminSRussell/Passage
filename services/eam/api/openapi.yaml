@@ -22,14 +22,14 @@ paths:
       responses:
         "200": { description: ready }
         "503": { $ref: "#/components/responses/Problem" }
-  /api/v1/eam/workspace:
+  /v1/eam/workspace:
     get:
       operationId: getWorkspace
       description: Asset management workspace tiles (8.44.6), counted at request time.
       x-passage-duty: EamInquire
       responses:
         "200": { description: tiles, content: { application/json: { schema: { $ref: "#/components/schemas/Workspace" } } } }
-  /api/v1/eam/assets:
+  /v1/eam/assets:
     get:
       operationId: listAssets
       x-passage-duty: EamInquire
@@ -51,7 +51,7 @@ paths:
         "201": { description: created, content: { application/json: { schema: { $ref: "#/components/schemas/Asset" } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
-  /api/v1/eam/assets/{id}:
+  /v1/eam/assets/{id}:
     get:
       operationId: getAsset
       x-passage-duty: EamInquire
@@ -59,7 +59,7 @@ paths:
       responses:
         "200": { description: asset, content: { application/json: { schema: { $ref: "#/components/schemas/AssetDetail" } } } }
         "404": { $ref: "#/components/responses/Problem" }
-  /api/v1/eam/assets/{id}/activate:
+  /v1/eam/assets/{id}/activate:
     post:
       operationId: activateAsset
       x-passage-duty: EamAssetMaintain
@@ -69,7 +69,7 @@ paths:
         "412": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
-  /api/v1/eam/assets/{id}/counters:
+  /v1/eam/assets/{id}/counters:
     post:
       operationId: createCounter
       x-passage-duty: EamAssetMaintain
@@ -81,7 +81,7 @@ paths:
         "201": { description: created, content: { application/json: { schema: { $ref: "#/components/schemas/Counter" } } } }
         "404": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
-  /api/v1/eam/assets/{id}/lifecycle:
+  /v1/eam/assets/{id}/lifecycle:
     post:
       operationId: changeAssetLifecycle
       description: >-
@@ -98,7 +98,7 @@ paths:
         "412": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
-  /api/v1/eam/assets/{id}/criticality:
+  /v1/eam/assets/{id}/criticality:
     get:
       operationId: listCriticalityAssessments
       description: The asset's criticality assessments, newest version first.
@@ -126,7 +126,7 @@ paths:
         "201": { description: recorded (or replayed for a repeated Idempotency-Key), content: { application/json: { schema: { $ref: "#/components/schemas/CriticalityAssessment" } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
-  /api/v1/eam/assets/{id}/warranties:
+  /v1/eam/assets/{id}/warranties:
     get:
       operationId: listWarranties
       x-passage-duty: EamInquire
@@ -152,7 +152,7 @@ paths:
         "201": { description: recorded (or replayed for a repeated Idempotency-Key), content: { application/json: { schema: { $ref: "#/components/schemas/Warranty" } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
-  /api/v1/eam/fault-catalogs:
+  /v1/eam/fault-catalogs:
     get:
       operationId: listFaultCatalogs
       description: Every asset type that has a fault catalog, by type.
@@ -163,7 +163,7 @@ paths:
           content:
             application/json:
               schema: { type: object, properties: { items: { type: array, items: { $ref: "#/components/schemas/FaultCatalogSummary" } } } }
-  /api/v1/eam/fault-catalogs/{assetType}:
+  /v1/eam/fault-catalogs/{assetType}:
     get:
       operationId: getFaultCatalog
       x-passage-duty: EamInquire
@@ -193,7 +193,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
         "412": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
-  /api/v1/eam/counters/{id}/rules:
+  /v1/eam/counters/{id}/rules:
     post:
       operationId: createRule
       x-passage-duty: EamAssetMaintain
@@ -205,7 +205,7 @@ paths:
         "201": { description: created (or replayed for a repeated Idempotency-Key), content: { application/json: { schema: { $ref: "#/components/schemas/Rule" } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
-  /api/v1/eam/counters/{id}/readings:
+  /v1/eam/counters/{id}/readings:
     get:
       operationId: listReadings
       description: The counter's latest readings, newest first (8.44.14 Measurement documents).
@@ -233,7 +233,7 @@ paths:
         "200": { description: replayed, content: { application/json: { schema: { $ref: "#/components/schemas/Reading" } } } }
         "201": { description: recorded, content: { application/json: { schema: { $ref: "#/components/schemas/Reading" } } } }
         "422": { $ref: "#/components/responses/Problem" }
-  /api/v1/eam/plans:
+  /v1/eam/plans:
     get:
       operationId: listPlans
       x-passage-duty: EamInquire
@@ -255,14 +255,14 @@ paths:
         "201": { description: created, content: { application/json: { schema: { $ref: "#/components/schemas/Plan" } } } }
         "409": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
-  /api/v1/eam/plans/schedule:
+  /v1/eam/plans/schedule:
     post:
       operationId: schedulePlans
       description: Nightly sweep over every active plan line. Idempotent by construction (one open work order per line).
       x-passage-duty: EamPlanAdmin
       responses:
         "200": { description: run, content: { application/json: { schema: { $ref: "#/components/schemas/ScheduleResult" } } } }
-  /api/v1/eam/requests:
+  /v1/eam/requests:
     get:
       operationId: listRequests
       x-passage-duty: EamInquire
@@ -284,7 +284,7 @@ paths:
       responses:
         "201": { description: created, content: { application/json: { schema: { $ref: "#/components/schemas/Request" } } } }
         "400": { $ref: "#/components/responses/Problem" }
-  /api/v1/eam/requests/{id}/convert:
+  /v1/eam/requests/{id}/convert:
     post:
       operationId: convertRequest
       x-passage-duty: EamPlanner
@@ -294,7 +294,7 @@ paths:
       responses:
         "201": { description: work order, content: { application/json: { schema: { $ref: "#/components/schemas/WorkOrder" } } } }
         "422": { $ref: "#/components/responses/Problem" }
-  /api/v1/eam/requests/{id}/triage:
+  /v1/eam/requests/{id}/triage:
     post:
       operationId: triageRequest
       description: >-
@@ -311,7 +311,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
-  /api/v1/eam/work-orders:
+  /v1/eam/work-orders:
     get:
       operationId: listWorkOrders
       x-passage-duty: EamInquire
@@ -337,7 +337,7 @@ paths:
       responses:
         "201": { description: created, content: { application/json: { schema: { $ref: "#/components/schemas/WorkOrder" } } } }
         "422": { $ref: "#/components/responses/Problem" }
-  /api/v1/eam/work-orders/{id}:
+  /v1/eam/work-orders/{id}:
     get:
       operationId: getWorkOrder
       x-passage-duty: EamInquire
@@ -345,7 +345,7 @@ paths:
       responses:
         "200": { description: work order, content: { application/json: { schema: { $ref: "#/components/schemas/WorkOrderDetail" } } } }
         "404": { $ref: "#/components/responses/Problem" }
-  /api/v1/eam/work-orders/{id}/status:
+  /v1/eam/work-orders/{id}/status:
     post:
       operationId: transitionWorkOrder
       description: >-
@@ -363,7 +363,7 @@ paths:
         "412": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
-  /api/v1/eam/work-orders/{id}/labor:
+  /v1/eam/work-orders/{id}/labor:
     post:
       operationId: recordLabor
       x-passage-duty: EamTechnician
@@ -374,7 +374,7 @@ paths:
       responses:
         "201": { description: booked, content: { application/json: { schema: { $ref: "#/components/schemas/WorkOrder" } } } }
         "422": { $ref: "#/components/responses/Problem" }
-  /api/v1/eam/work-orders/{id}/faults:
+  /v1/eam/work-orders/{id}/faults:
     post:
       operationId: registerFault
       description: >-
@@ -390,7 +390,7 @@ paths:
         "201": { description: registered, content: { application/json: { schema: { $ref: "#/components/schemas/WorkOrderDetail" } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
-  /api/v1/eam/work-orders/{id}/downtime:
+  /v1/eam/work-orders/{id}/downtime:
     post:
       operationId: recordDowntime
       description: >-
@@ -407,7 +407,7 @@ paths:
         "201": { description: recorded, content: { application/json: { schema: { $ref: "#/components/schemas/WorkOrderDetail" } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
-  /api/v1/eam/kpis:
+  /v1/eam/kpis:
     get:
       operationId: getKpis
       x-passage-duty: EamInquire

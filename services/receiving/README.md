@@ -18,11 +18,12 @@ Store tests run only when `PASSAGE_TEST_DATABASE_URL` is set, against a role wit
 |---|---|
 | `DATABASE_URL` | required; Postgres URL, from a Secret in the cluster |
 | `MIGRATE_ON_START` | `true` applies embedded migrations at start (dev only) |
-| `LEDGER_URL` | base URL of the ledger service (`POST /v1/ledger/journal-entries:post`, 3 s timeout); required |
+| `LEDGER_URL` | base URL of the ledger service (`POST /v1/ledger/journal-entries`, 3 s timeout); required |
 | `CLOSE_URL` | base URL of `services/close` (`POST /v1/close/period-statuses:check`, 2 s timeout, source system `ap`); required |
+| `PURCHASING_URL` | base URL of `services/purchasing` (`GET /v1/procurement/purchase-orders/{id}`, 2 s timeout); the caller's own tenant, legal entity, user and duties are forwarded, so the caller needs `PurchaseOrderInquire`; required |
 | `POSTING_LEDGER_ID` | UUID of the ledger that receipt journals post to (`ledgerId` in the ledger's entry request); invoices carry their own `ledgerId`; required |
 | `POSTING_ACCOUNT_INVENTORY`, `POSTING_ACCOUNT_GRIR`, `POSTING_ACCOUNT_PPV`, `POSTING_ACCOUNT_VENDOR_CONTROL` | ledger account codes for receipt and invoice journals (posting profile); all four required |
-| `PASSAGE_ALLOW_FAKES` | `1` lets an empty `LEDGER_URL`, `CLOSE_URL` or posting account fall back to the in-memory fakes with a warning log; local development only, any other value fails start-up |
+| `PASSAGE_ALLOW_FAKES` | `1` lets an empty `LEDGER_URL`, `CLOSE_URL`, `PURCHASING_URL` or posting account fall back to the in-memory fakes with a warning log; local development only, any other value fails start-up |
 | `HTTP_ADDR` | default `:8080` |
 | `ADMIN_ADDR` | default `:9090`, serves `/metrics` only |
 
@@ -73,7 +74,9 @@ Every POST except the tester requires `Idempotency-Key`; replays carry `Idempote
 | AP-DUP-001 | 409 | invoice number already posted for the vendor (case-insensitive) |
 | RCV-COR-001 | 409 | correction would take a line below its invoiced quantity |
 | RCV-IDM-001 | 409 | an earlier ledger posting for the receipt or invoice is unfinished (the ledger accepted it, the local commit did not) or differs; repeat the original request first |
-| RCV-NF-001 / RCV-NF-002 / RCV-NF-003 | 404 | receipt not found / receipt line has no open GR/IR item / pending posting not found |
+| RCV-NF-001 / RCV-NF-002 / RCV-NF-003 / RCV-NF-004 | 404 | receipt not found / receipt line has no open GR/IR item / pending posting not found / purchase order not found |
+| RCV-PO-001 | 422 | evaluate: purchase order is not APPROVED or CONFIRMED |
+| RCV-PO-002 | 422 | evaluate: purchase order line is cancelled |
 | RCV-LDG-001 | 422 | the ledger refused the reversal made by a resolve; not retryable |
 | COM-0503 | 503 | the ledger could not be reached while resolving a pending posting |
 | COM-0412 | 412 | `If-Match` differs from the receipt version |
@@ -87,7 +90,7 @@ A row stays open when the ledger call ended in an unknown outcome (timeout, tran
 
 When the original request cannot be repeated (the client is gone, the data changed):
 1. `GET /v1/receiving/pending-postings` (duty `ReceivingAdmin`) lists open rows, oldest first.
-2. `POST /v1/receiving/pending-postings/{key}/resolve` (duty `ReceivingAdmin`, `Idempotency-Key` required) re-sends the stored journal under its key. If the ledger returns an entry id it is reversed through `POST /api/v1/ledger/journal-entries/{id}/reverse` and the row becomes `REVERSED`, which frees the receipt and invoice; a definite rejection makes it `REJECTED`. Resolve first claims the row (`claimed_at`), so a second resolve gets 409 `RCV-IDM-001`, and the original command's commit then fails with 409 `RCV-IDM-001` instead of recording a posting that was reversed. A row younger than the ledger timeout plus the request timeout (33 s) is refused with 409 `RCV-IDM-001` because its command may still be running. A reversal into a closed period answers 422 `PER-AP-001`, any other ledger refusal 422 `RCV-LDG-001` (the reversal is dated like the original posting and carries no reason code, so a ledger that requires one refuses it). It answers 503 `COM-0503` when the ledger cannot be reached or the reversal failed; the claim is released, so call it again. A claim is a lease of 2 x ledger timeout + request timeout (36 s): a resolve process that dies mid-way leaves the row claimed only until the lease ends, after which the next resolve takes it over. Releasing and finishing run detached from the client connection, so a disconnect cannot strand a claim.
+2. `POST /v1/receiving/pending-postings/{key}/resolve` (duty `ReceivingAdmin`, `Idempotency-Key` required) re-sends the stored journal under its key. If the ledger returns an entry id it is reversed through `POST /v1/ledger/journal-entries/{id}/reverse` and the row becomes `REVERSED`, which frees the receipt and invoice; a definite rejection makes it `REJECTED`. Resolve first claims the row (`claimed_at`), so a second resolve gets 409 `RCV-IDM-001`, and the original command's commit then fails with 409 `RCV-IDM-001` instead of recording a posting that was reversed. A row younger than the ledger timeout plus the request timeout (33 s) is refused with 409 `RCV-IDM-001` because its command may still be running. A reversal into a closed period answers 422 `PER-AP-001`, any other ledger refusal 422 `RCV-LDG-001` (the reversal is dated like the original posting and carries no reason code, so a ledger that requires one refuses it). It answers 503 `COM-0503` when the ledger cannot be reached or the reversal failed; the claim is released, so call it again. A claim is a lease of 2 x ledger timeout + request timeout (36 s): a resolve process that dies mid-way leaves the row claimed only until the lease ends, after which the next resolve takes it over. Releasing and finishing run detached from the client connection, so a disconnect cannot strand a claim.
 3. The user repeats the command. Its ledger key carries a generation suffix (`:r1`, `:r2`) so it does not replay the reversed entry.
 
 `ReceivingAdmin` is not in `policies/authz/data.json` yet. Alerting: the gauge `receiving_pending_postings_oldest_age_seconds` (and `receiving_pending_postings_open`) is kept per process, so it is lost on restart and each replica only sees the postings it started. With `replicas` above 1 the gauge needs a DB-derived source (the gauge handler has no tenant context, and the application role sees one tenant at a time, so it cannot be built from `ListPending`); until then rely on the query below. The `ReceivingPendingPostingStuck` PrometheusRule fires above 900 s. After a crash use the database as the source of truth:
