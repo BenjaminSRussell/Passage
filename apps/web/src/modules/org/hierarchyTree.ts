@@ -1,4 +1,4 @@
-import type { HierarchyComparison, HierarchyNode, HierarchyNodeKind, HierarchyVersionSummary } from "./api/hierarchy";
+import type { HierarchyChange, HierarchyComparison, HierarchyNode, HierarchyNodeKind, HierarchyVersionSummary } from "./api/hierarchy";
 
 export interface TreeNode {
   node: HierarchyNode;
@@ -23,7 +23,7 @@ export function buildTree(nodes: readonly HierarchyNode[]): TreeNode[] {
 
 export const todayIso = () => new Date().toISOString().slice(0, 10);
 
-const ISO_DATE =/^(\d{4})-(\d{2})-(\d{2})$/;
+const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 export function dateFromDayNumber(days: number): string {
   const z = days + 719468;
@@ -186,19 +186,72 @@ export function addNode(nodes: readonly HierarchyNode[], orgUnitId: string, kind
   if (!parentValid || nodes.some((node) => node.orgUnitId === orgUnitId)) {
     return null;
   }
-  return [...nodes, { orgUnitId, kind, parentOrgUnitId: parentId, sortOrder: siblingIds(nodes, parentId).length }];
+  const last = Math.max(-1, ...nodes.filter((node) => node.parentOrgUnitId === parentId).map((node) => node.sortOrder));
+  return normalizeOrder([...nodes, { orgUnitId, kind, parentOrgUnitId: parentId, sortOrder: last + 1 }]);
+}
+
+export function removeNode(nodes: readonly HierarchyNode[], id: string): HierarchyNode[] | null {
+  const removing = nodes.find((node) => node.orgUnitId === id);
+  if (!removing || removing.parentOrgUnitId === null) {
+    return null;
+  }
+  const parentId = removing.parentOrgUnitId;
+  const adopted = siblingIds(nodes, id);
+  const lineup = siblingIds(nodes, parentId).flatMap((sibling) => (sibling === id ? adopted : [sibling]));
+  const place = new Map(lineup.map((sibling, position) => [sibling, position]));
+  return normalizeOrder(
+    nodes
+      .filter((node) => node.orgUnitId !== id)
+      .map((node) => ({
+        ...node,
+        parentOrgUnitId: node.parentOrgUnitId === id ? parentId : node.parentOrgUnitId,
+        sortOrder: place.get(node.orgUnitId) ?? node.sortOrder,
+      })),
+  );
+}
+
+export function treeSignature(nodes: readonly HierarchyNode[]): string {
+  const parts: string[] = [];
+  const walk = (level: TreeNode[]) => {
+    for (const { node, children } of level) {
+      parts.push(`${node.parentOrgUnitId ?? ""}>${node.orgUnitId}`);
+      walk(children);
+    }
+  };
+  walk(buildTree(nodes));
+  return parts.join("|");
+}
+
+export function diffNodes(before: readonly HierarchyNode[], after: readonly HierarchyNode[]): { changes: Map<string, NodeChange>; removed: HierarchyChange[] } {
+  const was = new Map(before.map((node) => [node.orgUnitId, node]));
+  const changes = new Map<string, NodeChange>();
+  for (const node of after) {
+    const old = was.get(node.orgUnitId);
+    if (!old) {
+      changes.set(node.orgUnitId, { kind: "added" });
+    } else if (old.parentOrgUnitId !== node.parentOrgUnitId) {
+      changes.set(node.orgUnitId, { kind: "moved", oldParentOrgUnitId: old.parentOrgUnitId });
+    }
+  }
+  const now = new Set(after.map((node) => node.orgUnitId));
+  const removed = before
+    .filter((node) => !now.has(node.orgUnitId))
+    .map(({ orgUnitId, kind, parentOrgUnitId }) => ({ orgUnitId, kind, parentOrgUnitId }));
+  return { changes, removed };
 }
 
 export function replaceNode(nodes: readonly HierarchyNode[], oldId: string, newId: string, kind: HierarchyNodeKind): HierarchyNode[] | null {
   if (!nodes.some((node) => node.orgUnitId === oldId) || nodes.some((node) => node.orgUnitId === newId)) {
     return null;
   }
-  return nodes.map((node) => ({
-    ...node,
-    orgUnitId: node.orgUnitId === oldId ? newId : node.orgUnitId,
-    kind: node.orgUnitId === oldId ? kind : node.kind,
-    parentOrgUnitId: node.parentOrgUnitId === oldId ? newId : node.parentOrgUnitId,
-  }));
+  return normalizeOrder(
+    nodes.map((node) => ({
+      ...node,
+      orgUnitId: node.orgUnitId === oldId ? newId : node.orgUnitId,
+      kind: node.orgUnitId === oldId ? kind : node.kind,
+      parentOrgUnitId: node.parentOrgUnitId === oldId ? newId : node.parentOrgUnitId,
+    })),
+  );
 }
 
 const csvCell = (value: string) => {

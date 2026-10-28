@@ -1,8 +1,10 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { createElement } from "react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { vi } from "vitest";
-import org from "./module";
+import { HierarchyDesignerPage } from "./HierarchyDesignerPage";
+import { OrgLayout } from "./pages";
 
 export const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 
@@ -68,10 +70,15 @@ export const defaultRoutes: Record<string, Reply> = {
   "GET /hierarchy-versions/v3": () => json({ ...versionList[0], version: 7, nodes: draftNodes }),
 };
 
-export function renderPage(overrides: Record<string, Reply> = {}) {
+export const allDuties = ["org.read", "org.hierarchy.write", "org.hierarchy.publish", "org.hierarchy.backdate"];
+
+export function renderPage(overrides: Record<string, Reply> = {}, duties: string[] = allDuties) {
   const fetchMock = serve({ ...defaultRoutes, ...overrides });
-  const router = createMemoryRouter(org.routes, { initialEntries: ["/org/hierarchy"] });
-  return { fetchMock, user: userEvent.setup(), ...render(<RouterProvider router={router} />) };
+  const router = createMemoryRouter(
+    [{ element: createElement(OrgLayout, { duties }), children: [{ path: "/org/hierarchy", element: createElement(HierarchyDesignerPage) }, { path: "/org", element: <p>Org home</p> }] }],
+    { initialEntries: ["/org/hierarchy"] },
+  );
+  return { fetchMock, router, user: userEvent.setup(), ...render(<RouterProvider router={router} />) };
 }
 
 export async function openType(user: ReturnType<typeof userEvent.setup>) {

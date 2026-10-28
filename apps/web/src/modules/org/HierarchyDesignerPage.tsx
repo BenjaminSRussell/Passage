@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Badge, Button, DataTable, EmptyState, FormField, Input, PageHeader, Select, Skeleton, StatusPill, type DataTableColumn } from "../../shell/ui";
+import { useBlocker } from "react-router-dom";
+import { Alert, Badge, Button, ConfirmDialog, DataTable, EmptyState, FormField, Input, PageHeader, Select, Skeleton, StatusPill, type DataTableColumn } from "../../shell/ui";
 import { ALL, describeProblem, listOperatingUnits, type Problem } from "./api/client";
 import {
   compareHierarchyVersions,
@@ -10,7 +11,7 @@ import {
   type HierarchyVersionSummary,
 } from "./api/hierarchy";
 import { HierarchyDraftEditor, ProblemAlert, type Candidate } from "./HierarchyDraftEditor";
-import { HierarchyTreeView, type Label } from "./HierarchyTreeView";
+import { HierarchyTreeView, RemovedSection, type Label } from "./HierarchyTreeView";
 import { useLegalEntity } from "./legalEntityContext";
 import {
   buildTree,
@@ -35,7 +36,7 @@ interface LoadState<T> {
 
 const idle: LoadState<never> = { key: "", data: null, loading: false, error: null };
 
-function useLoad<T>(key: string, load: (signal: AbortSignal) => Promise<T>): LoadState<T> {
+function useLoad<T>(key: string, load: (signal: AbortSignal) => Promise<T>, refresh = 0): LoadState<T> {
   const [state, setState] = useState<LoadState<T>>(idle);
   const loader = useRef(load);
   loader.current = load;
@@ -44,7 +45,7 @@ function useLoad<T>(key: string, load: (signal: AbortSignal) => Promise<T>): Loa
       return;
     }
     const controller = new AbortController();
-    setState({ key, data: null, loading: true, error: null });
+    setState((previous) => (previous.key === key ? { ...previous, loading: true, error: null } : { key, data: null, loading: true, error: null }));
     loader.current(controller.signal).then(
       (data) => {
         if (!controller.signal.aborted) {
@@ -58,7 +59,7 @@ function useLoad<T>(key: string, load: (signal: AbortSignal) => Promise<T>): Loa
       },
     );
     return () => controller.abort();
-  }, [key]);
+  }, [key, refresh]);
   if (key === "") {
     return idle;
   }
@@ -69,16 +70,22 @@ const rangeText = (version: HierarchyVersionSummary) =>
   version.effectiveFrom === null ? "Not yet effective" : `${version.effectiveFrom} to ${version.effectiveTo ?? "open"}`;
 
 function downloadCsv(filename: string, csv: string) {
-  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const url = URL.createObjectURL(new Blob(["﻿", csv], { type: "text/csv;charset=utf-8" }));
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;
+  document.body.appendChild(link);
   link.click();
-  URL.revokeObjectURL(url);
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 export function HierarchyDesignerPage() {
-  const { entities } = useLegalEntity();
+  const { entities, canWriteHierarchy, canPublishHierarchy, canBackdateHierarchy } = useLegalEntity();
+  const [dirty, setDirty] = useState(false);
+  const [pending, setPending] = useState<(() => void) | null>(null);
+  const noticeRef = useRef<HTMLDivElement>(null);
+  const blocker = useBlocker(dirty);
   const [typeId, setTypeId] = useState("");
   const [chosenDate, setChosenDate] = useState<string | null>(null);
   const [showDraft, setShowDraft] = useState(false);
@@ -90,7 +97,7 @@ export function HierarchyDesignerPage() {
 
   const types = useLoad("types", (signal) => listHierarchyTypes({}, { signal }));
   const units = useLoad("units", (signal) => listOperatingUnits(ALL, { signal }));
-  const versionsLoad = useLoad(typeId === "" ? "" : `${typeId}#${refresh}`, (signal) => listHierarchyVersions(typeId, undefined, { signal }));
+  const versionsLoad = useLoad(typeId, (signal) => listHierarchyVersions(typeId, undefined, { signal }), refresh);
   const versions = versionsLoad.data ?? [];
 
   const labels = useMemo(() => {
@@ -120,10 +127,14 @@ export function HierarchyDesignerPage() {
   const displayed = showDraft && draft ? draft : versionAsOf(versions, asOf);
   const previous = displayed ? previousVersion(versions, displayed) : undefined;
 
-  const detail = useLoad(displayed ? `${displayed.id}#${refresh}` : "", (signal) => getHierarchyVersion(displayed?.id ?? "", { signal }));
-  const comparison = useLoad(displayed && previous ? `${typeId}:${previous.versionNo}:${displayed.versionNo}#${refresh}` : "", (signal) =>
-    compareHierarchyVersions(typeId, previous?.versionNo ?? 0, displayed?.versionNo ?? 0, { signal }),
+  const editable = canWriteHierarchy && displayed?.status === "draft";
+  const detail = useLoad(displayed ? displayed.id : "", (signal) => getHierarchyVersion(displayed?.id ?? "", { signal }), refresh);
+  const comparison = useLoad(
+    displayed && previous ? `${typeId}:${previous.versionNo}:${displayed.versionNo}` : "",
+    (signal) => compareHierarchyVersions(typeId, previous?.versionNo ?? 0, displayed?.versionNo ?? 0, { signal }),
+    refresh,
   );
+  const previousDetail = useLoad(editable && previous ? previous.id : "", (signal) => getHierarchyVersion(previous?.id ?? "", { signal }));
   const changes = useMemo(() => (comparison.data ? changeMap(comparison.data) : new Map<string, NodeChange>()), [comparison.data]);
   const removed = comparison.data?.removed ?? [];
 
@@ -131,29 +142,67 @@ export function HierarchyDesignerPage() {
   const range = sliderRange(versions, dayNumber(asOf) === null ? todayIso() : asOf);
   const rangeStart = dayNumber(range.min) ?? 0;
   const sliderValue = Math.min(Math.max((dayNumber(asOf) ?? rangeStart) - rangeStart, 0), (dayNumber(range.max) ?? rangeStart) - rangeStart);
-  const nameOf = (id: string | null) => (id === null ? "no parent (root)" : (labels.get(id)?.name ?? id));
 
-  const pickType = (id: string) => {
-    setTypeId(id);
-    setChosenDate(null);
-    setShowDraft(false);
-    setNotice("");
-    setCreateFailure(null);
+  const guard = (action: () => void) => (dirty ? setPending(() => action) : action());
+  const confirmLeave = () => {
+    if (blocker.state === "blocked") {
+      blocker.proceed();
+    } else {
+      pending?.();
+      setPending(null);
+    }
   };
+  const keepEditing = () => {
+    if (blocker.state === "blocked") {
+      blocker.reset();
+    }
+    setPending(null);
+  };
+
+  useEffect(() => {
+    if (!dirty) {
+      return;
+    }
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
+  useEffect(() => {
+    if (notice !== "") {
+      noticeRef.current?.focus();
+    }
+  }, [notice]);
+
+  const pickType = (id: string) =>
+    guard(() => {
+      setTypeId(id);
+      setChosenDate(null);
+      setShowDraft(false);
+      setNotice("");
+      setCreateFailure(null);
+    });
   const pickDate = (value: string) => {
     if (dayNumber(value) !== null) {
-      setChosenDate(value);
-      setShowDraft(false);
+      guard(() => {
+        setChosenDate(value);
+        setShowDraft(false);
+      });
     }
   };
-  const pickVersion = (version: HierarchyVersionSummary) => {
-    if (version.effectiveFrom === null) {
-      setShowDraft(true);
-    } else {
-      setChosenDate(version.effectiveFrom);
-      setShowDraft(false);
-    }
-  };
+  const pickVersion = (version: HierarchyVersionSummary) =>
+    guard(() => {
+      if (version.effectiveFrom === null) {
+        setShowDraft(true);
+      } else {
+        setChosenDate(version.effectiveFrom);
+        setShowDraft(false);
+      }
+    });
+  const toggleDraft = (checked: boolean) => guard(() => setShowDraft(checked));
   const announce = (text: string) => {
     setNotice("");
     setAnnouncement(text);
@@ -209,7 +258,7 @@ export function HierarchyDesignerPage() {
     : "No version in force on this date";
 
   const detailData = detail.data;
-  const editingDraft = displayed?.status === "draft" && detailData !== null;
+  const editingDraft = editable && detailData !== null;
 
   return (
     <>
@@ -242,7 +291,7 @@ export function HierarchyDesignerPage() {
           </div>
         ) : null}
       </div>
-      <div aria-live="polite">
+      <div aria-live="polite" ref={noticeRef} tabIndex={-1} className={styles.notice}>
         {notice ? <Alert tone="success">{notice}</Alert> : null}
         <span className="visually-hidden">{announcement}</span>
       </div>
@@ -250,7 +299,7 @@ export function HierarchyDesignerPage() {
         <Alert tone="danger" title="Could not load versions" live="alert">
           {versionsLoad.error.message} ({versionsLoad.error.code})
         </Alert>
-      ) : versionsLoad.loading ? (
+      ) : versionsLoad.loading && versionsLoad.data === null ? (
         <Skeleton height="tile" />
       ) : (
         <>
@@ -258,16 +307,18 @@ export function HierarchyDesignerPage() {
           {versions.length === 0 ? (
             <EmptyState
               title="No versions yet"
-              description="Create a draft to start designing this hierarchy."
+              description={canWriteHierarchy ? "Create a draft to start designing this hierarchy." : "A draft needs the hierarchy write duty. Ask your workspace administrator for access."}
               action={
-                <Button variant="primary" loading={creating} onClick={startDraft}>
-                  Create draft
-                </Button>
+                canWriteHierarchy ? (
+                  <Button variant="primary" loading={creating} onClick={startDraft}>
+                    Create draft
+                  </Button>
+                ) : undefined
               }
             />
           ) : (
             <>
-              {draft ? null : (
+              {draft || !canWriteHierarchy ? null : (
                 <div className={styles.rowActions}>
                   <Button variant="primary" size="sm" loading={creating} onClick={startDraft}>
                     Create draft
@@ -295,7 +346,7 @@ export function HierarchyDesignerPage() {
                 </FormField>
                 {draft ? (
                   <label className={styles.filter}>
-                    <Input type="checkbox" checked={showDraft} onChange={(event) => setShowDraft(event.target.checked)} />
+                    <Input type="checkbox" checked={showDraft} onChange={(event) => toggleDraft(event.target.checked)} />
                     <span>Show draft</span>
                   </label>
                 ) : null}
@@ -317,6 +368,11 @@ export function HierarchyDesignerPage() {
                       {comparison.error.message} ({comparison.error.code})
                     </Alert>
                   ) : null}
+                  {displayed.status === "draft" && !canWriteHierarchy ? (
+                    <Alert tone="info" title="This draft is read-only for you">
+                      Editing a draft needs the hierarchy write duty.
+                    </Alert>
+                  ) : null}
                   {units.error && editingDraft ? (
                     <Alert tone="warning" title="Operating units did not load" live="alert">
                       Names show as ids and operating units cannot be added until this is fixed. {units.error.message} ({units.error.code})
@@ -330,14 +386,20 @@ export function HierarchyDesignerPage() {
                     <Skeleton height="tile" />
                   ) : editingDraft ? (
                     <HierarchyDraftEditor
-                      key={`${detailData.id}:${detailData.version}`}
+                      key={detailData.id}
                       version={detailData}
                       type={selectedType}
                       labels={labels}
                       candidates={candidates}
-                      changes={changes}
+                      canPublish={canPublishHierarchy}
+                      canBackdate={canBackdateHierarchy}
+                      previousVersionNo={previous?.versionNo ?? null}
+                      previousNodes={previousDetail.data?.nodes ?? null}
+                      serverChanges={changes}
+                      serverRemoved={removed}
                       announce={announce}
                       notify={notify}
+                      onDirtyChange={setDirty}
                       onReload={reload}
                       onPublished={(effectiveFrom) => {
                         setShowDraft(false);
@@ -349,28 +411,23 @@ export function HierarchyDesignerPage() {
                   ) : (
                     <HierarchyTreeView key={detailData.id} nodes={detailData.nodes} labels={labels} changes={changes} />
                   )}
-                  {previous && removed.length > 0 ? (
-                    <section aria-labelledby="hierarchy-removed" className={styles.removed}>
-                      <h3 id="hierarchy-removed" className={styles.removedTitle}>
-                        Removed since v{previous.versionNo}
-                      </h3>
-                      <ul className={styles.removedList}>
-                        {removed.map((entry) => (
-                          <li key={entry.orgUnitId} className={styles.removedItem}>
-                            <span className={styles.treeName}>{nameOf(entry.orgUnitId)}</span>
-                            {labels.get(entry.orgUnitId) ? <span className={styles.treeCode}>{labels.get(entry.orgUnitId)?.code}</span> : null}
-                            <span className={styles.treeCount}>was under {nameOf(entry.parentOrgUnitId)}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </section>
-                  ) : null}
+                  {previous && !editingDraft ? <RemovedSection since={previous.versionNo} removed={removed} labels={labels} /> : null}
                 </>
               ) : null}
             </>
           )}
         </>
       )}
+      {pending !== null || blocker.state === "blocked" ? (
+        <ConfirmDialog
+          title="Discard your unsaved changes?"
+          description="You have unsaved edits to this draft. Leaving now loses them."
+          confirmLabel="Discard changes"
+          cancelLabel="Keep editing"
+          onConfirm={confirmLeave}
+          onCancel={keepEditing}
+        />
+      ) : null}
     </>
   );
 }

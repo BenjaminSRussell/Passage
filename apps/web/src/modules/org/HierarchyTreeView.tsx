@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from "react";
-import { Badge } from "../../shell/ui";
-import type { HierarchyNode } from "./api/hierarchy";
+import { Badge, Icon } from "../../shell/ui";
+import type { HierarchyChange, HierarchyNode } from "./api/hierarchy";
 import { buildTree, parentChoices, type NodeChange, type TreeNode } from "./hierarchyTree";
 import styles from "./pages.module.css";
 
@@ -41,6 +41,26 @@ function flatten(roots: TreeNode[], collapsed: ReadonlySet<string>): VisibleItem
   };
   walk(roots, null);
   return items;
+}
+
+export function RemovedSection({ since, removed, labels }: { since: number; removed: readonly HierarchyChange[]; labels: ReadonlyMap<string, Label> }) {
+  const nameOf = (id: string | null) => (id === null ? "no parent (root)" : (labels.get(id)?.name ?? id));
+  return removed.length === 0 ? null : (
+    <section aria-labelledby="hierarchy-removed" className={styles.removed}>
+      <h3 id="hierarchy-removed" className={styles.removedTitle}>
+        Removed since v{since}
+      </h3>
+      <ul className={styles.removedList}>
+        {removed.map((entry) => (
+          <li key={entry.orgUnitId} className={styles.removedItem}>
+            <span className={styles.treeName}>{nameOf(entry.orgUnitId)}</span>
+            {labels.get(entry.orgUnitId) ? <span className={styles.treeCode}>{labels.get(entry.orgUnitId)?.code}</span> : null}
+            <span className={styles.treeCount}>was under {nameOf(entry.parentOrgUnitId)}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
 }
 
 interface TreeViewProps {
@@ -188,6 +208,24 @@ export function HierarchyTreeView({ nodes, labels, changes, editing }: TreeViewP
         }}
       >
         <div className={rowClass} onClick={() => !editing && hasChildren && toggle(id, !expanded)} {...dragHandlers(id, node.parentOrgUnitId === null)}>
+          {hasChildren ? (
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-hidden="true"
+              aria-label={expanded ? "Collapse" : "Expand"}
+              data-testid={`toggle-${id}`}
+              className={styles.treeToggle}
+              onClick={(event) => {
+                event.stopPropagation();
+                toggle(id, !expanded);
+              }}
+            >
+              <Icon name={expanded ? "chevronDown" : "chevronRight"} />
+            </button>
+          ) : (
+            <span className={styles.treeToggle} aria-hidden="true" />
+          )}
           <span id={`tree-label-${id}`} className={styles.treeName}>
             {label?.name ?? id}
           </span>

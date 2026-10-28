@@ -1,6 +1,7 @@
 export { Alert, type AlertProps, type AlertTone } from "./Alert";
 export { Button, buttonClassName, type ButtonProps, type ButtonSize, type ButtonVariant } from "./Button";
 export { Card, CardGrid, type CardGridProps, type CardProps } from "./Card";
+export { ConfirmDialog, type ConfirmDialogProps } from "./ConfirmDialog";
 export { DataTable, type DataTableColumn, type DataTableProps } from "./DataTable";
 export { EmptyState, type EmptyStateProps } from "./EmptyState";
 export { FormField, type FormFieldControlProps, type FormFieldProps } from "./FormField";

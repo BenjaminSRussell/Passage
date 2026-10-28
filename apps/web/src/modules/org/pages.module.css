@@ -146,6 +146,20 @@
   transition: background-color var(--duration-fast) var(--ease-out);
 }
 
+.treeToggle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  inline-size: 20px;
+  block-size: 20px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
 .treeRowSelected {
   background: var(--color-accent-subtle);
   border-color: var(--color-accent);
@@ -159,6 +173,10 @@
   background: var(--color-accent-subtle);
   border-style: dashed;
   border-color: var(--color-accent);
+}
+
+.notice:focus {
+  outline: none;
 }
 
 .bannerRow {

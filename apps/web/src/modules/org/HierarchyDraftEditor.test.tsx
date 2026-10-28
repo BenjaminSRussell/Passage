@@ -1,4 +1,5 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkAxeAA } from "../../shell/a11y";
 import { bodyOf, callsTo, draftNodes, json, openType, published, renderPage, versionList, type Reply } from "./hierarchyTestKit";
@@ -386,13 +387,39 @@ describe("removed since the previous version", () => {
       }),
   };
 
-  it("lists nodes present in the previous version and gone from the displayed one", async () => {
-    await openDraft(removedRoutes);
-    const section = screen.getByRole("region", { name: "Removed since v2" });
+  it("lists server-reported removals when the draft is only viewed", async () => {
+    const { user } = renderPage({ ...units, ...removedRoutes }, ["org.read"]);
+    await openType(user);
+    await screen.findByRole("tree");
+    await user.click(screen.getByRole("checkbox", { name: "Show draft" }));
+    const section = await screen.findByRole("region", { name: "Removed since v2" });
     expect(within(section).getByText("Beta")).toBeInTheDocument();
     expect(within(section).getByText("was under Passage Inc")).toBeInTheDocument();
     expect(within(section).getByText("ou-x")).toBeInTheDocument();
     expect(within(section).getByText("was under no parent (root)")).toBeInTheDocument();
+  });
+
+  it("reflects unsaved edits: removals, moves and additions track the draft as edited", async () => {
+    const { user } = await openDraft();
+    await waitFor(() => expect(screen.getByTitle("Previously under Alpha (ALPHA)")).toBeInTheDocument());
+    expect(screen.queryByText(/Removed since/)).toBeNull();
+
+    await user.click(screen.getByText("Gamma"));
+    await user.selectOptions(screen.getByLabelText("Move under"), "ou-a");
+    await user.click(screen.getByRole("button", { name: "Move" }));
+    expect(screen.queryByTitle(/Previously under/)).toBeNull();
+    expect(screen.queryAllByText("changed")).toHaveLength(0);
+
+    await user.click(screen.getByText("Beta"));
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+    const section = screen.getByRole("region", { name: "Removed since v2" });
+    expect(within(section).getByText("Beta")).toBeInTheDocument();
+    expect(within(section).getByText("was under Passage Inc")).toBeInTheDocument();
+
+    await user.click(screen.getByText("Alpha"));
+    await user.selectOptions(screen.getByLabelText("Add org unit"), "ou-d");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    expect(screen.getByRole("treeitem", { name: "Delta" })).toHaveAccessibleDescription("Added in this version");
   });
 
   it("leaves the section out when nothing was removed", async () => {
@@ -405,11 +432,13 @@ describe("export", () => {
   it("downloads the displayed version as CSV with a safe file name", async () => {
     const blobs: Blob[] = [];
     const names: string[] = [];
+    const attached: boolean[] = [];
     const created = vi.fn((blob: Blob) => (blobs.push(blob), "blob:hierarchy"));
     const revoked = vi.fn();
     Object.assign(URL, { createObjectURL: created, revokeObjectURL: revoked });
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
       names.push(this.download);
+      attached.push(this.isConnected);
     });
     try {
       const { user } = renderPage();
@@ -417,8 +446,11 @@ describe("export", () => {
       await screen.findByRole("tree");
       await user.click(screen.getByRole("button", { name: "Export CSV" }));
       expect(names).toEqual(["hierarchy-REP-v2.csv"]);
-      expect(revoked).toHaveBeenCalledWith("blob:hierarchy");
+      expect(attached).toEqual([true]);
+      expect(document.querySelector("a[download]")).toBeNull();
+      await waitFor(() => expect(revoked).toHaveBeenCalledWith("blob:hierarchy"));
       expect(blobs[0].type).toBe("text/csv;charset=utf-8");
+      expect(Array.from(new Uint8Array(await blobs[0].arrayBuffer()).slice(0, 3))).toEqual([0xef, 0xbb, 0xbf]);
       expect(await blobs[0].text()).toBe(
         ["Level,Name,Code,Kind,Parent code", "1,Passage Inc,PI,legal_entity,", "2,Alpha,ALPHA,operating_unit,PI", "3,ou-c,ou-c,operating_unit,ALPHA", "2,Beta,BETA,operating_unit,PI"].join("\r\n"),
       );
@@ -433,6 +465,314 @@ describe("export", () => {
     await screen.findByRole("tree");
     fireEvent.change(screen.getByLabelText("As of date"), { target: { value: "2025-12-31" } });
     expect(screen.queryByRole("button", { name: "Export CSV" })).toBeNull();
+  });
+});
+
+const dialog = () => screen.getByRole("alertdialog");
+
+async function dirtyDraft(overrides: Record<string, Reply> = {}) {
+  const context = await openDraft(overrides);
+  await context.user.click(screen.getByText("Alpha"));
+  await context.user.click(screen.getByRole("button", { name: "Move down" }));
+  return context;
+}
+
+describe("unsaved changes guard", () => {
+  it("asks before a type change throws edits away, and keeps them on Keep editing", async () => {
+    const { user } = await dirtyDraft();
+    await user.selectOptions(screen.getByLabelText("Hierarchy type"), "");
+    expect(dialog()).toHaveAccessibleName("Discard your unsaved changes?");
+    expect(dialog()).toHaveAccessibleDescription(/Leaving now loses them/);
+    expect(within(dialog()).getByRole("button", { name: "Keep editing" })).toHaveFocus();
+    await user.click(within(dialog()).getByRole("button", { name: "Keep editing" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(order()).toEqual(["1Passage Inc", "2Beta", "3Gamma", "2Alpha"]);
+    expect(screen.getByLabelText("Hierarchy type")).toHaveValue("t1");
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+  });
+
+  it("discards and proceeds on confirm", async () => {
+    const { user } = await dirtyDraft();
+    await user.selectOptions(screen.getByLabelText("Hierarchy type"), "");
+    await user.click(within(dialog()).getByRole("button", { name: "Discard changes" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(screen.queryByRole("tree")).toBeNull();
+    expect(screen.getByLabelText("Hierarchy type")).toHaveValue("");
+  });
+
+  it("closes the dialog with Escape and guards the date input, the slider, the version buttons and Show draft", async () => {
+    const { user } = await dirtyDraft();
+    fireEvent.change(screen.getByLabelText("As of date"), { target: { value: "2026-01-15" } });
+    expect(dialog()).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    fireEvent.change(screen.getByRole("slider", { name: "Effective date slider" }), { target: { value: "10" } });
+    await user.click(within(dialog()).getByRole("button", { name: "Keep editing" }));
+    await user.click(screen.getByRole("button", { name: "View version 1" }));
+    await user.click(within(dialog()).getByRole("button", { name: "Keep editing" }));
+    await user.click(screen.getByRole("checkbox", { name: "Show draft" }));
+    expect(dialog()).toBeInTheDocument();
+    await user.click(within(dialog()).getByRole("button", { name: "Discard changes" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Version 2");
+    expect(screen.queryByText("Unsaved changes")).toBeNull();
+  });
+
+  it("does not ask when there is nothing to lose, including after a move is undone by hand", async () => {
+    const { user } = await dirtyDraft();
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Move up" }));
+    expect(screen.getByText("No unsaved changes")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save draft" })).toBeDisabled();
+    await user.selectOptions(screen.getByLabelText("Hierarchy type"), "");
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(screen.queryByRole("tree")).toBeNull();
+  });
+
+  it("warns on page unload only while there are unsaved edits", async () => {
+    const { user } = await dirtyDraft();
+    const dirtyEvent = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(dirtyEvent);
+    expect(dirtyEvent.defaultPrevented).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Discard changes" }));
+    const cleanEvent = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(cleanEvent);
+    expect(cleanEvent.defaultPrevented).toBe(false);
+  });
+
+  it("blocks in-app navigation while dirty and stays put on Keep editing", async () => {
+    const { router } = await dirtyDraft();
+    await act(async () => void router.navigate("/org"));
+    expect(router.state.location.pathname).toBe("/org/hierarchy");
+    await clickInDialog("Keep editing");
+    expect(router.state.location.pathname).toBe("/org/hierarchy");
+    expect(order()).toEqual(["1Passage Inc", "2Beta", "3Gamma", "2Alpha"]);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+});
+
+const clickInDialog = (name: string) => userEvent.setup().click(within(dialog()).getByRole("button", { name }));
+
+describe("permissions", () => {
+  const withoutDraft = { "GET /hierarchy-types/t1/versions": () => json({ items: [versionList[1], versionList[2]] }) };
+
+  it("shows no write controls to a read-only user, only a read-only notice for the draft", async () => {
+    const { user } = renderPage({ ...units, ...withoutDraft }, ["org.read"]);
+    await openType(user);
+    await screen.findByRole("tree");
+    expect(screen.queryByRole("button", { name: "Create draft" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Export CSV" })).toBeInTheDocument();
+  });
+
+  it("shows the draft read-only, with the reason, when write is missing", async () => {
+    const { user } = renderPage(units, ["org.read", "org.hierarchy.publish"]);
+    await openType(user);
+    await screen.findByRole("tree");
+    await user.click(screen.getByRole("checkbox", { name: "Show draft" }));
+    expect(await screen.findByText("This draft is read-only for you")).toBeInTheDocument();
+    expect(await screen.findByRole("treeitem", { name: "Gamma" })).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Move selected node" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /save|publish|remove/i })).toBeNull();
+    expect(document.querySelector("[draggable='true']")).toBeNull();
+  });
+
+  it("offers Create draft only with the write duty, also from the empty state", async () => {
+    const { user, unmount } = renderPage({ "GET /hierarchy-types/t1/versions": () => json({ items: [] }) }, ["org.read"]);
+    await openType(user);
+    expect(await screen.findByText("No versions yet")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create draft" })).toBeNull();
+    expect(screen.getByText(/needs the hierarchy write duty/)).toBeInTheDocument();
+    unmount();
+    const writer = renderPage(withoutDraft, ["org.read", "org.hierarchy.write"]);
+    await openType(writer.user);
+    expect(await screen.findByRole("button", { name: "Create draft" })).toBeInTheDocument();
+  });
+
+  it("hides Publish without the publish duty but keeps editing", async () => {
+    const { user } = renderPage(units, ["org.read", "org.hierarchy.write"]);
+    await openType(user);
+    await screen.findByRole("tree");
+    await user.click(screen.getByRole("checkbox", { name: "Show draft" }));
+    await screen.findByRole("group", { name: "Move selected node" });
+    expect(screen.getByRole("button", { name: "Save draft" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Publish…" })).toBeNull();
+  });
+
+  it("refuses a past date without the backdate duty before sending", async () => {
+    const { fetchMock, user } = renderPage({ ...units, ...saved }, ["org.read", "org.hierarchy.write", "org.hierarchy.publish"]);
+    await openType(user);
+    await screen.findByRole("tree");
+    await user.click(screen.getByRole("checkbox", { name: "Show draft" }));
+    await screen.findByRole("group", { name: "Move selected node" });
+    await user.click(screen.getByRole("button", { name: "Publish…" }));
+    fireEvent.change(screen.getByLabelText("Effective from"), { target: { value: "2020-01-01" } });
+    await user.type(screen.getByLabelText("Backdate reason"), "Correcting an old record");
+    await user.click(screen.getByRole("button", { name: "Publish version 3" }));
+    expect(await screen.findByText(/needs the backdate duty/)).toBeInTheDocument();
+    expect(callsTo(fetchMock, ":publish", "POST")).toHaveLength(0);
+  });
+
+  it("states that publish dates are UTC", async () => {
+    const { user } = await openDraft();
+    await user.click(screen.getByRole("button", { name: "Publish…" }));
+    expect(screen.getByText(/Dates are in UTC\. Today is \d{4}-\d{2}-\d{2}\./)).toBeInTheDocument();
+  });
+});
+
+describe("removing a node", () => {
+  it("removes a leaf, announces it, selects the parent and frees it for the Add picker", async () => {
+    const { fetchMock, user } = await openDraft();
+    await user.click(screen.getByText("Gamma"));
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+    expect(order()).toEqual(["1Passage Inc", "2Alpha", "2Beta"]);
+    expect(announcement()).toBe("Gamma removed");
+    expect(screen.getByRole("treeitem", { name: "Beta" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("treeitem", { name: "Beta" })).toHaveFocus();
+    expect(within(screen.getByLabelText("Add org unit")).getByRole("option", { name: "Gamma (GAMMA)" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await screen.findByText("Draft version 3 saved");
+    expect(saveBody(fetchMock).nodes.map((entry) => entry.orgUnitId)).toEqual(expect.not.arrayContaining(["ou-c"]));
+  });
+
+  it("moves the children of a removed node up to its parent, in its place", async () => {
+    const { user } = await openDraft();
+    await user.click(screen.getByText("Beta"));
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+    expect(order()).toEqual(["1Passage Inc", "2Alpha", "2Gamma"]);
+    expect(announcement()).toBe("Beta removed, its child moved up under Passage Inc");
+  });
+
+  it("never removes the root", async () => {
+    const { user } = await openDraft();
+    await user.click(screen.getByText("Passage Inc"));
+    expect(screen.getByRole("button", { name: "Remove" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Remove" })).toBeDisabled();
+  });
+});
+
+describe("keeping your place across a refresh", () => {
+  const reloads = () => {
+    let reads = 0;
+    return {
+      "GET /hierarchy-versions/v3": () => (reads++ === 0 ? json({ ...versionList[0], version: 7, nodes: draftNodes }) : (new Promise<Response>(() => undefined) as never)),
+    };
+  };
+
+  it("keeps the tree, selection and collapse state, and puts focus on the confirmation after Save", async () => {
+    const { user } = await openDraft(reloads());
+    await user.click(screen.getByTestId("toggle-ou-b"));
+    expect(screen.queryByRole("treeitem", { name: "Gamma" })).toBeNull();
+    await user.click(screen.getByText("Alpha"));
+    await user.click(screen.getByRole("button", { name: "Move down" }));
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    const message = await screen.findByText("Draft version 3 saved");
+    expect(message.closest("[aria-live]")).toHaveFocus();
+    expect(screen.getByRole("tree")).toBeInTheDocument();
+    expect(screen.getByRole("treeitem", { name: "Alpha" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("treeitem", { name: "Gamma" })).toBeNull();
+    expect(screen.getByText("No unsaved changes")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Publish…" })).toBeEnabled();
+  });
+
+  it("uses the new lock version for the next save without waiting for the refetch", async () => {
+    const { fetchMock, user } = await openDraft(reloads());
+    await user.click(screen.getByText("Alpha"));
+    await user.click(screen.getByRole("button", { name: "Move down" }));
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await screen.findByText("Draft version 3 saved");
+    await user.click(screen.getByRole("button", { name: "Move down" }));
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() => expect(callsTo(fetchMock, "/hierarchy-versions/v3/nodes", "PUT")).toHaveLength(2));
+    expect(callsTo(fetchMock, "/hierarchy-versions/v3/nodes", "PUT").map((call) => bodyOf(call).version)).toEqual([7, 8]);
+  });
+});
+
+describe("keyboard shortcuts and focus", () => {
+  it("saves with Ctrl+S only when there is something to save", async () => {
+    const { fetchMock, user } = await openDraft();
+    act(() => screen.getByRole("treeitem", { name: "Alpha" }).focus());
+    await user.keyboard("{Control>}s{/Control}");
+    expect(callsTo(fetchMock, "/hierarchy-versions/v3/nodes", "PUT")).toHaveLength(0);
+    await user.keyboard("{Alt>}{ArrowDown}{/Alt}");
+    await user.keyboard("{Control>}s{/Control}");
+    expect(await screen.findByText("Draft version 3 saved")).toBeInTheDocument();
+    expect(callsTo(fetchMock, "/hierarchy-versions/v3/nodes", "PUT")).toHaveLength(1);
+  });
+
+  it("cancels with Esc after asking, and closes the publish panel first", async () => {
+    const { user } = await openDraft();
+    await user.click(screen.getByRole("button", { name: "Publish…" }));
+    expect(screen.getByRole("region", { name: "Publish draft" })).toBeInTheDocument();
+    act(() => screen.getByRole("treeitem", { name: "Alpha" }).focus());
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("region", { name: "Publish draft" })).toBeNull();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+
+    await user.click(screen.getByText("Alpha"));
+    await user.click(screen.getByRole("button", { name: "Move down" }));
+    await user.keyboard("{Escape}");
+    expect(dialog()).toHaveAccessibleName("Discard your changes?");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(order()).toEqual(["1Passage Inc", "2Beta", "3Gamma", "2Alpha"]);
+    await user.keyboard("{Escape}");
+    await user.click(within(dialog()).getByRole("button", { name: "Discard changes" }));
+    expect(order()).toEqual(["1Passage Inc", "2Alpha", "2Beta", "3Gamma"]);
+    expect(announcement()).toBe("Changes discarded");
+  });
+
+  it("moves focus to the moved node when the button that was pressed becomes disabled", async () => {
+    const { user } = await openDraft();
+    await user.click(screen.getByText("Alpha"));
+    await user.click(screen.getByRole("button", { name: "Move down" }));
+    expect(screen.getByRole("button", { name: "Move down" })).toBeDisabled();
+    expect(screen.getByRole("treeitem", { name: "Alpha" })).toHaveFocus();
+  });
+
+  it("expands and collapses with the disclosure control while editing, without changing the selection", async () => {
+    const { user } = await openDraft();
+    await user.click(screen.getByText("Beta"));
+    await user.click(screen.getByTestId("toggle-ou-b"));
+    expect(screen.getByRole("treeitem", { name: "Beta" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("treeitem", { name: "Beta" })).toHaveAttribute("aria-selected", "true");
+    await user.click(screen.getByTestId("toggle-ou-b"));
+    expect(screen.getByRole("treeitem", { name: "Gamma" })).toBeInTheDocument();
+  });
+});
+
+describe("accessibility of the open states", () => {
+  const pageLevel = ["page-has-heading-one", "landmark-unique", "region", "bypass"];
+  const clean = (root: ParentNode) => checkAxeAA(root).filter((violation) => !pageLevel.includes(violation.id));
+
+  it("has no violations with the publish panel open, a backdate reason field and a failure alert", async () => {
+    const { user } = await openDraft({ "POST /hierarchy-versions/v3:publish": () => json({ code: "ORG-HIER-OVERLAP", detail: "Overlaps" }, 409) });
+    await user.click(screen.getByRole("button", { name: "Publish…" }));
+    fireEvent.change(screen.getByLabelText("Effective from"), { target: { value: "2020-01-01" } });
+    await user.click(screen.getByRole("button", { name: "Publish version 3" }));
+    expect(await screen.findByText("Give a reason of 10 to 500 characters.")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Backdate reason"), "Correcting an old record");
+    await user.click(screen.getByRole("button", { name: "Publish version 3" }));
+    await screen.findByText("Could not publish the draft");
+    expect(clean(screen.getByRole("region", { name: "Edit draft" }))).toEqual([]);
+  });
+
+  it("has no violations in the empty draft state or with the discard dialog open", async () => {
+    const { user } = await openDraft({ "GET /hierarchy-versions/v3": () => json({ ...versionList[0], version: 7, nodes: [] }) }, () =>
+      screen.findByText("This draft has no nodes yet"),
+    );
+    expect(clean(document.body)).toEqual(expect.not.arrayContaining([expect.objectContaining({ id: "button-name" })]));
+    await user.selectOptions(screen.getByLabelText("Add org unit"), "le1");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    act(() => screen.getByRole("treeitem", { name: "Passage Inc" }).focus());
+    await user.keyboard("{Escape}");
+    expect(clean(dialog())).toEqual([]);
+    expect(dialog()).toHaveAttribute("aria-modal", "true");
+  });
+
+  it("has no violations in the conflict alert", async () => {
+    const { user } = await dirtyDraft({ "PUT /hierarchy-versions/v3/nodes": () => json({ code: "ORG-VERSION-CONFLICT", detail: "Stale" }, 409) });
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await screen.findByText("This draft changed elsewhere");
+    expect(clean(screen.getByRole("region", { name: "Edit draft" }))).toEqual([]);
   });
 });
 

@@ -6,7 +6,10 @@ import {
   buildTree,
   changeMap,
   dayNumber,
+  diffNodes,
   hierarchyCsv,
+  removeNode,
+  treeSignature,
   indentNode,
   isDescendant,
   moveNode,
@@ -199,7 +202,53 @@ describe("tree editing", () => {
   });
 });
 
+describe("removing, comparing and signing trees", () => {
+  it("removes a leaf and renumbers its siblings", () => {
+    expect(shape(removeNode(sample, "b"))).toEqual({ r: "-:0", a: "r:0", c: "r:1", a1: "a:0" });
+  });
+
+  it("hands a removed node's children to its parent in its place", () => {
+    expect(shape(removeNode(sample, "a"))).toEqual({ r: "-:0", a1: "r:0", b: "r:1", c: "r:2" });
+  });
+
+  it("refuses to remove the root or an unknown node", () => {
+    expect(removeNode(sample, "r")).toBeNull();
+    expect(removeNode(sample, "zzz")).toBeNull();
+  });
+
+  it("adds after the highest sibling order even when the orders have gaps", () => {
+    const gappy = [node("r", null, 0), node("a", "r", 4), node("b", "r", 9)];
+    expect(shape(addNode(gappy, "n", "operating_unit", "r"))).toMatchObject({ a: "r:0", b: "r:1", n: "r:2" });
+  });
+
+  it("treats the same shape as equal whatever the raw sort orders are", () => {
+    const renumbered = sample.map((entry) => ({ ...entry, sortOrder: entry.sortOrder * 10 + 3 }));
+    expect(treeSignature(renumbered)).toBe(treeSignature(sample));
+    expect(treeSignature(shiftNode(sample, "a", 1) ?? [])).not.toBe(treeSignature(sample));
+    expect(treeSignature(moveNode(moveNode(sample, "c", "a") ?? [], "c", "r") ?? [])).toBe(treeSignature(sample));
+  });
+
+  it("diffs added, moved and removed nodes against the previous version", () => {
+    const after = [node("r", null, 0), node("a", "r", 0), node("c", "a", 0), node("n", "r", 1)];
+    const { changes, removed } = diffNodes(sample, after);
+    expect(Object.fromEntries(changes)).toEqual({ c: { kind: "moved", oldParentOrgUnitId: "r" }, n: { kind: "added" } });
+    expect(removed.map((entry) => [entry.orgUnitId, entry.parentOrgUnitId])).toEqual([["b", "r"], ["a1", "a"]]);
+    expect(diffNodes(sample, sample).changes.size).toBe(0);
+  });
+});
+
 describe("hierarchyCsv", () => {
+  it.each([
+    ["a tab", "\tcmd", "'\tcmd"],
+    ["a carriage return", "\rcmd", '"\'\rcmd"'],
+    ["a plus", "+1+1", "'+1+1"],
+    ["an at sign", "@sum", "'@sum"],
+    ["a minus", "-2", "'-2"],
+  ])("neutralises a name starting with %s", (_label, name, cell) => {
+    const csv = hierarchyCsv(buildTree([node("r", null, 0)]), () => ({ name, code: "C" }));
+    expect(csv.slice("Level,Name,Code,Kind,Parent code\r\n".length)).toBe(`1,${cell},C,operating_unit,`);
+  });
+
   const names: Record<string, { name: string; code: string }> = {
     r: { name: "Root, Inc", code: "R" },
     a: { name: '=HYPERLINK("x")', code: "A" },
