@@ -267,17 +267,21 @@ class StageReleaseTests(unittest.TestCase):
         self.assertIn("name: hello-ledger-prod", prod_app)
         self.assertEqual(stage_release.read_digest(prod_app), stage_release.PLACEHOLDER_DIGEST)
 
-    def publish_main(self, stage=None, prod=None):
+    def publish_main(self, stage=None, prod=None, at=None, note=""):
         self.run_git("checkout", "-q", "main")
         template = self.manifest.read_text(encoding="utf-8")
         if stage is not None:
-            self.manifest.write_text(self.with_digest(template, stage), encoding="utf-8")
+            self.manifest.write_text(
+                self.with_digest(template, stage) + (f"# {note}\n" if note else ""), encoding="utf-8"
+            )
         if prod is not None:
             prod_path = self.root / PROD_MANIFEST
             prod_path.parent.mkdir(parents=True, exist_ok=True)
             prod_path.write_text(self.with_digest(template, prod), encoding="utf-8")
         self.run_git("add", str(STAGE_MANIFEST), *([str(PROD_MANIFEST)] if prod is not None else []))
-        self.run_git("commit", "-q", "-m", "Publish to main")
+        committer_date = {"GIT_COMMITTER_DATE": f"{int(at)} +0000"} if at is not None else {}
+        with unittest.mock.patch.dict(os.environ, committer_date):
+            self.run_git("commit", "-q", "-m", "Publish to main")
         if "origin" not in self.run_git("remote").split():
             origin = tempfile.mkdtemp()
             self.addCleanup(shutil.rmtree, origin, True)
@@ -294,9 +298,9 @@ class StageReleaseTests(unittest.TestCase):
     def prod_digest(self):
         return stage_release.read_digest((self.root / PROD_MANIFEST).read_text(encoding="utf-8"))
 
-    def run_cli(self, argv, soaked=True):
+    def run_cli(self, argv, soaked=True, now=None):
         errors = io.StringIO()
-        later = time.time() + 7200 if soaked else time.time()
+        later = now if now is not None else time.time() + 7200 if soaked else time.time()
         with unittest.mock.patch("stage_release.time.time", return_value=later), \
                 contextlib.redirect_stderr(errors):
             result = stage_release.main(argv, repo_root=self.root)
@@ -354,14 +358,79 @@ class StageReleaseTests(unittest.TestCase):
         self.assertIn("prod promotes only the digest stage pins on origin/main", errors)
         self.assertEqual(self.prod_digest(), stage_release.PLACEHOLDER_DIGEST)
 
-    def test_prod_refuses_an_uncommitted_stage_manifest(self):
+    def test_prod_promotion_reads_stage_from_origin_main_not_the_working_tree(self):
         self.publish_main(stage=PROMOTED_DIGEST, prod=stage_release.PLACEHOLDER_DIGEST)
         self.manifest.write_text(self.with_digest(self.manifest.read_text(encoding="utf-8"), INITIAL_DIGEST), encoding="utf-8")
+
+        result, _ = self.promote_prod()
+
+        self.assertEqual(result, 0)
+        self.assertEqual(self.prod_digest(), PROMOTED_DIGEST)
+
+    def test_prod_soak_counts_from_the_repin_not_the_earlier_pin(self):
+        now = time.time()
+        self.publish_main(stage=PROMOTED_DIGEST, prod=stage_release.PLACEHOLDER_DIGEST, at=now - 7200)
+        self.publish_main(stage=INITIAL_DIGEST, at=now - 3000)
+        self.publish_main(stage=PROMOTED_DIGEST, at=now - 600)
+
+        result, errors = self.run_cli(["promote", "--to", "prod", "--digest", PROMOTED_DIGEST], now=now)
+
+        self.assertEqual(result, 2)
+        self.assertIn("prod requires at least 60", errors)
+
+    def test_prod_soak_counts_from_the_earliest_commit_of_an_unbroken_pin(self):
+        now = time.time()
+        self.publish_main(stage=PROMOTED_DIGEST, prod=stage_release.PLACEHOLDER_DIGEST, at=now - 7200, note="a")
+        self.publish_main(stage=PROMOTED_DIGEST, at=now - 3000, note="b")
+        self.publish_main(stage=PROMOTED_DIGEST, at=now - 100, note="c")
+
+        result, _ = self.run_cli(["promote", "--to", "prod", "--digest", PROMOTED_DIGEST], now=now)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(self.prod_digest(), PROMOTED_DIGEST)
+
+    def test_prod_promotion_refuses_when_fetch_fails(self):
+        self.publish_main(stage=PROMOTED_DIGEST, prod=stage_release.PLACEHOLDER_DIGEST)
+        self.run_git("remote", "set-url", "origin", str(self.root / "missing-remote"))
 
         result, errors = self.promote_prod()
 
         self.assertEqual(result, 2)
-        self.assertIn("uncommitted changes", errors)
+        self.assertIn("fetch", errors)
+        self.assertEqual(self.prod_digest(), stage_release.PLACEHOLDER_DIGEST)
+
+    def test_prod_rollback_refuses_when_fetch_fails(self):
+        self.publish_main(prod=INITIAL_DIGEST)
+        self.publish_main(prod=PROMOTED_DIGEST)
+        self.run_git("remote", "set-url", "origin", str(self.root / "missing-remote"))
+
+        result, errors = self.run_cli(["rollback", "--env", "prod"])
+
+        self.assertEqual(result, 2)
+        self.assertIn("fetch", errors)
+        self.assertEqual(self.prod_digest(), PROMOTED_DIGEST)
+
+    def test_prod_rollback_refuses_target_without_sbom_attestation(self):
+        self.publish_main(prod=INITIAL_DIGEST)
+        self.publish_main(prod=PROMOTED_DIGEST)
+        self.install_cosign_stub(fail_on="verify-attestation")
+
+        result, errors = self.run_cli(["rollback", "--env", "prod"])
+
+        self.assertEqual(result, 2)
+        self.assertIn("verify-attestation", errors)
+        self.assertEqual(self.prod_digest(), PROMOTED_DIGEST)
+
+    def test_prod_rollback_refuses_a_stale_branch(self):
+        self.publish_main(prod=INITIAL_DIGEST)
+        self.publish_main(prod=PROMOTED_DIGEST)
+        self.run_git("reset", "-q", "--hard", "HEAD~1")
+
+        result, errors = self.run_cli(["rollback", "--env", "prod"])
+
+        self.assertEqual(result, 2)
+        self.assertIn("origin/main pins", errors)
+        self.assertEqual(self.prod_digest(), INITIAL_DIGEST)
 
     def test_prod_refuses_before_stage_soak_floor(self):
         self.publish_main(stage=PROMOTED_DIGEST, prod=stage_release.PLACEHOLDER_DIGEST)

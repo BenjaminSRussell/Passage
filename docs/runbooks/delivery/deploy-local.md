@@ -86,6 +86,15 @@ minutes (the script refuses otherwise), so stage and prod consume the same signe
 release artifact. `--skip-verify` is refused for prod. The check for zero
 `SLOBurnRateHigh` alerts remains manual until the Release table lands.
 
+Prerequisite: register the prod cluster in Argo CD only after a repo admin enables
+branch protection on `main` (required review plus code-owner review).
+`.github/CODEOWNERS` already covers everything via `*`. Until then any push to
+`main` auto-deploys prod.
+
+The 60-minute soak is measured from the committer date of the `origin/main`
+commit that pinned the digest in stage. That is reliable for GitHub merges but not
+for direct pushes of old commits, which keep their original committer date.
+
 ```sh
 make -C deploy promote-prod IMAGE_DIGEST=<digest pinned in deploy/envs/stage on main>
 # Commit the prod manifest change on a branch and merge its PR.

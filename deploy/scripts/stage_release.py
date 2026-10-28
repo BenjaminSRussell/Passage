@@ -14,7 +14,7 @@ MANIFESTS = {
     env: Path(f"deploy/envs/{env}/apps/hello-ledger.yaml") for env in ("stage", "prod")
 }
 SOAK_MINUTES = 60
-PLACEHOLDER_DIGEST ="sha256:" + "0" * 64
+PLACEHOLDER_DIGEST = "sha256:" + "0" * 64
 IMAGE_REPOSITORY = "ghcr.io/benjaminsrussell/hello-ledger"
 WORKFLOW_REPOSITORY = "BenjaminSRussell/Passage"
 OIDC_ISSUER = "https://token.actions.githubusercontent.com"
@@ -127,7 +127,6 @@ def _fetch_origin_main(root):
 
 def _require_soaked_stage_digest(root, digest):
     _manifest_path(root, "stage")
-    _require_clean_manifest(root, "stage")
     _fetch_origin_main(root)
     stage_path = MANIFESTS["stage"].as_posix()
     staged = read_digest(_git(root, "show", f"origin/main:{stage_path}"))
@@ -214,14 +213,19 @@ def rollback(root, env="stage"):
     _require_clean_manifest(root, env)
     text = _read_manifest(path)
     current = read_digest(text)
-    if current == PLACEHOLDER_DIGEST:
-        raise ReleaseError(
-            f"{env} still pins the placeholder digest; refusing rollback before the first promotion"
-        )
     ref = "HEAD"
     if env == "prod":
         _fetch_origin_main(root)
         ref = "origin/main"
+        live = read_digest(_git(root, "show", f"origin/main:{MANIFESTS[env].as_posix()}"))
+        if live != current:
+            raise ReleaseError(
+                f"local prod manifest pins {current} but origin/main pins {live}; rebase onto origin/main first"
+            )
+    if current == PLACEHOLDER_DIGEST:
+        raise ReleaseError(
+            f"{env} still pins the placeholder digest; refusing rollback before the first promotion"
+        )
     previous = _previous_digest(root, env, current, ref)
     if previous is None:
         raise ReleaseError(
