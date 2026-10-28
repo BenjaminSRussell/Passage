@@ -17,12 +17,16 @@ import (
 const (
 	LedgerPostPath        = "/v1/ledger/journal-entries"
 	LedgerReversePathTmpl = "/v1/ledger/journal-entries/%s/reverse"
+	PurchaseOrderPathTmpl = "/v1/procurement/purchase-orders/%s"
 )
 
 var (
 	ErrPeriodClosed   = errors.New("ledger period closed")
 	ErrLedgerConflict = errors.New("ledger idempotency conflict")
 	ErrLedgerRejected = errors.New("ledger rejected the entry")
+
+	ErrPurchaseOrderNotFound  = errors.New("purchase order not found")
+	ErrPurchaseOrderForbidden = errors.New("purchase order is not accessible to the caller")
 )
 
 type PeriodStatus string
@@ -79,6 +83,74 @@ type PeriodControl interface {
 
 type LedgerPoster interface {
 	Post(ctx context.Context, entry JournalEntry) (string, error)
+}
+
+type PurchaseOrderLine struct {
+	LineNo      int
+	ProductID   string
+	Unit        string
+	Qty         decimal.Decimal
+	UnitPrice   decimal.Decimal
+	PriceUnit   decimal.Decimal
+	DiscountPct decimal.Decimal
+	ReceivedQty decimal.Decimal
+	InvoicedQty decimal.Decimal
+	Status      string
+}
+
+var hundredPct = decimal.NewFromInt(100)
+
+func (l PurchaseOrderLine) NetUnitPrice() decimal.Decimal {
+	net := l.UnitPrice.Mul(hundredPct.Sub(l.DiscountPct)).Div(hundredPct)
+	if l.PriceUnit.Sign() <= 0 {
+		return net
+	}
+	return net.DivRound(l.PriceUnit, 12)
+}
+
+func (l PurchaseOrderLine) QtyRemaining() decimal.Decimal {
+	return decimal.Max(l.Qty.Sub(l.InvoicedQty), decimal.Zero)
+}
+
+type PurchaseOrder struct {
+	ID             string
+	VendorID       string
+	Currency       string
+	LegalEntityID  string
+	ApprovalStatus string
+	DocumentStatus string
+	Lines          []PurchaseOrderLine
+}
+
+const (
+	ApprovalApproved  = "APPROVED"
+	ApprovalConfirmed = "CONFIRMED"
+	StatusCancelled   = "CANCELLED"
+)
+
+func (o PurchaseOrder) Usable() bool {
+	return o.ApprovalStatus == ApprovalApproved || o.ApprovalStatus == ApprovalConfirmed
+}
+
+func (l PurchaseOrderLine) Usable() bool { return l.Status != StatusCancelled }
+
+type PurchaseOrders interface {
+	Get(ctx context.Context, id string) (PurchaseOrder, error)
+}
+
+type FakePurchaseOrders struct {
+	Orders map[string]PurchaseOrder
+	Err    error
+}
+
+func (f FakePurchaseOrders) Get(_ context.Context, id string) (PurchaseOrder, error) {
+	if f.Err != nil {
+		return PurchaseOrder{}, f.Err
+	}
+	if po, ok := f.Orders[id]; ok {
+		return po, nil
+	}
+	return PurchaseOrder{}, ErrPurchaseOrderNotFound
 }
 
 type FakePeriods struct {
