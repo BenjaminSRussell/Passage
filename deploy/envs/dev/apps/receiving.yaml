@@ -17,6 +17,16 @@ spec:
           repository: ghcr.io/benjaminsrussell/receiving
           digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
         migrateOnStart: true
+        serviceUrls:
+          ledger: http://ledger.hello-ledger.svc:8080
+          close: http://close.hello-ledger.svc:8080
+          purchasing: http://purchasing.hello-ledger.svc:8080
+        postingProfile:
+          ledgerId: 00000000-0000-4000-8000-000000000001
+          inventoryAccount: "1400"
+          grirAccount: "2100"
+          ppvAccount: "5200"
+          vendorControlAccount: "2000"
   destination:
     server: https://kubernetes.default.svc
     namespace: hello-ledger

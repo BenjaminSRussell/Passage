@@ -5,6 +5,16 @@ image:
   pullPolicy: IfNotPresent
 databaseSecret: receiving-db
 migrateOnStart: false
+serviceUrls:
+  ledger: ""
+  close: ""
+  purchasing: ""
+postingProfile:
+  ledgerId: ""
+  inventoryAccount: ""
+  grirAccount: ""
+  ppvAccount: ""
+  vendorControlAccount: ""
 replicaCount: 1
 resources:
   requests: { cpu: 50m, memory: 64Mi }
