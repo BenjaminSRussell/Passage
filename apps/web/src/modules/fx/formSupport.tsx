@@ -3,9 +3,17 @@ import { Alert } from "../../shell/ui";
 import { FxApiError } from "./api/client";
 import type { Errors } from "./validate";
 
+const editedErrors = new WeakSet<Errors>();
+
+export function withoutFields(errors: Errors, fields: readonly string[]): Errors {
+  const remaining = Object.fromEntries(Object.entries(errors).filter(([field]) => !fields.includes(field)));
+  editedErrors.add(remaining);
+  return remaining;
+}
+
 export function useFocusFirstInvalid(form: RefObject<HTMLFormElement | null>, errors: Errors) {
   useEffect(() => {
-    if (Object.keys(errors).length === 0) return;
+    if (Object.keys(errors).length === 0 || editedErrors.has(errors)) return;
     form.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
   }, [errors, form]);
 }

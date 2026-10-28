@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Alert, Button, FormField, Input, PageHeader } from "../../shell/ui";
 import { fetchHistory, publishRate, type HistoryEntry, type RateEntryInput } from "./api/client";
-import { ApiFailure, fieldsOwnFailure, mapServerFields, useFocusFirstInvalid } from "./formSupport";
+import { ApiFailure, fieldsOwnFailure, mapServerFields, useFocusFirstInvalid, withoutFields } from "./formSupport";
 import { RateTypeField } from "./RateTypeField";
 import styles from "./pages.module.css";
 import { deviationBeyondLimit, DEVIATION_LIMIT_PERCENT, emptyEntry, formatRate, normalizeCurrency, validateEntry, type Deviation, type Errors, type RateEntry } from "./validate";
@@ -28,6 +28,7 @@ export function RateEntryPage() {
   const form = useRef<HTMLFormElement>(null);
   const rateField = useRef<HTMLInputElement>(null);
   const confirmButton = useRef<HTMLButtonElement>(null);
+  const saveButton = useRef<HTMLButtonElement>(null);
   const idempotencyKey = useRef<string | null>(null);
   const [values, setValues] = useState<RateEntry>(emptyEntry);
   const [errors, setErrors] = useState<Errors>({});
@@ -70,6 +71,7 @@ export function RateEntryPage() {
 
   function change(next: Partial<RateEntry>) {
     setValues({ ...values, ...next });
+    setErrors(withoutFields(errors, Object.keys(next)));
     setSaved(null);
     setReview(null);
     idempotencyKey.current = null;
@@ -89,11 +91,17 @@ export function RateEntryPage() {
     setErrors(found);
     if (Object.keys(found).length > 0) return;
     setSaved(null);
+    publish.reset();
     check.mutate({ rateType: values.rateType, from: values.from, to: values.to, validFrom: values.validFrom, rate: values.rate.trim() });
   }
 
   const busy = check.isPending || publish.isPending;
   const publishFailure = publish.isError && !fieldsOwnFailure(publish.error, SERVER_PREFIX, FIELDS);
+  useEffect(() => {
+    if (busy) return;
+    if (saved) rateField.current?.focus();
+    else if (publishFailure) saveButton.current?.focus();
+  }, [busy, saved, publishFailure]);
 
   return (
     <div className={styles.stack}>
@@ -118,7 +126,7 @@ export function RateEntryPage() {
           </FormField>
         </fieldset>
         <div className={styles.formActions}>
-          <Button type="submit" variant="primary" loading={busy} aria-disabled={review !== null || undefined}>
+          <Button ref={saveButton} type="submit" variant="primary" loading={busy} aria-disabled={review !== null || undefined}>
             Save rate
           </Button>
         </div>
@@ -133,7 +141,7 @@ export function RateEntryPage() {
               <Button ref={confirmButton} variant="primary" loading={publish.isPending} onClick={() => publish.mutate(review.input)}>
                 Confirm and save
               </Button>
-              <Button variant="secondary" onClick={goBack}>
+              <Button variant="secondary" disabled={publish.isPending} onClick={goBack}>
                 Go back and edit
               </Button>
             </>

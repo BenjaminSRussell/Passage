@@ -33,6 +33,17 @@ async function fillEntry(user: ReturnType<typeof userEvent.setup>, rate: string)
   await user.type(screen.getByLabelText("Rate"), rate);
 }
 
+function holdRequests(method: string) {
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const stub = globalThis.fetch;
+  vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
+    if (init?.method === method) await gate;
+    return stub(input, init);
+  });
+  return release;
+}
+
 const publishCalls = () => server.calls.filter((c) => c.method === "POST");
 
 describe("rate entry page", () => {
@@ -174,6 +185,65 @@ describe("rate entry page", () => {
     await waitFor(() => expect(screen.getByLabelText("Rate type")).toHaveFocus());
     expect(screen.getByLabelText("Rate type")).toHaveAccessibleDescription("Choose a rate type.");
     expect(server.calls.some((c) => c.url.pathname.includes("/rates"))).toBe(false);
+  });
+
+  it("clears a field's error and invalid state as soon as it is edited, without moving focus", async () => {
+    answer({});
+    const user = userEvent.setup();
+    renderAt("/fx/rate-entry");
+    await screen.findByRole("option", { name: "CLOSING – Closing" });
+    await user.click(screen.getByRole("button", { name: "Save rate" }));
+    await screen.findByText("Enter a rate greater than zero, such as 1.0855.");
+    await user.type(screen.getByLabelText("Rate"), "1");
+    expect(screen.queryByText("Enter a rate greater than zero, such as 1.0855.")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Rate")).not.toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Rate")).toHaveFocus();
+    expect(screen.getByLabelText("Rate type")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText("Choose a rate type.")).toBeInTheDocument();
+  });
+
+  it("moves focus to the rate field after a successful save, also after confirming a large change", async () => {
+    answer({
+      history: json(200, { entries: [history("1")] }),
+      publish: posted(),
+    });
+    const user = userEvent.setup();
+    renderAt("/fx/rate-entry");
+    await fillEntry(user, "1.5");
+    await user.click(screen.getByRole("button", { name: "Save rate" }));
+    await user.click(await screen.findByRole("button", { name: "Confirm and save" }));
+    await screen.findByText("Stored as version 2.");
+    await waitFor(() => expect(screen.getByLabelText("Rate")).toHaveFocus());
+  });
+
+  it("moves focus to Save rate when a confirmed save fails with an error no field owns", async () => {
+    answer({
+      history: json(200, { entries: [history("1")] }),
+      publish: json(500, { code: "COM-0500", detail: "internal error" }),
+    });
+    const user = userEvent.setup();
+    renderAt("/fx/rate-entry");
+    await fillEntry(user, "1.5");
+    await user.click(screen.getByRole("button", { name: "Save rate" }));
+    await user.click(await screen.findByRole("button", { name: "Confirm and save" }));
+    await screen.findByText("Could not save the rate");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save rate" })).toHaveFocus());
+  });
+
+  it("disables Go back and edit while the confirmed save is in flight", async () => {
+    answer({
+      history: json(200, { entries: [history("1")] }),
+      publish: posted(),
+    });
+    const release = holdRequests("POST");
+    const user = userEvent.setup();
+    renderAt("/fx/rate-entry");
+    await fillEntry(user, "1.5");
+    await user.click(screen.getByRole("button", { name: "Save rate" }));
+    await user.click(await screen.findByRole("button", { name: "Confirm and save" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Go back and edit" })).toBeDisabled());
+    release();
+    expect(await screen.findByText("Stored as version 2.")).toBeInTheDocument();
   });
 
   it("rejects a zero rate", async () => {
@@ -336,6 +406,7 @@ describe("rate types page", () => {
     answer({ put: json(200, { id: "t3", code: "BUDGET", name: "Budget", allowInverse: false, provider: "csv" }) });
     const user = userEvent.setup();
     renderAt("/fx/rate-types");
+    await screen.findByRole("button", { name: "CLOSING" });
     await user.type(await screen.findByLabelText("Code"), "budget");
     await user.type(screen.getByLabelText("Name"), "Budget");
     await user.type(screen.getByLabelText("Provider"), "csv");
@@ -378,6 +449,7 @@ describe("rate types page", () => {
     answer({ put: json(403, { code: "COM-0403", detail: "forbidden" }) });
     const user = userEvent.setup();
     renderAt("/fx/rate-types");
+    await screen.findByRole("button", { name: "CLOSING" });
     await user.type(await screen.findByLabelText("Code"), "X");
     await user.type(screen.getByLabelText("Name"), "Xtra");
     await user.click(screen.getByRole("button", { name: "Create rate type" }));
@@ -390,6 +462,7 @@ describe("rate types page", () => {
     answer({ put: json(400, { code: "FX_RATE_INVALID", detail: "rate type code and name are required" }) });
     const user = userEvent.setup();
     renderAt("/fx/rate-types");
+    await screen.findByRole("button", { name: "CLOSING" });
     await user.type(await screen.findByLabelText("Code"), "X");
     await user.type(screen.getByLabelText("Name"), "Xtra");
     await user.click(screen.getByRole("button", { name: "Create rate type" }));
@@ -407,6 +480,56 @@ describe("rate types page", () => {
     expect(await screen.findByText("A rate type with this code already exists. Open it in the table to edit it.")).toBeInTheDocument();
     expect(screen.getByLabelText("Code")).toHaveFocus();
     expect(server.calls.some((c) => c.method === "PUT")).toBe(false);
+  });
+
+  it("does not create a rate type while the existing codes could not be loaded", async () => {
+    answer({
+      list: json(500, { code: "COM-0500", detail: "internal error" }),
+      put: json(200, {
+        id: "t9",
+        code: "CLOSING",
+        name: "Other",
+        allowInverse: true,
+      }),
+    });
+    const user = userEvent.setup();
+    renderAt("/fx/rate-types");
+    await screen.findByText("Could not load the rate types");
+    await user.type(screen.getByLabelText("Code"), "closing");
+    await user.type(screen.getByLabelText("Name"), "Other");
+    await user.click(screen.getByRole("button", { name: "Create rate type" }));
+    expect(await screen.findByText(/could not be checked yet/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Code")).toHaveFocus();
+    expect(server.calls.some((c) => c.method === "PUT")).toBe(false);
+  });
+
+  it("locks the form and ignores opening rows while a save is in flight", async () => {
+    answer({ put: json(200, { ...average, name: "Average" }) });
+    const release = holdRequests("PUT");
+    const user = userEvent.setup();
+    renderAt("/fx/rate-types");
+    await user.click(await screen.findByRole("button", { name: "AVERAGE" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(screen.getByLabelText("Name")).toBeDisabled());
+    expect(screen.getByLabelText("Provider")).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "CLOSING" }));
+    expect(screen.getByLabelText("Name")).toHaveValue("Monthly average");
+    release();
+    expect(await screen.findByText("Rate type AVERAGE saved")).toBeInTheDocument();
+    expect(screen.getByLabelText("Name")).toBeEnabled();
+  });
+
+  it("clears a field's error as soon as it is edited, without moving focus", async () => {
+    answer({});
+    const user = userEvent.setup();
+    renderAt("/fx/rate-types");
+    await user.click(await screen.findByRole("button", { name: "Create rate type" }));
+    await screen.findByText("Enter a name, for example Month-end closing.");
+    await user.type(screen.getByLabelText("Name"), "N");
+    expect(screen.queryByText("Enter a name, for example Month-end closing.")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Name")).not.toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Name")).toHaveFocus();
+    expect(screen.getByLabelText("Code")).toHaveAttribute("aria-invalid", "true");
   });
 
   it("moves focus to the name when a row is opened", async () => {
