@@ -41,6 +41,52 @@ func migrated(t *testing.T) *pgxpool.Pool {
 	return app
 }
 
+func TestChildRowsRespectLegalEntityScope(t *testing.T) {
+	pool := migrated(t)
+	s := store.New(pool)
+	entityA, entityB := ids.New(), ids.New()
+	ctxA := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(91), LegalEntityID: entityA, UserID: ids.New()})
+	ctxB := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(91), LegalEntityID: entityB, UserID: ids.New()})
+
+	rfqInput := draftRFQ(t)
+	rfqInput.LegalEntityID = entityA
+	rfq, err := s.CreateRFQ(ctxA, rfqInput, store.Idem{})
+	if err != nil {
+		t.Fatalf("create RFQ: %v", err)
+	}
+	if _, err := s.SendRFQ(ctxA, rfq.ID, 1, []string{ids.New()}, store.Idem{}); err != nil {
+		t.Fatalf("send RFQ: %v", err)
+	}
+
+	saInput := weeklyAgreement(t)
+	saInput.LegalEntityID = entityA
+	sa, err := s.CreateSchedulingAgreement(ctxA, saInput, store.Idem{})
+	if err != nil {
+		t.Fatalf("create scheduling agreement: %v", err)
+	}
+	rows := []struct {
+		table, key, id string
+	}{
+		{"purchase_rfq_line", "rfq_id", rfq.ID},
+		{"purchase_rfq_invitation", "rfq_id", rfq.ID},
+		{"purchase_sa_schedule_line", "agreement_id", sa.Agreement.ID},
+	}
+	for _, row := range rows {
+		t.Run(row.table, func(t *testing.T) {
+			var count int
+			err := dbx.WithTenantTx(ctxB, pool, func(tx pgx.Tx) error {
+				return tx.QueryRow(ctxB, "SELECT count(*) FROM "+row.table+" WHERE tenant_id = $1 AND "+row.key+" = $2", testkit.TenantID(91), row.id).Scan(&count)
+			})
+			if err != nil {
+				t.Fatalf("query child rows: %v", err)
+			}
+			if count != 0 {
+				t.Errorf("entity %s can see %d %s rows owned by entity %s", entityB, count, row.table, entityA)
+			}
+		})
+	}
+}
+
 func dec(s string) decimal.Decimal { return decimal.RequireFromString(s) }
 
 func day(t *testing.T, s string) domain.Day {
