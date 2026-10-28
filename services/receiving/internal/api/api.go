@@ -44,6 +44,8 @@ type Ports struct {
 	Ledger  domain.LedgerPoster
 	Profile domain.PostingProfile
 
+	PurchaseOrders domain.PurchaseOrders
+
 	ResolveMinAge time.Duration
 	ResolveLease  time.Duration
 }

@@ -17,12 +17,15 @@ import (
 const (
 	LedgerPostPath        = "/v1/ledger/journal-entries"
 	LedgerReversePathTmpl = "/v1/ledger/journal-entries/%s/reverse"
+	PurchaseOrderPathTmpl = "/v1/procurement/purchase-orders/%s"
 )
 
 var (
 	ErrPeriodClosed   = errors.New("ledger period closed")
 	ErrLedgerConflict = errors.New("ledger idempotency conflict")
 	ErrLedgerRejected = errors.New("ledger rejected the entry")
+
+	ErrPurchaseOrderNotFound = errors.New("purchase order not found")
 )
 
 type PeriodStatus string
@@ -79,6 +82,29 @@ type PeriodControl interface {
 
 type LedgerPoster interface {
 	Post(ctx context.Context, entry JournalEntry) (string, error)
+}
+
+type PurchaseOrderLine struct {
+	LineNo      int
+	ProductID   string
+	Unit        string
+	Qty         decimal.Decimal
+	UnitPrice   decimal.Decimal
+	ReceivedQty decimal.Decimal
+	InvoicedQty decimal.Decimal
+	Status      string
+}
+
+type PurchaseOrder struct {
+	ID             string
+	VendorID       string
+	Currency       string
+	DocumentStatus string
+	Lines          []PurchaseOrderLine
+}
+
+type PurchaseOrders interface {
+	Get(ctx context.Context, id string) (PurchaseOrder, error)
 }
 
 type FakePeriods struct {

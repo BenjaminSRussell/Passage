@@ -10,6 +10,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/ledger"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/periods"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/purchasing"
 )
 
 func TestRun(t *testing.T) {
@@ -130,7 +131,7 @@ func TestBuildPorts(t *testing.T) {
 
 func TestBuildPortsUsesRealAdaptersWhenConfigured(t *testing.T) {
 	ports, err := buildPorts(func(k string) string {
-		return map[string]string{"LEDGER_URL": "http://l", "CLOSE_URL": "http://c", "PASSAGE_ALLOW_FAKES": "1"}[k]
+		return map[string]string{"LEDGER_URL": "http://l", "CLOSE_URL": "http://c", "PURCHASING_URL": "http://p", "PASSAGE_ALLOW_FAKES": "1"}[k]
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -140,6 +141,9 @@ func TestBuildPortsUsesRealAdaptersWhenConfigured(t *testing.T) {
 	}
 	if _, real := ports.Periods.(*periods.Client); !real {
 		t.Fatalf("periods is %T despite CLOSE_URL", ports.Periods)
+	}
+	if _, real := ports.PurchaseOrders.(*purchasing.Client); !real {
+		t.Fatalf("purchase orders is %T despite PURCHASING_URL", ports.PurchaseOrders)
 	}
 }
 

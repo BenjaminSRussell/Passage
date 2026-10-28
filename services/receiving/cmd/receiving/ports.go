@@ -9,6 +9,7 @@ import (
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/ledger"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/periods"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/purchasing"
 )
 
 func buildPorts(getenv func(string) string) (api.Ports, error) {
@@ -31,6 +32,11 @@ func buildPorts(getenv func(string) string) (api.Ports, error) {
 		ports.Periods = domain.FakePeriods{Status: domain.PeriodOpen}
 	default:
 		return api.Ports{}, fmt.Errorf("CLOSE_URL is required (set PASSAGE_ALLOW_FAKES=1 only for local development)")
+	}
+	if url := getenv("PURCHASING_URL"); url != "" {
+		ports.PurchaseOrders = purchasing.New(url, nil)
+	} else {
+		slog.Warn("PURCHASING_URL is empty: no purchase order lookups are wired")
 	}
 	profile, err := buildProfile(getenv, allowFakes)
 	ports.Profile = profile
