@@ -23,28 +23,12 @@ const EnvURL = "PASSAGE_TEST_DATABASE_URL"
 // EnvAppURL is the application-role database URL used by RLS integration tests.
 const EnvAppURL = "PASSAGE_TEST_APP_DATABASE_URL"
 
-// EnvSkipPackages lists package directories (space separated, matched as path
-// suffixes of the test's working directory) whose database tests are skipped.
-const EnvSkipPackages = "PASSAGE_TEST_DB_SKIP_PACKAGES"
-
-func listedIn(list, dir string) bool {
-	for _, pkg := range strings.Fields(list) {
-		if strings.HasSuffix(dir, "/"+pkg) {
-			return true
-		}
-	}
-	return false
-}
-
 // DB returns a pool whose search_path is a throwaway schema, dropped on cleanup.
 func DB(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	url := os.Getenv(EnvURL)
 	if url == "" {
 		t.Skipf("%s not set; skipping database test", EnvURL)
-	}
-	if dir, _ := os.Getwd(); listedIn(os.Getenv(EnvSkipPackages), dir) {
-		t.Skipf("package is listed in %s; skipping database test", EnvSkipPackages)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
