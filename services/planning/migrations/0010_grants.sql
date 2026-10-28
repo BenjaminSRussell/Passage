@@ -1,6 +1,6 @@
 -- Application role privileges. passage_app (no BYPASSRLS) works under the row-level
--- security policies; tables the store never updates or deletes stay SELECT, INSERT.
--- Skipped when the role does not exist (developer databases without the role split).
+-- security policies. outbox and firming_batch are append-only. Skipped when the role
+-- does not exist (developer databases without the role split).
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'passage_app') THEN
