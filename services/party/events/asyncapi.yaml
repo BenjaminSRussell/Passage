@@ -13,7 +13,37 @@ channels:
         $ref: '#/components/messages/partyUpdated'
       merged:
         $ref: '#/components/messages/partyMerged'
+  passage.party.customer:
+    address: passage.party.customer
+    messages:
+      updated:
+        $ref: '#/components/messages/customerUpdated'
+  passage.party.change:
+    address: passage.party.change
+    messages:
+      requested:
+        $ref: '#/components/messages/changeRequested'
+      approved:
+        $ref: '#/components/messages/changeApproved'
+      rejected:
+        $ref: '#/components/messages/changeRejected'
 operations:
+  onCustomerUpdated:
+    action: send
+    channel: { $ref: '#/channels/passage.party.customer' }
+    messages: [{ $ref: '#/channels/passage.party.customer/messages/updated' }]
+  onChangeRequested:
+    action: send
+    channel: { $ref: '#/channels/passage.party.change' }
+    messages: [{ $ref: '#/channels/passage.party.change/messages/requested' }]
+  onChangeApproved:
+    action: send
+    channel: { $ref: '#/channels/passage.party.change' }
+    messages: [{ $ref: '#/channels/passage.party.change/messages/approved' }]
+  onChangeRejected:
+    action: send
+    channel: { $ref: '#/channels/passage.party.change' }
+    messages: [{ $ref: '#/channels/passage.party.change/messages/rejected' }]
   onPartyCreated:
     action: send
     channel: { $ref: '#/channels/passage.party.party' }
@@ -74,3 +104,45 @@ components:
                 toId: { type: string, format: uuid }
           mergedAt: { type: string, format: date-time }
       x-passage-type: dev.passage.party.party.merged.v1
+    customerUpdated:
+      name: updated
+      title: Customer updated
+      description: Emitted when a credit limit decrease is applied immediately. An increase emits change.requested and only reaches this limit through change.approved.
+      payload:
+        type: object
+        required: [customer_id, legal_entity_id, changed_fields, credit_limit]
+        properties:
+          customer_id: { type: string, format: uuid }
+          legal_entity_id: { type: string, format: uuid }
+          changed_fields: { type: array, items: { type: string } }
+          credit_limit: { type: string, description: Decimal with at most 2 places. }
+      x-passage-type: dev.passage.party.customer.updated.v1
+    changeRequested:
+      name: requested
+      title: Change approval requested
+      description: A protected-field change (credit limit increase) is held in pending_change and is not applied. The approval workflow starts from this event and decides through POST /v1/party/pending-changes/{id}:approve or :reject.
+      payload: { $ref: '#/components/schemas/Change' }
+      x-passage-type: dev.passage.party.change.requested.v1
+    changeApproved:
+      name: approved
+      title: Change approved and applied
+      payload: { $ref: '#/components/schemas/Change' }
+      x-passage-type: dev.passage.party.change.approved.v1
+    changeRejected:
+      name: rejected
+      title: Change rejected and discarded
+      payload: { $ref: '#/components/schemas/Change' }
+      x-passage-type: dev.passage.party.change.rejected.v1
+  schemas:
+    Change:
+      type: object
+      required: [change_id, customer_id, legal_entity_id, field, current_value, requested_value, requested_by]
+      properties:
+        change_id: { type: string, format: uuid }
+        customer_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        field: { type: string, enum: [credit_limit] }
+        current_value: { type: [string, 'null'] }
+        requested_value: { type: string }
+        requested_by: { type: string }
+        decided_by: { type: string, description: Present on approved and rejected. }

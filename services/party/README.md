@@ -31,11 +31,18 @@ Database tests (`internal/store`, the serve test in `cmd/party`) are skipped unl
 
 `store.Audit(ctx)` returns an `IntegrityReport`: roles owned by merged parties, references to merged parties, merged parties without a merge record. `Clean()` is true after any successful merge.
 
+## Credit limit change approval (FR-7.10, AC-7.4)
+
+`POST /v1/party/customers/{id}/credit-limit` with `{"creditLimit":"120000.00"}` (a decimal string). A value above the stored limit never touches `customer_role.credit_limit`: it inserts a `pending_change` row (one open row per customer and field), answers 202 with the unchanged limit and the pending change, and enqueues `dev.passage.party.change.requested.v1` in the same transaction. `POST /v1/party/pending-changes/{id}:approve` writes the limit and enqueues `change.approved.v1`; `:reject` leaves the limit alone and enqueues `change.rejected.v1`. The requester cannot decide their own change (`PTY-SELF-APPROVAL`). A decrease is applied at once and emits `customer.updated.v1`. `pending_change` carries RLS on tenant and legal entity; `0004_grants.sql` grants `passage_app`.
+
+Workflow engine: Temporal, per ADR 0001. Party stays Temporal-free and adds no `go.temporal.io/sdk` dependency. The `change.requested.v1` outbox event is the approval request: a `services/workflow-ts` worker consumes it, starts `approvalWorkflow` with `requestId` = `change_id` and `entityType` = `credit_limit`, and the workflow's outcome calls `:approve` or `:reject` as the deciding user. Because the pending row and the request event commit together, a limit change cannot be lost or applied without a recorded request, and the rule that the limit is unchanged until approved is enforced by party alone, whatever the workflow does. The consumer in workflow-ts is not part of this change. Payables can reuse the same shape: pending row, request event, decision routes.
+
 ## Duties
 
 | Duty | Grants |
 |---|---|
-| `party.write` | `POST /v1/party/tax-registrations:validate`, `POST /v1/party/parties`, `PATCH /v1/party/parties/{id}` |
+| `party.approve` | `POST /v1/party/pending-changes/{id}:approve`, `:reject`; seeded in `policies/authz/data.json` |
+| `party.write` | `POST /v1/party/tax-registrations:validate`, `POST /v1/party/parties`, `POST /v1/party/customers/{id}/credit-limit`, `PATCH /v1/party/parties/{id}` |
 | `party.read` | `GET /v1/party/parties/{id}` |
 | `pii.read` | shows `dob` unmasked on party responses; without it `dob` reads `"••••"` when set |
 
@@ -53,6 +60,12 @@ Database tests (`internal/store`, the serve test in `cmd/party`) are skipped unl
 | `PTY-VERSION-REQUIRED` | 428 | PATCH without a usable `If-Match` or body `version` |
 | `PTY-VERSION-CONFLICT` | 409 | PATCH with a stale version (error class `conflict_version`) |
 | `PTY-STATUS-TRANSITION` | 422 | status other than `active` or `inactive`, or the party is merged |
+| `PTY-CUSTOMER-NOT-FOUND` | 404 | unknown customer id, another tenant or legal entity, or a malformed id |
+| `PTY-CHANGE-NOT-FOUND` | 404 | unknown pending change, another tenant or legal entity, or a malformed id |
+| `PTY-CHANGE-PENDING` | 409 | a credit limit change is already awaiting approval for this customer |
+| `PTY-CHANGE-DECIDED` | 409 | the pending change was already approved or rejected |
+| `PTY-SELF-APPROVAL` | 403 | the requester tried to decide their own change |
+| `PTY-CREDIT-INVALID` | 422 | `creditLimit` is not a non-negative amount with at most 2 decimals |
 | `PTY-NUMBERING-UNAVAILABLE` | 503 | numbering failed, timed out or `NUMBERING_URL` is empty; no party is written |
 | `idempotency_key_reuse` | 409 | the `Idempotency-Key` was used with a different body |
 
@@ -72,6 +85,6 @@ No new Go dependency: `pgx` and `chi` were already required, and the database he
 
 ## Metrics
 
-`party_tax_validations_total{status}`, `party_tax_validations_rejected_total`, `party_tax_checker_failures_total`, `party_parties_created_total` (new parties only; an idempotent replay is not counted).
+`party_tax_validations_total{status}`, `party_tax_validations_rejected_total`, `party_tax_checker_failures_total`, `party_parties_created_total` (new parties only; an idempotent replay is not counted), `party_credit_limit_changes_total{outcome}` (requested, applied, approved, rejected).
 
 VAT numbers are format-checked only and return `unverified`; this slice has no VIES client.

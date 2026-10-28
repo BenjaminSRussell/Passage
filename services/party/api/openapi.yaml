@@ -113,6 +113,72 @@ paths:
         '422': { description: 'PTY-PARTY-INVALID (bad field, partyType change) or PTY-STATUS-TRANSITION (status merged, unknown status, or the party is merged).', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: 'PTY-VERSION-REQUIRED: no usable If-Match or body version.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '500': { $ref: '#/components/responses/Problem' }
+  /v1/party/customers/{id}/credit-limit:
+    parameters:
+      - { name: id, in: path, required: true, description: Customer role id., schema: { type: string, format: uuid } }
+    post:
+      operationId: setCustomerCreditLimit
+      x-passage-duty: party.write
+      description: A decrease (or any value not above the current limit) is applied at once and emits dev.passage.party.customer.updated.v1. An increase never changes the stored limit; it creates a pending_change, answers 202 and emits dev.passage.party.change.requested.v1 for the approval workflow. A limit equal to the current one is a no-op.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SetCreditLimit' }
+      responses:
+        '200':
+          description: Applied, or unchanged. creditLimit is the stored limit.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreditLimitResult' }
+        '202':
+          description: Increase held for approval. creditLimit is still the old limit and pendingChange is the open request.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreditLimitResult' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: 'PTY-CUSTOMER-NOT-FOUND: unknown id, another tenant or legal entity, or a malformed id.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: 'PTY-CHANGE-PENDING: a credit limit change is already awaiting approval for this customer.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'PTY-CREDIT-INVALID: creditLimit is not a non-negative amount with at most 2 decimals.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/party/pending-changes/{id}:approve:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: approvePendingChange
+      x-passage-duty: party.approve
+      description: Applies the held change to the customer and emits dev.passage.party.change.approved.v1. The requester cannot approve their own change.
+      responses:
+        '200':
+          description: The approved change.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PendingChange' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { description: 'AUTH-0003 (missing duty) or PTY-SELF-APPROVAL.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: 'PTY-CHANGE-NOT-FOUND.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: 'PTY-CHANGE-DECIDED: the change was already approved or rejected.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/party/pending-changes/{id}:reject:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: rejectPendingChange
+      x-passage-duty: party.approve
+      description: Discards the held change; the stored limit is untouched. Emits dev.passage.party.change.rejected.v1.
+      responses:
+        '200':
+          description: The rejected change.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PendingChange' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { description: 'AUTH-0003 (missing duty) or PTY-SELF-APPROVAL.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '404': { description: 'PTY-CHANGE-NOT-FOUND.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: 'PTY-CHANGE-DECIDED.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '500': { $ref: '#/components/responses/Problem' }
   /healthz:
     get:
       operationId: liveness
@@ -209,6 +275,33 @@ components:
             updatedAt: { type: string, format: date-time }
             requestedId: { type: string, description: Present with redirected when a merged party was requested. }
             redirected: { type: boolean }
+    SetCreditLimit:
+      type: object
+      additionalProperties: false
+      required: [creditLimit]
+      properties:
+        creditLimit: { type: string, pattern: '^[0-9]{1,16}(\.[0-9]{1,2})?$', description: Decimal string; JSON numbers are rejected. }
+    PendingChange:
+      type: object
+      required: [id, customerId, legalEntityId, field, currentValue, requestedValue, status, requestedBy, requestedAt]
+      properties:
+        id: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        field: { type: string, enum: [credit_limit] }
+        currentValue: { type: [string, 'null'] }
+        requestedValue: { type: string }
+        status: { type: string, enum: [pending, approved, rejected] }
+        requestedBy: { type: string }
+        decidedBy: { type: string }
+        requestedAt: { type: string, format: date-time }
+        decidedAt: { type: string, format: date-time }
+    CreditLimitResult:
+      type: object
+      required: [creditLimit]
+      properties:
+        creditLimit: { type: [string, 'null'] }
+        pendingChange: { $ref: '#/components/schemas/PendingChange' }
     Problem:
       type: object
       required: [type, title, status]

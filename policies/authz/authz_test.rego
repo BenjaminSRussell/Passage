@@ -3,7 +3,7 @@ package authz
 import rego.v1
 
 test_all_seeded_duties_allow_their_declared_permissions if {
-	count(data.duties) == 39
+	count(data.duties) == 40
 	every duty, spec in data.duties {
 		count(spec.permissions) > 0
 		every permission in spec.permissions {
