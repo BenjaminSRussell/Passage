@@ -42,7 +42,7 @@ func TestPostgres_UnitMigrationIsRepeatableAndWidensReferenceKinds(t *testing.T)
 		t.Fatalf("unknown kind error = %v; want check violation 23514", err)
 	}
 	var indexes int
-	if err := pool.QueryRow(ctx, `select count(*) from pg_indexes where indexname = 'unit_of_measure_idempotency' and indexdef like '%WHERE (idempotency_key IS NOT NULL)%'`).Scan(&indexes); err != nil || indexes != 1 {
+	if err := pool.QueryRow(ctx, `select count(*) from pg_indexes where indexname = 'unit_of_measure_idempotency' and indexdef like '%WHERE (idempotency_key IS NOT NULL)%' and schemaname = current_schema()`).Scan(&indexes); err != nil || indexes != 1 {
 		t.Fatalf("partial idempotency index count = %d, %v; want 1", indexes, err)
 	}
 }
@@ -259,7 +259,7 @@ func TestPostgres_ConversionMigrationIsRepeatable(t *testing.T) {
 		t.Fatalf("re-running the migrations: %v", err)
 	}
 	var indexes int
-	if err := pool.QueryRow(ctx, `select count(*) from pg_indexes where indexname = 'uom_conversion_idempotency' and indexdef like '%WHERE (idempotency_key IS NOT NULL)%'`).Scan(&indexes); err != nil || indexes != 1 {
+	if err := pool.QueryRow(ctx, `select count(*) from pg_indexes where indexname = 'uom_conversion_idempotency' and indexdef like '%WHERE (idempotency_key IS NOT NULL)%' and schemaname = current_schema()`).Scan(&indexes); err != nil || indexes != 1 {
 		t.Fatalf("partial idempotency index count = %d, %v; want 1", indexes, err)
 	}
 }
