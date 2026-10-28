@@ -2,21 +2,98 @@ package authz
 
 import rego.v1
 
+concrete(resource) := replace(replace(resource, "{,/**}", "/item-1"), "*", "item-1")
+
+allowed(duty, method, resource) if {
+	result := decision with input as {
+		"subject": {"tenant_id": "tenant-a", "user_id": "user-a"},
+		"action": method,
+		"resource": resource,
+	}
+		with data.assignments as {"tenant-a": {"user-a": [duty]}}
+	result.allow
+}
+
+has_route_permissions(spec) if count(spec.permissions) > 0
+
+has_route_permissions(spec) if {
+	spec.flag == true
+	count(spec.permissions) == 0
+}
+
 test_all_seeded_duties_allow_their_declared_permissions if {
-	count(data.duties) == 40
+	count(data.duties) == 92
 	every duty, spec in data.duties {
-		count(spec.permissions) > 0
+		has_route_permissions(spec)
 		every permission in spec.permissions {
-			method := permission.methods[0]
-			result := decision with input as {
-				"subject": {"tenant_id": "tenant-a", "user_id": "user-a"},
-				"action": method,
-				"resource": permission.resource,
+			every method in permission.methods {
+				allowed(duty, method, concrete(permission.resource))
 			}
-				with data.assignments as {"tenant-a": {"user-a": [duty]}}
-			result.allow
 		}
 	}
+}
+
+test_flag_duties_grant_no_routes if {
+	flag_duties := {"ledger.journal.postdirect", "inventory.count.approve"}
+	{d | some d, spec in data.duties; spec.flag == true} == flag_duties
+	every duty in flag_duties {
+		count(data.duties[duty].permissions) == 0
+		not allowed(duty, "POST", "/v1/ledger/journal-entries")
+		not allowed(duty, "POST", "/v1/inventory/count-sheets/c1:post")
+	}
+}
+
+segregation_denials := [
+	["inventory.journal.write", "POST", "/v1/inventory/journals/j1:post"],
+	["inventory.journal.write", "POST", "/v1/inventory/journals/j1:approve"],
+	["inventory.transfer.write", "POST", "/v1/inventory/transfer-orders/t1:ship"],
+	["inventory.transfer.write", "POST", "/v1/inventory/transfer-orders/t1:receive"],
+	["ledger.journal.write", "POST", "/v1/ledger/journal-batches/b1/approve"],
+	["ledger.journal.write", "POST", "/v1/ledger/journal-batches/b1/post"],
+	["ledger.journal.approve", "POST", "/v1/ledger/journal-batches/b1/post"],
+	["ledger.journal.post", "POST", "/v1/ledger/journal-entries/e1/reverse"],
+	["ledger.journal.reverse", "POST", "/v1/ledger/journal-entries"],
+	["ReceivingMaintain", "POST", "/v1/receiving/receipts/r1:post"],
+	["ReceivingMaintain", "POST", "/v1/receiving/receipts/r1:correct"],
+	["ReceivingMaintain", "POST", "/v1/receiving/receipts/r1:cancel"],
+	["PurchaseOrderMaintain", "POST", "/v1/procurement/purchase-orders/p1:approve"],
+	["RFQMaintain", "POST", "/v1/procurement/rfqs/q1:award"],
+	["ledger.journal.read", "GET", "/v1/reporting/runs/r1"],
+	["ledger.journal.read", "GET", "/v1/reporting/runs/r1/outputs/pdf"],
+	["reporting.statement.view", "GET", "/v1/reporting/runs/r1/cells/a/b/lines"],
+	["reporting.statement.view", "GET", "/v1/reporting/definitions/d1/export"],
+]
+
+test_narrow_duties_cannot_reach_verb_routes if {
+	every denial in segregation_denials {
+		not allowed(denial[0], denial[1], denial[2])
+	}
+}
+
+segregation_grants := [
+	["inventory.journal.post", "POST", "/v1/inventory/journals/j1:post"],
+	["inventory.transfer.post", "POST", "/v1/inventory/transfer-orders/t1:ship"],
+	["ledger.journal.approve", "POST", "/v1/ledger/journal-batches/b1/approve"],
+	["ledger.journal.post", "POST", "/v1/ledger/journal-batches/b1/post"],
+	["ledger.journal.reverse", "POST", "/v1/ledger/journal-entries/e1/reverse"],
+	["ReceivingPost", "POST", "/v1/receiving/receipts/r1:post"],
+	["PurchaseOrderConfirm", "POST", "/v1/procurement/purchase-orders/p1:approve"],
+	["RFQAward", "POST", "/v1/procurement/rfqs/q1:award"],
+	["ledger.journal.read", "GET", "/v1/reporting/runs/r1/cells/a/b/lines"],
+	["reporting.definition.maintain", "GET", "/v1/reporting/definitions/d1/export"],
+]
+
+test_verb_routes_granted_to_their_own_duty if {
+	every grant in segregation_grants {
+		allowed(grant[0], grant[1], grant[2])
+	}
+}
+
+test_platform_duties_keep_prefix_reach if {
+	allowed("Maintain vendors", "GET", "/v1/vendors")
+	allowed("Maintain vendors", "PUT", "/v1/vendors/v1/contacts/c1")
+	allowed("View exchange rates", "GET", "/v1/fx/rates/history")
+	not allowed("View exchange rates", "GET", "/v1/fx/ratesx")
 }
 
 test_maintain_vendors_can_put if {
