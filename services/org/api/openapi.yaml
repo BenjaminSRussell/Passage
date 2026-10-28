@@ -707,6 +707,18 @@ paths:
           description: Current address versions ordered by address id, for one owner or, with q, across the tenant's owners and legal entities, filtered by countryCode and purpose when given. Superseded versions are never returned. An owner or legal entity outside the caller's scope yields no rows. Pass nextCursor as cursor for the next page. 400 COM-0001 for a bad q (outside 3 to 100 characters), owner, countryCode, purpose, limit or cursor.
           content: { application/json: { schema: { $ref: '#/components/schemas/AddressList' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/org/addresses:normalize:
+    post:
+      operationId: normalizeAddress
+      x-passage-duty: org.read
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PostalAddressInput' } } }
+      responses:
+        '200':
+          description: The address the validation adapter normalizes (FR-6.13), its formatted text and the adapter's suggestions for fixes. The default adapter is null and returns the input unchanged with no suggestions; the rule-based adapter (ORG_ADDRESS_VALIDATOR=rules) trims and collapses whitespace, upper-cases codes, maps UK to GB and lays out postal codes for US, CA, GB, DE, FR, IN and MX. Nothing is stored. 400 COM-0001 for an unknown field, and for a countryCode that is not two letters once normalized.
+          content: { application/json: { schema: { $ref: '#/components/schemas/NormalizedAddress' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/org/address-versions/{id}:
     get:
       operationId: getAddressVersion
@@ -1616,6 +1628,20 @@ components:
       required: [items]
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/AddressVersion' } }
+    PostalAddressInput:
+      type: object
+      required: [countryCode]
+      additionalProperties: false
+      properties: { countryCode: { type: string }, regionCode: { type: string }, city: { type: string }, postalCode: { type: string }, street1: { type: string }, street2: { type: string }, street3: { type: string }, building: { type: string }, poBox: { type: string } }
+    NormalizedAddress:
+      type: object
+      required: [address, formatted, suggestions]
+      properties:
+        address: { $ref: '#/components/schemas/PostalAddressInput' }
+        formatted: { type: string }
+        suggestions:
+          type: array
+          items: { type: object, required: [address, reason], properties: { address: { $ref: '#/components/schemas/PostalAddressInput' }, reason: { type: string } } }
     AddressList:
       type: object
       required: [items]

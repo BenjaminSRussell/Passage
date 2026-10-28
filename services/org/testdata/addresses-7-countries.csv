@@ -1,0 +1,211 @@
+country,region,city,street1,postal_input,postal_expected,valid
+US,MI,Detroit,842 Main Street,17400,17400,true
+CA,BC,Vancouver,789 Main Street,A4S 3P8,A4S 3P8,true
+GB,,London,198 Main Street,JZ2 7JR,JZ2 7JR,true
+DE,,Hamburg,97 Main Street,34109,34109,true
+FR,,Paris,848 Main Street,57389,57389,true
+MX,NLE,Monterrey,994 Main Street,80539,80539,true
+IN,KA,Bengaluru,312 Main Street,691188,691188,true
+US,NY,Albany,120 Main Street, 94436 ,94436,true
+CA,QC,Montreal,855 Main Street,T0G2A5,T0G 2A5,true
+GB,,Bristol,384 Main Street,N97XN,N9 7XN,true
+DE,,Berlin,452 Main Street, 31977,31977,true
+FR,,Lyon,816 Main Street, 18674,18674,true
+MX,NLE,Monterrey,837 Main Street, 61347,61347,true
+IN,KA,Bengaluru,740 Main Street,300 814,300814,true
+US,MI,Detroit,822 Main Street,534875846,53487-5846,true
+CA,AB,Calgary,627 Main Street,s4x7z7,S4X 7Z7,true
+GB,,Glasgow,146 Main Street,n87xj,N8 7XJ,true
+DE,,Munich,662 Main Street,67248 ,67248,true
+FR,,Paris,639 Main Street,70209 ,70209,true
+MX,NLE,Monterrey,115 Main Street,55790 ,55790,true
+IN,MH,Mumbai,159 Main Street, 590687 ,590687,true
+US,CA,San Jose,481 Main Street,31552 3952,31552-3952,true
+CA,ON,Ottawa,644 Main Street,z1d  0Y7,Z1D 0Y7,true
+GB,,Glasgow,742 Main Street,ve2 8ay,VE2 8AY,true
+DE,,Berlin,838 Main Street,37 777,37777,true
+FR,,Lille,284 Main Street,79 145,79145,true
+MX,JAL,Guadalajara,369 Main Street,01 844,01844,true
+IN,KA,Bengaluru,990 Main Street,867501,867501,true
+US,NY,Albany,836 Main Street,93802-5500,93802-5500,true
+CA,QC,Montreal,718 Main Street, P5C2Z1 ,P5C 2Z1,true
+GB,,Glasgow,561 Main Street,  E2M 1FT ,E2M 1FT,true
+DE,,Hamburg,154 Main Street,24289,24289,true
+FR,,Lyon,816 Main Street,33926,33926,true
+MX,NLE,Monterrey,168 Main Street,53890,53890,true
+IN,DL,New Delhi,396 Main Street,456 870,456870,true
+US,IL,Chicago,866 Main Street,88238,88238,true
+CA,QC,Montreal,707 Main Street,Y2N 1B0,Y2N 1B0,true
+GB,,London,484 Main Street,B2 1VH,B2 1VH,true
+DE,,Munich,231 Main Street, 94171,94171,true
+FR,,Lille,588 Main Street, 02711,02711,true
+MX,NLE,Monterrey,183 Main Street, 00644,00644,true
+IN,KA,Bengaluru,238 Main Street, 483490 ,483490,true
+US,TX,Austin,540 Main Street, 58199 ,58199,true
+CA,QC,Montreal,972 Main Street,A5L6Z0,A5L 6Z0,true
+GB,,Bristol,143 Main Street,A15HE,A1 5HE,true
+DE,,Berlin,430 Main Street,82369 ,82369,true
+FR,,Lyon,578 Main Street,87442 ,87442,true
+MX,JAL,Guadalajara,910 Main Street,03712 ,03712,true
+IN,DL,New Delhi,112 Main Street,182129,182129,true
+US,IL,Chicago,486 Main Street,788736270,78873-6270,true
+CA,BC,Vancouver,428 Main Street,j5e4m9,J5E 4M9,true
+GB,,Bristol,229 Main Street,a54np,A5 4NP,true
+DE,,Berlin,772 Main Street,28 088,28088,true
+FR,,Lyon,944 Main Street,55 964,55964,true
+MX,NLE,Monterrey,680 Main Street,14 201,14201,true
+IN,DL,New Delhi,618 Main Street,388 111,388111,true
+US,CA,San Jose,222 Main Street,55232 2327,55232-2327,true
+CA,AB,Calgary,638 Main Street,d9e  7G9,D9E 7G9,true
+GB,,Bristol,752 Main Street,j1b 1sy,J1B 1SY,true
+DE,,Munich,326 Main Street,00416,00416,true
+FR,,Lille,345 Main Street,15225,15225,true
+MX,NLE,Monterrey,781 Main Street,76082,76082,true
+IN,MH,Mumbai,457 Main Street, 602874 ,602874,true
+US,CA,San Jose,490 Main Street,16382-7548,16382-7548,true
+CA,BC,Vancouver,302 Main Street, V4R8B8 ,V4R 8B8,true
+GB,,Leeds,678 Main Street,  X1 6AG ,X1 6AG,true
+DE,,Hamburg,312 Main Street, 32404,32404,true
+FR,,Lille,310 Main Street, 53290,53290,true
+MX,CMX,Mexico City,835 Main Street, 59252,59252,true
+IN,KA,Bengaluru,947 Main Street,476895,476895,true
+US,CA,San Jose,672 Main Street,16099,16099,true
+CA,QC,Montreal,654 Main Street,B7Z 8T4,B7Z 8T4,true
+GB,,Bristol,656 Main Street,M5 5BY,M5 5BY,true
+DE,,Hamburg,326 Main Street,80110 ,80110,true
+FR,,Lyon,441 Main Street,81245 ,81245,true
+MX,CMX,Mexico City,65 Main Street,44566 ,44566,true
+IN,DL,New Delhi,721 Main Street,214 774,214774,true
+US,TX,Austin,247 Main Street, 00886 ,00886,true
+CA,ON,Ottawa,270 Main Street,E8D0N4,E8D 0N4,true
+GB,,Glasgow,218 Main Street,D1G6PS,D1G 6PS,true
+DE,,Hamburg,587 Main Street,77 597,77597,true
+FR,,Paris,820 Main Street,28 132,28132,true
+MX,JAL,Guadalajara,229 Main Street,95 794,95794,true
+IN,DL,New Delhi,859 Main Street, 493063 ,493063,true
+US,IL,Chicago,591 Main Street,105574664,10557-4664,true
+CA,BC,Vancouver,538 Main Street,w5w0p9,W5W 0P9,true
+GB,,Leeds,313 Main Street,w3m7zr,W3M 7ZR,true
+DE,,Munich,74 Main Street,76701,76701,true
+FR,,Lille,67 Main Street,76008,76008,true
+MX,NLE,Monterrey,360 Main Street,52278,52278,true
+IN,MH,Mumbai,416 Main Street,205398,205398,true
+US,TX,Austin,850 Main Street,98465 0956,98465-0956,true
+CA,BC,Vancouver,180 Main Street,s5b  0V3,S5B 0V3,true
+GB,,London,794 Main Street,sy2 8gg,SY2 8GG,true
+DE,,Munich,148 Main Street, 13034,13034,true
+FR,,Lyon,226 Main Street, 57525,57525,true
+MX,NLE,Monterrey,774 Main Street, 43808,43808,true
+IN,MH,Mumbai,206 Main Street,780 601,780601,true
+US,CA,San Jose,122 Main Street,93818-9975,93818-9975,true
+CA,QC,Montreal,452 Main Street, G0H5G8 ,G0H 5G8,true
+GB,,Bristol,154 Main Street,  N9G 4PV ,N9G 4PV,true
+DE,,Hamburg,557 Main Street,97169 ,97169,true
+FR,,Lille,920 Main Street,22934 ,22934,true
+MX,JAL,Guadalajara,308 Main Street,60733 ,60733,true
+IN,KA,Bengaluru,239 Main Street, 750555 ,750555,true
+US,IL,Chicago,442 Main Street,58642,58642,true
+CA,AB,Calgary,514 Main Street,F8A 2C3,F8A 2C3,true
+GB,,Bristol,476 Main Street,GV5 7DM,GV5 7DM,true
+DE,,Munich,141 Main Street,48 094,48094,true
+FR,,Paris,276 Main Street,51 895,51895,true
+MX,CMX,Mexico City,593 Main Street,90 349,90349,true
+IN,MH,Mumbai,215 Main Street,260955,260955,true
+US,NY,Albany,947 Main Street, 96690 ,96690,true
+CA,QC,Montreal,537 Main Street,H4F4F9,H4F 4F9,true
+GB,,Bristol,362 Main Street,K42CV,K4 2CV,true
+DE,,Berlin,367 Main Street,57648,57648,true
+FR,,Paris,427 Main Street,99657,99657,true
+MX,JAL,Guadalajara,825 Main Street,88930,88930,true
+IN,DL,New Delhi,96 Main Street,786 198,786198,true
+US,IL,Chicago,341 Main Street,992111337,99211-1337,true
+CA,QC,Montreal,801 Main Street,v0m2b0,V0M 2B0,true
+GB,,Glasgow,8 Main Street,k88zy,K8 8ZY,true
+DE,,Hamburg,990 Main Street, 53276,53276,true
+FR,,Lyon,964 Main Street, 83531,83531,true
+MX,NLE,Monterrey,410 Main Street, 70349,70349,true
+IN,DL,New Delhi,645 Main Street, 581943 ,581943,true
+US,TX,Austin,791 Main Street,95446 6575,95446-6575,true
+CA,QC,Montreal,120 Main Street,w6j  1H5,W6J 1H5,true
+GB,,London,80 Main Street,d3 4ad,D3 4AD,true
+DE,,Munich,176 Main Street,33193 ,33193,true
+FR,,Lille,655 Main Street,05610 ,05610,true
+MX,NLE,Monterrey,372 Main Street,82729 ,82729,true
+IN,KA,Bengaluru,285 Main Street,199649,199649,true
+US,IL,Chicago,649 Main Street,99904-4203,99904-4203,true
+CA,BC,Vancouver,113 Main Street, E0W5M1 ,E0W 5M1,true
+GB,,Leeds,844 Main Street,  J2R 7DL ,J2R 7DL,true
+DE,,Munich,941 Main Street,30 641,30641,true
+FR,,Paris,23 Main Street,00 051,00051,true
+MX,JAL,Guadalajara,978 Main Street,02 444,02444,true
+IN,MH,Mumbai,226 Main Street,458 942,458942,true
+US,CA,San Jose,789 Main Street,1234,,false
+US,CA,San Jose,248 Main Street,ABCDE,,false
+US,IL,Chicago,120 Main Street,123456,,false
+US,MI,Detroit,406 Main Street,12345-12,,false
+US,MI,Detroit,499 Main Street,12345-ABCD,,false
+US,IL,Chicago,341 Main Street,,,false
+US,NY,Albany,536 Main Street,12 345 6,,false
+US,CA,San Jose,152 Main Street,O1234,,false
+US,TX,Austin,251 Main Street,123-45,,false
+US,CA,San Jose,225 Main Street,12345-123456,,false
+CA,BC,Vancouver,988 Main Street,K1A,,false
+CA,ON,Ottawa,391 Main Street,K1A 0B,,false
+CA,BC,Vancouver,647 Main Street,1K1 A0B,,false
+CA,BC,Vancouver,721 Main Street,KKA 0B1,,false
+CA,QC,Montreal,465 Main Street,K1A 0B12,,false
+CA,QC,Montreal,828 Main Street,,,false
+CA,ON,Ottawa,323 Main Street,K1A-0B1X,,false
+CA,QC,Montreal,716 Main Street,123 456,,false
+CA,QC,Montreal,197 Main Street,K1AB0B1,,false
+CA,QC,Montreal,86 Main Street,K1A 0BB,,false
+GB,,Leeds,493 Main Street,SW1A,,false
+GB,,Leeds,422 Main Street,12345,,false
+GB,,London,454 Main Street,SW1A 1,,false
+GB,,Glasgow,764 Main Street,SW1A 1A1,,false
+GB,,London,867 Main Street,SWW1A 1AA,,false
+GB,,London,933 Main Street,,,false
+GB,,Bristol,9 Main Street,SW1A 1AAA,,false
+GB,,Bristol,883 Main Street,A 1AA,,false
+GB,,Glasgow,480 Main Street,SW 1AA,,false
+GB,,Leeds,70 Main Street,1A1 1AA,,false
+DE,,Munich,911 Main Street,1234,,false
+DE,,Munich,18 Main Street,123456,,false
+DE,,Munich,977 Main Street,ABCDE,,false
+DE,,Berlin,18 Main Street,1234A,,false
+DE,,Munich,57 Main Street,12-345,,false
+DE,,Berlin,122 Main Street,,,false
+DE,,Berlin,72 Main Street,D-10115,,false
+DE,,Berlin,999 Main Street,1011,,false
+DE,,Berlin,207 Main Street,101 5,,false
+DE,,Hamburg,200 Main Street,123 4567,,false
+FR,,Lyon,651 Main Street,7500,,false
+FR,,Paris,94 Main Street,750011,,false
+FR,,Paris,609 Main Street,ABCDE,,false
+FR,,Lille,776 Main Street,7500A,,false
+FR,,Lille,632 Main Street,75-001,,false
+FR,,Lille,895 Main Street,,,false
+FR,,Lille,368 Main Street,F-75001,,false
+FR,,Paris,897 Main Street,75 0,,false
+FR,,Paris,637 Main Street,75001 Paris,,false
+FR,,Lyon,23 Main Street,0,,false
+IN,KA,Bengaluru,649 Main Street,012345,,false
+IN,DL,New Delhi,241 Main Street,12345,,false
+IN,DL,New Delhi,190 Main Street,1234567,,false
+IN,DL,New Delhi,113 Main Street,ABC123,,false
+IN,DL,New Delhi,744 Main Street,11 00,,false
+IN,DL,New Delhi,929 Main Street,,,false
+IN,KA,Bengaluru,263 Main Street,4000O1,,false
+IN,DL,New Delhi,929 Main Street,1100-01,,false
+IN,DL,New Delhi,235 Main Street,400 0,,false
+IN,DL,New Delhi,617 Main Street,99999,,false
+MX,JAL,Guadalajara,869 Main Street,1234,,false
+MX,CMX,Mexico City,219 Main Street,123456,,false
+MX,JAL,Guadalajara,42 Main Street,ABCDE,,false
+MX,JAL,Guadalajara,563 Main Street,06A00,,false
+MX,CMX,Mexico City,884 Main Street,06-000,,false
+MX,NLE,Monterrey,125 Main Street,,,false
+MX,CMX,Mexico City,360 Main Street,MX06000,,false
+MX,CMX,Mexico City,105 Main Street,060,,false
+MX,JAL,Guadalajara,636 Main Street,0600 00,,false
+MX,CMX,Mexico City,411 Main Street,06000-1,,false

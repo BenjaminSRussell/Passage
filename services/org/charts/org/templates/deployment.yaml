@@ -46,6 +46,12 @@ spec:
               value: {{ .Values.hierarchy.maxNodes | quote }}
             - name: ORG_HIERARCHY_MAX_DEPTH
               value: {{ .Values.hierarchy.maxDepth | quote }}
+            - name: ORG_ADDRESS_VALIDATOR
+              value: {{ .Values.addressValidator | quote }}
+            - name: ORG_SEED_PACKAGE
+              value: {{ .Values.seed.package | quote }}
+            - name: ORG_SEED_TENANT_ID
+              value: {{ .Values.seed.tenantId | quote }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }
