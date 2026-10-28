@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
@@ -24,23 +25,31 @@ func TestOutbox_InsertOnlyAndTenantScoped(t *testing.T) {
 	}
 	mine := testkit.Ctx(testkit.TenantID(1))
 	rollback := errors.New("rollback")
-	_ = dbx.WithTenantTx(mine, app, func(tx pgx.Tx) error {
+	err := dbx.WithTenantTx(mine, app, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(mine, insert, "o-mine", testkit.TenantID(1)); err != nil {
 			t.Errorf("own-tenant outbox insert: %v", err)
 		}
 		return rollback
 	})
-	_ = dbx.WithTenantTx(mine, app, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(mine, insert, "o-cross", testkit.TenantID(2)); err == nil {
-			t.Error("cross-tenant outbox insert must violate the policy")
-		}
-		return rollback
+	if !errors.Is(err, rollback) {
+		t.Fatalf("own-tenant tx error = %v, want rollback", err)
+	}
+	err = dbx.WithTenantTx(mine, app, func(tx pgx.Tx) error {
+		_, err := tx.Exec(mine, insert, "o-cross", testkit.TenantID(2))
+		return err
 	})
-	_ = dbx.WithTenantTx(mine, app, func(tx pgx.Tx) error {
+	requireInsufficientPrivilege(t, err, "cross-tenant outbox insert must violate the policy")
+	err = dbx.WithTenantTx(mine, app, func(tx pgx.Tx) error {
 		var n int
-		if err := tx.QueryRow(mine, `select count(*) from outbox`).Scan(&n); err == nil {
-			t.Error("passage_app must not be able to read the outbox")
-		}
-		return rollback
+		return tx.QueryRow(mine, `select count(*) from outbox`).Scan(&n)
 	})
+	requireInsufficientPrivilege(t, err, "passage_app must not be able to read the outbox")
+}
+
+func requireInsufficientPrivilege(t *testing.T, err error, msg string) {
+	t.Helper()
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
+		t.Fatalf("%s: got %v, want SQLSTATE 42501", msg, err)
+	}
 }
