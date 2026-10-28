@@ -1,82 +1,8 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { createMemoryRouter, RouterProvider } from "react-router-dom";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { callsTo, json, node, openType, published, renderPage, versionList } from "./hierarchyTestKit";
 import org from "./module";
 import { stubLocalStorage } from "./testStorage";
-
-const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
-
-type Reply = () => Response;
-
-function serve(routes: Record<string, Reply>) {
-  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-    const key = `${init?.method ?? "GET"} ${url.replace("/api/v1/org", "")}`;
-    const match = Object.keys(routes)
-      .sort((a, b) => b.length - a.length)
-      .find((prefix) => key.startsWith(prefix));
-    return match ? routes[match]() : json({ items: [] });
-  });
-  vi.stubGlobal("fetch", fetchMock);
-  return fetchMock;
-}
-
-const callsTo = (fetchMock: ReturnType<typeof serve>, path: string) => fetchMock.mock.calls.filter(([url]) => String(url).includes(path));
-
-const summary = (versionNo: number, status: string, effectiveFrom: string | null, effectiveTo: string | null, nodeCount: number) => ({
-  id: `v${versionNo}`,
-  hierarchyTypeId: "t1",
-  versionNo,
-  status,
-  effectiveFrom,
-  effectiveTo,
-  nodeCount,
-});
-
-const node = (orgUnitId: string, parentOrgUnitId: string | null, sortOrder: number, kind = "operating_unit") => ({
-  orgUnitId,
-  kind,
-  parentOrgUnitId,
-  sortOrder,
-});
-
-const versionList = [
-  summary(3, "draft", null, null, 4),
-  summary(2, "published", "2026-06-01", null, 4),
-  summary(1, "superseded", "2026-01-01", "2026-05-31", 3),
-];
-const published = [node("le1", null, 0, "legal_entity"), node("ou-a", "le1", 1), node("ou-b", "le1", 2), node("ou-c", "ou-a", 1)];
-const draftNodes = [node("le1", null, 0, "legal_entity"), node("ou-a", "le1", 1), node("ou-b", "le1", 2), node("ou-c", "ou-b", 1)];
-const first = [node("le1", null, 0, "legal_entity"), node("ou-a", "le1", 1), node("ou-b", "le1", 2)];
-
-const defaultRoutes: Record<string, Reply> = {
-  "GET /legal-entities": () => json({ items: [{ id: "le1", code: "PI", name: "Passage Inc", status: "active" }] }),
-  "GET /operating-units": () =>
-    json({
-      items: [
-        { id: "ou-a", code: "ALPHA", name: "Alpha", status: "active" },
-        { id: "ou-b", code: "BETA", name: "Beta", status: "active" },
-      ],
-    }),
-  "GET /hierarchy-types?": () => json({ items: [{ id: "t1", code: "REP", name: "Reporting", purposes: ["reporting", "security"], status: "active" }] }),
-  "GET /hierarchy-types/t1/versions": () => json({ items: versionList }),
-  "GET /hierarchy-types/t1/compare": () => json({ hierarchyTypeId: "t1", fromVersionNo: 2, toVersionNo: 3, added: [], removed: [], moved: [{ orgUnitId: "ou-c", kind: "operating_unit", oldParentOrgUnitId: "ou-a", newParentOrgUnitId: "ou-b" }] }),
-  "GET /hierarchy-versions/v1": () => json({ ...versionList[2], nodes: first }),
-  "GET /hierarchy-versions/v2": () => json({ ...versionList[1], nodes: published }),
-  "GET /hierarchy-versions/v3": () => json({ ...versionList[0], nodes: draftNodes }),
-};
-
-function renderPage(overrides: Record<string, Reply> = {}) {
-  const fetchMock = serve({ ...defaultRoutes, ...overrides });
-  const router = createMemoryRouter(org.routes, { initialEntries: ["/org/hierarchy"] });
-  return { fetchMock, user: userEvent.setup(), ...render(<RouterProvider router={router} />) };
-}
-
-
-async function openType(user: ReturnType<typeof userEvent.setup>) {
-  await screen.findByRole("option", { name: "REP · Reporting" });
-  await user.selectOptions(screen.getByLabelText("Hierarchy type"), "t1");
-}
 
 beforeEach(() => void stubLocalStorage());
 afterEach(() => vi.unstubAllGlobals());
@@ -106,10 +32,11 @@ describe("selection and fetch counts", () => {
     expect(screen.getAllByRole("row")).toHaveLength(4);
   });
 
-  it("shows the empty state when a type has no versions", async () => {
+  it("offers to create a draft when a type has no versions", async () => {
     const { user } = renderPage({ "GET /hierarchy-types/t1/versions": () => json({ items: [] }) });
     await openType(user);
     expect(await screen.findByText("No versions yet")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create draft" })).toBeInTheDocument();
     expect(screen.queryByRole("tree")).toBeNull();
   });
 
@@ -140,7 +67,7 @@ describe("cancellation", () => {
 });
 
 describe("tree", () => {
-  it("renders tree roles, names, codes, child counts and an unknown id", async () => {
+  it("renders tree roles, names, codes, child counts and an unknown id, with no edit controls on a published version", async () => {
     const { user } = renderPage({ "GET /hierarchy-versions/v2": () => json({ ...versionList[1], nodes: [...published, node("ou-x", "le1", 3)] }) });
     await openType(user);
     const tree = await screen.findByRole("tree");
@@ -153,8 +80,10 @@ describe("tree", () => {
     expect(screen.getByText("ALPHA")).toBeInTheDocument();
     expect(screen.getByText("3 children")).toBeInTheDocument();
     expect(screen.getByRole("treeitem", { name: "ou-x" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /edit|drag|publish|add|replace/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /edit|drag|publish|add|replace|move|indent/i })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Move selected node" })).toBeNull();
     expect(document.querySelector("[draggable]")).toBeNull();
+    expect(root).not.toHaveAttribute("aria-selected");
   });
 
   it("moves with arrow keys and expands and collapses with Right and Left", async () => {

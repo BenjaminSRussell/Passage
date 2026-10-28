@@ -1,25 +1,29 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { Alert, Badge, Button, DataTable, EmptyState, FormField, Input, PageHeader, Select, Skeleton, StatusPill, type DataTableColumn } from "../../shell/ui";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useBlocker } from "react-router-dom";
+import { Alert, Badge, Button, ConfirmDialog, DataTable, EmptyState, FormField, Input, PageHeader, Select, Skeleton, StatusPill, type DataTableColumn } from "../../shell/ui";
 import { ALL, describeProblem, listOperatingUnits, type Problem } from "./api/client";
 import {
   compareHierarchyVersions,
+  createHierarchyDraft,
   getHierarchyVersion,
   listHierarchyTypes,
   listHierarchyVersions,
-  type HierarchyNode,
   type HierarchyVersionSummary,
 } from "./api/hierarchy";
+import { HierarchyDraftEditor, ProblemAlert, type Candidate } from "./HierarchyDraftEditor";
+import { HierarchyTreeView, RemovedSection, type Label } from "./HierarchyTreeView";
 import { useLegalEntity } from "./legalEntityContext";
 import {
   buildTree,
   changeMap,
   dateFromDayNumber,
   dayNumber,
+  hierarchyCsv,
   previousVersion,
   sliderRange,
+  todayIso,
   versionAsOf,
   type NodeChange,
-  type TreeNode,
 } from "./hierarchyTree";
 import styles from "./pages.module.css";
 
@@ -32,7 +36,7 @@ interface LoadState<T> {
 
 const idle: LoadState<never> = { key: "", data: null, loading: false, error: null };
 
-function useLoad<T>(key: string, load: (signal: AbortSignal) => Promise<T>): LoadState<T> {
+function useLoad<T>(key: string, load: (signal: AbortSignal) => Promise<T>, refresh = 0): LoadState<T> {
   const [state, setState] = useState<LoadState<T>>(idle);
   const loader = useRef(load);
   loader.current = load;
@@ -41,7 +45,7 @@ function useLoad<T>(key: string, load: (signal: AbortSignal) => Promise<T>): Loa
       return;
     }
     const controller = new AbortController();
-    setState({ key, data: null, loading: true, error: null });
+    setState((previous) => (previous.key === key ? { ...previous, loading: true, error: null } : { key, data: null, loading: true, error: null }));
     loader.current(controller.signal).then(
       (data) => {
         if (!controller.signal.aborted) {
@@ -55,165 +59,45 @@ function useLoad<T>(key: string, load: (signal: AbortSignal) => Promise<T>): Loa
       },
     );
     return () => controller.abort();
-  }, [key]);
+  }, [key, refresh]);
   if (key === "") {
     return idle;
   }
   return state.key === key ? state : { key, data: null, loading: true, error: null };
 }
 
-interface Label {
-  name: string;
-  code: string;
-}
-
-const pluralChildren = (count: number) => `${count} ${count === 1 ? "child" : "children"}`;
-
-interface VisibleItem {
-  id: string;
-  parentId: string | null;
-  hasChildren: boolean;
-}
-
-function flatten(roots: TreeNode[], collapsed: ReadonlySet<string>): VisibleItem[] {
-  const items: VisibleItem[] = [];
-  const walk = (nodes: TreeNode[], parentId: string | null) => {
-    for (const { node, children } of nodes) {
-      items.push({ id: node.orgUnitId, parentId, hasChildren: children.length > 0 });
-      if (!collapsed.has(node.orgUnitId)) {
-        walk(children, node.orgUnitId);
-      }
-    }
-  };
-  walk(roots, null);
-  return items;
-}
-
-interface TreeViewProps {
-  nodes: HierarchyNode[];
-  labels: ReadonlyMap<string, Label>;
-  changes: ReadonlyMap<string, NodeChange>;
-}
-
-function HierarchyTreeView({ nodes, labels, changes }: TreeViewProps) {
-  const roots = useMemo(() => buildTree(nodes), [nodes]);
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
-  const [focusId, setFocusId] = useState<string | null>(null);
-  const treeRef = useRef<HTMLUListElement>(null);
-  const visible = flatten(roots, collapsed);
-  const tabStop = visible.some((item) => item.id === focusId) ? focusId : (visible[0]?.id ?? null);
-
-  const labelText = (id: string | null) => {
-    const label = id === null ? undefined : labels.get(id);
-    return id === null ? "no parent (root)" : label ? `${label.name} (${label.code})` : id;
-  };
-  const toggle = (id: string, open: boolean) =>
-    setCollapsed((current) => {
-      const next = new Set(current);
-      if (open) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  const focusItem = (id: string | undefined) => {
-    if (id !== undefined) {
-      Array.from(treeRef.current?.querySelectorAll<HTMLElement>('[role="treeitem"]') ?? [])
-        .find((element) => element.dataset.id === id)
-        ?.focus();
-    }
-  };
-
-  const onKeyDown = (event: KeyboardEvent<HTMLUListElement>) => {
-    const id = (event.target as HTMLElement).closest<HTMLElement>('[role="treeitem"]')?.dataset.id;
-    const index = visible.findIndex((item) => item.id === id);
-    const current = visible[index];
-    if (!current) {
-      return;
-    }
-    const expanded = !collapsed.has(current.id);
-    const handlers: Record<string, () => void> = {
-      ArrowDown: () => focusItem(visible[index + 1]?.id),
-      ArrowUp: () => focusItem(visible[index - 1]?.id),
-      Home: () => focusItem(visible[0]?.id),
-      End: () => focusItem(visible[visible.length - 1]?.id),
-      ArrowRight: () => (current.hasChildren && !expanded ? toggle(current.id, true) : current.hasChildren ? focusItem(visible[index + 1]?.id) : undefined),
-      ArrowLeft: () => (current.hasChildren && expanded ? toggle(current.id, false) : focusItem(current.parentId ?? undefined)),
-    };
-    const handler = handlers[event.key];
-    if (handler) {
-      event.preventDefault();
-      handler();
-    }
-  };
-
-  const renderNode = ({ node, children }: TreeNode, level: number) => {
-    const id = node.orgUnitId;
-    const label = labels.get(id);
-    const hasChildren = children.length > 0;
-    const expanded = !collapsed.has(id);
-    const change = changes.get(id);
-    const changeText = change ? (change.kind === "added" ? "Added in this version" : `Previously under ${labelText(change.oldParentOrgUnitId)}`) : "";
-    return (
-      <li
-        key={id}
-        role="treeitem"
-        data-id={id}
-        aria-level={level}
-        aria-expanded={hasChildren ? expanded : undefined}
-        aria-labelledby={`tree-label-${id}`}
-        aria-describedby={change ? `tree-change-${id}` : undefined}
-        tabIndex={id === tabStop ? 0 : -1}
-        className={styles.treeItem}
-        onFocus={(event) => event.target === event.currentTarget && setFocusId(id)}
-      >
-        <div className={styles.treeRow} onClick={() => hasChildren && toggle(id, !expanded)}>
-          <span id={`tree-label-${id}`} className={styles.treeName}>
-            {label?.name ?? id}
-          </span>
-          {label ? <span className={styles.treeCode}>{label.code}</span> : null}
-          <Badge tone={node.kind === "legal_entity" ? "info" : "neutral"}>{node.kind === "legal_entity" ? "Legal entity" : "Operating unit"}</Badge>
-          <span className={styles.treeCount}>{pluralChildren(children.length)}</span>
-          {change ? (
-            <span title={changeText}>
-              <Badge tone="warning">changed</Badge>
-              <span id={`tree-change-${id}`} className="visually-hidden">
-                {changeText}
-              </span>
-            </span>
-          ) : null}
-        </div>
-        {hasChildren && expanded ? (
-          <ul role="group" className={styles.treeGroup}>
-            {children.map((child) => renderNode(child, level + 1))}
-          </ul>
-        ) : null}
-      </li>
-    );
-  };
-
-  return (
-    <ul role="tree" aria-label="Hierarchy tree" className={styles.tree} ref={treeRef} onKeyDown={onKeyDown}>
-      {roots.map((root) => renderNode(root, 1))}
-    </ul>
-  );
-}
-
 const rangeText = (version: HierarchyVersionSummary) =>
   version.effectiveFrom === null ? "Not yet effective" : `${version.effectiveFrom} to ${version.effectiveTo ?? "open"}`;
 
-const todayIso = () => new Date().toISOString().slice(0, 10);
+function downloadCsv(filename: string, csv: string) {
+  const url = URL.createObjectURL(new Blob(["﻿", csv], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
 
 export function HierarchyDesignerPage() {
-  const { entities } = useLegalEntity();
+  const { entities, canWriteHierarchy, canPublishHierarchy, canBackdateHierarchy } = useLegalEntity();
+  const [dirty, setDirty] = useState(false);
+  const [pending, setPending] = useState<(() => void) | null>(null);
+  const noticeRef = useRef<HTMLDivElement>(null);
+  const blocker = useBlocker(dirty);
   const [typeId, setTypeId] = useState("");
   const [chosenDate, setChosenDate] = useState<string | null>(null);
   const [showDraft, setShowDraft] = useState(false);
+  const [refresh, setRefresh] = useState(0);
+  const [announcement, setAnnouncement] = useState("");
+  const [notice, setNotice] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createFailure, setCreateFailure] = useState<Problem | null>(null);
 
   const types = useLoad("types", (signal) => listHierarchyTypes({}, { signal }));
   const units = useLoad("units", (signal) => listOperatingUnits(ALL, { signal }));
-  const versionsLoad = useLoad(typeId, (signal) => listHierarchyVersions(typeId, undefined, { signal }));
+  const versionsLoad = useLoad(typeId, (signal) => listHierarchyVersions(typeId, undefined, { signal }), refresh);
   const versions = versionsLoad.data ?? [];
 
   const labels = useMemo(() => {
@@ -227,40 +111,127 @@ export function HierarchyDesignerPage() {
     return map;
   }, [entities, units.data]);
 
+  const candidates = useMemo<Candidate[]>(
+    () => [
+      ...entities.map((entity) => ({ id: entity.id, name: entity.name, code: entity.code, kind: "legal_entity" as const })),
+      ...(units.data?.items ?? [])
+        .filter((unit) => unit.status !== "inactive")
+        .map((unit) => ({ id: unit.id, name: unit.name, code: unit.code, kind: "operating_unit" as const })),
+    ],
+    [entities, units.data],
+  );
+
   const draft = versions.find((version) => version.status === "draft");
   const defaultDate = versions.find((version) => version.status !== "draft" && version.effectiveFrom !== null)?.effectiveFrom ?? "";
   const asOf = chosenDate ?? defaultDate;
   const displayed = showDraft && draft ? draft : versionAsOf(versions, asOf);
   const previous = displayed ? previousVersion(versions, displayed) : undefined;
 
-  const detail = useLoad(displayed ? displayed.id : "", (signal) => getHierarchyVersion(displayed?.id ?? "", { signal }));
-  const comparison = useLoad(displayed && previous ? `${typeId}:${previous.versionNo}:${displayed.versionNo}` : "", (signal) =>
-    compareHierarchyVersions(typeId, previous?.versionNo ?? 0, displayed?.versionNo ?? 0, { signal }),
+  const editable = canWriteHierarchy && displayed?.status === "draft";
+  const detail = useLoad(displayed ? displayed.id : "", (signal) => getHierarchyVersion(displayed?.id ?? "", { signal }), refresh);
+  const comparison = useLoad(
+    displayed && previous ? `${typeId}:${previous.versionNo}:${displayed.versionNo}` : "",
+    (signal) => compareHierarchyVersions(typeId, previous?.versionNo ?? 0, displayed?.versionNo ?? 0, { signal }),
+    refresh,
   );
+  const previousDetail = useLoad(editable && previous ? previous.id : "", (signal) => getHierarchyVersion(previous?.id ?? "", { signal }));
   const changes = useMemo(() => (comparison.data ? changeMap(comparison.data) : new Map<string, NodeChange>()), [comparison.data]);
+  const removed = comparison.data?.removed ?? [];
 
   const selectedType = types.data?.find((type) => type.id === typeId);
   const range = sliderRange(versions, dayNumber(asOf) === null ? todayIso() : asOf);
   const rangeStart = dayNumber(range.min) ?? 0;
   const sliderValue = Math.min(Math.max((dayNumber(asOf) ?? rangeStart) - rangeStart, 0), (dayNumber(range.max) ?? rangeStart) - rangeStart);
 
-  const pickType = (id: string) => {
-    setTypeId(id);
-    setChosenDate(null);
-    setShowDraft(false);
-  };
-  const pickDate = (value: string) => {
-    if (dayNumber(value) !== null) {
-      setChosenDate(value);
-      setShowDraft(false);
+  const guard = (action: () => void) => (dirty ? setPending(() => action) : action());
+  const confirmLeave = () => {
+    if (blocker.state === "blocked") {
+      blocker.proceed();
+    } else {
+      pending?.();
+      setPending(null);
     }
   };
-  const pickVersion = (version: HierarchyVersionSummary) => {
-    if (version.effectiveFrom === null) {
-      setShowDraft(true);
-    } else {
-      setChosenDate(version.effectiveFrom);
+  const keepEditing = () => {
+    if (blocker.state === "blocked") {
+      blocker.reset();
+    }
+    setPending(null);
+  };
+
+  useEffect(() => {
+    if (!dirty) {
+      return;
+    }
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
+  useEffect(() => {
+    if (notice !== "") {
+      noticeRef.current?.focus();
+    }
+  }, [notice]);
+
+  const pickType = (id: string) =>
+    guard(() => {
+      setTypeId(id);
+      setChosenDate(null);
       setShowDraft(false);
+      setNotice("");
+      setCreateFailure(null);
+    });
+  const pickDate = (value: string) => {
+    if (dayNumber(value) !== null) {
+      guard(() => {
+        setChosenDate(value);
+        setShowDraft(false);
+      });
+    }
+  };
+  const pickVersion = (version: HierarchyVersionSummary) =>
+    guard(() => {
+      if (version.effectiveFrom === null) {
+        setShowDraft(true);
+      } else {
+        setChosenDate(version.effectiveFrom);
+        setShowDraft(false);
+      }
+    });
+  const toggleDraft = (checked: boolean) => guard(() => setShowDraft(checked));
+  const announce = (text: string) => {
+    setNotice("");
+    setAnnouncement(text);
+  };
+  const notify = (text: string) => {
+    setAnnouncement("");
+    setNotice(text);
+  };
+  const reload = () => setRefresh((count) => count + 1);
+
+  const startDraft = async () => {
+    setCreating(true);
+    setCreateFailure(null);
+    try {
+      const created = await createHierarchyDraft(typeId);
+      setShowDraft(true);
+      notify(`Draft version ${created.versionNo} created`);
+      reload();
+    } catch (failure) {
+      setCreateFailure(describeProblem(failure));
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const exportCsv = () => {
+    if (detail.data && displayed) {
+      const csv = hierarchyCsv(buildTree(detail.data.nodes), (id) => labels.get(id) ?? { name: id, code: id });
+      downloadCsv(`hierarchy-${selectedType?.code ?? typeId}-v${displayed.versionNo}.csv`, csv);
     }
   };
 
@@ -286,9 +257,12 @@ export function HierarchyDesignerPage() {
       : `Version ${displayed.versionNo}, effective from ${displayed.effectiveFrom} to ${displayed.effectiveTo ?? "open"}`
     : "No version in force on this date";
 
+  const detailData = detail.data;
+  const editingDraft = editable && detailData !== null;
+
   return (
     <>
-      <PageHeader title="Hierarchies" description="Read-only view of hierarchy versions, as of a chosen date." />
+      <PageHeader title="Hierarchies" description="Browse hierarchy versions as of a date, then edit the draft and publish it." />
       {types.error ? (
         <Alert tone="danger" title="Could not load hierarchy types" live="alert">
           {types.error.message} ({types.error.code})
@@ -317,64 +291,143 @@ export function HierarchyDesignerPage() {
           </div>
         ) : null}
       </div>
+      <div aria-live="polite" ref={noticeRef} tabIndex={-1} className={styles.notice}>
+        {notice ? <Alert tone="success">{notice}</Alert> : null}
+        <span className="visually-hidden">{announcement}</span>
+      </div>
       {typeId === "" ? null : versionsLoad.error ? (
         <Alert tone="danger" title="Could not load versions" live="alert">
           {versionsLoad.error.message} ({versionsLoad.error.code})
         </Alert>
-      ) : versionsLoad.loading ? (
+      ) : versionsLoad.loading && versionsLoad.data === null ? (
         <Skeleton height="tile" />
-      ) : versions.length === 0 ? (
-        <EmptyState title="No versions yet" />
       ) : (
         <>
-          <DataTable label="Hierarchy versions" columns={columns} rows={versions} getRowKey={(row) => row.id} />
-          <div className={styles.sliderRow}>
-            <FormField id="hierarchy-as-of" label="As of date">
-              {(control) => <Input {...control} type="date" value={asOf} onChange={(event) => pickDate(event.target.value)} />}
-            </FormField>
-            <FormField id="hierarchy-slider" label="Effective date slider">
-              {(control) => (
-                <input
-                  {...control}
-                  type="range"
-                  min={0}
-                  max={(dayNumber(range.max) ?? rangeStart) - rangeStart}
-                  value={sliderValue}
-                  aria-valuetext={asOf || "No date"}
-                  onChange={(event) => pickDate(dateFromDayNumber(rangeStart + Number(event.target.value)))}
-                />
-              )}
-            </FormField>
-            {draft ? (
-              <label className={styles.filter}>
-                <Input type="checkbox" checked={showDraft} onChange={(event) => setShowDraft(event.target.checked)} />
-                <span>Show draft</span>
-              </label>
-            ) : null}
-          </div>
-          <div role="status" className={styles.banner}>
-            {banner}
-          </div>
-          {displayed ? (
+          {createFailure ? <ProblemAlert title="Could not create the draft" problem={createFailure} /> : null}
+          {versions.length === 0 ? (
+            <EmptyState
+              title="No versions yet"
+              description={canWriteHierarchy ? "Create a draft to start designing this hierarchy." : "A draft needs the hierarchy write duty. Ask your workspace administrator for access."}
+              action={
+                canWriteHierarchy ? (
+                  <Button variant="primary" loading={creating} onClick={startDraft}>
+                    Create draft
+                  </Button>
+                ) : undefined
+              }
+            />
+          ) : (
             <>
-              {comparison.error ? (
-                <Alert tone="danger" title="Could not load changes" live="alert">
-                  {comparison.error.message} ({comparison.error.code})
-                </Alert>
-              ) : null}
-              {detail.error ? (
-                <Alert tone="danger" title="Could not load version" live="alert">
-                  {detail.error.message} ({detail.error.code})
-                </Alert>
-              ) : detail.loading || !detail.data ? (
-                <Skeleton height="tile" />
-              ) : (
-                <HierarchyTreeView key={detail.data.id} nodes={detail.data.nodes} labels={labels} changes={changes} />
+              {draft || !canWriteHierarchy ? null : (
+                <div className={styles.rowActions}>
+                  <Button variant="primary" size="sm" loading={creating} onClick={startDraft}>
+                    Create draft
+                  </Button>
+                  <span className={styles.editorHint}>Copies the latest published version so you can change it.</span>
+                </div>
               )}
+              <DataTable label="Hierarchy versions" columns={columns} rows={versions} getRowKey={(row) => row.id} />
+              <div className={styles.sliderRow}>
+                <FormField id="hierarchy-as-of" label="As of date">
+                  {(control) => <Input {...control} type="date" value={asOf} onChange={(event) => pickDate(event.target.value)} />}
+                </FormField>
+                <FormField id="hierarchy-slider" label="Effective date slider">
+                  {(control) => (
+                    <input
+                      {...control}
+                      type="range"
+                      min={0}
+                      max={(dayNumber(range.max) ?? rangeStart) - rangeStart}
+                      value={sliderValue}
+                      aria-valuetext={asOf || "No date"}
+                      onChange={(event) => pickDate(dateFromDayNumber(rangeStart + Number(event.target.value)))}
+                    />
+                  )}
+                </FormField>
+                {draft ? (
+                  <label className={styles.filter}>
+                    <Input type="checkbox" checked={showDraft} onChange={(event) => toggleDraft(event.target.checked)} />
+                    <span>Show draft</span>
+                  </label>
+                ) : null}
+              </div>
+              <div className={styles.bannerRow}>
+                <div role="status" className={styles.banner}>
+                  {banner}
+                </div>
+                {detailData && displayed ? (
+                  <Button size="sm" onClick={exportCsv}>
+                    Export CSV
+                  </Button>
+                ) : null}
+              </div>
+              {displayed ? (
+                <>
+                  {comparison.error ? (
+                    <Alert tone="danger" title="Could not load changes" live="alert">
+                      {comparison.error.message} ({comparison.error.code})
+                    </Alert>
+                  ) : null}
+                  {displayed.status === "draft" && !canWriteHierarchy ? (
+                    <Alert tone="info" title="This draft is read-only for you">
+                      Editing a draft needs the hierarchy write duty.
+                    </Alert>
+                  ) : null}
+                  {units.error && editingDraft ? (
+                    <Alert tone="warning" title="Operating units did not load" live="alert">
+                      Names show as ids and operating units cannot be added until this is fixed. {units.error.message} ({units.error.code})
+                    </Alert>
+                  ) : null}
+                  {detail.error ? (
+                    <Alert tone="danger" title="Could not load version" live="alert">
+                      {detail.error.message} ({detail.error.code})
+                    </Alert>
+                  ) : detailData === null ? (
+                    <Skeleton height="tile" />
+                  ) : editingDraft ? (
+                    <HierarchyDraftEditor
+                      key={detailData.id}
+                      version={detailData}
+                      type={selectedType}
+                      labels={labels}
+                      candidates={candidates}
+                      canPublish={canPublishHierarchy}
+                      canBackdate={canBackdateHierarchy}
+                      previousVersionNo={previous?.versionNo ?? null}
+                      previousNodes={previousDetail.data?.nodes ?? null}
+                      serverChanges={changes}
+                      serverRemoved={removed}
+                      announce={announce}
+                      notify={notify}
+                      onDirtyChange={setDirty}
+                      onReload={reload}
+                      onPublished={(effectiveFrom) => {
+                        setShowDraft(false);
+                        setChosenDate(effectiveFrom);
+                        notify(`Version ${detailData.versionNo} published, effective from ${effectiveFrom}`);
+                        reload();
+                      }}
+                    />
+                  ) : (
+                    <HierarchyTreeView key={detailData.id} nodes={detailData.nodes} labels={labels} changes={changes} />
+                  )}
+                  {previous && !editingDraft ? <RemovedSection since={previous.versionNo} removed={removed} labels={labels} /> : null}
+                </>
+              ) : null}
             </>
-          ) : null}
+          )}
         </>
       )}
+      {pending !== null || blocker.state === "blocked" ? (
+        <ConfirmDialog
+          title="Discard your unsaved changes?"
+          description="You have unsaved edits to this draft. Leaving now loses them."
+          confirmLabel="Discard changes"
+          cancelLabel="Keep editing"
+          onConfirm={confirmLeave}
+          onCancel={keepEditing}
+        />
+      ) : null}
     </>
   );
 }

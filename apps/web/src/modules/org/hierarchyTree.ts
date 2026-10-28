@@ -1,4 +1,4 @@
-import type { HierarchyComparison, HierarchyNode, HierarchyVersionSummary } from "./api/hierarchy";
+import type { HierarchyChange, HierarchyComparison, HierarchyNode, HierarchyNodeKind, HierarchyVersionSummary } from "./api/hierarchy";
 
 export interface TreeNode {
   node: HierarchyNode;
@@ -20,6 +20,8 @@ export function buildTree(nodes: readonly HierarchyNode[]): TreeNode[] {
       .map((node) => ({ node, children: build(node.orgUnitId) }));
   return build(null);
 }
+
+export const todayIso = () => new Date().toISOString().slice(0, 10);
 
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
@@ -90,4 +92,197 @@ export function sliderRange(versions: readonly HierarchyVersionSummary[], fallba
     .flatMap((version) => (version.effectiveFrom === null ? [] : [version.effectiveTo ?? addDays(version.effectiveFrom, 365)]))
     .sort();
   return { min: starts[0], max: ends[ends.length - 1] };
+}
+
+const parentOf = (nodes: readonly HierarchyNode[], id: string) => nodes.find((node) => node.orgUnitId === id)?.parentOrgUnitId ?? null;
+
+export function siblingIds(nodes: readonly HierarchyNode[], parentId: string | null): string[] {
+  return nodes
+    .filter((node) => node.parentOrgUnitId === parentId)
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.orgUnitId.localeCompare(b.orgUnitId))
+    .map((node) => node.orgUnitId);
+}
+
+export const parentMap = (nodes: readonly HierarchyNode[]): ReadonlyMap<string, string | null> => new Map(nodes.map((node) => [node.orgUnitId, node.parentOrgUnitId]));
+
+export function descends(parents: ReadonlyMap<string, string | null>, ancestorId: string, id: string): boolean {
+  let current = parents.get(id) ?? null;
+  for (let hops = 0; current !== null && hops <= parents.size; hops += 1) {
+    if (current === ancestorId) {
+      return true;
+    }
+    current = parents.get(current) ?? null;
+  }
+  return false;
+}
+
+export const isDescendant = (nodes: readonly HierarchyNode[], ancestorId: string, id: string): boolean => descends(parentMap(nodes), ancestorId, id);
+
+export function ancestorIds(parents: ReadonlyMap<string, string | null>, id: string): string[] {
+  const found: string[] = [];
+  let current = parents.get(id) ?? null;
+  for (let hops = 0; current !== null && hops <= parents.size; hops += 1) {
+    found.push(current);
+    current = parents.get(current) ?? null;
+  }
+  return found;
+}
+
+function normalizeOrder(nodes: readonly HierarchyNode[]): HierarchyNode[] {
+  const order = new Map<string, number>();
+  for (const parent of new Set(nodes.map((node) => node.parentOrgUnitId))) {
+    siblingIds(nodes, parent).forEach((id, index) => order.set(id, index));
+  }
+  return nodes.map((node) => ({ ...node, sortOrder: order.get(node.orgUnitId) ?? 0 }));
+}
+
+export function moveNode(nodes: readonly HierarchyNode[], id: string, parentId: string, index?: number): HierarchyNode[] | null {
+  const moving = nodes.find((node) => node.orgUnitId === id);
+  if (!moving || moving.parentOrgUnitId === null || parentId === id || isDescendant(nodes, id, parentId)) {
+    return null;
+  }
+  if (!nodes.some((node) => node.orgUnitId === parentId)) {
+    return null;
+  }
+  const siblings = siblingIds(nodes, parentId).filter((sibling) => sibling !== id);
+  siblings.splice(Math.min(Math.max(index ?? siblings.length, 0), siblings.length), 0, id);
+  const placed = new Map(siblings.map((sibling, position) => [sibling, position]));
+  return normalizeOrder(
+    nodes.map((node) => {
+      const position = placed.get(node.orgUnitId);
+      if (node.orgUnitId === id) {
+        return { ...node, parentOrgUnitId: parentId, sortOrder: position ?? 0 };
+      }
+      return position === undefined ? node : { ...node, sortOrder: position };
+    }),
+  );
+}
+
+export function shiftNode(nodes: readonly HierarchyNode[], id: string, delta: -1 | 1): HierarchyNode[] | null {
+  const parentId = parentOf(nodes, id);
+  if (parentId === null) {
+    return null;
+  }
+  const siblings = siblingIds(nodes, parentId);
+  const target = siblings.indexOf(id) + delta;
+  return target < 0 || target >= siblings.length ? null : moveNode(nodes, id, parentId, target);
+}
+
+export function indentNode(nodes: readonly HierarchyNode[], id: string): HierarchyNode[] | null {
+  const parentId = parentOf(nodes, id);
+  if (parentId === null) {
+    return null;
+  }
+  const siblings = siblingIds(nodes, parentId);
+  const above = siblings[siblings.indexOf(id) - 1];
+  return above === undefined ? null : moveNode(nodes, id, above);
+}
+
+export function outdentNode(nodes: readonly HierarchyNode[], id: string): HierarchyNode[] | null {
+  const parentId = parentOf(nodes, id);
+  const grandparentId = parentId === null ? null : parentOf(nodes, parentId);
+  if (parentId === null || grandparentId === null) {
+    return null;
+  }
+  return moveNode(nodes, id, grandparentId, siblingIds(nodes, grandparentId).indexOf(parentId) + 1);
+}
+
+export function parentChoices(nodes: readonly HierarchyNode[], id: string): string[] {
+  const parents = parentMap(nodes);
+  const current = parents.get(id) ?? null;
+  if (current === null) {
+    return [];
+  }
+  return nodes.filter((node) => node.orgUnitId !== id && node.orgUnitId !== current && !descends(parents, id, node.orgUnitId)).map((node) => node.orgUnitId);
+}
+
+export function addNode(nodes: readonly HierarchyNode[], orgUnitId: string, kind: HierarchyNodeKind, parentId: string | null): HierarchyNode[] | null {
+  const parentValid = nodes.length === 0 ? parentId === null : nodes.some((node) => node.orgUnitId === parentId);
+  if (!parentValid || nodes.some((node) => node.orgUnitId === orgUnitId)) {
+    return null;
+  }
+  const last = Math.max(-1, ...nodes.filter((node) => node.parentOrgUnitId === parentId).map((node) => node.sortOrder));
+  return normalizeOrder([...nodes, { orgUnitId, kind, parentOrgUnitId: parentId, sortOrder: last + 1 }]);
+}
+
+export function removeNode(nodes: readonly HierarchyNode[], id: string): HierarchyNode[] | null {
+  const removing = nodes.find((node) => node.orgUnitId === id);
+  if (!removing || removing.parentOrgUnitId === null) {
+    return null;
+  }
+  const parentId = removing.parentOrgUnitId;
+  const adopted = siblingIds(nodes, id);
+  const lineup = siblingIds(nodes, parentId).flatMap((sibling) => (sibling === id ? adopted : [sibling]));
+  const place = new Map(lineup.map((sibling, position) => [sibling, position]));
+  return normalizeOrder(
+    nodes
+      .filter((node) => node.orgUnitId !== id)
+      .map((node) => ({
+        ...node,
+        parentOrgUnitId: node.parentOrgUnitId === id ? parentId : node.parentOrgUnitId,
+        sortOrder: place.get(node.orgUnitId) ?? node.sortOrder,
+      })),
+  );
+}
+
+export function treeSignature(nodes: readonly HierarchyNode[]): string {
+  const parts: string[] = [];
+  const walk = (level: TreeNode[]) => {
+    for (const { node, children } of level) {
+      parts.push(`${node.parentOrgUnitId ?? ""}>${node.orgUnitId}`);
+      walk(children);
+    }
+  };
+  walk(buildTree(nodes));
+  return parts.join("|");
+}
+
+export function diffNodes(before: readonly HierarchyNode[], after: readonly HierarchyNode[]): { changes: Map<string, NodeChange>; removed: HierarchyChange[] } {
+  const was = new Map(before.map((node) => [node.orgUnitId, node]));
+  const changes = new Map<string, NodeChange>();
+  for (const node of after) {
+    const old = was.get(node.orgUnitId);
+    if (!old) {
+      changes.set(node.orgUnitId, { kind: "added" });
+    } else if (old.parentOrgUnitId !== node.parentOrgUnitId) {
+      changes.set(node.orgUnitId, { kind: "moved", oldParentOrgUnitId: old.parentOrgUnitId });
+    }
+  }
+  const now = new Set(after.map((node) => node.orgUnitId));
+  const removed = before
+    .filter((node) => !now.has(node.orgUnitId))
+    .map(({ orgUnitId, kind, parentOrgUnitId }) => ({ orgUnitId, kind, parentOrgUnitId }));
+  return { changes, removed };
+}
+
+export function replaceNode(nodes: readonly HierarchyNode[], oldId: string, newId: string, kind: HierarchyNodeKind): HierarchyNode[] | null {
+  if (!nodes.some((node) => node.orgUnitId === oldId) || nodes.some((node) => node.orgUnitId === newId)) {
+    return null;
+  }
+  return normalizeOrder(
+    nodes.map((node) => ({
+      ...node,
+      orgUnitId: node.orgUnitId === oldId ? newId : node.orgUnitId,
+      kind: node.orgUnitId === oldId ? kind : node.kind,
+      parentOrgUnitId: node.parentOrgUnitId === oldId ? newId : node.parentOrgUnitId,
+    })),
+  );
+}
+
+const csvCell = (value: string) => {
+  const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  return /[",\n\r]/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
+};
+
+export function hierarchyCsv(roots: readonly TreeNode[], describe: (id: string) => { name: string; code: string }): string {
+  const rows = [["Level", "Name", "Code", "Kind", "Parent code"]];
+  const walk = (nodes: readonly TreeNode[], level: number, parentCode: string) => {
+    for (const { node, children } of nodes) {
+      const { name, code } = describe(node.orgUnitId);
+      rows.push([String(level), name, code, node.kind, parentCode]);
+      walk(children, level + 1, code);
+    }
+  };
+  walk(roots, 1, "");
+  return rows.map((row) => row.map(csvCell).join(",")).join("\r\n");
 }

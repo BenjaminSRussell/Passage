@@ -129,8 +129,9 @@
 }
 
 .treeItem:focus-visible {
-  outline: 2px solid var(--color-accent, currentColor);
-  outline-offset: 1px;
+  outline: 2px solid transparent;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-sm);
 }
 
 .treeRow {
@@ -138,8 +139,133 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-1) 0;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
   cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+.treeToggle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  inline-size: 20px;
+  block-size: 20px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.treeRowSelected {
+  background: var(--color-accent-subtle);
+  border-color: var(--color-accent);
+}
+
+.treeRowDragging {
+  opacity: 0.5;
+}
+
+.treeRowDrop {
+  background: var(--color-accent-subtle);
+  border-style: dashed;
+  border-color: var(--color-accent);
+}
+
+.notice:focus {
+  outline: none;
+}
+
+.bannerRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.editorHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.editorGroup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-4);
+  padding-block-start: var(--space-4);
+  border-block-start: 1px solid var(--color-border);
+}
+
+.editorHint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm-size);
+}
+
+.pickerForm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.publishFields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.removed {
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+}
+
+.removedTitle {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-lg-size);
+}
+
+.removedList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.removedItem {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .treeRow {
+    transition: none;
+  }
 }
 
 .treeName {
