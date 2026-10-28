@@ -60,6 +60,7 @@
     "Maintain exchange rates": {"permissions": [
       {"resource": "/v1/fx/rate-types", "methods": ["GET", "PUT"]},
       {"resource": "/v1/fx/rates", "methods": ["GET", "POST"]}
-    ]}
+    ]},
+    "party.approve": {"permissions": [{"resource": "/v1/party/pending-changes", "methods": ["POST"]}]}
   }
 }

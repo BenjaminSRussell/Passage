@@ -40,12 +40,15 @@ type Sequencer interface {
 type API struct {
 	pinger   Pinger
 	parties  store.Store
+	credit   store.CreditStore
 	sequence Sequencer
-	created  atomic.Int64
-	checker  loggedChecker
-	statuses map[domain.Status]*atomic.Int64
-	rejected atomic.Int64
-	failures atomic.Int64
+
+	creditCounts creditMetrics
+	created      atomic.Int64
+	checker      loggedChecker
+	statuses     map[domain.Status]*atomic.Int64
+	rejected     atomic.Int64
+	failures     atomic.Int64
 }
 
 type validateRequest struct {
@@ -90,6 +93,9 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyWrite)).Post("/v1/party/parties", a.createParty)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/party/parties/{id}", a.getParty)
 	r.With(authz.RequireDuty(dutyWrite)).Patch("/v1/party/parties/{id}", a.patchParty)
+	if a.credit != nil {
+		a.registerCredit(r)
+	}
 }
 
 func (a *API) Metrics() http.Handler {
@@ -102,6 +108,10 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP party_tax_validations_rejected_total Tax validation requests rejected for malformed requests, tenant context, or tax format.\n# TYPE party_tax_validations_rejected_total counter\nparty_tax_validations_rejected_total %d\n", a.rejected.Load())
 		fmt.Fprintf(w, "# HELP party_tax_checker_failures_total Checker calls that failed and left the registration unverified.\n# TYPE party_tax_checker_failures_total counter\nparty_tax_checker_failures_total %d\n", a.failures.Load())
 		fmt.Fprintf(w, "# HELP party_parties_created_total Parties created; an idempotent replay is not counted.\n# TYPE party_parties_created_total counter\nparty_parties_created_total %d\n", a.created.Load())
+		fmt.Fprint(w, "# HELP party_credit_limit_changes_total Credit limit changes by outcome: requested (increase held for approval), applied (decrease), approved, rejected.\n# TYPE party_credit_limit_changes_total counter\n")
+		c := &a.creditCounts
+		fmt.Fprintf(w, "party_credit_limit_changes_total{outcome=\"requested\"} %d\nparty_credit_limit_changes_total{outcome=\"applied\"} %d\nparty_credit_limit_changes_total{outcome=\"approved\"} %d\nparty_credit_limit_changes_total{outcome=\"rejected\"} %d\n",
+			c.requested.Load(), c.applied.Load(), c.approved.Load(), c.rejected.Load())
 	})
 }
 

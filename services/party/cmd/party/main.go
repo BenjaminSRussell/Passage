@@ -69,7 +69,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 		slog.Warn("NUMBERING_URL is empty, party creation returns 503 until it is set")
 	}
 	parties := store.New(pool)
-	a := api.New(vies.Unavailable{}, parties, parties, sequencer)
+	a := api.New(vies.Unavailable{}, parties, parties, sequencer).WithCredit(parties)
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
