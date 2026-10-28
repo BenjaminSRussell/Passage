@@ -38,9 +38,9 @@ func newProposal(t *testing.T, le string) Invoice {
 }
 
 func TestPostProposal_GapFreeNumbersAndOutbox(t *testing.T) {
-	pool := testkit.DB(t)
+	admin, pool := testkit.DBWithApp(t)
 	ctx := context.Background()
-	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
 	tctx := ctxAllEntities(testkit.TenantID(1))
@@ -79,7 +79,7 @@ func TestPostProposal_GapFreeNumbersAndOutbox(t *testing.T) {
 		t.Fatalf("read back %+v, err %v", got, err)
 	}
 	var events int
-	if err := pool.QueryRow(ctx, `select count(*) from outbox where type = 'dev.passage.billing.invoice.posted.v1'`).Scan(&events); err != nil {
+	if err := admin.QueryRow(ctx, `select count(*) from outbox where type = 'dev.passage.billing.invoice.posted.v1'`).Scan(&events); err != nil {
 		t.Fatal(err)
 	}
 	if events != 2 {
@@ -88,9 +88,9 @@ func TestPostProposal_GapFreeNumbersAndOutbox(t *testing.T) {
 }
 
 func TestPostProposal_VersionMismatchConsumesNoNumber(t *testing.T) {
-	pool := testkit.DB(t)
+	admin, pool := testkit.DBWithApp(t)
 	ctx := context.Background()
-	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
 	tctx := ctxAllEntities(testkit.TenantID(1))
@@ -123,7 +123,7 @@ func TestPostProposal_VersionMismatchConsumesNoNumber(t *testing.T) {
 		} `json:"data"`
 	}
 	var raw []byte
-	if err := pool.QueryRow(ctx, `select payload from outbox where aggregate_id = $1`, inv.ID).Scan(&raw); err != nil {
+	if err := admin.QueryRow(ctx, `select payload from outbox where aggregate_id = $1`, inv.ID).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
@@ -136,9 +136,9 @@ func TestPostProposal_VersionMismatchConsumesNoNumber(t *testing.T) {
 }
 
 func TestListInvoices_Filters(t *testing.T) {
-	pool := testkit.DB(t)
+	admin, pool := testkit.DBWithApp(t)
 	ctx := context.Background()
-	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
 	s := New(pool)
@@ -264,9 +264,9 @@ func creditNote(t *testing.T, s *Postgres, ctx context.Context, origID string, r
 }
 
 func TestCreditNote_PostNumbersChecksRemainderAndPublishes(t *testing.T) {
-	pool := testkit.DB(t)
+	admin, pool := testkit.DBWithApp(t)
 	ctx := context.Background()
-	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
 	tctx := ctxAllEntities(testkit.TenantID(1))
@@ -345,7 +345,7 @@ func TestCreditNote_PostNumbersChecksRemainderAndPublishes(t *testing.T) {
 		} `json:"data"`
 	}
 	var raw []byte
-	if err := pool.QueryRow(ctx, `select payload from outbox where aggregate_id = $1`, first.ID).Scan(&raw); err != nil {
+	if err := admin.QueryRow(ctx, `select payload from outbox where aggregate_id = $1`, first.ID).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
@@ -364,9 +364,9 @@ func TestCreditNote_PostNumbersChecksRemainderAndPublishes(t *testing.T) {
 }
 
 func TestCreditNote_OriginalMustBePosted(t *testing.T) {
-	pool := testkit.DB(t)
+	admin, pool := testkit.DBWithApp(t)
 	ctx := context.Background()
-	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
 	tctx := ctxAllEntities(testkit.TenantID(1))
@@ -388,9 +388,9 @@ func TestCreditNote_OriginalMustBePosted(t *testing.T) {
 }
 
 func TestInstallments_StoredAndPublished(t *testing.T) {
-	pool := testkit.DB(t)
+	admin, pool := testkit.DBWithApp(t)
 	ctx := context.Background()
-	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
 	tctx := ctxAllEntities(testkit.TenantID(1))
@@ -424,7 +424,7 @@ func TestInstallments_StoredAndPublished(t *testing.T) {
 		} `json:"data"`
 	}
 	var raw []byte
-	if err := pool.QueryRow(ctx, `select payload from outbox where aggregate_id = $1`, inv.ID).Scan(&raw); err != nil {
+	if err := admin.QueryRow(ctx, `select payload from outbox where aggregate_id = $1`, inv.ID).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
