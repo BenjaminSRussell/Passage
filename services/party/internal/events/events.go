@@ -37,6 +37,7 @@ type ChangeData struct {
 	RequestedValue string  `json:"requested_value"`
 	RequestedBy    string  `json:"requested_by"`
 	DecidedBy      string  `json:"decided_by,omitempty"`
+	Reason         *string `json:"reason,omitempty"`
 }
 
 type PartyCreatedData struct {

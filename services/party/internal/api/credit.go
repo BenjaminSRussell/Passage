@@ -18,6 +18,10 @@ type creditLimitRequest struct {
 	CreditLimit string `json:"creditLimit"`
 }
 
+type decisionRequest struct {
+	Reason string `json:"reason"`
+}
+
 type creditMetrics struct {
 	requested, applied, approved, rejected atomic.Int64
 }
@@ -61,7 +65,14 @@ func (a *API) decide(approve bool) http.HandlerFunc {
 		if !validTenant(w, r) {
 			return
 		}
-		change, err := a.credit.DecidePendingChange(r.Context(), chi.URLParam(r, "id"), approve)
+		var req decisionRequest
+		if r.ContentLength != 0 {
+			if err := httpx.Decode(r, &req); err != nil {
+				httpx.Fail(w, r, err)
+				return
+			}
+		}
+		change, err := a.credit.DecidePendingChange(r.Context(), chi.URLParam(r, "id"), approve, req.Reason)
 		if err != nil {
 			failParty(w, r, err)
 			return

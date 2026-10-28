@@ -146,3 +146,4 @@ components:
         requested_value: { type: string }
         requested_by: { type: string }
         decided_by: { type: string, description: Present on approved and rejected. }
+        reason: { type: string, description: Optional decision reason on approved and rejected. }

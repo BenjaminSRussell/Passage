@@ -20,6 +20,7 @@ type PendingChange struct {
 	Status         string     `json:"status"`
 	RequestedBy    string     `json:"requestedBy"`
 	DecidedBy      *string    `json:"decidedBy,omitempty"`
+	Reason         *string    `json:"reason,omitempty"`
 	RequestedAt    time.Time  `json:"requestedAt"`
 	DecidedAt      *time.Time `json:"decidedAt,omitempty"`
 }

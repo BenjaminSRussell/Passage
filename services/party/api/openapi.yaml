@@ -150,16 +150,21 @@ paths:
       operationId: approvePendingChange
       x-passage-duty: party.approve
       description: Applies the held change to the customer and emits dev.passage.party.change.approved.v1. The requester cannot approve their own change.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Decision' }
       responses:
         '200':
           description: The approved change.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/PendingChange' }
-        '401': { $ref: '#/components/responses/Problem' }
-        '403': { description: 'AUTH-0003 (missing duty) or PTY-SELF-APPROVAL.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '401': { description: 'AUTH-0001: no principal or blank X-Passage-User.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: 'AUTH-0003 (missing duty) or PTY-PENDING-SELF-APPROVAL.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: 'PTY-CHANGE-NOT-FOUND.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '409': { description: 'PTY-CHANGE-DECIDED: the change was already approved or rejected.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: 'PTY-CHANGE-DECIDED: the change was already decided differently or by someone else (the same decider repeating the same decision gets 200 with the stored change). PTY-PENDING-STALE: the limit changed after the request; the change stays pending and can only be rejected.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '500': { $ref: '#/components/responses/Problem' }
   /v1/party/pending-changes/{id}:reject:
     parameters:
@@ -168,16 +173,21 @@ paths:
       operationId: rejectPendingChange
       x-passage-duty: party.approve
       description: Discards the held change; the stored limit is untouched. Emits dev.passage.party.change.rejected.v1.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Decision' }
       responses:
         '200':
           description: The rejected change.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/PendingChange' }
-        '401': { $ref: '#/components/responses/Problem' }
-        '403': { description: 'AUTH-0003 (missing duty) or PTY-SELF-APPROVAL.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '401': { description: 'AUTH-0001: no principal or blank X-Passage-User.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { description: 'AUTH-0003 (missing duty) or PTY-PENDING-SELF-APPROVAL.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: 'PTY-CHANGE-NOT-FOUND.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '409': { description: 'PTY-CHANGE-DECIDED.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: 'PTY-CHANGE-DECIDED: decided differently or by someone else; the same decider repeating the same decision gets 200.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '500': { $ref: '#/components/responses/Problem' }
   /healthz:
     get:
@@ -281,6 +291,11 @@ components:
       required: [creditLimit]
       properties:
         creditLimit: { type: string, pattern: '^[0-9]{1,16}(\.[0-9]{1,2})?$', description: Decimal string; JSON numbers are rejected. }
+    Decision:
+      type: object
+      additionalProperties: false
+      properties:
+        reason: { type: string, maxLength: 500 }
     PendingChange:
       type: object
       required: [id, customerId, legalEntityId, field, currentValue, requestedValue, status, requestedBy, requestedAt]
@@ -294,6 +309,7 @@ components:
         status: { type: string, enum: [pending, approved, rejected] }
         requestedBy: { type: string }
         decidedBy: { type: string }
+        reason: { type: string }
         requestedAt: { type: string, format: date-time }
         decidedAt: { type: string, format: date-time }
     CreditLimitResult:

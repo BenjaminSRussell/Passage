@@ -7,13 +7,15 @@ CREATE TABLE IF NOT EXISTS pending_change (
   current_value numeric(18,2),
   requested_value numeric(18,2) NOT NULL CHECK (requested_value >= 0),
   status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
-  requested_by text NOT NULL,
-  decided_by text,
+  requested_by text NOT NULL CHECK (requested_by <> ''),
+  decided_by text CHECK (decided_by IS NULL OR decided_by <> ''),
+  decision_reason text CHECK (char_length(decision_reason) <= 500),
   requested_at timestamptz NOT NULL DEFAULT now(),
   decided_at timestamptz,
   PRIMARY KEY (tenant_id, id),
   FOREIGN KEY (tenant_id, customer_id) REFERENCES customer_role (tenant_id, id),
-  CHECK ((status = 'pending') = (decided_at IS NULL))
+  CHECK ((status = 'pending') = (decided_at IS NULL)),
+  CHECK (decided_by IS NULL OR decided_by <> requested_by)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS pending_change_one_open

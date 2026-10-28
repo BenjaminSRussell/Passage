@@ -32,7 +32,7 @@ func (f *fakeCredit) RequestCreditLimit(_ context.Context, customerID, limit str
 	return domain.CreditLimitResult{CreditLimit: &limit}, nil
 }
 
-func (f *fakeCredit) DecidePendingChange(_ context.Context, changeID string, approve bool) (domain.PendingChange, error) {
+func (f *fakeCredit) DecidePendingChange(_ context.Context, changeID string, approve bool, _ string) (domain.PendingChange, error) {
 	f.decided, f.approve = changeID, approve
 	if f.err != nil {
 		return domain.PendingChange{}, f.err
