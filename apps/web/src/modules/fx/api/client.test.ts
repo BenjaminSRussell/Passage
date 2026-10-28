@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { convertAmounts, fetchHistory, FxApiError, lookupRate, type FetchLike } from "./client";
+import { convertAmounts, fetchHistory, FxApiError, lookupRate, publishRate, putRateType, type FetchLike } from "./client";
 
 function reply(status: number, body: unknown) {
   return vi.fn<FetchLike>(async () => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } }));
@@ -21,6 +21,20 @@ describe("fx client", () => {
     const error = await convertAmounts({ rateType: "CLOSING", to: "USD", amounts: [{ value: "x", currency: "EUR" }] }, fetchImpl).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(FxApiError);
     expect(error).toMatchObject({ status: 400, code: "COM-0001", fields: { "amounts[0].value": "bad" } });
+  });
+
+  it("puts a rate type at its encoded code", async () => {
+    const fetchImpl = reply(200, { id: "t1", code: "A/B", name: "Closing", allowInverse: true });
+    await putRateType("A/B", { name: "Closing", allowInverse: true }, fetchImpl);
+    expect(fetchImpl.mock.calls[0][0]).toBe("/api/v1/fx/rate-types/A%2FB");
+    expect(fetchImpl.mock.calls[0][1]).toMatchObject({ method: "PUT", body: JSON.stringify({ name: "Closing", allowInverse: true }) });
+  });
+
+  it("publishes one rate with the idempotency key", async () => {
+    const fetchImpl = reply(200, { rates: [{ id: "r1", version: 1, superseded: false, unchanged: false }] });
+    const input = { rateType: "CLOSING", from: "EUR", to: "USD", validFrom: "2026-02-01", rate: "1.08" };
+    await publishRate(input, "key-1", fetchImpl);
+    expect(fetchImpl.mock.calls[0][1]).toMatchObject({ method: "POST", headers: { "Idempotency-Key": "key-1" }, body: JSON.stringify({ rates: [input] }) });
   });
 
   it("falls back to a generic message for a non-JSON error body", async () => {
