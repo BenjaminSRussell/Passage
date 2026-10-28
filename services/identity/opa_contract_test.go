@@ -10,6 +10,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -21,20 +23,35 @@ import (
 
 const (
 	contractTenant   = "tenant-a"
-	seededDutyCount  = 40
+	seededDutyCount  = 92
 	unassignedUserID = "user-without-duty"
 )
 
 type seededDuty struct {
+	Flag        bool `json:"flag"`
 	Permissions []struct {
 		Resource string   `json:"resource"`
 		Methods  []string `json:"methods"`
 	} `json:"permissions"`
 }
 
+func globRegexp(pattern string) *regexp.Regexp {
+	expr := regexp.QuoteMeta(pattern)
+	expr = strings.ReplaceAll(expr, `\{,/\*\*\}`, `(/.*)?`)
+	expr = strings.ReplaceAll(expr, `\*`, `[^/:]*`)
+	return regexp.MustCompile("^" + expr + "$")
+}
+
+func concreteResource(pattern string) string {
+	if base, ok := strings.CutSuffix(pattern, "{,/**}"); ok {
+		return base + "/item-1"
+	}
+	return strings.ReplaceAll(pattern, "*", "item-1")
+}
+
 func (d seededDuty) grants(method, resource string) bool {
 	for _, permission := range d.Permissions {
-		if resource != permission.Resource && !strings.HasPrefix(resource, permission.Resource+"/") {
+		if !globRegexp(permission.Resource).MatchString(resource) {
 			continue
 		}
 		for _, m := range permission.Methods {
@@ -217,7 +234,7 @@ func TestDutyContractAgainstRealPolicy(t *testing.T) {
 	for _, name := range h.names {
 		for _, permission := range h.duties[name].Permissions {
 			for _, method := range permission.Methods {
-				p := pair{method, permission.Resource + "/item-1"}
+				p := pair{method, concreteResource(permission.Resource)}
 				if !seen[p] {
 					seen[p] = true
 					pairs = append(pairs, p)
@@ -255,6 +272,25 @@ func TestDutyContractExpectations(t *testing.T) {
 		{duty: "View vendors", method: http.MethodGet, resource: "/v1/vendors/vendor-a", wantAllowed: true},
 		{duty: "View vendors", method: http.MethodPut, resource: "/v1/vendors", wantDutyMissing: "Maintain vendors"},
 		{duty: "Maintain vendors", method: http.MethodPut, resource: "/v1/vendors-extra/vendor-a"},
+		{duty: "inventory.journal.write", method: http.MethodPost, resource: "/v1/inventory/journals/j1:post"},
+		{duty: "inventory.journal.write", method: http.MethodPost, resource: "/v1/inventory/journals/j1:approve"},
+		{duty: "inventory.transfer.write", method: http.MethodPost, resource: "/v1/inventory/transfer-orders/t1:ship"},
+		{duty: "inventory.transfer.write", method: http.MethodPost, resource: "/v1/inventory/transfer-orders/t1:receive"},
+		{duty: "ledger.journal.write", method: http.MethodPost, resource: "/v1/ledger/journal-batches/b1/approve"},
+		{duty: "ledger.journal.write", method: http.MethodPost, resource: "/v1/ledger/journal-batches/b1/post"},
+		{duty: "ledger.journal.approve", method: http.MethodPost, resource: "/v1/ledger/journal-batches/b1/post"},
+		{duty: "ledger.journal.post", method: http.MethodPost, resource: "/v1/ledger/journal-entries/e1/reverse"},
+		{duty: "ledger.journal.reverse", method: http.MethodPost, resource: "/v1/ledger/journal-entries"},
+		{duty: "ReceivingMaintain", method: http.MethodPost, resource: "/v1/receiving/receipts/r1:post"},
+		{duty: "ReceivingMaintain", method: http.MethodPost, resource: "/v1/receiving/receipts/r1:correct"},
+		{duty: "ReceivingMaintain", method: http.MethodPost, resource: "/v1/receiving/receipts/r1:cancel"},
+		{duty: "PurchaseOrderMaintain", method: http.MethodPost, resource: "/v1/procurement/purchase-orders/p1:approve"},
+		{duty: "RFQMaintain", method: http.MethodPost, resource: "/v1/procurement/rfqs/q1:award"},
+		{duty: "ledger.journal.read", method: http.MethodGet, resource: "/v1/reporting/runs/r1"},
+		{duty: "reporting.statement.view", method: http.MethodGet, resource: "/v1/reporting/runs/r1/cells/a/b/lines"},
+		{duty: "reporting.statement.view", method: http.MethodGet, resource: "/v1/reporting/definitions/d1/export"},
+		{duty: "ReceivingPost", method: http.MethodPost, resource: "/v1/receiving/receipts/r1:post", wantAllowed: true},
+		{duty: "ledger.journal.read", method: http.MethodGet, resource: "/v1/reporting/runs/r1/cells/a/b/lines", wantAllowed: true},
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("%s/%s %s", tt.duty, tt.method, tt.resource), func(t *testing.T) {
@@ -277,5 +313,47 @@ func TestDutyContractExpectations(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+var coveredServices = []string{"ledger", "fx", "tax", "close", "finreport", "inventory", "purchasing", "receiving", "payables"}
+
+var dutyConstant = regexp.MustCompile(`(?m)\b[dD]uty[A-Za-z0-9]*\s*(?:string\s*)?=\s*"([^"]+)"`)
+
+func TestEveryServiceDutyIsSeeded(t *testing.T) {
+	raw, err := os.ReadFile("../../policies/authz/data.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seeded struct {
+		Duties map[string]json.RawMessage `json:"duties"`
+	}
+	if err := json.Unmarshal(raw, &seeded); err != nil {
+		t.Fatal(err)
+	}
+	for _, service := range coveredServices {
+		files, err := filepath.Glob(filepath.Join("..", service, "internal", "*", "*.go"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := 0
+		for _, file := range files {
+			if strings.HasSuffix(file, "_test.go") {
+				continue
+			}
+			src, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, match := range dutyConstant.FindAllStringSubmatch(string(src), -1) {
+				found++
+				if _, ok := seeded.Duties[match[1]]; !ok {
+					t.Errorf("%s: duty %q (%s) is not seeded in policies/authz/data.json", service, match[1], file)
+				}
+			}
+		}
+		if found == 0 {
+			t.Errorf("%s: no duty constants found; the scan is stale", service)
+		}
 	}
 }
