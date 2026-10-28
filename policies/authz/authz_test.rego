@@ -22,7 +22,7 @@ has_route_permissions(spec) if {
 }
 
 test_all_seeded_duties_allow_their_declared_permissions if {
-	count(data.duties) == 92
+	count(data.duties) == 94
 	every duty, spec in data.duties {
 		has_route_permissions(spec)
 		every permission in spec.permissions {
@@ -364,4 +364,14 @@ test_view_exchange_rates_can_convert if {
 	}
 		with data.assignments as {"tenant-a": {"user-a": ["View exchange rates"]}}
 	result.allow
+}
+
+test_payment_file_preview_duty_allows_only_its_route if {
+	allowed("payment-file.preview", "POST", "/v1/payables/payment-files:preview")
+	not allowed("payment-file.preview", "POST", "/v1/payables/payments/status:parse")
+}
+
+test_payment_status_parse_duty_does_not_open_file_preview if {
+	allowed("payment-status.parse", "POST", "/v1/payables/payments/status:parse")
+	not allowed("payment-status.parse", "POST", "/v1/payables/payment-files:preview")
 }

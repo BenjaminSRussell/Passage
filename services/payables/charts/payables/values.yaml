@@ -6,7 +6,7 @@ image:
 databaseSecret: payables-db
 replicaCount: 1
 resources:
-  requests: { cpu: 50m, memory: 64Mi }
-  limits: { cpu: 250m, memory: 128Mi }
+  requests: { cpu: 50m, memory: 128Mi }
+  limits: { cpu: 500m, memory: 512Mi }
 serviceMonitor:
   enabled: false

@@ -309,6 +309,8 @@
       {"resource": "/v1/receiving/pending-postings/*/resolve", "methods": ["POST"]}
     ]},
     "settlement.read": {"permissions": [{"resource": "/v1/payables/settlements:preview", "methods": ["POST"]}]},
+    "payment-file.preview": {"permissions": [{"resource": "/v1/payables/payment-files:preview", "methods": ["POST"]}]},
+    "payment-status.parse": {"permissions": [{"resource": "/v1/payables/payments/status:parse", "methods": ["POST"]}]},
     "party.approve": {"permissions": [
       {"resource": "/v1/party/pending-changes/*:approve", "methods": ["POST"]},
       {"resource": "/v1/party/pending-changes/*:reject", "methods": ["POST"]}

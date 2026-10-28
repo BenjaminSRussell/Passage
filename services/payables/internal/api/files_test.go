@@ -2,6 +2,8 @@ package api_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -73,7 +75,14 @@ func TestPreviewPaymentFile_MatchesGolden(t *testing.T) {
 	if err != nil {
 		t.Skipf("xmllint unavailable: %v", err)
 	}
-	for _, name := range []string{"sepa-50", "sepa-structured", "us", "uk", "ch", "wire"} {
+	summaries := map[string]struct {
+		count int
+		sum   string
+	}{
+		"sepa-50": {50, "71567"}, "sepa-structured": {5, "1361.1"}, "us": {4, "6140.7"},
+		"uk": {3, "3148.5"}, "ch": {3, "7733.31"}, "wire": {1, "1250000"},
+	}
+	for name, want := range summaries {
 		t.Run(name, func(t *testing.T) {
 			r, a := routerWith(validator)
 			rec := do(r, http.MethodPost, filePreviewPath, readTestdata(t, "pain001/"+name+".json"), true, previewDuty)
@@ -84,14 +93,15 @@ func TestPreviewPaymentFile_MatchesGolden(t *testing.T) {
 			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 				t.Fatal(err)
 			}
-			want := readTestdata(t, "pain001/"+name+".golden.xml")
-			if creationTime.ReplaceAllString(got.Content, "") != creationTime.ReplaceAllString(want, "") {
+			golden := readTestdata(t, "pain001/"+name+".golden.xml")
+			if creationTime.ReplaceAllString(got.Content, "") != creationTime.ReplaceAllString(golden, "") {
 				t.Fatalf("content differs from %s golden", name)
 			}
 			if !got.Validation.Valid || len(got.Validation.Errors) != 0 {
 				t.Fatalf("validation = %+v", got.Validation)
 			}
-			if got.Summary.PaymentCount == 0 || got.Summary.ControlSum == "" || len(got.Summary.SHA256) != 64 {
+			sum := sha256.Sum256([]byte(got.Content))
+			if got.Summary.PaymentCount != want.count || got.Summary.ControlSum != want.sum || got.Summary.SHA256 != hex.EncodeToString(sum[:]) {
 				t.Fatalf("summary = %+v", got.Summary)
 			}
 			if !strings.Contains(scrape(a), "payables_payment_file_previews_total 1") {
@@ -133,7 +143,7 @@ func TestPreviewPaymentFile_Rejections(t *testing.T) {
 		{"unknown field", `{"x":1}`, true, previewDuty, fakeValidator{}, http.StatusBadRequest, "COM-0001"},
 		{"bad created", `{"fileNumber":"F1","created":"yesterday","payments":[{}]}`, true, previewDuty, fakeValidator{}, http.StatusBadRequest, "PAY-0001"},
 		{"no payments", `{"fileNumber":"F1","created":"2026-01-01T00:00:00Z","profile":{"variant":"US"},"payments":[]}`, true, previewDuty, fakeValidator{}, http.StatusBadRequest, "PAY-0001"},
-		{"too many payments", manyPayments, true, previewDuty, fakeValidator{}, http.StatusUnprocessableEntity, "AP-FIL-001"},
+		{"too many payments", manyPayments, true, previewDuty, fakeValidator{}, http.StatusBadRequest, "PAY-0001"},
 		{"body over limit", `{"fileNumber":"` + strings.Repeat("A", 5<<20) + `"}`, true, previewDuty, fakeValidator{}, http.StatusRequestEntityTooLarge, "COM-0413"},
 		{"validator failure", us, true, previewDuty, fakeValidator{err: errors.New("xmllint crashed")}, http.StatusInternalServerError, "COM-0500"},
 	}
@@ -144,8 +154,16 @@ func TestPreviewPaymentFile_Rejections(t *testing.T) {
 			if rec.Code != tc.wantStatus || !strings.Contains(rec.Body.String(), tc.wantBody) {
 				t.Fatalf("got %d %.200s; want %d containing %s", rec.Code, rec.Body.String(), tc.wantStatus, tc.wantBody)
 			}
-			if strings.Contains(scrape(a), "payables_payment_file_previews_total 1") {
+			metrics := scrape(a)
+			if strings.Contains(metrics, "payables_payment_file_previews_total 1") {
 				t.Fatal("rejected request counted as a successful preview")
+			}
+			authRejected := tc.wantStatus == http.StatusUnauthorized || tc.wantStatus == http.StatusForbidden
+			wantFaults := tc.wantStatus >= 500
+			if wantFaults != strings.Contains(metrics, "payables_payment_file_server_faults_total 1") ||
+				(!authRejected && !wantFaults) != strings.Contains(metrics, "payables_payment_file_client_errors_total 1") ||
+				strings.Contains(metrics, "payables_settlement_preview_client_errors_total 1") {
+				t.Fatalf("error counters wrong for %d:\n%s", tc.wantStatus, metrics)
 			}
 		})
 	}

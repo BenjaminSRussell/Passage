@@ -20,7 +20,7 @@ spec:
           type: RuntimeDefault
       volumes:
         - name: tmp
-          emptyDir: {}
+          emptyDir: { sizeLimit: 64Mi }
       containers:
         - name: payables
           image: {{ include "payables.image" . | quote }}

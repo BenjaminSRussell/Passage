@@ -38,7 +38,10 @@ type API struct {
 	previews     atomic.Int64
 	clientErrors atomic.Int64
 	serverFaults atomic.Int64
-	http         requestMetrics
+
+	fileClientErrors atomic.Int64
+	fileServerFaults atomic.Int64
+	http             requestMetrics
 }
 
 type problemBody struct {
@@ -116,8 +119,16 @@ func (a *API) preview(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, res)
 }
 
-func (a *API) reject(w http.ResponseWriter, r *http.Request, err error) {
+func (a *API) countClientError(r *http.Request) {
+	if r.URL.Path == pathPaymentFilePreview || r.URL.Path == pathPaymentStatusParse {
+		a.fileClientErrors.Add(1)
+		return
+	}
 	a.clientErrors.Add(1)
+}
+
+func (a *API) reject(w http.ResponseWriter, r *http.Request, err error) {
+	a.countClientError(r)
 	slog.Warn("request rejected", "err", err, "path", r.URL.Path, "correlationId", middleware.GetReqID(r.Context()))
 	var de *domain.Error
 	if errors.As(err, &de) {
@@ -151,12 +162,12 @@ func fail(w http.ResponseWriter, r *http.Request, err error) {
 func (a *API) validTenant(w http.ResponseWriter, r *http.Request) bool {
 	p, ok := tenant.FromContext(r.Context())
 	if !ok || !ids.Valid(p.TenantID) {
-		a.clientErrors.Add(1)
+		a.countClientError(r)
 		fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "missing or malformed tenant"))
 		return false
 	}
 	if p.LegalEntityID != "" && !ids.Valid(p.LegalEntityID) {
-		a.clientErrors.Add(1)
+		a.countClientError(r)
 		fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "legal entity must be a single UUID"))
 		return false
 	}
@@ -171,6 +182,8 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP payables_settlement_preview_server_faults_total Previews that failed on a server fault (5xx).\n# TYPE payables_settlement_preview_server_faults_total counter\npayables_settlement_preview_server_faults_total %d\n", a.serverFaults.Load())
 		fmt.Fprintf(w, "# HELP payables_payment_file_previews_total Successful pain.001 previews.\n# TYPE payables_payment_file_previews_total counter\npayables_payment_file_previews_total %d\n", a.filePreviews.Load())
 		fmt.Fprintf(w, "# HELP payables_payment_status_parses_total Successful pain.002 status parses.\n# TYPE payables_payment_status_parses_total counter\npayables_payment_status_parses_total %d\n", a.statusParses.Load())
+		fmt.Fprintf(w, "# HELP payables_payment_file_client_errors_total Preview and status-parse requests rejected as invalid input (4xx).\n# TYPE payables_payment_file_client_errors_total counter\npayables_payment_file_client_errors_total %d\n", a.fileClientErrors.Load())
+		fmt.Fprintf(w, "# HELP payables_payment_file_server_faults_total Preview and status-parse requests that failed on a server fault (5xx).\n# TYPE payables_payment_file_server_faults_total counter\npayables_payment_file_server_faults_total %d\n", a.fileServerFaults.Load())
 		a.http.write(w)
 	})
 }

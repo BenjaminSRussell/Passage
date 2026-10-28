@@ -55,6 +55,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err != nil {
 		return err
 	}
+	defer validator.Close()
 	a := api.New(pool, validator, time.Now)
 	router := httpx.NewRouter()
 	a.Register(router)

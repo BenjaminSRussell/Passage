@@ -123,7 +123,7 @@ func (a *API) failDomain(w http.ResponseWriter, r *http.Request, err error) {
 		a.reject(w, r, err)
 		return
 	}
-	a.serverFaults.Add(1)
+	a.fileServerFaults.Add(1)
 	slog.Error("payment file request failed", "err", err, "path", r.URL.Path, "correlationId", middleware.GetReqID(r.Context()))
 	fail(w, r, err)
 }
@@ -138,7 +138,7 @@ func (a *API) previewPaymentFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(dto.Payments) > maxPreviewPayments {
-		a.failDomain(w, r, &domain.Error{Code: domain.CodeFileInvalid, Detail: "a preview holds at most 2000 payments"})
+		a.failDomain(w, r, &domain.Error{Code: domain.CodeValidation, Detail: "a preview holds at most 2000 payments"})
 		return
 	}
 	if dto.Created == "" {
