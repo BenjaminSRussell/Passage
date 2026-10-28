@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { OrgApiError } from "./client";
-import { compareHierarchyVersions, getHierarchyVersion, listHierarchyTypes, listHierarchyVersions } from "./hierarchy";
+import {
+  compareHierarchyVersions,
+  createHierarchyDraft,
+  getHierarchyVersion,
+  listHierarchyTypes,
+  listHierarchyVersions,
+  publishHierarchyVersion,
+  replaceHierarchyNodes,
+} from "./hierarchy";
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 
@@ -63,6 +71,45 @@ describe("hierarchy client", () => {
   ])("maps problem+json for %s to OrgApiError", async (_name, call, status, code) => {
     stub(json({ code, detail: "nope", status }, status));
     await expect(call()).rejects.toMatchObject({ status, code, message: "nope" });
+  });
+
+  it("creates a draft with a POST, an idempotency key and no body", async () => {
+    const fetchMock = stub(json({ id: "v9", versionNo: 9, version: 1, nodes: null }, 201));
+    expect(await createHierarchyDraft("a/b")).toMatchObject({ id: "v9", nodes: [] });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/v1/org/hierarchy-types/a%2Fb/versions");
+    expect(init).toMatchObject({ method: "POST" });
+    expect(init?.body).toBeUndefined();
+    expect(new Headers(init?.headers).get("Idempotency-Key")).toBeTruthy();
+  });
+
+  it("replaces nodes with a PUT that sends only id, parent and order next to the lock version", async () => {
+    const fetchMock = stub(json({ id: "v9", version: 4, nodes: [] }));
+    await replaceHierarchyNodes("v9", 3, [{ orgUnitId: "o1", kind: "operating_unit", parentOrgUnitId: null, sortOrder: 0 }]);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/v1/org/hierarchy-versions/v9/nodes");
+    expect(init).toMatchObject({ method: "PUT" });
+    expect(JSON.parse(String(init?.body))).toEqual({ version: 3, nodes: [{ orgUnitId: "o1", parentOrgUnitId: null, sortOrder: 0 }] });
+    expect(new Headers(init?.headers).get("Content-Type")).toBe("application/json");
+  });
+
+  it("publishes to the colon action with the date, reason and lock version", async () => {
+    const fetchMock = stub(json({ id: "v9", status: "published", nodes: [] }));
+    await publishHierarchyVersion("v9", { version: 3, effectiveFrom: "2026-01-01", reason: "Correcting the record" });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/v1/org/hierarchy-versions/v9:publish");
+    expect(init).toMatchObject({ method: "POST" });
+    expect(JSON.parse(String(init?.body))).toEqual({ version: 3, effectiveFrom: "2026-01-01", reason: "Correcting the record" });
+    expect(new Headers(init?.headers).get("Idempotency-Key")).toBeTruthy();
+  });
+
+  it.each([
+    ["publish", () => publishHierarchyVersion("v9", { version: 1, effectiveFrom: "2020-01-01", reason: "" }), 403, "ORG-HIER-BACKDATE-DUTY"],
+    ["save", () => replaceHierarchyNodes("v9", 1, []), 409, "ORG-VERSION-CONFLICT"],
+    ["create", () => createHierarchyDraft("t1"), 409, "ORG-HIER-DRAFT-EXISTS"],
+  ])("maps a failed %s to OrgApiError", async (_name, call, status, code) => {
+    stub(json({ code, detail: "refused" }, status));
+    await expect(call()).rejects.toMatchObject({ status, code, message: "refused" });
   });
 
   it("falls back to COM-0001 for a non-JSON error body", async () => {

@@ -30,7 +30,14 @@ export interface HierarchyNode {
 }
 
 export interface HierarchyVersion extends HierarchyVersionSummary {
+  version: number;
   nodes: HierarchyNode[];
+}
+
+export interface PublishInput {
+  version: number;
+  effectiveFrom: string;
+  reason: string;
 }
 
 export interface HierarchyChange {
@@ -80,8 +87,7 @@ export const listHierarchyVersions = (typeId: string, status?: HierarchyStatus, 
   listPaged<HierarchyVersionSummary>(`/hierarchy-types/${encodeURIComponent(typeId)}/versions`, { status }, options?.signal);
 
 export async function getHierarchyVersion(id: string, options?: ReadOptions): Promise<HierarchyVersion> {
-  const version = await referenceFetch<HierarchyVersion>(`/hierarchy-versions/${encodeURIComponent(id)}`, { signal: options?.signal });
-  return { ...version, nodes: Array.isArray(version?.nodes) ? version.nodes : [] };
+  return normalizeVersion(await referenceFetch<HierarchyVersion>(`/hierarchy-versions/${encodeURIComponent(id)}`, { signal: options?.signal }));
 }
 
 export async function compareHierarchyVersions(typeId: string, from: number, to: number, options?: ReadOptions): Promise<HierarchyComparison> {
@@ -90,3 +96,27 @@ export async function compareHierarchyVersions(typeId: string, from: number, to:
   const list = <T,>(value: T[] | null | undefined): T[] => (Array.isArray(value) ? value : []);
   return { ...comparison, added: list(comparison?.added), removed: list(comparison?.removed), moved: list(comparison?.moved) };
 }
+
+const normalizeVersion = (version: HierarchyVersion): HierarchyVersion => ({ ...version, nodes: Array.isArray(version?.nodes) ? version.nodes : [] });
+
+export const createHierarchyDraft = async (typeId: string): Promise<HierarchyVersion> =>
+  normalizeVersion(await referenceFetch<HierarchyVersion>(`/hierarchy-types/${encodeURIComponent(typeId)}/versions`, { method: "POST" }));
+
+export const replaceHierarchyNodes = async (versionId: string, version: number, nodes: readonly HierarchyNode[]): Promise<HierarchyVersion> =>
+  normalizeVersion(
+    await referenceFetch<HierarchyVersion>(`/hierarchy-versions/${encodeURIComponent(versionId)}/nodes`, {
+      method: "PUT",
+      body: JSON.stringify({
+        version,
+        nodes: nodes.map(({ orgUnitId, parentOrgUnitId, sortOrder }) => ({ orgUnitId, parentOrgUnitId, sortOrder })),
+      }),
+    }),
+  );
+
+export const publishHierarchyVersion = async (versionId: string, input: PublishInput): Promise<HierarchyVersion> =>
+  normalizeVersion(
+    await referenceFetch<HierarchyVersion>(`/hierarchy-versions/${encodeURIComponent(versionId)}:publish`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  );
