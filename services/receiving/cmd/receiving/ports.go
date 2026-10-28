@@ -33,10 +33,14 @@ func buildPorts(getenv func(string) string) (api.Ports, error) {
 	default:
 		return api.Ports{}, fmt.Errorf("CLOSE_URL is required (set PASSAGE_ALLOW_FAKES=1 only for local development)")
 	}
-	if url := getenv("PURCHASING_URL"); url != "" {
+	switch url := getenv("PURCHASING_URL"); {
+	case url != "":
 		ports.PurchaseOrders = purchasing.New(url, nil)
-	} else {
-		slog.Warn("PURCHASING_URL is empty: no purchase order lookups are wired")
+	case allowFakes:
+		slog.Warn("PURCHASING_URL is empty: purchase order lookups find nothing", "flag", "PASSAGE_ALLOW_FAKES")
+		ports.PurchaseOrders = domain.FakePurchaseOrders{}
+	default:
+		return api.Ports{}, fmt.Errorf("PURCHASING_URL is required (set PASSAGE_ALLOW_FAKES=1 only for local development)")
 	}
 	profile, err := buildProfile(getenv, allowFakes)
 	ports.Profile = profile
