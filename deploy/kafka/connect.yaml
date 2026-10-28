@@ -13,6 +13,7 @@ spec:
     acls:
       - resource: {type: topic, name: passage.platform., patternType: prefix}
         operations: [Create, Describe, Write, DescribeConfigs]
+      # Literal on purpose: a new metadata aggregate type routes to a new topic and needs its own ACL entry here.
       - resource: {type: topic, name: passage.metadata.entity, patternType: literal}
         operations: [Create, Describe, Write, DescribeConfigs]
       - resource: {type: topic, name: passage-connect-, patternType: prefix}
@@ -86,11 +87,12 @@ spec:
     topic.prefix: passage.platform
     slot.name: passage_outbox_batch
     table.include.list: public.outbox
+    snapshot.mode: initial
     tombstones.on.delete: false
     topic.creation.default.replication.factor: 3
     topic.creation.default.partitions: 12
     topic.creation.default.cleanup.policy: delete
-    topic.creation.default.retention.ms: 2592000000
+    topic.creation.default.retention.ms: 604800000
     topic.creation.groups: machineevent
     topic.creation.machineevent.include: passage\.manufacturing\.machineevent
     topic.creation.machineevent.partitions: 48
@@ -104,18 +106,22 @@ spec:
     transforms.outbox.table.field.event.payload: payload
     transforms.outbox.route.by.field: aggregate_type
     transforms.outbox.route.topic.replacement: passage.platform.${routedByValue}
+    transforms.outbox.table.expand.json.payload: true
+    transforms.outbox.table.fields.additional.placement: tenant_id:header:tenantid
     key.converter: org.apache.kafka.connect.storage.StringConverter
-    value.converter: io.debezium.converters.CloudEventsConverter
-    value.converter.serializer.type: json
-    value.converter.data.serializer.type: json
+    value.converter: org.apache.kafka.connect.json.JsonConverter
+    value.converter.schemas.enable: false
     producer.override.acks: all
     producer.override.enable.idempotence: true
 ---
 # Topic naming: services/metadata writes aggregate_type "entity" and events.Topic
 # maps dev.passage.metadata.entity.published.v1 to passage.metadata.entity, which
-# is also the AsyncAPI channel. The PRD names dev.passage.metadata.entity.v1 in
-# AC-4.5; that is the CloudEvents type namespace, not a Kafka topic, and is wrong.
-# The metadata outbox has no partition_key column, so the key is aggregate_id.
+# is also the AsyncAPI channel; PRD FR-4.1 and AC-4.5 use the same name.
+# Outbox payloads are complete CloudEvents (platform/go/outbox), so they pass
+# through unchanged: table.expand.json.payload emits the JSON object and
+# JsonConverter serializes it; tenant_id travels as the tenantid header.
+# Config keys: https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html
+# snapshot.mode initial needs a CDC role that bypasses RLS on outbox.
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaConnector
 metadata:
@@ -138,21 +144,23 @@ spec:
     publication.name: passage_outbox_metadata
     publication.autocreate.mode: filtered
     table.include.list: public.outbox
+    snapshot.mode: initial
     tombstones.on.delete: false
     topic.creation.default.replication.factor: 3
     topic.creation.default.partitions: 12
     topic.creation.default.cleanup.policy: delete
-    topic.creation.default.retention.ms: 2592000000
+    topic.creation.default.retention.ms: 604800000
     transforms: outbox
     transforms.outbox.type: io.debezium.transforms.outbox.EventRouter
     transforms.outbox.table.field.event.id: id
-    transforms.outbox.table.field.event.key: aggregate_id
+    transforms.outbox.table.field.event.key: partition_key
     transforms.outbox.table.field.event.payload: payload
     transforms.outbox.route.by.field: aggregate_type
     transforms.outbox.route.topic.replacement: passage.metadata.${routedByValue}
+    transforms.outbox.table.expand.json.payload: true
+    transforms.outbox.table.fields.additional.placement: tenant_id:header:tenantid
     key.converter: org.apache.kafka.connect.storage.StringConverter
-    value.converter: io.debezium.converters.CloudEventsConverter
-    value.converter.serializer.type: json
-    value.converter.data.serializer.type: json
+    value.converter: org.apache.kafka.connect.json.JsonConverter
+    value.converter.schemas.enable: false
     producer.override.acks: all
     producer.override.enable.idempotence: true
