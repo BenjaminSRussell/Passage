@@ -32,9 +32,9 @@ func batchFor(le string) ProposalBatch {
 }
 
 func TestShipmentProposals_BatchStoredReplayedAndPosted(t *testing.T) {
-	pool := testkit.DB(t)
+	admin, pool := testkit.DBWithApp(t)
 	ctx := context.Background()
-	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
 	tctx := ctxAllEntities(testkit.TenantID(1))
@@ -73,7 +73,7 @@ func TestShipmentProposals_BatchStoredReplayedAndPosted(t *testing.T) {
 		t.Fatal(err)
 	}
 	var raw []byte
-	if err := pool.QueryRow(ctx, `select payload from outbox where aggregate_id = $1`, first.ID).Scan(&raw); err != nil {
+	if err := admin.QueryRow(ctx, `select payload from outbox where aggregate_id = $1`, first.ID).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
 	var evt struct {
@@ -96,9 +96,9 @@ func TestShipmentProposals_BatchStoredReplayedAndPosted(t *testing.T) {
 }
 
 func TestShipmentProposals_SlipLineInvoicedOnceAndBatchIsAtomic(t *testing.T) {
-	pool := testkit.DB(t)
+	admin, pool := testkit.DBWithApp(t)
 	ctx := context.Background()
-	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
 	tctx := ctxAllEntities(testkit.TenantID(1))
@@ -168,9 +168,9 @@ func TestShipmentProposals_Isolation(t *testing.T) {
 }
 
 func TestShipmentTables_ForceRowLevelSecurity(t *testing.T) {
-	pool := testkit.DB(t)
+	admin, pool := testkit.DBWithApp(t)
 	ctx := context.Background()
-	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
 	var enabled, forced bool

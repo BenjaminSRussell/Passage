@@ -31,9 +31,9 @@ func principalCtx(tenantID string) context.Context {
 // agreement and starts the SLA clock; the completed work order posts its
 // labor split and consumes included hours once.
 func TestStore_CaseResolvesAgreementAndPostsBilling(t *testing.T) {
-	pool := testkit.DB(t)
+	admin, pool := testkit.DBWithApp(t)
 	ctx := principalCtx(testkit.TenantID(1))
-	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
 	s := New(pool)
@@ -113,9 +113,9 @@ type fixture struct {
 
 func newFixture(t *testing.T) fixture {
 	t.Helper()
-	pool := testkit.DB(t)
+	admin, pool := testkit.DBWithApp(t)
 	ctx := principalCtx(testkit.TenantID(1))
-	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
 	f := fixture{s: New(pool), ctx: ctx, customer: ids.New(), le: ids.New(), terr: ids.New()}
