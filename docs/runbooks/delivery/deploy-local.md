@@ -79,20 +79,31 @@ for real deployments.
 ## Promote or roll back prod
 
 Prod is the Argo CD root application at `deploy/argocd/root-prod.yaml`, reading
-`deploy/envs/prod/apps`. Its Applications have no `automated` sync policy: nothing
-syncs or prunes until an operator runs `argocd app sync` after the PR merges.
-Prod promotes only the digest stage currently pins, so stage and prod consume the
-same signed release artifact; the soak check (at least 60 minutes in stage with no
-`SLOBurnRateHigh` alert) is a manual gate until the Release table lands.
+`deploy/envs/prod/apps`. Like stage, it syncs automatically with prune and
+self-heal; the reviewed PR merge is the approval gate. Prod promotes only the
+digest stage pins on `origin/main`, once stage has pinned it for at least 60
+minutes (the script refuses otherwise), so stage and prod consume the same signed
+release artifact. `--skip-verify` is refused for prod. The check for zero
+`SLOBurnRateHigh` alerts remains manual until the Release table lands.
 
 ```sh
-make -C deploy promote-prod IMAGE_DIGEST=<digest pinned in deploy/envs/stage>
-# Commit the prod manifest change on a branch, merge its PR, then:
-argocd app sync hello-ledger-prod
+make -C deploy promote-prod IMAGE_DIGEST=<digest pinned in deploy/envs/stage on main>
+# Commit the prod manifest change on a branch and merge its PR.
+# Argo syncs on merge: watch root-prod -> hello-ledger-prod until Healthy.
+argocd app get hello-ledger-prod
 argocd app history hello-ledger-prod
-
-make -C deploy rollback-prod
 ```
+
+To roll back, restore the prior distinct digest from the prod manifest history on
+`origin/main` (its signature is re-verified first):
+
+```sh
+make -C deploy rollback-prod
+# Commit the rollback manifest change on a branch and merge its PR; Argo syncs on merge.
+argocd app history hello-ledger-prod
+```
+
+The FR-1.10 target is the prior digest active within 5 minutes of the merge.
 
 The prod cluster must be registered in Argo CD as `prod` and provide the
 `passage-prod-ca` ClusterIssuer and `hello-ledger-db` Secret outside Git.

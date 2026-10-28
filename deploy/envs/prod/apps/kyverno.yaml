@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: kyverno
+  name: kyverno-prod
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "-3"
@@ -12,9 +12,12 @@ spec:
     chart: kyverno
     targetRevision: 3.9.2
   destination:
-    server: https://kubernetes.default.svc
+    name: prod
     namespace: kyverno
   syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
@@ -22,7 +25,7 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: admission-policies
+  name: admission-policies-prod
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "-2"
@@ -33,8 +36,11 @@ spec:
     targetRevision: main
     path: deploy/policies/admission
   destination:
-    server: https://kubernetes.default.svc
+    name: prod
     namespace: kyverno
   syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
     syncOptions:
       - SkipDryRunOnMissingResource=true

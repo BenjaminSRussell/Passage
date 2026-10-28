@@ -24,3 +24,7 @@ spec:
   destination:
     name: prod
     namespace: hello-ledger
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

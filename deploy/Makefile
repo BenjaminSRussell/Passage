@@ -45,7 +45,8 @@ rollback-stage:
 
 promote-prod:
 	@test -n "$(IMAGE_DIGEST)" || { echo "Usage: make -C deploy promote-prod IMAGE_DIGEST=<the digest stage pins>" >&2; exit 2; }
-	$(PYTHON) scripts/stage_release.py promote --to prod --digest "$(IMAGE_DIGEST)" $(if $(filter 1,$(SKIP_VERIFY)),--skip-verify)
+	@test "$(SKIP_VERIFY)" != "1" || { echo "SKIP_VERIFY is not allowed for prod" >&2; exit 2; }
+	$(PYTHON) scripts/stage_release.py promote --to prod --digest "$(IMAGE_DIGEST)"
 
 rollback-prod:
 	$(PYTHON) scripts/stage_release.py rollback --env prod

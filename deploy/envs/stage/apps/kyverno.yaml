@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: kyverno
+  name: kyverno-stage
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "-3"
@@ -12,7 +12,7 @@ spec:
     chart: kyverno
     targetRevision: 3.9.2
   destination:
-    server: https://kubernetes.default.svc
+    name: stage
     namespace: kyverno
   syncPolicy:
     automated:
@@ -25,7 +25,7 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: admission-policies
+  name: admission-policies-stage
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "-2"
@@ -36,7 +36,7 @@ spec:
     targetRevision: main
     path: deploy/policies/admission
   destination:
-    server: https://kubernetes.default.svc
+    name: stage
     namespace: kyverno
   syncPolicy:
     automated:

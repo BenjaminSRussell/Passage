@@ -5,6 +5,7 @@ import argparse
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -12,7 +13,8 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 MANIFESTS = {
     env: Path(f"deploy/envs/{env}/apps/hello-ledger.yaml") for env in ("stage", "prod")
 }
-PLACEHOLDER_DIGEST = "sha256:" + "0" * 64
+SOAK_MINUTES = 60
+PLACEHOLDER_DIGEST ="sha256:" + "0" * 64
 IMAGE_REPOSITORY = "ghcr.io/benjaminsrussell/hello-ledger"
 WORKFLOW_REPOSITORY = "BenjaminSRussell/Passage"
 OIDC_ISSUER = "https://token.actions.githubusercontent.com"
@@ -119,7 +121,47 @@ def verify_image(digest):
             ) from error
 
 
+def _fetch_origin_main(root):
+    _git(root, "fetch", "origin", "main")
+
+
+def _require_soaked_stage_digest(root, digest):
+    _manifest_path(root, "stage")
+    _require_clean_manifest(root, "stage")
+    _fetch_origin_main(root)
+    stage_path = MANIFESTS["stage"].as_posix()
+    staged = read_digest(_git(root, "show", f"origin/main:{stage_path}"))
+    if staged == PLACEHOLDER_DIGEST:
+        raise ReleaseError("stage on origin/main still pins the placeholder digest; promote it to stage first")
+    if digest != staged:
+        raise ReleaseError(
+            f"prod promotes only the digest stage pins on origin/main ({staged}); got {digest}"
+        )
+    pinned_since = None
+    history = _git(
+        root, "log", "--first-parent", "--format=%H %ct", "origin/main", "--", stage_path
+    ).splitlines()
+    for line in history:
+        revision, committed = line.split()
+        try:
+            candidate = read_digest(_git(root, "show", f"{revision}:{stage_path}"))
+        except ReleaseError:
+            break
+        if candidate != staged:
+            break
+        pinned_since = int(committed)
+    if pinned_since is None:
+        raise ReleaseError("cannot determine when stage started pinning this digest")
+    soaked_minutes = (time.time() - pinned_since) / 60
+    if soaked_minutes < SOAK_MINUTES:
+        raise ReleaseError(
+            f"stage has pinned {digest} for {soaked_minutes:.0f} minutes; prod requires at least {SOAK_MINUTES}"
+        )
+
+
 def promote(root, digest, env="stage", skip_verify=False):
+    if env == "prod" and skip_verify:
+        raise ReleaseError("--skip-verify is not allowed for prod")
     if re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None:
         raise ReleaseError("digest must be an immutable lowercase sha256:<64 hex characters> reference")
     if digest == PLACEHOLDER_DIGEST:
@@ -131,9 +173,7 @@ def promote(root, digest, env="stage", skip_verify=False):
     text = _read_manifest(path)
     current = read_digest(text)
     if env == "prod":
-        staged = read_digest(_read_manifest(_manifest_path(root, "stage")))
-        if digest != staged:
-            raise ReleaseError(f"prod promotes only the digest stage pins ({staged}); got {digest}")
+        _require_soaked_stage_digest(root, digest)
     if digest == current:
         raise ReleaseError(f"{env} already pins {digest}")
     if skip_verify:
@@ -147,9 +187,9 @@ def promote(root, digest, env="stage", skip_verify=False):
     return current, digest
 
 
-def _previous_digest(root, env, current):
+def _previous_digest(root, env, current, ref="HEAD"):
     revisions = _git(
-        root, "log", "--first-parent", "--format=%H", "--", MANIFESTS[env].as_posix()
+        root, "log", "--first-parent", "--format=%H", ref, "--", MANIFESTS[env].as_posix()
     ).splitlines()
     for revision in revisions:
         try:
@@ -178,11 +218,16 @@ def rollback(root, env="stage"):
         raise ReleaseError(
             f"{env} still pins the placeholder digest; refusing rollback before the first promotion"
         )
-    previous = _previous_digest(root, env, current)
+    ref = "HEAD"
+    if env == "prod":
+        _fetch_origin_main(root)
+        ref = "origin/main"
+    previous = _previous_digest(root, env, current, ref)
     if previous is None:
         raise ReleaseError(
             f"no earlier non-placeholder {env} digest exists in Git history; refusing rollback"
         )
+    verify_image(previous)
     _write_digest(path, text, previous)
     return current, previous
 
