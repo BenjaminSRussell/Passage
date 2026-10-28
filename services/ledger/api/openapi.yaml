@@ -4,7 +4,7 @@ info:
   version: 0.1.0
   description: |
     Universal journal, chart of accounts and balance projection (wave 11, PSG-11).
-    Every route is mounted under /api/v1/ledger except /readyz. Errors are RFC 9457
+    Every route is mounted under /v1/ledger except /readyz. Errors are RFC 9457
     problem details (application/problem+json) with a stable `code`; rule rejections
     are 422 with a `violations[]` array of {code, lineIndex, field, message}.
     Each operation names the duty it requires in `x-passage-duty` (enforced with
@@ -593,7 +593,7 @@ components:
       description: The batch version as an entity tag, for If-Match on the next change
       schema: { type: string, example: '"3"' }
 paths:
-  /api/v1/ledger/journal-names:
+  /v1/ledger/journal-names:
     get:
       tags: [journal]
       operationId: listJournalNames
@@ -612,7 +612,7 @@ paths:
                     items: { $ref: "#/components/schemas/JournalName" }
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
-  /api/v1/ledger/journal-names/{code}:
+  /v1/ledger/journal-names/{code}:
     get:
       tags: [journal]
       operationId: getJournalName
@@ -657,7 +657,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem400" }
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
-  /api/v1/ledger/journal-batches:
+  /v1/ledger/journal-batches:
     get:
       tags: [journal]
       operationId: listJournalBatches
@@ -708,7 +708,7 @@ paths:
         "403": { $ref: "#/components/responses/Problem403" }
         "404": { $ref: "#/components/responses/Problem404" }
         "422": { $ref: "#/components/responses/BatchProblem422" }
-  /api/v1/ledger/journal-batches/{id}:
+  /v1/ledger/journal-batches/{id}:
     get:
       tags: [journal]
       operationId: getJournalBatch
@@ -763,7 +763,7 @@ paths:
         "409": { $ref: "#/components/responses/BatchProblem409" }
         "412": { $ref: "#/components/responses/Problem412" }
         "422": { $ref: "#/components/responses/BatchProblem422" }
-  /api/v1/ledger/journal-batches/{id}/submit:
+  /v1/ledger/journal-batches/{id}/submit:
     post:
       tags: [journal]
       operationId: submitJournalBatch
@@ -794,7 +794,7 @@ paths:
         "409": { $ref: "#/components/responses/BatchProblem409" }
         "412": { $ref: "#/components/responses/Problem412" }
         "422": { $ref: "#/components/responses/BatchProblem422" }
-  /api/v1/ledger/journal-batches/{id}/approve:
+  /v1/ledger/journal-batches/{id}/approve:
     post:
       tags: [journal]
       operationId: approveJournalBatch
@@ -823,7 +823,7 @@ paths:
         "404": { $ref: "#/components/responses/Problem404" }
         "409": { $ref: "#/components/responses/BatchProblem409" }
         "412": { $ref: "#/components/responses/Problem412" }
-  /api/v1/ledger/journal-batches/{id}/reject:
+  /v1/ledger/journal-batches/{id}/reject:
     post:
       tags: [journal]
       operationId: rejectJournalBatch
@@ -850,7 +850,7 @@ paths:
         "404": { $ref: "#/components/responses/Problem404" }
         "409": { $ref: "#/components/responses/BatchProblem409" }
         "412": { $ref: "#/components/responses/Problem412" }
-  /api/v1/ledger/journal-batches/{id}/cancel:
+  /v1/ledger/journal-batches/{id}/cancel:
     post:
       tags: [journal]
       operationId: cancelJournalBatch
@@ -877,7 +877,7 @@ paths:
         "404": { $ref: "#/components/responses/Problem404" }
         "409": { $ref: "#/components/responses/BatchProblem409" }
         "412": { $ref: "#/components/responses/Problem412" }
-  /api/v1/ledger/journal-batches/{id}/post:
+  /v1/ledger/journal-batches/{id}/post:
     post:
       tags: [journal]
       operationId: postJournalBatch
@@ -916,7 +916,7 @@ paths:
         "409": { $ref: "#/components/responses/BatchProblem409" }
         "412": { $ref: "#/components/responses/Problem412" }
         "422": { $ref: "#/components/responses/Problem422" }
-  /api/v1/ledger/ledgers/{ledger}/account-structures:
+  /v1/ledger/ledgers/{ledger}/account-structures:
     parameters:
       - name: ledger
         in: path
@@ -941,7 +941,7 @@ paths:
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
         "404": { $ref: "#/components/responses/Problem404" }
-  /api/v1/ledger/ledgers/{ledger}/account-structures/{id}:
+  /v1/ledger/ledgers/{ledger}/account-structures/{id}:
     parameters:
       - name: ledger
         in: path
@@ -1001,7 +1001,7 @@ paths:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
         "422": { $ref: "#/components/responses/Problem422" }
-  /api/v1/ledger/ledgers/{ledger}/dimension-values:
+  /v1/ledger/ledgers/{ledger}/dimension-values:
     parameters:
       - name: ledger
         in: path
@@ -1026,7 +1026,7 @@ paths:
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
         "404": { $ref: "#/components/responses/Problem404" }
-  /api/v1/ledger/ledgers/{ledger}/dimension-values/{attribute}/{value}:
+  /v1/ledger/ledgers/{ledger}/dimension-values/{attribute}/{value}:
     parameters:
       - name: ledger
         in: path
@@ -1066,7 +1066,7 @@ paths:
         "403": { $ref: "#/components/responses/Problem403" }
         "404": { $ref: "#/components/responses/Problem404" }
         "422": { $ref: "#/components/responses/Problem422" }
-  /api/v1/ledger/ledgers:
+  /v1/ledger/ledgers:
     post:
       tags: [ledgers]
       operationId: createLedger
@@ -1103,7 +1103,7 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
-  /api/v1/ledger/ledgers/{id}:
+  /v1/ledger/ledgers/{id}:
     get:
       tags: [ledgers]
       operationId: getLedger
@@ -1119,7 +1119,7 @@ paths:
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
         "404": { $ref: "#/components/responses/Problem404" }
-  /api/v1/ledger/charts/{chart}/accounts:
+  /v1/ledger/charts/{chart}/accounts:
     get:
       tags: [charts]
       operationId: listAccounts
@@ -1153,7 +1153,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem400" }
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
-  /api/v1/ledger/charts/{chart}/accounts/{number}:
+  /v1/ledger/charts/{chart}/accounts/{number}:
     put:
       tags: [charts]
       operationId: putAccount
@@ -1193,7 +1193,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem400" }
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
-  /api/v1/ledger/journal-entries:
+  /v1/ledger/journal-entries:
     post:
       tags: [journal]
       operationId: postEntry
@@ -1235,7 +1235,7 @@ paths:
         "404": { $ref: "#/components/responses/Problem404" }
         "409": { $ref: "#/components/responses/Problem409" }
         "422": { $ref: "#/components/responses/Problem422" }
-  /api/v1/ledger/journal-entries/{id}:
+  /v1/ledger/journal-entries/{id}:
     get:
       tags: [journal]
       operationId: getEntry
@@ -1251,7 +1251,7 @@ paths:
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
         "404": { $ref: "#/components/responses/Problem404" }
-  /api/v1/ledger/journal-entries/{id}/reverse:
+  /v1/ledger/journal-entries/{id}/reverse:
     post:
       tags: [journal]
       operationId: reverseEntry
@@ -1298,7 +1298,7 @@ paths:
         "404": { $ref: "#/components/responses/Problem404" }
         "409": { $ref: "#/components/responses/Problem409" }
         "422": { $ref: "#/components/responses/Problem422" }
-  /api/v1/ledger/validate:
+  /v1/ledger/validate:
     post:
       tags: [journal]
       operationId: validateEntry
@@ -1319,7 +1319,7 @@ paths:
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
         "404": { $ref: "#/components/responses/Problem404" }
-  /api/v1/ledger/journal-lines:
+  /v1/ledger/journal-lines:
     get:
       tags: [journal]
       operationId: listJournalLines
@@ -1360,7 +1360,7 @@ paths:
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
         "404": { $ref: "#/components/responses/Problem404" }
-  /api/v1/ledger/balances:
+  /v1/ledger/balances:
     get:
       tags: [balances]
       operationId: trialBalance
@@ -1397,7 +1397,7 @@ paths:
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
         "404": { $ref: "#/components/responses/Problem404" }
-  /api/v1/ledger/balances:rebuild:
+  /v1/ledger/balances:rebuild:
     post:
       tags: [ops]
       operationId: rebuildBalances
@@ -1422,7 +1422,7 @@ paths:
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
         "404": { $ref: "#/components/responses/Problem404" }
-  /api/v1/ledger/reason-codes:
+  /v1/ledger/reason-codes:
     get:
       tags: [reasons]
       operationId: listReasonCodes
@@ -1441,7 +1441,7 @@ paths:
                     items: { $ref: "#/components/schemas/ReasonCode" }
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
-  /api/v1/ledger/reason-codes/{code}:
+  /v1/ledger/reason-codes/{code}:
     get:
       tags: [reasons]
       operationId: getReasonCode
@@ -1505,7 +1505,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem400" }
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
-  /api/v1/ledger/description-templates:
+  /v1/ledger/description-templates:
     get:
       tags: [templates]
       operationId: listDescriptionTemplates
@@ -1526,7 +1526,7 @@ paths:
                     items: { $ref: "#/components/schemas/DescriptionTemplate" }
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
-  /api/v1/ledger/description-templates/{id}:
+  /v1/ledger/description-templates/{id}:
     get:
       tags: [templates]
       operationId: getDescriptionTemplate

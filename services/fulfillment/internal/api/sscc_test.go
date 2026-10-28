@@ -53,7 +53,7 @@ func TestSSCCRegister_PagesByCursorWithNoReuseDate(t *testing.T) {
 	fs := &fakeStore{ssccRows: rows}
 	h := newServer(t, fs)
 
-	rec := do(t, h, http.MethodGet, "/api/v1/fulfillment/sscc-register?limit=2", "", nil)
+	rec := do(t, h, http.MethodGet, "/v1/fulfillment/sscc-register?limit=2", "", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
 	}
@@ -68,7 +68,7 @@ func TestSSCCRegister_PagesByCursorWithNoReuseDate(t *testing.T) {
 		t.Fatalf("noReuseUntil = %q, want 2027-10-21 (12 months after issue, BR-28.5)", page.Items[0].NoReuseUntil)
 	}
 
-	rec = do(t, h, http.MethodGet, "/api/v1/fulfillment/sscc-register?limit=2&cursor="+page.NextCursor, "", nil)
+	rec = do(t, h, http.MethodGet, "/v1/fulfillment/sscc-register?limit=2&cursor="+page.NextCursor, "", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("second page status = %d body = %s", rec.Code, rec.Body.String())
 	}
@@ -82,7 +82,7 @@ func TestSSCCRegister_PagesByCursorWithNoReuseDate(t *testing.T) {
 }
 
 func TestSSCCRegister_EmptyIsAnEmptyList(t *testing.T) {
-	rec := do(t, newServer(t, &fakeStore{}), http.MethodGet, "/api/v1/fulfillment/sscc-register", "", nil)
+	rec := do(t, newServer(t, &fakeStore{}), http.MethodGet, "/v1/fulfillment/sscc-register", "", nil)
 	if rec.Code != http.StatusOK || rec.Body.String() != "{\"items\":[]}\n" {
 		t.Fatalf("status = %d body = %q, want 200 with an empty items array", rec.Code, rec.Body.String())
 	}
@@ -91,7 +91,7 @@ func TestSSCCRegister_EmptyIsAnEmptyList(t *testing.T) {
 func TestSSCCRegister_PassesFilters(t *testing.T) {
 	customer := ids.New()
 	fs := &fakeStore{}
-	path := "/api/v1/fulfillment/sscc-register?companyPrefix=0614141&customerId=" + customer + "&from=2026-10-01&to=2026-10-31"
+	path := "/v1/fulfillment/sscc-register?companyPrefix=0614141&customerId=" + customer + "&from=2026-10-01&to=2026-10-31"
 	if rec := do(t, newServer(t, fs), http.MethodGet, path, "", nil); rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
 	}
@@ -115,7 +115,7 @@ func TestSSCCRegister_RejectsBadInput(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fs := &fakeStore{}
-			rec := do(t, newServer(t, fs), http.MethodGet, "/api/v1/fulfillment/sscc-register?"+tc.query, "", nil)
+			rec := do(t, newServer(t, fs), http.MethodGet, "/v1/fulfillment/sscc-register?"+tc.query, "", nil)
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d body = %s, want 400", rec.Code, rec.Body.String())
 			}
@@ -135,7 +135,7 @@ func TestSSCCRegister_RejectsBadInput(t *testing.T) {
 
 func TestSSCCRegister_RequiresWarehouseView(t *testing.T) {
 	fs := &fakeStore{}
-	rec := do(t, newServer(t, fs), http.MethodGet, "/api/v1/fulfillment/sscc-register", "", map[string]string{"X-Passage-Duties": "WarehousePick"})
+	rec := do(t, newServer(t, fs), http.MethodGet, "/v1/fulfillment/sscc-register", "", map[string]string{"X-Passage-Duties": "WarehousePick"})
 	if rec.Code != http.StatusForbidden || fs.ssccCalls != 0 {
 		t.Fatalf("status = %d calls = %d, want 403 and no read", rec.Code, fs.ssccCalls)
 	}

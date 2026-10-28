@@ -17,10 +17,10 @@ import (
 // the SSCC register, short picks and backorders, and returnable packaging aging.
 // WarehouseView covers "GET shipments, tracking, DNI" (section 5.28.17).
 func (a *API) routesInquiry(r chi.Router) {
-	r.With(authz.RequireDuty("WarehouseView")).Get("/api/v1/fulfillment/delivered-not-invoiced", a.deliveredNotInvoiced)
-	r.With(authz.RequireDuty("WarehouseView")).Get("/api/v1/fulfillment/sscc-register", a.listSSCCs)
-	r.With(authz.RequireDuty("WarehouseView")).Get("/api/v1/fulfillment/backorders", a.listBackorders)
-	r.With(authz.RequireDuty("WarehouseView")).Get("/api/v1/fulfillment/returnable-packaging/aging", a.returnableAging)
+	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/delivered-not-invoiced", a.deliveredNotInvoiced)
+	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/sscc-register", a.listSSCCs)
+	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/backorders", a.listBackorders)
+	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/returnable-packaging/aging", a.returnableAging)
 }
 
 type dniResponse struct {
@@ -40,7 +40,7 @@ type dniLine struct {
 	DaysOutstanding int `json:"daysOutstanding"`
 }
 
-// deliveredNotInvoiced answers GET /api/v1/fulfillment/delivered-not-invoiced
+// deliveredNotInvoiced answers GET /v1/fulfillment/delivered-not-invoiced
 // for one legal entity, optionally one customer, as of a date (default today,
 // UTC). It returns the open 1405 balance per currency and the slips that make
 // it up with their days outstanding (FR-28.12, AC-28.8).

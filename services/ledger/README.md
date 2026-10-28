@@ -9,27 +9,27 @@ what is not is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 
 ## What slice 1 does
 
-- Chart of accounts: `PUT /api/v1/ledger/charts/{chart}/accounts/{number}` and
+- Chart of accounts: `PUT /v1/ledger/charts/{chart}/accounts/{number}` and
   paged listing. Account types, postable flag, suspension date and reconciliation
   account type (manual journals, source `ledger`/`manual_journal`, may not post to
   reconciliation accounts; subledgers may, BR-11.8).
 - Ledgers: create and read a ledger bound to a chart, a currency and up to 20
   dimension attribute names.
-- Posting: `POST /api/v1/ledger/journal-entries` posts a balanced entry atomically
+- Posting: `POST /v1/ledger/journal-entries` posts a balanced entry atomically
   or rejects it entirely with every violation in one 422 response. Idempotency
   keys replay identical requests (200, `idempotency.replayed = true`) and reject
   reused keys with different payloads (409 `LEDGER_IDEMPOTENCY_CONFLICT`).
-- Validation dry run: `POST /api/v1/ledger/validate` returns the same violations
+- Validation dry run: `POST /v1/ledger/validate` returns the same violations
   and the resolved dimension combinations without writing.
-- Reversal: `POST /api/v1/ledger/journal-entries/{id}/reverse` writes an exact
+- Reversal: `POST /v1/ledger/journal-entries/{id}/reverse` writes an exact
   negating entry linked to the original line by line, dated on the original posting
   date or a later one. A second reversal is refused; reversing the reversal
   re-instates the original.
 - Balances: a projection per (account, dimension combination, period) written in
-  the posting transaction; `GET /api/v1/ledger/balances` is the trial balance with
-  a balanced flag; `POST /api/v1/ledger/balances:rebuild` recomputes the projection
+  the posting transaction; `GET /v1/ledger/balances` is the trial balance with
+  a balanced flag; `POST /v1/ledger/balances:rebuild` recomputes the projection
   from the journal and reports differing rows.
-- Ledger transactions (FR-11.14): `GET /api/v1/ledger/journal-lines?ledger=` lists
+- Ledger transactions (FR-11.14): `GET /v1/ledger/journal-lines?ledger=` lists
   posted lines in posting order (posting sequence, line number) with the entry's
   voucher, date, description, source and trace id. Filters: `account_from`/`account_to`
   (text range, inclusive), `date_from`/`date_to` (posting date, inclusive), `voucher`,
@@ -48,7 +48,7 @@ what is not is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 ## What slice 2 adds
 
 - Shared financial reason codes (FR-11.15): one list per tenant,
-  `GET /api/v1/ledger/reason-codes`, `GET`/`PUT /api/v1/ledger/reason-codes/{code}`
+  `GET /v1/ledger/reason-codes`, `GET`/`PUT /v1/ledger/reason-codes/{code}`
   (201 created, 200 replaced). Codes are `^[A-Z0-9_]{1,10}$` with a name,
   `appliesTo` modules, `requiresComment`, `negativePostingAllowed`,
   `alternativePostingDateAllowed` and `active`. Codes are deactivated, never
@@ -70,7 +70,7 @@ what is not is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 
 ## What slice 3 adds
 
-- Account structures (FR-11.3): `GET /api/v1/ledger/ledgers/{ledger}/account-structures`,
+- Account structures (FR-11.3): `GET /v1/ledger/ledgers/{ledger}/account-structures`,
   `GET`/`PUT .../account-structures/{id}` (201 created, 200 replaced). A version has a
   name, version number, priority, `effectiveFrom`, status (`draft`, `active`, `retired`),
   ordered dimension segments after the implicit `MAIN_ACCOUNT`, a main-account filter
@@ -94,7 +94,7 @@ what is not is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 - Combinations (FR-11.4): a line validated under a structure is interned under a
   combination whose hash leads with the structure version id;
   `dimension_combination.account_structure_id` records it.
-- Dimension value register (FR-11.2): `GET /api/v1/ledger/ledgers/{ledger}/dimension-values`
+- Dimension value register (FR-11.2): `GET /v1/ledger/ledgers/{ledger}/dimension-values`
   and `PUT .../dimension-values/{attribute}/{value}` with a name, `activeFrom`/`activeTo`
   (inclusive) and `suspended`. Posting a registered value that is suspended or outside its
   dates is `LEDGER_DIMENSION_INACTIVE`; unregistered values are format-checked only.
@@ -103,7 +103,7 @@ what is not is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 
 ## What slice 4 adds
 
-- Default description templates (FR-11.17): `GET /api/v1/ledger/description-templates`,
+- Default description templates (FR-11.17): `GET /v1/ledger/description-templates`,
   `GET`/`PUT .../description-templates/{id}` (201 created, 200 replaced; duty
   `ledger.setup.write`, PRD "Maintain ledger setup"). A template has a scope (`tenant`, or
   `legal_entity` with `legalEntityId`), a `sourceType` (the posting's `source.type`, such as
@@ -125,7 +125,7 @@ what is not is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 
 ## What slice 5 adds
 
-- Journal names (FR-11.9, AX `LedgerJournalName`): `GET /api/v1/ledger/journal-names`,
+- Journal names (FR-11.9, AX `LedgerJournalName`): `GET /v1/ledger/journal-names`,
   `GET`/`PUT .../journal-names/{code}` (201 created, 200 replaced; duty `ledger.setup.write`).
   A name carries `requiresApproval`, `selfApprovalAllowed`, `reversalReasonRequired`
   (FR-11.15), `allowReconAccounts` (BR-11.8), `linesLimit` (default 5,000, at most 10,000)

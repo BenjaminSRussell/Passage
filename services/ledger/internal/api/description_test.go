@@ -13,7 +13,7 @@ func TestPutDescriptionTemplate_CreatedThenReplaced(t *testing.T) {
 	fs := &fakeStore{created: true}
 	h := server(fs)
 	body := `{"scope":"tenant","sourceType":"manual_journal","template":"Journal %1 of %2","fieldBindings":{"1":"voucher","2":"document_date"}}`
-	rec := call(h, http.MethodPut, "/api/v1/ledger/description-templates/"+testTemplate, body, dutySetupWrite, nil)
+	rec := call(h, http.MethodPut, "/v1/ledger/description-templates/"+testTemplate, body, dutySetupWrite, nil)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -23,7 +23,7 @@ func TestPutDescriptionTemplate_CreatedThenReplaced(t *testing.T) {
 	}
 
 	fs.created = false
-	rec = call(h, http.MethodPut, "/api/v1/ledger/description-templates/"+testTemplate, body, dutySetupWrite, nil)
+	rec = call(h, http.MethodPut, "/v1/ledger/description-templates/"+testTemplate, body, dutySetupWrite, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("replace status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -32,7 +32,7 @@ func TestPutDescriptionTemplate_CreatedThenReplaced(t *testing.T) {
 func TestPutDescriptionTemplate_RequiresSetupDuty(t *testing.T) {
 	fs := &fakeStore{}
 	body := `{"scope":"tenant","sourceType":"manual_journal","template":"Journal"}`
-	rec := call(server(fs), http.MethodPut, "/api/v1/ledger/description-templates/"+testTemplate, body, dutyRead, nil)
+	rec := call(server(fs), http.MethodPut, "/v1/ledger/description-templates/"+testTemplate, body, dutyRead, nil)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status %d, want 403", rec.Code)
 	}
@@ -69,7 +69,7 @@ func TestPutDescriptionTemplate_Validation(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			fs := &fakeStore{}
-			rec := call(server(fs), http.MethodPut, "/api/v1/ledger/description-templates/"+tc.id, tc.body, dutySetupWrite, nil)
+			rec := call(server(fs), http.MethodPut, "/v1/ledger/description-templates/"+tc.id, tc.body, dutySetupWrite, nil)
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 			}
@@ -88,16 +88,16 @@ func TestDescriptionTemplates_ReadRoutes(t *testing.T) {
 	fs := &fakeStore{templates: []store.DescriptionTemplate{{ID: testTemplate, Scope: "tenant", SourceType: "manual_journal",
 		Language: "en", Template: "Journal %1", FieldBindings: map[string]string{"1": "voucher"}}}}
 	h := server(fs)
-	rec := call(h, http.MethodGet, "/api/v1/ledger/description-templates", "", dutyRead, nil)
+	rec := call(h, http.MethodGet, "/v1/ledger/description-templates", "", dutyRead, nil)
 	if rec.Code != http.StatusOK || len(decode(t, rec)["items"].([]any)) != 1 {
 		t.Fatalf("list: status %d: %s", rec.Code, rec.Body.String())
 	}
-	rec = call(h, http.MethodGet, "/api/v1/ledger/description-templates/"+testTemplate, "", dutyRead, nil)
+	rec = call(h, http.MethodGet, "/v1/ledger/description-templates/"+testTemplate, "", dutyRead, nil)
 	if rec.Code != http.StatusOK || decode(t, rec)["template"] != "Journal %1" {
 		t.Fatalf("get: status %d: %s", rec.Code, rec.Body.String())
 	}
 	for _, id := range []string{"0190a000-0000-7000-8000-0000000000ff", "not-a-uuid"} {
-		rec = call(h, http.MethodGet, "/api/v1/ledger/description-templates/"+id, "", dutyRead, nil)
+		rec = call(h, http.MethodGet, "/v1/ledger/description-templates/"+id, "", dutyRead, nil)
 		if rec.Code != http.StatusNotFound || decode(t, rec)["code"] != "LEDGER_DESCRIPTION_TEMPLATE_NOT_FOUND" {
 			t.Fatalf("missing %s: status %d: %s", id, rec.Code, rec.Body.String())
 		}

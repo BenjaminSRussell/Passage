@@ -331,7 +331,7 @@ components:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
 paths:
-  /api/v1/fulfillment/releases:run:
+  /v1/fulfillment/releases:run:
     post:
       operationId: runRelease
       summary: Run release rules for a warehouse (FR-28.1)
@@ -390,7 +390,7 @@ paths:
         "400": { description: "FUL-0050 validation (also a repeated orderLineId, or lines of one order with different customers, legal entities or carriers), FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "403": { $ref: "#/components/responses/Problem" }
         "422": { description: "idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-  /api/v1/fulfillment/shipments:
+  /v1/fulfillment/shipments:
     get:
       operationId: listShipments
       summary: Shipments list / delivery monitor, newest first
@@ -414,7 +414,7 @@ paths:
                     items: { $ref: "#/components/schemas/ShipmentSummary" }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
-  /api/v1/fulfillment/packing-slips:
+  /v1/fulfillment/packing-slips:
     get:
       operationId: listPackingSlips
       summary: Packing slip journal, newest first
@@ -438,7 +438,7 @@ paths:
                     items: { $ref: "#/components/schemas/PackingSlipSummary" }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
-  /api/v1/fulfillment/packing-slips/{id}:
+  /v1/fulfillment/packing-slips/{id}:
     get:
       operationId: getPackingSlip
       summary: Read a packing slip with its lines and journal
@@ -453,7 +453,7 @@ paths:
               schema: { $ref: "#/components/schemas/PackingSlip" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { description: FUL-0040, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-  /api/v1/fulfillment/shipments/{id}:
+  /v1/fulfillment/shipments/{id}:
     get:
       operationId: getShipment
       summary: Read a shipment (ETag carries the version)
@@ -469,7 +469,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Shipment" }
         "404": { $ref: "#/components/responses/Problem" }
-  /api/v1/fulfillment/shipments/{id}:confirm-pick:
+  /v1/fulfillment/shipments/{id}:confirm-pick:
     post:
       operationId: confirmPick
       summary: Confirm picked quantities; short picks release the remainder (FR-28.2)
@@ -511,7 +511,7 @@ paths:
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "422": { description: "FUL-0001 status, FUL-0004 over-pick, FUL-0030 negative, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-  /api/v1/fulfillment/shipments/{id}/containers:
+  /v1/fulfillment/shipments/{id}/containers:
     post:
       operationId: packContainer
       summary: Pack lines into a container with an SSCC (FR-28.3)
@@ -557,7 +557,7 @@ paths:
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "422": { description: "FUL-0001 status, FUL-0023 over-pack, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-  /api/v1/fulfillment/shipments/{id}:post-packing-slip:
+  /v1/fulfillment/shipments/{id}:post-packing-slip:
     post:
       operationId: postPackingSlip
       summary: Post the packing slip; journal per BR-28.1 and packingslip.posted in one transaction (FR-28.4)
@@ -608,7 +608,7 @@ paths:
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "422": { description: "FUL-0001 not PACKED, FUL-0014 packaging fee rate missing for a shipped material, FUL-0042 cost missing, FUL-0044 nothing to ship, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-  /api/v1/fulfillment/packing-slips/{id}:cancel:
+  /v1/fulfillment/packing-slips/{id}:cancel:
     post:
       operationId: cancelPackingSlip
       summary: Reverse a packing slip with mirror inventory and journal entries (FR-28.5)
@@ -627,7 +627,7 @@ paths:
         "404": { description: FUL-0040, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "409": { description: "FUL-0010 invoiced, FUL-0043 not posted or a reversal, FUL-0021 shipment cannot return to PACKED (for example while its remainder is being picked)", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "422": { description: "FUL-0015 the customer already returned the slip's returnable containers, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-  /api/v1/fulfillment/container-types:
+  /v1/fulfillment/container-types:
     get:
       operationId: listContainerTypes
       summary: Container types by code (FR-28.14, FR-28.15)
@@ -676,7 +676,7 @@ paths:
         "400": { description: "FUL-0050 validation, FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "403": { $ref: "#/components/responses/Problem" }
         "422": { description: idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-  /api/v1/fulfillment/packing-rules:
+  /v1/fulfillment/packing-rules:
     get:
       operationId: listPackingRules
       summary: Packing rules, general rule of a product first (FR-28.15)
@@ -727,7 +727,7 @@ paths:
         "400": { description: "FUL-0050 validation, FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "403": { $ref: "#/components/responses/Problem" }
         "422": { description: "FUL-0050 containerType is not a known container type, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-  /api/v1/fulfillment/product-packaging:
+  /v1/fulfillment/product-packaging:
     get:
       operationId: listProductPackaging
       summary: Packaging material weight per product unit (FR-28.14)
@@ -776,7 +776,7 @@ paths:
         "400": { description: "FUL-0050 validation, FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "403": { $ref: "#/components/responses/Problem" }
         "422": { description: idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-  /api/v1/fulfillment/shipments/{id}:auto-pack:
+  /v1/fulfillment/shipments/{id}:auto-pack:
     post:
       operationId: autoPack
       summary: Auto-pack picked lines into containers by packing rule (FR-28.15, BR-28.11)
@@ -836,7 +836,7 @@ paths:
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "422": { description: "FUL-0001 status, FUL-0013 one unit exceeds the rule's max weight, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-  /api/v1/fulfillment/packaging-fee-rates:
+  /v1/fulfillment/packaging-fee-rates:
     get:
       operationId: listFeeRates
       summary: Packaging fee rates per country and material, newest first (FR-28.14)
@@ -887,7 +887,7 @@ paths:
         "400": { description: "FUL-0050 validation, FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "403": { $ref: "#/components/responses/Problem" }
         "422": { description: idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-  /api/v1/fulfillment/packaging-report:
+  /v1/fulfillment/packaging-report:
     get:
       operationId: packagingReport
       summary: Packaging weight and fee per material for a country and month, net of reversals (section 5.28.14)
@@ -920,7 +920,7 @@ paths:
                         currency: { type: string }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
-  /api/v1/fulfillment/delivered-not-invoiced:
+  /v1/fulfillment/delivered-not-invoiced:
     get:
       operationId: deliveredNotInvoiced
       summary: Delivered-not-invoiced report, the open GL 1405 balance per currency and its packing slips (FR-28.12, section 5.28.14)
@@ -974,7 +974,7 @@ paths:
                         daysOutstanding: { type: integer, minimum: 0 }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
-  /api/v1/fulfillment/sscc-register:
+  /v1/fulfillment/sscc-register:
     get:
       operationId: ssccRegister
       summary: SSCC register, every issued SSCC with its container and shipment (BR-28.5, section 5.28.14)
@@ -1018,7 +1018,7 @@ paths:
                   nextCursor: { type: string, pattern: "^[0-9]{18}$", description: "Present when another page exists." }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
-  /api/v1/fulfillment/backorders:
+  /v1/fulfillment/backorders:
     get:
       operationId: listBackorders
       summary: Short picks and backorders (FR-28.2, AC-28.4, section 5.28.14)
@@ -1070,7 +1070,7 @@ paths:
                   nextCursor: { type: string, format: uuid, description: "Present when another page exists." }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
-  /api/v1/fulfillment/returnable-packaging:
+  /v1/fulfillment/returnable-packaging:
     get:
       operationId: listReturnableBalances
       summary: Returnable packaging balances per customer and container type (FR-28.16)
@@ -1092,7 +1092,7 @@ paths:
                     items: { $ref: "#/components/schemas/ReturnableBalance" }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
-  /api/v1/fulfillment/returnable-packaging/aging:
+  /v1/fulfillment/returnable-packaging/aging:
     get:
       operationId: returnablePackagingAging
       summary: Returnable packaging aging, days outstanding and charge due (FR-28.16, section 5.28.14)
@@ -1134,7 +1134,7 @@ paths:
                             chargeDue: { type: boolean }
         "400": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
-  /api/v1/fulfillment/returnable-packaging:return:
+  /v1/fulfillment/returnable-packaging:return:
     post:
       operationId: returnPackaging
       summary: Record a standalone return receipt of returnable containers (BR-28.13)
@@ -1162,7 +1162,7 @@ paths:
         "400": { description: "FUL-0050 validation, FUL-0051 Idempotency-Key, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "403": { $ref: "#/components/responses/Problem" }
         "422": { description: "FUL-0015 the return exceeds the customer's balance, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-  /api/v1/fulfillment/shipments/{id}:cancel:
+  /v1/fulfillment/shipments/{id}:cancel:
     post:
       operationId: cancelShipment
       summary: Cancel a shipment before anything ships (BR-28.6)
@@ -1188,7 +1188,7 @@ paths:
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "422": { description: idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-  /api/v1/fulfillment/waves:preview:
+  /v1/fulfillment/waves:preview:
     post:
       operationId: previewWaves
       summary: Picking workbench preview of the grouped waves (FR-28.13, BR-28.14)
@@ -1222,7 +1222,7 @@ paths:
         "400": { description: "FUL-0050 validation, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "403": { $ref: "#/components/responses/Problem" }
         "422": { description: "FUL-0034 one shipment has more lines than maxLines", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-  /api/v1/fulfillment/waves:
+  /v1/fulfillment/waves:
     get:
       operationId: listWaves
       summary: Pick waves, newest first
@@ -1280,7 +1280,7 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "409": { description: "FUL-0053 a shipment left RELEASED or a line is already in a wave; preview again", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "422": { description: "FUL-0034 one shipment has more lines than maxLines, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-  /api/v1/fulfillment/waves/{id}:
+  /v1/fulfillment/waves/{id}:
     get:
       operationId: getWave
       summary: One pick wave with its shipments and their current status
@@ -1295,7 +1295,7 @@ paths:
               schema: { $ref: "#/components/schemas/Wave" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { description: FUL-0052, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-  /api/v1/fulfillment/shipments/{id}/tracking:
+  /v1/fulfillment/shipments/{id}/tracking:
     get:
       operationId: listTracking
       summary: Tracking events of a shipment, newest first (FR-28.10)
@@ -1363,7 +1363,7 @@ paths:
         "400": { description: "FUL-0050 validation, COM-0001 malformed body", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { description: FUL-0020, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-  /api/v1/fulfillment/shipments/{id}/containers/{cid}/label:
+  /v1/fulfillment/shipments/{id}/containers/{cid}/label:
     get:
       operationId: containerLabel
       summary: GS1-128 SSCC label of a container as ZPL (FR-28.3, BR-28.5)

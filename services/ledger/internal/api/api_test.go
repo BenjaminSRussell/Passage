@@ -297,7 +297,7 @@ const entryBody = `{"ledgerId":"` + testLedger + `","documentId":"` + testDoc + 
 func TestPostEntry_CreatedThenReplayed(t *testing.T) {
 	fs := &fakeStore{}
 	h := server(fs)
-	rec := call(h, http.MethodPost, "/api/v1/ledger/journal-entries", entryBody, dutyPost, map[string]string{"Idempotency-Key": "  ap-7F3A  "})
+	rec := call(h, http.MethodPost, "/v1/ledger/journal-entries", entryBody, dutyPost, map[string]string{"Idempotency-Key": "  ap-7F3A  "})
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -320,7 +320,7 @@ func TestPostEntry_CreatedThenReplayed(t *testing.T) {
 
 	// Same payload, whitespace-different key: identical hash, 200 replay.
 	fs.replay = true
-	rec = call(h, http.MethodPost, "/api/v1/ledger/journal-entries", entryBody, dutyPost, map[string]string{"Idempotency-Key": "ap-7F3A"})
+	rec = call(h, http.MethodPost, "/v1/ledger/journal-entries", entryBody, dutyPost, map[string]string{"Idempotency-Key": "ap-7F3A"})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("replay status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -335,7 +335,7 @@ func TestPostEntry_CreatedThenReplayed(t *testing.T) {
 func TestPostEntry_TraceparentIsCopied(t *testing.T) {
 	fs := &fakeStore{}
 	trace := "4bf92f3577b34da6a3ce929d0e0e4736"
-	rec := call(server(fs), http.MethodPost, "/api/v1/ledger/journal-entries", entryBody, dutyPost,
+	rec := call(server(fs), http.MethodPost, "/v1/ledger/journal-entries", entryBody, dutyPost,
 		map[string]string{"Idempotency-Key": "k1", "traceparent": "00-" + trace + "-00f067aa0ba902b7-01"})
 	if rec.Code != http.StatusCreated || fs.posted[0].TraceID != trace {
 		t.Fatalf("status %d, trace %q", rec.Code, fs.posted[0].TraceID)
@@ -366,7 +366,7 @@ func TestPostEntry_RequestValidation(t *testing.T) {
 			if tc.key != "" {
 				headers["Idempotency-Key"] = tc.key
 			}
-			rec := call(server(fs), http.MethodPost, "/api/v1/ledger/journal-entries", tc.body, dutyPost, headers)
+			rec := call(server(fs), http.MethodPost, "/v1/ledger/journal-entries", tc.body, dutyPost, headers)
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 			}
@@ -387,7 +387,7 @@ func TestPostEntry_RuleRejectionIs422WithEveryViolation(t *testing.T) {
 		{Code: "LEDGER_UNBALANCED", Field: "lines", Message: "debits 100.00, credits 99.99"},
 		{Code: "LEDGER_ACCOUNT_NOT_FOUND", Field: "lines.account", LineIndex: &idx, Message: "account 9999 does not exist"},
 	}}}
-	rec := call(server(fs), http.MethodPost, "/api/v1/ledger/journal-entries", entryBody, dutyPost, map[string]string{"Idempotency-Key": "k"})
+	rec := call(server(fs), http.MethodPost, "/v1/ledger/journal-entries", entryBody, dutyPost, map[string]string{"Idempotency-Key": "k"})
 	if rec.Code != http.StatusUnprocessableEntity || rec.Header().Get("Content-Type") != "application/problem+json" {
 		t.Fatalf("status %d, type %s", rec.Code, rec.Header().Get("Content-Type"))
 	}
@@ -410,12 +410,12 @@ func TestPostEntry_RuleRejectionIs422WithEveryViolation(t *testing.T) {
 
 func TestPostEntry_IdempotencyErrors(t *testing.T) {
 	fs := &fakeStore{err: httpx.NewProblem(http.StatusConflict, "LEDGER_IDEMPOTENCY_CONFLICT", "different body")}
-	rec := call(server(fs), http.MethodPost, "/api/v1/ledger/journal-entries", entryBody, dutyPost, map[string]string{"Idempotency-Key": "k"})
+	rec := call(server(fs), http.MethodPost, "/v1/ledger/journal-entries", entryBody, dutyPost, map[string]string{"Idempotency-Key": "k"})
 	if rec.Code != http.StatusConflict || decode(t, rec)["code"] != "LEDGER_IDEMPOTENCY_CONFLICT" || rec.Header().Get("Retry-After") != "" {
 		t.Fatalf("conflict: status %d retry %q", rec.Code, rec.Header().Get("Retry-After"))
 	}
 	fs.err = httpx.NewProblem(http.StatusConflict, store.CodeIdempotencyInProgress, "in flight")
-	rec = call(server(fs), http.MethodPost, "/api/v1/ledger/journal-entries", entryBody, dutyPost, map[string]string{"Idempotency-Key": "k"})
+	rec = call(server(fs), http.MethodPost, "/v1/ledger/journal-entries", entryBody, dutyPost, map[string]string{"Idempotency-Key": "k"})
 	if rec.Code != http.StatusConflict || rec.Header().Get("Retry-After") != "1" {
 		t.Fatalf("in progress: status %d retry %q", rec.Code, rec.Header().Get("Retry-After"))
 	}
@@ -425,17 +425,17 @@ func TestRoutes_RequireDuties(t *testing.T) {
 	routes := []struct {
 		method, path, body, duty string
 	}{
-		{http.MethodPost, "/api/v1/ledger/journal-entries", entryBody, dutyPost},
-		{http.MethodPost, "/api/v1/ledger/journal-entries/" + testEntry + "/reverse", `{}`, dutyReverse},
-		{http.MethodGet, "/api/v1/ledger/journal-entries/" + testEntry, "", dutyRead},
-		{http.MethodPost, "/api/v1/ledger/validate", entryBody, dutyPost},
-		{http.MethodGet, "/api/v1/ledger/balances?ledger=" + testLedger, "", dutyBalanceRead},
-		{http.MethodPost, "/api/v1/ledger/balances:rebuild", `{"ledgerId":"` + testLedger + `"}`, dutyRebuild},
-		{http.MethodPost, "/api/v1/ledger/ledgers", `{}`, dutyLedgerWrite},
-		{http.MethodPut, "/api/v1/ledger/charts/STD/accounts/6010", `{}`, dutyAccountWrite},
-		{http.MethodGet, "/api/v1/ledger/reason-codes", "", dutyRead},
-		{http.MethodGet, "/api/v1/ledger/reason-codes/ERR01", "", dutyRead},
-		{http.MethodPut, "/api/v1/ledger/reason-codes/ERR01", `{"name":"x","appliesTo":["ledger"]}`, dutyReasonWrite},
+		{http.MethodPost, "/v1/ledger/journal-entries", entryBody, dutyPost},
+		{http.MethodPost, "/v1/ledger/journal-entries/" + testEntry + "/reverse", `{}`, dutyReverse},
+		{http.MethodGet, "/v1/ledger/journal-entries/" + testEntry, "", dutyRead},
+		{http.MethodPost, "/v1/ledger/validate", entryBody, dutyPost},
+		{http.MethodGet, "/v1/ledger/balances?ledger=" + testLedger, "", dutyBalanceRead},
+		{http.MethodPost, "/v1/ledger/balances:rebuild", `{"ledgerId":"` + testLedger + `"}`, dutyRebuild},
+		{http.MethodPost, "/v1/ledger/ledgers", `{}`, dutyLedgerWrite},
+		{http.MethodPut, "/v1/ledger/charts/STD/accounts/6010", `{}`, dutyAccountWrite},
+		{http.MethodGet, "/v1/ledger/reason-codes", "", dutyRead},
+		{http.MethodGet, "/v1/ledger/reason-codes/ERR01", "", dutyRead},
+		{http.MethodPut, "/v1/ledger/reason-codes/ERR01", `{"name":"x","appliesTo":["ledger"]}`, dutyReasonWrite},
 	}
 	for _, rt := range routes {
 		others := strings.ReplaceAll(allDuties, rt.duty, "")
@@ -449,7 +449,7 @@ func TestRoutes_RequireDuties(t *testing.T) {
 func TestReverseEntry_PassesDateAndKey(t *testing.T) {
 	fs := &fakeStore{}
 	h := server(fs)
-	rec := call(h, http.MethodPost, "/api/v1/ledger/journal-entries/"+testEntry+"/reverse", `{"postingDate":"2026-04-01","description":"wrong vendor"}`,
+	rec := call(h, http.MethodPost, "/v1/ledger/journal-entries/"+testEntry+"/reverse", `{"postingDate":"2026-04-01","description":"wrong vendor"}`,
 		dutyReverse, map[string]string{"Idempotency-Key": " rev-1 "})
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
@@ -459,7 +459,7 @@ func TestReverseEntry_PassesDateAndKey(t *testing.T) {
 		t.Fatalf("reverse input: %+v", in)
 	}
 	// No body at all is allowed (date defaults to the original).
-	rec = call(h, http.MethodPost, "/api/v1/ledger/journal-entries/"+testEntry+"/reverse", "", dutyReverse, map[string]string{"Idempotency-Key": "rev-2"})
+	rec = call(h, http.MethodPost, "/v1/ledger/journal-entries/"+testEntry+"/reverse", "", dutyReverse, map[string]string{"Idempotency-Key": "rev-2"})
 	if rec.Code != http.StatusCreated || fs.reversed[1].PostingDate != nil {
 		t.Fatalf("empty body: status %d, date %v", rec.Code, fs.reversed[1].PostingDate)
 	}
@@ -467,11 +467,11 @@ func TestReverseEntry_PassesDateAndKey(t *testing.T) {
 	if string(fs.reversed[0].Hash) == string(fs.reversed[1].Hash) {
 		t.Fatal("different reversal requests must hash differently")
 	}
-	rec = call(h, http.MethodPost, "/api/v1/ledger/journal-entries/"+testEntry+"/reverse", `{"postingDate":"tomorrow"}`, dutyReverse, map[string]string{"Idempotency-Key": "rev-3"})
+	rec = call(h, http.MethodPost, "/v1/ledger/journal-entries/"+testEntry+"/reverse", `{"postingDate":"tomorrow"}`, dutyReverse, map[string]string{"Idempotency-Key": "rev-3"})
 	if rec.Code != http.StatusBadRequest || len(fs.reversed) != 2 {
 		t.Fatalf("bad date: status %d", rec.Code)
 	}
-	rec = call(h, http.MethodPost, "/api/v1/ledger/journal-entries/not-a-uuid/reverse", `{}`, dutyReverse, map[string]string{"Idempotency-Key": "rev-4"})
+	rec = call(h, http.MethodPost, "/v1/ledger/journal-entries/not-a-uuid/reverse", `{}`, dutyReverse, map[string]string{"Idempotency-Key": "rev-4"})
 	if rec.Code != http.StatusNotFound || decode(t, rec)["code"] != "LEDGER_ENTRY_NOT_FOUND" {
 		t.Fatalf("bad id: status %d", rec.Code)
 	}
@@ -480,7 +480,7 @@ func TestReverseEntry_PassesDateAndKey(t *testing.T) {
 func TestValidateEntry_ReturnsViolationsAndScaledTotals(t *testing.T) {
 	fs := &fakeStore{validate: domain.Result{Currency: "USD", Debit: decimal.RequireFromString("100"), Credit: decimal.RequireFromString("99.99"),
 		Violations: []domain.Violation{{Code: "LEDGER_UNBALANCED", Message: "x"}}}}
-	rec := call(server(fs), http.MethodPost, "/api/v1/ledger/validate", entryBody, dutyPost, nil)
+	rec := call(server(fs), http.MethodPost, "/v1/ledger/validate", entryBody, dutyPost, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -495,18 +495,18 @@ func TestValidateEntry_ReturnsViolationsAndScaledTotals(t *testing.T) {
 
 func TestPutAccount_Validation(t *testing.T) {
 	h := server(&fakeStore{})
-	rec := call(h, http.MethodPut, "/api/v1/ledger/charts/STD/accounts/6010", `{"name":"Freight","accountType":"expense"}`, dutyAccountWrite, nil)
+	rec := call(h, http.MethodPut, "/v1/ledger/charts/STD/accounts/6010", `{"name":"Freight","accountType":"expense"}`, dutyAccountWrite, nil)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
 	if m := decode(t, rec); m["isPostable"] != true || m["reconciliationAccountType"] != "none" {
 		t.Fatalf("defaults: %v", m)
 	}
-	rec = call(h, http.MethodPut, "/api/v1/ledger/charts/STD/accounts/6000", `{"name":"Expenses","accountType":"profit_and_loss_total"}`, dutyAccountWrite, nil)
+	rec = call(h, http.MethodPut, "/v1/ledger/charts/STD/accounts/6000", `{"name":"Expenses","accountType":"profit_and_loss_total"}`, dutyAccountWrite, nil)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("a postable total account must be refused, got %d", rec.Code)
 	}
-	rec = call(h, http.MethodPut, "/api/v1/ledger/charts/std/accounts/6010", `{"name":"x","accountType":"expense"}`, dutyAccountWrite, nil)
+	rec = call(h, http.MethodPut, "/v1/ledger/charts/std/accounts/6010", `{"name":"x","accountType":"expense"}`, dutyAccountWrite, nil)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("lowercase chart must be refused, got %d", rec.Code)
 	}
@@ -514,7 +514,7 @@ func TestPutAccount_Validation(t *testing.T) {
 
 func TestListAccounts_PagesWithCursor(t *testing.T) {
 	fs := &fakeStore{accounts: []store.Account{{Number: "1000"}, {Number: "2000"}}}
-	rec := call(server(fs), http.MethodGet, "/api/v1/ledger/charts/STD/accounts?limit=2", "", dutyRead, nil)
+	rec := call(server(fs), http.MethodGet, "/v1/ledger/charts/STD/accounts?limit=2", "", dutyRead, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d", rec.Code)
 	}
@@ -522,7 +522,7 @@ func TestListAccounts_PagesWithCursor(t *testing.T) {
 	if m["nextAfter"] != "2000" || len(m["items"].([]any)) != 2 {
 		t.Fatalf("page: %v", m)
 	}
-	rec = call(server(fs), http.MethodGet, "/api/v1/ledger/charts/STD/accounts?limit=0", "", dutyRead, nil)
+	rec = call(server(fs), http.MethodGet, "/v1/ledger/charts/STD/accounts?limit=0", "", dutyRead, nil)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("limit=0 must be refused, got %d", rec.Code)
 	}
@@ -531,29 +531,29 @@ func TestListAccounts_PagesWithCursor(t *testing.T) {
 func TestCreateLedger_ScopeAndValidation(t *testing.T) {
 	h := server(&fakeStore{})
 	body := `{"legalEntityId":"` + testDoc + `","code":"GL","name":"General ledger","chartCode":"STD","currency":"USD","dimensionAttributes":["DEPT","CC"]}`
-	rec := call(h, http.MethodPost, "/api/v1/ledger/ledgers", body, dutyLedgerWrite, nil)
+	rec := call(h, http.MethodPost, "/v1/ledger/ledgers", body, dutyLedgerWrite, nil)
 	if rec.Code != http.StatusCreated || decode(t, rec)["futurePostingDays"] != float64(366) {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
-	rec = call(h, http.MethodPost, "/api/v1/ledger/ledgers", body, dutyLedgerWrite, map[string]string{"X-Passage-Legal-Entity": testLedger})
+	rec = call(h, http.MethodPost, "/v1/ledger/ledgers", body, dutyLedgerWrite, map[string]string{"X-Passage-Legal-Entity": testLedger})
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("a caller scoped to another legal entity must get 403, got %d", rec.Code)
 	}
 	dup := strings.Replace(body, `["DEPT","CC"]`, `["DEPT","DEPT"]`, 1)
-	if rec = call(h, http.MethodPost, "/api/v1/ledger/ledgers", dup, dutyLedgerWrite, nil); rec.Code != http.StatusBadRequest {
+	if rec = call(h, http.MethodPost, "/v1/ledger/ledgers", dup, dutyLedgerWrite, nil); rec.Code != http.StatusBadRequest {
 		t.Fatalf("duplicate attributes must be refused, got %d", rec.Code)
 	}
 }
 
 func TestTrialBalance_RequiresLedgerAndPeriodFormat(t *testing.T) {
 	h := server(&fakeStore{})
-	if rec := call(h, http.MethodGet, "/api/v1/ledger/balances", "", dutyBalanceRead, nil); rec.Code != http.StatusBadRequest {
+	if rec := call(h, http.MethodGet, "/v1/ledger/balances", "", dutyBalanceRead, nil); rec.Code != http.StatusBadRequest {
 		t.Fatalf("missing ledger: %d", rec.Code)
 	}
-	if rec := call(h, http.MethodGet, "/api/v1/ledger/balances?ledger="+testLedger+"&period_from=2026-3", "", dutyBalanceRead, nil); rec.Code != http.StatusBadRequest {
+	if rec := call(h, http.MethodGet, "/v1/ledger/balances?ledger="+testLedger+"&period_from=2026-3", "", dutyBalanceRead, nil); rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad period: %d", rec.Code)
 	}
-	if rec := call(h, http.MethodGet, "/api/v1/ledger/balances?ledger="+testLedger+"&period_from=2026-01&period_to=2026-03", "", dutyBalanceRead, nil); rec.Code != http.StatusOK {
+	if rec := call(h, http.MethodGet, "/v1/ledger/balances?ledger="+testLedger+"&period_from=2026-01&period_to=2026-03", "", dutyBalanceRead, nil); rec.Code != http.StatusOK {
 		t.Fatalf("valid query: %d", rec.Code)
 	}
 }
@@ -581,8 +581,8 @@ func TestAdmin_ReadinessAndMetrics(t *testing.T) {
 
 func TestRoutes_RejectMalformedTenant(t *testing.T) {
 	h := server(&fakeStore{})
-	for _, path := range []string{"/api/v1/ledger/journal-entries/" + testEntry, "/api/v1/ledger/balances?ledger=" + testLedger,
-		"/api/v1/ledger/ledgers/" + testLedger, "/api/v1/ledger/charts/STD/accounts"} {
+	for _, path := range []string{"/v1/ledger/journal-entries/" + testEntry, "/v1/ledger/balances?ledger=" + testLedger,
+		"/v1/ledger/ledgers/" + testLedger, "/v1/ledger/charts/STD/accounts"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		req.Header.Set("X-Passage-Tenant", "not-a-uuid")
 		req.Header.Set("X-Passage-Duties", allDuties)

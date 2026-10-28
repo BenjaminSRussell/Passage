@@ -59,10 +59,10 @@ type feedbackRequest struct {
 // registerJobs mounts the dispatch projection, list, detail and feedback endpoints
 // (FR-25.3, FR-25.4, FR-25.5).
 func (a *API) registerJobs(r chi.Router) {
-	r.With(authz.RequireDuty(DutyJobSchedule)).Post("/api/v1/shopfloor/jobs", a.upsertJob)
-	r.With(authz.RequireDuty(DutyRegister)).Get("/api/v1/shopfloor/jobs", a.listJobs)
-	r.With(authz.RequireDuty(DutyRegister)).Get("/api/v1/shopfloor/jobs/{id}", a.getJob)
-	r.With(authz.RequireDuty(DutyRegister)).Post("/api/v1/shopfloor/jobs/{id}:feedback", a.recordFeedback)
+	r.With(authz.RequireDuty(DutyJobSchedule)).Post("/v1/shopfloor/jobs", a.upsertJob)
+	r.With(authz.RequireDuty(DutyRegister)).Get("/v1/shopfloor/jobs", a.listJobs)
+	r.With(authz.RequireDuty(DutyRegister)).Get("/v1/shopfloor/jobs/{id}", a.getJob)
+	r.With(authz.RequireDuty(DutyRegister)).Post("/v1/shopfloor/jobs/{id}:feedback", a.recordFeedback)
 }
 
 // upsertJob writes the plan of a job from the schedule (w23 feeds this endpoint). The

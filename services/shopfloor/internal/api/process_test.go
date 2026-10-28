@@ -200,7 +200,7 @@ func qualityBody(sourceID string) string {
 
 func TestProcessMessage_CreateFlagsOutOfLimitAndRoutesDestinations(t *testing.T) {
 	fs := &processFake{}
-	rec := call(t, newRouter(fs), http.MethodPost, "/api/v1/shopfloor/process-messages", qualityBody("kiosk-1"), processDuty)
+	rec := call(t, newRouter(fs), http.MethodPost, "/v1/shopfloor/process-messages", qualityBody("kiosk-1"), processDuty)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -219,8 +219,8 @@ func TestProcessMessage_CreateFlagsOutOfLimitAndRoutesDestinations(t *testing.T)
 func TestProcessMessage_ReplayReturnsStoredMessage(t *testing.T) {
 	fs := &processFake{}
 	h := newRouter(fs)
-	call(t, h, http.MethodPost, "/api/v1/shopfloor/process-messages", qualityBody("kiosk-2"), processDuty)
-	rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/process-messages", qualityBody("kiosk-2"), processDuty)
+	call(t, h, http.MethodPost, "/v1/shopfloor/process-messages", qualityBody("kiosk-2"), processDuty)
+	rec := call(t, h, http.MethodPost, "/v1/shopfloor/process-messages", qualityBody("kiosk-2"), processDuty)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("replay status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -234,7 +234,7 @@ func TestProcessMessage_ReplayReturnsStoredMessage(t *testing.T) {
 func TestProcessMessage_ValidationNamesFields(t *testing.T) {
 	bad := `{"source":"fax","sourceMessageId":"","categoryCode":"nope","orderId":"x","occurredAt":"2026-10-20T09:00:00Z",
 		"values":[{"name":"a","type":"numeric","value":"1"},{"name":"a","type":"color","value":"1"}]}`
-	rec := call(t, newRouter(&processFake{}), http.MethodPost, "/api/v1/shopfloor/process-messages", bad, processDuty)
+	rec := call(t, newRouter(&processFake{}), http.MethodPost, "/v1/shopfloor/process-messages", bad, processDuty)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d", rec.Code)
 	}
@@ -250,7 +250,7 @@ func TestProcessMessage_ValidationNamesFields(t *testing.T) {
 func TestProcessMessage_InvalidValueIsUnprocessable(t *testing.T) {
 	body := fmt.Sprintf(`{"source":"edge","sourceMessageId":"e-1","categoryCode":"process-data","orderId":%q,"occurredAt":"2026-10-20T09:00:00Z",
 		"values":[{"name":"flag","type":"boolean","value":"maybe"}]}`, orderID)
-	rec := call(t, newRouter(&processFake{}), http.MethodPost, "/api/v1/shopfloor/process-messages", body, processDuty)
+	rec := call(t, newRouter(&processFake{}), http.MethodPost, "/v1/shopfloor/process-messages", body, processDuty)
 	if rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != domain.CodeInvalidValue {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -258,34 +258,34 @@ func TestProcessMessage_InvalidValueIsUnprocessable(t *testing.T) {
 
 func TestProcessMessage_DutiesGateEachEndpoint(t *testing.T) {
 	h := newRouter(&processFake{})
-	if rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/process-messages", qualityBody("k-3"), "shopfloor.view"); rec.Code != http.StatusForbidden {
+	if rec := call(t, h, http.MethodPost, "/v1/shopfloor/process-messages", qualityBody("k-3"), "shopfloor.view"); rec.Code != http.StatusForbidden {
 		t.Fatalf("create without duty status %d", rec.Code)
 	}
-	if rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/process-messages/"+messageID+"/deliveries/kafka:report",
+	if rec := call(t, h, http.MethodPost, "/v1/shopfloor/process-messages/"+messageID+"/deliveries/kafka:report",
 		`{"outcome":"delivered"}`, "shopfloor.view"); rec.Code != http.StatusForbidden {
 		t.Fatalf("report without duty status %d", rec.Code)
 	}
-	if rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/process-messages", "", ""); rec.Code != http.StatusForbidden {
+	if rec := call(t, h, http.MethodGet, "/v1/shopfloor/process-messages", "", ""); rec.Code != http.StatusForbidden {
 		t.Fatalf("list without duty status %d", rec.Code)
 	}
 }
 
 func TestProcessMessage_ListFiltersAndValidates(t *testing.T) {
 	h := newRouter(&processFake{})
-	call(t, h, http.MethodPost, "/api/v1/shopfloor/process-messages", qualityBody("k-4"), processDuty)
-	rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/process-messages?status=received&limit=5", "", processDuty)
+	call(t, h, http.MethodPost, "/v1/shopfloor/process-messages", qualityBody("k-4"), processDuty)
+	rec := call(t, h, http.MethodGet, "/v1/shopfloor/process-messages?status=received&limit=5", "", processDuty)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("list status %d: %s", rec.Code, rec.Body.String())
 	}
 	for _, q := range []string{"status=done", "category=nope", "limit=0", "limit=999"} {
-		if rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/process-messages?"+q, "", processDuty); rec.Code != http.StatusBadRequest {
+		if rec := call(t, h, http.MethodGet, "/v1/shopfloor/process-messages?"+q, "", processDuty); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: status %d", q, rec.Code)
 		}
 	}
 }
 
 func TestProcessMessage_GetUnknownIsNotFound(t *testing.T) {
-	rec := call(t, newRouter(&processFake{}), http.MethodGet, "/api/v1/shopfloor/process-messages/"+messageID, "", processDuty)
+	rec := call(t, newRouter(&processFake{}), http.MethodGet, "/v1/shopfloor/process-messages/"+messageID, "", processDuty)
 	if rec.Code != http.StatusNotFound || problemCode(t, rec) != store.CodeProcessNotFound {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -294,8 +294,8 @@ func TestProcessMessage_GetUnknownIsNotFound(t *testing.T) {
 func TestProcessMessage_ReportValidatesOutcomeAndDestination(t *testing.T) {
 	fs := &processFake{}
 	h := newRouter(fs)
-	call(t, h, http.MethodPost, "/api/v1/shopfloor/process-messages", qualityBody("k-5"), processDuty)
-	base := "/api/v1/shopfloor/process-messages/" + messageID + "/deliveries/"
+	call(t, h, http.MethodPost, "/v1/shopfloor/process-messages", qualityBody("k-5"), processDuty)
+	base := "/v1/shopfloor/process-messages/" + messageID + "/deliveries/"
 	if rec := call(t, h, http.MethodPost, base+"fax:report", `{"outcome":"delivered"}`, processDuty); rec.Code != http.StatusBadRequest {
 		t.Fatalf("unknown destination status %d", rec.Code)
 	}
@@ -315,8 +315,8 @@ func TestProcessMessage_ReportValidatesOutcomeAndDestination(t *testing.T) {
 
 func TestProcessMessage_ReprocessNeedsDestinationAndReason(t *testing.T) {
 	h := newRouter(&processFake{})
-	call(t, h, http.MethodPost, "/api/v1/shopfloor/process-messages", qualityBody("k-6"), processDuty)
-	url := "/api/v1/shopfloor/process-messages/" + messageID + ":reprocess"
+	call(t, h, http.MethodPost, "/v1/shopfloor/process-messages", qualityBody("k-6"), processDuty)
+	url := "/v1/shopfloor/process-messages/" + messageID + ":reprocess"
 	if rec := call(t, h, http.MethodPost, url, `{"destination":"ebr","reason":""}`, processDuty); rec.Code != http.StatusBadRequest {
 		t.Fatalf("empty reason status %d", rec.Code)
 	}
@@ -327,8 +327,8 @@ func TestProcessMessage_ReprocessNeedsDestinationAndReason(t *testing.T) {
 
 func TestProcessMessage_ReprocessOnlyFromError(t *testing.T) {
 	h := newRouter(&processFake{})
-	call(t, h, http.MethodPost, "/api/v1/shopfloor/process-messages", qualityBody("k-7"), processDuty)
-	url := "/api/v1/shopfloor/process-messages/" + messageID + ":reprocess"
+	call(t, h, http.MethodPost, "/v1/shopfloor/process-messages", qualityBody("k-7"), processDuty)
+	url := "/v1/shopfloor/process-messages/" + messageID + ":reprocess"
 	rec := call(t, h, http.MethodPost, url, `{"destination":"ebr","reason":"EBR restored"}`, processDuty)
 	if rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != domain.CodeNotReprocessable {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
@@ -338,7 +338,7 @@ func TestProcessMessage_ReprocessOnlyFromError(t *testing.T) {
 func TestProcessMessage_StampsServerReceiveTime(t *testing.T) {
 	fs := &processFake{}
 	server := time.Date(2026, 10, 20, 9, 0, 7, 0, time.UTC)
-	rec := call(t, newRouterAt(fs, func() time.Time { return server }), http.MethodPost, "/api/v1/shopfloor/process-messages", qualityBody("k-10"), processDuty)
+	rec := call(t, newRouterAt(fs, func() time.Time { return server }), http.MethodPost, "/v1/shopfloor/process-messages", qualityBody("k-10"), processDuty)
 	if rec.Code != http.StatusCreated || !fs.received.Equal(server) {
 		t.Fatalf("status %d, received at %v", rec.Code, fs.received)
 	}
@@ -347,7 +347,7 @@ func TestProcessMessage_StampsServerReceiveTime(t *testing.T) {
 func TestProcessMessage_ListPassesEveryFilter(t *testing.T) {
 	fs := &processFake{}
 	h := newRouter(fs)
-	rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/process-messages?status=error&category=quality-result&destination=quality&orderId="+orderID+"&limit=20", "", processDuty)
+	rec := call(t, h, http.MethodGet, "/v1/shopfloor/process-messages?status=error&category=quality-result&destination=quality&orderId="+orderID+"&limit=20", "", processDuty)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -356,11 +356,11 @@ func TestProcessMessage_ListPassesEveryFilter(t *testing.T) {
 	if fs.filter != want {
 		t.Fatalf("filter %+v, want %+v", fs.filter, want)
 	}
-	if rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/process-messages", "", processDuty); rec.Code != http.StatusOK || fs.filter.Limit != defaultProcessList+1 {
+	if rec := call(t, h, http.MethodGet, "/v1/shopfloor/process-messages", "", processDuty); rec.Code != http.StatusOK || fs.filter.Limit != defaultProcessList+1 {
 		t.Fatalf("default limit %d (status %d)", fs.filter.Limit, rec.Code)
 	}
 	for _, q := range []string{"destination=fax", "orderId=PO-7"} {
-		if rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/process-messages?"+q, "", processDuty); rec.Code != http.StatusBadRequest {
+		if rec := call(t, h, http.MethodGet, "/v1/shopfloor/process-messages?"+q, "", processDuty); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: status %d", q, rec.Code)
 		}
 	}
@@ -371,12 +371,12 @@ func TestProcessMessage_ListPassesEveryFilter(t *testing.T) {
 func TestProcessMessage_ReportAndReprocessNeedIdempotencyKey(t *testing.T) {
 	fs := &processFake{}
 	h := newRouter(fs)
-	call(t, h, http.MethodPost, "/api/v1/shopfloor/process-messages", qualityBody("k-11"), processDuty)
-	report := "/api/v1/shopfloor/process-messages/" + messageID + "/deliveries/quality:report"
+	call(t, h, http.MethodPost, "/v1/shopfloor/process-messages", qualityBody("k-11"), processDuty)
+	report := "/v1/shopfloor/process-messages/" + messageID + "/deliveries/quality:report"
 	if rec := callWith(t, h, http.MethodPost, report, `{"outcome":"failed"}`, processDuty, nil); rec.Code != http.StatusBadRequest {
 		t.Fatalf("report without key: %d", rec.Code)
 	}
-	if rec := callWith(t, h, http.MethodPost, "/api/v1/shopfloor/process-messages/"+messageID+":reprocess", `{"destination":"quality","reason":"QMS back"}`,
+	if rec := callWith(t, h, http.MethodPost, "/v1/shopfloor/process-messages/"+messageID+":reprocess", `{"destination":"quality","reason":"QMS back"}`,
 		processDuty, nil); rec.Code != http.StatusBadRequest {
 		t.Fatalf("reprocess without key: %d", rec.Code)
 	}
@@ -395,7 +395,7 @@ func TestProcessMessage_ReportAndReprocessNeedIdempotencyKey(t *testing.T) {
 func TestProcessMessage_ReprocessTrimsReasonAndUnknownIDIsNotFound(t *testing.T) {
 	fs := &processFake{}
 	h := newRouter(fs)
-	call(t, h, http.MethodPost, "/api/v1/shopfloor/process-messages", qualityBody("k-12"), processDuty)
+	call(t, h, http.MethodPost, "/v1/shopfloor/process-messages", qualityBody("k-12"), processDuty)
 	m := fs.msgs[messageID]
 	for i := range m.Deliveries {
 		if m.Deliveries[i].Destination == domain.DestQuality {
@@ -403,14 +403,14 @@ func TestProcessMessage_ReprocessTrimsReasonAndUnknownIDIsNotFound(t *testing.T)
 		}
 	}
 	fs.msgs[messageID] = m
-	rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/process-messages/"+messageID+":reprocess", `{"destination":"quality","reason":"  QMS restored  "}`, processDuty)
+	rec := call(t, h, http.MethodPost, "/v1/shopfloor/process-messages/"+messageID+":reprocess", `{"destination":"quality","reason":"  QMS restored  "}`, processDuty)
 	if rec.Code != http.StatusOK || len(fs.reasons) != 1 || fs.reasons[0] != "QMS restored" {
 		t.Fatalf("status %d reasons %q: %s", rec.Code, fs.reasons, rec.Body.String())
 	}
-	if rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/process-messages/not-a-uuid:reprocess", `{"destination":"quality","reason":"x"}`, processDuty); rec.Code != http.StatusNotFound {
+	if rec := call(t, h, http.MethodPost, "/v1/shopfloor/process-messages/not-a-uuid:reprocess", `{"destination":"quality","reason":"x"}`, processDuty); rec.Code != http.StatusNotFound {
 		t.Fatalf("bad id: %d", rec.Code)
 	}
-	if rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/process-messages/not-a-uuid", "", processDuty); rec.Code != http.StatusNotFound || problemCode(t, rec) != store.CodeProcessNotFound {
+	if rec := call(t, h, http.MethodGet, "/v1/shopfloor/process-messages/not-a-uuid", "", processDuty); rec.Code != http.StatusNotFound || problemCode(t, rec) != store.CodeProcessNotFound {
 		t.Fatalf("bad id get: %d", rec.Code)
 	}
 }
@@ -437,7 +437,7 @@ func TestProcessMessage_MonitorPagesWithCursor(t *testing.T) {
 	fs := pagedFake()
 	h := newRouter(fs)
 	var seen []string
-	url := "/api/v1/shopfloor/process-messages?limit=2"
+	url := "/v1/shopfloor/process-messages?limit=2"
 	for page := 0; ; page++ {
 		if page > 3 {
 			t.Fatal("paging did not end")
@@ -462,7 +462,7 @@ func TestProcessMessage_MonitorPagesWithCursor(t *testing.T) {
 			}
 			break
 		}
-		url = "/api/v1/shopfloor/process-messages?limit=2&cursor=" + *out.NextCursor
+		url = "/v1/shopfloor/process-messages?limit=2&cursor=" + *out.NextCursor
 	}
 	if strings.Join(seen, ",") != strings.Join(fs.order, ",") {
 		t.Fatalf("pages walked %v, want %v", seen, fs.order)
@@ -471,7 +471,7 @@ func TestProcessMessage_MonitorPagesWithCursor(t *testing.T) {
 
 // A page that is exactly full at the end of the list says so: no cursor to an empty page.
 func TestProcessMessage_ExactLastPageHasNoCursor(t *testing.T) {
-	rec := call(t, newRouter(pagedFake()), http.MethodGet, "/api/v1/shopfloor/process-messages?limit=5", "", processDuty)
+	rec := call(t, newRouter(pagedFake()), http.MethodGet, "/v1/shopfloor/process-messages?limit=5", "", processDuty)
 	var out monitorPage
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
 	if rec.Code != http.StatusOK || len(out.Items) != 5 || out.NextCursor != nil {
@@ -484,7 +484,7 @@ func TestProcessMessage_MalformedCursorNamesField(t *testing.T) {
 	notUUID := base64.RawURLEncoding.EncodeToString([]byte("2026-10-20T09:00:00Z|PO-7"))
 	notTime := base64.RawURLEncoding.EncodeToString([]byte("yesterday|" + messageID))
 	for _, c := range []string{"garbage!", notUUID, notTime} {
-		rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/process-messages?cursor="+c, "", processDuty)
+		rec := call(t, h, http.MethodGet, "/v1/shopfloor/process-messages?cursor="+c, "", processDuty)
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("cursor %q: status %d", c, rec.Code)
 		}
@@ -507,8 +507,8 @@ func TestProcessMessage_CursorRoundTrips(t *testing.T) {
 func TestProcessMessage_DeleteNeedsReasonKeyAndDestinationInError(t *testing.T) {
 	fs := &processFake{}
 	h := newRouter(fs)
-	call(t, h, http.MethodPost, "/api/v1/shopfloor/process-messages", qualityBody("k-20"), processDuty)
-	url := "/api/v1/shopfloor/process-messages/" + messageID + ":delete"
+	call(t, h, http.MethodPost, "/v1/shopfloor/process-messages", qualityBody("k-20"), processDuty)
+	url := "/v1/shopfloor/process-messages/" + messageID + ":delete"
 	if rec := call(t, h, http.MethodPost, url, `{"reason":"   "}`, processDuty); rec.Code != http.StatusBadRequest {
 		t.Fatalf("blank reason: %d", rec.Code)
 	}
@@ -536,14 +536,14 @@ func TestProcessMessage_DeleteNeedsReasonKeyAndDestinationInError(t *testing.T) 
 	if rec := call(t, h, http.MethodPost, url, `{"reason":"again"}`, processDuty); rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != store.CodeMessageDeleted {
 		t.Fatalf("second delete: %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/process-messages/not-a-uuid:delete", `{"reason":"x"}`, processDuty); rec.Code != http.StatusNotFound {
+	if rec := call(t, h, http.MethodPost, "/v1/shopfloor/process-messages/not-a-uuid:delete", `{"reason":"x"}`, processDuty); rec.Code != http.StatusNotFound {
 		t.Fatalf("bad id: %d", rec.Code)
 	}
 }
 
 // Deletion is audited, so it needs an authenticated user and not only a tenant.
 func TestProcessMessage_DeleteNeedsUser(t *testing.T) {
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/shopfloor/process-messages/"+messageID+":delete", strings.NewReader(`{"reason":"x"}`))
+	r := httptest.NewRequest(http.MethodPost, "/v1/shopfloor/process-messages/"+messageID+":delete", strings.NewReader(`{"reason":"x"}`))
 	r.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
 	r.Header.Set("X-Passage-Duties", processDuty)
 	r.Header.Set("Idempotency-Key", "k")
@@ -558,7 +558,7 @@ func TestProcessMessage_RetrySweepUsesServerTimeAndLimit(t *testing.T) {
 	server := time.Date(2026, 10, 20, 9, 5, 0, 0, time.UTC)
 	fs := &processFake{claims: []store.RetryClaim{{MessageID: messageID, Destination: domain.DestQuality, Attempts: 2, NextAttemptAt: server.Add(5 * time.Minute)}}}
 	h := newRouterAt(fs, func() time.Time { return server })
-	url := "/api/v1/shopfloor/process-messages:retry-due"
+	url := "/v1/shopfloor/process-messages:retry-due"
 	if rec := call(t, h, http.MethodPost, url, "", "shopfloor.view,shopfloor.process.create"); rec.Code != http.StatusForbidden {
 		t.Fatalf("without the deliver duty: %d", rec.Code)
 	}

@@ -12,7 +12,7 @@ import (
 
 func TestStatement_ForwardsTheQueryAndReturnsSections(t *testing.T) {
 	f := &fakeStore{}
-	rec := do(router(f), http.MethodGet, "/api/v1/receivables/statements?legalEntityId="+testLE+"&customer="+testItem+"&asOf=2027-03-31", "", "ARView", nil)
+	rec := do(router(f), http.MethodGet, "/v1/receivables/statements?legalEntityId="+testLE+"&customer="+testItem+"&asOf=2027-03-31", "", "ARView", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
 	}
@@ -42,7 +42,7 @@ func TestStatement_ForwardsTheQueryAndReturnsSections(t *testing.T) {
 
 func TestStatement_DefaultsToToday(t *testing.T) {
 	f := &fakeStore{}
-	rec := do(router(f), http.MethodGet, "/api/v1/receivables/statements?legalEntityId="+testLE+"&customer="+testItem, "", "ARView", nil)
+	rec := do(router(f), http.MethodGet, "/v1/receivables/statements?legalEntityId="+testLE+"&customer="+testItem, "", "ARView", nil)
 	if rec.Code != http.StatusOK || f.statement.asOf != time.Now().UTC().Format("2006-01-02") {
 		t.Fatalf("status %d, asOf %q, want today", rec.Code, f.statement.asOf)
 	}
@@ -50,11 +50,11 @@ func TestStatement_DefaultsToToday(t *testing.T) {
 
 func TestStatement_RejectsBadQueriesAndChecksDutyAndScope(t *testing.T) {
 	h := router(&fakeStore{})
-	base := "/api/v1/receivables/statements?legalEntityId=" + testLE + "&customer=" + testItem
+	base := "/v1/receivables/statements?legalEntityId=" + testLE + "&customer=" + testItem
 	for path, field := range map[string]string{
-		"/api/v1/receivables/statements?customer=" + testItem:                       "legalEntityId",
-		"/api/v1/receivables/statements?legalEntityId=" + testLE:                    "customer",
-		"/api/v1/receivables/statements?legalEntityId=" + testLE + "&customer=nope": "customer",
+		"/v1/receivables/statements?customer=" + testItem:                       "legalEntityId",
+		"/v1/receivables/statements?legalEntityId=" + testLE:                    "customer",
+		"/v1/receivables/statements?legalEntityId=" + testLE + "&customer=nope": "customer",
 		base + "&asOf=31-03-2027":                                                   "asOf",
 	} {
 		rec := do(h, http.MethodGet, path, "", "ARView", nil)
@@ -74,7 +74,7 @@ func TestStatement_RejectsBadQueriesAndChecksDutyAndScope(t *testing.T) {
 func TestAgingSnapshot_RunsForTheLegalEntity(t *testing.T) {
 	f := &fakeStore{}
 	day := time.Now().UTC().AddDate(0, 0, -1).Format("2006-01-02")
-	rec := do(router(f), http.MethodPost, "/api/v1/receivables/aging-snapshots", `{"legalEntityId":"`+testLE+`","asOf":"`+day+`"}`, "ARAgingRun", nil)
+	rec := do(router(f), http.MethodPost, "/v1/receivables/aging-snapshots", `{"legalEntityId":"`+testLE+`","asOf":"`+day+`"}`, "ARAgingRun", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
 	}
@@ -90,7 +90,7 @@ func TestAgingSnapshot_RunsForTheLegalEntity(t *testing.T) {
 		t.Errorf("result = %+v (%v)", res, err)
 	}
 	// Without a date the job runs for today.
-	if rec := do(router(f), http.MethodPost, "/api/v1/receivables/aging-snapshots", `{"legalEntityId":"`+testLE+`"}`, "ARAgingRun", nil); rec.Code != http.StatusOK ||
+	if rec := do(router(f), http.MethodPost, "/v1/receivables/aging-snapshots", `{"legalEntityId":"`+testLE+`"}`, "ARAgingRun", nil); rec.Code != http.StatusOK ||
 		f.statement.asOf != time.Now().UTC().Format("2006-01-02") {
 		t.Errorf("default date: status %d asOf %q", rec.Code, f.statement.asOf)
 	}
@@ -104,13 +104,13 @@ func TestAgingSnapshot_ValidatesInputAndNeedsItsDuty(t *testing.T) {
 		`{"legalEntityId":"` + testLE + `","asOf":"yesterday"}`:        "asOf",
 		`{"legalEntityId":"` + testLE + `","asOf":"` + tomorrow + `"}`: "asOf",
 	} {
-		rec := do(h, http.MethodPost, "/api/v1/receivables/aging-snapshots", body, "ARAgingRun", nil)
+		rec := do(h, http.MethodPost, "/v1/receivables/aging-snapshots", body, "ARAgingRun", nil)
 		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"`+field+`"`) {
 			t.Errorf("%s: status %d body %s, want 400 naming %s", body, rec.Code, rec.Body.String(), field)
 		}
 	}
 	// Reading balances does not let a clerk write them.
-	if rec := do(h, http.MethodPost, "/api/v1/receivables/aging-snapshots", `{"legalEntityId":"`+testLE+`"}`, "ARView", nil); rec.Code != http.StatusForbidden {
+	if rec := do(h, http.MethodPost, "/v1/receivables/aging-snapshots", `{"legalEntityId":"`+testLE+`"}`, "ARView", nil); rec.Code != http.StatusForbidden {
 		t.Errorf("with ARView only: status %d, want 403", rec.Code)
 	}
 }
@@ -118,7 +118,7 @@ func TestAgingSnapshot_ValidatesInputAndNeedsItsDuty(t *testing.T) {
 func TestListAgingSnapshots_FiltersAndValidates(t *testing.T) {
 	f := &fakeStore{}
 	h := router(f)
-	rec := do(h, http.MethodGet, "/api/v1/receivables/aging-snapshots?legalEntityId="+testLE+"&asOf=2027-03-31&customer="+testItem, "", "ARView", nil)
+	rec := do(h, http.MethodGet, "/v1/receivables/aging-snapshots?legalEntityId="+testLE+"&asOf=2027-03-31&customer="+testItem, "", "ARView", nil)
 	if rec.Code != http.StatusOK || f.snapshots.AsOf != "2027-03-31" || f.snapshots.CustomerID != testItem || f.snapshots.LegalEntityID != testLE {
 		t.Fatalf("status %d filter %+v", rec.Code, f.snapshots)
 	}
@@ -126,7 +126,7 @@ func TestListAgingSnapshots_FiltersAndValidates(t *testing.T) {
 		t.Errorf("body = %s", rec.Body.String())
 	}
 	for _, q := range []string{"", "legalEntityId=" + testLE + "&asOf=2027-3-1", "legalEntityId=" + testLE + "&customer=x", "legalEntityId=" + testLE + "&limit=0"} {
-		if rec := do(h, http.MethodGet, "/api/v1/receivables/aging-snapshots?"+q, "", "ARView", nil); rec.Code != http.StatusBadRequest {
+		if rec := do(h, http.MethodGet, "/v1/receivables/aging-snapshots?"+q, "", "ARView", nil); rec.Code != http.StatusBadRequest {
 			t.Errorf("%q: status %d, want 400", q, rec.Code)
 		}
 	}
@@ -137,7 +137,7 @@ func TestCreatePayment_HashesThePayerAccountAndKeepsTheReason(t *testing.T) {
 	body := `{"legalEntityId":"` + testLE + `","paymentMode":"ACH","source":"MANUAL","sourceRef":"ACH-7",
 		"amount":"950.00","currency":"USD","receivedDate":"2027-03-05","valueDate":"2027-03-05",
 		"payerName":"Acme Inc","payerAccount":"DE89 3704 0044 0532 0130 00","shortPayReason":"  promo  "}`
-	rec := do(router(f), http.MethodPost, "/api/v1/receivables/payments", body, "ARPaymentPost", map[string]string{"Idempotency-Key": "k-pay-7"})
+	rec := do(router(f), http.MethodPost, "/v1/receivables/payments", body, "ARPaymentPost", map[string]string{"Idempotency-Key": "k-pay-7"})
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
 	}
@@ -161,7 +161,7 @@ func TestCreatePayment_RejectsBadPayerIdentity(t *testing.T) {
 	} {
 		body := `{"legalEntityId":"` + testLE + `","paymentMode":"ACH","source":"MANUAL","amount":"950.00","currency":"USD",
 			"receivedDate":"2027-03-05","valueDate":"2027-03-05",` + extra + `}`
-		rec := do(h, http.MethodPost, "/api/v1/receivables/payments", body, "ARPaymentPost", map[string]string{"Idempotency-Key": "k-" + field})
+		rec := do(h, http.MethodPost, "/v1/receivables/payments", body, "ARPaymentPost", map[string]string{"Idempotency-Key": "k-" + field})
 		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"`+field+`"`) {
 			t.Errorf("%s: status %d body %s, want 400 naming it", field, rec.Code, rec.Body.String())
 		}

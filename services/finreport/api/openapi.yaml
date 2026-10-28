@@ -11,7 +11,7 @@ servers:
 security:
   - bearerAuth: []
 paths:
-  /api/v1/reporting/definitions:
+  /v1/reporting/definitions:
     get:
       operationId: listDefinitions
       summary: One summary per definition code (designer list)
@@ -28,7 +28,7 @@ paths:
                   items:
                     type: array
                     items: {$ref: '#/components/schemas/DefinitionSummary'}
-  /api/v1/reporting/definitions/{code}:
+  /v1/reporting/definitions/{code}:
     parameters:
       - $ref: '#/components/parameters/Code'
     get:
@@ -81,7 +81,7 @@ paths:
         '412': {$ref: '#/components/responses/Problem'}
         '422': {$ref: '#/components/responses/Problem'}
         '428': {$ref: '#/components/responses/Problem'}
-  /api/v1/reporting/definitions/{code}/export:
+  /v1/reporting/definitions/{code}/export:
     parameters:
       - $ref: '#/components/parameters/Code'
     get:
@@ -95,7 +95,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Definition'}
         '404': {$ref: '#/components/responses/Problem'}
-  /api/v1/reporting/definitions/import:
+  /v1/reporting/definitions/import:
     post:
       operationId: importDefinition
       summary: Import an exported definition as a draft (FR-15.11)
@@ -136,7 +136,7 @@ paths:
         '400': {$ref: '#/components/responses/Problem'}
         '409': {$ref: '#/components/responses/Problem'}
         '422': {$ref: '#/components/responses/Problem'}
-  /api/v1/reporting/definitions/{code}:publish:
+  /v1/reporting/definitions/{code}:publish:
     parameters:
       - $ref: '#/components/parameters/Code'
     post:
@@ -151,7 +151,7 @@ paths:
               schema: {$ref: '#/components/schemas/Definition'}
         '404': {$ref: '#/components/responses/Problem'}
         '422': {$ref: '#/components/responses/Problem'}
-  /api/v1/reporting/definitions/{code}:validate:
+  /v1/reporting/definitions/{code}:validate:
     parameters:
       - $ref: '#/components/parameters/Code'
     post:
@@ -176,7 +176,7 @@ paths:
                   issues:
                     type: array
                     items: {$ref: '#/components/schemas/Issue'}
-  /api/v1/reporting/runs:
+  /v1/reporting/runs:
     get:
       operationId: listRuns
       summary: Report library - newest runs first
@@ -240,7 +240,7 @@ paths:
             application/problem+json:
               schema: {$ref: '#/components/schemas/Problem'}
         '422': {$ref: '#/components/responses/Problem'}
-  /api/v1/reporting/runs/{id}:
+  /v1/reporting/runs/{id}:
     parameters:
       - $ref: '#/components/parameters/RunId'
     get:
@@ -254,7 +254,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Run'}
         '404': {$ref: '#/components/responses/Problem'}
-  /api/v1/reporting/runs/{id}/cells:
+  /v1/reporting/runs/{id}/cells:
     parameters:
       - $ref: '#/components/parameters/RunId'
     get:
@@ -274,7 +274,7 @@ paths:
                     type: array
                     items: {$ref: '#/components/schemas/Cell'}
         '404': {$ref: '#/components/responses/Problem'}
-  /api/v1/reporting/runs/{id}/cells/{row}/{column}/balances:
+  /v1/reporting/runs/{id}/cells/{row}/{column}/balances:
     parameters:
       - $ref: '#/components/parameters/RunId'
       - name: row
@@ -315,7 +315,7 @@ paths:
                     items: {$ref: '#/components/schemas/BalanceKey'}
         '404': {$ref: '#/components/responses/Problem'}
         '500': {$ref: '#/components/responses/Problem'}
-  /api/v1/reporting/runs/{id}/cells/{row}/{column}/lines:
+  /v1/reporting/runs/{id}/cells/{row}/{column}/lines:
     parameters:
       - $ref: '#/components/parameters/RunId'
       - name: row
@@ -388,7 +388,7 @@ paths:
         '400': {$ref: '#/components/responses/Problem'}
         '403': {$ref: '#/components/responses/Problem'}
         '404': {$ref: '#/components/responses/Problem'}
-  /api/v1/reporting/runs/{id}/outputs/{format}:
+  /v1/reporting/runs/{id}/outputs/{format}:
     parameters:
       - $ref: '#/components/parameters/RunId'
       - name: format
@@ -430,7 +430,7 @@ paths:
           content:
             application/problem+json:
               schema: {$ref: '#/components/schemas/Problem'}
-  /api/v1/reporting/lag:
+  /v1/reporting/lag:
     get:
       operationId: getLag
       summary: Read-model high-water mark per ledger (FR-15.1)
@@ -447,7 +447,7 @@ paths:
                   items:
                     type: array
                     items: {$ref: '#/components/schemas/LagRow'}
-  /api/v1/reporting/definitions/{code}:retire:
+  /v1/reporting/definitions/{code}:retire:
     parameters:
       - $ref: '#/components/parameters/Code'
     post:
@@ -467,7 +467,7 @@ paths:
                   status: {type: string, enum: [retired]}
                   retiredVersions: {type: integer, description: published versions retired by this call}
         '404': {$ref: '#/components/responses/Problem'}
-  /api/v1/reporting/standard-definitions:
+  /v1/reporting/standard-definitions:
     get:
       operationId: listStandardDefinitions
       summary: The statutory definitions the service ships (TB-STD, BS-STD, PL-STD, PL-FUNC; FR-15.5, FR-15.14)
@@ -484,7 +484,7 @@ paths:
                   items:
                     type: array
                     items: {$ref: '#/components/schemas/StandardDefinition'}
-  /api/v1/reporting/standard-definitions:install:
+  /v1/reporting/standard-definitions:install:
     post:
       operationId: installStandardDefinitions
       summary: Publish, as version 1 and in one transaction, every shipped definition whose code the tenant does not use yet. Codes with any draft, published or retired version are skipped, so repeating the call is safe.
@@ -501,7 +501,7 @@ paths:
                   items:
                     type: array
                     items: {$ref: '#/components/schemas/InstallResult'}
-  /api/v1/reporting/hierarchies:
+  /v1/reporting/hierarchies:
     get:
       operationId: listHierarchies
       summary: One summary per derived hierarchy code (FR-15.13)
@@ -518,7 +518,7 @@ paths:
                   items:
                     type: array
                     items: {$ref: '#/components/schemas/HierarchySummary'}
-  /api/v1/reporting/hierarchies/{code}:
+  /v1/reporting/hierarchies/{code}:
     parameters:
       - $ref: '#/components/parameters/Code'
     get:
@@ -569,7 +569,7 @@ paths:
         '412': {$ref: '#/components/responses/Problem'}
         '422': {$ref: '#/components/responses/Problem'}
         '428': {$ref: '#/components/responses/Problem'}
-  /api/v1/reporting/hierarchies/{code}:publish:
+  /v1/reporting/hierarchies/{code}:publish:
     parameters:
       - $ref: '#/components/parameters/Code'
     post:
@@ -598,7 +598,7 @@ paths:
                   membership: {$ref: '#/components/schemas/Membership'}
         '404': {$ref: '#/components/responses/Problem'}
         '422': {$ref: '#/components/responses/Problem'}
-  /api/v1/reporting/hierarchies/{code}/members:
+  /v1/reporting/hierarchies/{code}/members:
     parameters:
       - $ref: '#/components/parameters/Code'
     get:
@@ -624,7 +624,7 @@ paths:
                       version: {type: integer}
         '400': {$ref: '#/components/responses/Problem'}
         '404': {$ref: '#/components/responses/Problem'}
-  /api/v1/reporting/schedules:
+  /v1/reporting/schedules:
     get:
       operationId: listSchedules
       summary: Distribution schedules ordered by code (FR-15.8)
@@ -641,7 +641,7 @@ paths:
                   items:
                     type: array
                     items: {$ref: '#/components/schemas/Schedule'}
-  /api/v1/reporting/schedules/{code}:
+  /v1/reporting/schedules/{code}:
     parameters:
       - $ref: '#/components/parameters/Code'
     get:
@@ -693,7 +693,7 @@ paths:
         '412': {$ref: '#/components/responses/Problem'}
         '422': {$ref: '#/components/responses/Problem'}
         '428': {$ref: '#/components/responses/Problem'}
-  /api/v1/reporting/audit-trail:
+  /v1/reporting/audit-trail:
     get:
       operationId: listAuditTrail
       summary: Audit trail report (FR-15.10)
@@ -738,7 +738,7 @@ paths:
                   nextCursor: {type: [string, 'null']}
         '400': {$ref: '#/components/responses/Problem'}
         '403': {$ref: '#/components/responses/Problem'}
-  /api/v1/reporting/audit-trail:export:
+  /v1/reporting/audit-trail:export:
     get:
       operationId: exportAuditTrail
       summary: Audit trail as a CSV file with its SHA-256 (FR-15.10)

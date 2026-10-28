@@ -14,7 +14,7 @@ lakehouse, dbt models and Cube semantic layer live in `../../data/`.
   `cube_contract_test.go` keeps the catalog in step with the Cube model and the
   `cube.js` scope map in `../../data/cube`.
 - **Query planning and scope mirror (FR-46.7, BR-46.9).** `POST
-  /api/v1/analytics/query` checks the shape limits (10 measures, 8 dimensions,
+  /v1/analytics/query` checks the shape limits (10 measures, 8 dimensions,
   5-year day-grain range), resolves the metrics, and returns the Cube plan with
   the caller's legal-entity filter. No scope returns reason `NO_SCOPE`. A model
   without a security mapping fails closed with `ANA-0103`.

@@ -128,7 +128,7 @@ func TestMachines_CreateValidatesAndReturns201(t *testing.T) {
 	fs := newFloorFake()
 	h := newRouter(fs)
 	body := fmt.Sprintf(`{"machineId":" M-101 ","resourceId":%q,"siteId":%q,"idealCycleSeconds":"1.5"}`, resourceID, siteID)
-	rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/machines", body, floorDuty)
+	rec := call(t, h, http.MethodPost, "/v1/shopfloor/machines", body, floorDuty)
 	if rec.Code != http.StatusCreated || len(fs.machines) != 1 {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -137,24 +137,24 @@ func TestMachines_CreateValidatesAndReturns201(t *testing.T) {
 	}
 
 	bad := `{"machineId":"","resourceId":"x","siteId":"y","idealCycleSeconds":"0.0001"}`
-	rec = call(t, h, http.MethodPost, "/api/v1/shopfloor/machines", bad, floorDuty)
+	rec = call(t, h, http.MethodPost, "/v1/shopfloor/machines", bad, floorDuty)
 	var p httpx.Problem
 	_ = json.Unmarshal(rec.Body.Bytes(), &p)
 	if rec.Code != http.StatusBadRequest || len(p.Errors) != 4 {
 		t.Fatalf("validation: %d %+v", rec.Code, p.Errors)
 	}
 	for _, ideal := range []string{`"0"`, `"-1"`, `"86401"`, `60`} {
-		rec = call(t, h, http.MethodPost, "/api/v1/shopfloor/machines",
+		rec = call(t, h, http.MethodPost, "/v1/shopfloor/machines",
 			fmt.Sprintf(`{"machineId":"M","resourceId":%q,"idealCycleSeconds":%s}`, resourceID, ideal), floorDuty)
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("idealCycleSeconds %s accepted: %d", ideal, rec.Code)
 		}
 	}
-	rec = callWith(t, h, http.MethodPost, "/api/v1/shopfloor/machines", body, floorDuty, nil)
+	rec = callWith(t, h, http.MethodPost, "/v1/shopfloor/machines", body, floorDuty, nil)
 	if rec.Code != http.StatusBadRequest || fs.registerCalls != 1 {
 		t.Fatalf("missing Idempotency-Key: %d, calls %d", rec.Code, fs.registerCalls)
 	}
-	if rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/machines", body, DutyView); rec.Code != http.StatusForbidden {
+	if rec := call(t, h, http.MethodPost, "/v1/shopfloor/machines", body, DutyView); rec.Code != http.StatusForbidden {
 		t.Fatalf("without setup duty: %d", rec.Code)
 	}
 }
@@ -164,7 +164,7 @@ func TestMachineEvents_ValidatesEveryEventAndReportsGaps(t *testing.T) {
 	h := newRouter(fs)
 	good := `{"events":[{"machineId":"M-101","seq":1,"kind":"state","ts":"2026-10-21T08:00:00Z","state":"RUNNING"},
 		{"machineId":"M-101","seq":2,"kind":"measurement","ts":"2026-10-21T08:00:01Z","measurement":{"name":"temp_c","value":71.4,"unit":"Cel"}}]}`
-	rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/machine-events", good, DutyIngest)
+	rec := call(t, h, http.MethodPost, "/v1/shopfloor/machine-events", good, DutyIngest)
 	if rec.Code != http.StatusOK || len(fs.ingested) != 2 {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -181,7 +181,7 @@ func TestMachineEvents_ValidatesEveryEventAndReportsGaps(t *testing.T) {
 		{"machineId":"M-1","seq":1,"kind":"state","ts":"2026-10-21T08:00:00Z"},
 		{"machineId":"M-1","seq":2,"kind":"alarm","ts":"2026-10-21T08:00:00Z","goodCount":3},
 		{"machineId":"M-1","seq":3,"kind":"measurement","ts":"2026-10-21T08:00:00Z"}]}`
-	rec = call(t, h, http.MethodPost, "/api/v1/shopfloor/machine-events", bad, DutyIngest)
+	rec = call(t, h, http.MethodPost, "/v1/shopfloor/machine-events", bad, DutyIngest)
 	var p httpx.Problem
 	_ = json.Unmarshal(rec.Body.Bytes(), &p)
 	for _, field := range []string{"events[0].machineId", "events[0].seq", "events[0].kind", "events[0].ts", "events[0].state",
@@ -194,10 +194,10 @@ func TestMachineEvents_ValidatesEveryEventAndReportsGaps(t *testing.T) {
 		t.Fatalf("invalid batch reached the store: %d, calls %d", rec.Code, fs.ingestCalls)
 	}
 	many := `{"events":[` + strings.TrimSuffix(strings.Repeat(`{"machineId":"M","seq":1,"kind":"alarm","ts":"2026-10-21T08:00:00Z"},`, maxIngest+1), ",") + `]}`
-	if rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/machine-events", many, DutyIngest); rec.Code != http.StatusBadRequest {
+	if rec := call(t, h, http.MethodPost, "/v1/shopfloor/machine-events", many, DutyIngest); rec.Code != http.StatusBadRequest {
 		t.Fatalf("oversized batch: %d", rec.Code)
 	}
-	if rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/machine-events", good, DutyView); rec.Code != http.StatusForbidden {
+	if rec := call(t, h, http.MethodPost, "/v1/shopfloor/machine-events", good, DutyView); rec.Code != http.StatusForbidden {
 		t.Fatalf("without ingest duty: %d", rec.Code)
 	}
 }
@@ -205,15 +205,15 @@ func TestMachineEvents_ValidatesEveryEventAndReportsGaps(t *testing.T) {
 func TestDowntimes_ListAndCode(t *testing.T) {
 	fs := newFloorFake()
 	h := newRouter(fs)
-	rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/downtimes?open=true&resourceId="+resourceID, "", DutyView)
+	rec := call(t, h, http.MethodGet, "/v1/shopfloor/downtimes?open=true&resourceId="+resourceID, "", DutyView)
 	if rec.Code != http.StatusOK || !fs.downFilter.OpenOnly || fs.downFilter.ResourceID != resourceID {
 		t.Fatalf("list %d %+v", rec.Code, fs.downFilter)
 	}
-	if rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/downtimes?open=maybe", "", DutyView); rec.Code != http.StatusBadRequest {
+	if rec := call(t, h, http.MethodGet, "/v1/shopfloor/downtimes?open=maybe", "", DutyView); rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad open filter: %d", rec.Code)
 	}
 
-	path := "/api/v1/shopfloor/downtimes/" + downtimeID + ":code"
+	path := "/v1/shopfloor/downtimes/" + downtimeID + ":code"
 	rec = call(t, h, http.MethodPost, path, `{"reasonCode":" JAM ","category":"planned"}`, DutyRegister)
 	if rec.Code != http.StatusOK || len(fs.coded) != 1 || fs.coded[0] != downtimeID+"|JAM|planned" {
 		t.Fatalf("code %d %v %s", rec.Code, fs.coded, rec.Body.String())
@@ -221,7 +221,7 @@ func TestDowntimes_ListAndCode(t *testing.T) {
 	if rec := call(t, h, http.MethodPost, path, `{"reasonCode":"","category":"later"}`, DutyRegister); rec.Code != http.StatusBadRequest {
 		t.Fatalf("empty reason: %d", rec.Code)
 	}
-	rec = call(t, h, http.MethodPost, "/api/v1/shopfloor/downtimes/nope:code", `{"reasonCode":"JAM"}`, DutyRegister)
+	rec = call(t, h, http.MethodPost, "/v1/shopfloor/downtimes/nope:code", `{"reasonCode":"JAM"}`, DutyRegister)
 	if rec.Code != http.StatusNotFound || problemCode(t, rec) != store.CodeDowntimeNotFound {
 		t.Fatalf("malformed id: %d", rec.Code)
 	}
@@ -233,13 +233,13 @@ func TestDowntimes_ListAndCode(t *testing.T) {
 func TestAndon_ListsOpenAlertsBySite(t *testing.T) {
 	fs := newFloorFake()
 	h := newRouter(fs)
-	rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/andon?siteId="+siteID, "", DutyView)
+	rec := call(t, h, http.MethodGet, "/v1/shopfloor/andon?siteId="+siteID, "", DutyView)
 	var out itemsResponse[store.Andon]
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
 	if rec.Code != http.StatusOK || len(out.Items) != 1 || fs.andonSite != siteID {
 		t.Fatalf("andon %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/andon?siteId=x", "", DutyView); rec.Code != http.StatusBadRequest {
+	if rec := call(t, h, http.MethodGet, "/v1/shopfloor/andon?siteId=x", "", DutyView); rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad site id: %d", rec.Code)
 	}
 }
@@ -259,7 +259,7 @@ func TestOEE_SeriesAndValidation(t *testing.T) {
 	}}
 	h := newRouter(fs)
 	other := "0195f0a0-0000-7000-8000-000000000099"
-	rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/oee?resourceIds="+resourceID+","+other+"&from=2026-10-21T02:00:00-04:00&to=2026-10-21T14:00:00Z&bucket=60m", "", DutyView)
+	rec := call(t, h, http.MethodGet, "/v1/shopfloor/oee?resourceIds="+resourceID+","+other+"&from=2026-10-21T02:00:00-04:00&to=2026-10-21T14:00:00Z&bucket=60m", "", DutyView)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -293,7 +293,7 @@ func TestOEE_SeriesAndValidation(t *testing.T) {
 		"resourceIds=" + resourceID + "&from=2026-10-21T00:00:00Z&to=2026-10-21T00:20:00Z",
 		"resourceIds=" + resourceID + "&from=yesterday&to=2026-10-21T00:15:00Z",
 	} {
-		if rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/oee?"+q, "", DutyView); rec.Code != http.StatusBadRequest {
+		if rec := call(t, h, http.MethodGet, "/v1/shopfloor/oee?"+q, "", DutyView); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: status %d", q, rec.Code)
 		}
 	}
@@ -302,31 +302,31 @@ func TestOEE_SeriesAndValidation(t *testing.T) {
 func TestPayExport_RangeUserAndKey(t *testing.T) {
 	fs := newFloorFake()
 	h := newRouter(fs)
-	rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/pay:export", `{"from":"2026-10-01","to":"2026-10-31"}`, DutyExport)
+	rec := call(t, h, http.MethodPost, "/v1/shopfloor/pay:export", `{"from":"2026-10-01","to":"2026-10-31"}`, DutyExport)
 	if rec.Code != http.StatusCreated || fs.exportRange != [3]string{"2026-10-01", "2026-10-31", "supervisor-1"} {
 		t.Fatalf("export %d %v %s", rec.Code, fs.exportRange, rec.Body.String())
 	}
 	for _, body := range []string{`{"from":"2026-10-31","to":"2026-10-01"}`, `{"from":"2026-10-01","to":"2026-11-01"}`, `{"from":"oct","to":"2026-10-01"}`} {
-		if rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/pay:export", body, DutyExport); rec.Code != http.StatusBadRequest {
+		if rec := call(t, h, http.MethodPost, "/v1/shopfloor/pay:export", body, DutyExport); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: %d", body, rec.Code)
 		}
 	}
 	fs.exportErr = httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeNothingToExport, "nothing")
-	rec = call(t, h, http.MethodPost, "/api/v1/shopfloor/pay:export", `{"from":"2026-10-01","to":"2026-10-02"}`, DutyExport)
+	rec = call(t, h, http.MethodPost, "/v1/shopfloor/pay:export", `{"from":"2026-10-01","to":"2026-10-02"}`, DutyExport)
 	if rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != store.CodeNothingToExport {
 		t.Fatalf("nothing to export: %d", rec.Code)
 	}
 	calls := fs.exportCalls
-	if rec := callWith(t, h, http.MethodPost, "/api/v1/shopfloor/pay:export", `{"from":"2026-10-01","to":"2026-10-02"}`, DutyExport, nil); rec.Code != http.StatusBadRequest || fs.exportCalls != calls {
+	if rec := callWith(t, h, http.MethodPost, "/v1/shopfloor/pay:export", `{"from":"2026-10-01","to":"2026-10-02"}`, DutyExport, nil); rec.Code != http.StatusBadRequest || fs.exportCalls != calls {
 		t.Fatalf("missing Idempotency-Key: %d", rec.Code)
 	}
-	if rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/pay:export", `{"from":"2026-10-01","to":"2026-10-02"}`, DutyApprove); rec.Code != http.StatusForbidden {
+	if rec := call(t, h, http.MethodPost, "/v1/shopfloor/pay:export", `{"from":"2026-10-01","to":"2026-10-02"}`, DutyApprove); rec.Code != http.StatusForbidden {
 		t.Fatalf("approve duty alone exported: %d", rec.Code)
 	}
-	if rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/pay-exports/"+regID, "", DutyExport); rec.Code != http.StatusNotFound || problemCode(t, rec) != store.CodeExportNotFound {
+	if rec := call(t, h, http.MethodGet, "/v1/shopfloor/pay-exports/"+regID, "", DutyExport); rec.Code != http.StatusNotFound || problemCode(t, rec) != store.CodeExportNotFound {
 		t.Fatalf("unknown batch: %d", rec.Code)
 	}
-	if rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/pay-exports", "", DutyView); rec.Code != http.StatusForbidden {
+	if rec := call(t, h, http.MethodGet, "/v1/shopfloor/pay-exports", "", DutyView); rec.Code != http.StatusForbidden {
 		t.Fatalf("export list without export duty: %d", rec.Code)
 	}
 }

@@ -12,7 +12,7 @@ import (
 
 const (
 	testBatch     = "0190a000-0000-7000-8000-000000000010"
-	batchPath     = "/api/v1/ledger/journal-batches/" + testBatch
+	batchPath     = "/v1/ledger/journal-batches/" + testBatch
 	journalDuties = dutyRead + "," + dutyJournalWrite + "," + dutyJournalApprove + "," + dutyPost + "," + dutySetupWrite
 	batchBody     = `{"ledgerId":"` + testLedger + `","journalName":"GJ","description":"Accrual","postingDate":"2026-03-31",
 		"documentDate":"2026-03-30",
@@ -72,7 +72,7 @@ func TestCheckBatchLines_TableDriven(t *testing.T) {
 func TestCreateBatch_ValidationReturns400WithEveryField(t *testing.T) {
 	fs := &fakeStore{}
 	body := `{"ledgerId":"not-a-uuid","journalName":"bad name!","postingDate":"2026-13-40","documentDate":"31/03/2026","lines":[]}`
-	rec := call(server(fs), http.MethodPost, "/api/v1/ledger/journal-batches", body, journalDuties, nil)
+	rec := call(server(fs), http.MethodPost, "/v1/ledger/journal-batches", body, journalDuties, nil)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
 	}
@@ -89,7 +89,7 @@ func TestCreateBatch_ValidationReturns400WithEveryField(t *testing.T) {
 
 func TestCreateBatch_PassesNormalisedLinesAndSetsETag(t *testing.T) {
 	fs := &fakeStore{batch: store.Batch{ID: testBatch, Status: domain.BatchDraft, Version: 1}}
-	rec := call(server(fs), http.MethodPost, "/api/v1/ledger/journal-batches", batchBody, journalDuties, nil)
+	rec := call(server(fs), http.MethodPost, "/v1/ledger/journal-batches", batchBody, journalDuties, nil)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
 	}
@@ -197,7 +197,7 @@ func TestBatchErrors_AreProblems(t *testing.T) {
 			t.Errorf("%s: status %d body %s", tt.name, rec.Code, rec.Body.String())
 		}
 	}
-	rec := call(server(&fakeStore{}), http.MethodGet, "/api/v1/ledger/journal-batches/not-a-uuid", "", journalDuties, nil)
+	rec := call(server(&fakeStore{}), http.MethodGet, "/v1/ledger/journal-batches/not-a-uuid", "", journalDuties, nil)
 	if rec.Code != http.StatusNotFound || decode(t, rec)["code"] != store.CodeBatchNotFound {
 		t.Fatalf("malformed id: status %d", rec.Code)
 	}
@@ -205,7 +205,7 @@ func TestBatchErrors_AreProblems(t *testing.T) {
 
 func TestListBatches_FiltersAndValidation(t *testing.T) {
 	fs := &fakeStore{batch: store.Batch{ID: testBatch}}
-	rec := call(server(fs), http.MethodGet, "/api/v1/ledger/journal-batches?ledger="+testLedger+"&status=in_approval&journalName=GJ",
+	rec := call(server(fs), http.MethodGet, "/v1/ledger/journal-batches?ledger="+testLedger+"&status=in_approval&journalName=GJ",
 		"", journalDuties, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
@@ -214,7 +214,7 @@ func TestListBatches_FiltersAndValidation(t *testing.T) {
 		t.Fatalf("filter %+v", f)
 	}
 	fs = &fakeStore{}
-	rec = call(server(fs), http.MethodGet, "/api/v1/ledger/journal-batches?ledger=x&status=parked", "", journalDuties, nil)
+	rec = call(server(fs), http.MethodGet, "/v1/ledger/journal-batches?ledger=x&status=parked", "", journalDuties, nil)
 	errs, _ := decode(t, rec)["errors"].(map[string]any)
 	if rec.Code != http.StatusBadRequest || errs["ledger"] == nil || errs["status"] == nil || len(fs.batchCalls) != 0 {
 		t.Fatalf("bad filter: status %d errors %v", rec.Code, errs)
@@ -223,7 +223,7 @@ func TestListBatches_FiltersAndValidation(t *testing.T) {
 
 func TestJournalNames_PutDefaultsAndValidation(t *testing.T) {
 	fs := &fakeStore{created: true}
-	rec := call(server(fs), http.MethodPut, "/api/v1/ledger/journal-names/GJ", `{"name":" General journal ","requiresApproval":true}`, journalDuties, nil)
+	rec := call(server(fs), http.MethodPut, "/v1/ledger/journal-names/GJ", `{"name":" General journal ","requiresApproval":true}`, journalDuties, nil)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
 	}
@@ -233,7 +233,7 @@ func TestJournalNames_PutDefaultsAndValidation(t *testing.T) {
 	}
 
 	fs = &fakeStore{}
-	rec = call(server(fs), http.MethodPut, "/api/v1/ledger/journal-names/G%20J",
+	rec = call(server(fs), http.MethodPut, "/v1/ledger/journal-names/G%20J",
 		`{"name":"","selfApprovalAllowed":true,"linesLimit":10001}`, journalDuties, nil)
 	errs, _ := decode(t, rec)["errors"].(map[string]any)
 	for _, field := range []string{"code", "name", "selfApprovalAllowed", "linesLimit"} {
@@ -246,10 +246,10 @@ func TestJournalNames_PutDefaultsAndValidation(t *testing.T) {
 	}
 
 	fs = &fakeStore{journalNames: []store.JournalName{{Code: "GJ", Name: "General journal"}}}
-	if rec := call(server(fs), http.MethodGet, "/api/v1/ledger/journal-names/GJ", "", journalDuties, nil); rec.Code != http.StatusOK {
+	if rec := call(server(fs), http.MethodGet, "/v1/ledger/journal-names/GJ", "", journalDuties, nil); rec.Code != http.StatusOK {
 		t.Fatalf("get: status %d", rec.Code)
 	}
-	if rec := call(server(fs), http.MethodGet, "/api/v1/ledger/journal-names/NOPE", "", journalDuties, nil); rec.Code != http.StatusNotFound {
+	if rec := call(server(fs), http.MethodGet, "/v1/ledger/journal-names/NOPE", "", journalDuties, nil); rec.Code != http.StatusNotFound {
 		t.Fatalf("get unknown: status %d", rec.Code)
 	}
 }
@@ -258,10 +258,10 @@ func TestBatchRoutes_RequireDuties(t *testing.T) {
 	routes := []struct {
 		method, path, body, duty string
 	}{
-		{http.MethodGet, "/api/v1/ledger/journal-names", "", dutyRead},
-		{http.MethodPut, "/api/v1/ledger/journal-names/GJ", `{"name":"x"}`, dutySetupWrite},
-		{http.MethodGet, "/api/v1/ledger/journal-batches", "", dutyRead},
-		{http.MethodPost, "/api/v1/ledger/journal-batches", batchBody, dutyJournalWrite},
+		{http.MethodGet, "/v1/ledger/journal-names", "", dutyRead},
+		{http.MethodPut, "/v1/ledger/journal-names/GJ", `{"name":"x"}`, dutySetupWrite},
+		{http.MethodGet, "/v1/ledger/journal-batches", "", dutyRead},
+		{http.MethodPost, "/v1/ledger/journal-batches", batchBody, dutyJournalWrite},
 		{http.MethodGet, batchPath, "", dutyRead},
 		{http.MethodPatch, batchPath, `{}`, dutyJournalWrite},
 		{http.MethodPost, batchPath + "/submit", "", dutyJournalWrite},

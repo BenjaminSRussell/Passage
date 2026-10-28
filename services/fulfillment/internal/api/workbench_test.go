@@ -76,7 +76,7 @@ const wbWarehouse = "00000000-0000-0000-0000-0000000000a1"
 func TestCancelShipment_RequiresKeyAndVersion(t *testing.T) {
 	fs := &fakeStore{}
 	h := newServer(t, fs)
-	path := "/api/v1/fulfillment/shipments/" + ids.New() + ":cancel"
+	path := "/v1/fulfillment/shipments/" + ids.New() + ":cancel"
 	if rec := do(t, h, http.MethodPost, path, "", map[string]string{"Idempotency-Key": "c-1"}); rec.Code != http.StatusPreconditionRequired {
 		t.Fatalf("no If-Match: status = %d, want 428", rec.Code)
 	}
@@ -100,7 +100,7 @@ func TestCancelShipment_RequiresKeyAndVersion(t *testing.T) {
 func TestPreviewWaves_DefaultsTotalsAndValidation(t *testing.T) {
 	fs := &fakeStore{}
 	h := newServer(t, fs)
-	path := "/api/v1/fulfillment/waves:preview"
+	path := "/v1/fulfillment/waves:preview"
 	body := `{"warehouseId":"` + wbWarehouse + `","shipFrom":"2026-10-01","shipTo":"2026-10-31","carrier":"UPS"}`
 	rec := do(t, h, http.MethodPost, path, body, nil)
 	if rec.Code != http.StatusOK {
@@ -146,10 +146,10 @@ func TestCreateWaves_RequiresKeyAndReportsFUL0016(t *testing.T) {
 	fs := &fakeStore{}
 	h := newServer(t, fs)
 	body := `{"warehouseId":"` + wbWarehouse + `","groupBy":"CARRIER","maxLines":20}`
-	if rec := do(t, h, http.MethodPost, "/api/v1/fulfillment/waves", body, nil); rec.Code != http.StatusBadRequest {
+	if rec := do(t, h, http.MethodPost, "/v1/fulfillment/waves", body, nil); rec.Code != http.StatusBadRequest {
 		t.Fatalf("no key: status = %d, want 400", rec.Code)
 	}
-	rec := do(t, h, http.MethodPost, "/api/v1/fulfillment/waves", body, map[string]string{"Idempotency-Key": "w-1"})
+	rec := do(t, h, http.MethodPost, "/v1/fulfillment/waves", body, map[string]string{"Idempotency-Key": "w-1"})
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -163,7 +163,7 @@ func TestCreateWaves_RequiresKeyAndReportsFUL0016(t *testing.T) {
 	if fs.lastIdem.Key != "w-1" || fs.workbench.waveReq.GroupBy != "CARRIER" || fs.workbench.waveReq.Limits.MaxLines != 20 {
 		t.Fatalf("idem = %+v req = %+v", fs.lastIdem, fs.workbench.waveReq)
 	}
-	if rec := do(t, h, http.MethodPost, "/api/v1/fulfillment/waves", body, map[string]string{"Idempotency-Key": "w-2", "X-Passage-Duties": "WarehouseView"}); rec.Code != http.StatusForbidden {
+	if rec := do(t, h, http.MethodPost, "/v1/fulfillment/waves", body, map[string]string{"Idempotency-Key": "w-2", "X-Passage-Duties": "WarehouseView"}); rec.Code != http.StatusForbidden {
 		t.Fatalf("view-only create: status = %d, want 403", rec.Code)
 	}
 }
@@ -171,22 +171,22 @@ func TestCreateWaves_RequiresKeyAndReportsFUL0016(t *testing.T) {
 func TestWaves_ListAndGet(t *testing.T) {
 	fs := &fakeStore{}
 	h := newServer(t, fs)
-	rec := do(t, h, http.MethodGet, "/api/v1/fulfillment/waves?warehouseId="+wbWarehouse+"&limit=10", "", nil)
+	rec := do(t, h, http.MethodGet, "/v1/fulfillment/waves?warehouseId="+wbWarehouse+"&limit=10", "", nil)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"items"`) {
 		t.Fatalf("list status = %d body = %s", rec.Code, rec.Body.String())
 	}
 	if fs.workbench.waveFilter != (store.WaveFilter{WarehouseID: wbWarehouse, Limit: 10}) {
 		t.Fatalf("filter = %+v", fs.workbench.waveFilter)
 	}
-	if rec := do(t, h, http.MethodGet, "/api/v1/fulfillment/waves?warehouseId=w1", "", nil); rec.Code != http.StatusBadRequest {
+	if rec := do(t, h, http.MethodGet, "/v1/fulfillment/waves?warehouseId=w1", "", nil); rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad warehouse: status = %d, want 400", rec.Code)
 	}
 	id := ids.New()
-	rec = do(t, h, http.MethodGet, "/api/v1/fulfillment/waves/"+id, "", nil)
+	rec = do(t, h, http.MethodGet, "/v1/fulfillment/waves/"+id, "", nil)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), id) {
 		t.Fatalf("get status = %d body = %s", rec.Code, rec.Body.String())
 	}
-	if rec := do(t, h, http.MethodGet, "/api/v1/fulfillment/waves/not-a-uuid", "", nil); rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), store.CodeWaveNotFound) {
+	if rec := do(t, h, http.MethodGet, "/v1/fulfillment/waves/not-a-uuid", "", nil); rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), store.CodeWaveNotFound) {
 		t.Fatalf("bad id: status = %d body = %s, want 404 %s", rec.Code, rec.Body.String(), store.CodeWaveNotFound)
 	}
 }
@@ -194,7 +194,7 @@ func TestWaves_ListAndGet(t *testing.T) {
 func TestTracking_RecordsOnceAndValidates(t *testing.T) {
 	fs := &fakeStore{}
 	h := newServer(t, fs)
-	path := "/api/v1/fulfillment/shipments/" + ids.New() + "/tracking"
+	path := "/v1/fulfillment/shipments/" + ids.New() + "/tracking"
 	ship := map[string]string{"X-Passage-Duties": "WarehouseShip"}
 	good := `{"provider":"easypost","eventKey":"evt_1","trackingNumber":"1Z999AA1","status":"IN_TRANSIT","description":"at hub","eventTime":"2026-10-21T12:00:00+02:00"}`
 	rec := do(t, h, http.MethodPost, path, good, ship)
@@ -230,7 +230,7 @@ func TestTracking_RecordsOnceAndValidates(t *testing.T) {
 func TestTracking_ListNeedsViewDuty(t *testing.T) {
 	fs := &fakeStore{workbench: workbenchCalls{tracked: []store.TrackingEvent{{Provider: "shippo", EventKey: "e1", Status: "DELIVERED"}}}}
 	h := newServer(t, fs)
-	path := "/api/v1/fulfillment/shipments/" + ids.New() + "/tracking"
+	path := "/v1/fulfillment/shipments/" + ids.New() + "/tracking"
 	rec := do(t, h, http.MethodGet, path, "", nil)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"eventKey":"e1"`) {
 		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
@@ -252,7 +252,7 @@ func TestContainerLabel_RendersZPLForKnownContainer(t *testing.T) {
 	}}}
 	h := newServer(t, fs)
 	sid := ids.New()
-	base := "/api/v1/fulfillment/shipments/" + sid + "/containers/"
+	base := "/v1/fulfillment/shipments/" + sid + "/containers/"
 	rec := do(t, h, http.MethodGet, base+cid+"/label", "", nil)
 	if rec.Code != http.StatusOK || !strings.HasPrefix(rec.Header().Get("Content-Type"), "application/zpl") {
 		t.Fatalf("status = %d type = %q body = %s", rec.Code, rec.Header().Get("Content-Type"), rec.Body.String())
@@ -280,7 +280,7 @@ func TestRelease_CarrierAndZonePassThroughAndValidate(t *testing.T) {
 			`","productId":"` + ids.New() + `","unit":"EA","qty":"5","confirmedShipDate":"` + today + `","atpOk":true,"carrierCode":"` + carrier + `","zone":"` + zone + `"}`
 	}
 	body := `{"warehouseId":"` + wbWarehouse + `","lines":[` + line("UPS", "A") + `,` + line("UPS", "B") + `]}`
-	rec := do(t, h, http.MethodPost, "/api/v1/fulfillment/releases:run", body, map[string]string{"Idempotency-Key": "rel-cz"})
+	rec := do(t, h, http.MethodPost, "/v1/fulfillment/releases:run", body, map[string]string{"Idempotency-Key": "rel-cz"})
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
 	}
@@ -289,12 +289,12 @@ func TestRelease_CarrierAndZonePassThroughAndValidate(t *testing.T) {
 		t.Fatalf("released lines = %+v", got)
 	}
 	mixed := `{"warehouseId":"` + wbWarehouse + `","lines":[` + line("UPS", "A") + `,` + line("DHL", "A") + `]}`
-	rec = do(t, h, http.MethodPost, "/api/v1/fulfillment/releases:run", mixed, map[string]string{"Idempotency-Key": "rel-mixed"})
+	rec = do(t, h, http.MethodPost, "/v1/fulfillment/releases:run", mixed, map[string]string{"Idempotency-Key": "rel-mixed"})
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "lines[1].carrierCode") {
 		t.Fatalf("mixed carriers: status = %d body = %s", rec.Code, rec.Body.String())
 	}
 	badZone := `{"warehouseId":"` + wbWarehouse + `","lines":[` + line("UPS", "zone a") + `]}`
-	rec = do(t, h, http.MethodPost, "/api/v1/fulfillment/releases:run", badZone, map[string]string{"Idempotency-Key": "rel-zone"})
+	rec = do(t, h, http.MethodPost, "/v1/fulfillment/releases:run", badZone, map[string]string{"Idempotency-Key": "rel-zone"})
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "lines[0].zone") {
 		t.Fatalf("bad zone: status = %d body = %s", rec.Code, rec.Body.String())
 	}
@@ -303,7 +303,7 @@ func TestRelease_CarrierAndZonePassThroughAndValidate(t *testing.T) {
 func TestListShipments_AcceptsPartiallyShipped(t *testing.T) {
 	fs := &fakeStore{}
 	h := newServer(t, fs)
-	if rec := do(t, h, http.MethodGet, "/api/v1/fulfillment/shipments?status=PARTIALLY_SHIPPED", "", nil); rec.Code != http.StatusOK || fs.shipmentFilter.Status != "PARTIALLY_SHIPPED" {
+	if rec := do(t, h, http.MethodGet, "/v1/fulfillment/shipments?status=PARTIALLY_SHIPPED", "", nil); rec.Code != http.StatusOK || fs.shipmentFilter.Status != "PARTIALLY_SHIPPED" {
 		t.Fatalf("status = %d filter = %+v", rec.Code, fs.shipmentFilter)
 	}
 }
@@ -311,7 +311,7 @@ func TestListShipments_AcceptsPartiallyShipped(t *testing.T) {
 func TestPostPackingSlip_PassesAsnFlag(t *testing.T) {
 	fs := &fakeStore{}
 	h := newServer(t, fs)
-	path := "/api/v1/fulfillment/shipments/" + ids.New() + ":post-packing-slip"
+	path := "/v1/fulfillment/shipments/" + ids.New() + ":post-packing-slip"
 	body := `{"postingDate":"2026-10-21","currency":"USD","asnEnabled":true,"costs":[{"shipmentLineId":"` + ids.New() + `","unitCost":"1","costSnapshotId":"s"}]}`
 	rec := do(t, h, http.MethodPost, path, body, map[string]string{"Idempotency-Key": "post-asn", "If-Match": `"3"`})
 	if rec.Code != http.StatusCreated || !fs.lastPost.EmitASN {

@@ -80,7 +80,7 @@ func catalogRouter(c *catalogStore) chi.Router {
 
 func TestStandardDefinitions_ListAndInstall(t *testing.T) {
 	c := &catalogStore{}
-	w := call(catalogRouter(c), http.MethodGet, "/api/v1/reporting/standard-definitions", "", nil, DutyMaintain)
+	w := call(catalogRouter(c), http.MethodGet, "/v1/reporting/standard-definitions", "", nil, DutyMaintain)
 	if w.Code != http.StatusOK {
 		t.Fatalf("list status %d: %s", w.Code, w.Body.String())
 	}
@@ -98,7 +98,7 @@ func TestStandardDefinitions_ListAndInstall(t *testing.T) {
 		}
 	}
 
-	w = call(catalogRouter(c), http.MethodPost, "/api/v1/reporting/standard-definitions:install", "", nil, DutyMaintain)
+	w = call(catalogRouter(c), http.MethodPost, "/v1/reporting/standard-definitions:install", "", nil, DutyMaintain)
 	if w.Code != http.StatusOK {
 		t.Fatalf("install status %d: %s", w.Code, w.Body.String())
 	}
@@ -109,7 +109,7 @@ func TestStandardDefinitions_ListAndInstall(t *testing.T) {
 
 func TestStandardDefinitions_InstallNeedsMaintainDuty(t *testing.T) {
 	c := &catalogStore{}
-	w := call(catalogRouter(c), http.MethodPost, "/api/v1/reporting/standard-definitions:install", "", nil, DutyView)
+	w := call(catalogRouter(c), http.MethodPost, "/v1/reporting/standard-definitions:install", "", nil, DutyView)
 	if w.Code != http.StatusForbidden || c.installed != nil {
 		t.Fatalf("status %d, installed %v; want 403 and no store call", w.Code, c.installed)
 	}
@@ -117,7 +117,7 @@ func TestStandardDefinitions_InstallNeedsMaintainDuty(t *testing.T) {
 
 func TestRetireDefinition(t *testing.T) {
 	c := &catalogStore{retireN: 2}
-	w := call(catalogRouter(c), http.MethodPost, "/api/v1/reporting/definitions/BS-STD:retire", "", nil, DutyMaintain)
+	w := call(catalogRouter(c), http.MethodPost, "/v1/reporting/definitions/BS-STD:retire", "", nil, DutyMaintain)
 	if w.Code != http.StatusOK || c.retired != "BS-STD" {
 		t.Fatalf("status %d retired %q: %s", w.Code, c.retired, w.Body.String())
 	}
@@ -130,7 +130,7 @@ func TestRetireDefinition(t *testing.T) {
 	}
 
 	c = &catalogStore{retireErr: httpx.NewProblem(http.StatusNotFound, store.CodeDefinitionNotFound, "no published version")}
-	w = call(catalogRouter(c), http.MethodPost, "/api/v1/reporting/definitions/NEW-DEF:retire", "", nil, DutyMaintain)
+	w = call(catalogRouter(c), http.MethodPost, "/v1/reporting/definitions/NEW-DEF:retire", "", nil, DutyMaintain)
 	if w.Code != http.StatusNotFound || problemCode(t, w) != store.CodeDefinitionNotFound {
 		t.Fatalf("status %d: %s", w.Code, w.Body.String())
 	}
@@ -166,7 +166,7 @@ func TestPutHierarchy(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			c := &catalogStore{}
-			w := call(catalogRouter(c), http.MethodPut, "/api/v1/reporting/hierarchies/"+tc.path, tc.body, tc.headers, DutyMaintain)
+			w := call(catalogRouter(c), http.MethodPut, "/v1/reporting/hierarchies/"+tc.path, tc.body, tc.headers, DutyMaintain)
 			if w.Code != tc.wantStatus {
 				t.Fatalf("status %d, want %d: %s", w.Code, tc.wantStatus, w.Body.String())
 			}
@@ -193,7 +193,7 @@ func TestPutHierarchy_DimensionHierarchyDefaultsToNonStrict(t *testing.T) {
 	c := &catalogStore{}
 	body := `{"name":"Cost centers","subject":"dimension_value","dimensionAttribute":"COST_CENTER",
 		"nodes":[{"code":"EMEA","label":"EMEA","rules":[{"attribute":"region","values":["EMEA"]}]}]}`
-	w := call(catalogRouter(c), http.MethodPut, "/api/v1/reporting/hierarchies/HIER-CC", body, nil, DutyMaintain)
+	w := call(catalogRouter(c), http.MethodPut, "/v1/reporting/hierarchies/HIER-CC", body, nil, DutyMaintain)
 	if w.Code != http.StatusOK || c.savedH.Strict || c.savedH.Code != "HIER-CC" {
 		t.Fatalf("status %d strict=%v code=%q: %s", w.Code, c.savedH != nil && c.savedH.Strict, c.savedH.Code, w.Body.String())
 	}
@@ -201,7 +201,7 @@ func TestPutHierarchy_DimensionHierarchyDefaultsToNonStrict(t *testing.T) {
 
 func TestPublishHierarchy(t *testing.T) {
 	c := &catalogStore{}
-	w := call(catalogRouter(c), http.MethodPost, "/api/v1/reporting/hierarchies/HIER-BS:publish",
+	w := call(catalogRouter(c), http.MethodPost, "/v1/reporting/hierarchies/HIER-BS:publish",
 		`{"members":[{"id":"a1","key":"1000"},{"id":"a2","key":"1050","attributes":{"type":"bank"}}]}`, nil, DutyMaintain)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", w.Code, w.Body.String())
@@ -219,7 +219,7 @@ func TestPublishHierarchy(t *testing.T) {
 		"unknown body field": {"HIER-BS:publish", `{"accounts":[]}`, http.StatusBadRequest},
 	} {
 		c := &catalogStore{}
-		w := call(catalogRouter(c), http.MethodPost, "/api/v1/reporting/hierarchies/"+tc.path, tc.body, nil, DutyMaintain)
+		w := call(catalogRouter(c), http.MethodPost, "/v1/reporting/hierarchies/"+tc.path, tc.body, nil, DutyMaintain)
 		if w.Code != tc.status || c.pubCode != "" {
 			t.Errorf("%s: status %d, store called with %q; want %d and no call", name, w.Code, c.pubCode, tc.status)
 		}
@@ -228,7 +228,7 @@ func TestPublishHierarchy(t *testing.T) {
 
 func TestHierarchyMembers(t *testing.T) {
 	c := &catalogStore{}
-	w := call(catalogRouter(c), http.MethodGet, "/api/v1/reporting/hierarchies/HIER-BS/members?version=3", "", nil, DutyMaintain)
+	w := call(catalogRouter(c), http.MethodGet, "/v1/reporting/hierarchies/HIER-BS/members?version=3", "", nil, DutyMaintain)
 	if w.Code != http.StatusOK || c.memVersion != 3 {
 		t.Fatalf("status %d version %d: %s", w.Code, c.memVersion, w.Body.String())
 	}
@@ -241,7 +241,7 @@ func TestHierarchyMembers(t *testing.T) {
 		t.Fatalf("body %s (err %v)", w.Body.String(), err)
 	}
 	for _, q := range []string{"draft", "0", "x"} {
-		w := call(catalogRouter(&catalogStore{}), http.MethodGet, "/api/v1/reporting/hierarchies/HIER-BS/members?version="+q, "", nil, DutyMaintain)
+		w := call(catalogRouter(&catalogStore{}), http.MethodGet, "/v1/reporting/hierarchies/HIER-BS/members?version="+q, "", nil, DutyMaintain)
 		if w.Code != http.StatusBadRequest {
 			t.Errorf("version=%s: status %d, want 400", q, w.Code)
 		}
@@ -250,11 +250,11 @@ func TestHierarchyMembers(t *testing.T) {
 
 func TestGetHierarchy_DraftCarriesETag(t *testing.T) {
 	c := &catalogStore{}
-	w := call(catalogRouter(c), http.MethodGet, "/api/v1/reporting/hierarchies/HIER-BS?version=draft", "", nil, DutyMaintain)
+	w := call(catalogRouter(c), http.MethodGet, "/v1/reporting/hierarchies/HIER-BS?version=draft", "", nil, DutyMaintain)
 	if w.Code != http.StatusOK || w.Header().Get("ETag") != `"3"` || c.memVersion != store.Draft {
 		t.Fatalf("status %d etag %q version %d", w.Code, w.Header().Get("ETag"), c.memVersion)
 	}
-	w = call(catalogRouter(c), http.MethodGet, "/api/v1/reporting/hierarchies", "", nil, DutyView)
+	w = call(catalogRouter(c), http.MethodGet, "/v1/reporting/hierarchies", "", nil, DutyView)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("hierarchy list with the view duty only: status %d, want 403", w.Code)
 	}

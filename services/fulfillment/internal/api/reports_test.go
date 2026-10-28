@@ -74,7 +74,7 @@ func TestListBackorders_RemainderAndOpen(t *testing.T) {
 	cancelled := backorderRow(domain.StatusCancelled, "5", "2")
 	fs := &fakeStore{reports: reportCalls{backorders: []store.BackorderRow{short, cancelled}}}
 	wh := ids.New()
-	rec := do(t, newServer(t, fs), http.MethodGet, "/api/v1/fulfillment/backorders?warehouseId="+wh+"&from=2026-10-01&to=2026-10-31&status=all", "", nil)
+	rec := do(t, newServer(t, fs), http.MethodGet, "/v1/fulfillment/backorders?warehouseId="+wh+"&from=2026-10-01&to=2026-10-31&status=all", "", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
 	}
@@ -101,7 +101,7 @@ func TestListBackorders_DefaultsToOpenAndPagesByCursor(t *testing.T) {
 	rows := []store.BackorderRow{backorderRow(domain.StatusPicked, "4", "1"), backorderRow(domain.StatusPicked, "4", "2"), backorderRow(domain.StatusPicked, "4", "3")}
 	fs := &fakeStore{reports: reportCalls{backorders: rows}}
 	h := newServer(t, fs)
-	rec := do(t, h, http.MethodGet, "/api/v1/fulfillment/backorders?limit=2", "", nil)
+	rec := do(t, h, http.MethodGet, "/v1/fulfillment/backorders?limit=2", "", nil)
 	var page backorderBody
 	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil || rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
@@ -112,7 +112,7 @@ func TestListBackorders_DefaultsToOpenAndPagesByCursor(t *testing.T) {
 	if len(page.Items) != 2 || page.NextCursor != rows[1].ShipmentLineID {
 		t.Fatalf("first page = %+v, want 2 rows and the second line as cursor", page)
 	}
-	rec = do(t, h, http.MethodGet, "/api/v1/fulfillment/backorders?limit=2&cursor="+page.NextCursor, "", nil)
+	rec = do(t, h, http.MethodGet, "/v1/fulfillment/backorders?limit=2&cursor="+page.NextCursor, "", nil)
 	page = backorderBody{}
 	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
 		t.Fatal(err)
@@ -134,7 +134,7 @@ func TestListBackorders_RejectsBadParameters(t *testing.T) {
 	}
 	for query, field := range cases {
 		fs := &fakeStore{}
-		rec := do(t, newServer(t, fs), http.MethodGet, "/api/v1/fulfillment/backorders?"+query, "", nil)
+		rec := do(t, newServer(t, fs), http.MethodGet, "/v1/fulfillment/backorders?"+query, "", nil)
 		expectField(t, rec, rec.Body.String(), field)
 	}
 }
@@ -179,7 +179,7 @@ func TestReturnableAging_AgesFirstInFirstOutAndFlagsCharges(t *testing.T) {
 			Shipped: []domain.RTPShipped{shipped("2026-10-11", 4)}},
 	}}}
 	h := agingServer(t, fs, time.Date(2026, 10, 21, 15, 0, 0, 0, time.UTC))
-	rec := do(t, h, http.MethodGet, "/api/v1/fulfillment/returnable-packaging/aging?customerId="+c1, "", nil)
+	rec := do(t, h, http.MethodGet, "/v1/fulfillment/returnable-packaging/aging?customerId="+c1, "", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
 	}
@@ -201,7 +201,7 @@ func TestReturnableAging_AgesFirstInFirstOutAndFlagsCharges(t *testing.T) {
 		t.Fatalf("second = %+v, want 10 days and not due", second)
 	}
 
-	rec = do(t, h, http.MethodGet, "/api/v1/fulfillment/returnable-packaging/aging?chargeDays=365", "", nil)
+	rec = do(t, h, http.MethodGet, "/v1/fulfillment/returnable-packaging/aging?chargeDays=365", "", nil)
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +209,7 @@ func TestReturnableAging_AgesFirstInFirstOutAndFlagsCharges(t *testing.T) {
 		t.Fatalf("with 365 days nothing is due: %+v", out)
 	}
 
-	rec = do(t, h, http.MethodGet, "/api/v1/fulfillment/returnable-packaging/aging?chargeDue=true&limit=1", "", nil)
+	rec = do(t, h, http.MethodGet, "/v1/fulfillment/returnable-packaging/aging?chargeDue=true&limit=1", "", nil)
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatal(err)
 	}
@@ -228,13 +228,13 @@ func TestReturnableAging_RejectsBadParameters(t *testing.T) {
 		"limit=501":       "limit",
 	}
 	for query, field := range cases {
-		rec := do(t, newServer(t, &fakeStore{}), http.MethodGet, "/api/v1/fulfillment/returnable-packaging/aging?"+query, "", nil)
+		rec := do(t, newServer(t, &fakeStore{}), http.MethodGet, "/v1/fulfillment/returnable-packaging/aging?"+query, "", nil)
 		expectField(t, rec, rec.Body.String(), field)
 	}
 }
 
 func TestReports_RequireWarehouseView(t *testing.T) {
-	for _, path := range []string{"/api/v1/fulfillment/backorders", "/api/v1/fulfillment/returnable-packaging/aging"} {
+	for _, path := range []string{"/v1/fulfillment/backorders", "/v1/fulfillment/returnable-packaging/aging"} {
 		rec := do(t, newServer(t, &fakeStore{}), http.MethodGet, path, "", map[string]string{"X-Passage-Duties": "WarehousePick"})
 		if rec.Code != http.StatusForbidden {
 			t.Fatalf("%s: status = %d body = %s, want 403", path, rec.Code, rec.Body.String())

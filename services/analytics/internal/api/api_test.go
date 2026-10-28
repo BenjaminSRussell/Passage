@@ -42,10 +42,10 @@ func withLE(le string) map[string]string {
 
 func TestListMetrics_RequiresDutyAndReturnsPublishedCatalog(t *testing.T) {
 	h := newTestServer()
-	if rec := do(t, h, http.MethodGet, "/api/v1/analytics/metrics", "", nil); rec.Code != http.StatusForbidden {
+	if rec := do(t, h, http.MethodGet, "/v1/analytics/metrics", "", nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("without duty: status %d, want 403", rec.Code)
 	}
-	rec := do(t, h, http.MethodGet, "/api/v1/analytics/metrics", "", map[string]string{tenant.HeaderDuties: DutyView})
+	rec := do(t, h, http.MethodGet, "/v1/analytics/metrics", "", map[string]string{tenant.HeaderDuties: DutyView})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -67,7 +67,7 @@ func TestListMetrics_RequiresDutyAndReturnsPublishedCatalog(t *testing.T) {
 func TestQuery_MirrorsLegalEntityScopeIntoPlan(t *testing.T) {
 	h := newTestServer()
 	body := `{"measures":["revenue"],"dimensions":["account_code"],"from":"2026-01-01","to":"2026-03-31"}`
-	rec := do(t, h, http.MethodPost, "/api/v1/analytics/query", body, withLE("USMF"))
+	rec := do(t, h, http.MethodPost, "/v1/analytics/query", body, withLE("USMF"))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -87,7 +87,7 @@ func TestQuery_MirrorsLegalEntityScopeIntoPlan(t *testing.T) {
 func TestQuery_NoHeaderMeansWholeTenant(t *testing.T) {
 	h := newTestServer()
 	body := `{"measures":["revenue"],"from":"2026-01-01","to":"2026-01-31"}`
-	rec := do(t, h, http.MethodPost, "/api/v1/analytics/query", body, withLE(""))
+	rec := do(t, h, http.MethodPost, "/v1/analytics/query", body, withLE(""))
 	var got QueryResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusOK {
 		t.Fatalf("status %d err %v", rec.Code, err)
@@ -121,7 +121,7 @@ func TestQuery_Problems(t *testing.T) {
 	h := newTestServer()
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rec := do(t, h, http.MethodPost, "/api/v1/analytics/query", tc.body, withLE("USMF"))
+			rec := do(t, h, http.MethodPost, "/v1/analytics/query", tc.body, withLE("USMF"))
 			if rec.Code != tc.status {
 				t.Fatalf("status %d, want %d: %s", rec.Code, tc.status, rec.Body.String())
 			}
@@ -140,7 +140,7 @@ func TestQuery_Problems(t *testing.T) {
 
 func TestQuery_RequiresTenant(t *testing.T) {
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/analytics/query", bytes.NewBufferString("{}"))
+	req := httptest.NewRequest(http.MethodPost, "/v1/analytics/query", bytes.NewBufferString("{}"))
 	newTestServer().ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status %d, want 401", rec.Code)
@@ -150,11 +150,11 @@ func TestQuery_RequiresTenant(t *testing.T) {
 func TestReconciliation_RejectsBadDateBeforeStore(t *testing.T) {
 	h := newTestServer()
 	headers := map[string]string{tenant.HeaderDuties: DutyFinance}
-	rec := do(t, h, http.MethodGet, "/api/v1/analytics/reconciliation?date=yesterday", "", headers)
+	rec := do(t, h, http.MethodGet, "/v1/analytics/reconciliation?date=yesterday", "", headers)
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), domain.CodeValidation) {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 	}
-	if rec := do(t, h, http.MethodGet, "/api/v1/analytics/reconciliation?date=2026-01-31", "", viewer); rec.Code != http.StatusForbidden {
+	if rec := do(t, h, http.MethodGet, "/v1/analytics/reconciliation?date=2026-01-31", "", viewer); rec.Code != http.StatusForbidden {
 		t.Fatalf("without FinanceView: status %d, want 403", rec.Code)
 	}
 }

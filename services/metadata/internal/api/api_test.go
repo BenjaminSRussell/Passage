@@ -88,7 +88,7 @@ func TestExtensionAppearsInEffectiveSchemaAndGeneratedAPIWithoutRestart(t *testi
 		t.Fatalf("extension status=%d body=%s", res.StatusCode, data)
 	}
 
-	res = request(t, srv.Client(), http.MethodGet, srv.URL+"/api/v1/metadata/entities/Vendor/schema", "", "metadata.read")
+	res = request(t, srv.Client(), http.MethodGet, srv.URL+"/v1/metadata/entities/Vendor/schema", "", "metadata.read")
 	schema := body(t, res)
 	if res.StatusCode != http.StatusOK || !bytes.Contains(schema, []byte(`"accountManager"`)) || !bytes.Contains(schema, []byte(`"preferred"`)) {
 		t.Fatalf("effective schema status=%d body=%s", res.StatusCode, schema)

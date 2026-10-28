@@ -93,7 +93,7 @@ func TestBadgeLogin_ResolvesWorkerOrRefuses(t *testing.T) {
 	r := httpx.NewRouter()
 	a.Register(r)
 
-	rec := call(t, r, http.MethodPost, "/api/v1/shopfloor/sessions:badge", `{"badgeId":" B-7 "}`, kioskDuty)
+	rec := call(t, r, http.MethodPost, "/v1/shopfloor/sessions:badge", `{"badgeId":" B-7 "}`, kioskDuty)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -115,7 +115,7 @@ func TestBadgeLogin_ResolvesWorkerOrRefuses(t *testing.T) {
 		t.Fatalf("session %+v", out)
 	}
 
-	rec = call(t, r, http.MethodPost, "/api/v1/shopfloor/sessions:badge", `{"badgeId":"NOPE"}`, kioskDuty)
+	rec = call(t, r, http.MethodPost, "/v1/shopfloor/sessions:badge", `{"badgeId":"NOPE"}`, kioskDuty)
 	if rec.Code != http.StatusUnprocessableEntity || problemCode(t, rec) != store.CodeBadgeUnknown {
 		t.Fatalf("unknown badge: %d %s", rec.Code, rec.Body.String())
 	}
@@ -123,16 +123,16 @@ func TestBadgeLogin_ResolvesWorkerOrRefuses(t *testing.T) {
 		t.Fatalf("metrics after a refused badge:\n%s", m)
 	}
 	for _, body := range []string{`{"badgeId":""}`, `{"badgeId":"   "}`, `{"badgeId":"` + strings.Repeat("x", 65) + `"}`, `{}`} {
-		if rec := call(t, r, http.MethodPost, "/api/v1/shopfloor/sessions:badge", body, kioskDuty); rec.Code != http.StatusBadRequest {
+		if rec := call(t, r, http.MethodPost, "/v1/shopfloor/sessions:badge", body, kioskDuty); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: status %d", body, rec.Code)
 		}
 	}
-	if rec := call(t, r, http.MethodPost, "/api/v1/shopfloor/sessions:badge", `{"badgeId":"B-7"}`, DutyView); rec.Code != http.StatusForbidden {
+	if rec := call(t, r, http.MethodPost, "/v1/shopfloor/sessions:badge", `{"badgeId":"B-7"}`, DutyView); rec.Code != http.StatusForbidden {
 		t.Fatalf("without the kiosk login duty: %d", rec.Code)
 	}
 
 	fs.badgeErr = errors.New("connection reset")
-	rec = call(t, r, http.MethodPost, "/api/v1/shopfloor/sessions:badge", `{"badgeId":"B-7"}`, kioskDuty)
+	rec = call(t, r, http.MethodPost, "/v1/shopfloor/sessions:badge", `{"badgeId":"B-7"}`, kioskDuty)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("store failure: %d %s", rec.Code, rec.Body.String())
 	}
@@ -149,7 +149,7 @@ func TestClockedIn_ListsWorkersAndJobs(t *testing.T) {
 	fs.clocked = []store.ClockedWorker{{WorkerID: workerID, Name: "Ana Silva", Active: true, ClockedInAt: at,
 		Jobs: []store.CurrentJob{{JobID: jobID, StartedAt: at.Add(30 * time.Minute)}}}}
 	h := newRouter(fs)
-	rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/clocked-in?limit=20", "", DutyView)
+	rec := call(t, h, http.MethodGet, "/v1/shopfloor/clocked-in?limit=20", "", DutyView)
 	if rec.Code != http.StatusOK || fs.clockLimit != 20 {
 		t.Fatalf("status %d limit %d: %s", rec.Code, fs.clockLimit, rec.Body.String())
 	}
@@ -160,14 +160,14 @@ func TestClockedIn_ListsWorkersAndJobs(t *testing.T) {
 	if len(out.Items) != 1 || out.Items[0].Name != "Ana Silva" || len(out.Items[0].Jobs) != 1 || out.Items[0].Jobs[0].JobID != jobID {
 		t.Fatalf("items %+v", out.Items)
 	}
-	empty := call(t, newRouter(&fakeStore{}), http.MethodGet, "/api/v1/shopfloor/clocked-in", "", DutyView)
+	empty := call(t, newRouter(&fakeStore{}), http.MethodGet, "/v1/shopfloor/clocked-in", "", DutyView)
 	if empty.Code != http.StatusOK || !strings.Contains(empty.Body.String(), `"items":[]`) {
 		t.Fatalf("empty board: %d %s", empty.Code, empty.Body.String())
 	}
-	if rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/clocked-in?limit=0", "", DutyView); rec.Code != http.StatusBadRequest {
+	if rec := call(t, h, http.MethodGet, "/v1/shopfloor/clocked-in?limit=0", "", DutyView); rec.Code != http.StatusBadRequest {
 		t.Fatalf("limit 0: %d", rec.Code)
 	}
-	if rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/clocked-in", "", DutyRegister); rec.Code != http.StatusForbidden {
+	if rec := call(t, h, http.MethodGet, "/v1/shopfloor/clocked-in", "", DutyRegister); rec.Code != http.StatusForbidden {
 		t.Fatalf("without the view duty: %d", rec.Code)
 	}
 }
@@ -178,19 +178,19 @@ func TestMachines_IdleThresholdDefaultAndBounds(t *testing.T) {
 	fs := newFloorFake()
 	h := newRouter(fs)
 	base := `"machineId":"M-102","resourceId":"` + resourceID + `","idealCycleSeconds":"60"`
-	if rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/machines", "{"+base+"}", floorDuty); rec.Code != http.StatusCreated {
+	if rec := call(t, h, http.MethodPost, "/v1/shopfloor/machines", "{"+base+"}", floorDuty); rec.Code != http.StatusCreated {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
 	if fs.machines[0].IdleThresholdSeconds != 300 {
 		t.Fatalf("default idle threshold %d", fs.machines[0].IdleThresholdSeconds)
 	}
 	for _, v := range []string{"29", "3601", "-1", "0"} {
-		rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/machines", "{"+base+`,"idleThresholdSeconds":`+v+"}", floorDuty)
+		rec := call(t, h, http.MethodPost, "/v1/shopfloor/machines", "{"+base+`,"idleThresholdSeconds":`+v+"}", floorDuty)
 		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "idleThresholdSeconds") {
 			t.Errorf("idle %s: %d %s", v, rec.Code, rec.Body.String())
 		}
 	}
-	if rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/machines", "{"+base+`,"idleThresholdSeconds":3600}`, floorDuty); rec.Code != http.StatusCreated {
+	if rec := call(t, h, http.MethodPost, "/v1/shopfloor/machines", "{"+base+`,"idleThresholdSeconds":3600}`, floorDuty); rec.Code != http.StatusCreated {
 		t.Fatalf("idle 3600: %d", rec.Code)
 	}
 	if got := fs.machines[len(fs.machines)-1].IdleThresholdSeconds; got != 3600 {
@@ -213,7 +213,7 @@ func TestOEE_WindowIntoTheFutureStopsAtNow(t *testing.T) {
 		},
 	}}
 	h := newRouterAt(fs, func() time.Time { return t0.Add(20 * time.Minute) })
-	rec := call(t, h, http.MethodGet, "/api/v1/shopfloor/oee?resourceIds="+resourceID+"&from=2026-10-21T08:00:00Z&to=2026-10-21T09:00:00Z&bucket=15m", "", DutyView)
+	rec := call(t, h, http.MethodGet, "/v1/shopfloor/oee?resourceIds="+resourceID+"&from=2026-10-21T08:00:00Z&to=2026-10-21T09:00:00Z&bucket=15m", "", DutyView)
 	var out itemsResponse[oeeItem]
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
 	if rec.Code != http.StatusOK || len(out.Items) != 2 {
@@ -247,7 +247,7 @@ func TestRollupOEE_ComputesAndStoresBuckets(t *testing.T) {
 	a.Register(h)
 
 	body := `{"resourceIds":["` + resourceID + `","` + resourceID + `"],"from":"2026-10-21T08:00:00Z","to":"2026-10-21T09:00:00Z","bucket":"15m"}`
-	rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/oee:rollup", body, rollupDuty)
+	rec := call(t, h, http.MethodPost, "/v1/shopfloor/oee:rollup", body, rollupDuty)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -269,7 +269,7 @@ func TestRollupOEE_ComputesAndStoresBuckets(t *testing.T) {
 	}
 
 	// Without resourceIds the registered machines are rolled up.
-	rec = call(t, h, http.MethodPost, "/api/v1/shopfloor/oee:rollup", `{"from":"2026-10-21T08:00:00Z","to":"2026-10-21T08:15:00Z"}`, rollupDuty)
+	rec = call(t, h, http.MethodPost, "/v1/shopfloor/oee:rollup", `{"from":"2026-10-21T08:00:00Z","to":"2026-10-21T08:15:00Z"}`, rollupDuty)
 	if rec.Code != http.StatusOK || len(fs.rollups) != 2 || len(fs.rollups[1].ResourceIDs) != 1 || fs.rollups[1].ResourceIDs[0] != resourceID {
 		t.Fatalf("all machines: %d %+v", rec.Code, fs.rollups)
 	}
@@ -284,14 +284,14 @@ func TestRollupOEE_ComputesAndStoresBuckets(t *testing.T) {
 		"malformed resource":            `{"resourceIds":["x"],"from":"2026-10-21T08:00:00Z","to":"2026-10-21T08:15:00Z"}`,
 		"malformed time":                `{"from":"today","to":"2026-10-21T08:15:00Z"}`,
 	} {
-		if rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/oee:rollup", bad, rollupDuty); rec.Code != http.StatusBadRequest {
+		if rec := call(t, h, http.MethodPost, "/v1/shopfloor/oee:rollup", bad, rollupDuty); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: status %d", name, rec.Code)
 		}
 	}
 	if len(fs.rollups) != 2 {
 		t.Fatalf("an invalid window reached the store: %d rollups", len(fs.rollups))
 	}
-	if rec := call(t, h, http.MethodPost, "/api/v1/shopfloor/oee:rollup", body, DutyView); rec.Code != http.StatusForbidden {
+	if rec := call(t, h, http.MethodPost, "/v1/shopfloor/oee:rollup", body, DutyView); rec.Code != http.StatusForbidden {
 		t.Fatalf("without the rollup duty: %d", rec.Code)
 	}
 }

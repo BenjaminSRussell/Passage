@@ -26,7 +26,7 @@ servers:
       env:
         default: dev
 paths:
-  /api/v1/shopfloor/workers:
+  /v1/shopfloor/workers:
     post:
       operationId: createWorker
       summary: Register a worker (shop floor projection of an employee)
@@ -86,7 +86,7 @@ paths:
           $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
-  /api/v1/shopfloor/workers/{id}:
+  /v1/shopfloor/workers/{id}:
     get:
       operationId: getWorker
       summary: Get one worker
@@ -111,7 +111,7 @@ paths:
           $ref: "#/components/responses/Problem"
         "404":
           $ref: "#/components/responses/Problem"
-  /api/v1/shopfloor/registrations:
+  /v1/shopfloor/registrations:
     get:
       operationId: listRegistrations
       summary: A worker's registrations in a date range, or every registration of a bundle
@@ -225,7 +225,7 @@ paths:
           $ref: "#/components/responses/Problem"
         "500":
           $ref: "#/components/responses/Problem"
-  /api/v1/shopfloor/pay:calculate:
+  /v1/shopfloor/pay:calculate:
     post:
       operationId: calculatePay
       summary: Calculate pay lines for a worker over a date range
@@ -263,7 +263,7 @@ paths:
           $ref: "#/components/responses/Problem"
         "500":
           $ref: "#/components/responses/Problem"
-  /api/v1/shopfloor/pay:approve:
+  /v1/shopfloor/pay:approve:
     post:
       operationId: approvePay
       summary: Approve calculated worker-days
@@ -301,7 +301,7 @@ paths:
           $ref: "#/components/responses/Problem"
         "500":
           $ref: "#/components/responses/Problem"
-  /api/v1/shopfloor/worker-days:
+  /v1/shopfloor/worker-days:
     get:
       operationId: listWorkerDays
       summary: Calculated and approved worker-days with pay lines (approval list)
@@ -340,7 +340,7 @@ paths:
           $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
-  /api/v1/shopfloor/machines:
+  /v1/shopfloor/machines:
     post:
       operationId: registerMachine
       summary: Map an edge machine code to a resource with its ideal cycle time
@@ -396,7 +396,7 @@ paths:
           $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
-  /api/v1/shopfloor/machine-events:
+  /v1/shopfloor/machine-events:
     post:
       operationId: ingestMachineEvents
       summary: Ingest a batch of edge machine events (BR-25.4)
@@ -431,7 +431,7 @@ paths:
           $ref: "#/components/responses/Problem"
         "422":
           $ref: "#/components/responses/Problem"
-  /api/v1/shopfloor/downtimes:
+  /v1/shopfloor/downtimes:
     get:
       operationId: listDowntimes
       summary: Machine downtimes, newest first
@@ -467,7 +467,7 @@ paths:
           $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
-  /api/v1/shopfloor/downtimes/{id}:code:
+  /v1/shopfloor/downtimes/{id}:code:
     post:
       operationId: codeDowntime
       summary: Assign a downtime reason code (FR-25.11)
@@ -506,7 +506,7 @@ paths:
           $ref: "#/components/responses/Problem"
         "422":
           $ref: "#/components/responses/Problem"
-  /api/v1/shopfloor/andon:
+  /v1/shopfloor/andon:
     get:
       operationId: listAndon
       summary: Open andon alerts, oldest first (BR-25.10)
@@ -536,7 +536,7 @@ paths:
           $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
-  /api/v1/shopfloor/oee:
+  /v1/shopfloor/oee:
     get:
       operationId: getOee
       summary: OEE series per resource and bucket (FR-25.10, BR-25.5)
@@ -594,7 +594,7 @@ paths:
           $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
-  /api/v1/shopfloor/oee:rollup:
+  /v1/shopfloor/oee:rollup:
     post:
       operationId: rollupOee
       summary: OEE rollup job - store the buckets of a window (FR-25.10)
@@ -628,7 +628,7 @@ paths:
           $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
-  /api/v1/shopfloor/sessions:badge:
+  /v1/shopfloor/sessions:badge:
     post:
       operationId: badgeLogin
       summary: Kiosk login by badge scan (FR-25.1)
@@ -660,7 +660,7 @@ paths:
           $ref: "#/components/responses/Problem"
         "422":
           $ref: "#/components/responses/Problem"
-  /api/v1/shopfloor/clocked-in:
+  /v1/shopfloor/clocked-in:
     get:
       operationId: listClockedIn
       summary: Who is clocked in (PRD 4.25.14, FR-25.14 supervisor view)
@@ -689,7 +689,7 @@ paths:
           $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
-  /api/v1/shopfloor/pay:export:
+  /v1/shopfloor/pay:export:
     post:
       operationId: exportPay
       summary: Export approved pay lines to payroll as one batch (FR-25.8)
@@ -724,7 +724,7 @@ paths:
           $ref: "#/components/responses/Problem"
         "422":
           $ref: "#/components/responses/Problem"
-  /api/v1/shopfloor/pay-exports:
+  /v1/shopfloor/pay-exports:
     get:
       operationId: listPayExports
       summary: Payroll export batches, newest first (without CSV)
@@ -750,7 +750,7 @@ paths:
           $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
-  /api/v1/shopfloor/pay-exports/{id}:
+  /v1/shopfloor/pay-exports/{id}:
     get:
       operationId: getPayExport
       summary: One payroll export batch with its CSV
@@ -775,7 +775,7 @@ paths:
           $ref: "#/components/responses/Problem"
         "404":
           $ref: "#/components/responses/Problem"
-  /api/v1/shopfloor/process-messages:
+  /v1/shopfloor/process-messages:
     post:
       operationId: createProcessMessage
       summary: Record a process message (FR-25.17, BR-25.13)
@@ -875,7 +875,7 @@ paths:
           $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
-  /api/v1/shopfloor/process-messages/{id}:
+  /v1/shopfloor/process-messages/{id}:
     get:
       operationId: getProcessMessage
       summary: One process message with its deliveries
@@ -901,7 +901,7 @@ paths:
           $ref: "#/components/responses/Problem"
         "404":
           $ref: "#/components/responses/Problem"
-  /api/v1/shopfloor/process-messages/{id}/deliveries/{destination}:report:
+  /v1/shopfloor/process-messages/{id}/deliveries/{destination}:report:
     post:
       operationId: reportProcessMessageDelivery
       summary: Report a destination outcome (consuming context)
@@ -952,7 +952,7 @@ paths:
           $ref: "#/components/responses/Problem"
         "422":
           $ref: "#/components/responses/Problem"
-  /api/v1/shopfloor/process-messages/{id}:reprocess:
+  /v1/shopfloor/process-messages/{id}:reprocess:
     post:
       operationId: reprocessProcessMessage
       summary: Send a destination in error again, with a reason
@@ -991,7 +991,7 @@ paths:
           $ref: "#/components/responses/Problem"
         "422":
           $ref: "#/components/responses/Problem"
-  /api/v1/shopfloor/process-messages/{id}:delete:
+  /v1/shopfloor/process-messages/{id}:delete:
     post:
       operationId: deleteProcessMessage
       summary: Delete a message with a destination in error, with a reason
@@ -1038,7 +1038,7 @@ paths:
           $ref: "#/components/responses/Problem"
         "422":
           $ref: "#/components/responses/Problem"
-  /api/v1/shopfloor/process-messages:retry-due:
+  /v1/shopfloor/process-messages:retry-due:
     post:
       operationId: retryDueProcessMessages
       summary: Retry sweep - publish again the destinations whose wait elapsed
@@ -1082,7 +1082,7 @@ paths:
           $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
-  /api/v1/shopfloor/jobs:
+  /v1/shopfloor/jobs:
     post:
       operationId: upsertJob
       summary: Write a job's plan into the dispatch projection (FR-25.3, w23 schedule)
@@ -1157,7 +1157,7 @@ paths:
           $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
-  /api/v1/shopfloor/jobs/{id}:
+  /v1/shopfloor/jobs/{id}:
     get:
       operationId: getJob
       summary: Job detail with its quality check results (kiosk job detail)
@@ -1184,7 +1184,7 @@ paths:
           $ref: "#/components/responses/Problem"
         "404":
           $ref: "#/components/responses/Problem"
-  /api/v1/shopfloor/jobs/{id}:feedback:
+  /v1/shopfloor/jobs/{id}:feedback:
     post:
       operationId: recordJobFeedback
       summary: Report good and scrap quantities, check values and finished (FR-25.4, FR-25.5)
