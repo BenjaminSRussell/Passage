@@ -71,7 +71,9 @@ export function RateEntryPage() {
 
   function change(next: Partial<RateEntry>) {
     setValues({ ...values, ...next });
-    setErrors(withoutFields(errors, Object.keys(next)));
+    const changedFields = Object.keys(next);
+    if ("from" in next) changedFields.push("to");
+    setErrors(withoutFields(errors, changedFields));
     setSaved(null);
     setReview(null);
     idempotencyKey.current = null;

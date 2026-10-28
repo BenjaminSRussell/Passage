@@ -337,6 +337,9 @@ describe("rate entry page", () => {
     await user.click(screen.getByRole("button", { name: "Save rate" }));
     expect(await screen.findByText("Choose a different currency from the first one.")).toBeInTheDocument();
     expect(screen.getByText("Use at most 10 decimal places.")).toBeInTheDocument();
+    await user.clear(screen.getByLabelText("From currency"));
+    await user.type(screen.getByLabelText("From currency"), "GBP");
+    expect(screen.queryByText("Choose a different currency from the first one.")).not.toBeInTheDocument();
     await user.clear(screen.getByLabelText("Rate"));
     await user.type(screen.getByLabelText("Rate"), "12345678901");
     await user.click(screen.getByRole("button", { name: "Save rate" }));
