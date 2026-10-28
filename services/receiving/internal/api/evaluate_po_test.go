@@ -178,3 +178,52 @@ func TestEvaluatePoReferenceValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestEvaluatePoValidationPrecedesLookup(t *testing.T) {
+	lookups := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		lookups++
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(purchasingOrder))
+	}))
+	defer srv.Close()
+	a := api.New(memstore.New(), api.Ports{
+		Periods: domain.FakePeriods{Status: domain.PeriodOpen}, Ledger: &domain.FakeLedger{},
+		PurchaseOrders: purchasing.New(srv.URL, nil),
+	})
+	r := httpx.NewRouter()
+	a.Register(r)
+	body := strings.Replace(poBody(`"poLineNo":1`), `"qty":10`, `"qty":-10`, 1)
+	rec := do(r, http.MethodPost, evaluatePath, body, "MatchingPolicyMaintain", true)
+	if rec.Code != http.StatusBadRequest || lookups != 0 {
+		t.Fatalf("got status %d after %d purchase order lookups: %s", rec.Code, lookups, rec.Body)
+	}
+}
+
+func TestEvaluateRejectsDuplicateAndOverriddenPOLines(t *testing.T) {
+	po := domain.PurchaseOrder{ApprovalStatus: "CONFIRMED", DocumentStatus: "NONE", Currency: "USD", Lines: []domain.PurchaseOrderLine{{LineNo: 1, UnitPrice: decimal.RequireFromString("2.5"), PriceUnit: decimal.NewFromInt(1), Qty: decimal.NewFromInt(10), Status: "OPEN"}}}
+	a := api.New(memstore.New(), api.Ports{
+		Periods: domain.FakePeriods{Status: domain.PeriodOpen}, Ledger: &domain.FakeLedger{},
+		PurchaseOrders: domain.FakePurchaseOrders{Orders: map[string]domain.PurchaseOrder{evalPOID: po}},
+	})
+	r := httpx.NewRouter()
+	a.Register(r)
+	tests := []struct{ name, line, field string }{
+		{"duplicate PO line", `{"qty":1,"unitPrice":2.5,"poLineNo":1}`, "lines[1].poLineNo"},
+		{"overridden PO unit price", `{"qty":1,"unitPrice":2.5,"poLineNo":1,"poUnitPrice":99}`, "lines[0].poUnitPrice"},
+		{"overridden remaining quantity", `{"qty":1,"unitPrice":2.5,"poLineNo":1,"poQtyRemaining":99}`, "lines[0].poQtyRemaining"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			body := `{"purchaseOrderId":"` + evalPOID + `","currency":"USD","headerTotal":2.5,"lines":[` + tc.line
+			if tc.name == "duplicate PO line" {
+				body += `,` + tc.line
+			}
+			body += `]}`
+			rec := do(r, http.MethodPost, evaluatePath, body, "MatchingPolicyMaintain", true)
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), tc.field) {
+				t.Fatalf("got %d %s", rec.Code, rec.Body)
+			}
+		})
+	}
+}

@@ -238,6 +238,16 @@ func (a *API) evaluate(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
+	_, _, fields := buildInvoice(req)
+	for i, line := range req.Lines {
+		if line.POLineNo != nil && line.POUnitPrice == nil {
+			delete(fields, fmt.Sprintf("lines[%d].poUnitPrice", i))
+		}
+	}
+	if len(fields) > 0 {
+		a.rejectEvaluation(w, r, fields)
+		return
+	}
 	poFields, err := a.fillFromPurchaseOrder(r.Context(), &req)
 	if err != nil {
 		a.rejected.Add(1)
@@ -247,10 +257,7 @@ func (a *API) evaluate(w http.ResponseWriter, r *http.Request) {
 	policy, invoice, fields := buildInvoice(req)
 	maps.Copy(fields, poFields)
 	if len(fields) > 0 {
-		a.rejected.Add(1)
-		problem := httpx.NewProblem(http.StatusBadRequest, "COM-0001", "request failed validation")
-		problem.Errors = fields
-		httpx.Fail(w, r, problem)
+		a.rejectEvaluation(w, r, fields)
 		return
 	}
 	result := domain.Evaluate(policy, invoice)
@@ -258,9 +265,17 @@ func (a *API) evaluate(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, toResponse(result, req.Lines))
 }
 
+func (a *API) rejectEvaluation(w http.ResponseWriter, r *http.Request, fields map[string]string) {
+	a.rejected.Add(1)
+	problem := httpx.NewProblem(http.StatusBadRequest, "COM-0001", "request failed validation")
+	problem.Errors = fields
+	httpx.Fail(w, r, problem)
+}
+
 func (a *API) fillFromPurchaseOrder(ctx context.Context, req *evaluateRequest) (map[string]string, error) {
 	fields := map[string]string{}
 	var wanted bool
+	lineIndexes := map[int]int{}
 	if req.PurchaseOrderID != "" && !ids.Valid(req.PurchaseOrderID) {
 		fields["purchaseOrderId"] = "must be a UUID"
 	}
@@ -269,9 +284,22 @@ func (a *API) fillFromPurchaseOrder(ctx context.Context, req *evaluateRequest) (
 			continue
 		}
 		wanted = true
+		if previous, exists := lineIndexes[*l.POLineNo]; exists {
+			fields[fmt.Sprintf("lines[%d].poLineNo", i)] = fmt.Sprintf("duplicates lines[%d].poLineNo", previous)
+		}
+		lineIndexes[*l.POLineNo] = i
+		if l.POUnitPrice != nil {
+			fields[fmt.Sprintf("lines[%d].poUnitPrice", i)] = "is supplied by the purchase order and cannot be overridden"
+		}
+		if l.POQtyRemaining != nil {
+			fields[fmt.Sprintf("lines[%d].poQtyRemaining", i)] = "is supplied by the purchase order and cannot be overridden"
+		}
 		if req.PurchaseOrderID == "" {
 			fields[fmt.Sprintf("lines[%d].poLineNo", i)] = "requires purchaseOrderId"
 		}
+	}
+	if len(fields) > 0 {
+		return fields, nil
 	}
 	if !wanted || len(fields) > 0 {
 		return fields, nil
