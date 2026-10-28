@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,8 +54,23 @@ func TestXSDValidator_ExitCodes(t *testing.T) {
 
 func TestXSDValidator_TimeoutIsAnError(t *testing.T) {
 	found, err := fakeValidator(t, `sleep 5`, 100*time.Millisecond).Validate(context.Background(), []byte("<x/>"))
-	if err == nil || len(found) != 0 {
+	if !errors.Is(err, context.DeadlineExceeded) || len(found) != 0 {
 		t.Fatalf("found = %+v, err = %v", found, err)
+	}
+}
+
+func TestXSDValidator_CancelledWhileRunning(t *testing.T) {
+	v := fakeValidator(t, `exec sleep 5`, 5*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		_, err := v.Validate(ctx, []byte("<x/>"))
+		result <- err
+	}()
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	if err := <-result; !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
 	}
 }
 

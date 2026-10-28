@@ -113,7 +113,10 @@ func (v *XSDValidator) Validate(ctx context.Context, content []byte) ([]XSDError
 		return nil, nil
 	}
 	var exit *exec.ExitError
-	if ctx.Err() != nil || !errors.As(err, &exit) || exit.ExitCode() != xmllintInvalidExit {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, fmt.Errorf("run xmllint: %w", ctxErr)
+	}
+	if !errors.As(err, &exit) || exit.ExitCode() != xmllintInvalidExit {
 		slog.Error("xmllint failed", "err", err, "output", strings.TrimSpace(string(out)))
 		return nil, fmt.Errorf("run xmllint: %w", err)
 	}

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"regexp"
 	"strings"
@@ -124,6 +125,21 @@ func TestPreviewPaymentFile_ReportsXSDViolations(t *testing.T) {
 	}
 }
 
+func TestPreviewPaymentFile_ClientCancellationIsNotCounted(t *testing.T) {
+	r, a := routerWith(fakeValidator{err: context.Canceled})
+	req := httptest.NewRequest(http.MethodPost, filePreviewPath, strings.NewReader(readTestdata(t, "pain001/us.json")))
+	req.Header.Set("X-Passage-Tenant", "00000000-0000-4000-8000-000000000001")
+	req.Header.Set("X-Passage-Duties", previewDuty)
+	ctx, cancel := context.WithCancel(req.Context())
+	cancel()
+	req = req.WithContext(ctx)
+	r.ServeHTTP(httptest.NewRecorder(), req)
+	metrics := scrape(a)
+	if strings.Contains(metrics, "payables_payment_file_server_faults_total 1") || strings.Contains(metrics, "payables_payment_file_client_errors_total 1") {
+		t.Fatalf("client cancellation changed error counters:\n%s", metrics)
+	}
+}
+
 func TestPreviewPaymentFile_Rejections(t *testing.T) {
 	us := readTestdata(t, "pain001/us.json")
 	manyPayments := `{"fileNumber":"F1","payments":[` + strings.Repeat(`{},`, 2000) + `{}]}`
@@ -145,6 +161,7 @@ func TestPreviewPaymentFile_Rejections(t *testing.T) {
 		{"no payments", `{"fileNumber":"F1","created":"2026-01-01T00:00:00Z","profile":{"variant":"US"},"payments":[]}`, true, previewDuty, fakeValidator{}, http.StatusBadRequest, "PAY-0001"},
 		{"too many payments", manyPayments, true, previewDuty, fakeValidator{}, http.StatusBadRequest, "PAY-0001"},
 		{"body over limit", `{"fileNumber":"` + strings.Repeat("A", 5<<20) + `"}`, true, previewDuty, fakeValidator{}, http.StatusRequestEntityTooLarge, "COM-0413"},
+		{"validator deadline", us, true, previewDuty, fakeValidator{err: context.DeadlineExceeded}, http.StatusServiceUnavailable, "COM-0503"},
 		{"validator failure", us, true, previewDuty, fakeValidator{err: errors.New("xmllint crashed")}, http.StatusInternalServerError, "COM-0500"},
 	}
 	for _, tc := range tests {
@@ -160,10 +177,14 @@ func TestPreviewPaymentFile_Rejections(t *testing.T) {
 			}
 			authRejected := tc.wantStatus == http.StatusUnauthorized || tc.wantStatus == http.StatusForbidden
 			wantFaults := tc.wantStatus >= 500
+			wantClientErrors := !authRejected && !wantFaults
 			if wantFaults != strings.Contains(metrics, "payables_payment_file_server_faults_total 1") ||
-				(!authRejected && !wantFaults) != strings.Contains(metrics, "payables_payment_file_client_errors_total 1") ||
+				wantClientErrors != strings.Contains(metrics, "payables_payment_file_client_errors_total 1") ||
 				strings.Contains(metrics, "payables_settlement_preview_client_errors_total 1") {
 				t.Fatalf("error counters wrong for %d:\n%s", tc.wantStatus, metrics)
+			}
+			if tc.wantStatus == http.StatusServiceUnavailable && rec.Header().Get("Retry-After") != "1" {
+				t.Fatalf("Retry-After = %q, want 1", rec.Header().Get("Retry-After"))
 			}
 		})
 	}
