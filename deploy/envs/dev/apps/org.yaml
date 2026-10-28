@@ -1,0 +1,26 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: org
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/BenjaminSRussell/Passage.git
+    targetRevision: main
+    path: services/org/charts/org
+    helm:
+      valuesObject:
+        image:
+          repository: ghcr.io/benjaminsrussell/org
+          digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+        migrateOnStart: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: hello-ledger
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
