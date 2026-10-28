@@ -12,7 +12,9 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/services/payables"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/api"
+	"github.com/BenjaminSRussell/passage/services/payables/internal/domain"
 )
 
 const (
@@ -49,7 +51,12 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return fmt.Errorf("connect database: %w", err)
 	}
 	defer pool.Close()
-	a := api.New(pool, time.Now)
+	validator, err := domain.NewXSDValidator(payables.Pain001XSD)
+	if err != nil {
+		return err
+	}
+	defer validator.Close()
+	a := api.New(pool, validator, time.Now)
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
