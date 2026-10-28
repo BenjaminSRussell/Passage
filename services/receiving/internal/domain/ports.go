@@ -101,10 +101,10 @@ type PurchaseOrderLine struct {
 var hundredPct = decimal.NewFromInt(100)
 
 func (l PurchaseOrderLine) NetUnitPrice() decimal.Decimal {
-	if l.PriceUnit.Sign() <= 0 {
-		return l.UnitPrice
-	}
 	net := l.UnitPrice.Mul(hundredPct.Sub(l.DiscountPct)).Div(hundredPct)
+	if l.PriceUnit.Sign() <= 0 {
+		return net
+	}
 	return net.DivRound(l.PriceUnit, 12)
 }
 
@@ -121,6 +121,17 @@ type PurchaseOrder struct {
 	DocumentStatus string
 	Lines          []PurchaseOrderLine
 }
+
+const (
+	ApprovalApproved = "APPROVED"
+	StatusCancelled  = "CANCELLED"
+)
+
+func (o PurchaseOrder) Usable() bool {
+	return o.ApprovalStatus == ApprovalApproved && o.DocumentStatus != StatusCancelled
+}
+
+func (l PurchaseOrderLine) Usable() bool { return l.Status != StatusCancelled }
 
 type PurchaseOrders interface {
 	Get(ctx context.Context, id string) (PurchaseOrder, error)

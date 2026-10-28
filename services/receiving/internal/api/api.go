@@ -260,6 +260,9 @@ func (a *API) evaluate(w http.ResponseWriter, r *http.Request) {
 func (a *API) fillFromPurchaseOrder(ctx context.Context, req *evaluateRequest) (map[string]string, error) {
 	fields := map[string]string{}
 	var wanted bool
+	if req.PurchaseOrderID != "" && !ids.Valid(req.PurchaseOrderID) {
+		fields["purchaseOrderId"] = "must be a UUID"
+	}
 	for i, l := range req.Lines {
 		if l.POLineNo == nil {
 			continue
@@ -269,11 +272,8 @@ func (a *API) fillFromPurchaseOrder(ctx context.Context, req *evaluateRequest) (
 			fields[fmt.Sprintf("lines[%d].poLineNo", i)] = "requires purchaseOrderId"
 		}
 	}
-	if !wanted {
+	if !wanted || len(fields) > 0 {
 		return fields, nil
-	}
-	if req.PurchaseOrderID != "" && !ids.Valid(req.PurchaseOrderID) {
-		fields["purchaseOrderId"] = "must be a UUID"
 	}
 	if len(fields) > 0 {
 		return fields, nil
@@ -282,6 +282,9 @@ func (a *API) fillFromPurchaseOrder(ctx context.Context, req *evaluateRequest) (
 		return nil, httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "purchase order lookup is not configured")
 	}
 	po, err := a.ports.PurchaseOrders.Get(ctx, req.PurchaseOrderID)
+	if err != nil {
+		a.rejected.Add(1)
+	}
 	switch {
 	case errors.Is(err, domain.ErrPurchaseOrderNotFound):
 		return nil, httpx.NewProblem(http.StatusNotFound, "RCV-NF-003", "purchase order not found")
@@ -290,6 +293,9 @@ func (a *API) fillFromPurchaseOrder(ctx context.Context, req *evaluateRequest) (
 	case err != nil:
 		slog.ErrorContext(ctx, "purchase order lookup failed", "err", err, "purchaseOrderId", req.PurchaseOrderID, "correlationId", middleware.GetReqID(ctx))
 		return nil, httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "purchase order lookup unavailable")
+	}
+	if !po.Usable() {
+		return nil, httpx.NewProblem(http.StatusUnprocessableEntity, "RCV-PO-001", "purchase order is not approved or is cancelled")
 	}
 	byNo := make(map[int]domain.PurchaseOrderLine, len(po.Lines))
 	for _, l := range po.Lines {
@@ -304,6 +310,9 @@ func (a *API) fillFromPurchaseOrder(ctx context.Context, req *evaluateRequest) (
 		if !ok {
 			fields[fmt.Sprintf("lines[%d].poLineNo", i)] = "no such line on the purchase order"
 			continue
+		}
+		if !line.Usable() {
+			return nil, httpx.NewProblem(http.StatusUnprocessableEntity, "RCV-PO-002", fmt.Sprintf("purchase order line %d is cancelled", *l.POLineNo))
 		}
 		if l.POUnitPrice == nil {
 			l.POUnitPrice = &wireDecimal{line.NetUnitPrice()}

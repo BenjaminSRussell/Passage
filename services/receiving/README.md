@@ -18,7 +18,7 @@ Store tests run only when `PASSAGE_TEST_DATABASE_URL` is set, against a role wit
 |---|---|
 | `DATABASE_URL` | required; Postgres URL, from a Secret in the cluster |
 | `MIGRATE_ON_START` | `true` applies embedded migrations at start (dev only) |
-| `LEDGER_URL` | base URL of the ledger service (`POST /v1/ledger/journal-entries:post`, 3 s timeout); required |
+| `LEDGER_URL` | base URL of the ledger service (`POST /v1/ledger/journal-entries`, 3 s timeout); required |
 | `CLOSE_URL` | base URL of `services/close` (`POST /v1/close/period-statuses:check`, 2 s timeout, source system `ap`); required |
 | `PURCHASING_URL` | base URL of `services/purchasing` (`GET /v1/procurement/purchase-orders/{id}`, 2 s timeout); the caller's own tenant, legal entity, user and duties are forwarded, so the caller needs `PurchaseOrderInquire`; required |
 | `POSTING_LEDGER_ID` | UUID of the ledger that receipt journals post to (`ledgerId` in the ledger's entry request); invoices carry their own `ledgerId`; required |

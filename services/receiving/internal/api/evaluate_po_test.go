@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/api"
@@ -96,17 +98,48 @@ func TestEvaluateReportsPurchasingFailures(t *testing.T) {
 	}
 }
 
+func TestEvaluateRefusesUnusablePurchaseOrders(t *testing.T) {
+	line := func(status string) []domain.PurchaseOrderLine {
+		return []domain.PurchaseOrderLine{{LineNo: 1, PriceUnit: decimal.NewFromInt(1), Status: status}}
+	}
+	tests := []struct {
+		name string
+		po   domain.PurchaseOrder
+		code string
+	}{
+		{"draft order", domain.PurchaseOrder{ApprovalStatus: "DRAFT", DocumentStatus: "NONE", Lines: line("OPEN")}, "RCV-PO-001"},
+		{"cancelled order", domain.PurchaseOrder{ApprovalStatus: "APPROVED", DocumentStatus: "CANCELLED", Lines: line("OPEN")}, "RCV-PO-001"},
+		{"cancelled line", domain.PurchaseOrder{ApprovalStatus: "APPROVED", DocumentStatus: "CONFIRMED", Lines: line("CANCELLED")}, "RCV-PO-002"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			a := api.New(memstore.New(), api.Ports{
+				Periods:        domain.FakePeriods{Status: domain.PeriodOpen},
+				Ledger:         &domain.FakeLedger{},
+				PurchaseOrders: domain.FakePurchaseOrders{Orders: map[string]domain.PurchaseOrder{evalPOID: tc.po}},
+			})
+			r := httpx.NewRouter()
+			a.Register(r)
+			rec := do(r, http.MethodPost, evaluatePath, poBody(`"poLineNo":1`), "MatchingPolicyMaintain", true)
+			if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), tc.code) {
+				t.Fatalf("got %d %s", rec.Code, rec.Body)
+			}
+		})
+	}
+}
+
 func TestEvaluatePoReferenceValidation(t *testing.T) {
 	a := api.New(memstore.New(), api.Ports{
 		Periods:        domain.FakePeriods{Status: domain.PeriodOpen},
 		Ledger:         &domain.FakeLedger{},
-		PurchaseOrders: domain.FakePurchaseOrders{Orders: map[string]domain.PurchaseOrder{evalPOID: {ID: evalPOID, Currency: "USD"}}},
+		PurchaseOrders: domain.FakePurchaseOrders{Orders: map[string]domain.PurchaseOrder{evalPOID: {ID: evalPOID, Currency: "USD", ApprovalStatus: "APPROVED", DocumentStatus: "CONFIRMED", Lines: []domain.PurchaseOrderLine{{LineNo: 1, PriceUnit: decimal.NewFromInt(1), Status: "OPEN"}}}}},
 	})
 	r := httpx.NewRouter()
 	a.Register(r)
 	tests := []struct{ name, body, field string }{
 		{"not a uuid", strings.Replace(poBody(`"poLineNo":1`), evalPOID, "po-1", 1), "purchaseOrderId"},
 		{"line without order", strings.Replace(poBody(`"poLineNo":1`), `"purchaseOrderId":"`+evalPOID+`",`, "", 1), "lines[0].poLineNo"},
+		{"id without any poLineNo", strings.Replace(poBody(`"poUnitPrice":2.5`), evalPOID, "po-1", 1), "purchaseOrderId"},
 		{"unknown line", poBody(`"poLineNo":9`), "lines[0].poLineNo"},
 	}
 	for _, tc := range tests {

@@ -75,6 +75,29 @@ func TestGet_RefusesAnOrderOfAnotherLegalEntity(t *testing.T) {
 	}
 }
 
+func TestGet_LegalEntityScopeIsAListOrWildcard(t *testing.T) {
+	other := "00000000-0000-0000-0000-0000000000e2"
+	tests := []struct {
+		name, scope string
+		allowed     bool
+	}{
+		{"wildcard", "*", true},
+		{"list including the order entity", other + ", " + legalEntityID, true},
+		{"list excluding the order entity", other + ",00000000-0000-0000-0000-0000000000e3", false},
+		{"exact match", legalEntityID, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			client, _ := serve(t, http.StatusOK, orderJSON)
+			ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: tc.scope})
+			_, err := client.Get(ctx, orderID)
+			if tc.allowed != (err == nil) || (!tc.allowed && !errors.Is(err, domain.ErrPurchaseOrderForbidden)) {
+				t.Fatalf("scope %q: err %v", tc.scope, err)
+			}
+		})
+	}
+}
+
 func TestGet_ForbiddenIsNotAnOutage(t *testing.T) {
 	client, _ := serve(t, http.StatusForbidden, `{"code":"AUTH-0003"}`)
 	if _, err := client.Get(testCtx(), orderID); !errors.Is(err, domain.ErrPurchaseOrderForbidden) {
@@ -113,6 +136,8 @@ func TestGet_Failures(t *testing.T) {
 		{"unavailable", http.StatusServiceUnavailable, ``},
 		{"bad request", http.StatusBadRequest, `{"code":"COM-0001"}`},
 		{"truncated at 1 MiB", http.StatusOK, `{"id":"x","number":"` + strings.Repeat("a", 1<<20) + `"}`},
+		{"discount above 100", http.StatusOK, `{"id":"x","lines":[{"lineNo":1,"qty":"1","unitPrice":"1","priceUnit":"1","discountPct":"101"}]}`},
+		{"negative discount", http.StatusOK, `{"id":"x","lines":[{"lineNo":1,"qty":"1","unitPrice":"1","priceUnit":"1","discountPct":"-1"}]}`},
 		{"line without price unit", http.StatusOK, `{"id":"x","lines":[{"lineNo":1,"qty":"1","unitPrice":"1"}]}`},
 		{"empty 200", http.StatusOK, ``},
 		{"non-json 200", http.StatusOK, `<html>`},
