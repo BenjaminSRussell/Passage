@@ -105,19 +105,20 @@ interface PublishPanelProps {
   lock: number;
   type: HierarchyType | undefined;
   canBackdate: boolean;
+  reason: string;
+  onReasonChange(reason: string): void;
   onPublished(effectiveFrom: string): void;
 }
 
-function PublishPanel({ versionId, versionNo, lock, type, canBackdate, onPublished }: PublishPanelProps) {
+function PublishPanel({ versionId, versionNo, lock, type, canBackdate, reason, onReasonChange, onPublished }: PublishPanelProps) {
   const [effectiveFrom, setEffectiveFrom] = useState(todayIso);
-  const [reason, setReason] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [failure, setFailure] = useState<Problem | null>(null);
 
   const validDate = dayNumber(effectiveFrom) !== null;
   const backdated = validDate && effectiveFrom < todayIso();
-  const reasonLength = reason.trim().length;
+  const reasonLength = [...reason.trim()].length;
   const dateError = !validDate
     ? "Enter a valid date."
     : backdated && type?.backdateAllowed === false
@@ -156,7 +157,7 @@ function PublishPanel({ versionId, versionNo, lock, type, canBackdate, onPublish
             hint={`Required because this date is in the past. ${REASON_MIN} to ${REASON_MAX} characters.`}
             error={submitted ? reasonError : undefined}
           >
-            {(control) => <Textarea {...control} rows={3} required value={reason} onChange={(event) => setReason(event.target.value)} />}
+            {(control) => <Textarea {...control} rows={3} required value={reason} onChange={(event) => onReasonChange(event.target.value)} />}
           </FormField>
         ) : null}
       </div>
@@ -169,6 +170,13 @@ function PublishPanel({ versionId, versionNo, lock, type, canBackdate, onPublish
     </section>
   );
 }
+
+const operationsFor = (list: HierarchyNode[]): Record<MoveCommand, (id: string) => HierarchyNode[] | null> => ({
+  up: (id) => shiftNode(list, id, -1),
+  down: (id) => shiftNode(list, id, 1),
+  indent: (id) => indentNode(list, id),
+  outdent: (id) => outdentNode(list, id),
+});
 
 interface DraftEditorProps {
   version: HierarchyVersion;
@@ -212,6 +220,7 @@ export function HierarchyDraftEditor({
   const [saving, setSaving] = useState(false);
   const [failure, setFailure] = useState<Problem | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
+  const [publishReason, setPublishReason] = useState("");
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const discardOnReload = useRef(false);
 
@@ -237,7 +246,7 @@ export function HierarchyDraftEditor({
   };
 
   const commit = (next: HierarchyNode[] | null, message: (updated: HierarchyNode[]) => string) => {
-    if (next === null) {
+    if (next === null || saving) {
       return;
     }
     setNodes(next);
@@ -251,13 +260,14 @@ export function HierarchyDraftEditor({
     return `${nameOf(id)} is now under ${parentId === null ? "no parent" : nameOf(parentId)}, position ${siblings.indexOf(id) + 1} of ${siblings.length}`;
   };
 
-  const operationsFor = (list: HierarchyNode[]): Record<MoveCommand, (id: string) => HierarchyNode[] | null> => ({
-    up: (id) => shiftNode(list, id, -1),
-    down: (id) => shiftNode(list, id, 1),
-    indent: (id) => indentNode(list, id),
-    outdent: (id) => outdentNode(list, id),
-  });
-  const available = (command: MoveCommand) => selectedId !== null && operationsFor(nodes)[command](selectedId) !== null;
+  const availability = useMemo(() => {
+    const operations = operationsFor(nodes);
+    const check = (command: MoveCommand) => selectedId !== null && operations[command](selectedId) !== null;
+    return { up: check("up"), down: check("down"), indent: check("indent"), outdent: check("outdent") };
+  }, [nodes, selectedId]);
+  const available = (command: MoveCommand) => !saving && availability[command];
+  const removable = useMemo(() => selectedId !== null && removeNode(nodes, selectedId) !== null, [nodes, selectedId]);
+  const focusTree = () => setFocusSignal((signal) => signal + 1);
 
   const move = (command: MoveCommand, refocus: boolean) => {
     if (selectedId === null) {
@@ -266,14 +276,17 @@ export function HierarchyDraftEditor({
     const next = operationsFor(nodes)[command](selectedId);
     commit(next, placement(selectedId));
     if (next && (refocus || operationsFor(next)[command](selectedId) === null)) {
-      setFocusSignal((signal) => signal + 1);
+      focusTree();
     }
   };
 
-  const moveUnder = (id: string, parentId: string) => commit(moveNode(nodes, id, parentId), placement(id));
+  const moveUnder = (id: string, parentId: string) => {
+    commit(moveNode(nodes, id, parentId), placement(id));
+    focusTree();
+  };
 
   const remove = () => {
-    if (selectedId === null) {
+    if (selectedId === null || saving) {
       return;
     }
     const parentId = nodes.find((node) => node.orgUnitId === selectedId)?.parentOrgUnitId ?? null;
@@ -283,20 +296,29 @@ export function HierarchyDraftEditor({
       adopted === 0 ? `${name} removed` : `${name} removed, its ${adopted === 1 ? "child" : `${adopted} children`} moved up under ${nameOf(parentId ?? "")}`,
     );
     setSelectedId(parentId);
-    setFocusSignal((signal) => signal + 1);
+    focusTree();
   };
 
-  const present = new Set(nodes.map((node) => node.orgUnitId));
-  const free = candidates.filter((candidate) => !present.has(candidate.id));
-  const freeOptions = free.map((candidate) => ({ value: candidate.id, label: `${candidate.name} (${candidate.code})` }));
+  const free = useMemo(() => {
+    const present = new Set(nodes.map((node) => node.orgUnitId));
+    return candidates.filter((candidate) => !present.has(candidate.id));
+  }, [candidates, nodes]);
+  const freeOptions = useMemo(() => free.map((candidate) => ({ value: candidate.id, label: `${candidate.name} (${candidate.code})` })), [free]);
   const candidate = (id: string) => free.find((entry) => entry.id === id);
-  const moveOptions = (selectedId === null ? [] : parentChoices(nodes, selectedId)).map((id) => ({ value: id, label: optionLabel(id) }));
+  const moveOptions = useMemo(
+    () => (selectedId === null ? [] : parentChoices(nodes, selectedId)).map((id) => ({ value: id, label: optionLabel(id) })),
+    [nodes, selectedId, labels],
+  );
   const rootless = nodes.length === 0;
 
   const add = (id: string) => {
     const chosen = candidate(id);
     if (chosen) {
       commit(addNode(nodes, id, chosen.kind, rootless ? null : selectedId), () => `${chosen.name} added${rootless ? " as the root" : ` under ${nameOf(selectedId ?? "")}`}`);
+      if (rootless) {
+        setSelectedId(id);
+      }
+      focusTree();
     }
   };
   const replace = (id: string) => {
@@ -305,6 +327,7 @@ export function HierarchyDraftEditor({
       const previous = nameOf(selectedId);
       commit(replaceNode(nodes, selectedId, id, chosen.kind), () => `${previous} replaced by ${chosen.name}`);
       setSelectedId(id);
+      focusTree();
     }
   };
 
@@ -327,7 +350,8 @@ export function HierarchyDraftEditor({
   const discard = () => {
     setNodes(base.nodes);
     setFailure(null);
-    setSelectedId(null);
+    setSelectedId(base.nodes.some((node) => node.orgUnitId === selectedId) ? selectedId : (base.nodes.find((node) => node.parentOrgUnitId === null)?.orgUnitId ?? null));
+    focusTree();
     setConfirmDiscard(false);
     announce("Changes discarded");
   };
@@ -345,8 +369,10 @@ export function HierarchyDraftEditor({
       }
     } else if (event.key === "Escape") {
       if (publishOpen) {
-        setPublishOpen(false);
-      } else if (dirty) {
+        if (publishReason === "") {
+          setPublishOpen(false);
+        }
+      } else if (dirty && !saving) {
         setConfirmDiscard(true);
       }
     }
@@ -392,7 +418,7 @@ export function HierarchyDraftEditor({
             <Button size="sm" disabled={!available("outdent")} onClick={() => move("outdent", false)}>
               Outdent
             </Button>
-            <Button size="sm" variant="danger" disabled={selectedId === null || removeNode(nodes, selectedId) === null} onClick={remove}>
+            <Button size="sm" variant="danger" disabled={saving || !removable} onClick={remove}>
               Remove
             </Button>
           </div>
@@ -403,7 +429,7 @@ export function HierarchyDraftEditor({
             options={moveOptions}
             hint="Alt with the arrow keys also moves the selected node. Ctrl+S saves and Esc cancels."
             actionLabel="Move"
-            disabled={selectedId === null || moveOptions.length === 0}
+            disabled={saving || selectedId === null || moveOptions.length === 0}
             onSubmit={(parentId) => selectedId !== null && moveUnder(selectedId, parentId)}
           />
         </div>
@@ -415,7 +441,7 @@ export function HierarchyDraftEditor({
             options={freeOptions}
             hint={rootless ? "It becomes the root of this hierarchy." : selectedId === null ? "Select a parent node first." : `It is added under ${nameOf(selectedId)}.`}
             actionLabel="Add"
-            disabled={!rootless && selectedId === null}
+            disabled={saving || (!rootless && selectedId === null)}
             onSubmit={add}
           />
           <PickerForm
@@ -425,12 +451,21 @@ export function HierarchyDraftEditor({
             options={freeOptions}
             hint={selectedId === null ? "Select the node to replace first." : "Children and position stay in place."}
             actionLabel="Replace"
-            disabled={selectedId === null}
+            disabled={saving || selectedId === null}
             onSubmit={replace}
           />
         </div>
         {publishOpen && !dirty && canPublish ? (
-          <PublishPanel versionId={version.id} versionNo={version.versionNo} lock={base.lock} type={type} canBackdate={canBackdate} onPublished={onPublished} />
+          <PublishPanel
+            versionId={version.id}
+            versionNo={version.versionNo}
+            lock={base.lock}
+            type={type}
+            canBackdate={canBackdate}
+            reason={publishReason}
+            onReasonChange={setPublishReason}
+            onPublished={onPublished}
+          />
         ) : null}
       </section>
       {rootless ? (
@@ -443,6 +478,7 @@ export function HierarchyDraftEditor({
           editing={{
             selectedId,
             focusSignal,
+            locked: saving,
             onSelect: setSelectedId,
             onMove: move,
             onDrop: (id, parentId) => {

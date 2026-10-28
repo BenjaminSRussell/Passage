@@ -783,3 +783,113 @@ describe("operating units fail to load while editing", () => {
     expect(screen.getByText(/Down \(COM-0002\)/)).toBeInTheDocument();
   });
 });
+
+describe("focus after an action disables the pressed button", () => {
+  it("returns focus to the tree after Add, Move under and Replace", async () => {
+    const { user } = await openDraft({
+      "GET /operating-units": () =>
+        json({
+          items: [
+            { id: "ou-a", code: "ALPHA", name: "Alpha", status: "active" },
+            { id: "ou-b", code: "BETA", name: "Beta", status: "active" },
+            { id: "ou-c", code: "GAMMA", name: "Gamma", status: "active" },
+            { id: "ou-d", code: "DELTA", name: "Delta", status: "active" },
+            { id: "ou-f", code: "FOX", name: "Fox", status: "active" },
+          ],
+        }),
+    });
+    await user.click(screen.getByText("Alpha"));
+    await user.selectOptions(screen.getByLabelText("Add org unit"), "ou-d");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
+    expect(screen.getByRole("treeitem", { name: "Alpha" })).toHaveFocus();
+
+    await user.click(screen.getByText("Beta"));
+    await user.selectOptions(screen.getByLabelText("Move under"), "ou-a");
+    await user.click(screen.getByRole("button", { name: "Move" }));
+    expect(screen.getByRole("button", { name: "Move" })).toBeDisabled();
+    expect(screen.getByRole("treeitem", { name: "Beta" })).toHaveFocus();
+
+    await user.click(screen.getByText("Delta"));
+    await user.selectOptions(screen.getByLabelText("Replace selected with"), "ou-f");
+    await user.click(screen.getByRole("button", { name: "Replace" }));
+    expect(screen.getByRole("button", { name: "Replace" })).toBeDisabled();
+    expect(screen.getByRole("treeitem", { name: "Fox" })).toHaveFocus();
+  });
+
+  it("focuses the replacement and the surviving selection after Discard", async () => {
+    const { user } = await openDraft();
+    await user.click(screen.getByText("Beta"));
+    await user.selectOptions(screen.getByLabelText("Replace selected with"), "ou-d");
+    await user.click(screen.getByRole("button", { name: "Replace" }));
+    expect(screen.getByRole("treeitem", { name: "Delta" })).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Discard changes" }));
+    expect(screen.getByRole("button", { name: "Discard changes" })).toBeDisabled();
+    expect(screen.getByRole("treeitem", { name: "Passage Inc" })).toHaveFocus();
+  });
+});
+
+describe("editing while a save is pending", () => {
+  it("locks the edit controls, Alt+arrow moves and dragging until the save returns", async () => {
+    const { user } = await dirtyDraft({ "PUT /hierarchy-versions/v3/nodes": () => new Promise<Response>(() => undefined) as never });
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Discard changes" })).toBeDisabled());
+    const before = order();
+    for (const name of ["Move up", "Move down", "Indent", "Outdent", "Remove", "Add", "Replace", "Move"]) {
+      expect(screen.getByRole("button", { name })).toBeDisabled();
+    }
+    expect(screen.getByLabelText("Add org unit")).toBeDisabled();
+    expect(rowOf("Gamma")).toHaveAttribute("draggable", "false");
+    act(() => screen.getByRole("treeitem", { name: "Alpha" }).focus());
+    await user.keyboard("{Alt>}{ArrowUp}{/Alt}");
+    fireEvent.dragStart(rowOf("Beta"));
+    fireEvent.drop(rowOf("Gamma"));
+    expect(order()).toEqual(before);
+  });
+});
+
+describe("tree reveal and disclosure control", () => {
+  it("expands a collapsed parent so the moved node stays visible and focused", async () => {
+    const { user } = await openDraft();
+    await user.click(screen.getByTestId("toggle-ou-b"));
+    expect(screen.queryByRole("treeitem", { name: "Gamma" })).toBeNull();
+    await user.click(screen.getByText("Alpha"));
+    await user.selectOptions(screen.getByLabelText("Move under"), "ou-b");
+    await user.click(screen.getByRole("button", { name: "Move" }));
+    expect(screen.getByRole("treeitem", { name: "Beta" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("treeitem", { name: "Alpha" })).toHaveFocus();
+  });
+
+  it("renders the disclosure control as a non-focusable, unnamed decoration", async () => {
+    await openDraft();
+    const toggle = screen.getByTestId("toggle-ou-b");
+    expect(toggle.tagName).toBe("SPAN");
+    expect(toggle).toHaveAttribute("aria-hidden", "true");
+    expect(toggle).not.toHaveAttribute("aria-label");
+    expect(screen.queryByRole("button", { name: /^(Expand|Collapse)$/ })).toBeNull();
+  });
+});
+
+describe("publish panel details", () => {
+  it("counts the backdate reason in code points, not UTF-16 units", async () => {
+    const { fetchMock, user } = await openDraft();
+    await user.click(screen.getByRole("button", { name: "Publish…" }));
+    fireEvent.change(screen.getByLabelText("Effective from"), { target: { value: "2020-01-01" } });
+    fireEvent.change(screen.getByLabelText("Backdate reason"), { target: { value: "😀😀😀😀😀" } });
+    await user.click(screen.getByRole("button", { name: "Publish version 3" }));
+    expect(await screen.findByText("Give a reason of 10 to 500 characters.")).toBeInTheDocument();
+    expect(callsTo(fetchMock, ":publish", "POST")).toHaveLength(0);
+  });
+
+  it("keeps the panel and a typed backdate reason on Esc, and closes it when the reason is empty", async () => {
+    const { user } = await openDraft();
+    await user.click(screen.getByRole("button", { name: "Publish…" }));
+    fireEvent.change(screen.getByLabelText("Effective from"), { target: { value: "2020-01-01" } });
+    await user.type(screen.getByLabelText("Backdate reason"), "Correcting an old record");
+    await user.keyboard("{Escape}");
+    expect(screen.getByLabelText("Backdate reason")).toHaveValue("Correcting an old record");
+    await user.clear(screen.getByLabelText("Backdate reason"));
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("region", { name: "Publish draft" })).toBeNull();
+  });
+});

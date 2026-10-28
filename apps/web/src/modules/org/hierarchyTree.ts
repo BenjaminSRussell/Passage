@@ -103,15 +103,29 @@ export function siblingIds(nodes: readonly HierarchyNode[], parentId: string | n
     .map((node) => node.orgUnitId);
 }
 
-export function isDescendant(nodes: readonly HierarchyNode[], ancestorId: string, id: string): boolean {
-  let current = parentOf(nodes, id);
-  for (let hops = 0; current !== null && hops <= nodes.length; hops += 1) {
+export const parentMap = (nodes: readonly HierarchyNode[]): ReadonlyMap<string, string | null> => new Map(nodes.map((node) => [node.orgUnitId, node.parentOrgUnitId]));
+
+export function descends(parents: ReadonlyMap<string, string | null>, ancestorId: string, id: string): boolean {
+  let current = parents.get(id) ?? null;
+  for (let hops = 0; current !== null && hops <= parents.size; hops += 1) {
     if (current === ancestorId) {
       return true;
     }
-    current = parentOf(nodes, current);
+    current = parents.get(current) ?? null;
   }
   return false;
+}
+
+export const isDescendant = (nodes: readonly HierarchyNode[], ancestorId: string, id: string): boolean => descends(parentMap(nodes), ancestorId, id);
+
+export function ancestorIds(parents: ReadonlyMap<string, string | null>, id: string): string[] {
+  const found: string[] = [];
+  let current = parents.get(id) ?? null;
+  for (let hops = 0; current !== null && hops <= parents.size; hops += 1) {
+    found.push(current);
+    current = parents.get(current) ?? null;
+  }
+  return found;
 }
 
 function normalizeOrder(nodes: readonly HierarchyNode[]): HierarchyNode[] {
@@ -174,11 +188,12 @@ export function outdentNode(nodes: readonly HierarchyNode[], id: string): Hierar
 }
 
 export function parentChoices(nodes: readonly HierarchyNode[], id: string): string[] {
-  const current = parentOf(nodes, id);
+  const parents = parentMap(nodes);
+  const current = parents.get(id) ?? null;
   if (current === null) {
     return [];
   }
-  return nodes.filter((node) => node.orgUnitId !== id && node.orgUnitId !== current && !isDescendant(nodes, id, node.orgUnitId)).map((node) => node.orgUnitId);
+  return nodes.filter((node) => node.orgUnitId !== id && node.orgUnitId !== current && !descends(parents, id, node.orgUnitId)).map((node) => node.orgUnitId);
 }
 
 export function addNode(nodes: readonly HierarchyNode[], orgUnitId: string, kind: HierarchyNodeKind, parentId: string | null): HierarchyNode[] | null {

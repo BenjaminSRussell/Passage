@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from "react";
 import { Badge, Icon } from "../../shell/ui";
 import type { HierarchyChange, HierarchyNode } from "./api/hierarchy";
-import { buildTree, parentChoices, type NodeChange, type TreeNode } from "./hierarchyTree";
+import { ancestorIds, buildTree, parentChoices, parentMap, type NodeChange, type TreeNode } from "./hierarchyTree";
 import styles from "./pages.module.css";
 
 export interface Label {
@@ -14,6 +14,7 @@ export type MoveCommand = "up" | "down" | "indent" | "outdent";
 export interface TreeEditing {
   selectedId: string | null;
   focusSignal: number;
+  locked: boolean;
   onSelect(id: string): void;
   onMove(command: MoveCommand, refocus: boolean): void;
   onDrop(id: string, parentId: string): void;
@@ -77,6 +78,8 @@ export function HierarchyTreeView({ nodes, labels, changes, editing }: TreeViewP
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
   const treeRef = useRef<HTMLUListElement>(null);
+  const focusPending = useRef(false);
+  const parents = useMemo(() => parentMap(nodes), [nodes]);
   const visible = flatten(roots, collapsed);
   const tabStop = visible.some((item) => item.id === focusId) ? focusId : (visible[0]?.id ?? null);
   const dropTargets = useMemo(() => new Set(dragId === null ? [] : parentChoices(nodes, dragId)), [nodes, dragId]);
@@ -105,11 +108,29 @@ export function HierarchyTreeView({ nodes, labels, changes, editing }: TreeViewP
 
   const focusSignal = editing?.focusSignal ?? 0;
   const selectedId = editing?.selectedId ?? null;
+  const locked = editing?.locked ?? false;
+  const hiddenAncestors = (id: string | null) => (id === null ? [] : ancestorIds(parents, id).filter((ancestor) => collapsed.has(ancestor)));
   useEffect(() => {
-    if (focusSignal > 0) {
-      focusItem(selectedId);
+    const hidden = hiddenAncestors(selectedId);
+    if (hidden.length > 0) {
+      setCollapsed((current) => new Set([...current].filter((id) => !hidden.includes(id))));
     }
+  }, [nodes, selectedId]);
+  useEffect(() => {
+    focusPending.current = focusSignal > 0;
   }, [focusSignal]);
+  useEffect(() => {
+    if (!focusPending.current) {
+      return;
+    }
+    const target = Array.from(treeRef.current?.querySelectorAll<HTMLElement>('[role="treeitem"]') ?? []).find((element) => element.dataset.id === selectedId);
+    if (target) {
+      target.focus();
+      focusPending.current = false;
+    } else if (hiddenAncestors(selectedId).length === 0) {
+      focusPending.current = false;
+    }
+  });
 
   const onKeyDown = (event: KeyboardEvent<HTMLUListElement>) => {
     const id = (event.target as HTMLElement).closest<HTMLElement>('[role="treeitem"]')?.dataset.id;
@@ -120,7 +141,9 @@ export function HierarchyTreeView({ nodes, labels, changes, editing }: TreeViewP
     }
     if (editing && event.altKey && shortcuts[event.key]) {
       event.preventDefault();
-      editing.onMove(shortcuts[event.key], true);
+      if (!locked) {
+        editing.onMove(shortcuts[event.key], true);
+      }
       return;
     }
     const expanded = !collapsed.has(current.id);
@@ -147,8 +170,12 @@ export function HierarchyTreeView({ nodes, labels, changes, editing }: TreeViewP
   const dragHandlers = (id: string, isRoot: boolean) =>
     editing
       ? {
-          draggable: !isRoot,
+          draggable: !isRoot && !locked,
           onDragStart: (event: DragEvent) => {
+            if (locked) {
+              event.preventDefault();
+              return;
+            }
             event.dataTransfer?.setData("text/plain", id);
             if (event.dataTransfer) {
               event.dataTransfer.effectAllowed = "move";
@@ -157,14 +184,14 @@ export function HierarchyTreeView({ nodes, labels, changes, editing }: TreeViewP
           },
           onDragEnd: clearDrag,
           onDragOver: (event: DragEvent) => {
-            if (dropTargets.has(id)) {
+            if (!locked && dropTargets.has(id)) {
               event.preventDefault();
               setOverId(id);
             }
           },
           onDragLeave: () => setOverId((current) => (current === id ? null : current)),
           onDrop: (event: DragEvent) => {
-            if (dragId !== null && dropTargets.has(id)) {
+            if (!locked && dragId !== null && dropTargets.has(id)) {
               event.preventDefault();
               editing.onDrop(dragId, id);
             }
@@ -209,11 +236,8 @@ export function HierarchyTreeView({ nodes, labels, changes, editing }: TreeViewP
       >
         <div className={rowClass} onClick={() => !editing && hasChildren && toggle(id, !expanded)} {...dragHandlers(id, node.parentOrgUnitId === null)}>
           {hasChildren ? (
-            <button
-              type="button"
-              tabIndex={-1}
+            <span
               aria-hidden="true"
-              aria-label={expanded ? "Collapse" : "Expand"}
               data-testid={`toggle-${id}`}
               className={styles.treeToggle}
               onClick={(event) => {
@@ -222,7 +246,7 @@ export function HierarchyTreeView({ nodes, labels, changes, editing }: TreeViewP
               }}
             >
               <Icon name={expanded ? "chevronDown" : "chevronRight"} />
-            </button>
+            </span>
           ) : (
             <span className={styles.treeToggle} aria-hidden="true" />
           )}
