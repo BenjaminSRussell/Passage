@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
@@ -27,6 +28,7 @@ const (
 	CodeSelfApproval     = "PTY-PENDING-SELF-APPROVAL"
 	CodeChangeStale      = "PTY-PENDING-STALE"
 	CodeCreditInvalid    = "PTY-CREDIT-INVALID"
+	CodeReasonTooLong    = "PTY-REASON-TOO-LONG"
 	changeColumns        = `id::text, customer_id::text, legal_entity_id::text, field, current_value::text, requested_value::text, status, requested_by, decided_by, decision_reason, requested_at, decided_at`
 )
 
@@ -34,6 +36,7 @@ var creditLimitPattern = regexp.MustCompile(`^[0-9]{1,16}(\.[0-9]{1,2})?$`)
 
 type CreditStore interface {
 	RequestCreditLimit(ctx context.Context, customerID, limit string) (domain.CreditLimitResult, error)
+	GetPendingChange(ctx context.Context, changeID string) (domain.PendingChange, error)
 	DecidePendingChange(ctx context.Context, changeID string, approve bool, reason string) (domain.PendingChange, error)
 }
 
@@ -110,10 +113,17 @@ func (s *Postgres) RequestCreditLimit(ctx context.Context, customerID, limit str
 			})
 		}
 		change, err := scanChange(tx.QueryRow(ctx, `insert into pending_change (tenant_id, id, legal_entity_id, customer_id, field, current_value, requested_value, requested_by)
-			values ($1, $2, $3, $4, $5, $6::text::numeric, $7::text::numeric, $8) returning `+changeColumns,
+			values ($1, $2, $3, $4, $5, $6::text::numeric, $7::text::numeric, $8)
+			on conflict (tenant_id, customer_id, field) where status = 'pending' do nothing returning `+changeColumns,
 			caller.TenantID, ids.New(), legalEntityID, id, domain.FieldCreditLimit, res.CreditLimit, limit, caller.UserID))
-		if isUniqueViolation(err) {
-			return httpx.NewProblem(http.StatusConflict, CodeChangePending, "a credit limit change is already awaiting approval for this customer")
+		if errors.Is(err, pgx.ErrNoRows) {
+			var pendingID string
+			if err := tx.QueryRow(ctx, `select id::text from pending_change where tenant_id = $1 and customer_id = $2 and field = $3 and status = 'pending'`, caller.TenantID, id, domain.FieldCreditLimit).Scan(&pendingID); err != nil {
+				return err
+			}
+			p := httpx.NewProblem(http.StatusConflict, CodeChangePending, "a credit limit change is already awaiting approval for this customer")
+			p.Errors = map[string]string{"pendingChangeId": pendingID}
+			return p
 		}
 		if err != nil {
 			return err
@@ -124,14 +134,35 @@ func (s *Postgres) RequestCreditLimit(ctx context.Context, customerID, limit str
 	return res, err
 }
 
+func (s *Postgres) GetPendingChange(ctx context.Context, changeID string) (domain.PendingChange, error) {
+	caller, _ := tenant.FromContext(ctx)
+	if err := requireUser(caller); err != nil {
+		return domain.PendingChange{}, err
+	}
+	id, err := canonicalID(changeID)
+	if err != nil {
+		return domain.PendingChange{}, notFound(CodeChangeNotFound, "pending change not found")
+	}
+	var change domain.PendingChange
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		change, err = scanChange(tx.QueryRow(ctx, `select `+changeColumns+` from pending_change where tenant_id = $1 and id = $2`, caller.TenantID, id))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return notFound(CodeChangeNotFound, "pending change not found")
+		}
+		return err
+	})
+	return change, err
+}
+
 func (s *Postgres) DecidePendingChange(ctx context.Context, changeID string, approve bool, reason string) (domain.PendingChange, error) {
 	caller, _ := tenant.FromContext(ctx)
 	if err := requireUser(caller); err != nil {
 		return domain.PendingChange{}, err
 	}
-	if len(reason) > maxReasonLength {
-		p := httpx.NewProblem(http.StatusUnprocessableEntity, CodeCreditInvalid, "decision failed validation")
-		p.Errors = map[string]string{"reason": "must be at most 500 bytes"}
+	if utf8.RuneCountInString(reason) > maxReasonLength {
+		p := httpx.NewProblem(http.StatusUnprocessableEntity, CodeReasonTooLong, "decision failed validation")
+		p.Errors = map[string]string{"reason": "must be at most 500 characters"}
 		return domain.PendingChange{}, p
 	}
 	id, err := canonicalID(changeID)
@@ -152,6 +183,7 @@ func (s *Postgres) DecidePendingChange(ctx context.Context, changeID string, app
 			wanted = domain.ChangeApproved
 		}
 		if cur.Status == wanted && cur.DecidedBy != nil && *cur.DecidedBy == caller.UserID {
+			cur.Replayed = true
 			change = cur
 			return nil
 		}

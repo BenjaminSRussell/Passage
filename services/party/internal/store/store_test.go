@@ -35,16 +35,6 @@ func migratedApp(t *testing.T) *pgxpool.Pool {
 	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	var schema string
-	if err := admin.QueryRow(ctx, "select current_schema()").Scan(&schema); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := admin.Exec(ctx, "grant usage on schema "+schema+" to passage_app"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := admin.Exec(ctx, "grant select, insert, update, delete on all tables in schema "+schema+" to passage_app"); err != nil {
-		t.Fatal(err)
-	}
 	return app
 }
 

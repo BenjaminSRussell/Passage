@@ -23,6 +23,7 @@ type PendingChange struct {
 	Reason         *string    `json:"reason,omitempty"`
 	RequestedAt    time.Time  `json:"requestedAt"`
 	DecidedAt      *time.Time `json:"decidedAt,omitempty"`
+	Replayed       bool       `json:"-"`
 }
 
 type CreditLimitResult struct {

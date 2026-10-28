@@ -172,12 +172,17 @@ func TestCreditLimit_OnePendingIncreasePerCustomer(t *testing.T) {
 	app := migratedApp(t)
 	s := store.New(app)
 	customerID := customerWithLimit(t, app, "50000.00")
-	if _, err := s.RequestCreditLimit(asUser(1, "", requester), customerID, "60000"); err != nil {
+	res, err := s.RequestCreditLimit(asUser(1, "", requester), customerID, "60000")
+	if err != nil {
 		t.Fatal(err)
 	}
-	_, err := s.RequestCreditLimit(asUser(1, "", requester), customerID, "70000")
+	_, err = s.RequestCreditLimit(asUser(1, "", requester), customerID, "70000")
 	if problemCode(t, err) != store.CodeChangePending {
 		t.Fatalf("got %v", err)
+	}
+	var problem *httpx.Problem
+	if !errors.As(err, &problem) || problem.Errors["pendingChangeId"] != res.Pending.ID {
+		t.Fatalf("pending change id was not returned: %#v", problem)
 	}
 	if got := count(principalContext(1, ""), t, app, "pending_change"); got != 1 {
 		t.Fatalf("pending rows = %d", got)
@@ -267,9 +272,6 @@ func TestCreditLimit_DatabaseRefusesBlankOrSelfDecider(t *testing.T) {
 	}
 	decide := func(decider string) error {
 		return dbx.WithTenantTx(ctx, app, func(tx pgx.Tx) error {
-			if _, err := tx.Exec(ctx, `delete from pending_change`); err != nil {
-				return err
-			}
 			_, err := tx.Exec(ctx, `insert into pending_change (tenant_id, id, legal_entity_id, customer_id, field, requested_value, requested_by, status, decided_by, decided_at)
 				values ($1, $2, $3, $4, 'credit_limit', 1, 'alice', 'approved', $5, now())`, testkit.TenantID(1), ids.New(), legalEntityA, customerID, decider)
 			return err
@@ -279,6 +281,14 @@ func TestCreditLimit_DatabaseRefusesBlankOrSelfDecider(t *testing.T) {
 		if err := decide(decider); sqlState(err) != "23514" {
 			t.Fatalf("decider %q: %v", decider, err)
 		}
+	}
+	err := dbx.WithTenantTx(ctx, app, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `insert into pending_change (tenant_id, id, legal_entity_id, customer_id, field, requested_value, requested_by, status, decided_at)
+			values ($1, $2, $3, $4, 'credit_limit', 1, 'alice', 'approved', now())`, testkit.TenantID(1), ids.New(), legalEntityA, customerID)
+		return err
+	})
+	if sqlState(err) != "23514" {
+		t.Fatalf("decided row without decided_by: %v", err)
 	}
 	if err := decide("bob"); err != nil {
 		t.Fatalf("distinct decider: %v", err)
@@ -308,6 +318,40 @@ func TestCreditLimit_ApprovalGoesStaleWhenLimitMovesAfterRequest(t *testing.T) {
 	}
 }
 
+func TestCreditLimit_DecisionReasonLimitCountsCharacters(t *testing.T) {
+	app := migratedApp(t)
+	s := store.New(app)
+	customerID := customerWithLimit(t, app, "50000.00")
+	res, err := s.RequestCreditLimit(asUser(1, "", requester), customerID, "60000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DecidePendingChange(asUser(1, "", approver), res.Pending.ID, false, strings.Repeat("é", 501)); problemCode(t, err) != store.CodeReasonTooLong {
+		t.Fatalf("501 Unicode characters: %v", err)
+	}
+	decided, err := s.DecidePendingChange(asUser(1, "", approver), res.Pending.ID, false, strings.Repeat("é", 500))
+	if err != nil || decided.Reason == nil || *decided.Reason != strings.Repeat("é", 500) {
+		t.Fatalf("500 Unicode characters: %+v, %v", decided, err)
+	}
+}
+
+func TestCreditLimit_GetPendingChangeIsScoped(t *testing.T) {
+	app := migratedApp(t)
+	s := store.New(app)
+	customerID := customerWithLimit(t, app, "50000.00")
+	res, err := s.RequestCreditLimit(asUser(1, legalEntityA, requester), customerID, "60000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetPendingChange(asUser(1, legalEntityA, approver), res.Pending.ID)
+	if err != nil || got.ID != res.Pending.ID {
+		t.Fatalf("get pending change = %+v, %v", got, err)
+	}
+	if _, err := s.GetPendingChange(asUser(1, legalEntityB, approver), res.Pending.ID); problemCode(t, err) != store.CodeChangeNotFound {
+		t.Fatalf("other legal entity: %v", err)
+	}
+}
+
 func TestCreditLimit_SameDeciderReplayIsIdempotent(t *testing.T) {
 	app := migratedApp(t)
 	s := store.New(app)
@@ -321,8 +365,11 @@ func TestCreditLimit_SameDeciderReplayIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	again, err := s.DecidePendingChange(asUser(1, "", approver), res.Pending.ID, true, "")
-	if err != nil || again.ID != first.ID || again.Status != domain.ChangeApproved {
+	if err != nil || again.ID != first.ID || again.Status != domain.ChangeApproved || !again.Replayed || first.Replayed {
 		t.Fatalf("replay: %+v, %v", again, err)
+	}
+	if again.Reason == nil || *again.Reason != "ok" {
+		t.Fatalf("replay did not preserve the original reason: %+v", again)
 	}
 	if got := outboxTypes(t, app); got != "dev.passage.party.change.requested.v1,dev.passage.party.change.approved.v1" {
 		t.Fatalf("replay emitted an event: %s", got)
