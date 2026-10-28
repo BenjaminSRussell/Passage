@@ -21,7 +21,7 @@ const (
 	callerUser = "00000000-0000-4000-8000-0000000000c1"
 )
 
-const purchasingOrder = `{"id":"` + evalPOID + `","number":"PO-1","legalEntityId":"","vendorId":"v-1","currency":"USD","approvalStatus":"APPROVED","documentStatus":"CONFIRMED","rowVersion":2,
+const purchasingOrder = `{"id":"` + evalPOID + `","number":"PO-1","legalEntityId":"","vendorId":"v-1","currency":"USD","approvalStatus":"APPROVED","documentStatus":"NONE","rowVersion":2,
 "lines":[{"lineNo":1,"productId":"p-1","unit":"EA","qty":"10","unitPrice":"250.00","priceUnit":"100","discountPct":"0","grossAmount":"25.00","lineAmount":"25.00","receivedQty":"10","invoicedQty":"0","status":"OPEN"}]}`
 
 func evaluateThrough(t *testing.T, status int, upstream string, wire bool) (*httptest.ResponseRecorder, *http.Request) {
@@ -83,7 +83,7 @@ func TestEvaluateReportsPurchasingFailures(t *testing.T) {
 		want     int
 		code     string
 	}{
-		{"unknown order", http.StatusNotFound, `{}`, true, http.StatusNotFound, "RCV-NF-003"},
+		{"unknown order", http.StatusNotFound, `{}`, true, http.StatusNotFound, "RCV-NF-004"},
 		{"caller lacks the duty", http.StatusForbidden, `{}`, true, http.StatusForbidden, "AUTH-0003"},
 		{"outage", http.StatusInternalServerError, `{}`, true, http.StatusServiceUnavailable, "COM-0503"},
 		{"no lookup configured", http.StatusOK, purchasingOrder, false, http.StatusServiceUnavailable, "COM-0503"},
@@ -108,8 +108,11 @@ func TestEvaluateRefusesUnusablePurchaseOrders(t *testing.T) {
 		code string
 	}{
 		{"draft order", domain.PurchaseOrder{ApprovalStatus: "DRAFT", DocumentStatus: "NONE", Lines: line("OPEN")}, "RCV-PO-001"},
-		{"cancelled order", domain.PurchaseOrder{ApprovalStatus: "APPROVED", DocumentStatus: "CANCELLED", Lines: line("OPEN")}, "RCV-PO-001"},
-		{"cancelled line", domain.PurchaseOrder{ApprovalStatus: "APPROVED", DocumentStatus: "CONFIRMED", Lines: line("CANCELLED")}, "RCV-PO-002"},
+		{"in review order", domain.PurchaseOrder{ApprovalStatus: "IN_REVIEW", DocumentStatus: "NONE", Lines: line("OPEN")}, "RCV-PO-001"},
+		{"rejected order", domain.PurchaseOrder{ApprovalStatus: "REJECTED", DocumentStatus: "NONE", Lines: line("OPEN")}, "RCV-PO-001"},
+		{"finalized order", domain.PurchaseOrder{ApprovalStatus: "FINALIZED", DocumentStatus: "INVOICED", Lines: line("OPEN")}, "RCV-PO-001"},
+		{"cancelled order", domain.PurchaseOrder{ApprovalStatus: "CANCELLED", DocumentStatus: "NONE", Lines: line("OPEN")}, "RCV-PO-001"},
+		{"cancelled line", domain.PurchaseOrder{ApprovalStatus: "CONFIRMED", DocumentStatus: "NONE", Lines: line("CANCELLED")}, "RCV-PO-002"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -124,6 +127,30 @@ func TestEvaluateRefusesUnusablePurchaseOrders(t *testing.T) {
 			if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), tc.code) {
 				t.Fatalf("got %d %s", rec.Code, rec.Body)
 			}
+			metrics := httptest.NewRecorder()
+			a.Metrics().ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+			if !strings.Contains(metrics.Body.String(), "receiving_evaluate_rejected_total 1\n") {
+				t.Fatalf("refusal not counted: %s", metrics.Body)
+			}
+		})
+	}
+}
+
+func TestEvaluateAcceptsApprovedAndConfirmedOrders(t *testing.T) {
+	for _, approval := range []string{"APPROVED", "CONFIRMED"} {
+		t.Run(approval, func(t *testing.T) {
+			po := domain.PurchaseOrder{ApprovalStatus: approval, DocumentStatus: "RECEIVED_PARTIAL", Currency: "USD", Lines: []domain.PurchaseOrderLine{{LineNo: 1, UnitPrice: decimal.RequireFromString("2.5"), PriceUnit: decimal.NewFromInt(1), Qty: decimal.NewFromInt(10), Status: "RECEIVED"}}}
+			a := api.New(memstore.New(), api.Ports{
+				Periods:        domain.FakePeriods{Status: domain.PeriodOpen},
+				Ledger:         &domain.FakeLedger{},
+				PurchaseOrders: domain.FakePurchaseOrders{Orders: map[string]domain.PurchaseOrder{evalPOID: po}},
+			})
+			r := httpx.NewRouter()
+			a.Register(r)
+			rec := do(r, http.MethodPost, evaluatePath, poBody(`"poLineNo":1`), "MatchingPolicyMaintain", true)
+			if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"MATCHED"`) {
+				t.Fatalf("got %d %s", rec.Code, rec.Body)
+			}
 		})
 	}
 }
@@ -132,7 +159,7 @@ func TestEvaluatePoReferenceValidation(t *testing.T) {
 	a := api.New(memstore.New(), api.Ports{
 		Periods:        domain.FakePeriods{Status: domain.PeriodOpen},
 		Ledger:         &domain.FakeLedger{},
-		PurchaseOrders: domain.FakePurchaseOrders{Orders: map[string]domain.PurchaseOrder{evalPOID: {ID: evalPOID, Currency: "USD", ApprovalStatus: "APPROVED", DocumentStatus: "CONFIRMED", Lines: []domain.PurchaseOrderLine{{LineNo: 1, PriceUnit: decimal.NewFromInt(1), Status: "OPEN"}}}}},
+		PurchaseOrders: domain.FakePurchaseOrders{Orders: map[string]domain.PurchaseOrder{evalPOID: {ID: evalPOID, Currency: "USD", ApprovalStatus: "CONFIRMED", DocumentStatus: "NONE", Lines: []domain.PurchaseOrderLine{{LineNo: 1, PriceUnit: decimal.NewFromInt(1), Status: "OPEN"}}}}},
 	})
 	r := httpx.NewRouter()
 	a.Register(r)

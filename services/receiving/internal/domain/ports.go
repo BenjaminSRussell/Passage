@@ -123,12 +123,13 @@ type PurchaseOrder struct {
 }
 
 const (
-	ApprovalApproved = "APPROVED"
-	StatusCancelled  = "CANCELLED"
+	ApprovalApproved  = "APPROVED"
+	ApprovalConfirmed = "CONFIRMED"
+	StatusCancelled   = "CANCELLED"
 )
 
 func (o PurchaseOrder) Usable() bool {
-	return o.ApprovalStatus == ApprovalApproved && o.DocumentStatus != StatusCancelled
+	return o.ApprovalStatus == ApprovalApproved || o.ApprovalStatus == ApprovalConfirmed
 }
 
 func (l PurchaseOrderLine) Usable() bool { return l.Status != StatusCancelled }

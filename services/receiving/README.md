@@ -74,7 +74,9 @@ Every POST except the tester requires `Idempotency-Key`; replays carry `Idempote
 | AP-DUP-001 | 409 | invoice number already posted for the vendor (case-insensitive) |
 | RCV-COR-001 | 409 | correction would take a line below its invoiced quantity |
 | RCV-IDM-001 | 409 | an earlier ledger posting for the receipt or invoice is unfinished (the ledger accepted it, the local commit did not) or differs; repeat the original request first |
-| RCV-NF-001 / RCV-NF-002 / RCV-NF-003 | 404 | receipt not found / receipt line has no open GR/IR item / pending posting not found |
+| RCV-NF-001 / RCV-NF-002 / RCV-NF-003 / RCV-NF-004 | 404 | receipt not found / receipt line has no open GR/IR item / pending posting not found / purchase order not found |
+| RCV-PO-001 | 422 | evaluate: purchase order is not APPROVED or CONFIRMED |
+| RCV-PO-002 | 422 | evaluate: purchase order line is cancelled |
 | RCV-LDG-001 | 422 | the ledger refused the reversal made by a resolve; not retryable |
 | COM-0503 | 503 | the ledger could not be reached while resolving a pending posting |
 | COM-0412 | 412 | `If-Match` differs from the receipt version |

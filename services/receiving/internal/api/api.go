@@ -240,6 +240,7 @@ func (a *API) evaluate(w http.ResponseWriter, r *http.Request) {
 	}
 	poFields, err := a.fillFromPurchaseOrder(r.Context(), &req)
 	if err != nil {
+		a.rejected.Add(1)
 		httpx.Fail(w, r, err)
 		return
 	}
@@ -275,19 +276,13 @@ func (a *API) fillFromPurchaseOrder(ctx context.Context, req *evaluateRequest) (
 	if !wanted || len(fields) > 0 {
 		return fields, nil
 	}
-	if len(fields) > 0 {
-		return fields, nil
-	}
 	if a.ports.PurchaseOrders == nil {
 		return nil, httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "purchase order lookup is not configured")
 	}
 	po, err := a.ports.PurchaseOrders.Get(ctx, req.PurchaseOrderID)
-	if err != nil {
-		a.rejected.Add(1)
-	}
 	switch {
 	case errors.Is(err, domain.ErrPurchaseOrderNotFound):
-		return nil, httpx.NewProblem(http.StatusNotFound, "RCV-NF-003", "purchase order not found")
+		return nil, httpx.NewProblem(http.StatusNotFound, "RCV-NF-004", "purchase order not found")
 	case errors.Is(err, domain.ErrPurchaseOrderForbidden):
 		return nil, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "purchase order is outside the caller's access")
 	case err != nil:
@@ -295,7 +290,7 @@ func (a *API) fillFromPurchaseOrder(ctx context.Context, req *evaluateRequest) (
 		return nil, httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "purchase order lookup unavailable")
 	}
 	if !po.Usable() {
-		return nil, httpx.NewProblem(http.StatusUnprocessableEntity, "RCV-PO-001", "purchase order is not approved or is cancelled")
+		return nil, httpx.NewProblem(http.StatusUnprocessableEntity, "RCV-PO-001", "purchase order is not approved or confirmed")
 	}
 	byNo := make(map[int]domain.PurchaseOrderLine, len(po.Lines))
 	for _, l := range po.Lines {
