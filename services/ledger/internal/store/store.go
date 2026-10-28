@@ -64,6 +64,10 @@ type Store interface {
 	CancelBatch(ctx context.Context, id string, version int) (Batch, error)
 	PostBatch(ctx context.Context, in PostBatchInput) (EntryResult, error)
 	ListLines(ctx context.Context, f LineFilter) (LinePage, error)
+	CreateLedgerSet(ctx context.Context, in LedgerSetInput) (LedgerSet, error)
+	GetLedgerSet(ctx context.Context, id string) (LedgerSet, error)
+	CreateAccountMapping(ctx context.Context, in AccountMapping) (AccountMapping, error)
+	PostSetEntry(ctx context.Context, setID string, in PostInput) (EntryResult, error)
 	Ping(ctx context.Context) error
 }
 

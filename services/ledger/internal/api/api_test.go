@@ -21,6 +21,7 @@ const (
 	testLedger = "0190a000-0000-7000-8000-000000000001"
 	testDoc    = "0190a000-0000-7000-8000-000000000002"
 	testEntry  = "0190a000-0000-7000-8000-000000000003"
+	testSet    = "0190a000-0000-7000-8000-000000000004"
 	allDuties  = dutyLedgerWrite + "," + dutyAccountWrite + "," + dutyRead + "," + dutyBalanceRead + "," + dutyPost + "," + dutyReverse + "," + dutyRebuild + "," + dutyReasonWrite
 )
 
@@ -55,6 +56,14 @@ type fakeStore struct {
 	// linePage answers ListLines; lineFilters records each filter it received.
 	linePage    store.LinePage
 	lineFilters []store.LineFilter
+	setInputs   []store.LedgerSetInput
+	mappings    []store.AccountMapping
+	setPosts    []setPost
+}
+
+type setPost struct {
+	setID string
+	in    store.PostInput
 }
 
 // batchCall is one journal batch store call as the handler made it.
@@ -253,6 +262,28 @@ func (f *fakeStore) PostBatch(_ context.Context, in store.PostBatchInput) (store
 		return store.EntryResult{}, f.err
 	}
 	return store.EntryResult{Entries: []store.Entry{{ID: testEntry}}, Idempotency: store.Idempotency{Key: in.Key, Replayed: f.replay}}, nil
+}
+
+func (f *fakeStore) CreateLedgerSet(_ context.Context, in store.LedgerSetInput) (store.LedgerSet, error) {
+	f.setInputs = append(f.setInputs, in)
+	return store.LedgerSet{ID: testSet, Code: in.Code, LeadingLedgerID: in.LeadingLedgerID}, f.err
+}
+
+func (f *fakeStore) GetLedgerSet(_ context.Context, id string) (store.LedgerSet, error) {
+	return store.LedgerSet{ID: id}, f.err
+}
+
+func (f *fakeStore) CreateAccountMapping(_ context.Context, in store.AccountMapping) (store.AccountMapping, error) {
+	f.mappings = append(f.mappings, in)
+	return in, f.err
+}
+
+func (f *fakeStore) PostSetEntry(_ context.Context, setID string, in store.PostInput) (store.EntryResult, error) {
+	f.setPosts = append(f.setPosts, setPost{setID: setID, in: in})
+	if f.err != nil {
+		return store.EntryResult{}, f.err
+	}
+	return store.EntryResult{Entries: []store.Entry{{ID: testEntry}, {ID: testEntry}}, Idempotency: store.Idempotency{Key: in.Key, Replayed: f.replay}}, nil
 }
 
 func (f *fakeStore) Ping(context.Context) error { return f.err }
