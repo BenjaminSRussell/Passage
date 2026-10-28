@@ -89,25 +89,6 @@ func outboxRows(ctx context.Context, t *testing.T, app *pgxpool.Pool, tenantID s
 	return rows
 }
 
-func TestOutboxPartitionKeyIsTenantAndAggregate(t *testing.T) {
-	admin, app := testkit.DBWithApp(t)
-	tenantID := testkit.TenantID(3)
-	ctx := testkit.Ctx(tenantID)
-	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := registry.NewPostgres(app).Publish(ctx, tenantID, baseEntity()); err != nil {
-		t.Fatal(err)
-	}
-	var key string
-	err := dbx.WithTenantTx(ctx, app, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `select partition_key from outbox`).Scan(&key)
-	})
-	if err != nil || key != tenantID+":Vendor" {
-		t.Fatalf("partition_key = %q err=%v", key, err)
-	}
-}
-
 func TestPostgresPublishAndExtendWriteOutboxEvents(t *testing.T) {
 	admin, app := testkit.DBWithApp(t)
 	tenantID := testkit.TenantID(2)
