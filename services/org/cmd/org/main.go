@@ -10,6 +10,8 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/org/internal/api"
@@ -57,11 +59,8 @@ func run(ctx context.Context, getenv func(string) string) error {
 	}
 	defer pool.Close()
 	if getenv("MIGRATE_ON_START") == "true" {
-		if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
-			return fmt.Errorf("migrate: %w", err)
-		}
-		if err := store.SeedReference(ctx, pool, migrations.Reference); err != nil {
-			return fmt.Errorf("seed reference data: %w", err)
+		if err := migrateAndSeed(ctx, pool, getenv("MIGRATE_DATABASE_URL")); err != nil {
+			return err
 		}
 	}
 	a := api.New(store.New(pool).WithTreeLimits(limits))
@@ -76,6 +75,24 @@ func run(ctx context.Context, getenv func(string) string) error {
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), router) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()
 	return <-errs
+}
+
+func migrateAndSeed(ctx context.Context, servePool *pgxpool.Pool, ownerURL string) error {
+	pool := servePool
+	if ownerURL != "" {
+		var err error
+		if pool, err = dbx.Connect(ctx, ownerURL); err != nil {
+			return fmt.Errorf("connect migration database: %w", err)
+		}
+		defer pool.Close()
+	}
+	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+		return fmt.Errorf("migrate: %w", err)
+	}
+	if err := store.SeedReference(ctx, pool, migrations.Reference); err != nil {
+		return fmt.Errorf("seed reference data: %w", err)
+	}
+	return nil
 }
 
 func addr(getenv func(string) string, key, fallback string) string {

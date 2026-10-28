@@ -32,6 +32,12 @@ data:
     \c passage_fx
     GRANT ALL ON SCHEMA public TO passage_app;
     SQL
+  40-org-db.sh: |
+    psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" <<SQL
+    CREATE ROLE passage_org_owner LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD '$ORG_OWNER_PASSWORD';
+    SELECT 'CREATE DATABASE passage_org OWNER passage_org_owner' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'passage_org')\gexec
+    GRANT CONNECT ON DATABASE passage_org TO passage_app;
+    SQL
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -51,7 +57,7 @@ spec:
         app.kubernetes.io/name: postgres
       annotations:
         # initdb scripts run only on an empty PGDATA; bump this whenever postgres-init changes so the pod restarts
-        passage.dev/init-rev: "3"
+        passage.dev/init-rev: "4"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -77,6 +83,9 @@ spec:
             - name: APP_PASSWORD
               valueFrom:
                 secretKeyRef: { name: hello-ledger-db, key: APP_PASSWORD }
+            - name: ORG_OWNER_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: hello-ledger-db, key: ORG_OWNER_PASSWORD, optional: true }
           ports:
             - { name: pg, containerPort: 5432 }
           readinessProbe:
@@ -127,5 +136,8 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: fx
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: org
       ports:
         - { protocol: TCP, port: 5432 }

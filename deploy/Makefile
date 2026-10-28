@@ -19,10 +19,11 @@ deploy-local:
 	kubectl --context k3d-$(CLUSTER) create namespace hello-ledger --dry-run=client -o yaml | kubectl --context k3d-$(CLUSTER) apply -f -
 	[ -n "$$(kubectl --context k3d-$(CLUSTER) -n hello-ledger get secret hello-ledger-db -o jsonpath='{.data.APP_PASSWORD}' 2>/dev/null)" ] || { \
 		kubectl --context k3d-$(CLUSTER) -n hello-ledger delete secret hello-ledger-db --ignore-not-found; \
-		pw=$$(openssl rand -hex 16); apw=$$(openssl rand -hex 16); \
+		pw=$$(openssl rand -hex 16); apw=$$(openssl rand -hex 16); opw=$$(openssl rand -hex 16); \
 		kubectl --context k3d-$(CLUSTER) -n hello-ledger create secret generic hello-ledger-db \
 			--from-literal=POSTGRES_PASSWORD=$$pw \
 			--from-literal=APP_PASSWORD=$$apw \
+			--from-literal=ORG_OWNER_PASSWORD=$$opw \
 			--from-literal=DATABASE_URL="postgres://passage_app:$$apw@postgres:5432/hello?sslmode=disable"; \
 		if kubectl --context k3d-$(CLUSTER) -n hello-ledger get deploy/postgres >/dev/null 2>&1; then \
 			kubectl --context k3d-$(CLUSTER) -n hello-ledger rollout restart deploy/postgres; fi; }
