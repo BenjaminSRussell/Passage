@@ -18,11 +18,12 @@ Store tests run only when `PASSAGE_TEST_DATABASE_URL` is set, against a role wit
 |---|---|
 | `DATABASE_URL` | required; Postgres URL, from a Secret in the cluster |
 | `MIGRATE_ON_START` | `true` applies embedded migrations at start (dev only) |
-| `LEDGER_URL` | base URL of the ledger service (`POST /v1/ledger/journal-entries:post`, 3 s timeout); required |
+| `LEDGER_URL` | base URL of the ledger service (`POST /v1/ledger/journal-entries`, 3 s timeout); required |
 | `CLOSE_URL` | base URL of `services/close` (`POST /v1/close/period-statuses:check`, 2 s timeout, source system `ap`); required |
+| `PURCHASING_URL` | base URL of `services/purchasing` (`GET /v1/procurement/purchase-orders/{id}`, 2 s timeout); the caller's own tenant, legal entity, user and duties are forwarded, so the caller needs `PurchaseOrderInquire`; required |
 | `POSTING_LEDGER_ID` | UUID of the ledger that receipt journals post to (`ledgerId` in the ledger's entry request); invoices carry their own `ledgerId`; required |
 | `POSTING_ACCOUNT_INVENTORY`, `POSTING_ACCOUNT_GRIR`, `POSTING_ACCOUNT_PPV`, `POSTING_ACCOUNT_VENDOR_CONTROL` | ledger account codes for receipt and invoice journals (posting profile); all four required |
-| `PASSAGE_ALLOW_FAKES` | `1` lets an empty `LEDGER_URL`, `CLOSE_URL` or posting account fall back to the in-memory fakes with a warning log; local development only, any other value fails start-up |
+| `PASSAGE_ALLOW_FAKES` | `1` lets an empty `LEDGER_URL`, `CLOSE_URL`, `PURCHASING_URL` or posting account fall back to the in-memory fakes with a warning log; local development only, any other value fails start-up |
 | `HTTP_ADDR` | default `:8080` |
 | `ADMIN_ADDR` | default `:9090`, serves `/metrics` only |
 
@@ -73,7 +74,9 @@ Every POST except the tester requires `Idempotency-Key`; replays carry `Idempote
 | AP-DUP-001 | 409 | invoice number already posted for the vendor (case-insensitive) |
 | RCV-COR-001 | 409 | correction would take a line below its invoiced quantity |
 | RCV-IDM-001 | 409 | an earlier ledger posting for the receipt or invoice is unfinished (the ledger accepted it, the local commit did not) or differs; repeat the original request first |
-| RCV-NF-001 / RCV-NF-002 / RCV-NF-003 | 404 | receipt not found / receipt line has no open GR/IR item / pending posting not found |
+| RCV-NF-001 / RCV-NF-002 / RCV-NF-003 / RCV-NF-004 | 404 | receipt not found / receipt line has no open GR/IR item / pending posting not found / purchase order not found |
+| RCV-PO-001 | 422 | evaluate: purchase order is not APPROVED or CONFIRMED |
+| RCV-PO-002 | 422 | evaluate: purchase order line is cancelled |
 | RCV-LDG-001 | 422 | the ledger refused the reversal made by a resolve; not retryable |
 | COM-0503 | 503 | the ledger could not be reached while resolving a pending posting |
 | COM-0412 | 412 | `If-Match` differs from the receipt version |

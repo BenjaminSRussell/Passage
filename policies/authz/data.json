@@ -79,6 +79,7 @@
       {"resource": "/v1/ledger/journal-names/*", "methods": ["GET"]},
       {"resource": "/v1/ledger/journal-batches", "methods": ["GET"]},
       {"resource": "/v1/ledger/journal-batches/*", "methods": ["GET"]},
+      {"resource": "/v1/ledger/ledger-sets/*", "methods": ["GET"]},
       {"resource": "/v1/reporting/runs/*/cells/*/*/lines", "methods": ["GET"]}
     ]},
     "ledger.balance.read": {"permissions": [{"resource": "/v1/ledger/balances", "methods": ["GET"]}]},
@@ -86,7 +87,8 @@
     "ledger.journal.post": {"permissions": [
       {"resource": "/v1/ledger/journal-entries", "methods": ["POST"]},
       {"resource": "/v1/ledger/validate", "methods": ["POST"]},
-      {"resource": "/v1/ledger/journal-batches/*/post", "methods": ["POST"]}
+      {"resource": "/v1/ledger/journal-batches/*/post", "methods": ["POST"]},
+      {"resource": "/v1/ledger/ledger-sets/*/journal-entries", "methods": ["POST"]}
     ]},
     "ledger.journal.postdirect": {"flag": true, "permissions": []},
     "ledger.journal.reverse": {"permissions": [{"resource": "/v1/ledger/journal-entries/*/reverse", "methods": ["POST"]}]},
@@ -105,7 +107,9 @@
     "ledger.dimension.write": {"permissions": [{"resource": "/v1/ledger/ledgers/*/dimension-values/*/*", "methods": ["PUT"]}]},
     "ledger.setup.write": {"permissions": [
       {"resource": "/v1/ledger/journal-names/*", "methods": ["PUT"]},
-      {"resource": "/v1/ledger/description-templates/*", "methods": ["PUT"]}
+      {"resource": "/v1/ledger/description-templates/*", "methods": ["PUT"]},
+      {"resource": "/v1/ledger/ledger-sets", "methods": ["POST"]},
+      {"resource": "/v1/ledger/ledgers/*/account-mappings", "methods": ["POST"]}
     ]},
     "Calculate tax": {"permissions": [{"resource": "/v1/tax/calculate", "methods": ["POST"]}]},
     "period.check": {"permissions": [{"resource": "/v1/close/period-statuses:check", "methods": ["POST"]}]},
@@ -309,6 +313,8 @@
       {"resource": "/v1/receiving/pending-postings/*/resolve", "methods": ["POST"]}
     ]},
     "settlement.read": {"permissions": [{"resource": "/v1/payables/settlements:preview", "methods": ["POST"]}]},
+    "payment-file.preview": {"permissions": [{"resource": "/v1/payables/payment-files:preview", "methods": ["POST"]}]},
+    "payment-status.parse": {"permissions": [{"resource": "/v1/payables/payments/status:parse", "methods": ["POST"]}]},
     "party.approve": {"permissions": [
       {"resource": "/v1/party/pending-changes/*:approve", "methods": ["POST"]},
       {"resource": "/v1/party/pending-changes/*:reject", "methods": ["POST"]}

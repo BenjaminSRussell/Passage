@@ -155,6 +155,17 @@ func TestPost_SendsHeadersAndBodyAndReturnsID(t *testing.T) {
 	}
 }
 
+func TestPostForwardsTheCallersDutiesAndUser(t *testing.T) {
+	client, got, _ := serve(t, http.StatusCreated, `{"journalEntryId":"je-1"}`)
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: "le-1", UserID: "u-1", Duties: map[string]struct{}{"ReceivingPost": {}, "ledger.journal.post": {}}})
+	if _, err := client.Post(ctx, testEntry()); err != nil {
+		t.Fatal(err)
+	}
+	if got.Header.Get("X-Passage-Duties") != "ReceivingPost,ledger.journal.post" || got.Header.Get("X-Passage-User") != "u-1" || got.Header.Get("X-Passage-Legal-Entity") != "le-1" {
+		t.Fatalf("headers %v", got.Header)
+	}
+}
+
 func TestPost_Failures(t *testing.T) {
 	tests := []struct {
 		name       string

@@ -19,6 +19,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/identity"
 )
 
 const (
@@ -161,10 +162,7 @@ func (c *Client) newRequest(ctx context.Context, path, idempotencyKey string, pa
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Idempotency-Key", idempotencyKey)
-	req.Header.Set(tenant.HeaderTenant, principal.TenantID)
-	if id := middleware.GetReqID(ctx); id != "" {
-		req.Header.Set(middleware.RequestIDHeader, id)
-	}
+	identity.Forward(req, principal)
 	return req, nil
 }
 

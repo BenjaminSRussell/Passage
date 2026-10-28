@@ -36,7 +36,7 @@ BV,Bouvet Island,false,
 BW,Botswana,false,
 BY,Belarus,false,
 BZ,Belize,false,
-CA,Canada,true,^[A-Z][0-9][A-Z] ?[0-9][A-Z][0-9]$
+CA,Canada,true,^[ABCEGHJ-NPRSTVXY][0-9][ABCEGHJ-NPRSTV-Z] ?[0-9][ABCEGHJ-NPRSTV-Z][0-9]$
 CC,Cocos (Keeling) Islands,false,
 CD,"Congo, The Democratic Republic of the",false,
 CF,Central African Republic,false,

@@ -13,7 +13,6 @@ import (
 	"sort"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/shopspring/decimal"
 
@@ -40,59 +39,6 @@ var (
 	}
 )
 
-type fixtureAddress struct {
-	StreetName string `json:"streetName"`
-	PostCode   string `json:"postCode"`
-	TownName   string `json:"townName"`
-	Country    string `json:"country"`
-}
-
-type fixtureParty struct {
-	Name    string         `json:"name"`
-	Address fixtureAddress `json:"address"`
-}
-
-type fixtureAccount struct {
-	IBAN    string `json:"iban"`
-	OtherID string `json:"otherId"`
-}
-
-type fixtureCreditor struct {
-	fixtureParty
-	fixtureAccount
-	BIC           string `json:"bic"`
-	RoutingNumber string `json:"routingNumber"`
-}
-
-type fixtureInvoice struct {
-	Number string `json:"number"`
-	Amount string `json:"amount"`
-}
-
-type fixturePayment struct {
-	Method        domain.PaymentMethodDTO `json:"method"`
-	ExecutionDate string                  `json:"executionDate"`
-	Number        string                  `json:"number"`
-	Amount        string                  `json:"amount"`
-	Currency      string                  `json:"currency"`
-	Creditor      fixtureCreditor         `json:"creditor"`
-	Invoices      []fixtureInvoice        `json:"invoices"`
-}
-
-type fixtureInput struct {
-	FileNumber    string                `json:"fileNumber"`
-	Created       string                `json:"created"`
-	Debtor        fixtureParty          `json:"debtor"`
-	DebtorAccount fixtureAccount        `json:"debtorAccount"`
-	DebtorBIC     string                `json:"debtorBic"`
-	Profile       domain.BankProfileDTO `json:"profile"`
-	Payments      []fixturePayment      `json:"payments"`
-}
-
-func (a fixtureAddress) domain() domain.PostalAddress {
-	return domain.PostalAddress{StreetName: a.StreetName, PostCode: a.PostCode, TownName: a.TownName, Country: a.Country}
-}
-
 func requireDecimal(t tester, raw string) decimal.Decimal {
 	t.Helper()
 	d, err := decimal.NewFromString(raw)
@@ -102,55 +48,21 @@ func requireDecimal(t tester, raw string) decimal.Decimal {
 	return d
 }
 
-func requireTime(t tester, layout, raw string) time.Time {
-	t.Helper()
-	parsed, err := time.Parse(layout, raw)
-	if err != nil {
-		t.Fatalf("time %q: %v", raw, err)
-	}
-	return parsed
-}
-
 func loadFixture(t tester, name string) domain.Pain001Input {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(pain001FixtureDir, name+".json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var fx fixtureInput
+	var dto domain.Pain001RequestDTO
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(&fx); err != nil {
+	if err := dec.Decode(&dto); err != nil {
 		t.Fatalf("fixture %s: %v", name, err)
 	}
-	profile, err := domain.ParseBankProfile(fx.Profile)
+	in, err := domain.ParsePain001Request(dto)
 	if err != nil {
-		t.Fatalf("fixture %s profile: %v", name, err)
-	}
-	in := domain.Pain001Input{
-		FileNumber: fx.FileNumber, Created: requireTime(t, time.RFC3339, fx.Created),
-		Debtor:        domain.Pain001Party{Name: fx.Debtor.Name, Address: fx.Debtor.Address.domain()},
-		DebtorAccount: domain.Pain001Account{IBAN: fx.DebtorAccount.IBAN, OtherID: fx.DebtorAccount.OtherID},
-		DebtorBIC:     fx.DebtorBIC, Profile: profile,
-	}
-	for _, p := range fx.Payments {
-		method, err := domain.ParsePaymentMethod(p.Method)
-		if err != nil {
-			t.Fatalf("fixture %s payment %s method: %v", name, p.Number, err)
-		}
-		out := domain.Pain001Payment{
-			Method: method, ExecutionDate: requireTime(t, "2006-01-02", p.ExecutionDate), Number: p.Number,
-			Amount: requireDecimal(t, p.Amount), Currency: p.Currency,
-			Creditor: domain.Pain001Creditor{
-				Party:   domain.Pain001Party{Name: p.Creditor.Name, Address: p.Creditor.Address.domain()},
-				Account: domain.Pain001Account{IBAN: p.Creditor.IBAN, OtherID: p.Creditor.OtherID},
-				BIC:     p.Creditor.BIC, RoutingNumber: p.Creditor.RoutingNumber,
-			},
-		}
-		for _, inv := range p.Invoices {
-			out.Invoices = append(out.Invoices, domain.Pain001Invoice{Number: inv.Number, Amount: requireDecimal(t, inv.Amount)})
-		}
-		in.Payments = append(in.Payments, out)
+		t.Fatalf("fixture %s: %v", name, err)
 	}
 	return in
 }

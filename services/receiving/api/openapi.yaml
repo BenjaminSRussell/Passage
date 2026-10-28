@@ -29,8 +29,11 @@ paths:
               schema: { $ref: '#/components/schemas/EvaluateResponse' }
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
-        '403': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003: duty missing, or the purchase order is outside the caller access.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-004: unknown purchase order.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'RCV-PO-001: purchase order not APPROVED or CONFIRMED; RCV-PO-002: purchase order line cancelled.' }
         '500': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem', description: 'COM-0503: purchase order lookup not configured or unavailable.' }
   /v1/receiving/arrivals:
     post:
       operationId: createArrival
@@ -421,10 +424,12 @@ components:
     Line:
       type: object
       additionalProperties: false
-      required: [qty, unitPrice, poUnitPrice]
+      required: [qty, unitPrice]
+      description: poUnitPrice is required unless poLineNo is given with a request-level purchaseOrderId; a body value always wins over the purchase order.
       properties:
+        poLineNo: { type: integer, minimum: 1, description: 'Line of the request purchaseOrderId. Fills poUnitPrice (net of discount, per price unit), poQtyRemaining and poCurrency when absent.' }
         qty: { type: [number, string], exclusiveMinimum: 0 }
-        unit: { type: string, description: Unit of measure, echoed in the response. }
+        unit: { type: string, description: 'Unit of measure, echoed in the response.' }
         unitPrice: { type: [number, string], minimum: 0 }
         poUnitPrice: { type: [number, string], minimum: 0 }
         poCurrency: { type: string, description: Absent means the invoice currency; a different value yields PRICE_VARIANCE with currencyMismatch. }
@@ -436,6 +441,7 @@ components:
       additionalProperties: false
       required: [currency, headerTotal, lines]
       properties:
+        purchaseOrderId: { type: string, format: uuid, description: 'Purchase order in services/purchasing that lines naming poLineNo are read from, with the caller identity.' }
         policy: { $ref: '#/components/schemas/Policy' }
         currency: { type: string, minLength: 3, maxLength: 3 }
         headerTotal: { type: [number, string] }

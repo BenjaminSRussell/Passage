@@ -22,7 +22,7 @@ has_route_permissions(spec) if {
 }
 
 test_all_seeded_duties_allow_their_declared_permissions if {
-	count(data.duties) == 92
+	count(data.duties) == 94
 	every duty, spec in data.duties {
 		has_route_permissions(spec)
 		every permission in spec.permissions {
@@ -53,6 +53,7 @@ segregation_denials := [
 	["ledger.journal.approve", "POST", "/v1/ledger/journal-batches/b1/post"],
 	["ledger.journal.post", "POST", "/v1/ledger/journal-entries/e1/reverse"],
 	["ledger.journal.reverse", "POST", "/v1/ledger/journal-entries"],
+	["ledger.journal.read", "POST", "/v1/ledger/ledger-sets/s1/journal-entries"],
 	["ReceivingMaintain", "POST", "/v1/receiving/receipts/r1:post"],
 	["ReceivingMaintain", "POST", "/v1/receiving/receipts/r1:correct"],
 	["ReceivingMaintain", "POST", "/v1/receiving/receipts/r1:cancel"],
@@ -76,6 +77,8 @@ segregation_grants := [
 	["ledger.journal.approve", "POST", "/v1/ledger/journal-batches/b1/approve"],
 	["ledger.journal.post", "POST", "/v1/ledger/journal-batches/b1/post"],
 	["ledger.journal.reverse", "POST", "/v1/ledger/journal-entries/e1/reverse"],
+	["ledger.journal.post", "POST", "/v1/ledger/ledger-sets/s1/journal-entries"],
+	["ledger.setup.write", "POST", "/v1/ledger/ledgers/l1/account-mappings"],
 	["ReceivingPost", "POST", "/v1/receiving/receipts/r1:post"],
 	["PurchaseOrderConfirm", "POST", "/v1/procurement/purchase-orders/p1:approve"],
 	["RFQAward", "POST", "/v1/procurement/rfqs/q1:award"],
@@ -364,4 +367,14 @@ test_view_exchange_rates_can_convert if {
 	}
 		with data.assignments as {"tenant-a": {"user-a": ["View exchange rates"]}}
 	result.allow
+}
+
+test_payment_file_preview_duty_allows_only_its_route if {
+	allowed("payment-file.preview", "POST", "/v1/payables/payment-files:preview")
+	not allowed("payment-file.preview", "POST", "/v1/payables/payments/status:parse")
+}
+
+test_payment_status_parse_duty_does_not_open_file_preview if {
+	allowed("payment-status.parse", "POST", "/v1/payables/payments/status:parse")
+	not allowed("payment-status.parse", "POST", "/v1/payables/payment-files:preview")
 }

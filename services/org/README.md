@@ -10,6 +10,8 @@ Run: `DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/org`. Test:
 |---|---|
 | `DATABASE_URL` | required; Postgres URL, from a Secret in the cluster |
 | `MIGRATE_ON_START` | `true` applies embedded migrations at start (dev only) |
+| `ORG_ADDRESS_VALIDATOR` | `null` (default) or `rules`; the adapter behind `POST /v1/org/addresses:normalize` |
+| `ORG_SEED_PACKAGE`, `ORG_SEED_TENANT_ID` | `demo-manufacturer` seeds that demo company into the tenant at start; idempotent on rerun; the tenant id is required with the package |
 | `HTTP_ADDR`, `ADMIN_ADDR` | default `:8080`, and `:9090` serving `/metrics` only |
 
 ## Reference data
