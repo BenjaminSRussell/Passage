@@ -4,11 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
-	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/purchasing/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/purchasing/internal/store"
@@ -21,10 +19,8 @@ func monthly(t *testing.T, per string) store.InvoicingPlanInput {
 
 func setPlanRowStatus(t *testing.T, ctx context.Context, pool *pgxpool.Pool, poID string, seq int, status string) {
 	t.Helper()
-	err := dbx.WithTenantTx(ctx, pool, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `update purchase_invoicing_plan_row set status = $3 where purchase_order_id = $1 and seq = $2`, poID, seq, status)
-		return err
-	})
+	admin, _ := adminPools.Load(pool)
+	_, err := admin.(*pgxpool.Pool).Exec(ctx, `update purchase_invoicing_plan_row set status = $3 where purchase_order_id = $1 and seq = $2`, poID, seq, status)
 	if err != nil {
 		t.Fatal(err)
 	}

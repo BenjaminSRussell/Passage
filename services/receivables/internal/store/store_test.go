@@ -3,9 +3,11 @@ package store
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
@@ -28,7 +30,18 @@ func setup(t *testing.T) *Postgres {
 	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
+	adminPools.Store(app, admin)
 	return New(app)
+}
+
+var adminPools sync.Map
+
+func execAdmin(t *testing.T, s *Postgres, sql string, args ...any) {
+	t.Helper()
+	admin, _ := adminPools.Load(s.pool)
+	if _, err := admin.(*pgxpool.Pool).Exec(context.Background(), sql, args...); err != nil {
+		t.Fatalf("exec %q: %v", sql, err)
+	}
 }
 
 func ptr[T any](v T) *T { return &v }
