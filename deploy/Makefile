@@ -9,7 +9,7 @@ PYTHON ?= python3
 IMAGE_DIGEST ?=
 SKIP_VERIFY ?=
 
-.PHONY: deploy-local destroy-local promote-stage rollback-stage test-stage-release test-policies
+.PHONY: deploy-local destroy-local promote-stage rollback-stage promote-prod rollback-prod test-stage-release test-policies
 
 deploy-local:
 	tofu -chdir=tofu/cluster init -input=false
@@ -43,6 +43,14 @@ promote-stage:
 
 rollback-stage:
 	$(PYTHON) scripts/stage_release.py rollback --env stage
+
+promote-prod:
+	@test -n "$(IMAGE_DIGEST)" || { echo "Usage: make -C deploy promote-prod IMAGE_DIGEST=<the digest stage pins>" >&2; exit 2; }
+	@test "$(SKIP_VERIFY)" != "1" || { echo "SKIP_VERIFY is not allowed for prod" >&2; exit 2; }
+	$(PYTHON) scripts/stage_release.py promote --to prod --digest "$(IMAGE_DIGEST)"
+
+rollback-prod:
+	$(PYTHON) scripts/stage_release.py rollback --env prod
 
 test-stage-release:
 	$(PYTHON) -m unittest discover -s scripts -p 'test_*.py' -v
