@@ -108,7 +108,7 @@ func (v RuleAddressValidator) Suggest(ctx context.Context, a PostalAddress) ([]A
 		}
 	}
 	if leadingZero[a.CountryCode] {
-		try("0"+a.PostalCode, "postal code is missing a leading zero")
+		try(rule.layout(compactPostal("0"+a.PostalCode)), "postal code is missing a leading zero")
 	}
 	if compact := []byte(compactPostal(a.PostalCode)); a.CountryCode == "CA" && len(compact) == 6 {
 		for _, i := range []int{1, 3, 5} {
