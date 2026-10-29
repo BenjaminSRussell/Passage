@@ -5,7 +5,7 @@ import { fetchHistory, publishRate, type HistoryEntry, type RateEntryInput } fro
 import { ApiFailure, fieldsOwnFailure, mapServerFields, useFocusFirstInvalid, withoutFields } from "./formSupport";
 import { RateTypeField } from "./RateTypeField";
 import styles from "./pages.module.css";
-import { deviationBeyondLimit, DEVIATION_LIMIT_PERCENT, emptyEntry, formatRate, normalizeCurrency, validateEntry, type Deviation, type Errors, type RateEntry } from "./validate";
+import { deviationBeyondLimit, DEVIATION_LIMIT_PERCENT, emptyEntry, formatRate, normalizeCurrency, SAME_CURRENCY_ERROR, validateEntry, type Deviation, type Errors, type RateEntry } from "./validate";
 
 const DUTY = "Maintain exchange rates";
 const FIELDS = ["rateType", "from", "to", "validFrom", "rate"] as const;
@@ -72,8 +72,9 @@ export function RateEntryPage() {
   function change(next: Partial<RateEntry>) {
     setValues({ ...values, ...next });
     const changedFields = Object.keys(next);
-    if ("from" in next) changedFields.push("to");
-    setErrors(withoutFields(errors, changedFields));
+    const cleared = withoutFields(errors, changedFields);
+    if ("from" in next && cleared.to === SAME_CURRENCY_ERROR) delete cleared.to;
+    setErrors(cleared);
     setSaved(null);
     setReview(null);
     idempotencyKey.current = null;

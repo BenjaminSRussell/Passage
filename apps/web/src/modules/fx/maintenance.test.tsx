@@ -3,6 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { json, pageViolations, renderAt, server, useFakeServer, type Reply } from "./testServer";
 
+import { emptyEntry, validateEntry } from "./validate";
+
 useFakeServer();
 
 const closing = { id: "t1", code: "CLOSING", name: "Closing", allowInverse: true };
@@ -340,11 +342,27 @@ describe("rate entry page", () => {
     await user.clear(screen.getByLabelText("From currency"));
     await user.type(screen.getByLabelText("From currency"), "GBP");
     expect(screen.queryByText("Choose a different currency from the first one.")).not.toBeInTheDocument();
+    expect(screen.getByText("Use at most 10 decimal places.")).toBeInTheDocument();
     await user.clear(screen.getByLabelText("Rate"));
     await user.type(screen.getByLabelText("Rate"), "12345678901");
     await user.click(screen.getByRole("button", { name: "Save rate" }));
     expect(await screen.findByText("Use at most 10 digits before the decimal point.")).toBeInTheDocument();
     expect(server.calls.some((c) => c.method === "POST")).toBe(false);
+  });
+
+  it("keeps a format error on the to currency when the from currency is edited", async () => {
+    answer({});
+    const user = userEvent.setup();
+    renderAt("/fx/rate-entry");
+    await fillEntry(user, "1.2");
+    await user.clear(screen.getByLabelText("To currency"));
+    await user.type(screen.getByLabelText("To currency"), "US");
+    await user.click(screen.getByRole("button", { name: "Save rate" }));
+    const toError = validateEntry({ ...emptyEntry, to: "US" }).to as string;
+    expect(await screen.findByText(toError)).toBeInTheDocument();
+    await user.clear(screen.getByLabelText("From currency"));
+    await user.type(screen.getByLabelText("From currency"), "GBP");
+    expect(screen.getByText(toError)).toBeInTheDocument();
   });
 
   it("reports that an identical rate was already stored", async () => {
