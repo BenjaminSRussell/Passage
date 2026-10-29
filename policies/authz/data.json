@@ -315,6 +315,8 @@
     "settlement.read": {"permissions": [{"resource": "/v1/payables/settlements:preview", "methods": ["POST"]}]},
     "payment-file.preview": {"permissions": [{"resource": "/v1/payables/payment-files:preview", "methods": ["POST"]}]},
     "payment-status.parse": {"permissions": [{"resource": "/v1/payables/payments/status:parse", "methods": ["POST"]}]},
+    "aging.read": {"permissions": [{"resource": "/v1/payables/aging", "methods": ["GET"]}]},
+    "aging.reconcile": {"permissions": [{"resource": "/v1/payables/aging:reconcile", "methods": ["GET"]}]},
     "party.write": {"permissions": [
       {"resource": "/v1/party/tax-registrations:validate", "methods": ["POST"]},
       {"resource": "/v1/party/parties", "methods": ["POST"]},

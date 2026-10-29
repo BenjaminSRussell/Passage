@@ -15,6 +15,8 @@ import (
 	"github.com/BenjaminSRussell/passage/services/payables"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/api"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/payables/internal/ledger"
+	"github.com/BenjaminSRussell/passage/services/payables/internal/store"
 )
 
 const (
@@ -56,7 +58,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return err
 	}
 	defer validator.Close()
-	a := api.New(pool, validator, time.Now)
+	a := api.New(pool, validator, time.Now).WithAging(store.New(pool), ledgerBalances(getenv), getenv("AP_CONTROL_ACCOUNT"))
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
@@ -68,6 +70,18 @@ func run(ctx context.Context, getenv func(string) string) error {
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), a.Instrument(router)) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()
 	return <-errs
+}
+
+func ledgerBalances(getenv func(string) string) api.LedgerBalances {
+	url := getenv("LEDGER_URL")
+	if url == "" {
+		return nil
+	}
+	timeout := ledger.Timeout
+	if v, err := time.ParseDuration(getenv("LEDGER_TIMEOUT")); err == nil && v > 0 {
+		timeout = v
+	}
+	return ledger.New(url, &http.Client{Timeout: timeout})
 }
 
 func addr(getenv func(string) string, key, fallback string) string {

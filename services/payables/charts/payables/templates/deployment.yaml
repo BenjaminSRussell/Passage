@@ -36,6 +36,8 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.databaseSecret }}
                   key: DATABASE_URL
+            - { name: LEDGER_URL, value: {{ .Values.ledgerUrl | quote }} }
+            - { name: AP_CONTROL_ACCOUNT, value: {{ .Values.controlAccount | quote }} }
           volumeMounts:
             - { name: tmp, mountPath: /tmp }
           ports:
