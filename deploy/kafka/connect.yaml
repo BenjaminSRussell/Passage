@@ -87,7 +87,7 @@ spec:
     topic.prefix: passage.platform
     slot.name: passage_outbox_batch
     publication.name: passage_outbox_batch
-    publication.autocreate.mode: filtered
+    publication.autocreate.mode: disabled
     table.include.list: public.outbox
     snapshot.mode: initial
     tombstones.on.delete: false
@@ -146,7 +146,7 @@ spec:
     topic.prefix: passage.metadata
     slot.name: passage_outbox_metadata
     publication.name: passage_outbox_metadata
-    publication.autocreate.mode: filtered
+    publication.autocreate.mode: disabled
     table.include.list: public.outbox
     snapshot.mode: initial
     tombstones.on.delete: false
