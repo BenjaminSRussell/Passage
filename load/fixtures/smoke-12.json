@@ -2,7 +2,7 @@
   "fixture": "fx-smoke-12",
   "version": 2,
   "source": "PRD 9.50.9 fx-smoke-12: the 12 core processes run after cutover and after failover (FR-50.6 step 6, AC-50.4)",
-  "notes": "Each process is an ordered list of API steps and a final assertion. Paths go through the gateway (/api/v1/<prefix> is rewritten to the service's /v1/<prefix>, deploy/gateway) and are checked against services/*/api/openapi.yaml by load/tools/test_smoke12.py. {id} is the id returned by an earlier step of the same process. A step marked 'unverified' has no route on main; its reason names the gap, and a runner must count it as failed until the owning wave publishes the route. A process passes only when every step succeeds and the final assertion holds. Request bodies come from the fx-load-10k pool (not built yet).",
+  "notes": "Each process is an ordered list of API steps and a final assertion. Paths go through the gateway (/api/v1/<prefix> is rewritten to the service's /v1/<prefix>, deploy/gateway) and are checked against services/*/api/openapi.yaml by load/tools/test_smoke12.py. {id} is the id returned by an earlier step of the same process. A step marked 'unverified' has no route on main; its reason names the gap, and a runner must count it as failed until the owning wave publishes the route. A process passes only when every step succeeds and the final assertion holds. Request bodies come from the fx-load-10k pool (not built yet). The runner is load/tools/smoke12.py.",
   "processes": [
     {
       "id": "P01",
@@ -109,8 +109,7 @@
       "id": "P10",
       "name": "Dashboard",
       "steps": [
-        {"action": "load_dashboard", "method": "GET", "path": "/api/v1/analytics/dashboards/executive",
-         "unverified": "analytics has no dashboard route on main (same gap as UNVERIFIED_PATHS in load/k6/scenarios.js)"}
+        {"action": "load_dashboard", "method": "GET", "path": "/api/v1/analytics/dashboards/executive"}
       ],
       "assert": "dashboard responds within the dashboard SLO (p95 < 2 s) and its revenue equals the GL"
     },

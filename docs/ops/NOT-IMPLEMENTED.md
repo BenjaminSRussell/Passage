@@ -1,11 +1,11 @@
-# NOT-IMPLEMENTED — PSG-50 (wave 50), slices 1 to 3
+# NOT-IMPLEMENTED — PSG-50 (wave 50), slices 1 to 4
 
 Wave 50 owns only `deploy/multi-region/`, `load/` and `docs/ops/`, and its ownership entry lists no web
 module. It has no service directory, so there is no Go module, database table, OpenAPI/AsyncAPI file or
 web screen in this slice. Items below are either later slices of PSG-50 or handoffs to the wave that owns
 the code or the infrastructure.
 
-Status key: **built** = in slices 1 to 3. **later slice of PSG-50** = same wave, next slice. **handoff** =
+Status key: **built** = in slices 1 to 4. **later slice of PSG-50** = same wave, next slice. **handoff** =
 needs another owner or an out-of-path edit.
 
 ## Deliverable 1: performance campaign
@@ -17,11 +17,13 @@ needs another owner or an out-of-path edit.
 | Journal post "sustained 5k lines/s" (FR-50.1 SLO table) | later slice of PSG-50 | 18x the S1 rate; needs a separate peak-throughput run, so `slo.json` lists it under `notChecked` |
 | Soak harness: `load/k6/soak.js` (S1 and S3 at 50%, 24 h), `soak` profile in `slo.json`, `check_campaign.py --profile soak` and the memory gate `load/tools/check_soak.py` (growth <= 10%, run spans 24 h) | built | `python3 -m unittest discover -s load/tools`, `node --test load/k6` |
 | Execute the 24 h soak and publish the result | later slice of PSG-50 | needs the campaign environment and a per-service `container_memory_working_set_bytes` export |
-| Fixture `fx-load-10k` (masked copy plus synthetic growth to 10k users, 40M lines) and the k6 data pool it writes | later slice of PSG-50 | needs the first customer's masked extract (FR-48.26); `load/k6/data/pool.example.json` fixes the pool's shape |
+| Synthetic growth part of `fx-load-10k`: deterministic, balanced journal-line CSV (decimal-string amounts, one currency per journal, spread over 36 periods) with a sha256 manifest | built | `load/tools/gen_fixture.py`, tests in `load/tools/test_gen_fixture.py` |
+| Rest of `fx-load-10k`: the masked copy of the first customer, the loader that brings the synthetic CSV into the ledger, the 10k users, and the k6 data pool written from it | later slice of PSG-50 | needs the first customer's masked extract (FR-48.26); `load/k6/data/pool.example.json` fixes the pool's shape |
 | Fixture `fx-smoke-12` (12 core processes as ordered API steps with a final assertion) | built | `load/fixtures/smoke-12.json`; `load/tools/test_smoke12.py` checks every step against the owning service's OpenAPI file, so a renamed route fails the test |
-| `fx-smoke-12` runner (executes the steps, checks the final assertions) | later slice of PSG-50 | needs request bodies from `fx-load-10k` ids and a target environment |
-| Smoke steps with no route on main: payment run, bank statement matching, payroll run posting, dashboard, copilot query | handoff (payables, treasury, payroll, analytics wave 46, agents wave 47 owners) | marked `unverified` with the reason in `smoke-12.json`; the runner must treat them as failed until the routes exist |
-| Routes for dashboard load, warehouse scan, inventory close, FX revaluation and lakehouse freshness | handoff (analytics wave 46, warehouse, inventory, ledger owners) | no such route on main; `UNVERIFIED_PATHS` in `scenarios.js` keeps them so the campaign fails until they exist. The other scenario routes and bodies follow the services' OpenAPI files |
+| `fx-smoke-12` runner: runs the steps in order with `Idempotency-Key` on writes, fills `{id}` from the latest response and other placeholders from `--params`, never sends an `unverified` step, passes a process only when its steps pass and its assertion is verified | built | `load/tools/smoke12.py`, tests in `load/tools/test_smoke12_runner.py` |
+| `fx-smoke-12` final-assertion verifiers (AP/AR subledger = journal, hash chain head, WIP zero, ...) and request bodies; the run in the new primary (FR-50.6 step 6) | later slice of PSG-50 | verifiers read the services' data in the campaign environment; bodies come from `fx-load-10k` ids. Until then a real run fails |
+| Smoke steps with no route on main: payment run, bank statement matching, payroll run posting, copilot query | handoff (payables, treasury, payroll, agents wave 47 owners) | marked `unverified` with the reason in `smoke-12.json`; the runner fails the process without sending the step. The dashboard step now uses analytics `getDashboard` (wave 46) |
+| Routes for warehouse scan, inventory close, FX revaluation and lakehouse freshness | handoff (analytics wave 46, warehouse, inventory, ledger owners) | no such route on main; `UNVERIFIED_PATHS` in `scenarios.js` keeps them so the campaign fails until they exist. The dashboard call moved to `PATHS` (`GET /api/v1/analytics/dashboards/{id}`, the pool's `dashboardId`) |
 | Postgres journal partitioning (month range, hash 16) and inventory/audit partitioning | handoff (ledger, inventory, platform owners) | DDL lives in each service's migrations; out of path |
 | PgBouncer transaction pooling and `pg_stat_statements` on the CNPG cluster (FR-50.2) | built | `Pooler` and parameters in `deploy/multi-region/chart/templates/cnpg-cluster.yaml` |
 | Services connecting through the pooler | handoff (each service chart owner, secret management) | service charts read `DATABASE_URL` from a secret; it must name `passage-pg-pooler-rw` while `MIGRATE_DATABASE_URL` keeps the direct `-rw` service (DDL and advisory locks need a session) |
@@ -48,11 +50,14 @@ needs another owner or an out-of-path edit.
 | Temporal multi-cluster replication | handoff (wave 4 workflow owner) | Temporal is wave 4's deploy |
 | Object-store replication for lakehouse and documents | handoff (deployment-cicd, wave 46 analytics) | out of path |
 | Game-day baseline manifest and post-failover verifier (`deploy/multi-region/gameday/baseline.py`, fx-gameday) | built | captures chain head, row counts, standby-cluster offsets, sequences; verifies extension, not replacement, against the digest recorded at capture (BR-50.3/50.4) |
-| Facts collector that reads chain heads, row counts, offsets and sequences from a live region into the facts JSON | later slice of PSG-50 | needs two live regions and read access to each service's database; the shape is fixed by `validate_facts` in `baseline.py` |
+| Facts collector: runs the operator's ledger, row-count, sequence and checkpoint queries through `psql` in read-only transactions, reads Kafka end offsets with the named command and cluster, and writes facts `baseline.py` accepts | built | `deploy/multi-region/gameday/collect.py`, tests in `test_collect.py` |
+| Collector spec for the real schemas (ledger chain, row counts per domain, fiscal sequences) and the offsets command | later slice of PSG-50 | the tables belong to the ledger, inventory and numbering waves; the spec is written against the game-day environment |
 | Cross-region Postgres failover drill with measured RTO/RPO (AC2) | later slice of PSG-50 | needs two live regions |
 | Game-day scheduled Temporal workflow with human tasks | later slice of PSG-50 | needs `passage-ops` (handoff above) |
 | Fail-back procedure dry run | later slice of PSG-50 | needs two live regions |
-| Chaos tests: Kafka broker loss, Postgres primary kill | later slice of PSG-50 | needs a cluster |
+| Chaos experiments: Kafka broker loss and Postgres primary kill as Chaos Mesh `PodChaos` (one pod, 5 min budget, runbook link) | built | `deploy/multi-region/chaos/`; `test_chaos.py` checks the selectors against `deploy/kafka/kafka.yaml` and the chart values |
+| Run the chaos experiments during a campaign and record "no failed postings, recovery < 5 min" (PRD 9.50.9) | later slice of PSG-50 | needs the campaign cluster |
+| Chaos Mesh installation | handoff (deployment-cicd) | the operator chart is not in wave 50's paths |
 
 ## Deliverable 3: operations
 | Item | Status | Reason |
@@ -71,8 +76,9 @@ needs another owner or an out-of-path edit.
 | Expand/contract linter (OPS-1707, BR-50.7) | built | `deploy/multi-region/tools/expand_contract_lint.py`: a release's new migrations (drops and renames of columns, tables, views) are checked against the code of this release (`--code`) and of the previous release (`--previous-code`, N-1), which still runs during the rolling deploy; `python3 -m unittest discover -s deploy/multi-region/tools` |
 | Run the expand/contract linter on every release in CI | handoff (deployment-cicd CI owner) | CI pipeline is not in wave 50's paths; the job checks out the previous release tag and passes it as `--previous-code` |
 | N / N-1 OpenAPI compatibility checker (FR-50.7, AC-50.5): removed operations, parameters, media types, 2xx responses and fields; new required inputs; narrowed request types and enums; widened response types; response fields made optional | built | `deploy/multi-region/tools/openapi_compat.py`, tests in `test_openapi_compat.py`. JSON input only (stdlib); `oneOf`/`anyOf` and external `$ref` are not compared |
-| Run `openapi_compat.py` for every service between the previous release tag and the release commit, and keep the report as release evidence | handoff (deployment-cicd CI owner) | needs the release pipeline (wave 1) to check out N-1 and convert the YAML specs to JSON |
-| CI jobs for `helm lint deploy/multi-region/chart`, `test_chart.py`, the Python tools' tests and `node --test load/k6` | handoff (deployment-cicd CI owner) | `.github/workflows` is not in wave 50's paths |
+| Release-level N/N-1 evidence: `openapi_compat` over every service's N-1 and N JSON, one evidence file per release with breaking changes and warnings | built | `deploy/multi-region/tools/compat_evidence.py`, tests in `test_compat_evidence.py`; `check_release_notes.py --compat-evidence` reads it |
+| Run `compat_evidence.py` on every release between the previous release tag and the release commit | handoff (deployment-cicd CI owner) | needs the release pipeline (wave 1) to check out N-1 and convert the YAML specs to JSON; the runner's exit status is the gate |
+| CI jobs for `helm lint deploy/multi-region/chart`, `test_chart.py`, the Python tools' tests (including `docs/ops/tools` and `deploy/multi-region/chaos`), `docs/ops/tools/check_docs.py` and `node --test load/k6` | handoff (deployment-cicd CI owner) | `.github/workflows` is not in wave 50's paths |
 | Zero-downtime upgrade evidence: a rolling deploy of N+1 with an expand migration and zero failed requests from N clients (AC-50.5) | later slice of PSG-50 | needs the release pipeline (wave 1) and a running environment |
 | Tenant provisioning API and automation (<= 15 min) | handoff (ops service) | steps documented in `tenant-provisioning.md` |
 | Metrics `passage_ops_failover_in_progress`, `passage_ops_region_fenced`, `passage_license_days_to_expiry` | handoff (ops service) | alert rules reference them; the producer is the ops service |
@@ -83,11 +89,15 @@ needs another owner or an out-of-path edit.
 | Administrator guide for platform operators (regions, failover, tenants, licenses, releases, alerts, error codes): `administrator-guide.md` | built | describes operator procedures and targets; the `/api/v1/ops/*` steps route to runbooks until the ops service ships |
 | Tenant administrator guide: company setup, users, roles and module admin screens | later slice of PSG-50 | needs the shipped admin surfaces of waves 1–5 and the module screens |
 | Implementer guide (migration, localization, cutover) | later slice of PSG-50 | depends on waves 47–49 |
-| API reference generated from OpenAPI/AsyncAPI, 0 undocumented operations | later slice of PSG-50 | generation runs in the docs site build (`passage-docs`), which is not built |
+| API reference generator and undocumented-operation gate for OpenAPI: one Markdown page per service; an operation is documented with an operationId, a summary or description, `x-passage-duty`, a 2xx response and a description on every response (probe and `/internal/` routes are skipped) | built | `docs/ops/tools/api_reference.py`, tests in `test_api_reference.py` |
+| 0 undocumented operations (AC-50.11). Run on main on 2026-10-29 over 106 specs: 328 of 1359 operations undocumented. 278 lack a summary or description (org 97, costacct 32, product 23, engineering 22, batch 20, eam 19, budgeting 15, ledger 14, and 36 in 11 more services); 50 purchasing operations lack `x-passage-duty`; 11 product and 1 migration operations declare only a `default` response | handoff (each service owner) | the specs are in the services' paths. `services/party/api/openapi.yaml` and `services/print/api/openapi.yaml` are not valid YAML (flow mapping at party line 260, unquoted colon at print line 124), so no reference can be generated for them |
+| AsyncAPI reference pages (event catalogue) | later slice of PSG-50 | the generator reads OpenAPI only |
+| Rendering the reference pages in the docs site build (`passage-docs`) | handoff (deployment-cicd) | the site is not built; `--out` writes the pages the site picks up |
 | Functional guides, one per module for phases 1–8 | later slice of PSG-50 | depends on module completion |
 | Training curriculum, 6 role tracks with labs and assessments (FR-50.11) | built | `docs/ops/training-curriculum.md` |
 | Lab verifiers and learner records against role grants | later slice of PSG-50 | the curriculum names them; they need the sandbox tier and the ops service |
-| Docs site link check (0 broken links) | handoff (deployment-cicd) | the docs site is not built |
+| Link and runbook check for `docs/ops`: relative links and anchors resolve, every alert's `runbook_url` page exists, no stray files in `runbooks/` | built | `docs/ops/tools/check_docs.py`, tests in `test_check_docs.py` |
+| Docs site link check over the whole site (0 broken links, AC-50.11) | handoff (deployment-cicd) | the docs site is not built; `check_docs.py --root` can run on any Markdown tree |
 | Operations guide (this directory) | built | `docs/ops/` |
 
 ## Deliverable 5: go-live and v1.0
@@ -97,7 +107,9 @@ needs another owner or an out-of-path edit.
 | Go/no-go checklist (14 items) | built as a template | `go-live-checklist.md`; decision recording needs `cutover.decision.recorded` |
 | Public v1.0 release: tag `v1.0.0`, cosign signature, SPDX SBOM, charts and images by digest (AC4) | later slice of PSG-50 | release pipeline is wave 1 / deployment-cicd |
 | Licensing: signed license file verification (Ed25519), user types, GRACE/EXPIRED states | handoff (ops service) | verification code needs a service; the state rules are in the runbook |
-| Release notes, pricing publication | later slice of PSG-50 | licensing model and pricing unit are open decisions (PRD 9.50.12, questions 2 and 3) |
+| Release notes template and gate (PRD 9.50.15): version title, image and chart digests, features by module, migrations, breaking changes `None` (N-1), CVE fixes, rollback; no placeholder left; agrees with the compat evidence | built | `docs/ops/release-notes-template.md`, `docs/ops/tools/check_release_notes.py`, tests in `test_check_release_notes.py` |
+| Release notes of v1.0.0 and their HTML and PDF renderings | later slice of PSG-50 | written at release time; rendering belongs to the docs site build (deployment-cicd) |
+| Pricing publication | later slice of PSG-50 | licensing model and pricing unit are open decisions (PRD 9.50.12, questions 2 and 3) |
 | Roadmap for v2 opened (AC4) | later slice of PSG-50 | after v1.0 tag |
 
 ## Acceptance criteria
@@ -108,7 +120,7 @@ needs another owner or an out-of-path edit.
 | AC3 first customer month-end in production | later slice of PSG-50 | customer go-live |
 | AC4 v1.0 tagged, signed, docs | later slice of PSG-50 | release |
 | AC5 every deliverable has code or a row here | built | this file |
-| AC6 go vet / go test in owned Go modules, web vitest/tsc, OpenAPI/AsyncAPI, Helm lint | partly built | no owned Go module, web module or API exists in this wave. `helm lint` passes with each region file; `deploy/multi-region/test_chart.py`, the Python tools' tests (`load/tools`, `deploy/multi-region/tools`, `deploy/multi-region/gameday`) and `load/k6/lib.test.mjs` pass but no platform check runs them (CI row above) |
+| AC6 go vet / go test in owned Go modules, web vitest/tsc, OpenAPI/AsyncAPI, Helm lint | partly built | no owned Go module, web module or API exists in this wave. `helm lint` passes with each region file; `deploy/multi-region/test_chart.py`, the Python tools' tests (`load/tools`, `deploy/multi-region/tools`, `deploy/multi-region/gameday`, `deploy/multi-region/chaos`, `docs/ops/tools`) and `load/k6/lib.test.mjs` pass but no platform check runs them (CI row above) |
 
 ## Coverage closure notes (PRD 9.50.21)
 Inventory rows cited there (tenant provisioning, DR game days, masked refresh, license reports) map to

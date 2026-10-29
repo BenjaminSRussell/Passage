@@ -32,6 +32,16 @@ that mirrors every Passage topic into it. DNS fails over with a 60 s TTL. Active
   facts: the chain was extended and the hash at the baseline sequence matches (BR-50.3), rows and offsets did
   not go down and were read from the same cluster, sequences are gap-free and cover the whole baseline range
   (BR-50.4). Exit 0 only when every check passes. Tests: `gameday/test_baseline.py`.
+- `gameday/collect.py` — the collector that writes those facts from a live region. The operator's spec names
+  the ledger, row-count and sequence queries (their tables belong to other waves), the Kafka cluster the
+  offsets are read from and the offsets command. Queries run through `psql` in read-only transactions with
+  the libpq `PG*` environment. After failover, `--baseline baseline.json` reads the hash at each tenant's
+  baseline sequence (`ledger.checkpoint_sql`), which `verify` needs. Tests: `gameday/test_collect.py`.
+- `chaos/` — Chaos Mesh `PodChaos` experiments for the PRD 9.50.9 chaos row: one Kafka broker of
+  `deploy/kafka`'s cluster, and the primary of this chart's CNPG cluster, each with a 5 min recovery budget
+  and a runbook link. Run them in the PRIMARY region during a campaign; `chaos/test_chaos.py` checks the
+  selectors against `deploy/kafka/kafka.yaml` and `chart/values.yaml`. Chaos Mesh itself is not installed by
+  this chart.
 - `tools/expand_contract_lint.py` — OPS-1707. Fails a release whose new migrations drop or rename a column,
   table or view that this release's code or the previous release's (N-1, still running during the rolling
   deploy) references (BR-50.7). Tests: `tools/test_expand_contract_lint.py`.
@@ -43,8 +53,14 @@ that mirrors every Passage topic into it. DNS fails over with a 60 s TTL. Active
   are merged before comparing; `oneOf`/`anyOf` are not compared and external `$ref` is an error. Input is
   JSON (convert YAML with `yq -o=json`). Exit 1 on a breaking change. Tests: `tools/test_openapi_compat.py`.
   Usage: `python3 deploy/multi-region/tools/openapi_compat.py --old n1.json --new n.json`.
-- Run tests: `python3 -m unittest discover -s deploy/multi-region/gameday` and
-  `python3 -m unittest discover -s deploy/multi-region/tools`.
+- `tools/compat_evidence.py` — the release-level N/N-1 record: pairs `<service>.json` files of the N-1 and N
+  directories, runs `openapi_compat` on each and writes one evidence file (schema
+  `passage.ops.compat-evidence/v1`) with each service's breaking changes and warnings. A service published by
+  N-1 and missing in N is breaking. Exit 1 when any service breaks. `docs/ops/tools/check_release_notes.py
+  --compat-evidence` reads the file. Tests: `tools/test_compat_evidence.py`.
+- Run tests: `python3 -m unittest discover -s deploy/multi-region/gameday`,
+  `python3 -m unittest discover -s deploy/multi-region/tools` and
+  `python3 -m unittest discover -s deploy/multi-region/chaos`.
 
 ## Render and lint
 ```

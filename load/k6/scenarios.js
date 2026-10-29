@@ -46,13 +46,13 @@ const PATHS = {
   analyticsQuery: '/api/v1/analytics/query', // analytics planQuery (explorer)
   planRun: '/api/v1/planning/plans', // planning runPlan: /{planCode}:run
   allocationRuns: '/api/v1/controlling/allocation-runs', // costacct allocation run
+  dashboards: '/api/v1/analytics/dashboards', // analytics getDashboard: /{id} (definition and tiles)
 };
 
 // No route on main serves these yet (docs/ops/NOT-IMPLEMENTED.md). They stay so
 // the scenario mix is complete; they show as failed requests until the owning
 // waves publish them, which fails the campaign as it should.
 const UNVERIFIED_PATHS = {
-  dashboards: '/api/v1/analytics/dashboards',
   scans: '/api/v1/warehouse/scans',
   inventoryClose: '/api/v1/inventory/close',
   fxRevaluation: '/api/v1/ledger/fx-revaluations',
@@ -262,7 +262,8 @@ export function s3Interactive() {
       tags: { op: 'form_save' },
     }));
   } else if (action === 'dashboard') {
-    ok(http.get(`${BASE}${UNVERIFIED_PATHS.dashboards}/executive`, { headers: headers(), tags: { op: 'dashboard' } }));
+    // getDashboard returns the definition and its tiles; the tiles' data is the explorer's analytics query.
+    ok(http.get(`${BASE}${PATHS.dashboards}/${POOL.dashboardId}`, { headers: headers(), tags: { op: 'dashboard' } }));
   } else {
     ok(http.post(`${BASE}${PATHS.analyticsQuery}`, JSON.stringify(POOL.analytics), {
       headers: headers(),

@@ -30,7 +30,7 @@ Checks (all must pass):
     failure was lost or reissued (BR-50.4). A baseline series missing from the facts fails.
 
 Stdlib only, Python 3.11+. Facts are plain JSON; this tool never talks to a cluster. The
-collector that produces facts is a runbook step, not part of this file.
+collector that produces facts from a live region is ``collect.py`` next to this file.
 """
 
 from __future__ import annotations

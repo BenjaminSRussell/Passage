@@ -25,6 +25,14 @@ a checker that fails a campaign when any SLO is missed or unmeasured.
 - `fixtures/smoke-12.json` — fx-smoke-12: the twelve PRD 9.50.9 processes as ordered steps with a final assertion.
   `tools/test_smoke12.py` checks the PRD names and order and resolves every step against the services' OpenAPI
   files; steps with no route yet carry an `unverified` reason.
+- `tools/smoke12.py` — the fx-smoke-12 runner. Runs the twelve processes in order against `--base-url` with the
+  token from `SMOKE_TOKEN`, sends `Idempotency-Key` on every write, fills `{id}` from the latest response and
+  other placeholders from `--params`, and never sends an `unverified` step (the process fails with its reason).
+  A process passes only when its steps pass and its final assertion is verified; no verifiers are registered
+  yet, so a real run reports every process FAILED or UNVERIFIED. `tools/test_smoke12_runner.py` covers it.
+- `tools/gen_fixture.py` — synthetic journal-line growth for `fx-load-10k`: a deterministic CSV (balanced journals
+  per currency, decimal-string amounts, spread over `--months` periods) and a manifest with its sha256. It does
+  not produce the masked customer copy, the k6 data pool or a loader. `tools/test_gen_fixture.py` covers it.
 - `tools/verify_paths.py` — resolves every `http.<method>` call in `k6/scenarios.js` (method and path, through
   the gateway's `/api/v1` -> `/v1` rewrite) against `services/*/api/openapi.yaml`. Exit 1 when a `PATHS` call has
   no route, or when an `UNVERIFIED_PATHS` call now has one (move it to `PATHS`). `tools/test_verify_paths.py`
@@ -72,15 +80,16 @@ Campaigns run against a masked copy of the first customer's data, never producti
 
 ## Routes
 `PATHS` in `scenarios.js` lists the routes that exist in `services/<svc>/api/openapi.yaml`, with request
-bodies that follow those schemas. `UNVERIFIED_PATHS` (dashboards, warehouse scans, inventory close, FX
+bodies that follow those schemas. `UNVERIFIED_PATHS` (warehouse scans, inventory close, FX
 revaluation, lakehouse freshness) have no route on main yet; they show as failed requests, so a campaign
 cannot pass until the owning waves publish them (see `docs/ops/NOT-IMPLEMENTED.md`). `tools/verify_paths.py`
 enforces both lists; run it before a campaign.
-`soak.js` reuses the S1 and S3 functions of `scenarios.js`, so it hits the same routes; its dashboard
-requests fail the same way until the analytics route exists.
+`soak.js` reuses the S1 and S3 functions of `scenarios.js`, so it hits the same routes. The dashboard
+request reads `GET /api/v1/analytics/dashboards/{id}` (wave 46) for the pool's `dashboardId`; it measures the
+definition and tile read, and the tile data goes through the explorer's `analytics/query` call.
 
 ## Not built yet
 - k6 writes tagged sub-metrics (`http_req_duration{op:...}`) to the summary export. The checker also accepts the
   `values` layout used by `handleSummary`.
-- Fixture `fx-smoke-12` is defined (`fixtures/smoke-12.json`) but its runner is not built. `fx-load-10k` is not
-  generated (see `docs/ops/NOT-IMPLEMENTED.md`).
+- fx-smoke-12 verifiers (the final domain assertions) and request bodies; the runner fails without them.
+  `fx-load-10k` has only its synthetic growth generator (see `docs/ops/NOT-IMPLEMENTED.md`).

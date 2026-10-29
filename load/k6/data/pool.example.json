@@ -16,6 +16,7 @@
     {"productId": "00000000-0000-4000-8000-000000000202", "unit": "EA", "unitPrice": "7.25"}
   ],
   "generatedEntity": "customer",
+  "dashboardId": "executive",
   "analytics": {"measures": ["revenue"], "dimensions": ["month"], "from": "2026-01-01", "to": "2026-09-30"},
   "allocation": {
     "secondaryElementId": "00000000-0000-4000-8000-000000000401",
