@@ -51,6 +51,9 @@ func (a *API) createLedgerSet(w http.ResponseWriter, r *http.Request) {
 	if len(req.ParallelLedgerIDs) > maxParallelLedgers {
 		fields["parallelLedgerIds"] = "at most 20 parallel ledgers"
 	}
+	if len(req.ParallelLedgerIDs) == 0 {
+		fields["parallelLedgerIds"] = "must contain at least one parallel ledger"
+	}
 	for _, id := range req.ParallelLedgerIDs {
 		if !ids.Valid(id) {
 			fields["parallelLedgerIds"] = "each entry must be a UUID"

@@ -4,6 +4,9 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/BenjaminSRussell/passage/services/ledger/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/ledger/internal/store"
 )
 
 const setEntryBody = `{"documentId":"` + testDoc + `","postingDate":"2026-03-31",
@@ -54,6 +57,10 @@ func TestCreateLedgerSet_Validation(t *testing.T) {
 		t.Fatalf("status %d, store calls %d", rec.Code, len(fs.setInputs))
 	}
 	good := `{"code":"IFRS","name":"Parallel","leadingLedgerId":"` + testLedger + `","parallelLedgerIds":["` + testDoc + `"]}`
+	empty := `{"code":"IFRS","name":"Parallel","leadingLedgerId":"` + testLedger + `","parallelLedgerIds":[]}`
+	if rec := call(h, http.MethodPost, "/v1/ledger/ledger-sets", empty, dutySetupWrite, nil); rec.Code != http.StatusBadRequest || len(fs.setInputs) != 0 {
+		t.Fatalf("empty parallelLedgerIds: status %d, store calls %d", rec.Code, len(fs.setInputs))
+	}
 	if rec := call(h, http.MethodPost, "/v1/ledger/ledger-sets", good, dutyRead, nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("without the setup duty: status %d", rec.Code)
 	}
@@ -77,5 +84,21 @@ func TestCreateAccountMapping_Validation(t *testing.T) {
 	rec := call(h, http.MethodPost, path, `{"sourceAccount":"1600","targetAccount":"6100","effectiveFrom":"2026-01-01"}`, dutySetupWrite, nil)
 	if rec.Code != http.StatusCreated || len(fs.mappings) != 1 || fs.mappings[0].LedgerID != testLedger {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCreateAccountMapping_OnLeadingLedgerIs422WithViolations(t *testing.T) {
+	fs := &fakeStore{err: &domain.RejectedError{Violations: []domain.Violation{
+		{Code: store.CodeMappingOnLeading, Field: "ledgerId", Message: "account mappings are not applied to a set's leading ledger"},
+	}}}
+	rec := call(server(fs), http.MethodPost, "/v1/ledger/ledgers/"+testLedger+"/account-mappings",
+		`{"sourceAccount":"1600","targetAccount":"6100","effectiveFrom":"2026-01-01"}`, dutySetupWrite, nil)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	m := decode(t, rec)
+	v := m["violations"].([]any)
+	if m["code"] != store.CodeMappingOnLeading || len(v) != 1 || v[0].(map[string]any)["field"] != "ledgerId" {
+		t.Fatalf("body: %v", m)
 	}
 }

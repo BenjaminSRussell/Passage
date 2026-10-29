@@ -24,6 +24,7 @@ const (
 	CodeMappingDuplicate    = "LEDGER_MAPPING_DUPLICATE"
 	CodeSetEntityMismatch   = "LEDGER_SET_LEGAL_ENTITY_MISMATCH"
 	CodeSetLeadingConflict  = "LEDGER_SET_LEADING_CONFLICT"
+	CodeMappingOnLeading    = "LEDGER_MAPPING_ON_LEADING_LEDGER"
 	CodeSetCurrencyMismatch = "LEDGER_SET_CURRENCY_MISMATCH"
 )
 
@@ -88,8 +89,19 @@ func (s *Postgres) CreateLedgerSet(ctx context.Context, in LedgerSetInput) (Ledg
 				return setViolation(CodeSetCurrencyMismatch, "parallelLedgerIds", "every ledger of a set has the same accounting currency")
 			}
 		}
+		if err := lockLegalEntity(ctx, tx, p.TenantID, loaded[0].LegalEntityID); err != nil {
+			return err
+		}
 		if _, err := loadLedger(ctx, tx, p.TenantID, in.LeadingLedgerID, true); err != nil {
 			return err
+		}
+		var hasMappings bool
+		if err := tx.QueryRow(ctx, `select exists(select 1 from ledger_account_mapping where tenant_id = $1 and ledger_id = $2)`,
+			p.TenantID, in.LeadingLedgerID).Scan(&hasMappings); err != nil {
+			return err
+		}
+		if hasMappings {
+			return setViolation(CodeMappingOnLeading, "leadingLedgerId", "the leading ledger has account mappings, which are never applied to a leading ledger")
 		}
 		var conflicting int
 		if err := tx.QueryRow(ctx, `select count(*) from ledger_set where tenant_id = $1 and legal_entity_id = $2 and leading_ledger_id <> $3`,
@@ -118,6 +130,11 @@ func (s *Postgres) CreateLedgerSet(ctx context.Context, in LedgerSetInput) (Ledg
 		return LedgerSet{}, httpx.NewProblem(http.StatusConflict, CodeSetCodeDuplicate, "a ledger set with this code already exists")
 	}
 	return out, err
+}
+
+func lockLegalEntity(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID string) error {
+	_, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1, 0))`, tenantID+"/"+legalEntityID)
+	return err
 }
 
 func (s *Postgres) GetLedgerSet(ctx context.Context, id string) (LedgerSet, error) {
@@ -155,6 +172,19 @@ func (s *Postgres) CreateAccountMapping(ctx context.Context, in AccountMapping) 
 		ledger, err := loadLedger(ctx, tx, p.TenantID, in.LedgerID, false)
 		if err != nil {
 			return err
+		}
+		if err := lockLegalEntity(ctx, tx, p.TenantID, ledger.LegalEntityID); err != nil {
+			return err
+		}
+		if ledger, err = loadLedger(ctx, tx, p.TenantID, in.LedgerID, true); err != nil {
+			return err
+		}
+		var isLeading bool
+		if err := tx.QueryRow(ctx, `select exists(select 1 from ledger_set where tenant_id = $1 and leading_ledger_id = $2)`, p.TenantID, in.LedgerID).Scan(&isLeading); err != nil {
+			return err
+		}
+		if isLeading {
+			return setViolation(CodeMappingOnLeading, "ledgerId", "account mappings are not applied to a set's leading ledger")
 		}
 		targets, err := loadAccounts(ctx, tx, p.TenantID, ledger.ChartCode, []string{in.TargetAccount})
 		if err != nil {
