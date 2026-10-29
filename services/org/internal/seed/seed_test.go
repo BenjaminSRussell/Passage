@@ -215,6 +215,45 @@ func TestRun_RelinksExistingSeedAddressAfterPointerIsCleared(t *testing.T) {
 	}
 }
 
+func TestRun_RecoversWhenSeedAddressWasRevisedWithoutBusinessPurposeAndPointerCleared(t *testing.T) {
+	s, pool := seededStore(t)
+	tenantID := testkit.TenantID(7)
+	runSeed(t, s, tenantID)
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID})
+	sites, err := s.ListSites(ctx, store.SiteFilter{}, store.SiteKey{}, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	site := sites.Items[0]
+	address, err := s.GetAddress(ctx, *site.AddressID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	address.City, address.ValidFrom = "Elsewhere", "2026-01-02"
+	address.Purposes = []store.AddressPurpose{{Purpose: "invoice", Primary: true}}
+	if _, err := s.ReviseAddress(ctx, address.ID, address.VersionID, address); err != nil {
+		t.Fatal(err)
+	}
+	addressCount := counts(t, ctx, pool)["postal_address"]
+	err = dbx.WithTenantTx(ctx, pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `update site set address_id = null where id = $1`, site.ID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := seed.Run(ctx, s, tenantID, seed.DemoManufacturer); err != nil {
+		t.Fatalf("rerun: %v", err)
+	}
+	updated, err := s.GetSite(ctx, site.ID)
+	if err != nil || updated.AddressID == nil || *updated.AddressID != *site.AddressID {
+		t.Fatalf("site address pointer = %v, err %v; want %s", updated.AddressID, err, *site.AddressID)
+	}
+	if got := counts(t, ctx, pool)["postal_address"]; got != addressCount {
+		t.Fatalf("rerun created another address: count %d, want %d", got, addressCount)
+	}
+}
+
 func TestRun_RerunAfterEditingSeededRows(t *testing.T) {
 	s, pool := seededStore(t)
 	tenantID := testkit.TenantID(7)

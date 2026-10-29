@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
 	"net/http"
 	"regexp"
 	"slices"
@@ -245,7 +244,7 @@ func (a *API) evaluate(w http.ResponseWriter, r *http.Request) {
 			delete(fields, fmt.Sprintf("lines[%d].poUnitPrice", i))
 		}
 	}
-	maps.Copy(fields, purchaseOrderReferenceFields(req))
+	mergeFields(fields, purchaseOrderReferenceFields(req))
 	if len(fields) > 0 {
 		a.rejectEvaluation(w, r, fields)
 		return
@@ -257,7 +256,7 @@ func (a *API) evaluate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	policy, invoice, fields := buildInvoice(req)
-	maps.Copy(fields, poFields)
+	mergeFields(fields, poFields)
 	if len(fields) > 0 {
 		a.rejectEvaluation(w, r, fields)
 		return
@@ -276,14 +275,22 @@ func (a *API) rejectEvaluation(w http.ResponseWriter, r *http.Request, fields ma
 
 const poOverrideMessage = "is supplied by the purchase order and cannot be overridden"
 
+func addField(fields map[string]string, key, message string) {
+	if existing, ok := fields[key]; ok {
+		message = existing + "; " + message
+	}
+	fields[key] = message
+}
+
+func mergeFields(dst, src map[string]string) {
+	for key, message := range src {
+		addField(dst, key, message)
+	}
+}
+
 func purchaseOrderReferenceFields(req evaluateRequest) map[string]string {
 	fields := map[string]string{}
-	add := func(key, message string) {
-		if existing, ok := fields[key]; ok {
-			message = existing + "; " + message
-		}
-		fields[key] = message
-	}
+	add := func(key, message string) { addField(fields, key, message) }
 	if req.PurchaseOrderID != "" && !ids.Valid(req.PurchaseOrderID) {
 		add("purchaseOrderId", "must be a UUID")
 	}
@@ -293,10 +300,11 @@ func purchaseOrderReferenceFields(req evaluateRequest) map[string]string {
 			continue
 		}
 		key := func(name string) string { return fmt.Sprintf("lines[%d].%s", i, name) }
-		if previous, exists := lineIndexes[*l.POLineNo]; exists {
-			add(key("poLineNo"), fmt.Sprintf("duplicates lines[%d].poLineNo", previous))
+		if first, exists := lineIndexes[*l.POLineNo]; exists {
+			add(key("poLineNo"), fmt.Sprintf("duplicates lines[%d].poLineNo", first))
+		} else {
+			lineIndexes[*l.POLineNo] = i
 		}
-		lineIndexes[*l.POLineNo] = i
 		if l.POUnitPrice != nil {
 			add(key("poUnitPrice"), poOverrideMessage)
 		}
