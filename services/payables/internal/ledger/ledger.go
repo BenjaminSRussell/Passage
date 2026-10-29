@@ -7,10 +7,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"maps"
 	"net/http"
 	"net/url"
-	"slices"
 	"strings"
 	"time"
 
@@ -18,6 +16,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/services/payables/internal/identity"
 )
 
 const (
@@ -71,7 +70,7 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, subject str
 	if err != nil {
 		return nil, fmt.Errorf("ledger: %w", err)
 	}
-	forward(req, principal)
+	identity.Forward(req, principal)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		slog.ErrorContext(ctx, "ledger request failed", "err", err, "subject", subject, "correlationId", middleware.GetReqID(ctx))
@@ -133,20 +132,4 @@ func parse(ctx context.Context, raw []byte, account string) (Balance, error) {
 		out.Debit, out.Credit = out.Debit.Add(d), out.Credit.Add(c)
 	}
 	return out, nil
-}
-
-func forward(req *http.Request, p tenant.Principal) {
-	req.Header.Set(tenant.HeaderTenant, p.TenantID)
-	if p.LegalEntityID != "" {
-		req.Header.Set(tenant.HeaderLegalEntity, p.LegalEntityID)
-	}
-	if p.UserID != "" {
-		req.Header.Set(tenant.HeaderUser, p.UserID)
-	}
-	if len(p.Duties) > 0 {
-		req.Header.Set(tenant.HeaderDuties, strings.Join(slices.Sorted(maps.Keys(p.Duties)), ","))
-	}
-	if id := middleware.GetReqID(req.Context()); id != "" {
-		req.Header.Set(middleware.RequestIDHeader, id)
-	}
 }

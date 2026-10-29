@@ -120,7 +120,7 @@ func (a *API) agingReport(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := a.aging.store.AgingRows(r.Context(), q.legalEntityID, q.asOf.Format(dateLayout))
 	if err != nil {
-		a.agingFault(w, r, "aging query failed", err)
+		a.fault(w, r, "aging query failed", err)
 		return
 	}
 	groupBy := "none"
@@ -165,7 +165,7 @@ func (a *API) agingReconcile(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := a.aging.store.AgingRows(r.Context(), q.legalEntityID, q.asOf.Format(dateLayout))
 	if err != nil {
-		a.agingFault(w, r, "reconciliation aging query failed", err)
+		a.fault(w, r, "reconciliation aging query failed", err)
 		return
 	}
 	period := q.asOf.Format(periodLayout)
@@ -205,7 +205,7 @@ func (a *API) ledgerFailure(w http.ResponseWriter, r *http.Request, ledgerID str
 
 func apBalance(b ledger.Balance) decimal.Decimal { return b.Credit.Sub(b.Debit) }
 
-func (a *API) agingFault(w http.ResponseWriter, r *http.Request, msg string, err error) {
+func (a *API) fault(w http.ResponseWriter, r *http.Request, msg string, err error) {
 	a.serverFaults.Add(1)
 	slog.Error(msg, "err", err, "correlationId", middleware.GetReqID(r.Context()))
 	fail(w, r, err)

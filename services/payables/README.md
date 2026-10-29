@@ -21,6 +21,9 @@ DATABASE_URL=postgres://... go run ./cmd/payables
 | `DATABASE_URL` | required; Postgres URL, from a Secret in the cluster |
 | `HTTP_ADDR` | default `:8080` |
 | `ADMIN_ADDR` | default `:9090`, serves `/metrics` only |
+| `FX_URL` | base URL of the fx service; unset: foreign-currency valuation and proposals with foreign items answer 503 |
+| `FX_RATE_TYPE` | fx rate type used for valuation, default `spot` |
+| `FX_TIMEOUT` | Go duration for the fx call, default 2s |
 
 ## API
 
@@ -37,9 +40,15 @@ The preview settles one credit against open invoices per PRD FR-19.2: priority o
 | Code | Status | Meaning |
 |---|---|---|
 | PAY-0001 | 400 | invalid field: date, decimal string, currency, discount, duplicate or empty invoices |
-| PAY-0002 | 422 | rate missing for a foreign currency, or not 1 for the accounting currency |
+| PAY-0002 | 422 | rate missing for a foreign currency, or not 1 for the accounting currency; also an fx service with no rate for the pair and date |
 | AP-RUN-002 | 422 | bank identifier failed validation (`iban`, `bic` or `aba` named in the detail) |
 | AP-FIL-001 | 422 | payment name has a character outside the profile charset after transliteration |
+| AP-PRP-001 | 409 | proposal run id already used with a different request, or items changed, were held or were taken by another proposal while the proposal was built (retry) |
+| AP-PRP-002 | 409 | proposal is not a draft |
+| AP-PRP-003 | 403 | the approver is the proposal's creator (segregation of duties) |
+| COM-0404 | 404 | open item or proposal not found (or outside the caller's tenant and legal entity) |
+| COM-0502 | 502 | fx service unavailable |
+| COM-0503 | 503 | fx rate source is not configured |
 | AP-FIL-002 | 200 | generated pain.001 failed XSD validation; reported in `validation.errors` of the preview response, never as a problem |
 | AP-STS-001 | 200 | bank rejected a payment in a pain.002 report; returned as an outcome `warning` |
 | AP-STS-002 | 200 | pain.002 names a message or end-to-end id the caller does not know; returned in `unknown` |
@@ -60,3 +69,23 @@ Settlement preview: `payables_settlement_previews_total`, `payables_settlement_p
 `GET /v1/payables/aging` (duty `aging.read`) buckets open items (`open_amount`) by days past due at `as_of` (CURRENT, 1-30, 31-60, 61-90, 91-180, OVER-180) per currency, and per vendor with `group_by=vendor`. `GET /v1/payables/aging:reconcile` (duty `aging.reconcile`, required `ledger` query parameter) compares total open AP per currency with the AP control account in the ledger (credits minus debits from `GET /v1/ledger/balances` through the period of `as_of`) and returns the difference and a `reconciled` flag.
 
 Configuration: `AP_CONTROL_ACCOUNT` (default `2000`) and `LEDGER_URL` (unset: reconcile answers 503) and `LEDGER_TIMEOUT` (Go duration, default 3s). The ledger call forwards the caller's tenant, legal-entity, user and duty headers, so the caller needs `ledger.balance.read` and `ledger.journal.read` (the ledger is fetched to confirm it belongs to the legal entity; a ledger 403 is returned as 403); a service identity (#226) will replace the forwarding. A ledger reports one currency in the accounting currency and includes translated foreign invoices, so other currencies are listed unreconciled and, while foreign-currency items are open, the ledger-currency line is marked `comparable: false` (reason `foreign-currency items require translation`) and the overall result is not reconciled. Reconcile at a period end: the ledger side is cumulative to the period, the open-item side is the current balance.
+
+## Open-item API, FX valuation and payment proposals
+
+`GET /v1/payables/open-items` and `GET /v1/payables/open-items/{id}` (duty `open-item.read`) read the open-item store. The list filters by `vendor`, `due_from`, `due_to`, `currency` and `status`, is ordered by due date then id and pages with `limit` (1 to 200, default 50) and the opaque `cursor` returned as `nextCursor`. Every request names its legal entity (`legal_entity` or the caller's single legal-entity scope); an unscoped caller without `legal_entity` gets 400, and an entity outside the caller's scope gets 403. With `value_in=USD` each item carries a `valuation` (open amount times the spot rate of today, rounded to the currency's minor unit).
+
+Rates come from `GET /v1/fx/rates` of the fx service (`internal/fx`, same adapter shape as `internal/ledger`). The call forwards the caller's tenant, legal-entity, user and duty headers, so the caller also needs the fx duty `View exchange rates`; a service identity (#226) will replace the forwarding. A pair without a rate is a 422 (`PAY-0002`), a caller fx refuses is a 403, anything else is a 502.
+
+`POST /v1/payables/payment-proposals` (duty `payment-proposal.write`) builds a payment proposal for a legal entity:
+
+- Selection: open items with `due_date <= dueBy` (default `runDate`), status OPEN or PARTIALLY_SETTLED, not on payment hold (`ap_open_item.payment_hold`), vendor not in `ap_vendor_block`, and not already on a proposal. At most 5000 items; lower `dueBy` otherwise.
+- Cash discount: taken when `runDate <= discount_date`, the item is still OPEN (a partly settled item pays its full remaining amount) and the discount is below the open amount. `pay = open_amount - discount`.
+- Grouping: per vendor, currency and payment method (`paymentMethod`, overridden per vendor by `vendorPaymentMethods`). Every group and line is valued in `legalEntityCurrency` at the spot rate of `runDate` (today when `runDate` is in the future); each line is rounded to the currency's minor unit before summing.
+- Persistence: `ap_payment_proposal`, `ap_payment_proposal_group`, `ap_payment_proposal_line`, status DRAFT. A line keeps the item version it was selected at and the insert re-checks version, open amount, hold and vendor block, so an item that changed in between fails the whole proposal with 409 and nothing is written. An item can sit on one proposal only (primary key on the line); releasing items on cancel or execution is part of #102.
+- Idempotency: unique per (legal entity, `runDate`, `runId`). Repeating the identical request returns the stored proposal (200, `Idempotent-Replayed: true`) without selecting or valuing again; the same key with a different request is 409 `AP-PRP-001`.
+
+`GET /v1/payables/payment-proposals/{id}` (duty `payment-proposal.read`) returns the proposal with groups and lines. `POST /v1/payables/payment-proposals/{id}:approve` (duty `payment-proposal.approve`) moves a DRAFT to APPROVED and requires a different user than the creator (`AP-PRP-003`); the table also carries a check constraint so no code path can store a self-approval. Creator and approver both need an identified user. The application role may update only `status`, `approved_by` and `approved_at` of a proposal.
+
+Payment holds and vendor blocks are read here and written by `store.SetPaymentHold`, `store.BlockVendor` and `store.UnblockVendor`; there is no HTTP route for them yet. The approved proposal is the input of the payment run (#102); withholding tax is not applied.
+
+Metrics: `payables_payment_proposals_total{outcome}` (created, replayed, approved, self_approval_refused) and `payables_fx_rate_faults_total`.
