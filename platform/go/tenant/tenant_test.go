@@ -1,12 +1,15 @@
 package tenant_test
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/go-chi/chi/v5/middleware"
 )
 
 const (
@@ -31,6 +34,32 @@ func serve(tenantID, legalEntity string) (*httptest.ResponseRecorder, *tenant.Pr
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	return rec, got
+}
+
+func distinctLEs(n int) string {
+	out := make([]string, n)
+	for i := range out {
+		out[i] = fmt.Sprintf("0190a5f2-7b1c-7d3e-8a4f-%012x", i+1)
+	}
+	return strings.Join(out, ",")
+}
+
+func TestRejectionIsProblemJSONWithTraceID(t *testing.T) {
+	h := middleware.RequestID(tenant.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+	req := httptest.NewRequest(http.MethodGet, "/v1/x", nil)
+	req.Header.Set("X-Request-Id", "req-123")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized || rec.Header().Get("Content-Type") != "application/problem+json" || rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("status %d headers %v", rec.Code, rec.Header())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["traceId"] != "req-123" || body["code"] != "AUTH-0001" {
+		t.Fatalf("body %v", body)
+	}
 }
 
 func TestMiddlewareTenantValidation(t *testing.T) {
@@ -85,6 +114,11 @@ func TestMiddlewareLegalEntityValidation(t *testing.T) {
 		{"valid then invalid entry", validLE + "," + "x", http.StatusBadRequest, ""},
 		{"empty list entry", validLE + ",," + other, http.StatusBadRequest, ""},
 		{"trailing comma", validLE + ",", http.StatusBadRequest, ""},
+		{"nil entry", validLE + "," + nilUUID, http.StatusBadRequest, ""},
+		{"only nil", nilUUID, http.StatusBadRequest, ""},
+		{"duplicates collapsed", validLE + "," + strings.ToUpper(validLE) + "," + other, http.StatusOK, validLE + "," + other},
+		{"at cap", distinctLEs(100), http.StatusOK, distinctLEs(100)},
+		{"over cap", distinctLEs(101), http.StatusBadRequest, ""},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
