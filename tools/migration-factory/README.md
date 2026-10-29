@@ -4,7 +4,7 @@ Tooling for moving a customer off AX 2012 / D365 F&O or SAP ECC / S/4HANA: trans
 migration packs with control totals, legacy cross-references, parallel-run diffing and the
 cutover runbook generator. Wave reference: PRD section 9.49, ticket PSG-49.
 
-## Slice 1 (this build)
+## Slices 1 and 2 (this build)
 
 Built and tested:
 
@@ -23,19 +23,31 @@ Built and tested:
   one (system, company) serialize on an advisory lock.
 - **Parallel-run classifier** (`diff.go`): outer join on `(area, key)`, EXPECTED by rule `RND-001`
   (≤ 0.01), EXPLAINED by an operator reason given for that area and key, otherwise UNEXPLAINED.
-  Sign-off gate: zero unexplained and explained ≤ 0.1 % of revenue (MIG-1509). No endpoint yet.
+  Sign-off gate: zero unexplained and explained ≤ 0.1 % of revenue (MIG-1509).
 - **Cutover plan** (`cutover.go`): timed steps from T-14d to T+30d with pack load steps, rehearsal
   duration overrides, go/no-go sequencing (CUT-1601), the abort step at `abortOffsetHours`, the
   BR-49.9 abort state (CUT-1604), rollback once with two distinct approvers (CUT-1603), and a plan
   version bumped on every change.
+- **Quarantine release** (`release.go`): a quarantined open item is corrected (party or control
+  account), re-validated, loaded into `legacy_xref` and booked into the run's control totals; the
+  run reaches RECONCILED with the last release.
+- **Parallel-run review** (`parallel.go`): a stored run per (period, system) with its variances;
+  reviewers explain variances and sign off, and the user who started the run cannot (MIG-001).
+- **Project beginning balances** (`project.go`): the project_wip pack validates opening lines,
+  loads them with their `legacy_xref` rows (never posting to the GL) and reconciles cost, sales,
+  WIP cost and WIP sales per project and category to legacy; a project that differs is
+  `OPENING_MISMATCH`.
+- **Legacy cross-reference lookup**: `GET /api/v1/migration/xref` by legacy id or by Passage record.
 - **Store** (`internal/store`, `migrations/`): Postgres with forced row-level security on every
   table, the outbox written in the same transaction, `Idempotency-Key` replay, and an optimistic
   version check on plan commands.
 - **HTTP API** (`internal/api`): the kernel router, tenant middleware and duty checks. Contract in
   `api/openapi.yaml` (a test checks it against the routes); events in `events/asyncapi.yaml`.
-- **Web module** (`apps/web/src/modules/migration-factory`): pack runs (list, start form, detail
-  with the control-total board and quarantine) and cutover runbooks (list, generate form, detail
-  with go/no-go checklist, step completion and rollback).
+- **Web module** (`apps/web/src/modules/migration-factory`): pack runs (list, open_items and
+  project_wip start forms, detail with the control-total board, quarantine release and projects),
+  project opening balances, parallel runs (list, start, variance review and sign-off), the legacy
+  reference lookup, and cutover runbooks (list, generate form, detail with go/no-go checklist,
+  step completion and rollback).
 - **Chart** (`charts/passage-migration-factory`): Deployment, Service and ServiceMonitor toggle.
 
 What is not built yet is listed in `NOT-IMPLEMENTED.md`.

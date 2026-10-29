@@ -1,10 +1,11 @@
 openapi: 3.1.0
 info:
   title: Passage Migration Factory API
-  version: 0.2.0
+  version: 0.3.0
   description: |
-    Slice 1 of wave 49 (PSG-49): open-items pack runs with control totals, quarantine and the
-    legacy cross-reference, and the cutover runbook. Source of truth for the handlers in
+    Slices 1 and 2 of wave 49 (PSG-49): open_items and project_wip pack runs with control
+    totals, quarantine release and the legacy cross-reference lookup, the parallel-run review,
+    project opening balances, and the cutover runbook. Source of truth for the handlers in
     internal/api. State is stored in Postgres under row-level security per tenant.
 
     Commands accept an optional `Idempotency-Key` header (at most 200 characters). A repeated
@@ -22,8 +23,12 @@ paths:
   /api/v1/migration/packs/{pack}/runs:
     post:
       operationId: startPackRun
-      summary: Validate, load and reconcile a pack extract (open_items in slice 1)
+      summary: Validate, load and reconcile a pack extract (open_items or project_wip)
       description: |
+        open_items takes a PackRunRequest and project_wip a ProjectRunRequest (FR-49.12: opening
+        lines per project and category, reconciled per project to the legacy category totals; a
+        project that does not reconcile is OPENING_MISMATCH and opening lines never post to the
+        GL). Other packs return MIG-0005.
         Records failing the referential, domain or uniqueness rules are quarantined (FR-49.11);
         the run is rejected with MIG-1504 when they exceed quarantineMaxPct. Accepted records
         that legacy_xref already holds by (system, company, table, id) are not loaded again
@@ -44,7 +49,9 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/PackRunRequest"
+              oneOf:
+                - $ref: "#/components/schemas/PackRunRequest"
+                - $ref: "#/components/schemas/ProjectRunRequest"
       responses:
         "201":
           description: The stored run (or the stored outcome of a repeated key).
@@ -149,6 +156,332 @@ paths:
         "403":
           $ref: "#/components/responses/Problem"
         "404":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/migration/runs/{id}/quarantine/{rec}/release:
+    post:
+      operationId: releaseQuarantined
+      summary: Correct and release a quarantined open item (FR-49.11)
+      description: |
+        Applies the party and account correction, re-runs the open-items suite against the run's
+        master-data snapshot plus `parties`, and loads the record into legacy_xref. The run's
+        counts, control totals and version change under its row lock; a corrected account moves
+        the record's legacy amount to the corrected account's subtotal. When no total is
+        MISMATCH any more the run moves to RECONCILED and writes
+        dev.passage.migration.pack.reconciled.v1. Releasing a released record returns the run
+        with Idempotent-Replayed (idempotent by record). Only LOADED open_items runs take a
+        release (MIG-0004 otherwise, MIG-0005 for other packs).
+      x-passage-duty: MigrationRun
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - name: rec
+          in: path
+          required: true
+          description: The quarantined record's seq within the run.
+          schema:
+            type: integer
+            minimum: 1
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReleaseRequest"
+      responses:
+        "200":
+          description: The run after the release.
+          headers:
+            Idempotent-Replayed:
+              $ref: "#/components/headers/IdempotentReplayed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PackRunDetail"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/migration/runs/{id}/projects/{project}/opening:
+    get:
+      operationId: getProjectOpening
+      summary: A project's opening lines and totals per category (FR-49.12, BR-49.12)
+      description: |
+        Lines are every opening line Passage holds for the project in the run's (system,
+        company), ordered by legacy id and paged with limit and after (a legacy id). Totals are
+        the run's reconciliation of the project; status is OPENING_MISMATCH while any differs.
+      x-passage-duty: MigrationView
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - name: project
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Limit"
+        - name: after
+          in: query
+          description: Legacy id of the last line of the previous page.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The project's opening balances.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectOpening"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/migration/xref:
+    get:
+      operationId: lookupXref
+      summary: Resolve a legacy id to its Passage record, or a Passage record to its legacy ids (FR-49.3)
+      description: |
+        Either system, table and id (company optional), or passageEntity and passageId. Any
+        authenticated caller; the tenant comes from the principal. No match is 200 with no items.
+      x-passage-duty: any authenticated
+      parameters:
+        - name: system
+          in: query
+          schema:
+            type: string
+            enum: [AX2012, D365FO, SAPECC, S4HANA]
+        - name: company
+          in: query
+          schema:
+            type: string
+        - name: table
+          in: query
+          description: legacy_xref source_table, for example open_items or project_wip.
+          schema:
+            type: string
+        - name: id
+          in: query
+          description: The legacy id.
+          schema:
+            type: string
+        - name: passageEntity
+          in: query
+          schema:
+            type: string
+        - name: passageId
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Matching cross-references, at most 200.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Xref"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/migration/parallel-runs:
+    post:
+      operationId: startParallelRun
+      summary: Diff a replayed period against the legacy period (FR-49.5)
+      description: |
+        Outer-joins the legacy and Passage tuples on (area, key) and classifies each difference
+        EXPECTED (rule RND-001, at most 0.01) or UNEXPLAINED, stores the run in REVIEW with its
+        variances and writes dev.passage.migration.parallelrun.diffed.v1. Idempotent by
+        (period, sourceSystem): the same input returns the stored run with Idempotent-Replayed,
+        other input for a stored period is MIG-0009. The body is limited to 16 MiB.
+      x-passage-duty: MigrationRun
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ParallelRunRequest"
+      responses:
+        "201":
+          description: The stored run with its variances.
+          headers:
+            Idempotent-Replayed:
+              $ref: "#/components/headers/IdempotentReplayed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParallelRun"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "413":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+    get:
+      operationId: listParallelRuns
+      summary: Parallel runs, newest first, without variances
+      x-passage-duty: MigrationView
+      parameters:
+        - name: state
+          in: query
+          schema:
+            $ref: "#/components/schemas/ParallelState"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/After"
+      responses:
+        "200":
+          description: One page of runs.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ParallelRun"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/migration/parallel-runs/{id}:
+    get:
+      operationId: getParallelRun
+      summary: A parallel run with its variances (parallel-run variance report, 9.49.14)
+      x-passage-duty: MigrationView
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The run.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParallelRun"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/migration/parallel-runs/{id}/variances/{v}/explain:
+    post:
+      operationId: explainVariance
+      summary: Attach a reason to an UNEXPLAINED variance, which becomes EXPLAINED
+      description: |
+        The reviewer must not be the user who started the run (MIG-001, 403 MIG-0008).
+        Explaining again with the same reason returns the run with Idempotent-Replayed
+        (idempotent by variance); another reason, or an EXPECTED variance, is MIG-0004.
+      x-passage-duty: MigrationReview
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - name: v
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              additionalProperties: false
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 2000
+                version:
+                  type: integer
+                  minimum: 1
+                  description: The run version the reviewer saw; a stale one is MIG-0006.
+      responses:
+        "200":
+          description: The run after the explanation.
+          headers:
+            Idempotent-Replayed:
+              $ref: "#/components/headers/IdempotentReplayed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParallelRun"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/migration/parallel-runs/{id}/sign-off:
+    post:
+      operationId: signOffParallelRun
+      summary: Sign off a parallel run as the calling reviewer (FR-49.5 step 6)
+      description: |
+        Refused with MIG-1509 while any variance is unexplained, and when the explained amount
+        exceeds explainedMaxPct percent of revenue. The reviewer must not be the user who
+        started the run (MIG-001, 403 MIG-0008).
+      x-passage-duty: MigrationReview
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                version:
+                  type: integer
+                  minimum: 1
+      responses:
+        "200":
+          description: The signed-off run.
+          headers:
+            Idempotent-Replayed:
+              $ref: "#/components/headers/IdempotentReplayed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParallelRun"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
           $ref: "#/components/responses/Problem"
         "422":
           $ref: "#/components/responses/Problem"
@@ -458,7 +791,7 @@ components:
       properties:
         name:
           type: string
-          enum: [open_items.amount, open_items.amount_by_account, open_items.count]
+          enum: [open_items.amount, open_items.amount_by_account, open_items.count, project_wip.cost, project_wip.sales, project_wip.wip_cost, project_wip.wip_sales]
         key:
           type: object
           additionalProperties:
@@ -481,8 +814,11 @@ components:
           enum: [MATCH, WITHIN_TOLERANCE, MISMATCH]
     Quarantined:
       type: object
-      required: [legacyId, rule, reason]
+      required: [seq, legacyId, rule, reason, status, amount]
       properties:
+        seq:
+          type: integer
+          description: Addresses the record within its run (release path parameter).
         legacyId:
           type: string
         rule:
@@ -490,9 +826,28 @@ components:
           enum: [REFERENTIAL, DOMAIN, UNIQUENESS]
         reason:
           type: string
+        status:
+          type: string
+          enum: [OPEN, RELEASED]
+        party:
+          type: string
+        account:
+          type: string
+        currency:
+          type: string
+        amount:
+          type: string
+          description: Decimal string as extracted (cost amount for a project line).
+        released:
+          $ref: "#/components/schemas/Record"
+        releasedBy:
+          type: string
+        releasedAt:
+          type: string
+          format: date-time
     PackRun:
       type: object
-      required: [runId, pack, sourceSystem, sourceCompany, cutoffTs, inputHash, status, recordsIn, recordsLoaded, recordsQuarantined, alreadyPresent, createdAt]
+      required: [runId, pack, sourceSystem, sourceCompany, cutoffTs, inputHash, status, recordsIn, recordsLoaded, recordsQuarantined, alreadyPresent, version, createdAt]
       properties:
         runId:
           type: string
@@ -524,6 +879,10 @@ components:
         message:
           type: string
           description: MIG-1505 text when a re-run loaded nothing new.
+        version:
+          type: integer
+          minimum: 1
+          description: Bumped by every release; a release with a stale version is MIG-0006.
         createdAt:
           type: string
           format: date-time
@@ -541,6 +900,339 @@ components:
               type: array
               items:
                 $ref: "#/components/schemas/Quarantined"
+    ReleaseRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        party:
+          type: string
+          description: Corrected party; blank keeps the extracted one.
+        account:
+          type: string
+          description: Corrected control account; blank keeps the extracted one.
+        parties:
+          type: array
+          description: Party ids added to master data since the run, checked with the run's snapshot.
+          items:
+            type: string
+        version:
+          type: integer
+          minimum: 1
+    OpeningLine:
+      type: object
+      required: [legacyId, category, transactionDate, costAmount, salesAmount, currency, billingStatus]
+      additionalProperties: false
+      properties:
+        legacyId:
+          type: string
+          description: Unique across the extract; ProjTrans* RecId or the CO line id.
+        category:
+          $ref: "#/components/schemas/Category"
+        transactionDate:
+          type: string
+          format: date
+          description: Not after cutoffTs (DOMAIN otherwise).
+        qty:
+          type: string
+        costAmount:
+          type: string
+        salesAmount:
+          type: string
+        currency:
+          type: string
+        workerId:
+          type: string
+        activityId:
+          type: string
+        dimensions:
+          type: object
+          additionalProperties:
+            type: string
+        billingStatus:
+          type: string
+          enum: [CHARGEABLE_UNBILLED, BILLED, NON_CHARGEABLE]
+          description: ON_ACCOUNT lines are BILLED; NON_CHARGEABLE lines carry no WIP sales (DOMAIN otherwise).
+        wipCost:
+          type: string
+        wipSales:
+          type: string
+    Category:
+      type: string
+      enum: [HOUR, EXPENSE, ITEM, FEE, ON_ACCOUNT]
+    LegacyCategoryTotal:
+      type: object
+      required: [category]
+      additionalProperties: false
+      properties:
+        category:
+          $ref: "#/components/schemas/Category"
+        cost:
+          type: string
+        sales:
+          type: string
+        wipCost:
+          type: string
+        wipSales:
+          type: string
+    ProjectRunRequest:
+      type: object
+      required: [sourceSystem, sourceCompany, cutoffTs, freezeTs, projects]
+      additionalProperties: false
+      properties:
+        sourceSystem:
+          type: string
+          enum: [AX2012, D365FO, SAPECC, S4HANA]
+        sourceCompany:
+          type: string
+          minLength: 1
+        cutoffTs:
+          type: string
+          format: date-time
+        freezeTs:
+          type: string
+          format: date-time
+        quarantineMaxPct:
+          type: string
+        projects:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [projectId, legacyTotals, lines]
+            additionalProperties: false
+            properties:
+              projectId:
+                type: string
+                minLength: 1
+              legacyTotals:
+                type: array
+                description: The legacy ProjTrans*/COSP-COSS and RA totals per category, at most one per category.
+                items:
+                  $ref: "#/components/schemas/LegacyCategoryTotal"
+              lines:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OpeningLine"
+    ProjectOpening:
+      type: object
+      required: [runId, projectId, status, totals, lineCount, lines]
+      properties:
+        runId:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+        status:
+          type: string
+          enum: [RECONCILED, OPENING_MISMATCH]
+        totals:
+          type: array
+          items:
+            $ref: "#/components/schemas/ControlTotal"
+        lineCount:
+          type: integer
+        lines:
+          type: array
+          description: |
+            Each line is an OpeningLine (qty, wipCost and wipSales always present, amounts as
+            decimal strings with 6 places) plus beginningBalance, which is always true.
+          items:
+            type: object
+            required: [legacyId, category, transactionDate, qty, costAmount, salesAmount, currency, billingStatus, wipCost, wipSales, beginningBalance]
+            properties:
+              legacyId:
+                type: string
+              category:
+                $ref: "#/components/schemas/Category"
+              transactionDate:
+                type: string
+                format: date
+              qty:
+                type: string
+              costAmount:
+                type: string
+              salesAmount:
+                type: string
+              currency:
+                type: string
+              workerId:
+                type: string
+              activityId:
+                type: string
+              dimensions:
+                type: object
+                additionalProperties:
+                  type: string
+              billingStatus:
+                type: string
+                enum: [CHARGEABLE_UNBILLED, BILLED, NON_CHARGEABLE]
+              wipCost:
+                type: string
+              wipSales:
+                type: string
+              beginningBalance:
+                const: true
+    Xref:
+      type: object
+      required: [xrefId, system, company, table, legacyId, passageEntity, passageId, runId, createdAt]
+      properties:
+        xrefId:
+          type: string
+          format: uuid
+        system:
+          type: string
+          enum: [AX2012, D365FO, SAPECC, S4HANA]
+        company:
+          type: string
+        table:
+          type: string
+        legacyId:
+          type: string
+        passageEntity:
+          type: string
+          enum: [open_item, project_opening_line]
+        passageId:
+          type: string
+          format: uuid
+        runId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+    ParallelState:
+      type: string
+      enum: [REPLAYING, DIFFING, REVIEW, SIGNED_OFF]
+    Tuple:
+      type: object
+      required: [area, key, amount]
+      additionalProperties: false
+      properties:
+        area:
+          type: string
+          enum: [TB, INV, AP, AR, FA]
+        key:
+          type: string
+          minLength: 1
+          description: The canonical tuple key, for example entity|account|dimensions|currency|period.
+        amount:
+          type: string
+    ParallelRunRequest:
+      type: object
+      required: [period, sourceSystem, documentsReplayed, revenue]
+      additionalProperties: false
+      properties:
+        period:
+          type: string
+          pattern: "^[0-9]{4}-(0[1-9]|1[0-2])$"
+        sourceSystem:
+          type: string
+          enum: [AX2012, D365FO, SAPECC, S4HANA]
+        documentsReplayed:
+          type: integer
+          minimum: 0
+        revenue:
+          type: string
+          description: Period revenue, the base of the explained-amount limit.
+        explainedMaxPct:
+          type: string
+          description: Percent of revenue from 0 to 1; defaults to 0.1 (migration.parallel.explained_max_pct_revenue).
+        legacy:
+          type: array
+          items:
+            $ref: "#/components/schemas/Tuple"
+        passage:
+          type: array
+          items:
+            $ref: "#/components/schemas/Tuple"
+    Variance:
+      type: object
+      required: [varianceId, area, key, legacy, passage, delta, class]
+      properties:
+        varianceId:
+          type: string
+          format: uuid
+        area:
+          type: string
+          enum: [TB, INV, AP, AR, FA]
+        key:
+          type: string
+        legacy:
+          type: string
+        passage:
+          type: string
+        delta:
+          type: string
+          description: passage - legacy.
+        class:
+          type: string
+          enum: [EXPECTED, EXPLAINED, UNEXPLAINED]
+        ruleId:
+          type: string
+        reason:
+          type: string
+        explainedBy:
+          type: string
+        explainedAt:
+          type: string
+          format: date-time
+    ParallelRun:
+      type: object
+      required: [parallelRunId, period, sourceSystem, documentsReplayed, revenue, explainedMaxPct, inputHash, state, unexplainedCount, unexplainedAmount, explainedAmount, expectedByRule, canSignOff, version, createdAt]
+      properties:
+        parallelRunId:
+          type: string
+          format: uuid
+        period:
+          type: string
+        sourceSystem:
+          type: string
+          enum: [AX2012, D365FO, SAPECC, S4HANA]
+        documentsReplayed:
+          type: integer
+        revenue:
+          type: string
+        explainedMaxPct:
+          type: string
+        inputHash:
+          type: string
+        state:
+          $ref: "#/components/schemas/ParallelState"
+        unexplainedCount:
+          type: integer
+        unexplainedAmount:
+          type: string
+        explainedAmount:
+          type: string
+        expectedByRule:
+          type: object
+          description: Variance count per rule id.
+          additionalProperties:
+            type: integer
+        canSignOff:
+          type: boolean
+          description: The FR-49.5 exit criterion holds now.
+        signOffBlocker:
+          type: string
+          description: Why the run cannot be signed off yet (MIG-1509 or the explained-amount limit).
+        startedBy:
+          type: string
+        signedOffBy:
+          type: string
+        signedOffAt:
+          type: string
+          format: date-time
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        variances:
+          type: array
+          description: Present on start, get and commands; absent in the list.
+          items:
+            $ref: "#/components/schemas/Variance"
     GenerateRequest:
       type: object
       required: [t0, packs, entities]

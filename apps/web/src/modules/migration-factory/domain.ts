@@ -1,5 +1,5 @@
 /** Pure helpers for the migration-factory screens. Mirrors tools/migration-factory/internal/domain. */
-import type { OpenItemRecord } from "./api/client";
+import type { Area, Category, BillingStatus, LegacyCategoryTotal, OpeningLine, OpenItemRecord, ParallelState, ProjectExtract, Tuple } from "./api/client";
 
 /** The nine transactional packs (FR-49.1). */
 export const PACKS = [
@@ -15,8 +15,8 @@ export const PACKS = [
 ] as const;
 export type Pack = (typeof PACKS)[number];
 
-/** Packs the slice-1 API runs. */
-export const AVAILABLE_PACKS: readonly Pack[] = ["open_items"];
+/** Packs the API runs today. */
+export const AVAILABLE_PACKS: readonly Pack[] = ["open_items", "project_wip"];
 
 export const SOURCE_SYSTEMS = ["AX2012", "D365FO", "SAPECC", "S4HANA"] as const;
 export type SourceSystem = (typeof SOURCE_SYSTEMS)[number];
@@ -147,4 +147,109 @@ export function parseRecords(text: string): ParsedRecords {
 /** Splits a comma, space or newline separated list and drops blanks and repeats. */
 export function splitList(text: string): string[] {
   return [...new Set(text.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean))];
+}
+
+/** Distinct project ids named by a project_wip run's control totals, sorted. */
+export function projectsOf(totals: ControlTotal[]): string[] {
+  const ids = totals.filter((t) => t.name.startsWith("project_wip.") && t.key.project).map((t) => t.key.project);
+  return [...new Set(ids)].sort();
+}
+
+/** A project's reconciliation status from its totals (BR-49.12). */
+export function projectStatus(totals: ControlTotal[], projectId: string): "RECONCILED" | "OPENING_MISMATCH" {
+  return totals.some((t) => t.name.startsWith("project_wip.") && t.key.project === projectId && t.status === "MISMATCH") ? "OPENING_MISMATCH" : "RECONCILED";
+}
+
+export const AREAS: readonly Area[] = ["TB", "INV", "AP", "AR", "FA"];
+export const CATEGORIES: readonly Category[] = ["HOUR", "EXPENSE", "ITEM", "FEE", "ON_ACCOUNT"];
+const BILLING: readonly BillingStatus[] = ["CHARGEABLE_UNBILLED", "BILLED", "NON_CHARGEABLE"];
+export const PARALLEL_STATES: readonly ParallelState[] = ["REPLAYING", "DIFFING", "REVIEW", "SIGNED_OFF"];
+export const PERIOD = /^\d{4}-(0[1-9]|1[0-2])$/;
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+function rows(text: string, header: string[], each: (cells: string[], n: number) => string | undefined): string[] {
+  const errors: string[] = [];
+  text.split(/\r?\n/).forEach((raw, index) => {
+    const line = raw.trim();
+    if (line === "") return;
+    const cells = line.split(/[,;\t]/).map((c) => c.trim());
+    if (index === 0 && cells.map((c) => c.toLowerCase()).join(",") === header.map((h) => h.toLowerCase()).join(",")) return;
+    const n = index + 1;
+    if (cells.length !== header.length) {
+      errors.push(`Line ${n}: expected ${header.length} values (${header.join(", ")}), found ${cells.length}.`);
+      return;
+    }
+    const problem = each(cells, n);
+    if (problem) errors.push(problem);
+  });
+  return errors;
+}
+
+const optionalDecimal = (v: string) => v === "" || DECIMAL.test(v);
+
+/** Parses pasted parallel-run tuples, one per line: area, key, amount (FR-49.5 canonical tuples). */
+export function parseTuples(text: string): { tuples: Tuple[]; errors: string[] } {
+  const tuples: Tuple[] = [];
+  const errors = rows(text, ["area", "key", "amount"], ([area, key, amount], n) => {
+    const a = area.toUpperCase() as Area;
+    if (!AREAS.includes(a)) return `Line ${n}: area "${area}" is not TB, INV, AP, AR or FA.`;
+    if (!key) return `Line ${n}: the key is blank.`;
+    if (!DECIMAL.test(amount)) return `Line ${n}: amount "${amount}" is not a decimal such as 1250.00.`;
+    tuples.push({ area: a, key, amount });
+    return undefined;
+  });
+  return { tuples, errors };
+}
+
+const LINE_HEADER = ["projectId", "legacyId", "category", "transactionDate", "qty", "costAmount", "salesAmount", "currency", "billingStatus", "wipCost", "wipSales"];
+const TOTAL_HEADER = ["projectId", "category", "cost", "sales", "wipCost", "wipSales"];
+
+/**
+ * Parses a project_wip extract: opening lines (projectId, legacyId, category, transactionDate,
+ * qty, costAmount, salesAmount, currency, billingStatus, wipCost, wipSales) and the legacy
+ * category totals (projectId, category, cost, sales, wipCost, wipSales), grouped by project in
+ * first-seen order. The service applies the FR-49.12 rules; this only checks the shape.
+ */
+export function parseProjectExtract(linesText: string, totalsText: string): { projects: ProjectExtract[]; lineErrors: string[]; totalErrors: string[] } {
+  const byId = new Map<string, ProjectExtract>();
+  const project = (id: string) => {
+    let p = byId.get(id);
+    if (!p) {
+      p = { projectId: id, legacyTotals: [], lines: [] };
+      byId.set(id, p);
+    }
+    return p;
+  };
+  const lineErrors = rows(linesText, LINE_HEADER, (c, n) => {
+    const [projectId, legacyId, category, transactionDate, qty, costAmount, salesAmount, currency, billingStatus, wipCost, wipSales] = c;
+    if (!projectId || !legacyId) return `Line ${n}: the project and legacy id are required.`;
+    const cat = category.toUpperCase() as Category;
+    if (!CATEGORIES.includes(cat)) return `Line ${n}: category "${category}" is not HOUR, EXPENSE, ITEM, FEE or ON_ACCOUNT.`;
+    if (!DATE.test(transactionDate)) return `Line ${n}: date "${transactionDate}" is not YYYY-MM-DD.`;
+    const bill = billingStatus.toUpperCase() as BillingStatus;
+    if (!BILLING.includes(bill)) return `Line ${n}: billing status "${billingStatus}" is not CHARGEABLE_UNBILLED, BILLED or NON_CHARGEABLE.`;
+    if (![qty, costAmount, salesAmount, wipCost, wipSales].every(optionalDecimal)) return `Line ${n}: amounts must be decimals such as 400.00.`;
+    const line: OpeningLine = { legacyId, category: cat, transactionDate, costAmount: costAmount || "0", salesAmount: salesAmount || "0", currency: currency.toUpperCase(), billingStatus: bill };
+    if (qty) line.qty = qty;
+    if (wipCost) line.wipCost = wipCost;
+    if (wipSales) line.wipSales = wipSales;
+    project(projectId).lines.push(line);
+    return undefined;
+  });
+  const totalErrors = rows(totalsText, TOTAL_HEADER, ([projectId, category, cost, sales, wipCost, wipSales], n) => {
+    if (!projectId) return `Line ${n}: the project id is required.`;
+    const cat = category.toUpperCase() as Category;
+    if (!CATEGORIES.includes(cat)) return `Line ${n}: category "${category}" is not HOUR, EXPENSE, ITEM, FEE or ON_ACCOUNT.`;
+    if (![cost, sales, wipCost, wipSales].every(optionalDecimal)) return `Line ${n}: totals must be decimals such as 48000.00.`;
+    const p = project(projectId);
+    if (p.legacyTotals.some((t) => t.category === cat)) return `Line ${n}: project ${projectId} already has a ${cat} total.`;
+    const total: LegacyCategoryTotal = { category: cat };
+    if (cost) total.cost = cost;
+    if (sales) total.sales = sales;
+    if (wipCost) total.wipCost = wipCost;
+    if (wipSales) total.wipSales = wipSales;
+    p.legacyTotals.push(total);
+    return undefined;
+  });
+  return { projects: [...byId.values()], lineErrors, totalErrors };
 }

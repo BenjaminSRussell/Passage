@@ -63,6 +63,7 @@ const run: PackRun = {
   recordsLoaded: 200,
   recordsQuarantined: 1,
   alreadyPresent: 0,
+  version: 1,
   createdAt: "2027-01-01T04:10:00Z",
 };
 
@@ -72,7 +73,9 @@ const detail: PackRunDetail = {
     { name: "open_items.amount", key: { company: "USMF", currency: "USD" }, source: "2055.000000", target: "2050.000000", delta: "-5.000000", tolerance: "0.000000", status: "MISMATCH" },
     { name: "open_items.count", key: { company: "USMF" }, source: "201.000000", target: "200.000000", delta: "-1.000000", tolerance: "0.000000", status: "MISMATCH" },
   ],
-  quarantined: [{ legacyId: "OI-BAD", rule: "REFERENTIAL", reason: 'party "V999" is not in master data' }],
+  quarantined: [
+    { seq: 1, legacyId: "OI-BAD", rule: "REFERENTIAL", reason: 'party "V999" is not in master data', status: "OPEN", party: "V999", account: "2100", currency: "USD", amount: "5.000000" },
+  ],
 };
 
 const step = (seq: number, name: string, offsetMin: number, extra: Partial<RunbookStep> = {}): RunbookStep => ({

@@ -3,6 +3,7 @@ package domain
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/shopspring/decimal"
 )
@@ -30,11 +31,18 @@ var iso4217 = map[string]struct{}{
 	"AUD": {}, "CNY": {}, "SEK": {}, "NOK": {}, "DKK": {}, "BRL": {}, "SGD": {}, "HKD": {},
 }
 
-// Quarantined is a record held back from load with the rule and reason (FR-49.11).
+// Quarantined is a record held back from load with the rule and reason (FR-49.11). Seq
+// addresses it within its run; Status is OPEN until a release loads the corrected record,
+// which is kept in Released.
 type Quarantined struct {
-	Record Record
-	Rule   string
-	Reason string
+	Seq        int
+	Record     Record
+	Rule       string
+	Reason     string
+	Status     string
+	Released   *Record
+	ReleasedBy string
+	ReleasedAt *time.Time
 }
 
 // Validate applies the open-items suite. parties is the set of vendor/customer ids known to
@@ -44,24 +52,24 @@ func Validate(records []Record, parties map[string]struct{}) (accepted []Record,
 	seen := make(map[string]struct{}, len(records))
 	for _, r := range records {
 		if strings.TrimSpace(r.LegacyID) == "" {
-			quarantined = append(quarantined, Quarantined{r, RuleUniqueness, "legacy id is blank"})
+			quarantined = append(quarantined, Quarantined{Record: r, Rule: RuleUniqueness, Reason: "legacy id is blank"})
 			continue
 		}
 		if _, dup := seen[r.LegacyID]; dup {
-			quarantined = append(quarantined, Quarantined{r, RuleUniqueness, "legacy id appears twice in the extract"})
+			quarantined = append(quarantined, Quarantined{Record: r, Rule: RuleUniqueness, Reason: "legacy id appears twice in the extract"})
 			continue
 		}
 		seen[r.LegacyID] = struct{}{}
 		if _, ok := parties[r.Party]; !ok {
-			quarantined = append(quarantined, Quarantined{r, RuleReferential, fmt.Sprintf("party %q is not in master data", r.Party)})
+			quarantined = append(quarantined, Quarantined{Record: r, Rule: RuleReferential, Reason: fmt.Sprintf("party %q is not in master data", r.Party)})
 			continue
 		}
 		if _, ok := iso4217[r.Currency]; !ok {
-			quarantined = append(quarantined, Quarantined{r, RuleDomain, fmt.Sprintf("currency %q is not ISO 4217", r.Currency)})
+			quarantined = append(quarantined, Quarantined{Record: r, Rule: RuleDomain, Reason: fmt.Sprintf("currency %q is not ISO 4217", r.Currency)})
 			continue
 		}
 		if strings.TrimSpace(r.Account) == "" {
-			quarantined = append(quarantined, Quarantined{r, RuleDomain, "control account is blank"})
+			quarantined = append(quarantined, Quarantined{Record: r, Rule: RuleDomain, Reason: "control account is blank"})
 			continue
 		}
 		accepted = append(accepted, r)

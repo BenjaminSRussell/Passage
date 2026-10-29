@@ -40,9 +40,14 @@ export function PackRunsPage() {
         title="Migration factory"
         description="Pack runs that validate, load and reconcile a legacy extract. A run reconciles only when every control total matches."
         actions={
-          <Link className={buttonClassName("primary")} to="/migration-factory/runs/new">
-            Start pack run
-          </Link>
+          <>
+            <Link className={buttonClassName("secondary")} to="/migration-factory/runs/new-project">
+              Load project balances
+            </Link>
+            <Link className={buttonClassName("primary")} to="/migration-factory/runs/new">
+              Start pack run
+            </Link>
+          </>
         }
       />
       <div className={styles.toolbar}>

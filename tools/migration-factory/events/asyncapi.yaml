@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: Passage Migration Factory events
-  version: 0.1.0
+  version: 0.2.0
   description: |
     Events the migration factory writes to its transactional outbox (PRD 9.49.5), in the same
     transaction as the state change. Debezium relays them to Kafka topic
@@ -15,6 +15,11 @@ channels:
     messages:
       packReconciled:
         $ref: "#/components/messages/PackReconciled"
+  migrationParallelRun:
+    address: passage.migration.parallelrun
+    messages:
+      parallelRunDiffed:
+        $ref: "#/components/messages/ParallelRunDiffed"
   cutoverStep:
     address: passage.cutover.step
     messages:
@@ -32,6 +37,12 @@ operations:
       $ref: "#/channels/migrationPack"
     messages:
       - $ref: "#/channels/migrationPack/messages/packReconciled"
+  publishParallelRunDiffed:
+    action: send
+    channel:
+      $ref: "#/channels/migrationParallelRun"
+    messages:
+      - $ref: "#/channels/migrationParallelRun/messages/parallelRunDiffed"
   publishStepCompleted:
     action: send
     channel:
@@ -49,9 +60,15 @@ components:
     PackReconciled:
       name: dev.passage.migration.pack.reconciled.v1
       title: Pack run reconciled
-      summary: A pack run computed its control totals. Written for every run, whether or not it reached RECONCILED.
+      summary: A pack run computed its control totals. Written for every run, whether or not it reached RECONCILED, and again when releasing a quarantined record brings a LOADED run to RECONCILED.
       payload:
         $ref: "#/components/schemas/PackReconciledEnvelope"
+    ParallelRunDiffed:
+      name: dev.passage.migration.parallelrun.diffed.v1
+      title: Parallel run diffed
+      summary: A parallel run outer-joined the legacy and Passage tuples and classified the variances (FR-49.5); it is in REVIEW.
+      payload:
+        $ref: "#/components/schemas/ParallelRunDiffedEnvelope"
     CutoverStepCompleted:
       name: dev.passage.cutover.step.completed.v1
       title: Cutover step completed
@@ -79,7 +96,7 @@ components:
           type: string
         subject:
           type: string
-          description: The aggregate id (run id or plan id).
+          description: The aggregate id (run id, parallel run id or plan id).
         time:
           type: string
           format: date-time
@@ -122,6 +139,33 @@ components:
                   type: integer
                 records_loaded:
                   type: integer
+    ParallelRunDiffedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            type:
+              const: dev.passage.migration.parallelrun.diffed.v1
+            data:
+              type: object
+              required: [parallel_run_id, period, source_system, variance_count, unexplained_count, unexplained_amount]
+              properties:
+                parallel_run_id:
+                  type: string
+                  format: uuid
+                period:
+                  type: string
+                  pattern: "^[0-9]{4}-(0[1-9]|1[0-2])$"
+                source_system:
+                  type: string
+                  enum: [AX2012, D365FO, SAPECC, S4HANA]
+                variance_count:
+                  type: integer
+                unexplained_count:
+                  type: integer
+                unexplained_amount:
+                  type: string
+                  description: Decimal string, sum of absolute deltas of the unexplained variances.
     CutoverStepCompletedEnvelope:
       allOf:
         - $ref: "#/components/schemas/Envelope"

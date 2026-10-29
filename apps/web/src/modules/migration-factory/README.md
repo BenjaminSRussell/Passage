@@ -6,13 +6,24 @@ call the service at `tools/migration-factory` through `api/client.ts` (paths fro
 
 - `/migration-factory`: pack runs with pack and status filters, and the nine packs.
 - `/migration-factory/runs/new`: start an open_items run from a pasted extract.
-- `/migration-factory/runs/:id`: run counts, the control-total board and quarantined records.
+- `/migration-factory/runs/new-project`: load project beginning balances (project_wip) from pasted
+  opening lines and legacy category totals.
+- `/migration-factory/runs/:id`: run counts, the control-total board, quarantined records with
+  release (party or control-account correction) on LOADED open_items runs, and, for project_wip
+  runs, each project's reconciliation.
+- `/migration-factory/runs/:id/projects/:project`: a project's totals per category against legacy
+  and its opening lines, paged by legacy id.
+- `/migration-factory/parallel-runs`: parallel runs with a state filter.
+- `/migration-factory/parallel-runs/new`: diff a replayed period from pasted legacy and Passage tuples.
+- `/migration-factory/parallel-runs/:id`: the variance report with a class filter, explain, and
+  sign-off once the exit criterion holds.
+- `/migration-factory/xref`: resolve a legacy id to the Passage record it became.
 - `/migration-factory/cutover`: cutover plans with progress.
 - `/migration-factory/cutover/new`: generate a plan.
 - `/migration-factory/cutover/:id`: the runbook, go/no-go checklist, step completion, abort warning
   and two-approver rollback.
 
-Commands send an `Idempotency-Key`; plan commands send the plan `version` the user saw, and a
-MIG-0006 conflict reloads the plan.
+Commands send an `Idempotency-Key`; pack-run releases, variance explanations, sign-off and plan
+commands send the `version` the user saw, and a MIG-0006 conflict reloads the record.
 
 Needs: none beyond the shell lockfile.

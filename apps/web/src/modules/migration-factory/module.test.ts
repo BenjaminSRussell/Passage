@@ -1,7 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadModules } from "../registry";
 import migrationFactory from "./module";
-import { completeStep, describeProblem, listRuns, MigrationApiError, rollbackPlan, startPackRun, type PackRunRequest } from "./api/client";
+import {
+  completeStep,
+  describeProblem,
+  explainVariance,
+  getProjectOpening,
+  listRuns,
+  lookupXref,
+  MigrationApiError,
+  releaseQuarantined,
+  rollbackPlan,
+  signOffParallelRun,
+  startPackRun,
+  type PackRunRequest,
+} from "./api/client";
 
 describe("migration-factory module", () => {
   it("uses its folder name as id and keeps every route and nav entry under /migration-factory", () => {
@@ -10,11 +23,17 @@ describe("migration-factory module", () => {
     expect(migrationFactory.nav.every((n) => n.to.startsWith("/migration-factory"))).toBe(true);
   });
 
-  it("has list, create and detail pages for pack runs and cutover plans", () => {
+  it("has list, create and detail pages for pack runs, project balances, parallel runs, legacy references and cutover plans", () => {
     expect(migrationFactory.routes.map((r) => r.path)).toEqual([
       "/migration-factory",
       "/migration-factory/runs/new",
+      "/migration-factory/runs/new-project",
       "/migration-factory/runs/:id",
+      "/migration-factory/runs/:id/projects/:project",
+      "/migration-factory/parallel-runs",
+      "/migration-factory/parallel-runs/new",
+      "/migration-factory/parallel-runs/:id",
+      "/migration-factory/xref",
       "/migration-factory/cutover",
       "/migration-factory/cutover/new",
       "/migration-factory/cutover/:id",
@@ -24,6 +43,8 @@ describe("migration-factory module", () => {
   it("guards the navigation with the duties the service enforces", () => {
     expect(migrationFactory.nav).toEqual([
       { label: "Pack runs", to: "/migration-factory", duty: "MigrationView" },
+      { label: "Parallel runs", to: "/migration-factory/parallel-runs", duty: "MigrationView" },
+      { label: "Legacy reference", to: "/migration-factory/xref" },
       { label: "Cutover runbooks", to: "/migration-factory/cutover", duty: "CutoverManager" },
     ]);
   });
@@ -67,6 +88,30 @@ describe("migration-factory client", () => {
     expect(JSON.parse(calls[0][1].body as string)).toEqual({ actualDurationMin: 45, version: 7 });
     expect(JSON.parse(calls[1][1].body as string)).toEqual({ approvers: ["alice", "bob"], version: 8 });
     expect(calls.map(([, init]) => new Headers(init.headers).get("Idempotency-Key"))).toEqual(["c-key", "r-key"]);
+  });
+
+  it("sends slice-2 commands to their paths with the version and key", async () => {
+    await releaseQuarantined("r/1", 2, { party: "V001", version: 4 }, "rel-key");
+    await explainVariance("p1", "v/1", "cut-off timing", 3, "ex-key");
+    await signOffParallelRun("p1", 4, "so-key");
+    const calls = fetchMock.mock.calls as unknown as [string, RequestInit][];
+    expect(calls.map(([url]) => url)).toEqual([
+      "/api/v1/migration/runs/r%2F1/quarantine/2/release",
+      "/api/v1/migration/parallel-runs/p1/variances/v%2F1/explain",
+      "/api/v1/migration/parallel-runs/p1/sign-off",
+    ]);
+    expect(calls.map(([, init]) => JSON.parse(init.body as string))).toEqual([{ party: "V001", version: 4 }, { reason: "cut-off timing", version: 3 }, { version: 4 }]);
+    expect(calls.map(([, init]) => new Headers(init.headers).get("Idempotency-Key"))).toEqual(["rel-key", "ex-key", "so-key"]);
+  });
+
+  it("builds the xref and project opening queries", async () => {
+    await lookupXref({ system: "SAPECC", table: "open_items", id: "1900000123", company: undefined });
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ lines: [] }), { status: 200 }));
+    await getProjectOpening("r1", "PRJ 1", { limit: 50, after: "PT-049" });
+    expect(fetchMock.mock.calls.map((c) => c[0])).toEqual([
+      "/api/v1/migration/xref?system=SAPECC&table=open_items&id=1900000123",
+      "/api/v1/migration/runs/r1/projects/PRJ%201/opening?limit=50&after=PT-049",
+    ]);
   });
 
   it("drops empty filters from the run list query", async () => {

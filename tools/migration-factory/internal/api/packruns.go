@@ -46,9 +46,18 @@ type totalDTO struct {
 }
 
 type quarantineDTO struct {
-	LegacyID string `json:"legacyId"`
-	Rule     string `json:"rule"`
-	Reason   string `json:"reason"`
+	Seq        int        `json:"seq"`
+	LegacyID   string     `json:"legacyId"`
+	Rule       string     `json:"rule"`
+	Reason     string     `json:"reason"`
+	Status     string     `json:"status"`
+	Party      string     `json:"party,omitempty"`
+	Account    string     `json:"account,omitempty"`
+	Currency   string     `json:"currency,omitempty"`
+	Amount     string     `json:"amount"`
+	Released   *recordDTO `json:"released,omitempty"`
+	ReleasedBy string     `json:"releasedBy,omitempty"`
+	ReleasedAt *time.Time `json:"releasedAt,omitempty"`
 }
 
 type runDTO struct {
@@ -64,6 +73,7 @@ type runDTO struct {
 	RecordsQuarantined int       `json:"recordsQuarantined"`
 	AlreadyPresent     int       `json:"alreadyPresent"`
 	Message            string    `json:"message,omitempty"`
+	Version            int       `json:"version"`
 	CreatedAt          time.Time `json:"createdAt"`
 }
 
@@ -84,8 +94,23 @@ func toRunSummary(run domain.PackRun) runDTO {
 		RunID: run.RunID, Pack: string(run.Pack), SourceSystem: string(run.SourceSystem), SourceCompany: run.SourceCompany,
 		CutoffTS: run.CutoffTS, InputHash: run.InputHash, Status: string(run.Status), RecordsIn: run.RecordsIn,
 		RecordsLoaded: run.RecordsLoaded, RecordsQuarantined: run.RecordsQuarantined, AlreadyPresent: run.AlreadyPresent,
-		Message: run.Message(), CreatedAt: run.CreatedAt,
+		Message: run.Message(), Version: run.Version, CreatedAt: run.CreatedAt,
 	}
+}
+
+func toRecordDTO(r domain.Record) recordDTO {
+	return recordDTO{LegacyID: r.LegacyID, Party: r.Party, Account: r.Account, Currency: r.Currency, Amount: r.Amount.StringFixed(6)}
+}
+
+func toQuarantineDTO(q domain.Quarantined) quarantineDTO {
+	out := quarantineDTO{Seq: q.Seq, LegacyID: q.Record.LegacyID, Rule: q.Rule, Reason: q.Reason, Status: q.Status,
+		Party: q.Record.Party, Account: q.Record.Account, Currency: q.Record.Currency, Amount: q.Record.Amount.StringFixed(6),
+		ReleasedBy: q.ReleasedBy, ReleasedAt: q.ReleasedAt}
+	if q.Released != nil {
+		rel := toRecordDTO(*q.Released)
+		out.Released = &rel
+	}
+	return out
 }
 
 func toRunDTO(run domain.PackRun) runDetailDTO {
@@ -94,7 +119,7 @@ func toRunDTO(run domain.PackRun) runDetailDTO {
 		out.ControlTotals = append(out.ControlTotals, toTotalDTO(t))
 	}
 	for _, q := range run.Quarantined {
-		out.Quarantined = append(out.Quarantined, quarantineDTO{LegacyID: q.Record.LegacyID, Rule: q.Rule, Reason: q.Reason})
+		out.Quarantined = append(out.Quarantined, toQuarantineDTO(q))
 	}
 	return out
 }
@@ -128,8 +153,13 @@ func (s *Server) startPackRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
-	if pack != domain.PackOpenItems {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeUnsupported, "pack "+string(pack)+" is not available in slice 1; only open_items runs"))
+	switch pack {
+	case domain.PackOpenItems:
+	case domain.PackProjectWIP:
+		s.startProjectRun(w, r)
+		return
+	default:
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeUnsupported, "pack "+string(pack)+" is not available yet; open_items and project_wip run"))
 		return
 	}
 	var req packRunRequest
@@ -174,8 +204,9 @@ func (s *Server) startPackRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
-	parties := make(map[string]struct{}, len(req.Parties))
-	for _, id := range req.Parties {
+	partyIDs := splitIDs(req.Parties)
+	parties := make(map[string]struct{}, len(partyIDs))
+	for _, id := range partyIDs {
 		parties[id] = struct{}{}
 	}
 	accepted, quarantined := domain.Validate(records, parties)
@@ -186,7 +217,7 @@ func (s *Server) startPackRun(w http.ResponseWriter, r *http.Request) {
 	run := domain.PackRun{
 		RunID: ids.New(), TenantID: p.TenantID, Pack: pack, SourceSystem: sys, SourceCompany: company,
 		CutoffTS: req.CutoffTS.UTC(), InputHash: domain.HashRecords(keyed(records)), Status: domain.StatusExtracted,
-		RecordsIn: len(records), RecordsQuarantined: len(quarantined), Quarantined: quarantined,
+		RecordsIn: len(records), RecordsQuarantined: len(quarantined), Quarantined: quarantined, Parties: partyIDs,
 	}
 	if err := run.Advance(domain.StatusValidated); err != nil {
 		fail(w, r, err)
@@ -272,4 +303,19 @@ func (s *Server) controlTotals(w http.ResponseWriter, r *http.Request) {
 		out = append(out, toTotalDTO(t))
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"runId": run.RunID, "status": run.Status, "controlTotals": out})
+}
+
+// splitIDs trims ids and drops blanks and repeats, keeping the first-seen order.
+func splitIDs(in []string) []string {
+	out := make([]string, 0, len(in))
+	seen := make(map[string]struct{}, len(in))
+	for _, id := range in {
+		id = strings.TrimSpace(id)
+		if _, dup := seen[id]; id == "" || dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
 }

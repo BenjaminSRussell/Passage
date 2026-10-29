@@ -10,6 +10,8 @@ const Source = "passage/migration-factory"
 var (
 	// PackReconciled is written when a pack run's reconciliation step has computed its totals.
 	PackReconciled = events.Type("migration", "pack", "reconciled", 1)
+	// ParallelRunDiffed is written when a parallel run's diff has classified its variances.
+	ParallelRunDiffed = events.Type("migration", "parallelrun", "diffed", 1)
 	// CutoverStepCompleted is written when a runbook step is marked done.
 	CutoverStepCompleted = events.Type("cutover", "step", "completed", 1)
 	// CutoverPlanRolledBack is written when a cutover plan's rollback is executed (FR-49.9).
@@ -18,7 +20,7 @@ var (
 
 // All lists every event type the service publishes.
 func All() []string {
-	return []string{PackReconciled, CutoverStepCompleted, CutoverPlanRolledBack}
+	return []string{PackReconciled, ParallelRunDiffed, CutoverStepCompleted, CutoverPlanRolledBack}
 }
 
 // PackReconciledData is the payload of dev.passage.migration.pack.reconciled.v1.
@@ -32,6 +34,17 @@ type PackReconciledData struct {
 	TotalsMismatch int    `json:"totals_mismatch"`
 	Quarantined    int    `json:"quarantined"`
 	RecordsLoaded  int    `json:"records_loaded"`
+}
+
+// ParallelRunDiffedData is the payload of dev.passage.migration.parallelrun.diffed.v1. Amounts
+// are decimal strings.
+type ParallelRunDiffedData struct {
+	ParallelRunID     string `json:"parallel_run_id"`
+	Period            string `json:"period"`
+	SourceSystem      string `json:"source_system"`
+	VarianceCount     int    `json:"variance_count"`
+	UnexplainedCount  int    `json:"unexplained_count"`
+	UnexplainedAmount string `json:"unexplained_amount"`
 }
 
 // CutoverStepCompletedData is the payload of dev.passage.cutover.step.completed.v1.

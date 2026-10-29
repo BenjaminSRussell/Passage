@@ -26,7 +26,12 @@ type PackRun struct {
 	AlreadyPresent int
 	Totals         []ControlTotal
 	Quarantined    []Quarantined
-	CreatedAt      time.Time
+	// Parties is the master-data snapshot the run validated against; a release checks a
+	// corrected party against it and the parties the release names.
+	Parties []string
+	// Version counts the run's writes; a release bumps it (optimistic concurrency).
+	Version   int
+	CreatedAt time.Time
 }
 
 // TableOpenItems is the legacy_xref source_table the open_items pack writes.
