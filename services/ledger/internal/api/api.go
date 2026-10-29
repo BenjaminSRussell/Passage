@@ -552,6 +552,7 @@ func (a *API) postEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.Key, in.Hash, in.Actor = key, hash, p.UserID
+	in.CanPostLedgerSpecific = p.HasDuty(store.DutyPostLedgerSpecific)
 	res, err := a.store.PostEntry(r.Context(), in)
 	if err != nil {
 		a.fail(w, r, err)
@@ -609,7 +610,7 @@ func (a *API) reverseEntry(w http.ResponseWriter, r *http.Request) {
 	}
 	fields := map[string]string{}
 	in := store.ReverseInput{EntryID: id, Description: req.Description, Actor: p.UserID, TraceID: traceID(r), Today: a.today(),
-		ReasonCode: req.ReasonCode, ReasonComment: req.ReasonComment}
+		ReasonCode: req.ReasonCode, ReasonComment: req.ReasonComment, CanPostLedgerSpecific: p.HasDuty(store.DutyPostLedgerSpecific)}
 	if req.PostingDate != nil {
 		d, ok := parseDate(*req.PostingDate)
 		if !ok {
@@ -672,7 +673,8 @@ type validateResponse struct {
 
 // validateEntry is the dry run: every violation in one response, no writes.
 func (a *API) validateEntry(w http.ResponseWriter, r *http.Request) {
-	if _, ok := principal(w, r); !ok {
+	p, ok := principal(w, r)
+	if !ok {
 		return
 	}
 	var req postEntryRequest
@@ -685,6 +687,7 @@ func (a *API) validateEntry(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
+	in.CanPostLedgerSpecific = p.HasDuty(store.DutyPostLedgerSpecific)
 	res, err := a.store.ValidateEntry(r.Context(), in)
 	if err != nil {
 		a.fail(w, r, err)

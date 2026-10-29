@@ -2,6 +2,7 @@
   "assignments": {},
   "duties": {
     "Maintain users": {"permissions": [{"resource": "/v1/identity/users{,/**}", "methods": ["GET", "POST", "PATCH"]}]},
+    "View effective permissions": {"permissions": [{"resource": "/v1/identity/users/*/effective-permissions", "methods": ["GET"]}]},
     "Maintain security roles": {"permissions": [
       {"resource": "/v1/authz/roles{,/**}", "methods": ["GET", "POST", "PUT", "DELETE"]},
       {"resource": "/v1/authz/duties{,/**}", "methods": ["GET", "POST", "PUT", "DELETE"]},
@@ -92,6 +93,7 @@
       {"resource": "/v1/ledger/ledger-sets/*/journal-entries", "methods": ["POST"]}
     ]},
     "ledger.journal.postdirect": {"flag": true, "permissions": []},
+    "ledger.journal.postledger": {"flag": true, "permissions": []},
     "ledger.journal.reverse": {"permissions": [{"resource": "/v1/ledger/journal-entries/*/reverse", "methods": ["POST"]}]},
     "ledger.journal.write": {"permissions": [
       {"resource": "/v1/ledger/journal-batches", "methods": ["POST"]},

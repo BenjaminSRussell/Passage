@@ -23,7 +23,7 @@ import (
 
 const (
 	contractTenant   = "tenant-a"
-	seededDutyCount  = 101
+	seededDutyCount  = 103
 	unassignedUserID = "user-without-duty"
 )
 
@@ -267,6 +267,10 @@ func TestDutyContractExpectations(t *testing.T) {
 		wantAllowed            bool
 		wantDutyMissing        string
 	}{
+		{duty: "View effective permissions", method: http.MethodGet, resource: "/v1/identity/users/u1/effective-permissions", wantAllowed: true},
+		{duty: "Maintain users", method: http.MethodGet, resource: "/v1/identity/users/u1/effective-permissions", wantAllowed: true},
+		{duty: "View effective permissions", method: http.MethodGet, resource: "/v1/identity/users/u1", wantDutyMissing: "Maintain users"},
+		{duty: "View effective permissions", method: http.MethodPost, resource: "/v1/identity/users/u1/effective-permissions", wantDutyMissing: "Maintain users"},
 		{duty: "Maintain vendors", method: http.MethodPut, resource: "/v1/vendors", wantAllowed: true},
 		{duty: "Maintain vendors", method: http.MethodPut, resource: "/v1/vendors/vendor-a", wantAllowed: true},
 		{duty: "View vendors", method: http.MethodGet, resource: "/v1/vendors/vendor-a", wantAllowed: true},
@@ -281,6 +285,7 @@ func TestDutyContractExpectations(t *testing.T) {
 		{duty: "ledger.journal.approve", method: http.MethodPost, resource: "/v1/ledger/journal-batches/b1/post"},
 		{duty: "ledger.journal.post", method: http.MethodPost, resource: "/v1/ledger/journal-entries/e1/reverse"},
 		{duty: "ledger.journal.reverse", method: http.MethodPost, resource: "/v1/ledger/journal-entries"},
+		{duty: "ledger.journal.postledger", method: http.MethodPost, resource: "/v1/ledger/journal-entries"},
 		{duty: "ReceivingMaintain", method: http.MethodPost, resource: "/v1/receiving/receipts/r1:post"},
 		{duty: "ReceivingMaintain", method: http.MethodPost, resource: "/v1/receiving/receipts/r1:correct"},
 		{duty: "ReceivingMaintain", method: http.MethodPost, resource: "/v1/receiving/receipts/r1:cancel"},
