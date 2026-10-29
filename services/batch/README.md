@@ -50,4 +50,6 @@ OPA duties `Maintain workflows`, `Approve workflow`, `Maintain batch jobs`, `Vie
 
 Reserved handlers: `product.explode` and `product.group-change` (Wave 08 still runs those in-process with 500-row outbox batches) and `metadata.usage` (Wave 03 collector, scheduled here when metadata enqueues it). The metadata registry publish and extend paths write `dev.passage.metadata.entity.published.v1` to its outbox; this service catalogs that type.
 
+CDC: migration `0004_cdc_publication` creates the `passage_outbox_batch` publication. The migrating role needs CREATE on the database and ownership of `outbox`; the Debezium connector in `deploy/kafka` must start after migration 0004.
+
 Metrics: `batch_submitted_total`, `batch_failed_total`. Extra Go dependency: `github.com/go-chi/chi/v5` (HTTP router, same as every other service).

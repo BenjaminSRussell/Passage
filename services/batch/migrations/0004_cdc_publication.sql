@@ -1,3 +1,4 @@
+-- Requires CREATE on the database and ownership of outbox; the Debezium connector must start after this migration.
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'passage_outbox_batch') THEN
