@@ -336,7 +336,25 @@ func TestPartyReadDeniedWithoutDuties(t *testing.T) {
 var coveredServices = []string{"ledger", "fx", "tax", "close", "finreport", "inventory", "purchasing", "receiving", "payables", "party"}
 
 var dutyConstant = regexp.MustCompile(`(?m)\b[dD]uty[A-Za-z0-9]*\s*(?:string\s*)?=\s*"([^"]+)"`)
-var dutyCallArgument = regexp.MustCompile(`(?:RequireDuty|HasDuty)\s*\(\s*([^)]*)\)`)
+var dutyCallArgument = regexp.MustCompile(`(?:RequireDuty|HasDuty)\s*\(\s*([^,)]*(?:\([^)]*\))?[^,)]*)[,)]`)
+var dutyConstantReference = regexp.MustCompile(`^(?:[A-Za-z_]\w*\.)?[dD]uty\w*$`)
+
+func TestDutyConstantReference(t *testing.T) {
+	cases := map[string]bool{
+		"dutyRead":             true,
+		"DutyPostDirect":       true,
+		"store.DutyPostDirect": true,
+		`"party.read"`:         false,
+		"dutyFor(x)":           false,
+		"name":                 false,
+		"store.name":           false,
+	}
+	for argument, want := range cases {
+		if got := dutyConstantReference.MatchString(argument); got != want {
+			t.Errorf("%q: match = %v, want %v", argument, got, want)
+		}
+	}
+}
 
 func TestEveryServiceDutyIsSeeded(t *testing.T) {
 	raw, err := os.ReadFile("../../policies/authz/data.json")
@@ -378,7 +396,7 @@ func TestEveryServiceDutyIsSeeded(t *testing.T) {
 				}
 			}
 			for _, match := range dutyCallArgument.FindAllStringSubmatch(string(src), -1) {
-				if argument := strings.TrimSpace(match[1]); !strings.HasPrefix(argument, "duty") && !strings.HasPrefix(argument, "Duty") {
+				if argument := strings.TrimSpace(match[1]); !dutyConstantReference.MatchString(argument) {
 					t.Errorf("%s: %s passes %q to RequireDuty/HasDuty; use a duty* constant", service, file, argument)
 				}
 			}

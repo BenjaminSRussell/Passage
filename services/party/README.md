@@ -45,7 +45,7 @@ Rules worth knowing: a `NULL` credit limit counts as 0, so any first limit needs
 |---|---|
 | `party.approve` | (PRD name: Approve master data changes) `POST /v1/party/pending-changes/{id}:approve`, `:reject`; seeded in `policies/authz/data.json` |
 | `party.write` | `POST /v1/party/tax-registrations:validate`, `POST /v1/party/parties`, `POST /v1/party/customers/{id}/credit-limit`, `PATCH /v1/party/parties/{id}` |
-| `party.read` | `GET /v1/party/parties/{id}` |
+| `party.read` | `GET /v1/party/parties/{id}`, `GET /v1/party/pending-changes/*` (the route lands with #230) |
 | `pii.read` | shows `dob` unmasked on party responses; without it `dob` reads `"••••"` when set |
 
 ## Error codes
