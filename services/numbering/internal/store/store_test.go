@@ -5,8 +5,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
@@ -103,13 +101,6 @@ func TestMigrationsApplyWithRLS(t *testing.T) {
 	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	var schema string
-	if err := admin.QueryRow(ctx, "select current_schema()").Scan(&schema); err != nil {
-		t.Fatal(err)
-	}
-	if err := grantApp(ctx, admin, schema); err != nil {
-		t.Fatal(err)
-	}
 	var currentUser string
 	var roleSuper, roleBypass bool
 	metadataErr := pool.QueryRow(ctx, `select current_user, r.rolsuper, r.rolbypassrls from pg_roles r where r.rolname = current_user`).Scan(&currentUser, &roleSuper, &roleBypass)
@@ -135,12 +126,4 @@ func TestMigrationsApplyWithRLS(t *testing.T) {
 	if _, err := app.Get(other, "INV"); err == nil {
 		t.Fatal("tenant 2 must not see tenant 1 sequence through the app role")
 	}
-}
-
-func grantApp(ctx context.Context, admin *pgxpool.Pool, schema string) error {
-	if _, err := admin.Exec(ctx, "grant usage on schema "+schema+" to passage_app"); err != nil {
-		return err
-	}
-	_, err := admin.Exec(ctx, "grant select, insert, update, delete on all tables in schema "+schema+" to passage_app")
-	return err
 }

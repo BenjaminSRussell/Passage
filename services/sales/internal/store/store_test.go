@@ -47,7 +47,7 @@ func TestPostgres_CreditHoldAndRelease(t *testing.T) {
 	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	s := New(pool)
+	s := New(appOf(t, pool))
 	le, customer, product, site := ids.New(), ids.New(), ids.New(), ids.New()
 	const day = "2027-03-04"
 
@@ -132,7 +132,7 @@ func TestPostgres_CreditReleaseIsPerOrder(t *testing.T) {
 	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	s := New(pool)
+	s := New(appOf(t, pool))
 	le, customer := ids.New(), ids.New()
 	limits := domain.CreditProfile{Limit: d(1000), Currency: "USD", LimitType: domain.LimitBalance, TolerancePct: d(0), ToleranceAmount: d(0), OldestItemDaysMax: 30, MaxDunningLevel: 3}
 	if _, err := s.PutCreditProfile(ctx, CreditProfile{LegalEntityID: le, CustomerID: customer, CreditProfile: limits}, 0); err != nil {
@@ -175,7 +175,7 @@ func TestPostgres_ListOrdersAndNumbering(t *testing.T) {
 	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	s := New(pool)
+	s := New(appOf(t, pool))
 	leA, leB, customer := ids.New(), ids.New(), ids.New()
 	create := func(le, hash string, price int64) Order {
 		line := Line{LineNo: 1, ProductID: ids.New(), Quantity: d(1), Unit: "EA", SiteID: ids.New(), WarehouseID: ids.New(), UnitPrice: d(price), DiscPct: d(0), LineNet: d(price), RequestedShipDate: "2027-03-04"}
@@ -268,7 +268,7 @@ func TestPostgres_StaleVersionIsRefused(t *testing.T) {
 	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	s := New(pool)
+	s := New(appOf(t, pool))
 	le, customer := ids.New(), ids.New()
 	line := Line{LineNo: 1, ProductID: ids.New(), Quantity: d(2), Unit: "EA", SiteID: ids.New(), WarehouseID: ids.New(), UnitPrice: d(5), DiscPct: d(0), LineNet: d(10), RequestedShipDate: "2027-03-04"}
 	order, _, err := s.CreateOrder(ctx, NewOrder{LegalEntityID: le, CustomerID: customer, InvoiceAccountID: customer, OrderType: "ORDER", Currency: "EUR", RequestedShipDate: "2027-03-04", Channel: "UI", RequestHash: "x", Lines: []Line{line}})
@@ -328,7 +328,7 @@ func TestPostgres_RowLevelSecurity(t *testing.T) {
 		t.Fatalf("only %d tables checked", tables)
 	}
 
-	s := New(pool)
+	s := New(appOf(t, pool))
 	leA, leB := ids.New(), ids.New()
 	other := tenant.With(bg, tenant.Principal{TenantID: testkit.TenantID(2), UserID: "x", Duties: map[string]struct{}{}})
 	mk := func(c context.Context, le, hash string) Order {

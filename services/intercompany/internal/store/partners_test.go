@@ -304,14 +304,6 @@ func TestStore_RowLevelSecurity(t *testing.T) {
 	if err := admin.QueryRow(ctx, "select current_schema()").Scan(&schema); err != nil {
 		t.Fatal(err)
 	}
-	for _, grant := range []string{
-		"grant usage on schema " + schema + " to passage_app",
-		"grant select, insert, update, delete on all tables in schema " + schema + " to passage_app",
-	} {
-		if _, err := admin.Exec(ctx, grant); err != nil {
-			t.Fatal(err)
-		}
-	}
 	for _, table := range []string{"intercompany_partner", "outbox", "idempotency_keys"} {
 		var enabled, forced bool
 		if err := admin.QueryRow(ctx, `select relrowsecurity, relforcerowsecurity from pg_class where relname = $1 and relnamespace = $2::regnamespace`, table, schema).Scan(&enabled, &forced); err != nil {

@@ -18,7 +18,7 @@ func TestPostgres_CreditProfileOptimisticConcurrency(t *testing.T) {
 	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	s := New(pool)
+	s := New(appOf(t, pool))
 	le, customer := ids.New(), ids.New()
 	profile := CreditProfile{LegalEntityID: le, CustomerID: customer, CreditProfile: domain.CreditProfile{
 		Limit: d(10000), Currency: "USD", LimitType: domain.LimitBalance, TolerancePct: d(5), ToleranceAmount: d(1000),
@@ -57,7 +57,7 @@ func TestPostgres_ChannelDuplicateRules(t *testing.T) {
 	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	s := New(pool)
+	s := New(appOf(t, pool))
 	ref := "PO-7781"
 	in := NewOrder{LegalEntityID: ids.New(), CustomerID: ids.New(), InvoiceAccountID: ids.New(), OrderType: "ORDER",
 		Currency: "USD", RequestedShipDate: "2027-03-04", Channel: "EDI", ExternalRef: &ref, RequestHash: "body-a",

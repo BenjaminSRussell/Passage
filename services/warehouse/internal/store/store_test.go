@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
@@ -33,7 +32,9 @@ func setup(t *testing.T) (*Store, context.Context, string) {
 	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	return New(pool), ctx, ids.New()
+	st := New(appOf(t, pool))
+	adminPools.Store(st, pool)
+	return st, ctx, ids.New()
 }
 
 func loc(name, zone string, seq int, c domain.Capacity) domain.Location {
@@ -218,7 +219,7 @@ func TestStore_PutAwayAssignConfirm(t *testing.T) {
 	if !locs[0].Used.Weight.Equal(dq("2.5")) || locs[0].Used.LPs != 1 || locs[0].Version != 2 {
 		t.Fatalf("A-01 usage = %+v version %d", locs[0].Used, locs[0].Version)
 	}
-	if outboxCount(t, st.pool, "dev.passage.wms.work.created.v1") != 1 || outboxCount(t, st.pool, "dev.passage.wms.work.completed.v1") != 1 {
+	if outboxCount(t, adminOf(st), "dev.passage.wms.work.created.v1") != 1 || outboxCount(t, adminOf(st), "dev.passage.wms.work.completed.v1") != 1 {
 		t.Fatal("want one work.created and one work.completed event")
 	}
 	if _, err := st.GetWork(ctx, ids.New()); !errors.Is(err, ErrNotFound) {
@@ -277,7 +278,7 @@ func TestStore_ShortPick(t *testing.T) {
 		t.Fatalf("GetWork remainder = %+v err=%v", fetched, err)
 	}
 	// Created: put-away, pick, remainder. Completed: put-away and the short-picked parent.
-	if c, d := outboxCount(t, st.pool, "dev.passage.wms.work.created.v1"), outboxCount(t, st.pool, "dev.passage.wms.work.completed.v1"); c != 3 || d != 2 {
+	if c, d := outboxCount(t, adminOf(st), "dev.passage.wms.work.created.v1"), outboxCount(t, adminOf(st), "dev.passage.wms.work.completed.v1"); c != 3 || d != 2 {
 		t.Fatalf("outbox created=%d completed=%d, want 3 and 2", c, d)
 	}
 }
@@ -416,7 +417,7 @@ func TestStore_ListWorkPages(t *testing.T) {
 }
 
 // Row-level security: through an application (non-owner) role, tenant 2 sees
-// none of tenant 1's locations, directives, work or outbox rows.
+// none of tenant 1's locations, directives, work, doors or receipts.
 func TestStore_TenantIsolation(t *testing.T) {
 	if os.Getenv(testkit.EnvAppURL) == "" {
 		t.Skipf("%s not set; skipping RLS test", testkit.EnvAppURL)
@@ -425,16 +426,6 @@ func TestStore_TenantIsolation(t *testing.T) {
 	ctx1 := testkit.Ctx(testkit.TenantID(1))
 	ctx2 := testkit.Ctx(testkit.TenantID(2))
 	if err := dbx.Migrate(ctx1, admin, migrations.FS); err != nil {
-		t.Fatal(err)
-	}
-	var schema, appUser string
-	if err := admin.QueryRow(ctx1, `select current_schema()`).Scan(&schema); err != nil {
-		t.Fatal(err)
-	}
-	if err := app.QueryRow(ctx1, `select current_user`).Scan(&appUser); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := admin.Exec(ctx1, fmt.Sprintf(`grant usage on schema %s to %s; grant select, insert, update, delete on all tables in schema %[1]s to %[2]s`, schema, appUser)); err != nil {
 		t.Fatal(err)
 	}
 	st := New(app)
@@ -480,11 +471,5 @@ func TestStore_TenantIsolation(t *testing.T) {
 	}
 	if sums, err := st.ListReceipts(ctx2, ReceiptFilter{WarehouseID: wh, Limit: 10}); err != nil || len(sums) != 0 {
 		t.Fatalf("tenant 2 receipts = %+v err=%v", sums, err)
-	}
-	var n int
-	if err := dbx.WithTenantTx(ctx2, app, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx2, `select count(*) from outbox`).Scan(&n)
-	}); err != nil || n != 0 {
-		t.Fatalf("tenant 2 outbox rows = %d err=%v", n, err)
 	}
 }

@@ -24,7 +24,7 @@ func migrated(t *testing.T) (*Postgres, *pgxpool.Pool, context.Context) {
 	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	return New(pool), pool, ctx
+	return New(appOf(t, pool)), pool, ctx
 }
 
 func oneLineOrder(le, customer, product string, orderDay time.Time) NewOrder {

@@ -354,18 +354,6 @@ func TestMigrationsApplyWithForcedRLS(t *testing.T) {
 	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	var schema string
-	if err := admin.QueryRow(ctx, "select current_schema()").Scan(&schema); err != nil {
-		t.Fatal(err)
-	}
-	for _, stmt := range []string{
-		"grant usage on schema " + schema + " to passage_app",
-		"grant select, insert, update, delete on all tables in schema " + schema + " to passage_app",
-	} {
-		if _, err := admin.Exec(ctx, stmt); err != nil {
-			t.Fatal(err)
-		}
-	}
 	var super, bypass bool
 	if err := app.QueryRow(ctx, `select rolsuper, rolbypassrls from pg_roles where rolname = current_user`).Scan(&super, &bypass); err != nil || super || bypass {
 		t.Fatalf("app role must not bypass RLS: super=%v bypass=%v err=%v", super, bypass, err)
