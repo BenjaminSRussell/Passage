@@ -42,6 +42,55 @@ paths:
                 items: { $ref: '#/components/schemas/Entry' }
         '401': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /v1/platform/releases:
+    post:
+      operationId: recordRelease
+      x-passage-duty: Maintain platform releases
+      description: Records one promote or rollback of an image digest. Platform-level data stored under the nil system tenant; the caller's tenant only authenticates the call. Emits dev.passage.platform.release.promoted.v1 or dev.passage.platform.release.rolledback.v1 through the outbox.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RecordRelease' }
+      responses:
+        '201':
+          description: Release recorded, or the original release on an Idempotency-Key replay.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Release' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listReleases
+      x-passage-duty: View platform releases
+      parameters:
+        - name: service
+          in: query
+          required: false
+          schema: { type: string }
+        - name: env
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: Newest releases first, at most 100.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Release' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /healthz:
     get:
       operationId: liveness
@@ -80,6 +129,32 @@ components:
       properties:
         id: { type: string, format: uuid }
         message: { type: string }
+        createdAt: { type: string, format: date-time }
+    RecordRelease:
+      type: object
+      additionalProperties: false
+      required: [service, environment, action, imageDigest, previousDigest]
+      properties:
+        service: { type: string, pattern: '^[a-z][a-z0-9-]{0,62}$' }
+        environment: { type: string, pattern: '^[a-z][a-z0-9-]{0,62}$', description: A registered platform environment (dev, stage, prod). }
+        action: { type: string, enum: [promote, rollback] }
+        imageDigest: { type: string, pattern: '^sha256:[0-9a-f]{64}$', description: Digest now pinned. }
+        previousDigest: { type: string, pattern: '^sha256:[0-9a-f]{64}$', description: Digest it replaced; must differ from imageDigest. }
+        signed: { type: boolean, description: True when cosign signature and SBOM attestation were verified. }
+        reason: { type: string, maxLength: 280 }
+    Release:
+      type: object
+      required: [id, service, environment, action, imageDigest, previousDigest, signed, actor, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        service: { type: string }
+        environment: { type: string }
+        action: { type: string, enum: [promote, rollback] }
+        imageDigest: { type: string }
+        previousDigest: { type: string }
+        signed: { type: boolean }
+        actor: { type: string }
+        reason: { type: string }
         createdAt: { type: string, format: date-time }
     Problem:
       type: object

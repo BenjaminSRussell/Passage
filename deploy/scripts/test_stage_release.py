@@ -1,11 +1,14 @@
 import contextlib
+import http.server
 import io
+import json
 import os
 import re
 import shutil
 import stat
 import subprocess
 import tempfile
+import threading
 import time
 import unittest
 import unittest.mock
@@ -69,6 +72,11 @@ class StageReleaseTests(unittest.TestCase):
         )
         path_patch.start()
         self.addCleanup(path_patch.stop)
+        for variable in (stage_release.API_URL_VARIABLE, stage_release.API_TOKEN_VARIABLE):
+            environment_patch = unittest.mock.patch.dict(os.environ)
+            environment_patch.start()
+            self.addCleanup(environment_patch.stop)
+            os.environ.pop(variable, None)
 
     def install_cosign_stub(self, fail_on):
         stub = self.stub_dir / "cosign"
@@ -518,6 +526,124 @@ class StageReleaseTests(unittest.TestCase):
 
         self.assertEqual(result, 2)
         self.assertEqual(self.digest(), PROMOTED_DIGEST)
+
+    def start_release_api(self, status=201, body=None):
+        received = []
+        reply = json.dumps(body if body is not None else {"id": "rel-1"}).encode()
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(handler):
+                length = int(handler.headers["Content-Length"])
+                received.append(
+                    {
+                        "path": handler.path,
+                        "headers": dict(handler.headers),
+                        "body": json.loads(handler.rfile.read(length)),
+                    }
+                )
+                handler.send_response(status)
+                handler.send_header("Content-Type", "application/json")
+                handler.end_headers()
+                handler.wfile.write(reply)
+
+            def log_message(handler, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        os.environ[stage_release.API_URL_VARIABLE] = f"http://127.0.0.1:{server.server_port}"
+        return received
+
+    def test_promote_records_a_release_row(self):
+        received = self.start_release_api()
+        os.environ[stage_release.API_TOKEN_VARIABLE] = "secret-token"
+
+        result, _ = self.run_cli(["promote", "--to", "stage", "--digest", PROMOTED_DIGEST])
+
+        self.assertEqual(result, 0)
+        self.assertEqual(len(received), 1)
+        self.assertEqual(received[0]["path"], "/v1/platform/releases")
+        self.assertEqual(received[0]["headers"]["Authorization"], "Bearer secret-token")
+        self.assertTrue(received[0]["headers"]["Idempotency-Key"])
+        self.assertEqual(
+            received[0]["body"],
+            {
+                "service": "hello-ledger",
+                "environment": "stage",
+                "action": "promote",
+                "imageDigest": PROMOTED_DIGEST,
+                "previousDigest": INITIAL_DIGEST,
+                "signed": True,
+            },
+        )
+
+    def test_skip_verify_promotion_is_recorded_unsigned(self):
+        received = self.start_release_api()
+
+        self.run_cli(["promote", "--to", "stage", "--digest", PROMOTED_DIGEST, "--skip-verify"])
+
+        self.assertIs(received[0]["body"]["signed"], False)
+
+    def test_rollback_records_a_release_row(self):
+        received = self.start_release_api()
+        self.run_cli(["promote", "--to", "stage", "--digest", PROMOTED_DIGEST])
+        self.commit("Promote hello-ledger to stage")
+
+        result, _ = self.run_cli(["rollback", "--env", "stage"])
+
+        self.assertEqual(result, 0)
+        self.assertEqual(
+            [(r["body"]["action"], r["body"]["imageDigest"], r["body"]["previousDigest"]) for r in received],
+            [("promote", PROMOTED_DIGEST, INITIAL_DIGEST), ("rollback", INITIAL_DIGEST, PROMOTED_DIGEST)],
+        )
+
+    def test_prod_promotion_is_recorded_for_prod(self):
+        received = self.start_release_api()
+        self.publish_main(stage=PROMOTED_DIGEST, prod=stage_release.PLACEHOLDER_DIGEST)
+
+        result, _ = self.promote_prod()
+
+        self.assertEqual(result, 0)
+        self.assertEqual(received[0]["body"]["environment"], "prod")
+        self.assertEqual(received[0]["body"]["previousDigest"], stage_release.PLACEHOLDER_DIGEST)
+
+    def test_rejected_release_api_warns_but_keeps_the_manifest_change(self):
+        self.start_release_api(status=400, body={"code": "COM-0001"})
+
+        result, errors = self.run_cli(["promote", "--to", "stage", "--digest", PROMOTED_DIGEST])
+
+        self.assertEqual(result, 0)
+        self.assertEqual(self.digest(), PROMOTED_DIGEST)
+        self.assertIn("NOT recorded", errors)
+        self.assertIn("answered 400", errors)
+
+    def test_unreachable_release_api_warns_but_keeps_the_manifest_change(self):
+        os.environ[stage_release.API_URL_VARIABLE] = "http://127.0.0.1:1"
+
+        result, errors = self.run_cli(["promote", "--to", "stage", "--digest", PROMOTED_DIGEST])
+
+        self.assertEqual(result, 0)
+        self.assertEqual(self.digest(), PROMOTED_DIGEST)
+        self.assertIn("NOT recorded", errors)
+
+    def test_unset_release_api_warns_and_non_http_url_is_refused(self):
+        _, errors = self.run_cli(["promote", "--to", "stage", "--digest", PROMOTED_DIGEST])
+        self.assertIn(f"{stage_release.API_URL_VARIABLE} is not set", errors)
+
+        os.environ[stage_release.API_URL_VARIABLE] = "file:///etc/passwd"
+        with self.assertRaises(stage_release.ReleaseError):
+            stage_release.record_release("stage", "promote", PROMOTED_DIGEST, INITIAL_DIGEST, True)
+
+    def test_refused_promotion_records_nothing(self):
+        received = self.start_release_api()
+        self.install_cosign_stub(fail_on="verify")
+
+        result, _ = self.run_cli(["promote", "--to", "stage", "--digest", PROMOTED_DIGEST])
+
+        self.assertEqual(result, 2)
+        self.assertEqual(received, [])
 
 
 if __name__ == "__main__":

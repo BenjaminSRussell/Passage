@@ -19,9 +19,33 @@ import (
 )
 
 type fakeStore struct {
-	err     error
-	pingErr error
-	entries []store.Entry
+	err      error
+	pingErr  error
+	entries  []store.Entry
+	releases []store.Release
+	lastKey  string
+}
+
+func (f *fakeStore) RecordRelease(_ context.Context, in store.Release, key string) (store.Release, error) {
+	if f.err != nil {
+		return store.Release{}, f.err
+	}
+	in.ID, in.Actor, in.CreatedAt, f.lastKey = "rel-1", "anonymous", time.Unix(0, 0).UTC(), key
+	f.releases = append(f.releases, in)
+	return in, nil
+}
+
+func (f *fakeStore) ListReleases(_ context.Context, service, environment string) ([]store.Release, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := []store.Release{}
+	for _, r := range f.releases {
+		if (service == "" || r.Service == service) && (environment == "" || r.Environment == environment) {
+			out = append(out, r)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeStore) Create(_ context.Context, message, _ string) (store.Entry, error) {

@@ -26,6 +26,8 @@ const (
 	idempotencyKey   = "Idempotency-Key"
 	dutyWrite        = "hello.write"
 	dutyRead         = "hello.read"
+	dutyReleaseWrite = "Maintain platform releases"
+	dutyReleaseRead  = "View platform releases"
 )
 
 type API struct {
@@ -33,6 +35,9 @@ type API struct {
 	created atomic.Int64
 	failed  atomic.Int64
 	http    requestMetrics
+
+	releasesRecorded atomic.Int64
+	releasesFailed   atomic.Int64
 }
 
 type createRequest struct {
@@ -45,6 +50,8 @@ func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutyWrite)).Post("/v1/hello-ledger/entries", a.create)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/hello-ledger/entries", a.list)
+	r.With(authz.RequireDuty(dutyReleaseWrite)).Post("/v1/platform/releases", a.recordRelease)
+	r.With(authz.RequireDuty(dutyReleaseRead)).Get("/v1/platform/releases", a.listReleases)
 }
 
 func (a *API) Metrics() http.Handler {
@@ -52,6 +59,8 @@ func (a *API) Metrics() http.Handler {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		_, _ = fmt.Fprintf(w, "# HELP hello_ledger_entries_created_total Entries created.\n# TYPE hello_ledger_entries_created_total counter\nhello_ledger_entries_created_total %d\n", a.created.Load())
 		_, _ = fmt.Fprintf(w, "# HELP hello_ledger_entries_failed_total Entry creations that failed in the store.\n# TYPE hello_ledger_entries_failed_total counter\nhello_ledger_entries_failed_total %d\n", a.failed.Load())
+		_, _ = fmt.Fprintf(w, "# HELP hello_ledger_releases_recorded_total Release rows recorded.\n# TYPE hello_ledger_releases_recorded_total counter\nhello_ledger_releases_recorded_total %d\n", a.releasesRecorded.Load())
+		_, _ = fmt.Fprintf(w, "# HELP hello_ledger_releases_failed_total Release recordings that failed in the store.\n# TYPE hello_ledger_releases_failed_total counter\nhello_ledger_releases_failed_total %d\n", a.releasesFailed.Load())
 		a.http.write(w)
 	})
 }

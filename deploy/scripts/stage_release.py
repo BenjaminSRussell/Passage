@@ -2,10 +2,15 @@
 """Prepare immutable hello-ledger digest changes for the Argo CD GitOps flow."""
 
 import argparse
+import json
+import os
 import re
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
+import uuid
 from pathlib import Path
 
 
@@ -14,6 +19,10 @@ MANIFESTS = {
     env: Path(f"deploy/envs/{env}/apps/hello-ledger.yaml") for env in ("stage", "prod")
 }
 SOAK_MINUTES = 60
+SERVICE = "hello-ledger"
+API_URL_VARIABLE = "PASSAGE_PLATFORM_API_URL"
+API_TOKEN_VARIABLE = "PASSAGE_PLATFORM_API_TOKEN"
+RECORD_TIMEOUT_SECONDS = 10
 PLACEHOLDER_DIGEST = "sha256:" + "0" * 64
 IMAGE_REPOSITORY = "ghcr.io/benjaminsrussell/hello-ledger"
 WORKFLOW_REPOSITORY = "BenjaminSRussell/Passage"
@@ -236,6 +245,51 @@ def rollback(root, env="stage"):
     return current, previous
 
 
+def record_release(env, action, digest, previous, signed):
+    """POST the promote or rollback to the platform-health release registry."""
+    base = os.environ.get(API_URL_VARIABLE, "").rstrip("/")
+    if not base:
+        raise ReleaseError(f"{API_URL_VARIABLE} is not set")
+    if not base.startswith(("http://", "https://")):
+        raise ReleaseError(f"{API_URL_VARIABLE} must be an http(s) URL")
+    headers = {"Content-Type": "application/json", "Idempotency-Key": str(uuid.uuid4())}
+    token = os.environ.get(API_TOKEN_VARIABLE)
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    body = json.dumps(
+        {
+            "service": SERVICE,
+            "environment": env,
+            "action": action,
+            "imageDigest": digest,
+            "previousDigest": previous,
+            "signed": signed,
+        }
+    ).encode()
+    request = urllib.request.Request(
+        f"{base}/v1/platform/releases", data=body, headers=headers, method="POST"
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=RECORD_TIMEOUT_SECONDS) as response:
+            return json.load(response)["id"]
+    except urllib.error.HTTPError as error:
+        raise ReleaseError(f"release API answered {error.code}: {error.read().decode(errors='replace')[:300]}") from error
+    except (OSError, ValueError, KeyError) as error:
+        raise ReleaseError(f"release API call failed: {error}") from error
+
+
+def _report_release(env, action, digest, previous, signed):
+    try:
+        release_id = record_release(env, action, digest, previous, signed)
+    except ReleaseError as error:
+        print(
+            f"WARNING: {action} of {env} to {digest} was NOT recorded in the release registry: {error}",
+            file=sys.stderr,
+        )
+        return
+    print(f"recorded {action} release {release_id} for {env}")
+
+
 def main(argv=None, repo_root=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -253,10 +307,12 @@ def main(argv=None, repo_root=None):
             target = args.to
             previous, current = promote(root, args.digest, target, args.skip_verify)
             print(f"{target} digest: {previous} -> {current}")
+            _report_release(target, "promote", current, previous, not args.skip_verify)
         else:
             target = args.env
             previous, current = rollback(root, target)
             print(f"{target} rollback digest: {previous} -> {current}")
+            _report_release(target, "rollback", current, previous, True)
     except ReleaseError as error:
         print(f"release refused: {error}", file=sys.stderr)
         return 2

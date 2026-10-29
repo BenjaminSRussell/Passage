@@ -5,7 +5,7 @@
 | Deliverable 1: TypeScript services, React web, Python layout | not built | `web modules: none` and no TS or Python code exists in the owned paths |
 | Deliverable 2: providers `eks`, `gke`, `aks`, `baremetal` | interface accepts them, apply fails a precondition | no cloud account, credentials or provider is named by the ticket |
 | Deploy: one cloud dev cluster | not built | same reason; `deploy/envs/dev` and `deploy/argocd/root-dev.yaml` are ready for it |
-| Deliverable 3: stage app-of-apps and digest promotion/rollback CLI (AC3) | declarative/local tooling added in slice 2 | no stage cluster/cloud credentials to prove sync or Argo history live; prod app-of-apps and Release row/event integration remain unbuilt |
+| Deliverable 3: stage app-of-apps and digest promotion/rollback CLI (AC3) | declarative/local tooling added in slice 2 | no stage cluster/cloud credentials to prove sync or Argo history live; Release rows and `release.*` events are recorded through `POST /v1/platform/releases` (issue #75); the live stage proof stays on #213 |
 | Deliverable 4: blocking gate for unsigned images and its negative test (AC4) | slice 2 of PSG-1 | line budget; CI still builds the SBOM, signs and attests every pushed image |
 | sigstore policy-controller, `ClusterImagePolicy` | slice 2 of PSG-1 | part of the AC4 gate |
 | HIGH-severity-older-than-14-days gate and `.vuln-exceptions.yaml` (FR-1.6) | not built | CI fails on CRITICAL only; the exception file format is slice 2 |
