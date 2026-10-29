@@ -40,6 +40,7 @@ type API struct {
 	http           requestMetrics
 
 	releasesRecorded atomic.Int64
+	releasesReplayed atomic.Int64
 	releasesFailed   atomic.Int64
 }
 
@@ -76,6 +77,7 @@ func (a *API) Metrics() http.Handler {
 		_, _ = fmt.Fprintf(w, "# HELP hello_ledger_entries_created_total Entries created.\n# TYPE hello_ledger_entries_created_total counter\nhello_ledger_entries_created_total %d\n", a.created.Load())
 		_, _ = fmt.Fprintf(w, "# HELP hello_ledger_entries_failed_total Entry creations that failed in the store.\n# TYPE hello_ledger_entries_failed_total counter\nhello_ledger_entries_failed_total %d\n", a.failed.Load())
 		_, _ = fmt.Fprintf(w, "# HELP hello_ledger_releases_recorded_total Release rows recorded.\n# TYPE hello_ledger_releases_recorded_total counter\nhello_ledger_releases_recorded_total %d\n", a.releasesRecorded.Load())
+		_, _ = fmt.Fprintf(w, "# HELP hello_ledger_releases_replayed_total Idempotent release replays answered without a new row.\n# TYPE hello_ledger_releases_replayed_total counter\nhello_ledger_releases_replayed_total %d\n", a.releasesReplayed.Load())
 		_, _ = fmt.Fprintf(w, "# HELP hello_ledger_releases_failed_total Release recordings that failed in the store.\n# TYPE hello_ledger_releases_failed_total counter\nhello_ledger_releases_failed_total %d\n", a.releasesFailed.Load())
 		a.http.write(w)
 	})

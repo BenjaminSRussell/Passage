@@ -96,6 +96,22 @@ func TestRecordReleaseForwardsIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestReplayedReleaseIsNotCountedAsRecorded(t *testing.T) {
+	r, a := newRouter(&fakeStore{})
+	for range 2 {
+		if rec := doRelease(r, http.MethodPost, releasesPath, releaseBody(nil), "Maintain platform releases", "key-1"); rec.Code != http.StatusCreated {
+			t.Fatalf("got %d %s", rec.Code, rec.Body.String())
+		}
+	}
+	rec := httptest.NewRecorder()
+	a.Metrics().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	for _, want := range []string{"hello_ledger_releases_recorded_total 1", "hello_ledger_releases_replayed_total 1"} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("metrics missing %q:\n%s", want, rec.Body.String())
+		}
+	}
+}
+
 func TestListReleasesFiltersAndValidates(t *testing.T) {
 	f := &fakeStore{releases: []store.Release{
 		{ID: "1", Service: "hello-ledger", Environment: "stage"},

@@ -43,6 +43,7 @@ type Release struct {
 	CreatedAt      time.Time `json:"createdAt"`
 
 	RecordedByTenant string `json:"-"`
+	Replayed         bool   `json:"-"`
 }
 
 func (r Release) samePayload(o Release) bool {
@@ -115,6 +116,7 @@ func (s *Postgres) RecordRelease(ctx context.Context, in Release, idempotencyKey
 			if !r.samePayload(in) {
 				return ErrIdempotencyConflict
 			}
+			r.Replayed = true
 			return nil
 		}
 		if err != nil {

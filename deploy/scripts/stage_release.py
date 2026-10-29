@@ -30,6 +30,7 @@ IMAGE_REPOSITORY = "ghcr.io/benjaminsrussell/hello-ledger"
 WORKFLOW_REPOSITORY = "BenjaminSRussell/Passage"
 OIDC_ISSUER = "https://token.actions.githubusercontent.com"
 IDENTITY_REGEXP = r"^https://github\.com/BenjaminSRussell/Passage/\.github/workflows/ci\.yml@refs/(heads/main|tags/v.+)$"
+GIT_SHA = re.compile(r"[0-9a-f]{40}")
 DIGEST_LINE = re.compile(r"(?m)^(\s*digest:\s*)(sha256:[0-9a-f]{64})(\s*)$")
 
 
@@ -115,6 +116,10 @@ def cosign_identity_args():
     ]
 
 
+def _cosign_env():
+    return {name: value for name, value in os.environ.items() if name != API_TOKEN_VARIABLE}
+
+
 def verify_image(digest):
     reference = f"{IMAGE_REPOSITORY}@{digest}"
     identity = cosign_identity_args()
@@ -123,7 +128,7 @@ def verify_image(digest):
         ["cosign", "verify-attestation", "--type", "spdxjson", *identity, reference],
     ):
         try:
-            subprocess.run(command, check=True, capture_output=True, text=True)
+            subprocess.run(command, check=True, capture_output=True, text=True, env=_cosign_env())
         except OSError as error:
             raise ReleaseError(f"cannot run cosign to verify {reference}: {error}") from error
         except subprocess.CalledProcessError as error:
@@ -289,8 +294,8 @@ def _call_api(request):
         raise ReleaseError(f"release API call failed: {error}") from error
 
 
-def newest_recorded_sha(root, base, env):
-    """Return the git sha of the newest release the registry holds for the environment, or None when it is empty or unknown to this checkout."""
+def newest_recorded_sha(base, env):
+    """Return the git sha of the newest release the registry holds for the environment, or None when it is empty."""
     query = urllib.parse.urlencode({"service": SERVICE, "env": env})
     releases = _call_api(
         urllib.request.Request(f"{base}/v1/platform/releases?{query}", headers=_api_headers(), method="GET")
@@ -299,12 +304,22 @@ def newest_recorded_sha(root, base, env):
         raise ReleaseError("release API list answered a non-array body")
     if not releases:
         return None
-    git_sha = releases[0].get("gitSha", "")
-    try:
-        _git(root, "cat-file", "-e", f"{git_sha}^{{commit}}")
-    except ReleaseError:
-        return None
+    newest = releases[0]
+    git_sha = newest.get("gitSha") if isinstance(newest, dict) else None
+    if not isinstance(git_sha, str) or GIT_SHA.fullmatch(git_sha) is None:
+        raise ReleaseError("release API newest release has no valid 40-hex gitSha")
     return git_sha
+
+
+def _is_ancestor(root, ancestor, descendant):
+    result = subprocess.run(
+        ["git", "-C", str(root), "merge-base", "--is-ancestor", ancestor, descendant],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode not in (0, 1):
+        raise ReleaseError(f"git merge-base --is-ancestor failed: {result.stderr.strip()}")
+    return result.returncode == 0
 
 
 def record_release(base, env, action, digest, previous, git_sha, signed):
@@ -347,17 +362,24 @@ def _was_pinned_before(root, env, digest, revision):
     return False
 
 
-def merged_release(root, env, since):
-    """Return (action, digest, previous, git_sha) for the merged manifest, or None when the digest did not change."""
-    path = _manifest_path(root, env)
-    digest = read_digest(_read_manifest(path))
-    previous = _digest_at(root, env, since)
-    if digest == previous:
-        return None
-    if digest == PLACEHOLDER_DIGEST:
-        raise ReleaseError(f"{env} pins the placeholder digest; nothing to record")
-    action = "rollback" if _was_pinned_before(root, env, digest, since) else "promote"
-    return action, digest, previous, _git(root, "rev-parse", "HEAD")
+def merged_releases(root, env, since):
+    """Return (action, digest, previous, git_sha) for each commit after `since` that changed the manifest digest, oldest first."""
+    _read_manifest(_manifest_path(root, env))
+    commits = _git(
+        root, "rev-list", "--first-parent", "--reverse", "--end-of-options", f"{since}..HEAD", "--", MANIFESTS[env].as_posix()
+    ).splitlines()
+    releases = []
+    before = since
+    for commit in commits:
+        digest = _digest_at(root, env, commit)
+        previous = _digest_at(root, env, before)
+        if digest != previous:
+            if digest == PLACEHOLDER_DIGEST:
+                raise ReleaseError(f"{env} pins the placeholder digest at {commit}; nothing to record")
+            action = "rollback" if _was_pinned_before(root, env, digest, before) else "promote"
+            releases.append((action, digest, previous, commit))
+        before = commit
+    return releases
 
 
 def record(root, env, since):
@@ -365,34 +387,41 @@ def record(root, env, since):
     base = _api_base()
     if base:
         try:
-            since = newest_recorded_sha(root, base, env) or since
+            cursor = newest_recorded_sha(base, env)
+            if cursor:
+                if not _is_ancestor(root, cursor, "HEAD"):
+                    if _is_ancestor(root, "HEAD", cursor):
+                        print(f"{env} registry is ahead of this checkout; nothing to record")
+                        return 0
+                    raise ReleaseError(f"registry gitSha {cursor} is unrelated to HEAD")
+                since = cursor
         except ReleaseError as error:
             print(f"release not recorded: {error}", file=sys.stderr)
             return 3
     since = since if since and set(since) != {"0"} else "HEAD~1"
-    release = merged_release(root, env, since)
-    if release is None:
+    releases = merged_releases(root, env, since)
+    if not releases:
         print(f"{env} digest unchanged since {since}; nothing to record")
         return 0
-    action, digest, previous, git_sha = release
     if not base:
         print(
-            f"WARNING: {API_URL_VARIABLE} is not set; {action} of {env} to {digest} was NOT recorded in the release registry",
+            f"WARNING: {API_URL_VARIABLE} is not set; {len(releases)} {env} release(s) were NOT recorded in the release registry",
             file=sys.stderr,
         )
         return 0
-    try:
-        verify_image(digest)
-        signed = True
-    except ReleaseError as error:
-        print(f"WARNING: recording {digest} as unsigned: {error}", file=sys.stderr)
-        signed = False
-    try:
-        release_id = record_release(base, env, action, digest, previous, git_sha, signed)
-    except ReleaseError as error:
-        print(f"release not recorded: {error}", file=sys.stderr)
-        return 3
-    print(f"recorded {action} release {release_id} for {env}")
+    for action, digest, previous, git_sha in releases:
+        try:
+            verify_image(digest)
+            signed = True
+        except ReleaseError as error:
+            print(f"WARNING: recording {digest} as unsigned: {error}", file=sys.stderr)
+            signed = False
+        try:
+            release_id = record_release(base, env, action, digest, previous, git_sha, signed)
+        except ReleaseError as error:
+            print(f"release not recorded: {error}", file=sys.stderr)
+            return 3
+        print(f"recorded {action} release {release_id} for {env} at {git_sha}")
     return 0
 
 

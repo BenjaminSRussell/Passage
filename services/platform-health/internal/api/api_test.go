@@ -24,6 +24,7 @@ type fakeStore struct {
 	entries  []store.Entry
 	releases []store.Release
 	lastKey  string
+	seenKeys map[string]bool
 }
 
 func (f *fakeStore) RecordRelease(_ context.Context, in store.Release, key string) (store.Release, error) {
@@ -31,6 +32,16 @@ func (f *fakeStore) RecordRelease(_ context.Context, in store.Release, key strin
 		return store.Release{}, f.err
 	}
 	in.ID, in.Actor, in.CreatedAt, f.lastKey = "rel-1", "anonymous", time.Unix(0, 0).UTC(), key
+	if key != "" && f.seenKeys[key] {
+		in.Replayed = true
+		return in, nil
+	}
+	if key != "" {
+		if f.seenKeys == nil {
+			f.seenKeys = map[string]bool{}
+		}
+		f.seenKeys[key] = true
+	}
 	f.releases = append(f.releases, in)
 	return in, nil
 }

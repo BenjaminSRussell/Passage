@@ -81,7 +81,11 @@ func (a *API) recordRelease(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	a.releasesRecorded.Add(1)
+	if release.Replayed {
+		a.releasesReplayed.Add(1)
+	} else {
+		a.releasesRecorded.Add(1)
+	}
 	httpx.JSON(w, http.StatusCreated, release)
 }
 

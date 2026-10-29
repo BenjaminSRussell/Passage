@@ -527,7 +527,7 @@ class StageReleaseTests(unittest.TestCase):
         self.assertEqual(result, 2)
         self.assertEqual(self.digest(), PROMOTED_DIGEST)
 
-    def start_release_api(self, status=201, body=None, registry=None, redirect_to=None):
+    def start_release_api(self, status=201, body=None, registry=None, redirect_to=None, fail_post_number=None):
         received = []
         self.listings = []
         registry = registry or []
@@ -543,7 +543,7 @@ class StageReleaseTests(unittest.TestCase):
                         "body": json.loads(handler.rfile.read(length)),
                     }
                 )
-                handler.send_response(status)
+                handler.send_response(500 if len(received) == fail_post_number else status)
                 handler.send_header("Content-Type", "application/json")
                 handler.end_headers()
                 handler.wfile.write(reply)
@@ -650,6 +650,123 @@ class StageReleaseTests(unittest.TestCase):
         posted = received[0]["body"]
         self.assertEqual((posted["imageDigest"], posted["previousDigest"]), (third, PROMOTED_DIGEST))
         self.assertNotEqual(first, recorded)
+
+    def publish_digests(self, *digests):
+        shas = []
+        for digest in digests:
+            self.publish_main(stage=digest)
+            shas.append(self.run_git("rev-parse", "HEAD"))
+        return shas
+
+    def test_record_posts_one_release_per_digest_change_in_order(self):
+        received = self.start_release_api()
+        third = "sha256:" + "c" * 64
+        cursor = self.run_git("rev-parse", "HEAD")
+        shas = self.publish_digests(PROMOTED_DIGEST, third, PROMOTED_DIGEST)
+
+        result, _ = self.record(since=cursor)
+
+        self.assertEqual(result, 0)
+        bodies = [item["body"] for item in received]
+        self.assertEqual([body["gitSha"] for body in bodies], shas)
+        self.assertEqual(
+            [(body["action"], body["previousDigest"], body["imageDigest"]) for body in bodies],
+            [
+                ("promote", INITIAL_DIGEST, PROMOTED_DIGEST),
+                ("promote", PROMOTED_DIGEST, third),
+                ("rollback", third, PROMOTED_DIGEST),
+            ],
+        )
+
+    def test_record_stops_at_a_failed_post_and_the_next_run_resumes_from_the_registry(self):
+        third = "sha256:" + "c" * 64
+        cursor = self.run_git("rev-parse", "HEAD")
+        shas = self.publish_digests(PROMOTED_DIGEST, third, INITIAL_DIGEST)
+        received = self.start_release_api(fail_post_number=2)
+
+        result, errors = self.record(since=cursor)
+
+        self.assertEqual(result, 3)
+        self.assertIn("answered 500", errors)
+        self.assertEqual([item["body"]["gitSha"] for item in received], shas[:2])
+
+        resumed = self.start_release_api(registry=[{"gitSha": shas[0]}])
+        result, _ = self.record(since=cursor)
+
+        self.assertEqual(result, 0)
+        self.assertEqual([item["body"]["gitSha"] for item in resumed], shas[1:])
+
+    def test_record_rejects_a_registry_sha_that_is_not_a_full_hex_commit_id(self):
+        self.publish_main(stage=PROMOTED_DIGEST)
+        for bad in ("--upload-pack=touch /tmp/pwned", "HEAD", "abc123", "A" * 40, "", None, 7):
+            received = self.start_release_api(registry=[{"gitSha": bad}])
+            result, errors = self.record()
+            self.assertEqual(result, 3, bad)
+            self.assertIn("release not recorded", errors)
+            self.assertEqual(received, [])
+
+    def test_record_rejects_a_registry_row_that_is_not_an_object(self):
+        self.publish_main(stage=PROMOTED_DIGEST)
+        received = self.start_release_api(registry=["not-an-object"])
+
+        result, errors = self.record()
+
+        self.assertEqual(result, 3)
+        self.assertIn("release not recorded", errors)
+        self.assertEqual(received, [])
+
+    def test_record_refuses_a_registry_sha_unrelated_to_head(self):
+        self.publish_main(stage=PROMOTED_DIGEST)
+        unrelated = self.run_git("commit-tree", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "-m", "elsewhere")
+        received = self.start_release_api(registry=[{"gitSha": unrelated}])
+
+        result, errors = self.record()
+
+        self.assertEqual(result, 3)
+        self.assertIn("unrelated to HEAD", errors)
+        self.assertEqual(received, [])
+
+    def test_record_refuses_a_registry_sha_this_checkout_does_not_have(self):
+        self.publish_main(stage=PROMOTED_DIGEST)
+        received = self.start_release_api(registry=[{"gitSha": "d" * 40}])
+
+        result, _ = self.record()
+
+        self.assertEqual(result, 3)
+        self.assertEqual(received, [])
+
+    def test_rerunning_an_older_run_records_nothing_when_the_registry_is_ahead(self):
+        older, newer = self.publish_digests(PROMOTED_DIGEST, "sha256:" + "c" * 64)
+        self.run_git("checkout", "-q", older)
+        received = self.start_release_api(registry=[{"gitSha": newer}])
+
+        result, errors = self.record()
+
+        self.assertEqual(result, 0)
+        self.assertEqual(received, [])
+        self.assertNotIn("release not recorded", errors)
+
+    def test_record_is_a_no_op_when_the_registry_cursor_is_head(self):
+        head, = self.publish_digests(PROMOTED_DIGEST)
+        received = self.start_release_api(registry=[{"gitSha": head}])
+
+        result, _ = self.record()
+
+        self.assertEqual(result, 0)
+        self.assertEqual(received, [])
+
+    def test_cosign_runs_without_the_platform_api_token(self):
+        os.environ[stage_release.API_TOKEN_VARIABLE] = "secret-token"
+        os.environ["PASSAGE_UNRELATED_SETTING"] = "kept"
+        with unittest.mock.patch("stage_release.subprocess.run") as run:
+            stage_release.verify_image(PROMOTED_DIGEST)
+
+        self.assertEqual(run.call_count, 2)
+        for call in run.call_args_list:
+            env = call.kwargs["env"]
+            self.assertNotIn(stage_release.API_TOKEN_VARIABLE, env)
+            self.assertEqual(env["PASSAGE_UNRELATED_SETTING"], "kept")
+            self.assertEqual(env["PATH"], os.environ["PATH"])
 
     def test_record_fails_closed_when_the_registry_cannot_be_read(self):
         self.publish_main(stage=PROMOTED_DIGEST)
