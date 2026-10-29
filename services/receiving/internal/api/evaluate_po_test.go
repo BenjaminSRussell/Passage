@@ -228,6 +228,7 @@ func TestEvaluateRejectsDuplicateAndOverriddenPOLines(t *testing.T) {
 	}{
 		{"adjacent duplicate PO line", first + `,` + first, map[string]string{"lines[1].poLineNo": "duplicates lines[0].poLineNo"}},
 		{"non-adjacent duplicate PO line", first + `,{"qty":1,"unitPrice":2.5,"poLineNo":2},` + first, map[string]string{"lines[2].poLineNo": "duplicates lines[0].poLineNo"}},
+		{"third duplicate points at the first", first + `,` + first + `,` + first, map[string]string{"lines[1].poLineNo": "duplicates lines[0].poLineNo", "lines[2].poLineNo": "duplicates lines[0].poLineNo"}},
 		{"overridden PO unit price", `{"qty":1,"unitPrice":2.5,"poLineNo":1,"poUnitPrice":99}`, map[string]string{"lines[0].poUnitPrice": poOverride}},
 		{"overridden remaining quantity", `{"qty":1,"unitPrice":2.5,"poLineNo":1,"poQtyRemaining":99}`, map[string]string{"lines[0].poQtyRemaining": poOverride}},
 		{"overridden currency matching the invoice", `{"qty":1,"unitPrice":2.5,"poLineNo":1,"poCurrency":"USD"}`, map[string]string{"lines[0].poCurrency": poOverride}},
@@ -260,6 +261,17 @@ func TestEvaluateReportsBodyAndPoReferenceErrorsTogether(t *testing.T) {
 		"lines[1].poLineNo": "duplicates lines[0].poLineNo; requires purchaseOrderId",
 	}
 	if rec.Code != http.StatusBadRequest || p.Code != "COM-0001" || !maps.Equal(p.Errors, want) || lookups.Load() != 0 {
+		t.Fatalf("got %d %+v after %d lookups", rec.Code, p, lookups.Load())
+	}
+}
+
+func TestEvaluateKeepsBodyErrorWhenPoReferenceErrorSharesTheKey(t *testing.T) {
+	lookups, r := purchasingCounter(t)
+	body := `{"purchaseOrderId":"` + evalPOID + `","currency":"USD","headerTotal":2.5,"lines":[{"qty":1,"unitPrice":2.5,"poLineNo":1,"poCurrency":"us"}]}`
+	rec := do(r, http.MethodPost, evaluatePath, body, "MatchingPolicyMaintain", true)
+	p := decodeProblem(t, rec)
+	want := map[string]string{"lines[0].poCurrency": "must be a 3-letter ISO 4217 code; " + poOverride}
+	if rec.Code != http.StatusBadRequest || !maps.Equal(p.Errors, want) || lookups.Load() != 0 {
 		t.Fatalf("got %d %+v after %d lookups", rec.Code, p, lookups.Load())
 	}
 }
