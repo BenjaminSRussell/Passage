@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Passage compliance
-  version: 0.5.0
+  version: 0.6.0
   description: >-
     Segregation of duties (PSG-48 slice 1): seed rules, pre-save simulation,
     evaluation of a user's effective roles, the conflict listing and the
@@ -13,8 +13,15 @@ info:
     Sanctions screening with stored hits and the officer decision, and the
     export license determination of a delivery (PSG-48 slice 4, FR-48.19,
     FR-48.20, BR-48.15, BR-48.16).
+    Stored GDPR and CCPA subject requests with their state machine, the
+    erasure preview and the retention purge check, certification campaign
+    planning and close, the incident lifecycle step, and export governance
+    and read-log classification (PSG-48 slice 5, FR-48.6, FR-48.10, FR-48.11,
+    FR-48.24, FR-48.25, FR-48.29, BR-48.5, BR-48.6, BR-48.9, BR-48.18); only
+    subject requests are stored.
     Browser calls go to /api/v1/sod/..., /api/v1/compliance/...,
-    /api/v1/security/... and /api/v1/trade/...; the gateway strips /api.
+    /api/v1/security/..., /api/v1/trade/... and /api/v1/privacy/...; the
+    gateway strips /api.
 servers:
   - url: https://api.passage.dev
 paths:
@@ -606,8 +613,493 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
+  /v1/privacy/requests:
+    post:
+      operationId: intakeSubjectRequest
+      x-passage-duty: PrivacyIntake
+      description: >-
+        Takes in a GDPR or CCPA subject request in RECEIVED (FR-48.10). The
+        deadline is receivedAt plus 30 days (GDPR) or 45 days (CCPA);
+        deadlineDays may only shorten it (PRV-1206). receivedAt defaults to the
+        server time and cannot lie in the future. A repeated Idempotency-Key
+        replays the first answer; the same key with another body is SOD-1110.
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 200 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [type, regulation, subjectRef]
+              properties:
+                type: { $ref: "#/components/schemas/PrivacyRequestType" }
+                regulation: { type: string, enum: [GDPR, CCPA] }
+                subjectRef: { type: string, maxLength: 200, description: 'party, worker, user or contact reference, e.g. party:42' }
+                receivedAt: { type: string, format: date-time }
+                deadlineDays: { type: integer, minimum: 1 }
+      responses:
+        "201":
+          description: The request
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SubjectRequest" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: listSubjectRequests
+      x-passage-duty: PrivacyOfficer
+      description: Subject requests, nearest deadline first (the privacy request list inquiry).
+      parameters:
+        - { name: state, in: query, schema: { $ref: "#/components/schemas/PrivacyState" } }
+        - { name: type, in: query, schema: { $ref: "#/components/schemas/PrivacyRequestType" } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 200 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: One page of requests
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/SubjectRequest" } }
+                  nextCursor: { type: string }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/privacy/requests/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getSubjectRequest
+      x-passage-duty: PrivacyOfficer
+      responses:
+        "200":
+          description: The request
+          headers:
+            ETag: { schema: { type: string }, description: 'the request version, e.g. "1"' }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SubjectRequest" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/privacy/requests/{id}/actions:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: actOnSubjectRequest
+      x-passage-duty: PrivacyOfficer
+      description: >-
+        Moves a stored request one step: VERIFY (RECEIVED, two distinct matched
+        attributes and the e-mail link, else PRV-1203), DISCOVER (VERIFIED; an
+        ERASURE with holdIds goes to HELD, AC-48.7), RELEASE_HOLD (HELD;
+        holdIds are the holds still standing and must be empty, else PRV-1201),
+        APPROVE (DISCOVERED; records the calling officer), DELIVER (APPROVED),
+        CLOSE (DELIVERED; after the deadline needs a justification of 10
+        characters, PRV-1205, and is marked late; emits
+        dev.passage.privacy.request.completed.v1) and REJECT (any open state,
+        reason of 10 characters, PRV-1207). Any other step is PRV-1204. The
+        type, state and deadline are the stored ones.
+      parameters:
+        - { name: If-Match, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action]
+              properties:
+                action: { type: string, enum: [VERIFY, DISCOVER, RELEASE_HOLD, APPROVE, DELIVER, CLOSE, REJECT] }
+                holdIds: { type: array, maxItems: 50, items: { type: string, maxLength: 200 } }
+                matchedAttributes: { type: array, maxItems: 20, items: { type: string, maxLength: 200 } }
+                emailLinkVerified: { type: boolean }
+                justification: { type: string, maxLength: 2000 }
+      responses:
+        "200":
+          description: The request after the step
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SubjectRequest" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/privacy/requests/{id}/erasure-preview:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: previewErasure
+      x-passage-duty: PrivacyOfficer
+      description: >-
+        Shows what an ERASURE request does to one record of the subject
+        (BR-48.5): name, address, email, phone, tax_id, bank_account and
+        date_of_birth become a deterministic pseudonym, every other field
+        (amounts, dates, dimensions) is kept and erased is set to "true". The
+        request must be an ERASURE past discovery (PRV-1204) and free of legal
+        holds (PRV-1201). Nothing is written; the domains apply it in the fan-out.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [record]
+              properties:
+                record: { type: object, minProperties: 1, maxProperties: 200, additionalProperties: { type: string } }
+      responses:
+        "200":
+          description: The pseudonymized record
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [record, pseudonymized]
+                properties:
+                  record: { type: object, additionalProperties: { type: string } }
+                  pseudonymized: { type: array, items: { type: string } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/privacy/retention:purge-check:
+    post:
+      operationId: checkRetentionPurge
+      x-passage-duty: PrivacyOfficer
+      description: >-
+        BR-48.6 for one record the monthly retention purge considers: a record
+        under legal hold, in an open fiscal period or referenced by an open
+        document is skipped with PRV-1208 and the reasons. Nothing is stored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [recordClass]
+              properties:
+                recordClass: { type: string, maxLength: 200 }
+                holdIds: { type: array, maxItems: 50, items: { type: string } }
+                fiscalPeriodOpen: { type: boolean }
+                openDocumentRefs: { type: array, maxItems: 1000, items: { type: string } }
+      responses:
+        "200":
+          description: The purge decision
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [purgeable, reasons]
+                properties:
+                  purgeable: { type: boolean }
+                  code: { type: string, enum: [PRV-1208] }
+                  reasons: { type: array, items: { type: string } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/sod/campaigns:plan:
+    post:
+      operationId: planCertificationCampaign
+      x-passage-duty: SoDAdmin
+      description: >-
+        The close instant of an access certification campaign (FR-48.6):
+        startsAt plus windowDays (0 takes the 14-day default; 3 to 60, else
+        SOD-1120). Nothing is stored yet.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [startsAt]
+              properties:
+                startsAt: { type: string, format: date-time }
+                windowDays: { type: integer, minimum: 0, maximum: 60 }
+      responses:
+        "200":
+          description: The campaign window
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [startsAt, closesAt]
+                properties:
+                  startsAt: { type: string, format: date-time }
+                  closesAt: { type: string, format: date-time }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/sod/campaigns:close:
+    post:
+      operationId: closeCertificationCampaign
+      x-passage-duty: SoDAdmin
+      description: >-
+        Campaign progress and, once closesAt has passed at the server time, the
+        close of BR-48.9: explicit REVOKE decisions are revoked; an uncertified
+        role is revoked when autoRevoke is set (certification.auto_revoke) and
+        flagged otherwise, and its manager counts as overdue. Before closesAt
+        closed is false and pending roles are only counted. A manager deciding
+        on their own roles is SOD-1121; a missing, duplicated or unknown line is
+        SOD-1122. Nothing is stored yet.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [entries, closesAt]
+              properties:
+                entries: { type: array, minItems: 1, maxItems: 5000, items: { $ref: "#/components/schemas/CampaignEntry" } }
+                autoRevoke: { type: boolean }
+                closesAt: { type: string, format: date-time }
+      responses:
+        "200":
+          description: The close result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CampaignCloseResult" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/security/incidents:transition:
+    post:
+      operationId: checkIncidentStep
+      x-passage-duty: SecurityIncidentManage
+      description: >-
+        One step of the security incident lifecycle (FR-48.29): TRIAGE when
+        opened (from empty), then CONTAINED, ERADICATED, RECOVERED and CLOSED,
+        one step at a time (INC-1322). A Sev-1 incident reports pageOnCall. For a
+        confirmed personal-data breach the clocks run from awareAt (BR-48.18);
+        notifiedAt records when each regime's fixed-deadline notice went out.
+        Closing needs a late-notification justification for every clock sent
+        after its deadline or still unsent past it (INC-1302). Status is at the
+        server time; nothing is stored yet.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [severity, source, to]
+              properties:
+                severity: { type: string, enum: [SEV1, SEV2, SEV3, SEV4] }
+                source: { type: string, enum: [ALERT, USER_REPORT, VENDOR, PEN_TEST] }
+                from: { type: string, enum: [TRIAGE, CONTAINED, ERADICATED, RECOVERED, CLOSED] }
+                to: { type: string, enum: [TRIAGE, CONTAINED, ERADICATED, RECOVERED, CLOSED] }
+                awareAt: { type: string, format: date-time }
+                personalDataBreach: { type: boolean }
+                regimes: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/BreachRegime" } }
+                usStateWindowDays: { type: integer, minimum: 30, maximum: 60 }
+                notifiedAt: { type: object, additionalProperties: { type: string, format: date-time }, description: 'keyed by regime, e.g. {"GDPR": "2026-11-04T10:00:00Z"}' }
+                justification: { type: string, maxLength: 2000 }
+      responses:
+        "200":
+          description: The incident after the step
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, pageOnCall, clocks, asOf]
+                properties:
+                  status: { type: string }
+                  pageOnCall: { type: boolean }
+                  asOf: { type: string, format: date-time }
+                  clocks:
+                    type: array
+                    items:
+                      allOf:
+                        - { $ref: "#/components/schemas/BreachClock" }
+                        - type: object
+                          required: [met, late]
+                          properties:
+                            notifiedAt: { type: string, format: date-time }
+                            met: { type: boolean }
+                            late: { type: boolean }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/compliance/export-governance:evaluate:
+    post:
+      operationId: evaluateExportGovernance
+      x-passage-duty: ComplianceView
+      description: >-
+        The export policy decision for one download (FR-48.24). Defaults per
+        classification: PII REASON and WATERMARK, FINANCIAL AUDIT, CONFIDENTIAL
+        AUDIT (assumed), PUBLIC ALLOW; policy overrides the action set of a
+        classification. DENY is SEC-0709; REASON needs a reason of 10 characters
+        (SEC-0710); APPROVAL, or an API_BULK or MCP_BULK read above 10,000 rows
+        of a non-public class, holds the download (allowed false). Every export
+        is audited. Unknown classification, channel or action is SEC-0711;
+        negative rows SEC-0715.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [classification, channel, rows]
+              properties:
+                classification: { $ref: "#/components/schemas/ExportClassification" }
+                channel: { type: string, enum: [GRID, EXPLORER, REPORT, API_BULK, MCP_BULK] }
+                rows: { type: integer }
+                reason: { type: string, maxLength: 2000 }
+                policy:
+                  type: object
+                  maxProperties: 10
+                  additionalProperties: { type: array, maxItems: 6, items: { $ref: "#/components/schemas/ExportAction" } }
+      responses:
+        "200":
+          description: The decision
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [allowed, actions, requiresReason, requiresApproval, watermark, audit]
+                properties:
+                  allowed: { type: boolean }
+                  actions: { type: array, items: { $ref: "#/components/schemas/ExportAction" } }
+                  requiresReason: { type: boolean }
+                  requiresApproval: { type: boolean }
+                  watermark: { type: boolean }
+                  audit: { type: boolean }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/compliance/read-log:classify:
+    post:
+      operationId: classifyReadLog
+      x-passage-duty: ComplianceView
+      description: >-
+        Which fields of one read the read-log policy covers (FR-48.25). Rules
+        default to national_id, bank_account, salary, health, i9_document and
+        date_of_birth on any entity ("*.name" matches the last segment); field
+        names only, never values. retentionDays 0 takes 730 (readlog.retention_days,
+        90 to 3650, else SEC-0714).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [fields]
+              properties:
+                fields: { type: array, minItems: 1, maxItems: 1000, items: { type: string, maxLength: 200 } }
+                rules:
+                  type: array
+                  maxItems: 500
+                  items:
+                    type: object
+                    required: [fieldFqn]
+                    properties:
+                      fieldFqn: { type: string, maxLength: 200 }
+                      classification: { $ref: "#/components/schemas/ExportClassification" }
+                retentionDays: { type: integer }
+      responses:
+        "200":
+          description: The logged fields
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [logged, fields, retentionDays]
+                properties:
+                  logged: { type: boolean }
+                  fields: { type: array, items: { type: string } }
+                  retentionDays: { type: integer }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
 components:
   schemas:
+    PrivacyRequestType:
+      type: string
+      enum: [ACCESS, PORTABILITY, ERASURE, RECTIFICATION, RESTRICTION]
+    PrivacyState:
+      type: string
+      enum: [RECEIVED, VERIFIED, DISCOVERED, HELD, APPROVED, DELIVERED, CLOSED, REJECTED]
+    SubjectRequest:
+      type: object
+      required: [requestId, type, regulation, subjectRef, receivedAt, deadlineAt, state, holdIds, late, createdBy, createdAt, updatedAt, version]
+      properties:
+        requestId: { type: string, format: uuid }
+        type: { $ref: "#/components/schemas/PrivacyRequestType" }
+        regulation: { type: string, enum: [GDPR, CCPA] }
+        subjectRef: { type: string }
+        receivedAt: { type: string, format: date-time }
+        deadlineAt: { type: string, format: date-time }
+        state: { $ref: "#/components/schemas/PrivacyState" }
+        holdIds: { type: array, items: { type: string } }
+        verifiedAt: { type: string, format: date-time }
+        privacyOfficerId: { type: string }
+        approvedAt: { type: string, format: date-time }
+        deliveredAt: { type: string, format: date-time }
+        closedAt: { type: string, format: date-time }
+        late: { type: boolean }
+        justification: { type: string }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+    CampaignEntry:
+      type: object
+      required: [managerId, userId, roleName]
+      properties:
+        managerId: { type: string, maxLength: 200 }
+        userId: { type: string, maxLength: 200 }
+        roleName: { type: string, maxLength: 200 }
+        decision: { type: string, enum: [CERTIFY, REVOKE, PENDING], description: empty means PENDING }
+    CampaignCloseResult:
+      type: object
+      required: [closed, revoke, flagged, progress, asOf]
+      properties:
+        closed: { type: boolean }
+        revoke: { type: array, items: { $ref: "#/components/schemas/CampaignEntry" } }
+        flagged: { type: array, items: { $ref: "#/components/schemas/CampaignEntry" } }
+        asOf: { type: string, format: date-time }
+        progress:
+          type: object
+          required: [total, certified, revoked, pending, percentCertified, overdueByManager]
+          properties:
+            total: { type: integer }
+            certified: { type: integer }
+            revoked: { type: integer }
+            pending: { type: integer }
+            percentCertified: { type: integer }
+            overdueByManager: { type: object, additionalProperties: { type: integer } }
+    ExportClassification:
+      type: string
+      enum: [PII, FINANCIAL, CONFIDENTIAL, PUBLIC]
+    ExportAction:
+      type: string
+      enum: [ALLOW, AUDIT, WATERMARK, REASON, APPROVAL, DENY]
     BreachRegime:
       type: string
       enum: [GDPR, UK_GDPR, US_STATE, PIPEDA, CERT_IN, LFPDPPP]
