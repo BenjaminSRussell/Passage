@@ -2,9 +2,11 @@ package identity_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
@@ -24,6 +26,14 @@ var identityTables = []string{"identity_tenants", "identity_users", "identity_le
 
 func inScope(ctx context.Context, tenantID, legalEntityID string) context.Context {
 	return tenant.With(ctx, tenant.Principal{TenantID: tenantID, UserID: "test-user", LegalEntityID: legalEntityID})
+}
+
+func requireDenied(t *testing.T, err error, what string) {
+	t.Helper()
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
+		t.Errorf("%s: want SQLSTATE 42501, got %v", what, err)
+	}
 }
 
 func asTenant(t *testing.T, app *pgxpool.Pool, tenantID, legalEntityID string, fn func(tx pgx.Tx) error) error {
@@ -166,25 +176,21 @@ func TestCrossTenantWriteIsRejected(t *testing.T) {
 			_, err := tx.Exec(ctx, stmt, tenantB)
 			return err
 		})
-		if err == nil {
-			t.Errorf("tenant A inserted a tenant B row into %s", table)
-		}
+		requireDenied(t, err, "tenant A inserting a tenant B row into "+table)
 	}
 	for _, table := range identityTables[1:] {
-		var updated, deleted int64
+		var updated int64
 		if err := asTenant(t, app, tenantA, "*", func(tx pgx.Tx) error {
 			u, err := tx.Exec(ctx, `update `+table+` set tenant_id = tenant_id where tenant_id = $1`, tenantB)
-			if err != nil {
-				return err
+			if err == nil {
+				updated = u.RowsAffected()
 			}
-			d, err := tx.Exec(ctx, `delete from `+table+` where tenant_id = $1`, tenantB)
-			updated, deleted = u.RowsAffected(), d.RowsAffected()
 			return err
 		}); err != nil {
 			t.Fatal(err)
 		}
-		if updated != 0 || deleted != 0 {
-			t.Errorf("%s: tenant A updated %d / deleted %d tenant B rows", table, updated, deleted)
+		if updated != 0 {
+			t.Errorf("%s: tenant A updated %d tenant B rows", table, updated)
 		}
 		if got := count(t, app, tenantB, "*", `select count(*) from `+table); got == 0 {
 			t.Errorf("tenant B lost its %s rows", table)
@@ -216,9 +222,7 @@ func TestLegalEntityScopeRestrictsEntitiesAndRoleAssignments(t *testing.T) {
 		_, err := tx.Exec(context.Background(), `insert into identity_legal_entities (tenant_id, legal_entity_id, code, display_name) values ($1, $2, 'OUT', 'x')`, tenantA, legalNone)
 		return err
 	})
-	if err == nil {
-		t.Error("legal-entity-scoped caller inserted an out-of-scope legal entity")
-	}
+	requireDenied(t, err, "legal-entity-scoped insert of an out-of-scope legal entity")
 }
 
 func TestRoleAssignmentEffectiveDating(t *testing.T) {
@@ -300,9 +304,7 @@ func TestAppRoleCannotWriteTenants(t *testing.T) {
 			_, err := tx.Exec(ctx, stmt, tenantA)
 			return err
 		})
-		if err == nil {
-			t.Errorf("passage_app could %s identity_tenants", name)
-		}
+		requireDenied(t, err, "passage_app "+name+" on identity_tenants")
 	}
 	if got := count(t, app, tenantA, "*", `select count(*) from identity_tenants`); got != 1 {
 		t.Errorf("tenant A sees %d tenant rows, want 1", got)
@@ -315,7 +317,16 @@ func TestUpdateCannotMoveRowToAnotherTenant(t *testing.T) {
 		_, err := tx.Exec(context.Background(), `update identity_legal_entities set tenant_id = $1 where tenant_id = $2`, tenantB, tenantA)
 		return err
 	})
-	if err == nil {
-		t.Error("tenant A moved its legal entity to tenant B")
+	requireDenied(t, err, "tenant A moving its legal entity to tenant B")
+}
+
+func TestAppRoleCannotDeleteIdentityHistory(t *testing.T) {
+	app, tenantA, _ := setup(t)
+	for _, table := range identityTables[1:] {
+		err := asTenant(t, app, tenantA, "*", func(tx pgx.Tx) error {
+			_, err := tx.Exec(context.Background(), `delete from `+table+` where tenant_id = $1`, tenantA)
+			return err
+		})
+		requireDenied(t, err, "passage_app delete on "+table)
 	}
 }

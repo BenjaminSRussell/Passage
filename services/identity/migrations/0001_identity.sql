@@ -5,8 +5,7 @@ create table identity_tenants (
   realm_name text not null unique,
   display_name text not null,
   status text not null default 'active' check (status in ('active', 'suspended', 'deprovisioned')),
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  created_at timestamptz not null default now()
 );
 
 create table identity_users (
@@ -17,7 +16,6 @@ create table identity_users (
   display_name text not null default '',
   status text not null default 'active' check (status in ('active', 'deprovisioned')),
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
   primary key (tenant_id, user_id),
   unique (tenant_id, idp_subject)
 );
@@ -29,7 +27,6 @@ create table identity_legal_entities (
   display_name text not null,
   status text not null default 'active' check (status in ('active', 'inactive')),
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
   primary key (tenant_id, legal_entity_id),
   unique (tenant_id, code)
 );
@@ -47,6 +44,8 @@ create table identity_role_assignments (
   foreign key (tenant_id, user_id) references identity_users (tenant_id, user_id),
   foreign key (tenant_id, legal_entity_id) references identity_legal_entities (tenant_id, legal_entity_id),
   check (valid_to is null or valid_to > valid_from),
+  -- The exclusion check sees rows the caller's RLS hides, so an overlap error can reveal an existing
+  -- tenant-wide grant to a legal-entity-scoped caller. Accepted: low impact.
   constraint identity_role_assignments_no_overlap exclude using gist (
     tenant_id with =,
     user_id with =,
