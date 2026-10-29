@@ -1,0 +1,70 @@
+asyncapi: 3.0.0
+info:
+  title: Passage Payables Events
+  version: 1.0.0
+  description: |
+    CloudEvents 1.0 published through the transactional outbox (Debezium relays
+    rows to Kafka). Each event is written in the same database transaction as the
+    state change it announces. Types follow dev.passage.<context>.<entity>.<verb>.v<n>.
+    Additive-only schema evolution.
+defaultContentType: application/cloudevents+json
+channels:
+  openItemEvents:
+    address: passage.payables.openitem
+    messages:
+      openItemCreated:
+        $ref: "#/components/messages/OpenItemCreated"
+      openItemSettled:
+        $ref: "#/components/messages/OpenItemSettled"
+operations:
+  publishOpenItemCreated:
+    action: send
+    channel: { $ref: "#/channels/openItemEvents" }
+    messages:
+      - { $ref: "#/channels/openItemEvents/messages/openItemCreated" }
+  publishOpenItemSettled:
+    action: send
+    channel: { $ref: "#/channels/openItemEvents" }
+    messages:
+      - { $ref: "#/channels/openItemEvents/messages/openItemSettled" }
+components:
+  messages:
+    OpenItemCreated:
+      name: dev.passage.payables.openitem.created.v1
+      summary: >-
+        A dev.passage.payables.invoice.posted.v1 event opened a vendor open item. Redelivery of the same source invoice
+        emits nothing. Consumers: aging, payment proposals.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/OpenItemData"
+    OpenItemSettled:
+      name: dev.passage.payables.openitem.settled.v1
+      summary: >-
+        A settlement reduced the open amount of a vendor open item; status is PARTIALLY_SETTLED or SETTLED.
+        Consumers: aging, ledger posting.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/OpenItemSettledData"
+  schemas:
+    OpenItemData:
+      type: object
+      required: [open_item_id, legal_entity_id, vendor_id, currency, open_amount, status]
+      properties:
+        open_item_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        vendor_id: { type: string, format: uuid }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        open_amount: { type: string, description: "decimal string; the amount still open after this change" }
+        status: { type: string, enum: [OPEN, PARTIALLY_SETTLED, SETTLED, REVERSED] }
+    OpenItemSettledData:
+      type: object
+      required: [open_item_id, legal_entity_id, vendor_id, currency, open_amount, status, settled_amount]
+      properties:
+        open_item_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        vendor_id: { type: string, format: uuid }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        open_amount: { type: string, description: "decimal string; the amount still open after this settlement" }
+        status: { type: string, enum: [PARTIALLY_SETTLED, SETTLED] }
+        settled_amount: { type: string, description: "decimal string; the amount this settlement applied" }
+        settlement_id: { type: string, description: "reference of the settlement that applied the amount; absent when the caller gave none" }

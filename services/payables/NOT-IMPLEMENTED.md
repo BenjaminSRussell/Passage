@@ -6,8 +6,8 @@ Slice A ships the settlement engine, the preview endpoint, the service skeleton 
 |---|---|---|
 | AC1: 300 settlement scenarios | built | `TestSettle_Grid300` checks 300 generated scenarios against an exact-rational oracle; no accountant-reviewed fixtures exist |
 | AC2: pain.001 XSD validation | built | vendored `testdata/xsd/pain.001.001.09.xsd`, `TestPain001Fixtures_XSD` and `TestPain001_CorruptedFileFailsXSD` in `internal/domain/pain001_fixtures_test.go`; the external bank harness half (ACCP for 50 payments) is the external row below |
-| AC3: aging reconciles to AP control | slice C | needs migrations, a store and the PSG-18 vendor projection |
-| AC4: idempotent payment run (Temporal) | slice D | needs the run workflow, a store and a Temporal SDK decision |
+| AC3: aging reconciles to AP control | slice C | store built (#103 C1: `ap_open_item`); aging report and per-vendor-group reconciliation to the control account remain (#101) |
+| AC4: idempotent payment run (Temporal) | slice D | store built (#103 C1; `idempotency_keys` table only, no code reads or writes it); needs the run workflow and a Temporal SDK decision (#102) |
 | Deliverable 1: store, commit, aging, withholding | partial | preview computes settlement; persistence is slice C; withholding engine is wave 13 |
 | Deliverable 2, Deliverables 5 to 8, Deliverable 9: proposals, holds, approvals, prepayments, reversal, prenotes, calendars, confirmations, installments, mandates, bank account change | slice C and D | need the store, the wave 4 workflow and wave 7 calendars and terms |
 | Deliverable 3 item 1 and AC1: IBAN, BIC, ABA validators, `PaymentMethod`, `BankProfile` | built | `internal/domain/bank.go`; `CARD` is accepted as a type with no media format; domain codes `AP-RUN-002` and `AP-FIL-001` are not yet mapped to HTTP |
@@ -28,9 +28,9 @@ Slice A ships the settlement engine, the preview endpoint, the service skeleton 
 | Card provider adapter | deferred | PRD open question 3: no provider adapter until v1.x |
 | Object-store `passage-payment-files` bucket and `GET /payment-files/{id}/content` | deferred | needs the store slice and a wave 1 deploy handoff |
 | `POST /payments/status:ingest` persistence and DLQ | deferred | needs the store slice |
-| `VendorTransaction` creation from wave 18 posted invoices (FR-19.1); incoming handoff from `services/receiving/NOT-IMPLEMENTED.md` row "Deliverable 2: vendor invoice capture, OCR adapter, UBL/Peppol" | slice C | needs the payables store; the receiving row says the payables-side API belongs in `services/payables/` |
+| Open items from wave 18 posted invoices (FR-19.1) | partial | built: `internal/store` (`ap_open_item`, idempotent by source invoice id, vendor and due-date list, `Settle` with version check, outbox events `payables.openitem.created/settled.v1`) and `internal/consumer.HandleInvoicePosted`; not wired to Kafka or HTTP (read API is C3), and `invoice.posted` carries no due date or discount terms yet, so the handler reads optional `due_date`, `discount_date`, `discount_amount` and falls back to the invoice date and no discount until wave 7 terms land |
 | Ledger posting via `ledger.Post` | slice D | key `post:payables:settlement:<id>:settle`; the event context name (`payables` vs `procurement`) must be settled first |
-| Tables, RLS, outbox events, Idempotency-Key | slice C | the preview writes nothing |
+| Tables, RLS, outbox events, Idempotency-Key | partial | `migrations/` 0001 (open items, outbox, idempotency_keys with tenant RLS plus legal-entity restrictive policy) and 0002 (least-privilege `passage_app` grants); the service `main` does not run migrations or use the store yet; vendor-invoice header, payment, settlement and proposal tables remain slice C/D |
 | JWT validation, step-up MFA, OPA | wave 2 | the gateway validates tokens; services trust tenant headers |
 | `serviceCode` on 401 and 403 bodies | kernel handoff | tenant and authz middleware live in `platform/go`; `api/openapi.yaml` documents the real bodies (`Unauthorized` as text/plain JSON, `Forbidden` as `KernelProblem`) |
 | Argo CD application, root `Makefile` wiring | handoff | `deploy/` belongs to wave 1 |
