@@ -2,6 +2,7 @@
   "assignments": {},
   "duties": {
     "Maintain users": {"permissions": [{"resource": "/v1/identity/users{,/**}", "methods": ["GET", "POST", "PATCH"]}]},
+    "View effective permissions": {"permissions": [{"resource": "/v1/identity/users/*/effective-permissions", "methods": ["GET"]}]},
     "Maintain security roles": {"permissions": [
       {"resource": "/v1/authz/roles{,/**}", "methods": ["GET", "POST", "PUT", "DELETE"]},
       {"resource": "/v1/authz/duties{,/**}", "methods": ["GET", "POST", "PUT", "DELETE"]},

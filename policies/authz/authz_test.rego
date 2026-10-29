@@ -22,7 +22,7 @@ has_route_permissions(spec) if {
 }
 
 test_all_seeded_duties_allow_their_declared_permissions if {
-	count(data.duties) == 100
+	count(data.duties) == 101
 	every duty, spec in data.duties {
 		has_route_permissions(spec)
 		every permission in spec.permissions {
