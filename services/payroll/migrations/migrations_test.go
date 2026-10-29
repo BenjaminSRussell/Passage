@@ -16,7 +16,8 @@ func TestMigrationsApplyWithRLS(t *testing.T) {
 	}
 	var policies int
 	if err := pool.QueryRow(ctx, `select count(*) from pg_policies
-		where policyname in ('outbox_tenant_access', 'idempotency_keys_tenant_access')`).Scan(&policies); err != nil {
+		where schemaname = current_schema()
+		and policyname in ('outbox_tenant_access', 'idempotency_keys_tenant_access')`).Scan(&policies); err != nil {
 		t.Fatal(err)
 	}
 	if policies != 2 {
