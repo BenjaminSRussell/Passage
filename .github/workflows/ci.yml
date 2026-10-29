@@ -146,6 +146,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: make -C deploy test-stage-release
+      - run: pip install pyyaml==6.0.2 && make -C deploy test-gateway
       - name: Install Kyverno CLI
         env:
           KYVERNO_VERSION: 1.19.2

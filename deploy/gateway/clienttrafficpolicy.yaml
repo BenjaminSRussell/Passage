@@ -1,0 +1,18 @@
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: passage-api-strip-identity-headers
+  namespace: hello-ledger
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: passage-api
+  headers:
+    earlyRequestHeaders:
+      remove:
+        - X-Passage-Tenant
+        - X-Passage-Legal-Entity
+        - X-Passage-User
+        - X-Passage-Duties
+        - X-Passage-Tier

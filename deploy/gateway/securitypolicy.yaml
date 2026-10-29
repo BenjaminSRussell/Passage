@@ -1,0 +1,52 @@
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: passage-api-jwt
+  namespace: hello-ledger
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: org
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: fx
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: receiving
+  jwt:
+    providers:
+      - name: passage-dev-idp
+        issuer: https://idp.dev.passage.dev/realms/dev
+        audiences:
+          - passage-api
+        localJWKS:
+          type: ValueRef
+          valueRef:
+            group: ""
+            kind: ConfigMap
+            name: passage-dev-jwks
+        claimToHeaders:
+          - claim: tid
+            header: X-Passage-Tenant
+          - claim: le
+            header: X-Passage-Legal-Entity
+          - claim: sub
+            header: X-Passage-User
+          - claim: duties
+            header: X-Passage-Duties
+          - claim: tier
+            header: X-Passage-Tier
+  authorization:
+    defaultAction: Allow
+    rules:
+      - name: deny-platform-nil-tenant
+        action: Deny
+        principal:
+          jwt:
+            provider: passage-dev-idp
+            claims:
+              - name: tid
+                valueType: String
+                values:
+                  - "00000000-0000-0000-0000-000000000000"

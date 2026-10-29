@@ -9,7 +9,7 @@ PYTHON ?= python3
 IMAGE_DIGEST ?=
 SKIP_VERIFY ?=
 
-.PHONY: deploy-local destroy-local promote-stage rollback-stage promote-prod rollback-prod test-stage-release test-policies
+.PHONY: deploy-local destroy-local promote-stage rollback-stage promote-prod rollback-prod test-stage-release test-policies test-gateway
 
 deploy-local:
 	tofu -chdir=tofu/cluster init -input=false
@@ -63,3 +63,6 @@ test-stage-release:
 test-policies:
 	@which kyverno >/dev/null || { echo "kyverno CLI not installed; install it from https://kyverno.io/docs/kyverno-cli/ to run the policy tests" >&2; exit 2; }
 	kyverno test policies/tests
+
+test-gateway:
+	$(PYTHON) -m unittest scripts/test_gateway.py -v

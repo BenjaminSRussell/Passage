@@ -1,8 +1,9 @@
 // Package tenant carries the caller's tenant, legal entity, user and duties
 // through context. Until wave 2 replaces it with JWT validation at the gateway,
 // the values come from headers that are trusted only behind the gateway; the
-// gateway must strip client-supplied X-Passage-* headers (issue #82, part b).
-// Middleware validates their shape but cannot authenticate their origin.
+// gateway must strip client-supplied X-Passage-* headers (issue #82, part b;
+// see deploy/gateway/README.md). Middleware validates their shape but cannot
+// authenticate their origin.
 package tenant
 
 import (
