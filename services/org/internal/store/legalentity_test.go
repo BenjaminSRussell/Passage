@@ -339,9 +339,13 @@ func TestPostgres_Migration0024AppliesTwiceAndKeepsExistingSitesUnassigned(t *te
 func TestPostgres_LegalEntitiesAreTenantLevelForNoEntityPrincipal(t *testing.T) {
 	s, ctx, _ := lifecycleStore(t)
 	created := mustCreate(t, s, ctx, newEntity("US01"))
-	page, err := s.ListLegalEntities(ctx, store.LegalEntityFilter{}, "", 10)
+	noEntity := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1)})
+	page, err := s.ListLegalEntities(noEntity, store.LegalEntityFilter{}, "", 10)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, err := s.CreateLegalEntity(noEntity, newEntity("US02"), ""); err != nil {
+		t.Fatalf("no-entity principal must create entities: %v", err)
 	}
 	if len(page.Items) != 1 || page.Items[0].ID != created.ID {
 		t.Fatalf("no-entity principal must list its tenant's entities, got %+v", page.Items)

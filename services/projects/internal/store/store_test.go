@@ -22,7 +22,7 @@ import (
 // tenantCtx returns a principal for tenant n with no legal-entity restriction, so
 // the restrictive RLS scope policy (passage.legal_entity_scopes = '*') allows all rows.
 func tenantCtx(n int, duties ...string) context.Context {
-	p := tenant.Principal{TenantID: testkit.TenantID(n), UserID: "user-test", Duties: map[string]struct{}{}}
+	p := tenant.Principal{TenantID: testkit.TenantID(n), UserID: "user-test", Duties: testkit.ScopeDuties("")}
 	for _, d := range duties {
 		p.Duties[d] = struct{}{}
 	}

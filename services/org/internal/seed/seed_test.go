@@ -61,7 +61,7 @@ func TestRun_DemoManufacturerIsComplete(t *testing.T) {
 	s, pool := seededStore(t)
 	tenantID := testkit.TenantID(7)
 	result := runSeed(t, s, tenantID)
-	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID})
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, Duties: testkit.ScopeDuties("")})
 	got := counts(t, ctx, pool)
 	want := map[string]int{"legal_entity": 3, "operating_unit": 40, "site": 2, "warehouse": 5, "location": 6, "postal_address": 2, "hierarchy_type": 3, "team_type": 2, "team": 3}
 	total := 0
@@ -89,7 +89,7 @@ func TestRun_RerunChangesNothing(t *testing.T) {
 	s, pool := seededStore(t)
 	tenantID := testkit.TenantID(7)
 	first := runSeed(t, s, tenantID)
-	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID})
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, Duties: testkit.ScopeDuties("")})
 	before := counts(t, ctx, pool)
 	rerun := runSeed(t, s, tenantID)
 	after := counts(t, ctx, pool)
@@ -106,7 +106,7 @@ func TestRun_RerunChangesNothing(t *testing.T) {
 func TestRun_ScopesSeedLookupsToTheirDatabaseKeys(t *testing.T) {
 	s, _ := seededStore(t)
 	tenantID := testkit.TenantID(7)
-	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID})
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, Duties: testkit.ScopeDuties("")})
 	other, err := s.CreateLegalEntity(ctx, store.LegalEntity{Code: "OTH", Name: "Other", Country: "US", Currency: "USD", TimeZone: "America/Chicago", DefaultLanguage: "en-US"}, "other-le")
 	if err != nil {
 		t.Fatal(err)
@@ -178,7 +178,7 @@ func TestRun_RelinksExistingSeedAddressAfterPointerIsCleared(t *testing.T) {
 	s, pool := seededStore(t)
 	tenantID := testkit.TenantID(7)
 	runSeed(t, s, tenantID)
-	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID})
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, Duties: testkit.ScopeDuties("")})
 	sites, err := s.ListSites(ctx, store.SiteFilter{}, store.SiteKey{}, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -219,7 +219,7 @@ func TestRun_RerunAfterEditingSeededRows(t *testing.T) {
 	s, pool := seededStore(t)
 	tenantID := testkit.TenantID(7)
 	first := runSeed(t, s, tenantID)
-	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID})
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, Duties: testkit.ScopeDuties("")})
 	renamed := "Renamed"
 
 	entities, err := s.ListLegalEntities(ctx, store.LegalEntityFilter{}, "", 10)
