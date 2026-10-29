@@ -97,8 +97,8 @@ func (s *Postgres) RequestCreditLimit(ctx context.Context, customerID, limit str
 		var legalEntityID string
 		var increase, changed, protected bool
 		err := tx.QueryRow(ctx, `select legal_entity_id::text, credit_limit::text, $3::text::numeric > coalesce(credit_limit, 0), $3::text::numeric is distinct from credit_limit,
-				coalesce((select $4::text = any(c.fields) from protected_field_config c where c.tenant_id = customer_role.tenant_id and c.legal_entity_id = customer_role.legal_entity_id), true)
-			from customer_role where tenant_id = $1 and id = $2 for update`, caller.TenantID, id, limit, domain.FieldCreditLimit).Scan(&legalEntityID, &res.CreditLimit, &increase, &changed, &protected)
+				coalesce((select $4::text = any(c.fields) or (c.updated_by = $5 and c.updated_at > now() - interval '24 hours') from protected_field_config c where c.tenant_id = customer_role.tenant_id and c.legal_entity_id = customer_role.legal_entity_id), true)
+			from customer_role where tenant_id = $1 and id = $2 for update`, caller.TenantID, id, limit, domain.FieldCreditLimit, caller.UserID).Scan(&legalEntityID, &res.CreditLimit, &increase, &changed, &protected)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return notFound(CodeCustomerNotFound, "customer not found")
 		}

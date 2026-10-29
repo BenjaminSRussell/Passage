@@ -12,7 +12,10 @@ import (
 	"github.com/BenjaminSRussell/passage/services/party/internal/store"
 )
 
-const dutyApprove = "party.approve"
+const (
+	dutyApprove     = "party.approve"
+	dutyPolicyWrite = "party.approval_policy.write"
+)
 
 type creditLimitRequest struct {
 	CreditLimit string `json:"creditLimit"`
@@ -35,7 +38,7 @@ func (a *API) registerCredit(r chi.Router) {
 	r.With(authz.RequireDuty(dutyWrite)).Post("/v1/party/customers/{id}/credit-limit", a.setCreditLimit)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/party/pending-changes/{id}", a.getPendingChange)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/party/legal-entities/{id}/protected-fields", a.getProtectedFields)
-	r.With(authz.RequireDuty(dutyApprove)).Put("/v1/party/legal-entities/{id}/protected-fields", a.setProtectedFields)
+	r.With(authz.RequireDuty(dutyPolicyWrite)).Put("/v1/party/legal-entities/{id}/protected-fields", a.setProtectedFields)
 	r.With(authz.RequireDuty(dutyApprove)).Post("/v1/party/pending-changes/{id}:approve", a.decide(true))
 	r.With(authz.RequireDuty(dutyApprove)).Post("/v1/party/pending-changes/{id}:reject", a.decide(false))
 }
@@ -60,12 +63,20 @@ func (a *API) setProtectedFields(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
 	}
-	var req protectedFields
+	var req struct {
+		Fields *[]string `json:"fields"`
+	}
 	if err := httpx.Decode(r, &req); err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
-	fields, err := a.credit.SetProtectedFields(r.Context(), chi.URLParam(r, "id"), req.Fields)
+	if req.Fields == nil {
+		p := httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeFieldsInvalid, "protected fields failed validation")
+		p.Errors = map[string]string{"fields": "is required; send [] to unprotect every field"}
+		httpx.Fail(w, r, p)
+		return
+	}
+	fields, err := a.credit.SetProtectedFields(r.Context(), chi.URLParam(r, "id"), *req.Fields)
 	if err != nil {
 		failParty(w, r, err)
 		return

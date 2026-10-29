@@ -162,8 +162,8 @@ paths:
         '500': { $ref: '#/components/responses/Problem' }
     put:
       operationId: setProtectedFields
-      x-passage-duty: party.approve
-      description: Replaces the set of fields that need approval in this legal entity. Only credit_limit is protectable today; changes already pending stay decidable.
+      x-passage-duty: party.approval_policy.write
+      description: Replaces the set of fields that need approval in this legal entity. fields is required; [] is an explicit unprotect-all, and a missing or null fields is 422. Only credit_limit is protectable today; changes already pending stay decidable. Every change enqueues dev.passage.party.protectedfields.updated.v1 with before, after and the actor. A credit limit request by the user who last unprotected the field within 24 hours is still held for approval. The legal entity id is not validated against the org service (party keeps no legal entity table); a scoped caller can only address its own.
       requestBody:
         required: true
         content:
@@ -178,7 +178,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { description: 'AUTH-0003 (missing duty) or PTY-LEGAL-ENTITY-OUT-OF-SCOPE.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: 'PTY-PROTECTED-FIELDS-INVALID: unknown field or malformed legal entity id.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'PTY-PROTECTED-FIELDS-INVALID: fields missing or null, unknown field, or malformed legal entity id.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '500': { $ref: '#/components/responses/Problem' }
   /v1/party/pending-changes/{id}:
     parameters:

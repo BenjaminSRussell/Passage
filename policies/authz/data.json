@@ -329,7 +329,9 @@
     "pii.read": {"flag": true, "permissions": []},
     "party.approve": {"permissions": [
       {"resource": "/v1/party/pending-changes/*:approve", "methods": ["POST"]},
-      {"resource": "/v1/party/pending-changes/*:reject", "methods": ["POST"]},
+      {"resource": "/v1/party/pending-changes/*:reject", "methods": ["POST"]}
+    ]},
+    "party.approval_policy.write": {"permissions": [
       {"resource": "/v1/party/legal-entities/*/protected-fields", "methods": ["PUT"]}
     ]}
   }

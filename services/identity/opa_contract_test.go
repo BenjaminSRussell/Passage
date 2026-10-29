@@ -23,7 +23,7 @@ import (
 
 const (
 	contractTenant   = "tenant-a"
-	seededDutyCount  = 97
+	seededDutyCount  = 98
 	unassignedUserID = "user-without-duty"
 )
 
@@ -294,6 +294,8 @@ func TestDutyContractExpectations(t *testing.T) {
 		{duty: "party.read", method: http.MethodGet, resource: "/v1/party/parties/p1", wantAllowed: true},
 		{duty: "party.write", method: http.MethodPost, resource: "/v1/party/pending-changes/x:approve"},
 		{duty: "pii.read", method: http.MethodGet, resource: "/v1/party/parties/p1", wantDutyMissing: "party.read"},
+		{duty: "party.approve", method: http.MethodPut, resource: "/v1/party/legal-entities/le1/protected-fields", wantDutyMissing: "party.approval_policy.write"},
+		{duty: "party.approval_policy.write", method: http.MethodPut, resource: "/v1/party/legal-entities/le1/protected-fields", wantAllowed: true},
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("%s/%s %s", tt.duty, tt.method, tt.resource), func(t *testing.T) {

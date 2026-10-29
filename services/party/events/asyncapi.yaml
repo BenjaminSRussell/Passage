@@ -27,7 +27,16 @@ channels:
         $ref: '#/components/messages/changeApproved'
       rejected:
         $ref: '#/components/messages/changeRejected'
+  passage.party.protectedfields:
+    address: passage.party.protectedfields
+    messages:
+      updated:
+        $ref: '#/components/messages/protectedFieldsUpdated'
 operations:
+  onProtectedFieldsUpdated:
+    action: send
+    channel: { $ref: '#/channels/passage.party.protectedfields' }
+    messages: [{ $ref: '#/channels/passage.party.protectedfields/messages/updated' }]
   onCustomerUpdated:
     action: send
     channel: { $ref: '#/channels/passage.party.customer' }
@@ -133,6 +142,20 @@ components:
       title: Change rejected and discarded
       payload: { $ref: '#/components/schemas/Change' }
       x-passage-type: dev.passage.party.change.rejected.v1
+    protectedFieldsUpdated:
+      name: updated
+      title: Protected fields updated
+      description: Audit record of every change to a legal entity's protected field set.
+      payload:
+        type: object
+        required: [legal_entity_id, before, after, actor_user_id, updated_at]
+        properties:
+          legal_entity_id: { type: string, format: uuid }
+          before: { type: array, items: { type: string } }
+          after: { type: array, items: { type: string } }
+          actor_user_id: { type: string }
+          updated_at: { type: string, format: date-time }
+      x-passage-type: dev.passage.party.protectedfields.updated.v1
   schemas:
     Change:
       type: object

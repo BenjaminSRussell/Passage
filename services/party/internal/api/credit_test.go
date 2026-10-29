@@ -31,7 +31,7 @@ func TestCreditRoutes_ProtectedFields(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"fields":["credit_limit"]`) || f.configured != knownID {
 		t.Fatalf("get: %d %s", rec.Code, rec.Body)
 	}
-	rec = do(r, http.MethodPut, path, `{"fields":[]}`, "party.approve", true)
+	rec = do(r, http.MethodPut, path, `{"fields":[]}`, "party.approval_policy.write", true)
 	if rec.Code != http.StatusOK || f.configured != knownID+"/" {
 		t.Fatalf("put: %d %s configured=%q", rec.Code, rec.Body, f.configured)
 	}
@@ -41,17 +41,20 @@ func TestCreditRoutes_ProtectedFields(t *testing.T) {
 		tenant                     bool
 		want                       int
 	}{
-		{"put needs party.approve", http.MethodPut, `{"fields":[]}`, "party.write", true, http.StatusForbidden},
+		{"put needs party.approval_policy.write", http.MethodPut, `{"fields":[]}`, "party.write", true, http.StatusForbidden},
+		{"party.approve cannot reconfigure", http.MethodPut, `{"fields":[]}`, "party.approve", true, http.StatusForbidden},
+		{"empty object", http.MethodPut, `{}`, "party.approval_policy.write", true, http.StatusUnprocessableEntity},
+		{"null fields", http.MethodPut, `{"fields":null}`, "party.approval_policy.write", true, http.StatusUnprocessableEntity},
 		{"get needs party.read", http.MethodGet, "", "party.write", true, http.StatusForbidden},
 		{"put without principal", http.MethodPut, `{"fields":[]}`, "", false, http.StatusUnauthorized},
-		{"unknown body field", http.MethodPut, `{"field":[]}`, "party.approve", true, http.StatusBadRequest},
+		{"unknown body field", http.MethodPut, `{"field":[]}`, "party.approval_policy.write", true, http.StatusBadRequest},
 	} {
 		if rec := do(r, tc.method, path, tc.body, tc.duties, tc.tenant); rec.Code != tc.want || f.configured != "" {
 			t.Fatalf("%s: %d %s configured=%q", tc.name, rec.Code, rec.Body, f.configured)
 		}
 	}
 	f.err = httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeFieldsInvalid, "no")
-	if rec := do(r, http.MethodPut, path, `{"fields":["x"]}`, "party.approve", true); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), store.CodeFieldsInvalid) {
+	if rec := do(r, http.MethodPut, path, `{"fields":["x"]}`, "party.approval_policy.write", true); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), store.CodeFieldsInvalid) {
 		t.Fatalf("store problem: %d %s", rec.Code, rec.Body)
 	}
 }

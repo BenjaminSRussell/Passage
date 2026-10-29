@@ -6,11 +6,12 @@ import (
 )
 
 const (
-	AggregateCustomer = "customer"
-	FieldCreditLimit  = "credit_limit"
-	ChangePending     = "pending"
-	ChangeApproved    = "approved"
-	ChangeRejected    = "rejected"
+	AggregateCustomer    = "customer"
+	AggregateLegalEntity = "legal_entity"
+	FieldCreditLimit     = "credit_limit"
+	ChangePending        = "pending"
+	ChangeApproved       = "approved"
+	ChangeRejected       = "rejected"
 )
 
 var ProtectableFields = []string{FieldCreditLimit}

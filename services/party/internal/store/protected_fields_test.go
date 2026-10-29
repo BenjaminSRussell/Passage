@@ -1,8 +1,10 @@
 package store_test
 
 import (
+	"encoding/json"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -35,7 +37,7 @@ func TestProtectedFields_UnprotectedIncreaseAppliesImmediately(t *testing.T) {
 	if got := storedLimit(t, app, customerID); got != "120000.00" {
 		t.Fatalf("limit = %s", got)
 	}
-	if got := outboxTypes(t, app); got != "dev.passage.party.customer.updated.v1" {
+	if got := outboxTypes(t, app); got != "dev.passage.party.protectedfields.updated.v1,dev.passage.party.customer.updated.v1" {
 		t.Fatalf("outbox = %s", got)
 	}
 	if _, err := s.SetProtectedFields(asUser(1, "", approver), legalEntityA, []string{domain.FieldCreditLimit}); err != nil {
@@ -128,5 +130,70 @@ func TestPendingChange_StatusMustMatchDecidedBy(t *testing.T) {
 	}
 	if err := insert("approved", "bob", "now"); err != nil {
 		t.Fatalf("approved row with decided_by: %v", err)
+	}
+}
+
+func TestProtectedFields_UpdateWritesAuditEvent(t *testing.T) {
+	app := migratedApp(t)
+	s := store.New(app)
+	if _, err := s.SetProtectedFields(asUser(1, "", approver), legalEntityA, []string{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetProtectedFields(asUser(1, "", "user-other"), legalEntityA, []string{domain.FieldCreditLimit}); err != nil {
+		t.Fatal(err)
+	}
+	rows := outboxRows(t, principalContext(1, ""), app)
+	if len(rows) != 2 {
+		t.Fatalf("outbox rows = %d", len(rows))
+	}
+	for i, want := range []struct{ actor, before, after string }{
+		{approver, `["credit_limit"]`, `[]`},
+		{"user-other", `[]`, `["credit_limit"]`},
+	} {
+		var evt struct {
+			Data struct {
+				LegalEntityID string          `json:"legal_entity_id"`
+				Before        json.RawMessage `json:"before"`
+				After         json.RawMessage `json:"after"`
+				ActorUserID   string          `json:"actor_user_id"`
+				UpdatedAt     time.Time       `json:"updated_at"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(rows[i].payload), &evt); err != nil {
+			t.Fatal(err)
+		}
+		d := evt.Data
+		if rows[i].typ != "dev.passage.party.protectedfields.updated.v1" || d.LegalEntityID != legalEntityA || d.ActorUserID != want.actor ||
+			string(d.Before) != want.before || string(d.After) != want.after || d.UpdatedAt.IsZero() {
+			t.Fatalf("event %d = %s", i, rows[i].payload)
+		}
+	}
+}
+
+func TestProtectedFields_SelfUnprotectDoesNotBypassOwnApproval(t *testing.T) {
+	app := migratedApp(t)
+	s := store.New(app)
+	customerID := customerWithLimit(t, app, "50000.00")
+	if _, err := s.SetProtectedFields(asUser(1, "", approver), legalEntityA, []string{}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.RequestCreditLimit(asUser(1, "", approver), customerID, "90000.00")
+	if err != nil || res.Pending == nil || storedLimit(t, app, customerID) != "50000.00" {
+		t.Fatalf("own increase after unprotecting must be held: %+v, %v", res, err)
+	}
+	ctx := principalContext(1, "")
+	err = dbx.WithTenantTx(ctx, app, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `update protected_field_config set updated_at = now() - interval '25 hours'`)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DecidePendingChange(asUser(1, "", "user-other"), res.Pending.ID, false, ""); err != nil {
+		t.Fatal(err)
+	}
+	res, err = s.RequestCreditLimit(asUser(1, "", approver), customerID, "90000.00")
+	if err != nil || res.Pending != nil || storedLimit(t, app, customerID) != "90000.00" {
+		t.Fatalf("after 24h the exemption lapses: %+v, %v", res, err)
 	}
 }
