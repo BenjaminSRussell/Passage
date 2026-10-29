@@ -2,7 +2,10 @@
 // Schemas are documented in events/asyncapi.yaml.
 package events
 
-import "github.com/BenjaminSRussell/passage/platform/events"
+import (
+	"github.com/BenjaminSRussell/passage/platform/events"
+	"github.com/BenjaminSRussell/passage/services/fieldservice/internal/domain"
+)
 
 // Context is the bounded-context segment of every event type.
 const Context = "service"
@@ -13,7 +16,28 @@ var (
 	WorkOrderPosted = events.Type(Context, "workorder", "posted", 1)
 	SLAWarning      = events.Type(Context, "sla", "warning", 1)
 	SLABreached     = events.Type(Context, "sla", "breached", 1)
+
+	// ArticlePublished is dev.passage.knowledge.article.published.v1 (PRD 8.45.5):
+	// the knowledge base is its own context in the event catalog.
+	ArticlePublished = events.Type(KnowledgeContext, "article", "published", 1)
 )
+
+// KnowledgeContext is the bounded-context segment of the knowledge-base events.
+const KnowledgeContext = "knowledge"
+
+// ArticlePublishedData is the payload of dev.passage.knowledge.article.published.v1
+// (PRD 8.45.5: articleId, version, language, applicability). RetiredArticleID is
+// the version this publish retired, if any, so the search index can drop it.
+type ArticlePublishedData struct {
+	ArticleID        string               `json:"articleId"`
+	Number           string               `json:"number"`
+	Version          int                  `json:"version"`
+	Language         string               `json:"language"`
+	Title            string               `json:"title"`
+	Applicability    domain.Applicability `json:"applicability"`
+	PublishedAt      string               `json:"publishedAt"`
+	RetiredArticleID *string              `json:"retiredArticleId"`
+}
 
 // SLAWarningData is the payload of dev.passage.service.sla.warning.v1: a case
 // clock reached the warning threshold (BR-45.2, message SVC-SLA-001). SLAType is

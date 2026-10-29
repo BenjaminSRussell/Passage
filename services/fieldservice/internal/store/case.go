@@ -82,6 +82,11 @@ func (s *Postgres) OpenCase(ctx context.Context, in OpenCaseInput, key, requestH
 			out, err = getCase(ctx, tx, tid, id)
 			return err
 		}
+		if in.ServiceObjectID != nil {
+			if err := checkCaseObject(ctx, tx, tid, *in.ServiceObjectID, in.CustomerPartyID); err != nil {
+				return err
+			}
+		}
 		cands, err := customerAgreements(ctx, tx, tid, in.CustomerPartyID, in.LegalEntityID)
 		if err != nil {
 			return err

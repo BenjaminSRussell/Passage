@@ -17,6 +17,7 @@ import {
   type WorkOrder,
   type WorkOrderStatus,
 } from "./api/client";
+import { ActivityPanel } from "./ActivitiesPage";
 import { CoverageBadge } from "./badges";
 import { Details } from "./Details";
 import { dash, duration, formatDateTime, money, sentence, shortId } from "./format";
@@ -202,6 +203,7 @@ export function WorkOrderDetailPage() {
           />
         </Card>
       ) : null}
+      <ActivityPanel entityType="work_order" entityId={wo.id} />
     </div>
   );
 }

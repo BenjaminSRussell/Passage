@@ -86,6 +86,9 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyWorkOrder)).Post("/v1/service/work-orders/{id}:transition", a.transitionWorkOrder)
 	r.With(authz.RequireDuty(dutyBilling)).Post("/v1/service/work-orders/{id}:post", a.postWorkOrder)
 	r.With(authz.RequireDuty(dutyWorkOrder)).Post("/v1/service/work-orders/{id}:follow-up", a.followUpWorkOrder)
+	a.registerObjects(r)
+	a.registerActivities(r)
+	a.registerKnowledge(r)
 }
 
 // Metrics serves the service counters in Prometheus text format.

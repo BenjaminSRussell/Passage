@@ -445,3 +445,315 @@ export function postWorkOrder(workOrderId: string, etag: string, key: string = n
 export function followUpWorkOrder(workOrderId: string, etag: string, key: string = newKey()): Promise<Versioned<WorkOrder>> {
   return versioned<WorkOrder>(`/work-orders/${id(workOrderId)}:follow-up`, { method: "POST", headers: { "If-Match": etag, "Idempotency-Key": key } });
 }
+
+// --- Installed base (FR-45.1, FR-45.2) ---
+
+export const WARRANTY_TRIGGERS = ["SHIP", "INSTALL", "REGISTRATION"] as const;
+export type WarrantyTrigger = (typeof WARRANTY_TRIGGERS)[number];
+
+export const OBJECT_STATUSES = ["ACTIVE", "INACTIVE", "RETURNED"] as const;
+export type ObjectStatus = (typeof OBJECT_STATUSES)[number];
+
+export interface WarrantyTerm {
+  startTrigger: WarrantyTrigger;
+  /** 0 to 240; 0 means no warranty. */
+  months: number;
+  partsCovered: boolean;
+  laborCovered: boolean;
+  travelCovered: boolean;
+}
+
+export interface ServiceObjectInput {
+  itemId: string;
+  serial: string;
+  customerPartyId: string;
+  legalEntityId: string;
+  siteAddressId?: string | null;
+  parentId?: string | null;
+  shippedOn?: string | null;
+  installedOn?: string | null;
+  warranty: WarrantyTerm;
+}
+
+export interface ServiceObject extends Omit<ServiceObjectInput, "siteAddressId" | "parentId" | "shippedOn" | "installedOn"> {
+  id: string;
+  siteAddressId?: string;
+  parentId?: string;
+  shipmentId?: string;
+  shippedOn?: string;
+  installedOn?: string;
+  status: ObjectStatus;
+  /** Absent until the trigger date is known (an INSTALL warranty before installation). */
+  warrantyStartsOn?: string;
+  /** The first day the warranty no longer covers. */
+  warrantyEndsOn?: string;
+  createdAt: string;
+  version: number;
+}
+
+export interface ShipmentInput {
+  shipmentId: string;
+  shipDate: string;
+  customerPartyId: string;
+  legalEntityId: string;
+  siteAddressId?: string | null;
+  lines: { itemId: string; serials: string[]; warranty: WarrantyTerm }[];
+}
+
+export interface ShipmentReceipt {
+  created: number;
+  existing: number;
+}
+
+export interface ObjectFilter {
+  customerPartyId?: string;
+  serial?: string;
+  parentId?: string;
+  status?: ObjectStatus | "";
+  cursor?: string;
+}
+
+export function listServiceObjects(f: ObjectFilter = {}, signal?: AbortSignal): Promise<Page<ServiceObject>> {
+  return json<Page<ServiceObject>>(
+    `/service-objects${query({ customerPartyId: f.customerPartyId, serial: f.serial, parentId: f.parentId, status: f.status, cursor: f.cursor })}`,
+    {},
+    signal,
+  );
+}
+
+export function getServiceObject(objectId: string, signal?: AbortSignal): Promise<Versioned<ServiceObject>> {
+  return versioned<ServiceObject>(`/service-objects/${id(objectId)}`, {}, signal);
+}
+
+export function createServiceObject(input: ServiceObjectInput, key: string = newKey()): Promise<Versioned<ServiceObject>> {
+  return versioned<ServiceObject>("/service-objects", post(input, key));
+}
+
+/** Creates one service object per shipped serial; a re-delivered shipment creates nothing twice (AC-45.8). */
+export function receiveShipment(input: ShipmentInput): Promise<ShipmentReceipt> {
+  return json<ShipmentReceipt>("/service-objects:receive-shipment", { method: "POST", body: JSON.stringify(input) });
+}
+
+/** Records the installation day; an INSTALL warranty starts that day. */
+export function installServiceObject(objectId: string, etag: string, installedOn: string): Promise<Versioned<ServiceObject>> {
+  return versioned<ServiceObject>(`/service-objects/${id(objectId)}:install`, {
+    method: "POST",
+    body: JSON.stringify({ installedOn }),
+    headers: { "If-Match": etag },
+  });
+}
+
+// --- Activities (FR-45.14) ---
+
+export const ACTIVITY_KINDS = ["TASK", "APPOINTMENT", "CALL_NOTE", "EMAIL_NOTE"] as const;
+export type ActivityKind = (typeof ACTIVITY_KINDS)[number];
+
+export const ACTIVITY_STATUSES = ["OPEN", "DONE", "CANCELED"] as const;
+export type ActivityStatus = (typeof ACTIVITY_STATUSES)[number];
+
+/** Record types an activity can be attached to (internal/domain/activity.go). */
+export const ASSOCIABLE_TYPES = [
+  "case",
+  "work_order",
+  "agreement",
+  "service_object",
+  "knowledge_article",
+  "project",
+  "customer",
+  "vendor",
+  "worker",
+  "invoice",
+  "item",
+  "asset",
+  "audit_finding",
+] as const;
+export type AssociableType = (typeof ASSOCIABLE_TYPES)[number];
+
+export interface Association {
+  entityType: AssociableType;
+  entityId: string;
+}
+
+export interface ActivitySchedule {
+  dueAt?: string | null;
+  startAt?: string | null;
+  endAt?: string | null;
+}
+
+export interface ActivityInput extends ActivitySchedule {
+  kind: ActivityKind;
+  subject: string;
+  ownerWorkerId: string;
+  reminderMinutes?: number | null;
+  associations: Association[];
+}
+
+export interface Activity {
+  id: string;
+  kind: ActivityKind;
+  subject: string;
+  ownerWorkerId: string;
+  dueAt?: string;
+  startAt?: string;
+  endAt?: string;
+  status: ActivityStatus;
+  reminderMinutes?: number;
+  associations: Association[];
+  completedAt?: string;
+  createdAt: string;
+  version: number;
+}
+
+/** "My activities" (owner) or the activities of one record (entityType with entityId). */
+export interface ActivityFilter {
+  owner?: string;
+  entityType?: AssociableType;
+  entityId?: string;
+  status?: ActivityStatus | "";
+  cursor?: string;
+}
+
+const activityQuery = (f: ActivityFilter) => query({ owner: f.owner, entityType: f.entityType, entityId: f.entityId, status: f.status, cursor: f.cursor });
+
+export function listActivities(f: ActivityFilter, signal?: AbortSignal): Promise<Page<Activity>> {
+  return json<Page<Activity>>(`/activities${activityQuery(f)}`, {}, signal);
+}
+
+/** The browser path of the iCalendar export of a filter (RFC 5545). */
+export function activityCalendarUrl(f: ActivityFilter): string {
+  return `${base}/activities:calendar${activityQuery({ ...f, cursor: undefined })}`;
+}
+
+export function getActivity(activityId: string, signal?: AbortSignal): Promise<Versioned<Activity>> {
+  return versioned<Activity>(`/activities/${id(activityId)}`, {}, signal);
+}
+
+export function createActivity(input: ActivityInput, key: string = newKey()): Promise<Versioned<Activity>> {
+  return versioned<Activity>("/activities", post(input, key));
+}
+
+export function completeActivity(activityId: string, etag: string): Promise<Versioned<Activity>> {
+  return versioned<Activity>(`/activities/${id(activityId)}:complete`, { method: "POST", headers: { "If-Match": etag } });
+}
+
+export function cancelActivity(activityId: string, etag: string): Promise<Versioned<Activity>> {
+  return versioned<Activity>(`/activities/${id(activityId)}:cancel`, { method: "POST", headers: { "If-Match": etag } });
+}
+
+export function rescheduleActivity(activityId: string, etag: string, when: ActivitySchedule): Promise<Versioned<Activity>> {
+  return versioned<Activity>(`/activities/${id(activityId)}:reschedule`, { method: "POST", body: JSON.stringify(when), headers: { "If-Match": etag } });
+}
+
+// --- Knowledge base (FR-45.13, BR-45.11) ---
+
+export const ARTICLE_STATUSES = ["DRAFT", "IN_REVIEW", "PUBLISHED", "RETIRED"] as const;
+export type ArticleStatus = (typeof ARTICLE_STATUSES)[number];
+
+export interface Applicability {
+  itemIds: string[];
+  itemGroupIds: string[];
+  incidentTypeIds: string[];
+  assetTypeIds: string[];
+  categoryIds: string[];
+}
+
+export interface ArticleInput {
+  title: string;
+  language: string;
+  symptom: string;
+  cause: string;
+  solution: string;
+  applicability: Applicability;
+}
+
+/** One version of an article; number groups the versions. revision is the ETag. */
+export interface Article extends ArticleInput {
+  id: string;
+  number: string;
+  version: number;
+  status: ArticleStatus;
+  authorId: string;
+  reviewerId?: string;
+  publishedAt?: string;
+  helpfulYes: number;
+  helpfulNo: number;
+  /** Decimal percent, present from ten votes. */
+  helpfulPercent?: Decimal;
+  createdAt: string;
+  revision: number;
+}
+
+export interface PublishResult {
+  article: Article;
+  retiredVersion?: number;
+  /** KB-PUB-002 when publishing retired an earlier version. */
+  warnings: string[];
+}
+
+export interface Suggestion {
+  article: Article;
+  score: number;
+}
+
+export interface ArticleFilter {
+  status?: ArticleStatus | "";
+  number?: string;
+  cursor?: string;
+}
+
+export interface SearchQuery {
+  q?: string;
+  itemId?: string;
+  incidentTypeId?: string;
+  lang?: string;
+  limit?: number;
+}
+
+/** An article read with its ETag, which carries the revision (not the article version number). */
+async function revisioned(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<Versioned<Article>> {
+  const res = await send(path, init, signal);
+  const value = (await res.json()) as Article;
+  return { value, etag: res.headers.get("ETag") ?? `"${value.revision}"` };
+}
+
+export function listArticles(f: ArticleFilter = {}, signal?: AbortSignal): Promise<Page<Article>> {
+  return json<Page<Article>>(`/knowledge/articles${query({ status: f.status, number: f.number, cursor: f.cursor })}`, {}, signal);
+}
+
+/** Ranks PUBLISHED articles for a description and item (BR-45.11). */
+export function searchArticles(q: SearchQuery, signal?: AbortSignal): Promise<{ items: Suggestion[] }> {
+  return json<{ items: Suggestion[] }>(
+    `/knowledge/articles/search${query({ q: q.q, itemId: q.itemId, incidentTypeId: q.incidentTypeId, lang: q.lang, limit: q.limit })}`,
+    {},
+    signal,
+  );
+}
+
+export function getArticle(articleId: string, signal?: AbortSignal): Promise<Versioned<Article>> {
+  return revisioned(`/knowledge/articles/${id(articleId)}`, {}, signal);
+}
+
+export function createArticle(input: ArticleInput, key: string = newKey()): Promise<Versioned<Article>> {
+  return revisioned("/knowledge/articles", post(input, key));
+}
+
+export function updateArticle(articleId: string, etag: string, input: ArticleInput): Promise<Versioned<Article>> {
+  return revisioned(`/knowledge/articles/${id(articleId)}`, { method: "PUT", body: JSON.stringify(input), headers: { "If-Match": etag } });
+}
+
+export type ArticleMove = "submit" | "reject" | "retire" | "new-version";
+
+export function moveArticle(articleId: string, etag: string, move: ArticleMove): Promise<Versioned<Article>> {
+  return revisioned(`/knowledge/articles/${id(articleId)}:${move}`, { method: "POST", headers: { "If-Match": etag } });
+}
+
+/** Publishes with the caller as reviewer, who must not be the author (KB-PUB-001). */
+export async function publishArticle(articleId: string, etag: string): Promise<{ value: PublishResult; etag: string }> {
+  const res = await send(`/knowledge/articles/${id(articleId)}:publish`, { method: "POST", headers: { "If-Match": etag } });
+  const value = (await res.json()) as PublishResult;
+  return { value, etag: res.headers.get("ETag") ?? `"${value.article.revision}"` };
+}
+
+export function voteArticle(articleId: string, helpful: boolean): Promise<Versioned<Article>> {
+  return revisioned(`/knowledge/articles/${id(articleId)}:vote`, { method: "POST", body: JSON.stringify({ helpful }) });
+}

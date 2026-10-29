@@ -177,7 +177,9 @@ func (s *Postgres) TransitionWorkOrder(ctx context.Context, id string, version i
 	return wo, err
 }
 
-// PostWorkOrder bills a completed work order (FR-45.10, BR-45.4). A replay with
+// PostWorkOrder bills a completed work order (FR-45.10, BR-45.4): each line is
+// WARRANTY when the case's service object warranty covers it on the completion
+// day, else AGREEMENT when the agreement covers it, else BILLABLE. A replay with
 // the same Idempotency-Key returns the stored posting.
 func (s *Postgres) PostWorkOrder(ctx context.Context, id string, version int, key string) (WorkOrder, bool, error) {
 	tid := tenantOf(ctx)
@@ -199,8 +201,12 @@ func (s *Postgres) PostWorkOrder(ctx context.Context, id string, version int, ke
 		if err != nil {
 			return err
 		}
+		warranty, err := warrantyCover(ctx, tx, tid, current)
+		if err != nil {
+			return err
+		}
 		posting, err := domain.Post(domain.PostInput{Status: domain.WOStatus(current.Status), Currency: current.Currency,
-			Lines: current.Lines, Agreement: cover})
+			Lines: current.Lines, Warranty: warranty, Agreement: cover})
 		if err != nil {
 			var de *domain.Error
 			if errors.As(err, &de) {

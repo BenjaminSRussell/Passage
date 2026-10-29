@@ -15,9 +15,11 @@ import {
   type SlaAlert,
   type WorkOrder,
 } from "./api/client";
+import { ActivityPanel } from "./ActivitiesPage";
 import { PriorityBadge, SlaBadge } from "./badges";
 import { Details } from "./Details";
 import { dash, duration, formatDateTime, sentence, shortId } from "./format";
+import { ArticleSuggestions } from "./KnowledgePage";
 import { PagedTable } from "./PagedTable";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -190,7 +192,7 @@ export function CaseDetailPage() {
           items={[
             ["Customer", c.customerPartyId, true],
             ["Legal entity", c.legalEntityId, true],
-            ["Service object", c.serviceObjectId ?? dash, true],
+            ["Service object", c.serviceObjectId ? <Link key="o" to={`/service/objects/${c.serviceObjectId}`}>{shortId(c.serviceObjectId)}</Link> : dash],
             ["Channel", sentence(c.channel)],
             ["Priority", <PriorityBadge key="p" priority={c.priority} />],
           ]}
@@ -222,6 +224,8 @@ export function CaseDetailPage() {
           onRowOpen={(row) => navigate(`/service/work-orders/${row.id}`)}
         />
       </Card>
+      {open ? <ArticleSuggestions description={c.description} serviceObjectId={c.serviceObjectId} /> : null}
+      <ActivityPanel entityType="case" entityId={c.id} />
       {confirming && finalMoves[confirming] ? (
         <ConfirmDialog
           title={finalMoves[confirming].title}

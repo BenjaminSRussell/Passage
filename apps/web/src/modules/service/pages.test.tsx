@@ -134,14 +134,17 @@ describe("service module", () => {
   it("declares a list and a detail or create page for each entity", () => {
     expect(service.id).toBe("service");
     const paths = service.routes.map((r) => r.path);
-    for (const path of ["/service", "/service/cases", "/service/cases/new", "/service/cases/:id", "/service/agreements", "/service/agreements/new", "/service/agreements/:id", "/service/work-orders", "/service/work-orders/new", "/service/work-orders/:id", "/service/sla-profiles", "/service/sla-profiles/new", "/service/kpis"]) {
+    for (const path of ["/service", "/service/cases", "/service/cases/new", "/service/cases/:id", "/service/agreements", "/service/agreements/new", "/service/agreements/:id", "/service/work-orders", "/service/work-orders/new", "/service/work-orders/:id", "/service/sla-profiles", "/service/sla-profiles/new", "/service/kpis", "/service/objects", "/service/objects/new", "/service/objects/receive", "/service/objects/:id", "/service/activities", "/service/activities/new", "/service/activities/:id", "/service/knowledge", "/service/knowledge/new", "/service/knowledge/:id"]) {
       expect(paths).toContain(path);
     }
     expect(service.routes.every((r) => r.element !== null)).toBe(true);
   });
 
   it("gates every nav entry by a PRD duty", () => {
-    expect(service.nav.every((n) => n.to.startsWith("/service/") && n.duty?.startsWith("Svc"))).toBe(true);
+    const prdDuties = new Set(["SvcInquire", "SvcCaseCreate", "ActivityMaintain", "KbRead"]);
+    expect(service.nav.every((n) => n.to.startsWith("/service/") && prdDuties.has(n.duty ?? ""))).toBe(true);
+    expect(service.nav.find((n) => n.to === "/service/knowledge")?.duty).toBe("KbRead");
+    expect(service.nav.find((n) => n.to === "/service/activities")?.duty).toBe("ActivityMaintain");
     expect(service.nav.find((n) => n.to === "/service/cases/new")?.duty).toBe("SvcCaseCreate");
   });
 
@@ -460,7 +463,7 @@ describe("work orders", () => {
     renderAt(`/service/work-orders/${WO}`);
     fireEvent.click(await screen.findByRole("button", { name: "Put on hold" }));
     expect(await findAlert()).toHaveTextContent("Someone else changed this work order");
-    await waitFor(() => expect(calls.filter((c) => c.method === "GET").length).toBe(2));
+    await waitFor(() => expect(calls.filter((c) => c.method === "GET" && c.url.pathname === `/api/v1/service/work-orders/${WO}`).length).toBe(2));
   });
 
   it("opens a follow-up visit for a completed order and lands on it", async () => {

@@ -1,11 +1,14 @@
-# fieldservice (wave 45, slices 1 and 2)
+# fieldservice (wave 45, slices 1 to 3)
 
 Service management core of Passage: service agreements with SLA profiles, the
 entitlement resolver, SLA clocks on service cases with the case status machine,
 pause and resume, the SLA monitor (warning and breach events), service work orders
 with coverage-aware billing, the work-order status machine with follow-up orders and
-first-time fix, and service KPIs. It replaces AX service management (agreements,
-service orders) and SAP CS (service orders, warranty check) for these slices.
+first-time fix, service KPIs, the installed base with warranty terms that cover
+work-order lines, activities on any record with an iCalendar export, and the
+knowledge base with versioned articles, review, publishing and suggestions. It
+replaces AX service management (agreements, service orders, service objects) and SAP
+CS (service orders, installed base, warranty check, solution database) for these slices.
 
 Wave reference: PSG-45 / `docs/prd/phase-8-projects-people-service.md` section 8.45.
 Dependencies on earlier waves (locations, pricing, serial shipments, invoicing,
@@ -18,13 +21,16 @@ cmd/fieldservice        entrypoint: dbx.Connect -> dbx.Migrate (optional) -> htt
 internal/domain         pure rules: SLA business-minute calendar, SLA clocks with pauses and the
                         monitor's warning/breach verdicts, case status machine, entitlement
                         resolver (BR-45.1), work-order status machine and coverage posting
-                        (BR-45.4/5), KPI rates
+                        (BR-45.4/5), KPI rates, warranty start and term (FR-45.2), activity
+                        status moves and the RFC 5545 export, the article lifecycle (BR-45.11)
 internal/store          Postgres repositories under RLS (dbx.WithTenantTx), idempotency, outbox
 internal/api            HTTP handlers under /v1/service, validation, problem details
 internal/events         event types and payloads (see events/asyncapi.yaml)
 migrations/             0001_init.sql (RLS, tenant_id first, money numeric(20,6) + currency),
                         0002/0003 passage_app grants, 0004_case_lifecycle.sql (case version, pause,
-                        warning instants, emitted alerts; work-order completion, follow-up, first-time fix)
+                        warning instants, emitted alerts; work-order completion, follow-up, first-time fix),
+                        0005_objects_activities_knowledge.sql (service objects, activities, knowledge
+                        articles and votes, with their passage_app grants)
 api/openapi.yaml        OpenAPI 3.1 for every endpoint
 events/asyncapi.yaml    AsyncAPI 3 for every event published
 charts/fieldservice     Helm chart (deployment, service, optional ServiceMonitor)
@@ -48,10 +54,26 @@ charts/fieldservice     Helm chart (deployment, service, optional ServiceMonitor
 | POST | `/v1/service/sla:scan` (`limit`, 1 to 5000, default 500) | SvcCaseMaintain |
 | POST | `/v1/service/work-orders/{id}:follow-up` | SvcWoMaintain (If-Match, Idempotency-Key) |
 | GET | `/v1/service/kpis` (`from`, `to`, `territory`) | SvcInquire |
+| POST | `/v1/service/service-objects` | SvcObjectMaintain (Idempotency-Key) |
+| POST | `/v1/service/service-objects:receive-shipment` | SvcObjectMaintain (idempotent per item and serial) |
+| GET | `/v1/service/service-objects` (`customerPartyId`, `itemId`, `serial`, `parentId`, `status`), `/v1/service/service-objects/{id}` | SvcInquire |
+| POST | `/v1/service/service-objects/{id}:install` | SvcObjectMaintain (If-Match) |
+| POST | `/v1/service/activities` | ActivityMaintain (Idempotency-Key) |
+| GET | `/v1/service/activities` (`owner`, or `entityType` with `entityId`; `status`), `/v1/service/activities/{id}` | ActivityMaintain |
+| GET | `/v1/service/activities:calendar` (same filter) | ActivityMaintain |
+| POST | `/v1/service/activities/{id}:complete`, `:cancel`, `:reschedule` | ActivityMaintain (If-Match) |
+| POST | `/v1/service/knowledge/articles` | KbAuthor (Idempotency-Key) |
+| GET | `/v1/service/knowledge/articles` (`status`, `lang`, `number`), `/v1/service/knowledge/articles/{id}` | KbRead |
+| GET | `/v1/service/knowledge/articles/search` (`q`, `itemId`, `incidentTypeId`, `assetTypeId`, `lang`, `limit` 1 to 20) | KbRead |
+| PUT | `/v1/service/knowledge/articles/{id}` | KbAuthor (If-Match) |
+| POST | `/v1/service/knowledge/articles/{id}:new-version`, `:submit` | KbAuthor (If-Match) |
+| POST | `/v1/service/knowledge/articles/{id}:publish`, `:reject`, `:retire` | KbPublish (If-Match) |
+| POST | `/v1/service/knowledge/articles/{id}:vote` | KbRead |
 
-Lists are newest first and page with `cursor` (the previous page's `nextCursor`)
+Lists are newest first (activities: earliest due first, undated last) and page with `cursor` (the previous page's `nextCursor`)
 and `limit` (1 to 200, default 50); they see only the caller's legal entities.
-Work-order and case responses carry `ETag: "<version>"`, which `If-Match` echoes back.
+Work-order, case, service-object and activity responses carry `ETag: "<version>"`, and
+article responses `ETag: "<revision>"`, which `If-Match` echoes back.
 `internal/api/openapi_test.go` fails when a route and `api/openapi.yaml` disagree,
 and `internal/events/events_test.go` does the same for the event payloads and
 `events/asyncapi.yaml`.
@@ -70,7 +92,13 @@ case or directly, detail with status moves and posting by coverage) and SLA prof
 (list, create). Slice 2 adds the case status actions on the case detail (start, wait
 for customer or parts, resume, resolve, close and cancel, the last two confirmed
 first) with the SLA alerts already emitted, the follow-up visit and first-time fix on
-the work-order detail, and the KPI dashboard (`/service/kpis`).
+the work-order detail, and the KPI dashboard (`/service/kpis`). Slice 3 adds the
+installed base (list with customer and serial search, register, receive a shipment,
+detail with warranty, components and installation), "My activities" (list by owner
+and status, create on any record, complete, cancel, reschedule, calendar download)
+with an activities panel on the case detail, and the knowledge base (list by status,
+search, author, edit a draft, submit, publish, send back, retire, new version, vote)
+with article suggestions on the case detail.
 
 ## Run
 
@@ -112,9 +140,35 @@ without `PASSAGE_TEST_DATABASE_URL`.
   included hours; the rest is billable. Parts and travel covered by the agreement post
   at zero. Only an ACTIVE agreement covers anything, and its row is locked while a
   post consumes hours, so concurrent posts cannot spend the same included hour twice.
-  Posted orders are immutable. Warranty coverage is supported by the domain
-  but not yet sourced from service objects (no installed base in this slice), so
-  `warrantyCost` is zero until that lands.
+  Posted orders are immutable. Warranty coverage comes from the service object
+  named on the work order's case: its term is active from `warrantyStartsOn` for
+  `months` months on the completion day of the order, and its parts, labor and
+  travel flags decide which lines are WARRANTY (zero-priced, unit cost recorded as
+  warranty cost).
+- Installed base (FR-45.1, FR-45.2): a service object is one serial of an item for a
+  customer, unique per item and serial, optionally under a parent of the same
+  customer. Its warranty starts on the ship day (SHIP), the installation day
+  (INSTALL, set by `:install`) or the day it was registered in the installed base
+  (REGISTRATION); `warrantyEndsOn` is the first day it no longer covers. A case may
+  name only an object of its own customer (`SVC-OBJ-005`).
+  `:receive-shipment` stands in for the wave-28 shipment event: it creates one ACTIVE
+  object per serial and counts serials that already have one as existing.
+- Activities (FR-45.14): TASK, APPOINTMENT, CALL_NOTE or EMAIL_NOTE owned by a worker,
+  with due, start, end, reminder and associations to records (`case`, `work_order`,
+  `project`, ...). OPEN can be completed (DONE with `completedAt`), canceled or
+  rescheduled; DONE and CANCELED are final, and repeating the same move is a no-op.
+  The calendar export is RFC 5545 (escaped, folded at 75 octets, CRLF), one VEVENT
+  per activity with a start or due instant.
+- Knowledge base (FR-45.13, BR-45.11): each version is a row grouped by `number`
+  (KB-{seq}); DRAFT can be edited and submitted, IN_REVIEW published (by a reviewer
+  other than the author, `KB-PUB-001`) or sent back, PUBLISHED retired or revised
+  into a new DRAFT version (one open version at a time, `KB-ART-003`). Publishing
+  retires the earlier PUBLISHED version of the same language in the same transaction
+  (`KB-PUB-002` warning) and writes `dev.passage.knowledge.article.published.v1`.
+  Search ranks PUBLISHED articles of the language by ts_rank (normalized to the best
+  match) × 0.6 + item 0.25 + incident type 0.10 + asset type 0.05 and returns the top
+  5 by default. Each user has one helpfulness vote per version; the helpful percent
+  shows from ten votes.
 - Case status (FR-45.5): `NEW`, `IN_PROGRESS`, `WAITING_CUSTOMER`, `WAITING_PARTS`,
   `RESOLVED`, `CLOSED`, `CANCELED`. Every open status can move to the other open
   statuses (except back to `NEW`), to `RESOLVED` or to `CANCELED`; `RESOLVED` only
@@ -176,9 +230,22 @@ Problem details use `application/problem+json`; `type` is `https://passage.dev/p
 | `SVC-WO-010` | 422 | Posting requires a COMPLETED work order |
 | `SVC-WO-011` | 422 | Status transition not allowed by the work-order state machine (BR-45.5) |
 | `SVC-WO-012` | 422 | A follow-up needs a COMPLETED or POSTED work order (BR-45.5) |
+| `AUTH-0003` | 403 | Missing duty, or the caller has no UUID user id to record as author, reviewer or voter |
+| `SVC-OBJ-001` | 409 | The item and serial already have a service object |
+| `SVC-OBJ-002` | 404 | Service object not found |
+| `SVC-OBJ-003` | 422 | The parent service object does not exist or belongs to another customer |
+| `SVC-OBJ-004` | 422 | The service object was already installed |
+| `SVC-OBJ-005` | 422 | The case names a service object that does not exist or belongs to another customer |
+| `SVC-ACT-001` | 404 | Activity not found |
+| `SVC-ACT-002` | 422 | The activity's status does not allow the move (DONE and CANCELED are final) |
+| `KB-ART-001` | 404 | Knowledge article not found |
+| `KB-ART-002` | 422 | The article's status does not allow the action |
+| `KB-ART-003` | 422 | Another version of the article is already in draft or review |
+| `KB-PUB-001` | 422 | The reviewer must differ from the author (PRD message catalog) |
 
 `SVC-SLA-001` (warning) and `SVC-SLA-002` (breach) are the messages of the
-`sla.warning` and `sla.breached` events, not HTTP errors. The PRD message catalog
+`sla.warning` and `sla.breached` events, not HTTP errors. `KB-PUB-002` (publishing
+retires version {v}) is a warning in the publish response. The PRD message catalog
 (8.45.18) also reserves `SVC-WO-001/002`,
 `SVC-DSP-*`, `SVC-TRK-001`, `SVC-SYNC-001` and `SVC-SWC-*` for the features that raise
 them; this service does not reuse those numbers.
