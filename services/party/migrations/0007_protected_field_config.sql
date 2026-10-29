@@ -4,6 +4,9 @@ CREATE TABLE IF NOT EXISTS protected_field_config (
   fields text[] NOT NULL CHECK (fields <@ ARRAY['credit_limit']::text[]),
   updated_by text NOT NULL CHECK (updated_by <> ''),
   updated_at timestamptz NOT NULL DEFAULT now(),
+  unprotected_by text CHECK (unprotected_by <> ''),
+  unprotected_at timestamptz,
+  CHECK ((unprotected_by IS NULL) = (unprotected_at IS NULL)),
   PRIMARY KEY (tenant_id, legal_entity_id)
 );
 

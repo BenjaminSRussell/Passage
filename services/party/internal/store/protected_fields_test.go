@@ -183,7 +183,7 @@ func TestProtectedFields_SelfUnprotectDoesNotBypassOwnApproval(t *testing.T) {
 	}
 	ctx := principalContext(1, "")
 	err = dbx.WithTenantTx(ctx, app, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `update protected_field_config set updated_at = now() - interval '25 hours'`)
+		_, err := tx.Exec(ctx, `update protected_field_config set unprotected_at = now() - interval '25 hours'`)
 		return err
 	})
 	if err != nil {
@@ -195,5 +195,46 @@ func TestProtectedFields_SelfUnprotectDoesNotBypassOwnApproval(t *testing.T) {
 	res, err = s.RequestCreditLimit(asUser(1, "", approver), customerID, "90000.00")
 	if err != nil || res.Pending != nil || storedLimit(t, app, customerID) != "90000.00" {
 		t.Fatalf("after 24h the exemption lapses: %+v, %v", res, err)
+	}
+}
+
+func TestProtectedFields_OtherAdminResaveKeepsHold(t *testing.T) {
+	app := migratedApp(t)
+	s := store.New(app)
+	customerID := customerWithLimit(t, app, "50000.00")
+	if _, err := s.SetProtectedFields(asUser(1, "", approver), legalEntityA, []string{}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.SetProtectedFields(asUser(1, "", "user-other"), legalEntityA, []string{}); err != nil || len(got) != 0 {
+		t.Fatalf("resave = %v, %v", got, err)
+	}
+	if rows := outboxRows(t, principalContext(1, ""), app); len(rows) != 1 {
+		t.Fatalf("unchanged resave emitted an audit event: %d rows", len(rows))
+	}
+	res, err := s.RequestCreditLimit(asUser(1, "", approver), customerID, "90000.00")
+	if err != nil || res.Pending == nil || storedLimit(t, app, customerID) != "50000.00" {
+		t.Fatalf("hold must survive another admin's resave: %+v, %v", res, err)
+	}
+}
+
+func TestProtectedFields_HoldRestartsAfterReprotect(t *testing.T) {
+	app := migratedApp(t)
+	s := store.New(app)
+	customerID := customerWithLimit(t, app, "50000.00")
+	for _, step := range []struct {
+		user   string
+		fields []string
+	}{{approver, []string{}}, {"user-other", []string{domain.FieldCreditLimit}}, {approver, []string{}}} {
+		if _, err := s.SetProtectedFields(asUser(1, "", step.user), legalEntityA, step.fields); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res, err := s.RequestCreditLimit(asUser(1, "", approver), customerID, "90000.00")
+	if err != nil || res.Pending == nil {
+		t.Fatalf("hold must restart for the latest unprotector: %+v, %v", res, err)
+	}
+	res, err = s.RequestCreditLimit(asUser(1, "", requester), customerID, "70000.00")
+	if err != nil || res.Pending != nil || storedLimit(t, app, customerID) != "70000.00" {
+		t.Fatalf("others are unaffected by the hold: %+v, %v", res, err)
 	}
 }

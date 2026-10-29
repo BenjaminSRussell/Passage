@@ -72,10 +72,21 @@ func (s *Postgres) SetProtectedFields(ctx context.Context, legalEntityID string,
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		if slices.Equal(before, fields) {
+			fields = before
+			return nil
+		}
+		var unprotectedBy *string
+		if !slices.Contains(fields, domain.FieldCreditLimit) {
+			unprotectedBy = &caller.UserID
+		}
+		wasProtected := slices.Contains(before, domain.FieldCreditLimit)
 		var updatedAt time.Time
-		if err := tx.QueryRow(ctx, `insert into protected_field_config (tenant_id, legal_entity_id, fields, updated_by) values ($1, $2, $3, $4)
-			on conflict (tenant_id, legal_entity_id) do update set fields = excluded.fields, updated_by = excluded.updated_by, updated_at = now()
-			returning fields, updated_at`, caller.TenantID, id, fields, caller.UserID).Scan(&fields, &updatedAt); err != nil {
+		if err := tx.QueryRow(ctx, `insert into protected_field_config (tenant_id, legal_entity_id, fields, updated_by, unprotected_by, unprotected_at) values ($1, $2, $3, $4, $5::text, case when $5::text is null then null else now() end)
+			on conflict (tenant_id, legal_entity_id) do update set fields = excluded.fields, updated_by = excluded.updated_by, updated_at = now(),
+				unprotected_by = case when excluded.unprotected_by is null or $6 then excluded.unprotected_by else protected_field_config.unprotected_by end,
+				unprotected_at = case when excluded.unprotected_by is null or $6 then excluded.unprotected_at else protected_field_config.unprotected_at end
+			returning fields, updated_at`, caller.TenantID, id, fields, caller.UserID, unprotectedBy, wasProtected).Scan(&fields, &updatedAt); err != nil {
 			return err
 		}
 		evt, err := events.New(partyevents.ProtectedFieldsUpdated, domain.EventSource, id, caller.TenantID, partyevents.ProtectedFieldsUpdatedData{
