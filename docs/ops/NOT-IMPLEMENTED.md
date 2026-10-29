@@ -1,11 +1,11 @@
-# NOT-IMPLEMENTED — PSG-50 (wave 50), slices 1 to 5
+# NOT-IMPLEMENTED — PSG-50 (wave 50), slices 1 to 6
 
 Wave 50 owns only `deploy/multi-region/`, `load/` and `docs/ops/`, and its ownership entry lists no web
 module. It has no service directory, so there is no Go module, database table, OpenAPI/AsyncAPI file or
 web screen in this slice. Items below are either later slices of PSG-50 or handoffs to the wave that owns
 the code or the infrastructure.
 
-Status key: **built** = in slices 1 to 5. **later slice of PSG-50** = same wave, next slice. **handoff** =
+Status key: **built** = in slices 1 to 6. **later slice of PSG-50** = same wave, next slice. **handoff** =
 needs another owner or an out-of-path edit.
 
 ## Deliverable 1: performance campaign
@@ -40,6 +40,7 @@ needs another owner or an out-of-path edit.
 | MirrorMaker 2 (target region only), its KafkaUser, JMX lag metrics and PodMonitor | built | `templates/mirrormaker2.yaml` |
 | Fence NetworkPolicy, region ConfigMap, values schema with the PRD 9.50.13 ranges | built | `templates/fence.yaml`, `region-config.yaml`, `values.schema.json` |
 | Reference region pair inside one residency (eu-west, eu-central) | built | `deploy/multi-region/values/` |
+| Region pair check across both files, which the per-file values schema cannot do: exactly two files, exactly one PRIMARY (BR-50.1), both files agree on the MirrorMaker 2 direction and it runs from the PRIMARY, Kafka aliases name the pair, a PASSIVE file names the primary endpoint; PRD 9.50.13 ranges on each region's values merged over the chart defaults | built | `deploy/multi-region/tools/check_region_pair.py`, tests in `test_check_region_pair.py`; failover runbook step 3 runs it |
 | Cross-region reachability: Kafka external TLS listener, Postgres replication endpoint, copied peer secrets | handoff (wave 3 deploy/kafka, deployment-cicd) | `deploy/kafka` has internal listeners only; the chart README lists the secrets to copy |
 | Cross-region synchronous ledger replication (`cnpg.cross_region_sync.ledger`) | handoff (platform owner, decision) | CNPG replica clusters are asynchronous; synchronous cross-region needs one stretched cluster. The flag is published to `passage-ops` only |
 | `passage-ops` Go control plane: `failover`, region state machine, `/api/v1/ops/*`, `/healthz/region` | handoff (platform owner, wave 1 or new ops service) | a Go service needs a `services/<name>` path; not in wave 50's owned paths |
@@ -95,7 +96,8 @@ needs another owner or an out-of-path edit.
 | Implementer guide (migration, localization, cutover) | later slice of PSG-50 | depends on waves 47–49 |
 | API reference generator and undocumented-operation gate for OpenAPI: one Markdown page per service; an operation is documented with an operationId, a summary or description, `x-passage-duty`, a 2xx response and a description on every response (probe and `/internal/` routes are skipped) | built | `docs/ops/tools/api_reference.py`, tests in `test_api_reference.py` |
 | 0 undocumented operations (AC-50.11). Run on main on 2026-10-29 over 106 specs: 328 of 1359 operations undocumented. 278 lack a summary or description (org 97, costacct 32, product 23, engineering 22, batch 20, eam 19, budgeting 15, ledger 14, and 36 in 11 more services); 50 purchasing operations lack `x-passage-duty`; 11 product and 1 migration operations declare only a `default` response | handoff (each service owner) | the specs are in the services' paths. `services/party/api/openapi.yaml` and `services/print/api/openapi.yaml` are not valid YAML (flow mapping at party line 260, unquoted colon at print line 124), so no reference can be generated for them |
-| AsyncAPI reference pages (event catalogue) | later slice of PSG-50 | the generator reads OpenAPI only |
+| AsyncAPI event reference generator and undocumented-event gate: one Markdown page per service; an event is documented with a CloudEvents type `dev.passage.<context>.<entity>.<verb>.v<n>` (`x-passage-type`, else the message name), a title, summary or description, a payload schema and no duplicate type; an operation has action send or receive, a channel `$ref` and only that channel's messages, and is described by itself or by its messages | built | `docs/ops/tools/asyncapi_reference.py`, tests in `test_asyncapi_reference.py` |
+| 0 undocumented events (AC-50.11). Run on main on 2026-10-29 over 51 specs (`services/*/events/asyncapi.yaml`): 144 of 258 events undocumented. 134 lack a title, summary or description (pricing 13, inventory 11, assets 9, eam 9, transport 9, sales 8, batch 8, and 67 in 21 more services); 10 purchasing messages carry their type only in the payload envelope (`type.const`), not in `x-passage-type` or the name; 50 operations in 12 services have no description and carry an undescribed message | handoff (each service owner) | the specs are in the services' paths. `services/workflow-ts/events/asyncapi.yaml` uses an external `$ref` (`../schemas/current/...`), which the gate treats as an input error |
 | Rendering the reference pages in the docs site build (`passage-docs`) | handoff (deployment-cicd) | the site is not built; `--out` writes the pages the site picks up |
 | Functional guides, one per module for phases 1–8 | later slice of PSG-50 | depends on module completion |
 | Training curriculum, 6 role tracks with labs and assessments (FR-50.11) | built | `docs/ops/training-curriculum.md` |

@@ -58,6 +58,14 @@ that mirrors every Passage topic into it. DNS fails over with a 60 s TTL. Active
   `passage.ops.compat-evidence/v1`) with each service's breaking changes and warnings. A service published by
   N-1 and missing in N is breaking. Exit 1 when any service breaks. `docs/ops/tools/check_release_notes.py
   --compat-evidence` reads the file. Tests: `tools/test_compat_evidence.py`.
+- `tools/check_region_pair.py` — the cross-file check `values.schema.json` cannot make (BR-50.1, PRD 9.50.13).
+  It merges each region file over the chart defaults as Helm does and fails unless there are exactly two
+  region files, exactly one is PRIMARY, both agree on the MirrorMaker 2 direction and it runs from the
+  PRIMARY to the other region, the Kafka aliases name the pair, a PASSIVE file names the primary endpoint
+  itself, and every region's failover, DNS TTL, two-person window, MM2 lag alert, burn-rate and license
+  warning values sit in their ranges. Run it after every edit to `values/`, including failover step 3.
+  Stdlib only (a strict parser for the YAML subset these files use). Exit 1 on a problem.
+  Usage: `python3 deploy/multi-region/tools/check_region_pair.py`. Tests: `tools/test_check_region_pair.py`.
 - Run tests: `python3 -m unittest discover -s deploy/multi-region/gameday`,
   `python3 -m unittest discover -s deploy/multi-region/tools` and
   `python3 -m unittest discover -s deploy/multi-region/chaos`.

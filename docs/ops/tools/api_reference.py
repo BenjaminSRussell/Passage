@@ -24,8 +24,8 @@ gaps, 1 undocumented operations, 2 usage or input error.
 
     python3 docs/ops/tools/api_reference.py --spec services/org/api/openapi.json --out build/api
 
-The input is JSON; convert YAML first (CI does this, e.g. `yq -o=json`). AsyncAPI is not covered by this
-slice. Stdlib only, Python 3.11+. Tests: python3 -m unittest discover -s docs/ops/tools
+The input is JSON; convert YAML first (CI does this, e.g. `yq -o=json`). AsyncAPI documents are checked by
+asyncapi_reference.py. Stdlib only, Python 3.11+. Tests: python3 -m unittest discover -s docs/ops/tools
 """
 
 from __future__ import annotations

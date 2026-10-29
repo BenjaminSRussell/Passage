@@ -21,7 +21,9 @@ Example pair: eu-west (PRIMARY) to eu-central (PASSIVE), `deploy/multi-region/va
    promotes the replica cluster's designated primary, with quorum-synchronous standbys in-region.
 3. **Switch MirrorMaker.** Swap `mm2.sourceAlias` and `mm2.targetAlias` in both region files. MM2 renders
    only next to its target, so it stops in the new primary and starts in the old region once that is
-   re-seeded (it has no target until then).
+   re-seeded (it has no target until then). Before committing the region files, run
+   `python3 deploy/multi-region/tools/check_region_pair.py`: it fails on two PRIMARY files or an MM2
+   direction that differs between the files or does not start at the new PRIMARY (BR-50.1).
 4. **Activate Temporal** in the target region (multi-cluster replication).
 5. **Flip DNS** (weight 0 to 100 on the target, TTL 60 s).
 6. **Verify the ledger hash chain** per tenant from the last shared journal (BR-50.3). A break is
