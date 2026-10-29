@@ -79,10 +79,14 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyInquire)).Get("/{id}/plans/{ver}/wbs", a.getWBS)
 		r.With(authz.RequireDuty(DutyPlan)).Put("/{id}/plans/{ver}/wbs", a.putWBS)
 		r.With(authz.RequireDuty(DutyPlan)).Post("/{id}/plans/{ver}/schedule", a.scheduleWBS)
+		// Simulation transfer into WORKING (FR-41.17, BR-41.14).
+		r.With(authz.RequireDuty(DutyInquire)).Get("/{id}/plans/{ver}/transfer", a.previewTransfer)
+		r.With(authz.RequireDuty(DutyPlan)).Post("/{id}/plans/{ver}/transfer", a.transferPlan)
 
 		// Change orders and claims (FR-41.18) and the risk register (FR-41.20).
 		a.registerChangeOrders(r)
 		a.registerRisks(r)
+		a.registerForecasts(r)
 
 		// Transactions, invoice proposals and the billing explanation (FR-41.4, FR-41.6).
 		a.registerBilling(r)
@@ -215,10 +219,7 @@ func (a *API) list(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	body := listResponse{Items: page.Items}
-	if page.NextID != "" {
-		body.NextCursor = base64.RawURLEncoding.EncodeToString([]byte(page.NextID))
-	}
+	body := listResponse{Items: page.Items, NextCursor: encodeCursor(page.NextID)}
 	httpx.JSON(w, http.StatusOK, body)
 }
 
@@ -364,4 +365,23 @@ func pageParams(r *http.Request) (int, string, error) {
 		after = string(decoded)
 	}
 	return limit, after, nil
+}
+
+// encodeCursor turns the last id of a page into the opaque nextCursor ("" when
+// no page follows).
+func encodeCursor(lastID string) string {
+	if lastID == "" {
+		return ""
+	}
+	return base64.RawURLEncoding.EncodeToString([]byte(lastID))
+}
+
+// idPageParams reads limit and cursor for a list keyed by UUID rows: a cursor
+// that does not decode to a UUID is 400.
+func idPageParams(r *http.Request) (int, string, error) {
+	limit, after, err := pageParams(r)
+	if err == nil && after != "" && !ids.Valid(after) {
+		err = validation(map[string]string{"cursor": "is invalid"})
+	}
+	return limit, after, err
 }

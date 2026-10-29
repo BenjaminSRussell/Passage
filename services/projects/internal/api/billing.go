@@ -52,7 +52,8 @@ type transactionRequest struct {
 }
 
 type transactionList struct {
-	Items []domain.Transaction `json:"items"`
+	Items      []domain.Transaction `json:"items"`
+	NextCursor string               `json:"nextCursor,omitempty"`
 }
 
 // billingStatus is the "why not billed" explanation of one transaction.
@@ -71,7 +72,8 @@ type buildProposalRequest struct {
 }
 
 type proposalList struct {
-	Items []domain.InvoiceProposal `json:"items"`
+	Items      []domain.InvoiceProposal `json:"items"`
+	NextCursor string                   `json:"nextCursor,omitempty"`
 }
 
 // registerBilling mounts categories, transactions and invoice proposals.
@@ -201,20 +203,28 @@ func (a *API) createTransaction(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, createdStatus(created), out)
 }
 
-// listTransactions returns the transactions of one project, newest first.
+// listTransactions returns one page of the transactions of one project, newest
+// first: limit (1 to 100, default 100) and the opaque cursor from the previous
+// page's nextCursor (D3e).
 func (a *API) listTransactions(w http.ResponseWriter, r *http.Request) {
 	if _, ok := principal(w, r); !ok {
 		return
 	}
-	items, err := a.store.ListTransactions(r.Context(), chi.URLParam(r, "id"))
+	limit, after, err := idPageParams(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	page, err := a.store.ListTransactions(r.Context(), chi.URLParam(r, "id"), after, limit)
 	if err != nil {
 		httpx.Fail(w, r, problemFrom(err))
 		return
 	}
-	if items == nil {
-		items = []domain.Transaction{}
+	body := transactionList{Items: page.Items, NextCursor: encodeCursor(page.NextID)}
+	if body.Items == nil {
+		body.Items = []domain.Transaction{}
 	}
-	httpx.JSON(w, http.StatusOK, transactionList{Items: items})
+	httpx.JSON(w, http.StatusOK, body)
 }
 
 // billingStatus explains whether a transaction would be selected for a window
@@ -303,8 +313,9 @@ func (a *API) buildProposal(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, createdStatus(created), out)
 }
 
-// listProposals returns the proposals of one project (projectId is required),
-// optionally of one status.
+// listProposals returns one page of the proposals of one project (projectId is
+// required), optionally of one status, newest first, paged like the
+// transaction list (D3e).
 func (a *API) listProposals(w http.ResponseWriter, r *http.Request) {
 	if _, ok := principal(w, r); !ok {
 		return
@@ -322,15 +333,22 @@ func (a *API) listProposals(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, validation(fields))
 		return
 	}
-	items, err := a.store.ListProposals(r.Context(), f)
+	limit, after, err := idPageParams(r)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	f.AfterID, f.Limit = after, limit
+	page, err := a.store.ListProposals(r.Context(), f)
 	if err != nil {
 		httpx.Fail(w, r, problemFrom(err))
 		return
 	}
-	if items == nil {
-		items = []domain.InvoiceProposal{}
+	body := proposalList{Items: page.Items, NextCursor: encodeCursor(page.NextID)}
+	if body.Items == nil {
+		body.Items = []domain.InvoiceProposal{}
 	}
-	httpx.JSON(w, http.StatusOK, proposalList{Items: items})
+	httpx.JSON(w, http.StatusOK, body)
 }
 
 // proposalID reads {proposalId}; a malformed id is 404 like an unknown one.

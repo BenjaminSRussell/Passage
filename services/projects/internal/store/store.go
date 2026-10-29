@@ -1,9 +1,11 @@
 // Package store persists projects, project groups, posting profiles, plan
-// versions and WBS nodes, change orders, the risk register, project categories,
-// project transactions and invoice proposals in Postgres. Every call runs in a transaction
-// scoped to the caller's tenant (RLS), and every state change the PRD publishes
-// writes its event to the outbox in that same transaction (categories,
-// unposted transactions and proposal build, approve and cancel publish none).
+// versions and WBS nodes (with the simulation transfer), change orders, the
+// risk register, forecast models, project categories, project transactions and
+// invoice proposals in Postgres. Every call runs in a transaction scoped to the
+// caller's tenant (RLS), and every state change the PRD publishes writes its
+// event to the outbox in that same transaction (categories, unposted
+// transactions, proposal build, approve and cancel, forecasts and simulation
+// transfers publish none).
 package store
 
 import (
@@ -79,6 +81,10 @@ type Store interface {
 	ReplaceWBS(ctx context.Context, projectID, planID string, expected int, nodes []domain.WBSNodeInput, deps []domain.WBSDependencyInput) (WBS, error)
 	SchedulePlan(ctx context.Context, projectID, planID string) (ScheduleResult, error)
 
+	// Simulation transfer (FR-41.17, BR-41.14).
+	PreviewTransfer(ctx context.Context, projectID, simID string) (Transfer, error)
+	TransferSimulation(ctx context.Context, projectID, simID string, expected, workingVersion int, resolutions map[string]string) (Transfer, error)
+
 	// Change orders and claims (FR-41.18, BR-41.13). approvalRef, when not nil,
 	// records customer approval evidence with a submit or approve.
 	CreateChangeOrder(ctx context.Context, in domain.ChangeOrder, idempotencyKey string) (domain.ChangeOrder, bool, error)
@@ -92,16 +98,22 @@ type Store interface {
 	ListRisks(ctx context.Context, f RiskFilter) ([]domain.RiskIssue, error)
 	UpdateRisk(ctx context.Context, expected int, in domain.RiskIssue) (domain.RiskIssue, error)
 
+	// Forecast models and forecast vs actual (FR-41.20).
+	CreateForecastModel(ctx context.Context, projectID string, in ForecastInput, idempotencyKey string) (domain.ForecastModel, bool, error)
+	ListForecastModels(ctx context.Context, projectID string) ([]domain.ForecastModel, error)
+	GetForecast(ctx context.Context, projectID, modelID string) (ForecastComparison, error)
+	ReplaceForecast(ctx context.Context, projectID, modelID string, expected int, in ForecastInput) (domain.ForecastModel, error)
+
 	// Categories, transactions and invoice proposals (FR-41.4, FR-41.6). The
 	// transaction comes in priced (domain.PriceLine).
 	UpsertCategory(ctx context.Context, c domain.Category, expected int) (out domain.Category, created bool, err error)
 	ListCategories(ctx context.Context) ([]domain.Category, error)
 	CreateTransaction(ctx context.Context, in domain.Transaction, idempotencyKey string) (domain.Transaction, bool, error)
-	ListTransactions(ctx context.Context, projectID string) ([]domain.Transaction, error)
+	ListTransactions(ctx context.Context, projectID, afterID string, limit int) (TransactionPage, error)
 	GetTransactionBilling(ctx context.Context, id string) (TransactionBilling, error)
 	CreateProposal(ctx context.Context, in domain.ProposalRequest, idempotencyKey string) (domain.InvoiceProposal, bool, error)
 	GetProposal(ctx context.Context, id string) (domain.InvoiceProposal, error)
-	ListProposals(ctx context.Context, f ProposalFilter) ([]domain.InvoiceProposal, error)
+	ListProposals(ctx context.Context, f ProposalFilter) (ProposalPage, error)
 	DecideProposal(ctx context.Context, id string, expected int, to domain.ProposalStatus) (domain.InvoiceProposal, error)
 	RemoveProposalLine(ctx context.Context, id string, expected int, txnID string) (domain.InvoiceProposal, error)
 

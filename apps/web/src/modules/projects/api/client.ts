@@ -193,6 +193,11 @@ export interface Items<T> {
   items: T[];
 }
 
+/** One page of a keyset-paged list; nextCursor is present when more rows follow. */
+export interface Page<T> extends Items<T> {
+  nextCursor?: string;
+}
+
 /** Sends the version as If-Match when replacing; without it the row is created (201). */
 function versionHeader(version?: number): Record<string, string> {
   return version ? { "If-Match": `"${version}"` } : {};
@@ -232,6 +237,8 @@ export interface PlanVersion {
   copiedFromVersionId?: string;
   /** Set on a BASELINE an applied change order replaced (BR-41.13). */
   supersededByVersionId?: string;
+  /** Set on a SIMULATION transferred into the working plan (BR-41.14); it is locked from then on. */
+  transferredAt?: string;
   locked: boolean;
   version: number;
   createdAt: string;
@@ -323,6 +330,131 @@ export function replaceWbs(projectId: string, planId: string, body: { nodes: Wbs
 
 export function schedulePlan(projectId: string, planId: string): Promise<ScheduleView> {
   return call<ScheduleView>(`${plansPath(projectId)}/${encodeURIComponent(planId)}/schedule`, { method: "POST" });
+}
+
+// ---- Simulation transfer (FR-41.17, BR-41.14) ----
+
+export const RESOLUTIONS = ["KEEP_WORKING", "TAKE_SIMULATION"] as const;
+export type Resolution = (typeof RESOLUTIONS)[number];
+
+/** What the simulation's side does to a node of the working plan. */
+export type NodeChangeKind = "ADDED" | "CHANGED" | "REMOVED";
+
+export interface NodeChange {
+  wbsCode: string;
+  change: NodeChangeKind;
+  working?: WbsNodeInput;
+  simulation?: WbsNodeInput;
+  resolution?: Resolution;
+}
+
+export interface TransferView {
+  simulation: PlanVersion;
+  working: PlanVersion;
+  /** Nodes changed only in the simulation (and conflicts resolved TAKE_SIMULATION). */
+  applied: NodeChange[];
+  /** Nodes changed differently in both since the copy (PROJ-SIM-001 until resolved). */
+  conflicts: NodeChange[];
+}
+
+/** The three-way diff of a simulation against the working plan; changes nothing. */
+export function previewTransfer(projectId: string, planId: string, signal?: AbortSignal): Promise<TransferView> {
+  return call<TransferView>(`${plansPath(projectId)}/${encodeURIComponent(planId)}/transfer`, {}, signal);
+}
+
+/**
+ * Transfers the simulation into the working plan with one resolution per conflict. The simulation version the
+ * user saw goes as If-Match and the working version the diff was read at in the body (412 conflict_version when either moved).
+ */
+export function transferSimulation(
+  projectId: string,
+  planId: string,
+  body: { resolutions: Record<string, Resolution>; workingVersion: number },
+  version: number,
+): Promise<TransferView> {
+  return call<TransferView>(`${plansPath(projectId)}/${encodeURIComponent(planId)}/transfer`, {
+    method: "POST",
+    headers: { "If-Match": `"${version}"` },
+    body: JSON.stringify(body),
+  });
+}
+
+// ---- Forecast models (FR-41.20) ----
+
+export interface ForecastLine {
+  lineNo?: number;
+  /** Calendar month YYYY-MM. */
+  period: string;
+  wbsCode?: string;
+  txnType: TxnType;
+  quantity: string;
+  costAmount: string;
+  salesAmount: string;
+}
+
+export interface ForecastModel {
+  id: string;
+  projectId: string;
+  name: string;
+  currency: string;
+  version: number;
+  lineCount: number;
+  totalCost: string;
+  totalSales: string;
+  /** Present on create, replace and read of one model; absent in the list. */
+  lines?: ForecastLine[];
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Forecast vs actual for one period and transaction type; variances are actual minus forecast. */
+export interface ForecastRow {
+  period: string;
+  txnType: TxnType;
+  forecastQuantity: string;
+  forecastCost: string;
+  forecastSales: string;
+  actualQuantity: string;
+  actualCost: string;
+  actualSales: string;
+  quantityVariance: string;
+  costVariance: string;
+  salesVariance: string;
+}
+
+export interface ForecastView {
+  model: ForecastModel & { lines: ForecastLine[] };
+  comparison: ForecastRow[];
+}
+
+export interface ForecastInput {
+  name: string;
+  lines: ForecastLine[];
+}
+
+const forecastsPath = (projectId: string) => `/${encodeURIComponent(projectId)}/forecasts`;
+
+export function listForecasts(projectId: string, signal?: AbortSignal): Promise<Items<ForecastModel>> {
+  return call<Items<ForecastModel>>(forecastsPath(projectId), {}, signal);
+}
+
+/** Creates a forecast model; reuse the key when retrying the same request. */
+export function createForecast(projectId: string, input: ForecastInput, idempotencyKey: string): Promise<ForecastModel> {
+  return call<ForecastModel>(forecastsPath(projectId), { method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify(input) });
+}
+
+export function getForecast(projectId: string, modelId: string, signal?: AbortSignal): Promise<ForecastView> {
+  return call<ForecastView>(`${forecastsPath(projectId)}/${encodeURIComponent(modelId)}`, {}, signal);
+}
+
+/** Renames the model and replaces all its lines; the version the user saw goes as If-Match. */
+export function replaceForecast(projectId: string, modelId: string, input: ForecastInput, version: number): Promise<ForecastModel> {
+  return call<ForecastModel>(`${forecastsPath(projectId)}/${encodeURIComponent(modelId)}`, {
+    method: "PUT",
+    headers: { "If-Match": `"${version}"` },
+    body: JSON.stringify(input),
+  });
 }
 
 // ---- Change orders and claims (FR-41.18, BR-41.13) ----
@@ -646,8 +778,10 @@ export function putCategory(id: string, input: { name: string; txnType: TxnType 
   return call<Category>(`/categories/${encodeURIComponent(id)}`, { method: "PUT", headers: versionHeader(version), body: JSON.stringify(input) });
 }
 
-export function listTransactions(projectId: string, signal?: AbortSignal): Promise<Items<Transaction>> {
-  return call<Items<Transaction>>(`/${encodeURIComponent(projectId)}/transactions`, {}, signal);
+/** One page of a project's transactions, newest first; pass the previous page's nextCursor for the next one. */
+export function listTransactions(projectId: string, cursor?: string, signal?: AbortSignal): Promise<Page<Transaction>> {
+  const q = cursor ? `?${new URLSearchParams({ cursor }).toString()}` : "";
+  return call<Page<Transaction>>(`/${encodeURIComponent(projectId)}/transactions${q}`, {}, signal);
 }
 
 export function createTransaction(input: NewTransaction, idempotencyKey: string): Promise<Transaction> {
@@ -659,10 +793,12 @@ export function getBillingStatus(txnId: string, window: { from: string; to: stri
   return call<BillingStatus>(`/transactions/${encodeURIComponent(txnId)}/billing?${q.toString()}`, {}, signal);
 }
 
-export function listProposals(projectId: string, status: ProposalStatus | "" = "", signal?: AbortSignal): Promise<Items<InvoiceProposal>> {
+/** One page of a project's proposals, newest first; pass the previous page's nextCursor for the next one. */
+export function listProposals(projectId: string, status: ProposalStatus | "" = "", signal?: AbortSignal, cursor?: string): Promise<Page<InvoiceProposal>> {
   const q = new URLSearchParams({ projectId });
   if (status) q.set("status", status);
-  return call<Items<InvoiceProposal>>(`/invoice-proposals?${q.toString()}`, {}, signal);
+  if (cursor) q.set("cursor", cursor);
+  return call<Page<InvoiceProposal>>(`/invoice-proposals?${q.toString()}`, {}, signal);
 }
 
 export function getProposal(id: string, signal?: AbortSignal): Promise<InvoiceProposal> {

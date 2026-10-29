@@ -341,6 +341,9 @@ export function ProjectDetailPage() {
             <Link className={buttonClassName("secondary")} to={`/projects/${encodeURIComponent(current.id)}/risks`}>
               Risks and issues
             </Link>
+            <Link className={buttonClassName("secondary")} to={`/projects/${encodeURIComponent(current.id)}/forecasts`}>
+              Forecasts
+            </Link>
             <Link className={buttonClassName("secondary")} to={`/projects/${encodeURIComponent(current.id)}/transactions`}>
               Transactions
             </Link>

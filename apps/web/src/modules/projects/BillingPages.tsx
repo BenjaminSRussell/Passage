@@ -47,7 +47,7 @@ import {
 } from "./api/client";
 import { billingReasonLabel, dash, linePropertyLabel, proposalStatusLabel, proposalStatusTone, txnTypeLabel } from "./labels";
 import styles from "./pages.module.css";
-import { useLoad } from "./useLoad";
+import { useLoad, useMore, type MoreState } from "./useLoad";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -93,6 +93,26 @@ function LoadFailure({ what, problem, retry }: { what: string; problem: Problem;
     >
       {problem.message} ({problem.code})
     </Alert>
+  );
+}
+
+/** The "Load more" button under a paged table, with the failure of the last page fetch. */
+function LoadMore<T>({ what, more }: { what: string; more: MoreState<T> }) {
+  return (
+    <>
+      {more.error ? (
+        <Alert tone="danger" title={`Could not load more ${what}`} live="alert">
+          {more.error.message} ({more.error.code})
+        </Alert>
+      ) : null}
+      {more.hasMore ? (
+        <div className={styles.more}>
+          <Button onClick={() => void more.loadMore()} loading={more.loading}>
+            Load more {what}
+          </Button>
+        </div>
+      ) : null}
+    </>
   );
 }
 
@@ -338,7 +358,8 @@ function monthWindow(): { from: string; to: string } {
 export function TransactionsPage() {
   const { id = "" } = useParams();
   const project = useLoad((signal) => getProject(id, signal), id);
-  const txns = useLoad((signal) => listTransactions(id, signal), id);
+  const txns = useLoad((signal) => listTransactions(id, undefined, signal), id);
+  const txnRows = useMore(txns.data, (cursor) => listTransactions(id, cursor));
   const categories = useLoad((signal) => listCategories(signal), "categories");
   const [values, setValues] = useState<TransactionValues>(blankTransaction);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -466,12 +487,13 @@ export function TransactionsPage() {
         <DataTable
           label="Transactions"
           columns={columns}
-          rows={txns.data?.items ?? []}
+          rows={txnRows.rows}
           getRowKey={(t) => t.id}
           loading={txns.loading}
           empty={{ title: "No transactions yet", description: "Record hours, expenses or fees against the project below." }}
         />
       )}
+      {!txns.error ? <LoadMore what="transactions" more={txnRows} /> : null}
       <Card title="Record a transaction">
         {project.data && project.data.stage !== "IN_PROCESS" ? (
           <p className={styles.note}>Transactions need a project in process; this project is {project.data.stage.toLowerCase().replace("_", " ")}.</p>
@@ -588,6 +610,7 @@ export function ProposalsPage() {
   const navigate = useNavigate();
   const [status, setStatus] = useState<ProposalStatus | "">("");
   const state = useLoad((signal) => listProposals(id, status, signal), `${id}|${status}`);
+  const proposalRows = useMore(state.data, (cursor) => listProposals(id, status, undefined, cursor));
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [txnType, setTxnType] = useState<TxnType | "">("");
@@ -679,7 +702,7 @@ export function ProposalsPage() {
         <DataTable
           label="Invoice proposals"
           columns={columns}
-          rows={state.data?.items ?? []}
+          rows={proposalRows.rows}
           getRowKey={(p) => p.id}
           loading={state.loading}
           empty={
@@ -689,6 +712,7 @@ export function ProposalsPage() {
           }
         />
       )}
+      {!state.error ? <LoadMore what="proposals" more={proposalRows} /> : null}
       <Card title="Build a proposal">
         <form className={styles.form} onSubmit={build} noValidate aria-label="Build invoice proposal">
           <FormField id="prop-from" label="From" error={errors.from}>

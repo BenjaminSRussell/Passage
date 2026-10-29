@@ -125,11 +125,11 @@ func TestTransactions_RulesKeysAndScope(t *testing.T) {
 		t.Fatalf("key reuse: %v", err)
 	}
 
-	list, err := s.ListTransactions(ctx, "ES-TXN")
-	if err != nil || len(list) != 1 || list[0].ID != first.ID {
+	list, err := s.ListTransactions(ctx, "ES-TXN", "", 0)
+	if err != nil || len(list.Items) != 1 || list.Items[0].ID != first.ID || list.NextID != "" {
 		t.Fatalf("list: %+v %v", list, err)
 	}
-	if _, err := s.ListTransactions(tenantCtx(2), "ES-TXN"); problemCode(err) != CodeNotFound {
+	if _, err := s.ListTransactions(tenantCtx(2), "ES-TXN", "", 0); problemCode(err) != CodeNotFound {
 		t.Fatalf("tenant two lists tenant one's project: %v", err)
 	}
 	if _, err := s.GetTransactionBilling(tenantCtx(2), first.ID); problemCode(err) != CodeNotFound {
@@ -215,7 +215,7 @@ func TestProposals_BuildRemoveCancelAndFinishGate(t *testing.T) {
 		t.Fatalf("remove from a canceled proposal: %v", err)
 	}
 	list, err := s.ListProposals(ctx, ProposalFilter{ProjectID: "ES-BILL", Status: domain.ProposalDraft})
-	if err != nil || len(list) != 1 || list[0].ID != again.ID || len(list[0].Lines) != 0 || list[0].LineCount != 1 {
+	if err != nil || len(list.Items) != 1 || list.Items[0].ID != again.ID || len(list.Items[0].Lines) != 0 || list.Items[0].LineCount != 1 {
 		t.Fatalf("list drafts: %+v %v", list, err)
 	}
 	if _, err := s.DecideProposal(ctx, again.ID, 1, domain.ProposalCanceled); err != nil {

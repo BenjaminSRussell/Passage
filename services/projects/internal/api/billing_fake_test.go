@@ -89,11 +89,11 @@ func (f *fakeStore) CreateTransaction(ctx context.Context, in domain.Transaction
 	return in, true, nil
 }
 
-func (f *fakeStore) ListTransactions(_ context.Context, projectID string) ([]domain.Transaction, error) {
+func (f *fakeStore) ListTransactions(_ context.Context, projectID, afterID string, limit int) (store.TransactionPage, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if _, ok := f.projects[projectID]; !ok {
-		return nil, notFoundProblem("project")
+		return store.TransactionPage{}, notFoundProblem("project")
 	}
 	out := []domain.Transaction{}
 	for _, t := range f.txns {
@@ -105,9 +105,35 @@ func (f *fakeStore) ListTransactions(_ context.Context, projectID string) ([]dom
 		if out[i].TxnDate != out[j].TxnDate {
 			return out[i].TxnDate > out[j].TxnDate
 		}
-		return out[i].CreatedAt.After(out[j].CreatedAt)
+		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].CreatedAt.After(out[j].CreatedAt)
+		}
+		return out[i].ID > out[j].ID
 	})
-	return out, nil
+	items, next := fakePage(out, afterID, limit, func(t domain.Transaction) string { return t.ID })
+	return store.TransactionPage{Items: items, NextID: next}, nil
+}
+
+// fakePage cuts one keyset page out of a sorted list, as the store does.
+func fakePage[T any](all []T, afterID string, limit int, id func(T) string) ([]T, string) {
+	if limit < 1 || limit > store.MaxPageSize {
+		limit = store.MaxPageSize
+	}
+	start := 0
+	if afterID != "" {
+		start = len(all)
+		for i, v := range all {
+			if id(v) == afterID {
+				start = i + 1
+				break
+			}
+		}
+	}
+	rest := all[start:]
+	if len(rest) > limit {
+		return rest[:limit], id(rest[limit-1])
+	}
+	return rest, ""
 }
 
 // candidate is the selection view of a transaction (lock held), with the
@@ -225,11 +251,11 @@ func (f *fakeStore) GetProposal(_ context.Context, id string) (domain.InvoicePro
 	return f.withLines(pr, true), nil
 }
 
-func (f *fakeStore) ListProposals(_ context.Context, flt store.ProposalFilter) ([]domain.InvoiceProposal, error) {
+func (f *fakeStore) ListProposals(_ context.Context, flt store.ProposalFilter) (store.ProposalPage, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if _, ok := f.projects[flt.ProjectID]; !ok {
-		return nil, notFoundProblem("project")
+		return store.ProposalPage{}, notFoundProblem("project")
 	}
 	out := []domain.InvoiceProposal{}
 	for _, pr := range f.props {
@@ -237,8 +263,14 @@ func (f *fakeStore) ListProposals(_ context.Context, flt store.ProposalFilter) (
 			out = append(out, f.withLines(pr, false))
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
-	return out, nil
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].CreatedAt.After(out[j].CreatedAt)
+		}
+		return out[i].ID > out[j].ID
+	})
+	items, next := fakePage(out, flt.AfterID, flt.Limit, func(p domain.InvoiceProposal) string { return p.ID })
+	return store.ProposalPage{Items: items, NextID: next}, nil
 }
 
 // lockedProposal checks the If-Match version (lock held).

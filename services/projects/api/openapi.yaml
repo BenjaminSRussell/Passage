@@ -506,6 +506,90 @@ paths:
           $ref: '#/components/responses/Problem'
         '422':
           $ref: '#/components/responses/Problem'
+  /v1/projects/{id}/plans/{ver}/transfer:
+    get:
+      operationId: previewSimulationTransfer
+      summary: >-
+        Three-way diff of a SIMULATION against the WORKING plan (BR-41.14): the nodes a transfer
+        would apply and the nodes changed on both sides since the copy (conflicts). Changes nothing.
+      description: |
+        The common ancestor is the version the simulation was copied from, as recorded at copy
+        time. A node changed only in the simulation is applied; a node changed only in WORKING,
+        or changed alike on both sides, is kept; a node changed differently on both sides is a
+        conflict. A node's content is its fields and its incoming dependencies (scheduled dates
+        are not content). Not a SIMULATION, a simulation copied before ancestors were recorded,
+        or a project without a WORKING plan is PROJ-PLAN-001; a transferred simulation is
+        PROJ-PLAN-002.
+      x-passage-duty: ProjInquire
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/PlanVersionId'
+      responses:
+        '200':
+          description: The diff. The ETag is the simulation's version, to send as If-Match on the transfer.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferView'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: transferSimulation
+      summary: >-
+        Transfer a SIMULATION into WORKING (FR-41.17, BR-41.14). Every conflict needs a resolution
+        (KEEP_WORKING or TAKE_SIMULATION); unresolved conflicts, or a merge that is not a valid WBS,
+        are 422 PROJ-SIM-001 and nothing changes. The WORKING plan's WBS is replaced by the merge
+        (scheduled dates are cleared) and its version bumped; the simulation is locked.
+      description: |
+        If-Match carries the simulation's version (412 when stale). `workingVersion`, when given,
+        is the WORKING version the diff was read at (412 when WORKING changed since). A replay
+        finds the simulation locked (PROJ-PLAN-002), so the transfer is idempotent by state and
+        takes no Idempotency-Key (see NOT-IMPLEMENTED.md). A merged dependency cycle is
+        PROJ-WBS-001. No event is published.
+      x-passage-duty: ProjPlan
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/PlanVersionId'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferRequest'
+      responses:
+        '200':
+          description: Transferred. The ETag is the WORKING plan's new version.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferView'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '428':
+          $ref: '#/components/responses/Problem'
   /v1/projects/change-orders:
     post:
       operationId: createChangeOrder
@@ -912,6 +996,146 @@ paths:
           $ref: '#/components/responses/Problem'
         '428':
           $ref: '#/components/responses/Problem'
+  /v1/projects/{id}/forecasts:
+    get:
+      operationId: listForecastModels
+      summary: Forecast models of a project by name, with line counts and totals, without lines (FR-41.20)
+      x-passage-duty: ProjInquire
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Forecast models
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ForecastModel'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: createForecastModel
+      summary: >-
+        Create a forecast model with its lines (FR-41.20). Lines are validated against the project
+        currency (amounts rounded half-even to the minor unit) and the WORKING plan's WBS codes (400);
+        a second model with the same name is 422 PROJ-FC-001.
+      x-passage-duty: ProjPlan
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForecastRequest'
+      responses:
+        '201':
+          description: Created
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForecastModel'
+        '200':
+          description: Idempotent replay
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Idempotent-Replayed:
+              schema:
+                type: string
+                enum: ['true']
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForecastModel'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+  /v1/projects/{id}/forecasts/{modelId}:
+    get:
+      operationId: getForecastVsActual
+      summary: >-
+        A forecast model with its lines and forecast vs actual by period and transaction type
+        (§8.41.5). Actuals are the project's recorded transactions summed by calendar month;
+        variances are actual minus forecast.
+      x-passage-duty: ProjInquire
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/ForecastModelId'
+      responses:
+        '200':
+          description: The model and the comparison
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForecastView'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+    put:
+      operationId: replaceForecastModel
+      summary: Rename a forecast model and replace all of its lines (If-Match on the model version)
+      x-passage-duty: ProjPlan
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/ForecastModelId'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForecastRequest'
+      responses:
+        '200':
+          description: Replaced; the model version is bumped
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForecastModel'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '428':
+          $ref: '#/components/responses/Problem'
   /v1/projects/categories:
     get:
       operationId: listCategories
@@ -1075,10 +1299,22 @@ paths:
   /v1/projects/{id}/transactions:
     get:
       operationId: listTransactions
-      summary: Transactions of a project, newest date first (at most 500)
+      summary: One page of a project's transactions, newest date first (keyset cursor)
       x-passage-duty: ProjInquire
       parameters:
         - $ref: '#/components/parameters/ProjectId'
+        - name: limit
+          in: query
+          description: Page size, 1 to 100 (default 100).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: cursor
+          in: query
+          description: The nextCursor of the previous page.
+          schema:
+            type: string
       responses:
         '200':
           description: Transactions
@@ -1092,6 +1328,11 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/Transaction'
+                  nextCursor:
+                    type: string
+                    description: Present when more transactions follow.
+        '400':
+          $ref: '#/components/responses/Problem'
         '401':
           $ref: '#/components/responses/Problem'
         '403':
@@ -1154,7 +1395,7 @@ paths:
           $ref: '#/components/responses/Problem'
     get:
       operationId: listInvoiceProposals
-      summary: Invoice proposals of a project, newest first, without lines
+      summary: One page of the invoice proposals of a project, newest first, without lines (keyset cursor)
       x-passage-duty: ProjInquire
       parameters:
         - name: projectId
@@ -1167,6 +1408,18 @@ paths:
           in: query
           schema:
             $ref: '#/components/schemas/ProposalStatus'
+        - name: limit
+          in: query
+          description: Page size, 1 to 100 (default 100).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: cursor
+          in: query
+          description: The nextCursor of the previous page.
+          schema:
+            type: string
       responses:
         '200':
           description: Proposals
@@ -1180,6 +1433,9 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/InvoiceProposal'
+                  nextCursor:
+                    type: string
+                    description: Present when more proposals follow.
         '400':
           $ref: '#/components/responses/Problem'
         '401':
@@ -1329,6 +1585,14 @@ components:
       schema:
         type: string
         format: uuid
+    ForecastModelId:
+      name: modelId
+      in: path
+      required: true
+      description: Forecast model id (UUID).
+      schema:
+        type: string
+        format: uuid
     PlanVersionId:
       name: ver
       in: path
@@ -1367,7 +1631,7 @@ components:
         maxLength: 20
   headers:
     ETag:
-      description: Row version (project, group, posting profile, plan version, change order, risk, category or invoice proposal), quoted.
+      description: Row version (project, group, posting profile, plan version, change order, risk, forecast model, category or invoice proposal), quoted.
       schema:
         type: string
   responses:
@@ -1627,9 +1891,13 @@ components:
           type: string
           format: uuid
           description: Set on a BASELINE replaced by the BASELINE an applied change order created (BR-41.13). One BASELINE per project has none.
+        transferredAt:
+          type: string
+          format: date-time
+          description: Set on a SIMULATION transferred into WORKING (BR-41.14).
         locked:
           type: boolean
-          description: True for a BASELINE; a locked plan's WBS cannot be replaced or rescheduled.
+          description: True for a BASELINE and a transferred SIMULATION; a locked plan's WBS cannot be replaced, rescheduled or transferred.
         version:
           type: integer
           minimum: 1
@@ -1650,7 +1918,10 @@ components:
         copyFromVersionId:
           type: string
           format: uuid
-          description: Plan version of the same project whose WBS is copied. Required for BASELINE (from WORKING) and SIMULATION.
+          description: >-
+            Plan version of the same project whose WBS is copied. Required for BASELINE (from WORKING) and
+            SIMULATION (from WORKING or BASELINE; at most 20 per project, PROJ-PLAN-001). A SIMULATION
+            records its source's nodes as the common ancestor of a later transfer.
     WbsNodeRequest:
       type: object
       additionalProperties: false
@@ -2343,6 +2614,171 @@ components:
         updatedAt:
           type: string
           format: date-time
+    NodeChange:
+      type: object
+      required: [wbsCode, change]
+      properties:
+        wbsCode:
+          type: string
+        change:
+          type: string
+          enum: [ADDED, CHANGED, REMOVED]
+          description: What the simulation's side does to WORKING.
+        working:
+          $ref: '#/components/schemas/WbsNodeRequest'
+        simulation:
+          $ref: '#/components/schemas/WbsNodeRequest'
+        resolution:
+          type: string
+          enum: [KEEP_WORKING, TAKE_SIMULATION]
+          description: Set on a conflict the request resolved.
+    TransferRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        resolutions:
+          type: object
+          description: WBS code of each conflict → KEEP_WORKING or TAKE_SIMULATION. Codes that are not conflicts are ignored.
+          additionalProperties:
+            type: string
+            enum: [KEEP_WORKING, TAKE_SIMULATION]
+        workingVersion:
+          type: integer
+          minimum: 1
+          description: The WORKING plan version the diff was read at; 412 when WORKING changed since.
+    TransferView:
+      type: object
+      required: [simulation, working, applied, conflicts]
+      properties:
+        simulation:
+          $ref: '#/components/schemas/PlanVersion'
+        working:
+          $ref: '#/components/schemas/PlanVersion'
+        applied:
+          type: array
+          description: Nodes changed only in the simulation, and conflicts resolved TAKE_SIMULATION.
+          items:
+            $ref: '#/components/schemas/NodeChange'
+        conflicts:
+          type: array
+          description: Nodes changed differently in both since the copy (PROJ-SIM-001 until resolved).
+          items:
+            $ref: '#/components/schemas/NodeChange'
+    ForecastLine:
+      type: object
+      additionalProperties: false
+      required: [period, txnType, quantity, costAmount, salesAmount]
+      properties:
+        lineNo:
+          type: integer
+          minimum: 1
+          description: Assigned in request order; ignored on input.
+        period:
+          type: string
+          pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$'
+          description: Calendar month YYYY-MM (fiscal periods are wave 14).
+        wbsCode:
+          type: string
+          description: A node of the project's WORKING plan, by WBS code.
+        txnType:
+          $ref: '#/components/schemas/TxnType'
+        quantity:
+          type: string
+          description: Non-negative decimal, at most 3 fraction digits.
+        costAmount:
+          type: string
+          description: Non-negative decimal in the project currency, rounded half-even to its minor unit.
+        salesAmount:
+          type: string
+          description: Decimal in the project currency; negative only on ON_ACCOUNT.
+    ForecastRequest:
+      type: object
+      additionalProperties: false
+      required: [name, lines]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        lines:
+          type: array
+          maxItems: 2000
+          description: Unique per (period, txnType, wbsCode).
+          items:
+            $ref: '#/components/schemas/ForecastLine'
+    ForecastModel:
+      type: object
+      required: [id, projectId, name, currency, version, lineCount, totalCost, totalSales, createdBy, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+        name:
+          type: string
+        currency:
+          type: string
+        version:
+          type: integer
+          minimum: 1
+        lineCount:
+          type: integer
+        totalCost:
+          type: string
+        totalSales:
+          type: string
+        lines:
+          type: array
+          description: Present on create, replace and read of one model.
+          items:
+            $ref: '#/components/schemas/ForecastLine'
+        createdBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    ForecastRow:
+      type: object
+      required: [period, txnType, forecastQuantity, forecastCost, forecastSales, actualQuantity, actualCost, actualSales, quantityVariance, costVariance, salesVariance]
+      properties:
+        period:
+          type: string
+        txnType:
+          $ref: '#/components/schemas/TxnType'
+        forecastQuantity:
+          type: string
+        forecastCost:
+          type: string
+        forecastSales:
+          type: string
+        actualQuantity:
+          type: string
+        actualCost:
+          type: string
+        actualSales:
+          type: string
+        quantityVariance:
+          type: string
+        costVariance:
+          type: string
+          description: Actual minus forecast; positive is overspend.
+        salesVariance:
+          type: string
+    ForecastView:
+      type: object
+      required: [model, comparison]
+      properties:
+        model:
+          $ref: '#/components/schemas/ForecastModel'
+        comparison:
+          type: array
+          description: One row per (period, txnType) on either side, by period then type.
+          items:
+            $ref: '#/components/schemas/ForecastRow'
     Problem:
       type: object
       description: RFC 9457 with Passage extensions (code, traceId, errors).

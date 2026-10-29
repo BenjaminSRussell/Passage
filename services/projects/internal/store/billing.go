@@ -15,10 +15,6 @@ import (
 	"github.com/BenjaminSRussell/passage/services/projects/internal/domain"
 )
 
-// BillingListLimit caps the transaction list of one project until cursor
-// pagination lands (NOT-IMPLEMENTED.md "Transaction list pagination").
-const BillingListLimit = 500
-
 // Default names of the UNIQUE (tenant_id, idempotency_key) constraints.
 const (
 	txnKeyConstraint      = "project_transaction_tenant_id_idempotency_key_key"
@@ -26,9 +22,33 @@ const (
 )
 
 // ProposalFilter narrows the proposals of one project. ProjectID is required.
+// AfterID and Limit page the list (keyset; AfterID is the last id of the
+// previous page, Limit at most MaxPageSize).
 type ProposalFilter struct {
 	ProjectID string
 	Status    domain.ProposalStatus
+	AfterID   string
+	Limit     int
+}
+
+// TransactionPage is one page of a project's transactions; NextID is set when more remain.
+type TransactionPage struct {
+	Items  []domain.Transaction
+	NextID string
+}
+
+// ProposalPage is one page of a project's proposals; NextID is set when more remain.
+type ProposalPage struct {
+	Items  []domain.InvoiceProposal
+	NextID string
+}
+
+// pageLimit bounds a requested page size to 1..MaxPageSize.
+func pageLimit(n int) int {
+	if n < 1 || n > MaxPageSize {
+		return MaxPageSize
+	}
+	return n
 }
 
 // TransactionBilling is a transaction with the candidate view the BR-41.3
@@ -227,25 +247,39 @@ func (s *Postgres) CreateTransaction(ctx context.Context, in domain.Transaction,
 	return out, created, err
 }
 
-// ListTransactions returns up to BillingListLimit transactions of one project,
-// newest date first. A project that is not visible is 404.
-func (s *Postgres) ListTransactions(ctx context.Context, projectID string) ([]domain.Transaction, error) {
+// ListTransactions returns one page of a project's transactions, newest date
+// first (then newest entry, then id), after the transaction afterID when it is
+// not empty (keyset on (txn_date, created_at, id), D3e). A project that is not
+// visible is 404; a cursor that is not a transaction of the project gives an
+// empty page.
+func (s *Postgres) ListTransactions(ctx context.Context, projectID, afterID string, limit int) (TransactionPage, error) {
 	p, _ := tenant.FromContext(ctx)
-	items := []domain.Transaction{}
+	limit = pageLimit(limit)
+	page := TransactionPage{Items: []domain.Transaction{}}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := lockProject(ctx, tx, p.TenantID, projectID, false); err != nil {
 			return err
 		}
 		rows, err := tx.Query(ctx, `select `+txnColumns+` from project_transaction t
-			where t.tenant_id = $1 and t.project_id = $2 order by t.txn_date desc, t.created_at desc, t.id limit $3`,
-			p.TenantID, projectID, BillingListLimit)
+			where t.tenant_id = $1 and t.project_id = $2
+			and ($3::text = '' or (t.txn_date, t.created_at, t.id) < (select c.txn_date, c.created_at, c.id from project_transaction c
+				where c.tenant_id = $1 and c.project_id = $2 and c.id = nullif($3, '')::uuid))
+			order by t.txn_date desc, t.created_at desc, t.id desc limit $4`,
+			p.TenantID, projectID, afterID, limit+1)
 		if err != nil {
 			return err
 		}
-		items, err = pgx.CollectRows(rows, func(r pgx.CollectableRow) (domain.Transaction, error) { return scanTxn(r) })
-		return err
+		page.Items, err = pgx.CollectRows(rows, func(r pgx.CollectableRow) (domain.Transaction, error) { return scanTxn(r) })
+		if err != nil {
+			return err
+		}
+		if len(page.Items) > limit {
+			page.Items = page.Items[:limit]
+			page.NextID = page.Items[limit-1].ID
+		}
+		return nil
 	})
-	return items, err
+	return page, err
 }
 
 // GetTransactionBilling returns a transaction and its candidate view (with its
@@ -573,25 +607,36 @@ func (s *Postgres) GetProposal(ctx context.Context, id string) (domain.InvoicePr
 	return out, err
 }
 
-// ListProposals returns the proposals of one project, newest first, with their
-// totals and line counts but without lines. A project that is not visible is 404.
-func (s *Postgres) ListProposals(ctx context.Context, f ProposalFilter) ([]domain.InvoiceProposal, error) {
+// ListProposals returns one page of a project's proposals, newest first, with
+// their totals and line counts but without lines (keyset on (created_at, id)
+// after f.AfterID, D3e). A project that is not visible is 404.
+func (s *Postgres) ListProposals(ctx context.Context, f ProposalFilter) (ProposalPage, error) {
 	p, _ := tenant.FromContext(ctx)
-	items := []domain.InvoiceProposal{}
+	limit := pageLimit(f.Limit)
+	page := ProposalPage{Items: []domain.InvoiceProposal{}}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := lockProject(ctx, tx, p.TenantID, f.ProjectID, false); err != nil {
 			return err
 		}
 		rows, err := tx.Query(ctx, `select `+proposalColumns+` from project_invoice_proposal pr
 			where pr.tenant_id = $1 and pr.project_id = $2 and ($3::text = '' or pr.status = $3)
-			order by pr.created_at desc, pr.id`, p.TenantID, f.ProjectID, string(f.Status))
+			and ($4::text = '' or (pr.created_at, pr.id) < (select c.created_at, c.id from project_invoice_proposal c
+				where c.tenant_id = $1 and c.project_id = $2 and c.id = nullif($4, '')::uuid))
+			order by pr.created_at desc, pr.id desc limit $5`, p.TenantID, f.ProjectID, string(f.Status), f.AfterID, limit+1)
 		if err != nil {
 			return err
 		}
-		items, err = pgx.CollectRows(rows, func(r pgx.CollectableRow) (domain.InvoiceProposal, error) { return scanProposal(r) })
-		return err
+		page.Items, err = pgx.CollectRows(rows, func(r pgx.CollectableRow) (domain.InvoiceProposal, error) { return scanProposal(r) })
+		if err != nil {
+			return err
+		}
+		if len(page.Items) > limit {
+			page.Items = page.Items[:limit]
+			page.NextID = page.Items[limit-1].ID
+		}
+		return nil
 	})
-	return items, err
+	return page, err
 }
 
 // lockProposalAt locks a proposal and checks the caller's If-Match version.
