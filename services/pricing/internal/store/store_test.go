@@ -48,7 +48,13 @@ func principal(n int, legalEntityID string) context.Context {
 // non-superuser application role, so row-level security is really enforced.
 func appPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	admin, app := testkit.DBWithApp(t)
+	_, app := adminAndAppPools(t)
+	return app
+}
+
+func adminAndAppPools(t *testing.T) (admin, app *pgxpool.Pool) {
+	t.Helper()
+	admin, app = testkit.DBWithApp(t)
 	ctx := context.Background()
 	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
 		t.Fatal(err)
@@ -65,7 +71,7 @@ func appPool(t *testing.T) *pgxpool.Pool {
 			t.Fatal(err)
 		}
 	}
-	return app
+	return admin, app
 }
 
 func problemCode(err error) string {
