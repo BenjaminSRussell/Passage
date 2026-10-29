@@ -32,6 +32,7 @@ import {
   SEVERITIES,
   UUID,
   type DQRule,
+  type DQRuleFilter,
   type DQRuleInput,
   type DQScore,
   type Problem,
@@ -93,11 +94,28 @@ const columns: DataTableColumn<Row>[] = [
  */
 export function DataQualityPage() {
   const navigate = useNavigate();
+  const [draft, setDraft] = useState<Required<DQRuleFilter>>({ asset: "", ruleType: "", owner: "" });
+  const [filter, setFilter] = useState<Required<DQRuleFilter>>(draft);
+  const [filterErrors, setFilterErrors] = useState<Partial<Record<keyof DQRuleFilter, string>>>({});
   const state = useLoad(async (signal) => {
-    const [rules, scores] = await Promise.all([listDQRules("", undefined, signal), listDQScores({ limit: 366 }, undefined, signal)]);
+    const [rules, scores] = await Promise.all([
+      listDQRules(filter, undefined, signal),
+      listDQScores({ asset: filter.asset, limit: 366 }, undefined, signal),
+    ]);
     const latest = latestByRule(scores);
     return rules.map((rule): Row => ({ rule, latest: latest.get(rule.ruleId) }));
-  }, "dq");
+  }, `dq/${filter.asset}/${filter.ruleType}/${filter.owner}`);
+  const filtered = filter.asset !== "" || filter.ruleType !== "" || filter.owner !== "";
+
+  function applyFilter(event: FormEvent) {
+    event.preventDefault();
+    const next = { asset: draft.asset.trim(), ruleType: draft.ruleType, owner: draft.owner.trim() };
+    const errors: Partial<Record<keyof DQRuleFilter, string>> = {};
+    if (next.asset !== "" && !ASSET_FQN.test(next.asset)) errors.asset = "Use a dotted lower-case asset such as core.vendor.";
+    if (next.owner !== "" && !UUID.test(next.owner)) errors.owner = "Use the owner's user id (a UUID).";
+    setFilterErrors(errors);
+    if (Object.keys(errors).length === 0) setFilter(next);
+  }
   const rows = state.data ?? [];
   const failing = rows.filter((r) => r.rule.status === "ACTIVE" && r.latest?.below).length;
   const escalated = rows.filter((r) => (r.latest?.belowStreak ?? 0) >= ESCALATE_AFTER).length;
@@ -113,6 +131,44 @@ export function DataQualityPage() {
           </Link>
         }
       />
+      <form className={styles.toolbar} onSubmit={applyFilter} noValidate aria-label="Scorecard filter">
+        <FormField id="dq-filter-asset" label="Asset" error={filterErrors.asset} optional>
+          {(control) => (
+            <Input
+              {...control}
+              className={styles.mono}
+              placeholder="core.vendor"
+              value={draft.asset}
+              invalid={Boolean(filterErrors.asset)}
+              onChange={(e) => setDraft((d) => ({ ...d, asset: e.target.value }))}
+            />
+          )}
+        </FormField>
+        <FormField id="dq-filter-type" label="Rule type">
+          {(control) => (
+            <Select {...control} value={draft.ruleType} onChange={(e) => setDraft((d) => ({ ...d, ruleType: e.target.value }))}>
+              <option value="">Any type</option>
+              {RULE_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {enumLabel(t)}
+                </option>
+              ))}
+            </Select>
+          )}
+        </FormField>
+        <FormField id="dq-filter-owner" label="Owner user id" error={filterErrors.owner} optional>
+          {(control) => (
+            <Input
+              {...control}
+              className={styles.mono}
+              value={draft.owner}
+              invalid={Boolean(filterErrors.owner)}
+              onChange={(e) => setDraft((d) => ({ ...d, owner: e.target.value }))}
+            />
+          )}
+        </FormField>
+        <Button type="submit">Show rules</Button>
+      </form>
       {state.error ? (
         <Alert tone="danger" title="Could not load data-quality rules" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
           {state.error.message} ({state.error.code})
@@ -133,7 +189,11 @@ export function DataQualityPage() {
             rows={rows}
             getRowKey={(r) => r.rule.ruleId}
             loading={state.loading}
-            empty={{ title: "No data-quality rules yet", description: "Add a rule to start scoring a catalog asset." }}
+            empty={
+              filtered
+                ? { title: "No rules match the filter", description: "Change the asset, rule type or owner, or clear them to see every rule." }
+                : { title: "No data-quality rules yet", description: "Add a rule to start scoring a catalog asset." }
+            }
             onRowOpen={(r) => navigate(`/analytics/data-quality/${encodeURIComponent(r.rule.ruleId)}`)}
           />
         </>

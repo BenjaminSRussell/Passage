@@ -19,6 +19,7 @@ import {
 } from "../../shell/ui";
 import {
   ARCHIVE_NAME,
+  ARCHIVE_PERIOD,
   ARCHIVE_STATUSES,
   describeProblem,
   getArchivePartition,
@@ -64,8 +65,11 @@ const columns: DataTableColumn<ArchivePartition>[] = [
 
 interface Filter {
   domain: string;
+  period: string;
   status: string;
 }
+
+type FilterErrors = Partial<Record<"domain" | "period", string>>;
 
 /**
  * Archive partition inquiry (FR-46.18, PRD §9.46.14): closed OLTP partitions
@@ -73,20 +77,21 @@ interface Filter {
  */
 export function ArchivePage() {
   const navigate = useNavigate();
-  const [draft, setDraft] = useState<Filter>({ domain: "", status: "" });
+  const [draft, setDraft] = useState<Filter>({ domain: "", period: "", status: "" });
   const [filter, setFilter] = useState<Filter>(draft);
-  const [error, setError] = useState<string | undefined>();
-  const state = useLoad((signal) => listArchivePartitions(filter, undefined, signal), `${filter.domain}/${filter.status}`);
+  const [errors, setErrors] = useState<FilterErrors>({});
+  const state = useLoad((signal) => listArchivePartitions(filter, undefined, signal), `${filter.domain}/${filter.period}/${filter.status}`);
 
   function submit(event: FormEvent) {
     event.preventDefault();
     const domain = draft.domain.trim();
-    if (domain !== "" && !ARCHIVE_NAME.test(domain)) {
-      setError("Use a domain name such as ledger or inventory.");
-      return;
-    }
-    setError(undefined);
-    setFilter({ domain, status: draft.status });
+    const period = draft.period.trim();
+    const next: FilterErrors = {};
+    if (domain !== "" && !ARCHIVE_NAME.test(domain)) next.domain = "Use a domain name such as ledger or inventory.";
+    if (period !== "" && !ARCHIVE_PERIOD.test(period)) next.period = "Use a month as YYYY-MM, for example 2024-01.";
+    setErrors(next);
+    if (Object.keys(next).length > 0) return;
+    setFilter({ domain, period, status: draft.status });
   }
 
   const rows = state.data ?? [];
@@ -99,9 +104,22 @@ export function ArchivePage() {
         description="Closed partitions older than their residence period move to the archive tier. A partition is dropped from the database only after its row count and content hash match the archive copy."
       />
       <form className={styles.toolbar} onSubmit={submit} noValidate aria-label="Archive filter">
-        <FormField id="archive-domain" label="Domain" hint="Leave empty for every domain." error={error} optional>
+        <FormField id="archive-domain" label="Domain" hint="Leave empty for every domain." error={errors.domain} optional>
           {(control) => (
-            <Input {...control} className={styles.mono} value={draft.domain} invalid={Boolean(error)} onChange={(e) => setDraft((d) => ({ ...d, domain: e.target.value }))} />
+            <Input {...control} className={styles.mono} value={draft.domain} invalid={Boolean(errors.domain)} onChange={(e) => setDraft((d) => ({ ...d, domain: e.target.value }))} />
+          )}
+        </FormField>
+        <FormField id="archive-period" label="Period" hint="Month as YYYY-MM." error={errors.period} optional>
+          {(control) => (
+            <Input
+              {...control}
+              className={styles.mono}
+              placeholder="2024-01"
+              inputMode="numeric"
+              value={draft.period}
+              invalid={Boolean(errors.period)}
+              onChange={(e) => setDraft((d) => ({ ...d, period: e.target.value }))}
+            />
           )}
         </FormField>
         <FormField id="archive-status" label="Status">

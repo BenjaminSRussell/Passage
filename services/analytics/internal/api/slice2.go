@@ -14,8 +14,10 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/analytics/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/analytics/internal/store"
 )
 
 // Duties for the slice-2 screens (§9.46.17).
@@ -115,13 +117,26 @@ type DQRuleRequest struct {
 	Muted        bool    `json:"muted,omitempty"`
 }
 
+// listDQRules is the scorecard rule list, filtered by asset, rule type and
+// owner (§9.46.14).
 func (a *API) listDQRules(w http.ResponseWriter, r *http.Request) {
-	asset := r.URL.Query().Get("asset")
-	if asset != "" && !domain.IsAssetFQN(asset) {
-		refuse(w, r, "asset must be a dotted lowercase asset name", map[string]string{"asset": "dotted lowercase asset name"})
+	q := r.URL.Query()
+	f := store.RuleFilter{Asset: q.Get("asset"), RuleType: q.Get("ruleType"), OwnerUserID: strings.ToLower(q.Get("owner"))}
+	fields := map[string]string{}
+	if f.Asset != "" && !domain.IsAssetFQN(f.Asset) {
+		fields["asset"] = "dotted lowercase asset name"
+	}
+	if f.RuleType != "" && !domain.IsRuleType(f.RuleType) {
+		fields["ruleType"] = "COMPLETENESS, VALIDITY, UNIQUENESS, REFERENTIAL or FRESHNESS"
+	}
+	if f.OwnerUserID != "" && !ids.Valid(f.OwnerUserID) {
+		fields["owner"] = "user id (UUID)"
+	}
+	if len(fields) > 0 {
+		refuse(w, r, "request failed validation", fields)
 		return
 	}
-	items, err := a.store.ListDQRules(r.Context(), asset)
+	items, err := a.store.ListDQRules(r.Context(), f)
 	if err != nil {
 		fail(w, r, err)
 		return
@@ -228,19 +243,22 @@ type PartitionsResponse struct {
 
 func (a *API) listPartitions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	domainName, status := q.Get("domain"), q.Get("status")
+	f := store.PartitionFilter{Domain: q.Get("domain"), Period: q.Get("period"), Status: q.Get("status")}
 	fields := map[string]string{}
-	if domainName != "" && !domain.IsArchiveName(domainName) {
+	if f.Domain != "" && !domain.IsArchiveName(f.Domain) {
 		fields["domain"] = "lower snake case domain name"
 	}
-	if status != "" && !domain.IsArchiveStatus(status) {
+	if f.Period != "" && !domain.IsArchivePeriod(f.Period) {
+		fields["period"] = "month as YYYY-MM"
+	}
+	if f.Status != "" && !domain.IsArchiveStatus(f.Status) {
 		fields["status"] = "PENDING, VERIFIED, DROPPED or RESTORED"
 	}
 	if len(fields) > 0 {
 		refuse(w, r, "request failed validation", fields)
 		return
 	}
-	items, err := a.store.ListArchivePartitions(r.Context(), domainName, status)
+	items, err := a.store.ListArchivePartitions(r.Context(), f)
 	if err != nil {
 		fail(w, r, err)
 		return

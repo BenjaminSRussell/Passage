@@ -194,6 +194,7 @@ export const DESTINATION_TYPES = ["EMAIL", "SFTP", "INBOX"] as const;
 export const RULE_ID = /^[a-z][a-z0-9_]{1,62}$/;
 export const ASSET_FQN = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*){1,3}$/;
 export const ARCHIVE_NAME = /^[a-z][a-z0-9_]{1,62}$/;
+export const ARCHIVE_PERIOD = /^\d{4}-(0[1-9]|1[0-2])$/;
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const dqRuleSchema = z.object({
@@ -288,9 +289,17 @@ function query(params: Record<string, string>): string {
   return text === "" ? "" : `?${text}`;
 }
 
-/** Data-quality rules, optionally for one catalog asset. */
-export async function listDQRules(asset = "", fetchImpl: Fetch = defaultFetch, signal?: AbortSignal): Promise<DQRule[]> {
-  const reply = await send(fetchImpl, `${catalogBase}/dq-rules${query({ asset })}`, {}, signal);
+/** Scorecard filters (PRD §9.46.14); an empty field matches every rule. */
+export interface DQRuleFilter {
+  asset?: string;
+  ruleType?: string;
+  owner?: string;
+}
+
+/** Data-quality rules filtered by catalog asset, rule type and owner. */
+export async function listDQRules(filter: DQRuleFilter = {}, fetchImpl: Fetch = defaultFetch, signal?: AbortSignal): Promise<DQRule[]> {
+  const q = query({ asset: filter.asset ?? "", ruleType: filter.ruleType ?? "", owner: filter.owner ?? "" });
+  const reply = await send(fetchImpl, `${catalogBase}/dq-rules${q}`, {}, signal);
   return items(dqRuleSchema).parse(reply.body).items;
 }
 
@@ -327,7 +336,7 @@ export async function listDQScores(
 
 /** Archive partitions, newest period first. */
 export async function listArchivePartitions(
-  filter: { domain: string; status: string },
+  filter: { domain: string; period: string; status: string },
   fetchImpl: Fetch = defaultFetch,
   signal?: AbortSignal,
 ): Promise<ArchivePartition[]> {

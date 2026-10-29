@@ -106,10 +106,10 @@ func TestPutDQRule_CreateReplaceAndVersioning(t *testing.T) {
 	if got, err := st.GetDQRule(ctxFor(2, ""), "vendor_tax_id"); codeOf(err) != domain.CodeNotFound {
 		t.Fatalf("tenant 2 reads %+v, %v; want not found", got, err)
 	}
-	if rules, err := st.ListDQRules(ctxFor(2, ""), ""); err != nil || len(rules) != 0 {
+	if rules, err := st.ListDQRules(ctxFor(2, ""), RuleFilter{}); err != nil || len(rules) != 0 {
 		t.Fatalf("tenant 2 lists %+v, %v", rules, err)
 	}
-	if rules, err := st.ListDQRules(ctx, "core.vendor"); err != nil || len(rules) != 1 || rules[0].Version != 4 {
+	if rules, err := st.ListDQRules(ctx, RuleFilter{Asset: "core.vendor"}); err != nil || len(rules) != 1 || rules[0].Version != 4 {
 		t.Fatalf("list by asset = %+v, %v", rules, err)
 	}
 }
@@ -284,11 +284,11 @@ func TestArchivePartition_VerifyDropRestore(t *testing.T) {
 	if _, err := st.RegisterArchivePartition(ctx, "audit", "audit_event", "2024-02", true, false); err != nil {
 		t.Fatal(err)
 	}
-	list, err := st.ListArchivePartitions(ctx, "", domain.ArchiveRestored)
+	list, err := st.ListArchivePartitions(ctx, PartitionFilter{Status: domain.ArchiveRestored})
 	if err != nil || len(list) != 1 || list[0].ID != p.ID {
 		t.Fatalf("list RESTORED = %+v, %v", list, err)
 	}
-	if list, _ = st.ListArchivePartitions(ctx, "audit", ""); len(list) != 1 || !list[0].LegalHold {
+	if list, _ = st.ListArchivePartitions(ctx, PartitionFilter{Domain: "audit"}); len(list) != 1 || !list[0].LegalHold {
 		t.Fatalf("list audit = %+v", list)
 	}
 }

@@ -33,13 +33,22 @@ func scanScore(row pgx.Row) (domain.Score, error) {
 	return s, err
 }
 
-// ListDQRules returns the tenant's rules, optionally for one asset, ordered by
-// asset and rule id.
-func (s *Postgres) ListDQRules(ctx context.Context, asset string) ([]domain.DQRule, error) {
+// RuleFilter narrows the scorecard rule list (§9.46.14: asset, rule type,
+// owner). An empty field matches every rule.
+type RuleFilter struct {
+	Asset       string
+	RuleType    string
+	OwnerUserID string
+}
+
+// ListDQRules returns the tenant's rules matching f, ordered by asset and rule id.
+func (s *Postgres) ListDQRules(ctx context.Context, f RuleFilter) ([]domain.DQRule, error) {
 	items := []domain.DQRule{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select `+dqRuleColumns+` from dq_rule
-			where `+ownTenant+` and ($1::text = '' or asset_fqn = $1) order by asset_fqn, rule_id`, asset)
+			where `+ownTenant+` and ($1::text = '' or asset_fqn = $1) and ($2::text = '' or rule_type = $2)
+				and ($3::text = '' or owner_user_id::text = $3)
+			order by asset_fqn, rule_id`, f.Asset, f.RuleType, f.OwnerUserID)
 		if err != nil {
 			return err
 		}

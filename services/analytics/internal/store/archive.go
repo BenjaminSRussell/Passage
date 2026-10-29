@@ -184,14 +184,22 @@ func (s *Postgres) GetArchivePartition(ctx context.Context, id string) (domain.A
 	return out, err
 }
 
-// ListArchivePartitions returns partitions filtered by domain and status,
-// newest period first.
-func (s *Postgres) ListArchivePartitions(ctx context.Context, domainName, status string) ([]domain.ArchivePartition, error) {
+// PartitionFilter narrows the archive partition inquiry (§9.46.14: domain,
+// period, status). An empty field matches every partition.
+type PartitionFilter struct {
+	Domain string
+	Period string
+	Status string
+}
+
+// ListArchivePartitions returns partitions matching f, newest period first.
+func (s *Postgres) ListArchivePartitions(ctx context.Context, f PartitionFilter) ([]domain.ArchivePartition, error) {
 	items := []domain.ArchivePartition{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select `+archiveColumns+` from archive_partition
-			where `+ownTenant+` and ($1::text = '' or domain = $1) and ($2::text = '' or status = $2)
-			order by period desc, domain, table_name limit 500`, domainName, status)
+			where `+ownTenant+` and ($1::text = '' or domain = $1) and ($2::text = '' or period = $2)
+				and ($3::text = '' or status = $3)
+			order by period desc, domain, table_name limit 500`, f.Domain, f.Period, f.Status)
 		if err != nil {
 			return err
 		}

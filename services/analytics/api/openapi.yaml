@@ -89,7 +89,7 @@ paths:
   /v1/catalog/dq-rules:
     get:
       operationId: listDQRules
-      summary: List data-quality rules, optionally for one catalog asset
+      summary: List data-quality rules, filtered by catalog asset, rule type and owner
       x-passage-duty: CatalogSteward
       parameters:
         - name: asset
@@ -98,6 +98,19 @@ paths:
           schema:
             type: string
             pattern: "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*){1,3}$"
+        - name: ruleType
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [COMPLETENESS, VALIDITY, UNIQUENESS, REFERENTIAL, FRESHNESS]
+        - name: owner
+          in: query
+          required: false
+          description: Owner user id; matched case-insensitively.
+          schema:
+            type: string
+            format: uuid
       responses:
         "200":
           description: Rules ordered by asset and rule id
@@ -239,6 +252,13 @@ paths:
           schema:
             type: string
             pattern: "^[a-z][a-z0-9_]{1,62}$"
+        - name: period
+          in: query
+          required: false
+          description: Calendar month of the partition.
+          schema:
+            type: string
+            pattern: "^[0-9]{4}-(0[1-9]|1[0-2])$"
         - name: status
           in: query
           required: false

@@ -68,9 +68,15 @@ func IsArchiveStatus(s string) bool {
 	return slices.Contains([]string{ArchivePending, ArchiveVerified, ArchiveDropped, ArchiveRestored}, s)
 }
 
+// IsArchivePeriod reports whether s is a calendar month written YYYY-MM.
+func IsArchivePeriod(s string) bool {
+	_, err := time.Parse(periodLayout, s)
+	return err == nil
+}
+
 // NewArchivePartition starts a PENDING partition after validating its period.
 func NewArchivePartition(domain, table, period string) (ArchivePartition, *Error) {
-	if _, err := time.Parse(periodLayout, period); err != nil {
+	if !IsArchivePeriod(period) {
 		return ArchivePartition{}, &Error{Code: CodeValidation, Status: 400, Detail: "period must be YYYY-MM", Fields: map[string]string{"period": "must be YYYY-MM"}}
 	}
 	fields := map[string]string{}

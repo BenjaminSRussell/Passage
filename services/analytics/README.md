@@ -58,6 +58,20 @@ lakehouse, dbt models and Cube semantic layer live in `../../data/`.
   create and detail (score history, mute), scheduled reports list, create and
   detail, archive partitions list and detail with restore.
 
+## What slice 3 covers
+
+The swarm draft of slice 3 rebuilt the slice-2 store and API (DQ rules,
+archive restore, schedules, idempotency) a second time; main already had the
+reviewed versions, so none of it was taken. In particular the draft's
+`If-Match` on archive restore was not adopted: the PRD makes restore idempotent
+by partition id (§9.46.5). What slice 3 adds is the inquiry filters of §9.46.14
+on the existing endpoints:
+
+- `GET /v1/catalog/dq-rules?asset=&ruleType=&owner=` (scorecard: asset, rule
+  type, owner; the owner id matches case-insensitively).
+- `GET /v1/archive/partitions?domain=&period=&status=` (period is `YYYY-MM`).
+- The scorecard and the archive list screens carry the matching filter forms.
+
 ## Layout
 
 ```

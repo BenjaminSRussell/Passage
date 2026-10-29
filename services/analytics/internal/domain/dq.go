@@ -66,7 +66,7 @@ func (r DQRule) Validate() error {
 	if !assetPattern.MatchString(r.AssetFQN) {
 		fields["assetFqn"] = "dotted lowercase asset name"
 	}
-	if !slices.Contains([]string{RuleCompleteness, RuleValidity, RuleUniqueness, RuleReferential, RuleFreshness}, r.Type) {
+	if !IsRuleType(r.Type) {
 		fields["ruleType"] = "COMPLETENESS, VALIDITY, UNIQUENESS, REFERENTIAL or FRESHNESS"
 	}
 	if r.Expression == "" || len(r.Expression) > maxDQExpression {
@@ -96,6 +96,11 @@ func (r DQRule) Validate() error {
 
 // IsRuleID reports whether id follows the rule id rule.
 func IsRuleID(id string) bool { return ruleIDPattern.MatchString(id) }
+
+// IsRuleType reports whether t is one of the five rule types.
+func IsRuleType(t string) bool {
+	return slices.Contains([]string{RuleCompleteness, RuleValidity, RuleUniqueness, RuleReferential, RuleFreshness}, t)
+}
 
 // IsAssetFQN reports whether fqn is a dotted lowercase catalog asset name.
 func IsAssetFQN(fqn string) bool { return assetPattern.MatchString(fqn) }
