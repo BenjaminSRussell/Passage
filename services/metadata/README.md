@@ -31,6 +31,10 @@ The registry API publishes and diffs definitions, atomically applies customer ex
 - `gopkg.in/yaml.v3` v3.0.1 parses the YAML entity definitions; the standard library has no YAML parser.
 - `github.com/go-chi/chi/v5` and `github.com/jackc/pgx/v5` are existing platform dependencies imported directly by the registry API and Postgres store.
 
+## CDC
+
+Migration `0004_cdc_publication` creates the `passage_outbox_metadata` publication. The migrating role needs CREATE on the database and ownership of `outbox`; the Debezium connector in `deploy/kafka` must start after migration 0004.
+
 ## Duties
 
 | Duty | Access |
