@@ -3,10 +3,12 @@ info:
   title: Passage Field Service API
   version: 0.1.0
   description: |
-    Service agreements, SLA profiles, cases and service work orders (wave 45, slice 1).
+    Service agreements, SLA profiles, cases with their status lifecycle and SLA monitor,
+    service work orders with follow-ups, and service KPIs (wave 45, slices 1 and 2).
     Routes are mounted under /v1/service on the service; the browser reaches them as
     /api/v1/service/... through the web BFF. Every mutating operation requires an
-    Idempotency-Key header. Custom methods (`:transition`, `:post`) require If-Match
+    Idempotency-Key header, except the case transition, where it is optional because
+    If-Match already makes a retry safe. Custom methods (`:transition`, `:post`, `:follow-up`) require If-Match
     with the current aggregate version. Errors are RFC 9457 problem details whose
     `code` is listed in the service README.
 servers:
@@ -143,6 +145,8 @@ paths:
       responses:
         "201":
           description: Created
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Case" }
@@ -180,12 +184,107 @@ paths:
       responses:
         "200":
           description: The case
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Case" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
+  /v1/service/cases/{id}:transition:
+    post:
+      operationId: transitionCase
+      summary: Move a case along its status machine; pauses, resumes or stops the SLA clocks (FR-45.5, BR-45.2)
+      description: |
+        PRD 8.45.5 names this `POST /cases/{id}/status`; it follows the custom-method
+        form of the work-order routes. WAITING_CUSTOMER pauses the resolution clock,
+        WAITING_PARTS pauses it when the profile has pauseOnParts; leaving the pause
+        moves the due by the paused business minutes. Leaving NEW records the response.
+        A clock found past due becomes BREACHED and emits `sla.breached` once; a
+        case resolved in time is MET. NEW cannot be requested; CLOSED only follows
+        RESOLVED and is final.
+      x-passage-duty: SvcCaseMaintain
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Optional; a retry with the same key and request returns the first answer.
+          schema: { type: string, maxLength: 255 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to]
+              additionalProperties: false
+              properties:
+                to:
+                  type: string
+                  enum: [IN_PROGRESS, WAITING_CUSTOMER, WAITING_PARTS, RESOLVED, CLOSED, CANCELED]
+      responses:
+        "200":
+          description: Transitioned (a request for the current status is a no-op; a replay carries Idempotent-Replayed true)
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Case" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/service/sla:scan:
+    post:
+      operationId: scanSLA
+      summary: One pass of the SLA monitor over the caller's tenant (BR-45.2, AC-45.3, job service-sla-monitor)
+      description: |
+        Selects RUNNING clocks of open cases with a warning (75 % of the target) or a
+        breach due and not yet emitted, oldest resolution due first, records each
+        alert on the case and writes `sla.warning` / `sla.breached` to the outbox in
+        the same transaction. Repeating a pass emits nothing new.
+      x-passage-duty: SvcCaseMaintain
+      parameters:
+        - { name: limit, in: query, description: cases per pass, schema: { type: integer, minimum: 1, maximum: 5000, default: 500 } }
+      responses:
+        "200":
+          description: What the pass did
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [scanned, warnings, breaches]
+                properties:
+                  scanned: { type: integer }
+                  warnings: { type: integer }
+                  breaches: { type: integer }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/service/kpis:
+    get:
+      operationId: getKpis
+      summary: Service KPIs over a window - SLA attainment, mean time to respond and resolve, first-time fix (FR-45.11)
+      x-passage-duty: SvcInquire
+      parameters:
+        - { name: from, in: query, required: true, description: inclusive, schema: { type: string, format: date-time } }
+        - { name: to, in: query, required: true, description: exclusive; at most 366 days after from, schema: { type: string, format: date-time } }
+        - { name: territory, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The measures
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Kpis" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
   /v1/service/work-orders:
     post:
       operationId: createWorkOrder
@@ -301,6 +400,31 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/WorkOrder" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/service/work-orders/{id}:follow-up:
+    post:
+      operationId: followUpWorkOrder
+      summary: Open the follow-up of a COMPLETED or POSTED work order; clears its first-time fix (BR-45.5)
+      x-passage-duty: SvcWoMaintain
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "201":
+          description: The new UNSCHEDULED follow-up order (linked by followUpOf, without lines)
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkOrder" }
+        "200": { $ref: "#/components/responses/Replayed" }
         "400": { $ref: "#/components/responses/Problem" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
@@ -483,18 +607,28 @@ components:
         channel: { type: string }
         priority: { type: integer }
         description: { type: string }
-        status: { type: string, description: "NEW on open; later transitions are case-stage work (not in slice 1)" }
+        status: { type: string, enum: [NEW, IN_PROGRESS, WAITING_CUSTOMER, WAITING_PARTS, RESOLVED, CLOSED, CANCELED] }
         agreementId: { type: [string, "null"], format: uuid }
         slaProfileId: { type: string, format: uuid }
         entitlementTrace:
           type: array
           items: { type: string }
           description: Resolution trace from BR-45.1 (why this agreement was chosen)
-        slaState: { type: string, enum: [RUNNING, PAUSED, MET, BREACHED] }
-        slaPausedMinutes: { type: integer }
+        slaState: { type: string, enum: [RUNNING, PAUSED, MET, BREACHED], description: state of the resolution clock }
+        slaPausedMinutes: { type: integer, description: business minutes of closed pauses of the resolution clock }
+        slaPausedAt: { type: [string, "null"], format: date-time, description: start of the open pause }
+        slaAlerts:
+          type: array
+          items: { type: string, enum: [RESPONSE_WARNING, RESPONSE_BREACH, RESOLUTION_WARNING, RESOLUTION_BREACH] }
+          description: SLA events already emitted for the case (each fires once)
         openedAt: { type: string, format: date-time }
+        respondedAt: { type: [string, "null"], format: date-time, description: first move out of NEW, or the first dispatch of its work orders }
+        resolvedAt: { type: [string, "null"], format: date-time }
         slaResponseDue: { type: string, format: date-time }
+        slaResponseWarnAt: { type: string, format: date-time }
         slaResolutionDue: { type: string, format: date-time }
+        slaResolutionWarnAt: { type: string, format: date-time }
+        version: { type: integer, description: echoed as If-Match on transitions }
     WorkLine:
       type: object
       required: [kind, qty]
@@ -542,7 +676,33 @@ components:
           items: { $ref: "#/components/schemas/WorkLine" }
         incidentTypeId: { type: [string, "null"], format: uuid }
         posting: { $ref: "#/components/schemas/Posting" }
+        followUpOf: { type: [string, "null"], format: uuid, description: the finished order this one follows up (BR-45.5) }
+        completedAt: { type: [string, "null"], format: date-time }
+        firstTimeFix: { type: [boolean, "null"], description: set true at completion, false once a follow-up exists }
         version: { type: integer }
+    Kpis:
+      type: object
+      description: |
+        Cases count by opening time, work orders by completion time; follow-up orders
+        are not counted as jobs. Rates are percentages as decimal strings rounded
+        half-even to two places, null when their denominator is zero. Means are
+        wall-clock minutes. A breached clock stays a miss when resolved later.
+      properties:
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        territory: { type: string, format: uuid }
+        casesOpened: { type: integer }
+        responseMet: { type: integer }
+        responseMissed: { type: integer, description: answered late, or still NEW and past its response due }
+        responseAttainmentPct: { type: [string, "null"] }
+        meanResponseMinutes: { type: [string, "null"] }
+        resolutionMet: { type: integer }
+        resolutionBreached: { type: integer }
+        resolutionAttainmentPct: { type: [string, "null"] }
+        meanResolutionMinutes: { type: [string, "null"] }
+        workOrdersCompleted: { type: integer }
+        firstTimeFix: { type: integer }
+        firstTimeFixPct: { type: [string, "null"] }
     PostedLine:
       type: object
       properties:

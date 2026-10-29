@@ -50,6 +50,28 @@ export const NEXT_STATUSES: Record<WorkOrderStatus, WorkOrderStatus[]> = {
   CANCELED: [],
 };
 
+/**
+ * The case status machine (FR-45.5), mirrored from internal/domain/case.go.
+ * NEW is only the start; CLOSED and CANCELED are final.
+ */
+export const CASE_NEXT: Record<CaseStatus, CaseStatus[]> = {
+  NEW: ["IN_PROGRESS", "WAITING_CUSTOMER", "WAITING_PARTS", "RESOLVED", "CANCELED"],
+  IN_PROGRESS: ["WAITING_CUSTOMER", "WAITING_PARTS", "RESOLVED", "CANCELED"],
+  WAITING_CUSTOMER: ["IN_PROGRESS", "WAITING_PARTS", "RESOLVED", "CANCELED"],
+  WAITING_PARTS: ["IN_PROGRESS", "WAITING_CUSTOMER", "RESOLVED", "CANCELED"],
+  RESOLVED: ["CLOSED"],
+  CLOSED: [],
+  CANCELED: [],
+};
+
+/** Statuses that keep a case open, so its SLA clocks run or are paused. */
+export const OPEN_CASE_STATUSES: CaseStatus[] = ["NEW", "IN_PROGRESS", "WAITING_CUSTOMER", "WAITING_PARTS"];
+
+/** Work orders that can take a follow-up visit (BR-45.5). */
+export const FOLLOW_UP_STATUSES: WorkOrderStatus[] = ["COMPLETED", "POSTED"];
+
+export type SlaAlert = "RESPONSE_WARNING" | "RESPONSE_BREACH" | "RESOLUTION_WARNING" | "RESOLUTION_BREACH";
+
 export interface SlaTarget {
   priority: number;
   responseMinutes: number;
@@ -124,11 +146,22 @@ export interface ServiceCase {
   slaProfileId: string;
   entitlementTrace: string[];
   openedAt: string;
+  respondedAt?: string | null;
+  resolvedAt?: string | null;
   slaResponseDue: string;
+  slaResponseWarnAt: string;
   slaResolutionDue: string;
+  slaResolutionWarnAt: string;
+  /** Business minutes of closed pauses of the resolution clock. */
   slaPausedMinutes: number;
+  /** Start of the open pause, while the case waits. */
+  slaPausedAt?: string | null;
   slaState: SlaState;
+  /** SLA events already emitted for the case; each fires once. */
+  slaAlerts: SlaAlert[];
   status: CaseStatus;
+  /** Optimistic-concurrency version, echoed as If-Match on transitions. */
+  version: number;
 }
 
 export interface WorkLine {
@@ -183,7 +216,39 @@ export interface WorkOrder {
   status: WorkOrderStatus;
   lines: Required<WorkLine>[];
   posting?: Posting;
+  /** The finished order this one follows up (BR-45.5). */
+  followUpOf?: string | null;
+  completedAt?: string | null;
+  /** Set at completion; false once a follow-up was opened. */
+  firstTimeFix?: boolean | null;
   version: number;
+}
+
+export interface KpiQuery {
+  /** RFC 3339, inclusive. */
+  from: string;
+  /** RFC 3339, exclusive; at most 366 days after from. */
+  to: string;
+  territory?: string;
+}
+
+/** Service measures over a window (FR-45.11). Rates are decimal strings, null when nothing was measured. */
+export interface Kpis {
+  from: string;
+  to: string;
+  territory?: string;
+  casesOpened: number;
+  responseMet: number;
+  responseMissed: number;
+  responseAttainmentPct: Decimal | null;
+  meanResponseMinutes: Decimal | null;
+  resolutionMet: number;
+  resolutionBreached: number;
+  resolutionAttainmentPct: Decimal | null;
+  meanResolutionMinutes: Decimal | null;
+  workOrdersCompleted: number;
+  firstTimeFix: number;
+  firstTimeFixPct: Decimal | null;
 }
 
 export interface Page<T> {
@@ -324,6 +389,24 @@ export function openCase(input: OpenCaseInput, key: string = newKey()): Promise<
   return json<ServiceCase>("/cases", post(input, key));
 }
 
+/**
+ * Moves a case along its status machine at the version the caller read,
+ * pausing, resuming or stopping its SLA clocks (FR-45.5, BR-45.2). The key
+ * makes a retry of the same intent return the first answer.
+ */
+export function transitionCase(caseId: string, version: number, to: CaseStatus, key: string = newKey()): Promise<ServiceCase> {
+  return json<ServiceCase>(`/cases/${id(caseId)}:transition`, {
+    method: "POST",
+    body: JSON.stringify({ to }),
+    headers: { "If-Match": `"${version}"`, "Idempotency-Key": key },
+  });
+}
+
+/** Service KPIs over a window and optional territory (FR-45.11). */
+export function getKpis(q: KpiQuery, signal?: AbortSignal): Promise<Kpis> {
+  return json<Kpis>(`/kpis${query({ from: q.from, to: q.to, territory: q.territory })}`, {}, signal);
+}
+
 // --- Work orders ---
 
 export interface WorkOrderFilter {
@@ -356,4 +439,9 @@ export function transitionWorkOrder(workOrderId: string, etag: string, to: WorkO
 /** Posts a COMPLETED work order to billing and warranty cost (FR-45.10, BR-45.4). */
 export function postWorkOrder(workOrderId: string, etag: string, key: string = newKey()): Promise<Versioned<WorkOrder>> {
   return versioned<WorkOrder>(`/work-orders/${id(workOrderId)}:post`, { method: "POST", headers: { "If-Match": etag, "Idempotency-Key": key } });
+}
+
+/** Opens the follow-up of a COMPLETED or POSTED work order; clears its first-time fix (BR-45.5). */
+export function followUpWorkOrder(workOrderId: string, etag: string, key: string = newKey()): Promise<Versioned<WorkOrder>> {
+  return versioned<WorkOrder>(`/work-orders/${id(workOrderId)}:follow-up`, { method: "POST", headers: { "If-Match": etag, "Idempotency-Key": key } });
 }

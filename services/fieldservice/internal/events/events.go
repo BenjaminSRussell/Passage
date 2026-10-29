@@ -11,7 +11,35 @@ const Context = "service"
 var (
 	CaseOpened      = events.Type(Context, "case", "opened", 1)
 	WorkOrderPosted = events.Type(Context, "workorder", "posted", 1)
+	SLAWarning      = events.Type(Context, "sla", "warning", 1)
+	SLABreached     = events.Type(Context, "sla", "breached", 1)
 )
+
+// SLAWarningData is the payload of dev.passage.service.sla.warning.v1: a case
+// clock reached the warning threshold (BR-45.2, message SVC-SLA-001). SLAType is
+// RESPONSE or RESOLUTION; times are RFC 3339 UTC.
+type SLAWarningData struct {
+	CaseID           string `json:"caseId"`
+	Number           string `json:"number"`
+	SLAType          string `json:"slaType"`
+	Priority         int    `json:"priority"`
+	DueAt            string `json:"dueAt"`
+	WarnedAt         string `json:"warnedAt"`
+	ThresholdPercent int    `json:"thresholdPercent"`
+}
+
+// SLABreachedData is the payload of dev.passage.service.sla.breached.v1 (PRD
+// 8.0: caseId, slaType, dueAt, breachedAt; message SVC-SLA-002). BreachedAt is
+// when the service detected the breach: the monitor pass, the late response or
+// the transition that found the clock past due.
+type SLABreachedData struct {
+	CaseID     string `json:"caseId"`
+	Number     string `json:"number"`
+	SLAType    string `json:"slaType"`
+	Priority   int    `json:"priority"`
+	DueAt      string `json:"dueAt"`
+	BreachedAt string `json:"breachedAt"`
+}
 
 // CaseOpenedData is the payload of dev.passage.service.case.opened.v1.
 type CaseOpenedData struct {

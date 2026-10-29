@@ -4,6 +4,7 @@ import { AgreementDetailPage } from "./AgreementDetailPage";
 import { AgreementsPage, NewAgreementPage } from "./AgreementsPage";
 import { CaseDetailPage } from "./CaseDetailPage";
 import { CasesPage, OpenCasePage } from "./CasesPage";
+import { KpisPage } from "./KpisPage";
 import { NewSlaProfilePage, SlaProfilesPage } from "./SlaProfilesPage";
 import { WorkOrderDetailPage } from "./WorkOrderDetailPage";
 import { NewWorkOrderPage, WorkOrdersPage } from "./WorkOrdersPage";
@@ -11,7 +12,7 @@ import { NewWorkOrderPage, WorkOrdersPage } from "./WorkOrdersPage";
 const service: PassageModule = {
   id: "service",
   title: "Service",
-  description: "Open service cases with entitlement and SLA clocks, maintain service agreements and SLA profiles, and run work orders through to billing.",
+  description: "Open service cases with entitlement and SLA clocks, pause and resolve them, maintain service agreements and SLA profiles, run work orders through to billing and follow-up, and track SLA attainment and first-time fix.",
   routes: [
     { path: "/service", element: createElement(CasesPage), handle: { title: "Service cases" } },
     { path: "/service/cases", element: createElement(CasesPage) },
@@ -25,6 +26,7 @@ const service: PassageModule = {
     { path: "/service/work-orders/:id", element: createElement(WorkOrderDetailPage), handle: { title: "Service work order" } },
     { path: "/service/sla-profiles", element: createElement(SlaProfilesPage) },
     { path: "/service/sla-profiles/new", element: createElement(NewSlaProfilePage), handle: { title: "New SLA profile" } },
+    { path: "/service/kpis", element: createElement(KpisPage), handle: { title: "Service KPIs" } },
   ],
   nav: [
     { label: "Service cases", to: "/service/cases", duty: "SvcInquire" },
@@ -32,6 +34,7 @@ const service: PassageModule = {
     { label: "Work orders", to: "/service/work-orders", duty: "SvcInquire" },
     { label: "Service agreements", to: "/service/agreements", duty: "SvcInquire" },
     { label: "SLA profiles", to: "/service/sla-profiles", duty: "SvcInquire" },
+    { label: "Service KPIs", to: "/service/kpis", duty: "SvcInquire" },
   ],
 };
 

@@ -3,7 +3,7 @@ info:
   title: Passage Field Service events
   version: 0.1.0
   description: |
-    Events published by the fieldservice service (wave 45, slice 1). Every event is
+    Events published by the fieldservice service (wave 45, slices 1 and 2). Every event is
     written to the service outbox in the same transaction as the state change and
     relayed by Debezium to Kafka. Envelope: CloudEvents 1.0 (source /passage/service/fieldservice).
 defaultContentType: application/json
@@ -18,6 +18,13 @@ channels:
     messages:
       workOrderPosted:
         $ref: "#/components/messages/WorkOrderPosted"
+  slaAlerts:
+    address: passage.service.sla
+    messages:
+      slaWarning:
+        $ref: "#/components/messages/SLAWarning"
+      slaBreached:
+        $ref: "#/components/messages/SLABreached"
 operations:
   publishCaseOpened:
     action: send
@@ -31,6 +38,18 @@ operations:
     summary: A completed service work order was posted to billing and warranty cost.
     messages:
       - $ref: "#/channels/workOrderPosted/messages/workOrderPosted"
+  publishSLAWarning:
+    action: send
+    channel: { $ref: "#/channels/slaAlerts" }
+    summary: A case clock reached the 75 % warning threshold (BR-45.2, SVC-SLA-001); emitted once per case and clock.
+    messages:
+      - $ref: "#/channels/slaAlerts/messages/slaWarning"
+  publishSLABreached:
+    action: send
+    channel: { $ref: "#/channels/slaAlerts" }
+    summary: A case clock ran past its due (BR-45.2, SVC-SLA-002); emitted once per case and clock by the monitor, a late response or a transition.
+    messages:
+      - $ref: "#/channels/slaAlerts/messages/slaBreached"
 components:
   messages:
     CaseOpened:
@@ -90,3 +109,33 @@ components:
                 amount: { type: string, description: Billed amount; zero unless BILLABLE }
                 warrantyCost: { type: string }
                 agreementHours: { type: string }
+    SLAWarning:
+      name: dev.passage.service.sla.warning.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [caseId, number, slaType, priority, dueAt, warnedAt, thresholdPercent]
+        additionalProperties: false
+        properties:
+          caseId: { type: string, format: uuid }
+          number: { type: string, example: CS-000001 }
+          slaType: { type: string, enum: [RESPONSE, RESOLUTION] }
+          priority: { type: integer, minimum: 1, maximum: 4 }
+          dueAt: { type: string, format: date-time }
+          warnedAt: { type: string, format: date-time }
+          thresholdPercent: { type: integer, example: 75 }
+    SLABreached:
+      name: dev.passage.service.sla.breached.v1
+      contentType: application/cloudevents+json
+      description: PRD 8.0 payload (caseId, slaType, dueAt, breachedAt) plus the case number and priority. breachedAt is when the service detected the breach.
+      payload:
+        type: object
+        required: [caseId, number, slaType, priority, dueAt, breachedAt]
+        additionalProperties: false
+        properties:
+          caseId: { type: string, format: uuid }
+          number: { type: string, example: CS-000001 }
+          slaType: { type: string, enum: [RESPONSE, RESOLUTION] }
+          priority: { type: integer, minimum: 1, maximum: 4 }
+          dueAt: { type: string, format: date-time }
+          breachedAt: { type: string, format: date-time }

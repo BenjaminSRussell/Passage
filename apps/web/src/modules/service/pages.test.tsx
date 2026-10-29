@@ -6,6 +6,7 @@ import { checkAxeAA } from "../../shell/a11y";
 import { loadModules } from "../registry";
 import { validateAgreement, emptyAgreementLine, type AgreementValues } from "./AgreementsPage";
 import { validateCase } from "./CasesPage";
+import { defaultKpiValues, validateKpis } from "./KpisPage";
 import service from "./module";
 import { validateProfile, type ProfileValues } from "./SlaProfilesPage";
 import { validateWorkOrder, emptyWorkLine } from "./WorkOrdersPage";
@@ -87,10 +88,14 @@ const serviceCase = {
   entitlementTrace: [`agreement ${AGREEMENT} matched at specificity 1`, "priority rank 5"],
   openedAt: "2026-10-23T21:00:00Z",
   slaResponseDue: "2026-10-23T22:00:00Z",
+  slaResponseWarnAt: "2026-10-23T21:45:00Z",
   slaResolutionDue: "2026-10-26T19:00:00Z",
+  slaResolutionWarnAt: "2026-10-26T17:00:00Z",
   slaPausedMinutes: 0,
   slaState: "RUNNING",
+  slaAlerts: [] as string[],
   status: "NEW",
+  version: 1,
 };
 
 const agreement = {
@@ -129,7 +134,7 @@ describe("service module", () => {
   it("declares a list and a detail or create page for each entity", () => {
     expect(service.id).toBe("service");
     const paths = service.routes.map((r) => r.path);
-    for (const path of ["/service", "/service/cases", "/service/cases/new", "/service/cases/:id", "/service/agreements", "/service/agreements/new", "/service/agreements/:id", "/service/work-orders", "/service/work-orders/new", "/service/work-orders/:id", "/service/sla-profiles", "/service/sla-profiles/new"]) {
+    for (const path of ["/service", "/service/cases", "/service/cases/new", "/service/cases/:id", "/service/agreements", "/service/agreements/new", "/service/agreements/:id", "/service/work-orders", "/service/work-orders/new", "/service/work-orders/:id", "/service/sla-profiles", "/service/sla-profiles/new", "/service/kpis"]) {
       expect(paths).toContain(path);
     }
     expect(service.routes.every((r) => r.element !== null)).toBe(true);
@@ -235,6 +240,79 @@ describe("cases", () => {
     expect(await findTable({ name: "Case work orders" })).toHaveTextContent("SWO-000003");
     expect(calls.find((c) => c.url.pathname === "/api/v1/service/work-orders")?.url.searchParams.get("caseId")).toBe(CASE);
     expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("offers the moves the case status machine allows and pauses with If-Match and an Idempotency-Key", async () => {
+    const paused = { ...serviceCase, status: "WAITING_CUSTOMER", slaState: "PAUSED", slaPausedAt: "2026-10-26T15:00:00Z", respondedAt: "2026-10-23T21:10:00Z", version: 2 };
+    handler = (url, init) => {
+      if (url.pathname === "/api/v1/service/work-orders") return { status: 200, body: { items: [] } };
+      if (init.method === "POST") return { status: 200, body: paused, etag: '"2"' };
+      return { status: 200, body: serviceCase, etag: '"1"' };
+    };
+    const { container } = renderAt(`/service/cases/${CASE}`);
+    for (const name of ["Start work", "Wait for customer", "Wait for parts", "Resolve", "Cancel case"]) {
+      expect(await screen.findByRole("button", { name })).toBeInTheDocument();
+    }
+    expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
+    expect(pageViolations(container)).toEqual([]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Wait for customer" }));
+    expect(await findStatus()).toHaveTextContent("Case is now waiting customer; SLA paused.");
+    const move = calls.find((c) => c.method === "POST");
+    expect(move?.url.pathname).toBe(`/api/v1/service/cases/${CASE}:transition`);
+    expect(move?.headers.get("If-Match")).toBe('"1"');
+    expect(move?.headers.get("Idempotency-Key")).toMatch(/[0-9a-f-]{36}/);
+    expect(move?.body).toEqual({ to: "WAITING_CUSTOMER" });
+    expect(screen.getByLabelText("SLA clocks")).toHaveTextContent("Since 2026-10-26 15:00 UTC");
+    expect(screen.getByRole("button", { name: "Resume" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Wait for customer" })).toBeNull();
+  });
+
+  it("shows the SLA alerts already emitted and hides the work-order link once the case is closed", async () => {
+    const closed = { ...serviceCase, status: "CLOSED", slaState: "BREACHED", slaAlerts: ["RESOLUTION_WARNING", "RESOLUTION_BREACH"], resolvedAt: "2026-10-27T15:00:00Z", version: 6 };
+    handler = (url) => (url.pathname === "/api/v1/service/work-orders" ? { status: 200, body: { items: [] } } : { status: 200, body: closed, etag: '"6"' });
+    renderAt(`/service/cases/${CASE}`);
+    const sla = await screen.findByLabelText("SLA clocks");
+    expect(sla).toHaveTextContent("Resolution at 75 %");
+    expect(sla).toHaveTextContent("Resolution breached");
+    expect(sla).toHaveTextContent("2026-10-27 15:00 UTC");
+    expect(screen.queryByRole("link", { name: "Create work order" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Resume" })).toBeNull();
+    expect(await screen.findByText("The case is no longer open.")).toBeInTheDocument();
+  });
+
+  it("asks before canceling a case and sends nothing when kept", async () => {
+    handler = (url, init) => {
+      if (url.pathname === "/api/v1/service/work-orders") return { status: 200, body: { items: [] } };
+      if (init.method === "POST") return { status: 200, body: { ...serviceCase, status: "CANCELED", version: 2 } };
+      return { status: 200, body: serviceCase };
+    };
+    renderAt(`/service/cases/${CASE}`);
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel case" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Cancel this case?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Keep the case" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel case" }));
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Cancel case" }));
+    expect(await findStatus()).toHaveTextContent("Case is now canceled");
+    expect(calls.find((c) => c.method === "POST")?.body).toEqual({ to: "CANCELED" });
+  });
+
+  it("reloads a case changed by someone else and explains why", async () => {
+    let gets = 0;
+    handler = (url, init) => {
+      if (url.pathname === "/api/v1/service/work-orders") return { status: 200, body: { items: [] } };
+      if (init.method === "POST") return { status: 412, body: { code: "conflict_version", detail: "current version is 2" } };
+      gets += 1;
+      return { status: 200, body: gets === 1 ? serviceCase : { ...serviceCase, status: "IN_PROGRESS", version: 2 } };
+    };
+    renderAt(`/service/cases/${CASE}`);
+    fireEvent.click(await screen.findByRole("button", { name: "Resolve" }));
+    expect(await findAlert()).toHaveTextContent("Someone else changed this case; it was reloaded");
+    expect(await screen.findByRole("button", { name: "Wait for customer" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start work" })).toBeNull();
   });
 
   it("reports a case that cannot be loaded", async () => {
@@ -385,6 +463,31 @@ describe("work orders", () => {
     await waitFor(() => expect(calls.filter((c) => c.method === "GET").length).toBe(2));
   });
 
+  it("opens a follow-up visit for a completed order and lands on it", async () => {
+    const CHILD = "88888888-0000-4000-8000-000000000008";
+    handler = (url, init) => {
+      if (init.method === "POST") return { status: 201, body: workOrder({ id: CHILD, number: "SWO-000004", status: "UNSCHEDULED", lines: [], followUpOf: WO, version: 1 }), etag: '"1"' };
+      if (url.pathname.endsWith(CHILD)) return { status: 200, body: workOrder({ id: CHILD, number: "SWO-000004", status: "UNSCHEDULED", lines: [], followUpOf: WO, version: 1 }), etag: '"1"' };
+      return { status: 200, body: workOrder({ status: "COMPLETED", version: 6, completedAt: "2026-10-27T15:00:00Z", firstTimeFix: true }), etag: '"6"' };
+    };
+    renderAt(`/service/work-orders/${WO}`);
+    expect(await screen.findByLabelText("Work order")).toHaveTextContent("Yes");
+    fireEvent.click(screen.getByRole("button", { name: "Open follow-up visit" }));
+    expect(await screen.findByRole("heading", { name: /SWO-000004/ })).toBeInTheDocument();
+    const follow = calls.find((c) => c.method === "POST");
+    expect(follow?.url.pathname).toBe(`/api/v1/service/work-orders/${WO}:follow-up`);
+    expect(follow?.headers.get("If-Match")).toBe('"6"');
+    expect(follow?.headers.get("Idempotency-Key")).toMatch(/[0-9a-f-]{36}/);
+    expect(screen.getByRole("link", { name: shortOf(WO) })).toHaveAttribute("href", `/service/work-orders/${WO}`);
+  });
+
+  it("offers no follow-up before the order is finished", async () => {
+    handler = () => ({ status: 200, body: workOrder(), etag: '"5"' });
+    renderAt(`/service/work-orders/${WO}`);
+    expect(await screen.findByRole("button", { name: "Complete" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open follow-up visit" })).toBeNull();
+  });
+
   it("lists work orders with what each billed", async () => {
     handler = () => ({ status: 200, body: { items: [workOrder({ status: "POSTED", posting: { currency: "USD", billableTotal: "190.00", warrantyCost: "0", entitlementConsumed: "1", lines: [] } })] } });
     renderAt("/service/work-orders");
@@ -442,5 +545,80 @@ describe("SLA profiles", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create SLA profile" }));
     expect(await findAlert()).toHaveTextContent("That code is taken");
     expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({ code: "GOLD", openMinute: 480, closeMinute: 1080 });
+  });
+});
+
+const shortOf = (id: string) => id.split("-")[0];
+
+describe("service KPIs", () => {
+  const kpis = {
+    from: "2026-10-01T00:00:00Z",
+    to: "2026-10-31T00:00:00Z",
+    casesOpened: 3,
+    responseMet: 1,
+    responseMissed: 2,
+    responseAttainmentPct: "33.33",
+    meanResponseMinutes: "75",
+    resolutionMet: 1,
+    resolutionBreached: 1,
+    resolutionAttainmentPct: "50",
+    meanResolutionMinutes: "900",
+    workOrdersCompleted: 2,
+    firstTimeFix: 1,
+    firstTimeFixPct: "50",
+  };
+
+  it("turns whole days into the service's window and checks it like the service does", () => {
+    expect(validateKpis({ from: "2026-10-01", to: "2026-10-30", territory: "" }).query).toEqual({ from: "2026-10-01T00:00:00Z", to: "2026-10-31T00:00:00Z", territory: undefined });
+    expect(validateKpis({ from: "2026-10-01", to: "2026-10-01", territory: TERRITORY }).query).toEqual({ from: "2026-10-01T00:00:00Z", to: "2026-10-02T00:00:00Z", territory: TERRITORY });
+    expect(Object.keys(validateKpis({ from: "2026-10-02", to: "2026-10-01", territory: "north" }).errors).sort()).toEqual(["territory", "to"]);
+    expect(validateKpis({ from: "2025-01-01", to: "2026-01-02", territory: "" }).errors.to).toMatch(/366 days/);
+    expect(validateKpis({ from: "", to: "2026-10-01", territory: "" }).errors.from).toBeTruthy();
+    expect(defaultKpiValues(new Date("2026-10-29T12:00:00Z"))).toEqual({ from: "2026-09-30", to: "2026-10-29", territory: "" });
+  });
+
+  it("shows SLA attainment and first-time fix for the window and refilters by territory", async () => {
+    handler = () => ({ status: 200, body: kpis });
+    const { container } = renderAt("/service/kpis");
+    const sla = await screen.findByRole("list", { name: "SLA attainment" });
+    expect(sla).toHaveTextContent("Response attainment 33.33 %");
+    expect(sla).toHaveTextContent("1 met, 2 missed");
+    expect(sla).toHaveTextContent("Mean time to resolve 900 min");
+    expect(screen.getByRole("list", { name: "First-time fix" })).toHaveTextContent("First-time-fix rate 50 %");
+    expect(pageViolations(container)).toEqual([]);
+    const first = calls[0]?.url;
+    expect(first?.pathname).toBe("/api/v1/service/kpis");
+    expect(first?.searchParams.get("from")).toMatch(/^\d{4}-\d{2}-\d{2}T00:00:00Z$/);
+    expect(first?.searchParams.has("territory")).toBe(false);
+
+    fireEvent.change(screen.getByLabelText("First day"), { target: { value: "2026-10-01" } });
+    fireEvent.change(screen.getByLabelText("Last day"), { target: { value: "2026-10-30" } });
+    fireEvent.change(screen.getByLabelText(/Territory/), { target: { value: TERRITORY } });
+    fireEvent.click(screen.getByRole("button", { name: "Show KPIs" }));
+    await waitFor(() => expect(calls.at(-1)?.url.searchParams.get("territory")).toBe(TERRITORY));
+    expect(calls.at(-1)?.url.searchParams.get("from")).toBe("2026-10-01T00:00:00Z");
+    expect(calls.at(-1)?.url.searchParams.get("to")).toBe("2026-10-31T00:00:00Z");
+  });
+
+  it("shows an empty window, field errors without a request, and a failed load with a retry", async () => {
+    handler = () => ({ status: 200, body: { ...kpis, casesOpened: 0, responseMet: 0, responseMissed: 0, resolutionMet: 0, resolutionBreached: 0, workOrdersCompleted: 0, firstTimeFix: 0, responseAttainmentPct: null, resolutionAttainmentPct: null, meanResponseMinutes: null, meanResolutionMinutes: null, firstTimeFixPct: null } });
+    const first = renderAt("/service/kpis");
+    expect(await screen.findByText("Nothing measured in this window")).toBeInTheDocument();
+    const before = calls.length;
+    fireEvent.change(screen.getByLabelText(/Territory/), { target: { value: "north" } });
+    fireEvent.click(screen.getByRole("button", { name: "Show KPIs" }));
+    expect(await screen.findByText("Enter a territory UUID or leave it empty.")).toBeInTheDocument();
+    expect(calls.length).toBe(before);
+    first.unmount();
+
+    let failing = true;
+    handler = () => (failing ? { status: 403, body: { code: "COM-0403", detail: "missing duty SvcInquire" } } : { status: 200, body: kpis });
+    renderAt("/service/kpis");
+    const alert = await findAlert();
+    expect(alert).toHaveTextContent("Could not load the service KPIs");
+    expect(alert).toHaveTextContent("COM-0403");
+    failing = false;
+    fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("list", { name: "SLA attainment" })).toBeInTheDocument();
   });
 });

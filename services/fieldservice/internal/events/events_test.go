@@ -59,6 +59,15 @@ func TestPayloadsMatchAsyncAPI(t *testing.T) {
 	if got, want := keysOf(t, WorkOrderPostedData{}), requiredOf(t, "WorkOrderPosted"); !reflect.DeepEqual(got, want) {
 		t.Errorf("WorkOrderPostedData keys %v, AsyncAPI requires %v", got, want)
 	}
+	if got, want := keysOf(t, SLAWarningData{}), requiredOf(t, "SLAWarning"); !reflect.DeepEqual(got, want) {
+		t.Errorf("SLAWarningData keys %v, AsyncAPI requires %v", got, want)
+	}
+	if got, want := keysOf(t, SLABreachedData{}), requiredOf(t, "SLABreached"); !reflect.DeepEqual(got, want) {
+		t.Errorf("SLABreachedData keys %v, AsyncAPI requires %v", got, want)
+	}
+	if SLAWarning != "dev.passage.service.sla.warning.v1" || SLABreached != "dev.passage.service.sla.breached.v1" {
+		t.Errorf("event types %s, %s", SLAWarning, SLABreached)
+	}
 	if CaseOpened != "dev.passage.service.case.opened.v1" || WorkOrderPosted != "dev.passage.service.workorder.posted.v1" {
 		t.Errorf("event types %s, %s", CaseOpened, WorkOrderPosted)
 	}
