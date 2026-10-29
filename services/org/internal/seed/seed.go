@@ -37,7 +37,7 @@ type locationSeed struct{ code, name, kind string }
 
 type operatingUnitSeed struct{ code, name, kind, legalEntity string }
 
-type teamSeed struct{ code, name, teamType, operatingUnit string }
+type teamSeed struct{ code, name, teamType, operatingUnit, operatingUnitType string }
 
 var (
 	legalEntities = []legalEntitySeed{
@@ -84,9 +84,9 @@ var (
 		{Code: "PLANT", Name: "Plant crew", MemberKinds: []string{"user"}},
 	}
 	teams = []teamSeed{
-		{"MD-STEWARDS", "Master data stewards", "STEWARDSHIP", ""},
-		{"DET-LEADS", "Detroit shift leads", "PLANT", "DET-ASSY"},
-		{"AUS-LEADS", "Austin shift leads", "PLANT", "AUS-MACH"},
+		{"MD-STEWARDS", "Master data stewards", "STEWARDSHIP", "", ""},
+		{"DET-LEADS", "Detroit shift leads", "PLANT", "DET-ASSY", "value_stream"},
+		{"AUS-LEADS", "Austin shift leads", "PLANT", "AUS-MACH", "value_stream"},
 	}
 )
 
@@ -199,10 +199,8 @@ func (r *runner) sites(entityIDs map[string]string) error {
 		return err
 	}
 	existing := map[string]store.Site{}
-	legalEntityBySite := map[string]string{}
 	for _, s := range page.Items {
 		existing[s.LegalEntityID+"/"+s.Code] = s
-		legalEntityBySite[s.ID] = s.LegalEntityID
 	}
 	warehousePage, err := r.st.ListWarehouses(r.ctx, store.WarehouseFilter{}, store.SiteKey{}, listAll)
 	if err != nil {
@@ -210,7 +208,7 @@ func (r *runner) sites(entityIDs map[string]string) error {
 	}
 	warehouseIDs := map[string]string{}
 	for _, w := range warehousePage.Items {
-		warehouseIDs[legalEntityBySite[w.SiteID]+"/"+w.Code] = w.ID
+		warehouseIDs[w.LegalEntityID+"/"+w.Code] = w.ID
 	}
 	locationPage, err := r.st.ListLocations(r.ctx, store.LocationFilter{}, store.SiteKey{}, listAll)
 	if err != nil {
@@ -281,12 +279,11 @@ func (r *runner) siteAddress(site store.Site, s siteSeed) error {
 		r.tally(true)
 		return nil
 	}
-	addresses, err := r.st.ListAddresses(r.ctx, store.AddressFilter{OwnerType: "site", OwnerID: site.ID}, "", 2)
+	addresses, err := r.st.ListAddresses(r.ctx, store.AddressFilter{OwnerType: "site", OwnerID: site.ID, Purpose: "business"}, "", listAll)
 	if err != nil {
 		return err
 	}
-	if len(addresses.Items) > 0 {
-		addressID := addresses.Items[0].ID
+	if addressID := primaryBusinessAddressID(addresses.Items); addressID != "" {
 		if _, err := r.st.UpdateSite(r.ctx, site.ID, current.Version, store.SitePatch{AddressID: &addressID}); err != nil {
 			return fmt.Errorf("site %s address pointer: %w", s.code, err)
 		}
@@ -305,6 +302,17 @@ func (r *runner) siteAddress(site store.Site, s siteSeed) error {
 	}
 	r.tally(false)
 	return nil
+}
+
+func primaryBusinessAddressID(addresses []store.Address) string {
+	for _, a := range addresses {
+		for _, p := range a.Purposes {
+			if p.Purpose == "business" && p.Primary {
+				return a.ID
+			}
+		}
+	}
+	return ""
 }
 
 func (r *runner) hierarchyTypes() error {
@@ -359,7 +367,7 @@ func (r *runner) teams(unitIDs map[string]string) error {
 		if !existing[t.code] {
 			team := store.Team{Code: t.code, Name: t.name, TeamTypeID: typeIDs[t.teamType], EffectiveFrom: validFrom}
 			if t.operatingUnit != "" {
-				unit := unitIDs[operatingUnitKey("value_stream", t.operatingUnit)]
+				unit := unitIDs[operatingUnitKey(t.operatingUnitType, t.operatingUnit)]
 				team.OperatingUnitID = &unit
 			}
 			if _, _, err := r.st.CreateTeam(r.ctx, team, keyPrefix+"team:"+t.code); err != nil {

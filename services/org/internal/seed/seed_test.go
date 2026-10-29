@@ -115,7 +115,7 @@ func TestRun_ScopesSeedLookupsToTheirDatabaseKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateWarehouse(ctx, store.Warehouse{SiteID: otherSite.ID, Code: "DET-MAIN", Name: "Other Detroit Main", Type: "standard"}, "other-warehouse"); err != nil {
+	if _, err := s.CreateWarehouse(ctx, store.Warehouse{SiteID: otherSite.ID, Code: "DET-QA", Name: "Other Detroit Quarantine", Type: "standard"}, "other-warehouse"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.CreateOperatingUnit(ctx, store.OperatingUnit{Code: "OPS", Name: "Other OPS", Type: "department", DefaultLegalEntityID: &other.ID}, "other-ops"); err != nil {
@@ -153,25 +153,25 @@ func TestRun_ScopesSeedLookupsToTheirDatabaseKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var detMain string
+	var detQA string
 	for _, warehouse := range warehouses.Items {
-		if warehouse.SiteID == det.ID && warehouse.Code == "DET-MAIN" {
-			detMain = warehouse.ID
+		if warehouse.SiteID == det.ID && warehouse.Code == "DET-QA" {
+			detQA = warehouse.ID
 		}
 	}
-	if detMain == "" {
-		t.Fatal("Detroit warehouse missing")
+	if detQA == "" {
+		t.Fatal("seeded Detroit DET-QA warehouse missing because the other legal entity's DET-QA already existed")
 	}
 	locations, err := s.ListLocations(ctx, store.LocationFilter{}, store.SiteKey{}, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, location := range locations.Items {
-		if location.WarehouseID == detMain && location.Code == "RCV-01" {
+		if location.WarehouseID == detQA && location.Code == "QA-01" {
 			return
 		}
 	}
-	t.Fatal("Detroit receiving location was not attached to Detroit Main")
+	t.Fatal("Detroit quality hold location was not attached to the seeded Detroit DET-QA")
 }
 
 func TestRun_RelinksExistingSeedAddressAfterPointerIsCleared(t *testing.T) {
@@ -186,6 +186,14 @@ func TestRun_RelinksExistingSeedAddressAfterPointerIsCleared(t *testing.T) {
 	site := sites.Items[0]
 	if site.AddressID == nil {
 		t.Fatal("seeded site address is missing")
+	}
+	address, err := s.GetAddress(ctx, *site.AddressID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	address.City, address.ValidFrom = "Elsewhere", "2026-01-02"
+	if _, err := s.ReviseAddress(ctx, address.ID, address.VersionID, address); err != nil {
+		t.Fatal(err)
 	}
 	addressCount := counts(t, ctx, pool)["postal_address"]
 	err = dbx.WithTenantTx(ctx, pool, func(tx pgx.Tx) error {
