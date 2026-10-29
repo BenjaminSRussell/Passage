@@ -30,15 +30,6 @@ func scanSchedule(row pgx.Row) (domain.Schedule, error) {
 	return s, json.Unmarshal(dest, &s.Destination)
 }
 
-// Created is the outcome of an idempotent create. Replayed is true when the
-// Idempotency-Key was seen before with the same request: Body is the stored
-// response and nothing new was written.
-type Created struct {
-	Status   int
-	Body     json.RawMessage
-	Replayed bool
-}
-
 // CreateSchedule validates and stores a schedule under an Idempotency-Key
 // (POST /analytics/schedules). The first request claims the key in the same
 // transaction as the insert, so a concurrent duplicate waits and then replays
@@ -52,31 +43,12 @@ func (s *Postgres) CreateSchedule(ctx context.Context, key, requestHash string, 
 	p, _ := tenant.FromContext(ctx)
 	var out Created
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		// Keys are replay-safe for 24 hours (CONVENTIONS); an older key is free again.
-		if _, err := tx.Exec(ctx, `delete from idempotency_keys where `+ownTenant+` and key = $1
-			and created_at < now() - interval '24 hours'`, key); err != nil {
-			return err
-		}
-		claimed, err := tx.Exec(ctx, `insert into idempotency_keys (tenant_id, key, request_hash, response_status)
-			values ($1, $2, $3, 0) on conflict (tenant_id, key) do nothing`, p.TenantID, key, requestHash)
-		if err != nil {
-			return err
-		}
-		if claimed.RowsAffected() == 0 {
-			var (
-				storedHash string
-				status     int
-				body       []byte
-			)
-			if err := tx.QueryRow(ctx, `select request_hash, response_status, response_body from idempotency_keys
-				where `+ownTenant+` and key = $1`, key).Scan(&storedHash, &status, &body); err != nil {
-				return err
+		replay, err := claimKey(ctx, tx, p.TenantID, key, requestHash)
+		if err != nil || replay != nil {
+			if replay != nil {
+				out = *replay
 			}
-			if storedHash != requestHash {
-				return &domain.Error{Code: domain.CodeIdempotencyReuse, Status: 422, Detail: "Idempotency-Key was already used with a different request"}
-			}
-			out = Created{Status: status, Body: body, Replayed: true}
-			return nil
+			return err
 		}
 		dest, err := json.Marshal(prepared.Destination)
 		if err != nil {
@@ -90,16 +62,8 @@ func (s *Postgres) CreateSchedule(ctx context.Context, key, requestHash string, 
 		if err != nil {
 			return err
 		}
-		body, err := json.Marshal(created)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `update idempotency_keys set response_status = 201, response_body = $2
-			where `+ownTenant+` and key = $1`, key, body); err != nil {
-			return err
-		}
-		out = Created{Status: 201, Body: body}
-		return nil
+		out, err = storeResponse(ctx, tx, key, 201, created)
+		return err
 	})
 	return out, err
 }

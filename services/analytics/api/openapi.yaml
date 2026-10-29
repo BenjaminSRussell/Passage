@@ -402,6 +402,284 @@ paths:
           $ref: "#/components/responses/Problem"
         "404":
           $ref: "#/components/responses/Problem"
+  /v1/analytics/schedules/{id}/deliveries:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      operationId: listScheduleDeliveries
+      summary: Delivery attempts of one schedule, newest first (schedule deliveries inquiry)
+      description: One row per attempt. The attempts of one scheduled run share runId; a failed attempt is retried after 1, 4 and 16 minutes and the fourth failure is FAILED.
+      x-passage-duty: AnalyticsAuthor
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [DELIVERED, RETRY, FAILED]
+      responses:
+        "200":
+          description: Deliveries (at most 200)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliveriesResponse"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/analytics/dashboards:
+    get:
+      operationId: listDashboards
+      summary: Dashboard definitions by title
+      x-passage-duty: AnalyticsView
+      responses:
+        "200":
+          description: Dashboards
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardsResponse"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/analytics/dashboards/{id}:
+    parameters:
+      - $ref: "#/components/parameters/DashboardId"
+    get:
+      operationId: getDashboard
+      summary: Dashboard definition and tiles; the ETag is its version
+      x-passage-duty: AnalyticsView
+      responses:
+        "200":
+          description: The dashboard
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Dashboard"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: putDashboard
+      summary: Create a dashboard (no If-Match) or replace it (If-Match with the current version)
+      description: Every tile must name a published governed metric.
+      x-passage-duty: AnalyticsAuthor
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: The dashboard version as an entity tag, for example "3". Required to replace an existing dashboard.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DashboardRequest"
+      responses:
+        "200":
+          description: Replaced
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Dashboard"
+        "201":
+          description: Created
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Dashboard"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "412":
+          description: If-Match does not name the current version (ANA-0113)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: If-Match missing on a replace (COM-0428)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/analytics/exports:
+    get:
+      operationId: listExports
+      summary: Export log, newest first, filtered by user, format and creation day
+      x-passage-duty: AnalyticsExport
+      parameters:
+        - name: user
+          in: query
+          required: false
+          description: Requesting user id
+          schema:
+            type: string
+            maxLength: 255
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [XLSX, CSV]
+        - name: from
+          in: query
+          required: false
+          description: First creation day (UTC), inclusive
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: false
+          description: Last creation day (UTC), inclusive
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Export jobs (at most 500)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExportsResponse"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createExport
+      summary: Start an explorer export job
+      description: The query is planned with the caller's data scope exactly like POST /v1/analytics/query. Above 100,000 rows the job runs as a Temporal job; above 1,000,000 rows it is refused (ANA-0101). An identical request by the same user within one hour returns the existing job (BR-46.7); files are deleted 24 hours after creation.
+      x-passage-duty: AnalyticsExport
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Replays within 24 hours return the stored response with Idempotency-Replayed true.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 255
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExportRequest"
+      responses:
+        "200":
+          description: An identical export from the last hour (reused true)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Export"
+        "202":
+          description: Queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Export"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          description: Missing duty, or no data scope for the model (ANA-0102)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: Over the export row cap (ANA-0101), or Idempotency-Key reused with a different request (ANA-0114)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/catalog/lineage/{asset_fqn}:
+    parameters:
+      - name: asset_fqn
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*){1,3}$"
+    get:
+      operationId: getLineage
+      summary: Upstream and downstream assets of a catalog asset, nearest first
+      x-passage-duty: CatalogView
+      parameters:
+        - name: depth
+          in: query
+          required: false
+          description: Hops in each direction; 0 or omitted means 20.
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 20
+      responses:
+        "200":
+          description: Lineage
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Lineage"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/catalog/lineage/edges:
+    post:
+      operationId: addLineageEdges
+      summary: Record lineage edges (source feeds target)
+      description: Idempotent by edge. Existing edges are kept, so re-sending a batch answers added 0.
+      x-passage-duty: CatalogSteward
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LineageEdgesRequest"
+      responses:
+        "200":
+          description: How many edges were new
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LineageEdgesResponse"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
   /healthz:
     get:
       operationId: healthz
@@ -434,6 +712,13 @@ components:
       schema:
         type: string
         format: uuid
+    DashboardId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-z][a-z0-9_-]{1,62}$"
   headers:
     ETag:
       description: The resource version as an entity tag, for example "3"
@@ -838,3 +1123,243 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Schedule"
+    Tile:
+      type: object
+      required: [title, metric, period]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+        metric:
+          type: string
+          description: A published governed metric id
+        period:
+          type: string
+          enum: [MTD, QTD, YTD, TRAILING_12M]
+    Dashboard:
+      type: object
+      required: [dashboardId, title, tiles, refreshSeconds, version]
+      properties:
+        dashboardId:
+          type: string
+        title:
+          type: string
+        tiles:
+          type: array
+          minItems: 1
+          maxItems: 12
+          items:
+            $ref: "#/components/schemas/Tile"
+        refreshSeconds:
+          type: integer
+          minimum: 15
+          maximum: 600
+        version:
+          type: integer
+        updatedAt:
+          type: string
+          format: date-time
+    DashboardRequest:
+      type: object
+      additionalProperties: false
+      required: [title, tiles]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+        tiles:
+          type: array
+          minItems: 1
+          maxItems: 12
+          items:
+            $ref: "#/components/schemas/Tile"
+        refreshSeconds:
+          type: integer
+          minimum: 15
+          maximum: 600
+          default: 60
+    DashboardsResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Dashboard"
+    Delivery:
+      type: object
+      required: [deliveryId, scheduleId, runId, attempt, status, format, destinationType, rowCount, bytes, runAt]
+      properties:
+        deliveryId:
+          type: string
+          format: uuid
+        scheduleId:
+          type: string
+          format: uuid
+        runId:
+          type: string
+          format: uuid
+        attempt:
+          type: integer
+          minimum: 1
+        status:
+          type: string
+          enum: [DELIVERED, RETRY, FAILED]
+        format:
+          type: string
+          enum: [PDF, XLSX]
+        destinationType:
+          type: string
+          enum: [EMAIL, SFTP, INBOX]
+        rowCount:
+          type: integer
+        bytes:
+          type: integer
+        error:
+          type: string
+          maxLength: 500
+        runAt:
+          type: string
+          format: date-time
+        retryAt:
+          type: string
+          format: date-time
+    DeliveriesResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Delivery"
+    ExportRequest:
+      type: object
+      additionalProperties: false
+      required: [measures, from, to, format, rowCount]
+      properties:
+        measures:
+          type: array
+          items:
+            type: string
+        dimensions:
+          type: array
+          items:
+            type: string
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        format:
+          type: string
+          enum: [XLSX, CSV]
+        rowCount:
+          type: integer
+          minimum: 0
+          description: Rows the query returns, from the explorer's count
+        linkTtlHours:
+          type: integer
+          minimum: 1
+          maximum: 168
+          default: 24
+    Export:
+      type: object
+      required: [exportId, requestedBy, queryHash, plan, format, mode, rowCount, linkTtlHours, status, createdAt, linkExpiresAt, deleteAt, reused]
+      properties:
+        exportId:
+          type: string
+          format: uuid
+        requestedBy:
+          type: string
+        queryHash:
+          type: string
+          description: SHA-256 of the user, format and scope-filtered plan
+        plan:
+          $ref: "#/components/schemas/Plan"
+        format:
+          type: string
+          enum: [XLSX, CSV]
+        mode:
+          type: string
+          enum: [INLINE, TEMPORAL_JOB]
+        rowCount:
+          type: integer
+        linkTtlHours:
+          type: integer
+        status:
+          type: string
+          enum: [QUEUED, READY, DELETED]
+        createdAt:
+          type: string
+          format: date-time
+        linkExpiresAt:
+          type: string
+          format: date-time
+          description: createdAt plus linkTtlHours, but never after deleteAt (the file is deleted 24 hours after creation, BR-46.7)
+        deleteAt:
+          type: string
+          format: date-time
+        reused:
+          type: boolean
+    ExportsResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Export"
+    LineageAsset:
+      type: object
+      required: [fqn, distance]
+      properties:
+        fqn:
+          type: string
+        distance:
+          type: integer
+          minimum: 1
+          description: Fewest hops from the asset
+    Lineage:
+      type: object
+      required: [asset, depth, upstream, downstream]
+      properties:
+        asset:
+          type: string
+        depth:
+          type: integer
+        upstream:
+          type: array
+          items:
+            $ref: "#/components/schemas/LineageAsset"
+        downstream:
+          type: array
+          items:
+            $ref: "#/components/schemas/LineageAsset"
+    Edge:
+      type: object
+      required: [source, target]
+      properties:
+        source:
+          type: string
+        target:
+          type: string
+    LineageEdgesRequest:
+      type: object
+      additionalProperties: false
+      required: [edges]
+      properties:
+        edges:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            $ref: "#/components/schemas/Edge"
+    LineageEdgesResponse:
+      type: object
+      required: [added]
+      properties:
+        added:
+          type: integer

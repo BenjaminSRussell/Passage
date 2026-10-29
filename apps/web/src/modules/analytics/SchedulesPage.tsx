@@ -2,6 +2,7 @@ import { useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
+  Badge,
   Button,
   buttonClassName,
   Card,
@@ -17,18 +18,21 @@ import {
 } from "../../shell/ui";
 import {
   createSchedule,
+  DELIVERY_STATUSES,
   describeProblem,
   DESTINATION_TYPES,
   getSchedule,
+  listDeliveries,
   listSchedules,
   SCHEDULE_FORMATS,
   TARGET_TYPES,
   UUID,
+  type Delivery,
   type Problem,
   type Schedule,
   type ScheduleInput,
 } from "./api/client";
-import { dateTime, enumLabel } from "./format";
+import { count, dateTime, enumLabel, shortId } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -343,8 +347,80 @@ export function ScheduleDetailPage() {
           <Entry term="Next run">{dateTime(s.nextRunAt) || "Not scheduled"}</Entry>
           <Entry term="Last run">{dateTime(s.lastRunAt) || "Not run yet"}</Entry>
           <Entry term="Destination">{destinationText(s.destination)}</Entry>
-          <Entry term="Failed deliveries">{s.failureCount}</Entry>
+          <Entry term="Failed attempts in this run">{s.failureCount}</Entry>
         </dl>
+      </Card>
+      <Deliveries schedule={s} />
+    </div>
+  );
+}
+
+function DeliveryStatus({ delivery }: { delivery: Delivery }) {
+  switch (delivery.status) {
+    case "DELIVERED":
+      return <Badge tone="success">Delivered</Badge>;
+    case "RETRY":
+      return <Badge tone="warning">Retrying</Badge>;
+    default:
+      return <Badge tone="danger">Failed</Badge>;
+  }
+}
+
+const deliveryColumns: DataTableColumn<Delivery>[] = [
+  { key: "runAt", header: "Attempted", render: (d) => dateTime(d.runAt) },
+  { key: "runId", header: "Run", mono: true, render: (d) => <span title={d.runId}>{shortId(d.runId)}</span> },
+  { key: "attempt", header: "Attempt", align: "end" },
+  { key: "status", header: "Status", render: (d) => <DeliveryStatus delivery={d} /> },
+  { key: "format", header: "Format" },
+  { key: "destinationType", header: "Destination", render: (d) => destinationLabel[d.destinationType] },
+  { key: "rowCount", header: "Rows", align: "end", render: (d) => count(d.rowCount) },
+  { key: "bytes", header: "Bytes", align: "end", render: (d) => count(d.bytes) },
+  { key: "retryAt", header: "Next attempt", render: (d) => dateTime(d.retryAt) },
+  { key: "error", header: "Error", render: (d) => d.error ?? "" },
+];
+
+/** Delivery attempts of a schedule, newest first (PRD §9.46.14 "Schedule deliveries"). */
+function Deliveries({ schedule }: { schedule: Schedule }) {
+  const [status, setStatus] = useState("");
+  const state = useLoad((signal) => listDeliveries(schedule.scheduleId, status, undefined, signal), `deliveries/${schedule.scheduleId}/${status}`);
+  // The newest attempt decides the banner: a run that spent its retries is ANA-0108.
+  const latest = status === "" ? state.data?.[0] : undefined;
+  return (
+    <div className={styles.stack}>
+      {latest?.status === "FAILED" ? (
+        <Alert tone="danger" title={`Schedule ${schedule.name} failed after 3 attempts`}>
+          {latest.error || "The destination did not accept the report."} Fix the destination; the next run is {dateTime(schedule.nextRunAt) || "not scheduled"}. (ANA-0108)
+        </Alert>
+      ) : null}
+      <Card title="Deliveries">
+        <div className={styles.toolbar}>
+          <FormField id="deliveries-status" label="Status">
+            {(control) => (
+              <Select {...control} value={status} onChange={(e) => setStatus(e.target.value)}>
+                <option value="">Every attempt</option>
+                {DELIVERY_STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {enumLabel(s)}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </FormField>
+        </div>
+        {state.error ? (
+          <Alert tone="danger" title="Could not load deliveries" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>
+            {state.error.message} ({state.error.code})
+          </Alert>
+        ) : (
+          <DataTable
+            label="Deliveries"
+            columns={deliveryColumns}
+            rows={state.data ?? []}
+            getRowKey={(d) => d.deliveryId}
+            loading={state.loading}
+            empty={{ title: "No deliveries yet", description: "Each attempt appears here once the schedule runs. A failed attempt is retried after 1, 4 and 16 minutes." }}
+          />
+        )}
       </Card>
     </div>
   );

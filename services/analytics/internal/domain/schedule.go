@@ -102,9 +102,15 @@ func CanReuseExport(created, now time.Time) bool {
 // ExportDeleteAt is when the export file is removed (BR-46.7).
 func ExportDeleteAt(created time.Time) time.Time { return created.Add(ExportFileLifetime) }
 
-// LinkExpiresAt is when the signed download link stops working.
+// LinkExpiresAt is when the signed download link stops working: ttlHours after
+// creation, but never after the file itself is deleted (BR-46.7), so a link
+// longer than 24 hours cannot point at a removed file.
 func LinkExpiresAt(created time.Time, ttlHours int) time.Time {
-	return created.Add(time.Duration(ttlHours) * time.Hour)
+	link := created.Add(time.Duration(ttlHours) * time.Hour)
+	if deleted := ExportDeleteAt(created); link.After(deleted) {
+		return deleted
+	}
+	return link
 }
 
 // RetryDelay is the wait before retry attempt n (1-based): 1, 4, 16, 64, 256

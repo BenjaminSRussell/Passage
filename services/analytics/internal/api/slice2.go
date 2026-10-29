@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -325,17 +326,10 @@ func (a *API) getSchedule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) createSchedule(w http.ResponseWriter, r *http.Request) {
-	key := strings.TrimSpace(r.Header.Get(headerIdempotency))
-	if key == "" || len(key) > maxKeyLength {
-		refuse(w, r, "Idempotency-Key header is required (1 to 255 characters)", map[string]string{headerIdempotency: "required, at most 255 characters"})
+	key, raw, ok := idempotentBody(w, r)
+	if !ok {
 		return
 	}
-	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
-	if err != nil {
-		refuse(w, r, "request body is too large", nil)
-		return
-	}
-	r.Body = io.NopCloser(strings.NewReader(string(raw)))
 	var req ScheduleRequest
 	if err := httpx.Decode(r, &req); err != nil {
 		refuse(w, r, "request body is not valid JSON", nil)
@@ -354,12 +348,41 @@ func (a *API) createSchedule(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, verr)
 		return
 	}
-	sum := sha256.Sum256(append([]byte(r.Method+" "+r.URL.Path+"\n"), raw...))
-	out, err := a.store.CreateSchedule(r.Context(), key, hex.EncodeToString(sum[:]), in, now)
+	out, err := a.store.CreateSchedule(r.Context(), key, requestHash(r, raw), in, now)
 	if err != nil {
 		fail(w, r, err)
 		return
 	}
+	writeCreated(w, out)
+}
+
+// idempotentBody reads the Idempotency-Key header and the raw body of a
+// command, leaving the body readable for httpx.Decode. It answers the problem
+// itself and returns ok=false when the key is missing or the body too large.
+func idempotentBody(w http.ResponseWriter, r *http.Request) (string, []byte, bool) {
+	key := strings.TrimSpace(r.Header.Get(headerIdempotency))
+	if key == "" || len(key) > maxKeyLength {
+		refuse(w, r, "Idempotency-Key header is required (1 to 255 characters)", map[string]string{headerIdempotency: "required, at most 255 characters"})
+		return "", nil, false
+	}
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err != nil {
+		refuse(w, r, "request body is too large", nil)
+		return "", nil, false
+	}
+	r.Body = io.NopCloser(bytes.NewReader(raw))
+	return key, raw, true
+}
+
+// requestHash fingerprints a command for its Idempotency-Key: a key reused
+// with another method, path or body is ANA-0114.
+func requestHash(r *http.Request, raw []byte) string {
+	sum := sha256.Sum256(append([]byte(r.Method+" "+r.URL.Path+"\n"), raw...))
+	return hex.EncodeToString(sum[:])
+}
+
+// writeCreated answers with the response stored under the Idempotency-Key.
+func writeCreated(w http.ResponseWriter, out store.Created) {
 	w.Header().Set("Content-Type", "application/json")
 	if out.Replayed {
 		w.Header().Set("Idempotency-Replayed", "true")

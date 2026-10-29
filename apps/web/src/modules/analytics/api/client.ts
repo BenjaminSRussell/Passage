@@ -375,3 +375,159 @@ export async function createSchedule(input: ScheduleInput, idempotencyKey: strin
   });
   return scheduleSchema.parse(reply.body);
 }
+
+// --- Slice 4: dashboards, exports, schedule deliveries, lineage ---------------
+
+export const TILE_PERIODS = ["MTD", "QTD", "YTD", "TRAILING_12M"] as const;
+export const EXPORT_FORMATS = ["XLSX", "CSV"] as const;
+export const EXPORT_MODES = ["INLINE", "TEMPORAL_JOB"] as const;
+export const EXPORT_STATUSES = ["QUEUED", "READY", "DELETED"] as const;
+export const DELIVERY_STATUSES = ["DELIVERED", "RETRY", "FAILED"] as const;
+
+/** Limits the service enforces (services/analytics/internal/domain). */
+export const DASHBOARD_ID = /^[a-z][a-z0-9_-]{1,62}$/;
+export const MAX_TILES = 12;
+export const MIN_REFRESH_SECONDS = 15;
+export const MAX_REFRESH_SECONDS = 600;
+export const MAX_EXPORT_ROWS = 1_000_000;
+export const ASYNC_EXPORT_ROWS = 100_000;
+export const MAX_LINEAGE_DEPTH = 20;
+
+const tileSchema = z.object({ title: z.string(), metric: z.string(), period: z.enum(TILE_PERIODS) });
+
+const dashboardSchema = z.object({
+  dashboardId: z.string(),
+  title: z.string(),
+  tiles: z.array(tileSchema),
+  refreshSeconds: z.number().int(),
+  version: z.number().int(),
+  updatedAt: z.string().optional(),
+});
+
+const deliverySchema = z.object({
+  deliveryId: z.string(),
+  scheduleId: z.string(),
+  runId: z.string(),
+  attempt: z.number().int(),
+  status: z.enum(DELIVERY_STATUSES),
+  format: z.enum(SCHEDULE_FORMATS),
+  destinationType: z.enum(DESTINATION_TYPES),
+  rowCount: z.number().int(),
+  bytes: z.number().int(),
+  error: z.string().optional(),
+  runAt: z.string(),
+  retryAt: z.string().optional(),
+});
+
+const exportSchema = z.object({
+  exportId: z.string(),
+  requestedBy: z.string(),
+  queryHash: z.string(),
+  plan: planSchema,
+  format: z.enum(EXPORT_FORMATS),
+  mode: z.enum(EXPORT_MODES),
+  rowCount: z.number().int(),
+  linkTtlHours: z.number().int(),
+  status: z.enum(EXPORT_STATUSES),
+  createdAt: z.string(),
+  linkExpiresAt: z.string(),
+  deleteAt: z.string(),
+  reused: z.boolean(),
+});
+
+const lineageAssetSchema = z.object({ fqn: z.string(), distance: z.number().int() });
+
+const lineageSchema = z.object({
+  asset: z.string(),
+  depth: z.number().int(),
+  upstream: z.array(lineageAssetSchema),
+  downstream: z.array(lineageAssetSchema),
+});
+
+export type Tile = z.infer<typeof tileSchema>;
+export type Dashboard = z.infer<typeof dashboardSchema>;
+export type Delivery = z.infer<typeof deliverySchema>;
+export type ExportJob = z.infer<typeof exportSchema>;
+export type LineageAsset = z.infer<typeof lineageAssetSchema>;
+export type Lineage = z.infer<typeof lineageSchema>;
+
+export interface DashboardInput {
+  title: string;
+  tiles: Tile[];
+  refreshSeconds: number;
+}
+
+export interface ExportInput extends QueryInput {
+  format: ExportJob["format"];
+  rowCount: number;
+  linkTtlHours: number;
+}
+
+export interface LineageEdge {
+  source: string;
+  target: string;
+}
+
+export async function listDashboards(fetchImpl: Fetch = defaultFetch, signal?: AbortSignal): Promise<Dashboard[]> {
+  return items(dashboardSchema).parse(await call(fetchImpl, "/dashboards", {}, signal)).items;
+}
+
+/** One dashboard with its version, which a later save sends back as If-Match. */
+export async function getDashboard(id: string, fetchImpl: Fetch = defaultFetch, signal?: AbortSignal): Promise<Dashboard> {
+  return dashboardSchema.parse(await call(fetchImpl, `/dashboards/${encodeURIComponent(id)}`, {}, signal));
+}
+
+/**
+ * Creates a dashboard (version null: no If-Match) or replaces it (If-Match
+ * with the version the editor was loaded at). A stale version fails with ANA-0113.
+ */
+export async function putDashboard(id: string, input: DashboardInput, version: number | null, fetchImpl: Fetch = defaultFetch): Promise<Dashboard> {
+  const headers: Record<string, string> = version === null ? {} : { "If-Match": `"${version}"` };
+  const body = await call(fetchImpl, `/dashboards/${encodeURIComponent(id)}`, { method: "PUT", headers, body: JSON.stringify(input) });
+  return dashboardSchema.parse(body);
+}
+
+/** Delivery attempts of one schedule, newest first. */
+export async function listDeliveries(scheduleId: string, status = "", fetchImpl: Fetch = defaultFetch, signal?: AbortSignal): Promise<Delivery[]> {
+  const body = await call(fetchImpl, `/schedules/${encodeURIComponent(scheduleId)}/deliveries${query({ status })}`, {}, signal);
+  return items(deliverySchema).parse(body).items;
+}
+
+/** Export log filters (PRD §9.46.14: user, date, format); an empty field matches every job. */
+export interface ExportFilter {
+  user?: string;
+  format?: string;
+  from?: string;
+  to?: string;
+}
+
+export async function listExports(filter: ExportFilter = {}, fetchImpl: Fetch = defaultFetch, signal?: AbortSignal): Promise<ExportJob[]> {
+  const q = query({ user: filter.user ?? "", format: filter.format ?? "", from: filter.from ?? "", to: filter.to ?? "" });
+  return items(exportSchema).parse(await call(fetchImpl, `/exports${q}`, {}, signal)).items;
+}
+
+/**
+ * Starts an export job. The caller keeps one idempotency key per filled-in
+ * form, so a retry after a lost response returns the job created the first
+ * time. `reused` is true when an identical export from the last hour is returned.
+ */
+export async function createExport(input: ExportInput, idempotencyKey: string, fetchImpl: Fetch = defaultFetch): Promise<ExportJob> {
+  const reply = await send(fetchImpl, `${base}/exports`, {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(input),
+  });
+  return exportSchema.parse(reply.body);
+}
+
+/** Upstream and downstream assets of a catalog asset, nearest first. */
+export async function getLineage(asset: string, depth: number, fetchImpl: Fetch = defaultFetch, signal?: AbortSignal): Promise<Lineage> {
+  const reply = await send(fetchImpl, `${catalogBase}/lineage/${encodeURIComponent(asset)}${query({ depth: depth > 0 ? String(depth) : "" })}`, {}, signal);
+  return lineageSchema.parse(reply.body);
+}
+
+/** Records lineage edges; re-sending an edge is harmless. Returns how many were new. */
+export async function addLineageEdges(edges: LineageEdge[], fetchImpl: Fetch = defaultFetch): Promise<number> {
+  const reply = await send(fetchImpl, `${catalogBase}/lineage/edges`, { method: "POST", body: JSON.stringify({ edges }) });
+  return z.object({ added: z.number().int() }).parse(reply.body).added;
+}

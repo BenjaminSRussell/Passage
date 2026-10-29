@@ -104,10 +104,13 @@ describe("analytics module", () => {
     expect(analytics.nav.every((n) => n.to.startsWith("/analytics"))).toBe(true);
     expect(Object.fromEntries(analytics.nav.map((n) => [n.to, n.duty]))).toEqual({
       "/analytics/metrics": "AnalyticsView",
+      "/analytics/dashboards": "AnalyticsView",
       "/analytics/explorer": "AnalyticsView",
+      "/analytics/exports": "AnalyticsExport",
       "/analytics/reconciliation": "FinanceView",
       "/analytics/data-quality": "CatalogSteward",
       "/analytics/schedules": "AnalyticsAuthor",
+      "/analytics/lineage": "CatalogView",
       "/analytics/archive": "ArchiveAdmin",
     });
     // Every nav entry resolves to a route.

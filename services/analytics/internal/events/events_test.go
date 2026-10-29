@@ -22,6 +22,7 @@ func TestAsyncAPI_MatchesPayloads(t *testing.T) {
 		MetricReconciled:      MetricReconciledData{},
 		DQScored:              DQScoredData{},
 		ArchivePartitionMoved: ArchivePartitionMovedData{},
+		ReportDelivered:       ReportDeliveredData{},
 	}
 	nameLine := regexp.MustCompile(`(?m)^      name: (\S+)$`)
 	documented := map[string]bool{}

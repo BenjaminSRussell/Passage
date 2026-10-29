@@ -20,6 +20,11 @@ channels:
     messages:
       archivePartitionMoved:
         $ref: "#/components/messages/ArchivePartitionMoved"
+  analyticsReport:
+    address: passage.analytics.report
+    messages:
+      reportDelivered:
+        $ref: "#/components/messages/ReportDelivered"
 operations:
   publishMetricReconciled:
     action: send
@@ -42,6 +47,13 @@ operations:
     summary: The archive job verified a partition's counts and content hash (FR-46.18, BR-46.14); evidence for control CC6.5
     messages:
       - $ref: "#/channels/archivePartition/messages/archivePartitionMoved"
+  publishReportDelivered:
+    action: send
+    channel:
+      $ref: "#/channels/analyticsReport"
+    summary: A scheduled report reached its destination (FR-46.10, AC-46.10); consumer is audit
+    messages:
+      - $ref: "#/channels/analyticsReport/messages/reportDelivered"
 components:
   messages:
     MetricReconciled:
@@ -245,5 +257,72 @@ components:
               content_hash:
                 type: string
               moved_at:
+                type: string
+                format: date-time
+    ReportDelivered:
+      name: dev.passage.analytics.report.delivered.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        description: Written to the outbox in the transaction that records the DELIVERED attempt in report_delivery and moves the schedule to its next cron slot. Failed and retried attempts emit nothing.
+        required: [specversion, id, source, type, subject, time, datacontenttype, tenantid, data]
+        properties:
+          specversion:
+            type: string
+            const: "1.0"
+          id:
+            type: string
+          source:
+            type: string
+            const: analytics
+          type:
+            type: string
+            const: dev.passage.analytics.report.delivered.v1
+          subject:
+            type: string
+            description: scheduleId
+          time:
+            type: string
+            format: date-time
+          datacontenttype:
+            type: string
+            const: application/json
+          tenantid:
+            type: string
+          correlationid:
+            type: string
+          causationid:
+            type: string
+          actor:
+            type: string
+          data:
+            type: object
+            required: [schedule_id, run_id, attempt, format, destination, row_count, bytes, delivered_at]
+            properties:
+              schedule_id:
+                type: string
+                format: uuid
+              run_id:
+                type: string
+                format: uuid
+                description: The same for every attempt of one scheduled run.
+              attempt:
+                type: integer
+                minimum: 1
+                description: 1 for the first try, up to 4 after three retries.
+              format:
+                type: string
+                enum: [PDF, XLSX]
+              destination:
+                type: string
+                enum: [EMAIL, SFTP, INBOX]
+                description: Destination type only; recipient addresses are not carried.
+              row_count:
+                type: integer
+                minimum: 0
+              bytes:
+                type: integer
+                minimum: 0
+              delivered_at:
                 type: string
                 format: date-time

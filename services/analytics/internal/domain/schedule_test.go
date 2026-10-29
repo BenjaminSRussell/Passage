@@ -154,6 +154,12 @@ func TestExportReuseAndLifetime_BR46_7(t *testing.T) {
 	if !LinkExpiresAt(created, DefaultLinkTTLHours).Equal(created.Add(24 * time.Hour)) {
 		t.Fatal("default link ttl is 24 hours")
 	}
+	if !LinkExpiresAt(created, 2).Equal(created.Add(2 * time.Hour)) {
+		t.Fatal("a shorter link ttl must be kept")
+	}
+	if !LinkExpiresAt(created, MaxLinkTTLHours).Equal(ExportDeleteAt(created)) {
+		t.Fatal("a link must not outlive the file, which is deleted after 24 hours")
+	}
 	if err := ValidateLinkTTL(0); err == nil {
 		t.Fatal("link ttl 0 must be rejected")
 	}
