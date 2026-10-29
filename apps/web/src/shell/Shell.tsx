@@ -6,6 +6,7 @@ import { copy } from "./copy";
 import { useOnlineStatus } from "./hooks/useOnlineStatus";
 import { demoNote } from "./metadata";
 import { resolvePage } from "./pageMeta";
+import { devDuties, PrincipalProvider } from "./principal";
 import { applyView, saveView, type Density, type Personalization, type SavedView } from "./personalization";
 import { RouteErrorBoundary } from "./RouteErrorBoundary";
 import styles from "./Shell.module.css";
@@ -25,6 +26,7 @@ function isShown(el: HTMLElement): boolean {
 
 export interface ShellProps {
   modules: PassageModule[];
+  duties?: readonly string[];
 }
 
 function PageSkeleton() {
@@ -38,7 +40,8 @@ function PageSkeleton() {
   );
 }
 
-export function Shell({ modules }: ShellProps) {
+export function Shell({ modules, duties }: ShellProps) {
+  const principalDuties = useMemo(() => duties ?? devDuties(), [duties]);
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const online = useOnlineStatus();
@@ -257,7 +260,9 @@ export function Shell({ modules }: ShellProps) {
           <div className={styles.content}>
             <RouteErrorBoundary key={pathname}>
               <Suspense fallback={<PageSkeleton />}>
-                <Outlet />
+                <PrincipalProvider duties={principalDuties}>
+                  <Outlet />
+                </PrincipalProvider>
               </Suspense>
             </RouteErrorBoundary>
           </div>

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Outlet } from "react-router-dom";
+import { usePrincipalDuties } from "../../shell/principal";
 import { Alert, Badge, DataTable, PageHeader, StatusPill, type DataTableColumn } from "../../shell/ui";
 import {
   ALL,
@@ -41,8 +42,9 @@ function OrgFrame() {
 }
 
 export function OrgLayout({ duties }: { duties?: readonly string[] }) {
+  const principalDuties = usePrincipalDuties();
   return (
-    <LegalEntityProvider duties={duties}>
+    <LegalEntityProvider duties={duties ?? principalDuties}>
       <OrgFrame />
     </LegalEntityProvider>
   );
