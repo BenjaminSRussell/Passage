@@ -103,6 +103,118 @@ func TestRun_RerunChangesNothing(t *testing.T) {
 	}
 }
 
+func TestRun_ScopesSeedLookupsToTheirDatabaseKeys(t *testing.T) {
+	s, _ := seededStore(t)
+	tenantID := testkit.TenantID(7)
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID})
+	other, err := s.CreateLegalEntity(ctx, store.LegalEntity{Code: "OTH", Name: "Other", Country: "US", Currency: "USD", TimeZone: "America/Chicago", DefaultLanguage: "en-US"}, "other-le")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherSite, err := s.CreateSite(ctx, store.Site{LegalEntityID: other.ID, Code: "OTH", Name: "Other", TimeZone: "America/Chicago"}, "other-site")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateWarehouse(ctx, store.Warehouse{SiteID: otherSite.ID, Code: "DET-QA", Name: "Other Detroit Quarantine", Type: "standard"}, "other-warehouse"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateOperatingUnit(ctx, store.OperatingUnit{Code: "OPS", Name: "Other OPS", Type: "department", DefaultLegalEntityID: &other.ID}, "other-ops"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := seed.Run(ctx, s, tenantID, seed.DemoManufacturer); err != nil {
+		t.Fatal(err)
+	}
+	units, err := s.ListOperatingUnits(ctx, store.OperatingUnitFilter{}, store.OperatingUnitKey{}, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundBusinessUnit := false
+	for _, unit := range units.Items {
+		foundBusinessUnit = foundBusinessUnit || unit.Code == "OPS" && unit.Type == "business_unit"
+	}
+	if !foundBusinessUnit {
+		t.Fatal("seed skipped business_unit/OPS because department/OPS already existed")
+	}
+	sites, err := s.ListSites(ctx, store.SiteFilter{}, store.SiteKey{}, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var det store.Site
+	for _, site := range sites.Items {
+		if site.LegalEntityID != other.ID && site.Code == "DET" {
+			det = site
+			break
+		}
+	}
+	if det.ID == "" {
+		t.Fatal("seeded Detroit site not found")
+	}
+	warehouses, err := s.ListWarehouses(ctx, store.WarehouseFilter{}, store.SiteKey{}, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var detQA string
+	for _, warehouse := range warehouses.Items {
+		if warehouse.SiteID == det.ID && warehouse.Code == "DET-QA" {
+			detQA = warehouse.ID
+		}
+	}
+	if detQA == "" {
+		t.Fatal("seeded Detroit DET-QA warehouse missing because the other legal entity's DET-QA already existed")
+	}
+	locations, err := s.ListLocations(ctx, store.LocationFilter{}, store.SiteKey{}, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, location := range locations.Items {
+		if location.WarehouseID == detQA && location.Code == "QA-01" {
+			return
+		}
+	}
+	t.Fatal("Detroit quality hold location was not attached to the seeded Detroit DET-QA")
+}
+
+func TestRun_RelinksExistingSeedAddressAfterPointerIsCleared(t *testing.T) {
+	s, pool := seededStore(t)
+	tenantID := testkit.TenantID(7)
+	runSeed(t, s, tenantID)
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID})
+	sites, err := s.ListSites(ctx, store.SiteFilter{}, store.SiteKey{}, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	site := sites.Items[0]
+	if site.AddressID == nil {
+		t.Fatal("seeded site address is missing")
+	}
+	address, err := s.GetAddress(ctx, *site.AddressID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	address.City, address.ValidFrom = "Elsewhere", "2026-01-02"
+	if _, err := s.ReviseAddress(ctx, address.ID, address.VersionID, address); err != nil {
+		t.Fatal(err)
+	}
+	addressCount := counts(t, ctx, pool)["postal_address"]
+	err = dbx.WithTenantTx(ctx, pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `update site set address_id = null where id = $1`, site.ID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := seed.Run(ctx, s, tenantID, seed.DemoManufacturer); err != nil {
+		t.Fatalf("rerun after clearing address pointer: %v", err)
+	}
+	updated, err := s.GetSite(ctx, site.ID)
+	if err != nil || updated.AddressID == nil || *updated.AddressID != *site.AddressID {
+		t.Fatalf("site address pointer = %v, err %v; want %s", updated.AddressID, err, *site.AddressID)
+	}
+	if got := counts(t, ctx, pool)["postal_address"]; got != addressCount {
+		t.Fatalf("rerun created another address: count %d, want %d", got, addressCount)
+	}
+}
+
 func TestRun_RerunAfterEditingSeededRows(t *testing.T) {
 	s, pool := seededStore(t)
 	tenantID := testkit.TenantID(7)

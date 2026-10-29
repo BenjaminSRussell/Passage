@@ -121,6 +121,7 @@ func TestRuleAddressValidator_Suggest(t *testing.T) {
 		wantPostal []string
 	}{
 		{"us missing leading zero", domain.PostalAddress{CountryCode: "US", PostalCode: "2108"}, []string{"02108"}},
+		{"us zip plus four missing leading zero", domain.PostalAddress{CountryCode: "US", PostalCode: "21081234"}, []string{"02108-1234"}},
 		{"de missing leading zero", domain.PostalAddress{CountryCode: "DE", PostalCode: "1067"}, []string{"01067"}},
 		{"ca letter o for zero", domain.PostalAddress{CountryCode: "CA", PostalCode: "K1A OB1"}, []string{"K1A 0B1"}},
 		{"valid has none", domain.PostalAddress{CountryCode: "FR", PostalCode: "75001"}, nil},
