@@ -1,0 +1,23 @@
+# Region settings read by passage-ops and by the failover workflow. Values come
+# from the region file; nothing here is a secret.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: passage-region
+  namespace: {{ .Values.region.namespace }}
+  labels:
+    {{- include "passage-mr.labels" . | nindent 4 }}
+data:
+  REGION_ID: {{ .Values.region.id | quote }}
+  REGION_ROLE: {{ .Values.region.role | quote }}
+  REGION_PROVIDER: {{ .Values.region.provider | quote }}
+  FAILOVER_MAX_LAG_S: {{ .Values.failover.maxLagSeconds | quote }}
+  FAILOVER_TWO_PERSON_WINDOW_MIN: {{ .Values.failover.twoPersonWindowMinutes | quote }}
+  DNS_PROVIDER: {{ .Values.failover.dnsProvider | quote }}
+  DNS_TTL_S: {{ .Values.failover.dnsTtlSeconds | quote }}
+  RTO_TARGET_MIN: {{ .Values.failover.rtoTargetMinutes | quote }}
+  RPO_TARGET_S: {{ .Values.failover.rpoTargetSeconds | quote }}
+  MM2_SOURCE_ALIAS: {{ .Values.mm2.sourceAlias | quote }}
+  MM2_TARGET_ALIAS: {{ .Values.mm2.targetAlias | quote }}
+  CNPG_SYNC_QUORUM: {{ include "passage-mr.syncQuorum" . | quote }}
+  CROSS_REGION_SYNC_LEDGER: {{ .Values.postgres.crossRegionSyncLedger | quote }}

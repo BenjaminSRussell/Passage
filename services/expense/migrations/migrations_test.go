@@ -9,7 +9,7 @@ import (
 )
 
 // Every table carries tenant_id and has row-level security enabled and forced with a
-// tenant policy; the report tables also have their legal-entity scope policy.
+// tenant policy; every business table also has its legal-entity scope policy.
 func TestMigrationsApplyWithRLS(t *testing.T) {
 	pool := testkit.DB(t)
 	ctx := context.Background()
@@ -40,17 +40,20 @@ func TestMigrationsApplyWithRLS(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	for _, table := range []string{"outbox", "idempotency_keys", "expense_report", "expense_line"} {
+	for _, table := range []string{"outbox", "idempotency_keys", "expense_report", "expense_line",
+		"travel_requisition", "cash_advance", "card_import", "card_transaction"} {
 		if !seen[table] {
 			t.Errorf("table %s was not created", table)
 		}
 	}
 	var scoped int
 	if err := pool.QueryRow(ctx, `select count(*) from pg_policies where schemaname = current_schema()
-		and policyname in ('expense_report_legal_entity_scope', 'expense_line_legal_entity_scope') and permissive = 'RESTRICTIVE'`).Scan(&scoped); err != nil {
+		and policyname in ('expense_report_legal_entity_scope', 'expense_line_legal_entity_scope',
+		  'travel_requisition_legal_entity_scope', 'cash_advance_legal_entity_scope',
+		  'card_import_legal_entity_scope', 'card_transaction_legal_entity_scope') and permissive = 'RESTRICTIVE'`).Scan(&scoped); err != nil {
 		t.Fatal(err)
 	}
-	if scoped != 2 {
-		t.Fatalf("restrictive legal-entity policies = %d; want 2", scoped)
+	if scoped != 6 {
+		t.Fatalf("restrictive legal-entity policies = %d; want 6", scoped)
 	}
 }

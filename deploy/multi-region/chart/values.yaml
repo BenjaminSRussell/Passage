@@ -1,0 +1,96 @@
+# Default values for passage-multiregion. Per-region overrides live in
+# deploy/multi-region/values/<region>.yaml. Exactly one region may be PRIMARY
+# for a tenant at any time (BR-50.1); the other is PASSIVE or FENCED.
+# values.schema.json enforces the enums and the PRD 9.50.13 ranges.
+
+region:
+  id: eu-west                 # region_id, e.g. eu-west, eu-central
+  role: PRIMARY               # PRIMARY | PASSIVE | FENCED (REGION_ROLE)
+  provider: bare              # eks | gke | aks | bare
+  namespace: passage-data     # namespace of the CNPG cluster, pooler, fence and alert rules
+
+postgres:
+  clusterName: passage-pg
+  imageName: ghcr.io/cloudnative-pg/postgresql:17
+  instances: 3                # 1 primary + 2 standbys (FR-50.2)
+  storageSize: 500Gi
+  # cnpg.sync_quorum (FR-50.2): quorum-synchronous standbys inside the PRIMARY
+  # region. method any|first renders as synchronous_standby_names "ANY 1".
+  synchronous:
+    method: any
+    number: 1
+  # cnpg.cross_region_sync.ledger: published to passage-ops only. CNPG replica
+  # clusters replicate asynchronously, so cross-region sync is not rendered here
+  # (docs/ops/NOT-IMPLEMENTED.md).
+  crossRegionSyncLedger: false
+  # Used only when role is PASSIVE: the current PRIMARY region's read-write endpoint.
+  primary:
+    host: passage-pg-rw.eu-central.passage.internal
+    port: 5432
+    user: streaming_replica
+    replicationSecret: passage-pg-replication   # key: password
+    tlsSecret: passage-pg-replication-tls       # keys: tls.crt, tls.key, ca.crt
+  # PgBouncer in transaction mode (FR-50.2). platform/go/dbx sets the tenant with
+  # set_config(..., true), which is transaction-local and so pooler-safe.
+  pooler:
+    enabled: true
+    instances: 3
+    maxClientConn: 2000
+    defaultPoolSize: 50
+    maxPreparedStatements: 200  # pgx uses the extended protocol
+
+kafka:
+  namespace: kafka                          # namespace of the Strimzi Kafka cluster (deploy/kafka)
+  clusterName: passage                      # Strimzi Kafka name; its CA secret is <name>-cluster-ca-cert
+  localAlias: eu-west
+  localBootstrap: passage-kafka-bootstrap.kafka.svc:9093
+  localTrustSecret: passage-cluster-ca-cert # key: ca.crt
+  remoteAlias: eu-central
+  remoteBootstrap: passage-kafka-bootstrap.kafka.passage-eu-central.internal:9093
+  remoteTrustSecret: passage-kafka-remote-ca     # key: ca.crt, copy of the peer's cluster CA
+  remoteMm2Secret: passage-mm2-remote            # key: password, copy of the peer's passage-mm2 KafkaUser secret
+
+mm2:
+  enabled: true
+  # The SCRAM KafkaUser this chart creates in every region; the User Operator
+  # writes its password to a Secret of the same name.
+  user: passage-mm2
+  version: 4.0.0
+  replicas: 3
+  replicationFactor: 3
+  # Direction is data, not code: failover swaps sourceAlias and targetAlias in
+  # both region files (FR-50.5 "switches MirrorMaker direction"). MirrorMaker 2
+  # runs next to its target cluster, so it renders only where
+  # kafka.localAlias == mm2.targetAlias.
+  sourceAlias: eu-west
+  targetAlias: eu-central
+  topicsPattern: "passage\\.(?!internal\\.).*"
+  groupsPattern: ".*"
+  lagAlertMessages: 100000    # mm2.lag_alert_messages, >= 1000
+
+failover:
+  maxLagSeconds: 300          # FAILOVER_MAX_LAG_S, range 30-3600
+  dnsTtlSeconds: 60           # dns.ttl_s, range 30-300
+  dnsProvider: none           # DNS_PROVIDER: name of the per-provider DNS module (not built, see NOT-IMPLEMENTED)
+  twoPersonWindowMinutes: 5   # failover.two_person_window_min, range 1-30
+  rtoTargetMinutes: 60
+  rpoTargetSeconds: 300
+
+slo:
+  # Availability target per tenant (FR-50.1); the error budget is 1 - target.
+  availabilityTarget: 0.999
+  burnFast: 14.4              # 1 h window (with 5 m confirmation), page (BR-50.6)
+  burnSlow: 6                 # 6 h window (with 30 m confirmation), ticket (BR-50.6)
+  # Render the passage:slo_burn_rate:* recording rules from http_requests_total,
+  # the series the observability chart's alerts already use.
+  recordingRules: true
+
+license:
+  warnDays: [30, 7, 1]        # one alert per band: (7,30], (1,7], <= 1
+
+fence:
+  # FENCED regions are always fenced. Set true otherwise only from a game day.
+  # The fence stops every CNPG instance (cnpg.io/fencedInstances) and closes the
+  # Postgres pods to all ingress except their own cluster and the CNPG operator.
+  enabled: false
+  operatorNamespace: cnpg-system

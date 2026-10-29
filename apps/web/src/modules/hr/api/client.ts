@@ -583,3 +583,356 @@ export function createBenefitEnrollment(input: NewBenefitEnrollment, key: string
 export function endBenefitEnrollment(enrollmentId: string, lastDay: string, reason: EnrollmentEndReason): Promise<BenefitEnrollment> {
   return command<BenefitEnrollment>(`/benefits/enrollments/${id(enrollmentId)}/end`, { lastDay, reason });
 }
+
+// Skills and certifications (FR-42.10), skill mapping and gap analysis (FR-42.18).
+
+/** Skill and certificate codes: 1 to 20 of A-Z, 0-9, hyphen and underscore. */
+export const SKILL_CODE = /^[A-Z0-9][A-Z0-9_-]{0,19}$/;
+/** The widest rating scale a skill may declare. */
+export const MAX_SKILL_SCALE = 10;
+
+export interface Skill {
+  id: string;
+  code: string;
+  name: string;
+  scaleMax: number;
+  createdAt: string;
+}
+
+export interface NewSkill {
+  code: string;
+  name: string;
+  scaleMax: number;
+}
+
+export interface WorkerSkill {
+  workerId: string;
+  skillId: string;
+  skillCode: string;
+  skillName: string;
+  scaleMax: number;
+  rating: number;
+  assessedOn: string;
+  updatedAt: string;
+}
+
+export interface NewRating {
+  skillCode: string;
+  rating: number;
+  assessedOn: string;
+}
+
+export interface Certification {
+  id: string;
+  workerId: string;
+  code: string;
+  name: string;
+  issuer?: string;
+  issuedOn: string;
+  /** Exclusive: the certificate is no longer valid on this day. Absent when it never expires. */
+  expiresOn?: string;
+  valid: boolean;
+}
+
+export interface NewCertification {
+  code: string;
+  name: string;
+  issuer?: string;
+  issuedOn: string;
+  expiresOn?: string;
+  validityMonths?: number;
+}
+
+export interface CertificationList {
+  asOf: string;
+  items: Certification[];
+}
+
+export interface ExpiringCertification extends Certification {
+  personnelNumber: string;
+  legalName: string;
+  daysLeft: number;
+}
+
+export interface ExpiringCertificationPage extends Page<ExpiringCertification> {
+  asOf: string;
+  withinDays: number;
+}
+
+export interface SkillRequirement {
+  positionId: string;
+  skillId: string;
+  skillCode: string;
+  skillName: string;
+  scaleMax: number;
+  minRating: number;
+}
+
+/** One requirement next to the worker's rating; delta = actual - required, negative is a shortfall. */
+export interface SkillGapRow {
+  skill: string;
+  required: number;
+  actual: number;
+  delta: number;
+}
+
+export interface SkillGap {
+  workerId: string;
+  positionId: string;
+  met: boolean;
+  comparison: SkillGapRow[];
+  gaps: SkillGapRow[];
+}
+
+export interface SkillMatch {
+  workerId: string;
+  personnelNumber: string;
+  legalName: string;
+  skills: SkillGapRow[];
+}
+
+export interface SkillSearchResult {
+  asOf: string;
+  items: SkillMatch[];
+  truncated: boolean;
+}
+
+export interface SkillSearchQuery {
+  /** Comma-separated CODE or CODE:min terms. */
+  skills?: string;
+  minRating?: string;
+  certs?: string;
+  asOf?: string;
+}
+
+export function listSkills(filter: { cursor?: string } = {}, signal?: AbortSignal): Promise<Page<Skill>> {
+  return page<Skill>(`/skills${query({ cursor: filter.cursor })}`, signal);
+}
+
+/** Every skill in the catalog, following the cursor (the catalog is short; pickers need all of it). */
+export async function listAllSkills(signal?: AbortSignal): Promise<Skill[]> {
+  const out: Skill[] = [];
+  let cursor: string | undefined;
+  do {
+    const next = await listSkills({ cursor }, signal);
+    out.push(...next.items);
+    cursor = next.nextCursor;
+  } while (cursor);
+  return out;
+}
+
+export function createSkill(input: NewSkill, key: string = newKey()): Promise<Skill> {
+  return post<Skill>("/skills", input, key);
+}
+
+export async function listWorkerSkills(workerId: string, signal?: AbortSignal): Promise<WorkerSkill[]> {
+  return (await page<WorkerSkill>(`/workers/${id(workerId)}/skills`, signal)).items;
+}
+
+/** Recording the same rating and date again is a no-op on the service, so no key is needed. */
+export function rateWorkerSkill(workerId: string, input: NewRating): Promise<WorkerSkill> {
+  return command<WorkerSkill>(`/workers/${id(workerId)}/skills`, input);
+}
+
+export function listCertifications(workerId: string, asOf?: string, signal?: AbortSignal): Promise<CertificationList> {
+  return send<CertificationList>(`/workers/${id(workerId)}/certifications${query({ asOf })}`, {}, signal);
+}
+
+export function issueCertification(workerId: string, input: NewCertification, key: string = newKey()): Promise<Certification> {
+  return post<Certification>(`/workers/${id(workerId)}/certifications`, input, key);
+}
+
+export function listExpiringCertifications(
+  filter: { withinDays?: string; asOf?: string; cursor?: string } = {},
+  signal?: AbortSignal,
+): Promise<ExpiringCertificationPage> {
+  return send<ExpiringCertificationPage>(
+    `/certifications/expiring${query({ withinDays: filter.withinDays, asOf: filter.asOf, cursor: filter.cursor })}`,
+    {},
+    signal,
+  );
+}
+
+export async function listSkillRequirements(positionId: string, signal?: AbortSignal): Promise<SkillRequirement[]> {
+  return (await page<SkillRequirement>(`/positions/${id(positionId)}/skill-requirements`, signal)).items;
+}
+
+/** Sets or replaces one skill's minimum, so a retry is safe without a key. */
+export function setSkillRequirement(positionId: string, skillCode: string, minRating: number): Promise<SkillRequirement> {
+  return command<SkillRequirement>(`/positions/${id(positionId)}/skill-requirements`, { skillCode, minRating });
+}
+
+export async function removeSkillRequirement(positionId: string, skillCode: string): Promise<void> {
+  const res = await fetch(`${base}/positions/${id(positionId)}/skill-requirements/${id(skillCode)}`, {
+    method: "DELETE",
+    headers: { Accept: "application/json" },
+    credentials: "same-origin",
+  });
+  if (!res.ok) throw await toError(res);
+}
+
+export function skillGap(workerId: string, positionId: string, signal?: AbortSignal): Promise<SkillGap> {
+  return send<SkillGap>(`/workers/${id(workerId)}/skill-gap${query({ positionId })}`, {}, signal);
+}
+
+export function searchSkills(q: SkillSearchQuery, signal?: AbortSignal): Promise<SkillSearchResult> {
+  return send<SkillSearchResult>(
+    `/skills/search${query({ skills: q.skills?.trim(), minRating: q.minRating?.trim(), certs: q.certs?.trim(), asOf: q.asOf })}`,
+    {},
+    signal,
+  );
+}
+
+// Courses (slice 5): catalog, sessions, registrations and completion (FR-42.14, BR-42.9).
+
+export type RegistrationStatus = "REQUESTED" | "CONFIRMED" | "WAITLISTED" | "ATTENDED" | "NO_SHOW" | "CANCELED";
+export type CourseResult = "PASS" | "FAIL";
+
+/** Waitlist size a session takes when the form leaves it empty (8.42.13 default). */
+export const DEFAULT_WAITLIST = 5;
+export const MAX_WAITLIST = 100;
+export const MAX_SEATS = 10000;
+export const MAX_VALIDITY_MONTHS = 240;
+
+export interface CourseSkillOutcome {
+  skillId: string;
+  skillCode: string;
+  skillName: string;
+  rating: number;
+}
+
+export interface Course {
+  id: string;
+  code: string;
+  name: string;
+  courseGroup?: string;
+  skillOutcomes: CourseSkillOutcome[];
+  certificationCode?: string;
+  certificationName?: string;
+  /** 0: the certificate does not expire. */
+  validityMonths: number;
+  requiresManagerApproval: boolean;
+  createdAt: string;
+}
+
+export interface NewCourse {
+  code: string;
+  name: string;
+  courseGroup?: string;
+  skillOutcomes: { skillCode: string; rating: number }[];
+  certificationCode?: string;
+  certificationName?: string;
+  validityMonths?: number;
+  requiresManagerApproval: boolean;
+}
+
+export interface CourseSession {
+  id: string;
+  courseId: string;
+  courseCode: string;
+  courseName: string;
+  startsAt: string;
+  endsAt: string;
+  location?: string;
+  virtualUrl?: string;
+  instructorWorkerId?: string;
+  instructorPartyId?: string;
+  capacity: number;
+  waitlistCapacity: number;
+  /** Decimal string at the currency's minor units. */
+  costPerAttendee?: string;
+  currency?: string;
+  confirmed: number;
+  waitlisted: number;
+  requested: number;
+  seatsLeft: number;
+  createdAt: string;
+}
+
+export interface NewCourseSession {
+  startsAt: string;
+  endsAt: string;
+  location?: string;
+  virtualUrl?: string;
+  instructorWorkerId?: string;
+  capacity: number;
+  waitlistCapacity?: number;
+  costPerAttendee?: string;
+  currency?: string;
+}
+
+export interface CourseRegistration {
+  id: string;
+  sessionId: string;
+  workerId: string;
+  personnelNumber: string;
+  legalName: string;
+  status: RegistrationStatus;
+  result?: CourseResult;
+  score?: string;
+  completedOn?: string;
+  queuedAt: string;
+}
+
+export interface CourseRegistrationResult extends CourseRegistration {
+  warnings: RuleWarning[];
+}
+
+export interface CompletionLine {
+  workerId: string;
+  outcome: "ATTENDED" | "NO_SHOW";
+  result?: CourseResult;
+  score?: string;
+}
+
+export interface CourseCompletion {
+  items: CourseRegistration[];
+  changed: number;
+  passed: number;
+}
+
+export function listCourses(filter: { cursor?: string } = {}, signal?: AbortSignal): Promise<Page<Course>> {
+  return page<Course>(`/courses${query({ cursor: filter.cursor })}`, signal);
+}
+
+export function getCourse(courseId: string, signal?: AbortSignal): Promise<Course> {
+  return send<Course>(`/courses/${id(courseId)}`, {}, signal);
+}
+
+export function createCourse(input: NewCourse, key: string = newKey()): Promise<Course> {
+  return post<Course>("/courses", input, key);
+}
+
+export async function listCourseSessions(courseId: string, signal?: AbortSignal): Promise<CourseSession[]> {
+  return (await page<CourseSession>(`/courses/${id(courseId)}/sessions`, signal)).items;
+}
+
+export function createCourseSession(courseId: string, input: NewCourseSession, key: string = newKey()): Promise<CourseSession> {
+  return post<CourseSession>(`/courses/${id(courseId)}/sessions`, input, key);
+}
+
+export function getCourseSession(sessionId: string, signal?: AbortSignal): Promise<CourseSession> {
+  return send<CourseSession>(`/courses/sessions/${id(sessionId)}`, {}, signal);
+}
+
+export async function listCourseRegistrations(sessionId: string, signal?: AbortSignal): Promise<CourseRegistration[]> {
+  return (await page<CourseRegistration>(`/courses/sessions/${id(sessionId)}/registrations`, signal)).items;
+}
+
+/** One registration per worker and session, so registering again returns it; no key is needed. */
+export function registerForCourseSession(sessionId: string, workerId: string): Promise<CourseRegistrationResult> {
+  return command<CourseRegistrationResult>(`/courses/sessions/${id(sessionId)}/registrations`, { workerId });
+}
+
+export function approveCourseRegistration(registrationId: string): Promise<CourseRegistration> {
+  return command<CourseRegistration>(`/courses/registrations/${id(registrationId)}/approve`);
+}
+
+export function cancelCourseRegistration(registrationId: string): Promise<CourseRegistration> {
+  return command<CourseRegistration>(`/courses/registrations/${id(registrationId)}/cancel`);
+}
+
+/** The same outcome again changes nothing on the service, so a retry is safe without a key. */
+export function completeCourseSession(sessionId: string, results: CompletionLine[]): Promise<CourseCompletion> {
+  return command<CourseCompletion>(`/courses/sessions/${id(sessionId)}/complete`, { results });
+}

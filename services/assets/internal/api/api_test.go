@@ -41,11 +41,18 @@ type fakeStore struct {
 	// Slice 4 (capex_decision_test.go).
 	lastDecision   store.CapexDecisionInput
 	lastMidQuarter store.MidQuarterFilter
+
+	// Slice 5 (transfer_group_test.go).
+	groups          map[string]store.GroupAsset
+	lastTransfer    store.TransferInput
+	lastGroup       store.GroupAssetInput
+	lastGroupFilter store.GroupFilter
 }
 
 func newFake() *fakeStore {
 	return &fakeStore{assets: map[string]store.Asset{}, books: map[string]store.Book{}, leases: map[string]store.Lease{},
-		runs: map[string]store.DepreciationRun{}, capex: map[string]store.CapexRequest{}, series: map[string]store.IndexSeries{}, impairment: map[string]decimal.Decimal{}}
+		runs: map[string]store.DepreciationRun{}, capex: map[string]store.CapexRequest{}, series: map[string]store.IndexSeries{}, impairment: map[string]decimal.Decimal{},
+		groups: map[string]store.GroupAsset{}}
 }
 
 func (f *fakeStore) CreateAsset(_ context.Context, in store.Asset, _ string) (store.Asset, error) {

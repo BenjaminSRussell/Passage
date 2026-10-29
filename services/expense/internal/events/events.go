@@ -15,3 +15,17 @@ type PolicyViolatedData struct {
 	RuleID   string `json:"ruleId"`
 	Outcome  string `json:"outcome"`
 }
+
+// CashAdvancePaid is published when an approved advance is recorded as paid by its AP
+// prepayment (PRD 8.43.5 `cash-advance.paid.v1`). The kernel naming rule allows no
+// hyphen in the entity, so the entity is "cashadvance".
+const CashAdvancePaid = "dev.passage.expense.cashadvance.paid.v1"
+
+// CashAdvancePaidData is the payload of CashAdvancePaid: ids and the paid amount, no bank data.
+type CashAdvancePaidData struct {
+	AdvanceID    string `json:"advanceId"`
+	WorkerID     string `json:"workerId"`
+	Amount       string `json:"amount"`
+	Currency     string `json:"currency"`
+	PrepaymentID string `json:"prepaymentId"`
+}

@@ -4,6 +4,7 @@ package store
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -17,6 +18,10 @@ import (
 )
 
 const eventSource = "analytics"
+
+// ownTenant repeats the RLS predicate in queries, so a connection that bypasses
+// row-level security (a superuser, the migration role) still reads one tenant.
+const ownTenant = `tenant_id = current_setting('passage.tenant_id', true)::uuid`
 
 const reconColumns = `legal_entity_id::text, metric_id, recon_date::text, currency, semantic_value, source_value,
 	delta, tolerance, status, consecutive_ok_days, trusted`
@@ -32,6 +37,16 @@ func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
 
 // Ping checks the database for readiness.
 func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
+
+// utc normalises a scanned timestamptz to UTC so responses do not depend on
+// the server's time zone.
+func utc(t *time.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	u := t.UTC()
+	return &u
+}
 
 func scanRecon(row pgx.Row) (domain.Reconciliation, error) {
 	var r domain.Reconciliation

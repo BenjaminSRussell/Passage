@@ -1,0 +1,15 @@
+image: { repository: ghcr.io/benjaminsrussell/mcp-gateway, digest: "", tag: "", pullPolicy: IfNotPresent }
+# Base URL of the Passage API the gateway forwards user tokens to (edge routes /api/v1).
+apiUrl: http://passage-api.passage.svc.cluster.local:8080
+# ConfigMap holding the OpenAPI document as JSON, generated at deploy time from the services' specs.
+openApi: { configMap: mcp-gateway-openapi, key: openapi.json }
+replicaCount: 3
+resources:
+  requests: { cpu: 50m, memory: 96Mi }
+  limits: { cpu: 500m, memory: 256Mi }
+# /metrics is served on the admin port 9090. Off by default like every service
+# chart: enable it where the Prometheus Operator CRDs are installed.
+serviceMonitor: { enabled: false }
+# Namespaces allowed to call the gateway besides its own, e.g. the edge gateway's;
+# metricsNamespace may reach only the admin port.
+networkPolicy: { metricsNamespace: observability, ingressNamespaces: [] }

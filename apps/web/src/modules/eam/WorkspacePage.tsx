@@ -10,6 +10,8 @@ const areas = [
   { to: "/eam/requests", title: "Requests", text: "Triage, defer or reject requests from people and condition rules, or convert them to work orders." },
   { to: "/eam/work-orders", title: "Work orders", text: "Move orders through their lifecycle, book labor and downtime, and register faults." },
   { to: "/eam/fault-catalogs", title: "Fault catalogs", text: "Design the symptoms, causes and remedies technicians choose from per asset type." },
+  { to: "/eam/rounds", title: "Maintenance rounds", text: "Routes of assets inspected together, one work order per round with a job per stop." },
+  { to: "/eam/kpis", title: "Maintenance KPIs", text: "Cost per asset, the open backlog, emergency orders to regularize and plan reviews due." },
 ];
 
 /** Asset management workspace (8.44.6): tiles counted by the service, then the areas of the workspace. */

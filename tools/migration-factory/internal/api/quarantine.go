@@ -1,0 +1,56 @@
+package api
+
+import (
+	"net/http"
+
+	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/domain"
+	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/store"
+)
+
+type releaseRequest struct {
+	// Party and Account correct the quarantined record; blank keeps the extracted value.
+	Party   string `json:"party,omitempty"`
+	Account string `json:"account,omitempty"`
+	// Parties are master-data ids added since the run, checked with the run's snapshot.
+	Parties []string `json:"parties,omitempty"`
+	Version int      `json:"version,omitempty"`
+}
+
+// releaseQuarantined corrects a quarantined open item and loads it when the suite now passes
+// (FR-49.11, 9.49.5). Releasing a record that is already released returns the run with
+// Idempotent-Replayed: true (idempotent by record).
+func (s *Server) releaseQuarantined(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	seq, err := seqParam(r, "rec")
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	var req releaseRequest
+	idem, err := readCommand(r, &req, 1<<20)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	p, ok := principal(w, r)
+	if !ok {
+		return
+	}
+	if req.Version < 0 {
+		fail(w, r, invalid("version must be >= 1 when given"))
+		return
+	}
+	run, replayed, err := s.store.ReleaseQuarantined(r.Context(), idem, store.Release{
+		RunID: id, Seq: seq, Fix: domain.Correction{Party: req.Party, Account: req.Account},
+		Parties: splitIDs(req.Parties), ExpectedVersion: req.Version, By: p.UserID,
+	})
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	respond(w, http.StatusOK, replayed, toRunDTO(run))
+}

@@ -8,7 +8,7 @@ export type WorkOrderStatus = "CREATED" | "SCHEDULED" | "RELEASED" | "IN_PROGRES
 export type WorkOrderType = "PREVENTIVE" | "CORRECTIVE" | "INSPECTION" | "EMERGENCY" | "CAPITAL";
 export type RequestStatus = "NEW" | "TRIAGED" | "CONVERTED" | "REJECTED" | "DEFERRED";
 export type RequestSource = "USER" | "MOBILE" | "QUALITY";
-export type LineKind = "TIME" | "COUNTER" | "TIME_OR_COUNTER" | "TIME_AND_COUNTER";
+export type LineKind = "TIME" | "COUNTER" | "TIME_OR_COUNTER" | "TIME_AND_COUNTER" | "ROUND";
 export type IntervalUnit = "DAYS" | "WEEKS" | "MONTHS" | "YEARS";
 
 export interface Page<T> {
@@ -25,6 +25,7 @@ export interface Asset {
   criticality: number;
   lifecycleState: LifecycleState;
   productionResourceId?: string;
+  functionalLocationId?: string;
   version: number;
   createdAt: string;
 }
@@ -65,6 +66,7 @@ export interface AssetDetail extends Asset {
   openWorkOrders: number;
   partsCost: string;
   laborCost: string;
+  location?: FunctionalLocation;
 }
 
 export interface NewCounter {
@@ -114,6 +116,8 @@ export interface Workspace {
 export interface PlanLine {
   id: string;
   assetId: string;
+  /** ROUND lines only: the round they schedule; assetId is its first stop. */
+  roundId?: string;
   kind: LineKind;
   intervalValue?: number;
   intervalUnit?: IntervalUnit;
@@ -139,14 +143,16 @@ export interface Plan {
   lines: PlanLine[];
 }
 
+/** A plan line; ROUND lines name roundId instead of assetId and jobType (FR-44.14). */
 export interface NewPlanLine {
-  assetId: string;
+  assetId?: string;
+  roundId?: string;
   kind: LineKind;
   intervalValue?: number;
   intervalUnit?: IntervalUnit;
   counterId?: string;
   counterInterval?: number;
-  jobType: string;
+  jobType?: string;
   horizonDays?: number;
   startAt?: string;
 }
@@ -253,6 +259,8 @@ export interface WorkOrderDetail extends WorkOrder {
   history: StatusChange[];
   fault?: WorkOrderFault;
   downtime: DowntimeWindow[];
+  /** ROUND orders only, in stop order (BR-44.9). */
+  stops?: WorkOrderStop[];
 }
 
 export interface NewDowntime {
@@ -564,4 +572,416 @@ export function recordDowntime(workOrderId: string, input: NewDowntime, key: str
 
 export function triageRequest(requestId: string, action: TriageAction, note: string, key = newKey()): Promise<MaintenanceRequest> {
   return post<MaintenanceRequest>(`/requests/${id(requestId)}/triage`, note ? { action, note } : { action }, key);
+}
+
+// Slice 3: permits to work and lockout/tagout (FR-44.19, BR-44.11).
+
+export type PermitStatus = "REQUESTED" | "APPROVED" | "ISSUED" | "SUSPENDED" | "CLOSED" | "CANCELED";
+export type EnergyType = "ELECTRICAL" | "PNEUMATIC" | "HYDRAULIC" | "MECHANICAL" | "THERMAL" | "CHEMICAL";
+export type LockAction = "APPLY" | "VERIFY" | "REMOVE";
+export type LockState = "APPLIED" | "VERIFIED" | "REMOVED";
+
+export interface PermitType {
+  code: string;
+  name: string;
+  approverRole: string;
+  maxValidityHours: number;
+  requiresIsolation: boolean;
+  requiresGasTest: boolean;
+}
+
+export interface JobPermits {
+  jobType: string;
+  permitTypeCodes: string[];
+}
+
+export interface NewIsolationPoint {
+  energyType: EnergyType;
+  location: string;
+  method: string;
+  verificationStep: string;
+  tagCode: string;
+}
+
+export interface IsolationPoint extends NewIsolationPoint {
+  id: string;
+  assetId: string;
+  createdAt: string;
+}
+
+export interface Permit {
+  id: string;
+  number: string;
+  permitTypeCode: string;
+  workOrderId: string;
+  assetId: string;
+  status: PermitStatus;
+  validFrom: string;
+  validTo: string;
+  requestedBy: string;
+  approvedBy?: string;
+  issuedBy?: string;
+  closedBy?: string;
+  locksOpen: number;
+  version: number;
+  createdAt: string;
+}
+
+export interface NewPermit {
+  workOrderId: string;
+  permitTypeCode: string;
+  validFrom: string;
+  validTo: string;
+}
+
+export interface LotoLock {
+  id: string;
+  permitId: string;
+  isolationPointId: string;
+  technicianId: string;
+  lockNumber: string;
+  state: LockState;
+  appliedAt: string;
+  verifiedAt?: string;
+  removedAt?: string;
+}
+
+export interface PermitDetail {
+  permit: Permit;
+  isolationPoints: IsolationPoint[];
+  locks: LotoLock[];
+  unlockedPoints: number;
+  history: StatusChange[];
+}
+
+export interface ExpiredPermit {
+  permitId: string;
+  number: string;
+  workOrderId: string;
+  validTo: string;
+  workOrderInProgress: boolean;
+  code: string;
+}
+
+export interface PermitFilter extends ListFilter {
+  workOrder?: string;
+}
+
+export async function listPermitTypes(signal?: AbortSignal): Promise<PermitType[]> {
+  return (await page<PermitType>("/permit-types", signal)).items;
+}
+
+/** Creates or replaces a permit type; saving the same definition again changes nothing. */
+export function upsertPermitType(input: PermitType, key = newKey()): Promise<PermitType> {
+  return post<PermitType>("/permit-types", input, key);
+}
+
+export function getJobPermits(jobType: string, signal?: AbortSignal): Promise<JobPermits> {
+  return send<JobPermits>(`/job-types/${id(jobType)}/permits`, {}, signal);
+}
+
+/** Replaces the permit types a job type requires; an empty list clears the requirement. */
+export function setJobPermits(jobType: string, permitTypeCodes: string[]): Promise<JobPermits> {
+  return send<JobPermits>(`/job-types/${id(jobType)}/permits`, { method: "PUT", body: JSON.stringify({ permitTypeCodes }) });
+}
+
+export async function listIsolationPoints(assetId: string, signal?: AbortSignal): Promise<IsolationPoint[]> {
+  return (await page<IsolationPoint>(`/assets/${id(assetId)}/isolation-points`, signal)).items;
+}
+
+export function createIsolationPoint(assetId: string, input: NewIsolationPoint, key: string): Promise<IsolationPoint> {
+  return post<IsolationPoint>(`/assets/${id(assetId)}/isolation-points`, input, key);
+}
+
+export function listPermits(filter: PermitFilter = {}, signal?: AbortSignal): Promise<Page<Permit>> {
+  const q = query({
+    status: filter.status,
+    asset: filter.asset,
+    workOrder: filter.workOrder,
+    cursor: filter.cursor,
+    limit: filter.limit === undefined ? undefined : String(filter.limit),
+  });
+  return page<Permit>(`/permits${q}`, signal);
+}
+
+export function getPermit(permitId: string, signal?: AbortSignal): Promise<PermitDetail> {
+  return send<PermitDetail>(`/permits/${id(permitId)}`, {}, signal);
+}
+
+export function requestPermit(input: NewPermit, key: string): Promise<Permit> {
+  return post<Permit>("/permits", input, key);
+}
+
+/** Approve, issue, suspend, close or cancel; version is the permit version read (If-Match). */
+export function transitionPermit(permitId: string, to: Exclude<PermitStatus, "REQUESTED">, version: number, key = newKey()): Promise<Permit> {
+  return post<Permit>(`/permits/${id(permitId)}/transition`, { to }, key, { "If-Match": `"${version}"` });
+}
+
+/** Applies, verifies or removes the caller's own personal lock on an isolation point. */
+export function recordLock(permitId: string, action: LockAction, isolationPointId: string, key = newKey()): Promise<LotoLock> {
+  return post<LotoLock>(`/permits/${id(permitId)}/locks`, { action, isolationPointId }, key);
+}
+
+/** Runs the permit expiry check: ISSUED permits past their validity are suspended (EAM-PMT-004). */
+export async function expirePermits(key = newKey()): Promise<ExpiredPermit[]> {
+  return (await post<{ items: ExpiredPermit[] }>("/permits/expire", undefined, key)).items;
+}
+
+// Slice 4: functional locations (FR-44.1, FR-44.2) and maintenance sequences (FR-44.15).
+
+/** A node of a site's plant structure; path joins the codes from the root with "/". */
+export interface FunctionalLocation {
+  id: string;
+  code: string;
+  name: string;
+  siteId: string;
+  parentId?: string;
+  locationType?: string;
+  depth: number;
+  path: string;
+  createdAt: string;
+}
+
+export interface NewLocation {
+  code: string;
+  name: string;
+  siteId: string;
+  parentId?: string;
+  locationType?: string;
+}
+
+export interface LocationDetail extends FunctionalLocation {
+  children: FunctionalLocation[];
+  assets: Asset[];
+}
+
+export type LocationMove = "INSTALL" | "MOVE" | "REMOVE";
+
+export interface LocationHistory {
+  id: string;
+  assetId: string;
+  action: LocationMove;
+  fromLocationId?: string;
+  fromPath?: string;
+  toLocationId?: string;
+  toPath?: string;
+  actor: string;
+  at: string;
+}
+
+export interface LocationFilter {
+  site?: string;
+  under?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface SequenceStep {
+  code: string;
+  jobType: string;
+  multiple: number;
+  hierarchy: number;
+  includes?: string[];
+}
+
+export interface MaintenanceSequence {
+  id: string;
+  code: string;
+  name: string;
+  assetId?: string;
+  assetType?: string;
+  baseIntervalValue: number;
+  baseIntervalUnit?: IntervalUnit;
+  counterId?: string;
+  steps: SequenceStep[];
+  lastOccurrenceNumber: number;
+  version: number;
+  createdAt: string;
+}
+
+export interface NewSequence {
+  code: string;
+  name: string;
+  assetId?: string;
+  assetType?: string;
+  baseIntervalValue: number;
+  baseIntervalUnit?: IntervalUnit;
+  counterId?: string;
+  steps: SequenceStep[];
+}
+
+export interface SimulatedOccurrence {
+  occurrenceNumber: number;
+  stepCodes: string[];
+  jobTypes: string[];
+}
+
+export interface SequenceOccurrence extends SimulatedOccurrence {
+  id: string;
+  sequenceId: string;
+  workOrderId?: string;
+  actor: string;
+  createdAt: string;
+}
+
+export interface NewOccurrence {
+  currency: string;
+  dueAt?: string;
+}
+
+export function listLocations(filter: LocationFilter = {}, signal?: AbortSignal): Promise<Page<FunctionalLocation>> {
+  const q = query({ site: filter.site, under: filter.under, cursor: filter.cursor, limit: filter.limit === undefined ? undefined : String(filter.limit) });
+  return page<FunctionalLocation>(`/functional-locations${q}`, signal);
+}
+
+export function getLocation(locationId: string, signal?: AbortSignal): Promise<LocationDetail> {
+  return send<LocationDetail>(`/functional-locations/${id(locationId)}`, {}, signal);
+}
+
+export function createLocation(input: NewLocation, key: string): Promise<FunctionalLocation> {
+  return post<FunctionalLocation>("/functional-locations", input, key);
+}
+
+/** Installs or moves the asset to a location, or removes it (null); version is the asset version read (If-Match). */
+export function placeAsset(assetId: string, functionalLocationId: string | null, version: number, key = newKey()): Promise<Asset> {
+  return post<Asset>(`/assets/${id(assetId)}/location`, { functionalLocationId }, key, { "If-Match": `"${version}"` });
+}
+
+export async function listLocationHistory(assetId: string, signal?: AbortSignal): Promise<LocationHistory[]> {
+  return (await page<LocationHistory>(`/assets/${id(assetId)}/location-history`, signal)).items;
+}
+
+export function listSequences(filter: ListFilter = {}, signal?: AbortSignal): Promise<Page<MaintenanceSequence>> {
+  return page<MaintenanceSequence>(`/sequences${listQuery(filter)}`, signal);
+}
+
+export function getSequence(sequenceId: string, signal?: AbortSignal): Promise<MaintenanceSequence> {
+  return send<MaintenanceSequence>(`/sequences/${id(sequenceId)}`, {}, signal);
+}
+
+export function createSequence(input: NewSequence, key: string): Promise<MaintenanceSequence> {
+  return post<MaintenanceSequence>("/sequences", input, key);
+}
+
+/** The next occurrences and the steps BR-44.10 selects, without generating them. */
+export async function simulateSequence(sequenceId: string, occurrences = 12, signal?: AbortSignal): Promise<SimulatedOccurrence[]> {
+  return (await page<SimulatedOccurrence>(`/sequences/${id(sequenceId)}/simulation?occurrences=${occurrences}`, signal)).items;
+}
+
+/** Generates the next occurrence of an asset sequence; it opens a preventive work order for the selected step. */
+export function generateOccurrence(sequenceId: string, input: NewOccurrence, key: string): Promise<SequenceOccurrence> {
+  return post<SequenceOccurrence>(`/sequences/${id(sequenceId)}/occurrences`, input, key);
+}
+
+export async function listOccurrences(sequenceId: string, signal?: AbortSignal): Promise<SequenceOccurrence[]> {
+  return (await page<SequenceOccurrence>(`/sequences/${id(sequenceId)}/occurrences`, signal)).items;
+}
+
+// Slice 5: maintenance rounds (FR-44.14, BR-44.9), reminders (BR-44.7, BR-44.15), cost and backlog KPIs (FR-44.13).
+
+export type StopOutcome = "DONE" | "SKIPPED";
+
+export interface RoundStop {
+  sequence: number;
+  assetId: string;
+  jobType: string;
+  mandatory: boolean;
+  travelMinutes: number;
+}
+
+export interface MaintenanceRound {
+  id: string;
+  code: string;
+  name: string;
+  siteId: string;
+  active: boolean;
+  stops: RoundStop[];
+  travelMinutes: number;
+  createdAt: string;
+}
+
+export interface NewRound {
+  code: string;
+  name: string;
+  siteId: string;
+  stops: RoundStop[];
+}
+
+export interface WorkOrderStop extends RoundStop {
+  outcome?: StopOutcome;
+  reason?: string;
+  requestId?: string;
+  recordedBy?: string;
+  recordedAt?: string;
+}
+
+export interface RegularizationAlert extends WorkOrder {
+  code: string;
+  detail: string;
+}
+
+export interface PlanReview {
+  assetId: string;
+  assetNumber: string;
+  name: string;
+  criticality: number;
+  lastReviewedAt?: string;
+  dueAt?: string;
+}
+
+export interface AssetCost {
+  assetId: string;
+  assetNumber: string;
+  name: string;
+  assetType: string;
+  currency: string;
+  workOrders: number;
+  partsCost: string;
+  laborCost: string;
+  total: string;
+}
+
+export interface BacklogRow {
+  priority: number;
+  openCount: number;
+  overdueCount: number;
+  oldestDueAt?: string;
+}
+
+export function listRounds(filter: ListFilter = {}, signal?: AbortSignal): Promise<Page<MaintenanceRound>> {
+  return page<MaintenanceRound>(`/rounds${listQuery(filter)}`, signal);
+}
+
+export function getRound(roundId: string, signal?: AbortSignal): Promise<MaintenanceRound> {
+  return send<MaintenanceRound>(`/rounds/${id(roundId)}`, {}, signal);
+}
+
+export function createRound(input: NewRound, key: string): Promise<MaintenanceRound> {
+  return post<MaintenanceRound>("/rounds", input, key);
+}
+
+/** Opens a ROUND work order for one extra occurrence of the round; ROUND plan lines create the scheduled ones. */
+export function createRoundWorkOrder(roundId: string, input: NewOccurrence, key: string): Promise<WorkOrder> {
+  return post<WorkOrder>(`/rounds/${id(roundId)}/work-orders`, input, key);
+}
+
+/** Records one stop of an in-progress round as DONE or SKIPPED (a skip needs a reason). */
+export function recordStopOutcome(workOrderId: string, sequence: number, outcome: StopOutcome, reason: string, key = newKey()): Promise<WorkOrderStop> {
+  return post<WorkOrderStop>(`/work-orders/${id(workOrderId)}/stops/${sequence}`, reason ? { outcome, reason } : { outcome }, key);
+}
+
+export async function listEmergencyOverdue(hours = 24, signal?: AbortSignal): Promise<RegularizationAlert[]> {
+  return (await page<RegularizationAlert>(`/work-orders/emergency-overdue?hours=${hours}`, signal)).items;
+}
+
+export async function listPlanReviews(signal?: AbortSignal): Promise<PlanReview[]> {
+  return (await page<PlanReview>("/assets/plan-reviews", signal)).items;
+}
+
+export async function costByAsset(from: string, to: string, assetType = "", signal?: AbortSignal): Promise<AssetCost[]> {
+  return (await page<AssetCost>(`/kpis/cost${query({ from, to, assetType })}`, signal)).items;
+}
+
+export async function backlog(signal?: AbortSignal): Promise<BacklogRow[]> {
+  return (await page<BacklogRow>("/kpis/backlog", signal)).items;
 }

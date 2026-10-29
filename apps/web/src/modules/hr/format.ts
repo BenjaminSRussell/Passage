@@ -173,3 +173,35 @@ export function formatRate(rate: string, currency: string): string {
   const [whole, frac = ""] = rate.split(".");
   return places === 0 ? `${whole} ${currency}` : `${whole}.${frac.padEnd(places, "0")} ${currency}`;
 }
+
+export const registrationStatusLabel: Record<string, { label: string; tone: "neutral" | "success" | "warning" | "danger" | "info" }> = {
+  REQUESTED: { label: "Awaiting approval", tone: "warning" },
+  CONFIRMED: { label: "Confirmed", tone: "info" },
+  WAITLISTED: { label: "Waitlisted", tone: "warning" },
+  ATTENDED: { label: "Attended", tone: "success" },
+  NO_SHOW: { label: "No-show", tone: "danger" },
+  CANCELED: { label: "Cancelled", tone: "neutral" },
+};
+
+/** An RFC 3339 instant from the service shown as "2026-06-01 09:00 UTC" (sessions are scheduled in UTC). */
+export function formatUtc(iso?: string | null): string {
+  if (!iso) return dash;
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return iso;
+  const s = new Date(t).toISOString();
+  return `${s.slice(0, 10)} ${s.slice(11, 16)} UTC`;
+}
+
+/** A datetime-local value ("2026-06-01T09:00") read as UTC, as the service's RFC 3339 ("2026-06-01T09:00:00Z"); null when malformed. */
+export function utcFromLocalInput(value: string): string | null {
+  const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})$/.exec(value.trim());
+  if (!m) return null;
+  const iso = `${m[1]}T${m[2]}:${m[3]}:00Z`;
+  return Number.isNaN(Date.parse(iso)) ? null : iso;
+}
+
+/** "Expires 24 months after the session" or "Does not expire". */
+export function validityLabel(months: number): string {
+  if (months <= 0) return "Does not expire";
+  return `${months} month${months === 1 ? "" : "s"} after the session ends`;
+}

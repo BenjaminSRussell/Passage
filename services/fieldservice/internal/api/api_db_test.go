@@ -24,7 +24,7 @@ func dbRouter(t *testing.T) (http.Handler, context.Context) {
 	t.Helper()
 	admin, pool := testkit.DBWithApp(t)
 	duties := map[string]struct{}{}
-	for _, d := range []string{dutyAgreement, dutyCaseCreate, dutyWorkOrder, dutyBilling, dutyInquire} {
+	for _, d := range []string{dutyAgreement, dutyCaseCreate, dutyCaseMaintain, dutyWorkOrder, dutyBilling, dutyInquire} {
 		duties[d] = struct{}{}
 	}
 	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), UserID: "u", Duties: duties})
@@ -114,5 +114,57 @@ func TestAPI_AllDayProfileNeedsNoHours(t *testing.T) {
 		map[string]string{"Idempotency-Key": "p-24x7"})
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create 24x7 profile: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// FR-45.5 over HTTP: reads carry the case ETag, a transition at that ETag
+// pauses the clock and returns the next one, a keyed retry replays, and the
+// KPIs and monitor answer for the tenant.
+func TestAPI_CaseTransitionETagAndReplay(t *testing.T) {
+	h, ctx := dbRouter(t)
+	profile := call(t, h, ctx, http.MethodPost, "/v1/service/sla-profiles",
+		`{"code":"H24","name":"24x7","timeZone":"UTC","allDay":true,"targets":[{"priority":2,"responseMinutes":60,"resolutionMinutes":480}]}`,
+		map[string]string{"Idempotency-Key": "p"})
+	var p store.SLAProfile
+	if err := json.Unmarshal(profile.Body.Bytes(), &p); err != nil || profile.Code != http.StatusCreated {
+		t.Fatalf("profile: %d %s", profile.Code, profile.Body.String())
+	}
+	opened := call(t, h, ctx, http.MethodPost, "/v1/service/cases", `{"customerPartyId":"`+ids.New()+`","legalEntityId":"`+ids.New()+
+		`","channel":"PHONE","priority":2,"fallbackSlaProfileId":"`+p.ID+`"}`, map[string]string{"Idempotency-Key": "c"})
+	var c store.Case
+	if err := json.Unmarshal(opened.Body.Bytes(), &c); err != nil || opened.Code != http.StatusCreated || opened.Header().Get("ETag") != `"1"` {
+		t.Fatalf("open: %d ETag %q %s", opened.Code, opened.Header().Get("ETag"), opened.Body.String())
+	}
+	read := call(t, h, ctx, http.MethodGet, "/v1/service/cases/"+c.ID, "", nil)
+	if read.Header().Get("ETag") != `"1"` {
+		t.Fatalf("read ETag %q", read.Header().Get("ETag"))
+	}
+	path := "/v1/service/cases/" + c.ID + ":transition"
+	headers := map[string]string{"If-Match": `"1"`, "Idempotency-Key": "pause"}
+	moved := call(t, h, ctx, http.MethodPost, path, `{"to":"WAITING_CUSTOMER"}`, headers)
+	var m store.Case
+	if err := json.Unmarshal(moved.Body.Bytes(), &m); err != nil || moved.Code != http.StatusOK || moved.Header().Get("ETag") != `"2"` ||
+		m.SLAState != "PAUSED" || m.RespondedAt == nil {
+		t.Fatalf("transition: %d ETag %q %s", moved.Code, moved.Header().Get("ETag"), moved.Body.String())
+	}
+	again := call(t, h, ctx, http.MethodPost, path, `{"to":"WAITING_CUSTOMER"}`, headers)
+	if again.Code != http.StatusOK || again.Header().Get(replayedHeader) != "true" || again.Header().Get("ETag") != `"2"` {
+		t.Fatalf("keyed retry: %d %v %s", again.Code, again.Header(), again.Body.String())
+	}
+	stale := call(t, h, ctx, http.MethodPost, path, `{"to":"IN_PROGRESS"}`, map[string]string{"If-Match": `"1"`})
+	if code, _ := problemOf(t, stale); stale.Code != http.StatusPreconditionFailed || code != store.CodeVersionConflict {
+		t.Fatalf("stale: %d %s", stale.Code, stale.Body.String())
+	}
+	closed := call(t, h, ctx, http.MethodPost, path, `{"to":"CLOSED"}`, map[string]string{"If-Match": `"2"`})
+	if code, _ := problemOf(t, closed); closed.Code != http.StatusUnprocessableEntity || code != store.CodeCaseTransition {
+		t.Fatalf("close an unresolved case: %d %s", closed.Code, closed.Body.String())
+	}
+
+	if rec := call(t, h, ctx, http.MethodPost, "/v1/service/sla:scan", "", nil); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"scanned":0`) {
+		t.Fatalf("scan of a paused case: %d %s", rec.Code, rec.Body.String())
+	}
+	kpis := call(t, h, ctx, http.MethodGet, "/v1/service/kpis?from=2000-01-01T00:00:00Z&to=2000-12-31T00:00:00Z", "", nil)
+	if kpis.Code != http.StatusOK || !strings.Contains(kpis.Body.String(), `"casesOpened":0`) || !strings.Contains(kpis.Body.String(), `"firstTimeFixPct":null`) {
+		t.Fatalf("empty KPI window: %d %s", kpis.Code, kpis.Body.String())
 	}
 }

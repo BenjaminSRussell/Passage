@@ -10,6 +10,21 @@ channels:
     messages:
       metricReconciled:
         $ref: "#/components/messages/MetricReconciled"
+  catalogDq:
+    address: passage.catalog.dq
+    messages:
+      dqScored:
+        $ref: "#/components/messages/DQScored"
+  archivePartition:
+    address: passage.archive.partition
+    messages:
+      archivePartitionMoved:
+        $ref: "#/components/messages/ArchivePartitionMoved"
+  analyticsReport:
+    address: passage.analytics.report
+    messages:
+      reportDelivered:
+        $ref: "#/components/messages/ReportDelivered"
 operations:
   publishMetricReconciled:
     action: send
@@ -18,6 +33,27 @@ operations:
     summary: A daily reconciliation result was recorded or changed (FR-46.13)
     messages:
       - $ref: "#/channels/analyticsMetric/messages/metricReconciled"
+  publishDQScored:
+    action: send
+    channel:
+      $ref: "#/channels/catalogDq"
+    summary: A data-quality rule was evaluated (FR-46.16); carries the owner-task and steward-escalation decision (BR-46.15)
+    messages:
+      - $ref: "#/channels/catalogDq/messages/dqScored"
+  publishArchivePartitionMoved:
+    action: send
+    channel:
+      $ref: "#/channels/archivePartition"
+    summary: The archive job verified a partition's counts and content hash (FR-46.18, BR-46.14); evidence for control CC6.5
+    messages:
+      - $ref: "#/channels/archivePartition/messages/archivePartitionMoved"
+  publishReportDelivered:
+    action: send
+    channel:
+      $ref: "#/channels/analyticsReport"
+    summary: A scheduled report reached its destination (FR-46.10, AC-46.10); consumer is audit
+    messages:
+      - $ref: "#/channels/analyticsReport/messages/reportDelivered"
 components:
   messages:
     MetricReconciled:
@@ -89,3 +125,204 @@ components:
                 enum: [OK, FAILED, BLOCKED]
               trusted:
                 type: boolean
+    DQScored:
+      name: dev.passage.catalog.dq.scored.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        description: Written to the outbox in the transaction that stores the score. notify_owner is true on the first unmuted below-threshold evaluation of a rule each day, and escalate_steward once per below-threshold run when it reaches three consecutive evaluations (BR-46.15). The owner's inbox (wave 4) still creates at most one task per task_key.
+        required: [specversion, id, source, type, subject, time, datacontenttype, tenantid, data]
+        properties:
+          specversion:
+            type: string
+            const: "1.0"
+          id:
+            type: string
+          source:
+            type: string
+            const: analytics
+          type:
+            type: string
+            const: dev.passage.catalog.dq.scored.v1
+          subject:
+            type: string
+            description: ruleId/date
+          time:
+            type: string
+            format: date-time
+          datacontenttype:
+            type: string
+            const: application/json
+          tenantid:
+            type: string
+          correlationid:
+            type: string
+          causationid:
+            type: string
+          actor:
+            type: string
+          data:
+            type: object
+            required: [asset_fqn, rule_id, date, pass_pct, threshold_pct, failed_rows, total_rows, severity, owner_user_id, below, below_streak, muted, notify_owner, escalate_steward]
+            properties:
+              asset_fqn:
+                type: string
+              rule_id:
+                type: string
+              date:
+                type: string
+                format: date
+              pass_pct:
+                type: string
+                description: Decimal string, rounded half-even to two decimals
+              threshold_pct:
+                type: string
+              failed_rows:
+                type: integer
+              total_rows:
+                type: integer
+              severity:
+                type: string
+                enum: [LOW, MEDIUM, HIGH]
+              owner_user_id:
+                type: string
+                format: uuid
+              below:
+                type: boolean
+              below_streak:
+                type: integer
+              muted:
+                type: boolean
+              notify_owner:
+                type: boolean
+                description: Ask the owner's inbox for the day's task (once per rule per day)
+              escalate_steward:
+                type: boolean
+                description: Escalate to the catalog steward (once per below-threshold run)
+              task_key:
+                type: string
+                description: Present when notify_owner is true; one task per rule per day
+    ArchivePartitionMoved:
+      name: dev.passage.archive.partition.moved.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        description: Written to the outbox in the transaction that marks the partition VERIFIED.
+        required: [specversion, id, source, type, subject, time, datacontenttype, tenantid, data]
+        properties:
+          specversion:
+            type: string
+            const: "1.0"
+          id:
+            type: string
+          source:
+            type: string
+            const: analytics
+          type:
+            type: string
+            const: dev.passage.archive.partition.moved.v1
+          subject:
+            type: string
+            description: partitionId
+          time:
+            type: string
+            format: date-time
+          datacontenttype:
+            type: string
+            const: application/json
+          tenantid:
+            type: string
+          correlationid:
+            type: string
+          causationid:
+            type: string
+          actor:
+            type: string
+          data:
+            type: object
+            required: [partition_id, domain, table, period, rows, content_hash, moved_at]
+            properties:
+              partition_id:
+                type: string
+                format: uuid
+              domain:
+                type: string
+              table:
+                type: string
+              period:
+                type: string
+                pattern: "^[0-9]{4}-(0[1-9]|1[0-2])$"
+              rows:
+                type: integer
+              content_hash:
+                type: string
+              moved_at:
+                type: string
+                format: date-time
+    ReportDelivered:
+      name: dev.passage.analytics.report.delivered.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        description: Written to the outbox in the transaction that records the DELIVERED attempt in report_delivery and moves the schedule to its next cron slot. Failed and retried attempts emit nothing.
+        required: [specversion, id, source, type, subject, time, datacontenttype, tenantid, data]
+        properties:
+          specversion:
+            type: string
+            const: "1.0"
+          id:
+            type: string
+          source:
+            type: string
+            const: analytics
+          type:
+            type: string
+            const: dev.passage.analytics.report.delivered.v1
+          subject:
+            type: string
+            description: scheduleId
+          time:
+            type: string
+            format: date-time
+          datacontenttype:
+            type: string
+            const: application/json
+          tenantid:
+            type: string
+          correlationid:
+            type: string
+          causationid:
+            type: string
+          actor:
+            type: string
+          data:
+            type: object
+            required: [schedule_id, run_id, attempt, format, destination, row_count, bytes, delivered_at]
+            properties:
+              schedule_id:
+                type: string
+                format: uuid
+              run_id:
+                type: string
+                format: uuid
+                description: The same for every attempt of one scheduled run.
+              attempt:
+                type: integer
+                minimum: 1
+                description: 1 for the first try, up to 4 after three retries.
+              format:
+                type: string
+                enum: [PDF, XLSX]
+              destination:
+                type: string
+                enum: [EMAIL, SFTP, INBOX]
+                description: Destination type only; recipient addresses are not carried.
+              row_count:
+                type: integer
+                minimum: 0
+              bytes:
+                type: integer
+                minimum: 0
+              delivered_at:
+                type: string
+                format: date-time

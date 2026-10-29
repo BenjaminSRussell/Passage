@@ -84,6 +84,12 @@ type Store interface {
 	GetCountSession(ctx context.Context, id string) (CountSession, error)
 	InsuranceReport(ctx context.Context, f InsuranceReportFilter) (InsuranceReport, error)
 
+	Transfer(ctx context.Context, assetID string, in TransferInput, idempotencyKey string) (Transfer, error)
+	ListTransfers(ctx context.Context, assetID string) ([]Transfer, error)
+	CreateGroupAsset(ctx context.Context, in GroupAssetInput, idempotencyKey string) (GroupAsset, error)
+	ListGroupAssets(ctx context.Context, f GroupFilter) (GroupPage, error)
+	GetGroupAsset(ctx context.Context, id string) (GroupAsset, error)
+
 	Ping(ctx context.Context) error
 }
 
@@ -329,8 +335,28 @@ func (s *Postgres) GetAsset(ctx context.Context, id string) (AssetDetail, error)
 			return err
 		}
 		books, err := loadBooks(ctx, tx, p.TenantID, id, false)
+		if err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `select m.asset_book_id, g.id, g.group_code from group_asset_member m
+			join group_asset g on g.tenant_id = m.tenant_id and g.id = m.group_id where m.tenant_id = $1 and m.asset_id = $2`, p.TenantID, id)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var bookID, groupID, code string
+			if err := rows.Scan(&bookID, &groupID, &code); err != nil {
+				return err
+			}
+			for i := range books {
+				if books[i].ID == bookID {
+					books[i].GroupAssetID, books[i].GroupCode = &groupID, &code
+				}
+			}
+		}
 		out = AssetDetail{Asset: a, Books: books}
-		return err
+		return rows.Err()
 	})
 	return out, err
 }

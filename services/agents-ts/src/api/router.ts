@@ -1,0 +1,141 @@
+import type { IncomingMessage, ServerResponse } from "node:http";
+import type { KillSwitchRegistry } from "../domain/killswitch.js";
+import { type ApprovalStore, handleApprovalDecision } from "./decision.js";
+import { handleKillSwitchCommand, type KillSwitchVersionSource, type Publish, readKillSwitchStatus } from "./killswitch.js";
+import { ApiError, principalFromHeaders, toApiError } from "./principal.js";
+
+/** 64 KiB is far above any control payload in this API. */
+export const MAX_BODY_BYTES = 64 * 1024;
+
+export interface AgentsApiDeps {
+  registry: KillSwitchRegistry;
+  versions: KillSwitchVersionSource;
+  approvals: ApprovalStore;
+  publish: Publish;
+  now?: () => Date;
+}
+
+const UUID = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
+const KILL_PATH = "/api/v1/agents/kill-switch";
+const DECISION_PATH = new RegExp(`^/api/v1/agents/runs/(${UUID})/actions/(${UUID})/decision$`);
+
+async function readBody(req: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    const buf = typeof chunk === "string" ? Buffer.from(chunk) : (chunk as Buffer);
+    size += buf.length;
+    if (size > MAX_BODY_BYTES) throw new ApiError(413, "AGT-0413", "request body exceeds 64 KiB");
+    chunks.push(buf);
+  }
+  if (size === 0) throw new ApiError(400, "AGT-0400", "a JSON body is required");
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+  } catch {
+    throw new ApiError(400, "AGT-0400", "body is not valid JSON");
+  }
+}
+
+function send(res: ServerResponse, status: number, body: unknown): void {
+  const payload = JSON.stringify(body);
+  res.writeHead(status, {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "content-length": Buffer.byteLength(payload).toString(),
+  });
+  res.end(payload);
+}
+
+const TITLES: Readonly<Record<number, string>> = {
+  400: "Bad Request",
+  401: "Unauthorized",
+  403: "Forbidden",
+  404: "Not Found",
+  405: "Method Not Allowed",
+  409: "Conflict",
+  413: "Content Too Large",
+  422: "Unprocessable Content",
+  500: "Internal Server Error",
+};
+
+/** RFC 9457 problem details in the kernel's shape: type, title, status, code, detail. */
+function problem(res: ServerResponse, err: ApiError, path: string, extra: Record<string, string> = {}): void {
+  const payload = JSON.stringify({
+    type: `https://passage.dev/problems/${err.code}`,
+    title: TITLES[err.status] ?? "Error",
+    status: err.status,
+    code: err.code,
+    detail: err.message,
+    instance: path,
+  });
+  res.writeHead(err.status, {
+    "content-type": "application/problem+json",
+    "cache-control": "no-store",
+    "content-length": Buffer.byteLength(payload).toString(),
+    "x-content-type-options": "nosniff",
+    ...extra,
+  });
+  res.end(payload);
+}
+
+class MethodNotAllowed extends ApiError {
+  readonly allow: string;
+
+  constructor(allow: string) {
+    super(405, "AGT-0405", "method not allowed");
+    this.allow = allow;
+  }
+}
+
+/**
+ * The agents HTTP surface served in this slice: the kill switch (read and
+ * toggle) and the approval decision. Every other route answers 404. A toggle's
+ * event is published before the 200 is sent.
+ */
+export function createAgentsHandler(deps: AgentsApiDeps): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
+  const now = deps.now ?? (() => new Date());
+  return async (req, res) => {
+    const path = new URL(req.url ?? "/", "http://agents.internal").pathname;
+    try {
+      if (path === KILL_PATH) {
+        if (req.method === "GET") {
+          send(res, 200, readKillSwitchStatus(principalFromHeaders(req.headers), deps.registry));
+          return;
+        }
+        if (req.method !== "POST") throw new MethodNotAllowed("GET, POST");
+        const principal = principalFromHeaders(req.headers);
+        const out = await handleKillSwitchCommand({
+          principal,
+          body: await readBody(req),
+          registry: deps.registry,
+          versions: deps.versions,
+          publish: deps.publish,
+          now,
+        });
+        send(res, 200, out.body);
+        return;
+      }
+      const match = DECISION_PATH.exec(path);
+      if (match === null) throw new ApiError(404, "AGT-0404", "no such route");
+      if (req.method !== "POST") throw new MethodNotAllowed("POST");
+      const principal = principalFromHeaders(req.headers);
+      const out = await handleApprovalDecision({
+        principal,
+        runId: (match[1] ?? "").toLowerCase(),
+        actionId: (match[2] ?? "").toLowerCase(),
+        body: await readBody(req),
+        store: deps.approvals,
+        now,
+      });
+      send(res, 200, out);
+    } catch (err) {
+      // Internal errors are never echoed to the caller.
+      if (res.headersSent) {
+        res.destroy();
+        return;
+      }
+      const apiErr = toApiError(err);
+      problem(res, apiErr, path, err instanceof MethodNotAllowed ? { allow: err.allow } : {});
+    }
+  };
+}

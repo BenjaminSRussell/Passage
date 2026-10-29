@@ -1,0 +1,6 @@
+apiVersion: v2
+name: mcp-gateway
+description: Passage MCP gateway exposing Passage APIs as governed tools (FR-47.1, FR-47.2)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { addAddition, adjustBook, decideCapex, getMidQuarterTest, listAdditions, postRun, putIndexSeries, submitCapex } from "./client";
+import { addAddition, adjustBook, createGroupAsset, decideCapex, getMidQuarterTest, listAdditions, listAssets, listTransfers, postRun, putIndexSeries, submitCapex, transferAsset } from "./client";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -98,5 +98,43 @@ describe("assets client, slice 4 commands", () => {
     const fn = stub(200, { applies: false });
     await getMidQuarterTest({ legalEntityId: "le", bookCode: "TAX", year: 2026 });
     expect(sent(fn).url).toBe("/api/v1/assets/mid-quarter-test?legalEntityId=le&bookCode=TAX&year=2026");
+  });
+});
+
+describe("assets client, slice 5 commands", () => {
+  it("posts a transfer with If-Match and an Idempotency-Key and returns the source's new ETag", async () => {
+    const fn = stub(201, { id: "t", kind: "split", targets: [] }, { ETag: '"5"' });
+    const input = { kind: "split" as const, transferDate: "2026-02-15", parts: [{ assetNumber: "A", name: "A", percentage: "50" }, { assetNumber: "B", name: "B", percentage: "50" }] };
+    const res = await transferAsset("a/1", '"4"', input, "k-5");
+    const { url, init, headers, body } = sent(fn);
+    expect(url).toBe("/api/v1/assets/a%2F1/transfer");
+    expect(init.method).toBe("POST");
+    expect(headers.get("If-Match")).toBe('"4"');
+    expect(headers.get("Idempotency-Key")).toBe("k-5");
+    expect(body).toEqual(input);
+    expect(res.etag).toBe('"5"');
+  });
+
+  it("raises the split-percentage problem (AST-0507)", async () => {
+    stub(422, { code: "AST-0507", detail: "split percentages total 90.00%; they must total 100.00%" });
+    await expect(transferAsset("a", '"1"', { kind: "split", transferDate: "2026-01-01", parts: [] })).rejects.toMatchObject({ code: "AST-0507", status: 422 });
+  });
+
+  it("lists an asset's transfers and the open assets of a legal entity", async () => {
+    const fn = stub(200, { items: [] });
+    expect(await listTransfers("a")).toEqual([]);
+    expect(sent(fn).url).toBe("/api/v1/assets/a/transfers");
+    await listAssets({ status: "Open", legalEntityId: "le" });
+    expect(sent(fn, 1).url).toBe("/api/v1/assets?status=Open&legalEntityId=le");
+  });
+
+  it("creates a group asset with an Idempotency-Key", async () => {
+    const fn = stub(201, { id: "g" });
+    await createGroupAsset({ legalEntityId: "le", groupCode: "SP", name: "Pool", classCode: "GWG", bookCode: "DE-TAX", taxYear: 2026, method: "StraightLine",
+      serviceLifePeriods: 60, convention: "None", memberAssetIds: ["m1"] }, "k-g");
+    const { url, headers, body } = sent(fn);
+    expect(url).toBe("/api/v1/assets/group-assets");
+    expect(headers.get("Idempotency-Key")).toBe("k-g");
+    expect(body.memberAssetIds).toEqual(["m1"]);
   });
 });

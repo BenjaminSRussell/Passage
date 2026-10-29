@@ -4,7 +4,11 @@ Human resources core: workers, employments, positions and position assignments
 with effective dating, the as-of manager query, the audited PII vault, and
 absence (plans, accrual, year end and carry-over, balances, requests and
 approval), and benefits (plans with CEL eligibility, a workforce simulation,
-life events and enrollments). Built for PSG-42, **slices 1 to 3**. The wave's remaining
+life events and enrollments), and skills (catalog, worker ratings,
+certificates with expiry, position skill profiles, gap analysis and skill
+search), and courses (catalog, sessions with a waitlist, registrations with
+manager approval, completion into skills and certificates). Built for PSG-42,
+**slices 1 to 5**. The wave's remaining
 deliverables are listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
 
 ## What slice 1 does
@@ -123,6 +127,75 @@ deliverables are listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
   benefits only for the caller's own worker; `HcmWorkerMaintain` acts for
   anyone and `HcmWorkerInquire` reads anyone's.
 
+## What slice 4 does (skills)
+
+- **Catalog** (FR-42.10): a skill is a code, a name and a rating scale 1 to
+  `scaleMax` (1–10, default 5). Codes are unique per tenant; a replayed
+  `Idempotency-Key` returns the stored skill.
+- **Ratings**: one current rating per worker and skill, on the skill's scale
+  (HCM-SKL-RATING), with the assessment date (not in the future). A new
+  rating replaces the old one and writes `dev.passage.hr.workerskill.changed.v1`
+  with the previous rating in the same transaction. An assessment dated
+  before the stored one is HCM-SKL-STALE, so a late retry cannot overwrite a
+  newer rating; the same rating and date again changes nothing and publishes
+  nothing. Writes for one worker are serialised by a lock on the worker row.
+- **Certificates** (BR-42.8): code, title, optional issuer, issue date and an
+  expiry given as a date or as validity months (the same day that many months
+  later, or the month's last day when it has no such day), or none. Valid on
+  `[issuedOn, expiresOn)`: a certificate is no longer valid on its expiry day.
+  Recording writes `dev.passage.hr.certification.issued.v1`. The same worker,
+  code and issue date twice is HCM-CERT-DUPLICATE.
+- **Certifications expiring** (8.42.14): certificates valid on `asOf` that
+  expire within `withinDays` (default 60, at most 366), soonest first, with
+  the holder and the days left. A certificate the worker has already renewed
+  (a later one of the same code that lasts longer) is left out.
+- **Position skill profile** (FR-42.18): a minimum rating per skill, set,
+  changed or removed. Positions follow the legal-entity scope.
+- **Gap analysis** (AC-42.16): every requirement next to the worker's rating
+  (`comparison`) and the unmet ones (`gaps`) as (skill, required, actual,
+  delta); a skill the worker is not rated on counts as 0.
+- **Skill search** (FR-42.18): `skills=WELDING:3,PLC&minRating=2&certs=OSHA10&asOf=`
+  finds the workers employed on the date who meet every rating and hold every
+  certificate valid on the date, by personnel number, at most 500
+  (`truncated` says when there were more). `availableFrom` is refused until
+  availability exists.
+
+## What slice 5 does (courses)
+
+- **Catalog** (FR-42.14): a course is a code, a name, an optional group, the
+  skill outcomes a PASS awards (catalog skills, each at a rating on its
+  scale), an optional certificate (code and name) with validity months (0:
+  does not expire), and whether registration needs manager approval. A
+  replayed `Idempotency-Key` returns the stored course.
+- **Sessions**: start and end, a location or a virtual link (or both), an
+  internal instructor (a worker) or an external one (a party id), capacity
+  (1–10,000), waitlist capacity (0–100, default 5, the 8.42.13 parameter
+  default) and an optional cost per attendee in a currency (decimal at the
+  currency's minor units). Reads carry the confirmed, waitlisted and
+  requested counts and the seats left.
+- **Registration** (BR-42.9): one per worker and session; registering again
+  returns it. Seats go in registration order: CONFIRMED while a seat is free,
+  WAITLISTED while the waitlist has room, else HCM-CRS-001. Registration and
+  the seat count run under a lock on the session row, so concurrent
+  registrations cannot overfill. A course that needs manager approval
+  registers as REQUESTED with the HCM-CRS-002 warning and holds no seat;
+  `MssApprove` approves it into a seat or the waitlist (not their own:
+  HCM-CRS-SELF-APPROVAL). Registration closes when the session ends. An
+  employee with only `EssLearning` registers and cancels only themselves.
+- **Cancel**: cancels or declines; a canceled CONFIRMED seat promotes the
+  oldest WAITLISTED registration. A worker who registers again after a
+  cancel queues at the back.
+- **Completion** (FR-42.14): from the session start, ATTENDED (optionally
+  PASS or FAIL, with a score) or NO_SHOW per registered worker; an ATTENDED
+  line may get its result later and the same outcome again changes nothing.
+  A PASS raises each skill outcome to max(existing, course rating) (a higher
+  rating keeps its assessment date; a raised one writes
+  `workerskill.changed`), issues the certificate from the session end date
+  for the validity months (`certification.issued`; a certificate the worker
+  already holds for that code and day is reused), and writes
+  `dev.passage.hr.course.completed.v1`, all in one transaction. Lines apply
+  all or none.
+
 Domain rules that are not yet exposed by an endpoint, but are implemented and
 tested: hierarchy cycle detection (BR-42.7) and the reveal gate (`CheckReveal`).
 
@@ -178,7 +251,17 @@ go vet ./... && go test ./...
   scoped accrual run followed by an all-entity rerun. Benefits: plan replay
   and duplicates, the window, life-event, eligibility, option and overlap
   rules with the outbox events, the end rules, the simulation agreeing with
-  enrollment, and own-data refusals.
+  enrollment, and own-data refusals. Skills: catalog replay, duplicates and
+  paging; rating scale, replace, stale and no-op rules with the event;
+  AC-42.16 through the database; certificate replay, expiry and validity; the
+  expiring inquiry skipping renewed certificates and paging; skill search by
+  ratings, certificates and employment date. Courses: AC-42.9 end to end
+  (10 + 2 of 13, promotion on cancel, FORKLIFT 3 and a 24-month certificate
+  with the three events, a no-op replay, all-or-nothing lines, closed
+  registration), ratings never lowered and results recorded after
+  attendance, approval and self-approval, own-data refusals, catalog and
+  session replay, and 16 concurrent registrations that cannot overfill.
+  `grants_test.go` runs every skills and courses path as `passage_app`.
 
 To run the store tests:
 
@@ -223,6 +306,29 @@ kernel `authz.RequireDuty` (`x-passage-duty` in the spec).
 | POST | `/v1/hr/benefits/enrollments` | EssBenefits (own worker unless HcmWorkerMaintain) |
 | POST | `/v1/hr/benefits/enrollments/{id}/end` | HcmWorkerMaintain |
 | GET | `/v1/hr/workers/{id}/benefits` | EssBenefits (own unless HcmWorkerInquire or HcmWorkerMaintain) |
+| POST | `/v1/hr/skills` | HcmSetupAdmin |
+| GET | `/v1/hr/skills?limit=&cursor=` | HcmWorkerInquire |
+| GET | `/v1/hr/skills/search?skills=&minRating=&certs=&asOf=` | HcmOrgInquire |
+| POST | `/v1/hr/workers/{id}/skills` | HcmWorkerMaintain |
+| GET | `/v1/hr/workers/{id}/skills` | HcmWorkerInquire |
+| POST | `/v1/hr/workers/{id}/certifications` | HcmWorkerMaintain |
+| GET | `/v1/hr/workers/{id}/certifications?asOf=` | HcmWorkerInquire |
+| GET | `/v1/hr/certifications/expiring?withinDays=&asOf=&limit=&cursor=` | HcmWorkerInquire |
+| GET | `/v1/hr/workers/{id}/skill-gap?positionId=` | HcmOrgInquire |
+| GET | `/v1/hr/positions/{id}/skill-requirements` | HcmOrgInquire |
+| POST | `/v1/hr/positions/{id}/skill-requirements` | HcmOrgMaintain |
+| DELETE | `/v1/hr/positions/{id}/skill-requirements/{skillCode}` | HcmOrgMaintain |
+| POST | `/v1/hr/courses` | HcmLearningAdmin |
+| GET | `/v1/hr/courses?limit=&cursor=` | EssLearning |
+| GET | `/v1/hr/courses/{id}` | EssLearning |
+| POST | `/v1/hr/courses/{id}/sessions` | HcmLearningAdmin |
+| GET | `/v1/hr/courses/{id}/sessions` | EssLearning |
+| GET | `/v1/hr/courses/sessions/{id}` | EssLearning |
+| GET | `/v1/hr/courses/sessions/{id}/registrations` | HcmLearningAdmin |
+| POST | `/v1/hr/courses/sessions/{id}/registrations` | EssLearning (own worker unless HcmLearningAdmin or MssApprove) |
+| POST | `/v1/hr/courses/sessions/{id}/complete` | HcmLearningAdmin |
+| POST | `/v1/hr/courses/registrations/{id}/approve` | MssApprove |
+| POST | `/v1/hr/courses/registrations/{id}/cancel` | EssLearning (own unless HcmLearningAdmin or MssApprove) |
 
 ## Error codes
 
@@ -271,6 +377,21 @@ type is `https://passage.dev/problems/<code>`.
 | `HCM-BEN-ENR-NOT-FOUND` | 404 | Benefit enrollment does not exist for this tenant |
 | `HCM-BEN-LE-NOT-FOUND` | 422 | The life event does not exist or is another worker's |
 | `HCM-BEN-NOT-OWN` | 403 | An employee-only caller acted on another worker's benefits |
+| `HCM-SKL-RATING` | 422 | Rating or minimum outside the skill's scale |
+| `HCM-SKL-NOT-FOUND` | 404 | No skill with that code in the catalog |
+| `HCM-SKL-DUPLICATE` | 409 | Skill code already used in this tenant |
+| `HCM-SKL-STALE` | 409 | The worker has a newer assessment of the skill |
+| `HCM-SKL-REQ-NOT-FOUND` | 404 | The position does not require that skill |
+| `HCM-CERT-DUPLICATE` | 409 | The worker already has a certificate with that code and issue date |
+| `HCM-CRS-001` | 422 | The session and its waitlist are full |
+| `HCM-CRS-002` | warning | The course needs manager approval; returned in `warnings` with the REQUESTED registration |
+| `HCM-CRS-STATE` | 409 | The session has ended (registration) or not started (completion), or the registration's status does not allow the step |
+| `HCM-CRS-SELF-APPROVAL` | 403 | An approver tried to approve their own registration |
+| `HCM-CRS-NOT-OWN` | 403 | An employee-only caller acted on another worker's registration |
+| `HCM-CRS-NOT-FOUND` | 404 | Course does not exist for this tenant |
+| `HCM-CRS-DUPLICATE` | 409 | Course code already used in this tenant |
+| `HCM-CRS-SESSION-NOT-FOUND` | 404 | Session does not exist for this tenant |
+| `HCM-CRS-REG-NOT-FOUND` | 404 | Registration does not exist, or the worker is not registered for the session |
 | `idempotency_key_reuse` | 422 | Same key used with a different request body |
 | `idempotency_key_in_flight` | 409 | A concurrent request with the same key committed first; retry |
 | `AUTH-0003` | 403 | Caller lacks the duty (kernel `authz`) |
@@ -286,10 +407,10 @@ internal/domain/   pure rules: effective dating, hierarchy, accrual, PII sealing
 internal/store/    pgx repositories, RLS-scoped transactions, outbox writes
 internal/api/      HTTP handlers, DTOs, validation, duties
 internal/events/   event type constants and payloads
-migrations/        0001_hr_core.sql, 0002_absence.sql, 0003_benefits.sql (applied in order by dbx.Migrate)
+migrations/        0001_hr_core.sql, 0002_absence.sql, 0003_benefits.sql, 0004_grants.sql, 0005_skills.sql, 0006_courses.sql (applied in order by dbx.Migrate)
 testdata/          hr-benefit-100.json (AC-42.5 fixture)
 api/openapi.yaml   OpenAPI 3.1 for every endpoint above
-events/asyncapi.yaml  AsyncAPI 3 for the five events published
+events/asyncapi.yaml  AsyncAPI 3 for the eight events published
 charts/hr/         Helm chart passage-hr (lint: helm lint charts/hr)
 ```
 
