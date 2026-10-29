@@ -119,7 +119,10 @@ function PublishPanel({ versionId, versionNo, lock, type, canBackdate, reason, o
 
   const validDate = dayNumber(effectiveFrom) !== null;
   const backdated = validDate && effectiveFrom < todayIso();
-  useEffect(() => onBackdateChange(backdated), [backdated, onBackdateChange]);
+  useEffect(() => {
+    onBackdateChange(backdated);
+    return () => onBackdateChange(false);
+  }, [backdated, onBackdateChange]);
   const reasonLength = [...reason.trim()].length;
   const dateError = !validDate
     ? "Enter a valid date."
