@@ -128,6 +128,15 @@ export interface RateTypeInput {
   provider?: string;
 }
 
+export function createRateType(code: string, input: RateTypeInput, fetchImpl: FetchLike = defaultFetch): Promise<RateType> {
+  return send(
+    "/api/v1/fx/rate-types",
+    { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" }, body: JSON.stringify({ code, ...input }) },
+    rateTypeSchema,
+    fetchImpl,
+  );
+}
+
 export function putRateType(code: string, input: RateTypeInput, fetchImpl: FetchLike = defaultFetch): Promise<RateType> {
   return send(
     `/api/v1/fx/rate-types/${encodeURIComponent(code)}`,

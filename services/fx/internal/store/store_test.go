@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strconv"
 	"strings"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
@@ -47,7 +49,7 @@ func migrated(t *testing.T) (*store.Postgres, *pgxpool.Pool, context.Context) {
 		t.Fatal(err)
 	}
 	s := store.New(pool)
-	if _, err := s.PutRateType(ctx, store.RateType{Code: "CLOSING", Name: "Closing", AllowInverse: true}); err != nil {
+	if _, err := s.CreateRateType(ctx, store.RateType{Code: "CLOSING", Name: "Closing", AllowInverse: true}); err != nil {
 		t.Fatal(err)
 	}
 	return s, pool, ctx
@@ -205,21 +207,38 @@ func TestCurrentBookSkipsStoredRateTheBookRejects(t *testing.T) {
 	}
 }
 
-func TestPutRateTypeIsIdempotent(t *testing.T) {
+func TestRateTypeCreateIsCreateOnlyAndUpdateIsSeparate(t *testing.T) {
 	s, _, ctx := migrated(t)
-	again, err := s.PutRateType(ctx, store.RateType{Code: "CLOSING", Name: "Closing rate", AllowInverse: false})
+	before, err := s.GetRateType(ctx, "CLOSING")
 	if err != nil {
 		t.Fatal(err)
 	}
+	_, err = s.CreateRateType(ctx, store.RateType{Code: "CLOSING", Name: "Overwrite", AllowInverse: false})
+	var problem *httpx.Problem
+	if !errors.As(err, &problem) || problem.Status != http.StatusConflict || problem.Code != store.CodeRateTypeExists {
+		t.Fatalf("duplicate create err = %v", err)
+	}
+	if kept, _ := s.GetRateType(ctx, "CLOSING"); kept != before {
+		t.Fatalf("create overwrote the rate type: %+v", kept)
+	}
+	updated, err := s.UpdateRateType(ctx, store.RateType{Code: "CLOSING", Name: "Closing rate", AllowInverse: false})
+	if err != nil || updated.ID != before.ID || updated.Name != "Closing rate" || updated.AllowInverse {
+		t.Fatalf("update = %+v, %v", updated, err)
+	}
 	list, err := s.ListRateTypes(ctx)
-	if err != nil || len(list) != 1 || list[0].ID != again.ID || list[0].Name != "Closing rate" || list[0].AllowInverse {
+	if err != nil || len(list) != 1 || list[0] != updated {
 		t.Fatalf("list = %+v, %v", list, err)
 	}
-	if _, err := s.GetRateType(ctx, "MISSING"); err == nil {
-		t.Fatal("unknown rate type must error")
+	if _, err := s.UpdateRateType(ctx, store.RateType{Code: "MISSING", Name: "x"}); !errors.As(err, &problem) || problem.Status != http.StatusNotFound {
+		t.Fatalf("update unknown err = %v", err)
 	}
-	if _, err := s.PutRateType(ctx, store.RateType{Code: "", Name: "x"}); !errors.Is(err, domain.ErrInvalidRate) {
-		t.Fatalf("empty code err = %v", err)
+	for _, bad := range []store.RateType{{Name: "x"}, {Code: "X"}} {
+		if _, err := s.CreateRateType(ctx, bad); !errors.Is(err, domain.ErrInvalidRate) {
+			t.Fatalf("create %+v err = %v", bad, err)
+		}
+		if _, err := s.UpdateRateType(ctx, bad); !errors.Is(err, domain.ErrInvalidRate) {
+			t.Fatalf("update %+v err = %v", bad, err)
+		}
 	}
 }
 
@@ -237,7 +256,7 @@ func TestRLSHidesOtherTenantRates(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := store.New(app)
-	if _, err := s.PutRateType(ctx, store.RateType{Code: "CLOSING", Name: "Closing", AllowInverse: true}); err != nil {
+	if _, err := s.CreateRateType(ctx, store.RateType{Code: "CLOSING", Name: "Closing", AllowInverse: true}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.PostRates(ctx, []store.RateInput{in("manual", "1.1")}); err != nil {
@@ -567,7 +586,7 @@ func TestRLSHidesOtherTenantRunsAndIdempotencyKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := store.New(app)
-	if _, err := s.PutRateType(ctx, store.RateType{Code: "CLOSING", Name: "Closing", AllowInverse: true}); err != nil {
+	if _, err := s.CreateRateType(ctx, store.RateType{Code: "CLOSING", Name: "Closing", AllowInverse: true}); err != nil {
 		t.Fatal(err)
 	}
 	run, _, err := s.StartRun(ctx, "ecb", "CLOSING", valid)
@@ -611,7 +630,7 @@ func TestMigrationGrantsKeepRatesAppendOnlyForAppRole(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := store.New(app)
-	if _, err := s.PutRateType(ctx, store.RateType{Code: "CLOSING", Name: "Closing", AllowInverse: true}); err != nil {
+	if _, err := s.CreateRateType(ctx, store.RateType{Code: "CLOSING", Name: "Closing", AllowInverse: true}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.PostRates(ctx, []store.RateInput{in("ecb", "1.1")}); err != nil {
@@ -647,7 +666,7 @@ func TestPublishIdempotentSurvivesASmallPoolUnderConcurrency(t *testing.T) {
 	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.New(app).PutRateType(ctx, store.RateType{Code: "CLOSING", Name: "Closing", AllowInverse: true}); err != nil {
+	if _, err := store.New(app).CreateRateType(ctx, store.RateType{Code: "CLOSING", Name: "Closing", AllowInverse: true}); err != nil {
 		t.Fatal(err)
 	}
 	cfg := app.Config().Copy()

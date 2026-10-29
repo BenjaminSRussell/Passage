@@ -34,7 +34,7 @@ type fakeStore struct {
 	locks   map[string]*sync.Mutex
 }
 
-func (f *fakeStore) PutRateType(_ context.Context, in store.RateType) (store.RateType, error) {
+func (f *fakeStore) CreateRateType(_ context.Context, in store.RateType) (store.RateType, error) {
 	f.puts++
 	if f.err != nil {
 		return store.RateType{}, f.err
@@ -42,10 +42,30 @@ func (f *fakeStore) PutRateType(_ context.Context, in store.RateType) (store.Rat
 	if in.Code == "" || in.Name == "" {
 		return store.RateType{}, fmt.Errorf("%w: rate type code and name are required", domain.ErrInvalidRate)
 	}
+	if _, taken := f.types[in.Code]; taken {
+		return store.RateType{}, httpx.NewProblem(http.StatusConflict, store.CodeRateTypeExists, "a rate type with this code already exists")
+	}
 	if f.types == nil {
 		f.types = map[string]store.RateType{}
 	}
 	in.ID = "id-" + in.Code
+	f.types[in.Code] = in
+	return in, nil
+}
+
+func (f *fakeStore) UpdateRateType(_ context.Context, in store.RateType) (store.RateType, error) {
+	f.puts++
+	if f.err != nil {
+		return store.RateType{}, f.err
+	}
+	if in.Code == "" || in.Name == "" {
+		return store.RateType{}, fmt.Errorf("%w: rate type code and name are required", domain.ErrInvalidRate)
+	}
+	current, ok := f.types[in.Code]
+	if !ok {
+		return store.RateType{}, httpx.NewProblem(http.StatusNotFound, store.CodeRateTypeUnknown, "rate type not found")
+	}
+	in.ID = current.ID
 	f.types[in.Code] = in
 	return in, nil
 }
@@ -94,6 +114,7 @@ const (
 	typesPath   = "/v1/fx/rate-types"
 	closingPath = "/v1/fx/rate-types/CLOSING"
 	closingBody = `{"name":"Closing","allowInverse":true,"provider":"ecb"}`
+	createBody  = `{"code":"CLOSING","name":"Closing","allowInverse":true,"provider":"ecb"}`
 	allDuties   = "View exchange rates,Maintain exchange rates"
 )
 
@@ -106,11 +127,18 @@ func TestRateTypes(t *testing.T) {
 		wantBody                                 string
 		wantPuts                                 int
 	}{
-		{"put ok", http.MethodPut, closingPath, closingBody, allDuties, tenantID, &fakeStore{}, 200, `"code":"CLOSING"`, 1},
+		{"create ok", http.MethodPost, typesPath, createBody, allDuties, tenantID, &fakeStore{}, 201, `"code":"CLOSING"`, 1},
+		{"create existing code", http.MethodPost, typesPath, createBody, allDuties, tenantID, &fakeStore{types: map[string]store.RateType{"CLOSING": {Code: "CLOSING", Name: "Old"}}}, 409, "FX_RATE_TYPE_EXISTS", 1},
+		{"create without Maintain exchange rates", http.MethodPost, typesPath, createBody, "View exchange rates", tenantID, &fakeStore{}, 403, "AUTH-0003", 0},
+		{"create unknown field", http.MethodPost, typesPath, `{"code":"X","name":"x","extra":1}`, allDuties, tenantID, &fakeStore{}, 400, "COM-0001", 0},
+		{"create empty code", http.MethodPost, typesPath, `{"name":"x"}`, allDuties, tenantID, &fakeStore{}, 400, "FX_RATE_INVALID", 1},
+		{"create store failure", http.MethodPost, typesPath, createBody, allDuties, tenantID, &fakeStore{err: errors.New("pg secret")}, 500, "COM-0500", 1},
+		{"put ok", http.MethodPut, closingPath, closingBody, allDuties, tenantID, &fakeStore{types: map[string]store.RateType{"CLOSING": {ID: "id-CLOSING", Code: "CLOSING", Name: "Old"}}}, 200, `"name":"Closing"`, 1},
+		{"put unknown code", http.MethodPut, closingPath, closingBody, allDuties, tenantID, &fakeStore{}, 404, "FX_RATE_TYPE_UNKNOWN", 1},
 		{"put without Maintain exchange rates", http.MethodPut, closingPath, closingBody, "View exchange rates", tenantID, &fakeStore{}, 403, "AUTH-0003", 0},
 		{"put unknown field", http.MethodPut, closingPath, `{"name":"x","extra":1}`, allDuties, tenantID, &fakeStore{}, 400, "COM-0001", 0},
 		{"put wrong type", http.MethodPut, closingPath, `{"name":"x","allowInverse":"yes"}`, allDuties, tenantID, &fakeStore{}, 400, "COM-0001", 0},
-		{"put empty name", http.MethodPut, closingPath, `{}`, allDuties, tenantID, &fakeStore{}, 400, "FX_RATE_INVALID", 1},
+		{"put empty name", http.MethodPut, closingPath, `{}`, allDuties, tenantID, &fakeStore{types: map[string]store.RateType{"CLOSING": {Code: "CLOSING", Name: "Old"}}}, 400, "FX_RATE_INVALID", 1},
 		{"put store failure", http.MethodPut, closingPath, closingBody, allDuties, tenantID, &fakeStore{err: errors.New("pg secret")}, 500, "COM-0500", 1},
 		{"get unknown", http.MethodGet, "/v1/fx/rate-types/NOPE", "", allDuties, tenantID, &fakeStore{}, 404, "FX_RATE_TYPE_UNKNOWN", 0},
 		{"get without View exchange rates", http.MethodGet, closingPath, "", "Maintain exchange rates", tenantID, &fakeStore{}, 403, "AUTH-0003", 0},
@@ -133,13 +161,13 @@ func TestRateTypes(t *testing.T) {
 	}
 }
 
-func TestPutRateTypeIdempotentAndReadable(t *testing.T) {
+func TestCreateRateTypeThenReadable(t *testing.T) {
 	r := newRouter(&fakeStore{})
 	tenantID := testkit.TenantID(1)
-	first := do(r, http.MethodPut, closingPath, closingBody, allDuties, tenantID)
-	second := do(r, http.MethodPut, closingPath, closingBody, allDuties, tenantID)
-	if first.Code != 200 || second.Code != 200 || first.Body.String() != second.Body.String() {
-		t.Fatalf("put twice: %d %s / %d %s", first.Code, first.Body.String(), second.Code, second.Body.String())
+	first := do(r, http.MethodPost, typesPath, createBody, allDuties, tenantID)
+	second := do(r, http.MethodPost, typesPath, createBody, allDuties, tenantID)
+	if first.Code != 201 || second.Code != 409 || !strings.Contains(second.Body.String(), "FX_RATE_TYPE_EXISTS") {
+		t.Fatalf("create twice: %d %s / %d %s", first.Code, first.Body.String(), second.Code, second.Body.String())
 	}
 	got := do(r, http.MethodGet, closingPath, "", allDuties, tenantID)
 	list := do(r, http.MethodGet, typesPath, "", allDuties, tenantID)
