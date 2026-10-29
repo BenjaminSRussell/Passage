@@ -112,7 +112,7 @@ CREATE POLICY recognition_run_legal_entity_scope ON recognition_run AS RESTRICTI
          OR legal_entity_id::text = ANY(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));
 CREATE INDEX IF NOT EXISTS recognition_run_created_idx ON recognition_run (tenant_id, period_end DESC, created_at DESC);
 
--- Transactional outbox relayed by Debezium (platform dbx.OutboxDDL); excluded from RLS.
+-- Transactional outbox relayed by Debezium (platform dbx.OutboxDDL); tenant RLS is added in 0004.
 CREATE TABLE IF NOT EXISTS outbox (
   id text primary key,
   tenant_id uuid not null,
