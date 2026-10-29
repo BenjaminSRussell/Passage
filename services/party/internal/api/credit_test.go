@@ -98,18 +98,29 @@ func TestCreditRoutes_GetPendingChangeNeedsPartyRead(t *testing.T) {
 }
 
 func TestCreditRoutes_DecisionReplayDoesNotIncrementMetrics(t *testing.T) {
-	f := &fakeCredit{replayed: true}
+	f := &fakeCredit{}
 	a := api.New(&stubChecker{}, stubPinger{}, &fakeParties{}, &fakeSequencer{}).WithCredit(f)
 	r := httpx.NewRouter()
 	a.Register(r)
-	rec := do(r, http.MethodPost, "/v1/party/pending-changes/"+knownID+":approve", "", "party.approve", true)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("approve replay: %d %s", rec.Code, rec.Body)
+	path := "/v1/party/pending-changes/" + knownID + ":approve"
+	for _, replayed := range []bool{false, true} {
+		f.replayed = replayed
+		if rec := do(r, http.MethodPost, path, "", "party.approve", true); rec.Code != http.StatusOK {
+			t.Fatalf("approve (replayed=%v): %d %s", replayed, rec.Code, rec.Body)
+		}
 	}
-	rec = httptest.NewRecorder()
+	rec := httptest.NewRecorder()
 	a.Metrics().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
-	if strings.Contains(rec.Body.String(), `outcome="approved"} 1`) {
-		t.Fatalf("replay incremented decision metric: %s", rec.Body)
+	if !strings.Contains(rec.Body.String(), `outcome="approved"} 1`+"\n") {
+		t.Fatalf("decision counter after one fresh decision and one replay is not exactly 1: %s", rec.Body)
+	}
+}
+
+func TestCreditRoutes_GetPendingChangeUnknownIs404(t *testing.T) {
+	f := &fakeCredit{err: httpx.NewProblem(http.StatusNotFound, store.CodeChangeNotFound, "pending change not found")}
+	rec := do(creditRouter(f), http.MethodGet, "/v1/party/pending-changes/"+knownID, "", "party.read", true)
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), store.CodeChangeNotFound) {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
 	}
 }
 

@@ -350,6 +350,9 @@ func TestCreditLimit_GetPendingChangeIsScoped(t *testing.T) {
 	if _, err := s.GetPendingChange(asUser(1, legalEntityB, approver), res.Pending.ID); problemCode(t, err) != store.CodeChangeNotFound {
 		t.Fatalf("other legal entity: %v", err)
 	}
+	if _, err := s.GetPendingChange(asUser(2, "", approver), res.Pending.ID); problemCode(t, err) != store.CodeChangeNotFound {
+		t.Fatalf("other tenant: %v", err)
+	}
 }
 
 func TestCreditLimit_SameDeciderReplayIsIdempotent(t *testing.T) {

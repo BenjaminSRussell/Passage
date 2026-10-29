@@ -117,12 +117,14 @@ func (s *Postgres) RequestCreditLimit(ctx context.Context, customerID, limit str
 			on conflict (tenant_id, customer_id, field) where status = 'pending' do nothing returning `+changeColumns,
 			caller.TenantID, ids.New(), legalEntityID, id, domain.FieldCreditLimit, res.CreditLimit, limit, caller.UserID))
 		if errors.Is(err, pgx.ErrNoRows) {
+			p := httpx.NewProblem(http.StatusConflict, CodeChangePending, "a credit limit change is already awaiting approval for this customer")
 			var pendingID string
-			if err := tx.QueryRow(ctx, `select id::text from pending_change where tenant_id = $1 and customer_id = $2 and field = $3 and status = 'pending'`, caller.TenantID, id, domain.FieldCreditLimit).Scan(&pendingID); err != nil {
+			err := tx.QueryRow(ctx, `select id::text from pending_change where tenant_id = $1 and customer_id = $2 and field = $3 and status = 'pending'`, caller.TenantID, id, domain.FieldCreditLimit).Scan(&pendingID)
+			if err == nil {
+				p.Errors = map[string]string{"pendingChangeId": pendingID}
+			} else if !errors.Is(err, pgx.ErrNoRows) {
 				return err
 			}
-			p := httpx.NewProblem(http.StatusConflict, CodeChangePending, "a credit limit change is already awaiting approval for this customer")
-			p.Errors = map[string]string{"pendingChangeId": pendingID}
 			return p
 		}
 		if err != nil {
