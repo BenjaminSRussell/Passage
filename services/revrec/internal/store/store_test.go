@@ -28,7 +28,7 @@ func day(y int, m time.Month, d int) time.Time { return time.Date(y, m, d, 0, 0,
 
 // tenantCtx is a principal of tenant n; scope is its legal entity ("" = all).
 func tenantCtx(n int, scope string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), LegalEntityID: scope})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), LegalEntityID: scope, Duties: testkit.ScopeDuties(scope)})
 }
 
 func migratedPools(t *testing.T) (admin, app *pgxpool.Pool) {

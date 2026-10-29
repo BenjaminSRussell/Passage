@@ -28,7 +28,7 @@ import (
 const legalEntity = "00000000-0000-7000-8000-0000000001e1"
 
 func principalContext(n int) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), UserID: ids.New()})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), UserID: ids.New(), Duties: map[string]struct{}{tenant.DutyAllScope: {}}})
 }
 
 var adminPools sync.Map

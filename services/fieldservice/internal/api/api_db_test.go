@@ -23,7 +23,7 @@ import (
 func dbRouter(t *testing.T) (http.Handler, context.Context) {
 	t.Helper()
 	admin, pool := testkit.DBWithApp(t)
-	duties := map[string]struct{}{}
+	duties := map[string]struct{}{tenant.DutyAllScope: {}}
 	for _, d := range []string{dutyAgreement, dutyCaseCreate, dutyWorkOrder, dutyBilling, dutyInquire} {
 		duties[d] = struct{}{}
 	}

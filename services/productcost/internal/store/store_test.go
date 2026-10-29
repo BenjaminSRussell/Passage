@@ -59,7 +59,7 @@ func setup(t *testing.T) (s *Postgres, admin *pgxpool.Pool, rls bool) {
 
 // as is a principal of tenant n; scope is its legal-entity scope ("" for all).
 func as(n int, scope string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), LegalEntityID: scope, UserID: "cost.accountant", Duties: map[string]struct{}{}})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), LegalEntityID: scope, UserID: "cost.accountant", Duties: testkit.ScopeDuties(scope)})
 }
 
 func codeOf(err error) string {

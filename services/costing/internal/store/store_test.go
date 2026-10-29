@@ -19,7 +19,7 @@ import (
 // scopedCtx returns a tenant-wide principal (no legal-entity narrowing), so the
 // restrictive legal-entity policy sees the '*' scope.
 func scopedCtx(tenantID string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, Duties: map[string]struct{}{}})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, Duties: map[string]struct{}{tenant.DutyAllScope: {}}})
 }
 
 func setup(t *testing.T) (*Postgres, *pgxpool.Pool) {

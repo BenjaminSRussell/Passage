@@ -24,7 +24,7 @@ import (
 // principalCtx carries a tenant with no legal-entity scope, so the restrictive
 // policy sees '*' and every row of the tenant is visible.
 func principalCtx(tenantID string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, Duties: map[string]struct{}{}})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, Duties: map[string]struct{}{tenant.DutyAllScope: {}}})
 }
 
 // AC-45.1 and AC-45.6 against Postgres: a case resolves to the customer's
