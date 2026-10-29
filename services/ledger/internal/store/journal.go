@@ -96,7 +96,7 @@ func requireLedgerSpecific(ctx context.Context, tx pgx.Tx, tenantID, ledgerID st
 	}
 	if parallel {
 		return httpx.NewProblem(http.StatusForbidden, "AUTH-0003",
-			"posting to a single parallel ledger needs duty "+DutyPostLedgerSpecific)
+			"acting on a single parallel ledger needs duty "+DutyPostLedgerSpecific)
 	}
 	return nil
 }

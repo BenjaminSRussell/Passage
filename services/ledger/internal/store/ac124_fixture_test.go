@@ -256,6 +256,7 @@ func TestPostgres_BatchPostToAParallelLedgerNeedsTheLedgerSpecificDuty(t *testin
 	if b, err = e.store.DecideBatch(asUser(e.env, "approver"), b.ID, 0, true); err != nil {
 		t.Fatal(err)
 	}
+	entriesBefore := e.entryCount(t)
 	post := func(key string, granted bool) error {
 		_, err := e.store.PostBatch(e.ctx, PostBatchInput{ID: b.ID, Key: key, Today: testToday, TraceID: testTrace, CanPostLedgerSpecific: granted})
 		return err
@@ -266,6 +267,9 @@ func TestPostgres_BatchPostToAParallelLedgerNeedsTheLedgerSpecificDuty(t *testin
 	after, err := e.store.GetBatch(e.ctx, b.ID)
 	if err != nil || after.Status != domain.BatchApproved || after.LastError == "" || after.PostedEntryID != "" {
 		t.Fatalf("a denied batch stays approved with lastError: %+v %v", after, err)
+	}
+	if n := e.entryCount(t); n != entriesBefore {
+		t.Fatalf("a denied batch must write no entry: %d before, %d after", entriesBefore, n)
 	}
 	if err := post("FB50L-B1", true); err != nil {
 		t.Fatalf("batch post with the duty: %v", err)
