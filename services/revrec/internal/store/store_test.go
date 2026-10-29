@@ -74,6 +74,38 @@ func TestChildInsertUnderOtherEntityParentIsRefused(t *testing.T) {
 	requireRLSViolation(t, err)
 }
 
+func TestScheduleInsertUnderOtherEntityObligationIsRefused(t *testing.T) {
+	_, app := migratedPools(t)
+	entityA, entityB := ids.New(), ids.New()
+	created, err := New(app).CreateContract(tenantCtx(1, entityA), bundleContract(t, entityA))
+	if err != nil {
+		t.Fatalf("create contract: %v", err)
+	}
+	obligationID := created.Obligations[0].ID
+	insert := func(ctx context.Context, scheduleID string) error {
+		return dbx.WithTenantTx(ctx, app, func(tx pgx.Tx) error {
+			_, err := tx.Exec(context.Background(), `INSERT INTO revenue_schedule
+				(tenant_id, id, obligation_id, seq, scheduled_date, amount, status)
+				VALUES ($1, $2, $3, 99, '2027-04-01', 1, 'SCHEDULED')`,
+				testkit.TenantID(1), scheduleID, obligationID)
+			return err
+		})
+	}
+	requireRLSViolation(t, insert(tenantCtx(1, entityB), ids.New()))
+
+	ownID := ids.New()
+	if err := insert(tenantCtx(1, entityA), ownID); err != nil {
+		t.Fatalf("owning entity insert: %v", err)
+	}
+	var count int
+	err = dbx.WithTenantTx(tenantCtx(1, entityA), app, func(tx pgx.Tx) error {
+		return tx.QueryRow(context.Background(), "SELECT count(*) FROM revenue_schedule WHERE tenant_id = $1 AND id = $2", testkit.TenantID(1), ownID).Scan(&count)
+	})
+	if err != nil || count != 1 {
+		t.Fatalf("owning entity read = %d, %v; want 1, nil", count, err)
+	}
+}
+
 func TestLegalEntityScopeRestrictsRevenueChildren(t *testing.T) {
 	_, app := migratedPools(t)
 	s := New(app)

@@ -1,6 +1,5 @@
 -- revenue_schedule checks the owning contract's legal entity directly instead of
 -- relying on performance_obligation's policy applying inside the subquery.
--- The outbox is not exempt from RLS: 0004 scopes it to the transaction tenant.
 DROP POLICY revenue_schedule_legal_entity_scope ON revenue_schedule;
 
 CREATE POLICY revenue_schedule_legal_entity_scope ON revenue_schedule AS RESTRICTIVE
