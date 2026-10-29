@@ -18,7 +18,7 @@ Each permission is a route template matched with `glob.match(pattern, ["/", ":"]
 
 ## Flag duties
 
-`"flag": true` duties (`ledger.journal.postdirect`, `inventory.count.approve`) are checked in a handler on a route another duty already opens. They carry no route permissions.
+`"flag": true` duties (`ledger.journal.postdirect`, `ledger.journal.postledger`, `inventory.count.approve`) are checked in a handler on a route another duty already opens. They carry no route permissions.
 
 ## Tests
 
