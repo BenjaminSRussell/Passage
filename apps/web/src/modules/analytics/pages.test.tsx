@@ -106,6 +106,9 @@ describe("analytics module", () => {
       "/analytics/metrics": "AnalyticsView",
       "/analytics/explorer": "AnalyticsView",
       "/analytics/reconciliation": "FinanceView",
+      "/analytics/data-quality": "CatalogSteward",
+      "/analytics/schedules": "AnalyticsAuthor",
+      "/analytics/archive": "ArchiveAdmin",
     });
     // Every nav entry resolves to a route.
     for (const n of analytics.nav) expect(analytics.routes.some((r) => r.path === n.to)).toBe(true);

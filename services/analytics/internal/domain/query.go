@@ -12,7 +12,28 @@ const (
 	MaxDimensions  = 8
 	MaxSpanYears   = 5
 	CodeValidation = "COM-0001"
+
+	// CodePreconditionRequired: a replace of an existing resource without If-Match.
+	CodePreconditionRequired = "COM-0428"
+	// CodeStateConflict: the action does not fit the resource's current state.
+	CodeStateConflict = "ANA-0111"
+	// CodeNotFound: no such resource in the caller's tenant.
+	CodeNotFound = "ANA-0112"
+	// CodeVersionConflict: If-Match does not name the current version.
+	CodeVersionConflict = "ANA-0113"
+	// CodeIdempotencyReuse: an Idempotency-Key reused with a different request.
+	CodeIdempotencyReuse = "ANA-0114"
 )
+
+// NotFound is the 404 for a missing resource.
+func NotFound(what string) *Error {
+	return &Error{Code: CodeNotFound, Status: 404, Detail: what + " not found"}
+}
+
+// StateConflict is the 409 for an action the current state does not allow.
+func StateConflict(detail string) *Error {
+	return &Error{Code: CodeStateConflict, Status: 409, Detail: detail}
+}
 
 // Error is a domain failure that the API maps to an RFC 9457 problem.
 type Error struct {

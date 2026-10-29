@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: Passage Analytics API
   version: 1.0.0
-  description: Governed metric catalog, row-scoped query planning and daily metric reconciliation (wave 46).
+  description: Governed metric catalog, row-scoped query planning, daily metric reconciliation, data-quality rules, archive partitions and report schedules (wave 46).
 servers:
   - url: https://api.{env}.passage.dev
     variables:
@@ -86,6 +86,302 @@ paths:
           $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
+  /v1/catalog/dq-rules:
+    get:
+      operationId: listDQRules
+      summary: List data-quality rules, optionally for one catalog asset
+      x-passage-duty: CatalogSteward
+      parameters:
+        - name: asset
+          in: query
+          required: false
+          schema:
+            type: string
+            pattern: "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*){1,3}$"
+      responses:
+        "200":
+          description: Rules ordered by asset and rule id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DQRulesResponse"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/catalog/dq-rules/scores:
+    get:
+      operationId: listDQScores
+      summary: Data-quality score history, newest first (one row per rule and day)
+      x-passage-duty: CatalogSteward
+      parameters:
+        - name: asset
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: rule
+          in: query
+          required: false
+          schema:
+            type: string
+            pattern: "^[a-z][a-z0-9_]{1,62}$"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 366
+            default: 90
+      responses:
+        "200":
+          description: Score history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DQScoresResponse"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/catalog/dq-rules/{ruleId}:
+    parameters:
+      - $ref: "#/components/parameters/RuleId"
+    get:
+      operationId: getDQRule
+      summary: One data-quality rule; the ETag is its version
+      x-passage-duty: CatalogSteward
+      responses:
+        "200":
+          description: The rule
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DQRule"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: putDQRule
+      summary: Create a rule (no If-Match) or replace it (If-Match with the current version)
+      description: muted=true opens a 7-day mute window (or keeps an open one); a muted rule still scores but does not notify (BR-46.15).
+      x-passage-duty: CatalogSteward
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: The rule version as an entity tag, for example "3". Required to replace an existing rule.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DQRuleRequest"
+      responses:
+        "200":
+          description: Replaced
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DQRule"
+        "201":
+          description: Created
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DQRule"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "412":
+          description: If-Match does not name the current version (ANA-0113)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "428":
+          description: If-Match missing on a replace (COM-0428)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/archive/partitions:
+    get:
+      operationId: listArchivePartitions
+      summary: Archive partitions, newest period first
+      x-passage-duty: ArchiveAdmin
+      parameters:
+        - name: domain
+          in: query
+          required: false
+          schema:
+            type: string
+            pattern: "^[a-z][a-z0-9_]{1,62}$"
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [PENDING, VERIFIED, DROPPED, RESTORED]
+      responses:
+        "200":
+          description: Partitions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PartitionsResponse"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/archive/partitions/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      operationId: getArchivePartition
+      summary: One archive partition with counts, hashes and restore state
+      x-passage-duty: ArchiveAdmin
+      responses:
+        "200":
+          description: The partition
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArchivePartition"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/archive/partitions/{id}/restore:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    post:
+      operationId: restoreArchivePartition
+      summary: Restore a DROPPED partition into a side table for 30 days
+      description: Idempotent by partition id; repeating the request while the restore is live returns the same partition.
+      x-passage-duty: ArchiveAdmin
+      responses:
+        "200":
+          description: The restored partition
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArchivePartition"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          description: The partition is not DROPPED (ANA-0111)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/analytics/schedules:
+    get:
+      operationId: listSchedules
+      summary: Report schedules by next run
+      x-passage-duty: AnalyticsAuthor
+      responses:
+        "200":
+          description: Schedules
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SchedulesResponse"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createSchedule
+      summary: Create a schedule; the first run is computed in its time zone
+      x-passage-duty: AnalyticsAuthor
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Replays within 24 hours return the stored response with Idempotency-Replayed true.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 255
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScheduleRequest"
+      responses:
+        "201":
+          description: Created, or the stored response of an earlier identical request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Schedule"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
+          description: Idempotency-Key reused with a different request (ANA-0114)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/analytics/schedules/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      operationId: getSchedule
+      summary: One report schedule
+      x-passage-duty: AnalyticsAuthor
+      responses:
+        "200":
+          description: The schedule
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Schedule"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
   /healthz:
     get:
       operationId: healthz
@@ -103,6 +399,26 @@ paths:
         "503":
           description: Database unavailable
 components:
+  parameters:
+    RuleId:
+      name: ruleId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-z][a-z0-9_]{1,62}$"
+    Id:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  headers:
+    ETag:
+      description: The resource version as an entity tag, for example "3"
+      schema:
+        type: string
   responses:
     Problem:
       description: RFC 9457 problem details
@@ -282,3 +598,223 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Reconciliation"
+    DQRule:
+      type: object
+      required: [ruleId, assetFqn, ruleType, expression, thresholdPct, severity, ownerUserId, status, version]
+      properties:
+        ruleId:
+          type: string
+        assetFqn:
+          type: string
+        ruleType:
+          type: string
+          enum: [COMPLETENESS, VALIDITY, UNIQUENESS, REFERENTIAL, FRESHNESS]
+        expression:
+          type: string
+          maxLength: 2048
+        thresholdPct:
+          type: string
+          description: Decimal string, 0 to 100 with at most two decimals
+        severity:
+          type: string
+          enum: [LOW, MEDIUM, HIGH]
+        ownerUserId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [ACTIVE, RETIRED]
+        muteUntil:
+          type: string
+          format: date-time
+        version:
+          type: integer
+    DQRuleRequest:
+      type: object
+      required: [assetFqn, ruleType, expression, severity, ownerUserId]
+      properties:
+        assetFqn:
+          type: string
+        ruleType:
+          type: string
+          enum: [COMPLETENESS, VALIDITY, UNIQUENESS, REFERENTIAL, FRESHNESS]
+        expression:
+          type: string
+          maxLength: 2048
+        thresholdPct:
+          type: string
+          default: "98"
+        severity:
+          type: string
+          enum: [LOW, MEDIUM, HIGH]
+        ownerUserId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [ACTIVE, RETIRED]
+          default: ACTIVE
+        muted:
+          type: boolean
+    DQRulesResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DQRule"
+    DQScore:
+      type: object
+      required: [assetFqn, ruleId, date, passPct, failedRows, totalRows, below, belowStreak]
+      properties:
+        assetFqn:
+          type: string
+        ruleId:
+          type: string
+        date:
+          type: string
+          format: date
+        passPct:
+          type: string
+          description: Decimal string, rounded half-even to two decimals
+        failedRows:
+          type: integer
+        totalRows:
+          type: integer
+        below:
+          type: boolean
+          description: The exact pass rate is under the rule threshold
+        belowStreak:
+          type: integer
+          description: Consecutive below-threshold evaluations; 3 escalates to the steward
+    DQScoresResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DQScore"
+    ArchivePartition:
+      type: object
+      required: [partitionId, domain, tableName, period, rowsOltp, rowsArchive, contentHashOltp, contentHashArchive, status, legalHold, openPeriod]
+      properties:
+        partitionId:
+          type: string
+          format: uuid
+        domain:
+          type: string
+        tableName:
+          type: string
+        period:
+          type: string
+          pattern: "^[0-9]{4}-(0[1-9]|1[0-2])$"
+        rowsOltp:
+          type: integer
+        rowsArchive:
+          type: integer
+        contentHashOltp:
+          type: string
+        contentHashArchive:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, VERIFIED, DROPPED, RESTORED]
+        legalHold:
+          type: boolean
+        openPeriod:
+          type: boolean
+        movedAt:
+          type: string
+          format: date-time
+        restoreUntil:
+          type: string
+          format: date-time
+    PartitionsResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArchivePartition"
+    Destination:
+      type: object
+      required: [type, targets]
+      properties:
+        type:
+          type: string
+          enum: [EMAIL, SFTP, INBOX]
+        targets:
+          type: array
+          minItems: 1
+          maxItems: 50
+          description: E-mail addresses (EMAIL), one sftp:// URL (SFTP) or user ids (INBOX)
+          items:
+            type: string
+    ScheduleRequest:
+      type: object
+      required: [name, targetType, targetId, cron, timezone, format, destination]
+      properties:
+        name:
+          type: string
+          maxLength: 120
+        targetType:
+          type: string
+          enum: [DASHBOARD, QUERY]
+        targetId:
+          type: string
+        cron:
+          type: string
+          description: Five fields (minute hour day-of-month month day-of-week); L is the last day of the month
+          example: 0 6 * * 1
+        timezone:
+          type: string
+          example: Europe/Berlin
+        format:
+          type: string
+          enum: [PDF, XLSX]
+        destination:
+          $ref: "#/components/schemas/Destination"
+    Schedule:
+      type: object
+      required: [scheduleId, name, targetType, targetId, cron, timezone, format, destination, failureCount, version]
+      properties:
+        scheduleId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        targetType:
+          type: string
+          enum: [DASHBOARD, QUERY]
+        targetId:
+          type: string
+        cron:
+          type: string
+        timezone:
+          type: string
+        format:
+          type: string
+          enum: [PDF, XLSX]
+        destination:
+          $ref: "#/components/schemas/Destination"
+        lastRunAt:
+          type: string
+          format: date-time
+        nextRunAt:
+          type: string
+          format: date-time
+        failureCount:
+          type: integer
+        version:
+          type: integer
+    SchedulesResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Schedule"

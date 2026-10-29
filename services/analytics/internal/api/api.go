@@ -1,6 +1,7 @@
 // Package api exposes the analytics HTTP surface: the governed metric catalog,
-// the Cube query planner (with the OPA scope mirror applied) and the daily
-// reconciliation results. Handlers decode, validate, read the tenant principal,
+// the Cube query planner (with the OPA scope mirror applied), the daily
+// reconciliation results, data-quality rules and scores, archive partitions
+// and report schedules. Handlers decode, validate, read the tenant principal,
 // call the domain or store, and answer with httpx.
 package api
 
@@ -32,11 +33,12 @@ const CodeBadRequest = domain.CodeValidation
 type API struct {
 	store   *store.Postgres
 	catalog []domain.Metric
+	now     func() time.Time
 }
 
 // New returns the API over the store with the platform metric catalog.
 func New(st *store.Postgres) *API {
-	return &API{store: st, catalog: domain.GovernedMetrics()}
+	return &API{store: st, catalog: domain.GovernedMetrics(), now: time.Now}
 }
 
 // Register mounts the analytics routes on r.
@@ -47,6 +49,7 @@ func (a *API) Register(r *chi.Mux) {
 		g.Post("/v1/analytics/query", a.query)
 	})
 	r.With(authz.RequireDuty(DutyFinance)).Get("/v1/analytics/reconciliation", a.reconciliation)
+	a.registerSlice2(r)
 }
 
 // MetricsResponse lists published metrics.
