@@ -205,6 +205,8 @@ describe("asset detail", () => {
       if (get(`/assets/${PUMP}/criticality`)(url, init)) return json(200, { items: [] });
       if (get(`/assets/${PUMP}/warranties`)(url, init)) return json(200, { items: [] });
       if (get(`/assets/${PUMP}/isolation-points`)(url, init)) return json(200, { items: [] });
+      if (get("/functional-locations")(url, init)) return json(200, { items: [] });
+      if (get(`/assets/${PUMP}/location-history`)(url, init)) return json(200, { items: [] });
       return undefined;
     };
   }

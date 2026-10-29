@@ -636,7 +636,8 @@ func TestRLS_TenantIsolation(t *testing.T) {
 		"work_order_transition", "work_order_labor", "work_order_part", "maintenance_request", "condition_rule", "outbox", "idempotency_keys",
 		"criticality_assessment", "fault_catalog", "fault_code", "fault_combination", "work_order_fault", "downtime_window",
 		"maintenance_request_triage", "asset_warranty", "permit_type", "job_permit_requirement", "isolation_point", "permit",
-		"permit_transition", "loto_lock", "loto_lock_action"} {
+		"permit_transition", "loto_lock", "loto_lock_action", "functional_location", "asset_location_history",
+		"maintenance_sequence", "sequence_occurrence"} {
 		var enabled, forced bool
 		if err := admin.QueryRow(ctx, `select relrowsecurity, relforcerowsecurity from pg_class
 		  where relname = $1 and relnamespace = $2::regnamespace`, table, schema).Scan(&enabled, &forced); err != nil {

@@ -170,8 +170,8 @@ export function validatePlan(values: PlanValues): { errors: PlanErrors; input?: 
   return { errors, input: { code, name, currency, lines } };
 }
 
-/** Counters of the line's asset, for a counter-based line. */
-function CounterSelect({ id, assetId, value, error, onChange }: { id: string; assetId: string; value: string; error?: string; onChange(next: string): void }) {
+/** Counters of one asset, loaded from the asset detail (plan lines and sequences on a counter). */
+export function CounterSelect({ id, assetId, value, error, onChange }: { id: string; assetId: string; value: string; error?: string; onChange(next: string): void }) {
   const state = useLoad<Counter[]>(async (signal) => (assetId ? (await getAsset(assetId, signal)).counters : []), `counters|${assetId}`);
   return (
     <FormField id={id} label="Counter" error={error ?? (state.error ? `Could not load counters (${state.error.code}).` : undefined)}>

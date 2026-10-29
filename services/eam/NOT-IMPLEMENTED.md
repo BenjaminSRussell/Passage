@@ -1,6 +1,6 @@
-# NOT-IMPLEMENTED — services/eam (PSG-44, slices 1 to 3)
+# NOT-IMPLEMENTED — services/eam (PSG-44, slices 1 to 4)
 
-Every ticket deliverable and acceptance criterion that slices 1 to 3 do not build, with
+Every ticket deliverable and acceptance criterion that slices 1 to 4 do not build, with
 its status and reason. Status is either `later slice of PSG-44` or `handoff` (needs
 work outside the owned paths).
 
@@ -8,15 +8,20 @@ work outside the owned paths).
 
 | # | Item | Status | Reason |
 |---|---|---|---|
-| D1 | Functional locations, ltree path, location history (FR-44.1) | later slice of PSG-44 | Slice 1 focuses on the asset-to-plan-to-WO path. Assets have no location or parent. |
-| D1 | Asset hierarchy (parent asset), install/remove history, asset type entity | later slice of PSG-44 | Not needed for the scheduler path. Asset type is a text code for now. |
+| D1 | `ltree` column and GiST index for the location path (8.44.4) | later slice of PSG-44 (handoff: platform, for the extension) | Slice 4 builds functional locations (FR-44.1) with a text path (codes joined by `/`) and a `text_pattern_ops` index; subtree reads use the path prefix. The `ltree` extension needs a superuser `CREATE EXTENSION` that service migrations cannot run. |
+| D1 | Functional location edit, move of a location (re-parenting a subtree), deactivation, location history of the location itself | later slice of PSG-44 | Slice 4 creates locations; code, name, type and parent are set at creation. Asset install, move and remove with history is built. |
+| D1 | Location types as a setup entity, cost dimension of the functional location (FR-44.11 posting key) | later slice of PSG-44 | `location_type` is a free code. The cost dimension depends on ledger posting (D3). |
+| D1 | Asset hierarchy (parent asset), asset type entity | later slice of PSG-44 | Assets have no parent asset. Asset type is a text code for now. |
 | D1 | BOMs and spares, measurement points beyond counters | later slice of PSG-44 | Spares depend on wave-16 inventory. |
 | D1 | Asset edit (name, type, site, production resource, manufacturer/model/serial, fixed asset link) | later slice of PSG-44 | Slice 2 builds the lifecycle (activate, retire to INACTIVE, dispose); the other asset fields are set at creation only. Criticality changes through assessments. |
 | D2 | Plan checklists, est. hours, planned parts (FR-44.4) | later slice of PSG-44 | Requires checklist and parts tables. |
 | D2 | Shift factors (BR-44.1 (a)), merge window (BR-44.1 (e)), counter release tolerance (BR-44.1 (f)) | later slice of PSG-44 | Next-due uses last completion only. Work orders are created one per line, not merged. |
-| D2 | Plan scope by asset type or location; calendar_id | later slice of PSG-44 | Plan lines are per asset. |
+| D2 | Plan scope by asset type or location; calendar_id | later slice of PSG-44 | Plan lines are per asset, now that locations exist (slice 4) a location scope is possible but not built. |
 | D2 | Request merge (8.44.6 Request triage "merge") | later slice of PSG-44 | Slice 2 builds triage, defer and reject with history; merging two requests into one is not built. |
-| D2 | Maintenance rounds (FR-44.14), sequences (FR-44.15) | later slice of PSG-44 | Separate aggregates and scheduler branches. |
+| D2 | Maintenance rounds (FR-44.14) | later slice of PSG-44 | Separate aggregate and scheduler branch. |
+| D2 | Sequence lines in the plan scheduler (due dates from the base interval or counter, BR-44.1 for sequences), editing a sequence | later slice of PSG-44 | Slice 4 builds sequences with BR-44.10 step selection, the simulation and on-demand occurrence generation (one PREVENTIVE work order per occurrence). Due dates are not computed from `baseIntervalValue`/`baseIntervalUnit`/`counterId`; the work order takes an optional `dueAt`. Sequences are create-only. |
+| D2 | Extra jobs of a sequence occurrence on the work order (one job per due step) | later slice of PSG-44 | Work orders carry one job type until job lines exist (D3 jobs row). The work order gets the selected step's job type; the occurrence lists every job (`jobTypes`). |
+| D2 | Occurrences of asset type sequences (per-asset occurrence counters) | later slice of PSG-44 | An asset type sequence is a template: it can be simulated but not generated (EAM-SEQ-001). |
 | D3 | Work order jobs, checklists and mandatory-item completion check (EAM-WO-004) | later slice of PSG-44 | No job or checklist tables yet. |
 | D3 | Scheduling against wave-23 resources and team capacity (FR-44.8) | handoff (wave 23) | Wave 23 owns the resource model and capacity. Slice 2 emits `downtime.recorded` for recorded downtime windows; planned downtime of SCHEDULED/RELEASED orders (tentative, then firm at RELEASED, BR-44.5) needs planned_start/planned_end, which work orders do not carry yet. |
 | D3 | Parts reservation, pick and issue through wave-16 (FR-44.9, BR-44.6) | handoff (wave 16) | Needs the inventory reservation and journal API. The `work_order_part` table exists but no endpoint writes it. |
@@ -38,7 +43,7 @@ work outside the owned paths).
 | D6 | Warranty duration in counter units (`counter_id`, `counter_limit`), warranty check at each part issue, per-line coverage flags (BR-44.14) | later slice of PSG-44 (part issue: handoff to wave 16) | Slice 2 checks at work order creation on the order date and flags the whole order. Part issue is not built (D3 wave 16 row), so claims carry the order's parts cost when parts are covered. |
 | D6 | Voiding a warranty, warranty inquiry across assets (8.44.14), `eam-warranty-expiry` job, warranty check on WO create as a site parameter | later slice of PSG-44 | The `status` column allows VOIDED but no endpoint sets it. Warranties are listed per asset. The check always runs. |
 | D6 | Vendor warranty claim (FR-45.15) | handoff (wave 45) | Slice 2 emits `dev.passage.eam.warranty.claimable.v1` at completion; wave 45 creates the claim. |
-| D7 | Permits required by asset type or functional location (FR-44.19) | later slice of PSG-44 | Slice 3 builds the job-type requirement only. Functional locations do not exist yet (D1). |
+| D7 | Permits required by asset type or functional location (FR-44.19) | later slice of PSG-44 | Slice 3 builds the job-type requirement only. Functional locations exist since slice 4, but no requirement is stored against them. |
 | D7 | Permit checklists and gas test results (`checklist_id`, `checklist_results[]`), country permit templates (`eam.permit.template.<cc>`), translatable permit texts | later slice of PSG-44 | `requires_gas_test` is stored on the type but no gas test is recorded or checked at issue. No checklist tables yet (D3). |
 | D7 | Approver role check: the approver holds the permit type's `approver_role` (Area authority, Safety officer) | handoff (wave 42 workers) | The role is stored on the type. Slice 3 enforces the EamPermitIssuer duty and approver ≠ requester, not the named role. |
 | D7 | Technician identity as a wave-42 worker (`technician_worker_id`), and the 8.44.17 conflict "EamTechnician with EamPermitIssuer approving a permit for own job" | handoff (wave 42 workers) | Locks and transitions record the signed-in user id. Which users work a job is not known until workers are assigned to work orders. |
@@ -65,7 +70,7 @@ work outside the owned paths).
 | AC-44.7 | later slice of PSG-44 | Needs checklists. |
 | AC-44.8 | built | Domain test and store test (`TestAssetKPI_AC448`): MTBF of 900 h for 3 failures in 2,700 h of uptime. |
 | AC-44.9 | later slice of PSG-44 | Needs rounds. |
-| AC-44.10 | later slice of PSG-44 | Needs sequences. |
+| AC-44.10 | built | `TestSelectSteps_AC44_10` (domain) and `TestSequences_AC4410` (store): A×1, B×4 (includes A), C×12 (includes A, B) generate occurrences 1-12 with work orders for A, A, A, B, A, A, A, B, A, A, A, C, matching the simulation. |
 | AC-44.11 | built | `TestPermit_AC4411` (store) and `TestHTTP_PermitFlowAC4411` (HTTP): ELECTRICAL_ISOLATION on an asset with 3 isolation points; IN_PROGRESS with 2 verified locks returns EAM-PMT-002, with 3 and an ISSUED permit it succeeds, and closing with a lock still applied returns EAM-PMT-003. |
 | AC-44.12 | later slice of PSG-44 | Needs refurbishment and the wave-16 condition dimension. |
 | AC-44.13 | partial | `TestWarranty_AC4413`: a 24-month parts-only warranty from 2025-11-01 covers an order created on 2026-10-21, and completion emits `warranty.claimable` with 350.00 of parts and 0.00 of labor. Part issue itself is a wave-16 handoff, so the test sets the parts cost; coverage is per order, not per part line. |
@@ -85,6 +90,7 @@ satisfied for the Go module; the web checks pass.
 | Idempotency for `POST /plans/schedule` | later slice of PSG-44 | Re-runs are safe by construction (one open WO per line). No stored key. |
 | Kernel httpx idempotency middleware (`idempotency_keys` table) | handoff (platform kernel) | Slice 1 stores keys on each aggregate row instead. |
 | Work order and asset numbers from wave-5 number sequences (site scope) | handoff (wave 5 / platform) | Slice 1 uses global sequences `WO-n` and `AST-n`. |
+| Location and sequence events | later slice of PSG-44 | The PRD names none for locations, placement or sequences; sequence occurrences publish the existing `workorder.created`. |
 | `dev.passage.eam.budget.calculated.v1` | later slice of PSG-44 | Budgets are not built. `downtime.recorded`, `warranty.claimable` and `request.triaged` are emitted from slice 2. The PRD's `permit.status.changed` is emitted from slice 3 as `dev.passage.eam.permitstatus.changed.v1` (the kernel type regex allows three segments, so the middle ones are joined, as for `workorderstatus.changed`). |
 | Criticality and lifecycle events | later slice of PSG-44 | The PRD names none; assessments and lifecycle changes are not published. |
 | ETag reads, search by text, list filters beyond status and asset | later slice of PSG-44 | Lists page by cursor with status and asset filters; versions travel in the body and If-Match. |
@@ -95,4 +101,4 @@ satisfied for the Go module; the web checks pass.
 | Monthly partitioning of `counter_reading` (8.44.4) | later slice of PSG-44 | Single table in slice 1. |
 | Legal-entity scoping (`dbx.LegalEntityScopePolicy`) | later slice of PSG-44 | No legal entity column on EAM tables yet. |
 | Parameters 8.44.13 (number sequences per site, tolerances per tenant, cooldown overrides) | later slice of PSG-44 | Hard-coded defaults in slice 1 (cooldown 60 min, tolerance 10%, horizon 90 days). |
-| Web: plant structure tree, work order board (kanban + Gantt), technician mobile PWA, KPI dashboard, round/sequence editor, fault analysis, budget, rotables (8.44.6) | later slice of PSG-44 | Built: workspace tiles, asset list/create/detail with counters, readings, rules, KPIs, lifecycle (activate, retire, dispose), criticality matrix and versions, and warranties; plan list and editor; request list with convert, triage, defer and reject, and create; work order list/create/detail with status actions, completion, labor, fault registration, downtime windows and history; fault catalog list and designer; permit register with the expiry run, permit request, permit detail with lifecycle actions, isolation points and personal lock actions, permit type and job requirement setup, isolation points on the asset, permits card on the work order. Workspace tile "backlog hours" is shown as open work orders until jobs carry estimated hours. Shell owner: no Needs. |
+| Web: drag-and-drop plant structure tree with expand/collapse, work order board (kanban + Gantt), technician mobile PWA, KPI dashboard, round editor, 12-month calendar view of a sequence, fault analysis, budget, rotables (8.44.6) | later slice of PSG-44 | Built: workspace tiles, asset list/create/detail with counters, readings, rules, KPIs, lifecycle (activate, retire, dispose), criticality matrix and versions, and warranties; plan list and editor; request list with convert, triage, defer and reject, and create; work order list/create/detail with status actions, completion, labor, fault registration, downtime windows and history; fault catalog list and designer; permit register with the expiry run, permit request, permit detail with lifecycle actions, isolation points and personal lock actions, permit type and job requirement setup, isolation points on the asset, permits card on the work order; slice 4: plant structure list in path order with subtree filter, location create form and detail (children, installed assets), the asset location card (install, move, remove, history), sequence list, sequence editor (steps with multiple, hierarchy and includes) and sequence detail with the 12-occurrence simulation, occurrence generation and generated occurrences. The structure is an indented list, not an interactive tree, and the asset location card offers the first 200 locations of the asset's site (no search). Workspace tile "backlog hours" is shown as open work orders until jobs carry estimated hours. Shell owner: no Needs. |

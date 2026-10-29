@@ -25,6 +25,7 @@ export interface Asset {
   criticality: number;
   lifecycleState: LifecycleState;
   productionResourceId?: string;
+  functionalLocationId?: string;
   version: number;
   createdAt: string;
 }
@@ -65,6 +66,7 @@ export interface AssetDetail extends Asset {
   openWorkOrders: number;
   partsCost: string;
   laborCost: string;
+  location?: FunctionalLocation;
 }
 
 export interface NewCounter {
@@ -717,4 +719,154 @@ export function recordLock(permitId: string, action: LockAction, isolationPointI
 /** Runs the permit expiry check: ISSUED permits past their validity are suspended (EAM-PMT-004). */
 export async function expirePermits(key = newKey()): Promise<ExpiredPermit[]> {
   return (await post<{ items: ExpiredPermit[] }>("/permits/expire", undefined, key)).items;
+}
+
+// Slice 4: functional locations (FR-44.1, FR-44.2) and maintenance sequences (FR-44.15).
+
+/** A node of a site's plant structure; path joins the codes from the root with "/". */
+export interface FunctionalLocation {
+  id: string;
+  code: string;
+  name: string;
+  siteId: string;
+  parentId?: string;
+  locationType?: string;
+  depth: number;
+  path: string;
+  createdAt: string;
+}
+
+export interface NewLocation {
+  code: string;
+  name: string;
+  siteId: string;
+  parentId?: string;
+  locationType?: string;
+}
+
+export interface LocationDetail extends FunctionalLocation {
+  children: FunctionalLocation[];
+  assets: Asset[];
+}
+
+export type LocationMove = "INSTALL" | "MOVE" | "REMOVE";
+
+export interface LocationHistory {
+  id: string;
+  assetId: string;
+  action: LocationMove;
+  fromLocationId?: string;
+  fromPath?: string;
+  toLocationId?: string;
+  toPath?: string;
+  actor: string;
+  at: string;
+}
+
+export interface LocationFilter {
+  site?: string;
+  under?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface SequenceStep {
+  code: string;
+  jobType: string;
+  multiple: number;
+  hierarchy: number;
+  includes?: string[];
+}
+
+export interface MaintenanceSequence {
+  id: string;
+  code: string;
+  name: string;
+  assetId?: string;
+  assetType?: string;
+  baseIntervalValue: number;
+  baseIntervalUnit?: IntervalUnit;
+  counterId?: string;
+  steps: SequenceStep[];
+  lastOccurrenceNumber: number;
+  version: number;
+  createdAt: string;
+}
+
+export interface NewSequence {
+  code: string;
+  name: string;
+  assetId?: string;
+  assetType?: string;
+  baseIntervalValue: number;
+  baseIntervalUnit?: IntervalUnit;
+  counterId?: string;
+  steps: SequenceStep[];
+}
+
+export interface SimulatedOccurrence {
+  occurrenceNumber: number;
+  stepCodes: string[];
+  jobTypes: string[];
+}
+
+export interface SequenceOccurrence extends SimulatedOccurrence {
+  id: string;
+  sequenceId: string;
+  workOrderId?: string;
+  actor: string;
+  createdAt: string;
+}
+
+export interface NewOccurrence {
+  currency: string;
+  dueAt?: string;
+}
+
+export function listLocations(filter: LocationFilter = {}, signal?: AbortSignal): Promise<Page<FunctionalLocation>> {
+  const q = query({ site: filter.site, under: filter.under, cursor: filter.cursor, limit: filter.limit === undefined ? undefined : String(filter.limit) });
+  return page<FunctionalLocation>(`/functional-locations${q}`, signal);
+}
+
+export function getLocation(locationId: string, signal?: AbortSignal): Promise<LocationDetail> {
+  return send<LocationDetail>(`/functional-locations/${id(locationId)}`, {}, signal);
+}
+
+export function createLocation(input: NewLocation, key: string): Promise<FunctionalLocation> {
+  return post<FunctionalLocation>("/functional-locations", input, key);
+}
+
+/** Installs or moves the asset to a location, or removes it (null); version is the asset version read (If-Match). */
+export function placeAsset(assetId: string, functionalLocationId: string | null, version: number, key = newKey()): Promise<Asset> {
+  return post<Asset>(`/assets/${id(assetId)}/location`, { functionalLocationId }, key, { "If-Match": `"${version}"` });
+}
+
+export async function listLocationHistory(assetId: string, signal?: AbortSignal): Promise<LocationHistory[]> {
+  return (await page<LocationHistory>(`/assets/${id(assetId)}/location-history`, signal)).items;
+}
+
+export function listSequences(filter: ListFilter = {}, signal?: AbortSignal): Promise<Page<MaintenanceSequence>> {
+  return page<MaintenanceSequence>(`/sequences${listQuery(filter)}`, signal);
+}
+
+export function getSequence(sequenceId: string, signal?: AbortSignal): Promise<MaintenanceSequence> {
+  return send<MaintenanceSequence>(`/sequences/${id(sequenceId)}`, {}, signal);
+}
+
+export function createSequence(input: NewSequence, key: string): Promise<MaintenanceSequence> {
+  return post<MaintenanceSequence>("/sequences", input, key);
+}
+
+/** The next occurrences and the steps BR-44.10 selects, without generating them. */
+export async function simulateSequence(sequenceId: string, occurrences = 12, signal?: AbortSignal): Promise<SimulatedOccurrence[]> {
+  return (await page<SimulatedOccurrence>(`/sequences/${id(sequenceId)}/simulation?occurrences=${occurrences}`, signal)).items;
+}
+
+/** Generates the next occurrence of an asset sequence; it opens a preventive work order for the selected step. */
+export function generateOccurrence(sequenceId: string, input: NewOccurrence, key: string): Promise<SequenceOccurrence> {
+  return post<SequenceOccurrence>(`/sequences/${id(sequenceId)}/occurrences`, input, key);
+}
+
+export async function listOccurrences(sequenceId: string, signal?: AbortSignal): Promise<SequenceOccurrence[]> {
+  return (await page<SequenceOccurrence>(`/sequences/${id(sequenceId)}/occurrences`, signal)).items;
 }

@@ -1,4 +1,4 @@
-# EAM (enterprise asset management) — wave 44, slices 1 to 3
+# EAM (enterprise asset management) — wave 44, slices 1 to 4
 
 Ticket PSG-44. Passage's maintenance context: plant assets, counters and condition
 rules, maintenance plans that generate preventive work orders, maintenance requests,
@@ -6,7 +6,8 @@ work orders with labor and status transitions, and asset reliability KPIs.
 Slice 2 adds asset retirement, criticality assessment, vendor warranties with the
 work order warranty check, fault catalogs with fault registration, downtime windows
 and request triage. Slice 3 adds permits to work and lockout/tagout (LOTO), which gate
-the start of work orders. The authoritative requirements are PRD section 8.44;
+the start of work orders. Slice 4 adds the functional-location hierarchy with asset
+installation history, and maintenance sequences. The authoritative requirements are PRD section 8.44;
 NOT-IMPLEMENTED.md lists what the slices leave out and why.
 
 ## What slice 1 does
@@ -117,9 +118,38 @@ NOT-IMPLEMENTED.md lists what the slices leave out and why.
   permit past its validity for the caller's tenant and lists them with EAM-PMT-004,
   flagging work orders still IN_PROGRESS. Reruns suspend nothing more.
 
+## What slice 4 does
+
+- **Functional locations** (FR-44.1): `POST /functional-locations` adds a root location
+  of a site or a child of a parent in the same site (EAM-FL-002), with an optional
+  location type. The path joins the codes from the root with `/` (for example
+  `PLANT-1/LINE-2/PUMP-3`), is unique per site (EAM-DUP-001), and the depth is at most
+  12 (EAM-FL-001). `GET /functional-locations` pages a site's locations in path order,
+  optionally one location's subtree (`under`); the detail lists the children and the
+  installed assets.
+- **Asset placement and history** (FR-44.1, FR-44.2): `POST /assets/{id}/location`
+  (If-Match) installs, moves or removes (`null`) the asset at a location of its own
+  site (EAM-FL-002 for another site or no change; EAM-AST-001 for a DISPOSED asset),
+  moves the asset version on, and appends INSTALL, MOVE or REMOVE with the locations
+  left and reached to the append-only `asset_location_history`. Disposal removes an
+  installed asset from its location the same way. The asset carries
+  `functionalLocationId` and its detail the location.
+- **Maintenance sequences** (FR-44.15, BR-44.10): `POST /sequences` defines job-type
+  steps on one asset or one asset type, over a base interval in a time unit or on a
+  counter of the asset. Steps have unique codes and hierarchies, multiples of 1 to 1000,
+  and may include only lower-hierarchy steps (EAM-SEQ-001). For occurrence k the due
+  steps are those with k mod multiple = 0; the one with the highest hierarchy is
+  performed, the steps it includes are suppressed, and the other due steps are extra
+  jobs. `GET /sequences/{id}/simulation` shows the next occurrences without changing
+  anything. `POST /sequences/{id}/occurrences` generates the next occurrence of an asset
+  sequence and opens a PREVENTIVE work order for the selected step's job type
+  (`workorder.created` in the same transaction); the previous occurrence's order must be
+  finished or canceled first (EAM-SEQ-002). Asset type sequences are templates.
+
 Domain logic is pure (`internal/domain`) and table-tested, with property tests
 (`rapid`). Store integration tests are in `internal/store/store_test.go` and
-`internal/store/slice2_test.go` and `internal/store/permits_test.go`; HTTP tests,
+`internal/store/slice2_test.go`, `internal/store/permits_test.go` and
+`internal/store/locations_sequences_test.go`; HTTP tests,
 including a check that `api/openapi.yaml` lists exactly the served routes, are in
 `internal/api`.
 
@@ -133,7 +163,11 @@ catalog designer (`/eam/fault-catalogs`). Slice 3 adds the permit register
 (`/eam/permits`), the permit request form, the permit detail with lifecycle actions,
 isolation points and personal lock actions, permit type and job requirement setup
 (`/eam/permit-types`), isolation points on the asset page and a permits card on the
-work order page.
+work order page. Slice 4 adds the plant structure (`/eam/locations`: location tree
+with subtree filter, create form, location detail with children and installed assets),
+the asset's location card with install, move, remove and history, and maintenance
+sequences (`/eam/sequences`: list, editor with step hierarchy, detail with a
+simulation, occurrence generation and the generated occurrences).
 
 ## Layout
 
@@ -144,7 +178,8 @@ internal/store/          Postgres repositories (tenant-scoped transactions, outb
 internal/api/            HTTP handlers, duty checks, validation
 internal/events/         event types and payloads
 migrations/              0001 domain tables + RLS, 0002 outbox and idempotency, 0003 slice 2 tables + RLS,
-                         0004 passage_app grants, 0005 permits and LOTO + RLS + grants
+                         0004 passage_app grants, 0005 permits and LOTO + RLS + grants,
+                         0006 functional locations, location history, sequences + RLS + grants
 api/openapi.yaml         contract for every endpoint
 events/asyncapi.yaml     contract for every event
 charts/eam/              Helm chart (passage-eam)
@@ -176,7 +211,8 @@ row-level security test runs the store as that role.
 |---|---|
 | EamAssetMaintain | assets, activate, lifecycle, criticality, warranties, counters, rules |
 | EamCounterRegister | readings |
-| EamPlanAdmin | plans, plans/schedule, fault catalogs (PUT) |
+| EamPlanAdmin | plans, plans/schedule, fault catalogs (PUT), sequences and their occurrences (POST) |
+| EamStructureMaintain | functional locations (POST), asset placement |
 | EamRequestCreate | requests |
 | EamPlanner | request convert and triage, work order create, status and downtime (or EamTechnician) |
 | EamTechnician | status and downtime (or EamPlanner), labor, faults |
@@ -184,7 +220,7 @@ row-level security test runs the store as that role.
 | EamPermitIssuer | permit transitions (approve, issue, suspend, close, cancel), permit expiry run |
 | EamTechnician | personal LOTO lock actions |
 | EamSetupAdmin | permit types, job permit requirements (PUT), isolation points (POST) |
-| EamInquire | every GET: workspace, assets, assessments, warranties, readings, plans, fault catalogs, requests, work orders, kpis, permit types, job permit requirements, isolation points, permits |
+| EamInquire | every GET: workspace, assets, assessments, warranties, readings, plans, fault catalogs, requests, work orders, kpis, permit types, job permit requirements, isolation points, permits, functional locations, location history, sequences, simulation, occurrences |
 
 ## Error codes
 
@@ -210,10 +246,14 @@ Problem details are `application/problem+json`. The `code` field carries the cod
 | EAM-PMT-006 | 422 | Permit or lock state does not allow the action |
 | EAM-PMT-007 | 422 | The technician already holds an open lock on the isolation point |
 | EAM-PMT-008 | 422 | Permit cannot close while its work order is IN_PROGRESS |
-| EAM-NF-001 | 404 | Asset, counter, work order, request, plan, fault catalog, permit type, isolation point, permit or lock not found |
+| EAM-FL-001 | 422 | Functional location depth exceeds 12 |
+| EAM-FL-002 | 422 | Location rule: parent or target location in another site, or the asset is already there (or not installed, on removal) |
+| EAM-SEQ-001 | 422 | Sequence invalid (steps, includes, scope or interval), or an occurrence asked of an asset type sequence |
+| EAM-SEQ-002 | 422 | Sequence occurrence while the previous occurrence's work order is still open |
+| EAM-NF-001 | 404 | Asset, counter, work order, request, plan, fault catalog, permit type, isolation point, permit, lock, functional location or sequence not found |
 | EAM-VAL-001 | 400 | Request failed validation |
-| EAM-DUP-001 | 409 | Plan code, counter name or isolation tag code (per asset) already used, or a permit of the type is already in force on the work order |
-| idempotency_key_reuse | 422 | Idempotency-Key already used for another counter, work order, rule, request, asset assessment, warranty, isolation point, permit or lock |
+| EAM-DUP-001 | 409 | Plan code, counter name, isolation tag code (per asset), location path (per site) or sequence code already used, or a permit of the type is already in force on the work order |
+| idempotency_key_reuse | 422 | Idempotency-Key already used for another counter, work order, rule, request, asset assessment, warranty, isolation point, permit, lock, asset placement or sequence occurrence |
 | conflict_version | 412 | If-Match version does not match the current version |
 | precondition_required | 428 | If-Match missing on a versioned action |
 | idempotency_key_required | 400 | Idempotency-Key missing on a creating or custom POST |
@@ -221,9 +261,10 @@ Problem details are `application/problem+json`. The `code` field carries the cod
 | AUTH-0003 | 403 | Missing duty |
 
 Codes from PRD 8.44.18 that these slices do not raise (EAM-WO-002..004, EAM-BUD-001,
-EAM-REF-001) belong to later slices. EAM-PMT-005..008 are service codes for BR-44.11 and
-8.44.17 rules the PRD states without a code. EAM-WAR-001 is informational: the work
-order carries `warrantyCovered` and `warrantyId` instead of a message.
+EAM-REF-001) belong to later slices. EAM-PMT-005..008, EAM-FL-002 and EAM-SEQ-001..002
+are service codes for BR-44.11, FR-44.1, FR-44.15 and 8.44.17 rules the PRD states
+without a code. EAM-WAR-001 is informational: the work order carries `warrantyCovered`
+and `warrantyId` instead of a message.
 
 ## Wave reference
 

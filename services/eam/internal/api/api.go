@@ -31,6 +31,8 @@ const (
 	DutyInquire         = "EamInquire"
 	DutyPermitIssuer    = "EamPermitIssuer"
 	DutySetupAdmin      = "EamSetupAdmin"
+	// DutyStructureMaintain covers functional locations and asset placement.
+	DutyStructureMaintain = "EamStructureMaintain"
 )
 
 var (
@@ -117,6 +119,18 @@ func (h *Handler) router() chi.Router {
 		r.With(authz.RequireDuty(DutyInquire)).Get("/permits/{id}", h.getPermit)
 		r.With(authz.RequireDuty(DutyPermitIssuer)).Post("/permits/{id}/transition", h.transitionPermit)
 		r.With(authz.RequireDuty(DutyTechnician)).Post("/permits/{id}/locks", h.recordLock)
+		// Slice 4: functional locations (FR-44.1, FR-44.2) and maintenance sequences (FR-44.15).
+		r.With(authz.RequireDuty(DutyStructureMaintain)).Post("/functional-locations", h.createLocation)
+		r.With(authz.RequireDuty(DutyInquire)).Get("/functional-locations", h.listLocations)
+		r.With(authz.RequireDuty(DutyInquire)).Get("/functional-locations/{id}", h.getLocation)
+		r.With(authz.RequireDuty(DutyStructureMaintain)).Post("/assets/{id}/location", h.placeAsset)
+		r.With(authz.RequireDuty(DutyInquire)).Get("/assets/{id}/location-history", h.listLocationHistory)
+		r.With(authz.RequireDuty(DutyPlanAdmin)).Post("/sequences", h.createSequence)
+		r.With(authz.RequireDuty(DutyInquire)).Get("/sequences", h.listSequences)
+		r.With(authz.RequireDuty(DutyInquire)).Get("/sequences/{id}", h.getSequence)
+		r.With(authz.RequireDuty(DutyInquire)).Get("/sequences/{id}/simulation", h.simulateSequence)
+		r.With(authz.RequireDuty(DutyPlanAdmin)).Post("/sequences/{id}/occurrences", h.generateOccurrence)
+		r.With(authz.RequireDuty(DutyInquire)).Get("/sequences/{id}/occurrences", h.listOccurrences)
 	})
 	return r
 }

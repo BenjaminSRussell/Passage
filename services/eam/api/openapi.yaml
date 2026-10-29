@@ -2,14 +2,14 @@ openapi: 3.1.0
 info:
   title: Passage EAM API
   version: 0.1.0
-  description: Enterprise asset management (wave 44, slices 1-3). Errors are RFC 9457 problem details with a stable code.
+  description: Enterprise asset management (wave 44, slices 1-4). Errors are RFC 9457 problem details with a stable code.
 servers:
   - url: https://api.{env}.passage.dev
     variables:
       env:
         default: dev
 security: []
-x-passage-slice: "PSG-44 slices 1-3; remaining deliverables are listed in NOT-IMPLEMENTED.md"
+x-passage-slice: "PSG-44 slices 1-4; remaining deliverables are listed in NOT-IMPLEMENTED.md"
 paths:
   /healthz:
     get:
@@ -86,7 +86,8 @@ paths:
       operationId: changeAssetLifecycle
       description: >-
         Retires an asset (FR-44.2): ACTIVE to INACTIVE, INACTIVE or CREATED to DISPOSED. DISPOSED is final, and an
-        asset with open work orders cannot be disposed (EAM-AST-001). Use /activate to return an INACTIVE asset to ACTIVE.
+        asset with open work orders cannot be disposed (EAM-AST-001). Disposal removes the asset from its functional
+        location (REMOVE in its location history). Use /activate to return an INACTIVE asset to ACTIVE.
       x-passage-duty: EamAssetMaintain
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IfMatch" }]
       requestBody:
@@ -579,6 +580,167 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
+  /v1/eam/functional-locations:
+    get:
+      operationId: listFunctionalLocations
+      x-passage-duty: EamInquire
+      description: >-
+        Functional locations (FR-44.1) in path order, so the plant structure reads top-down. site narrows to one site;
+        under narrows to one location's subtree (the location included).
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { name: site, in: query, schema: { type: string, format: uuid } }
+        - { name: under, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: page, content: { application/json: { schema: { $ref: "#/components/schemas/FunctionalLocationPage" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createFunctionalLocation
+      x-passage-duty: EamStructureMaintain
+      description: >-
+        Adds a root location of a site, or a child of a parent in the same site (EAM-FL-002). Depth is at most 12
+        (EAM-FL-001); the path (codes joined by "/") is unique per site (EAM-DUP-001).
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/FunctionalLocationIn" } } }
+      responses:
+        "201": { description: created, content: { application/json: { schema: { $ref: "#/components/schemas/FunctionalLocation" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/eam/functional-locations/{id}:
+    get:
+      operationId: getFunctionalLocation
+      x-passage-duty: EamInquire
+      description: The location with its direct children and the assets installed at it.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: location, content: { application/json: { schema: { $ref: "#/components/schemas/LocationDetail" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/eam/assets/{id}/location:
+    post:
+      operationId: placeAsset
+      x-passage-duty: EamStructureMaintain
+      description: >-
+        Installs, moves or removes (functionalLocationId null) the asset and appends the change to its location history
+        (FR-44.2). The location must be in the asset's site and differ from the current one (EAM-FL-002); a DISPOSED
+        asset cannot be placed (EAM-AST-001). The asset version moves on. A repeated Idempotency-Key returns the asset.
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }, { $ref: "#/components/parameters/IfMatch" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/PlacementIn" } } }
+      responses:
+        "200": { description: placed, content: { application/json: { schema: { $ref: "#/components/schemas/Asset" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/eam/assets/{id}/location-history:
+    get:
+      operationId: listAssetLocationHistory
+      x-passage-duty: EamInquire
+      description: The asset's install, move and remove history, newest first.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: history
+          content:
+            application/json:
+              schema: { type: object, properties: { items: { type: array, items: { $ref: "#/components/schemas/LocationHistory" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/eam/sequences:
+    get:
+      operationId: listSequences
+      x-passage-duty: EamInquire
+      description: Maintenance sequences (FR-44.15), newest first; asset narrows to one asset's sequences.
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { name: asset, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: page, content: { application/json: { schema: { $ref: "#/components/schemas/SequencePage" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createSequence
+      x-passage-duty: EamPlanAdmin
+      description: >-
+        Defines a maintenance sequence on one asset or one asset type, over a base interval in a time unit or on a
+        counter of the asset. Steps need unique codes and hierarchies, multiples of 1 to 1000, and may include only
+        lower-hierarchy steps (EAM-SEQ-001). The code is unique (EAM-DUP-001).
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/SequenceIn" } } }
+      responses:
+        "201": { description: created, content: { application/json: { schema: { $ref: "#/components/schemas/MaintenanceSequence" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/eam/sequences/{id}:
+    get:
+      operationId: getSequence
+      x-passage-duty: EamInquire
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: sequence, content: { application/json: { schema: { $ref: "#/components/schemas/MaintenanceSequence" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/eam/sequences/{id}/simulation:
+    get:
+      operationId: simulateSequence
+      x-passage-duty: EamInquire
+      description: The next occurrences after lastOccurrenceNumber with the steps BR-44.10 selects, generating nothing.
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { name: occurrences, in: query, schema: { type: integer, minimum: 1, maximum: 120, default: 12 } }
+      responses:
+        "200":
+          description: simulated occurrences
+          content:
+            application/json:
+              schema: { type: object, properties: { items: { type: array, items: { $ref: "#/components/schemas/SimulatedOccurrence" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/eam/sequences/{id}/occurrences:
+    get:
+      operationId: listSequenceOccurrences
+      x-passage-duty: EamInquire
+      description: Generated occurrences, newest first.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: occurrences
+          content:
+            application/json:
+              schema: { type: object, properties: { items: { type: array, items: { $ref: "#/components/schemas/SequenceOccurrence" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: generateSequenceOccurrence
+      x-passage-duty: EamPlanAdmin
+      description: >-
+        Generates occurrence lastOccurrenceNumber + 1 of an asset sequence (BR-44.10) and opens a PREVENTIVE work
+        order (event workorder.created) for the selected step's job type; extra due steps are listed in jobTypes. The
+        asset must be ACTIVE (EAM-AST-001) and the previous occurrence's order completed, closed or canceled
+        (EAM-SEQ-002); asset type sequences are templates (EAM-SEQ-001). A repeated Idempotency-Key returns the
+        stored occurrence.
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: false
+        content: { application/json: { schema: { $ref: "#/components/schemas/OccurrenceIn" } } }
+      responses:
+        "201": { description: generated, content: { application/json: { schema: { $ref: "#/components/schemas/SequenceOccurrence" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
 components:
   parameters:
     Id:
@@ -618,6 +780,124 @@ components:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
   schemas:
+    FunctionalLocationIn:
+      type: object
+      required: [code, name, siteId]
+      properties:
+        code: { type: string, pattern: "^[A-Z0-9][A-Z0-9_.-]{0,39}$", description: one path segment }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        siteId: { type: string, format: uuid }
+        parentId: { type: [string, "null"], format: uuid, description: omitted for a root location }
+        locationType: { type: [string, "null"], pattern: "^[A-Z0-9_]{2,20}$" }
+    FunctionalLocation:
+      type: object
+      required: [id, code, name, siteId, depth, path, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        siteId: { type: string, format: uuid }
+        parentId: { type: string, format: uuid }
+        locationType: { type: string }
+        depth: { type: integer, minimum: 1, maximum: 12 }
+        path: { type: string, description: codes from the root joined by "/" }
+        createdAt: { type: string, format: date-time }
+    FunctionalLocationPage:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/FunctionalLocation" } }
+        nextCursor: { type: string, format: uuid }
+    LocationDetail:
+      allOf:
+        - $ref: "#/components/schemas/FunctionalLocation"
+        - type: object
+          properties:
+            children: { type: array, items: { $ref: "#/components/schemas/FunctionalLocation" } }
+            assets: { type: array, items: { $ref: "#/components/schemas/Asset" } }
+    PlacementIn:
+      type: object
+      required: [functionalLocationId]
+      properties:
+        functionalLocationId: { type: [string, "null"], format: uuid, description: null removes the asset from its location }
+    LocationHistory:
+      type: object
+      required: [id, assetId, action, actor, at]
+      properties:
+        id: { type: string, format: uuid }
+        assetId: { type: string, format: uuid }
+        action: { type: string, enum: [INSTALL, MOVE, REMOVE] }
+        fromLocationId: { type: string, format: uuid }
+        fromPath: { type: string }
+        toLocationId: { type: string, format: uuid }
+        toPath: { type: string }
+        actor: { type: string }
+        at: { type: string, format: date-time }
+    SequenceStep:
+      type: object
+      required: [code, jobType, multiple, hierarchy]
+      properties:
+        code: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{0,19}$" }
+        jobType: { type: string, pattern: "^[A-Z0-9_]{2,20}$" }
+        multiple: { type: integer, minimum: 1, maximum: 1000, description: due on every occurrence k with k mod multiple = 0 }
+        hierarchy: { type: integer, minimum: 1, maximum: 32767, description: the highest due hierarchy is performed }
+        includes: { type: array, items: { type: string }, description: lower-hierarchy step codes this step covers }
+    SequenceIn:
+      type: object
+      required: [code, name, baseIntervalValue, steps]
+      description: Exactly one of assetId and assetType, and exactly one of baseIntervalUnit and counterId (counter needs assetId).
+      properties:
+        code: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{1,29}$" }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        assetId: { type: string, format: uuid }
+        assetType: { type: string, pattern: "^[A-Z0-9_]{2,20}$" }
+        baseIntervalValue: { type: integer, minimum: 1, maximum: 100000 }
+        baseIntervalUnit: { type: string, enum: [DAYS, WEEKS, MONTHS, YEARS] }
+        counterId: { type: string, format: uuid }
+        steps: { type: array, minItems: 1, maxItems: 50, items: { $ref: "#/components/schemas/SequenceStep" } }
+    MaintenanceSequence:
+      type: object
+      required: [id, code, name, baseIntervalValue, steps, lastOccurrenceNumber, version, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        assetId: { type: string, format: uuid }
+        assetType: { type: string }
+        baseIntervalValue: { type: integer }
+        baseIntervalUnit: { type: string, enum: [DAYS, WEEKS, MONTHS, YEARS] }
+        counterId: { type: string, format: uuid }
+        steps: { type: array, items: { $ref: "#/components/schemas/SequenceStep" } }
+        lastOccurrenceNumber: { type: integer, minimum: 0 }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+    SequencePage:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/MaintenanceSequence" } }
+        nextCursor: { type: string, format: uuid }
+    SimulatedOccurrence:
+      type: object
+      properties:
+        occurrenceNumber: { type: integer, minimum: 1 }
+        stepCodes: { type: array, items: { type: string }, description: selected step first, then extra due steps }
+        jobTypes: { type: array, items: { type: string } }
+    OccurrenceIn:
+      type: object
+      properties:
+        currency: { type: string, pattern: "^[A-Z]{3}$", default: USD, description: the work order currency }
+        dueAt: { type: string, format: date-time }
+    SequenceOccurrence:
+      type: object
+      required: [id, sequenceId, occurrenceNumber, stepCodes, jobTypes, actor, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        sequenceId: { type: string, format: uuid }
+        occurrenceNumber: { type: integer, minimum: 1 }
+        stepCodes: { type: array, items: { type: string } }
+        jobTypes: { type: array, items: { type: string } }
+        workOrderId: { type: string, format: uuid, description: absent when no step is due on the occurrence }
+        actor: { type: string }
+        createdAt: { type: string, format: date-time }
     Problem:
       type: object
       required: [type, title, status]
@@ -651,6 +931,7 @@ components:
         criticality: { type: integer }
         lifecycleState: { type: string, enum: [CREATED, ACTIVE, INACTIVE, DISPOSED] }
         productionResourceId: { type: string, format: uuid }
+        functionalLocationId: { type: string, format: uuid, description: the functional location the asset is installed at }
         version: { type: integer }
         createdAt: { type: string, format: date-time }
     AssetPage:
@@ -668,6 +949,7 @@ components:
             openWorkOrders: { type: integer }
             partsCost: { type: string, description: decimal string, sum over the asset's work orders }
             laborCost: { type: string, description: decimal string, sum over the asset's work orders }
+            location: { $ref: "#/components/schemas/FunctionalLocation" }
     Workspace:
       type: object
       properties:
