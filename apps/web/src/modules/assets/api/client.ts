@@ -51,9 +51,12 @@ export interface Book {
   cost: Decimal;
   accumulatedDepreciation: Decimal;
   nbv: Decimal;
-  status: "Open" | "Sold" | "Scrapped";
+  status: "Open" | "Sold" | "Scrapped" | "Transferred";
   /** Last period a posted depreciation run charged ("2026-03" or "2026"). */
   lastDepreciatedPeriod?: string | null;
+  /** The group asset that depreciates this book (FR-37.16); set on the asset read. */
+  groupAssetId?: string;
+  groupCode?: string;
 }
 
 export interface AssetDetail extends Asset {
@@ -99,7 +102,17 @@ export interface Transaction {
   createdAt: string;
 }
 
-export type TransactionType = "Acquisition" | "AcquisitionAdj" | "Depreciation" | "DepreciationAdj" | "Revaluation" | "Impairment" | "DisposalSale" | "DisposalScrap";
+export type TransactionType =
+  | "Acquisition"
+  | "AcquisitionAdj"
+  | "Depreciation"
+  | "DepreciationAdj"
+  | "Revaluation"
+  | "Impairment"
+  | "DisposalSale"
+  | "DisposalScrap"
+  | "Transfer"
+  | "Split";
 
 export const ADJUSTMENT_TYPES = ["AcquisitionAdj", "DepreciationAdj", "Revaluation", "Impairment"] as const;
 export type AdjustmentType = (typeof ADJUSTMENT_TYPES)[number];
@@ -519,6 +532,108 @@ export interface NewLease {
 }
 
 /** A value read together with the ETag that If-Match must echo back. */
+export const TRANSFER_KINDS = ["transfer", "split"] as const;
+export type TransferKind = (typeof TRANSFER_KINDS)[number];
+
+/** One target asset of a transfer or split (FR-37.7). */
+export interface NewTransferPart {
+  assetNumber: string;
+  name: string;
+  /** Share of every book, two decimals at most; the parts total 100.00. */
+  percentage: Decimal;
+  /** Transfer only: another legal entity of the tenant. */
+  legalEntityId?: string;
+  classCode?: string;
+  barcode?: string;
+  quantity?: Decimal;
+}
+
+export interface TransferInput {
+  kind: TransferKind;
+  transferDate: string;
+  parts: NewTransferPart[];
+}
+
+export interface TransferTarget {
+  lineNo: number;
+  percentage: Decimal;
+  asset: Asset;
+  books: Book[];
+}
+
+export interface Transfer {
+  id: string;
+  kind: TransferKind;
+  transferDate: string;
+  legalEntityId: string;
+  sourceAssetId: string;
+  sourceAssetNumber: string;
+  createdBy: string | null;
+  createdAt: string;
+  /** On the command response: the source asset after the transfer. */
+  source?: Asset;
+  targets: TransferTarget[];
+  transactions?: Transaction[];
+}
+
+export interface NewGroupAsset {
+  legalEntityId: string;
+  groupCode: string;
+  name: string;
+  classCode: string;
+  bookCode: string;
+  taxYear: number;
+  method: Method;
+  factor?: Decimal;
+  switchToStraightLine?: boolean;
+  serviceLifePeriods: number;
+  convention: string;
+  memberAssetIds: string[];
+}
+
+export interface GroupMember {
+  assetId: string;
+  assetNumber: string;
+  name: string;
+  assetBookId: string;
+  bookStatus: string;
+  inServiceDate: string;
+  cost: Decimal;
+}
+
+export interface GroupYear {
+  year: string;
+  amount: Decimal;
+  accumulated: Decimal;
+  nbv: Decimal;
+}
+
+/** A group asset for pooled tax depreciation (FR-37.16). */
+export interface GroupAsset {
+  id: string;
+  legalEntityId: string;
+  groupCode: string;
+  name: string;
+  classCode: string;
+  bookCode: string;
+  taxYear: number;
+  currency: string;
+  method: Method;
+  factor: Decimal;
+  switchToStraightLine: boolean;
+  serviceLifePeriods: number;
+  convention: string;
+  inServiceDate: string;
+  status: "Open";
+  /** Sum of the members' cost on the group's book. */
+  basis: Decimal;
+  memberCount: number;
+  version: number;
+  createdAt: string;
+  members?: GroupMember[];
+  schedule?: GroupYear[];
+}
+
 export interface Versioned<T> {
   value: T;
   etag: string;
@@ -598,11 +713,12 @@ const id = encodeURIComponent;
 
 export interface AssetFilter {
   status?: AssetStatus | "";
+  legalEntityId?: string;
   after?: string;
 }
 
 export function listAssets(filter: AssetFilter = {}, signal?: AbortSignal): Promise<Page<Asset>> {
-  return json(`/assets${query({ status: filter.status, after: filter.after })}`, {}, signal);
+  return json(`/assets${query({ status: filter.status, legalEntityId: filter.legalEntityId, after: filter.after })}`, {}, signal);
 }
 
 export async function getAsset(assetId: string, signal?: AbortSignal): Promise<Versioned<AssetDetail>> {
@@ -751,4 +867,27 @@ export function getInsuranceReport(filter: InsuranceReportFilter, signal?: Abort
     {},
     signal,
   );
+}
+
+/** Transfers the whole asset to one new asset, or splits it, at the version the caller read (If-Match). */
+export async function transferAsset(assetId: string, etag: string, input: TransferInput, key: string = newKey()): Promise<Versioned<Transfer>> {
+  return versioned(
+    await send(`/assets/${id(assetId)}/transfer`, { method: "POST", body: JSON.stringify(input), headers: { "Idempotency-Key": key, "If-Match": etag } }),
+  );
+}
+
+export async function listTransfers(assetId: string, signal?: AbortSignal): Promise<Transfer[]> {
+  return (await json<{ items?: Transfer[] }>(`/assets/${id(assetId)}/transfers`, {}, signal)).items ?? [];
+}
+
+export function listGroupAssets(after?: string, signal?: AbortSignal): Promise<Page<GroupAsset>> {
+  return json(`/assets/group-assets${query({ after })}`, {}, signal);
+}
+
+export function getGroupAsset(groupId: string, signal?: AbortSignal): Promise<GroupAsset> {
+  return json(`/assets/group-assets/${id(groupId)}`, {}, signal);
+}
+
+export function createGroupAsset(input: NewGroupAsset, key: string = newKey()): Promise<GroupAsset> {
+  return post(`/assets/group-assets`, input, key);
 }

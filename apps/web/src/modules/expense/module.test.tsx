@@ -26,6 +26,10 @@ describe("expense module", () => {
       expect(n.duty).toMatch(/^expense\./);
     }
     expect(expense.nav.find((n) => n.to === "/expense/card-feeds/preview")?.duty).toBe("expense.card.import");
+    expect(expense.nav.find((n) => n.to === "/expense/card-transactions/import")?.duty).toBe("expense.card.import");
+    for (const to of ["/expense/cash-advances", "/expense/travel-requisitions", "/expense/card-transactions"]) {
+      expect(expense.nav.find((n) => n.to === to)?.duty).toBe("expense.report.write");
+    }
     expect(expense.routes.every((r) => r.element != null)).toBe(true);
   });
 

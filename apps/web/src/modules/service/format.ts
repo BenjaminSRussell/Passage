@@ -58,3 +58,17 @@ export function duration(minutes: number): string {
 export function today(now: Date = new Date()): string {
   return now.toISOString().slice(0, 10);
 }
+
+const LOCAL_MINUTE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
+
+/** A datetime-local value read as UTC ("2026-10-27T14:30" → "2026-10-27T14:30:00Z"); null when empty or malformed. */
+export function utcInstant(value: string): string | null {
+  return LOCAL_MINUTE.test(value) ? `${value}:00Z` : null;
+}
+
+/** An RFC 3339 instant as a datetime-local value in UTC ("" when absent). */
+export function utcLocal(iso?: string | null): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 16);
+}

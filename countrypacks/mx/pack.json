@@ -1,0 +1,23 @@
+{
+  "code": "MX",
+  "version": "2026.1",
+  "name": "Mexico",
+  "country": "MX",
+  "currency": "MXN",
+  "locale": "es-MX",
+  "taxRegime": "IVA_ISR",
+  "fiscalYearStartMonth": 1,
+  "holidayRegion": "MX-CDMX",
+  "bankFormats": ["SPEI"],
+  "taxIdScheme": "MX_RFC",
+  "retentionMinYears": {"financial": 5, "hr": 5},
+  "documentLayouts": ["cfdi-es-mx"],
+  "statutoryReports": [
+    {
+      "code": "MX_DIOT",
+      "format": "CSV",
+      "mandate": "SAT DIOT informative return",
+      "requiredFields": ["rfc", "tipoTercero", "tipoOperacion", "importe"]
+    }
+  ]
+}

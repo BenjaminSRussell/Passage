@@ -3,10 +3,18 @@ info:
   title: Passage Field Service API
   version: 0.1.0
   description: |
-    Service agreements, SLA profiles, cases and service work orders (wave 45, slice 1).
-    Routes are mounted under /v1/service on the service; the browser reaches them as
-    /api/v1/service/... through the web BFF. Every mutating operation requires an
-    Idempotency-Key header. Custom methods (`:transition`, `:post`) require If-Match
+    Service agreements, SLA profiles, cases with their status lifecycle and SLA monitor,
+    service work orders with follow-ups, service KPIs, the installed base with warranties,
+    activities on any record, the knowledge base (wave 45, slices 1 to 3) and generic
+    case management: case processes, the case category tree and cases in any
+    non-service category with stages, associations and a log (slice 4).
+    Service routes are mounted under /v1/service and generic case routes under
+    /v1/cases, /v1/case-categories and /v1/case-processes (PRD 8.45.5); the browser
+    reaches them as /api/v1/... through the web BFF. Every mutating operation requires an
+    Idempotency-Key header, except the case transition, where it is optional because
+    If-Match already makes a retry safe, the If-Match-guarded custom methods of slice 3 (a retry after success
+    is answered 412 and the client reloads), and the shipment receipt, which is idempotent per serial. Custom
+    methods (`:transition`, `:post`, `:follow-up`, `:install`, `:complete`, `:publish`, ...) and PUT require If-Match
     with the current aggregate version. Errors are RFC 9457 problem details whose
     `code` is listed in the service README.
 servers:
@@ -143,6 +151,8 @@ paths:
       responses:
         "201":
           description: Created
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Case" }
@@ -180,12 +190,107 @@ paths:
       responses:
         "200":
           description: The case
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Case" }
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
+  /v1/service/cases/{id}:transition:
+    post:
+      operationId: transitionCase
+      summary: Move a case along its status machine; pauses, resumes or stops the SLA clocks (FR-45.5, BR-45.2)
+      description: |
+        PRD 8.45.5 names this `POST /cases/{id}/status`; it follows the custom-method
+        form of the work-order routes. WAITING_CUSTOMER pauses the resolution clock,
+        WAITING_PARTS pauses it when the profile has pauseOnParts; leaving the pause
+        moves the due by the paused business minutes. Leaving NEW records the response.
+        A clock found past due becomes BREACHED and emits `sla.breached` once; a
+        case resolved in time is MET. NEW cannot be requested; CLOSED only follows
+        RESOLVED and is final.
+      x-passage-duty: SvcCaseMaintain
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Optional; a retry with the same key and request returns the first answer.
+          schema: { type: string, maxLength: 255 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to]
+              additionalProperties: false
+              properties:
+                to:
+                  type: string
+                  enum: [IN_PROGRESS, WAITING_CUSTOMER, WAITING_PARTS, RESOLVED, CLOSED, CANCELED]
+      responses:
+        "200":
+          description: Transitioned (a request for the current status is a no-op; a replay carries Idempotent-Replayed true)
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Case" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/service/sla:scan:
+    post:
+      operationId: scanSLA
+      summary: One pass of the SLA monitor over the caller's tenant (BR-45.2, AC-45.3, job service-sla-monitor)
+      description: |
+        Selects RUNNING clocks of open cases with a warning (75 % of the target) or a
+        breach due and not yet emitted, oldest resolution due first, records each
+        alert on the case and writes `sla.warning` / `sla.breached` to the outbox in
+        the same transaction. Repeating a pass emits nothing new.
+      x-passage-duty: SvcCaseMaintain
+      parameters:
+        - { name: limit, in: query, description: cases per pass, schema: { type: integer, minimum: 1, maximum: 5000, default: 500 } }
+      responses:
+        "200":
+          description: What the pass did
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [scanned, warnings, breaches]
+                properties:
+                  scanned: { type: integer }
+                  warnings: { type: integer }
+                  breaches: { type: integer }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/service/kpis:
+    get:
+      operationId: getKpis
+      summary: Service KPIs over a window - SLA attainment, mean time to respond and resolve, first-time fix (FR-45.11)
+      x-passage-duty: SvcInquire
+      parameters:
+        - { name: from, in: query, required: true, description: inclusive, schema: { type: string, format: date-time } }
+        - { name: to, in: query, required: true, description: exclusive; at most 366 days after from, schema: { type: string, format: date-time } }
+        - { name: territory, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The measures
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Kpis" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
   /v1/service/work-orders:
     post:
       operationId: createWorkOrder
@@ -308,6 +413,855 @@ paths:
         "412": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
+  /v1/service/work-orders/{id}:follow-up:
+    post:
+      operationId: followUpWorkOrder
+      summary: Open the follow-up of a COMPLETED or POSTED work order; clears its first-time fix (BR-45.5)
+      x-passage-duty: SvcWoMaintain
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "201":
+          description: The new UNSCHEDULED follow-up order (linked by followUpOf, without lines)
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkOrder" }
+        "200": { $ref: "#/components/responses/Replayed" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/service/service-objects:
+    post:
+      operationId: createServiceObject
+      summary: "Register a service object by hand with its warranty term (FR-45.1, FR-45.2)"
+      x-passage-duty: SvcObjectMaintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServiceObjectRequest" }
+      responses:
+        "201":
+          description: "Created"
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServiceObject" }
+        "200": { $ref: "#/components/responses/Replayed" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: listServiceObjects
+      summary: "Installed base explorer: service objects newest first, by customer, item, serial or parent"
+      x-passage-duty: SvcInquire
+      parameters:
+        - { name: customerPartyId, in: query, schema: { type: string, format: uuid } }
+        - { name: itemId, in: query, schema: { type: string, format: uuid } }
+        - { name: serial, in: query, schema: { type: string, maxLength: 100 }, description: "exact serial number" }
+        - { name: parentId, in: query, schema: { type: string, format: uuid }, description: "children of one object" }
+        - { name: status, in: query, schema: { type: string, enum: [ACTIVE, INACTIVE, RETURNED] } }
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: "A page of service objects"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServiceObjectPage" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/service/service-objects:receive-shipment:
+    post:
+      operationId: receiveShipment
+      summary: "Create one ACTIVE service object per serial of a confirmed serialized shipment (FR-45.1, AC-45.8)"
+      x-passage-duty: SvcObjectMaintain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ShipmentRequest" }
+      responses:
+        "200":
+          description: "Counts of created objects and of serials that already had one; a re-delivered shipment creates nothing twice, so no Idempotency-Key is needed"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShipmentReceipt" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/service/service-objects/{id}:
+    get:
+      operationId: getServiceObject
+      summary: "Read a service object with its warranty term, start and end"
+      x-passage-duty: SvcInquire
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: "The service object"
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServiceObject" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/service/service-objects/{id}:install:
+    post:
+      operationId: installServiceObject
+      summary: "Record the installation day; an INSTALL warranty starts that day (FR-45.1, FR-45.2)"
+      x-passage-duty: SvcObjectMaintain
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InstallRequest" }
+      responses:
+        "200":
+          description: "Installed"
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServiceObject" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/service/activities:
+    post:
+      operationId: createActivity
+      summary: "Create an OPEN activity on any record (FR-45.14)"
+      x-passage-duty: ActivityMaintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ActivityRequest" }
+      responses:
+        "201":
+          description: "Created"
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Activity" }
+        "200": { $ref: "#/components/responses/Replayed" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: listActivities
+      summary: "My activities (owner) or the activities of one record, earliest due first, undated last (PRD 8.45.14); owner or entityType with entityId is required"
+      x-passage-duty: ActivityMaintain
+      parameters:
+        - { name: owner, in: query, schema: { type: string, format: uuid }, description: "owner worker (My activities)" }
+        - { name: entityType, in: query, schema: { type: string, enum: [case, work_order, agreement, service_object, knowledge_article, project, customer, vendor, worker, invoice, item, asset, audit_finding] }, description: "with entityId, the activities of one record" }
+        - { name: entityId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [OPEN, DONE, CANCELED] } }
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: "A page of activities"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ActivityPage" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/service/activities:calendar:
+    get:
+      operationId: exportActivityCalendar
+      summary: "Export up to 500 dated activities of the filter as an RFC 5545 iCalendar (FR-45.14)"
+      x-passage-duty: ActivityMaintain
+      parameters:
+        - { name: owner, in: query, schema: { type: string, format: uuid }, description: "owner worker (My activities)" }
+        - { name: entityType, in: query, schema: { type: string, enum: [case, work_order, agreement, service_object, knowledge_article, project, customer, vendor, worker, invoice, item, asset, audit_finding] }, description: "with entityId, the activities of one record" }
+        - { name: entityId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [OPEN, DONE, CANCELED] } }
+      responses:
+        "200":
+          description: "One VEVENT per activity with a start or due instant"
+          content:
+            text/calendar:
+              schema: { type: string }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/service/activities/{id}:
+    get:
+      operationId: getActivity
+      summary: "Read an activity"
+      x-passage-duty: ActivityMaintain
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: "The activity"
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Activity" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/service/activities/{id}:complete:
+    post:
+      operationId: completeActivity
+      summary: "Mark an OPEN activity DONE with a timestamp (AC-45.15); completing a DONE activity is a no-op"
+      x-passage-duty: ActivityMaintain
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: "Completed"
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Activity" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/service/activities/{id}:cancel:
+    post:
+      operationId: cancelActivity
+      summary: "Cancel an OPEN activity; canceling a CANCELED activity is a no-op"
+      x-passage-duty: ActivityMaintain
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: "Canceled"
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Activity" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/service/activities/{id}:reschedule:
+    post:
+      operationId: rescheduleActivity
+      summary: "Replace the due, start and end of an OPEN activity"
+      x-passage-duty: ActivityMaintain
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ActivitySchedule" }
+      responses:
+        "200":
+          description: "Rescheduled"
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Activity" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/service/knowledge/articles:
+    post:
+      operationId: createArticle
+      summary: "Start a knowledge article (KB-{seq}) at version 1 in DRAFT with the caller as author (FR-45.13)"
+      x-passage-duty: KbAuthor
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ArticleRequest" }
+      responses:
+        "201":
+          description: "Created"
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Article" }
+        "200": { $ref: "#/components/responses/Replayed" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: listArticles
+      summary: "Article versions newest first, by status, language or number"
+      x-passage-duty: KbRead
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [DRAFT, IN_REVIEW, PUBLISHED, RETIRED] } }
+        - { name: lang, in: query, schema: { type: string, example: en } }
+        - { name: number, in: query, schema: { type: string, example: KB-000001 }, description: "every version of one article" }
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: "A page of article versions"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ArticlePage" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/service/knowledge/articles/search:
+    get:
+      operationId: searchArticles
+      summary: "Search and suggest PUBLISHED articles for a case (BR-45.11): 0.6 text rank plus item, incident type and asset type matches"
+      x-passage-duty: KbRead
+      parameters:
+        - { name: q, in: query, schema: { type: string, maxLength: 500 }, description: "case description or search text; an article matching any of its words is a candidate" }
+        - { name: itemId, in: query, schema: { type: string, format: uuid } }
+        - { name: incidentTypeId, in: query, schema: { type: string, format: uuid } }
+        - { name: assetTypeId, in: query, schema: { type: string, format: uuid } }
+        - { name: lang, in: query, schema: { type: string, default: en } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 20, default: 5 } }
+      responses:
+        "200":
+          description: "Suggestions, best first"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SuggestionList" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/service/knowledge/articles/{id}:
+    get:
+      operationId: getArticle
+      summary: "Read one article version"
+      x-passage-duty: KbRead
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: "The article version"
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Article" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+    put:
+      operationId: updateArticle
+      summary: "Replace the content of a DRAFT version (the language is fixed)"
+      x-passage-duty: KbAuthor
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ArticleRequest" }
+      responses:
+        "200":
+          description: "Updated"
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Article" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/service/knowledge/articles/{id}:new-version:
+    post:
+      operationId: newArticleVersion
+      summary: "Start the next DRAFT version of a PUBLISHED or RETIRED article with the caller as author; one version is open at a time (KB-ART-003)"
+      x-passage-duty: KbAuthor
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "201":
+          description: "The new DRAFT version"
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Article" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/service/knowledge/articles/{id}:submit:
+    post:
+      operationId: submitArticle
+      summary: "Send a DRAFT version to review"
+      x-passage-duty: KbAuthor
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: "In review"
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Article" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/service/knowledge/articles/{id}:reject:
+    post:
+      operationId: rejectArticle
+      summary: "Send an IN_REVIEW version back to DRAFT"
+      x-passage-duty: KbPublish
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: "Back in draft"
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Article" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/service/knowledge/articles/{id}:retire:
+    post:
+      operationId: retireArticle
+      summary: "Retire a PUBLISHED version without a successor"
+      x-passage-duty: KbPublish
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: "Retired"
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Article" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/service/knowledge/articles/{id}:publish:
+    post:
+      operationId: publishArticle
+      summary: "Publish an IN_REVIEW version with the caller as reviewer, who must differ from the author (KB-PUB-001); retires the earlier PUBLISHED version (KB-PUB-002) and emits dev.passage.knowledge.article.published.v1"
+      x-passage-duty: KbPublish
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: "Published"
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublishResult" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/service/knowledge/articles/{id}:vote:
+    post:
+      operationId: voteArticle
+      summary: "Record the caller's helpful or not-helpful vote on a PUBLISHED version; voting again replaces it"
+      x-passage-duty: KbRead
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VoteRequest" }
+      responses:
+        "200":
+          description: "The article with its vote counts"
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Article" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/case-processes:
+    post:
+      operationId: createCaseProcess
+      summary: Define a case process with ordered stages and the activities each stage requires (FR-45.12, BR-45.9)
+      x-passage-duty: CaseSetupAdmin
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CaseProcessRequest" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CaseProcess" }
+        "200": { $ref: "#/components/responses/Replayed" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: listCaseProcesses
+      summary: List the case processes ordered by code (at most 500); any one of the listed duties suffices
+      x-passage-duty: [CaseMaintain, CaseCreate, CaseSetupAdmin]
+      responses:
+        "200":
+          description: The processes
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/CaseProcess" } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/case-categories:
+    post:
+      operationId: createCaseCategory
+      summary: Define a node of the case category tree with its type, process, SLA profile, resolution codes and access duty (FR-45.12, BR-45.10)
+      x-passage-duty: CaseSetupAdmin
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CaseCategoryRequest" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CaseCategory" }
+        "200": { $ref: "#/components/responses/Replayed" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: listCaseCategories
+      summary: List the case categories ordered by code (at most 500); any one of the listed duties suffices
+      x-passage-duty: [CaseMaintain, CaseCreate, CaseSetupAdmin]
+      responses:
+        "200":
+          description: The categories
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/CaseCategory" } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/cases:
+    post:
+      operationId: openGenericCase
+      summary: Open a case in any non-service category at the first stage of its process (FR-45.12)
+      description: |
+        The caller becomes the owner and must hold the category's access duty when it
+        has one (category-scoped CaseCreate, BR-45.10). SERVICE and CUSTOMER_SERVICE
+        categories are refused (CASE-CAT-002); they open through /v1/service/cases with
+        entitlement and SLA. COLLECTIONS needs customerPartyId (CASE-CUS-001). A category
+        SLA profile sets the response and resolution dues. Priority defaults to the
+        category's default priority.
+      x-passage-duty: CaseCreate
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GenericCaseRequest" }
+      responses:
+        "201":
+          description: Created
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GenericCase" }
+        "200": { $ref: "#/components/responses/Replayed" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: listGenericCases
+      summary: List the cases the caller may read (BR-45.10) newest first inside the caller's legal-entity scope
+      x-passage-duty: CaseMaintain
+      parameters:
+        - { name: categoryId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [OPEN, RESOLVED, CLOSED, CANCELED] } }
+        - { name: stage, in: query, schema: { type: string, maxLength: 40 } }
+        - { name: ownerId, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: entityType, in: query, description: With entityId, keeps the cases associated with that record., schema: { type: string } }
+        - { name: entityId, in: query, schema: { type: string, format: uuid } }
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: One page
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GenericCasePage" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/cases/{id}:
+    get:
+      operationId: getGenericCase
+      summary: Read a case with its associations and log; 403 CASE-SEC-001 outside the category's access (AC-45.11)
+      x-passage-duty: CaseMaintain
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The case
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GenericCase" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/cases/{id}/stage:
+    post:
+      operationId: advanceCaseStage
+      summary: Move an OPEN case to the next stage of its process, or back one stage with a reason (BR-45.9, AC-45.10)
+      description: |
+        Moving forward requires every required activity of the current stage to be DONE
+        on the case (an activity whose associations hold {entityType case, entityId the
+        case id} and whose subject equals the template), else CASE-STG-001 naming the
+        missing activities. Any other target is CASE-STG-002. Emits
+        dev.passage.case.stage.changed.v1 in the same transaction.
+      x-passage-duty: CaseMaintain
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [toStage]
+              additionalProperties: false
+              properties:
+                toStage: { type: string, pattern: "^[A-Z0-9_-]{2,40}$" }
+                reason: { type: string, maxLength: 500, description: Required to move back one stage. }
+      responses:
+        "200":
+          description: Moved (a replay carries Idempotent-Replayed true)
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GenericCase" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/cases/{id}:transition:
+    post:
+      operationId: transitionGenericCase
+      summary: Resolve (with a resolution code), close or cancel a case (BR-45.9)
+      description: |
+        OPEN to RESOLVED (resolutionCode required, from the category's list when it has
+        one: CASE-RES-001, CASE-RES-002) or CANCELED; RESOLVED to CLOSED. CLOSED and
+        CANCELED are final; see :reopen.
+      x-passage-duty: CaseMaintain
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to]
+              additionalProperties: false
+              properties:
+                to: { type: string, enum: [RESOLVED, CLOSED, CANCELED] }
+                resolutionCode: { type: string, pattern: "^[A-Z0-9_-]{2,40}$" }
+                resolutionText: { type: string, maxLength: 4000 }
+                reason: { type: string, maxLength: 500 }
+      responses:
+        "200":
+          description: Transitioned (a replay carries Idempotent-Replayed true)
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GenericCase" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/cases/{id}:reopen:
+    post:
+      operationId: reopenGenericCase
+      summary: Reopen a RESOLVED or CLOSED case (BR-45.9)
+      description: |
+        Within the category's reopen window (days since resolution; default 14, 0
+        disables it) the case itself returns to OPEN at its stage with its resolution
+        cleared (200). After the window a new OPEN case is created at the first stage,
+        linked by reopenedFrom and carrying the original's associations (201).
+      x-passage-duty: CaseMaintain
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              additionalProperties: false
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 500 }
+      responses:
+        "200":
+          description: The case reopened itself (or a replay, with Idempotent-Replayed true)
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReopenResult" }
+        "201":
+          description: A new case linked by reopenedFrom; ETag is the new case's version
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReopenResult" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/cases/{id}/associations:
+    post:
+      operationId: associateCase
+      summary: Associate any registry record with a case that is not CLOSED or CANCELED (FR-45.12)
+      description: Associating the same record again replaces its role. The case version moves; no If-Match is needed (PRD 8.45.5).
+      x-passage-duty: CaseMaintain
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CaseAssociation" }
+      responses:
+        "200":
+          description: The case with its associations (a replay carries Idempotent-Replayed true)
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GenericCase" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
 components:
   parameters:
     Id:
@@ -483,18 +1437,28 @@ components:
         channel: { type: string }
         priority: { type: integer }
         description: { type: string }
-        status: { type: string, description: "NEW on open; later transitions are case-stage work (not in slice 1)" }
+        status: { type: string, enum: [NEW, IN_PROGRESS, WAITING_CUSTOMER, WAITING_PARTS, RESOLVED, CLOSED, CANCELED] }
         agreementId: { type: [string, "null"], format: uuid }
         slaProfileId: { type: string, format: uuid }
         entitlementTrace:
           type: array
           items: { type: string }
           description: Resolution trace from BR-45.1 (why this agreement was chosen)
-        slaState: { type: string, enum: [RUNNING, PAUSED, MET, BREACHED] }
-        slaPausedMinutes: { type: integer }
+        slaState: { type: string, enum: [RUNNING, PAUSED, MET, BREACHED], description: state of the resolution clock }
+        slaPausedMinutes: { type: integer, description: business minutes of closed pauses of the resolution clock }
+        slaPausedAt: { type: [string, "null"], format: date-time, description: start of the open pause }
+        slaAlerts:
+          type: array
+          items: { type: string, enum: [RESPONSE_WARNING, RESPONSE_BREACH, RESOLUTION_WARNING, RESOLUTION_BREACH] }
+          description: SLA events already emitted for the case (each fires once)
         openedAt: { type: string, format: date-time }
+        respondedAt: { type: [string, "null"], format: date-time, description: first move out of NEW, or the first dispatch of its work orders }
+        resolvedAt: { type: [string, "null"], format: date-time }
         slaResponseDue: { type: string, format: date-time }
+        slaResponseWarnAt: { type: string, format: date-time }
         slaResolutionDue: { type: string, format: date-time }
+        slaResolutionWarnAt: { type: string, format: date-time }
+        version: { type: integer, description: echoed as If-Match on transitions }
     WorkLine:
       type: object
       required: [kind, qty]
@@ -542,7 +1506,33 @@ components:
           items: { $ref: "#/components/schemas/WorkLine" }
         incidentTypeId: { type: [string, "null"], format: uuid }
         posting: { $ref: "#/components/schemas/Posting" }
+        followUpOf: { type: [string, "null"], format: uuid, description: the finished order this one follows up (BR-45.5) }
+        completedAt: { type: [string, "null"], format: date-time }
+        firstTimeFix: { type: [boolean, "null"], description: set true at completion, false once a follow-up exists }
         version: { type: integer }
+    Kpis:
+      type: object
+      description: |
+        Cases count by opening time, work orders by completion time; follow-up orders
+        are not counted as jobs. Rates are percentages as decimal strings rounded
+        half-even to two places, null when their denominator is zero. Means are
+        wall-clock minutes. A breached clock stays a miss when resolved later.
+      properties:
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        territory: { type: string, format: uuid }
+        casesOpened: { type: integer }
+        responseMet: { type: integer }
+        responseMissed: { type: integer, description: answered late, or still NEW and past its response due }
+        responseAttainmentPct: { type: [string, "null"] }
+        meanResponseMinutes: { type: [string, "null"] }
+        resolutionMet: { type: integer }
+        resolutionBreached: { type: integer }
+        resolutionAttainmentPct: { type: [string, "null"] }
+        meanResolutionMinutes: { type: [string, "null"] }
+        workOrdersCompleted: { type: integer }
+        firstTimeFix: { type: integer }
+        firstTimeFixPct: { type: [string, "null"] }
     PostedLine:
       type: object
       properties:
@@ -562,3 +1552,346 @@ components:
         billableTotal: { type: string }
         warrantyCost: { type: string }
         entitlementConsumed: { type: string }
+    WarrantyTerm:
+      type: object
+      required: [startTrigger, months]
+      properties:
+        startTrigger: { type: string, enum: [SHIP, INSTALL, REGISTRATION] }
+        months: { type: integer, minimum: 0, maximum: 240, description: 0 means no warranty }
+        partsCovered: { type: boolean }
+        laborCovered: { type: boolean }
+        travelCovered: { type: boolean }
+    ServiceObjectRequest:
+      type: object
+      required: [itemId, serial, customerPartyId, legalEntityId, warranty]
+      additionalProperties: false
+      properties:
+        itemId: { type: string, format: uuid }
+        serial: { type: string, minLength: 1, maxLength: 100 }
+        customerPartyId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        siteAddressId: { type: [string, "null"], format: uuid }
+        parentId: { type: [string, "null"], format: uuid, description: must belong to the same customer (SVC-OBJ-003) }
+        shippedOn: { type: [string, "null"], format: date }
+        installedOn: { type: [string, "null"], format: date }
+        warranty: { $ref: "#/components/schemas/WarrantyTerm" }
+    ServiceObject:
+      type: object
+      required: [id, itemId, serial, customerPartyId, legalEntityId, status, warranty, createdAt, version]
+      properties:
+        id: { type: string, format: uuid }
+        itemId: { type: string, format: uuid }
+        serial: { type: string }
+        customerPartyId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        siteAddressId: { type: string, format: uuid }
+        parentId: { type: string, format: uuid }
+        shipmentId: { type: string, format: uuid }
+        shippedOn: { type: string, format: date }
+        installedOn: { type: string, format: date }
+        status: { type: string, enum: [ACTIVE, INACTIVE, RETURNED] }
+        warranty: { $ref: "#/components/schemas/WarrantyTerm" }
+        warrantyStartsOn: { type: string, format: date, description: absent until the trigger date is known }
+        warrantyEndsOn: { type: string, format: date, description: first day the warranty no longer covers }
+        createdAt: { type: string, format: date-time }
+        version: { type: integer }
+    ServiceObjectPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/ServiceObject" } }
+        nextCursor: { type: string, format: uuid }
+    InstallRequest:
+      type: object
+      required: [installedOn]
+      additionalProperties: false
+      properties:
+        installedOn: { type: string, format: date }
+        siteAddressId: { type: [string, "null"], format: uuid }
+    ShipmentRequest:
+      type: object
+      required: [shipmentId, shipDate, customerPartyId, legalEntityId, lines]
+      additionalProperties: false
+      properties:
+        shipmentId: { type: string, format: uuid }
+        shipDate: { type: string, format: date }
+        customerPartyId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        siteAddressId: { type: [string, "null"], format: uuid }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 200
+          description: At most 2,000 serials in all.
+          items:
+            type: object
+            required: [itemId, serials, warranty]
+            additionalProperties: false
+            properties:
+              itemId: { type: string, format: uuid }
+              serials: { type: array, minItems: 1, maxItems: 500, uniqueItems: true, items: { type: string, minLength: 1, maxLength: 100 } }
+              warranty: { $ref: "#/components/schemas/WarrantyTerm" }
+    ShipmentReceipt:
+      type: object
+      required: [created, existing]
+      properties:
+        created: { type: integer }
+        existing: { type: integer }
+    Association:
+      type: object
+      required: [entityType, entityId]
+      additionalProperties: false
+      properties:
+        entityType: { type: string, enum: [case, work_order, agreement, service_object, knowledge_article, project, customer, vendor, worker, invoice, item, asset, audit_finding] }
+        entityId: { type: string, format: uuid }
+    ActivitySchedule:
+      type: object
+      additionalProperties: false
+      properties:
+        dueAt: { type: [string, "null"], format: date-time }
+        startAt: { type: [string, "null"], format: date-time }
+        endAt: { type: [string, "null"], format: date-time, description: not before startAt }
+    ActivityRequest:
+      type: object
+      required: [kind, subject, ownerWorkerId]
+      additionalProperties: false
+      properties:
+        kind: { type: string, enum: [TASK, APPOINTMENT, CALL_NOTE, EMAIL_NOTE] }
+        subject: { type: string, minLength: 1, maxLength: 200 }
+        ownerWorkerId: { type: string, format: uuid }
+        dueAt: { type: [string, "null"], format: date-time }
+        startAt: { type: [string, "null"], format: date-time }
+        endAt: { type: [string, "null"], format: date-time }
+        reminderMinutes: { type: [integer, "null"], minimum: 0, maximum: 10080 }
+        associations: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/Association" } }
+    Activity:
+      type: object
+      required: [id, kind, subject, ownerWorkerId, status, associations, createdAt, version]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [TASK, APPOINTMENT, CALL_NOTE, EMAIL_NOTE] }
+        subject: { type: string }
+        ownerWorkerId: { type: string, format: uuid }
+        dueAt: { type: string, format: date-time }
+        startAt: { type: string, format: date-time }
+        endAt: { type: string, format: date-time }
+        status: { type: string, enum: [OPEN, DONE, CANCELED] }
+        reminderMinutes: { type: integer }
+        associations: { type: array, items: { $ref: "#/components/schemas/Association" } }
+        completedAt: { type: string, format: date-time, description: set when DONE }
+        createdAt: { type: string, format: date-time }
+        version: { type: integer }
+    ActivityPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Activity" } }
+        nextCursor: { type: string, format: uuid }
+    Applicability:
+      type: object
+      additionalProperties: false
+      properties:
+        itemIds: { type: array, maxItems: 50, items: { type: string, format: uuid } }
+        itemGroupIds: { type: array, maxItems: 50, items: { type: string, format: uuid } }
+        incidentTypeIds: { type: array, maxItems: 50, items: { type: string, format: uuid } }
+        assetTypeIds: { type: array, maxItems: 50, items: { type: string, format: uuid } }
+        categoryIds: { type: array, maxItems: 50, items: { type: string, format: uuid } }
+    ArticleRequest:
+      type: object
+      required: [title, language, solution]
+      additionalProperties: false
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        language: { type: string, pattern: "^[a-z]{2}(-[A-Za-z]{2,4})?$", description: fixed per version; ignored by PUT }
+        symptom: { type: string, maxLength: 4000 }
+        cause: { type: string, maxLength: 4000 }
+        solution: { type: string, minLength: 1, maxLength: 4000 }
+        applicability: { $ref: "#/components/schemas/Applicability" }
+    Article:
+      type: object
+      required: [id, number, version, language, title, symptom, cause, solution, applicability, status, authorId, helpfulYes, helpfulNo, createdAt, revision]
+      properties:
+        id: { type: string, format: uuid, description: id of this version }
+        number: { type: string, example: KB-000001 }
+        version: { type: integer, minimum: 1 }
+        language: { type: string }
+        title: { type: string }
+        symptom: { type: string }
+        cause: { type: string }
+        solution: { type: string }
+        applicability: { $ref: "#/components/schemas/Applicability" }
+        status: { type: string, enum: [DRAFT, IN_REVIEW, PUBLISHED, RETIRED] }
+        authorId: { type: string, format: uuid }
+        reviewerId: { type: string, format: uuid }
+        publishedAt: { type: string, format: date-time }
+        helpfulYes: { type: integer }
+        helpfulNo: { type: integer }
+        helpfulPercent: { type: string, description: "decimal percent, shown from ten votes (BR-45.11)" }
+        createdAt: { type: string, format: date-time }
+        revision: { type: integer, description: optimistic-concurrency token of this version; the ETag }
+    ArticlePage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Article" } }
+        nextCursor: { type: string, format: uuid }
+    PublishResult:
+      type: object
+      required: [article, warnings]
+      properties:
+        article: { $ref: "#/components/schemas/Article" }
+        retiredVersion: { type: integer, description: the version this publish retired }
+        warnings: { type: array, items: { type: string }, description: "KB-PUB-002 when a version was retired" }
+    Suggestion:
+      type: object
+      required: [article, score]
+      properties:
+        article: { $ref: "#/components/schemas/Article" }
+        score: { type: number, minimum: 0, maximum: 1 }
+    SuggestionList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Suggestion" } }
+    VoteRequest:
+      type: object
+      required: [helpful]
+      additionalProperties: false
+      properties:
+        helpful: { type: boolean }
+    CaseStage:
+      type: object
+      required: [code, sequence]
+      additionalProperties: false
+      properties:
+        code: { type: string, pattern: "^[A-Z0-9_-]{2,40}$" }
+        sequence: { type: integer, minimum: 1, description: "1 to n in order" }
+        requiredActivities:
+          type: array
+          description: Activity subjects that must be DONE on the case before it leaves the stage.
+          items: { type: string, minLength: 1, maxLength: 200 }
+    CaseProcessRequest:
+      type: object
+      required: [code, name, stages]
+      additionalProperties: false
+      properties:
+        code: { type: string, pattern: "^[A-Z0-9_-]{2,40}$" }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        stages: { type: array, minItems: 1, maxItems: 20, items: { $ref: "#/components/schemas/CaseStage" } }
+    CaseProcess:
+      allOf:
+        - $ref: "#/components/schemas/CaseProcessRequest"
+        - type: object
+          required: [id]
+          properties:
+            id: { type: string, format: uuid }
+    CaseCategoryRequest:
+      type: object
+      required: [code, name, categoryType]
+      additionalProperties: false
+      properties:
+        code: { type: string, pattern: "^[A-Z0-9_-]{2,40}$" }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        categoryType: { type: string, enum: [SERVICE, CUSTOMER_SERVICE, HR, COLLECTIONS, PRODUCT_CHANGE, AUDIT, PROJECT, VENDOR, INTERNAL] }
+        parentId: { type: string, format: uuid }
+        processId: { type: string, format: uuid }
+        slaProfileId: { type: string, format: uuid }
+        defaultPriority: { type: integer, minimum: 1, maximum: 4, default: 3 }
+        reopenWindowDays: { type: integer, minimum: 0, maximum: 365, default: 14 }
+        accessDuty: { type: string, maxLength: 100, description: "Duty that, beside ownership, grants access to the category's cases (BR-45.10); empty leaves them to every CaseMaintain holder." }
+        resolutionCodes: { type: array, maxItems: 50, uniqueItems: true, items: { type: string, pattern: "^[A-Z0-9_-]{2,40}$" } }
+    CaseCategory:
+      type: object
+      required: [id, code, name, categoryType, defaultPriority, reopenWindowDays, accessDuty, resolutionCodes]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        categoryType: { type: string }
+        parentId: { type: string, format: uuid }
+        processId: { type: string, format: uuid }
+        slaProfileId: { type: string, format: uuid }
+        defaultPriority: { type: integer }
+        reopenWindowDays: { type: integer }
+        accessDuty: { type: string }
+        resolutionCodes: { type: array, items: { type: string } }
+    CaseAssociation:
+      type: object
+      required: [entityType, entityId]
+      additionalProperties: false
+      properties:
+        entityType: { type: string, enum: [case, work_order, agreement, service_object, knowledge_article, project, customer, vendor, worker, invoice, item, asset, audit_finding] }
+        entityId: { type: string, format: uuid }
+        role: { type: string, enum: [SUBJECT, RELATED], default: RELATED }
+    CaseLogEntry:
+      type: object
+      required: [at, actor, kind, text]
+      properties:
+        at: { type: string, format: date-time }
+        actor: { type: string }
+        kind: { type: string, enum: [CREATED, STAGE, STATUS, ASSOCIATION, REOPENED] }
+        text: { type: string }
+    GenericCaseRequest:
+      type: object
+      required: [categoryId, legalEntityId, subject]
+      additionalProperties: false
+      properties:
+        categoryId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        customerPartyId: { type: string, format: uuid, description: Required for COLLECTIONS. }
+        subject: { type: string, minLength: 1, maxLength: 200 }
+        description: { type: string, maxLength: 4000 }
+        priority: { type: integer, minimum: 1, maximum: 4, description: Defaults to the category's default priority. }
+        associations: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/CaseAssociation" } }
+    GenericCase:
+      type: object
+      required: [id, number, categoryId, categoryCode, categoryType, legalEntityId, ownerId, subject, description, priority, stageCode,
+        status, resolutionText, openedAt, version, createdAt, updatedAt, associations, log]
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: string, example: CS-000042 }
+        categoryId: { type: string, format: uuid }
+        categoryCode: { type: string }
+        categoryType: { type: string }
+        legalEntityId: { type: string, format: uuid }
+        customerPartyId: { type: string, format: uuid }
+        ownerId: { type: string }
+        subject: { type: string }
+        description: { type: string }
+        priority: { type: integer }
+        stageCode: { type: string, description: Empty when the category has no process. }
+        status: { type: string, enum: [OPEN, RESOLVED, CLOSED, CANCELED] }
+        resolutionCode: { type: string }
+        resolutionText: { type: string }
+        slaProfileId: { type: string, format: uuid }
+        slaResponseDue: { type: string, format: date-time }
+        slaResolutionDue: { type: string, format: date-time }
+        openedAt: { type: string, format: date-time }
+        resolvedAt: { type: string, format: date-time }
+        closedAt: { type: string, format: date-time }
+        reopenedFrom: { type: string, format: uuid }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        associations:
+          type: array
+          items:
+            type: object
+            required: [entityType, entityId, role]
+            properties:
+              entityType: { type: string }
+              entityId: { type: string, format: uuid }
+              role: { type: string, enum: [SUBJECT, RELATED] }
+        log: { type: array, items: { $ref: "#/components/schemas/CaseLogEntry" } }
+    GenericCasePage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/GenericCase" } }
+        nextCursor: { type: string, format: uuid }
+    ReopenResult:
+      type: object
+      required: [case, created]
+      properties:
+        case: { $ref: "#/components/schemas/GenericCase" }
+        created: { type: boolean, description: True when a new case linked by reopenedFrom was created. }

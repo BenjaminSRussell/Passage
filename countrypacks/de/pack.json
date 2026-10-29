@@ -1,0 +1,23 @@
+{
+  "code": "DE",
+  "version": "2026.1",
+  "name": "Germany",
+  "country": "DE",
+  "currency": "EUR",
+  "locale": "de-DE",
+  "taxRegime": "VAT",
+  "fiscalYearStartMonth": 1,
+  "holidayRegion": "DE-NW",
+  "bankFormats": ["SEPA_CT", "SEPA_DD"],
+  "taxIdScheme": "DE_USTID",
+  "retentionMinYears": {"financial": 10, "hr": 6},
+  "documentLayouts": ["rechnung-de-de"],
+  "statutoryReports": [
+    {
+      "code": "DE_UStVA",
+      "format": "XML",
+      "mandate": "ELSTER Umsatzsteuer-Voranmeldung",
+      "requiredFields": ["steuernummer", "zeitraum", "kz81", "kz86", "kz66"]
+    }
+  ]
+}

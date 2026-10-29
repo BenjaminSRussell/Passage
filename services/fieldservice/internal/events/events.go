@@ -2,7 +2,10 @@
 // Schemas are documented in events/asyncapi.yaml.
 package events
 
-import "github.com/BenjaminSRussell/passage/platform/events"
+import (
+	"github.com/BenjaminSRussell/passage/platform/events"
+	"github.com/BenjaminSRussell/passage/services/fieldservice/internal/domain"
+)
 
 // Context is the bounded-context segment of every event type.
 const Context = "service"
@@ -11,7 +14,76 @@ const Context = "service"
 var (
 	CaseOpened      = events.Type(Context, "case", "opened", 1)
 	WorkOrderPosted = events.Type(Context, "workorder", "posted", 1)
+	SLAWarning      = events.Type(Context, "sla", "warning", 1)
+	SLABreached     = events.Type(Context, "sla", "breached", 1)
+
+	// ArticlePublished is dev.passage.knowledge.article.published.v1 (PRD 8.45.5):
+	// the knowledge base is its own context in the event catalog.
+	ArticlePublished = events.Type(KnowledgeContext, "article", "published", 1)
+
+	// CaseStageChanged is dev.passage.case.stage.changed.v1 (PRD 8.45.5): stage
+	// moves of cases in any category belong to the case context of the catalog.
+	CaseStageChanged = events.Type(CaseContext, "stage", "changed", 1)
 )
+
+// CaseContext is the bounded-context segment of the generic case events (FR-45.12).
+const CaseContext = "case"
+
+// CaseStageChangedData is the payload of dev.passage.case.stage.changed.v1 (PRD
+// 8.45.5: caseId, categoryId, from, to, at, actor). Reason is empty on a forward move.
+type CaseStageChangedData struct {
+	CaseID     string `json:"caseId"`
+	Number     string `json:"number"`
+	CategoryID string `json:"categoryId"`
+	From       string `json:"from"`
+	To         string `json:"to"`
+	At         string `json:"at"`
+	Actor      string `json:"actor"`
+	Reason     string `json:"reason"`
+}
+
+// KnowledgeContext is the bounded-context segment of the knowledge-base events.
+const KnowledgeContext = "knowledge"
+
+// ArticlePublishedData is the payload of dev.passage.knowledge.article.published.v1
+// (PRD 8.45.5: articleId, version, language, applicability). RetiredArticleID is
+// the version this publish retired, if any, so the search index can drop it.
+type ArticlePublishedData struct {
+	ArticleID        string               `json:"articleId"`
+	Number           string               `json:"number"`
+	Version          int                  `json:"version"`
+	Language         string               `json:"language"`
+	Title            string               `json:"title"`
+	Applicability    domain.Applicability `json:"applicability"`
+	PublishedAt      string               `json:"publishedAt"`
+	RetiredArticleID *string              `json:"retiredArticleId"`
+}
+
+// SLAWarningData is the payload of dev.passage.service.sla.warning.v1: a case
+// clock reached the warning threshold (BR-45.2, message SVC-SLA-001). SLAType is
+// RESPONSE or RESOLUTION; times are RFC 3339 UTC.
+type SLAWarningData struct {
+	CaseID           string `json:"caseId"`
+	Number           string `json:"number"`
+	SLAType          string `json:"slaType"`
+	Priority         int    `json:"priority"`
+	DueAt            string `json:"dueAt"`
+	WarnedAt         string `json:"warnedAt"`
+	ThresholdPercent int    `json:"thresholdPercent"`
+}
+
+// SLABreachedData is the payload of dev.passage.service.sla.breached.v1 (PRD
+// 8.0: caseId, slaType, dueAt, breachedAt; message SVC-SLA-002). BreachedAt is
+// when the service detected the breach: the monitor pass, the late response or
+// the transition that found the clock past due.
+type SLABreachedData struct {
+	CaseID     string `json:"caseId"`
+	Number     string `json:"number"`
+	SLAType    string `json:"slaType"`
+	Priority   int    `json:"priority"`
+	DueAt      string `json:"dueAt"`
+	BreachedAt string `json:"breachedAt"`
+}
 
 // CaseOpenedData is the payload of dev.passage.service.case.opened.v1.
 type CaseOpenedData struct {

@@ -1,0 +1,12 @@
+{"journalId":"J1","amount":"1250.00","accountPair":"1000-6000","postedAtHour":10,"userId":"U1","anomalous":false}
+{"journalId":"J2","amount":"980.00","accountPair":"1000-6000","postedAtHour":14,"userId":"U2","anomalous":false}
+{"journalId":"J3","amount":"45000.00","accountPair":"1000-9900","postedAtHour":2,"userId":"U3","anomalous":true}
+{"journalId":"J4","amount":"310.00","accountPair":"2000-4000","postedAtHour":11,"userId":"U1","anomalous":false}
+{"journalId":"J5","amount":"15.00","accountPair":"1000-6000","postedAtHour":9,"userId":"U4","anomalous":false}
+{"journalId":"J6","amount":"99999.00","accountPair":"1000-9900","postedAtHour":23,"userId":"U5","anomalous":true}
+{"journalId":"J7","amount":"2400.00","accountPair":"5000-6000","postedAtHour":13,"userId":"U2","anomalous":false}
+{"journalId":"J8","amount":"600.00","accountPair":"1000-6000","postedAtHour":4,"userId":"U6","anomalous":true}
+{"journalId":"J9","amount":"720.00","accountPair":"3000-4000","postedAtHour":15,"userId":"U3","anomalous":false}
+{"journalId":"J10","amount":"1100.00","accountPair":"1000-6000","postedAtHour":16,"userId":"U1","anomalous":false}
+{"journalId":"J11","amount":"830.00","accountPair":"1000-6000","postedAtHour":1,"userId":"BATCH","anomalous":false}
+{"journalId":"J12","amount":"48000.00","accountPair":"1000-9900","postedAtHour":11,"userId":"U2","anomalous":true}

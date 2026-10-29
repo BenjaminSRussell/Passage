@@ -17,11 +17,13 @@ import {
 } from "../../shell/ui";
 import { AbsenceCard } from "./AbsenceCard";
 import { BenefitsCard } from "./BenefitsCard";
+import { CertificationsCard } from "./CertificationsCard";
 import { getWorker, listEmployments, workerAsOf, type Employment, type WorkerDetail } from "./api/client";
 import { EmploymentForm } from "./EmploymentForm";
 import { assignmentKindLabel, dash, DATE, dayOf, employmentTypeLabel, lastDay, todayIso, workerTypeLabel } from "./format";
 import styles from "./pages.module.css";
 import { PiiCard } from "./PiiCard";
+import { SkillsCard } from "./SkillsCard";
 import { useLoad } from "./useLoad";
 
 const employmentColumns: DataTableColumn<Employment>[] = [
@@ -214,6 +216,8 @@ export function WorkerDetailPage() {
       <AsOfCard workerId={worker.id} />
       <AbsenceCard workerId={worker.id} />
       <BenefitsCard workerId={worker.id} />
+      <SkillsCard workerId={worker.id} />
+      <CertificationsCard workerId={worker.id} />
     </div>
   );
 }

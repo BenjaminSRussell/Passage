@@ -39,8 +39,10 @@ const (
 	CodeNoEntitlement     = "SVC-ENT-002"
 	CodeCaseUnknown       = "SVC-CASE-001"
 	CodeCaseCustomer      = "SVC-CASE-002"
+	CodeCaseTransition    = "SVC-CASE-003"
 	CodeWOUnknown         = "SVC-WO-004"
 	CodeWOInvalid         = "SVC-WO-011"
+	CodeWOFollowUp        = "SVC-WO-012"
 	CodeVersionConflict   = "conflict_version"
 	CodeIdempotencyReuse  = "idempotency_key_reuse"
 )

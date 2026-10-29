@@ -23,7 +23,44 @@ var (
 	// CapexApproved is published when a capex request is approved (FR-37.17);
 	// budget (wave 38) and the depreciation forecast consume it.
 	CapexApproved = events.Type(Context, "capexrequest", "approved", 1)
+	// AssetTransferred and AssetSplit are published for every transfer and
+	// split (FR-37.7); they are not in the PRD event table and are added so
+	// the ledger (intercompany settlement, wave 40) and analytics see every
+	// move of cost and accumulated depreciation between assets.
+	AssetTransferred = events.Type(Context, "asset", "transferred", 1)
+	AssetSplit       = events.Type(Context, "asset", "split", 1)
 )
+
+// AssetTransferredData is the payload of AssetTransferred and AssetSplit: the
+// source asset, the balances each of its books moved, and the targets with
+// the share each took. Amounts are decimal strings; percentages have two
+// decimals and total 100.00.
+type AssetTransferredData struct {
+	TransferID    string               `json:"transferId"`
+	SourceAssetID string               `json:"sourceAssetId"`
+	LegalEntityID string               `json:"legalEntityId"`
+	Kind          string               `json:"kind"`
+	TransferDate  string               `json:"transferDate"`
+	Books         []TransferBookData   `json:"books"`
+	Targets       []TransferTargetData `json:"targets"`
+}
+
+// TransferBookData is one source book's balances at the transfer.
+type TransferBookData struct {
+	BookCode                string `json:"bookCode"`
+	Currency                string `json:"currency"`
+	Cost                    string `json:"cost"`
+	AccumulatedDepreciation string `json:"accumulatedDepreciation"`
+	NBV                     string `json:"nbv"`
+}
+
+// TransferTargetData is one target asset of a transfer or split.
+type TransferTargetData struct {
+	AssetID       string `json:"assetId"`
+	AssetNumber   string `json:"assetNumber"`
+	LegalEntityID string `json:"legalEntityId"`
+	Percentage    string `json:"percentage"`
+}
 
 // CapexApprovedData is the payload of CapexApproved: the approved variant's
 // amounts per year (decimal strings keyed by four-digit year) with the request

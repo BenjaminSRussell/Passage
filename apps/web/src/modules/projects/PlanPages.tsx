@@ -64,6 +64,8 @@ function NotFound({ title, text, back, backLabel }: { title: string; text: strin
 }
 
 interface PlanAction {
+  /** Distinguishes the two simulation actions (from WORKING, from BASELINE) for busy state and keys. */
+  id: string;
   kind: PlanKind;
   label: string;
   from?: PlanVersion;
@@ -77,33 +79,35 @@ export function ProjectPlansPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const state = useLoad((signal) => listPlans(id, signal), id);
-  const [busy, setBusy] = useState<PlanKind | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const [failure, setFailure] = useState<Problem | null>(null);
   // One key per action until it succeeds, so a retry after a lost response replays.
-  const keys = useRef<Partial<Record<PlanKind, string>>>({});
+  const keys = useRef<Record<string, string>>({});
 
   if (state.error?.status === 404) {
     return <NotFound title="Project" text={`There is no project ${id} in your legal entities.`} back="/projects/list" backLabel="Back to projects" />;
   }
   const plans = state.data?.items ?? [];
   const working = plans.find((p) => p.kind === "WORKING");
-  const baseline = plans.find((p) => p.kind === "BASELINE");
+  // The current baseline: an applied change order supersedes the earlier ones (BR-41.13).
+  const baseline = plans.find((p) => p.kind === "BASELINE" && !p.supersededByVersionId);
   const actions: PlanAction[] = [];
-  if (!working) actions.push({ kind: "WORKING", label: "Create working plan" });
-  if (working && !baseline) actions.push({ kind: "BASELINE", label: "Save as baseline", from: working });
-  if (working) actions.push({ kind: "SIMULATION", label: "New simulation", from: working });
+  if (!working) actions.push({ id: "working", kind: "WORKING", label: "Create working plan" });
+  if (working && !baseline) actions.push({ id: "baseline", kind: "BASELINE", label: "Save as baseline", from: working });
+  if (working) actions.push({ id: "sim-working", kind: "SIMULATION", label: "New simulation", from: working });
+  if (baseline) actions.push({ id: "sim-baseline", kind: "SIMULATION", label: "New simulation from baseline", from: baseline });
 
   async function run(action: PlanAction) {
-    setBusy(action.kind);
+    setBusy(action.id);
     setFailure(null);
-    const key = (keys.current[action.kind] ??= newKey());
+    const key = (keys.current[action.id] ??= newKey());
     try {
       const created = await createPlan(id, { kind: action.kind, ...(action.from ? { copyFromVersionId: action.from.id } : {}) }, key);
-      delete keys.current[action.kind];
+      delete keys.current[action.id];
       navigate(`/projects/${encodeURIComponent(id)}/plans/${encodeURIComponent(created.id)}`);
     } catch (error) {
       const problem = describeProblem(error);
-      if (problem.code === "idempotency_key_reuse" || problem.status === 422) delete keys.current[action.kind];
+      if (problem.code === "idempotency_key_reuse" || problem.status === 422) delete keys.current[action.id];
       setFailure(problem);
       state.reload();
     } finally {
@@ -115,7 +119,7 @@ export function ProjectPlansPage() {
   const columns: DataTableColumn<PlanVersion>[] = [
     { key: "sequence", header: "Plan", render: (p) => planTitle(p) },
     { key: "kind", header: "Kind", render: (p) => <PlanBadge version={p} /> },
-    { key: "locked", header: "Changes", render: (p) => (p.locked ? "Locked" : "Editable") },
+    { key: "locked", header: "Changes", render: (p) => (p.transferredAt ? `Transferred ${p.transferredAt.slice(0, 10)}` : p.locked ? "Locked" : "Editable") },
     { key: "copiedFromVersionId", header: "Copied from", render: (p) => (p.copiedFromVersionId ? `Plan ${bySequence.get(p.copiedFromVersionId) ?? dash}` : dash) },
     { key: "version", header: "Version", align: "end" },
     { key: "createdAt", header: "Created", mono: true, render: (p) => p.createdAt.slice(0, 10) },
@@ -148,7 +152,7 @@ export function ProjectPlansPage() {
             title="No plan versions yet"
             description="Create the working plan to build the work breakdown structure and schedule it."
             action={
-              <Button variant="primary" loading={busy === "WORKING"} onClick={() => void run({ kind: "WORKING", label: "" })}>
+              <Button variant="primary" loading={busy === "working"} onClick={() => void run({ id: "working", kind: "WORKING", label: "" })}>
                 Create working plan
               </Button>
             }
@@ -160,10 +164,10 @@ export function ProjectPlansPage() {
             <div className={plan.toolbar} role="group" aria-label="Plan actions">
               {actions.map((a) => (
                 <Button
-                  key={a.kind}
+                  key={a.id}
                   variant={a.kind === "WORKING" ? "primary" : "secondary"}
-                  loading={busy === a.kind}
-                  disabled={busy !== null && busy !== a.kind}
+                  loading={busy === a.id}
+                  disabled={busy !== null && busy !== a.id}
                   onClick={() => void run(a)}
                 >
                   {a.label}
@@ -418,15 +422,22 @@ export function WbsPage() {
         title={`${planTitle(current.planVersion)} for ${id}`}
         meta={<PlanBadge version={current.planVersion} />}
         description={
-          locked
-            ? "This baseline is locked. It keeps the dates it had when it was saved; change the working plan instead."
-            : "Edit the tasks and their links, save, then run the schedule. Dates use the Monday-to-Friday calendar from the project start."
+          current.planVersion.transferredAt
+            ? "This simulation was transferred into the working plan and is locked. Change the working plan instead."
+            : locked
+              ? "This baseline is locked. It keeps the dates it had when it was saved; change the working plan instead."
+              : "Edit the tasks and their links, save, then run the schedule. Dates use the Monday-to-Friday calendar from the project start."
         }
         actions={
           <>
             <Link className={buttonClassName("secondary")} to={`/projects/${encodeURIComponent(id)}/plans`}>
               All plans
             </Link>
+            {current.planVersion.kind === "SIMULATION" && !locked ? (
+              <Link className={buttonClassName("secondary")} to={`/projects/${encodeURIComponent(id)}/plans/${encodeURIComponent(planId)}/transfer`}>
+                Transfer to working plan
+              </Link>
+            ) : null}
             {!locked ? (
               <Button variant="primary" loading={busy === "schedule"} disabled={dirty || busy === "save"} onClick={() => void schedule()}>
                 Run schedule

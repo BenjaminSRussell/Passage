@@ -635,7 +635,9 @@ func TestRLS_TenantIsolation(t *testing.T) {
 	for _, table := range []string{"asset", "counter", "counter_reading", "maintenance_plan", "plan_line", "work_order",
 		"work_order_transition", "work_order_labor", "work_order_part", "maintenance_request", "condition_rule", "outbox", "idempotency_keys",
 		"criticality_assessment", "fault_catalog", "fault_code", "fault_combination", "work_order_fault", "downtime_window",
-		"maintenance_request_triage", "asset_warranty"} {
+		"maintenance_request_triage", "asset_warranty", "permit_type", "job_permit_requirement", "isolation_point", "permit",
+		"permit_transition", "loto_lock", "loto_lock_action", "functional_location", "asset_location_history",
+		"maintenance_sequence", "sequence_occurrence", "maintenance_round", "round_stop", "work_order_stop"} {
 		var enabled, forced bool
 		if err := admin.QueryRow(ctx, `select relrowsecurity, relforcerowsecurity from pg_class
 		  where relname = $1 and relnamespace = $2::regnamespace`, table, schema).Scan(&enabled, &forced); err != nil {
@@ -680,5 +682,22 @@ func TestRLS_TenantIsolation(t *testing.T) {
 	}
 	if _, err := s.ListWarranties(two, a.ID); problemCode(err) != CodeNotFound {
 		t.Fatalf("tenant 2 listing tenant 1's warranties: %v, want %s", err, CodeNotFound)
+	}
+	// Permit types, isolation points and permits are tenant data (FR-44.19).
+	if _, err := s.UpsertPermitType(one, PermitType{Code: "HOT_WORK", Name: "Hot work", ApproverRole: "Safety", MaxValidityHours: 8}); err != nil {
+		t.Fatal(err)
+	}
+	if types, err := s.ListPermitTypes(two); err != nil || len(types) != 0 {
+		t.Fatalf("tenant 2 permit types = %+v %v, want none", types, err)
+	}
+	if _, err := s.CreateIsolationPoint(one, a.ID, IsolationPoint{EnergyType: "ELECTRICAL", LocationText: "MCC", Method: "breaker",
+		VerificationStep: "try start", TagCode: "ISO-1"}, "ip"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListIsolationPoints(two, a.ID); problemCode(err) != CodeNotFound {
+		t.Fatalf("tenant 2 listing tenant 1's isolation points: %v, want %s", err, CodeNotFound)
+	}
+	if permits, err := s.ListPermits(two, ListOptions{Limit: 10}); err != nil || len(permits.Items) != 0 {
+		t.Fatalf("tenant 2 permits = %+v %v, want none", permits, err)
 	}
 }

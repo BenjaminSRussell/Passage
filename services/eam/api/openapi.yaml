@@ -2,14 +2,14 @@ openapi: 3.1.0
 info:
   title: Passage EAM API
   version: 0.1.0
-  description: Enterprise asset management (wave 44, slices 1-2). Errors are RFC 9457 problem details with a stable code.
+  description: Enterprise asset management (wave 44, slices 1-5). Errors are RFC 9457 problem details with a stable code.
 servers:
   - url: https://api.{env}.passage.dev
     variables:
       env:
         default: dev
 security: []
-x-passage-slice: "PSG-44 slices 1-2; remaining deliverables are listed in NOT-IMPLEMENTED.md"
+x-passage-slice: "PSG-44 slices 1-5; remaining deliverables are listed in NOT-IMPLEMENTED.md"
 paths:
   /healthz:
     get:
@@ -86,7 +86,8 @@ paths:
       operationId: changeAssetLifecycle
       description: >-
         Retires an asset (FR-44.2): ACTIVE to INACTIVE, INACTIVE or CREATED to DISPOSED. DISPOSED is final, and an
-        asset with open work orders cannot be disposed (EAM-AST-001). Use /activate to return an INACTIVE asset to ACTIVE.
+        asset with open work orders cannot be disposed (EAM-AST-001). Disposal removes the asset from its functional
+        location (REMOVE in its location history). Use /activate to return an INACTIVE asset to ACTIVE.
       x-passage-duty: EamAssetMaintain
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IfMatch" }]
       requestBody:
@@ -351,7 +352,9 @@ paths:
       description: >-
         A repeated Idempotency-Key returns the work order as it is now, without a second transition. Completion of a
         CORRECTIVE or EMERGENCY order needs a registered fault (EAM-FLT-001); completing a warranty-covered order with
-        a covered cost above zero emits dev.passage.eam.warranty.claimable.v1 (BR-44.14).
+        a covered cost above zero emits dev.passage.eam.warranty.claimable.v1 (BR-44.14). A ROUND order completes only
+        when every stop is DONE or SKIPPED (EAM-RND-001), and cannot start while a stop's job type requires a permit to
+        work (EAM-PMT-001).
       x-passage-duty: EamPlanner | EamTechnician
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }, { $ref: "#/components/parameters/IfMatch" }]
       requestBody:
@@ -418,6 +421,476 @@ paths:
       responses:
         "200": { description: kpis, content: { application/json: { schema: { $ref: "#/components/schemas/Kpi" } } } }
         "400": { $ref: "#/components/responses/Problem" }
+  /v1/eam/permit-types:
+    get:
+      operationId: listPermitTypes
+      x-passage-duty: EamInquire
+      responses:
+        "200":
+          description: permit types by code
+          content:
+            application/json:
+              schema: { type: object, properties: { items: { type: array, items: { $ref: "#/components/schemas/PermitType" } } } }
+    post:
+      operationId: upsertPermitType
+      x-passage-duty: EamSetupAdmin
+      description: Creates or replaces a permit type (FR-44.19). Saving the same definition again changes nothing.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/PermitTypeIn" } } }
+      responses:
+        "200": { description: saved, content: { application/json: { schema: { $ref: "#/components/schemas/PermitType" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+  /v1/eam/job-types/{jobType}/permits:
+    get:
+      operationId: getJobPermits
+      x-passage-duty: EamInquire
+      description: The permit types a job type requires before its work orders may start (BR-44.11); empty when none.
+      parameters:
+        - { name: jobType, in: path, required: true, schema: { type: string, pattern: "^[A-Z0-9_]{2,20}$" } }
+      responses:
+        "200": { description: requirement, content: { application/json: { schema: { $ref: "#/components/schemas/JobPermits" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+    put:
+      operationId: setJobPermits
+      x-passage-duty: EamSetupAdmin
+      description: Replaces the permit types a job type requires (BR-44.11). An empty list clears the requirement. Idempotent replace; no If-Match because the set is administered as a whole.
+      parameters:
+        - { name: jobType, in: path, required: true, schema: { type: string, pattern: "^[A-Z0-9_]{2,20}$" } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/JobPermitsIn" } } }
+      responses:
+        "200": { description: replaced, content: { application/json: { schema: { $ref: "#/components/schemas/JobPermits" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/eam/assets/{id}/isolation-points:
+    get:
+      operationId: listIsolationPoints
+      x-passage-duty: EamInquire
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: isolation points by tag code
+          content:
+            application/json:
+              schema: { type: object, properties: { items: { type: array, items: { $ref: "#/components/schemas/IsolationPoint" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createIsolationPoint
+      x-passage-duty: EamSetupAdmin
+      description: Adds an energy isolation point to the asset. The tag code is unique per asset (EAM-DUP-001).
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/IsolationPointIn" } } }
+      responses:
+        "201": { description: created, content: { application/json: { schema: { $ref: "#/components/schemas/IsolationPoint" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /v1/eam/permits:
+    get:
+      operationId: listPermits
+      x-passage-duty: EamInquire
+      description: Permit register (8.44.12), newest first.
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/PermitStatus" } }
+        - { name: asset, in: query, schema: { type: string, format: uuid } }
+        - { name: workOrder, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: permits, content: { application/json: { schema: { $ref: "#/components/schemas/PermitPage" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: requestPermit
+      x-passage-duty: EamPlanner
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      description: >-
+        Opens a REQUESTED permit for an open work order (EAM-PMT-006 otherwise). The validity window must fit the
+        permit type maximum (EAM-VAL-001). Only one permit of a type may be in force on a work order (EAM-DUP-001).
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/PermitIn" } } }
+      responses:
+        "201": { description: requested, content: { application/json: { schema: { $ref: "#/components/schemas/Permit" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/eam/permits/expire:
+    post:
+      operationId: expirePermits
+      x-passage-duty: EamPermitIssuer
+      description: >-
+        The eam-permit-expiry job (8.44.20), run every 5 minutes: ISSUED permits past validTo move to SUSPENDED and are
+        listed with EAM-PMT-004; workOrderInProgress flags jobs still running. Running it again suspends nothing more.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200":
+          description: permits suspended by this run
+          content:
+            application/json:
+              schema: { type: object, properties: { items: { type: array, items: { $ref: "#/components/schemas/ExpiredPermit" } } } }
+  /v1/eam/permits/{id}:
+    get:
+      operationId: getPermit
+      x-passage-duty: EamInquire
+      description: The permit with the asset's isolation points, its locks and its history. ETag is the permit version.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: permit with locks, content: { application/json: { schema: { $ref: "#/components/schemas/PermitDetail" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/eam/permits/{id}/transition:
+    post:
+      operationId: transitionPermit
+      x-passage-duty: EamPermitIssuer
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }, { $ref: "#/components/parameters/IfMatch" }]
+      description: >-
+        Approve, issue, suspend, close or cancel (BR-44.11). Approval needs an approver other than the requester
+        (EAM-PMT-005). Issue needs the permit still valid (EAM-PMT-004) and, for an isolation permit, isolation points
+        on the asset each with a verified lock (EAM-PMT-002) held by someone besides the issuer (EAM-PMT-005). Close
+        and cancel need every lock removed (EAM-PMT-003); close needs the work order not IN_PROGRESS (EAM-PMT-008).
+        A repeated Idempotency-Key returns the permit without a second transition.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/PermitTransitionIn" } } }
+      responses:
+        "200": { description: transitioned, content: { application/json: { schema: { $ref: "#/components/schemas/Permit" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/eam/permits/{id}/locks:
+    post:
+      operationId: recordLock
+      x-passage-duty: EamTechnician
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      description: >-
+        Applies, verifies (the zero-energy check) or removes the caller's own personal lock on an isolation point of
+        the permit's asset (BR-44.11). One open lock per technician per point (EAM-PMT-007). Locks need an APPROVED,
+        ISSUED or SUSPENDED permit (EAM-PMT-006). A repeated Idempotency-Key returns the lock as it is now.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/LockIn" } } }
+      responses:
+        "200": { description: lock verified or removed, content: { application/json: { schema: { $ref: "#/components/schemas/LotoLock" } } } }
+        "201": { description: lock applied, content: { application/json: { schema: { $ref: "#/components/schemas/LotoLock" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/eam/functional-locations:
+    get:
+      operationId: listFunctionalLocations
+      x-passage-duty: EamInquire
+      description: >-
+        Functional locations (FR-44.1) in path order, so the plant structure reads top-down. site narrows to one site;
+        under narrows to one location's subtree (the location included).
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { name: site, in: query, schema: { type: string, format: uuid } }
+        - { name: under, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: page, content: { application/json: { schema: { $ref: "#/components/schemas/FunctionalLocationPage" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createFunctionalLocation
+      x-passage-duty: EamStructureMaintain
+      description: >-
+        Adds a root location of a site, or a child of a parent in the same site (EAM-FL-002). Depth is at most 12
+        (EAM-FL-001); the path (codes joined by "/") is unique per site (EAM-DUP-001).
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/FunctionalLocationIn" } } }
+      responses:
+        "201": { description: created, content: { application/json: { schema: { $ref: "#/components/schemas/FunctionalLocation" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/eam/functional-locations/{id}:
+    get:
+      operationId: getFunctionalLocation
+      x-passage-duty: EamInquire
+      description: The location with its direct children and the assets installed at it.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: location, content: { application/json: { schema: { $ref: "#/components/schemas/LocationDetail" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/eam/assets/{id}/location:
+    post:
+      operationId: placeAsset
+      x-passage-duty: EamStructureMaintain
+      description: >-
+        Installs, moves or removes (functionalLocationId null) the asset and appends the change to its location history
+        (FR-44.2). The location must be in the asset's site and differ from the current one (EAM-FL-002); a DISPOSED
+        asset cannot be placed (EAM-AST-001). The asset version moves on. A repeated Idempotency-Key returns the asset.
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }, { $ref: "#/components/parameters/IfMatch" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/PlacementIn" } } }
+      responses:
+        "200": { description: placed, content: { application/json: { schema: { $ref: "#/components/schemas/Asset" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/eam/assets/{id}/location-history:
+    get:
+      operationId: listAssetLocationHistory
+      x-passage-duty: EamInquire
+      description: The asset's install, move and remove history, newest first.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: history
+          content:
+            application/json:
+              schema: { type: object, properties: { items: { type: array, items: { $ref: "#/components/schemas/LocationHistory" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/eam/sequences:
+    get:
+      operationId: listSequences
+      x-passage-duty: EamInquire
+      description: Maintenance sequences (FR-44.15), newest first; asset narrows to one asset's sequences.
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { name: asset, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: page, content: { application/json: { schema: { $ref: "#/components/schemas/SequencePage" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createSequence
+      x-passage-duty: EamPlanAdmin
+      description: >-
+        Defines a maintenance sequence on one asset or one asset type, over a base interval in a time unit or on a
+        counter of the asset. Steps need unique codes and hierarchies, multiples of 1 to 1000, and may include only
+        lower-hierarchy steps (EAM-SEQ-001). The code is unique (EAM-DUP-001).
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/SequenceIn" } } }
+      responses:
+        "201": { description: created, content: { application/json: { schema: { $ref: "#/components/schemas/MaintenanceSequence" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/eam/sequences/{id}:
+    get:
+      operationId: getSequence
+      x-passage-duty: EamInquire
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: sequence, content: { application/json: { schema: { $ref: "#/components/schemas/MaintenanceSequence" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/eam/sequences/{id}/simulation:
+    get:
+      operationId: simulateSequence
+      x-passage-duty: EamInquire
+      description: The next occurrences after lastOccurrenceNumber with the steps BR-44.10 selects, generating nothing.
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { name: occurrences, in: query, schema: { type: integer, minimum: 1, maximum: 120, default: 12 } }
+      responses:
+        "200":
+          description: simulated occurrences
+          content:
+            application/json:
+              schema: { type: object, properties: { items: { type: array, items: { $ref: "#/components/schemas/SimulatedOccurrence" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/eam/sequences/{id}/occurrences:
+    get:
+      operationId: listSequenceOccurrences
+      x-passage-duty: EamInquire
+      description: Generated occurrences, newest first.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: occurrences
+          content:
+            application/json:
+              schema: { type: object, properties: { items: { type: array, items: { $ref: "#/components/schemas/SequenceOccurrence" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: generateSequenceOccurrence
+      x-passage-duty: EamPlanAdmin
+      description: >-
+        Generates occurrence lastOccurrenceNumber + 1 of an asset sequence (BR-44.10) and opens a PREVENTIVE work
+        order (event workorder.created) for the selected step's job type; extra due steps are listed in jobTypes. The
+        asset must be ACTIVE (EAM-AST-001) and the previous occurrence's order completed, closed or canceled
+        (EAM-SEQ-002); asset type sequences are templates (EAM-SEQ-001). A repeated Idempotency-Key returns the
+        stored occurrence.
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: false
+        content: { application/json: { schema: { $ref: "#/components/schemas/OccurrenceIn" } } }
+      responses:
+        "201": { description: generated, content: { application/json: { schema: { $ref: "#/components/schemas/SequenceOccurrence" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/eam/rounds:
+    get:
+      operationId: listRounds
+      x-passage-duty: EamInquire
+      description: Maintenance rounds (FR-44.14), newest first, each with its stops.
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+      responses:
+        "200": { description: page, content: { application/json: { schema: { $ref: "#/components/schemas/RoundPage" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createRound
+      x-passage-duty: EamPlanAdmin
+      description: >-
+        Defines a round: 1 to 50 stops numbered 1..n in order, each an asset of the round's site with a job type code,
+        a mandatory flag and the travel minutes from the previous stop (EAM-RND-003). A stop job type that requires a
+        permit to work is refused (EAM-RND-003): a round work order cannot carry one permit per stop. The code is
+        unique (EAM-DUP-001). A repeated Idempotency-Key returns the stored round. Schedule it with a ROUND plan line.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/RoundIn" } } }
+      responses:
+        "201": { description: created, content: { application/json: { schema: { $ref: "#/components/schemas/MaintenanceRound" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/eam/rounds/{id}:
+    get:
+      operationId: getRound
+      x-passage-duty: EamInquire
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: round, content: { application/json: { schema: { $ref: "#/components/schemas/MaintenanceRound" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/eam/rounds/{id}/work-orders:
+    post:
+      operationId: createRoundWorkOrder
+      x-passage-duty: EamPlanner
+      description: >-
+        Opens a ROUND work order for one extra occurrence of the round (ROUND plan lines generate the scheduled ones):
+        booked on the first stop's asset, with every stop copied in stop order (BR-44.9), event workorder.created.
+        Every stop asset must be ACTIVE (EAM-AST-001). A repeated Idempotency-Key returns the same order.
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: false
+        content: { application/json: { schema: { $ref: "#/components/schemas/OccurrenceIn" } } }
+      responses:
+        "201": { description: created, content: { application/json: { schema: { $ref: "#/components/schemas/WorkOrder" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/eam/work-orders/{id}/stops/{seq}:
+    post:
+      operationId: recordStopOutcome
+      x-passage-duty: EamTechnician
+      description: >-
+        Records one stop of an IN_PROGRESS ROUND work order as DONE or SKIPPED, once (EAM-RND-002). SKIPPED needs a
+        reason; a skipped mandatory stop raises a maintenance request with source ROUND for the stop's asset (event
+        request.created) in the same transaction (BR-44.9). The order completes only when every stop has an outcome
+        (EAM-RND-001 on the status transition). A repeated Idempotency-Key returns the stop as recorded.
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { name: seq, in: path, required: true, schema: { type: integer, minimum: 1, maximum: 50 } }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/StopOutcomeIn" } } }
+      responses:
+        "200": { description: recorded, content: { application/json: { schema: { $ref: "#/components/schemas/WorkOrderStop" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/eam/work-orders/emergency-overdue:
+    get:
+      operationId: listEmergencyOverdue
+      x-passage-duty: EamInquire
+      description: >-
+        Emergency regularization (BR-44.7): open priority 1 work orders that were never SCHEDULED or RELEASED and
+        were created at least the window ago, oldest first, each with the warning EAM-WO-003.
+      parameters:
+        - { name: hours, in: query, schema: { type: integer, minimum: 1, maximum: 72, default: 24 } }
+      responses:
+        "200":
+          description: overdue orders
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, windowHours]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/RegularizationAlert" } }
+                  windowHours: { type: integer }
+        "400": { $ref: "#/components/responses/Problem" }
+  /v1/eam/assets/plan-reviews:
+    get:
+      operationId: listPlanReviews
+      x-passage-duty: EamInquire
+      description: >-
+        Plan review reminder (BR-44.15): assets of criticality 4 or 5, not disposed, never assessed or last assessed
+        12 months ago or more, most overdue first.
+      responses:
+        "200":
+          description: assets due for review
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/PlanReview" } } } }
+  /v1/eam/kpis/cost:
+    get:
+      operationId: getCostByAsset
+      x-passage-duty: EamInquire
+      description: Parts, labor and total cost of the work orders completed in [from, to), per asset and currency, highest first (FR-44.13).
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: assetType, in: query, schema: { type: string, pattern: "^[A-Z0-9_]{2,20}$" } }
+      responses:
+        "200":
+          description: cost per asset
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, from, to]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/AssetCost" } }
+                  from: { type: string, format: date-time }
+                  to: { type: string, format: date-time }
+        "400": { $ref: "#/components/responses/Problem" }
+  /v1/eam/kpis/backlog:
+    get:
+      operationId: getBacklog
+      x-passage-duty: EamInquire
+      description: Open work orders per priority with the overdue count and the oldest due date (FR-44.13), optionally on one site.
+      parameters:
+        - { name: site, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: backlog per priority
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/BacklogRow" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
 components:
   parameters:
     Id:
@@ -457,6 +930,217 @@ components:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
   schemas:
+    RoundStop:
+      type: object
+      required: [sequence, assetId, jobType]
+      properties:
+        sequence: { type: integer, minimum: 1, maximum: 50 }
+        assetId: { type: string, format: uuid }
+        jobType: { type: string, pattern: "^[A-Z0-9_]{2,20}$" }
+        mandatory: { type: boolean, default: false, description: a SKIPPED mandatory stop raises a ROUND request }
+        travelMinutes: { type: integer, minimum: 0, maximum: 480, default: 0, description: from the previous stop }
+    RoundIn:
+      type: object
+      required: [code, name, siteId, stops]
+      properties:
+        code: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{1,29}$" }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        siteId: { type: string, format: uuid }
+        stops: { type: array, minItems: 1, maxItems: 50, items: { $ref: "#/components/schemas/RoundStop" } }
+    MaintenanceRound:
+      type: object
+      required: [id, code, name, siteId, active, stops, travelMinutes, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        siteId: { type: string, format: uuid }
+        active: { type: boolean }
+        stops: { type: array, items: { $ref: "#/components/schemas/RoundStop" } }
+        travelMinutes: { type: integer, description: total travel between stops }
+        createdAt: { type: string, format: date-time }
+    RoundPage:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/MaintenanceRound" } }
+        nextCursor: { type: string, format: uuid }
+    StopOutcomeIn:
+      type: object
+      required: [outcome]
+      properties:
+        outcome: { type: string, enum: [DONE, SKIPPED] }
+        reason: { type: string, maxLength: 120, description: required for SKIPPED; an optional remark for DONE }
+    WorkOrderStop:
+      type: object
+      required: [sequence, assetId, jobType, mandatory, travelMinutes]
+      properties:
+        sequence: { type: integer }
+        assetId: { type: string, format: uuid }
+        jobType: { type: string }
+        mandatory: { type: boolean }
+        travelMinutes: { type: integer }
+        outcome: { type: string, enum: [DONE, SKIPPED], description: absent until recorded }
+        reason: { type: string }
+        requestId: { type: string, format: uuid, description: the ROUND request a skipped mandatory stop raised }
+        recordedBy: { type: string }
+        recordedAt: { type: string, format: date-time }
+    RegularizationAlert:
+      allOf:
+        - $ref: "#/components/schemas/WorkOrder"
+        - type: object
+          required: [code, detail]
+          properties:
+            code: { type: string, enum: [EAM-WO-003] }
+            detail: { type: string }
+    PlanReview:
+      type: object
+      required: [assetId, assetNumber, name, criticality]
+      properties:
+        assetId: { type: string, format: uuid }
+        assetNumber: { type: string }
+        name: { type: string }
+        criticality: { type: integer, minimum: 4, maximum: 5 }
+        lastReviewedAt: { type: string, format: date-time, description: the latest criticality assessment; absent when never assessed }
+        dueAt: { type: string, format: date-time }
+    AssetCost:
+      type: object
+      required: [assetId, assetNumber, name, assetType, currency, workOrders, partsCost, laborCost, total]
+      properties:
+        assetId: { type: string, format: uuid }
+        assetNumber: { type: string }
+        name: { type: string }
+        assetType: { type: string }
+        currency: { type: string }
+        workOrders: { type: integer }
+        partsCost: { type: string, description: decimal string, two places }
+        laborCost: { type: string, description: decimal string, two places }
+        total: { type: string, description: decimal string, two places }
+    BacklogRow:
+      type: object
+      required: [priority, openCount, overdueCount]
+      properties:
+        priority: { type: integer, minimum: 1, maximum: 5 }
+        openCount: { type: integer }
+        overdueCount: { type: integer }
+        oldestDueAt: { type: string, format: date-time }
+    FunctionalLocationIn:
+      type: object
+      required: [code, name, siteId]
+      properties:
+        code: { type: string, pattern: "^[A-Z0-9][A-Z0-9_.-]{0,39}$", description: one path segment }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        siteId: { type: string, format: uuid }
+        parentId: { type: [string, "null"], format: uuid, description: omitted for a root location }
+        locationType: { type: [string, "null"], pattern: "^[A-Z0-9_]{2,20}$" }
+    FunctionalLocation:
+      type: object
+      required: [id, code, name, siteId, depth, path, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        siteId: { type: string, format: uuid }
+        parentId: { type: string, format: uuid }
+        locationType: { type: string }
+        depth: { type: integer, minimum: 1, maximum: 12 }
+        path: { type: string, description: codes from the root joined by "/" }
+        createdAt: { type: string, format: date-time }
+    FunctionalLocationPage:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/FunctionalLocation" } }
+        nextCursor: { type: string, format: uuid }
+    LocationDetail:
+      allOf:
+        - $ref: "#/components/schemas/FunctionalLocation"
+        - type: object
+          properties:
+            children: { type: array, items: { $ref: "#/components/schemas/FunctionalLocation" } }
+            assets: { type: array, items: { $ref: "#/components/schemas/Asset" } }
+    PlacementIn:
+      type: object
+      required: [functionalLocationId]
+      properties:
+        functionalLocationId: { type: [string, "null"], format: uuid, description: null removes the asset from its location }
+    LocationHistory:
+      type: object
+      required: [id, assetId, action, actor, at]
+      properties:
+        id: { type: string, format: uuid }
+        assetId: { type: string, format: uuid }
+        action: { type: string, enum: [INSTALL, MOVE, REMOVE] }
+        fromLocationId: { type: string, format: uuid }
+        fromPath: { type: string }
+        toLocationId: { type: string, format: uuid }
+        toPath: { type: string }
+        actor: { type: string }
+        at: { type: string, format: date-time }
+    SequenceStep:
+      type: object
+      required: [code, jobType, multiple, hierarchy]
+      properties:
+        code: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{0,19}$" }
+        jobType: { type: string, pattern: "^[A-Z0-9_]{2,20}$" }
+        multiple: { type: integer, minimum: 1, maximum: 1000, description: due on every occurrence k with k mod multiple = 0 }
+        hierarchy: { type: integer, minimum: 1, maximum: 32767, description: the highest due hierarchy is performed }
+        includes: { type: array, items: { type: string }, description: lower-hierarchy step codes this step covers }
+    SequenceIn:
+      type: object
+      required: [code, name, baseIntervalValue, steps]
+      description: Exactly one of assetId and assetType, and exactly one of baseIntervalUnit and counterId (counter needs assetId).
+      properties:
+        code: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{1,29}$" }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        assetId: { type: string, format: uuid }
+        assetType: { type: string, pattern: "^[A-Z0-9_]{2,20}$" }
+        baseIntervalValue: { type: integer, minimum: 1, maximum: 100000 }
+        baseIntervalUnit: { type: string, enum: [DAYS, WEEKS, MONTHS, YEARS] }
+        counterId: { type: string, format: uuid }
+        steps: { type: array, minItems: 1, maxItems: 50, items: { $ref: "#/components/schemas/SequenceStep" } }
+    MaintenanceSequence:
+      type: object
+      required: [id, code, name, baseIntervalValue, steps, lastOccurrenceNumber, version, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        assetId: { type: string, format: uuid }
+        assetType: { type: string }
+        baseIntervalValue: { type: integer }
+        baseIntervalUnit: { type: string, enum: [DAYS, WEEKS, MONTHS, YEARS] }
+        counterId: { type: string, format: uuid }
+        steps: { type: array, items: { $ref: "#/components/schemas/SequenceStep" } }
+        lastOccurrenceNumber: { type: integer, minimum: 0 }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+    SequencePage:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/MaintenanceSequence" } }
+        nextCursor: { type: string, format: uuid }
+    SimulatedOccurrence:
+      type: object
+      properties:
+        occurrenceNumber: { type: integer, minimum: 1 }
+        stepCodes: { type: array, items: { type: string }, description: selected step first, then extra due steps }
+        jobTypes: { type: array, items: { type: string } }
+    OccurrenceIn:
+      type: object
+      properties:
+        currency: { type: string, pattern: "^[A-Z]{3}$", default: USD, description: the work order currency }
+        dueAt: { type: string, format: date-time }
+    SequenceOccurrence:
+      type: object
+      required: [id, sequenceId, occurrenceNumber, stepCodes, jobTypes, actor, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        sequenceId: { type: string, format: uuid }
+        occurrenceNumber: { type: integer, minimum: 1 }
+        stepCodes: { type: array, items: { type: string } }
+        jobTypes: { type: array, items: { type: string } }
+        workOrderId: { type: string, format: uuid, description: absent when no step is due on the occurrence }
+        actor: { type: string }
+        createdAt: { type: string, format: date-time }
     Problem:
       type: object
       required: [type, title, status]
@@ -490,6 +1174,7 @@ components:
         criticality: { type: integer }
         lifecycleState: { type: string, enum: [CREATED, ACTIVE, INACTIVE, DISPOSED] }
         productionResourceId: { type: string, format: uuid }
+        functionalLocationId: { type: string, format: uuid, description: the functional location the asset is installed at }
         version: { type: integer }
         createdAt: { type: string, format: date-time }
     AssetPage:
@@ -507,6 +1192,7 @@ components:
             openWorkOrders: { type: integer }
             partsCost: { type: string, description: decimal string, sum over the asset's work orders }
             laborCost: { type: string, description: decimal string, sum over the asset's work orders }
+            location: { $ref: "#/components/schemas/FunctionalLocation" }
     Workspace:
       type: object
       properties:
@@ -571,10 +1257,14 @@ components:
         messageId: { type: string }
     PlanLineIn:
       type: object
-      required: [assetId, kind, jobType]
+      description: >-
+        assetId and jobType are required except on ROUND lines (FR-44.14), which name a roundId and an interval,
+        schedule on time only, and take the asset (the first stop) and the jobs from the round.
+      required: [kind]
       properties:
         assetId: { type: string, format: uuid }
-        kind: { type: string, enum: [TIME, COUNTER, TIME_OR_COUNTER, TIME_AND_COUNTER] }
+        roundId: { type: string, format: uuid, description: ROUND lines only }
+        kind: { type: string, enum: [TIME, COUNTER, TIME_OR_COUNTER, TIME_AND_COUNTER, ROUND] }
         intervalValue: { type: integer, minimum: 1 }
         intervalUnit: { type: string, enum: [DAYS, WEEKS, MONTHS, YEARS] }
         counterId: { type: string, format: uuid }
@@ -590,7 +1280,8 @@ components:
       properties:
         id: { type: string, format: uuid }
         assetId: { type: string, format: uuid }
-        kind: { type: string, enum: [TIME, COUNTER, TIME_OR_COUNTER, TIME_AND_COUNTER] }
+        roundId: { type: string, format: uuid }
+        kind: { type: string, enum: [TIME, COUNTER, TIME_OR_COUNTER, TIME_AND_COUNTER, ROUND] }
         intervalValue: { type: integer }
         intervalUnit: { type: string }
         counterId: { type: string, format: uuid }
@@ -716,6 +1407,7 @@ components:
         - type: object
           properties:
             assetType: { type: string }
+            stops: { type: array, items: { $ref: "#/components/schemas/WorkOrderStop" }, description: ROUND orders only, in stop order }
             fault: { $ref: "#/components/schemas/WorkOrderFault" }
             downtime: { type: array, items: { $ref: "#/components/schemas/DowntimeWindow" } }
             labor:
@@ -895,3 +1587,126 @@ components:
         mtbfHours: { type: number }
         mttrHours: { type: number }
         availability: { type: number }
+    PermitStatus:
+      type: string
+      enum: [REQUESTED, APPROVED, ISSUED, SUSPENDED, CLOSED, CANCELED]
+    PermitTypeIn:
+      type: object
+      required: [code, name, approverRole, maxValidityHours]
+      properties:
+        code: { type: string, pattern: "^[A-Z0-9_]{2,20}$" }
+        name: { type: string, maxLength: 120 }
+        approverRole: { type: string, maxLength: 60 }
+        maxValidityHours: { type: integer, minimum: 1, maximum: 168, default: 12 }
+        requiresIsolation: { type: boolean, default: false }
+        requiresGasTest: { type: boolean, default: false }
+    PermitType:
+      allOf:
+        - $ref: "#/components/schemas/PermitTypeIn"
+    JobPermitsIn:
+      type: object
+      required: [permitTypeCodes]
+      properties:
+        permitTypeCodes: { type: array, maxItems: 10, items: { type: string, pattern: "^[A-Z0-9_]{2,20}$" } }
+    JobPermits:
+      type: object
+      properties:
+        jobType: { type: string }
+        permitTypeCodes: { type: array, items: { type: string } }
+    IsolationPointIn:
+      type: object
+      required: [energyType, location, method, verificationStep, tagCode]
+      properties:
+        energyType: { type: string, enum: [ELECTRICAL, PNEUMATIC, HYDRAULIC, MECHANICAL, THERMAL, CHEMICAL] }
+        location: { type: string, maxLength: 200 }
+        method: { type: string, maxLength: 200, description: isolation method }
+        verificationStep: { type: string, maxLength: 200, description: zero-energy check }
+        tagCode: { type: string, maxLength: 40, description: unique per asset }
+    IsolationPoint:
+      allOf:
+        - $ref: "#/components/schemas/IsolationPointIn"
+        - type: object
+          properties:
+            id: { type: string, format: uuid }
+            assetId: { type: string, format: uuid }
+            createdAt: { type: string, format: date-time }
+    PermitIn:
+      type: object
+      required: [workOrderId, permitTypeCode, validFrom, validTo]
+      properties:
+        workOrderId: { type: string, format: uuid }
+        permitTypeCode: { type: string, pattern: "^[A-Z0-9_]{2,20}$" }
+        validFrom: { type: string, format: date-time }
+        validTo: { type: string, format: date-time }
+    Permit:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: string, description: EAM-PMT sequence }
+        permitTypeCode: { type: string }
+        workOrderId: { type: string, format: uuid }
+        assetId: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/PermitStatus" }
+        validFrom: { type: string, format: date-time }
+        validTo: { type: string, format: date-time }
+        requestedBy: { type: string }
+        approvedBy: { type: string }
+        issuedBy: { type: string }
+        closedBy: { type: string }
+        locksOpen: { type: integer, description: personal locks still applied or verified }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+    PermitTransitionIn:
+      type: object
+      required: [to]
+      properties:
+        to: { type: string, enum: [APPROVED, ISSUED, SUSPENDED, CLOSED, CANCELED] }
+    LockIn:
+      type: object
+      required: [action, isolationPointId]
+      properties:
+        action: { type: string, enum: [APPLY, VERIFY, REMOVE] }
+        isolationPointId: { type: string, format: uuid }
+    LotoLock:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        permitId: { type: string, format: uuid }
+        isolationPointId: { type: string, format: uuid }
+        technicianId: { type: string }
+        lockNumber: { type: string, description: LOCK-n sequence, printed on the lock tag }
+        state: { type: string, enum: [APPLIED, VERIFIED, REMOVED] }
+        appliedAt: { type: string, format: date-time }
+        verifiedAt: { type: string, format: date-time }
+        removedAt: { type: string, format: date-time }
+    PermitDetail:
+      type: object
+      properties:
+        permit: { $ref: "#/components/schemas/Permit" }
+        isolationPoints: { type: array, items: { $ref: "#/components/schemas/IsolationPoint" } }
+        locks: { type: array, items: { $ref: "#/components/schemas/LotoLock" } }
+        unlockedPoints: { type: integer, description: isolation points without a verified lock }
+        history:
+          type: array
+          description: append-only transitions, oldest first (from is empty on the request)
+          items:
+            type: object
+            properties:
+              from: { type: string }
+              to: { type: string }
+              at: { type: string, format: date-time }
+              actor: { type: string }
+    PermitPage:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Permit" } }
+        nextCursor: { type: string }
+    ExpiredPermit:
+      type: object
+      properties:
+        permitId: { type: string, format: uuid }
+        number: { type: string }
+        workOrderId: { type: string, format: uuid }
+        validTo: { type: string, format: date-time }
+        workOrderInProgress: { type: boolean, description: the job is running without a valid permit }
+        code: { type: string, enum: [EAM-PMT-004] }

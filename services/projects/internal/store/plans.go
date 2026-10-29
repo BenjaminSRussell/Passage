@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -41,13 +42,13 @@ type ScheduleResult struct {
 // planKeyConstraint is the default name of UNIQUE (tenant_id, idempotency_key) on plan_version.
 const planKeyConstraint = "plan_version_tenant_id_idempotency_key_key"
 
-const planColumns = `id::text, project_id, kind, sequence, copied_from_version_id::text, superseded_by_version_id::text, locked,
-	version, created_at, updated_at`
+const planColumns = `id::text, project_id, kind, sequence, copied_from_version_id::text, superseded_by_version_id::text, transferred_at,
+	locked, version, created_at, updated_at`
 
 func scanPlan(row pgx.Row) (domain.PlanVersion, error) {
 	var pv domain.PlanVersion
 	var kind string
-	err := row.Scan(&pv.ID, &pv.ProjectID, &kind, &pv.Sequence, &pv.CopiedFromVersionID, &pv.SupersededByVersionID, &pv.Locked,
+	err := row.Scan(&pv.ID, &pv.ProjectID, &kind, &pv.Sequence, &pv.CopiedFromVersionID, &pv.SupersededByVersionID, &pv.TransferredAt, &pv.Locked,
 		&pv.Version, &pv.CreatedAt, &pv.UpdatedAt)
 	pv.Kind = domain.PlanKind(kind)
 	return pv, err
@@ -73,8 +74,9 @@ func lockProject(ctx context.Context, tx pgx.Tx, tenantID, projectID string, for
 }
 
 // CreatePlanVersion adds a plan version to a project (FR-41.2, FR-41.17). The
-// project row is locked, so sequence numbers and the one-WORKING / one-BASELINE
-// rule hold under concurrency. A copy takes the source's nodes (with their
+// project row is locked, so sequence numbers, the one-WORKING / one-BASELINE
+// rule and the simulation cap hold under concurrency. A SIMULATION stores the
+// fingerprints of its source's nodes as the transfer's common ancestor. A copy takes the source's nodes (with their
 // scheduled dates) and dependencies under fresh ids. A replayed Idempotency-Key
 // returns the stored version with created=false; a different body under the
 // same key is idempotency_key_reuse.
@@ -131,9 +133,17 @@ func (s *Postgres) CreatePlanVersion(ctx context.Context, projectID string, in N
 		if err != nil {
 			return err
 		}
-		out, err = scanPlan(tx.QueryRow(ctx, `insert into plan_version (tenant_id, id, project_id, kind, sequence, copied_from_version_id, locked, idempotency_key)
-			values ($1, $2, $3, $4, (select coalesce(max(sequence), 0) + 1 from plan_version where tenant_id = $1 and project_id = $3), $5::text::uuid, $6, $7)
-			returning `+planColumns, p.TenantID, ids.New(), projectID, string(in.Kind), nullable(in.CopyFromVersionID), locked, idempotencyKey))
+		// A SIMULATION records its common ancestor for the transfer (BR-41.14).
+		var base []byte
+		if in.Kind == domain.KindSimulation {
+			if base, err = json.Marshal(domain.Fingerprints(domain.ContentByCode(source.Nodes, source.Links))); err != nil {
+				return err
+			}
+		}
+		out, err = scanPlan(tx.QueryRow(ctx, `insert into plan_version (tenant_id, id, project_id, kind, sequence, copied_from_version_id, locked,
+				idempotency_key, base_fingerprints)
+			values ($1, $2, $3, $4, (select coalesce(max(sequence), 0) + 1 from plan_version where tenant_id = $1 and project_id = $3), $5::text::uuid, $6, $7, $8)
+			returning `+planColumns, p.TenantID, ids.New(), projectID, string(in.Kind), nullable(in.CopyFromVersionID), locked, idempotencyKey, base))
 		if err != nil {
 			return err
 		}

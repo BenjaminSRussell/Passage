@@ -1,0 +1,54 @@
+image:
+  repository: ghcr.io/benjaminsrussell/passage-compliance
+  # Stage and prod pin the digest (cosign-signed) through Argo CD; the tag is for dev.
+  tag: "0.1.0"
+  digest: ""
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+serviceName: compliance
+
+config:
+  passageEnv: dev
+  httpAddr: ":8080"
+  adminAddr: ":9090"
+  migrateOnStart: "false"
+  # Tenant policies until per-tenant settings exist (PRD §9.48.13).
+  sodBlockHigh: "true"
+  sodMaxMitigationDays: "365"
+  auditCaseArchiveDays: "365"
+  breakglassMaxMinutes: "60"
+  breakglassSelfActivate: "false"
+  breakglassReviewDays: "3"
+  screeningThreshold: "0.88"
+  # BLOCK, WARN or OFF; one value for every legal entity until per-entity settings exist.
+  tradeLicenseCheck: "BLOCK"
+
+# DATABASE_URL is read from this secret (Vault via External Secrets), never inline.
+databaseSecret:
+  name: passage-compliance-db
+  key: url
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]

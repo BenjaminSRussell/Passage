@@ -37,5 +37,40 @@ func TestAppRole_CrossTenantRLS(t *testing.T) {
 			LegalEntity: true,
 			Delete:      true,
 		},
+		{
+			Table:  "travel_requisition",
+			Insert: `insert into travel_requisition (tenant_id, id, legal_entity_id, worker_id, purpose, currency, trip_from, trip_to, estimated_total, create_key, request_hash) values ($1, $2, $3, $4, 'Workshop', 'USD', '2025-03-03', '2025-03-10', 0, $5, 'hash')`,
+			Args: func(tenantID, entityID string) []any {
+				return []any{tenantID, ids.New(), entityID, ids.New(), ids.New()}
+			},
+			LegalEntity: true,
+		},
+		{
+			Table:  "cash_advance",
+			Insert: `insert into cash_advance (tenant_id, id, legal_entity_id, worker_id, amount, currency, purpose, trip_end, due_settlement_date, create_key, request_hash) values ($1, $2, $3, $4, 100, 'USD', 'Trip', '2025-03-10', '2025-04-09', $5, 'hash')`,
+			Args: func(tenantID, entityID string) []any {
+				return []any{tenantID, ids.New(), entityID, ids.New(), ids.New()}
+			},
+			LegalEntity: true,
+		},
+		{
+			Table:  "card_import",
+			Insert: `insert into card_import (tenant_id, id, legal_entity_id, format, file_hash, create_key, request_hash) values ($1, $2, $3, 'CSV', encode(sha256(convert_to($4::text, 'UTF8')), 'hex'), $5, 'hash')`,
+			Args: func(tenantID, entityID string) []any {
+				return []any{tenantID, ids.New(), entityID, ids.New(), ids.New()}
+			},
+			LegalEntity: true,
+			NoUpdate:    true,
+		},
+		{
+			Table:  "card_transaction",
+			Before: `insert into card_import (tenant_id, id, legal_entity_id, format, file_hash, create_key, request_hash) values ($1, $2, $3, 'CSV', encode(sha256(convert_to($4::text, 'UTF8')), 'hex'), $5, 'hash')`,
+			Insert: `insert into card_transaction (tenant_id, id, import_id, legal_entity_id, worker_id, source_line, card_last4, txn_date, post_date, merchant, amount, currency) values ($1, $2, $2, $3, $4, 1, '4242', '2025-03-03', '2025-03-04', $5::text, 12.5, 'USD')`,
+			Args: func(tenantID, entityID string) []any {
+				return []any{tenantID, ids.New(), entityID, ids.New(), ids.New()}
+			},
+			LegalEntity: true,
+			NoUpdate:    true,
+		},
 	})
 }

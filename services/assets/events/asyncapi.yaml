@@ -43,6 +43,16 @@ channels:
     messages:
       capexApproved:
         $ref: "#/components/messages/CapexApproved"
+  assetTransferred:
+    address: passage.assets.asset
+    messages:
+      assetTransferred:
+        $ref: "#/components/messages/AssetTransferred"
+  assetSplit:
+    address: passage.assets.asset
+    messages:
+      assetSplit:
+        $ref: "#/components/messages/AssetSplit"
 operations:
   publishAssetAcquired:
     action: send
@@ -65,6 +75,12 @@ operations:
   publishCapexApproved:
     action: send
     channel: { $ref: "#/channels/capexApproved" }
+  publishAssetTransferred:
+    action: send
+    channel: { $ref: "#/channels/assetTransferred" }
+  publishAssetSplit:
+    action: send
+    channel: { $ref: "#/channels/assetSplit" }
 components:
   messages:
     AssetAdjusted:
@@ -102,7 +118,56 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/CapexApprovedData"
+    AssetTransferred:
+      name: dev.passage.assets.asset.transferred.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/AssetTransferredData"
+    AssetSplit:
+      name: dev.passage.assets.asset.split.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/AssetTransferredData"
   schemas:
+    AssetTransferredData:
+      type: object
+      description: |
+        Published in the same transaction as a transfer (one target) or split
+        (two or more targets) of an asset (FR-37.7, POST /v1/assets/{id}/transfer).
+        Not in the PRD event table; added so the ledger (intercompany
+        settlement, wave 40) and analytics see every move of cost and
+        accumulated depreciation between assets. books lists each source
+        book's balances at the transfer (all of it moves; the source ends
+        Transferred); targets lists the new assets with the share each took.
+        Aggregate key is the source asset id.
+      required: [transferId, sourceAssetId, legalEntityId, kind, transferDate, books, targets]
+      properties:
+        transferId: { type: string, format: uuid }
+        sourceAssetId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid, description: "The source asset's legal entity" }
+        kind: { type: string, enum: [transfer, split] }
+        transferDate: { type: string, format: date }
+        books:
+          type: array
+          items:
+            type: object
+            required: [bookCode, currency, cost, accumulatedDepreciation, nbv]
+            properties:
+              bookCode: { type: string }
+              currency: { type: string, pattern: "^[A-Z]{3}$" }
+              cost: { type: string, description: "Decimal string" }
+              accumulatedDepreciation: { type: string, description: "Decimal string" }
+              nbv: { type: string, description: "Decimal string" }
+        targets:
+          type: array
+          items:
+            type: object
+            required: [assetId, assetNumber, legalEntityId, percentage]
+            properties:
+              assetId: { type: string, format: uuid }
+              assetNumber: { type: string }
+              legalEntityId: { type: string, format: uuid, description: "Differs from the source for a transfer to another legal entity" }
+              percentage: { type: string, description: "Two decimals; the targets total 100.00" }
     CapexApprovedData:
       type: object
       description: |

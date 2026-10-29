@@ -1047,6 +1047,156 @@ paths:
           $ref: "#/components/responses/Problem"
         "428":
           $ref: "#/components/responses/Problem"
+  /v1/assets/{id}/transfer:
+    post:
+      summary: Transfer the asset to one new asset or split it into several (FR-37.7)
+      description: |
+        Every Open book moves. kind transfer has one target taking 100% (it may
+        name another legal entity of the tenant); kind split has 2 to 50
+        targets in the source legal entity whose percentages (two decimals)
+        total 100.00% (AST-0507). Cost, accumulated depreciation, the
+        impairment share, salvage and the schedule basis are allocated by
+        percentage with the residual cents on the last target (BR-37.7); each
+        target book keeps the source profile, in-service date and last
+        depreciated period. Each source book is emptied by a Transfer or Split
+        transaction and ends Transferred, and the source asset becomes
+        Transferred (BR-37.2). A transfer dated before the end of a book's last
+        depreciated period is AST-0508. Requires If-Match with the asset ETag;
+        the response ETag is the source asset's new version. Publishes
+        dev.passage.assets.asset.transferred.v1 or .split.v1.
+      operationId: transferAsset
+      x-passage-duty: AssetMaintain
+      parameters:
+        - $ref: "#/components/parameters/AssetId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransferRequest"
+      responses:
+        "201":
+          description: Transfer or split recorded
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Transfer"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
+  /v1/assets/{id}/transfers:
+    get:
+      summary: Transfers and splits the asset took part in, as source or target, oldest first
+      operationId: listAssetTransfers
+      x-passage-duty: AssetView
+      parameters:
+        - $ref: "#/components/parameters/AssetId"
+      responses:
+        "200":
+          description: The transfers with their targets (targets carry no books here)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Transfer" }
+        "404":
+          $ref: "#/components/responses/Problem"
+  /v1/assets/group-assets:
+    get:
+      summary: Group assets ordered by code (without members)
+      operationId: listGroupAssets
+      x-passage-duty: AssetView or AssetConfigure
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+        - $ref: "#/components/parameters/After"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: One page of group assets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GroupAssetPage"
+        "400":
+          $ref: "#/components/responses/Problem"
+    post:
+      summary: Create a group asset and assign its members (FR-37.16)
+      description: |
+        Pools the books with bookCode of the member assets into a group asset
+        for pooled tax depreciation (US general asset account, DE
+        Sammelposten, UK pools). Every member must be an Open book of the
+        group's legal entity and class, placed in service in the tax year, in
+        one currency (AST-0031); a book belongs to at most one group asset
+        (BR-37.11, AST-0535, 409). The group depreciates its basis (the sum of
+        the members' cost, read live) with its own profile from 1 January of
+        the tax year; a depreciation run gives member books an AST-0035
+        exception and no own charge.
+      operationId: createGroupAsset
+      x-passage-duty: AssetConfigure
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GroupAssetRequest"
+      responses:
+        "201":
+          description: Group asset created
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GroupAsset"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /v1/assets/group-assets/{id}:
+    get:
+      summary: Read a group asset with its members and yearly schedule
+      operationId: getGroupAsset
+      x-passage-duty: AssetView or AssetConfigure
+      parameters:
+        - $ref: "#/components/parameters/GroupAssetId"
+      responses:
+        "200":
+          description: The group asset
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GroupAsset"
+        "404":
+          $ref: "#/components/responses/Problem"
   /v1/leases:
     get:
       summary: Leases ordered by lease number (without schedules)
@@ -1202,6 +1352,11 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    GroupAssetId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     After:
       name: after
       in: query
@@ -1320,8 +1475,10 @@ components:
         cost: { type: string }
         accumulatedDepreciation: { type: string }
         nbv: { type: string }
-        status: { type: string, enum: [Open, Sold, Scrapped] }
+        status: { type: string, enum: [Open, Sold, Scrapped, Transferred] }
         lastDepreciatedPeriod: { type: [string, "null"], description: "Last period a posted run charged (YYYY-MM or YYYY)" }
+        groupAssetId: { type: string, format: uuid, description: "Set on the asset read when a group asset depreciates this book (FR-37.16)" }
+        groupCode: { type: string, description: "The code of that group asset" }
     Schedule:
       type: object
       required: [bookId, bookCode, currency, total, lines]
@@ -1356,14 +1513,14 @@ components:
         assetBookId: { type: string, format: uuid }
         bookCode: { type: string }
         currency: { type: string }
-        type: { type: string, enum: [Acquisition, AcquisitionAdj, Depreciation, DepreciationAdj, Revaluation, Impairment, DisposalSale, DisposalScrap] }
+        type: { type: string, enum: [Acquisition, AcquisitionAdj, Depreciation, DepreciationAdj, Revaluation, Impairment, DisposalSale, DisposalScrap, Transfer, Split] }
         transactionDate: { type: string, format: date }
         costAmount: { type: string, description: "Signed; disposals are negative" }
         accumulatedAmount: { type: string, description: "Signed; disposals are negative" }
         proceedsAmount: { type: [string, "null"] }
         gainLoss: { type: [string, "null"] }
         impairmentAmount: { type: string, description: "Impairment share of accumulatedAmount (negative for a reversal)" }
-        sourceType: { type: string, enum: [manual, addition, depreciation_run] }
+        sourceType: { type: string, enum: [manual, addition, depreciation_run, transfer, split] }
         sourceId: { type: [string, "null"], format: uuid }
         runId: { type: [string, "null"], format: uuid }
         createdAt: { type: string, format: date-time }
@@ -1842,4 +1999,136 @@ components:
         items:
           type: array
           items: { $ref: "#/components/schemas/CapexRequest" }
+        nextCursor: { type: string, format: uuid }
+    TransferRequest:
+      type: object
+      additionalProperties: false
+      required: [kind, parts]
+      properties:
+        kind: { type: string, enum: [transfer, split] }
+        transferDate: { type: string, format: date, description: "Defaults to today" }
+        parts:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: object
+            additionalProperties: false
+            required: [assetNumber, name, percentage]
+            properties:
+              assetNumber: { type: string, minLength: 1, maxLength: 40, description: "Unique in the target legal entity" }
+              name: { type: string, minLength: 1, maxLength: 120 }
+              percentage: { type: string, description: "Share of every book, above 0 with at most two decimals" }
+              legalEntityId: { type: string, format: uuid, description: "Transfer only; defaults to the source legal entity" }
+              classCode: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{0,19}$", description: "Defaults to the source class" }
+              barcode: { type: string, minLength: 1, maxLength: 64 }
+              quantity: { type: string, description: "Defaults to the source quantity (times the share for a split)" }
+    TransferTarget:
+      type: object
+      required: [lineNo, percentage, asset, books]
+      properties:
+        lineNo: { type: integer }
+        percentage: { type: string }
+        asset: { $ref: "#/components/schemas/Asset" }
+        books:
+          type: array
+          items: { $ref: "#/components/schemas/Book" }
+    Transfer:
+      type: object
+      required: [id, kind, transferDate, legalEntityId, sourceAssetId, sourceAssetNumber, createdBy, createdAt, targets]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [transfer, split] }
+        transferDate: { type: string, format: date }
+        legalEntityId: { type: string, format: uuid, description: "The source asset's legal entity" }
+        sourceAssetId: { type: string, format: uuid }
+        sourceAssetNumber: { type: string }
+        createdBy: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+        source: { $ref: "#/components/schemas/Asset", description: "On the command response: the source asset after the transfer" }
+        targets:
+          type: array
+          items: { $ref: "#/components/schemas/TransferTarget" }
+        transactions:
+          type: array
+          description: On the command response, the Transfer / Split transactions on the source and target books
+          items: { $ref: "#/components/schemas/Transaction" }
+    GroupAssetRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, groupCode, name, classCode, bookCode, taxYear, method, serviceLifePeriods, convention, memberAssetIds]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        groupCode: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{0,19}$", description: "Unique in the legal entity" }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        classCode: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{0,19}$" }
+        bookCode: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{0,19}$", description: "The tax book the group depreciates" }
+        taxYear: { type: integer, minimum: 1900, maximum: 2200 }
+        method: { type: string, enum: [StraightLine, DecliningBalance] }
+        factor: { type: string, description: "Declining-balance factor, 1 to 3" }
+        switchToStraightLine: { type: boolean }
+        serviceLifePeriods: { type: integer, minimum: 1, maximum: 1200, description: "Months for StraightLine, years for DecliningBalance" }
+        convention: { type: string, enum: [None, FullMonth, MidMonth15, HalfYear, MidQuarter] }
+        memberAssetIds:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          uniqueItems: true
+          items: { type: string, format: uuid }
+    GroupAsset:
+      type: object
+      required: [id, legalEntityId, groupCode, name, classCode, bookCode, taxYear, currency, method, factor, switchToStraightLine,
+        serviceLifePeriods, convention, inServiceDate, status, basis, memberCount, version, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        groupCode: { type: string }
+        name: { type: string }
+        classCode: { type: string }
+        bookCode: { type: string }
+        taxYear: { type: integer }
+        currency: { type: string }
+        method: { type: string, enum: [StraightLine, DecliningBalance] }
+        factor: { type: string }
+        switchToStraightLine: { type: boolean }
+        serviceLifePeriods: { type: integer }
+        convention: { type: string }
+        inServiceDate: { type: string, format: date, description: "1 January of the tax year" }
+        status: { type: string, enum: [Open] }
+        basis: { type: string, description: "Sum of the members' cost on the group's book" }
+        memberCount: { type: integer }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        members:
+          type: array
+          description: On the read and the create
+          items:
+            type: object
+            required: [assetId, assetNumber, name, assetBookId, bookStatus, inServiceDate, cost]
+            properties:
+              assetId: { type: string, format: uuid }
+              assetNumber: { type: string }
+              name: { type: string }
+              assetBookId: { type: string, format: uuid }
+              bookStatus: { type: string, enum: [Open, Sold, Scrapped, Transferred] }
+              inServiceDate: { type: string, format: date }
+              cost: { type: string }
+        schedule:
+          type: array
+          description: The projected group depreciation by year on the current basis (AC-37.10)
+          items:
+            type: object
+            required: [year, amount, accumulated, nbv]
+            properties:
+              year: { type: string }
+              amount: { type: string }
+              accumulated: { type: string }
+              nbv: { type: string }
+    GroupAssetPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/GroupAsset" }
         nextCursor: { type: string, format: uuid }

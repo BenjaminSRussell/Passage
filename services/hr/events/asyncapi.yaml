@@ -8,6 +8,16 @@ info:
     vault never leaves the service (8.42.5, FR-42.1).
 defaultContentType: application/cloudevents+json
 channels:
+  workerSkillChanged:
+    address: passage.hr.workerskill
+    messages:
+      workerSkillChanged:
+        $ref: "#/components/messages/WorkerSkillChanged"
+  certificationIssued:
+    address: passage.hr.certification
+    messages:
+      certificationIssued:
+        $ref: "#/components/messages/CertificationIssued"
   workerCreated:
     address: passage.hr.worker
     messages:
@@ -33,7 +43,24 @@ channels:
     messages:
       benefitEnrollmentChanged:
         $ref: "#/components/messages/BenefitEnrollmentChanged"
+  courseCompleted:
+    address: passage.hr.course
+    messages:
+      courseCompleted:
+        $ref: "#/components/messages/CourseCompleted"
 operations:
+  publishWorkerSkillChanged:
+    action: send
+    channel:
+      $ref: "#/channels/workerSkillChanged"
+    messages:
+      - $ref: "#/channels/workerSkillChanged/messages/workerSkillChanged"
+  publishCertificationIssued:
+    action: send
+    channel:
+      $ref: "#/channels/certificationIssued"
+    messages:
+      - $ref: "#/channels/certificationIssued/messages/certificationIssued"
   publishBenefitEnrollmentChanged:
     action: send
     channel:
@@ -64,6 +91,12 @@ operations:
       $ref: "#/channels/positionAssignmentChanged"
     messages:
       - $ref: "#/channels/positionAssignmentChanged/messages/positionAssignmentChanged"
+  publishCourseCompleted:
+    action: send
+    channel:
+      $ref: "#/channels/courseCompleted"
+    messages:
+      - $ref: "#/channels/courseCompleted/messages/courseCompleted"
 components:
   messages:
     WorkerCreated:
@@ -101,7 +134,110 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/BenefitEnrollmentChangedData"
+    WorkerSkillChanged:
+      name: dev.passage.hr.workerskill.changed.v1
+      description: Published in the same transaction as a worker's rating on a skill changes (FR-42.10). Wave-45 dispatch consumes it. Carries codes and ratings only.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/WorkerSkillChangedData"
+    CertificationIssued:
+      name: dev.passage.hr.certification.issued.v1
+      description: Published in the same transaction as a certificate is recorded (BR-42.8). Validity is [issued_on, expires_on); expiry reminders (FR-42.20) and wave-45 dispatch read expires_on.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/CertificationIssuedData"
+    CourseCompleted:
+      name: dev.passage.hr.course.completed.v1
+      description: Published in the same transaction as a registration is recorded ATTENDED with PASS and its skills and certificate are written (8.42.5, FR-42.14, BR-42.9). Wave-45 dispatch consumes the skills; notifications consume the certificate id. Codes, ratings and ids only; no worker names.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/CourseCompletedData"
   schemas:
+    CourseCompletedData:
+      type: object
+      description: |
+        skills lists every skill outcome of the course with the rating the
+        worker holds after the completion, max(existing, course rating); a
+        raised rating also publishes workerskill.changed and a new
+        certificate certification.issued, in the same transaction.
+        completed_on is the session end date. certification_id is null when
+        the course issues no certificate.
+      required: [registration_id, worker_id, course_id, session_id, completed_on, skills, certification_id]
+      properties:
+        registration_id:
+          type: string
+          format: uuid
+        worker_id:
+          type: string
+          format: uuid
+        course_id:
+          type: string
+          format: uuid
+        session_id:
+          type: string
+          format: uuid
+        completed_on:
+          type: string
+          format: date
+        skills:
+          type: array
+          items:
+            type: object
+            required: [skill_id, skill_code, rating]
+            properties:
+              skill_id:
+                type: string
+                format: uuid
+              skill_code:
+                type: string
+              rating:
+                type: integer
+                minimum: 1
+                maximum: 10
+        certification_id:
+          type: [string, "null"]
+          format: uuid
+    WorkerSkillChangedData:
+      type: object
+      description: A rating recorded again with the same value publishes nothing.
+      required: [worker_id, skill_id, skill_code, rating, previous_rating, assessed_on]
+      properties:
+        worker_id:
+          type: string
+          format: uuid
+        skill_id:
+          type: string
+          format: uuid
+        skill_code:
+          type: string
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 10
+        previous_rating:
+          type: [integer, "null"]
+          description: Null when the worker was not rated on the skill before.
+        assessed_on:
+          type: string
+          format: date
+    CertificationIssuedData:
+      type: object
+      required: [id, worker_id, code, issued_on, expires_on]
+      properties:
+        id:
+          type: string
+          format: uuid
+        worker_id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        issued_on:
+          type: string
+          format: date
+        expires_on:
+          type: [string, "null"]
+          format: date
     BenefitEnrollmentChangedData:
       type: object
       description: |

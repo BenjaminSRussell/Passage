@@ -206,3 +206,94 @@ func (a *API) scheduleWBS(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.JSON(w, http.StatusOK, scheduleView{wbsView: toWBSView(out.WBS), FinishDate: out.FinishDate, CriticalPath: critical})
 }
+
+// transferRequest is the wire shape of POST /v1/projects/{id}/plans/{ver}/transfer.
+// Resolutions maps a conflicting WBS code to KEEP_WORKING or TAKE_SIMULATION;
+// workingVersion, when given, is the WORKING plan version the diff was read at.
+type transferRequest struct {
+	Resolutions    map[string]string `json:"resolutions"`
+	WorkingVersion int               `json:"workingVersion,omitempty"`
+}
+
+// transferView is a simulation transfer: the preview before it, the outcome after it.
+type transferView struct {
+	Simulation domain.PlanVersion  `json:"simulation"`
+	Working    domain.PlanVersion  `json:"working"`
+	Applied    []domain.NodeChange `json:"applied"`
+	Conflicts  []domain.NodeChange `json:"conflicts"`
+}
+
+func toTransferView(t store.Transfer) transferView {
+	v := transferView{Simulation: t.Simulation, Working: t.Working, Applied: t.Plan.Applied, Conflicts: t.Plan.Conflicts}
+	if v.Applied == nil {
+		v.Applied = []domain.NodeChange{}
+	}
+	if v.Conflicts == nil {
+		v.Conflicts = []domain.NodeChange{}
+	}
+	return v
+}
+
+// previewTransfer returns the three-way diff of a SIMULATION against WORKING
+// (BR-41.14): the nodes a transfer would apply and the conflicts to resolve. The
+// ETag is the simulation's version, to send back as If-Match on the transfer.
+func (a *API) previewTransfer(w http.ResponseWriter, r *http.Request) {
+	if _, ok := principal(w, r); !ok {
+		return
+	}
+	ver, ok := planID(w, r)
+	if !ok {
+		return
+	}
+	out, err := a.store.PreviewTransfer(r.Context(), chi.URLParam(r, "id"), ver)
+	if err != nil {
+		httpx.Fail(w, r, problemFrom(err))
+		return
+	}
+	setETag(w, out.Simulation.Version)
+	httpx.JSON(w, http.StatusOK, toTransferView(out))
+}
+
+// transferPlan transfers a SIMULATION into WORKING (FR-41.17, BR-41.14).
+// If-Match carries the simulation's version (428 when absent, 412 when stale).
+// Unresolved conflicts, or a merge that is not a valid WBS, are 422
+// PROJ-SIM-001 and nothing changes; a transferred simulation is locked
+// (PROJ-PLAN-002 on a second transfer). The ETag is the WORKING plan's new version.
+func (a *API) transferPlan(w http.ResponseWriter, r *http.Request) {
+	if _, ok := principal(w, r); !ok {
+		return
+	}
+	ver, ok := planID(w, r)
+	if !ok {
+		return
+	}
+	expected, ok := ifMatchVersion(w, r)
+	if !ok {
+		return
+	}
+	var req transferRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	fields := map[string]string{}
+	for code, choice := range req.Resolutions {
+		if choice != domain.ResolveKeepWorking && choice != domain.ResolveTakeSimulation {
+			fields["resolutions."+code] = "must be KEEP_WORKING or TAKE_SIMULATION"
+		}
+	}
+	if req.WorkingVersion < 0 {
+		fields["workingVersion"] = "must be a plan version number"
+	}
+	if len(fields) > 0 {
+		httpx.Fail(w, r, validation(fields))
+		return
+	}
+	out, err := a.store.TransferSimulation(r.Context(), chi.URLParam(r, "id"), ver, expected, req.WorkingVersion, req.Resolutions)
+	if err != nil {
+		httpx.Fail(w, r, problemFrom(err))
+		return
+	}
+	setETag(w, out.Working.Version)
+	httpx.JSON(w, http.StatusOK, toTransferView(out))
+}

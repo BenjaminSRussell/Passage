@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -32,8 +33,15 @@ type WorkOrder struct {
 	Status             string            `json:"status"`
 	Lines              []domain.WorkLine `json:"lines"`
 	Posting            *domain.Posting   `json:"posting,omitempty"`
-	Version            int               `json:"version"`
-	postKey            string
+	// FollowUpOf links a follow-up order to the finished order it follows up (BR-45.5).
+	FollowUpOf *string `json:"followUpOf,omitempty"`
+	// CompletedAt is when the order reached COMPLETED.
+	CompletedAt *time.Time `json:"completedAt,omitempty"`
+	// FirstTimeFix is set at completion and cleared when a follow-up is opened
+	// (PRD 8.45.4, BR-45.5); it is absent before completion.
+	FirstTimeFix *bool `json:"firstTimeFix,omitempty"`
+	Version      int   `json:"version"`
+	postKey      string
 }
 
 // CreateWorkOrder stores a work order in UNSCHEDULED status.
@@ -131,6 +139,8 @@ func (s *Postgres) GetWorkOrder(ctx context.Context, id string) (WorkOrder, erro
 
 // TransitionWorkOrder moves a work order along the status machine (BR-45.5).
 // Requesting the status it already has is a no-op that does not bump the version.
+// COMPLETED stamps completed_at and sets first_time_fix; DISPATCHED stops the
+// response clock of the order's case if nobody has responded yet (BR-45.2).
 func (s *Postgres) TransitionWorkOrder(ctx context.Context, id string, version int, to domain.WOStatus) (WorkOrder, error) {
 	tid := tenantOf(ctx)
 	var wo WorkOrder
@@ -149,9 +159,17 @@ func (s *Postgres) TransitionWorkOrder(ctx context.Context, id string, version i
 		if !domain.CanTransition(domain.WOStatus(current.Status), to) {
 			return unprocessable(CodeWOInvalid, fmt.Sprintf("a work order cannot move from %s to %s", current.Status, to))
 		}
-		if _, err := tx.Exec(ctx, `update service_work_order set status = $3, version = version + 1, updated_at = now() where tenant_id = $1 and id = $2`,
-			tid, id, string(to)); err != nil {
+		now := time.Now().UTC()
+		if _, err := tx.Exec(ctx, `update service_work_order set status = $3, version = version + 1, updated_at = $4,
+			completed_at = case when $3 = 'COMPLETED' then $4 else completed_at end,
+			first_time_fix = case when $3 = 'COMPLETED' then coalesce(first_time_fix, true) else first_time_fix end
+			where tenant_id = $1 and id = $2`, tid, id, string(to), now); err != nil {
 			return err
+		}
+		if to == domain.WODispatched && current.CaseID != nil {
+			if err := recordResponse(ctx, tx, tid, *current.CaseID, now); err != nil {
+				return err
+			}
 		}
 		wo, err = getWorkOrder(ctx, tx, tid, id)
 		return err
@@ -159,7 +177,9 @@ func (s *Postgres) TransitionWorkOrder(ctx context.Context, id string, version i
 	return wo, err
 }
 
-// PostWorkOrder bills a completed work order (FR-45.10, BR-45.4). A replay with
+// PostWorkOrder bills a completed work order (FR-45.10, BR-45.4): each line is
+// WARRANTY when the case's service object warranty covers it on the completion
+// day, else AGREEMENT when the agreement covers it, else BILLABLE. A replay with
 // the same Idempotency-Key returns the stored posting.
 func (s *Postgres) PostWorkOrder(ctx context.Context, id string, version int, key string) (WorkOrder, bool, error) {
 	tid := tenantOf(ctx)
@@ -181,8 +201,12 @@ func (s *Postgres) PostWorkOrder(ctx context.Context, id string, version int, ke
 		if err != nil {
 			return err
 		}
+		warranty, err := warrantyCover(ctx, tx, tid, current)
+		if err != nil {
+			return err
+		}
 		posting, err := domain.Post(domain.PostInput{Status: domain.WOStatus(current.Status), Currency: current.Currency,
-			Lines: current.Lines, Agreement: cover})
+			Lines: current.Lines, Warranty: warranty, Agreement: cover})
 		if err != nil {
 			var de *domain.Error
 			if errors.As(err, &de) {
@@ -265,13 +289,15 @@ func versionConflict(current int) error {
 }
 
 const workOrderColumns = `id::text, number, case_id::text, agreement_id::text, customer_party_id::text, legal_entity_id::text,
-	territory_id::text, incident_type_id::text, est_duration_minutes, currency, status, lines, posting, version, coalesce(post_key, '')`
+	territory_id::text, incident_type_id::text, est_duration_minutes, currency, status, lines, posting, version, coalesce(post_key, ''),
+	follow_up_of::text, completed_at, first_time_fix`
 
 func scanWorkOrder(row pgx.Row) (WorkOrder, error) {
 	var wo WorkOrder
 	var lines, posting []byte
 	if err := row.Scan(&wo.ID, &wo.Number, &wo.CaseID, &wo.AgreementID, &wo.CustomerPartyID, &wo.LegalEntityID, &wo.TerritoryID,
-		&wo.IncidentTypeID, &wo.EstDurationMinutes, &wo.Currency, &wo.Status, &lines, &posting, &wo.Version, &wo.postKey); err != nil {
+		&wo.IncidentTypeID, &wo.EstDurationMinutes, &wo.Currency, &wo.Status, &lines, &posting, &wo.Version, &wo.postKey,
+		&wo.FollowUpOf, &wo.CompletedAt, &wo.FirstTimeFix); err != nil {
 		return wo, err
 	}
 	if err := json.Unmarshal(lines, &wo.Lines); err != nil {

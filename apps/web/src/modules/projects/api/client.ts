@@ -193,6 +193,11 @@ export interface Items<T> {
   items: T[];
 }
 
+/** One page of a keyset-paged list; nextCursor is present when more rows follow. */
+export interface Page<T> extends Items<T> {
+  nextCursor?: string;
+}
+
 /** Sends the version as If-Match when replacing; without it the row is created (201). */
 function versionHeader(version?: number): Record<string, string> {
   return version ? { "If-Match": `"${version}"` } : {};
@@ -232,6 +237,8 @@ export interface PlanVersion {
   copiedFromVersionId?: string;
   /** Set on a BASELINE an applied change order replaced (BR-41.13). */
   supersededByVersionId?: string;
+  /** Set on a SIMULATION transferred into the working plan (BR-41.14); it is locked from then on. */
+  transferredAt?: string;
   locked: boolean;
   version: number;
   createdAt: string;
@@ -323,6 +330,131 @@ export function replaceWbs(projectId: string, planId: string, body: { nodes: Wbs
 
 export function schedulePlan(projectId: string, planId: string): Promise<ScheduleView> {
   return call<ScheduleView>(`${plansPath(projectId)}/${encodeURIComponent(planId)}/schedule`, { method: "POST" });
+}
+
+// ---- Simulation transfer (FR-41.17, BR-41.14) ----
+
+export const RESOLUTIONS = ["KEEP_WORKING", "TAKE_SIMULATION"] as const;
+export type Resolution = (typeof RESOLUTIONS)[number];
+
+/** What the simulation's side does to a node of the working plan. */
+export type NodeChangeKind = "ADDED" | "CHANGED" | "REMOVED";
+
+export interface NodeChange {
+  wbsCode: string;
+  change: NodeChangeKind;
+  working?: WbsNodeInput;
+  simulation?: WbsNodeInput;
+  resolution?: Resolution;
+}
+
+export interface TransferView {
+  simulation: PlanVersion;
+  working: PlanVersion;
+  /** Nodes changed only in the simulation (and conflicts resolved TAKE_SIMULATION). */
+  applied: NodeChange[];
+  /** Nodes changed differently in both since the copy (PROJ-SIM-001 until resolved). */
+  conflicts: NodeChange[];
+}
+
+/** The three-way diff of a simulation against the working plan; changes nothing. */
+export function previewTransfer(projectId: string, planId: string, signal?: AbortSignal): Promise<TransferView> {
+  return call<TransferView>(`${plansPath(projectId)}/${encodeURIComponent(planId)}/transfer`, {}, signal);
+}
+
+/**
+ * Transfers the simulation into the working plan with one resolution per conflict. The simulation version the
+ * user saw goes as If-Match and the working version the diff was read at in the body (412 conflict_version when either moved).
+ */
+export function transferSimulation(
+  projectId: string,
+  planId: string,
+  body: { resolutions: Record<string, Resolution>; workingVersion: number },
+  version: number,
+): Promise<TransferView> {
+  return call<TransferView>(`${plansPath(projectId)}/${encodeURIComponent(planId)}/transfer`, {
+    method: "POST",
+    headers: { "If-Match": `"${version}"` },
+    body: JSON.stringify(body),
+  });
+}
+
+// ---- Forecast models (FR-41.20) ----
+
+export interface ForecastLine {
+  lineNo?: number;
+  /** Calendar month YYYY-MM. */
+  period: string;
+  wbsCode?: string;
+  txnType: TxnType;
+  quantity: string;
+  costAmount: string;
+  salesAmount: string;
+}
+
+export interface ForecastModel {
+  id: string;
+  projectId: string;
+  name: string;
+  currency: string;
+  version: number;
+  lineCount: number;
+  totalCost: string;
+  totalSales: string;
+  /** Present on create, replace and read of one model; absent in the list. */
+  lines?: ForecastLine[];
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Forecast vs actual for one period and transaction type; variances are actual minus forecast. */
+export interface ForecastRow {
+  period: string;
+  txnType: TxnType;
+  forecastQuantity: string;
+  forecastCost: string;
+  forecastSales: string;
+  actualQuantity: string;
+  actualCost: string;
+  actualSales: string;
+  quantityVariance: string;
+  costVariance: string;
+  salesVariance: string;
+}
+
+export interface ForecastView {
+  model: ForecastModel & { lines: ForecastLine[] };
+  comparison: ForecastRow[];
+}
+
+export interface ForecastInput {
+  name: string;
+  lines: ForecastLine[];
+}
+
+const forecastsPath = (projectId: string) => `/${encodeURIComponent(projectId)}/forecasts`;
+
+export function listForecasts(projectId: string, signal?: AbortSignal): Promise<Items<ForecastModel>> {
+  return call<Items<ForecastModel>>(forecastsPath(projectId), {}, signal);
+}
+
+/** Creates a forecast model; reuse the key when retrying the same request. */
+export function createForecast(projectId: string, input: ForecastInput, idempotencyKey: string): Promise<ForecastModel> {
+  return call<ForecastModel>(forecastsPath(projectId), { method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify(input) });
+}
+
+export function getForecast(projectId: string, modelId: string, signal?: AbortSignal): Promise<ForecastView> {
+  return call<ForecastView>(`${forecastsPath(projectId)}/${encodeURIComponent(modelId)}`, {}, signal);
+}
+
+/** Renames the model and replaces all its lines; the version the user saw goes as If-Match. */
+export function replaceForecast(projectId: string, modelId: string, input: ForecastInput, version: number): Promise<ForecastModel> {
+  return call<ForecastModel>(`${forecastsPath(projectId)}/${encodeURIComponent(modelId)}`, {
+    method: "PUT",
+    headers: { "If-Match": `"${version}"` },
+    body: JSON.stringify(input),
+  });
 }
 
 // ---- Change orders and claims (FR-41.18, BR-41.13) ----
@@ -502,5 +634,190 @@ export function updateRisk(projectId: string, riskId: string, input: RiskInput &
     method: "PUT",
     headers: { "If-Match": `"${version}"` },
     body: JSON.stringify(input),
+  });
+}
+
+// ---- Categories, transactions and invoice proposals (FR-41.4, FR-41.6) ----
+
+export const TXN_TYPES = ["HOUR", "COST", "ITEM", "FEE", "ON_ACCOUNT"] as const;
+export type TxnType = (typeof TXN_TYPES)[number];
+
+export interface Category {
+  id: string;
+  name: string;
+  txnType: TxnType;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Transaction {
+  id: string;
+  projectId: string;
+  wbsNodeId?: string;
+  wbsCode?: string;
+  txnType: TxnType;
+  categoryId: string;
+  lineProperty: LineProperty;
+  txnDate: string;
+  /** Decimal strings: quantity to 3 places, prices to 6, amounts in the minor unit (BR-41.5). */
+  quantity: string;
+  costPrice: string;
+  salesPrice: string;
+  currency: string;
+  costAmount: string;
+  salesAmount: string;
+  workerId?: string;
+  itemId?: string;
+  vendorPartyId?: string;
+  sourceDocType: string;
+  sourceDocId?: string;
+  description: string;
+  journalId?: string;
+  proposalId?: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+/** Body of POST /v1/projects/transactions; the service computes the amounts. */
+export interface NewTransaction {
+  projectId: string;
+  txnType: TxnType;
+  categoryId: string;
+  lineProperty: LineProperty;
+  txnDate: string;
+  quantity: string;
+  costPrice: string;
+  salesPrice: string;
+  currency: string;
+  wbsNodeId?: string;
+  workerId?: string;
+  itemId?: string;
+  description?: string;
+}
+
+export const BILLING_REASONS = [
+  "NOT_CHARGEABLE",
+  "ALREADY_PROPOSED",
+  "OUT_OF_RANGE",
+  "PROJECT_STAGE",
+  "TXN_TYPE",
+  "PROJECT_NOT_IN_SCOPE",
+  "MILESTONE_NOT_DUE",
+  "PROJECT_TYPE",
+] as const;
+export type BillingReason = (typeof BILLING_REASONS)[number];
+
+export interface BillingStatus {
+  transactionId: string;
+  billable: boolean;
+  reason?: BillingReason;
+}
+
+export const PROPOSAL_STATUSES = ["DRAFT", "APPROVED", "POSTED", "CANCELED"] as const;
+export type ProposalStatus = (typeof PROPOSAL_STATUSES)[number];
+
+export interface ProposalLine {
+  lineNo: number;
+  transactionId: string;
+  txnType: TxnType;
+  txnDate: string;
+  categoryId: string;
+  description: string;
+  quantity: string;
+  unitPrice: string;
+  costAmount: string;
+  amount: string;
+}
+
+export interface InvoiceProposal {
+  id: string;
+  projectId: string;
+  customerPartyId?: string;
+  status: ProposalStatus;
+  currency: string;
+  fromDate: string;
+  toDate: string;
+  txnTypes: TxnType[];
+  totalCost: string;
+  totalSales: string;
+  lineCount: number;
+  /** Empty in list responses. */
+  lines: ProposalLine[];
+  createdBy: string;
+  approvedBy?: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewProposal {
+  projectId: string;
+  from: string;
+  to: string;
+  /** Empty means every type the project bills. */
+  txnTypes?: TxnType[];
+}
+
+export type ProposalAction = "approve" | "cancel";
+
+// Moves the service accepts (mirrors domain.CheckProposalMove). POSTED is the wave-29 hand-off.
+export const proposalActions: Record<ProposalStatus, ProposalAction[]> = {
+  DRAFT: ["approve", "cancel"],
+  APPROVED: ["cancel"],
+  POSTED: [],
+  CANCELED: [],
+};
+
+export function listCategories(signal?: AbortSignal): Promise<Items<Category>> {
+  return call<Items<Category>>("/categories", {}, signal);
+}
+
+/** Creates a category (no version) or renames it (with its version as If-Match). */
+export function putCategory(id: string, input: { name: string; txnType: TxnType }, version?: number): Promise<Category> {
+  return call<Category>(`/categories/${encodeURIComponent(id)}`, { method: "PUT", headers: versionHeader(version), body: JSON.stringify(input) });
+}
+
+/** One page of a project's transactions, newest first; pass the previous page's nextCursor for the next one. */
+export function listTransactions(projectId: string, cursor?: string, signal?: AbortSignal): Promise<Page<Transaction>> {
+  const q = cursor ? `?${new URLSearchParams({ cursor }).toString()}` : "";
+  return call<Page<Transaction>>(`/${encodeURIComponent(projectId)}/transactions${q}`, {}, signal);
+}
+
+export function createTransaction(input: NewTransaction, idempotencyKey: string): Promise<Transaction> {
+  return call<Transaction>("/transactions", { method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify(input) });
+}
+
+export function getBillingStatus(txnId: string, window: { from: string; to: string }, signal?: AbortSignal): Promise<BillingStatus> {
+  const q = new URLSearchParams({ from: window.from, to: window.to });
+  return call<BillingStatus>(`/transactions/${encodeURIComponent(txnId)}/billing?${q.toString()}`, {}, signal);
+}
+
+/** One page of a project's proposals, newest first; pass the previous page's nextCursor for the next one. */
+export function listProposals(projectId: string, status: ProposalStatus | "" = "", signal?: AbortSignal, cursor?: string): Promise<Page<InvoiceProposal>> {
+  const q = new URLSearchParams({ projectId });
+  if (status) q.set("status", status);
+  if (cursor) q.set("cursor", cursor);
+  return call<Page<InvoiceProposal>>(`/invoice-proposals?${q.toString()}`, {}, signal);
+}
+
+export function getProposal(id: string, signal?: AbortSignal): Promise<InvoiceProposal> {
+  return call<InvoiceProposal>(`/invoice-proposals/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Builds a DRAFT proposal from the billable transactions; reuse the key when retrying. */
+export function buildProposal(input: NewProposal, idempotencyKey: string): Promise<InvoiceProposal> {
+  return call<InvoiceProposal>("/invoice-proposals", { method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify(input) });
+}
+
+export function decideProposal(id: string, action: ProposalAction, version: number): Promise<InvoiceProposal> {
+  return call<InvoiceProposal>(`/invoice-proposals/${encodeURIComponent(id)}/${action}`, { method: "POST", headers: { "If-Match": `"${version}"` } });
+}
+
+/** Takes a transaction off a DRAFT or APPROVED proposal; it returns to the pool. */
+export function removeProposalLine(id: string, txnId: string, version: number): Promise<InvoiceProposal> {
+  return call<InvoiceProposal>(`/invoice-proposals/${encodeURIComponent(id)}/lines/${encodeURIComponent(txnId)}`, {
+    method: "DELETE",
+    headers: { "If-Match": `"${version}"` },
   });
 }
