@@ -1,15 +1,12 @@
 package identity
 
 import (
-	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
@@ -18,6 +15,7 @@ import (
 
 const (
 	dutyViewEffectivePermissions = "View effective permissions"
+	dutyMaintainUsers            = "Maintain users"
 	codeInvalid                  = "COM-0001"
 	codeUserNotFound             = "IDN-USER-NOT-FOUND"
 )
@@ -34,8 +32,27 @@ func NewEffectivePermissionsAPI(pool *pgxpool.Pool, catalogue *Catalogue) *Effec
 	return &EffectivePermissionsAPI{pool: pool, catalogue: catalogue}
 }
 
+func requireAnyDuty(duties ...string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			p, ok := tenant.FromContext(r.Context())
+			if !ok {
+				httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "no principal"))
+				return
+			}
+			for _, duty := range duties {
+				if p.HasDuty(duty) {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "missing duty "+duties[0]))
+		})
+	}
+}
+
 func (a *EffectivePermissionsAPI) Register(r chi.Router) {
-	r.With(authz.RequireDuty(dutyViewEffectivePermissions)).Get("/v1/identity/users/{id}/effective-permissions", a.get)
+	r.With(requireAnyDuty(dutyViewEffectivePermissions, dutyMaintainUsers)).Get("/v1/identity/users/{id}/effective-permissions", a.get)
 }
 
 type effectivePermission struct {
@@ -66,10 +83,23 @@ func (a *EffectivePermissionsAPI) get(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "missing or malformed tenant"))
 		return
 	}
+	if p.LegalEntityID != "" && p.LegalEntityID != "*" {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "effective permissions require access to all legal entities"))
+		return
+	}
 	userID := chi.URLParam(r, "id")
 	legalEntityID := r.URL.Query().Get("legalEntityId")
-	if !ids.Valid(userID) || (legalEntityID != "" && !ids.Valid(legalEntityID)) {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, codeInvalid, "user id and legalEntityId must be UUIDs"))
+	fields := map[string]string{}
+	if !ids.Valid(userID) {
+		fields["id"] = "must be a UUID"
+	}
+	if legalEntityID != "" && !ids.Valid(legalEntityID) {
+		fields["legalEntityId"] = "must be a UUID"
+	}
+	if len(fields) > 0 {
+		problem := httpx.NewProblem(http.StatusBadRequest, codeInvalid, "user id and legalEntityId must be UUIDs")
+		problem.Errors = fields
+		httpx.Fail(w, r, problem)
 		return
 	}
 	var legalEntity *string
@@ -91,7 +121,6 @@ func (a *EffectivePermissionsAPI) get(w http.ResponseWriter, r *http.Request) {
 		return err
 	})
 	if err != nil {
-		slog.Error("resolve effective permissions", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
 		return
 	}

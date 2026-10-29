@@ -112,6 +112,42 @@ func TestEffectivePermissionsMatchOPAOver100Resources(t *testing.T) {
 	}
 }
 
+func TestEffectivePermissionsMatchOPAOnEdgePaths(t *testing.T) {
+	base := startRealPolicy(t)
+	catalogue := loadSeededCatalogue(t)
+	client, err := NewOPAClient(base, &http.Client{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	principals := parityPrincipals(catalogue)
+	putAssignments(t, base, principals)
+
+	var resources []string
+	for i, route := range catalogue.Routes() {
+		if i%7 != 0 {
+			continue
+		}
+		sample := SampleResource(route.Resource)
+		resources = append(resources, sample+"/a:b", sample+"/", sample+"/x/y/z/w", strings.Replace(sample, "item-1", "a:b", 1))
+	}
+	resources = append(resources, "/v1/unknown-prefix/item-1", "/v1/unknown-prefix/", "/", "/v1")
+
+	for _, name := range []string{"viewer-and-edit", "finance", "identity-admin", "broad"} {
+		for _, resource := range resources {
+			for _, method := range []string{http.MethodGet, http.MethodPost} {
+				want, err := client.Decide(context.Background(), tenant.Principal{TenantID: parityTenant, UserID: name}, method, resource)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got := catalogue.Evaluate(principals[name], method, resource)
+				if got.Allow != want.Allow || got.DutyMissing != want.DutyMissing {
+					t.Errorf("%s %s %s: engine allow=%v missing=%q, OPA allow=%v missing=%q", name, method, resource, got.Allow, got.DutyMissing, want.Allow, want.DutyMissing)
+				}
+			}
+		}
+	}
+}
+
 func TestEffectiveReportEqualsOPAForEveryRoute(t *testing.T) {
 	base := startRealPolicy(t)
 	catalogue := loadSeededCatalogue(t)

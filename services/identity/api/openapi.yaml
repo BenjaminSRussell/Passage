@@ -16,7 +16,17 @@ paths:
         roles that are not seeded duties are listed in ignoredRoles and grant nothing. Tenant-wide
         assignments always apply; assignments for a legal entity apply when legalEntityId is given.
         Each decision equals the authorization policy's decision for the route's sample path.
+        Duties are sourced from identity_role_assignments (role = duty name) until the role catalogue
+        (issue #83) lands, whereas live authorization reads the JWT duties claim. A caller whose
+        legal-entity scope is not all entities receives 403, because row-level security would hide
+        tenant-wide and other-entity assignments and the report would be incomplete. Callers holding
+        either View effective permissions or Maintain users are accepted.
+      security:
+        - gatewayHeaders: []
       parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/Duties'
+        - $ref: '#/components/parameters/LegalEntityHeader'
         - name: id
           in: path
           required: true
@@ -37,6 +47,31 @@ paths:
         '404': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
 components:
+  securitySchemes:
+    gatewayHeaders:
+      type: apiKey
+      in: header
+      name: X-Passage-Tenant
+      description: Tenant, caller and duties are asserted by the gateway through X-Passage-* headers until JWT validation lands.
+  parameters:
+    TenantHeader:
+      name: X-Passage-Tenant
+      in: header
+      required: true
+      description: Tenant id set by the gateway until JWT validation lands (kernel tenant middleware).
+      schema: { type: string, format: uuid }
+    Duties:
+      name: X-Passage-Duties
+      in: header
+      required: false
+      description: Comma-separated duties of the caller; View effective permissions or Maintain users is required.
+      schema: { type: string }
+    LegalEntityHeader:
+      name: X-Passage-Legal-Entity
+      in: header
+      required: false
+      description: Legal-entity scope of the caller; absent means all entities. Any other value yields 403.
+      schema: { type: string }
   schemas:
     EffectivePermissions:
       type: object

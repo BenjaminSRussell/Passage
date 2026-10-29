@@ -48,12 +48,16 @@ func newEffectiveRouter(t *testing.T, app *pgxpool.Pool) http.Handler {
 }
 
 func getReport(router http.Handler, tenantID, path string, duties ...string) *httptest.ResponseRecorder {
+	return getReportScoped(router, tenantID, "", path, duties...)
+}
+
+func getReportScoped(router http.Handler, tenantID, legalEntityID, path string, duties ...string) *httptest.ResponseRecorder {
 	held := map[string]struct{}{}
 	for _, d := range duties {
 		held[d] = struct{}{}
 	}
 	req := httptest.NewRequest(http.MethodGet, path, nil)
-	req = req.WithContext(tenant.With(req.Context(), tenant.Principal{TenantID: tenantID, UserID: "caller", Duties: held}))
+	req = req.WithContext(tenant.With(req.Context(), tenant.Principal{TenantID: tenantID, LegalEntityID: legalEntityID, UserID: "caller", Duties: held}))
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	return rec
@@ -140,6 +144,35 @@ func TestEffectivePermissionsEndpoint(t *testing.T) {
 		}
 		if rec := getReport(router, testkit.TenantID(3), path, view); rec.Code != http.StatusNotFound {
 			t.Fatalf("unknown tenant status = %d, want 404", rec.Code)
+		}
+	})
+
+	t.Run("Maintain users holder is accepted like OPA", func(t *testing.T) {
+		if rec := getReport(router, tenantA, path, "Maintain users"); rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("caller scoped to a legal entity is refused rather than shown a partial report", func(t *testing.T) {
+		rec := getReportScoped(router, tenantA, legalA, path, view)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403, body = %s", rec.Code, rec.Body.String())
+		}
+		if rec := getReportScoped(router, tenantA, "*", path, view); rec.Code != http.StatusOK {
+			t.Fatalf("all-entity caller status = %d", rec.Code)
+		}
+	})
+
+	t.Run("malformed ids carry field errors", func(t *testing.T) {
+		rec := getReport(router, tenantA, "/v1/identity/users/nope/effective-permissions?legalEntityId=x", view)
+		var problem struct {
+			Errors map[string]string `json:"errors"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &problem); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != http.StatusBadRequest || problem.Errors["id"] != "must be a UUID" || problem.Errors["legalEntityId"] != "must be a UUID" {
+			t.Fatalf("status = %d, errors = %v", rec.Code, problem.Errors)
 		}
 	})
 
