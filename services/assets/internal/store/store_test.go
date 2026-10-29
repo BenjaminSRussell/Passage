@@ -353,14 +353,6 @@ func TestStore_RowLevelSecurity(t *testing.T) {
 	if err := admin.QueryRow(ctx, "select current_schema()").Scan(&schema); err != nil {
 		t.Fatal(err)
 	}
-	for _, grant := range []string{
-		"grant usage on schema " + schema + " to passage_app",
-		"grant select, insert, update, delete on all tables in schema " + schema + " to passage_app",
-	} {
-		if _, err := admin.Exec(ctx, grant); err != nil {
-			t.Fatal(err)
-		}
-	}
 	for _, table := range []string{"asset", "asset_book", "asset_transaction", "lease", "lease_schedule_line", "outbox", "idempotency_keys",
 		"depreciation_run", "depreciation_run_line", "asset_addition", "asset_index_series", "asset_index_value", "asset_insurance_policy",
 		"capex_request", "capex_request_variant", "lease_modification", "asset_count_session", "asset_count_line",
