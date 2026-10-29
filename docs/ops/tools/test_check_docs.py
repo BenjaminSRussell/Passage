@@ -118,6 +118,32 @@ class TestRunbookHygiene(unittest.TestCase):
             self.assertIn("leftover.md.tmp", errors[0])
 
 
+class TestRepoPaths(unittest.TestCase):
+    def test_missing_service_path_reported_and_existing_one_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "services" / "ledger").mkdir(parents=True)
+            root = repo / "docs" / "ops"
+            write(root, "guide.md", "Owning area: `services/ledger`. Also `services/procurement-ts`.\n")
+            errors = cd.check_repo_paths(root, repo)
+            self.assertEqual(errors, ["guide.md: repository path services/procurement-ts does not exist"])
+
+    def test_code_fences_and_other_prefixes_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            root = repo / "docs" / "ops"
+            write(root, "guide.md", "```\n`services/nowhere`\n```\nRun `tools/cost_meter.py`.\n")
+            self.assertEqual(cd.check_repo_paths(root, repo), [])
+
+    def test_trailing_slash_and_sentence_dot_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "apps" / "web" / "src" / "modules" / "org").mkdir(parents=True)
+            root = repo / "docs" / "ops"
+            write(root, "guide.md", "Screens: `apps/web/src/modules/org/` and `apps/web/src/modules/org.`\n")
+            self.assertEqual(cd.check_repo_paths(root, repo), [])
+
+
 class TestRepository(unittest.TestCase):
     """Runs the checks against the real docs/ops tree and the real alert rules."""
 
@@ -126,6 +152,9 @@ class TestRepository(unittest.TestCase):
 
     def test_every_alert_links_to_an_existing_runbook(self) -> None:
         self.assertEqual(cd.check_alerts(RULES, OPS / "runbooks"), [])
+
+    def test_repository_paths_in_docs_exist(self) -> None:
+        self.assertEqual(cd.check_repo_paths(OPS, OPS.parents[1]), [])
 
 
 if __name__ == "__main__":

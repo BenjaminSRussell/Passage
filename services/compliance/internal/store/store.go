@@ -1,5 +1,5 @@
-// Package store persists SoD conflicts and mitigations, and sanctions
-// screening hits, in Postgres. Every
+// Package store persists SoD conflicts and mitigations, sanctions screening
+// hits and GDPR/CCPA subject requests in Postgres. Every
 // method runs in a tenant-scoped transaction (dbx.WithTenantTx) so row-level
 // security applies, and every state change other contexts care about is
 // written to the outbox in the same transaction.

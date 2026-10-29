@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Docs link and runbook checker for docs/ops (PSG-50, PRD 9.50.9 docs row, FR-50.10).
 
-Three checks, all must pass (exit 1 otherwise):
+Four checks, all must pass (exit 1 otherwise):
   1. Markdown links: every relative link under docs/ops resolves to a file, and every #anchor resolves to
      a heading in the target file (GitHub slug rules). External http(s)/mailto links are not fetched.
   2. Alert runbooks: every alert in the multi-region PrometheusRule carries a runbook_url, each URL points
      into https://docs.passage.dev/ops/runbooks/ and the page exists in docs/ops/runbooks/ (FR-50.10).
   3. Runbook directory hygiene: docs/ops/runbooks holds only .md pages (stray files fail).
+  4. Repository paths: every `services/...` or `apps/...` path written in backticks in prose names a file or
+     directory that exists in the repository, so a guide cannot point readers at a service that is not there.
 
     python3 docs/ops/tools/check_docs.py [--root docs/ops] [--rules deploy/multi-region/chart/templates/prometheusrule.yaml]
 
@@ -27,6 +29,7 @@ HEADING_RE = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
 ALERT_RE = re.compile(r"^\s*- alert:\s*(\S+)", re.MULTILINE)
 URL_RE = re.compile(r"runbook_url:\s*(\S+)")
 EXTERNAL = ("http://", "https://", "mailto:", "<")
+REPO_PATH_RE = re.compile(r"`((?:services|apps)/[A-Za-z0-9_.\-/]+)`")
 ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -106,9 +109,21 @@ def check_runbook_dir(runbooks: Path) -> list[str]:
             if p.is_file() and p.suffix != ".md"]
 
 
-def run(root: Path, rules: Path) -> list[str]:
+def check_repo_paths(root: Path, repo: Path) -> list[str]:
+    errors: list[str] = []
+    for md in sorted(root.rglob("*.md")):
+        rel = md.relative_to(root)
+        for line in _prose_lines(md.read_text(encoding="utf-8")):
+            for path in REPO_PATH_RE.findall(line):
+                if not (repo / path.rstrip("/.")).exists():
+                    errors.append(f"{rel}: repository path {path} does not exist")
+    return errors
+
+
+def run(root: Path, rules: Path, repo: Path = ROOT) -> list[str]:
     runbooks = root / "runbooks"
-    return check_markdown(root) + check_alerts(rules, runbooks) + check_runbook_dir(runbooks)
+    return (check_markdown(root) + check_alerts(rules, runbooks) + check_runbook_dir(runbooks)
+            + check_repo_paths(root, repo))
 
 
 def main(argv: list[str] | None = None) -> int:
