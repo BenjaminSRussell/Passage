@@ -1,0 +1,29 @@
+{
+  "_comment": "Shape of the k6 data pool. The fx-load-10k generator writes the real pool from the masked customer copy (BR-50.5); these placeholder ids only let the script initialise. Pass the real file with --env POOL_FILE=<path>.",
+  "legalEntityId": "00000000-0000-4000-8000-000000000001",
+  "ledgerId": "00000000-0000-4000-8000-000000000002",
+  "siteId": "00000000-0000-4000-8000-000000000003",
+  "warehouseId": "00000000-0000-4000-8000-000000000004",
+  "currency": "USD",
+  "postingDate": "2026-10-15",
+  "requestedShipDate": "2026-10-20",
+  "accounts": ["6100", "6110", "6120", "6130", "2100", "2110", "2120", "2130"],
+  "customers": [
+    {"customerId": "00000000-0000-4000-8000-000000000101", "invoiceAccountId": "00000000-0000-4000-8000-000000000101"}
+  ],
+  "products": [
+    {"productId": "00000000-0000-4000-8000-000000000201", "unit": "EA", "unitPrice": "12.50"},
+    {"productId": "00000000-0000-4000-8000-000000000202", "unit": "EA", "unitPrice": "7.25"}
+  ],
+  "generatedEntity": "customer",
+  "analytics": {"measures": ["revenue"], "dimensions": ["month"], "from": "2026-01-01", "to": "2026-09-30"},
+  "allocation": {
+    "secondaryElementId": "00000000-0000-4000-8000-000000000401",
+    "costObjectIds": ["00000000-0000-4000-8000-000000000402", "00000000-0000-4000-8000-000000000403"],
+    "basis": [["0", "1"], ["1", "0"]]
+  },
+  "mrp": {
+    "planCode": "LOAD50K",
+    "itemIds": ["00000000-0000-4000-8000-000000000301"]
+  }
+}

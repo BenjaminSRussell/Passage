@@ -1,0 +1,102 @@
+{
+  "version": 1,
+  "source": "PRD 9.50 FR-50.1 SLO table and throughput targets (binding budget)",
+  "slos": [
+    {
+      "id": "entity_read",
+      "op": "entity_read",
+      "description": "Entity read (generated)",
+      "p95ms": 50,
+      "p99ms": 150,
+      "errorBudget": 0.001
+    },
+    {
+      "id": "form_save",
+      "op": "form_save",
+      "description": "Form save",
+      "p99ms": 400,
+      "errorBudget": 0.001
+    },
+    {
+      "id": "order_intake_line",
+      "op": "order_intake",
+      "description": "Order intake (line)",
+      "p99ms": 500,
+      "errorBudget": 0.001
+    },
+    {
+      "id": "pricing",
+      "op": "pricing",
+      "description": "Pricing",
+      "p95ms": 20,
+      "errorBudget": 0.001
+    },
+    {
+      "id": "journal_post",
+      "op": "journal_post",
+      "description": "Journal post (500-line batch)",
+      "p99ms": 2000,
+      "errorBudget": 0.0005
+    },
+    {
+      "id": "mobile_scan",
+      "op": "mobile_scan",
+      "description": "Mobile scan round trip",
+      "p99ms": 300,
+      "errorBudget": 0.001
+    },
+    {
+      "id": "dashboard",
+      "op": "dashboard",
+      "description": "Dashboard load",
+      "p95ms": 2000,
+      "errorBudget": 0.005
+    },
+    {
+      "id": "lakehouse_lag",
+      "metric": "lakehouse_lag_seconds",
+      "description": "Lakehouse lag (S7), measured during S1+S2",
+      "p95Seconds": 60
+    },
+    {
+      "id": "mrp_50k",
+      "metric": "mrp_run_seconds",
+      "description": "MRP regeneration of 50k items (S5)",
+      "maxSeconds": 600
+    },
+    {
+      "id": "journal_throughput",
+      "metric": "journal_lines_posted",
+      "description": "S1 journal lines posted, 1M lines/h (FR-50.1)",
+      "minPerHour": 1000000
+    },
+    {
+      "id": "order_throughput",
+      "metric": "order_lines_accepted",
+      "description": "S2 order lines accepted, 100k lines/h (FR-50.1)",
+      "minPerHour": 100000
+    },
+    {
+      "id": "mrp_completed",
+      "metric": "mrp_runs_completed",
+      "description": "S5 MRP run returned 201 (a timed-out or failed run cannot pass mrp_50k)",
+      "minCount": 1
+    }
+  ],
+  "availability": {
+    "perTenant": 0.999,
+    "perTenantMultiRegion": 0.9995
+  },
+  "notChecked": [
+    {
+      "id": "journal_post_sustained",
+      "description": "Journal post sustained 5k lines/s",
+      "reason": "18x the S1 target; needs a separate peak-throughput run (docs/ops/NOT-IMPLEMENTED.md)"
+    },
+    {
+      "id": "availability",
+      "description": "Availability per tenant",
+      "reason": "monthly production measure from the burn-rate recording rules, not a campaign result"
+    }
+  ]
+}

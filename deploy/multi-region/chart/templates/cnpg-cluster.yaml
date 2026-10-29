@@ -1,0 +1,105 @@
+# Postgres cluster for this region (FR-50.2, FR-50.4).
+#   PRIMARY: the write path, quorum-synchronous standbys inside the region.
+#   PASSIVE: a CNPG replica cluster streaming asynchronously from the primary
+#            region (lag SLO < 30 s). Promotion = render this region as PRIMARY,
+#            which drops spec.replica (CNPG promotes the designated primary).
+#   FENCED:  the former primary keeps its spec and every instance is fenced
+#            (cnpg.io/fencedInstances), so it accepts no connections and no
+#            writes until it is re-seeded as PASSIVE (BR-50.1, failback runbook).
+# CNPG applies spec.bootstrap only when the cluster is created; a role change
+# on an existing cluster changes replica, synchronous and the fence only.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ .Values.postgres.clusterName }}
+  namespace: {{ .Values.region.namespace }}
+  labels:
+    {{- include "passage-mr.labels" . | nindent 4 }}
+  {{- if include "passage-mr.fenced" . }}
+  annotations:
+    cnpg.io/fencedInstances: '["*"]'
+  {{- end }}
+spec:
+  instances: {{ .Values.postgres.instances }}
+  imageName: {{ .Values.postgres.imageName }}
+  primaryUpdateStrategy: unsupervised
+  enableSuperuserAccess: false
+  postgresql:
+    parameters:
+      max_wal_senders: "16"
+      max_replication_slots: "16"
+      wal_compression: "on"
+      log_min_duration_statement: "1000"
+      pg_stat_statements.max: "10000"
+      pg_stat_statements.track: "all"
+    {{- if ne .Values.region.role "PASSIVE" }}
+    synchronous:
+      method: {{ .Values.postgres.synchronous.method }}
+      number: {{ .Values.postgres.synchronous.number }}
+      dataDurability: required
+    {{- end }}
+  {{- if ne .Values.region.role "PASSIVE" }}
+  bootstrap:
+    initdb:
+      database: passage
+      owner: passage_owner
+      # The application role never bypasses RLS (CONVENTIONS); its password is
+      # set by the secret rotation job, not here.
+      postInitApplicationSQL:
+        - CREATE ROLE passage_app LOGIN NOSUPERUSER NOBYPASSRLS
+  {{- else }}
+  bootstrap:
+    pg_basebackup:
+      source: {{ .Values.postgres.clusterName }}-source
+  replica:
+    enabled: true
+    source: {{ .Values.postgres.clusterName }}-source
+  externalClusters:
+    - name: {{ .Values.postgres.clusterName }}-source
+      connectionParameters:
+        host: {{ .Values.postgres.primary.host | quote }}
+        port: {{ .Values.postgres.primary.port | quote }}
+        user: {{ .Values.postgres.primary.user | quote }}
+        dbname: postgres
+        sslmode: verify-full
+      password:
+        name: {{ .Values.postgres.primary.replicationSecret }}
+        key: password
+      sslCert:
+        name: {{ .Values.postgres.primary.tlsSecret }}
+        key: tls.crt
+      sslKey:
+        name: {{ .Values.postgres.primary.tlsSecret }}
+        key: tls.key
+      sslRootCert:
+        name: {{ .Values.postgres.primary.tlsSecret }}
+        key: ca.crt
+  {{- end }}
+  storage:
+    size: {{ .Values.postgres.storageSize }}
+  monitoring:
+    enablePodMonitor: true
+{{- if and .Values.postgres.pooler.enabled (not (include "passage-mr.fenced" .)) }}
+---
+# PgBouncer transaction pooling in front of the read-write service (FR-50.2).
+# In a PASSIVE region it fronts the replica cluster's designated primary, which
+# is read-only until promotion.
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: {{ .Values.postgres.clusterName }}-pooler-rw
+  namespace: {{ .Values.region.namespace }}
+  labels:
+    {{- include "passage-mr.labels" . | nindent 4 }}
+spec:
+  cluster:
+    name: {{ .Values.postgres.clusterName }}
+  instances: {{ .Values.postgres.pooler.instances }}
+  type: rw
+  pgbouncer:
+    poolMode: transaction
+    parameters:
+      max_client_conn: {{ .Values.postgres.pooler.maxClientConn | quote }}
+      default_pool_size: {{ .Values.postgres.pooler.defaultPoolSize | quote }}
+      max_prepared_statements: {{ .Values.postgres.pooler.maxPreparedStatements | quote }}
+{{- end }}
