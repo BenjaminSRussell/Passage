@@ -21,6 +21,26 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createRateType
+      x-passage-duty: Maintain exchange rates
+      description: Creates a rate type. Create-only; an existing code is never overwritten. Use PUT to change an existing one.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RateTypeCreate' }
+      responses:
+        '201':
+          description: The created rate type.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RateType' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001 malformed body; FX_RATE_INVALID missing code or name.' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem', description: FX_RATE_TYPE_EXISTS a rate type with this code already exists. }
+        '500': { $ref: '#/components/responses/Problem' }
   /v1/fx/rate-types/{code}:
     parameters:
       - name: code
@@ -43,7 +63,7 @@ paths:
     put:
       operationId: putRateType
       x-passage-duty: Maintain exchange rates
-      description: Creates or replaces the rate type. Naturally idempotent, so it takes neither Idempotency-Key nor If-Match; rate types carry no version.
+      description: Replaces an existing rate type. Naturally idempotent, so it takes neither Idempotency-Key nor If-Match; rate types carry no version.
       requestBody:
         required: true
         content:
@@ -58,6 +78,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem', description: 'COM-0001 malformed body; FX_RATE_INVALID missing code or name.' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem', description: FX_RATE_TYPE_UNKNOWN }
         '500': { $ref: '#/components/responses/Problem' }
   /v1/fx/rates:
     post:
@@ -204,6 +225,15 @@ components:
       additionalProperties: false
       required: [name]
       properties:
+        name: { type: string, minLength: 1 }
+        allowInverse: { type: boolean }
+        provider: { type: string }
+    RateTypeCreate:
+      type: object
+      additionalProperties: false
+      required: [code, name]
+      properties:
+        code: { type: string, minLength: 1 }
         name: { type: string, minLength: 1 }
         allowInverse: { type: boolean }
         provider: { type: string }
