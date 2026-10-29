@@ -34,10 +34,13 @@ spec:
               value: /etc/passage/openapi/{{ .Values.openApi.key }}
             - name: HTTP_ADDR
               value: "0.0.0.0:8080"
+            - name: ADMIN_ADDR
+              value: "0.0.0.0:9090"
             - name: SERVICE_VERSION
               value: {{ .Chart.AppVersion | quote }}
           ports:
             - { name: http, containerPort: 8080 }
+            - { name: admin, containerPort: 9090 }
           volumeMounts:
             - name: openapi
               mountPath: /etc/passage/openapi

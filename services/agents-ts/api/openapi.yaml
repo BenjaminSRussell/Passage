@@ -4,15 +4,174 @@ info:
   version: 0.1.0
   description: |
     PRD 9.47.5 endpoints for agent runs, approvals, kill switch, budgets and
-    eval triggers. This slice ships the run engine (src/runtime/engine.ts) and
-    its domain rules, not the HTTP layer, so `paths` is empty until the API
-    slice lands. The endpoints planned for that slice are listed in
-    NOT-IMPLEMENTED.md so reviewers can check the gap.
+    eval triggers. This slice serves the kill switch (read and toggle) and the
+    approval decision (src/api/router.ts). The run, budget, eval and promotion
+    endpoints are not served yet; NOT-IMPLEMENTED.md lists them. Callers reach
+    these routes through the edge, which verifies the user's token and sets
+    x-passage-tenant, x-passage-user and x-passage-duties (client copies are
+    stripped). Errors are RFC 9457 problems with a stable `code`: AGT-04xx and
+    AGT-0500 for HTTP-level errors, AGT-02xx from the PRD 9.47.18 catalog for
+    business refusals (README, Error codes).
 servers:
-  - url: https://api.passage.dev/v1/agents
-paths: {}
+  - url: https://api.passage.dev
+paths:
+  /api/v1/agents/kill-switch:
+    get:
+      operationId: getKillSwitchStatus
+      summary: The caller's tenant kill switch and the global kill switch (9.47.6 agent administration)
+      description: |
+        As this worker sees them. `halted` is true when runs for the caller's
+        tenant are stopped for any reason, including a worker that has not
+        heard from the kill-switch stream for 10 s (`stale`, fail-closed).
+        Readable with AgentAdmin or PlatformAdmin.
+      x-passage-duty: AgentAdmin
+      responses:
+        "200":
+          description: Kill switch status.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/KillSwitchStatus"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+    post:
+      operationId: toggleKillSwitch
+      summary: Halt or resume agent runs for a tenant or globally (AC-47.6)
+      description: |
+        TENANT scope needs AgentAdmin and the caller's own tenant (AGT-0403
+        otherwise). GLOBAL scope needs PlatformAdmin (break-glass). Idempotent
+        by scope: asking for the state the switch is already in returns its
+        current toggle and publishes nothing. Otherwise
+        dev.passage.agent.killswitch.changed.v1 is published before the
+        response, and only then applied to this worker. Versions are strictly
+        increasing so workers ignore duplicates.
+      x-passage-duty: AgentAdmin
+      x-passage-approval: none
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/KillSwitchCommand"}
+      responses:
+        "200":
+          description: The switch's current toggle.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/KillSwitchResult"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "413": {$ref: "#/components/responses/Problem"}
+  /api/v1/agents/runs/{runId}/actions/{actionId}/decision:
+    post:
+      operationId: decideAgentAction
+      summary: Approve or reject a proposal that waits at the approval gate (FR-47.8)
+      description: |
+        The caller must hold the action's approval duty (AGT-0203). An approver
+        who started the run may not approve above the self-approval limit
+        (AGT-0209). An expired request is recorded and answered with decision
+        REJECTED, reason EXPIRED and code AGT-0208 (BR-47.3): the source
+        document stays unposted. Idempotent by action id: the same decision
+        again returns the recorded one; a different decision on a decided
+        action is 409 AGT-0409. Another tenant's action is never found (404).
+      x-passage-duty: AgentApprove
+      x-passage-approval: none
+      parameters:
+        - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: actionId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ApprovalDecisionCommand"}
+      responses:
+        "200":
+          description: The recorded decision.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ApprovalDecisionResult"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "413": {$ref: "#/components/responses/Problem"}
 components:
+  responses:
+    Problem:
+      description: RFC 9457 problem details (application/problem+json).
+      content:
+        application/problem+json:
+          schema:
+            type: object
+            required: [type, title, status, code]
+            properties:
+              type: {type: string, format: uri, description: "https://passage.dev/problems/<code>"}
+              title: {type: string}
+              status: {type: integer}
+              code: {type: string, pattern: "^AGT-[0-9]{4}$"}
+              detail: {type: string}
+              instance: {type: string}
   schemas:
+    KillSwitchCommand:
+      type: object
+      required: [scope, active]
+      properties:
+        scope: {type: string, enum: [GLOBAL, TENANT]}
+        tenantId: {type: [string, "null"], format: uuid, description: Required for TENANT, forbidden for GLOBAL.}
+        active: {type: boolean}
+      additionalProperties: false
+    KillSwitchResult:
+      type: object
+      required: [scope, tenantId, active, version, changedAt, byUser]
+      properties:
+        scope: {type: string, enum: [GLOBAL, TENANT]}
+        tenantId: {type: [string, "null"], format: uuid}
+        active: {type: boolean}
+        version: {type: integer, minimum: 1}
+        changedAt: {type: string, format: date-time}
+        byUser: {type: string, format: uuid}
+    KillSwitchState:
+      type: object
+      required: [active, version, changedAt]
+      properties:
+        active: {type: boolean, description: False when the switch was never toggled.}
+        version: {type: [integer, "null"], minimum: 1}
+        changedAt: {type: [string, "null"], format: date-time}
+    KillSwitchStatus:
+      type: object
+      required: [tenantId, halted, stale, tenant, global]
+      properties:
+        tenantId: {type: string, format: uuid}
+        halted: {type: boolean}
+        stale: {type: boolean}
+        tenant:
+          allOf:
+            - {$ref: "#/components/schemas/KillSwitchState"}
+            - type: object
+              required: [byUser]
+              properties:
+                byUser: {type: [string, "null"], format: uuid}
+        global:
+          description: The operator who toggled it belongs to another tenant, so no user id is returned.
+          allOf:
+            - {$ref: "#/components/schemas/KillSwitchState"}
+    ApprovalDecisionCommand:
+      type: object
+      required: [decision]
+      properties:
+        decision: {type: string, enum: [APPROVED, REJECTED]}
+      additionalProperties: false
+    ApprovalDecisionResult:
+      type: object
+      required: [runId, actionId, decision, approverUserId, decidedAt]
+      properties:
+        runId: {type: string, format: uuid}
+        actionId: {type: string, format: uuid}
+        decision: {type: string, enum: [APPROVED, REJECTED]}
+        reason: {type: string, enum: [EXPIRED]}
+        code: {type: string, enum: [AGT-0208]}
+        approverUserId: {type: string, format: uuid}
+        decidedAt: {type: string, format: date-time}
     RunStatus:
       type: string
       description: BR-47.1 run state machine. COMMITTED, REJECTED, FAILED and KILLED are terminal.

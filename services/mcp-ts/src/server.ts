@@ -3,6 +3,7 @@ import { handleRpc, type RpcRequest, type RpcResponse, RPC } from "./jsonrpc.js"
 import type { GatewayDeps, Principal } from "./gateway.js";
 import { isObject } from "./tool.js";
 import { rateLimitHeaders, type RateLimiter } from "./ratelimit.js";
+import { Metrics, routeLabel } from "./metrics.js";
 
 /** Header carrying the build identifier on every response (kernel-standard). */
 export const API_BUILD_HEADER = "x-passage-api-build";
@@ -30,6 +31,8 @@ export interface ServerOptions {
   maxBodyBytes?: number;
   /** Per-pod limiter keyed by tenant and user; omitted means no limit. */
   limiter?: RateLimiter;
+  /** Counters this listener records into; the admin listener serves them (src/metrics.ts). Omitted means a private registry. */
+  metrics?: Metrics;
 }
 
 export type PrincipalResult = { ok: true; principal: Principal } | { ok: false; message: string };
@@ -151,8 +154,11 @@ async function dispatch(deps: GatewayDeps, p: Principal, parsed: unknown): Promi
 /** Creates the request listener: /healthz, /readyz and POST /mcp (streamable HTTP, JSON responses). */
 export function createHandler(opts: ServerOptions): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
   const limit = opts.maxBodyBytes ?? MAX_BODY_BYTES;
+  const metrics = opts.metrics ?? new Metrics();
   return async (req, res) => {
     const path = new URL(req.url ?? "/", "http://localhost").pathname;
+    // Counted once the response is fully sent; a connection destroyed mid-answer has no status to count.
+    res.on("finish", () => metrics.recordResponse(routeLabel(path), res.statusCode));
     try {
       if (path === "/healthz") {
         return send(res, opts.build, 200, { status: "ok" });
@@ -176,6 +182,7 @@ export function createHandler(opts: ServerOptions): (req: IncomingMessage, res: 
       const decision = opts.limiter?.hit(`${auth.principal.tenantId}:${auth.principal.userId}`);
       const rl: Record<string, string> = decision === undefined ? {} : rateLimitHeaders(decision);
       if (decision !== undefined && !decision.allowed) {
+        metrics.recordRateLimited();
         return problem(res, opts.build, 429, "MCP-0429", "rate limit exceeded", rl);
       }
       let raw: string;

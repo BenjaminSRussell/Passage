@@ -14,5 +14,5 @@ FROM gcr.io/distroless/nodejs22-debian12:nonroot
 WORKDIR /app
 COPY services/mcp-ts/package.json package.json
 COPY --from=build /src/dist dist
-EXPOSE 8080
+EXPOSE 8080 9090
 CMD ["dist/main.js"]

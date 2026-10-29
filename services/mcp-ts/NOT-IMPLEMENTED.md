@@ -12,7 +12,11 @@ Slice 3 validates read tools' upstream bodies against the tool's `outputSchema`
 (`Dockerfile`, distroless Node 22, nonroot) and the Helm chart
 `charts/mcp-gateway` (3 replicas, read-only root filesystem, the OpenAPI
 document mounted from a ConfigMap, probes on `/healthz` and `/readyz`, an
-ingress NetworkPolicy); `helm lint` passes.
+ingress NetworkPolicy); `helm lint` passes. Slice 5 adds the admin listener
+(`src/metrics.ts`, `ADMIN_ADDR`, port 9090 by kernel convention) with
+`GET /metrics`: Prometheus counters of responses by bounded route and status
+and of 429 refusals. The chart exposes the admin port, lets only the metrics
+namespace reach it, and points the ServiceMonitor at it.
 The rows below are what the ticket and PRD 9.47 ask for and are not built.
 
 | Deliverable / criterion | Status | Reason |
@@ -28,6 +32,5 @@ The rows below are what the ticket and PRD 9.47 ask for and are not built.
 | Live-API half of the 400-tool contract: the API itself returns 403 for a user without the duty (FR-47.2) | later slice of PSG-47 | The gateway side is covered over 400 generated tools; the services and their OpenAPI annotations do not exist yet |
 | Audit to `agent_action` store (AC-47.2 `DENIED` log) | later slice of PSG-47 | The gateway calls an injected `AuditSink`; `main.ts` writes JSON lines to stdout. The durable sink is part of the runtime's database slice |
 | Building and publishing the image in CI, and the deploy step that creates the `mcp-gateway-openapi` ConfigMap | handoff | CI and deploy pipelines live outside the owned paths. The `Dockerfile` and chart are ready; the chart expects the ConfigMap to exist |
-| `/metrics` endpoint for the chart's ServiceMonitor (kernel convention) | later slice of PSG-47 | The gateway serves no metrics yet. `serviceMonitor.enabled` defaults to false, so the chart does not scrape an endpoint that does not exist |
 | Copilot chat BFF (`POST /api/v1/copilot/chat`) | later slice of PSG-47 | Not part of the gateway; see `apps/web/src/modules/copilot/NOT-IMPLEMENTED.md`. Model provider adapters are built in `services/agents-ts` |
 | Full `outputSchema` conformance: `$ref`, `oneOf`/`allOf`, formats and patterns; `outputSchema` and `structuredContent` on the MCP wire | later slice of PSG-47 | `src/schema.ts` checks type, `nullable`, enum, properties, required and items on read tools only. `tools/list` does not advertise `outputSchema` yet, so results carry text content only and need no `structuredContent` |

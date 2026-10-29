@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import type { PassageModule } from "../registry";
+import { KillSwitchPage } from "./KillSwitchPage";
 import { CopilotHome } from "./pages";
 import { ToolCatalogPage } from "./ToolCatalogPage";
 import { ToolDetailPage } from "./ToolDetailPage";
@@ -18,15 +19,17 @@ function ToolDetailRoute() {
 const copilot: PassageModule = {
   id: "copilot",
   title: "Copilot",
-  description: "Ask questions, explain records and draft text with cited answers, and see the tools the copilot can call for you.",
+  description: "Ask questions, explain records and draft text with cited answers, see the tools the copilot can call for you, and halt agent runs with the kill switch.",
   routes: [
     { path: "/copilot", element: createElement(CopilotHome) },
     { path: "/copilot/tools", element: createElement(ToolCatalogRoute), handle: { title: "Tool catalog" } },
     { path: "/copilot/tools/:name", element: createElement(ToolDetailRoute), handle: { title: "Tool" } },
+    { path: "/copilot/kill-switch", element: createElement(KillSwitchPage), handle: { title: "Agent kill switch" } },
   ],
   nav: [
     { label: "Copilot", to: "/copilot", duty: "CopilotUse" },
     { label: "Tool catalog", to: "/copilot/tools", duty: "CopilotUse" },
+    { label: "Agent kill switch", to: "/copilot/kill-switch", duty: "AgentAdmin" },
   ],
 };
 

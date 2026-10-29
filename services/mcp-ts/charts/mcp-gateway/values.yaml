@@ -7,7 +7,9 @@ replicaCount: 3
 resources:
   requests: { cpu: 50m, memory: 96Mi }
   limits: { cpu: 500m, memory: 256Mi }
-# The gateway serves no /metrics yet (NOT-IMPLEMENTED.md); keep this off until it does.
+# /metrics is served on the admin port 9090. Off by default like every service
+# chart: enable it where the Prometheus Operator CRDs are installed.
 serviceMonitor: { enabled: false }
-# Namespaces allowed to call the gateway besides its own, e.g. the edge gateway's.
-networkPolicy: { ingressNamespaces: [] }
+# Namespaces allowed to call the gateway besides its own, e.g. the edge gateway's;
+# metricsNamespace may reach only the admin port.
+networkPolicy: { metricsNamespace: observability, ingressNamespaces: [] }

@@ -11,14 +11,18 @@ describe("loadConfig (12-factor startup config)", () => {
       host: "0.0.0.0",
       port: 8080,
       build: "0.1.0",
+      adminHost: "0.0.0.0",
+      adminPort: 9090,
     });
   });
 
-  it("reads HTTP_ADDR and SERVICE_VERSION", () => {
-    expect(loadConfig({ ...base, HTTP_ADDR: "127.0.0.1:9000", SERVICE_VERSION: "abc123" })).toMatchObject({
+  it("reads HTTP_ADDR, ADMIN_ADDR and SERVICE_VERSION", () => {
+    expect(loadConfig({ ...base, HTTP_ADDR: "127.0.0.1:9000", ADMIN_ADDR: "127.0.0.1:9191", SERVICE_VERSION: "abc123" })).toMatchObject({
       host: "127.0.0.1",
       port: 9000,
       build: "abc123",
+      adminHost: "127.0.0.1",
+      adminPort: 9191,
     });
   });
 
@@ -27,6 +31,8 @@ describe("loadConfig (12-factor startup config)", () => {
     ["a missing OpenAPI file", { PASSAGE_API_URL: base.PASSAGE_API_URL }, /PASSAGE_OPENAPI_JSON/],
     ["an address without a port", { ...base, HTTP_ADDR: "localhost" }, /HTTP_ADDR/],
     ["a port out of range", { ...base, HTTP_ADDR: ":70000" }, /HTTP_ADDR/],
+    ["an admin address without a port", { ...base, ADMIN_ADDR: "localhost" }, /ADMIN_ADDR/],
+    ["the admin listener on the API port", { ...base, ADMIN_ADDR: ":8080" }, /different port/],
   ])("refuses %s at startup", (_name, env, message) => {
     expect(() => loadConfig(env)).toThrow(message);
   });

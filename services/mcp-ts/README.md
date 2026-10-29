@@ -15,7 +15,8 @@ decide what the caller may do. The gateway holds no credentials of its own.
 | `src/openapi.ts` | `toolsFromOpenApi`: generates tool definitions from an OpenAPI 3.1 document; `tenant_id` and header parameters are left out of the input schema |
 | `src/jsonrpc.ts` | MCP JSON-RPC handler: `initialize`, `tools/list`, `tools/call`, notifications |
 | `src/server.ts` | HTTP transport on `node:http`: `POST /mcp` (single and batched JSON-RPC, 202 for notifications, 1 MiB body cap), `GET /healthz`, `GET /readyz`, `X-Passage-Api-Build` on every response. `principalFromHeaders` builds the caller from the bearer token and the edge headers |
-| `src/main.ts` | Entrypoint: 12-factor config (`PASSAGE_API_URL`, `PASSAGE_OPENAPI_JSON`, `HTTP_ADDR`, `SERVICE_VERSION`), loads the tool catalog from the OpenAPI JSON, starts the server. Audit lines go to stdout as JSON without token or argument values |
+| `src/metrics.ts` | Prometheus counters `mcp_http_requests_total{route,status}` (bounded route labels) and `mcp_rate_limited_total`, served by the admin listener (`GET /metrics`, `GET /healthz`) on its own port, never on the public one |
+| `src/main.ts` | Entrypoint: 12-factor config (`PASSAGE_API_URL`, `PASSAGE_OPENAPI_JSON`, `HTTP_ADDR`, `ADMIN_ADDR` default `:9090`, `SERVICE_VERSION`), loads the tool catalog from the OpenAPI JSON, starts the server and the admin listener. Audit lines go to stdout as JSON without token or argument values |
 | `src/ratelimit.ts` | Per-pod fixed-window limiter keyed by tenant and user; `RateLimit-*` and `Retry-After` headers. Counters are in memory, so each pod enforces its own limit until the shared-store ADR is settled |
 | `src/schema.ts` | `schemaViolations`: validates a read tool's 200 body against its `outputSchema` (type, `nullable`, enum, properties, required, items; `$ref` and other keywords are not checked); the gateway returns `MCP-0502` on violation. Write tools are not checked, because their upstream has already committed |
 | `src/upstream.ts` | `createFetchUpstream`: calls the Passage API with `fetch`, forwarding the user's bearer token |
@@ -43,7 +44,7 @@ npm run typecheck # tsc --noEmit
 npm run build     # tsc -p tsconfig.build.json
 
 # run locally against an API and its OpenAPI document as JSON
-PASSAGE_API_URL=http://localhost:8080 PASSAGE_OPENAPI_JSON=./openapi.json HTTP_ADDR=127.0.0.1:8090 node dist/main.js
+PASSAGE_API_URL=http://localhost:8080 PASSAGE_OPENAPI_JSON=./openapi.json HTTP_ADDR=127.0.0.1:8090 ADMIN_ADDR=127.0.0.1:9091 node dist/main.js
 ```
 
 No database is needed. The server tests bind an ephemeral port on 127.0.0.1;

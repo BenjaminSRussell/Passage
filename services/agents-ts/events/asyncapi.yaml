@@ -11,7 +11,11 @@ info:
     outbox wiring that writes them inside the business transaction is a later
     slice (see NOT-IMPLEMENTED.md), so `channels` and `operations` stay empty
     until that wiring exists and the spec matches code.
-    `version.promoted` is still planned.
+    `version.promoted` is still planned. `killswitch.changed` is produced by
+    `POST /api/v1/agents/kill-switch` through the router's `publish` port and
+    read back by `KillSwitchFeed` (src/runtime/killswitch-feed.ts), which
+    parses exactly the KillSwitchChangedData schema below; the broker channel
+    is added with the outbox wiring.
 defaultContentType: application/cloudevents+json
 channels: {}
 operations: {}

@@ -33,6 +33,11 @@ deterministic in tests.
 | `src/domain/reconcile.ts` | 9.47.9: provider-billed against recorded tokens per run, 1% tolerance, estimated runs (BR-47.4) flagged separately |
 | `src/domain/events.ts` | Payload builders and validation for `run.completed`, `approval.requested` (redacted proposal; AGT-0210 on raw PII), `budget.threshold` (the cost-guard alert, AC-47.4) and `killswitch.changed`. Tool names and decisions only; no inputs, outputs or display text |
 | `src/errors.ts` | `AgentError` with the stable PRD 9.47.18 codes |
+| `src/api/router.ts` | `createAgentsHandler`: the node:http listener for the routes this slice serves (`GET`/`POST /api/v1/agents/kill-switch`, `POST /api/v1/agents/runs/{run_id}/actions/{id}/decision`). Reads the caller from the edge headers, caps bodies at 64 KiB, answers RFC 9457 problems and never echoes an internal error |
+| `src/api/killswitch.ts` | Kill switch toggle (AC-47.6): tenant scope needs AgentAdmin and the caller's own tenant, global scope PlatformAdmin. Idempotent by scope. The `killswitch.changed` event is published first and applied to the local registry only after it succeeded. `readKillSwitchStatus` serves the administration screen |
+| `src/api/decision.ts` | Approval decision (FR-47.8): approver duty (AGT-0203), self-approval (AGT-0209), expiry recorded as REJECTED/EXPIRED (BR-47.3). Idempotent by action id with a first-writer-wins `ApprovalStore.record`; a different decision on a decided action is 409. Every store call is scoped to the caller's tenant |
+| `src/api/principal.ts` | The caller from `x-passage-tenant`, `x-passage-user`, `x-passage-duties` (401 on a missing, malformed or nil tenant), the HTTP error codes and the mapping of `AgentError` to status |
+| `src/runtime/killswitch-feed.ts` | `KillSwitchFeed`: applies each consumed `killswitch.changed` message to a worker's registry and keeps the fail-closed window open on heartbeats. A malformed message, one without an envelope tenant, or a tenant toggle addressed to another tenant throws so the consumer sends it to the DLQ |
 
 ## Run and test
 
@@ -53,7 +58,8 @@ The tests run without a database or network. Ports are faked in `test/fakes.ts`.
 - FR-47.13 provider layer: Anthropic, OpenAI-compatible (Azure through the same adapter) and Amazon Bedrock (Converse API, in-tree SigV4 checked against AWS SDK reference signatures) adapters, with parity tests in `test/providers.test.ts` and `test/bedrock.test.ts`
 - FR-47.5 to 47.7 agent definitions: `defaultCatalog` in `src/agents/catalog.ts` builds version 1 of the five agents (prompts, read and propose tools only, required duties); wiring them into the runtime is not built
 - BR-47.9 provider failover: `createFailoverProvider` in `src/providers/failover.ts`; only outages (5xx, timeouts, transport errors) count, a rejected request never fails over
-- FR-47.12 kill switch: `KillSwitchRegistry` and the `killswitch.changed` payload; the engine checks it before the provider call (AC-47.6). The delivery channel is not built
+- FR-47.12 kill switch: `KillSwitchRegistry` and the `killswitch.changed` payload; the engine checks it before the provider call (AC-47.6). The toggle and status endpoints and the worker-side feed are built; the Kafka consumer that drives the feed and the outbox writer behind `publish` are not
+- FR-47.8 approval decision: the endpoint and its rules are built against the `ApprovalStore` port; the `agent_action` table behind it is not
 - AC-47.4 cost guard: `budgetThresholdEvent` fires once when the budget moves into SOFT (80%) or HARD (100%). The event is the alert; routing it to a pager is the alerting consumer's job
 - FR-47.14 knowledge retrieval: hybrid fusion and the 0.75 citation gate (AGT-0212) in `src/domain/knowledge.ts`; the search tool and index are not built
 - 9.47.9 reconciliation: `reconcileRuns` compares billed and recorded tokens within 1%; the daily job is not built
@@ -73,6 +79,14 @@ The tests run without a database or network. Ports are faked in `test/fakes.ts`.
 | `AGT-0206` | Provider unavailable (transport, timeout, 5xx), rate-limited or rejected (4xx), or an unusable response; the run fails. Only the first group counts towards failover |
 | `AGT-0212` | No knowledge source reaches citation similarity 0.75; the copilot says so instead of guessing |
 | `AGT-0214` | A tool call failed; 4xx is not retried |
+| `AGT-0400` | Malformed request: body not a JSON object, unknown field or invalid value |
+| `AGT-0401` | The edge did not identify a tenant and user |
+| `AGT-0403` | A tenant administrator toggled another tenant's kill switch |
+| `AGT-0404` | No such route, or no approval request for this action in the caller's tenant |
+| `AGT-0405` | Method not allowed on the route (`Allow` lists the methods) |
+| `AGT-0409` | The action was already decided differently |
+| `AGT-0413` | Request body above 64 KiB |
+| `AGT-0500` | Unexpected error; the detail is never echoed |
 
 Error codes not listed here (AGT-0205, 0207, 0211, 0213) are in the
 PRD catalog; they belong to slices that are not built yet.

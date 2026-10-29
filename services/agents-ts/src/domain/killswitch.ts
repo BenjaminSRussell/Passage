@@ -44,6 +44,8 @@ export class KillSwitchRegistry implements KillSwitchPort {
   private appliedVersion = 0;
   private globalOn = false;
   private readonly tenantsOn = new Set<string>();
+  /** The last applied change per scope: "GLOBAL" or a tenant id. */
+  private readonly last = new Map<string, KillSwitchChange>();
   private syncedAtMs: number;
   private readonly nowMs: () => number;
   private readonly maxStalenessMs: number;
@@ -59,6 +61,7 @@ export class KillSwitchRegistry implements KillSwitchPort {
     this.syncedAtMs = this.nowMs();
     if (change.version <= this.appliedVersion) return false;
     this.appliedVersion = change.version;
+    this.last.set(change.scope === "GLOBAL" ? "GLOBAL" : change.tenantId, change);
     if (change.scope === "GLOBAL") {
       this.globalOn = change.active;
     } else if (change.active) {
@@ -72,6 +75,14 @@ export class KillSwitchRegistry implements KillSwitchPort {
   /** Called on every stream heartbeat, even when no toggle arrived. */
   heartbeat(): void {
     this.syncedAtMs = this.nowMs();
+  }
+
+  /**
+   * The last change applied for the global switch (no tenant) or for one
+   * tenant; undefined when that switch has never been toggled (it is off).
+   */
+  lastChange(tenantId?: string): KillSwitchChange | undefined {
+    return this.last.get(tenantId ?? "GLOBAL");
   }
 
   get version(): number {

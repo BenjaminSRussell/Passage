@@ -9,10 +9,11 @@ import { postChat } from "./api/client";
 describe("copilot module", () => {
   it("uses its folder name as id and declares its route and duty-gated nav", () => {
     expect(copilot.id).toBe("copilot");
-    expect(copilot.routes.map((r) => r.path)).toEqual(["/copilot", "/copilot/tools", "/copilot/tools/:name"]);
+    expect(copilot.routes.map((r) => r.path)).toEqual(["/copilot", "/copilot/tools", "/copilot/tools/:name", "/copilot/kill-switch"]);
     expect(copilot.nav).toEqual([
       { label: "Copilot", to: "/copilot", duty: "CopilotUse" },
       { label: "Tool catalog", to: "/copilot/tools", duty: "CopilotUse" },
+      { label: "Agent kill switch", to: "/copilot/kill-switch", duty: "AgentAdmin" },
     ]);
     expect(copilot.nav.every((n) => n.to.startsWith("/copilot"))).toBe(true);
   });

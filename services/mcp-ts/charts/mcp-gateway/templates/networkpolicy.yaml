@@ -1,6 +1,7 @@
 # Same-namespace pods (the agent runtime) reach the gateway. The edge gateway
 # that verifies the user's token and routes mcp.passage.<tenant> runs in another
 # namespace and is denied until it is listed in networkPolicy.ingressNamespaces.
+# Prometheus reaches only the admin port (/metrics).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -22,3 +23,9 @@ spec:
         {{- end }}
       ports:
         - { protocol: TCP, port: 8080 }
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.metricsNamespace }}
+      ports:
+        - { protocol: TCP, port: 9090 }
