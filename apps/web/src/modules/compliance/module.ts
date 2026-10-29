@@ -4,12 +4,18 @@ import { AuditCasesPage } from "./AuditCasesPage";
 import { AuditRunPage } from "./AuditRunPage";
 import { BreachClocksPage } from "./BreachClocksPage";
 import { BreakGlassPage } from "./BreakGlassPage";
+import { CampaignPage } from "./CampaignPage";
 import { ComplianceHome } from "./ComplianceHome";
 import { ConflictDetailPage } from "./ConflictDetailPage";
 import { ConflictsPage } from "./ConflictsPage";
 import { ExportCheckPage } from "./ExportCheckPage";
+import { ExportPolicyPage } from "./ExportPolicyPage";
+import { IncidentStepPage } from "./IncidentStepPage";
 import { PackDetailPage } from "./PackDetailPage";
 import { PacksPage } from "./PacksPage";
+import { PrivacyRequestNewPage } from "./PrivacyRequestNewPage";
+import { PrivacyRequestPage } from "./PrivacyRequestPage";
+import { PrivacyRequestsPage } from "./PrivacyRequestsPage";
 import { RoleCheckPage } from "./RoleCheckPage";
 import { RulesPage } from "./RulesPage";
 import { ScreeningCheckPage } from "./ScreeningCheckPage";
@@ -20,7 +26,7 @@ import { TdsPage } from "./TdsPage";
 const compliance: PassageModule = {
   id: "compliance",
   title: "Compliance",
-  description: "Segregation-of-duties conflicts and mitigations, role assignment checks, SoD rules, audit rule runs and audit cases, break-glass access, breach notification clocks, sanctions screening hits and checks, export license checks, country packs and the India TDS calculator.",
+  description: "Segregation-of-duties conflicts and mitigations, role assignment checks, SoD rules, audit rule runs and audit cases, break-glass access, breach notification clocks, sanctions screening hits and checks, export license checks, privacy requests, certification campaigns, incident steps, export policy, country packs and the India TDS calculator.",
   routes: [
     { path: "/compliance", element: createElement(ComplianceHome) },
     { path: "/compliance/sod/conflicts", element: createElement(ConflictsPage) },
@@ -38,6 +44,12 @@ const compliance: PassageModule = {
     { path: "/compliance/screening/hits/:id", element: createElement(ScreeningHitPage), handle: { title: "Screening hit" } },
     { path: "/compliance/screening/check", element: createElement(ScreeningCheckPage) },
     { path: "/compliance/export-checks", element: createElement(ExportCheckPage) },
+    { path: "/compliance/privacy/requests", element: createElement(PrivacyRequestsPage) },
+    { path: "/compliance/privacy/requests/new", element: createElement(PrivacyRequestNewPage), handle: { title: "Record a privacy request" } },
+    { path: "/compliance/privacy/requests/:id", element: createElement(PrivacyRequestPage), handle: { title: "Privacy request" } },
+    { path: "/compliance/campaigns", element: createElement(CampaignPage) },
+    { path: "/compliance/incidents/step", element: createElement(IncidentStepPage) },
+    { path: "/compliance/export-policy", element: createElement(ExportPolicyPage) },
   ],
   nav: [
     { label: "Overview", to: "/compliance", duty: "SoDReview" },
@@ -53,6 +65,11 @@ const compliance: PassageModule = {
     { label: "Screening hits", to: "/compliance/screening/hits", duty: "TradeComplianceView" },
     { label: "Screening check", to: "/compliance/screening/check", duty: "TradeComplianceView" },
     { label: "Export license check", to: "/compliance/export-checks", duty: "TradeComplianceView" },
+    { label: "Privacy requests", to: "/compliance/privacy/requests", duty: "PrivacyOfficer" },
+    { label: "Record a privacy request", to: "/compliance/privacy/requests/new", duty: "PrivacyIntake" },
+    { label: "Certification campaign", to: "/compliance/campaigns", duty: "SoDAdmin" },
+    { label: "Incident step check", to: "/compliance/incidents/step", duty: "SecurityIncidentManage" },
+    { label: "Export policy check", to: "/compliance/export-policy", duty: "ComplianceView" },
   ],
 };
 
