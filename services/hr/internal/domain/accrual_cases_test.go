@@ -130,10 +130,16 @@ func TestAccrualFixture36(t *testing.T) {
 	for i, h := range rows[0] {
 		col[h] = i
 	}
+	for _, h := range []string{"id", "hire_date", "rate", "prorate", "max_balance", "carry_max", "used", "accrued", "discarded", "balance_dec31", "carried", "expired", "balance_jan31", "carry_used_jan", "current_used_jan", "carry_expired_mar31", "balance_mar31"} {
+		if _, ok := col[h]; !ok {
+			t.Fatalf("fixture header %q is missing", h)
+		}
+	}
 	rows = rows[1:]
 	if len(rows) != 36 {
 		t.Fatalf("fixture has %d cases, want 36", len(rows))
 	}
+	const planYear = 2026
 	for _, r := range rows {
 		get := func(name string) string { return r[col[name]] }
 		t.Run(get("id"), func(t *testing.T) {
@@ -141,20 +147,21 @@ func TestAccrualFixture36(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if hire.Year() != planYear {
+				t.Fatalf("hire year %d, fixture is the %d plan year", hire.Year(), planYear)
+			}
 			rate, maxBalance, carryMax := dec(get("rate")), dec(get("max_balance")), dec(get("carry_max"))
 			prorate := get("prorate") == "true"
 
 			var l Ledger
 			discarded := decimal.Zero
 			for m := hire.Month(); m <= time.December; m++ {
-				first := time.Date(2026, m, 1, 0, 0, 0, 0, time.UTC)
-				daysInMonth := first.AddDate(0, 1, -1).Day()
-				employed := daysInMonth
-				if m == hire.Month() {
-					employed = daysInMonth - hire.Day() + 1
-				}
+				from := time.Date(planYear, m, 1, 0, 0, 0, 0, time.UTC)
 				var cut decimal.Decimal
-				l, cut = l.Accrue(AccrualAmount(rate, employed, daysInMonth, prorate), maxBalance)
+				l, cut = l.Accrue(PeriodAccrual(PeriodInput{
+					Rate: rate, Prorate: prorate, From: from, To: from.AddDate(0, 1, -1),
+					Employed: []DaySpan{{From: hire}}, HireDate: hire,
+				}), maxBalance)
 				discarded = discarded.Add(cut)
 			}
 			assertDec(t, "accrued", l.Current.Accrued, get("accrued"))
@@ -166,12 +173,29 @@ func TestAccrualFixture36(t *testing.T) {
 			}
 			assertDec(t, "balance 2026-12-31", l.Total(), get("balance_dec31"))
 
-			l, expired := l.YearEnd(carryMax)
-			assertDec(t, "carried", l.Carry.Balance(), get("carried"))
+			closed, carried, expired := CloseYear(l, carryMax)
+			assertDec(t, "carried", carried, get("carried"))
 			assertDec(t, "expired", expired, get("expired"))
+			assertDec(t, "closed ledger balance", closed.Total(), get("carried"))
 
-			l, _ = l.Accrue(AccrualAmount(rate, 31, 31, prorate), maxBalance)
-			assertDec(t, "balance 2027-01-31", l.Total(), get("balance_jan31"))
+			next := Ledger{Carry: Bucket{Accrued: carried}}
+			jan := time.Date(planYear+1, time.January, 1, 0, 0, 0, 0, time.UTC)
+			next, _ = next.Accrue(PeriodAccrual(PeriodInput{
+				Rate: rate, Prorate: prorate, From: jan, To: jan.AddDate(0, 1, -1),
+				Employed: []DaySpan{{From: hire}}, HireDate: hire,
+			}), maxBalance)
+			assertDec(t, "balance 2027-01-31", next.Total(), get("balance_jan31"))
+
+			next, err = next.Consume(decimal.NewFromInt(1), decimal.Zero)
+			if err != nil {
+				t.Fatalf("consume 1.00 in January: %v", err)
+			}
+			assertDec(t, "carry-over used first", next.Carry.Used, get("carry_used_jan"))
+			assertDec(t, "current used after carry-over", next.Current.Used, get("current_used_jan"))
+
+			next, carryExpired := ExpireCarryOver(next)
+			assertDec(t, "carry-over expired 2027-03-31", carryExpired, get("carry_expired_mar31"))
+			assertDec(t, "balance 2027-03-31", next.Total(), get("balance_mar31"))
 		})
 	}
 }
