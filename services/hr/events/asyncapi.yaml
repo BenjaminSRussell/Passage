@@ -43,6 +43,11 @@ channels:
     messages:
       benefitEnrollmentChanged:
         $ref: "#/components/messages/BenefitEnrollmentChanged"
+  courseCompleted:
+    address: passage.hr.course
+    messages:
+      courseCompleted:
+        $ref: "#/components/messages/CourseCompleted"
 operations:
   publishWorkerSkillChanged:
     action: send
@@ -86,6 +91,12 @@ operations:
       $ref: "#/channels/positionAssignmentChanged"
     messages:
       - $ref: "#/channels/positionAssignmentChanged/messages/positionAssignmentChanged"
+  publishCourseCompleted:
+    action: send
+    channel:
+      $ref: "#/channels/courseCompleted"
+    messages:
+      - $ref: "#/channels/courseCompleted/messages/courseCompleted"
 components:
   messages:
     WorkerCreated:
@@ -135,7 +146,57 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/CertificationIssuedData"
+    CourseCompleted:
+      name: dev.passage.hr.course.completed.v1
+      description: Published in the same transaction as a registration is recorded ATTENDED with PASS and its skills and certificate are written (8.42.5, FR-42.14, BR-42.9). Wave-45 dispatch consumes the skills; notifications consume the certificate id. Codes, ratings and ids only; no worker names.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/CourseCompletedData"
   schemas:
+    CourseCompletedData:
+      type: object
+      description: |
+        skills lists every skill outcome of the course with the rating the
+        worker holds after the completion, max(existing, course rating); a
+        raised rating also publishes workerskill.changed and a new
+        certificate certification.issued, in the same transaction.
+        completed_on is the session end date. certification_id is null when
+        the course issues no certificate.
+      required: [registration_id, worker_id, course_id, session_id, completed_on, skills, certification_id]
+      properties:
+        registration_id:
+          type: string
+          format: uuid
+        worker_id:
+          type: string
+          format: uuid
+        course_id:
+          type: string
+          format: uuid
+        session_id:
+          type: string
+          format: uuid
+        completed_on:
+          type: string
+          format: date
+        skills:
+          type: array
+          items:
+            type: object
+            required: [skill_id, skill_code, rating]
+            properties:
+              skill_id:
+                type: string
+                format: uuid
+              skill_code:
+                type: string
+              rating:
+                type: integer
+                minimum: 1
+                maximum: 10
+        certification_id:
+          type: [string, "null"]
+          format: uuid
     WorkerSkillChangedData:
       type: object
       description: A rating recorded again with the same value publishes nothing.

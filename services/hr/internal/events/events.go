@@ -28,12 +28,17 @@ var (
 	// is recorded (BR-42.8). Wave-45 dispatch stops matching on the expiry day;
 	// reminders (FR-42.20) read expires_on.
 	CertificationIssued = events.Type(Context, "certification", "issued", 1)
+	// CourseCompleted is written in the same transaction as a registration is
+	// recorded ATTENDED with PASS and its skills and certificate are written
+	// (8.42.5, BR-42.9); wave-45 dispatch reads the skills, notifications the
+	// certificate.
+	CourseCompleted = events.Type(Context, "course", "completed", 1)
 )
 
 // All lists every event type the service publishes (asyncapi.yaml).
 func All() []string {
 	return []string{WorkerCreated, EmploymentChanged, PositionAssignmentChanged, AbsenceApproved, BenefitEnrollmentChanged,
-		WorkerSkillChanged, CertificationIssued}
+		WorkerSkillChanged, CertificationIssued, CourseCompleted}
 }
 
 // ActionHire is the employment.changed action for a new employment. Transfer,
@@ -138,4 +143,25 @@ type CertificationIssuedData struct {
 	Code      string  `json:"code"`
 	IssuedOn  string  `json:"issued_on"`
 	ExpiresOn *string `json:"expires_on"`
+}
+
+// CourseSkillAward is one skill outcome of a completed course: the rating the
+// worker holds after the completion, never lower than before (BR-42.9).
+type CourseSkillAward struct {
+	SkillID   string `json:"skill_id"`
+	SkillCode string `json:"skill_code"`
+	Rating    int    `json:"rating"`
+}
+
+// CourseCompletedData is the 8.42.5 contract (workerId, courseId, sessionId,
+// skills[], certificationId) in the kernel's snake_case payload style, plus
+// the registration id. certification_id is null when the course issues none.
+type CourseCompletedData struct {
+	RegistrationID  string             `json:"registration_id"`
+	WorkerID        string             `json:"worker_id"`
+	CourseID        string             `json:"course_id"`
+	SessionID       string             `json:"session_id"`
+	CompletedOn     string             `json:"completed_on"`
+	Skills          []CourseSkillAward `json:"skills"`
+	CertificationID *string            `json:"certification_id"`
 }

@@ -3,15 +3,18 @@ info:
   title: Passage HR API
   version: 0.1.0
   description: |
-    Wave 42 slices 1 to 4 (PSG-42): workers, employments, positions and
+    Wave 42 slices 1 to 5 (PSG-42): workers, employments, positions and
     position assignments with effective dating, the as-of manager query, the
     audited PII vault, absence plans, accrual, year end and carry-over,
     balances and requests with approval, benefit plans with CEL
     eligibility, a workforce simulation, life events and enrollments, and
     skills: the catalog, worker ratings, certificates with expiry, position
-    skill profiles, gap analysis and skill search. Personnel actions,
-    performance and goals, learning, questionnaires, incidents, recruiting
-    and compensation cycles are later slices (see NOT-IMPLEMENTED.md).
+    skill profiles, gap analysis and skill search, and courses: the catalog
+    with skill outcomes and certificates, sessions with capacity and a
+    waitlist, registrations with manager approval, and completion that writes
+    skills and certificates. Personnel actions, performance and goals,
+    questionnaires, incidents, recruiting and compensation cycles are later
+    slices (see NOT-IMPLEMENTED.md).
 servers:
   - url: https://api.{env}.passage.dev
     variables:
@@ -1369,6 +1372,407 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+  /v1/hr/courses:
+    get:
+      operationId: listCourses
+      summary: List the course catalog by code, with each course's skill outcomes (FR-42.14)
+      x-passage-duty: EssLearning
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page of courses
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CourseList"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createCourse
+      summary: Add a course with the skills a PASS awards and the certificate it issues (FR-42.14)
+      x-passage-duty: HcmLearningAdmin
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCourseRequest"
+      responses:
+        "201":
+          description: Course created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Course"
+        "200":
+          description: Idempotent replay; the stored course
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Course"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          description: HCM-SKL-NOT-FOUND (a skill outcome names no catalog skill)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: HCM-CRS-DUPLICATE or idempotency_key_in_flight
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: HCM-SKL-RATING (a rating outside the skill's scale) or idempotency_key_reuse
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/hr/courses/{id}:
+    get:
+      operationId: getCourse
+      summary: Get one course
+      x-passage-duty: EssLearning
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+      responses:
+        "200":
+          description: Course
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Course"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          description: HCM-CRS-NOT-FOUND
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/hr/courses/{id}/sessions:
+    get:
+      operationId: listCourseSessions
+      summary: List a course's sessions by start, with seat counts (at most 500)
+      x-passage-duty: EssLearning
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+      responses:
+        "200":
+          description: Sessions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CourseSessionList"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          description: HCM-CRS-NOT-FOUND
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+    post:
+      operationId: createCourseSession
+      summary: Schedule a session (dates, location or virtual link, instructor, capacity, waitlist, cost)
+      x-passage-duty: HcmLearningAdmin
+      parameters:
+        - $ref: "#/components/parameters/CourseId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCourseSessionRequest"
+      responses:
+        "201":
+          description: Session scheduled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CourseSession"
+        "200":
+          description: Idempotent replay; the stored session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CourseSession"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          description: HCM-CRS-NOT-FOUND
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: idempotency_key_in_flight
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: HCM-WRK-NOT-FOUND (the instructor is not a worker) or idempotency_key_reuse
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/hr/courses/sessions/{id}:
+    get:
+      operationId: getCourseSession
+      summary: Get one session with its confirmed, waitlisted and requested counts
+      x-passage-duty: EssLearning
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CourseSession"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          description: HCM-CRS-SESSION-NOT-FOUND
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/hr/courses/sessions/{id}/registrations:
+    get:
+      operationId: listCourseRegistrations
+      summary: The attendance list, in registration order (at most 500)
+      x-passage-duty: HcmLearningAdmin
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Registrations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CourseRegistrationList"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          description: HCM-CRS-SESSION-NOT-FOUND
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+    post:
+      operationId: registerForCourseSession
+      summary: Register a worker, self or by a manager (BR-42.9)
+      description: |
+        One registration per worker and session: a worker already registered
+        gets it back with 200. A course without manager approval takes a seat
+        now (CONFIRMED, else WAITLISTED, else HCM-CRS-001); with approval it
+        waits as REQUESTED with the HCM-CRS-002 warning. An employee with only
+        EssLearning registers only themselves (HCM-CRS-NOT-OWN). Registration
+        closes when the session ends.
+      x-passage-duty: EssLearning
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterForCourseRequest"
+      responses:
+        "201":
+          description: Registration placed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CourseRegistrationResult"
+        "200":
+          description: The worker's existing registration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CourseRegistrationResult"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          description: HCM-CRS-NOT-OWN
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: HCM-CRS-SESSION-NOT-FOUND or HCM-WRK-NOT-FOUND
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: HCM-CRS-STATE (the session has ended)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: HCM-CRS-001 (the session and its waitlist are full)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/hr/courses/sessions/{id}/complete:
+    post:
+      operationId: completeCourseSession
+      summary: Record attendance and results; a PASS writes skills and the certificate (FR-42.14, BR-42.9)
+      description: |
+        From the session start. Every line names a registered worker. A
+        CONFIRMED registration takes ATTENDED (optionally PASS or FAIL with a
+        score) or NO_SHOW; an ATTENDED one without a result may get its result
+        later. The same outcome again changes nothing, so a retry is safe
+        without an Idempotency-Key. A PASS raises each skill outcome to
+        max(existing, course rating), issues the course certificate from the
+        session end date for the course's validity months, and publishes
+        course.completed in the same transaction. All lines apply or none.
+      x-passage-duty: HcmLearningAdmin
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompleteCourseSessionRequest"
+      responses:
+        "200":
+          description: Each line's registration and how many lines changed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CourseCompletion"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          description: HCM-CRS-SESSION-NOT-FOUND or HCM-CRS-REG-NOT-FOUND
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: HCM-CRS-STATE (not started, not confirmed, or a different outcome already recorded)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/hr/courses/registrations/{id}/approve:
+    post:
+      operationId: approveCourseRegistration
+      summary: Approve a REQUESTED registration; it takes a seat or a waitlist place
+      x-passage-duty: MssApprove
+      parameters:
+        - $ref: "#/components/parameters/RegistrationId"
+      responses:
+        "200":
+          description: Approved registration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CourseRegistration"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          description: HCM-CRS-SELF-APPROVAL
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: HCM-CRS-REG-NOT-FOUND
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: HCM-CRS-STATE (not awaiting approval)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: HCM-CRS-001 (full)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/hr/courses/registrations/{id}/cancel:
+    post:
+      operationId: cancelCourseRegistration
+      summary: Cancel or decline a registration; a freed seat goes to the oldest waitlisted
+      description: |
+        Canceling again returns the registration unchanged. A registration
+        with a recorded outcome cannot be canceled. An employee with only
+        EssLearning cancels only their own (HCM-CRS-NOT-OWN).
+      x-passage-duty: EssLearning
+      parameters:
+        - $ref: "#/components/parameters/RegistrationId"
+      responses:
+        "200":
+          description: Canceled registration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CourseRegistration"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          description: HCM-CRS-NOT-OWN
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: HCM-CRS-REG-NOT-FOUND
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: HCM-CRS-STATE (outcome recorded)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
 components:
   securitySchemes:
     bearerAuth:
@@ -1426,6 +1830,27 @@ components:
       schema:
         type: string
         format: date
+    CourseId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    SessionId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    RegistrationId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -2816,3 +3241,313 @@ components:
             $ref: "#/components/schemas/SkillMatch"
         truncated:
           type: boolean
+    CourseSkillOutcomeInput:
+      type: object
+      required: [skillCode, rating]
+      additionalProperties: false
+      properties:
+        skillCode:
+          type: string
+          pattern: "^[A-Z0-9][A-Z0-9_-]{0,19}$"
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 10
+          description: Must sit on the skill's scale (HCM-SKL-RATING)
+    CourseSkillOutcome:
+      type: object
+      required: [skillId, skillCode, skillName, rating]
+      properties:
+        skillId:
+          type: string
+          format: uuid
+        skillCode:
+          type: string
+        skillName:
+          type: string
+        rating:
+          type: integer
+    CreateCourseRequest:
+      type: object
+      required: [code, name]
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          pattern: "^[A-Z0-9][A-Z0-9_-]{0,19}$"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        courseGroup:
+          type: [string, "null"]
+          maxLength: 60
+        skillOutcomes:
+          type: array
+          maxItems: 20
+          description: Each skill once
+          items:
+            $ref: "#/components/schemas/CourseSkillOutcomeInput"
+        certificationCode:
+          type: [string, "null"]
+          pattern: "^[A-Z0-9][A-Z0-9_-]{0,19}$"
+          description: Given together with certificationName
+        certificationName:
+          type: [string, "null"]
+          maxLength: 120
+        validityMonths:
+          type: [integer, "null"]
+          minimum: 0
+          maximum: 240
+          description: Needs a certificate; 0 or absent issues a certificate that does not expire
+        requiresManagerApproval:
+          type: boolean
+          default: false
+    Course:
+      type: object
+      required: [id, code, name, skillOutcomes, validityMonths, requiresManagerApproval, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        courseGroup:
+          type: string
+        skillOutcomes:
+          type: array
+          items:
+            $ref: "#/components/schemas/CourseSkillOutcome"
+        certificationCode:
+          type: string
+        certificationName:
+          type: string
+        validityMonths:
+          type: integer
+        requiresManagerApproval:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+    CourseList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Course"
+        nextCursor:
+          type: string
+    CreateCourseSessionRequest:
+      type: object
+      required: [startsAt, endsAt, capacity]
+      additionalProperties: false
+      description: Give a location, a virtualUrl, or both; at most one instructor; a cost with its currency.
+      properties:
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+          description: After startsAt
+        location:
+          type: [string, "null"]
+          maxLength: 200
+        virtualUrl:
+          type: [string, "null"]
+          maxLength: 500
+          description: http or https
+        instructorWorkerId:
+          type: [string, "null"]
+          format: uuid
+        instructorPartyId:
+          type: [string, "null"]
+          format: uuid
+          description: External instructor (wave-7 party); not checked yet
+        capacity:
+          type: integer
+          minimum: 1
+          maximum: 10000
+        waitlistCapacity:
+          type: [integer, "null"]
+          minimum: 0
+          maximum: 100
+          default: 5
+        costPerAttendee:
+          type: [string, "null"]
+          description: Non-negative decimal with at most the currency's minor-unit places
+        currency:
+          type: [string, "null"]
+          pattern: "^[A-Z]{3}$"
+    CourseSession:
+      type: object
+      required: [id, courseId, courseCode, courseName, startsAt, endsAt, capacity, waitlistCapacity, confirmed, waitlisted, requested, seatsLeft, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        courseId:
+          type: string
+          format: uuid
+        courseCode:
+          type: string
+        courseName:
+          type: string
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+        location:
+          type: string
+        virtualUrl:
+          type: string
+        instructorWorkerId:
+          type: string
+          format: uuid
+        instructorPartyId:
+          type: string
+          format: uuid
+        capacity:
+          type: integer
+        waitlistCapacity:
+          type: integer
+        costPerAttendee:
+          type: string
+          description: Decimal string at the currency's minor-unit places
+        currency:
+          type: string
+        confirmed:
+          type: integer
+        waitlisted:
+          type: integer
+        requested:
+          type: integer
+          description: Registrations awaiting manager approval; they hold no seat
+        seatsLeft:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+    CourseSessionList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CourseSession"
+    RegisterForCourseRequest:
+      type: object
+      required: [workerId]
+      additionalProperties: false
+      properties:
+        workerId:
+          type: string
+          format: uuid
+    CourseRegistration:
+      type: object
+      required: [id, sessionId, workerId, personnelNumber, legalName, status, queuedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          format: uuid
+        workerId:
+          type: string
+          format: uuid
+        personnelNumber:
+          type: string
+        legalName:
+          type: string
+        status:
+          type: string
+          enum: [REQUESTED, CONFIRMED, WAITLISTED, ATTENDED, NO_SHOW, CANCELED]
+        result:
+          type: string
+          enum: [PASS, FAIL]
+        score:
+          type: string
+          description: Decimal string with two places
+        completedOn:
+          type: string
+          format: date
+          description: The session end date, on ATTENDED and NO_SHOW
+        queuedAt:
+          type: string
+          format: date-time
+          description: Registration order for seats and the waitlist
+    CourseRegistrationResult:
+      allOf:
+        - $ref: "#/components/schemas/CourseRegistration"
+        - type: object
+          required: [warnings]
+          properties:
+            warnings:
+              type: array
+              description: Non-blocking warnings such as HCM-CRS-002.
+              items:
+                type: object
+                required: [code, detail]
+                properties:
+                  code:
+                    type: string
+                  detail:
+                    type: string
+    CourseRegistrationList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CourseRegistration"
+    CompleteCourseSessionRequest:
+      type: object
+      required: [results]
+      additionalProperties: false
+      properties:
+        results:
+          type: array
+          minItems: 1
+          maxItems: 500
+          description: Each worker once
+          items:
+            type: object
+            required: [workerId, outcome]
+            additionalProperties: false
+            properties:
+              workerId:
+                type: string
+                format: uuid
+              outcome:
+                type: string
+                enum: [ATTENDED, NO_SHOW]
+              result:
+                type: string
+                enum: [PASS, FAIL, ""]
+                description: ATTENDED only
+              score:
+                type: [string, "null"]
+                description: Decimal 0 to 999.99, with a result only
+    CourseCompletion:
+      type: object
+      required: [items, changed, passed]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CourseRegistration"
+        changed:
+          type: integer
+          description: Lines that changed a registration (0 on a retry)
+        passed:
+          type: integer
+          description: Lines newly recorded with PASS

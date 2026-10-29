@@ -5,9 +5,13 @@ import { AbsencePlansPage } from "./AbsencePlansPage";
 import { AbsenceRequestsPage } from "./AbsenceRequestsPage";
 import { BenefitPlanDetailPage } from "./BenefitPlanDetailPage";
 import { BenefitPlansPage } from "./BenefitPlansPage";
+import { CourseDetailPage } from "./CourseDetailPage";
+import { CourseSessionPage } from "./CourseSessionPage";
+import { CoursesPage } from "./CoursesPage";
 import { ExpiringCertificationsPage } from "./ExpiringCertificationsPage";
 import { NewBenefitPlanPage } from "./NewBenefitPlanPage";
 import { NewAbsencePlanPage } from "./NewAbsencePlanPage";
+import { NewCoursePage } from "./NewCoursePage";
 import { NewPositionPage } from "./NewPositionPage";
 import { NewSkillPage } from "./NewSkillPage";
 import { NewWorkerPage } from "./NewWorkerPage";
@@ -22,7 +26,7 @@ const hr: PassageModule = {
   id: "hr",
   title: "Human resources",
   description:
-    "Workers with masked personal data and an audited reveal, effective-dated employments, positions with FTE and reports-to lines, assignments, each worker's position and manager on any date, absence plans, accrual, balances and requests, benefit plans with eligibility simulation, life events and enrollments, and skills: the catalog, worker ratings and certificates, position skill profiles, gap analysis, skill search and expiring certifications.",
+    "Workers with masked personal data and an audited reveal, effective-dated employments, positions with FTE and reports-to lines, assignments, each worker's position and manager on any date, absence plans, accrual, balances and requests, benefit plans with eligibility simulation, life events and enrollments, and skills: the catalog, worker ratings and certificates, position skill profiles, gap analysis, skill search and expiring certifications, and courses: the catalog, sessions with seats and a waitlist, registrations with approval, and attendance that writes skills and certificates.",
   routes: [
     { path: "/hr", element: createElement(WorkersPage), handle: { title: "Workers" } },
     { path: "/hr/workers", element: createElement(WorkersPage), handle: { title: "Workers" } },
@@ -42,6 +46,10 @@ const hr: PassageModule = {
     { path: "/hr/skills/new", element: createElement(NewSkillPage), handle: { title: "New skill" } },
     { path: "/hr/skills/search", element: createElement(SkillSearchPage), handle: { title: "Find workers by skill" } },
     { path: "/hr/certifications/expiring", element: createElement(ExpiringCertificationsPage), handle: { title: "Expiring certifications" } },
+    { path: "/hr/courses", element: createElement(CoursesPage), handle: { title: "Courses" } },
+    { path: "/hr/courses/new", element: createElement(NewCoursePage), handle: { title: "New course" } },
+    { path: "/hr/courses/sessions/:id", element: createElement(CourseSessionPage), handle: { title: "Course session" } },
+    { path: "/hr/courses/:id", element: createElement(CourseDetailPage), handle: { title: "Course" } },
   ],
   nav: [
     { label: "Workers", to: "/hr/workers", duty: "HcmWorkerInquire" },
@@ -52,6 +60,7 @@ const hr: PassageModule = {
     { label: "Skills", to: "/hr/skills", duty: "HcmWorkerInquire" },
     { label: "Skill search", to: "/hr/skills/search", duty: "HcmOrgInquire" },
     { label: "Expiring certifications", to: "/hr/certifications/expiring", duty: "HcmWorkerInquire" },
+    { label: "Courses", to: "/hr/courses", duty: "HcmLearningAdmin" },
   ],
 };
 

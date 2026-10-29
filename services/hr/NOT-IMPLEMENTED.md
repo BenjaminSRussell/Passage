@@ -19,7 +19,13 @@ the `workerskill.changed` event, certificates with expiry (given as a date or
 as validity months) and the `certification.issued` event, the
 certifications-expiring inquiry, position skill requirements, gap analysis
 (AC-42.16) and the skill search by ratings and valid certificates, with the
-web screens for all of them. Everything below is either a later slice of PSG-42 or a handoff to another wave or owner.
+web screens for all of them. Slice 5 builds courses: the catalog with skill
+outcomes and a certificate, sessions with capacity, waitlist, instructor and
+cost, registrations seated in order with the waitlist and HCM-CRS-001,
+manager approval with HCM-CRS-002, cancellation with waitlist promotion,
+completion that writes skills (never lowered) and certificates with the
+`course.completed` event (AC-42.9), and the web screens for courses,
+sessions, registrations and attendance. Everything below is either a later slice of PSG-42 or a handoff to another wave or owner.
 Statuses: **later slice of PSG-42** (same wave, next slice) or **handoff** (needs
 another owner).
 
@@ -76,7 +82,19 @@ another owner).
 | 5 | PII vault: encrypted columns, masked reads, audited unmasked reads | **built** for national ID and bank account | `worker_pii` sealed with AES-256-GCM, masked by default, reveal needs `HcmPIIRead` and a reason, audit row in the same transaction. Date of birth and home address (FR-42.1) are not collected yet; they come with ESS personal data |
 | 5 | Separate `hr_pii` schema, its DB role and grants | handoff (deployment-cicd) | Slice 1 keeps `worker_pii` in the `hr` schema. A separate schema and role need deployment grants (no BYPASSRLS for the app role) and a schema move in a later migration |
 | 5 | Tenant PII key from Vault; key rotation job `hr-pii-rekey` | handoff (deployment-cicd) and later slice | Slice 1 reads `HR_PII_KEY` from a Kubernetes secret; Vault and External Secrets wiring and the re-encrypt job are not built |
-| 6 | Courses, sessions, registrations, completion to skills and certifications | later slice of PSG-42 | Not started (FR-42.14, BR-42.9) |
+| 6 | Courses, sessions, registrations, completion to skills and certifications | **built** | See the service README (FR-42.14, BR-42.9, AC-42.9) |
+| 6 | Course types, course groups as a table, agenda templates and multi-day agenda lines | later slice of PSG-42 | `course_group` is free text; there is no `course_type_id` or `agenda_template_id`, and a session is one start-end range |
+| 6 | Locations, classrooms and instructors as catalog entities (HRMCourseLocation/Classroom, instructor table) | later slice of PSG-42 and handoff (wave 7 party) | A session's location is free text; an internal instructor is checked as a worker; `instructorPartyId` is stored as a uuid and not checked against the wave-7 party service |
+| 6 | Certificate type on the course (`course.certification_id`) | later slice of PSG-42 | There is no certificate-type catalog yet (see deliverable 4), so the course names the certificate code and title it issues |
+| 6 | Session cost posting to the attendee's department dimension (BR-42.9, parameter "Post course costs to GL") | handoff (wave 11 posting API, wave 6 departments) | The cost per attendee and currency are stored and shown; nothing is posted and the parameter does not exist |
+| 6 | Tenant parameter "Course waitlist default size" (8.42.13) | later slice of PSG-42 | The default is the parameter's default 5 for every tenant; a session can state its own 0-100 |
+| 6 | Course confirmation letter, attendance list and course certificate documents (8.42.15) | handoff (document rendering) and later slice | The attendance list is the registrations read and its screen; no PDF, email or iCalendar output |
+| 6 | Course attendance report (8.42.14: attendance %, pass %, cost by course and date range) | later slice of PSG-42 | Per-session counts are on the session read; no cross-session report |
+| 6 | Job `hr-course-completion-transfer` (8.42.16) | built differently | The transfer to skills and certificates runs in the completion transaction, so there is nothing left for a sweep to find |
+| 6 | Course browsing and self-registration in ESS, and the worker's own registrations ("My courses") | later slice of PSG-42 (ESS) and handoff (shell) | The API lets an `EssLearning` employee register and cancel for themselves; the web screens are the learning-admin ones until the shell gives the signed-in user's worker id. There is no per-worker registrations read |
+| 6 | Managers register and approve only their team | handoff (platform OPA, wave 4 workflow) | `MssApprove` registers, approves and cancels for any worker in the tenant; only self-approval is blocked |
+| 6 | Course evaluation questionnaires | later slice of PSG-42 | Comes with the questionnaire engine (FR-42.15) |
+| 6 | Paging of a course's sessions and a session's registrations | later slice of PSG-42 | Each read returns at most 500 rows in order; the catalog itself pages by code |
 | 6 | Questionnaire engine (design, schedules, answers, results) | later slice of PSG-42 | Not started (FR-42.15, BR-42.10) |
 | 7 | Injury and illness register, OSHA 300/300A/301 extracts | later slice of PSG-42 | Not started (FR-42.16, BR-42.11); the form layouts and ITA submission are in the wave-48 US pack |
 | 7 | Loaned items | later slice of PSG-42 | Not started (FR-42.17); the link to wave-44 assets is a handoff to wave 44 |
@@ -98,7 +116,9 @@ employments, the as-of view, the worker's absence and benefits; position
 detail with assignments; absence plans with accrual and year end; the absence
 request queue; benefit plans with the eligibility simulation; the skill
 catalog, skill search and expiring certifications, the worker's skills,
-certificates and gap, and the position's skill profile). The HR workspace
+certificates and gap, and the position's skill profile; the course catalog,
+course detail with sessions, and the session's registrations with approval,
+cancellation and attendance). The HR workspace
 tiles (pending actions, expiring certifications, open enrollment), the org chart, personnel actions, absence calendars and the
 self-service portal screens are not. The **ESS
 portal** is not built here (apps/ess README). **Demo workforce loaded** is not
@@ -116,7 +136,7 @@ built (needs the `hr-workforce-1200` generator under `testdata/`).
 | AC-42.6 future-dated transfer on its date | later slice of PSG-42 | Personnel actions and the Temporal timer not started |
 | AC-42.7 masked national ID and audited read | **built** (store and API tests) | DB test needs `PASSAGE_TEST_DATABASE_URL`; the no-DB API test covers the duty and reason gate |
 | AC-42.8 SCIM user within 60 s | handoff (platform / Keycloak) and later slice | SCIM worker not built; needs Keycloak admin access and the personnel-action events |
-| AC-42.9 course waitlist | later slice of PSG-42 | Courses not started |
+| AC-42.9 course waitlist | **built** (domain and store tests) | `TestCourseWaitlistAndCompletionAC429` runs capacity 10 and waitlist 2 with 13 registrations, the promotion on cancel, and the PASS that rates FORKLIFT 3 and issues a certificate expiring 2028-06-01 for a 2026-06-01 session, through the database (needs `PASSAGE_TEST_DATABASE_URL`) |
 | AC-42.10 anonymous questionnaire threshold | later slice of PSG-42 | Questionnaires not started |
 | AC-42.11 OSHA 300 extract | later slice of PSG-42 | Incidents not started |
 | AC-42.12 onboarding task date | later slice of PSG-42 | Checklists not started |
@@ -131,12 +151,12 @@ built (needs the `hr-workforce-1200` generator under `testdata/`).
 |---|---|---|
 | Kernel `httpx` idempotency middleware (replay headers, 60 s lease, 24 h expiry) | handoff (platform) and later slice | Slice 1 stores the `Idempotency-Key` on the worker, employment, position and assignment rows (the org pattern): a replay with the same body returns the stored row, another body is `idempotency_key_reuse`, a concurrent duplicate is `idempotency_key_in_flight`. Keys do not expire and there is no replay header |
 | `ETag` on reads and `If-Match` on PUT/PATCH/DELETE | later slice of PSG-42 | Slices 1 to 3 have no update endpoints; `ETag` is not set on reads yet, so the OpenAPI does not declare it. Absence decisions and benefit enrollment ends are guarded by row locks and the row state instead. Slice 4's rating and requirement writes are set-to-value upserts (a retry is harmless): a rating is guarded by its assessment date (an older one is HCM-SKL-STALE) under a worker row lock, and a requirement is last-writer-wins |
-| `Idempotency-Key` on absence decide, accrue and close, and on ending an enrollment | built differently | Accrual, year end and expiry are keyed per (plan, period or year, worker) in the database, so retries are safe without a key. A decision or cancel replayed on a request that already has that outcome returns it unchanged; a different outcome is HCM-ABS-STATE. Ending an enrollment again with the same last day and reason returns it unchanged; otherwise HCM-BEN-ENDED |
+| `Idempotency-Key` on absence decide, accrue and close, on ending an enrollment, and on course registration, approval, cancel and completion | built differently | Accrual, year end and expiry are keyed per (plan, period or year, worker) in the database, so retries are safe without a key. A decision or cancel replayed on a request that already has that outcome returns it unchanged; a different outcome is HCM-ABS-STATE. Ending an enrollment again with the same last day and reason returns it unchanged; otherwise HCM-BEN-ENDED. A course registration is unique per (worker, session), so registering again returns it; the same attendance outcome again changes nothing; cancel again is a no-op |
 | OPA decision and `legalEntityScopes` | handoff (platform / edge-identity) | Duties are checked locally by `authz.RequireDuty`; legal-entity scoping is not enforced yet |
 | Effective-date granularity TIMESTAMP and tenant-local midnight | later slice of PSG-42 | Slice 1 uses UTC days (DAY granularity) |
 | Future-dated actions (up to 365 days) and workflow approval | later slice of PSG-42 | Depends on personnel actions and wave-4 workflow |
 | `party_person_id` checked against the wave-7 party service | handoff (wave 7 party) | Stored as a uuid; existence is not checked |
-| Outbox events `position.changed`, `employment.changed` for terminations, personnel action events | later slice of PSG-42 | Slice 2 adds `absence.approved`; slice 3 adds `benefitenrollment.changed` (the PRD's `benefit.enrollment.changed`, collapsed like `positionassignment`); slice 4 adds `workerskill.changed` and `certification.issued` (not in the PRD event table; wave-45 dispatch keeps its technician skills from them). Slice 1 emits `worker.created`, `employment.changed` (action HIRE, with the exclusive end when a termination date is given) and `positionassignment.changed` (with `manager_position_id`). The PRD name `position.assignment.changed` is written as `positionassignment` to fit the kernel event-type rule (see asyncapi) |
+| Outbox events `position.changed`, `employment.changed` for terminations, personnel action events | later slice of PSG-42 | Slice 2 adds `absence.approved`; slice 3 adds `benefitenrollment.changed` (the PRD's `benefit.enrollment.changed`, collapsed like `positionassignment`); slice 4 adds `workerskill.changed` and `certification.issued` (not in the PRD event table; wave-45 dispatch keeps its technician skills from them); slice 5 adds `course.completed`. Slice 1 emits `worker.created`, `employment.changed` (action HIRE, with the exclusive end when a termination date is given) and `positionassignment.changed` (with `manager_position_id`). The PRD name `position.assignment.changed` is written as `positionassignment` to fit the kernel event-type rule (see asyncapi) |
 
 ## Reference fixtures (PRD 8.42.9)
 

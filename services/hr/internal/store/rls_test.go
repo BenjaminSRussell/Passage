@@ -91,7 +91,20 @@ func TestRowLevelSecurity(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Courses: a course with a skill outcome, a session and a registration
+	// of tenant 1.
+	mustSkill(t, s, one, "FORKLIFT", 5)
+	crs := mustCourse(t, s, one, forkliftCourse("FORK-RLS"))
+	crsSess := mustSession(t, s, one, crs.ID, day(time.December, 1), 5, 1)
+	mustRegister(t, s, one, crsSess.ID, w.ID)
+
 	two := scoped(testkit.TenantID(2), "")
+	if _, err := s.GetCourse(two, crs.ID); err == nil {
+		t.Error("tenant 2 read tenant 1's course")
+	}
+	if _, _, _, err := s.RegisterWorker(two, crsSess.ID, w.ID, false); err == nil {
+		t.Error("tenant 2 registered into tenant 1's session")
+	}
 	if found, err := s.SearchWorkers(two, []domain.Requirement{{Skill: "WELDING", MinRating: 1}}, nil, day(time.April, 1)); err != nil || len(found.Items) != 0 {
 		t.Errorf("tenant 2 skill search = %+v, err %v", found, err)
 	}
@@ -107,7 +120,8 @@ func TestRowLevelSecurity(t *testing.T) {
 	for _, table := range []string{"worker", "worker_pii", "employment", "hr_position", "position_hierarchy", "position_assignment", "audit_event",
 		"absence_plan", "absence_balance", "absence_accrual_period", "absence_accrual_line", "absence_close_line", "absence_request",
 		"benefit_plan", "benefit_plan_option", "benefit_life_event", "benefit_enrollment",
-		"hr_skill", "worker_skill", "hr_certification", "position_skill_requirement"} {
+		"hr_skill", "worker_skill", "hr_certification", "position_skill_requirement",
+		"hr_course", "hr_course_skill_outcome", "hr_course_session", "hr_course_registration"} {
 		if n := count(two, table); n != 0 {
 			t.Errorf("tenant 2 sees %d rows in %s", n, table)
 		}

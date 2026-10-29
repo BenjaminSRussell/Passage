@@ -119,3 +119,49 @@ func TestGrants_SkillPathsWorkAsAppRole(t *testing.T) {
 		t.Fatalf("remove requirement as app role: %v", err)
 	}
 }
+
+// TestGrants_CoursePathsWorkAsAppRole runs every course write and read as
+// passage_app: catalog and outcome inserts, a session insert and its FOR
+// UPDATE seat lock, registration insert and status updates, waitlist
+// promotion, approval and a PASS that upserts worker_skill and inserts
+// hr_certification. A missing grant on a 0006 table fails here with 42501.
+func TestGrants_CoursePathsWorkAsAppRole(t *testing.T) {
+	s, ctx := appStore(t)
+	at(s, day(time.May, 1))
+	mustSkill(t, s, ctx, "FORKLIFT", 5)
+	course := mustCourse(t, s, ctx, forkliftCourse("FORK-GRANTS"))
+	if _, err := s.ListCourses(ctx, "", 10); err != nil {
+		t.Fatalf("list courses as app role: %v", err)
+	}
+	sess := mustSession(t, s, ctx, course.ID, day(time.June, 1), 1, 1)
+	a := mustWorker(t, s, ctx, "GrantsCrsA")
+	b := mustWorker(t, s, ctx, "GrantsCrsB")
+	first := mustRegister(t, s, ctx, sess.ID, a.ID)
+	mustRegister(t, s, ctx, sess.ID, b.ID)
+	if _, _, err := s.CancelRegistration(ctx, first.ID, false); err != nil {
+		t.Fatalf("cancel and promote as app role: %v", err)
+	}
+	approval := mustCourse(t, s, ctx, Course{Code: "APR-GRANTS", Name: "Approval", RequiresManagerApproval: true})
+	asess := mustSession(t, s, ctx, approval.ID, day(time.June, 1), 1, 0)
+	if _, err := s.ApproveRegistration(ctx, mustRegister(t, s, ctx, asess.ID, a.ID).ID); err != nil {
+		t.Fatalf("approve as app role: %v", err)
+	}
+	at(s, day(time.June, 2))
+	res, err := s.CompleteSession(ctx, sess.ID, []Outcome{{WorkerID: b.ID, Status: domain.RegAttended, Result: domain.ResultPass, Score: "75.00"}})
+	if err != nil || res.Passed != 1 {
+		t.Fatalf("complete as app role = %+v, err %v", res, err)
+	}
+	if regs, err := s.ListRegistrations(ctx, sess.ID); err != nil || len(regs) != 2 {
+		t.Fatalf("list registrations as app role = %+v, err %v", regs, err)
+	}
+	for _, stmt := range []string{`delete from hr_course`, `delete from hr_course_registration`, `update hr_course set name = name`} {
+		err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, stmt)
+			return err
+		})
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
+			t.Errorf("%q = %v; want insufficient_privilege 42501", stmt, err)
+		}
+	}
+}

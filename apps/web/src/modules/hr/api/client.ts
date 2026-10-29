@@ -782,3 +782,157 @@ export function searchSkills(q: SkillSearchQuery, signal?: AbortSignal): Promise
     signal,
   );
 }
+
+// Courses (slice 5): catalog, sessions, registrations and completion (FR-42.14, BR-42.9).
+
+export type RegistrationStatus = "REQUESTED" | "CONFIRMED" | "WAITLISTED" | "ATTENDED" | "NO_SHOW" | "CANCELED";
+export type CourseResult = "PASS" | "FAIL";
+
+/** Waitlist size a session takes when the form leaves it empty (8.42.13 default). */
+export const DEFAULT_WAITLIST = 5;
+export const MAX_WAITLIST = 100;
+export const MAX_SEATS = 10000;
+export const MAX_VALIDITY_MONTHS = 240;
+
+export interface CourseSkillOutcome {
+  skillId: string;
+  skillCode: string;
+  skillName: string;
+  rating: number;
+}
+
+export interface Course {
+  id: string;
+  code: string;
+  name: string;
+  courseGroup?: string;
+  skillOutcomes: CourseSkillOutcome[];
+  certificationCode?: string;
+  certificationName?: string;
+  /** 0: the certificate does not expire. */
+  validityMonths: number;
+  requiresManagerApproval: boolean;
+  createdAt: string;
+}
+
+export interface NewCourse {
+  code: string;
+  name: string;
+  courseGroup?: string;
+  skillOutcomes: { skillCode: string; rating: number }[];
+  certificationCode?: string;
+  certificationName?: string;
+  validityMonths?: number;
+  requiresManagerApproval: boolean;
+}
+
+export interface CourseSession {
+  id: string;
+  courseId: string;
+  courseCode: string;
+  courseName: string;
+  startsAt: string;
+  endsAt: string;
+  location?: string;
+  virtualUrl?: string;
+  instructorWorkerId?: string;
+  instructorPartyId?: string;
+  capacity: number;
+  waitlistCapacity: number;
+  /** Decimal string at the currency's minor units. */
+  costPerAttendee?: string;
+  currency?: string;
+  confirmed: number;
+  waitlisted: number;
+  requested: number;
+  seatsLeft: number;
+  createdAt: string;
+}
+
+export interface NewCourseSession {
+  startsAt: string;
+  endsAt: string;
+  location?: string;
+  virtualUrl?: string;
+  instructorWorkerId?: string;
+  capacity: number;
+  waitlistCapacity?: number;
+  costPerAttendee?: string;
+  currency?: string;
+}
+
+export interface CourseRegistration {
+  id: string;
+  sessionId: string;
+  workerId: string;
+  personnelNumber: string;
+  legalName: string;
+  status: RegistrationStatus;
+  result?: CourseResult;
+  score?: string;
+  completedOn?: string;
+  queuedAt: string;
+}
+
+export interface CourseRegistrationResult extends CourseRegistration {
+  warnings: RuleWarning[];
+}
+
+export interface CompletionLine {
+  workerId: string;
+  outcome: "ATTENDED" | "NO_SHOW";
+  result?: CourseResult;
+  score?: string;
+}
+
+export interface CourseCompletion {
+  items: CourseRegistration[];
+  changed: number;
+  passed: number;
+}
+
+export function listCourses(filter: { cursor?: string } = {}, signal?: AbortSignal): Promise<Page<Course>> {
+  return page<Course>(`/courses${query({ cursor: filter.cursor })}`, signal);
+}
+
+export function getCourse(courseId: string, signal?: AbortSignal): Promise<Course> {
+  return send<Course>(`/courses/${id(courseId)}`, {}, signal);
+}
+
+export function createCourse(input: NewCourse, key: string = newKey()): Promise<Course> {
+  return post<Course>("/courses", input, key);
+}
+
+export async function listCourseSessions(courseId: string, signal?: AbortSignal): Promise<CourseSession[]> {
+  return (await page<CourseSession>(`/courses/${id(courseId)}/sessions`, signal)).items;
+}
+
+export function createCourseSession(courseId: string, input: NewCourseSession, key: string = newKey()): Promise<CourseSession> {
+  return post<CourseSession>(`/courses/${id(courseId)}/sessions`, input, key);
+}
+
+export function getCourseSession(sessionId: string, signal?: AbortSignal): Promise<CourseSession> {
+  return send<CourseSession>(`/courses/sessions/${id(sessionId)}`, {}, signal);
+}
+
+export async function listCourseRegistrations(sessionId: string, signal?: AbortSignal): Promise<CourseRegistration[]> {
+  return (await page<CourseRegistration>(`/courses/sessions/${id(sessionId)}/registrations`, signal)).items;
+}
+
+/** One registration per worker and session, so registering again returns it; no key is needed. */
+export function registerForCourseSession(sessionId: string, workerId: string): Promise<CourseRegistrationResult> {
+  return command<CourseRegistrationResult>(`/courses/sessions/${id(sessionId)}/registrations`, { workerId });
+}
+
+export function approveCourseRegistration(registrationId: string): Promise<CourseRegistration> {
+  return command<CourseRegistration>(`/courses/registrations/${id(registrationId)}/approve`);
+}
+
+export function cancelCourseRegistration(registrationId: string): Promise<CourseRegistration> {
+  return command<CourseRegistration>(`/courses/registrations/${id(registrationId)}/cancel`);
+}
+
+/** The same outcome again changes nothing on the service, so a retry is safe without a key. */
+export function completeCourseSession(sessionId: string, results: CompletionLine[]): Promise<CourseCompletion> {
+  return command<CourseCompletion>(`/courses/sessions/${id(sessionId)}/complete`, { results });
+}

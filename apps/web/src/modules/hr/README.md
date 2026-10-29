@@ -1,4 +1,4 @@
-# HR module (web, PSG-42 slices 1 to 4)
+# HR module (web, PSG-42 slices 1 to 5)
 
 The HR workspace for the HR service (`services/hr/api/openapi.yaml`).
 Routes and nav are in `module.ts`; the shell discovers it through the registry.
@@ -27,6 +27,10 @@ Routes and nav are in `module.ts`; the shell discovers it through the registry.
 | `/hr/workers/:id` (Skills card) | The worker's ratings, a rate form whose ratings follow the chosen skill's scale (a stale assessment lands on the date), and the gap against a chosen position (AC-42.16) | `GET`/`POST /workers/{id}/skills`, `GET /skills`, `GET /positions`, `GET /workers/{id}/skill-gap?positionId=` |
 | `/hr/workers/:id` (Certifications card) | The worker's certificates with their validity today and a record form (expiry as months, a date or never) | `GET`/`POST /workers/{id}/certifications` |
 | `/hr/positions/:id` (Skill profile card) | The skills the position requires with set, change and remove | `GET`/`POST /positions/{id}/skill-requirements`, `DELETE /positions/{id}/skill-requirements/{skillCode}` |
+| `/hr/courses` | Course catalog with the skills and certificate a pass awards and whether registration needs approval, paged | `GET /courses?cursor=` |
+| `/hr/courses/new` | New course: skill outcomes picked from the catalog with ratings on each skill's scale, the certificate and its validity, manager approval | `GET /skills`, `POST /courses` |
+| `/hr/courses/:id` | Course detail: what a pass awards, the sessions with seats, waitlist and cost, and a schedule-session form (times in UTC) | `GET /courses/{id}`, `GET`/`POST /courses/{id}/sessions` |
+| `/hr/courses/sessions/:id` | Session: seat tiles, the attendance list in registration order with approve, decline and cancel, a register-worker form until the session ends (full and approval warnings shown), and attendance with pass or fail from the session start | `GET /courses/sessions/{id}`, `GET`/`POST /courses/sessions/{id}/registrations`, `POST /courses/registrations/{id}/approve`, `POST /courses/registrations/{id}/cancel`, `POST /courses/sessions/{id}/complete`, `GET /workers` |
 
 The as-of date is kept in the URL (`?date=`), so it survives reloads and can be
 shared (PRD 8.42.6). Every create form sends one `Idempotency-Key` per filled-in
@@ -40,7 +44,7 @@ and `npx tsc --noEmit` in `apps/web`.
 ## Needs
 
 - Shell owner (wave 5): nav entries carry `HcmWorkerInquire`,
-  `HcmOrgInquire`, `HcmAbsenceAdmin`, `EssAbsence` and `HcmSetupAdmin`; the shell filters by
+  `HcmOrgInquire`, `HcmAbsenceAdmin`, `EssAbsence`, `HcmSetupAdmin` and `HcmLearningAdmin`; the shell filters by
   duty once duties reach the client. Until then the absence screens show the
   service's 403 as an error.
 - Pickers for legal entity and department ids need the wave-6 org read
@@ -53,5 +57,10 @@ and `npx tsc --noEmit` in `apps/web`.
 - The Benefits card sits on the worker page too, so an employee with only
   `EssBenefits` enrolls through the API until a "my benefits" page or the
   ESS portal exists (same need as "my absence").
+- The course screens are the learning administrator's. Employees browsing
+  the catalog and registering themselves (`EssLearning`), and a manager's
+  approval queue (`MssApprove`), need the signed-in user's worker id and the
+  ESS/MSS pages; the session page's registrations list needs
+  `HcmLearningAdmin`.
 - Org chart, personnel actions, absence calendars and the ESS/MSS portals
   come with the later slices listed in `services/hr/NOT-IMPLEMENTED.md`.
