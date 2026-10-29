@@ -13,8 +13,9 @@ import (
 )
 
 var (
-	ErrNoLastKnownRate = errors.New("provider outage and no last-known rate to fall back to")
-	ErrDateMismatch    = errors.New("provider returned rates for a different date than requested")
+	ErrNoLastKnownRate  = errors.New("provider outage and no last-known rate to fall back to")
+	ErrDateMismatch     = errors.New("provider returned rates for a different date than requested")
+	ErrCubeNotPublished = errors.New("provider has not published a cube for the run date yet")
 )
 
 type RunStore interface {
@@ -29,12 +30,13 @@ type RunStore interface {
 }
 
 type Config struct {
-	MaxAttempts int
-	BaseBackoff time.Duration
-	MaxBackoff  time.Duration
+	MaxAttempts          int
+	BaseBackoff          time.Duration
+	MaxBackoff           time.Duration
+	PublishCutoffHourUTC int
 }
 
-var DefaultConfig = Config{MaxAttempts: 4, BaseBackoff: time.Second, MaxBackoff: 30 * time.Second}
+var DefaultConfig = Config{MaxAttempts: 4, BaseBackoff: time.Second, MaxBackoff: 30 * time.Second, PublishCutoffHourUTC: 18}
 
 type Result struct {
 	RunID         string
@@ -44,6 +46,8 @@ type Result struct {
 	AlreadyDone   bool
 	InProgress    bool
 	Degraded      bool
+	Pending       bool
+	ValidFrom     time.Time
 	LastSuccessAt *time.Time
 }
 
@@ -65,6 +69,9 @@ func New(p provider.Provider, s RunStore, cfg Config, m *Metrics) *Importer {
 	}
 	if cfg.MaxBackoff <= 0 {
 		cfg.MaxBackoff = DefaultConfig.MaxBackoff
+	}
+	if cfg.PublishCutoffHourUTC <= 0 || cfg.PublishCutoffHourUTC > 24 {
+		cfg.PublishCutoffHourUTC = DefaultConfig.PublishCutoffHourUTC
 	}
 	return &Importer{provider: p, store: s, cfg: cfg, sleep: sleepContext, now: time.Now, metrics: m}
 }
@@ -156,6 +163,9 @@ func (i *Importer) Run(ctx context.Context, rateType string, date time.Time) (Re
 	}
 	inputs := make([]store.RateInput, len(points))
 	for n, pt := range points {
+		if pt.ValidFrom.After(res.ValidFrom) {
+			res.ValidFrom = pt.ValidFrom
+		}
 		inputs[n] = store.RateInput{
 			RateType: rateType, From: pt.From, To: pt.To, ValidFrom: pt.ValidFrom, Rate: pt.Rate,
 			Source: name, ProviderTimestamp: pt.ProviderTimestamp, PayloadHash: pt.PayloadHash[:],
@@ -172,19 +182,38 @@ func (i *Importer) Run(ctx context.Context, rateType string, date time.Time) (Re
 			res.Imported++
 		}
 	}
+	now := i.now()
+	if i.awaitingPublication(date, res.ValidFrom, now) {
+		res.Pending = true
+		cause := fmt.Errorf("%w: cube dated %s, run date %s", ErrCubeNotPublished, res.ValidFrom.Format(time.DateOnly), date.UTC().Format(time.DateOnly))
+		if err := i.store.FinishRunAborted(finishCtx, run.ID, res.Attempts, cause); err != nil {
+			return res, fmt.Errorf("finish pending run: %w", err)
+		}
+		return res, nil
+	}
 	if err := i.store.FinishRunSucceeded(finishCtx, run.ID, res.Imported, res.Unchanged); err != nil {
 		return res, fmt.Errorf("finish run: %w", err)
 	}
-	now := i.now()
 	i.metrics.record(ctx, name, rateType, false, &now)
 	return res, nil
+}
+
+func (i *Importer) awaitingPublication(date, validFrom, now time.Time) bool {
+	if i.provider.SupportsHistory() || !validFrom.Before(dayOf(date)) {
+		return false
+	}
+	return dayOf(date).Equal(dayOf(now)) && now.UTC().Hour() < i.cfg.PublishCutoffHourUTC
+}
+
+func dayOf(t time.Time) time.Time {
+	y, m, d := t.UTC().Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 }
 
 func (i *Importer) SupportsHistory() bool { return i.provider.SupportsHistory() }
 
 func checkDate(points []provider.RatePoint, date time.Time) error {
-	y, m, d := date.UTC().Date()
-	want := time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+	want := dayOf(date)
 	for _, pt := range points {
 		if !pt.ValidFrom.Equal(want) {
 			return fmt.Errorf("%w: requested %s, got %s", ErrDateMismatch, want.Format(time.DateOnly), pt.ValidFrom.Format(time.DateOnly))
@@ -196,6 +225,9 @@ func checkDate(points []provider.RatePoint, date time.Time) error {
 func (i *Importer) reject(ctx context.Context, name, rateType string, res Result, cause error) error {
 	if err := i.store.FinishRunFailed(ctx, res.RunID, res.Attempts, cause, false); err != nil {
 		slog.Error("fx finish failed run", "runId", res.RunID, "err", err)
+		if errors.Is(err, store.ErrLostOwnership) {
+			return err
+		}
 	}
 	i.metrics.record(ctx, name, rateType, true, nil)
 	return cause

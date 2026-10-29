@@ -122,7 +122,7 @@ func points() []provider.RatePoint {
 	}
 }
 
-func harness(p *fakeProvider, s *fakeStore) (*Importer, *[]time.Duration) {
+func harness(p *fakeProvider, s RunStore) (*Importer, *[]time.Duration) {
 	var slept []time.Duration
 	i := New(p, s, Config{MaxAttempts: 4, BaseBackoff: time.Second, MaxBackoff: 3 * time.Second}, NewMetrics())
 	i.sleep = func(_ context.Context, d time.Duration) error {
@@ -460,4 +460,59 @@ func TestRunIgnoresCubeDateForProvidersWithoutHistory(t *testing.T) {
 	if _, err := i.Run(context.Background(), "CLOSING", day); err != nil || s.outcome() != store.RunSucceeded {
 		t.Fatalf("err=%v outcome=%q", err, s.outcome())
 	}
+}
+
+func stalePoints() []provider.RatePoint {
+	stale := points()
+	for n := range stale {
+		stale[n].ValidFrom = day.AddDate(0, 0, -1)
+	}
+	return stale
+}
+
+func TestRunBeforeCubePublicationStoresRatesAndStaysRetryable(t *testing.T) {
+	s := &fakeStore{}
+	p := &fakeProvider{points: stalePoints()}
+	i, _ := harness(p, s)
+	res, err := i.Run(context.Background(), "CLOSING", day)
+	if err != nil || !res.Pending || !res.ValidFrom.Equal(day.AddDate(0, 0, -1)) || len(s.posted) != 2 {
+		t.Fatalf("res=%+v err=%v posted=%d", res, err, len(s.posted))
+	}
+	if s.outcome() != "aborted" || !errors.Is(s.finishes[0].cause, ErrCubeNotPublished) {
+		t.Fatalf("finishes=%+v", s.finishes)
+	}
+	p.points = points()
+	res, err = i.Run(context.Background(), "CLOSING", day)
+	if err != nil || res.Pending || !res.ValidFrom.Equal(day) || s.outcome() != store.RunSucceeded {
+		t.Fatalf("res=%+v err=%v outcome=%q", res, err, s.outcome())
+	}
+	if s.posted[0].ValidFrom != day {
+		t.Fatalf("today's rates not fetched: %+v", s.posted[0])
+	}
+}
+
+func TestRunWithStaleCubeAfterPublishCutoffSucceedsOnWeekends(t *testing.T) {
+	s := &fakeStore{}
+	i, _ := harness(&fakeProvider{points: stalePoints()}, s)
+	i.now = func() time.Time { return day.Add(time.Duration(DefaultConfig.PublishCutoffHourUTC) * time.Hour) }
+	res, err := i.Run(context.Background(), "CLOSING", day)
+	if err != nil || res.Pending || !res.ValidFrom.Equal(day.AddDate(0, 0, -1)) || s.outcome() != store.RunSucceeded {
+		t.Fatalf("res=%+v err=%v outcome=%q", res, err, s.outcome())
+	}
+}
+
+func TestRunRejectReturnsLostOwnership(t *testing.T) {
+	s := &lostStore{fakeStore: &fakeStore{}}
+	stale := points()
+	stale[1].ValidFrom = day.AddDate(0, 0, -1)
+	i, _ := harness(&fakeProvider{points: stale, history: true}, s)
+	if _, err := i.Run(context.Background(), "CLOSING", day); !errors.Is(err, store.ErrLostOwnership) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+type lostStore struct{ *fakeStore }
+
+func (s *lostStore) FinishRunFailed(context.Context, string, int, error, bool) error {
+	return store.ErrLostOwnership
 }

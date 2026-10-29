@@ -649,6 +649,14 @@ describe("import now", () => {
     expect(await screen.findByRole("button", { name: "Import now" })).toBeInTheDocument();
   });
 
+  it("is not offered for a provider the server cannot import from", async () => {
+    answer({ list: json(200, [{ id: "t3", code: "BUDGET", name: "Budget", allowInverse: false, provider: "csv" }]) });
+    const user = userEvent.setup();
+    renderAt("/fx/rate-types");
+    await user.click(await screen.findByRole("button", { name: "BUDGET" }));
+    expect(screen.queryByRole("button", { name: "Import now" })).not.toBeInTheDocument();
+  });
+
   it("imports through the provider route, locks the button while pending and reports the summary", async () => {
     answer({ importRun: importRun() });
     const release = holdRequests("POST");
@@ -661,11 +669,21 @@ describe("import now", () => {
     await user.click(button);
     release();
     expect(await screen.findByText("Import finished")).toBeInTheDocument();
-    expect(screen.getByText(/30 rates stored and 2 unchanged from ecb for 2026-03-02/)).toBeInTheDocument();
+    expect(screen.getByText(/30 rates stored and 2 unchanged from ecb dated 2026-03-02/)).toBeInTheDocument();
     expect(importCalls()).toHaveLength(1);
     expect(importCalls()[0].body).toEqual({ rateType: "AVERAGE" });
     expect(button).not.toHaveAttribute("aria-busy");
     expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("reports the cube date and asks to retry when the provider has not published today", async () => {
+    answer({ importRun: importRun({ pending: true, date: "2026-02-27" }) });
+    const user = userEvent.setup();
+    renderAt("/fx/rate-types");
+    await user.click(await screen.findByRole("button", { name: "AVERAGE" }));
+    await user.click(await screen.findByRole("button", { name: "Import now" }));
+    expect(await screen.findByText("Latest rates stored")).toBeInTheDocument();
+    expect(screen.getByText(/rates dated 2026-02-27 were stored.*import again later/)).toBeInTheDocument();
   });
 
   it("says when the day was already imported", async () => {

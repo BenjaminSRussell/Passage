@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"errors"
 	"net/http"
 
@@ -33,7 +32,6 @@ var sentinelProblems = []struct {
 	{importer.ErrNoLastKnownRate, http.StatusBadGateway, "FX_PROVIDER_FAILED", providerFailedDetail},
 	{importer.ErrDateMismatch, http.StatusBadGateway, "FX_PROVIDER_FAILED", providerFailedDetail},
 	{store.ErrLostOwnership, http.StatusConflict, importInProgressCode, importInProgressMsg},
-	{context.Canceled, http.StatusServiceUnavailable, "FX_IMPORT_CANCELLED", "the import was cancelled before it finished"},
 }
 
 func toProblem(err error) error {

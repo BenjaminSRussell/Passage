@@ -41,6 +41,7 @@ type importRunBody struct {
 	AlreadyDone   bool   `json:"alreadyDone"`
 	Degraded      bool   `json:"degraded"`
 	LastSuccessAt string `json:"lastSuccessAt,omitempty"`
+	Pending       bool   `json:"pending,omitempty"`
 }
 
 func (a *API) WithImporters(importers map[string]Importer) *API {
@@ -108,6 +109,10 @@ func (a *API) importNow(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, store.ErrLostOwnership) {
 			w.Header().Set("Retry-After", strconv.Itoa(importRetryAfter))
 		}
+		if errors.Is(err, context.Canceled) {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, "FX_IMPORT_CANCELLED", "the import was cancelled before it finished"))
+			return
+		}
 		a.fail(w, r, "manual import failed", err)
 		return
 	}
@@ -116,10 +121,14 @@ func (a *API) importNow(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, importInProgressCode, importInProgressMsg))
 		return
 	}
+	validFrom := date
+	if !res.ValidFrom.IsZero() {
+		validFrom = res.ValidFrom
+	}
 	out := importRunBody{
-		RunID: res.RunID, Provider: name, RateType: body.RateType, Date: date.Format(time.DateOnly),
+		RunID: res.RunID, Provider: name, RateType: body.RateType, Date: validFrom.Format(time.DateOnly),
 		Attempts: res.Attempts, Imported: res.Imported, Unchanged: res.Unchanged,
-		AlreadyDone: res.AlreadyDone, Degraded: res.Degraded, LastSuccessAt: formatTime(res.LastSuccessAt),
+		AlreadyDone: res.AlreadyDone, Degraded: res.Degraded, Pending: res.Pending, LastSuccessAt: formatTime(res.LastSuccessAt),
 	}
 	httpx.JSON(w, http.StatusOK, out)
 }

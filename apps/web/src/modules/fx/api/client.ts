@@ -199,8 +199,10 @@ const importRunSchema = z.object({
   unchanged: z.number().int(),
   alreadyDone: z.boolean(),
   degraded: z.boolean(),
+  pending: z.boolean().optional(),
   lastSuccessAt: z.string().optional(),
 });
+export const IMPORT_PROVIDERS: readonly string[] = ["ecb", "openexchangerates"];
 export type ImportRun = z.infer<typeof importRunSchema>;
 
 export function importNow(provider: string, rateType: string, fetchImpl: FetchLike = defaultFetch): Promise<ImportRun> {

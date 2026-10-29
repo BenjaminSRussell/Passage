@@ -182,7 +182,7 @@ paths:
     post:
       operationId: importProviderRates
       x-passage-duty: Administer exchange rates
-      description: Runs the provider import now for one rate type and day (default today, UTC), through the same importer as the schedule. Idempotent per provider, rate type and day; a day that already succeeded returns that run with alreadyDone true. A provider outage with a last-known rate returns degraded true.
+      description: Runs the provider import now for one rate type and day (default today, UTC), through the same importer as the schedule. Idempotent per provider, rate type and day; a day that already succeeded returns that run with alreadyDone true. A provider outage with a last-known rate returns degraded true. Providers without history (ecb) only import today (UTC); the response date is the valid-from date of the rates actually stored. If that cube predates the run day and it is before 18:00 UTC, the rates are stored, pending is true and the run stays retryable, so a later tick or call fetches the same day again; from 18:00 UTC the stale cube is final (weekend, holiday).
       requestBody:
         required: true
         content:
@@ -212,14 +212,22 @@ paths:
                   unchanged: { type: integer }
                   alreadyDone: { type: boolean }
                   degraded: { type: boolean }
+                  pending: { type: boolean, description: The provider has not published a cube for the run day yet; call again later. }
                   lastSuccessAt: { type: string, format: date-time }
         '400': { $ref: '#/components/responses/Problem', description: 'COM-0001 malformed body; FX_RATE_INVALID unknown rate type.' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem', description: FX_PROVIDER_UNKNOWN }
-        '422': { $ref: '#/components/responses/Problem', description: 'FX_PROVIDER_UNAVAILABLE provider has no credentials; FX_RATE_DATE_FUTURE.' }
+        '409':
+          description: FX_IMPORT_IN_PROGRESS another run holds this provider, rate type and day (or took it over); retry after the Retry-After seconds.
+          headers:
+            Retry-After: { schema: { type: integer, example: 5 } }
+          content:
+            application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } }
+        '422': { $ref: '#/components/responses/Problem', description: 'FX_PROVIDER_UNAVAILABLE provider has no credentials; FX_RATE_DATE_FUTURE; FX_PROVIDER_MISMATCH the rate type is not configured for this provider; FX_PROVIDER_HISTORY_UNSUPPORTED date other than today for a provider without history (ecb).' }
         '500': { $ref: '#/components/responses/Problem' }
         '502': { $ref: '#/components/responses/Problem', description: FX_PROVIDER_FAILED provider failed and no last-known rate exists. }
+        '503': { $ref: '#/components/responses/Problem', description: FX_IMPORT_CANCELLED the request was cancelled before the import finished. }
   /healthz:
     get:
       operationId: liveness
