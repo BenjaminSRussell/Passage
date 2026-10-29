@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -10,7 +11,10 @@ from hypothesis import strategies as st
 
 from scheduler_opt import Instance, Job, Operation, check_schedule, parse_orlib, validate_instance
 
-FT06 = Path(__file__).resolve().parent.parent / "testdata" / "orlib" / "ft06.txt"
+ORLIB = Path(__file__).resolve().parent.parent / "testdata" / "orlib"
+FT06 = ORLIB / "ft06.txt"
+BENCHMARKS = json.loads((ORLIB / "manifest.json").read_text())["instances"]
+BENCHMARK_TIME_LIMIT_S = 30
 FT06_OPTIMUM = 55  # published optimum (OR-Library)
 
 
@@ -78,6 +82,25 @@ def test_ft06_cpsat_reaches_known_optimum():
     # AC1: within 5% of the known optimum (in practice CP-SAT proves 55).
     assert sol.makespan <= FT06_OPTIMUM * 1.05
     assert sol.status == "OPTIMAL" and sol.makespan == FT06_OPTIMUM
+
+
+def test_orlib_manifest_lists_30_instances_with_fixtures():
+    assert len(BENCHMARKS) == 30
+    for entry in BENCHMARKS:
+        inst = parse_orlib((ORLIB / f"{entry['name']}.txt").read_text())
+        assert (len(inst.jobs), inst.machines) == (entry["jobs"], entry["machines"])
+
+
+@pytest.mark.parametrize("entry", BENCHMARKS, ids=[e["name"] for e in BENCHMARKS])
+def test_orlib_instance_cpsat_within_5_percent_of_optimum(entry):
+    pytest.importorskip("ortools")
+    from scheduler_opt import solve
+
+    inst = parse_orlib((ORLIB / f"{entry['name']}.txt").read_text())
+    sol = solve(inst, time_limit_s=BENCHMARK_TIME_LIMIT_S)
+    assert sol.status in ("OPTIMAL", "FEASIBLE")
+    assert check_schedule(inst, sol.starts) == []
+    assert sol.makespan <= entry["optimum"] * 1.05
 
 
 def test_solve_refuses_windows_above_limit():
