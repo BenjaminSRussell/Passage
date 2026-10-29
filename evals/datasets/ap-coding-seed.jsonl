@@ -1,0 +1,8 @@
+{"invoiceId":"INV-1001","vendorId":"V-ACME","amount":"1200.00","text":"Pallet freight Q3","account":"6100","history":["6100","6100","6200"]}
+{"invoiceId":"INV-1002","vendorId":"V-ACME","amount":"845.50","text":"Freight surcharge fuel","account":"6100","history":["6100","6300"]}
+{"invoiceId":"INV-1003","vendorId":"V-BOLT","amount":"310.00","text":"Fasteners box 40","account":"5200","history":["5200","5200"]}
+{"invoiceId":"INV-1004","vendorId":"V-BOLT","amount":"95.10","text":"Shipping label rolls","account":"6400","history":["5200"]}
+{"invoiceId":"INV-1005","vendorId":"V-NEW","amount":"2500.00","text":"Consulting January","account":"6700","history":[]}
+{"invoiceId":"INV-1006","vendorId":"V-ACME","amount":"410.00","text":"Pallet rental","account":"6200","history":["6100","6200","6200"]}
+{"invoiceId":"INV-1007","vendorId":"V-CLEAN","amount":"77.25","text":"Janitorial supplies","account":"6500","history":["6500","6500","6500"]}
+{"invoiceId":"INV-1008","vendorId":"V-NEW","amount":"980.00","text":"Software licence annual","account":"6800","history":[]}

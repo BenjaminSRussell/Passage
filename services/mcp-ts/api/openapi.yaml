@@ -1,0 +1,102 @@
+openapi: 3.1.0
+info:
+  title: Passage MCP gateway
+  version: 0.1.0
+  description: |
+    Model Context Protocol endpoint (PRD 9.47.5, FR-47.1, FR-47.2). The
+    handler in src/jsonrpc.ts implements the JSON-RPC 2.0 methods below. Every
+    call runs with the invoking user's token: tools/list shows only tools whose
+    x-passage-duty the user holds, and tools/call forwards the user's
+    Authorization header, so OPA decides at the API.
+    This slice ships the handler and the catalog only. The HTTP server and the
+    SSE transport are a later slice (see NOT-IMPLEMENTED.md).
+servers:
+  - url: https://mcp.passage.dev
+paths:
+  /mcp:
+    post:
+      operationId: mcpJsonRpc
+      summary: Handle one MCP JSON-RPC message
+      description: |
+        Notifications (no id) return no body. Denied tool calls return a
+        JSON-RPC error with code -32003 and data {status: 403, code}.
+        A 403 from the API is mapped the same way. Other tool failures return a
+        result with isError true and text "<code>: <message>", where code is
+        AGT-0214 (tool failed), MCP-0400 (tenant_id supplied), MCP-0404
+        (unknown tool) or MCP-0422 (missing required argument).
+      x-passage-duty: none
+      parameters:
+        - name: traceparent
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: x-agent-run-id
+          in: header
+          required: false
+          description: Set by the agent runtime so every tool call is traceable to its run.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JsonRpcRequest"
+      responses:
+        "200":
+          description: JSON-RPC response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JsonRpcResponse"
+        "202":
+          description: Notification accepted; no body
+components:
+  schemas:
+    JsonRpcRequest:
+      type: object
+      required: [jsonrpc, method]
+      properties:
+        jsonrpc: {const: "2.0"}
+        id: {oneOf: [{type: string}, {type: number}, {type: "null"}]}
+        method:
+          type: string
+          description: initialize, tools/list or tools/call. Other values get error -32601.
+        params:
+          type: object
+          additionalProperties: true
+    JsonRpcResponse:
+      type: object
+      required: [jsonrpc, id]
+      properties:
+        jsonrpc: {const: "2.0"}
+        id: {oneOf: [{type: string}, {type: number}, {type: "null"}]}
+        result: {type: object, additionalProperties: true}
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: {type: integer, enum: [-32600, -32601, -32602, -32003]}
+            message: {type: string}
+            data: {type: object, additionalProperties: true}
+    Tool:
+      type: object
+      description: MCP tool as listed by tools/list. tenant_id is removed from inputSchema; it comes from the token.
+      required: [name, description, inputSchema, annotations]
+      properties:
+        name:
+          type: string
+          pattern: "^passage(\\.[a-z][a-z0-9_-]*){2,3}$"
+        description: {type: string}
+        inputSchema: {type: object, description: JSON Schema draft 2020-12}
+        annotations:
+          type: object
+          required: [readOnlyHint, destructiveHint, idempotentHint]
+          properties:
+            readOnlyHint: {type: boolean}
+            destructiveHint: {type: boolean}
+            idempotentHint: {type: boolean}
+        x-passage-duty: {type: string}
+        x-passage-approval: {type: string, enum: [none, suggest, approve_before_commit]}

@@ -1,0 +1,25 @@
+asyncapi: 3.0.0
+info:
+  title: Passage agent runtime events
+  version: 0.1.0
+  description: |
+    PRD 9.47.5 events. The run engine in this slice does not publish events:
+    it reports results to its caller and calls its ApprovalPort and ToolPort
+    through injected interfaces. The outbox wiring that turns the results below
+    into events is a later slice (see NOT-IMPLEMENTED.md). `channels` and
+    `operations` stay empty until that wiring exists, so the spec matches code.
+defaultContentType: application/cloudevents+json
+channels: {}
+operations: {}
+components:
+  messages: {}
+  schemas:
+    PlannedEventTypes:
+      type: string
+      description: Event types planned for the wiring slice; additive-only evolution.
+      enum:
+        - dev.passage.agent.run.completed.v1
+        - dev.passage.agent.approval.requested.v1
+        - dev.passage.agent.budget.threshold.v1
+        - dev.passage.agent.killswitch.changed.v1
+        - dev.passage.agent.version.promoted.v1

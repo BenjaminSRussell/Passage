@@ -1,0 +1,57 @@
+openapi: 3.1.0
+info:
+  title: Passage agent runtime
+  version: 0.1.0
+  description: |
+    PRD 9.47.5 endpoints for agent runs, approvals, kill switch, budgets and
+    eval triggers. This slice ships the run engine (src/runtime/engine.ts) and
+    its domain rules, not the HTTP layer, so `paths` is empty until the API
+    slice lands. The endpoints planned for that slice are listed in
+    NOT-IMPLEMENTED.md so reviewers can check the gap.
+servers:
+  - url: https://api.passage.dev/v1/agents
+paths: {}
+components:
+  schemas:
+    RunStatus:
+      type: string
+      description: BR-47.1 run state machine. COMMITTED, REJECTED, FAILED and KILLED are terminal.
+      enum: [PLANNING, ACTING, AWAITING_APPROVAL, COMMITTED, REJECTED, FAILED, KILLED]
+    ActionDecision:
+      type: string
+      enum: [APPROVED, REJECTED, AUTO, DENIED]
+    AgentMode:
+      type: string
+      enum: [OFF, SUGGEST, AUTO]
+    AgentErrorCode:
+      type: string
+      description: Stable codes from PRD 9.47.18 raised by this slice.
+      enum: [AGT-0201, AGT-0202, AGT-0203, AGT-0204, AGT-0208, AGT-0209, AGT-0210, AGT-0214]
+    RunResult:
+      type: object
+      description: Returned by runAgent. Mirrors RunResult in src/runtime/engine.ts.
+      required: [runId, status, tokensIn, tokensOut, estimated, actions]
+      properties:
+        runId: {type: string}
+        status: {$ref: "#/components/schemas/RunStatus"}
+        code: {$ref: "#/components/schemas/AgentErrorCode"}
+        reason: {type: string}
+        displayText: {type: string, description: Model text with pseudonyms resolved; shown in the UI only.}
+        tokensIn: {type: integer, minimum: 0}
+        tokensOut: {type: integer, minimum: 0}
+        estimated: {type: boolean, description: BR-47.4 — true when the provider reported no usage.}
+        budgetState: {type: string, enum: [OK, SOFT, HARD]}
+        actions:
+          type: array
+          items: {$ref: "#/components/schemas/AgentAction"}
+    AgentAction:
+      type: object
+      description: One audited tool call or proposal (agent_action).
+      required: [seq, toolName, inputJson, decision, committedEntityRef, approverUserId]
+      properties:
+        seq: {type: integer, minimum: 1}
+        toolName: {type: string}
+        inputJson: {type: string, description: Redacted input. Never contains raw PII.}
+        decision: {$ref: "#/components/schemas/ActionDecision"}
+        approverUserId: {type: [string, "null"], format: uuid}
+        committedEntityRef: {type: [string, "null"]}
