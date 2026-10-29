@@ -1,11 +1,12 @@
 openapi: 3.1.0
 info:
   title: Passage Migration Factory API
-  version: 0.3.0
+  version: 0.4.0
   description: |
-    Slices 1 and 2 of wave 49 (PSG-49): open_items and project_wip pack runs with control
-    totals, quarantine release and the legacy cross-reference lookup, the parallel-run review,
-    project opening balances, and the cutover runbook. Source of truth for the handlers in
+    Slices 1 to 4 of wave 49 (PSG-49): the pack catalog, open_items and project_wip pack runs
+    with control totals, quarantine release and the legacy cross-reference lookup, the
+    parallel-run review, project opening balances, and the cutover runbook with timed steps, the
+    generated rollback plan and the rollback re-keying export. Source of truth for the handlers in
     internal/api. State is stored in Postgres under row-level security per tenant.
 
     Commands accept an optional `Idempotency-Key` header (at most 200 characters). A repeated
@@ -20,6 +21,32 @@ servers:
 security:
   - bearerAuth: []
 paths:
+  /api/v1/migration/packs:
+    get:
+      operationId: listPackCatalog
+      summary: The nine transactional packs (FR-49.1) for the migration factory workspace
+      description: |
+        Every pack covers AX2012, D365FO, SAPECC and S4HANA. `available` is true for the packs a
+        run can be started for in this release (open_items and project_wip); the others return
+        MIG-0005 from startPackRun. Reads no tenant data.
+      x-passage-duty: MigrationView
+      responses:
+        "200":
+          description: The catalog in FR-49.1 order.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/CatalogEntry"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
   /api/v1/migration/packs/{pack}/runs:
     post:
       operationId: startPackRun
@@ -561,14 +588,16 @@ paths:
           $ref: "#/components/responses/Problem"
         "422":
           $ref: "#/components/responses/Problem"
-  /api/v1/cutover/plans/{id}/steps/{seq}/complete:
+  /api/v1/cutover/plans/{id}/steps/{seq}/start:
     post:
-      operationId: completeCutoverStep
-      summary: Mark a runbook step done. Rejects out-of-sequence go/no-go steps (CUT-1601).
+      operationId: startCutoverStep
+      summary: Start a runbook step so the runbook times it against its planned duration (FR-49.6)
       description: |
-        Writes dev.passage.cutover.step.completed.v1. When `version` is given and the plan has
-        moved on, the request is rejected with MIG-0006. A rolled-back plan's steps cannot be
-        completed (MIG-0004).
+        Records the start time and the user. A step starts once (MIG-0001 on a second start or a
+        done step) and obeys the go/no-go sequencing of completion (CUT-1601). A rolled-back
+        plan's steps cannot be started (MIG-0004). When `version` is given and the plan has moved
+        on, the request is rejected with MIG-0006. No event is written; completion writes
+        dev.passage.cutover.step.completed.v1.
       x-passage-duty: CutoverStepOwner
       parameters:
         - $ref: "#/components/parameters/Id"
@@ -585,12 +614,63 @@ paths:
           application/json:
             schema:
               type: object
-              required: [actualDurationMin]
+              additionalProperties: false
+              properties:
+                version:
+                  type: integer
+                  minimum: 1
+                  description: The plan version the client read (optimistic check).
+      responses:
+        "200":
+          description: The plan after the step started.
+          headers:
+            Idempotent-Replayed:
+              $ref: "#/components/headers/IdempotentReplayed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Plan"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/cutover/plans/{id}/steps/{seq}/complete:
+    post:
+      operationId: completeCutoverStep
+      summary: Mark a runbook step done. Rejects out-of-sequence go/no-go steps (CUT-1601).
+      description: |
+        Writes dev.passage.cutover.step.completed.v1. Without `actualDurationMin` the duration
+        is measured in whole minutes from the step's start; a step that was never started needs
+        it (MIG-0001). When `version` is given and the plan has moved on, the request is
+        rejected with MIG-0006. A rolled-back plan's steps cannot be completed (MIG-0004).
+      x-passage-duty: CutoverStepOwner
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - name: seq
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
               additionalProperties: false
               properties:
                 actualDurationMin:
                   type: integer
                   minimum: 0
+                  description: Minutes the step took. Optional for a started step.
                 version:
                   type: integer
                   minimum: 1
@@ -1339,6 +1419,63 @@ components:
         completedAt:
           type: string
           format: date-time
+        startedAt:
+          type: string
+          format: date-time
+          description: Set once the step is started; the runbook timer runs from it (FR-49.6).
+        startedBy:
+          type: string
+        elapsedMin:
+          type: integer
+          minimum: 0
+          description: |
+            Elapsed minutes at the time of the response: from the start for a running step, the
+            recorded duration for a done step. Absent for a step not started.
+        tone:
+          type: string
+          enum: [ok, amber, red]
+          description: Elapsed against planned, amber at 110 % and red at 125 % (9.49.6). Absent with elapsedMin.
+        overrunWarning:
+          type: string
+          description: CUT-1602 text for a running step at or above the amber percentage.
+    RollbackStep:
+      type: object
+      required: [seq, offsetMin, name, owner, plannedDurationMin, decisionPoint]
+      properties:
+        seq:
+          type: integer
+          minimum: 1
+        offsetMin:
+          type: integer
+          description: Minutes from T-0. The first step is at the abort deadline; each later step starts when the one before is planned to end.
+        name:
+          type: string
+        owner:
+          type: string
+        plannedDurationMin:
+          type: integer
+          minimum: 1
+        decisionPoint:
+          type: boolean
+          description: True for the first step, the rollback decision at the abort deadline (BR-49.9).
+    CatalogEntry:
+      type: object
+      required: [pack, sourceSystems, controlTotals, available]
+      properties:
+        pack:
+          type: string
+          enum: [open_items, gl_balances, onhand, open_orders, wip_prod, fixed_assets, project_wip, payroll_ytd, bank_balances]
+        sourceSystems:
+          type: array
+          items:
+            type: string
+            enum: [AX2012, D365FO, SAPECC, S4HANA]
+        controlTotals:
+          type: string
+          description: The FR-49.2 control totals the pack compares.
+        available:
+          type: boolean
+          description: A run can be started for this pack in this release.
     Plan:
       type: object
       required: [planId, t0, packs, entities, abortOffsetMin, rolledBack, approvers, version, createdAt, stepsDone, stepsTotal, openGoNoGo, abortDue]
@@ -1407,6 +1544,11 @@ components:
           description: Present on generate, get and commands; absent in the list.
           items:
             $ref: "#/components/schemas/Step"
+        rollbackSteps:
+          type: array
+          description: The generated rollback plan (FR-49.9), sent with the steps.
+          items:
+            $ref: "#/components/schemas/RollbackStep"
     RekeyPosting:
       type: object
       required: [kind, entity, documentRef, postedAt, account, currency, amount]

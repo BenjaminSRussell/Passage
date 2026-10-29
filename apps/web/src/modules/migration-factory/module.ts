@@ -6,6 +6,7 @@ import { NewCutoverPlanPage } from "./NewCutoverPlanPage";
 import { NewPackRunPage } from "./NewPackRunPage";
 import { NewParallelRunPage } from "./NewParallelRunPage";
 import { NewProjectRunPage } from "./NewProjectRunPage";
+import { PackCatalogPage } from "./PackCatalogPage";
 import { PackRunDetailPage } from "./PackRunDetailPage";
 import { PackRunsPage } from "./PackRunsPage";
 import { ParallelRunDetailPage } from "./ParallelRunDetailPage";
@@ -17,9 +18,10 @@ const migrationFactory: PassageModule = {
   id: "migration-factory",
   title: "Migration factory",
   description:
-    "Move a customer off AX or SAP: pack runs with control totals and quarantine release, project beginning balances, parallel-run review, legacy references and the cutover runbook.",
+    "Move a customer off AX or SAP: the pack catalog, pack runs with control totals and quarantine release, project beginning balances, parallel-run review, legacy references and the timed cutover runbook with its rollback plan.",
   routes: [
     { path: "/migration-factory", element: createElement(PackRunsPage), handle: { title: "Pack runs" } },
+    { path: "/migration-factory/packs", element: createElement(PackCatalogPage), handle: { title: "Transactional packs" } },
     { path: "/migration-factory/runs/new", element: createElement(NewPackRunPage), handle: { title: "Start pack run" } },
     { path: "/migration-factory/runs/new-project", element: createElement(NewProjectRunPage), handle: { title: "Load project beginning balances" } },
     { path: "/migration-factory/runs/:id", element: createElement(PackRunDetailPage), handle: { title: "Pack run" } },
@@ -34,6 +36,7 @@ const migrationFactory: PassageModule = {
   ],
   nav: [
     { label: "Pack runs", to: "/migration-factory", duty: "MigrationView" },
+    { label: "Pack catalog", to: "/migration-factory/packs", duty: "MigrationView" },
     { label: "Parallel runs", to: "/migration-factory/parallel-runs", duty: "MigrationView" },
     // Any signed-in user may resolve a legacy id (9.49.5).
     { label: "Legacy reference", to: "/migration-factory/xref" },

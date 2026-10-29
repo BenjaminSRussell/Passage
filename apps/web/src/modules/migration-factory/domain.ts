@@ -15,9 +15,6 @@ export const PACKS = [
 ] as const;
 export type Pack = (typeof PACKS)[number];
 
-/** Packs the API runs today. */
-export const AVAILABLE_PACKS: readonly Pack[] = ["open_items", "project_wip"];
-
 export const SOURCE_SYSTEMS = ["AX2012", "D365FO", "SAPECC", "S4HANA"] as const;
 export type SourceSystem = (typeof SOURCE_SYSTEMS)[number];
 
@@ -55,6 +52,19 @@ export function overrunTone(planned: number, actual: number, amberPct = 110, red
 }
 
 export const toneLabel: Record<Tone, string> = { ok: "On plan", amber: "Amber", red: "Red" };
+
+/** Whole minutes since a step started, for the live runbook timer (FR-49.6). Never negative; 0 for a bad time. */
+export function elapsedSince(startedAt: string, nowMs: number): number {
+  const started = Date.parse(startedAt);
+  if (Number.isNaN(started)) return 0;
+  return Math.max(0, Math.floor((nowMs - started) / 60_000));
+}
+
+/** "2 h 05 min" or "45 min". */
+export function formatMinutes(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
+  return `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, "0")} min`;
+}
 
 /** A run may reach RECONCILED only when no control total is MISMATCH (9.49.4 invariant). */
 export function canReconcile(totals: ControlTotal[]): boolean {

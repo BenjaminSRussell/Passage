@@ -120,7 +120,7 @@ describe("Pack runs", () => {
     await waitFor(() => expect(table).toHaveTextContent("AX 2012 USMF"));
     expect(table).toHaveTextContent("Loaded");
     expect(screen.getByRole("link", { name: "Start pack run" })).toHaveAttribute("href", "/migration-factory/runs/new");
-    expect(screen.getByRole("table", { name: "Transactional packs" })).toHaveTextContent("Later slice");
+    expect(screen.getByRole("link", { name: "Pack catalog" })).toHaveAttribute("href", "/migration-factory/packs");
     expect(pageViolations(container)).toEqual([]);
   });
 

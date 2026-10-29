@@ -153,13 +153,12 @@ func (s *Server) startPackRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
-	switch pack {
-	case domain.PackOpenItems:
-	case domain.PackProjectWIP:
-		s.startProjectRun(w, r)
-		return
-	default:
+	if !domain.PackAvailable(pack) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeUnsupported, "pack "+string(pack)+" is not available yet; open_items and project_wip run"))
+		return
+	}
+	if pack == domain.PackProjectWIP {
+		s.startProjectRun(w, r)
 		return
 	}
 	var req packRunRequest

@@ -27,7 +27,14 @@ Built and tested:
 - **Cutover plan** (`cutover.go`): timed steps from T-14d to T+30d with pack load steps, rehearsal
   duration overrides, go/no-go sequencing (CUT-1601), the abort step at `abortOffsetHours`, the
   BR-49.9 abort state (CUT-1604), rollback once with two distinct approvers (CUT-1603), and a plan
-  version bumped on every change.
+  version bumped on every change. A step can be started (once, under the same go/no-go gate) so
+  the runbook shows elapsed against planned, amber at 110 % and red at 125 % with CUT-1602; a
+  completion without a duration is measured from the start.
+- **Rollback plan** (`rollback.go`, FR-49.9): generated from the plan, starting with the decision
+  point at the abort deadline, then stop Passage access, restore legacy write access, resume the
+  coexistence adapters, export the postings since T-0 and re-key them.
+- **Pack catalog** (`catalog.go`, FR-49.1): the nine packs for AX 2012, D365 F&O, SAP ECC and
+  S/4HANA with their FR-49.2 control totals and whether a run can be started today.
 - **Rollback re-keying export** (`rekey.go`, FR-49.9): the postings since T-0 given with the
   rollback become a journal file (debit and credit, each journal balanced) and a document file,
   kept write-once in `rekey_line` and served as CSV; postings before T-0 are counted and left out.
@@ -46,11 +53,12 @@ Built and tested:
   version check on plan commands.
 - **HTTP API** (`internal/api`): the kernel router, tenant middleware and duty checks. Contract in
   `api/openapi.yaml` (a test checks it against the routes); events in `events/asyncapi.yaml`.
-- **Web module** (`apps/web/src/modules/migration-factory`): pack runs (list, open_items and
+- **Web module** (`apps/web/src/modules/migration-factory`): the pack catalog, pack runs (list, open_items and
   project_wip start forms, detail with the control-total board, quarantine release and projects),
   project opening balances, parallel runs (list, start, variance review and sign-off), the legacy
   reference lookup, and cutover runbooks (list, generate form, detail with go/no-go checklist,
-  step completion, rollback with the re-keying postings, and the re-keying file downloads).
+  step start with the live timer, step completion, the rollback plan, rollback with the re-keying
+  postings, and the re-keying file downloads).
 - **Chart** (`charts/passage-migration-factory`): Deployment, Service and ServiceMonitor toggle.
 
 What is not built yet is listed in `NOT-IMPLEMENTED.md`.
@@ -85,6 +93,7 @@ Web: `cd apps/web && npx vitest --run src/modules/migration-factory && npx tsc -
 
 | Route | Duty |
 |---|---|
+| `GET /api/v1/migration/packs` | `MigrationView` |
 | `POST /api/v1/migration/packs/{pack}/runs` | `MigrationRun` |
 | `GET /api/v1/migration/runs` | `MigrationView` |
 | `GET /api/v1/migration/runs/{id}` | `MigrationView` |
@@ -92,6 +101,7 @@ Web: `cd apps/web && npx vitest --run src/modules/migration-factory && npx tsc -
 | `POST /api/v1/cutover/plans/generate` | `CutoverManager` |
 | `GET /api/v1/cutover/plans` | `CutoverManager` |
 | `GET /api/v1/cutover/plans/{id}` | `CutoverManager` |
+| `POST /api/v1/cutover/plans/{id}/steps/{seq}/start` | `CutoverStepOwner` |
 | `POST /api/v1/cutover/plans/{id}/steps/{seq}/complete` | `CutoverStepOwner` |
 | `POST /api/v1/cutover/plans/{id}/rollback` | `CutoverManager` (plus two approvers in the body) |
 | `GET /api/v1/cutover/plans/{id}/rekeying/{file}` | `CutoverManager` |

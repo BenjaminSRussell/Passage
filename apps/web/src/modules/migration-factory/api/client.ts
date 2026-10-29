@@ -227,6 +227,34 @@ export interface RunbookStep {
   pack?: string;
   completedBy?: string;
   completedAt?: string;
+  /** Set once the step is started; the runbook timer runs from it (FR-49.6). */
+  startedAt?: string;
+  startedBy?: string;
+  /** Elapsed minutes when the plan was read: from the start while running, the recorded duration when done. */
+  elapsedMin?: number;
+  tone?: "ok" | "amber" | "red";
+  /** CUT-1602 text for a running step at or above 110 % of its planned duration. */
+  overrunWarning?: string;
+}
+
+/** One step of the generated rollback plan (FR-49.9); the first is the decision at the abort deadline. */
+export interface RollbackStep {
+  seq: number;
+  offsetMin: number;
+  name: string;
+  owner: string;
+  plannedDurationMin: number;
+  decisionPoint: boolean;
+}
+
+/** One pack of the workspace catalog (FR-49.1). */
+export interface CatalogEntry {
+  pack: Pack;
+  sourceSystems: SourceSystem[];
+  /** The FR-49.2 control totals the pack compares. */
+  controlTotals: string;
+  /** A run can be started for this pack in this release. */
+  available: boolean;
 }
 
 export interface CutoverPlan {
@@ -248,6 +276,8 @@ export interface CutoverPlan {
   rekeying?: Rekeying;
   /** Present on get and commands; the list leaves it out. */
   steps?: RunbookStep[];
+  /** The generated rollback plan, sent with the steps. */
+  rollbackSteps?: RollbackStep[];
 }
 
 export interface Rekeying {
@@ -320,6 +350,11 @@ function query(params: Record<string, string | number | undefined>): string {
   }
   const s = q.toString();
   return s ? `?${s}` : "";
+}
+
+/** GET /migration/packs: the nine packs, the systems they cover and whether each runs today. */
+export function listPackCatalog(signal?: AbortSignal): Promise<CatalogEntry[]> {
+  return items("/migration/packs", signal);
 }
 
 /** GET /migration/runs, newest first. */
@@ -397,9 +432,17 @@ export function generateCutoverPlan(body: GenerateCutoverRequest, key: string = 
   return post("/cutover/plans/generate", body, key);
 }
 
-/** POST /cutover/plans/{id}/steps/{seq}/complete. version is the plan version the user saw. */
-export function completeStep(planId: string, seq: number, actualDurationMin: number, version: number, key: string = newKey()): Promise<CutoverPlan> {
-  return post(`/cutover/plans/${encodeURIComponent(planId)}/steps/${seq}/complete`, { actualDurationMin, version }, key);
+/** POST /cutover/plans/{id}/steps/{seq}/start: starts the runbook timer for the step. */
+export function startStep(planId: string, seq: number, version: number, key: string = newKey()): Promise<CutoverPlan> {
+  return post(`/cutover/plans/${encodeURIComponent(planId)}/steps/${seq}/start`, { version }, key);
+}
+
+/**
+ * POST /cutover/plans/{id}/steps/{seq}/complete. version is the plan version the user saw. Without
+ * actualDurationMin the service measures a started step from its start.
+ */
+export function completeStep(planId: string, seq: number, actualDurationMin: number | undefined, version: number, key: string = newKey()): Promise<CutoverPlan> {
+  return post(`/cutover/plans/${encodeURIComponent(planId)}/steps/${seq}/complete`, actualDurationMin === undefined ? { version } : { actualDurationMin, version }, key);
 }
 
 /**

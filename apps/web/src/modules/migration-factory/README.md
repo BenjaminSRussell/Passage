@@ -4,7 +4,9 @@ Migration factory workspace for wave 49 (PSG-49), discovered by the shell via `m
 call the service at `tools/migration-factory` through `api/client.ts` (paths from its
 `api/openapi.yaml`):
 
-- `/migration-factory`: pack runs with pack and status filters, and the nine packs.
+- `/migration-factory`: pack runs with pack and status filters.
+- `/migration-factory/packs`: the nine transactional packs from the service catalog, the legacy
+  systems and control totals of each, and a start link for the packs that run today.
 - `/migration-factory/runs/new`: start an open_items run from a pasted extract.
 - `/migration-factory/runs/new-project`: load project beginning balances (project_wip) from pasted
   opening lines and legacy category totals.
@@ -20,8 +22,10 @@ call the service at `tools/migration-factory` through `api/client.ts` (paths fro
 - `/migration-factory/xref`: resolve a legacy id to the Passage record it became.
 - `/migration-factory/cutover`: cutover plans with progress.
 - `/migration-factory/cutover/new`: generate a plan.
-- `/migration-factory/cutover/:id`: the runbook, go/no-go checklist, step completion, abort warning,
-  two-approver rollback with the postings since T-0 to re-key, and the journal and document CSV
+- `/migration-factory/cutover/:id`: the runbook, go/no-go checklist, step start with a timer that
+  refreshes every 30 s (elapsed against planned, amber at 110 %, red at 125 %, CUT-1602 warnings),
+  step completion (blank minutes on a started step use the measured time), abort warning, the
+  generated rollback plan, two-approver rollback with the postings since T-0 to re-key, and the journal and document CSV
   downloads once rolled back (FR-49.9).
 
 Commands send an `Idempotency-Key`; pack-run releases, variance explanations, sign-off and plan

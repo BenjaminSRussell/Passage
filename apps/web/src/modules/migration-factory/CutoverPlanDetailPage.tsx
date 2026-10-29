@@ -1,7 +1,8 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   Alert,
+  Badge,
   Button,
   buttonClassName,
   Card,
@@ -14,14 +15,50 @@ import {
   StatTile,
   StatusPill,
   Textarea,
+  type BadgeTone,
   type DataTableColumn,
 } from "../../shell/ui";
-import { completeStep, describeProblem, getPlan, newKey, rekeyFileUrl, rollbackPlan, type Problem, type RekeyPosting, type RunbookStep } from "./api/client";
-import { formatDateTime, formatOffset, overrunTone, parsePostings, toneLabel } from "./domain";
+import {
+  completeStep,
+  describeProblem,
+  getPlan,
+  newKey,
+  rekeyFileUrl,
+  rollbackPlan,
+  startStep,
+  type Problem,
+  type RekeyPosting,
+  type RollbackStep,
+  type RunbookStep,
+} from "./api/client";
+import { elapsedSince, formatDateTime, formatMinutes, formatOffset, overrunTone, parsePostings, toneLabel, type Tone } from "./domain";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
 const WHOLE = /^\d{1,5}$/;
+
+/** How often the runbook timer refreshes while a step runs. */
+const TICK_MS = 30_000;
+
+const toneBadge: Record<Tone, BadgeTone> = { ok: "success", amber: "warning", red: "danger" };
+
+const running = (step: RunbookStep) => step.status === "PENDING" && Boolean(step.startedAt);
+
+/** Elapsed minutes of a step at nowMs: live from the start while running, the recorded duration when done. */
+function elapsedOf(step: RunbookStep, nowMs: number): number | null {
+  if (step.status === "DONE") return step.actualDurationMin;
+  if (step.startedAt) return elapsedSince(step.startedAt, nowMs);
+  return null;
+}
+
+const rollbackColumns: DataTableColumn<RollbackStep>[] = [
+  { key: "seq", header: "Seq", mono: true },
+  { key: "offsetMin", header: "T offset", mono: true, render: (row) => formatOffset(row.offsetMin) },
+  { key: "name", header: "Step" },
+  { key: "owner", header: "Owner" },
+  { key: "plannedDurationMin", header: "Planned (min)", align: "end" },
+  { key: "decisionPoint", header: "Decision point", render: (row) => (row.decisionPoint ? <Badge tone="warning">Decision</Badge> : "") },
+];
 
 const POSTINGS_HINT =
   "One line per posting since T-0: kind (JOURNAL or DOCUMENT), entity, document, posted at (2027-01-02T10:00:00Z), account, dimensions, currency, amount (credit negative), text. Leave blank if nothing was posted.";
@@ -36,8 +73,9 @@ function conflictMessage(problem: Problem): string {
 }
 
 /**
- * One cutover runbook: steps with planned against actual, the go/no-go checklist, step completion,
- * and the rollback with its re-keying export of the postings since T-0 (FR-49.9).
+ * One cutover runbook: steps with planned against actual, started steps timed live (FR-49.6), the
+ * go/no-go checklist, step completion, the generated rollback plan, and the rollback with its
+ * re-keying export of the postings since T-0 (FR-49.9).
  */
 export function CutoverPlanDetailPage() {
   const { id = "" } = useParams();
@@ -55,7 +93,23 @@ export function CutoverPlanDetailPage() {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const stepKey = useRef(newKey());
+  const startKey = useRef(newKey());
   const rollbackKey = useRef(newKey());
+  const [now, setNow] = useState(() => Date.now());
+  const anyRunning = plan?.steps?.some(running) ?? false;
+
+  // The runbook timer (FR-49.6): refresh elapsed against planned while a step runs.
+  useEffect(() => {
+    if (!anyRunning) return undefined;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), TICK_MS);
+    return () => clearInterval(timer);
+  }, [anyRunning]);
+
+  const overruns = (plan?.steps ?? [])
+    .filter(running)
+    .map((step) => ({ step, elapsed: elapsedOf(step, now) ?? 0 }))
+    .filter(({ step, elapsed }) => overrunTone(step.plannedDurationMin, elapsed) !== "ok");
 
   const columns: DataTableColumn<RunbookStep>[] = [
     { key: "seq", header: "Seq", mono: true },
@@ -63,29 +117,70 @@ export function CutoverPlanDetailPage() {
     { key: "name", header: "Step" },
     { key: "owner", header: "Owner" },
     { key: "plannedDurationMin", header: "Planned (min)", align: "end" },
-    { key: "actualDurationMin", header: "Actual (min)", align: "end", render: (row) => (row.status === "DONE" ? row.actualDurationMin : "") },
+    {
+      key: "actualDurationMin",
+      header: "Elapsed / actual (min)",
+      align: "end",
+      render: (row) => {
+        const elapsed = elapsedOf(row, now);
+        return elapsed === null ? "" : elapsed;
+      },
+    },
     { key: "goNoGo", header: "Go/no-go", render: (row) => (row.goNoGo ? "Yes" : "No") },
-    { key: "status", header: "Status", render: (row) => <StatusPill status={row.status} /> },
+    { key: "status", header: "Status", render: (row) => <StatusPill status={running(row) ? "running" : row.status} /> },
     {
       key: "tone",
       header: "Overrun",
-      render: (row) => (row.status === "DONE" ? toneLabel[overrunTone(row.plannedDurationMin, row.actualDurationMin)] : ""),
+      render: (row) => {
+        const elapsed = elapsedOf(row, now);
+        if (elapsed === null) return "";
+        const tone = overrunTone(row.plannedDurationMin, elapsed);
+        return <Badge tone={toneBadge[tone]}>{toneLabel[tone]}</Badge>;
+      },
     },
     {
       key: "action",
       header: "Action",
       render: (row) =>
         row.status === "PENDING" && plan && !plan.rolledBack ? (
-          <Button size="sm" onClick={() => choose(row)} aria-label={`Complete step ${row.seq}`}>
-            Complete
-          </Button>
+          <span className={styles.rowActions}>
+            {row.startedAt ? null : (
+              <Button size="sm" onClick={() => void start(row)} disabled={busy} aria-label={`Start step ${row.seq}`}>
+                Start
+              </Button>
+            )}
+            <Button size="sm" onClick={() => choose(row)} aria-label={`Complete step ${row.seq}`}>
+              Complete
+            </Button>
+          </span>
         ) : null,
     },
   ];
 
+  async function start(step: RunbookStep) {
+    if (!plan) return;
+    setFailure(null);
+    setBusy(true);
+    try {
+      const updated = await startStep(plan.planId, step.seq, plan.version, startKey.current);
+      state.set(updated);
+      setNow(Date.now());
+      // A completion form open for this step switches to the measured time.
+      if (selected?.seq === step.seq) choose(updated.steps?.find((s) => s.seq === step.seq) ?? step);
+    } catch (error) {
+      const problem = describeProblem(error);
+      setFailure({ ...problem, message: conflictMessage(problem) });
+      if (problem.code === "MIG-0006") state.reload();
+    } finally {
+      startKey.current = newKey();
+      setBusy(false);
+    }
+  }
+
   function choose(step: RunbookStep) {
     setSelected(step);
-    setMinutes(String(step.plannedDurationMin));
+    // A started step is measured by the service when the minutes are left blank.
+    setMinutes(step.startedAt ? "" : String(step.plannedDurationMin));
     setMinutesError(undefined);
     setFailure(null);
     stepKey.current = newKey();
@@ -94,15 +189,17 @@ export function CutoverPlanDetailPage() {
   async function submitStep(event: FormEvent) {
     event.preventDefault();
     if (!plan || !selected) return;
-    if (!WHOLE.test(minutes.trim())) {
-      setMinutesError("Enter the minutes the step took, as a whole number.");
+    const typed = minutes.trim();
+    const measured = typed === "" && Boolean(selected.startedAt);
+    if (!measured && !WHOLE.test(typed)) {
+      setMinutesError(selected.startedAt ? "Enter the minutes as a whole number, or leave blank to use the measured time." : "Enter the minutes the step took, as a whole number.");
       return;
     }
     setMinutesError(undefined);
     setFailure(null);
     setBusy(true);
     try {
-      state.set(await completeStep(plan.planId, selected.seq, Number(minutes.trim()), plan.version, stepKey.current));
+      state.set(await completeStep(plan.planId, selected.seq, measured ? undefined : Number(typed), plan.version, stepKey.current));
       setSelected(null);
     } catch (error) {
       const problem = describeProblem(error);
@@ -178,6 +275,18 @@ export function CutoverPlanDetailPage() {
               {plan.abortWarning}
             </Alert>
           ) : null}
+          {overruns.length > 0 ? (
+            <Alert tone="warning" title="Steps over plan">
+              <ul className={styles.plainList} aria-label="Steps over plan">
+                {overruns.map(({ step, elapsed }) => (
+                  <li key={step.seq}>
+                    CUT-1602 Step {step.seq} {step.name} at {Math.floor((elapsed * 100) / step.plannedDurationMin)}% of planned duration ({formatMinutes(elapsed)}{" "}
+                    of {formatMinutes(step.plannedDurationMin)}).
+                  </li>
+                ))}
+              </ul>
+            </Alert>
+          ) : null}
           <StatGroup label="Progress">
             <StatTile label="Steps done" value={`${plan.stepsDone} / ${plan.stepsTotal}`} />
             <StatTile label="Open go/no-go" value={plan.openGoNoGo.length} tone={plan.openGoNoGo.length > 0 ? "warning" : "neutral"} />
@@ -197,7 +306,17 @@ export function CutoverPlanDetailPage() {
           {selected ? (
             <Card title={`Complete step ${selected.seq}: ${selected.name}`}>
               <form className={styles.form} onSubmit={submitStep} noValidate>
-                <FormField id="step-minutes" label="Actual duration (min)" hint={`Planned ${selected.plannedDurationMin} min.`} error={minutesError}>
+                <FormField
+                  id="step-minutes"
+                  label="Actual duration (min)"
+                  hint={
+                    selected.startedAt
+                      ? `Planned ${selected.plannedDurationMin} min. Started ${formatDateTime(selected.startedAt)}, running ${formatMinutes(elapsedSince(selected.startedAt, now))}; leave blank to use the measured time.`
+                      : `Planned ${selected.plannedDurationMin} min.`
+                  }
+                  error={minutesError}
+                  optional={Boolean(selected.startedAt)}
+                >
                   {(control) => <Input {...control} inputMode="numeric" value={minutes} invalid={Boolean(minutesError)} onChange={(event) => setMinutes(event.target.value)} />}
                 </FormField>
                 <div className={styles.formActions}>
@@ -222,6 +341,17 @@ export function CutoverPlanDetailPage() {
           loading={state.loading}
           empty={{ title: "No steps", description: "The plan has no steps." }}
         />
+      ) : null}
+      {plan?.rollbackSteps && plan.rollbackSteps.length > 0 ? (
+        <Card title="Rollback plan">
+          <div className={styles.stack}>
+            <p className={styles.note}>
+              Generated for this cutover (FR-49.9). If go/no-go items are still open at the abort deadline ({formatOffset(plan.abortOffsetMin)}), the
+              cutover manager decides on the rollback and these steps follow.
+            </p>
+            <DataTable label="Rollback plan" columns={rollbackColumns} rows={plan.rollbackSteps} getRowKey={(row) => String(row.seq)} />
+          </div>
+        </Card>
       ) : null}
       {plan ? (
         <Card title="Rollback">

@@ -73,7 +73,7 @@ func loadSteps(ctx context.Context, tx pgx.Tx, plans []*domain.Plan) error {
 		planIDs = append(planIDs, p.PlanID)
 	}
 	rows, err := tx.Query(ctx, `select plan_id::text, seq, offset_minutes, name, owner, planned_duration_min, actual_duration_min, status,
-		go_nogo, pack, completed_by, completed_at
+		go_nogo, pack, completed_by, completed_at, started_at, started_by
 		from cutover_step where tenant_id = current_setting('passage.tenant_id', true)::uuid and plan_id = any($1::uuid[]) order by plan_id, seq`, planIDs)
 	if err != nil {
 		return err
@@ -83,7 +83,7 @@ func loadSteps(ctx context.Context, tx pgx.Tx, plans []*domain.Plan) error {
 		var planID string
 		var st domain.Step
 		if err := rows.Scan(&planID, &st.Seq, &st.OffsetMin, &st.Name, &st.Owner, &st.PlannedDurationMin, &st.ActualDurationMin, &st.Status,
-			&st.GoNoGo, &st.Pack, &st.CompletedBy, &st.CompletedAt); err != nil {
+			&st.GoNoGo, &st.Pack, &st.CompletedBy, &st.CompletedAt, &st.StartedAt, &st.StartedBy); err != nil {
 			return err
 		}
 		byID[planID].Steps = append(byID[planID].Steps, st)
@@ -171,13 +171,76 @@ func (s *Postgres) ListPlans(ctx context.Context, f PlanFilter) ([]domain.Plan, 
 }
 
 // StepCompletion is a request to mark one runbook step done. ExpectedVersion 0 skips the
-// optimistic version check.
+// optimistic version check. A nil ActualDurationMin measures the duration from the step's start.
 type StepCompletion struct {
 	PlanID            string
 	Seq               int
-	ActualDurationMin int
+	ActualDurationMin *int
 	ExpectedVersion   int
 	By                string
+}
+
+// StepStart is a request to start one runbook step. ExpectedVersion 0 skips the version check.
+type StepStart struct {
+	PlanID          string
+	Seq             int
+	ExpectedVersion int
+	By              string
+}
+
+// lockPlan reads the plan under its row lock and checks the caller's expected version.
+func lockPlan(ctx context.Context, tx pgx.Tx, planID string, expected int) (domain.Plan, error) {
+	plan, err := getPlan(ctx, tx, planID, true)
+	if err != nil {
+		return domain.Plan{}, err
+	}
+	if expected != 0 && expected != plan.Version {
+		return domain.Plan{}, fmt.Errorf("%w: plan is at version %d, request expected %d", ErrVersion, plan.Version, expected)
+	}
+	return plan, nil
+}
+
+func stepAt(plan *domain.Plan, seq int) *domain.Step {
+	for i := range plan.Steps {
+		if plan.Steps[i].Seq == seq {
+			return &plan.Steps[i]
+		}
+	}
+	return nil
+}
+
+func savePlanVersion(ctx context.Context, tx pgx.Tx, plan domain.Plan) error {
+	if _, err := tx.Exec(ctx, `update cutover_plan set version = $2 where tenant_id = current_setting('passage.tenant_id', true)::uuid and plan_id = $1`, plan.PlanID, plan.Version); err != nil {
+		return fmt.Errorf("update cutover_plan: %w", err)
+	}
+	return nil
+}
+
+// StartStep records the start of a runbook step under the plan's row lock (FR-49.6): the timer
+// on the runbook runs from it. The go/no-go gate applies as for completion (CUT-1601).
+func (s *Postgres) StartStep(ctx context.Context, idem Idem, st StepStart) (domain.Plan, bool, error) {
+	var out domain.Plan
+	var replayed bool
+	err := s.tx(ctx, func(tx pgx.Tx) error {
+		var err error
+		out, replayed, err = idempotent(ctx, tx, idem, http.StatusOK, func() (domain.Plan, error) {
+			plan, err := lockPlan(ctx, tx, st.PlanID, st.ExpectedVersion)
+			if err != nil {
+				return domain.Plan{}, err
+			}
+			if err := plan.Start(st.Seq, time.Now().UTC(), st.By); err != nil {
+				return domain.Plan{}, err
+			}
+			step := stepAt(&plan, st.Seq)
+			if _, err := tx.Exec(ctx, `update cutover_step set started_at = $3, started_by = $4
+				where tenant_id = current_setting('passage.tenant_id', true)::uuid and plan_id = $1 and seq = $2`, plan.PlanID, step.Seq, step.StartedAt, step.StartedBy); err != nil {
+				return domain.Plan{}, fmt.Errorf("update cutover_step: %w", err)
+			}
+			return plan, savePlanVersion(ctx, tx, plan)
+		})
+		return err
+	})
+	return out, replayed, err
 }
 
 // CompleteStep marks the step done under the plan's row lock, checks the expected version,
@@ -188,30 +251,28 @@ func (s *Postgres) CompleteStep(ctx context.Context, idem Idem, c StepCompletion
 	err := s.tx(ctx, func(tx pgx.Tx) error {
 		var err error
 		out, replayed, err = idempotent(ctx, tx, idem, http.StatusOK, func() (domain.Plan, error) {
-			plan, err := getPlan(ctx, tx, c.PlanID, true)
+			plan, err := lockPlan(ctx, tx, c.PlanID, c.ExpectedVersion)
 			if err != nil {
 				return domain.Plan{}, err
 			}
-			if c.ExpectedVersion != 0 && c.ExpectedVersion != plan.Version {
-				return domain.Plan{}, fmt.Errorf("%w: plan is at version %d, request expected %d", ErrVersion, plan.Version, c.ExpectedVersion)
-			}
-			if err := plan.Complete(c.Seq, c.ActualDurationMin); err != nil {
+			now := time.Now().UTC()
+			var actual int
+			if c.ActualDurationMin != nil {
+				actual = *c.ActualDurationMin
+			} else if actual, err = plan.MeasuredDuration(c.Seq, now); err != nil {
 				return domain.Plan{}, err
 			}
-			var step *domain.Step
-			for i := range plan.Steps {
-				if plan.Steps[i].Seq == c.Seq {
-					step = &plan.Steps[i]
-				}
+			if err := plan.Complete(c.Seq, actual); err != nil {
+				return domain.Plan{}, err
 			}
-			now := time.Now().UTC()
+			step := stepAt(&plan, c.Seq)
 			step.CompletedBy, step.CompletedAt = c.By, &now
 			if _, err := tx.Exec(ctx, `update cutover_step set status = $3, actual_duration_min = $4, completed_by = $5, completed_at = $6
 				where tenant_id = current_setting('passage.tenant_id', true)::uuid and plan_id = $1 and seq = $2`, plan.PlanID, step.Seq, step.Status, step.ActualDurationMin, c.By, now); err != nil {
 				return domain.Plan{}, fmt.Errorf("update cutover_step: %w", err)
 			}
-			if _, err := tx.Exec(ctx, `update cutover_plan set version = $2 where tenant_id = current_setting('passage.tenant_id', true)::uuid and plan_id = $1`, plan.PlanID, plan.Version); err != nil {
-				return domain.Plan{}, fmt.Errorf("update cutover_plan: %w", err)
+			if err := savePlanVersion(ctx, tx, plan); err != nil {
+				return domain.Plan{}, err
 			}
 			if err := enqueue(ctx, tx, mfevents.CutoverStepCompleted, "cutover_plan", plan.PlanID, mfevents.CutoverStepCompletedData{
 				PlanID: plan.PlanID, StepID: step.Seq, Name: step.Name, ActualDurationMin: step.ActualDurationMin, Status: step.Status, CompletedBy: c.By,
@@ -244,12 +305,9 @@ func (s *Postgres) Rollback(ctx context.Context, idem Idem, r RollbackRequest) (
 	err := s.tx(ctx, func(tx pgx.Tx) error {
 		var err error
 		out, replayed, err = idempotent(ctx, tx, idem, http.StatusOK, func() (domain.Plan, error) {
-			plan, err := getPlan(ctx, tx, r.PlanID, true)
+			plan, err := lockPlan(ctx, tx, r.PlanID, r.ExpectedVersion)
 			if err != nil {
 				return domain.Plan{}, err
-			}
-			if r.ExpectedVersion != 0 && r.ExpectedVersion != plan.Version {
-				return domain.Plan{}, fmt.Errorf("%w: plan is at version %d, request expected %d", ErrVersion, plan.Version, r.ExpectedVersion)
 			}
 			if err := plan.Rollback(r.Approvers...); err != nil {
 				return domain.Plan{}, err

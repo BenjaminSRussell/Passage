@@ -60,6 +60,7 @@ type Store interface {
 	CreatePlan(ctx context.Context, idem store.Idem, plan domain.Plan, createdBy string) (domain.Plan, bool, error)
 	GetPlan(ctx context.Context, id string) (domain.Plan, error)
 	ListPlans(ctx context.Context, f store.PlanFilter) ([]domain.Plan, error)
+	StartStep(ctx context.Context, idem store.Idem, st store.StepStart) (domain.Plan, bool, error)
 	CompleteStep(ctx context.Context, idem store.Idem, c store.StepCompletion) (domain.Plan, bool, error)
 	Rollback(ctx context.Context, idem store.Idem, r store.RollbackRequest) (domain.Plan, bool, error)
 	RekeyLines(ctx context.Context, planID string, kind domain.PostingKind) ([]domain.RekeyPosting, error)
@@ -96,6 +97,7 @@ func (s *Server) Routes() http.Handler {
 // Register mounts the endpoints on r.
 func (s *Server) Register(r chi.Router) {
 	r.Route("/api/v1", func(r chi.Router) {
+		r.With(authz.RequireDuty(DutyMigrationView)).Get("/migration/packs", s.packCatalog)
 		r.With(authz.RequireDuty(DutyMigrationRun)).Post("/migration/packs/{pack}/runs", s.startPackRun)
 		r.With(authz.RequireDuty(DutyMigrationView)).Get("/migration/runs", s.listRuns)
 		r.With(authz.RequireDuty(DutyMigrationView)).Get("/migration/runs/{id}", s.getRun)
@@ -113,6 +115,7 @@ func (s *Server) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyCutoverManager)).Post("/cutover/plans/generate", s.generatePlan)
 		r.With(authz.RequireDuty(DutyCutoverManager)).Get("/cutover/plans", s.listPlans)
 		r.With(authz.RequireDuty(DutyCutoverManager)).Get("/cutover/plans/{id}", s.getPlan)
+		r.With(authz.RequireDuty(DutyStepOwner)).Post("/cutover/plans/{id}/steps/{seq}/start", s.startStep)
 		r.With(authz.RequireDuty(DutyStepOwner)).Post("/cutover/plans/{id}/steps/{seq}/complete", s.completeStep)
 		r.With(authz.RequireDuty(DutyCutoverManager)).Post("/cutover/plans/{id}/rollback", s.rollback)
 		r.With(authz.RequireDuty(DutyCutoverManager)).Get("/cutover/plans/{id}/rekeying/{file}", s.rekeyFile)

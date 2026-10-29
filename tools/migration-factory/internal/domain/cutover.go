@@ -34,6 +34,9 @@ type Step struct {
 	Pack               string
 	CompletedBy        string
 	CompletedAt        *time.Time
+	// StartedAt is set when the step is started; the runbook timer runs from it (FR-49.6).
+	StartedAt *time.Time
+	StartedBy string
 }
 
 // Step status values.
@@ -203,29 +206,21 @@ func (p *Plan) OpenGoNoGo() []string {
 	return open
 }
 
-// Complete marks a step done. A go/no-go step may complete only after the earlier go/no-go
-// steps are done; the open-access step may start only when every go/no-go item is done (9.49.4).
-func (p *Plan) Complete(seq, actualMin int) error {
-	idx := -1
+// indexOf returns the position of the step with the given sequence number.
+func (p *Plan) indexOf(seq int) (int, error) {
 	for i, s := range p.Steps {
 		if s.Seq == seq {
-			idx = i
-			break
+			return i, nil
 		}
 	}
-	if idx < 0 {
-		return fmt.Errorf("%w: step %d does not exist", ErrInvalid, seq)
-	}
-	if p.RolledBack {
-		return fmt.Errorf("%w: plan was rolled back; its steps cannot be completed", ErrTransition)
-	}
-	if actualMin < 0 {
-		return fmt.Errorf("%w: actual duration must be >= 0 minutes", ErrInvalid)
-	}
-	s := &p.Steps[idx]
-	if s.Status == StepDone {
-		return fmt.Errorf("%w: step %d is already complete", ErrInvalid, seq)
-	}
+	return -1, fmt.Errorf("%w: step %d does not exist", ErrInvalid, seq)
+}
+
+// gate applies the go/no-go sequencing of 9.49.4 to the step at idx, for both starting and
+// completing it: a go/no-go step waits for the earlier go/no-go steps, and the open-access step
+// waits for every go/no-go item (CUT-1601).
+func (p *Plan) gate(idx int) error {
+	s := p.Steps[idx]
 	if s.GoNoGo {
 		for _, earlier := range p.Steps[:idx] {
 			if earlier.GoNoGo && earlier.Status != StepDone {
@@ -237,6 +232,81 @@ func (p *Plan) Complete(seq, actualMin int) error {
 		if open := p.OpenGoNoGo(); len(open) > 0 {
 			return fmt.Errorf("%w: CUT-1601 step %q cannot start: go/no-go items %v are open", ErrInvalid, s.Name, open)
 		}
+	}
+	return nil
+}
+
+// Start records when a step began, so the runbook can show elapsed against planned while it runs
+// (FR-49.6, 9.49.6). A step starts once, not after it is done, not on a rolled-back plan, and under
+// the same go/no-go gate as completion.
+func (p *Plan) Start(seq int, at time.Time, by string) error {
+	idx, err := p.indexOf(seq)
+	if err != nil {
+		return err
+	}
+	if p.RolledBack {
+		return fmt.Errorf("%w: plan was rolled back; its steps cannot be started", ErrTransition)
+	}
+	if at.IsZero() {
+		return fmt.Errorf("%w: a start time is required", ErrInvalid)
+	}
+	s := &p.Steps[idx]
+	if s.Status == StepDone {
+		return fmt.Errorf("%w: step %d is already complete", ErrInvalid, seq)
+	}
+	if s.StartedAt != nil {
+		return fmt.Errorf("%w: step %d already started at %s", ErrInvalid, seq, s.StartedAt.UTC().Format(time.RFC3339))
+	}
+	if err := p.gate(idx); err != nil {
+		return err
+	}
+	started := at.UTC()
+	s.StartedAt, s.StartedBy = &started, by
+	p.Version++
+	return nil
+}
+
+// MeasuredDuration returns the whole minutes a started step has run at now, for a completion that
+// gives no duration of its own. A step that was never started has no measurement.
+func (p *Plan) MeasuredDuration(seq int, now time.Time) (int, error) {
+	idx, err := p.indexOf(seq)
+	if err != nil {
+		return 0, err
+	}
+	s := p.Steps[idx]
+	if s.StartedAt == nil {
+		return 0, fmt.Errorf("%w: step %d was not started, so actualDurationMin is required", ErrInvalid, seq)
+	}
+	return ElapsedMin(*s.StartedAt, now), nil
+}
+
+// ElapsedMin is the whole minutes from start to now, never negative.
+func ElapsedMin(start, now time.Time) int {
+	if now.Before(start) {
+		return 0
+	}
+	return int(now.Sub(start) / time.Minute)
+}
+
+// Complete marks a step done. A go/no-go step may complete only after the earlier go/no-go
+// steps are done; the open-access step may start only when every go/no-go item is done (9.49.4).
+func (p *Plan) Complete(seq, actualMin int) error {
+	idx, err := p.indexOf(seq)
+	if err != nil {
+		return err
+	}
+	if p.RolledBack {
+		return fmt.Errorf("%w: plan was rolled back; its steps cannot be completed", ErrTransition)
+	}
+	if actualMin < 0 {
+		return fmt.Errorf("%w: actual duration must be >= 0 minutes", ErrInvalid)
+	}
+	s := &p.Steps[idx]
+	if s.Status == StepDone {
+		return fmt.Errorf("%w: step %d is already complete", ErrInvalid, seq)
+	}
+	if err := p.gate(idx); err != nil {
+		return err
 	}
 	s.Status = StepDone
 	s.ActualDurationMin = actualMin
@@ -292,4 +362,25 @@ func OverrunTone(plannedMin, actualMin, amberPct, redPct int) string {
 		return ToneAmber
 	}
 	return ToneOK
+}
+
+// Running reports whether the step has started and is not yet done.
+func (s Step) Running() bool { return s.StartedAt != nil && s.Status != StepDone }
+
+// Timing is elapsed against planned for one step at now (9.49.6): a running step counts from its
+// start, a done step reports its recorded duration, and a step not started has no timing (tone
+// empty). A running step at or above the amber percentage carries the CUT-1602 warning.
+func (s Step) Timing(now time.Time, amberPct, redPct int) (elapsedMin int, tone, warning string) {
+	switch {
+	case s.Status == StepDone:
+		return s.ActualDurationMin, OverrunTone(s.PlannedDurationMin, s.ActualDurationMin, amberPct, redPct), ""
+	case s.Running():
+		elapsedMin = ElapsedMin(*s.StartedAt, now)
+		tone = OverrunTone(s.PlannedDurationMin, elapsedMin, amberPct, redPct)
+		if tone != ToneOK {
+			warning = fmt.Sprintf("CUT-1602 Step %q at %d%% of planned duration.", s.Name, elapsedMin*100/s.PlannedDurationMin)
+		}
+		return elapsedMin, tone, warning
+	}
+	return 0, "", ""
 }

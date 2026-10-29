@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Button, buttonClassName, Card, DataTable, FormField, PageHeader, Select, StatusPill, type DataTableColumn } from "../../shell/ui";
+import { Alert, Button, buttonClassName, DataTable, FormField, PageHeader, Select, StatusPill, type DataTableColumn } from "../../shell/ui";
 import { listRuns, type PackRun } from "./api/client";
-import { AVAILABLE_PACKS, formatDateTime, PACKS, RUN_STATUSES, SOURCE_LABELS, type Pack, type RunStatus } from "./domain";
+import { formatDateTime, PACKS, RUN_STATUSES, SOURCE_LABELS, type Pack, type RunStatus } from "./domain";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -15,17 +15,6 @@ const columns: DataTableColumn<PackRun>[] = [
   { key: "recordsLoaded", header: "Loaded", align: "end" },
   { key: "alreadyPresent", header: "Already present", align: "end" },
   { key: "recordsQuarantined", header: "Quarantined", align: "end" },
-];
-
-interface PackRow {
-  pack: Pack;
-  availability: string;
-}
-
-const packRows: PackRow[] = PACKS.map((pack) => ({ pack, availability: AVAILABLE_PACKS.includes(pack) ? "Available" : "Later slice" }));
-const packColumns: DataTableColumn<PackRow>[] = [
-  { key: "pack", header: "Pack", mono: true },
-  { key: "availability", header: "Runs in this release" },
 ];
 
 /** Migration factory workspace: pack runs with their status and record counts (9.49.6, 9.49.14). */
@@ -41,6 +30,9 @@ export function PackRunsPage() {
         description="Pack runs that validate, load and reconcile a legacy extract. A run reconciles only when every control total matches."
         actions={
           <>
+            <Link className={buttonClassName("ghost")} to="/migration-factory/packs">
+              Pack catalog
+            </Link>
             <Link className={buttonClassName("secondary")} to="/migration-factory/runs/new-project">
               Load project balances
             </Link>
@@ -91,9 +83,6 @@ export function PackRunsPage() {
           onRowOpen={(row) => navigate(`/migration-factory/runs/${row.runId}`)}
         />
       )}
-      <Card title="Transactional packs">
-        <DataTable label="Transactional packs" columns={packColumns} rows={packRows} getRowKey={(row) => row.pack} />
-      </Card>
     </div>
   );
 }

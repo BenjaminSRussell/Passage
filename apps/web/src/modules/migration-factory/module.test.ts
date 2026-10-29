@@ -23,9 +23,10 @@ describe("migration-factory module", () => {
     expect(migrationFactory.nav.every((n) => n.to.startsWith("/migration-factory"))).toBe(true);
   });
 
-  it("has list, create and detail pages for pack runs, project balances, parallel runs, legacy references and cutover plans", () => {
+  it("has list, create and detail pages for the pack catalog, pack runs, project balances, parallel runs, legacy references and cutover plans", () => {
     expect(migrationFactory.routes.map((r) => r.path)).toEqual([
       "/migration-factory",
+      "/migration-factory/packs",
       "/migration-factory/runs/new",
       "/migration-factory/runs/new-project",
       "/migration-factory/runs/:id",
@@ -43,6 +44,7 @@ describe("migration-factory module", () => {
   it("guards the navigation with the duties the service enforces", () => {
     expect(migrationFactory.nav).toEqual([
       { label: "Pack runs", to: "/migration-factory", duty: "MigrationView" },
+      { label: "Pack catalog", to: "/migration-factory/packs", duty: "MigrationView" },
       { label: "Parallel runs", to: "/migration-factory/parallel-runs", duty: "MigrationView" },
       { label: "Legacy reference", to: "/migration-factory/xref" },
       { label: "Cutover runbooks", to: "/migration-factory/cutover", duty: "CutoverManager" },

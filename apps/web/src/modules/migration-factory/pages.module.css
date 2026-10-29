@@ -101,3 +101,9 @@
   align-items: end;
   gap: var(--space-4);
 }
+
+.rowActions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}

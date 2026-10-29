@@ -55,6 +55,10 @@ func (u unreachableStore) ListPlans(context.Context, store.PlanFilter) ([]domain
 	u.fail()
 	return nil, nil
 }
+func (u unreachableStore) StartStep(context.Context, store.Idem, store.StepStart) (domain.Plan, bool, error) {
+	u.fail()
+	return domain.Plan{}, false, nil
+}
 func (u unreachableStore) CompleteStep(context.Context, store.Idem, store.StepCompletion) (domain.Plan, bool, error) {
 	u.fail()
 	return domain.Plan{}, false, nil
@@ -225,6 +229,14 @@ func TestRequestsRejectedBeforeTheStore(t *testing.T) {
 		{"rekeying file needs CutoverManager", request{method: "GET", path: planPath + "/rekeying/journals.csv", tenant: tenantA, duties: "MigrationView"}, 403, "AUTH-0003", ""},
 		{"rekeying unknown file", request{method: "GET", path: planPath + "/rekeying/ledger.csv", tenant: tenantA, duties: allDuties}, 422, CodeInvalid, "journals.csv or documents.csv"},
 		{"rekeying plan id not a UUID", request{method: "GET", path: "/api/v1/cutover/plans/p1/rekeying/journals.csv", tenant: tenantA, duties: allDuties}, 422, CodeInvalid, "UUID"},
+		// Slice 4: step start, the pack catalog.
+		{"start needs CutoverStepOwner", request{method: "POST", path: planPath + "/steps/1/start", tenant: tenantA, duties: "CutoverManager", body: `{}`}, 403, "AUTH-0003", ""},
+		{"start bad seq", request{method: "POST", path: planPath + "/steps/x/start", tenant: tenantA, duties: allDuties, body: `{}`}, 422, CodeInvalid, "positive"},
+		{"start plan id not a UUID", request{method: "POST", path: "/api/v1/cutover/plans/p1/steps/1/start", tenant: tenantA, duties: allDuties, body: `{}`}, 422, CodeInvalid, "UUID"},
+		{"start negative version", request{method: "POST", path: planPath + "/steps/1/start", tenant: tenantA, duties: allDuties, body: `{"version":-1}`}, 422, CodeInvalid, "version"},
+		{"start unknown field", request{method: "POST", path: planPath + "/steps/1/start", tenant: tenantA, duties: allDuties, body: `{"startedAt":"2027-01-01T00:00:00Z"}`}, 400, "COM-0001", ""},
+		{"catalog needs MigrationView", request{method: "GET", path: "/api/v1/migration/packs", tenant: tenantA, duties: "MigrationRun,CutoverManager"}, 403, "AUTH-0003", ""},
+		{"catalog needs a tenant", request{method: "GET", path: "/api/v1/migration/packs", duties: "MigrationView"}, 401, "", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
