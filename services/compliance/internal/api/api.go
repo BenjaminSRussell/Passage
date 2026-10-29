@@ -5,7 +5,9 @@
 // confirmed personal-data breach (FR-48.29, BR-48.18); the audit rule run
 // kernel, audit case grouping and status machine (FR-48.14, FR-48.15) and
 // break-glass session planning (FR-48.23, BR-48.19), none of which store
-// anything yet.
+// anything yet; and trade compliance: sanctions screening with stored hits and
+// the officer decision (FR-48.19, BR-48.15) and the export license
+// determination of a delivery (FR-48.20, BR-48.16).
 package api
 
 import (
@@ -57,12 +59,17 @@ type Store interface {
 	Get(ctx context.Context, id string, now time.Time) (store.ConflictDetail, error)
 	Mitigate(ctx context.Context, id string, expected int, in store.MitigationInput, tenantCapDays int, key string, now time.Time) (store.ConflictDetail, error)
 	AcceptRisk(ctx context.Context, id string, expected int, reason string, now time.Time) (store.ConflictDetail, error)
+	Screen(ctx context.Context, subject domain.Subject, entries []domain.ListEntry, threshold float64, now time.Time) (store.ScreeningResult, error)
+	ListHits(ctx context.Context, f store.HitFilter) (store.HitPage, error)
+	GetHit(ctx context.Context, id string) (store.ScreeningHit, error)
+	DecideHit(ctx context.Context, id string, expected int, in store.DecisionInput, key string, now time.Time) (store.ScreeningHit, error)
 }
 
 // Config carries the tenant policies the service reads from its environment
 // until per-tenant settings exist (sod.block_high, sod.max_mitigation_days,
 // audit.case_archive_days, breakglass.max_minutes, breakglass.self_activate,
-// breakglass.review_days). Zero values take the PRD defaults.
+// breakglass.review_days, screening.threshold, trade.license_check). Zero
+// values take the PRD defaults.
 type Config struct {
 	BlockHigh              bool
 	MaxMitigationDays      int
@@ -70,6 +77,8 @@ type Config struct {
 	BreakGlassMaxMinutes   int
 	BreakGlassSelfActivate bool
 	BreakGlassReviewDays   int
+	ScreeningThreshold     float64
+	LicenseCheck           string
 }
 
 // API holds the handler dependencies and counters.
@@ -86,6 +95,12 @@ type API struct {
 func New(s Store, cfg Config) *API {
 	if cfg.MaxMitigationDays <= 0 || cfg.MaxMitigationDays > domain.MaxMitigationDaysCeiling {
 		cfg.MaxMitigationDays = domain.DefaultMaxMitigationDays
+	}
+	if cfg.ScreeningThreshold < domain.MinScreeningThreshold || cfg.ScreeningThreshold > domain.MaxScreeningThreshold {
+		cfg.ScreeningThreshold = domain.DefaultScreeningThreshold
+	}
+	if cfg.LicenseCheck != domain.LicenseCheckWarn && cfg.LicenseCheck != domain.LicenseCheckOff {
+		cfg.LicenseCheck = domain.LicenseCheckBlock
 	}
 	return &API{store: s, cfg: cfg, rules: domain.SeedRules, now: func() time.Time { return time.Now().UTC() }}
 }
@@ -163,6 +178,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutyAuditCaseManage)).Post("/v1/compliance/audit-cases:group", a.groupCases)
 	r.With(authz.RequireDuty(DutyAuditCaseManage)).Post("/v1/compliance/audit-cases:transition", a.transitionCase)
 	r.With(authz.RequireDuty(DutyBreakGlassRequest)).Post("/v1/security/elevated-sessions:plan", a.planElevated)
+	a.registerTrade(r)
 }
 
 func (a *API) ready(w http.ResponseWriter, r *http.Request) {
@@ -461,6 +477,7 @@ func domainProblem(err error) error {
 	return err
 }
 
+// conflictID reads the {id} path parameter (a conflict or screening hit id) as a UUID.
 func conflictID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	if !validTenant(w, r) {
 		return "", false

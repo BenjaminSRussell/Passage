@@ -7,16 +7,20 @@ import { BreakGlassPage } from "./BreakGlassPage";
 import { ComplianceHome } from "./ComplianceHome";
 import { ConflictDetailPage } from "./ConflictDetailPage";
 import { ConflictsPage } from "./ConflictsPage";
+import { ExportCheckPage } from "./ExportCheckPage";
 import { PackDetailPage } from "./PackDetailPage";
 import { PacksPage } from "./PacksPage";
 import { RoleCheckPage } from "./RoleCheckPage";
 import { RulesPage } from "./RulesPage";
+import { ScreeningCheckPage } from "./ScreeningCheckPage";
+import { ScreeningHitPage } from "./ScreeningHitPage";
+import { ScreeningHitsPage } from "./ScreeningHitsPage";
 import { TdsPage } from "./TdsPage";
 
 const compliance: PassageModule = {
   id: "compliance",
   title: "Compliance",
-  description: "Segregation-of-duties conflicts and mitigations, role assignment checks, SoD rules, audit rule runs and audit cases, break-glass access, breach notification clocks, country packs and the India TDS calculator.",
+  description: "Segregation-of-duties conflicts and mitigations, role assignment checks, SoD rules, audit rule runs and audit cases, break-glass access, breach notification clocks, sanctions screening hits and checks, export license checks, country packs and the India TDS calculator.",
   routes: [
     { path: "/compliance", element: createElement(ComplianceHome) },
     { path: "/compliance/sod/conflicts", element: createElement(ConflictsPage) },
@@ -30,6 +34,10 @@ const compliance: PassageModule = {
     { path: "/compliance/break-glass", element: createElement(BreakGlassPage) },
     { path: "/compliance/incidents/breach-clocks", element: createElement(BreachClocksPage) },
     { path: "/compliance/tds", element: createElement(TdsPage) },
+    { path: "/compliance/screening/hits", element: createElement(ScreeningHitsPage) },
+    { path: "/compliance/screening/hits/:id", element: createElement(ScreeningHitPage), handle: { title: "Screening hit" } },
+    { path: "/compliance/screening/check", element: createElement(ScreeningCheckPage) },
+    { path: "/compliance/export-checks", element: createElement(ExportCheckPage) },
   ],
   nav: [
     { label: "Overview", to: "/compliance", duty: "SoDReview" },
@@ -42,6 +50,9 @@ const compliance: PassageModule = {
     { label: "Breach clocks", to: "/compliance/incidents/breach-clocks", duty: "SecurityIncidentManage" },
     { label: "Country packs", to: "/compliance/packs", duty: "LocalizationAdmin" },
     { label: "India TDS", to: "/compliance/tds", duty: "LocalizationAdmin" },
+    { label: "Screening hits", to: "/compliance/screening/hits", duty: "TradeComplianceView" },
+    { label: "Screening check", to: "/compliance/screening/check", duty: "TradeComplianceView" },
+    { label: "Export license check", to: "/compliance/export-checks", duty: "TradeComplianceView" },
   ],
 };
 

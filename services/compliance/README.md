@@ -1,4 +1,4 @@
-# compliance (PSG-48, wave 48, slices 1 to 3)
+# compliance (PSG-48, wave 48, slices 1 to 4)
 
 Compliance controls for Passage. Slice 1 ships segregation of duties (SoD): the rules engine, pre-save
 simulation, evaluation of a user's effective roles with stored conflicts, and the mitigation and
@@ -7,7 +7,9 @@ Slice 2 adds the rules of three later features as pure, tested functions (breach
 electronic signatures, the DUPLICATE audit rule), one read-only endpoint for the breach clocks and the
 breach clock and India TDS calculator screens. Slice 3 completes the audit rule kernel (all seven rule
 types), adds audit case grouping and the case status machine, and break-glass session planning, each
-behind a stateless endpoint, with the audit policy run, audit case and break-glass screens.
+behind a stateless endpoint, with the audit policy run, audit case and break-glass screens. Slice 4
+adds denied-party and sanctions screening with stored hits and the officer decision, and the export
+license determination of a delivery, with the screening and export check screens.
 
 ## What it does now
 
@@ -35,9 +37,15 @@ behind a stateless endpoint, with the audit policy run, audit case and break-gla
 | `POST /v1/compliance/audit-cases:group` | AuditCaseManage | slice 3, read-only: case drafts from violations (one per vendor for DUPLICATE, one per policy otherwise) |
 | `POST /v1/compliance/audit-cases:transition` | AuditCaseManage | slice 3, read-only: one action of the case status machine, judged at server time with `audit.case_archive_days` |
 | `POST /v1/security/elevated-sessions:plan` | BreakGlassRequest | slice 3, read-only: the break-glass session the calling user's request would open; no session is stored and no token issued |
+| `POST /v1/trade/screening/check` | TradeComplianceView | slice 4: screens a party or document against the list entries in the body at `screening.threshold`; new hits are stored OPEN and emit `trade.screening.hit`; answers the subject's blocking hits (OPEN and CONFIRMED) and `blocked` |
+| `GET /v1/trade/screening/hits` | TradeComplianceView | slice 4: filter by state, list, subject type and subject; keyset paging with `cursor` |
+| `GET /v1/trade/screening/hits/{id}` | TradeComplianceView | slice 4: one hit; `ETag` is the version |
+| `POST /v1/trade/screening/hits/{id}/decision` | TradeComplianceOfficer | slice 4: `If-Match` and `Idempotency-Key` required; `CLEAR_FALSE_POSITIVE` or `CONFIRM` with a reason; the caller is the decider |
+| `POST /v1/trade/export-checks` | TradeComplianceView | slice 4, read-only: license determination per delivery line; `officerReleaseLicenseRef` (embargo release) needs TradeComplianceOfficer |
 
-- Events (`events/asyncapi.yaml`): `dev.passage.sod.conflict.detected.v1`, `dev.passage.sod.mitigation.approved.v1`.
-  The slice 2 and 3 endpoints store nothing and emit nothing.
+- Events (`events/asyncapi.yaml`): `dev.passage.sod.conflict.detected.v1`, `dev.passage.sod.mitigation.approved.v1`,
+  `dev.passage.trade.screening.hit.v1` (slice 4, keyed by hit id, written with the hit). The slice 2 and 3
+  endpoints and the export check store nothing and emit nothing.
 - `GET /readyz` pings Postgres; admin `/metrics` counts simulations and blocked simulations.
 
 Slice 2 domain rules (pure; no store yet, see `NOT-IMPLEMENTED.md`):
@@ -83,9 +91,36 @@ Simulation reads the user's recorded conflict states; a caller cannot claim a mi
 the calling user (`X-Passage-User`), and the tenant settings, not the request, decide the length cap and
 self-activation.
 
+Slice 4 (FR-48.19, FR-48.20):
+
+- `internal/domain/screening.go`: names and addresses are lower-cased, Latin accents and Cyrillic
+  transliterated and punctuation dropped; names compare by token-set ratio (best of primary name and
+  aliases; an empty side scores 0), the address weighs 20% when both sides have one, and a country
+  mismatch scales the score by 0.9. Hits are at or above `screening.threshold` (0.88, 0.70..0.99).
+  `DecideHit` takes an OPEN hit to FALSE_POSITIVE or CONFIRMED with a reason and a decider.
+- `internal/store/screening.go` and `0004_screening.sql`: `screening_hit` with RLS. One OPEN or
+  CONFIRMED hit per subject and list entry (partial unique index), so screening again refreshes an OPEN
+  hit instead of adding one. A FALSE_POSITIVE hit is the BR-48.15 whitelist: it holds the list entry
+  version and the fingerprint of the subject's normalized name, address and country, and the entry is
+  not flagged again until one of them changes. Decisions use `If-Match` and `Idempotency-Key`.
+- `internal/domain/export_control.go`: BR-48.16 comprehensive embargo (CU, IR, KP, SY and the regions
+  UA-43 Crimea, UA-40 Sevastopol, UA-14 Donetsk, UA-09 Luhansk) blocks every line with `TRD-1002`, even
+  with license checks off, unless a TradeComplianceOfficer releases it with a license reference. Otherwise
+  a line that the decision table says needs a license must find one for its regime, classification and
+  destination, unexpired at server time, with quantity and value left after the earlier lines of the same
+  delivery; if none, `TRD-1003` (blocked under `trade.license_check` BLOCK, a warning under WARN). The
+  table (`DefaultLicenseTable`) is illustrative until the packs ship theirs. Quantities and values are
+  decimals, never floats.
+
+The threshold, the license check mode, the decision table and the clock are the server's: the request
+bodies have no fields for them, and an unknown field is a 400.
+
 The slice 3 screens are in `apps/web/src/modules/compliance`: `/compliance/audit/run` (run an audit
 rule), `/compliance/audit/cases` (group violations into cases and check a case action) and
-`/compliance/break-glass` (plan a break-glass session).
+`/compliance/break-glass` (plan a break-glass session). Slice 4 adds `/compliance/screening/hits` (the
+screening workbench, filter by state and list), `/compliance/screening/hits/:id` (compare the subject
+with the list entry, clear or confirm), `/compliance/screening/check` (screen a party or document) and
+`/compliance/export-checks` (license determination for a delivery).
 
 ## Run and test
 
@@ -97,7 +132,7 @@ PASSAGE_TEST_DATABASE_URL=postgres://admin... PASSAGE_TEST_APP_DATABASE_URL=post
 
 Without `PASSAGE_TEST_DATABASE_URL` the store and migration tests skip. With it they apply the migrations,
 assert RLS on every tenant table, and, with `PASSAGE_TEST_APP_DATABASE_URL`, run the store as
-`passage_app` (NOBYPASSRLS) on the real grants of `0003_grants.sql`, probe cross-tenant isolation and
+`passage_app` (NOBYPASSRLS) on the real grants of `0003_grants.sql` and `0004_screening.sql`, probe cross-tenant isolation and
 check the append-only tables refuse UPDATE and DELETE.
 
 Fixture `testdata/sod-50.json` (fx-sod-50) plants 50 users across the seed rules.
@@ -119,6 +154,8 @@ document, the case machine never skips a state and no break-glass session exceed
 | `BREAKGLASS_MAX_MINUTES` | `60` | tenant policy `breakglass.max_minutes`, 15..240 |
 | `BREAKGLASS_SELF_ACTIVATE` | `false` | tenant policy `breakglass.self_activate` |
 | `BREAKGLASS_REVIEW_DAYS` | `3` | tenant policy `breakglass.review_days`, 1..10 business days |
+| `SCREENING_THRESHOLD` | `0.88` | tenant policy `screening.threshold`, 0.70..0.99 |
+| `TRADE_LICENSE_CHECK` | `BLOCK` | legal entity policy `trade.license_check`: `BLOCK`, `WARN` or `OFF` |
 | `HTTP_ADDR` / `ADMIN_ADDR` | `:8080` / `:9090` | listeners |
 
 ## Error codes
@@ -154,13 +191,21 @@ document, the case machine never skips a state and no break-glass session exceed
 | `SEC-0707` | 422 | break-glass cannot grant SecurityAdmin or PlatformAdmin to yourself (BR-48.19) |
 | `SEC-0708` | domain | break-glass session not reviewed within `breakglass.review_days` (`ReviewOverdue`; no endpoint yet) |
 | `SEC-0713` | 422 | break-glass request incomplete or out of range (reason, ticket, roles, minutes) |
+| `TRD-1002` | 200 (`code` per export check line) | destination under comprehensive embargo; delivery blocked (BR-48.16) |
+| `TRD-1003` | 200 (`code` per export check line) | export license required and none valid (blocked under BLOCK, a warning under WARN) |
+| `TRD-1004` | 422 | screening subject, threshold or list entry invalid |
+| `TRD-1005` | 422 | screening decision without a reason or decider |
+| `TRD-1006` | 422 | decision on a hit that is not OPEN |
+| `TRD-1007` | 422 | export check input invalid (destination, region, item classification, quantities, licenses) |
+| `TRD-1008` | 404 | no screening hit with that id |
+| `TRD-1009` | 412 | stale `If-Match` on a screening decision (missing `If-Match` is 428 `SOD-1109`) |
 | `COM-0500` | 500 | internal error |
 
 ## Deploy
 
 `charts/compliance` (`helm lint` clean): Deployment, Service, optional ServiceMonitor; `DATABASE_URL`
 from the `passage-compliance-db` secret; the tenant policies (`SOD_*`, `AUDIT_CASE_ARCHIVE_DAYS`,
-`BREAKGLASS_*`) from values. `Dockerfile` builds from the repository root.
+`BREAKGLASS_*`, `SCREENING_THRESHOLD`, `TRADE_LICENSE_CHECK`) from values. `Dockerfile` builds from the repository root.
 
 ## Wave reference
 
@@ -168,4 +213,5 @@ PSG-48 slice 1: FR-48.4, FR-48.5 and BR-48.1 for the seed rule set; AC2, AC-48.2
 Slice 2: the rules of FR-48.13 (BR-48.11, BR-48.12; AC-48.12 lockout), FR-48.14 (BR-48.14; AC-48.13 on
 the pure rule) and FR-48.29 (BR-48.18; AC-48.19 deadline). Slice 3: the rule kernel of FR-48.14 (all
 rule types), the case machine and grouping of FR-48.15, and the planning part of FR-48.23 (BR-48.19;
-AC-48.18 review deadline). Everything else in the ticket is listed in `NOT-IMPLEMENTED.md`.
+AC-48.18 review deadline). Slice 4: FR-48.19 (BR-48.15; AC-48.16 at the store: blocked, OPEN, cleared,
+no recurrence) and the determination of FR-48.20 (BR-48.16; AC-48.17 `TRD-1003`). Everything else in the ticket is listed in `NOT-IMPLEMENTED.md`.

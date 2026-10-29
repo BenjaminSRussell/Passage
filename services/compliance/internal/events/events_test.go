@@ -9,7 +9,8 @@ import (
 )
 
 func TestTypesFollowNamingRule(t *testing.T) {
-	want := map[string]bool{"dev.passage.sod.conflict.detected.v1": true, "dev.passage.sod.mitigation.approved.v1": true}
+	want := map[string]bool{"dev.passage.sod.conflict.detected.v1": true, "dev.passage.sod.mitigation.approved.v1": true,
+		"dev.passage.trade.screening.hit.v1": true}
 	for _, typ := range All() {
 		if !events.ValidType(typ) {
 			t.Errorf("%s breaks dev.passage.<ctx>.<entity>.<verb>.v<n>", typ)

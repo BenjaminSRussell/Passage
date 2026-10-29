@@ -32,6 +32,7 @@ type fakeStore struct {
 	lastKey   string
 	lastList  store.Filter
 	evaluated []domain.Role
+	trade     fakeTrade
 }
 
 func (f *fakeStore) Ping(context.Context) error { return f.pingErr }
@@ -184,6 +185,11 @@ func TestDutiesAreEnforced(t *testing.T) {
 		{http.MethodPost, "/v1/compliance/audit-cases:group", DutyAuditCaseManage},
 		{http.MethodPost, "/v1/compliance/audit-cases:transition", DutyAuditCaseManage},
 		{http.MethodPost, "/v1/security/elevated-sessions:plan", DutyBreakGlassRequest},
+		{http.MethodPost, "/v1/trade/screening/check", DutyTradeView},
+		{http.MethodGet, "/v1/trade/screening/hits", DutyTradeView},
+		{http.MethodGet, "/v1/trade/screening/hits/" + id, DutyTradeView},
+		{http.MethodPost, "/v1/trade/screening/hits/" + id + "/decision", DutyTradeOfficer},
+		{http.MethodPost, "/v1/trade/export-checks", DutyTradeView},
 	} {
 		// A neighbouring duty is not enough.
 		rec := serve(t, h, call{method: tc.method, path: tc.path, duties: []string{"ComplianceView"}})

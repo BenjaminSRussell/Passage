@@ -1,4 +1,5 @@
-// Package store persists SoD conflicts and mitigations in Postgres. Every
+// Package store persists SoD conflicts and mitigations, and sanctions
+// screening hits, in Postgres. Every
 // method runs in a tenant-scoped transaction (dbx.WithTenantTx) so row-level
 // security applies, and every state change other contexts care about is
 // written to the outbox in the same transaction.
@@ -187,12 +188,17 @@ func expire(ctx context.Context, tx pgx.Tx, now time.Time) error {
 }
 
 func enqueue(ctx context.Context, tx pgx.Tx, p tenant.Principal, typ, conflictID string, data any) error {
-	evt, err := events.New(typ, eventSource, conflictID, p.TenantID, data)
+	return enqueueAggregate(ctx, tx, p, typ, aggregateType, conflictID, data)
+}
+
+// enqueueAggregate writes one event to the outbox in the caller's transaction.
+func enqueueAggregate(ctx context.Context, tx pgx.Tx, p tenant.Principal, typ, aggregate, aggregateID string, data any) error {
+	evt, err := events.New(typ, eventSource, aggregateID, p.TenantID, data)
 	if err != nil {
 		return err
 	}
 	evt.Actor = p.UserID
-	return outbox.Enqueue(ctx, tx, aggregateType, conflictID, evt)
+	return outbox.Enqueue(ctx, tx, aggregate, aggregateID, evt)
 }
 
 // Evaluate records the outcome of an evaluation of one user's effective roles
@@ -343,8 +349,10 @@ type cursor struct {
 	ID         string    `json:"i"`
 }
 
-func encodeCursor(c Conflict) string {
-	raw, _ := json.Marshal(cursor{DetectedAt: c.DetectedAt, ID: c.ConflictID})
+func encodeCursor(c Conflict) string { return cursorOf(c.DetectedAt, c.ConflictID) }
+
+func cursorOf(at time.Time, id string) string {
+	raw, _ := json.Marshal(cursor{DetectedAt: at, ID: id})
 	return base64.RawURLEncoding.EncodeToString(raw)
 }
 

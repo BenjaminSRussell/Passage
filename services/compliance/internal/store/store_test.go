@@ -129,6 +129,13 @@ func TestAppRole_CrossTenantRLS(t *testing.T) {
 			Args:     func(tenantID, _ string) []any { return []any{tenantID, ids.New(), ids.New()} },
 			NoUpdate: true,
 		},
+		{
+			Table: "screening_hit",
+			Insert: `insert into screening_hit (tenant_id, hit_id, subject_type, subject_id, subject_name, subject_fingerprint, list_code,
+				list_entry_id, list_entry_version, list_entry_name, score, matched_fields, detected_at, updated_at)
+				values ($1, $2, 'PARTY', $3, 'Volga Maritime', repeat('a', 64), 'OFAC_SDN', 'SDN-1', 1, 'Volga Maritime', 0.950, '{name}', now(), now())`,
+			Args: func(tenantID, _ string) []any { return []any{tenantID, ids.New(), ids.New()} },
+		},
 	})
 }
 
@@ -145,6 +152,7 @@ func TestGrants_AppRoleCannotRewriteAppendOnlyTables(t *testing.T) {
 		`select count(*) from outbox`,
 		`update outbox set type = type`,
 		`delete from idempotency_keys`,
+		`delete from screening_hit`,
 	} {
 		err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 			_, err := tx.Exec(ctx, stmt)

@@ -1,7 +1,7 @@
 // Client for the compliance service (services/compliance/api/openapi.yaml) and
 // the localization service (services/localization/api/openapi.yaml). Browser
-// calls use /api/v1/sod/..., /api/v1/compliance/..., /api/v1/security/... and
-// /api/v1/localization/...; the gateway strips /api.
+// calls use /api/v1/sod/..., /api/v1/compliance/..., /api/v1/security/...,
+// /api/v1/trade/... and /api/v1/localization/...; the gateway strips /api.
 
 export const sodBase = "/api/v1/sod";
 export const complianceBase = "/api/v1/compliance";
@@ -492,4 +492,150 @@ export function transitionAuditCase(input: CaseTransitionInput): Promise<CaseSta
 /** Plans the break-glass session the signed-in user's request would open (FR-48.23); nothing is stored. */
 export function planElevatedSession(input: ElevatedPlanInput): Promise<ElevatedPlan> {
   return json<ElevatedPlan>(`${securityBase}/elevated-sessions:plan`, { method: "POST", body: JSON.stringify(input) });
+}
+
+// Trade compliance (FR-48.19 screening, FR-48.20 export checks).
+
+export const tradeBase = "/api/v1/trade";
+
+export const SUBJECT_TYPES = ["PARTY", "DOCUMENT"] as const;
+export type SubjectType = (typeof SUBJECT_TYPES)[number];
+
+export const HIT_STATES = ["OPEN", "FALSE_POSITIVE", "CONFIRMED"] as const;
+export type HitState = (typeof HIT_STATES)[number];
+
+export type HitDecision = "CLEAR_FALSE_POSITIVE" | "CONFIRM";
+
+export interface ScreeningSubject {
+  type: SubjectType;
+  id: string;
+  name: string;
+  address?: string;
+  country?: string;
+}
+
+export interface ListEntry {
+  listCode: string;
+  entryId: string;
+  version: number;
+  name: string;
+  aliases?: string[];
+  address?: string;
+  country?: string;
+}
+
+export interface ScreeningHit {
+  hitId: string;
+  subjectType: SubjectType;
+  subjectId: string;
+  subjectName: string;
+  listCode: string;
+  listEntryId: string;
+  listEntryVersion: number;
+  listEntryName: string;
+  score: number;
+  matchedFields: string[];
+  state: HitState;
+  decidedBy?: string;
+  reason?: string;
+  decidedAt?: string;
+  detectedAt: string;
+  updatedAt: string;
+  version: number;
+}
+
+export interface ScreeningResult {
+  blocked: boolean;
+  hits: ScreeningHit[];
+}
+
+export interface HitFilter {
+  state?: HitState | "";
+  listCode?: string;
+  subjectType?: SubjectType | "";
+  subjectId?: string;
+  cursor?: string;
+}
+
+export interface HitPage {
+  items: ScreeningHit[];
+  nextCursor?: string;
+}
+
+export const EXPORT_REGIMES = ["US_EAR", "EU_DUALUSE", "HS"] as const;
+export type ExportRegime = (typeof EXPORT_REGIMES)[number];
+
+export interface ExportItem {
+  itemId: string;
+  classification: { regime: ExportRegime; code: string };
+  qty: string;
+  value: string;
+}
+
+export interface ExportLicense {
+  licenseId: string;
+  number?: string;
+  regime: ExportRegime;
+  classifications: string[];
+  destinations: string[];
+  qtyLimit?: string;
+  usedQty: string;
+  valueLimit?: string;
+  usedValue: string;
+  expiresAt: string;
+}
+
+export interface ExportCheckInput {
+  destination: string;
+  region?: string;
+  items: ExportItem[];
+  licenses: ExportLicense[];
+  officerReleaseLicenseRef?: string;
+}
+
+export interface ExportLineDecision {
+  itemId: string;
+  licenseRequired: boolean;
+  licenseId?: string;
+  blocked: boolean;
+  warning: boolean;
+  code?: "TRD-1002" | "TRD-1003";
+  detail?: string;
+}
+
+export interface ExportResult {
+  embargo: boolean;
+  blocked: boolean;
+  items: ExportLineDecision[];
+}
+
+/** Screens a party or document; new hits are stored OPEN (FR-48.19). */
+export function screenSubject(subject: ScreeningSubject, entries: ListEntry[]): Promise<ScreeningResult> {
+  return json<ScreeningResult>(`${tradeBase}/screening/check`, { method: "POST", body: JSON.stringify({ subject, entries }) });
+}
+
+export function listScreeningHits(filter: HitFilter = {}, signal?: AbortSignal): Promise<HitPage> {
+  return json<HitPage>(
+    `${tradeBase}/screening/hits${query({ state: filter.state, listCode: filter.listCode, subjectType: filter.subjectType, subjectId: filter.subjectId, cursor: filter.cursor, limit: "50" })}`,
+    {},
+    signal,
+  );
+}
+
+export function getScreeningHit(id: string, signal?: AbortSignal): Promise<Versioned<ScreeningHit>> {
+  return versioned<ScreeningHit>(`${tradeBase}/screening/hits/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Clears or confirms an OPEN hit at the given ETag; the caller is the decider. */
+export function decideScreeningHit(id: string, etag: string, decision: HitDecision, reason: string, key: string): Promise<Versioned<ScreeningHit>> {
+  return versioned<ScreeningHit>(`${tradeBase}/screening/hits/${encodeURIComponent(id)}/decision`, {
+    method: "POST",
+    body: JSON.stringify({ decision, reason }),
+    headers: { "If-Match": etag, "Idempotency-Key": key },
+  });
+}
+
+/** License determination for a delivery (FR-48.20); nothing is stored. */
+export function checkExport(input: ExportCheckInput): Promise<ExportResult> {
+  return json<ExportResult>(`${tradeBase}/export-checks`, { method: "POST", body: JSON.stringify(input) });
 }

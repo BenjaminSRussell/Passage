@@ -42,17 +42,21 @@ func TestConfigReadsTenantPolicies(t *testing.T) {
 	env := func(kv map[string]string) func(string) string { return func(k string) string { return kv[k] } }
 	cfg, err := config(env(nil))
 	if err != nil || !cfg.BlockHigh || cfg.MaxMitigationDays != 365 || cfg.CaseArchiveDays != 365 ||
-		cfg.BreakGlassMaxMinutes != 60 || cfg.BreakGlassSelfActivate || cfg.BreakGlassReviewDays != 3 {
+		cfg.BreakGlassMaxMinutes != 60 || cfg.BreakGlassSelfActivate || cfg.BreakGlassReviewDays != 3 ||
+		cfg.ScreeningThreshold != 0.88 || cfg.LicenseCheck != "BLOCK" {
 		t.Fatalf("defaults: %+v %v", cfg, err)
 	}
 	cfg, err = config(env(map[string]string{"SOD_BLOCK_HIGH": "false", "SOD_MAX_MITIGATION_DAYS": "180", "AUDIT_CASE_ARCHIVE_DAYS": "90",
-		"BREAKGLASS_MAX_MINUTES": "240", "BREAKGLASS_SELF_ACTIVATE": "true", "BREAKGLASS_REVIEW_DAYS": "5"}))
+		"BREAKGLASS_MAX_MINUTES": "240", "BREAKGLASS_SELF_ACTIVATE": "true", "BREAKGLASS_REVIEW_DAYS": "5",
+		"SCREENING_THRESHOLD": "0.92", "TRADE_LICENSE_CHECK": "WARN"}))
 	if err != nil || cfg.BlockHigh || cfg.MaxMitigationDays != 180 || cfg.CaseArchiveDays != 90 ||
-		cfg.BreakGlassMaxMinutes != 240 || !cfg.BreakGlassSelfActivate || cfg.BreakGlassReviewDays != 5 {
+		cfg.BreakGlassMaxMinutes != 240 || !cfg.BreakGlassSelfActivate || cfg.BreakGlassReviewDays != 5 ||
+		cfg.ScreeningThreshold != 0.92 || cfg.LicenseCheck != "WARN" {
 		t.Fatalf("overrides: %+v %v", cfg, err)
 	}
 	for _, bad := range []map[string]string{{"SOD_BLOCK_HIGH": "no"}, {"SOD_MAX_MITIGATION_DAYS": "731"}, {"SOD_MAX_MITIGATION_DAYS": "x"},
-		{"AUDIT_CASE_ARCHIVE_DAYS": "29"}, {"BREAKGLASS_MAX_MINUTES": "241"}, {"BREAKGLASS_SELF_ACTIVATE": "yes"}, {"BREAKGLASS_REVIEW_DAYS": "0"}} {
+		{"AUDIT_CASE_ARCHIVE_DAYS": "29"}, {"BREAKGLASS_MAX_MINUTES": "241"}, {"BREAKGLASS_SELF_ACTIVATE": "yes"}, {"BREAKGLASS_REVIEW_DAYS": "0"},
+		{"SCREENING_THRESHOLD": "0.5"}, {"SCREENING_THRESHOLD": "high"}, {"TRADE_LICENSE_CHECK": "block"}} {
 		if _, err := config(env(bad)); err == nil {
 			t.Errorf("%v accepted", bad)
 		}

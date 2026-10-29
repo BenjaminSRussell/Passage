@@ -78,7 +78,8 @@ func run(ctx context.Context, getenv func(string) string) error {
 // config reads the tenant policies from the environment (PRD §9.48.13):
 // sod.block_high (default true), sod.max_mitigation_days (365, 1..730),
 // audit.case_archive_days (365, 30..3650), breakglass.max_minutes (60, 15..240),
-// breakglass.self_activate (false) and breakglass.review_days (3, 1..10).
+// breakglass.self_activate (false), breakglass.review_days (3, 1..10),
+// screening.threshold (0.88, 0.70..0.99) and trade.license_check (BLOCK, WARN or OFF).
 func config(getenv func(string) string) (api.Config, error) {
 	cfg := api.Config{BlockHigh: true, MaxMitigationDays: 365, CaseArchiveDays: domain.DefaultCaseArchiveDays,
 		BreakGlassMaxMinutes: domain.BreakGlassDefaultMinutes, BreakGlassReviewDays: domain.BreakGlassReviewDays}
@@ -88,6 +89,22 @@ func config(getenv func(string) string) (api.Config, error) {
 	}
 	if cfg.BreakGlassSelfActivate, err = boolEnv(getenv, "BREAKGLASS_SELF_ACTIVATE", false); err != nil {
 		return cfg, err
+	}
+	cfg.ScreeningThreshold = domain.DefaultScreeningThreshold
+	if v := getenv("SCREENING_THRESHOLD"); v != "" {
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil || f < domain.MinScreeningThreshold || f > domain.MaxScreeningThreshold {
+			return cfg, fmt.Errorf("SCREENING_THRESHOLD must be %.2f..%.2f, got %q", domain.MinScreeningThreshold, domain.MaxScreeningThreshold, v)
+		}
+		cfg.ScreeningThreshold = f
+	}
+	switch v := getenv("TRADE_LICENSE_CHECK"); v {
+	case "":
+		cfg.LicenseCheck = domain.LicenseCheckBlock
+	case domain.LicenseCheckBlock, domain.LicenseCheckWarn, domain.LicenseCheckOff:
+		cfg.LicenseCheck = v
+	default:
+		return cfg, fmt.Errorf("TRADE_LICENSE_CHECK must be BLOCK, WARN or OFF, got %q", v)
 	}
 	for _, p := range []struct {
 		key      string

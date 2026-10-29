@@ -1,5 +1,5 @@
 import type { BadgeTone } from "../../shell/ui";
-import type { ConflictState, Severity } from "./api/client";
+import type { ConflictState, HitState, Severity } from "./api/client";
 
 export const dash = "—";
 
@@ -41,3 +41,10 @@ export function dateIn(days: number, now: Date = new Date()): string {
 export const severityTone: Record<Severity, BadgeTone> = { HIGH: "danger", MEDIUM: "warning", LOW: "neutral" };
 
 export const stateTone: Record<ConflictState, BadgeTone> = { OPEN: "warning", MITIGATED: "info", RESOLVED: "success", ACCEPTED_RISK: "neutral" };
+
+export const hitStateTone: Record<HitState, BadgeTone> = { OPEN: "warning", FALSE_POSITIVE: "success", CONFIRMED: "danger" };
+
+/** 0.92 → "0.920": screening scores always show three places. */
+export function scoreText(score: number): string {
+  return score.toFixed(3);
+}

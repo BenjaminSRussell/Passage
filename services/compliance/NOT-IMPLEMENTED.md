@@ -1,4 +1,4 @@
-# Not implemented in PSG-48 (after slice 3)
+# Not implemented in PSG-48 (after slice 4)
 
 Slice 1 ships segregation of duties: the engine (detection, simulation, conflict state machine), the
 conflict store with the mitigation approval record, the evaluation, listing, mitigation and
@@ -10,7 +10,11 @@ endpoint, and the breach clock and India TDS calculator screens. Slice 3 complet
 (KEYWORD, LIST_SEARCH, SAMPLING, THRESHOLD, WEEKEND_HOLIDAY, AGGREGATE next to DUPLICATE), adds audit case
 grouping and the case status machine (FR-48.15) and break-glass session planning (FR-48.23, BR-48.19),
 each behind a read-only endpoint, and the audit rule run, audit case and break-glass screens. Nothing in
-slice 3 is stored. Everything else in the ticket is a later slice of PSG-48 unless marked handoff.
+slice 3 is stored. Slice 4 adds sanctions screening (FR-48.19) with stored `screening_hit` rows, the
+officer decision and the `dev.passage.trade.screening.hit.v1` event, and the export license
+determination of a delivery (FR-48.20, BR-48.16) behind a read-only endpoint, with the screening hits,
+hit detail, screening check and export check screens. Everything else in the ticket is a later slice of
+PSG-48 unless marked handoff.
 
 | Deliverable or AC | Status | Reason |
 |---|---|---|
@@ -38,8 +42,16 @@ slice 3 is stored. Everything else in the ticket is a later slice of PSG-48 unle
 | FR-48.16: process, risk and control library | later slice of PSG-48 | needs store and wave-5 document store |
 | FR-48.3, FR-48.17: ER designer, mandates registry, electronic messaging lifecycle (BR-48.3, BR-48.17) | later slice of PSG-48 | `er_format`, `mandate` and `e_message` belong with the ereporting work (the PRD's `passage-ereporting`) |
 | FR-48.18: XBRL and iXBRL | later slice of PSG-48 | Arelle job in Python, taxonomy registry |
-| FR-48.19: sanctions screening (BR-48.15) | later slice of PSG-48 | screening lists refresh and matcher |
-| FR-48.20, FR-48.21: export control, origin determination (BR-48.16) | later slice of PSG-48 | depends on waves 21, 34 and 35 |
+| FR-48.19: `screening_list` store, daily 05:00 UTC refresh from OFAC SDN and Consolidated, EU CFSP, UK OFSI, UN SC and BIS EL/DPL/UVL, delta rescreen of every party on a list change and on party change (< 20 min for 1M parties), trigram and phonetic list index | later slice of PSG-48 | slice 4 built the matcher (`internal/domain/screening.go`: normalization, Latin and Cyrillic transliteration, token-set ratio, address weight, country factor, `screening.threshold`) and the stored hits (`screening_hit`, `0004_screening.sql`); until the list store exists the caller of `POST /v1/trade/screening/check` supplies the list entries |
+| FR-48.19: blocking order release, shipment, PO send and payment on an OPEN hit (`SCREENING_BLOCK` on the party, AC-48.16 at release) | handoff | the blocking hooks belong to sales, shipment (wave 34), procurement and payments, which consume `dev.passage.trade.screening.hit.v1` and call the check before the transition; this service answers `blocked` and stores the hit |
+| FR-48.19: provider adapters (Descartes, LexisNexis Bridger, Dow Jones) and the `screening.provider` and `screening.lists` tenant settings | later slice of PSG-48 | the internal matcher only; `screening.threshold` is read once per process from `SCREENING_THRESHOLD` until the tenant settings store exists |
+| FR-48.19: 5-year decision retention job | later slice of PSG-48 | hits and decisions are never deleted (`passage_app` has no DELETE on `screening_hit`); the purge after 5 years comes with the retention policies of FR-48.11 |
+| FR-48.20: `trade_classification` and `export_license` stores with used quantity and value booked on shipment, the `export_check` record and the export-blocked deliveries inquiry | later slice of PSG-48 | slice 4 built the determination (`internal/domain/export_control.go`) behind the read-only `POST /v1/trade/export-checks`: BR-48.16 embargo (CU, IR, KP, SY, UA-43/UA-40/UA-14/UA-09) released only by a TradeComplianceOfficer with a license reference, the license table, validity, expiry and quantity and value headroom shared across the lines of one delivery; the caller supplies the lines and the licenses |
+| FR-48.20: the FR-3.13 license decision table shipped by each pack | later slice of PSG-48 | `DefaultLicenseTable` (US EAR 5A002, EU dual-use 1A001 and 5A002) is illustrative and ASSUMED pending export counsel review; the pack table needs the FR-3.13 rules engine binding |
+| FR-48.20: `trade.license_check` per legal entity | partial | read once per process from `TRADE_LICENSE_CHECK` (BLOCK, WARN, OFF) until the legal entity settings exist |
+| FR-48.20: blocking delivery confirmation with `TRD-1003` (AC-48.17 at the shipment) | handoff | the delivery confirmation hook is logistics (wave 34); the determination returns `TRD-1003` per line and `blocked` |
+| FR-48.20: export document set (commercial invoice, packing list, certificate of origin, EUR.1 / origin statement, US EEI / EU export declaration broker data) | later slice of PSG-48 | needs the wave-35 document hub and broker adapters |
+| FR-48.21: origin and preference determination | later slice of PSG-48 | depends on the wave-21 BOM roll-up and supplier declarations |
 | FR-48.22, FR-48.31: US workforce compliance and statutory outputs (BR-48.20) | handoff | the HR records and fields framework is wave 42; outputs follow those fields |
 | FR-48.23: `elevated_session` store, `POST /v1/security/elevated-sessions` with `Idempotency-Key`, approval by the designated approver, the Keycloak token with `elev=<session_id>`, per-call session log, reviewer inbox task and sign-off, `dev.passage.security.elevated.started.v1` / `.ended.v1`, the break-glass session inquiry, SoD evaluation of the granted roles | partial | slice 3 built the planning rules (`breakglass.go`) behind the read-only `POST /v1/security/elevated-sessions:plan`: reason codes, ticket, 60-minute default and 240-minute cap, BR-48.19 (`SEC-0707` for yourself, a second PlatformAdmin for someone else), self-activation with post-review, the review deadline and `ReviewOverdue` (`SEC-0708`). The session, token, log and events need the session store and the wave-2 Keycloak flow |
 | AC-48.18: when a 60-minute session ends the token is invalid, every call is logged and the reviewer has a task due in 3 business days | partial | the 3-business-day review deadline is computed and tested; token expiry, the call log and the task need the session store |
@@ -50,9 +62,9 @@ slice 3 is stored. Everything else in the ticket is a later slice of PSG-48 unle
 | AC-48.19: saving the incident creates the GDPR deadline and a notification task | partial | the 2026-11-05T09:00Z deadline is computed and tested; saving and the task need the incident store |
 | BR-48.18: deadlines displayed in the tenant time zone | later slice of PSG-48 | the breach clock screen shows UTC; the tenant time zone comes with the tenant settings store |
 | FR-48.30: evidence store with object lock and hash chain | later slice of PSG-48 | needs the object store and bucket policy from `deploy/` |
-| Web: privacy, signatures, signature log, audit policy maintenance, audit violation and case lists, screening, break-glass session list and review, and incident record screens | later slice of PSG-48 | slice 1 screens cover SoD and country packs; slice 2 adds the breach clock and India TDS calculators; slice 3 adds the audit rule run, the audit case grouping and action check, and the break-glass planner. List and detail screens for violations, cases and sessions wait for their stores |
+| Web: privacy, signatures, signature log, audit policy maintenance, audit violation and case lists, break-glass session list and review, incident record, classification and license maintenance screens | later slice of PSG-48 | slice 1 screens cover SoD and country packs; slice 2 adds the breach clock and India TDS calculators; slice 3 adds the audit rule run, the audit case grouping and action check, and the break-glass planner; slice 4 adds the screening hits list, hit detail with the decision, the screening check and the export check. List and detail screens for violations, cases, sessions, classifications and licenses wait for their stores |
 | JWT validation and OPA duties | wave 2 | the gateway validates tokens; the service trusts tenant headers and the local `authz.DutyPolicy` |
 | `serviceCode` on problem bodies | kernel handoff | `httpx.Problem` in `platform/go` has no `serviceCode`; the OpenAPI documents the body as served |
 | Readiness with migrations current and OPA bundle | handoff | the kernel `/readyz` contract checks OPA; the slice only pings Postgres |
-| Duty names `AuditPolicyRun`, `AuditCaseManage`, `BreakGlassRequest` | handoff | not yet in the OPA policy bundle (`policies/`, wave 2); the service enforces them through the local `authz` check until then |
+| Duty names `AuditPolicyRun`, `AuditCaseManage`, `BreakGlassRequest`, `TradeComplianceView`, `TradeComplianceOfficer` | handoff | not yet in the OPA policy bundle (`policies/`, wave 2); the service enforces them through the local `authz` check until then |
 | Public holidays for the weekend and holiday rule and the break-glass review SLA | partial | the calendar comes from the country pack (`countrypacks/`); the rule takes a caller-supplied holiday list and the review SLA counts Monday to Friday only |

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Passage compliance
-  version: 0.4.0
+  version: 0.5.0
   description: >-
     Segregation of duties (PSG-48 slice 1): seed rules, pre-save simulation,
     evaluation of a user's effective roles, the conflict listing and the
@@ -10,8 +10,11 @@ info:
     Audit rule evaluation, audit case grouping and status machine, and
     break-glass session planning (PSG-48 slice 3, FR-48.14, FR-48.15,
     FR-48.23, BR-48.19); these store nothing yet.
-    Browser calls go to /api/v1/sod/..., /api/v1/compliance/... and
-    /api/v1/security/...; the gateway strips /api.
+    Sanctions screening with stored hits and the officer decision, and the
+    export license determination of a delivery (PSG-48 slice 4, FR-48.19,
+    FR-48.20, BR-48.15, BR-48.16).
+    Browser calls go to /api/v1/sod/..., /api/v1/compliance/...,
+    /api/v1/security/... and /api/v1/trade/...; the gateway strips /api.
 servers:
   - url: https://api.passage.dev
 paths:
@@ -438,6 +441,171 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: "#/components/schemas/Problem" }
+  /v1/trade/screening/check:
+    post:
+      operationId: screenSubject
+      x-passage-duty: TradeComplianceView
+      description: >-
+        Screens a party or document on demand against the given list entries
+        (FR-48.19) with normalized token-set matching and transliteration, at the
+        tenant's screening.threshold (default 0.88). Each new hit is stored OPEN
+        and emits dev.passage.trade.screening.hit.v1 in the same transaction; an
+        OPEN hit for the same subject and entry is refreshed, not duplicated. An
+        entry cleared as a false positive for the same entry version and the same
+        subject name, address and country is not flagged again (BR-48.15).
+        Until the screening_list store exists the caller supplies the entries.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [subject, entries]
+              properties:
+                subject: { $ref: "#/components/schemas/ScreeningSubject" }
+                entries: { type: array, maxItems: 10000, items: { $ref: "#/components/schemas/ListEntry" } }
+      responses:
+        "200":
+          description: >-
+            The subject's blocking hits (OPEN and CONFIRMED) after this run; while
+            any exist the subject may not be released, shipped, sent or paid.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [blocked, hits]
+                properties:
+                  blocked: { type: boolean }
+                  hits: { type: array, items: { $ref: "#/components/schemas/ScreeningHit" } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/trade/screening/hits:
+    get:
+      operationId: listScreeningHits
+      x-passage-duty: TradeComplianceView
+      description: Screening hits, newest detection first (the screening workbench).
+      parameters:
+        - { name: state, in: query, schema: { type: string, enum: [OPEN, FALSE_POSITIVE, CONFIRMED] } }
+        - { name: listCode, in: query, schema: { type: string } }
+        - { name: subjectType, in: query, schema: { type: string, enum: [PARTY, DOCUMENT] } }
+        - { name: subjectId, in: query, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 200 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: One page of hits
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/ScreeningHit" } }
+                  nextCursor: { type: string }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/trade/screening/hits/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getScreeningHit
+      x-passage-duty: TradeComplianceView
+      responses:
+        "200":
+          description: The hit
+          headers:
+            ETag: { schema: { type: string }, description: 'the hit version, e.g. "1"' }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScreeningHit" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/trade/screening/hits/{id}/decision:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: decideScreeningHit
+      x-passage-duty: TradeComplianceOfficer
+      description: >-
+        Clears an OPEN hit as a false positive or confirms it, with a reason
+        (FR-48.19). The decider is the calling user. A false positive becomes the
+        whitelist entry for this subject and list entry (BR-48.15); a confirmed
+        hit keeps the subject blocked. A repeated Idempotency-Key replays the
+        first answer.
+      parameters:
+        - { name: If-Match, in: header, required: true, schema: { type: string } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 200 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [decision, reason]
+              properties:
+                decision: { type: string, enum: [CLEAR_FALSE_POSITIVE, CONFIRM] }
+                reason: { type: string, maxLength: 2000 }
+      responses:
+        "200":
+          description: The decided hit
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScreeningHit" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/trade/export-checks:
+    post:
+      operationId: checkExportLicenses
+      x-passage-duty: TradeComplianceView
+      description: >-
+        License determination for a delivery (FR-48.20, AC-48.17). A destination
+        under comprehensive embargo blocks every line with TRD-1002 whatever the
+        classification (BR-48.16); otherwise each line needing a license by the
+        pack decision table must find a valid, unexpired license for its
+        classification and destination with quantity and value left, counting
+        earlier lines of the same delivery, or it gets TRD-1003 (blocked under
+        trade.license_check BLOCK, a warning under WARN, skipped under OFF).
+        officerReleaseLicenseRef releases an embargoed delivery and requires
+        TradeComplianceOfficer (403 otherwise). Until the export_license store
+        exists the caller supplies the licenses; nothing is stored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [destination, items]
+              properties:
+                destination: { type: string, pattern: '^[A-Za-z]{2}$', description: ISO 3166 alpha-2 }
+                region: { type: string, description: 'ISO 3166-2 of the destination, e.g. UA-43' }
+                items: { type: array, minItems: 1, maxItems: 5000, items: { $ref: "#/components/schemas/ExportItem" } }
+                licenses: { type: array, items: { $ref: "#/components/schemas/ExportLicense" } }
+                officerReleaseLicenseRef: { type: string, maxLength: 2000 }
+      responses:
+        "200":
+          description: The determination per line
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExportResult" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
 components:
   schemas:
     BreachRegime:
@@ -624,6 +792,98 @@ components:
           required: [mitigations]
           properties:
             mitigations: { type: array, items: { $ref: "#/components/schemas/Mitigation" } }
+    ScreeningSubject:
+      type: object
+      additionalProperties: false
+      required: [type, id, name]
+      properties:
+        type: { type: string, enum: [PARTY, DOCUMENT] }
+        id: { type: string, format: uuid }
+        name: { type: string, maxLength: 500 }
+        address: { type: string, maxLength: 2000 }
+        country: { type: string, pattern: '^[A-Za-z]{2}$' }
+    ListEntry:
+      type: object
+      additionalProperties: false
+      required: [listCode, entryId, version, name]
+      properties:
+        listCode: { type: string, example: OFAC_SDN }
+        entryId: { type: string }
+        version: { type: integer, minimum: 1 }
+        name: { type: string }
+        aliases: { type: array, items: { type: string } }
+        address: { type: string }
+        country: { type: string }
+    ScreeningHit:
+      type: object
+      required: [hitId, subjectType, subjectId, subjectName, listCode, listEntryId, listEntryVersion, listEntryName, score, matchedFields, state, detectedAt, updatedAt, version]
+      properties:
+        hitId: { type: string, format: uuid }
+        subjectType: { type: string, enum: [PARTY, DOCUMENT] }
+        subjectId: { type: string, format: uuid }
+        subjectName: { type: string }
+        listCode: { type: string }
+        listEntryId: { type: string }
+        listEntryVersion: { type: integer, minimum: 1 }
+        listEntryName: { type: string }
+        score: { type: number, minimum: 0, maximum: 1, description: composite match score, three decimal places }
+        matchedFields: { type: array, items: { type: string, enum: [name, address, country] } }
+        state: { type: string, enum: [OPEN, FALSE_POSITIVE, CONFIRMED] }
+        decidedBy: { type: string }
+        reason: { type: string }
+        decidedAt: { type: string, format: date-time }
+        detectedAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+    ExportItem:
+      type: object
+      additionalProperties: false
+      required: [itemId, classification, qty, value]
+      properties:
+        itemId: { type: string }
+        classification:
+          type: object
+          additionalProperties: false
+          required: [regime, code]
+          properties:
+            regime: { type: string, enum: [US_EAR, EU_DUALUSE, HS] }
+            code: { type: string, example: 5A002 }
+        qty: { $ref: "#/components/schemas/Decimal" }
+        value: { $ref: "#/components/schemas/Decimal" }
+    ExportLicense:
+      type: object
+      additionalProperties: false
+      required: [licenseId, regime, classifications, destinations, usedQty, usedValue, expiresAt]
+      properties:
+        licenseId: { type: string }
+        number: { type: string }
+        regime: { type: string, enum: [US_EAR, EU_DUALUSE, HS] }
+        classifications: { type: array, items: { type: string, example: "US_EAR:5A002" } }
+        destinations: { type: array, items: { type: string } }
+        qtyLimit: { $ref: "#/components/schemas/Decimal" }
+        usedQty: { $ref: "#/components/schemas/Decimal" }
+        valueLimit: { $ref: "#/components/schemas/Decimal" }
+        usedValue: { $ref: "#/components/schemas/Decimal" }
+        expiresAt: { type: string, format: date-time }
+    ExportResult:
+      type: object
+      required: [embargo, blocked, items]
+      properties:
+        embargo: { type: boolean }
+        blocked: { type: boolean }
+        items:
+          type: array
+          items:
+            type: object
+            required: [itemId, licenseRequired, blocked, warning]
+            properties:
+              itemId: { type: string }
+              licenseRequired: { type: boolean }
+              licenseId: { type: string, description: the license drawn on, or the officer's release reference }
+              blocked: { type: boolean }
+              warning: { type: boolean }
+              code: { type: string, enum: [TRD-1002, TRD-1003] }
+              detail: { type: string }
     Problem:
       type: object
       required: [type, title, status, code]
