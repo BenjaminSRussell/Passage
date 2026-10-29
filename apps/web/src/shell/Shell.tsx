@@ -227,56 +227,56 @@ export function Shell({ modules, duties }: ShellProps) {
   }
 
   return (
-    <div className={styles.root} data-density={density}>
-      <a href="#main" className="skip-link">
-        Skip to content
-      </a>
-      <div className={styles.frame}>
-        <Sidebar
-          modules={modules}
-          shellNav={shellNav}
-          drawerOpen={drawerOpen}
-          searchRef={searchRef}
-          onOpenSearch={openSearch}
-          onCloseDrawer={closeDrawer}
-        />
-        {drawerOpen ? <div className={styles.scrim} onClick={closeDrawer} aria-hidden="true" /> : null}
-        <main id="main" tabIndex={-1} className={styles.main}>
-          <TopBar
-            page={page}
-            titleRef={titleRef}
-            menuRef={menuRef}
+    <PrincipalProvider duties={principalDuties}>
+      <div className={styles.root} data-density={density}>
+        <a href="#main" className="skip-link">
+          Skip to content
+        </a>
+        <div className={styles.frame}>
+          <Sidebar
+            modules={modules}
+            shellNav={shellNav}
             drawerOpen={drawerOpen}
-            compact={density === "compact"}
-            onOpenDrawer={() => setDrawerOpen(true)}
-            onApplyView={applySavedView}
-            onToggleCompact={() => setDensity((d) => (d === "compact" ? "comfortable" : "compact"))}
+            searchRef={searchRef}
+            onOpenSearch={openSearch}
+            onCloseDrawer={closeDrawer}
           />
-          {online ? null : (
-            <div className={styles.banner}>
-              <Alert tone="warning">{copy.offlineBanner}</Alert>
-            </div>
-          )}
-          <div className={styles.content}>
-            <RouteErrorBoundary key={pathname}>
-              <Suspense fallback={<PageSkeleton />}>
-                <PrincipalProvider duties={principalDuties}>
+          {drawerOpen ? <div className={styles.scrim} onClick={closeDrawer} aria-hidden="true" /> : null}
+          <main id="main" tabIndex={-1} className={styles.main}>
+            <TopBar
+              page={page}
+              titleRef={titleRef}
+              menuRef={menuRef}
+              drawerOpen={drawerOpen}
+              compact={density === "compact"}
+              onOpenDrawer={() => setDrawerOpen(true)}
+              onApplyView={applySavedView}
+              onToggleCompact={() => setDensity((d) => (d === "compact" ? "comfortable" : "compact"))}
+            />
+            {online ? null : (
+              <div className={styles.banner}>
+                <Alert tone="warning">{copy.offlineBanner}</Alert>
+              </div>
+            )}
+            <div className={styles.content}>
+              <RouteErrorBoundary key={pathname}>
+                <Suspense fallback={<PageSkeleton />}>
                   <Outlet />
-                </PrincipalProvider>
-              </Suspense>
-            </RouteErrorBoundary>
-          </div>
-        </main>
-      </div>
-      <div role="status" aria-live="polite" className="visually-hidden">
-        {announcement}
-      </div>
-      {toast ? (
-        <div className={styles.toast} aria-hidden="true">
-          {toast}
+                </Suspense>
+              </RouteErrorBoundary>
+            </div>
+          </main>
         </div>
-      ) : null}
-      {paletteOpen ? <CommandPalette entries={entries} onSelect={selectEntry} onClose={() => closePalette()} announce={announceQuietly} /> : null}
-    </div>
+        <div role="status" aria-live="polite" className="visually-hidden">
+          {announcement}
+        </div>
+        {toast ? (
+          <div className={styles.toast} aria-hidden="true">
+            {toast}
+          </div>
+        ) : null}
+        {paletteOpen ? <CommandPalette entries={entries} onSelect={selectEntry} onClose={() => closePalette()} announce={announceQuietly} /> : null}
+      </div>
+    </PrincipalProvider>
   );
 }

@@ -16,7 +16,7 @@ export default defineConfig(({ mode, command }) => {
     plugins: [react()],
     define: {
       __PASSAGE_REMOTES__: JSON.stringify(federationRemotes),
-      __PASSAGE_DEV_DUTIES__: JSON.stringify(command === "serve" ? (env.PASSAGE_DEV_DUTIES ?? "") : ""),
+      __PASSAGE_DEV_DUTIES__: JSON.stringify(command === "serve" && mode !== "test" ? (env.PASSAGE_DEV_DUTIES ?? "") : ""),
     },
     server: { port: 5173, proxy: devProxy(env) },
     test: { environment: "jsdom", globals: true, setupFiles: ["./src/test-setup.ts"], exclude: [...configDefaults.exclude, "e2e/**"] },
