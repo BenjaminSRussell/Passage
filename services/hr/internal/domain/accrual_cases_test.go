@@ -1,8 +1,11 @@
 package domain
 
 import (
+	"encoding/csv"
 	"errors"
+	"os"
 	"testing"
+	"time"
 
 	"github.com/shopspring/decimal"
 )
@@ -110,5 +113,72 @@ func TestConsumeRespectsFloor(t *testing.T) {
 				t.Fatalf("refusal code = %v, want HCM-ABS-002", err)
 			}
 		})
+	}
+}
+
+func TestAccrualFixture36(t *testing.T) {
+	f, err := os.Open("../../testdata/hr-accrual-cases.csv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	rows, err := csv.NewReader(f).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	col := map[string]int{}
+	for i, h := range rows[0] {
+		col[h] = i
+	}
+	rows = rows[1:]
+	if len(rows) != 36 {
+		t.Fatalf("fixture has %d cases, want 36", len(rows))
+	}
+	for _, r := range rows {
+		get := func(name string) string { return r[col[name]] }
+		t.Run(get("id"), func(t *testing.T) {
+			hire, err := time.Parse("2006-01-02", get("hire_date"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			rate, maxBalance, carryMax := dec(get("rate")), dec(get("max_balance")), dec(get("carry_max"))
+			prorate := get("prorate") == "true"
+
+			var l Ledger
+			discarded := decimal.Zero
+			for m := hire.Month(); m <= time.December; m++ {
+				first := time.Date(2026, m, 1, 0, 0, 0, 0, time.UTC)
+				daysInMonth := first.AddDate(0, 1, -1).Day()
+				employed := daysInMonth
+				if m == hire.Month() {
+					employed = daysInMonth - hire.Day() + 1
+				}
+				var cut decimal.Decimal
+				l, cut = l.Accrue(AccrualAmount(rate, employed, daysInMonth, prorate), maxBalance)
+				discarded = discarded.Add(cut)
+			}
+			assertDec(t, "accrued", l.Current.Accrued, get("accrued"))
+			assertDec(t, "discarded", discarded, get("discarded"))
+
+			l, err = l.Consume(dec(get("used")), decimal.Zero)
+			if err != nil {
+				t.Fatalf("consume %s: %v", get("used"), err)
+			}
+			assertDec(t, "balance 2026-12-31", l.Total(), get("balance_dec31"))
+
+			l, expired := l.YearEnd(carryMax)
+			assertDec(t, "carried", l.Carry.Balance(), get("carried"))
+			assertDec(t, "expired", expired, get("expired"))
+
+			l, _ = l.Accrue(AccrualAmount(rate, 31, 31, prorate), maxBalance)
+			assertDec(t, "balance 2027-01-31", l.Total(), get("balance_jan31"))
+		})
+	}
+}
+
+func assertDec(t *testing.T, what string, got decimal.Decimal, want string) {
+	t.Helper()
+	if !got.Equal(dec(want)) {
+		t.Errorf("%s = %s, want %s", what, got, want)
 	}
 }
