@@ -1,11 +1,11 @@
-# NOT-IMPLEMENTED — PSG-50 (wave 50), slices 1 and 2
+# NOT-IMPLEMENTED — PSG-50 (wave 50), slices 1 to 3
 
 Wave 50 owns only `deploy/multi-region/`, `load/` and `docs/ops/`, and its ownership entry lists no web
 module. It has no service directory, so there is no Go module, database table, OpenAPI/AsyncAPI file or
 web screen in this slice. Items below are either later slices of PSG-50 or handoffs to the wave that owns
 the code or the infrastructure.
 
-Status key: **built** = in slice 1 or 2. **later slice of PSG-50** = same wave, next slice. **handoff** =
+Status key: **built** = in slices 1 to 3. **later slice of PSG-50** = same wave, next slice. **handoff** =
 needs another owner or an out-of-path edit.
 
 ## Deliverable 1: performance campaign
@@ -25,9 +25,11 @@ needs another owner or an out-of-path edit.
 | Postgres journal partitioning (month range, hash 16) and inventory/audit partitioning | handoff (ledger, inventory, platform owners) | DDL lives in each service's migrations; out of path |
 | PgBouncer transaction pooling and `pg_stat_statements` on the CNPG cluster (FR-50.2) | built | `Pooler` and parameters in `deploy/multi-region/chart/templates/cnpg-cluster.yaml` |
 | Services connecting through the pooler | handoff (each service chart owner, secret management) | service charts read `DATABASE_URL` from a secret; it must name `passage-pg-pooler-rw` while `MIGRATE_DATABASE_URL` keeps the direct `-rw` service (DDL and advisory locks need a session) |
-| `pg_stat_statements` top-50 review and index additions | later slice of PSG-50 | needs measured data from the campaign |
+| Top-SQL review tool: top 50 by total time from a `pg_stat_statements` export, fails when a statement's mean exceeds 1 s (AC-50.2) | built | `load/tools/top_sql.py`, tests in `load/tools/test_top_sql.py` |
+| `pg_stat_statements` top-50 review and index additions (FR-50.2) | later slice of PSG-50 | needs measured data from the campaign; the indexes go into the owning services' migrations (handoff when found) |
 | Strimzi 6 brokers, partition sizing | handoff (wave 3 eventing / deploy/kafka owner) | `deploy/kafka` is wave 3's path; it already sets `min.insync.replicas=2` with 3 brokers |
 | Pricing and policy-bundle caches, <= 5 s invalidation, TTL jitter and single-flight refill (the rules `runbooks/cache-stampede.md` assumes) | handoff (pricing, platform owners) | cache is service code; tier 2 is Valkey, proposed and not yet in ADR-0001 (architecture Q4), never Redis |
+| Campaign route check: every `PATHS` call in `scenarios.js` (method and path) resolves to a service OpenAPI route and every `UNVERIFIED_PATHS` call still has none | built | `load/tools/verify_paths.py`; `load/tools/test_verify_paths.py` runs it on this branch's specs, so a renamed route or a newly published one fails the test |
 
 ## Deliverable 2: multi-region and DR
 | Item | Status | Reason |
@@ -68,15 +70,18 @@ needs another owner or an out-of-path edit.
 | Nightly capacity refresh, weekly SLO report, monthly backup drill, hourly license check | handoff (ops service, wave 48 backups) | scheduled jobs live in the ops service |
 | Expand/contract linter (OPS-1707, BR-50.7) | built | `deploy/multi-region/tools/expand_contract_lint.py`: a release's new migrations (drops and renames of columns, tables, views) are checked against the code of this release (`--code`) and of the previous release (`--previous-code`, N-1), which still runs during the rolling deploy; `python3 -m unittest discover -s deploy/multi-region/tools` |
 | Run the expand/contract linter on every release in CI | handoff (deployment-cicd CI owner) | CI pipeline is not in wave 50's paths; the job checks out the previous release tag and passes it as `--previous-code` |
+| N / N-1 OpenAPI compatibility checker (FR-50.7, AC-50.5): removed operations, parameters, media types, 2xx responses and fields; new required inputs; narrowed request types and enums; widened response types; response fields made optional | built | `deploy/multi-region/tools/openapi_compat.py`, tests in `test_openapi_compat.py`. JSON input only (stdlib); `oneOf`/`anyOf` and external `$ref` are not compared |
+| Run `openapi_compat.py` for every service between the previous release tag and the release commit, and keep the report as release evidence | handoff (deployment-cicd CI owner) | needs the release pipeline (wave 1) to check out N-1 and convert the YAML specs to JSON |
 | CI jobs for `helm lint deploy/multi-region/chart`, `test_chart.py`, the Python tools' tests and `node --test load/k6` | handoff (deployment-cicd CI owner) | `.github/workflows` is not in wave 50's paths |
-| Zero-downtime upgrade evidence and N/N-1 contract test suite | later slice of PSG-50 | depends on release pipeline (wave 1) |
+| Zero-downtime upgrade evidence: a rolling deploy of N+1 with an expand migration and zero failed requests from N clients (AC-50.5) | later slice of PSG-50 | needs the release pipeline (wave 1) and a running environment |
 | Tenant provisioning API and automation (<= 15 min) | handoff (ops service) | steps documented in `tenant-provisioning.md` |
 | Metrics `passage_ops_failover_in_progress`, `passage_ops_region_fenced`, `passage_license_days_to_expiry` | handoff (ops service) | alert rules reference them; the producer is the ops service |
 
 ## Deliverable 4: documentation
 | Item | Status | Reason |
 |---|---|---|
-| Administrator guide | later slice of PSG-50 | needs the shipped admin surface (waves 1–5) |
+| Administrator guide for platform operators (regions, failover, tenants, licenses, releases, alerts, error codes): `administrator-guide.md` | built | describes operator procedures and targets; the `/api/v1/ops/*` steps route to runbooks until the ops service ships |
+| Tenant administrator guide: company setup, users, roles and module admin screens | later slice of PSG-50 | needs the shipped admin surfaces of waves 1–5 and the module screens |
 | Implementer guide (migration, localization, cutover) | later slice of PSG-50 | depends on waves 47–49 |
 | API reference generated from OpenAPI/AsyncAPI, 0 undocumented operations | later slice of PSG-50 | generation runs in the docs site build (`passage-docs`), which is not built |
 | Functional guides, one per module for phases 1–8 | later slice of PSG-50 | depends on module completion |

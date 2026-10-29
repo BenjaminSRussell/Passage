@@ -35,6 +35,14 @@ that mirrors every Passage topic into it. DNS fails over with a 60 s TTL. Active
 - `tools/expand_contract_lint.py` — OPS-1707. Fails a release whose new migrations drop or rename a column,
   table or view that this release's code or the previous release's (N-1, still running during the rolling
   deploy) references (BR-50.7). Tests: `tools/test_expand_contract_lint.py`.
+- `tools/openapi_compat.py` — N / N-1 API compatibility (FR-50.7, AC-50.5). Compares the previous release's
+  OpenAPI JSON with the new one and lists every change an N-1 client would notice: removed paths, operations,
+  parameters, request media types, 2xx responses and response fields; new required parameters, bodies or
+  request fields; request types or enums narrowed; response types or enums widened; response fields that
+  stop being required. Additive changes pass, and renaming a path parameter is not a change. `allOf` members
+  are merged before comparing; `oneOf`/`anyOf` are not compared and external `$ref` is an error. Input is
+  JSON (convert YAML with `yq -o=json`). Exit 1 on a breaking change. Tests: `tools/test_openapi_compat.py`.
+  Usage: `python3 deploy/multi-region/tools/openapi_compat.py --old n1.json --new n.json`.
 - Run tests: `python3 -m unittest discover -s deploy/multi-region/gameday` and
   `python3 -m unittest discover -s deploy/multi-region/tools`.
 

@@ -16,11 +16,17 @@ Each schema change is four releases or fewer, never one:
 4. **Contract**: drop the old column in a later release.
 
 Linter rule (BR-50.7, OPS-1707): a migration that drops a column cannot ship in the same release as the
-code that stops using it. The linter runs in CI on every migration file. Rollbacks never run a contract
-step; it waits for the next release.
+code that stops using it. `deploy/multi-region/tools/expand_contract_lint.py` checks a release's new migrations
+against this release's code and the previous release's; the CI job that runs it on every release is a handoff
+(see [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md)). Rollbacks never run a contract step; it waits for the next release.
 
 ## API compatibility
 - Contract tests run N (new) against N-1 (previous) clients on every release candidate.
+- Static check per service: `python3 deploy/multi-region/tools/openapi_compat.py --old n1.json --new n.json`
+  compares the previous release's OpenAPI (converted to JSON) with the candidate's and fails on any change an
+  N-1 client would notice (removed operations, parameters or fields, new required inputs, narrowed request or
+  widened response types). New response enum values are warnings the release manager checks against the N-1
+  web client.
 - Additive-only change within a major version; removed fields need a `Sunset` header of at least 12 months.
 - Acceptance: 100% of contract tests pass (test plan, "upgrade compatibility").
 
