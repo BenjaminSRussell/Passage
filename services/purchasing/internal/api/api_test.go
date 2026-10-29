@@ -345,7 +345,7 @@ func TestCreateRequisition_ScopeAllowsListedEntityAndWarnsOnZeroEstimate(t *test
 	body := `{"legalEntityId":"` + leA + `","currency":"USD","lines":[
 	 {"description":"Toner","category":"OFFICE","qty":"4","unit":"EA","estimatedUnitPrice":"300","requestedDate":"2026-03-10"},
 	 {"description":"Chairs","category":"OFFICE","qty":"2","unit":"EA","requestedDate":"2026-03-10"}]}`
-	rec := h.do(call{method: "POST", path: "/v1/procurement/requisitions", user: userA, scope: "x," + leA, duties: []string{dutyRequisitionCreate},
+	rec := h.do(call{method: "POST", path: "/v1/procurement/requisitions", user: userA, scope: "00000000-0000-7000-8000-0000000001e3," + leA, duties: []string{dutyRequisitionCreate},
 		body: body, headers: idem("k1")})
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body)

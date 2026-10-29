@@ -165,7 +165,7 @@ func TestMetricsCountBusinessOperations(t *testing.T) {
 	do(r, http.MethodPost, validatePath, `{"type":"VAT","country":"DE","number":"bad"}`, "party.write", true)
 	do(r, http.MethodPost, validatePath, `{`, "party.write", true)
 	req := httptest.NewRequest(http.MethodPost, validatePath, strings.NewReader(`{"type":"EIN","number":"12-3456789"}`))
-	req.Header = http.Header{"X-Passage-Tenant": {testkit.TenantID(1)}, "X-Passage-Legal-Entity": {"not-a-uuid"}, "X-Passage-Duties": {"party.write"}}
+	req.Header = http.Header{"X-Passage-Tenant": {testkit.TenantID(1)}, "X-Passage-Legal-Entity": {testkit.TenantID(2) + "," + testkit.TenantID(3)}, "X-Passage-Duties": {"party.write"}}
 	r.ServeHTTP(httptest.NewRecorder(), req)
 
 	rec := httptest.NewRecorder()

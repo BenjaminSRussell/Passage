@@ -126,10 +126,7 @@ func TestAuthRejectionBodiesMatchKernel(t *testing.T) {
 	if unauth.Code != http.StatusUnauthorized || forbidden.Code != http.StatusForbidden || malformed.Code != http.StatusUnauthorized {
 		t.Fatalf("statuses %d %d %d", unauth.Code, forbidden.Code, malformed.Code)
 	}
-	if ct := unauth.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
-		t.Errorf("401 content type %q", ct)
-	}
-	for name, rec := range map[string]*httptest.ResponseRecorder{"403": forbidden, "malformed 401": malformed} {
+	for name, rec := range map[string]*httptest.ResponseRecorder{"401": unauth, "malformed 401": malformed, "403": forbidden} {
 		if ct := rec.Header().Get("Content-Type"); ct != "application/problem+json" {
 			t.Errorf("%s content type %q", name, ct)
 		}
@@ -141,20 +138,19 @@ func TestAuthRejectionBodiesMatchKernel(t *testing.T) {
 		}
 		return body
 	}
-	for _, key := range []string{"type", "title", "status", "detail"} {
-		if _, ok := decode("403", forbidden)[key]; !ok {
-			t.Errorf("403 body missing %q: %s", key, forbidden.Body.String())
+	for name, rec := range map[string]*httptest.ResponseRecorder{"401": unauth, "malformed 401": malformed, "403": forbidden} {
+		for _, key := range []string{"type", "title", "status", "detail", "traceId"} {
+			if _, ok := decode(name, rec)[key]; !ok {
+				t.Errorf("%s body missing %q: %s", name, key, rec.Body.String())
+			}
 		}
 	}
-	for name, rec := range map[string]*httptest.ResponseRecorder{"401": unauth, "403": forbidden} {
+	for name, rec := range map[string]*httptest.ResponseRecorder{"401": unauth, "malformed 401": malformed, "403": forbidden} {
 		if _, ok := decode(name, rec)["serviceCode"]; ok {
 			t.Errorf("%s body carries serviceCode: %s", name, rec.Body.String())
 		}
 	}
-	if body := decode("malformed 401", malformed); body["serviceCode"] != "AUTH-0001" || body["code"] != "forbidden_tenant" || body["traceId"] == "" {
-		t.Errorf("malformed tenant problem %v", body)
-	}
-	if !strings.Contains(unauth.Body.String(), `"code":"AUTH-0001"`) || !strings.Contains(forbidden.Body.String(), `"code":"AUTH-0003"`) {
+	if !strings.Contains(unauth.Body.String(), `"code":"AUTH-0001"`) || !strings.Contains(malformed.Body.String(), `"code":"AUTH-0001"`) || !strings.Contains(forbidden.Body.String(), `"code":"AUTH-0003"`) {
 		t.Errorf("unexpected codes: %s / %s", unauth.Body.String(), forbidden.Body.String())
 	}
 }
@@ -219,15 +215,14 @@ func TestMetricsSeparateClientErrorsFromServerFaults(t *testing.T) {
 	got := scrape(a)
 	for _, want := range []string{
 		"payables_settlement_previews_total 1",
-		"payables_settlement_preview_client_errors_total 2",
+		"payables_settlement_preview_client_errors_total 1",
 		"payables_settlement_preview_server_faults_total 0",
 		`payables_http_requests_total{route="/v1/payables/settlements:preview",status="200"} 1`,
 		`payables_http_requests_total{route="/v1/payables/settlements:preview",status="400"} 1`,
-		`payables_http_requests_total{route="unmatched",status="401"} 1`,
-		`payables_http_requests_total{route="/v1/payables/settlements:preview",status="401"} 1`,
+		`payables_http_requests_total{route="unmatched",status="401"} 2`,
 		`payables_http_requests_total{route="/v1/payables/settlements:preview",status="403"} 1`,
-		`payables_http_request_duration_seconds_bucket{route="/v1/payables/settlements:preview",le="+Inf"} 4`,
-		`payables_http_request_duration_seconds_count{route="/v1/payables/settlements:preview"} 4`,
+		`payables_http_request_duration_seconds_bucket{route="/v1/payables/settlements:preview",le="+Inf"} 3`,
+		`payables_http_request_duration_seconds_count{route="/v1/payables/settlements:preview"} 3`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("metrics missing %q in\n%s", want, got)
