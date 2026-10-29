@@ -8,6 +8,8 @@ import {
   approveSignal,
   approvalWorkflow,
   delegateSignal,
+  validateInput,
+  type ApprovalInput,
   type ApprovalState,
 } from "../src/workflows.js";
 
@@ -66,6 +68,30 @@ describe("approval workflow", () => {
       ]);
     });
   }, 30_000);
+});
+
+describe("validateInput", () => {
+  const base: ApprovalInput = {
+    requestId: "req-2",
+    entityType: "party-change",
+    requester: "rita",
+    partyChange: { changeId: "chg-1", tenantId: "t1", legalEntityId: "le1" },
+    levels: [{ id: "l1", approver: "alice", escalationApprover: "finance", slaMs: 1000 }],
+  };
+
+  it("accepts levels that exclude the requester", () => {
+    expect(() => validateInput(base)).not.toThrow();
+  });
+
+  it("refuses a level whose approver is the requester", () => {
+    const levels = [{ ...base.levels[0]!, approver: "rita" }];
+    expect(() => validateInput({ ...base, levels })).toThrow(/requester/);
+  });
+
+  it("refuses a level whose escalation approver is the requester", () => {
+    const levels = [{ ...base.levels[0]!, escalationApprover: "rita" }];
+    expect(() => validateInput({ ...base, levels })).toThrow(/requester/);
+  });
 });
 
 async function waitForLevel(
