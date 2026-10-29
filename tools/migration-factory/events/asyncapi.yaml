@@ -1,0 +1,171 @@
+asyncapi: 3.0.0
+info:
+  title: Passage Migration Factory events
+  version: 0.1.0
+  description: |
+    Events the migration factory writes to its transactional outbox (PRD 9.49.5), in the same
+    transaction as the state change. Debezium relays them to Kafka topic
+    passage.<context>.<entity>, keyed by aggregate id. Each message is a CloudEvents 1.0
+    structured envelope; `data` carries the payload below. Source: passage/migration-factory.
+    The constants live in internal/events.
+defaultContentType: application/cloudevents+json
+channels:
+  migrationPack:
+    address: passage.migration.pack
+    messages:
+      packReconciled:
+        $ref: "#/components/messages/PackReconciled"
+  cutoverStep:
+    address: passage.cutover.step
+    messages:
+      stepCompleted:
+        $ref: "#/components/messages/CutoverStepCompleted"
+  cutoverPlan:
+    address: passage.cutover.plan
+    messages:
+      planRolledBack:
+        $ref: "#/components/messages/CutoverPlanRolledBack"
+operations:
+  publishPackReconciled:
+    action: send
+    channel:
+      $ref: "#/channels/migrationPack"
+    messages:
+      - $ref: "#/channels/migrationPack/messages/packReconciled"
+  publishStepCompleted:
+    action: send
+    channel:
+      $ref: "#/channels/cutoverStep"
+    messages:
+      - $ref: "#/channels/cutoverStep/messages/stepCompleted"
+  publishPlanRolledBack:
+    action: send
+    channel:
+      $ref: "#/channels/cutoverPlan"
+    messages:
+      - $ref: "#/channels/cutoverPlan/messages/planRolledBack"
+components:
+  messages:
+    PackReconciled:
+      name: dev.passage.migration.pack.reconciled.v1
+      title: Pack run reconciled
+      summary: A pack run computed its control totals. Written for every run, whether or not it reached RECONCILED.
+      payload:
+        $ref: "#/components/schemas/PackReconciledEnvelope"
+    CutoverStepCompleted:
+      name: dev.passage.cutover.step.completed.v1
+      title: Cutover step completed
+      summary: A runbook step was marked done.
+      payload:
+        $ref: "#/components/schemas/CutoverStepCompletedEnvelope"
+    CutoverPlanRolledBack:
+      name: dev.passage.cutover.plan.rolledback.v1
+      title: Cutover plan rolled back
+      summary: A cutover plan's rollback was executed with two distinct approvers (FR-49.9). Coexistence adapters resume legacy write access on it.
+      payload:
+        $ref: "#/components/schemas/CutoverPlanRolledBackEnvelope"
+  schemas:
+    Envelope:
+      type: object
+      required: [specversion, id, source, type, time, datacontenttype, data, tenantid]
+      properties:
+        specversion:
+          const: "1.0"
+        id:
+          type: string
+        source:
+          const: passage/migration-factory
+        type:
+          type: string
+        subject:
+          type: string
+          description: The aggregate id (run id or plan id).
+        time:
+          type: string
+          format: date-time
+        datacontenttype:
+          const: application/json
+        tenantid:
+          type: string
+          format: uuid
+        actor:
+          type: string
+    PackReconciledEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            type:
+              const: dev.passage.migration.pack.reconciled.v1
+            data:
+              type: object
+              required: [run_id, pack, source_system, source_company, status, totals_match, totals_mismatch, quarantined, records_loaded]
+              properties:
+                run_id:
+                  type: string
+                  format: uuid
+                pack:
+                  type: string
+                source_system:
+                  type: string
+                  enum: [AX2012, D365FO, SAPECC, S4HANA]
+                source_company:
+                  type: string
+                status:
+                  type: string
+                  enum: [LOADED, RECONCILED]
+                totals_match:
+                  type: integer
+                totals_mismatch:
+                  type: integer
+                quarantined:
+                  type: integer
+                records_loaded:
+                  type: integer
+    CutoverStepCompletedEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            type:
+              const: dev.passage.cutover.step.completed.v1
+            data:
+              type: object
+              required: [plan_id, step_id, name, actual_duration_min, status, completed_by]
+              properties:
+                plan_id:
+                  type: string
+                  format: uuid
+                step_id:
+                  type: integer
+                  description: The step's sequence number in the plan.
+                name:
+                  type: string
+                actual_duration_min:
+                  type: integer
+                status:
+                  type: string
+                  enum: [DONE]
+                completed_by:
+                  type: string
+    CutoverPlanRolledBackEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            type:
+              const: dev.passage.cutover.plan.rolledback.v1
+            data:
+              type: object
+              required: [plan_id, approvers, executed_by]
+              properties:
+                plan_id:
+                  type: string
+                  format: uuid
+                approvers:
+                  type: array
+                  minItems: 2
+                  items:
+                    type: string
+                executed_by:
+                  type: string

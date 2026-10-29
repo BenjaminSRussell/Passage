@@ -1,0 +1,658 @@
+openapi: 3.1.0
+info:
+  title: Passage Migration Factory API
+  version: 0.2.0
+  description: |
+    Slice 1 of wave 49 (PSG-49): open-items pack runs with control totals, quarantine and the
+    legacy cross-reference, and the cutover runbook. Source of truth for the handlers in
+    internal/api. State is stored in Postgres under row-level security per tenant.
+
+    Commands accept an optional `Idempotency-Key` header (at most 200 characters). A repeated
+    key with the same request returns the stored outcome with `Idempotent-Replayed: true`; the
+    same key with a different request is rejected with MIG-0007. Errors are RFC 9457 problem
+    details (application/problem+json) with a stable `code`; see README.md.
+servers:
+  - url: https://api.{env}.passage.dev
+    variables:
+      env:
+        default: dev
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/migration/packs/{pack}/runs:
+    post:
+      operationId: startPackRun
+      summary: Validate, load and reconcile a pack extract (open_items in slice 1)
+      description: |
+        Records failing the referential, domain or uniqueness rules are quarantined (FR-49.11);
+        the run is rejected with MIG-1504 when they exceed quarantineMaxPct. Accepted records
+        that legacy_xref already holds by (system, company, table, id) are not loaded again
+        (FR-49.10). Every run is stored, with its input hash, and writes
+        dev.passage.migration.pack.reconciled.v1. Status is RECONCILED only when no control
+        total is MISMATCH. The body is limited to 16 MiB.
+      x-passage-duty: MigrationRun
+      parameters:
+        - name: pack
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [open_items, gl_balances, onhand, open_orders, wip_prod, fixed_assets, project_wip, payroll_ytd, bank_balances]
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PackRunRequest"
+      responses:
+        "201":
+          description: The stored run (or the stored outcome of a repeated key).
+          headers:
+            Idempotent-Replayed:
+              $ref: "#/components/headers/IdempotentReplayed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PackRunDetail"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "413":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/migration/runs:
+    get:
+      operationId: listPackRuns
+      summary: Pack runs, newest first (inquiry "Pack runs", 9.49.14)
+      x-passage-duty: MigrationView
+      parameters:
+        - name: pack
+          in: query
+          schema:
+            type: string
+            enum: [open_items, gl_balances, onhand, open_orders, wip_prod, fixed_assets, project_wip, payroll_ytd, bank_balances]
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/RunStatus"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/After"
+      responses:
+        "200":
+          description: One page of runs.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PackRun"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/migration/runs/{id}:
+    get:
+      operationId: getPackRun
+      summary: A pack run with its control totals and quarantined records
+      x-passage-duty: MigrationView
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The run.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PackRunDetail"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/migration/runs/{id}/control-totals:
+    get:
+      operationId: getControlTotals
+      summary: Control totals and status for a pack run
+      x-passage-duty: MigrationView
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Totals for the run.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [runId, status, controlTotals]
+                properties:
+                  runId:
+                    type: string
+                    format: uuid
+                  status:
+                    $ref: "#/components/schemas/RunStatus"
+                  controlTotals:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ControlTotal"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/cutover/plans/generate:
+    post:
+      operationId: generateCutoverPlan
+      summary: Generate and store the timed runbook from the timeline baseline (FR-49.6)
+      x-passage-duty: CutoverManager
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateRequest"
+      responses:
+        "201":
+          description: The generated plan at version 1.
+          headers:
+            Idempotent-Replayed:
+              $ref: "#/components/headers/IdempotentReplayed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Plan"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/cutover/plans:
+    get:
+      operationId: listCutoverPlans
+      summary: Cutover plans, newest first, with step counts (inquiry "Cutover runbook status")
+      x-passage-duty: CutoverManager
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/After"
+      responses:
+        "200":
+          description: One page of plans, without their steps.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Plan"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/cutover/plans/{id}:
+    get:
+      operationId: getCutoverPlan
+      summary: A cutover plan with its steps and the BR-49.9 abort state at the time of the response
+      x-passage-duty: CutoverManager
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The plan.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Plan"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/cutover/plans/{id}/steps/{seq}/complete:
+    post:
+      operationId: completeCutoverStep
+      summary: Mark a runbook step done. Rejects out-of-sequence go/no-go steps (CUT-1601).
+      description: |
+        Writes dev.passage.cutover.step.completed.v1. When `version` is given and the plan has
+        moved on, the request is rejected with MIG-0006. A rolled-back plan's steps cannot be
+        completed (MIG-0004).
+      x-passage-duty: CutoverStepOwner
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - name: seq
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actualDurationMin]
+              additionalProperties: false
+              properties:
+                actualDurationMin:
+                  type: integer
+                  minimum: 0
+                version:
+                  type: integer
+                  minimum: 1
+                  description: The plan version the client read (optimistic check).
+      responses:
+        "200":
+          description: The plan after the step completed.
+          headers:
+            Idempotent-Replayed:
+              $ref: "#/components/headers/IdempotentReplayed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Plan"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/cutover/plans/{id}/rollback:
+    post:
+      operationId: rollbackCutoverPlan
+      summary: Record rollback execution. Needs two distinct approvers (CUT-1603).
+      description: |
+        Runs once per plan (a second rollback is MIG-0004). Writes
+        dev.passage.cutover.plan.rolledback.v1. `version` works as on step completion.
+      x-passage-duty: CutoverManager
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approvers]
+              additionalProperties: false
+              properties:
+                approvers:
+                  type: array
+                  minItems: 2
+                  items:
+                    type: string
+                version:
+                  type: integer
+                  minimum: 1
+      responses:
+        "200":
+          description: The plan with rolledBack true.
+          headers:
+            Idempotent-Replayed:
+              $ref: "#/components/headers/IdempotentReplayed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Plan"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+        maxLength: 200
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+    After:
+      name: after
+      in: query
+      description: Id of the last item of the previous page.
+      schema:
+        type: string
+        format: uuid
+  headers:
+    IdempotentReplayed:
+      description: "true when the response is the stored outcome of a repeated Idempotency-Key."
+      schema:
+        type: string
+        enum: ["true"]
+  responses:
+    Problem:
+      description: RFC 9457 problem details.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+        code:
+          type: string
+        traceId:
+          type: string
+    RunStatus:
+      type: string
+      enum: [EXTRACTED, VALIDATED, LOADED, RECONCILED, FAILED, ROLLED_BACK]
+    Record:
+      type: object
+      required: [legacyId, party, account, currency, amount]
+      additionalProperties: false
+      properties:
+        legacyId:
+          type: string
+        party:
+          type: string
+        account:
+          type: string
+          description: Control account; blank is a DOMAIN failure.
+        currency:
+          type: string
+          description: ISO 4217 code; an unknown code is a DOMAIN failure.
+        amount:
+          type: string
+          description: Decimal string in transaction currency. Never a float.
+    PackRunRequest:
+      type: object
+      required: [sourceSystem, sourceCompany, cutoffTs, freezeTs, parties, records]
+      additionalProperties: false
+      properties:
+        sourceSystem:
+          type: string
+          enum: [AX2012, D365FO, SAPECC, S4HANA]
+        sourceCompany:
+          type: string
+          minLength: 1
+          description: DataAreaId (AX) or BUKRS (SAP).
+        cutoffTs:
+          type: string
+          format: date-time
+          description: Must not be after freezeTs (MIG-1501).
+        freezeTs:
+          type: string
+          format: date-time
+        quarantineMaxPct:
+          type: string
+          description: Decimal percent from 0 to 10; defaults to 1.0 (migration.quarantine_max_pct).
+        parties:
+          type: array
+          description: Vendor and customer ids in master data (referential rule).
+          items:
+            type: string
+        records:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/Record"
+    ControlTotal:
+      type: object
+      required: [name, key, source, target, delta, tolerance, status]
+      properties:
+        name:
+          type: string
+          enum: [open_items.amount, open_items.amount_by_account, open_items.count]
+        key:
+          type: object
+          additionalProperties:
+            type: string
+        source:
+          type: string
+          description: Legacy value, decimal string with 6 places.
+        target:
+          type: string
+          description: Value held in Passage, decimal string with 6 places.
+        delta:
+          type: string
+          description: target - source.
+        tolerance:
+          type: string
+        toleranceReason:
+          type: string
+        status:
+          type: string
+          enum: [MATCH, WITHIN_TOLERANCE, MISMATCH]
+    Quarantined:
+      type: object
+      required: [legacyId, rule, reason]
+      properties:
+        legacyId:
+          type: string
+        rule:
+          type: string
+          enum: [REFERENTIAL, DOMAIN, UNIQUENESS]
+        reason:
+          type: string
+    PackRun:
+      type: object
+      required: [runId, pack, sourceSystem, sourceCompany, cutoffTs, inputHash, status, recordsIn, recordsLoaded, recordsQuarantined, alreadyPresent, createdAt]
+      properties:
+        runId:
+          type: string
+          format: uuid
+        pack:
+          type: string
+        sourceSystem:
+          type: string
+          enum: [AX2012, D365FO, SAPECC, S4HANA]
+        sourceCompany:
+          type: string
+        cutoffTs:
+          type: string
+          format: date-time
+        inputHash:
+          type: string
+          description: sha256 hex of the sorted (legacy id, amount) pairs of the extract.
+        status:
+          $ref: "#/components/schemas/RunStatus"
+        recordsIn:
+          type: integer
+        recordsLoaded:
+          type: integer
+        recordsQuarantined:
+          type: integer
+        alreadyPresent:
+          type: integer
+          description: Accepted records legacy_xref already held, so not loaded again.
+        message:
+          type: string
+          description: MIG-1505 text when a re-run loaded nothing new.
+        createdAt:
+          type: string
+          format: date-time
+    PackRunDetail:
+      allOf:
+        - $ref: "#/components/schemas/PackRun"
+        - type: object
+          required: [controlTotals, quarantined]
+          properties:
+            controlTotals:
+              type: array
+              items:
+                $ref: "#/components/schemas/ControlTotal"
+            quarantined:
+              type: array
+              items:
+                $ref: "#/components/schemas/Quarantined"
+    GenerateRequest:
+      type: object
+      required: [t0, packs, entities]
+      additionalProperties: false
+      properties:
+        t0:
+          type: string
+          format: date-time
+          description: cutover.t0, 00:00 of cutover day.
+        packs:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            enum: [open_items, gl_balances, onhand, open_orders, wip_prod, fixed_assets, project_wip, payroll_ytd, bank_balances]
+        entities:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+        abortOffsetHours:
+          type: integer
+          minimum: 12
+          maximum: 72
+          default: 36
+        rehearsalDurationsMin:
+          type: object
+          description: Step name to the duration measured in the last rehearsal, in minutes.
+          additionalProperties:
+            type: integer
+            minimum: 0
+    Step:
+      type: object
+      required: [seq, offsetMin, name, owner, plannedDurationMin, actualDurationMin, status, goNoGo]
+      properties:
+        seq:
+          type: integer
+        offsetMin:
+          type: integer
+          description: Minutes from T-0.
+        name:
+          type: string
+        owner:
+          type: string
+        plannedDurationMin:
+          type: integer
+        actualDurationMin:
+          type: integer
+        status:
+          type: string
+          enum: [PENDING, DONE]
+        goNoGo:
+          type: boolean
+        pack:
+          type: string
+        completedBy:
+          type: string
+        completedAt:
+          type: string
+          format: date-time
+    Plan:
+      type: object
+      required: [planId, t0, packs, entities, abortOffsetMin, rolledBack, approvers, version, createdAt, stepsDone, stepsTotal, openGoNoGo, abortDue]
+      properties:
+        planId:
+          type: string
+          format: uuid
+        t0:
+          type: string
+          format: date-time
+        packs:
+          type: array
+          items:
+            type: string
+        entities:
+          type: array
+          items:
+            type: string
+        abortOffsetMin:
+          type: integer
+        rolledBack:
+          type: boolean
+        approvers:
+          type: array
+          description: The two or more distinct rollback approvers, once rolled back.
+          items:
+            type: string
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        stepsDone:
+          type: integer
+        stepsTotal:
+          type: integer
+        openGoNoGo:
+          type: array
+          description: Names of go/no-go steps not yet done.
+          items:
+            type: string
+        abortDue:
+          type: boolean
+          description: The abort deadline has passed with go/no-go items open (BR-49.9).
+        abortWarning:
+          type: string
+          description: CUT-1604 text in the hour before the deadline.
+        steps:
+          type: array
+          description: Present on generate, get and commands; absent in the list.
+          items:
+            $ref: "#/components/schemas/Step"
