@@ -6,14 +6,8 @@ metadata:
 spec:
   targetRefs:
     - group: gateway.networking.k8s.io
-      kind: HTTPRoute
-      name: org
-    - group: gateway.networking.k8s.io
-      kind: HTTPRoute
-      name: fx
-    - group: gateway.networking.k8s.io
-      kind: HTTPRoute
-      name: receiving
+      kind: Gateway
+      name: passage-api
   jwt:
     providers:
       - name: passage-dev-idp

@@ -18,7 +18,8 @@ spec:
     type: Global
     global:
       rules:
-      - clientSelectors:
+      - shared: true
+        clientSelectors:
           - headers:
               - name: X-Passage-Tier
                 value: starter
@@ -27,7 +28,8 @@ spec:
         limit:
           requests: 600
           unit: Minute
-      - clientSelectors:
+      - shared: true
+        clientSelectors:
           - headers:
               - name: X-Passage-Tier
                 value: professional
@@ -36,7 +38,8 @@ spec:
         limit:
           requests: 3000
           unit: Minute
-      - clientSelectors:
+      - shared: true
+        clientSelectors:
           - headers:
               - name: X-Passage-Tier
                 value: enterprise
@@ -45,10 +48,15 @@ spec:
         limit:
           requests: 12000
           unit: Minute
-      - clientSelectors:
+      - shared: true
+        clientSelectors:
           - headers:
+              - name: X-Passage-Tier
+                type: RegularExpression
+                value: ^(starter|professional|enterprise)$
+                invert: true
               - name: X-Passage-Tenant
                 type: Distinct
         limit:
-          requests: 12000
+          requests: 600
           unit: Minute

@@ -41,6 +41,16 @@ class GatewayManifests(unittest.TestCase):
         (ctp,) = of_kind(self.docs, "ClientTrafficPolicy")
         removed = set(ctp["spec"]["headers"]["earlyRequestHeaders"]["remove"])
         self.assertTrue(header_consts <= removed, header_consts - removed)
+        explicit = {
+            "X-Passage-Tenant",
+            "X-Passage-Legal-Entity",
+            "X-Passage-LegalEntity",
+            "X-Passage-LegalEntity-Scope",
+            "X-Passage-User",
+            "X-Passage-Duties",
+            "X-Passage-Tier",
+        }
+        self.assertTrue(explicit <= removed, explicit - removed)
         gateway = of_kind(self.docs, "Gateway")[0]["metadata"]["name"]
         self.assertEqual(target_names(ctp), {("Gateway", gateway)})
 
@@ -54,11 +64,29 @@ class GatewayManifests(unittest.TestCase):
             self.assertTrue(mapped <= removed, mapped - removed)
             self.assertIn("X-Passage-Tenant", mapped)
 
-    def test_every_route_has_security_policy(self):
-        routes = {("HTTPRoute", r["metadata"]["name"]) for r in of_kind(self.docs, "HTTPRoute")}
-        self.assertTrue(routes)
+    def test_security_policy_targets_gateway_so_every_route_is_covered(self):
+        self.assertTrue(of_kind(self.docs, "HTTPRoute"))
+        gateway = of_kind(self.docs, "Gateway")[0]["metadata"]["name"]
         (sp,) = of_kind(self.docs, "SecurityPolicy")
-        self.assertEqual(target_names(sp), routes)
+        self.assertEqual(target_names(sp), {("Gateway", gateway)})
+
+    def test_gateway_has_tls_listener_and_http_is_dev_only(self):
+        (gw,) = of_kind(self.docs, "Gateway")
+        listeners = {l["name"]: l for l in gw["spec"]["listeners"]}
+        self.assertEqual(set(listeners), {"http-dev", "https"})
+        self.assertEqual(listeners["https"]["protocol"], "HTTPS")
+        refs = listeners["https"]["tls"]["certificateRefs"]
+        self.assertEqual([r["kind"] for r in refs], ["Secret"])
+
+    def test_envoy_gateway_version_requirement_recorded(self):
+        app = yaml.safe_load((DEPLOY / "envs/dev/apps/gateway.yaml").read_text())
+        self.assertIn(">=v1.4", app["metadata"]["annotations"]["passage.dev/requires"])
+        self.assertIn("v1.4", (DEPLOY / "gateway/README.md").read_text())
+
+    def test_duties_claim_mapped_as_single_string_claim(self):
+        (sp,) = of_kind(self.docs, "SecurityPolicy")
+        for provider in sp["spec"]["jwt"]["providers"]:
+            self.assertIn(("duties", "X-Passage-Duties"), {(m["claim"], m["header"]) for m in provider["claimToHeaders"]})
 
     def test_nil_tenant_denied(self):
         (sp,) = of_kind(self.docs, "SecurityPolicy")
@@ -72,18 +100,27 @@ class GatewayManifests(unittest.TestCase):
         self.assertEqual(target_names(btp), routes)
         rules = btp["spec"]["rateLimit"]["global"]["rules"]
         for rule in rules:
+            self.assertIs(rule.get("shared"), True)
             headers = rule["clientSelectors"][0]["headers"]
             self.assertIn(("X-Passage-Tenant", "Distinct"), {(h["name"], h.get("type")) for h in headers})
         limits = {
             next(h["value"] for h in r["clientSelectors"][0]["headers"] if h["name"] == "X-Passage-Tier"): r["limit"]
             for r in rules
-            if any(h["name"] == "X-Passage-Tier" for h in r["clientSelectors"][0]["headers"])
+            if any(h["name"] == "X-Passage-Tier" and not h.get("invert") for h in r["clientSelectors"][0]["headers"])
         }
         self.assertEqual(
             {k: (v["requests"], v["unit"]) for k, v in limits.items()},
             {"starter": (600, "Minute"), "professional": (3000, "Minute"), "enterprise": (12000, "Minute")},
         )
-        self.assertTrue(any(len(r["clientSelectors"][0]["headers"]) == 1 for r in rules))
+        (fallback,) = [
+            r
+            for r in rules
+            if any(h.get("invert") for h in r["clientSelectors"][0]["headers"])
+        ]
+        self.assertEqual((fallback["limit"]["requests"], fallback["limit"]["unit"]), (600, "Minute"))
+        inverted = next(h for h in fallback["clientSelectors"][0]["headers"] if h.get("invert"))
+        self.assertEqual(inverted["name"], "X-Passage-Tier")
+        self.assertEqual(inverted["value"], "^(starter|professional|enterprise)$")
 
     def test_routes_strip_api_prefix_to_service_convention(self):
         for route in of_kind(self.docs, "HTTPRoute"):

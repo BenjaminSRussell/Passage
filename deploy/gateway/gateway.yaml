@@ -6,9 +6,21 @@ metadata:
 spec:
   gatewayClassName: passage-envoy
   listeners:
-    - name: http
+    - name: http-dev
       protocol: HTTP
       port: 80
+      allowedRoutes:
+        namespaces:
+          from: Same
+    - name: https
+      protocol: HTTPS
+      port: 443
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - group: ""
+            kind: Secret
+            name: passage-api-tls
       allowedRoutes:
         namespaces:
           from: Same

@@ -5,7 +5,7 @@ metadata:
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "1"
-    passage.dev/requires: envoy-gateway-crds (#213)
+    passage.dev/requires: envoy-gateway>=v1.4 with crds (#213)
 spec:
   project: default
   source:

@@ -16,3 +16,5 @@ spec:
         - X-Passage-User
         - X-Passage-Duties
         - X-Passage-Tier
+        - X-Passage-LegalEntity
+        - X-Passage-LegalEntity-Scope

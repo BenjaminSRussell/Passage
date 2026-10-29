@@ -9,7 +9,7 @@ PYTHON ?= python3
 IMAGE_DIGEST ?=
 SKIP_VERIFY ?=
 
-.PHONY: deploy-local destroy-local promote-stage rollback-stage promote-prod rollback-prod test-stage-release test-policies test-gateway
+.PHONY: deploy-local destroy-local promote-stage rollback-stage promote-prod rollback-prod test-stage-release test-policies test-gateway validate-gateway-schema
 
 deploy-local:
 	tofu -chdir=tofu/cluster init -input=false
@@ -64,5 +64,13 @@ test-policies:
 	@which kyverno >/dev/null || { echo "kyverno CLI not installed; install it from https://kyverno.io/docs/kyverno-cli/ to run the policy tests" >&2; exit 2; }
 	kyverno test policies/tests
 
-test-gateway:
+GATEWAY_CRDS := third_party/envoy-gateway-v1.4.0/crds.yaml
+GATEWAY_SCHEMAS ?= $(CURDIR)/.gateway-schemas
+
+validate-gateway-schema:
+	@which kubeconform >/dev/null || { echo "kubeconform not installed; run: go install github.com/yannh/kubeconform/cmd/kubeconform@v0.6.7" >&2; exit 2; }
+	$(PYTHON) scripts/crd_schemas.py $(GATEWAY_CRDS) $(GATEWAY_SCHEMAS)
+	kubectl kustomize gateway | kubeconform -strict -summary -schema-location default -schema-location '$(GATEWAY_SCHEMAS)/{{.ResourceKind}}-{{.Group}}-{{.ResourceAPIVersion}}.json' -
+
+test-gateway: validate-gateway-schema
 	$(PYTHON) -m unittest scripts/test_gateway.py -v
