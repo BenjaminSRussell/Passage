@@ -85,7 +85,7 @@ export class AesGcmSealer implements SealCipher {
   constructor(
     private readonly subtle: SubtleCrypto,
     private readonly key: CryptoKey,
-    private readonly random: (n: number) => Uint8Array<ArrayBuffer> =(n) => globalThis.crypto.getRandomValues(new Uint8Array(n)),
+    private readonly random: (n: number) => Uint8Array = (n) => globalThis.crypto.getRandomValues(new Uint8Array(n)),
   ) {}
 
   static generateKey(subtle: SubtleCrypto): Promise<CryptoKey> {
@@ -93,7 +93,7 @@ export class AesGcmSealer implements SealCipher {
   }
 
   async seal(plain: string): Promise<string> {
-    const iv = this.random(12);
+    const iv = new Uint8Array(this.random(12));
     const data = new TextEncoder().encode(plain);
     const ct = new Uint8Array(await this.subtle.encrypt({ name: "AES-GCM", iv }, this.key, data));
     const out = new Uint8Array(iv.length + ct.length);
