@@ -163,7 +163,7 @@ func TestStore_ReceiveASNPallet(t *testing.T) {
 	if _, _, err := st.ReceiveLine(ctx, key("recv-x"), ReceiveInput{ReceiptID: ids.New(), LineNo: 1, Qty: dq("1"), User: "clerk", Now: time.Now()}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unknown receipt: err = %v", err)
 	}
-	if n := outboxCount(t, st.pool, "dev.passage.wms.receipt.registered.v1"); n != 1 {
+	if n := outboxCount(t, adminOf(st), "dev.passage.wms.receipt.registered.v1"); n != 1 {
 		t.Fatalf("receipt.registered events = %d, want 1", n)
 	}
 

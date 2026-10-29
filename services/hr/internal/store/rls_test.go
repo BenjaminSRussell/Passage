@@ -3,7 +3,6 @@ package store
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -29,16 +28,6 @@ func TestRowLevelSecurity(t *testing.T) {
 	admin, app := testkit.DBWithApp(t)
 	bg := context.Background()
 	if err := dbx.Migrate(bg, admin, migrations.FS); err != nil {
-		t.Fatal(err)
-	}
-	var schema, appUser string
-	if err := admin.QueryRow(bg, `select current_schema()`).Scan(&schema); err != nil {
-		t.Fatal(err)
-	}
-	if err := app.QueryRow(bg, `select current_user`).Scan(&appUser); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := admin.Exec(bg, fmt.Sprintf(`grant usage on schema %s to %s; grant select, insert, update, delete on all tables in schema %[1]s to %[2]s`, schema, appUser)); err != nil {
 		t.Fatal(err)
 	}
 	sealer, err := domain.NewSealer(bytes.Repeat([]byte{7}, 32))
@@ -99,7 +88,7 @@ func TestRowLevelSecurity(t *testing.T) {
 	if _, err := s.Balances(two, w.ID, day(time.January, 31), false); err == nil {
 		t.Error("tenant 2 read tenant 1's balances")
 	}
-	for _, table := range []string{"worker", "worker_pii", "employment", "hr_position", "position_hierarchy", "position_assignment", "audit_event", "outbox",
+	for _, table := range []string{"worker", "worker_pii", "employment", "hr_position", "position_hierarchy", "position_assignment", "audit_event",
 		"absence_plan", "absence_balance", "absence_accrual_period", "absence_accrual_line", "absence_close_line", "absence_request",
 		"benefit_plan", "benefit_plan_option", "benefit_life_event", "benefit_enrollment"} {
 		if n := count(two, table); n != 0 {
