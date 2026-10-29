@@ -13,8 +13,9 @@ release that fails a threshold is blocked.
 | `src/report.ts` | Markdown model card (refused for a version whose gate failed) and eval report (PRD 9.47.15) |
 | `src/datasets.ts` | Dataset types, the JSONL loader and `datasetVersion` (content hash). Datasets are versioned data, not code |
 | `src/baselines.ts` | Reference predictors that the gate is measured against: vendor history (AP coding), exact remittance amount (cash application), cause keywords (MRP triage) and off-hours posting (anomaly) |
-| `src/run.ts` | CLI: loads the AP coding, cash application, MRP triage and anomaly seed datasets, evaluates the baselines, applies the gate, sets a non-zero exit code on failure |
-| `datasets/` | Seed datasets (`ap-coding-seed.jsonl`, `cash-app-seed.jsonl`, `mrp-triage-seed.jsonl` with 9 action messages, `anomaly-seed.jsonl` with 12 journals of which 4 are anomalies, including a normal night batch and a daytime anomaly, `adversarial-seed.jsonl` with 12 attacks and 4 benign prompts). These are small seeds for the harness, not the held-out sets in FR-47.9 (see NOT-IMPLEMENTED.md) |
+| `src/askdata-baseline.ts` | Ask-the-data reference predictor: metric lexicon, entity codes, "by entity" grouping and one month with year (real month end). The copilot predictor must beat it |
+| `src/run.ts` | CLI: loads the AP coding, cash application, MRP triage, anomaly and ask-the-data seed datasets, evaluates the baselines, applies the gate, sets a non-zero exit code on failure |
+| `datasets/` | Seed datasets (`ap-coding-seed.jsonl`, `cash-app-seed.jsonl`, `mrp-triage-seed.jsonl` with 9 action messages, `anomaly-seed.jsonl` with 12 journals of which 4 are anomalies, including a normal night batch and a daytime anomaly, `adversarial-seed.jsonl` with 12 attacks and 4 benign prompts, `ask-data-seed.jsonl` with 8 questions). These are small seeds for the harness, not the held-out sets in FR-47.9 (see NOT-IMPLEMENTED.md) |
 
 ## Run and test
 

@@ -50,7 +50,8 @@ The tests run without a database or network. Ports are faked in `test/fakes.ts`.
 
 - FR-47.4 runtime steps, FR-47.5 AP coding modes, FR-47.8 approval gate
 - FR-47.10 version registry, FR-47.11 token budgets, FR-47.12 responsible AI
-- FR-47.13 provider layer: Anthropic and OpenAI-compatible adapters (Azure through the same adapter) with a parity test in `test/providers.test.ts`. Bedrock is not built (see NOT-IMPLEMENTED.md)
+- FR-47.13 provider layer: Anthropic, OpenAI-compatible (Azure through the same adapter) and Amazon Bedrock (Converse API, in-tree SigV4 checked against AWS SDK reference signatures) adapters, with parity tests in `test/providers.test.ts` and `test/bedrock.test.ts`
+- FR-47.5 to 47.7 agent definitions: `defaultCatalog` in `src/agents/catalog.ts` builds version 1 of the five agents (prompts, read and propose tools only, required duties); wiring them into the runtime is not built
 - BR-47.9 provider failover: `createFailoverProvider` in `src/providers/failover.ts`; only outages (5xx, timeouts, transport errors) count, a rejected request never fails over
 - FR-47.12 kill switch: `KillSwitchRegistry` and the `killswitch.changed` payload; the engine checks it before the provider call (AC-47.6). The delivery channel is not built
 - AC-47.4 cost guard: `budgetThresholdEvent` fires once when the budget moves into SOFT (80%) or HARD (100%). The event is the alert; routing it to a pager is the alerting consumer's job

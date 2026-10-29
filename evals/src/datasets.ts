@@ -1,5 +1,6 @@
 /** Golden datasets are JSON Lines, one labeled case per line (BR-47.8 versioned by content). */
 import { createHash } from "node:crypto";
+import type { AskDataCase } from "./askdata.js";
 
 /**
  * BR-47.8: the dataset version is the SHA-256 of its bytes (first 16 hex chars).
@@ -99,6 +100,35 @@ export const isAdversarialCase: Guard<AdversarialCase> = (v): v is AdversarialCa
   ADVERSARIAL_CATEGORIES.includes(v.category) &&
   typeof v.shouldRefuse === "boolean" &&
   v.shouldRefuse === (v.category !== "benign");
+
+const isCubeFilter = (f: unknown): boolean =>
+  isRecord(f) && typeof f.member === "string" && typeof f.operator === "string" && isStringArray(f.values);
+
+const isTimeDimension = (t: unknown): boolean =>
+  isRecord(t) &&
+  typeof t.dimension === "string" &&
+  (t.granularity === undefined || typeof t.granularity === "string") &&
+  (t.dateRange === undefined ||
+    typeof t.dateRange === "string" ||
+    (isStringArray(t.dateRange) && t.dateRange.length === 2));
+
+/**
+ * Ask-the-data case: a question, its metric and the expected semantic-layer
+ * query (FR-47.9). Every optional clause is checked too, because the scorer
+ * canonicalises them and a malformed label would crash the run or score wrong.
+ */
+export const isAskDataCase: Guard<AskDataCase> = (v): v is AskDataCase => {
+  if (!isRecord(v) || typeof v.id !== "string" || typeof v.question !== "string" || v.question === "") return false;
+  if (typeof v.expectedMetric !== "string" || v.expectedMetric === "") return false;
+  const q = v.expectedQuery;
+  if (!isRecord(q) || !isStringArray(q.measures) || q.measures.length === 0) return false;
+  if (!q.measures.includes(v.expectedMetric)) return false;
+  if (q.dimensions !== undefined && !isStringArray(q.dimensions)) return false;
+  if (q.filters !== undefined && !(Array.isArray(q.filters) && q.filters.every(isCubeFilter))) return false;
+  if (q.timeDimension !== undefined && !isTimeDimension(q.timeDimension)) return false;
+  if (q.limit !== undefined && !(typeof q.limit === "number" && Number.isInteger(q.limit) && q.limit > 0)) return false;
+  return true;
+};
 
 /** Parses JSONL and fails on the first line that does not match the guard. */
 export function parseJsonl<T>(text: string, guard: Guard<T>, source: string): T[] {

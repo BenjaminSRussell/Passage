@@ -20,6 +20,7 @@ decide what the caller may do. The gateway holds no credentials of its own.
 | `src/schema.ts` | `schemaViolations`: validates a read tool's 200 body against its `outputSchema` (type, `nullable`, enum, properties, required, items; `$ref` and other keywords are not checked); the gateway returns `MCP-0502` on violation. Write tools are not checked, because their upstream has already committed |
 | `src/upstream.ts` | `createFetchUpstream`: calls the Passage API with `fetch`, forwarding the user's bearer token |
 | `api/openapi.yaml` | Contract for `POST /mcp` (the JSON-RPC wire), health probes and the tool shape |
+| `Dockerfile`, `charts/mcp-gateway` | Image (distroless Node 22, nonroot; build from the repository root) and Helm chart: 3 replicas, read-only root filesystem, OpenAPI JSON mounted from the `openApi.configMap` ConfigMap, probes, ingress NetworkPolicy (`networkPolicy.ingressNamespaces` admits the edge) |
 
 Identity at the HTTP edge: the bearer token is the user's Keycloak token, already
 verified by the gateway. The tenant, user and duty set come from `x-passage-tenant`,
