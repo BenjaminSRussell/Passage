@@ -1,11 +1,11 @@
-# NOT-IMPLEMENTED — PSG-50 (wave 50), slices 1 to 4
+# NOT-IMPLEMENTED — PSG-50 (wave 50), slices 1 to 5
 
 Wave 50 owns only `deploy/multi-region/`, `load/` and `docs/ops/`, and its ownership entry lists no web
 module. It has no service directory, so there is no Go module, database table, OpenAPI/AsyncAPI file or
 web screen in this slice. Items below are either later slices of PSG-50 or handoffs to the wave that owns
 the code or the infrastructure.
 
-Status key: **built** = in slices 1 to 4. **later slice of PSG-50** = same wave, next slice. **handoff** =
+Status key: **built** = in slices 1 to 5. **later slice of PSG-50** = same wave, next slice. **handoff** =
 needs another owner or an out-of-path edit.
 
 ## Deliverable 1: performance campaign
@@ -70,8 +70,12 @@ needs another owner or an out-of-path edit.
 | Per-operation latency SLO recording rules (FR-50.1 rows) and SLO dashboard | handoff (wave 5 observability) | needs per-route histograms from the service metrics |
 | Automatic rollback on fast burn in the 30-minute release window (BR-50.6, OPS-1706) | handoff (deployment-cicd, wave 1 release pipeline) | Argo CD rollout analysis is not in wave 50's paths |
 | Status page (`passage-status-page`) and public subscription | handoff (deployment-cicd, wave 5 observability) | separate chart and public domain |
-| Capacity estimate endpoint `GET /api/v1/ops/capacity/estimate` | handoff (ops service) | model is documented; code needs a service |
-| Monthly cost meter job and `tenant_cost` | handoff (ops service) | needs Prometheus data and provider billing |
+| Capacity calculator: users, think time, journal and order lines/h, scanners, storage growth and Kafka peak to pods (x1.5 headroom, passive 50% warm), nodes, Postgres instances and GiB, Kafka brokers and partition floor; monthly cost for the parts whose provider rate is given (nodes, Postgres GiB-month, brokers, both regions, 12% overhead), listed in `costPriced` | built | `docs/ops/tools/capacity_estimate.py`; `test_capacity_estimate.py` reproduces the reference tenant of `capacity-model.md` (20 API, 14 ledger, 3 order pods; 7 + 4 nodes; 4,500 GiB; 6 brokers) |
+| Measured per-pod budgets and node sizes for the capacity model (the `[ASSUMED]` constants) and a published `capacity.model_version` | later slice of PSG-50 | come from the load campaign (AC1) |
+| Capacity estimate endpoint `GET /api/v1/ops/capacity/estimate` and the `capacity_model` table | handoff (ops service) | the calculator above is the rule; serving it and storing model versions needs a service |
+| Cost calculator: one statement per tenant and month from the six metered dimensions, Decimal only (floats rejected), USD and EUR rounded once to 0.01 from the unrounded total, EUR at the ECB month average (BR-50.10); sum of tenant costs reconciled with the cluster invoice, COST-1901 above 5% with the catalog text (AC-50.7) | built | `docs/ops/tools/cost_meter.py`, tests in `test_cost_meter.py` |
+| Monthly cost meter job: Prometheus queries with a stored query version, `tenant_cost` rows, statements as PDF/CSV, ECB rate fetch | handoff (ops service) | needs Prometheus data, provider billing and a service; the calculator above is what it runs |
+| Runbooks for OPS-1704 (ledger hash chain break, Sev-1), backup verification or PITR drill failure, COST-1901 (cost meter drift) and OPS-1707 (expand/contract violation) | built | `runbooks/ledger-hash-chain-break.md`, `backup-drill-failure.md`, `cost-meter-drift.md`, `expand-contract-violation.md`; linked from the administrator guide's error-code table |
 | Nightly capacity refresh, weekly SLO report, monthly backup drill, hourly license check | handoff (ops service, wave 48 backups) | scheduled jobs live in the ops service |
 | Expand/contract linter (OPS-1707, BR-50.7) | built | `deploy/multi-region/tools/expand_contract_lint.py`: a release's new migrations (drops and renames of columns, tables, views) are checked against the code of this release (`--code`) and of the previous release (`--previous-code`, N-1), which still runs during the rolling deploy; `python3 -m unittest discover -s deploy/multi-region/tools` |
 | Run the expand/contract linter on every release in CI | handoff (deployment-cicd CI owner) | CI pipeline is not in wave 50's paths; the job checks out the previous release tag and passes it as `--previous-code` |
@@ -106,7 +110,9 @@ needs another owner or an out-of-path edit.
 | Production go-live of the first customer (AC3) | later slice of PSG-50 | requires waves 47–49 done and the customer's parallel run |
 | Go/no-go checklist (14 items) | built as a template | `go-live-checklist.md`; decision recording needs `cutover.decision.recorded` |
 | Public v1.0 release: tag `v1.0.0`, cosign signature, SPDX SBOM, charts and images by digest (AC4) | later slice of PSG-50 | release pipeline is wave 1 / deployment-cicd |
-| Licensing: signed license file verification (Ed25519), user types, GRACE/EXPIRED states | handoff (ops service) | verification code needs a service; the state rules are in the runbook |
+| License state rules: VALID, GRACE (up to `license.grace_days` after expiry, or full users above the licensed count), EXPIRED; EXPIRED blocks new logins but never admin sign-in or export (BR-50.8, AC-50.8); LIC-1801 within 30 days of expiry, LIC-1802, LIC-1803 and their catalog texts; 30/7/1-day warning bands | built | `docs/ops/tools/license_state.py`, tests in `test_license_state.py` (the AC-50.8 case: expired 31 days ago is EXPIRED, login blocked, export allowed) |
+| Signed license file verification (Ed25519, LIC-1804), `PUT /api/v1/ops/tenants/{id}/license` with ETag, `tenant_license` persistence, hourly check, `license.state_changed.v1`, login enforcement in the identity layer and the shell banner | handoff (ops service, wave 1 identity and shell owners) | needs a service, a crypto library and the shell; the state rules above are what they apply |
+| How long over-use GRACE may last (PRD 9.50.4 makes over-use GRACE; BR-50.8's 30 days is stated for the grace period without saying whether it bounds over-use) | handoff (product decision, PRD owner) | `license_state.py` keeps over-use in GRACE until it is cleared and documents this; it does not invent a deadline |
 | Release notes template and gate (PRD 9.50.15): version title, image and chart digests, features by module, migrations, breaking changes `None` (N-1), CVE fixes, rollback; no placeholder left; agrees with the compat evidence | built | `docs/ops/release-notes-template.md`, `docs/ops/tools/check_release_notes.py`, tests in `test_check_release_notes.py` |
 | Release notes of v1.0.0 and their HTML and PDF renderings | later slice of PSG-50 | written at release time; rendering belongs to the docs site build (deployment-cicd) |
 | Pricing publication | later slice of PSG-50 | licensing model and pricing unit are open decisions (PRD 9.50.12, questions 2 and 3) |

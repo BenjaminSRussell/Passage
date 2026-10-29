@@ -139,10 +139,11 @@ verify is LIC-1804: reinstall the issued file. Do not edit a license file by han
   statement with a mean above 1 s fails AC-50.2; review the top 50 and add indexes in the owning service's
   migrations.
 
-- Capacity model: [capacity-model.md](capacity-model.md). Re-run it before onboarding a tenant whose user or
-  line volume is above the reference tenant.
+- Capacity model: [capacity-model.md](capacity-model.md), calculator `docs/ops/tools/capacity_estimate.py`.
+  Re-run it before onboarding a tenant whose user or line volume is above the reference tenant.
 - Cost meter: [cost-model.md](cost-model.md). Monthly statements in USD and EUR (ECB month-average rate).
-  Drift from provider billing above 5% is COST-1901.
+  Drift from provider billing above 5% is COST-1901. Calculator `docs/ops/tools/cost_meter.py`; a failed
+  backup verification or PITR drill follows [backup-drill-failure.md](runbooks/backup-drill-failure.md).
 
 ## 9. Error codes you will see
 
@@ -151,13 +152,13 @@ verify is LIC-1804: reinstall the issued file. Do not edit a license file by han
 | OPS-1701 | failover rejected, target lag too high | failover runbook |
 | OPS-1702 | second confirmation missing or expired | failover runbook |
 | OPS-1703 | region read-only during failover; retry | client retry, BR-50.2 |
-| OPS-1704 | ledger hash chain broken; user access blocked | Sev-1, ledger owner |
+| OPS-1704 | ledger hash chain broken; user access blocked | Sev-1, [ledger hash chain break](runbooks/ledger-hash-chain-break.md) runbook, ledger owner |
 | OPS-1705 | residency region not deployed | tenant provisioning |
 | OPS-1706 | release rolled back by fast burn | release rollback runbook |
-| OPS-1707 | migration drops a column still in use | expand/contract rule |
+| OPS-1707 | migration drops a column still in use | [expand/contract violation](runbooks/expand-contract-violation.md) runbook |
 | OPS-1708 | replication lag above 60 s | postgres replication lag runbook |
 | LIC-1801 / 1802 / 1803 / 1804 | license expiring / in grace / expired / signature invalid | license expiry runbook |
-| COST-1901 | metered cost differs from billing by more than 5% | cost model |
+| COST-1901 | metered cost differs from billing by more than 5% | [cost meter drift](runbooks/cost-meter-drift.md) runbook |
 
 ## 10. Escalation
 

@@ -20,8 +20,12 @@ Rounding: USD and EUR to 0.01 (BR-50.10). EUR uses the ECB month-average rate (`
 
 ## Accuracy
 AC-50.7: the meter is within 5% of provider billing for the cluster over one month. Variance above 5%
-raises COST-1901 and the query version is reviewed. Reconciliation is monthly: sum of tenant costs
-versus the cluster invoice.
+raises COST-1901 and the query version is reviewed ([cost-meter-drift](runbooks/cost-meter-drift.md)).
+Reconciliation is monthly: sum of tenant costs versus the cluster invoice.
+
+Calculator: `python3 docs/ops/tools/cost_meter.py --usage <tenant>.json ... --rates rates.json --usd-per-eur <ECB>
+--month YYYY-MM --billed-usd <cluster invoice>` prints one statement per tenant and the variance; pass every
+tenant on the cluster. The monthly job that reads Prometheus and writes `tenant_cost` is the ops service's.
 
 ## Statements
 Monthly statement per tenant (PDF, CSV) with resource lines, USD and EUR, and `model_version`. Billing

@@ -41,6 +41,9 @@ of that and scales to 100% during failover inside the RTO budget, so the pair co
 - Retention 7 days, tiered storage for older data; 30 TB retained (budget).
 
 ## How to use
-Run the model with the workload inputs; compare against the last load campaign's measured
+Run the model with the workload inputs (`python3 docs/ops/tools/capacity_estimate.py --help`; the reference
+tenant's figures above are its test cases in `tools/test_capacity_estimate.py`). Monthly cost is priced only for
+the parts whose provider rate is given (nodes, Postgres GiB-month, Kafka brokers, both regions, plus 12% overhead)
+and the output lists them in `costPriced`. Compare the result against the last load campaign's measured
 throughput per pod, then update `capacity.model_version`. Any change to a per-pod budget
 requires a new campaign run.

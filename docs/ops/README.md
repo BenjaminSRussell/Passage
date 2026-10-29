@@ -11,10 +11,10 @@ Operator-facing documents for scale, DR, release and go-live.
 | [tenant-provisioning.md](tenant-provisioning.md) | Provision and decommission steps (FR-50.8, BR-50.9) |
 | [go-live-checklist.md](go-live-checklist.md) | 14-item cutover go/no-go and hypercare exit (9.50.1) |
 | [training-curriculum.md](training-curriculum.md) | Six role-based training tracks with labs and assessments (FR-50.11) |
-| [runbooks/](runbooks/) | Failover, fail-back, game day, replication lag, MM2 lag, slot bloat, SLO burn, license expiry, release rollback; Kafka broker replacement, Postgres primary loss, cache stampede, Temporal replication lag, certificate expiry, object-store lag |
+| [runbooks/](runbooks/) | Failover, fail-back, game day, replication lag, MM2 lag, slot bloat, SLO burn, license expiry, release rollback; Kafka broker replacement, Postgres primary loss, cache stampede, Temporal replication lag, certificate expiry, object-store lag; ledger hash chain break, backup drill failure, cost meter drift, expand/contract violation |
 | [release-notes-template.md](release-notes-template.md) | Release notes layout (digests, features by module, migrations, breaking changes, CVE fixes, rollback), gated by `tools/check_release_notes.py` (PRD 9.50.15) |
-| [tools/](tools/) | `check_docs.py` (links, anchors, alert runbooks), `api_reference.py` (API reference pages and the 0-undocumented gate), `check_release_notes.py`; tests: `python3 -m unittest discover -s docs/ops/tools` |
-| [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md) | Deliverables not built yet (slices 1 to 4 shipped), with status and reason |
+| [tools/](tools/) | `check_docs.py` (links, anchors, alert runbooks), `api_reference.py` (API reference pages and the 0-undocumented gate), `check_release_notes.py`, `cost_meter.py` (tenant statements, COST-1901), `license_state.py` (VALID/GRACE/EXPIRED rules), `capacity_estimate.py` (capacity model); tests: `python3 -m unittest discover -s docs/ops/tools` |
+| [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md) | Deliverables not built yet (slices 1 to 5 shipped), with status and reason |
 
 Related: [deploy/multi-region](../../deploy/multi-region/README.md) (chart and region values),
 [load](../../load/README.md) (k6 campaign and checker).
