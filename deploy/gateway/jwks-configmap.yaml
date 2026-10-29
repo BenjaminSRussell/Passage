@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: passage-dev-jwks
+  namespace: hello-ledger
+data:
+  jwks: '{"keys":[{"kty":"RSA","kid":"passage-dev-placeholder","use":"sig","alg":"RS256","n":"ykfoCi1Al3nUSxo-1lgqrnRRqQGMkF1UoMl0_GuHkO0DNVxs0yMvMecX15omK8J-zYJfGgL2CMkg4tD6N7s5nJa2qkcyBBjJgmvqMn0odusnug6sGKCHOkUvONndQZhxzP3rLMF4xvoJF7yNKzyRmFHlqvYZW978yEUKlJRH4AJIRjmlIEi3yQwCb8LIgJKC1bFzeic8MEiB9OY1PVBtZQqkKrWzQ6yN6-c3oKubnXKEGolwT_NniphEVtdZXXqyi1RHOGfbhifLJYJg0Y5mFG2FmeOou5xhgR2t5gJvsYm-e-rSXfGMbxEVqao6jhzl-UlRIo5NZUbIEKfmaICVWQ","e":"AQAB"}]}'

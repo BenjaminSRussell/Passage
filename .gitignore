@@ -22,3 +22,4 @@ apps/web/playwright-report/
 # `go build` in a service dir drops the binary there
 /services/receiving/receiving
 **/testdata/rapid/**/*.fail
+deploy/.gateway-schemas/
