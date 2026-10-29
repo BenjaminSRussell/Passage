@@ -60,7 +60,7 @@ func TestHandleInvoicePosted_CreatesOpenItemOnceAcrossRedelivery(t *testing.T) {
 		t.Fatalf("items = %+v err=%v", items, err)
 	}
 	got := items[0]
-	if got.SourceInvoiceID != inv || got.Amount.String() != "1250.5" || got.DueDate != "2027-03-31" || got.DiscountAmount.String() != "25.01" || *got.DiscountDate != "2027-03-11" {
+	if got.SourceInvoiceID != inv || got.Amount.String() != "1250.5" || got.DueDate != "2027-03-31" || got.DueDateSource != store.DueDateEvent || got.DiscountAmount.String() != "25.01" || *got.DiscountDate != "2027-03-11" {
 		t.Fatalf("open item = %+v", got)
 	}
 }
@@ -72,7 +72,7 @@ func TestHandleInvoicePosted_DueDateDefaultsToInvoiceDate(t *testing.T) {
 	}
 	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: "*"})
 	items, _ := s.List(ctx, store.Filter{}, 10)
-	if len(items) != 1 || items[0].DueDate != "2027-03-01" {
+	if len(items) != 1 || items[0].DueDate != "2027-03-01" || items[0].DueDateSource != store.DueDateDefaulted {
 		t.Fatalf("items = %+v", items)
 	}
 }
@@ -80,13 +80,24 @@ func TestHandleInvoicePosted_DueDateDefaultsToInvoiceDate(t *testing.T) {
 func TestHandleInvoicePosted_RejectsInvalidEvents(t *testing.T) {
 	s := setup(t)
 	cases := map[string]events.Event{
-		"wrong type":        event(t, events.Type("payables", "invoice", "voided", 1), payload(nil)),
-		"zero total":        event(t, InvoicePostedType, payload(map[string]any{"total": "0"})),
-		"bad total":         event(t, InvoicePostedType, payload(map[string]any{"total": "abc"})),
-		"discount > total":  event(t, InvoicePostedType, payload(map[string]any{"discount_amount": "9999"})),
-		"bad invoice date":  event(t, InvoicePostedType, payload(map[string]any{"invoice_date": "03/01/2027"})),
-		"missing vendor":    event(t, InvoicePostedType, payload(map[string]any{"vendor_id": ""})),
-		"missing tenant id": {Type: InvoicePostedType, Data: event(t, InvoicePostedType, payload(nil)).Data},
+		"wrong type":              event(t, events.Type("payables", "invoice", "voided", 1), payload(nil)),
+		"zero total":              event(t, InvoicePostedType, payload(map[string]any{"total": "0"})),
+		"bad total":               event(t, InvoicePostedType, payload(map[string]any{"total": "abc"})),
+		"discount > total":        event(t, InvoicePostedType, payload(map[string]any{"discount_amount": "9999"})),
+		"bad invoice date":        event(t, InvoicePostedType, payload(map[string]any{"invoice_date": "03/01/2027"})),
+		"missing vendor":          event(t, InvoicePostedType, payload(map[string]any{"vendor_id": ""})),
+		"lowercase currency":      event(t, InvoicePostedType, payload(map[string]any{"currency": "usd"})),
+		"four letter currency":    event(t, InvoicePostedType, payload(map[string]any{"currency": "USDX"})),
+		"non-uuid invoice id":     event(t, InvoicePostedType, payload(map[string]any{"invoice_id": "inv-1"})),
+		"non-uuid vendor id":      event(t, InvoicePostedType, payload(map[string]any{"vendor_id": "v1"})),
+		"non-uuid legal entity":   event(t, InvoicePostedType, payload(map[string]any{"legal_entity_id": "le"})),
+		"malformed discount date": event(t, InvoicePostedType, payload(map[string]any{"discount_date": "11/03/2027", "discount_amount": "5"})),
+		"discount date alone":     event(t, InvoicePostedType, payload(map[string]any{"discount_date": "2027-03-11"})),
+		"discount amount alone":   event(t, InvoicePostedType, payload(map[string]any{"discount_amount": "5"})),
+		"seven decimal total":     event(t, InvoicePostedType, payload(map[string]any{"total": "1.0000001"})),
+		"seven decimal discount":  event(t, InvoicePostedType, payload(map[string]any{"discount_date": "2027-03-11", "discount_amount": "1.0000001"})),
+		"non-uuid tenant":         {Type: InvoicePostedType, TenantID: "t1", Data: event(t, InvoicePostedType, payload(nil)).Data},
+		"missing tenant id":       {Type: InvoicePostedType, Data: event(t, InvoicePostedType, payload(nil)).Data},
 	}
 	for name, evt := range cases {
 		if err := HandleInvoicePosted(context.Background(), s, evt); !errors.Is(err, ErrInvalidEvent) {

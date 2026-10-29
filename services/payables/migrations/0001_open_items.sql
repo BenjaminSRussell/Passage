@@ -7,18 +7,19 @@ CREATE TABLE IF NOT EXISTS ap_open_item (
   invoice_number text NOT NULL,
   invoice_date date NOT NULL,
   due_date date NOT NULL,
+  due_date_source text NOT NULL DEFAULT 'EVENT' CHECK (due_date_source IN ('EVENT', 'DEFAULTED')),
   currency char(3) NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
   amount numeric(20,6) NOT NULL CHECK (amount > 0),
   open_amount numeric(20,6) NOT NULL CHECK (open_amount >= 0 AND open_amount <= amount),
   discount_date date,
   discount_amount numeric(20,6) NOT NULL DEFAULT 0 CHECK (discount_amount >= 0),
-  status text NOT NULL CHECK (status IN ('OPEN', 'PARTIALLY_SETTLED', 'SETTLED')),
+  status text NOT NULL CHECK (status IN ('OPEN', 'PARTIALLY_SETTLED', 'SETTLED', 'REVERSED')),
   version integer NOT NULL DEFAULT 1,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (tenant_id, id),
   UNIQUE (tenant_id, source_invoice_id),
-  CHECK ((open_amount = 0) = (status = 'SETTLED'))
+  CHECK ((open_amount = 0) = (status IN ('SETTLED', 'REVERSED')))
 );
 CREATE INDEX IF NOT EXISTS ap_open_item_vendor_status_due ON ap_open_item (tenant_id, vendor_id, status, due_date);
 ALTER TABLE ap_open_item ENABLE ROW LEVEL SECURITY;

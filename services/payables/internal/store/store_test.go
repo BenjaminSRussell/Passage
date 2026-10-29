@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -90,7 +91,7 @@ func TestIsolation_TenantAndLegalEntity(t *testing.T) {
 		if err != nil || len(items) != 0 {
 			t.Errorf("%s list = %d err=%v, want 0", name, len(items), err)
 		}
-		if _, err := s.Settle(ctx, created.ID, created.Version, decimal.NewFromInt(1)); !errors.Is(err, ErrNotFound) {
+		if _, err := s.Settle(ctx, created.ID, created.Version, decimal.NewFromInt(1), ""); !errors.Is(err, ErrNotFound) {
 			t.Errorf("%s settle err = %v, want ErrNotFound", name, err)
 		}
 	}
@@ -133,24 +134,87 @@ func TestSettle_ReducesOpenAmountWithVersionCheck(t *testing.T) {
 	ctx := ctxFor(1, leA)
 	item, _, _ := s.CreateFromInvoice(ctx, invoice(leA, vendor1, src1, "2027-03-31"))
 
-	partial, err := s.Settle(ctx, item.ID, item.Version, decimal.RequireFromString("400.00"))
+	partial, err := s.Settle(ctx, item.ID, item.Version, decimal.RequireFromString("400.00"), "stl-1")
 	if err != nil || partial.Status != "PARTIALLY_SETTLED" || !partial.OpenAmount.Equal(decimal.RequireFromString("600")) || partial.Version != item.Version+1 {
 		t.Fatalf("partial = %+v err=%v", partial, err)
 	}
-	if _, err := s.Settle(ctx, item.ID, item.Version, decimal.NewFromInt(1)); !errors.Is(err, ErrVersionConflict) {
+	var payload string
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `select payload::text from outbox where type = $1`, OpenItemSettledType).Scan(&payload)
+	})
+	if err != nil || !strings.Contains(payload, `"settled_amount":"400"`) || !strings.Contains(payload, `"settlement_id":"stl-1"`) {
+		t.Fatalf("settled event payload = %s err=%v", payload, err)
+	}
+	if _, err := s.Settle(ctx, item.ID, item.Version, decimal.NewFromInt(1), ""); !errors.Is(err, ErrVersionConflict) {
 		t.Fatalf("stale version err = %v, want ErrVersionConflict", err)
 	}
-	if _, err := s.Settle(ctx, item.ID, partial.Version, decimal.RequireFromString("600.01")); !errors.Is(err, ErrOverSettled) {
+	if _, err := s.Settle(ctx, item.ID, partial.Version, decimal.RequireFromString("600.01"), ""); !errors.Is(err, ErrOverSettled) {
 		t.Fatalf("oversettle err = %v, want ErrOverSettled", err)
 	}
-	if _, err := s.Settle(ctx, item.ID, partial.Version, decimal.Zero); !errors.Is(err, ErrInvalidAmount) {
+	if _, err := s.Settle(ctx, item.ID, partial.Version, decimal.Zero, ""); !errors.Is(err, ErrInvalidAmount) {
 		t.Fatalf("zero amount err = %v, want ErrInvalidAmount", err)
 	}
-	done, err := s.Settle(ctx, item.ID, partial.Version, decimal.RequireFromString("600"))
+	done, err := s.Settle(ctx, item.ID, partial.Version, decimal.RequireFromString("600"), "")
 	if err != nil || done.Status != "SETTLED" || !done.OpenAmount.IsZero() {
 		t.Fatalf("final = %+v err=%v", done, err)
 	}
 	if open, _ := s.List(ctx, Filter{OpenOnly: true}, 10); len(open) != 0 {
 		t.Fatalf("settled item listed as open: %+v", open)
+	}
+}
+
+func TestCreateFromInvoice_ConflictingReplayIsRejected(t *testing.T) {
+	s := setup(t)
+	ctx := ctxFor(1, leA)
+	first, _, err := s.CreateFromInvoice(ctx, invoice(leA, vendor1, src1, "2027-03-31"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, mutate := range map[string]func(*OpenItem){
+		"total":    func(o *OpenItem) { o.Amount = decimal.RequireFromString("999.00") },
+		"vendor":   func(o *OpenItem) { o.VendorID = vendor2 },
+		"currency": func(o *OpenItem) { o.Currency = "EUR" },
+	} {
+		in := invoice(leA, vendor1, src1, "2027-03-31")
+		mutate(&in)
+		if _, created, err := s.CreateFromInvoice(ctx, in); !errors.Is(err, ErrConflictingReplay) || created {
+			t.Errorf("%s: created=%v err=%v, want ErrConflictingReplay", name, created, err)
+		}
+	}
+	again, created, err := s.CreateFromInvoice(ctx, invoice(leA, vendor1, src1, "2027-03-31"))
+	if err != nil || created || again.ID != first.ID {
+		t.Fatalf("identical replay: created=%v err=%v", created, err)
+	}
+}
+
+func TestList_ClampsLimit(t *testing.T) {
+	s := setup(t)
+	ctx := ctxFor(1, leA)
+	for _, src := range []string{src1, src2} {
+		if _, _, err := s.CreateFromInvoice(ctx, invoice(leA, vendor1, src, "2027-03-31")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, limit := range []int{-1, 0, 100000} {
+		if got, err := s.List(ctx, Filter{}, limit); err != nil || len(got) != 2 {
+			t.Errorf("limit %d: %d items err=%v, want 2", limit, len(got), err)
+		}
+	}
+}
+
+func TestCreateFromInvoice_RecordsDueDateSource(t *testing.T) {
+	s := setup(t)
+	ctx := ctxFor(1, leA)
+	in := invoice(leA, vendor1, src1, "2027-03-01")
+	in.DueDateSource = DueDateDefaulted
+	if _, _, err := s.CreateFromInvoice(ctx, in); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.CreateFromInvoice(ctx, invoice(leA, vendor1, src2, "2027-03-31")); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.List(ctx, Filter{}, 10)
+	if len(got) != 2 || got[0].DueDateSource != DueDateDefaulted || got[1].DueDateSource != DueDateEvent {
+		t.Fatalf("items = %+v", got)
 	}
 }
