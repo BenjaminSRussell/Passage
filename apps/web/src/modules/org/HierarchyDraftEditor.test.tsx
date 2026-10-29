@@ -255,6 +255,17 @@ describe("saving", () => {
     expect(screen.getByText("No unsaved changes")).toBeInTheDocument();
     expect(announcement()).toBe("Changes discarded");
   });
+
+  it("does not let Ctrl+S start a save from the discard confirmation", async () => {
+    const { fetchMock, user } = await dirtyDraft({});
+    await user.keyboard("{Escape}");
+    expect(dialog()).toBeInTheDocument();
+    await user.keyboard("{Control>}s{/Control}");
+    expect(callsTo(fetchMock, "/hierarchy-versions/v3/nodes", "PUT")).toHaveLength(0);
+    expect(dialog()).toBeInTheDocument();
+    await user.click(within(dialog()).getByRole("button", { name: "Keep editing" }));
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+  });
 });
 
 describe("publishing", () => {
@@ -888,8 +899,19 @@ describe("publish panel details", () => {
     await user.type(screen.getByLabelText("Backdate reason"), "Correcting an old record");
     await user.keyboard("{Escape}");
     expect(screen.getByLabelText("Backdate reason")).toHaveValue("Correcting an old record");
-    await user.clear(screen.getByLabelText("Backdate reason"));
-    await user.keyboard("{Escape}");
+    fireEvent.change(screen.getByLabelText("Effective from"), { target: { value: "2099-01-01" } });
+    await waitFor(() => expect(screen.queryByLabelText("Backdate reason")).toBeNull());
+    fireEvent.keyDown(screen.getByRole("treeitem", { name: "Alpha" }), { key: "Escape" });
     expect(screen.queryByRole("region", { name: "Publish draft" })).toBeNull();
+  });
+
+  it("keeps a deliberately collapsed branch collapsed after an unrelated draft edit", async () => {
+    const { user } = await openDraft();
+    await user.click(screen.getByTestId("toggle-ou-b"));
+    expect(screen.queryByRole("treeitem", { name: "Gamma" })).toBeNull();
+    await user.click(screen.getByText("Alpha"));
+    await user.click(screen.getByRole("button", { name: "Move down" }));
+    expect(screen.queryByRole("treeitem", { name: "Gamma" })).toBeNull();
+    expect(screen.getByRole("treeitem", { name: "Beta" })).toHaveAttribute("aria-expanded", "false");
   });
 });
