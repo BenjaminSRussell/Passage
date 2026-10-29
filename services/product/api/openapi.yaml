@@ -40,7 +40,18 @@ paths:
       requestBody:
         content: { application/json: { schema: { $ref: '#/components/schemas/ExplodeRequest' } } }
       responses:
-        '200': { description: 'Created and skipped counts. With limit, at most limit variants are created and remaining counts the rest; repeating the call is idempotent.' }
+        '200':
+          description: 'Created and skipped counts. With limit (0 means all), at most limit variants are created and remaining counts the rest; repeating the call is idempotent.'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [created, skipped, remaining, variants]
+                properties:
+                  created: { type: integer, minimum: 0 }
+                  skipped: { type: integer, minimum: 0 }
+                  remaining: { type: integer, minimum: 0, description: Variants still to create after this call. }
+                  variants: { type: array, items: { type: object } }
         '400': { description: 'limit outside 0 to 500.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/product/products/{id}/variants:lookup:
     get:
@@ -246,7 +257,7 @@ components:
       type: object
       properties:
         selected: { type: object, additionalProperties: { type: array, items: { type: string } } }
-        limit: { type: integer, minimum: 0, maximum: 500 }
+        limit: { type: integer, minimum: 0, maximum: 500, description: 'Maximum variants to create in this call; 0 means all.' }
     ReleasedPage:
       type: object
       required: [items, next]

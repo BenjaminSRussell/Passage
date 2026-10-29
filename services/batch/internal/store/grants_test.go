@@ -50,8 +50,8 @@ func TestGrants_AppRoleWorkflowAndAppendOnlyTables(t *testing.T) {
 		`select count(*) from outbox`,
 		`update workflow_definition set status = status`,
 		`update batch_run set job_id = job_id`,
-			`update batch_run set triggered_by = triggered_by`,
-			`delete from batch_run_pages`,
+		`update batch_run set triggered_by = triggered_by`,
+		`delete from batch_run_pages`,
 		`delete from workflow_work_item`,
 	} {
 		err := dbx.WithTenantTx(ctx, app, func(tx pgx.Tx) error {

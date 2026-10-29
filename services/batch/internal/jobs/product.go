@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
+	"strings"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/batch/internal/domain"
@@ -64,33 +66,36 @@ type ProductJobs struct {
 	MaxAttempts int
 }
 
-func (p ProductJobs) Run(ctx context.Context, handler, runID string, params json.RawMessage) (Summary, error) {
+func (p ProductJobs) Run(ctx context.Context, handler, runID string) (Summary, error) {
 	size := p.PageSize
 	if size == 0 {
 		size = MaxPageSize
 	}
-	if p.Client == nil || p.Pages == nil || p.MaxAttempts <= 0 || size < 1 || size > MaxPageSize || !ids.Valid(runID) {
+	known := handler == HandlerProductExplode || handler == HandlerProductGroupChange
+	if p.Client == nil || p.Pages == nil || p.MaxAttempts <= 0 || size < 1 || size > MaxPageSize || !ids.Valid(runID) || !known {
 		return Summary{}, ErrInvalidArgument
 	}
+	claim, err := p.Pages.Claim(ctx, runID, handler)
+	if err != nil {
+		return Summary{}, err
+	}
 	var summary Summary
-	var err error
 	switch handler {
 	case HandlerProductExplode:
 		var in ExplodeParams
-		if jsonErr := json.Unmarshal(params, &in); jsonErr != nil || !ids.Valid(in.MasterID) {
-			return Summary{}, ErrInvalidArgument
+		if jsonErr := json.Unmarshal(claim.Params, &in); jsonErr != nil || !ids.Valid(in.MasterID) {
+			err = fmt.Errorf("batch_run.params: %w", ErrInvalidArgument)
+		} else {
+			summary, err = p.explode(ctx, runID, in, size)
 		}
-		summary, err = p.explode(ctx, runID, in, size)
 	case HandlerProductGroupChange:
 		summary, err = p.groupChange(ctx, runID, size)
-	default:
-		return Summary{}, ErrInvalidArgument
 	}
 	status, msg := domain.RunEnded, ""
 	if err != nil {
 		status, msg = domain.RunError, err.Error()
 	}
-	if finishErr := p.Pages.Finish(ctx, runID, status, msg); finishErr != nil {
+	if finishErr := p.Pages.Finish(context.WithoutCancel(ctx), runID, status, msg); finishErr != nil {
 		slog.Error("finish batch run", "err", finishErr, "runId", runID, "handler", handler)
 		err = errors.Join(err, finishErr)
 	}
@@ -103,6 +108,7 @@ func (p ProductJobs) explode(ctx context.Context, runID string, in ExplodeParams
 	if err != nil || resume.Done {
 		return summary, err
 	}
+	previous := remainingIn(resume.Cursor)
 	for pageNo := resume.NextPage; ; pageNo++ {
 		var res ExplodePage
 		err := p.attempt(ctx, func() (err error) {
@@ -112,9 +118,13 @@ func (p ProductJobs) explode(ctx context.Context, runID string, in ExplodeParams
 		if err == nil && res.Created == 0 && res.Remaining > 0 {
 			err = errors.New("explode made no progress")
 		}
-		page := Page{No: pageNo, Cursor: cursorFor(pageNo), Items: res.Created, Succeeded: res.Created, Status: PageOK}
+		created := res.Created
+		if err == nil && previous >= 0 {
+			created = max(created, previous-res.Remaining)
+		}
+		page := Page{No: pageNo, Cursor: cursorFor(pageNo), Items: created, Succeeded: created, Status: PageOK}
 		if res.Remaining > 0 {
-			page.NextCursor = moreCursor
+			page.NextCursor = fmt.Sprintf("%s:%d", moreCursor, res.Remaining)
 		}
 		if err := p.settle(ctx, runID, &page, err); err != nil {
 			return summary, err
@@ -123,7 +133,20 @@ func (p ProductJobs) explode(ctx context.Context, runID string, in ExplodeParams
 		if res.Remaining == 0 {
 			return summary, nil
 		}
+		previous = res.Remaining
 	}
+}
+
+func remainingIn(cursor string) int {
+	rest, ok := strings.CutPrefix(cursor, moreCursor+":")
+	if !ok {
+		return -1
+	}
+	n, err := strconv.Atoi(rest)
+	if err != nil {
+		return -1
+	}
+	return n
 }
 
 func (p ProductJobs) groupChange(ctx context.Context, runID string, size int) (Summary, error) {
@@ -169,7 +192,7 @@ func (p ProductJobs) settle(ctx context.Context, runID string, page *Page, cause
 		page.Status, page.Error, page.NextCursor = PageFailed, cause.Error(), ""
 		slog.Error("batch page failed", "err", cause, "runId", runID, "page", page.No)
 	}
-	if err := p.Pages.Record(ctx, runID, *page); err != nil {
+	if err := p.Pages.Record(context.WithoutCancel(ctx), runID, *page); err != nil {
 		return errors.Join(cause, fmt.Errorf("record page %d: %w", page.No, err))
 	}
 	if cause != nil {

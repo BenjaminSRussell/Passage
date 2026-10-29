@@ -316,7 +316,7 @@ func (s *Postgres) ListReleasedIDs(ctx context.Context, after string, limit int)
 	}
 	out := []string{}
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `select id::text from released_product where tenant_id=$1 and ($2::text = '' or id > $2::uuid) order by id limit $3`, p.TenantID, after, limit)
+		rows, err := tx.Query(ctx, `select id::text from released_product where tenant_id=$1 and (nullif($2,'')::uuid is null or id > nullif($2,'')::uuid) order by id limit $3`, p.TenantID, after, limit)
 		if err != nil {
 			return err
 		}

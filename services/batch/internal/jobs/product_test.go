@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 
@@ -18,13 +19,27 @@ import (
 )
 
 type memoryPages struct {
-	mu     sync.Mutex
-	pages  map[int]jobs.Page
-	status string
-	errMsg string
+	mu       sync.Mutex
+	pages    map[int]jobs.Page
+	status   string
+	errMsg   string
+	params   json.RawMessage
+	claimErr error
+	finished bool
 }
 
-func newMemoryPages() *memoryPages { return &memoryPages{pages: map[int]jobs.Page{}} }
+func newMemoryPages() *memoryPages {
+	return &memoryPages{pages: map[int]jobs.Page{}, params: explodeParams()}
+}
+
+func (m *memoryPages) Claim(context.Context, string, string) (jobs.Claim, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.claimErr != nil {
+		return jobs.Claim{}, m.claimErr
+	}
+	return jobs.Claim{Params: m.params}, nil
+}
 
 func (m *memoryPages) Resume(context.Context, string) (jobs.Resume, error) {
 	m.mu.Lock()
@@ -54,7 +69,7 @@ func (m *memoryPages) Record(_ context.Context, _ string, page jobs.Page) error 
 func (m *memoryPages) Finish(_ context.Context, _, status, errMsg string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.status, m.errMsg = status, errMsg
+	m.status, m.errMsg, m.finished = status, errMsg, true
 	return nil
 }
 
@@ -132,7 +147,7 @@ func TestExplodeProcessesPagesOfAtMost500(t *testing.T) {
 	pages := newMemoryPages()
 	runner := jobs.ProductJobs{Client: product, Pages: pages, MaxAttempts: 1}
 
-	summary, err := runner.Run(context.Background(), jobs.HandlerProductExplode, runID, explodeParams())
+	summary, err := runner.Run(context.Background(), jobs.HandlerProductExplode, runID)
 	if err != nil || summary.Pages != 3 || summary.Succeeded != 1200 {
 		t.Fatalf("summary = %+v, %v", summary, err)
 	}
@@ -149,7 +164,7 @@ func TestExplodeResumesAfterCrashWithoutReprocessing(t *testing.T) {
 	pages := newMemoryPages()
 	crashing := &crashAfter{fakeProduct: product, okCalls: 1}
 	first := jobs.ProductJobs{Client: crashing, Pages: pages, MaxAttempts: 1}
-	if _, err := first.Run(context.Background(), jobs.HandlerProductExplode, runID, explodeParams()); err == nil {
+	if _, err := first.Run(context.Background(), jobs.HandlerProductExplode, runID); err == nil {
 		t.Fatal("first run must fail on the second page")
 	}
 	if pages.status != domain.RunError || pages.pages[1].Status != jobs.PageFailed || pages.pages[0].Status != jobs.PageOK {
@@ -158,7 +173,7 @@ func TestExplodeResumesAfterCrashWithoutReprocessing(t *testing.T) {
 
 	product.explodeCalls = 0
 	second := jobs.ProductJobs{Client: product, Pages: pages, MaxAttempts: 1}
-	summary, err := second.Run(context.Background(), jobs.HandlerProductExplode, runID, explodeParams())
+	summary, err := second.Run(context.Background(), jobs.HandlerProductExplode, runID)
 	if err != nil || summary.Succeeded != 700 || summary.Pages != 2 || product.explodeCalls != 2 {
 		t.Fatalf("resume = %+v, %v, calls=%d", summary, err, product.explodeCalls)
 	}
@@ -167,7 +182,7 @@ func TestExplodeResumesAfterCrashWithoutReprocessing(t *testing.T) {
 	}
 
 	product.explodeCalls = 0
-	if summary, err := second.Run(context.Background(), jobs.HandlerProductExplode, runID, explodeParams()); err != nil || summary.Pages != 0 || product.explodeCalls != 0 {
+	if summary, err := second.Run(context.Background(), jobs.HandlerProductExplode, runID); err != nil || summary.Pages != 0 || product.explodeCalls != 0 {
 		t.Fatalf("finished run must not call product again: %+v, %v, calls=%d", summary, err, product.explodeCalls)
 	}
 }
@@ -189,14 +204,14 @@ func TestExplodeRetriesAFailingPageThenRecordsIt(t *testing.T) {
 	product := &fakeProduct{variantsLeft: 10, failExplode: 2}
 	pages := newMemoryPages()
 	retrying := jobs.ProductJobs{Client: product, Pages: pages, MaxAttempts: 3}
-	if summary, err := retrying.Run(context.Background(), jobs.HandlerProductExplode, runID, explodeParams()); err != nil || summary.Succeeded != 10 {
+	if summary, err := retrying.Run(context.Background(), jobs.HandlerProductExplode, runID); err != nil || summary.Succeeded != 10 {
 		t.Fatalf("retry = %+v, %v", summary, err)
 	}
 
 	failing := &fakeProduct{variantsLeft: 10, failExplode: 5}
 	pages = newMemoryPages()
 	exhausted := jobs.ProductJobs{Client: failing, Pages: pages, MaxAttempts: 2}
-	if _, err := exhausted.Run(context.Background(), jobs.HandlerProductExplode, runID, explodeParams()); err == nil {
+	if _, err := exhausted.Run(context.Background(), jobs.HandlerProductExplode, runID); err == nil {
 		t.Fatal("exhausted attempts must fail the run")
 	}
 	if failing.explodeCalls != 2 || pages.pages[0].Status != jobs.PageFailed || pages.pages[0].Error == "" || pages.errMsg == "" {
@@ -207,7 +222,7 @@ func TestExplodeRetriesAFailingPageThenRecordsIt(t *testing.T) {
 func TestExplodeStopsWhenProductMakesNoProgress(t *testing.T) {
 	stuck := stuckProduct{}
 	runner := jobs.ProductJobs{Client: stuck, Pages: newMemoryPages(), MaxAttempts: 1}
-	if _, err := runner.Run(context.Background(), jobs.HandlerProductExplode, runID, explodeParams()); err == nil {
+	if _, err := runner.Run(context.Background(), jobs.HandlerProductExplode, runID); err == nil {
 		t.Fatal("zero-progress explode must fail instead of looping")
 	}
 }
@@ -224,7 +239,7 @@ func TestGroupChangePagesCheckpointsAndSkipsOnHand(t *testing.T) {
 	pages := newMemoryPages()
 	runner := jobs.ProductJobs{Client: product, Pages: pages, PageSize: 3, MaxAttempts: 1}
 
-	summary, err := runner.Run(context.Background(), jobs.HandlerProductGroupChange, runID, nil)
+	summary, err := runner.Run(context.Background(), jobs.HandlerProductGroupChange, runID)
 	if err != nil || summary.Pages != 3 || summary.Items != 7 || summary.Succeeded != 5 || summary.Skipped != 2 {
 		t.Fatalf("summary = %+v, %v", summary, err)
 	}
@@ -238,7 +253,7 @@ func TestGroupChangeResumesFromLastCheckpoint(t *testing.T) {
 	product := &fakeProduct{released: ids, failReleased: map[string]int{ids[5]: 99}}
 	pages := newMemoryPages()
 	runner := jobs.ProductJobs{Client: product, Pages: pages, PageSize: 3, MaxAttempts: 1}
-	if _, err := runner.Run(context.Background(), jobs.HandlerProductGroupChange, runID, nil); err == nil {
+	if _, err := runner.Run(context.Background(), jobs.HandlerProductGroupChange, runID); err == nil {
 		t.Fatal("third page must fail")
 	}
 	if len(product.groupCalls) != 2 || pages.pages[2].Status != jobs.PageFailed {
@@ -247,7 +262,7 @@ func TestGroupChangeResumesFromLastCheckpoint(t *testing.T) {
 
 	product.failReleased = nil
 	product.groupCalls = nil
-	summary, err := runner.Run(context.Background(), jobs.HandlerProductGroupChange, runID, nil)
+	summary, err := runner.Run(context.Background(), jobs.HandlerProductGroupChange, runID)
 	if err != nil || summary.Items != 1 || len(product.groupCalls) != 1 || product.groupCalls[0][0] != ids[6] {
 		t.Fatalf("resume = %+v, %v, calls=%v", summary, err, product.groupCalls)
 	}
@@ -256,7 +271,7 @@ func TestGroupChangeResumesFromLastCheckpoint(t *testing.T) {
 func TestGroupChangePermanentRejectionIsNotRetried(t *testing.T) {
 	product := &fakeProduct{released: releasedIDs(2), rejectGroup: true}
 	runner := jobs.ProductJobs{Client: product, Pages: newMemoryPages(), MaxAttempts: 5}
-	if _, err := runner.Run(context.Background(), jobs.HandlerProductGroupChange, runID, nil); !errors.Is(err, jobs.ErrRejected) {
+	if _, err := runner.Run(context.Background(), jobs.HandlerProductGroupChange, runID); !errors.Is(err, jobs.ErrRejected) {
 		t.Fatalf("err = %v", err)
 	}
 	if len(product.groupCalls) != 1 {
@@ -270,19 +285,85 @@ func TestRunRejectsInvalidInput(t *testing.T) {
 		runner  jobs.ProductJobs
 		handler string
 		runID   string
-		params  json.RawMessage
 	}{
-		"unknown handler":  {good, "metadata.usage", runID, nil},
-		"bad run id":       {good, jobs.HandlerProductGroupChange, "run-1", nil},
-		"no master":        {good, jobs.HandlerProductExplode, runID, json.RawMessage(`{}`)},
-		"page over 500":    {jobs.ProductJobs{Client: &fakeProduct{}, Pages: newMemoryPages(), MaxAttempts: 1, PageSize: 501}, jobs.HandlerProductGroupChange, runID, nil},
-		"no attempts":      {jobs.ProductJobs{Client: &fakeProduct{}, Pages: newMemoryPages()}, jobs.HandlerProductGroupChange, runID, nil},
-		"missing adapters": {jobs.ProductJobs{MaxAttempts: 1}, jobs.HandlerProductGroupChange, runID, nil},
+		"unknown handler":  {good, "metadata.usage", runID},
+		"bad run id":       {good, jobs.HandlerProductGroupChange, "run-1"},
+		"page over 500":    {jobs.ProductJobs{Client: &fakeProduct{}, Pages: newMemoryPages(), MaxAttempts: 1, PageSize: 501}, jobs.HandlerProductGroupChange, runID},
+		"no attempts":      {jobs.ProductJobs{Client: &fakeProduct{}, Pages: newMemoryPages()}, jobs.HandlerProductGroupChange, runID},
+		"missing adapters": {jobs.ProductJobs{MaxAttempts: 1}, jobs.HandlerProductGroupChange, runID},
 	}
 	for name, c := range cases {
-		if _, err := c.runner.Run(context.Background(), c.handler, c.runID, c.params); !errors.Is(err, jobs.ErrInvalidArgument) {
+		if _, err := c.runner.Run(context.Background(), c.handler, c.runID); !errors.Is(err, jobs.ErrInvalidArgument) {
 			t.Errorf("%s: err = %v", name, err)
 		}
+	}
+}
+
+func TestRunErrorsTheRunWhenPersistedParamsAreInvalid(t *testing.T) {
+	pages := newMemoryPages()
+	pages.params = json.RawMessage(`{}`)
+	product := &fakeProduct{variantsLeft: 5}
+	runner := jobs.ProductJobs{Client: product, Pages: pages, MaxAttempts: 1}
+	if _, err := runner.Run(context.Background(), jobs.HandlerProductExplode, runID); !errors.Is(err, jobs.ErrInvalidArgument) {
+		t.Fatalf("err = %v", err)
+	}
+	if product.explodeCalls != 0 || pages.status != domain.RunError {
+		t.Fatalf("calls=%d status=%q", product.explodeCalls, pages.status)
+	}
+}
+
+func TestRunDoesNothingWhenTheClaimIsRefused(t *testing.T) {
+	pages := newMemoryPages()
+	pages.claimErr = jobs.ErrRunNotActive
+	product := &fakeProduct{variantsLeft: 5, released: releasedIDs(2)}
+	runner := jobs.ProductJobs{Client: product, Pages: pages, MaxAttempts: 1}
+	for _, handler := range []string{jobs.HandlerProductExplode, jobs.HandlerProductGroupChange} {
+		if _, err := runner.Run(context.Background(), handler, runID); !errors.Is(err, jobs.ErrRunNotActive) {
+			t.Fatalf("%s: err = %v", handler, err)
+		}
+	}
+	if product.explodeCalls != 0 || len(product.groupCalls) != 0 || pages.finished {
+		t.Fatalf("a refused claim touched product or the run: %+v finished=%v", product, pages.finished)
+	}
+}
+
+func TestRunFinalizesACancelledRun(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	pages := newMemoryPages()
+	runner := jobs.ProductJobs{Client: cancelling{fakeProduct: &fakeProduct{variantsLeft: 1200}, cancel: cancel}, Pages: pages, MaxAttempts: 3}
+	if _, err := runner.Run(ctx, jobs.HandlerProductExplode, runID); err == nil {
+		t.Fatal("a cancelled run must report an error")
+	}
+	if !pages.finished || pages.status != domain.RunError || pages.pages[0].Status != jobs.PageFailed {
+		t.Fatalf("cancelled run not settled: finished=%v status=%q pages=%+v", pages.finished, pages.status, pages.pages)
+	}
+}
+
+type cancelling struct {
+	*fakeProduct
+	cancel context.CancelFunc
+}
+
+func (c cancelling) ExplodePage(ctx context.Context, _ string, _ map[string][]string, _ int) (jobs.ExplodePage, error) {
+	c.cancel()
+	return jobs.ExplodePage{}, ctx.Err()
+}
+
+func TestExplodeCreditsVariantsCreatedByACallThatCrashedBeforeItsCheckpoint(t *testing.T) {
+	product := &fakeProduct{variantsLeft: 1200}
+	pages := newMemoryPages()
+	first := jobs.ProductJobs{Client: &crashAfter{fakeProduct: product, okCalls: 1}, Pages: pages, MaxAttempts: 1}
+	if _, err := first.Run(context.Background(), jobs.HandlerProductExplode, runID); err == nil {
+		t.Fatal("second page must fail")
+	}
+	product.variantsLeft -= 500
+	second := jobs.ProductJobs{Client: product, Pages: pages, MaxAttempts: 1}
+	summary, err := second.Run(context.Background(), jobs.HandlerProductExplode, runID)
+	if err != nil || summary.Succeeded != 700 {
+		t.Fatalf("resume = %+v, %v", summary, err)
+	}
+	if pages.pages[1].Succeeded != 700 {
+		t.Fatalf("lost call not credited: %+v", pages.pages)
 	}
 }
 
@@ -364,5 +445,73 @@ func TestHTTPProductClientTreats5xxAndBrokenBodyAsRetryable(t *testing.T) {
 		if _, err := client.ReleasedPage(ctx, "", 1); err == nil || errors.Is(err, jobs.ErrRejected) {
 			t.Fatalf("status %d: err = %v; want a retryable error", code, err)
 		}
+	}
+}
+
+func TestHTTPProductClientForwardsOnlyTheDutiesTheCallNeeds(t *testing.T) {
+	var duties []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		duties = append(duties, r.Header.Get(tenant.HeaderDuties))
+		_, _ = w.Write([]byte(`{"items":[],"created":0,"remaining":0}`))
+	}))
+	defer server.Close()
+	client := jobs.NewHTTPProductClient(server.URL)
+	held := map[string]struct{}{"product.read": {}, "product.write": {}, "product.jobs.write": {}, "product.release": {}}
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), Duties: held})
+	if _, err := client.ExplodePage(ctx, testkit.TenantID(50), nil, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.ReleasedPage(ctx, "", 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.GroupChange(ctx, []string{testkit.TenantID(1)}); err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(duties) != "[product.write product.read product.jobs.write]" {
+		t.Fatalf("duties = %v", duties)
+	}
+}
+
+func TestHTTPProductClientRetriesTransientStatusesAndReportsBodyDetail(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		if calls < 3 {
+			w.Header().Set("Retry-After", "0")
+			http.Error(w, "slow down", http.StatusTooManyRequests)
+			return
+		}
+		_, _ = w.Write([]byte(`{"items":[],"next":""}`))
+	}))
+	defer server.Close()
+	client := jobs.NewHTTPProductClient(server.URL)
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1)})
+	if _, err := client.ReleasedPage(ctx, "", 1); err != nil || calls != 3 {
+		t.Fatalf("429 must be retried: err=%v calls=%d", err, calls)
+	}
+
+	calls = 0
+	rejecting := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		http.Error(w, strings.Repeat("x", 5000), http.StatusUnprocessableEntity)
+	}))
+	defer rejecting.Close()
+	_, err := jobs.NewHTTPProductClient(rejecting.URL).ReleasedPage(ctx, "", 1)
+	if !errors.Is(err, jobs.ErrRejected) || calls != 1 || len(err.Error()) > 700 || !strings.Contains(err.Error(), "xxx") {
+		t.Fatalf("422 must be final with bounded detail: err=%v calls=%d", err, calls)
+	}
+}
+
+func TestHTTPProductClientRefusesRedirects(t *testing.T) {
+	var leaked bool
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { leaked = true }))
+	defer target.Close()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	defer server.Close()
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1)})
+	if _, err := jobs.NewHTTPProductClient(server.URL).ReleasedPage(ctx, "", 1); !errors.Is(err, jobs.ErrRejected) || leaked {
+		t.Fatalf("redirect followed: err=%v leaked=%v", err, leaked)
 	}
 }

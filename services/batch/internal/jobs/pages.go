@@ -2,8 +2,10 @@ package jobs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -15,9 +17,18 @@ import (
 const (
 	PageOK     = "ok"
 	PageFailed = "failed"
+
+	RunLease = 10 * time.Minute
 )
 
-var ErrRunNotFound = errors.New("batch run not found")
+var (
+	ErrRunNotFound  = errors.New("batch run not found")
+	ErrRunNotActive = errors.New("batch run is not executable by this worker")
+)
+
+type Claim struct {
+	Params json.RawMessage
+}
 
 type Page struct {
 	No         int
@@ -37,6 +48,7 @@ type Resume struct {
 }
 
 type PageStore interface {
+	Claim(ctx context.Context, runID, handler string) (Claim, error)
 	Resume(ctx context.Context, runID string) (Resume, error)
 	Record(ctx context.Context, runID string, page Page) error
 	Finish(ctx context.Context, runID, status, errMsg string) error
@@ -52,6 +64,43 @@ func tenantID(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("batch pages: no principal in context")
 	}
 	return p.TenantID, nil
+}
+
+func runNotActive(ctx context.Context, tx pgx.Tx, tenantID, runID string) error {
+	var exists bool
+	if err := tx.QueryRow(ctx, `select exists (select 1 from batch_run where tenant_id = $1 and id = $2)`, tenantID, runID).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return ErrRunNotFound
+	}
+	return ErrRunNotActive
+}
+
+// ponytail: a worker that stalls past RunLease without recording a page can lose its run to another worker, then overwrite it; add a lease token column if that matters.
+func (s *PgPageStore) Claim(ctx context.Context, runID, handler string) (Claim, error) {
+	tenantID, err := tenantID(ctx)
+	if err != nil {
+		return Claim{}, err
+	}
+	var out Claim
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `
+			update batch_run r set status = 'executing', error = null, ended_at = null,
+			       started_at = coalesce(r.started_at, now()), claimed_until = now() + make_interval(secs => $4)
+			from batch_job j
+			where r.tenant_id = $1 and r.id = $2 and j.tenant_id = r.tenant_id and j.id = r.job_id and j.handler = $3
+			  and r.status in ('executing', 'error') and (r.claimed_until is null or r.claimed_until < now())
+			returning r.params`, tenantID, runID, handler, RunLease.Seconds()).Scan(&out.Params)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return runNotActive(ctx, tx, tenantID, runID)
+		}
+		return err
+	})
+	if err != nil {
+		return Claim{}, fmt.Errorf("claim run: %w", err)
+	}
+	return out, nil
 }
 
 func (s *PgPageStore) Resume(ctx context.Context, runID string) (Resume, error) {
@@ -101,15 +150,15 @@ func (s *PgPageStore) Record(ctx context.Context, runID string, page Page) error
 			return fmt.Errorf("upsert page: %w", err)
 		}
 		tag, err := tx.Exec(ctx, `
-			update batch_run set rows_done = (
+			update batch_run set claimed_until = now() + make_interval(secs => $3), rows_done = (
 				select coalesce(sum(succeeded + skipped), 0) from batch_run_pages
 				where tenant_id = $1 and run_id = $2 and status = 'ok')
-			where tenant_id = $1 and id = $2`, tenantID, runID)
+			where tenant_id = $1 and id = $2 and status = 'executing'`, tenantID, runID, RunLease.Seconds())
 		if err != nil {
 			return fmt.Errorf("update run progress: %w", err)
 		}
 		if tag.RowsAffected() == 0 {
-			return ErrRunNotFound
+			return runNotActive(ctx, tx, tenantID, runID)
 		}
 		return nil
 	})
@@ -123,13 +172,13 @@ func (s *PgPageStore) Finish(ctx context.Context, runID, status, errMsg string) 
 	}
 	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `
-			update batch_run set status = $3, ended_at = now(), error = nullif($4, '')
-			where tenant_id = $1 and id = $2`, tenantID, runID, status, errMsg)
+			update batch_run set status = $3, ended_at = now(), error = nullif($4, ''), claimed_until = null
+			where tenant_id = $1 and id = $2 and status = 'executing'`, tenantID, runID, status, errMsg)
 		if err != nil {
 			return fmt.Errorf("finish run: %w", err)
 		}
 		if tag.RowsAffected() == 0 {
-			return ErrRunNotFound
+			return runNotActive(ctx, tx, tenantID, runID)
 		}
 		return nil
 	})

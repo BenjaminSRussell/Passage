@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -16,7 +18,17 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 )
 
-const productTimeout = 30 * time.Second
+const (
+	productTimeout  = 30 * time.Second
+	productAttempts = 3
+	productBackoff  = 200 * time.Millisecond
+	maxRetryAfter   = 5 * time.Second
+	maxErrorDetail  = 512
+
+	dutyProductRead  = "product.read"
+	dutyProductWrite = "product.write"
+	dutyProductJobs  = "product.jobs.write"
+)
 
 type HTTPProductClient struct {
 	baseURL string
@@ -24,13 +36,16 @@ type HTTPProductClient struct {
 }
 
 func NewHTTPProductClient(baseURL string) *HTTPProductClient {
-	return &HTTPProductClient{baseURL: strings.TrimRight(baseURL, "/"), client: &http.Client{Timeout: productTimeout}}
+	return &HTTPProductClient{baseURL: strings.TrimRight(baseURL, "/"), client: &http.Client{
+		Timeout:       productTimeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}}
 }
 
 func (c *HTTPProductClient) ExplodePage(ctx context.Context, masterID string, selected map[string][]string, limit int) (ExplodePage, error) {
 	var out struct{ Created, Remaining int }
 	body := map[string]any{"selected": selected, "limit": limit}
-	err := c.do(ctx, http.MethodPost, "/v1/product/products/"+url.PathEscape(masterID)+"/variants:explode", body, &out)
+	err := c.do(ctx, http.MethodPost, "/v1/product/products/"+url.PathEscape(masterID)+"/variants:explode", []string{dutyProductWrite}, body, &out)
 	return ExplodePage{Created: out.Created, Remaining: out.Remaining}, err
 }
 
@@ -43,7 +58,7 @@ func (c *HTTPProductClient) ReleasedPage(ctx context.Context, after string, limi
 	if after != "" {
 		query.Set("after", after)
 	}
-	if err := c.do(ctx, http.MethodGet, "/v1/product/released-products?"+query.Encode(), nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/product/released-products?"+query.Encode(), []string{dutyProductRead}, nil, &out); err != nil {
 		return ReleasedPage{}, err
 	}
 	page := ReleasedPage{Next: out.Next, IDs: make([]string, len(out.Items))}
@@ -61,7 +76,7 @@ func (c *HTTPProductClient) GroupChange(ctx context.Context, releasedIDs []strin
 	var out struct {
 		Items []struct{ ID, Status, Code string } `json:"items"`
 	}
-	if err := c.do(ctx, http.MethodPost, "/v1/product/jobs/group-change", map[string]any{"items": items}, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/product/jobs/group-change", []string{dutyProductJobs}, map[string]any{"items": items}, &out); err != nil {
 		return nil, err
 	}
 	results := make([]ItemResult, len(out.Items))
@@ -71,44 +86,73 @@ func (c *HTTPProductClient) GroupChange(ctx context.Context, releasedIDs []strin
 	return results, nil
 }
 
-func (c *HTTPProductClient) do(ctx context.Context, method, path string, in, out any) error {
-	var body bytes.Buffer
+func (c *HTTPProductClient) do(ctx context.Context, method, path string, duties []string, in, out any) error {
+	var payload []byte
 	if in != nil {
-		if err := json.NewEncoder(&body).Encode(in); err != nil {
+		var err error
+		if payload, err = json.Marshal(in); err != nil {
 			return fmt.Errorf("encode product request: %w", err)
 		}
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, &body)
+	var err error
+	for attempt := 0; attempt < productAttempts; attempt++ {
+		var wait time.Duration
+		if wait, err = c.once(ctx, method, path, duties, payload, out); err == nil || errors.Is(err, ErrRejected) || attempt == productAttempts-1 {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return errors.Join(err, ctx.Err())
+		case <-time.After(max(wait, productBackoff<<attempt)):
+		}
+	}
+	return err
+}
+
+func (c *HTTPProductClient) once(ctx context.Context, method, path string, duties []string, payload []byte, out any) (time.Duration, error) {
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bytes.NewReader(payload))
 	if err != nil {
-		return err
+		return 0, fmt.Errorf("%w: %v", ErrRejected, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if p, ok := tenant.FromContext(ctx); ok {
-		duties := make([]string, 0, len(p.Duties))
-		for d := range p.Duties {
-			duties = append(duties, d)
+		held := make([]string, 0, len(duties))
+		for _, d := range duties {
+			if _, has := p.Duties[d]; has {
+				held = append(held, d)
+			}
 		}
 		req.Header.Set(tenant.HeaderTenant, p.TenantID)
 		req.Header.Set(tenant.HeaderLegalEntity, p.LegalEntityID)
 		req.Header.Set(tenant.HeaderUser, p.UserID)
-		req.Header.Set(tenant.HeaderDuties, strings.Join(duties, ","))
+		req.Header.Set(tenant.HeaderDuties, strings.Join(held, ","))
 	}
 	if id := middleware.GetReqID(ctx); id != "" {
 		req.Header.Set(middleware.RequestIDHeader, id)
 	}
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("product request: %w", err)
+		return 0, fmt.Errorf("product request: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 400 && resp.StatusCode < 500 {
-		return fmt.Errorf("%w: status %d", ErrRejected, resp.StatusCode)
-	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("product responded with status %d", resp.StatusCode)
+		detail, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorDetail))
+		err := fmt.Errorf("product responded with status %d: %s", resp.StatusCode, strings.TrimSpace(string(detail)))
+		if resp.StatusCode < 500 && resp.StatusCode != http.StatusRequestTimeout && resp.StatusCode != http.StatusTooManyRequests {
+			return 0, fmt.Errorf("%w: %w", ErrRejected, err)
+		}
+		return retryAfter(resp.Header.Get("Retry-After")), err
 	}
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		return fmt.Errorf("decode product response: %w", err)
+		return 0, fmt.Errorf("decode product response: %w", err)
 	}
-	return nil
+	return 0, nil
+}
+
+func retryAfter(header string) time.Duration {
+	secs, err := strconv.Atoi(header)
+	if err != nil || secs < 0 {
+		return 0
+	}
+	return min(time.Duration(secs)*time.Second, maxRetryAfter)
 }
