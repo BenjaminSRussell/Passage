@@ -23,7 +23,7 @@ import (
 
 const (
 	contractTenant   = "tenant-a"
-	seededDutyCount  = 94
+	seededDutyCount  = 97
 	unassignedUserID = "user-without-duty"
 )
 
@@ -291,6 +291,9 @@ func TestDutyContractExpectations(t *testing.T) {
 		{duty: "reporting.statement.view", method: http.MethodGet, resource: "/v1/reporting/definitions/d1/export"},
 		{duty: "ReceivingPost", method: http.MethodPost, resource: "/v1/receiving/receipts/r1:post", wantAllowed: true},
 		{duty: "ledger.journal.read", method: http.MethodGet, resource: "/v1/reporting/runs/r1/cells/a/b/lines", wantAllowed: true},
+		{duty: "party.read", method: http.MethodGet, resource: "/v1/party/parties/p1", wantAllowed: true},
+		{duty: "party.write", method: http.MethodPost, resource: "/v1/party/pending-changes/x:approve"},
+		{duty: "pii.read", method: http.MethodGet, resource: "/v1/party/parties/p1", wantDutyMissing: "party.read"},
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("%s/%s %s", tt.duty, tt.method, tt.resource), func(t *testing.T) {
@@ -316,9 +319,42 @@ func TestDutyContractExpectations(t *testing.T) {
 	}
 }
 
-var coveredServices = []string{"ledger", "fx", "tax", "close", "finreport", "inventory", "purchasing", "receiving", "payables"}
+func TestPartyReadDeniedWithoutDuties(t *testing.T) {
+	h := newContractHarness(t)
+	resp := h.serve(unassignedUserID, http.MethodGet, "/v1/party/parties/p1")
+	if resp.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.Code)
+	}
+	var problem struct {
+		Errors map[string]string `json:"errors"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &problem); err != nil || problem.Errors["duty_missing"] != "party.read" {
+		t.Fatalf("body = %s, want duty_missing party.read", resp.Body.String())
+	}
+}
+
+var coveredServices = []string{"ledger", "fx", "tax", "close", "finreport", "inventory", "purchasing", "receiving", "payables", "party"}
 
 var dutyConstant = regexp.MustCompile(`(?m)\b[dD]uty[A-Za-z0-9]*\s*(?:string\s*)?=\s*"([^"]+)"`)
+var dutyCallArgument = regexp.MustCompile(`(?:RequireDuty|HasDuty)\s*\(\s*([^,)]*(?:\([^)]*\))?[^,)]*)[,)]`)
+var dutyConstantReference = regexp.MustCompile(`^(?:[A-Za-z_]\w*\.)?[dD]uty\w*$`)
+
+func TestDutyConstantReference(t *testing.T) {
+	cases := map[string]bool{
+		"dutyRead":             true,
+		"DutyPostDirect":       true,
+		"store.DutyPostDirect": true,
+		`"party.read"`:         false,
+		"dutyFor(x)":           false,
+		"name":                 false,
+		"store.name":           false,
+	}
+	for argument, want := range cases {
+		if got := dutyConstantReference.MatchString(argument); got != want {
+			t.Errorf("%q: match = %v, want %v", argument, got, want)
+		}
+	}
+}
 
 func TestEveryServiceDutyIsSeeded(t *testing.T) {
 	raw, err := os.ReadFile("../../policies/authz/data.json")
@@ -332,15 +368,23 @@ func TestEveryServiceDutyIsSeeded(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, service := range coveredServices {
-		files, err := filepath.Glob(filepath.Join("..", service, "internal", "*", "*.go"))
+		root := filepath.Join("..", service, "internal")
+		var files []string
+		err := filepath.WalkDir(root, func(file string, entry os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() || !strings.HasSuffix(file, ".go") || strings.HasSuffix(file, "_test.go") {
+				return nil
+			}
+			files = append(files, file)
+			return nil
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		found := 0
 		for _, file := range files {
-			if strings.HasSuffix(file, "_test.go") {
-				continue
-			}
 			src, err := os.ReadFile(file)
 			if err != nil {
 				t.Fatal(err)
@@ -349,6 +393,11 @@ func TestEveryServiceDutyIsSeeded(t *testing.T) {
 				found++
 				if _, ok := seeded.Duties[match[1]]; !ok {
 					t.Errorf("%s: duty %q (%s) is not seeded in policies/authz/data.json", service, match[1], file)
+				}
+			}
+			for _, match := range dutyCallArgument.FindAllStringSubmatch(string(src), -1) {
+				if argument := strings.TrimSpace(match[1]); !dutyConstantReference.MatchString(argument) {
+					t.Errorf("%s: %s passes %q to RequireDuty/HasDuty; use a duty* constant", service, file, argument)
 				}
 			}
 		}
