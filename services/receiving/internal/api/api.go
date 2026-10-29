@@ -10,6 +10,7 @@ import (
 	"maps"
 	"net/http"
 	"regexp"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -244,6 +245,7 @@ func (a *API) evaluate(w http.ResponseWriter, r *http.Request) {
 			delete(fields, fmt.Sprintf("lines[%d].poUnitPrice", i))
 		}
 	}
+	maps.Copy(fields, purchaseOrderReferenceFields(req))
 	if len(fields) > 0 {
 		a.rejectEvaluation(w, r, fields)
 		return
@@ -272,36 +274,48 @@ func (a *API) rejectEvaluation(w http.ResponseWriter, r *http.Request, fields ma
 	httpx.Fail(w, r, problem)
 }
 
-func (a *API) fillFromPurchaseOrder(ctx context.Context, req *evaluateRequest) (map[string]string, error) {
+const poOverrideMessage = "is supplied by the purchase order and cannot be overridden"
+
+func purchaseOrderReferenceFields(req evaluateRequest) map[string]string {
 	fields := map[string]string{}
-	var wanted bool
-	lineIndexes := map[int]int{}
-	if req.PurchaseOrderID != "" && !ids.Valid(req.PurchaseOrderID) {
-		fields["purchaseOrderId"] = "must be a UUID"
+	add := func(key, message string) {
+		if existing, ok := fields[key]; ok {
+			message = existing + "; " + message
+		}
+		fields[key] = message
 	}
+	if req.PurchaseOrderID != "" && !ids.Valid(req.PurchaseOrderID) {
+		add("purchaseOrderId", "must be a UUID")
+	}
+	lineIndexes := map[int]int{}
 	for i, l := range req.Lines {
 		if l.POLineNo == nil {
 			continue
 		}
-		wanted = true
+		key := func(name string) string { return fmt.Sprintf("lines[%d].%s", i, name) }
 		if previous, exists := lineIndexes[*l.POLineNo]; exists {
-			fields[fmt.Sprintf("lines[%d].poLineNo", i)] = fmt.Sprintf("duplicates lines[%d].poLineNo", previous)
+			add(key("poLineNo"), fmt.Sprintf("duplicates lines[%d].poLineNo", previous))
 		}
 		lineIndexes[*l.POLineNo] = i
 		if l.POUnitPrice != nil {
-			fields[fmt.Sprintf("lines[%d].poUnitPrice", i)] = "is supplied by the purchase order and cannot be overridden"
+			add(key("poUnitPrice"), poOverrideMessage)
 		}
 		if l.POQtyRemaining != nil {
-			fields[fmt.Sprintf("lines[%d].poQtyRemaining", i)] = "is supplied by the purchase order and cannot be overridden"
+			add(key("poQtyRemaining"), poOverrideMessage)
+		}
+		if l.POCurrency != "" {
+			add(key("poCurrency"), poOverrideMessage)
 		}
 		if req.PurchaseOrderID == "" {
-			fields[fmt.Sprintf("lines[%d].poLineNo", i)] = "requires purchaseOrderId"
+			add(key("poLineNo"), "requires purchaseOrderId")
 		}
 	}
-	if len(fields) > 0 {
-		return fields, nil
-	}
-	if !wanted || len(fields) > 0 {
+	return fields
+}
+
+func (a *API) fillFromPurchaseOrder(ctx context.Context, req *evaluateRequest) (map[string]string, error) {
+	fields := map[string]string{}
+	if !slices.ContainsFunc(req.Lines, func(l lineRequest) bool { return l.POLineNo != nil }) {
 		return fields, nil
 	}
 	if a.ports.PurchaseOrders == nil {
@@ -337,15 +351,9 @@ func (a *API) fillFromPurchaseOrder(ctx context.Context, req *evaluateRequest) (
 		if !line.Usable() {
 			return nil, httpx.NewProblem(http.StatusUnprocessableEntity, "RCV-PO-002", fmt.Sprintf("purchase order line %d is cancelled", *l.POLineNo))
 		}
-		if l.POUnitPrice == nil {
-			l.POUnitPrice = &wireDecimal{line.NetUnitPrice()}
-		}
-		if l.POQtyRemaining == nil {
-			l.POQtyRemaining = &wireDecimal{line.QtyRemaining()}
-		}
-		if l.POCurrency == "" {
-			l.POCurrency = po.Currency
-		}
+		l.POUnitPrice = &wireDecimal{line.NetUnitPrice()}
+		l.POQtyRemaining = &wireDecimal{line.QtyRemaining()}
+		l.POCurrency = po.Currency
 	}
 	return fields, nil
 }
