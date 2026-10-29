@@ -20,5 +20,15 @@ func New() string {
 // Valid reports whether s parses as a UUID of any version.
 func Valid(s string) bool { _, err := uuid.Parse(s); return err == nil }
 
+// Canonical returns the lowercase hyphenated form of a UUID string, the form
+// whose byte order matches Postgres uuid ordering.
+func Canonical(s string) (string, bool) {
+	id, err := uuid.Parse(s)
+	if err != nil {
+		return "", false
+	}
+	return id.String(), true
+}
+
 // Nil is the all-zero UUID string, used for "not set" in tests and fixtures.
 const Nil = "00000000-0000-0000-0000-000000000000"

@@ -64,6 +64,17 @@ func (s *Postgres) CreateLedgerSet(ctx context.Context, in LedgerSetInput) (Ledg
 	}
 	var out LedgerSet
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var ok bool
+		if in.LeadingLedgerID, ok = ids.Canonical(in.LeadingLedgerID); !ok {
+			return setViolation(CodeSetInvalid, "leadingLedgerId", "must be a UUID")
+		}
+		parallel := make([]string, len(in.ParallelLedgerIDs))
+		for i, raw := range in.ParallelLedgerIDs {
+			if parallel[i], ok = ids.Canonical(raw); !ok {
+				return setViolation(CodeSetInvalid, "parallelLedgerIds", "each entry must be a UUID")
+			}
+		}
+		in.ParallelLedgerIDs = parallel
 		members := append([]string{in.LeadingLedgerID}, in.ParallelLedgerIDs...)
 		if len(in.ParallelLedgerIDs) == 0 || slices.Contains(in.ParallelLedgerIDs, in.LeadingLedgerID) {
 			return setViolation(CodeSetInvalid, "parallelLedgerIds", "a set needs at least one parallel ledger besides the leading ledger")

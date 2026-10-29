@@ -3,6 +3,8 @@ package store
 import (
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -384,12 +386,14 @@ func TestPostgres_ConcurrentSetPostsWithOneKeyPostOnce(t *testing.T) {
 	}
 }
 
-func waitForAdvisoryWaiters(t *testing.T, e env, want int) {
+func waitForAdvisoryWaiters(t *testing.T, e env, tenantID, legalEntityID string, want int) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		var waiting int
-		if err := e.pool.QueryRow(e.ctx, `select count(*) from pg_locks where locktype = 'advisory' and not granted`).Scan(&waiting); err != nil {
+		if err := e.pool.QueryRow(e.ctx, `select count(*) from pg_locks
+			where locktype = 'advisory' and not granted
+			and ((classid::bigint << 32) | objid::bigint) = hashtextextended($1, 0)`, tenantID+"/"+legalEntityID).Scan(&waiting); err != nil {
 			t.Fatal(err)
 		}
 		if waiting >= want {
@@ -415,6 +419,9 @@ func TestPostgres_AccountMappingAndLedgerSetOnTheSameLeadingLedgerAdmitExactlyOn
 		t.Fatal(err)
 	}
 	holding, release, barrierDone := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	var releaseOnce sync.Once
+	releaseBarrier := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releaseBarrier)
 	go func() {
 		barrierDone <- dbx.WithTenantTx(e.ctx, e.pool, func(tx pgx.Tx) error {
 			if err := lockLegalEntity(e.ctx, tx, p.TenantID, e.le); err != nil {
@@ -435,8 +442,8 @@ func TestPostgres_AccountMappingAndLedgerSetOnTheSameLeadingLedgerAdmitExactlyOn
 		_, err := e.store.CreateLedgerSet(e.ctx, LedgerSetInput{Code: "RACE", Name: "Race", LeadingLedgerID: lead.ID, ParallelLedgerIDs: []string{parallel.ID}})
 		results <- err
 	}()
-	waitForAdvisoryWaiters(t, e, 2)
-	close(release)
+	waitForAdvisoryWaiters(t, e, p.TenantID, e.le, 2)
+	releaseBarrier()
 	if err := <-barrierDone; err != nil {
 		t.Fatal(err)
 	}
@@ -471,9 +478,16 @@ func TestPostgres_LedgerSetCreateDoesNotDeadlockWithSetPosting(t *testing.T) {
 	if a.ID > b.ID {
 		a, b = b, a
 	}
-	set, err := e.store.CreateLedgerSet(e.ctx, LedgerSetInput{Code: "BASE", Name: "Base", LeadingLedgerID: b.ID, ParallelLedgerIDs: []string{a.ID}})
+	rawA, rawB := strings.ReplaceAll(a.ID, "-", ""), strings.ToUpper(b.ID)
+	if rawA < rawB {
+		t.Fatalf("raw ids %s, %s sort in canonical order; the case needs them inverted", rawA, rawB)
+	}
+	set, err := e.store.CreateLedgerSet(e.ctx, LedgerSetInput{Code: "BASE", Name: "Base", LeadingLedgerID: rawB, ParallelLedgerIDs: []string{rawA}})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if want := []string{a.ID, b.ID}; !slices.Equal(set.LedgerIDs, want) || set.LeadingLedgerID != b.ID {
+		t.Fatalf("set = %+v; want canonical ids %v leading %s", set, want, b.ID)
 	}
 	for round := range 15 {
 		start := make(chan struct{})
@@ -485,7 +499,7 @@ func TestPostgres_LedgerSetCreateDoesNotDeadlockWithSetPosting(t *testing.T) {
 		}()
 		go func() {
 			<-start
-			_, err := e.store.CreateLedgerSet(e.ctx, LedgerSetInput{Code: fmt.Sprintf("DL%d", round), Name: "Concurrent", LeadingLedgerID: b.ID, ParallelLedgerIDs: []string{a.ID}})
+			_, err := e.store.CreateLedgerSet(e.ctx, LedgerSetInput{Code: fmt.Sprintf("DL%d", round), Name: "Concurrent", LeadingLedgerID: rawB, ParallelLedgerIDs: []string{rawA}})
 			results <- err
 		}()
 		close(start)
