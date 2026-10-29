@@ -64,6 +64,11 @@ func (u unreachableStore) Rollback(context.Context, store.Idem, store.RollbackRe
 	return domain.Plan{}, false, nil
 }
 
+func (u unreachableStore) RekeyLines(context.Context, string, domain.PostingKind) ([]domain.RekeyPosting, error) {
+	u.fail()
+	return nil, nil
+}
+
 func (u unreachableStore) ReleaseQuarantined(context.Context, store.Idem, store.Release) (domain.PackRun, bool, error) {
 	u.fail()
 	return domain.PackRun{}, false, nil
@@ -213,6 +218,13 @@ func TestRequestsRejectedBeforeTheStore(t *testing.T) {
 		{"project run bad date", request{method: "POST", path: "/api/v1/migration/packs/project_wip/runs", tenant: tenantA, duties: allDuties, body: `{"sourceSystem":"AX2012","sourceCompany":"USMF","cutoffTs":"2026-12-31T00:00:00Z","freezeTs":"2026-12-31T06:00:00Z","projects":[{"projectId":"P1","legacyTotals":[],"lines":[{"legacyId":"L1","category":"HOUR","transactionDate":"01.12.2026","costAmount":"1","salesAmount":"1","currency":"USD","billingStatus":"BILLED"}]}]}`}, 422, CodeInvalid, "YYYY-MM-DD"},
 		{"project run late cutoff", request{method: "POST", path: "/api/v1/migration/packs/project_wip/runs", tenant: tenantA, duties: allDuties, body: `{"sourceSystem":"AX2012","sourceCompany":"USMF","cutoffTs":"2027-01-02T00:00:00Z","freezeTs":"2026-12-31T06:00:00Z","projects":[]}`}, 422, CodeInvalid, "MIG-1501"},
 		{"opening needs MigrationView", request{method: "GET", path: runPath + "/projects/P1/opening", tenant: tenantA, duties: "MigrationRun"}, 403, "AUTH-0003", ""},
+		// Slice 3: the rollback re-keying export.
+		{"rollback posting bad kind", request{method: "POST", path: planPath + "/rollback", tenant: tenantA, duties: allDuties, body: `{"approvers":["a","b"],"postings":[{"kind":"TRANSFER","entity":"USMF","documentRef":"JV-1","postedAt":"2027-01-02T00:00:00Z","account":"1100","currency":"USD","amount":"1"}]}`}, 422, CodeInvalid, "JOURNAL or DOCUMENT"},
+		{"rollback posting bad amount", request{method: "POST", path: planPath + "/rollback", tenant: tenantA, duties: allDuties, body: `{"approvers":["a","b"],"postings":[{"kind":"JOURNAL","entity":"USMF","documentRef":"JV-1","postedAt":"2027-01-02T00:00:00Z","account":"1100","currency":"USD","amount":"ten"}]}`}, 422, CodeInvalid, "not a decimal"},
+		{"rollback posting unknown field", request{method: "POST", path: planPath + "/rollback", tenant: tenantA, duties: allDuties, body: `{"approvers":["a","b"],"postings":[{"kind":"JOURNAL","debit":"1"}]}`}, 400, "COM-0001", ""},
+		{"rekeying file needs CutoverManager", request{method: "GET", path: planPath + "/rekeying/journals.csv", tenant: tenantA, duties: "MigrationView"}, 403, "AUTH-0003", ""},
+		{"rekeying unknown file", request{method: "GET", path: planPath + "/rekeying/ledger.csv", tenant: tenantA, duties: allDuties}, 422, CodeInvalid, "journals.csv or documents.csv"},
+		{"rekeying plan id not a UUID", request{method: "GET", path: "/api/v1/cutover/plans/p1/rekeying/journals.csv", tenant: tenantA, duties: allDuties}, 422, CodeInvalid, "UUID"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

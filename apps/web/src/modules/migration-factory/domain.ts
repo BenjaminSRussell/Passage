@@ -1,5 +1,5 @@
 /** Pure helpers for the migration-factory screens. Mirrors tools/migration-factory/internal/domain. */
-import type { Area, Category, BillingStatus, LegacyCategoryTotal, OpeningLine, OpenItemRecord, ParallelState, ProjectExtract, Tuple } from "./api/client";
+import type { Area, Category, BillingStatus, LegacyCategoryTotal, OpeningLine, OpenItemRecord, ParallelState, ProjectExtract, RekeyPosting, Tuple } from "./api/client";
 
 /** The nine transactional packs (FR-49.1). */
 export const PACKS = [
@@ -252,4 +252,72 @@ export function parseProjectExtract(linesText: string, totalsText: string): { pr
     return undefined;
   });
   return { projects: [...byId.values()], lineErrors, totalErrors };
+}
+
+const POSTING_HEADER = ["kind", "entity", "documentRef", "postedAt", "account", "dimensions", "currency", "amount", "text"];
+const POSTED_AT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(Z|[+-]\d{2}:\d{2})$/;
+
+/**
+ * Parses the Passage postings since T-0 that a rollback exports for re-keying (FR-49.9), one line
+ * each: kind, entity, documentRef, postedAt, account, dimensions, currency, amount, text.
+ * Dimensions and text may be blank and text may be left out. Values are separated by commas,
+ * semicolons or tabs, so text cannot hold one. postedAt is an ISO date-time with an offset and is
+ * sent as UTC. Entities must be those of the plan. The service checks the rest, including that each
+ * journal balances.
+ */
+export function parsePostings(text: string, entities: readonly string[]): { postings: RekeyPosting[]; errors: string[] } {
+  const postings: RekeyPosting[] = [];
+  const errors: string[] = [];
+  text.split(/\r?\n/).forEach((raw, index) => {
+    const line = raw.trim();
+    if (line === "") return;
+    const cells = line.split(/[,;\t]/).map((c) => c.trim());
+    if (index === 0 && cells.slice(0, 4).map((c) => c.toLowerCase()).join(",") === POSTING_HEADER.slice(0, 4).map((h) => h.toLowerCase()).join(",")) return;
+    const n = index + 1;
+    if (cells.length < 8 || cells.length > POSTING_HEADER.length) {
+      errors.push(`Line ${n}: expected 8 or 9 values (${POSTING_HEADER.join(", ")}), found ${cells.length}.`);
+      return;
+    }
+    const [kind, entity, documentRef, postedAt, account, dimensions, currency, amount, note = ""] = cells;
+    const k = kind.toUpperCase();
+    if (k !== "JOURNAL" && k !== "DOCUMENT") {
+      errors.push(`Line ${n}: kind "${kind}" is not JOURNAL or DOCUMENT.`);
+      return;
+    }
+    if (!entity || !documentRef || !account) {
+      errors.push(`Line ${n}: the entity, document and account are required.`);
+      return;
+    }
+    if (!entities.includes(entity)) {
+      errors.push(`Line ${n}: entity ${entity} is not cut over by this plan (${entities.join(", ")}).`);
+      return;
+    }
+    const ms = POSTED_AT.test(postedAt) ? Date.parse(postedAt) : Number.NaN;
+    if (Number.isNaN(ms)) {
+      errors.push(`Line ${n}: posted at "${postedAt}" is not a date-time such as 2027-01-02T10:00:00Z.`);
+      return;
+    }
+    const cur = currency.toUpperCase();
+    if (!CURRENCY.test(cur)) {
+      errors.push(`Line ${n}: currency "${currency}" is not a three-letter code.`);
+      return;
+    }
+    if (!DECIMAL.test(amount)) {
+      errors.push(`Line ${n}: amount "${amount}" is not a decimal such as -250.00.`);
+      return;
+    }
+    const posting: RekeyPosting = {
+      kind: k,
+      entity,
+      documentRef,
+      postedAt: new Date(ms).toISOString().replace(".000Z", "Z"),
+      account,
+      currency: cur,
+      amount,
+    };
+    if (dimensions) posting.dimensions = dimensions;
+    if (note) posting.text = note;
+    postings.push(posting);
+  });
+  return { postings, errors };
 }

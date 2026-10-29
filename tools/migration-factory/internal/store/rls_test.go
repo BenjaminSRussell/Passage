@@ -108,11 +108,20 @@ func TestAppRole_CrossTenantRLS(t *testing.T) {
 				values ($1, $2, 1, 0, 'Extract transactional packs', 'Migration engineer', 180, 'PENDING')`,
 			Args: func(tenantID, _ string) []any { return []any{tenantID, ids.New()} },
 		},
+		{
+			Table:  "rekey_line",
+			Before: insertPlan,
+			Insert: `insert into rekey_line (tenant_id, plan_id, kind, seq, entity, document_ref, line, posted_at, account, currency, amount)
+				values ($1, $2, 'JOURNAL', 1, 'USMF', 'JV-1', 1, now(), '1100', 'USD', 10)`,
+			Args:     func(tenantID, _ string) []any { return []any{tenantID, ids.New()} },
+			NoUpdate: true,
+		},
 	})
 }
 
-// legacy_xref and project opening lines are append-only (9.49.4, FR-49.12): the application
-// role cannot change or delete a row, and it deletes nothing else either.
+// legacy_xref, project opening lines and re-keying lines are append-only (9.49.4, FR-49.12,
+// FR-49.9): the application role cannot change or delete a row, and it deletes nothing else
+// either.
 func TestAppRole_LegacyXrefIsAppendOnly(t *testing.T) {
 	admin, app := testkit.DBWithApp(t)
 	ctx := context.Background()
@@ -135,7 +144,7 @@ func TestAppRole_LegacyXrefIsAppendOnly(t *testing.T) {
 	}
 	for _, stmt := range []string{`update legacy_xref set amount = 0`, `delete from legacy_xref`, `delete from pack_run`,
 		`update project_opening_line set cost_amount = 0`, `delete from project_opening_line`, `delete from variance`, `delete from parallel_run`,
-		`delete from control_total`, `delete from pack_quarantine`} {
+		`delete from control_total`, `delete from pack_quarantine`, `update rekey_line set amount = 0`, `delete from rekey_line`} {
 		err := inTenant(func(tx pgx.Tx) error { _, err := tx.Exec(ctx, stmt); return err })
 		var pgErr *pgconn.PgError
 		if !errors.As(err, &pgErr) || pgErr.Code != "42501" {

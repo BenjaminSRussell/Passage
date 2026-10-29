@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/domain"
 	mfevents "github.com/BenjaminSRussell/passage/tools/migration-factory/internal/events"
@@ -44,12 +45,14 @@ func (s *Postgres) CreatePlan(ctx context.Context, idem Idem, plan domain.Plan, 
 	return out, replayed, err
 }
 
-const planColumns = `plan_id::text, t0, packs, entities, abort_offset_min, rolled_back, rollback_approvers, version, created_at`
+const planColumns = `plan_id::text, t0, packs, entities, abort_offset_min, rolled_back, rollback_approvers,
+	rekey_journal_lines, rekey_document_lines, rekey_excluded, version, created_at`
 
 func scanPlan(row pgx.Row) (domain.Plan, error) {
 	var p domain.Plan
 	var packs []string
-	if err := row.Scan(&p.PlanID, &p.T0, &packs, &p.Entities, &p.AbortOffsetMin, &p.RolledBack, &p.Approvers, &p.Version, &p.CreatedAt); err != nil {
+	if err := row.Scan(&p.PlanID, &p.T0, &packs, &p.Entities, &p.AbortOffsetMin, &p.RolledBack, &p.Approvers,
+		&p.Rekey.JournalLines, &p.Rekey.DocumentLines, &p.Rekey.Excluded, &p.Version, &p.CreatedAt); err != nil {
 		return domain.Plan{}, err
 	}
 	for _, pk := range packs {
@@ -222,15 +225,19 @@ func (s *Postgres) CompleteStep(ctx context.Context, idem Idem, c StepCompletion
 	return out, replayed, err
 }
 
-// RollbackRequest executes a plan's rollback with two distinct approvers.
+// RollbackRequest executes a plan's rollback with two distinct approvers. Postings are the
+// Passage postings since go-live to export for re-keying (FR-49.9).
 type RollbackRequest struct {
 	PlanID          string
 	Approvers       []string
+	Postings        []domain.RekeyPosting
 	ExpectedVersion int
 	By              string
 }
 
-// Rollback records the rollback under the plan's row lock and writes cutover.plan.rolledback.
+// Rollback records the rollback under the plan's row lock, stores the re-keying lines built
+// from the postings and writes cutover.plan.rolledback, all in one transaction: a posting the
+// export rejects leaves the plan as it was.
 func (s *Postgres) Rollback(ctx context.Context, idem Idem, r RollbackRequest) (domain.Plan, bool, error) {
 	var out domain.Plan
 	var replayed bool
@@ -247,12 +254,26 @@ func (s *Postgres) Rollback(ctx context.Context, idem Idem, r RollbackRequest) (
 			if err := plan.Rollback(r.Approvers...); err != nil {
 				return domain.Plan{}, err
 			}
+			export, err := domain.BuildRekeyExport(plan, r.Postings)
+			if err != nil {
+				return domain.Plan{}, err
+			}
+			plan.Rekey = export.Summary()
+			if err := insertRekeyLines(ctx, tx, plan.PlanID, domain.KindJournal, export.Journals); err != nil {
+				return domain.Plan{}, err
+			}
+			if err := insertRekeyLines(ctx, tx, plan.PlanID, domain.KindDocument, export.Documents); err != nil {
+				return domain.Plan{}, err
+			}
 			if _, err := tx.Exec(ctx, `update cutover_plan set rolled_back = true, rollback_approvers = $2, rolled_back_by = $3,
-				rolled_back_at = now(), version = $4 where tenant_id = current_setting('passage.tenant_id', true)::uuid and plan_id = $1`, plan.PlanID, plan.Approvers, r.By, plan.Version); err != nil {
+				rolled_back_at = now(), version = $4, rekey_journal_lines = $5, rekey_document_lines = $6, rekey_excluded = $7
+				where tenant_id = current_setting('passage.tenant_id', true)::uuid and plan_id = $1`,
+				plan.PlanID, plan.Approvers, r.By, plan.Version, plan.Rekey.JournalLines, plan.Rekey.DocumentLines, plan.Rekey.Excluded); err != nil {
 				return domain.Plan{}, fmt.Errorf("update cutover_plan: %w", err)
 			}
 			if err := enqueue(ctx, tx, mfevents.CutoverPlanRolledBack, "cutover_plan", plan.PlanID, mfevents.CutoverPlanRolledBackData{
 				PlanID: plan.PlanID, Approvers: plan.Approvers, ExecutedBy: r.By,
+				RekeyJournalLines: plan.Rekey.JournalLines, RekeyDocumentLines: plan.Rekey.DocumentLines,
 			}); err != nil {
 				return domain.Plan{}, fmt.Errorf("enqueue cutover.plan.rolledback: %w", err)
 			}
@@ -261,4 +282,59 @@ func (s *Postgres) Rollback(ctx context.Context, idem Idem, r RollbackRequest) (
 		return err
 	})
 	return out, replayed, err
+}
+
+// insertRekeyLines stores one re-keying file's lines in file order (seq from 1).
+func insertRekeyLines(ctx context.Context, tx pgx.Tx, planID string, kind domain.PostingKind, lines []domain.RekeyPosting) error {
+	if len(lines) == 0 {
+		return nil
+	}
+	batch := &pgx.Batch{}
+	for i, l := range lines {
+		batch.Queue(`insert into rekey_line (tenant_id, plan_id, kind, seq, entity, document_ref, line, posted_at, account, dimensions, currency, amount, text)
+			values (current_setting('passage.tenant_id', true)::uuid, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+			planID, string(kind), i+1, l.Entity, l.DocumentRef, l.Line, l.PostedAt, l.Account, l.Dimensions, l.Currency, l.Amount.String(), l.Text)
+	}
+	if err := tx.SendBatch(ctx, batch).Close(); err != nil {
+		return fmt.Errorf("insert rekey_line: %w", err)
+	}
+	return nil
+}
+
+// RekeyLines returns one re-keying file of a rolled-back plan in file order. A plan that has
+// not been rolled back has no files (domain.ErrTransition).
+func (s *Postgres) RekeyLines(ctx context.Context, planID string, kind domain.PostingKind) ([]domain.RekeyPosting, error) {
+	out := []domain.RekeyPosting{}
+	err := s.tx(ctx, func(tx pgx.Tx) error {
+		var rolledBack bool
+		err := tx.QueryRow(ctx, `select rolled_back from cutover_plan where tenant_id = current_setting('passage.tenant_id', true)::uuid and plan_id = $1`, planID).Scan(&rolledBack)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if !rolledBack {
+			return fmt.Errorf("%w: plan is not rolled back, so it has no re-keying files", domain.ErrTransition)
+		}
+		rows, err := tx.Query(ctx, `select entity, document_ref, line, posted_at, account, dimensions, currency, amount::text, text
+			from rekey_line where tenant_id = current_setting('passage.tenant_id', true)::uuid and plan_id = $1 and kind = $2 order by seq`, planID, string(kind))
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			l := domain.RekeyPosting{Kind: kind}
+			var amount string
+			if err := rows.Scan(&l.Entity, &l.DocumentRef, &l.Line, &l.PostedAt, &l.Account, &l.Dimensions, &l.Currency, &amount, &l.Text); err != nil {
+				return err
+			}
+			if l.Amount, err = decimal.NewFromString(amount); err != nil {
+				return fmt.Errorf("rekey_line amount %q: %w", amount, err)
+			}
+			out = append(out, l)
+		}
+		return rows.Err()
+	})
+	return out, err
 }

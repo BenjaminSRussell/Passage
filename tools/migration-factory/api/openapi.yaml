@@ -618,10 +618,15 @@ paths:
   /api/v1/cutover/plans/{id}/rollback:
     post:
       operationId: rollbackCutoverPlan
-      summary: Record rollback execution. Needs two distinct approvers (CUT-1603).
+      summary: Execute the rollback and export the postings since T-0 for re-keying (FR-49.9). Needs two distinct approvers (CUT-1603).
       description: |
-        Runs once per plan (a second rollback is MIG-0004). Writes
-        dev.passage.cutover.plan.rolledback.v1. `version` works as on step completion.
+        Runs once per plan (a second rollback is MIG-0004). `postings` are the Passage postings
+        made since go-live; lines dated before T-0 are counted as excluded, every line must be for
+        an entity of the plan, and each journal (entity, document, currency) must balance. One bad
+        posting rejects the request (MIG-0001) and leaves the plan as it was. The accepted lines are
+        stored with the plan and served by GET .../rekeying/{file}. Writes
+        dev.passage.cutover.plan.rolledback.v1 with the line counts. `version` works as on step
+        completion. The body may be up to 16 MiB.
       x-passage-duty: CutoverManager
       parameters:
         - $ref: "#/components/parameters/Id"
@@ -640,12 +645,17 @@ paths:
                   minItems: 2
                   items:
                     type: string
+                postings:
+                  type: array
+                  description: Passage postings since T-0 to export for re-keying. Empty or absent when nothing was posted.
+                  items:
+                    $ref: "#/components/schemas/RekeyPosting"
                 version:
                   type: integer
                   minimum: 1
       responses:
         "200":
-          description: The plan with rolledBack true.
+          description: The plan with rolledBack true and the re-keying counts.
           headers:
             Idempotent-Replayed:
               $ref: "#/components/headers/IdempotentReplayed"
@@ -655,6 +665,40 @@ paths:
                 $ref: "#/components/schemas/Plan"
         "400":
           $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /api/v1/cutover/plans/{id}/rekeying/{file}:
+    get:
+      operationId: getRekeyingFile
+      summary: One re-keying file of a rolled-back plan as CSV (FR-49.9, 9.49.15)
+      description: |
+        `journals.csv` has the columns entity, document_ref, line, posted_at, account, dimensions,
+        currency, debit, credit, text; `documents.csv` has entity, document_ref, line, posted_at,
+        account, dimensions, currency, amount, text. Lines are ordered by entity, posting time and
+        document. Amounts have 6 decimal places; times are RFC 3339 UTC. A plan that has not been
+        rolled back has no files (MIG-0004).
+      x-passage-duty: CutoverManager
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - name: file
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [journals.csv, documents.csv]
+      responses:
+        "200":
+          description: The CSV file, with its header row.
+          content:
+            text/csv:
+              schema:
+                type: string
         "403":
           $ref: "#/components/responses/Problem"
         "404":
@@ -1343,8 +1387,51 @@ components:
         abortWarning:
           type: string
           description: CUT-1604 text in the hour before the deadline.
+        rekeying:
+          type: object
+          description: Present once the plan is rolled back. The lines exported for re-keying (FR-49.9).
+          required: [journalLines, documentLines, excluded]
+          properties:
+            journalLines:
+              type: integer
+              minimum: 0
+            documentLines:
+              type: integer
+              minimum: 0
+            excluded:
+              type: integer
+              minimum: 0
+              description: Postings given with the rollback that were dated before T-0 and left out.
         steps:
           type: array
           description: Present on generate, get and commands; absent in the list.
           items:
             $ref: "#/components/schemas/Step"
+    RekeyPosting:
+      type: object
+      required: [kind, entity, documentRef, postedAt, account, currency, amount]
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          enum: [JOURNAL, DOCUMENT]
+        entity:
+          type: string
+          description: A legal entity of the plan.
+        documentRef:
+          type: string
+        postedAt:
+          type: string
+          format: date-time
+        account:
+          type: string
+        dimensions:
+          type: string
+        currency:
+          type: string
+          pattern: "^[A-Z]{3}$"
+        amount:
+          type: string
+          description: Signed decimal, at most 6 places; debit positive, credit negative.
+        text:
+          type: string

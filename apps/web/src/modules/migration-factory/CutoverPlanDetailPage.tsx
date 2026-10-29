@@ -13,20 +13,32 @@ import {
   StatGroup,
   StatTile,
   StatusPill,
+  Textarea,
   type DataTableColumn,
 } from "../../shell/ui";
-import { completeStep, describeProblem, getPlan, newKey, rollbackPlan, type Problem, type RunbookStep } from "./api/client";
-import { formatDateTime, formatOffset, overrunTone, toneLabel } from "./domain";
+import { completeStep, describeProblem, getPlan, newKey, rekeyFileUrl, rollbackPlan, type Problem, type RekeyPosting, type RunbookStep } from "./api/client";
+import { formatDateTime, formatOffset, overrunTone, parsePostings, toneLabel } from "./domain";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
 const WHOLE = /^\d{1,5}$/;
 
+const POSTINGS_HINT =
+  "One line per posting since T-0: kind (JOURNAL or DOCUMENT), entity, document, posted at (2027-01-02T10:00:00Z), account, dimensions, currency, amount (credit negative), text. Leave blank if nothing was posted.";
+
+function postingSummary(n: number): string {
+  if (n === 0) return "No postings are sent for re-keying.";
+  return `${n} posting ${n === 1 ? "line is" : "lines are"} sent for re-keying; lines dated before T-0 are left out.`;
+}
+
 function conflictMessage(problem: Problem): string {
   return problem.code === "MIG-0006" ? "Someone changed this plan since you opened it. The plan has been reloaded; check it and try again." : problem.message;
 }
 
-/** One cutover runbook: steps with planned against actual, the go/no-go checklist, step completion and rollback. */
+/**
+ * One cutover runbook: steps with planned against actual, the go/no-go checklist, step completion,
+ * and the rollback with its re-keying export of the postings since T-0 (FR-49.9).
+ */
 export function CutoverPlanDetailPage() {
   const { id = "" } = useParams();
   const state = useLoad((signal) => getPlan(id, signal), id);
@@ -36,6 +48,9 @@ export function CutoverPlanDetailPage() {
   const [minutesError, setMinutesError] = useState<string | undefined>();
   const [approvers, setApprovers] = useState({ first: "", second: "" });
   const [approverError, setApproverError] = useState<string | undefined>();
+  const [postingsText, setPostingsText] = useState("");
+  const [postingsError, setPostingsError] = useState<string | undefined>();
+  const [postings, setPostings] = useState<RekeyPosting[]>([]);
   const [confirming, setConfirming] = useState(false);
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
@@ -101,13 +116,15 @@ export function CutoverPlanDetailPage() {
 
   function askRollback(event: FormEvent) {
     event.preventDefault();
+    if (!plan) return;
     const first = approvers.first.trim();
     const second = approvers.second.trim();
-    if (!first || !second || first === second) {
-      setApproverError("Rollback needs two different approvers (CUT-1603).");
-      return;
-    }
-    setApproverError(undefined);
+    const approversOk = Boolean(first && second && first !== second);
+    setApproverError(approversOk ? undefined : "Rollback needs two different approvers (CUT-1603).");
+    const parsed = parsePostings(postingsText, plan.entities);
+    setPostingsError(parsed.errors.length > 0 ? parsed.errors.slice(0, 3).join(" ") : undefined);
+    if (!approversOk || parsed.errors.length > 0) return;
+    setPostings(parsed.postings);
     setConfirming(true);
   }
 
@@ -117,7 +134,7 @@ export function CutoverPlanDetailPage() {
     setFailure(null);
     setBusy(true);
     try {
-      state.set(await rollbackPlan(plan.planId, [approvers.first.trim(), approvers.second.trim()], plan.version, rollbackKey.current));
+      state.set(await rollbackPlan(plan.planId, [approvers.first.trim(), approvers.second.trim()], postings, plan.version, rollbackKey.current));
     } catch (error) {
       const problem = describeProblem(error);
       setFailure({ ...problem, message: conflictMessage(problem) });
@@ -213,7 +230,8 @@ export function CutoverPlanDetailPage() {
           ) : (
             <form className={styles.form} onSubmit={askRollback} noValidate>
               <p className={`${styles.note} ${styles.wide}`}>
-                Stops Passage access and restores legacy write access. Two different people must approve.
+                Stops Passage access, restores legacy write access and exports the postings made since T-0 as journal and document files for
+                re-keying in the legacy system. Two different people must approve.
               </p>
               <FormField id="rollback-first" label="First approver" error={approverError}>
                 {(control) => <Input {...control} value={approvers.first} invalid={Boolean(approverError)} onChange={(event) => setApprovers({ ...approvers, first: event.target.value })} />}
@@ -221,6 +239,13 @@ export function CutoverPlanDetailPage() {
               <FormField id="rollback-second" label="Second approver">
                 {(control) => <Input {...control} value={approvers.second} onChange={(event) => setApprovers({ ...approvers, second: event.target.value })} />}
               </FormField>
+              <div className={styles.wide}>
+                <FormField id="rollback-postings" label="Postings since T-0" hint={POSTINGS_HINT} error={postingsError} optional>
+                  {(control) => (
+                    <Textarea {...control} mono rows={6} value={postingsText} invalid={Boolean(postingsError)} onChange={(event) => setPostingsText(event.target.value)} />
+                  )}
+                </FormField>
+              </div>
               <div className={styles.formActions}>
                 <Button type="submit" variant="danger" loading={busy}>
                   Roll back cutover
@@ -230,10 +255,32 @@ export function CutoverPlanDetailPage() {
           )}
         </Card>
       ) : null}
+      {plan?.rolledBack && plan.rekeying ? (
+        <Card title="Re-keying files">
+          <div className={styles.stack}>
+            <StatGroup label="Re-keying export">
+              <StatTile label="Journal lines" value={plan.rekeying.journalLines} />
+              <StatTile label="Document lines" value={plan.rekeying.documentLines} />
+              <StatTile label="Left out (before T-0)" value={plan.rekeying.excluded} />
+            </StatGroup>
+            <p className={styles.note}>
+              Re-key these postings in the legacy system, then reconcile. The files are kept with this plan until they are re-keyed.
+            </p>
+            <div className={styles.toolbar}>
+              <a className={buttonClassName("secondary")} href={rekeyFileUrl(plan.planId, "journals.csv")} download>
+                Download journals (CSV)
+              </a>
+              <a className={buttonClassName("secondary")} href={rekeyFileUrl(plan.planId, "documents.csv")} download>
+                Download documents (CSV)
+              </a>
+            </div>
+          </div>
+        </Card>
+      ) : null}
       {confirming ? (
         <ConfirmDialog
           title="Roll back this cutover?"
-          description="Passage access stops and the legacy system takes postings again. This can't be undone from this screen."
+          description={`Passage access stops and the legacy system takes postings again. ${postingSummary(postings.length)} This can't be undone from this screen.`}
           confirmLabel="Roll back"
           cancelLabel="Keep cutover"
           onConfirm={() => void doRollback()}

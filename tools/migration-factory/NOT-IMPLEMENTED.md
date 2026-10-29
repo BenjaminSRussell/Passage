@@ -6,8 +6,11 @@ rules, the Postgres store (row-level security, outbox events, idempotency keys, 
 open_items and cutover API, the web screens, and the chart. Slice 2 adds the release of quarantined
 open items, the legacy cross-reference lookup, the stored parallel-run review (variances, explain,
 sign-off with MIG-001 segregation of duties), the project_wip pack with project beginning balances
-(FR-49.12), and the web screens for all of them. Every other deliverable and acceptance criterion
-is listed here with its status.
+(FR-49.12), and the web screens for all of them. Slice 3 adds the rollback re-keying export
+(FR-49.9): the postings since T-0 given with the rollback are validated, stored with the plan and
+served as journal and document CSV files, with the counts on the plan and on
+`cutover.plan.rolledback`, and the runbook screen takes the postings and links the files. Every
+other deliverable and acceptance criterion is listed here with its status.
 
 Status values: `later slice of PSG-49` (planned in this wave) or `handoff` (needs an owner outside
 this wave's paths).
@@ -29,7 +32,7 @@ this wave's paths).
 | D6 | Legacy coexistence adapters, entity by entity (FR-49.7) | later slice of PSG-49 for the factory side; handoff for the adapters | AX OData/DMF and SAP IDoc/BAPI adapters sit in the wave-35 integration hub. The `coexistence.entities` flag and BR-49.10 xref dedupe are later. |
 | D7 | Project beginning balance journals (FR-49.12, `project_opening_line`) | Partly built | Built: the project_wip pack loads opening lines by category (HOUR, EXPENSE, ITEM, FEE, ON_ACCOUNT) with quantity, cost, sales value, date, worker, activity, dimensions, billing status and WIP cost and sales, flagged `beginning_balance`, each with its `legacy_xref` row and never posted to the GL (BR-49.11); per project and category the cost, sales, WIP cost and WIP sales are compared with the legacy totals to 0.00, and a project that differs reports `OPENING_MISMATCH` (BR-49.12) on `GET /migration/runs/{id}/projects/{project}/opening`. Later slice of PSG-49: the remaining estimate, accrued revenue, and percent complete and recognized revenue to date for fixed-price projects (the request has no fields for them yet), configurable categories (`migration.project_opening.categories`), and release of quarantined project lines. Handoff to wave 41 (projects): blocking invoicing and estimates of an `OPENING_MISMATCH` project, and invoice proposals over the chargeable unbilled lines at the legacy date and sales price. |
 | D8 | Rehearsal environment provisioning, Terraform + Helm + seed (FR-49.8, AC-49.10) | handoff | Pipeline and Terraform live in `deploy/`, which this wave does not own. The chart is here. |
-| D9 | Rollback plan per cutover, with re-keying files (FR-49.9) | Partly built | Rollback records the two-approver execution once, writes `dev.passage.cutover.plan.rolledback.v1`, and the plan reports when the abort deadline has passed (`abortDue`) or is within the hour (CUT-1604). Re-keying file export and the automatic execution at the deadline (BR-49.9) are later. |
+| D9 | Rollback plan per cutover, with re-keying files (FR-49.9) | Partly built | Rollback records the two-approver execution once, writes `dev.passage.cutover.plan.rolledback.v1`, and the plan reports when the abort deadline has passed (`abortDue`) or is within the hour (CUT-1604). Built in slice 3: the re-keying export. The rollback request carries the Passage postings since go-live; lines dated before T-0 are counted and left out, every line must be for an entity of the plan, each journal (entity, document, currency) must balance, and one bad line rejects the rollback without changing the plan. The lines are stored write-once in `rekey_line` (retained with the plan, 9.49.15) and served as `journals.csv` (debit and credit columns) and `documents.csv` (signed amount) by `GET /api/v1/cutover/plans/{id}/rekeying/{file}`. `handoff` to the general ledger and subledger waves (waves 12 to 14): a "postings since" query the factory can call itself, so the caller no longer has to supply the postings. Later slice of PSG-49: the legacy import formats (AX DIXF package, SAP `LTMC` template), which need the legacy adapters' mappings (D6), marking the files re-keyed and reconciled, and the automatic execution at the deadline (BR-49.9). |
 | D10 | Idempotent re-runs with `legacy_xref` uniqueness (FR-49.10) | Built | Natural-key primary key per tenant, append-only for the application role, runs of one (system, company) serialized by an advisory lock. Every run is stored with its input hash. |
 | D11 | Deploy: migration factory workspace and rehearsal environment | Partly built | The web module, Dockerfile and chart are here. The umbrella chart entry, the Argo CD app and the gateway route sending `/api/v1/migration/*` and `/api/v1/cutover/*` to this service are `handoff` to `deploy/` and the gateway (wave 82). |
 
@@ -40,7 +43,7 @@ this wave's paths).
 | AC1 | Synthetic AX dataset (3 entities, full year), all control totals MATCH | later slice of PSG-49 | Fixture `fx-ax-synth-year` (1.1M rows) is not generated. The rule logic is tested. |
 | AC2 | Synthetic SAP dataset, all control totals MATCH | later slice of PSG-49 | Fixture `fx-sap-synth-year` is not generated. |
 | AC3 | Cutover rehearsal inside the planned window (< 48 h) | later slice of PSG-49 | A rehearsal needs the runner and measured durations. The plan's open-access step is at T+30h, and a test checks that. |
-| AC4 | Rollback rehearsal restores legacy coexistence | later slice of PSG-49 | Needs the coexistence adapters (D6). |
+| AC4 | Rollback rehearsal restores legacy coexistence | later slice of PSG-49 | Needs the coexistence adapters (D6). The factory side is built: the rollback event and the re-keying files (D9). |
 | AC5 | Every deliverable has code or a reason in this file | Met | This file. |
 | AC6 | `go vet`, `go test`, web vitest and tsc, OpenAPI matches code, chart lints | Met for the built surface | AsyncAPI is `later slice of PSG-49`, below. |
 
@@ -53,7 +56,7 @@ this wave's paths).
 | AC-49.4 | Met | `TestPackRun_CleanExtractReconcilesAndRerunLoadsNothing` and `TestRunOpenItems_ConcurrentRunsLoadEachRecordOnce` (database tests). |
 | AC-49.5 | later slice of PSG-49 | Needs the replay (D4) and the `fx-replay-month` fixture. The diff, the explain step and the sign-off gate (unexplained = 0, explained ≤ 0.1 % of revenue) are tested: `TestParallelRun_DiffExplainSignOff` (database) and `TestParallelRun_ExplainAndSignOff`. |
 | AC-49.6 | later slice of PSG-49 | Needs the rehearsal run (AC3). |
-| AC-49.7 | later slice of PSG-49 | Needs the rollback re-keying export (D9). |
+| AC-49.7 | Partly met | "Passage postings since T-0 are exported as re-keying files": `TestRollback_ExportsPostingsSinceT0AsRekeyingFiles` (database) and `TestBuildRekeyExport_Properties` (every posting since T-0 is in exactly one file, the journal file nets to zero). "The legacy coexistence adapters resume" is `handoff` to the wave-35 integration hub, which consumes `dev.passage.cutover.plan.rolledback.v1` (D6). |
 | AC-49.8 | Partly met | `GET /api/v1/migration/xref` resolves a legacy id (and a Passage record back to its legacy ids), and the Legacy reference screen shows system, company and id (`TestRelease_CorrectedRecordLoadsAndReconcilesTheRun`). The panel on the Passage invoice page is `handoff` to the sales module (wave 14), which calls this endpoint by `passageEntity` and `passageId`; customer invoices are not a pack yet (D1a). |
 | AC-49.9 | later slice of PSG-49 | Needs the history load (D3). |
 | AC-49.10 | handoff | Pipeline provisioning (D8). |
@@ -71,6 +74,7 @@ this wave's paths).
 | `POST /api/v1/cutover/plans/{id}/steps/{s}/complete` | Built | Served and stored. |
 | Go/no-go decision endpoint (record decision with approvers) | later slice of PSG-49 | Completing the go/no-go meeting step stands in for it; `dev.passage.cutover.decision.recorded.v1` comes with the endpoint. |
 | `GET /api/v1/migration/runs/{id}/projects/{project}/opening` | Built | Lines paged by legacy id; totals and status from the run. |
+| `GET /api/v1/cutover/plans/{id}/rekeying/{file}` (not in the PRD table, needed for FR-49.9) | Built | CutoverManager. `journals.csv` or `documents.csv` of a rolled-back plan; MIG-0004 before the rollback. |
 
 ## Events (PRD section 9.49.5)
 
@@ -79,17 +83,18 @@ this wave's paths).
 | `dev.passage.migration.pack.reconciled.v1` | Built | Written for every run after reconciliation, with the match and mismatch counts. |
 | `dev.passage.migration.parallelrun.diffed.v1` | Built | Written when a parallel run is stored, with the variance and unexplained counts. |
 | `dev.passage.cutover.step.completed.v1` | Built | |
-| `dev.passage.cutover.plan.rolledback.v1` (not in the PRD table) | Built | Added so the coexistence adapters (FR-49.7) can resume legacy write access when a rollback executes. |
+| `dev.passage.cutover.plan.rolledback.v1` (not in the PRD table) | Built | Added so the coexistence adapters (FR-49.7) can resume legacy write access when a rollback executes. Carries the re-keying journal and document line counts. |
 | `dev.passage.cutover.decision.recorded.v1` | later slice of PSG-49 | Needs the go/no-go decision endpoint. |
 
-`events/asyncapi.yaml` documents the four built events; a test checks it against `internal/events`.
+`events/asyncapi.yaml` documents the four built events; tests check the event names and every
+payload field against `internal/events`.
 `pack.reconciled` is written again when a release brings a LOADED run to RECONCILED.
 
 ## Persistence, security and platform
 
 | Item | Status | Reason |
 |---|---|---|
-| Postgres store, migrations, RLS (`tenant_id` first, `dbx.RLSPolicy`) | Built | `migrations/0001_init.sql`: `pack_run`, `control_total`, `pack_quarantine`, `legacy_xref`, `cutover_plan`, `cutover_step`, `outbox`, `idempotency_keys`. `migrations/0002_release_parallel_project_opening.sql`: `parallel_run`, `variance`, `project_opening_line` with forced RLS, the release columns, and the `passage_app` grants (UPDATE on runs, totals and quarantine for release; no DELETE anywhere; `legacy_xref` and `project_opening_line` insert-only). |
+| Postgres store, migrations, RLS (`tenant_id` first, `dbx.RLSPolicy`) | Built | `migrations/0001_init.sql`: `pack_run`, `control_total`, `pack_quarantine`, `legacy_xref`, `cutover_plan`, `cutover_step`, `outbox`, `idempotency_keys`. `migrations/0002_release_parallel_project_opening.sql`: `parallel_run`, `variance`, `project_opening_line` with forced RLS, the release columns, and the `passage_app` grants (UPDATE on runs, totals and quarantine for release; no DELETE anywhere; `legacy_xref` and `project_opening_line` insert-only). `migrations/0003_rollback_rekeying.sql`: `rekey_line` with forced RLS, insert-only for `passage_app`, and the re-keying counts on `cutover_plan`. |
 | Transactional outbox writes | Built | Same transaction as the state change. |
 | Metrics endpoint for the ServiceMonitor | later slice of PSG-49 | The chart's ServiceMonitor toggle is off by default; no `/metrics` is served yet. |
 | OPA decision point replacing `DutyPolicy` | handoff | Owned by edge-identity and platform (wave 2). The routes already use the kernel `authz.RequireDuty` contract. |
@@ -132,6 +137,7 @@ this wave's paths).
 | Control-total board auto-refresh every 10 s during a run | later slice of PSG-49 | A slice-1 run completes inside its request, so the board is final when it opens. Refresh comes with asynchronous (Temporal) runs. |
 | Runbook live timer (elapsed against planned while a step runs) | later slice of PSG-49 | Steps record the actual duration on completion and colour amber at 110 % and red at 125 %; a start action and a running timer are later. |
 | Drill from a mismatch to records, and export (9.49.6) | later slice of PSG-49 | Needs the per-record staging view. |
-| Screens built | Built | Pack runs (list with filters, open_items and project_wip start forms, detail with control-total board, quarantine release and projects), project opening balances, parallel runs (list, start, review), legacy reference lookup, and cutover runbooks (list, generate form, detail with go/no-go checklist, step completion, abort warning and two-approver rollback), all on the live API. |
+| Rollback re-keying export (FR-49.9) | Built | On the runbook page: the rollback form takes the postings since T-0 as pasted lines (kind, entity, document, posted at, account, dimensions, currency, amount, text), checks their shape and entities before sending, and after the rollback shows the line counts and links to download the two CSV files. Text holding a comma, semicolon or tab cannot be pasted; an upload of the ledger's own export comes with the ledger query (D9 handoff). |
+| Screens built | Built | Pack runs (list with filters, open_items and project_wip start forms, detail with control-total board, quarantine release and projects), project opening balances, parallel runs (list, start, review), legacy reference lookup, and cutover runbooks (list, generate form, detail with go/no-go checklist, step completion, abort warning, two-approver rollback with the re-keying export and its files), all on the live API. |
 
 Web "Needs": none. The module uses `fetch`, React and the shell UI primitives only.

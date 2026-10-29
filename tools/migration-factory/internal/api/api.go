@@ -1,8 +1,9 @@
 // Package api exposes the migration-factory HTTP surface: open_items and project_wip pack runs
 // with their control totals and quarantine release, the legacy cross-reference lookup, the
-// parallel-run review, project opening balances, and the cutover runbook. Handlers decode and validate the
-// request, read the principal from the tenant context, apply the domain rules and persist
-// through the Store, which scopes every transaction to the tenant.
+// parallel-run review, project opening balances, and the cutover runbook with its rollback
+// re-keying export. Handlers decode and validate the request, read the principal from the tenant
+// context, apply the domain rules and persist through the Store, which scopes every transaction
+// to the tenant.
 package api
 
 import (
@@ -61,6 +62,7 @@ type Store interface {
 	ListPlans(ctx context.Context, f store.PlanFilter) ([]domain.Plan, error)
 	CompleteStep(ctx context.Context, idem store.Idem, c store.StepCompletion) (domain.Plan, bool, error)
 	Rollback(ctx context.Context, idem store.Idem, r store.RollbackRequest) (domain.Plan, bool, error)
+	RekeyLines(ctx context.Context, planID string, kind domain.PostingKind) ([]domain.RekeyPosting, error)
 	ReleaseQuarantined(ctx context.Context, idem store.Idem, rq store.Release) (domain.PackRun, bool, error)
 	LookupXref(ctx context.Context, q store.XrefQuery) ([]domain.Xref, error)
 	StartParallelRun(ctx context.Context, idem store.Idem, run domain.ParallelRun) (domain.ParallelRun, bool, error)
@@ -113,6 +115,7 @@ func (s *Server) Register(r chi.Router) {
 		r.With(authz.RequireDuty(DutyCutoverManager)).Get("/cutover/plans/{id}", s.getPlan)
 		r.With(authz.RequireDuty(DutyStepOwner)).Post("/cutover/plans/{id}/steps/{seq}/complete", s.completeStep)
 		r.With(authz.RequireDuty(DutyCutoverManager)).Post("/cutover/plans/{id}/rollback", s.rollback)
+		r.With(authz.RequireDuty(DutyCutoverManager)).Get("/cutover/plans/{id}/rekeying/{file}", s.rekeyFile)
 	})
 }
 

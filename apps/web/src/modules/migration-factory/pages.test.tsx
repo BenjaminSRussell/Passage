@@ -361,7 +361,7 @@ describe("Cutover runbook", () => {
     fireEvent.click(screen.getByRole("button", { name: "Roll back cutover" }));
     fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Roll back" }));
     expect(await screen.findByText("Rolled back with the approval of alice and bob.")).toBeInTheDocument();
-    expect(posts("/rollback")[0].body).toEqual({ approvers: ["alice", "bob"], version: 3 });
+    expect(posts("/rollback")[0].body).toEqual({ approvers: ["alice", "bob"], postings: [], version: 3 });
     expect(screen.queryByRole("button", { name: "Complete step 1" })).not.toBeInTheDocument();
   });
 });

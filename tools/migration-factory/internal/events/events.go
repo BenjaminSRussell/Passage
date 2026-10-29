@@ -57,9 +57,13 @@ type CutoverStepCompletedData struct {
 	CompletedBy       string `json:"completed_by"`
 }
 
-// CutoverPlanRolledBackData is the payload of dev.passage.cutover.plan.rolledback.v1.
+// CutoverPlanRolledBackData is the payload of dev.passage.cutover.plan.rolledback.v1. The
+// re-keying line counts tell the legacy side how much to re-key; the files themselves are read
+// from GET /cutover/plans/{id}/rekeying/{file}.
 type CutoverPlanRolledBackData struct {
-	PlanID     string   `json:"plan_id"`
-	Approvers  []string `json:"approvers"`
-	ExecutedBy string   `json:"executed_by"`
+	PlanID             string   `json:"plan_id"`
+	Approvers          []string `json:"approvers"`
+	ExecutedBy         string   `json:"executed_by"`
+	RekeyJournalLines  int      `json:"rekey_journal_lines"`
+	RekeyDocumentLines int      `json:"rekey_document_lines"`
 }

@@ -82,11 +82,12 @@ describe("migration-factory client", () => {
 
   it("sends the plan version the user saw on step completion and rollback", async () => {
     await completeStep("p/1", 3, 45, 7, "c-key");
-    await rollbackPlan("p/1", ["alice", "bob"], 8, "r-key");
+    const posting = { kind: "DOCUMENT" as const, entity: "USMF", documentRef: "SI-9", postedAt: "2027-01-02T08:00:00Z", account: "1200", currency: "USD", amount: "125.50" };
+    await rollbackPlan("p/1", ["alice", "bob"], [posting], 8, "r-key");
     const calls = fetchMock.mock.calls as unknown as [string, RequestInit][];
     expect(calls.map(([url]) => url)).toEqual(["/api/v1/cutover/plans/p%2F1/steps/3/complete", "/api/v1/cutover/plans/p%2F1/rollback"]);
     expect(JSON.parse(calls[0][1].body as string)).toEqual({ actualDurationMin: 45, version: 7 });
-    expect(JSON.parse(calls[1][1].body as string)).toEqual({ approvers: ["alice", "bob"], version: 8 });
+    expect(JSON.parse(calls[1][1].body as string)).toEqual({ approvers: ["alice", "bob"], postings: [posting], version: 8 });
     expect(calls.map(([, init]) => new Headers(init.headers).get("Idempotency-Key"))).toEqual(["c-key", "r-key"]);
   });
 

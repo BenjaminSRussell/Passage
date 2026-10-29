@@ -20,8 +20,9 @@ call the service at `tools/migration-factory` through `api/client.ts` (paths fro
 - `/migration-factory/xref`: resolve a legacy id to the Passage record it became.
 - `/migration-factory/cutover`: cutover plans with progress.
 - `/migration-factory/cutover/new`: generate a plan.
-- `/migration-factory/cutover/:id`: the runbook, go/no-go checklist, step completion, abort warning
-  and two-approver rollback.
+- `/migration-factory/cutover/:id`: the runbook, go/no-go checklist, step completion, abort warning,
+  two-approver rollback with the postings since T-0 to re-key, and the journal and document CSV
+  downloads once rolled back (FR-49.9).
 
 Commands send an `Idempotency-Key`; pack-run releases, variance explanations, sign-off and plan
 commands send the `version` the user saw, and a MIG-0006 conflict reloads the record.

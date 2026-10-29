@@ -28,6 +28,9 @@ Built and tested:
   duration overrides, go/no-go sequencing (CUT-1601), the abort step at `abortOffsetHours`, the
   BR-49.9 abort state (CUT-1604), rollback once with two distinct approvers (CUT-1603), and a plan
   version bumped on every change.
+- **Rollback re-keying export** (`rekey.go`, FR-49.9): the postings since T-0 given with the
+  rollback become a journal file (debit and credit, each journal balanced) and a document file,
+  kept write-once in `rekey_line` and served as CSV; postings before T-0 are counted and left out.
 - **Quarantine release** (`release.go`): a quarantined open item is corrected (party or control
   account), re-validated, loaded into `legacy_xref` and booked into the run's control totals; the
   run reaches RECONCILED with the last release.
@@ -47,7 +50,7 @@ Built and tested:
   project_wip start forms, detail with the control-total board, quarantine release and projects),
   project opening balances, parallel runs (list, start, variance review and sign-off), the legacy
   reference lookup, and cutover runbooks (list, generate form, detail with go/no-go checklist,
-  step completion and rollback).
+  step completion, rollback with the re-keying postings, and the re-keying file downloads).
 - **Chart** (`charts/passage-migration-factory`): Deployment, Service and ServiceMonitor toggle.
 
 What is not built yet is listed in `NOT-IMPLEMENTED.md`.
@@ -91,6 +94,7 @@ Web: `cd apps/web && npx vitest --run src/modules/migration-factory && npx tsc -
 | `GET /api/v1/cutover/plans/{id}` | `CutoverManager` |
 | `POST /api/v1/cutover/plans/{id}/steps/{seq}/complete` | `CutoverStepOwner` |
 | `POST /api/v1/cutover/plans/{id}/rollback` | `CutoverManager` (plus two approvers in the body) |
+| `GET /api/v1/cutover/plans/{id}/rekeying/{file}` | `CutoverManager` |
 
 Duties are checked by the kernel's local `DutyPolicy`. The OPA decision point replaces it later
 (see NOT-IMPLEMENTED.md). Every POST accepts an optional `Idempotency-Key`; plan commands accept
@@ -102,7 +106,7 @@ Duties are checked by the kernel's local `DutyPolicy`. The OPA decision point re
 |---|---|
 | `dev.passage.migration.pack.reconciled.v1` | every pack run, after its control totals are computed |
 | `dev.passage.cutover.step.completed.v1` | a runbook step is marked done |
-| `dev.passage.cutover.plan.rolledback.v1` | a plan's rollback is executed |
+| `dev.passage.cutover.plan.rolledback.v1` | a plan's rollback is executed, with the re-keying line counts |
 
 ## Error codes
 
@@ -112,7 +116,7 @@ Problem details use `type` `https://passage.dev/problems/<code>`. The stable `co
 |---|---|---|
 | `MIG-0001` | 422 | Input breaks a domain rule. The detail carries the message code (MIG-1501, MIG-1504, CUT-1601, CUT-1603, ...). |
 | `MIG-0003` | 404 | Run or plan not found for this tenant. |
-| `MIG-0004` | 409 | Illegal state transition: a second rollback, or completing a step of a rolled-back plan. |
+| `MIG-0004` | 409 | Illegal state transition: a second rollback, completing a step of a rolled-back plan, or reading the re-keying files of a plan that was not rolled back. |
 | `MIG-0005` | 422 | Pack or source not available in this slice. |
 | `MIG-0006` | 409 | The plan `version` in the request is not the current one. |
 | `MIG-0007` | 422 | `Idempotency-Key` reused with a different request. |

@@ -244,9 +244,35 @@ export interface CutoverPlan {
   openGoNoGo: string[];
   abortDue: boolean;
   abortWarning?: string;
+  /** Present once the plan is rolled back: the lines exported for re-keying (FR-49.9). */
+  rekeying?: Rekeying;
   /** Present on get and commands; the list leaves it out. */
   steps?: RunbookStep[];
 }
+
+export interface Rekeying {
+  journalLines: number;
+  documentLines: number;
+  /** Postings sent with the rollback that were dated before T-0 and left out. */
+  excluded: number;
+}
+
+/** One Passage posting line since T-0 handed back to the legacy system for re-keying (FR-49.9). */
+export interface RekeyPosting {
+  kind: "JOURNAL" | "DOCUMENT";
+  entity: string;
+  documentRef: string;
+  /** RFC 3339 UTC. */
+  postedAt: string;
+  account: string;
+  dimensions?: string;
+  currency: string;
+  /** Signed decimal string: debit positive, credit negative. Never a float. */
+  amount: string;
+  text?: string;
+}
+
+export type RekeyFile = "journals.csv" | "documents.csv";
 
 export interface GenerateCutoverRequest {
   t0: string;
@@ -376,7 +402,15 @@ export function completeStep(planId: string, seq: number, actualDurationMin: num
   return post(`/cutover/plans/${encodeURIComponent(planId)}/steps/${seq}/complete`, { actualDurationMin, version }, key);
 }
 
-/** POST /cutover/plans/{id}/rollback. Needs two distinct approvers (CUT-1603). */
-export function rollbackPlan(planId: string, approvers: string[], version: number, key: string = newKey()): Promise<CutoverPlan> {
-  return post(`/cutover/plans/${encodeURIComponent(planId)}/rollback`, { approvers, version }, key);
+/**
+ * POST /cutover/plans/{id}/rollback. Needs two distinct approvers (CUT-1603). postings are the
+ * Passage postings since T-0 to export for re-keying; one the service rejects leaves the plan as it was.
+ */
+export function rollbackPlan(planId: string, approvers: string[], postings: RekeyPosting[], version: number, key: string = newKey()): Promise<CutoverPlan> {
+  return post(`/cutover/plans/${encodeURIComponent(planId)}/rollback`, { approvers, postings, version }, key);
+}
+
+/** GET /cutover/plans/{id}/rekeying/{file}: the CSV download of a rolled-back plan's re-keying file. */
+export function rekeyFileUrl(planId: string, file: RekeyFile): string {
+  return `/api/v1/cutover/plans/${encodeURIComponent(planId)}/rekeying/${file}`;
 }

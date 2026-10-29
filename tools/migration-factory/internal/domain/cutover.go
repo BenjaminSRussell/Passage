@@ -53,8 +53,10 @@ type Plan struct {
 	Steps          []Step
 	RolledBack     bool
 	Approvers      []string
-	Version        int
-	CreatedAt      time.Time
+	// Rekey counts the re-keying lines the rollback exported (FR-49.9); zero until rolled back.
+	Rekey     RekeySummary
+	Version   int
+	CreatedAt time.Time
 }
 
 // DurationOverrides maps a step name to the duration measured in the last rehearsal (minutes).

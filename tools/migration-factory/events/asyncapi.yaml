@@ -201,7 +201,7 @@ components:
               const: dev.passage.cutover.plan.rolledback.v1
             data:
               type: object
-              required: [plan_id, approvers, executed_by]
+              required: [plan_id, approvers, executed_by, rekey_journal_lines, rekey_document_lines]
               properties:
                 plan_id:
                   type: string
@@ -213,3 +213,11 @@ components:
                     type: string
                 executed_by:
                   type: string
+                rekey_journal_lines:
+                  type: integer
+                  minimum: 0
+                  description: Journal lines posted since T-0 exported for re-keying (FR-49.9).
+                rekey_document_lines:
+                  type: integer
+                  minimum: 0
+                  description: Document lines posted since T-0 exported for re-keying. The files are served at /api/v1/cutover/plans/{id}/rekeying/{file}.

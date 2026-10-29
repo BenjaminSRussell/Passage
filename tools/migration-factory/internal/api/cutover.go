@@ -52,9 +52,11 @@ type planDTO struct {
 	OpenGoNoGo     []string  `json:"openGoNoGo"`
 	// AbortDue and AbortWarning report BR-49.9 at the time of the response: the abort deadline
 	// has passed with go/no-go items open, or it is less than an hour away (CUT-1604).
-	AbortDue     bool      `json:"abortDue"`
-	AbortWarning string    `json:"abortWarning,omitempty"`
-	Steps        []stepDTO `json:"steps,omitempty"`
+	AbortDue     bool   `json:"abortDue"`
+	AbortWarning string `json:"abortWarning,omitempty"`
+	// Rekeying is set once the plan is rolled back: the lines exported for re-keying (FR-49.9).
+	Rekeying *rekeyingDTO `json:"rekeying,omitempty"`
+	Steps    []stepDTO    `json:"steps,omitempty"`
 }
 
 func (s *Server) toPlanDTO(p domain.Plan, withSteps bool) planDTO {
@@ -78,7 +80,9 @@ func (s *Server) toPlanDTO(p domain.Plan, withSteps bool) planDTO {
 		}
 	}
 	out.StepsTotal = len(p.Steps)
-	if !p.RolledBack {
+	if p.RolledBack {
+		out.Rekeying = &rekeyingDTO{JournalLines: p.Rekey.JournalLines, DocumentLines: p.Rekey.DocumentLines, Excluded: p.Rekey.Excluded}
+	} else {
 		out.AbortDue, out.AbortWarning = p.AbortDue(int(s.now().Sub(p.T0).Minutes()))
 	}
 	if withSteps {
@@ -213,8 +217,9 @@ func (s *Server) completeStep(w http.ResponseWriter, r *http.Request) {
 }
 
 type rollbackRequest struct {
-	Approvers []string `json:"approvers"`
-	Version   int      `json:"version,omitempty"`
+	Approvers []string     `json:"approvers"`
+	Postings  []postingDTO `json:"postings"`
+	Version   int          `json:"version,omitempty"`
 }
 
 func (s *Server) rollback(w http.ResponseWriter, r *http.Request) {
@@ -224,7 +229,7 @@ func (s *Server) rollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req rollbackRequest
-	idem, err := readCommand(r, &req, 1<<16)
+	idem, err := readCommand(r, &req, rollbackBodyLimit)
 	if err != nil {
 		fail(w, r, err)
 		return
@@ -237,7 +242,13 @@ func (s *Server) rollback(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, invalid("version must be >= 1 when given"))
 		return
 	}
-	plan, replayed, err := s.store.Rollback(r.Context(), idem, store.RollbackRequest{PlanID: id, Approvers: req.Approvers, ExpectedVersion: req.Version, By: p.UserID})
+	postings, err := toPostings(req.Postings)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	plan, replayed, err := s.store.Rollback(r.Context(), idem, store.RollbackRequest{PlanID: id, Approvers: req.Approvers, Postings: postings,
+		ExpectedVersion: req.Version, By: p.UserID})
 	if err != nil {
 		fail(w, r, err)
 		return
