@@ -2,6 +2,7 @@ package ledger_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -77,5 +78,32 @@ func TestAccountBalance_Failures(t *testing.T) {
 	}
 	if _, err := ledger.New("http://127.0.0.1:1", nil).AccountBalance(ctx(), "l", "2000", "2027-06"); err == nil {
 		t.Fatal("unreachable ledger must error")
+	}
+}
+
+func TestLegalEntity(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_, _ = w.Write([]byte(`{"id":"led-1","legalEntityId":"le-9"}`))
+	}))
+	defer srv.Close()
+	got, err := ledger.New(srv.URL, nil).LegalEntity(ctx(), "led-1")
+	if err != nil || got != "le-9" || gotPath != "/v1/ledger/ledgers/led-1" {
+		t.Fatalf("got %q err=%v path=%s", got, err, gotPath)
+	}
+}
+
+func TestStatusErrorIsTyped(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusForbidden) }))
+	defer srv.Close()
+	c := ledger.New(srv.URL, nil)
+	var se *ledger.StatusError
+	if _, err := c.AccountBalance(ctx(), "l", "2000", "2027-06"); !errors.As(err, &se) || se.Status != http.StatusForbidden {
+		t.Fatalf("balance err = %v", err)
+	}
+	se = nil
+	if _, err := c.LegalEntity(ctx(), "l"); !errors.As(err, &se) || se.Status != http.StatusForbidden {
+		t.Fatalf("legal entity err = %v", err)
 	}
 }

@@ -49,3 +49,11 @@ func TestLedgerBalancesWiring(t *testing.T) {
 		t.Fatal("LEDGER_URL must configure the ledger client")
 	}
 }
+
+func TestLedgerBalancesTimeoutOverride(t *testing.T) {
+	if ledgerBalances(func(k string) string {
+		return map[string]string{"LEDGER_URL": "http://ledger", "LEDGER_TIMEOUT": "750ms"}[k]
+	}) == nil {
+		t.Fatal("LEDGER_TIMEOUT must not disable the ledger client")
+	}
+}

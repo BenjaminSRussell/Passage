@@ -88,7 +88,11 @@ type Reconciliation struct {
 	Difference      *decimal.Decimal `json:"difference"`
 	Reconciled      bool             `json:"reconciled"`
 	LedgerAvailable bool             `json:"ledgerAvailable"`
+	Comparable      bool             `json:"comparable"`
+	Reason          string           `json:"reason,omitempty"`
 }
+
+const ReasonForeignCurrency = "foreign-currency items require translation"
 
 func Reconcile(totals []AgingTotal, ledgerCurrency string, ledgerBalance decimal.Decimal) []Reconciliation {
 	sub := map[string]decimal.Decimal{ledgerCurrency: decimal.Zero}
@@ -99,8 +103,13 @@ func Reconcile(totals []AgingTotal, ledgerCurrency string, ledgerBalance decimal
 	for currency, total := range sub {
 		r := Reconciliation{Currency: currency, SubledgerTotal: total}
 		if currency == ledgerCurrency {
-			diff := total.Sub(ledgerBalance)
-			r.LedgerBalance, r.Difference, r.LedgerAvailable, r.Reconciled = &ledgerBalance, &diff, true, diff.IsZero()
+			r.LedgerBalance, r.LedgerAvailable = &ledgerBalance, true
+			if len(sub) > 1 {
+				r.Reason = ReasonForeignCurrency
+			} else {
+				diff := total.Sub(ledgerBalance)
+				r.Difference, r.Comparable, r.Reconciled = &diff, true, diff.IsZero()
+			}
 		}
 		out = append(out, r)
 	}

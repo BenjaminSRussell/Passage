@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -37,6 +38,7 @@ type AgingStore interface {
 
 type LedgerBalances interface {
 	AccountBalance(ctx context.Context, ledgerID, account, periodTo string) (ledger.Balance, error)
+	LegalEntity(ctx context.Context, ledgerID string) (string, error)
 }
 
 type agingDeps struct {
@@ -149,8 +151,16 @@ func (a *API) agingReconcile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.aging.ledger == nil {
-		a.countClientError(r)
 		fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "ledger balance source is not configured"))
+		return
+	}
+	owner, err := a.aging.ledger.LegalEntity(r.Context(), ledgerID)
+	if err != nil {
+		a.ledgerFailure(w, r, ledgerID, err)
+		return
+	}
+	if owner != q.legalEntityID {
+		a.reject(w, r, &domain.Error{Code: domain.CodeValidation, Detail: "ledger does not belong to legal_entity"})
 		return
 	}
 	rows, err := a.aging.store.AgingRows(r.Context(), q.legalEntityID, q.asOf.Format(dateLayout))
@@ -161,9 +171,7 @@ func (a *API) agingReconcile(w http.ResponseWriter, r *http.Request) {
 	period := q.asOf.Format(periodLayout)
 	bal, err := a.aging.ledger.AccountBalance(r.Context(), ledgerID, a.aging.controlAccount, period)
 	if err != nil {
-		a.aging.ledgerFaults.Add(1)
-		slog.Error("ledger balance unavailable", "err", err, "ledgerId", ledgerID, "correlationId", middleware.GetReqID(r.Context()))
-		fail(w, r, httpx.NewProblem(http.StatusBadGateway, "COM-0502", "ledger balance unavailable"))
+		a.ledgerFailure(w, r, ledgerID, err)
 		return
 	}
 	currencies := domain.Reconcile(domain.Age(q.asOf, rows, false), bal.Currency, apBalance(bal))
@@ -181,6 +189,18 @@ func (a *API) agingReconcile(w http.ResponseWriter, r *http.Request) {
 		AsOf: q.asOf.Format(dateLayout), LegalEntityID: q.legalEntityID, LedgerID: ledgerID, ControlAccount: a.aging.controlAccount,
 		LedgerPeriod: period, Currencies: currencies, Reconciled: all,
 	})
+}
+
+func (a *API) ledgerFailure(w http.ResponseWriter, r *http.Request, ledgerID string, err error) {
+	var se *ledger.StatusError
+	if errors.As(err, &se) && se.Status == http.StatusForbidden {
+		a.countClientError(r)
+		fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "caller lacks ledger.balance.read and ledger.journal.read for the ledger"))
+		return
+	}
+	a.aging.ledgerFaults.Add(1)
+	slog.Error("ledger unavailable", "err", err, "ledgerId", ledgerID, "correlationId", middleware.GetReqID(r.Context()))
+	fail(w, r, httpx.NewProblem(http.StatusBadGateway, "COM-0502", "ledger balance unavailable"))
 }
 
 func apBalance(b ledger.Balance) decimal.Decimal { return b.Credit.Sub(b.Debit) }

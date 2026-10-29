@@ -23,6 +23,7 @@ import (
 const (
 	Timeout         = 3 * time.Second
 	balancesPath    = "/v1/ledger/balances"
+	ledgersPath     = "/v1/ledger/ledgers/"
 	maxResponseSize = 1 << 20
 )
 
@@ -53,34 +54,63 @@ type balancesBody struct {
 	} `json:"rows"`
 }
 
-func (c *Client) AccountBalance(ctx context.Context, ledgerID, account, periodTo string) (Balance, error) {
+type StatusError struct{ Status int }
+
+func (e *StatusError) Error() string { return fmt.Sprintf("ledger: unexpected status %d", e.Status) }
+
+func (c *Client) get(ctx context.Context, path string, q url.Values, subject string) ([]byte, error) {
 	principal, ok := tenant.FromContext(ctx)
 	if !ok {
-		return Balance{}, errors.New("ledger balance: no principal in context")
+		return nil, errors.New("ledger: no principal in context")
 	}
-	q := url.Values{"ledger": {ledgerID}, "period_to": {periodTo}, "account_from": {account}, "account_to": {account}}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+balancesPath+"?"+q.Encode(), nil)
+	target := c.baseURL + path
+	if q != nil {
+		target += "?" + q.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
-		return Balance{}, fmt.Errorf("ledger balance: %w", err)
+		return nil, fmt.Errorf("ledger: %w", err)
 	}
 	forward(req, principal)
 	resp, err := c.http.Do(req)
 	if err != nil {
-		slog.ErrorContext(ctx, "ledger balance transport failed", "err", err, "account", account, "correlationId", middleware.GetReqID(ctx))
-		return Balance{}, fmt.Errorf("ledger balance: %w", err)
+		slog.ErrorContext(ctx, "ledger request failed", "err", err, "subject", subject, "correlationId", middleware.GetReqID(ctx))
+		return nil, fmt.Errorf("ledger: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
 	if err != nil {
-		slog.ErrorContext(ctx, "ledger balance read failed", "err", err, "account", account, "correlationId", middleware.GetReqID(ctx))
-		return Balance{}, fmt.Errorf("ledger balance: %w", err)
+		slog.ErrorContext(ctx, "ledger read failed", "err", err, "subject", subject, "correlationId", middleware.GetReqID(ctx))
+		return nil, fmt.Errorf("ledger: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		err := fmt.Errorf("ledger balance: unexpected status %d", resp.StatusCode)
-		slog.ErrorContext(ctx, "ledger balance rejected", "err", err, "status", resp.StatusCode, "account", account, "correlationId", middleware.GetReqID(ctx))
+		slog.ErrorContext(ctx, "ledger rejected", "status", resp.StatusCode, "subject", subject, "correlationId", middleware.GetReqID(ctx))
+		return nil, &StatusError{Status: resp.StatusCode}
+	}
+	return raw, nil
+}
+
+func (c *Client) AccountBalance(ctx context.Context, ledgerID, account, periodTo string) (Balance, error) {
+	q := url.Values{"ledger": {ledgerID}, "period_to": {periodTo}, "account_from": {account}, "account_to": {account}}
+	raw, err := c.get(ctx, balancesPath, q, account)
+	if err != nil {
 		return Balance{}, err
 	}
 	return parse(ctx, raw, account)
+}
+
+func (c *Client) LegalEntity(ctx context.Context, ledgerID string) (string, error) {
+	raw, err := c.get(ctx, ledgersPath+url.PathEscape(ledgerID), nil, ledgerID)
+	if err != nil {
+		return "", err
+	}
+	var body struct {
+		LegalEntityID string `json:"legalEntityId"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil || body.LegalEntityID == "" {
+		return "", errors.New("ledger: response has no legalEntityId")
+	}
+	return body.LegalEntityID, nil
 }
 
 func parse(ctx context.Context, raw []byte, account string) (Balance, error) {

@@ -102,7 +102,7 @@ paths:
     get:
       operationId: reconcileAging
       x-passage-duty: aging.reconcile
-      description: Compares total open AP per currency with the AP control account (config AP_CONTROL_ACCOUNT, default 2000) in the ledger, as credits minus debits through the ledger period containing as_of. The ledger reports one currency per ledger; other currencies are listed with ledgerAvailable false and are never reconciled. The ledger balance is cumulative to period end, so reconcile at a period end. The ledger call forwards the caller's identity and duties, so the caller needs ledger.balance.read until service identity (#226) replaces forwarding.
+      description: Compares total open AP per currency with the AP control account (config AP_CONTROL_ACCOUNT, default 2000) in the ledger, as credits minus debits through the ledger period containing as_of. The ledger reports one currency per ledger; other currencies are listed with ledgerAvailable false and are never reconciled. When open items exist in any currency other than the ledger's, the ledger-currency line is also not comparable (comparable false, reason foreign-currency items require translation, difference null) because the ledger balance includes translated foreign invoices, and the overall reconciled flag is false. The ledger balance is cumulative to period end, so reconcile at a period end. The ledger call forwards the caller's identity and duties, so the caller needs ledger.balance.read and ledger.journal.read (the ledger is looked up to confirm it belongs to the legal entity; a 400 is returned otherwise, and a ledger 403 is passed through as 403) until service identity (#226) replaces forwarding.
       parameters:
         - { name: legal_entity, in: query, required: false, schema: { type: string, format: uuid } }
         - { name: as_of, in: query, required: false, schema: { type: string, format: date } }
@@ -176,7 +176,7 @@ components:
           type: array
           items:
             type: object
-            required: [currency, subledgerTotal, ledgerBalance, difference, reconciled, ledgerAvailable]
+            required: [currency, subledgerTotal, ledgerBalance, difference, reconciled, ledgerAvailable, comparable]
             properties:
               currency: { type: string }
               subledgerTotal: { type: string }
@@ -184,6 +184,8 @@ components:
               difference: { type: [string, 'null'], description: Subledger minus ledger. }
               reconciled: { type: boolean }
               ledgerAvailable: { type: boolean }
+              comparable: { type: boolean }
+              reason: { type: string }
     DecimalString:
       type: string
       pattern: '^[0-9]+(\.[0-9]+)?$'

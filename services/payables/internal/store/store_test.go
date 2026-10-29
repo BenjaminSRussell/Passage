@@ -1,14 +1,12 @@
 package store
 
 import (
-	"fmt"
-	"time"
-
 	"context"
 	"errors"
-	"github.com/BenjaminSRussell/passage/services/payables/internal/domain"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
@@ -16,6 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
+	"github.com/BenjaminSRussell/passage/services/payables/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/payables/migrations"
 )
 

@@ -132,8 +132,14 @@ func TestAge_GeneratedThousandItems(t *testing.T) {
 }
 
 func TestReconcile(t *testing.T) {
-	totals := domain.Age(asOf, generated1000(), false)
-	usd := totalOf(totals, "USD")
+	all := domain.Age(asOf, generated1000(), false)
+	usd := totalOf(all, "USD")
+	var totals []domain.AgingTotal
+	for _, t := range all {
+		if t.Currency == "USD" {
+			totals = append(totals, t)
+		}
+	}
 	tests := []struct {
 		name       string
 		ledger     decimal.Decimal
@@ -147,17 +153,31 @@ func TestReconcile(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got := domain.Reconcile(totals, "USD", tc.ledger)
-			if len(got) != 2 || got[0].Currency != "EUR" || got[1].Currency != "USD" {
+			if len(got) != 1 || got[0].Currency != "USD" {
 				t.Fatalf("currencies = %+v", got)
 			}
-			if got[0].LedgerAvailable || got[0].Reconciled || got[0].Difference != nil {
-				t.Fatalf("EUR has no ledger balance but reports %+v", got[0])
-			}
-			u := got[1]
-			if u.Reconciled != tc.reconciled || !u.Difference.Equal(tc.wantDiff) || !u.SubledgerTotal.Equal(usd) || !u.LedgerBalance.Equal(tc.ledger) {
+			u := got[0]
+			if !u.Comparable || u.Reconciled != tc.reconciled || !u.Difference.Equal(tc.wantDiff) || !u.SubledgerTotal.Equal(usd) || !u.LedgerBalance.Equal(tc.ledger) {
 				t.Fatalf("USD = %+v", u)
 			}
 		})
+	}
+}
+
+func TestReconcile_ForeignItemsMakeLedgerLineNotComparable(t *testing.T) {
+	totals := domain.Age(asOf, generated1000(), false)
+	usd := totalOf(totals, "USD")
+	got := domain.Reconcile(totals, "USD", usd)
+	if len(got) != 2 || got[0].Currency != "EUR" || got[1].Currency != "USD" {
+		t.Fatalf("currencies = %+v", got)
+	}
+	for _, r := range got {
+		if r.Comparable || r.Reconciled || r.Difference != nil {
+			t.Fatalf("%s must not be comparable beside foreign items: %+v", r.Currency, r)
+		}
+	}
+	if got[0].LedgerAvailable || !got[1].LedgerAvailable || got[1].Reason != domain.ReasonForeignCurrency || !got[1].LedgerBalance.Equal(usd) {
+		t.Fatalf("got %+v", got)
 	}
 }
 

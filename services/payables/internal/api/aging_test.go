@@ -44,6 +44,18 @@ type fakeLedger struct {
 	err     error
 	account string
 	period  string
+	owner   string
+	ownErr  error
+}
+
+func (f *fakeLedger) LegalEntity(context.Context, string) (string, error) {
+	if f.ownErr != nil {
+		return "", f.ownErr
+	}
+	if f.owner == "" {
+		return entityA, nil
+	}
+	return f.owner, nil
 }
 
 func (f *fakeLedger) AccountBalance(_ context.Context, _, account, period string) (ledger.Balance, error) {
@@ -175,6 +187,9 @@ func TestAging_ReconcileCurrencyWithoutLedgerIsNotReconciled(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"ledgerAvailable":false`) || !strings.HasSuffix(strings.TrimSpace(rec.Body.String()), `"reconciled":false}`) {
 		t.Fatalf("got %d %s", rec.Code, rec.Body)
 	}
+	if !strings.Contains(rec.Body.String(), `"comparable":false,"reason":"foreign-currency items require translation"`) || strings.Contains(rec.Body.String(), `"difference":"0"`) {
+		t.Fatalf("ledger-currency line must be not comparable beside foreign items: %s", rec.Body)
+	}
 }
 
 func TestAging_ReconcileFailures(t *testing.T) {
@@ -187,6 +202,10 @@ func TestAging_ReconcileFailures(t *testing.T) {
 		wantBody string
 	}{
 		{"ledger error", &fakeLedger{err: errors.New("boom")}, reconcile, "aging.reconcile", http.StatusBadGateway, "COM-0502"},
+		{"ledger forbids caller", &fakeLedger{err: &ledger.StatusError{Status: http.StatusForbidden}}, reconcile, "aging.reconcile", http.StatusForbidden, "AUTH-0003"},
+		{"ledger lookup forbids caller", &fakeLedger{ownErr: &ledger.StatusError{Status: http.StatusForbidden}}, reconcile, "aging.reconcile", http.StatusForbidden, "AUTH-0003"},
+		{"ledger lookup error", &fakeLedger{ownErr: errors.New("boom")}, reconcile, "aging.reconcile", http.StatusBadGateway, "COM-0502"},
+		{"ledger of another legal entity", &fakeLedger{owner: entityB}, reconcile, "aging.reconcile", http.StatusBadRequest, "ledger does not belong"},
 		{"no ledger configured", nil, reconcile, "aging.reconcile", http.StatusServiceUnavailable, "COM-0503"},
 		{"missing ledger param", &fakeLedger{}, "/v1/payables/aging:reconcile?legal_entity=" + entityA, "aging.reconcile", http.StatusBadRequest, "ledger"},
 		{"report duty does not open reconcile", &fakeLedger{}, reconcile, "aging.read", http.StatusForbidden, "AUTH-0003"},

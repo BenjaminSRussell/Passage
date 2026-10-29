@@ -73,10 +73,15 @@ func run(ctx context.Context, getenv func(string) string) error {
 }
 
 func ledgerBalances(getenv func(string) string) api.LedgerBalances {
-	if url := getenv("LEDGER_URL"); url != "" {
-		return ledger.New(url, nil)
+	url := getenv("LEDGER_URL")
+	if url == "" {
+		return nil
 	}
-	return nil
+	timeout := ledger.Timeout
+	if v, err := time.ParseDuration(getenv("LEDGER_TIMEOUT")); err == nil && v > 0 {
+		timeout = v
+	}
+	return ledger.New(url, &http.Client{Timeout: timeout})
 }
 
 func addr(getenv func(string) string, key, fallback string) string {
