@@ -1,12 +1,13 @@
 openapi: 3.1.0
 info:
   title: Passage compliance
-  version: 0.2.0
+  version: 0.3.0
   description: >-
     Segregation of duties (PSG-48 slice 1): seed rules, pre-save simulation,
     evaluation of a user's effective roles, the conflict listing and the
     mitigation and risk-acceptance workflow (FR-48.4, FR-48.5, BR-48.1).
-    Browser calls go to /api/v1/sod/...; the gateway strips /api.
+    Breach notification clocks (PSG-48 slice 2, FR-48.29, BR-48.18).
+    Browser calls go to /api/v1/sod/... and /api/v1/security/...; the gateway strips /api.
 servers:
   - url: https://api.passage.dev
 paths:
@@ -219,8 +220,67 @@ paths:
         "412": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
         "428": { $ref: "#/components/responses/Problem" }
+  /v1/security/incidents:breach-clocks:
+    post:
+      operationId: computeBreachClocks
+      x-passage-duty: SecurityIncidentManage
+      description: >-
+        Notification clocks for a confirmed personal-data breach (FR-48.29).
+        Clocks start at awareAt, not at detection, and deadlines are UTC
+        instants (BR-48.18); status is computed at the server time. A clock
+        with no fixed hour ("without undue delay", "as soon as feasible") has
+        no deadlineAt. Read-only: nothing is stored until the security_incident
+        store exists.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [awareAt, personalDataBreach, regimes]
+              properties:
+                awareAt: { type: string, format: date-time, description: when the controller became aware; not in the future }
+                personalDataBreach: { type: boolean, description: must be true (INC-1303 otherwise) }
+                regimes:
+                  type: array
+                  minItems: 1
+                  maxItems: 20
+                  items: { $ref: "#/components/schemas/BreachRegime" }
+                usStateWindowDays: { type: integer, minimum: 30, maximum: 60, description: US_STATE only; 0 or omitted means 30 }
+      responses:
+        "200":
+          description: Clocks in regime order with their status at asOf
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [awareAt, asOf, items]
+                properties:
+                  awareAt: { type: string, format: date-time }
+                  asOf: { type: string, format: date-time }
+                  items: { type: array, items: { $ref: "#/components/schemas/BreachClock" } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
 components:
   schemas:
+    BreachRegime:
+      type: string
+      enum: [GDPR, UK_GDPR, US_STATE, PIPEDA, CERT_IN, LFPDPPP]
+    BreachClock:
+      type: object
+      required: [regime, recipient, basis, status]
+      properties:
+        regime: { $ref: "#/components/schemas/BreachRegime" }
+        recipient: { type: string }
+        basis: { type: string }
+        deadlineAt: { type: string, format: date-time, description: absent where the regime has no fixed hour }
+        status:
+          type: string
+          enum: [NO_FIXED_DEADLINE, NOT_DUE, AT_RISK, OVERDUE]
+          description: AT_RISK inside the last 12 hours before the deadline
     Role:
       type: object
       required: [name, duties]

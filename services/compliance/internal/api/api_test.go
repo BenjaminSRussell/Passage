@@ -179,6 +179,7 @@ func TestDutiesAreEnforced(t *testing.T) {
 		{http.MethodGet, "/v1/sod/conflicts/" + id, DutySoDReview},
 		{http.MethodPost, "/v1/sod/conflicts/" + id + "/mitigations", DutySoDApprove},
 		{http.MethodPost, "/v1/sod/conflicts/" + id + "/accept-risk", DutySoDAdmin},
+		{http.MethodPost, "/v1/security/incidents:breach-clocks", DutyIncidentManage},
 	} {
 		// A neighbouring duty is not enough.
 		rec := serve(t, h, call{method: tc.method, path: tc.path, duties: []string{"ComplianceView"}})
@@ -394,6 +395,75 @@ func TestAcceptRisk(t *testing.T) {
 	rec = serve(t, h, call{method: http.MethodPost, path: path, body: AcceptRiskRequest{Reason: "monthly review"}, user: ids.New(), duties: []string{DutySoDAdmin}, headers: hdr})
 	if rec.Code != http.StatusOK || f.conflict.State != domain.StateAcceptedRisk {
 		t.Fatalf("MEDIUM accept: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func breachCall(body any, duties ...string) call {
+	return call{method: http.MethodPost, path: "/v1/security/incidents:breach-clocks", body: body, duties: duties}
+}
+
+func TestBreachClocks(t *testing.T) {
+	h := router(newAPI(&fakeStore{}, true))
+	// AC-48.19: aware 2026-11-02T09:00Z; the server clock reads 13 h later.
+	aware := now.Add(-13 * time.Hour)
+	body := map[string]any{"awareAt": aware.Format(time.RFC3339), "personalDataBreach": true, "regimes": []string{"CERT_IN", "GDPR"}}
+	rec := serve(t, h, breachCall(body, DutyIncidentManage))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	var got BreachClocksResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.AsOf.Equal(now) || len(got.Items) != 3 {
+		t.Fatalf("want 3 clocks as of the server time, got %+v", got)
+	}
+	gdpr, subjects, certIn := got.Items[0], got.Items[1], got.Items[2]
+	if gdpr.Regime != domain.RegimeGDPR || gdpr.DeadlineAt == nil || !gdpr.DeadlineAt.Equal(aware.Add(72*time.Hour)) || gdpr.Status != domain.ClockNotDue {
+		t.Fatalf("GDPR authority clock: %+v", gdpr)
+	}
+	if subjects.DeadlineAt != nil || subjects.Status != domain.ClockNoFixedDeadline {
+		t.Fatalf("GDPR Art. 34 has no fixed hour: %+v", subjects)
+	}
+	if certIn.Regime != domain.RegimeCERTIn || certIn.Status != domain.ClockOverdue {
+		t.Fatalf("CERT-In 6 h clock is overdue at +13 h: %+v", certIn)
+	}
+}
+
+func TestBreachClocksRefusals(t *testing.T) {
+	h := router(newAPI(&fakeStore{}, true))
+	aware := now.Add(-time.Hour).Format(time.RFC3339)
+	for _, tc := range []struct {
+		name   string
+		body   any
+		status int
+		code   string
+		field  string
+	}{
+		{"not a confirmed breach", map[string]any{"awareAt": aware, "personalDataBreach": false, "regimes": []string{"GDPR"}}, http.StatusUnprocessableEntity, domain.CodeBreachNotConfirmed, ""},
+		{"missing awareAt", map[string]any{"personalDataBreach": true, "regimes": []string{"GDPR"}}, http.StatusBadRequest, codeInvalid, "awareAt"},
+		{"awareAt in the future", map[string]any{"awareAt": now.Add(time.Hour).Format(time.RFC3339), "personalDataBreach": true, "regimes": []string{"GDPR"}}, http.StatusBadRequest, codeInvalid, "awareAt"},
+		{"no regimes", map[string]any{"awareAt": aware, "personalDataBreach": true, "regimes": []string{}}, http.StatusBadRequest, codeInvalid, "regimes"},
+		{"unknown regime", map[string]any{"awareAt": aware, "personalDataBreach": true, "regimes": []string{"NOWHERE"}}, http.StatusBadRequest, codeInvalid, "regimes"},
+		{"US state window out of range", map[string]any{"awareAt": aware, "personalDataBreach": true, "regimes": []string{"US_STATE"}, "usStateWindowDays": 90}, http.StatusUnprocessableEntity, domain.CodeBreachStateDays, ""},
+		{"unknown field", map[string]any{"awareAt": aware, "personalDataBreach": true, "regimes": []string{"GDPR"}, "now": aware}, http.StatusBadRequest, "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := serve(t, h, breachCall(tc.body, DutyIncidentManage))
+			if rec.Code != tc.status {
+				t.Fatalf("want %d, got %d: %s", tc.status, rec.Code, rec.Body.String())
+			}
+			if tc.code == "" {
+				return
+			}
+			var p httpx.Problem
+			if err := json.Unmarshal(rec.Body.Bytes(), &p); err != nil || p.Code != tc.code {
+				t.Fatalf("want %s, got %s", tc.code, rec.Body.String())
+			}
+			if tc.field != "" && p.Errors[tc.field] == "" {
+				t.Fatalf("want a %s field error, got %+v", tc.field, p.Errors)
+			}
+		})
 	}
 }
 

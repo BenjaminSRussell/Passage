@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
@@ -104,5 +105,44 @@ func TestTaxIDAndMTDValidation(t *testing.T) {
 	legacy := `{"periodKey":"26A1","boxes":{"box1":"1"}}`
 	if rec := call(t, h, http.MethodPost, path, json.RawMessage(legacy), "LocalizationAdmin"); rec.Code != http.StatusBadRequest {
 		t.Fatalf("legacy body: %d", rec.Code)
+	}
+}
+
+func TestTDSWithholdEndpoint(t *testing.T) {
+	h := newRouter(t)
+	path := "/v1/localization/in/tds:withhold"
+	// AC-48.21: 194J at 10% without PAN withholds 20%.
+	rec := call(t, h, http.MethodPost, path, map[string]any{"section": "194J", "amount": "100000", "panPresent": false}, "LocalizationAdmin")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("withhold: %d %s", rec.Code, rec.Body.String())
+	}
+	var res domain.WithholdResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.TDSAmount.String() != "20000" || !res.RatePct.Equal(decimal.NewFromInt(20)) || res.Reason != domain.ReasonNoPAN || res.ReturnForm != "26Q" {
+		t.Fatalf("want 20000 at 20%% on 26Q, got %+v", res)
+	}
+	if !strings.Contains(rec.Body.String(), `"tdsAmount":"20000"`) {
+		t.Fatalf("amounts travel as decimal strings: %s", rec.Body.String())
+	}
+	for _, tc := range []struct {
+		name   string
+		body   map[string]any
+		duty   string
+		status int
+		want   string
+	}{
+		{"unknown section", map[string]any{"section": "999Z", "amount": "1"}, "LocalizationAdmin", http.StatusUnprocessableEntity, domain.CodeTDSSection},
+		{"missing section", map[string]any{"amount": "1"}, "LocalizationAdmin", http.StatusBadRequest, `"section"`},
+		{"sub-paisa amount", map[string]any{"section": "194J", "amount": "1.005"}, "LocalizationAdmin", http.StatusBadRequest, `"amount"`},
+		{"194C without payee type", map[string]any{"section": "194C", "amount": "40000", "panPresent": true}, "LocalizationAdmin", http.StatusUnprocessableEntity, domain.CodeTDSPayee},
+		{"unknown field", map[string]any{"section": "194J", "amount": "1", "rate": "5"}, "LocalizationAdmin", http.StatusBadRequest, ""},
+		{"wrong duty", map[string]any{"section": "194J", "amount": "1"}, "ComplianceView", http.StatusForbidden, ""},
+	} {
+		rec := call(t, h, http.MethodPost, path, tc.body, tc.duty)
+		if rec.Code != tc.status || !strings.Contains(rec.Body.String(), tc.want) {
+			t.Errorf("%s: %d %s", tc.name, rec.Code, rec.Body.String())
+		}
 	}
 }

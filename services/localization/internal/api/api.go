@@ -1,5 +1,6 @@
 // Package api exposes the localization HTTP surface: pack catalogue, install
-// checks, tax-id validation and statutory fixture validation (FR-48.1, FR-48.2).
+// checks, tax-id validation and statutory fixture validation (FR-48.1, FR-48.2),
+// and the India TDS calculation (FR-48.27).
 package api
 
 import (
@@ -7,9 +8,11 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 	"sync/atomic"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -59,6 +62,41 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyAdmin)).Post("/v1/localization/packs/{code}/install:check", a.checkInstall)
 	r.With(authz.RequireDuty(dutyAdmin)).Post("/v1/localization/tax-ids:validate", a.validateTaxID)
 	r.With(authz.RequireDuty(dutyAdmin)).Post("/v1/localization/statutory/uk-mtd-vat:validate", a.validateMTDVAT)
+	r.With(authz.RequireDuty(dutyAdmin)).Post("/v1/localization/in/tds:withhold", a.withholdTDS)
+}
+
+// withholdTDS computes TDS for one payment under the India pack (FR-48.27). It is a
+// read-only calculation; the withholding entry is written by the posting path.
+func (a *API) withholdTDS(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	var req domain.WithholdInput
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	fields := map[string]string{}
+	if strings.TrimSpace(req.Section) == "" {
+		fields["section"] = "is required"
+	}
+	for name, v := range map[string]decimal.Decimal{"amount": req.Amount, "ytdPaid": req.YTDPaid, "ytdTaxed": req.YTDTaxed} {
+		if v.Exponent() < -2 {
+			fields[name] = "at most 2 decimal places (paise)"
+		}
+	}
+	if len(fields) > 0 {
+		p := httpx.NewProblem(http.StatusBadRequest, "COM-0002", "request failed validation")
+		p.Errors = fields
+		httpx.Fail(w, r, p)
+		return
+	}
+	res, err := domain.Withhold(req)
+	if err != nil {
+		httpx.Fail(w, r, domainProblem(err))
+		return
+	}
+	httpx.JSON(w, http.StatusOK, res)
 }
 
 func (a *API) listPacks(w http.ResponseWriter, r *http.Request) {

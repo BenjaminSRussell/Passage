@@ -1,7 +1,8 @@
-// Package api exposes the compliance HTTP surface for segregation of duties:
+// Package api exposes the compliance HTTP surface: for segregation of duties,
 // rule listing, pre-save simulation, evaluation of a user's effective roles,
 // the conflict listing and the mitigation and risk-acceptance workflow
-// (FR-48.4, FR-48.5, BR-48.1).
+// (FR-48.4, FR-48.5, BR-48.1); and the breach notification clocks of a
+// confirmed personal-data breach (FR-48.29, BR-48.18).
 package api
 
 import (
@@ -30,6 +31,8 @@ const (
 	DutySoDApprove    = "SoDApprove"
 	DutySoDAdmin      = "SoDAdmin"
 	DutySecurityAdmin = "SecurityAdmin"
+	// DutyIncidentManage covers security incidents and breach clocks (PRD §9.48 duties).
+	DutyIncidentManage = "SecurityIncidentManage"
 )
 
 const (
@@ -38,6 +41,8 @@ const (
 	maxDuties    = 500
 	maxText      = 2000
 	codeInvalid  = "COM-0002"
+	// maxRegimes bounds the regimes of one breach-clock request.
+	maxRegimes = 20
 )
 
 // Store is the persistence the handlers need (implemented by store.Postgres).
@@ -111,6 +116,29 @@ type AcceptRiskRequest struct {
 	Reason string `json:"reason"`
 }
 
+// BreachClocksRequest is the body of POST /v1/security/incidents:breach-clocks.
+// Nothing is stored: the incident record and its notification tasks come with
+// the security_incident store.
+type BreachClocksRequest struct {
+	AwareAt            time.Time       `json:"awareAt"`
+	PersonalDataBreach bool            `json:"personalDataBreach"`
+	Regimes            []domain.Regime `json:"regimes"`
+	USStateWindowDays  int             `json:"usStateWindowDays"`
+}
+
+// BreachClocksResponse lists each clock with its status at the server time.
+type BreachClocksResponse struct {
+	AwareAt time.Time         `json:"awareAt"`
+	AsOf    time.Time         `json:"asOf"`
+	Items   []BreachClockItem `json:"items"`
+}
+
+// BreachClockItem is one clock with its computed status.
+type BreachClockItem struct {
+	domain.Clock
+	Status domain.ClockStatus `json:"status"`
+}
+
 // Register mounts the routes on r.
 func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
@@ -121,6 +149,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutySoDReview)).Get("/v1/sod/conflicts/{id}", a.getConflict)
 	r.With(authz.RequireDuty(DutySoDApprove)).Post("/v1/sod/conflicts/{id}/mitigations", a.mitigate)
 	r.With(authz.RequireDuty(DutySoDAdmin)).Post("/v1/sod/conflicts/{id}/accept-risk", a.acceptRisk)
+	r.With(authz.RequireDuty(DutyIncidentManage)).Post("/v1/security/incidents:breach-clocks", a.breachClocks)
 }
 
 func (a *API) ready(w http.ResponseWriter, r *http.Request) {
@@ -330,6 +359,58 @@ func (a *API) acceptRisk(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, c)
 }
 
+// breachClocks computes the notification clocks of a confirmed personal-data
+// breach (FR-48.29). Clocks start at awareAt (BR-48.18), which cannot lie in
+// the future; status is reported at the server time.
+func (a *API) breachClocks(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	var req BreachClocksRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	at := a.now()
+	fields := map[string]string{}
+	switch {
+	case req.AwareAt.IsZero():
+		fields["awareAt"] = "is required (RFC 3339)"
+	case req.AwareAt.After(at):
+		fields["awareAt"] = "must not be in the future"
+	}
+	switch {
+	case len(req.Regimes) == 0:
+		fields["regimes"] = "list at least one regime"
+	case len(req.Regimes) > maxRegimes:
+		fields["regimes"] = fmt.Sprintf("at most %d regimes", maxRegimes)
+	default:
+		for _, reg := range req.Regimes {
+			if !domain.ValidRegime(reg) {
+				fields["regimes"] = fmt.Sprintf("%q is not a supported regime", reg)
+			}
+		}
+	}
+	if len(fields) > 0 {
+		httpx.Fail(w, r, invalid(fields))
+		return
+	}
+	if !req.PersonalDataBreach {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeBreachNotConfirmed, "breach clocks start only for a confirmed personal-data breach"))
+		return
+	}
+	clocks, err := domain.BreachClocks(req.AwareAt, req.Regimes, req.USStateWindowDays)
+	if err != nil {
+		httpx.Fail(w, r, domainProblem(err))
+		return
+	}
+	items := make([]BreachClockItem, 0, len(clocks))
+	for _, c := range clocks {
+		items = append(items, BreachClockItem{Clock: c, Status: domain.StatusOf(c, at)})
+	}
+	httpx.JSON(w, http.StatusOK, BreachClocksResponse{AwareAt: req.AwareAt.UTC(), AsOf: at, Items: items})
+}
+
 func validateRoles(userID string, roles []domain.Role) error {
 	fields := map[string]string{}
 	if !ids.Valid(userID) {
@@ -358,7 +439,7 @@ func invalid(fields map[string]string) error {
 	return p
 }
 
-// domainProblem maps a domain rule violation to 422 with its SOD code.
+// domainProblem maps a domain rule violation to 422 with its code.
 func domainProblem(err error) error {
 	var de *domain.Error
 	if errors.As(err, &de) {

@@ -1,4 +1,4 @@
-# localization (PSG-48, wave 48, slice 1)
+# localization (PSG-48, wave 48, slices 1 and 2)
 
 Country localization for Passage. Packs are metadata, never code forks (FR-48.1). Slice 1 loads the
 seven first country packs from `countrypacks/` at start-up, validates them, and exposes:
@@ -9,10 +9,12 @@ seven first country packs from `countrypacks/` at start-up, validates them, and 
 - the UK MTD VAT return check against HMRC's VAT (MTD) API 1.0 submit-return body (`periodKey`,
   `vatDueSales` … `totalAcquisitionsExVAT`, `finalised`): every box present within HMRC's range and scale
   (boxes 1 to 4 signed with pence, box 5 non-negative, boxes 6 to 9 signed whole pounds), `finalised` true,
-  box 3 = box 1 + box 2 and box 5 = |box 3 - box 4|. Amounts are decimals, never floats.
+  box 3 = box 1 + box 2 and box 5 = |box 3 - box 4|. Amounts are decimals, never floats;
+- (slice 2) the India TDS calculation for one payment, `POST /v1/localization/in/tds:withhold` (see Wave reference).
 
 The compliance workspace (`apps/web/src/modules/compliance`, routes `/compliance/packs` and
-`/compliance/packs/:code`) lists the packs, shows a pack's contents and runs the install and tax-id checks.
+`/compliance/packs/:code`) lists the packs, shows a pack's contents and runs the install and tax-id checks;
+`/compliance/tds` is the India TDS calculator.
 
 Installs per legal entity, pack versions and upgrade preview need the store (later slice). The service is
 stateless in this slice and needs no database.
@@ -53,8 +55,17 @@ any pack fails validation, or when the directory does not hold the seven packs.
 | `LOC-0505` | 422 | invalid pack metadata or tax id |
 | `LOC-0506` | 404 | no pack with that code |
 | `ERP-0801` | 422 | statutory output fails its schema (`errors` lists fields) |
+| `LOC-0510` | 422 | TDS section is not in the India table |
+| `LOC-0511` | 422 | TDS amount not positive, year-to-date paid or taxed negative, taxed above paid, or certificate rate outside 0..100 |
+| `LOC-0512` | 422 | 194C payee type missing or not INDIVIDUAL_HUF or COMPANY |
 
 ## Wave reference
 
 PSG-48 slice 1 covers FR-48.1 (framework and validation), FR-48.2 (seven packs, metadata only) and the
-UK part of AC1. See `NOT-IMPLEMENTED.md`.
+UK part of AC1. Slice 2 adds the India TDS calculation (part of FR-48.27, AC-48.21):
+`POST /v1/localization/in/tds:withhold` (duty `LocalizationAdmin`) for sections 194C, 194J, 194I, 194H and
+194Q. Crossing an annual threshold also deducts on the year's earlier untaxed credits (`ytdPaid - ytdTaxed`);
+without a PAN the rate is the highest of the section rate, twice that rate and 20% (5% for 194Q) under
+206AA; a section 197 certificate lowers the rate only with a PAN; 194Q deducts on the excess over 50 lakh.
+Amounts are decimal strings in INR, rounded to the paisa through `platform/money`. Rates and thresholds
+are FY 2025-26 values and ASSUMED until tax counsel signs them off. See `NOT-IMPLEMENTED.md`.

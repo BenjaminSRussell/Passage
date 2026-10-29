@@ -1,8 +1,10 @@
 // Client for the compliance service (services/compliance/api/openapi.yaml) and
 // the localization service (services/localization/api/openapi.yaml). Browser
-// calls use /api/v1/sod/... and /api/v1/localization/...; the gateway strips /api.
+// calls use /api/v1/sod/..., /api/v1/security/... and /api/v1/localization/...;
+// the gateway strips /api.
 
 export const sodBase = "/api/v1/sod";
+export const securityBase = "/api/v1/security";
 export const localizationBase = "/api/v1/localization";
 
 export const SEVERITIES = ["HIGH", "MEDIUM", "LOW"] as const;
@@ -139,6 +141,63 @@ export interface InstallCheckResult {
   version: string;
 }
 
+export const BREACH_REGIMES = ["GDPR", "UK_GDPR", "US_STATE", "PIPEDA", "CERT_IN", "LFPDPPP"] as const;
+export type BreachRegime = (typeof BREACH_REGIMES)[number];
+
+export const CLOCK_STATUSES = ["OVERDUE", "AT_RISK", "NOT_DUE", "NO_FIXED_DEADLINE"] as const;
+export type ClockStatus = (typeof CLOCK_STATUSES)[number];
+
+export interface BreachClocksInput {
+  /** RFC 3339 instant the controller became aware of the breach. */
+  awareAt: string;
+  personalDataBreach: boolean;
+  regimes: BreachRegime[];
+  /** US_STATE only, 30..60; omitted means 30. */
+  usStateWindowDays?: number;
+}
+
+export interface BreachClock {
+  regime: BreachRegime;
+  recipient: string;
+  basis: string;
+  deadlineAt?: string;
+  status: ClockStatus;
+}
+
+export interface BreachClocksResult {
+  awareAt: string;
+  asOf: string;
+  items: BreachClock[];
+}
+
+export const TDS_SECTIONS = ["194C", "194J", "194I", "194H", "194Q"] as const;
+export type TdsSection = (typeof TDS_SECTIONS)[number];
+
+export const PAYEE_TYPES = ["INDIVIDUAL_HUF", "COMPANY"] as const;
+export type PayeeType = (typeof PAYEE_TYPES)[number];
+
+/** Amounts are INR decimal strings, never numbers. */
+export interface TdsInput {
+  section: TdsSection;
+  payeeType?: PayeeType;
+  amount: string;
+  ytdPaid?: string;
+  ytdTaxed?: string;
+  panPresent: boolean;
+  lowerRatePct?: string;
+}
+
+export interface TdsResult {
+  section: string;
+  ratePct: string;
+  taxableAmount: string;
+  tdsAmount: string;
+  currency: string;
+  reason: "BELOW_THRESHOLD" | "THRESHOLD_CROSSED" | "PAN_MISSING_206AA" | "LOWER_DEDUCTION_CERTIFICATE" | "EXCESS_OVER_THRESHOLD";
+  returnForm: string;
+  challanForm: string;
+}
+
 export interface Versioned<T> {
   value: T;
   etag: string;
@@ -267,4 +326,14 @@ export function checkInstall(code: string, input: InstallCheckInput): Promise<In
 
 export function validateTaxId(scheme: string, value: string): Promise<{ valid: boolean; scheme: string }> {
   return json<{ valid: boolean; scheme: string }>(`${localizationBase}/tax-ids:validate`, { method: "POST", body: JSON.stringify({ scheme, value }) });
+}
+
+/** Notification clocks of a confirmed personal-data breach (FR-48.29); nothing is stored. */
+export function computeBreachClocks(input: BreachClocksInput): Promise<BreachClocksResult> {
+  return json<BreachClocksResult>(`${securityBase}/incidents:breach-clocks`, { method: "POST", body: JSON.stringify(input) });
+}
+
+/** India TDS for one payment (FR-48.27); a calculation, nothing is posted. */
+export function withholdTds(input: TdsInput): Promise<TdsResult> {
+  return json<TdsResult>(`${localizationBase}/in/tds:withhold`, { method: "POST", body: JSON.stringify(input) });
 }

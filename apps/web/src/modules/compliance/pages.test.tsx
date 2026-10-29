@@ -6,7 +6,9 @@ import { findAlert, findStatus, findTable } from "../../test-utils";
 import { expiryText } from "./ConflictsPage";
 import { validateMitigation } from "./ConflictDetailPage";
 import compliance from "./module";
+import { toBreachInput } from "./BreachClocksPage";
 import { parseRoles } from "./RoleCheckPage";
+import { formatInr, toTdsInput } from "./TdsPage";
 
 const USER = "11111111-0000-4000-8000-000000000001";
 const CONFLICT = "22222222-0000-4000-8000-000000000002";
@@ -352,5 +354,125 @@ describe("Country packs", () => {
     fireEvent.click(screen.getByRole("button", { name: "Check tax id" }));
     expect((await findStatus()).textContent).toBe("GB123456789 is a valid GB_VAT.");
     expect(calls.find((c) => c.url.pathname.endsWith("/tax-ids:validate"))?.body).toEqual({ scheme: "GB_VAT", value: "GB123456789" });
+  });
+});
+
+describe("Breach notification clocks", () => {
+  const clocks = {
+    awareAt: "2026-01-02T09:00:00Z",
+    asOf: "2026-01-02T22:00:00Z",
+    items: [
+      { regime: "GDPR", recipient: "supervisory authority", basis: "GDPR Art. 33: within 72 h of awareness", deadlineAt: "2026-01-05T09:00:00Z", status: "NOT_DUE" },
+      { regime: "GDPR", recipient: "data subjects", basis: "GDPR Art. 34: without undue delay when high risk", status: "NO_FIXED_DEADLINE" },
+      { regime: "CERT_IN", recipient: "CERT-In", basis: "CERT-In directions: 6 h for reportable incidents", deadlineAt: "2026-01-02T15:00:00Z", status: "OVERDUE" },
+    ],
+  };
+
+  it("reads awareness as UTC and only sends the US state window with US_STATE", () => {
+    const now = new Date("2026-11-03T00:00:00Z");
+    const base = { awareAt: "2026-11-02T09:00", confirmed: true, regimes: ["GDPR" as const], stateDays: "45" };
+    expect(toBreachInput(base, now).input).toEqual({ awareAt: "2026-11-02T09:00:00.000Z", personalDataBreach: true, regimes: ["GDPR"] });
+    expect(toBreachInput({ ...base, regimes: ["US_STATE"] }, now).input?.usStateWindowDays).toBe(45);
+    expect(toBreachInput({ ...base, regimes: ["US_STATE"], stateDays: "90" }, now).errors.stateDays).toBe("Enter whole days from 30 to 60.");
+    expect(toBreachInput({ ...base, awareAt: "2026-11-04T09:00" }, now).errors.awareAt).toBe("Awareness cannot be in the future.");
+  });
+
+  // Awareness dates in the form are in the past for any run date; the service decides status.
+  it("computes the clocks for the chosen regimes", async () => {
+    handler = () => ({ status: 200, body: clocks });
+    const { container } = renderAt("/compliance/incidents/breach-clocks");
+    expect(screen.getByText("No clocks yet")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Aware at (UTC)"), { target: { value: "2026-01-02T09:00" } });
+    fireEvent.click(screen.getByLabelText("EU GDPR"));
+    fireEvent.click(screen.getByLabelText("India CERT-In"));
+    fireEvent.click(screen.getByRole("button", { name: "Compute clocks" }));
+    expect((await findStatus()).textContent).toBe("3 clocks from awareness at 2026-01-02 09:00 UTC: 1 overdue, 0 due within 12 hours.");
+    expect(calls[0].method).toBe("POST");
+    expect(calls[0].url.pathname).toBe("/api/v1/security/incidents:breach-clocks");
+    expect(calls[0].body).toEqual({ awareAt: "2026-01-02T09:00:00.000Z", personalDataBreach: true, regimes: ["GDPR", "CERT_IN"] });
+    const table = await findTable({ name: "Breach clocks" });
+    expect(within(table).getByText("2026-01-05 09:00 UTC")).toBeInTheDocument();
+    expect(within(table).getByText("Overdue")).toBeInTheDocument();
+    expect(within(table).getByText("No fixed deadline")).toBeInTheDocument();
+    expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("validates before calling the service", async () => {
+    handler = () => ({ status: 200, body: clocks });
+    renderAt("/compliance/incidents/breach-clocks");
+    fireEvent.click(screen.getByRole("button", { name: "Compute clocks" }));
+    expect(await screen.findByText("Enter when you became aware of the breach.")).toBeInTheDocument();
+    expect(screen.getByText("Choose at least one regime.")).toBeInTheDocument();
+    expect(screen.getByLabelText("US state window (days)")).toBeDisabled();
+    expect(calls).toHaveLength(0);
+  });
+
+  it("shows the service refusal for an unconfirmed breach", async () => {
+    handler = () => problem(422, "INC-1303", "breach clocks start only for a confirmed personal-data breach");
+    renderAt("/compliance/incidents/breach-clocks");
+    fireEvent.change(screen.getByLabelText("Aware at (UTC)"), { target: { value: "2026-01-02T09:00" } });
+    fireEvent.click(screen.getByLabelText("UK GDPR"));
+    fireEvent.click(screen.getByLabelText("Personal data is confirmed to be affected"));
+    fireEvent.click(screen.getByRole("button", { name: "Compute clocks" }));
+    expect((await findAlert()).textContent).toContain("breach clocks start only for a confirmed personal-data breach (INC-1303)");
+    expect(calls[0].body).toMatchObject({ personalDataBreach: false, regimes: ["UK_GDPR"] });
+    expect(screen.queryByRole("table")).toBeNull();
+  });
+});
+
+describe("India TDS calculator", () => {
+  const base = { section: "194J" as const, payeeType: "COMPANY" as const, amount: "100000", ytdPaid: "", ytdTaxed: "", pan: false, lowerRate: "" };
+
+  it("builds a decimal-string request and checks the figures", () => {
+    expect(toTdsInput(base).input).toEqual({ section: "194J", amount: "100000", panPresent: false });
+    expect(toTdsInput({ ...base, section: "194C", ytdPaid: "90000", ytdTaxed: "40000" }).input).toEqual({ section: "194C", payeeType: "COMPANY", amount: "100000", ytdPaid: "90000", ytdTaxed: "40000", panPresent: false });
+    expect(toTdsInput({ ...base, amount: "0" }).errors.amount).toBe("Enter a positive amount in rupees, at most 2 decimals.");
+    expect(toTdsInput({ ...base, amount: "1.005" }).errors.amount).toBeDefined();
+    expect(toTdsInput({ ...base, ytdTaxed: "10" }).errors.ytdTaxed).toBe("Cannot be more than paid so far this year.");
+    expect(toTdsInput({ ...base, lowerRate: "120" }).errors.lowerRate).toBe("Enter a percentage from 0 to 100.");
+  });
+
+  it("formats rupees with Indian grouping", () => {
+    expect(formatInr("20000")).toBe("₹20,000.00");
+    expect(formatInr("2000000.5")).toBe("₹20,00,000.50");
+    expect(formatInr("300.01")).toBe("₹300.01");
+  });
+
+  it("calculates 206AA withholding for a deductee without PAN (AC-48.21)", async () => {
+    handler = () => ({
+      status: 200,
+      body: { section: "194J", ratePct: "20", taxableAmount: "100000", tdsAmount: "20000", currency: "INR", reason: "PAN_MISSING_206AA", returnForm: "26Q", challanForm: "ITNS 281" },
+    });
+    const { container } = renderAt("/compliance/tds");
+    expect(screen.getByText("No calculation yet")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Payee type")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Payment amount (INR)"), { target: { value: "100000" } });
+    fireEvent.click(screen.getByLabelText("The deductee has given a valid PAN"));
+    fireEvent.click(screen.getByRole("button", { name: "Calculate TDS" }));
+    expect((await findStatus()).textContent).toBe("No PAN: deducted at the higher section 206AA rate.");
+    expect(calls[0].url.pathname).toBe("/api/v1/localization/in/tds:withhold");
+    expect(calls[0].body).toEqual({ section: "194J", amount: "100000", panPresent: false });
+    expect(screen.getByText("₹20,000.00")).toBeInTheDocument();
+    expect(screen.getByText("20%")).toBeInTheDocument();
+    expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("asks for the payee type on 194C and shows a service error", async () => {
+    handler = () => problem(422, "LOC-0510", 'section "194C" is not in the India TDS table');
+    renderAt("/compliance/tds");
+    fireEvent.change(screen.getByLabelText("Section"), { target: { value: "194C" } });
+    fireEvent.change(screen.getByLabelText("Payee type"), { target: { value: "INDIVIDUAL_HUF" } });
+    fireEvent.change(screen.getByLabelText("Payment amount (INR)"), { target: { value: "40000" } });
+    fireEvent.click(screen.getByRole("button", { name: "Calculate TDS" }));
+    expect((await findAlert()).textContent).toContain("(LOC-0510)");
+    expect(calls[0].body).toEqual({ section: "194C", payeeType: "INDIVIDUAL_HUF", amount: "40000", panPresent: true });
+  });
+
+  it("validates before calling the service", async () => {
+    handler = () => ({ status: 200, body: {} });
+    renderAt("/compliance/tds");
+    fireEvent.click(screen.getByRole("button", { name: "Calculate TDS" }));
+    expect(await screen.findByText("Enter a positive amount in rupees, at most 2 decimals.")).toBeInTheDocument();
+    expect(calls).toHaveLength(0);
   });
 });

@@ -90,6 +90,44 @@ paths:
                   valid: { type: boolean }
                   scheme: { type: string }
         "422": { $ref: "#/components/responses/Problem" }
+  /v1/localization/in/tds:withhold:
+    post:
+      operationId: withholdIndiaTds
+      x-passage-duty: LocalizationAdmin
+      description: >-
+        TDS for one payment to a resident deductee under sections 194C, 194J,
+        194I, 194H and 194Q (FR-48.27). Crossing the annual threshold also
+        deducts on the year's earlier credits that bore no TDS (ytdPaid -
+        ytdTaxed). Without a PAN the rate is the highest of the section rate,
+        twice that rate and 20% (5% for 194Q) under section 206AA. Thresholds
+        and rates are FY 2025-26 values pending tax-counsel sign-off.
+        Read-only calculation; nothing is posted.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [section, amount]
+              properties:
+                section: { type: string, enum: [194C, 194J, 194I, 194H, 194Q] }
+                payeeType: { type: string, enum: [INDIVIDUAL_HUF, COMPANY], description: required for 194C; COMPANY means any payee other than an individual or HUF }
+                amount: { type: string, description: "INR, positive, at most 2 decimals", pattern: '^\d+(\.\d{1,2})?$' }
+                ytdPaid: { type: string, description: "INR credited to the deductee under the section earlier this FY", pattern: '^\d+(\.\d{1,2})?$' }
+                ytdTaxed: { type: string, description: "the part of ytdPaid that already bore TDS; not above ytdPaid", pattern: '^\d+(\.\d{1,2})?$' }
+                panPresent: { type: boolean }
+                lowerRatePct: { type: string, description: "rate from a section 197 certificate, 0..100; used only with a PAN and when below the section rate", pattern: '^\d+(\.\d+)?$' }
+      responses:
+        "200":
+          description: Withholding decision
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WithholdResult" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
   /v1/localization/statutory/uk-mtd-vat:validate:
     post:
       operationId: validateUkMtdVat
@@ -133,6 +171,18 @@ components:
         retentionMinYears: { type: object, additionalProperties: { type: integer } }
         documentLayouts: { type: array, items: { type: string } }
         statutoryReports: { type: array, items: { type: object } }
+    WithholdResult:
+      type: object
+      required: [section, ratePct, taxableAmount, tdsAmount, currency, reason, returnForm, challanForm]
+      properties:
+        section: { type: string }
+        ratePct: { type: string, description: decimal percent applied }
+        taxableAmount: { type: string, description: decimal INR base }
+        tdsAmount: { type: string, description: decimal INR, rounded to the paisa }
+        currency: { type: string, enum: [INR] }
+        reason: { type: string, enum: [BELOW_THRESHOLD, THRESHOLD_CROSSED, PAN_MISSING_206AA, LOWER_DEDUCTION_CERTIFICATE, EXCESS_OVER_THRESHOLD] }
+        returnForm: { type: string, enum: ["26Q"] }
+        challanForm: { type: string, enum: ["ITNS 281"] }
     VatReturn:
       description: >-
         HMRC VAT (MTD) API 1.0 submit-return body, boxes 1 to 9. Beyond the
