@@ -140,8 +140,25 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { description: 'PTY-CUSTOMER-NOT-FOUND: unknown id, another tenant or legal entity, or a malformed id.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '409': { description: 'PTY-CHANGE-PENDING: a credit limit change is already awaiting approval for this customer.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: 'PTY-CHANGE-PENDING: a credit limit change is already awaiting approval; errors.pendingChangeId contains its id.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: 'PTY-CREDIT-INVALID: creditLimit is not a non-negative amount with at most 2 decimals.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/party/pending-changes/{id}:
+    parameters:
+      - { name: id, in: path, required: true, description: Pending change id., schema: { type: string, format: uuid } }
+    get:
+      operationId: getPendingChange
+      x-passage-duty: party.read
+      description: Returns one pending change visible to the caller's tenant and legal entity scope.
+      responses:
+        '200':
+          description: The pending change.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PendingChange' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: 'PTY-CHANGE-NOT-FOUND.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '500': { $ref: '#/components/responses/Problem' }
   /v1/party/pending-changes/{id}:approve:
     parameters:
@@ -165,6 +182,7 @@ paths:
         '403': { description: 'AUTH-0003 (missing duty) or PTY-PENDING-SELF-APPROVAL.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: 'PTY-CHANGE-NOT-FOUND.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '409': { description: 'PTY-CHANGE-DECIDED: the change was already decided differently or by someone else (the same decider repeating the same decision gets 200 with the stored change). PTY-PENDING-STALE: the limit changed after the request; the change stays pending and can only be rejected.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'PTY-REASON-TOO-LONG: decision reason exceeds 500 Unicode characters.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '500': { $ref: '#/components/responses/Problem' }
   /v1/party/pending-changes/{id}:reject:
     parameters:
@@ -188,6 +206,7 @@ paths:
         '403': { description: 'AUTH-0003 (missing duty) or PTY-PENDING-SELF-APPROVAL.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '404': { description: 'PTY-CHANGE-NOT-FOUND.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '409': { description: 'PTY-CHANGE-DECIDED: decided differently or by someone else; the same decider repeating the same decision gets 200.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'PTY-REASON-TOO-LONG: decision reason exceeds 500 Unicode characters.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '500': { $ref: '#/components/responses/Problem' }
   /healthz:
     get:

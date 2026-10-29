@@ -33,8 +33,21 @@ func (a *API) WithCredit(credit store.CreditStore) *API {
 
 func (a *API) registerCredit(r chi.Router) {
 	r.With(authz.RequireDuty(dutyWrite)).Post("/v1/party/customers/{id}/credit-limit", a.setCreditLimit)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/party/pending-changes/{id}", a.getPendingChange)
 	r.With(authz.RequireDuty(dutyApprove)).Post("/v1/party/pending-changes/{id}:approve", a.decide(true))
 	r.With(authz.RequireDuty(dutyApprove)).Post("/v1/party/pending-changes/{id}:reject", a.decide(false))
+}
+
+func (a *API) getPendingChange(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	change, err := a.credit.GetPendingChange(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		failParty(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, change)
 }
 
 func (a *API) setCreditLimit(w http.ResponseWriter, r *http.Request) {
@@ -77,10 +90,12 @@ func (a *API) decide(approve bool) http.HandlerFunc {
 			failParty(w, r, err)
 			return
 		}
-		if change.Status == domain.ChangeApproved {
-			a.creditCounts.approved.Add(1)
-		} else {
-			a.creditCounts.rejected.Add(1)
+		if !change.Replayed {
+			if change.Status == domain.ChangeApproved {
+				a.creditCounts.approved.Add(1)
+			} else {
+				a.creditCounts.rejected.Add(1)
+			}
 		}
 		httpx.JSON(w, http.StatusOK, change)
 	}
