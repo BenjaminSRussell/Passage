@@ -1,5 +1,6 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
+import { CategoriesPage, ProposalDetailPage, ProposalsPage, TransactionsPage } from "./BillingPages";
 import { ChangeOrderDetailPage, ChangeOrdersPage, NewChangeOrderPage } from "./ChangeOrderPages";
 import { NewProjectPage } from "./NewProjectPage";
 import { ProjectDetailPage, ProjectsHome, ProjectsListPage } from "./pages";
@@ -11,13 +12,14 @@ const projects: PassageModule = {
   id: "projects",
   title: "Projects",
   description:
-    "Create projects and sub-projects, move them through their stages, plan and schedule their WBS, record and apply change orders and claims, keep a risk and issue register, and set up project groups and posting profiles.",
+    "Create projects and sub-projects, move them through their stages, plan and schedule their WBS, record and apply change orders and claims, keep a risk and issue register, record project transactions, build and approve invoice proposals, and set up project groups, posting profiles and categories.",
   routes: [
     { path: "/projects", element: createElement(ProjectsHome), handle: { title: "Projects" } },
     { path: "/projects/list", element: createElement(ProjectsListPage), handle: { title: "All projects" } },
     { path: "/projects/new", element: createElement(NewProjectPage), handle: { title: "New project" } },
     { path: "/projects/groups", element: createElement(ProjectGroupsPage), handle: { title: "Project groups" } },
     { path: "/projects/posting-profiles", element: createElement(PostingProfilesPage), handle: { title: "Posting profiles" } },
+    { path: "/projects/categories", element: createElement(CategoriesPage), handle: { title: "Project categories" } },
     { path: "/projects/:id", element: createElement(ProjectDetailPage), handle: { title: "Project" } },
     { path: "/projects/:id/plans", element: createElement(ProjectPlansPage), handle: { title: "Plans" } },
     { path: "/projects/:id/plans/:planId", element: createElement(WbsPage), handle: { title: "WBS" } },
@@ -25,6 +27,9 @@ const projects: PassageModule = {
     { path: "/projects/:id/change-orders/new", element: createElement(NewChangeOrderPage), handle: { title: "New change order" } },
     { path: "/projects/:id/change-orders/:coId", element: createElement(ChangeOrderDetailPage), handle: { title: "Change order" } },
     { path: "/projects/:id/risks", element: createElement(RisksPage), handle: { title: "Risks and issues" } },
+    { path: "/projects/:id/transactions", element: createElement(TransactionsPage), handle: { title: "Transactions" } },
+    { path: "/projects/:id/invoice-proposals", element: createElement(ProposalsPage), handle: { title: "Invoice proposals" } },
+    { path: "/projects/:id/invoice-proposals/:proposalId", element: createElement(ProposalDetailPage), handle: { title: "Invoice proposal" } },
   ],
   nav: [
     { label: "Overview", to: "/projects", duty: "ProjInquire" },
@@ -32,6 +37,7 @@ const projects: PassageModule = {
     { label: "New project", to: "/projects/new", duty: "ProjMaintain" },
     { label: "Project groups", to: "/projects/groups", duty: "ProjInquire" },
     { label: "Posting profiles", to: "/projects/posting-profiles", duty: "ProjInquire" },
+    { label: "Project categories", to: "/projects/categories", duty: "ProjInquire" },
   ],
 };
 

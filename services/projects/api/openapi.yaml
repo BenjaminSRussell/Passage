@@ -1,15 +1,18 @@
 openapi: 3.1.0
 info:
   title: Passage Projects API
-  version: 0.3.0
+  version: 0.4.0
   description: |
     Wave 41 (PSG-41). Slice 1: project master and hierarchy (FR-41.1) with stage
     transitions. Slice 2: project groups (FR-41.1), posting profiles and fallback
     resolution (FR-41.5), plan versions, WBS replace/read and the CPM scheduler (FR-41.2).
     Slice 3: contract value, change orders and claims with apply (FR-41.18, BR-41.13)
     and the risk and issue register (FR-41.20).
-    Journals, billing, estimates, timesheets and the rest of wave 41 are later
-    slices (see NOT-IMPLEMENTED.md).
+    Slice 4: project categories, project transactions priced per line (FR-41.4,
+    BR-41.5) and invoice proposals built from billable transactions with the
+    "why not billed" explanation (FR-41.6, BR-41.3, BR-41.8).
+    Journal posting, billing rules, funding, estimates, timesheets and the rest of
+    wave 41 are later slices (see NOT-IMPLEMENTED.md).
     Browser calls use `/api/v1/projects/...`; the BFF rewrites them to `/v1/projects/...`.
 servers:
   - url: https://api.{env}.passage.dev
@@ -909,8 +912,415 @@ paths:
           $ref: '#/components/responses/Problem'
         '428':
           $ref: '#/components/responses/Problem'
+  /v1/projects/categories:
+    get:
+      operationId: listCategories
+      summary: Project categories, by id (§8.41.4 ProjectCategory)
+      x-passage-duty: ProjInquire
+      responses:
+        '200':
+          description: Categories
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Category'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+  /v1/projects/categories/{categoryId}:
+    put:
+      operationId: putCategory
+      summary: Create a category (no If-Match, 201) or rename it (If-Match, 200)
+      description: The transaction type of an existing category cannot change (422 PROJ-CAT-001).
+      x-passage-duty: ProjSetupAdmin
+      parameters:
+        - name: categoryId
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[A-Z0-9][A-Z0-9_-]{0,19}$'
+        - $ref: '#/components/parameters/OptionalIfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CategoryRequest'
+      responses:
+        '201':
+          description: Created
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Category'
+        '200':
+          description: Renamed
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Category'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '428':
+          $ref: '#/components/responses/Problem'
+  /v1/projects/transactions:
+    post:
+      operationId: createTransaction
+      summary: Record an HOUR, COST, ITEM, FEE or ON_ACCOUNT transaction (FR-41.4)
+      description: |
+        The caller gives quantity and unit prices; costAmount and salesAmount are
+        quantity × price rounded half-even to the currency's minor unit per line (BR-41.5).
+        The project must be IN_PROCESS (422 PROJ-TXN-001) and in the transaction's
+        currency (422 PROJ-TXN-002); the category must exist with the transaction's
+        type (422 PROJ-TXN-003). Posting to the universal journal is not built yet
+        (journalId stays empty; see NOT-IMPLEMENTED.md D2b).
+      x-passage-duty: ProjJournalMaintain
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransactionRequest'
+      responses:
+        '201':
+          description: Recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+        '200':
+          description: Idempotent replay
+          headers:
+            Idempotent-Replayed:
+              schema:
+                type: string
+                enum: ['true']
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+  /v1/projects/transactions/{txnId}/billing:
+    get:
+      operationId: getTransactionBilling
+      summary: Why a transaction is or is not billed in a window (BR-41.3)
+      x-passage-duty: ProjInquire
+      parameters:
+        - $ref: '#/components/parameters/TransactionId'
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: txnTypes
+          in: query
+          description: Comma-separated transaction types; empty means every type the project bills.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Billing status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BillingStatus'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+  /v1/projects/{id}/transactions:
+    get:
+      operationId: listTransactions
+      summary: Transactions of a project, newest date first (at most 500)
+      x-passage-duty: ProjInquire
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Transactions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Transaction'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+  /v1/projects/invoice-proposals:
+    post:
+      operationId: buildInvoiceProposal
+      summary: Build a DRAFT invoice proposal from the billable transactions of a project (FR-41.6)
+      description: |
+        Selects the project's transactions that are CHARGEABLE, not on a live proposal,
+        dated in [from, to] and of a selected type, on an IN_PROCESS or FINISHED project
+        (BR-41.3), with SELECT … FOR UPDATE SKIP LOCKED so concurrent builds never
+        select the same transaction (BR-41.8). A TIME_MATERIAL project bills the
+        requested types (all when none). A FIXED_PRICE project bills only ON_ACCOUNT
+        lines on billable milestones scheduled to finish by `to`; other project types
+        do not bill (422 PROJ-PROP-004). Nothing selected is 422 PROJ-PROP-002.
+      x-passage-duty: ProjBillingMaintain
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProposalRequest'
+      responses:
+        '201':
+          description: Built
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvoiceProposal'
+        '200':
+          description: Idempotent replay
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Idempotent-Replayed:
+              schema:
+                type: string
+                enum: ['true']
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvoiceProposal'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+    get:
+      operationId: listInvoiceProposals
+      summary: Invoice proposals of a project, newest first, without lines
+      x-passage-duty: ProjInquire
+      parameters:
+        - name: projectId
+          in: query
+          required: true
+          schema:
+            type: string
+            maxLength: 20
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/ProposalStatus'
+      responses:
+        '200':
+          description: Proposals
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/InvoiceProposal'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+  /v1/projects/invoice-proposals/{proposalId}:
+    get:
+      operationId: getInvoiceProposal
+      summary: An invoice proposal with its lines
+      x-passage-duty: ProjInquire
+      parameters:
+        - $ref: '#/components/parameters/ProposalId'
+      responses:
+        '200':
+          description: Proposal
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvoiceProposal'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+  /v1/projects/invoice-proposals/{proposalId}/approve:
+    post:
+      operationId: approveInvoiceProposal
+      summary: Approve a DRAFT proposal that has lines (DRAFT → APPROVED)
+      x-passage-duty: ProjBillingMaintain
+      parameters:
+        - $ref: '#/components/parameters/ProposalId'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Approved
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvoiceProposal'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '428':
+          $ref: '#/components/responses/Problem'
+  /v1/projects/invoice-proposals/{proposalId}/cancel:
+    post:
+      operationId: cancelInvoiceProposal
+      summary: Cancel a DRAFT or APPROVED proposal; its transactions return to the pool
+      x-passage-duty: ProjBillingMaintain
+      parameters:
+        - $ref: '#/components/parameters/ProposalId'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Canceled
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvoiceProposal'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '428':
+          $ref: '#/components/responses/Problem'
+  /v1/projects/invoice-proposals/{proposalId}/lines/{txnId}:
+    delete:
+      operationId: removeInvoiceProposalLine
+      summary: Take a transaction off a DRAFT or APPROVED proposal (FR-41.6)
+      description: The transaction returns to the pool and the totals are recomputed; an APPROVED proposal goes back to DRAFT.
+      x-passage-duty: ProjBillingMaintain
+      parameters:
+        - $ref: '#/components/parameters/ProposalId'
+        - $ref: '#/components/parameters/TransactionId'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Line removed
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvoiceProposal'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '428':
+          $ref: '#/components/responses/Problem'
 components:
   parameters:
+    ProposalId:
+      name: proposalId
+      in: path
+      required: true
+      description: Invoice proposal id (UUID).
+      schema:
+        type: string
+        format: uuid
+    TransactionId:
+      name: txnId
+      in: path
+      required: true
+      description: Project transaction id (UUID).
+      schema:
+        type: string
+        format: uuid
     ChangeOrderId:
       name: coId
       in: path
@@ -957,7 +1367,7 @@ components:
         maxLength: 20
   headers:
     ETag:
-      description: Row version (project, group, posting profile, plan version, change order or risk), quoted.
+      description: Row version (project, group, posting profile, plan version, change order, risk, category or invoice proposal), quoted.
       schema:
         type: string
   responses:
@@ -1650,6 +2060,281 @@ components:
           format: date
         status:
           $ref: '#/components/schemas/RiskStatus'
+        version:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    TxnType:
+      type: string
+      enum: [HOUR, COST, ITEM, FEE, ON_ACCOUNT]
+    LineProperty:
+      type: string
+      enum: [CHARGEABLE, NON_CHARGEABLE]
+    CategoryRequest:
+      type: object
+      additionalProperties: false
+      required: [name, txnType]
+      properties:
+        id:
+          type: string
+          description: Optional; must equal the path id.
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        txnType:
+          $ref: '#/components/schemas/TxnType'
+    Category:
+      type: object
+      required: [id, name, txnType, version, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        txnType:
+          $ref: '#/components/schemas/TxnType'
+        version:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    TransactionRequest:
+      type: object
+      additionalProperties: false
+      required: [projectId, txnType, categoryId, lineProperty, txnDate, quantity, costPrice, salesPrice, currency]
+      description: workerId is required for HOUR and itemId for ITEM. salesPrice may be negative only on ON_ACCOUNT (retainer applied, BR-41.4).
+      properties:
+        projectId:
+          type: string
+          pattern: '^[A-Z0-9][A-Z0-9-]{0,19}$'
+        wbsNodeId:
+          type: string
+          format: uuid
+          description: A node of one of the project's plan versions; its WBS code is stored with the transaction.
+        txnType:
+          $ref: '#/components/schemas/TxnType'
+        categoryId:
+          type: string
+          pattern: '^[A-Z0-9][A-Z0-9_-]{0,19}$'
+        lineProperty:
+          $ref: '#/components/schemas/LineProperty'
+        txnDate:
+          type: string
+          format: date
+        quantity:
+          type: string
+          description: Decimal, at least 0, at most 3 places.
+          example: '7.5'
+        costPrice:
+          type: string
+          description: Unit cost price, decimal, at least 0, at most 6 places.
+        salesPrice:
+          type: string
+          description: Unit sales price, decimal, at most 6 places.
+        currency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+          description: Must equal the project currency.
+        workerId:
+          type: string
+          format: uuid
+        itemId:
+          type: string
+          format: uuid
+        vendorPartyId:
+          type: string
+          format: uuid
+        sourceDocType:
+          type: string
+          enum: [TIMESHEET, EXPENSE, PO_RECEIPT, INV_JOURNAL, MANUAL]
+          default: MANUAL
+        sourceDocId:
+          type: string
+          format: uuid
+        description:
+          type: string
+          maxLength: 500
+    Transaction:
+      type: object
+      required: [id, projectId, txnType, categoryId, lineProperty, txnDate, quantity, costPrice, salesPrice, currency, costAmount, salesAmount, sourceDocType, description, createdBy, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+        wbsNodeId:
+          type: string
+          format: uuid
+        wbsCode:
+          type: string
+        txnType:
+          $ref: '#/components/schemas/TxnType'
+        categoryId:
+          type: string
+        lineProperty:
+          $ref: '#/components/schemas/LineProperty'
+        txnDate:
+          type: string
+          format: date
+        quantity:
+          type: string
+          example: '7.500'
+        costPrice:
+          type: string
+          example: '50.000000'
+        salesPrice:
+          type: string
+        currency:
+          type: string
+        costAmount:
+          type: string
+          description: quantity × costPrice, rounded half-even to the minor unit.
+          example: '375.00'
+        salesAmount:
+          type: string
+          description: quantity × salesPrice, rounded half-even to the minor unit.
+        workerId:
+          type: string
+          format: uuid
+        itemId:
+          type: string
+          format: uuid
+        vendorPartyId:
+          type: string
+          format: uuid
+        sourceDocType:
+          type: string
+        sourceDocId:
+          type: string
+          format: uuid
+        description:
+          type: string
+        journalId:
+          type: string
+          format: uuid
+          description: Empty until the wave-11 posting API posts the line.
+        proposalId:
+          type: string
+          format: uuid
+          description: The DRAFT, APPROVED or POSTED proposal the transaction is on.
+        createdBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    BillingStatus:
+      type: object
+      required: [transactionId, billable]
+      properties:
+        transactionId:
+          type: string
+          format: uuid
+        billable:
+          type: boolean
+        reason:
+          type: string
+          enum: [NOT_CHARGEABLE, ALREADY_PROPOSED, OUT_OF_RANGE, PROJECT_STAGE, TXN_TYPE, PROJECT_NOT_IN_SCOPE, MILESTONE_NOT_DUE, PROJECT_TYPE]
+    ProposalStatus:
+      type: string
+      enum: [DRAFT, APPROVED, POSTED, CANCELED]
+    ProposalRequest:
+      type: object
+      additionalProperties: false
+      required: [projectId, from, to]
+      properties:
+        projectId:
+          type: string
+          pattern: '^[A-Z0-9][A-Z0-9-]{0,19}$'
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        txnTypes:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/TxnType'
+    ProposalLine:
+      type: object
+      required: [lineNo, transactionId, txnType, txnDate, categoryId, description, quantity, unitPrice, costAmount, amount]
+      properties:
+        lineNo:
+          type: integer
+        transactionId:
+          type: string
+          format: uuid
+        txnType:
+          $ref: '#/components/schemas/TxnType'
+        txnDate:
+          type: string
+          format: date
+        categoryId:
+          type: string
+        description:
+          type: string
+        quantity:
+          type: string
+        unitPrice:
+          type: string
+        costAmount:
+          type: string
+        amount:
+          type: string
+    InvoiceProposal:
+      type: object
+      required: [id, projectId, status, currency, fromDate, toDate, txnTypes, totalCost, totalSales, lineCount, lines, createdBy, version, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+        customerPartyId:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/ProposalStatus'
+        currency:
+          type: string
+        fromDate:
+          type: string
+          format: date
+        toDate:
+          type: string
+          format: date
+        txnTypes:
+          type: array
+          items:
+            $ref: '#/components/schemas/TxnType'
+        totalCost:
+          type: string
+          example: '500.00'
+        totalSales:
+          type: string
+          description: Sum of the rounded line amounts.
+          example: '900.05'
+        lineCount:
+          type: integer
+        lines:
+          type: array
+          description: Empty in list responses.
+          items:
+            $ref: '#/components/schemas/ProposalLine'
+        createdBy:
+          type: string
+        approvedBy:
+          type: string
         version:
           type: integer
         createdAt:

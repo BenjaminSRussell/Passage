@@ -72,7 +72,7 @@ export function ProjectsHome() {
     <div className={styles.stack}>
       <PageHeader
         title="Projects"
-        description="Project master, stages, plans and WBS for your legal entities. Billing, estimates and timesheets arrive in later releases of this workspace."
+        description="Project master, stages, plans and WBS, transactions and invoice proposals for your legal entities. Journal posting, estimates and timesheets arrive in later releases of this workspace."
         actions={actions}
       />
       {state.error ? (
@@ -340,6 +340,12 @@ export function ProjectDetailPage() {
             </Link>
             <Link className={buttonClassName("secondary")} to={`/projects/${encodeURIComponent(current.id)}/risks`}>
               Risks and issues
+            </Link>
+            <Link className={buttonClassName("secondary")} to={`/projects/${encodeURIComponent(current.id)}/transactions`}>
+              Transactions
+            </Link>
+            <Link className={buttonClassName("secondary")} to={`/projects/${encodeURIComponent(current.id)}/invoice-proposals`}>
+              Invoice proposals
             </Link>
             <Link
               className={buttonClassName("secondary")}

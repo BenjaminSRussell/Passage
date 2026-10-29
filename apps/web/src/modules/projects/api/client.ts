@@ -504,3 +504,184 @@ export function updateRisk(projectId: string, riskId: string, input: RiskInput &
     body: JSON.stringify(input),
   });
 }
+
+// ---- Categories, transactions and invoice proposals (FR-41.4, FR-41.6) ----
+
+export const TXN_TYPES = ["HOUR", "COST", "ITEM", "FEE", "ON_ACCOUNT"] as const;
+export type TxnType = (typeof TXN_TYPES)[number];
+
+export interface Category {
+  id: string;
+  name: string;
+  txnType: TxnType;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Transaction {
+  id: string;
+  projectId: string;
+  wbsNodeId?: string;
+  wbsCode?: string;
+  txnType: TxnType;
+  categoryId: string;
+  lineProperty: LineProperty;
+  txnDate: string;
+  /** Decimal strings: quantity to 3 places, prices to 6, amounts in the minor unit (BR-41.5). */
+  quantity: string;
+  costPrice: string;
+  salesPrice: string;
+  currency: string;
+  costAmount: string;
+  salesAmount: string;
+  workerId?: string;
+  itemId?: string;
+  vendorPartyId?: string;
+  sourceDocType: string;
+  sourceDocId?: string;
+  description: string;
+  journalId?: string;
+  proposalId?: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+/** Body of POST /v1/projects/transactions; the service computes the amounts. */
+export interface NewTransaction {
+  projectId: string;
+  txnType: TxnType;
+  categoryId: string;
+  lineProperty: LineProperty;
+  txnDate: string;
+  quantity: string;
+  costPrice: string;
+  salesPrice: string;
+  currency: string;
+  wbsNodeId?: string;
+  workerId?: string;
+  itemId?: string;
+  description?: string;
+}
+
+export const BILLING_REASONS = [
+  "NOT_CHARGEABLE",
+  "ALREADY_PROPOSED",
+  "OUT_OF_RANGE",
+  "PROJECT_STAGE",
+  "TXN_TYPE",
+  "PROJECT_NOT_IN_SCOPE",
+  "MILESTONE_NOT_DUE",
+  "PROJECT_TYPE",
+] as const;
+export type BillingReason = (typeof BILLING_REASONS)[number];
+
+export interface BillingStatus {
+  transactionId: string;
+  billable: boolean;
+  reason?: BillingReason;
+}
+
+export const PROPOSAL_STATUSES = ["DRAFT", "APPROVED", "POSTED", "CANCELED"] as const;
+export type ProposalStatus = (typeof PROPOSAL_STATUSES)[number];
+
+export interface ProposalLine {
+  lineNo: number;
+  transactionId: string;
+  txnType: TxnType;
+  txnDate: string;
+  categoryId: string;
+  description: string;
+  quantity: string;
+  unitPrice: string;
+  costAmount: string;
+  amount: string;
+}
+
+export interface InvoiceProposal {
+  id: string;
+  projectId: string;
+  customerPartyId?: string;
+  status: ProposalStatus;
+  currency: string;
+  fromDate: string;
+  toDate: string;
+  txnTypes: TxnType[];
+  totalCost: string;
+  totalSales: string;
+  lineCount: number;
+  /** Empty in list responses. */
+  lines: ProposalLine[];
+  createdBy: string;
+  approvedBy?: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewProposal {
+  projectId: string;
+  from: string;
+  to: string;
+  /** Empty means every type the project bills. */
+  txnTypes?: TxnType[];
+}
+
+export type ProposalAction = "approve" | "cancel";
+
+// Moves the service accepts (mirrors domain.CheckProposalMove). POSTED is the wave-29 hand-off.
+export const proposalActions: Record<ProposalStatus, ProposalAction[]> = {
+  DRAFT: ["approve", "cancel"],
+  APPROVED: ["cancel"],
+  POSTED: [],
+  CANCELED: [],
+};
+
+export function listCategories(signal?: AbortSignal): Promise<Items<Category>> {
+  return call<Items<Category>>("/categories", {}, signal);
+}
+
+/** Creates a category (no version) or renames it (with its version as If-Match). */
+export function putCategory(id: string, input: { name: string; txnType: TxnType }, version?: number): Promise<Category> {
+  return call<Category>(`/categories/${encodeURIComponent(id)}`, { method: "PUT", headers: versionHeader(version), body: JSON.stringify(input) });
+}
+
+export function listTransactions(projectId: string, signal?: AbortSignal): Promise<Items<Transaction>> {
+  return call<Items<Transaction>>(`/${encodeURIComponent(projectId)}/transactions`, {}, signal);
+}
+
+export function createTransaction(input: NewTransaction, idempotencyKey: string): Promise<Transaction> {
+  return call<Transaction>("/transactions", { method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify(input) });
+}
+
+export function getBillingStatus(txnId: string, window: { from: string; to: string }, signal?: AbortSignal): Promise<BillingStatus> {
+  const q = new URLSearchParams({ from: window.from, to: window.to });
+  return call<BillingStatus>(`/transactions/${encodeURIComponent(txnId)}/billing?${q.toString()}`, {}, signal);
+}
+
+export function listProposals(projectId: string, status: ProposalStatus | "" = "", signal?: AbortSignal): Promise<Items<InvoiceProposal>> {
+  const q = new URLSearchParams({ projectId });
+  if (status) q.set("status", status);
+  return call<Items<InvoiceProposal>>(`/invoice-proposals?${q.toString()}`, {}, signal);
+}
+
+export function getProposal(id: string, signal?: AbortSignal): Promise<InvoiceProposal> {
+  return call<InvoiceProposal>(`/invoice-proposals/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Builds a DRAFT proposal from the billable transactions; reuse the key when retrying. */
+export function buildProposal(input: NewProposal, idempotencyKey: string): Promise<InvoiceProposal> {
+  return call<InvoiceProposal>("/invoice-proposals", { method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify(input) });
+}
+
+export function decideProposal(id: string, action: ProposalAction, version: number): Promise<InvoiceProposal> {
+  return call<InvoiceProposal>(`/invoice-proposals/${encodeURIComponent(id)}/${action}`, { method: "POST", headers: { "If-Match": `"${version}"` } });
+}
+
+/** Takes a transaction off a DRAFT or APPROVED proposal; it returns to the pool. */
+export function removeProposalLine(id: string, txnId: string, version: number): Promise<InvoiceProposal> {
+  return call<InvoiceProposal>(`/invoice-proposals/${encodeURIComponent(id)}/lines/${encodeURIComponent(txnId)}`, {
+    method: "DELETE",
+    headers: { "If-Match": `"${version}"` },
+  });
+}

@@ -83,6 +83,9 @@ func (a *API) Register(r chi.Router) {
 		// Change orders and claims (FR-41.18) and the risk register (FR-41.20).
 		a.registerChangeOrders(r)
 		a.registerRisks(r)
+
+		// Transactions, invoice proposals and the billing explanation (FR-41.4, FR-41.6).
+		a.registerBilling(r)
 	})
 }
 

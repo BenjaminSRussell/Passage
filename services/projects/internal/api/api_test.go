@@ -42,6 +42,15 @@ type fakeStore struct {
 	coKeys  map[string]string
 	risks   map[string]domain.RiskIssue
 	riskKey map[string]string
+
+	// Categories, transactions and invoice proposals (see billing_fake_test.go).
+	cats    map[string]domain.Category
+	txns    map[string]domain.Transaction
+	txnKeys map[string]string
+	props   map[string]domain.InvoiceProposal
+	// propLines holds each proposal's current lines.
+	propLines map[string][]domain.ProposalLine
+	propKey   map[string]string
 }
 
 // sampleProject is a valid CREATED internal project with the given id.
@@ -57,6 +66,8 @@ func newFake() *fakeStore {
 		nodes: map[string][]domain.WBSNode{}, links: map[string][]domain.WBSLink{},
 		cos: map[string]domain.ChangeOrder{}, coKeys: map[string]string{},
 		risks: map[string]domain.RiskIssue{}, riskKey: map[string]string{},
+		cats: map[string]domain.Category{}, txns: map[string]domain.Transaction{}, txnKeys: map[string]string{},
+		props: map[string]domain.InvoiceProposal{}, propKey: map[string]string{}, propLines: map[string][]domain.ProposalLine{},
 	}
 }
 
@@ -139,6 +150,11 @@ func (f *fakeStore) TransitionProject(_ context.Context, id string, version int,
 	}
 	if err := domain.Transition(p.Stage, to); err != nil {
 		return domain.Project{}, err
+	}
+	if to == domain.StageFinished {
+		if err := domain.CanFinish(domain.FinishBlockers{OpenProposals: f.openProposals(id)}); err != nil {
+			return domain.Project{}, err
+		}
 	}
 	p.Stage = to
 	p.Version++

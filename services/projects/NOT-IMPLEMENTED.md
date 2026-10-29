@@ -19,6 +19,16 @@ baseline and emits `changeorder.applied`; the risk and issue register (probabili
 mitigation, due date, status lifecycle); and web pages for the change order log, change order entry and detail
 (submit, approve, reject, apply) and the risks and issues register.
 
+Slice 4 (PSG-4104) delivers: project categories bound to one transaction type (`project_category`, `GET /categories`,
+`PUT /categories/{categoryId}`, PROJ-CAT-001); the project transaction subledger (`project_transaction`) with
+manual HOUR, COST, ITEM, FEE and ON_ACCOUNT entry priced per line half-even (BR-41.5), IN_PROCESS and currency
+checks (PROJ-TXN-001/002), the type-bound category (PROJ-TXN-003, also a composite FK) and the WBS code stored
+with the node; invoice proposals built from the BR-41.3 predicate with `FOR UPDATE SKIP LOCKED` (BR-41.8),
+including the fixed-price milestone condition, with approve, cancel and remove-line returning transactions to
+the pool; the "why not billed" explanation per transaction; BR-41.7 now refuses FINISHED while a DRAFT or
+APPROVED proposal is open; `passage_app` grants for the new tables; and web pages for categories, transactions
+(with the billing check), the invoice proposal list and build form, and proposal detail.
+
 Status values: **later slice of PSG-41** (builds in this wave, not yet) or **handoff** (needs another
 owner or a kernel change; see the reason).
 
@@ -33,11 +43,11 @@ owner or a kernel change; see the reason).
 | D1e | Scheduler over wave-8 role calendars | handoff (wave 8) | Slice uses a `Calendar` value (weekday mask and holidays); wave-8 calendars do not exist yet. |
 | D1f | Resource roles and soft/hard bookings, over-allocation checks, price precedence | later slice of PSG-41 | Needs worker records from wave 42. Role/booking tables not built. |
 | D1g | Forecasts and budgets (`ProjectForecast`, budget copy) | later slice of PSG-41 | Budget control needs wave 38; forecast tables not built. |
-| D2a | Hour, cost, item, fee and on-account transactions and journals; `ProjectTransaction` table | later slice of PSG-41 | Needs the wave-11 posting API for atomic GL posting. |
-| D2b | Posting to the universal journal with key `projects:txn:{journalId}:{lineNo}` | handoff (wave 11) | Wave-11 posting API not available. |
+| D2a | Hour, cost, item, fee and on-account transactions and journals; `ProjectTransaction` table | **partly built** (slice 4) | Built: `project_transaction`, `project_category` (type-bound, composite FK), `POST /transactions` (ProjJournalMaintain, `Idempotency-Key`), `GET /{id}/transactions`, amounts = quantity × unit price rounded half-even per line in the minor unit (BR-41.5), IN_PROCESS and project-currency checks, HOUR needs a worker and ITEM an item, a `wbsNodeId` must be a node of the project and its WBS code is stored. Not built: journals as documents (header, line numbers, validate, post) and their approval parameter (later slice of PSG-41, with D2b); the accounting- and reporting-currency columns (needs wave-12 rates; handoff); period control BR-41.6 `PROJ-PERIOD-001` (handoff, wave 14); hour price precedence FR-41.3 (later slice, with D1f; the caller gives the prices); the "default line property" parameter; integrated documents from timesheets, expenses, PO receipts and inventory journals (handoffs, waves 25, 43, 17, 16; only MANUAL is entered here); `worker_id`, `item_id` and `vendor_party_id` foreign keys (handoffs, waves 42, 15, 7); `estimate_id` (with D4b). Recorded transactions cannot be edited or deleted; corrections wait for journals. |
+| D2b | Posting to the universal journal with key `projects:txn:{journalId}:{lineNo}` | handoff (wave 11) | Wave-11 posting API not available. `journal_id` stays empty and `dev.passage.projects.transaction.posted.v1` is not published, because nothing is posted yet. |
 | D2c | Project purchase orders and subcontracts referencing WBS | handoff (wave 17) | Needs wave-17 PO model. |
-| D3a | Invoice proposals: build from selection, edit, remove line, post to invoicing | later slice of PSG-41 (base selection predicate built) | `domain.Explain` / `domain.Select` implement the base BR-41.3 conditions (chargeable, not proposed, date window, stage, type, project set) and the "why not billed" reasons. The FIXED_PRICE milestone condition and funding-source routing of BR-41.3, persistence, the `FOR UPDATE SKIP LOCKED` build (BR-41.8) and the API are not built. |
-| D3b | Billing rules and T&M, fixed-price milestone, retainer rule types | later slice of PSG-41 | Depends on D3a. |
+| D3a | Invoice proposals: build from selection, edit, remove line, post to invoicing | **built** (slice 4) except posting, with gaps | `project_invoice_proposal` + lines; `POST /invoice-proposals` (ProjBillingMaintain, `Idempotency-Key`) builds a DRAFT for one project from the BR-41.3 predicate under `FOR UPDATE SKIP LOCKED` (BR-41.8), `GET /invoice-proposals?projectId=&status=`, `GET /invoice-proposals/{id}`, `approve` and `cancel` (If-Match), `DELETE /invoice-proposals/{id}/lines/{txnId}` (returns the transaction to the pool; an APPROVED proposal goes back to DRAFT), and `GET /transactions/{txnId}/billing` ("why not billed"). A TIME_MATERIAL project bills the requested types; a FIXED_PRICE project bills only ON_ACCOUNT lines on billable milestones whose scheduled early finish in the WORKING plan is on or before `to` (BR-41.3; the "% complete = 100" alternative waits for progress capture, later slice); other project types do not bill (service code PROJ-PROP-004). Gaps: POSTED and the hand-off to invoicing (D3c, handoff wave 29) and with it `dev.passage.projects.invoice-proposal.posted.v1` and the ProjBillingPost duty; editing a line's quantity or price (only removal); funding-source routing and `FUND-LIMIT` (D3d); tax amount (wave-10 tax, handoff); multi-project proposals by contract; the `PROJ-PROP` number (kernel sequence, handoff); the printed pre-bill proposal document (wave 35, handoff). Approve takes ProjBillingMaintain (the PRD gives approval no separate duty). No events for build, approve, cancel or line removal (the PRD lists only `posted`). |
+| D3b | Billing rules and T&M, fixed-price milestone, retainer rule types | later slice of PSG-41 (T&M and fixed-price milestone selection built by project type) | There is no BillingRule entity: the selection's types come from the request and the project type (D3a), so PROJ-PROP-001 (rule currency ≠ project currency) cannot arise yet. Retainers (BR-41.4: on-account invoices as ON_ACCOUNT lines with negative sales, applied oldest first on T&M proposals) and unit-of-delivery rules are not built; a negative ON_ACCOUNT sales price can be recorded but is not netted automatically. |
 | D3c | Hand-off of proposals to invoicing | handoff (wave 29) | Wave-29 invoicing not available. |
 | D3d | Customer funding sources, percentage split, limits, `FUND-LIMIT` hold | later slice of PSG-41 | Not built. Multi-currency splitting is out of scope per PRD. |
 | D4a | POC (cost-to-cost) arithmetic, loss provision | **built (domain)**; persistence and API later slice of PSG-41 | `domain.ComputePOC` implements BR-41.1/41.2 and matches `testdata/poc-worked-example.csv`. |
@@ -64,11 +74,11 @@ owner or a kernel change; see the reason).
 | # | Criterion | Status | Reason |
 |---|---|---|---|
 | AC1 | Estimate fixtures match an accountant-reviewed workbook | later slice of PSG-41 + handoff (accountant sign-off) | `testdata/poc-worked-example.csv` covers the BR-41.1/41.2 worked example. The PRD workbook `fixtures/projects/poc-workbook.xlsx` and sign-off are not in this repo. Domain test `poc_test.go` checks the periods. |
-| AC2 | Invoice proposals capture exactly the billable transactions (property test) | later slice of PSG-41 | Selection predicate tested at domain level in `selection_test.go`; persisted proposal build is not built. |
+| AC2 | Invoice proposals capture exactly the billable transactions (property test) | **built** (slice 4) | `TestSelect_NoFalsePositivesOrNegatives` (rapid, up to 200 candidates per run, now with the fixed-price milestone condition) compares `domain.Select` with an independent formula; the store re-checks every SQL-selected row with `domain.Select`. Store tests `TestProposals_BuildRemoveCancelAndFinishGate`, `TestProposals_FixedPriceSelectsDueMilestones` and `TestProposals_ConcurrentBuildsAreDisjoint` (six parallel builds, BR-41.8) run the persisted build. The PRD's 10,000-row generated database fixture is not in `testdata/`. |
 | AC3 | WBS scheduling respects dependencies and resource calendars | partly built | Domain CPM with dependencies and working calendars is tested in `schedule_test.go`; the persisted WBS is scheduled through the API (store and API tests). Role calendars (wave 8, handoff) are not wired: the API schedules on the standard calendar. |
 | AC4 | Project subledger reconciles to GL WIP and revenue | later slice of PSG-41 + handoff (wave 11) | Needs D2b and D4c. |
 | AC5 | Every deliverable has code or is listed here | **this file** | |
-| AC6 | `go vet`/`go test`, web `vitest`/`tsc`, OpenAPI/AsyncAPI match, chart lints | **built** for slices 1 to 3 (`TestOpenAPIMatchesRoutes` checks the routes against `api/openapi.yaml`) | Store tests run only with `PASSAGE_TEST_DATABASE_URL` and `PASSAGE_TEST_APP_DATABASE_URL`; they were run against Postgres 16 in the slice-1, slice-2 and slice-3 reviews. |
+| AC6 | `go vet`/`go test`, web `vitest`/`tsc`, OpenAPI/AsyncAPI match, chart lints | **built** for slices 1 to 4 (`TestOpenAPIMatchesRoutes` checks the routes against `api/openapi.yaml`) | Store tests run only with `PASSAGE_TEST_DATABASE_URL` and `PASSAGE_TEST_APP_DATABASE_URL`; they were run against Postgres 16 as the `passage_app` role (real grants) in the slice-1 to slice-4 reviews. |
 
 ## Acceptance scenarios from PRD §8.41.8 (not yet testable end to end)
 
@@ -76,7 +86,7 @@ owner or a kernel change; see the reason).
 |---|---|---|
 | AC-41.1 POC revenue over periods 1 and 2 | partly built | Domain values are tested; the journal balance check needs D4c. |
 | AC-41.2 Loss provision 20,000 | partly built | Domain `LossProvision` is tested; the GL account needs D4e. |
-| AC-41.3 Proposal selection, 10,000 transactions | later slice of PSG-41 | Needs D3a persistence. |
+| AC-41.3 Proposal selection, 10,000 transactions | partly built | Property test over generated candidates and store tests over persisted transactions (AC2); the 10,000-row database fixture is not built. |
 | AC-41.4 FS lag 2 days on weekend calendar | built (standard calendar) | Domain test covers the rule (lag counts calendar days, then rolls to the next working day); the store and API tests schedule a stored FS + 2 link through `POST .../schedule`. Holiday calendars per role need wave 8. |
 | AC-41.5 Hour journal to WIP and payroll allocation | later slice of PSG-41 | Needs D2a and D4e. |
 | AC-41.6 PO receipt creates ITEM and lowers committed cost | handoff (wave 17) and later slice | Needs D5a. |
@@ -94,14 +104,15 @@ owner or a kernel change; see the reason).
 
 | Item | Status | Reason |
 |---|---|---|
-| BR-41.7 FINISHED blockers (open journals, open proposals, non-zero WIP) | later slice of PSG-41 | `domain.CanFinish` exists, but the store passes no blockers. Until journals, proposals and WIP exist, FINISHED is limited to the stage rule. This is a known gap. |
+| BR-41.7 FINISHED blockers (open journals, open proposals, non-zero WIP) | partly built (slice 4) | `TransitionProject` counts DRAFT and APPROVED proposals under the project lock and refuses FINISHED with PROJ-STAGE-002 (a proposal build holds the project row `FOR SHARE`, so a concurrent build cannot slip in). Open journals and the WIP balance are not passed yet (D2a journals, D4c). |
 | Project id from number sequence `PROJ` (wave 5) | handoff (platform kernel) | The kernel `sequence` package does not exist yet. Slice 1 takes the id from the caller, validated against `^[A-Z0-9][A-Z0-9-]{0,19}$`. |
 | `dimension_set_id` (default financial dimensions) | later slice of PSG-41 + handoff (dimensions wave) | Column not in the migration. |
 | `customer_party_id` and `contract_id` foreign keys | handoff (party, wave 7; contracts) | Stored as uuid without FK until party and contract tables exist. |
-| Tenant hash partitioning (16) for `ProjectTransaction` | later slice of PSG-41 | No transaction table yet. |
+| Tenant hash partitioning (16) for `ProjectTransaction` | later slice of PSG-41 | `project_transaction` exists (slice 4) as a plain table with the `(tenant_id, project_id, txn_date)` index and the partial index on unbilled chargeable rows; partitioning by tenant hash is not done. |
+| Transaction list pagination | later slice of PSG-41 | `GET /{id}/transactions` returns the newest 500 (`store.BillingListLimit`) without a cursor; the Posted transactions inquiry filters of §8.41.14 (WBS, type, category, worker, source) are not built. |
 | `GET /v1/projects/openapi.yaml`, `/asyncapi.yaml`, `/error-codes` | handoff (platform kernel) | Kernel-standard endpoints; the files exist under `api/` and `events/`. |
 | Idempotency through the `idempotency_keys` table and kernel middleware | handoff (platform kernel) | Slice 1 stores the key on the project row (`idempotency_key`, unique per tenant, race-safe through `ON CONFLICT`), as the reference service does; the `idempotency_keys` table from `0002_outbox.sql` is created but unused. Stage moves are guarded by `If-Match` and take no key. Slice 2 does the same for plan versions (`plan_version.idempotency_key`, checked under the project row lock); group and profile upserts and the WBS replace are PUTs guarded by `If-Match`, and the schedule run is repeatable, so they take no key. The kernel middleware is not used. |
-| Events for project-group, posting-profile and plan-version changes | later slice of PSG-41 | The PRD event table (§8.41.5) lists none and no consumer needs them yet; only `wbs.scheduled` is published for plans. |
+| Events for project-group, posting-profile and plan-version changes | later slice of PSG-41 | The PRD event table (§8.41.5) lists none and no consumer needs them yet; only `wbs.scheduled` is published for plans. Likewise categories, recorded (unposted) transactions and proposal build, approve and cancel publish nothing in slice 4. |
 | `/metrics` on the admin port (9090) | later slice of PSG-41 | The chart declares the admin port and an optional ServiceMonitor (off by default), but the binary serves no metrics yet. |
 | `DATABASE_URL_FILE`, OTel, Kafka, OPA sidecar configuration | handoff (platform kernel, deploy) | The entrypoint reads `DATABASE_URL` and `HTTP_ADDR` only. |
 | Gateway duty checks via OPA (`x-passage-duty` enforcement at the edge) | handoff (edge-identity) | This service checks duties in-process through `authz.RequireDuty`. |
@@ -115,11 +126,14 @@ project entry (project and sub-project), Project detail (header, stage moves, li
 Posting profiles (with an account lookup), the plan versions of a project and the WBS page (scheduled table
 with dates, slack and critical tasks, a row editor that saves the whole WBS, and the scheduler run), and since
 slice 3 the contract value on Project detail, the Change orders log, change order entry and detail (submit,
-approve, reject, apply) and the Risks and issues register. Everything below needs the service slice that backs it.
+approve, reject, apply) and the Risks and issues register, and since slice 4 Project categories, the project's
+Transactions (list, single-line entry, "check billing" for a window), Invoice proposals (list by status, build
+from a window and type) and proposal detail (lines, remove line, approve, cancel). Everything below needs the
+service slice that backs it.
 
 | Screen or element | Status | Reason |
 |---|---|---|
-| Workspace tiles: proposals to approve, estimates due, over-budget, unposted journals | later slice of PSG-41 | Need D3a, D4b, D1g and D2a. |
+| Workspace tiles: proposals to approve, estimates due, over-budget, unposted journals | later slice of PSG-41 | Proposals exist (slice 4) but there is no cross-project proposal query for a tile yet; the others need D4b, D1g and D2a. |
 | Projects list columns name, budget, actual, committed, remaining, CPI, SPI; filters group, customer, project manager | later slice of PSG-41 | The project has no name or manager field yet (not in the §8.41.4 data model either); the measures need D1g, D2a, D5a and D5b. |
 | Project detail: copy, funding, forecasts, statements | later slice of PSG-41 | Need the copy command, D3d, D1g and D5c. |
 | WBS Gantt bars and the Gantt keyboard rules (Tab indent, Shift+Tab outdent, Ctrl+L link) | later slice of PSG-41 | The WBS page is a table editor: the tree comes from the dotted codes and dependencies are entered as rows. A bar chart needs a charting approach the shell owner (wave 5) has not provided (no new npm dependencies). Role and % complete columns wait for D1f and D2a. |
@@ -127,4 +141,6 @@ approve, reject, apply) and the Risks and issues register. Everything below need
 | Change orders: attach approval as a file | handoff (document storage) | The detail page takes the approval reference as text. |
 | Forecasts (forecast lines by period, copy to budget) on the risks page | later slice of PSG-41 | Needs D8d forecasts. |
 | Owner picker on risks | handoff (wave 42) | The owner is a worker id typed as a UUID until worker records exist. |
-| Resource board, Journals, Invoice proposals, Estimates, Project statements / EVM, My timesheet, Timesheet approval, Plan version compare, Retention ledger | later slice of PSG-41 | Each needs its deliverable above (D1f, D2a, D3a, D4b, D5b, D6a, D8b, D7a). |
+| Journals as batches (add lines, validate, post) and bulk edit of category or line property | later slice of PSG-41 | Transactions are entered one line at a time until journals exist (D2a, D2b). |
+| Invoice proposals: funding split column, grid personalization, post | later slice of PSG-41 | Need D3d, a per-user view store, and D3c. |
+| Resource board, Estimates, Project statements / EVM, My timesheet, Timesheet approval, Plan version compare, Retention ledger | later slice of PSG-41 | Each needs its deliverable above (D1f, D4b, D5b, D6a, D8b, D7a). |

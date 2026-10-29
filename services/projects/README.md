@@ -11,7 +11,10 @@ copied from it, SIMULATION copies), bulk WBS replacement and the CPM scheduler o
 `wbs.scheduled` event. **Slice 3** adds the project contract value, change orders and claims (DRAFT →
 SUBMITTED → APPROVED | REJECTED → APPLIED, creator ≠ decider) whose apply raises the contract value, creates a
 new BASELINE from the current one with the effort and schedule deltas and emits `changeorder.applied`, and the
-risk and issue register. See [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md) for what
+risk and issue register. **Slice 4** adds project categories, project transactions priced per line
+(FR-41.4, BR-41.5) and invoice proposals built from the BR-41.3 selection under `FOR UPDATE SKIP LOCKED`
+(BR-41.8), with approve, cancel, remove line, the fixed-price milestone condition, the "why not billed"
+explanation and the BR-41.7 open-proposal finish gate. See [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md) for what
 is still missing and why.
 
 ## Layout
@@ -24,7 +27,9 @@ internal/domain/         pure rules, no I/O: project validation, sub-project inh
                          invoice-proposal selection predicate and "why not billed" (BR-41.3), finish blockers (BR-41.7),
                          retention amount and release trigger (BR-41.10), monthly interest (BR-41.12),
                          change-order lifecycle, decision rules and apply arithmetic (FR-41.18, BR-41.13),
-                         risk register validation and status moves (FR-41.20)
+                         risk register validation and status moves (FR-41.20), transaction validation and
+                         half-even line pricing (FR-41.4, BR-41.5), proposal types by project type and the
+                         proposal lifecycle (FR-41.6)
 internal/store/          Postgres repository (pgx); every call runs in dbx.WithTenantTx (RLS); writes outbox rows
 internal/events/         event type constants and payloads (events/asyncapi.yaml)
 internal/api/            HTTP handlers, DTOs, validation, problem mapping
@@ -32,7 +37,10 @@ migrations/              0001_init.sql (project + RLS), 0002_outbox.sql (outbox,
                          0003_setup_plans.sql (project_group + project FK, posting_profile, plan_version, wbs_node,
                          wbs_dependency, all with RLS and legal-entity scope through the project),
                          0004_risk_change_order.sql (project.contract_value, superseded baselines,
-                         project_change_order + lines, project_risk_issue), migrations.go (embed)
+                         project_change_order + lines, project_risk_issue), 0005_grants.sql and
+                         0006_revoke_unused_delete.sql (passage_app privileges), 0007_transactions_billing.sql
+                         (project_category, project_transaction, project_invoice_proposal + lines, with RLS,
+                         legal-entity scope and passage_app grants), migrations.go (embed)
 api/openapi.yaml         OpenAPI 3.1 for every endpoint
 events/asyncapi.yaml     AsyncAPI 3 for every event published
 charts/projects/         Helm chart (deployment, service, optional ServiceMonitor)
@@ -134,11 +142,14 @@ PASSAGE_TEST_DATABASE_URL=postgres://... go test ./internal/store/...   # DB-bac
   scope on plans, nodes and dependencies; for slice 3 AC-41.12 end to end (contract value, superseded and new
   rescheduled baseline, outbox payloads, second apply), rollback of a refused apply, change-order keys and a
   concurrent same-key create, WBS node resolution, the risk register lifecycle, and tenant and legal-entity
-  scope on change orders, lines and risks. Skipped without `PASSAGE_TEST_DATABASE_URL`; also needs `PASSAGE_TEST_APP_DATABASE_URL`
+  scope on change orders, lines and risks; for slice 4 category type lock, transaction rules, keys and
+  scope, proposal build, replay, remove line, cancel and the finish gate, fixed-price milestones over a
+  scheduled WBS (also after a WBS replace), six concurrent builds staying disjoint (BR-41.8), and that the
+  app role cannot delete transactions, proposals or categories. Skipped without `PASSAGE_TEST_DATABASE_URL`; also needs `PASSAGE_TEST_APP_DATABASE_URL`
   (uses `testkit.DBWithApp`, so the app role has no BYPASSRLS).
 
 Web: `npx vitest --run src/modules/projects` and `npx tsc --noEmit` from `apps/web` (tests in `module.test.tsx`,
-`plans.test.tsx` and `registers.test.tsx`).
+`plans.test.tsx`, `registers.test.tsx` and `billing.test.tsx`).
 
 Chart: `helm lint charts/projects`.
 
@@ -168,7 +179,7 @@ Problem details are RFC 9457 (`application/problem+json`), `type` = `https://pas
 | conflict_version | 412 | `If-Match` does not match the stored version (someone else changed the row), or `If-Match` sent to create a group or profile that does not exist |
 | idempotency_key_reuse | 422 | Same `Idempotency-Key` sent with a different body |
 | PROJ-STAGE-001 | 422 | Stage move not allowed (FR-41.1) |
-| PROJ-STAGE-002 | 422 | Domain rule (BR-41.7): project cannot be FINISHED; raised by `domain.CanFinish`, not yet wired to the API (see NOT-IMPLEMENTED) |
+| PROJ-STAGE-002 | 422 | Project cannot be FINISHED (BR-41.7): raised on the stage move while a DRAFT or APPROVED invoice proposal is open (journals and WIP not counted yet, see NOT-IMPLEMENTED) |
 | PROJ-POST-001 | 422 | No posting profile at any fallback level (FR-41.5), from `/posting-profiles/resolve` |
 | PROJ-WBS-001 | 422 | Dependency cycle in a WBS replace (FR-41.2) |
 | PROJ-WBS-002 | 422 | Duplicate WBS code in a WBS replace (FR-41.2) |
@@ -179,6 +190,13 @@ Problem details are RFC 9457 (`application/problem+json`), `type` = `https://pas
 | PROJ-CO-005 | 422 | Apply needs a current BASELINE plan version (service-specific) |
 | PROJ-CO-006 | 422 | An impact line cannot be applied: its WBS code is not in the current baseline, it changes a summary node's duration, or it makes the contract value, effort or duration negative (service-specific) |
 | PROJ-RISK-001 | 422 | Risk or issue status move not allowed, or the entry is CLOSED (service-specific) |
+| PROJ-CAT-001 | 422 | A category's transaction type cannot change (service-specific) |
+| PROJ-TXN-001 | 422 | Transactions need an IN_PROCESS project (§8.41.5 command validation; service-specific) |
+| PROJ-TXN-002 | 422 | Transaction currency differs from the project currency (service-specific) |
+| PROJ-TXN-003 | 422 | The category does not exist or is for another transaction type (§8.41.5; service-specific) |
+| PROJ-PROP-002 | 422 | No billable transactions matched the selection (FR-41.6) |
+| PROJ-PROP-003 | 422 | Proposal lifecycle step not allowed: approve twice or without lines, move a CANCELED or POSTED proposal, remove a line from one (service-specific) |
+| PROJ-PROP-004 | 422 | The project's type does not bill these transactions: a fixed-price project bills ON_ACCOUNT milestones only, INTERNAL, COST, INVESTMENT and TIME projects bill nothing (service-specific) |
 | PROJ-RET-001 | — | Domain rule (BR-41.10): release before its trigger without override; raised by `domain.CheckRelease`, no HTTP path yet |
 
 Other wave-41 codes from PRD §8.41.18 are not raised yet; they arrive with the slices that implement their rules.
