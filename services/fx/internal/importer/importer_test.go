@@ -22,9 +22,13 @@ type fakeProvider struct {
 	errs   []error
 	points []provider.RatePoint
 	calls  int
+
+	history bool
 }
 
 func (f *fakeProvider) Name() string { return "ecb" }
+
+func (f *fakeProvider) SupportsHistory() bool { return f.history }
 
 func (f *fakeProvider) Fetch(context.Context, string, time.Time) ([]provider.RatePoint, error) {
 	f.calls++
@@ -52,6 +56,7 @@ type fakeStore struct {
 	postErr     error
 	lastErr     error
 	degradedErr error
+	status      string
 }
 
 func (s *fakeStore) outcome() string {
@@ -62,7 +67,11 @@ func (s *fakeStore) outcome() string {
 }
 
 func (s *fakeStore) StartRun(context.Context, string, string, time.Time) (store.Run, bool, error) {
-	return store.Run{ID: "run-1", Status: store.RunSucceeded, PairsImported: 7, LastSuccessAt: s.last}, s.done, nil
+	status := s.status
+	if status == "" {
+		status = store.RunSucceeded
+	}
+	return store.Run{ID: "run-1", Status: status, PairsImported: 7, LastSuccessAt: s.last}, s.done, nil
 }
 
 func (s *fakeStore) RecordAttempt(_ context.Context, _ string, n int) error {
@@ -411,5 +420,44 @@ func TestMetricsAggregateWorstStateAcrossTenantsAndEscapeLabels(t *testing.T) {
 	}
 	if ct := rec.Header().Get("Content-Type"); ct != "text/plain; version=0.0.4; charset=utf-8" {
 		t.Fatalf("content type = %q", ct)
+	}
+}
+
+func TestRunReportsInProgressWhenAnotherRunHoldsTheDay(t *testing.T) {
+	s := &fakeStore{done: true, status: store.RunRunning}
+	p := &fakeProvider{points: points()}
+	i, _ := harness(p, s)
+	res, err := i.Run(context.Background(), "CLOSING", day)
+	if err != nil || !res.InProgress || res.AlreadyDone || p.calls != 0 || len(s.finishes) != 0 {
+		t.Fatalf("res=%+v err=%v calls=%d finishes=%v", res, err, p.calls, s.finishes)
+	}
+}
+
+func TestRunFailsWhenHistoryProviderReturnsAnotherDate(t *testing.T) {
+	stale := points()
+	stale[1].ValidFrom = day.AddDate(0, 0, -1)
+	s := &fakeStore{}
+	i, _ := harness(&fakeProvider{points: stale, history: true}, s)
+	_, err := i.Run(context.Background(), "CLOSING", day.Add(5*time.Hour))
+	if !errors.Is(err, ErrDateMismatch) || s.outcome() != "failed" || len(s.posted) != 0 {
+		t.Fatalf("err=%v outcome=%q posted=%d", err, s.outcome(), len(s.posted))
+	}
+}
+
+func TestRunAcceptsMatchingDateForHistoryProvider(t *testing.T) {
+	s := &fakeStore{}
+	i, _ := harness(&fakeProvider{points: points(), history: true}, s)
+	if _, err := i.Run(context.Background(), "CLOSING", day.Add(5*time.Hour)); err != nil || s.outcome() != store.RunSucceeded {
+		t.Fatalf("err=%v outcome=%q", err, s.outcome())
+	}
+}
+
+func TestRunIgnoresCubeDateForProvidersWithoutHistory(t *testing.T) {
+	stale := points()
+	stale[0].ValidFrom = day.AddDate(0, 0, -3)
+	s := &fakeStore{}
+	i, _ := harness(&fakeProvider{points: stale}, s)
+	if _, err := i.Run(context.Background(), "CLOSING", day); err != nil || s.outcome() != store.RunSucceeded {
+		t.Fatalf("err=%v outcome=%q", err, s.outcome())
 	}
 }

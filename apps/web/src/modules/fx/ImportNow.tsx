@@ -1,10 +1,12 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Alert, Button, Card } from "../../shell/ui";
-import { importNow, type ImportRun, type RateType } from "./api/client";
+import { FxApiError, importNow, type ImportRun, type RateType } from "./api/client";
 import { ApiFailure } from "./formSupport";
 import styles from "./pages.module.css";
 
 const DUTY = "Administer exchange rates";
+
+const STILL_RUNNING = { title: "Import still running", message: "An import for this day is still running. Try again shortly.", tone: "warning" } as const;
 
 function summary(run: ImportRun): { title: string; message: string; tone: "success" | "warning" } {
   if (run.degraded) {
@@ -26,7 +28,8 @@ export function ImportNow({ rateType }: { rateType: RateType | undefined }) {
   });
   const provider = rateType?.provider;
   if (!rateType || !provider) return null;
-  const result = run.data ? summary(run.data) : null;
+  const stillRunning = run.error instanceof FxApiError && run.error.code === "FX_IMPORT_IN_PROGRESS";
+  const result = run.data ? summary(run.data) : stillRunning ? STILL_RUNNING : null;
   return (
     <Card title={`Import ${rateType.code} now`}>
       <div className={styles.stack}>
@@ -39,7 +42,7 @@ export function ImportNow({ rateType }: { rateType: RateType | undefined }) {
         <Alert tone={result?.tone ?? "success"} live="status" title={result?.title}>
           {result?.message}
         </Alert>
-        {run.isError ? <ApiFailure error={run.error} title="Could not import the rates" duty={DUTY} /> : null}
+        {run.isError && !stillRunning ?<ApiFailure error={run.error} title="Could not import the rates" duty={DUTY} /> : null}
       </div>
     </Card>
   );

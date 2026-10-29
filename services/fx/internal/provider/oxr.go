@@ -24,6 +24,8 @@ func NewOXR(client *http.Client, baseURL, appID string) *OXR {
 
 func (*OXR) Name() string { return "openexchangerates" }
 
+func (*OXR) SupportsHistory() bool { return true }
+
 func (o *OXR) Enabled() bool { return o.appID != "" }
 
 type oxrDocument struct {

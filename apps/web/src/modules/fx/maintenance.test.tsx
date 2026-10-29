@@ -677,6 +677,18 @@ describe("import now", () => {
     expect(await screen.findByText("Already imported")).toBeInTheDocument();
   });
 
+  it("says the import is still running on a 409 instead of reporting a failure", async () => {
+    answer({ importRun: json(409, { code: "FX_IMPORT_IN_PROGRESS", detail: "an import is still running" }) });
+    const user = userEvent.setup();
+    renderAt("/fx/rate-types");
+    await user.click(await screen.findByRole("button", { name: "AVERAGE" }));
+    await user.click(await screen.findByRole("button", { name: "Import now" }));
+    expect(await screen.findByText("Import still running")).toBeInTheDocument();
+    expect(screen.getByText(/Try again shortly/)).toBeInTheDocument();
+    expect(screen.queryByText("Could not import the rates")).not.toBeInTheDocument();
+    expect(screen.queryByText("Already imported")).not.toBeInTheDocument();
+  });
+
   it("warns when the provider is down and last-known rates stay in use", async () => {
     answer({ importRun: importRun({ degraded: true, lastSuccessAt: "2026-03-01T09:00:00Z" }) });
     const user = userEvent.setup();

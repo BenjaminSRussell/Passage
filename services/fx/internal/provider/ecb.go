@@ -17,6 +17,8 @@ func NewECB(client *http.Client, baseURL string) *ECB { return &ECB{client: clie
 
 func (*ECB) Name() string { return "ecb" }
 
+func (*ECB) SupportsHistory() bool { return false }
+
 type ecbDocument struct {
 	Days []struct {
 		Time  string `xml:"time,attr"`

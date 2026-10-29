@@ -12,7 +12,10 @@ import (
 	"github.com/BenjaminSRussell/passage/services/fx/internal/store"
 )
 
-var ErrNoLastKnownRate = errors.New("provider outage and no last-known rate to fall back to")
+var (
+	ErrNoLastKnownRate = errors.New("provider outage and no last-known rate to fall back to")
+	ErrDateMismatch    = errors.New("provider returned rates for a different date than requested")
+)
 
 type RunStore interface {
 	StartRun(ctx context.Context, provider, rateType string, runDate time.Time) (store.Run, bool, error)
@@ -39,6 +42,7 @@ type Result struct {
 	Imported      int
 	Unchanged     int
 	AlreadyDone   bool
+	InProgress    bool
 	Degraded      bool
 	LastSuccessAt *time.Time
 }
@@ -124,6 +128,9 @@ func (i *Importer) Run(ctx context.Context, rateType string, date time.Time) (Re
 		return Result{}, fmt.Errorf("start run: %w", err)
 	}
 	if done {
+		if run.Status == store.RunRunning {
+			return Result{RunID: run.ID, InProgress: true, Attempts: run.Attempts}, nil
+		}
 		i.metrics.record(ctx, name, rateType, false, run.LastSuccessAt)
 		return Result{RunID: run.ID, AlreadyDone: true, Attempts: run.Attempts, Imported: run.PairsImported, Unchanged: run.PairsUnchanged}, nil
 	}
@@ -141,6 +148,11 @@ func (i *Importer) Run(ctx context.Context, rateType string, date time.Time) (Re
 			return res, i.abort(finishCtx, res, fmt.Errorf("%s: %w", name, fetchErr))
 		}
 		return i.fallBack(finishCtx, name, rateType, res, fetchErr)
+	}
+	if i.provider.SupportsHistory() {
+		if err := checkDate(points, date); err != nil {
+			return res, i.reject(finishCtx, name, rateType, res, err)
+		}
 	}
 	inputs := make([]store.RateInput, len(points))
 	for n, pt := range points {
@@ -166,6 +178,27 @@ func (i *Importer) Run(ctx context.Context, rateType string, date time.Time) (Re
 	now := i.now()
 	i.metrics.record(ctx, name, rateType, false, &now)
 	return res, nil
+}
+
+func (i *Importer) SupportsHistory() bool { return i.provider.SupportsHistory() }
+
+func checkDate(points []provider.RatePoint, date time.Time) error {
+	y, m, d := date.UTC().Date()
+	want := time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+	for _, pt := range points {
+		if !pt.ValidFrom.Equal(want) {
+			return fmt.Errorf("%w: requested %s, got %s", ErrDateMismatch, want.Format(time.DateOnly), pt.ValidFrom.Format(time.DateOnly))
+		}
+	}
+	return nil
+}
+
+func (i *Importer) reject(ctx context.Context, name, rateType string, res Result, cause error) error {
+	if err := i.store.FinishRunFailed(ctx, res.RunID, res.Attempts, cause, false); err != nil {
+		slog.Error("fx finish failed run", "runId", res.RunID, "err", err)
+	}
+	i.metrics.record(ctx, name, rateType, true, nil)
+	return cause
 }
 
 func (i *Importer) abort(ctx context.Context, res Result, cause error) error {
