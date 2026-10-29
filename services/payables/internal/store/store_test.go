@@ -142,7 +142,7 @@ func TestSettle_ReducesOpenAmountWithVersionCheck(t *testing.T) {
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `select payload::text from outbox where type = $1`, OpenItemSettledType).Scan(&payload)
 	})
-	if err != nil || !strings.Contains(payload, `"settled_amount":"400"`) || !strings.Contains(payload, `"settlement_id":"stl-1"`) {
+	if err != nil || !strings.Contains(payload, `"settled_amount": "400"`) || !strings.Contains(payload, `"settlement_id": "stl-1"`) {
 		t.Fatalf("settled event payload = %s err=%v", payload, err)
 	}
 	if _, err := s.Settle(ctx, item.ID, item.Version, decimal.NewFromInt(1), ""); !errors.Is(err, ErrVersionConflict) {
