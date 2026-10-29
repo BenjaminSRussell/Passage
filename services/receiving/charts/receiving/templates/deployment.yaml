@@ -35,6 +35,22 @@ spec:
                   key: DATABASE_URL
             - name: MIGRATE_ON_START
               value: {{ .Values.migrateOnStart | quote }}
+            - name: LEDGER_URL
+              value: {{ .Values.serviceUrls.ledger | default (printf "http://ledger.%s.svc:8080" .Release.Namespace) | quote }}
+            - name: CLOSE_URL
+              value: {{ .Values.serviceUrls.close | default (printf "http://close.%s.svc:8080" .Release.Namespace) | quote }}
+            - name: PURCHASING_URL
+              value: {{ .Values.serviceUrls.purchasing | default (printf "http://purchasing-purchasing.%s.svc" .Release.Namespace) | quote }}
+            - name: POSTING_LEDGER_ID
+              value: {{ .Values.postingProfile.ledgerId | quote }}
+            - name: POSTING_ACCOUNT_INVENTORY
+              value: {{ .Values.postingProfile.inventoryAccount | quote }}
+            - name: POSTING_ACCOUNT_GRIR
+              value: {{ .Values.postingProfile.grirAccount | quote }}
+            - name: POSTING_ACCOUNT_PPV
+              value: {{ .Values.postingProfile.ppvAccount | quote }}
+            - name: POSTING_ACCOUNT_VENDOR_CONTROL
+              value: {{ .Values.postingProfile.vendorControlAccount | quote }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }

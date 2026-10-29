@@ -5,6 +5,18 @@ image:
   pullPolicy: IfNotPresent
 databaseSecret: receiving-db
 migrateOnStart: false
+serviceUrls:
+  ledger: ""
+  close: ""
+  purchasing: ""
+# postingProfile values are required outside dev: the pod exits at startup with "POSTING_LEDGER_ID is required" when ledgerId is empty.
+# serviceUrls.purchasing defaults to http://purchasing-purchasing.<namespace>.svc, the Service the purchasing chart renders for a release named "purchasing".
+postingProfile:
+  ledgerId: ""
+  inventoryAccount: ""
+  grirAccount: ""
+  ppvAccount: ""
+  vendorControlAccount: ""
 replicaCount: 1
 resources:
   requests: { cpu: 50m, memory: 64Mi }
