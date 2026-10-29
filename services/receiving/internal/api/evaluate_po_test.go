@@ -1,9 +1,12 @@
 package api_test
 
 import (
+	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -176,5 +179,87 @@ func TestEvaluatePoReferenceValidation(t *testing.T) {
 				t.Fatalf("got %d %s", rec.Code, rec.Body)
 			}
 		})
+	}
+}
+
+func purchasingCounter(t *testing.T) (*atomic.Int32, http.Handler) {
+	t.Helper()
+	var lookups atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		lookups.Add(1)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(purchasingOrder))
+	}))
+	t.Cleanup(srv.Close)
+	a := api.New(memstore.New(), api.Ports{
+		Periods: domain.FakePeriods{Status: domain.PeriodOpen}, Ledger: &domain.FakeLedger{},
+		PurchaseOrders: purchasing.New(srv.URL, nil),
+	})
+	r := httpx.NewRouter()
+	a.Register(r)
+	return &lookups, r
+}
+
+func decodeProblem(t *testing.T, rec *httptest.ResponseRecorder) httpx.Problem {
+	t.Helper()
+	var p httpx.Problem
+	if err := json.Unmarshal(rec.Body.Bytes(), &p); err != nil {
+		t.Fatalf("decode problem: %v: %s", err, rec.Body)
+	}
+	return p
+}
+
+func TestEvaluatePoValidationPrecedesLookup(t *testing.T) {
+	lookups, r := purchasingCounter(t)
+	body := strings.Replace(poBody(`"poLineNo":1`), `"qty":10`, `"qty":-10`, 1)
+	rec := do(r, http.MethodPost, evaluatePath, body, "MatchingPolicyMaintain", true)
+	if rec.Code != http.StatusBadRequest || lookups.Load() != 0 {
+		t.Fatalf("got status %d after %d purchase order lookups: %s", rec.Code, lookups.Load(), rec.Body)
+	}
+}
+
+func TestEvaluateRejectsDuplicateAndOverriddenPOLines(t *testing.T) {
+	lookups, r := purchasingCounter(t)
+	const first = `{"qty":1,"unitPrice":2.5,"poLineNo":1}`
+	tests := []struct {
+		name  string
+		lines string
+		want  map[string]string
+	}{
+		{"adjacent duplicate PO line", first + `,` + first, map[string]string{"lines[1].poLineNo": "duplicates lines[0].poLineNo"}},
+		{"non-adjacent duplicate PO line", first + `,{"qty":1,"unitPrice":2.5,"poLineNo":2},` + first, map[string]string{"lines[2].poLineNo": "duplicates lines[0].poLineNo"}},
+		{"overridden PO unit price", `{"qty":1,"unitPrice":2.5,"poLineNo":1,"poUnitPrice":99}`, map[string]string{"lines[0].poUnitPrice": poOverride}},
+		{"overridden remaining quantity", `{"qty":1,"unitPrice":2.5,"poLineNo":1,"poQtyRemaining":99}`, map[string]string{"lines[0].poQtyRemaining": poOverride}},
+		{"overridden currency matching the invoice", `{"qty":1,"unitPrice":2.5,"poLineNo":1,"poCurrency":"USD"}`, map[string]string{"lines[0].poCurrency": poOverride}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			body := `{"purchaseOrderId":"` + evalPOID + `","currency":"USD","headerTotal":2.5,"lines":[` + tc.lines + `]}`
+			rec := do(r, http.MethodPost, evaluatePath, body, "MatchingPolicyMaintain", true)
+			p := decodeProblem(t, rec)
+			if rec.Code != http.StatusBadRequest || p.Code != "COM-0001" || !maps.Equal(p.Errors, tc.want) {
+				t.Fatalf("got %d %+v", rec.Code, p)
+			}
+		})
+	}
+	if lookups.Load() != 0 {
+		t.Fatalf("purchasing called %d times for refused requests", lookups.Load())
+	}
+}
+
+const poOverride = "is supplied by the purchase order and cannot be overridden"
+
+func TestEvaluateReportsBodyAndPoReferenceErrorsTogether(t *testing.T) {
+	lookups, r := purchasingCounter(t)
+	body := `{"currency":"usd","headerTotal":2.5,"lines":[{"qty":1,"unitPrice":2.5,"poLineNo":1},{"qty":1,"unitPrice":2.5,"poLineNo":1}]}`
+	rec := do(r, http.MethodPost, evaluatePath, body, "MatchingPolicyMaintain", true)
+	p := decodeProblem(t, rec)
+	want := map[string]string{
+		"currency":          "must be a 3-letter upper-case ISO 4217 code",
+		"lines[0].poLineNo": "requires purchaseOrderId",
+		"lines[1].poLineNo": "duplicates lines[0].poLineNo; requires purchaseOrderId",
+	}
+	if rec.Code != http.StatusBadRequest || p.Code != "COM-0001" || !maps.Equal(p.Errors, want) || lookups.Load() != 0 {
+		t.Fatalf("got %d %+v after %d lookups", rec.Code, p, lookups.Load())
 	}
 }

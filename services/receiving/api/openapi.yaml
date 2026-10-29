@@ -425,9 +425,9 @@ components:
       type: object
       additionalProperties: false
       required: [qty, unitPrice]
-      description: poUnitPrice is required unless poLineNo is given with a request-level purchaseOrderId; a body value always wins over the purchase order.
+      description: poUnitPrice is required unless poLineNo is given with a request-level purchaseOrderId; with poLineNo set, poUnitPrice, poQtyRemaining and poCurrency are refused (400 COM-0001) and the purchase order supplies them.
       properties:
-        poLineNo: { type: integer, minimum: 1, description: 'Line of the request purchaseOrderId. Fills poUnitPrice (net of discount, per price unit), poQtyRemaining and poCurrency when absent.' }
+        poLineNo: { type: integer, minimum: 1, description: 'Line of the request purchaseOrderId. Supplies poUnitPrice (net of discount, per price unit), poQtyRemaining and poCurrency from the purchase order; sending any of them with poLineNo is refused (400 COM-0001), as is repeating a poLineNo within the request. A purchase order that is not approved or confirmed (including FINALIZED) is refused with RCV-PO-001.' }
         qty: { type: [number, string], exclusiveMinimum: 0 }
         unit: { type: string, description: 'Unit of measure, echoed in the response.' }
         unitPrice: { type: [number, string], minimum: 0 }
