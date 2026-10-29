@@ -20,7 +20,10 @@ import (
 	pevents "github.com/BenjaminSRussell/passage/services/product/internal/events"
 )
 
-const uniqueViolation = "23505"
+const (
+	uniqueViolation = "23505"
+	MaxPage         = 500
+)
 
 type Store interface {
 	Ping(ctx context.Context) error
@@ -31,7 +34,8 @@ type Store interface {
 	CreateProduct(ctx context.Context, in domain.Product, idem string) (domain.Product, error)
 	GetProduct(ctx context.Context, id string) (domain.Product, error)
 	ListProducts(ctx context.Context, limit int) ([]domain.Product, error)
-	ExplodeVariants(ctx context.Context, masterID string, selected map[string][]string) (domain.ExplosionResult, error)
+	ExplodeVariants(ctx context.Context, masterID string, selected map[string][]string, limit int) (domain.ExplosionResult, error)
+	ListReleasedIDs(ctx context.Context, after string, limit int) ([]string, error)
 	LookupVariant(ctx context.Context, masterID string, values map[string]string) (domain.Product, error)
 	Release(ctx context.Context, productID string, defaults domain.ReleaseDefaults, itemNumber string) (domain.ReleasedProduct, error)
 	GetReleased(ctx context.Context, id string) (domain.ReleasedProduct, error)
@@ -302,7 +306,34 @@ func (s *Postgres) ListProducts(ctx context.Context, limit int) ([]domain.Produc
 	return out, err
 }
 
-func (s *Postgres) ExplodeVariants(ctx context.Context, masterID string, selected map[string][]string) (domain.ExplosionResult, error) {
+func (s *Postgres) ListReleasedIDs(ctx context.Context, after string, limit int) ([]string, error) {
+	p, err := principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 || limit > MaxPage {
+		limit = MaxPage
+	}
+	out := []string{}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select id::text from released_product where tenant_id=$1 and ($2::text = '' or id > $2::uuid) order by id limit $3`, p.TenantID, after, limit)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			out = append(out, id)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+func (s *Postgres) ExplodeVariants(ctx context.Context, masterID string, selected map[string][]string, limit int) (domain.ExplosionResult, error) {
 	p, err := principal(ctx)
 	if err != nil {
 		return domain.ExplosionResult{}, err
@@ -343,6 +374,10 @@ func (s *Postgres) ExplodeVariants(ctx context.Context, masterID string, selecte
 		result, err = domain.Explode(existing, domain.ExplosionRequest{MasterNumber: master.ProductNumber, Dimensions: dims, Selected: selected})
 		if err != nil {
 			return domainProblem(err)
+		}
+		if limit > 0 && len(result.Created) > limit {
+			result.Remaining = len(result.Created) - limit
+			result.Created = result.Created[:limit]
 		}
 		var idsCreated []string
 		var values []map[string]string

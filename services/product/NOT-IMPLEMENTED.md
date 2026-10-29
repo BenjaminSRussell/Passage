@@ -4,8 +4,8 @@ Delivered: product/master/variant domain and persistence, Cartesian explosion wi
 
 | Deliverable or AC | Status | Reason |
 |---|---|---|
-| Temporal job `explode-{master_id}` with durable checkpoints | in-process | Wave 4 Temporal is being built in parallel; explosion is synchronous with 500-row outbox batches (AC-8.1 still holds) |
-| Temporal `group-change-{id}` at an effective date | in-process | same; `RunGroupChange` is the callback-driven core (AC-8.12) |
+| Temporal job `explode-{master_id}` with durable checkpoints | batch job | `services/batch` hosts `product.explode` over the paged `variants:explode` route with per-page checkpoints (#105); the route stays synchronous for direct callers and Temporal is not used (AC-8.1 still holds) |
+| Temporal `group-change-{id}` at an effective date | batch job, no effective date | `services/batch` hosts `product.group-change` over `released-products` paging and `jobs/group-change` (#105); `RunGroupChange` is still the callback-driven core (AC-8.12) and the effective date is not implemented |
 | Live wave-16/17/20/21 reference callbacks | fake | callbacks return zero references until those waves exist (FR-8.15/8.16) |
 | Object-storage originals, malware scan, 200 MB uploads | deferred | DIR metadata, version copy and tsvector column exist; bucket `passage-product-media` is a wave-1 deploy handoff |
 | 1M-product typeahead p95 and 2M-DIR full-text p95 | not measured | search endpoints exist; the volume fixtures are a later capacity run |

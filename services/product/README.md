@@ -21,7 +21,8 @@ Run: `DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/product`. T
 |---|---|
 | `POST /v1/product/products` (optional `Idempotency-Key`) | `product.write` |
 | `GET /v1/product/products`, `GET /v1/product/products/{id}`, `GET /v1/product/products:search` | `product.read` |
-| `POST /v1/product/products/{id}/variants:explode` | `product.write` |
+| `POST /v1/product/products/{id}/variants:explode` (optional body `limit` 0-500 creates at most that many variants and reports `remaining`; repeat until it is 0) | `product.write` |
+| `GET /v1/product/released-products?after=&limit=` (keyset page of released product ids, `next` empty on the last page, limit 1-500) | `product.read` |
 | `GET /v1/product/products/{id}/variants:lookup` | `product.read` |
 | `POST /v1/product/releases` | `product.release` |
 | `PATCH /v1/product/released-products/{id}`, `PUT .../site-defaults/{siteId}` | `product.released.write` |

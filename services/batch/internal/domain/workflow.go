@@ -258,8 +258,8 @@ func FinishInstance(inst Instance, approved bool, reason string) Instance {
 	return inst
 }
 
-// ProductJobCodes are the Wave 08 explode/group-change handlers this engine
-// is ready to host. The product service still runs them in-process.
+// ProductJobCodes are the Wave 08 explode/group-change handlers; internal/jobs
+// implements them against the product service HTTP API.
 func ProductJobCodes() []string {
 	return []string{"product.explode", "product.group-change"}
 }
