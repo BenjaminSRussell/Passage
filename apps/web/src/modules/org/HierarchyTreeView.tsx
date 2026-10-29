@@ -115,7 +115,7 @@ export function HierarchyTreeView({ nodes, labels, changes, editing }: TreeViewP
     if (hidden.length > 0) {
       setCollapsed((current) => new Set([...current].filter((id) => !hidden.includes(id))));
     }
-  }, [nodes, selectedId]);
+  }, [nodes, selectedId, focusSignal]);
   useEffect(() => {
     focusPending.current = focusSignal > 0;
   }, [focusSignal]);

@@ -892,7 +892,7 @@ describe("publish panel details", () => {
     expect(callsTo(fetchMock, ":publish", "POST")).toHaveLength(0);
   });
 
-  it("keeps the panel and a typed backdate reason on Esc, and closes it when the reason is empty", async () => {
+  it("keeps the panel and a typed backdate reason on Esc, and closes it once the date is no longer backdated", async () => {
     const { user } = await openDraft();
     await user.click(screen.getByRole("button", { name: "Publish…" }));
     fireEvent.change(screen.getByLabelText("Effective from"), { target: { value: "2020-01-01" } });
@@ -903,6 +903,29 @@ describe("publish panel details", () => {
     await waitFor(() => expect(screen.queryByLabelText("Backdate reason")).toBeNull());
     fireEvent.keyDown(screen.getByRole("treeitem", { name: "Alpha" }), { key: "Escape" });
     expect(screen.queryByRole("region", { name: "Publish draft" })).toBeNull();
+  });
+
+  it("closes the panel on Esc while backdated with the reason cleared", async () => {
+    const { user } = await openDraft();
+    await user.click(screen.getByRole("button", { name: "Publish…" }));
+    fireEvent.change(screen.getByLabelText("Effective from"), { target: { value: "2020-01-01" } });
+    await user.type(screen.getByLabelText("Backdate reason"), "Correcting an old record");
+    await user.clear(screen.getByLabelText("Backdate reason"));
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("region", { name: "Publish draft" })).toBeNull();
+  });
+
+  it("does not swallow Esc after the panel unmounts while backdated and the tree becomes dirty", async () => {
+    const { user } = await openDraft();
+    await user.click(screen.getByRole("button", { name: "Publish…" }));
+    fireEvent.change(screen.getByLabelText("Effective from"), { target: { value: "2020-01-01" } });
+    await user.type(screen.getByLabelText("Backdate reason"), "Correcting an old record");
+    await user.click(screen.getByText("Alpha"));
+    await user.click(screen.getByRole("button", { name: "Move down" }));
+    expect(screen.queryByLabelText("Backdate reason")).toBeNull();
+    expect(screen.getByRole("button", { name: "Publish…" })).toHaveAttribute("aria-expanded", "true");
+    fireEvent.keyDown(screen.getByRole("treeitem", { name: "Alpha" }), { key: "Escape" });
+    expect(screen.getByRole("button", { name: "Publish…" })).toHaveAttribute("aria-expanded", "false");
   });
 
   it("keeps a deliberately collapsed branch collapsed after an unrelated draft edit", async () => {
