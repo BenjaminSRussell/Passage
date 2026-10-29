@@ -26,7 +26,7 @@ import (
 func d(n int64) decimal.Decimal { return decimal.NewFromInt(n) }
 
 func principalCtx(user string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), UserID: user, Duties: map[string]struct{}{}})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), UserID: user, Duties: testkit.ScopeDuties("")})
 }
 
 func problemCode(t *testing.T, err error) string {
@@ -330,7 +330,7 @@ func TestPostgres_RowLevelSecurity(t *testing.T) {
 
 	s := New(appOf(t, pool))
 	leA, leB := ids.New(), ids.New()
-	other := tenant.With(bg, tenant.Principal{TenantID: testkit.TenantID(2), UserID: "x", Duties: map[string]struct{}{}})
+	other := tenant.With(bg, tenant.Principal{TenantID: testkit.TenantID(2), UserID: "x", Duties: testkit.ScopeDuties("")})
 	mk := func(c context.Context, le, hash string) Order {
 		line := Line{LineNo: 1, ProductID: ids.New(), Quantity: d(1), Unit: "EA", SiteID: ids.New(), WarehouseID: ids.New(), UnitPrice: d(1), DiscPct: d(0), LineNet: d(1), RequestedShipDate: "2027-03-04"}
 		c2 := ids.New()

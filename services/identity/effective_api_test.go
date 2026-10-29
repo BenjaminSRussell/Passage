@@ -48,7 +48,7 @@ func newEffectiveRouter(t *testing.T, app *pgxpool.Pool) http.Handler {
 }
 
 func getReport(router http.Handler, tenantID, path string, duties ...string) *httptest.ResponseRecorder {
-	return getReportScoped(router, tenantID, "", path, duties...)
+	return getReportScoped(router, tenantID, "", path, append([]string{tenant.DutyAllScope}, duties...)...)
 }
 
 func getReportScoped(router http.Handler, tenantID, legalEntityID, path string, duties ...string) *httptest.ResponseRecorder {
@@ -158,7 +158,10 @@ func TestEffectivePermissionsEndpoint(t *testing.T) {
 		if rec.Code != http.StatusForbidden {
 			t.Fatalf("status = %d, want 403, body = %s", rec.Code, rec.Body.String())
 		}
-		if rec := getReportScoped(router, tenantA, "*", path, view); rec.Code != http.StatusOK {
+		if rec := getReportScoped(router, tenantA, "", path, view); rec.Code != http.StatusForbidden {
+			t.Fatalf("unscoped caller without all-scope duty: status = %d, want 403", rec.Code)
+		}
+		if rec := getReport(router, tenantA, path, view); rec.Code != http.StatusOK {
 			t.Fatalf("all-entity caller status = %d", rec.Code)
 		}
 	})

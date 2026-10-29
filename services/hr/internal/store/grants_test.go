@@ -21,7 +21,7 @@ import (
 func appStore(t *testing.T) (*Postgres, context.Context) {
 	t.Helper()
 	admin, app := testkit.DBWithApp(t)
-	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), UserID: "user-test", Duties: map[string]struct{}{}})
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), UserID: "user-test", Duties: testkit.ScopeDuties("")})
 	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}

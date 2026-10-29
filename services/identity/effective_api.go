@@ -83,7 +83,7 @@ func (a *EffectivePermissionsAPI) get(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "missing or malformed tenant"))
 		return
 	}
-	if p.LegalEntityID != "" && p.LegalEntityID != "*" {
+	if dbx.LegalEntityScopes(p) != "*" {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "effective permissions require access to all legal entities"))
 		return
 	}

@@ -15,7 +15,7 @@ import (
 
 // userCtx is a caller of tenant n with a user id and duties and no legal-entity scope.
 func userCtx(n int, user string, duties ...string) context.Context {
-	d := map[string]struct{}{}
+	d := testkit.ScopeDuties("")
 	for _, x := range duties {
 		d[x] = struct{}{}
 	}

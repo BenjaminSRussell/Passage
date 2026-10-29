@@ -219,7 +219,7 @@ func TestRun_RecoversWhenSeedAddressWasRevisedWithoutBusinessPurposeAndPointerCl
 	s, pool := seededStore(t)
 	tenantID := testkit.TenantID(7)
 	runSeed(t, s, tenantID)
-	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID})
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, Duties: testkit.ScopeDuties("")})
 	sites, err := s.ListSites(ctx, store.SiteFilter{}, store.SiteKey{}, 10)
 	if err != nil {
 		t.Fatal(err)

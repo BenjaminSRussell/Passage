@@ -70,7 +70,7 @@ components:
       name: X-Passage-Legal-Entity
       in: header
       required: false
-      description: Legal-entity scope of the caller; absent means all entities. Any other value yields 403.
+      description: Legal-entity scope of the caller. Only an explicit all-entity scope is accepted; an absent or narrower scope yields 403.
       schema: { type: string }
   schemas:
     EffectivePermissions:

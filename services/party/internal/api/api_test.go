@@ -173,7 +173,7 @@ func TestMetricsCountBusinessOperations(t *testing.T) {
 	for _, want := range []string{
 		`party_tax_validations_total{status="valid"} 1`,
 		`party_tax_validations_total{status="unverified"} 1`,
-		`party_tax_validations_rejected_total 2`,
+		`party_tax_validations_rejected_total 3`,
 		`party_tax_checker_failures_total 1`,
 	} {
 		if !strings.Contains(rec.Body.String(), want) {

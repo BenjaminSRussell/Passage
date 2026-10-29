@@ -20,7 +20,7 @@ import (
 
 // as returns a tenant-1 context for one user with no legal-entity scope.
 func as(user string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), UserID: user, Duties: map[string]struct{}{}})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), UserID: user, Duties: testkit.ScopeDuties("")})
 }
 
 // submittedCapex creates a request as "creator" for requester "plant.manager"
