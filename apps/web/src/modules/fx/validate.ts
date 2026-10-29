@@ -56,6 +56,8 @@ export interface RateEntry {
 
 export const emptyEntry: RateEntry = { rateType: "", from: "", to: "", validFrom: "", rate: "" };
 
+export const SAME_CURRENCY_ERROR = "Choose a different currency from the first one.";
+
 export function validateEntry(v: RateEntry): Errors {
   const errors: Errors = {};
   if (v.rateType === "") errors.rateType = "Choose a rate type.";
@@ -63,7 +65,7 @@ export function validateEntry(v: RateEntry): Errors {
   if (from) errors.from = from;
   const to = currencyError(v.to, true);
   if (to) errors.to = to;
-  if (!from && !to && v.from === v.to) errors.to = "Choose a different currency from the first one.";
+  if (!from && !to && v.from === v.to) errors.to = SAME_CURRENCY_ERROR;
   if (v.validFrom === "") errors.validFrom = "Enter the date the rate takes effect.";
   else if (!DATE.test(v.validFrom)) errors.validFrom = "Enter the date as YYYY-MM-DD.";
   const rate = rateError(v.rate);
