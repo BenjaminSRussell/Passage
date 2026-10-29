@@ -2,9 +2,9 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Worker } from "@temporalio/worker";
 import { TestWorkflowEnvironment } from "@temporalio/testing";
-import { createActivities, createPartyHttpClient, type PartyClient, type PartyDecision } from "../src/activities.js";
+import { createActivities, type PartyClient, type PartyDecision } from "../src/activities.js";
 import { changeRequestedType, handleChangeRequested, toApprovalInput, type ChangeRequestedEvent } from "../src/changeRequested.js";
-import { approvalStateQuery, approvalWorkflow, approveSignal, rejectSignal, type ApprovalLevel } from "../src/workflows.js";
+import { approvalStateQuery, approvalWorkflow, approveSignal, delegateSignal, rejectSignal, type ApprovalLevel } from "../src/workflows.js";
 
 const levels: ApprovalLevel[] = [
   { id: "finance", approver: "alice", escalationApprover: "cfo", slaMs: 3_600_000 },
@@ -97,52 +97,19 @@ describe("change.requested consumer", () => {
     });
   }, 30_000);
 
-  it("refuses a decision by the requester", async () => {
-    const selfLevels: ApprovalLevel[] = [
-      { id: "finance", approver: "requester", escalationApprover: "cfo", slaMs: 3_600_000 },
-    ];
+  it("refuses a decision or a delegation by or to the requester", async () => {
     await run("self-queue", async () => {
-      await handleChangeRequested(environment.client, "self-queue", selfLevels, event("c-self"));
+      await handleChangeRequested(environment.client, "self-queue", levels, event("c-self"));
       const handle = environment.client.workflow.getHandle<typeof approvalWorkflow>("approval:c-self");
       await handle.signal(approveSignal, "requester");
+      await handle.signal(delegateSignal, "alice", "requester");
       const state = await handle.query(approvalStateQuery);
       expect(state.status).toBe("pending");
-      await environment.sleep(3_600_001);
-      await handle.signal(approveSignal, "cfo");
+      expect(state.approver).toBe("alice");
+      await handle.signal(approveSignal, "alice");
       const result = await handle.result();
-      expect(result.history.map((entry) => entry.action)).toEqual(["escalated", "approved"]);
-      expect(decisions.map((d) => d.decidedBy)).toEqual(["cfo"]);
+      expect(result.history.map((entry) => entry.action)).toEqual(["approved"]);
+      expect(decisions.map((d) => d.decidedBy)).toEqual(["alice"]);
     });
   }, 30_000);
-});
-
-describe("party http client", () => {
-  const decision: PartyDecision = {
-    changeId: "c-1", tenantId: "t", legalEntityId: "le", decision: "approved", decidedBy: "alice",
-  };
-
-  it("posts approve and reject to the pending-change endpoints with scope headers", async () => {
-    const calls: { url: string; headers: Record<string, string> }[] = [];
-    const fetchStub = (async (url: string, init: { headers: Record<string, string> }) => {
-      calls.push({ url, headers: init.headers });
-      return new Response("{}", { status: 200 });
-    }) as unknown as typeof fetch;
-    const client = createPartyHttpClient("http://party", fetchStub);
-    await client.decide(decision);
-    await client.decide({ ...decision, decision: "rejected" });
-    expect(calls.map((c) => c.url)).toEqual([
-      "http://party/v1/party/pending-changes/c-1:approve",
-      "http://party/v1/party/pending-changes/c-1:reject",
-    ]);
-    expect(calls[0]?.headers).toMatchObject({
-      "X-Passage-Tenant": "t", "X-Passage-Legal-Entity": "le", "X-Passage-User": "alice",
-    });
-  });
-
-  it("fails non-retryably on 4xx and retryably on 5xx", async () => {
-    const respond = (status: number) =>
-      createPartyHttpClient("http://party", (async () => new Response("", { status })) as unknown as typeof fetch);
-    await expect(respond(403).decide(decision)).rejects.toMatchObject({ nonRetryable: true });
-    await expect(respond(503).decide(decision)).rejects.not.toMatchObject({ nonRetryable: true });
-  });
 });

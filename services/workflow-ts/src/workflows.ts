@@ -9,7 +9,7 @@ import type { PartyDecisionActivities } from "./activities.js";
 
 const { decidePartyChange } = proxyActivities<PartyDecisionActivities>({
   startToCloseTimeout: "30 seconds",
-  retry: { maximumAttempts: 10 },
+  retry: { maximumInterval: "1 minute" },
 });
 
 export interface PartyChangeRef {
@@ -131,7 +131,7 @@ async function recordPartyDecision(
   await decidePartyChange({ ...input.partyChange, decision, decidedBy });
 }
 
-function validateInput(input: ApprovalInput): void {
+export function validateInput(input: ApprovalInput): void {
   if (!input.requestId || !input.entityType || input.levels.length === 0) {
     throw new TypeError("requestId, entityType and at least one approval level are required");
   }
@@ -141,6 +141,9 @@ function validateInput(input: ApprovalInput): void {
   for (const level of input.levels) {
     if (!level.id || !level.approver || !level.escalationApprover || level.slaMs <= 0) {
       throw new TypeError("approval levels require id, approver, escalationApprover and positive slaMs");
+    }
+    if (input.requester && (level.approver === input.requester || level.escalationApprover === input.requester)) {
+      throw new TypeError("the requester cannot be an approver or escalation approver");
     }
   }
 }
