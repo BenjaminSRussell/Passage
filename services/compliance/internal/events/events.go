@@ -13,6 +13,9 @@ const Context = "sod"
 // TradeContext is the event context of trade compliance (PRD §9.48.5).
 const TradeContext = "trade"
 
+// PrivacyContext is the event context of subject requests (PRD §9.48.5).
+const PrivacyContext = "privacy"
+
 var (
 	// ConflictDetected is emitted when an evaluation raises a conflict, or raises a RESOLVED one again.
 	ConflictDetected = events.Type(Context, "conflict", "detected", 1)
@@ -21,10 +24,14 @@ var (
 	// ScreeningHit is emitted when screening opens a hit on a party or document;
 	// sales, procurement and payments hold the subject until it is decided (FR-48.19).
 	ScreeningHit = events.Type(TradeContext, "screening", "hit", 1)
+	// RequestCompleted is emitted when a delivered subject request is closed (FR-48.10).
+	RequestCompleted = events.Type(PrivacyContext, "request", "completed", 1)
 )
 
 // All lists every event type this service publishes.
-func All() []string { return []string{ConflictDetected, MitigationApproved, ScreeningHit} }
+func All() []string {
+	return []string{ConflictDetected, MitigationApproved, ScreeningHit, RequestCompleted}
+}
 
 // ConflictDetectedData is the data member of sod.conflict.detected.v1
 // (PRD §9.48.5: user_id, rule_id, severity, roles[]).
@@ -62,4 +69,16 @@ type ScreeningHitData struct {
 	ListEntryID   string   `json:"list_entry_id"`
 	Score         string   `json:"score"`
 	MatchedFields []string `json:"matched_fields"`
+}
+
+// RequestCompletedData is the data member of privacy.request.completed.v1
+// (PRD §9.48.5: request_id, type, affected_domains[], delivered_at).
+type RequestCompletedData struct {
+	RequestID       string    `json:"request_id"`
+	Type            string    `json:"type"`
+	Regulation      string    `json:"regulation"`
+	AffectedDomains []string  `json:"affected_domains"`
+	DeliveredAt     time.Time `json:"delivered_at"`
+	ClosedAt        time.Time `json:"closed_at"`
+	Late            bool      `json:"late"`
 }

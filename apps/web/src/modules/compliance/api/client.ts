@@ -639,3 +639,199 @@ export function decideScreeningHit(id: string, etag: string, decision: HitDecisi
 export function checkExport(input: ExportCheckInput): Promise<ExportResult> {
   return json<ExportResult>(`${tradeBase}/export-checks`, { method: "POST", body: JSON.stringify(input) });
 }
+
+// Subject requests, retention, certification campaigns, incident steps and
+// export governance (PSG-48 slice 5).
+
+export const privacyBase = "/api/v1/privacy";
+
+export const PRIVACY_TYPES = ["ACCESS", "PORTABILITY", "ERASURE", "RECTIFICATION", "RESTRICTION"] as const;
+export type PrivacyRequestType = (typeof PRIVACY_TYPES)[number];
+
+export const REGULATIONS = ["GDPR", "CCPA"] as const;
+export type Regulation = (typeof REGULATIONS)[number];
+
+export const PRIVACY_STATES = ["RECEIVED", "VERIFIED", "DISCOVERED", "HELD", "APPROVED", "DELIVERED", "CLOSED", "REJECTED"] as const;
+export type PrivacyState = (typeof PRIVACY_STATES)[number];
+
+export type PrivacyAction = "VERIFY" | "DISCOVER" | "RELEASE_HOLD" | "APPROVE" | "DELIVER" | "CLOSE" | "REJECT";
+
+export interface SubjectRequest {
+  requestId: string;
+  type: PrivacyRequestType;
+  regulation: Regulation;
+  subjectRef: string;
+  receivedAt: string;
+  deadlineAt: string;
+  state: PrivacyState;
+  holdIds: string[];
+  verifiedAt?: string;
+  privacyOfficerId?: string;
+  approvedAt?: string;
+  deliveredAt?: string;
+  closedAt?: string;
+  late: boolean;
+  justification?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  version: number;
+}
+
+export interface IntakeInput {
+  type: PrivacyRequestType;
+  regulation: Regulation;
+  subjectRef: string;
+  receivedAt?: string;
+  deadlineDays?: number;
+}
+
+export interface RequestFilter {
+  state?: PrivacyState | "";
+  type?: PrivacyRequestType | "";
+  cursor?: string;
+}
+
+export interface RequestPage {
+  items: SubjectRequest[];
+  nextCursor?: string;
+}
+
+export interface RequestActionInput {
+  action: PrivacyAction;
+  holdIds?: string[];
+  matchedAttributes?: string[];
+  emailLinkVerified?: boolean;
+  justification?: string;
+}
+
+export interface ErasurePreview {
+  record: Record<string, string>;
+  pseudonymized: string[];
+}
+
+export function intakeSubjectRequest(input: IntakeInput, key: string): Promise<Versioned<SubjectRequest>> {
+  return versioned<SubjectRequest>(`${privacyBase}/requests`, { method: "POST", body: JSON.stringify(input), headers: { "Idempotency-Key": key } });
+}
+
+export function listSubjectRequests(filter: RequestFilter = {}, signal?: AbortSignal): Promise<RequestPage> {
+  return json<RequestPage>(`${privacyBase}/requests${query({ state: filter.state, type: filter.type, cursor: filter.cursor, limit: "50" })}`, {}, signal);
+}
+
+export function getSubjectRequest(id: string, signal?: AbortSignal): Promise<Versioned<SubjectRequest>> {
+  return versioned<SubjectRequest>(`${privacyBase}/requests/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Moves a stored request one step at the given ETag (FR-48.10). */
+export function actOnSubjectRequest(id: string, etag: string, input: RequestActionInput): Promise<Versioned<SubjectRequest>> {
+  return versioned<SubjectRequest>(`${privacyBase}/requests/${encodeURIComponent(id)}/actions`, {
+    method: "POST",
+    body: JSON.stringify(input),
+    headers: { "If-Match": etag },
+  });
+}
+
+/** What the erasure does to one record of the subject (BR-48.5); nothing is written. */
+export function previewErasure(id: string, record: Record<string, string>): Promise<ErasurePreview> {
+  return json<ErasurePreview>(`${privacyBase}/requests/${encodeURIComponent(id)}/erasure-preview`, { method: "POST", body: JSON.stringify({ record }) });
+}
+
+export type CertDecision = "CERTIFY" | "REVOKE" | "PENDING";
+
+export interface CampaignEntry {
+  managerId: string;
+  userId: string;
+  roleName: string;
+  decision?: CertDecision;
+}
+
+export interface CampaignProgress {
+  total: number;
+  certified: number;
+  revoked: number;
+  pending: number;
+  percentCertified: number;
+  overdueByManager: Record<string, number>;
+}
+
+export interface CampaignCloseResult {
+  closed: boolean;
+  revoke: CampaignEntry[];
+  flagged: CampaignEntry[];
+  progress: CampaignProgress;
+  asOf: string;
+}
+
+export function planCampaign(input: { startsAt: string; windowDays?: number }): Promise<{ startsAt: string; closesAt: string }> {
+  return json<{ startsAt: string; closesAt: string }>(`${sodBase}/campaigns:plan`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export function closeCampaign(input: { entries: CampaignEntry[]; autoRevoke: boolean; closesAt: string }): Promise<CampaignCloseResult> {
+  return json<CampaignCloseResult>(`${sodBase}/campaigns:close`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export const INCIDENT_STEPS = ["TRIAGE", "CONTAINED", "ERADICATED", "RECOVERED", "CLOSED"] as const;
+export type IncidentStatus = (typeof INCIDENT_STEPS)[number];
+export const INCIDENT_SEVERITIES = ["SEV1", "SEV2", "SEV3", "SEV4"] as const;
+export type IncidentSeverity = (typeof INCIDENT_SEVERITIES)[number];
+export const INCIDENT_SOURCES = ["ALERT", "USER_REPORT", "VENDOR", "PEN_TEST"] as const;
+export type IncidentSource = (typeof INCIDENT_SOURCES)[number];
+
+export interface IncidentStepInput {
+  severity: IncidentSeverity;
+  source: IncidentSource;
+  from?: IncidentStatus;
+  to: IncidentStatus;
+  personalDataBreach: boolean;
+  awareAt?: string;
+  regimes?: BreachRegime[];
+  notifiedAt?: Partial<Record<BreachRegime, string>>;
+  justification?: string;
+}
+
+export interface IncidentClock extends BreachClock {
+  notifiedAt?: string;
+  met: boolean;
+  late: boolean;
+}
+
+export interface IncidentStepResult {
+  status: IncidentStatus;
+  pageOnCall: boolean;
+  clocks: IncidentClock[];
+  asOf: string;
+}
+
+/** Checks one incident lifecycle step (FR-48.29); nothing is stored. */
+export function checkIncidentStep(input: IncidentStepInput): Promise<IncidentStepResult> {
+  return json<IncidentStepResult>(`${securityBase}/incidents:transition`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export const EXPORT_CLASSES = ["PII", "FINANCIAL", "CONFIDENTIAL", "PUBLIC"] as const;
+export type ExportClassification = (typeof EXPORT_CLASSES)[number];
+export const EXPORT_CHANNELS = ["GRID", "EXPLORER", "REPORT", "API_BULK", "MCP_BULK"] as const;
+export type ExportChannel = (typeof EXPORT_CHANNELS)[number];
+export type ExportAction = "ALLOW" | "AUDIT" | "WATERMARK" | "REASON" | "APPROVAL" | "DENY";
+
+export interface ExportDecision {
+  allowed: boolean;
+  actions: ExportAction[];
+  requiresReason: boolean;
+  requiresApproval: boolean;
+  watermark: boolean;
+  audit: boolean;
+}
+
+export interface ReadClassification {
+  logged: boolean;
+  fields: string[];
+  retentionDays: number;
+}
+
+export function evaluateExportPolicy(input: { classification: ExportClassification; channel: ExportChannel; rows: number; reason?: string }): Promise<ExportDecision> {
+  return json<ExportDecision>(`${complianceBase}/export-governance:evaluate`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export function classifyRead(fields: string[]): Promise<ReadClassification> {
+  return json<ReadClassification>(`${complianceBase}/read-log:classify`, { method: "POST", body: JSON.stringify({ fields }) });
+}
