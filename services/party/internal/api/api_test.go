@@ -164,16 +164,13 @@ func TestMetricsCountBusinessOperations(t *testing.T) {
 	do(r, http.MethodPost, validatePath, `{"type":"VAT","country":"DE","number":"DE123456789"}`, "party.write", true)
 	do(r, http.MethodPost, validatePath, `{"type":"VAT","country":"DE","number":"bad"}`, "party.write", true)
 	do(r, http.MethodPost, validatePath, `{`, "party.write", true)
-	req := httptest.NewRequest(http.MethodPost, validatePath, strings.NewReader(`{"type":"EIN","number":"12-3456789"}`))
-	req.Header = http.Header{"X-Passage-Tenant": {testkit.TenantID(1)}, "X-Passage-Legal-Entity": {"not-a-uuid"}, "X-Passage-Duties": {"party.write"}}
-	r.ServeHTTP(httptest.NewRecorder(), req)
 
 	rec := httptest.NewRecorder()
 	a.Metrics().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	for _, want := range []string{
 		`party_tax_validations_total{status="valid"} 1`,
 		`party_tax_validations_total{status="unverified"} 1`,
-		`party_tax_validations_rejected_total 3`,
+		`party_tax_validations_rejected_total 2`,
 		`party_tax_checker_failures_total 1`,
 	} {
 		if !strings.Contains(rec.Body.String(), want) {

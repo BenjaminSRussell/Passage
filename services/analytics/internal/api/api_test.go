@@ -34,6 +34,8 @@ func do(t *testing.T, h http.Handler, method, path, body string, headers map[str
 	return rec
 }
 
+const usmf = "00000000-0000-7000-8000-0000000000e1"
+
 var viewer = map[string]string{tenant.HeaderDuties: DutyView}
 
 func withLE(le string) map[string]string {
@@ -67,7 +69,7 @@ func TestListMetrics_RequiresDutyAndReturnsPublishedCatalog(t *testing.T) {
 func TestQuery_MirrorsLegalEntityScopeIntoPlan(t *testing.T) {
 	h := newTestServer()
 	body := `{"measures":["revenue"],"dimensions":["account_code"],"from":"2026-01-01","to":"2026-03-31"}`
-	rec := do(t, h, http.MethodPost, "/v1/analytics/query", body, withLE("USMF"))
+	rec := do(t, h, http.MethodPost, "/v1/analytics/query", body, withLE(usmf))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -79,8 +81,8 @@ func TestQuery_MirrorsLegalEntityScopeIntoPlan(t *testing.T) {
 		t.Fatalf("plan = %+v", got.Plan)
 	}
 	if len(got.Plan.Filters) != 1 || got.Plan.Filters[0].Member != "fin_journal_line.legal_entity_id" ||
-		got.Plan.Filters[0].Values[0] != "USMF" {
-		t.Fatalf("filters = %+v, want legal entity USMF", got.Plan.Filters)
+		got.Plan.Filters[0].Values[0] != usmf {
+		t.Fatalf("filters = %+v, want legal entity %s", got.Plan.Filters, usmf)
 	}
 }
 
@@ -121,7 +123,7 @@ func TestQuery_Problems(t *testing.T) {
 	h := newTestServer()
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rec := do(t, h, http.MethodPost, "/v1/analytics/query", tc.body, withLE("USMF"))
+			rec := do(t, h, http.MethodPost, "/v1/analytics/query", tc.body, withLE(usmf))
 			if rec.Code != tc.status {
 				t.Fatalf("status %d, want %d: %s", rec.Code, tc.status, rec.Body.String())
 			}
