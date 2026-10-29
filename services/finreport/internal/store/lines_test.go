@@ -29,14 +29,14 @@ func loadLedger(t testing.TB, ctx context.Context, pool *pgxpool.Pool, st *Postg
 	}
 	err := dbx.WithTenantTx(ctx, pool, func(tx pgx.Tx) error {
 		p, _ := tenant.FromContext(ctx)
-		if _, err := tx.Exec(ctx, `insert into reporting_balance(tenant_id, ledger_id, period_year, period_no, quarter, account, combination, currency_type, net, closing_net)
+		if _, err := tx.Exec(ctx, `insert into reporting_balance(tenant_id, ledger_id, period_year, period_no, quarter, account, combination, currency_type, net, closing_net, legal_entity_id)
 			select tenant_id, ledger_id, period_year, period_no, 1, account, combination, currency_type, sum(net),
-			       coalesce(sum(net) filter (where closing_entry), 0)
+			       coalesce(sum(net) filter (where closing_entry), 0), legal_entity_id
 			from reporting_journal_line where ledger_id = $1 and posting_sequence <= $2
-			group by tenant_id, ledger_id, period_year, period_no, account, combination, currency_type`, ledger, hwm); err != nil {
+			group by tenant_id, ledger_id, period_year, period_no, account, combination, currency_type, legal_entity_id`, ledger, hwm); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `insert into reporting_hwm(tenant_id, ledger_id, posting_sequence) values($1,$2,$3)`, p.TenantID, ledger, hwm)
+		_, err := tx.Exec(ctx, `insert into reporting_hwm(tenant_id, ledger_id, posting_sequence, legal_entity_id) values($1,$2,$3,nullif($4,'')::uuid)`, p.TenantID, ledger, hwm, p.LegalEntityID)
 		return err
 	})
 	if err != nil {

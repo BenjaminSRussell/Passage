@@ -333,3 +333,14 @@ Each is written to the outbox in the transaction that makes the change.
 
 No new third-party dependencies beyond the platform module and what it pulls in
 (chi, pgx/v5, shopspring/decimal, pgregory.net/rapid for tests).
+
+## Legal-entity scope (#241)
+
+`load`, `freight_bill`, `carrier_invoice`, `gate_visit` and `goods_in_transit_order`
+carry a nullable `legal_entity_id` (migration 0006) with a RESTRICTIVE legal-entity
+policy, set from the caller's single legal entity on create; `load_shipment`,
+`dg_check`, `screening_hold`, `freight_bill_decision`, `gate_event` and
+`goods_in_transit_line` follow their parent. A carrier invoice matched to a freight
+bill takes the bill's entity. A row with no entity is visible only to all-entity
+callers. Rate cards, tenders, tracking events, voyages and route plans stay
+tenant-level.

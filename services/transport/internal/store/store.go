@@ -216,7 +216,11 @@ func (s *Postgres) ListRateCards(ctx context.Context, f RateCardFilter) ([]domai
 func (s *Postgres) CreateFreightBill(ctx context.Context, in domain.FreightBill, idem Idem) (domain.FreightBill, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out domain.FreightBill
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	entity, err := httpx.OwnerLegalEntity(ctx, "")
+	if err != nil {
+		return out, err
+	}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		replay := func() (bool, error) {
 			if idem.Key == "" {
 				return false, nil
@@ -242,12 +246,12 @@ func (s *Postgres) CreateFreightBill(ctx context.Context, in domain.FreightBill,
 			return err
 		}
 		out, _, err = scanFreightBill(tx.QueryRow(ctx, `insert into freight_bill (tenant_id, id, load_id, carrier_id, currency, expected_lines, expected_total,
-			match_status, idempotency_key, request_hash)
-			values ($1, $2, $3, $4, $5, $6::jsonb, $7::numeric, $8, $9, $10)
+			match_status, idempotency_key, request_hash, legal_entity_id)
+			values ($1, $2, $3, $4, $5, $6::jsonb, $7::numeric, $8, $9, $10, nullif($11, '')::uuid)
 			on conflict (tenant_id, idempotency_key) do nothing
 			returning `+freightBillColumns,
 			p.TenantID, ids.New(), in.LoadID, in.CarrierID, in.Currency, string(lines), domain.SumLines(in.ExpectedLines).String(),
-			domain.BillUnmatched, nullable(idem.Key), nullable(idem.Fingerprint)))
+			domain.BillUnmatched, nullable(idem.Key), nullable(idem.Fingerprint), entity))
 		if errors.Is(err, pgx.ErrNoRows) {
 			if done, err := replay(); done || err != nil {
 				return err
@@ -308,7 +312,11 @@ func (s *Postgres) RegisterCarrierInvoice(ctx context.Context, in domain.Carrier
 	in.Total = domain.SumLines(in.Lines)
 	var saved domain.CarrierInvoice
 	var bill *domain.FreightBill
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	entity, err := httpx.OwnerLegalEntity(ctx, "")
+	if err != nil {
+		return domain.CarrierInvoice{}, nil, err
+	}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var result domain.MatchResult
 		if in.FreightBillID == nil {
 			in.MatchStatus, in.VarianceTotal = domain.MatchUnexpected, nil
@@ -333,7 +341,7 @@ func (s *Postgres) RegisterCarrierInvoice(ctx context.Context, in domain.Carrier
 			in.MatchStatus, in.VarianceTotal = result.Status, &variance
 		}
 		var err error
-		saved, err = insertInvoice(ctx, tx, p.TenantID, in)
+		saved, err = insertInvoice(ctx, tx, p.TenantID, entity, in)
 		if err != nil || in.FreightBillID == nil {
 			return err
 		}
@@ -391,17 +399,18 @@ func (s *Postgres) ListCarrierInvoices(ctx context.Context, f InvoiceFilter) ([]
 	return invoices, err
 }
 
-func insertInvoice(ctx context.Context, tx pgx.Tx, tenantID string, in domain.CarrierInvoice) (domain.CarrierInvoice, error) {
+func insertInvoice(ctx context.Context, tx pgx.Tx, tenantID, entity string, in domain.CarrierInvoice) (domain.CarrierInvoice, error) {
 	lines, err := json.Marshal(in.Lines)
 	if err != nil {
 		return domain.CarrierInvoice{}, err
 	}
 	saved, err := scanInvoice(tx.QueryRow(ctx, `insert into carrier_invoice (tenant_id, id, carrier_id, invoice_no, invoice_date, source, freight_bill_id,
-		currency, lines, total, match_status, variance_total)
-		values ($1, $2, $3, $4, $5::date, $6, $7, $8, $9::jsonb, $10::numeric, $11, $12::numeric)
+		currency, lines, total, match_status, variance_total, legal_entity_id)
+		values ($1, $2, $3, $4, $5::date, $6, $7, $8, $9::jsonb, $10::numeric, $11, $12::numeric,
+			coalesce((select b.legal_entity_id from freight_bill b where b.tenant_id = $1 and b.id = $7), nullif($13, '')::uuid))
 		returning `+carrierInvoiceColumns,
 		tenantID, in.ID, in.CarrierID, in.InvoiceNo, in.InvoiceDate, in.Source, in.FreightBillID, in.Currency, string(lines),
-		in.Total.String(), in.MatchStatus, varianceString(in.VarianceTotal)))
+		in.Total.String(), in.MatchStatus, varianceString(in.VarianceTotal), entity))
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
 		return domain.CarrierInvoice{}, httpx.NewProblem(http.StatusConflict, domain.CodeDuplicateInvoice,

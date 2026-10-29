@@ -40,7 +40,11 @@ type GoodsInTransitFilter struct {
 func (s *Postgres) CreateGoodsInTransit(ctx context.Context, voyageID, incoterm, siteID string, lines []int, idem Idem) (domain.GoodsInTransit, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out domain.GoodsInTransit
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	entity, err := httpx.OwnerLegalEntity(ctx, "")
+	if err != nil {
+		return out, err
+	}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		replay := func() (bool, error) {
 			if idem.Key == "" {
 				return false, nil
@@ -103,10 +107,10 @@ func (s *Postgres) CreateGoodsInTransit(ctx context.Context, voyageID, incoterm,
 		}
 		id := ids.New()
 		if _, err := tx.Exec(ctx, `insert into goods_in_transit_order (tenant_id, id, voyage_id, site_id, incoterm, transfer_event,
-			in_transit_warehouse, currency, status, lines, goods_value, estimated_total, idempotency_key, request_hash, created_by)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::numeric, $12::numeric, $13, $14, $15)`,
+			in_transit_warehouse, currency, status, lines, goods_value, estimated_total, idempotency_key, request_hash, created_by, legal_entity_id)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::numeric, $12::numeric, $13, $14, $15, nullif($16, '')::uuid)`,
 			p.TenantID, id, voyageID, g.SiteID, g.Incoterm, g.TransferEvent, g.InTransitWarehouse, g.Currency, g.Status, string(raw),
-			g.GoodsValue.String(), g.EstimatedTotal.String(), nullable(idem.Key), nullable(idem.Fingerprint), p.UserID); err != nil {
+			g.GoodsValue.String(), g.EstimatedTotal.String(), nullable(idem.Key), nullable(idem.Fingerprint), p.UserID, entity); err != nil {
 			return err
 		}
 		for _, line := range lineNos {

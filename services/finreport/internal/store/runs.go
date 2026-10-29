@@ -12,6 +12,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 
 	"github.com/BenjaminSRussell/passage/services/finreport/internal/domain"
@@ -23,6 +24,7 @@ type RunSpec struct {
 	Code              string
 	Version           int // 0 means the latest published version
 	LedgerID          string
+	LegalEntityID     string
 	CurrencyType      string
 	PeriodYear        int
 	PeriodNo          int
@@ -70,7 +72,11 @@ type LagRow struct {
 func (s *Postgres) CreateRun(ctx context.Context, spec RunSpec) (Run, error) {
 	var run Run
 	started := time.Now()
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	entity, err := httpx.OwnerLegalEntity(ctx, spec.LegalEntityID)
+	if err != nil {
+		return run, err
+	}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if spec.IdempotencyKey != "" {
 			var id, hash string
 			err := tx.QueryRow(ctx, `select id::text, request_hash from statement_run where idempotency_key=$1`, spec.IdempotencyKey).Scan(&id, &hash)
@@ -139,11 +145,11 @@ func (s *Postgres) CreateRun(ctx context.Context, spec RunSpec) (Run, error) {
 		}
 		_, err = tx.Exec(ctx, `insert into statement_run(tenant_id, id, definition_code, definition_version, ledger_id, currency_type,
 			period_year, period_no, include_adjustment, status, hwm, result_hash, cell_count, requested_by, request_hash, idempotency_key,
-			started_at, completed_at, duration_ms, checks)
-			values($1,$2,$3,$4,$5,$6,$7,$8,$9,'completed',$10,$11,$12,$13,$14,$15,$16,now(),$17,$18)`,
+			started_at, completed_at, duration_ms, checks, legal_entity_id)
+			values($1,$2,$3,$4,$5,$6,$7,$8,$9,'completed',$10,$11,$12,$13,$14,$15,$16,now(),$17,$18,nullif($19,'')::uuid)`,
 			tenantID(ctx), run.ID, def.Code, def.Version, spec.LedgerID, spec.CurrencyType, spec.PeriodYear, spec.PeriodNo,
 			spec.IncludeAdjustment, hwmJSON, hash, len(res.Cells), spec.RequestedBy, spec.RequestHash, nullable(spec.IdempotencyKey),
-			started, int(time.Since(started).Milliseconds()), checksJSON)
+			started, int(time.Since(started).Milliseconds()), checksJSON, entity)
 		if err != nil {
 			return err
 		}
@@ -174,7 +180,7 @@ func (s *Postgres) CreateRun(ctx context.Context, spec RunSpec) (Run, error) {
 		}); err != nil {
 			return err
 		}
-		return recordAuditTx(ctx, tx, domain.AuditEntry{Kind: domain.AuditStatementRun, LedgerID: spec.LedgerID, Period: period,
+		return recordAuditTx(ctx, tx, domain.AuditEntry{Kind: domain.AuditStatementRun, LedgerID: spec.LedgerID, LegalEntityID: entity, Period: period,
 			ActorID: spec.RequestedBy, ObjectRef: "run:" + run.ID, Details: map[string]any{
 				"definition": def.Code, "version": def.Version, "currencyType": spec.CurrencyType,
 				"hwm": hwm[spec.LedgerID], "resultHash": res.Hash, "cells": len(res.Cells),

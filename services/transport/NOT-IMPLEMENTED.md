@@ -130,3 +130,13 @@ owner's work, or a change outside this wave's paths).
 | Events `dev.passage.tms.shipment.rated.v1`, and load, DG or gate check-out events | later slice of PSG-34 | Published: `freightbill.matched`, `freightbill.approved` (slice 3), `tender.accepted/declined/expired`, `tracking.event`, `landedcost.posted`, `gate.checkedin` and `goodsintransit.shipped` (slice 4; the latter is not in the PRD's event table and is added for wave 20). Load builds, DG checks and check-outs publish nothing yet. Screening holds, their release and route plans publish nothing: the PRD's event table has no event for them |
 | BFF route registration for `/api/v1/transport` | handoff (web-bff owner) | The service follows the `/v1/<service>` convention the BFF rewrites; registering the upstream is outside this wave's paths |
 | Error codes TMS-0103, 0107, 0125, 0132, 0135 | later slice of PSG-34 | Raised only by features not built in slices 1 to 5. TMS-0128 is raised by the check-in rule but cannot be reached until sites can refuse walk-ins (D7) |
+
+## Legal-entity scope follow-ups (#241)
+
+- **later slice**: create bodies for loads, freight bills, gate check-ins and
+  goods-in-transit orders do not accept `legalEntityId`; an all-entity caller
+  leaves the row unassigned and a caller scoped to several gets 422.
+- **later slice**: `tender`, `tracking_event`, `voyage`, `rate_card` and `route_plan`
+  are still tenant-level.
+- **handoff**: existing rows keep a NULL `legal_entity_id`; assigning them is a
+  data migration owned by the tenant administrator.

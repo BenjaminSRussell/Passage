@@ -171,3 +171,13 @@ not edit that code).
 - PSG-20 inventory costing: current item cost for the inventory forecast value (FR-22.22).
 - PSG-48 sanctions screening.
 - Policies (`policies/`, not owned by this wave): register the duty `planning.forecast.approve` (Approve forecast consensus) for the supply chain manager role, apart from `planning.forecast.maintain` (Demand planner), and `planning.setup.maintain` (Maintain planning setup: coverage groups, item coverage, buffer profiles, quota arrangements) for the planning administrator role. The buffer recalculation uses `planning.run` (Run master planning, including the batch service account).
+
+## Legal-entity scope follow-ups (#241)
+
+- **later slice**: `firming_batch`, `coverage_group`, `item_coverage`, `buffer_profile`
+  and `ddmrp_buffer` are still tenant-level; they have no line tables.
+- **later slice**: forecast-model and quota-arrangement creates take the caller's
+  single legal entity; an all-entity caller leaves them unassigned and a caller
+  scoped to several gets 422 until the create bodies accept `legalEntityId`.
+- **handoff**: existing rows keep a NULL `legal_entity_id`; assigning them is a
+  data migration owned by the tenant administrator.

@@ -51,7 +51,11 @@ type gateVisitRow struct {
 func (s *Postgres) CheckIn(ctx context.Context, in domain.GateVisit, idem Idem) (domain.GateVisit, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out domain.GateVisit
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	entity, err := httpx.OwnerLegalEntity(ctx, "")
+	if err != nil {
+		return out, err
+	}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		replay := func() (bool, error) {
 			if idem.Key == "" {
 				return false, nil
@@ -97,12 +101,12 @@ func (s *Postgres) CheckIn(ctx context.Context, in domain.GateVisit, idem Idem) 
 		}
 		row, err := scanGateVisit(tx.QueryRow(ctx, `insert into gate_visit (tenant_id, id, site_id, direction, load_id, carrier_scac, trailer_no,
 			seal_no, driver_name, driver_license_id, appointment_id, scheduled_at, arrival_status, arrival_delta_min, checked_in_at,
-			free_time_min, status, idempotency_key, request_hash, created_by)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+			free_time_min, status, idempotency_key, request_hash, created_by, legal_entity_id)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, nullif($21, '')::uuid)
 			returning `+gateVisitColumns,
 			p.TenantID, ids.New(), in.SiteID, in.Direction, nullable(in.LoadID), in.CarrierSCAC, in.TrailerNo, nullable(in.SealNo),
 			in.DriverName, in.DriverLicenseID, nullable(in.AppointmentID), in.ScheduledAt, status, delta, in.CheckedInAt,
-			in.FreeTimeMin, domain.VisitInYard, nullable(idem.Key), nullable(idem.Fingerprint), p.UserID))
+			in.FreeTimeMin, domain.VisitInYard, nullable(idem.Key), nullable(idem.Fingerprint), p.UserID, entity))
 		if isUnique(err) {
 			return httpx.NewProblem(http.StatusConflict, domain.CodeVisitState, "trailer "+in.TrailerNo+" of "+in.CarrierSCAC+" is already in the yard")
 		}

@@ -425,3 +425,15 @@ PSG-9 (BOM and low-level codes), PSG-27 (sales demand, later).
 
 Only the platform kernel and the modules it already pulls in (chi, pgx/v5,
 shopspring/decimal, google/uuid, and `pgregory.net/rapid` for property tests).
+
+## Legal-entity scope (#241)
+
+`plan`, `plan_version`, `forecast_model` and `quota_arrangement` carry a nullable
+`legal_entity_id` (migration 0012) with a RESTRICTIVE legal-entity policy;
+`planned_order`, `pegging`, `action_message`, `net_requirement`, `forecast_line` and
+`quota_source` follow their parent. A row with no entity is visible only to
+all-entity callers. A plan run takes an optional `legalEntityId` (default: the
+caller's single entity; 403 outside the caller's scope) that owns the plan when
+the run creates it; an existing plan keeps its owner and a plan or forecast model
+code owned by another legal entity is 409 `PLAN-CODE-TAKEN`. Forecast models and
+quota arrangements belong to the caller's single legal entity.

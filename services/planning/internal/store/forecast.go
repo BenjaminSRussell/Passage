@@ -97,12 +97,15 @@ func forecastNotFound() error {
 
 // lockForecastModel returns the model locked for the write. A model that does
 // not exist yet is created at version 0, so a first write sends If-Match "0".
-func lockForecastModel(ctx context.Context, tx pgx.Tx, tenantID, code string, expectedVersion int) (ForecastModel, error) {
-	if _, err := tx.Exec(ctx, `insert into forecast_model (tenant_id, id, code, version) values ($1, $2, $3, 0) on conflict (tenant_id, code) do nothing`,
-		tenantID, ids.New(), code); err != nil {
+func lockForecastModel(ctx context.Context, tx pgx.Tx, tenantID, code, newEntity string, expectedVersion int) (ForecastModel, error) {
+	if _, err := tx.Exec(ctx, `insert into forecast_model (tenant_id, id, code, version, legal_entity_id) values ($1, $2, $3, 0, nullif($4, '')::uuid) on conflict (tenant_id, code) do nothing`,
+		tenantID, ids.New(), code, newEntity); err != nil {
 		return ForecastModel{}, err
 	}
 	m, err := scanModel(tx.QueryRow(ctx, modelSelect+` where tenant_id = $1 and code = $2 for update`, tenantID, code))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ForecastModel{}, httpx.NewProblem(http.StatusConflict, CodeCodeTaken, "forecast model "+code+" belongs to another legal entity")
+	}
 	if err != nil {
 		return ForecastModel{}, err
 	}
@@ -120,8 +123,12 @@ func lockForecastModel(ctx context.Context, tx pgx.Tx, tenantID, code string, ex
 func (s *Postgres) UpsertForecastLines(ctx context.Context, modelCode string, expectedVersion int, spec *ModelSpec, cells []ForecastCellInput) (ForecastModel, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out ForecastModel
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		m, err := lockForecastModel(ctx, tx, p.TenantID, modelCode, expectedVersion)
+	newEntity, err := httpx.OwnerLegalEntity(ctx, "")
+	if err != nil {
+		return out, err
+	}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		m, err := lockForecastModel(ctx, tx, p.TenantID, modelCode, newEntity, expectedVersion)
 		if err != nil {
 			return err
 		}

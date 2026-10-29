@@ -28,6 +28,7 @@ const (
 	CodeVersionNotFound  = "PLAN-VERSION-NOT-FOUND"
 	CodeOrderNotFound    = "PLAN-ORDER-NOT-FOUND"
 	CodeAlreadyRunning   = "PLAN-0001"
+	CodeCodeTaken        = "PLAN-CODE-TAKEN"
 	CodeOrderNotEditable = "PLAN-ORDER-NOT-EDITABLE"
 	CodeOrderInvalid     = "PLAN-ORDER-INVALID"
 	CodeForecastNotFound = "PLAN-FORECAST-NOT-FOUND"
@@ -116,6 +117,7 @@ func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 // RunRequest is one persisted plan run.
 type RunRequest struct {
 	PlanCode       string
+	LegalEntityID  string
 	SiteID         string
 	AsOf           time.Time
 	ItemsPlanned   int
@@ -205,7 +207,11 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 	p, _ := tenant.FromContext(ctx)
 	var v Version
 	replayed := false
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	newPlanEntity, err := httpx.OwnerLegalEntity(ctx, req.LegalEntityID)
+	if err != nil {
+		return Version{}, false, err
+	}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if req.IdempotencyKey != "" {
 			existing, err := scanVersion(tx.QueryRow(ctx, versionSelect+` where v.tenant_id = $1 and v.idempotency_key = $2`, p.TenantID, req.IdempotencyKey))
 			if err == nil {
@@ -219,7 +225,7 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 				return err
 			}
 		}
-		planID, err := lockPlan(ctx, tx, p.TenantID, req.PlanCode)
+		planID, planEntity, err := lockPlan(ctx, tx, p.TenantID, req.PlanCode, newPlanEntity)
 		if err != nil {
 			return err
 		}
@@ -246,9 +252,9 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 		}); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `insert into plan_version (tenant_id, id, plan_id, number, site_id, as_of, status, items_planned, planned_orders_count, messages_count, duration_ms, plan_hash, input_hash, idempotency_key)
-			values ($1, $2, $3, $4, $5, $6::date, 'current', $7, $8, $9, $10, $11, $12, $13)`,
-			p.TenantID, versionID, planID, number, req.SiteID, asOf, req.ItemsPlanned, len(r.Orders), len(r.Messages), req.DurationMs, r.Hash, req.InputHash, key); err != nil {
+		if _, err := tx.Exec(ctx, `insert into plan_version (tenant_id, id, plan_id, number, site_id, as_of, status, items_planned, planned_orders_count, messages_count, duration_ms, plan_hash, input_hash, idempotency_key, legal_entity_id)
+			values ($1, $2, $3, $4, $5, $6::date, 'current', $7, $8, $9, $10, $11, $12, $13, nullif($14, '')::uuid)`,
+			p.TenantID, versionID, planID, number, req.SiteID, asOf, req.ItemsPlanned, len(r.Orders), len(r.Messages), req.DurationMs, r.Hash, req.InputHash, key, planEntity); err != nil {
 			return err
 		}
 		// One round trip per kind of output row instead of one per row; COPY is
@@ -388,17 +394,21 @@ func purgeVersions(ctx context.Context, tx pgx.Tx, tenantID, planID string, cut 
 
 // lockPlan creates the plan on first use and locks its row for the run; a second
 // run that cannot take the lock immediately is refused (FR-22.1, AC-22.9).
-func lockPlan(ctx context.Context, tx pgx.Tx, tenantID, code string) (string, error) {
-	if _, err := tx.Exec(ctx, `insert into plan (tenant_id, id, code) values ($1, $2, $3) on conflict (tenant_id, code) do nothing`, tenantID, ids.New(), code); err != nil {
-		return "", err
+func lockPlan(ctx context.Context, tx pgx.Tx, tenantID, code, newEntity string) (string, string, error) {
+	if _, err := tx.Exec(ctx, `insert into plan (tenant_id, id, code, legal_entity_id) values ($1, $2, $3, nullif($4, '')::uuid) on conflict (tenant_id, code) do nothing`,
+		tenantID, ids.New(), code, newEntity); err != nil {
+		return "", "", err
 	}
-	var id string
-	err := tx.QueryRow(ctx, `select id::text from plan where tenant_id = $1 and code = $2 for update nowait`, tenantID, code).Scan(&id)
+	var id, entity string
+	err := tx.QueryRow(ctx, `select id::text, coalesce(legal_entity_id::text, '') from plan where tenant_id = $1 and code = $2 for update nowait`, tenantID, code).Scan(&id, &entity)
 	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == lockNotAvailable {
-		return "", httpx.NewProblem(http.StatusConflict, CodeAlreadyRunning, "a run of plan "+code+" is already in progress")
+	switch {
+	case errors.As(err, &pgErr) && pgErr.Code == lockNotAvailable:
+		return "", "", httpx.NewProblem(http.StatusConflict, CodeAlreadyRunning, "a run of plan "+code+" is already in progress")
+	case errors.Is(err, pgx.ErrNoRows):
+		return "", "", httpx.NewProblem(http.StatusConflict, CodeCodeTaken, "plan code "+code+" belongs to another legal entity")
 	}
-	return id, err
+	return id, entity, err
 }
 
 const versionSelect = `select v.id::text, p.code, v.number, v.status, to_char(v.as_of, 'YYYY-MM-DD'), v.items_planned,

@@ -1589,6 +1589,7 @@ components:
       properties:
         asOf: {type: string, format: date, description: Day 0 of the plan}
         siteId: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid, description: "Owning legal entity of the plan when this run creates it; an existing plan keeps its owner. Defaults to the caller's single legal entity; required for a caller scoped to several; an all-entity caller may omit it and leave the plan unassigned. A value outside the caller's scope is 403; a plan code owned by another legal entity is 409 PLAN-CODE-TAKEN."}
         forecastModel:
           type: string
           pattern: '^[A-Z0-9][A-Z0-9_-]{1,19}$'

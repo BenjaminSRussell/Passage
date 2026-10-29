@@ -10,6 +10,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 
 	"github.com/BenjaminSRussell/passage/services/finreport/internal/domain"
 )
@@ -222,15 +223,23 @@ func (s *Postgres) PutJournalLines(ctx context.Context, lines []domain.JournalLi
 			return err
 		}
 	}
+	entities := make([]string, len(lines))
+	for i, l := range lines {
+		entity, err := httpx.OwnerLegalEntity(ctx, l.LegalEntityID)
+		if err != nil {
+			return err
+		}
+		entities[i] = entity
+	}
 	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		for _, l := range lines {
+		for i, l := range lines {
 			if _, err := tx.Exec(ctx, `insert into reporting_journal_line(tenant_id, ledger_id, posting_sequence, line_number, posting_date,
-				period_year, period_no, account, combination, currency_type, voucher, debit, credit, closing_entry, source_uri, trace_id)
-				values($1,$2::uuid,$3,$4,$5::date,$6,$7,$8,$9,$10,$11,$12::numeric,$13::numeric,$14,$15,$16)
+				period_year, period_no, account, combination, currency_type, voucher, debit, credit, closing_entry, source_uri, trace_id, legal_entity_id)
+				values($1,$2::uuid,$3,$4,$5::date,$6,$7,$8,$9,$10,$11,$12::numeric,$13::numeric,$14,$15,$16,nullif($17,'')::uuid)
 				on conflict (tenant_id, ledger_id, posting_sequence, line_number) do nothing`,
 				tenantID(ctx), l.LedgerID, l.PostingSequence, l.LineNumber, l.PostingDate, l.PeriodYear, l.PeriodNo,
 				l.Account, l.Combination, l.CurrencyType, l.Voucher, l.Debit.StringFixed(6), l.Credit.StringFixed(6),
-				l.ClosingEntry, l.SourceURI, l.TraceID); err != nil {
+				l.ClosingEntry, l.SourceURI, l.TraceID, entities[i]); err != nil {
 				return err
 			}
 		}

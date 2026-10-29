@@ -128,3 +128,14 @@ platform change outside the wave's owned paths).
 - The duty `reporting.statement.schedule` ("Schedule financial statements",
   PRD §2.15.17) is new in slice 3; the role catalog that grants it to the
   financial reporting analyst is a **handoff** to wave 2.
+
+## Legal-entity scope follow-ups (#241)
+
+- **later slice**: the ledger consumer that fills `reporting_balance` and
+  `reporting_hwm` must write `legal_entity_id` from the ledger's legal entity;
+  rows written without it are visible only to all-entity callers.
+- **later slice**: a caller scoped to several legal entities cannot export the
+  audit trail filtered by ledger (422) until the ledger-to-entity mapping is
+  known; callers scoped to one entity or to all entities are unaffected.
+- **handoff**: existing rows keep a NULL `legal_entity_id`; assigning them is a
+  data migration owned by the tenant administrator.

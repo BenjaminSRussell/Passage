@@ -318,6 +318,7 @@ type runRequest struct {
 	Definition        string      `json:"definition"`
 	DefinitionVersion int         `json:"definitionVersion"`
 	LedgerID          string      `json:"ledgerId"`
+	LegalEntityID     string      `json:"legalEntityId"`
 	CurrencyType      string      `json:"currencyType"`
 	Period            periodDTO   `json:"period"`
 	Calendar          []periodDTO `json:"calendar"`
@@ -355,7 +356,7 @@ func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
 	}
 	sum := sha256.Sum256(raw)
 	run, err := a.store.CreateRun(r.Context(), store.RunSpec{
-		Code: req.Definition, Version: req.DefinitionVersion, LedgerID: req.LedgerID, CurrencyType: req.CurrencyType,
+		Code: req.Definition, Version: req.DefinitionVersion, LedgerID: req.LedgerID, LegalEntityID: req.LegalEntityID, CurrencyType: req.CurrencyType,
 		PeriodYear: req.Period.Year, PeriodNo: req.Period.No, IncludeAdjustment: req.IncludeAdjustment, Calendar: cal,
 		RequestedBy: p.UserID, IdempotencyKey: key, RequestHash: hex.EncodeToString(sum[:]),
 	})

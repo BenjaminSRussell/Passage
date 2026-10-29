@@ -302,3 +302,15 @@ Problem details use `type` `https://passage.dev/problems/<code>`.
 
 Go modules only: the platform module and what it already pulls in (chi,
 pgx/v5, shopspring/decimal, google/uuid) plus `pgregory.net/rapid` for tests.
+
+## Legal-entity scope (#241)
+
+`statement_run`, `reporting_balance`, `reporting_hwm`, `reporting_journal_line` and
+`audit_trail_entry` carry a nullable `legal_entity_id` (migration 0008) with a
+RESTRICTIVE legal-entity policy; `statement_cell` follows its run. A row with no
+entity is visible only to all-entity callers. `POST /v1/reporting/runs` takes an
+optional `legalEntityId` (default: the caller's single entity; 403 outside the
+caller's scope). Journal lines and ledger audit entries take the caller's entity
+the same way. Audit entries without a ledger (definitions, hierarchies,
+schedules) stay tenant-level. Report definitions, hierarchies and schedules are
+tenant-level configuration and are not entity-scoped.

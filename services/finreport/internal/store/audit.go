@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 
@@ -75,12 +76,19 @@ func insertAuditRowTx(ctx context.Context, tx pgx.Tx, e domain.AuditEntry) (bool
 	if e.ID == "" {
 		e.ID = ids.New()
 	}
+	entity := ""
+	if e.LedgerID != "" {
+		var err error
+		if entity, err = httpx.OwnerLegalEntity(ctx, e.LegalEntityID); err != nil {
+			return false, err
+		}
+	}
 	tag, err := tx.Exec(ctx, `insert into audit_trail_entry(tenant_id, id, occurred_at, ledger_id, period, kind, actor_id, object_ref,
-			details, trace_id, source_event_id)
-		values($1,$2,$3,nullif($4,'')::uuid,nullif($5,''),$6,$7,$8,$9,$10,nullif($11,''))
+			details, trace_id, source_event_id, legal_entity_id)
+		values($1,$2,$3,nullif($4,'')::uuid,nullif($5,''),$6,$7,$8,$9,$10,nullif($11,''),nullif($12,'')::uuid)
 		on conflict (tenant_id, source_event_id) where source_event_id is not null do nothing`,
 		tenantID(ctx), e.ID, e.OccurredAt.UTC().Truncate(time.Microsecond), e.LedgerID, e.Period, e.Kind, e.ActorID, e.ObjectRef,
-		details, e.TraceID, e.SourceEventID)
+		details, e.TraceID, e.SourceEventID, entity)
 	if err != nil {
 		return false, err
 	}
