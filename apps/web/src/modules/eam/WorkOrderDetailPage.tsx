@@ -15,6 +15,7 @@ import {
 } from "./api/client";
 import { addMoney, dash, dayOf, HOURS, minuteOf, money, nextStatuses, RATE, statusLabel, typeLabel } from "./format";
 import { Entry, Failure, State } from "./parts";
+import { WorkOrderPermitsCard } from "./PermitCare";
 import { DowntimeCard, FaultCard } from "./WorkOrderCare";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -123,6 +124,7 @@ export function WorkOrderDetailPage() {
         </dl>
       </Card>
       <StatusCard wo={wo} onSaved={saved} />
+      <WorkOrderPermitsCard wo={wo} />
       <FaultCard wo={wo} onSaved={saved} />
       <DowntimeCard wo={wo} onSaved={saved} />
       <Card title="Labor">

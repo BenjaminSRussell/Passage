@@ -21,6 +21,7 @@ import {
 import { addMoney, dash, dayOf, hours, minuteOf, percent, typeLabel } from "./format";
 import { CriticalityCard, WarrantyCard } from "./AssetCare";
 import { Entry, Failure, State } from "./parts";
+import { IsolationPointsCard } from "./PermitCare";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -218,6 +219,7 @@ export function AssetDetailPage() {
       </Card>
       <CriticalityCard assetId={asset.id} onSaved={saved} />
       <WarrantyCard assetId={asset.id} onSaved={saved} />
+      <IsolationPointsCard assetId={asset.id} onSaved={setNotice} />
       <KpiCard assetId={asset.id} />
       <RecentOrders assetId={asset.id} onOpen={(row) => navigate(`/eam/work-orders/${row.id}`)} />
     </div>

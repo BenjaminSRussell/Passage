@@ -174,6 +174,12 @@ func (s *Postgres) TransitionWorkOrder(ctx context.Context, id string, in Transi
 			return problem(422, CodeWOTransition, "transition "+cur.Status+" to "+string(to)+" not allowed")
 		}
 		now := s.now()
+		if to == domain.StatusInProgress {
+			// Permits and LOTO gate the start of work (BR-44.11, FR-44.19).
+			if err := checkPermitGate(ctx, tx, t, cur, now); err != nil {
+				return err
+			}
+		}
 		newStart, newEnd := cur.ActualStart, cur.ActualEnd
 		if in.ActualStart != nil {
 			newStart = in.ActualStart

@@ -1,6 +1,6 @@
-# NOT-IMPLEMENTED — services/eam (PSG-44, slices 1 and 2)
+# NOT-IMPLEMENTED — services/eam (PSG-44, slices 1 to 3)
 
-Every ticket deliverable and acceptance criterion that slices 1 and 2 do not build, with
+Every ticket deliverable and acceptance criterion that slices 1 to 3 do not build, with
 its status and reason. Status is either `later slice of PSG-44` or `handoff` (needs
 work outside the owned paths).
 
@@ -38,7 +38,15 @@ work outside the owned paths).
 | D6 | Warranty duration in counter units (`counter_id`, `counter_limit`), warranty check at each part issue, per-line coverage flags (BR-44.14) | later slice of PSG-44 (part issue: handoff to wave 16) | Slice 2 checks at work order creation on the order date and flags the whole order. Part issue is not built (D3 wave 16 row), so claims carry the order's parts cost when parts are covered. |
 | D6 | Voiding a warranty, warranty inquiry across assets (8.44.14), `eam-warranty-expiry` job, warranty check on WO create as a site parameter | later slice of PSG-44 | The `status` column allows VOIDED but no endpoint sets it. Warranties are listed per asset. The check always runs. |
 | D6 | Vendor warranty claim (FR-45.15) | handoff (wave 45) | Slice 2 emits `dev.passage.eam.warranty.claimable.v1` at completion; wave 45 creates the claim. |
-| D7 | Permits to work and LOTO (FR-44.19, BR-44.11, AC11) | later slice of PSG-44 | Work orders do not yet gate on permits. |
+| D7 | Permits required by asset type or functional location (FR-44.19) | later slice of PSG-44 | Slice 3 builds the job-type requirement only. Functional locations do not exist yet (D1). |
+| D7 | Permit checklists and gas test results (`checklist_id`, `checklist_results[]`), country permit templates (`eam.permit.template.<cc>`), translatable permit texts | later slice of PSG-44 | `requires_gas_test` is stored on the type but no gas test is recorded or checked at issue. No checklist tables yet (D3). |
+| D7 | Approver role check: the approver holds the permit type's `approver_role` (Area authority, Safety officer) | handoff (wave 42 workers) | The role is stored on the type. Slice 3 enforces the EamPermitIssuer duty and approver ≠ requester, not the named role. |
+| D7 | Technician identity as a wave-42 worker (`technician_worker_id`), and the 8.44.17 conflict "EamTechnician with EamPermitIssuer approving a permit for own job" | handoff (wave 42 workers) | Locks and transitions record the signed-in user id. Which users work a job is not known until workers are assigned to work orders. |
+| D7 | Close only when the work order is COMPLETED or the work is suspended (BR-44.11) | later slice of PSG-44 | Close is refused while the order is IN_PROGRESS (EAM-PMT-008). It is allowed when the order has not started, so an unused permit can be closed. |
+| D7 | `eam-permit-expiry` CronJob every 5 minutes (8.44.20), alert to the safety officer for flagged IN_PROGRESS jobs | handoff (deployment-cicd; wave 5 alerts) | `POST /permits/expire` runs the sweep per tenant and returns the flagged jobs with EAM-PMT-004; nothing calls it on a schedule yet. |
+| D7 | Permit to work document and LOTO lock tag label (8.44.15), permit register reporting projection `eam_permits` | later slice of PSG-44 (print: wave 3 print service) | The register is served from the permit table. |
+| D7 | Permit and lock numbers from wave-5 site sequences (EAM-PMT) | handoff (wave 5 / platform) | Global sequences `EAM-PMT-n` and `LOCK-n`, as for work orders. |
+| D7 | 5-year retention job for permit and lock audit rows | later slice of PSG-44 | The logs are append-only (passage_app has no UPDATE or DELETE on them); nothing archives or purges them. |
 | D8 | Maintenance budgets (FR-44.18, BR-44.13), budget event | later slice of PSG-44 (budget transfer: handoff to wave 38) | Needs plan forecasting and the wave-38 budget API. |
 | D8 | Refurbishment orders and condition valuation (FR-44.20, BR-44.12) | later slice of PSG-44 (condition dimension: handoff to wave 16) | Needs the wave-16 condition dimension, which is not available. |
 | D8 | Fleet attributes and fuel log (FR-44.21) | later slice of PSG-44 | Requires worker assignment (wave 42). |
@@ -58,7 +66,7 @@ work outside the owned paths).
 | AC-44.8 | built | Domain test and store test (`TestAssetKPI_AC448`): MTBF of 900 h for 3 failures in 2,700 h of uptime. |
 | AC-44.9 | later slice of PSG-44 | Needs rounds. |
 | AC-44.10 | later slice of PSG-44 | Needs sequences. |
-| AC-44.11 | later slice of PSG-44 | Needs permits and LOTO. |
+| AC-44.11 | built | `TestPermit_AC4411` (store) and `TestHTTP_PermitFlowAC4411` (HTTP): ELECTRICAL_ISOLATION on an asset with 3 isolation points; IN_PROGRESS with 2 verified locks returns EAM-PMT-002, with 3 and an ISSUED permit it succeeds, and closing with a lock still applied returns EAM-PMT-003. |
 | AC-44.12 | later slice of PSG-44 | Needs refurbishment and the wave-16 condition dimension. |
 | AC-44.13 | partial | `TestWarranty_AC4413`: a 24-month parts-only warranty from 2025-11-01 covers an order created on 2026-10-21, and completion emits `warranty.claimable` with 350.00 of parts and 0.00 of labor. Part issue itself is a wave-16 handoff, so the test sets the parts cost; coverage is per order, not per part line. |
 | AC-44.14 | later slice of PSG-44 | Needs budgets. |
@@ -77,7 +85,7 @@ satisfied for the Go module; the web checks pass.
 | Idempotency for `POST /plans/schedule` | later slice of PSG-44 | Re-runs are safe by construction (one open WO per line). No stored key. |
 | Kernel httpx idempotency middleware (`idempotency_keys` table) | handoff (platform kernel) | Slice 1 stores keys on each aggregate row instead. |
 | Work order and asset numbers from wave-5 number sequences (site scope) | handoff (wave 5 / platform) | Slice 1 uses global sequences `WO-n` and `AST-n`. |
-| `dev.passage.eam.budget.calculated.v1`, `dev.passage.eam.permit.status.changed.v1` | later slice of PSG-44 | Their features are not built. `downtime.recorded`, `warranty.claimable` and `request.triaged` are emitted from slice 2. |
+| `dev.passage.eam.budget.calculated.v1` | later slice of PSG-44 | Budgets are not built. `downtime.recorded`, `warranty.claimable` and `request.triaged` are emitted from slice 2. The PRD's `permit.status.changed` is emitted from slice 3 as `dev.passage.eam.permitstatus.changed.v1` (the kernel type regex allows three segments, so the middle ones are joined, as for `workorderstatus.changed`). |
 | Criticality and lifecycle events | later slice of PSG-44 | The PRD names none; assessments and lifecycle changes are not published. |
 | ETag reads, search by text, list filters beyond status and asset | later slice of PSG-44 | Lists page by cursor with status and asset filters; versions travel in the body and If-Match. |
 | Request merge | later slice of PSG-44 | See D2. |
@@ -87,4 +95,4 @@ satisfied for the Go module; the web checks pass.
 | Monthly partitioning of `counter_reading` (8.44.4) | later slice of PSG-44 | Single table in slice 1. |
 | Legal-entity scoping (`dbx.LegalEntityScopePolicy`) | later slice of PSG-44 | No legal entity column on EAM tables yet. |
 | Parameters 8.44.13 (number sequences per site, tolerances per tenant, cooldown overrides) | later slice of PSG-44 | Hard-coded defaults in slice 1 (cooldown 60 min, tolerance 10%, horizon 90 days). |
-| Web: plant structure tree, work order board (kanban + Gantt), technician mobile PWA, KPI dashboard, round/sequence editor, fault analysis, permit board, budget, rotables (8.44.6) | later slice of PSG-44 | Built: workspace tiles, asset list/create/detail with counters, readings, rules, KPIs, lifecycle (activate, retire, dispose), criticality matrix and versions, and warranties; plan list and editor; request list with convert, triage, defer and reject, and create; work order list/create/detail with status actions, completion, labor, fault registration, downtime windows and history; fault catalog list and designer. Workspace tile "backlog hours" is shown as open work orders until jobs carry estimated hours. Shell owner: no Needs. |
+| Web: plant structure tree, work order board (kanban + Gantt), technician mobile PWA, KPI dashboard, round/sequence editor, fault analysis, budget, rotables (8.44.6) | later slice of PSG-44 | Built: workspace tiles, asset list/create/detail with counters, readings, rules, KPIs, lifecycle (activate, retire, dispose), criticality matrix and versions, and warranties; plan list and editor; request list with convert, triage, defer and reject, and create; work order list/create/detail with status actions, completion, labor, fault registration, downtime windows and history; fault catalog list and designer; permit register with the expiry run, permit request, permit detail with lifecycle actions, isolation points and personal lock actions, permit type and job requirement setup, isolation points on the asset, permits card on the work order. Workspace tile "backlog hours" is shown as open work orders until jobs carry estimated hours. Shell owner: no Needs. |

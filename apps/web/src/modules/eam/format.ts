@@ -1,5 +1,5 @@
 import type { BadgeTone } from "../../shell/ui";
-import type { WorkOrderStatus } from "./api/client";
+import type { PermitStatus, WorkOrderStatus } from "./api/client";
 
 export const dash = "—";
 
@@ -69,6 +69,13 @@ export const statusTone: Record<string, BadgeTone> = {
   REJECTED: "neutral",
   DEFERRED: "neutral",
   VOIDED: "neutral",
+  REQUESTED: "warning",
+  APPROVED: "info",
+  ISSUED: "success",
+  SUSPENDED: "warning",
+  APPLIED: "warning",
+  VERIFIED: "success",
+  REMOVED: "neutral",
 };
 
 export const typeLabel: Record<string, string> = {
@@ -140,4 +147,22 @@ export function addMoney(a: string, b: string): string {
 /** A decimal string shown with two places ("360.000000" -> "360.00"). */
 export function money(value: string): string {
   return addMoney(value, "0");
+}
+
+/** The permit transitions a user may choose (BR-44.11), mirroring domain.CanPermitTransition. */
+export function nextPermitStatuses(status: PermitStatus): Exclude<PermitStatus, "REQUESTED">[] {
+  const next: Record<PermitStatus, Exclude<PermitStatus, "REQUESTED">[]> = {
+    REQUESTED: ["APPROVED", "CANCELED"],
+    APPROVED: ["ISSUED", "CANCELED"],
+    ISSUED: ["SUSPENDED", "CLOSED"],
+    SUSPENDED: ["ISSUED", "CLOSED"],
+    CLOSED: [],
+    CANCELED: [],
+  };
+  return next[status];
+}
+
+/** Personal locks can be applied, verified and removed on an APPROVED, ISSUED or SUSPENDED permit. */
+export function permitLockable(status: PermitStatus): boolean {
+  return status === "APPROVED" || status === "ISSUED" || status === "SUSPENDED";
 }

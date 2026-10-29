@@ -1,11 +1,12 @@
-# EAM (enterprise asset management) — wave 44, slices 1 and 2
+# EAM (enterprise asset management) — wave 44, slices 1 to 3
 
 Ticket PSG-44. Passage's maintenance context: plant assets, counters and condition
 rules, maintenance plans that generate preventive work orders, maintenance requests,
 work orders with labor and status transitions, and asset reliability KPIs.
 Slice 2 adds asset retirement, criticality assessment, vendor warranties with the
 work order warranty check, fault catalogs with fault registration, downtime windows
-and request triage. The authoritative requirements are PRD section 8.44;
+and request triage. Slice 3 adds permits to work and lockout/tagout (LOTO), which gate
+the start of work orders. The authoritative requirements are PRD section 8.44;
 NOT-IMPLEMENTED.md lists what the slices leave out and why.
 
 ## What slice 1 does
@@ -88,9 +89,37 @@ NOT-IMPLEMENTED.md lists what the slices leave out and why.
   append-only history whose key replays a retried action; each change emits
   `dev.passage.eam.request.triaged.v1`. CONVERTED and REJECTED requests are final.
 
+## What slice 3 adds
+
+- **Permit types and job requirements** (FR-44.19, 8.44.13): `POST /permit-types`
+  creates or replaces a type (code, name, approver role, maximum validity 1-168 h,
+  requires isolation, requires gas test). `PUT /job-types/{jobType}/permits` replaces
+  the permit types a job type requires; work orders carry the job type.
+- **Isolation points** (FR-44.19): energy type, location, isolation method,
+  verification step and tag code (unique per asset), per asset.
+- **Permits** (BR-44.11): `POST /permits` requests a permit (`EAM-PMT-n`) for an open
+  work order with a validity window inside the type's maximum; one permit of a type is
+  in force per work order at a time. `POST /permits/{id}/transition` (If-Match) moves it
+  REQUESTED → APPROVED → ISSUED ⇄ SUSPENDED → CLOSED, or cancels it before issue.
+  The approver must differ from the requester; an isolation permit is issued only when
+  every isolation point of the asset has a verified lock held by someone besides the
+  issuer; CLOSE and CANCEL need every lock removed, and CLOSE needs the work order not
+  IN_PROGRESS. Every transition is an append-only `permit_transition` row and a
+  `dev.passage.eam.permitstatus.changed.v1` event in the same transaction.
+- **Personal LOTO locks** (BR-44.11): `POST /permits/{id}/locks` applies, verifies (the
+  zero-energy check) or removes the caller's own lock (`LOCK-n`) on an isolation point;
+  one open lock per technician per point. Each action is logged append-only with its key.
+- **The work order gate** (BR-44.11, AC-44.11): moving a work order to IN_PROGRESS
+  needs, for each permit type its job type requires, a permit that is ISSUED and valid
+  now (EAM-PMT-001); for an isolation permit every isolation point must carry a verified
+  lock first (EAM-PMT-002).
+- **Expiry** (8.44.20 `eam-permit-expiry`): `POST /permits/expire` suspends every ISSUED
+  permit past its validity for the caller's tenant and lists them with EAM-PMT-004,
+  flagging work orders still IN_PROGRESS. Reruns suspend nothing more.
+
 Domain logic is pure (`internal/domain`) and table-tested, with property tests
 (`rapid`). Store integration tests are in `internal/store/store_test.go` and
-`internal/store/slice2_test.go`; HTTP tests,
+`internal/store/slice2_test.go` and `internal/store/permits_test.go`; HTTP tests,
 including a check that `api/openapi.yaml` lists exactly the served routes, are in
 `internal/api`.
 
@@ -100,7 +129,11 @@ triage with one-action conversion, and the work order list, create form and deta
 (status actions, completion with downtime, labor, history). Slice 2 adds asset
 retirement and disposal, the criticality matrix and its versions, warranties, the fault
 and downtime cards on the work order, triage actions on the request list, and the fault
-catalog designer (`/eam/fault-catalogs`).
+catalog designer (`/eam/fault-catalogs`). Slice 3 adds the permit register
+(`/eam/permits`), the permit request form, the permit detail with lifecycle actions,
+isolation points and personal lock actions, permit type and job requirement setup
+(`/eam/permit-types`), isolation points on the asset page and a permits card on the
+work order page.
 
 ## Layout
 
@@ -110,7 +143,8 @@ internal/domain/         pure rules: scheduler, counters, condition rules, work 
 internal/store/          Postgres repositories (tenant-scoped transactions, outbox in the same tx)
 internal/api/            HTTP handlers, duty checks, validation
 internal/events/         event types and payloads
-migrations/              0001 domain tables + RLS, 0002 outbox and idempotency, 0003 slice 2 tables + RLS
+migrations/              0001 domain tables + RLS, 0002 outbox and idempotency, 0003 slice 2 tables + RLS,
+                         0004 passage_app grants, 0005 permits and LOTO + RLS + grants
 api/openapi.yaml         contract for every endpoint
 events/asyncapi.yaml     contract for every event
 charts/eam/              Helm chart (passage-eam)
@@ -146,7 +180,11 @@ row-level security test runs the store as that role.
 | EamRequestCreate | requests |
 | EamPlanner | request convert and triage, work order create, status and downtime (or EamTechnician) |
 | EamTechnician | status and downtime (or EamPlanner), labor, faults |
-| EamInquire | every GET: workspace, assets, assessments, warranties, readings, plans, fault catalogs, requests, work orders, kpis |
+| EamPlanner | permit request |
+| EamPermitIssuer | permit transitions (approve, issue, suspend, close, cancel), permit expiry run |
+| EamTechnician | personal LOTO lock actions |
+| EamSetupAdmin | permit types, job permit requirements (PUT), isolation points (POST) |
+| EamInquire | every GET: workspace, assets, assessments, warranties, readings, plans, fault catalogs, requests, work orders, kpis, permit types, job permit requirements, isolation points, permits |
 
 ## Error codes
 
@@ -164,23 +202,33 @@ Problem details are `application/problem+json`. The `code` field carries the cod
 | EAM-FLT-001 | 422 | CORRECTIVE or EMERGENCY work order completed without a registered fault |
 | EAM-FLT-002 | 422 | Fault not allowed by the asset type's catalog, or the type has no catalog |
 | EAM-DT-001 | 422 | Downtime window overlaps one on the order, no production resource to book, or completion downtime below the windows |
-| EAM-NF-001 | 404 | Asset, counter, work order, request, plan or fault catalog not found |
+| EAM-PMT-001 | 422 | Work order cannot start: its job type requires an ISSUED permit valid now |
+| EAM-PMT-002 | 422 | Isolation points lack a verified lock (or the asset has none) for an isolation permit |
+| EAM-PMT-003 | 422 | Permit cannot close or cancel while locks are applied |
+| EAM-PMT-004 | 422 | Permit validity has ended (issue refused; the expiry run lists suspended permits with it) |
+| EAM-PMT-005 | 422 | Separation of duties: approver is the requester, or the issuer is the only lock holder |
+| EAM-PMT-006 | 422 | Permit or lock state does not allow the action |
+| EAM-PMT-007 | 422 | The technician already holds an open lock on the isolation point |
+| EAM-PMT-008 | 422 | Permit cannot close while its work order is IN_PROGRESS |
+| EAM-NF-001 | 404 | Asset, counter, work order, request, plan, fault catalog, permit type, isolation point, permit or lock not found |
 | EAM-VAL-001 | 400 | Request failed validation |
-| EAM-DUP-001 | 409 | Plan code or counter name (per asset) already used |
-| idempotency_key_reuse | 422 | Idempotency-Key already used for another counter, work order, rule, request, asset assessment or warranty |
+| EAM-DUP-001 | 409 | Plan code, counter name or isolation tag code (per asset) already used, or a permit of the type is already in force on the work order |
+| idempotency_key_reuse | 422 | Idempotency-Key already used for another counter, work order, rule, request, asset assessment, warranty, isolation point, permit or lock |
 | conflict_version | 412 | If-Match version does not match the current version |
 | precondition_required | 428 | If-Match missing on a versioned action |
 | idempotency_key_required | 400 | Idempotency-Key missing on a creating or custom POST |
 | AUTH-0001 | 401 | No tenant or principal |
 | AUTH-0003 | 403 | Missing duty |
 
-Codes from PRD 8.44.18 that these slices do not raise (EAM-WO-002..004, EAM-PMT-*,
-EAM-BUD-001, EAM-REF-001) belong to later slices. EAM-WAR-001 is informational: the work
+Codes from PRD 8.44.18 that these slices do not raise (EAM-WO-002..004, EAM-BUD-001,
+EAM-REF-001) belong to later slices. EAM-PMT-005..008 are service codes for BR-44.11 and
+8.44.17 rules the PRD states without a code. EAM-WAR-001 is informational: the work
 order carries `warrantyCovered` and `warrantyId` instead of a message.
 
 ## Wave reference
 
 PRD section 8.44 (`docs/prd/phase-8-projects-people-service.md`). Depends on PSG-43.
 Downstream consumers: wave 23 scheduler (`downtime.recorded`), wave 45 supplier
-warranty claims (`warranty.claimable`), wave 16 inventory (parts, later), ledger posting
+warranty claims (`warranty.claimable`), mobile and safety notifications
+(`permitstatus.changed`), wave 16 inventory (parts, later), ledger posting
 (WO costs, later).

@@ -2,14 +2,14 @@ openapi: 3.1.0
 info:
   title: Passage EAM API
   version: 0.1.0
-  description: Enterprise asset management (wave 44, slices 1-2). Errors are RFC 9457 problem details with a stable code.
+  description: Enterprise asset management (wave 44, slices 1-3). Errors are RFC 9457 problem details with a stable code.
 servers:
   - url: https://api.{env}.passage.dev
     variables:
       env:
         default: dev
 security: []
-x-passage-slice: "PSG-44 slices 1-2; remaining deliverables are listed in NOT-IMPLEMENTED.md"
+x-passage-slice: "PSG-44 slices 1-3; remaining deliverables are listed in NOT-IMPLEMENTED.md"
 paths:
   /healthz:
     get:
@@ -418,6 +418,167 @@ paths:
       responses:
         "200": { description: kpis, content: { application/json: { schema: { $ref: "#/components/schemas/Kpi" } } } }
         "400": { $ref: "#/components/responses/Problem" }
+  /v1/eam/permit-types:
+    get:
+      operationId: listPermitTypes
+      x-passage-duty: EamInquire
+      responses:
+        "200":
+          description: permit types by code
+          content:
+            application/json:
+              schema: { type: object, properties: { items: { type: array, items: { $ref: "#/components/schemas/PermitType" } } } }
+    post:
+      operationId: upsertPermitType
+      x-passage-duty: EamSetupAdmin
+      description: Creates or replaces a permit type (FR-44.19). Saving the same definition again changes nothing.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/PermitTypeIn" } } }
+      responses:
+        "200": { description: saved, content: { application/json: { schema: { $ref: "#/components/schemas/PermitType" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+  /v1/eam/job-types/{jobType}/permits:
+    get:
+      operationId: getJobPermits
+      x-passage-duty: EamInquire
+      description: The permit types a job type requires before its work orders may start (BR-44.11); empty when none.
+      parameters:
+        - { name: jobType, in: path, required: true, schema: { type: string, pattern: "^[A-Z0-9_]{2,20}$" } }
+      responses:
+        "200": { description: requirement, content: { application/json: { schema: { $ref: "#/components/schemas/JobPermits" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+    put:
+      operationId: setJobPermits
+      x-passage-duty: EamSetupAdmin
+      description: Replaces the permit types a job type requires (BR-44.11). An empty list clears the requirement. Idempotent replace; no If-Match because the set is administered as a whole.
+      parameters:
+        - { name: jobType, in: path, required: true, schema: { type: string, pattern: "^[A-Z0-9_]{2,20}$" } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/JobPermitsIn" } } }
+      responses:
+        "200": { description: replaced, content: { application/json: { schema: { $ref: "#/components/schemas/JobPermits" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/eam/assets/{id}/isolation-points:
+    get:
+      operationId: listIsolationPoints
+      x-passage-duty: EamInquire
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200":
+          description: isolation points by tag code
+          content:
+            application/json:
+              schema: { type: object, properties: { items: { type: array, items: { $ref: "#/components/schemas/IsolationPoint" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createIsolationPoint
+      x-passage-duty: EamSetupAdmin
+      description: Adds an energy isolation point to the asset. The tag code is unique per asset (EAM-DUP-001).
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/IsolationPointIn" } } }
+      responses:
+        "201": { description: created, content: { application/json: { schema: { $ref: "#/components/schemas/IsolationPoint" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /v1/eam/permits:
+    get:
+      operationId: listPermits
+      x-passage-duty: EamInquire
+      description: Permit register (8.44.12), newest first.
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/PermitStatus" } }
+        - { name: asset, in: query, schema: { type: string, format: uuid } }
+        - { name: workOrder, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: permits, content: { application/json: { schema: { $ref: "#/components/schemas/PermitPage" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: requestPermit
+      x-passage-duty: EamPlanner
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      description: >-
+        Opens a REQUESTED permit for an open work order (EAM-PMT-006 otherwise). The validity window must fit the
+        permit type maximum (EAM-VAL-001). Only one permit of a type may be in force on a work order (EAM-DUP-001).
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/PermitIn" } } }
+      responses:
+        "201": { description: requested, content: { application/json: { schema: { $ref: "#/components/schemas/Permit" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/eam/permits/expire:
+    post:
+      operationId: expirePermits
+      x-passage-duty: EamPermitIssuer
+      description: >-
+        The eam-permit-expiry job (8.44.20), run every 5 minutes: ISSUED permits past validTo move to SUSPENDED and are
+        listed with EAM-PMT-004; workOrderInProgress flags jobs still running. Running it again suspends nothing more.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200":
+          description: permits suspended by this run
+          content:
+            application/json:
+              schema: { type: object, properties: { items: { type: array, items: { $ref: "#/components/schemas/ExpiredPermit" } } } }
+  /v1/eam/permits/{id}:
+    get:
+      operationId: getPermit
+      x-passage-duty: EamInquire
+      description: The permit with the asset's isolation points, its locks and its history. ETag is the permit version.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: permit with locks, content: { application/json: { schema: { $ref: "#/components/schemas/PermitDetail" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/eam/permits/{id}/transition:
+    post:
+      operationId: transitionPermit
+      x-passage-duty: EamPermitIssuer
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }, { $ref: "#/components/parameters/IfMatch" }]
+      description: >-
+        Approve, issue, suspend, close or cancel (BR-44.11). Approval needs an approver other than the requester
+        (EAM-PMT-005). Issue needs the permit still valid (EAM-PMT-004) and, for an isolation permit, isolation points
+        on the asset each with a verified lock (EAM-PMT-002) held by someone besides the issuer (EAM-PMT-005). Close
+        and cancel need every lock removed (EAM-PMT-003); close needs the work order not IN_PROGRESS (EAM-PMT-008).
+        A repeated Idempotency-Key returns the permit without a second transition.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/PermitTransitionIn" } } }
+      responses:
+        "200": { description: transitioned, content: { application/json: { schema: { $ref: "#/components/schemas/Permit" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/eam/permits/{id}/locks:
+    post:
+      operationId: recordLock
+      x-passage-duty: EamTechnician
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      description: >-
+        Applies, verifies (the zero-energy check) or removes the caller's own personal lock on an isolation point of
+        the permit's asset (BR-44.11). One open lock per technician per point (EAM-PMT-007). Locks need an APPROVED,
+        ISSUED or SUSPENDED permit (EAM-PMT-006). A repeated Idempotency-Key returns the lock as it is now.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/LockIn" } } }
+      responses:
+        "200": { description: lock verified or removed, content: { application/json: { schema: { $ref: "#/components/schemas/LotoLock" } } } }
+        "201": { description: lock applied, content: { application/json: { schema: { $ref: "#/components/schemas/LotoLock" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
 components:
   parameters:
     Id:
@@ -895,3 +1056,126 @@ components:
         mtbfHours: { type: number }
         mttrHours: { type: number }
         availability: { type: number }
+    PermitStatus:
+      type: string
+      enum: [REQUESTED, APPROVED, ISSUED, SUSPENDED, CLOSED, CANCELED]
+    PermitTypeIn:
+      type: object
+      required: [code, name, approverRole, maxValidityHours]
+      properties:
+        code: { type: string, pattern: "^[A-Z0-9_]{2,20}$" }
+        name: { type: string, maxLength: 120 }
+        approverRole: { type: string, maxLength: 60 }
+        maxValidityHours: { type: integer, minimum: 1, maximum: 168, default: 12 }
+        requiresIsolation: { type: boolean, default: false }
+        requiresGasTest: { type: boolean, default: false }
+    PermitType:
+      allOf:
+        - $ref: "#/components/schemas/PermitTypeIn"
+    JobPermitsIn:
+      type: object
+      required: [permitTypeCodes]
+      properties:
+        permitTypeCodes: { type: array, maxItems: 10, items: { type: string, pattern: "^[A-Z0-9_]{2,20}$" } }
+    JobPermits:
+      type: object
+      properties:
+        jobType: { type: string }
+        permitTypeCodes: { type: array, items: { type: string } }
+    IsolationPointIn:
+      type: object
+      required: [energyType, location, method, verificationStep, tagCode]
+      properties:
+        energyType: { type: string, enum: [ELECTRICAL, PNEUMATIC, HYDRAULIC, MECHANICAL, THERMAL, CHEMICAL] }
+        location: { type: string, maxLength: 200 }
+        method: { type: string, maxLength: 200, description: isolation method }
+        verificationStep: { type: string, maxLength: 200, description: zero-energy check }
+        tagCode: { type: string, maxLength: 40, description: unique per asset }
+    IsolationPoint:
+      allOf:
+        - $ref: "#/components/schemas/IsolationPointIn"
+        - type: object
+          properties:
+            id: { type: string, format: uuid }
+            assetId: { type: string, format: uuid }
+            createdAt: { type: string, format: date-time }
+    PermitIn:
+      type: object
+      required: [workOrderId, permitTypeCode, validFrom, validTo]
+      properties:
+        workOrderId: { type: string, format: uuid }
+        permitTypeCode: { type: string, pattern: "^[A-Z0-9_]{2,20}$" }
+        validFrom: { type: string, format: date-time }
+        validTo: { type: string, format: date-time }
+    Permit:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: string, description: EAM-PMT sequence }
+        permitTypeCode: { type: string }
+        workOrderId: { type: string, format: uuid }
+        assetId: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/PermitStatus" }
+        validFrom: { type: string, format: date-time }
+        validTo: { type: string, format: date-time }
+        requestedBy: { type: string }
+        approvedBy: { type: string }
+        issuedBy: { type: string }
+        closedBy: { type: string }
+        locksOpen: { type: integer, description: personal locks still applied or verified }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+    PermitTransitionIn:
+      type: object
+      required: [to]
+      properties:
+        to: { type: string, enum: [APPROVED, ISSUED, SUSPENDED, CLOSED, CANCELED] }
+    LockIn:
+      type: object
+      required: [action, isolationPointId]
+      properties:
+        action: { type: string, enum: [APPLY, VERIFY, REMOVE] }
+        isolationPointId: { type: string, format: uuid }
+    LotoLock:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        permitId: { type: string, format: uuid }
+        isolationPointId: { type: string, format: uuid }
+        technicianId: { type: string }
+        lockNumber: { type: string, description: LOCK-n sequence, printed on the lock tag }
+        state: { type: string, enum: [APPLIED, VERIFIED, REMOVED] }
+        appliedAt: { type: string, format: date-time }
+        verifiedAt: { type: string, format: date-time }
+        removedAt: { type: string, format: date-time }
+    PermitDetail:
+      type: object
+      properties:
+        permit: { $ref: "#/components/schemas/Permit" }
+        isolationPoints: { type: array, items: { $ref: "#/components/schemas/IsolationPoint" } }
+        locks: { type: array, items: { $ref: "#/components/schemas/LotoLock" } }
+        unlockedPoints: { type: integer, description: isolation points without a verified lock }
+        history:
+          type: array
+          description: append-only transitions, oldest first (from is empty on the request)
+          items:
+            type: object
+            properties:
+              from: { type: string }
+              to: { type: string }
+              at: { type: string, format: date-time }
+              actor: { type: string }
+    PermitPage:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Permit" } }
+        nextCursor: { type: string }
+    ExpiredPermit:
+      type: object
+      properties:
+        permitId: { type: string, format: uuid }
+        number: { type: string }
+        workOrderId: { type: string, format: uuid }
+        validTo: { type: string, format: date-time }
+        workOrderInProgress: { type: boolean, description: the job is running without a valid permit }
+        code: { type: string, enum: [EAM-PMT-004] }

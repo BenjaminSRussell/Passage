@@ -29,6 +29,8 @@ const (
 	DutyPlanner         = "EamPlanner"
 	DutyTechnician      = "EamTechnician"
 	DutyInquire         = "EamInquire"
+	DutyPermitIssuer    = "EamPermitIssuer"
+	DutySetupAdmin      = "EamSetupAdmin"
 )
 
 var (
@@ -102,6 +104,19 @@ func (h *Handler) router() chi.Router {
 		r.With(authz.RequireDuty(DutyTechnician)).Post("/work-orders/{id}/faults", h.registerFault)
 		r.With(anyDuty(DutyPlanner, DutyTechnician)).Post("/work-orders/{id}/downtime", h.recordDowntime)
 		r.With(authz.RequireDuty(DutyPlanner)).Post("/requests/{id}/triage", h.triageRequest)
+		// Slice 3: permits to work and lockout/tagout (FR-44.19, BR-44.11).
+		r.With(authz.RequireDuty(DutySetupAdmin)).Post("/permit-types", h.upsertPermitType)
+		r.With(authz.RequireDuty(DutyInquire)).Get("/permit-types", h.listPermitTypes)
+		r.With(authz.RequireDuty(DutyInquire)).Get("/job-types/{jobType}/permits", h.getJobPermits)
+		r.With(authz.RequireDuty(DutySetupAdmin)).Put("/job-types/{jobType}/permits", h.setJobPermits)
+		r.With(authz.RequireDuty(DutySetupAdmin)).Post("/assets/{id}/isolation-points", h.createIsolationPoint)
+		r.With(authz.RequireDuty(DutyInquire)).Get("/assets/{id}/isolation-points", h.listIsolationPoints)
+		r.With(authz.RequireDuty(DutyPlanner)).Post("/permits", h.requestPermit)
+		r.With(authz.RequireDuty(DutyInquire)).Get("/permits", h.listPermits)
+		r.With(authz.RequireDuty(DutyPermitIssuer)).Post("/permits/expire", h.expirePermits)
+		r.With(authz.RequireDuty(DutyInquire)).Get("/permits/{id}", h.getPermit)
+		r.With(authz.RequireDuty(DutyPermitIssuer)).Post("/permits/{id}/transition", h.transitionPermit)
+		r.With(authz.RequireDuty(DutyTechnician)).Post("/permits/{id}/locks", h.recordLock)
 	})
 	return r
 }

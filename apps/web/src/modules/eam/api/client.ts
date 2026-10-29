@@ -565,3 +565,156 @@ export function recordDowntime(workOrderId: string, input: NewDowntime, key: str
 export function triageRequest(requestId: string, action: TriageAction, note: string, key = newKey()): Promise<MaintenanceRequest> {
   return post<MaintenanceRequest>(`/requests/${id(requestId)}/triage`, note ? { action, note } : { action }, key);
 }
+
+// Slice 3: permits to work and lockout/tagout (FR-44.19, BR-44.11).
+
+export type PermitStatus = "REQUESTED" | "APPROVED" | "ISSUED" | "SUSPENDED" | "CLOSED" | "CANCELED";
+export type EnergyType = "ELECTRICAL" | "PNEUMATIC" | "HYDRAULIC" | "MECHANICAL" | "THERMAL" | "CHEMICAL";
+export type LockAction = "APPLY" | "VERIFY" | "REMOVE";
+export type LockState = "APPLIED" | "VERIFIED" | "REMOVED";
+
+export interface PermitType {
+  code: string;
+  name: string;
+  approverRole: string;
+  maxValidityHours: number;
+  requiresIsolation: boolean;
+  requiresGasTest: boolean;
+}
+
+export interface JobPermits {
+  jobType: string;
+  permitTypeCodes: string[];
+}
+
+export interface NewIsolationPoint {
+  energyType: EnergyType;
+  location: string;
+  method: string;
+  verificationStep: string;
+  tagCode: string;
+}
+
+export interface IsolationPoint extends NewIsolationPoint {
+  id: string;
+  assetId: string;
+  createdAt: string;
+}
+
+export interface Permit {
+  id: string;
+  number: string;
+  permitTypeCode: string;
+  workOrderId: string;
+  assetId: string;
+  status: PermitStatus;
+  validFrom: string;
+  validTo: string;
+  requestedBy: string;
+  approvedBy?: string;
+  issuedBy?: string;
+  closedBy?: string;
+  locksOpen: number;
+  version: number;
+  createdAt: string;
+}
+
+export interface NewPermit {
+  workOrderId: string;
+  permitTypeCode: string;
+  validFrom: string;
+  validTo: string;
+}
+
+export interface LotoLock {
+  id: string;
+  permitId: string;
+  isolationPointId: string;
+  technicianId: string;
+  lockNumber: string;
+  state: LockState;
+  appliedAt: string;
+  verifiedAt?: string;
+  removedAt?: string;
+}
+
+export interface PermitDetail {
+  permit: Permit;
+  isolationPoints: IsolationPoint[];
+  locks: LotoLock[];
+  unlockedPoints: number;
+  history: StatusChange[];
+}
+
+export interface ExpiredPermit {
+  permitId: string;
+  number: string;
+  workOrderId: string;
+  validTo: string;
+  workOrderInProgress: boolean;
+  code: string;
+}
+
+export interface PermitFilter extends ListFilter {
+  workOrder?: string;
+}
+
+export async function listPermitTypes(signal?: AbortSignal): Promise<PermitType[]> {
+  return (await page<PermitType>("/permit-types", signal)).items;
+}
+
+/** Creates or replaces a permit type; saving the same definition again changes nothing. */
+export function upsertPermitType(input: PermitType, key = newKey()): Promise<PermitType> {
+  return post<PermitType>("/permit-types", input, key);
+}
+
+export function getJobPermits(jobType: string, signal?: AbortSignal): Promise<JobPermits> {
+  return send<JobPermits>(`/job-types/${id(jobType)}/permits`, {}, signal);
+}
+
+/** Replaces the permit types a job type requires; an empty list clears the requirement. */
+export function setJobPermits(jobType: string, permitTypeCodes: string[]): Promise<JobPermits> {
+  return send<JobPermits>(`/job-types/${id(jobType)}/permits`, { method: "PUT", body: JSON.stringify({ permitTypeCodes }) });
+}
+
+export async function listIsolationPoints(assetId: string, signal?: AbortSignal): Promise<IsolationPoint[]> {
+  return (await page<IsolationPoint>(`/assets/${id(assetId)}/isolation-points`, signal)).items;
+}
+
+export function createIsolationPoint(assetId: string, input: NewIsolationPoint, key: string): Promise<IsolationPoint> {
+  return post<IsolationPoint>(`/assets/${id(assetId)}/isolation-points`, input, key);
+}
+
+export function listPermits(filter: PermitFilter = {}, signal?: AbortSignal): Promise<Page<Permit>> {
+  const q = query({
+    status: filter.status,
+    asset: filter.asset,
+    workOrder: filter.workOrder,
+    cursor: filter.cursor,
+    limit: filter.limit === undefined ? undefined : String(filter.limit),
+  });
+  return page<Permit>(`/permits${q}`, signal);
+}
+
+export function getPermit(permitId: string, signal?: AbortSignal): Promise<PermitDetail> {
+  return send<PermitDetail>(`/permits/${id(permitId)}`, {}, signal);
+}
+
+export function requestPermit(input: NewPermit, key: string): Promise<Permit> {
+  return post<Permit>("/permits", input, key);
+}
+
+/** Approve, issue, suspend, close or cancel; version is the permit version read (If-Match). */
+export function transitionPermit(permitId: string, to: Exclude<PermitStatus, "REQUESTED">, version: number, key = newKey()): Promise<Permit> {
+  return post<Permit>(`/permits/${id(permitId)}/transition`, { to }, key, { "If-Match": `"${version}"` });
+}
+
+/** Applies, verifies or removes the caller's own personal lock on an isolation point. */
+export function recordLock(permitId: string, action: LockAction, isolationPointId: string, key = newKey()): Promise<LotoLock> {
+  return post<LotoLock>(`/permits/${id(permitId)}/locks`, { action, isolationPointId }, key);
+}
+
+/** Runs the permit expiry check: ISSUED permits past their validity are suspended (EAM-PMT-004). */
+export async function expirePermits(key = newKey()): Promise<ExpiredPermit[]> {
+  return (await post<{ items: ExpiredPermit[] }>("/permits/expire", undefined, key)).items;
+}

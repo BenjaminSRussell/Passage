@@ -204,6 +204,7 @@ describe("asset detail", () => {
       if (get("/work-orders")(url, init)) return json(200, { items: [order] });
       if (get(`/assets/${PUMP}/criticality`)(url, init)) return json(200, { items: [] });
       if (get(`/assets/${PUMP}/warranties`)(url, init)) return json(200, { items: [] });
+      if (get(`/assets/${PUMP}/isolation-points`)(url, init)) return json(200, { items: [] });
       return undefined;
     };
   }
@@ -310,7 +311,9 @@ describe("work orders", () => {
 
 describe("work order detail", () => {
   function fakeOrder(detail: WorkOrderDetail, extra: Handler = () => undefined) {
-    handler = (url, init) => extra(url, init) ?? (get(`/work-orders/${WO}`)(url, init) ? json(200, detail) : undefined);
+    handler = (url, init) =>
+      extra(url, init) ??
+      (get(`/work-orders/${WO}`)(url, init) ? json(200, detail) : get("/permits")(url, init) ? json(200, { items: [] }) : undefined);
   }
 
   it("shows labor, history and the next status actions", async () => {
