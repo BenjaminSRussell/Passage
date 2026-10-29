@@ -3,7 +3,7 @@ info:
   title: Passage Field Service events
   version: 0.1.0
   description: |
-    Events published by the fieldservice service (wave 45, slices 1 to 3). Every event is
+    Events published by the fieldservice service (wave 45, slices 1 to 4). Every event is
     written to the service outbox in the same transaction as the state change and
     relayed by Debezium to Kafka. Envelope: CloudEvents 1.0 (source /passage/service/fieldservice).
 defaultContentType: application/json
@@ -30,6 +30,11 @@ channels:
     messages:
       articlePublished:
         $ref: "#/components/messages/ArticlePublished"
+  caseStageChanged:
+    address: passage.case.stage
+    messages:
+      caseStageChanged:
+        $ref: "#/components/messages/CaseStageChanged"
 operations:
   publishCaseOpened:
     action: send
@@ -61,6 +66,12 @@ operations:
     summary: A knowledge article version was published (FR-45.13, BR-45.11); the previous PUBLISHED version of the article and language, if any, was retired in the same transaction.
     messages:
       - $ref: "#/channels/articlePublished/messages/articlePublished"
+  publishCaseStageChanged:
+    action: send
+    channel: { $ref: "#/channels/caseStageChanged" }
+    summary: A case in any non-service category moved to the next stage (its gate passed) or back one stage with a reason (FR-45.12, BR-45.9).
+    messages:
+      - $ref: "#/channels/caseStageChanged/messages/caseStageChanged"
 components:
   messages:
     CaseOpened:
@@ -176,3 +187,20 @@ components:
               categoryIds: { type: array, items: { type: string, format: uuid } }
           publishedAt: { type: string, format: date-time }
           retiredArticleId: { type: [string, "null"], format: uuid, description: The version row this publish retired. }
+    CaseStageChanged:
+      name: dev.passage.case.stage.changed.v1
+      contentType: application/cloudevents+json
+      description: PRD 8.45.5 payload (caseId, categoryId, from, to, at, actor) plus the case number and the reason of a move back. Consumers are workflow, notifications and the domain owners (HR, collections, audit).
+      payload:
+        type: object
+        required: [caseId, number, categoryId, from, to, at, actor, reason]
+        additionalProperties: false
+        properties:
+          caseId: { type: string, format: uuid }
+          number: { type: string, example: CS-000002 }
+          categoryId: { type: string, format: uuid }
+          from: { type: string, description: Stage code the case left. }
+          to: { type: string, description: Stage code the case entered. }
+          at: { type: string, format: date-time }
+          actor: { type: string, description: User id of the caller who moved the case. }
+          reason: { type: string, description: The reason of a move back one stage; empty on a forward move. }

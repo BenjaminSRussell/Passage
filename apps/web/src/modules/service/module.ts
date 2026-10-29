@@ -4,7 +4,10 @@ import { ActivitiesPage, ActivityDetailPage, NewActivityPage } from "./Activitie
 import { AgreementDetailPage } from "./AgreementDetailPage";
 import { AgreementsPage, NewAgreementPage } from "./AgreementsPage";
 import { CaseDetailPage } from "./CaseDetailPage";
+import { CaseSetupPage, NewCaseCategoryPage, NewCaseProcessPage } from "./CaseSetupPage";
 import { CasesPage, OpenCasePage } from "./CasesPage";
+import { GenericCaseDetailPage } from "./GenericCaseDetailPage";
+import { GenericCasesPage, OpenGenericCasePage } from "./GenericCasesPage";
 import { ArticleDetailPage, KnowledgePage, NewArticlePage } from "./KnowledgePage";
 import { KpisPage } from "./KpisPage";
 import { ServiceObjectDetailPage } from "./ServiceObjectDetailPage";
@@ -16,7 +19,7 @@ import { NewWorkOrderPage, WorkOrdersPage } from "./WorkOrdersPage";
 const service: PassageModule = {
   id: "service",
   title: "Service",
-  description: "Open service cases with entitlement and SLA clocks, pause and resolve them, maintain service agreements and SLA profiles, run work orders through to billing and follow-up, track SLA attainment and first-time fix, keep the installed base with its warranties, plan activities on any record and maintain the knowledge base.",
+  description: "Open service cases with entitlement and SLA clocks, pause and resolve them, maintain service agreements and SLA profiles, run work orders through to billing and follow-up, track SLA attainment and first-time fix, keep the installed base with its warranties, plan activities on any record, maintain the knowledge base, and run HR, collections, audit and other cases through their category's stages.",
   routes: [
     { path: "/service", element: createElement(CasesPage), handle: { title: "Service cases" } },
     { path: "/service/cases", element: createElement(CasesPage) },
@@ -41,6 +44,12 @@ const service: PassageModule = {
     { path: "/service/knowledge", element: createElement(KnowledgePage), handle: { title: "Knowledge base" } },
     { path: "/service/knowledge/new", element: createElement(NewArticlePage), handle: { title: "New knowledge article" } },
     { path: "/service/knowledge/:id", element: createElement(ArticleDetailPage), handle: { title: "Knowledge article" } },
+    { path: "/service/case-management", element: createElement(GenericCasesPage), handle: { title: "Cases" } },
+    { path: "/service/case-management/new", element: createElement(OpenGenericCasePage), handle: { title: "Open case" } },
+    { path: "/service/case-management/:id", element: createElement(GenericCaseDetailPage), handle: { title: "Case" } },
+    { path: "/service/case-setup", element: createElement(CaseSetupPage), handle: { title: "Case setup" } },
+    { path: "/service/case-setup/categories/new", element: createElement(NewCaseCategoryPage), handle: { title: "New case category" } },
+    { path: "/service/case-setup/processes/new", element: createElement(NewCaseProcessPage), handle: { title: "New case process" } },
   ],
   nav: [
     { label: "Service cases", to: "/service/cases", duty: "SvcInquire" },
@@ -52,6 +61,8 @@ const service: PassageModule = {
     { label: "Installed base", to: "/service/objects", duty: "SvcInquire" },
     { label: "My activities", to: "/service/activities", duty: "ActivityMaintain" },
     { label: "Knowledge base", to: "/service/knowledge", duty: "KbRead" },
+    { label: "Cases (all categories)", to: "/service/case-management", duty: "CaseMaintain" },
+    { label: "Case setup", to: "/service/case-setup", duty: "CaseSetupAdmin" },
   ],
 };
 

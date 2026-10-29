@@ -1,8 +1,12 @@
 // Client for the fieldservice service (services/fieldservice/api/openapi.yaml).
-// Browser calls use /api/v1/service/..., which the web BFF rewrites to /v1/service/....
+// Browser calls use /api/v1/service/..., which the web BFF rewrites to /v1/service/...;
+// generic case calls use /api/v1/cases, /api/v1/case-categories and /api/v1/case-processes.
 // No npm dependencies: fetch only. Decimals travel as strings, never floats.
 
 export const base = "/api/v1/service";
+
+/** Root of the generic case routes (PRD 8.45.5 `/api/v1/cases`), outside /service. */
+export const caseBase = "/api/v1";
 
 export const CHANNELS = ["PHONE", "EMAIL", "PORTAL", "IOT", "INTERNAL"] as const;
 export type CaseChannel = (typeof CHANNELS)[number];
@@ -298,25 +302,30 @@ async function toError(res: Response): Promise<ServiceApiError> {
   return new ServiceApiError(res.status, code, message, fields);
 }
 
-async function send(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<Response> {
+async function send(path: string, init: RequestInit = {}, signal?: AbortSignal, root: string = base): Promise<Response> {
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
   if (init.body !== undefined) {
     headers.set("Content-Type", "application/json");
   }
-  const res = await fetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
+  const res = await fetch(`${root}${path}`, { ...init, headers, credentials: "same-origin", signal });
   if (!res.ok) {
     throw await toError(res);
   }
   return res;
 }
 
-async function json<T>(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<T> {
-  return (await (await send(path, init, signal)).json()) as T;
+async function json<T>(path: string, init: RequestInit = {}, signal?: AbortSignal, root: string = base): Promise<T> {
+  return (await (await send(path, init, signal, root)).json()) as T;
 }
 
-async function versioned<T extends { version: number }>(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<Versioned<T>> {
-  const res = await send(path, init, signal);
+async function versioned<T extends { version: number }>(
+  path: string,
+  init: RequestInit = {},
+  signal?: AbortSignal,
+  root: string = base,
+): Promise<Versioned<T>> {
+  const res = await send(path, init, signal, root);
   const value = (await res.json()) as T;
   return { value, etag: res.headers.get("ETag") ?? `"${value.version}"` };
 }
@@ -756,4 +765,196 @@ export async function publishArticle(articleId: string, etag: string): Promise<{
 
 export function voteArticle(articleId: string, helpful: boolean): Promise<Versioned<Article>> {
   return revisioned(`/knowledge/articles/${id(articleId)}:vote`, { method: "POST", body: JSON.stringify({ helpful }) });
+}
+
+// --- Generic case management (FR-45.12, BR-45.9, BR-45.10) ---
+
+export const CATEGORY_TYPES = ["SERVICE", "CUSTOMER_SERVICE", "HR", "COLLECTIONS", "PRODUCT_CHANGE", "AUDIT", "PROJECT", "VENDOR", "INTERNAL"] as const;
+export type CategoryType = (typeof CATEGORY_TYPES)[number];
+
+/** Category types whose cases open through the service case screens (entitlement and SLA). */
+export const SERVICE_ROUTED: CategoryType[] = ["SERVICE", "CUSTOMER_SERVICE"];
+
+/** Category types whose cases need a customer (FR-45.12). */
+export const CUSTOMER_REQUIRED: CategoryType[] = ["SERVICE", "CUSTOMER_SERVICE", "COLLECTIONS"];
+
+export const GENERIC_STATUSES = ["OPEN", "RESOLVED", "CLOSED", "CANCELED"] as const;
+export type GenericStatus = (typeof GENERIC_STATUSES)[number];
+
+export const ASSOCIATION_ROLES = ["SUBJECT", "RELATED"] as const;
+export type AssociationRole = (typeof ASSOCIATION_ROLES)[number];
+
+export interface CaseStage {
+  code: string;
+  sequence: number;
+  /** Activity subjects that must be DONE on the case before it moves on. */
+  requiredActivities: string[];
+}
+
+export interface CaseProcessInput {
+  code: string;
+  name: string;
+  stages: CaseStage[];
+}
+
+export interface CaseProcess extends CaseProcessInput {
+  id: string;
+}
+
+export interface CaseCategoryInput {
+  code: string;
+  name: string;
+  categoryType: CategoryType;
+  parentId?: string;
+  processId?: string;
+  slaProfileId?: string;
+  defaultPriority?: number;
+  reopenWindowDays?: number;
+  accessDuty?: string;
+  resolutionCodes?: string[];
+}
+
+export interface CaseCategory {
+  id: string;
+  code: string;
+  name: string;
+  categoryType: CategoryType;
+  parentId?: string;
+  processId?: string;
+  slaProfileId?: string;
+  defaultPriority: number;
+  reopenWindowDays: number;
+  accessDuty: string;
+  resolutionCodes: string[];
+}
+
+export interface CaseAssociation {
+  entityType: AssociableType;
+  entityId: string;
+  role: AssociationRole;
+}
+
+export interface CaseLogEntry {
+  at: string;
+  actor: string;
+  kind: "CREATED" | "STAGE" | "STATUS" | "ASSOCIATION" | "REOPENED";
+  text: string;
+}
+
+export interface GenericCaseInput {
+  categoryId: string;
+  legalEntityId: string;
+  customerPartyId?: string;
+  subject: string;
+  description?: string;
+  priority?: number;
+  associations?: CaseAssociation[];
+}
+
+export interface GenericCase {
+  id: string;
+  number: string;
+  categoryId: string;
+  categoryCode: string;
+  categoryType: CategoryType;
+  legalEntityId: string;
+  customerPartyId?: string;
+  ownerId: string;
+  subject: string;
+  description: string;
+  priority: number;
+  stageCode: string;
+  status: GenericStatus;
+  resolutionCode?: string;
+  resolutionText: string;
+  slaProfileId?: string;
+  slaResponseDue?: string;
+  slaResolutionDue?: string;
+  openedAt: string;
+  resolvedAt?: string;
+  closedAt?: string;
+  reopenedFrom?: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  associations: CaseAssociation[];
+  log: CaseLogEntry[];
+}
+
+export interface ReopenResult {
+  case: GenericCase;
+  /** True when a new case linked by reopenedFrom was created. */
+  created: boolean;
+}
+
+export interface GenericCaseFilter {
+  categoryId?: string;
+  status?: GenericStatus | "";
+  stage?: string;
+  entityType?: AssociableType | "";
+  entityId?: string;
+  cursor?: string;
+}
+
+export function listCaseProcesses(signal?: AbortSignal): Promise<Page<CaseProcess>> {
+  return json<Page<CaseProcess>>("/case-processes", {}, signal, caseBase);
+}
+
+export function createCaseProcess(input: CaseProcessInput, key: string = newKey()): Promise<CaseProcess> {
+  return json<CaseProcess>("/case-processes", post(input, key), undefined, caseBase);
+}
+
+export function listCaseCategories(signal?: AbortSignal): Promise<Page<CaseCategory>> {
+  return json<Page<CaseCategory>>("/case-categories", {}, signal, caseBase);
+}
+
+export function createCaseCategory(input: CaseCategoryInput, key: string = newKey()): Promise<CaseCategory> {
+  return json<CaseCategory>("/case-categories", post(input, key), undefined, caseBase);
+}
+
+/** Cases the caller may read (BR-45.10), newest first. */
+export function listGenericCases(f: GenericCaseFilter = {}, signal?: AbortSignal): Promise<Page<GenericCase>> {
+  const q = query({ categoryId: f.categoryId, status: f.status, stage: f.stage, entityType: f.entityType, entityId: f.entityId, cursor: f.cursor });
+  return json<Page<GenericCase>>(`/cases${q}`, {}, signal, caseBase);
+}
+
+export function getGenericCase(caseId: string, signal?: AbortSignal): Promise<Versioned<GenericCase>> {
+  return versioned<GenericCase>(`/cases/${id(caseId)}`, {}, signal, caseBase);
+}
+
+/** Opens a case at the first stage of its category's process (FR-45.12). */
+export function openGenericCase(input: GenericCaseInput, key: string = newKey()): Promise<Versioned<GenericCase>> {
+  return versioned<GenericCase>("/cases", post(input, key), undefined, caseBase);
+}
+
+const guarded = (body: unknown, etag: string, key: string): RequestInit => ({
+  method: "POST",
+  body: JSON.stringify(body),
+  headers: { "If-Match": etag, "Idempotency-Key": key },
+});
+
+/** Moves a case to the next stage, or back one with a reason (BR-45.9). */
+export function advanceCaseStage(caseId: string, etag: string, toStage: string, reason: string, key: string = newKey()): Promise<Versioned<GenericCase>> {
+  return versioned<GenericCase>(`/cases/${id(caseId)}/stage`, guarded({ toStage, ...(reason ? { reason } : {}) }, etag, key), undefined, caseBase);
+}
+
+export interface GenericTransition {
+  to: Exclude<GenericStatus, "OPEN">;
+  resolutionCode?: string;
+  resolutionText?: string;
+}
+
+/** Resolves (with a resolution code), closes or cancels a case. */
+export function transitionGenericCase(caseId: string, etag: string, move: GenericTransition, key: string = newKey()): Promise<Versioned<GenericCase>> {
+  return versioned<GenericCase>(`/cases/${id(caseId)}:transition`, guarded(move, etag, key), undefined, caseBase);
+}
+
+/** Reopens a RESOLVED or CLOSED case: the same case inside the category's window, else a new linked case. */
+export function reopenGenericCase(caseId: string, etag: string, reason: string, key: string = newKey()): Promise<ReopenResult> {
+  return json<ReopenResult>(`/cases/${id(caseId)}:reopen`, guarded({ reason }, etag, key), undefined, caseBase);
+}
+
+/** Associates any registry record with a case (FR-45.12). */
+export function associateCase(caseId: string, association: CaseAssociation, key: string = newKey()): Promise<Versioned<GenericCase>> {
+  return versioned<GenericCase>(`/cases/${id(caseId)}/associations`, post(association, key), undefined, caseBase);
 }

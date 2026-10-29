@@ -1,4 +1,4 @@
-# fieldservice (wave 45, slices 1 to 3)
+# fieldservice (wave 45, slices 1 to 4)
 
 Service management core of Passage: service agreements with SLA profiles, the
 entitlement resolver, SLA clocks on service cases with the case status machine,
@@ -6,9 +6,13 @@ pause and resume, the SLA monitor (warning and breach events), service work orde
 with coverage-aware billing, the work-order status machine with follow-up orders and
 first-time fix, service KPIs, the installed base with warranty terms that cover
 work-order lines, activities on any record with an iCalendar export, and the
-knowledge base with versioned articles, review, publishing and suggestions. It
-replaces AX service management (agreements, service orders, service objects) and SAP
-CS (service orders, installed base, warranty check, solution database) for these slices.
+knowledge base with versioned articles, review, publishing and suggestions, and
+generic case management: case processes with stage gates, a case category tree with
+per-category SLA profile, resolution codes and access duty, cases in any non-service
+category with associations to any record, a case log and reopen. It replaces AX
+service management (agreements, service orders, service objects), the AX/D365 case
+framework (CaseDetail, CaseCategory, CaseProcess) and SAP CS (service orders,
+installed base, warranty check, solution database) for these slices.
 
 Wave reference: PSG-45 / `docs/prd/phase-8-projects-people-service.md` section 8.45.
 Dependencies on earlier waves (locations, pricing, serial shipments, invoicing,
@@ -22,15 +26,18 @@ internal/domain         pure rules: SLA business-minute calendar, SLA clocks wit
                         monitor's warning/breach verdicts, case status machine, entitlement
                         resolver (BR-45.1), work-order status machine and coverage posting
                         (BR-45.4/5), KPI rates, warranty start and term (FR-45.2), activity
-                        status moves and the RFC 5545 export, the article lifecycle (BR-45.11)
+                        status moves and the RFC 5545 export, the article lifecycle (BR-45.11),
+                        case process stages, gate, resolution and reopen rules (BR-45.9, BR-45.10)
 internal/store          Postgres repositories under RLS (dbx.WithTenantTx), idempotency, outbox
-internal/api            HTTP handlers under /v1/service, validation, problem details
+internal/api            HTTP handlers under /v1/service and /v1/cases, validation, problem details
 internal/events         event types and payloads (see events/asyncapi.yaml)
 migrations/             0001_init.sql (RLS, tenant_id first, money numeric(20,6) + currency),
                         0002/0003 passage_app grants, 0004_case_lifecycle.sql (case version, pause,
                         warning instants, emitted alerts; work-order completion, follow-up, first-time fix),
                         0005_objects_activities_knowledge.sql (service objects, activities, knowledge
-                        articles and votes, with their passage_app grants)
+                        articles and votes, with their passage_app grants),
+                        0006_generic_cases.sql (case processes, categories, generic cases,
+                        associations and the case log, with their passage_app grants)
 api/openapi.yaml        OpenAPI 3.1 for every endpoint
 events/asyncapi.yaml    AsyncAPI 3 for every event published
 charts/fieldservice     Helm chart (deployment, service, optional ServiceMonitor)
@@ -69,10 +76,16 @@ charts/fieldservice     Helm chart (deployment, service, optional ServiceMonitor
 | POST | `/v1/service/knowledge/articles/{id}:new-version`, `:submit` | KbAuthor (If-Match) |
 | POST | `/v1/service/knowledge/articles/{id}:publish`, `:reject`, `:retire` | KbPublish (If-Match) |
 | POST | `/v1/service/knowledge/articles/{id}:vote` | KbRead |
+| POST | `/v1/case-processes`, `/v1/case-categories` | CaseSetupAdmin (Idempotency-Key) |
+| GET | `/v1/case-processes`, `/v1/case-categories` | any of CaseMaintain, CaseCreate, CaseSetupAdmin |
+| POST | `/v1/cases` | CaseCreate (Idempotency-Key; and the category's access duty) |
+| GET | `/v1/cases` (`categoryId`, `status`, `stage`, `ownerId`, `entityType` with `entityId`), `/v1/cases/{id}` | CaseMaintain (and BR-45.10 access) |
+| POST | `/v1/cases/{id}/stage`, `/v1/cases/{id}:transition`, `/v1/cases/{id}:reopen` | CaseMaintain (If-Match, Idempotency-Key) |
+| POST | `/v1/cases/{id}/associations` | CaseMaintain (Idempotency-Key) |
 
 Lists are newest first (activities: earliest due first, undated last) and page with `cursor` (the previous page's `nextCursor`)
 and `limit` (1 to 200, default 50); they see only the caller's legal entities.
-Work-order, case, service-object and activity responses carry `ETag: "<version>"`, and
+Work-order, case (service and generic), service-object and activity responses carry `ETag: "<version>"`, and
 article responses `ETag: "<revision>"`, which `If-Match` echoes back.
 `internal/api/openapi_test.go` fails when a route and `api/openapi.yaml` disagree,
 and `internal/events/events_test.go` does the same for the event payloads and
@@ -98,7 +111,13 @@ detail with warranty, components and installation), "My activities" (list by own
 and status, create on any record, complete, cancel, reschedule, calendar download)
 with an activities panel on the case detail, and the knowledge base (list by status,
 search, author, edit a draft, submit, publish, send back, retire, new version, vote)
-with article suggestions on the case detail.
+with article suggestions on the case detail. Slice 4 adds generic case management:
+the case list across categories (`/service/case-management`, filtered by category,
+status, stage and associated record), opening a case, the case detail (stages with
+the current stage's required activities and "Add" links that create them on the
+case, advance, back with a reason, resolve with a category code, close, cancel,
+reopen, associated records, the case log and the activities panel) and case setup
+(`/service/case-setup`: category and process lists, new category, new process).
 
 ## Run
 
@@ -114,7 +133,8 @@ Environment: `DATABASE_URL` (required), `MIGRATE_ON_START`, `HTTP_ADDR`, `ADMIN_
 
 ```
 go vet ./... && go test ./...
-PASSAGE_TEST_DATABASE_URL=postgres://... go test ./...   # store and API tests against Postgres
+PASSAGE_TEST_DATABASE_URL=postgres://... PASSAGE_TEST_APP_DATABASE_URL=postgres://passage_app:...@... go test ./...
+# store and API tests against Postgres, application queries as the NOSUPERUSER NOBYPASSRLS passage_app
 ```
 
 Domain tests are table-driven plus `pgregory.net/rapid` properties (calendar
@@ -200,6 +220,39 @@ without `PASSAGE_TEST_DATABASE_URL`.
   clocks within target are not counted yet). First-time fix counts original orders
   only (not follow-ups). Rates are percentages rounded half-even to two places and
   null with an empty denominator; means are wall-clock minutes.
+- Generic cases (FR-45.12) live in `service_generic_case`; SERVICE and
+  CUSTOMER_SERVICE categories keep the entitlement and SLA engine of
+  `/v1/service/cases` and are refused by `POST /v1/cases` (`CASE-CAT-002`). Both
+  kinds share the `CS` number sequence, so a CS number names one case. COLLECTIONS
+  needs a customer (`CASE-CUS-001`). Priority defaults to the category's default
+  priority. A category SLA profile sets `slaResponseDue` and `slaResolutionDue` at
+  open with the business calendar of BR-45.2; there is no pause or monitor on these
+  dues yet.
+- Stages (BR-45.9): a case starts at the first stage of its category's process.
+  `POST /v1/cases/{id}/stage` enters the next stage only when every required activity
+  of the current stage is DONE on the case: an activity whose associations hold
+  `{entityType: "case", entityId: <case id>}` and whose subject equals the template.
+  A refusal is `CASE-STG-001` and names what is missing. Back one stage needs a
+  reason; anything else is `CASE-STG-002`. Each move is logged and writes
+  `dev.passage.case.stage.changed.v1` in the same transaction.
+- Status: OPEN to RESOLVED (a resolution code, from the category's list when it has
+  one: `CASE-RES-001`, `CASE-RES-002`) or CANCELED; RESOLVED to CLOSED. CANCELED is
+  final. `:reopen` takes a RESOLVED or CLOSED case: within the category's reopen
+  window (days since resolution, default 14; 0 disables it) the case itself returns
+  to OPEN at its stage; after it a new case opens at the first stage, linked by
+  `reopenedFrom`, carrying the associations, and the call answers 201.
+- Access (BR-45.10): a category's `accessDuty` limits its cases to holders of that
+  duty and the case owner (the user who opened it), for open, read, list and every
+  change (`CASE-SEC-001`, 403); the list leaves inaccessible cases out. A category
+  without one is open to every CaseMaintain holder.
+- Associations: any registry record type of `domain.AssociableTypes` with role
+  SUBJECT or RELATED; associating the same record again replaces the role. The case
+  version moves (the ETag changes), but the call needs no If-Match (PRD 8.45.5).
+- Idempotency on the generic case commands: create calls store the key on the new
+  row; stage, transition, reopen and association calls store their answer in
+  `idempotency_keys`, so a retry with the same key and body returns the first
+  answer (even after the version moved on); the fingerprint includes the command and
+  the case, so a key reused elsewhere is refused (`idempotency_key_reuse`).
 - Money is decimal (`shopspring/decimal` at `numeric(20,6)`), never float.
 
 ## Error codes
@@ -242,6 +295,19 @@ Problem details use `application/problem+json`; `type` is `https://passage.dev/p
 | `KB-ART-002` | 422 | The article's status does not allow the action |
 | `KB-ART-003` | 422 | Another version of the article is already in draft or review |
 | `KB-PUB-001` | 422 | The reviewer must differ from the author (PRD message catalog) |
+| `CASE-GEN-001` | 404 | Generic case not found |
+| `CASE-CAT-001` | 409 | Case category code already exists |
+| `CASE-CAT-002` | 422 | SERVICE or CUSTOMER_SERVICE category used on `POST /v1/cases` |
+| `CASE-CAT-003` | 422 | Referenced case category (case or parent) not found |
+| `CASE-PRC-002` | 409 | Case process code already exists |
+| `CASE-PRC-003` | 422 | Referenced case process not found |
+| `CASE-CUS-001` | 422 | The category requires a customer party |
+| `CASE-STG-001` | 422 | Required activities of the current stage are not DONE (PRD message catalog) |
+| `CASE-STG-002` | 422 | Stage move not allowed (not adjacent, same stage, unknown stage, no reason for a move back, or no process) |
+| `CASE-RES-001` | 422 | A resolution code is required to resolve |
+| `CASE-RES-002` | 422 | The resolution code is not one of the category's codes |
+| `CASE-ST-001` | 422 | Case status move not allowed, or a stage move, association or reopen in a status that does not allow it |
+| `CASE-SEC-001` | 403 | The caller has no access to cases of this category (BR-45.10) |
 
 `SVC-SLA-001` (warning) and `SVC-SLA-002` (breach) are the messages of the
 `sla.warning` and `sla.breached` events, not HTTP errors. `KB-PUB-002` (publishing

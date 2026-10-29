@@ -89,6 +89,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerObjects(r)
 	a.registerActivities(r)
 	a.registerKnowledge(r)
+	a.registerCases(r)
 }
 
 // Metrics serves the service counters in Prometheus text format.

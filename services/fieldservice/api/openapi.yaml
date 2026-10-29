@@ -5,9 +5,12 @@ info:
   description: |
     Service agreements, SLA profiles, cases with their status lifecycle and SLA monitor,
     service work orders with follow-ups, service KPIs, the installed base with warranties,
-    activities on any record and the knowledge base (wave 45, slices 1 to 3).
-    Routes are mounted under /v1/service on the service; the browser reaches them as
-    /api/v1/service/... through the web BFF. Every mutating operation requires an
+    activities on any record, the knowledge base (wave 45, slices 1 to 3) and generic
+    case management: case processes, the case category tree and cases in any
+    non-service category with stages, associations and a log (slice 4).
+    Service routes are mounted under /v1/service and generic case routes under
+    /v1/cases, /v1/case-categories and /v1/case-processes (PRD 8.45.5); the browser
+    reaches them as /api/v1/... through the web BFF. Every mutating operation requires an
     Idempotency-Key header, except the case transition, where it is optional because
     If-Match already makes a retry safe, the If-Match-guarded custom methods of slice 3 (a retry after success
     is answered 412 and the client reloads), and the shipment receipt, which is idempotent per serial. Custom
@@ -952,6 +955,313 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
+  /v1/case-processes:
+    post:
+      operationId: createCaseProcess
+      summary: Define a case process with ordered stages and the activities each stage requires (FR-45.12, BR-45.9)
+      x-passage-duty: CaseSetupAdmin
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CaseProcessRequest" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CaseProcess" }
+        "200": { $ref: "#/components/responses/Replayed" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: listCaseProcesses
+      summary: List the case processes ordered by code (at most 500); any one of the listed duties suffices
+      x-passage-duty: [CaseMaintain, CaseCreate, CaseSetupAdmin]
+      responses:
+        "200":
+          description: The processes
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/CaseProcess" } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/case-categories:
+    post:
+      operationId: createCaseCategory
+      summary: Define a node of the case category tree with its type, process, SLA profile, resolution codes and access duty (FR-45.12, BR-45.10)
+      x-passage-duty: CaseSetupAdmin
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CaseCategoryRequest" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CaseCategory" }
+        "200": { $ref: "#/components/responses/Replayed" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: listCaseCategories
+      summary: List the case categories ordered by code (at most 500); any one of the listed duties suffices
+      x-passage-duty: [CaseMaintain, CaseCreate, CaseSetupAdmin]
+      responses:
+        "200":
+          description: The categories
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/CaseCategory" } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/cases:
+    post:
+      operationId: openGenericCase
+      summary: Open a case in any non-service category at the first stage of its process (FR-45.12)
+      description: |
+        The caller becomes the owner and must hold the category's access duty when it
+        has one (category-scoped CaseCreate, BR-45.10). SERVICE and CUSTOMER_SERVICE
+        categories are refused (CASE-CAT-002); they open through /v1/service/cases with
+        entitlement and SLA. COLLECTIONS needs customerPartyId (CASE-CUS-001). A category
+        SLA profile sets the response and resolution dues. Priority defaults to the
+        category's default priority.
+      x-passage-duty: CaseCreate
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GenericCaseRequest" }
+      responses:
+        "201":
+          description: Created
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GenericCase" }
+        "200": { $ref: "#/components/responses/Replayed" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: listGenericCases
+      summary: List the cases the caller may read (BR-45.10) newest first inside the caller's legal-entity scope
+      x-passage-duty: CaseMaintain
+      parameters:
+        - { name: categoryId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [OPEN, RESOLVED, CLOSED, CANCELED] } }
+        - { name: stage, in: query, schema: { type: string, maxLength: 40 } }
+        - { name: ownerId, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: entityType, in: query, description: With entityId, keeps the cases associated with that record., schema: { type: string } }
+        - { name: entityId, in: query, schema: { type: string, format: uuid } }
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: One page
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GenericCasePage" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/cases/{id}:
+    get:
+      operationId: getGenericCase
+      summary: Read a case with its associations and log; 403 CASE-SEC-001 outside the category's access (AC-45.11)
+      x-passage-duty: CaseMaintain
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The case
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GenericCase" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/cases/{id}/stage:
+    post:
+      operationId: advanceCaseStage
+      summary: Move an OPEN case to the next stage of its process, or back one stage with a reason (BR-45.9, AC-45.10)
+      description: |
+        Moving forward requires every required activity of the current stage to be DONE
+        on the case (an activity whose associations hold {entityType case, entityId the
+        case id} and whose subject equals the template), else CASE-STG-001 naming the
+        missing activities. Any other target is CASE-STG-002. Emits
+        dev.passage.case.stage.changed.v1 in the same transaction.
+      x-passage-duty: CaseMaintain
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [toStage]
+              additionalProperties: false
+              properties:
+                toStage: { type: string, pattern: "^[A-Z0-9_-]{2,40}$" }
+                reason: { type: string, maxLength: 500, description: Required to move back one stage. }
+      responses:
+        "200":
+          description: Moved (a replay carries Idempotent-Replayed true)
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GenericCase" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/cases/{id}:transition:
+    post:
+      operationId: transitionGenericCase
+      summary: Resolve (with a resolution code), close or cancel a case (BR-45.9)
+      description: |
+        OPEN to RESOLVED (resolutionCode required, from the category's list when it has
+        one: CASE-RES-001, CASE-RES-002) or CANCELED; RESOLVED to CLOSED. CLOSED and
+        CANCELED are final; see :reopen.
+      x-passage-duty: CaseMaintain
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to]
+              additionalProperties: false
+              properties:
+                to: { type: string, enum: [RESOLVED, CLOSED, CANCELED] }
+                resolutionCode: { type: string, pattern: "^[A-Z0-9_-]{2,40}$" }
+                resolutionText: { type: string, maxLength: 4000 }
+                reason: { type: string, maxLength: 500 }
+      responses:
+        "200":
+          description: Transitioned (a replay carries Idempotent-Replayed true)
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GenericCase" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/cases/{id}:reopen:
+    post:
+      operationId: reopenGenericCase
+      summary: Reopen a RESOLVED or CLOSED case (BR-45.9)
+      description: |
+        Within the category's reopen window (days since resolution; default 14, 0
+        disables it) the case itself returns to OPEN at its stage with its resolution
+        cleared (200). After the window a new OPEN case is created at the first stage,
+        linked by reopenedFrom and carrying the original's associations (201).
+      x-passage-duty: CaseMaintain
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              additionalProperties: false
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 500 }
+      responses:
+        "200":
+          description: The case reopened itself (or a replay, with Idempotent-Replayed true)
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReopenResult" }
+        "201":
+          description: A new case linked by reopenedFrom; ETag is the new case's version
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReopenResult" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/cases/{id}/associations:
+    post:
+      operationId: associateCase
+      summary: Associate any registry record with a case that is not CLOSED or CANCELED (FR-45.12)
+      description: Associating the same record again replaces its role. The case version moves; no If-Match is needed (PRD 8.45.5).
+      x-passage-duty: CaseMaintain
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CaseAssociation" }
+      responses:
+        "200":
+          description: The case with its associations (a replay carries Idempotent-Replayed true)
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GenericCase" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
 components:
   parameters:
     Id:
@@ -1449,3 +1759,139 @@ components:
       additionalProperties: false
       properties:
         helpful: { type: boolean }
+    CaseStage:
+      type: object
+      required: [code, sequence]
+      additionalProperties: false
+      properties:
+        code: { type: string, pattern: "^[A-Z0-9_-]{2,40}$" }
+        sequence: { type: integer, minimum: 1, description: "1 to n in order" }
+        requiredActivities:
+          type: array
+          description: Activity subjects that must be DONE on the case before it leaves the stage.
+          items: { type: string, minLength: 1, maxLength: 200 }
+    CaseProcessRequest:
+      type: object
+      required: [code, name, stages]
+      additionalProperties: false
+      properties:
+        code: { type: string, pattern: "^[A-Z0-9_-]{2,40}$" }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        stages: { type: array, minItems: 1, maxItems: 20, items: { $ref: "#/components/schemas/CaseStage" } }
+    CaseProcess:
+      allOf:
+        - $ref: "#/components/schemas/CaseProcessRequest"
+        - type: object
+          required: [id]
+          properties:
+            id: { type: string, format: uuid }
+    CaseCategoryRequest:
+      type: object
+      required: [code, name, categoryType]
+      additionalProperties: false
+      properties:
+        code: { type: string, pattern: "^[A-Z0-9_-]{2,40}$" }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        categoryType: { type: string, enum: [SERVICE, CUSTOMER_SERVICE, HR, COLLECTIONS, PRODUCT_CHANGE, AUDIT, PROJECT, VENDOR, INTERNAL] }
+        parentId: { type: string, format: uuid }
+        processId: { type: string, format: uuid }
+        slaProfileId: { type: string, format: uuid }
+        defaultPriority: { type: integer, minimum: 1, maximum: 4, default: 3 }
+        reopenWindowDays: { type: integer, minimum: 0, maximum: 365, default: 14 }
+        accessDuty: { type: string, maxLength: 100, description: "Duty that, beside ownership, grants access to the category's cases (BR-45.10); empty leaves them to every CaseMaintain holder." }
+        resolutionCodes: { type: array, maxItems: 50, uniqueItems: true, items: { type: string, pattern: "^[A-Z0-9_-]{2,40}$" } }
+    CaseCategory:
+      type: object
+      required: [id, code, name, categoryType, defaultPriority, reopenWindowDays, accessDuty, resolutionCodes]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        categoryType: { type: string }
+        parentId: { type: string, format: uuid }
+        processId: { type: string, format: uuid }
+        slaProfileId: { type: string, format: uuid }
+        defaultPriority: { type: integer }
+        reopenWindowDays: { type: integer }
+        accessDuty: { type: string }
+        resolutionCodes: { type: array, items: { type: string } }
+    CaseAssociation:
+      type: object
+      required: [entityType, entityId]
+      additionalProperties: false
+      properties:
+        entityType: { type: string, enum: [case, work_order, agreement, service_object, knowledge_article, project, customer, vendor, worker, invoice, item, asset, audit_finding] }
+        entityId: { type: string, format: uuid }
+        role: { type: string, enum: [SUBJECT, RELATED], default: RELATED }
+    CaseLogEntry:
+      type: object
+      required: [at, actor, kind, text]
+      properties:
+        at: { type: string, format: date-time }
+        actor: { type: string }
+        kind: { type: string, enum: [CREATED, STAGE, STATUS, ASSOCIATION, REOPENED] }
+        text: { type: string }
+    GenericCaseRequest:
+      type: object
+      required: [categoryId, legalEntityId, subject]
+      additionalProperties: false
+      properties:
+        categoryId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        customerPartyId: { type: string, format: uuid, description: Required for COLLECTIONS. }
+        subject: { type: string, minLength: 1, maxLength: 200 }
+        description: { type: string, maxLength: 4000 }
+        priority: { type: integer, minimum: 1, maximum: 4, description: Defaults to the category's default priority. }
+        associations: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/CaseAssociation" } }
+    GenericCase:
+      type: object
+      required: [id, number, categoryId, categoryCode, categoryType, legalEntityId, ownerId, subject, description, priority, stageCode,
+        status, resolutionText, openedAt, version, createdAt, updatedAt, associations, log]
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: string, example: CS-000042 }
+        categoryId: { type: string, format: uuid }
+        categoryCode: { type: string }
+        categoryType: { type: string }
+        legalEntityId: { type: string, format: uuid }
+        customerPartyId: { type: string, format: uuid }
+        ownerId: { type: string }
+        subject: { type: string }
+        description: { type: string }
+        priority: { type: integer }
+        stageCode: { type: string, description: Empty when the category has no process. }
+        status: { type: string, enum: [OPEN, RESOLVED, CLOSED, CANCELED] }
+        resolutionCode: { type: string }
+        resolutionText: { type: string }
+        slaProfileId: { type: string, format: uuid }
+        slaResponseDue: { type: string, format: date-time }
+        slaResolutionDue: { type: string, format: date-time }
+        openedAt: { type: string, format: date-time }
+        resolvedAt: { type: string, format: date-time }
+        closedAt: { type: string, format: date-time }
+        reopenedFrom: { type: string, format: uuid }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        associations:
+          type: array
+          items:
+            type: object
+            required: [entityType, entityId, role]
+            properties:
+              entityType: { type: string }
+              entityId: { type: string, format: uuid }
+              role: { type: string, enum: [SUBJECT, RELATED] }
+        log: { type: array, items: { $ref: "#/components/schemas/CaseLogEntry" } }
+    GenericCasePage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/GenericCase" } }
+        nextCursor: { type: string, format: uuid }
+    ReopenResult:
+      type: object
+      required: [case, created]
+      properties:
+        case: { $ref: "#/components/schemas/GenericCase" }
+        created: { type: boolean, description: True when a new case linked by reopenedFrom was created. }

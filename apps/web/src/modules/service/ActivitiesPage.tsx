@@ -219,14 +219,14 @@ export function validateActivity(values: ActivityValues): { errors: Errors; inpu
   };
 }
 
-/** Create an activity, optionally on a record passed as ?entityType=&entityId=. */
+/** Create an activity, optionally on a record passed as ?entityType=&entityId= (and a ?subject=, such as a required stage activity). */
 export function NewActivityPage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const presetType = params.get("entityType");
   const [values, setValues] = useState<ActivityValues>({
     kind: "TASK",
-    subject: "",
+    subject: params.get("subject") ?? "",
     ownerWorkerId: params.get("owner") ?? "",
     dueAt: "",
     startAt: "",

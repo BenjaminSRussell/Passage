@@ -68,6 +68,12 @@ func TestPayloadsMatchAsyncAPI(t *testing.T) {
 	if got, want := keysOf(t, ArticlePublishedData{}), requiredOf(t, "ArticlePublished"); !reflect.DeepEqual(got, want) {
 		t.Errorf("ArticlePublishedData keys %v, AsyncAPI requires %v", got, want)
 	}
+	if got, want := keysOf(t, CaseStageChangedData{}), requiredOf(t, "CaseStageChanged"); !reflect.DeepEqual(got, want) {
+		t.Errorf("CaseStageChangedData keys %v, AsyncAPI requires %v", got, want)
+	}
+	if CaseStageChanged != "dev.passage.case.stage.changed.v1" {
+		t.Errorf("event type %s", CaseStageChanged)
+	}
 	if ArticlePublished != "dev.passage.knowledge.article.published.v1" {
 		t.Errorf("event type %s", ArticlePublished)
 	}
