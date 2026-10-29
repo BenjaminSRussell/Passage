@@ -99,29 +99,36 @@ jobs:
       - run: npx playwright test
 
   py:
-    name: py (ortools=${{ matrix.ortools }})
+    name: py (${{ matrix.package }}, ortools=${{ matrix.ortools }})
     if: inputs.py
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        ortools: [true, false]
+        include:
+          - package: configurator-py
+            ortools: true
+            extras: test,ortools
+          - package: configurator-py
+            ortools: false
+            extras: test
+          - package: scheduler-py
+            ortools: true
+            extras: dev
     defaults:
       run:
-        working-directory: services/configurator-py
+        working-directory: services/${{ matrix.package }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
         with:
           python-version: '3.12'
           cache: pip
-          cache-dependency-path: services/configurator-py/pyproject.toml
-      - run: pip install -e '.[test,ortools]'
-        if: matrix.ortools
-      - run: pip install -e '.[test]'
-        if: '!matrix.ortools'
+          cache-dependency-path: services/${{ matrix.package }}/pyproject.toml
+      - run: pip install -e '.[${{ matrix.extras }}]'
       - run: python -m pytest -q
         env:
-          CONFIGURATOR_REQUIRE_ORTOOLS: ${{ matrix.ortools && '1' || '' }}
+          CONFIGURATOR_REQUIRE_ORTOOLS: ${{ matrix.package == 'configurator-py' && matrix.ortools && '1' || '' }}
+          SCHEDULER_REQUIRE_ORTOOLS: ${{ matrix.package == 'scheduler-py' && matrix.ortools && '1' || '' }}
 
   charts:
     runs-on: ubuntu-24.04

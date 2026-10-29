@@ -39,9 +39,11 @@ Run: `uvicorn scheduler_opt.app:create_app --factory --port 8080`.
 Test: `uv run --with ortools --with fastapi --with httpx --with pytest --with hypothesis --no-project -- python -m pytest -q`
 (the solver and HTTP tests skip when OR-Tools or FastAPI is not installed).
 
-Fixtures: `testdata/orlib/ft06.txt` (Fisher and Thompson 6x6, optimum 55). The
-test suite proves the optimum with CP-SAT (AC-23.1 for ft06). The remaining 29
-OR-Library instances are listed in `services/scheduling/NOT-IMPLEMENTED.md`.
+Fixtures: `testdata/orlib/` holds 30 OR-Library job-shop instances (ft06, ft10,
+ft20, la01-la25, abz5, abz6) from `jobshop1.txt`, with the proven optimum of each
+in `manifest.json`. The suite solves every instance with CP-SAT (30 s limit
+each, about a minute in total) and asserts a feasible schedule within 5% of the
+optimum (AC-23.1). Run one with `pytest -k "within_5_percent and la21"`.
 
 Dependencies: `ortools` (CP-SAT), `fastapi`, `pydantic`, `uvicorn`; tests use
 `pytest`, `hypothesis` and `httpx`.
