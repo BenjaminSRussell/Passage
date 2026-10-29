@@ -96,7 +96,7 @@ func TestExplodePersistsThousandAndLooksUp(t *testing.T) {
 		t.Fatal(err)
 	}
 	start := time.Now()
-	res, err := s.ExplodeVariants(ctx, master.ID, nil)
+	res, err := s.ExplodeVariants(ctx, master.ID, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestExplodePersistsThousandAndLooksUp(t *testing.T) {
 	if err != nil || got.VariantHash != res.Created[0].VariantHash {
 		t.Fatalf("lookup %v %+v", err, got)
 	}
-	again, err := s.ExplodeVariants(ctx, master.ID, nil)
+	again, err := s.ExplodeVariants(ctx, master.ID, nil, 0)
 	if err != nil || len(again.Created) != 0 || len(again.Skipped) != 1000 {
 		t.Fatalf("second explode %+v %v", again, err)
 	}
@@ -166,5 +166,59 @@ func TestReleaseAndIdentifierAndPolicy(t *testing.T) {
 	dec, err := s.EvaluatePolicy(ctx, patched.ID, "purchase_order")
 	if err != nil || dec.Code != domain.CodeLCBlocked {
 		t.Fatalf("policy %+v %v", dec, err)
+	}
+}
+
+func TestExplodeLimitPagesAndListReleasedIDsKeyset(t *testing.T) {
+	s, ctx := newStore(t, 1)
+	dims := []domain.Dimension{{Code: "size", Name: "size", Values: []string{"s1", "s2", "s3"}}, {Code: "color", Name: "color", Values: []string{"c1", "c2"}}}
+	g, err := s.CreateDimensionGroup(ctx, domain.DimensionGroup{Code: "PAGED", Name: "Paged", Kind: "product", Fields: dims})
+	if err != nil {
+		t.Fatal(err)
+	}
+	master, err := s.CreateProduct(ctx, domain.Product{ProductNumber: "PAGEDM", Subtype: domain.SubtypeMaster, ProductType: domain.TypeItem, Name: "Paged", BaseUOM: "EA", DimensionGroupID: g.ID, LifecycleState: domain.StateActive}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.ExplodeVariants(ctx, master.ID, nil, 4)
+	if err != nil || len(first.Created) != 4 || first.Remaining != 2 {
+		t.Fatalf("first page %+v %v", first, err)
+	}
+	second, err := s.ExplodeVariants(ctx, master.ID, nil, 4)
+	if err != nil || len(second.Created) != 2 || len(second.Skipped) != 4 || second.Remaining != 0 {
+		t.Fatalf("second page %+v %v", second, err)
+	}
+
+	ig, err := s.CreateItemGroup(ctx, domain.ItemGroup{Code: "FG", Name: "Finished"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mg, err := s.CreateItemModelGroup(ctx, domain.ItemModelGroup{Code: "STD", Name: "Standard", CostingMethod: "standard", Stocked: true, PostPhysical: true, PostFinancial: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedLifecycle(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, number := range []string{"REL1", "REL2", "REL3"} {
+		p, err := s.CreateProduct(ctx, domain.Product{ProductNumber: number, Subtype: domain.SubtypeProduct, ProductType: domain.TypeItem, Name: number, BaseUOM: "EA", LifecycleState: domain.StateActive}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Release(ctx, p.ID, domain.ReleaseDefaults{LegalEntityID: testkit.TenantID(9), ItemGroupID: ig.ID, ItemModelGroupID: mg.ID, DefaultSiteID: testkit.TenantID(3), DefaultWarehouseID: testkit.TenantID(4)}, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pageOne, err := s.ListReleasedIDs(ctx, "", 2)
+	if err != nil || len(pageOne) != 2 {
+		t.Fatalf("page one %v %v", pageOne, err)
+	}
+	pageTwo, err := s.ListReleasedIDs(ctx, pageOne[1], 2)
+	if err != nil || len(pageTwo) != 1 || pageTwo[0] <= pageOne[1] {
+		t.Fatalf("page two %v %v", pageTwo, err)
+	}
+	other := tenant.With(context.Background(), principal(2))
+	if foreign, err := s.ListReleasedIDs(other, "", 10); err != nil || len(foreign) != 0 {
+		t.Fatalf("tenant 2 must see no released products: %v %v", foreign, err)
 	}
 }

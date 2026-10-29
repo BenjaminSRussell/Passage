@@ -83,8 +83,9 @@ type ExplosionRequest struct {
 
 // ExplosionResult reports created and already-existing combinations.
 type ExplosionResult struct {
-	Created []Variant
-	Skipped []Variant
+	Created   []Variant
+	Skipped   []Variant
+	Remaining int
 }
 
 // ItemModelGroup carries costing and inventory posting flags.
@@ -264,15 +265,15 @@ type DocumentTypeSettings struct {
 
 // GroupChangeItem is one released product in a conversion job.
 type GroupChangeItem struct {
-	ReleasedProductID string
-	OnHand            decimal.Decimal
+	ReleasedProductID string          `json:"releasedProductId"`
+	OnHand            decimal.Decimal `json:"onHand"`
 }
 
 // JobItemResult is the per-item outcome of a mass job.
 type JobItemResult struct {
-	ID     string
-	Status string // changed, skipped, obsolete, deleted
-	Code   string
+	ID     string `json:"id"`
+	Status string `json:"status"` // changed, skipped, obsolete, deleted
+	Code   string `json:"code,omitempty"`
 }
 
 // Catalog is a named category subtree with a validity window.
