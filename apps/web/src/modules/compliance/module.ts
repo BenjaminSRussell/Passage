@@ -1,6 +1,9 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
+import { AuditCasesPage } from "./AuditCasesPage";
+import { AuditRunPage } from "./AuditRunPage";
 import { BreachClocksPage } from "./BreachClocksPage";
+import { BreakGlassPage } from "./BreakGlassPage";
 import { ComplianceHome } from "./ComplianceHome";
 import { ConflictDetailPage } from "./ConflictDetailPage";
 import { ConflictsPage } from "./ConflictsPage";
@@ -13,7 +16,7 @@ import { TdsPage } from "./TdsPage";
 const compliance: PassageModule = {
   id: "compliance",
   title: "Compliance",
-  description: "Segregation-of-duties conflicts and mitigations, role assignment checks, SoD rules, breach notification clocks, country packs and the India TDS calculator.",
+  description: "Segregation-of-duties conflicts and mitigations, role assignment checks, SoD rules, audit rule runs and audit cases, break-glass access, breach notification clocks, country packs and the India TDS calculator.",
   routes: [
     { path: "/compliance", element: createElement(ComplianceHome) },
     { path: "/compliance/sod/conflicts", element: createElement(ConflictsPage) },
@@ -22,6 +25,9 @@ const compliance: PassageModule = {
     { path: "/compliance/sod/rules", element: createElement(RulesPage) },
     { path: "/compliance/packs", element: createElement(PacksPage) },
     { path: "/compliance/packs/:code", element: createElement(PackDetailPage), handle: { title: "Country pack" } },
+    { path: "/compliance/audit/run", element: createElement(AuditRunPage) },
+    { path: "/compliance/audit/cases", element: createElement(AuditCasesPage) },
+    { path: "/compliance/break-glass", element: createElement(BreakGlassPage) },
     { path: "/compliance/incidents/breach-clocks", element: createElement(BreachClocksPage) },
     { path: "/compliance/tds", element: createElement(TdsPage) },
   ],
@@ -30,6 +36,9 @@ const compliance: PassageModule = {
     { label: "SoD conflicts", to: "/compliance/sod/conflicts", duty: "SoDReview" },
     { label: "Role assignment check", to: "/compliance/sod/check", duty: "SecurityAdmin" },
     { label: "SoD rules", to: "/compliance/sod/rules", duty: "SoDReview" },
+    { label: "Audit rule run", to: "/compliance/audit/run", duty: "AuditPolicyRun" },
+    { label: "Audit cases", to: "/compliance/audit/cases", duty: "AuditCaseManage" },
+    { label: "Break-glass access", to: "/compliance/break-glass", duty: "BreakGlassRequest" },
     { label: "Breach clocks", to: "/compliance/incidents/breach-clocks", duty: "SecurityIncidentManage" },
     { label: "Country packs", to: "/compliance/packs", duty: "LocalizationAdmin" },
     { label: "India TDS", to: "/compliance/tds", duty: "LocalizationAdmin" },

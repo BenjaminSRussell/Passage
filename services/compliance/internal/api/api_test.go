@@ -180,6 +180,10 @@ func TestDutiesAreEnforced(t *testing.T) {
 		{http.MethodPost, "/v1/sod/conflicts/" + id + "/mitigations", DutySoDApprove},
 		{http.MethodPost, "/v1/sod/conflicts/" + id + "/accept-risk", DutySoDAdmin},
 		{http.MethodPost, "/v1/security/incidents:breach-clocks", DutyIncidentManage},
+		{http.MethodPost, "/v1/compliance/audit-policies:evaluate", DutyAuditPolicyRun},
+		{http.MethodPost, "/v1/compliance/audit-cases:group", DutyAuditCaseManage},
+		{http.MethodPost, "/v1/compliance/audit-cases:transition", DutyAuditCaseManage},
+		{http.MethodPost, "/v1/security/elevated-sessions:plan", DutyBreakGlassRequest},
 	} {
 		// A neighbouring duty is not enough.
 		rec := serve(t, h, call{method: tc.method, path: tc.path, duties: []string{"ComplianceView"}})

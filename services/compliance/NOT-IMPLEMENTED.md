@@ -1,4 +1,4 @@
-# Not implemented in PSG-48 (after slice 2)
+# Not implemented in PSG-48 (after slice 3)
 
 Slice 1 ships segregation of duties: the engine (detection, simulation, conflict state machine), the
 conflict store with the mitigation approval record, the evaluation, listing, mitigation and
@@ -6,8 +6,11 @@ risk-acceptance endpoints with outbox events, the chart, and the compliance work
 conflicts, conflict detail with mitigation and risk acceptance, role assignment check, SoD rules,
 country packs). Slice 2 adds pure, tested rules for breach clocks (FR-48.29), electronic signatures
 (FR-48.13) and the DUPLICATE audit rule (FR-48.14), the read-only `POST /v1/security/incidents:breach-clocks`
-endpoint, and the breach clock and India TDS calculator screens. Everything else in the ticket is a later
-slice of PSG-48 unless marked handoff.
+endpoint, and the breach clock and India TDS calculator screens. Slice 3 completes the audit rule kernel
+(KEYWORD, LIST_SEARCH, SAMPLING, THRESHOLD, WEEKEND_HOLIDAY, AGGREGATE next to DUPLICATE), adds audit case
+grouping and the case status machine (FR-48.15) and break-glass session planning (FR-48.23, BR-48.19),
+each behind a read-only endpoint, and the audit rule run, audit case and break-glass screens. Nothing in
+slice 3 is stored. Everything else in the ticket is a later slice of PSG-48 unless marked handoff.
 
 | Deliverable or AC | Status | Reason |
 |---|---|---|
@@ -20,7 +23,7 @@ slice of PSG-48 unless marked handoff.
 | BR-48.2: effective duties from inherited roles and temporary delegations; refuse a delegation creating a HIGH conflict | later slice of PSG-48 | roles carry their duties inline in the request until the wave-2 role catalogue and delegations can be read |
 | FR-48.4: 50-rule seed set and tenant-maintained rules (`sod_rule`), GRC ruleset import | partial | the 11 rule ids the PRD lists are seeded in code; the other 39, the `sod_rule` table and the import come later |
 | FR-48.4: privilege-level rules | later slice of PSG-48 | rules relate duties only |
-| FR-48.5: `sod.block_high` and `sod.max_mitigation_days` per tenant | partial | read once per process from `SOD_BLOCK_HIGH` and `SOD_MAX_MITIGATION_DAYS`; per-tenant settings need the tenant settings store |
+| FR-48.5, §9.48.13: `sod.block_high`, `sod.max_mitigation_days`, `audit.case_archive_days`, `breakglass.max_minutes`, `breakglass.self_activate`, `breakglass.review_days` per tenant | partial | read once per process from `SOD_BLOCK_HIGH`, `SOD_MAX_MITIGATION_DAYS`, `AUDIT_CASE_ARCHIVE_DAYS` and `BREAKGLASS_*`; per-tenant settings need the tenant settings store |
 | PRD §9.48.6: bulk mitigation of up to 25 conflicts with one approver; conflict export | later slice of PSG-48 | one conflict per call in this slice |
 | PRD §9.48.10: alert "HIGH conflict unmitigated > 7 days"; SoD evaluation SLO metric | later slice of PSG-48 | the conflict age is exposed per row; the alert rule ships with the deploy monitoring work |
 | FR-48.6: access certification campaigns (`POST /v1/sod/campaigns`, BR-48.9) | later slice of PSG-48 | needs the manager hierarchy and the auto-revoke job |
@@ -29,16 +32,17 @@ slice of PSG-48 unless marked handoff.
 | FR-48.12: database log configuration | later slice of PSG-48 | depends on wave 5 CDC audit |
 | FR-48.13: `esign_requirement`, `esign_record` and `esign_reason` store, `GET/PUT /v1/compliance/esign/requirements`, `POST /v1/compliance/esign/sign` and `/{id}/revoke`, signature log, `dev.passage.compliance.esign.signed.v1`, optional certificate signing, BR-48.11 single transaction with the guarded action, BR-48.13 printout block | later slice of PSG-48 | slice 2 built the rules only (`internal/domain/esign.go`: record version hash, `ESG-0602`, BR-48.12 component count, `ESG-0603` lockout); the store, Keycloak step-up `acr=esign` and the lockout counter's persistence come next |
 | AC-48.11, AC-48.12: release with password plus TOTP; the lockout logs a security event | partial | the lockout rule and the 30-minute window are tested; the dialog, the stored counter and the security event need the e-signature store and step-up flow |
-| FR-48.14: `audit_policy`, runs (`POST /v1/compliance/audit-policies/{id}/runs`), `audit_violation` persistence, FR-3.13 decision-table binding, org scope and effective dates; rule types KEYWORD, LIST_SEARCH, SAMPLING, THRESHOLD, WEEKEND_HOLIDAY, AGGREGATE; `AUD-0701` | later slice of PSG-48 | slice 2 built the DUPLICATE rule (BR-48.14), one violation per later document, the violation key and per-vendor grouping as pure functions; documents come from waves 11, 17, 19 and 43 |
-| AC-48.13 end to end: a stored run creates 12 violations, a rerun none, one case per vendor | partial | proven on the pure rule with the 1,000-invoice planted fixture; the stored run and cases follow the store |
-| FR-48.15: `audit_case`, statuses, resolution codes, archive (`POST /v1/compliance/audit-cases`) | later slice of PSG-48 | needs the case store and the archive tier (FR-46.18) |
+| FR-48.14: `audit_policy` (document type, org scope, effective dates, schedule, versions), stored runs (`POST /v1/compliance/audit-policies/{id}/runs`), `audit_violation` persistence with state OPEN/IN_CASE/DISMISSED, `dev.passage.compliance.audit.violation.created.v1`, FR-3.13 decision-table binding (`rules.eval('audit.<rule_type>')`), `audit.sampling_seed_policy`, the nightly batch job | partial | slices 2 and 3 built every rule type as a pure kernel (`audit_duplicate.go`, `audit_rules.go`) with idempotent finding keys, and the read-only `POST /v1/compliance/audit-policies:evaluate` that runs it over a document window the caller supplies (`AUD-0701` in the body). The policy and violation tables, the run record, the event and reading documents from waves 11, 17, 19 and 43 come with the audit store |
+| AC-48.13 end to end: a stored run creates 12 violations, a rerun none, one case per vendor | partial | proven through `EvaluateAudit` and `GroupViolations` on the 1,000-invoice planted fixture (`TestEvaluateAudit_DuplicatePlantedFixture`); the stored run and cases follow the store |
+| FR-48.15: `audit_case` persistence (assignee, due date, findings, linked documents), `POST /v1/compliance/audit-cases`, the audit case inquiry and report (§9.48.14), moving archived cases to the archive tier (FR-46.18) | partial | slice 3 built the status machine with resolution codes, recovery amount and the archive window (`audit_case.go`) and the grouping, behind the read-only `audit-cases:group` and `audit-cases:transition`; the caller supplies the case's current status. Storing cases, assigning them and the archive move need the case store |
 | FR-48.16: process, risk and control library | later slice of PSG-48 | needs store and wave-5 document store |
 | FR-48.3, FR-48.17: ER designer, mandates registry, electronic messaging lifecycle (BR-48.3, BR-48.17) | later slice of PSG-48 | `er_format`, `mandate` and `e_message` belong with the ereporting work (the PRD's `passage-ereporting`) |
 | FR-48.18: XBRL and iXBRL | later slice of PSG-48 | Arelle job in Python, taxonomy registry |
 | FR-48.19: sanctions screening (BR-48.15) | later slice of PSG-48 | screening lists refresh and matcher |
 | FR-48.20, FR-48.21: export control, origin determination (BR-48.16) | later slice of PSG-48 | depends on waves 21, 34 and 35 |
 | FR-48.22, FR-48.31: US workforce compliance and statutory outputs (BR-48.20) | handoff | the HR records and fields framework is wave 42; outputs follow those fields |
-| FR-48.23: break-glass elevated sessions (BR-48.19) | later slice of PSG-48 | needs the Keycloak `elev` claim flow |
+| FR-48.23: `elevated_session` store, `POST /v1/security/elevated-sessions` with `Idempotency-Key`, approval by the designated approver, the Keycloak token with `elev=<session_id>`, per-call session log, reviewer inbox task and sign-off, `dev.passage.security.elevated.started.v1` / `.ended.v1`, the break-glass session inquiry, SoD evaluation of the granted roles | partial | slice 3 built the planning rules (`breakglass.go`) behind the read-only `POST /v1/security/elevated-sessions:plan`: reason codes, ticket, 60-minute default and 240-minute cap, BR-48.19 (`SEC-0707` for yourself, a second PlatformAdmin for someone else), self-activation with post-review, the review deadline and `ReviewOverdue` (`SEC-0708`). The session, token, log and events need the session store and the wave-2 Keycloak flow |
+| AC-48.18: when a 60-minute session ends the token is invalid, every call is logged and the reviewer has a task due in 3 business days | partial | the 3-business-day review deadline is computed and tested; token expiry, the call log and the task need the session store |
 | FR-48.24, FR-48.25: export governance and read-access logging | later slice of PSG-48 | needs the API layer hooks and PII classification |
 | FR-48.26: masked tenant clone | later slice of PSG-48 | clone pipeline; used by waves 49 and 50 |
 | FR-48.27, FR-48.28: India pack depth and HR legal content | later slice of PSG-48 / handoff | the TDS calculation is in `services/localization` (see its NOT-IMPLEMENTED); the rest of the IN pack is a later slice; HR fields belong to wave 42 |
@@ -46,7 +50,9 @@ slice of PSG-48 unless marked handoff.
 | AC-48.19: saving the incident creates the GDPR deadline and a notification task | partial | the 2026-11-05T09:00Z deadline is computed and tested; saving and the task need the incident store |
 | BR-48.18: deadlines displayed in the tenant time zone | later slice of PSG-48 | the breach clock screen shows UTC; the tenant time zone comes with the tenant settings store |
 | FR-48.30: evidence store with object lock and hash chain | later slice of PSG-48 | needs the object store and bucket policy from `deploy/` |
-| Web: privacy, signatures, signature log, audit policies and cases, screening, break-glass and incident record screens | later slice of PSG-48 | slice 1 screens cover SoD and country packs; slice 2 adds the breach clock calculator and the India TDS calculator; e-signature and audit screens wait for their endpoints |
+| Web: privacy, signatures, signature log, audit policy maintenance, audit violation and case lists, screening, break-glass session list and review, and incident record screens | later slice of PSG-48 | slice 1 screens cover SoD and country packs; slice 2 adds the breach clock and India TDS calculators; slice 3 adds the audit rule run, the audit case grouping and action check, and the break-glass planner. List and detail screens for violations, cases and sessions wait for their stores |
 | JWT validation and OPA duties | wave 2 | the gateway validates tokens; the service trusts tenant headers and the local `authz.DutyPolicy` |
 | `serviceCode` on problem bodies | kernel handoff | `httpx.Problem` in `platform/go` has no `serviceCode`; the OpenAPI documents the body as served |
 | Readiness with migrations current and OPA bundle | handoff | the kernel `/readyz` contract checks OPA; the slice only pings Postgres |
+| Duty names `AuditPolicyRun`, `AuditCaseManage`, `BreakGlassRequest` | handoff | not yet in the OPA policy bundle (`policies/`, wave 2); the service enforces them through the local `authz` check until then |
+| Public holidays for the weekend and holiday rule and the break-glass review SLA | partial | the calendar comes from the country pack (`countrypacks/`); the rule takes a caller-supplied holiday list and the review SLA counts Monday to Friday only |

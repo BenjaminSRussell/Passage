@@ -47,6 +47,14 @@ spec:
               value: {{ .Values.config.sodBlockHigh | quote }}
             - name: SOD_MAX_MITIGATION_DAYS
               value: {{ .Values.config.sodMaxMitigationDays | quote }}
+            - name: AUDIT_CASE_ARCHIVE_DAYS
+              value: {{ .Values.config.auditCaseArchiveDays | quote }}
+            - name: BREAKGLASS_MAX_MINUTES
+              value: {{ .Values.config.breakglassMaxMinutes | quote }}
+            - name: BREAKGLASS_SELF_ACTIVATE
+              value: {{ .Values.config.breakglassSelfActivate | quote }}
+            - name: BREAKGLASS_REVIEW_DAYS
+              value: {{ .Values.config.breakglassReviewDays | quote }}
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:

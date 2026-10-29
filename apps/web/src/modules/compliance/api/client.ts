@@ -1,9 +1,10 @@
 // Client for the compliance service (services/compliance/api/openapi.yaml) and
 // the localization service (services/localization/api/openapi.yaml). Browser
-// calls use /api/v1/sod/..., /api/v1/security/... and /api/v1/localization/...;
-// the gateway strips /api.
+// calls use /api/v1/sod/..., /api/v1/compliance/..., /api/v1/security/... and
+// /api/v1/localization/...; the gateway strips /api.
 
 export const sodBase = "/api/v1/sod";
+export const complianceBase = "/api/v1/compliance";
 export const securityBase = "/api/v1/security";
 export const localizationBase = "/api/v1/localization";
 
@@ -168,6 +169,141 @@ export interface BreachClocksResult {
   awareAt: string;
   asOf: string;
   items: BreachClock[];
+}
+
+export const AUDIT_RULE_TYPES = ["DUPLICATE", "KEYWORD", "LIST_SEARCH", "SAMPLING", "THRESHOLD", "WEEKEND_HOLIDAY", "AGGREGATE"] as const;
+export type AuditRuleType = (typeof AUDIT_RULE_TYPES)[number];
+
+/** One audit rule's configuration (FR-48.14); only the fields of its type are read. Amounts are decimal strings. */
+export interface AuditSpec {
+  type: AuditRuleType;
+  keywords?: string[];
+  watchList?: string[];
+  /** THRESHOLD: category to limit. */
+  limits?: Record<string, string>;
+  currency?: string;
+  /** AGGREGATE: limit per party per calendar month. */
+  limit?: string;
+  /** WEEKEND_HOLIDAY: YYYY-MM-DD. */
+  holidays?: string[];
+  sample?: { seed: string; percent?: number; everyK?: number };
+}
+
+export interface AuditDocument {
+  id: string;
+  partyId?: string;
+  category?: string;
+  amount?: string;
+  currency?: string;
+  /** RFC 3339 instant. */
+  date?: string;
+  texts?: string[];
+  /** DUPLICATE: the invoice number. */
+  number?: string;
+}
+
+export interface AuditFinding {
+  key: string;
+  ruleType: AuditRuleType;
+  documentId: string;
+  score: number;
+  evidence: Record<string, string>;
+}
+
+export interface AuditEvaluateInput {
+  policyId: string;
+  version: number;
+  spec: AuditSpec;
+  documents: AuditDocument[];
+}
+
+export interface AuditEvaluateResult {
+  count: number;
+  findings: AuditFinding[];
+  /** AUD-0701 when any document violates the policy. */
+  code?: string;
+}
+
+export interface AuditViolation {
+  id: string;
+  policyId: string;
+  ruleType: string;
+  documentId: string;
+  partyId?: string;
+  caseId?: string;
+}
+
+export const CASE_CATEGORIES = ["DUPLICATE_PAYMENT", "POLICY_BREACH", "SAMPLED_REVIEW"] as const;
+export type CaseCategory = (typeof CASE_CATEGORIES)[number];
+
+export interface CaseDraft {
+  key: string;
+  category: CaseCategory;
+  violationIds: string[];
+  documentIds: string[];
+}
+
+export const CASE_STATUSES = ["OPEN", "IN_REVIEW", "RESOLVED_NO_ISSUE", "RESOLVED_ISSUE", "CLOSED", "ARCHIVED"] as const;
+export type CaseStatus = (typeof CASE_STATUSES)[number];
+
+export type CaseAction = "START_REVIEW" | "RESOLVE_NO_ISSUE" | "RESOLVE_ISSUE" | "CLOSE" | "ARCHIVE";
+
+/** The audit case status machine (FR-48.15), as the service applies it. */
+export const CASE_TRANSITIONS: Record<CaseStatus, Partial<Record<CaseAction, CaseStatus>>> = {
+  OPEN: { START_REVIEW: "IN_REVIEW" },
+  IN_REVIEW: { RESOLVE_NO_ISSUE: "RESOLVED_NO_ISSUE", RESOLVE_ISSUE: "RESOLVED_ISSUE" },
+  RESOLVED_NO_ISSUE: { CLOSE: "CLOSED" },
+  RESOLVED_ISSUE: { CLOSE: "CLOSED" },
+  CLOSED: { ARCHIVE: "ARCHIVED" },
+  ARCHIVED: {},
+};
+
+export const NO_ISSUE_CODES = ["NO_ISSUE", "FALSE_POSITIVE", "SAMPLE_CLEARED"] as const;
+export const ISSUE_CODES = ["DUPLICATE_RECOVERED", "POLICY_CORRECTED", "REFERRED_FRAUD"] as const;
+
+export interface CaseTransitionInput {
+  status: CaseStatus;
+  action: CaseAction;
+  resolutionCode?: string;
+  /** Decimal string; RESOLVE_ISSUE only. */
+  recoveryAmount?: string;
+  currency?: string;
+  /** RFC 3339; ARCHIVE only. */
+  closedAt?: string;
+}
+
+export interface CaseState {
+  status: CaseStatus;
+  resolutionCode?: string;
+  recoveryAmount: string;
+  currency?: string;
+  closedAt?: string;
+  asOf: string;
+}
+
+export const BREAK_GLASS_REASONS = ["INCIDENT_RESPONSE", "PRODUCTION_OUTAGE", "DATA_CORRECTION_APPROVED", "PERIOD_CLOSE_BLOCKER", "AUDIT_EVIDENCE_REQUEST"] as const;
+export type BreakGlassReason = (typeof BREAK_GLASS_REASONS)[number];
+
+/** A break-glass request of the signed-in user; the target defaults to them. */
+export interface ElevatedPlanInput {
+  targetUserId?: string;
+  roles: string[];
+  reasonCode: BreakGlassReason;
+  ticketRef: string;
+  requestedMinutes?: number;
+}
+
+export interface ElevatedPlan {
+  requesterId: string;
+  targetUserId: string;
+  roles: string[];
+  minutes: number;
+  startsAt: string;
+  endsAt: string;
+  reviewDueAt: string;
+  needsApproval: boolean;
+  approverDuty?: "BreakGlassApprove" | "PlatformAdmin";
+  requiresPostReview: boolean;
 }
 
 export const TDS_SECTIONS = ["194C", "194J", "194I", "194H", "194Q"] as const;
@@ -336,4 +472,24 @@ export function computeBreachClocks(input: BreachClocksInput): Promise<BreachClo
 /** India TDS for one payment (FR-48.27); a calculation, nothing is posted. */
 export function withholdTds(input: TdsInput): Promise<TdsResult> {
   return json<TdsResult>(`${localizationBase}/in/tds:withhold`, { method: "POST", body: JSON.stringify(input) });
+}
+
+/** Runs one audit rule over a document window (FR-48.14); nothing is stored. */
+export function evaluateAuditPolicy(input: AuditEvaluateInput): Promise<AuditEvaluateResult> {
+  return json<AuditEvaluateResult>(`${complianceBase}/audit-policies:evaluate`, { method: "POST", body: JSON.stringify(input) });
+}
+
+/** Groups unassigned violations into case drafts (FR-48.15); nothing is stored. */
+export async function groupViolations(violations: AuditViolation[]): Promise<CaseDraft[]> {
+  return (await json<{ cases: CaseDraft[] }>(`${complianceBase}/audit-cases:group`, { method: "POST", body: JSON.stringify({ violations }) })).cases ?? [];
+}
+
+/** Applies one audit case action at the server time (FR-48.15); nothing is stored. */
+export function transitionAuditCase(input: CaseTransitionInput): Promise<CaseState> {
+  return json<CaseState>(`${complianceBase}/audit-cases:transition`, { method: "POST", body: JSON.stringify(input) });
+}
+
+/** Plans the break-glass session the signed-in user's request would open (FR-48.23); nothing is stored. */
+export function planElevatedSession(input: ElevatedPlanInput): Promise<ElevatedPlan> {
+  return json<ElevatedPlan>(`${securityBase}/elevated-sessions:plan`, { method: "POST", body: JSON.stringify(input) });
 }

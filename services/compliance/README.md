@@ -1,11 +1,13 @@
-# compliance (PSG-48, wave 48, slices 1 and 2)
+# compliance (PSG-48, wave 48, slices 1 to 3)
 
 Compliance controls for Passage. Slice 1 ships segregation of duties (SoD): the rules engine, pre-save
 simulation, evaluation of a user's effective roles with stored conflicts, and the mitigation and
 risk-acceptance workflow, plus the compliance workspace screens in `apps/web/src/modules/compliance`.
 Slice 2 adds the rules of three later features as pure, tested functions (breach notification clocks,
 electronic signatures, the DUPLICATE audit rule), one read-only endpoint for the breach clocks and the
-breach clock and India TDS calculator screens.
+breach clock and India TDS calculator screens. Slice 3 completes the audit rule kernel (all seven rule
+types), adds audit case grouping and the case status machine, and break-glass session planning, each
+behind a stateless endpoint, with the audit policy run, audit case and break-glass screens.
 
 ## What it does now
 
@@ -29,8 +31,13 @@ breach clock and India TDS calculator screens.
 | `POST /v1/sod/conflicts/{id}/mitigations` | SoDApprove | `If-Match` and `Idempotency-Key` required; the caller is the approver; emits `sod.mitigation.approved` |
 | `POST /v1/sod/conflicts/{id}/accept-risk` | SoDAdmin | `If-Match` required; LOW and MEDIUM only |
 | `POST /v1/security/incidents:breach-clocks` | SecurityIncidentManage | slice 2, read-only: the notification clocks of a confirmed personal-data breach with their status at server time |
+| `POST /v1/compliance/audit-policies:evaluate` | AuditPolicyRun | slice 3, read-only: runs one audit rule over the document window in the body; findings keyed on (policy, version, document); `code: AUD-0701` when any document violates |
+| `POST /v1/compliance/audit-cases:group` | AuditCaseManage | slice 3, read-only: case drafts from violations (one per vendor for DUPLICATE, one per policy otherwise) |
+| `POST /v1/compliance/audit-cases:transition` | AuditCaseManage | slice 3, read-only: one action of the case status machine, judged at server time with `audit.case_archive_days` |
+| `POST /v1/security/elevated-sessions:plan` | BreakGlassRequest | slice 3, read-only: the break-glass session the calling user's request would open; no session is stored and no token issued |
 
 - Events (`events/asyncapi.yaml`): `dev.passage.sod.conflict.detected.v1`, `dev.passage.sod.mitigation.approved.v1`.
+  The slice 2 and 3 endpoints store nothing and emit nothing.
 - `GET /readyz` pings Postgres; admin `/metrics` counts simulations and blocked simulations.
 
 Slice 2 domain rules (pure; no store yet, see `NOT-IMPLEMENTED.md`):
@@ -49,8 +56,36 @@ Slice 2 domain rules (pure; no store yet, see `NOT-IMPLEMENTED.md`):
   one case group per vendor. `TestFindDuplicates_PlantedFixture` covers AC-48.13 on 1,000 invoices with
   12 planted duplicates, including that a rerun adds no keys.
 
+Slice 3 domain rules (pure):
+
+- `internal/domain/audit_rules.go` (FR-48.14): `EvaluateAudit` runs DUPLICATE, KEYWORD (whole words,
+  case and punctuation folded), LIST_SEARCH (normalized watch list against the party), THRESHOLD
+  (positive limit per category, same currency; evidence carries the share of the limit), WEEKEND_HOLIDAY
+  (Saturday, Sunday or a listed YYYY-MM-DD holiday, UTC day), AGGREGATE (sum per party per calendar month
+  above the limit) and SAMPLING (seeded percent or every k-th; the same seed selects the same documents
+  whatever the input order). Findings are sorted by document and keyed by `ViolationKey`.
+  `TestEvaluateAudit_DuplicatePlantedFixture` runs AC-48.13 through the kernel and the case grouping.
+- `internal/domain/audit_case.go` (FR-48.15): `ApplyCaseAction` walks OPEN → IN_REVIEW →
+  RESOLVED_NO_ISSUE or RESOLVED_ISSUE (resolution code of the matching kind; recovery amount, never
+  negative, with a currency) → CLOSED (needs a resolution code) → ARCHIVED (only `audit.case_archive_days`,
+  30..3650, after closing). `GroupViolations` builds one draft per vendor for DUPLICATE and one per policy
+  otherwise, skipping violations already in a case.
+- `internal/domain/breakglass.go` (FR-48.23, BR-48.19): `PlanElevatedSession` checks the reason code and
+  ticket, trims and de-duplicates roles, caps the length at `breakglass.max_minutes` (default 60, at most
+  240), refuses a protected role (SecurityAdmin, PlatformAdmin) for yourself (`SEC-0707`), routes a
+  protected role for another user to a second PlatformAdmin, and otherwise follows
+  `breakglass.self_activate` (BreakGlassApprove approval, or self-activation with mandatory post-review).
+  The review is due `breakglass.review_days` business days after the end; `ReviewOverdue` is the SEC-0708
+  check.
+
 Simulation reads the user's recorded conflict states; a caller cannot claim a mitigation in the request
-(the draft's `mitigatedRuleIds` field is gone and an unknown field is a 400).
+(the draft's `mitigatedRuleIds` field is gone and an unknown field is a 400). The break-glass requester is
+the calling user (`X-Passage-User`), and the tenant settings, not the request, decide the length cap and
+self-activation.
+
+The slice 3 screens are in `apps/web/src/modules/compliance`: `/compliance/audit/run` (run an audit
+rule), `/compliance/audit/cases` (group violations into cases and check a case action) and
+`/compliance/break-glass` (plan a break-glass session).
 
 ## Run and test
 
@@ -68,8 +103,9 @@ check the append-only tables refuse UPDATE and DELETE.
 Fixture `testdata/sod-50.json` (fx-sod-50) plants 50 users across the seed rules.
 `TestDetect_PlantedFixtureNoFalseNegatives` asserts every planted conflict is detected and nothing else
 fires; `TestEvaluate_PlantedFiftyReconcileWithRecomputation` stores them and reconciles the OPEN count and
-the `conflict.detected` events with an independent recomputation (PRD §9.48.9). A rapid property test
-asserts a role set holding both duties of any seed rule is never missed.
+the `conflict.detected` events with an independent recomputation (PRD §9.48.9). Rapid property tests
+assert a role set holding both duties of any seed rule is never missed, sampling at 100% selects every
+document, the case machine never skips a state and no break-glass session exceeds 240 minutes.
 
 ## Environment
 
@@ -79,6 +115,10 @@ asserts a role set holding both duties of any seed rule is never missed.
 | `MIGRATE_ON_START` | unset | `true` applies migrations at start (dev only) |
 | `SOD_BLOCK_HIGH` | `true` | tenant policy `sod.block_high`; `false` reports without blocking |
 | `SOD_MAX_MITIGATION_DAYS` | `365` | tenant policy `sod.max_mitigation_days`, 1..730 |
+| `AUDIT_CASE_ARCHIVE_DAYS` | `365` | tenant policy `audit.case_archive_days`, 30..3650 |
+| `BREAKGLASS_MAX_MINUTES` | `60` | tenant policy `breakglass.max_minutes`, 15..240 |
+| `BREAKGLASS_SELF_ACTIVATE` | `false` | tenant policy `breakglass.self_activate` |
+| `BREAKGLASS_REVIEW_DAYS` | `3` | tenant policy `breakglass.review_days`, 1..10 business days |
 | `HTTP_ADDR` / `ADMIN_ADDR` | `:8080` / `:9090` | listeners |
 
 ## Error codes
@@ -105,17 +145,27 @@ asserts a role set holding both duties of any seed rule is never missed.
 | `INC-1310` / `INC-1311` / `INC-1312` | 422 (domain) | awareness time missing, US state window outside 30..60 days, unknown regime; the endpoint reports the first and last as `COM-0002` field errors |
 | `ESG-0602` | domain | record changed since the signing dialog opened (BR-48.11) |
 | `ESG-0603` | domain | signing locked after three failed re-authentications |
+| `AUD-0701` | 200 (`code` in the evaluate body) | warning: documents violate the policy |
+| `AUD-0711` | 422 | unknown audit rule type, or a violation whose rule has no case category |
+| `AUD-0712` | 422 | audit rule configuration missing or out of range (KEYWORD without words, THRESHOLD without a currency or a positive limit, a holiday that is not YYYY-MM-DD, AGGREGATE without a limit, SAMPLING without a seed) |
+| `AUD-0713` | 422 | case action not allowed from the current status |
+| `AUD-0714` | 422 | resolution code missing or of the wrong kind; recovery amount negative or without currency |
+| `AUD-0715` | 422 | archive refused: the archive window has not passed since closing |
+| `SEC-0707` | 422 | break-glass cannot grant SecurityAdmin or PlatformAdmin to yourself (BR-48.19) |
+| `SEC-0708` | domain | break-glass session not reviewed within `breakglass.review_days` (`ReviewOverdue`; no endpoint yet) |
+| `SEC-0713` | 422 | break-glass request incomplete or out of range (reason, ticket, roles, minutes) |
 | `COM-0500` | 500 | internal error |
 
 ## Deploy
 
 `charts/compliance` (`helm lint` clean): Deployment, Service, optional ServiceMonitor; `DATABASE_URL`
-from the `passage-compliance-db` secret; `SOD_BLOCK_HIGH` and `SOD_MAX_MITIGATION_DAYS` from values.
-`Dockerfile` builds from the repository root.
+from the `passage-compliance-db` secret; the tenant policies (`SOD_*`, `AUDIT_CASE_ARCHIVE_DAYS`,
+`BREAKGLASS_*`) from values. `Dockerfile` builds from the repository root.
 
 ## Wave reference
 
 PSG-48 slice 1: FR-48.4, FR-48.5 and BR-48.1 for the seed rule set; AC2, AC-48.2, AC-48.3, AC-48.4.
 Slice 2: the rules of FR-48.13 (BR-48.11, BR-48.12; AC-48.12 lockout), FR-48.14 (BR-48.14; AC-48.13 on
-the pure rule) and FR-48.29 (BR-48.18; AC-48.19 deadline). Everything else in the ticket is listed in
-`NOT-IMPLEMENTED.md`.
+the pure rule) and FR-48.29 (BR-48.18; AC-48.19 deadline). Slice 3: the rule kernel of FR-48.14 (all
+rule types), the case machine and grouping of FR-48.15, and the planning part of FR-48.23 (BR-48.19;
+AC-48.18 review deadline). Everything else in the ticket is listed in `NOT-IMPLEMENTED.md`.

@@ -17,6 +17,10 @@ config:
   # Tenant policies until per-tenant settings exist (PRD §9.48.13).
   sodBlockHigh: "true"
   sodMaxMitigationDays: "365"
+  auditCaseArchiveDays: "365"
+  breakglassMaxMinutes: "60"
+  breakglassSelfActivate: "false"
+  breakglassReviewDays: "3"
 
 # DATABASE_URL is read from this secret (Vault via External Secrets), never inline.
 databaseSecret:

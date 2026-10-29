@@ -13,6 +13,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/compliance/internal/api"
+	"github.com/BenjaminSRussell/passage/services/compliance/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/compliance/internal/store"
 	"github.com/BenjaminSRussell/passage/services/compliance/migrations"
 )
@@ -74,25 +75,54 @@ func run(ctx context.Context, getenv func(string) string) error {
 	return <-errs
 }
 
-// config reads the tenant policies sod.block_high (default true) and
-// sod.max_mitigation_days (default 365, 1..730) from the environment.
+// config reads the tenant policies from the environment (PRD §9.48.13):
+// sod.block_high (default true), sod.max_mitigation_days (365, 1..730),
+// audit.case_archive_days (365, 30..3650), breakglass.max_minutes (60, 15..240),
+// breakglass.self_activate (false) and breakglass.review_days (3, 1..10).
 func config(getenv func(string) string) (api.Config, error) {
-	cfg := api.Config{BlockHigh: true, MaxMitigationDays: 365}
-	switch v := getenv("SOD_BLOCK_HIGH"); v {
-	case "", "true":
-	case "false":
-		cfg.BlockHigh = false
-	default:
-		return cfg, fmt.Errorf("SOD_BLOCK_HIGH must be true or false, got %q", v)
+	cfg := api.Config{BlockHigh: true, MaxMitigationDays: 365, CaseArchiveDays: domain.DefaultCaseArchiveDays,
+		BreakGlassMaxMinutes: domain.BreakGlassDefaultMinutes, BreakGlassReviewDays: domain.BreakGlassReviewDays}
+	var err error
+	if cfg.BlockHigh, err = boolEnv(getenv, "SOD_BLOCK_HIGH", true); err != nil {
+		return cfg, err
 	}
-	if v := getenv("SOD_MAX_MITIGATION_DAYS"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 || n > 730 {
-			return cfg, fmt.Errorf("SOD_MAX_MITIGATION_DAYS must be 1..730, got %q", v)
+	if cfg.BreakGlassSelfActivate, err = boolEnv(getenv, "BREAKGLASS_SELF_ACTIVATE", false); err != nil {
+		return cfg, err
+	}
+	for _, p := range []struct {
+		key      string
+		min, max int
+		dst      *int
+	}{
+		{"SOD_MAX_MITIGATION_DAYS", 1, 730, &cfg.MaxMitigationDays},
+		{"AUDIT_CASE_ARCHIVE_DAYS", domain.MinCaseArchiveDays, domain.MaxCaseArchiveDays, &cfg.CaseArchiveDays},
+		{"BREAKGLASS_MAX_MINUTES", domain.BreakGlassMinMinutes, domain.BreakGlassHardMaxMinutes, &cfg.BreakGlassMaxMinutes},
+		{"BREAKGLASS_REVIEW_DAYS", domain.BreakGlassMinReviewDays, domain.BreakGlassMaxReviewDays, &cfg.BreakGlassReviewDays},
+	} {
+		v := getenv(p.key)
+		if v == "" {
+			continue
 		}
-		cfg.MaxMitigationDays = n
+		n, err := strconv.Atoi(v)
+		if err != nil || n < p.min || n > p.max {
+			return cfg, fmt.Errorf("%s must be %d..%d, got %q", p.key, p.min, p.max, v)
+		}
+		*p.dst = n
 	}
 	return cfg, nil
+}
+
+func boolEnv(getenv func(string) string, key string, fallback bool) (bool, error) {
+	switch v := getenv(key); v {
+	case "":
+		return fallback, nil
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	default:
+		return fallback, fmt.Errorf("%s must be true or false, got %q", key, v)
+	}
 }
 
 func addr(getenv func(string) string, key, fallback string) string {

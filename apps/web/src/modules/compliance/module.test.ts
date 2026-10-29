@@ -6,7 +6,7 @@ describe("compliance module", () => {
   it("uses its folder name as id and declares a page for each entity", () => {
     expect(compliance.id).toBe("compliance");
     const paths = compliance.routes.map((r) => r.path);
-    for (const path of ["/compliance", "/compliance/sod/conflicts", "/compliance/sod/conflicts/:id", "/compliance/sod/check", "/compliance/sod/rules", "/compliance/packs", "/compliance/packs/:code", "/compliance/incidents/breach-clocks", "/compliance/tds"]) {
+    for (const path of ["/compliance", "/compliance/sod/conflicts", "/compliance/sod/conflicts/:id", "/compliance/sod/check", "/compliance/sod/rules", "/compliance/packs", "/compliance/packs/:code", "/compliance/audit/run", "/compliance/audit/cases", "/compliance/break-glass", "/compliance/incidents/breach-clocks", "/compliance/tds"]) {
       expect(paths).toContain(path);
     }
     expect(compliance.routes.every((r) => r.element !== null && r.element !== undefined)).toBe(true);
@@ -20,6 +20,9 @@ describe("compliance module", () => {
     expect(duty("/compliance/packs")).toBe("LocalizationAdmin");
     expect(duty("/compliance/incidents/breach-clocks")).toBe("SecurityIncidentManage");
     expect(duty("/compliance/tds")).toBe("LocalizationAdmin");
+    expect(duty("/compliance/audit/run")).toBe("AuditPolicyRun");
+    expect(duty("/compliance/audit/cases")).toBe("AuditCaseManage");
+    expect(duty("/compliance/break-glass")).toBe("BreakGlassRequest");
   });
 
   it("is auto-discovered by the registry", () => {

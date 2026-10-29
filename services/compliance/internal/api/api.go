@@ -2,7 +2,10 @@
 // rule listing, pre-save simulation, evaluation of a user's effective roles,
 // the conflict listing and the mitigation and risk-acceptance workflow
 // (FR-48.4, FR-48.5, BR-48.1); and the breach notification clocks of a
-// confirmed personal-data breach (FR-48.29, BR-48.18).
+// confirmed personal-data breach (FR-48.29, BR-48.18); the audit rule run
+// kernel, audit case grouping and status machine (FR-48.14, FR-48.15) and
+// break-glass session planning (FR-48.23, BR-48.19), none of which store
+// anything yet.
 package api
 
 import (
@@ -57,10 +60,16 @@ type Store interface {
 }
 
 // Config carries the tenant policies the service reads from its environment
-// until per-tenant settings exist (sod.block_high, sod.max_mitigation_days).
+// until per-tenant settings exist (sod.block_high, sod.max_mitigation_days,
+// audit.case_archive_days, breakglass.max_minutes, breakglass.self_activate,
+// breakglass.review_days). Zero values take the PRD defaults.
 type Config struct {
-	BlockHigh         bool
-	MaxMitigationDays int
+	BlockHigh              bool
+	MaxMitigationDays      int
+	CaseArchiveDays        int
+	BreakGlassMaxMinutes   int
+	BreakGlassSelfActivate bool
+	BreakGlassReviewDays   int
 }
 
 // API holds the handler dependencies and counters.
@@ -150,6 +159,10 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutySoDApprove)).Post("/v1/sod/conflicts/{id}/mitigations", a.mitigate)
 	r.With(authz.RequireDuty(DutySoDAdmin)).Post("/v1/sod/conflicts/{id}/accept-risk", a.acceptRisk)
 	r.With(authz.RequireDuty(DutyIncidentManage)).Post("/v1/security/incidents:breach-clocks", a.breachClocks)
+	r.With(authz.RequireDuty(DutyAuditPolicyRun)).Post("/v1/compliance/audit-policies:evaluate", a.evaluateAudit)
+	r.With(authz.RequireDuty(DutyAuditCaseManage)).Post("/v1/compliance/audit-cases:group", a.groupCases)
+	r.With(authz.RequireDuty(DutyAuditCaseManage)).Post("/v1/compliance/audit-cases:transition", a.transitionCase)
+	r.With(authz.RequireDuty(DutyBreakGlassRequest)).Post("/v1/security/elevated-sessions:plan", a.planElevated)
 }
 
 func (a *API) ready(w http.ResponseWriter, r *http.Request) {

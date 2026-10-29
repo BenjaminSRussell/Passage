@@ -1,13 +1,17 @@
 openapi: 3.1.0
 info:
   title: Passage compliance
-  version: 0.3.0
+  version: 0.4.0
   description: >-
     Segregation of duties (PSG-48 slice 1): seed rules, pre-save simulation,
     evaluation of a user's effective roles, the conflict listing and the
     mitigation and risk-acceptance workflow (FR-48.4, FR-48.5, BR-48.1).
     Breach notification clocks (PSG-48 slice 2, FR-48.29, BR-48.18).
-    Browser calls go to /api/v1/sod/... and /api/v1/security/...; the gateway strips /api.
+    Audit rule evaluation, audit case grouping and status machine, and
+    break-glass session planning (PSG-48 slice 3, FR-48.14, FR-48.15,
+    FR-48.23, BR-48.19); these store nothing yet.
+    Browser calls go to /api/v1/sod/..., /api/v1/compliance/... and
+    /api/v1/security/...; the gateway strips /api.
 servers:
   - url: https://api.passage.dev
 paths:
@@ -264,11 +268,276 @@ paths:
         "401": { $ref: "#/components/responses/Problem" }
         "403": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
+  /v1/compliance/audit-policies:evaluate:
+    post:
+      operationId: evaluateAuditPolicy
+      x-passage-duty: AuditPolicyRun
+      description: >-
+        Runs one audit rule (FR-48.14) over a document window the caller
+        selected and returns the findings. Every rule type is supported:
+        DUPLICATE (BR-48.14, partyId is the vendor and date the invoice date),
+        KEYWORD, LIST_SEARCH, SAMPLING (seeded, so a rerun selects the same
+        documents), THRESHOLD, WEEKEND_HOLIDAY and AGGREGATE. Each finding key
+        is idempotent on (policy id, version, document id). Nothing is stored:
+        persisted runs and audit_violation rows come with the audit store.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [policyId, version, spec]
+              properties:
+                policyId: { type: string, format: uuid }
+                version: { type: integer, minimum: 1 }
+                spec: { $ref: "#/components/schemas/AuditSpec" }
+                documents:
+                  type: array
+                  maxItems: 100000
+                  description: ids are unique; DUPLICATE, WEEKEND_HOLIDAY and AGGREGATE need a date on every document
+                  items: { $ref: "#/components/schemas/AuditDocument" }
+      responses:
+        "200":
+          description: Findings sorted by document id
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [count, findings]
+                properties:
+                  count: { type: integer }
+                  findings: { type: array, items: { $ref: "#/components/schemas/Finding" } }
+                  code: { type: string, enum: [AUD-0701], description: "warning: {n} documents violate the policy; absent when count is 0" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422":
+          description: AUD-0711 unknown rule type, AUD-0712 rule configuration incomplete or out of range
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+  /v1/compliance/audit-cases:group:
+    post:
+      operationId: groupViolationsIntoCases
+      x-passage-duty: AuditCaseManage
+      description: >-
+        Groups unassigned violations into audit case drafts (FR-48.15).
+        DUPLICATE violations group per vendor (AC-48.13: one case per vendor);
+        other rules group per policy. A violation that already has a caseId is
+        skipped, so it belongs to at most one case. Nothing is stored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                violations:
+                  type: array
+                  maxItems: 10000
+                  description: ids are unique
+                  items: { $ref: "#/components/schemas/Violation" }
+      responses:
+        "200":
+          description: Case drafts sorted by key
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cases]
+                properties:
+                  cases: { type: array, items: { $ref: "#/components/schemas/CaseDraft" } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/compliance/audit-cases:transition:
+    post:
+      operationId: transitionAuditCase
+      x-passage-duty: AuditCaseManage
+      description: >-
+        Applies one action of the audit case status machine (FR-48.15):
+        OPEN -START_REVIEW-> IN_REVIEW -RESOLVE_NO_ISSUE|RESOLVE_ISSUE->
+        RESOLVED_NO_ISSUE|RESOLVED_ISSUE -CLOSE-> CLOSED -ARCHIVE-> ARCHIVED.
+        For RESOLVE_* the resolution code (and recovery) are the action's
+        inputs; for CLOSE and ARCHIVE they are the values already on the case.
+        Closing requires a resolution code and stamps the server time;
+        archiving needs audit.case_archive_days (tenant setting, 365 by
+        default) since closedAt, measured at the server time. Nothing is
+        stored until the audit case store exists.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status, action]
+              properties:
+                status: { $ref: "#/components/schemas/CaseStatus" }
+                action: { type: string, enum: [START_REVIEW, RESOLVE_NO_ISSUE, RESOLVE_ISSUE, CLOSE, ARCHIVE] }
+                resolutionCode:
+                  type: string
+                  enum: [NO_ISSUE, FALSE_POSITIVE, SAMPLE_CLEARED, DUPLICATE_RECOVERED, POLICY_CORRECTED, REFERRED_FRAUD]
+                  description: the first three resolve without issue, the last three with an issue
+                recoveryAmount: { type: string, description: "decimal, not negative; RESOLVE_ISSUE only", pattern: '^\d+(\.\d+)?$' }
+                currency: { type: string, pattern: '^[A-Z]{3}$', description: required with a positive recoveryAmount }
+                closedAt: { type: string, format: date-time, description: when the case was closed; not in the future; ARCHIVE only }
+      responses:
+        "200":
+          description: Case state after the action
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CaseState" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422":
+          description: AUD-0713 action not allowed from the status, AUD-0714 resolution missing or wrong for the action, AUD-0715 archive window not yet passed
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+  /v1/security/elevated-sessions:plan:
+    post:
+      operationId: planElevatedSession
+      x-passage-duty: BreakGlassRequest
+      description: >-
+        Validates a break-glass request of the calling user (X-Passage-User)
+        and returns the session it would open (FR-48.23, BR-48.19): the window
+        from the server time, capped by breakglass.max_minutes (tenant
+        setting, 60 by default, never above 240), the approval path and the
+        reviewer deadline breakglass.review_days business days after the end.
+        A protected role (SecurityAdmin, PlatformAdmin) can never be granted
+        to yourself (SEC-0707) and, for another user, always waits for a
+        second PlatformAdmin. Otherwise breakglass.self_activate decides
+        between approval by a BreakGlassApprove holder and self-activation
+        with mandatory post-review. No session is stored and no token issued.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roles, reasonCode, ticketRef]
+              properties:
+                targetUserId: { type: string, format: uuid, description: defaults to the calling user }
+                roles: { type: array, minItems: 1, maxItems: 200, items: { type: string, minLength: 1 } }
+                reasonCode: { type: string, enum: [INCIDENT_RESPONSE, PRODUCTION_OUTAGE, DATA_CORRECTION_APPROVED, PERIOD_CLOSE_BLOCKER, AUDIT_EVIDENCE_REQUEST] }
+                ticketRef: { type: string, minLength: 1, maxLength: 2000 }
+                requestedMinutes: { type: integer, minimum: 15, maximum: 240, description: "0 or omitted means 60, or the tenant maximum when lower" }
+      responses:
+        "200":
+          description: Validated session plan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ElevatedPlan" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422":
+          description: SEC-0707 self-grant of a protected role, SEC-0713 request incomplete or out of range
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
 components:
   schemas:
     BreachRegime:
       type: string
       enum: [GDPR, UK_GDPR, US_STATE, PIPEDA, CERT_IN, LFPDPPP]
+    Decimal:
+      type: string
+      pattern: '^-?\d+(\.\d+)?$'
+      description: decimal amount as a string, never a float
+    AuditSpec:
+      type: object
+      required: [type]
+      description: only the fields of the rule type are read
+      properties:
+        type: { type: string, enum: [DUPLICATE, KEYWORD, LIST_SEARCH, SAMPLING, THRESHOLD, WEEKEND_HOLIDAY, AGGREGATE] }
+        keywords: { type: array, maxItems: 1000, items: { type: string }, description: KEYWORD; whole words, case and punctuation ignored }
+        watchList: { type: array, maxItems: 1000, items: { type: string }, description: LIST_SEARCH; matched against partyId }
+        limits:
+          type: object
+          maxProperties: 1000
+          additionalProperties: { $ref: "#/components/schemas/Decimal" }
+          description: THRESHOLD; positive limit per document category, in currency
+        currency: { type: string, description: THRESHOLD and AGGREGATE; documents in another currency are not compared }
+        holidays: { type: array, maxItems: 1000, items: { type: string, format: date }, description: WEEKEND_HOLIDAY; YYYY-MM-DD }
+        sample:
+          type: object
+          required: [seed]
+          description: SAMPLING; percent or everyK
+          properties:
+            seed: { type: string, minLength: 1 }
+            percent: { type: integer, minimum: 1, maximum: 100 }
+            everyK: { type: integer, minimum: 1 }
+        limit: { $ref: "#/components/schemas/Decimal", description: AGGREGATE limit per party per calendar month }
+    AuditDocument:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string, minLength: 1, maxLength: 200 }
+        partyId: { type: string, description: vendor, employee or customer }
+        category: { type: string }
+        amount: { $ref: "#/components/schemas/Decimal" }
+        currency: { type: string }
+        date: { type: string, format: date-time }
+        texts: { type: array, items: { type: string } }
+        number: { type: string, description: DUPLICATE; invoice number }
+        postedCredit: { type: boolean, description: DUPLICATE; a posted credit note is never a duplicate }
+    Finding:
+      type: object
+      required: [key, ruleType, documentId, score, evidence]
+      properties:
+        key: { type: string, description: "audit:<policyId>:v<version>:<documentId>" }
+        ruleType: { type: string }
+        documentId: { type: string }
+        score: { type: integer, minimum: 0, maximum: 100 }
+        evidence: { type: object, additionalProperties: { type: string } }
+    Violation:
+      type: object
+      required: [id, policyId, ruleType, documentId]
+      properties:
+        id: { type: string, minLength: 1, maxLength: 200 }
+        policyId: { type: string }
+        ruleType: { type: string, enum: [DUPLICATE, KEYWORD, LIST_SEARCH, SAMPLING, THRESHOLD, WEEKEND_HOLIDAY, AGGREGATE] }
+        documentId: { type: string }
+        partyId: { type: string, description: required for DUPLICATE (the vendor) }
+        caseId: { type: string, description: set when the violation already belongs to a case }
+    CaseDraft:
+      type: object
+      required: [key, category, violationIds, documentIds]
+      properties:
+        key: { type: string }
+        category: { type: string, enum: [DUPLICATE_PAYMENT, POLICY_BREACH, SAMPLED_REVIEW] }
+        violationIds: { type: array, items: { type: string } }
+        documentIds: { type: array, items: { type: string } }
+    CaseStatus:
+      type: string
+      enum: [OPEN, IN_REVIEW, RESOLVED_NO_ISSUE, RESOLVED_ISSUE, CLOSED, ARCHIVED]
+    CaseState:
+      type: object
+      required: [status, recoveryAmount, asOf]
+      properties:
+        status: { $ref: "#/components/schemas/CaseStatus" }
+        resolutionCode: { type: string }
+        recoveryAmount: { $ref: "#/components/schemas/Decimal" }
+        currency: { type: string }
+        closedAt: { type: string, format: date-time }
+        asOf: { type: string, format: date-time, description: server time the action was judged at }
+    ElevatedPlan:
+      type: object
+      required: [requesterId, targetUserId, roles, minutes, startsAt, endsAt, reviewDueAt, needsApproval, requiresPostReview]
+      properties:
+        requesterId: { type: string, format: uuid }
+        targetUserId: { type: string, format: uuid }
+        roles: { type: array, items: { type: string }, description: trimmed and de-duplicated }
+        minutes: { type: integer }
+        startsAt: { type: string, format: date-time }
+        endsAt: { type: string, format: date-time }
+        reviewDueAt: { type: string, format: date-time, description: endsAt plus breakglass.review_days business days (Monday to Friday) }
+        needsApproval: { type: boolean }
+        approverDuty: { type: string, enum: [BreakGlassApprove, PlatformAdmin], description: present when needsApproval }
+        requiresPostReview: { type: boolean }
     BreachClock:
       type: object
       required: [regime, recipient, basis, status]
