@@ -65,6 +65,7 @@ func TestRecordRelease(t *testing.T) {
 		{"malformed body", &fakeStore{}, `{`, http.StatusBadRequest, "COM-0001"},
 		{"idempotency conflict", &fakeStore{err: store.ErrIdempotencyConflict}, releaseBody(nil), http.StatusConflict, "COM-0409"},
 		{"unregistered environment", &fakeStore{err: store.ErrUnknownEnvironment}, releaseBody(nil), http.StatusBadRequest, "environment is not registered"},
+		{"rollback to unseen digest", &fakeStore{err: store.ErrRollbackTargetUnseen}, releaseBody(replace(`"promote"`, `"rollback"`)), http.StatusUnprocessableEntity, "PLH-0422"},
 		{"store error hides detail", &fakeStore{err: errors.New("pg secret detail")}, releaseBody(nil), http.StatusInternalServerError, "COM-0500"},
 	}
 	for _, tc := range tests {

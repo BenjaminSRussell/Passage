@@ -164,3 +164,39 @@ func TestReleases_AppRoleIsAppendOnlyAndScoped(t *testing.T) {
 		t.Fatalf("a customer tenant scope sees %d platform rows, %v; want 0", visible, err)
 	}
 }
+
+func TestReleases_RollbackRequiresPriorPromotionOfSameTarget(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	s := store.New(app)
+	ctx := principal(1, "zach")
+	for _, env := range []string{"stage", "prod"} {
+		if _, err := s.RecordRelease(ctx, release(env, store.ActionRollback, digestA, digestB), ""); !errors.Is(err, store.ErrRollbackTargetUnseen) {
+			t.Fatalf("%s rollback to an unseen digest: err = %v, want ErrRollbackTargetUnseen", env, err)
+		}
+	}
+	if _, err := s.RecordRelease(ctx, release("stage", store.ActionPromote, digestA, digestB), ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RecordRelease(ctx, release("prod", store.ActionRollback, digestA, digestB), ""); !errors.Is(err, store.ErrRollbackTargetUnseen) {
+		t.Fatalf("prod rollback to a digest promoted only to stage: err = %v, want ErrRollbackTargetUnseen", err)
+	}
+	if _, err := s.RecordRelease(ctx, release("stage", store.ActionRollback, digestA, digestB), ""); err != nil {
+		t.Fatalf("stage rollback to a promoted digest: %v", err)
+	}
+	if _, err := s.RecordRelease(ctx, release("prod", store.ActionPromote, digestA, digestB), ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RecordRelease(ctx, release("prod", store.ActionRollback, digestA, digestB), ""); err != nil {
+		t.Fatalf("prod rollback to a promoted digest: %v", err)
+	}
+	var rows, events int
+	if err := admin.QueryRow(context.Background(), `select count(*) from platform_release`).Scan(&rows); err != nil || rows != 4 {
+		t.Fatalf("release rows = %d, %v; want 4 (rejected rollbacks write nothing)", rows, err)
+	}
+	if err := admin.QueryRow(context.Background(), `select count(*) from outbox`).Scan(&events); err != nil || events != 4 {
+		t.Fatalf("outbox rows = %d, %v; want 4", events, err)
+	}
+}

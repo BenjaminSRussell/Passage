@@ -67,6 +67,10 @@ func (a *API) recordRelease(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "environment is not registered"))
 		return
 	}
+	if errors.Is(err, store.ErrRollbackTargetUnseen) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, "PLH-0422", "rollback imageDigest was never promoted to this service and environment"))
+		return
+	}
 	if errors.Is(err, store.ErrIdempotencyConflict) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, "COM-0409", "Idempotency-Key was already used for a different release"))
 		return

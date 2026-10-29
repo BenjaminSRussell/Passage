@@ -24,8 +24,9 @@ const (
 )
 
 var (
-	ErrUnknownEnvironment  = errors.New("unknown environment")
-	ErrIdempotencyConflict = errors.New("idempotency key reused with a different release")
+	ErrUnknownEnvironment   = errors.New("unknown environment")
+	ErrIdempotencyConflict  = errors.New("idempotency key reused with a different release")
+	ErrRollbackTargetUnseen = errors.New("rollback target was never promoted to this service and environment")
 )
 
 type Release struct {
@@ -88,6 +89,16 @@ func (s *Postgres) RecordRelease(ctx context.Context, in Release, idempotencyKey
 	}
 	var r Release
 	err := dbx.WithTenantTx(platformScope(ctx), s.pool, func(tx pgx.Tx) error {
+		if in.Action == ActionRollback {
+			var promoted bool
+			if err := tx.QueryRow(ctx, `select exists (select 1 from platform_release where service = $1 and environment = $2 and action = 'promote' and image_digest = $3)`,
+				in.Service, in.Environment, in.ImageDigest).Scan(&promoted); err != nil {
+				return err
+			}
+			if !promoted {
+				return ErrRollbackTargetUnseen
+			}
+		}
 		var reason *string
 		if in.Reason != "" {
 			reason = &in.Reason
