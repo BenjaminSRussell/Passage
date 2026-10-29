@@ -24,10 +24,12 @@ const (
 var (
 	ErrRunNotFound  = errors.New("batch run not found")
 	ErrRunNotActive = errors.New("batch run is not executable by this worker")
+	ErrLostLease    = errors.New("batch run lease passed to another worker")
 )
 
 type Claim struct {
 	Params json.RawMessage
+	Token  string
 }
 
 type Page struct {
@@ -50,8 +52,8 @@ type Resume struct {
 type PageStore interface {
 	Claim(ctx context.Context, runID, handler string) (Claim, error)
 	Resume(ctx context.Context, runID string) (Resume, error)
-	Record(ctx context.Context, runID string, page Page) error
-	Finish(ctx context.Context, runID, status, errMsg string) error
+	Record(ctx context.Context, runID, token string, page Page) error
+	Finish(ctx context.Context, runID, token, status, errMsg string) error
 }
 
 type PgPageStore struct{ pool *pgxpool.Pool }
@@ -66,18 +68,21 @@ func tenantID(ctx context.Context) (string, error) {
 	return p.TenantID, nil
 }
 
-func runNotActive(ctx context.Context, tx pgx.Tx, tenantID, runID string) error {
-	var exists bool
-	if err := tx.QueryRow(ctx, `select exists (select 1 from batch_run where tenant_id = $1 and id = $2)`, tenantID, runID).Scan(&exists); err != nil {
+func runNotActive(ctx context.Context, tx pgx.Tx, tenantID, runID, token string) error {
+	var held bool
+	err := tx.QueryRow(ctx, `select coalesce(lease_token::text, '') = $3 from batch_run where tenant_id = $1 and id = $2`, tenantID, runID, token).Scan(&held)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrRunNotFound
+	}
+	if err != nil {
 		return err
 	}
-	if !exists {
-		return ErrRunNotFound
+	if token != "" && !held {
+		return ErrLostLease
 	}
 	return ErrRunNotActive
 }
 
-// ponytail: a worker that stalls past RunLease without recording a page can lose its run to another worker, then overwrite it; add a lease token column if that matters.
 func (s *PgPageStore) Claim(ctx context.Context, runID, handler string) (Claim, error) {
 	tenantID, err := tenantID(ctx)
 	if err != nil {
@@ -87,13 +92,13 @@ func (s *PgPageStore) Claim(ctx context.Context, runID, handler string) (Claim, 
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		err := tx.QueryRow(ctx, `
 			update batch_run r set status = 'executing', error = null, ended_at = null,
-			       started_at = coalesce(r.started_at, now()), claimed_until = now() + make_interval(secs => $4)
+			       started_at = coalesce(r.started_at, now()), claimed_until = now() + make_interval(secs => $4), lease_token = gen_random_uuid()
 			from batch_job j
 			where r.tenant_id = $1 and r.id = $2 and j.tenant_id = r.tenant_id and j.id = r.job_id and j.handler = $3
 			  and r.status in ('executing', 'error') and (r.claimed_until is null or r.claimed_until < now())
-			returning r.params`, tenantID, runID, handler, RunLease.Seconds()).Scan(&out.Params)
+			returning r.params, r.lease_token::text`, tenantID, runID, handler, RunLease.Seconds()).Scan(&out.Params, &out.Token)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return runNotActive(ctx, tx, tenantID, runID)
+			return runNotActive(ctx, tx, tenantID, runID, "")
 		}
 		return err
 	})
@@ -131,7 +136,7 @@ func (s *PgPageStore) Resume(ctx context.Context, runID string) (Resume, error) 
 	return out, nil
 }
 
-func (s *PgPageStore) Record(ctx context.Context, runID string, page Page) error {
+func (s *PgPageStore) Record(ctx context.Context, runID, token string, page Page) error {
 	tenantID, err := tenantID(ctx)
 	if err != nil {
 		return err
@@ -153,19 +158,19 @@ func (s *PgPageStore) Record(ctx context.Context, runID string, page Page) error
 			update batch_run set claimed_until = now() + make_interval(secs => $3), rows_done = (
 				select coalesce(sum(succeeded + skipped), 0) from batch_run_pages
 				where tenant_id = $1 and run_id = $2 and status = 'ok')
-			where tenant_id = $1 and id = $2 and status = 'executing'`, tenantID, runID, RunLease.Seconds())
+			where tenant_id = $1 and id = $2 and status = 'executing' and lease_token = nullif($4, '')::uuid`, tenantID, runID, RunLease.Seconds(), token)
 		if err != nil {
 			return fmt.Errorf("update run progress: %w", err)
 		}
 		if tag.RowsAffected() == 0 {
-			return runNotActive(ctx, tx, tenantID, runID)
+			return runNotActive(ctx, tx, tenantID, runID, token)
 		}
 		return nil
 	})
 	return err
 }
 
-func (s *PgPageStore) Finish(ctx context.Context, runID, status, errMsg string) error {
+func (s *PgPageStore) Finish(ctx context.Context, runID, token, status, errMsg string) error {
 	tenantID, err := tenantID(ctx)
 	if err != nil {
 		return err
@@ -173,12 +178,12 @@ func (s *PgPageStore) Finish(ctx context.Context, runID, status, errMsg string) 
 	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `
 			update batch_run set status = $3, ended_at = now(), error = nullif($4, ''), claimed_until = null
-			where tenant_id = $1 and id = $2 and status = 'executing'`, tenantID, runID, status, errMsg)
+			where tenant_id = $1 and id = $2 and status = 'executing' and lease_token = nullif($5, '')::uuid`, tenantID, runID, status, errMsg, token)
 		if err != nil {
 			return fmt.Errorf("finish run: %w", err)
 		}
 		if tag.RowsAffected() == 0 {
-			return runNotActive(ctx, tx, tenantID, runID)
+			return runNotActive(ctx, tx, tenantID, runID, token)
 		}
 		return nil
 	})

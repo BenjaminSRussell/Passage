@@ -86,23 +86,26 @@ func (p ProductJobs) Run(ctx context.Context, handler, runID string) (Summary, e
 		if jsonErr := json.Unmarshal(claim.Params, &in); jsonErr != nil || !ids.Valid(in.MasterID) {
 			err = fmt.Errorf("batch_run.params: %w", ErrInvalidArgument)
 		} else {
-			summary, err = p.explode(ctx, runID, in, size)
+			summary, err = p.explode(ctx, runID, claim.Token, in, size)
 		}
 	case HandlerProductGroupChange:
-		summary, err = p.groupChange(ctx, runID, size)
+		summary, err = p.groupChange(ctx, runID, claim.Token, size)
+	}
+	if errors.Is(err, ErrLostLease) {
+		return summary, err
 	}
 	status, msg := domain.RunEnded, ""
 	if err != nil {
 		status, msg = domain.RunError, err.Error()
 	}
-	if finishErr := p.Pages.Finish(context.WithoutCancel(ctx), runID, status, msg); finishErr != nil {
+	if finishErr := p.Pages.Finish(context.WithoutCancel(ctx), runID, claim.Token, status, msg); finishErr != nil {
 		slog.Error("finish batch run", "err", finishErr, "runId", runID, "handler", handler)
 		err = errors.Join(err, finishErr)
 	}
 	return summary, err
 }
 
-func (p ProductJobs) explode(ctx context.Context, runID string, in ExplodeParams, size int) (Summary, error) {
+func (p ProductJobs) explode(ctx context.Context, runID, token string, in ExplodeParams, size int) (Summary, error) {
 	var summary Summary
 	resume, err := p.Pages.Resume(ctx, runID)
 	if err != nil || resume.Done {
@@ -126,7 +129,7 @@ func (p ProductJobs) explode(ctx context.Context, runID string, in ExplodeParams
 		if res.Remaining > 0 {
 			page.NextCursor = fmt.Sprintf("%s:%d", moreCursor, res.Remaining)
 		}
-		if err := p.settle(ctx, runID, &page, err); err != nil {
+		if err := p.settle(ctx, runID, token, &page, err); err != nil {
 			return summary, err
 		}
 		summary.add(page)
@@ -149,7 +152,7 @@ func remainingIn(cursor string) int {
 	return n
 }
 
-func (p ProductJobs) groupChange(ctx context.Context, runID string, size int) (Summary, error) {
+func (p ProductJobs) groupChange(ctx context.Context, runID, token string, size int) (Summary, error) {
 	var summary Summary
 	resume, err := p.Pages.Resume(ctx, runID)
 	if err != nil || resume.Done {
@@ -176,7 +179,7 @@ func (p ProductJobs) groupChange(ctx context.Context, runID string, size int) (S
 				page.Skipped++
 			}
 		}
-		if err := p.settle(ctx, runID, &page, err); err != nil {
+		if err := p.settle(ctx, runID, token, &page, err); err != nil {
 			return summary, err
 		}
 		summary.add(page)
@@ -187,12 +190,12 @@ func (p ProductJobs) groupChange(ctx context.Context, runID string, size int) (S
 	}
 }
 
-func (p ProductJobs) settle(ctx context.Context, runID string, page *Page, cause error) error {
+func (p ProductJobs) settle(ctx context.Context, runID, token string, page *Page, cause error) error {
 	if cause != nil {
 		page.Status, page.Error, page.NextCursor = PageFailed, cause.Error(), ""
 		slog.Error("batch page failed", "err", cause, "runId", runID, "page", page.No)
 	}
-	if err := p.Pages.Record(context.WithoutCancel(ctx), runID, *page); err != nil {
+	if err := p.Pages.Record(context.WithoutCancel(ctx), runID, token, *page); err != nil {
 		return errors.Join(cause, fmt.Errorf("record page %d: %w", page.No, err))
 	}
 	if cause != nil {

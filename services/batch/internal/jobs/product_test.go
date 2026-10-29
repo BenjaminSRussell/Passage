@@ -57,7 +57,7 @@ func (m *memoryPages) Resume(context.Context, string) (jobs.Resume, error) {
 	return jobs.Resume{NextPage: last + 1, Cursor: next, Done: next == ""}, nil
 }
 
-func (m *memoryPages) Record(_ context.Context, _ string, page jobs.Page) error {
+func (m *memoryPages) Record(_ context.Context, _, _ string, page jobs.Page) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if existing, ok := m.pages[page.No]; !ok || existing.Status != jobs.PageOK {
@@ -66,7 +66,7 @@ func (m *memoryPages) Record(_ context.Context, _ string, page jobs.Page) error 
 	return nil
 }
 
-func (m *memoryPages) Finish(_ context.Context, _, status, errMsg string) error {
+func (m *memoryPages) Finish(_ context.Context, _, _, status, errMsg string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.status, m.errMsg, m.finished = status, errMsg, true

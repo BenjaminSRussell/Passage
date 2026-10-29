@@ -130,11 +130,15 @@ func TestPgPageStoreIsTenantScopedAndKeepsCompletedPages(t *testing.T) {
 	}
 	run := startProductRun(t, store.New(app), ctx, "scoped", jobs.HandlerProductGroupChange)
 	pages := jobs.NewPgPageStore(app)
-
-	if err := pages.Record(ctx, run.ID, jobs.Page{No: 0, Cursor: "", NextCursor: "x", Items: 3, Succeeded: 3, Status: jobs.PageOK}); err != nil {
+	claim, err := pages.Claim(ctx, run.ID, jobs.HandlerProductGroupChange)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := pages.Record(ctx, run.ID, jobs.Page{No: 0, NextCursor: "other", Items: 9, Status: jobs.PageFailed, Error: "late retry"}); err != nil {
+
+	if err := pages.Record(ctx, run.ID, claim.Token, jobs.Page{No: 0, Cursor: "", NextCursor: "x", Items: 3, Succeeded: 3, Status: jobs.PageOK}); err != nil {
+		t.Fatal(err)
+	}
+	if err := pages.Record(ctx, run.ID, claim.Token, jobs.Page{No: 0, NextCursor: "other", Items: 9, Status: jobs.PageFailed, Error: "late retry"}); err != nil {
 		t.Fatal(err)
 	}
 	resume, err := pages.Resume(ctx, run.ID)
@@ -146,10 +150,10 @@ func TestPgPageStoreIsTenantScopedAndKeepsCompletedPages(t *testing.T) {
 	if foreign, err := pages.Resume(other, run.ID); err != nil || foreign != (jobs.Resume{}) {
 		t.Fatalf("tenant 2 saw tenant 1 pages: %+v, %v", foreign, err)
 	}
-	if err := pages.Record(other, run.ID, jobs.Page{No: 0, Status: jobs.PageOK}); !errors.Is(err, jobs.ErrRunNotFound) {
+	if err := pages.Record(other, run.ID, claim.Token, jobs.Page{No: 0, Status: jobs.PageOK}); !errors.Is(err, jobs.ErrRunNotFound) {
 		t.Fatalf("tenant 2 recording on tenant 1 run = %v", err)
 	}
-	if err := pages.Finish(other, run.ID, domain.RunEnded, ""); !errors.Is(err, jobs.ErrRunNotFound) {
+	if err := pages.Finish(other, run.ID, claim.Token, domain.RunEnded, ""); !errors.Is(err, jobs.ErrRunNotFound) {
 		t.Fatalf("tenant 2 finishing tenant 1 run = %v", err)
 	}
 	if got, _ := store.New(app).GetRun(ctx, run.ID); got.Status != domain.RunExecuting {
@@ -228,7 +232,7 @@ func TestRunsThatAreNotExecutableAreNeverStartedOrOverwritten(t *testing.T) {
 		if _, err := (jobs.ProductJobs{Client: product, Pages: pages, MaxAttempts: 1}).Run(ctx, jobs.HandlerProductGroupChange, run.ID); !errors.Is(err, jobs.ErrRunNotActive) {
 			t.Fatalf("%s: err = %v", status, err)
 		}
-		if err := pages.Finish(ctx, run.ID, domain.RunEnded, ""); !errors.Is(err, jobs.ErrRunNotActive) {
+		if err := pages.Finish(ctx, run.ID, testkit.TenantID(99), domain.RunEnded, ""); !errors.Is(err, jobs.ErrLostLease) {
 			t.Fatalf("%s: finish err = %v", status, err)
 		}
 		if got := runStatus(t, runs, ctx, run.ID); got.Status != status || len(product.groupCalls) != 0 {
@@ -271,4 +275,41 @@ func (c cancelAfterFirstGroup) GroupChange(ctx context.Context, ids []string) ([
 	out, err := c.fakeProduct.GroupChange(ctx, ids)
 	c.cancel()
 	return out, err
+}
+
+func TestStalledWorkerWithALostLeaseCannotWrite(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	ctx := scoped(1)
+	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	runs := store.New(app)
+	pages := jobs.NewPgPageStore(app)
+	run := startProductRun(t, runs, ctx, "lost-lease", jobs.HandlerProductGroupChange)
+
+	a, err := pages.Claim(ctx, run.ID, jobs.HandlerProductGroupChange)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setRun(t, admin, run.ID, "claimed_until = now() - interval '1 minute'")
+	if _, err := (jobs.ProductJobs{Client: &fakeProduct{released: releasedIDs(4)}, Pages: pages, PageSize: 3, MaxAttempts: 1}).Run(ctx, jobs.HandlerProductGroupChange, run.ID); err != nil {
+		t.Fatalf("worker B: %v", err)
+	}
+	want := runStatus(t, runs, ctx, run.ID)
+	if want.Status != domain.RunEnded || want.RowsDone != 4 {
+		t.Fatalf("worker B run = %+v", want)
+	}
+
+	if err := pages.Record(ctx, run.ID, a.Token, jobs.Page{No: 9, Items: 50, Succeeded: 50, Status: jobs.PageOK}); !errors.Is(err, jobs.ErrLostLease) {
+		t.Fatalf("stalled Record = %v", err)
+	}
+	if err := pages.Finish(ctx, run.ID, a.Token, domain.RunError, "stalled"); !errors.Is(err, jobs.ErrLostLease) {
+		t.Fatalf("stalled Finish = %v", err)
+	}
+	if got := runStatus(t, runs, ctx, run.ID); got != want {
+		t.Fatalf("B's state changed: %+v want %+v", got, want)
+	}
+	if resume, _ := pages.Resume(ctx, run.ID); resume.NextPage != 2 {
+		t.Fatalf("stalled page leaked: %+v", resume)
+	}
 }
