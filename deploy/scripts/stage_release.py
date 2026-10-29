@@ -294,21 +294,14 @@ def _call_api(request):
         raise ReleaseError(f"release API call failed: {error}") from error
 
 
-def newest_recorded_sha(base, env):
-    """Return the git sha of the newest release the registry holds for the environment, or None when it is empty."""
+def _list_releases(base, env):
     query = urllib.parse.urlencode({"service": SERVICE, "env": env})
     releases = _call_api(
         urllib.request.Request(f"{base}/v1/platform/releases?{query}", headers=_api_headers(), method="GET")
     )
     if not isinstance(releases, list):
         raise ReleaseError("release API list answered a non-array body")
-    if not releases:
-        return None
-    newest = releases[0]
-    git_sha = newest.get("gitSha") if isinstance(newest, dict) else None
-    if not isinstance(git_sha, str) or GIT_SHA.fullmatch(git_sha) is None:
-        raise ReleaseError("release API newest release has no valid 40-hex gitSha")
-    return git_sha
+    return releases
 
 
 def _is_ancestor(root, ancestor, descendant):
@@ -320,6 +313,29 @@ def _is_ancestor(root, ancestor, descendant):
     if result.returncode not in (0, 1):
         raise ReleaseError(f"git merge-base --is-ancestor failed: {result.stderr.strip()}")
     return result.returncode == 0
+
+
+def registry_cursor(root, base, env):
+    """Return (cursor, registry_ahead): the newest registry gitSha that is a valid commit on HEAD's history, skipping rows that are not."""
+    releases = _list_releases(base, env)
+    if not releases:
+        return None, False
+    reason = ""
+    for release in releases:
+        git_sha = release.get("gitSha") if isinstance(release, dict) else None
+        if not isinstance(git_sha, str) or GIT_SHA.fullmatch(git_sha) is None:
+            reason = "release API release has no valid 40-hex gitSha"
+            continue
+        try:
+            if _is_ancestor(root, git_sha, "HEAD"):
+                return git_sha, False
+            if _is_ancestor(root, "HEAD", git_sha):
+                return None, True
+        except ReleaseError as error:
+            reason = f"registry gitSha {git_sha} cannot be compared with HEAD: {error}"
+            continue
+        reason = f"registry gitSha {git_sha} is unrelated to HEAD"
+    raise ReleaseError(reason)
 
 
 def record_release(base, env, action, digest, previous, git_sha, signed):
@@ -375,9 +391,13 @@ def merged_releases(root, env, since):
         previous = _digest_at(root, env, before)
         if digest != previous:
             if digest == PLACEHOLDER_DIGEST:
-                raise ReleaseError(f"{env} pins the placeholder digest at {commit}; nothing to record")
-            action = "rollback" if _was_pinned_before(root, env, digest, before) else "promote"
-            releases.append((action, digest, previous, commit))
+                print(
+                    f"WARNING: {env} pins the placeholder or an unreadable digest at {commit}; skipping that commit",
+                    file=sys.stderr,
+                )
+            else:
+                action = "rollback" if _was_pinned_before(root, env, digest, before) else "promote"
+                releases.append((action, digest, previous, commit))
         before = commit
     return releases
 
@@ -387,13 +407,11 @@ def record(root, env, since):
     base = _api_base()
     if base:
         try:
-            cursor = newest_recorded_sha(base, env)
+            cursor, registry_ahead = registry_cursor(root, base, env)
+            if registry_ahead:
+                print(f"{env} registry is ahead of this checkout; nothing to record")
+                return 0
             if cursor:
-                if not _is_ancestor(root, cursor, "HEAD"):
-                    if _is_ancestor(root, "HEAD", cursor):
-                        print(f"{env} registry is ahead of this checkout; nothing to record")
-                        return 0
-                    raise ReleaseError(f"registry gitSha {cursor} is unrelated to HEAD")
                 since = cursor
         except ReleaseError as error:
             print(f"release not recorded: {error}", file=sys.stderr)

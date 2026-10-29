@@ -1,16 +1,19 @@
 package api_test
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/platform-health/internal/api"
 	"github.com/BenjaminSRussell/passage/services/platform-health/internal/store"
+	"github.com/BenjaminSRussell/passage/services/platform-health/migrations"
 )
 
 const (
@@ -82,6 +85,29 @@ func TestRecordRelease(t *testing.T) {
 				t.Fatalf("rejected request reached the store")
 			}
 		})
+	}
+}
+
+func TestRollbackToPreRegistryDigestIsAcceptedAfterGoLive(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	a := api.New(store.New(app), testkit.TenantID(1))
+	r := httpx.NewRouter()
+	a.Register(r)
+	toRollback := func(b string) string { return strings.Replace(b, `"promote"`, `"rollback"`, 1) }
+	swapped := strings.NewReplacer(digestB, digestA, digestA, digestB)
+	duties := "Maintain platform releases,Rollback environment"
+	if rec := doRelease(r, http.MethodPost, releasesPath, releaseBody(nil), duties, ""); rec.Code != http.StatusCreated {
+		t.Fatalf("go-live promote: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := doRelease(r, http.MethodPost, releasesPath, swapped.Replace(toRollback(releaseBody(nil))), duties, ""); rec.Code != http.StatusCreated {
+		t.Fatalf("rollback to the pre-registry digest: %d %s", rec.Code, rec.Body.String())
+	}
+	never := strings.Replace(toRollback(releaseBody(nil)), digestB, "sha256:"+strings.Repeat("c", 64), 1)
+	if rec := doRelease(r, http.MethodPost, releasesPath, never, duties, ""); rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("rollback to a never-seen digest: %d %s", rec.Code, rec.Body.String())
 	}
 }
 

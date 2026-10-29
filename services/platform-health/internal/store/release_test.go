@@ -205,3 +205,25 @@ func TestReleases_RollbackRequiresPriorPromotionOfSameTarget(t *testing.T) {
 		t.Fatalf("outbox rows = %d, %v; want 4", events, err)
 	}
 }
+
+func TestReleases_RollbackToDigestRunningBeforeTheRegistryIsAccepted(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	s := store.New(app)
+	ctx := principal(1, "zach")
+	digestC := "sha256:" + strings.Repeat("c", 64)
+	if _, err := s.RecordRelease(ctx, release("stage", store.ActionPromote, digestB, digestA), ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RecordRelease(ctx, release("prod", store.ActionRollback, digestA, digestB), ""); !errors.Is(err, store.ErrRollbackTargetUnseen) {
+		t.Fatalf("prod never ran digest A in the registry: err = %v, want ErrRollbackTargetUnseen", err)
+	}
+	if _, err := s.RecordRelease(ctx, release("stage", store.ActionRollback, digestC, digestB), ""); !errors.Is(err, store.ErrRollbackTargetUnseen) {
+		t.Fatalf("rollback to a never-seen digest: err = %v, want ErrRollbackTargetUnseen", err)
+	}
+	if _, err := s.RecordRelease(ctx, release("stage", store.ActionRollback, digestA, digestB), ""); err != nil {
+		t.Fatalf("go-live A->B->A rollback to the pre-registry digest: %v", err)
+	}
+}

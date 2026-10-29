@@ -715,6 +715,49 @@ class StageReleaseTests(unittest.TestCase):
         self.assertIn("release not recorded", errors)
         self.assertEqual(received, [])
 
+    def test_record_skips_registry_rows_that_are_not_on_main_when_choosing_the_cursor(self):
+        third = "sha256:" + "c" * 64
+        recorded, _ = self.publish_digests(PROMOTED_DIGEST, third)
+        orphan = self.run_git("commit-tree", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "-m", "elsewhere")
+        received = self.start_release_api(
+            registry=[{"gitSha": orphan}, {"gitSha": "d" * 40}, {"gitSha": "not-a-sha"}, {"gitSha": recorded}]
+        )
+
+        result, _ = self.record()
+
+        self.assertEqual(result, 0)
+        self.assertEqual([item["body"]["imageDigest"] for item in received], [third])
+
+    def test_record_skips_a_placeholder_commit_with_a_warning_and_continues(self):
+        third = "sha256:" + "c" * 64
+        cursor = self.run_git("rev-parse", "HEAD")
+        shas = self.publish_digests(PROMOTED_DIGEST, stage_release.PLACEHOLDER_DIGEST, third)
+        received = self.start_release_api()
+
+        result, errors = self.record(since=cursor)
+
+        self.assertEqual(result, 0)
+        self.assertIn(shas[1], errors)
+        self.assertEqual([item["body"]["gitSha"] for item in received], [shas[0], shas[2]])
+        self.assertEqual(received[1]["body"]["previousDigest"], stage_release.PLACEHOLDER_DIGEST)
+
+    def test_record_exits_3_on_a_422_and_the_cursor_stays_on_the_rejected_commit(self):
+        cursor = self.run_git("rev-parse", "HEAD")
+        shas = self.publish_digests(PROMOTED_DIGEST, INITIAL_DIGEST)
+        received = self.start_release_api(status=422, body={"code": "PLH-0422"})
+
+        result, errors = self.record(since=cursor)
+
+        self.assertEqual(result, 3)
+        self.assertIn("answered 422", errors)
+        self.assertEqual([item["body"]["gitSha"] for item in received], [shas[0]])
+
+        retried = self.start_release_api(registry=[])
+        result, _ = self.record(since=cursor)
+
+        self.assertEqual(result, 0)
+        self.assertEqual([item["body"]["gitSha"] for item in retried], shas)
+
     def test_record_refuses_a_registry_sha_unrelated_to_head(self):
         self.publish_main(stage=PROMOTED_DIGEST)
         unrelated = self.run_git("commit-tree", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "-m", "elsewhere")
