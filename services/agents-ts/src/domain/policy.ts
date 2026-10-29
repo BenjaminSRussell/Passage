@@ -1,4 +1,4 @@
-import { compareMoney, scaled6, sumMoney, type Money } from "./money.js";
+import { compareMoney, fromScaled6, scaled6, sumMoney, type Money } from "./money.js";
 
 /** agent.<id>.mode per legal entity (FR-47.5, 9.47.13). */
 export type AgentMode = "OFF" | "SUGGEST" | "AUTO";
@@ -61,8 +61,11 @@ export const CASH_APP_MAX_INVOICES_DEFAULT = 20;
 
 export interface CashApplicationProposal {
   payment: Money;
-  /** One settlement per invoice. */
-  allocations: ReadonlyArray<{ invoiceId: string; amount: Money }>;
+  /**
+   * One settlement per invoice. `openAmount` is the invoice's open balance
+   * before this settlement; when given, the allocation may not exceed it.
+   */
+  allocations: ReadonlyArray<{ invoiceId: string; amount: Money; openAmount?: Money }>;
   /** Short-payment write-off the proposal would create, if any. */
   writeOff?: Money;
 }
@@ -77,8 +80,12 @@ export interface CashApplicationLimits {
  * BR-47.10: a cash application proposal never splits a payment across more than
  * maxInvoices invoices and never creates a write-off above the tolerance. It also
  * never applies more than the payment, never settles an invoice twice, and every
- * amount is positive. Returns every violation; empty means the proposal may go
- * to the approval gate.
+ * amount is positive. When the invoices' open amounts are given, no allocation
+ * exceeds its invoice's open amount and the write-off does not exceed what the
+ * allocations leave open (a write-off closes a short payment; it never
+ * over-settles). An unapplied remainder of the payment is allowed: it stays on
+ * account. Returns every violation; empty means the proposal may go to the
+ * approval gate.
  */
 export function checkCashApplication(p: CashApplicationProposal, limits: CashApplicationLimits): string[] {
   const errors: string[] = [];
@@ -97,6 +104,10 @@ export function checkCashApplication(p: CashApplicationProposal, limits: CashApp
       errors.push(`invoice ${a.invoiceId} is in ${a.amount.currency}, the payment in ${p.payment.currency}`);
     } else if (scaled6(a.amount.amount) <= 0n) {
       errors.push(`invoice ${a.invoiceId} allocation must be positive`);
+    } else if (a.openAmount && a.openAmount.currency !== p.payment.currency) {
+      errors.push(`invoice ${a.invoiceId} open amount is in ${a.openAmount.currency}, the payment in ${p.payment.currency}`);
+    } else if (a.openAmount && compareMoney(a.amount, a.openAmount) > 0) {
+      errors.push(`invoice ${a.invoiceId} allocation ${a.amount.amount} exceeds its open amount ${a.openAmount.amount}`);
     }
   }
   if (errors.length > 0) return errors;
@@ -107,9 +118,28 @@ export function checkCashApplication(p: CashApplicationProposal, limits: CashApp
   if (p.writeOff) {
     if (p.writeOff.currency !== limits.writeOffTolerance.currency) {
       errors.push(`write-off currency ${p.writeOff.currency} differs from the tolerance currency`);
+    } else if (p.writeOff.currency !== p.payment.currency) {
+      errors.push(`write-off currency ${p.writeOff.currency} differs from the payment currency`);
+    } else if (scaled6(p.writeOff.amount) < 0n) {
+      errors.push("write-off must not be negative");
     } else if (compareMoney(p.writeOff, limits.writeOffTolerance) > 0) {
       errors.push(`write-off ${p.writeOff.amount} exceeds the tolerance ${limits.writeOffTolerance.amount}`);
+    } else {
+      const residual = openResidual(p);
+      if (residual !== undefined && scaled6(p.writeOff.amount) > residual) {
+        errors.push(`write-off ${p.writeOff.amount} exceeds the ${fromScaled6(residual)} the allocations leave open`);
+      }
     }
   }
   return errors;
+}
+
+/** What the allocations leave open, in 6-place units, or undefined when any open amount is unknown. */
+function openResidual(p: CashApplicationProposal): bigint | undefined {
+  let residual = 0n;
+  for (const a of p.allocations) {
+    if (!a.openAmount) return undefined;
+    residual += scaled6(a.openAmount.amount) - scaled6(a.amount.amount);
+  }
+  return residual;
 }

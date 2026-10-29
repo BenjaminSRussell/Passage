@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { buildActionRecord } from "../src/domain/audit.js";
-import { budgetThresholdEvent, killSwitchChangedEvent, runCompletedEvent } from "../src/domain/events.js";
+import { approvalRequestedEvent, budgetThresholdEvent, killSwitchChangedEvent, runCompletedEvent } from "../src/domain/events.js";
 import { buildKillSwitchChange, KILL_PROPAGATION_MS, KillSwitchRegistry } from "../src/domain/killswitch.js";
 import type { RunResult } from "../src/runtime/engine.js";
 
@@ -197,6 +197,19 @@ function asyncApiRequired(schema: string): string[] {
 describe("event payloads match events/asyncapi.yaml", () => {
   it.each([
     ["RunCompletedData", () => runCompletedEvent({ tenantId: T1, agentId: "ap_coding", version: 3, result: result(), costUsd: "0.01" }).data],
+    [
+      "ApprovalRequestedData",
+      () =>
+        approvalRequestedEvent({
+          tenantId: T1,
+          runId: "run-1",
+          actionId: "act-1",
+          toolName: "passage.ar.payment.apply",
+          proposalRedacted: "apply to INV-1",
+          confidence: 0.9,
+          riskScore: 0.1,
+        }).data,
+    ],
     ["BudgetThresholdData", () => budgetThresholdEvent({ tenantId: T1, month: "2026-10", previous: "OK", current: { state: "SOFT", pct: 81 } })?.data],
     ["KillSwitchChangedData", () => killSwitchChangedEvent(globalChange(1, true), OPERATOR).data],
   ])("%s carries exactly the documented fields", (schema, build) => {

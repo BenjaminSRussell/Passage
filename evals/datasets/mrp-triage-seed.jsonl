@@ -1,0 +1,9 @@
+{"messageId":"m1","text":"Supplier ACME delivery delayed 5 days, PO line late","cause":"SUPPLY_LATE"}
+{"messageId":"m2","text":"Sales forecast increase 40 percent on item 1001","cause":"DEMAND_SPIKE"}
+{"messageId":"m3","text":"Work centre WC-10 overloaded at 130 percent","cause":"CAPACITY"}
+{"messageId":"m4","text":"Lot L-2291 on quality hold pending inspection","cause":"QUALITY_HOLD"}
+{"messageId":"m5","text":"Duplicate planned order for item 2002","cause":"DATA_ERROR"}
+{"messageId":"m6","text":"Supplier shipment late, expedite requested","cause":"SUPPLY_LATE"}
+{"messageId":"m7","text":"Demand surge from customer X for item 3003","cause":"DEMAND_SPIKE"}
+{"messageId":"m8","text":"Machine breakdown at WC-20, capacity reduced","cause":"CAPACITY"}
+{"messageId":"m9","text":"PO line for item 5005 arrives 10 days before need date, postpone receipt","cause":"SUPPLY_EARLY"}

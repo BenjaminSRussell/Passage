@@ -42,3 +42,37 @@ export function approvalLabel(mode: ApprovalModeName): string {
 export function approvalTone(mode: ApprovalModeName): "neutral" | "info" | "warning" {
   return mode === "approve_before_commit" ? "warning" : mode === "suggest" ? "info" : "neutral";
 }
+
+/** Minimal key-value store; the browser's localStorage satisfies it. */
+export interface ModeStore {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+
+/** Storage key for the mode a user last chose in a workspace (9.47.6: "remembers mode per workspace per user"). */
+export function modeMemoryKey(userId: string, workspace: string): string {
+  return `passage.copilot.mode:${encodeURIComponent(userId)}:${encodeURIComponent(workspace)}`;
+}
+
+/**
+ * The remembered mode, or undefined when nothing valid was stored. Invalid
+ * stored values are ignored, and so is a store that throws (browser storage
+ * is unavailable in private windows or when site data is blocked).
+ */
+export function readRememberedMode(store: ModeStore, userId: string, workspace: string): CopilotMode | undefined {
+  try {
+    const raw = store.getItem(modeMemoryKey(userId, workspace));
+    return raw !== null && isCopilotMode(raw) ? raw : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Saves the mode; a store that refuses the write leaves the panel working without memory. */
+export function rememberMode(store: ModeStore, userId: string, workspace: string, mode: CopilotMode): void {
+  try {
+    store.setItem(modeMemoryKey(userId, workspace), mode);
+  } catch {
+    // Remembering the mode is a convenience; never fail the panel over it.
+  }
+}

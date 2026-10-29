@@ -7,6 +7,8 @@ health probes, the `X-Passage-Api-Build` header, the gateway-side contract test
 over 400 generated tools (`test/contract400.test.ts`), opaque read cursors
 (`cursor` in, `nextCursor` out, MCP `_meta`), and per-pod `RateLimit-*` /
 `Retry-After` headers with a 429 `MCP-0429` refusal, keyed by tenant and user.
+Slice 3 validates read tools' upstream bodies against the tool's `outputSchema`
+(`src/schema.ts`, 502 `MCP-0502` on a violation).
 The rows below are what the ticket and PRD 9.47 ask for and are not built.
 
 | Deliverable / criterion | Status | Reason |
@@ -21,6 +23,6 @@ The rows below are what the ticket and PRD 9.47 ask for and are not built.
 | OPA decision at the gateway (`authz.Policy`) | handoff | The duty check is local (from the duty set); OPA stays authoritative at the API, which is the contract the gateway relies on |
 | Live-API half of the 400-tool contract: the API itself returns 403 for a user without the duty (FR-47.2) | later slice of PSG-47 | The gateway side is covered over 400 generated tools; the services and their OpenAPI annotations do not exist yet |
 | Audit to `agent_action` store (AC-47.2 `DENIED` log) | later slice of PSG-47 | The gateway calls an injected `AuditSink`; `main.ts` writes JSON lines to stdout. The durable sink is part of the runtime's database slice |
-| `outputSchema` validation against MCP spec (tool schema conformance test) | later slice of PSG-47 | `outputSchema` is carried but not validated |
 | Helm chart `charts/mcp-gateway` | later slice of PSG-47 | Image and chart are not built in this slice; the entrypoint now exists, so the chart can follow |
 | Copilot chat BFF (`POST /api/v1/copilot/chat`) | later slice of PSG-47 | Not part of the gateway; see `apps/web/src/modules/copilot/NOT-IMPLEMENTED.md`. Model provider adapters are built in `services/agents-ts` |
+| Full `outputSchema` conformance: `$ref`, `oneOf`/`allOf`, formats and patterns; `outputSchema` and `structuredContent` on the MCP wire | later slice of PSG-47 | `src/schema.ts` checks type, `nullable`, enum, properties, required and items on read tools only. `tools/list` does not advertise `outputSchema` yet, so results carry text content only and need no `structuredContent` |

@@ -25,8 +25,9 @@ paths:
         -32003 and data {status: 403, code}. A 403 from the API is mapped the
         same way. Other tool failures return a result with isError true and text
         "<code>: <message>", where code is AGT-0214 (tool failed), MCP-0400
-        (tenant_id supplied, or an invalid cursor), MCP-0404 (unknown tool) or
-        MCP-0422 (missing required argument). A read tool whose upstream returns
+        (tenant_id supplied, or an invalid cursor), MCP-0404 (unknown tool),
+        MCP-0422 (missing required argument) or MCP-0502 (a read tool's upstream
+        body does not match the tool's outputSchema). A read tool whose upstream returns
         a continuation token puts it in result._meta.nextCursor.
       x-passage-duty: none
       parameters:

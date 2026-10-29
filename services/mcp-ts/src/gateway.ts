@@ -1,4 +1,5 @@
 import type { Catalog } from "./catalog.js";
+import { schemaViolations } from "./schema.js";
 import { isObject, type JsonObject, type ToolDefinition } from "./tool.js";
 
 /** FR-47.1: read tools return at most 200 rows per call. */
@@ -147,6 +148,24 @@ export async function callTool(deps: GatewayDeps, p: Principal, name: string, ra
       ? `tool ${name} failed with ${res.status} after ${RETRY_DELAYS_MS.length} retries`
       : `tool ${name} failed with ${res.status}; not retried`;
     return fail(deps, p, name, "UPSTREAM_ERROR", res.status, "AGT-0214", message);
+  }
+  // Tool schema conformance: a read tool's 200 body must match the outputSchema
+  // it was generated from (the OpenAPI 200 response). Writes are not checked:
+  // the upstream has already committed, and reporting a failure after a commit
+  // would invite a retry that posts twice.
+  if (tool.readOnly && res.status === 200) {
+    const violations = schemaViolations(tool.outputSchema, res.body);
+    if (violations.length > 0) {
+      return fail(
+        deps,
+        p,
+        name,
+        "UPSTREAM_ERROR",
+        502,
+        "MCP-0502",
+        `tool ${name} returned a body that does not match its outputSchema: ${violations.slice(0, 3).join("; ")}`,
+      );
+    }
   }
   await deps.audit.record({
     at: deps.now().toISOString(),

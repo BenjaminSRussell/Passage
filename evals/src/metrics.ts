@@ -65,3 +65,13 @@ export function meanAbsoluteError(rows: ReadonlyArray<{ predicted: number; actua
   if (rows.length === 0) throw new Error("MAE needs at least one row");
   return rows.reduce((sum, r) => sum + Math.abs(r.predicted - r.actual), 0) / rows.length;
 }
+
+/**
+ * False-positive rate at a flag threshold (FR-47.7: a journal is flagged when
+ * its anomaly score is strictly greater than the threshold). Gate `fpr` <= 0.05.
+ */
+export function falsePositiveRate(rows: ReadonlyArray<{ score: number; label: boolean }>, threshold: number): number {
+  const negatives = rows.filter((r) => !r.label);
+  if (negatives.length === 0) throw new Error("false-positive rate needs at least one negative");
+  return negatives.filter((r) => r.score > threshold).length / negatives.length;
+}

@@ -6,15 +6,15 @@ release that fails a threshold is blocked.
 | Module | Responsibility |
 |---|---|
 | `src/gate.ts` | Deploy thresholds from FR-47.9 per agent: AP coding top-1 >= 0.92 and top-3 >= 0.98; cash application precision >= 0.90 and recall >= 0.75; MRP triage macro-F1 >= 0.80; anomaly AUROC >= 0.85 and FPR <= 0.05; ask-the-data selection >= 0.95 and SQL equivalence >= 0.90; refusal >= 0.99. `gate()` also fails any drop of more than 1 point against the previous release |
-| `src/metrics.ts` | `accuracyTopK`, `precisionRecall`, `auroc`, `refusalCorrectness` and MAE (pure functions) |
-| `src/harness.ts` | `evaluateApCoding`, `evaluateCashApp` and `evaluateRefusal`: run a predictor over labelled cases and return metrics. The refusal harness also counts missed attacks and over-refusals |
+| `src/metrics.ts` | `accuracyTopK`, `precisionRecall`, `macroF1`, `auroc`, `falsePositiveRate`, `refusalCorrectness` and MAE (pure functions) |
+| `src/harness.ts` | `evaluateApCoding`, `evaluateCashApp`, `evaluateMrpTriage` (macro-F1), `evaluateAnomaly` (AUROC, and FPR with a journal flagged when its score is above 0.8, FR-47.7) and `evaluateRefusal`: run a predictor over labelled cases and return metrics. The refusal harness also counts missed attacks and over-refusals |
 | `src/askdata.ts` | Ask-the-data scoring: metric-selection accuracy and SQL equivalence on a canonical form of the semantic-layer query (member order and case ignored; measures, filters, positional date ranges and limits kept) |
 | `src/rebaseline.ts` | BR-47.8: `rebaselineQueue` lists agent versions without a passing eval on the current dataset version; `canPromote` refuses promotion with AGT-0204 otherwise |
 | `src/report.ts` | Markdown model card (refused for a version whose gate failed) and eval report (PRD 9.47.15) |
 | `src/datasets.ts` | Dataset types, the JSONL loader and `datasetVersion` (content hash). Datasets are versioned data, not code |
-| `src/baselines.ts` | Reference predictors that the gate is measured against |
-| `src/run.ts` | CLI: loads the seed datasets, evaluates, applies the gate, sets a non-zero exit code on failure |
-| `datasets/` | Seed datasets (`ap-coding-seed.jsonl`, `cash-app-seed.jsonl`, `adversarial-seed.jsonl` with 12 attacks and 4 benign prompts). These are small seeds for the harness, not the held-out sets in FR-47.9 (see NOT-IMPLEMENTED.md) |
+| `src/baselines.ts` | Reference predictors that the gate is measured against: vendor history (AP coding), exact remittance amount (cash application), cause keywords (MRP triage) and off-hours posting (anomaly) |
+| `src/run.ts` | CLI: loads the AP coding, cash application, MRP triage and anomaly seed datasets, evaluates the baselines, applies the gate, sets a non-zero exit code on failure |
+| `datasets/` | Seed datasets (`ap-coding-seed.jsonl`, `cash-app-seed.jsonl`, `mrp-triage-seed.jsonl` with 9 action messages, `anomaly-seed.jsonl` with 12 journals of which 4 are anomalies, including a normal night batch and a daytime anomaly, `adversarial-seed.jsonl` with 12 attacks and 4 benign prompts). These are small seeds for the harness, not the held-out sets in FR-47.9 (see NOT-IMPLEMENTED.md) |
 
 ## Run and test
 

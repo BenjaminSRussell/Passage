@@ -17,6 +17,7 @@ decide what the caller may do. The gateway holds no credentials of its own.
 | `src/server.ts` | HTTP transport on `node:http`: `POST /mcp` (single and batched JSON-RPC, 202 for notifications, 1 MiB body cap), `GET /healthz`, `GET /readyz`, `X-Passage-Api-Build` on every response. `principalFromHeaders` builds the caller from the bearer token and the edge headers |
 | `src/main.ts` | Entrypoint: 12-factor config (`PASSAGE_API_URL`, `PASSAGE_OPENAPI_JSON`, `HTTP_ADDR`, `SERVICE_VERSION`), loads the tool catalog from the OpenAPI JSON, starts the server. Audit lines go to stdout as JSON without token or argument values |
 | `src/ratelimit.ts` | Per-pod fixed-window limiter keyed by tenant and user; `RateLimit-*` and `Retry-After` headers. Counters are in memory, so each pod enforces its own limit until the shared-store ADR is settled |
+| `src/schema.ts` | `schemaViolations`: validates a read tool's 200 body against its `outputSchema` (type, `nullable`, enum, properties, required, items; `$ref` and other keywords are not checked); the gateway returns `MCP-0502` on violation. Write tools are not checked, because their upstream has already committed |
 | `src/upstream.ts` | `createFetchUpstream`: calls the Passage API with `fetch`, forwarding the user's bearer token |
 | `api/openapi.yaml` | Contract for `POST /mcp` (the JSON-RPC wire), health probes and the tool shape |
 
@@ -70,6 +71,7 @@ nothing else touches the network.
 | `MCP-0422` | 400 | A required argument (for example a path parameter) is missing; the API is not called |
 | `MCP-0429` | 429 | Per-pod rate limit for the tenant and user exceeded; `Retry-After` gives the wait. Limit is 600 per minute by default (`src/ratelimit.ts`); a batch counts once and holds at most 50 messages |
 | `MCP-0500` | 500 | Internal error; no detail returned |
+| `MCP-0502` | 502 | A read tool's upstream body does not match the tool's `outputSchema` (`src/schema.ts`, MCP tool schema conformance); audited as `UPSTREAM_ERROR` |
 | JSON-RPC `-32600` | | Invalid request |
 | JSON-RPC `-32601` | | Method not found |
 | JSON-RPC `-32602` | | `params.name` is missing |

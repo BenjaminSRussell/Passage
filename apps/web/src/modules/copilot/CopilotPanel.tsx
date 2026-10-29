@@ -2,7 +2,17 @@ import { useState, type FormEvent } from "react";
 import { Alert, Badge, Button, Card, EmptyState, FormField, Textarea } from "../../shell/ui";
 import type { ChatRequest, ChatResponse } from "./api/client";
 import { askCopilot } from "./api/stream";
-import { canInsertDraft, COPILOT_MODES, GENERATED_BADGE, MODE_LABELS, toolCallLabel, type CopilotMode } from "./domain";
+import {
+  canInsertDraft,
+  COPILOT_MODES,
+  GENERATED_BADGE,
+  MODE_LABELS,
+  readRememberedMode,
+  rememberMode,
+  toolCallLabel,
+  type CopilotMode,
+  type ModeStore,
+} from "./domain";
 import styles from "./pages.module.css";
 
 export interface CopilotPanelProps {
@@ -16,6 +26,11 @@ export interface CopilotPanelProps {
   /** Called only when the user clicks "Insert draft". Never called automatically. */
   onInsertDraft?: (text: string) => void;
   initialMode?: CopilotMode;
+  /**
+   * When set, the chosen mode is remembered per user and workspace in `store`
+   * (9.47.6) and restored the next time the panel opens there.
+   */
+  memory?: { store: ModeStore; userId: string; workspace: string };
 }
 
 interface Result {
@@ -30,8 +45,14 @@ const PROMPT_HINTS: Readonly<Record<CopilotMode, string>> = {
   summarize: "Name the workflow or case to summarize.",
 };
 
-export function CopilotPanel({ ask = askCopilot, recordRef, onInsertDraft, initialMode = "ask" }: CopilotPanelProps) {
-  const [mode, setMode] = useState<CopilotMode>(initialMode);
+export function CopilotPanel({ ask = askCopilot, recordRef, onInsertDraft, initialMode = "ask", memory }: CopilotPanelProps) {
+  const [mode, setModeState] = useState<CopilotMode>(
+    () => (memory ? readRememberedMode(memory.store, memory.userId, memory.workspace) : undefined) ?? initialMode,
+  );
+  function setMode(next: CopilotMode) {
+    setModeState(next);
+    if (memory) rememberMode(memory.store, memory.userId, memory.workspace, next);
+  }
   const [message, setMessage] = useState("");
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState<string | null>(null);

@@ -60,6 +60,35 @@ export const isCashAppCase: Guard<CashAppCase> = (v): v is CashAppCase =>
   v.openInvoices.every((i) => isRecord(i) && typeof i.invoiceId === "string" && typeof i.amount === "string") &&
   isStringArray(v.truth);
 
+/** One MRP action message with the cause a planner labeled (FR-47.7 triage). */
+export interface MrpTriageCase {
+  messageId: string;
+  text: string;
+  cause: string;
+}
+
+/** One journal with its hand label: true when the journal is an injected anomaly. */
+export interface AnomalyCase {
+  journalId: string;
+  amount: string;
+  accountPair: string;
+  postedAtHour: number;
+  userId: string;
+  anomalous: boolean;
+}
+
+export const isMrpTriageCase: Guard<MrpTriageCase> = (v): v is MrpTriageCase =>
+  isRecord(v) && ["messageId", "text", "cause"].every((k) => typeof v[k] === "string" && v[k] !== "");
+
+export const isAnomalyCase: Guard<AnomalyCase> = (v): v is AnomalyCase =>
+  isRecord(v) &&
+  ["journalId", "amount", "accountPair", "userId"].every((k) => typeof v[k] === "string") &&
+  typeof v.postedAtHour === "number" &&
+  Number.isInteger(v.postedAtHour) &&
+  v.postedAtHour >= 0 &&
+  v.postedAtHour <= 23 &&
+  typeof v.anomalous === "boolean";
+
 const ADVERSARIAL_CATEGORIES = ["injection", "exfiltration", "policy_bypass", "benign"];
 
 export const isAdversarialCase: Guard<AdversarialCase> = (v): v is AdversarialCase =>

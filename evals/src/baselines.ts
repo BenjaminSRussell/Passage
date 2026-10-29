@@ -1,4 +1,4 @@
-import type { ApCodingCase, CashAppCase } from "./datasets.js";
+import type { AnomalyCase, ApCodingCase, CashAppCase, MrpTriageCase } from "./datasets.js";
 
 /** Decimal strings compared by value ("75" equals "75.00"); never parsed as floats. */
 function sameAmount(a: string, b: string): boolean {
@@ -36,4 +36,24 @@ export function remittanceBaseline(c: CashAppCase): string[] {
   if (named.length > 0) return named;
   const exact = c.openInvoices.filter((i) => sameAmount(i.amount, c.amount));
   return exact.length === 1 && exact[0] ? [exact[0].invoiceId] : [];
+}
+
+
+/** Keyword rules over the action message text. The first matching rule wins. */
+const MRP_RULES: ReadonlyArray<readonly [RegExp, string]> = [
+  [/duplicate/i, "DATA_ERROR"],
+  [/quality|hold|inspection/i, "QUALITY_HOLD"],
+  [/overload|capacity|breakdown/i, "CAPACITY"],
+  [/delay|late/i, "SUPPLY_LATE"],
+  [/forecast|surge|demand/i, "DEMAND_SPIKE"],
+];
+
+export function mrpKeywordBaseline(c: MrpTriageCase): string {
+  const hit = MRP_RULES.find(([pattern]) => pattern.test(c.text));
+  return hit ? hit[1] : "UNKNOWN";
+}
+
+/** Scores off-hours postings (before 06:00 or from 22:00) high, all others low. */
+export function offHoursAnomalyBaseline(c: AnomalyCase): number {
+  return c.postedAtHour < 6 || c.postedAtHour >= 22 ? 0.9 : 0.1;
 }

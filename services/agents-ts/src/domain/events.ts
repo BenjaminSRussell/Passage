@@ -1,11 +1,13 @@
 import type { RunResult } from "../runtime/engine.js";
 import type { BudgetState, BudgetStatus } from "./budget.js";
 import type { KillSwitchChange } from "./killswitch.js";
+import { assertNoPii } from "./redaction.js";
 import type { RunStatus } from "./run.js";
 
 /** Event types from PRD 9.47.5 that this slice builds payloads for. */
 export const AGENT_EVENT_TYPES = {
   runCompleted: "dev.passage.agent.run.completed.v1",
+  approvalRequested: "dev.passage.agent.approval.requested.v1",
   budgetThreshold: "dev.passage.agent.budget.threshold.v1",
   killSwitchChanged: "dev.passage.agent.killswitch.changed.v1",
 } as const;
@@ -127,4 +129,54 @@ export function killSwitchChangedEvent(change: KillSwitchChange, envelopeTenantI
       changed_at: change.changedAt,
     },
   };
+}
+
+export interface ApprovalRequestedData {
+  run_id: string;
+  action_id: string;
+  tool_name: string;
+  /** Pseudonymized proposal. Real values are shown in the inbox only, never in the event. */
+  proposal: string;
+  confidence: number;
+  risk_score: number;
+}
+
+/**
+ * `agent.approval.requested` (gate reached, FR-47.8). The proposal must be the
+ * redacted text: raw PII is refused with AGT-0210, so the inbox consumer never
+ * receives values the run kept out of the model. Confidence and risk score are
+ * fractions in [0, 1].
+ */
+export function approvalRequestedEvent(input: {
+  tenantId: string;
+  runId: string;
+  actionId: string;
+  toolName: string;
+  proposalRedacted: string;
+  confidence: number;
+  riskScore: number;
+}): AgentEvent<ApprovalRequestedData> {
+  if (!UUID.test(input.tenantId)) throw new Error("tenantId must be a tenant id");
+  if (input.runId.trim() === "") throw new Error("runId is required");
+  if (input.actionId.trim() === "") throw new Error("actionId is required");
+  if (input.toolName.trim() === "") throw new Error("toolName is required");
+  if (!isFraction(input.confidence)) throw new Error("confidence must be between 0 and 1");
+  if (!isFraction(input.riskScore)) throw new Error("riskScore must be between 0 and 1");
+  assertNoPii(input.proposalRedacted);
+  return {
+    type: AGENT_EVENT_TYPES.approvalRequested,
+    tenantId: input.tenantId,
+    data: {
+      run_id: input.runId,
+      action_id: input.actionId,
+      tool_name: input.toolName,
+      proposal: input.proposalRedacted,
+      confidence: input.confidence,
+      risk_score: input.riskScore,
+    },
+  };
+}
+
+function isFraction(n: number): boolean {
+  return Number.isFinite(n) && n >= 0 && n <= 1;
 }

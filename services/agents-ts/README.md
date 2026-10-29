@@ -14,7 +14,9 @@ deterministic in tests.
 |---|---|
 | `src/runtime/engine.ts` | `runAgent`: one model turn and one proposal. Checks the kill switch, budget, eval and policy at start and the kill switch before every step, redacts prompts, calls the provider, enforces the per-run token cap, and routes the proposal through the policy. `approve_before_commit` tools always wait for a human; AUTO applies only to `suggest` tools. The AUTO and self-approval limits use the document amount from `RiskPort`, not the model's figure. A port that throws ends the run FAILED |
 | `src/domain/run.ts` | BR-47.1 state machine: PLANNING, ACTING, AWAITING_APPROVAL, COMMITTED, REJECTED, FAILED, KILLED. Terminal states cannot be left |
-| `src/domain/policy.ts` | `decideDisposition` (BR-47.2): OFF blocks, SUGGEST proposes, AUTO only when confidence, amount, vendor risk and SoD all pass. `validatePolicy` enforces the parameter ranges. `isApprovalExpired` (BR-47.3). `checkCashApplication` (BR-47.10): at most 20 invoices per payment (1 to 50 allowed), write-off within tolerance, never more than the payment |
+| `src/domain/policy.ts` | `decideDisposition` (BR-47.2): OFF blocks, SUGGEST proposes, AUTO only when confidence, amount, vendor risk and SoD all pass. `validatePolicy` enforces the parameter ranges. `isApprovalExpired` (BR-47.3). `checkCashApplication` (BR-47.10): at most 20 invoices per payment (1 to 50 allowed), write-off within tolerance, never more than the payment; with open amounts, no allocation above its invoice's open amount and no write-off above what stays open |
+| `src/domain/approval.ts` | Approval rules (BR-47.3, 9.47.5): `agent.approval_expiry_h` range check, the hourly sweeper's selection `expiredApprovals`, and `decideApproval` for the decision endpoint (approver duty AGT-0203, expiry AGT-0208, self-approval above the limit AGT-0209) |
+| `src/domain/copilot.ts` | BR-47.11: `gateCopilotTools` answers a tool the user lacks with AGT-0203 and the catalog text; `CopilotAnswerCache` serves an answer only to the same tenant, user, duty set and mode, for 5 minutes |
 | `src/domain/authz.ts` | Duty check for tool calls on behalf of a user. An agent can never exceed its invoker (AC-47.2 contract) |
 | `src/domain/budget.ts` | Monthly token budget states OK, SOFT (80%), HARD (100%) (FR-47.11, AC-47.7) |
 | `src/domain/redaction.ts` | `scanPii` (write-time scanner), `assertNoPii`, and `Pseudonymizer`: stable pseudonyms per (tenant, value) with a TTL, restored only for the UI (FR-47.12, BR-47.7, AC-47.8) |
@@ -29,7 +31,7 @@ deterministic in tests.
 | `src/domain/killswitch.ts` | `KillSwitchRegistry`: applies `killswitch.changed` versions in order, ignores duplicates, fails closed after 10 s without a heartbeat (AC-47.6) |
 | `src/domain/knowledge.ts` | FR-47.14: reciprocal rank fusion of keyword and embedding results, and the citation gate (similarity >= 0.75, else AGT-0212) |
 | `src/domain/reconcile.ts` | 9.47.9: provider-billed against recorded tokens per run, 1% tolerance, estimated runs (BR-47.4) flagged separately |
-| `src/domain/events.ts` | Payload builders and validation for `run.completed`, `budget.threshold` (the cost-guard alert, AC-47.4) and `killswitch.changed`. Tool names and decisions only; no inputs, outputs or display text |
+| `src/domain/events.ts` | Payload builders and validation for `run.completed`, `approval.requested` (redacted proposal; AGT-0210 on raw PII), `budget.threshold` (the cost-guard alert, AC-47.4) and `killswitch.changed`. Tool names and decisions only; no inputs, outputs or display text |
 | `src/errors.ts` | `AgentError` with the stable PRD 9.47.18 codes |
 
 ## Run and test

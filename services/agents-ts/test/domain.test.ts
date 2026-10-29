@@ -199,6 +199,22 @@ describe("cash application limits (BR-47.10)", () => {
     expect(checkCashApplication({ payment: usd("20"), allocations: [] }, limits)).toHaveLength(1);
   });
 
+  it("checks allocations and the write-off against the invoices' open amounts", () => {
+    const open = (id: string, amount: string, openAmount: string) => ({ invoiceId: id, amount: usd(amount), openAmount: usd(openAmount) });
+    // Customer pays 249.50 on a 250.00 invoice: apply it all, write off the 0.50 left open.
+    expect(checkCashApplication({ payment: usd("249.50"), allocations: [open("i1", "249.50", "250.00")], writeOff: usd("0.50") }, limits)).toEqual([]);
+    // Overpayment: 10 stays on account, nothing is written off.
+    expect(checkCashApplication({ payment: usd("260"), allocations: [open("i1", "250", "250")] }, limits)).toEqual([]);
+    expect(checkCashApplication({ payment: usd("300"), allocations: [open("i1", "250.01", "250")] }, limits).join(" ")).toContain("exceeds its open amount");
+    expect(checkCashApplication({ payment: usd("250"), allocations: [open("i1", "250", "250")], writeOff: usd("0.01") }, limits).join(" ")).toContain(
+      "the allocations leave open",
+    );
+    expect(checkCashApplication({ payment: usd("10"), allocations: [open("i1", "10", "20")], writeOff: usd("-1") }, limits).join(" ")).toContain("negative");
+    expect(
+      checkCashApplication({ payment: usd("10"), allocations: [{ invoiceId: "i1", amount: usd("10"), openAmount: { amount: "10", currency: "EUR" } }] }, limits),
+    ).toHaveLength(1);
+  });
+
   it("enforces the 1..50 parameter range", () => {
     expect(checkCashApplication({ payment: usd("10"), allocations: alloc(1) }, { ...limits, maxInvoices: 51 }).join(" ")).toContain("between 1 and 50");
     expect(CASH_APP_MAX_INVOICES_DEFAULT).toBe(20);
