@@ -1,0 +1,315 @@
+openapi: 3.1.0
+info:
+  title: Passage compliance
+  version: 0.2.0
+  description: >-
+    Segregation of duties (PSG-48 slice 1): seed rules, pre-save simulation,
+    evaluation of a user's effective roles, the conflict listing and the
+    mitigation and risk-acceptance workflow (FR-48.4, FR-48.5, BR-48.1).
+    Browser calls go to /api/v1/sod/...; the gateway strips /api.
+servers:
+  - url: https://api.passage.dev
+paths:
+  /v1/sod/rules:
+    get:
+      operationId: listSodRules
+      x-passage-duty: SoDReview
+      responses:
+        "200":
+          description: The FR-48.4 seed rules
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Rule" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/sod/simulate:
+    post:
+      operationId: simulateRoleAssignment
+      x-passage-duty: SecurityAdmin
+      description: >-
+        Returns the conflicts a role assignment would introduce, before anything
+        is saved. With sod.block_high the save is blocked (code SOD-1101) when the
+        resulting role set holds a HIGH conflict that the service has not recorded
+        as MITIGATED, new or existing (FR-48.5, AC-48.3).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [userId]
+              properties:
+                userId: { type: string, format: uuid }
+                currentRoles: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/Role" } }
+                proposedRoles: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/Role" } }
+      responses:
+        "200":
+          description: Simulation result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [newConflicts, blocked, blockingRuleIds]
+                properties:
+                  newConflicts: { type: array, items: { $ref: "#/components/schemas/SimulatedConflict" } }
+                  blocked: { type: boolean }
+                  blockingRuleIds: { type: array, items: { type: string } }
+                  code: { type: string, enum: [SOD-1101], description: set when blocked }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/sod/evaluations:
+    post:
+      operationId: evaluateUserRoles
+      x-passage-duty: SecurityAdmin
+      description: >-
+        Evaluates a user's effective roles after an assignment change (or from the
+        nightly run) and records the outcome: new conflicts are stored OPEN and emit
+        dev.passage.sod.conflict.detected.v1, a RESOLVED conflict detected again is
+        reopened, and a stored conflict that is no longer detected is RESOLVED. A
+        repeat with the same roles changes nothing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [userId, roles]
+              properties:
+                userId: { type: string, format: uuid }
+                roles: { type: array, maxItems: 200, items: { $ref: "#/components/schemas/Role" } }
+      responses:
+        "200":
+          description: Every conflict recorded for the user after the evaluation
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [userId, conflicts]
+                properties:
+                  userId: { type: string, format: uuid }
+                  conflicts: { type: array, items: { $ref: "#/components/schemas/Conflict" } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/sod/conflicts:
+    get:
+      operationId: listSodConflicts
+      x-passage-duty: SoDReview
+      description: Conflicts, newest detection first. Lapsed mitigations are reopened before reading.
+      parameters:
+        - { name: state, in: query, schema: { type: string, enum: [OPEN, MITIGATED, RESOLVED, ACCEPTED_RISK] } }
+        - { name: severity, in: query, schema: { type: string, enum: [HIGH, MEDIUM, LOW] } }
+        - { name: userId, in: query, schema: { type: string, format: uuid } }
+        - { name: ruleId, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 200 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: One page of conflicts
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Conflict" } }
+                  nextCursor: { type: string }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/sod/conflicts/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getSodConflict
+      x-passage-duty: SoDReview
+      responses:
+        "200":
+          description: The conflict with its mitigation history
+          headers:
+            ETag: { schema: { type: string }, description: 'the conflict version, e.g. "2"' }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConflictDetail" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/sod/conflicts/{id}/mitigations:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: mitigateSodConflict
+      x-passage-duty: SoDApprove
+      description: >-
+        Approves a compensating control for an OPEN conflict (FR-48.5, AC-48.4).
+        The approver is the calling user and must not be the conflicted user; the
+        expiry must be in the future and within min(rule cap, sod.max_mitigation_days).
+        Emits dev.passage.sod.mitigation.approved.v1 in the same transaction.
+      parameters:
+        - { name: If-Match, in: header, required: true, schema: { type: string } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 200 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [controlRef, reason, expiresAt]
+              properties:
+                controlRef: { type: string, maxLength: 2000 }
+                reason: { type: string, maxLength: 2000 }
+                expiresAt: { type: string, format: date-time }
+      responses:
+        "201":
+          description: The conflict, now MITIGATED, with its mitigation history
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConflictDetail" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/sod/conflicts/{id}/accept-risk:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: acceptSodRisk
+      x-passage-duty: SoDAdmin
+      description: Accepts the risk of an OPEN LOW or MEDIUM conflict with a reason (BR-48.1).
+      parameters:
+        - { name: If-Match, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: string, maxLength: 2000 }
+      responses:
+        "200":
+          description: The conflict, now ACCEPTED_RISK
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConflictDetail" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+components:
+  schemas:
+    Role:
+      type: object
+      required: [name, duties]
+      properties:
+        name: { type: string, minLength: 1 }
+        duties: { type: array, maxItems: 500, items: { type: string } }
+    Rule:
+      type: object
+      required: [ruleId, name, dutyA, dutyB, severity, riskId, mitigationAllowed, maxMitigationDays, status, version]
+      properties:
+        ruleId: { type: string, pattern: '^[A-Z0-9]+-\d{3}$' }
+        name: { type: string }
+        dutyA: { type: string, description: duty id or glob pattern such as *Post* }
+        dutyB: { type: string }
+        severity: { type: string, enum: [HIGH, MEDIUM, LOW] }
+        riskId: { type: string }
+        description: { type: string }
+        mitigationAllowed: { type: boolean }
+        maxMitigationDays: { type: integer, minimum: 1, maximum: 730 }
+        status: { type: string, enum: [ACTIVE, RETIRED] }
+        version: { type: integer }
+    SimulatedConflict:
+      type: object
+      required: [userId, ruleId, severity, riskId, dutyA, dutyB, rolesA, rolesB, state]
+      properties:
+        userId: { type: string }
+        ruleId: { type: string }
+        severity: { type: string, enum: [HIGH, MEDIUM, LOW] }
+        riskId: { type: string }
+        dutyA: { type: string }
+        dutyB: { type: string }
+        rolesA: { type: array, items: { type: string } }
+        rolesB: { type: array, items: { type: string } }
+        state: { type: string, enum: [OPEN, MITIGATED, ACCEPTED_RISK] }
+    Conflict:
+      type: object
+      required: [conflictId, userId, ruleId, riskId, severity, dutyA, dutyB, rolesA, rolesB, state, detectedAt, updatedAt, version]
+      properties:
+        conflictId: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        ruleId: { type: string }
+        riskId: { type: string }
+        severity: { type: string, enum: [HIGH, MEDIUM, LOW] }
+        dutyA: { type: string }
+        dutyB: { type: string }
+        rolesA: { type: array, items: { type: string } }
+        rolesB: { type: array, items: { type: string } }
+        state: { type: string, enum: [OPEN, MITIGATED, RESOLVED, ACCEPTED_RISK] }
+        mitigationId: { type: string, format: uuid }
+        expiresAt: { type: string, format: date-time, description: mitigation expiry, only while MITIGATED }
+        decidedBy: { type: string, description: approver of the latest mitigation or the SoDAdmin who accepted the risk }
+        decisionReason: { type: string }
+        detectedAt: { type: string, format: date-time }
+        resolvedAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+    Mitigation:
+      type: object
+      required: [mitigationId, conflictId, controlRef, reason, approverId, approvedAt, expiresAt]
+      properties:
+        mitigationId: { type: string, format: uuid }
+        conflictId: { type: string, format: uuid }
+        controlRef: { type: string }
+        reason: { type: string }
+        approverId: { type: string }
+        approvedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+    ConflictDetail:
+      allOf:
+        - { $ref: "#/components/schemas/Conflict" }
+        - type: object
+          required: [mitigations]
+          properties:
+            mitigations: { type: array, items: { $ref: "#/components/schemas/Mitigation" } }
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        traceId: { type: string }
+        errors: { type: object, additionalProperties: { type: string } }
+  responses:
+    Problem:
+      description: RFC 9457 problem
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }

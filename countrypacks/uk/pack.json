@@ -1,0 +1,23 @@
+{
+  "code": "UK",
+  "version": "2026.1",
+  "name": "United Kingdom",
+  "country": "GB",
+  "currency": "GBP",
+  "locale": "en-GB",
+  "taxRegime": "VAT",
+  "fiscalYearStartMonth": 4,
+  "holidayRegion": "GB-ENG",
+  "bankFormats": ["BACS"],
+  "taxIdScheme": "GB_VAT",
+  "retentionMinYears": {"financial": 6, "hr": 6},
+  "documentLayouts": ["invoice-en-gb", "credit-note-en-gb"],
+  "statutoryReports": [
+    {
+      "code": "UK_MTD_VAT",
+      "format": "JSON",
+      "mandate": "HMRC Making Tax Digital for VAT (VAT (MTD) API 1.0, submit return)",
+      "requiredFields": ["periodKey", "vatDueSales", "vatDueAcquisitions", "totalVatDue", "vatReclaimedCurrPeriod", "netVatDue", "totalValueSalesExVAT", "totalValuePurchasesExVAT", "totalValueGoodsSuppliedExVAT", "totalAcquisitionsExVAT", "finalised"]
+    }
+  ]
+}

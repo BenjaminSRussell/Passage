@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-compliance
+  labels:
+    app.kubernetes.io/name: {{ .Values.serviceName }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Values.serviceName }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Values.serviceName }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: compliance
+          {{- if .Values.image.digest }}
+          image: "{{ .Values.image.repository }}@{{ .Values.image.digest }}"
+          {{- else }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          {{- end }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: admin
+              containerPort: 9090
+          env:
+            - name: PASSAGE_ENV
+              value: {{ .Values.config.passageEnv | quote }}
+            - name: SERVICE_NAME
+              value: {{ .Values.serviceName | quote }}
+            - name: HTTP_ADDR
+              value: {{ .Values.config.httpAddr | quote }}
+            - name: ADMIN_ADDR
+              value: {{ .Values.config.adminAddr | quote }}
+            - name: MIGRATE_ON_START
+              value: {{ .Values.config.migrateOnStart | quote }}
+            - name: SOD_BLOCK_HIGH
+              value: {{ .Values.config.sodBlockHigh | quote }}
+            - name: SOD_MAX_MITIGATION_DAYS
+              value: {{ .Values.config.sodMaxMitigationDays | quote }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.databaseSecret.name }}
+                  key: {{ .Values.databaseSecret.key }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}

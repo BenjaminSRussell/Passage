@@ -1,0 +1,96 @@
+asyncapi: 3.0.0
+info:
+  title: Passage compliance events
+  version: 1.0.0
+  description: >-
+    CloudEvents 1.0 events published by the compliance service through the
+    outbox (wave 48, slice 1: segregation of duties). Types follow
+    dev.passage.<context>.<entity>.<verb>.v<n>; the topic passage.<context>.<entity>
+    is relayed by Debezium's outbox router, keyed by the conflict id.
+defaultContentType: application/cloudevents+json
+servers:
+  kafka:
+    host: kafka.passage.svc:9092
+    protocol: kafka
+channels:
+  conflictDetected:
+    address: passage.sod.conflict
+    messages:
+      conflictDetected:
+        $ref: "#/components/messages/ConflictDetected"
+  mitigationApproved:
+    address: passage.sod.mitigation
+    messages:
+      mitigationApproved:
+        $ref: "#/components/messages/MitigationApproved"
+operations:
+  publishConflictDetected:
+    action: send
+    channel: {$ref: "#/channels/conflictDetected"}
+    summary: >-
+      An evaluation of a user's effective roles raised a conflict, or raised a
+      RESOLVED one again (FR-48.4). Consumers - workflow, compliance.
+    messages:
+      - {$ref: "#/channels/conflictDetected/messages/conflictDetected"}
+  publishMitigationApproved:
+    action: send
+    channel: {$ref: "#/channels/mitigationApproved"}
+    summary: >-
+      A non-conflicted approver mitigated an OPEN conflict with a compensating
+      control and an expiry (FR-48.5, AC-48.4). Consumers - audit.
+    messages:
+      - {$ref: "#/channels/mitigationApproved/messages/mitigationApproved"}
+components:
+  messages:
+    ConflictDetected:
+      name: dev.passage.sod.conflict.detected.v1
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/ConflictDetectedData"
+    MitigationApproved:
+      name: dev.passage.sod.mitigation.approved.v1
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/MitigationApprovedData"
+  schemas:
+    CloudEventHeaders:
+      type: object
+      required: [specversion, id, source, type, tenantid]
+      properties:
+        specversion: {type: string, const: "1.0"}
+        id: {type: string}
+        source: {type: string, example: compliance}
+        type: {type: string}
+        subject: {type: string, description: conflict id}
+        time: {type: string, format: date-time}
+        tenantid: {type: string, format: uuid}
+        correlationid: {type: string}
+        causationid: {type: string}
+        actor: {type: string}
+    ConflictDetectedData:
+      type: object
+      required: [conflict_id, user_id, rule_id, risk_id, severity, duty_a, duty_b, roles]
+      properties:
+        conflict_id: {type: string, format: uuid}
+        user_id: {type: string, format: uuid}
+        rule_id: {type: string, pattern: '^[A-Z0-9]+-\d{3}$'}
+        risk_id: {type: string}
+        severity: {type: string, enum: [HIGH, MEDIUM, LOW]}
+        duty_a: {type: string}
+        duty_b: {type: string}
+        roles: {type: array, items: {type: string}, description: roles that grant either duty}
+    MitigationApprovedData:
+      type: object
+      required: [conflict_id, mitigation_id, user_id, rule_id, control_ref, approver, expires_at]
+      properties:
+        conflict_id: {type: string, format: uuid}
+        mitigation_id: {type: string, format: uuid}
+        user_id: {type: string, format: uuid}
+        rule_id: {type: string}
+        control_ref: {type: string}
+        approver: {type: string}
+        expires_at: {type: string, format: date-time}

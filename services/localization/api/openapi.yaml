@@ -1,0 +1,173 @@
+openapi: 3.1.0
+info:
+  title: Passage localization
+  version: 0.1.0
+  description: Country pack catalogue, install checks, tax-id and statutory fixture validation (PSG-48 slice 1).
+servers:
+  - url: https://api.passage.dev
+paths:
+  /v1/localization/packs:
+    get:
+      operationId: listPacks
+      x-passage-duty: LocalizationAdmin
+      responses:
+        "200":
+          description: Installed-capable country packs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Pack" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/localization/packs/{code}:
+    get:
+      operationId: getPack
+      x-passage-duty: LocalizationAdmin
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string, enum: [US, UK, DE, FR, IN, MX, CA] } }
+      responses:
+        "200":
+          description: The pack
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Pack" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/localization/packs/{code}/install:check:
+    post:
+      operationId: checkPackInstall
+      x-passage-duty: LocalizationAdmin
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [entityCountry, primaryInstalled, calendarOpenPeriodsOk]
+              properties:
+                entityCountry: { type: string, minLength: 2, maxLength: 2 }
+                primaryInstalled: { type: integer, minimum: 0 }
+                calendarOpenPeriodsOk: { type: boolean }
+      responses:
+        "200":
+          description: Pack is installable
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  installable: { type: boolean }
+                  pack: { type: string }
+                  version: { type: string }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/localization/tax-ids:validate:
+    post:
+      operationId: validateTaxId
+      x-passage-duty: LocalizationAdmin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scheme, value]
+              properties:
+                scheme: { type: string, enum: [GB_VAT, DE_USTID, FR_VAT, IN_GSTIN, MX_RFC, CA_BN, US_EIN] }
+                value: { type: string }
+      responses:
+        "200":
+          description: Valid
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid: { type: boolean }
+                  scheme: { type: string }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/localization/statutory/uk-mtd-vat:validate:
+    post:
+      operationId: validateUkMtdVat
+      x-passage-duty: LocalizationAdmin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VatReturn" }
+      responses:
+        "200":
+          description: Passes the MTD VAT rules
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid: { type: boolean }
+                  errors: { type: integer, enum: [0] }
+        "422":
+          description: Fails schema ERP-0801; errors maps field to detail
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+components:
+  schemas:
+    Pack:
+      type: object
+      properties:
+        code: { type: string }
+        version: { type: string, pattern: '^\d{4}\.\d+$' }
+        name: { type: string }
+        country: { type: string }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        locale: { type: string }
+        taxRegime: { type: string }
+        fiscalYearStartMonth: { type: integer, minimum: 1, maximum: 12 }
+        holidayRegion: { type: string }
+        bankFormats: { type: array, items: { type: string } }
+        taxIdScheme: { type: string }
+        retentionMinYears: { type: object, additionalProperties: { type: integer } }
+        documentLayouts: { type: array, items: { type: string } }
+        statutoryReports: { type: array, items: { type: object } }
+    VatReturn:
+      description: >-
+        HMRC VAT (MTD) API 1.0 submit-return body, boxes 1 to 9. Beyond the
+        ranges below, totalVatDue must equal vatDueSales + vatDueAcquisitions and
+        netVatDue must equal |totalVatDue - vatReclaimedCurrPeriod|.
+      type: object
+      additionalProperties: false
+      required: [periodKey, vatDueSales, vatDueAcquisitions, totalVatDue, vatReclaimedCurrPeriod, netVatDue, totalValueSalesExVAT, totalValuePurchasesExVAT, totalValueGoodsSuppliedExVAT, totalAcquisitionsExVAT, finalised]
+      properties:
+        periodKey: { type: string, pattern: '^[0-9A-Za-z#]{4}$' }
+        vatDueSales: { type: number, minimum: -9999999999999.99, maximum: 9999999999999.99, multipleOf: 0.01, description: box 1 }
+        vatDueAcquisitions: { type: number, minimum: -9999999999999.99, maximum: 9999999999999.99, multipleOf: 0.01, description: box 2 }
+        totalVatDue: { type: number, minimum: -9999999999999.99, maximum: 9999999999999.99, multipleOf: 0.01, description: box 3 }
+        vatReclaimedCurrPeriod: { type: number, minimum: -9999999999999.99, maximum: 9999999999999.99, multipleOf: 0.01, description: box 4 }
+        netVatDue: { type: number, minimum: 0, maximum: 99999999999.99, multipleOf: 0.01, description: box 5 }
+        totalValueSalesExVAT: { type: integer, minimum: -9999999999999, maximum: 9999999999999, description: box 6, whole pounds }
+        totalValuePurchasesExVAT: { type: integer, minimum: -9999999999999, maximum: 9999999999999, description: box 7, whole pounds }
+        totalValueGoodsSuppliedExVAT: { type: integer, minimum: -9999999999999, maximum: 9999999999999, description: box 8, whole pounds }
+        totalAcquisitionsExVAT: { type: integer, minimum: -9999999999999, maximum: 9999999999999, description: box 9, whole pounds }
+        finalised: { type: boolean, const: true }
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        traceId: { type: string }
+        errors: { type: object, additionalProperties: { type: string } }
+  responses:
+    Problem:
+      description: RFC 9457 problem
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }

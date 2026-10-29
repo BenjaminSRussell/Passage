@@ -1,0 +1,13 @@
+{
+  "periodKey": "26A1",
+  "vatDueSales": 1000.00,
+  "vatDueAcquisitions": 0.00,
+  "totalVatDue": 1000.00,
+  "vatReclaimedCurrPeriod": 250.00,
+  "netVatDue": 750.00,
+  "totalValueSalesExVAT": 4000,
+  "totalValuePurchasesExVAT": 2000,
+  "totalValueGoodsSuppliedExVAT": 0,
+  "totalAcquisitionsExVAT": 0,
+  "finalised": true
+}
