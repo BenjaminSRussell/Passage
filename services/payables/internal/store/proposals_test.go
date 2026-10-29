@@ -358,3 +358,71 @@ func TestList_FiltersAndKeysetPagination(t *testing.T) {
 		t.Fatalf("get across tenants = %v", err)
 	}
 }
+
+func TestApproveProposal_RechecksLinesAtApproval(t *testing.T) {
+	tests := map[string]func(t *testing.T, s *Postgres, ctx context.Context, item OpenItem){
+		"held": func(t *testing.T, s *Postgres, ctx context.Context, item OpenItem) {
+			if err := s.SetPaymentHold(ctx, item.ID, true); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"partially paid": func(t *testing.T, s *Postgres, ctx context.Context, item OpenItem) {
+			if _, err := s.Settle(ctx, item.ID, item.Version, dec("10.00"), "s"); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"fully settled": func(t *testing.T, s *Postgres, ctx context.Context, item OpenItem) {
+			if _, err := s.Settle(ctx, item.ID, item.Version, dec("100.00"), "s"); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"vendor blocked": func(t *testing.T, s *Postgres, ctx context.Context, item OpenItem) {
+			if err := s.BlockVendor(ctx, item.VendorID, "fraud"); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	for name, change := range tests {
+		t.Run(name, func(t *testing.T) {
+			s := setup(t)
+			ctx := ctxAs(1, leA, "alice")
+			item := seed(t, s, ctx, leA, vendor1, 1, "2027-03-10", "USD", "100.00")
+			seed(t, s, ctx, leA, vendor2, 2, "2027-03-10", "USD", "100.00")
+			created, _, err := s.CreateProposal(ctx, proposalFor(t, s, ctx, leA, "run-1"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			change(t, s, ctx, item)
+			_, err = s.ApproveProposal(ctx, created.ID, "bob")
+			var changed *LinesChangedError
+			if !errors.As(err, &changed) || len(changed.OpenItemIDs) != 1 || changed.OpenItemIDs[0] != item.ID {
+				t.Fatalf("err = %v, want LinesChangedError naming only %s", err, item.ID)
+			}
+			if still, _ := s.GetProposal(ctx, created.ID); still.Status != domain.ProposalDraft {
+				t.Fatalf("status = %s after refused approval", still.Status)
+			}
+		})
+	}
+}
+
+func TestApproveProposal_SucceedsWhenLinesUnchangedOrRestored(t *testing.T) {
+	s := setup(t)
+	ctx := ctxAs(1, leA, "alice")
+	item := seed(t, s, ctx, leA, vendor1, 1, "2027-03-10", "USD", "100.00")
+	created, _, err := s.CreateProposal(ctx, proposalFor(t, s, ctx, leA, "run-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.BlockVendor(ctx, item.VendorID, "review"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApproveProposal(ctx, created.ID, "bob"); err == nil {
+		t.Fatal("approved with a blocked vendor")
+	}
+	if err := s.UnblockVendor(ctx, item.VendorID); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.ApproveProposal(ctx, created.ID, "bob"); err != nil || got.Status != domain.ProposalApproved {
+		t.Fatalf("approve after unblock: %+v err=%v", got, err)
+	}
+}

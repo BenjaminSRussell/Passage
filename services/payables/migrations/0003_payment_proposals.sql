@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS ap_payment_proposal_line (
   proposal_id uuid NOT NULL,
   group_id uuid NOT NULL,
   legal_entity_id uuid NOT NULL,
+  item_version integer NOT NULL,
   open_amount numeric(20,6) NOT NULL,
   discount_amount numeric(20,6) NOT NULL,
   pay_amount numeric(20,6) NOT NULL CHECK (pay_amount > 0),

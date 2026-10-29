@@ -394,6 +394,10 @@ func (a *API) createProposal(w http.ResponseWriter, r *http.Request) {
 		a.fault(w, r, "payment proposal lookup failed", err)
 		return
 	}
+	if runDate.Before(a.today()) {
+		a.invalid(w, r, map[string]string{"runDate": "must not be earlier than today (UTC)"})
+		return
+	}
 	candidates, err := a.proposals.store.Candidates(ctx, le, req.DueBy)
 	if errors.Is(err, store.ErrTooManyItems) {
 		a.invalid(w, r, map[string]string{"dueBy": fmt.Sprintf("more than %d open items are due; lower dueBy", store.MaxProposalItems)})
@@ -490,7 +494,10 @@ func (a *API) approveProposal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	proposal, err := a.proposals.store.ApproveProposal(r.Context(), id, caller.UserID)
+	var changed *store.LinesChangedError
 	switch {
+	case errors.As(err, &changed):
+		a.problem(w, r, http.StatusConflict, domain.CodeProposalConflict, changed.Error())
 	case errors.Is(err, store.ErrProposalNotFound):
 		a.problem(w, r, http.StatusNotFound, codeNotFound, "payment proposal not found")
 	case errors.Is(err, store.ErrNotDraft):

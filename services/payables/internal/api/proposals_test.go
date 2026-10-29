@@ -553,6 +553,12 @@ func TestApproveProposal(t *testing.T) {
 
 	s.approveErr = store.ErrSelfApproval
 	wantProblem(t, caller{duties: dutyApprove, user: "alice", entity: entityA}.send(r, http.MethodPost, "/v1/payables/payment-proposals/"+proposalID+":approve", ""), http.StatusForbidden, domain.CodeSegregation)
+	s.approveErr = &store.LinesChangedError{OpenItemIDs: []string{itemOne, itemTwo}}
+	conflict := approver.send(r, http.MethodPost, "/v1/payables/payment-proposals/"+proposalID+":approve", "")
+	wantProblem(t, conflict, http.StatusConflict, domain.CodeProposalConflict)
+	if !strings.Contains(conflict.Body.String(), itemOne) || !strings.Contains(conflict.Body.String(), itemTwo) {
+		t.Fatalf("conflict must name the offending lines: %s", conflict.Body)
+	}
 	s.approveErr = store.ErrNotDraft
 	wantProblem(t, approver.send(r, http.MethodPost, "/v1/payables/payment-proposals/"+proposalID+":approve", ""), http.StatusConflict, domain.CodeProposalState)
 	s.approveErr = store.ErrProposalNotFound
@@ -593,4 +599,17 @@ func TestProposalRoutes_AbsentUntilConfigured(t *testing.T) {
 	if rec.Code != http.StatusNotFound && rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("unconfigured route answered %d", rec.Code)
 	}
+}
+
+func TestCreateProposal_RejectsBackdatedRunDateButReplaysOldRun(t *testing.T) {
+	s := newFakeStore()
+	s.candidates = dueCandidates()[:1]
+	r, _ := proposalRouter(s, nil)
+	past := strings.Replace(proposalBody, "2026-01-10", "2026-01-09", 1)
+	body := wantProblem(t, creator.send(r, http.MethodPost, "/v1/payables/payment-proposals", past), http.StatusBadRequest, "COM-0001")
+	if errs, _ := body["errors"].(map[string]any); errs["runDate"] == nil || s.createCalls != 0 || s.candCalls != 0 {
+		t.Fatalf("backdated run must be refused before selection: %v creates=%d", body, s.createCalls)
+	}
+	s.proposals[entityA+"2026-01-09"+"run-1"] = store.Proposal{ID: proposalID, RequestHash: "x"}
+	wantProblem(t, creator.send(r, http.MethodPost, "/v1/payables/payment-proposals", past), http.StatusConflict, domain.CodeProposalConflict)
 }

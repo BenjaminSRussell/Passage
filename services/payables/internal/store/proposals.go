@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -27,6 +28,12 @@ var (
 	ErrItemsChanged     = errors.New("open items changed, were held or were reserved while the proposal was built")
 	ErrTooManyItems     = errors.New("more open items are due than one proposal can hold")
 )
+
+type LinesChangedError struct{ OpenItemIDs []string }
+
+func (e *LinesChangedError) Error() string {
+	return "open items changed, were held, settled or blocked since the proposal was created: " + strings.Join(e.OpenItemIDs, ", ")
+}
 
 type Proposal struct {
 	ID                  string                 `json:"id"`
@@ -168,8 +175,8 @@ func insertGroups(ctx context.Context, tx pgx.Tx, tenantID, proposalID string, i
 	for _, g := range in.Groups {
 		for _, l := range g.Lines {
 			lines++
-			batch.Queue(`insert into ap_payment_proposal_line (tenant_id, open_item_id, proposal_id, group_id, legal_entity_id, open_amount, discount_amount, pay_amount, rate, valued_amount)
-				select i.tenant_id, i.id, $2::uuid, $3::uuid, i.legal_entity_id, $5::numeric, $6::numeric, $7::numeric, $8::numeric, $9::numeric from ap_open_item i
+			batch.Queue(`insert into ap_payment_proposal_line (tenant_id, open_item_id, proposal_id, group_id, legal_entity_id, item_version, open_amount, discount_amount, pay_amount, rate, valued_amount)
+				select i.tenant_id, i.id, $2::uuid, $3::uuid, i.legal_entity_id, i.version, $5::numeric, $6::numeric, $7::numeric, $8::numeric, $9::numeric from ap_open_item i
 				where i.id = $1::uuid and i.version = $4 and i.open_amount = $5::numeric and not i.payment_hold
 				and not exists (select 1 from ap_vendor_block b where b.vendor_id = i.vendor_id)`,
 				l.OpenItemID, proposalID, g.ID, l.OpenItemVersion, l.OpenAmount.String(), l.Discount.String(), l.Pay.String(), l.Rate.String(), l.Valued.String())
@@ -274,6 +281,36 @@ func parseDecimals(dst []*decimal.Decimal, raw ...string) error {
 	return nil
 }
 
+func verifyLines(ctx context.Context, tx pgx.Tx, proposalID string) error {
+	rows, err := tx.Query(ctx, `select l.open_item_id::text,
+			(i.version <> l.item_version or i.open_amount <> l.open_amount or i.payment_hold or i.status not in ('OPEN', 'PARTIALLY_SETTLED')
+			 or exists (select 1 from ap_vendor_block b where b.vendor_id = i.vendor_id))
+		from ap_payment_proposal_line l join ap_open_item i on i.tenant_id = l.tenant_id and i.id = l.open_item_id
+		where l.proposal_id = $1::uuid order by l.open_item_id for update of i`, proposalID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var bad []string
+	for rows.Next() {
+		var id string
+		var changed bool
+		if err := rows.Scan(&id, &changed); err != nil {
+			return err
+		}
+		if changed {
+			bad = append(bad, id)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(bad) > 0 {
+		return &LinesChangedError{OpenItemIDs: bad}
+	}
+	return nil
+}
+
 func (s *Postgres) ApproveProposal(ctx context.Context, id, approver string) (Proposal, error) {
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var status, createdBy string
@@ -289,6 +326,9 @@ func (s *Postgres) ApproveProposal(ctx context.Context, id, approver string) (Pr
 		}
 		if createdBy == approver {
 			return ErrSelfApproval
+		}
+		if err := verifyLines(ctx, tx, id); err != nil {
+			return err
 		}
 		_, err = tx.Exec(ctx, `update ap_payment_proposal set status = 'APPROVED', approved_by = $2, approved_at = now() where id = $1::uuid`, id, approver)
 		return err
