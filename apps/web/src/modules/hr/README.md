@@ -1,4 +1,4 @@
-# HR module (web, PSG-42 slices 1 to 3)
+# HR module (web, PSG-42 slices 1 to 4)
 
 The HR workspace for the HR service (`services/hr/api/openapi.yaml`).
 Routes and nav are in `module.ts`; the shell discovers it through the registry.
@@ -20,6 +20,13 @@ Routes and nav are in `module.ts`; the shell discovers it through the registry.
 | `/hr/benefits/plans/:id` | Plan detail: terms, coverage options, and the eligibility simulation as of a date (totals, each worker with the reason, eligible-only filter) | `GET /benefits/plans/{id}`, `GET /benefits/plans/{id}/simulate?asOf=` |
 | `/hr/workers/:id` (Benefits card) | The worker's enrollments with the employee cost per period, life events with their window, an enroll form with the cost preview (window, eligibility and overlap refusals land on the fields or show the eligibility reason), a record-life-event form and an end-coverage form (termination keeps coverage to the month end) | `GET /workers/{id}/benefits`, `GET /benefits/plans`, `POST /benefits/enrollments`, `POST /benefits/life-events`, `POST /benefits/enrollments/{id}/end` |
 | `/hr/workers/:id` (Absence card) | The worker's balances for the current plan year (carry-over, accrued, used, available), their requests with cancel, and a request form whose balance and overlap refusals land on the fields; overlap warnings are shown after submit | `GET /workers/{id}/absence/balances?asOf=`, `GET /absence/requests?workerId=`, `GET /absence/plans`, `POST /absence/requests` |
+| `/hr/skills` | Skill catalog with each rating scale, paged | `GET /skills?cursor=` |
+| `/hr/skills/new` | New skill: code, name, rating scale 1 to 10 | `POST /skills` |
+| `/hr/skills/search?skills=&minRating=&certs=&asOf=` | Find workers by skill: CODE or CODE:rating terms, certificates valid on the date, each match with its ratings against the minimums; warns when the 500-row limit cut the list | `GET /skills/search` |
+| `/hr/certifications/expiring?withinDays=&asOf=` | Certificates expiring within 60, 30 or 7 days, soonest first, with the days left and a link to the worker | `GET /certifications/expiring` |
+| `/hr/workers/:id` (Skills card) | The worker's ratings, a rate form whose ratings follow the chosen skill's scale (a stale assessment lands on the date), and the gap against a chosen position (AC-42.16) | `GET`/`POST /workers/{id}/skills`, `GET /skills`, `GET /positions`, `GET /workers/{id}/skill-gap?positionId=` |
+| `/hr/workers/:id` (Certifications card) | The worker's certificates with their validity today and a record form (expiry as months, a date or never) | `GET`/`POST /workers/{id}/certifications` |
+| `/hr/positions/:id` (Skill profile card) | The skills the position requires with set, change and remove | `GET`/`POST /positions/{id}/skill-requirements`, `DELETE /positions/{id}/skill-requirements/{skillCode}` |
 
 The as-of date is kept in the URL (`?date=`), so it survives reloads and can be
 shared (PRD 8.42.6). Every create form sends one `Idempotency-Key` per filled-in

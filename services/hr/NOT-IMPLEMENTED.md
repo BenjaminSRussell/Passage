@@ -13,7 +13,13 @@ the CEL eligibility rule with the waiting period, the whole-workforce
 simulation, life events, enrollment inside the open window or a life event's
 window, ending an enrollment (termination to the end of the month), the
 `benefitenrollment.changed` event, and the web screens for plans, the
-simulation and the worker's benefits. Everything below is either a later slice of PSG-42 or a handoff to another wave or owner.
+simulation and the worker's benefits. Slice 4 builds skills: the skill
+catalog with rating scales, worker ratings with the stale-assessment guard and
+the `workerskill.changed` event, certificates with expiry (given as a date or
+as validity months) and the `certification.issued` event, the
+certifications-expiring inquiry, position skill requirements, gap analysis
+(AC-42.16) and the skill search by ratings and valid certificates, with the
+web screens for all of them. Everything below is either a later slice of PSG-42 or a handoff to another wave or owner.
 Statuses: **later slice of PSG-42** (same wave, next slice) or **handoff** (needs
 another owner).
 
@@ -60,7 +66,11 @@ another owner).
 | 3 | Plan provider checked against the wave-7 party service; plan end and retirement of options | handoff (wave 7) and later slice | `providerPartyId` is stored as a uuid; plans and options cannot be edited or retired yet (no update endpoint, so no ETag) |
 | 3 | Benefits enrollment wizard in ESS and "My benefits" for employees | later slice of PSG-42 (ESS) and handoff (shell) | The web module has the HR screens. An employee with only `EssBenefits` can call the API for their own worker but has no page until the shell gives the signed-in user's worker id or `apps/ess` exists |
 | 3 | Employee self-service and manager self-service | later slice of PSG-42 (ESS) and handoff (shell) | See `apps/ess/README.md`; MSS needs the approval flows |
-| 4 | Skills, certifications, goals, performance reviews | later slice of PSG-42 | Not started |
+| 4 | Skills and certifications (FR-42.10, BR-42.8) | **built** | See the service README. Certificate codes are free text checked for shape; there is no certificate-type catalog (issuer body, default validity) yet |
+| 4 | Certificate expiry notifications at 60/30/7 days (BR-42.8) | handoff (wave 5) and later slice | The expiring inquiry (`GET /certifications/expiring`, 8.42.14) and its screen are built; sending notifications needs the FR-42.20 reminder rules on the wave-5 alert engine and the `hr-cert-expiry` schedule |
+| 4 | Expired certificate removes the skill match in wave-45 dispatch | handoff (wave 45) | `certification.issued` carries `expires_on`; dispatch must stop matching on that day. HR's own skill search already ignores expired certificates |
+| 4 | Rating history | later slice of PSG-42 | Only the current rating per worker and skill is stored; the history is in the `workerskill.changed` events |
+| 4 | Goals, review templates, review cycle with sign-off (FR-42.11) | later slice of PSG-42 | Not started |
 | 4 | Recruitment pipeline basics | later slice of PSG-42 | Not started (FR-42.21) |
 | 5 | Consent records, retention policies per data class, country field slots | later slice of PSG-42 | Not started; retention purge job `hr-retention-purge` not built |
 | 5 | PII vault: encrypted columns, masked reads, audited unmasked reads | **built** for national ID and bank account | `worker_pii` sealed with AES-256-GCM, masked by default, reveal needs `HcmPIIRead` and a reason, audit row in the same transaction. Date of birth and home address (FR-42.1) are not collected yet; they come with ESS personal data |
@@ -70,7 +80,12 @@ another owner).
 | 6 | Questionnaire engine (design, schedules, answers, results) | later slice of PSG-42 | Not started (FR-42.15, BR-42.10) |
 | 7 | Injury and illness register, OSHA 300/300A/301 extracts | later slice of PSG-42 | Not started (FR-42.16, BR-42.11); the form layouts and ITA submission are in the wave-48 US pack |
 | 7 | Loaned items | later slice of PSG-42 | Not started (FR-42.17); the link to wave-44 assets is a handoff to wave 44 |
-| 7 | Skill mapping and gap analysis | later slice of PSG-42 | Not started (FR-42.18) |
+| 7 | Skill mapping and gap analysis (FR-42.18) | **built** for workers and positions | Search by skills with minimum ratings and by certificates valid on the date, over workers employed on that date, at most 500 results. Gap analysis compares a worker with a position's skill profile as (skill, required, actual, delta) |
+| 7 | Skill search `availableFrom` (availability) | later slice of PSG-42 and handoff (waves 25, 45) | Refused with a field error until availability exists (absence calendars, wave-25 time, wave-45 schedules) |
+| 7 | Skill search over FR-42.21 candidates | later slice of PSG-42 | Candidates are not built |
+| 7 | Job skill profiles (gap against a job, not only a position) | later slice of PSG-42 | The `Job` entity does not exist yet; positions carry the profile |
+| 7 | Manager sees only their subtree in skill search and gap (8.42.17, OPA) | handoff (platform OPA) | `HcmOrgInquire` searches the tenant; positions follow the legal-entity scope |
+| 7 | GIN index on WorkerSkill (8.42.19) | built differently | A btree on (tenant, skill, rating) answers "at least n on skill s" as a range scan; the 500/day budget is not load-tested |
 | 8 | Onboarding and offboarding checklists, worker tasks | later slice of PSG-42 | Not started (FR-42.19, BR-42.12) |
 | 8 | HR reminders on the wave-5 alert rules | handoff (wave 5) | The reminder rule model needs the alert rule engine; not started |
 | 8 | Requisitions, candidates, offers | later slice of PSG-42 | Not started (FR-42.21, BR-42.15) |
@@ -81,7 +96,10 @@ Deploy items: **HR workspace** is built as the web module
 `apps/web/src/modules/hr` (workers, positions, worker detail with PII reveal,
 employments, the as-of view, the worker's absence and benefits; position
 detail with assignments; absence plans with accrual and year end; the absence
-request queue; benefit plans with the eligibility simulation). The org chart, personnel actions, absence calendars and the
+request queue; benefit plans with the eligibility simulation; the skill
+catalog, skill search and expiring certifications, the worker's skills,
+certificates and gap, and the position's skill profile). The HR workspace
+tiles (pending actions, expiring certifications, open enrollment), the org chart, personnel actions, absence calendars and the
 self-service portal screens are not. The **ESS
 portal** is not built here (apps/ess README). **Demo workforce loaded** is not
 built (needs the `hr-workforce-1200` generator under `testdata/`).
@@ -105,20 +123,20 @@ built (needs the `hr-workforce-1200` generator under `testdata/`).
 | AC-42.13 compensation budget block | later slice of PSG-42 | Cycles not started |
 | AC-42.14 concurrent and global as-of with pay groups | partly built | Both employments appear in `as-of` (entities are separate rows). Payroll pay-group memberships are wave 43 |
 | AC-42.15 loaned item blocks offboarding | later slice of PSG-42 | Loaned items and offboarding not started |
-| AC-42.16 skill gap | later slice of PSG-42 | Skill profiles not started |
+| AC-42.16 skill gap | **built** (domain, store and web tests) | `TestSkillGapAC4216` runs POS-200 (WELDING ≥ 3, PLC ≥ 2) against WELDING 4, PLC 1 through the database and gets only (PLC, 2, 1, −1). The DB test needs `PASSAGE_TEST_DATABASE_URL` |
 
 ## Platform and API conventions not yet used
 
 | Item | Status | Reason |
 |---|---|---|
 | Kernel `httpx` idempotency middleware (replay headers, 60 s lease, 24 h expiry) | handoff (platform) and later slice | Slice 1 stores the `Idempotency-Key` on the worker, employment, position and assignment rows (the org pattern): a replay with the same body returns the stored row, another body is `idempotency_key_reuse`, a concurrent duplicate is `idempotency_key_in_flight`. Keys do not expire and there is no replay header |
-| `ETag` on reads and `If-Match` on PUT/PATCH/DELETE | later slice of PSG-42 | Slices 1 to 3 have no update endpoints; `ETag` is not set on reads yet, so the OpenAPI does not declare it. Absence decisions and benefit enrollment ends are guarded by row locks and the row state instead |
+| `ETag` on reads and `If-Match` on PUT/PATCH/DELETE | later slice of PSG-42 | Slices 1 to 3 have no update endpoints; `ETag` is not set on reads yet, so the OpenAPI does not declare it. Absence decisions and benefit enrollment ends are guarded by row locks and the row state instead. Slice 4's rating and requirement writes are set-to-value upserts (a retry is harmless): a rating is guarded by its assessment date (an older one is HCM-SKL-STALE) under a worker row lock, and a requirement is last-writer-wins |
 | `Idempotency-Key` on absence decide, accrue and close, and on ending an enrollment | built differently | Accrual, year end and expiry are keyed per (plan, period or year, worker) in the database, so retries are safe without a key. A decision or cancel replayed on a request that already has that outcome returns it unchanged; a different outcome is HCM-ABS-STATE. Ending an enrollment again with the same last day and reason returns it unchanged; otherwise HCM-BEN-ENDED |
 | OPA decision and `legalEntityScopes` | handoff (platform / edge-identity) | Duties are checked locally by `authz.RequireDuty`; legal-entity scoping is not enforced yet |
 | Effective-date granularity TIMESTAMP and tenant-local midnight | later slice of PSG-42 | Slice 1 uses UTC days (DAY granularity) |
 | Future-dated actions (up to 365 days) and workflow approval | later slice of PSG-42 | Depends on personnel actions and wave-4 workflow |
 | `party_person_id` checked against the wave-7 party service | handoff (wave 7 party) | Stored as a uuid; existence is not checked |
-| Outbox events `position.changed`, `employment.changed` for terminations, personnel action events | later slice of PSG-42 | Slice 2 adds `absence.approved`; slice 3 adds `benefitenrollment.changed` (the PRD's `benefit.enrollment.changed`, collapsed like `positionassignment`). Slice 1 emits `worker.created`, `employment.changed` (action HIRE, with the exclusive end when a termination date is given) and `positionassignment.changed` (with `manager_position_id`). The PRD name `position.assignment.changed` is written as `positionassignment` to fit the kernel event-type rule (see asyncapi) |
+| Outbox events `position.changed`, `employment.changed` for terminations, personnel action events | later slice of PSG-42 | Slice 2 adds `absence.approved`; slice 3 adds `benefitenrollment.changed` (the PRD's `benefit.enrollment.changed`, collapsed like `positionassignment`); slice 4 adds `workerskill.changed` and `certification.issued` (not in the PRD event table; wave-45 dispatch keeps its technician skills from them). Slice 1 emits `worker.created`, `employment.changed` (action HIRE, with the exclusive end when a termination date is given) and `positionassignment.changed` (with `manager_position_id`). The PRD name `position.assignment.changed` is written as `positionassignment` to fit the kernel event-type rule (see asyncapi) |
 
 ## Reference fixtures (PRD 8.42.9)
 

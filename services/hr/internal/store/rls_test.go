@@ -81,7 +81,23 @@ func TestRowLevelSecurity(t *testing.T) {
 		t.Fatalf("enroll: %v", err)
 	}
 
+	// Skills: a catalog skill, a rating, a certificate and a position
+	// requirement of tenant 1.
+	mustSkill(t, s, one, "WELDING", 5)
+	mustRate(t, s, one, w.ID, "WELDING", 3, day(time.March, 1))
+	mustCert(t, s, one, w.ID, "OSHA10", "2026-01-10", nil)
+	rlsPos := mustPosition(t, s, one, "POS-RLS-SKL", ids.New(), le, "1.00", false, day(time.January, 1), nil)
+	if _, err := s.SetRequirement(one, rlsPos.ID, "WELDING", 2); err != nil {
+		t.Fatal(err)
+	}
+
 	two := scoped(testkit.TenantID(2), "")
+	if found, err := s.SearchWorkers(two, []domain.Requirement{{Skill: "WELDING", MinRating: 1}}, nil, day(time.April, 1)); err != nil || len(found.Items) != 0 {
+		t.Errorf("tenant 2 skill search = %+v, err %v", found, err)
+	}
+	if _, err := s.SkillGapFor(scoped(testkit.TenantID(1), otherLE), w.ID, rlsPos.ID); err == nil {
+		t.Error("a caller scoped to another legal entity ran a gap against a position it cannot see")
+	}
 	if _, err := s.GetBenefitPlan(two, bplan.ID); err == nil {
 		t.Error("tenant 2 read tenant 1's benefit plan")
 	}
@@ -90,7 +106,8 @@ func TestRowLevelSecurity(t *testing.T) {
 	}
 	for _, table := range []string{"worker", "worker_pii", "employment", "hr_position", "position_hierarchy", "position_assignment", "audit_event",
 		"absence_plan", "absence_balance", "absence_accrual_period", "absence_accrual_line", "absence_close_line", "absence_request",
-		"benefit_plan", "benefit_plan_option", "benefit_life_event", "benefit_enrollment"} {
+		"benefit_plan", "benefit_plan_option", "benefit_life_event", "benefit_enrollment",
+		"hr_skill", "worker_skill", "hr_certification", "position_skill_requirement"} {
 		if n := count(two, table); n != 0 {
 			t.Errorf("tenant 2 sees %d rows in %s", n, table)
 		}

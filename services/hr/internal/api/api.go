@@ -67,6 +67,10 @@ type API struct {
 	simulations      atomic.Int64
 	enrollments      atomic.Int64
 	enrollmentsEnded atomic.Int64
+	skillsCreated    atomic.Int64
+	skillRatings     atomic.Int64
+	certsIssued      atomic.Int64
+	skillSearches    atomic.Int64
 }
 
 // New builds the API over a store.
@@ -105,6 +109,18 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyEssBenefits)).Post("/v1/hr/benefits/enrollments", a.createBenefitEnrollment)
 	r.With(authz.RequireDuty(dutyWorkerMaintain)).Post("/v1/hr/benefits/enrollments/{id}/end", enrollmentRoute(a.endBenefitEnrollment))
 	r.With(authz.RequireDuty(dutyEssBenefits)).Get("/v1/hr/workers/{id}/benefits", workerRoute(a.workerBenefits))
+	r.With(authz.RequireDuty(dutySetupAdmin)).Post("/v1/hr/skills", a.createSkill)
+	r.With(authz.RequireDuty(dutyWorkerInquire)).Get("/v1/hr/skills", a.listSkills)
+	r.With(authz.RequireDuty(dutyOrgInquire)).Get("/v1/hr/skills/search", a.searchSkills)
+	r.With(authz.RequireDuty(dutyWorkerMaintain)).Post("/v1/hr/workers/{id}/skills", workerRoute(a.rateWorkerSkill))
+	r.With(authz.RequireDuty(dutyWorkerInquire)).Get("/v1/hr/workers/{id}/skills", workerRoute(a.listWorkerSkills))
+	r.With(authz.RequireDuty(dutyWorkerMaintain)).Post("/v1/hr/workers/{id}/certifications", workerRoute(a.issueCertification))
+	r.With(authz.RequireDuty(dutyWorkerInquire)).Get("/v1/hr/workers/{id}/certifications", workerRoute(a.listCertifications))
+	r.With(authz.RequireDuty(dutyWorkerInquire)).Get("/v1/hr/certifications/expiring", a.expiringCertifications)
+	r.With(authz.RequireDuty(dutyOrgInquire)).Get("/v1/hr/workers/{id}/skill-gap", workerRoute(a.skillGap))
+	r.With(authz.RequireDuty(dutyOrgInquire)).Get("/v1/hr/positions/{id}/skill-requirements", positionRoute(a.listRequirements))
+	r.With(authz.RequireDuty(dutyOrgMaintain)).Post("/v1/hr/positions/{id}/skill-requirements", positionRoute(a.setRequirement))
+	r.With(authz.RequireDuty(dutyOrgMaintain)).Delete("/v1/hr/positions/{id}/skill-requirements/{skillCode}", positionRoute(a.removeRequirement))
 }
 
 // ready replaces the kernel's static /readyz: it pings the database within
@@ -142,6 +158,10 @@ func (a *API) Metrics() http.Handler {
 		counter("hr_benefit_simulations_total", "Whole-workforce eligibility simulations run.", a.simulations.Load())
 		counter("hr_benefit_enrollments_total", "Benefit enrollments recorded; idempotent replays are not counted.", a.enrollments.Load())
 		counter("hr_benefit_enrollments_ended_total", "Benefit enrollments ended; repeated ends are not counted.", a.enrollmentsEnded.Load())
+		counter("hr_skills_created_total", "Catalog skills created; idempotent replays are not counted.", a.skillsCreated.Load())
+		counter("hr_worker_skill_ratings_total", "Worker skill ratings that changed a stored rating or date.", a.skillRatings.Load())
+		counter("hr_certifications_issued_total", "Certifications issued; idempotent replays are not counted.", a.certsIssued.Load())
+		counter("hr_skill_searches_total", "Skill searches answered.", a.skillSearches.Load())
 	})
 }
 

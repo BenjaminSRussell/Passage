@@ -3,13 +3,15 @@ info:
   title: Passage HR API
   version: 0.1.0
   description: |
-    Wave 42 slices 1 to 3 (PSG-42): workers, employments, positions and
+    Wave 42 slices 1 to 4 (PSG-42): workers, employments, positions and
     position assignments with effective dating, the as-of manager query, the
     audited PII vault, absence plans, accrual, year end and carry-over,
-    balances and requests with approval, and benefit plans with CEL
-    eligibility, a workforce simulation, life events and enrollments.
-    Personnel actions, learning, questionnaires, incidents, recruiting and
-    compensation cycles are later slices (see NOT-IMPLEMENTED.md).
+    balances and requests with approval, benefit plans with CEL
+    eligibility, a workforce simulation, life events and enrollments, and
+    skills: the catalog, worker ratings, certificates with expiry, position
+    skill profiles, gap analysis and skill search. Personnel actions,
+    performance and goals, learning, questionnaires, incidents, recruiting
+    and compensation cycles are later slices (see NOT-IMPLEMENTED.md).
 servers:
   - url: https://api.{env}.passage.dev
     variables:
@@ -968,6 +970,405 @@ paths:
           $ref: "#/components/responses/Problem"
         "404":
           $ref: "#/components/responses/Problem"
+  /v1/hr/skills:
+    get:
+      operationId: listSkills
+      summary: List the skill catalog by code (FR-42.10)
+      x-passage-duty: HcmWorkerInquire
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page of skills
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillList"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createSkill
+      summary: Add a skill to the catalog with its rating scale 1..scaleMax (FR-42.10)
+      x-passage-duty: HcmSetupAdmin
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSkillRequest"
+      responses:
+        "201":
+          description: Skill created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Skill"
+        "200":
+          description: The stored skill on an idempotent replay
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Skill"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          description: HCM-SKL-DUPLICATE (code taken) or idempotency_key_in_flight
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/skills/search:
+    get:
+      operationId: searchSkills
+      summary: Skill mapping search (FR-42.18)
+      description: |
+        Workers with an employment on asOf (under the caller's legal-entity
+        scope) who are rated at least the minimum on every skill and hold
+        every certificate valid on asOf, by personnel number, at most 500
+        (truncated is true when more matched). Give skills, certs or both. A
+        skill code not in the catalog matches nobody. availableFrom is refused
+        until availability exists (NOT-IMPLEMENTED.md).
+      x-passage-duty: HcmOrgInquire
+      parameters:
+        - name: skills
+          in: query
+          required: false
+          description: Comma-separated CODE or CODE:minRating terms, at most 20 (e.g. WELDING:3,PLC).
+          schema:
+            type: string
+        - name: minRating
+          in: query
+          required: false
+          description: Minimum for terms without their own; default 1.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 10
+        - name: certs
+          in: query
+          required: false
+          description: Comma-separated certificate codes, at most 20.
+          schema:
+            type: string
+        - $ref: "#/components/parameters/AsOf"
+      responses:
+        "200":
+          description: Matching workers with each searched skill next to their rating
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillSearch"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/workers/{id}/skills:
+    get:
+      operationId: listWorkerSkills
+      summary: A worker's skill profile, one current rating per skill
+      x-passage-duty: HcmWorkerInquire
+      parameters:
+        - $ref: "#/components/parameters/WorkerId"
+      responses:
+        "200":
+          description: The profile by skill code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkerSkillList"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: rateWorkerSkill
+      summary: Record a worker's rating on a skill, replacing the earlier one (FR-42.10)
+      description: |
+        The rating must be on the skill's scale (HCM-SKL-RATING). An
+        assessment dated before the stored one is HCM-SKL-STALE, so a late
+        retry cannot overwrite a newer rating. The same rating and date again
+        changes nothing and publishes no event, so a retry is safe without an
+        Idempotency-Key. A changed rating publishes workerskill.changed.
+      x-passage-duty: HcmWorkerMaintain
+      parameters:
+        - $ref: "#/components/parameters/WorkerId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RateWorkerSkillRequest"
+      responses:
+        "200":
+          description: The stored rating
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkerSkill"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          description: HCM-WRK-NOT-FOUND or HCM-SKL-NOT-FOUND
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: HCM-SKL-STALE (a newer assessment is stored)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: HCM-SKL-RATING (rating outside the skill's scale)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/hr/workers/{id}/certifications:
+    get:
+      operationId: listCertifications
+      summary: A worker's certificates, newest first, with validity as-of a date (BR-42.8)
+      x-passage-duty: HcmWorkerInquire
+      parameters:
+        - $ref: "#/components/parameters/WorkerId"
+        - $ref: "#/components/parameters/AsOf"
+      responses:
+        "200":
+          description: The certificates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CertificationList"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: issueCertification
+      summary: Record a certificate a worker holds (BR-42.8)
+      description: |
+        Give expiresOn or validityMonths (expiry = issue date + months, on the
+        month's last day when the day does not exist), or neither for a
+        certificate that never expires. Validity is [issuedOn, expiresOn).
+        Publishes certification.issued.
+      x-passage-duty: HcmWorkerMaintain
+      parameters:
+        - $ref: "#/components/parameters/WorkerId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IssueCertificationRequest"
+      responses:
+        "201":
+          description: Certificate recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Certification"
+        "200":
+          description: The stored certificate on an idempotent replay
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Certification"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          description: HCM-CERT-DUPLICATE (same code and issue date for the worker) or idempotency_key_in_flight
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/certifications/expiring:
+    get:
+      operationId: listExpiringCertifications
+      summary: Certifications expiring (8.42.14, BR-42.8)
+      description: |
+        Certificates valid on asOf that expire within withinDays after it,
+        soonest first. A certificate already renewed (a later one of the same
+        code for the worker that is valid longer) is left out.
+      x-passage-duty: HcmWorkerInquire
+      parameters:
+        - $ref: "#/components/parameters/AsOf"
+        - name: withinDays
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 366
+            default: 60
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page of expiring certificates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExpiringCertificationList"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/workers/{id}/skill-gap:
+    get:
+      operationId: skillGap
+      summary: Gap between a position's skill profile and the worker's ratings (FR-42.18, AC-42.16)
+      description: |
+        comparison lists every requirement with the worker's rating (0 when
+        not rated) and delta = actual - required; gaps lists only the rows
+        with a negative delta.
+      x-passage-duty: HcmOrgInquire
+      parameters:
+        - $ref: "#/components/parameters/WorkerId"
+        - name: positionId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The comparison
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillGap"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          description: HCM-WRK-NOT-FOUND or HCM-POS-NOT-FOUND
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/hr/positions/{id}/skill-requirements:
+    get:
+      operationId: listSkillRequirements
+      summary: A position's skill profile by skill code
+      x-passage-duty: HcmOrgInquire
+      parameters:
+        - $ref: "#/components/parameters/PositionId"
+      responses:
+        "200":
+          description: The requirements
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillRequirementList"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: setSkillRequirement
+      summary: Set or replace the minimum rating a position needs in a skill (FR-42.18)
+      description: Replaces an earlier minimum for the same skill, so a retry is safe without an Idempotency-Key.
+      x-passage-duty: HcmOrgMaintain
+      parameters:
+        - $ref: "#/components/parameters/PositionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetSkillRequirementRequest"
+      responses:
+        "200":
+          description: The stored requirement
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillRequirement"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          description: HCM-POS-NOT-FOUND or HCM-SKL-NOT-FOUND
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: HCM-SKL-RATING (minimum outside the skill's scale)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /v1/hr/positions/{id}/skill-requirements/{skillCode}:
+    delete:
+      operationId: removeSkillRequirement
+      summary: Drop a skill from a position's profile
+      x-passage-duty: HcmOrgMaintain
+      parameters:
+        - $ref: "#/components/parameters/PositionId"
+        - name: skillCode
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Removed
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          description: HCM-POS-NOT-FOUND or HCM-SKL-REQ-NOT-FOUND
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
 components:
   securitySchemes:
     bearerAuth:
@@ -1017,6 +1418,14 @@ components:
       schema:
         type: string
         format: uuid
+    AsOf:
+      name: asOf
+      in: query
+      required: false
+      description: YYYY-MM-DD; default today (UTC).
+      schema:
+        type: string
+        format: date
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -2127,3 +2536,283 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/LifeEvent"
+    CreateSkillRequest:
+      type: object
+      additionalProperties: false
+      required: [code, name]
+      properties:
+        code:
+          type: string
+          pattern: "^[A-Z0-9][A-Z0-9_-]{0,19}$"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        scaleMax:
+          type: integer
+          minimum: 1
+          maximum: 10
+          default: 5
+    Skill:
+      type: object
+      required: [id, code, name, scaleMax, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        scaleMax:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+    SkillList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Skill"
+        nextCursor:
+          type: string
+    RateWorkerSkillRequest:
+      type: object
+      additionalProperties: false
+      required: [skillCode, rating, assessedOn]
+      properties:
+        skillCode:
+          type: string
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 10
+        assessedOn:
+          type: string
+          format: date
+          description: Not in the future.
+    WorkerSkill:
+      type: object
+      required: [workerId, skillId, skillCode, skillName, scaleMax, rating, assessedOn, updatedAt]
+      properties:
+        workerId:
+          type: string
+          format: uuid
+        skillId:
+          type: string
+          format: uuid
+        skillCode:
+          type: string
+        skillName:
+          type: string
+        scaleMax:
+          type: integer
+        rating:
+          type: integer
+        assessedOn:
+          type: string
+          format: date
+        updatedAt:
+          type: string
+          format: date-time
+    WorkerSkillList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkerSkill"
+    IssueCertificationRequest:
+      type: object
+      additionalProperties: false
+      required: [code, name, issuedOn]
+      properties:
+        code:
+          type: string
+          pattern: "^[A-Z0-9][A-Z0-9_-]{0,19}$"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        issuer:
+          type: string
+          maxLength: 120
+        issuedOn:
+          type: string
+          format: date
+          description: Not in the future.
+        expiresOn:
+          type: string
+          format: date
+          description: After issuedOn; not with validityMonths.
+        validityMonths:
+          type: integer
+          minimum: 1
+          maximum: 240
+    Certification:
+      type: object
+      required: [id, workerId, code, name, issuedOn, valid]
+      properties:
+        id:
+          type: string
+          format: uuid
+        workerId:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        issuer:
+          type: string
+        issuedOn:
+          type: string
+          format: date
+        expiresOn:
+          type: string
+          format: date
+          description: Exclusive; absent when the certificate never expires.
+        valid:
+          type: boolean
+          description: Valid on the as-of date of the read (today for a create).
+    CertificationList:
+      type: object
+      required: [asOf, items]
+      properties:
+        asOf:
+          type: string
+          format: date
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Certification"
+    ExpiringCertification:
+      allOf:
+        - $ref: "#/components/schemas/Certification"
+        - type: object
+          required: [personnelNumber, legalName, daysLeft]
+          properties:
+            personnelNumber:
+              type: string
+            legalName:
+              type: string
+            daysLeft:
+              type: integer
+    ExpiringCertificationList:
+      type: object
+      required: [asOf, withinDays, items]
+      properties:
+        asOf:
+          type: string
+          format: date
+        withinDays:
+          type: integer
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExpiringCertification"
+        nextCursor:
+          type: string
+    SkillRequirement:
+      type: object
+      required: [positionId, skillId, skillCode, skillName, scaleMax, minRating]
+      properties:
+        positionId:
+          type: string
+          format: uuid
+        skillId:
+          type: string
+          format: uuid
+        skillCode:
+          type: string
+        skillName:
+          type: string
+        scaleMax:
+          type: integer
+        minRating:
+          type: integer
+    SkillRequirementList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/SkillRequirement"
+    SetSkillRequirementRequest:
+      type: object
+      additionalProperties: false
+      required: [skillCode, minRating]
+      properties:
+        skillCode:
+          type: string
+        minRating:
+          type: integer
+          minimum: 1
+          maximum: 10
+    SkillGapRow:
+      type: object
+      required: [skill, required, actual, delta]
+      properties:
+        skill:
+          type: string
+        required:
+          type: integer
+        actual:
+          type: integer
+          description: 0 when the worker is not rated on the skill.
+        delta:
+          type: integer
+          description: actual - required; negative is a shortfall.
+    SkillGap:
+      type: object
+      required: [workerId, positionId, met, comparison, gaps]
+      properties:
+        workerId:
+          type: string
+          format: uuid
+        positionId:
+          type: string
+          format: uuid
+        met:
+          type: boolean
+        comparison:
+          type: array
+          items:
+            $ref: "#/components/schemas/SkillGapRow"
+        gaps:
+          type: array
+          items:
+            $ref: "#/components/schemas/SkillGapRow"
+    SkillMatch:
+      type: object
+      required: [workerId, personnelNumber, legalName, skills]
+      properties:
+        workerId:
+          type: string
+          format: uuid
+        personnelNumber:
+          type: string
+        legalName:
+          type: string
+        skills:
+          type: array
+          items:
+            $ref: "#/components/schemas/SkillGapRow"
+    SkillSearch:
+      type: object
+      required: [asOf, items, truncated]
+      properties:
+        asOf:
+          type: string
+          format: date
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/SkillMatch"
+        truncated:
+          type: boolean

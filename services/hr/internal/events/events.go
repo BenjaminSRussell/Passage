@@ -20,11 +20,20 @@ var (
 	// PRD name benefit.enrollment.changed collapses to one entity segment like
 	// positionassignment.
 	BenefitEnrollmentChanged = events.Type(Context, "benefitenrollment", "changed", 1)
+	// WorkerSkillChanged is written in the same transaction as a worker's
+	// rating on a skill changes (FR-42.10); wave-45 dispatch keeps its
+	// technician skill index from it.
+	WorkerSkillChanged = events.Type(Context, "workerskill", "changed", 1)
+	// CertificationIssued is written in the same transaction as a certificate
+	// is recorded (BR-42.8). Wave-45 dispatch stops matching on the expiry day;
+	// reminders (FR-42.20) read expires_on.
+	CertificationIssued = events.Type(Context, "certification", "issued", 1)
 )
 
 // All lists every event type the service publishes (asyncapi.yaml).
 func All() []string {
-	return []string{WorkerCreated, EmploymentChanged, PositionAssignmentChanged, AbsenceApproved, BenefitEnrollmentChanged}
+	return []string{WorkerCreated, EmploymentChanged, PositionAssignmentChanged, AbsenceApproved, BenefitEnrollmentChanged,
+		WorkerSkillChanged, CertificationIssued}
 }
 
 // ActionHire is the employment.changed action for a new employment. Transfer,
@@ -107,4 +116,26 @@ type PositionAssignmentChangedData struct {
 	IsPrimary         bool    `json:"is_primary"`
 	ValidFrom         string  `json:"valid_from"`
 	ValidTo           *string `json:"valid_to"`
+}
+
+// WorkerSkillChangedData carries the skill code and the new rating; a rating
+// recorded again unchanged publishes nothing. previous_rating is null when
+// the worker was not rated on the skill before.
+type WorkerSkillChangedData struct {
+	WorkerID       string `json:"worker_id"`
+	SkillID        string `json:"skill_id"`
+	SkillCode      string `json:"skill_code"`
+	Rating         int    `json:"rating"`
+	PreviousRating *int   `json:"previous_rating"`
+	AssessedOn     string `json:"assessed_on"`
+}
+
+// CertificationIssuedData carries the certificate code and its validity
+// [issued_on, expires_on); a null expires_on never expires. No holder names.
+type CertificationIssuedData struct {
+	ID        string  `json:"id"`
+	WorkerID  string  `json:"worker_id"`
+	Code      string  `json:"code"`
+	IssuedOn  string  `json:"issued_on"`
+	ExpiresOn *string `json:"expires_on"`
 }
