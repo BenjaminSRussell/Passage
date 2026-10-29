@@ -5,6 +5,8 @@ Operator-facing documents for scale, DR, release and go-live.
 | Document | Purpose |
 |---|---|
 | [administrator-guide.md](administrator-guide.md) | Operator guide: duties, regions, failover, tenants, licenses, releases, alerts, error codes (FR-50.11) |
+| [tenant-administrator-guide.md](tenant-administrator-guide.md) | Customer administrator guide: duties, licence states, user types, SoD, cost statement, release rings, export (FR-50.11) |
+| [implementer-guide.md](implementer-guide.md) | Migration, localization, parallel run, cutover and hypercare for implementers (FR-50.11) |
 | [capacity-model.md](capacity-model.md) | Workload inputs to nodes, Postgres, Kafka (FR-50.9) |
 | [cost-model.md](cost-model.md) | Per-tenant metering, USD/EUR, accuracy target (BR-50.10) |
 | [upgrade-strategy.md](upgrade-strategy.md) | Rolling deploys, expand/contract, N/N-1 compatibility (FR-50.7) |

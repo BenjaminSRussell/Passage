@@ -75,6 +75,7 @@ assessor.
 ## Track 3: Tenant administrator (2 days)
 
 **Audience:** customer administrators (TenantAdmin duty). Not for operators (Track 6).
+**Guide:** [tenant administrator guide](tenant-administrator-guide.md).
 
 **Covers**
 - Users and roles: assigning roles within the license user types (full, operational, self-service).
@@ -102,6 +103,7 @@ assessor.
 ## Track 4: Implementer (5 days)
 
 **Audience:** partner and internal implementers who migrate a customer from AX or SAP.
+**Guide:** [implementer guide](implementer-guide.md).
 
 **Covers**
 - Migration pipeline: extraction, mapping to Passage metadata, validation, load, and reconciliation.

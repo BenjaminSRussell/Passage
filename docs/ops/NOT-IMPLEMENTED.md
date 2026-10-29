@@ -1,11 +1,11 @@
-# NOT-IMPLEMENTED — PSG-50 (wave 50), slices 1 to 6
+# NOT-IMPLEMENTED — PSG-50 (wave 50), slices 1 to 7
 
 Wave 50 owns only `deploy/multi-region/`, `load/` and `docs/ops/`, and its ownership entry lists no web
 module. It has no service directory, so there is no Go module, database table, OpenAPI/AsyncAPI file or
 web screen in this slice. Items below are either later slices of PSG-50 or handoffs to the wave that owns
 the code or the infrastructure.
 
-Status key: **built** = in slices 1 to 6. **later slice of PSG-50** = same wave, next slice. **handoff** =
+Status key: **built** = in slices 1 to 7. **later slice of PSG-50** = same wave, next slice. **handoff** =
 needs another owner or an out-of-path edit.
 
 ## Deliverable 1: performance campaign
@@ -92,8 +92,11 @@ needs another owner or an out-of-path edit.
 | Item | Status | Reason |
 |---|---|---|
 | Administrator guide for platform operators (regions, failover, tenants, licenses, releases, alerts, error codes): `administrator-guide.md` | built | describes operator procedures and targets; the `/api/v1/ops/*` steps route to runbooks until the ops service ships |
-| Tenant administrator guide: company setup, users, roles and module admin screens | later slice of PSG-50 | needs the shipped admin surfaces of waves 1–5 and the module screens |
-| Implementer guide (migration, localization, cutover) | later slice of PSG-50 | depends on waves 47–49 |
+| Implementer guide (FR-50.11: migration, localization, parallel run, cutover, hypercare): `implementer-guide.md` | built | written against the tools on main (wave 10 migration service, wave 49 migration factory pack runs, parallel runs and cutover runbooks, wave 48 country packs); its status table names each step that cannot run yet |
+| Tools the implementer guide relies on that are not on main: the migration service's connectors and batch loader (`POST /v1/integration/migration-runs` answers 501), the factory packs other than `open_items` and `project_wip` (MIG-0005), the parallel-run replay, the go/no-go decision endpoint and `cutover.decision.recorded.v1`, stored country pack installs with versions | handoff (wave 10 migration, wave 49 migration factory, wave 48 localization) | in those waves' paths; each is listed in their own NOT-IMPLEMENTED.md |
+| Tenant administrator guide (TenantAdmin duty: licence states and user types, user and role assignment, SoD, cost statement, release rings, export and decommission, status page, messages): `tenant-administrator-guide.md` | built | its status table names each screen or endpoint that is not on main |
+| Screens the tenant administrator guide relies on: user and role assignment (admin-security), licence inquiry with user-type usage counts, the GRACE banner, a tenant-side release ring setting | handoff (wave 2 identity, wave 3 `UsageSnapshot`, wave 1 shell, ops service) | not in wave 50's paths; the ops screens are also in the deliverable 2 row |
+| Company setup and module admin screens in the tenant administrator guide | later slice of PSG-50 | belong with the per-module functional guides below, once the modules' admin screens are complete |
 | API reference generator and undocumented-operation gate for OpenAPI: one Markdown page per service; an operation is documented with an operationId, a summary or description, `x-passage-duty`, a 2xx response and a description on every response (probe and `/internal/` routes are skipped) | built | `docs/ops/tools/api_reference.py`, tests in `test_api_reference.py` |
 | 0 undocumented operations (AC-50.11). Run on main on 2026-10-29 over 106 specs: 328 of 1359 operations undocumented. 278 lack a summary or description (org 97, costacct 32, product 23, engineering 22, batch 20, eam 19, budgeting 15, ledger 14, and 36 in 11 more services); 50 purchasing operations lack `x-passage-duty`; 11 product and 1 migration operations declare only a `default` response | handoff (each service owner) | the specs are in the services' paths. `services/party/api/openapi.yaml` and `services/print/api/openapi.yaml` are not valid YAML (flow mapping at party line 260, unquoted colon at print line 124), so no reference can be generated for them |
 | AsyncAPI event reference generator and undocumented-event gate: one Markdown page per service; an event is documented with a CloudEvents type `dev.passage.<context>.<entity>.<verb>.v<n>` (`x-passage-type`, else the message name), a title, summary or description, a payload schema and no duplicate type; an operation has action send or receive, a channel `$ref` and only that channel's messages, and is described by itself or by its messages | built | `docs/ops/tools/asyncapi_reference.py`, tests in `test_asyncapi_reference.py` |
