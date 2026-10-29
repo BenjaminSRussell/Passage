@@ -945,7 +945,8 @@ paths:
         the posting pipeline, and marks the batch posted with the entry id in the same transaction. An
         approved batch can be posted; a validated batch only when its journal name has no workflow (409
         LEDGER_BATCH_APPROVAL_REQUIRED otherwise) and the caller also holds ledger.journal.postdirect
-        ("Post ledger journals without approval", 403 AUTH-0003 otherwise). On a rule rejection (422) or
+        ("Post ledger journals without approval", 403 AUTH-0003 otherwise). A batch addressed to a
+        non-leading ledger of a ledger set also needs ledger.journal.postledger (FB50L, 403 AUTH-0003). On a rule rejection (422) or
         other failure nothing is posted, the batch stays approved or validated and lastError records the
         cause. The same key on the posted batch replays the stored response (200); another key is 409
         LEDGER_BATCH_STATE.
@@ -1270,7 +1271,9 @@ paths:
         are new requests.
 
         Posting to a ledger that is a non-leading member of a ledger set also needs the duty
-        ledger.journal.postledger (FB50L); without it the response is 403 AUTH-0003.
+        ledger.journal.postledger (FB50L); without it the response is 403 AUTH-0003. POST
+        /ledger/validate applies the same check, and reversing an entry of such a ledger needs the
+        duty on top of ledger.journal.reverse.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/Traceparent"
@@ -1434,6 +1437,8 @@ paths:
         reversalOfLineId). An entry can be reversed once (LEDGER_REVERSAL_ALREADY_REVERSED); a
         reversal can itself be reversed to re-instate the original. The reversal date defaults to
         the original posting date and may not precede it (LEDGER_DATE_INVALID).
+        Reversing an entry of a non-leading ledger of a ledger set also needs ledger.journal.postledger
+        (FB50L, 403 AUTH-0003).
         A reason code (FR-11.15) is required when the ledger's reversalReasonRequired is true; it must
         be active and apply to the ledger module, and a comment is required when the code says so. A
         code with alternativePostingDateAllowed = false refuses any date other than the original. A code
@@ -1476,7 +1481,7 @@ paths:
       tags: [journal]
       operationId: validateEntry
       x-passage-duty: ledger.journal.post
-      description: Dry run of the posting rules. Returns every violation in one response; writes nothing.
+      description: Dry run of the posting rules. Returns every violation in one response; writes nothing. A dry run against a non-leading ledger of a ledger set also needs ledger.journal.postledger (FB50L, 403 AUTH-0003), as the real post does.
       requestBody:
         required: true
         content:

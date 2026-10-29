@@ -170,6 +170,8 @@ type ReverseInput struct {
 	Actor         string
 	TraceID       string
 	Today         time.Time
+
+	CanPostLedgerSpecific bool
 }
 
 // Idempotency reports the replay state of a keyed request.

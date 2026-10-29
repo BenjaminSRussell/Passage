@@ -124,6 +124,14 @@ func TestPostgres_AC124TwentyDocumentsKeepEveryLedgerBalancedWithExpectedBalance
 	if got := e.entryCount(t); got != entries || entries != 5+15*3 {
 		t.Fatalf("entries = %d (counted %d), want %d", got, entries, 5+15*3)
 	}
+	if len(f.ExpectedTrialBalance) != len(ledgerOf) {
+		t.Fatalf("fixture expects %d ledgers, want %d", len(f.ExpectedTrialBalance), len(ledgerOf))
+	}
+	for code := range ledgerOf {
+		if _, ok := f.ExpectedTrialBalance[code]; !ok {
+			t.Fatalf("fixture has no expected trial balance for %s", code)
+		}
+	}
 	for code, want := range f.ExpectedTrialBalance {
 		tb, err := e.store.TrialBalance(e.ctx, BalanceFilter{LedgerID: ledgerOf[code]})
 		if err != nil {
@@ -182,5 +190,84 @@ func TestPostgres_LedgerNotInAnySetPostsWithoutTheLedgerSpecificDuty(t *testing.
 	e, _ := setup(t)
 	if _, err := e.store.PostEntry(e.ctx, vendorInvoice(e.ledger.ID, "PLAIN-1", "10.00")); err != nil {
 		t.Fatalf("a ledger outside any set needs no ledger-specific duty: %v", err)
+	}
+}
+
+func TestPostgres_ReversingAParallelLedgerEntryNeedsTheLedgerSpecificDuty(t *testing.T) {
+	e := setupLedgerSet(t)
+	in := vendorInvoice(e.tax.ID, "FB50L-REV", "10.00")
+	in.CanPostLedgerSpecific = true
+	posted, err := e.store.PostEntry(e.ctx, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entryID := posted.Entries[0].ID
+	rev := func(key string, granted bool) error {
+		_, err := e.store.ReverseEntry(e.ctx, ReverseInput{EntryID: entryID, Key: key, Hash: make([]byte, 32), Actor: "test-user", TraceID: testTrace,
+			Today: testToday, CanPostLedgerSpecific: granted})
+		return err
+	}
+	if err := rev("FB50L-R1", false); !isProblem(err, http.StatusForbidden, "AUTH-0003") {
+		t.Fatalf("reverse without the duty: want 403 AUTH-0003, got %v", err)
+	}
+	if n := e.entryCount(t); n != 1 {
+		t.Fatalf("a denied reversal must write nothing, got %d entries", n)
+	}
+	if err := rev("FB50L-R2", true); err != nil {
+		t.Fatalf("reverse with the duty: %v", err)
+	}
+}
+
+func TestPostgres_ReversingALeadingLedgerEntryNeedsNoLedgerSpecificDuty(t *testing.T) {
+	e := setupLedgerSet(t)
+	posted, err := e.store.PostEntry(e.ctx, vendorInvoice(e.ledger.ID, "FB50L-LEAD", "10.00"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.store.ReverseEntry(e.ctx, ReverseInput{EntryID: posted.Entries[0].ID, Key: "FB50L-LR", Hash: make([]byte, 32), TraceID: testTrace, Today: testToday}); err != nil {
+		t.Fatalf("leading ledger reversal: %v", err)
+	}
+}
+
+func TestPostgres_ValidateToAParallelLedgerNeedsTheLedgerSpecificDuty(t *testing.T) {
+	e := setupLedgerSet(t)
+	in := vendorInvoice(e.tax.ID, "FB50L-VAL", "10.00")
+	if _, err := e.store.ValidateEntry(e.ctx, in); !isProblem(err, http.StatusForbidden, "AUTH-0003") {
+		t.Fatalf("validate without the duty: want 403 AUTH-0003, got %v", err)
+	}
+	in.CanPostLedgerSpecific = true
+	if res, err := e.store.ValidateEntry(e.ctx, in); err != nil || !res.Valid() {
+		t.Fatalf("validate with the duty: %v %+v", err, res.Violations)
+	}
+}
+
+func TestPostgres_BatchPostToAParallelLedgerNeedsTheLedgerSpecificDuty(t *testing.T) {
+	e := setupLedgerSet(t)
+	putName(t, e.env, "APPR", JournalName{Active: true, RequiresApproval: true})
+	in := batchOf(e.env, "APPR", "10.00")
+	in.LedgerID = e.tax.ID
+	b, err := e.store.CreateBatch(e.ctx, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, err = e.store.SubmitBatch(e.ctx, b.ID, 0, testToday); err != nil {
+		t.Fatal(err)
+	}
+	if b, err = e.store.DecideBatch(asUser(e.env, "approver"), b.ID, 0, true); err != nil {
+		t.Fatal(err)
+	}
+	post := func(key string, granted bool) error {
+		_, err := e.store.PostBatch(e.ctx, PostBatchInput{ID: b.ID, Key: key, Today: testToday, TraceID: testTrace, CanPostLedgerSpecific: granted})
+		return err
+	}
+	if err := post("FB50L-B1", false); !isProblem(err, http.StatusForbidden, "AUTH-0003") {
+		t.Fatalf("batch post without the duty: want 403 AUTH-0003, got %v", err)
+	}
+	after, err := e.store.GetBatch(e.ctx, b.ID)
+	if err != nil || after.Status != domain.BatchApproved || after.LastError == "" || after.PostedEntryID != "" {
+		t.Fatalf("a denied batch stays approved with lastError: %+v %v", after, err)
+	}
+	if err := post("FB50L-B1", true); err != nil {
+		t.Fatalf("batch post with the duty: %v", err)
 	}
 }
