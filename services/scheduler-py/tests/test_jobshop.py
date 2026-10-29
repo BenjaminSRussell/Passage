@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -84,6 +86,12 @@ def test_ft06_cpsat_reaches_known_optimum():
     assert sol.status == "OPTIMAL" and sol.makespan == FT06_OPTIMUM
 
 
+def test_ortools_present_when_required():
+    if os.environ.get("SCHEDULER_REQUIRE_ORTOOLS") != "1":
+        pytest.skip("CP-SAT backend not required")
+    assert importlib.util.find_spec("ortools") is not None
+
+
 def test_orlib_manifest_lists_30_instances_with_fixtures():
     assert len(BENCHMARKS) == 30
     for entry in BENCHMARKS:
@@ -100,6 +108,12 @@ def test_orlib_instance_cpsat_within_5_percent_of_optimum(entry):
     sol = solve(inst, time_limit_s=BENCHMARK_TIME_LIMIT_S)
     assert sol.status in ("OPTIMAL", "FEASIBLE")
     assert check_schedule(inst, sol.starts) == []
+    recomputed = max(
+        sol.starts[j][k] + op.minutes
+        for j, job in enumerate(inst.jobs)
+        for k, op in enumerate(job.operations)
+    )
+    assert recomputed == sol.makespan
     assert sol.makespan <= entry["optimum"] * 1.05
 
 

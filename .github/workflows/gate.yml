@@ -37,6 +37,7 @@ jobs:
               - '.github/workflows/**'
             py:
               - 'services/configurator-py/**'
+              - 'services/scheduler-py/**'
               - '.github/workflows/**'
             charts:
               - 'services/**/charts/**'
