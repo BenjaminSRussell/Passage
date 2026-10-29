@@ -186,6 +186,7 @@ describe("asset detail: lifecycle, criticality and warranties", () => {
       if (isGet("/work-orders")(url, init)) return json(200, { items: [] });
       if (isGet(`/assets/${PUMP}/criticality`)(url, init)) return json(200, { items: [] });
       if (isGet(`/assets/${PUMP}/warranties`)(url, init)) return json(200, { items: [] });
+      if (isGet(`/assets/${PUMP}/isolation-points`)(url, init)) return json(200, { items: [] });
       return undefined;
     };
   }
@@ -290,6 +291,7 @@ describe("work order detail: fault and downtime", () => {
       const hit = extra(url, init);
       if (hit) return hit;
       if (isGet(`/work-orders/${WO}`)(url, init)) return json(200, detail);
+      if (isGet("/permits")(url, init)) return json(200, { items: [] });
       if (isGet("/fault-catalogs/PUMP")(url, init)) return cat ? json(200, cat) : json(404, { code: "EAM-NF-001", detail: "no fault catalog" });
       return undefined;
     };
@@ -341,6 +343,7 @@ describe("work order detail: fault and downtime", () => {
         return json(201, withWindow);
       }
       if (isGet(`/work-orders/${WO}`)(url, init)) return json(200, current);
+      if (isGet("/permits")(url, init)) return json(200, { items: [] });
       return undefined;
     });
     renderAt(`/eam/work-orders/${WO}`);

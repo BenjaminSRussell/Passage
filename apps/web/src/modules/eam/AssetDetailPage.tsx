@@ -21,6 +21,8 @@ import {
 import { addMoney, dash, dayOf, hours, minuteOf, percent, typeLabel } from "./format";
 import { CriticalityCard, WarrantyCard } from "./AssetCare";
 import { Entry, Failure, State } from "./parts";
+import { AssetLocationCard } from "./LocationPages";
+import { IsolationPointsCard } from "./PermitCare";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -187,6 +189,9 @@ export function AssetDetailPage() {
           <Entry term="Site" mono>
             {asset.siteId}
           </Entry>
+          <Entry term="Functional location" mono>
+            {asset.location ? <Link to={`/eam/locations/${asset.location.id}`}>{asset.location.path}</Link> : "Not installed"}
+          </Entry>
           <Entry term="Production resource" mono>
             {asset.productionResourceId ?? dash}
           </Entry>
@@ -216,8 +221,10 @@ export function AssetDetailPage() {
           {asset.counters.length > 0 ? <RuleForm counters={asset.counters} onSaved={(text) => { setNotice(text); state.reload(); }} /> : null}
         </div>
       </Card>
+      <AssetLocationCard asset={asset} onSaved={saved} />
       <CriticalityCard assetId={asset.id} onSaved={saved} />
       <WarrantyCard assetId={asset.id} onSaved={saved} />
+      <IsolationPointsCard assetId={asset.id} onSaved={setNotice} />
       <KpiCard assetId={asset.id} />
       <RecentOrders assetId={asset.id} onOpen={(row) => navigate(`/eam/work-orders/${row.id}`)} />
     </div>

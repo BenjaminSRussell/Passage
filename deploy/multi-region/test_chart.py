@@ -1,0 +1,159 @@
+"""Render tests for the passage-multiregion chart. Run: python3 -m unittest discover -s deploy/multi-region
+
+They call `helm template`, split the output into documents and assert what each region role renders.
+Stdlib only; skipped when helm is not on PATH.
+"""
+
+from __future__ import annotations
+
+import re
+import shutil
+import subprocess
+import unittest
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+CHART = HERE / "chart"
+HELM = shutil.which("helm")
+
+
+def render(values_file: str | None = None, *sets: str) -> list[str]:
+    cmd = [HELM, "template", "mr", str(CHART)]
+    if values_file:
+        cmd += ["-f", str(HERE / "values" / values_file)]
+    for s in sets:
+        cmd += ["--set", s]
+    out = subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
+    # Drop comment lines so assertions see only rendered fields.
+    out = "\n".join(line for line in out.splitlines() if not line.lstrip().startswith("#"))
+    return [d for d in re.split(r"^---\s*$", out, flags=re.M) if re.search(r"^kind:", d, re.M)]
+
+
+def kinds(docs: list[str]) -> list[str]:
+    return sorted(re.search(r"^kind: (\S+)", d, re.M).group(1) for d in docs)
+
+
+def doc(docs: list[str], kind: str) -> str:
+    found = [d for d in docs if re.search(rf"^kind: {kind}$", d, re.M)]
+    if len(found) != 1:
+        raise AssertionError(f"expected one {kind}, found {len(found)}")
+    return found[0]
+
+
+@unittest.skipUnless(HELM, "helm not installed")
+class TestRoles(unittest.TestCase):
+    def test_primary_writes_with_quorum_and_no_replica(self) -> None:
+        docs = render("eu-west.yaml")
+        cluster = doc(docs, "Cluster")
+        self.assertIn("method: any", cluster)
+        self.assertIn("number: 1", cluster)
+        self.assertIn("dataDurability: required", cluster)
+        self.assertNotIn("replica:", cluster)
+        self.assertNotIn("fencedInstances", cluster)
+        self.assertIn("NOBYPASSRLS", cluster)
+        self.assertNotIn("shared_preload_libraries", cluster)  # CNPG manages it; setting it is rejected
+        self.assertIn("poolMode: transaction", doc(docs, "Pooler"))
+        self.assertNotIn("NetworkPolicy", kinds(docs))
+
+    def test_passive_is_an_async_replica_of_the_primary(self) -> None:
+        cluster = doc(render("eu-central.yaml"), "Cluster")
+        self.assertRegex(cluster, r"replica:\n\s+enabled: true")
+        self.assertIn('host: "passage-pg-rw.eu-west.passage.internal"', cluster)
+        self.assertIn("sslmode: verify-full", cluster)
+        self.assertNotIn("synchronous:", cluster)
+        self.assertNotIn("initdb", cluster)
+
+    def test_fenced_stops_postgres_and_closes_its_pods(self) -> None:
+        docs = render("eu-west.yaml", "region.role=FENCED")
+        cluster = doc(docs, "Cluster")
+        self.assertIn("cnpg.io/fencedInstances: '[\"*\"]'", cluster)
+        self.assertNotIn("replica:", cluster)  # keeps the former primary's spec until re-seeded
+        self.assertNotIn("Pooler", kinds(docs))
+        policy = doc(docs, "NetworkPolicy")
+        self.assertIn("cnpg.io/cluster: passage-pg", policy)
+        self.assertIn("kubernetes.io/metadata.name: cnpg-system", policy)
+
+    def test_game_day_fence_applies_to_a_primary(self) -> None:
+        docs = render("eu-west.yaml", "fence.enabled=true")
+        self.assertIn("fencedInstances", doc(docs, "Cluster"))
+        self.assertIn("NetworkPolicy", kinds(docs))
+
+
+@unittest.skipUnless(HELM, "helm not installed")
+class TestMirrorMaker(unittest.TestCase):
+    def test_mm2_runs_only_next_to_its_target(self) -> None:
+        self.assertNotIn("KafkaMirrorMaker2", kinds(render("eu-west.yaml")))
+        docs = render("eu-central.yaml")
+        mm2 = doc(docs, "KafkaMirrorMaker2")
+        self.assertIn('connectCluster: "eu-central"', mm2)
+        self.assertIn('sourceCluster: "eu-west"', mm2)
+        self.assertIn("namespace: kafka", mm2)
+        self.assertIn("secretName: passage-cluster-ca-cert", mm2)
+        self.assertIn("sync.group.offsets.enabled", mm2)
+        self.assertIn("PodMonitor", kinds(docs))
+
+    def test_swapping_direction_moves_mm2(self) -> None:
+        swap = ("mm2.sourceAlias=eu-central", "mm2.targetAlias=eu-west")
+        self.assertIn("KafkaMirrorMaker2", kinds(render("eu-west.yaml", *swap)))
+        self.assertNotIn("KafkaMirrorMaker2", kinds(render("eu-central.yaml", *swap)))
+
+    def test_every_region_has_the_mm2_user(self) -> None:
+        for f in ("eu-west.yaml", "eu-central.yaml"):
+            user = doc(render(f), "KafkaUser")
+            self.assertIn("strimzi.io/cluster: passage", user)
+            self.assertIn("type: scram-sha-512", user)
+
+
+@unittest.skipUnless(HELM, "helm not installed")
+class TestAlerts(unittest.TestCase):
+    def setUp(self) -> None:
+        self.rules = doc(render("eu-central.yaml"), "PrometheusRule")
+
+    def test_every_alert_links_a_runbook_that_exists(self) -> None:
+        alerts = re.findall(r"- alert: (\S+)", self.rules)
+        urls = re.findall(r"runbook_url: https://docs.passage.dev/ops/runbooks/(\S+)", self.rules)
+        self.assertEqual(len(alerts), len(urls))
+        runbooks = HERE.parent.parent / "docs" / "ops" / "runbooks"
+        for page in set(urls):
+            self.assertTrue((runbooks / f"{page}.md").is_file(), page)
+
+    def test_burn_rate_rules_are_recorded_here(self) -> None:
+        for w in ("5m", "30m", "1h", "6h"):
+            self.assertIn(f"record: passage:slo_burn_rate:{w}", self.rules)
+        self.assertIn("/ (1 - 0.999)", self.rules)
+        self.assertIn("passage:slo_burn_rate:1h > 14.4 and passage:slo_burn_rate:5m > 14.4", self.rules)
+
+    def test_license_alerts_do_not_overlap(self) -> None:
+        self.assertIn("<= 30 and min by (tenant_id) (passage_license_days_to_expiry) > 7", self.rules)
+        self.assertIn("<= 7 and min by (tenant_id) (passage_license_days_to_expiry) > 1", self.rules)
+        self.assertRegex(self.rules, r"expr: min by \(tenant_id\) \(passage_license_days_to_expiry\) <= 1\n")
+
+    def test_cnpg_alerts_select_instance_pods(self) -> None:
+        self.assertIn('pod=~"passage-pg-[0-9]+"', self.rules)
+
+
+@unittest.skipUnless(HELM, "helm not installed")
+class TestSchema(unittest.TestCase):
+    def assert_rejected(self, setting: str, message: str) -> None:
+        proc = subprocess.run(
+            [HELM, "template", "mr", str(CHART), "--set", setting], capture_output=True, text=True
+        )
+        self.assertNotEqual(proc.returncode, 0, setting)
+        self.assertIn(message, proc.stderr)
+
+    def test_role_enum(self) -> None:
+        self.assert_rejected("region.role=ACTIVE", "/region/role")
+
+    def test_failover_lag_range(self) -> None:
+        self.assert_rejected("failover.maxLagSeconds=10", "/failover/maxLagSeconds")
+        self.assert_rejected("failover.maxLagSeconds=4000", "/failover/maxLagSeconds")
+
+    def test_dns_ttl_range(self) -> None:
+        self.assert_rejected("failover.dnsTtlSeconds=600", "/failover/dnsTtlSeconds")
+
+    def test_mm2_lag_alert_floor(self) -> None:
+        self.assert_rejected("mm2.lagAlertMessages=10", "/mm2/lagAlertMessages")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -86,7 +86,7 @@ func TestOpenAPIMatchesRoutes(t *testing.T) {
 			}
 		}
 		method, route, _ := strings.Cut(op, " ")
-		target := strings.ReplaceAll(route, "{id}", testkit.TenantID(9))
+		target := strings.NewReplacer("{id}", testkit.TenantID(9), "{skillCode}", "WELDING").Replace(route)
 		if rec := serve(t, tid(), method, target, "", others...); rec.Code != http.StatusForbidden {
 			t.Errorf("%s with every duty but %s: status = %d, want 403", op, duty, rec.Code)
 		}

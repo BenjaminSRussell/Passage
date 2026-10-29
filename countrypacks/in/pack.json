@@ -1,0 +1,29 @@
+{
+  "code": "IN",
+  "version": "2026.1",
+  "name": "India",
+  "country": "IN",
+  "currency": "INR",
+  "locale": "en-IN",
+  "taxRegime": "GST",
+  "fiscalYearStartMonth": 4,
+  "holidayRegion": "IN-MH",
+  "bankFormats": ["NEFT", "RTGS"],
+  "taxIdScheme": "IN_GSTIN",
+  "retentionMinYears": {"financial": 8, "hr": 8},
+  "documentLayouts": ["tax-invoice-en-in"],
+  "statutoryReports": [
+    {
+      "code": "IN_GSTR1",
+      "format": "JSON",
+      "mandate": "GST GSTR-1 outward supplies",
+      "requiredFields": ["gstin", "fp", "b2b", "hsn"]
+    },
+    {
+      "code": "IN_26Q",
+      "format": "FIXED",
+      "mandate": "TDS quarterly return FVU",
+      "requiredFields": ["tan", "quarter", "deductees", "challans"]
+    }
+  ]
+}

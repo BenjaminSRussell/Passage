@@ -121,6 +121,12 @@ describe("ScheduleEditorPage", () => {
     fireEvent.click(screen.getByLabelText("CSV"));
     fireEvent.click(screen.getByRole("button", { name: "Save schedule" }));
 
+    // The first save moves to the schedule's own route, which reloads it (the notice is hidden while it
+    // loads). Wait for that reload before looking for the notice, or findByText can return the notice
+    // from the render before the reload and it is detached by the time it is asserted.
+    await waitFor(() =>
+      expect(server.calls.some((c) => c.method === "GET" && c.url.pathname === "/api/v1/reporting/schedules/NIGHTLY")).toBe(true),
+    );
     expect(await screen.findByText(/Schedule saved\. Next run: 2026-04-01T23:00:00Z\./)).toBeInTheDocument();
     const put = server.calls.find((c) => c.method === "PUT");
     expect(put?.url.pathname).toBe("/api/v1/reporting/schedules/NIGHTLY");

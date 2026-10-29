@@ -1,5 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select, StatusPill, Textarea, type DataTableColumn } from "../../shell/ui";
 import {
   CASE_STATUSES,
@@ -128,11 +128,13 @@ export function validateCase(values: CaseValues): { errors: Errors; input?: Open
 /** Open a service case: the service picks the agreement (BR-45.1) and starts the SLA clocks (BR-45.2). */
 export function OpenCasePage() {
   const navigate = useNavigate();
+  // The service-object detail links here with its customer, legal entity and unit.
+  const [params] = useSearchParams();
   const profiles = useLoad((signal) => listSlaProfiles(signal), "profiles");
   const [values, setValues] = useState<CaseValues>({
-    customerPartyId: "",
-    legalEntityId: "",
-    serviceObjectId: "",
+    customerPartyId: params.get("customerPartyId") ?? "",
+    legalEntityId: params.get("legalEntityId") ?? "",
+    serviceObjectId: params.get("serviceObjectId") ?? "",
     channel: "PHONE",
     priority: 3,
     description: "",

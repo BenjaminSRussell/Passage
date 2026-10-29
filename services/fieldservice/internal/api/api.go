@@ -37,11 +37,12 @@ const (
 	maxPageSize      = 200
 
 	// Duties follow the PRD names (8.45.17); OPA maps them to privileges.
-	dutyAgreement  = "SvcAgreementMaintain"
-	dutyCaseCreate = "SvcCaseCreate"
-	dutyWorkOrder  = "SvcWoMaintain"
-	dutyBilling    = "SvcBillingPost"
-	dutyInquire    = "SvcInquire"
+	dutyAgreement    = "SvcAgreementMaintain"
+	dutyCaseCreate   = "SvcCaseCreate"
+	dutyCaseMaintain = "SvcCaseMaintain"
+	dutyWorkOrder    = "SvcWoMaintain"
+	dutyBilling      = "SvcBillingPost"
+	dutyInquire      = "SvcInquire"
 )
 
 var (
@@ -51,11 +52,13 @@ var (
 
 // API holds the store and the counters exported on /metrics.
 type API struct {
-	store    *store.Postgres
-	now      func() time.Time
-	opened   atomic.Int64
-	posted   atomic.Int64
-	replayed atomic.Int64
+	store       *store.Postgres
+	now         func() time.Time
+	opened      atomic.Int64
+	posted      atomic.Int64
+	replayed    atomic.Int64
+	slaWarnings atomic.Int64
+	slaBreaches atomic.Int64
 }
 
 // New returns the API over s.
@@ -74,11 +77,19 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyCaseCreate)).Post("/v1/service/cases", a.openCase)
 	r.With(authz.RequireDuty(dutyInquire)).Get("/v1/service/cases", a.listCases)
 	r.With(authz.RequireDuty(dutyInquire)).Get("/v1/service/cases/{id}", a.getCase)
+	r.With(authz.RequireDuty(dutyCaseMaintain)).Post("/v1/service/cases/{id}:transition", a.transitionCase)
+	r.With(authz.RequireDuty(dutyCaseMaintain)).Post("/v1/service/sla:scan", a.scanSLA)
+	r.With(authz.RequireDuty(dutyInquire)).Get("/v1/service/kpis", a.kpis)
 	r.With(authz.RequireDuty(dutyWorkOrder)).Post("/v1/service/work-orders", a.createWorkOrder)
 	r.With(authz.RequireDuty(dutyInquire)).Get("/v1/service/work-orders", a.listWorkOrders)
 	r.With(authz.RequireDuty(dutyInquire)).Get("/v1/service/work-orders/{id}", a.getWorkOrder)
 	r.With(authz.RequireDuty(dutyWorkOrder)).Post("/v1/service/work-orders/{id}:transition", a.transitionWorkOrder)
 	r.With(authz.RequireDuty(dutyBilling)).Post("/v1/service/work-orders/{id}:post", a.postWorkOrder)
+	r.With(authz.RequireDuty(dutyWorkOrder)).Post("/v1/service/work-orders/{id}:follow-up", a.followUpWorkOrder)
+	a.registerObjects(r)
+	a.registerActivities(r)
+	a.registerKnowledge(r)
+	a.registerCases(r)
 }
 
 // Metrics serves the service counters in Prometheus text format.
@@ -87,6 +98,8 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP service_cases_opened_total Cases opened; idempotent replays are not counted.\n# TYPE service_cases_opened_total counter\nservice_cases_opened_total %d\n", a.opened.Load())
 		fmt.Fprintf(w, "# HELP service_workorders_posted_total Work orders posted; idempotent replays are not counted.\n# TYPE service_workorders_posted_total counter\nservice_workorders_posted_total %d\n", a.posted.Load())
 		fmt.Fprintf(w, "# HELP service_idempotent_replays_total Requests answered from a stored Idempotency-Key.\n# TYPE service_idempotent_replays_total counter\nservice_idempotent_replays_total %d\n", a.replayed.Load())
+		fmt.Fprintf(w, "# HELP service_sla_warnings_total SLA warnings emitted by the monitor.\n# TYPE service_sla_warnings_total counter\nservice_sla_warnings_total %d\n", a.slaWarnings.Load())
+		fmt.Fprintf(w, "# HELP service_sla_breaches_total SLA breaches emitted by the monitor (transitions that find a breach are not counted).\n# TYPE service_sla_breaches_total counter\nservice_sla_breaches_total %d\n", a.slaBreaches.Load())
 	})
 }
 
@@ -317,6 +330,7 @@ func (a *API) openCase(w http.ResponseWriter, r *http.Request) {
 	if !replayed {
 		a.opened.Add(1)
 	}
+	setETag(w, created.Version)
 	a.respond(w, replayed, http.StatusCreated, created)
 }
 
@@ -333,6 +347,7 @@ func (a *API) getCase(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, "get case", err)
 		return
 	}
+	setETag(w, c.Version)
 	httpx.JSON(w, http.StatusOK, c)
 }
 

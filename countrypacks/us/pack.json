@@ -1,0 +1,23 @@
+{
+  "code": "US",
+  "version": "2026.1",
+  "name": "United States",
+  "country": "US",
+  "currency": "USD",
+  "locale": "en-US",
+  "taxRegime": "SALES_USE",
+  "fiscalYearStartMonth": 1,
+  "holidayRegion": "US-FED",
+  "bankFormats": ["NACHA"],
+  "taxIdScheme": "US_EIN",
+  "retentionMinYears": {"financial": 7, "hr": 6},
+  "documentLayouts": ["invoice-en-us"],
+  "statutoryReports": [
+    {
+      "code": "US_1099_FIRE",
+      "format": "FIXED",
+      "mandate": "IRS FIRE 1099-NEC/MISC",
+      "requiredFields": ["payerTin", "recipientTin", "boxAmount"]
+    }
+  ]
+}

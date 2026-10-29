@@ -47,10 +47,11 @@ type Page[T any] struct {
 // ListOptions narrows and pages a list. Cursor is the last id of the previous
 // page (ids are UUIDv7, so id order is creation order).
 type ListOptions struct {
-	Status  string
-	AssetID string
-	Cursor  string
-	Limit   int
+	Status      string
+	AssetID     string
+	WorkOrderID string
+	Cursor      string
+	Limit       int
 }
 
 // pageOf trims a result fetched with limit+1 rows into a page.

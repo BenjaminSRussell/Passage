@@ -1,9 +1,14 @@
 openapi: 3.1.0
 info:
   title: expense
-  version: 0.4.0
+  version: 0.5.0
   description: >-
-    Expense management, slices 1-4 of PSG-43. Slice 4 persists expense reports and lines
+    Expense management, slices 1-5 of PSG-43. Slice 5 persists cash advances (FR-43.15:
+    request, decide, record the AP prepayment that paid it, record a cash return), travel
+    requisitions (FR-43.16: create, submit, decide) and card feed imports (FR-43.13: import
+    into the workers' unassigned pools with a quarantine, list). Their custom methods take a
+    required Idempotency-Key and honour If-Match; decisions refuse the requester
+    (EXP-SOD-001). Slice 4 persists expense reports and lines
     (FR-43.11): create a report, add a line (evaluated against the default rule set at
     commit, FR-43.12), delete a line, submit, list and get. Creating POSTs and submit take a
     required Idempotency-Key; a repeated key with the same request replays the first outcome
@@ -21,7 +26,9 @@ info:
     string, never a float.
     Error codes: COM-0001, COM-0503, AUTH-0001, AUTH-0003, AUTH-0004, EXP-REP-001,
     EXP-REP-002, EXP-REP-003, EXP-REP-004, EXP-LINE-001, EXP-LINE-002, EXP-LINE-003,
-    EXP-IDEM-001, COM-0500; a refused submit is a 422 carrying the first unsatisfied
+    EXP-IDEM-001, EXP-ADV-001, EXP-ADV-002, EXP-ADV-004, EXP-ADV-005, EXP-ADV-006,
+    EXP-ADV-007, EXP-ADV-008, EXP-TR-003, EXP-TR-004, EXP-TR-005, EXP-CARD-002,
+    EXP-SOD-001, COM-0500; a refused submit is a 422 carrying the first unsatisfied
     result's code (EXP-POL-001, EXP-REC-001 or EXP-TR-002). Result codes (in bodies):
     EXP-POL-001, EXP-POL-002, EXP-REC-001, EXP-TR-001, EXP-TR-002, EXP-ADV-002, EXP-ADV-003.
 servers:
@@ -380,6 +387,299 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/Problem' }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/expense/cash-advances:
+    get:
+      operationId: listCashAdvances
+      x-passage-duty: expense.report.write
+      description: Cash advances visible to the caller (tenant and legal-entity scope), in id order.
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [DRAFT, SUBMITTED, APPROVED, REJECTED, PAID, PARTIALLY_SETTLED, SETTLED] } }
+        - { name: workerId, in: query, schema: { type: string, format: uuid } }
+        - { name: cursor, in: query, description: nextCursor of the previous page., schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: One page; nextCursor is empty on the last page.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CashAdvancePage' }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: requestCashAdvance
+      x-passage-duty: expense.report.write
+      description: >-
+        Requests a cash advance (FR-43.15); it is stored SUBMITTED, routed for approval. The
+        due settlement date is tripEnd plus 30 days (8.43.13 default). Refused with 422
+        EXP-ADV-001 above the per-request maximum (2,000.00 default), 422 EXP-ADV-002 while
+        the worker has a PAID or PARTIALLY_SETTLED advance still open after its due date,
+        422 EXP-ADV-004 when the travel requisition belongs to another worker or legal entity
+        or is REJECTED or CLOSED, 404 EXP-TR-003 when it does not exist, and 403 AUTH-0004 for a legal entity
+        outside the caller's scope.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CashAdvanceRequest' }
+      responses:
+        '201':
+          description: Requested.
+          headers: { ETag: { $ref: '#/components/headers/ETag' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CashAdvance' }
+        '200':
+          description: Replay of an earlier request with the same key and body.
+          headers: { ETag: { $ref: '#/components/headers/ETag' }, Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CashAdvance' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/expense/cash-advances/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    get:
+      operationId: getCashAdvance
+      x-passage-duty: expense.report.write
+      responses:
+        '200':
+          description: The advance with its settlement amounts and open balance.
+          headers: { ETag: { $ref: '#/components/headers/ETag' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CashAdvance' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/expense/cash-advances/{id}/decide:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    post:
+      operationId: decideCashAdvance
+      x-passage-duty: expense.approve
+      description: >-
+        Approves or rejects a SUBMITTED advance (409 EXP-ADV-005 otherwise). The decision
+        needs an authenticated user (401 AUTH-0001), and the user who requested the advance
+        may not decide it (403 EXP-SOD-001, 8.43.17 own items blocked).
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Decision' }
+      responses:
+        '200':
+          description: The decided advance, or the replay of an earlier decision with the same key.
+          headers: { ETag: { $ref: '#/components/headers/ETag' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CashAdvance' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/expense/cash-advances/{id}/pay:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    post:
+      operationId: payCashAdvance
+      x-passage-duty: expense.advance.admin
+      description: >-
+        Records that the wave-18 AP prepayment prepaymentId paid an APPROVED advance in full
+        (409 EXP-ADV-005 otherwise): paid becomes the amount, the status PAID, and
+        dev.passage.expense.cashadvance.paid.v1 is written to the outbox in the same
+        transaction.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PayCashAdvanceRequest' }
+      responses:
+        '200':
+          description: The PAID advance, or the replay of an earlier call with the same key.
+          headers: { ETag: { $ref: '#/components/headers/ETag' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CashAdvance' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/expense/cash-advances/{id}/return:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    post:
+      operationId: returnCashAdvance
+      x-passage-duty: expense.advance.admin
+      description: >-
+        Records cash the worker returned (BR-43.9 option a) against a PAID or
+        PARTIALLY_SETTLED advance (409 EXP-ADV-005 before payment). The amount may not exceed
+        the open balance (422 EXP-ADV-007). The status is re-derived: PARTIALLY_SETTLED while
+        a balance stays open, SETTLED when it is cleared.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReturnCashAdvanceRequest' }
+      responses:
+        '200':
+          description: The advance after the return, or the replay of an earlier return with the same key.
+          headers: { ETag: { $ref: '#/components/headers/ETag' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CashAdvance' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/expense/travel-requisitions:
+    get:
+      operationId: listTravelRequisitions
+      x-passage-duty: expense.report.write
+      description: Requisitions visible to the caller, in id order.
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [DRAFT, SUBMITTED, APPROVED, REJECTED, CLOSED] } }
+        - { name: workerId, in: query, schema: { type: string, format: uuid } }
+        - { name: cursor, in: query, description: nextCursor of the previous page., schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: One page; nextCursor is empty on the last page.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TravelRequisitionPage' }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createTravelRequisition
+      x-passage-duty: expense.report.write
+      description: >-
+        Creates a DRAFT pre-trip requisition (FR-43.16) with destinations, trip dates and
+        estimate lines by category; estimatedTotal is the sum of the estimate lines. 403
+        AUTH-0004 for a legal entity outside the caller's scope.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TravelRequisitionRequest' }
+      responses:
+        '201':
+          description: Created.
+          headers: { ETag: { $ref: '#/components/headers/ETag' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TravelRequisition' }
+        '200':
+          description: Replay of an earlier create with the same key and body.
+          headers: { ETag: { $ref: '#/components/headers/ETag' }, Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TravelRequisition' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/expense/travel-requisitions/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    get:
+      operationId: getTravelRequisition
+      x-passage-duty: expense.report.write
+      responses:
+        '200':
+          description: The requisition.
+          headers: { ETag: { $ref: '#/components/headers/ETag' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TravelRequisition' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/expense/travel-requisitions/{id}/submit:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    post:
+      operationId: submitTravelRequisition
+      x-passage-duty: expense.report.write
+      description: Submits a DRAFT requisition for approval (409 EXP-TR-004 otherwise).
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: The SUBMITTED requisition, or the replay of an earlier submit with the same key.
+          headers: { ETag: { $ref: '#/components/headers/ETag' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TravelRequisition' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/expense/travel-requisitions/{id}/decide:
+    parameters:
+      - $ref: '#/components/parameters/ResourceId'
+    post:
+      operationId: decideTravelRequisition
+      x-passage-duty: expense.approve
+      description: >-
+        Approves or rejects a SUBMITTED requisition (409 EXP-TR-004 otherwise). The decision
+        needs an authenticated user (401 AUTH-0001), and the user who created the
+        requisition may not decide it (403 EXP-SOD-001).
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Decision' }
+      responses:
+        '200':
+          description: The decided requisition, or the replay of an earlier decision with the same key.
+          headers: { ETag: { $ref: '#/components/headers/ETag' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TravelRequisition' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/expense/card-transactions:
+    get:
+      operationId: listCardTransactions
+      x-passage-duty: expense.report.write
+      description: Imported card transactions in id order; status UNASSIGNED with a workerId is that worker's unassigned pool.
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [UNASSIGNED, ASSIGNED, DISPUTED, PERSONAL] } }
+        - { name: workerId, in: query, schema: { type: string, format: uuid } }
+        - { name: cursor, in: query, description: nextCursor of the previous page., schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: One page; nextCursor is empty on the last page.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CardTransactionPage' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/expense/card-transactions/import:
+    post:
+      operationId: importCardFeed
+      x-passage-duty: expense.card.import
+      description: >-
+        Imports a CSV or OFX card feed (FR-43.13). Each parsed row goes to the worker who holds
+        its card (cardholders maps the last four digits to a worker id) as an UNASSIGNED card
+        transaction; rows the parser rejected and rows of a card with no cardholder are kept
+        on the import as its quarantine. The file hash is unique per tenant: the same file
+        under a new key is 409 EXP-CARD-002, while the same key and body replays the import.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CardImportRequest' }
+      responses:
+        '201':
+          description: Imported.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CardImport' }
+        '200':
+          description: Replay of an earlier import with the same key and body.
+          headers: { Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CardImport' }
+        default: { $ref: '#/components/responses/Problem' }
   /readyz:
     get:
       operationId: readyz
@@ -404,16 +704,23 @@ components:
       name: If-Match
       in: header
       required: false
-      description: The report version as an entity tag, for example "3" (412 EXP-REP-004 when stale).
+      description: >-
+        The resource version as an entity tag, for example "3". A stale version is 412:
+        EXP-REP-004 (report), EXP-ADV-008 (cash advance), EXP-TR-005 (requisition).
       schema: { type: string }
     ReportId:
       name: id
       in: path
       required: true
       schema: { type: string, format: uuid }
+    ResourceId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
   headers:
     ETag:
-      description: The report version, for example "3".
+      description: The resource version, for example "3".
       schema: { type: string }
     IdempotentReplayed:
       description: true when the response replays an earlier request with the same Idempotency-Key.
@@ -815,4 +1122,168 @@ components:
       required: [items, nextCursor]
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/ExpenseReport' } }
+        nextCursor: { type: string }
+    Decision:
+      type: object
+      required: [decision]
+      additionalProperties: false
+      properties:
+        decision: { type: string, enum: [APPROVE, REJECT] }
+    CashAdvanceRequest:
+      type: object
+      required: [legalEntityId, workerId, amount, currency, purpose, tripEnd]
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        workerId: { type: string, format: uuid }
+        amount: { type: string, description: 'Greater than zero, no more decimals than the currency allows.', example: '1000.00' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        purpose: { type: string, minLength: 1, maxLength: 500 }
+        travelRequisitionId: { type: string, format: uuid }
+        tripEnd: { type: string, format: date }
+    PayCashAdvanceRequest:
+      type: object
+      required: [prepaymentId]
+      additionalProperties: false
+      properties:
+        prepaymentId: { type: string, format: uuid }
+    ReturnCashAdvanceRequest:
+      type: object
+      required: [amount]
+      additionalProperties: false
+      properties:
+        amount: { type: string, description: Greater than zero and at most the open balance. }
+    CashAdvance:
+      type: object
+      required: [id, legalEntityId, workerId, amount, currency, purpose, travelRequisitionId, tripEnd, dueDate, overdue, status, paid, settled, returned, recovered, open, apPrepaymentId, version, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        workerId: { type: string, format: uuid }
+        amount: { type: string }
+        currency: { type: string }
+        purpose: { type: string }
+        travelRequisitionId: { type: [string, 'null'], format: uuid }
+        tripEnd: { type: string, format: date }
+        dueDate: { type: string, format: date, description: Settlement due date (trip end + settlement-due days). }
+        overdue: { type: boolean, description: An open balance remains after the due date. }
+        status: { type: string, enum: [DRAFT, SUBMITTED, APPROVED, REJECTED, PAID, PARTIALLY_SETTLED, SETTLED] }
+        paid: { type: string }
+        settled: { type: string, description: Applied by expense reports. }
+        returned: { type: string, description: Cash returned by the worker. }
+        recovered: { type: string, description: Recovered through payroll. }
+        open: { type: string, description: 'paid - settled - returned - recovered, never negative.' }
+        apPrepaymentId: { type: [string, 'null'], format: uuid }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+    CashAdvancePage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/CashAdvance' } }
+        nextCursor: { type: string }
+    Destination:
+      type: object
+      required: [country, city]
+      additionalProperties: false
+      properties:
+        country: { type: string, minLength: 1, maxLength: 128 }
+        city: { type: string, minLength: 1, maxLength: 128 }
+    Estimate:
+      type: object
+      required: [category, amount]
+      additionalProperties: false
+      properties:
+        category: { type: string, minLength: 1, maxLength: 32, description: Expense category; stored upper-case. }
+        amount: { type: string, description: Non-negative, in the requisition currency. }
+    TravelRequisitionRequest:
+      type: object
+      required: [legalEntityId, workerId, purpose, currency, tripFrom, tripTo, destinations, estimates]
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        workerId: { type: string, format: uuid }
+        purpose: { type: string, minLength: 1, maxLength: 500 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        tripFrom: { type: string, format: date }
+        tripTo: { type: string, format: date, description: Not before tripFrom. }
+        destinations: { type: array, minItems: 1, maxItems: 20, items: { $ref: '#/components/schemas/Destination' } }
+        estimates: { type: array, minItems: 1, maxItems: 100, description: 'The amounts may add up to at most 1000000000000.', items: { $ref: '#/components/schemas/Estimate' } }
+    TravelRequisition:
+      type: object
+      required: [id, legalEntityId, workerId, purpose, currency, status, tripFrom, tripTo, destinations, estimates, estimatedTotal, version, createdAt, submittedAt, decidedAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        workerId: { type: string, format: uuid }
+        purpose: { type: string }
+        currency: { type: string }
+        status: { type: string, enum: [DRAFT, SUBMITTED, APPROVED, REJECTED, CLOSED] }
+        tripFrom: { type: string, format: date }
+        tripTo: { type: string, format: date }
+        destinations: { type: array, items: { $ref: '#/components/schemas/Destination' } }
+        estimates: { type: array, items: { $ref: '#/components/schemas/Estimate' } }
+        estimatedTotal: { type: string, description: Sum of the estimate lines. }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+        submittedAt: { type: [string, 'null'], format: date-time }
+        decidedAt: { type: [string, 'null'], format: date-time }
+    TravelRequisitionPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/TravelRequisition' } }
+        nextCursor: { type: string }
+    CardImportRequest:
+      type: object
+      required: [legalEntityId, format, content, cardholders]
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        format: { type: string, enum: [CSV, OFX] }
+        content: { type: string, minLength: 1, maxLength: 2097152 }
+        cardholders:
+          type: object
+          description: Last four card digits to the worker id holding the card (1 to 5000 cards).
+          propertyNames: { pattern: '^[0-9]{4}$' }
+          additionalProperties: { type: string, format: uuid }
+    CardImport:
+      type: object
+      required: [id, legalEntityId, format, fileHash, imported, quarantined, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        format: { type: string, enum: [CSV, OFX] }
+        fileHash: { type: string, description: SHA-256 of the file content, hex. }
+        imported: { type: integer, minimum: 0 }
+        quarantined:
+          type: array
+          items:
+            type: object
+            required: [line, reason]
+            properties:
+              line: { type: integer }
+              reason: { type: string }
+        createdAt: { type: string, format: date-time }
+    CardTransaction:
+      type: object
+      required: [id, importId, workerId, line, cardLast4, txnDate, postDate, merchant, mcc, amount, currency, status]
+      properties:
+        id: { type: string, format: uuid }
+        importId: { type: string, format: uuid }
+        workerId: { type: string, format: uuid }
+        line: { type: integer, description: File line (CSV) or STMTTRN position (OFX). }
+        cardLast4: { type: string, pattern: '^[0-9]{4}$' }
+        txnDate: { type: string, format: date }
+        postDate: { type: string, format: date }
+        merchant: { type: string }
+        mcc: { type: string }
+        amount: { type: string, description: Spend is positive, refunds negative. }
+        currency: { type: string }
+        status: { type: string, enum: [UNASSIGNED, ASSIGNED, DISPUTED, PERSONAL] }
+    CardTransactionPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/CardTransaction' } }
         nextCursor: { type: string }

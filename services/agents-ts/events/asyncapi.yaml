@@ -1,0 +1,96 @@
+asyncapi: 3.0.0
+info:
+  title: Passage agent runtime events
+  version: 0.3.0
+  description: |
+    PRD 9.47.5 events, CloudEvents 1.0 envelope; the schemas below are the
+    data member, with snake_case field names as in the PRD and the other
+    services' events. `src/domain/events.ts` builds and validates the payloads
+    of four events (run.completed, approval.requested, budget.threshold,
+    killswitch.changed); the schemas below mirror those payloads. The
+    outbox wiring that writes them inside the business transaction is a later
+    slice (see NOT-IMPLEMENTED.md), so `channels` and `operations` stay empty
+    until that wiring exists and the spec matches code.
+    `version.promoted` is still planned. `killswitch.changed` is produced by
+    `POST /api/v1/agents/kill-switch` through the router's `publish` port and
+    read back by `KillSwitchFeed` (src/runtime/killswitch-feed.ts), which
+    parses exactly the KillSwitchChangedData schema below; the broker channel
+    is added with the outbox wiring.
+defaultContentType: application/cloudevents+json
+channels: {}
+operations: {}
+components:
+  messages: {}
+  schemas:
+    PlannedEventTypes:
+      type: string
+      description: Event types planned for the wiring slice; additive-only evolution.
+      enum:
+        - dev.passage.agent.run.completed.v1
+        - dev.passage.agent.approval.requested.v1
+        - dev.passage.agent.budget.threshold.v1
+        - dev.passage.agent.killswitch.changed.v1
+        - dev.passage.agent.version.promoted.v1
+    RunCompletedData:
+      type: object
+      description: Emitted at run end. Tool names and decisions only; no inputs, outputs or display text (PII stays out of events).
+      required: [run_id, agent_id, version, status, code, tool_calls, tokens_in, tokens_out, estimated, cost_usd]
+      additionalProperties: false
+      properties:
+        run_id: { type: string }
+        agent_id: { type: string }
+        version: { type: integer, minimum: 1 }
+        status: { type: string, enum: [COMMITTED, REJECTED, FAILED, KILLED] }
+        code: { type: [string, "null"] }
+        tool_calls:
+          type: array
+          items:
+            type: object
+            required: [seq, tool, decision]
+            additionalProperties: false
+            properties:
+              seq: { type: integer, minimum: 1 }
+              tool: { type: string }
+              decision: { type: string, enum: [AUTO, APPROVED, REJECTED, DENIED] }
+        tokens_in: { type: integer, minimum: 0 }
+        tokens_out: { type: integer, minimum: 0 }
+        estimated: { type: boolean }
+        cost_usd: { type: string, pattern: "^[0-9]+(\\.[0-9]{1,6})?$" }
+    ApprovalRequestedData:
+      type: object
+      description: |
+        Emitted when a run reaches an approval gate (FR-47.8); consumed by the
+        workflow inbox. `proposal` is the pseudonymized proposal: raw PII is
+        refused at build time (AGT-0210). The inbox shows real values from the
+        run, never from this event.
+      required: [run_id, action_id, tool_name, proposal, confidence, risk_score]
+      additionalProperties: false
+      properties:
+        run_id: { type: string, minLength: 1 }
+        action_id: { type: string, minLength: 1 }
+        tool_name: { type: string, minLength: 1 }
+        proposal: { type: string }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+        risk_score: { type: number, minimum: 0, maximum: 1 }
+    BudgetThresholdData:
+      type: object
+      description: Cost-guard alert (AC-47.4). Emitted only when the budget moves up into SOFT (80%) or HARD (100%).
+      required: [tenant_id, month, pct, state]
+      additionalProperties: false
+      properties:
+        tenant_id: { type: string, format: uuid }
+        month: { type: string, pattern: "^[0-9]{4}-(0[1-9]|1[0-2])$" }
+        pct: { type: integer, minimum: 0 }
+        state: { type: string, enum: [SOFT, HARD] }
+    KillSwitchChangedData:
+      type: object
+      description: One kill-switch toggle. Versions are strictly increasing; consumers apply them in order and ignore duplicates.
+      required: [scope, tenant_id, active, by_user, version, changed_at]
+      additionalProperties: false
+      properties:
+        scope: { type: string, enum: [GLOBAL, TENANT] }
+        tenant_id: { type: [string, "null"], format: uuid }
+        active: { type: boolean }
+        by_user: { type: string, format: uuid }
+        version: { type: integer, minimum: 1 }
+        changed_at: { type: string, format: date-time }

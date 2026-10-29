@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app.kubernetes.io/name: mcp-gateway
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mcp-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mcp-gateway
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mcp-gateway
+          image: {{ include "mcp-gateway.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: PASSAGE_API_URL
+              value: {{ .Values.apiUrl | quote }}
+            - name: PASSAGE_OPENAPI_JSON
+              value: /etc/passage/openapi/{{ .Values.openApi.key }}
+            - name: HTTP_ADDR
+              value: "0.0.0.0:8080"
+            - name: ADMIN_ADDR
+              value: "0.0.0.0:9090"
+            - name: SERVICE_VERSION
+              value: {{ .Chart.AppVersion | quote }}
+          ports:
+            - { name: http, containerPort: 8080 }
+            - { name: admin, containerPort: 9090 }
+          volumeMounts:
+            - name: openapi
+              mountPath: /etc/passage/openapi
+              readOnly: true
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            failureThreshold: 30
+            periodSeconds: 2
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: openapi
+          configMap:
+            name: {{ .Values.openApi.configMap }}

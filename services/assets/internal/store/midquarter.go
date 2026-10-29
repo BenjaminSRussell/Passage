@@ -57,7 +57,9 @@ type MidQuarterReport struct {
 
 // MidQuarterTest runs BR-37.5 over every book with the code placed in service
 // in the year, at its current cost. Books placed in service and fully disposed
-// of in the same year are left out, as IRS Pub. 946 excludes them.
+// of in the same year are left out, as IRS Pub. 946 excludes them; so are the
+// emptied source books of a transfer or split, whose basis the target books
+// carry with the same in-service date.
 func (s *Postgres) MidQuarterTest(ctx context.Context, f MidQuarterFilter) (MidQuarterReport, error) {
 	p := principal(ctx)
 	out := MidQuarterReport{LegalEntityID: f.LegalEntityID, BookCode: f.BookCode, Review: []MidQuarterBook{}}
@@ -67,6 +69,7 @@ func (s *Postgres) MidQuarterTest(ctx context.Context, f MidQuarterFilter) (MidQ
 			from asset_book b join asset a on a.tenant_id = b.tenant_id and a.id = b.asset_id
 			where b.tenant_id = $1 and b.legal_entity_id = $2 and b.book_code = $3
 			  and b.in_service_date >= make_date($4::int, 1, 1) and b.in_service_date < make_date($4::int + 1, 1, 1)
+			  and b.status <> 'Transferred'
 			  and not (b.status <> 'Open' and exists (select 1 from asset_transaction t
 			      where t.tenant_id = b.tenant_id and t.asset_book_id = b.id and t.type in ('DisposalSale', 'DisposalScrap')
 			        and t.transaction_date < make_date($4::int + 1, 1, 1)))

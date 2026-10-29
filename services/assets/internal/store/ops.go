@@ -494,6 +494,10 @@ func (s *Postgres) ProposeRun(ctx context.Context, in RunInput, idempotencyKey s
 			if err := rows.Err(); err != nil {
 				return DepreciationRun{}, err
 			}
+			grouped, err := groupMemberships(ctx, tx, p.TenantID, in.LegalEntityID, in.BookCode)
+			if err != nil {
+				return DepreciationRun{}, err
+			}
 			var currency *string
 			var lines []RunLine
 			total, due, exceptions := decimal.Zero, 0, 0
@@ -505,6 +509,9 @@ func (s *Postgres) ProposeRun(ctx context.Context, in RunInput, idempotencyKey s
 						Detail: "book " + in.BookCode + " has books in " + *currency + " and " + b.Currency + "; a run covers one currency"}
 				}
 				line, ok := decideBook(b, in.Period)
+				if group, member := grouped[b.ID]; member && ok {
+					line = groupLine(b, group)
+				}
 				if !ok {
 					continue
 				}
@@ -601,6 +608,11 @@ func (s *Postgres) PostRun(ctx context.Context, runID string, version int) (Depr
 		if err := rows.Err(); err != nil {
 			return err
 		}
+		// A book that joined a group asset after the proposal takes no own charge.
+		grouped, err := groupMemberships(ctx, tx, p.TenantID, run.LegalEntityID, run.BookCode)
+		if err != nil {
+			return err
+		}
 		total, posted := decimal.Zero, 0
 		touched := map[string]bool{}
 		locked := map[string]bool{}
@@ -618,6 +630,8 @@ func (s *Postgres) PostRun(ctx context.Context, runID string, version int) (Depr
 			line, ok := decideBook(book, run.Period)
 			if book.Status != string(domain.StatusOpen) {
 				line, ok = RunLine{Status: "Exception", ExceptionCode: ptr(domain.CodeAssetState), Detail: ptr("book is " + book.Status)}, true
+			} else if group, member := grouped[book.ID]; member {
+				line, ok = groupLine(book, group), true
 			}
 			if !ok || line.Status != "Due" || !line.Amount.Equal(d.amount) {
 				code, detail := domain.CodeRunStale, "the book changed since the proposal; propose the run again"

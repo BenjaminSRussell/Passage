@@ -15,6 +15,8 @@ import {
 } from "./api/client";
 import { addMoney, dash, dayOf, HOURS, minuteOf, money, nextStatuses, RATE, statusLabel, typeLabel } from "./format";
 import { Entry, Failure, State } from "./parts";
+import { WorkOrderPermitsCard } from "./PermitCare";
+import { RoundStopsCard } from "./RoundPages";
 import { DowntimeCard, FaultCard } from "./WorkOrderCare";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -118,11 +120,13 @@ export function WorkOrderDetailPage() {
           </Entry>
           <Entry term="Warranty">{wo.warrantyCovered ? "Covered by a vendor warranty; completion raises a claim" : "Not covered"}</Entry>
           <Entry term="Origin">
-            {wo.planLineId ? "Maintenance plan" : wo.requestId ? "Maintenance request" : "Raised by hand"}
+            {wo.planLineId ? "Maintenance plan" : wo.requestId ? "Maintenance request" : wo.workOrderType === "ROUND" ? "Maintenance round" : "Raised by hand"}
           </Entry>
         </dl>
       </Card>
       <StatusCard wo={wo} onSaved={saved} />
+      {wo.workOrderType === "ROUND" ? <RoundStopsCard wo={wo} onSaved={saved} /> : null}
+      <WorkOrderPermitsCard wo={wo} />
       <FaultCard wo={wo} onSaved={saved} />
       <DowntimeCard wo={wo} onSaved={saved} />
       <Card title="Labor">
@@ -232,7 +236,9 @@ function StatusCard({ wo, onSaved }: { wo: WorkOrderDetail; onSaved(text: string
                 ? "Someone else changed this work order. Reload it and try again."
                 : failure.code === "EAM-FLT-001"
                   ? "Register the fault first"
-                  : "Could not change the status"
+                  : failure.code === "EAM-RND-001"
+                    ? "Record every round stop first"
+                    : "Could not change the status"
             }
             problem={failure}
           />

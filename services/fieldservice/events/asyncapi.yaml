@@ -3,7 +3,7 @@ info:
   title: Passage Field Service events
   version: 0.1.0
   description: |
-    Events published by the fieldservice service (wave 45, slice 1). Every event is
+    Events published by the fieldservice service (wave 45, slices 1 to 4). Every event is
     written to the service outbox in the same transaction as the state change and
     relayed by Debezium to Kafka. Envelope: CloudEvents 1.0 (source /passage/service/fieldservice).
 defaultContentType: application/json
@@ -18,6 +18,23 @@ channels:
     messages:
       workOrderPosted:
         $ref: "#/components/messages/WorkOrderPosted"
+  slaAlerts:
+    address: passage.service.sla
+    messages:
+      slaWarning:
+        $ref: "#/components/messages/SLAWarning"
+      slaBreached:
+        $ref: "#/components/messages/SLABreached"
+  articlePublished:
+    address: passage.knowledge.article
+    messages:
+      articlePublished:
+        $ref: "#/components/messages/ArticlePublished"
+  caseStageChanged:
+    address: passage.case.stage
+    messages:
+      caseStageChanged:
+        $ref: "#/components/messages/CaseStageChanged"
 operations:
   publishCaseOpened:
     action: send
@@ -31,6 +48,30 @@ operations:
     summary: A completed service work order was posted to billing and warranty cost.
     messages:
       - $ref: "#/channels/workOrderPosted/messages/workOrderPosted"
+  publishSLAWarning:
+    action: send
+    channel: { $ref: "#/channels/slaAlerts" }
+    summary: A case clock reached the 75 % warning threshold (BR-45.2, SVC-SLA-001); emitted once per case and clock.
+    messages:
+      - $ref: "#/channels/slaAlerts/messages/slaWarning"
+  publishSLABreached:
+    action: send
+    channel: { $ref: "#/channels/slaAlerts" }
+    summary: A case clock ran past its due (BR-45.2, SVC-SLA-002); emitted once per case and clock by the monitor, a late response or a transition.
+    messages:
+      - $ref: "#/channels/slaAlerts/messages/slaBreached"
+  publishArticlePublished:
+    action: send
+    channel: { $ref: "#/channels/articlePublished" }
+    summary: A knowledge article version was published (FR-45.13, BR-45.11); the previous PUBLISHED version of the article and language, if any, was retired in the same transaction.
+    messages:
+      - $ref: "#/channels/articlePublished/messages/articlePublished"
+  publishCaseStageChanged:
+    action: send
+    channel: { $ref: "#/channels/caseStageChanged" }
+    summary: A case in any non-service category moved to the next stage (its gate passed) or back one stage with a reason (FR-45.12, BR-45.9).
+    messages:
+      - $ref: "#/channels/caseStageChanged/messages/caseStageChanged"
 components:
   messages:
     CaseOpened:
@@ -90,3 +131,76 @@ components:
                 amount: { type: string, description: Billed amount; zero unless BILLABLE }
                 warrantyCost: { type: string }
                 agreementHours: { type: string }
+    SLAWarning:
+      name: dev.passage.service.sla.warning.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [caseId, number, slaType, priority, dueAt, warnedAt, thresholdPercent]
+        additionalProperties: false
+        properties:
+          caseId: { type: string, format: uuid }
+          number: { type: string, example: CS-000001 }
+          slaType: { type: string, enum: [RESPONSE, RESOLUTION] }
+          priority: { type: integer, minimum: 1, maximum: 4 }
+          dueAt: { type: string, format: date-time }
+          warnedAt: { type: string, format: date-time }
+          thresholdPercent: { type: integer, example: 75 }
+    SLABreached:
+      name: dev.passage.service.sla.breached.v1
+      contentType: application/cloudevents+json
+      description: PRD 8.0 payload (caseId, slaType, dueAt, breachedAt) plus the case number and priority. breachedAt is when the service detected the breach.
+      payload:
+        type: object
+        required: [caseId, number, slaType, priority, dueAt, breachedAt]
+        additionalProperties: false
+        properties:
+          caseId: { type: string, format: uuid }
+          number: { type: string, example: CS-000001 }
+          slaType: { type: string, enum: [RESPONSE, RESOLUTION] }
+          priority: { type: integer, minimum: 1, maximum: 4 }
+          dueAt: { type: string, format: date-time }
+          breachedAt: { type: string, format: date-time }
+    ArticlePublished:
+      name: dev.passage.knowledge.article.published.v1
+      contentType: application/cloudevents+json
+      description: PRD 8.45.5 payload (articleId, version, language, applicability) plus the article number, title, publish time and the version it retired. Consumers are the search index and copilot retrieval (wave 47).
+      payload:
+        type: object
+        required: [articleId, number, version, language, title, applicability, publishedAt, retiredArticleId]
+        additionalProperties: false
+        properties:
+          articleId: { type: string, format: uuid, description: Id of the published version row. }
+          number: { type: string, example: KB-000001 }
+          version: { type: integer, minimum: 1 }
+          language: { type: string, example: en }
+          title: { type: string }
+          applicability:
+            type: object
+            required: [itemIds, itemGroupIds, incidentTypeIds, assetTypeIds, categoryIds]
+            additionalProperties: false
+            properties:
+              itemIds: { type: array, items: { type: string, format: uuid } }
+              itemGroupIds: { type: array, items: { type: string, format: uuid } }
+              incidentTypeIds: { type: array, items: { type: string, format: uuid } }
+              assetTypeIds: { type: array, items: { type: string, format: uuid } }
+              categoryIds: { type: array, items: { type: string, format: uuid } }
+          publishedAt: { type: string, format: date-time }
+          retiredArticleId: { type: [string, "null"], format: uuid, description: The version row this publish retired. }
+    CaseStageChanged:
+      name: dev.passage.case.stage.changed.v1
+      contentType: application/cloudevents+json
+      description: PRD 8.45.5 payload (caseId, categoryId, from, to, at, actor) plus the case number and the reason of a move back. Consumers are workflow, notifications and the domain owners (HR, collections, audit).
+      payload:
+        type: object
+        required: [caseId, number, categoryId, from, to, at, actor, reason]
+        additionalProperties: false
+        properties:
+          caseId: { type: string, format: uuid }
+          number: { type: string, example: CS-000002 }
+          categoryId: { type: string, format: uuid }
+          from: { type: string, description: Stage code the case left. }
+          to: { type: string, description: Stage code the case entered. }
+          at: { type: string, format: date-time }
+          actor: { type: string, description: User id of the caller who moved the case. }
+          reason: { type: string, description: The reason of a move back one stage; empty on a forward move. }

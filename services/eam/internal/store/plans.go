@@ -12,9 +12,12 @@ import (
 )
 
 // PlanLineInput is one maintenance plan line (FR-44.4). Optional fields are
-// pointers so that zero values are not mistaken for omissions.
+// pointers so that zero values are not mistaken for omissions. A ROUND line
+// (FR-44.14) names a round instead of an asset and a job type: its asset is the
+// round's first stop and the jobs are the stops.
 type PlanLineInput struct {
 	AssetID           string     `json:"assetId"`
+	RoundID           *string    `json:"roundId,omitempty"`
 	Kind              string     `json:"kind"`
 	IntervalValue     *int       `json:"intervalValue,omitempty"`
 	IntervalUnit      *string    `json:"intervalUnit,omitempty"`
@@ -56,11 +59,26 @@ type ScheduleResult struct {
 
 // validateLine checks a line against the plan line rules before it is stored.
 func validateLine(in PlanLineInput, start, now time.Time) error {
-	if in.AssetID == "" || in.JobType == "" {
-		return problem(422, CodeLineInvalid, "plan line needs an asset and a job type")
-	}
 	kind := domain.Kind(in.Kind)
-	needsTime := kind == domain.KindTime || kind == domain.KindTimeOrCounter || kind == domain.KindTimeAndCounter
+	if kind == domain.KindRound {
+		// BR-44.9: a ROUND line schedules on time only, for one round.
+		switch {
+		case in.RoundID == nil || *in.RoundID == "":
+			return problem(422, CodeLineInvalid, "a ROUND line needs a roundId")
+		case in.AssetID != "" || in.JobType != "":
+			return problem(422, CodeLineInvalid, "a ROUND line takes its assets and job types from the round's stops")
+		case in.CounterID != nil || in.CounterInterval != nil || in.LastCompletedReading != nil:
+			return problem(422, CodeLineInvalid, "a ROUND line schedules on time only")
+		}
+	} else {
+		if in.AssetID == "" || in.JobType == "" {
+			return problem(422, CodeLineInvalid, "plan line needs an asset and a job type")
+		}
+		if in.RoundID != nil {
+			return problem(422, CodeLineInvalid, "only ROUND lines name a round")
+		}
+	}
+	needsTime := kind == domain.KindTime || kind == domain.KindRound || kind == domain.KindTimeOrCounter || kind == domain.KindTimeAndCounter
 	needsCounter := kind == domain.KindCounter || kind == domain.KindTimeOrCounter || kind == domain.KindTimeAndCounter
 	if !needsTime && !needsCounter {
 		return problem(422, CodeLineInvalid, "unknown plan line kind "+in.Kind)
@@ -139,6 +157,13 @@ func (s *Postgres) CreatePlan(ctx context.Context, in PlanInput, key string) (Pl
 		}
 		out = Plan{ID: planID, Code: in.Code, Name: in.Name, Currency: in.Currency}
 		for _, l := range in.Lines {
+			if l.RoundID != nil {
+				r, err := getRound(ctx, tx, t, *l.RoundID)
+				if err != nil {
+					return err
+				}
+				l.AssetID = r.Stops[0].AssetID
+			}
 			if _, err := getAsset(ctx, tx, t, l.AssetID, false); err != nil {
 				return err
 			}
@@ -154,12 +179,12 @@ func (s *Postgres) CreatePlan(ctx context.Context, in PlanInput, key string) (Pl
 			}
 			lineID := ids.New()
 			start := deref(l.StartAt, now)
-			if _, err := tx.Exec(ctx, `insert into plan_line (tenant_id, id, plan_id, asset_id, line_type, interval_value,
+			if _, err := tx.Exec(ctx, `insert into plan_line (tenant_id, id, plan_id, asset_id, round_id, line_type, interval_value,
 			    interval_unit, counter_id, counter_interval, job_type, early_tolerance_pct, late_tolerance_pct,
 			    horizon_days, start_at, last_completed_at, last_completed_reading)
-			  values ($1, $2, $3, $4, $5, $6, $7, $8, $9::numeric, $10, $11, 10, $12, $13, $14, $15::numeric)`,
-				t, lineID, planID, l.AssetID, l.Kind, l.IntervalValue, l.IntervalUnit, l.CounterID,
-				numPtr(l.CounterInterval), l.JobType, deref(l.EarlyTolerancePct, 10), deref(l.HorizonDays, 90), start,
+			  values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::numeric, $11, $12, 10, $13, $14, $15, $16::numeric)`,
+				t, lineID, planID, l.AssetID, l.RoundID, l.Kind, l.IntervalValue, l.IntervalUnit, l.CounterID,
+				numPtr(l.CounterInterval), optStr(l.JobType), deref(l.EarlyTolerancePct, 10), deref(l.HorizonDays, 90), start,
 				l.LastCompletedAt, numText(deref(l.LastCompletedReading, 0))); err != nil {
 				return err
 			}
@@ -197,6 +222,7 @@ func getPlan(ctx context.Context, tx pgx.Tx, t, id string) (Plan, error) {
 type PlanLine struct {
 	ID                   string     `json:"id"`
 	AssetID              string     `json:"assetId"`
+	RoundID              *string    `json:"roundId,omitempty"`
 	Kind                 string     `json:"kind"`
 	IntervalValue        *int       `json:"intervalValue,omitempty"`
 	IntervalUnit         *string    `json:"intervalUnit,omitempty"`
@@ -261,8 +287,8 @@ func (s *Postgres) ListPlans(ctx context.Context, opt ListOptions) (Page[PlanVie
 }
 
 func planLines(ctx context.Context, tx pgx.Tx, t, planID string) ([]PlanLine, error) {
-	rows, err := tx.Query(ctx, `select id::text, asset_id::text, line_type, interval_value, interval_unit, counter_id::text,
-	    counter_interval::float8, job_type, early_tolerance_pct, horizon_days, start_at, last_completed_at,
+	rows, err := tx.Query(ctx, `select id::text, asset_id::text, round_id::text, line_type, interval_value, interval_unit, counter_id::text,
+	    counter_interval::float8, coalesce(job_type, ''), early_tolerance_pct, horizon_days, start_at, last_completed_at,
 	    last_completed_reading::float8, next_due_at, next_due_reading::float8, next_due_forecast_at
 	  from plan_line where tenant_id = $1 and plan_id = $2 order by id`, t, planID)
 	if err != nil {
@@ -272,7 +298,7 @@ func planLines(ctx context.Context, tx pgx.Tx, t, planID string) ([]PlanLine, er
 	lines := []PlanLine{}
 	for rows.Next() {
 		var l PlanLine
-		if err := rows.Scan(&l.ID, &l.AssetID, &l.Kind, &l.IntervalValue, &l.IntervalUnit, &l.CounterID,
+		if err := rows.Scan(&l.ID, &l.AssetID, &l.RoundID, &l.Kind, &l.IntervalValue, &l.IntervalUnit, &l.CounterID,
 			&l.CounterInterval, &l.JobType, &l.EarlyTolerancePct, &l.HorizonDays, &l.StartAt, &l.LastCompletedAt,
 			&l.LastCompletedReading, &l.NextDueAt, &l.NextDueReading, &l.NextDueForecastAt); err != nil {
 			return nil, err
@@ -296,7 +322,7 @@ func (s *Postgres) SchedulePlans(ctx context.Context) (ScheduleResult, error) {
 type lineRow struct {
 	id, assetID, kind, jobType, currency, lifecycle string
 	intervalValue                                   *int
-	intervalUnit, counterID                         *string
+	intervalUnit, counterID, roundID                *string
 	counterInterval                                 *float64
 	counterLast, usage                              float64
 	startAt                                         time.Time
@@ -330,6 +356,18 @@ func scheduleLines(ctx context.Context, tx pgx.Tx, t, extra string, args []any, 
 		if !domain.Generate(sched, l.early, l.horizon, now) {
 			continue
 		}
+		if l.roundID != nil {
+			generated, err := scheduleRound(ctx, tx, t, l, sched, now)
+			if err != nil {
+				return res, err
+			}
+			if generated {
+				res.Generated++
+			} else {
+				res.Skipped++
+			}
+			continue
+		}
 		if l.lifecycle != "ACTIVE" {
 			res.Skipped++
 			continue
@@ -359,11 +397,38 @@ func scheduleLines(ctx context.Context, tx pgx.Tx, t, extra string, args []any, 
 	return res, nil
 }
 
+// scheduleRound generates the ROUND work order of a due round line (BR-44.9):
+// one order per occurrence with every stop, while no order of the line is open.
+// An inactive round, or a stop asset that is not ACTIVE, skips the line.
+func scheduleRound(ctx context.Context, tx pgx.Tx, t string, l lineRow, sched domain.Schedule, now time.Time) (bool, error) {
+	var open bool
+	if err := tx.QueryRow(ctx, `select exists(select 1 from work_order where tenant_id = $1 and plan_line_id = $2
+	    and status not in ('COMPLETED', 'CLOSED', 'CANCELED'))`, t, l.id).Scan(&open); err != nil {
+		return false, err
+	}
+	if open {
+		return false, nil
+	}
+	r, err := getRound(ctx, tx, t, *l.roundID)
+	if err != nil {
+		return false, err
+	}
+	if !r.Active {
+		return false, nil
+	}
+	if bad, err := inactiveStop(ctx, tx, t, r); err != nil || bad != "" {
+		return false, err
+	}
+	lineID := l.id
+	_, err = insertRoundWorkOrder(ctx, tx, t, r, &lineID, l.currency, sched.NextDueAt, "", now)
+	return err == nil, err
+}
+
 func loadLines(ctx context.Context, tx pgx.Tx, t, extra string, args []any) ([]lineRow, error) {
-	q := `select pl.id::text, pl.asset_id::text, pl.line_type, pl.interval_value, pl.interval_unit, pl.counter_id::text,
+	q := `select pl.id::text, pl.asset_id::text, pl.round_id::text, pl.line_type, pl.interval_value, pl.interval_unit, pl.counter_id::text,
 	    pl.counter_interval::float8, coalesce(c.last_reading, 0)::float8, coalesce(c.avg_daily_usage, 0)::float8,
 	    pl.start_at, pl.last_completed_at, pl.last_completed_reading::float8, pl.early_tolerance_pct, pl.horizon_days,
-	    pl.job_type, p.currency, a.criticality, a.lifecycle_state
+	    coalesce(pl.job_type, ''), p.currency, a.criticality, a.lifecycle_state
 	  from plan_line pl
 	  join maintenance_plan p on p.tenant_id = pl.tenant_id and p.id = pl.plan_id
 	  join asset a on a.tenant_id = pl.tenant_id and a.id = pl.asset_id
@@ -378,7 +443,7 @@ func loadLines(ctx context.Context, tx pgx.Tx, t, extra string, args []any) ([]l
 	var out []lineRow
 	for rows.Next() {
 		var l lineRow
-		if err := rows.Scan(&l.id, &l.assetID, &l.kind, &l.intervalValue, &l.intervalUnit, &l.counterID,
+		if err := rows.Scan(&l.id, &l.assetID, &l.roundID, &l.kind, &l.intervalValue, &l.intervalUnit, &l.counterID,
 			&l.counterInterval, &l.counterLast, &l.usage, &l.startAt, &l.lastAt, &l.lastReading, &l.early,
 			&l.horizon, &l.jobType, &l.currency, &l.criticality, &l.lifecycle); err != nil {
 			return nil, err

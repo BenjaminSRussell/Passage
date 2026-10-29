@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "passage-multiregion values",
+  "type": "object",
+  "required": ["region", "postgres", "kafka", "mm2", "failover", "slo", "license", "fence"],
+  "properties": {
+    "region": {
+      "type": "object",
+      "required": ["id", "role", "provider", "namespace"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z]+-[a-z]+[0-9]*$"},
+        "role": {"enum": ["PRIMARY", "PASSIVE", "FENCED"]},
+        "provider": {"enum": ["eks", "gke", "aks", "bare"]},
+        "namespace": {"type": "string", "minLength": 1}
+      }
+    },
+    "postgres": {
+      "type": "object",
+      "required": ["clusterName", "instances", "synchronous", "primary", "pooler"],
+      "properties": {
+        "instances": {"type": "integer", "minimum": 3},
+        "synchronous": {
+          "type": "object",
+          "required": ["method", "number"],
+          "properties": {
+            "method": {"enum": ["any", "first"]},
+            "number": {"type": "integer", "minimum": 1}
+          }
+        },
+        "crossRegionSyncLedger": {"type": "boolean"},
+        "pooler": {
+          "type": "object",
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "instances": {"type": "integer", "minimum": 1}
+          }
+        }
+      }
+    },
+    "mm2": {
+      "type": "object",
+      "required": ["sourceAlias", "targetAlias", "lagAlertMessages"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "replicationFactor": {"type": "integer", "minimum": 2, "maximum": 3},
+        "lagAlertMessages": {"type": "integer", "minimum": 1000}
+      }
+    },
+    "failover": {
+      "type": "object",
+      "required": ["maxLagSeconds", "dnsTtlSeconds", "twoPersonWindowMinutes"],
+      "properties": {
+        "maxLagSeconds": {"type": "integer", "minimum": 30, "maximum": 3600},
+        "dnsTtlSeconds": {"type": "integer", "minimum": 30, "maximum": 300},
+        "twoPersonWindowMinutes": {"type": "integer", "minimum": 1, "maximum": 30},
+        "rtoTargetMinutes": {"type": "integer", "minimum": 1},
+        "rpoTargetSeconds": {"type": "integer", "minimum": 0}
+      }
+    },
+    "slo": {
+      "type": "object",
+      "required": ["availabilityTarget", "burnFast", "burnSlow"],
+      "properties": {
+        "availabilityTarget": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1},
+        "burnFast": {"type": "number", "exclusiveMinimum": 0},
+        "burnSlow": {"type": "number", "exclusiveMinimum": 0},
+        "recordingRules": {"type": "boolean"}
+      }
+    },
+    "license": {
+      "type": "object",
+      "properties": {
+        "warnDays": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "integer", "minimum": 1}}
+      }
+    },
+    "fence": {
+      "type": "object",
+      "required": ["enabled", "operatorNamespace"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "operatorNamespace": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

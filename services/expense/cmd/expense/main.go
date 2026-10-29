@@ -56,7 +56,8 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
-	a := api.New(pool).WithReports(store.New(pool))
+	s := store.New(pool)
+	a := api.New(pool).WithReports(s).WithTravel(s)
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

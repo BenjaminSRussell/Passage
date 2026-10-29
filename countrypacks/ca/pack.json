@@ -1,0 +1,23 @@
+{
+  "code": "CA",
+  "version": "2026.1",
+  "name": "Canada",
+  "country": "CA",
+  "currency": "CAD",
+  "locale": "en-CA",
+  "taxRegime": "GST_HST_PST",
+  "fiscalYearStartMonth": 1,
+  "holidayRegion": "CA-ON",
+  "bankFormats": ["EFT"],
+  "taxIdScheme": "CA_BN",
+  "retentionMinYears": {"financial": 6, "hr": 6},
+  "documentLayouts": ["invoice-en-ca", "invoice-fr-ca"],
+  "statutoryReports": [
+    {
+      "code": "CA_GST34",
+      "format": "XML",
+      "mandate": "CRA GST34 via NETFILE",
+      "requiredFields": ["businessNumber", "reportingPeriod", "line101", "line105"]
+    }
+  ]
+}

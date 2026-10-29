@@ -1,7 +1,20 @@
 import { useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Badge, Button, buttonClassName, Card, DataTable, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
-import { getAsset, getSchedule, listAdditions, listPolicies, listTransactions, type Addition, type Book, type InsurancePolicy, type ScheduleLine, type Transaction } from "./api/client";
+import {
+  getAsset,
+  getSchedule,
+  listAdditions,
+  listPolicies,
+  listTransactions,
+  listTransfers,
+  type Addition,
+  type Book,
+  type InsurancePolicy,
+  type ScheduleLine,
+  type Transaction,
+  type Transfer,
+} from "./api/client";
 import { StatusBadge } from "./badges";
 import { dash, money, sentence } from "./format";
 import styles from "./pages.module.css";
@@ -27,7 +40,42 @@ const bookColumns: DataTableColumn<Book>[] = [
   { key: "accumulatedDepreciation", header: "Accumulated", align: "end", render: (b) => money(b.accumulatedDepreciation, b.currency) },
   { key: "nbv", header: "NBV", align: "end", render: (b) => money(b.nbv, b.currency) },
   { key: "status", header: "Status", render: (b) => <StatusBadge status={b.status} /> },
+  {
+    key: "groupCode",
+    header: "Group asset",
+    mono: true,
+    render: (b) => (b.groupAssetId ? <Link to={`/assets/group-assets/${b.groupAssetId}`}>{b.groupCode ?? b.groupAssetId}</Link> : dash),
+  },
 ];
+
+/** Transfers and splits the asset took part in, as source or as target (FR-37.7). */
+function transferColumns(assetId: string): DataTableColumn<Transfer>[] {
+  return [
+    { key: "transferDate", header: "Date", mono: true },
+    { key: "kind", header: "Kind", render: (t) => sentence(t.kind) },
+    {
+      key: "sourceAssetNumber",
+      header: "From",
+      mono: true,
+      render: (t) => (t.sourceAssetId === assetId ? t.sourceAssetNumber : <Link to={`/assets/${t.sourceAssetId}`}>{t.sourceAssetNumber}</Link>),
+    },
+    {
+      key: "targets",
+      header: "To",
+      render: (t) => (
+        <span className={styles.actions}>
+          {t.targets.map((x) =>
+            x.asset.id === assetId ? (
+              <span key={x.asset.id} className={styles.mono}>{`${x.asset.assetNumber} (${x.percentage}%)`}</span>
+            ) : (
+              <Link key={x.asset.id} className={styles.mono} to={`/assets/${x.asset.id}`}>{`${x.asset.assetNumber} (${x.percentage}%)`}</Link>
+            ),
+          )}
+        </span>
+      ),
+    },
+  ];
+}
 
 const scheduleColumns: DataTableColumn<ScheduleLine>[] = [
   { key: "period", header: "Period", mono: true },
@@ -124,6 +172,7 @@ export function AssetDetailPage() {
   const transactions = useLoad((signal) => listTransactions(id, signal), id);
   const additions = useLoad((signal) => listAdditions(id, signal), id);
   const policies = useLoad((signal) => listPolicies(id, signal), id);
+  const transfers = useLoad((signal) => listTransfers(id, signal), id);
   const [selected, setSelected] = useState<string | null>(null);
 
   if (state.error) {
@@ -180,9 +229,14 @@ export function AssetDetailPage() {
               </>
             ) : null}
             {asset.status === "Open" ? (
-              <Link className={buttonClassName("secondary")} to={`/assets/${asset.id}/dispose`}>
-                Dispose
-              </Link>
+              <>
+                <Link className={buttonClassName("secondary")} to={`/assets/${asset.id}/transfer`}>
+                  Transfer or split
+                </Link>
+                <Link className={buttonClassName("secondary")} to={`/assets/${asset.id}/dispose`}>
+                  Dispose
+                </Link>
+              </>
             ) : null}
           </div>
         }
@@ -247,6 +301,14 @@ export function AssetDetailPage() {
         columns={policyColumns}
         rowKey={(p) => p.id}
         empty={{ title: "No insurance policies", description: "Record a policy to track the insured value against the indexed replacement value." }}
+      />
+      <ListCard
+        title="Transfers and splits"
+        label="Transfers"
+        state={transfers}
+        columns={transferColumns(asset.id)}
+        rowKey={(t) => t.id}
+        empty={{ title: "No transfers", description: "Transfers and splits from or into this asset appear here." }}
       />
       <div>
         <Button variant="ghost" onClick={() => navigate("/assets")}>

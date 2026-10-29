@@ -1,0 +1,109 @@
+# Multi-region alert rules. Every alert carries runbook_url pointing into
+# docs/ops/runbooks (FR-50.10). Thresholds: PRD 9.50.10 alerts and BR-50.6.
+{{- $ns := .Values.region.namespace }}
+{{- $cluster := .Values.postgres.clusterName }}
+{{- $target := .Values.slo.availabilityTarget }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: passage-multiregion
+  namespace: {{ $ns }}
+  labels:
+    {{- include "passage-mr.labels" . | nindent 4 }}
+spec:
+  groups:
+    {{- if .Values.slo.recordingRules }}
+    # Availability burn rate = 5xx ratio / error budget (SRE workbook ch. 5),
+    # from http_requests_total, the series the observability chart alerts on.
+    - name: passage-multiregion.slo-recording
+      rules:
+        {{- range $w := list "5m" "30m" "1h" "6h" }}
+        - record: passage:slo_error_ratio:rate{{ $w }}
+          expr: sum by (job) (rate(http_requests_total{status=~"5.."}[{{ $w }}])) / sum by (job) (rate(http_requests_total[{{ $w }}]))
+        - record: passage:slo_burn_rate:{{ $w }}
+          expr: passage:slo_error_ratio:rate{{ $w }} / (1 - {{ $target }})
+        {{- end }}
+    {{- end }}
+    - name: passage-multiregion.replication
+      rules:
+        # CNPG metrics carry namespace and pod; instance pods are <cluster>-<n>.
+        - alert: PassageReplicationLagHigh
+          expr: max(cnpg_pg_replication_lag{namespace="{{ $ns }}", pod=~"{{ $cluster }}-[0-9]+"}) > 60
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Postgres replication lag above 60 s on {{ .Values.region.id }}"
+            code: OPS-1708
+            runbook_url: https://docs.passage.dev/ops/runbooks/postgres-replication-lag
+        - alert: PassageMirrorMaker2LagHigh
+          expr: sum(kafka_mm2_records_lag{namespace="{{ .Values.kafka.namespace }}", pod=~"passage-mm2-mirrormaker2-.*"}) > {{ .Values.mm2.lagAlertMessages }}
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "MirrorMaker 2 lag above {{ .Values.mm2.lagAlertMessages }} messages"
+            runbook_url: https://docs.passage.dev/ops/runbooks/mirrormaker-lag
+        - alert: PassageReplicationSlotBloat
+          expr: max(cnpg_pg_replication_slots_pg_wal_lsn_diff{namespace="{{ $ns }}", pod=~"{{ $cluster }}-[0-9]+"}) > 1073741824
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Replication slot retains more than 1 GB of WAL"
+            runbook_url: https://docs.passage.dev/ops/runbooks/replication-slot-bloat
+    - name: passage-multiregion.failover
+      rules:
+        - alert: PassageFailoverInProgress
+          expr: max(passage_ops_failover_in_progress) == 1
+          labels:
+            severity: page
+          annotations:
+            summary: "Region failover in progress"
+            runbook_url: https://docs.passage.dev/ops/runbooks/failover
+        - alert: PassageRegionFenced
+          expr: max(passage_ops_region_fenced{region="{{ .Values.region.id }}"}) == 1
+          labels:
+            severity: info
+          annotations:
+            summary: "Region {{ .Values.region.id }} is fenced; no writes accepted"
+            runbook_url: https://docs.passage.dev/ops/runbooks/failback
+    - name: passage-multiregion.slo
+      rules:
+        # Multi-window burn alerts: the long window sets the rate (BR-50.6), the
+        # short window (1/12 of it) stops the alert once the burn has ended.
+        - alert: PassageSLOFastBurn
+          expr: passage:slo_burn_rate:1h > {{ .Values.slo.burnFast }} and passage:slo_burn_rate:5m > {{ .Values.slo.burnFast }}
+          for: 2m
+          labels:
+            severity: page
+          annotations:
+            summary: "Fast SLO burn on {{ "{{" }} $labels.job {{ "}}" }} (> {{ .Values.slo.burnFast }}x over 1 h)"
+            runbook_url: https://docs.passage.dev/ops/runbooks/slo-burn
+        - alert: PassageSLOSlowBurn
+          expr: passage:slo_burn_rate:6h > {{ .Values.slo.burnSlow }} and passage:slo_burn_rate:30m > {{ .Values.slo.burnSlow }}
+          for: 15m
+          labels:
+            severity: ticket
+          annotations:
+            summary: "Slow SLO burn on {{ "{{" }} $labels.job {{ "}}" }} (> {{ .Values.slo.burnSlow }}x over 6 h)"
+            runbook_url: https://docs.passage.dev/ops/runbooks/slo-burn
+    - name: passage-multiregion.license
+      rules:
+        # One alert per band so a tenant at 5 days raises only the 7-day alert:
+        # band of d is (next smaller warn day, d]; the smallest band includes expired.
+        {{- $days := .Values.license.warnDays }}
+        {{- range $d := $days }}
+        {{- $lower := -1 }}
+        {{- range $o := $days }}
+        {{- if and (lt (int $o) (int $d)) (gt (int $o) $lower) }}{{ $lower = int $o }}{{ end }}
+        {{- end }}
+        - alert: PassageLicenseExpiresIn{{ $d }}Days
+          expr: min by (tenant_id) (passage_license_days_to_expiry) <= {{ $d }}{{ if ge $lower 0 }} and min by (tenant_id) (passage_license_days_to_expiry) > {{ $lower }}{{ end }}
+          labels:
+            severity: {{ if le (int $d) 1 }}page{{ else if le (int $d) 7 }}warning{{ else }}info{{ end }}
+          annotations:
+            summary: "License of tenant {{ "{{" }} $labels.tenant_id {{ "}}" }} expires within {{ $d }} days"
+            code: LIC-1801
+            runbook_url: https://docs.passage.dev/ops/runbooks/license-expiry
+        {{- end }}
