@@ -85,7 +85,7 @@ export class AesGcmSealer implements SealCipher {
   constructor(
     private readonly subtle: SubtleCrypto,
     private readonly key: CryptoKey,
-    private readonly random: (n: number) => Uint8Array = (n) => globalThis.crypto.getRandomValues(new Uint8Array(n)),
+    private readonly random: (n: number) => Uint8Array<ArrayBuffer> =(n) => globalThis.crypto.getRandomValues(new Uint8Array(n)),
   ) {}
 
   static generateKey(subtle: SubtleCrypto): Promise<CryptoKey> {
