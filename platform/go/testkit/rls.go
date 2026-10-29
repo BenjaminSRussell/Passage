@@ -34,7 +34,7 @@ select c.relname, c.relrowsecurity, c.relforcerowsecurity,
           and p.qual like '%passage.legal_entity_scopes%')
 from pg_class c
 join pg_namespace n on n.oid = c.relnamespace
-where n.nspname = current_schema() and c.relkind = 'r'
+where n.nspname = current_schema() and c.relkind in ('r', 'p')
   and exists (select 1 from pg_attribute a where a.attrelid = c.oid and a.attname = 'tenant_id' and not a.attisdropped)
 order by c.relname`)
 	if err != nil {
@@ -68,13 +68,26 @@ order by c.relname`)
 }
 
 // RLSCase is one table's cross-tenant probe. Insert takes the arguments
-// returned by Args; Args receives the owning tenant and legal entity.
+// returned by Args, after the optional Before statement that creates a parent
+// row; Args receives the owning tenant and legal entity.
 type RLSCase struct {
 	Table       string
+	Before      string
 	Insert      string
 	Args        func(tenantID, legalEntityID string) []any
 	LegalEntity bool
 	NoUpdate    bool
+	Delete      bool
+}
+
+func (c RLSCase) insert(tx pgx.Tx, args []any) error {
+	if c.Before != "" {
+		if _, err := tx.Exec(context.Background(), c.Before, args...); err != nil {
+			return err
+		}
+	}
+	_, err := tx.Exec(context.Background(), c.Insert, args...)
+	return err
 }
 
 // OutboxCase probes the outbox table every service carries; the application
@@ -99,7 +112,7 @@ func IdempotencyCase() RLSCase {
 }
 
 // CrossTenant runs each case as the application role: tenant A inserts a row,
-// then tenant B cannot read it, update it, or insert a row owned by tenant A.
+// then tenant B cannot read it, update it, delete it, or insert a row owned by tenant A.
 // For LegalEntity cases, a same-tenant principal scoped to another legal entity
 // is held to the same checks.
 func CrossTenant(t *testing.T, app *pgxpool.Pool, cases []RLSCase) {
@@ -110,8 +123,7 @@ func CrossTenant(t *testing.T, app *pgxpool.Pool, cases []RLSCase) {
 		t.Run(c.Table, func(t *testing.T) {
 			args := c.Args(tenantA, entityA)
 			if err := inScope(app, tenantA, "*", func(tx pgx.Tx) error {
-				_, err := tx.Exec(context.Background(), c.Insert, args...)
-				return err
+				return c.insert(tx, args)
 			}); err != nil {
 				t.Fatalf("tenant A insert: %v", err)
 			}
@@ -132,8 +144,7 @@ func CrossTenant(t *testing.T, app *pgxpool.Pool, cases []RLSCase) {
 				}
 			}
 			err := inScope(app, tenantB, "*", func(tx pgx.Tx) error {
-				_, err := tx.Exec(context.Background(), c.Insert, c.Args(tenantA, entityA)...)
-				return err
+				return c.insert(tx, c.Args(tenantA, entityA))
 			})
 			if !isRLSViolation(err) {
 				t.Errorf("tenant B insert of tenant A row: %v, want row-level security violation", err)
@@ -153,8 +164,7 @@ func CrossTenant(t *testing.T, app *pgxpool.Pool, cases []RLSCase) {
 				}
 			}
 			err = inScope(app, tenantA, entityB, func(tx pgx.Tx) error {
-				_, err := tx.Exec(context.Background(), c.Insert, c.Args(tenantA, entityA)...)
-				return err
+				return c.insert(tx, c.Args(tenantA, entityA))
 			})
 			if !isRLSViolation(err) {
 				t.Errorf("other legal entity insert: %v, want row-level security violation", err)
@@ -190,6 +200,32 @@ func visibleRows(t *testing.T, app *pgxpool.Pool, table, tenantID, scopes string
 		t.Fatalf("select %s as app role: %v", table, err)
 	}
 	return n
+}
+
+func assertDenied(t *testing.T, app *pgxpool.Pool, verb, sql, tenantID string) {
+	t.Helper()
+	err := inScope(app, tenantID, "*", func(tx pgx.Tx) error {
+		_, err := tx.Exec(context.Background(), sql)
+		return err
+	})
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != insufficientPrivilege || !strings.Contains(pgErr.Message, "permission denied") {
+		t.Errorf("%s as app role: %v, want permission denied", verb, err)
+	}
+}
+
+func execRows(t *testing.T, app *pgxpool.Pool, sql, tenantID string) int {
+	t.Helper()
+	var n int64
+	err := inScope(app, tenantID, "*", func(tx pgx.Tx) error {
+		tag, err := tx.Exec(context.Background(), sql)
+		n = tag.RowsAffected()
+		return err
+	})
+	if err != nil {
+		t.Fatalf("%s as app role: %v", sql, err)
+	}
+	return int(n)
 }
 
 func updatedRows(t *testing.T, app *pgxpool.Pool, table, tenantID, scopes string) int {
