@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
@@ -29,26 +31,52 @@ func tenantCtx(n int, scope string) context.Context {
 	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), LegalEntityID: scope})
 }
 
-func testStore(t *testing.T) (*Postgres, *pgxpool.Pool) {
+func migratedPools(t *testing.T) (admin, app *pgxpool.Pool) {
 	t.Helper()
-	admin, app := testkit.DBWithApp(t)
+	admin, app = testkit.DBWithApp(t)
 	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
+	return admin, app
+}
+
+func testStore(t *testing.T) (*Postgres, *pgxpool.Pool) {
+	t.Helper()
+	admin, app := migratedPools(t)
 	return New(app), admin
 }
 
-func testAppStore(t *testing.T) (*Postgres, *pgxpool.Pool) {
+func requireRLSViolation(t *testing.T, err error) {
 	t.Helper()
-	admin, app := testkit.DBWithApp(t)
-	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
-		t.Fatalf("migrate: %v", err)
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		t.Fatalf("err = %v, want a pgconn error", err)
 	}
-	return New(app), app
+	if pgErr.Code != "42501" || !strings.Contains(pgErr.Message, "row-level security") {
+		t.Fatalf("pg error = %s %q, want 42501 row-level security", pgErr.Code, pgErr.Message)
+	}
+}
+
+func TestChildInsertUnderOtherEntityParentIsRefused(t *testing.T) {
+	_, app := migratedPools(t)
+	entityA, entityB := ids.New(), ids.New()
+	created, err := New(app).CreateContract(tenantCtx(1, entityA), bundleContract(t, entityA))
+	if err != nil {
+		t.Fatalf("create contract: %v", err)
+	}
+	err = dbx.WithTenantTx(tenantCtx(1, entityB), app, func(tx pgx.Tx) error {
+		_, err := tx.Exec(context.Background(), `INSERT INTO performance_obligation
+			(tenant_id, id, contract_id, line_no, product_id, ssp_amount, ssp_source, allocated_amount, method)
+			VALUES ($1, $2, $3, 99, $4, 1, 'EXPLICIT', 1, 'POINT_IN_TIME')`,
+			testkit.TenantID(1), ids.New(), created.ID, ids.New())
+		return err
+	})
+	requireRLSViolation(t, err)
 }
 
 func TestLegalEntityScopeRestrictsRevenueChildren(t *testing.T) {
-	s, app := testAppStore(t)
+	_, app := migratedPools(t)
+	s := New(app)
 	entityA, entityB := ids.New(), ids.New()
 	created, err := s.CreateContract(tenantCtx(1, entityA), bundleContract(t, entityA))
 	if err != nil {
@@ -81,18 +109,13 @@ func TestLegalEntityScopeRestrictsRevenueChildren(t *testing.T) {
 }
 
 func TestOutboxRejectsTenantMismatch(t *testing.T) {
-	admin, app := testkit.DBWithApp(t)
-	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	_, app := migratedPools(t)
 	err := dbx.WithTenantTx(tenantCtx(1, ""), app, func(tx pgx.Tx) error {
 		_, err := tx.Exec(context.Background(), `INSERT INTO outbox (id, tenant_id, aggregate_type, aggregate_id, type, payload)
 			VALUES ($1, $2, 'customer', $3, 'test', '{}'::jsonb)`, ids.New(), testkit.TenantID(2), ids.New())
 		return err
 	})
-	if err == nil {
-		t.Fatal("outbox accepted a row for a tenant outside the transaction scope")
-	}
+	requireRLSViolation(t, err)
 }
 
 // bundleContract builds the BR-29.1 bundle the way the API does: allocate, then

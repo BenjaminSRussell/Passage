@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
@@ -84,6 +86,31 @@ func TestChildRowsRespectLegalEntityScope(t *testing.T) {
 				t.Errorf("entity %s can see %d %s rows owned by entity %s", entityB, count, row.table, entityA)
 			}
 		})
+	}
+}
+
+func TestChildInsertUnderOtherEntityParentIsRefused(t *testing.T) {
+	pool := migrated(t)
+	entityA, entityB := ids.New(), ids.New()
+	ctxA := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(92), LegalEntityID: entityA, UserID: ids.New()})
+	ctxB := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(92), LegalEntityID: entityB, UserID: ids.New()})
+	rfqInput := draftRFQ(t)
+	rfqInput.LegalEntityID = entityA
+	rfq, err := store.New(pool).CreateRFQ(ctxA, rfqInput, store.Idem{})
+	if err != nil {
+		t.Fatalf("create RFQ: %v", err)
+	}
+	err = dbx.WithTenantTx(ctxB, pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctxB, `INSERT INTO purchase_rfq_line (tenant_id, rfq_id, line_no, id, description, qty, unit)
+			VALUES ($1, $2, 99, $3, 'smuggled', 1, 'EA')`, testkit.TenantID(92), rfq.ID, ids.New())
+		return err
+	})
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		t.Fatalf("err = %v, want a pgconn error", err)
+	}
+	if pgErr.Code != "42501" || !strings.Contains(pgErr.Message, "row-level security") {
+		t.Fatalf("pg error = %s %q, want 42501 row-level security", pgErr.Code, pgErr.Message)
 	}
 }
 
