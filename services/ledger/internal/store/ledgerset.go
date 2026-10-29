@@ -92,8 +92,10 @@ func (s *Postgres) CreateLedgerSet(ctx context.Context, in LedgerSetInput) (Ledg
 		if err := lockLegalEntity(ctx, tx, p.TenantID, loaded[0].LegalEntityID); err != nil {
 			return err
 		}
-		if _, err := loadLedger(ctx, tx, p.TenantID, in.LeadingLedgerID, true); err != nil {
-			return err
+		for _, id := range sorted {
+			if _, err := loadLedger(ctx, tx, p.TenantID, id, true); err != nil {
+				return err
+			}
 		}
 		var hasMappings bool
 		if err := tx.QueryRow(ctx, `select exists(select 1 from ledger_account_mapping where tenant_id = $1 and ledger_id = $2)`,
