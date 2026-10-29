@@ -51,10 +51,10 @@ func setup(t *testing.T) (*pgxpool.Pool, string, string) {
 	}
 	tenantA, tenantB := testkit.TenantID(1), testkit.TenantID(2)
 	seed := func(tenantID string, legalIDs ...string) {
+		if _, err := admin.Exec(ctx, `insert into identity_tenants (tenant_id, realm_name, display_name) values ($1, $2, 'Tenant')`, tenantID, "realm-"+tenantID); err != nil {
+			t.Fatal(err)
+		}
 		if err := asTenant(t, app, tenantID, "*", func(tx pgx.Tx) error {
-			if _, err := tx.Exec(ctx, `insert into identity_tenants (tenant_id, realm_name, display_name) values ($1, $2, 'Tenant')`, tenantID, "realm-"+tenantID); err != nil {
-				return err
-			}
 			if _, err := tx.Exec(ctx, `insert into identity_users (tenant_id, user_id, idp_subject) values ($1, $2, $3)`, tenantID, userID, "subject-"+tenantID); err != nil {
 				return err
 			}
@@ -170,7 +170,7 @@ func TestCrossTenantWriteIsRejected(t *testing.T) {
 			t.Errorf("tenant A inserted a tenant B row into %s", table)
 		}
 	}
-	for _, table := range identityTables {
+	for _, table := range identityTables[1:] {
 		var updated, deleted int64
 		if err := asTenant(t, app, tenantA, "*", func(tx pgx.Tx) error {
 			u, err := tx.Exec(ctx, `update `+table+` set tenant_id = tenant_id where tenant_id = $1`, tenantB)
@@ -223,15 +223,99 @@ func TestLegalEntityScopeRestrictsEntitiesAndRoleAssignments(t *testing.T) {
 
 func TestRoleAssignmentEffectiveDating(t *testing.T) {
 	app, tenantA, _ := setup(t)
+	ctx := context.Background()
+	insert := func(validFrom, validTo string) error {
+		return asTenant(t, app, tenantA, "*", func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `insert into identity_role_assignments (tenant_id, assignment_id, user_id, role, valid_from, valid_to)
+values ($1, gen_random_uuid(), $2, 'dated', `+validFrom+`, `+validTo+`)`, tenantA, userID)
+			return err
+		})
+	}
+	if err := insert("now()", "now() - interval '1 day'"); err == nil {
+		t.Fatal("valid_to before valid_from was accepted")
+	}
+	if err := insert("now() + interval '1 day'", "null"); err != nil {
+		t.Fatal(err)
+	}
+	if err := insert("now() - interval '2 days'", "now() - interval '1 day'"); err != nil {
+		t.Fatal(err)
+	}
+	const effective = `select count(*) from identity_role_assignments where valid_from <= now() and (valid_to is null or valid_to > now())`
+	if got := count(t, app, tenantA, "*", effective); got != 3 {
+		t.Errorf("effective assignments = %d, want 3", got)
+	}
+	if got := count(t, app, tenantA, "*", `select count(*) from identity_role_assignments where role = 'dated'`); got != 2 {
+		t.Errorf("dated assignments = %d, want 2", got)
+	}
+}
+
+func TestRoleAssignmentOverlapIsRejectedAndAdjacentAllowed(t *testing.T) {
+	app, tenantA, _ := setup(t)
+	ctx := context.Background()
+	insert := func(entity any, validFrom, validTo string) error {
+		return asTenant(t, app, tenantA, "*", func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `insert into identity_role_assignments (tenant_id, assignment_id, user_id, role, legal_entity_id, valid_from, valid_to)
+values ($1, gen_random_uuid(), $2, 'overlap', $3, `+validFrom+`, `+validTo+`)`, tenantA, userID, entity)
+			return err
+		})
+	}
+	if err := insert(nil, "'2030-01-01'", "'2030-02-01'"); err != nil {
+		t.Fatal(err)
+	}
+	if err := insert(nil, "'2030-01-15'", "'2030-03-01'"); err == nil {
+		t.Error("overlapping tenant-wide assignment was accepted")
+	}
+	if err := insert(nil, "'2029-01-01'", "null"); err == nil {
+		t.Error("open-ended assignment overlapping an existing one was accepted")
+	}
+	if err := insert(nil, "'2030-02-01'", "'2030-03-01'"); err != nil {
+		t.Errorf("adjacent assignment rejected: %v", err)
+	}
+	if err := insert(legalA, "'2030-01-15'", "'2030-03-01'"); err != nil {
+		t.Errorf("same role on a different legal entity rejected: %v", err)
+	}
+}
+
+func TestRoleMustBeNonEmpty(t *testing.T) {
+	app, tenantA, _ := setup(t)
 	err := asTenant(t, app, tenantA, "*", func(tx pgx.Tx) error {
-		_, err := tx.Exec(context.Background(), `insert into identity_role_assignments (tenant_id, assignment_id, user_id, role, valid_from, valid_to)
-values ($1, gen_random_uuid(), $2, 'x', now(), now() - interval '1 day')`, tenantA, userID)
+		_, err := tx.Exec(context.Background(), `insert into identity_role_assignments (tenant_id, assignment_id, user_id, role) values ($1, gen_random_uuid(), $2, '')`, tenantA, userID)
 		return err
 	})
 	if err == nil {
-		t.Fatal("valid_to before valid_from was accepted")
+		t.Error("empty role was accepted")
 	}
-	if got := count(t, app, tenantA, "*", `select count(*) from identity_role_assignments where valid_from <= now() and (valid_to is null or valid_to > now())`); got != 3 {
-		t.Errorf("effective assignments = %d, want 3", got)
+}
+
+func TestAppRoleCannotWriteTenants(t *testing.T) {
+	app, tenantA, _ := setup(t)
+	ctx := context.Background()
+	for name, stmt := range map[string]string{
+		"insert":      `insert into identity_tenants (tenant_id, realm_name, display_name) values ($1, 'new-realm', 'x')`,
+		"update":      `update identity_tenants set status = 'active' where tenant_id = $1`,
+		"update-self": `update identity_tenants set realm_name = 'renamed' where tenant_id = $1`,
+		"delete":      `delete from identity_tenants where tenant_id = $1`,
+	} {
+		err := asTenant(t, app, tenantA, "*", func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, stmt, tenantA)
+			return err
+		})
+		if err == nil {
+			t.Errorf("passage_app could %s identity_tenants", name)
+		}
+	}
+	if got := count(t, app, tenantA, "*", `select count(*) from identity_tenants`); got != 1 {
+		t.Errorf("tenant A sees %d tenant rows, want 1", got)
+	}
+}
+
+func TestUpdateCannotMoveRowToAnotherTenant(t *testing.T) {
+	app, tenantA, tenantB := setup(t)
+	err := asTenant(t, app, tenantA, "*", func(tx pgx.Tx) error {
+		_, err := tx.Exec(context.Background(), `update identity_legal_entities set tenant_id = $1 where tenant_id = $2`, tenantB, tenantA)
+		return err
+	})
+	if err == nil {
+		t.Error("tenant A moved its legal entity to tenant B")
 	}
 }

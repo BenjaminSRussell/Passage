@@ -21,3 +21,7 @@ Stable problem codes in this slice: `AUTH-0001` unauthenticated or invalid token
 ## Wave 2 status
 
 This is the first isolated slice, not a complete Wave 2 implementation. The following remain: Keycloak realm and deployment, OIDC/SAML federation and MFA, gateway JWT/host validation, SCIM provisioning, persistent tenant/legal-entity and role-assignment APIs (the tenant, user, legal-entity and effective-dated role-assignment tables with forced RLS live in `migrations/`), policy compilation and bundle distribution/version checks, Envoy Gateway deployment and per-tenant rate limits, and the admin-security web module with effective-permission reporting. Those need follow-up owned-path PRs.
+
+## Schema grants and scoping
+
+`passage_app` has SELECT only on `identity_tenants`: tenant provisioning and status changes belong to the migrator or a future provisioner role, so a tenant cannot reactivate itself, rename its realm, or probe other tenants' realm names. `identity_role_assignments` rejects overlapping grants of the same user, role and legal entity (an exclusion constraint, open-ended `valid_to` counts as infinity), so a revoke always takes effect. A caller scoped to specific legal entities does not see tenant-wide assignments (null `legal_entity_id`); only a `*` scope does.
