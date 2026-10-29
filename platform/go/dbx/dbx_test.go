@@ -20,14 +20,18 @@ func principal(legalEntity string, duties ...string) tenant.Principal {
 }
 
 func TestLegalEntityScopes(t *testing.T) {
+	leA, leB := testkit.TenantID(11), testkit.TenantID(12)
 	cases := []struct {
 		name string
 		p    tenant.Principal
 		want string
 	}{
-		{"single entity", principal("a"), "a"},
-		{"entity list", principal("a,b"), "a,b"},
-		{"entity wins over all-scope duty", principal("a", tenant.DutyAllScope), "a"},
+		{"single entity", principal(leA), leA},
+		{"entity list", principal(leA + "," + leB), leA + "," + leB},
+		{"entity wins over all-scope duty", principal(leA, tenant.DutyAllScope), leA},
+		{"wildcard entity dropped", principal("*", tenant.DutyAllScope), ""},
+		{"wildcard in list dropped", principal(leA + ",*"), leA},
+		{"all keyword dropped", principal("all", tenant.DutyAllScope), ""},
 		{"no entity, no duty fails closed", principal(""), ""},
 		{"no entity, unrelated duty fails closed", principal("", "org.read"), ""},
 		{"no entity with all-scope duty", principal("", tenant.DutyAllScope), "*"},

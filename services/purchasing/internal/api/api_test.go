@@ -271,6 +271,7 @@ type call struct {
 	duties             []string
 	headers            map[string]string
 	noTenant           bool
+	unscoped           bool
 }
 
 func (h *harness) do(c call) *httptest.ResponseRecorder {
@@ -282,8 +283,12 @@ func (h *harness) do(c call) *httptest.ResponseRecorder {
 	if c.user != "" {
 		req.Header.Set(tenant.HeaderUser, c.user)
 	}
-	if c.scope != "" {
-		req.Header.Set(tenant.HeaderLegalEntity, c.scope)
+	scope := c.scope
+	if scope == "" && !c.unscoped {
+		scope = leA
+	}
+	if scope != "" {
+		req.Header.Set(tenant.HeaderLegalEntity, scope)
 	}
 	req.Header.Set(tenant.HeaderDuties, strings.Join(c.duties, ","))
 	for k, v := range c.headers {
@@ -570,5 +575,13 @@ func TestReadyAndMetrics(t *testing.T) {
 	h.api.Metrics().ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
 	if !strings.Contains(rec.Body.String(), "purchasing_requisitions_created_total 1\n") {
 		t.Fatalf("metrics:\n%s", rec.Body)
+	}
+}
+
+func TestWriteWithoutLegalEntityScopeIsForbidden(t *testing.T) {
+	h := newHarness(t)
+	rec := h.do(call{method: "POST", path: "/v1/procurement/requisitions", user: userA, unscoped: true, duties: []string{dutyRequisitionCreate}, body: reqBody, headers: idem("k-unscoped")})
+	if rec.Code != http.StatusForbidden || problemCode(t, rec) != codeScope {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
 	}
 }

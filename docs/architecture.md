@@ -5284,7 +5284,7 @@ A module missing from `modules`, or with `enabled: false`, is not loaded and its
   - Unsaved changes trigger the guard.
   - Last-used LE is a localStorage convenience, read with try/catch. Never auth.
 - **Query cache isolation.** Every react-query key starts with `[tenantId, leId, …]`. On an LE switch, queries for the previous LE are kept but never rendered under the new LE. On sign-out the cache is cleared.
-- **API scoping.** The UI sends `Passage-Legal-Entity: <uuid | *>` on every API call. The gateway and service intersect it with the grants in OPA; it can narrow but never widen scope. Generated list calls also send `filter=legalEntityId eq '<uuid>'` as defense-in-depth. The header name and semantics are fixed by the backend contract (Q6 resolved). Without the header, the server returns all granted LEs, and the UI's filter alone scopes the screen.
+- **API scoping.** The UI sends `Passage-Legal-Entity: <uuid | *>` on every API call. The gateway and service intersect it with the grants in OPA; it can narrow but never widen scope. Generated list calls also send `filter=legalEntityId eq '<uuid>'` as defense-in-depth. The header name and semantics are fixed by the backend contract (Q6 resolved). Without the header the server fails closed: a principal with no legal entity sees no legal-entity-scoped rows, unless it holds `org.switcher.all_scope` and explicitly requests the ALL scope on a read (`X-Passage-LegalEntity-Scope: ALL`). Header values must be UUIDs; `*` is rejected with 400 COM-0001.
 - **Unauthorized LE in URL.** A code the user has no grant for renders `ForbiddenPage` with a switcher to a granted LE. The UI never reveals whether the LE exists.
 
 ### 5.3 Deep links

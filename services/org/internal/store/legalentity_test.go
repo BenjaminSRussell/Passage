@@ -335,3 +335,22 @@ func TestPostgres_Migration0024AppliesTwiceAndKeepsExistingSitesUnassigned(t *te
 		t.Fatalf("site after re-migrate = %+v, %v; want no calendar", got, err)
 	}
 }
+
+func TestPostgres_LegalEntitiesAreTenantLevelForNoEntityPrincipal(t *testing.T) {
+	s, ctx, _ := lifecycleStore(t)
+	created := mustCreate(t, s, ctx, newEntity("US01"))
+	page, err := s.ListLegalEntities(ctx, store.LegalEntityFilter{}, "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].ID != created.ID {
+		t.Fatalf("no-entity principal must list its tenant's entities, got %+v", page.Items)
+	}
+	other, err := s.ListLegalEntities(principalContext(2), store.LegalEntityFilter{}, "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(other.Items) != 0 {
+		t.Fatalf("another tenant saw %d entities", len(other.Items))
+	}
+}

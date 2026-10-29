@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -75,12 +76,18 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, migrations fs.FS) error {
 }
 
 // LegalEntityScopes derives passage.legal_entity_scopes from the principal and
-// fails closed: its legal entity list when set, '*' only for a principal with
-// no legal entity that holds tenant.DutyAllScope, otherwise the empty list (no
-// legal-entity-scoped rows).
+// fails closed: its UUID legal entities when set (any other entry is dropped,
+// so '*' can never come from LegalEntityID), '*' only for a principal with no
+// legal entity that holds tenant.DutyAllScope, otherwise the empty list.
 func LegalEntityScopes(p tenant.Principal) string {
 	if p.LegalEntityID != "" {
-		return p.LegalEntityID
+		var ids []string
+		for _, part := range strings.Split(p.LegalEntityID, ",") {
+			if id, err := uuid.Parse(strings.TrimSpace(part)); err == nil {
+				ids = append(ids, id.String())
+			}
+		}
+		return strings.Join(ids, ",")
 	}
 	if p.HasDuty(tenant.DutyAllScope) {
 		return "*"
