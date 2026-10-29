@@ -22,6 +22,8 @@ const (
 	genericXSDReason     = "document does not conform to the schema"
 )
 
+var ErrValidatorBusy = errors.New("xmllint validator busy")
+
 type XSDValidator struct {
 	xmllint string
 	dir     string
@@ -93,7 +95,7 @@ func (v *XSDValidator) Validate(ctx context.Context, content []byte) ([]XSDError
 	case v.slots <- struct{}{}:
 		defer func() { <-v.slots }()
 	case <-ctx.Done():
-		return nil, fmt.Errorf("wait for xmllint slot: %w", ctx.Err())
+		return nil, fmt.Errorf("wait for xmllint slot: %w: %w", ErrValidatorBusy, ctx.Err())
 	}
 	file, err := os.CreateTemp(v.dir, "doc-*.xml")
 	if err != nil {
