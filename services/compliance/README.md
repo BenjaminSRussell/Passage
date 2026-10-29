@@ -1,4 +1,4 @@
-# compliance (PSG-48, wave 48, slices 1 to 4)
+# compliance (PSG-48, wave 48, slices 1 to 5)
 
 Compliance controls for Passage. Slice 1 ships segregation of duties (SoD): the rules engine, pre-save
 simulation, evaluation of a user's effective roles with stored conflicts, and the mitigation and
@@ -9,7 +9,11 @@ breach clock and India TDS calculator screens. Slice 3 completes the audit rule 
 types), adds audit case grouping and the case status machine, and break-glass session planning, each
 behind a stateless endpoint, with the audit policy run, audit case and break-glass screens. Slice 4
 adds denied-party and sanctions screening with stored hits and the officer decision, and the export
-license determination of a delivery, with the screening and export check screens.
+license determination of a delivery, with the screening and export check screens. Slice 5 adds stored
+GDPR and CCPA subject requests with their state machine, the erasure preview and the retention purge
+check, and four stateless rule endpoints: certification campaign planning and close, the incident
+lifecycle step, export governance and read-log classification, with the subject request, certification
+campaign, incident step and export policy screens.
 
 ## What it does now
 
@@ -42,10 +46,22 @@ license determination of a delivery, with the screening and export check screens
 | `GET /v1/trade/screening/hits/{id}` | TradeComplianceView | slice 4: one hit; `ETag` is the version |
 | `POST /v1/trade/screening/hits/{id}/decision` | TradeComplianceOfficer | slice 4: `If-Match` and `Idempotency-Key` required; `CLEAR_FALSE_POSITIVE` or `CONFIRM` with a reason; the caller is the decider |
 | `POST /v1/trade/export-checks` | TradeComplianceView | slice 4, read-only: license determination per delivery line; `officerReleaseLicenseRef` (embargo release) needs TradeComplianceOfficer |
+| `POST /v1/privacy/requests` | PrivacyIntake | slice 5: `Idempotency-Key` required; stores a subject request in RECEIVED with its deadline (GDPR 30, CCPA 45 days from `receivedAt`, shorter override only) |
+| `GET /v1/privacy/requests` | PrivacyOfficer | slice 5: filter by state and type, nearest deadline first; keyset paging with `cursor` |
+| `GET /v1/privacy/requests/{id}` | PrivacyOfficer | slice 5: one request; `ETag` is the version |
+| `POST /v1/privacy/requests/{id}/actions` | PrivacyOfficer | slice 5: `If-Match` required; VERIFY, DISCOVER, RELEASE_HOLD, APPROVE, DELIVER, CLOSE or REJECT on the stored state; CLOSE emits `privacy.request.completed` |
+| `POST /v1/privacy/requests/{id}/erasure-preview` | PrivacyOfficer | slice 5, read-only: the BR-48.5 pseudonymization of one record of the subject, refused under a legal hold |
+| `POST /v1/privacy/retention:purge-check` | PrivacyOfficer | slice 5, read-only: BR-48.6 skip reasons for one record |
+| `POST /v1/sod/campaigns:plan` | SoDAdmin | slice 5, read-only: campaign close instant (14 days default, 3..60) |
+| `POST /v1/sod/campaigns:close` | SoDAdmin | slice 5, read-only: progress, and after `closesAt` the BR-48.9 revocations and flags |
+| `POST /v1/security/incidents:transition` | SecurityIncidentManage | slice 5, read-only: one incident lifecycle step with the breach clocks and closure rule |
+| `POST /v1/compliance/export-governance:evaluate` | ComplianceView | slice 5, read-only: the export policy decision for one download |
+| `POST /v1/compliance/read-log:classify` | ComplianceView | slice 5, read-only: which fields of a read the read-log policy covers |
 
 - Events (`events/asyncapi.yaml`): `dev.passage.sod.conflict.detected.v1`, `dev.passage.sod.mitigation.approved.v1`,
-  `dev.passage.trade.screening.hit.v1` (slice 4, keyed by hit id, written with the hit). The slice 2 and 3
-  endpoints and the export check store nothing and emit nothing.
+  `dev.passage.trade.screening.hit.v1` (slice 4, keyed by hit id, written with the hit),
+  `dev.passage.privacy.request.completed.v1` (slice 5, keyed by request id, written with the close). The
+  slice 2 and 3 endpoints, the export check and the slice 5 rule endpoints store nothing and emit nothing.
 - `GET /readyz` pings Postgres; admin `/metrics` counts simulations and blocked simulations.
 
 Slice 2 domain rules (pure; no store yet, see `NOT-IMPLEMENTED.md`):
@@ -121,6 +137,34 @@ rule), `/compliance/audit/cases` (group violations into cases and check a case a
 screening workbench, filter by state and list), `/compliance/screening/hits/:id` (compare the subject
 with the list entry, clear or confirm), `/compliance/screening/check` (screen a party or document) and
 `/compliance/export-checks` (license determination for a delivery).
+
+Slice 5 (FR-48.6, FR-48.10, FR-48.11, FR-48.24, FR-48.25, FR-48.29):
+
+- `internal/domain/privacy.go`: `PlanPrivacyRequest` (deadline, days left rounded up, due soon at 5
+  days or fewer), `ApplyPrivacyTransition` (VERIFY needs two distinct matched attributes and the e-mail
+  link; an ERASURE with holds goes to HELD at DISCOVER and cannot leave it or be approved while a hold
+  stands, AC-48.7; a close after the deadline needs a 10-character justification and is marked late;
+  REJECT needs a reason), `PseudonymizeSubject` (BR-48.5: the seven PII fields become a deterministic
+  `ERASED-` token per subject and field, everything else is kept and `erased` is set) and `PurgeCheck`
+  (BR-48.6).
+- `internal/store/privacy.go` and `0005_privacy.sql`: `subject_request` with RLS; intake under
+  `Idempotency-Key`, actions under the row lock and `If-Match`, the stored type, state, holds and
+  deadline (never the caller's), the approving officer, and the completed event in the close transaction.
+- `internal/domain/campaign.go` (BR-48.9): before `closesAt` only progress; after it explicit REVOKE is
+  revoked, PENDING is revoked under `autoRevoke` and flagged otherwise, and the manager counts as
+  overdue. A manager deciding their own roles is `SOD-1121`.
+- `internal/domain/incident.go` (FR-48.29, BR-48.18): TRIAGE → CONTAINED → ERADICATED → RECOVERED →
+  CLOSED one step at a time; Sev-1 pages on-call; breach clocks from `awareAt`; a clock notified by its
+  deadline (`notifiedAt` per regime) is met, and closing needs a justification for every clock sent late
+  or still unsent past its deadline.
+- `internal/domain/governance.go` (FR-48.24, FR-48.25): `DecideExport` (PRD default actions, overrides,
+  DENY, REASON, APPROVAL and the 10,000-row bulk hold, audit always) and `ClassifyRead` (default
+  read-logged fields, exact and `*.name` rules, 90..3650 day retention, names only).
+
+Slice 5 screens: `/compliance/privacy/requests` (list by deadline, days left red at 5 or fewer),
+`/compliance/privacy/requests/new` (intake), `/compliance/privacy/requests/:id` (the next action, the
+erasure preview), `/compliance/campaigns` (plan and close check), `/compliance/incidents/step`
+(incident lifecycle check) and `/compliance/export-policy` (export decision and read-log check).
 
 ## Run and test
 
@@ -199,6 +243,25 @@ document, the case machine never skips a state and no break-glass session exceed
 | `TRD-1007` | 422 | export check input invalid (destination, region, item classification, quantities, licenses) |
 | `TRD-1008` | 404 | no screening hit with that id |
 | `TRD-1009` | 412 | stale `If-Match` on a screening decision (missing `If-Match` is 428 `SOD-1109`) |
+| `PRV-1201` | 422 | erasure blocked by a legal hold; nothing changed (AC-48.7) |
+| `PRV-1202` | 422 | subject request type, regulation or receipt invalid |
+| `PRV-1203` | 422 | identity not verified: two attributes and the e-mail link are required |
+| `PRV-1204` | 422 | action not allowed from the request's state, or erasure preview on a request that is not an ERASURE past discovery |
+| `PRV-1205` | 422 | closing after the deadline without a justification |
+| `PRV-1206` | 422 | deadline override longer than the regulation allows |
+| `PRV-1207` | 422 | rejection without a reason |
+| `PRV-1208` | 200 (`code` in the purge check body) | record skipped by the retention purge (BR-48.6) |
+| `PRV-1209` | 404 | no subject request with that id |
+| `PRV-1210` | 412 | stale `If-Match` on a subject request action (missing `If-Match` is 428 `SOD-1109`) |
+| `SOD-1120` | 422 | campaign start or close missing, or window outside 3..60 days |
+| `SOD-1121` | 422 | a manager cannot certify their own roles |
+| `SOD-1122` | 422 | campaign line incomplete, duplicated or with an unknown decision |
+| `INC-1320` / `INC-1321` / `INC-1322` / `INC-1323` | 422 | incident severity or source unknown, a skipped or unknown step, a breach naming no regime |
+| `SEC-0709` | 422 | download denied by export policy |
+| `SEC-0710` | 422 | export policy requires a reason of at least 10 characters |
+| `SEC-0711` | 422 | unknown export classification, channel or action |
+| `SEC-0714` | 422 | read-log retention outside 90..3650 days |
+| `SEC-0715` | 422 | negative export row count |
 | `COM-0500` | 500 | internal error |
 
 ## Deploy
@@ -214,4 +277,7 @@ Slice 2: the rules of FR-48.13 (BR-48.11, BR-48.12; AC-48.12 lockout), FR-48.14 
 the pure rule) and FR-48.29 (BR-48.18; AC-48.19 deadline). Slice 3: the rule kernel of FR-48.14 (all
 rule types), the case machine and grouping of FR-48.15, and the planning part of FR-48.23 (BR-48.19;
 AC-48.18 review deadline). Slice 4: FR-48.19 (BR-48.15; AC-48.16 at the store: blocked, OPEN, cleared,
-no recurrence) and the determination of FR-48.20 (BR-48.16; AC-48.17 `TRD-1003`). Everything else in the ticket is listed in `NOT-IMPLEMENTED.md`.
+no recurrence) and the determination of FR-48.20 (BR-48.16; AC-48.17 `TRD-1003`). Slice 5: the
+subject request lifecycle of FR-48.10 with storage (AC-48.7 at the store; the 30 and 45 day deadlines),
+BR-48.5 and BR-48.6 of FR-48.11, the close rules of FR-48.6 (BR-48.9), the incident lifecycle of FR-48.29
+(BR-48.18 closure with notification times) and the policy kernels of FR-48.24 and FR-48.25. Everything else in the ticket is listed in `NOT-IMPLEMENTED.md`.

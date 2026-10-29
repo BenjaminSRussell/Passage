@@ -6,7 +6,7 @@ describe("compliance module", () => {
   it("uses its folder name as id and declares a page for each entity", () => {
     expect(compliance.id).toBe("compliance");
     const paths = compliance.routes.map((r) => r.path);
-    for (const path of ["/compliance", "/compliance/sod/conflicts", "/compliance/sod/conflicts/:id", "/compliance/sod/check", "/compliance/sod/rules", "/compliance/packs", "/compliance/packs/:code", "/compliance/audit/run", "/compliance/audit/cases", "/compliance/break-glass", "/compliance/incidents/breach-clocks", "/compliance/tds", "/compliance/screening/hits", "/compliance/screening/hits/:id", "/compliance/screening/check", "/compliance/export-checks"]) {
+    for (const path of ["/compliance", "/compliance/sod/conflicts", "/compliance/sod/conflicts/:id", "/compliance/sod/check", "/compliance/sod/rules", "/compliance/packs", "/compliance/packs/:code", "/compliance/audit/run", "/compliance/audit/cases", "/compliance/break-glass", "/compliance/incidents/breach-clocks", "/compliance/tds", "/compliance/screening/hits", "/compliance/screening/hits/:id", "/compliance/screening/check", "/compliance/export-checks", "/compliance/privacy/requests", "/compliance/privacy/requests/new", "/compliance/privacy/requests/:id", "/compliance/campaigns", "/compliance/incidents/step", "/compliance/export-policy"]) {
       expect(paths).toContain(path);
     }
     expect(compliance.routes.every((r) => r.element !== null && r.element !== undefined)).toBe(true);
@@ -26,6 +26,11 @@ describe("compliance module", () => {
     expect(duty("/compliance/screening/hits")).toBe("TradeComplianceView");
     expect(duty("/compliance/screening/check")).toBe("TradeComplianceView");
     expect(duty("/compliance/export-checks")).toBe("TradeComplianceView");
+    expect(duty("/compliance/privacy/requests")).toBe("PrivacyOfficer");
+    expect(duty("/compliance/privacy/requests/new")).toBe("PrivacyIntake");
+    expect(duty("/compliance/campaigns")).toBe("SoDAdmin");
+    expect(duty("/compliance/incidents/step")).toBe("SecurityIncidentManage");
+    expect(duty("/compliance/export-policy")).toBe("ComplianceView");
   });
 
   it("is auto-discovered by the registry", () => {

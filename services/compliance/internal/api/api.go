@@ -7,7 +7,12 @@
 // break-glass session planning (FR-48.23, BR-48.19), none of which store
 // anything yet; and trade compliance: sanctions screening with stored hits and
 // the officer decision (FR-48.19, BR-48.15) and the export license
-// determination of a delivery (FR-48.20, BR-48.16).
+// determination of a delivery (FR-48.20, BR-48.16); and privacy and controls:
+// stored GDPR and CCPA subject requests with their state machine, the erasure
+// preview and the retention purge check (FR-48.10, FR-48.11), certification
+// campaign planning and close (FR-48.6, BR-48.9), the incident lifecycle step
+// (FR-48.29) and export governance and read-log classification (FR-48.24,
+// FR-48.25), the last four not stored yet.
 package api
 
 import (
@@ -63,6 +68,10 @@ type Store interface {
 	ListHits(ctx context.Context, f store.HitFilter) (store.HitPage, error)
 	GetHit(ctx context.Context, id string) (store.ScreeningHit, error)
 	DecideHit(ctx context.Context, id string, expected int, in store.DecisionInput, key string, now time.Time) (store.ScreeningHit, error)
+	Intake(ctx context.Context, in store.IntakeInput, key string, now time.Time) (store.SubjectRequest, error)
+	ListRequests(ctx context.Context, f store.RequestFilter) (store.RequestPage, error)
+	GetRequest(ctx context.Context, id string) (store.SubjectRequest, error)
+	ActOnRequest(ctx context.Context, id string, expected int, in store.RequestActionInput, now time.Time) (store.SubjectRequest, error)
 }
 
 // Config carries the tenant policies the service reads from its environment
@@ -179,6 +188,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutyAuditCaseManage)).Post("/v1/compliance/audit-cases:transition", a.transitionCase)
 	r.With(authz.RequireDuty(DutyBreakGlassRequest)).Post("/v1/security/elevated-sessions:plan", a.planElevated)
 	a.registerTrade(r)
+	a.registerCompliance(r)
 }
 
 func (a *API) ready(w http.ResponseWriter, r *http.Request) {
@@ -477,7 +487,8 @@ func domainProblem(err error) error {
 	return err
 }
 
-// conflictID reads the {id} path parameter (a conflict or screening hit id) as a UUID.
+// conflictID reads the {id} path parameter (a conflict, screening hit or
+// subject request id) as a UUID.
 func conflictID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	if !validTenant(w, r) {
 		return "", false
