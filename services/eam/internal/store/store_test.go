@@ -632,15 +632,6 @@ func TestRLS_TenantIsolation(t *testing.T) {
 	if err := admin.QueryRow(ctx, "select current_schema()").Scan(&schema); err != nil {
 		t.Fatal(err)
 	}
-	for _, grant := range []string{
-		"grant usage on schema " + schema + " to passage_app",
-		"grant select, insert, update, delete on all tables in schema " + schema + " to passage_app",
-		"grant usage on all sequences in schema " + schema + " to passage_app",
-	} {
-		if _, err := admin.Exec(ctx, grant); err != nil {
-			t.Fatal(err)
-		}
-	}
 	for _, table := range []string{"asset", "counter", "counter_reading", "maintenance_plan", "plan_line", "work_order",
 		"work_order_transition", "work_order_labor", "work_order_part", "maintenance_request", "condition_rule", "outbox", "idempotency_keys",
 		"criticality_assessment", "fault_catalog", "fault_code", "fault_combination", "work_order_fault", "downtime_window",

@@ -257,16 +257,6 @@ func TestRowLevelSecurity(t *testing.T) {
 	if err := dbx.Migrate(bg, admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	var schema, appUser string
-	if err := admin.QueryRow(bg, `select current_schema()`).Scan(&schema); err != nil {
-		t.Fatal(err)
-	}
-	if err := app.QueryRow(bg, `select current_user`).Scan(&appUser); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := admin.Exec(bg, fmt.Sprintf(`grant usage on schema %s to %s; grant select, insert, update, delete on all tables in schema %[1]s to %[2]s`, schema, appUser)); err != nil {
-		t.Fatal(err)
-	}
 	st := New(app, 30)
 	one := testkit.Ctx(testkit.TenantID(1), "EDI_ADMIN")
 	two := testkit.Ctx(testkit.TenantID(2), "EDI_ADMIN")
