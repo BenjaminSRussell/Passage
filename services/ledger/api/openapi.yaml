@@ -1300,7 +1300,10 @@ paths:
       x-passage-duty: ledger.setup.write
       description: |
         Creates a set of one leading ledger and at least one parallel ledger (FR-12.7). Every ledger of a set
-        belongs to one legal entity and has the same accounting currency; a set is immutable.
+        belongs to one legal entity and has the same accounting currency; a set is immutable. Set codes are unique
+        per legal entity (409 on a duplicate). A legal entity has one leading ledger, so a set whose leading ledger
+        differs from the entity's existing sets is rejected (422). A leading ledger that already has account
+        mappings is rejected with 422 LEDGER_MAPPING_ON_LEADING_LEDGER, because mappings are never applied to it.
       requestBody:
         required: true
         content:
@@ -1380,7 +1383,8 @@ paths:
         Remaps a source account to a target account of this ledger's chart for set postings dated on or after
         effectiveFrom (BR-12.6). The latest mapping per source account valid on the posting date applies.
         Mappings are append-only; a later effectiveFrom supersedes an earlier one. The target account must exist
-        and be postable in the ledger's chart (422). The leading ledger of a set always keeps the original accounts.
+        and be postable in the ledger's chart (422). Mappings are never applied to a set's leading ledger, which always keeps the original accounts, so a mapping
+        on a ledger that leads a set is rejected with 422 LEDGER_MAPPING_ON_LEADING_LEDGER.
       parameters:
         - $ref: "#/components/parameters/LedgerId"
       requestBody:

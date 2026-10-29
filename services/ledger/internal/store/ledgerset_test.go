@@ -209,6 +209,15 @@ func TestPostgres_AccountMappingOnLeadingLedgerIsRejected(t *testing.T) {
 	}
 }
 
+func TestPostgres_LedgerSetRejectsLeadingLedgerWithExistingMapping(t *testing.T) {
+	e := setupLedgerSet(t)
+	_, err := e.store.CreateLedgerSet(e.ctx, LedgerSetInput{Code: "REV", Name: "reverse", LeadingLedgerID: e.local.ID, ParallelLedgerIDs: []string{e.tax.ID}})
+	var rej *domain.RejectedError
+	if !errors.As(err, &rej) || rej.Violations[0].Code != CodeMappingOnLeading {
+		t.Fatalf("a leading ledger that already has a mapping must be rejected, got %v", err)
+	}
+}
+
 func TestPostgres_SetPostingMappingDateBoundary(t *testing.T) {
 	e := setupLedgerSet(t)
 	if _, err := e.store.CreateAccountMapping(e.ctx, AccountMapping{LedgerID: e.tax.ID, SourceAccount: "6010", TargetAccount: "2100", EffectiveFrom: "2026-03-10"}); err != nil {
