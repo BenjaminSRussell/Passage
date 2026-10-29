@@ -462,7 +462,7 @@ func (a *API) postBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	p, _ := principal(w, r)
 	res, err := a.store.PostBatch(r.Context(), store.PostBatchInput{ID: id, Version: version, Key: key, Today: a.today(),
-		TraceID: traceID(r), CanPostDirect: p.HasDuty(store.DutyPostDirect)})
+		TraceID: traceID(r), CanPostDirect: p.HasDuty(store.DutyPostDirect), CanPostLedgerSpecific: p.HasDuty(store.DutyPostLedgerSpecific)})
 	if err != nil {
 		a.fail(w, r, err)
 		return

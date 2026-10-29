@@ -552,6 +552,7 @@ func (a *API) postEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.Key, in.Hash, in.Actor = key, hash, p.UserID
+	in.CanPostLedgerSpecific = p.HasDuty(store.DutyPostLedgerSpecific)
 	res, err := a.store.PostEntry(r.Context(), in)
 	if err != nil {
 		a.fail(w, r, err)

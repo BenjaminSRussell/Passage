@@ -144,6 +144,9 @@ type PostInput struct {
 	// AllowReconAccounts lifts the BR-11.8 protection for a manual journal whose
 	// journal name sets allow_recon_accounts (migration and correction use).
 	AllowReconAccounts bool
+	// CanPostLedgerSpecific is true when the caller holds the duty "Post to a
+	// ledger-specific ledger" (FB50L), needed to post to one non-leading ledger of a set.
+	CanPostLedgerSpecific bool
 }
 
 // rules returns the ledger's posting rules for this input: a manual journal

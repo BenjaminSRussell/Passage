@@ -1268,6 +1268,9 @@ paths:
         Retries with the same Idempotency-Key and payload replay the stored response (200 with
         idempotency.replayed = true). Idempotency records are kept 400 days; replays after expiry
         are new requests.
+
+        Posting to a ledger that is a non-leading member of a ledger set also needs the duty
+        ledger.journal.postledger (FB50L); without it the response is 403 AUTH-0003.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/Traceparent"

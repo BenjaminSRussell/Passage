@@ -69,6 +69,18 @@ func postEntryTx(ctx context.Context, tx pgx.Tx, tenantID string, in PostInput) 
 	if err != nil {
 		return out, err
 	}
+	if !in.CanPostLedgerSpecific {
+		var parallel bool
+		if err := tx.QueryRow(ctx, `select exists(select 1 from ledger_set_member m
+			join ledger_set s on s.tenant_id = m.tenant_id and s.id = m.ledger_set_id
+			where m.tenant_id = $1 and m.ledger_id = $2 and s.leading_ledger_id <> m.ledger_id)`, tenantID, ledger.ID).Scan(&parallel); err != nil {
+			return out, err
+		}
+		if parallel {
+			return out, httpx.NewProblem(http.StatusForbidden, "AUTH-0003",
+				"posting to a single parallel ledger needs duty "+DutyPostLedgerSpecific)
+		}
+	}
 	replayed, err := replayIdempotent(ctx, tx, tenantID, ledger.LegalEntityID, in.Key, in.Hash, &out)
 	if err != nil || replayed {
 		return out, err
