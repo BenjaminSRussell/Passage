@@ -131,8 +131,8 @@ components:
       required: [workOrderId, assetId, type]
       properties:
         workOrderId: { type: string, format: uuid }
-        assetId: { type: string, format: uuid }
-        type: { type: string }
+        assetId: { type: string, format: uuid, description: for a ROUND order the first stop's asset }
+        type: { type: string, enum: [PREVENTIVE, CORRECTIVE, INSPECTION, EMERGENCY, CAPITAL, ROUND] }
         planLineId: { type: string, format: uuid }
     WorkOrderCompleted:
       type: object

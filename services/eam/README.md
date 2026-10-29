@@ -1,4 +1,4 @@
-# EAM (enterprise asset management) — wave 44, slices 1 to 4
+# EAM (enterprise asset management) — wave 44, slices 1 to 5
 
 Ticket PSG-44. Passage's maintenance context: plant assets, counters and condition
 rules, maintenance plans that generate preventive work orders, maintenance requests,
@@ -7,7 +7,9 @@ Slice 2 adds asset retirement, criticality assessment, vendor warranties with th
 work order warranty check, fault catalogs with fault registration, downtime windows
 and request triage. Slice 3 adds permits to work and lockout/tagout (LOTO), which gate
 the start of work orders. Slice 4 adds the functional-location hierarchy with asset
-installation history, and maintenance sequences. The authoritative requirements are PRD section 8.44;
+installation history, and maintenance sequences. Slice 5 adds maintenance rounds, the
+emergency regularization and plan review reminders, and the cost and backlog KPIs. The
+authoritative requirements are PRD section 8.44;
 NOT-IMPLEMENTED.md lists what the slices leave out and why.
 
 ## What slice 1 does
@@ -146,10 +148,45 @@ NOT-IMPLEMENTED.md lists what the slices leave out and why.
   (`workorder.created` in the same transaction); the previous occurrence's order must be
   finished or canceled first (EAM-SEQ-002). Asset type sequences are templates.
 
+## What slice 5 adds
+
+- **Rounds** (FR-44.14): `POST /rounds` (EamPlanAdmin) defines 1 to 50 stops numbered
+  1..n in order, each an asset of the round's site with a job type code, a mandatory
+  flag and the travel minutes from the previous stop (EAM-RND-003; code unique,
+  EAM-DUP-001). A stop job type that requires a permit to work is refused: a round
+  order carries no permit per stop. Rounds are create-only.
+- **ROUND plan lines** (BR-44.9): a plan line of kind `ROUND` names a `roundId` and a
+  time interval (no asset, job type or counter of its own) and schedules by BR-44.1 on
+  time only. Each occurrence is one ROUND work order booked on the first stop's asset,
+  with the stops copied in order (`work_order_stop`, one job per stop) and
+  `workorder.created` in the same transaction. Completion resets the line once for the
+  whole round and reschedules it. `POST /rounds/{id}/work-orders` (EamPlanner) opens an
+  extra occurrence outside the plan. Every stop asset must be ACTIVE (EAM-AST-001; the
+  scheduler skips the line). ROUND orders are never warranty covered, and
+  `POST /work-orders` still refuses the ROUND type.
+- **Stop outcomes** (BR-44.9): `POST /work-orders/{id}/stops/{seq}` (EamTechnician)
+  records DONE or SKIPPED once, while the order is IN_PROGRESS (EAM-RND-002). SKIPPED
+  needs a reason; a skipped mandatory stop raises a maintenance request with source
+  ROUND for the stop's asset (`request.created`) in the same transaction. The order
+  cannot complete while a stop has no outcome (EAM-RND-001), and cannot start while a
+  stop's job type has gained a permit requirement (EAM-PMT-001, fail closed). The
+  work order detail carries the stops.
+- **Emergency regularization** (BR-44.7): `GET /work-orders/emergency-overdue?hours=24`
+  lists open priority 1 orders that were never SCHEDULED or RELEASED and were raised at
+  least the window ago (1 to 72 h, default 24), each with the warning EAM-WO-003.
+- **Plan review reminder** (BR-44.15): `GET /assets/plan-reviews` lists assets of
+  criticality 4 or 5 (not disposed) never assessed or last assessed 12 months ago or
+  more; the latest criticality assessment is the review record.
+- **KPIs** (FR-44.13): `GET /kpis/cost?from&to[&assetType]` sums parts and labor of the
+  orders completed in the window per asset and currency (numeric in SQL, decimal in
+  Go). `GET /kpis/backlog[?site]` counts open orders per priority with the overdue count
+  and the oldest due date.
+
 Domain logic is pure (`internal/domain`) and table-tested, with property tests
 (`rapid`). Store integration tests are in `internal/store/store_test.go` and
 `internal/store/slice2_test.go`, `internal/store/permits_test.go` and
-`internal/store/locations_sequences_test.go`; HTTP tests,
+`internal/store/locations_sequences_test.go` and `internal/store/rounds_test.go`
+(AC-44.9 end to end, and the slice 5 paths as `passage_app`); HTTP tests,
 including a check that `api/openapi.yaml` lists exactly the served routes, are in
 `internal/api`.
 
@@ -167,7 +204,11 @@ work order page. Slice 4 adds the plant structure (`/eam/locations`: location tr
 with subtree filter, create form, location detail with children and installed assets),
 the asset's location card with install, move, remove and history, and maintenance
 sequences (`/eam/sequences`: list, editor with step hierarchy, detail with a
-simulation, occurrence generation and the generated occurrences).
+simulation, occurrence generation and the generated occurrences). Slice 5 adds rounds
+(`/eam/rounds`: list, editor with ordered stops, detail with an extra occurrence), the
+round stops card on a ROUND work order (record done or skipped), ROUND lines in the
+plan editor, and the KPI page (`/eam/kpis`: cost per asset with a window and asset type
+filter, backlog by priority, emergency orders to regularize, plan reviews due).
 
 ## Layout
 
@@ -179,7 +220,8 @@ internal/api/            HTTP handlers, duty checks, validation
 internal/events/         event types and payloads
 migrations/              0001 domain tables + RLS, 0002 outbox and idempotency, 0003 slice 2 tables + RLS,
                          0004 passage_app grants, 0005 permits and LOTO + RLS + grants,
-                         0006 functional locations, location history, sequences + RLS + grants
+                         0006 functional locations, location history, sequences + RLS + grants,
+                         0007 rounds, round stops, work order stops, ROUND plan lines + RLS + grants
 api/openapi.yaml         contract for every endpoint
 events/asyncapi.yaml     contract for every event
 charts/eam/              Helm chart (passage-eam)
@@ -211,16 +253,16 @@ row-level security test runs the store as that role.
 |---|---|
 | EamAssetMaintain | assets, activate, lifecycle, criticality, warranties, counters, rules |
 | EamCounterRegister | readings |
-| EamPlanAdmin | plans, plans/schedule, fault catalogs (PUT), sequences and their occurrences (POST) |
+| EamPlanAdmin | plans, plans/schedule, fault catalogs (PUT), sequences and their occurrences (POST), rounds (POST) |
 | EamStructureMaintain | functional locations (POST), asset placement |
 | EamRequestCreate | requests |
-| EamPlanner | request convert and triage, work order create, status and downtime (or EamTechnician) |
-| EamTechnician | status and downtime (or EamPlanner), labor, faults |
+| EamPlanner | request convert and triage, work order create, round work orders, status and downtime (or EamTechnician) |
+| EamTechnician | status and downtime (or EamPlanner), labor, faults, round stop outcomes |
 | EamPlanner | permit request |
 | EamPermitIssuer | permit transitions (approve, issue, suspend, close, cancel), permit expiry run |
 | EamTechnician | personal LOTO lock actions |
 | EamSetupAdmin | permit types, job permit requirements (PUT), isolation points (POST) |
-| EamInquire | every GET: workspace, assets, assessments, warranties, readings, plans, fault catalogs, requests, work orders, kpis, permit types, job permit requirements, isolation points, permits, functional locations, location history, sequences, simulation, occurrences |
+| EamInquire | every GET: workspace, assets, assessments, warranties, readings, plans, fault catalogs, requests, work orders, kpis, permit types, job permit requirements, isolation points, permits, functional locations, location history, sequences, simulation, occurrences, rounds, emergency-overdue, plan reviews, cost and backlog KPIs |
 
 ## Error codes
 
@@ -250,7 +292,11 @@ Problem details are `application/problem+json`. The `code` field carries the cod
 | EAM-FL-002 | 422 | Location rule: parent or target location in another site, or the asset is already there (or not installed, on removal) |
 | EAM-SEQ-001 | 422 | Sequence invalid (steps, includes, scope or interval), or an occurrence asked of an asset type sequence |
 | EAM-SEQ-002 | 422 | Sequence occurrence while the previous occurrence's work order is still open |
-| EAM-NF-001 | 404 | Asset, counter, work order, request, plan, fault catalog, permit type, isolation point, permit, lock, functional location or sequence not found |
+| EAM-RND-001 | 422 | ROUND work order completion while a stop has no outcome (BR-44.9) |
+| EAM-RND-002 | 422 | Stop outcome not allowed: order not ROUND or not IN_PROGRESS, stop already recorded, skip without a reason |
+| EAM-RND-003 | 422 | Round definition breaks a rule: stop numbering, job type code, travel, stop asset on another site, job type that needs a permit |
+| EAM-WO-003 | warning (in the emergency-overdue items) | Emergency work order not regularized within the window (BR-44.7) |
+| EAM-NF-001 | 404 | Asset, counter, work order, request, plan, fault catalog, permit type, isolation point, permit, lock, functional location, sequence, round or round stop not found |
 | EAM-VAL-001 | 400 | Request failed validation |
 | EAM-DUP-001 | 409 | Plan code, counter name, isolation tag code (per asset), location path (per site) or sequence code already used, or a permit of the type is already in force on the work order |
 | idempotency_key_reuse | 422 | Idempotency-Key already used for another counter, work order, rule, request, asset assessment, warranty, isolation point, permit, lock, asset placement or sequence occurrence |

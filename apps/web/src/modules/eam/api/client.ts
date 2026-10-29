@@ -8,7 +8,7 @@ export type WorkOrderStatus = "CREATED" | "SCHEDULED" | "RELEASED" | "IN_PROGRES
 export type WorkOrderType = "PREVENTIVE" | "CORRECTIVE" | "INSPECTION" | "EMERGENCY" | "CAPITAL";
 export type RequestStatus = "NEW" | "TRIAGED" | "CONVERTED" | "REJECTED" | "DEFERRED";
 export type RequestSource = "USER" | "MOBILE" | "QUALITY";
-export type LineKind = "TIME" | "COUNTER" | "TIME_OR_COUNTER" | "TIME_AND_COUNTER";
+export type LineKind = "TIME" | "COUNTER" | "TIME_OR_COUNTER" | "TIME_AND_COUNTER" | "ROUND";
 export type IntervalUnit = "DAYS" | "WEEKS" | "MONTHS" | "YEARS";
 
 export interface Page<T> {
@@ -116,6 +116,8 @@ export interface Workspace {
 export interface PlanLine {
   id: string;
   assetId: string;
+  /** ROUND lines only: the round they schedule; assetId is its first stop. */
+  roundId?: string;
   kind: LineKind;
   intervalValue?: number;
   intervalUnit?: IntervalUnit;
@@ -141,14 +143,16 @@ export interface Plan {
   lines: PlanLine[];
 }
 
+/** A plan line; ROUND lines name roundId instead of assetId and jobType (FR-44.14). */
 export interface NewPlanLine {
-  assetId: string;
+  assetId?: string;
+  roundId?: string;
   kind: LineKind;
   intervalValue?: number;
   intervalUnit?: IntervalUnit;
   counterId?: string;
   counterInterval?: number;
-  jobType: string;
+  jobType?: string;
   horizonDays?: number;
   startAt?: string;
 }
@@ -255,6 +259,8 @@ export interface WorkOrderDetail extends WorkOrder {
   history: StatusChange[];
   fault?: WorkOrderFault;
   downtime: DowntimeWindow[];
+  /** ROUND orders only, in stop order (BR-44.9). */
+  stops?: WorkOrderStop[];
 }
 
 export interface NewDowntime {
@@ -869,4 +875,113 @@ export function generateOccurrence(sequenceId: string, input: NewOccurrence, key
 
 export async function listOccurrences(sequenceId: string, signal?: AbortSignal): Promise<SequenceOccurrence[]> {
   return (await page<SequenceOccurrence>(`/sequences/${id(sequenceId)}/occurrences`, signal)).items;
+}
+
+// Slice 5: maintenance rounds (FR-44.14, BR-44.9), reminders (BR-44.7, BR-44.15), cost and backlog KPIs (FR-44.13).
+
+export type StopOutcome = "DONE" | "SKIPPED";
+
+export interface RoundStop {
+  sequence: number;
+  assetId: string;
+  jobType: string;
+  mandatory: boolean;
+  travelMinutes: number;
+}
+
+export interface MaintenanceRound {
+  id: string;
+  code: string;
+  name: string;
+  siteId: string;
+  active: boolean;
+  stops: RoundStop[];
+  travelMinutes: number;
+  createdAt: string;
+}
+
+export interface NewRound {
+  code: string;
+  name: string;
+  siteId: string;
+  stops: RoundStop[];
+}
+
+export interface WorkOrderStop extends RoundStop {
+  outcome?: StopOutcome;
+  reason?: string;
+  requestId?: string;
+  recordedBy?: string;
+  recordedAt?: string;
+}
+
+export interface RegularizationAlert extends WorkOrder {
+  code: string;
+  detail: string;
+}
+
+export interface PlanReview {
+  assetId: string;
+  assetNumber: string;
+  name: string;
+  criticality: number;
+  lastReviewedAt?: string;
+  dueAt?: string;
+}
+
+export interface AssetCost {
+  assetId: string;
+  assetNumber: string;
+  name: string;
+  assetType: string;
+  currency: string;
+  workOrders: number;
+  partsCost: string;
+  laborCost: string;
+  total: string;
+}
+
+export interface BacklogRow {
+  priority: number;
+  openCount: number;
+  overdueCount: number;
+  oldestDueAt?: string;
+}
+
+export function listRounds(filter: ListFilter = {}, signal?: AbortSignal): Promise<Page<MaintenanceRound>> {
+  return page<MaintenanceRound>(`/rounds${listQuery(filter)}`, signal);
+}
+
+export function getRound(roundId: string, signal?: AbortSignal): Promise<MaintenanceRound> {
+  return send<MaintenanceRound>(`/rounds/${id(roundId)}`, {}, signal);
+}
+
+export function createRound(input: NewRound, key: string): Promise<MaintenanceRound> {
+  return post<MaintenanceRound>("/rounds", input, key);
+}
+
+/** Opens a ROUND work order for one extra occurrence of the round; ROUND plan lines create the scheduled ones. */
+export function createRoundWorkOrder(roundId: string, input: NewOccurrence, key: string): Promise<WorkOrder> {
+  return post<WorkOrder>(`/rounds/${id(roundId)}/work-orders`, input, key);
+}
+
+/** Records one stop of an in-progress round as DONE or SKIPPED (a skip needs a reason). */
+export function recordStopOutcome(workOrderId: string, sequence: number, outcome: StopOutcome, reason: string, key = newKey()): Promise<WorkOrderStop> {
+  return post<WorkOrderStop>(`/work-orders/${id(workOrderId)}/stops/${sequence}`, reason ? { outcome, reason } : { outcome }, key);
+}
+
+export async function listEmergencyOverdue(hours = 24, signal?: AbortSignal): Promise<RegularizationAlert[]> {
+  return (await page<RegularizationAlert>(`/work-orders/emergency-overdue?hours=${hours}`, signal)).items;
+}
+
+export async function listPlanReviews(signal?: AbortSignal): Promise<PlanReview[]> {
+  return (await page<PlanReview>("/assets/plan-reviews", signal)).items;
+}
+
+export async function costByAsset(from: string, to: string, assetType = "", signal?: AbortSignal): Promise<AssetCost[]> {
+  return (await page<AssetCost>(`/kpis/cost${query({ from, to, assetType })}`, signal)).items;
+}
+
+export async function backlog(signal?: AbortSignal): Promise<BacklogRow[]> {
+  return (await page<BacklogRow>("/kpis/backlog", signal)).items;
 }

@@ -282,6 +282,9 @@ func requiredPermitTypes(ctx context.Context, tx pgx.Tx, t, jobType string) ([]P
 // every permit type its job type requires needs an ISSUED permit valid now,
 // and an isolation permit needs every isolation point locked and verified.
 func checkPermitGate(ctx context.Context, tx pgx.Tx, t string, wo WorkOrder, now time.Time) error {
+	if wo.Type == domain.TypeRound {
+		return roundPermitGate(ctx, tx, t, wo.ID)
+	}
 	if wo.JobType == "" {
 		return nil
 	}
@@ -309,6 +312,29 @@ func checkPermitGate(ctx context.Context, tx pgx.Tx, t string, wo WorkOrder, now
 		}
 		if err := domain.CheckPermitGate(req, now); err != nil {
 			return gateProblem(err)
+		}
+	}
+	return nil
+}
+
+// roundPermitGate fails closed for ROUND orders: a round carries one job per
+// stop but no permit per stop, so a round cannot start while any stop's job
+// type requires a permit to work (EAM-PMT-001). Rounds refuse such job types
+// when defined; this catches a requirement added to the job type later.
+func roundPermitGate(ctx context.Context, tx pgx.Tx, t, woID string) error {
+	stops, err := workOrderStops(ctx, tx, t, woID)
+	if err != nil {
+		return err
+	}
+	for _, st := range stops {
+		types, err := requiredPermitTypes(ctx, tx, t, st.JobType)
+		if err != nil {
+			return err
+		}
+		if len(types) > 0 {
+			return problem(422, domain.CodePermitMissing, fmt.Sprintf(
+				"round stop %d job type %s requires an ISSUED %s permit, which a round cannot carry; plan the job as its own work order",
+				st.Sequence, st.JobType, types[0].Code))
 		}
 	}
 	return nil

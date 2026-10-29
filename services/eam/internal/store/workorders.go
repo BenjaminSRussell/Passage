@@ -62,23 +62,27 @@ func getWorkOrder(ctx context.Context, tx pgx.Tx, t, id string, lock bool) (Work
 
 // insertWorkOrder creates a work order in CREATED and returns its id. Every
 // creation path (by hand, request conversion, plan generation) runs the
-// warranty check here (BR-44.14) on the order's date: its due date, or now. The
-// number comes from the work-order sequence, allocated last in the transaction.
+// warranty check here (BR-44.14) on the order's date: its due date, or now. A
+// ROUND order spans several assets and is booked on its first stop only, so it
+// is never warranty covered. The number comes from the work-order sequence,
+// allocated last in the transaction.
 func insertWorkOrder(ctx context.Context, tx pgx.Tx, t string, in WorkOrder, key string, now time.Time) (string, error) {
 	at := now
 	if in.DueAt != nil {
 		at = *in.DueAt
 	}
-	w, err := coveringWarranty(ctx, tx, t, in.AssetID, at, in.JobType)
-	if err != nil {
-		return "", err
-	}
 	var warrantyID *string
-	if w != nil {
-		warrantyID = &w.ID
+	if in.Type != domain.TypeRound {
+		w, err := coveringWarranty(ctx, tx, t, in.AssetID, at, in.JobType)
+		if err != nil {
+			return "", err
+		}
+		if w != nil {
+			warrantyID = &w.ID
+		}
 	}
 	id := ids.New()
-	_, err = tx.Exec(ctx, `insert into work_order (tenant_id, id, number, asset_id, work_order_type, status, priority,
+	_, err := tx.Exec(ctx, `insert into work_order (tenant_id, id, number, asset_id, work_order_type, status, priority,
 	    plan_line_id, request_id, job_type, currency, due_at, warranty_id, warranty_covered, idempotency_key)
 	  values ($1, $2, 'WO-' || nextval('work_order_number_seq'), $3, $4, 'CREATED', $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
 		t, id, in.AssetID, in.Type, in.Priority, in.PlanLineID, in.RequestID, optStr(in.JobType), in.Currency,
@@ -205,6 +209,17 @@ func (s *Postgres) TransitionWorkOrder(ctx context.Context, id string, in Transi
 				}
 				if f == nil {
 					return problem(422, CodeFaultMissing, "register a fault before completing "+cur.Type+" work orders")
+				}
+			}
+			if cur.Type == domain.TypeRound {
+				// Every stop needs an outcome before a round completes (BR-44.9).
+				open, err := openStops(ctx, tx, t, id)
+				if err != nil {
+					return err
+				}
+				if open > 0 {
+					return problem(422, domain.CodeRoundIncomplete, fmt.Sprintf(
+						"%d round stops have no outcome; record each stop as DONE or SKIPPED", open))
 				}
 			}
 			if in.DowntimeMinutes != nil {
@@ -402,7 +417,7 @@ type StatusChange struct {
 }
 
 // WorkOrderDetail is a work order with its asset type, labor, status history,
-// current fault registration and downtime windows.
+// current fault registration, downtime windows and, for a ROUND order, its stops.
 type WorkOrderDetail struct {
 	WorkOrder
 	AssetType string           `json:"assetType"`
@@ -410,6 +425,8 @@ type WorkOrderDetail struct {
 	History   []StatusChange   `json:"history"`
 	Fault     *WorkOrderFault  `json:"fault,omitempty"`
 	Downtime  []DowntimeWindow `json:"downtime"`
+	// Stops are the round stops of a ROUND order in stop order (BR-44.9).
+	Stops []WorkOrderStop `json:"stops,omitempty"`
 }
 
 // GetWorkOrder returns one work order with its detail.
@@ -484,6 +501,11 @@ func workOrderDetail(ctx context.Context, tx pgx.Tx, t string, w WorkOrder) (Wor
 	if err := rows.Err(); err != nil {
 		return out, err
 	}
-	out.Fault, err = currentFault(ctx, tx, t, w.ID)
+	if out.Fault, err = currentFault(ctx, tx, t, w.ID); err != nil {
+		return out, err
+	}
+	if w.Type == domain.TypeRound {
+		out.Stops, err = workOrderStops(ctx, tx, t, w.ID)
+	}
 	return out, err
 }

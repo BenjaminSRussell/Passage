@@ -7,11 +7,13 @@ import {
   getAsset,
   listAssets,
   listPlans,
+  listRounds,
   newKey,
   type Asset,
   type Counter,
   type IntervalUnit,
   type LineKind,
+  type MaintenanceRound,
   type NewPlan,
   type NewPlanLine,
   type Plan,
@@ -31,7 +33,12 @@ function interval(line: PlanLine): string {
 }
 
 const lineColumns: DataTableColumn<PlanLine>[] = [
-  { key: "jobType", header: "Job type", mono: true },
+  {
+    key: "jobType",
+    header: "Job type",
+    mono: true,
+    render: (row) => (row.roundId ? <Link to={`/eam/rounds/${row.roundId}`}>Round</Link> : row.jobType),
+  },
   { key: "kind", header: "Kind", render: (row) => kindLabel[row.kind] ?? row.kind },
   { key: "interval", header: "Every", render: interval },
   { key: "nextDueAt", header: "Next due", mono: true, render: (row) => dayOf(row.nextDueAt) },
@@ -86,6 +93,8 @@ export function PlansPage() {
 
 interface LineValues {
   assetId: string;
+  /** ROUND lines only. */
+  roundId?: string;
   kind: LineKind;
   intervalValue: string;
   intervalUnit: IntervalUnit;
@@ -113,10 +122,11 @@ interface PlanErrors {
 }
 
 const usesTime = (kind: LineKind) => kind !== "COUNTER";
-const usesCounter = (kind: LineKind) => kind !== "TIME";
+const usesCounter = (kind: LineKind) => kind !== "TIME" && kind !== "ROUND";
 
 const emptyLine = (assetId = ""): LineValues => ({
   assetId,
+  roundId: "",
   kind: "TIME",
   intervalValue: "",
   intervalUnit: "DAYS",
@@ -139,10 +149,17 @@ export function validatePlan(values: PlanValues): { errors: PlanErrors; input?: 
   const lines: NewPlanLine[] = [];
   values.lines.forEach((l, i) => {
     const e = errors.lines[i];
-    if (!l.assetId) e.assetId = "Choose the asset.";
-    const jobType = l.jobType.trim().toUpperCase();
-    if (!CODE.test(jobType)) e.jobType = "Use 2 to 20 characters: A to Z, 0 to 9 or an underscore.";
-    const line: NewPlanLine = { assetId: l.assetId, kind: l.kind, jobType };
+    let line: NewPlanLine;
+    if (l.kind === "ROUND") {
+      // A round line takes its assets and jobs from the round's stops (FR-44.14).
+      if (!l.roundId) e.roundId = "Choose the round.";
+      line = { roundId: l.roundId ?? "", kind: l.kind };
+    } else {
+      if (!l.assetId) e.assetId = "Choose the asset.";
+      const jobType = l.jobType.trim().toUpperCase();
+      if (!CODE.test(jobType)) e.jobType = "Use 2 to 20 characters: A to Z, 0 to 9 or an underscore.";
+      line = { assetId: l.assetId, kind: l.kind, jobType };
+    }
     if (usesTime(l.kind)) {
       const n = Number(l.intervalValue);
       if (!/^\d+$/.test(l.intervalValue.trim()) || n < 1) e.intervalValue = "Enter a whole number of 1 or more.";
@@ -194,6 +211,8 @@ function LineEditor({
   line,
   errors,
   assets,
+  rounds,
+  roundsError,
   canRemove,
   onChange,
   onRemove,
@@ -202,6 +221,8 @@ function LineEditor({
   line: LineValues;
   errors: LineErrors;
   assets: Asset[];
+  rounds: MaintenanceRound[];
+  roundsError?: string;
   canRemove: boolean;
   onChange(patch: Partial<LineValues>): void;
   onRemove(): void;
@@ -210,22 +231,10 @@ function LineEditor({
   return (
     <fieldset className={styles.lineCard}>
       <legend className={styles.lineTitle}>Line {index + 1}</legend>
-      <FormField id={`${p}-asset`} label="Asset" error={errors.assetId}>
-        {(control) => (
-          <Select {...control} value={line.assetId} invalid={Boolean(errors.assetId)} onChange={(e) => onChange({ assetId: e.target.value, counterId: "" })}>
-            <option value="">Choose an asset</option>
-            {assets.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.assetNumber} {a.name}
-              </option>
-            ))}
-          </Select>
-        )}
-      </FormField>
       <FormField id={`${p}-kind`} label="Kind">
         {(control) => (
           <Select {...control} value={line.kind} onChange={(e) => onChange({ kind: e.target.value as LineKind })}>
-            {(["TIME", "COUNTER", "TIME_OR_COUNTER", "TIME_AND_COUNTER"] as const).map((k) => (
+            {(["TIME", "COUNTER", "TIME_OR_COUNTER", "TIME_AND_COUNTER", "ROUND"] as const).map((k) => (
               <option key={k} value={k}>
                 {kindLabel[k]}
               </option>
@@ -233,9 +242,38 @@ function LineEditor({
           </Select>
         )}
       </FormField>
-      <FormField id={`${p}-job`} label="Job type" hint="A code such as LUBE or OVERHAUL." error={errors.jobType}>
-        {(control) => <Input {...control} value={line.jobType} maxLength={20} invalid={Boolean(errors.jobType)} onChange={(e) => onChange({ jobType: e.target.value })} />}
-      </FormField>
+      {line.kind === "ROUND" ? (
+        <FormField id={`${p}-round`} label="Round" hint="Each occurrence is one work order with a job per stop." error={errors.roundId ?? roundsError}>
+          {(control) => (
+            <Select {...control} value={line.roundId ?? ""} invalid={Boolean(errors.roundId)} onChange={(e) => onChange({ roundId: e.target.value })}>
+              <option value="">{rounds.length === 0 ? "No rounds yet" : "Choose a round"}</option>
+              {rounds.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.code} {r.name}
+                </option>
+              ))}
+            </Select>
+          )}
+        </FormField>
+      ) : (
+        <>
+          <FormField id={`${p}-asset`} label="Asset" error={errors.assetId}>
+            {(control) => (
+              <Select {...control} value={line.assetId} invalid={Boolean(errors.assetId)} onChange={(e) => onChange({ assetId: e.target.value, counterId: "" })}>
+                <option value="">Choose an asset</option>
+                {assets.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.assetNumber} {a.name}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </FormField>
+          <FormField id={`${p}-job`} label="Job type" hint="A code such as LUBE or OVERHAUL." error={errors.jobType}>
+            {(control) => <Input {...control} value={line.jobType} maxLength={20} invalid={Boolean(errors.jobType)} onChange={(e) => onChange({ jobType: e.target.value })} />}
+          </FormField>
+        </>
+      )}
       {usesTime(line.kind) ? (
         <>
           <FormField id={`${p}-every`} label="Every" error={errors.intervalValue}>
@@ -282,6 +320,7 @@ function LineEditor({
 export function NewPlanPage() {
   const navigate = useNavigate();
   const assets = useLoad((signal) => listAssets({ limit: 200 }, signal), "plan-assets");
+  const rounds = useLoad((signal) => listRounds({ limit: 200 }, signal), "plan-rounds");
   const [values, setValues] = useState<PlanValues>({ code: "", name: "", currency: "USD", lines: [emptyLine()] });
   const [errors, setErrors] = useState<PlanErrors>({ lines: [{}] });
   const [failure, setFailure] = useState<Problem | null>(null);
@@ -318,7 +357,10 @@ export function NewPlanPage() {
 
   return (
     <div className={styles.stack}>
-      <PageHeader title="New maintenance plan" description="Add one line per job. Time lines repeat on the calendar; counter lines follow the asset's usage." />
+      <PageHeader
+        title="New maintenance plan"
+        description="Add one line per job. Time lines repeat on the calendar; counter lines follow the asset's usage; round lines schedule a maintenance round."
+      />
       <Card>
         {assets.error ? (
           <Failure title="Could not load the assets" problem={assets.error} retry={assets.reload} />
@@ -348,6 +390,8 @@ export function NewPlanPage() {
                 line={line}
                 errors={errors.lines[i] ?? {}}
                 assets={assets.data!.items}
+                rounds={rounds.data?.items ?? []}
+                roundsError={rounds.error ? `Could not load the rounds (${rounds.error.code}).` : undefined}
                 canRemove={values.lines.length > 1}
                 onChange={(patch) => updateLine(i, patch)}
                 onRemove={() => {

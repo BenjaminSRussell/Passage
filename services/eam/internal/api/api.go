@@ -40,8 +40,9 @@ var (
 	currencyCode = regexp.MustCompile(`^[A-Z]{3}$`)
 	planCode     = regexp.MustCompile(`^[A-Z0-9][A-Z0-9_-]{1,29}$`)
 	// Work order types a caller may request. CAPITAL is accepted so that the
-	// store can answer EAM-WO-005; ROUND and REFURBISHMENT are not enabled
-	// until rounds (FR-44.14) and refurbishment (FR-44.20) exist.
+	// store can answer EAM-WO-005. ROUND orders come only from rounds
+	// (POST /rounds/{id}/work-orders and ROUND plan lines), and REFURBISHMENT
+	// is not enabled until refurbishment (FR-44.20) exists.
 	workOrderTyp = map[string]bool{"PREVENTIVE": true, "CORRECTIVE": true, "INSPECTION": true,
 		"EMERGENCY": true, "CAPITAL": true}
 	assetStates   = map[string]bool{"CREATED": true, "ACTIVE": true, "INACTIVE": true, "DISPOSED": true}
@@ -131,6 +132,16 @@ func (h *Handler) router() chi.Router {
 		r.With(authz.RequireDuty(DutyInquire)).Get("/sequences/{id}/simulation", h.simulateSequence)
 		r.With(authz.RequireDuty(DutyPlanAdmin)).Post("/sequences/{id}/occurrences", h.generateOccurrence)
 		r.With(authz.RequireDuty(DutyInquire)).Get("/sequences/{id}/occurrences", h.listOccurrences)
+		// Slice 5: maintenance rounds (FR-44.14, BR-44.9), reminders (BR-44.7, BR-44.15), cost and backlog KPIs (FR-44.13).
+		r.With(authz.RequireDuty(DutyPlanAdmin)).Post("/rounds", h.createRound)
+		r.With(authz.RequireDuty(DutyInquire)).Get("/rounds", h.listRounds)
+		r.With(authz.RequireDuty(DutyInquire)).Get("/rounds/{id}", h.getRound)
+		r.With(authz.RequireDuty(DutyPlanner)).Post("/rounds/{id}/work-orders", h.createRoundWorkOrder)
+		r.With(authz.RequireDuty(DutyTechnician)).Post("/work-orders/{id}/stops/{seq}", h.recordStop)
+		r.With(authz.RequireDuty(DutyInquire)).Get("/work-orders/emergency-overdue", h.emergencyOverdue)
+		r.With(authz.RequireDuty(DutyInquire)).Get("/assets/plan-reviews", h.planReviews)
+		r.With(authz.RequireDuty(DutyInquire)).Get("/kpis/cost", h.costByAsset)
+		r.With(authz.RequireDuty(DutyInquire)).Get("/kpis/backlog", h.backlog)
 	})
 	return r
 }
@@ -448,6 +459,12 @@ func (h *Handler) createPlan(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, invalid("a plan needs at least one line"))
 		return
 	}
+	for _, l := range in.Lines {
+		if (l.AssetID != "" && !ids.Valid(l.AssetID)) || (l.RoundID != nil && !ids.Valid(*l.RoundID)) {
+			fail(w, r, invalid("assetId and roundId must be UUIDs"))
+			return
+		}
+	}
 	out, err := h.store.CreatePlan(r.Context(), in, key)
 	if err != nil {
 		fail(w, r, err)
@@ -685,10 +702,9 @@ func (h *Handler) kpis(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, invalid("asset must be a UUID"))
 		return
 	}
-	from, errFrom := time.Parse(time.RFC3339, r.URL.Query().Get("from"))
-	to, errTo := time.Parse(time.RFC3339, r.URL.Query().Get("to"))
-	if errFrom != nil || errTo != nil || !from.Before(to) {
-		fail(w, r, invalid("from and to must be RFC 3339 timestamps with from before to"))
+	from, to, err := window(r)
+	if err != nil {
+		fail(w, r, err)
 		return
 	}
 	out, err := h.store.AssetKPI(r.Context(), asset, from, to)

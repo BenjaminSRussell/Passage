@@ -5,9 +5,11 @@ import { AssetsPage, NewAssetPage } from "./AssetsPage";
 import { FaultCatalogPage } from "./FaultCatalogPage";
 import { LocationDetailPage, LocationsPage, NewLocationPage } from "./LocationPages";
 import { NewPermitPage, PermitDetailPage, PermitsPage } from "./PermitPages";
+import { KpiPage } from "./KpiPages";
 import { PermitTypesPage } from "./PermitTypesPage";
 import { NewPlanPage, PlansPage } from "./PlansPage";
 import { NewRequestPage, RequestsPage } from "./RequestsPage";
+import { NewRoundPage, RoundDetailPage, RoundsPage } from "./RoundPages";
 import { NewSequencePage, SequenceDetailPage, SequencesPage } from "./SequencePages";
 import { WorkOrderDetailPage } from "./WorkOrderDetailPage";
 import { NewWorkOrderPage, WorkOrdersPage } from "./WorkOrdersPage";
@@ -16,7 +18,7 @@ import { WorkspacePage } from "./WorkspacePage";
 const eam: PassageModule = {
   id: "eam",
   title: "Asset management",
-  description: "Maintain plant assets with preventive plans, condition triggers, work orders, faults, warranties, permits to work with lockout/tagout, functional locations, maintenance sequences, and asset costs.",
+  description: "Maintain plant assets with preventive plans, condition triggers, work orders, faults, warranties, permits to work with lockout/tagout, functional locations, maintenance sequences and rounds, asset costs, backlog and maintenance reminders.",
   routes: [
     { path: "/eam", element: createElement(WorkspacePage), handle: { title: "Asset management" } },
     { path: "/eam/assets", element: createElement(AssetsPage), handle: { title: "Assets" } },
@@ -40,6 +42,10 @@ const eam: PassageModule = {
     { path: "/eam/sequences", element: createElement(SequencesPage), handle: { title: "Maintenance sequences" } },
     { path: "/eam/sequences/new", element: createElement(NewSequencePage), handle: { title: "New maintenance sequence" } },
     { path: "/eam/sequences/:id", element: createElement(SequenceDetailPage), handle: { title: "Maintenance sequence" } },
+    { path: "/eam/rounds", element: createElement(RoundsPage), handle: { title: "Maintenance rounds" } },
+    { path: "/eam/rounds/new", element: createElement(NewRoundPage), handle: { title: "New maintenance round" } },
+    { path: "/eam/rounds/:id", element: createElement(RoundDetailPage), handle: { title: "Maintenance round" } },
+    { path: "/eam/kpis", element: createElement(KpiPage), handle: { title: "Maintenance KPIs" } },
   ],
   nav: [
     { label: "Overview", to: "/eam", duty: "EamInquire" },
@@ -47,11 +53,13 @@ const eam: PassageModule = {
     { label: "Assets", to: "/eam/assets", duty: "EamInquire" },
     { label: "Maintenance plans", to: "/eam/plans", duty: "EamInquire" },
     { label: "Sequences", to: "/eam/sequences", duty: "EamInquire" },
+    { label: "Rounds", to: "/eam/rounds", duty: "EamInquire" },
     { label: "Requests", to: "/eam/requests", duty: "EamInquire" },
     { label: "Work orders", to: "/eam/work-orders", duty: "EamInquire" },
     { label: "Fault catalogs", to: "/eam/fault-catalogs", duty: "EamInquire" },
     { label: "Permits", to: "/eam/permits", duty: "EamInquire" },
     { label: "Permit types", to: "/eam/permit-types", duty: "EamInquire" },
+    { label: "KPIs", to: "/eam/kpis", duty: "EamInquire" },
   ],
 };
 

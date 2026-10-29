@@ -76,6 +76,8 @@ export const statusTone: Record<string, BadgeTone> = {
   APPLIED: "warning",
   VERIFIED: "success",
   REMOVED: "neutral",
+  DONE: "success",
+  SKIPPED: "warning",
 };
 
 export const typeLabel: Record<string, string> = {
@@ -84,6 +86,7 @@ export const typeLabel: Record<string, string> = {
   INSPECTION: "Inspection",
   EMERGENCY: "Emergency",
   CAPITAL: "Capital",
+  ROUND: "Round",
 };
 
 export const kindLabel: Record<string, string> = {
@@ -91,6 +94,7 @@ export const kindLabel: Record<string, string> = {
   COUNTER: "Counter",
   TIME_OR_COUNTER: "Time or counter, whichever first",
   TIME_AND_COUNTER: "Time and counter, whichever last",
+  ROUND: "Maintenance round, on time",
 };
 
 export function sentence(value: string): string {

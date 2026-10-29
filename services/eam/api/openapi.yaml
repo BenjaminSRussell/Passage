@@ -2,14 +2,14 @@ openapi: 3.1.0
 info:
   title: Passage EAM API
   version: 0.1.0
-  description: Enterprise asset management (wave 44, slices 1-4). Errors are RFC 9457 problem details with a stable code.
+  description: Enterprise asset management (wave 44, slices 1-5). Errors are RFC 9457 problem details with a stable code.
 servers:
   - url: https://api.{env}.passage.dev
     variables:
       env:
         default: dev
 security: []
-x-passage-slice: "PSG-44 slices 1-4; remaining deliverables are listed in NOT-IMPLEMENTED.md"
+x-passage-slice: "PSG-44 slices 1-5; remaining deliverables are listed in NOT-IMPLEMENTED.md"
 paths:
   /healthz:
     get:
@@ -352,7 +352,9 @@ paths:
       description: >-
         A repeated Idempotency-Key returns the work order as it is now, without a second transition. Completion of a
         CORRECTIVE or EMERGENCY order needs a registered fault (EAM-FLT-001); completing a warranty-covered order with
-        a covered cost above zero emits dev.passage.eam.warranty.claimable.v1 (BR-44.14).
+        a covered cost above zero emits dev.passage.eam.warranty.claimable.v1 (BR-44.14). A ROUND order completes only
+        when every stop is DONE or SKIPPED (EAM-RND-001), and cannot start while a stop's job type requires a permit to
+        work (EAM-PMT-001).
       x-passage-duty: EamPlanner | EamTechnician
       parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }, { $ref: "#/components/parameters/IfMatch" }]
       requestBody:
@@ -741,6 +743,154 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
+  /v1/eam/rounds:
+    get:
+      operationId: listRounds
+      x-passage-duty: EamInquire
+      description: Maintenance rounds (FR-44.14), newest first, each with its stops.
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+      responses:
+        "200": { description: page, content: { application/json: { schema: { $ref: "#/components/schemas/RoundPage" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createRound
+      x-passage-duty: EamPlanAdmin
+      description: >-
+        Defines a round: 1 to 50 stops numbered 1..n in order, each an asset of the round's site with a job type code,
+        a mandatory flag and the travel minutes from the previous stop (EAM-RND-003). A stop job type that requires a
+        permit to work is refused (EAM-RND-003): a round work order cannot carry one permit per stop. The code is
+        unique (EAM-DUP-001). A repeated Idempotency-Key returns the stored round. Schedule it with a ROUND plan line.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/RoundIn" } } }
+      responses:
+        "201": { description: created, content: { application/json: { schema: { $ref: "#/components/schemas/MaintenanceRound" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/eam/rounds/{id}:
+    get:
+      operationId: getRound
+      x-passage-duty: EamInquire
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: round, content: { application/json: { schema: { $ref: "#/components/schemas/MaintenanceRound" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/eam/rounds/{id}/work-orders:
+    post:
+      operationId: createRoundWorkOrder
+      x-passage-duty: EamPlanner
+      description: >-
+        Opens a ROUND work order for one extra occurrence of the round (ROUND plan lines generate the scheduled ones):
+        booked on the first stop's asset, with every stop copied in stop order (BR-44.9), event workorder.created.
+        Every stop asset must be ACTIVE (EAM-AST-001). A repeated Idempotency-Key returns the same order.
+      parameters: [{ $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: false
+        content: { application/json: { schema: { $ref: "#/components/schemas/OccurrenceIn" } } }
+      responses:
+        "201": { description: created, content: { application/json: { schema: { $ref: "#/components/schemas/WorkOrder" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/eam/work-orders/{id}/stops/{seq}:
+    post:
+      operationId: recordStopOutcome
+      x-passage-duty: EamTechnician
+      description: >-
+        Records one stop of an IN_PROGRESS ROUND work order as DONE or SKIPPED, once (EAM-RND-002). SKIPPED needs a
+        reason; a skipped mandatory stop raises a maintenance request with source ROUND for the stop's asset (event
+        request.created) in the same transaction (BR-44.9). The order completes only when every stop has an outcome
+        (EAM-RND-001 on the status transition). A repeated Idempotency-Key returns the stop as recorded.
+      parameters:
+        - { $ref: "#/components/parameters/Id" }
+        - { name: seq, in: path, required: true, schema: { type: integer, minimum: 1, maximum: 50 } }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/StopOutcomeIn" } } }
+      responses:
+        "200": { description: recorded, content: { application/json: { schema: { $ref: "#/components/schemas/WorkOrderStop" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /v1/eam/work-orders/emergency-overdue:
+    get:
+      operationId: listEmergencyOverdue
+      x-passage-duty: EamInquire
+      description: >-
+        Emergency regularization (BR-44.7): open priority 1 work orders that were never SCHEDULED or RELEASED and
+        were created at least the window ago, oldest first, each with the warning EAM-WO-003.
+      parameters:
+        - { name: hours, in: query, schema: { type: integer, minimum: 1, maximum: 72, default: 24 } }
+      responses:
+        "200":
+          description: overdue orders
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, windowHours]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/RegularizationAlert" } }
+                  windowHours: { type: integer }
+        "400": { $ref: "#/components/responses/Problem" }
+  /v1/eam/assets/plan-reviews:
+    get:
+      operationId: listPlanReviews
+      x-passage-duty: EamInquire
+      description: >-
+        Plan review reminder (BR-44.15): assets of criticality 4 or 5, not disposed, never assessed or last assessed
+        12 months ago or more, most overdue first.
+      responses:
+        "200":
+          description: assets due for review
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/PlanReview" } } } }
+  /v1/eam/kpis/cost:
+    get:
+      operationId: getCostByAsset
+      x-passage-duty: EamInquire
+      description: Parts, labor and total cost of the work orders completed in [from, to), per asset and currency, highest first (FR-44.13).
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: assetType, in: query, schema: { type: string, pattern: "^[A-Z0-9_]{2,20}$" } }
+      responses:
+        "200":
+          description: cost per asset
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, from, to]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/AssetCost" } }
+                  from: { type: string, format: date-time }
+                  to: { type: string, format: date-time }
+        "400": { $ref: "#/components/responses/Problem" }
+  /v1/eam/kpis/backlog:
+    get:
+      operationId: getBacklog
+      x-passage-duty: EamInquire
+      description: Open work orders per priority with the overdue count and the oldest due date (FR-44.13), optionally on one site.
+      parameters:
+        - { name: site, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: backlog per priority
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/BacklogRow" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
 components:
   parameters:
     Id:
@@ -780,6 +930,99 @@ components:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
   schemas:
+    RoundStop:
+      type: object
+      required: [sequence, assetId, jobType]
+      properties:
+        sequence: { type: integer, minimum: 1, maximum: 50 }
+        assetId: { type: string, format: uuid }
+        jobType: { type: string, pattern: "^[A-Z0-9_]{2,20}$" }
+        mandatory: { type: boolean, default: false, description: a SKIPPED mandatory stop raises a ROUND request }
+        travelMinutes: { type: integer, minimum: 0, maximum: 480, default: 0, description: from the previous stop }
+    RoundIn:
+      type: object
+      required: [code, name, siteId, stops]
+      properties:
+        code: { type: string, pattern: "^[A-Z0-9][A-Z0-9_-]{1,29}$" }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        siteId: { type: string, format: uuid }
+        stops: { type: array, minItems: 1, maxItems: 50, items: { $ref: "#/components/schemas/RoundStop" } }
+    MaintenanceRound:
+      type: object
+      required: [id, code, name, siteId, active, stops, travelMinutes, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        siteId: { type: string, format: uuid }
+        active: { type: boolean }
+        stops: { type: array, items: { $ref: "#/components/schemas/RoundStop" } }
+        travelMinutes: { type: integer, description: total travel between stops }
+        createdAt: { type: string, format: date-time }
+    RoundPage:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/MaintenanceRound" } }
+        nextCursor: { type: string, format: uuid }
+    StopOutcomeIn:
+      type: object
+      required: [outcome]
+      properties:
+        outcome: { type: string, enum: [DONE, SKIPPED] }
+        reason: { type: string, maxLength: 120, description: required for SKIPPED; an optional remark for DONE }
+    WorkOrderStop:
+      type: object
+      required: [sequence, assetId, jobType, mandatory, travelMinutes]
+      properties:
+        sequence: { type: integer }
+        assetId: { type: string, format: uuid }
+        jobType: { type: string }
+        mandatory: { type: boolean }
+        travelMinutes: { type: integer }
+        outcome: { type: string, enum: [DONE, SKIPPED], description: absent until recorded }
+        reason: { type: string }
+        requestId: { type: string, format: uuid, description: the ROUND request a skipped mandatory stop raised }
+        recordedBy: { type: string }
+        recordedAt: { type: string, format: date-time }
+    RegularizationAlert:
+      allOf:
+        - $ref: "#/components/schemas/WorkOrder"
+        - type: object
+          required: [code, detail]
+          properties:
+            code: { type: string, enum: [EAM-WO-003] }
+            detail: { type: string }
+    PlanReview:
+      type: object
+      required: [assetId, assetNumber, name, criticality]
+      properties:
+        assetId: { type: string, format: uuid }
+        assetNumber: { type: string }
+        name: { type: string }
+        criticality: { type: integer, minimum: 4, maximum: 5 }
+        lastReviewedAt: { type: string, format: date-time, description: the latest criticality assessment; absent when never assessed }
+        dueAt: { type: string, format: date-time }
+    AssetCost:
+      type: object
+      required: [assetId, assetNumber, name, assetType, currency, workOrders, partsCost, laborCost, total]
+      properties:
+        assetId: { type: string, format: uuid }
+        assetNumber: { type: string }
+        name: { type: string }
+        assetType: { type: string }
+        currency: { type: string }
+        workOrders: { type: integer }
+        partsCost: { type: string, description: decimal string, two places }
+        laborCost: { type: string, description: decimal string, two places }
+        total: { type: string, description: decimal string, two places }
+    BacklogRow:
+      type: object
+      required: [priority, openCount, overdueCount]
+      properties:
+        priority: { type: integer, minimum: 1, maximum: 5 }
+        openCount: { type: integer }
+        overdueCount: { type: integer }
+        oldestDueAt: { type: string, format: date-time }
     FunctionalLocationIn:
       type: object
       required: [code, name, siteId]
@@ -1014,10 +1257,14 @@ components:
         messageId: { type: string }
     PlanLineIn:
       type: object
-      required: [assetId, kind, jobType]
+      description: >-
+        assetId and jobType are required except on ROUND lines (FR-44.14), which name a roundId and an interval,
+        schedule on time only, and take the asset (the first stop) and the jobs from the round.
+      required: [kind]
       properties:
         assetId: { type: string, format: uuid }
-        kind: { type: string, enum: [TIME, COUNTER, TIME_OR_COUNTER, TIME_AND_COUNTER] }
+        roundId: { type: string, format: uuid, description: ROUND lines only }
+        kind: { type: string, enum: [TIME, COUNTER, TIME_OR_COUNTER, TIME_AND_COUNTER, ROUND] }
         intervalValue: { type: integer, minimum: 1 }
         intervalUnit: { type: string, enum: [DAYS, WEEKS, MONTHS, YEARS] }
         counterId: { type: string, format: uuid }
@@ -1033,7 +1280,8 @@ components:
       properties:
         id: { type: string, format: uuid }
         assetId: { type: string, format: uuid }
-        kind: { type: string, enum: [TIME, COUNTER, TIME_OR_COUNTER, TIME_AND_COUNTER] }
+        roundId: { type: string, format: uuid }
+        kind: { type: string, enum: [TIME, COUNTER, TIME_OR_COUNTER, TIME_AND_COUNTER, ROUND] }
         intervalValue: { type: integer }
         intervalUnit: { type: string }
         counterId: { type: string, format: uuid }
@@ -1159,6 +1407,7 @@ components:
         - type: object
           properties:
             assetType: { type: string }
+            stops: { type: array, items: { $ref: "#/components/schemas/WorkOrderStop" }, description: ROUND orders only, in stop order }
             fault: { $ref: "#/components/schemas/WorkOrderFault" }
             downtime: { type: array, items: { $ref: "#/components/schemas/DowntimeWindow" } }
             labor:
