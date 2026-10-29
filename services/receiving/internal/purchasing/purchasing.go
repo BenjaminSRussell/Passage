@@ -3,7 +3,6 @@ package purchasing
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -60,31 +59,40 @@ type orderBody struct {
 	Lines          []lineBody `json:"lines"`
 }
 
-func (c *Client) Get(ctx context.Context, orderID string) (domain.PurchaseOrder, error) {
+func (c *Client) fetch(ctx context.Context, what, orderID, path string) (int, []byte, error) {
 	principal, ok := tenant.FromContext(ctx)
 	if !ok {
-		return domain.PurchaseOrder{}, errors.New("purchase order get: no principal in context")
+		return 0, nil, fmt.Errorf("%s: no principal in context", what)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+fmt.Sprintf(domain.PurchaseOrderPathTmpl, url.PathEscape(orderID)), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
-		return domain.PurchaseOrder{}, fmt.Errorf("purchase order get %s: %w", orderID, err)
+		return 0, nil, fmt.Errorf("%s %s: %w", what, orderID, err)
 	}
 	identity.Forward(req, principal)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		slog.ErrorContext(ctx, "purchase order get transport failed", "err", err, "purchaseOrderId", orderID, "correlationId", middleware.GetReqID(ctx))
-		return domain.PurchaseOrder{}, fmt.Errorf("purchase order get %s: %w", orderID, err)
+		slog.ErrorContext(ctx, what+" transport failed", "err", err, "purchaseOrderId", orderID, "correlationId", middleware.GetReqID(ctx))
+		return 0, nil, fmt.Errorf("%s %s: %w", what, orderID, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
 	if err != nil {
-		slog.ErrorContext(ctx, "purchase order get read failed", "err", err, "purchaseOrderId", orderID, "correlationId", middleware.GetReqID(ctx))
-		return domain.PurchaseOrder{}, fmt.Errorf("purchase order get %s: %w", orderID, err)
+		slog.ErrorContext(ctx, what+" read failed", "err", err, "purchaseOrderId", orderID, "correlationId", middleware.GetReqID(ctx))
+		return 0, nil, fmt.Errorf("%s %s: %w", what, orderID, err)
 	}
+	return resp.StatusCode, raw, nil
+}
 
-	switch resp.StatusCode {
+func (c *Client) Get(ctx context.Context, orderID string) (domain.PurchaseOrder, error) {
+	const what = "purchase order get"
+	status, raw, err := c.fetch(ctx, what, orderID, fmt.Sprintf(domain.PurchaseOrderPathTmpl, url.PathEscape(orderID)))
+	if err != nil {
+		return domain.PurchaseOrder{}, err
+	}
+	switch status {
 	case http.StatusOK:
+		principal, _ := tenant.FromContext(ctx)
 		var out orderBody
 		if err := json.Unmarshal(raw, &out); err != nil || out.ID == "" || out.badLine() {
 			slog.ErrorContext(ctx, "purchase order response unusable", "err", err, "purchaseOrderId", orderID, "correlationId", middleware.GetReqID(ctx))
@@ -99,8 +107,8 @@ func (c *Client) Get(ctx context.Context, orderID string) (domain.PurchaseOrder,
 	case http.StatusForbidden:
 		return domain.PurchaseOrder{}, fmt.Errorf("purchase order get %s: %w", orderID, domain.ErrPurchaseOrderForbidden)
 	}
-	err = fmt.Errorf("purchase order get %s: unexpected status %d", orderID, resp.StatusCode)
-	slog.ErrorContext(ctx, "purchase order get rejected", "err", err, "status", resp.StatusCode, "purchaseOrderId", orderID, "correlationId", middleware.GetReqID(ctx))
+	err = fmt.Errorf("purchase order get %s: unexpected status %d", orderID, status)
+	slog.ErrorContext(ctx, "purchase order get rejected", "err", err, "status", status, "purchaseOrderId", orderID, "correlationId", middleware.GetReqID(ctx))
 	return domain.PurchaseOrder{}, err
 }
 

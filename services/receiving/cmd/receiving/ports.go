@@ -7,6 +7,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/api"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/inventory"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/ledger"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/periods"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/purchasing"
@@ -35,12 +36,22 @@ func buildPorts(getenv func(string) string) (api.Ports, error) {
 	}
 	switch url := getenv("PURCHASING_URL"); {
 	case url != "":
-		ports.PurchaseOrders = purchasing.New(url, nil)
+		client := purchasing.New(url, nil)
+		ports.PurchaseOrders, ports.InvoicingPlans = client, client
 	case allowFakes:
-		slog.Warn("PURCHASING_URL is empty: purchase order lookups find nothing", "flag", "PASSAGE_ALLOW_FAKES")
-		ports.PurchaseOrders = domain.FakePurchaseOrders{}
+		slog.Warn("PURCHASING_URL is empty: purchase order and invoicing plan lookups find nothing", "flag", "PASSAGE_ALLOW_FAKES")
+		ports.PurchaseOrders, ports.InvoicingPlans = domain.FakePurchaseOrders{}, domain.FakeInvoicingPlans{}
 	default:
 		return api.Ports{}, fmt.Errorf("PURCHASING_URL is required (set PASSAGE_ALLOW_FAKES=1 only for local development)")
+	}
+	switch url := getenv("INVENTORY_URL"); {
+	case url != "":
+		ports.OwnershipChanges = inventory.New(url, nil)
+	case allowFakes:
+		slog.Warn("INVENTORY_URL is empty: consignment settlement finds no ownership changes", "flag", "PASSAGE_ALLOW_FAKES")
+		ports.OwnershipChanges = domain.FakeOwnershipChanges{}
+	default:
+		slog.Warn("INVENTORY_URL is empty: consignment settlement answers 503 until it is set")
 	}
 	profile, err := buildProfile(getenv, allowFakes)
 	ports.Profile = profile

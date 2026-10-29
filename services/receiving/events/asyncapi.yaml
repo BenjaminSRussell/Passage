@@ -23,6 +23,13 @@ channels:
     messages:
       invoicePosted:
         $ref: "#/components/messages/InvoicePosted"
+      invoiceAdjusted:
+        $ref: "#/components/messages/InvoiceAdjusted"
+  settlementEvents:
+    address: passage.payables.settlement
+    messages:
+      settlementPosted:
+        $ref: "#/components/messages/SettlementPosted"
 operations:
   publishReceiptPosted:
     action: send
@@ -39,6 +46,16 @@ operations:
     channel: { $ref: "#/channels/invoiceEvents" }
     messages:
       - { $ref: "#/channels/invoiceEvents/messages/invoicePosted" }
+  publishInvoiceAdjusted:
+    action: send
+    channel: { $ref: "#/channels/invoiceEvents" }
+    messages:
+      - { $ref: "#/channels/invoiceEvents/messages/invoiceAdjusted" }
+  publishSettlementPosted:
+    action: send
+    channel: { $ref: "#/channels/settlementEvents" }
+    messages:
+      - { $ref: "#/channels/settlementEvents/messages/settlementPosted" }
 components:
   messages:
     ReceiptPosted:
@@ -65,6 +82,24 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/InvoicePostedData"
+    InvoiceAdjusted:
+      name: dev.passage.payables.invoice.adjusted.v1
+      summary: >-
+        POST /v1/receiving/invoice-adjustments:post posted a subsequent debit (the vendor charges more) or a credit note
+        (the vendor charges less) against a posted vendor invoice. The adjustment changes value only: GR/IR items and
+        quantities are untouched. Consumers: payables, costing, tax, analytics.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/InvoiceAdjustedData"
+    SettlementPosted:
+      name: dev.passage.payables.settlement.posted.v1
+      summary: >-
+        An invoicing plan row (kind PLAN_ROW, Dr GR/IR / Cr vendor control) or a consumed consignment journal (kind
+        CONSIGNMENT, Dr consignment accrual / Cr vendor control) was settled by POST /v1/receiving/plan-settlements:run or
+        /v1/receiving/consignment-settlements:run. Emitted once per source. Consumers: payables, treasury, analytics.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/SettlementPostedData"
   schemas:
     ReceiptPostedData:
       type: object
@@ -143,3 +178,40 @@ components:
               unit_price: { type: string }
               amount: { type: string }
               grir_cleared_amount: { type: string, description: "decimal string; the GR/IR amount this line cleared (pro rata, the exact remainder on the last quantity)" }
+    InvoiceAdjustedData:
+      type: object
+      required: [adjustment_id, original_invoice_id, kind, legal_entity_id, vendor_id, document_number, document_date, posting_date, currency, total, ledger_entry_id, lines]
+      properties:
+        adjustment_id: { type: string, format: uuid, description: "derived from tenant, original invoice and document number; stable across retries" }
+        original_invoice_id: { type: string, format: uuid }
+        kind: { type: string, enum: [CREDIT, DEBIT] }
+        legal_entity_id: { type: string, format: uuid }
+        vendor_id: { type: string, format: uuid }
+        document_number: { type: string, description: "the vendor's credit note or debit note number" }
+        document_date: { type: string, format: date }
+        posting_date: { type: string, format: date }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        total: { type: string, description: "decimal string; the vendor control movement, always positive" }
+        ledger_entry_id: { type: string }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [line_no, invoice_line_no, amount]
+            properties:
+              line_no: { type: integer, minimum: 1 }
+              invoice_line_no: { type: integer, minimum: 1, description: "the line of the original invoice this adjustment changes" }
+              amount: { type: string, description: "decimal string, positive; the kind says whether it adds or removes value" }
+    SettlementPostedData:
+      type: object
+      required: [settlement_id, kind, source_ref, legal_entity_id, vendor_id, posting_date, currency, amount, ledger_entry_id]
+      properties:
+        settlement_id: { type: string, format: uuid, description: "derived from tenant, kind and source; stable across retries" }
+        kind: { type: string, enum: [PLAN_ROW, CONSIGNMENT] }
+        source_ref: { type: string, description: "<purchase order id>/<line no>/<row seq> for PLAN_ROW; the inventory OWNERSHIP_CHANGE journal id for CONSIGNMENT" }
+        legal_entity_id: { type: string, format: uuid }
+        vendor_id: { type: string, description: "the purchase order's vendor (uuid) for PLAN_ROW; the inventory owner dimension for CONSIGNMENT" }
+        posting_date: { type: string, format: date }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        amount: { type: string, description: "decimal string, positive; the vendor control credit" }
+        ledger_entry_id: { type: string }

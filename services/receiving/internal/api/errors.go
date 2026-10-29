@@ -24,6 +24,7 @@ var domainStatus = map[string]int{
 	domain.CodeCorrectionBelow:   http.StatusConflict,
 	domain.CodePostingPending:    http.StatusConflict,
 	domain.CodeLedgerRejected:    http.StatusUnprocessableEntity,
+	domain.CodeOverCredit:        http.StatusUnprocessableEntity,
 }
 
 func writeError(w http.ResponseWriter, r *http.Request, err error) {
@@ -46,6 +47,8 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, domain.CodePostingPending, err.Error()+"; nothing was committed; review the pending postings before repeating the request"))
 	case errors.Is(err, store.ErrNotFound):
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, "RCV-NF-001", "receipt not found"))
+	case errors.Is(err, store.ErrInvoiceNotFound):
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, "RCV-NF-005", "vendor invoice not found"))
 	case errors.Is(err, store.ErrGrirNotFound):
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, "RCV-NF-002", "receipt line has no open GR/IR item"))
 	default:
