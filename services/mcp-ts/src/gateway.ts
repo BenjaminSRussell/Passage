@@ -56,8 +56,11 @@ export interface GatewayDeps {
   sleep: (ms: number) => Promise<void>;
 }
 
+/** Longest cursor the gateway forwards; upstream cursors are opaque tokens. */
+export const MAX_CURSOR_LENGTH = 512;
+
 export type CallResult =
-  | { kind: "ok"; status: number; body: unknown }
+  | { kind: "ok"; status: number; body: unknown; nextCursor?: string }
   | { kind: "error"; status: number; code: string; message: string };
 
 async function fail(
@@ -115,6 +118,12 @@ export async function callTool(deps: GatewayDeps, p: Principal, name: string, ra
     const requested = typeof args.limit === "number" && Number.isFinite(args.limit) ? Math.trunc(args.limit) : READ_PAGE_LIMIT;
     args.limit = Math.max(1, Math.min(requested, READ_PAGE_LIMIT));
   }
+  if (tool.readOnly && "cursor" in args) {
+    // The cursor is opaque: it is forwarded unchanged, but must be a bounded string.
+    if (typeof args.cursor !== "string" || args.cursor.length === 0 || args.cursor.length > MAX_CURSOR_LENGTH) {
+      return fail(deps, p, name, "INVALID", 400, "MCP-0400", `cursor must be a string of 1 to ${MAX_CURSOR_LENGTH} characters`);
+    }
+  }
 
   const headers: Record<string, string> = { authorization: `Bearer ${p.userToken}` };
   if (p.traceparent !== undefined) headers.traceparent = p.traceparent;
@@ -148,7 +157,17 @@ export async function callTool(deps: GatewayDeps, p: Principal, name: string, ra
     status: res.status,
     ...(p.runId !== undefined ? { runId: p.runId } : {}),
   });
-  return { kind: "ok", status: res.status, body: res.body };
+  const nextCursor = tool.readOnly ? nextCursorOf(res.body) : undefined;
+  return nextCursor === undefined
+    ? { kind: "ok", status: res.status, body: res.body }
+    : { kind: "ok", status: res.status, body: res.body, nextCursor };
+}
+
+/** Reads the upstream's continuation token, accepting the camelCase or snake_case field. */
+export function nextCursorOf(body: unknown): string | undefined {
+  if (!isObject(body)) return undefined;
+  const candidate = body.nextCursor ?? body.next_cursor;
+  return typeof candidate === "string" && candidate.length > 0 && candidate.length <= MAX_CURSOR_LENGTH ? candidate : undefined;
 }
 
 function missingRequired(tool: ToolDefinition, args: JsonObject): string[] {

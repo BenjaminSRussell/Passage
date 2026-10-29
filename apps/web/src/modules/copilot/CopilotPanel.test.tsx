@@ -38,7 +38,7 @@ describe("CopilotPanel", () => {
     await user.type(screen.getByLabelText("Ask Copilot"), "what was revenue last month vs the month before");
     await user.click(screen.getByRole("button", { name: "Send" }));
 
-    expect(ask).toHaveBeenCalledWith({ mode: "ask", message: "what was revenue last month vs the month before" });
+    expect(ask).toHaveBeenCalledWith({ mode: "ask", message: "what was revenue last month vs the month before" }, expect.any(Function));
     expect(await screen.findByRole("article", { name: "Copilot answer" })).toHaveTextContent(answer.answer);
     expect(screen.getByText(GENERATED_BADGE)).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "Tool calls" })).toHaveTextContent("passage.ledger.journal.get: OK");
@@ -56,7 +56,7 @@ describe("CopilotPanel", () => {
     expect(screen.getByRole("button", { name: "Ask the data" })).toHaveAttribute("aria-pressed", "false");
     await user.type(screen.getByLabelText("Ask Copilot"), "why is this journal reversed");
     await user.click(screen.getByRole("button", { name: "Send" }));
-    expect(ask).toHaveBeenCalledWith({ mode: "explain", message: "why is this journal reversed", recordRef: "ledger.journal:JV-0042" });
+    expect(ask).toHaveBeenCalledWith({ mode: "explain", message: "why is this journal reversed", recordRef: "ledger.journal:JV-0042" }, expect.any(Function));
   });
 
   it("inserts a draft only when the user clicks Insert draft", async () => {
@@ -93,6 +93,46 @@ describe("CopilotPanel", () => {
     await user.type(screen.getByLabelText("Ask Copilot"), "hello");
     await user.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("HTTP 503"));
+  });
+
+  it("shows the answer as it streams, labelled, then the final answer", async () => {
+    let finish: (r: ChatResponse) => void = () => undefined;
+    const ask = vi.fn(
+      (_req: unknown, onToken?: (text: string) => void) =>
+        new Promise<ChatResponse>((resolve) => {
+          onToken?.("Revenue was ");
+          onToken?.("1,200.00 USD");
+          finish = resolve;
+        }),
+    );
+    render(<CopilotPanel ask={ask} />);
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText("Ask Copilot"), "revenue last month");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    const live = await screen.findByRole("article", { name: "Copilot answer in progress" });
+    expect(live).toHaveTextContent("Revenue was 1,200.00 USD");
+    expect(live).toHaveTextContent(GENERATED_BADGE);
+    expect(live).toHaveAttribute("aria-busy", "true");
+    expect(screen.queryByText("No answer yet")).toBeNull();
+    expect(pageViolations()).toEqual([]);
+
+    finish(answer);
+    expect(await screen.findByRole("article", { name: "Copilot answer" })).toHaveTextContent(answer.answer);
+    expect(screen.queryByRole("article", { name: "Copilot answer in progress" })).toBeNull();
+  });
+
+  it("drops a partial answer when the stream fails, and shows the error", async () => {
+    const ask = vi.fn(async (_req: unknown, onToken?: (text: string) => void) => {
+      onToken?.("half an ans");
+      throw new Error("AGT-0206: Provider unavailable.");
+    });
+    render(<CopilotPanel ask={ask} />);
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText("Ask Copilot"), "hello");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("AGT-0206"));
+    expect(screen.queryByText("half an ans")).toBeNull();
   });
 
   it("does not send an empty message", async () => {

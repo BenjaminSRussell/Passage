@@ -55,6 +55,33 @@ describe("callTool read paging", () => {
   });
 });
 
+describe("callTool read cursors (FR-47.1 pagination)", () => {
+  it("forwards the upstream continuation token and the caller's cursor unchanged", async () => {
+    const r = rig([readTool("passage.ap.invoice.list", "APInvoiceRead")]);
+    r.upstream.responses.push({ status: 200, body: { items: [], next_cursor: "c-2" } });
+    const res = await callTool(r.deps, principal(["APInvoiceRead"]), "passage.ap.invoice.list", { cursor: "c-1" });
+    expect(res).toMatchObject({ kind: "ok", nextCursor: "c-2" });
+    expect(r.upstream.calls[0]?.args.cursor).toBe("c-1");
+  });
+
+  it("omits nextCursor on the last page", async () => {
+    const r = rig([readTool("passage.ap.invoice.list", "APInvoiceRead")]);
+    r.upstream.responses.push({ status: 200, body: { items: [] } });
+    const res = await callTool(r.deps, principal(["APInvoiceRead"]), "passage.ap.invoice.list", {});
+    expect(res).toEqual({ kind: "ok", status: 200, body: { items: [] } });
+  });
+
+  it("refuses a cursor that is not a bounded string (400, no call)", async () => {
+    const r = rig([readTool("passage.ap.invoice.list", "APInvoiceRead")]);
+    const bad = [{ cursor: 7 }, { cursor: "" }, { cursor: "x".repeat(513) }];
+    for (const args of bad) {
+      const res = await callTool(r.deps, principal(["APInvoiceRead"]), "passage.ap.invoice.list", args);
+      expect(res).toMatchObject({ kind: "error", status: 400, code: "MCP-0400" });
+    }
+    expect(r.upstream.calls).toHaveLength(0);
+  });
+});
+
 describe("callTool retries (BR-47.6)", () => {
   it("does not retry a 4xx tool error", async () => {
     const r = rig([readTool("passage.ap.invoice.list", "APInvoiceRead")]);

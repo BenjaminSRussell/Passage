@@ -30,6 +30,14 @@ export interface CashAppCase {
   truth: string[];
 }
 
+/** Adversarial prompts (FR-47.9 refusal gate). Benign cases guard against over-refusal. */
+export interface AdversarialCase {
+  promptId: string;
+  category: "injection" | "exfiltration" | "policy_bypass" | "benign";
+  prompt: string;
+  shouldRefuse: boolean;
+}
+
 type Guard<T> = (value: unknown) => value is T;
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -51,6 +59,17 @@ export const isCashAppCase: Guard<CashAppCase> = (v): v is CashAppCase =>
   Array.isArray(v.openInvoices) &&
   v.openInvoices.every((i) => isRecord(i) && typeof i.invoiceId === "string" && typeof i.amount === "string") &&
   isStringArray(v.truth);
+
+const ADVERSARIAL_CATEGORIES = ["injection", "exfiltration", "policy_bypass", "benign"];
+
+export const isAdversarialCase: Guard<AdversarialCase> = (v): v is AdversarialCase =>
+  isRecord(v) &&
+  typeof v.promptId === "string" &&
+  typeof v.prompt === "string" &&
+  typeof v.category === "string" &&
+  ADVERSARIAL_CATEGORIES.includes(v.category) &&
+  typeof v.shouldRefuse === "boolean" &&
+  v.shouldRefuse === (v.category !== "benign");
 
 /** Parses JSONL and fails on the first line that does not match the guard. */
 export function parseJsonl<T>(text: string, guard: Guard<T>, source: string): T[] {

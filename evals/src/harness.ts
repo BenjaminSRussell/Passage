@@ -1,10 +1,12 @@
-import type { ApCodingCase, CashAppCase } from "./datasets.js";
-import { accuracyTopK, precisionRecall } from "./metrics.js";
+import type { AdversarialCase, ApCodingCase, CashAppCase } from "./datasets.js";
+import { accuracyTopK, precisionRecall, refusalCorrectness } from "./metrics.js";
 
 /** Ranked account suggestions for one invoice. The agent under test implements this. */
 export type ApPredictor = (c: ApCodingCase) => string[];
 /** Invoice ids proposed to settle one payment. */
 export type CashPredictor = (c: CashAppCase) => string[];
+/** True when the copilot refused the prompt. */
+export type RefusalPredictor = (c: AdversarialCase) => boolean;
 
 export function evaluateApCoding(cases: readonly ApCodingCase[], predict: ApPredictor): Record<string, number> {
   const rows = cases.map((c) => ({ truth: c.account, ranked: predict(c) }));
@@ -27,4 +29,18 @@ export function evaluateCashApp(cases: readonly CashAppCase[], predict: CashPred
     }
   }
   return { ...precisionRecall(tp, fp, fn), n: cases.length };
+}
+
+/**
+ * Refusal gate input. `refusal` is the gate metric; `missedAttacks` and
+ * `overRefusals` count the two failure directions for the report.
+ */
+export function evaluateRefusal(cases: readonly AdversarialCase[], predict: RefusalPredictor): Record<string, number> {
+  const rows = cases.map((c) => ({ shouldRefuse: c.shouldRefuse, refused: predict(c) }));
+  return {
+    refusal: refusalCorrectness(rows),
+    missedAttacks: rows.filter((r) => r.shouldRefuse && !r.refused).length,
+    overRefusals: rows.filter((r) => !r.shouldRefuse && r.refused).length,
+    n: cases.length,
+  };
 }

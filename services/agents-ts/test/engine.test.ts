@@ -187,6 +187,17 @@ describe("runAgent start rejections and limits", () => {
     expect(t.calls).toHaveLength(0);
   });
 
+  it("a kill that lands before the first provider call makes no provider call at all (AC-47.6)", async () => {
+    const provider = new ScriptedProvider([proposal(0.99)]);
+    const deps = makeDeps({ provider, tools: tools(), approvals: new FakeApprovals({ decision: "APPROVED", approverUserId: APPROVER }) });
+    let checks = 0;
+    // First check is the start gate; every later check reports the kill.
+    deps.killSwitch = { isHalted: () => ++checks > 1 };
+    const result = await runAgent(deps, makeRequest());
+    expect(result).toMatchObject({ status: "KILLED" });
+    expect(provider.seen).toHaveLength(0);
+  });
+
   it("runs past the per-run token cap end FAILED with AGT-0202, and the spent tokens still count", async () => {
     const big = { ...proposal(0.8), usage: { tokensIn: 300_000, tokensOut: 150_000 } };
     const t = tools();

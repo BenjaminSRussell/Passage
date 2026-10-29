@@ -21,6 +21,15 @@ deterministic in tests.
 | `src/domain/registry.ts` | `agent_version` records: prompt, tool list and model id pinned; a production version needs a passing eval (FR-47.10) |
 | `src/domain/audit.ts` | Action records: inputs, tool calls, outputs and approver (AC-47.3) |
 | `src/domain/money.ts` | Currency-safe money comparison for the AUTO amount limit. Never floats |
+| `src/providers/wire.ts` | The one forced tool (`propose_action`) every adapter calls, and `toModelResponse`: validates arguments (allow-listed tool, confidence in 0..1, decimal amount, ISO currency) before the engine sees them |
+| `src/providers/anthropic.ts` | Anthropic Messages API adapter (default provider) |
+| `src/providers/openai.ts` | OpenAI chat-completions adapter for OpenAI-compatible open-weights endpoints (vLLM, TGI) and Azure OpenAI (`auth: "api-key"`, `query` for `api-version`) |
+| `src/providers/http.ts` | `postJson`: timeout; transport errors, timeouts and 5xx are an outage, 429 and other 4xx a rejection; error messages never include the key or the body |
+| `src/providers/failover.ts` | BR-47.9: after 60 s of primary outage, calls move to a residency-compliant secondary, or the run pauses (AGT-0206). While failed over the primary is retried once per 30 s, and `reportPrimaryHealthy` lets the health probe return traffic at once |
+| `src/domain/killswitch.ts` | `KillSwitchRegistry`: applies `killswitch.changed` versions in order, ignores duplicates, fails closed after 10 s without a heartbeat (AC-47.6) |
+| `src/domain/knowledge.ts` | FR-47.14: reciprocal rank fusion of keyword and embedding results, and the citation gate (similarity >= 0.75, else AGT-0212) |
+| `src/domain/reconcile.ts` | 9.47.9: provider-billed against recorded tokens per run, 1% tolerance, estimated runs (BR-47.4) flagged separately |
+| `src/domain/events.ts` | Payload builders and validation for `run.completed`, `budget.threshold` (the cost-guard alert, AC-47.4) and `killswitch.changed`. Tool names and decisions only; no inputs, outputs or display text |
 | `src/errors.ts` | `AgentError` with the stable PRD 9.47.18 codes |
 
 ## Run and test
@@ -39,8 +48,13 @@ The tests run without a database or network. Ports are faked in `test/fakes.ts`.
 
 - FR-47.4 runtime steps, FR-47.5 AP coding modes, FR-47.8 approval gate
 - FR-47.10 version registry, FR-47.11 token budgets, FR-47.12 responsible AI
-- FR-47.13 provider layer: the `ModelProvider` port is defined; the Anthropic, Bedrock, Azure and OpenAI-compatible adapters are not built (see NOT-IMPLEMENTED.md)
-- BR-47.1 to BR-47.5, BR-47.7 and BR-47.10 are domain rules in code and tested. BR-47.6 (4xx not retried, 5xx retried 1 s / 4 s / 16 s) is enforced by the MCP gateway (`services/mcp-ts/src/gateway.ts`), which is the runtime's `ToolPort`. BR-47.3 is a rule (`isApprovalExpired`) plus the engine's handling of an `EXPIRED` decision; the expiry sweeper is not built. The rest are listed in NOT-IMPLEMENTED.md
+- FR-47.13 provider layer: Anthropic and OpenAI-compatible adapters (Azure through the same adapter) with a parity test in `test/providers.test.ts`. Bedrock is not built (see NOT-IMPLEMENTED.md)
+- BR-47.9 provider failover: `createFailoverProvider` in `src/providers/failover.ts`; only outages (5xx, timeouts, transport errors) count, a rejected request never fails over
+- FR-47.12 kill switch: `KillSwitchRegistry` and the `killswitch.changed` payload; the engine checks it before the provider call (AC-47.6). The delivery channel is not built
+- AC-47.4 cost guard: `budgetThresholdEvent` fires once when the budget moves into SOFT (80%) or HARD (100%). The event is the alert; routing it to a pager is the alerting consumer's job
+- FR-47.14 knowledge retrieval: hybrid fusion and the 0.75 citation gate (AGT-0212) in `src/domain/knowledge.ts`; the search tool and index are not built
+- 9.47.9 reconciliation: `reconcileRuns` compares billed and recorded tokens within 1%; the daily job is not built
+- BR-47.1 to BR-47.5, BR-47.7, BR-47.9 and BR-47.10 are domain rules in code and tested. BR-47.6 (4xx not retried, 5xx retried 1 s / 4 s / 16 s) is enforced by the MCP gateway (`services/mcp-ts/src/gateway.ts`), which is the runtime's `ToolPort`. BR-47.3 is a rule (`isApprovalExpired`) plus the engine's handling of an `EXPIRED` decision; the expiry sweeper is not built. The rest are listed in NOT-IMPLEMENTED.md
 
 ## Error codes
 
@@ -53,9 +67,11 @@ The tests run without a database or network. Ports are faked in `test/fakes.ts`.
 | `AGT-0208` | Approval expired after the configured hours; nothing was posted |
 | `AGT-0209` | Approver is the invoker above the self-approval limit |
 | `AGT-0210` | Unredacted PII detected before a provider call or storage; the run fails |
+| `AGT-0206` | Provider unavailable (transport, timeout, 5xx), rate-limited or rejected (4xx), or an unusable response; the run fails. Only the first group counts towards failover |
+| `AGT-0212` | No knowledge source reaches citation similarity 0.75; the copilot says so instead of guessing |
 | `AGT-0214` | A tool call failed; 4xx is not retried |
 
-Error codes not listed here (AGT-0205, 0206, 0207, 0211, 0212, 0213) are in the
+Error codes not listed here (AGT-0205, 0207, 0211, 0213) are in the
 PRD catalog; they belong to slices that are not built yet.
 
 ## Dependencies

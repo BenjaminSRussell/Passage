@@ -1,59 +1,207 @@
 openapi: 3.1.0
 info:
   title: Passage MCP gateway
-  version: 0.1.0
+  version: 0.2.0
   description: |
     Model Context Protocol endpoint (PRD 9.47.5, FR-47.1, FR-47.2). The
-    handler in src/jsonrpc.ts implements the JSON-RPC 2.0 methods below. Every
-    call runs with the invoking user's token: tools/list shows only tools whose
-    x-passage-duty the user holds, and tools/call forwards the user's
-    Authorization header, so OPA decides at the API.
-    This slice ships the handler and the catalog only. The HTTP server and the
-    SSE transport are a later slice (see NOT-IMPLEMENTED.md).
+    handler in src/jsonrpc.ts implements the JSON-RPC 2.0 methods below, served
+    over HTTP by src/server.ts. Every call runs with the invoking user's token:
+    tools/list shows only tools whose x-passage-duty the user holds, and
+    tools/call forwards the user's Authorization header, so OPA decides at the API.
+    The edge (Envoy) verifies the JWT, strips any client copies of
+    x-passage-tenant, x-passage-user and x-passage-duties, and sets them from
+    the token's claims (deploy/gateway).
+    Server-initiated SSE streams are not offered yet; clients POST every message.
 servers:
   - url: https://mcp.passage.dev
 paths:
   /mcp:
     post:
       operationId: mcpJsonRpc
-      summary: Handle one MCP JSON-RPC message
+      summary: Handle one MCP JSON-RPC message or batch
       description: |
-        Notifications (no id) return no body. Denied tool calls return a
-        JSON-RPC error with code -32003 and data {status: 403, code}.
-        A 403 from the API is mapped the same way. Other tool failures return a
-        result with isError true and text "<code>: <message>", where code is
-        AGT-0214 (tool failed), MCP-0400 (tenant_id supplied), MCP-0404
-        (unknown tool) or MCP-0422 (missing required argument).
+        Notifications (no id) return no body (202). A batch returns one reply per
+        request, in order. Denied tool calls return a JSON-RPC error with code
+        -32003 and data {status: 403, code}. A 403 from the API is mapped the
+        same way. Other tool failures return a result with isError true and text
+        "<code>: <message>", where code is AGT-0214 (tool failed), MCP-0400
+        (tenant_id supplied, or an invalid cursor), MCP-0404 (unknown tool) or
+        MCP-0422 (missing required argument). A read tool whose upstream returns
+        a continuation token puts it in result._meta.nextCursor.
       x-passage-duty: none
       parameters:
-        - name: traceparent
-          in: header
-          required: false
-          schema:
-            type: string
+        - $ref: "#/components/parameters/Traceparent"
         - name: x-agent-run-id
           in: header
           required: false
           description: Set by the agent runtime so every tool call is traceable to its run.
           schema:
             type: string
-            format: uuid
+        - $ref: "#/components/parameters/Authorization"
+        - $ref: "#/components/parameters/PassageTenant"
+        - $ref: "#/components/parameters/PassageUser"
+        - $ref: "#/components/parameters/PassageDuties"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/JsonRpcRequest"
+              oneOf:
+                - $ref: "#/components/schemas/JsonRpcRequest"
+                - type: array
+                  minItems: 1
+                  maxItems: 50
+                  description: A batch of more than 50 messages gets one JSON-RPC -32600 error.
+                  items:
+                    $ref: "#/components/schemas/JsonRpcRequest"
       responses:
         "200":
-          description: JSON-RPC response
+          description: JSON-RPC response (single object, or array for a batch)
+          headers:
+            X-Passage-Api-Build:
+              $ref: "#/components/headers/ApiBuild"
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimitLimit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimitRemaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimitReset"
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/JsonRpcResponse"
+                  - type: array
+                    items:
+                      $ref: "#/components/schemas/JsonRpcResponse"
+        "202":
+          description: Only notifications were sent; no body
+        "400":
+          description: Body is not valid JSON (JSON-RPC -32700 in the body)
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/JsonRpcResponse"
-        "202":
-          description: Notification accepted; no body
+        "401":
+          description: Bearer token or edge identity headers missing or malformed (MCP-0401)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: Unknown path (MCP-0404)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "405":
+          description: Only POST is accepted on /mcp (MCP-0405)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "413":
+          description: Body over 1 MiB (MCP-0413)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: |
+            Per-pod rate limit for this tenant and user exceeded (MCP-0429).
+            Default 600 requests per minute; a batch counts as one request.
+          headers:
+            Retry-After:
+              description: Whole seconds until the window resets.
+              schema: {type: integer, minimum: 1}
+            RateLimit-Limit:
+              $ref: "#/components/headers/RateLimitLimit"
+            RateLimit-Remaining:
+              $ref: "#/components/headers/RateLimitRemaining"
+            RateLimit-Reset:
+              $ref: "#/components/headers/RateLimitReset"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "500":
+          description: Internal error; no detail is returned (MCP-0500)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /healthz:
+    get:
+      operationId: healthz
+      summary: Liveness; no dependency checks
+      x-passage-duty: none
+      responses:
+        "200":
+          description: Process is up
+  /readyz:
+    get:
+      operationId: readyz
+      summary: Readiness; the tool catalog is loaded
+      x-passage-duty: none
+      responses:
+        "200":
+          description: Ready to serve tools
+        "503":
+          description: Catalog empty or probe failed
 components:
+  parameters:
+    Traceparent:
+      name: traceparent
+      in: header
+      required: false
+      description: W3C trace context; malformed values are ignored.
+      schema:
+        type: string
+    Authorization:
+      name: authorization
+      in: header
+      required: true
+      description: The invoking user's Keycloak access token (Bearer). Forwarded to every API call.
+      schema:
+        type: string
+        pattern: "^Bearer .+$"
+    PassageTenant:
+      name: x-passage-tenant
+      in: header
+      required: true
+      description: Set by the edge from the verified token's tid claim. The nil tenant is refused.
+      schema:
+        type: string
+        format: uuid
+    PassageUser:
+      name: x-passage-user
+      in: header
+      required: true
+      description: Set by the edge from the verified token.
+      schema:
+        type: string
+        format: uuid
+    PassageDuties:
+      name: x-passage-duties
+      in: header
+      required: false
+      description: Comma-separated duty ids the edge copies from the verified token's duties claim. Absent means no duties.
+      schema:
+        type: string
+  headers:
+    ApiBuild:
+      description: Build identifier of this gateway (kernel-standard header).
+      schema:
+        type: string
+    RateLimitLimit:
+      description: Requests allowed per window for this tenant and user on this pod.
+      schema: {type: integer}
+    RateLimitRemaining:
+      description: Requests left in the current window.
+      schema: {type: integer}
+    RateLimitReset:
+      description: Whole seconds until the current window resets.
+      schema: {type: integer}
   schemas:
     JsonRpcRequest:
       type: object
@@ -78,9 +226,19 @@ components:
           type: object
           required: [code, message]
           properties:
-            code: {type: integer, enum: [-32600, -32601, -32602, -32003]}
+            code: {type: integer, enum: [-32700, -32600, -32601, -32602, -32003]}
             message: {type: string}
             data: {type: object, additionalProperties: true}
+    Problem:
+      type: object
+      description: RFC 9457 problem details (application/problem+json) with the stable MCP code.
+      required: [type, title, status, code, detail]
+      properties:
+        type: {type: string, format: uri, pattern: "^https://passage.dev/problems/"}
+        title: {type: string}
+        status: {type: integer}
+        code: {type: string, pattern: "^MCP-[0-9]{4}$"}
+        detail: {type: string}
     Tool:
       type: object
       description: MCP tool as listed by tools/list. tenant_id is removed from inputSchema; it comes from the token.

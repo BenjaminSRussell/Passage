@@ -58,7 +58,9 @@ export async function handleRpc(deps: GatewayDeps, p: Principal, req: RpcRequest
       if (typeof name !== "string") return error(id, RPC.invalidParams, "params.name is required");
       const result = await callTool(deps, p, name, req.params?.arguments);
       if (result.kind === "ok") {
-        return ok(id, { content: [{ type: "text", text: JSON.stringify(result.body) ?? "null" }], isError: false });
+        // The continuation token travels in the MCP reserved _meta object (FR-47.1 read pagination).
+        const meta = result.nextCursor === undefined ? {} : { _meta: { nextCursor: result.nextCursor } };
+        return ok(id, { content: [{ type: "text", text: JSON.stringify(result.body) ?? "null" }], isError: false, ...meta });
       }
       if (result.status === 403) {
         return error(id, RPC.forbidden, result.message, { status: result.status, code: result.code });

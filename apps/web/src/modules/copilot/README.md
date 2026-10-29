@@ -17,6 +17,7 @@ may call, with each tool's duty, approval mode and arguments.
 | `ToolDetailPage.tsx` | One tool: governance facts (duty, approval, read/write, retry safety) and its arguments table; loading, not-available and error states |
 | `domain.ts` | Pure rules: mode list and labels, the generated-text badge, `canInsertDraft` (only a non-refused draft, only on click), tool-call labels, approval-mode labels |
 | `api/client.ts` | `postChat` to `POST /api/v1/copilot/chat`. The response is validated with zod, and a response not marked `generated: true` is rejected |
+| `api/stream.ts` | `askCopilot`, the panel's client: asks for an event stream or JSON, passes streamed tokens to the panel, and validates the final answer with the same schema as `postChat`. `streamChat` and `parseSseFrames` are the SSE frame reader (`token`, `done`, `error`) |
 | `api/mcp.ts` | `listTools`: JSON-RPC `tools/list` to the MCP gateway at `/api/v1/mcp`, validated with zod |
 | `pages.module.css` | Layout for the module, design tokens only |
 

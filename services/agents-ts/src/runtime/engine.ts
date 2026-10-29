@@ -220,6 +220,8 @@ export async function runAgent(deps: RunDeps, req: RunRequest): Promise<RunResul
   try {
     const prompt = pseudo.redact(req.prompt);
     assertNoPii(prompt);
+    // AC-47.6: once halted, no provider call is made at all, not only no tool call.
+    if (halted()) return finish("KILLED", undefined, "kill switch activated");
     const response = await deps.provider.complete({
       system: req.agent.systemPrompt,
       user: prompt,

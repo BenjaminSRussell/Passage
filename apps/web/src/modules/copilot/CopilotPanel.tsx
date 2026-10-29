@@ -1,12 +1,16 @@
 import { useState, type FormEvent } from "react";
 import { Alert, Badge, Button, Card, EmptyState, FormField, Textarea } from "../../shell/ui";
-import { postChat, type ChatRequest, type ChatResponse } from "./api/client";
+import type { ChatRequest, ChatResponse } from "./api/client";
+import { askCopilot } from "./api/stream";
 import { canInsertDraft, COPILOT_MODES, GENERATED_BADGE, MODE_LABELS, toolCallLabel, type CopilotMode } from "./domain";
 import styles from "./pages.module.css";
 
 export interface CopilotPanelProps {
-  /** Injected for tests; defaults to the BFF chat endpoint. */
-  ask?: (req: ChatRequest) => Promise<ChatResponse>;
+  /**
+   * Injected for tests; defaults to the BFF chat endpoint, which may stream.
+   * `onToken` receives each streamed piece of the answer as it arrives.
+   */
+  ask?: (req: ChatRequest, onToken?: (text: string) => void) => Promise<ChatResponse>;
   /** Record the user is looking at, sent as context for explain and summarize. */
   recordRef?: string;
   /** Called only when the user clicks "Insert draft". Never called automatically. */
@@ -26,12 +30,14 @@ const PROMPT_HINTS: Readonly<Record<CopilotMode, string>> = {
   summarize: "Name the workflow or case to summarize.",
 };
 
-export function CopilotPanel({ ask = postChat, recordRef, onInsertDraft, initialMode = "ask" }: CopilotPanelProps) {
+export function CopilotPanel({ ask = askCopilot, recordRef, onInsertDraft, initialMode = "ask" }: CopilotPanelProps) {
   const [mode, setMode] = useState<CopilotMode>(initialMode);
   const [message, setMessage] = useState("");
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  /** The answer so far while the server streams it (FR-47.3). */
+  const [partial, setPartial] = useState("");
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -39,13 +45,18 @@ export function CopilotPanel({ ask = postChat, recordRef, onInsertDraft, initial
     if (text === "" || pending) return;
     setPending(true);
     setError(null);
+    setResult(null);
+    setPartial("");
     try {
-      const response = await ask({ mode, message: text, ...(recordRef ? { recordRef } : {}) });
+      const response = await ask({ mode, message: text, ...(recordRef ? { recordRef } : {}) }, (token) =>
+        setPartial((so) => so + token),
+      );
       setResult({ mode, response });
     } catch (err) {
       setResult(null);
       setError(err instanceof Error ? err.message : "Copilot is unavailable.");
     } finally {
+      setPartial("");
       setPending(false);
     }
   }
@@ -74,6 +85,14 @@ export function CopilotPanel({ ask = postChat, recordRef, onInsertDraft, initial
         <Alert tone="danger" live="alert">
           {error}
         </Alert>
+        {pending && partial !== "" ? (
+          <article aria-label="Copilot answer in progress" aria-busy="true" className={styles.answer}>
+            <div>
+              <Badge tone="info">{GENERATED_BADGE}</Badge>
+            </div>
+            <p className={styles.answerText}>{partial}</p>
+          </article>
+        ) : null}
         {result ? (
           <Answer result={result} onInsertDraft={onInsertDraft} />
         ) : !pending && !error ? (
