@@ -1,8 +1,12 @@
 package store
 
 import (
+	"fmt"
+	"time"
+
 	"context"
 	"errors"
+	"github.com/BenjaminSRussell/passage/services/payables/internal/domain"
 	"strings"
 	"testing"
 
@@ -216,5 +220,87 @@ func TestCreateFromInvoice_RecordsDueDateSource(t *testing.T) {
 	got, _ := s.List(ctx, Filter{}, 10)
 	if len(got) != 2 || got[0].DueDateSource != DueDateDefaulted || got[1].DueDateSource != DueDateEvent {
 		t.Fatalf("items = %+v", got)
+	}
+}
+
+func TestAgingRows_OpenAmountsAsOfAndIsolation(t *testing.T) {
+	s := setup(t)
+	ctx := ctxFor(1, leA)
+	mk := func(source, vendor, invoiceDate, due string, le string) OpenItem {
+		in := invoice(le, vendor, source, due)
+		in.InvoiceDate = invoiceDate
+		o, _, err := s.CreateFromInvoice(ctxFor(1, le), in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return o
+	}
+	partial := mk(src1, vendor1, "2027-03-01", "2027-03-31", leA)
+	settled := mk(src2, vendor1, "2027-03-01", "2027-03-31", leA)
+	mk("00000000-0000-0000-0000-0000000000f3", vendor2, "2027-03-01", "2027-04-30", leA)
+	mk("00000000-0000-0000-0000-0000000000f4", vendor2, "2027-07-01", "2027-07-31", leA)
+	mk("00000000-0000-0000-0000-0000000000f5", vendor2, "2027-03-01", "2027-03-31", leB)
+	if _, err := s.Settle(ctx, partial.ID, partial.Version, decimal.RequireFromString("250.00"), "set-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Settle(ctx, settled.ID, settled.Version, decimal.RequireFromString("1000.00"), "set-2"); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := s.AgingRows(ctx, leA, "2027-06-30")
+	if err != nil {
+		t.Fatal(err)
+	}
+	total := decimal.Zero
+	for _, r := range rows {
+		total = total.Add(r.OpenAmount)
+	}
+	if want := decimal.RequireFromString("1750.00"); !total.Equal(want) || len(rows) != 2 {
+		t.Fatalf("open total = %s over %d groups, want %s over 2 (partial remainder + untouched; settled and later-dated excluded; other entity excluded)", total, len(rows), want)
+	}
+	for name, c := range map[string]struct {
+		ctx context.Context
+		le  string
+	}{"other tenant": {ctxFor(2, leA), leA}, "scope excludes entity": {ctxFor(1, leB), leA}} {
+		got, err := s.AgingRows(c.ctx, c.le, "2027-06-30")
+		if err != nil || len(got) != 0 {
+			t.Fatalf("%s: rows=%v err=%v, want none", name, got, err)
+		}
+	}
+}
+
+func TestAgingRows_ThousandGeneratedItemsSumToOpenAmounts(t *testing.T) {
+	s := setup(t)
+	ctx := ctxFor(1, leA)
+	want := decimal.Zero
+	for i := range 1000 {
+		in := invoice(leA, []string{vendor1, vendor2}[i%2], fmt.Sprintf("00000000-0000-0000-0000-%012d", 5000+i), "2027-03-31")
+		in.DueDate = time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC).AddDate(0, 0, (i*13)%300).Format("2006-01-02")
+		in.Amount = decimal.New(int64(10000+i*91%500000), -2)
+		o, _, err := s.CreateFromInvoice(ctx, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		open := o.Amount
+		if i%5 == 0 {
+			part := o.Amount.Div(decimal.NewFromInt(4)).Round(2)
+			if o, err = s.Settle(ctx, o.ID, o.Version, part, "set"); err != nil {
+				t.Fatal(err)
+			}
+			open = o.OpenAmount
+		}
+		want = want.Add(open)
+	}
+	rows, err := s.AgingRows(ctx, leA, "2028-01-31")
+	if err != nil {
+		t.Fatal(err)
+	}
+	asOf := time.Date(2028, 1, 31, 0, 0, 0, 0, time.UTC)
+	got := decimal.Zero
+	for _, t := range domain.Age(asOf, rows, true) {
+		got = got.Add(t.Amount)
+	}
+	if !got.Equal(want) {
+		t.Fatalf("bucket total %s, want open total %s", got, want)
 	}
 }

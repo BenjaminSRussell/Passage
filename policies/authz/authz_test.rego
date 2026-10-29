@@ -22,7 +22,7 @@ has_route_permissions(spec) if {
 }
 
 test_all_seeded_duties_allow_their_declared_permissions if {
-	count(data.duties) == 98
+	count(data.duties) == 100
 	every duty, spec in data.duties {
 		has_route_permissions(spec)
 		every permission in spec.permissions {
@@ -377,4 +377,11 @@ test_payment_file_preview_duty_allows_only_its_route if {
 test_payment_status_parse_duty_does_not_open_file_preview if {
 	allowed("payment-status.parse", "POST", "/v1/payables/payments/status:parse")
 	not allowed("payment-status.parse", "POST", "/v1/payables/payment-files:preview")
+}
+
+test_aging_duties_open_only_their_routes if {
+	allowed("aging.read", "GET", "/v1/payables/aging")
+	not allowed("aging.read", "GET", "/v1/payables/aging:reconcile")
+	allowed("aging.reconcile", "GET", "/v1/payables/aging:reconcile")
+	not allowed("aging.reconcile", "GET", "/v1/payables/aging")
 }

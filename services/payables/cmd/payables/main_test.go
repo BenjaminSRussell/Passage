@@ -40,3 +40,12 @@ func TestLoggerEmitsKernelLogFields(t *testing.T) {
 		}
 	}
 }
+
+func TestLedgerBalancesWiring(t *testing.T) {
+	if ledgerBalances(func(string) string { return "" }) != nil {
+		t.Fatal("no LEDGER_URL must leave reconciliation without a ledger")
+	}
+	if ledgerBalances(func(string) string { return "http://ledger" }) == nil {
+		t.Fatal("LEDGER_URL must configure the ledger client")
+	}
+}

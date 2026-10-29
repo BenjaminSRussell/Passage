@@ -15,6 +15,8 @@ import (
 	"github.com/BenjaminSRussell/passage/services/payables"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/api"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/payables/internal/ledger"
+	"github.com/BenjaminSRussell/passage/services/payables/internal/store"
 )
 
 const (
@@ -56,7 +58,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return err
 	}
 	defer validator.Close()
-	a := api.New(pool, validator, time.Now)
+	a := api.New(pool, validator, time.Now).WithAging(store.New(pool), ledgerBalances(getenv), getenv("AP_CONTROL_ACCOUNT"))
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
@@ -68,6 +70,13 @@ func run(ctx context.Context, getenv func(string) string) error {
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "HTTP_ADDR", defaultHTTPAddr), a.Instrument(router)) }()
 	go func() { errs <- httpx.Serve(ctx, addr(getenv, "ADMIN_ADDR", defaultAdminAddr), admin) }()
 	return <-errs
+}
+
+func ledgerBalances(getenv func(string) string) api.LedgerBalances {
+	if url := getenv("LEDGER_URL"); url != "" {
+		return ledger.New(url, nil)
+	}
+	return nil
 }
 
 func addr(getenv func(string) string, key, fallback string) string {

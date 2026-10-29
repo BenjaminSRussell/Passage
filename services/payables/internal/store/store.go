@@ -13,6 +13,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/outbox"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/services/payables/internal/domain"
 )
 
 const (
@@ -211,4 +212,30 @@ func (s *Postgres) Settle(ctx context.Context, id string, version int, amount de
 		return enqueue(ctx, tx, OpenItemSettledType, out, p.TenantID, amount, settlementID)
 	})
 	return out, err
+}
+
+func (s *Postgres) AgingRows(ctx context.Context, legalEntityID, asOf string) ([]domain.AgingRow, error) {
+	rows := []domain.AgingRow{}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		res, err := tx.Query(ctx, `select vendor_id::text, currency, due_date, sum(open_amount)::text from ap_open_item
+			where legal_entity_id = $1::uuid and invoice_date <= $2::date and open_amount > 0
+			group by vendor_id, currency, due_date order by vendor_id, currency, due_date`, legalEntityID, asOf)
+		if err != nil {
+			return err
+		}
+		defer res.Close()
+		for res.Next() {
+			var r domain.AgingRow
+			var open string
+			if err := res.Scan(&r.VendorID, &r.Currency, &r.DueDate, &open); err != nil {
+				return err
+			}
+			if r.OpenAmount, err = decimal.NewFromString(open); err != nil {
+				return err
+			}
+			rows = append(rows, r)
+		}
+		return res.Err()
+	})
+	return rows, err
 }

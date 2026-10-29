@@ -79,6 +79,46 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '413': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /v1/payables/aging:
+    get:
+      operationId: vendorAging
+      x-passage-duty: aging.read
+      description: Vendor aging from the open-item store. Buckets (CURRENT, 1-30, 31-60, 61-90, 91-180, OVER-180) are whole days past due at as_of; amounts are open_amount per currency, optionally per vendor. Open amounts are the current balances; as_of bounds the invoice date and sets the bucket day count, it does not rewind settlements.
+      parameters:
+        - { name: legal_entity, in: query, required: false, description: Legal entity; defaults to the caller's single legal-entity scope., schema: { type: string, format: uuid } }
+        - { name: as_of, in: query, required: false, description: Defaults to today (UTC)., schema: { type: string, format: date } }
+        - { name: group_by, in: query, required: false, schema: { type: string, enum: [vendor, none], default: none } }
+      responses:
+        '200':
+          description: Aging buckets.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgingReport' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/payables/aging:reconcile:
+    get:
+      operationId: reconcileAging
+      x-passage-duty: aging.reconcile
+      description: Compares total open AP per currency with the AP control account (config AP_CONTROL_ACCOUNT, default 2000) in the ledger, as credits minus debits through the ledger period containing as_of. The ledger reports one currency per ledger; other currencies are listed with ledgerAvailable false and are never reconciled. The ledger balance is cumulative to period end, so reconcile at a period end. The ledger call forwards the caller's identity and duties, so the caller needs ledger.balance.read until service identity (#226) replaces forwarding.
+      parameters:
+        - { name: legal_entity, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: as_of, in: query, required: false, schema: { type: string, format: date } }
+        - { name: ledger, in: query, required: true, description: Ledger holding the control account for the legal entity., schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Per-currency differences and the overall reconciled flag.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgingReconciliation' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/Problem' }
+        '502': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
   /healthz:
     get:
       operationId: liveness
@@ -105,6 +145,45 @@ paths:
               schema: { type: string }
 components:
   schemas:
+    AgingReport:
+      type: object
+      required: [asOf, legalEntityId, groupBy, buckets]
+      properties:
+        asOf: { type: string, format: date }
+        legalEntityId: { type: string, format: uuid }
+        groupBy: { type: string, enum: [vendor, none] }
+        buckets:
+          type: array
+          items:
+            type: object
+            required: [currency, bucket, amount]
+            properties:
+              vendorId: { type: string, format: uuid }
+              currency: { type: string }
+              bucket: { type: string, enum: [CURRENT, 1-30, 31-60, 61-90, 91-180, OVER-180] }
+              amount: { type: string }
+    AgingReconciliation:
+      type: object
+      required: [asOf, legalEntityId, ledgerId, controlAccount, ledgerPeriod, currencies, reconciled]
+      properties:
+        asOf: { type: string, format: date }
+        legalEntityId: { type: string, format: uuid }
+        ledgerId: { type: string, format: uuid }
+        controlAccount: { type: string }
+        ledgerPeriod: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
+        reconciled: { type: boolean, description: True only when every currency reconciles. }
+        currencies:
+          type: array
+          items:
+            type: object
+            required: [currency, subledgerTotal, ledgerBalance, difference, reconciled, ledgerAvailable]
+            properties:
+              currency: { type: string }
+              subledgerTotal: { type: string }
+              ledgerBalance: { type: [string, 'null'] }
+              difference: { type: [string, 'null'], description: Subledger minus ledger. }
+              reconciled: { type: boolean }
+              ledgerAvailable: { type: boolean }
     DecimalString:
       type: string
       pattern: '^[0-9]+(\.[0-9]+)?$'
