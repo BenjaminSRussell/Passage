@@ -29,6 +29,8 @@ const (
 	CodeChangeStale      = "PTY-PENDING-STALE"
 	CodeCreditInvalid    = "PTY-CREDIT-INVALID"
 	CodeReasonTooLong    = "PTY-REASON-TOO-LONG"
+	CodeFieldsInvalid    = "PTY-PROTECTED-FIELDS-INVALID"
+	CodeOutOfScope       = "PTY-LEGAL-ENTITY-OUT-OF-SCOPE"
 	changeColumns        = `id::text, customer_id::text, legal_entity_id::text, field, current_value::text, requested_value::text, status, requested_by, decided_by, decision_reason, requested_at, decided_at`
 )
 
@@ -38,6 +40,8 @@ type CreditStore interface {
 	RequestCreditLimit(ctx context.Context, customerID, limit string) (domain.CreditLimitResult, error)
 	GetPendingChange(ctx context.Context, changeID string) (domain.PendingChange, error)
 	DecidePendingChange(ctx context.Context, changeID string, approve bool, reason string) (domain.PendingChange, error)
+	ProtectedFields(ctx context.Context, legalEntityID string) ([]string, error)
+	SetProtectedFields(ctx context.Context, legalEntityID string, fields []string) ([]string, error)
 }
 
 const maxReasonLength = 500
@@ -91,9 +95,10 @@ func (s *Postgres) RequestCreditLimit(ctx context.Context, customerID, limit str
 	var res domain.CreditLimitResult
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var legalEntityID string
-		var increase, changed bool
-		err := tx.QueryRow(ctx, `select legal_entity_id::text, credit_limit::text, $3::text::numeric > coalesce(credit_limit, 0), $3::text::numeric is distinct from credit_limit
-			from customer_role where tenant_id = $1 and id = $2 for update`, caller.TenantID, id, limit).Scan(&legalEntityID, &res.CreditLimit, &increase, &changed)
+		var increase, changed, protected bool
+		err := tx.QueryRow(ctx, `select legal_entity_id::text, credit_limit::text, $3::text::numeric > coalesce(credit_limit, 0), $3::text::numeric is distinct from credit_limit,
+				coalesce((select $4::text = any(c.fields) or (c.unprotected_by = $5 and c.unprotected_at > now() - interval '24 hours') from protected_field_config c where c.tenant_id = customer_role.tenant_id and c.legal_entity_id = customer_role.legal_entity_id), true)
+			from customer_role where tenant_id = $1 and id = $2 for update`, caller.TenantID, id, limit, domain.FieldCreditLimit, caller.UserID).Scan(&legalEntityID, &res.CreditLimit, &increase, &changed, &protected)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return notFound(CodeCustomerNotFound, "customer not found")
 		}
@@ -103,7 +108,7 @@ func (s *Postgres) RequestCreditLimit(ctx context.Context, customerID, limit str
 		if !changed {
 			return nil
 		}
-		if !increase {
+		if !increase || !protected {
 			if err := tx.QueryRow(ctx, `update customer_role set credit_limit = $3::text::numeric, version = version + 1
 				where tenant_id = $1 and id = $2 returning credit_limit::text`, caller.TenantID, id, limit).Scan(&res.CreditLimit); err != nil {
 				return err
@@ -120,6 +125,7 @@ func (s *Postgres) RequestCreditLimit(ctx context.Context, customerID, limit str
 			p := httpx.NewProblem(http.StatusConflict, CodeChangePending, "a credit limit change is already awaiting approval for this customer")
 			var pendingID string
 			err := tx.QueryRow(ctx, `select id::text from pending_change where tenant_id = $1 and customer_id = $2 and field = $3 and status = 'pending'`, caller.TenantID, id, domain.FieldCreditLimit).Scan(&pendingID)
+			// ponytail: ErrNoRows needs the open change decided between the conflicting insert and this select, a race no test can force; the 409 then omits the id
 			if err == nil {
 				p.Errors = map[string]string{"pendingChangeId": pendingID}
 			} else if !errors.Is(err, pgx.ErrNoRows) {

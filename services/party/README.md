@@ -39,13 +39,16 @@ Workflow engine: Temporal, per ADR 0001. Party stays Temporal-free and adds no `
 
 Rules worth knowing: a `NULL` credit limit counts as 0, so any first limit needs approval. Requesters cannot withdraw their own request. Requests and decisions need a non-blank `X-Passage-User` (401 `AUTH-0001` otherwise), and the database refuses a decider equal to the requester. If the stored limit changes after the request (for example a decrease), `:approve` answers 409 `PTY-PENDING-STALE` and the row stays pending; it can then only be rejected, after which a new request may be made. The same decider repeating the same decision gets 200 with the originally stored change and reason; a replay with a different reason is ignored and does not increment decision metrics or write another event. `:approve` and `:reject` accept an optional `reason` (max 500 Unicode characters), stored on `pending_change` and carried on the decided event. `pending_change` is never deleted (grants are SELECT, INSERT, UPDATE). Payables can reuse the same shape: pending row, request event, decision routes.
 
+Protected fields per legal entity (FR-7.10, `party.protected_fields`): `GET /v1/party/legal-entities/{id}/protected-fields` (`party.read`) returns `{"fields":[...]}`; `PUT` (`party.approval_policy.write`, a duty separate from `party.approve` so the approver of a change cannot also switch protection off) replaces the set; `fields` is required and `[]` is an explicit unprotect-all (a missing or null `fields` is 422). Every PUT enqueues `party.protectedfields.updated.v1` with before, after, actor and time in the same transaction. A credit limit request from the user who last changed the config, within 24 hours of unprotecting `credit_limit`, is still held for approval. The legal entity id is not checked against the org service (party has no legal entity table); a legal-entity-scoped caller can only address its own. Only `credit_limit` is protectable today; an unknown field is 422 `PTY-PROTECTED-FIELDS-INVALID`, and a caller scoped to another legal entity gets 403 `PTY-LEGAL-ENTITY-OUT-OF-SCOPE`. A legal entity with no row defaults to `["credit_limit"]`, the behaviour above. When `credit_limit` is not in the set, an increase is applied at once like a decrease (emits `customer.updated.v1`, no pending row). Changes already pending stay decidable. The table `protected_field_config` (`0007`) carries tenant and legal-entity RLS; `0006` tightens `pending_change` so `status = 'pending'` holds exactly when `decided_by IS NULL`.
+
 ## Duties
 
 | Duty | Grants |
 |---|---|
 | `party.approve` | (PRD name: Approve master data changes) `POST /v1/party/pending-changes/{id}:approve`, `:reject`; seeded in `policies/authz/data.json` |
 | `party.write` | `POST /v1/party/tax-registrations:validate`, `POST /v1/party/parties`, `POST /v1/party/customers/{id}/credit-limit`, `PATCH /v1/party/parties/{id}` |
-| `party.read` | `GET /v1/party/parties/{id}`, `GET /v1/party/pending-changes/{id}`; seeded in `policies/authz/data.json` |
+| `party.approval_policy.write` | `PUT /v1/party/legal-entities/{id}/protected-fields`; seeded in `policies/authz/data.json` |
+| `party.read` | `GET /v1/party/parties/{id}`, `GET /v1/party/pending-changes/{id}`, `GET /v1/party/legal-entities/{id}/protected-fields`; seeded in `policies/authz/data.json` |
 | `pii.read` | shows `dob` unmasked on party responses; without it `dob` reads `"••••"` when set |
 
 ## Error codes
