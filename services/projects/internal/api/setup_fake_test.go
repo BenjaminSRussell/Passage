@@ -113,6 +113,9 @@ func (f *fakeStore) CreatePlanVersion(_ context.Context, projectID string, in st
 		pv.CopiedFromVersionID = &from
 		f.nodes[pv.ID] = append([]domain.WBSNode(nil), f.nodes[source.ID]...)
 		f.links[pv.ID] = append([]domain.WBSLink(nil), f.links[source.ID]...)
+		if in.Kind == domain.KindSimulation {
+			f.planBase[pv.ID] = domain.Fingerprints(domain.ContentByCode(f.nodes[source.ID], f.links[source.ID]))
+		}
 	}
 	f.plans[pv.ID] = pv
 	f.planKeys[key] = pv.ID
@@ -164,6 +167,14 @@ func (f *fakeStore) ReplaceWBS(_ context.Context, projectID, planID string, expe
 	if w.Plan.Locked {
 		return store.WBS{}, &domain.Error{Code: domain.CodePlanLocked, Detail: "locked"}
 	}
+	f.setWBS(planID, nodes, deps)
+	w.Plan.Version++
+	f.plans[planID] = w.Plan
+	return f.wbsOf(projectID, planID)
+}
+
+// setWBS stores a WBS replacement under fresh node ids (lock held).
+func (f *fakeStore) setWBS(planID string, nodes []domain.WBSNodeInput, deps []domain.WBSDependencyInput) {
 	idOf := map[string]string{}
 	for _, n := range nodes {
 		idOf[n.WBSCode] = ids.New()
@@ -184,9 +195,6 @@ func (f *fakeStore) ReplaceWBS(_ context.Context, projectID, planID string, expe
 		links = append(links, domain.WBSLink{PredecessorID: idOf[d.PredecessorWBSCode], SuccessorID: idOf[d.SuccessorWBSCode], Type: d.Type, LagDays: d.LagDays})
 	}
 	f.nodes[planID], f.links[planID] = out, links
-	w.Plan.Version++
-	f.plans[planID] = w.Plan
-	return f.wbsOf(projectID, planID)
 }
 
 func (f *fakeStore) SchedulePlan(_ context.Context, projectID, planID string) (store.ScheduleResult, error) {

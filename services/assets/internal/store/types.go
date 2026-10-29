@@ -128,6 +128,10 @@ type Book struct {
 	// AcquisitionCost is the schedule basis a depreciation run spreads its
 	// charges by (the cost at acquisition); adjustments change Cost only.
 	AcquisitionCost decimal.Decimal `json:"-"`
+	// GroupAssetID and GroupCode name the group asset that depreciates this
+	// book (FR-37.16, depreciatedAtGroup); they are set on the asset read.
+	GroupAssetID *string `json:"groupAssetId,omitempty"`
+	GroupCode    *string `json:"groupCode,omitempty"`
 }
 
 // Profile maps the book onto the domain depreciation input.

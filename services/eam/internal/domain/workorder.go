@@ -69,6 +69,9 @@ const (
 	TypeInspection = "INSPECTION"
 	TypeEmergency  = "EMERGENCY"
 	TypeCapital    = "CAPITAL"
+	// TypeRound orders come only from maintenance rounds (FR-44.14): one per
+	// occurrence, with one job per stop.
+	TypeRound = "ROUND"
 )
 
 // DefaultTypePriority is the priority a new work order of typ gets when the

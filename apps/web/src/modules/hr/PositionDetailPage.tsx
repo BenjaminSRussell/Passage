@@ -5,6 +5,7 @@ import { getPosition, type PositionAssignment } from "./api/client";
 import { AssignmentForm } from "./AssignmentForm";
 import { dayOf, lastDay } from "./format";
 import styles from "./pages.module.css";
+import { SkillProfileCard } from "./SkillProfileCard";
 import { useLoad } from "./useLoad";
 
 const assignmentColumns: DataTableColumn<PositionAssignment>[] = [
@@ -137,6 +138,7 @@ export function PositionDetailPage() {
           />
         </div>
       </Card>
+      <SkillProfileCard positionId={position.id} />
     </div>
   );
 }

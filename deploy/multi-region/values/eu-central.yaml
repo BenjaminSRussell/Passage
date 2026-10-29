@@ -1,0 +1,25 @@
+# Region file: eu-central is PASSIVE (CNPG replica cluster and MirrorMaker 2
+# target) in the reference pair. `passage-ops failover --to eu-central` sets
+# role PRIMARY here, role FENCED in eu-west.yaml and swaps
+# mm2.sourceAlias/targetAlias in both files (docs/ops/runbooks/failover.md).
+# Other residencies get their own pair from the same chart (an IN pair stays
+# in-country, PRD 9.50.20).
+region:
+  id: eu-central
+  role: PASSIVE
+  provider: eks
+  namespace: passage-data
+
+postgres:
+  primary:
+    host: passage-pg-rw.eu-west.passage.internal
+
+kafka:
+  localAlias: eu-central
+  localBootstrap: passage-kafka-bootstrap.kafka.svc:9093
+  remoteAlias: eu-west
+  remoteBootstrap: passage-kafka-bootstrap.kafka.passage-eu-west.internal:9093
+
+mm2:
+  sourceAlias: eu-west
+  targetAlias: eu-central

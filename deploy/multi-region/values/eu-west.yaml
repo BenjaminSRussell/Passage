@@ -1,0 +1,26 @@
+# Region file: eu-west is PRIMARY in the reference pair; the passive peer is
+# eu-central. Both are EU regions, so EU-resident tenants (wave 48) can run on
+# this pair: failover never crosses a residency boundary (PRD 9.50.20).
+# MirrorMaker 2 does not run here while eu-central is its target.
+# postgres.primary is read only in a PASSIVE region: it already names the peer,
+# so this file is ready to re-seed as PASSIVE after a failover
+# (docs/ops/runbooks/failback.md).
+region:
+  id: eu-west
+  role: PRIMARY
+  provider: eks
+  namespace: passage-data
+
+postgres:
+  primary:
+    host: passage-pg-rw.eu-central.passage.internal
+
+kafka:
+  localAlias: eu-west
+  localBootstrap: passage-kafka-bootstrap.kafka.svc:9093
+  remoteAlias: eu-central
+  remoteBootstrap: passage-kafka-bootstrap.kafka.passage-eu-central.internal:9093
+
+mm2:
+  sourceAlias: eu-west
+  targetAlias: eu-central

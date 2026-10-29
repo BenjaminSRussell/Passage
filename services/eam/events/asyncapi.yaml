@@ -2,7 +2,7 @@ asyncapi: 3.0.0
 info:
   title: Passage EAM events
   version: 0.1.0
-  description: CloudEvents published through the transactional outbox (Debezium relay). Permit and budget events arrive in later slices.
+  description: CloudEvents published through the transactional outbox (Debezium relay). Budget events arrive in later slices.
 defaultContentType: application/cloudevents+json
 channels:
   requestCreated:
@@ -45,7 +45,15 @@ channels:
     messages:
       warrantyClaimable:
         $ref: "#/components/messages/WarrantyClaimable"
+  permitStatusChanged:
+    address: passage.eam.permitstatus
+    messages:
+      permitStatusChanged:
+        $ref: "#/components/messages/PermitStatusChanged"
 operations:
+  publishPermitStatusChanged:
+    action: send
+    channel: { $ref: "#/channels/permitStatusChanged" }
   publishRequestCreated:
     action: send
     channel: { $ref: "#/channels/requestCreated" }
@@ -84,6 +92,10 @@ components:
       name: dev.passage.eam.warranty.claimable.v1
       payload:
         $ref: "#/components/schemas/WarrantyClaimable"
+    PermitStatusChanged:
+      name: dev.passage.eam.permitstatus.changed.v1
+      payload:
+        $ref: "#/components/schemas/PermitStatusChanged"
     RequestCreated:
       name: dev.passage.eam.request.created.v1
       payload:
@@ -119,8 +131,8 @@ components:
       required: [workOrderId, assetId, type]
       properties:
         workOrderId: { type: string, format: uuid }
-        assetId: { type: string, format: uuid }
-        type: { type: string }
+        assetId: { type: string, format: uuid, description: for a ROUND order the first stop's asset }
+        type: { type: string, enum: [PREVENTIVE, CORRECTIVE, INSPECTION, EMERGENCY, CAPITAL, ROUND] }
         planLineId: { type: string, format: uuid }
     WorkOrderCompleted:
       type: object
@@ -187,3 +199,14 @@ components:
         currency: { type: string }
         coveredParts: { type: string, description: decimal string }
         coveredLabor: { type: string, description: decimal string }
+    PermitStatusChanged:
+      type: object
+      required: [permitId, workOrderId, from, to, at, actor]
+      description: Emitted on every permit transition, including the initial REQUESTED state (from is empty then). No personal data beyond the acting user id.
+      properties:
+        permitId: { type: string, format: uuid }
+        workOrderId: { type: string, format: uuid }
+        from: { type: string, enum: ["", REQUESTED, APPROVED, ISSUED, SUSPENDED, CLOSED, CANCELED] }
+        to: { type: string, enum: [REQUESTED, APPROVED, ISSUED, SUSPENDED, CLOSED, CANCELED] }
+        at: { type: string, format: date-time }
+        actor: { type: string }

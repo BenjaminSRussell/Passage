@@ -44,3 +44,22 @@ export const DATE = /^\d{4}-\d{2}-\d{2}$/;
 export function shortId(id: string): string {
   return id.length > 8 ? `${id.slice(0, 8)}…` : id;
 }
+
+/** "2026-10-28T08:00:00Z" -> "2026-10-28 08:00 UTC"; empty for a missing value. */
+export function dateTime(iso: string | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return `${d.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+}
+
+/** "COMPLETENESS" -> "Completeness". */
+export function enumLabel(value: string): string {
+  const spaced = value.toLowerCase().replace(/_/g, " ");
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+/** Thousands separators for row counts; counts are integers, never money. */
+export function count(n: number): string {
+  return n.toLocaleString("en-US");
+}

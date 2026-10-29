@@ -1,9 +1,10 @@
 // Package api exposes the expense service over HTTP: persisted expense reports
-// and lines (create, add line with commit-time policy, submit, list, get) and
-// the stateless previews of the expense rules (report policy evaluation,
+// and lines (create, add line with commit-time policy, submit, list, get), cash
+// advances, travel requisitions and card feed imports (slice 5), and the
+// stateless previews of the expense rules (report policy evaluation,
 // advance settlement, travel variance, per diem, advance aging, requisition
 // window and closure, card feed parsing, lodging cap, mileage and batch card
-// matching). Receipts, stored card import and AP posting arrive in later slices.
+// matching). Receipts and AP posting arrive in later slices.
 package api
 
 import (
@@ -41,22 +42,26 @@ type Pinger interface {
 
 // API holds handlers and counters.
 type API struct {
-	db                Pinger
-	reports           reportStore
-	now               func() time.Time
-	evaluations       atomic.Int64
-	settlements       atomic.Int64
-	variances         atomic.Int64
-	perDiems          atomic.Int64
-	agings            atomic.Int64
-	requisitionChecks atomic.Int64
-	feeds             atomic.Int64
-	lodgings          atomic.Int64
-	mileages          atomic.Int64
-	cardMatches       atomic.Int64
-	reportsCreated    atomic.Int64
-	linesAdded        atomic.Int64
-	reportsSubmitted  atomic.Int64
+	db                  Pinger
+	reports             reportStore
+	travel              travelStore
+	now                 func() time.Time
+	evaluations         atomic.Int64
+	settlements         atomic.Int64
+	variances           atomic.Int64
+	perDiems            atomic.Int64
+	agings              atomic.Int64
+	requisitionChecks   atomic.Int64
+	feeds               atomic.Int64
+	lodgings            atomic.Int64
+	mileages            atomic.Int64
+	cardMatches         atomic.Int64
+	reportsCreated      atomic.Int64
+	linesAdded          atomic.Int64
+	reportsSubmitted    atomic.Int64
+	advancesRequested   atomic.Int64
+	requisitionsCreated atomic.Int64
+	cardImports         atomic.Int64
 }
 
 // New returns the API. db may be nil in tests.
@@ -78,6 +83,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(duty).Post("/v1/expense/card-matches", a.cardMatch)
 	r.With(authz.RequireDuty(dutyCardImport)).Post("/v1/expense/card-transactions:parse", a.cardFeedParse)
 	a.registerReports(r, duty)
+	a.registerTravel(r, duty)
 }
 
 // Metrics serves Prometheus text on the admin port.
@@ -96,6 +102,9 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP expense_reports_created_total Expense reports created.\n# TYPE expense_reports_created_total counter\nexpense_reports_created_total %d\n", a.reportsCreated.Load())
 		fmt.Fprintf(w, "# HELP expense_lines_added_total Expense lines committed.\n# TYPE expense_lines_added_total counter\nexpense_lines_added_total %d\n", a.linesAdded.Load())
 		fmt.Fprintf(w, "# HELP expense_reports_submitted_total Expense reports submitted.\n# TYPE expense_reports_submitted_total counter\nexpense_reports_submitted_total %d\n", a.reportsSubmitted.Load())
+		fmt.Fprintf(w, "# HELP expense_cash_advances_requested_total Cash advances requested.\n# TYPE expense_cash_advances_requested_total counter\nexpense_cash_advances_requested_total %d\n", a.advancesRequested.Load())
+		fmt.Fprintf(w, "# HELP expense_travel_requisitions_created_total Travel requisitions created.\n# TYPE expense_travel_requisitions_created_total counter\nexpense_travel_requisitions_created_total %d\n", a.requisitionsCreated.Load())
+		fmt.Fprintf(w, "# HELP expense_card_imports_total Card feed files imported.\n# TYPE expense_card_imports_total counter\nexpense_card_imports_total %d\n", a.cardImports.Load())
 	})
 }
 

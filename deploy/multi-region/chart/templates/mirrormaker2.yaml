@@ -1,0 +1,157 @@
+{{- if .Values.mm2.enabled }}
+# SCRAM user MirrorMaker 2 authenticates as. Rendered in every region: the MM2
+# in the target region reads the source cluster with the source region's user
+# and writes its own cluster with the local one. The Strimzi User Operator
+# writes the password to the Secret {{ .Values.mm2.user }}; the peer region
+# receives a copy as kafka.remoteMm2Secret.
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata:
+  name: {{ .Values.mm2.user }}
+  namespace: {{ .Values.kafka.namespace }}
+  labels:
+    strimzi.io/cluster: {{ .Values.kafka.clusterName }}
+    {{- include "passage-mr.labels" . | nindent 4 }}
+spec:
+  authentication:
+    type: scram-sha-512
+  authorization:
+    type: simple
+    acls:
+      - resource: {type: topic, name: "*", patternType: literal}
+        operations: [Read, Write, Create, Describe, DescribeConfigs, AlterConfigs]
+      - resource: {type: group, name: "*", patternType: literal}
+        operations: [Read, Describe]
+      - resource: {type: cluster}
+        operations: [Describe, DescribeConfigs]
+{{- end }}
+{{- if include "passage-mr.mm2Here" . }}
+---
+# MirrorMaker 2 for every Passage topic (passage.<ctx>.<entity>; the pattern
+# skips passage.internal.*). It runs in the target region, in the namespace of
+# the Strimzi cluster so the local cluster CA secret is readable. Offset
+# translation and group offset sync are on, so consumers reconnect in the
+# target region at translated offsets (FR-50.4). IdentityReplicationPolicy keeps
+# topic names, so services need no topic remapping after failover; only one
+# direction runs at a time, so there is no replication loop.
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaMirrorMaker2
+metadata:
+  name: passage-mm2
+  namespace: {{ .Values.kafka.namespace }}
+  labels:
+    {{- include "passage-mr.labels" . | nindent 4 }}
+spec:
+  version: {{ .Values.mm2.version }}
+  replicas: {{ .Values.mm2.replicas }}
+  connectCluster: {{ .Values.mm2.targetAlias | quote }}
+  clusters:
+    - alias: {{ .Values.kafka.localAlias | quote }}
+      bootstrapServers: {{ .Values.kafka.localBootstrap }}
+      tls:
+        trustedCertificates:
+          - secretName: {{ .Values.kafka.localTrustSecret }}
+            certificate: ca.crt
+      authentication:
+        type: scram-sha-512
+        username: {{ .Values.mm2.user }}
+        passwordSecret:
+          secretName: {{ .Values.mm2.user }}
+          password: password
+    - alias: {{ .Values.kafka.remoteAlias | quote }}
+      bootstrapServers: {{ .Values.kafka.remoteBootstrap }}
+      tls:
+        trustedCertificates:
+          - secretName: {{ .Values.kafka.remoteTrustSecret }}
+            certificate: ca.crt
+      authentication:
+        type: scram-sha-512
+        username: {{ .Values.mm2.user }}
+        passwordSecret:
+          secretName: {{ .Values.kafka.remoteMm2Secret }}
+          password: password
+  mirrors:
+    - sourceCluster: {{ .Values.mm2.sourceAlias | quote }}
+      targetCluster: {{ .Values.mm2.targetAlias | quote }}
+      sourceConnector:
+        config:
+          replication.factor: {{ .Values.mm2.replicationFactor }}
+          offset-syncs.topic.replication.factor: {{ .Values.mm2.replicationFactor }}
+          sync.topic.acls.enabled: "false"
+          refresh.topics.interval.seconds: "30"
+          replication.policy.class: org.apache.kafka.connect.mirror.IdentityReplicationPolicy
+      heartbeatConnector:
+        config:
+          heartbeats.topic.replication.factor: {{ .Values.mm2.replicationFactor }}
+          replication.policy.class: org.apache.kafka.connect.mirror.IdentityReplicationPolicy
+      checkpointConnector:
+        config:
+          checkpoints.topic.replication.factor: {{ .Values.mm2.replicationFactor }}
+          sync.group.offsets.enabled: "true"
+          sync.group.offsets.interval.seconds: "30"
+          emit.checkpoints.interval.seconds: "30"
+          replication.policy.class: org.apache.kafka.connect.mirror.IdentityReplicationPolicy
+      topicsPattern: {{ .Values.mm2.topicsPattern | quote }}
+      groupsPattern: {{ .Values.mm2.groupsPattern | quote }}
+  metricsConfig:
+    type: jmxPrometheusExporter
+    valueFrom:
+      configMapKeyRef:
+        name: passage-mm2-metrics
+        key: metrics-config.yml
+---
+# JMX exporter rules for MM2. kafka_mm2_records_lag is the per-partition lag of
+# the source connector's consumer (messages behind the source log end), which
+# the lag alert sums. Strimzi exposes the exporter on port tcp-prometheus.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: passage-mm2-metrics
+  namespace: {{ .Values.kafka.namespace }}
+  labels:
+    {{- include "passage-mr.labels" . | nindent 4 }}
+data:
+  metrics-config.yml: |
+    lowercaseOutputName: true
+    lowercaseOutputLabelNames: true
+    rules:
+      - pattern: "kafka.consumer<type=consumer-fetch-manager-metrics, client-id=(.+), topic=(.+), partition=(.+)><>records-lag"
+        name: kafka_mm2_records_lag
+        type: GAUGE
+        labels:
+          clientId: "$1"
+          topic: "$2"
+          partition: "$3"
+      - pattern: "kafka.connect.mirror<type=MirrorSourceConnector, target=(.+), topic=(.+), partition=([0-9]+)><>replication-latency-ms"
+        name: kafka_mm2_replication_latency_ms
+        type: GAUGE
+        labels:
+          target: "$1"
+          topic: "$2"
+          partition: "$3"
+      - pattern: "kafka.connect.mirror<type=MirrorCheckpointConnector, source=(.+), target=(.+), group=(.+), topic=(.+), partition=([0-9]+)><>checkpoint-latency-ms"
+        name: kafka_mm2_checkpoint_latency_ms
+        type: GAUGE
+        labels:
+          source: "$1"
+          target: "$2"
+          group: "$3"
+          topic: "$4"
+          partition: "$5"
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: passage-mm2
+  namespace: {{ .Values.kafka.namespace }}
+  labels:
+    {{- include "passage-mr.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      strimzi.io/kind: KafkaMirrorMaker2
+      strimzi.io/cluster: passage-mm2
+  podMetricsEndpoints:
+    - path: /metrics
+      port: tcp-prometheus
+{{- end }}

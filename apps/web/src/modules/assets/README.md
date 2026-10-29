@@ -4,13 +4,13 @@ Module folder: `apps/web/src/modules/assets/`. Discovered by the shell through
 `module.ts` (`id: "assets"`). Pages use the shell primitives from
 `src/shell/ui` and `pages.module.css` tokens only (docs/design-system.md).
 
-## Screens (slices 1 to 4)
+## Screens (slices 1 to 5)
 
 | Route | Page | Duty (nav) | What it does |
 |---|---|---|---|
 | `/assets` | `AssetsPage` | AssetView | Asset register with a status filter and "Load more" over the service cursor |
 | `/assets/new` | `NewAssetPage` | AssetMaintain | Create an asset (number, name, class, barcode, quantity) |
-| `/assets/:id` | `AssetDetailPage` | AssetView | Master data, books with cost / accumulated / NBV and the last depreciated period, the projected schedule of the selected book, the transaction log, additions and insurance policies (with the under-insured flag) |
+| `/assets/:id` | `AssetDetailPage` | AssetView | Master data, books with cost / accumulated / NBV, the last depreciated period and the group asset that depreciates the book, the projected schedule of the selected book, the transaction log, additions, insurance policies (with the under-insured flag) and the transfers and splits the asset took part in |
 | `/assets/:id/adjust` | `AdjustPage` | AssetPostJournal | Acquisition or depreciation adjustment, revaluation or impairment on one open book; shows the AST-0512 warning when a reversal is capped |
 | `/assets/:id/additions/new` | `NewAdditionPage` | AssetMaintain | Record an improvement, component or accessory; a financial one posts its cost on the chosen open books |
 | `/assets/:id/insurance/new` | `NewPolicyPage` | AssetInsuranceMaintain | Record a policy with an optional index series; shows the indexed value and the AST-0531 / AST-0532 warnings |
@@ -32,6 +32,10 @@ Module folder: `apps/web/src/modules/assets/`. Discovered by the shell through
 | `/assets/count-sessions/new` | `NewCountSessionPage` | AssetCount | Record a count: legal entity, location, date and the scanned barcodes (one per line) |
 | `/assets/count-sessions/:id` | `CountSessionDetailPage` | AssetView | Result tiles, the AST-0525 warnings and the lines (missing, unknown, found) linking to the asset |
 | `/assets/insurance-report` | `InsuranceReportPage` | AssetView | Policies in force on a date for a legal entity, filterable by type and expiry window: sum insured, indexed replacement value, NBV per book, under-insured and expiring-soon flags |
+| `/assets/:id/transfer` | `TransferPage` | AssetMaintain | Transfer the whole asset to one new asset (optionally in another legal entity) or split it into 2 to 50 new assets by share; the shares are totalled without floats and must be 100.00%; sent with the asset ETag as If-Match; shows the new assets with their book values and links (slice 5) |
+| `/assets/group-assets` | `GroupAssetsPage` | AssetConfigure | Group assets with class, tax book, tax year, member count and basis, and "Load more" (slice 5) |
+| `/assets/group-assets/new` | `NewGroupAssetPage` | AssetConfigure | Create a group asset: profile, tax book and year, and the members picked from the open assets of the legal entity and class; shows the AST-0535 membership conflict (slice 5) |
+| `/assets/group-assets/:id` | `GroupAssetDetailPage` | AssetView | Basis, members (linking to each asset) and the projected yearly group depreciation (AC-37.10); explains that members take no own charge in a run (slice 5) |
 
 Every page has loading (skeleton or `DataTable loading`), empty (`EmptyState`
 through `DataTable empty`) and error (`Alert` with "Try again") states. Forms
@@ -44,15 +48,15 @@ replays instead of duplicating.
 `api/client.ts` calls the `/api/v1/assets...` (including
 `/assets/depreciation-runs`, `/assets/index-series`,
 `/assets/capex-requests` with its decision routes, `/assets/count-sessions`,
-`/assets/insurance-report` and `/assets/mid-quarter-test`) and `/api/v1/leases...` paths of
+`/assets/insurance-report`, `/assets/mid-quarter-test`, `/assets/{id}/transfer`,
+`/assets/{id}/transfers` and `/assets/group-assets`) and `/api/v1/leases...` paths of
 `services/assets/api/openapi.yaml`. Amounts stay decimal strings; the page
 never parses money to floats.
 
 ## Not in this slice
 
-Transfer / split, lease termination, the PWA barcode scanner (the count page
-takes pasted or keyed scans), transfer / scrap proposals from a count, group
-assets, routing capex approvals to the approver of each level (wave-4
+Transfer between locations or dimensions, the group's own run line, lease termination, the PWA barcode scanner (the count page
+takes pasted or keyed scans), transfer / scrap proposals from a count, routing capex approvals to the approver of each level (wave-4
 workflow), run reversal and the workspace tiles
 are later slices of PSG-37 or handoffs (see `services/assets/NOT-IMPLEMENTED.md`).
 

@@ -1,0 +1,135 @@
+{
+  "fixture": "fx-smoke-12",
+  "version": 2,
+  "source": "PRD 9.50.9 fx-smoke-12: the 12 core processes run after cutover and after failover (FR-50.6 step 6, AC-50.4)",
+  "notes": "Each process is an ordered list of API steps and a final assertion. Paths go through the gateway (/api/v1/<prefix> is rewritten to the service's /v1/<prefix>, deploy/gateway) and are checked against services/*/api/openapi.yaml by load/tools/test_smoke12.py. {id} is the id returned by an earlier step of the same process. A step marked 'unverified' has no route on main; its reason names the gap, and a runner must count it as failed until the owning wave publishes the route. A process passes only when every step succeeds and the final assertion holds. Request bodies come from the fx-load-10k pool (not built yet). The runner is load/tools/smoke12.py.",
+  "processes": [
+    {
+      "id": "P01",
+      "name": "Purchase to pay",
+      "steps": [
+        {"action": "create_purchase_order", "method": "POST", "path": "/api/v1/procurement/purchase-orders"},
+        {"action": "submit_purchase_order", "method": "POST", "path": "/api/v1/procurement/purchase-orders/{id}:submit"},
+        {"action": "approve_purchase_order", "method": "POST", "path": "/api/v1/procurement/purchase-orders/{id}:approve"},
+        {"action": "create_goods_receipt", "method": "POST", "path": "/api/v1/receiving/receipts"},
+        {"action": "post_goods_receipt", "method": "POST", "path": "/api/v1/receiving/receipts/{id}:post"},
+        {"action": "post_vendor_invoice", "method": "POST", "path": "/api/v1/receiving/invoices:post"},
+        {"action": "run_payment", "method": "POST", "path": "/api/v1/payables/payment-runs",
+         "unverified": "payables serves only settlements:preview and payment-files:preview; no payment run route on main"}
+      ],
+      "assert": "vendor invoice is paid, GR/IR is cleared for the receipt and the AP subledger equals the journal control account"
+    },
+    {
+      "id": "P02",
+      "name": "Order to cash",
+      "steps": [
+        {"action": "create_sales_order", "method": "POST", "path": "/api/v1/sales/orders"},
+        {"action": "confirm_sales_order", "method": "POST", "path": "/api/v1/sales/orders/{id}:confirm"},
+        {"action": "release_to_warehouse", "method": "POST", "path": "/api/v1/fulfillment/releases:run"},
+        {"action": "confirm_pick", "method": "POST", "path": "/api/v1/fulfillment/shipments/{id}:confirm-pick"},
+        {"action": "post_packing_slip", "method": "POST", "path": "/api/v1/fulfillment/shipments/{id}:post-packing-slip"},
+        {"action": "build_invoice_proposal", "method": "POST", "path": "/api/v1/billing/proposals"},
+        {"action": "post_customer_invoice", "method": "POST", "path": "/api/v1/billing/invoices/{id}:post"},
+        {"action": "record_payment", "method": "POST", "path": "/api/v1/receivables/payments"},
+        {"action": "apply_payment", "method": "POST", "path": "/api/v1/receivables/payments/{id}:apply"}
+      ],
+      "assert": "customer invoice is settled and the AR subledger equals the journal control account"
+    },
+    {
+      "id": "P03",
+      "name": "Production order to RAF",
+      "steps": [
+        {"action": "create_production_order", "method": "POST", "path": "/api/v1/production/orders"},
+        {"action": "release_production_order", "method": "POST", "path": "/api/v1/production/orders/{id}:release"},
+        {"action": "start_production_order", "method": "POST", "path": "/api/v1/production/orders/{id}:start"},
+        {"action": "report_as_finished", "method": "POST", "path": "/api/v1/production/orders/{id}:report-finished"},
+        {"action": "end_production_order", "method": "POST", "path": "/api/v1/production/orders/{id}:end"}
+      ],
+      "assert": "order is ended, the WIP balance is zero and finished goods were received at planned cost (BR-21.1)"
+    },
+    {
+      "id": "P04",
+      "name": "Journal post",
+      "steps": [
+        {"action": "post_journal_entry", "method": "POST", "path": "/api/v1/ledger/journal-entries"},
+        {"action": "read_journal_entry", "method": "GET", "path": "/api/v1/ledger/journal-entries/{id}"}
+      ],
+      "assert": "entry is posted, balanced in every currency, and the tenant's hash chain head is this entry (BR-50.3)"
+    },
+    {
+      "id": "P05",
+      "name": "Bank reconciliation",
+      "steps": [
+        {"action": "import_statement", "method": "POST", "path": "/api/v1/treasury/statements/import"},
+        {"action": "read_statement_lines", "method": "GET", "path": "/api/v1/treasury/statements/{id}/lines"},
+        {"action": "match_statement", "method": "POST", "path": "/api/v1/treasury/statements/{id}:match",
+         "unverified": "treasury has no statement matching route on main (import and read only)"}
+      ],
+      "assert": "every statement line is matched or listed as an exception"
+    },
+    {
+      "id": "P06",
+      "name": "Asset depreciation",
+      "steps": [
+        {"action": "create_depreciation_run", "method": "POST", "path": "/api/v1/assets/depreciation-runs"},
+        {"action": "post_depreciation_run", "method": "POST", "path": "/api/v1/assets/depreciation-runs/{id}/post"}
+      ],
+      "assert": "depreciation journal balances and net book value reconciles to the asset register"
+    },
+    {
+      "id": "P07",
+      "name": "Project invoice",
+      "steps": [
+        {"action": "record_project_transaction", "method": "POST", "path": "/api/v1/projects/transactions"},
+        {"action": "build_invoice_proposal", "method": "POST", "path": "/api/v1/projects/invoice-proposals"},
+        {"action": "approve_invoice_proposal", "method": "POST", "path": "/api/v1/projects/invoice-proposals/{id}/approve"}
+      ],
+      "assert": "project invoice total equals the billable transactions of the period"
+    },
+    {
+      "id": "P08",
+      "name": "Payroll run",
+      "steps": [
+        {"action": "calculate_pay_statement", "method": "POST", "path": "/api/v1/payroll/calculations"},
+        {"action": "post_payroll_run", "method": "POST", "path": "/api/v1/payroll/runs/{id}:post",
+         "unverified": "payroll serves gross-to-net per worker only; no payroll run or posting route on main"}
+      ],
+      "assert": "payroll journal balances and net pay equals the sum of the pay statements"
+    },
+    {
+      "id": "P09",
+      "name": "Statutory report",
+      "steps": [
+        {"action": "create_report_run", "method": "POST", "path": "/api/v1/reporting/runs"},
+        {"action": "read_report_cells", "method": "GET", "path": "/api/v1/reporting/runs/{id}/cells"}
+      ],
+      "assert": "the statutory definition's run for the period ties to the trial balance"
+    },
+    {
+      "id": "P10",
+      "name": "Dashboard",
+      "steps": [
+        {"action": "load_dashboard", "method": "GET", "path": "/api/v1/analytics/dashboards/executive"}
+      ],
+      "assert": "dashboard responds within the dashboard SLO (p95 < 2 s) and its revenue equals the GL"
+    },
+    {
+      "id": "P11",
+      "name": "Copilot query",
+      "steps": [
+        {"action": "ask_copilot", "method": "POST", "path": "/api/v1/agents/copilot/queries",
+         "unverified": "services/agents-ts/api/openapi.yaml declares no paths; the copilot has no HTTP route on main"}
+      ],
+      "assert": "answer cites data and no write is performed (suggest mode)"
+    },
+    {
+      "id": "P12",
+      "name": "Mobile pick",
+      "steps": [
+        {"action": "create_pick_work", "method": "POST", "path": "/api/v1/warehouse/work"},
+        {"action": "confirm_pick_line", "method": "POST", "path": "/api/v1/warehouse/work/{id}/lines/{n}:confirm"}
+      ],
+      "assert": "pick is confirmed and on-hand at the pick location decreases by the picked quantity"
+    }
+  ]
+}

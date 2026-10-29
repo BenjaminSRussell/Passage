@@ -1,0 +1,29 @@
+# Chaos experiment: kill one Strimzi Kafka broker (PRD 9.50.9 chaos row, FR-50.3).
+# deploy/kafka runs Kafka `passage` with 3 dual-role (controller + broker) nodes, replication factor 3 and
+# min.insync.replicas=2, so losing one node keeps every partition writable with acks=all and keeps the KRaft
+# quorum (2 of 3). Producers retry, leaders move and the outbox relay resumes. Recovery budget 5 min.
+# Run it in the PRIMARY region. The 6-broker sizing of FR-50.3 is a wave 3 handoff (docs/ops/NOT-IMPLEMENTED.md).
+# Selectors must match deploy/kafka/kafka.yaml; deploy/multi-region/chaos/test_chaos.py checks that.
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: kafka-broker-kill
+  namespace: kafka
+  labels:
+    app.kubernetes.io/part-of: passage
+    passage.dev/experiment: kafka-broker-kill
+  annotations:
+    passage.dev/acceptance: "no failed postings; under-replicated partitions cleared < 5 min"
+    passage.dev/recovery-budget: "5m"
+    passage.dev/runbook: "https://docs.passage.dev/ops/runbooks/kafka-broker-replacement"
+spec:
+  action: pod-kill
+  mode: one
+  gracePeriod: 0
+  selector:
+    namespaces:
+      - kafka
+    labelSelectors:
+      strimzi.io/cluster: passage
+      strimzi.io/kind: Kafka
+      strimzi.io/broker-role: "true"

@@ -20,17 +20,18 @@ type Asset struct {
 	Criticality          int       `json:"criticality"`
 	LifecycleState       string    `json:"lifecycleState"`
 	ProductionResourceID *string   `json:"productionResourceId,omitempty"`
+	FunctionalLocationID *string   `json:"functionalLocationId,omitempty"`
 	Version              int       `json:"version"`
 	CreatedAt            time.Time `json:"createdAt"`
 }
 
 const assetColumns = `id::text, asset_number, name, asset_type, site_id::text, criticality, lifecycle_state,
-  production_resource_id::text, version, created_at`
+  production_resource_id::text, functional_location_id::text, version, created_at`
 
 func scanAsset(row pgx.Row) (Asset, error) {
 	var a Asset
 	err := row.Scan(&a.ID, &a.AssetNumber, &a.Name, &a.AssetType, &a.SiteID, &a.Criticality,
-		&a.LifecycleState, &a.ProductionResourceID, &a.Version, &a.CreatedAt)
+		&a.LifecycleState, &a.ProductionResourceID, &a.FunctionalLocationID, &a.Version, &a.CreatedAt)
 	return a, err
 }
 
@@ -236,9 +237,12 @@ type AssetDetail struct {
 	OpenWorkOrders int       `json:"openWorkOrders"`
 	PartsCost      string    `json:"partsCost"`
 	LaborCost      string    `json:"laborCost"`
+	// Location is the functional location the asset is installed at (FR-44.1).
+	Location *FunctionalLocation `json:"location,omitempty"`
 }
 
-// GetAsset returns one asset with its counters, rules and the sum of its work order costs.
+// GetAsset returns one asset with its counters, rules, current functional
+// location and the sum of its work order costs.
 func (s *Postgres) GetAsset(ctx context.Context, id string) (AssetDetail, error) {
 	var out AssetDetail
 	err := s.withTx(ctx, func(tx pgx.Tx, t string) error {
@@ -247,6 +251,13 @@ func (s *Postgres) GetAsset(ctx context.Context, id string) (AssetDetail, error)
 			return err
 		}
 		out = AssetDetail{Asset: a, Counters: []Counter{}, Rules: []Rule{}}
+		if a.FunctionalLocationID != nil {
+			loc, err := getLocation(ctx, tx, t, *a.FunctionalLocationID)
+			if err != nil {
+				return err
+			}
+			out.Location = &loc
+		}
 		rows, err := tx.Query(ctx, `select `+counterColumns+` from counter where tenant_id = $1 and asset_id = $2 order by name`, t, id)
 		if err != nil {
 			return err

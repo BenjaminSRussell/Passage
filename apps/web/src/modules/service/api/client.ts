@@ -1,8 +1,12 @@
 // Client for the fieldservice service (services/fieldservice/api/openapi.yaml).
-// Browser calls use /api/v1/service/..., which the web BFF rewrites to /v1/service/....
+// Browser calls use /api/v1/service/..., which the web BFF rewrites to /v1/service/...;
+// generic case calls use /api/v1/cases, /api/v1/case-categories and /api/v1/case-processes.
 // No npm dependencies: fetch only. Decimals travel as strings, never floats.
 
 export const base = "/api/v1/service";
+
+/** Root of the generic case routes (PRD 8.45.5 `/api/v1/cases`), outside /service. */
+export const caseBase = "/api/v1";
 
 export const CHANNELS = ["PHONE", "EMAIL", "PORTAL", "IOT", "INTERNAL"] as const;
 export type CaseChannel = (typeof CHANNELS)[number];
@@ -49,6 +53,28 @@ export const NEXT_STATUSES: Record<WorkOrderStatus, WorkOrderStatus[]> = {
   POSTED: [],
   CANCELED: [],
 };
+
+/**
+ * The case status machine (FR-45.5), mirrored from internal/domain/case.go.
+ * NEW is only the start; CLOSED and CANCELED are final.
+ */
+export const CASE_NEXT: Record<CaseStatus, CaseStatus[]> = {
+  NEW: ["IN_PROGRESS", "WAITING_CUSTOMER", "WAITING_PARTS", "RESOLVED", "CANCELED"],
+  IN_PROGRESS: ["WAITING_CUSTOMER", "WAITING_PARTS", "RESOLVED", "CANCELED"],
+  WAITING_CUSTOMER: ["IN_PROGRESS", "WAITING_PARTS", "RESOLVED", "CANCELED"],
+  WAITING_PARTS: ["IN_PROGRESS", "WAITING_CUSTOMER", "RESOLVED", "CANCELED"],
+  RESOLVED: ["CLOSED"],
+  CLOSED: [],
+  CANCELED: [],
+};
+
+/** Statuses that keep a case open, so its SLA clocks run or are paused. */
+export const OPEN_CASE_STATUSES: CaseStatus[] = ["NEW", "IN_PROGRESS", "WAITING_CUSTOMER", "WAITING_PARTS"];
+
+/** Work orders that can take a follow-up visit (BR-45.5). */
+export const FOLLOW_UP_STATUSES: WorkOrderStatus[] = ["COMPLETED", "POSTED"];
+
+export type SlaAlert = "RESPONSE_WARNING" | "RESPONSE_BREACH" | "RESOLUTION_WARNING" | "RESOLUTION_BREACH";
 
 export interface SlaTarget {
   priority: number;
@@ -124,11 +150,22 @@ export interface ServiceCase {
   slaProfileId: string;
   entitlementTrace: string[];
   openedAt: string;
+  respondedAt?: string | null;
+  resolvedAt?: string | null;
   slaResponseDue: string;
+  slaResponseWarnAt: string;
   slaResolutionDue: string;
+  slaResolutionWarnAt: string;
+  /** Business minutes of closed pauses of the resolution clock. */
   slaPausedMinutes: number;
+  /** Start of the open pause, while the case waits. */
+  slaPausedAt?: string | null;
   slaState: SlaState;
+  /** SLA events already emitted for the case; each fires once. */
+  slaAlerts: SlaAlert[];
   status: CaseStatus;
+  /** Optimistic-concurrency version, echoed as If-Match on transitions. */
+  version: number;
 }
 
 export interface WorkLine {
@@ -183,7 +220,39 @@ export interface WorkOrder {
   status: WorkOrderStatus;
   lines: Required<WorkLine>[];
   posting?: Posting;
+  /** The finished order this one follows up (BR-45.5). */
+  followUpOf?: string | null;
+  completedAt?: string | null;
+  /** Set at completion; false once a follow-up was opened. */
+  firstTimeFix?: boolean | null;
   version: number;
+}
+
+export interface KpiQuery {
+  /** RFC 3339, inclusive. */
+  from: string;
+  /** RFC 3339, exclusive; at most 366 days after from. */
+  to: string;
+  territory?: string;
+}
+
+/** Service measures over a window (FR-45.11). Rates are decimal strings, null when nothing was measured. */
+export interface Kpis {
+  from: string;
+  to: string;
+  territory?: string;
+  casesOpened: number;
+  responseMet: number;
+  responseMissed: number;
+  responseAttainmentPct: Decimal | null;
+  meanResponseMinutes: Decimal | null;
+  resolutionMet: number;
+  resolutionBreached: number;
+  resolutionAttainmentPct: Decimal | null;
+  meanResolutionMinutes: Decimal | null;
+  workOrdersCompleted: number;
+  firstTimeFix: number;
+  firstTimeFixPct: Decimal | null;
 }
 
 export interface Page<T> {
@@ -233,25 +302,30 @@ async function toError(res: Response): Promise<ServiceApiError> {
   return new ServiceApiError(res.status, code, message, fields);
 }
 
-async function send(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<Response> {
+async function send(path: string, init: RequestInit = {}, signal?: AbortSignal, root: string = base): Promise<Response> {
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
   if (init.body !== undefined) {
     headers.set("Content-Type", "application/json");
   }
-  const res = await fetch(`${base}${path}`, { ...init, headers, credentials: "same-origin", signal });
+  const res = await fetch(`${root}${path}`, { ...init, headers, credentials: "same-origin", signal });
   if (!res.ok) {
     throw await toError(res);
   }
   return res;
 }
 
-async function json<T>(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<T> {
-  return (await (await send(path, init, signal)).json()) as T;
+async function json<T>(path: string, init: RequestInit = {}, signal?: AbortSignal, root: string = base): Promise<T> {
+  return (await (await send(path, init, signal, root)).json()) as T;
 }
 
-async function versioned<T extends { version: number }>(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<Versioned<T>> {
-  const res = await send(path, init, signal);
+async function versioned<T extends { version: number }>(
+  path: string,
+  init: RequestInit = {},
+  signal?: AbortSignal,
+  root: string = base,
+): Promise<Versioned<T>> {
+  const res = await send(path, init, signal, root);
   const value = (await res.json()) as T;
   return { value, etag: res.headers.get("ETag") ?? `"${value.version}"` };
 }
@@ -324,6 +398,24 @@ export function openCase(input: OpenCaseInput, key: string = newKey()): Promise<
   return json<ServiceCase>("/cases", post(input, key));
 }
 
+/**
+ * Moves a case along its status machine at the version the caller read,
+ * pausing, resuming or stopping its SLA clocks (FR-45.5, BR-45.2). The key
+ * makes a retry of the same intent return the first answer.
+ */
+export function transitionCase(caseId: string, version: number, to: CaseStatus, key: string = newKey()): Promise<ServiceCase> {
+  return json<ServiceCase>(`/cases/${id(caseId)}:transition`, {
+    method: "POST",
+    body: JSON.stringify({ to }),
+    headers: { "If-Match": `"${version}"`, "Idempotency-Key": key },
+  });
+}
+
+/** Service KPIs over a window and optional territory (FR-45.11). */
+export function getKpis(q: KpiQuery, signal?: AbortSignal): Promise<Kpis> {
+  return json<Kpis>(`/kpis${query({ from: q.from, to: q.to, territory: q.territory })}`, {}, signal);
+}
+
 // --- Work orders ---
 
 export interface WorkOrderFilter {
@@ -356,4 +448,513 @@ export function transitionWorkOrder(workOrderId: string, etag: string, to: WorkO
 /** Posts a COMPLETED work order to billing and warranty cost (FR-45.10, BR-45.4). */
 export function postWorkOrder(workOrderId: string, etag: string, key: string = newKey()): Promise<Versioned<WorkOrder>> {
   return versioned<WorkOrder>(`/work-orders/${id(workOrderId)}:post`, { method: "POST", headers: { "If-Match": etag, "Idempotency-Key": key } });
+}
+
+/** Opens the follow-up of a COMPLETED or POSTED work order; clears its first-time fix (BR-45.5). */
+export function followUpWorkOrder(workOrderId: string, etag: string, key: string = newKey()): Promise<Versioned<WorkOrder>> {
+  return versioned<WorkOrder>(`/work-orders/${id(workOrderId)}:follow-up`, { method: "POST", headers: { "If-Match": etag, "Idempotency-Key": key } });
+}
+
+// --- Installed base (FR-45.1, FR-45.2) ---
+
+export const WARRANTY_TRIGGERS = ["SHIP", "INSTALL", "REGISTRATION"] as const;
+export type WarrantyTrigger = (typeof WARRANTY_TRIGGERS)[number];
+
+export const OBJECT_STATUSES = ["ACTIVE", "INACTIVE", "RETURNED"] as const;
+export type ObjectStatus = (typeof OBJECT_STATUSES)[number];
+
+export interface WarrantyTerm {
+  startTrigger: WarrantyTrigger;
+  /** 0 to 240; 0 means no warranty. */
+  months: number;
+  partsCovered: boolean;
+  laborCovered: boolean;
+  travelCovered: boolean;
+}
+
+export interface ServiceObjectInput {
+  itemId: string;
+  serial: string;
+  customerPartyId: string;
+  legalEntityId: string;
+  siteAddressId?: string | null;
+  parentId?: string | null;
+  shippedOn?: string | null;
+  installedOn?: string | null;
+  warranty: WarrantyTerm;
+}
+
+export interface ServiceObject extends Omit<ServiceObjectInput, "siteAddressId" | "parentId" | "shippedOn" | "installedOn"> {
+  id: string;
+  siteAddressId?: string;
+  parentId?: string;
+  shipmentId?: string;
+  shippedOn?: string;
+  installedOn?: string;
+  status: ObjectStatus;
+  /** Absent until the trigger date is known (an INSTALL warranty before installation). */
+  warrantyStartsOn?: string;
+  /** The first day the warranty no longer covers. */
+  warrantyEndsOn?: string;
+  createdAt: string;
+  version: number;
+}
+
+export interface ShipmentInput {
+  shipmentId: string;
+  shipDate: string;
+  customerPartyId: string;
+  legalEntityId: string;
+  siteAddressId?: string | null;
+  lines: { itemId: string; serials: string[]; warranty: WarrantyTerm }[];
+}
+
+export interface ShipmentReceipt {
+  created: number;
+  existing: number;
+}
+
+export interface ObjectFilter {
+  customerPartyId?: string;
+  serial?: string;
+  parentId?: string;
+  status?: ObjectStatus | "";
+  cursor?: string;
+}
+
+export function listServiceObjects(f: ObjectFilter = {}, signal?: AbortSignal): Promise<Page<ServiceObject>> {
+  return json<Page<ServiceObject>>(
+    `/service-objects${query({ customerPartyId: f.customerPartyId, serial: f.serial, parentId: f.parentId, status: f.status, cursor: f.cursor })}`,
+    {},
+    signal,
+  );
+}
+
+export function getServiceObject(objectId: string, signal?: AbortSignal): Promise<Versioned<ServiceObject>> {
+  return versioned<ServiceObject>(`/service-objects/${id(objectId)}`, {}, signal);
+}
+
+export function createServiceObject(input: ServiceObjectInput, key: string = newKey()): Promise<Versioned<ServiceObject>> {
+  return versioned<ServiceObject>("/service-objects", post(input, key));
+}
+
+/** Creates one service object per shipped serial; a re-delivered shipment creates nothing twice (AC-45.8). */
+export function receiveShipment(input: ShipmentInput): Promise<ShipmentReceipt> {
+  return json<ShipmentReceipt>("/service-objects:receive-shipment", { method: "POST", body: JSON.stringify(input) });
+}
+
+/** Records the installation day; an INSTALL warranty starts that day. */
+export function installServiceObject(objectId: string, etag: string, installedOn: string): Promise<Versioned<ServiceObject>> {
+  return versioned<ServiceObject>(`/service-objects/${id(objectId)}:install`, {
+    method: "POST",
+    body: JSON.stringify({ installedOn }),
+    headers: { "If-Match": etag },
+  });
+}
+
+// --- Activities (FR-45.14) ---
+
+export const ACTIVITY_KINDS = ["TASK", "APPOINTMENT", "CALL_NOTE", "EMAIL_NOTE"] as const;
+export type ActivityKind = (typeof ACTIVITY_KINDS)[number];
+
+export const ACTIVITY_STATUSES = ["OPEN", "DONE", "CANCELED"] as const;
+export type ActivityStatus = (typeof ACTIVITY_STATUSES)[number];
+
+/** Record types an activity can be attached to (internal/domain/activity.go). */
+export const ASSOCIABLE_TYPES = [
+  "case",
+  "work_order",
+  "agreement",
+  "service_object",
+  "knowledge_article",
+  "project",
+  "customer",
+  "vendor",
+  "worker",
+  "invoice",
+  "item",
+  "asset",
+  "audit_finding",
+] as const;
+export type AssociableType = (typeof ASSOCIABLE_TYPES)[number];
+
+export interface Association {
+  entityType: AssociableType;
+  entityId: string;
+}
+
+export interface ActivitySchedule {
+  dueAt?: string | null;
+  startAt?: string | null;
+  endAt?: string | null;
+}
+
+export interface ActivityInput extends ActivitySchedule {
+  kind: ActivityKind;
+  subject: string;
+  ownerWorkerId: string;
+  reminderMinutes?: number | null;
+  associations: Association[];
+}
+
+export interface Activity {
+  id: string;
+  kind: ActivityKind;
+  subject: string;
+  ownerWorkerId: string;
+  dueAt?: string;
+  startAt?: string;
+  endAt?: string;
+  status: ActivityStatus;
+  reminderMinutes?: number;
+  associations: Association[];
+  completedAt?: string;
+  createdAt: string;
+  version: number;
+}
+
+/** "My activities" (owner) or the activities of one record (entityType with entityId). */
+export interface ActivityFilter {
+  owner?: string;
+  entityType?: AssociableType;
+  entityId?: string;
+  status?: ActivityStatus | "";
+  cursor?: string;
+}
+
+const activityQuery = (f: ActivityFilter) => query({ owner: f.owner, entityType: f.entityType, entityId: f.entityId, status: f.status, cursor: f.cursor });
+
+export function listActivities(f: ActivityFilter, signal?: AbortSignal): Promise<Page<Activity>> {
+  return json<Page<Activity>>(`/activities${activityQuery(f)}`, {}, signal);
+}
+
+/** The browser path of the iCalendar export of a filter (RFC 5545). */
+export function activityCalendarUrl(f: ActivityFilter): string {
+  return `${base}/activities:calendar${activityQuery({ ...f, cursor: undefined })}`;
+}
+
+export function getActivity(activityId: string, signal?: AbortSignal): Promise<Versioned<Activity>> {
+  return versioned<Activity>(`/activities/${id(activityId)}`, {}, signal);
+}
+
+export function createActivity(input: ActivityInput, key: string = newKey()): Promise<Versioned<Activity>> {
+  return versioned<Activity>("/activities", post(input, key));
+}
+
+export function completeActivity(activityId: string, etag: string): Promise<Versioned<Activity>> {
+  return versioned<Activity>(`/activities/${id(activityId)}:complete`, { method: "POST", headers: { "If-Match": etag } });
+}
+
+export function cancelActivity(activityId: string, etag: string): Promise<Versioned<Activity>> {
+  return versioned<Activity>(`/activities/${id(activityId)}:cancel`, { method: "POST", headers: { "If-Match": etag } });
+}
+
+export function rescheduleActivity(activityId: string, etag: string, when: ActivitySchedule): Promise<Versioned<Activity>> {
+  return versioned<Activity>(`/activities/${id(activityId)}:reschedule`, { method: "POST", body: JSON.stringify(when), headers: { "If-Match": etag } });
+}
+
+// --- Knowledge base (FR-45.13, BR-45.11) ---
+
+export const ARTICLE_STATUSES = ["DRAFT", "IN_REVIEW", "PUBLISHED", "RETIRED"] as const;
+export type ArticleStatus = (typeof ARTICLE_STATUSES)[number];
+
+export interface Applicability {
+  itemIds: string[];
+  itemGroupIds: string[];
+  incidentTypeIds: string[];
+  assetTypeIds: string[];
+  categoryIds: string[];
+}
+
+export interface ArticleInput {
+  title: string;
+  language: string;
+  symptom: string;
+  cause: string;
+  solution: string;
+  applicability: Applicability;
+}
+
+/** One version of an article; number groups the versions. revision is the ETag. */
+export interface Article extends ArticleInput {
+  id: string;
+  number: string;
+  version: number;
+  status: ArticleStatus;
+  authorId: string;
+  reviewerId?: string;
+  publishedAt?: string;
+  helpfulYes: number;
+  helpfulNo: number;
+  /** Decimal percent, present from ten votes. */
+  helpfulPercent?: Decimal;
+  createdAt: string;
+  revision: number;
+}
+
+export interface PublishResult {
+  article: Article;
+  retiredVersion?: number;
+  /** KB-PUB-002 when publishing retired an earlier version. */
+  warnings: string[];
+}
+
+export interface Suggestion {
+  article: Article;
+  score: number;
+}
+
+export interface ArticleFilter {
+  status?: ArticleStatus | "";
+  number?: string;
+  cursor?: string;
+}
+
+export interface SearchQuery {
+  q?: string;
+  itemId?: string;
+  incidentTypeId?: string;
+  lang?: string;
+  limit?: number;
+}
+
+/** An article read with its ETag, which carries the revision (not the article version number). */
+async function revisioned(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<Versioned<Article>> {
+  const res = await send(path, init, signal);
+  const value = (await res.json()) as Article;
+  return { value, etag: res.headers.get("ETag") ?? `"${value.revision}"` };
+}
+
+export function listArticles(f: ArticleFilter = {}, signal?: AbortSignal): Promise<Page<Article>> {
+  return json<Page<Article>>(`/knowledge/articles${query({ status: f.status, number: f.number, cursor: f.cursor })}`, {}, signal);
+}
+
+/** Ranks PUBLISHED articles for a description and item (BR-45.11). */
+export function searchArticles(q: SearchQuery, signal?: AbortSignal): Promise<{ items: Suggestion[] }> {
+  return json<{ items: Suggestion[] }>(
+    `/knowledge/articles/search${query({ q: q.q, itemId: q.itemId, incidentTypeId: q.incidentTypeId, lang: q.lang, limit: q.limit })}`,
+    {},
+    signal,
+  );
+}
+
+export function getArticle(articleId: string, signal?: AbortSignal): Promise<Versioned<Article>> {
+  return revisioned(`/knowledge/articles/${id(articleId)}`, {}, signal);
+}
+
+export function createArticle(input: ArticleInput, key: string = newKey()): Promise<Versioned<Article>> {
+  return revisioned("/knowledge/articles", post(input, key));
+}
+
+export function updateArticle(articleId: string, etag: string, input: ArticleInput): Promise<Versioned<Article>> {
+  return revisioned(`/knowledge/articles/${id(articleId)}`, { method: "PUT", body: JSON.stringify(input), headers: { "If-Match": etag } });
+}
+
+export type ArticleMove = "submit" | "reject" | "retire" | "new-version";
+
+export function moveArticle(articleId: string, etag: string, move: ArticleMove): Promise<Versioned<Article>> {
+  return revisioned(`/knowledge/articles/${id(articleId)}:${move}`, { method: "POST", headers: { "If-Match": etag } });
+}
+
+/** Publishes with the caller as reviewer, who must not be the author (KB-PUB-001). */
+export async function publishArticle(articleId: string, etag: string): Promise<{ value: PublishResult; etag: string }> {
+  const res = await send(`/knowledge/articles/${id(articleId)}:publish`, { method: "POST", headers: { "If-Match": etag } });
+  const value = (await res.json()) as PublishResult;
+  return { value, etag: res.headers.get("ETag") ?? `"${value.article.revision}"` };
+}
+
+export function voteArticle(articleId: string, helpful: boolean): Promise<Versioned<Article>> {
+  return revisioned(`/knowledge/articles/${id(articleId)}:vote`, { method: "POST", body: JSON.stringify({ helpful }) });
+}
+
+// --- Generic case management (FR-45.12, BR-45.9, BR-45.10) ---
+
+export const CATEGORY_TYPES = ["SERVICE", "CUSTOMER_SERVICE", "HR", "COLLECTIONS", "PRODUCT_CHANGE", "AUDIT", "PROJECT", "VENDOR", "INTERNAL"] as const;
+export type CategoryType = (typeof CATEGORY_TYPES)[number];
+
+/** Category types whose cases open through the service case screens (entitlement and SLA). */
+export const SERVICE_ROUTED: CategoryType[] = ["SERVICE", "CUSTOMER_SERVICE"];
+
+/** Category types whose cases need a customer (FR-45.12). */
+export const CUSTOMER_REQUIRED: CategoryType[] = ["SERVICE", "CUSTOMER_SERVICE", "COLLECTIONS"];
+
+export const GENERIC_STATUSES = ["OPEN", "RESOLVED", "CLOSED", "CANCELED"] as const;
+export type GenericStatus = (typeof GENERIC_STATUSES)[number];
+
+export const ASSOCIATION_ROLES = ["SUBJECT", "RELATED"] as const;
+export type AssociationRole = (typeof ASSOCIATION_ROLES)[number];
+
+export interface CaseStage {
+  code: string;
+  sequence: number;
+  /** Activity subjects that must be DONE on the case before it moves on. */
+  requiredActivities: string[];
+}
+
+export interface CaseProcessInput {
+  code: string;
+  name: string;
+  stages: CaseStage[];
+}
+
+export interface CaseProcess extends CaseProcessInput {
+  id: string;
+}
+
+export interface CaseCategoryInput {
+  code: string;
+  name: string;
+  categoryType: CategoryType;
+  parentId?: string;
+  processId?: string;
+  slaProfileId?: string;
+  defaultPriority?: number;
+  reopenWindowDays?: number;
+  accessDuty?: string;
+  resolutionCodes?: string[];
+}
+
+export interface CaseCategory {
+  id: string;
+  code: string;
+  name: string;
+  categoryType: CategoryType;
+  parentId?: string;
+  processId?: string;
+  slaProfileId?: string;
+  defaultPriority: number;
+  reopenWindowDays: number;
+  accessDuty: string;
+  resolutionCodes: string[];
+}
+
+export interface CaseAssociation {
+  entityType: AssociableType;
+  entityId: string;
+  role: AssociationRole;
+}
+
+export interface CaseLogEntry {
+  at: string;
+  actor: string;
+  kind: "CREATED" | "STAGE" | "STATUS" | "ASSOCIATION" | "REOPENED";
+  text: string;
+}
+
+export interface GenericCaseInput {
+  categoryId: string;
+  legalEntityId: string;
+  customerPartyId?: string;
+  subject: string;
+  description?: string;
+  priority?: number;
+  associations?: CaseAssociation[];
+}
+
+export interface GenericCase {
+  id: string;
+  number: string;
+  categoryId: string;
+  categoryCode: string;
+  categoryType: CategoryType;
+  legalEntityId: string;
+  customerPartyId?: string;
+  ownerId: string;
+  subject: string;
+  description: string;
+  priority: number;
+  stageCode: string;
+  status: GenericStatus;
+  resolutionCode?: string;
+  resolutionText: string;
+  slaProfileId?: string;
+  slaResponseDue?: string;
+  slaResolutionDue?: string;
+  openedAt: string;
+  resolvedAt?: string;
+  closedAt?: string;
+  reopenedFrom?: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  associations: CaseAssociation[];
+  log: CaseLogEntry[];
+}
+
+export interface ReopenResult {
+  case: GenericCase;
+  /** True when a new case linked by reopenedFrom was created. */
+  created: boolean;
+}
+
+export interface GenericCaseFilter {
+  categoryId?: string;
+  status?: GenericStatus | "";
+  stage?: string;
+  entityType?: AssociableType | "";
+  entityId?: string;
+  cursor?: string;
+}
+
+export function listCaseProcesses(signal?: AbortSignal): Promise<Page<CaseProcess>> {
+  return json<Page<CaseProcess>>("/case-processes", {}, signal, caseBase);
+}
+
+export function createCaseProcess(input: CaseProcessInput, key: string = newKey()): Promise<CaseProcess> {
+  return json<CaseProcess>("/case-processes", post(input, key), undefined, caseBase);
+}
+
+export function listCaseCategories(signal?: AbortSignal): Promise<Page<CaseCategory>> {
+  return json<Page<CaseCategory>>("/case-categories", {}, signal, caseBase);
+}
+
+export function createCaseCategory(input: CaseCategoryInput, key: string = newKey()): Promise<CaseCategory> {
+  return json<CaseCategory>("/case-categories", post(input, key), undefined, caseBase);
+}
+
+/** Cases the caller may read (BR-45.10), newest first. */
+export function listGenericCases(f: GenericCaseFilter = {}, signal?: AbortSignal): Promise<Page<GenericCase>> {
+  const q = query({ categoryId: f.categoryId, status: f.status, stage: f.stage, entityType: f.entityType, entityId: f.entityId, cursor: f.cursor });
+  return json<Page<GenericCase>>(`/cases${q}`, {}, signal, caseBase);
+}
+
+export function getGenericCase(caseId: string, signal?: AbortSignal): Promise<Versioned<GenericCase>> {
+  return versioned<GenericCase>(`/cases/${id(caseId)}`, {}, signal, caseBase);
+}
+
+/** Opens a case at the first stage of its category's process (FR-45.12). */
+export function openGenericCase(input: GenericCaseInput, key: string = newKey()): Promise<Versioned<GenericCase>> {
+  return versioned<GenericCase>("/cases", post(input, key), undefined, caseBase);
+}
+
+const guarded = (body: unknown, etag: string, key: string): RequestInit => ({
+  method: "POST",
+  body: JSON.stringify(body),
+  headers: { "If-Match": etag, "Idempotency-Key": key },
+});
+
+/** Moves a case to the next stage, or back one with a reason (BR-45.9). */
+export function advanceCaseStage(caseId: string, etag: string, toStage: string, reason: string, key: string = newKey()): Promise<Versioned<GenericCase>> {
+  return versioned<GenericCase>(`/cases/${id(caseId)}/stage`, guarded({ toStage, ...(reason ? { reason } : {}) }, etag, key), undefined, caseBase);
+}
+
+export interface GenericTransition {
+  to: Exclude<GenericStatus, "OPEN">;
+  resolutionCode?: string;
+  resolutionText?: string;
+}
+
+/** Resolves (with a resolution code), closes or cancels a case. */
+export function transitionGenericCase(caseId: string, etag: string, move: GenericTransition, key: string = newKey()): Promise<Versioned<GenericCase>> {
+  return versioned<GenericCase>(`/cases/${id(caseId)}:transition`, guarded(move, etag, key), undefined, caseBase);
+}
+
+/** Reopens a RESOLVED or CLOSED case: the same case inside the category's window, else a new linked case. */
+export function reopenGenericCase(caseId: string, etag: string, reason: string, key: string = newKey()): Promise<ReopenResult> {
+  return json<ReopenResult>(`/cases/${id(caseId)}:reopen`, guarded({ reason }, etag, key), undefined, caseBase);
+}
+
+/** Associates any registry record with a case (FR-45.12). */
+export function associateCase(caseId: string, association: CaseAssociation, key: string = newKey()): Promise<Versioned<GenericCase>> {
+  return versioned<GenericCase>(`/cases/${id(caseId)}/associations`, post(association, key), undefined, caseBase);
 }

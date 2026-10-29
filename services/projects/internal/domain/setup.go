@@ -122,11 +122,14 @@ type PlanVersion struct {
 	CopiedFromVersionID *string  `json:"copiedFromVersionId,omitempty"`
 	// SupersededByVersionID is set on a BASELINE that an applied change order
 	// replaced with a new BASELINE (BR-41.13); the project's current baseline has none.
-	SupersededByVersionID *string   `json:"supersededByVersionId,omitempty"`
-	Locked                bool      `json:"locked"`
-	Version               int       `json:"version"`
-	CreatedAt             time.Time `json:"createdAt"`
-	UpdatedAt             time.Time `json:"updatedAt"`
+	SupersededByVersionID *string `json:"supersededByVersionId,omitempty"`
+	// TransferredAt is set on a SIMULATION transferred into WORKING (BR-41.14);
+	// it is locked from then on.
+	TransferredAt *time.Time `json:"transferredAt,omitempty"`
+	Locked        bool       `json:"locked"`
+	Version       int        `json:"version"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
 }
 
 // CheckNewPlan applies the FR-41.2 / FR-41.17 plan-version rules to a new
@@ -135,7 +138,8 @@ type PlanVersion struct {
 //   - one WORKING and one BASELINE per project;
 //   - a BASELINE is a copy of the WORKING plan and is locked on creation (the
 //     copy is the approval; a baseline is immutable after it);
-//   - a SIMULATION is a copy of the WORKING or the BASELINE plan;
+//   - a SIMULATION is a copy of the WORKING or the BASELINE plan, and a project
+//     has at most MaxSimulations of them (BR-41.14; transferred ones count);
 //   - a WORKING plan starts empty or copies any version.
 //
 // It returns whether the new version is locked, or PROJ-PLAN-001.
@@ -156,6 +160,15 @@ func CheckNewPlan(kind PlanKind, source *PlanVersion, existing []PlanKind) (bool
 	case KindSimulation:
 		if source == nil || source.Kind == KindSimulation {
 			return false, rule(CodePlanKind, "a SIMULATION is created by copying the WORKING or BASELINE plan version")
+		}
+		n := 0
+		for _, k := range existing {
+			if k == KindSimulation {
+				n++
+			}
+		}
+		if n >= MaxSimulations {
+			return false, rule(CodePlanKind, "the project already has %d SIMULATION plan versions, the most allowed", MaxSimulations)
 		}
 	}
 	return false, nil

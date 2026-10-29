@@ -25,6 +25,7 @@ import {
   type Problem,
   type QueryInput,
 } from "./api/client";
+import { ExportPanel } from "./ExportsPage";
 import { DATE, dimensionLabel, grainLabel, monthStart, today } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
@@ -112,10 +113,10 @@ function PlanResult({ plan }: { plan: Plan }) {
 }
 
 /**
- * Self-service explorer, slice 1 (FR-46.9, FR-46.7): compose metrics by
- * dimensions over a date range and see the Cube plan the service builds,
- * including the legal-entity filter mirrored from your access. Running the
- * plan and exporting rows are later slices.
+ * Self-service explorer (FR-46.9, FR-46.7): compose metrics by dimensions over
+ * a date range and see the Cube plan the service builds, including the
+ * legal-entity filter mirrored from your access, then export that query
+ * (slice 4). Running the plan for rows is a later slice.
  */
 export function ExplorerPage() {
   const [params] = useSearchParams();
@@ -129,7 +130,7 @@ export function ExplorerPage() {
   }));
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
-  const [plan, setPlan] = useState<Plan | null>(null);
+  const [plan, setPlan] = useState<{ plan: Plan; query: QueryInput } | null>(null);
   const [busy, setBusy] = useState(false);
 
   const metrics = catalog.data ?? [];
@@ -153,7 +154,8 @@ export function ExplorerPage() {
     if (Object.keys(found).length > 0) return;
     setBusy(true);
     try {
-      setPlan(await planQuery(input));
+      // The export panel exports the query this plan was built from, not later edits.
+      setPlan({ plan: await planQuery(input), query: input });
     } catch (error) {
       const problem = describeProblem(error);
       setErrors(problem.fields as Errors);
@@ -257,7 +259,8 @@ export function ExplorerPage() {
           </form>
         </Card>
       )}
-      {plan ? <PlanResult plan={plan} /> : null}
+      {plan ? <PlanResult plan={plan.plan} /> : null}
+      {plan && plan.plan.reason !== "NO_SCOPE" ? <ExportPanel key={JSON.stringify(plan.query)} query={plan.query} /> : null}
     </div>
   );
 }

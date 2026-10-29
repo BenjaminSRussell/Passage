@@ -1,4 +1,4 @@
-# assets (Wave 37: Fixed Assets & Leases, slices 1 to 4)
+# assets (Wave 37: Fixed Assets & Leases, slices 1 to 5)
 
 The fixed-asset subledger and IFRS 16 leases. Slice 1 delivers the asset
 register, depreciation books with the straight-line and declining-balance
@@ -17,7 +17,9 @@ against the register (FR-37.11), and the insurance report (7.37.14). Slice 4
 adds the capex decisions (approve, reject, postpone, reopen, release, close)
 with the decision trail and the `capexrequest.approved` event, and the
 mid-quarter convention on declining-balance books with the on-demand BR-37.5
-test. The web module is
+test. Slice 5 adds transfer and split of assets (FR-37.7, also to another
+legal entity of the tenant) and group assets for pooled tax depreciation
+(FR-37.16). The web module is
 `apps/web/src/modules/assets`.
 
 Reference: PSG-37, `docs/prd/phase-7-treasury-controlling.md` section 7.37.
@@ -37,7 +39,8 @@ internal/events/       event types and payloads (dev.passage.assets.*.v1)
 migrations/            0001_assets.sql (RLS on every table, append-only asset_transaction),
                        0002 adjustments, runs and additions, 0003 insurance and capex,
                        0004 lease modifications, rate method and count sessions,
-                       0005 MidQuarter convention, capex creator and decision trail
+                       0005 MidQuarter convention, capex creator and decision trail,
+                       0006 transfers and splits, group assets and their members
 testdata/              worked-examples.json: PRD fixtures (AC-37.1, AC-37.2)
 api/openapi.yaml       HTTP contract for every route (checked by TestRoutesMatchOpenAPI)
 events/asyncapi.yaml   events published through the outbox (checked by TestEventsMatchAsyncAPI)
@@ -157,6 +160,35 @@ and `authz` until OPA is wired (wave 2 kernel).
   for declining balance. MidQuarter charges 10.5, 7.5, 4.5 or 1.5 months of
   the first year by in-service quarter (IRS Pub. 946 Tables A-2 to A-5, the
   5-year rows checked to the published rates).
+- Transfer and split (`POST /v1/assets/{id}/transfer`, AssetMaintain,
+  Idempotency-Key and If-Match with the asset ETag): every Open book of an
+  Open asset moves. `kind: transfer` has one target taking 100%, optionally in
+  another legal entity of the tenant (the caller needs that entity in scope);
+  `kind: split` has 2 to 50 targets in the source entity whose percentages
+  (two decimals) total 100.00% (AST-0507). Each book's cost, accumulated
+  depreciation, impairment share, salvage and schedule basis are allocated by
+  percentage, rounded half-up with the residual cents on the last target
+  (BR-37.7), keeping 0 <= impairment <= accumulated <= cost on every target.
+  Target books keep the source profile, in-service date and last depreciated
+  period, so the next run continues the schedule. Every source book gets a
+  Transfer / Split transaction that empties it and ends Transferred; the
+  source asset ends Transferred (BR-37.2). The target books open with a
+  Transfer / Split transaction (`sourceType` transfer / split, `sourceId` the
+  transfer), so Σ transactions = projections holds on both sides. A transfer
+  dated before the end of a book's last depreciated period is AST-0508 (as for
+  a disposal, BR-37.6). One `asset.transferred` or `asset.split` event is
+  written in the same transaction. `GET /v1/assets/{id}/transfers` lists the
+  transfers an asset took part in as source or target.
+- Group assets (`POST /v1/assets/group-assets`, AssetConfigure; `GET` list and
+  read with AssetView or AssetConfigure): a group pools the books with one
+  book code of member assets of one legal entity, class and tax year, in one
+  currency (AST-0031); a book belongs to one group asset (BR-37.11, 409
+  AST-0535). The group has its own profile and depreciates from 1 January of
+  the tax year; its basis is the members' current cost on the book, read live,
+  and the read returns the projected yearly schedule (AC-37.10: 40 x 600.00
+  over 60 months is 4,800.00 a year). Member books take no own charge: a run
+  lists them as AST-0035 exceptions with no amount. The group's own run line
+  (one charge on the basis with a drill to the members) is not built yet.
 - A legal-entity header narrows every read through the restrictive RLS policy;
   creating in another entity is 403.
 
@@ -186,7 +218,13 @@ the capex decisions (own-request refusal, stale version, illegal moves, the
 approved amount and the outbox payload of `capexrequest.approved`, reopen and
 resubmit, the trail) and the mid-quarter test (a MidQuarter book stored,
 quarters, other years / codes / entities ignored, same-year disposal left out,
-books to review, two currencies refused), all also under RLS as the
+books to review, two currencies refused); for slice 5 a 60/40 split of a
+depreciated, impaired asset with two books (allocation, impairment share,
+Transferred source, reconciliation on every book, replay and key reuse, the
+next run continuing on the targets), a transfer to another legal entity with
+its guards, and AC-37.10 on 40 Sammelposten members (basis, yearly schedule,
+duplicate membership, class / year / book checks, members as AST-0035 run
+exceptions, live basis after a partial sale), all also under RLS as the
 application role.
 Domain tests are pure: table-driven, `pgregory.net/rapid` properties (life totals,
 lease closing), and the worked-example fixtures.
@@ -239,10 +277,16 @@ Problem details are `application/problem+json` with `code` and `type`
 | AST-0027 | 422 | A lease period from the effective period on is already posted |
 | AST-0028 | 403 | The user created or requested the capex request and may not approve, reject or postpone it |
 | AST-0029 | 422 | The mid-quarter test covers books in more than one currency |
+| AST-0030 | 422 | Transfer or split invalid (a transfer with other than one target, a split with fewer than 2 or more than 50, a split into another legal entity, a date before in-service, a zero target quantity) |
+| AST-0031 | 422 | A member does not fit the group asset (other legal entity, class, tax year or currency, no book with the group's code, book not Open, listed twice) |
+| AST-0032 | 404 | Group asset not found |
+| AST-0033 | 409 | Group code already exists in the legal entity |
+| AST-0035 | run line | The book is depreciated at its group asset and takes no own charge (FR-37.16) |
 | AST-0502 | 409 / run line | Depreciation for the book and period is already posted |
 | AST-0503 | run line | Previous period is not depreciated (BR-37.3) |
 | AST-0504 | 409 | Another depreciation run holds the book and period (BR-37.9) |
-| AST-0508 | 422 | Disposal date precedes the last depreciated period (BR-37.6) |
+| AST-0507 | 422 | Split percentages do not total 100.00% (or a share is not above 0 with at most two decimals) |
+| AST-0508 | 422 | Disposal or transfer date precedes the end of the last depreciated period (BR-37.6) |
 | AST-0509 | 422 | Asset or book state does not allow the posting (BR-37.2) |
 | AST-0511 | warning | Q4 placed-in-service share exceeds 40%; mid-quarter applies (BR-37.5) |
 | AST-0512 | warning | Impairment reversal limited (FR-37.9) |
@@ -251,9 +295,10 @@ Problem details are `application/problem+json` with `code` and `type`
 | AST-0525 | warning | Scanned barcode is not in the register (FR-37.11) |
 | AST-0531 | warning | Index series has no value for the valuation year; the latest year was used (BR-37.10) |
 | AST-0532 | warning | Asset is under-insured: sum insured below 90% of the indexed value (FR-37.15) |
+| AST-0535 | 409 | The asset's book already belongs to a group asset (BR-37.11) |
 | idempotency_key_reuse | 422 | Idempotency-Key reused with a different request |
 
-Other PRD message codes (AST-0501, 0507, 0520, 0535, 0541, 0542) belong to later slices; see NOT-IMPLEMENTED.md.
+Other PRD message codes (AST-0501, 0520, 0541, 0542) belong to later slices; see NOT-IMPLEMENTED.md.
 
 ## Events
 

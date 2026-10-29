@@ -16,12 +16,24 @@ var (
 	DowntimeRecorded     = events.Type(Context, "downtime", "recorded", 1)
 	RequestTriaged       = events.Type(Context, "request", "triaged", 1)
 	WarrantyClaimable    = events.Type(Context, "warranty", "claimable", 1)
+	PermitStatus         = events.Type(Context, "permitstatus", "changed", 1)
 )
 
 // All lists every event type this service publishes (checked by the registry test).
 func All() []string {
 	return []string{RequestCreated, WorkOrderCreated, WorkOrderStatus, WorkOrderCompleted, CounterReadingLogged,
-		DowntimeRecorded, RequestTriaged, WarrantyClaimable}
+		DowntimeRecorded, RequestTriaged, WarrantyClaimable, PermitStatus}
+}
+
+// PermitStatusData is the payload of a permit transition (FR-44.19); the permit
+// and its work order let mobile and safety notifications follow the permit.
+type PermitStatusData struct {
+	PermitID    string `json:"permitId"`
+	WorkOrderID string `json:"workOrderId"`
+	From        string `json:"from"`
+	To          string `json:"to"`
+	At          string `json:"at"`
+	Actor       string `json:"actor"`
 }
 
 // DowntimeRecordedData is a stop of a production resource booked on a work

@@ -1,0 +1,40 @@
+image:
+  repository: ghcr.io/benjaminsrussell/passage-localization
+  # Stage and prod pin the digest (cosign-signed) through Argo CD; the tag is for dev.
+  tag: "0.1.0"
+  digest: ""
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+serviceName: localization
+
+# Slice 1 is stateless: packs ship in the image under /countrypacks and no database is used.
+config:
+  passageEnv: dev
+  httpAddr: ":8080"
+  adminAddr: ":9090"
+  countryPacksDir: /countrypacks
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
