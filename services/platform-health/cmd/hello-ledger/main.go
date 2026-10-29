@@ -11,6 +11,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/platform-health/internal/api"
 	"github.com/BenjaminSRussell/passage/services/platform-health/internal/store"
 	"github.com/BenjaminSRussell/passage/services/platform-health/migrations"
@@ -55,7 +56,15 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
-	a := api.New(store.New(pool))
+	operatorTenant := getenv("PLATFORM_OPERATOR_TENANT_ID")
+	if operatorTenant != "" {
+		canonical, ok := ids.Canonical(operatorTenant)
+		if !ok {
+			return errors.New("PLATFORM_OPERATOR_TENANT_ID must be a UUID")
+		}
+		operatorTenant = canonical
+	}
+	a := api.New(store.New(pool), operatorTenant)
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()

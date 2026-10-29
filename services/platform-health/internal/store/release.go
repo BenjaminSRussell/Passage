@@ -20,10 +20,13 @@ const (
 	ActionRollback = "rollback"
 	eventSource    = "platform-health"
 	fkViolation    = "23503"
-	releaseColumns = "id, service, environment, action, image_digest, previous_digest, signed, actor, coalesce(reason, ''), created_at"
+	releaseColumns = "id, service, environment, action, image_digest, previous_digest, git_sha, signed, recorded_by_tenant::text, recorded_by_user, coalesce(reason, ''), created_at"
 )
 
-var ErrUnknownEnvironment = errors.New("unknown environment")
+var (
+	ErrUnknownEnvironment  = errors.New("unknown environment")
+	ErrIdempotencyConflict = errors.New("idempotency key reused with a different release")
+)
 
 type Release struct {
 	ID             string    `json:"id"`
@@ -32,10 +35,19 @@ type Release struct {
 	Action         string    `json:"action"`
 	ImageDigest    string    `json:"imageDigest"`
 	PreviousDigest string    `json:"previousDigest"`
+	GitSHA         string    `json:"gitSha"`
 	Signed         bool      `json:"signed"`
 	Actor          string    `json:"actor"`
 	Reason         string    `json:"reason,omitempty"`
 	CreatedAt      time.Time `json:"createdAt"`
+
+	RecordedByTenant string `json:"-"`
+}
+
+func (r Release) samePayload(o Release) bool {
+	return r.Service == o.Service && r.Environment == o.Environment && r.Action == o.Action &&
+		r.ImageDigest == o.ImageDigest && r.PreviousDigest == o.PreviousDigest && r.GitSHA == o.GitSHA &&
+		r.Signed == o.Signed && r.Reason == o.Reason
 }
 
 type releaseEventData struct {
@@ -44,12 +56,13 @@ type releaseEventData struct {
 	Environment    string `json:"environment"`
 	ImageDigest    string `json:"image_digest"`
 	PreviousDigest string `json:"previous_digest"`
+	GitSHA         string `json:"git_sha"`
 	Actor          string `json:"actor"`
 	Reason         string `json:"reason,omitempty"`
 }
 
 func scanRelease(row pgx.Row, r *Release) error {
-	return row.Scan(&r.ID, &r.Service, &r.Environment, &r.Action, &r.ImageDigest, &r.PreviousDigest, &r.Signed, &r.Actor, &r.Reason, &r.CreatedAt)
+	return row.Scan(&r.ID, &r.Service, &r.Environment, &r.Action, &r.ImageDigest, &r.PreviousDigest, &r.GitSHA, &r.Signed, &r.RecordedByTenant, &r.Actor, &r.Reason, &r.CreatedAt)
 }
 
 func platformScope(ctx context.Context) context.Context {
@@ -60,9 +73,10 @@ func platformScope(ctx context.Context) context.Context {
 }
 
 func (s *Postgres) RecordRelease(ctx context.Context, in Release, idempotencyKey string) (Release, error) {
+	caller, _ := tenant.FromContext(ctx)
 	actor := "anonymous"
-	if p, _ := tenant.FromContext(ctx); p.UserID != "" {
-		actor = p.UserID
+	if caller.UserID != "" {
+		actor = caller.UserID
 	}
 	var key *string
 	if idempotencyKey != "" {
@@ -78,20 +92,26 @@ func (s *Postgres) RecordRelease(ctx context.Context, in Release, idempotencyKey
 		if in.Reason != "" {
 			reason = &in.Reason
 		}
-		err := scanRelease(tx.QueryRow(ctx, `insert into platform_release (tenant_id, id, service, environment, action, image_digest, previous_digest, signed, actor, reason, idempotency_key)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-			on conflict (tenant_id, idempotency_key) do nothing
+		err := scanRelease(tx.QueryRow(ctx, `insert into platform_release (tenant_id, id, service, environment, action, image_digest, previous_digest, git_sha, signed, recorded_by_tenant, recorded_by_user, reason, idempotency_key)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+			on conflict (recorded_by_tenant, idempotency_key) do nothing
 			returning `+releaseColumns,
-			ids.Nil, ids.New(), in.Service, in.Environment, in.Action, in.ImageDigest, in.PreviousDigest, in.Signed, actor, reason, key), &r)
+			ids.Nil, ids.New(), in.Service, in.Environment, in.Action, in.ImageDigest, in.PreviousDigest, in.GitSHA, in.Signed, caller.TenantID, actor, reason, key), &r)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return scanRelease(tx.QueryRow(ctx, `select `+releaseColumns+` from platform_release where tenant_id = $1 and idempotency_key = $2`, ids.Nil, key), &r)
+			if err := scanRelease(tx.QueryRow(ctx, `select `+releaseColumns+` from platform_release where recorded_by_tenant = $1 and idempotency_key = $2`, caller.TenantID, key), &r); err != nil {
+				return err
+			}
+			if !r.samePayload(in) {
+				return ErrIdempotencyConflict
+			}
+			return nil
 		}
 		if err != nil {
 			return err
 		}
 		evt, err := events.New(typ, eventSource, r.ID, ids.Nil, releaseEventData{
 			ReleaseID: r.ID, Service: r.Service, Environment: r.Environment, ImageDigest: r.ImageDigest,
-			PreviousDigest: r.PreviousDigest, Actor: r.Actor, Reason: r.Reason,
+			PreviousDigest: r.PreviousDigest, GitSHA: r.GitSHA, Actor: r.Actor, Reason: r.Reason,
 		})
 		if err != nil {
 			return err

@@ -7,7 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
+	"github.com/BenjaminSRussell/passage/services/platform-health/internal/api"
 	"github.com/BenjaminSRussell/passage/services/platform-health/internal/store"
 )
 
@@ -15,10 +17,11 @@ const (
 	releasesPath = "/v1/platform/releases"
 	digestA      = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	digestB      = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	gitSHA       = "0123456789abcdef0123456789abcdef01234567"
 )
 
 func releaseBody(mutate func(string) string) string {
-	body := `{"service":"hello-ledger","environment":"stage","action":"promote","imageDigest":"` + digestB + `","previousDigest":"` + digestA + `","signed":true}`
+	body := `{"service":"hello-ledger","environment":"stage","action":"promote","imageDigest":"` + digestB + `","previousDigest":"` + digestA + `","gitSha":"` + gitSHA + `","signed":true}`
 	if mutate != nil {
 		return mutate(body)
 	}
@@ -56,16 +59,18 @@ func TestRecordRelease(t *testing.T) {
 		{"same digest", &fakeStore{}, releaseBody(replace(digestB, digestA)), http.StatusBadRequest, "COM-0001"},
 		{"bad service", &fakeStore{}, releaseBody(replace("hello-ledger", "Hello_Ledger")), http.StatusBadRequest, "COM-0001"},
 		{"empty environment", &fakeStore{}, releaseBody(replace(`"stage"`, `""`)), http.StatusBadRequest, "COM-0001"},
+		{"missing git sha", &fakeStore{}, releaseBody(replace(`"gitSha":"`+gitSHA+`",`, "")), http.StatusBadRequest, "gitSha"},
 		{"reason too long", &fakeStore{}, releaseBody(replace(`"signed":true`, `"reason":"`+strings.Repeat("a", 281)+`"`)), http.StatusBadRequest, "COM-0001"},
 		{"unknown field", &fakeStore{}, releaseBody(replace(`"signed":true`, `"x":1`)), http.StatusBadRequest, "COM-0001"},
 		{"malformed body", &fakeStore{}, `{`, http.StatusBadRequest, "COM-0001"},
+		{"idempotency conflict", &fakeStore{err: store.ErrIdempotencyConflict}, releaseBody(nil), http.StatusConflict, "COM-0409"},
 		{"unregistered environment", &fakeStore{err: store.ErrUnknownEnvironment}, releaseBody(nil), http.StatusBadRequest, "environment is not registered"},
 		{"store error hides detail", &fakeStore{err: errors.New("pg secret detail")}, releaseBody(nil), http.StatusInternalServerError, "COM-0500"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			r, _ := newRouter(tc.store)
-			rec := doRelease(r, http.MethodPost, releasesPath, tc.body, "Maintain platform releases", "")
+			rec := doRelease(r, http.MethodPost, releasesPath, tc.body, "Maintain platform releases,Rollback environment", "")
 			if rec.Code != tc.wantStatus || !strings.Contains(rec.Body.String(), tc.wantBody) {
 				t.Fatalf("got %d %s; want %d containing %s", rec.Code, rec.Body.String(), tc.wantStatus, tc.wantBody)
 			}
@@ -125,27 +130,77 @@ func TestListReleasesFiltersAndValidates(t *testing.T) {
 func newRouterOnly(f *fakeStore) http.Handler { r, _ := newRouter(f); return r }
 
 func TestReleasesRequireDuty(t *testing.T) {
+	prod := func(b string) string { return strings.Replace(b, `"stage"`, `"prod"`, 1) }
+	rollback := func(b string) string { return strings.Replace(b, `"promote"`, `"rollback"`, 1) }
 	tests := []struct {
 		name, method, duties string
+		body                 string
 		wantStatus           int
 	}{
-		{"record without duty", http.MethodPost, "", http.StatusForbidden},
-		{"record with view duty only", http.MethodPost, "View platform releases", http.StatusForbidden},
-		{"list without duty", http.MethodGet, "", http.StatusForbidden},
-		{"list with maintain duty only", http.MethodGet, "Maintain platform releases", http.StatusForbidden},
-		{"record with maintain duty", http.MethodPost, "Maintain platform releases", http.StatusCreated},
-		{"list with view duty", http.MethodGet, "View platform releases", http.StatusOK},
+		{"record without duty", http.MethodPost, "", releaseBody(nil), http.StatusForbidden},
+		{"record with view duty only", http.MethodPost, "View platform releases", releaseBody(nil), http.StatusForbidden},
+		{"list without duty", http.MethodGet, "", "", http.StatusForbidden},
+		{"list with maintain duty only", http.MethodGet, "Maintain platform releases", "", http.StatusForbidden},
+		{"stage promote with maintain duty", http.MethodPost, "Maintain platform releases", releaseBody(nil), http.StatusCreated},
+		{"prod promote with maintain duty only", http.MethodPost, "Maintain platform releases", releaseBody(prod), http.StatusForbidden},
+		{"prod promote with approve duty", http.MethodPost, "Approve production promotion", releaseBody(prod), http.StatusCreated},
+		{"stage promote with approve duty only", http.MethodPost, "Approve production promotion", releaseBody(nil), http.StatusForbidden},
+		{"stage rollback with maintain duty only", http.MethodPost, "Maintain platform releases", releaseBody(rollback), http.StatusForbidden},
+		{"stage rollback with rollback duty", http.MethodPost, "Rollback environment", releaseBody(rollback), http.StatusCreated},
+		{"prod rollback with approve duty only", http.MethodPost, "Approve production promotion", releaseBody(func(b string) string { return rollback(prod(b)) }), http.StatusForbidden},
+		{"list with view duty", http.MethodGet, "View platform releases", "", http.StatusOK},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			rec := doRelease(newRouterOnly(&fakeStore{}), tc.method, releasesPath, releaseBody(nil), tc.duties, "")
+			f := &fakeStore{}
+			rec := doRelease(newRouterOnly(f), tc.method, releasesPath, tc.body, tc.duties, "")
 			if rec.Code != tc.wantStatus {
 				t.Fatalf("got %d %s; want %d", rec.Code, rec.Body.String(), tc.wantStatus)
 			}
-			if tc.wantStatus == http.StatusForbidden && !strings.Contains(rec.Body.String(), "AUTH-0003") {
-				t.Fatalf("want AUTH-0003, got %s", rec.Body.String())
+			if tc.wantStatus == http.StatusForbidden && (!strings.Contains(rec.Body.String(), "AUTH-0003") || len(f.releases) != 0) {
+				t.Fatalf("want AUTH-0003 and no write, got %s with %d rows", rec.Body.String(), len(f.releases))
 			}
 		})
+	}
+}
+
+func TestRecordReleaseRestrictedToOperatorTenant(t *testing.T) {
+	tests := []struct {
+		name     string
+		operator string
+		tenantN  int
+		wantBody string
+	}{
+		{"other tenant", testkit.TenantID(1), 2, "restricted to the platform operator tenant"},
+		{"operator unset", "", 1, "PLATFORM_OPERATOR_TENANT_ID is not configured"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeStore{}
+			r := httpx.NewRouter()
+			api.New(f, tc.operator).Register(r)
+			req := httptest.NewRequest(http.MethodPost, releasesPath, strings.NewReader(releaseBody(nil)))
+			req.Header.Set("X-Passage-Tenant", testkit.TenantID(tc.tenantN))
+			req.Header.Set("X-Passage-Duties", "Maintain platform releases,Approve production promotion,Rollback environment")
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, req)
+			if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), tc.wantBody) || len(f.releases) != 0 {
+				t.Fatalf("got %d %s with %d rows; want 403 containing %q and no write", rec.Code, rec.Body.String(), len(f.releases), tc.wantBody)
+			}
+		})
+	}
+}
+
+func TestListReleasesOpenToAnyTenantWithDuty(t *testing.T) {
+	r := httpx.NewRouter()
+	api.New(&fakeStore{}, testkit.TenantID(1)).Register(r)
+	req := httptest.NewRequest(http.MethodGet, releasesPath, nil)
+	req.Header.Set("X-Passage-Tenant", testkit.TenantID(2))
+	req.Header.Set("X-Passage-Duties", "View platform releases")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
 	}
 }
 

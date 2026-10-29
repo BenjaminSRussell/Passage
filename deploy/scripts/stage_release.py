@@ -2,6 +2,7 @@
 """Prepare immutable hello-ledger digest changes for the Argo CD GitOps flow."""
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -9,8 +10,8 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
-import uuid
 from pathlib import Path
 
 
@@ -23,6 +24,7 @@ SERVICE = "hello-ledger"
 API_URL_VARIABLE = "PASSAGE_PLATFORM_API_URL"
 API_TOKEN_VARIABLE = "PASSAGE_PLATFORM_API_TOKEN"
 RECORD_TIMEOUT_SECONDS = 10
+LOCAL_HOSTS = ("localhost", "127.0.0.1")
 PLACEHOLDER_DIGEST = "sha256:" + "0" * 64
 IMAGE_REPOSITORY = "ghcr.io/benjaminsrussell/hello-ledger"
 WORKFLOW_REPOSITORY = "BenjaminSRussell/Passage"
@@ -245,14 +247,28 @@ def rollback(root, env="stage"):
     return current, previous
 
 
-def record_release(env, action, digest, previous, signed):
-    """POST the promote or rollback to the platform-health release registry."""
+def idempotency_key(env, action, digest, git_sha):
+    material = "|".join((env, SERVICE, digest, git_sha, action))
+    return hashlib.sha256(material.encode()).hexdigest()
+
+
+def _api_base():
     base = os.environ.get(API_URL_VARIABLE, "").rstrip("/")
     if not base:
-        raise ReleaseError(f"{API_URL_VARIABLE} is not set")
-    if not base.startswith(("http://", "https://")):
-        raise ReleaseError(f"{API_URL_VARIABLE} must be an http(s) URL")
-    headers = {"Content-Type": "application/json", "Idempotency-Key": str(uuid.uuid4())}
+        return ""
+    parsed = urllib.parse.urlparse(base)
+    local = parsed.scheme == "http" and parsed.hostname in LOCAL_HOSTS
+    if parsed.scheme != "https" and not local:
+        raise ReleaseError(f"{API_URL_VARIABLE} must be https (http is allowed only for localhost or 127.0.0.1)")
+    return base
+
+
+def record_release(base, env, action, digest, previous, git_sha, signed):
+    """POST the merged promote or rollback to the platform-health release registry."""
+    headers = {
+        "Content-Type": "application/json",
+        "Idempotency-Key": idempotency_key(env, action, digest, git_sha),
+    }
     token = os.environ.get(API_TOKEN_VARIABLE)
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -263,6 +279,7 @@ def record_release(env, action, digest, previous, signed):
             "action": action,
             "imageDigest": digest,
             "previousDigest": previous,
+            "gitSha": git_sha,
             "signed": signed,
         }
     ).encode()
@@ -278,16 +295,62 @@ def record_release(env, action, digest, previous, signed):
         raise ReleaseError(f"release API call failed: {error}") from error
 
 
-def _report_release(env, action, digest, previous, signed):
+def _digest_at(root, env, revision):
     try:
-        release_id = record_release(env, action, digest, previous, signed)
-    except ReleaseError as error:
+        return read_digest(_git(root, "show", f"{revision}:{MANIFESTS[env].as_posix()}"))
+    except ReleaseError:
+        return PLACEHOLDER_DIGEST
+
+
+def _was_pinned_before(root, env, digest, revision):
+    path = MANIFESTS[env].as_posix()
+    for line in _git(root, "log", "--first-parent", "--format=%H", revision, "--", path).splitlines():
+        if _digest_at(root, env, line) == digest:
+            return True
+    return False
+
+
+def merged_release(root, env, since):
+    """Return (action, digest, previous, git_sha) for the merged manifest, or None when the digest did not change."""
+    path = _manifest_path(root, env)
+    digest = read_digest(_read_manifest(path))
+    previous = _digest_at(root, env, since)
+    if digest == previous:
+        return None
+    if digest == PLACEHOLDER_DIGEST:
+        raise ReleaseError(f"{env} pins the placeholder digest; nothing to record")
+    action = "rollback" if _was_pinned_before(root, env, digest, since) else "promote"
+    return action, digest, previous, _git(root, "rev-parse", "HEAD")
+
+
+def record(root, env, since):
+    root = Path(root).resolve()
+    base = _api_base()
+    since = since if since and set(since) != {"0"} else "HEAD~1"
+    release = merged_release(root, env, since)
+    if release is None:
+        print(f"{env} digest unchanged since {since}; nothing to record")
+        return 0
+    action, digest, previous, git_sha = release
+    if not base:
         print(
-            f"WARNING: {action} of {env} to {digest} was NOT recorded in the release registry: {error}",
+            f"WARNING: {API_URL_VARIABLE} is not set; {action} of {env} to {digest} was NOT recorded in the release registry",
             file=sys.stderr,
         )
-        return
+        return 0
+    try:
+        verify_image(digest)
+        signed = True
+    except ReleaseError as error:
+        print(f"WARNING: recording {digest} as unsigned: {error}", file=sys.stderr)
+        signed = False
+    try:
+        release_id = record_release(base, env, action, digest, previous, git_sha, signed)
+    except ReleaseError as error:
+        print(f"release not recorded: {error}", file=sys.stderr)
+        return 3
     print(f"recorded {action} release {release_id} for {env}")
+    return 0
 
 
 def main(argv=None, repo_root=None):
@@ -299,27 +362,32 @@ def main(argv=None, repo_root=None):
     promote_parser.add_argument("--skip-verify", action="store_true")
     rollback_parser = commands.add_parser("rollback", help="restore the prior environment digest from Git history")
     rollback_parser.add_argument("--env", choices=sorted(MANIFESTS), required=True)
+    record_parser = commands.add_parser(
+        "record", help="record the merged manifest digest in the release registry (post-merge CI step)"
+    )
+    record_parser.add_argument("--env", choices=sorted(MANIFESTS), required=True)
+    record_parser.add_argument("--since", help="revision the merge started from; defaults to HEAD~1")
     args = parser.parse_args(argv)
     root = Path(repo_root or REPOSITORY_ROOT).resolve()
 
     try:
+        if args.command == "record":
+            return record(root, args.env, args.since)
         if args.command == "promote":
             target = args.to
             previous, current = promote(root, args.digest, target, args.skip_verify)
             print(f"{target} digest: {previous} -> {current}")
-            _report_release(target, "promote", current, previous, not args.skip_verify)
         else:
             target = args.env
             previous, current = rollback(root, target)
             print(f"{target} rollback digest: {previous} -> {current}")
-            _report_release(target, "rollback", current, previous, True)
     except ReleaseError as error:
         print(f"release refused: {error}", file=sys.stderr)
         return 2
 
     print(
-        f"Review and merge this manifest change on main; then verify Argo with: "
-        f"argocd app history hello-ledger-{target}"
+        f"Review and merge this manifest change on main (CI records the release after the merge); "
+        f"then verify Argo with: argocd app history hello-ledger-{target}"
     )
     return 0
 

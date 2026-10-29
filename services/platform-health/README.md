@@ -24,11 +24,27 @@ Local cluster: `make -C deploy deploy-local` (see `docs/runbooks/delivery/deploy
 
 ## API
 
-`POST /v1/hello-ledger/entries` (optional `Idempotency-Key`), `GET /v1/hello-ledger/entries`, `GET /healthz`, `GET /readyz` (database ping, 503 when down), `GET /metrics` on the admin port. `POST /v1/platform/releases` (duty `Maintain platform releases`, optional `Idempotency-Key`) records a promote or rollback and `GET /v1/platform/releases?service=&env=` (duty `View platform releases`) lists them. Contract: `api/openapi.yaml`.
+`POST /v1/hello-ledger/entries` (optional `Idempotency-Key`), `GET /v1/hello-ledger/entries`, `GET /healthz`, `GET /readyz` (database ping, 503 when down), `GET /metrics` on the admin port. `POST /v1/platform/releases` (operator tenant only; duty per environment and action, optional `Idempotency-Key`) records a promote or rollback and `GET /v1/platform/releases?service=&env=` (duty `View platform releases`) lists them. Contract: `api/openapi.yaml`.
 
 ## Releases
 
-`platform_release` is append-only and `platform_environment` (seeded dev, stage, prod) is read-only for `passage_app`. Releases are platform-level, not customer data: rows are stored and read under the nil system tenant (`00000000-0000-0000-0000-000000000000`) server-side, so any caller holding the duty sees every release; the caller's tenant only authenticates the request. Each new release writes `dev.passage.platform.release.promoted.v1` or `dev.passage.platform.release.rolledback.v1` to the `outbox` table in the same transaction (an idempotent replay writes none). The event fires when the release is recorded, not on Argo sync Healthy. `deploy/scripts/stage_release.py` posts these rows when `PASSAGE_PLATFORM_API_URL` is set.
+`platform_release` is append-only and `platform_environment` (seeded dev, stage, prod) is read-only for `passage_app`. Releases are platform-level, not customer data: rows are stored and read under the nil system tenant server-side, so any caller holding `View platform releases` sees every release.
+
+Writes are accepted only when the caller's tenant equals `PLATFORM_OPERATOR_TENANT_ID`; when it is unset every write is 403. Each row stores the caller's tenant and user (`recorded_by_tenant`, `recorded_by_user`) for audit.
+
+The handler checks the duty by environment and action because route-level OPA cannot see the body:
+
+| Request | Duty |
+|---|---|
+| promote to dev or stage | `Maintain platform releases` |
+| promote to prod | `Approve production promotion` |
+| any rollback | `Rollback environment` |
+
+`Idempotency-Key` is scoped per caller tenant. Replaying a key with the same payload returns the original row (201, no new event); a different payload is 409 `COM-0409`.
+
+Each new release writes `dev.passage.platform.release.promoted.v1` or `dev.passage.platform.release.rolledback.v1` to the `outbox` table in the same transaction. The event fires when the release is recorded, not on Argo sync Healthy; Argo Healthy confirmation stays live-only on #213.
+
+Recording happens after merge, not when the manifest is edited: `python3 deploy/scripts/stage_release.py record --env <env> [--since <rev>]` reads the merged manifest (environment, service, digest, git sha), derives promote or rollback from Git history and POSTs it. The `record-release` job in `.github/workflows/ci.yml` runs it on pushes to `main` that touch `deploy/envs/**`. With `PASSAGE_PLATFORM_API_URL` set a failed recording exits 3; unset, it only warns. The URL must be https unless the host is `localhost` or `127.0.0.1`. The idempotency key is the SHA-256 of environment, service, digest, git sha and action, so a CI re-run replays instead of duplicating.
 
 ## Error codes
 
@@ -37,7 +53,8 @@ Local cluster: `make -C deploy deploy-local` (see `docs/runbooks/delivery/deploy
 | COM-0001 | 400 | malformed body, unknown field, `message` not 1 to 280 characters, or an invalid release (service, environment, action, digest, unregistered environment) |
 | COM-0500 | 500 | internal error, detail hidden |
 | AUTH-0001 | 401 | missing or malformed tenant (kernel header middleware) |
-| AUTH-0003 | 403 | missing duty |
+| AUTH-0003 | 403 | missing duty, caller is not the platform operator tenant, or release writes are not configured |
+| COM-0409 | 409 | `Idempotency-Key` reused for a different release |
 
 ## Metrics
 

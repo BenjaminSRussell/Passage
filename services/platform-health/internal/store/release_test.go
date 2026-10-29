@@ -17,6 +17,7 @@ import (
 const (
 	digestA = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	digestB = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	gitSHA  = "0123456789abcdef0123456789abcdef01234567"
 )
 
 func principal(n int, user string) context.Context {
@@ -24,7 +25,7 @@ func principal(n int, user string) context.Context {
 }
 
 func release(env, action, image, previous string) store.Release {
-	return store.Release{Service: "hello-ledger", Environment: env, Action: action, ImageDigest: image, PreviousDigest: previous, Signed: true}
+	return store.Release{Service: "hello-ledger", Environment: env, Action: action, ImageDigest: image, PreviousDigest: previous, GitSHA: gitSHA, Signed: true}
 }
 
 func TestReleases_RecordListAndEvents(t *testing.T) {
@@ -42,9 +43,16 @@ func TestReleases_RecordListAndEvents(t *testing.T) {
 	if promoted.Actor != "zach" || promoted.Action != "promote" || !promoted.Signed {
 		t.Fatalf("unexpected release %+v", promoted)
 	}
-	replay, err := s.RecordRelease(ctx, release("stage", store.ActionPromote, digestA, digestB), "key-1")
-	if err != nil || replay.ID != promoted.ID || replay.ImageDigest != digestB {
+	replay, err := s.RecordRelease(ctx, release("stage", store.ActionPromote, digestB, digestA), "key-1")
+	if err != nil || replay.ID != promoted.ID {
 		t.Fatalf("idempotent replay must return the original, got %+v, %v", replay, err)
+	}
+	if _, err := s.RecordRelease(ctx, release("stage", store.ActionPromote, digestA, digestB), "key-1"); !errors.Is(err, store.ErrIdempotencyConflict) {
+		t.Fatalf("replay with a different payload: err = %v, want ErrIdempotencyConflict", err)
+	}
+	recordedByOther, err := s.RecordRelease(principal(2, "x"), release("stage", store.ActionPromote, digestA, digestB), "key-1")
+	if err != nil || recordedByOther.ID == promoted.ID || recordedByOther.ImageDigest != digestA {
+		t.Fatalf("idempotency keys are scoped per caller tenant, got %+v, %v", recordedByOther, err)
 	}
 	rolledBack := release("stage", store.ActionRollback, digestA, digestB)
 	rolledBack.Reason = "bad deploy"
@@ -56,20 +64,25 @@ func TestReleases_RecordListAndEvents(t *testing.T) {
 	}
 
 	all, err := s.ListReleases(ctx, "", "")
-	if err != nil || len(all) != 3 {
-		t.Fatalf("list all = %d, %v; want 3 (replay must not add a row)", len(all), err)
+	if err != nil || len(all) != 4 {
+		t.Fatalf("list all = %d, %v; want 4 (replay must not add a row)", len(all), err)
 	}
 	if all[0].Environment != "prod" {
 		t.Fatalf("newest first, got %+v", all[0])
 	}
-	if stage, _ := s.ListReleases(ctx, "hello-ledger", "stage"); len(stage) != 2 {
-		t.Fatalf("stage filter = %d, want 2", len(stage))
+	if stage, _ := s.ListReleases(ctx, "hello-ledger", "stage"); len(stage) != 3 {
+		t.Fatalf("stage filter = %d, want 3", len(stage))
 	}
 	if other, _ := s.ListReleases(ctx, "other-service", ""); len(other) != 0 {
 		t.Fatalf("service filter = %d, want 0", len(other))
 	}
-	if otherTenant, err := s.ListReleases(principal(2, "x"), "", ""); err != nil || len(otherTenant) != 3 {
+	if otherTenant, err := s.ListReleases(principal(2, "x"), "", ""); err != nil || len(otherTenant) != 4 {
 		t.Fatalf("releases are platform-level and visible to any caller with the duty, got %d, %v", len(otherTenant), err)
+	}
+
+	var audited int
+	if err := admin.QueryRow(context.Background(), `select count(*) from platform_release where recorded_by_tenant = $1::uuid and recorded_by_user = 'zach' and git_sha = $2`, testkit.TenantID(1), gitSHA).Scan(&audited); err != nil || audited != 2 {
+		t.Fatalf("rows recorded by tenant 1 / zach = %d, %v; want 2", audited, err)
 	}
 
 	rows, err := admin.Query(context.Background(), `select type, tenant_id::text, aggregate_id, payload->>'actor', payload->'data'->>'previous_digest' from outbox order by created_at, id`)
@@ -88,7 +101,7 @@ func TestReleases_RecordListAndEvents(t *testing.T) {
 		}
 		types = append(types, typ)
 	}
-	want := "dev.passage.platform.release.promoted.v1,dev.passage.platform.release.rolledback.v1,dev.passage.platform.release.promoted.v1"
+	want := "dev.passage.platform.release.promoted.v1,dev.passage.platform.release.promoted.v1,dev.passage.platform.release.rolledback.v1,dev.passage.platform.release.promoted.v1"
 	if strings.Join(types, ",") != want {
 		t.Fatalf("outbox types = %v, want one event per recorded release and none for the replay", types)
 	}
@@ -120,7 +133,7 @@ func TestReleases_AppRoleIsAppendOnlyAndScoped(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, sql := range []string{
-		`update platform_release set actor = 'x'`,
+		`update platform_release set recorded_by_user = 'x'`,
 		`delete from platform_release`,
 		`update outbox set type = 'x'`,
 		`delete from outbox`,

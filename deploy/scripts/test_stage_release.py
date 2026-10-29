@@ -556,17 +556,35 @@ class StageReleaseTests(unittest.TestCase):
         os.environ[stage_release.API_URL_VARIABLE] = f"http://127.0.0.1:{server.server_port}"
         return received
 
-    def test_promote_records_a_release_row(self):
+    def record(self, env="stage", since=None):
+        argv = ["record", "--env", env] + (["--since", since] if since else [])
+        return self.run_cli(argv)
+
+    def test_promote_and_rollback_edits_record_nothing(self):
+        received = self.start_release_api()
+
+        self.run_cli(["promote", "--to", "stage", "--digest", PROMOTED_DIGEST])
+        self.commit("Promote hello-ledger to stage")
+        self.run_cli(["rollback", "--env", "stage"])
+
+        self.assertEqual(received, [])
+
+    def test_record_posts_the_merged_promotion(self):
         received = self.start_release_api()
         os.environ[stage_release.API_TOKEN_VARIABLE] = "secret-token"
+        self.publish_main(stage=PROMOTED_DIGEST)
 
-        result, _ = self.run_cli(["promote", "--to", "stage", "--digest", PROMOTED_DIGEST])
+        result, _ = self.record()
 
         self.assertEqual(result, 0)
         self.assertEqual(len(received), 1)
         self.assertEqual(received[0]["path"], "/v1/platform/releases")
         self.assertEqual(received[0]["headers"]["Authorization"], "Bearer secret-token")
-        self.assertTrue(received[0]["headers"]["Idempotency-Key"])
+        git_sha = self.run_git("rev-parse", "HEAD")
+        self.assertEqual(
+            received[0]["headers"]["Idempotency-Key"],
+            stage_release.idempotency_key("stage", "promote", PROMOTED_DIGEST, git_sha),
+        )
         self.assertEqual(
             received[0]["body"],
             {
@@ -575,75 +593,109 @@ class StageReleaseTests(unittest.TestCase):
                 "action": "promote",
                 "imageDigest": PROMOTED_DIGEST,
                 "previousDigest": INITIAL_DIGEST,
+                "gitSha": git_sha,
                 "signed": True,
             },
         )
+        self.assertEqual(len(self.cosign_calls()), 2)
 
-    def test_skip_verify_promotion_is_recorded_unsigned(self):
+    def test_record_classifies_a_return_to_an_earlier_digest_as_rollback(self):
         received = self.start_release_api()
+        self.publish_main(stage=PROMOTED_DIGEST)
+        self.publish_main(stage=INITIAL_DIGEST)
 
-        self.run_cli(["promote", "--to", "stage", "--digest", PROMOTED_DIGEST, "--skip-verify"])
+        self.record()
 
-        self.assertIs(received[0]["body"]["signed"], False)
+        body = received[0]["body"]
+        self.assertEqual((body["action"], body["imageDigest"], body["previousDigest"]), ("rollback", INITIAL_DIGEST, PROMOTED_DIGEST))
 
-    def test_rollback_records_a_release_row(self):
+    def test_record_covers_every_commit_since_the_given_revision(self):
         received = self.start_release_api()
-        self.run_cli(["promote", "--to", "stage", "--digest", PROMOTED_DIGEST])
-        self.commit("Promote hello-ledger to stage")
+        before = self.run_git("rev-parse", "HEAD")
+        self.publish_main(stage=PROMOTED_DIGEST)
+        self.publish_main(stage=PROMOTED_DIGEST, note="doc only")
 
-        result, _ = self.run_cli(["rollback", "--env", "stage"])
+        self.record(since=before)
 
-        self.assertEqual(result, 0)
-        self.assertEqual(
-            [(r["body"]["action"], r["body"]["imageDigest"], r["body"]["previousDigest"]) for r in received],
-            [("promote", PROMOTED_DIGEST, INITIAL_DIGEST), ("rollback", INITIAL_DIGEST, PROMOTED_DIGEST)],
-        )
+        self.assertEqual(received[0]["body"]["previousDigest"], INITIAL_DIGEST)
+        self.assertEqual(received[0]["body"]["action"], "promote")
 
-    def test_prod_promotion_is_recorded_for_prod(self):
+    def test_record_prod_promotion(self):
         received = self.start_release_api()
         self.publish_main(stage=PROMOTED_DIGEST, prod=stage_release.PLACEHOLDER_DIGEST)
+        self.publish_main(prod=PROMOTED_DIGEST)
 
-        result, _ = self.promote_prod()
+        result, _ = self.record("prod")
 
         self.assertEqual(result, 0)
         self.assertEqual(received[0]["body"]["environment"], "prod")
         self.assertEqual(received[0]["body"]["previousDigest"], stage_release.PLACEHOLDER_DIGEST)
 
-    def test_rejected_release_api_warns_but_keeps_the_manifest_change(self):
-        self.start_release_api(status=400, body={"code": "COM-0001"})
-
-        result, errors = self.run_cli(["promote", "--to", "stage", "--digest", PROMOTED_DIGEST])
-
-        self.assertEqual(result, 0)
-        self.assertEqual(self.digest(), PROMOTED_DIGEST)
-        self.assertIn("NOT recorded", errors)
-        self.assertIn("answered 400", errors)
-
-    def test_unreachable_release_api_warns_but_keeps_the_manifest_change(self):
-        os.environ[stage_release.API_URL_VARIABLE] = "http://127.0.0.1:1"
-
-        result, errors = self.run_cli(["promote", "--to", "stage", "--digest", PROMOTED_DIGEST])
-
-        self.assertEqual(result, 0)
-        self.assertEqual(self.digest(), PROMOTED_DIGEST)
-        self.assertIn("NOT recorded", errors)
-
-    def test_unset_release_api_warns_and_non_http_url_is_refused(self):
-        _, errors = self.run_cli(["promote", "--to", "stage", "--digest", PROMOTED_DIGEST])
-        self.assertIn(f"{stage_release.API_URL_VARIABLE} is not set", errors)
-
-        os.environ[stage_release.API_URL_VARIABLE] = "file:///etc/passwd"
-        with self.assertRaises(stage_release.ReleaseError):
-            stage_release.record_release("stage", "promote", PROMOTED_DIGEST, INITIAL_DIGEST, True)
-
-    def test_refused_promotion_records_nothing(self):
+    def test_record_skips_when_the_digest_did_not_change(self):
         received = self.start_release_api()
+        self.publish_main(stage=INITIAL_DIGEST, note="doc only")
+
+        result, _ = self.record()
+
+        self.assertEqual(result, 0)
+        self.assertEqual(received, [])
+
+    def test_record_marks_an_unverifiable_image_unsigned(self):
+        received = self.start_release_api()
+        self.publish_main(stage=PROMOTED_DIGEST)
         self.install_cosign_stub(fail_on="verify")
 
-        result, _ = self.run_cli(["promote", "--to", "stage", "--digest", PROMOTED_DIGEST])
+        result, errors = self.record()
 
+        self.assertEqual(result, 0)
+        self.assertIs(received[0]["body"]["signed"], False)
+        self.assertIn("unsigned", errors)
+
+    def test_record_fails_with_exit_3_when_the_api_rejects_or_is_unreachable(self):
+        self.publish_main(stage=PROMOTED_DIGEST)
+        self.start_release_api(status=400, body={"code": "COM-0001"})
+        result, errors = self.record()
+        self.assertEqual(result, 3)
+        self.assertIn("answered 400", errors)
+
+        os.environ[stage_release.API_URL_VARIABLE] = "http://127.0.0.1:1"
+        result, errors = self.record()
+        self.assertEqual(result, 3)
+        self.assertIn("release not recorded", errors)
+
+    def test_record_without_an_api_url_only_warns(self):
+        self.publish_main(stage=PROMOTED_DIGEST)
+
+        result, errors = self.record()
+
+        self.assertEqual(result, 0)
+        self.assertIn(f"{stage_release.API_URL_VARIABLE} is not set", errors)
+
+    def test_record_requires_https_except_for_localhost(self):
+        self.publish_main(stage=PROMOTED_DIGEST)
+        os.environ[stage_release.API_URL_VARIABLE] = "http://platform.example.com"
+        result, errors = self.record()
         self.assertEqual(result, 2)
-        self.assertEqual(received, [])
+        self.assertIn("must be https", errors)
+
+        for allowed in ("https://platform.example.com/", "http://localhost:8080", "http://127.0.0.1:8080"):
+            os.environ[stage_release.API_URL_VARIABLE] = allowed
+            self.assertEqual(stage_release._api_base(), allowed.rstrip("/"))
+        os.environ[stage_release.API_URL_VARIABLE] = "file:///etc/passwd"
+        with self.assertRaises(stage_release.ReleaseError):
+            stage_release._api_base()
+
+    def test_idempotency_key_is_deterministic_and_changes_with_every_input(self):
+        sha = "1" * 40
+        key = stage_release.idempotency_key("stage", "promote", PROMOTED_DIGEST, sha)
+        self.assertEqual(key, stage_release.idempotency_key("stage", "promote", PROMOTED_DIGEST, sha))
+        for other in (
+            ("prod", "promote", PROMOTED_DIGEST, sha),
+            ("stage", "rollback", PROMOTED_DIGEST, sha),
+            ("stage", "promote", INITIAL_DIGEST, sha),
+            ("stage", "promote", PROMOTED_DIGEST, "2" * 40),
+        ):
+            self.assertNotEqual(key, stage_release.idempotency_key(*other))
 
 
 if __name__ == "__main__":

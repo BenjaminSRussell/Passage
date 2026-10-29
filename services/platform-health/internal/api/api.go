@@ -28,13 +28,16 @@ const (
 	dutyRead         = "hello.read"
 	dutyReleaseWrite = "Maintain platform releases"
 	dutyReleaseRead  = "View platform releases"
+	dutyApproveProd  = "Approve production promotion"
+	dutyRollback     = "Rollback environment"
 )
 
 type API struct {
-	store   store.Store
-	created atomic.Int64
-	failed  atomic.Int64
-	http    requestMetrics
+	store          store.Store
+	operatorTenant string
+	created        atomic.Int64
+	failed         atomic.Int64
+	http           requestMetrics
 
 	releasesRecorded atomic.Int64
 	releasesFailed   atomic.Int64
@@ -44,13 +47,26 @@ type createRequest struct {
 	Message string `json:"message"`
 }
 
-func New(s store.Store) *API { return &API{store: s, http: newRequestMetrics()} }
+func New(s store.Store, operatorTenant string) *API {
+	return &API{store: s, operatorTenant: operatorTenant, http: newRequestMetrics()}
+}
+
+type anyDutyPolicy []string
+
+func (d anyDutyPolicy) Allow(_ context.Context, p tenant.Principal, _, _ string) (bool, error) {
+	for _, duty := range d {
+		if p.HasDuty(duty) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
 
 func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutyWrite)).Post("/v1/hello-ledger/entries", a.create)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/hello-ledger/entries", a.list)
-	r.With(authz.RequireDuty(dutyReleaseWrite)).Post("/v1/platform/releases", a.recordRelease)
+	r.With(authz.Require(anyDutyPolicy{dutyReleaseWrite, dutyApproveProd, dutyRollback}, dutyReleaseWrite, "")).Post("/v1/platform/releases", a.recordRelease)
 	r.With(authz.RequireDuty(dutyReleaseRead)).Get("/v1/platform/releases", a.listReleases)
 }
 
@@ -115,14 +131,19 @@ func (a *API) list(w http.ResponseWriter, r *http.Request) {
 }
 
 func validTenant(w http.ResponseWriter, r *http.Request) bool {
+	_, ok := validPrincipal(w, r)
+	return ok
+}
+
+func validPrincipal(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) {
 	p, ok := tenant.FromContext(r.Context())
 	if !ok || !ids.Valid(p.TenantID) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "missing or malformed tenant"))
-		return false
+		return p, false
 	}
 	if p.LegalEntityID != "" && !ids.Valid(p.LegalEntityID) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "legal entity must be a single UUID"))
-		return false
+		return p, false
 	}
-	return true
+	return p, true
 }

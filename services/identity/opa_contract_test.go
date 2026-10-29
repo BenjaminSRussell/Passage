@@ -296,6 +296,10 @@ func TestDutyContractExpectations(t *testing.T) {
 		{duty: "pii.read", method: http.MethodGet, resource: "/v1/party/parties/p1", wantDutyMissing: "party.read"},
 		{duty: "party.approve", method: http.MethodPut, resource: "/v1/party/legal-entities/le1/protected-fields", wantDutyMissing: "party.approval_policy.write"},
 		{duty: "party.approval_policy.write", method: http.MethodPut, resource: "/v1/party/legal-entities/le1/protected-fields", wantAllowed: true},
+		{duty: "Approve production promotion", method: http.MethodPost, resource: "/v1/platform/releases", wantAllowed: true},
+		{duty: "Rollback environment", method: http.MethodPost, resource: "/v1/platform/releases", wantAllowed: true},
+		{duty: "View platform releases", method: http.MethodPost, resource: "/v1/platform/releases"},
+		{duty: "Rollback environment", method: http.MethodGet, resource: "/v1/platform/releases"},
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("%s/%s %s", tt.duty, tt.method, tt.resource), func(t *testing.T) {

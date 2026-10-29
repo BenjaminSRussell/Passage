@@ -67,7 +67,7 @@ func (f *fakeStore) List(context.Context) ([]store.Entry, error) {
 func (f *fakeStore) Ping(context.Context) error { return f.pingErr }
 
 func newRouter(f *fakeStore) (*chi.Mux, *api.API) {
-	a := api.New(f)
+	a := api.New(f, testkit.TenantID(1))
 	r := httpx.NewRouter()
 	a.Register(r)
 	return r, a

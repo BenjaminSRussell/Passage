@@ -63,6 +63,9 @@ segregation_denials := [
 	["ledger.journal.read", "GET", "/v1/reporting/runs/r1/outputs/pdf"],
 	["reporting.statement.view", "GET", "/v1/reporting/runs/r1/cells/a/b/lines"],
 	["reporting.statement.view", "GET", "/v1/reporting/definitions/d1/export"],
+	["View platform releases", "POST", "/v1/platform/releases"],
+	["Approve production promotion", "GET", "/v1/platform/releases"],
+	["Rollback environment", "DELETE", "/v1/platform/releases/r1"],
 ]
 
 test_narrow_duties_cannot_reach_verb_routes if {
@@ -84,6 +87,9 @@ segregation_grants := [
 	["RFQAward", "POST", "/v1/procurement/rfqs/q1:award"],
 	["ledger.journal.read", "GET", "/v1/reporting/runs/r1/cells/a/b/lines"],
 	["reporting.definition.maintain", "GET", "/v1/reporting/definitions/d1/export"],
+	["Approve production promotion", "POST", "/v1/platform/releases"],
+	["Rollback environment", "POST", "/v1/platform/releases"],
+	["Maintain platform releases", "POST", "/v1/platform/releases"],
 ]
 
 test_verb_routes_granted_to_their_own_duty if {

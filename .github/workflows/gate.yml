@@ -47,6 +47,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.run == 'true' || startsWith(github.ref, 'refs/tags/')
     uses: ./.github/workflows/ci.yml
+    secrets: inherit
     with:
       go: ${{ needs.changes.outputs.go == 'true' || startsWith(github.ref, 'refs/tags/') }}
       web: ${{ needs.changes.outputs.web == 'true' }}

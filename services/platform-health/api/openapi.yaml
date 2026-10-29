@@ -46,7 +46,7 @@ paths:
     post:
       operationId: recordRelease
       x-passage-duty: Maintain platform releases
-      description: Records one promote or rollback of an image digest. Platform-level data stored under the nil system tenant; the caller's tenant only authenticates the call. Emits dev.passage.platform.release.promoted.v1 or dev.passage.platform.release.rolledback.v1 through the outbox.
+      description: Records one promote or rollback of an image digest. Accepted only from the platform operator tenant (PLATFORM_OPERATOR_TENANT_ID; all writes are 403 while unset). Needs Maintain platform releases for dev or stage promotions, Approve production promotion for prod promotions and Rollback environment for rollbacks. Idempotency-Key is scoped to the caller tenant; reusing it with a different payload is 409. Platform-level data stored under the nil system tenant; the caller's tenant and user are kept for audit. Emits dev.passage.platform.release.promoted.v1 or dev.passage.platform.release.rolledback.v1 through the outbox.
       parameters:
         - name: Idempotency-Key
           in: header
@@ -66,6 +66,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
     get:
       operationId: listReleases
@@ -133,18 +134,19 @@ components:
     RecordRelease:
       type: object
       additionalProperties: false
-      required: [service, environment, action, imageDigest, previousDigest]
+      required: [service, environment, action, imageDigest, previousDigest, gitSha]
       properties:
         service: { type: string, pattern: '^[a-z][a-z0-9-]{0,62}$' }
         environment: { type: string, pattern: '^[a-z][a-z0-9-]{0,62}$', description: A registered platform environment (dev, stage, prod). }
         action: { type: string, enum: [promote, rollback] }
         imageDigest: { type: string, pattern: '^sha256:[0-9a-f]{64}$', description: Digest now pinned. }
         previousDigest: { type: string, pattern: '^sha256:[0-9a-f]{64}$', description: Digest it replaced; must differ from imageDigest. }
+        gitSha: { type: string, pattern: '^[0-9a-f]{40}$', description: Commit that produced the build. }
         signed: { type: boolean, description: True when cosign signature and SBOM attestation were verified. }
         reason: { type: string, maxLength: 280 }
     Release:
       type: object
-      required: [id, service, environment, action, imageDigest, previousDigest, signed, actor, createdAt]
+      required: [id, service, environment, action, imageDigest, previousDigest, gitSha, signed, actor, createdAt]
       properties:
         id: { type: string, format: uuid }
         service: { type: string }
@@ -152,6 +154,7 @@ components:
         action: { type: string, enum: [promote, rollback] }
         imageDigest: { type: string }
         previousDigest: { type: string }
+        gitSha: { type: string }
         signed: { type: boolean }
         actor: { type: string }
         reason: { type: string }

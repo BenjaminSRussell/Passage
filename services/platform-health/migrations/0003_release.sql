@@ -22,13 +22,15 @@ CREATE TABLE IF NOT EXISTS platform_release (
   action text NOT NULL CHECK (action IN ('promote', 'rollback')),
   image_digest text NOT NULL CHECK (image_digest ~ '^sha256:[0-9a-f]{64}$'),
   previous_digest text NOT NULL CHECK (previous_digest ~ '^sha256:[0-9a-f]{64}$' AND previous_digest <> image_digest),
+  git_sha text NOT NULL CHECK (git_sha ~ '^[0-9a-f]{40}$'),
   signed boolean NOT NULL,
-  actor text NOT NULL,
+  recorded_by_tenant uuid NOT NULL,
+  recorded_by_user text NOT NULL,
   reason text,
   idempotency_key text,
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (tenant_id, id),
-  UNIQUE (tenant_id, idempotency_key),
+  UNIQUE (recorded_by_tenant, idempotency_key),
   FOREIGN KEY (tenant_id, environment) REFERENCES platform_environment (tenant_id, name)
 );
 CREATE INDEX IF NOT EXISTS platform_release_service_created_idx ON platform_release (tenant_id, service, created_at DESC, id DESC);

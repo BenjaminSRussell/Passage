@@ -12,13 +12,19 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/platform-health/internal/store"
 )
 
-const maxReasonLength = 280
+const (
+	maxReasonLength = 280
+	prodEnvironment = "prod"
+)
 
 var (
 	digestPattern  = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+	gitSHAPattern  = regexp.MustCompile(`^[0-9a-f]{40}$`)
 	namePattern    = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
 	releaseActions = map[string]bool{store.ActionPromote: true, store.ActionRollback: true}
 )
@@ -29,12 +35,14 @@ type recordReleaseRequest struct {
 	Action         string `json:"action"`
 	ImageDigest    string `json:"imageDigest"`
 	PreviousDigest string `json:"previousDigest"`
+	GitSHA         string `json:"gitSha"`
 	Signed         bool   `json:"signed"`
 	Reason         string `json:"reason"`
 }
 
 func (a *API) recordRelease(w http.ResponseWriter, r *http.Request) {
-	if !validTenant(w, r) {
+	p, ok := validPrincipal(w, r)
+	if !ok || !a.isOperator(w, r, p) {
 		return
 	}
 	var req recordReleaseRequest
@@ -47,12 +55,20 @@ func (a *API) recordRelease(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", detail))
 		return
 	}
+	if duty := requiredReleaseDuty(req); !p.HasDuty(duty) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "missing duty "+duty))
+		return
+	}
 	release, err := a.store.RecordRelease(r.Context(), store.Release{
 		Service: req.Service, Environment: req.Environment, Action: req.Action, ImageDigest: req.ImageDigest,
-		PreviousDigest: req.PreviousDigest, Signed: req.Signed, Reason: req.Reason,
+		PreviousDigest: req.PreviousDigest, GitSHA: req.GitSHA, Signed: req.Signed, Reason: req.Reason,
 	}, r.Header.Get(idempotencyKey))
 	if errors.Is(err, store.ErrUnknownEnvironment) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "environment is not registered"))
+		return
+	}
+	if errors.Is(err, store.ErrIdempotencyConflict) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusConflict, "COM-0409", "Idempotency-Key was already used for a different release"))
 		return
 	}
 	if err != nil {
@@ -65,6 +81,33 @@ func (a *API) recordRelease(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, release)
 }
 
+func (a *API) isOperator(w http.ResponseWriter, r *http.Request, p tenant.Principal) bool {
+	switch {
+	case a.operatorTenant == "":
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "release writes are disabled: PLATFORM_OPERATOR_TENANT_ID is not configured"))
+	case caller(p) != a.operatorTenant:
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "release writes are restricted to the platform operator tenant"))
+	default:
+		return true
+	}
+	return false
+}
+
+func caller(p tenant.Principal) string {
+	canonical, _ := ids.Canonical(p.TenantID)
+	return canonical
+}
+
+func requiredReleaseDuty(req recordReleaseRequest) string {
+	switch {
+	case req.Action == store.ActionRollback:
+		return dutyRollback
+	case req.Environment == prodEnvironment:
+		return dutyApproveProd
+	}
+	return dutyReleaseWrite
+}
+
 func validateRelease(req recordReleaseRequest) string {
 	switch {
 	case !namePattern.MatchString(req.Service):
@@ -75,6 +118,8 @@ func validateRelease(req recordReleaseRequest) string {
 		return "action must be promote or rollback"
 	case !digestPattern.MatchString(req.ImageDigest), !digestPattern.MatchString(req.PreviousDigest):
 		return "imageDigest and previousDigest must be sha256:<64 lowercase hex characters>"
+	case !gitSHAPattern.MatchString(req.GitSHA):
+		return "gitSha must be 40 lowercase hex characters"
 	case req.ImageDigest == req.PreviousDigest:
 		return "imageDigest must differ from previousDigest"
 	case utf8.RuneCountInString(req.Reason) > maxReasonLength:
