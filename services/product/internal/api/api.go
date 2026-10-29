@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -100,6 +101,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyConfigure)).Post("/v1/product/configuration-models/{id}:solve", a.solve)
 	r.With(authz.RequireDuty(dutyView)).Get("/v1/product/barcodes/{gtin}", a.barcode)
 	r.With(authz.RequireDuty(dutyJobs)).Post("/v1/product/jobs/group-change", a.groupChange)
+	r.With(authz.RequireDuty(dutyView)).Get("/v1/product/released-products", a.listReleased)
 }
 
 func (a *API) Metrics() http.Handler {
@@ -282,6 +284,7 @@ func (a *API) getProduct(w http.ResponseWriter, r *http.Request) {
 
 type explodeRequest struct {
 	Selected map[string][]string `json:"selected"`
+	Limit    int                 `json:"limit"`
 }
 
 func (a *API) explode(w http.ResponseWriter, r *http.Request) {
@@ -295,14 +298,18 @@ func (a *API) explode(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	res, err := a.store.ExplodeVariants(r.Context(), chi.URLParam(r, "id"), req.Selected)
+	if req.Limit < 0 || req.Limit > store.MaxPage {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "limit must be 0 to 500"))
+		return
+	}
+	res, err := a.store.ExplodeVariants(r.Context(), chi.URLParam(r, "id"), req.Selected, req.Limit)
 	if err != nil {
 		a.failed.Add(1)
 		httpx.Fail(w, r, err)
 		return
 	}
 	a.exploded.Add(1)
-	httpx.JSON(w, http.StatusOK, map[string]any{"created": len(res.Created), "skipped": len(res.Skipped), "variants": res.Created})
+	httpx.JSON(w, http.StatusOK, map[string]any{"created": len(res.Created), "skipped": len(res.Skipped), "remaining": res.Remaining, "variants": res.Created})
 }
 
 func (a *API) lookup(w http.ResponseWriter, r *http.Request) {
@@ -621,6 +628,40 @@ func (a *API) groupChange(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"items": domain.RunGroupChange(req.Items, nil)})
+}
+
+func (a *API) listReleased(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	after := r.URL.Query().Get("after")
+	if after != "" && !ids.Valid(after) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "after must be a UUID"))
+		return
+	}
+	limit := store.MaxPage
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > store.MaxPage {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "limit must be 1 to 500"))
+			return
+		}
+		limit = n
+	}
+	found, err := a.store.ListReleasedIDs(r.Context(), after, limit)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	items := make([]map[string]string, len(found))
+	for i, id := range found {
+		items[i] = map[string]string{"id": id}
+	}
+	next := ""
+	if len(found) == limit {
+		next = found[len(found)-1]
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": items, "next": next})
 }
 
 type placement struct {
