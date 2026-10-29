@@ -20,7 +20,7 @@ spec:
         serviceUrls:
           ledger: http://ledger.hello-ledger.svc:8080
           close: http://close.hello-ledger.svc:8080
-          purchasing: http://purchasing.hello-ledger.svc:8080
+          purchasing: http://purchasing-purchasing.hello-ledger.svc
         postingProfile:
           ledgerId: 00000000-0000-4000-8000-000000000001
           inventoryAccount: "1400"
