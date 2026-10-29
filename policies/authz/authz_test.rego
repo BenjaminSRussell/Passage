@@ -22,7 +22,7 @@ has_route_permissions(spec) if {
 }
 
 test_all_seeded_duties_allow_their_declared_permissions if {
-	count(data.duties) == 100
+	count(data.duties) == 101
 	every duty, spec in data.duties {
 		has_route_permissions(spec)
 		every permission in spec.permissions {
@@ -367,6 +367,13 @@ test_view_exchange_rates_can_convert if {
 	}
 		with data.assignments as {"tenant-a": {"user-a": ["View exchange rates"]}}
 	result.allow
+}
+
+test_administer_exchange_rates_allows_only_provider_import if {
+	allowed("Administer exchange rates", "POST", "/v1/fx/providers/ecb:import")
+	not allowed("Administer exchange rates", "GET", "/v1/fx/providers/ecb:import")
+	not allowed("Administer exchange rates", "POST", "/v1/fx/rates")
+	not allowed("Maintain exchange rates", "POST", "/v1/fx/providers/ecb:import")
 }
 
 test_payment_file_preview_duty_allows_only_its_route if {

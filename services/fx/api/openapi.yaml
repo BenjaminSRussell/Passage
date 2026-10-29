@@ -176,6 +176,50 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem', description: 'LEDGER_RATE_MISSING; FX_RATE_DATE_FUTURE.' }
         '500': { $ref: '#/components/responses/Problem' }
+  /v1/fx/providers/{p}:import:
+    parameters:
+      - { name: p, in: path, required: true, schema: { type: string, enum: [ecb, openexchangerates] } }
+    post:
+      operationId: importProviderRates
+      x-passage-duty: Administer exchange rates
+      description: Runs the provider import now for one rate type and day (default today, UTC), through the same importer as the schedule. Idempotent per provider, rate type and day; a day that already succeeded returns that run with alreadyDone true. A provider outage with a last-known rate returns degraded true.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rateType]
+              additionalProperties: false
+              properties:
+                rateType: { type: string }
+                date: { type: string, format: date }
+      responses:
+        '200':
+          description: Run summary.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [runId, provider, rateType, date, attempts, imported, unchanged, alreadyDone, degraded]
+                properties:
+                  runId: { type: string }
+                  provider: { type: string }
+                  rateType: { type: string }
+                  date: { type: string, format: date }
+                  attempts: { type: integer }
+                  imported: { type: integer }
+                  unchanged: { type: integer }
+                  alreadyDone: { type: boolean }
+                  degraded: { type: boolean }
+                  lastSuccessAt: { type: string, format: date-time }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001 malformed body; FX_RATE_INVALID unknown rate type.' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem', description: FX_PROVIDER_UNKNOWN }
+        '422': { $ref: '#/components/responses/Problem', description: 'FX_PROVIDER_UNAVAILABLE provider has no credentials; FX_RATE_DATE_FUTURE.' }
+        '500': { $ref: '#/components/responses/Problem' }
+        '502': { $ref: '#/components/responses/Problem', description: FX_PROVIDER_FAILED provider failed and no last-known rate exists. }
   /healthz:
     get:
       operationId: liveness

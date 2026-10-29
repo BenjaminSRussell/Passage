@@ -6,6 +6,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/fx/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/fx/internal/importer"
 	"github.com/BenjaminSRussell/passage/services/fx/internal/provider"
 )
 
@@ -20,6 +21,7 @@ var sentinelProblems = []struct {
 	{domain.ErrRoundingExceeded, http.StatusUnprocessableEntity, "LEDGER_ROUNDING_EXCEEDED"},
 	{domain.ErrUnbalanced, http.StatusUnprocessableEntity, "LEDGER_UNBALANCED"},
 	{provider.ErrDisabled, http.StatusUnprocessableEntity, "FX_PROVIDER_UNAVAILABLE"},
+	{importer.ErrNoLastKnownRate, http.StatusBadGateway, "FX_PROVIDER_FAILED"},
 }
 
 func toProblem(err error) error {

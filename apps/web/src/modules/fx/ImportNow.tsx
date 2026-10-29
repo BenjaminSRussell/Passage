@@ -1,0 +1,46 @@
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Alert, Button, Card } from "../../shell/ui";
+import { importNow, type ImportRun, type RateType } from "./api/client";
+import { ApiFailure } from "./formSupport";
+import styles from "./pages.module.css";
+
+const DUTY = "Administer exchange rates";
+
+function summary(run: ImportRun): { title: string; message: string; tone: "success" | "warning" } {
+  if (run.degraded) {
+    return { title: "The provider is unavailable", message: `No new rates were stored. Lookups keep using the last imported rates${run.lastSuccessAt ? ` from ${run.lastSuccessAt}` : ""}.`, tone: "warning" };
+  }
+  if (run.alreadyDone) {
+    return { title: "Already imported", message: `${run.provider} rates for ${run.date} were imported earlier, so nothing changed.`, tone: "success" };
+  }
+  return { title: "Import finished", message: `${run.imported} rate${run.imported === 1 ? "" : "s"} stored and ${run.unchanged} unchanged from ${run.provider} for ${run.date}.`, tone: "success" };
+}
+
+export function ImportNow({ rateType }: { rateType: RateType | undefined }) {
+  const queryClient = useQueryClient();
+  const run = useMutation({
+    mutationFn: ({ provider, code }: { provider: string; code: string }) => importNow(provider, code),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["fx", "history"] });
+    },
+  });
+  const provider = rateType?.provider;
+  if (!rateType || !provider) return null;
+  const result = run.data ? summary(run.data) : null;
+  return (
+    <Card title={`Import ${rateType.code} now`}>
+      <div className={styles.stack}>
+        <p>{`Fetch today's rates from ${provider} now instead of waiting for the schedule. Running it again the same day changes nothing.`}</p>
+        <div className={styles.formActions}>
+          <Button variant="secondary" loading={run.isPending} onClick={() => run.mutate({ provider, code: rateType.code })}>
+            Import now
+          </Button>
+        </div>
+        <Alert tone={result?.tone ?? "success"} live="status" title={result?.title}>
+          {result?.message}
+        </Alert>
+        {run.isError ? <ApiFailure error={run.error} title="Could not import the rates" duty={DUTY} /> : null}
+      </div>
+    </Card>
+  );
+}
