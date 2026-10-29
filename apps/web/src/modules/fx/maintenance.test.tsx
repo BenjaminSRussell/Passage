@@ -503,6 +503,39 @@ describe("rate types page", () => {
     expect(server.calls.some((c) => c.method === "PUT")).toBe(false);
   });
 
+  it("clears the unavailable-list field error after the list recovers", async () => {
+    answer({ list: json(500, { code: "COM-0500", detail: "internal error" }) });
+    const user = userEvent.setup();
+    renderAt("/fx/rate-types");
+    await screen.findByText("Could not load the rate types");
+    await user.type(screen.getByLabelText("Code"), "BUDGET");
+    await user.type(screen.getByLabelText("Name"), "Budget");
+    await user.click(screen.getByRole("button", { name: "Create rate type" }));
+    expect(await screen.findByText(/could not be checked yet/)).toBeInTheDocument();
+    answer({});
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    await screen.findByRole("button", { name: "AVERAGE" });
+    await waitFor(() => expect(screen.queryByText(/could not be checked yet/)).not.toBeInTheDocument());
+    expect(server.calls.some((c) => c.method === "PUT")).toBe(false);
+  });
+
+  it("keeps the edit form while saving and disables New rate type", async () => {
+    answer({ put: json(200, { ...average, name: "Average updated" }) });
+    const release = holdRequests("PUT");
+    const user = userEvent.setup();
+    renderAt("/fx/rate-types");
+    await user.click(await screen.findByRole("button", { name: "AVERAGE" }));
+    await user.clear(screen.getByLabelText("Name"));
+    await user.type(screen.getByLabelText("Name"), "Average updated");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    const newButton = screen.getByRole("button", { name: "New rate type" });
+    await waitFor(() => expect(newButton).toBeDisabled());
+    expect(screen.getByLabelText("Code")).toHaveValue("AVERAGE");
+    expect(screen.getByLabelText("Name")).toHaveValue("Average updated");
+    release();
+    expect(await screen.findByText("Rate type AVERAGE saved")).toBeInTheDocument();
+  });
+
   it("locks the form and ignores opening rows while a save is in flight", async () => {
     answer({ put: json(200, { ...average, name: "Average" }) });
     const release = holdRequests("PUT");
