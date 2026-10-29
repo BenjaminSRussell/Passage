@@ -1,0 +1,33 @@
+name: record-release
+
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/envs/**']
+
+concurrency:
+  group: record-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  record-release:
+    runs-on: ubuntu-24.04
+    environment: platform-release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+      - env:
+          PASSAGE_PLATFORM_API_URL: ${{ vars.PASSAGE_PLATFORM_API_URL }}
+          PASSAGE_PLATFORM_API_TOKEN: ${{ secrets.PASSAGE_PLATFORM_API_TOKEN }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          status=0
+          for env in stage prod; do
+            python3 deploy/scripts/stage_release.py record --env "$env" --since "$BEFORE" || status=$?
+          done
+          exit "$status"

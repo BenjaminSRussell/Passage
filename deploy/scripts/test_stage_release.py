@@ -527,8 +527,10 @@ class StageReleaseTests(unittest.TestCase):
         self.assertEqual(result, 2)
         self.assertEqual(self.digest(), PROMOTED_DIGEST)
 
-    def start_release_api(self, status=201, body=None):
+    def start_release_api(self, status=201, body=None, registry=None, redirect_to=None):
         received = []
+        self.listings = []
+        registry = registry or []
         reply = json.dumps(body if body is not None else {"id": "rel-1"}).encode()
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -545,6 +547,18 @@ class StageReleaseTests(unittest.TestCase):
                 handler.send_header("Content-Type", "application/json")
                 handler.end_headers()
                 handler.wfile.write(reply)
+
+            def do_GET(handler):
+                self.listings.append({"path": handler.path, "headers": dict(handler.headers)})
+                if redirect_to:
+                    handler.send_response(302)
+                    handler.send_header("Location", redirect_to)
+                    handler.end_headers()
+                    return
+                handler.send_response(200)
+                handler.send_header("Content-Type", "application/json")
+                handler.end_headers()
+                handler.wfile.write(json.dumps(registry).encode())
 
             def log_message(handler, *args):
                 pass
@@ -619,6 +633,49 @@ class StageReleaseTests(unittest.TestCase):
 
         self.assertEqual(received[0]["body"]["previousDigest"], INITIAL_DIGEST)
         self.assertEqual(received[0]["body"]["action"], "promote")
+
+    def test_record_resumes_from_the_newest_recorded_release_not_the_given_revision(self):
+        third = "sha256:" + "c" * 64
+        first = self.run_git("rev-parse", "HEAD")
+        self.publish_main(stage=PROMOTED_DIGEST)
+        recorded = self.run_git("rev-parse", "HEAD")
+        self.publish_main(stage=third)
+        received = self.start_release_api(registry=[{"gitSha": recorded, "imageDigest": PROMOTED_DIGEST}])
+
+        result, _ = self.record(since=self.run_git("rev-parse", "HEAD"))
+
+        self.assertEqual(result, 0)
+        self.assertTrue(self.listings[0]["path"].startswith("/v1/platform/releases?"))
+        self.assertIn("env=stage", self.listings[0]["path"])
+        posted = received[0]["body"]
+        self.assertEqual((posted["imageDigest"], posted["previousDigest"]), (third, PROMOTED_DIGEST))
+        self.assertNotEqual(first, recorded)
+
+    def test_record_fails_closed_when_the_registry_cannot_be_read(self):
+        self.publish_main(stage=PROMOTED_DIGEST)
+        received = self.start_release_api(status=201, body=None)
+        os.environ[stage_release.API_URL_VARIABLE] = "http://127.0.0.1:1"
+
+        result, errors = self.record()
+
+        self.assertEqual(result, 3)
+        self.assertIn("release not recorded", errors)
+        self.assertEqual(received, [])
+
+    def test_record_never_follows_a_redirect_with_the_token(self):
+        target = self.start_release_api()
+        target_url = os.environ[stage_release.API_URL_VARIABLE]
+        os.environ[stage_release.API_TOKEN_VARIABLE] = "secret-token"
+        self.publish_main(stage=PROMOTED_DIGEST)
+        self.start_release_api(redirect_to=f"{target_url}/elsewhere")
+
+        result, errors = self.record()
+
+        self.assertEqual(result, 3)
+        self.assertIn("answered 302", errors)
+        self.assertEqual(len(self.listings), 1)
+        self.assertEqual(target, [])
+        self.assertNotIn("/elsewhere", [item["path"] for item in self.listings])
 
     def test_record_prod_promotion(self):
         received = self.start_release_api()

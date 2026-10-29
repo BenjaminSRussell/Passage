@@ -133,7 +133,8 @@ func validateRelease(req recordReleaseRequest) string {
 }
 
 func (a *API) listReleases(w http.ResponseWriter, r *http.Request) {
-	if !validTenant(w, r) {
+	p, ok := validPrincipal(w, r)
+	if !ok {
 		return
 	}
 	service, environment := r.URL.Query().Get("service"), r.URL.Query().Get("env")
@@ -146,6 +147,11 @@ func (a *API) listReleases(w http.ResponseWriter, r *http.Request) {
 		slog.Error("list releases failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
 		return
+	}
+	if a.operatorTenant == "" || caller(p) != a.operatorTenant {
+		for i := range releases {
+			releases[i].Actor = ""
+		}
 	}
 	httpx.JSON(w, http.StatusOK, releases)
 }

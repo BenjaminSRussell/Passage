@@ -48,7 +48,7 @@ type Release struct {
 func (r Release) samePayload(o Release) bool {
 	return r.Service == o.Service && r.Environment == o.Environment && r.Action == o.Action &&
 		r.ImageDigest == o.ImageDigest && r.PreviousDigest == o.PreviousDigest && r.GitSHA == o.GitSHA &&
-		r.Signed == o.Signed && r.Reason == o.Reason
+		r.Reason == o.Reason
 }
 
 type releaseEventData struct {

@@ -263,15 +263,55 @@ def _api_base():
     return base
 
 
-def record_release(base, env, action, digest, previous, git_sha, signed):
-    """POST the merged promote or rollback to the platform-health release registry."""
-    headers = {
-        "Content-Type": "application/json",
-        "Idempotency-Key": idempotency_key(env, action, digest, git_sha),
-    }
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
+def _api_headers(extra=None):
+    headers = dict(extra or {})
     token = os.environ.get(API_TOKEN_VARIABLE)
     if token:
         headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+def _call_api(request):
+    try:
+        with _OPENER.open(request, timeout=RECORD_TIMEOUT_SECONDS) as response:
+            return json.load(response)
+    except urllib.error.HTTPError as error:
+        raise ReleaseError(f"release API answered {error.code}: {error.read().decode(errors='replace')[:300]}") from error
+    except (OSError, ValueError) as error:
+        raise ReleaseError(f"release API call failed: {error}") from error
+
+
+def newest_recorded_sha(root, base, env):
+    """Return the git sha of the newest release the registry holds for the environment, or None when it is empty or unknown to this checkout."""
+    query = urllib.parse.urlencode({"service": SERVICE, "env": env})
+    releases = _call_api(
+        urllib.request.Request(f"{base}/v1/platform/releases?{query}", headers=_api_headers(), method="GET")
+    )
+    if not isinstance(releases, list):
+        raise ReleaseError("release API list answered a non-array body")
+    if not releases:
+        return None
+    git_sha = releases[0].get("gitSha", "")
+    try:
+        _git(root, "cat-file", "-e", f"{git_sha}^{{commit}}")
+    except ReleaseError:
+        return None
+    return git_sha
+
+
+def record_release(base, env, action, digest, previous, git_sha, signed):
+    """POST the merged promote or rollback to the platform-health release registry."""
+    headers = _api_headers(
+        {"Content-Type": "application/json", "Idempotency-Key": idempotency_key(env, action, digest, git_sha)}
+    )
     body = json.dumps(
         {
             "service": SERVICE,
@@ -287,11 +327,8 @@ def record_release(base, env, action, digest, previous, git_sha, signed):
         f"{base}/v1/platform/releases", data=body, headers=headers, method="POST"
     )
     try:
-        with urllib.request.urlopen(request, timeout=RECORD_TIMEOUT_SECONDS) as response:
-            return json.load(response)["id"]
-    except urllib.error.HTTPError as error:
-        raise ReleaseError(f"release API answered {error.code}: {error.read().decode(errors='replace')[:300]}") from error
-    except (OSError, ValueError, KeyError) as error:
+        return _call_api(request)["id"]
+    except (KeyError, TypeError) as error:
         raise ReleaseError(f"release API call failed: {error}") from error
 
 
@@ -326,6 +363,12 @@ def merged_release(root, env, since):
 def record(root, env, since):
     root = Path(root).resolve()
     base = _api_base()
+    if base:
+        try:
+            since = newest_recorded_sha(root, base, env) or since
+        except ReleaseError as error:
+            print(f"release not recorded: {error}", file=sys.stderr)
+            return 3
     since = since if since and set(since) != {"0"} else "HEAD~1"
     release = merged_release(root, env, since)
     if release is None:
@@ -366,7 +409,7 @@ def main(argv=None, repo_root=None):
         "record", help="record the merged manifest digest in the release registry (post-merge CI step)"
     )
     record_parser.add_argument("--env", choices=sorted(MANIFESTS), required=True)
-    record_parser.add_argument("--since", help="revision the merge started from; defaults to HEAD~1")
+    record_parser.add_argument("--since", help="fallback revision when the registry has no release for the environment; defaults to HEAD~1")
     args = parser.parse_args(argv)
     root = Path(repo_root or REPOSITORY_ROOT).resolve()
 

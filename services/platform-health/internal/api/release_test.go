@@ -193,15 +193,27 @@ func TestRecordReleaseRestrictedToOperatorTenant(t *testing.T) {
 }
 
 func TestListReleasesOpenToAnyTenantWithDuty(t *testing.T) {
-	r := httpx.NewRouter()
-	api.New(&fakeStore{}, testkit.TenantID(1)).Register(r)
-	req := httptest.NewRequest(http.MethodGet, releasesPath, nil)
-	req.Header.Set("X-Passage-Tenant", testkit.TenantID(2))
-	req.Header.Set("X-Passage-Duties", "View platform releases")
-	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
+	tests := []struct {
+		name      string
+		tenantN   int
+		wantActor bool
+	}{
+		{"other tenant never sees the operator's actor", 2, false},
+		{"operator tenant sees the actor", 1, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httpx.NewRouter()
+			api.New(&fakeStore{releases: []store.Release{{ID: "1", Actor: "operator-user"}}}, testkit.TenantID(1)).Register(r)
+			req := httptest.NewRequest(http.MethodGet, releasesPath, nil)
+			req.Header.Set("X-Passage-Tenant", testkit.TenantID(tc.tenantN))
+			req.Header.Set("X-Passage-Duties", "View platform releases")
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "operator-user") != tc.wantActor {
+				t.Fatalf("got %d %s; want 200 with actor visible = %v", rec.Code, rec.Body.String(), tc.wantActor)
+			}
+		})
 	}
 }
 

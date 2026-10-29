@@ -47,6 +47,11 @@ func TestReleases_RecordListAndEvents(t *testing.T) {
 	if err != nil || replay.ID != promoted.ID {
 		t.Fatalf("idempotent replay must return the original, got %+v, %v", replay, err)
 	}
+	unsignedReplay := release("stage", store.ActionPromote, digestB, digestA)
+	unsignedReplay.Signed = false
+	if replay, err := s.RecordRelease(ctx, unsignedReplay, "key-1"); err != nil || replay.ID != promoted.ID || !replay.Signed {
+		t.Fatalf("a re-run whose signature check flaked must replay the original, got %+v, %v", replay, err)
+	}
 	if _, err := s.RecordRelease(ctx, release("stage", store.ActionPromote, digestA, digestB), "key-1"); !errors.Is(err, store.ErrIdempotencyConflict) {
 		t.Fatalf("replay with a different payload: err = %v, want ErrIdempotencyConflict", err)
 	}

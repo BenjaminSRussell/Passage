@@ -40,11 +40,13 @@ The handler checks the duty by environment and action because route-level OPA ca
 | promote to prod | `Approve production promotion` |
 | any rollback | `Rollback environment` |
 
+Duty separation: dev and stage promotion, prod promotion and rollback are three distinct duties, so the credential CI records with can be granted `Maintain platform releases` alone while `Approve production promotion` and `Rollback environment` stay with named humans. `actor` (the recording user) in the list response is returned only to the operator tenant; other tenants get it empty.
+
 `Idempotency-Key` is scoped per caller tenant. Replaying a key with the same payload returns the original row (201, no new event); a different payload is 409 `COM-0409`.
 
 Each new release writes `dev.passage.platform.release.promoted.v1` or `dev.passage.platform.release.rolledback.v1` to the `outbox` table in the same transaction. The event fires when the release is recorded, not on Argo sync Healthy; Argo Healthy confirmation stays live-only on #213.
 
-Recording happens after merge, not when the manifest is edited: `python3 deploy/scripts/stage_release.py record --env <env> [--since <rev>]` reads the merged manifest (environment, service, digest, git sha), derives promote or rollback from Git history and POSTs it. The `record-release` job in `.github/workflows/ci.yml` runs it on pushes to `main` that touch `deploy/envs/**`. With `PASSAGE_PLATFORM_API_URL` set a failed recording exits 3; unset, it only warns. The URL must be https unless the host is `localhost` or `127.0.0.1`. The idempotency key is the SHA-256 of environment, service, digest, git sha and action, so a CI re-run replays instead of duplicating.
+Recording happens after merge, not when the manifest is edited: `python3 deploy/scripts/stage_release.py record --env <env> [--since <rev>]` reads the merged manifest (environment, service, digest, git sha), derives promote or rollback from Git history and POSTs it. The `record-release` workflow (`.github/workflows/record-release.yml`) runs it on pushes to `main` that touch `deploy/envs/**`, in the `platform-release` GitHub Environment (restricted to `main`; it holds `PASSAGE_PLATFORM_API_TOKEN`) with a non-cancelling concurrency group. `--since` is the git sha of the registry's newest release for the environment, falling back to the flag (the push's `before`) when the registry is empty, so a cancelled or skipped run never leaves a manifest gap that later 422s a rollback. The client never follows redirects, so the token cannot leave the configured host. With `PASSAGE_PLATFORM_API_URL` set a failed recording exits 3; unset, it only warns. The URL must be https unless the host is `localhost` or `127.0.0.1`. The idempotency key is the SHA-256 of environment, service, digest, git sha and action, so a CI re-run replays instead of duplicating.
 
 ## Error codes
 
