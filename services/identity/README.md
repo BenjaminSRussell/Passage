@@ -25,3 +25,11 @@ This is the first isolated slice, not a complete Wave 2 implementation. The foll
 ## Schema grants and scoping
 
 `passage_app` has SELECT only on `identity_tenants`: tenant provisioning and status changes belong to the migrator or a future provisioner role, so a tenant cannot reactivate itself, rename its realm, or probe other tenants' realm names. `identity_role_assignments` rejects overlapping grants of the same user, role and legal entity (an exclusion constraint, open-ended `valid_to` counts as infinity), so a revoke always takes effect. A caller scoped to specific legal entities does not see tenant-wide assignments (null `legal_entity_id`); only a `*` scope does.
+
+## Effective permissions
+
+`LoadCatalogue` parses `../../policies/authz/data.json` into an engine that mirrors `authz.rego`: `Evaluate(duties, method, resource)` returns allow, the lexically first held duty that grants it, and (on deny) the policy's least-privileged `duty_missing`. `Effective(duties)` evaluates every distinct resource pattern and method in the catalogue at a sample path (`{,/**}` becomes `/item-1`, `*` becomes `item-1`). Globs outside literal text, `*` and a trailing `{,/**}` fail at load so the engine cannot drift from OPA silently.
+
+`NewEffectivePermissionsAPI(pool, catalogue).Register(r)` serves `GET /v1/identity/users/{id}/effective-permissions` (duty `View effective permissions`, OpenAPI in `api/openapi.yaml`). Until the role catalogue exists (#83), `identity_role_assignments.role` holds a duty name. Active assignments (`valid_from <= now() < valid_to`) are resolved: tenant-wide rows always, plus rows for `?legalEntityId=` when given. Roles that are not seeded duties are listed in `ignoredRoles` and grant nothing, as in OPA. The caller's own legal-entity scope still applies through RLS, so a scoped caller sees only assignments for its entities.
+
+`effective_test.go` checks the engine against the real policy (OPA server, same harness as `opa_contract_test.go`): 100 routes sampled evenly across the sorted catalogue, times eight fixture principals, must match OPA on allow and `duty_missing`; the full report is also compared row by row for four principals.
