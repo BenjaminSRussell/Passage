@@ -291,6 +291,9 @@ func TestDutyContractExpectations(t *testing.T) {
 		{duty: "reporting.statement.view", method: http.MethodGet, resource: "/v1/reporting/definitions/d1/export"},
 		{duty: "ReceivingPost", method: http.MethodPost, resource: "/v1/receiving/receipts/r1:post", wantAllowed: true},
 		{duty: "ledger.journal.read", method: http.MethodGet, resource: "/v1/reporting/runs/r1/cells/a/b/lines", wantAllowed: true},
+		{duty: "party.read", method: http.MethodGet, resource: "/v1/party/parties/p1", wantAllowed: true},
+		{duty: "party.write", method: http.MethodPost, resource: "/v1/party/pending-changes/x:approve"},
+		{duty: "pii.read", method: http.MethodGet, resource: "/v1/party/parties/p1", wantDutyMissing: "party.read"},
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("%s/%s %s", tt.duty, tt.method, tt.resource), func(t *testing.T) {
@@ -316,10 +319,24 @@ func TestDutyContractExpectations(t *testing.T) {
 	}
 }
 
+func TestPartyReadDeniedWithoutDuties(t *testing.T) {
+	h := newContractHarness(t)
+	resp := h.serve(unassignedUserID, http.MethodGet, "/v1/party/parties/p1")
+	if resp.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.Code)
+	}
+	var problem struct {
+		Errors map[string]string `json:"errors"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &problem); err != nil || problem.Errors["duty_missing"] != "party.read" {
+		t.Fatalf("body = %s, want duty_missing party.read", resp.Body.String())
+	}
+}
+
 var coveredServices = []string{"ledger", "fx", "tax", "close", "finreport", "inventory", "purchasing", "receiving", "payables", "party"}
 
 var dutyConstant = regexp.MustCompile(`(?m)\b[dD]uty[A-Za-z0-9]*\s*(?:string\s*)?=\s*"([^"]+)"`)
-var dutyLiteralCall = regexp.MustCompile(`(?:RequireDuty|HasDuty)\s*\(\s*"([^"]+)"`)
+var dutyCallArgument = regexp.MustCompile(`(?:RequireDuty|HasDuty)\s*\(\s*([^)]*)\)`)
 
 func TestEveryServiceDutyIsSeeded(t *testing.T) {
 	raw, err := os.ReadFile("../../policies/authz/data.json")
@@ -360,10 +377,9 @@ func TestEveryServiceDutyIsSeeded(t *testing.T) {
 					t.Errorf("%s: duty %q (%s) is not seeded in policies/authz/data.json", service, match[1], file)
 				}
 			}
-			for _, match := range dutyLiteralCall.FindAllStringSubmatch(string(src), -1) {
-				found++
-				if _, ok := seeded.Duties[match[1]]; !ok {
-					t.Errorf("%s: duty %q passed directly to RequireDuty/HasDuty is not seeded in policies/authz/data.json", service, match[1])
+			for _, match := range dutyCallArgument.FindAllStringSubmatch(string(src), -1) {
+				if argument := strings.TrimSpace(match[1]); !strings.HasPrefix(argument, "duty") && !strings.HasPrefix(argument, "Duty") {
+					t.Errorf("%s: %s passes %q to RequireDuty/HasDuty; use a duty* constant", service, file, argument)
 				}
 			}
 		}
