@@ -2,8 +2,21 @@ import {
   condition,
   defineQuery,
   defineSignal,
+  proxyActivities,
   setHandler,
 } from "@temporalio/workflow";
+import type { PartyDecisionActivities } from "./activities.js";
+
+const { decidePartyChange } = proxyActivities<PartyDecisionActivities>({
+  startToCloseTimeout: "30 seconds",
+  retry: { maximumAttempts: 10 },
+});
+
+export interface PartyChangeRef {
+  changeId: string;
+  tenantId: string;
+  legalEntityId: string;
+}
 
 export interface ApprovalLevel {
   id: string;
@@ -16,6 +29,8 @@ export interface ApprovalInput {
   requestId: string;
   entityType: string;
   levels: ApprovalLevel[];
+  requester?: string;
+  partyChange?: PartyChangeRef;
 }
 
 export interface ApprovalHistoryEntry {
@@ -54,13 +69,13 @@ export async function approvalWorkflow(input: ApprovalInput): Promise<ApprovalRe
 
   setHandler(approvalStateQuery, () => snapshot(state));
   setHandler(approveSignal, (actor) => {
-    if (actor === state.approver) decision = "approved";
+    if (actor === state.approver && actor !== input.requester) decision = "approved";
   });
   setHandler(rejectSignal, (actor) => {
-    if (actor === state.approver) decision = "rejected";
+    if (actor === state.approver && actor !== input.requester) decision = "rejected";
   });
   setHandler(delegateSignal, (actor, delegate) => {
-    if (actor !== state.approver || delegate.length === 0 || !state.levelId) return;
+    if (actor !== state.approver || delegate.length === 0 || delegate === input.requester || !state.levelId) return;
     state.history.push({
       action: "delegated",
       levelId: state.levelId,
@@ -94,6 +109,7 @@ export async function approvalWorkflow(input: ApprovalInput): Promise<ApprovalRe
     });
     if (decision === "rejected") {
       state.status = "rejected";
+      await recordPartyDecision(input, "rejected", state.history);
       return snapshot(state);
     }
   }
@@ -101,12 +117,26 @@ export async function approvalWorkflow(input: ApprovalInput): Promise<ApprovalRe
   state.status = "approved";
   state.levelId = undefined;
   state.approver = undefined;
+  await recordPartyDecision(input, "approved", state.history);
   return snapshot(state);
+}
+
+async function recordPartyDecision(
+  input: ApprovalInput,
+  decision: "approved" | "rejected",
+  history: ApprovalHistoryEntry[],
+): Promise<void> {
+  const decidedBy = history[history.length - 1]?.actor;
+  if (!input.partyChange || !decidedBy) return;
+  await decidePartyChange({ ...input.partyChange, decision, decidedBy });
 }
 
 function validateInput(input: ApprovalInput): void {
   if (!input.requestId || !input.entityType || input.levels.length === 0) {
     throw new TypeError("requestId, entityType and at least one approval level are required");
+  }
+  if (input.partyChange && !input.requester) {
+    throw new TypeError("a party change approval requires the requester");
   }
   for (const level of input.levels) {
     if (!level.id || !level.approver || !level.escalationApprover || level.slaMs <= 0) {
