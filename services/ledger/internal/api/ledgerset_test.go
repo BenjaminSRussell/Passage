@@ -102,3 +102,61 @@ func TestCreateAccountMapping_OnLeadingLedgerIs422WithViolations(t *testing.T) {
 		t.Fatalf("body: %v", m)
 	}
 }
+
+func TestPostLedgerSpecificDuty_IsPassedToTheStoreOnlyWhenHeld(t *testing.T) {
+	for _, tc := range []struct {
+		name, duties string
+		want         bool
+	}{
+		{"post duty alone", dutyPost, false},
+		{"post and ledger-specific duties", dutyPost + "," + store.DutyPostLedgerSpecific, true},
+	} {
+		fs := &fakeStore{}
+		rec := call(server(fs), http.MethodPost, "/v1/ledger/journal-entries", entryBody, tc.duties, map[string]string{"Idempotency-Key": "k1"})
+		if rec.Code != http.StatusCreated || len(fs.posted) != 1 || fs.posted[0].CanPostLedgerSpecific != tc.want {
+			t.Errorf("%s: status %d, posted %+v", tc.name, rec.Code, fs.posted)
+		}
+		fs = &fakeStore{}
+		rec = call(server(fs), http.MethodPost, batchPath+"/post", "", journalDuties+","+tc.duties, map[string]string{"Idempotency-Key": "k1"})
+		if rec.Code != http.StatusCreated || len(fs.batchCalls) != 1 || fs.batchCalls[0].post.CanPostLedgerSpecific != tc.want {
+			t.Errorf("%s: batch post status %d, calls %+v", tc.name, rec.Code, fs.batchCalls)
+		}
+	}
+}
+
+func TestPostLedgerSpecificDuty_AloneOpensNoRoute(t *testing.T) {
+	fs := &fakeStore{}
+	rec := call(server(fs), http.MethodPost, "/v1/ledger/journal-entries", entryBody, store.DutyPostLedgerSpecific, map[string]string{"Idempotency-Key": "k1"})
+	if rec.Code != http.StatusForbidden || len(fs.posted) != 0 {
+		t.Fatalf("the ledger-specific duty must not replace the posting duty: status %d, posted %d", rec.Code, len(fs.posted))
+	}
+}
+
+func TestReverseAndValidate_PassTheLedgerSpecificDutyOnlyWhenHeld(t *testing.T) {
+	for _, tc := range []struct {
+		name, duties string
+		want         bool
+	}{
+		{"reverse duty alone", dutyReverse, false},
+		{"reverse and ledger-specific duties", dutyReverse + "," + store.DutyPostLedgerSpecific, true},
+	} {
+		fs := &fakeStore{}
+		rec := call(server(fs), http.MethodPost, "/v1/ledger/journal-entries/"+testEntry+"/reverse", `{}`, tc.duties, map[string]string{"Idempotency-Key": "k1"})
+		if rec.Code != http.StatusCreated || len(fs.reversed) != 1 || fs.reversed[0].CanPostLedgerSpecific != tc.want {
+			t.Errorf("%s: reverse status %d, calls %+v", tc.name, rec.Code, fs.reversed)
+		}
+	}
+	for _, tc := range []struct {
+		name, duties string
+		want         bool
+	}{
+		{"post duty alone", dutyPost, false},
+		{"post and ledger-specific duties", dutyPost + "," + store.DutyPostLedgerSpecific, true},
+	} {
+		fs := &fakeStore{}
+		rec := call(server(fs), http.MethodPost, "/v1/ledger/validate", entryBody, tc.duties, nil)
+		if rec.Code != http.StatusOK || len(fs.posted) != 1 || fs.posted[0].CanPostLedgerSpecific != tc.want {
+			t.Errorf("%s: validate status %d, calls %+v", tc.name, rec.Code, fs.posted)
+		}
+	}
+}

@@ -69,6 +69,9 @@ func postEntryTx(ctx context.Context, tx pgx.Tx, tenantID string, in PostInput) 
 	if err != nil {
 		return out, err
 	}
+	if err := requireLedgerSpecific(ctx, tx, tenantID, ledger.ID, in.CanPostLedgerSpecific); err != nil {
+		return out, err
+	}
 	replayed, err := replayIdempotent(ctx, tx, tenantID, ledger.LegalEntityID, in.Key, in.Hash, &out)
 	if err != nil || replayed {
 		return out, err
@@ -79,6 +82,23 @@ func postEntryTx(ctx context.Context, tx pgx.Tx, tenantID string, in PostInput) 
 	}
 	out = EntryResult{Entries: []Entry{entry}, Idempotency: Idempotency{Key: in.Key}, TraceID: in.TraceID, Notices: notices}
 	return out, storeIdempotent(ctx, tx, tenantID, ledger.LegalEntityID, in.Key, in.Hash, out)
+}
+
+func requireLedgerSpecific(ctx context.Context, tx pgx.Tx, tenantID, ledgerID string, allowed bool) error {
+	if allowed {
+		return nil
+	}
+	var parallel bool
+	if err := tx.QueryRow(ctx, `select exists(select 1 from ledger_set_member m
+		join ledger_set s on s.tenant_id = m.tenant_id and s.id = m.ledger_set_id
+		where m.tenant_id = $1 and m.ledger_id = $2 and s.leading_ledger_id <> m.ledger_id)`, tenantID, ledgerID).Scan(&parallel); err != nil {
+		return err
+	}
+	if parallel {
+		return httpx.NewProblem(http.StatusForbidden, "AUTH-0003",
+			"acting on a single parallel ledger needs duty "+DutyPostLedgerSpecific)
+	}
+	return nil
 }
 
 func postToLedger(ctx context.Context, tx pgx.Tx, tenantID string, ledger Ledger, in PostInput) (Entry, []Notice, error) {
@@ -129,6 +149,9 @@ func (s *Postgres) ReverseEntry(ctx context.Context, in ReverseInput) (EntryResu
 		}
 		ledger, err := loadLedger(ctx, tx, p.TenantID, ledgerID, true)
 		if err != nil {
+			return err
+		}
+		if err := requireLedgerSpecific(ctx, tx, p.TenantID, ledger.ID, in.CanPostLedgerSpecific); err != nil {
 			return err
 		}
 		replayed, err := replayIdempotent(ctx, tx, p.TenantID, ledger.LegalEntityID, in.Key, in.Hash, &out)
@@ -470,6 +493,9 @@ func (s *Postgres) ValidateEntry(ctx context.Context, in PostInput) (domain.Resu
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		ledger, err := loadLedger(ctx, tx, p.TenantID, in.LedgerID, false)
 		if err != nil {
+			return err
+		}
+		if err := requireLedgerSpecific(ctx, tx, p.TenantID, ledger.ID, in.CanPostLedgerSpecific); err != nil {
 			return err
 		}
 		accounts, err := loadAccounts(ctx, tx, p.TenantID, ledger.ChartCode, accountNumbers(in.Lines))
