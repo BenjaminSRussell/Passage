@@ -1,6 +1,8 @@
 package events
 
 import (
+	"time"
+
 	"github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/services/party/internal/domain"
 )
@@ -15,10 +17,12 @@ var (
 	ChangeRequested = events.Type(Context, "change", "requested", 1)
 	ChangeApproved  = events.Type(Context, "change", "approved", 1)
 	ChangeRejected  = events.Type(Context, "change", "rejected", 1)
+
+	ProtectedFieldsUpdated = events.Type(Context, "protectedfields", "updated", 1)
 )
 
 func All() []string {
-	return []string{PartyCreated, PartyUpdated, domain.PartyMergedType, CustomerUpdated, ChangeRequested, ChangeApproved, ChangeRejected}
+	return []string{PartyCreated, PartyUpdated, domain.PartyMergedType, CustomerUpdated, ChangeRequested, ChangeApproved, ChangeRejected, ProtectedFieldsUpdated}
 }
 
 type CustomerUpdatedData struct {
@@ -38,6 +42,14 @@ type ChangeData struct {
 	RequestedBy    string  `json:"requested_by"`
 	DecidedBy      string  `json:"decided_by,omitempty"`
 	Reason         *string `json:"reason,omitempty"`
+}
+
+type ProtectedFieldsUpdatedData struct {
+	LegalEntityID string    `json:"legal_entity_id"`
+	Before        []string  `json:"before"`
+	After         []string  `json:"after"`
+	ActorUserID   string    `json:"actor_user_id"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 type PartyCreatedData struct {

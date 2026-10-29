@@ -1,0 +1,62 @@
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: passage-api-tenant-rate-limit
+  namespace: hello-ledger
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: org
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: fx
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: receiving
+  rateLimit:
+    type: Global
+    global:
+      rules:
+      - shared: true
+        clientSelectors:
+          - headers:
+              - name: X-Passage-Tier
+                value: starter
+              - name: X-Passage-Tenant
+                type: Distinct
+        limit:
+          requests: 600
+          unit: Minute
+      - shared: true
+        clientSelectors:
+          - headers:
+              - name: X-Passage-Tier
+                value: professional
+              - name: X-Passage-Tenant
+                type: Distinct
+        limit:
+          requests: 3000
+          unit: Minute
+      - shared: true
+        clientSelectors:
+          - headers:
+              - name: X-Passage-Tier
+                value: enterprise
+              - name: X-Passage-Tenant
+                type: Distinct
+        limit:
+          requests: 12000
+          unit: Minute
+      - shared: true
+        clientSelectors:
+          - headers:
+              - name: X-Passage-Tier
+                type: RegularExpression
+                value: ^(starter|professional|enterprise)$
+                invert: true
+              - name: X-Passage-Tenant
+                type: Distinct
+        limit:
+          requests: 600
+          unit: Minute

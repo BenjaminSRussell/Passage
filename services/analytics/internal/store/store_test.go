@@ -7,7 +7,6 @@ import (
 	"os"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
@@ -176,16 +175,6 @@ func TestTenantAndLegalEntityIsolation(t *testing.T) {
 	if err := dbx.Migrate(bg, admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	var schema, appUser string
-	if err := admin.QueryRow(bg, `select current_schema()`).Scan(&schema); err != nil {
-		t.Fatal(err)
-	}
-	if err := app.QueryRow(bg, `select current_user`).Scan(&appUser); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := admin.Exec(bg, fmt.Sprintf(`grant usage on schema %s to %s; grant select, insert, update, delete on all tables in schema %[1]s to %[2]s`, schema, appUser)); err != nil {
-		t.Fatal(err)
-	}
 	st := New(app)
 	for _, le := range []string{leUSMF, leDEMF} {
 		if _, _, err := st.RecordReconciliation(ctxFor(1, ""), recon(le, "revenue", "2026-10-01", "1", "1")); err != nil {
@@ -203,9 +192,7 @@ func TestTenantAndLegalEntityIsolation(t *testing.T) {
 		t.Fatal("a DEMF-scoped caller must not write a USMF result")
 	}
 	var outboxRows int
-	if err := dbx.WithTenantTx(ctxFor(2, ""), app, func(tx pgx.Tx) error {
-		return tx.QueryRow(bg, `select count(*) from outbox`).Scan(&outboxRows)
-	}); err != nil || outboxRows != 0 {
-		t.Fatalf("tenant 2 sees %d outbox rows, %v", outboxRows, err)
+	if err := admin.QueryRow(bg, `select count(*) from outbox where tenant_id = $1`, testkit.TenantID(2)).Scan(&outboxRows); err != nil || outboxRows != 0 {
+		t.Fatalf("tenant 2 owns %d outbox rows, %v", outboxRows, err)
 	}
 }

@@ -1,5 +1,5 @@
 import type { BadgeTone } from "../../shell/ui";
-import type { ChangeOrderStatus, ChangeOrderType, PlanKind, ProjectType, RiskKind, RiskStatus, Stage } from "./api/client";
+import type { BillingReason, ChangeOrderStatus, ChangeOrderType, PlanKind, ProjectType, ProposalStatus, RiskKind, RiskStatus, Stage, TxnType } from "./api/client";
 
 export const dash = "—";
 
@@ -78,3 +78,37 @@ export const riskStatusTone: Record<RiskStatus, BadgeTone> = { OPEN: "warning", 
 export function riskScoreTone(score: number): BadgeTone {
   return score >= 15 ? "danger" : score >= 8 ? "warning" : "success";
 }
+
+export const txnTypeLabel: Record<TxnType, string> = {
+  HOUR: "Hours",
+  COST: "Expense",
+  ITEM: "Item",
+  FEE: "Fee",
+  ON_ACCOUNT: "On account",
+};
+
+export const proposalStatusLabel: Record<ProposalStatus, string> = {
+  DRAFT: "Draft",
+  APPROVED: "Approved",
+  POSTED: "Posted",
+  CANCELED: "Canceled",
+};
+
+export const proposalStatusTone: Record<ProposalStatus, BadgeTone> = {
+  DRAFT: "neutral",
+  APPROVED: "info",
+  POSTED: "success",
+  CANCELED: "warning",
+};
+
+/** The "why not billed" reasons of BR-41.3 in words. */
+export const billingReasonLabel: Record<BillingReason, string> = {
+  NOT_CHARGEABLE: "The line is not chargeable.",
+  ALREADY_PROPOSED: "The line is already on an invoice proposal.",
+  OUT_OF_RANGE: "The line's date is outside the window.",
+  PROJECT_STAGE: "The project is not in process or finished.",
+  TXN_TYPE: "The project does not bill this transaction type in this selection.",
+  PROJECT_NOT_IN_SCOPE: "The project is not in the selection.",
+  MILESTONE_NOT_DUE: "The line is not on a billable milestone that finishes by the end of the window.",
+  PROJECT_TYPE: "Projects of this type do not bill a customer.",
+};

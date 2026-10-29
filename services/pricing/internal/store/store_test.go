@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -44,6 +45,8 @@ func principal(n int, legalEntityID string) context.Context {
 	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), LegalEntityID: legalEntityID, Duties: testkit.ScopeDuties(legalEntityID)})
 }
 
+var adminByApp sync.Map
+
 // appPool migrates a fresh schema as the admin role and returns a pool for the
 // non-superuser application role, so row-level security is really enforced.
 func appPool(t *testing.T) *pgxpool.Pool {
@@ -59,18 +62,7 @@ func adminAndAppPools(t *testing.T) (admin, app *pgxpool.Pool) {
 	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	var schema string
-	if err := admin.QueryRow(ctx, "select current_schema()").Scan(&schema); err != nil {
-		t.Fatal(err)
-	}
-	for _, stmt := range []string{
-		"grant usage on schema " + schema + " to passage_app",
-		"grant select, insert, update, delete on all tables in schema " + schema + " to passage_app",
-	} {
-		if _, err := admin.Exec(ctx, stmt); err != nil {
-			t.Fatal(err)
-		}
-	}
+	adminByApp.Store(app, admin)
 	return admin, app
 }
 
@@ -90,6 +82,9 @@ type outboxRow struct {
 func outboxRows(t *testing.T, ctx context.Context, pool *pgxpool.Pool) []outboxRow {
 	t.Helper()
 	var out []outboxRow
+	if admin, ok := adminByApp.Load(pool); ok {
+		pool = admin.(*pgxpool.Pool)
+	}
 	if err := dbx.WithTenantTx(ctx, pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select type, payload from outbox order by created_at, id`)
 		if err != nil {

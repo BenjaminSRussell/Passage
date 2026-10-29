@@ -1,8 +1,9 @@
 // Package api exposes the assets HTTP surface: asset register, books, the
 // projected depreciation schedule, transactions and adjustments, additions,
 // depreciation runs, disposal, insurance policies, index series and the
-// insurance report, capex requests, physical inventory count sessions and
-// IFRS 16 leases with their remeasurement.
+// insurance report, capex requests, physical inventory count sessions,
+// transfers and splits, group assets and IFRS 16 leases with their
+// remeasurement.
 package api
 
 import (
@@ -80,6 +81,9 @@ type API struct {
 	counted    atomic.Int64
 	// Slice 4: capex decisions.
 	decided atomic.Int64
+	// Slice 5: transfers and splits, group assets.
+	transferred atomic.Int64
+	grouped     atomic.Int64
 }
 
 // New returns an API over s.
@@ -131,6 +135,12 @@ func (a *API) Register(r chi.Router) {
 		r.With(requireAny(DutyView, DutyCount)).Get("/v1/assets/count-sessions/{id}", a.getCountSession)
 		r.With(requireAny(DutyView, DutyInsuranceMaintain)).Get("/v1/assets/insurance-report", a.insuranceReport)
 		r.With(requireAny(DutyView, DutyDepreciate)).Get("/v1/assets/mid-quarter-test", a.midQuarterTest)
+
+		r.With(authz.RequireDuty(DutyMaintain)).Post("/v1/assets/{id}/transfer", a.transfer)
+		r.With(authz.RequireDuty(DutyView)).Get("/v1/assets/{id}/transfers", a.listTransfers)
+		r.With(authz.RequireDuty(DutyConfigure)).Post("/v1/assets/group-assets", a.createGroupAsset)
+		r.With(requireAny(DutyView, DutyConfigure)).Get("/v1/assets/group-assets", a.listGroupAssets)
+		r.With(requireAny(DutyView, DutyConfigure)).Get("/v1/assets/group-assets/{id}", a.getGroupAsset)
 	})
 }
 
@@ -160,6 +170,8 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# TYPE assets_leases_remeasured_total counter\nassets_leases_remeasured_total %d\n", a.remeasured.Load())
 		fmt.Fprintf(w, "# TYPE assets_count_sessions_total counter\nassets_count_sessions_total %d\n", a.counted.Load())
 		fmt.Fprintf(w, "# TYPE assets_capex_decisions_total counter\nassets_capex_decisions_total %d\n", a.decided.Load())
+		fmt.Fprintf(w, "# TYPE assets_transfers_total counter\nassets_transfers_total %d\n", a.transferred.Load())
+		fmt.Fprintf(w, "# TYPE assets_group_assets_total counter\nassets_group_assets_total %d\n", a.grouped.Load())
 	})
 }
 

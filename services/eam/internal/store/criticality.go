@@ -109,7 +109,8 @@ func (s *Postgres) ListAssessments(ctx context.Context, assetID string) ([]Criti
 
 // ChangeAssetLifecycle retires an asset to INACTIVE or DISPOSED (FR-44.2); the
 // caller's version must match (If-Match). An asset with open work orders cannot
-// be disposed. Activation keeps its own action (ActivateAsset).
+// be disposed, and disposal removes it from its functional location. Activation
+// keeps its own action (ActivateAsset).
 func (s *Postgres) ChangeAssetLifecycle(ctx context.Context, id, to string, version int) (Asset, error) {
 	var out Asset
 	err := s.withTx(ctx, func(tx pgx.Tx, t string) error {
@@ -133,9 +134,15 @@ func (s *Postgres) ChangeAssetLifecycle(ctx context.Context, id, to string, vers
 				return problem(422, CodeAssetState, "the asset has open work orders; complete or cancel them before disposal")
 			}
 		}
+		// A disposed asset leaves its functional location (FR-44.2 remove history).
+		leaving := to == "DISPOSED" && cur.FunctionalLocationID != nil
 		out, err = scanAsset(tx.QueryRow(ctx, `update asset set lifecycle_state = $3, version = version + 1,
-		    updated_at = now() where tenant_id = $1 and id = $2 returning `+assetColumns, t, id, to))
-		return err
+		    functional_location_id = case when $4 then null else functional_location_id end,
+		    updated_at = now() where tenant_id = $1 and id = $2 returning `+assetColumns, t, id, to, leaving))
+		if err != nil || !leaving {
+			return err
+		}
+		return recordLocationChange(ctx, tx, t, id, domain.MoveRemove, *cur.FunctionalLocationID, "", actorOf(ctx), s.now(), "")
 	})
 	return out, err
 }

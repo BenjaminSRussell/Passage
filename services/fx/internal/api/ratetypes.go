@@ -46,6 +46,28 @@ func (a *API) getRateType(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, t)
 }
 
+type createRateTypeBody struct {
+	Code string `json:"code"`
+	rateTypeBody
+}
+
+func (a *API) createRateType(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	var body createRateTypeBody
+	if err := httpx.Decode(r, &body); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	t, err := a.store.CreateRateType(r.Context(), store.RateType{Code: body.Code, Name: body.Name, AllowInverse: body.AllowInverse, Provider: body.Provider})
+	if err != nil {
+		a.fail(w, r, "create rate type failed", err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, t)
+}
+
 func (a *API) putRateType(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -55,9 +77,9 @@ func (a *API) putRateType(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
-	t, err := a.store.PutRateType(r.Context(), store.RateType{Code: chi.URLParam(r, "code"), Name: body.Name, AllowInverse: body.AllowInverse, Provider: body.Provider})
+	t, err := a.store.UpdateRateType(r.Context(), store.RateType{Code: chi.URLParam(r, "code"), Name: body.Name, AllowInverse: body.AllowInverse, Provider: body.Provider})
 	if err != nil {
-		a.fail(w, r, "put rate type failed", err)
+		a.fail(w, r, "update rate type failed", err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, t)

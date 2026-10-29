@@ -1,8 +1,10 @@
 import { useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, Card, DataTable, PageHeader, Skeleton, StatGroup, StatTile, StatusPill, type DataTableColumn } from "../../shell/ui";
 import {
   describeProblem,
+  FOLLOW_UP_STATUSES,
+  followUpWorkOrder,
   getWorkOrder,
   newKey,
   NEXT_STATUSES,
@@ -15,9 +17,10 @@ import {
   type WorkOrder,
   type WorkOrderStatus,
 } from "./api/client";
+import { ActivityPanel } from "./ActivitiesPage";
 import { CoverageBadge } from "./badges";
 import { Details } from "./Details";
-import { dash, duration, money, sentence, shortId } from "./format";
+import { dash, duration, formatDateTime, money, sentence, shortId } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -50,7 +53,10 @@ const actionLabel: Record<WorkOrderStatus, string> = {
   CANCELED: "Cancel work order",
 };
 
-/** One work order: lines, status moves (BR-45.5) and posting with per-line coverage (PRD 8.45.6 "Work order detail"). */
+/**
+ * One work order: lines, status moves (BR-45.5), posting with per-line coverage
+ * and a follow-up visit when the first one did not fix it (PRD 8.45.6 "Work order detail").
+ */
 export function WorkOrderDetailPage() {
   const { id = "" } = useParams();
   const state = useLoad((signal) => getWorkOrder(id, signal), id);
@@ -59,6 +65,8 @@ export function WorkOrderDetailPage() {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [notice, setNotice] = useState<string>("");
   const postKey = useRef(newKey());
+  const followUpKey = useRef(newKey());
+  const navigate = useNavigate();
   const current = latest && latest.value.id === id ? latest : state.data;
 
   if (state.error && !current) {
@@ -99,6 +107,23 @@ export function WorkOrderDetailPage() {
     }
   }
 
+  async function followUp() {
+    setBusy("follow-up");
+    setFailure(null);
+    setNotice("");
+    try {
+      const child = await followUpWorkOrder(wo.id, etag, followUpKey.current);
+      followUpKey.current = newKey();
+      navigate(`/service/work-orders/${child.value.id}`);
+    } catch (error) {
+      const problem = describeProblem(error);
+      setFailure(problem);
+      if (problem.code === "conflict_version") state.reload();
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const moves = NEXT_STATUSES[wo.status];
   return (
     <div className={styles.stack}>
@@ -126,6 +151,11 @@ export function WorkOrderDetailPage() {
                 Post to billing
               </Button>
             ) : null}
+            {FOLLOW_UP_STATUSES.includes(wo.status) ? (
+              <Button variant="secondary" loading={busy === "follow-up"} onClick={followUp}>
+                Open follow-up visit
+              </Button>
+            ) : null}
           </div>
         }
       />
@@ -148,6 +178,9 @@ export function WorkOrderDetailPage() {
             ["Agreement", wo.agreementId ? <Link to={`/service/agreements/${wo.agreementId}`}>{shortId(wo.agreementId)}</Link> : "None (billable)"],
             ["Estimate", duration(wo.estDurationMinutes)],
             ["Currency", wo.currency],
+            ["Completed", formatDateTime(wo.completedAt), true],
+            ["First-time fix", wo.firstTimeFix === true ? "Yes" : wo.firstTimeFix === false ? "No, a follow-up was needed" : dash],
+            ["Follow-up of", wo.followUpOf ? <Link to={`/service/work-orders/${wo.followUpOf}`}>{shortId(wo.followUpOf)}</Link> : dash],
           ]}
         />
       </Card>
@@ -170,6 +203,7 @@ export function WorkOrderDetailPage() {
           />
         </Card>
       ) : null}
+      <ActivityPanel entityType="work_order" entityId={wo.id} />
     </div>
   );
 }

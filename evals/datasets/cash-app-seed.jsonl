@@ -1,0 +1,4 @@
+{"paymentId":"PAY-2001","amount":"500.00","remittance":"Payment for INV-2101 and INV-2102","openInvoices":[{"invoiceId":"INV-2101","amount":"300.00"},{"invoiceId":"INV-2102","amount":"200.00"},{"invoiceId":"INV-2103","amount":"500.00"}],"truth":["INV-2101","INV-2102"]}
+{"paymentId":"PAY-2002","amount":"480.00","remittance":"wire, no reference","openInvoices":[{"invoiceId":"INV-2201","amount":"480.00"},{"invoiceId":"INV-2202","amount":"120.00"}],"truth":["INV-2201"]}
+{"paymentId":"PAY-2003","amount":"1000.00","remittance":"INV-2301 short paid by 20","openInvoices":[{"invoiceId":"INV-2301","amount":"1020.00"}],"truth":["INV-2301"]}
+{"paymentId":"PAY-2004","amount":"75.00","remittance":"ACH batch 77","openInvoices":[{"invoiceId":"INV-2401","amount":"75.00"},{"invoiceId":"INV-2402","amount":"75.00"}],"truth":[]}

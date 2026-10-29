@@ -1006,7 +1006,7 @@ Interaction rules: drag snaps to 5-minute grid; `Shift+drag` moves the whole ord
 
 ### 4.23.9 Test plan and fixtures
 
-Fixtures: `orlib-jobshop-30` (ft06, ft10, ft20, la01–la20, abz5–abz9 with known optima); `sched-calendar-edge` (DST days, 24/7, zero-capacity holidays); `sched-5k-ops` (demo plant scaled); `sched-propagation` (pegged chains 5 deep).
+Fixtures: `orlib-jobshop-30` (30 instances with known optima: ft06, ft10, ft20, la01–la25, abz5, abz6; abz7–abz9 are 20×15 and too slow for a CI time limit); `sched-calendar-edge` (DST days, 24/7, zero-capacity holidays); `sched-5k-ops` (demo plant scaled); `sched-propagation` (pegged chains 5 deep).
 
 | Test | Type | Target | Pass criterion |
 |---|---|---|---|

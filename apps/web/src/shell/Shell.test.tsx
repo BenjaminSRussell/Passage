@@ -9,6 +9,7 @@ import { demoNote } from "./metadata";
 import { HomePage } from "./pages/HomePage";
 import { NotesPage } from "./pages/NotesPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
+import { usePrincipalDuties } from "./principal";
 import { RouteErrorBoundary } from "./RouteErrorBoundary";
 import { Shell } from "./Shell";
 import { recordedErrors } from "./telemetry";
@@ -402,6 +403,26 @@ describe("shell feedback", () => {
     expect(screen.getByRole("dialog", { name: "Navigation" })).toBeInTheDocument();
     act(() => notify?.({ matches: true }));
     expect(screen.queryByRole("dialog", { name: "Navigation" })).not.toBeInTheDocument();
+  });
+});
+
+describe("shell principal", () => {
+  function DutiesProbe() {
+    return <p>{`duties:${usePrincipalDuties().join("|")}`}</p>;
+  }
+
+  it("falls back to the dev duties when no duties prop is given", () => {
+    vi.stubGlobal("__PASSAGE_DEV_DUTIES__", "org.read, org.hierarchy.write");
+    render(
+      <MemoryRouter>
+        <Routes>
+          <Route element={<Shell modules={modules} />}>
+            <Route path="/" element={<DutiesProbe />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("duties:org.read|org.hierarchy.write")).toBeInTheDocument();
   });
 });
 

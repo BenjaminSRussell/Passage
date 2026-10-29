@@ -26,10 +26,12 @@ import (
 )
 
 const (
-	CodeConflict    = "FX_RATE_CONFLICT"
-	RatePublished   = "dev.passage.fx.rate.published.v1"
-	uniqueViolation = "23505"
-	maxDecimals     = 10
+	CodeConflict        = "FX_RATE_CONFLICT"
+	CodeRateTypeExists  = "FX_RATE_TYPE_EXISTS"
+	CodeRateTypeUnknown = "FX_RATE_TYPE_UNKNOWN"
+	RatePublished       = "dev.passage.fx.rate.published.v1"
+	uniqueViolation     = "23505"
+	maxDecimals         = 10
 )
 
 var priorities = map[string]int{"ecb": 10, "openexchangerates": 20, "csv": 30, "manual": 40, "migration": 40}
@@ -75,7 +77,8 @@ type HistoryEntry struct {
 }
 
 type Store interface {
-	PutRateType(ctx context.Context, in RateType) (RateType, error)
+	CreateRateType(ctx context.Context, in RateType) (RateType, error)
+	UpdateRateType(ctx context.Context, in RateType) (RateType, error)
 	GetRateType(ctx context.Context, code string) (RateType, error)
 	ListRateTypes(ctx context.Context) ([]RateType, error)
 	PostRates(ctx context.Context, in []RateInput) ([]Posted, error)
@@ -158,7 +161,7 @@ func scanType(row pgx.Row) (RateType, error) {
 
 const typeColumns = `id, code, name, allow_inverse, provider`
 
-func (s *Postgres) PutRateType(ctx context.Context, in RateType) (RateType, error) {
+func (s *Postgres) CreateRateType(ctx context.Context, in RateType) (RateType, error) {
 	if in.Code == "" || in.Name == "" {
 		return RateType{}, invalid("rate type code and name are required")
 	}
@@ -168,10 +171,32 @@ func (s *Postgres) PutRateType(ctx context.Context, in RateType) (RateType, erro
 		var err error
 		out, err = scanType(tx.QueryRow(ctx, `insert into exchange_rate_type (tenant_id, id, code, name, allow_inverse, provider, created_by)
 			values ($1,$2,$3,$4,$5,nullif($6,''),$7)
-			on conflict (tenant_id, code) do update set name = excluded.name, allow_inverse = excluded.allow_inverse, provider = excluded.provider
 			returning `+typeColumns, p.TenantID, ids.New(), in.Code, in.Name, in.AllowInverse, in.Provider, p.UserID))
 		return err
 	})
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
+		return RateType{}, httpx.NewProblem(http.StatusConflict, CodeRateTypeExists, "a rate type with this code already exists")
+	}
+	return out, err
+}
+
+func (s *Postgres) UpdateRateType(ctx context.Context, in RateType) (RateType, error) {
+	if in.Code == "" || in.Name == "" {
+		return RateType{}, invalid("rate type code and name are required")
+	}
+	p, _ := tenant.FromContext(ctx)
+	var out RateType
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		out, err = scanType(tx.QueryRow(ctx, `update exchange_rate_type set name=$3, allow_inverse=$4, provider=nullif($5,'')
+			where tenant_id=$1 and code=$2
+			returning `+typeColumns, p.TenantID, in.Code, in.Name, in.AllowInverse, in.Provider))
+		return err
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return RateType{}, httpx.NewProblem(http.StatusNotFound, CodeRateTypeUnknown, "rate type not found")
+	}
 	return out, err
 }
 
@@ -184,7 +209,7 @@ func (s *Postgres) GetRateType(ctx context.Context, code string) (RateType, erro
 		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return RateType{}, httpx.NewProblem(http.StatusNotFound, "FX_RATE_TYPE_UNKNOWN", "rate type not found")
+		return RateType{}, httpx.NewProblem(http.StatusNotFound, CodeRateTypeUnknown, "rate type not found")
 	}
 	return out, err
 }

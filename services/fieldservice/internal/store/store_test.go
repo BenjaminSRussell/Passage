@@ -428,4 +428,19 @@ func TestStore_TenantAndLegalEntityIsolation(t *testing.T) {
 	if page, err := s.ListCases(t1, ListFilter{Limit: 10}); err != nil || len(page.Items) != 1 {
 		t.Fatalf("tenant 1 lists %d cases, err %v", len(page.Items), err)
 	}
+	// Slice 2 under RLS: another tenant can neither move the case nor have the
+	// monitor see it; the owning tenant can do both.
+	later := time.Now().UTC().Add(48 * time.Hour)
+	if _, _, err := s.TransitionCase(t2, c.ID, c.Version, domain.CaseInProgress, time.Now().UTC(), "", ""); problemCode(err) != CodeCaseUnknown {
+		t.Fatalf("tenant 2 moved tenant 1's case: err %v", err)
+	}
+	if res, err := s.ScanSLA(t2, later, 100); err != nil || res.Scanned != 0 {
+		t.Fatalf("tenant 2 monitor saw %+v, err %v", res, err)
+	}
+	if res, err := s.ScanSLA(t1, later, 100); err != nil || res.Scanned != 1 || res.Breaches != 2 {
+		t.Fatalf("tenant 1 monitor: %+v, err %v; want the response and resolution breaches", res, err)
+	}
+	if k, err := s.KPIs(t2, KPIFilter{From: later.Add(-96 * time.Hour), To: later, AsOf: later}); err != nil || k.CasesOpened != 0 {
+		t.Fatalf("tenant 2 KPIs counted %d cases, err %v", k.CasesOpened, err)
+	}
 }

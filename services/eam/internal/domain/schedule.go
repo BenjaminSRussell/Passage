@@ -15,6 +15,9 @@ const (
 	KindCounter        Kind = "COUNTER"
 	KindTimeOrCounter  Kind = "TIME_OR_COUNTER"
 	KindTimeAndCounter Kind = "TIME_AND_COUNTER"
+	// KindRound schedules a maintenance round on time only (BR-44.9); one work
+	// order per occurrence carries every stop.
+	KindRound Kind = "ROUND"
 )
 
 // ErrInvalidLine reports a plan line that cannot be scheduled.
@@ -75,7 +78,7 @@ func AddInterval(t time.Time, iv Interval) (time.Time, error) {
 // forecast is unknown and counter-only or AND lines have no due point.
 func Compute(line PlanLine, c CounterState, now time.Time) (Schedule, error) {
 	var s Schedule
-	hasTime := line.Kind == KindTime || line.Kind == KindTimeOrCounter || line.Kind == KindTimeAndCounter
+	hasTime := line.Kind == KindTime || line.Kind == KindRound || line.Kind == KindTimeOrCounter || line.Kind == KindTimeAndCounter
 	hasCounter := line.Kind == KindCounter || line.Kind == KindTimeOrCounter || line.Kind == KindTimeAndCounter
 	if !hasTime && !hasCounter {
 		return s, fmt.Errorf("%w: kind %q", ErrInvalidLine, line.Kind)
@@ -117,7 +120,7 @@ func Compute(line PlanLine, c CounterState, now time.Time) (Schedule, error) {
 	}
 	s.ForecastAt = forecast
 	switch line.Kind {
-	case KindTime:
+	case KindTime, KindRound:
 		s.NextDueAt = due
 	case KindCounter:
 		s.NextDueAt = forecast

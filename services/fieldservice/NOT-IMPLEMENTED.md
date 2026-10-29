@@ -1,4 +1,4 @@
-# NOT-IMPLEMENTED — PSG-45 (wave 45), slice 1
+# NOT-IMPLEMENTED — PSG-45 (wave 45), slices 1 to 4
 
 Slice 1 delivers: SLA profiles with business-hour calendars and holidays; service
 agreements; the entitlement resolver (BR-45.1); case open with entitlement and SLA
@@ -8,7 +8,46 @@ and agreement hour FIFO (FR-45.10, BR-45.4, BR-45.8 rounding); list and read
 endpoints for every entity; the events `case.opened` and `workorder.posted`; the
 greedy dispatch checker and solver in `services/dispatch-py`; the web service module
 with list, create and detail screens for cases, agreements, work orders and SLA
-profiles; OpenAPI, AsyncAPI, chart, Dockerfile. Everything below is not in this slice.
+profiles; OpenAPI, AsyncAPI, chart, Dockerfile.
+
+Slice 2 (PSG-4502) delivers: the case status machine (`POST /cases/{id}:transition`,
+If-Match) with SLA pause and resume (WAITING_CUSTOMER, WAITING_PARTS under
+`pauseOnParts`), the response stamp from leaving NEW or the first DISPATCHED work
+order, MET/BREACHED resolution; one SLA monitor pass (`POST /sla:scan`) that emits
+`sla.warning` at 75 % and `sla.breached` past due once per clock through the outbox;
+work-order completion time, `first_time_fix` and follow-up orders (`:follow-up`,
+BR-45.5); `GET /kpis` with SLA attainment, mean time to respond and resolve and the
+first-time-fix rate; and in the web module the case status actions, SLA alerts, the
+follow-up action and a KPI dashboard.
+
+Slice 3 (PSG-4503) delivers: the installed base (`service_object`) registered by hand
+or from a confirmed serialized shipment (`:receive-shipment`, one ACTIVE object per
+serial, idempotent per item and serial) with parent/child structure, installation and
+a warranty term per object (parts, labor and travel flags, months from SHIP, INSTALL
+or REGISTRATION); a case on a service object of its customer bills the covered lines
+of its work orders to warranty when posted (FR-45.2, BR-45.4, AC-45.6); activities
+(TASK, APPOINTMENT, CALL_NOTE, EMAIL_NOTE) on any record with "My activities",
+complete, cancel, reschedule and an iCalendar export (FR-45.14, AC-45.15); the
+knowledge base with versioned per-language articles, the DRAFT → IN_REVIEW →
+PUBLISHED → RETIRED lifecycle, reviewer ≠ author (`KB-PUB-001`), publishing retiring
+the previous version (`KB-PUB-002`) with `dev.passage.knowledge.article.published.v1`
+through the outbox, helpfulness votes and ranked suggestions (BR-45.11, AC-45.12);
+and in the web module the installed-base explorer, "My activities", the knowledge
+base screens, and activities and suggested articles on the case detail.
+
+Slice 4 (PSG-4504) delivers generic case management (FR-45.12): case processes with
+ordered stages and the activities each stage requires; the case category tree (type,
+parent, process, SLA profile, default priority, reopen window, resolution codes and an
+access duty); cases in any non-service category (`POST /v1/cases`, starting at the
+first stage, the category's SLA profile setting the dues, COLLECTIONS requiring a
+customer) with associations to any registry record and a case log; the stage gate
+(`CASE-STG-001` until the stage's required activities are DONE on the case, back one
+stage with a reason) emitting `dev.passage.case.stage.changed.v1` through the outbox;
+resolve with a category resolution code, close, cancel and reopen (in place within
+the window, else a new case linked by `reopenedFrom`) (BR-45.9, AC-45.10); category
+security by access duty and ownership on open, read, list and every change (BR-45.10,
+AC-45.11 403); and in the web module the case list, open case, case detail and case
+setup screens. Everything below is not built yet.
 
 Status values: **later slice of PSG-45** (planned in this wave) or **handoff** (needs
 another owner, or lives outside my owned paths).
@@ -17,34 +56,34 @@ another owner, or lives outside my owned paths).
 
 | # | Deliverable | Status | Reason |
 |---|---|---|---|
-| 1 | Installed base / service objects; warranty terms; serial tracking from shipments | later slice of PSG-45 | Needs the wave-28 serialized-shipment event consumer and the ServiceObject/Warranty tables (FR-45.1, FR-45.2). Posting already accepts warranty cover from the domain, but nothing sources it yet. |
-| 2 | Service agreements (entitlements, SLAs, pricing); cases to service work orders; repair orders | partial | Agreements, SLA profiles, case open and work orders from cases are built. The agreement lifecycle after create (activate a DRAFT, suspend, expire, cancel), repair orders, preventive visits (`service-agreement-visits`), case status transitions with SLA pause/resume (`POST /cases/{id}/status`) and pricing from price lists (wave 27) are later slices. |
+| 1 | Installed base / service objects; warranty terms; serial tracking from shipments | partial | Built (slice 3): service objects with customer, site address, parent/child, ship and install dates, status and a warranty term each; `POST /service-objects:receive-shipment` creates them from a confirmed serialized shipment; posting sources warranty cover from the case's service object. Not built: the wave-28 shipment-confirmed event consumer (handoff; the endpoint stands in for it, and the per-legal-entity "create service objects" parameter waits for it), status changes after create (INACTIVE, RETURNED), warranty exclusions and warranty templates (the term lives on the object), the item-group default start trigger, and the shipment line id (the shipment id is stored). |
+| 2 | Service agreements (entitlements, SLAs, pricing); cases to service work orders; repair orders | partial | Agreements, SLA profiles, case open and work orders from cases are built. Case status transitions with SLA pause/resume are built (slice 2, as the custom method `POST /cases/{id}:transition` rather than the PRD's `/status`). The agreement lifecycle after create (activate a DRAFT, suspend, expire, cancel), repair orders, preventive visits (`service-agreement-visits`) and pricing from price lists (wave 27) are later slices. |
 | 3 | Dispatch board and scheduling with OR-Tools; mobile technician app | partial | Feasibility checker and greedy solver in `services/dispatch-py` are built. CP-SAT model, dispatch-run API (`/dispatch/runs`, publish), board UI, travel matrix client (OSRM) and `service-dispatch-auto` are later slices. The PWA is a handoff (see `apps/technician/README.md`). |
 | 4 | Parts consumption from truck stock; billing to customer or warranty | partial | Posting to billable, warranty and agreement coverage is built. Truck consumption (TRUCK locations, BR-45.7) and mobile action log are later slices. Invoice creation is a handoff to wave 29 (consumes `workorder.posted.v1`). |
-| 5 | Service KPIs: SLA attainment, first-time fix | later slice of PSG-45 | `GET /v1/service/kpis` and the `svc_sla` / `svc_kpi` projections need the breach monitor and the first-time-fix flag set at completion (not yet in the model). |
-| 6 | Generic case management (categories, processes, associations, category security) consolidating wave 9/30 cases | later slice of PSG-45 | FR-45.12, BR-45.9, BR-45.10 and the `case-consolidate` migration are not started. The current `service_case` is the SERVICE category only. |
-| 7 | Knowledge base; activities on cases, projects and records | later slice of PSG-45 | FR-45.13 and FR-45.14 are not started. Project activities depend on wave 41. |
+| 5 | Service KPIs: SLA attainment, first-time fix | partial | `GET /v1/service/kpis` (window and territory) computes response and resolution attainment, mean time to respond and resolve, and the first-time-fix rate live from the case and work-order tables, and the web module has a KPI dashboard. Not built: technician utilization and travel ratio (need dispatch assignments), filters by technician, category and priority (8.45.14), and the `svc_sla` / `svc_kpi` read projections (the analytics wave consumes the events instead). |
+| 6 | Generic case management (categories, processes, associations, category security) consolidating wave 9/30 cases | partial | Built (slice 4): see FR-45.12, BR-45.9 and BR-45.10 below. Not built: the `case-consolidate` migration of the wave-30 disputes and wave-9 product change requests into COLLECTIONS and PRODUCT_CHANGE cases (handoff: those waves expose no case export yet; the job is a later slice once they do), and categories on service cases (SERVICE and CUSTOMER_SERVICE cases stay in `service_case`, see FR-45.12). |
+| 7 | Knowledge base; activities on cases, projects and records | partial | Built (slice 3): see FR-45.13 and FR-45.14 below. Activities accept a project (wave 41) as a record type, but no record id is checked against its owning service. |
 | 8 | Supplier warranty claims with vendor recovery; email-to-case intake | later slice of PSG-45 | FR-45.15 and FR-45.16 are not started. Email intake depends on the wave-35 mailbox hub (handoff). |
-| Deploy | Service workspace and technician mobile app; demo service objects from shipped serials | partial | The web service module has list, create and detail screens for cases, agreements, work orders and SLA profiles. The workspace tiles (SLA at risk, unscheduled work orders, completion rate), dispatch board, installed-base explorer and KPI dashboard (PRD 8.45.6) wait for their features. The PWA is a handoff. Demo objects wait for item 1. |
+| Deploy | Service workspace and technician mobile app; demo service objects from shipped serials | partial | The web service module has list, create and detail screens for cases, agreements, work orders and SLA profiles. Slice 2 adds the case status actions, the follow-up action and the KPI dashboard. Slice 3 adds the installed-base explorer, "My activities" and the knowledge base. Slice 4 adds the case list across categories, open case, the case detail (stages, required activities, resolve, reopen, associations, log, activities) and case setup (categories and processes). Not built in the web module for slice 4: a tree view of the category tree (setup lists categories with their parent), the case list's SLA-state filter and "My cases" shortcut (the API takes `ownerId`), and links from "My activities" to a generic case (an activity on a case links to the service case screen, which cannot show a generic case). The workspace tiles (SLA at risk, unscheduled work orders, completion rate) and the dispatch board (PRD 8.45.6) wait for their features. The PWA is a handoff. Demo service objects (a seeded shipment) are not built. |
 
 ## Functional requirements (PRD 8.45.3)
 
 | FR | Status | Reason |
 |---|---|---|
-| FR-45.1 Installed base | later slice of PSG-45 | See deliverable 1. |
-| FR-45.2 Warranties | later slice of PSG-45 | Domain rule exists (`WarrantyActive`, `coverFor`); no warranty tables or term sourcing. |
+| FR-45.1 Installed base | partial | See deliverable 1. |
+| FR-45.2 Warranties | partial | Parts, labor and travel flags and the duration from SHIP, INSTALL (starts when the installation is recorded) or REGISTRATION (the day the object is registered) are stored per object, and coverage is evaluated per work-order line on the completion day. Exclusions and warranty templates are not built. |
 | FR-45.3 Service agreements | partial | Agreements and lines are stored and listed with consumed included hours; `billing_model` and `includedVisits` are recorded, but visit consumption, preventive visits, the status lifecycle after create, `price_list_id`/`discount_pct` and the subscription hand-off to wave 29 are not built. |
 | FR-45.4 SLA profiles | partial | Profiles, targets, Monday-to-Friday calendars with holiday dates, 24x7 and `pauseOnParts` are stored; calendars and holidays drive the clock arithmetic. Per-weekday hours, holidays from wave-8 calendars (handoff) and the warning threshold parameter (75 %) are not built. |
-| FR-45.5 Cases | partial | Open is built with entitlement and SLA clocks. Channel is recorded. Status transitions, pause/resume, breach monitor and the warning event are not built. |
-| FR-45.6 Service work orders | partial | Create (from a case, inheriting its agreement, or directly), list, read, transition and lines are built. Required skills, service object, address, geo, time window and assignment are not stored yet; `follow_up_of` (BR-45.5) is not built. The 8.45.5 validations "complete requires a signature" (`SVC-WO-001`) and "post requires all parts lines consumed" (`SVC-WO-002`) wait for the mobile action log and truck stock. |
+| FR-45.5 Cases | partial | Open is built with entitlement and SLA clocks; channel is recorded. Status transitions, pause/resume, the monitor pass and the warning and breach events are built (slice 2). Not built: intake from portal and IoT sources (wave 44/25 events) and the case log/timeline. |
+| FR-45.6 Service work orders | partial | Create (from a case, inheriting its agreement, or directly), list, read, transition and lines are built. Follow-up orders (`follow_up_of`) and the completion time are built (slice 2). Required skills, service object, address, geo, time window and assignment are not stored yet. The 8.45.5 validations "complete requires a signature" (`SVC-WO-001`) and "post requires all parts lines consumed" (`SVC-WO-002`) wait for the mobile action log and truck stock. |
 | FR-45.7 Dispatch optimization | partial | Greedy and checker only (`services/dispatch-py`); no CP-SAT, no API, no re-optimization. |
 | FR-45.8 Technician PWA | handoff | `apps/technician/README.md`. |
 | FR-45.9 Truck stock | later slice of PSG-45 | Needs wave-16 TRUCK locations (handoff) and BR-45.7 consumption. |
 | FR-45.10 Billing | partial | Work order posting is built and emits `workorder.posted.v1`. Invoice creation is a wave-29 handoff. |
-| FR-45.11 Service KPIs | later slice of PSG-45 | See deliverable 5. |
-| FR-45.12 Generic case management | later slice of PSG-45 | See deliverable 6. |
-| FR-45.13 Knowledge base | later slice of PSG-45 | See deliverable 7. |
-| FR-45.14 Activities | later slice of PSG-45 | See deliverable 7. |
+| FR-45.11 Service KPIs | partial | SLA attainment, first-time fix and mean time to respond and resolve are built; utilization and travel ratio are not. See deliverable 5. |
+| FR-45.12 Generic case management | partial | Built: processes (1 to 20 ordered stages with required activities), the category tree with the nine category types, process, SLA profile, default priority, reopen window, resolution codes and access duty; cases in the non-service categories in `service_generic_case` with the customer optional except for COLLECTIONS, associations (SUBJECT or RELATED) to the registry record types of `domain.AssociableTypes`, the case log (created, stage, status, association, reopen), resolution codes, and response and resolution dues from the category's SLA profile at open; list by category, status, stage, owner and associated record. Not built: SERVICE and CUSTOMER_SERVICE categories on service cases (`service_case` has no category, stage or resolution code yet, so `POST /v1/cases` refuses those categories with `CASE-CAT-002` and the service case screens stay as they are; generalizing `service_case` instead of a second table is the open design choice for the PRD owner); inheritance of process, SLA profile or access from a parent category (each node carries its own); category and process updates (create and list only); SLA pause, monitor and breach events on generic-case dues (computed once at open); case owner reassignment and the "bulk assign" action of the case list (the owner is the user who opened the case); free-text notes in the case log; a check that an associated record exists in its owning service (wave-3 registry, handoff); the `case_stats` report (8.45.14). |
+| FR-45.13 Knowledge base | partial | Built: articles (title, symptom, cause, solution, applicability to items, item groups, incident types, asset types and categories, language), versions with the lifecycle and a reject back to DRAFT, full-text search over the PUBLISHED versions with the item, incident type and asset type ranking, helpfulness votes. Not built: attachments; structured search by item group or category (stored, not filtered); the suggestions returned in the case-create response (the case detail calls the search with the case description and its object's item instead); linking articles to cases with an outcome (`CaseArticleLink`); view counts and the `kb_stats` usage report; a translation of an article into another language under the same number (a new version keeps its language; a new language is a new article); the English fallback. |
+| FR-45.14 Activities | partial | Built: the four kinds with owner, due, start, end, status, reminder minutes and associations to any registry record type; "My activities" by owner and status, the activities of one record, complete (DONE with a timestamp), cancel, reschedule and the iCalendar export with reminders as VALARM. Not built: reminder notifications (wave-35 hub, handoff), checking that an associated record exists in its owning service, a calendar view in the web module (the export opens in any calendar), and the "case activities" report. |
 | FR-45.15 Supplier warranty claims | later slice of PSG-45 | See deliverable 8. |
 | FR-45.16 Email-to-case intake | later slice of PSG-45 | See deliverable 8. |
 
@@ -53,16 +92,16 @@ another owner, or lives outside my owned paths).
 | BR | Status | Reason |
 |---|---|---|
 | BR-45.1 Entitlement resolution | partial | Resolver in `internal/domain/entitlement.go`, unit-tested; candidates are restricted to the case's legal entity. Not built: the parent-party match (needs the party hierarchy), the object-category match from a service object's category (no installed base yet), and the legal entity's default SLA profile parameter; the caller passes `fallbackSlaProfileId` instead. |
-| BR-45.2 SLA clock rules | partial | Business-minute calendar with holidays and due arithmetic are built and property-tested (inverse laws, DST-safe, with and without holidays). Response measured until DISPATCHED, pause states on WAITING_CUSTOMER/WAITING_PARTS, warning at 75 % and breach events are later slices. |
+| BR-45.2 SLA clock rules | partial | Business-minute calendar with holidays and due arithmetic are built and property-tested. Slice 2 builds the response stamp (leaving NEW or the first DISPATCHED work order), the pauses (WAITING_CUSTOMER; WAITING_PARTS with `pauseOnParts`) with the due recomputed from the paused business minutes, the warning at 75 % and the breach, each emitted once, and BREACHED staying a miss when resolved late. Not built: the tenant warning-threshold parameter (fixed at the 75 % default) and holiday calendars from wave 8 (handoff). The response clock does not pause on WAITING_CUSTOMER, because a case can only wait after it was answered. |
 | BR-45.3 Dispatch constraints | partial | Hard constraints are in the checker; objective and CP-SAT are later. Certification expiry (BR-42.8) waits for wave 42. |
-| BR-45.4 Coverage per line | partial | Warranty, agreement and billable per line; FIFO hours. Warranty sourcing is later. |
-| BR-45.5 Work order state machine | built | Transitions tested; `follow_up_of` and `first_time_fix` are not set. |
+| BR-45.4 Coverage per line | built | Warranty (from the case's service object, active on the completion day), then agreement, then billable per line; FIFO hours (`TestStore_WarrantyFromServiceObjectCoversPart`). |
+| BR-45.5 Work order state machine | built | Transitions tested; completion sets `first_time_fix` and `completed_at`, and a follow-up of a COMPLETED or POSTED order links by `follow_up_of` and clears the parent's `first_time_fix` (slice 2). |
 | BR-45.6 Offline merge | later slice of PSG-45 | Needs the action log endpoint. |
 | BR-45.7 Truck stock | later slice of PSG-45 | See FR-45.9. |
 | BR-45.8 Pricing | partial | Half-even rounding per line is built. Price lists and wave-27 pricing are a handoff. |
-| BR-45.9 Case process stages | later slice of PSG-45 | Generic cases not started. |
-| BR-45.10 Case category security | later slice of PSG-45 | Generic cases not started. |
-| BR-45.11 Knowledge lifecycle | later slice of PSG-45 | Knowledge base not started. |
+| BR-45.9 Case process stages | partial | Built: start at the first stage; the next stage only when every required activity of the current stage is DONE on the case (`CASE-STG-001`), back one stage with a reason, other moves refused (`CASE-STG-002`); RESOLVED requires a resolution code (from the category's list when it has one); CANCELED final; reopen of a RESOLVED or CLOSED case in place within the category's window (days since resolution, default 14, 0 disables it), else a new case linked by `reopenedFrom` (`TestStore_GenericCaseStageGate`, `TestStore_GenericCaseResolveCloseAndReopen`). Not built: entry and exit criteria as CEL expressions over the case, associations and activities (only the required activities gate a move; needs a CEL evaluator in the platform kernel, handoff); required activity templates as their own entity (a template is matched by the activity subject). The PRD's "CLOSED is final ... unless the category allows reopen within N days" is read as: a CLOSED or RESOLVED case reopens itself inside the window and is otherwise reopened as a new linked case. |
+| BR-45.10 Case category security | partial | Built: a category's access duty (standing in for its OPA policy reference) plus the case owner decide open, read, list and every change; others get `CASE-SEC-001` (403) and the list leaves the case out; a category without one is open to every CaseMaintain holder (`TestStore_GenericCaseCategorySecurity`, `TestAPI_GenericCaseFlow`). Not built: members of the category's owning team (no team entity), OPA policy evaluation per category type (the duty stands in; policies handoff), the HR subject's manager chain as of today (BR-42.1, wave 42 handoff), the collector of a COLLECTIONS case's customer (wave 30 handoff), associations shown as "restricted record" when the caller cannot read the record (needs the registry's read check), and the `hr_pii` protected column set for HR case free text. |
+| BR-45.11 Knowledge lifecycle | partial | Built: one PUBLISHED version per article and language (partial unique index), publishing retires the previous one (`KB-PUB-002` warning), reviewer ≠ author (`KB-PUB-001`, also a table check), the ranking ts_rank × 0.6 (normalized to the best candidate; any word of the description matches) + item 0.25 + incident type 0.10 + asset type 0.05, top 5 by default, and the helpful share from 10 votes. Not built: the tenant parameters "Knowledge article review required" (always required) and "Suggestion count and weights" (fixed at the defaults; the count can be passed as `limit`). |
 | BR-45.12 Supplier claims | later slice of PSG-45 | Not started. |
 | BR-45.13 Email threading | later slice of PSG-45 | Not started. |
 
@@ -71,69 +110,81 @@ another owner, or lives outside my owned paths).
 | AC | Status | Reason |
 |---|---|---|
 | AC-45.1 Entitlement fixtures (50) | partial | Resolver unit tests exist. The 50-case fixture set under `testdata/` is not built. |
-| AC-45.2 Pause 120 min to 2026-10-27T12:00-05:00 | partial | Clock arithmetic is tested; the pause endpoint is not built. Open question for the PRD owner: under the BR-45.2 example calendar (Mon–Fri 08:00–18:00) 480 + 120 business minutes from Fri 2026-10-23 16:00 end Mon 2026-10-26 16:00, not Tue 12:00 (Tue 12:00 needs 960 minutes). `sla_test.go` asserts Mon 16:00; the AC text should be corrected or the example calendar stated. |
-| AC-45.3 Warning at 75 % and single breach event | later slice of PSG-45 | Monitor and warning not built. |
+| AC-45.2 Pause 120 min to 2026-10-27T12:00-05:00 | partial | The pause and resume are built and tested against Postgres (`TestStore_CaseTransitionPausesAndResumes`). Open question for the PRD owner: under the BR-45.2 example calendar (Mon–Fri 08:00–18:00) 480 + 120 business minutes from Fri 2026-10-23 16:00 end Mon 2026-10-26 16:00, not Tue 12:00 (Tue 12:00 needs 960 minutes). `sla_test.go` and the store test assert Mon 16:00; the AC text should be corrected or the example calendar stated. |
+| AC-45.3 Warning at 75 % and single breach event | built | Domain tests (`TestDueAlerts*`) and `TestStore_SLAMonitorWarnsOnceThenBreachesOnce` (one warning, then one breach, nothing on later passes). The 60 s schedule is not built (see scheduled jobs). |
 | AC-45.4 1,000 territory-days, p95 < 30 s | partial | Hypothesis property (300 examples) proves greedy feasibility. CP-SAT and the timing run are not built. |
 | AC-45.5 Pinned assignment unchanged | partial (greedy) | Verified by property test in the greedy solver. The CP-SAT re-optimization path is not built. |
-| AC-45.6 Warranty and agreement billing split | partial | Agreement 1 h of 3 h labor split is unit-tested. Warranty part is not sourced (see FR-45.2). |
+| AC-45.6 Warranty and agreement billing split | built | `TestStore_WarrantyFromServiceObjectCoversPart`: the part is zero-priced under the service object's warranty with its cost recorded, 2 of 3 labor hours are billable and 1 included hour is consumed. The invoice itself is wave 29 (handoff). |
 | AC-45.7 Offline replay equals device state | later slice of PSG-45 | Needs BR-45.6. |
-| AC-45.8 10 active service objects from shipment | later slice of PSG-45 | Needs FR-45.1. |
+| AC-45.8 10 active service objects from shipment | partial | `TestStore_ShipmentCreatesObjectsAndInstallStartsWarranty`: 10 serials give 10 ACTIVE objects with the warranty starting on the ship date, and a re-delivery creates none. The trigger is the receive endpoint until wave 28 publishes the shipment event (handoff). |
 | AC-45.9 Phase-8 exit walkthrough | handoff | Spans waves 41, 42, 43, 44 and this wave. Owned by the phase-exit demo. |
-| AC-45.10 HR stage gate `CASE-STG-001` | later slice of PSG-45 | Needs FR-45.12. |
-| AC-45.11 HR case category 403 | later slice of PSG-45 | Needs FR-45.12 and BR-45.10. |
-| AC-45.12 KB ranking and `KB-PUB-001` | later slice of PSG-45 | Needs FR-45.13. |
+| AC-45.10 HR stage gate `CASE-STG-001` | built | `TestStore_GenericCaseStageGate` (as passage_app): INTAKE → INVESTIGATION, RESOLUTION refused with `CASE-STG-001` while the "Interview" activity on the case is OPEN (a DONE "Interview" on another record does not count), then accepted once it is DONE; `TestAPI_GenericCaseFlow` checks the code over HTTP. |
+| AC-45.11 HR case category 403 | partial | `TestStore_GenericCaseCategorySecurity` and `TestAPI_GenericCaseFlow`: a collector without the HR category's access duty gets 403 `CASE-SEC-001` on read and write and no list row, while duty holders and the owner can read it. Not built: the subject's manager reading the case (needs the wave-42 manager chain; see BR-45.10). |
+| AC-45.12 KB ranking and `KB-PUB-001` | built | `TestStore_KnowledgeLifecycleAndSuggestions`: the article that applies to the case item ranks first for a case description, and the author cannot publish (`KB-PUB-001`). |
 | AC-45.13 Supplier claim settlement | later slice of PSG-45 | Needs FR-45.15. |
 | AC-45.14 Email threading | later slice of PSG-45 | Needs FR-45.16. |
-| AC-45.15 My activities | later slice of PSG-45 | Needs FR-45.14. |
+| AC-45.15 My activities | built | `TestStore_ActivitiesListCompleteAndReschedule`: a project task and a case task of one owner both appear with their records, and completing one sets DONE with its timestamp. The project is referenced by id; wave 41 is not called. |
 | Ticket AC1 entitlement fixtures | partial | See AC-45.1. |
 | Ticket AC2 dispatch feasibility (property) | partial | Greedy only (see AC-45.4). |
 | Ticket AC3 billable vs warranty posting | partial | See AC-45.6. |
 | Ticket AC4 phase-8 exit | handoff | See AC-45.9. |
 | Ticket AC5 every deliverable has code or a row here | met | This file. |
-| Ticket AC6 vet/test, web tests, specs match, chart lints | met | Service `go vet`/`go test` pass; web module vitest and tsc pass; `api/openapi.yaml` and `events/asyncapi.yaml` match the handlers and events; chart lints (see README). |
+| Ticket AC6 vet/test, web tests, specs match, chart lints | met (slice 4 included) | Service `go vet`/`go test` pass; web module vitest and tsc pass; `api/openapi.yaml` and `events/asyncapi.yaml` match the handlers and events; chart lints (see README). |
 
 ## Fixtures and test plan (PRD 8.45.9)
 
 | Item | Status | Reason |
 |---|---|---|
-| `svc-installed-base` (2,000 objects) | later slice of PSG-45 | Needs FR-45.1. |
+| `svc-installed-base` (2,000 objects) | later slice of PSG-45 | The installed base is built; the 2,000-object fixture is not. |
 | `svc-entitlement-50` | later slice of PSG-45 | Not yet in `testdata/`. |
 | `svc-dispatch-gen` | partial | Hypothesis generator in `services/dispatch-py/tests/test_properties.py`; seeded OSRM matrix not built. |
 | `svc-mobile-replay` | later slice of PSG-45 | Needs BR-45.6. |
 | `svc-billing-30` | later slice of PSG-45 | Not built. |
 | Reconciliation: Σ posted billable = wave-29 invoices; Σ warranty = GL; truck issues = part actions | later slice of PSG-45 (and handoff for the wave-29 and GL sides) | Needs invoice creation, truck stock and warranty sourcing. |
 | PWA Playwright offline E2E | handoff | `apps/technician` not built. |
-| Breach monitor performance (100k cases < 60 s) | later slice of PSG-45 | Monitor not built. |
+| Breach monitor performance (100k cases < 60 s) | later slice of PSG-45 | The pass is built on the partial index `service_case_sla_running` and batches with `limit`; the 100k-case timing run is not. |
 
 ## Data model and operations (PRD 8.45.4, 8.45.10, 8.45.13, 8.45.19)
 
 | Item | Status | Reason |
 |---|---|---|
-| ServiceObject, Warranty, Technician, DispatchRun, ServiceWorkOrder assignment fields, geo (PostGIS point index) | later slice of PSG-45 | Not in migration 0001. |
-| `Case` category fields, stages, CaseAssociation, case log | later slice of PSG-45 | FR-45.12. |
-| ETag on reads and `If-Match` on PUT/PATCH/custom methods | built for work orders | Work-order create, read, transition and post set `ETag: "<version>"`, and the custom methods require `If-Match`. Agreements, cases and profiles have no update endpoints yet, so they carry no version. |
-| Number sequences from wave-5 definitions | partial | Fixed prefixes `SA`, `CS`, `SWO` allocated by the store; per-legal-entity definitions are not read yet. |
-| Parameters 8.45.13 (default SLA profile, warning threshold, dispatch time, solver limits, buffer, overtime, negative truck, reopen window, parent-party match) | partial | The business calendar and holidays per SLA profile are built. The legal entity's default SLA profile is not stored; the case request carries the fallback. `pauseOnParts` is stored on the profile but not applied, since no pause endpoint exists yet. The rest wait for the features above. |
-| Scheduled jobs (`service-sla-monitor`, `service-dispatch-auto`, `service-truck-replenish`, `service-ib-from-shipments`, `service-agreement-visits`, `case-email-ingest`, `case-consolidate`, `supplier-claim-deadline`, `kb-reindex`) | later slice of PSG-45 | Each depends on a feature above. |
+| ServiceObject, Warranty | partial | `service_object` (migration 0005) carries the warranty term inline; there is no separate Warranty table, `warranty_id` or `shipment_line_id`. |
+| KnowledgeArticle, Activity | partial | `service_kb_article` (one row per version, `revision` as the ETag, generated `tsvector` with a GIN index), `service_kb_vote` (one vote per user and version) and `service_activity` (associations as jsonb with a GIN index) in migration 0005. The tsvector uses the `simple` configuration for every language; per-language dictionaries and the title-only fallback index (8.45.18) are not built. `CaseArticleLink` and `views` are not built. |
+| Technician, DispatchRun, ServiceWorkOrder assignment fields, geo (PostGIS point index) | later slice of PSG-45 | Not in the migrations yet. |
+| `Case` category fields, stages, CaseAssociation, case log | partial | `service_case_process`, `service_case_category`, `service_generic_case`, `service_case_association` and `service_case_log` (migration 0006, with tenant RLS, the legal-entity policy on cases and passage_app grants). `CaseCategory.opa_policy_ref` is `access_duty`; `CaseProcess` stages are jsonb without entry/exit criteria; `service_case` itself gained no category fields (see FR-45.12). |
+| ETag on reads and `If-Match` on PUT/PATCH/custom methods | built for work orders, cases, service objects, activities and articles | Their create, read and custom methods set `ETag` (articles: the revision), and the updates require `If-Match`. Publishing takes If-Match but no Idempotency-Key (the PRD lists "key + ETag"): a replay fails the If-Match check instead of returning the stored result. Agreements and profiles have no update endpoints yet, so they carry no version. |
+| Number sequences from wave-5 definitions | partial | Fixed prefixes `SA`, `CS`, `SWO`, `KB` allocated by the store; per-legal-entity definitions are not read yet. |
+| Parameters 8.45.13 (default SLA profile, warning threshold, dispatch time, solver limits, buffer, overtime, negative truck, reopen window, parent-party match) | partial | The business calendar and holidays per SLA profile are built. The legal entity's default SLA profile is not stored; the case request carries the fallback. `pauseOnParts` is applied by the case transitions (slice 2). The SLA warning threshold is fixed at the 75 % default (no tenant parameter yet). The rest wait for the features above. |
+| `service-sla-monitor` schedule | handoff (platform scheduler) and later slice | One pass per tenant is built (`POST /v1/service/sla:scan`); running it every 60 s for every tenant needs the platform scheduler (wave-23 patterns) or a chart CronJob with a service principal per tenant, and the "monitor lag > 2 min" alert waits for that. |
+| Event `dev.passage.service.workorder.completed.v1` | later slice of PSG-45 | Its trigger is the mobile complete action (technicianId, lines, durationMinutes; 8.45.5), which needs the action log (BR-45.6). The `:transition` to COMPLETED sets the completion time and first-time fix but emits no event yet. |
+| Scheduled jobs (`service-dispatch-auto`, `service-truck-replenish`, `service-ib-from-shipments`, `service-agreement-visits`, `case-email-ingest`, `case-consolidate`, `supplier-claim-deadline`, `kb-reindex`) | later slice of PSG-45 | Each depends on a feature above. |
 | Feature flag `service.allow-negative-truck` | later slice of PSG-45 | Needs BR-45.7. |
 | Chart `passage-service` (TS API, breach monitor, mobile BFF) and `passage-dispatch` (Python worker, OSRM sidecar) | partial | Chart `services/fieldservice/charts/fieldservice` is built. The dispatch worker chart and OSRM sidecar are later. |
-| Privacy: technician location retention (90 days) and works-council flag; HR `hr_pii` protection | later slice of PSG-45 | Needs live tracking and HR categories. |
+| Privacy: technician location retention (90 days) and works-council flag; HR `hr_pii` protection | later slice of PSG-45 | Needs live tracking; HR categories exist (slice 4) but their free text is not yet in a protected column set. |
 | Migration from AX/SAP (PRD 8.45.11) | later slice of PSG-45 | Needs the entities above. |
 
 ## Handoffs (outside owned paths)
 
 | Owner | Request | Why |
 |---|---|---|
-| Policies (`policies/`) | Define OPA duty mappings for `SvcAgreementMaintain`, `SvcCaseCreate`, `SvcInquire`, `SvcWoMaintain`, `SvcBillingPost`, `SvcDispatch`, `SvcTechnician`, `SvcCaseMaintain` | Operations declare these duties in `x-passage-duty`; enforcement is via OPA. |
-| Wave 28 (serialized shipments) | Publish a shipment-confirmed event that the service can consume to create service objects | FR-45.1 |
+| Policies (`policies/`) | Define OPA duty mappings for `SvcAgreementMaintain`, `SvcCaseCreate`, `SvcCaseMaintain`, `SvcInquire`, `SvcWoMaintain`, `SvcBillingPost`, `SvcDispatch`, `SvcTechnician`, `SvcObjectMaintain`, `ActivityMaintain`, `KbRead`, `KbAuthor`, `KbPublish`, `CaseCreate`, `CaseMaintain`, `CaseSetupAdmin`, and the per-category access duties set up in case categories (for example an HR partner duty) | Operations declare these duties in `x-passage-duty`; enforcement is via OPA. The PRD duty table (8.45.17) names no installed-base duty, so `SvcObjectMaintain` is this service's proposal. A per-category OPA policy (BR-45.10) would replace the access duty. |
+| Wave 28 (serialized shipments) | Publish a shipment-confirmed event (shipment, ship date, customer, legal entity, site, item lines with serials) that the service can consume to create service objects; until then a caller posts it to `:receive-shipment` | FR-45.1, AC-45.8 |
 | Wave 29 (invoicing) | Consume `dev.passage.service.workorder.posted.v1` to create invoices (billable lines only, source SWO) | FR-45.10 and the reconciliation |
 | Wave 16 (locations) | TRUCK location type per technician; consumption issue API | FR-45.9, BR-45.7 |
 | Wave 27 (pricing) | Price list lookup for labor and parts (BR-45.8) | BR-45.8 |
-| Wave 35 (notification hub, mailboxes) | Mailbox ingestion and outbound acknowledgment | FR-45.16 |
+| Wave 35 (notification hub, mailboxes) | Mailbox ingestion and outbound acknowledgment; activity reminders (`reminderMinutes` before the start or due time) | FR-45.16, FR-45.14 |
+| Wave 47 (copilot) and search | Consume `dev.passage.knowledge.article.published.v1` (its `retiredArticleId` drops the version it replaced) | FR-45.13 |
 | Wave 42 (workers and skills) | Technician entity links to workers; skills and certification expiry (BR-42.8) | BR-45.3 |
 | Wave 5 (sequences) | Per-legal-entity number sequences `SA`, `CS`, `SWO`, `SWC`, `KB` | Parameters 8.45.13 |
-| Web BFF (`services/web-bff-ts`) | Rewrite `/api/v1/service/...` to `/v1/service/...` and set `X-Passage-CSRF` | Web module calls |
+| Web BFF (`services/web-bff-ts`) and the dev proxy (`apps/web/src/shell/devProxy.ts`) | Rewrite `/api/v1/service/...` to `/v1/service/...`, and route `/api/v1/cases`, `/api/v1/case-categories` and `/api/v1/case-processes` to this service as `/v1/...`; set `X-Passage-CSRF` | Web module calls; the generic case routes follow the PRD paths (8.45.5) outside `/service` |
+| Wave 42 (workers) | Manager chain as of a date for a worker (BR-42.1) | BR-45.10: the HR case subject's manager may read the case (AC-45.11) |
+| Wave 30 (disputes) and wave 9 (product change requests) | An export or event of their open minimal cases with ids, so `case-consolidate` can create COLLECTIONS and PRODUCT_CHANGE cases keeping the ids as associations; the collector of a customer (BR-45.10) | FR-45.12 |
+| Wave 3 (metadata registry) | Read check and existence lookup by registry entity type and id | Case associations: "restricted record" display and checking an associated record exists (FR-45.12, BR-45.10) |
+| Platform kernel | CEL evaluator over a record and its associations | BR-45.9 stage entry and exit criteria |
+| Workflow and notifications | Consume `dev.passage.case.stage.changed.v1` | PRD 8.45.5 consumers (workflow, notifications, HR, collections, audit owners) |
 | Deploy (`deploy/`) | Helm umbrella entry and Argo CD app for `fieldservice` | Deployment |
+| Platform scheduler | Run `POST /v1/service/sla:scan` every 60 s per tenant with a service principal holding `SvcCaseMaintain` (`service-sla-monitor`) | BR-45.2, 8.45.16 |
+| Notifications (wave 35) | Consume `dev.passage.service.sla.warning.v1` and `sla.breached.v1` to notify (messages `SVC-SLA-001`, `SVC-SLA-002`) | AC-45.3 "warning notification fires" |
 | Platform kernel | Shared ETag helper (the service sets the header itself today) | Convention |
 | Wave 8 (calendars) | Public-holiday calendars per site that SLA profiles can reference instead of their own date list | BR-45.2, 8.45.20 |
 | Party hierarchy owner | Parent party lookup for the parent-party entitlement match | BR-45.1 |

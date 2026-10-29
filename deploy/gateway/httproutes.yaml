@@ -1,0 +1,89 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: org
+  namespace: hello-ledger
+spec:
+  parentRefs:
+    - name: passage-api
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/v1/org
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /v1/org
+      backendRefs:
+        - name: org
+          port: 8080
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/org
+      backendRefs:
+        - name: org
+          port: 8080
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: fx
+  namespace: hello-ledger
+spec:
+  parentRefs:
+    - name: passage-api
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/v1/fx
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /v1/fx
+      backendRefs:
+        - name: fx
+          port: 8080
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/fx
+      backendRefs:
+        - name: fx
+          port: 8080
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: receiving
+  namespace: hello-ledger
+spec:
+  parentRefs:
+    - name: passage-api
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/v1/receiving
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /v1/receiving
+      backendRefs:
+        - name: receiving
+          port: 8080
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/receiving
+      backendRefs:
+        - name: receiving
+          port: 8080

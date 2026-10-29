@@ -143,6 +143,43 @@ paths:
         '409': { description: 'PTY-CHANGE-PENDING: a credit limit change is already awaiting approval; errors.pendingChangeId contains its id.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: 'PTY-CREDIT-INVALID: creditLimit is not a non-negative amount with at most 2 decimals.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '500': { $ref: '#/components/responses/Problem' }
+  /v1/party/legal-entities/{id}/protected-fields:
+    parameters:
+      - { name: id, in: path, required: true, description: Legal entity id., schema: { type: string, format: uuid } }
+    get:
+      operationId: getProtectedFields
+      x-passage-duty: party.read
+      description: Fields that need approval in this legal entity. Defaults to credit_limit when never configured.
+      responses:
+        '200':
+          description: The protected field set.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProtectedFields' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { description: 'AUTH-0003 (missing duty) or PTY-LEGAL-ENTITY-OUT-OF-SCOPE.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'PTY-PROTECTED-FIELDS-INVALID: malformed legal entity id.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '500': { $ref: '#/components/responses/Problem' }
+    put:
+      operationId: setProtectedFields
+      x-passage-duty: party.approval_policy.write
+      description: Replaces the set of fields that need approval in this legal entity. fields is required; [] is an explicit unprotect-all, and a missing or null fields is 422. Only credit_limit is protectable today; changes already pending stay decidable. Every change enqueues dev.passage.party.protectedfields.updated.v1 with before, after and the actor. A credit limit request by the user who last unprotected the field within 24 hours is still held for approval. The legal entity id is not validated against the org service (party keeps no legal entity table); a scoped caller can only address its own.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProtectedFields' }
+      responses:
+        '200':
+          description: The stored set.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProtectedFields' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { description: 'AUTH-0003 (missing duty) or PTY-LEGAL-ENTITY-OUT-OF-SCOPE.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'PTY-PROTECTED-FIELDS-INVALID: fields missing or null, unknown field, or malformed legal entity id.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '500': { $ref: '#/components/responses/Problem' }
   /v1/party/pending-changes/{id}:
     parameters:
       - { name: id, in: path, required: true, description: Pending change id., schema: { type: string, format: uuid } }
@@ -310,6 +347,12 @@ components:
       required: [creditLimit]
       properties:
         creditLimit: { type: string, pattern: '^[0-9]{1,16}(\.[0-9]{1,2})?$', description: Decimal string; JSON numbers are rejected. }
+    ProtectedFields:
+      type: object
+      additionalProperties: false
+      required: [fields]
+      properties:
+        fields: { type: array, items: { type: string, enum: [credit_limit] }, uniqueItems: true }
     Decision:
       type: object
       additionalProperties: false

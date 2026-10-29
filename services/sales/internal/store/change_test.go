@@ -183,7 +183,7 @@ func TestPostgres_ChangeConfirmedOrder(t *testing.T) {
 	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	s := New(pool)
+	s := New(appOf(t, pool))
 	order := changeOrderFixture(t, s, ctx, ids.New(), ids.New(), 10, 7)
 	now := time.Date(2027, 3, 1, 9, 0, 0, 0, time.UTC)
 	confirmed, err := s.ConfirmOrder(ctx, order.ID, order.Version, "sales-rep", now)
@@ -254,7 +254,7 @@ func TestPostgres_ChangeRaisingTotalRechecksCredit(t *testing.T) {
 	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	s := New(pool)
+	s := New(appOf(t, pool))
 	le, customer := ids.New(), ids.New()
 	limits := domain.CreditProfile{Limit: d(10000), Currency: "USD", LimitType: domain.LimitBalance, TolerancePct: d(5), ToleranceAmount: d(1000), OldestItemDaysMax: 30, MaxDunningLevel: 3}
 	if _, err := s.PutCreditProfile(ctx, CreditProfile{LegalEntityID: le, CustomerID: customer, CreditProfile: limits, Exposure: domain.Exposure{OpenAR: d(8500)}}, 0); err != nil {
@@ -303,7 +303,7 @@ func TestPostgres_CancelOrder(t *testing.T) {
 	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	s := New(pool)
+	s := New(appOf(t, pool))
 	le, customer := ids.New(), ids.New()
 	limits := domain.CreditProfile{Limit: d(10), Currency: "USD", LimitType: domain.LimitBalance, TolerancePct: d(0), ToleranceAmount: d(0), OldestItemDaysMax: 30, MaxDunningLevel: 3}
 	if _, err := s.PutCreditProfile(ctx, CreditProfile{LegalEntityID: le, CustomerID: customer, CreditProfile: limits}, 0); err != nil {

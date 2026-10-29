@@ -1,9 +1,9 @@
 // Typed client for services/expense (contract: services/expense/api/openapi.yaml).
 // The browser calls /api/v1/...; the BFF rewrites the path and attaches the session.
-// The report calls persist (slice 4): creating POSTs and submit send an
-// Idempotency-Key, and submit and line removal send If-Match with the report
-// version. Every other call is a stateless preview that stores nothing and takes
-// no key.
+// The report calls (slice 4) and the cash advance, travel requisition and card feed
+// calls (slice 5) persist: creating POSTs and custom methods send an Idempotency-Key,
+// and custom methods and line removal send If-Match with the version acted on.
+// Every other call is a stateless preview that stores nothing and takes no key.
 
 export interface ExpenseLineInput {
   id: string;
@@ -378,3 +378,192 @@ export function submitReport(reportId: string, version: number, key: string, fet
   });
 }
 
+
+// ---- Cash advances, travel requisitions and card feeds (slice 5, persisted) ----
+// Creating POSTs and every custom method send an Idempotency-Key; the custom methods
+// also send If-Match with the version the user acted on.
+
+export type AdvanceStatus = "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED" | "PAID" | "PARTIALLY_SETTLED" | "SETTLED";
+export type RequisitionStatus = "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED" | "CLOSED";
+export type CardTxnStatus = "UNASSIGNED" | "ASSIGNED" | "DISPUTED" | "PERSONAL";
+export type Decision = "APPROVE" | "REJECT";
+
+export interface CashAdvance {
+  id: string;
+  legalEntityId: string;
+  workerId: string;
+  amount: string;
+  currency: string;
+  purpose: string;
+  travelRequisitionId: string | null;
+  tripEnd: string;
+  dueDate: string;
+  overdue: boolean;
+  status: AdvanceStatus;
+  paid: string;
+  settled: string;
+  returned: string;
+  recovered: string;
+  open: string;
+  apPrepaymentId: string | null;
+  version: number;
+  createdAt: string;
+}
+
+export interface NewAdvanceInput {
+  legalEntityId: string;
+  workerId: string;
+  amount: string;
+  currency: string;
+  purpose: string;
+  travelRequisitionId?: string;
+  tripEnd: string;
+}
+
+export interface Destination {
+  country: string;
+  city: string;
+}
+
+export interface Estimate {
+  category: string;
+  amount: string;
+}
+
+export interface TravelRequisition {
+  id: string;
+  legalEntityId: string;
+  workerId: string;
+  purpose: string;
+  currency: string;
+  status: RequisitionStatus;
+  tripFrom: string;
+  tripTo: string;
+  destinations: Destination[];
+  estimates: Estimate[];
+  estimatedTotal: string;
+  version: number;
+  createdAt: string;
+  submittedAt: string | null;
+  decidedAt: string | null;
+}
+
+export interface NewRequisitionInput {
+  legalEntityId: string;
+  workerId: string;
+  purpose: string;
+  currency: string;
+  tripFrom: string;
+  tripTo: string;
+  destinations: Destination[];
+  estimates: Estimate[];
+}
+
+/** An imported card transaction in its worker's pool (the parsed row plus where it is stored). */
+export interface StoredCardTransaction extends CardTransaction {
+  id: string;
+  importId: string;
+  workerId: string;
+  status: CardTxnStatus;
+}
+
+export interface CardImportInput {
+  legalEntityId: string;
+  format: FeedFormat;
+  content: string;
+  /** Last four card digits to the worker id holding the card. */
+  cardholders: Record<string, string>;
+}
+
+export interface CardImport {
+  id: string;
+  legalEntityId: string;
+  format: FeedFormat;
+  fileHash: string;
+  imported: number;
+  quarantined: { line: number; reason: string }[];
+  createdAt: string;
+}
+
+export interface Page<T> {
+  items: T[];
+  nextCursor: string;
+}
+
+export interface ListQuery<S extends string> {
+  status?: S;
+  workerId?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+const ADVANCES = "/api/v1/expense/cash-advances";
+const REQUISITIONS = "/api/v1/expense/travel-requisitions";
+const CARDS = "/api/v1/expense/card-transactions";
+
+function withQuery(path: string, query: object): string {
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(query)) {
+    if (v !== undefined && v !== "") params.set(k, String(v));
+  }
+  const qs = params.toString();
+  return qs ? `${path}?${qs}` : path;
+}
+
+function command<T>(path: string, body: unknown, key: string, version: number | undefined, fetchImpl: typeof fetch): Promise<T> {
+  const headers: Record<string, string> = { "Idempotency-Key": key };
+  if (version !== undefined) headers["If-Match"] = `"${version}"`;
+  return request("POST", path, body, fetchImpl, headers);
+}
+
+export function listAdvances(query: ListQuery<AdvanceStatus> = {}, fetchImpl: typeof fetch = fetch): Promise<Page<CashAdvance>> {
+  return request("GET", withQuery(ADVANCES, query), undefined, fetchImpl);
+}
+
+export function getAdvance(id: string, fetchImpl: typeof fetch = fetch): Promise<CashAdvance> {
+  return request("GET", `${ADVANCES}/${encodeURIComponent(id)}`, undefined, fetchImpl);
+}
+
+export function requestAdvance(input: NewAdvanceInput, key: string, fetchImpl: typeof fetch = fetch): Promise<CashAdvance> {
+  return command(ADVANCES, input, key, undefined, fetchImpl);
+}
+
+export function decideAdvance(id: string, decision: Decision, version: number, key: string, fetchImpl: typeof fetch = fetch): Promise<CashAdvance> {
+  return command(`${ADVANCES}/${encodeURIComponent(id)}/decide`, { decision }, key, version, fetchImpl);
+}
+
+export function payAdvance(id: string, prepaymentId: string, version: number, key: string, fetchImpl: typeof fetch = fetch): Promise<CashAdvance> {
+  return command(`${ADVANCES}/${encodeURIComponent(id)}/pay`, { prepaymentId }, key, version, fetchImpl);
+}
+
+export function returnAdvance(id: string, amount: string, version: number, key: string, fetchImpl: typeof fetch = fetch): Promise<CashAdvance> {
+  return command(`${ADVANCES}/${encodeURIComponent(id)}/return`, { amount }, key, version, fetchImpl);
+}
+
+export function listRequisitions(query: ListQuery<RequisitionStatus> = {}, fetchImpl: typeof fetch = fetch): Promise<Page<TravelRequisition>> {
+  return request("GET", withQuery(REQUISITIONS, query), undefined, fetchImpl);
+}
+
+export function getRequisition(id: string, fetchImpl: typeof fetch = fetch): Promise<TravelRequisition> {
+  return request("GET", `${REQUISITIONS}/${encodeURIComponent(id)}`, undefined, fetchImpl);
+}
+
+export function createRequisition(input: NewRequisitionInput, key: string, fetchImpl: typeof fetch = fetch): Promise<TravelRequisition> {
+  return command(REQUISITIONS, input, key, undefined, fetchImpl);
+}
+
+export function submitRequisition(id: string, version: number, key: string, fetchImpl: typeof fetch = fetch): Promise<TravelRequisition> {
+  return command(`${REQUISITIONS}/${encodeURIComponent(id)}/submit`, undefined, key, version, fetchImpl);
+}
+
+export function decideRequisition(id: string, decision: Decision, version: number, key: string, fetchImpl: typeof fetch = fetch): Promise<TravelRequisition> {
+  return command(`${REQUISITIONS}/${encodeURIComponent(id)}/decide`, { decision }, key, version, fetchImpl);
+}
+
+export function listCardTransactions(query: ListQuery<CardTxnStatus> = {}, fetchImpl: typeof fetch = fetch): Promise<Page<StoredCardTransaction>> {
+  return request("GET", withQuery(CARDS, query), undefined, fetchImpl);
+}
+
+export function importCardFeed(input: CardImportInput, key: string, fetchImpl: typeof fetch = fetch): Promise<CardImport> {
+  return command(`${CARDS}/import`, input, key, undefined, fetchImpl);
+}

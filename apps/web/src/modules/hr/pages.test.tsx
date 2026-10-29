@@ -110,6 +110,10 @@ describe("hr module", () => {
       { label: "Absence plans", to: "/hr/absence/plans", duty: "HcmAbsenceAdmin" },
       { label: "Absence requests", to: "/hr/absence/requests", duty: "EssAbsence" },
       { label: "Benefit plans", to: "/hr/benefits/plans", duty: "HcmSetupAdmin" },
+      { label: "Skills", to: "/hr/skills", duty: "HcmWorkerInquire" },
+      { label: "Skill search", to: "/hr/skills/search", duty: "HcmOrgInquire" },
+      { label: "Expiring certifications", to: "/hr/certifications/expiring", duty: "HcmWorkerInquire" },
+      { label: "Courses", to: "/hr/courses", duty: "HcmLearningAdmin" },
     ]);
     expect(loadModules().map((m) => m.id)).toContain("hr");
   });

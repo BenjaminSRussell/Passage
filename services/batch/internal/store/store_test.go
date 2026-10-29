@@ -163,16 +163,6 @@ func TestMigrationsApplyWithRLS(t *testing.T) {
 	if err := dbx.Migrate(ctx, admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	var schemaName string
-	if err := admin.QueryRow(ctx, "select current_schema()").Scan(&schemaName); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := admin.Exec(ctx, "grant usage on schema "+schemaName+" to passage_app"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := admin.Exec(ctx, "grant select, insert, update, delete on all tables in schema "+schemaName+" to passage_app"); err != nil {
-		t.Fatal(err)
-	}
 	var currentUser string
 	var roleSuper, roleBypass bool
 	if err := pool.QueryRow(ctx, `select current_user, r.rolsuper, r.rolbypassrls from pg_roles r where r.rolname = current_user`).Scan(&currentUser, &roleSuper, &roleBypass); err != nil || currentUser != "passage_app" || roleSuper || roleBypass {

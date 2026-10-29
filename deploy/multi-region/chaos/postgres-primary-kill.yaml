@@ -1,0 +1,29 @@
+# Chaos experiment: kill the primary pod of the region's CNPG cluster (PRD 9.50.9 chaos row).
+# Acceptance: no failed postings (every journal post either commits once or is retried with the same
+# Idempotency-Key), and writes recover within the 5 min budget. In the PRIMARY role the chart runs
+# quorum-synchronous standbys (postgres.synchronous), so CNPG promotes a standby that holds every
+# committed transaction. Run it in the PRIMARY region only: a PASSIVE replica cluster has no writers.
+# Namespace and cluster name must match region.namespace and postgres.clusterName in
+# deploy/multi-region/chart/values.yaml; deploy/multi-region/chaos/test_chaos.py checks that.
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: pg-primary-kill
+  namespace: passage-data
+  labels:
+    app.kubernetes.io/part-of: passage
+    passage.dev/experiment: postgres-primary-kill
+  annotations:
+    passage.dev/acceptance: "no failed postings; recovery < 5 min"
+    passage.dev/recovery-budget: "5m"
+    passage.dev/runbook: "https://docs.passage.dev/ops/runbooks/postgres-primary-loss"
+spec:
+  action: pod-kill
+  mode: one
+  gracePeriod: 0
+  selector:
+    namespaces:
+      - passage-data
+    labelSelectors:
+      cnpg.io/cluster: passage-pg
+      cnpg.io/instanceRole: primary

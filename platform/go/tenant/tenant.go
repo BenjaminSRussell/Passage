@@ -1,20 +1,22 @@
 // Package tenant carries the caller's tenant, legal entity, user and duties
 // through context. Until wave 2 replaces it with JWT validation at the gateway,
 // the values come from headers that are trusted only behind the gateway; the
-// gateway must strip client-supplied X-Passage-* headers (issue #82, part b).
-// Middleware validates their shape but cannot authenticate their origin.
+// gateway must strip client-supplied X-Passage-* headers (issue #82, part b;
+// see deploy/gateway/README.md). Middleware validates their shape but cannot
+// authenticate their origin.
 package tenant
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
-	"strconv"
 	"strings"
 
-	"github.com/google/uuid"
+	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/go-chi/chi/v5/middleware"
 )
 
-const nilTenant = "00000000-0000-0000-0000-000000000000"
+const maxLegalEntities = 100
 
 // Principal is who is calling and in which scope.
 type Principal struct {
@@ -58,11 +60,7 @@ func canonicalUUID(s string) (string, bool) {
 	if len(s) != 36 {
 		return "", false
 	}
-	id, err := uuid.Parse(s)
-	if err != nil {
-		return "", false
-	}
-	return id.String(), true
+	return ids.Canonical(s)
 }
 
 func canonicalLegalEntities(raw string) (string, bool) {
@@ -70,14 +68,22 @@ func canonicalLegalEntities(raw string) (string, bool) {
 		return "", true
 	}
 	parts := strings.Split(raw, ",")
-	for i, part := range parts {
+	if len(parts) > maxLegalEntities {
+		return "", false
+	}
+	seen := make(map[string]struct{}, len(parts))
+	canonical := parts[:0]
+	for _, part := range parts {
 		c, ok := canonicalUUID(strings.TrimSpace(part))
-		if !ok {
+		if !ok || c == ids.Nil {
 			return "", false
 		}
-		parts[i] = c
+		if _, dup := seen[c]; !dup {
+			seen[c] = struct{}{}
+			canonical = append(canonical, c)
+		}
 	}
-	return strings.Join(parts, ","), true
+	return strings.Join(canonical, ","), true
 }
 
 const DutyAllScope = "org.switcher.all_scope"
@@ -104,9 +110,10 @@ func requestLegalEntity(r *http.Request) (string, bool) {
 // Middleware extracts the principal from headers. Requests without a tenant,
 // with a malformed tenant, or with the nil system tenant are rejected with 401;
 // a malformed or conflicting legal entity scope is rejected with 400. Health
-// endpoints pass through. The all-entity duty
-// survives only on a read that explicitly asks for the ALL scope; on any other
-// request it is dropped so an unscoped call sees no legal-entity rows.
+// endpoints pass through. The nil tenant is server-side only and is never
+// accepted from headers. The all-entity duty survives only on a read that
+// explicitly asks for the ALL scope; on any other request it is dropped so an
+// unscoped call sees no legal-entity rows.
 func Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
@@ -115,17 +122,17 @@ func Middleware(next http.Handler) http.Handler {
 		}
 		raw := r.Header.Get(HeaderTenant)
 		if raw == "" {
-			reject(w, http.StatusUnauthorized, "AUTH-0001", "Unauthorized", "missing tenant")
+			reject(w, r, http.StatusUnauthorized, "AUTH-0001", "Unauthorized", "missing tenant")
 			return
 		}
 		t, ok := canonicalUUID(raw)
-		if !ok || t == nilTenant {
-			reject(w, http.StatusUnauthorized, "AUTH-0001", "Unauthorized", "invalid tenant")
+		if !ok || t == ids.Nil {
+			reject(w, r, http.StatusUnauthorized, "AUTH-0001", "Unauthorized", "invalid tenant")
 			return
 		}
 		le, ok := requestLegalEntity(r)
 		if !ok {
-			reject(w, http.StatusBadRequest, "COM-0001", "Bad Request", "invalid legal entity")
+			reject(w, r, http.StatusBadRequest, "COM-0001", "Bad Request", "invalid legal entity")
 			return
 		}
 		p := Principal{TenantID: t, LegalEntityID: le, UserID: r.Header.Get(HeaderUser), Duties: map[string]struct{}{}}
@@ -141,6 +148,19 @@ func Middleware(next http.Handler) http.Handler {
 	})
 }
 
-func reject(w http.ResponseWriter, status int, code, title, detail string) {
-	http.Error(w, `{"type":"https://passage.dev/problems/`+code+`","title":"`+title+`","status":`+strconv.Itoa(status)+`,"code":"`+code+`","detail":"`+detail+`"}`, status)
+func reject(w http.ResponseWriter, r *http.Request, status int, code, title, detail string) {
+	body := map[string]any{
+		"type":   "https://passage.dev/problems/" + code,
+		"title":  title,
+		"status": status,
+		"code":   code,
+		"detail": detail,
+	}
+	if id := middleware.GetReqID(r.Context()); id != "" {
+		body["traceId"] = id
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
 }

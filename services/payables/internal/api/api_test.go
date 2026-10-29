@@ -126,8 +126,8 @@ func TestAuthRejectionBodiesMatchKernel(t *testing.T) {
 	if unauth.Code != http.StatusUnauthorized || forbidden.Code != http.StatusForbidden || malformed.Code != http.StatusUnauthorized {
 		t.Fatalf("statuses %d %d %d", unauth.Code, forbidden.Code, malformed.Code)
 	}
-	for name, rec := range map[string]*httptest.ResponseRecorder{"401": unauth, "malformed 401": malformed} {
-		if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
+	for name, rec := range map[string]*httptest.ResponseRecorder{"401": unauth, "malformed 401": malformed, "403": forbidden} {
+		if ct := rec.Header().Get("Content-Type"); ct != "application/problem+json" {
 			t.Errorf("%s content type %q", name, ct)
 		}
 	}
@@ -141,9 +141,11 @@ func TestAuthRejectionBodiesMatchKernel(t *testing.T) {
 		}
 		return body
 	}
-	for _, key := range []string{"type", "title", "status", "detail"} {
-		if _, ok := decode("403", forbidden)[key]; !ok {
-			t.Errorf("403 body missing %q: %s", key, forbidden.Body.String())
+	for name, rec := range map[string]*httptest.ResponseRecorder{"401": unauth, "malformed 401": malformed, "403": forbidden} {
+		for _, key := range []string{"type", "title", "status", "detail", "traceId"} {
+			if _, ok := decode(name, rec)[key]; !ok {
+				t.Errorf("%s body missing %q: %s", name, key, rec.Body.String())
+			}
 		}
 	}
 	for name, rec := range map[string]*httptest.ResponseRecorder{"401": unauth, "malformed 401": malformed, "403": forbidden} {

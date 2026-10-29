@@ -1,13 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
-import { fetchRateTypes, putRateType, type RateType } from "./api/client";
+import { createRateType, FxApiError, fetchRateTypes, putRateType, type RateType } from "./api/client";
 import { ApiFailure, fieldsOwnFailure, mapServerFields, useFocusFirstInvalid, withoutFields } from "./formSupport";
 import styles from "./pages.module.css";
 import { emptyRateType, normalizeCode, validateRateType, type Errors, type RateTypeValues } from "./validate";
 
 const DUTY = "Maintain exchange rates";
 const FIELDS = ["code", "name", "provider"] as const;
+const RATE_TYPE_EXISTS = "FX_RATE_TYPE_EXISTS";
+const CODE_TAKEN = "A rate type with this code already exists. Open it in the table to edit it.";
+const LIST_UNAVAILABLE = "The existing rate types could not be checked yet. Wait for the table to load, or use Try again, then create the rate type.";
 
 const columns: DataTableColumn<RateType>[] = [
   { key: "code", header: "Code", mono: true },
@@ -15,6 +18,10 @@ const columns: DataTableColumn<RateType>[] = [
   { key: "allowInverse", header: "Inverse rates", render: (t) => (t.allowInverse ? "Allowed" : "Not allowed") },
   { key: "provider", header: "Provider", render: (t) => t.provider ?? "Manual entry" },
 ];
+
+function isCodeTaken(error: unknown) {
+  return error instanceof FxApiError && error.status === 409 && error.code === RATE_TYPE_EXISTS;
+}
 
 export function RateTypesPage() {
   const queryClient = useQueryClient();
@@ -26,18 +33,28 @@ export function RateTypesPage() {
   const [saved, setSaved] = useState<string | null>(null);
   const types = useQuery({ queryKey: ["fx", "rate-types"], queryFn: () => fetchRateTypes() });
   const save = useMutation({
-    mutationFn: (v: RateTypeValues) => putRateType(v.code, { name: v.name.trim(), allowInverse: v.allowInverse, provider: v.provider.trim() || undefined }),
+    mutationFn: (v: RateTypeValues) => {
+      const input = { name: v.name.trim(), allowInverse: v.allowInverse, provider: v.provider.trim() || undefined };
+      return editing ? putRateType(v.code, input) : createRateType(v.code, input);
+    },
     onSuccess: async (stored) => {
       setSaved(stored.code);
       setValues(emptyRateType);
       setEditing(false);
       await queryClient.invalidateQueries({ queryKey: ["fx", "rate-types"] });
     },
-    onError: (error) => setErrors(mapServerFields(error, "", FIELDS)),
+    onError: async (error) => {
+      if (isCodeTaken(error)) {
+        setErrors({ code: CODE_TAKEN });
+        await queryClient.invalidateQueries({ queryKey: ["fx", "rate-types"] });
+        return;
+      }
+      setErrors(mapServerFields(error, "", FIELDS));
+    },
   });
   useFocusFirstInvalid(form, errors);
   useEffect(() => {
-    if (types.isSuccess && errors.code?.startsWith("The existing rate types could not be checked yet.")) {
+    if (types.isSuccess && errors.code === LIST_UNAVAILABLE) {
       setErrors((current) => withoutFields(current, ["code"]));
     }
   }, [types.isSuccess, errors.code]);
@@ -71,14 +88,14 @@ export function RateTypesPage() {
     event.preventDefault();
     const found = validateRateType(values);
     if (!editing && !found.code) {
-      if (!types.isSuccess) found.code = "The existing rate types could not be checked yet. Wait for the table to load, or use Try again, then create the rate type.";
-      else if (types.data.some((t) => t.code === values.code.trim())) found.code = "A rate type with this code already exists. Open it in the table to edit it.";
+      if (!types.isSuccess) found.code = LIST_UNAVAILABLE;
+      else if (types.data.some((t) => t.code === values.code.trim())) found.code = CODE_TAKEN;
     }
     setErrors(found);
     if (Object.keys(found).length === 0) save.mutate({ ...values, code: values.code.trim() });
   }
 
-  const saveFailure = save.isError && !fieldsOwnFailure(save.error, "", FIELDS);
+  const saveFailure = save.isError && !fieldsOwnFailure(save.error, "", FIELDS) && !isCodeTaken(save.error);
 
   return (
     <div className={styles.stack}>

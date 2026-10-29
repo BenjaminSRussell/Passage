@@ -14,12 +14,49 @@ import (
 )
 
 type fakeCredit struct {
-	limit     string
-	requested string
-	decided   string
-	approve   bool
-	replayed  bool
-	err       error
+	limit      string
+	requested  string
+	decided    string
+	approve    bool
+	replayed   bool
+	configured string
+	err        error
+}
+
+func TestCreditRoutes_ProtectedFields(t *testing.T) {
+	f := &fakeCredit{}
+	r := creditRouter(f)
+	path := "/v1/party/legal-entities/" + knownID + "/protected-fields"
+	rec := do(r, http.MethodGet, path, "", "party.read", true)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"fields":["credit_limit"]`) || f.configured != knownID {
+		t.Fatalf("get: %d %s", rec.Code, rec.Body)
+	}
+	rec = do(r, http.MethodPut, path, `{"fields":[]}`, "party.approval_policy.write", true)
+	if rec.Code != http.StatusOK || f.configured != knownID+"/" {
+		t.Fatalf("put: %d %s configured=%q", rec.Code, rec.Body, f.configured)
+	}
+	f.configured = ""
+	for _, tc := range []struct {
+		name, method, body, duties string
+		tenant                     bool
+		want                       int
+	}{
+		{"put needs party.approval_policy.write", http.MethodPut, `{"fields":[]}`, "party.write", true, http.StatusForbidden},
+		{"party.approve cannot reconfigure", http.MethodPut, `{"fields":[]}`, "party.approve", true, http.StatusForbidden},
+		{"empty object", http.MethodPut, `{}`, "party.approval_policy.write", true, http.StatusUnprocessableEntity},
+		{"null fields", http.MethodPut, `{"fields":null}`, "party.approval_policy.write", true, http.StatusUnprocessableEntity},
+		{"get needs party.read", http.MethodGet, "", "party.write", true, http.StatusForbidden},
+		{"put without principal", http.MethodPut, `{"fields":[]}`, "", false, http.StatusUnauthorized},
+		{"unknown body field", http.MethodPut, `{"field":[]}`, "party.approval_policy.write", true, http.StatusBadRequest},
+	} {
+		if rec := do(r, tc.method, path, tc.body, tc.duties, tc.tenant); rec.Code != tc.want || f.configured != "" {
+			t.Fatalf("%s: %d %s configured=%q", tc.name, rec.Code, rec.Body, f.configured)
+		}
+	}
+	f.err = httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeFieldsInvalid, "no")
+	if rec := do(r, http.MethodPut, path, `{"fields":["x"]}`, "party.approval_policy.write", true); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), store.CodeFieldsInvalid) {
+		t.Fatalf("store problem: %d %s", rec.Code, rec.Body)
+	}
 }
 
 func (f *fakeCredit) RequestCreditLimit(_ context.Context, customerID, limit string) (domain.CreditLimitResult, error) {
@@ -51,6 +88,16 @@ func (f *fakeCredit) DecidePendingChange(_ context.Context, changeID string, app
 		status = domain.ChangeApproved
 	}
 	return domain.PendingChange{ID: changeID, Status: status, Replayed: f.replayed}, nil
+}
+
+func (f *fakeCredit) ProtectedFields(_ context.Context, legalEntityID string) ([]string, error) {
+	f.configured = legalEntityID
+	return []string{domain.FieldCreditLimit}, f.err
+}
+
+func (f *fakeCredit) SetProtectedFields(_ context.Context, legalEntityID string, fields []string) ([]string, error) {
+	f.configured = legalEntityID + "/" + strings.Join(fields, ",")
+	return fields, f.err
 }
 
 func creditRouter(f *fakeCredit) http.Handler {

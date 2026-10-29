@@ -42,6 +42,7 @@ type API struct {
 	fileClientErrors atomic.Int64
 	fileServerFaults atomic.Int64
 	http             requestMetrics
+	aging            *agingDeps
 }
 
 type problemBody struct {
@@ -81,6 +82,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutySettleRead)).Post("/v1/payables/settlements:preview", a.preview)
 	r.With(authz.RequireDuty(dutyPaymentFilePreview)).Post(pathPaymentFilePreview, a.previewPaymentFile)
 	r.With(authz.RequireDuty(dutyPaymentStatusParse)).Post(pathPaymentStatusParse, a.parsePaymentStatus)
+	a.registerAging(r)
 }
 
 func (a *API) ready(w http.ResponseWriter, r *http.Request) {
@@ -184,6 +186,7 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP payables_payment_status_parses_total Successful pain.002 status parses.\n# TYPE payables_payment_status_parses_total counter\npayables_payment_status_parses_total %d\n", a.statusParses.Load())
 		fmt.Fprintf(w, "# HELP payables_payment_file_client_errors_total Preview and status-parse requests rejected as invalid input (4xx).\n# TYPE payables_payment_file_client_errors_total counter\npayables_payment_file_client_errors_total %d\n", a.fileClientErrors.Load())
 		fmt.Fprintf(w, "# HELP payables_payment_file_server_faults_total Preview and status-parse requests that failed on a server fault (5xx).\n# TYPE payables_payment_file_server_faults_total counter\npayables_payment_file_server_faults_total %d\n", a.fileServerFaults.Load())
+		a.writeAgingMetrics(w)
 		a.http.write(w)
 	})
 }

@@ -4,6 +4,8 @@ image:
   tag: ""
   pullPolicy: IfNotPresent
 databaseSecret: payables-db
+ledgerUrl: ""
+controlAccount: "2000"
 replicaCount: 1
 resources:
   requests: { cpu: 50m, memory: 128Mi }

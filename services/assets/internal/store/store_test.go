@@ -353,18 +353,10 @@ func TestStore_RowLevelSecurity(t *testing.T) {
 	if err := admin.QueryRow(ctx, "select current_schema()").Scan(&schema); err != nil {
 		t.Fatal(err)
 	}
-	for _, grant := range []string{
-		"grant usage on schema " + schema + " to passage_app",
-		"grant select, insert, update, delete on all tables in schema " + schema + " to passage_app",
-	} {
-		if _, err := admin.Exec(ctx, grant); err != nil {
-			t.Fatal(err)
-		}
-	}
 	for _, table := range []string{"asset", "asset_book", "asset_transaction", "lease", "lease_schedule_line", "outbox", "idempotency_keys",
 		"depreciation_run", "depreciation_run_line", "asset_addition", "asset_index_series", "asset_index_value", "asset_insurance_policy",
 		"capex_request", "capex_request_variant", "lease_modification", "asset_count_session", "asset_count_line",
-		"capex_request_decision"} {
+		"capex_request_decision", "asset_transfer", "asset_transfer_part", "group_asset", "group_asset_member"} {
 		var enabled, forced bool
 		if err := admin.QueryRow(ctx, `select relrowsecurity, relforcerowsecurity from pg_class where relname = $1 and relnamespace = $2::regnamespace`, table, schema).Scan(&enabled, &forced); err != nil {
 			t.Fatal(table, err)
@@ -456,5 +448,27 @@ func TestStore_RowLevelSecurity(t *testing.T) {
 	}
 	if report, err := s.InsuranceReport(scoped(1, leB), store.InsuranceReportFilter{LegalEntityID: leA, AsOf: day("2026-04-01"), Limit: 50}); err != nil || len(report.Items) != 0 {
 		t.Fatalf("scope B reads A's insurance report: %+v, %v", report, err)
+	}
+	// Slice 5: a split and a group asset run as the application role and stay
+	// inside their entity.
+	split := newAsset(t, s, scoped(1, leA), leA, "FA-SPLIT")
+	if _, err := s.AddBook(scoped(1, leA), split.ID, book("TAX", "1000"), "rls-split-book"); err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.Transfer(scoped(1, leA), split.ID, store.TransferInput{Version: 2, Kind: domain.TransferKindSplit, Date: day("2026-04-01"),
+		Parts: []store.TransferPart{{AssetNumber: "FA-SPLIT-1", Name: "One", Percentage: d("50")}, {AssetNumber: "FA-SPLIT-2", Name: "Two", Percentage: d("50")}}}, "rls-split")
+	if err != nil || len(res.Targets) != 2 {
+		t.Fatalf("split as the app role = %+v, %v", res, err)
+	}
+	if _, err := s.ListTransfers(scoped(1, leB), split.ID); problemCode(err) != store.CodeAssetNotFound {
+		t.Fatalf("scope B lists A's transfers: err = %v", err)
+	}
+	g, err := s.CreateGroupAsset(scoped(1, leA), store.GroupAssetInput{LegalEntityID: leA, GroupCode: "POOL", Name: "Pool", ClassCode: "VEH", BookCode: "TAX",
+		TaxYear: 2026, Method: "StraightLine", ServiceLifePeriods: 60, Convention: "None", MemberAssetIDs: []string{res.Targets[0].Asset.ID}}, "rls-group")
+	if err != nil || g.MemberCount != 1 {
+		t.Fatalf("group as the app role = %+v, %v", g, err)
+	}
+	if _, err := s.GetGroupAsset(scoped(1, leB), g.ID); problemCode(err) != store.CodeGroupNotFound {
+		t.Fatalf("scope B reads A's group asset: err = %v", err)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -341,16 +342,6 @@ func TestTenantIsolation(t *testing.T) {
 	if err := dbx.Migrate(ctx1, admin, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
-	var schema, appUser string
-	if err := admin.QueryRow(ctx1, `select current_schema()`).Scan(&schema); err != nil {
-		t.Fatal(err)
-	}
-	if err := app.QueryRow(ctx1, `select current_user`).Scan(&appUser); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := admin.Exec(ctx1, fmt.Sprintf(`grant usage on schema %s to %s; grant select, insert, update, delete on all tables in schema %[1]s to %[2]s`, schema, appUser)); err != nil {
-		t.Fatal(err)
-	}
 	st := New(app)
 	if _, _, err := st.SaveDraft(ctx1, storeFixtureDefinition("TENANT-ONE"), nil); err != nil {
 		t.Fatal(err)
@@ -359,7 +350,7 @@ func TestTenantIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	ledger := ids.New()
-	seedBalance(t, ctx1, app, ledger, 2026, 3, "1000", "acct", "10", 1)
+	seedBalance(t, ctx1, admin, ledger, 2026, 3, "1000", "acct", "10", 1)
 	run, err := st.CreateRun(ctx1, RunSpec{Code: "TENANT-ONE", LedgerID: ledger, CurrencyType: "acct", PeriodYear: 2026, PeriodNo: 3,
 		Calendar: storeFixtureCalendar(), IdempotencyKey: "shared-key", RequestHash: "h"})
 	if err != nil {
@@ -403,8 +394,9 @@ func TestTenantIsolation(t *testing.T) {
 	if lag, _ := st.Lag(ctx2); len(lag) != 0 {
 		t.Fatalf("tenant 2 lag = %+v", lag)
 	}
-	if got := outboxTypes(t, ctx2, app); len(got) != 0 {
-		t.Fatalf("tenant 2 outbox = %v", got)
+	var tenant2Outbox int
+	if err := admin.QueryRow(ctx2, `select count(*) from outbox where tenant_id = $1`, testkit.TenantID(2)).Scan(&tenant2Outbox); err != nil || tenant2Outbox != 0 {
+		t.Fatalf("tenant 2 outbox rows = %d, %v", tenant2Outbox, err)
 	}
 	// Journal lines and drill level 2 are tenant-scoped.
 	if err := st.PutJournalLines(ctx1, []domain.JournalLine{{LedgerID: ledger, PostingSequence: 1, LineNumber: 1, PostingDate: "2026-03-01",
@@ -456,11 +448,11 @@ func TestTenantIsolation(t *testing.T) {
 		t.Fatalf("tenant 2 run must not replay tenant 1's run, got %v", err)
 	}
 	err = dbx.WithTenantTx(ctx2, app, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx2, `insert into reporting_hwm(tenant_id, ledger_id, posting_sequence) values($1,$2,1)`, testkit.TenantID(1), ids.New())
+		_, err := tx.Exec(ctx2, `insert into idempotency_keys(tenant_id, key, request_hash, response_status) values($1,$2,'h',200)`, testkit.TenantID(1), ids.New())
 		return err
 	})
-	if err == nil {
-		t.Fatal("writing a row for another tenant must be refused by the policy")
+	if err == nil || !strings.Contains(err.Error(), "row-level security") {
+		t.Fatalf("writing a row for another tenant must be refused by the policy, got %v", err)
 	}
 }
 

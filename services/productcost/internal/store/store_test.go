@@ -33,21 +33,6 @@ func setup(t *testing.T) (s *Postgres, admin *pgxpool.Pool, rls bool) {
 		if err := dbx.Migrate(ctx, adminPool, migrations.FS); err != nil {
 			t.Fatalf("migrate: %v", err)
 		}
-		var schema, role string
-		if err := adminPool.QueryRow(ctx, "select current_schema()").Scan(&schema); err != nil {
-			t.Fatal(err)
-		}
-		if err := app.QueryRow(ctx, "select current_user").Scan(&role); err != nil {
-			t.Fatal(err)
-		}
-		for _, grant := range []string{
-			fmt.Sprintf("grant usage on schema %s to %q", schema, role),
-			fmt.Sprintf("grant select, insert, update, delete on all tables in schema %s to %q", schema, role),
-		} {
-			if _, err := adminPool.Exec(ctx, grant); err != nil {
-				t.Fatal(err)
-			}
-		}
 		return New(app), adminPool, true
 	}
 	pool := testkit.DB(t)

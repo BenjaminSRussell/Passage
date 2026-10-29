@@ -1,0 +1,6 @@
+apiVersion: v2
+name: passage-multiregion
+description: Passage active/passive multi-region data plane - CNPG replica cluster, MirrorMaker 2, region fence and failover alert rules (PSG-50)
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

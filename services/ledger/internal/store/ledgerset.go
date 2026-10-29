@@ -64,6 +64,17 @@ func (s *Postgres) CreateLedgerSet(ctx context.Context, in LedgerSetInput) (Ledg
 	}
 	var out LedgerSet
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var ok bool
+		if in.LeadingLedgerID, ok = ids.Canonical(in.LeadingLedgerID); !ok {
+			return setViolation(CodeSetInvalid, "leadingLedgerId", "must be a UUID")
+		}
+		parallel := make([]string, len(in.ParallelLedgerIDs))
+		for i, raw := range in.ParallelLedgerIDs {
+			if parallel[i], ok = ids.Canonical(raw); !ok {
+				return setViolation(CodeSetInvalid, "parallelLedgerIds", "each entry must be a UUID")
+			}
+		}
+		in.ParallelLedgerIDs = parallel
 		members := append([]string{in.LeadingLedgerID}, in.ParallelLedgerIDs...)
 		if len(in.ParallelLedgerIDs) == 0 || slices.Contains(in.ParallelLedgerIDs, in.LeadingLedgerID) {
 			return setViolation(CodeSetInvalid, "parallelLedgerIds", "a set needs at least one parallel ledger besides the leading ledger")
@@ -92,8 +103,10 @@ func (s *Postgres) CreateLedgerSet(ctx context.Context, in LedgerSetInput) (Ledg
 		if err := lockLegalEntity(ctx, tx, p.TenantID, loaded[0].LegalEntityID); err != nil {
 			return err
 		}
-		if _, err := loadLedger(ctx, tx, p.TenantID, in.LeadingLedgerID, true); err != nil {
-			return err
+		for _, id := range sorted {
+			if _, err := loadLedger(ctx, tx, p.TenantID, id, true); err != nil {
+				return err
+			}
 		}
 		var hasMappings bool
 		if err := tx.QueryRow(ctx, `select exists(select 1 from ledger_account_mapping where tenant_id = $1 and ledger_id = $2)`,

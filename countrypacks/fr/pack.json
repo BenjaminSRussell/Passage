@@ -1,0 +1,29 @@
+{
+  "code": "FR",
+  "version": "2026.1",
+  "name": "France",
+  "country": "FR",
+  "currency": "EUR",
+  "locale": "fr-FR",
+  "taxRegime": "VAT",
+  "fiscalYearStartMonth": 1,
+  "holidayRegion": "FR-METRO",
+  "bankFormats": ["SEPA_CT", "SEPA_DD"],
+  "taxIdScheme": "FR_VAT",
+  "retentionMinYears": {"financial": 10, "hr": 5},
+  "documentLayouts": ["facture-fr-fr"],
+  "statutoryReports": [
+    {
+      "code": "FR_CA3",
+      "format": "CSV",
+      "mandate": "DGFiP CA3 and EDI-TVA",
+      "requiredFields": ["siren", "periode", "ligne01", "ligne16"]
+    },
+    {
+      "code": "FR_FEC",
+      "format": "CSV",
+      "mandate": "Fichier des écritures comptables",
+      "requiredFields": ["JournalCode", "EcritureNum", "EcritureDate", "Debit", "Credit"]
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{{- if include "passage-mr.fenced" . }}
+# Network half of the fence (BR-50.1, FR-50.5). The Postgres pods of this
+# region accept traffic only from their own cluster and the CNPG operator, so
+# no application, pooler or replication client can reach them. No other policy
+# in this chart selects these pods, so nothing widens this one. The database
+# half is the cnpg.io/fencedInstances annotation on the Cluster. Application
+# pods are scaled to zero by the failover workflow; the gateway answers 503
+# with Retry-After: 30 meanwhile (BR-50.2).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Values.postgres.clusterName }}-fence
+  namespace: {{ .Values.region.namespace }}
+  labels:
+    {{- include "passage-mr.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: {{ .Values.postgres.clusterName }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: {{ .Values.postgres.clusterName }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.fence.operatorNamespace }}
+{{- end }}

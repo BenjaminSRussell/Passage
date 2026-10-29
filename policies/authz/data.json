@@ -58,7 +58,7 @@
       {"resource": "/v1/fx/convert{,/**}", "methods": ["POST"]}
     ]},
     "Maintain exchange rates": {"permissions": [
-      {"resource": "/v1/fx/rate-types{,/**}", "methods": ["GET", "PUT"]},
+      {"resource": "/v1/fx/rate-types{,/**}", "methods": ["GET", "POST", "PUT"]},
       {"resource": "/v1/fx/rates{,/**}", "methods": ["GET", "POST"]}
     ]},
     "ledger.ledger.write": {"permissions": [{"resource": "/v1/ledger/ledgers", "methods": ["POST"]}]},
@@ -315,6 +315,8 @@
     "settlement.read": {"permissions": [{"resource": "/v1/payables/settlements:preview", "methods": ["POST"]}]},
     "payment-file.preview": {"permissions": [{"resource": "/v1/payables/payment-files:preview", "methods": ["POST"]}]},
     "payment-status.parse": {"permissions": [{"resource": "/v1/payables/payments/status:parse", "methods": ["POST"]}]},
+    "aging.read": {"permissions": [{"resource": "/v1/payables/aging", "methods": ["GET"]}]},
+    "aging.reconcile": {"permissions": [{"resource": "/v1/payables/aging:reconcile", "methods": ["GET"]}]},
     "party.write": {"permissions": [
       {"resource": "/v1/party/tax-registrations:validate", "methods": ["POST"]},
       {"resource": "/v1/party/parties", "methods": ["POST"]},
@@ -323,12 +325,16 @@
     ]},
     "party.read": {"permissions": [
       {"resource": "/v1/party/parties/*", "methods": ["GET"]},
-      {"resource": "/v1/party/pending-changes/*", "methods": ["GET"]}
+      {"resource": "/v1/party/pending-changes/*", "methods": ["GET"]},
+      {"resource": "/v1/party/legal-entities/*/protected-fields", "methods": ["GET"]}
     ]},
     "pii.read": {"flag": true, "permissions": []},
     "party.approve": {"permissions": [
       {"resource": "/v1/party/pending-changes/*:approve", "methods": ["POST"]},
       {"resource": "/v1/party/pending-changes/*:reject", "methods": ["POST"]}
+    ]},
+    "party.approval_policy.write": {"permissions": [
+      {"resource": "/v1/party/legal-entities/*/protected-fields", "methods": ["PUT"]}
     ]}
   }
 }

@@ -279,11 +279,11 @@ func (r *runner) siteAddress(site store.Site, s siteSeed) error {
 		r.tally(true)
 		return nil
 	}
-	addresses, err := r.st.ListAddresses(r.ctx, store.AddressFilter{OwnerType: "site", OwnerID: site.ID, Purpose: "business"}, "", listAll)
+	addresses, err := r.st.ListAddresses(r.ctx, store.AddressFilter{OwnerType: "site", OwnerID: site.ID}, "", listAll)
 	if err != nil {
 		return err
 	}
-	if addressID := primaryBusinessAddressID(addresses.Items); addressID != "" {
+	if addressID := siteAddressID(addresses.Items); addressID != "" {
 		if _, err := r.st.UpdateSite(r.ctx, site.ID, current.Version, store.SitePatch{AddressID: &addressID}); err != nil {
 			return fmt.Errorf("site %s address pointer: %w", s.code, err)
 		}
@@ -304,13 +304,16 @@ func (r *runner) siteAddress(site store.Site, s siteSeed) error {
 	return nil
 }
 
-func primaryBusinessAddressID(addresses []store.Address) string {
+func siteAddressID(addresses []store.Address) string {
 	for _, a := range addresses {
 		for _, p := range a.Purposes {
 			if p.Purpose == "business" && p.Primary {
 				return a.ID
 			}
 		}
+	}
+	if len(addresses) > 0 {
+		return addresses[0].ID
 	}
 	return ""
 }

@@ -1,0 +1,10 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - gatewayclass.yaml
+  - gateway.yaml
+  - jwks-configmap.yaml
+  - httproutes.yaml
+  - clienttrafficpolicy.yaml
+  - securitypolicy.yaml
+  - backendtrafficpolicy.yaml

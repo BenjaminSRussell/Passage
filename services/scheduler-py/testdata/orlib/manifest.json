@@ -1,0 +1,186 @@
+{
+ "source": "http://people.brunel.ac.uk/~mastjjb/jeb/orlib/files/jobshop1.txt (OR-Library, Beasley; instances contributed by Mattfeld and Vaessens)",
+ "note": "optimum is the proven optimal makespan from the published literature; all 30 are solved to optimality",
+ "instances": [
+  {
+   "name": "abz5",
+   "jobs": 10,
+   "machines": 10,
+   "optimum": 1234
+  },
+  {
+   "name": "abz6",
+   "jobs": 10,
+   "machines": 10,
+   "optimum": 943
+  },
+  {
+   "name": "ft06",
+   "jobs": 6,
+   "machines": 6,
+   "optimum": 55
+  },
+  {
+   "name": "ft10",
+   "jobs": 10,
+   "machines": 10,
+   "optimum": 930
+  },
+  {
+   "name": "ft20",
+   "jobs": 20,
+   "machines": 5,
+   "optimum": 1165
+  },
+  {
+   "name": "la01",
+   "jobs": 10,
+   "machines": 5,
+   "optimum": 666
+  },
+  {
+   "name": "la02",
+   "jobs": 10,
+   "machines": 5,
+   "optimum": 655
+  },
+  {
+   "name": "la03",
+   "jobs": 10,
+   "machines": 5,
+   "optimum": 597
+  },
+  {
+   "name": "la04",
+   "jobs": 10,
+   "machines": 5,
+   "optimum": 590
+  },
+  {
+   "name": "la05",
+   "jobs": 10,
+   "machines": 5,
+   "optimum": 593
+  },
+  {
+   "name": "la06",
+   "jobs": 15,
+   "machines": 5,
+   "optimum": 926
+  },
+  {
+   "name": "la07",
+   "jobs": 15,
+   "machines": 5,
+   "optimum": 890
+  },
+  {
+   "name": "la08",
+   "jobs": 15,
+   "machines": 5,
+   "optimum": 863
+  },
+  {
+   "name": "la09",
+   "jobs": 15,
+   "machines": 5,
+   "optimum": 951
+  },
+  {
+   "name": "la10",
+   "jobs": 15,
+   "machines": 5,
+   "optimum": 958
+  },
+  {
+   "name": "la11",
+   "jobs": 20,
+   "machines": 5,
+   "optimum": 1222
+  },
+  {
+   "name": "la12",
+   "jobs": 20,
+   "machines": 5,
+   "optimum": 1039
+  },
+  {
+   "name": "la13",
+   "jobs": 20,
+   "machines": 5,
+   "optimum": 1150
+  },
+  {
+   "name": "la14",
+   "jobs": 20,
+   "machines": 5,
+   "optimum": 1292
+  },
+  {
+   "name": "la15",
+   "jobs": 20,
+   "machines": 5,
+   "optimum": 1207
+  },
+  {
+   "name": "la16",
+   "jobs": 10,
+   "machines": 10,
+   "optimum": 945
+  },
+  {
+   "name": "la17",
+   "jobs": 10,
+   "machines": 10,
+   "optimum": 784
+  },
+  {
+   "name": "la18",
+   "jobs": 10,
+   "machines": 10,
+   "optimum": 848
+  },
+  {
+   "name": "la19",
+   "jobs": 10,
+   "machines": 10,
+   "optimum": 842
+  },
+  {
+   "name": "la20",
+   "jobs": 10,
+   "machines": 10,
+   "optimum": 902
+  },
+  {
+   "name": "la21",
+   "jobs": 15,
+   "machines": 10,
+   "optimum": 1046
+  },
+  {
+   "name": "la22",
+   "jobs": 15,
+   "machines": 10,
+   "optimum": 927
+  },
+  {
+   "name": "la23",
+   "jobs": 15,
+   "machines": 10,
+   "optimum": 1032
+  },
+  {
+   "name": "la24",
+   "jobs": 15,
+   "machines": 10,
+   "optimum": 935
+  },
+  {
+   "name": "la25",
+   "jobs": 15,
+   "machines": 10,
+   "optimum": 977
+  }
+ ]
+}

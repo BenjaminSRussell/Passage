@@ -2,7 +2,6 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { json, pageViolations, renderAt, server, useFakeServer, type Reply } from "./testServer";
-
 import { emptyEntry, validateEntry } from "./validate";
 
 useFakeServer();
@@ -14,9 +13,10 @@ function history(rate: string, extra: Record<string, unknown> = {}) {
   return { id: "h1", version: 1, validFrom: "2026-01-02", rate, source: "manual", createdAt: "2026-01-02T09:00:00Z", ...extra };
 }
 
-function answer(routes: { history?: Reply; publish?: Reply; put?: Reply; list?: Reply }) {
+function answer(routes: { history?: Reply; publish?: Reply; put?: Reply; create?: Reply; list?: Reply }) {
   server.handler = (url, method) => {
     if (url.pathname === "/api/v1/fx/rate-types" && method === "GET") return routes.list ?? json(200, [closing, average]);
+    if (url.pathname === "/api/v1/fx/rate-types" && method === "POST") return routes.create;
     if (url.pathname.startsWith("/api/v1/fx/rate-types/") && method === "PUT") return routes.put;
     if (url.pathname === "/api/v1/fx/rates/history") return routes.history ?? json(200, { entries: [] });
     if (url.pathname === "/api/v1/fx/rates" && method === "POST") return routes.publish;
@@ -46,6 +46,7 @@ function holdRequests(method: string) {
   return release;
 }
 
+const rateTypeCalls = (method: string) => server.calls.filter((c) => c.method === method && c.url.pathname.startsWith("/api/v1/fx/rate-types"));
 const publishCalls = () => server.calls.filter((c) => c.method === "POST");
 
 describe("rate entry page", () => {
@@ -424,7 +425,7 @@ describe("rate types page", () => {
   });
 
   it("creates a rate type", async () => {
-    answer({ put: json(200, { id: "t3", code: "BUDGET", name: "Budget", allowInverse: false, provider: "csv" }) });
+    answer({ create: json(201, { id: "t3", code: "BUDGET", name: "Budget", allowInverse: false, provider: "csv" }) });
     const user = userEvent.setup();
     renderAt("/fx/rate-types");
     await screen.findByRole("button", { name: "CLOSING" });
@@ -434,9 +435,11 @@ describe("rate types page", () => {
     await user.click(screen.getByLabelText("Allow inverse rates"));
     await user.click(screen.getByRole("button", { name: "Create rate type" }));
     expect(await screen.findByText("Rate type BUDGET saved")).toBeInTheDocument();
-    const put = server.calls.find((c) => c.method === "PUT");
-    expect(put?.url.pathname).toBe("/api/v1/fx/rate-types/BUDGET");
-    expect(put?.body).toEqual({ name: "Budget", allowInverse: false, provider: "csv" });
+    const create = rateTypeCalls("POST");
+    expect(create).toHaveLength(1);
+    expect(create[0]?.url.pathname).toBe("/api/v1/fx/rate-types");
+    expect(create[0]?.body).toEqual({ code: "BUDGET", name: "Budget", allowInverse: false, provider: "csv" });
+    expect(rateTypeCalls("PUT")).toHaveLength(0);
     expect(screen.getByLabelText("Code")).toHaveValue("");
   });
 
@@ -463,11 +466,11 @@ describe("rate types page", () => {
     expect(await screen.findByText("Enter a code, for example CLOSING.")).toBeInTheDocument();
     expect(screen.getByText("Enter a name, for example Month-end closing.")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByLabelText("Code")).toHaveFocus());
-    expect(server.calls.some((c) => c.method === "PUT")).toBe(false);
+    expect(rateTypeCalls("POST")).toHaveLength(0);
   });
 
   it("explains a missing permission to save", async () => {
-    answer({ put: json(403, { code: "COM-0403", detail: "forbidden" }) });
+    answer({ create: json(403, { code: "COM-0403", detail: "forbidden" }) });
     const user = userEvent.setup();
     renderAt("/fx/rate-types");
     await screen.findByRole("button", { name: "CLOSING" });
@@ -480,7 +483,7 @@ describe("rate types page", () => {
   });
 
   it("shows the server's rejection when no field owns it", async () => {
-    answer({ put: json(400, { code: "FX_RATE_INVALID", detail: "rate type code and name are required" }) });
+    answer({ create: json(400, { code: "FX_RATE_INVALID", detail: "rate type code and name are required" }) });
     const user = userEvent.setup();
     renderAt("/fx/rate-types");
     await screen.findByRole("button", { name: "CLOSING" });
@@ -488,6 +491,20 @@ describe("rate types page", () => {
     await user.type(screen.getByLabelText("Name"), "Xtra");
     await user.click(screen.getByRole("button", { name: "Create rate type" }));
     expect((await screen.findByRole("alert")).textContent).toContain("rate type code and name are required");
+  });
+
+  it("shows the code error when the server reports the code was taken meanwhile", async () => {
+    answer({ create: json(409, { code: "FX_RATE_TYPE_EXISTS", detail: "a rate type with this code already exists" }) });
+    const user = userEvent.setup();
+    renderAt("/fx/rate-types");
+    await screen.findByRole("button", { name: "CLOSING" });
+    await user.type(screen.getByLabelText("Code"), "budget");
+    await user.type(screen.getByLabelText("Name"), "Budget");
+    await user.click(screen.getByRole("button", { name: "Create rate type" }));
+    expect(await screen.findByText("A rate type with this code already exists. Open it in the table to edit it.")).toBeInTheDocument();
+    expect(screen.queryByText("Someone else saved this rate first")).not.toBeInTheDocument();
+    expect(rateTypeCalls("POST")).toHaveLength(1);
+    expect(rateTypeCalls("PUT")).toHaveLength(0);
   });
 
   it("refuses to create a code that already exists instead of overwriting it", async () => {
@@ -500,13 +517,13 @@ describe("rate types page", () => {
     await user.click(screen.getByRole("button", { name: "Create rate type" }));
     expect(await screen.findByText("A rate type with this code already exists. Open it in the table to edit it.")).toBeInTheDocument();
     expect(screen.getByLabelText("Code")).toHaveFocus();
-    expect(server.calls.some((c) => c.method === "PUT")).toBe(false);
+    expect(rateTypeCalls("POST")).toHaveLength(0);
   });
 
   it("does not create a rate type while the existing codes could not be loaded", async () => {
     answer({
       list: json(500, { code: "COM-0500", detail: "internal error" }),
-      put: json(200, {
+      create: json(201, {
         id: "t9",
         code: "CLOSING",
         name: "Other",
@@ -521,7 +538,7 @@ describe("rate types page", () => {
     await user.click(screen.getByRole("button", { name: "Create rate type" }));
     expect(await screen.findByText(/could not be checked yet/)).toBeInTheDocument();
     expect(screen.getByLabelText("Code")).toHaveFocus();
-    expect(server.calls.some((c) => c.method === "PUT")).toBe(false);
+    expect(rateTypeCalls("POST")).toHaveLength(0);
   });
 
   it("clears the unavailable-list field error after the list recovers", async () => {
@@ -537,7 +554,7 @@ describe("rate types page", () => {
     await user.click(screen.getByRole("button", { name: "Try again" }));
     await screen.findByRole("button", { name: "AVERAGE" });
     await waitFor(() => expect(screen.queryByText(/could not be checked yet/)).not.toBeInTheDocument());
-    expect(server.calls.some((c) => c.method === "PUT")).toBe(false);
+    expect(rateTypeCalls("POST")).toHaveLength(0);
   });
 
   it("keeps the edit form while saving and disables New rate type", async () => {
@@ -570,6 +587,7 @@ describe("rate types page", () => {
     expect(screen.getByLabelText("Name")).toHaveValue("Monthly average");
     release();
     expect(await screen.findByText("Rate type AVERAGE saved")).toBeInTheDocument();
+    expect(rateTypeCalls("PUT")).toHaveLength(1);
     expect(screen.getByLabelText("Name")).toBeEnabled();
   });
 
