@@ -49,6 +49,15 @@ paths:
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+        '503':
+          description: XSD validation timed out (COM-0503). Retry-After is sent only when the request timed out waiting for a validator slot; a document that ran the full validation timeout will time out again and carries no Retry-After.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying; present only when the validator was busy.
+              schema: { type: integer }
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/KernelProblem' }
   /v1/payables/payments/status:parse:
     post:
       operationId: parsePaymentStatus

@@ -102,12 +102,16 @@ type statusParseResponse struct {
 }
 
 func (a *API) failDomain(w http.ResponseWriter, r *http.Request, err error) {
-	if errors.Is(err, context.Canceled) {
+	if errors.Is(err, context.Canceled) && r.Context().Err() != nil {
 		return
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		a.fileServerFaults.Add(1)
-		w.Header().Set("Retry-After", "1")
+		busy := errors.Is(err, domain.ErrValidatorBusy)
+		slog.Warn("payment file validation timed out", "err", err, "waitingForSlot", busy, "path", r.URL.Path, "correlationId", middleware.GetReqID(r.Context()))
+		if busy {
+			w.Header().Set("Retry-After", "1")
+		}
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "payment file validation is temporarily unavailable"))
 		return
 	}

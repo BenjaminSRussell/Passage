@@ -1,11 +1,14 @@
 package api_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -133,11 +136,68 @@ func TestPreviewPaymentFile_ClientCancellationIsNotCounted(t *testing.T) {
 	ctx, cancel := context.WithCancel(req.Context())
 	cancel()
 	req = req.WithContext(ctx)
-	r.ServeHTTP(httptest.NewRecorder(), req)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
 	metrics := scrape(a)
 	if strings.Contains(metrics, "payables_payment_file_server_faults_total 1") || strings.Contains(metrics, "payables_payment_file_client_errors_total 1") {
 		t.Fatalf("client cancellation changed error counters:\n%s", metrics)
 	}
+	if rec.Code >= 500 || rec.Body.Len() != 0 {
+		t.Fatalf("client cancellation wrote %d %q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPreviewPaymentFile_CanceledErrorOnLiveRequestIsAServerFault(t *testing.T) {
+	r, a := routerWith(fakeValidator{err: context.Canceled})
+	rec := do(r, http.MethodPost, filePreviewPath, readTestdata(t, "pain001/us.json"), true, previewDuty)
+	if rec.Code != http.StatusInternalServerError || !strings.Contains(scrape(a), "payables_payment_file_server_faults_total 1") {
+		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPreviewPaymentFile_TimeoutRetryAfterOnlyWhenWaitingForSlot(t *testing.T) {
+	busy := fmt.Errorf("wait for xmllint slot: %w: %w", domain.ErrValidatorBusy, context.DeadlineExceeded)
+	for name, tc := range map[string]struct {
+		err        error
+		retryAfter string
+	}{
+		"waiting for slot": {busy, "1"},
+		"full xmllint run": {fmt.Errorf("run xmllint: %w", context.DeadlineExceeded), ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r, _ := routerWith(fakeValidator{err: tc.err})
+			rec := do(r, http.MethodPost, filePreviewPath, readTestdata(t, "pain001/us.json"), true, previewDuty)
+			if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") != tc.retryAfter {
+				t.Fatalf("got %d Retry-After=%q, want 503 %q", rec.Code, rec.Header().Get("Retry-After"), tc.retryAfter)
+			}
+		})
+	}
+}
+
+func TestPreviewPaymentFile_TimeoutIsLoggedWithCorrelationID(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	r, _ := routerWith(fakeValidator{err: fmt.Errorf("run xmllint: %w", context.DeadlineExceeded)})
+	req := httptest.NewRequest(http.MethodPost, filePreviewPath, strings.NewReader(readTestdata(t, "pain001/us.json")))
+	req.Header.Set("X-Passage-Tenant", "00000000-0000-4000-8000-000000000001")
+	req.Header.Set("X-Passage-Duties", previewDuty)
+	req.Header.Set("X-Request-Id", "req-229")
+	r.ServeHTTP(httptest.NewRecorder(), req)
+	for _, raw := range bytes.Split(bytes.TrimSpace(logs.Bytes()), []byte("\n")) {
+		var line struct {
+			Level         string
+			CorrelationID string `json:"correlationId"`
+		}
+		if err := json.Unmarshal(raw, &line); err != nil {
+			t.Fatalf("log line %q: %v", raw, err)
+		}
+		if line.Level == "WARN" && line.CorrelationID == "req-229" {
+			return
+		}
+	}
+	t.Fatalf("no WARN with correlationId req-229 in %s", logs.String())
 }
 
 func TestPreviewPaymentFile_Rejections(t *testing.T) {
@@ -182,9 +242,6 @@ func TestPreviewPaymentFile_Rejections(t *testing.T) {
 				wantClientErrors != strings.Contains(metrics, "payables_payment_file_client_errors_total 1") ||
 				strings.Contains(metrics, "payables_settlement_preview_client_errors_total 1") {
 				t.Fatalf("error counters wrong for %d:\n%s", tc.wantStatus, metrics)
-			}
-			if tc.wantStatus == http.StatusServiceUnavailable && rec.Header().Get("Retry-After") != "1" {
-				t.Fatalf("Retry-After = %q, want 1", rec.Header().Get("Retry-After"))
 			}
 		})
 	}
