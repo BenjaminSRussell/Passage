@@ -10,9 +10,15 @@ import { devProxy } from "./src/shell/devProxy";
  * src/shell/federation.ts. The @module-federation/vite plugin is a lockfile
  * Need; discovery in tests and `vite` uses import.meta.glob.
  */
-export default defineConfig(({ mode }) => ({
-  plugins: [react()],
-  define: { __PASSAGE_REMOTES__: JSON.stringify(federationRemotes) },
-  server: { port: 5173, proxy: devProxy(loadEnv(mode, decodeURIComponent(new URL(".", import.meta.url).pathname), "PASSAGE_")) },
-  test: { environment: "jsdom", globals: true, setupFiles: ["./src/test-setup.ts"], exclude: [...configDefaults.exclude, "e2e/**"] },
-}));
+export default defineConfig(({ mode, command }) => {
+  const env = loadEnv(mode, decodeURIComponent(new URL(".", import.meta.url).pathname), "PASSAGE_");
+  return {
+    plugins: [react()],
+    define: {
+      __PASSAGE_REMOTES__: JSON.stringify(federationRemotes),
+      __PASSAGE_DEV_DUTIES__: JSON.stringify(command === "serve" && mode !== "test" ? (env.PASSAGE_DEV_DUTIES ?? "") : ""),
+    },
+    server: { port: 5173, proxy: devProxy(env) },
+    test: { environment: "jsdom", globals: true, setupFiles: ["./src/test-setup.ts"], exclude: [...configDefaults.exclude, "e2e/**"] },
+  };
+});

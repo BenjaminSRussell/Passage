@@ -6,6 +6,7 @@ import { copy } from "./copy";
 import { useOnlineStatus } from "./hooks/useOnlineStatus";
 import { demoNote } from "./metadata";
 import { resolvePage } from "./pageMeta";
+import { devDuties, PrincipalProvider } from "./principal";
 import { applyView, saveView, type Density, type Personalization, type SavedView } from "./personalization";
 import { RouteErrorBoundary } from "./RouteErrorBoundary";
 import styles from "./Shell.module.css";
@@ -25,6 +26,7 @@ function isShown(el: HTMLElement): boolean {
 
 export interface ShellProps {
   modules: PassageModule[];
+  duties?: readonly string[];
 }
 
 function PageSkeleton() {
@@ -38,7 +40,8 @@ function PageSkeleton() {
   );
 }
 
-export function Shell({ modules }: ShellProps) {
+export function Shell({ modules, duties }: ShellProps) {
+  const principalDuties = useMemo(() => duties ?? devDuties(), [duties]);
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const online = useOnlineStatus();
@@ -224,54 +227,56 @@ export function Shell({ modules }: ShellProps) {
   }
 
   return (
-    <div className={styles.root} data-density={density}>
-      <a href="#main" className="skip-link">
-        Skip to content
-      </a>
-      <div className={styles.frame}>
-        <Sidebar
-          modules={modules}
-          shellNav={shellNav}
-          drawerOpen={drawerOpen}
-          searchRef={searchRef}
-          onOpenSearch={openSearch}
-          onCloseDrawer={closeDrawer}
-        />
-        {drawerOpen ? <div className={styles.scrim} onClick={closeDrawer} aria-hidden="true" /> : null}
-        <main id="main" tabIndex={-1} className={styles.main}>
-          <TopBar
-            page={page}
-            titleRef={titleRef}
-            menuRef={menuRef}
+    <PrincipalProvider duties={principalDuties}>
+      <div className={styles.root} data-density={density}>
+        <a href="#main" className="skip-link">
+          Skip to content
+        </a>
+        <div className={styles.frame}>
+          <Sidebar
+            modules={modules}
+            shellNav={shellNav}
             drawerOpen={drawerOpen}
-            compact={density === "compact"}
-            onOpenDrawer={() => setDrawerOpen(true)}
-            onApplyView={applySavedView}
-            onToggleCompact={() => setDensity((d) => (d === "compact" ? "comfortable" : "compact"))}
+            searchRef={searchRef}
+            onOpenSearch={openSearch}
+            onCloseDrawer={closeDrawer}
           />
-          {online ? null : (
-            <div className={styles.banner}>
-              <Alert tone="warning">{copy.offlineBanner}</Alert>
+          {drawerOpen ? <div className={styles.scrim} onClick={closeDrawer} aria-hidden="true" /> : null}
+          <main id="main" tabIndex={-1} className={styles.main}>
+            <TopBar
+              page={page}
+              titleRef={titleRef}
+              menuRef={menuRef}
+              drawerOpen={drawerOpen}
+              compact={density === "compact"}
+              onOpenDrawer={() => setDrawerOpen(true)}
+              onApplyView={applySavedView}
+              onToggleCompact={() => setDensity((d) => (d === "compact" ? "comfortable" : "compact"))}
+            />
+            {online ? null : (
+              <div className={styles.banner}>
+                <Alert tone="warning">{copy.offlineBanner}</Alert>
+              </div>
+            )}
+            <div className={styles.content}>
+              <RouteErrorBoundary key={pathname}>
+                <Suspense fallback={<PageSkeleton />}>
+                  <Outlet />
+                </Suspense>
+              </RouteErrorBoundary>
             </div>
-          )}
-          <div className={styles.content}>
-            <RouteErrorBoundary key={pathname}>
-              <Suspense fallback={<PageSkeleton />}>
-                <Outlet />
-              </Suspense>
-            </RouteErrorBoundary>
-          </div>
-        </main>
-      </div>
-      <div role="status" aria-live="polite" className="visually-hidden">
-        {announcement}
-      </div>
-      {toast ? (
-        <div className={styles.toast} aria-hidden="true">
-          {toast}
+          </main>
         </div>
-      ) : null}
-      {paletteOpen ? <CommandPalette entries={entries} onSelect={selectEntry} onClose={() => closePalette()} announce={announceQuietly} /> : null}
-    </div>
+        <div role="status" aria-live="polite" className="visually-hidden">
+          {announcement}
+        </div>
+        {toast ? (
+          <div className={styles.toast} aria-hidden="true">
+            {toast}
+          </div>
+        ) : null}
+        {paletteOpen ? <CommandPalette entries={entries} onSelect={selectEntry} onClose={() => closePalette()} announce={announceQuietly} /> : null}
+      </div>
+    </PrincipalProvider>
   );
 }

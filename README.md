@@ -42,7 +42,7 @@ PASSAGE_DEV_USER=dev
 PASSAGE_DEV_DUTIES=ledger.journal.read,ledger.journal.post   # comma-separated; each service lists its duties in internal/api/api.go
 ```
 
-`PASSAGE_DEV_DUTIES` defaults to empty, so any duty-guarded call returns 403 until you set the duties the service checks.
+`PASSAGE_DEV_DUTIES` defaults to empty, so any duty-guarded call returns 403 until you set the duties the service checks. The same list is given to the shell's modules so UI that needs a duty (for example `org.hierarchy.write` for the hierarchy designer's edit mode) is shown; restart `vite` after changing it.
 
 The gateway ([#82](https://github.com/BenjaminSRussell/Passage/issues/82)) is expected to do the same: its HTTPRoutes match `/api/v1/<svc>` and rewrite to `/v1/<svc>` (strip `/api`), and set the `X-Passage-*` headers from the verified token.
 
