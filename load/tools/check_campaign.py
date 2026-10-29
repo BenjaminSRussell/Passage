@@ -3,12 +3,15 @@
 
 Usage:
     python3 load/tools/check_campaign.py results/summary.json [--slo load/slo/slo.json]
+    python3 load/tools/check_campaign.py --profile soak results/soak-summary.json
 
 Exit status is 0 only when every SLO has data and meets its limit. A missing metric
 counts as a failure: an operation that was not measured cannot pass a campaign.
 Latency and error limits are strict upper bounds (k6 "<"); throughput targets are
 lower bounds. --scale must match the run's LOAD_SCALE and lowers only throughput
 targets; a published campaign (AC1) runs at scale 1.
+--profile soak checks only the rows listed in the table's "soak" profile (the ones
+load/k6/soak.js measures) and multiplies the throughput targets by its fraction (50%).
 Stdlib only, Python 3.11+.
 """
 
@@ -52,13 +55,31 @@ class Row:
     comparison: str = "<"
 
 
-def build_checks(slo: dict[str, Any], scale: float = 1.0) -> list[Check]:
-    """Translate the SLO table into concrete metric checks."""
+def profile(slo: dict[str, Any], name: str, scale: float) -> tuple[float, set[str] | None]:
+    """Return (effective scale, SLO ids to check) for a run profile."""
+    if name == "campaign":
+        return scale, None
+    if name == "soak":
+        soak = slo.get("soak")
+        if not isinstance(soak, dict) or not soak.get("slos") or not soak.get("fraction", 0) > 0:
+            raise ValueError("SLO table has no soak profile")
+        ids = set(soak["slos"])
+        unknown = ids - {s["id"] for s in slo["slos"]}
+        if unknown:
+            raise ValueError(f"soak profile names unknown SLO ids: {', '.join(sorted(unknown))}")
+        return scale * float(soak["fraction"]), ids
+    raise ValueError(f"unknown profile {name!r}")
+
+
+def build_checks(slo: dict[str, Any], scale: float = 1.0, ids: set[str] | None = None) -> list[Check]:
+    """Translate the SLO table into concrete metric checks, optionally only for some rows."""
     if scale <= 0:
         raise ValueError("scale must be positive")
     checks: list[Check] = []
     for s in slo["slos"]:
         sid = s["id"]
+        if ids is not None and sid not in ids:
+            continue
         if "op" in s:
             duration = f"http_req_duration{{op:{s['op']}}}"
             failed = f"http_req_failed{{op:{s['op']}}}"
@@ -102,12 +123,14 @@ def read_stat(metrics: dict[str, Any], metric: str, stat: str) -> float | None:
     return None
 
 
-def evaluate(summary: dict[str, Any], slo: dict[str, Any], scale: float = 1.0) -> list[Row]:
+def evaluate(
+    summary: dict[str, Any], slo: dict[str, Any], scale: float = 1.0, ids: set[str] | None = None
+) -> list[Row]:
     metrics = summary.get("metrics", {})
     if not isinstance(metrics, dict):
         raise ValueError("summary has no metrics object")
     rows: list[Row] = []
-    for check in build_checks(slo, scale):
+    for check in build_checks(slo, scale, ids):
         value = read_stat(metrics, check.metric, check.stat)
         if value is not None:
             value *= check.factor
@@ -134,6 +157,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("summary", type=Path, help="k6 --summary-export JSON file")
     parser.add_argument("--slo", type=Path, default=DEFAULT_SLO, help="SLO table JSON")
     parser.add_argument("--scale", type=float, default=1.0, help="LOAD_SCALE of the run (default 1)")
+    parser.add_argument(
+        "--profile", choices=["campaign", "soak"], default="campaign", help="run profile (default campaign)"
+    )
     args = parser.parse_args(argv)
     if args.scale <= 0:
         parser.error("--scale must be positive")
@@ -143,7 +169,12 @@ def main(argv: list[str] | None = None) -> int:
     with args.slo.open(encoding="utf-8") as fh:
         slo = json.load(fh)
 
-    rows = evaluate(summary, slo, args.scale)
+    try:
+        scale, ids = profile(slo, args.profile, args.scale)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    rows = evaluate(summary, slo, scale, ids)
     print(render(rows))
     return 0 if rows and all(r.passed for r in rows) else 1
 

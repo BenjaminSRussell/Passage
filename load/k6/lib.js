@@ -4,12 +4,19 @@
 // k6 thresholds from the SLO table. Latency SLOs map to tagged request metrics
 // (http_req_duration{op:<tag>}); throughput SLOs map to counters, whose rate k6
 // reports per second. scale is LOAD_SCALE and lowers only throughput targets.
-export function thresholds(slo, scale) {
+// ids, when given, limits the thresholds to those SLO rows (the soak profile).
+export function thresholds(slo, scale, ids) {
   const t = {};
   const add = (k, v) => {
     t[k] = (t[k] || []).concat([v]);
   };
+  const only = ids ? new Set(ids) : null;
+  if (only) {
+    const known = new Set(slo.slos.map((s) => s.id));
+    for (const id of only) if (!known.has(id)) throw new Error(`unknown SLO id ${id}`);
+  }
   for (const s of slo.slos) {
+    if (only && !only.has(s.id)) continue;
     if (s.op) {
       if (s.p95ms !== undefined) add(`http_req_duration{op:${s.op}}`, `p(95)<${s.p95ms}`);
       if (s.p99ms !== undefined) add(`http_req_duration{op:${s.op}}`, `p(99)<${s.p99ms}`);
@@ -22,6 +29,15 @@ export function thresholds(slo, scale) {
     }
   }
   return t;
+}
+
+// Soak load fraction: the profile's fraction (PRD: 50%) times LOAD_SCALE, so a
+// smoke soak shrinks the same way a smoke campaign does. The checker gets the
+// same LOAD_SCALE as --scale and applies the fraction itself.
+export function soakFraction(slo, scale) {
+  if (!slo.soak || !(slo.soak.fraction > 0)) throw new Error('slo.json has no soak profile');
+  if (!(scale > 0)) throw new Error('LOAD_SCALE must be positive');
+  return slo.soak.fraction * scale;
 }
 
 export function uuid() {

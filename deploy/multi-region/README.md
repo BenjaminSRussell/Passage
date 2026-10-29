@@ -25,6 +25,19 @@ that mirrors every Passage topic into it. DNS fails over with a 60 s TTL. Active
   own pair from the same chart.
 - `test_chart.py`: render tests per role (`python3 -m unittest discover -s deploy/multi-region`).
 
+## Game day and release tools
+- `gameday/baseline.py` — fx-gameday. `capture` writes a digest-sealed baseline manifest (ledger chain head per
+  tenant, row counts, Kafka end offsets of the standby cluster, fiscal sequence ranges) before failure injection
+  and prints the digest to record in the game-day ticket. `verify --expect-digest` checks the post-failover
+  facts: the chain was extended and the hash at the baseline sequence matches (BR-50.3), rows and offsets did
+  not go down and were read from the same cluster, sequences are gap-free and cover the whole baseline range
+  (BR-50.4). Exit 0 only when every check passes. Tests: `gameday/test_baseline.py`.
+- `tools/expand_contract_lint.py` — OPS-1707. Fails a release whose new migrations drop or rename a column,
+  table or view that this release's code or the previous release's (N-1, still running during the rolling
+  deploy) references (BR-50.7). Tests: `tools/test_expand_contract_lint.py`.
+- Run tests: `python3 -m unittest discover -s deploy/multi-region/gameday` and
+  `python3 -m unittest discover -s deploy/multi-region/tools`.
+
 ## Render and lint
 ```
 helm lint deploy/multi-region/chart -f deploy/multi-region/values/eu-central.yaml

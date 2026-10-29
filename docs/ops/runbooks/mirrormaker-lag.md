@@ -8,7 +8,7 @@ Alert: `PassageMirrorMaker2LagHigh` (sum of `kafka_mm2_records_lag` > `mm2.lagAl
    issue (the `passage-mm2` KafkaUser in either region, or a stale `kafka.remoteMm2Secret` copy).
 2. Find the lagging topics: `topk(10, sum by (topic) (kafka_mm2_records_lag))`.
 3. Check the target cluster brokers and disk. Under-replicated partitions mean `min.insync.replicas=2`
-   may block produce; see the broker runbook (later slice).
+   may block produce; see [Kafka broker replacement](kafka-broker-replacement.md).
 4. Check throughput against the 60k msgs/s peak and `kafka_mm2_replication_latency_ms`. Scale
    `mm2.replicas` only after the cause is known.
 5. Offset translation: consumers reconnect at translated offsets after failover. Verify with the

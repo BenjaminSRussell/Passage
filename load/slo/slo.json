@@ -87,6 +87,20 @@
     "perTenant": 0.999,
     "perTenantMultiRegion": 0.9995
   },
+  "soak": {
+    "description": "PRD 9.50.9 Soak: 24 h at 50% load, no memory growth > 10%. Runs S1 and S3 of the campaign at half rate; only the SLOs those scenarios measure are checked (check_campaign.py --profile soak).",
+    "fraction": 0.5,
+    "duration": "24h",
+    "slos": [
+      "entity_read",
+      "form_save",
+      "journal_post",
+      "dashboard",
+      "journal_throughput"
+    ],
+    "maxMemoryGrowth": 0.1,
+    "minSpanHours": 24
+  },
   "notChecked": [
     {
       "id": "journal_post_sustained",

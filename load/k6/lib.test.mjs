@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { journalEntry, thresholds, uuid } from './lib.js';
+import { journalEntry, soakFraction, thresholds, uuid } from './lib.js';
 
 const SLO = JSON.parse(readFileSync(new URL('../slo/slo.json', import.meta.url)));
 const POOL = JSON.parse(readFileSync(new URL('./data/pool.example.json', import.meta.url)));
@@ -55,4 +55,29 @@ test('uuid is v4 shaped and unique', () => {
   const seen = new Set();
   for (let i = 0; i < 1000; i++) seen.add(uuid());
   assert.equal(seen.size, 1000);
+});
+
+test('soak thresholds cover only the soak SLO rows, at the soak fraction', () => {
+  const t = thresholds(SLO, soakFraction(SLO, 1), SLO.soak.slos);
+  assert.deepEqual(Object.keys(t).sort(), [
+    'http_req_duration{op:dashboard}',
+    'http_req_duration{op:entity_read}',
+    'http_req_duration{op:form_save}',
+    'http_req_duration{op:journal_post}',
+    'http_req_failed{op:dashboard}',
+    'http_req_failed{op:entity_read}',
+    'http_req_failed{op:form_save}',
+    'http_req_failed{op:journal_post}',
+    'journal_lines_posted',
+  ]);
+  // 1M lines/h at 50% = 500k/h = 138.8889/s; latency limits are the campaign's.
+  assert.deepEqual(t['journal_lines_posted'], ['rate>=138.8889']);
+  assert.deepEqual(t['http_req_duration{op:journal_post}'], ['p(99)<2000']);
+});
+
+test('soak profile and SLO filter reject bad input', () => {
+  assert.equal(soakFraction(SLO, 0.1), 0.05);
+  assert.throws(() => soakFraction(SLO, 0), /positive/);
+  assert.throws(() => soakFraction({ slos: [] }, 1), /no soak profile/);
+  assert.throws(() => thresholds(SLO, 1, ['journal_post', 'no_such_row']), /unknown SLO id no_such_row/);
 });

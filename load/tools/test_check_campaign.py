@@ -183,5 +183,73 @@ class TestMain(unittest.TestCase):
             self.assertEqual(cc.main([str(small), "--scale", "0.1"]), 0)
 
 
+class TestSoakProfile(unittest.TestCase):
+    def soak_summary(self) -> dict:
+        """What soak.js exports: only the S1 and S3 metrics, S1 at half rate."""
+        slo = load_slo()
+        full = passing_summary()["metrics"]
+        keep = set()
+        for s in slo["slos"]:
+            if s["id"] in slo["soak"]["slos"]:
+                if "op" in s:
+                    keep |= {f"http_req_duration{{op:{s['op']}}}", f"http_req_failed{{op:{s['op']}}}"}
+                else:
+                    keep.add(s["metric"])
+        metrics = {k: v for k, v in full.items() if k in keep}
+        metrics["journal_lines_posted"] = {"count": 1, "rate": 1_000_000 * 0.5 * 1.02 / 3600}
+        return {"metrics": metrics}
+
+    def test_soak_checks_only_the_profile_rows(self) -> None:
+        slo = load_slo()
+        scale, ids = cc.profile(slo, "soak", 1.0)
+        self.assertEqual(scale, 0.5)
+        labels = {c.label for c in cc.build_checks(slo, scale, ids)}
+        self.assertIn("journal_throughput per hour", labels)
+        self.assertNotIn("order_throughput per hour", labels)
+        self.assertNotIn("mrp_50k max (s)", labels)
+        self.assertNotIn("pricing p95 (ms)", labels)
+
+    def test_soak_summary_passes_soak_but_not_campaign(self) -> None:
+        slo = load_slo()
+        summary = self.soak_summary()
+        scale, ids = cc.profile(slo, "soak", 1.0)
+        self.assertTrue(all(r.passed for r in cc.evaluate(summary, slo, scale, ids)))
+        # Half the S1 rate and no S2/S5 data cannot pass the full campaign.
+        self.assertFalse(all(r.passed for r in cc.evaluate(summary, slo)))
+
+    def test_soak_below_half_rate_fails(self) -> None:
+        slo = load_slo()
+        summary = self.soak_summary()
+        summary["metrics"]["journal_lines_posted"]["rate"] = 400_000 / 3600
+        scale, ids = cc.profile(slo, "soak", 1.0)
+        rows = {r.label: r for r in cc.evaluate(summary, slo, scale, ids)}
+        self.assertFalse(rows["journal_throughput per hour"].passed)
+
+    def test_soak_profile_errors(self) -> None:
+        slo = load_slo()
+        with self.assertRaisesRegex(ValueError, "no soak profile"):
+            cc.profile({"slos": slo["slos"]}, "soak", 1.0)
+        bad = copy.deepcopy(slo)
+        bad["soak"]["slos"].append("nope")
+        with self.assertRaisesRegex(ValueError, "unknown SLO ids: nope"):
+            cc.profile(bad, "soak", 1.0)
+        with self.assertRaises(ValueError):
+            cc.profile(slo, "other", 1.0)
+
+    def test_main_soak_profile_exit_codes(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "soak.json"
+            path.write_text(json.dumps(self.soak_summary()), encoding="utf-8")
+            self.assertEqual(cc.main([str(path), "--profile", "soak"]), 0)
+            self.assertEqual(cc.main([str(path)]), 1)
+            no_profile = Path(tmp) / "slo.json"
+            slo = load_slo()
+            del slo["soak"]
+            no_profile.write_text(json.dumps(slo), encoding="utf-8")
+            self.assertEqual(cc.main([str(path), "--profile", "soak", "--slo", str(no_profile)]), 2)
+
+
 if __name__ == "__main__":
     unittest.main()
