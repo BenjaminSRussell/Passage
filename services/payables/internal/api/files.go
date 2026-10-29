@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -21,7 +20,6 @@ const (
 	maxPreviewBodyBytes    = 4 << 20
 	maxPreviewPayments     = 2000
 	maxStatusBodyBytes     = 16 << 20
-	maxStatusContentBytes  = 10 << 20
 	codeBodyTooLarge       = "COM-0413"
 	pathPaymentFilePreview = "/v1/payables/payment-files:preview"
 	pathPaymentStatusParse = "/v1/payables/payments/status:parse"
@@ -103,20 +101,16 @@ type statusParseResponse struct {
 	Unknown           []unknownRef    `json:"unknown"`
 }
 
-func decodeBounded(w http.ResponseWriter, r *http.Request, limit int64, v any) error {
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(v); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			return httpx.NewProblem(http.StatusRequestEntityTooLarge, codeBodyTooLarge, "request body exceeds the size limit")
-		}
-		return httpx.NewProblem(http.StatusBadRequest, "COM-0001", "malformed JSON body: "+err.Error())
-	}
-	return nil
-}
-
 func (a *API) failDomain(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, context.Canceled) {
+		return
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		a.fileServerFaults.Add(1)
+		w.Header().Set("Retry-After", "1")
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "payment file validation is temporarily unavailable"))
+		return
+	}
 	var de *domain.Error
 	var p *httpx.Problem
 	if errors.As(err, &de) || errors.As(err, &p) {
@@ -133,7 +127,7 @@ func (a *API) previewPaymentFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var dto domain.Pain001RequestDTO
-	if err := decodeBounded(w, r, maxPreviewBodyBytes, &dto); err != nil {
+	if err := httpx.DecodeLimit(r, &dto, maxPreviewBodyBytes); err != nil {
 		a.failDomain(w, r, err)
 		return
 	}
@@ -176,11 +170,11 @@ func (a *API) parsePaymentStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req statusParseRequest
-	if err := decodeBounded(w, r, maxStatusBodyBytes, &req); err != nil {
+	if err := httpx.DecodeLimit(r, &req, maxStatusBodyBytes); err != nil {
 		a.failDomain(w, r, err)
 		return
 	}
-	if len(req.Content) > maxStatusContentBytes {
+	if len(req.Content) > domain.MaxPain002Bytes {
 		a.failDomain(w, r, httpx.NewProblem(http.StatusRequestEntityTooLarge, codeBodyTooLarge, "status file exceeds the size limit"))
 		return
 	}

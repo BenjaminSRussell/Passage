@@ -12,7 +12,7 @@ const (
 	CodeStatusUnknown  = "AP-STS-002"
 	HoldBankDetails    = "BANK_DETAILS"
 
-	maxPain002Bytes = 10 << 20
+	MaxPain002Bytes = 10 << 20
 	statusRejected  = "RJCT"
 	reasonBadAcct   = "AC01"
 	unknownMessage  = "message"
@@ -152,7 +152,7 @@ func asDomainError(err error) *Error {
 
 func ParsePain002(content []byte, known KnownIDs) (StatusReport, error) {
 	var doc xmlStatusDocument
-	if len(content) > maxPain002Bytes || xml.Unmarshal(content, &doc) != nil ||
+	if len(content) > MaxPain002Bytes || xml.Unmarshal(content, &doc) != nil ||
 		doc.Report.MessageID == "" || doc.Report.Group.MessageID == "" {
 		return StatusReport{}, invalid("document is not a pain.002.001.10 status report")
 	}

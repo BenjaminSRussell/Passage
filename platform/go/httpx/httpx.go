@@ -80,6 +80,20 @@ func Decode(r *http.Request, v any) error {
 	return nil
 }
 
+// DecodeLimit parses JSON like Decode with a caller-selected body limit.
+func DecodeLimit(r *http.Request, v any, limit int64) error {
+	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, limit))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			return NewProblem(http.StatusRequestEntityTooLarge, "COM-0413", "request body exceeds the size limit")
+		}
+		return NewProblem(http.StatusBadRequest, "COM-0001", "malformed JSON body: "+err.Error())
+	}
+	return nil
+}
+
 // Fail writes err as a problem. *Problem values are written as-is; anything
 // else becomes a 500 with code COM-0500 and the detail hidden from the client.
 func Fail(w http.ResponseWriter, r *http.Request, err error) {
