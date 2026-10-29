@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"slices"
+	"time"
+)
 
 const (
 	AggregateCustomer = "customer"
@@ -9,6 +12,10 @@ const (
 	ChangeApproved    = "approved"
 	ChangeRejected    = "rejected"
 )
+
+var ProtectableFields = []string{FieldCreditLimit}
+
+func DefaultProtectedFields() []string { return slices.Clone(ProtectableFields) }
 
 type PendingChange struct {
 	ID             string     `json:"id"`

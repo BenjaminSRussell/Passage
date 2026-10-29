@@ -34,8 +34,43 @@ func (a *API) WithCredit(credit store.CreditStore) *API {
 func (a *API) registerCredit(r chi.Router) {
 	r.With(authz.RequireDuty(dutyWrite)).Post("/v1/party/customers/{id}/credit-limit", a.setCreditLimit)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/party/pending-changes/{id}", a.getPendingChange)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/party/legal-entities/{id}/protected-fields", a.getProtectedFields)
+	r.With(authz.RequireDuty(dutyApprove)).Put("/v1/party/legal-entities/{id}/protected-fields", a.setProtectedFields)
 	r.With(authz.RequireDuty(dutyApprove)).Post("/v1/party/pending-changes/{id}:approve", a.decide(true))
 	r.With(authz.RequireDuty(dutyApprove)).Post("/v1/party/pending-changes/{id}:reject", a.decide(false))
+}
+
+type protectedFields struct {
+	Fields []string `json:"fields"`
+}
+
+func (a *API) getProtectedFields(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	fields, err := a.credit.ProtectedFields(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		failParty(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, protectedFields{Fields: fields})
+}
+
+func (a *API) setProtectedFields(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	var req protectedFields
+	if err := httpx.Decode(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	fields, err := a.credit.SetProtectedFields(r.Context(), chi.URLParam(r, "id"), req.Fields)
+	if err != nil {
+		failParty(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, protectedFields{Fields: fields})
 }
 
 func (a *API) getPendingChange(w http.ResponseWriter, r *http.Request) {
