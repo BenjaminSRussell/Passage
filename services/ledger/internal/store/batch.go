@@ -113,12 +113,13 @@ type BatchFilter struct {
 // "Post ledger journals without approval", needed to post a validated batch of
 // a journal name without workflow (§2.11.17).
 type PostBatchInput struct {
-	ID            string
-	Version       int
-	Key           string
-	Today         time.Time
-	TraceID       string
-	CanPostDirect bool
+	ID                    string
+	Version               int
+	Key                   string
+	Today                 time.Time
+	TraceID               string
+	CanPostDirect         bool
+	CanPostLedgerSpecific bool
 }
 
 // batchFingerprint is what the posting idempotency hash covers: the batch
@@ -627,6 +628,7 @@ func (s *Postgres) PostBatch(ctx context.Context, in PostBatchInput) (EntryResul
 		}
 		post.Key, post.Hash, post.Actor, post.TraceID, post.Today = in.Key, hash, p.UserID, in.TraceID, in.Today
 		attempted = true
+		post.CanPostLedgerSpecific = in.CanPostLedgerSpecific
 		res, err := postEntryTx(ctx, tx, p.TenantID, post)
 		if err != nil {
 			return err
@@ -649,6 +651,10 @@ func (s *Postgres) PostBatch(ctx context.Context, in PostBatchInput) (EntryResul
 
 // DutyPostDirect is "Post ledger journals without approval" (§2.11.17).
 const DutyPostDirect = "ledger.journal.postdirect"
+
+// DutyPostLedgerSpecific is "Post to a ledger-specific ledger" (FB50L): posting to one
+// non-leading ledger of a ledger set instead of through the set.
+const DutyPostLedgerSpecific = "ledger.journal.postledger"
 
 // recordPostFailure keeps why posting failed on the batch, which stays in the
 // state it was posted from (BR-11.10: back to approved with error). It is
