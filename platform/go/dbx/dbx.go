@@ -74,6 +74,20 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, migrations fs.FS) error {
 	return nil
 }
 
+// LegalEntityScopes derives passage.legal_entity_scopes from the principal and
+// fails closed: its legal entity list when set, '*' only for a principal with
+// no legal entity that holds tenant.DutyAllScope, otherwise the empty list (no
+// legal-entity-scoped rows).
+func LegalEntityScopes(p tenant.Principal) string {
+	if p.LegalEntityID != "" {
+		return p.LegalEntityID
+	}
+	if p.HasDuty(tenant.DutyAllScope) {
+		return "*"
+	}
+	return ""
+}
+
 // WithTenantTx begins a transaction with app.tenant_id set from the context
 // principal so RLS policies apply, runs fn, and commits or rolls back.
 func WithTenantTx(ctx context.Context, pool *pgxpool.Pool, fn func(tx pgx.Tx) error) error {
@@ -85,11 +99,7 @@ func WithTenantTx(ctx context.Context, pool *pgxpool.Pool, fn func(tx pgx.Tx) er
 	if err != nil {
 		return err
 	}
-	scopes := p.LegalEntityID
-	if scopes == "" {
-		scopes = "*"
-	}
-	if _, err := tx.Exec(ctx, `select set_config('passage.tenant_id', $1, true), set_config('passage.legal_entity_scopes', $2, true)`, p.TenantID, scopes); err != nil {
+	if _, err := tx.Exec(ctx, `select set_config('passage.tenant_id', $1, true), set_config('passage.legal_entity_scopes', $2, true)`, p.TenantID, LegalEntityScopes(p)); err != nil {
 		_ = tx.Rollback(ctx)
 		return err
 	}
@@ -114,7 +124,8 @@ create policy %[1]s_tenant_access on %[1]s as permissive
 
 // LegalEntityScopePolicy returns the additional RESTRICTIVE policy for tables
 // that carry legal_entity_id: rows are visible only inside the caller's
-// legal-entity scopes (passage.legal_entity_scopes, a comma list or '*').
+// legal-entity scopes (passage.legal_entity_scopes, a comma list, or '*' for
+// a principal holding tenant.DutyAllScope; an empty list matches no rows).
 func LegalEntityScopePolicy(table string) string {
 	return fmt.Sprintf(`create policy %[1]s_legal_entity_scope on %[1]s as restrictive
   using (current_setting('passage.legal_entity_scopes', true) = '*'

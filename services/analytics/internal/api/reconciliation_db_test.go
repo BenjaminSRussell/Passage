@@ -26,7 +26,7 @@ func TestReconciliation_ReturnsDayWithFailedCount(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := store.New(pool)
-	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testTenant})
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testTenant, Duties: map[string]struct{}{tenant.DutyAllScope: {}}})
 	for _, r := range []struct{ le, semantic, source string }{
 		{"11111111-0000-4000-8000-000000000001", "100.00", "100.00"},
 		{"22222222-0000-4000-8000-000000000002", "100.00", "99.00"},

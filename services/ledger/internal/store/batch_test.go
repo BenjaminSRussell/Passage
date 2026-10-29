@@ -47,7 +47,7 @@ func batchOf(e env, name, amount string) BatchInput {
 }
 
 func asUser(e env, user string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: e.tenant, LegalEntityID: e.le, UserID: user, Duties: map[string]struct{}{}})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: e.tenant, LegalEntityID: e.le, UserID: user, Duties: testkit.ScopeDuties(e.le)})
 }
 
 func postBatch(e env, ctx context.Context, b Batch, key string, direct bool) (EntryResult, error) {

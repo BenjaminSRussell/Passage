@@ -46,6 +46,10 @@ const (
 	HeaderLegalEntity = "X-Passage-Legal-Entity"
 	HeaderUser        = "X-Passage-User"
 	HeaderDuties      = "X-Passage-Duties"
+
+	HeaderWebLegalEntity      = "X-Passage-LegalEntity"
+	HeaderLegalEntityScopeAll = "X-Passage-LegalEntity-Scope"
+	LegalEntityScopeAll       = "ALL"
 )
 
 // canonicalUUID returns the lowercase hyphenated form of s, or false when s is
@@ -76,10 +80,33 @@ func canonicalLegalEntities(raw string) (string, bool) {
 	return strings.Join(parts, ","), true
 }
 
+const DutyAllScope = "org.switcher.all_scope"
+
+func isRead(method string) bool {
+	return method == http.MethodGet || method == http.MethodHead || method == http.MethodOptions
+}
+
+func requestLegalEntity(r *http.Request) (string, bool) {
+	primary, ok := canonicalLegalEntities(r.Header.Get(HeaderLegalEntity))
+	if !ok {
+		return "", false
+	}
+	web, ok := canonicalLegalEntities(r.Header.Get(HeaderWebLegalEntity))
+	if !ok || (primary != "" && web != "" && primary != web) {
+		return "", false
+	}
+	if primary == "" {
+		return web, true
+	}
+	return primary, true
+}
+
 // Middleware extracts the principal from headers. Requests without a tenant,
 // with a malformed tenant, or with the nil system tenant are rejected with 401;
-// a malformed legal entity scope is rejected with 400. Health endpoints pass
-// through. The nil tenant is server-side only and is never accepted from headers.
+// a malformed or conflicting legal entity scope is rejected with 400. Health
+// endpoints pass through. The all-entity duty
+// survives only on a read that explicitly asks for the ALL scope; on any other
+// request it is dropped so an unscoped call sees no legal-entity rows.
 func Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
@@ -96,7 +123,7 @@ func Middleware(next http.Handler) http.Handler {
 			reject(w, http.StatusUnauthorized, "AUTH-0001", "Unauthorized", "invalid tenant")
 			return
 		}
-		le, ok := canonicalLegalEntities(r.Header.Get(HeaderLegalEntity))
+		le, ok := requestLegalEntity(r)
 		if !ok {
 			reject(w, http.StatusBadRequest, "COM-0001", "Bad Request", "invalid legal entity")
 			return
@@ -106,6 +133,9 @@ func Middleware(next http.Handler) http.Handler {
 			if d = strings.TrimSpace(d); d != "" {
 				p.Duties[d] = struct{}{}
 			}
+		}
+		if r.Header.Get(HeaderLegalEntityScopeAll) != LegalEntityScopeAll || !isRead(r.Method) {
+			delete(p.Duties, DutyAllScope)
 		}
 		next.ServeHTTP(w, r.WithContext(With(r.Context(), p)))
 	})

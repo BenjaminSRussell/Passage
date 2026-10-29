@@ -28,7 +28,7 @@ const (
 // (the scheduled reconciliation job); a set one narrows RLS to that entity.
 func ctxFor(n int, legalEntity string) context.Context {
 	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), LegalEntityID: legalEntity,
-		UserID: "user-test", Duties: map[string]struct{}{}})
+		UserID: "user-test", Duties: testkit.ScopeDuties(legalEntity)})
 }
 
 func migrated(t *testing.T) *pgxpool.Pool {

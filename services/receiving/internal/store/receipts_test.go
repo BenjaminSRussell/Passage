@@ -334,7 +334,7 @@ func TestListReceiptsKeysetFiltersAndLegalEntityScope(t *testing.T) {
 	st := setup(t).st
 	nine := principal(1)
 	eight := tenant.Principal{TenantID: nine.TenantID, LegalEntityID: testkit.TenantID(8)}
-	all := tenant.Principal{TenantID: nine.TenantID}
+	all := tenant.Principal{TenantID: nine.TenantID, Duties: map[string]struct{}{tenant.DutyAllScope: {}}}
 	registered(t, st, nine, "PS-1", "S1", "S2", "S3")
 	for _, slip := range []string{"PS-2", "PS-3"} {
 		if _, err := st.CreateArrival(ctxOf(nine), arrival(nine, slip)); err != nil {

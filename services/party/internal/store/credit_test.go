@@ -25,7 +25,7 @@ const (
 )
 
 func asUser(tenantNumber int, legalEntityID, user string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(tenantNumber), LegalEntityID: legalEntityID, UserID: user})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(tenantNumber), LegalEntityID: legalEntityID, UserID: user, Duties: testkit.ScopeDuties(legalEntityID)})
 }
 
 func customerWithLimit(t *testing.T, app *pgxpool.Pool, limit string) string {

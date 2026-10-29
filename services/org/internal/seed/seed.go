@@ -120,7 +120,7 @@ func Run(ctx context.Context, st store.Store, tenantID, name string) (Result, er
 	if name != DemoManufacturer {
 		return Result{}, fmt.Errorf("unknown seed package %q; known packages: %s", name, DemoManufacturer)
 	}
-	r := &runner{ctx: tenant.With(ctx, tenant.Principal{TenantID: tenantID}), st: st}
+	r := &runner{ctx: tenant.With(ctx, tenant.Principal{TenantID: tenantID, Duties: map[string]struct{}{tenant.DutyAllScope: {}}}), st: st}
 	err := r.run()
 	return r.res, err
 }
