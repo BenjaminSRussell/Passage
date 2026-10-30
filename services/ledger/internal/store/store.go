@@ -136,14 +136,20 @@ type PostInput struct {
 	Description  string
 	Source       ledgerevents.Source
 	Lines        []domain.LineInput
-	Key          string
-	Hash         []byte
-	Actor        string
-	TraceID      string
-	Today        time.Time
+	// LedgerLines are extra lines per ledger id, posted by PostSetEntry to that ledger
+	// only (no account mapping) on top of the common Lines (BR-12.6 ledger_lines).
+	LedgerLines map[string][]domain.LineInput
+	Key         string
+	Hash        []byte
+	Actor       string
+	TraceID     string
+	Today       time.Time
 	// AllowReconAccounts lifts the BR-11.8 protection for a manual journal whose
 	// journal name sets allow_recon_accounts (migration and correction use).
 	AllowReconAccounts bool
+	// CanPostLedgerSpecific is true when the caller holds the duty "Post to a
+	// ledger-specific ledger" (FB50L), needed to post to one non-leading ledger of a set.
+	CanPostLedgerSpecific bool
 }
 
 // rules returns the ledger's posting rules for this input: a manual journal
@@ -167,6 +173,8 @@ type ReverseInput struct {
 	Actor         string
 	TraceID       string
 	Today         time.Time
+
+	CanPostLedgerSpecific bool
 }
 
 // Idempotency reports the replay state of a keyed request.

@@ -1,11 +1,11 @@
-# NOT-IMPLEMENTED — PSG-50 (wave 50), slices 1 to 7
+# NOT-IMPLEMENTED — PSG-50 (wave 50), slices 1 to 8
 
 Wave 50 owns only `deploy/multi-region/`, `load/` and `docs/ops/`, and its ownership entry lists no web
 module. It has no service directory, so there is no Go module, database table, OpenAPI/AsyncAPI file or
 web screen in this slice. Items below are either later slices of PSG-50 or handoffs to the wave that owns
 the code or the infrastructure.
 
-Status key: **built** = in slices 1 to 7. **later slice of PSG-50** = same wave, next slice. **handoff** =
+Status key: **built** = in slices 1 to 8. **later slice of PSG-50** = same wave, next slice. **handoff** =
 needs another owner or an out-of-path edit.
 
 ## Deliverable 1: performance campaign
@@ -66,8 +66,11 @@ needs another owner or an out-of-path edit.
 | Runbooks for the alerts in this chart | built | 9 pages under `runbooks/`; `test_chart.py` checks every `runbook_url` resolves |
 | Runbooks named in PRD 9.50.10 without an alert in this chart: Kafka broker replacement, Postgres primary loss, cache stampede, Temporal replication lag, certificate expiry, object-store replication lag | built | 6 pages under `runbooks/`. Their alerts belong to the owning waves (next row) |
 | Alerts that link to those 6 pages: broker loss and under-replicated partitions, CNPG primary loss, cache hit ratio, Temporal replication lag, certificate expiry (daily scan, 9.50.16), object-store replication backlog | handoff (wave 3 eventing, wave 4 workflow, wave 5 observability, deployment-cicd) | the metrics come from charts outside wave 50's paths; each alert must carry `runbook_url` to its page (FR-50.10) |
-| Runbooks for all 30 platform alert rules | later slice of PSG-50 | the other alert rules belong to the observability rule set (wave 5) |
-| Availability burn-rate recording rules `passage:slo_burn_rate:{5m,30m,1h,6h}` | built | `prometheusrule.yaml`, from `http_requests_total` as the observability chart's alerts use |
+| Runbooks for the two wave-5 observability alerts: `PassageAvailabilityBurn` (fleet 5xx ratio above 0.1% for 5 m) and `PassageLatencyP95` (fleet p95 above `slo.latencyP95Ms` for 10 m) | built | `runbooks/availability-burn.md` and `runbooks/latency-p95.md` (slice 8); each names the gaps below and the manual query to use meanwhile |
+| `runbook_url` annotations on `PassageAvailabilityBurn` and `PassageLatencyP95` | handoff (wave 5 observability) | the rules are in `deploy/observability/charts/observability/templates/alerts.yaml`, outside wave 50's paths; the values are `https://docs.passage.dev/ops/runbooks/availability-burn` and `https://docs.passage.dev/ops/runbooks/latency-p95` (FR-50.10) |
+| HTTP metric names the SLO alerts and dashboards can read | handoff (wave 5 observability, platform kernel `platform/go/httpx`) | the wave-5 alerts and dashboard and this chart's burn-rate recording rules read `http_requests_total{status}` and `http_request_duration_seconds`, but every service on main exports its own prefixed series (`payables_http_requests_total`, `receiving_…`, `hello_ledger_…` from platform-health, `engineering_…` with a `class` label instead of `status`, `mcp_http_requests_total`), so those expressions have no data and cannot fire. One shared name and label set should come from the HTTP kernel; the two runbooks above give the per-service query to use until then |
+| Runbooks for the other platform alert rules (FR-50.10: 30 in all) | later slice of PSG-50 | the remaining rules belong to the owning waves' charts (for example `services/receiving/charts/receiving/templates/prometheusrule.yaml`) and still need pages |
+| Availability burn-rate recording rules `passage:slo_burn_rate:{5m,30m,1h,6h}` | built | `prometheusrule.yaml`, from `http_requests_total` as the observability chart's alerts use; no data until the metric names are aligned (handoff row above) |
 | Per-operation latency SLO recording rules (FR-50.1 rows) and SLO dashboard | handoff (wave 5 observability) | needs per-route histograms from the service metrics |
 | Automatic rollback on fast burn in the 30-minute release window (BR-50.6, OPS-1706) | handoff (deployment-cicd, wave 1 release pipeline) | Argo CD rollout analysis is not in wave 50's paths |
 | Status page (`passage-status-page`) and public subscription | handoff (deployment-cicd, wave 5 observability) | separate chart and public domain |
@@ -102,10 +105,12 @@ needs another owner or an out-of-path edit.
 | AsyncAPI event reference generator and undocumented-event gate: one Markdown page per service; an event is documented with a CloudEvents type `dev.passage.<context>.<entity>.<verb>.v<n>` (`x-passage-type`, else the message name), a title, summary or description, a payload schema and no duplicate type; an operation has action send or receive, a channel `$ref` and only that channel's messages, and is described by itself or by its messages | built | `docs/ops/tools/asyncapi_reference.py`, tests in `test_asyncapi_reference.py` |
 | 0 undocumented events (AC-50.11). Run on main on 2026-10-29 over 51 specs (`services/*/events/asyncapi.yaml`): 144 of 258 events undocumented. 134 lack a title, summary or description (pricing 13, inventory 11, assets 9, eam 9, transport 9, sales 8, batch 8, and 67 in 21 more services); 10 purchasing messages carry their type only in the payload envelope (`type.const`), not in `x-passage-type` or the name; 50 operations in 12 services have no description and carry an undescribed message | handoff (each service owner) | the specs are in the services' paths. `services/workflow-ts/events/asyncapi.yaml` uses an external `$ref` (`../schemas/current/...`), which the gate treats as an input error |
 | Rendering the reference pages in the docs site build (`passage-docs`) | handoff (deployment-cicd) | the site is not built; `--out` writes the pages the site picks up |
-| Functional guides, one per module for phases 1–8 | later slice of PSG-50 | depends on module completion |
+| Functional guides for phases 1 to 3 (waves 6 to 20): one guide per phase, one section per wave with its owning service, its web module and what the user does there, from the phase PRDs | built | `functional-guides/phase-1-master-data.md`, `phase-2-financial-core.md`, `phase-3-procure-to-pay.md` (slice 8). They describe intended behaviour and defer to each service's `NOT-IMPLEMENTED.md` for build status; `check_docs.py` fails if a guide names a `services/` or `apps/` path that does not exist |
+| Screens the phase 1 guide relies on: the party web module (wave 7) and the migration web module (wave 10) | handoff (wave 7 party, wave 10 migration) | neither module is on main; the guide says so in those sections |
+| Functional guides for phases 4 to 8 (manufacturing, order-to-cash, logistics, treasury and controlling, projects, people and service) | later slice of PSG-50 | same pattern, from `docs/prd/phase-4-manufacturing.md` to `phase-8-projects-people-service.md` |
 | Training curriculum, 6 role tracks with labs and assessments (FR-50.11) | built | `docs/ops/training-curriculum.md` |
 | Lab verifiers and learner records against role grants | later slice of PSG-50 | the curriculum names them; they need the sandbox tier and the ops service |
-| Link and runbook check for `docs/ops`: relative links and anchors resolve, every alert's `runbook_url` page exists, no stray files in `runbooks/` | built | `docs/ops/tools/check_docs.py`, tests in `test_check_docs.py` |
+| Link and runbook check for `docs/ops`: relative links and anchors resolve, every alert's `runbook_url` page exists, no stray files in `runbooks/`, every backticked `services/` or `apps/` path exists | built | `docs/ops/tools/check_docs.py`, tests in `test_check_docs.py` |
 | Docs site link check over the whole site (0 broken links, AC-50.11) | handoff (deployment-cicd) | the docs site is not built; `check_docs.py --root` can run on any Markdown tree |
 | Operations guide (this directory) | built | `docs/ops/` |
 

@@ -22,7 +22,7 @@ has_route_permissions(spec) if {
 }
 
 test_all_seeded_duties_allow_their_declared_permissions if {
-	count(data.duties) == 100
+	count(data.duties) == 103
 	every duty, spec in data.duties {
 		has_route_permissions(spec)
 		every permission in spec.permissions {
@@ -34,7 +34,7 @@ test_all_seeded_duties_allow_their_declared_permissions if {
 }
 
 test_flag_duties_grant_no_routes if {
-	flag_duties := {"ledger.journal.postdirect", "inventory.count.approve", "pii.read"}
+	flag_duties := {"ledger.journal.postdirect", "ledger.journal.postledger", "inventory.count.approve", "pii.read"}
 	{d | some d, spec in data.duties; spec.flag == true} == flag_duties
 	every duty in flag_duties {
 		count(data.duties[duty].permissions) == 0
@@ -53,6 +53,7 @@ segregation_denials := [
 	["ledger.journal.approve", "POST", "/v1/ledger/journal-batches/b1/post"],
 	["ledger.journal.post", "POST", "/v1/ledger/journal-entries/e1/reverse"],
 	["ledger.journal.reverse", "POST", "/v1/ledger/journal-entries"],
+	["ledger.journal.postledger", "POST", "/v1/ledger/journal-entries"],
 	["ledger.journal.read", "POST", "/v1/ledger/ledger-sets/s1/journal-entries"],
 	["ReceivingMaintain", "POST", "/v1/receiving/receipts/r1:post"],
 	["ReceivingMaintain", "POST", "/v1/receiving/receipts/r1:correct"],
@@ -367,6 +368,13 @@ test_view_exchange_rates_can_convert if {
 	}
 		with data.assignments as {"tenant-a": {"user-a": ["View exchange rates"]}}
 	result.allow
+}
+
+test_administer_exchange_rates_allows_only_provider_import if {
+	allowed("Administer exchange rates", "POST", "/v1/fx/providers/ecb:import")
+	not allowed("Administer exchange rates", "GET", "/v1/fx/providers/ecb:import")
+	not allowed("Administer exchange rates", "POST", "/v1/fx/rates")
+	not allowed("Maintain exchange rates", "POST", "/v1/fx/providers/ecb:import")
 }
 
 test_payment_file_preview_duty_allows_only_its_route if {

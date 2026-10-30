@@ -5,9 +5,10 @@ info:
   description: >-
     CloudEvents 1.0 events published by the compliance service through the
     outbox (wave 48: segregation of duties from slice 1, sanctions screening
-    from slice 4). Types follow dev.passage.<context>.<entity>.<verb>.v<n>; the
-    topic passage.<context>.<entity> is relayed by Debezium's outbox router,
-    keyed by the aggregate id (conflict id or screening hit id).
+    from slice 4, subject requests from slice 5). Types follow
+    dev.passage.<context>.<entity>.<verb>.v<n>; the topic
+    passage.<context>.<entity> is relayed by Debezium's outbox router, keyed by
+    the aggregate id (conflict id, screening hit id or subject request id).
 defaultContentType: application/cloudevents+json
 servers:
   kafka:
@@ -29,6 +30,11 @@ channels:
     messages:
       screeningHit:
         $ref: "#/components/messages/ScreeningHit"
+  requestCompleted:
+    address: passage.privacy.request
+    messages:
+      requestCompleted:
+        $ref: "#/components/messages/RequestCompleted"
 operations:
   publishConflictDetected:
     action: send
@@ -56,6 +62,15 @@ operations:
       clears or confirms the hit. Consumers - sales, procurement, payments.
     messages:
       - {$ref: "#/channels/screeningHit/messages/screeningHit"}
+  publishRequestCompleted:
+    action: send
+    channel: {$ref: "#/channels/requestCompleted"}
+    summary: >-
+      A privacy officer closed a delivered GDPR or CCPA subject request
+      (FR-48.10). late is true when it closed after its deadline, with the
+      late-closure justification kept on the request. Consumers - audit.
+    messages:
+      - {$ref: "#/channels/requestCompleted/messages/requestCompleted"}
 components:
   messages:
     ConflictDetected:
@@ -79,6 +94,13 @@ components:
         $ref: "#/components/schemas/CloudEventHeaders"
       payload:
         $ref: "#/components/schemas/ScreeningHitData"
+    RequestCompleted:
+      name: dev.passage.privacy.request.completed.v1
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/RequestCompletedData"
   schemas:
     CloudEventHeaders:
       type: object
@@ -88,7 +110,7 @@ components:
         id: {type: string}
         source: {type: string, example: compliance}
         type: {type: string}
-        subject: {type: string, description: conflict id or screening hit id}
+        subject: {type: string, description: conflict id, screening hit id or subject request id}
         time: {type: string, format: date-time}
         tenantid: {type: string, format: uuid}
         correlationid: {type: string}
@@ -128,3 +150,17 @@ components:
         list_entry_id: {type: string}
         score: {type: string, pattern: '^[01]\.\d{3}$', example: "0.920"}
         matched_fields: {type: array, items: {type: string, enum: [name, address, country]}}
+    RequestCompletedData:
+      type: object
+      required: [request_id, type, regulation, affected_domains, delivered_at, closed_at, late]
+      properties:
+        request_id: {type: string, format: uuid}
+        type: {type: string, enum: [ACCESS, PORTABILITY, ERASURE, RECTIFICATION, RESTRICTION]}
+        regulation: {type: string, enum: [GDPR, CCPA]}
+        affected_domains:
+          type: array
+          items: {type: string}
+          description: domains that held the subject; empty until the per-domain fan-out exists
+        delivered_at: {type: string, format: date-time}
+        closed_at: {type: string, format: date-time}
+        late: {type: boolean}

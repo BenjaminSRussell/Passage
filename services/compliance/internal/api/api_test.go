@@ -33,6 +33,7 @@ type fakeStore struct {
 	lastList  store.Filter
 	evaluated []domain.Role
 	trade     fakeTrade
+	privacy   fakePrivacy
 }
 
 func (f *fakeStore) Ping(context.Context) error { return f.pingErr }
