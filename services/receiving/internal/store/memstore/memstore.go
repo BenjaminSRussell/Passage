@@ -3,6 +3,7 @@ package memstore
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -445,17 +446,36 @@ func (r *pendingRow) sharedSubject(subjects []string) string {
 	return slices.Min(shared)
 }
 
+func pendingEntity(journal []byte) string {
+	var entry struct {
+		LegalEntityID string `json:"legalEntityId"`
+	}
+	if json.Unmarshal(journal, &entry) != nil {
+		return ""
+	}
+	id, _ := ids.Canonical(entry.LegalEntityID)
+	return id
+}
+
+func visibleTo(p tenant.Principal, entity string) bool {
+	if p.LegalEntityID == "" {
+		return p.HasDuty(tenant.DutyAllScope)
+	}
+	return entity != "" && slices.Contains(tenant.LegalEntityScopeList(p), entity)
+}
+
 func (s *Store) pendingFor(ctx context.Context) (map[string]*pendingRow, error) {
 	principal, ok := tenant.FromContext(ctx)
 	if !ok {
 		return nil, errors.New("memstore: no principal in context")
 	}
-	rows := s.pending[principal.TenantID]
-	if rows == nil {
-		rows = map[string]*pendingRow{}
-		s.pending[principal.TenantID] = rows
+	visible := map[string]*pendingRow{}
+	for key, row := range s.pending[principal.TenantID] {
+		if visibleTo(principal, pendingEntity(row.Journal)) {
+			visible[key] = row
+		}
 	}
-	return rows, nil
+	return visible, nil
 }
 
 func (s *Store) markDone(ctx context.Context, subject string, expectOpen bool) error {
@@ -489,6 +509,10 @@ func (s *Store) ReservePosting(ctx context.Context, p store.PendingPosting) (str
 	if err != nil {
 		return "", err
 	}
+	principal, _ := tenant.FromContext(ctx)
+	if pendingEntity(p.Journal) == "" || !visibleTo(principal, pendingEntity(p.Journal)) {
+		return "", errors.New("memstore: the pending posting needs a legal entity within the caller's scope")
+	}
 	generation := 0
 	for _, row := range rows {
 		if row.BaseKey == p.BaseKey && row.Outcome == store.OutcomeReversed {
@@ -508,7 +532,10 @@ func (s *Store) ReservePosting(ctx context.Context, p store.PendingPosting) (str
 	if existing != nil && existing.Outcome != store.OutcomeRejected {
 		return key, nil
 	}
-	rows[key] = &pendingRow{PendingRow: store.PendingRow{
+	if s.pending[principal.TenantID] == nil {
+		s.pending[principal.TenantID] = map[string]*pendingRow{}
+	}
+	s.pending[principal.TenantID][key] = &pendingRow{PendingRow: store.PendingRow{
 		Key: key, BaseKey: p.BaseKey, Subjects: slices.Compact(slices.Sorted(slices.Values(p.Subjects))), Hash: p.Hash, Journal: slices.Clone(p.Journal), CreatedAt: time.Now().UTC(),
 	}}
 	return key, nil

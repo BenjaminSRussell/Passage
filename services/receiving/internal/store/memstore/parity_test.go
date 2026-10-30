@@ -642,6 +642,25 @@ var cases = []struct {
 			t.Fatalf("grir unit price %s, want the receipt line price 2.5", page.Items[0].UnitPrice)
 		}
 	}},
+	{"a posting is invisible to a caller scoped to another legal entity", func(t *testing.T, b backend) {
+		p := principal(1)
+		other := tenant.Principal{TenantID: p.TenantID, LegalEntityID: testkit.TenantID(8)}
+		if _, err := b.st.ReservePosting(ctxOf(p), store.PendingPosting{BaseKey: "k", Subjects: []string{"subject-a"}, Hash: "h", Journal: pendingJournal}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := b.st.ClaimPending(ctxOf(other), "k", 0, time.Minute); !errors.Is(err, store.ErrPendingNotFound) {
+			t.Fatalf("claim from another entity: err=%v, want ErrPendingNotFound", err)
+		}
+		if _, err := b.st.GetPending(ctxOf(other), "k"); !errors.Is(err, store.ErrPendingNotFound) {
+			t.Fatalf("get from another entity: err=%v, want ErrPendingNotFound", err)
+		}
+		if err := b.st.EnsureNoPending(ctxOf(other), "subject-a"); err != nil {
+			t.Fatalf("another entity must not see the open posting: %v", err)
+		}
+		if _, err := b.st.ReservePosting(ctxOf(other), store.PendingPosting{BaseKey: "k2", Subjects: []string{"subject-b"}, Hash: "h", Journal: pendingJournal}); err == nil {
+			t.Fatal("a posting for an entity outside the caller's scope must be refused")
+		}
+	}},
 	{"a released key can be reserved again with a new body, and a posted key keeps its body", func(t *testing.T, b backend) {
 		p := principal(1)
 		reserve := func(key, hash string) error {

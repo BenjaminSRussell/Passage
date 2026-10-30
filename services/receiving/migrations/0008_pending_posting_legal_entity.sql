@@ -1,5 +1,13 @@
 ALTER TABLE receiving_pending_posting
-  ADD COLUMN IF NOT EXISTS legal_entity_id uuid GENERATED ALWAYS AS ((journal->>'legalEntityId')::uuid) STORED;
+  ADD COLUMN IF NOT EXISTS legal_entity_id uuid GENERATED ALWAYS AS (NULLIF(journal->>'legalEntityId', '')::uuid) STORED;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'receiving_pending_posting_legal_entity_required' AND conrelid = 'receiving_pending_posting'::regclass) THEN
+    ALTER TABLE receiving_pending_posting ADD CONSTRAINT receiving_pending_posting_legal_entity_required CHECK (legal_entity_id IS NOT NULL) NOT VALID;
+  END IF;
+END
+$$;
 
 ALTER TABLE receiving_pending_posting_subject ADD COLUMN IF NOT EXISTS legal_entity_id uuid;
 

@@ -345,8 +345,13 @@ func TestMintRequiresExplicitEntityInTheUsersScope(t *testing.T) {
 		t.Fatalf("claims %+v err %v", claims, err)
 	}
 	allScope := tenant.Principal{TenantID: validTenant, UserID: "u", Duties: map[string]struct{}{tenant.DutyAllScope: {}}}
-	if _, err := f.signer.Mint("ledger", allScope, other); err != nil {
-		t.Fatalf("an ALL-scope read may name any entity: %v", err)
+	if _, err := f.signer.Mint("ledger", allScope, other); err == nil {
+		t.Fatal("the all-scope exception must not apply to a grant that can post")
+	}
+	_, priv, _ := ed25519.GenerateKey(nil)
+	payables, _ := tenant.NewServiceSigner("payables", priv)
+	if _, err := payables.Mint("ledger", allScope, other); err != nil {
+		t.Fatalf("an ALL-scope read-only grant may name any entity: %v", err)
 	}
 	allScope.LegalEntityID = validLE
 	if _, err := f.signer.Mint("ledger", allScope, other); err == nil {

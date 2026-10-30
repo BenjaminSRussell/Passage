@@ -119,10 +119,14 @@ func (s *Postgres) ReservePosting(ctx context.Context, p PendingPosting) (string
 			return err
 		}
 		for _, subject := range slices.Compact(slices.Sorted(slices.Values(p.Subjects))) {
-			if _, err := tx.Exec(ctx, `INSERT INTO receiving_pending_posting_subject (tenant_id, ledger_key, subject, legal_entity_id)
+			tag, err := tx.Exec(ctx, `INSERT INTO receiving_pending_posting_subject (tenant_id, ledger_key, subject, legal_entity_id)
 				SELECT $1::uuid, $2::text, $3::text, legal_entity_id FROM receiving_pending_posting WHERE tenant_id = $1 AND ledger_key = $2
-				ON CONFLICT (tenant_id, ledger_key, subject) DO UPDATE SET done_at = NULL`, tenantID, key, subject); err != nil {
+				ON CONFLICT (tenant_id, ledger_key, subject) DO UPDATE SET done_at = NULL`, tenantID, key, subject)
+			if err != nil {
 				return err
+			}
+			if tag.RowsAffected() == 0 {
+				return fmt.Errorf("pending posting %s is not visible to the caller's legal entities", key)
 			}
 		}
 		return nil

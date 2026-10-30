@@ -155,7 +155,7 @@ func (s *ServiceSigner) Mint(aud string, p Principal, legalEntity string) (strin
 	if len(duties) == 0 {
 		return "", fmt.Errorf("%w: %s -> %s", ErrNoServiceGrant, s.name, aud)
 	}
-	le, ok := s.legalEntityFor(p, legalEntity)
+	le, ok := s.legalEntityFor(p, legalEntity, duties)
 	tid, tok := canonicalUUID(p.TenantID)
 	if !ok || !tok || tid == ids.Nil {
 		return "", errors.New("service token needs a tenant and one legal entity within the end user's scope")
@@ -182,9 +182,10 @@ func (s *ServiceSigner) Mint(aud string, p Principal, legalEntity string) (strin
 
 // legalEntityFor resolves the token's legal entity: the explicit one must lie
 // in the end user's legal-entity scope (or the user has no entity and holds the all-scope
-// duty, which only survives on explicit ALL-scope reads); with none given the user
+// duty, which only survives on explicit ALL-scope reads, and the grant
+// holds only read duties); with none given the user
 // must be scoped to exactly one.
-func (s *ServiceSigner) legalEntityFor(p Principal, explicit string) (string, bool) {
+func (s *ServiceSigner) legalEntityFor(p Principal, explicit string, duties []string) (string, bool) {
 	scopes := LegalEntityScopeList(p)
 	if explicit == "" {
 		if len(scopes) != 1 {
@@ -196,7 +197,13 @@ func (s *ServiceSigner) legalEntityFor(p Principal, explicit string) (string, bo
 	if !ok || le == ids.Nil {
 		return "", false
 	}
-	return le, (p.LegalEntityID == "" && p.HasDuty(DutyAllScope)) || slices.Contains(scopes, le)
+	return le, (p.LegalEntityID == "" && p.HasDuty(DutyAllScope) && onlyReads(duties)) || slices.Contains(scopes, le)
+}
+
+var readDuties = map[string]struct{}{"ledger.balance.read": {}, "ledger.journal.read": {}}
+
+func onlyReads(duties []string) bool {
+	return !slices.ContainsFunc(duties, func(d string) bool { _, ok := readDuties[d]; return !ok })
 }
 
 // Apply signs a token for aud and sets it on req together with the request id.

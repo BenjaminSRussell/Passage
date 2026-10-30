@@ -61,7 +61,7 @@ func (rg *rig) key() string {
 }
 
 func duty(name, key string, extra ...string) headers {
-	h := headers{"X-Passage-Tenant": testkit.TenantID(1), "X-Passage-Duties": name, "Idempotency-Key": key}
+	h := headers{"X-Passage-Tenant": testkit.TenantID(1), "X-Passage-Legal-Entity": legalEntityID, "X-Passage-Duties": name, "Idempotency-Key": key}
 	for i := 0; i+1 < len(extra); i += 2 {
 		h[extra[i]] = extra[i+1]
 	}

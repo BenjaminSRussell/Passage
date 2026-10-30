@@ -16,6 +16,9 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
+        {{- if .Values.serviceIdentity.signingKeySecret }}
+        fsGroup: 65532
+        {{- end }}
         seccompProfile:
           type: RuntimeDefault
       {{- if .Values.serviceIdentity.signingKeySecret }}
@@ -23,7 +26,7 @@ spec:
         - name: service-identity
           secret:
             secretName: {{ .Values.serviceIdentity.signingKeySecret }}
-            defaultMode: 0400
+            defaultMode: 0440
       {{- end }}
       containers:
         - name: party
@@ -42,10 +45,6 @@ spec:
                   key: DATABASE_URL
             - name: PASSAGE_SERVICE_NAME
               value: party
-{{- if .Values.serviceIdentity.publicKeys }}
-            - name: PASSAGE_SERVICE_PUBLIC_KEYS
-              value: {{ .Values.serviceIdentity.publicKeys | quote }}
-{{- end }}
 {{- if .Values.serviceIdentity.signingKeySecret }}
             - name: PASSAGE_SERVICE_SIGNING_KEY_FILE
               value: /var/run/passage/service-identity/signing-key

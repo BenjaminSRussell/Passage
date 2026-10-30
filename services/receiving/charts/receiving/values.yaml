@@ -33,6 +33,5 @@ alerts:
   p99LatencySeconds: 4
 
 serviceIdentity:
-  publicKeys: ""
   signingKeySecret: ""
   keyId: ""
