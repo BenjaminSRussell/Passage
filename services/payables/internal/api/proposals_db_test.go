@@ -82,7 +82,8 @@ func TestProposalFlow_RealStoreAndFXServer(t *testing.T) {
 		t.Fatalf("replay: %d %s", replay.Code, replay.Body)
 	}
 	other := alice.send(router, http.MethodPost, "/v1/payables/payment-proposals", strings.Replace(proposalBody, `"run-1"`, `"run-2"`, 1))
-	if other.Code != http.StatusCreated || strings.Contains(other.Body.String(), usd.ID) || len(decode(t, other)["groups"].([]any)) != 0 {
+	wantProblem(t, other, http.StatusUnprocessableEntity, "AP-PRP-005")
+	if strings.Contains(other.Body.String(), usd.ID) {
 		t.Fatalf("a second run must not re-select reserved items: %d %s", other.Code, other.Body)
 	}
 
@@ -102,4 +103,7 @@ func TestProposalFlow_RealStoreAndFXServer(t *testing.T) {
 	outsider := caller{duties: all, user: "mallory", entity: entityB}
 	wantProblem(t, outsider.send(router, http.MethodGet, "/v1/payables/payment-proposals/"+id, ""), http.StatusNotFound, "COM-0404")
 	wantProblem(t, outsider.send(router, http.MethodPost, approvePath, ""), http.StatusNotFound, "COM-0404")
+	cancelPath := "/v1/payables/payment-proposals/" + id + ":cancel"
+	wantProblem(t, outsider.send(router, http.MethodPost, cancelPath, ""), http.StatusNotFound, "COM-0404")
+	wantProblem(t, alice.send(router, http.MethodPost, cancelPath, ""), http.StatusConflict, "AP-PRP-002")
 }

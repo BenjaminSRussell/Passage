@@ -323,7 +323,7 @@
       {"resource": "/v1/payables/open-items", "methods": ["GET"]},
       {"resource": "/v1/payables/open-items/*", "methods": ["GET"]}
     ]},
-    "payment-proposal.write": {"permissions": [{"resource": "/v1/payables/payment-proposals", "methods": ["POST"]}]},
+    "payment-proposal.write": {"permissions": [{"resource": "/v1/payables/payment-proposals", "methods": ["POST"]}, {"resource": "/v1/payables/payment-proposals/*:cancel", "methods": ["POST"]}]},
     "payment-proposal.read": {"permissions": [{"resource": "/v1/payables/payment-proposals/*", "methods": ["GET"]}]},
     "payment-proposal.approve": {"permissions": [{"resource": "/v1/payables/payment-proposals/*:approve", "methods": ["POST"]}]},
     "party.write": {"permissions": [

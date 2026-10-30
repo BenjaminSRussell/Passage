@@ -59,6 +59,9 @@ type fakeStore struct {
 
 	approveErr error
 	approver   string
+	approveDay string
+	cancelErr  error
+	canceller  string
 }
 
 func newFakeStore() *fakeStore { return &fakeStore{proposals: map[string]store.Proposal{}} }
@@ -120,8 +123,19 @@ func (f *fakeStore) GetProposal(_ context.Context, id string) (store.Proposal, e
 	return store.Proposal{}, store.ErrProposalNotFound
 }
 
-func (f *fakeStore) ApproveProposal(_ context.Context, id, approver string) (store.Proposal, error) {
-	f.approver = approver
+func (f *fakeStore) CancelProposal(_ context.Context, id, user string) (store.Proposal, error) {
+	f.canceller = user
+	if f.cancelErr != nil {
+		return store.Proposal{}, f.cancelErr
+	}
+	p, err := f.GetProposal(context.Background(), id)
+	p.Status = domain.ProposalCancelled
+	p.CancelledBy = &user
+	return p, err
+}
+
+func (f *fakeStore) ApproveProposal(_ context.Context, id, approver, today string) (store.Proposal, error) {
+	f.approver, f.approveDay = approver, today
 	if f.approveErr != nil {
 		return store.Proposal{}, f.approveErr
 	}
@@ -559,6 +573,11 @@ func TestApproveProposal(t *testing.T) {
 	if !strings.Contains(conflict.Body.String(), itemOne) || !strings.Contains(conflict.Body.String(), itemTwo) {
 		t.Fatalf("conflict must name the offending lines: %s", conflict.Body)
 	}
+	s.approveErr = store.ErrRunDateElapsed
+	wantProblem(t, approver.send(r, http.MethodPost, "/v1/payables/payment-proposals/"+proposalID+":approve", ""), http.StatusConflict, domain.CodeRunDatePassed)
+	if s.approveDay != "2026-01-10" {
+		t.Fatalf("approval must compare the run date against today (UTC) from the API clock, got %q", s.approveDay)
+	}
 	s.approveErr = store.ErrNotDraft
 	wantProblem(t, approver.send(r, http.MethodPost, "/v1/payables/payment-proposals/"+proposalID+":approve", ""), http.StatusConflict, domain.CodeProposalState)
 	s.approveErr = store.ErrProposalNotFound
@@ -612,4 +631,53 @@ func TestCreateProposal_RejectsBackdatedRunDateButReplaysOldRun(t *testing.T) {
 	}
 	s.proposals[entityA+"2026-01-09"+"run-1"] = store.Proposal{ID: proposalID, RequestHash: "x"}
 	wantProblem(t, creator.send(r, http.MethodPost, "/v1/payables/payment-proposals", past), http.StatusConflict, domain.CodeProposalConflict)
+}
+
+func TestCreateProposal_NullAndEmptyVendorMethodsReplayIdentically(t *testing.T) {
+	s := newFakeStore()
+	s.candidates = dueCandidates()[:1]
+	r, _ := proposalRouter(s, nil)
+	if rec := creator.send(r, http.MethodPost, "/v1/payables/payment-proposals", proposalBody); rec.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body)
+	}
+	for name, field := range map[string]string{"null": `"vendorPaymentMethods":null,`, "empty": `"vendorPaymentMethods":{},`} {
+		body := strings.Replace(proposalBody, `"runDate"`, field+`"runDate"`, 1)
+		if rec := creator.send(r, http.MethodPost, "/v1/payables/payment-proposals", body); rec.Code != http.StatusOK || rec.Header().Get("Idempotent-Replayed") != "true" {
+			t.Fatalf("%s vendorPaymentMethods must replay the omitted-field run: %d %s", name, rec.Code, rec.Body)
+		}
+	}
+}
+
+func TestCreateProposal_NothingDueIsRefusedAndNotPersisted(t *testing.T) {
+	s := newFakeStore()
+	r, _ := proposalRouter(s, nil)
+	wantProblem(t, creator.send(r, http.MethodPost, "/v1/payables/payment-proposals", proposalBody), http.StatusUnprocessableEntity, domain.CodeNothingDue)
+	if s.createCalls != 0 {
+		t.Fatalf("an empty draft was persisted: %d creates", s.createCalls)
+	}
+}
+
+func TestCancelProposal(t *testing.T) {
+	s := newFakeStore()
+	s.proposals["k"] = store.Proposal{ID: proposalID, Status: domain.ProposalDraft, CreatedBy: "alice"}
+	r, a := proposalRouter(s, nil)
+	path := "/v1/payables/payment-proposals/" + proposalID + ":cancel"
+	rec := creator.send(r, http.MethodPost, path, "")
+	if body := decode(t, rec); rec.Code != http.StatusOK || body["status"] != "CANCELLED" || body["cancelledBy"] != "alice" || s.canceller != "alice" {
+		t.Fatalf("cancel: %d %s", rec.Code, rec.Body)
+	}
+	s.cancelErr = store.ErrNotDraft
+	wantProblem(t, creator.send(r, http.MethodPost, path, ""), http.StatusConflict, domain.CodeProposalState)
+	s.cancelErr = store.ErrProposalNotFound
+	wantProblem(t, creator.send(r, http.MethodPost, path, ""), http.StatusNotFound, "COM-0404")
+	s.cancelErr = errors.New("db down")
+	wantProblem(t, creator.send(r, http.MethodPost, path, ""), http.StatusInternalServerError, "COM-0500")
+	wantProblem(t, creator.send(r, http.MethodPost, "/v1/payables/payment-proposals/nope:cancel", ""), http.StatusBadRequest, "COM-0001")
+	wantProblem(t, caller{duties: dutyWrite, entity: entityA}.send(r, http.MethodPost, path, ""), http.StatusForbidden, "AUTH-0003")
+	wantProblem(t, approver.send(r, http.MethodPost, path, ""), http.StatusForbidden, "AUTH-0003")
+	m := httptest.NewRecorder()
+	a.Metrics().ServeHTTP(m, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(m.Body.String(), `outcome="cancelled"} 1`) {
+		t.Fatalf("metrics lack the cancellation: %s", m.Body)
+	}
 }

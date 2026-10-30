@@ -58,7 +58,8 @@ type PayablesStore interface {
 	FindProposal(ctx context.Context, legalEntityID, runDate, runID string) (store.Proposal, error)
 	CreateProposal(ctx context.Context, in store.NewProposal) (store.Proposal, bool, error)
 	GetProposal(ctx context.Context, id string) (store.Proposal, error)
-	ApproveProposal(ctx context.Context, id, approver string) (store.Proposal, error)
+	ApproveProposal(ctx context.Context, id, approver, today string) (store.Proposal, error)
+	CancelProposal(ctx context.Context, id, user string) (store.Proposal, error)
 }
 
 type RateSource interface {
@@ -71,6 +72,7 @@ type proposalDeps struct {
 	created       atomic.Int64
 	replayed      atomic.Int64
 	approved      atomic.Int64
+	cancelled     atomic.Int64
 	selfApprovals atomic.Int64
 	rateFaults    atomic.Int64
 }
@@ -89,6 +91,7 @@ func (a *API) registerProposals(r chi.Router) {
 	r.With(authz.RequireDuty(dutyProposalWrite)).Post(pathProposals, a.createProposal)
 	r.With(authz.RequireDuty(dutyProposalRead)).Get(pathProposals+"/{id}", a.getProposal)
 	r.With(authz.RequireDuty(dutyProposalApprove)).Post(pathProposals+"/{id}:approve", a.approveProposal)
+	r.With(authz.RequireDuty(dutyProposalWrite)).Post(pathProposals+"/{id}:cancel", a.cancelProposal)
 }
 
 func (a *API) problem(w http.ResponseWriter, r *http.Request, status int, code, detail string) {
@@ -352,6 +355,9 @@ func (p proposalRequest) validate() (runDate time.Time, fields map[string]string
 }
 
 func (p proposalRequest) hash() string {
+	if p.VendorPaymentMethods == nil {
+		p.VendorPaymentMethods = map[string]string{}
+	}
 	raw, _ := json.Marshal(p)
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
@@ -427,6 +433,10 @@ func (a *API) createProposal(w http.ResponseWriter, r *http.Request) {
 		a.reject(w, r, err)
 		return
 	}
+	if len(groups) == 0 {
+		a.problem(w, r, http.StatusUnprocessableEntity, domain.CodeNothingDue, "no open items are due for payment on or before "+req.DueBy)
+		return
+	}
 	proposal, created, err := a.proposals.store.CreateProposal(ctx, store.NewProposal{
 		LegalEntityID: le, RunDate: req.RunDate, RunID: req.RunID, DueBy: req.DueBy, RateDate: rateDate.Format(time.DateOnly),
 		LegalEntityCurrency: req.LegalEntityCurrency, PaymentMethod: req.PaymentMethod, RequestHash: req.hash(), CreatedBy: caller.UserID, Groups: groups,
@@ -493,7 +503,7 @@ func (a *API) approveProposal(w http.ResponseWriter, r *http.Request) {
 		a.invalid(w, r, map[string]string{"id": "must be a UUID"})
 		return
 	}
-	proposal, err := a.proposals.store.ApproveProposal(r.Context(), id, caller.UserID)
+	proposal, err := a.proposals.store.ApproveProposal(r.Context(), id, caller.UserID, a.today().Format(time.DateOnly))
 	var changed *store.LinesChangedError
 	switch {
 	case errors.As(err, &changed):
@@ -502,6 +512,8 @@ func (a *API) approveProposal(w http.ResponseWriter, r *http.Request) {
 		a.problem(w, r, http.StatusNotFound, codeNotFound, "payment proposal not found")
 	case errors.Is(err, store.ErrNotDraft):
 		a.problem(w, r, http.StatusConflict, domain.CodeProposalState, "payment proposal is not a draft")
+	case errors.Is(err, store.ErrRunDateElapsed):
+		a.problem(w, r, http.StatusConflict, domain.CodeRunDatePassed, "run date has passed; create a new proposal")
 	case errors.Is(err, store.ErrSelfApproval):
 		a.proposals.selfApprovals.Add(1)
 		slog.Warn("payment proposal approval refused: creator cannot approve", "proposalId", id, "userId", caller.UserID, "correlationId", middleware.GetReqID(r.Context()))
@@ -514,11 +526,39 @@ func (a *API) approveProposal(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (a *API) cancelProposal(w http.ResponseWriter, r *http.Request) {
+	if !a.validTenant(w, r) {
+		return
+	}
+	caller, _ := tenant.FromContext(r.Context())
+	id := chi.URLParam(r, "id")
+	switch {
+	case caller.UserID == "":
+		a.problem(w, r, http.StatusForbidden, "AUTH-0003", "a cancellation needs an identified user")
+		return
+	case !ids.Valid(id):
+		a.invalid(w, r, map[string]string{"id": "must be a UUID"})
+		return
+	}
+	proposal, err := a.proposals.store.CancelProposal(r.Context(), id, caller.UserID)
+	switch {
+	case errors.Is(err, store.ErrProposalNotFound):
+		a.problem(w, r, http.StatusNotFound, codeNotFound, "payment proposal not found")
+	case errors.Is(err, store.ErrNotDraft):
+		a.problem(w, r, http.StatusConflict, domain.CodeProposalState, "payment proposal is not a draft")
+	case err != nil:
+		a.fault(w, r, "payment proposal cancel failed", err)
+	default:
+		a.proposals.cancelled.Add(1)
+		httpx.JSON(w, http.StatusOK, proposal)
+	}
+}
+
 func (a *API) writeProposalMetrics(w http.ResponseWriter) {
 	if a.proposals == nil {
 		return
 	}
-	fmt.Fprintf(w, "# HELP payables_payment_proposals_total Payment proposal commands by outcome.\n# TYPE payables_payment_proposals_total counter\npayables_payment_proposals_total{outcome=\"created\"} %d\npayables_payment_proposals_total{outcome=\"replayed\"} %d\npayables_payment_proposals_total{outcome=\"approved\"} %d\npayables_payment_proposals_total{outcome=\"self_approval_refused\"} %d\n",
-		a.proposals.created.Load(), a.proposals.replayed.Load(), a.proposals.approved.Load(), a.proposals.selfApprovals.Load())
+	fmt.Fprintf(w, "# HELP payables_payment_proposals_total Payment proposal commands by outcome.\n# TYPE payables_payment_proposals_total counter\npayables_payment_proposals_total{outcome=\"created\"} %d\npayables_payment_proposals_total{outcome=\"replayed\"} %d\npayables_payment_proposals_total{outcome=\"approved\"} %d\npayables_payment_proposals_total{outcome=\"self_approval_refused\"} %d\npayables_payment_proposals_total{outcome=\"cancelled\"} %d\n",
+		a.proposals.created.Load(), a.proposals.replayed.Load(), a.proposals.approved.Load(), a.proposals.selfApprovals.Load(), a.proposals.cancelled.Load())
 	fmt.Fprintf(w, "# HELP payables_fx_rate_faults_total Exchange rate lookups that failed on a server or transport fault.\n# TYPE payables_fx_rate_faults_total counter\npayables_fx_rate_faults_total %d\n", a.proposals.rateFaults.Load())
 }

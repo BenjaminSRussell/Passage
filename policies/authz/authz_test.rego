@@ -397,6 +397,10 @@ test_open_item_read_duty_opens_list_and_get_only if {
 test_payment_proposal_duties_are_separate if {
 	allowed("payment-proposal.write", "POST", "/v1/payables/payment-proposals")
 	not allowed("payment-proposal.write", "POST", "/v1/payables/payment-proposals/p1:approve")
+	allowed("payment-proposal.write", "POST", "/v1/payables/payment-proposals/p1:cancel")
+	not allowed("payment-proposal.write", "GET", "/v1/payables/payment-proposals/p1:cancel")
+	not allowed("payment-proposal.read", "POST", "/v1/payables/payment-proposals/p1:cancel")
+	not allowed("payment-proposal.approve", "POST", "/v1/payables/payment-proposals/p1:cancel")
 	not allowed("payment-proposal.write", "GET", "/v1/payables/payment-proposals/p1")
 	allowed("payment-proposal.read", "GET", "/v1/payables/payment-proposals/p1")
 	not allowed("payment-proposal.read", "POST", "/v1/payables/payment-proposals/p1:approve")

@@ -245,20 +245,20 @@ func TestApproveProposal_SegregationOfDuties(t *testing.T) {
 		t.Fatalf("app role rewrote created_by: %v", tamper)
 	}
 
-	if _, err := s.ApproveProposal(alice, created.ID, "alice"); !errors.Is(err, ErrSelfApproval) {
+	if _, err := s.ApproveProposal(alice, created.ID, "alice", runDay); !errors.Is(err, ErrSelfApproval) {
 		t.Fatalf("creator approval = %v, want ErrSelfApproval", err)
 	}
 	if still, _ := s.GetProposal(alice, created.ID); still.Status != domain.ProposalDraft {
 		t.Fatalf("status after refused approval = %s", still.Status)
 	}
-	approved, err := s.ApproveProposal(alice, created.ID, "bob")
+	approved, err := s.ApproveProposal(alice, created.ID, "bob", runDay)
 	if err != nil || approved.Status != domain.ProposalApproved || approved.ApprovedBy == nil || *approved.ApprovedBy != "bob" || approved.ApprovedAt == nil {
 		t.Fatalf("approved = %+v err=%v", approved, err)
 	}
-	if _, err := s.ApproveProposal(alice, created.ID, "carol"); !errors.Is(err, ErrNotDraft) {
+	if _, err := s.ApproveProposal(alice, created.ID, "carol", runDay); !errors.Is(err, ErrNotDraft) {
 		t.Fatalf("second approval = %v, want ErrNotDraft", err)
 	}
-	if _, err := s.ApproveProposal(alice, "00000000-0000-0000-0000-00000000dead", "bob"); !errors.Is(err, ErrProposalNotFound) {
+	if _, err := s.ApproveProposal(alice, "00000000-0000-0000-0000-00000000dead", "bob", runDay); !errors.Is(err, ErrProposalNotFound) {
 		t.Fatalf("unknown proposal = %v, want ErrProposalNotFound", err)
 	}
 }
@@ -278,7 +278,7 @@ func TestProposal_TenantAndLegalEntityIsolation(t *testing.T) {
 		if _, err := s.FindProposal(ctx, leA, runDay, "run-1"); !errors.Is(err, ErrProposalNotFound) {
 			t.Errorf("%s find = %v, want ErrProposalNotFound", name, err)
 		}
-		if _, err := s.ApproveProposal(ctx, created.ID, "bob"); !errors.Is(err, ErrProposalNotFound) {
+		if _, err := s.ApproveProposal(ctx, created.ID, "bob", runDay); !errors.Is(err, ErrProposalNotFound) {
 			t.Errorf("%s approve = %v, want ErrProposalNotFound", name, err)
 		}
 		if got, _ := s.Candidates(ctx, leA, runDay); len(got) != 0 {
@@ -393,7 +393,7 @@ func TestApproveProposal_RechecksLinesAtApproval(t *testing.T) {
 				t.Fatal(err)
 			}
 			change(t, s, ctx, item)
-			_, err = s.ApproveProposal(ctx, created.ID, "bob")
+			_, err = s.ApproveProposal(ctx, created.ID, "bob", runDay)
 			var changed *LinesChangedError
 			if !errors.As(err, &changed) || len(changed.OpenItemIDs) != 1 || changed.OpenItemIDs[0] != item.ID {
 				t.Fatalf("err = %v, want LinesChangedError naming only %s", err, item.ID)
@@ -416,13 +416,138 @@ func TestApproveProposal_SucceedsWhenLinesUnchangedOrRestored(t *testing.T) {
 	if err := s.BlockVendor(ctx, item.VendorID, "review"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ApproveProposal(ctx, created.ID, "bob"); err == nil {
+	if _, err := s.ApproveProposal(ctx, created.ID, "bob", runDay); err == nil {
 		t.Fatal("approved with a blocked vendor")
 	}
 	if err := s.UnblockVendor(ctx, item.VendorID); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := s.ApproveProposal(ctx, created.ID, "bob"); err != nil || got.Status != domain.ProposalApproved {
+	if got, err := s.ApproveProposal(ctx, created.ID, "bob", runDay); err != nil || got.Status != domain.ProposalApproved {
 		t.Fatalf("approve after unblock: %+v err=%v", got, err)
 	}
+}
+
+func TestApproveProposal_RefusesAfterRunDate(t *testing.T) {
+	s := setup(t)
+	ctx := ctxAs(1, leA, "alice")
+	seed(t, s, ctx, leA, vendor1, 1, "2027-03-10", "USD", "100.00")
+	created, _, err := s.CreateProposal(ctx, proposalFor(t, s, ctx, leA, "run-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApproveProposal(ctx, created.ID, "bob", "2027-04-01"); !errors.Is(err, ErrRunDateElapsed) {
+		t.Fatalf("approval the day after the run date = %v, want ErrRunDateElapsed", err)
+	}
+	if still, _ := s.GetProposal(ctx, created.ID); still.Status != domain.ProposalDraft {
+		t.Fatalf("status = %s after refused approval", still.Status)
+	}
+	if got, err := s.ApproveProposal(ctx, created.ID, "bob", runDay); err != nil || got.Status != domain.ProposalApproved {
+		t.Fatalf("approval on the run date: %+v err=%v", got, err)
+	}
+}
+
+func TestCancelProposal_ReleasesItemsForANewProposal(t *testing.T) {
+	s := setup(t)
+	alice := ctxAs(1, leA, "alice")
+	item := seed(t, s, alice, leA, vendor1, 1, "2027-03-10", "USD", "100.00")
+	first, _, err := s.CreateProposal(alice, proposalFor(t, s, alice, leA, "run-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := candidateIDs(t, s, alice, leA, runDay); len(got) != 0 {
+		t.Fatalf("candidates while reserved = %v", got)
+	}
+	cancelled, err := s.CancelProposal(alice, first.ID, "carol")
+	if err != nil || cancelled.Status != domain.ProposalCancelled || cancelled.CancelledBy == nil || *cancelled.CancelledBy != "carol" || cancelled.CancelledAt == nil {
+		t.Fatalf("cancelled = %+v err=%v", cancelled, err)
+	}
+	if len(cancelled.Groups) != 1 || len(cancelled.Groups[0].Lines) != 1 {
+		t.Fatalf("a cancelled proposal keeps its lines for audit: %+v", cancelled.Groups)
+	}
+	if got := candidateIDs(t, s, alice, leA, runDay); len(got) != 1 || got[0] != item.ID {
+		t.Fatalf("candidates after cancel = %v, want the released item", got)
+	}
+	second, isNew, err := s.CreateProposal(alice, proposalFor(t, s, alice, leA, "run-2"))
+	if err != nil || !isNew || len(second.Groups) != 1 {
+		t.Fatalf("new proposal over released item: new=%v err=%v %+v", isNew, err, second)
+	}
+	if _, _, err := s.CreateProposal(alice, proposalFor(t, s, alice, leA, "run-3")); err != nil && !errors.Is(err, ErrItemsChanged) {
+		t.Fatal(err)
+	}
+	if _, err := s.CancelProposal(alice, first.ID, "carol"); !errors.Is(err, ErrNotDraft) {
+		t.Fatalf("second cancel = %v, want ErrNotDraft", err)
+	}
+	if _, err := s.ApproveProposal(alice, first.ID, "bob", runDay); !errors.Is(err, ErrNotDraft) {
+		t.Fatalf("approve of a cancelled proposal = %v, want ErrNotDraft", err)
+	}
+}
+
+func TestCancelProposal_RefusesApprovedAndOutsiders(t *testing.T) {
+	s := setup(t)
+	alice := ctxAs(1, leA, "alice")
+	seed(t, s, alice, leA, vendor1, 1, "2027-03-10", "USD", "100.00")
+	created, _, err := s.CreateProposal(alice, proposalFor(t, s, alice, leA, "run-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, ctx := range map[string]context.Context{"other tenant": ctxAs(2, leA, "bob"), "other legal entity": ctxAs(1, leB, "bob")} {
+		if _, err := s.CancelProposal(ctx, created.ID, "bob"); !errors.Is(err, ErrProposalNotFound) {
+			t.Errorf("%s cancel = %v, want ErrProposalNotFound", name, err)
+		}
+	}
+	if _, err := s.ApproveProposal(alice, created.ID, "bob", runDay); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CancelProposal(alice, created.ID, "alice"); !errors.Is(err, ErrNotDraft) {
+		t.Fatalf("cancel of an approved proposal = %v, want ErrNotDraft", err)
+	}
+	if got, _ := s.GetProposal(alice, created.ID); got.Status != domain.ProposalApproved {
+		t.Fatalf("status = %s", got.Status)
+	}
+}
+
+func TestProposal_AppRoleCannotRewriteTerminalStateOrReleaseLines(t *testing.T) {
+	s := setup(t)
+	alice := ctxAs(1, leA, "alice")
+	seed(t, s, alice, leA, vendor1, 1, "2027-03-10", "USD", "100.00")
+	seed(t, s, alice, leA, vendor2, 2, "2027-03-10", "USD", "100.00")
+	approved, _, err := s.CreateProposal(alice, proposalFor(t, s, alice, leA, "run-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApproveProposal(alice, approved.ID, "bob", runDay); err != nil {
+		t.Fatal(err)
+	}
+	exec := func(sql string, args ...any) error {
+		return dbx.WithTenantTx(alice, s.pool, func(tx pgx.Tx) error {
+			_, err := tx.Exec(alice, sql, args...)
+			return err
+		})
+	}
+	wantGuard := func(name string, err error) {
+		t.Helper()
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "55000" {
+			t.Errorf("%s: %v, want a 55000 guard error", name, err)
+		}
+	}
+	wantGuard("revert APPROVED to DRAFT", exec(`update ap_payment_proposal set status = 'DRAFT', approved_by = null, approved_at = null where id = $1::uuid`, approved.ID))
+	wantGuard("rewrite approved_by", exec(`update ap_payment_proposal set approved_by = 'mallory' where id = $1::uuid`, approved.ID))
+	wantGuard("cancel through SQL once approved", exec(`update ap_payment_proposal set status = 'CANCELLED', cancelled_by = 'x', cancelled_at = now() where id = $1::uuid`, approved.ID))
+	if got, _ := s.GetProposal(alice, approved.ID); got.Status != domain.ProposalApproved || *got.ApprovedBy != "bob" {
+		t.Fatalf("approved proposal changed: %+v", got)
+	}
+
+	draftCtx := ctxAs(1, leA, "alice")
+	seed(t, s, draftCtx, leA, vendor1, 3, "2027-03-10", "USD", "100.00")
+	draft, _, err := s.CreateProposal(draftCtx, proposalFor(t, s, draftCtx, leA, "run-2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantGuard("release a draft line without cancelling", exec(`update ap_payment_proposal_line set reserved = false where proposal_id = $1::uuid`, draft.ID))
+	if _, err := s.CancelProposal(draftCtx, draft.ID, "alice"); err != nil {
+		t.Fatal(err)
+	}
+	wantGuard("re-reserve a released line", exec(`update ap_payment_proposal_line set reserved = true where proposal_id = $1::uuid`, draft.ID))
+	wantGuard("revive a cancelled proposal", exec(`update ap_payment_proposal set status = 'DRAFT', cancelled_by = null, cancelled_at = null where id = $1::uuid`, draft.ID))
 }

@@ -15,9 +15,12 @@ const (
 	CodeProposalConflict = "AP-PRP-001"
 	CodeProposalState    = "AP-PRP-002"
 	CodeSegregation      = "AP-PRP-003"
+	CodeRunDatePassed    = "AP-PRP-004"
+	CodeNothingDue       = "AP-PRP-005"
 
-	ProposalDraft    = "DRAFT"
-	ProposalApproved = "APPROVED"
+	ProposalDraft     = "DRAFT"
+	ProposalApproved  = "APPROVED"
+	ProposalCancelled = "CANCELLED"
 )
 
 func ValidPaymentMethod(method string) bool {

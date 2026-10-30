@@ -27,6 +27,7 @@ var (
 	ErrSelfApproval     = errors.New("a proposal cannot be approved by its creator")
 	ErrItemsChanged     = errors.New("open items changed, were held or were reserved while the proposal was built")
 	ErrTooManyItems     = errors.New("more open items are due than one proposal can hold")
+	ErrRunDateElapsed   = errors.New("the proposal's run date has passed")
 )
 
 type LinesChangedError struct{ OpenItemIDs []string }
@@ -49,6 +50,8 @@ type Proposal struct {
 	CreatedAt           time.Time              `json:"createdAt"`
 	ApprovedBy          *string                `json:"approvedBy,omitempty"`
 	ApprovedAt          *time.Time             `json:"approvedAt,omitempty"`
+	CancelledBy         *string                `json:"cancelledBy,omitempty"`
+	CancelledAt         *time.Time             `json:"cancelledAt,omitempty"`
 	Groups              []domain.ProposalGroup `json:"groups"`
 	TotalValued         decimal.Decimal        `json:"totalValued"`
 	RequestHash         string                 `json:"-"`
@@ -74,7 +77,7 @@ func (s *Postgres) Candidates(ctx context.Context, legalEntityID, dueBy string) 
 			from ap_open_item i
 			where i.legal_entity_id = $1::uuid and i.due_date <= $2::date and i.status in ('OPEN', 'PARTIALLY_SETTLED') and not i.payment_hold
 			and not exists (select 1 from ap_vendor_block b where b.vendor_id = i.vendor_id)
-			and not exists (select 1 from ap_payment_proposal_line l where l.open_item_id = i.id)
+			and not exists (select 1 from ap_payment_proposal_line l where l.open_item_id = i.id and l.reserved)
 			order by i.due_date, i.id limit $3`, legalEntityID, dueBy, MaxProposalItems+1)
 		if err != nil {
 			return err
@@ -103,12 +106,12 @@ func (s *Postgres) Candidates(ctx context.Context, legalEntityID, dueBy string) 
 }
 
 const proposalColumns = `id::text, legal_entity_id::text, run_date::text, run_id, due_by::text, rate_date::text, legal_entity_currency, payment_method, status,
-	created_by, created_at, approved_by, approved_at, request_hash`
+	created_by, created_at, approved_by, approved_at, cancelled_by, cancelled_at, request_hash`
 
 func scanProposal(row pgx.Row) (Proposal, error) {
 	var p Proposal
 	err := row.Scan(&p.ID, &p.LegalEntityID, &p.RunDate, &p.RunID, &p.DueBy, &p.RateDate, &p.LegalEntityCurrency, &p.PaymentMethod, &p.Status,
-		&p.CreatedBy, &p.CreatedAt, &p.ApprovedBy, &p.ApprovedAt, &p.RequestHash)
+		&p.CreatedBy, &p.CreatedAt, &p.ApprovedBy, &p.ApprovedAt, &p.CancelledBy, &p.CancelledAt, &p.RequestHash)
 	return p, err
 }
 
@@ -311,10 +314,11 @@ func verifyLines(ctx context.Context, tx pgx.Tx, proposalID string) error {
 	return nil
 }
 
-func (s *Postgres) ApproveProposal(ctx context.Context, id, approver string) (Proposal, error) {
+func (s *Postgres) ApproveProposal(ctx context.Context, id, approver, today string) (Proposal, error) {
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var status, createdBy string
-		err := tx.QueryRow(ctx, `select status, created_by from ap_payment_proposal where id = $1::uuid for update`, id).Scan(&status, &createdBy)
+		var elapsed bool
+		err := tx.QueryRow(ctx, `select status, created_by, run_date < $2::date from ap_payment_proposal where id = $1::uuid for update`, id, today).Scan(&status, &createdBy, &elapsed)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrProposalNotFound
 		}
@@ -327,10 +331,38 @@ func (s *Postgres) ApproveProposal(ctx context.Context, id, approver string) (Pr
 		if createdBy == approver {
 			return ErrSelfApproval
 		}
+		if elapsed {
+			return ErrRunDateElapsed
+		}
 		if err := verifyLines(ctx, tx, id); err != nil {
 			return err
 		}
 		_, err = tx.Exec(ctx, `update ap_payment_proposal set status = 'APPROVED', approved_by = $2, approved_at = now() where id = $1::uuid`, id, approver)
+		return err
+	})
+	if err != nil {
+		return Proposal{}, err
+	}
+	return s.GetProposal(ctx, id)
+}
+
+func (s *Postgres) CancelProposal(ctx context.Context, id, user string) (Proposal, error) {
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var status string
+		err := tx.QueryRow(ctx, `select status from ap_payment_proposal where id = $1::uuid for update`, id).Scan(&status)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrProposalNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if status != domain.ProposalDraft {
+			return ErrNotDraft
+		}
+		if _, err = tx.Exec(ctx, `update ap_payment_proposal set status = 'CANCELLED', cancelled_by = $2, cancelled_at = now() where id = $1::uuid`, id, user); err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `update ap_payment_proposal_line set reserved = false where proposal_id = $1::uuid`, id)
 		return err
 	})
 	if err != nil {
