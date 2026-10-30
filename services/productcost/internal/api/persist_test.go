@@ -248,6 +248,10 @@ func TestCreateVersion_ValidatesScopesAndNormalises(t *testing.T) {
 	if code, _ := problemCode(t, rec); rec.Code != http.StatusUnprocessableEntity || code != domain.CodeFallbackVersion {
 		t.Fatalf("specified fallback without a version: %d %s", rec.Code, code)
 	}
+	rec = post(`{"legalEntityId":"`+le+`","code":"STD"}`, "")
+	if code, _ := problemCode(t, rec); rec.Code != http.StatusForbidden || code != domain.CodeLegalEntityScope {
+		t.Fatalf("no legal-entity scope: %d %s", rec.Code, code)
+	}
 	rec = post(`{"legalEntityId":"`+le+`","code":"STD"}`, ids.New()+","+ids.New())
 	if code, _ := problemCode(t, rec); rec.Code != http.StatusForbidden || code != domain.CodeLegalEntityScope {
 		t.Fatalf("outside the caller's scope: %d %s", rec.Code, code)

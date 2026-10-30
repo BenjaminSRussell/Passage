@@ -13,7 +13,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/shopspring/decimal"
 
-	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/money"
@@ -91,15 +90,8 @@ func validationProblem(fields map[string]string) *httpx.Problem {
 }
 
 func inScope(p tenant.Principal, legalEntityID string) error {
-	scopes := dbx.LegalEntityScopes(p)
-	if scopes == "*" {
+	if tenant.InLegalEntityScope(p, legalEntityID) {
 		return nil
-	}
-	canonical, _ := ids.Canonical(legalEntityID)
-	for _, scope := range strings.Split(scopes, ",") {
-		if scope != "" && scope == canonical {
-			return nil
-		}
 	}
 	return httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "legal entity is outside the caller's scope")
 }

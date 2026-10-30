@@ -149,7 +149,7 @@ func (a *API) recordCostTransactions(w http.ResponseWriter, r *http.Request) {
 	}
 	p, _ := tenant.FromContext(r.Context())
 	for _, c := range rows {
-		if !inScope(p, c.LegalEntityID) {
+		if !tenant.InLegalEntityScope(p, c.LegalEntityID) {
 			httpx.Fail(w, r, outOfScope())
 			return
 		}
@@ -161,10 +161,6 @@ func (a *API) recordCostTransactions(w http.ResponseWriter, r *http.Request) {
 	}
 	a.costTxnsRecorded.Add(int64(inserted))
 	httpx.JSON(w, http.StatusCreated, recordCostTransactionsResponse{Received: len(rows), Inserted: inserted})
-}
-
-func inScope(p tenant.Principal, legalEntityID string) bool {
-	return p.LegalEntityID == "" || strings.EqualFold(p.LegalEntityID, legalEntityID)
 }
 
 func outOfScope() error {
@@ -239,7 +235,7 @@ func (a *API) listCostTransactions(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	if p, _ := tenant.FromContext(r.Context()); !inScope(p, f.LegalEntityID) {
+	if p, _ := tenant.FromContext(r.Context()); !tenant.InLegalEntityScope(p, f.LegalEntityID) {
 		httpx.Fail(w, r, outOfScope())
 		return
 	}
@@ -301,7 +297,7 @@ func (a *API) loadReport(r *http.Request, p reportParams) (domain.ValueReport, l
 	if err := domain.ValidateGroupBy(p.GroupBy); err != nil {
 		return domain.ValueReport{}, ledgerSelection{}, err
 	}
-	if pr, _ := tenant.FromContext(r.Context()); !inScope(pr, p.LegalEntityID) {
+	if pr, _ := tenant.FromContext(r.Context()); !tenant.InLegalEntityScope(pr, p.LegalEntityID) {
 		return domain.ValueReport{}, ledgerSelection{}, outOfScope()
 	}
 	sel, err := a.selectLedger(r, p.LegalEntityID, p.ValuationLedgerID)

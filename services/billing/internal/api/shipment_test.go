@@ -227,6 +227,16 @@ func TestShipmentProposals_ScopedCallerCannotInvoiceAnotherEntity(t *testing.T) 
 	}
 }
 
+func TestShipmentProposals_RefusesCallerWithoutLegalEntityScope(t *testing.T) {
+	s := newFakeStore()
+	h := setup(t, s, &fakeTax{perLine: "19.00"})
+	rec := doAs(h, http.MethodPost, "/v1/billing/proposals", "ship-n", shipmentBody(false, slipA), allDuties,
+		map[string]string{tenant.HeaderLegalEntity: ""})
+	if rec.Code != http.StatusForbidden || s.batchCreates != 0 {
+		t.Fatalf("status %d, batches %d: %s", rec.Code, s.batchCreates, rec.Body)
+	}
+}
+
 func TestInvoiceTrace(t *testing.T) {
 	s := newFakeStore()
 	h := setup(t, s, &fakeTax{perLine: "19.00"})

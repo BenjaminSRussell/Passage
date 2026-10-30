@@ -297,7 +297,7 @@ func (a *API) createLedger(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	if p.LegalEntityID != "" && p.LegalEntityID != req.LegalEntityID {
+	if !tenant.InLegalEntityScope(p, req.LegalEntityID) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "the caller is scoped to another legal entity"))
 		return
 	}

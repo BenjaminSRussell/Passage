@@ -98,13 +98,17 @@ func (s *Postgres) Create(ctx context.Context, in Sequence, idempotencyKey strin
 // Get loads a sequence by code in the caller's legal-entity scope.
 func (s *Postgres) Get(ctx context.Context, code string) (Sequence, error) {
 	p, _ := tenant.FromContext(ctx)
+	entities, err := scopeEntities(p)
+	if err != nil {
+		return Sequence{}, err
+	}
 	var e Sequence
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		q := `select id, code, name, format, legal_entity_id, mode, start_from from number_sequence where tenant_id=$1 and code=$2`
 		args := []any{p.TenantID, code}
-		if p.LegalEntityID != "" && p.LegalEntityID != "*" {
-			q += ` and legal_entity_id=$3`
-			args = append(args, p.LegalEntityID)
+		if entities != nil {
+			q += ` and legal_entity_id = any($3::uuid[])`
+			args = append(args, entities)
 		}
 		var err error
 		e, err = scanSeq(tx.QueryRow(ctx, q, args...))
@@ -178,13 +182,31 @@ func (s *Postgres) Allocate(ctx context.Context, code, idempotencyKey string) (I
 	return out, err
 }
 
+func scopeEntities(p tenant.Principal) ([]string, error) {
+	if p.LegalEntityID == "" {
+		if p.HasDuty(tenant.DutyAllScope) {
+			return nil, nil
+		}
+		return nil, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "the caller has no legal-entity scope")
+	}
+	entities := tenant.LegalEntityScopeList(p)
+	if len(entities) == 0 {
+		return nil, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "the caller's legal-entity scope holds no valid legal entity")
+	}
+	return entities, nil
+}
+
 func loadForUpdate(ctx context.Context, tx pgx.Tx, p tenant.Principal, code string) (Sequence, error) {
+	entities, err := scopeEntities(p)
+	if err != nil {
+		return Sequence{}, err
+	}
 	q := `select id, code, name, format, legal_entity_id, mode, start_from from number_sequence
 		where tenant_id=$1 and code=$2`
 	args := []any{p.TenantID, code}
-	if p.LegalEntityID != "" && p.LegalEntityID != "*" {
-		q += ` and legal_entity_id=$3`
-		args = append(args, p.LegalEntityID)
+	if entities != nil {
+		q += ` and legal_entity_id = any($3::uuid[])`
+		args = append(args, entities)
 	}
 	q += ` for update`
 	e, err := scanSeq(tx.QueryRow(ctx, q, args...))

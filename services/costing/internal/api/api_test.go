@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -55,11 +56,16 @@ func server() (http.Handler, *fakeStore) {
 	return r, fs
 }
 
+var bodyLegalEntity = regexp.MustCompile(`(?i)legalEntityId"?[=:]\s*"?([0-9a-f-]{36})`)
+
 func call(h http.Handler, method, path, body, duties string, headers map[string]string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Passage-Tenant", testTenant)
 	req.Header.Set("X-Passage-Duties", duties)
+	if m := bodyLegalEntity.FindStringSubmatch(path + body); m != nil {
+		req.Header.Set("X-Passage-Legal-Entity", m[1])
+	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
@@ -243,5 +249,22 @@ func TestCreateVersion_ReplayIsNotCountedAsCreated(t *testing.T) {
 	}
 	if got := a.versionsCreated.Load(); got != 1 {
 		t.Errorf("versions created counter = %d, want 1 (the replay is not a creation)", got)
+	}
+}
+
+func TestCreateVersion_RefusesCallerWithoutLegalEntityScope(t *testing.T) {
+	h, fs := server()
+	body := `{"legalEntityId":"` + ids.New() + `","code":"STD-2026","type":"STANDARD","currency":"EUR","effectiveFrom":"2026-01-01"}`
+	rec := call(h, http.MethodPost, "/v1/costing/versions", body, allDuties, map[string]string{"Idempotency-Key": "k-noscope", "X-Passage-Legal-Entity": ""})
+	if rec.Code != http.StatusForbidden || len(fs.versions) != 0 {
+		t.Fatalf("status %d versions %d, want 403 and nothing stored: %s", rec.Code, len(fs.versions), rec.Body)
+	}
+}
+
+func TestListAgingBucketSets_RefusesCallerWithoutLegalEntityScope(t *testing.T) {
+	h, _ := server()
+	rec := call(h, http.MethodGet, "/v1/costing/aging/bucket-sets", "", allDuties, nil)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status %d, want 403: %s", rec.Code, rec.Body)
 	}
 }

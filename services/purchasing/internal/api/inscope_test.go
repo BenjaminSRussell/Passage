@@ -28,3 +28,11 @@ func TestInScope_ComparesCanonicalUUIDs(t *testing.T) {
 		})
 	}
 }
+
+func TestInScope_EmptyScopeAdmitsNothing(t *testing.T) {
+	const entity = "00000000-0000-7000-8000-0000000001e9"
+	p := tenant.Principal{TenantID: "00000000-0000-7000-8000-000000000001"}
+	if err := inScope(p, entity); err == nil {
+		t.Fatal("a caller with no legal-entity scope must be refused")
+	}
+}

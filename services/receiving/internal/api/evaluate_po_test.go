@@ -22,9 +22,10 @@ import (
 const (
 	evalPOID   = "00000000-0000-4000-8000-0000000000b1"
 	callerUser = "00000000-0000-4000-8000-0000000000c1"
+	evalLE     = "00000000-0000-4000-8000-0000000000e1"
 )
 
-const purchasingOrder = `{"id":"` + evalPOID + `","number":"PO-1","legalEntityId":"","vendorId":"v-1","currency":"USD","approvalStatus":"APPROVED","documentStatus":"NONE","rowVersion":2,
+const purchasingOrder = `{"id":"` + evalPOID + `","number":"PO-1","legalEntityId":"` + evalLE + `","vendorId":"v-1","currency":"USD","approvalStatus":"APPROVED","documentStatus":"NONE","rowVersion":2,
 "lines":[{"lineNo":1,"productId":"p-1","unit":"EA","qty":"10","unitPrice":"250.00","priceUnit":"100","discountPct":"0","grossAmount":"25.00","lineAmount":"25.00","receivedQty":"10","invoicedQty":"0","status":"OPEN"}]}`
 
 func evaluateThrough(t *testing.T, status int, upstream string, wire bool) (*httptest.ResponseRecorder, *http.Request) {
@@ -45,6 +46,7 @@ func evaluateThrough(t *testing.T, status int, upstream string, wire bool) (*htt
 	a.Register(r)
 	req := httptest.NewRequest(http.MethodPost, evaluatePath, strings.NewReader(poBody(`"poLineNo":1`)))
 	req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
+	req.Header.Set("X-Passage-Legal-Entity", evalLE)
 	req.Header.Set("X-Passage-User", callerUser)
 	req.Header.Set("X-Passage-Duties", "MatchingPolicyMaintain,PurchaseOrderInquire")
 	req.Header.Set("X-Request-Id", "req-42")
