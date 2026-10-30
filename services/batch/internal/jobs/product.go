@@ -93,6 +93,9 @@ func (p ProductJobs) Run(ctx context.Context, handler, runID string) (Summary, e
 	status, msg := domain.RunEnded, ""
 	if err != nil {
 		status, msg = domain.RunError, err.Error()
+		if errors.Is(err, ErrRejected) || errors.Is(err, ErrInvalidArgument) {
+			status = domain.RunFailed
+		}
 	}
 	if finishErr := p.Pages.Finish(context.WithoutCancel(ctx), runID, claim.Token, status, msg); finishErr != nil {
 		slog.Error("finish batch run", "err", finishErr, "runId", runID, "handler", handler)

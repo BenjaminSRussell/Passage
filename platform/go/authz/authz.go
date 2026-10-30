@@ -28,6 +28,26 @@ func RequireDuty(duty string) func(http.Handler) http.Handler {
 	return Require(DutyPolicy{}, duty, "")
 }
 
+// RequireAnyDuty is RequireDuty satisfied by any one of duties.
+func RequireAnyDuty(duties ...string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			p, ok := tenant.FromContext(r.Context())
+			if !ok {
+				httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "no principal"))
+				return
+			}
+			for _, d := range duties {
+				if p.HasDuty(d) {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "missing duty "+duties[0]))
+		})
+	}
+}
+
 // Require is route middleware over an arbitrary Policy.
 func Require(pol Policy, action, resource string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {

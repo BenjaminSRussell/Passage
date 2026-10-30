@@ -1,5 +1,5 @@
-// Package api exposes the migration-factory HTTP surface: open_items and project_wip pack runs
-// with their control totals and quarantine release, the legacy cross-reference lookup, the
+// Package api exposes the migration-factory HTTP surface: open_items, gl_balances and project_wip
+// pack runs with their control totals and quarantine release, the legacy cross-reference lookup, the
 // parallel-run review, project opening balances, and the cutover runbook with its rollback
 // re-keying export. Handlers decode and validate the request, read the principal from the tenant
 // context, apply the domain rules and persist through the Store, which scopes every transaction
@@ -72,6 +72,7 @@ type Store interface {
 	ExplainVariance(ctx context.Context, idem store.Idem, e store.ExplainVariance) (domain.ParallelRun, bool, error)
 	SignOffParallelRun(ctx context.Context, idem store.Idem, so store.SignOff) (domain.ParallelRun, bool, error)
 	RunProjectWIP(ctx context.Context, idem store.Idem, in store.ProjectWIPRun) (domain.PackRun, bool, error)
+	RunGLBalances(ctx context.Context, idem store.Idem, in store.GLBalancesRun) (domain.PackRun, bool, error)
 	GetProjectOpening(ctx context.Context, f store.OpeningFilter) (store.ProjectOpening, error)
 }
 

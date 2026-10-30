@@ -24,6 +24,10 @@ const (
 	maxErrorDetail  = 512
 
 	productAudience = "product"
+
+	dutyProductExplode      = "product.variants.explode"
+	dutyProductReleasedRead = "product.released.read"
+	dutyProductJobsWrite    = "product.jobs.write"
 )
 
 type HTTPProductClient struct {
@@ -42,7 +46,7 @@ func NewHTTPProductClient(baseURL string, signer *tenant.ServiceSigner) *HTTPPro
 func (c *HTTPProductClient) ExplodePage(ctx context.Context, masterID string, selected map[string][]string, limit int) (ExplodePage, error) {
 	var out struct{ Created, Remaining int }
 	body := map[string]any{"selected": selected, "limit": limit}
-	err := c.do(ctx, http.MethodPost, "/v1/product/products/"+url.PathEscape(masterID)+"/variants:explode", body, &out)
+	err := c.do(ctx, http.MethodPost, "/v1/product/products/"+url.PathEscape(masterID)+"/variants:explode", dutyProductExplode, body, &out)
 	return ExplodePage{Created: out.Created, Remaining: out.Remaining}, err
 }
 
@@ -55,7 +59,7 @@ func (c *HTTPProductClient) ReleasedPage(ctx context.Context, after string, limi
 	if after != "" {
 		query.Set("after", after)
 	}
-	if err := c.do(ctx, http.MethodGet, "/v1/product/released-products?"+query.Encode(), nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/product/released-products?"+query.Encode(), dutyProductReleasedRead, nil, &out); err != nil {
 		return ReleasedPage{}, err
 	}
 	page := ReleasedPage{Next: out.Next, IDs: make([]string, len(out.Items))}
@@ -73,7 +77,7 @@ func (c *HTTPProductClient) GroupChange(ctx context.Context, releasedIDs []strin
 	var out struct {
 		Items []struct{ ID, Status, Code string } `json:"items"`
 	}
-	if err := c.do(ctx, http.MethodPost, "/v1/product/jobs/group-change", map[string]any{"items": items}, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/product/jobs/group-change", dutyProductJobsWrite, map[string]any{"items": items}, &out); err != nil {
 		return nil, err
 	}
 	results := make([]ItemResult, len(out.Items))
@@ -83,7 +87,7 @@ func (c *HTTPProductClient) GroupChange(ctx context.Context, releasedIDs []strin
 	return results, nil
 }
 
-func (c *HTTPProductClient) do(ctx context.Context, method, path string, in, out any) error {
+func (c *HTTPProductClient) do(ctx context.Context, method, path, duty string, in, out any) error {
 	var payload []byte
 	if in != nil {
 		var err error
@@ -94,7 +98,7 @@ func (c *HTTPProductClient) do(ctx context.Context, method, path string, in, out
 	var err error
 	for attempt := 0; attempt < productAttempts; attempt++ {
 		var wait time.Duration
-		if wait, err = c.once(ctx, method, path, payload, out); err == nil || errors.Is(err, ErrRejected) || attempt == productAttempts-1 {
+		if wait, err = c.once(ctx, method, path, duty, payload, out); err == nil || errors.Is(err, ErrRejected) || attempt == productAttempts-1 {
 			return err
 		}
 		select {
@@ -106,7 +110,7 @@ func (c *HTTPProductClient) do(ctx context.Context, method, path string, in, out
 	return err
 }
 
-func (c *HTTPProductClient) once(ctx context.Context, method, path string, payload []byte, out any) (time.Duration, error) {
+func (c *HTTPProductClient) once(ctx context.Context, method, path, duty string, payload []byte, out any) (time.Duration, error) {
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bytes.NewReader(payload))
 	if err != nil {
 		return 0, fmt.Errorf("%w: %v", ErrRejected, err)
@@ -116,7 +120,10 @@ func (c *HTTPProductClient) once(ctx context.Context, method, path string, paylo
 	if !ok {
 		return 0, fmt.Errorf("%w: no principal in context", ErrRejected)
 	}
-	signed, err := c.signer.Apply(req, p, productAudience, p.LegalEntityID)
+	if !p.HasDuty(duty) {
+		return 0, fmt.Errorf("%w: the run holds no %s duty", ErrRejected, duty)
+	}
+	signed, err := c.signer.ApplyDuties(req, p, productAudience, p.LegalEntityID, []string{duty})
 	if err == nil && !signed {
 		err = errors.New("no service signer configured")
 	}

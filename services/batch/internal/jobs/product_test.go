@@ -280,9 +280,13 @@ func TestGroupChangeResumesFromLastCheckpoint(t *testing.T) {
 
 func TestGroupChangePermanentRejectionIsNotRetried(t *testing.T) {
 	product := &fakeProduct{released: releasedIDs(2), rejectGroup: true}
-	runner := jobs.ProductJobs{Client: product, Pages: newMemoryPages(), MaxAttempts: 5}
+	pages := newMemoryPages()
+	runner := jobs.ProductJobs{Client: product, Pages: pages, MaxAttempts: 5}
 	if _, err := runner.Run(context.Background(), jobs.HandlerProductGroupChange, runID); !errors.Is(err, jobs.ErrRejected) {
 		t.Fatalf("err = %v", err)
+	}
+	if pages.status != domain.RunFailed {
+		t.Fatalf("a rejected run is terminal, status = %q", pages.status)
 	}
 	if len(product.groupCalls) != 1 {
 		t.Fatalf("a 4xx must not be retried, calls=%d", len(product.groupCalls))
@@ -317,7 +321,7 @@ func TestRunErrorsTheRunWhenPersistedParamsAreInvalid(t *testing.T) {
 	if _, err := runner.Run(context.Background(), jobs.HandlerProductExplode, runID); !errors.Is(err, jobs.ErrInvalidArgument) {
 		t.Fatalf("err = %v", err)
 	}
-	if product.explodeCalls != 0 || pages.status != domain.RunError {
+	if product.explodeCalls != 0 || pages.status != domain.RunFailed {
 		t.Fatalf("calls=%d status=%q", product.explodeCalls, pages.status)
 	}
 }
@@ -394,7 +398,11 @@ func serviceClient(t *testing.T, h http.Handler) *jobs.HTTPProductClient {
 }
 
 func runCtx(tenantN int) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(tenantN), LegalEntityID: testkit.TenantID(9), UserID: testkit.TenantID(8)})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(tenantN), LegalEntityID: testkit.TenantID(9), UserID: testkit.TenantID(8), Duties: allProductDuties()})
+}
+
+func allProductDuties() map[string]struct{} {
+	return map[string]struct{}{"product.variants.explode": {}, "product.released.read": {}, "product.jobs.write": {}}
 }
 
 func TestHTTPProductClientSpeaksProductContract(t *testing.T) {
@@ -458,7 +466,7 @@ func TestHTTPProductClientSpeaksProductContract(t *testing.T) {
 	}
 }
 
-func TestHTTPProductClientSendsAServiceTokenWithTheBatchGrantAndNoUserHeaders(t *testing.T) {
+func TestHTTPProductClientSendsEachCallATokenWithOnlyThatCallsDutyAndNoUserHeaders(t *testing.T) {
 	var got []tenant.Principal
 	var leaked []string
 	client := serviceClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -467,25 +475,23 @@ func TestHTTPProductClientSendsAServiceTokenWithTheBatchGrantAndNoUserHeaders(t 
 		leaked = append(leaked, r.Header.Get(tenant.HeaderDuties), r.Header.Get(tenant.HeaderTenant))
 		_, _ = w.Write([]byte(`{"items":[],"created":0,"remaining":0}`))
 	}))
-	forged := tenant.With(runCtx(1), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: testkit.TenantID(9), UserID: testkit.TenantID(8), Duties: map[string]struct{}{"product.release": {}}})
-	if _, err := client.ExplodePage(forged, testkit.TenantID(50), nil, 1); err != nil {
+	ctx := runCtx(1)
+	if _, err := client.ExplodePage(ctx, testkit.TenantID(50), nil, 1); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.ReleasedPage(forged, "", 1); err != nil {
+	if _, err := client.ReleasedPage(ctx, "", 1); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.GroupChange(forged, []string{testkit.TenantID(1)}); err != nil {
+	if _, err := client.GroupChange(ctx, []string{testkit.TenantID(1)}); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"product.jobs.write", "product.read", "product.write"}
-	for _, p := range got {
-		held := make([]string, 0, len(p.Duties))
-		for d := range p.Duties {
-			held = append(held, d)
-		}
-		sort.Strings(held)
-		if len(got) != 3 || fmt.Sprint(held) != fmt.Sprint(want) || p.Service != "batch" || p.UserID != testkit.TenantID(8) || p.LegalEntityID != testkit.TenantID(9) {
-			t.Fatalf("principal = %+v held=%v", p, held)
+	want := []string{"product.variants.explode", "product.released.read", "product.jobs.write"}
+	if len(got) != 3 {
+		t.Fatalf("calls = %d", len(got))
+	}
+	for i, p := range got {
+		if len(p.Duties) != 1 || !p.HasDuty(want[i]) || p.Service != "batch" || p.UserID != testkit.TenantID(8) || p.LegalEntityID != testkit.TenantID(9) {
+			t.Fatalf("call %d principal = %+v, want only %s", i, p, want[i])
 		}
 	}
 	for _, header := range leaked {
@@ -501,17 +507,19 @@ func TestHTTPProductClientRefusesToCallWithoutAValidServicePrincipal(t *testing.
 	defer server.Close()
 	_, priv, _ := ed25519.GenerateKey(nil)
 	signer, _ := tenant.NewServiceSigner("batch", priv)
-	multi := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: testkit.TenantID(9) + "," + testkit.TenantID(10), UserID: testkit.TenantID(8)})
-	noUser := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: testkit.TenantID(9)})
+	multi := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: testkit.TenantID(9) + "," + testkit.TenantID(10), UserID: testkit.TenantID(8), Duties: allProductDuties()})
+	noUser := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: testkit.TenantID(9), Duties: allProductDuties()})
+	snapshot := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: testkit.TenantID(9), UserID: testkit.TenantID(8), Duties: map[string]struct{}{"product.jobs.write": {}}})
 	cases := map[string]struct {
 		client *jobs.HTTPProductClient
 		ctx    context.Context
 	}{
-		"no signer":        {jobs.NewHTTPProductClient(server.URL, nil), runCtx(1)},
-		"no principal":     {jobs.NewHTTPProductClient(server.URL, signer), context.Background()},
-		"several entities": {jobs.NewHTTPProductClient(server.URL, signer), multi},
-		"no acting user":   {jobs.NewHTTPProductClient(server.URL, signer), noUser},
-		"wrong service":    {jobs.NewHTTPProductClient(server.URL, mustSigner(t, "receiving")), runCtx(1)},
+		"no signer":                      {jobs.NewHTTPProductClient(server.URL, nil), runCtx(1)},
+		"no principal":                   {jobs.NewHTTPProductClient(server.URL, signer), context.Background()},
+		"several entities":               {jobs.NewHTTPProductClient(server.URL, signer), multi},
+		"duty not in the run's snapshot": {jobs.NewHTTPProductClient(server.URL, signer), snapshot},
+		"no acting user":                 {jobs.NewHTTPProductClient(server.URL, signer), noUser},
+		"wrong service":                  {jobs.NewHTTPProductClient(server.URL, mustSigner(t, "receiving")), runCtx(1)},
 	}
 	for name, c := range cases {
 		if _, err := c.client.ReleasedPage(c.ctx, "", 1); !errors.Is(err, jobs.ErrRejected) {

@@ -98,7 +98,9 @@ paths:
         content: { application/json: { schema: { $ref: '#/components/schemas/StartRun' } } }
       responses:
         '201': { description: Run started. Product handlers also record the caller's single legal entity and user for the dispatcher's service token. }
-        '400': { description: Params failed the handler's schema, or a product run's caller is not scoped to exactly one legal entity (COM-0001, field errors under errors). }
+        '400': { description: Params failed the handler's schema (COM-0001, field errors under errors). }
+        '403': { description: A product handler's run needs the product duties it will use (product.variants.explode or product.write for explode; product.released.read or product.read, and product.jobs.write, for group-change) (AUTH-0003). }
+        '422': { description: legalEntityId missing or outside the caller's scope (COM-0001). }
         '409': { description: Exclusive job overlap (WFL-0409). }
   /v1/batch/runs/{id}:
     get:
@@ -210,6 +212,7 @@ components:
       additionalProperties: false
       properties:
         rows: { type: integer }
+        legalEntityId: { type: string, format: uuid, description: Legal entity the run is bound to. Optional only when the caller is scoped to exactly one; otherwise required and must lie in the caller's scope. }
         params:
           description: Handler parameters stored on the run; the schema depends on the job's handler. Handlers without a schema accept none.
           oneOf:

@@ -1,11 +1,11 @@
-# NOT-IMPLEMENTED — PSG-50 (wave 50), slices 1 to 10
+# NOT-IMPLEMENTED — PSG-50 (wave 50), slices 1 to 11
 
 Wave 50 owns only `deploy/multi-region/`, `load/` and `docs/ops/`, and its ownership entry lists no web
 module. It has no service directory, so there is no Go module, database table, OpenAPI/AsyncAPI file or
 web screen in this slice. Items below are either later slices of PSG-50 or handoffs to the wave that owns
 the code or the infrastructure.
 
-Status key: **built** = in slices 1 to 10. **later slice of PSG-50** = same wave, next slice. **handoff** =
+Status key: **built** = in slices 1 to 11. **later slice of PSG-50** = same wave, next slice. **handoff** =
 needs another owner or an out-of-path edit.
 
 ## Deliverable 1: performance campaign
@@ -32,7 +32,7 @@ needs another owner or an out-of-path edit.
 | Strimzi 6 brokers, partition sizing | handoff (wave 3 eventing / deploy/kafka owner) | `deploy/kafka` is wave 3's path; it already sets `min.insync.replicas=2` with 3 brokers |
 | Pricing and policy-bundle caches, <= 5 s invalidation, TTL jitter and single-flight refill (the rules `runbooks/cache-stampede.md` assumes) | handoff (pricing, platform owners) | cache is service code; tier 2 is Valkey, proposed and not yet in ADR-0001 (architecture Q4), never Redis |
 | Campaign route check: every `PATHS` call in `scenarios.js` (method and path) resolves to a service OpenAPI route and every `UNVERIFIED_PATHS` call still has none | built | `load/tools/verify_paths.py`; `load/tools/test_verify_paths.py` runs it on this branch's specs, so a renamed route or a newly published one fails the test |
-| Campaign edge check: `verify_paths.py --gateway deploy/gateway` fails every `PATHS` call that no HTTPRoute `/api/v1/...` prefix forwards; the run on main is recorded (slice 10) | built | `load/tools/verify_paths.py`, tests in `load/tools/test_verify_paths.py`; record in `load/PATH-CHECK.md` (services pass, edge 0 of 10) |
+| Campaign edge check: `verify_paths.py --gateway deploy/gateway` fails every `PATHS` call that no HTTPRoute `/api/v1/...` prefix forwards; the run on main is recorded (slice 10, re-run at `8e452b55` in slice 11 with the same result) | built | `load/tools/verify_paths.py`, tests in `load/tools/test_verify_paths.py`; record in `load/PATH-CHECK.md` (services pass, edge 0 of 10) |
 | Gateway HTTPRoutes for the campaign's contexts: ledger, pricing, sales, party, analytics, planning, and the two prefixes named differently from their service (`/api/v1/data` served by metadata, `/api/v1/controlling` served by costacct) | handoff (wave 1, `deploy/gateway` owner) | `deploy/gateway/httproutes.yaml` routes only org, fx and receiving, so every campaign request is a 404 at the edge; the gateway test ties each route's name and backend to its prefix, so `data` and `controlling` need an alias or an exception. Found by `verify_paths.py --gateway` (`load/PATH-CHECK.md`) |
 
 ## Deliverable 2: multi-region and DR

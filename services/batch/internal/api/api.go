@@ -255,8 +255,9 @@ func (a *API) getJob(w http.ResponseWriter, r *http.Request) {
 }
 
 type runRequest struct {
-	Rows   int64           `json:"rows"`
-	Params json.RawMessage `json:"params"`
+	Rows          int64           `json:"rows"`
+	Params        json.RawMessage `json:"params"`
+	LegalEntityID string          `json:"legalEntityId"`
 }
 
 func (a *API) startRun(w http.ResponseWriter, r *http.Request) {
@@ -269,7 +270,7 @@ func (a *API) startRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p, _ := tenant.FromContext(r.Context())
-	run, err := a.store.StartRun(r.Context(), chi.URLParam(r, "code"), req.Rows, p.UserID, req.Params)
+	run, err := a.store.StartRun(r.Context(), chi.URLParam(r, "code"), store.RunInput{Rows: req.Rows, TriggeredBy: p.UserID, Params: req.Params, LegalEntityID: req.LegalEntityID})
 	if err != nil {
 		a.failed.Add(1)
 		httpx.Fail(w, r, err)

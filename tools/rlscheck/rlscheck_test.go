@@ -26,6 +26,7 @@ const (
 	problemNoTenantPol = "no-tenant-policy"
 	problemNoEntityPol = "no-legal-entity-policy"
 	problemExtraPolicy = "extra-permissive-policy"
+	problemNullEntity  = "null-admitting-legal-entity-policy"
 )
 
 type tableFacts struct {
@@ -37,6 +38,7 @@ type tableFacts struct {
 	HasEntity    bool
 	EntityPolicy bool
 	ExtraPolicy  bool
+	NullEntity   bool
 }
 
 type violation struct {
@@ -65,7 +67,9 @@ select c.relname, c.relrowsecurity, c.relforcerowsecurity,
           and (p.with_check is null or p.with_check like '%passage.legal_entity_scopes%')),
   exists (select 1 from pg_policies p where p.schemaname = n.nspname and p.tablename = c.relname and p.permissive = 'PERMISSIVE'
           and (p.roles = '{public}' or 'passage_app' = any (p.roles))
-          and (coalesce(p.qual, '') || ' ' || coalesce(p.with_check, '')) !~ '` + tenantColumn + `')
+          and (coalesce(p.qual, '') || ' ' || coalesce(p.with_check, '')) !~ '` + tenantColumn + `'),
+  exists (select 1 from pg_policies p where p.schemaname = n.nspname and p.tablename = c.relname and p.permissive = 'RESTRICTIVE'
+          and p.qual ~* 'legal_entity_id[[:space:])]+is[[:space:]]+null')
 from pg_class c
 join pg_namespace n on n.oid = c.relnamespace
 where n.nspname = $1 and c.relkind in ('r', 'p') and not c.relispartition and c.relname <> 'schema_migrations'
@@ -161,7 +165,7 @@ func collect(t *testing.T, ctx context.Context, pool *pgxpool.Pool, service, sch
 	tables := 0
 	for rows.Next() {
 		var f tableFacts
-		if err := rows.Scan(&f.Name, &f.Enabled, &f.Forced, &f.HasTenantID, &f.TenantPolicy, &f.HasEntity, &f.EntityPolicy, &f.ExtraPolicy); err != nil {
+		if err := rows.Scan(&f.Name, &f.Enabled, &f.Forced, &f.HasTenantID, &f.TenantPolicy, &f.HasEntity, &f.EntityPolicy, &f.ExtraPolicy, &f.NullEntity); err != nil {
 			t.Fatal(err)
 		}
 		tables++
@@ -189,6 +193,9 @@ func judge(service string, f tableFacts) []violation {
 	}
 	if f.ExtraPolicy {
 		add(problemExtraPolicy)
+	}
+	if f.NullEntity {
+		add(problemNullEntity)
 	}
 	return out
 }
@@ -287,6 +294,7 @@ func TestFixtureViolationsArePinned(t *testing.T) {
 		"fixture.bad_column:" + problemNoTenantPol,
 		"fixture.extra_true:" + problemExtraPolicy,
 		"fixture.insert_true:" + problemExtraPolicy,
+		"fixture.null_admitting:" + problemNullEntity,
 		"fixture.select_restrictive:" + problemNoEntityPol,
 	}
 	if strings.Join(keys, "\n") != strings.Join(want, "\n") {

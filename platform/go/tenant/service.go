@@ -50,7 +50,7 @@ var (
 // policies/authz/data.json "service_grants" mirrors it and a test keeps them equal.
 var serviceGrants = map[string]map[string][]string{
 	"batch": {
-		"product": {"product.read", "product.write", "product.jobs.write"},
+		"product": {"product.variants.explode", "product.released.read", "product.jobs.write"},
 	},
 	"receiving": {
 		"ledger": {"ledger.journal.post", "ledger.journal.reverse"},
@@ -154,7 +154,17 @@ func ServiceSignerFromEnv(getenv func(string) string) (*ServiceSigner, error) {
 // entity must be explicit: legalEntity when non-empty, else p's, and it must be
 // exactly one legal entity.
 func (s *ServiceSigner) Mint(aud string, p Principal, legalEntity string) (string, error) {
+	return s.MintDuties(aud, p, legalEntity, nil)
+}
+
+// MintDuties is Mint restricted to the given duties: the token carries the
+// intersection of duties and the service's grant for aud, never more than the
+// grant. A nil duties means the whole grant.
+func (s *ServiceSigner) MintDuties(aud string, p Principal, legalEntity string, only []string) (string, error) {
 	duties := serviceGrant(s.name, aud)
+	if only != nil {
+		duties = slices.DeleteFunc(slices.Clone(duties), func(d string) bool { return !slices.Contains(only, d) })
+	}
 	if len(duties) == 0 {
 		return "", fmt.Errorf("%w: %s -> %s", ErrNoServiceGrant, s.name, aud)
 	}
@@ -213,10 +223,15 @@ func onlyReads(duties []string) bool {
 // A nil signer reports signed=false and touches nothing, so the caller can fall
 // back to forwarding the end user's own headers.
 func (s *ServiceSigner) Apply(req *http.Request, p Principal, aud, legalEntity string) (signed bool, err error) {
+	return s.ApplyDuties(req, p, aud, legalEntity, nil)
+}
+
+// ApplyDuties is Apply with the token restricted to the given duties (see MintDuties).
+func (s *ServiceSigner) ApplyDuties(req *http.Request, p Principal, aud, legalEntity string, only []string) (signed bool, err error) {
 	if s == nil {
 		return false, nil
 	}
-	token, err := s.Mint(aud, p, legalEntity)
+	token, err := s.MintDuties(aud, p, legalEntity, only)
 	if err != nil {
 		return false, err
 	}

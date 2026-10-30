@@ -11,9 +11,13 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 )
 
-func batchCall(t *testing.T, signer *tenant.ServiceSigner, method, path, body string, headers map[string]string) *httptest.ResponseRecorder {
+func batchCall(t *testing.T, signer *tenant.ServiceSigner, method, path, body string, headers map[string]string, only ...string) *httptest.ResponseRecorder {
 	t.Helper()
-	token, err := signer.Mint("product", tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: testkit.TenantID(9), UserID: testkit.TenantID(8)}, "")
+	var duties []string
+	if len(only) > 0 {
+		duties = only
+	}
+	token, err := signer.MintDuties("product", tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: testkit.TenantID(9), UserID: testkit.TenantID(8)}, "", duties)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,6 +43,24 @@ func TestBatchServiceTokenReadsReleasedProductsButCannotReleaseOrSmuggleUserDuti
 	}
 	if rec := batchCall(t, batch, http.MethodPost, "/v1/product/releases", `{}`, map[string]string{tenant.HeaderDuties: "product.release", tenant.HeaderTenant: testkit.TenantID(1)}); rec.Code != http.StatusForbidden {
 		t.Fatalf("batch holds no release duty and its token replaces user headers: %d %s", rec.Code, rec.Body)
+	}
+
+	for _, c := range []struct{ method, path string }{
+		{http.MethodPost, "/v1/product/products"},
+		{http.MethodGet, "/v1/product/products"},
+		{http.MethodGet, "/v1/product/products/" + testkit.TenantID(50)},
+		{http.MethodPost, "/v1/product/products/" + testkit.TenantID(50) + "/attributes"},
+		{http.MethodPost, "/v1/product/products/" + testkit.TenantID(50) + "/identifiers"},
+	} {
+		if rec := batchCall(t, batch, c.method, c.path, `{}`, nil); rec.Code != http.StatusForbidden {
+			t.Errorf("%s %s with the whole batch grant = %d; batch must not reach product's broad routes", c.method, c.path, rec.Code)
+		}
+	}
+	if rec := batchCall(t, batch, http.MethodPost, "/v1/product/products/"+testkit.TenantID(50)+"/variants:explode", `{"selected":{}}`, nil); rec.Code == http.StatusForbidden || rec.Code == http.StatusUnauthorized {
+		t.Errorf("the explode route must accept product.variants.explode, got %d", rec.Code)
+	}
+	if rec := batchCall(t, batch, http.MethodGet, "/v1/product/released-products", "", nil, "product.jobs.write"); rec.Code != http.StatusForbidden {
+		t.Errorf("a token narrowed to jobs.write must not read released products, got %d", rec.Code)
 	}
 
 	_, strangerKey, _ := ed25519.GenerateKey(nil)

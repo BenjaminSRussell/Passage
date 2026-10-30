@@ -19,17 +19,18 @@ import (
 )
 
 type fakeStore struct {
-	err     error
-	ping    error
-	def     store.Definition
-	inst    store.Instance
-	items   []store.WorkItem
-	job     store.Job
-	run     store.Run
-	msg     store.Message
-	schema  schema.JSONSchema
-	overlap bool
-	params  json.RawMessage
+	err         error
+	ping        error
+	def         store.Definition
+	inst        store.Instance
+	items       []store.WorkItem
+	job         store.Job
+	run         store.Run
+	msg         store.Message
+	schema      schema.JSONSchema
+	overlap     bool
+	params      json.RawMessage
+	legalEntity string
 }
 
 func (f *fakeStore) Ping(context.Context) error { return f.ping }
@@ -77,8 +78,8 @@ func (f *fakeStore) SaveJob(_ context.Context, job store.Job) (store.Job, error)
 	return job, nil
 }
 func (f *fakeStore) GetJob(context.Context, string) (store.Job, error) { return f.job, f.err }
-func (f *fakeStore) StartRun(_ context.Context, _ string, _ int64, _ string, params json.RawMessage) (store.Run, error) {
-	f.params = params
+func (f *fakeStore) StartRun(_ context.Context, _ string, in store.RunInput) (store.Run, error) {
+	f.params, f.legalEntity = in.Params, in.LegalEntityID
 	if f.overlap {
 		return store.Run{}, httpx.NewProblem(http.StatusConflict, domain.CodeRunOverlap, "job already has a running instance")
 	}

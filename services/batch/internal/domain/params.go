@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
 )
@@ -25,6 +26,37 @@ type ExplodeParams struct {
 
 func IsProductHandler(handler string) bool {
 	return handler == HandlerProductExplode || handler == HandlerProductGroupChange
+}
+
+var (
+	dutyExplode      = "product.variants.explode"
+	dutyReleasedRead = "product.released.read"
+	dutyJobsWrite    = "product.jobs.write"
+
+	productRequirements = map[string][][]string{
+		HandlerProductExplode:     {{dutyExplode, "product.write"}},
+		HandlerProductGroupChange: {{dutyReleasedRead, "product.read"}, {dutyJobsWrite}},
+	}
+	productServiceDuties = map[string][]string{
+		HandlerProductExplode:     {dutyExplode},
+		HandlerProductGroupChange: {dutyReleasedRead, dutyJobsWrite},
+	}
+)
+
+// ProductServiceDuties returns the route-scoped product duties a run of handler
+// needs, and whether held (the caller's own duties) covers every requirement:
+// each requirement is met by the scoped duty or its broad product equivalent.
+func ProductServiceDuties(handler string, held func(string) bool) ([]string, bool) {
+	for _, anyOf := range productRequirements[handler] {
+		met := false
+		for _, d := range anyOf {
+			met = met || held(d)
+		}
+		if !met {
+			return nil, false
+		}
+	}
+	return append([]string(nil), productServiceDuties[handler]...), len(productServiceDuties[handler]) > 0
 }
 
 func noParams(raw json.RawMessage) bool {
@@ -59,7 +91,7 @@ func validateExplode(raw json.RawMessage, fields map[string]string) {
 	var in ExplodeParams
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
-	if noParams(raw) || dec.Decode(&in) != nil {
+	if noParams(raw) || dec.Decode(&in) != nil || dec.Decode(&struct{}{}) != io.EOF {
 		fields["params"] = `must be an object {"masterId": uuid, "selected": {axis: [values]}}`
 		return
 	}

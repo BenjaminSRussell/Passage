@@ -16,6 +16,8 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 )
 
+var dispatchHandlers = []string{HandlerProductExplode, HandlerProductGroupChange}
+
 const (
 	DefaultDispatchInterval    = 5 * time.Second
 	DefaultDispatchConcurrency = 4
@@ -29,10 +31,13 @@ type Runnable struct {
 	Handler       string
 	LegalEntityID string
 	UserID        string
+	Duties        []string
 }
 
 type RunSource interface {
 	Runnable(ctx context.Context, handlers []string, maxAttempts int, retryAfter time.Duration, limit int) ([]Runnable, error)
+	FailExhausted(ctx context.Context, handlers []string, maxAttempts int) ([]Runnable, error)
+	CanScan(ctx context.Context) (bool, error)
 }
 
 type RunExecutor interface {
@@ -44,7 +49,7 @@ type PgRunSource struct{ pool *pgxpool.Pool }
 func NewPgRunSource(pool *pgxpool.Pool) *PgRunSource { return &PgRunSource{pool: pool} }
 
 func (s *PgRunSource) Runnable(ctx context.Context, handlers []string, maxAttempts int, retryAfter time.Duration, limit int) ([]Runnable, error) {
-	rows, err := s.pool.Query(ctx, `select tenant_id::text, run_id::text, handler, legal_entity_id::text, triggered_by::text
+	rows, err := s.pool.Query(ctx, `select tenant_id::text, run_id::text, handler, legal_entity_id::text, triggered_by::text, service_duties
 		from batch_dispatchable_runs($1, $2, $3, $4)`, handlers, maxAttempts, int(retryAfter.Seconds()), limit)
 	if err != nil {
 		return nil, fmt.Errorf("find runnable runs: %w", err)
@@ -53,12 +58,35 @@ func (s *PgRunSource) Runnable(ctx context.Context, handlers []string, maxAttemp
 	var out []Runnable
 	for rows.Next() {
 		var r Runnable
-		if err := rows.Scan(&r.TenantID, &r.RunID, &r.Handler, &r.LegalEntityID, &r.UserID); err != nil {
+		if err := rows.Scan(&r.TenantID, &r.RunID, &r.Handler, &r.LegalEntityID, &r.UserID, &r.Duties); err != nil {
 			return nil, fmt.Errorf("scan runnable run: %w", err)
 		}
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+func (s *PgRunSource) FailExhausted(ctx context.Context, handlers []string, maxAttempts int) ([]Runnable, error) {
+	rows, err := s.pool.Query(ctx, `select tenant_id::text, run_id::text from batch_fail_exhausted_runs($1, $2)`, handlers, maxAttempts)
+	if err != nil {
+		return nil, fmt.Errorf("fail exhausted runs: %w", err)
+	}
+	defer rows.Close()
+	var out []Runnable
+	for rows.Next() {
+		var r Runnable
+		if err := rows.Scan(&r.TenantID, &r.RunID); err != nil {
+			return nil, fmt.Errorf("scan exhausted run: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (s *PgRunSource) CanScan(ctx context.Context) (bool, error) {
+	var ok bool
+	err := s.pool.QueryRow(ctx, `select batch_dispatch_can_scan()`).Scan(&ok)
+	return ok, err
 }
 
 // Dispatcher finds executing or retryable runs of the product handlers and runs
@@ -72,14 +100,18 @@ type Dispatcher struct {
 	MaxAttempts int
 	RetryAfter  time.Duration
 
-	inflight sync.Map
-	active   atomic.Int64
-	started  atomic.Int64
-	ended    atomic.Int64
-	failed   atomic.Int64
-	refused  atomic.Int64
-	scanErrs atomic.Int64
+	inflight  sync.Map
+	active    atomic.Int64
+	started   atomic.Int64
+	ended     atomic.Int64
+	failed    atomic.Int64
+	refused   atomic.Int64
+	scanErrs  atomic.Int64
+	exhausted atomic.Int64
+	scanBlind atomic.Int64
 }
+
+func (d *Dispatcher) Refused() int64 { return d.refused.Load() }
 
 func (d *Dispatcher) Run(ctx context.Context) {
 	interval := d.Interval
@@ -90,6 +122,7 @@ func (d *Dispatcher) Run(ctx context.Context) {
 	defer ticker.Stop()
 	var wg sync.WaitGroup
 	defer wg.Wait()
+	d.selfCheck(ctx)
 	for {
 		d.tick(ctx, &wg)
 		select {
@@ -101,12 +134,27 @@ func (d *Dispatcher) Run(ctx context.Context) {
 	}
 }
 
+// selfCheck warns, and raises batch_dispatch_scan_blind, when the function that
+// lists runs across tenants cannot see past row-level security (its owner is
+// neither superuser nor BYPASSRLS), in which case no run would ever be found.
+func (d *Dispatcher) selfCheck(ctx context.Context) {
+	ok, err := d.Source.CanScan(ctx)
+	switch {
+	case err != nil:
+		slog.Error("batch dispatcher self-check failed", "err", err)
+	case !ok:
+		d.scanBlind.Store(1)
+		slog.Error("batch dispatcher is blind: the owner of batch_dispatchable_runs cannot bypass row-level security, so it will find no runs; migrate as a superuser or BYPASSRLS role")
+	}
+}
+
 func (d *Dispatcher) tick(ctx context.Context, wg *sync.WaitGroup) {
+	d.failExhausted(ctx)
 	slots := d.limit() - int(d.active.Load())
 	if slots <= 0 || ctx.Err() != nil {
 		return
 	}
-	runs, err := d.Source.Runnable(ctx, []string{HandlerProductExplode, HandlerProductGroupChange}, d.attempts(), d.retryAfter(), slots)
+	runs, err := d.Source.Runnable(ctx, dispatchHandlers, d.attempts(), d.retryAfter(), slots)
 	if err != nil {
 		if ctx.Err() == nil {
 			d.scanErrs.Add(1)
@@ -132,8 +180,20 @@ func (d *Dispatcher) tick(ctx context.Context, wg *sync.WaitGroup) {
 	}
 }
 
+func (d *Dispatcher) failExhausted(ctx context.Context) {
+	failed, err := d.Source.FailExhausted(ctx, dispatchHandlers, d.attempts())
+	if err != nil && ctx.Err() == nil {
+		d.scanErrs.Add(1)
+		slog.Error("batch dispatcher could not fail exhausted runs", "err", err)
+	}
+	for _, r := range failed {
+		d.exhausted.Add(1)
+		slog.Error("batch run failed: dispatch attempts exhausted", "runId", r.RunID, "tenantId", r.TenantID, "maxAttempts", d.attempts(), "correlationId", "batch-run-"+r.RunID)
+	}
+}
+
 func (d *Dispatcher) execute(ctx context.Context, r Runnable) {
-	ctx = tenant.With(ctx, tenant.Principal{TenantID: r.TenantID, LegalEntityID: r.LegalEntityID, UserID: r.UserID, Service: "batch"})
+	ctx = tenant.With(ctx, tenant.Principal{TenantID: r.TenantID, LegalEntityID: r.LegalEntityID, UserID: r.UserID, Service: "batch", Duties: dutySet(r.Duties)})
 	ctx = context.WithValue(ctx, middleware.RequestIDKey, "batch-run-"+r.RunID)
 	log := slog.With("runId", r.RunID, "tenantId", r.TenantID, "handler", r.Handler, "correlationId", "batch-run-"+r.RunID)
 	d.started.Add(1)
@@ -150,6 +210,14 @@ func (d *Dispatcher) execute(ctx context.Context, r Runnable) {
 		d.ended.Add(1)
 		log.Info("batch run ended", "pages", summary.Pages, "items", summary.Items, "succeeded", summary.Succeeded, "skipped", summary.Skipped, "durationMs", time.Since(start).Milliseconds())
 	}
+}
+
+func dutySet(duties []string) map[string]struct{} {
+	out := make(map[string]struct{}, len(duties))
+	for _, d := range duties {
+		out[d] = struct{}{}
+	}
+	return out
 }
 
 func (d *Dispatcher) limit() int {
@@ -185,6 +253,8 @@ func (d *Dispatcher) Metrics() http.Handler {
 			{"batch_dispatch_ended_total", "counter", "Dispatched runs that ended cleanly.", d.ended.Load()},
 			{"batch_dispatch_failed_total", "counter", "Dispatched runs that ended in error.", d.failed.Load()},
 			{"batch_dispatch_refused_total", "counter", "Runs another worker held or that were no longer executable.", d.refused.Load()},
+			{"batch_dispatch_exhausted_total", "counter", "Runs moved to failed after using every dispatch attempt.", d.exhausted.Load()},
+			{"batch_dispatch_scan_blind", "gauge", "1 when the cross-tenant scan cannot bypass row-level security.", d.scanBlind.Load()},
 			{"batch_dispatch_scan_errors_total", "counter", "Failed scans for runnable runs.", d.scanErrs.Load()},
 		} {
 			_, _ = fmt.Fprintf(w, "# HELP %[1]s %[3]s\n# TYPE %[1]s %[2]s\n%[1]s %[4]d\n", m.name, m.kind, m.help, m.value)

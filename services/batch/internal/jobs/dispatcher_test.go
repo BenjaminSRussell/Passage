@@ -3,6 +3,7 @@ package jobs_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sort"
 	"sync"
 	"testing"
@@ -66,7 +67,7 @@ func TestRunnableFindsOnlyExecutableUnclaimedRunsAcrossTenants(t *testing.T) {
 	if _, err := runs.SaveJob(scoped(1), store.Job{Code: "synthetic", Handler: "synthetic.rows"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runs.StartRun(scoped(1), "synthetic", 10, testkit.TenantID(8), nil); err != nil {
+	if _, err := runs.StartRun(scoped(1), "synthetic", store.RunInput{Rows: 10, TriggeredBy: testkit.TenantID(8)}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -87,7 +88,7 @@ func TestRunnableFindsOnlyExecutableUnclaimedRunsAcrossTenants(t *testing.T) {
 		t.Fatalf("limit not applied: %d, %v", len(found), err)
 	}
 	for _, r := range found {
-		if r.RunID == fresh.ID && (r.TenantID != testkit.TenantID(1) || r.LegalEntityID != testkit.TenantID(9) || r.UserID != testkit.TenantID(8) || r.Handler != jobs.HandlerProductGroupChange) {
+		if r.RunID == fresh.ID && (!reflect.DeepEqual(r.Duties, []string{"product.released.read", "product.jobs.write"}) || r.TenantID != testkit.TenantID(1) || r.LegalEntityID != testkit.TenantID(9) || r.UserID != testkit.TenantID(8) || r.Handler != jobs.HandlerProductGroupChange) {
 			t.Fatalf("runnable row = %+v", r)
 		}
 	}
@@ -145,6 +146,9 @@ func TestDispatcherRunsEveryRunnableRunAsTheCreatorsServicePrincipal(t *testing.
 	cancel()
 	<-stopped
 
+	if got := recorder.seen[explode.ID]; len(got.Duties) != 1 || !got.HasDuty("product.variants.explode") {
+		t.Fatalf("explode run principal holds %v; want only its stored duty", got.Duties)
+	}
 	if got := recorder.seen[group.ID]; got.TenantID != testkit.TenantID(1) || got.LegalEntityID != testkit.TenantID(9) || got.UserID != testkit.TenantID(8) {
 		t.Fatalf("group principal = %+v", got)
 	}
@@ -220,9 +224,11 @@ func TestTwoDispatchersNeverRunTheSameRunTwice(t *testing.T) {
 	}
 	shared := &perRunProduct{delay: 40 * time.Millisecond, calls: map[string]int{}}
 	pages := jobs.NewPgPageStore(app)
+	barrier := &sync.WaitGroup{}
+	barrier.Add(2)
 	replicas := []*jobs.Dispatcher{
-		{Source: jobs.NewPgRunSource(app), Executor: shared.executor(pages), Interval: 5 * time.Millisecond, Concurrency: 4},
-		{Source: jobs.NewPgRunSource(app), Executor: shared.executor(pages), Interval: 5 * time.Millisecond, Concurrency: 4},
+		{Source: &barrierSource{PgRunSource: jobs.NewPgRunSource(app), barrier: barrier}, Executor: shared.executor(pages), Interval: 5 * time.Millisecond, Concurrency: 4},
+		{Source: &barrierSource{PgRunSource: jobs.NewPgRunSource(app), barrier: barrier}, Executor: shared.executor(pages), Interval: 5 * time.Millisecond, Concurrency: 4},
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -242,6 +248,9 @@ func TestTwoDispatchersNeverRunTheSameRunTwice(t *testing.T) {
 	cancel()
 	wg.Wait()
 
+	if refused := replicas[0].Refused() + replicas[1].Refused(); refused == 0 {
+		t.Error("both replicas saw the same runs at once, so one of them must have been refused a claim")
+	}
 	shared.mu.Lock()
 	defer shared.mu.Unlock()
 	for _, id := range ids {
@@ -252,6 +261,18 @@ func TestTwoDispatchersNeverRunTheSameRunTwice(t *testing.T) {
 			t.Errorf("run %s made %d group-change calls, want 2 (one worker, two pages)", id, shared.calls[id])
 		}
 	}
+}
+
+type barrierSource struct {
+	*jobs.PgRunSource
+	barrier *sync.WaitGroup
+	once    sync.Once
+}
+
+func (b *barrierSource) Runnable(ctx context.Context, handlers []string, maxAttempts int, retryAfter time.Duration, limit int) ([]jobs.Runnable, error) {
+	found, err := b.PgRunSource.Runnable(ctx, handlers, maxAttempts, retryAfter, limit)
+	b.once.Do(func() { b.barrier.Done(); b.barrier.Wait() })
+	return found, err
 }
 
 type blockUntilCanceled struct {
@@ -350,4 +371,46 @@ func TestConcurrentClaimsAdmitExactlyOneWorker(t *testing.T) {
 	if err := admin.QueryRow(context.Background(), `select attempts from batch_run where id = $1`, run.ID).Scan(&attempts); err != nil || attempts != 1 {
 		t.Fatalf("attempts = %d, %v; only the winning claim counts", attempts, err)
 	}
+}
+
+func TestExhaustedRunsBecomeFailedAndTheScanSeesPastRowSecurity(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	runs := store.New(app)
+	src := jobs.NewPgRunSource(app)
+	if ok, err := src.CanScan(context.Background()); err != nil || !ok {
+		t.Fatalf("CanScan = %v, %v", ok, err)
+	}
+	stuck := startProductRun(t, runs, scoped(1), "stuck", jobs.HandlerProductGroupChange)
+	setRun(t, admin, stuck.ID, "attempts = 5, status = 'error', ended_at = now()")
+	busy := startProductRun(t, runs, scoped(1), "busy", jobs.HandlerProductGroupChange)
+	setRun(t, admin, busy.ID, "attempts = 5, claimed_until = now() + interval '5 minutes'")
+	fine := startProductRun(t, runs, scoped(1), "fine", jobs.HandlerProductGroupChange)
+
+	failed, err := src.FailExhausted(context.Background(), dispatchHandlers, 5)
+	if err != nil || len(failed) != 1 || failed[0].RunID != stuck.ID {
+		t.Fatalf("failed = %+v, %v", failed, err)
+	}
+	if got := runStatus(t, runs, scoped(1), stuck.ID); got.Status != domain.RunFailed {
+		t.Fatalf("stuck run = %+v", got)
+	}
+	if got := runStatus(t, runs, scoped(1), busy.ID); got.Status != domain.RunExecuting {
+		t.Fatalf("a run another worker holds must not be failed: %+v", got)
+	}
+	if ids := runnableIDs(t, src); len(ids) != 1 || ids[0] != fine.ID {
+		t.Fatalf("runnable after failing = %v", ids)
+	}
+
+	d := &jobs.Dispatcher{Source: src, Executor: executorFunc(func(context.Context, string, string) (jobs.Summary, error) { return jobs.Summary{}, nil }), Interval: time.Hour, MaxAttempts: 5}
+	setRun(t, admin, fine.ID, "attempts = 5")
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
+	go func() { d.Run(ctx); close(stopped) }()
+	waitFor(t, "the dispatcher to fail the exhausted run", func() bool {
+		return runStatus(t, runs, scoped(1), fine.ID).Status == domain.RunFailed
+	})
+	cancel()
+	<-stopped
 }

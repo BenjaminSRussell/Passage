@@ -21,7 +21,7 @@ import (
 func scoped(tenantN int) context.Context {
 	return tenant.With(context.Background(), tenant.Principal{
 		TenantID: testkit.TenantID(tenantN), LegalEntityID: testkit.TenantID(9), UserID: testkit.TenantID(8),
-		Duties: map[string]struct{}{"batch.write": {}},
+		Duties: map[string]struct{}{"batch.write": {}, "product.write": {}, "product.read": {}, "product.jobs.write": {}},
 	})
 }
 
@@ -34,7 +34,7 @@ func startProductRun(t *testing.T, s *store.Postgres, ctx context.Context, code,
 	if handler == jobs.HandlerProductExplode {
 		params = explodeParams()
 	}
-	run, err := s.StartRun(ctx, code, 0, testkit.TenantID(8), params)
+	run, err := s.StartRun(ctx, code, store.RunInput{TriggeredBy: testkit.TenantID(8), Params: params})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -53,6 +53,7 @@ type quarantineDTO struct {
 	Status     string     `json:"status"`
 	Party      string     `json:"party,omitempty"`
 	Account    string     `json:"account,omitempty"`
+	Dimensions string     `json:"dimensions,omitempty"`
 	Currency   string     `json:"currency,omitempty"`
 	Amount     string     `json:"amount"`
 	Released   *recordDTO `json:"released,omitempty"`
@@ -73,15 +74,18 @@ type runDTO struct {
 	RecordsQuarantined int       `json:"recordsQuarantined"`
 	AlreadyPresent     int       `json:"alreadyPresent"`
 	Message            string    `json:"message,omitempty"`
+	OpenItemsRunID     string    `json:"openItemsRunId,omitempty"`
 	Version            int       `json:"version"`
 	CreatedAt          time.Time `json:"createdAt"`
 }
 
-// runDetailDTO is a run with its control totals and quarantined records.
+// runDetailDTO is a run with its control totals and quarantined records. MismatchMessages holds
+// MIG-1506 for every control account whose open items differ from the migrated GL balance.
 type runDetailDTO struct {
 	runDTO
-	ControlTotals []totalDTO      `json:"controlTotals"`
-	Quarantined   []quarantineDTO `json:"quarantined"`
+	ControlTotals    []totalDTO      `json:"controlTotals"`
+	Quarantined      []quarantineDTO `json:"quarantined"`
+	MismatchMessages []string        `json:"mismatchMessages,omitempty"`
 }
 
 func toTotalDTO(t domain.ControlTotal) totalDTO {
@@ -94,7 +98,7 @@ func toRunSummary(run domain.PackRun) runDTO {
 		RunID: run.RunID, Pack: string(run.Pack), SourceSystem: string(run.SourceSystem), SourceCompany: run.SourceCompany,
 		CutoffTS: run.CutoffTS, InputHash: run.InputHash, Status: string(run.Status), RecordsIn: run.RecordsIn,
 		RecordsLoaded: run.RecordsLoaded, RecordsQuarantined: run.RecordsQuarantined, AlreadyPresent: run.AlreadyPresent,
-		Message: run.Message(), Version: run.Version, CreatedAt: run.CreatedAt,
+		Message: run.Message(), OpenItemsRunID: run.OpenItemsRunID, Version: run.Version, CreatedAt: run.CreatedAt,
 	}
 }
 
@@ -104,7 +108,7 @@ func toRecordDTO(r domain.Record) recordDTO {
 
 func toQuarantineDTO(q domain.Quarantined) quarantineDTO {
 	out := quarantineDTO{Seq: q.Seq, LegacyID: q.Record.LegacyID, Rule: q.Rule, Reason: q.Reason, Status: q.Status,
-		Party: q.Record.Party, Account: q.Record.Account, Currency: q.Record.Currency, Amount: q.Record.Amount.StringFixed(6),
+		Party: q.Record.Party, Account: q.Record.Account, Dimensions: q.Record.Dimensions, Currency: q.Record.Currency, Amount: q.Record.Amount.StringFixed(6),
 		ReleasedBy: q.ReleasedBy, ReleasedAt: q.ReleasedAt}
 	if q.Released != nil {
 		rel := toRecordDTO(*q.Released)
@@ -117,6 +121,9 @@ func toRunDTO(run domain.PackRun) runDetailDTO {
 	out := runDetailDTO{runDTO: toRunSummary(run), ControlTotals: []totalDTO{}, Quarantined: []quarantineDTO{}}
 	for _, t := range run.Totals {
 		out.ControlTotals = append(out.ControlTotals, toTotalDTO(t))
+		if t.Name == domain.ControlAccountName && t.Status == domain.StatusMismatch {
+			out.MismatchMessages = append(out.MismatchMessages, domain.ControlAccountMessage(t))
+		}
 	}
 	for _, q := range run.Quarantined {
 		out.Quarantined = append(out.Quarantined, toQuarantineDTO(q))
@@ -145,7 +152,8 @@ func keyed(records []domain.Record) []domain.Keyed {
 	return out
 }
 
-// startPackRun validates an open_items extract, quarantines failing records, loads the rest
+// startPackRun starts a run of an available pack; gl_balances and project_wip have their own
+// request shapes. For open_items it validates the extract, quarantines failing records, loads the rest
 // idempotently by legacy_xref and reconciles (FR-49.2, FR-49.10, FR-49.11).
 func (s *Server) startPackRun(w http.ResponseWriter, r *http.Request) {
 	pack, err := domain.ParsePack(chi.URLParam(r, "pack"))
@@ -154,11 +162,15 @@ func (s *Server) startPackRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !domain.PackAvailable(pack) {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeUnsupported, "pack "+string(pack)+" is not available yet; open_items and project_wip run"))
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, CodeUnsupported, "pack "+string(pack)+" is not available yet; open_items, gl_balances and project_wip run"))
 		return
 	}
-	if pack == domain.PackProjectWIP {
+	switch pack {
+	case domain.PackProjectWIP:
 		s.startProjectRun(w, r)
+		return
+	case domain.PackGLBalances:
+		s.startGLRun(w, r)
 		return
 	}
 	var req packRunRequest

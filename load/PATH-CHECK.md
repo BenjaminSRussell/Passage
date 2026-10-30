@@ -1,8 +1,9 @@
 # Campaign route check (PSG-50, FR-50.1)
 
-Record of `load/tools/verify_paths.py` run on 2026-10-29 against main at `ba93dd3e` (wave 50 slice 10). It is a
-snapshot: `load/tools/test_verify_paths.py` re-runs the service check on every test run, so a renamed or newly
-published route fails the tests before this file goes stale. Re-run both commands below before a campaign and
+Record of `load/tools/verify_paths.py` run on 2026-10-29 against main at `8e452b55` (re-run in wave 50 slice 11;
+first recorded in slice 10 at `ba93dd3e`). It is a snapshot: `load/tools/test_verify_paths.py` re-runs the
+service check on every test run, so a renamed or newly published route fails the tests before this file goes
+stale. Re-run both commands below before a campaign and
 replace the tables with their output.
 
 ```
@@ -34,7 +35,7 @@ service check strips `/api` and looks the method and path up in `services/*/api/
 | `UNVERIFIED_PATHS.freshness` | `GET /api/v1/analytics/freshness` | none (expected) | not checked |
 
 Service check: all 14 requests pass (10 resolve, 4 still unpublished as `UNVERIFIED_PATHS` expects), against
-1507 service operations.
+1518 service operations (1507 at `ba93dd3e`; the routes the campaign calls did not change).
 
 Edge check: 0 of 10 `PATHS` requests are forwarded. `deploy/gateway/httproutes.yaml` routes only `/api/v1/org`,
 `/api/v1/fx` and `/api/v1/receiving`, so every campaign request would get a 404 at the gateway.
