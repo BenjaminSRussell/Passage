@@ -170,3 +170,29 @@ type ConditionRecordWithdrawnData struct {
 	Version int    `json:"version"`
 	Reason  string `json:"reason"`
 }
+
+// Free goods rules (FR-26.22): a rule was created, or withdrawn. The sales cache drops its
+// free goods snapshot for the legal entity on either event.
+const (
+	FreeGoodsRuleCreated   = "dev.passage.pricing.freegoodsrule.created.v1"
+	FreeGoodsRuleWithdrawn = "dev.passage.pricing.freegoodsrule.withdrawn.v1"
+)
+
+// FreeGoodsRuleData is the payload of freegoodsrule.created and .withdrawn.
+type FreeGoodsRuleData struct {
+	RuleID        string `json:"rule_id"`
+	LegalEntityID string `json:"legal_entity_id"`
+	CustomerKind  string `json:"customer_kind"`
+	CustomerKey   string `json:"customer_key"`
+	ProductID     string `json:"product_id"`
+	Unit          string `json:"unit"`
+	Kind          string `json:"kind"`
+	CalcRule      string `json:"calc_rule"`
+	EveryQuantity string `json:"every_quantity"`
+	FreeQuantity  string `json:"free_quantity"`
+	MinQuantity   string `json:"min_quantity"`
+	ValidFrom     string `json:"valid_from"`
+	ValidTo       string `json:"valid_to"`
+	Withdrawn     bool   `json:"withdrawn"`
+	Version       int    `json:"version"`
+}

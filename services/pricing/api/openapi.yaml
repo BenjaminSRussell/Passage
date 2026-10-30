@@ -1230,6 +1230,97 @@ paths:
         "403": {$ref: "#/components/responses/Problem"}
         "404": {$ref: "#/components/responses/Problem"}
         "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/free-goods-rules:
+    get:
+      operationId: listFreeGoodsRules
+      summary: List free goods rules, latest start first, withdrawn included (FR-26.22).
+      x-passage-duty: pricing.view
+      parameters:
+        - {name: legalEntityId, in: query, required: false, description: "Only rules of this legal entity.", schema: {type: string, format: uuid}}
+        - {name: productId, in: query, required: false, description: "Only rules for this product.", schema: {type: string}}
+      responses:
+        "200":
+          description: Free goods rules (at most 100).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/FreeGoodsRule"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+    post:
+      operationId: createFreeGoodsRule
+      summary: >
+        Create a live free goods rule (FR-26.22, condition type FREE_GOODS): free units for
+        every N ordered of one product and unit, inclusive or exclusive, from a minimum quantity.
+        409 PRC-0002 when a live rule for the same customer, product and unit overlaps in time.
+        Writes dev.passage.pricing.freegoodsrule.created.v1.
+      x-passage-duty: pricing.maintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/FreeGoodsRuleInput"}
+      responses:
+        "201":
+          description: Created live at version 1.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/FreeGoodsRule"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/free-goods-rules/{id}:
+    get:
+      operationId: getFreeGoodsRule
+      summary: Read one free goods rule. 404 PRC-0047 when unknown.
+      x-passage-duty: pricing.view
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: The free goods rule.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/FreeGoodsRule"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/free-goods-rules/{id}:withdraw:
+    post:
+      operationId: withdrawFreeGoodsRule
+      summary: >
+        Withdraw a free goods rule: it takes no part in the next resolve. 409 PRC-0031 when
+        already withdrawn; 412 on a stale version. Writes dev.passage.pricing.freegoodsrule.withdrawn.v1.
+      x-passage-duty: pricing.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/VersionRequest"}
+      responses:
+        "200":
+          description: Withdrawn; version incremented.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/FreeGoodsRule"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
   /v1/pricing/campaigns:
     get:
       operationId: listCampaigns
@@ -1723,9 +1814,53 @@ components:
       properties:
         version: {type: integer, minimum: 1}
         reason: {type: string, description: "Optional, recorded on withdraw."}
+    FreeGoodsRule:
+      allOf:
+        - $ref: "#/components/schemas/FreeGoodsRuleInput"
+        - type: object
+          required: [id, withdrawn, version]
+          properties:
+            id: {type: string, format: uuid}
+            withdrawn: {type: boolean, description: "A withdrawn rule takes no part in resolve."}
+            version: {type: integer, minimum: 1}
+    FreeGoodsRuleInput:
+      type: object
+      required: [legalEntityId, customerKind, productId, unit, kind, everyQuantity, freeQuantity, validFrom, validTo]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        customerKind: {type: string, enum: [customer, customer_group, all]}
+        customerKey: {type: string, maxLength: 64, description: "Customer or customer group id; empty when customerKind is all."}
+        productId: {type: string, maxLength: 64}
+        unit: {type: string, maxLength: 16, description: "The rule applies to lines ordered in this unit."}
+        kind: {type: string, enum: [INCLUSIVE, EXCLUSIVE], description: "INCLUSIVE gives the free units out of the ordered quantity (1 free within every 10); EXCLUSIVE adds them on top (1 extra per 10)."}
+        calcRule: {type: string, enum: [PROPORTIONAL, UNIT_REFERENCE, WHOLE_UNITS], default: WHOLE_UNITS, description: "Defaults to WHOLE_UNITS (free_goods_calc_rule). PROPORTIONAL gives fractional free units (6 decimals); UNIT_REFERENCE rounds the proportional quantity down to whole units; WHOLE_UNITS counts only whole multiples of everyQuantity."}
+        everyQuantity: {type: string, description: "Ordered quantity that earns freeQuantity, decimal greater than 0."}
+        freeQuantity: {type: string, description: "Free units per everyQuantity, decimal greater than 0 (less than everyQuantity when INCLUSIVE)."}
+        minQuantity: {type: string, description: "Smallest ordered quantity that earns free goods; default 0."}
+        validFrom: {type: string, format: date}
+        validTo: {type: string, format: date, description: "Inclusive; not before validFrom."}
+    FreeGoodsProposal:
+      type: object
+      description: >
+        A zero-priced supplementary line proposal (FR-26.22) that w27 adds to the order (FR-27.14).
+        For INCLUSIVE the free units are part of orderedQuantity and pricedQuantity is what is charged
+        (25 ordered, 1 free per 10, WHOLE_UNITS: 23 priced, 2 free); the resolved line then carries
+        quantity = pricedQuantity and its net covers those units only, at the quantity break of the
+        ordered quantity. For EXCLUSIVE pricedQuantity equals orderedQuantity and the free units are extra.
+      required: [lineNo, productId, unit, ruleId, kind, orderedQuantity, pricedQuantity, freeQuantity]
+      properties:
+        lineNo: {type: integer}
+        productId: {type: string}
+        unit: {type: string}
+        ruleId: {type: string, format: uuid}
+        kind: {type: string, enum: [INCLUSIVE, EXCLUSIVE]}
+        orderedQuantity: {type: string}
+        pricedQuantity: {type: string}
+        freeQuantity: {type: string}
+        warning: {type: string, enum: [PRC-0014], description: "PRC-0014 when the line is already priced at nothing, so free goods would give the goods twice."}
     ResolveResponse:
       type: object
-      required: [currency, lines, subtotal, totalDiscount, surcharge, orderNet, applied, explainRef]
+      required: [currency, lines, subtotal, totalDiscount, surcharge, orderNet, applied, explainRef, freeGoods]
       properties:
         currency: {type: string}
         lines:
@@ -1736,7 +1871,7 @@ components:
             properties:
               lineNo: {type: integer}
               unit: {type: string}
-              quantity: {type: string}
+              quantity: {type: string, description: "The charged quantity: the ordered quantity less the free units of an INCLUSIVE free goods proposal for this line (BR-26.13)."}
               unitPrice: {type: string}
               netUnitPrice: {type: string}
               lineNet: {type: string}
@@ -1758,6 +1893,10 @@ components:
           items: {$ref: "#/components/schemas/Applied"}
         explainRef: {type: string, pattern: "^sha256:[0-9a-f]{64}$"}
         explainTruncated: {type: boolean}
+        freeGoods:
+          type: array
+          description: "Free goods proposals for priced lines (FR-26.22); empty when no live rule applies. Always empty on simulate."
+          items: {$ref: "#/components/schemas/FreeGoodsProposal"}
         trace:
           type: array
           items: {$ref: "#/components/schemas/TraceStep"}

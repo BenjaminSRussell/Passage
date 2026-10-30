@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Alert, Button, Card, DataTable, EmptyState, FormField, Input, PageHeader, StatGroup, StatTile, type DataTableColumn } from "../../shell/ui";
-import { describeProblem, resolvePrice, type Problem, type ResolvedLine, type ResolveRequest, type ResolveResponse, type TraceAccess, type TraceStep } from "./api/client";
+import { describeProblem, resolvePrice, type FreeGoodsProposal, type Problem, type ResolvedLine, type ResolveRequest, type ResolveResponse, type TraceAccess, type TraceStep } from "./api/client";
 import { DAY, DECIMAL, today, TYPE_LABELS, UUID } from "./format";
 import styles from "./pages.module.css";
 
@@ -63,6 +63,16 @@ const lineColumns: DataTableColumn<ResolvedLine>[] = [
         ? `${l.errorCode}: ${l.errorDetail ?? "no price"}`
         : l.applied.map((a) => `${TYPE_LABELS[a.type] ?? a.type} (access ${a.access})`).join(", ") + (l.exclusive ? " · exclusive" : ""),
   },
+];
+
+const freeGoodsColumns: DataTableColumn<FreeGoodsProposal>[] = [
+  { key: "lineNo", header: "Line", align: "end" },
+  { key: "productId", header: "Product", mono: true },
+  { key: "kind", header: "Variant", render: (p) => (p.kind === "INCLUSIVE" ? "Inclusive" : "Exclusive") },
+  { key: "orderedQuantity", header: "Ordered", mono: true, align: "end", render: (p) => `${p.orderedQuantity} ${p.unit}` },
+  { key: "pricedQuantity", header: "Charged", mono: true, align: "end", render: (p) => `${p.pricedQuantity} ${p.unit}` },
+  { key: "freeQuantity", header: "Free", mono: true, align: "end", render: (p) => `${p.freeQuantity} ${p.unit}` },
+  { key: "warning", header: "Note", render: (p) => (p.warning === "PRC-0014" ? "PRC-0014: the line is already priced at nothing" : "—") },
 ];
 
 interface TraceRow extends TraceAccess {
@@ -184,6 +194,11 @@ export function SimulatePage() {
               {result.explainTruncated ? <p className={styles.note}>The explanation is larger than the configured limit and was left out.</p> : null}
             </div>
           </Card>
+          {result.freeGoods.length > 0 ? (
+            <Card title="Free goods proposed" headingLevel={3}>
+              <DataTable label="Free goods proposals" columns={freeGoodsColumns} rows={result.freeGoods} getRowKey={(p) => String(p.lineNo)} />
+            </Card>
+          ) : null}
           {result.lines.map((l) =>
             l.trace && l.trace.length > 0 ? (
               <Card key={l.lineNo} title={`Why line ${l.lineNo} has this price`} headingLevel={3}>

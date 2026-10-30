@@ -8,6 +8,9 @@ Routes, all on the pricing service API (`services/pricing/api/openapi.yaml`):
 | `/pricing/agreements` | Trade agreements grid with status, type, customer, product, as-of and ends-between filters | `GET /condition-records` |
 | `/pricing/agreements/new` | Create a DRAFT agreement, optionally in a campaign; `?copy=<id>` starts from an existing one, `?campaign=<id>` fills the campaign | `POST /condition-records` |
 | `/pricing/agreements/:id` | Detail with its campaign, activate (overlap 409 shown) and withdraw | `GET`, `:activate`, `:withdraw` |
+| `/pricing/free-goods` | Free goods rules (FR-26.22) with status | `GET /free-goods-rules` |
+| `/pricing/free-goods/new` | Create a rule: customers, product, unit, inclusive or exclusive, calculation, quantities, validity (overlap 409 shown) | `POST /free-goods-rules` |
+| `/pricing/free-goods/:id` | Rule detail and withdraw | `GET /free-goods-rules/{id}`, `:withdraw` |
 | `/pricing/campaigns` | Campaigns with target group, validity, budget and status (live, scheduled, ended, killed) | `GET /campaigns` |
 | `/pricing/campaigns/new` | Create a campaign: validity, target customer group, budget and currency | `POST /campaigns` |
 | `/pricing/campaigns/:id` | Terms, the campaign's agreements, kill and restore at the campaign version | `GET /campaigns/{id}`, `GET /condition-records?campaignId=`, `:kill`, `:restore` |

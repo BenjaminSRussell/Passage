@@ -160,7 +160,7 @@ func SmallOrderThreshold(currency string) decimal.Decimal {
 }
 
 func resolveLine(h Header, line Line, recs []Record, steps []ConditionType, groupQty decimal.Decimal) LineResult {
-	lr := LineResult{No: line.No, Unit: line.Unit, Quantity: line.Quantity, Applied: []Applied{}, Trace: []TraceStep{}}
+	lr := LineResult{No: line.No, Unit: line.Unit, Quantity: line.ChargedQuantity(), Applied: []Applied{}, Trace: []TraceStep{}}
 	rec, value, access, step := evaluate(TypePrice, h, line, recs, decimal.Zero)
 	lr.Trace = append(lr.Trace, step)
 	if rec == nil {
@@ -190,7 +190,7 @@ func resolveLine(h Header, line Line, recs []Record, steps []ConditionType, grou
 		lr.Applied = append(lr.Applied, Applied{Type: t, RecordID: rec.ID, Access: access})
 	}
 	lr.NetUnit = net
-	lr.LineNet = roundMinor(line.Quantity.Mul(net), h.Currency)
+	lr.LineNet = roundMinor(line.ChargedQuantity().Mul(net), h.Currency)
 	lr.Exclusive = suppressed
 	return lr
 }

@@ -94,6 +94,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerCommissionRoutes(r)
 	a.registerFundRoutes(r)
 	a.registerCampaignRoutes(r)
+	a.registerFreeGoodsRoutes(r)
 	a.registerProcedureRoutes(r)
 	a.registerOpsRoutes(r)
 }
@@ -174,6 +175,8 @@ type resolveResponse struct {
 	ExplainRef      string             `json:"explainRef"`
 	ExplainTruncate bool               `json:"explainTruncated,omitempty"`
 	Trace           []domain.TraceStep `json:"trace,omitempty"`
+	// FreeGoods lists the zero-priced supplementary line proposals (FR-26.22) for w27.
+	FreeGoods []domain.FreeGoodsProposal `json:"freeGoods"`
 }
 
 func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
@@ -205,11 +208,17 @@ func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, err)
 		return
 	}
+	rules, err := a.freeGoodsRules(r, req.LegalEntityID, header, lines)
+	if err != nil {
+		slog.Error("load free goods rules failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		httpx.Fail(w, r, err)
+		return
+	}
 	a.resolves.Add(1)
 	a.linesPriced.Add(int64(len(lines)))
-	res := domain.Resolve(domain.Input{Header: header, Lines: lines, Records: records,
-		SmallOrderThreshold: domain.SmallOrderThreshold(header.Currency)})
-	a.respond(w, r, res, r.URL.Query().Get("explain") == "true")
+	res, free := domain.ResolveWithFreeGoods(domain.Input{Header: header, Lines: lines, Records: records,
+		SmallOrderThreshold: domain.SmallOrderThreshold(header.Currency)}, rules)
+	a.respond(w, r, res, free, r.URL.Query().Get("explain") == "true")
 }
 
 // simulate prices a tuple against records supplied in the body. Nothing is stored,
@@ -243,7 +252,7 @@ func (a *API) simulate(w http.ResponseWriter, r *http.Request) {
 	}
 	res := domain.Resolve(domain.Input{Header: header, Lines: lines, Records: records,
 		SmallOrderThreshold: domain.SmallOrderThreshold(header.Currency)})
-	a.respond(w, r, res, r.URL.Query().Get("explain") != "false")
+	a.respond(w, r, res, nil, r.URL.Query().Get("explain") != "false")
 }
 
 // buildInput validates a resolve body. Too many lines is PRC-0009; other faults are 422 field errors.
@@ -285,14 +294,17 @@ func (a *API) buildInput(req resolveRequest) (domain.Header, []domain.Line, *htt
 	return domain.Header{CustomerID: req.CustomerID, CustomerGroupID: req.CustomerGroupID, Currency: req.Currency, PricingDate: date}, lines, nil
 }
 
-func (a *API) respond(w http.ResponseWriter, r *http.Request, res domain.Result, explain bool) {
+func (a *API) respond(w http.ResponseWriter, r *http.Request, res domain.Result, free []domain.FreeGoodsProposal, explain bool) {
 	body, ref, err := domain.ExplainTrace(res)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
 	out := resolveResponse{Currency: res.Currency, Lines: make([]lineView, len(res.Lines)), Subtotal: res.Subtotal,
-		TotalDiscount: res.TotalDiscount, Surcharge: res.Surcharge, OrderNet: res.OrderNet, Applied: res.Applied, ExplainRef: ref}
+		TotalDiscount: res.TotalDiscount, Surcharge: res.Surcharge, OrderNet: res.OrderNet, Applied: res.Applied, ExplainRef: ref, FreeGoods: free}
+	if out.FreeGoods == nil {
+		out.FreeGoods = []domain.FreeGoodsProposal{}
+	}
 	for i, lr := range res.Lines {
 		out.Lines[i] = lineView{LineResult: lr}
 	}

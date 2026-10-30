@@ -93,6 +93,18 @@ type Line struct {
 	Variant        string
 	Unit           string
 	Quantity       decimal.Decimal
+	// Charged is the quantity charged when it is less than Quantity: an inclusive free
+	// goods rule gives part of the order free (BR-26.13). Quantity breaks still count
+	// Quantity. Zero means the whole Quantity is charged.
+	Charged decimal.Decimal
+}
+
+// ChargedQuantity is the quantity the line net is computed on.
+func (l Line) ChargedQuantity() decimal.Decimal {
+	if l.Charged.IsPositive() {
+		return l.Charged
+	}
+	return l.Quantity
 }
 
 // Input is everything the engine needs. Steps defaults to DefaultSteps.
