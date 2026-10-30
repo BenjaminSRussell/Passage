@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -19,7 +20,7 @@ import (
 
 const planID = "0190f0a0-0000-7000-8000-0000000000f2"
 
-func (f *fakeStore) FindRoutePlan(_ context.Context, hash string) (domain.RoutePlan, bool, error) {
+func (f *fakeStore) FindRoutePlan(_ context.Context, hash, _ string) (domain.RoutePlan, bool, error) {
 	p, ok := f.plans[hash]
 	return p, ok, f.findPlanErr
 }
@@ -187,6 +188,27 @@ func TestOptimizeRoutes_FailuresAreNeverAnEmptyPlan(t *testing.T) {
 				t.Fatalf("status %d %s, saves %d", rec.Code, rec.Body.String(), st.savedPlans)
 			}
 		})
+	}
+}
+
+func TestOptimizeRoutes_WithLegalEntityNeverSendsItToTheSolver(t *testing.T) {
+	var posted map[string]any
+	solver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&posted)
+		_ = json.NewEncoder(w).Encode(twoStopSolution())
+	}))
+	defer solver.Close()
+	body := strings.Replace(routeBody, `{"depot"`, `{"legalEntityId":"0190f0a0-0000-7000-8000-00000000000a","depot"`, 1)
+	st := &fakeStore{}
+	rec := do(t, optimizerRouter(st, optimizer.New(solver.URL, nil)), http.MethodPost, base+"/routes:optimize", body, api.DutyPlan)
+	if rec.Code != http.StatusCreated || st.savedPlans != 1 {
+		t.Fatalf("optimize = %d %s", rec.Code, rec.Body.String())
+	}
+	if _, present := posted["legalEntityId"]; present || posted["stops"] == nil {
+		t.Fatalf("solver body = %v", posted)
+	}
+	if got := decodePlan(t, rec.Body.Bytes()).Request.LegalEntityID; got == "" {
+		t.Fatal("stored plan lost its legal entity")
 	}
 }
 

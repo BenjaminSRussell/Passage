@@ -1707,6 +1707,7 @@ components:
       type: object
       required: [reference, currency, legs, costLines, receiptLines]
       properties:
+        legalEntityId: { type: string, format: uuid, description: "Owning legal entity of the voyage and its legs, containers, folios, cost lines and receipt lines. Defaults to the caller's single legal entity; required (422) for a caller scoped to several or to all legal entities; 403 outside the caller's scope." }
         reference: { type: string, minLength: 1, maxLength: 40 }
         currency: { type: string, pattern: '^[A-Za-z]{3}$' }
         legs:
@@ -1959,6 +1960,7 @@ components:
       type: object
       required: [depot, stops, vehicles]
       properties:
+        legalEntityId: { type: string, format: uuid, description: "Owning legal entity of the plan; same rules as on a voyage. The request hash is the idempotency key within one legal entity, and the field is not part of the hash." }
         depot: { $ref: '#/components/schemas/RoutePoint' }
         stops:
           type: array
@@ -2021,6 +2023,7 @@ components:
       required: [id, requestHash, stopCount, vehicleCount, routeCount, droppedCount, totalDistanceKm, timeLimitS, createdBy, createdAt]
       properties:
         id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
         requestHash: { type: string, pattern: '^[0-9a-f]{64}$' }
         stopCount: { type: integer }
         vehicleCount: { type: integer }

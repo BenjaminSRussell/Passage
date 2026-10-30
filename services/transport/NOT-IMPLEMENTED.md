@@ -132,8 +132,10 @@ owner's work, or a change outside this wave's paths).
 
 ## Legal-entity scope follow-ups (#241)
 
-- **later slice**: `voyage`, `rate_card` and `route_plan` are still tenant-level;
-  `tender` and `tracking_event` follow their load.
+- `voyage` (with its folios and cost lines, which are JSON documents inside the row)
+  and `route_plan` carry `legal_entity_id` since #292 (migration 0008). `rate_card`
+  stays tenant-level on purpose: carrier rates are negotiated per tenant and shared by
+  every entity when rating. `tender` and `tracking_event` follow their load.
 - **handoff**: existing rows keep a NULL `legal_entity_id` and are invisible to
   scoped callers (a tender or tracking report on such a load answers 404) until the
   tenant administrator assigns an entity; the backfill is a data migration.

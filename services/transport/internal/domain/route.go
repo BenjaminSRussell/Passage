@@ -75,6 +75,7 @@ type RouteVehicle struct {
 // RouteRequest is the VRP input. Normalize fills the defaults; LatenessPerMin is a
 // pointer so that an explicit 0 (no lateness penalty) differs from "use the default".
 type RouteRequest struct {
+	LegalEntityID  string         `json:"legalEntityId,omitempty"`
 	Depot          RoutePoint     `json:"depot"`
 	Stops          []RouteStop    `json:"stops"`
 	Vehicles       []RouteVehicle `json:"vehicles"`
@@ -116,6 +117,7 @@ type RoutePlan struct {
 // RoutePlanSummary is the list view of a plan.
 type RoutePlanSummary struct {
 	ID              string    `json:"id"`
+	LegalEntityID   string    `json:"legalEntityId,omitempty"`
 	RequestHash     string    `json:"requestHash"`
 	StopCount       int       `json:"stopCount"`
 	VehicleCount    int       `json:"vehicleCount"`
@@ -244,6 +246,7 @@ func (r RouteRequest) Validate() map[string]string {
 // of route optimization (§6.34.5 "key = request hash"): the same request returns
 // the stored plan instead of solving again.
 func (r RouteRequest) Hash() (string, error) {
+	r.LegalEntityID = ""
 	b, err := json.Marshal(r)
 	if err != nil {
 		return "", err

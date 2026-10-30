@@ -110,7 +110,7 @@ type Store interface {
 	GetScreeningHold(ctx context.Context, id string) (domain.ScreeningHold, error)
 	ListScreeningHolds(ctx context.Context, f HoldFilter) ([]domain.ScreeningHold, error)
 	ReleaseScreeningHold(ctx context.Context, id, reason string, at time.Time) (domain.ScreeningHold, error)
-	FindRoutePlan(ctx context.Context, hash string) (domain.RoutePlan, bool, error)
+	FindRoutePlan(ctx context.Context, hash, legalEntityID string) (domain.RoutePlan, bool, error)
 	SaveRoutePlan(ctx context.Context, plan domain.RoutePlan) (domain.RoutePlan, bool, error)
 	GetRoutePlan(ctx context.Context, id string) (domain.RoutePlan, error)
 	ListRoutePlans(ctx context.Context) ([]domain.RoutePlanSummary, error)

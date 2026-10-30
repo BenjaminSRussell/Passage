@@ -40,11 +40,7 @@ type GoodsInTransitFilter struct {
 func (s *Postgres) CreateGoodsInTransit(ctx context.Context, voyageID, incoterm, siteID, legalEntityID string, lines []int, idem Idem) (domain.GoodsInTransit, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out domain.GoodsInTransit
-	entity, err := httpx.OwnerLegalEntity(ctx, legalEntityID)
-	if err != nil {
-		return out, err
-	}
-	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		replay := func() (bool, error) {
 			if idem.Key == "" {
 				return false, nil
@@ -71,6 +67,13 @@ func (s *Postgres) CreateGoodsInTransit(ctx context.Context, voyageID, incoterm,
 		}
 		if err != nil {
 			return err
+		}
+		if err := assertParentEntity(parentVoyage, legalEntityID, v.LegalEntityID); err != nil {
+			return err
+		}
+		if v.LegalEntityID == "" {
+			return httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeGITState,
+				"voyage "+v.Reference+" has no legal entity; an all-entity admin must assign one before goods-in-transit orders can be opened")
 		}
 		// A concurrent request with the same key may have committed while this one waited.
 		if done, err := replay(); done || err != nil {
@@ -110,7 +113,7 @@ func (s *Postgres) CreateGoodsInTransit(ctx context.Context, voyageID, incoterm,
 			in_transit_warehouse, currency, status, lines, goods_value, estimated_total, idempotency_key, request_hash, created_by, legal_entity_id)
 			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::numeric, $12::numeric, $13, $14, $15, nullif($16, '')::uuid)`,
 			p.TenantID, id, voyageID, g.SiteID, g.Incoterm, g.TransferEvent, g.InTransitWarehouse, g.Currency, g.Status, string(raw),
-			g.GoodsValue.String(), g.EstimatedTotal.String(), nullable(idem.Key), nullable(idem.Fingerprint), p.UserID, entity); err != nil {
+			g.GoodsValue.String(), g.EstimatedTotal.String(), nullable(idem.Key), nullable(idem.Fingerprint), p.UserID, v.LegalEntityID); err != nil {
 			return err
 		}
 		for _, line := range lineNos {

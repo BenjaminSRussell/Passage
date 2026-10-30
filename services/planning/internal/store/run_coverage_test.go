@@ -59,7 +59,7 @@ func TestRunCoverages(t *testing.T) {
 	mustCreate(domain.DefaultItemCoverage(noLead, site, minmax.ID))
 	mustCreate(domain.DefaultItemCoverage(item, otherSite, minmax.ID))
 
-	got, err := st.RunCoverages(ctx, site, []string{item, whOnly, bare, noLead})
+	got, err := st.RunCoverages(ctx, site, "", []string{item, whOnly, bare, noLead})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,14 +82,14 @@ func TestRunCoverages(t *testing.T) {
 		t.Fatalf("coverage without lead-time override: %+v", n)
 	}
 
-	at, err := st.RunCoverages(ctx, otherSite, []string{item})
+	at, err := st.RunCoverages(ctx, otherSite, "", []string{item})
 	if err != nil || len(at) != 1 || at[item].GroupCode != "MM" {
 		t.Fatalf("other site = %+v, %v; want its own MM coverage", at, err)
 	}
-	if none, err := st.RunCoverages(ctx, site, nil); err != nil || len(none) != 0 {
+	if none, err := st.RunCoverages(ctx, site, "", nil); err != nil || len(none) != 0 {
 		t.Fatalf("no items = %+v, %v", none, err)
 	}
-	other, err := st.RunCoverages(testkit.Ctx(testkit.TenantID(2), "planning.read"), site, []string{item})
+	other, err := st.RunCoverages(testkit.Ctx(testkit.TenantID(2), "planning.read"), site, "", []string{item})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -223,6 +223,10 @@ func TestCreateItemCoverage_DuplicateUnknownGroupAndIdempotency(t *testing.T) {
 	if reuse.Code != http.StatusUnprocessableEntity || problemOf(t, reuse).Code != store.CodeIdempotencyReuse {
 		t.Fatalf("key reuse: %d %s", reuse.Code, reuse.Body.String())
 	}
+	otherEntity := do(t, st, http.MethodPost, itemCoveragePath, itemCoverageBody(fgID, g, `,"legalEntityId":"`+testkit.TenantID(77)+`"`), dutySetup, true, "ic-1")
+	if otherEntity.Code != http.StatusUnprocessableEntity || problemOf(t, otherEntity).Code != store.CodeIdempotencyReuse {
+		t.Fatalf("key reuse across entities: %d %s", otherEntity.Code, otherEntity.Body.String())
+	}
 	dup := do(t, st, http.MethodPost, itemCoveragePath, body, dutySetup, true, "")
 	if dup.Code != http.StatusConflict || problemOf(t, dup).Code != store.CodeItemCoverageExists {
 		t.Fatalf("duplicate: %d %s", dup.Code, dup.Body.String())
