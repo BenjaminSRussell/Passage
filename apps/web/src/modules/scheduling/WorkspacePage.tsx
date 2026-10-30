@@ -157,6 +157,11 @@ export function WorkspacePage() {
     },
     { key: "cleaningSetId", header: "Cleaning set", mono: true, render: (row) => row.cleaningSetId ?? dash },
     { key: "lateMinutes", header: "Late", render: (row) => (row.lateMinutes > 0 ? <Badge tone="warning">{`${row.lateMinutes} min`}</Badge> : "On time") },
+    {
+      key: "outsideCapacity",
+      header: "Capacity",
+      render: (row) => (row.outsideCapacity ? <Badge tone="danger">Outside open capacity</Badge> : "Inside"),
+    },
     { key: "firmed", header: "Firmed", render: (row) => (row.firmed ? <Badge tone="info">Firmed</Badge> : "No") },
     {
       key: "actions",

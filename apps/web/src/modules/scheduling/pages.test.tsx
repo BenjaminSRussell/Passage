@@ -77,8 +77,8 @@ const resources: Resource[] = [
 const day = dayStart(today());
 const at = (h: number) => new Date(Date.parse(day) + h * 3_600_000).toISOString().replace(".000Z", "Z");
 const bars: GanttBar[] = [
-  { jobId: JOB1, orderId: ORDER, operNumber: 10, resourceId: MIX, segment: 1, start: at(8), end: at(9), lateMinutes: 0, firmed: false, setupGroup: null, changeoverMinutes: 0, changeoverCost: null, changeoverCurrency: null, cleaningSetId: null },
-  { jobId: JOB2, orderId: ORDER, operNumber: 20, resourceId: FILL, segment: 1, start: at(9), end: at(11), lateMinutes: 45, firmed: true, setupGroup: "WHITE", changeoverMinutes: 30, changeoverCost: "45.5", changeoverCurrency: "EUR", cleaningSetId: "WET-CLEAN" },
+  { jobId: JOB1, orderId: ORDER, operNumber: 10, resourceId: MIX, segment: 1, start: at(8), end: at(9), lateMinutes: 0, firmed: false, setupGroup: null, changeoverMinutes: 0, changeoverCost: null, changeoverCurrency: null, cleaningSetId: null, outsideCapacity: false },
+  { jobId: JOB2, orderId: ORDER, operNumber: 20, resourceId: FILL, segment: 1, start: at(9), end: at(11), lateMinutes: 45, firmed: true, setupGroup: "WHITE", changeoverMinutes: 30, changeoverCost: "45.5", changeoverCurrency: "EUR", cleaningSetId: "WET-CLEAN", outsideCapacity: true },
 ];
 
 const run: Run = {
@@ -156,6 +156,11 @@ describe("Scheduling workspace", () => {
     expect(rows[2]).toHaveTextContent("45.50 EUR");
     expect(rows[2]).toHaveTextContent("WET-CLEAN");
     expect(rows[1]).not.toHaveTextContent("EUR");
+    // AC-23.7: a job outside open capacity (a downtime added after booking) is flagged in the table and on the bar.
+    expect(rows[2]).toHaveTextContent("Outside open capacity");
+    expect(rows[1]).not.toHaveTextContent("Outside open capacity");
+    expect(container.querySelector(`rect[data-job="${JOB2}"] title`)?.textContent).toContain("outside open capacity (SCHED-0002)");
+    expect(container.querySelector(`rect[data-job="${JOB1}"] title`)?.textContent).not.toContain("outside open capacity");
     expect(within(table).getByRole("columnheader", { name: "Changeover cost" })).toBeInTheDocument();
     const gantt = calls.find((c) => c.url.pathname.endsWith("/gantt"));
     expect(gantt?.url.searchParams.get("from")).toBe(day);

@@ -167,6 +167,11 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutySchedule)).Post("/v1/scheduling/jobs/{id}:firm", a.firmJob)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/capacity-load", a.capacityLoad)
 
+	// Slice 9: downtimes and extra shifts over a resource's calendar (FR-23.1).
+	r.With(authz.RequireDuty(dutyCapacity)).Post("/v1/scheduling/resources/{id}/capacity-overrides", a.createCapacityOverride)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/resources/{id}/capacity-overrides", a.listCapacityOverrides)
+	r.With(authz.RequireDuty(dutyCapacity)).Delete("/v1/scheduling/resources/{id}/capacity-overrides/{overrideId}", a.deleteCapacityOverride)
+
 	// Slice 4: order pegs that moves propagate along (FR-23.8).
 	r.With(authz.RequireDuty(dutySchedule)).Post("/v1/scheduling/order-pegs", a.createPeg)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/scheduling/order-pegs", a.listPegs)

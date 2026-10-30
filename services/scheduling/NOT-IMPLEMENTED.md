@@ -174,6 +174,27 @@ noted it lacked); its `SetupPage.tsx` and `setup.ts` (main has had list,
 create and detail screens for networks, setup matrices, cleanout rules and
 capacity blocks since slice 2).
 
+Slice 9 builds capacity overrides (FR-23.1, AC-23.7): downtimes and extra
+shifts on a resource calendar (`scheduling_capacity_override`, migration
+`0007_capacity_overrides.sql`). `POST/GET /resources/{id}/capacity-overrides`
+and `DELETE /resources/{id}/capacity-overrides/{overrideId}`, idempotent, with
+`capacityoverride.created` and `capacityoverride.deleted` through the outbox. A
+span is at most 31 days; a downtime wins over an overlapping extra shift
+(`domain.ApplyOverrides`). Runs, moves, the capacity inquiry, block
+utilization and the weekly capacity load all read the calendar with overrides
+applied (`Resource.Overrides`, `domain.OpenWithOverrides`). Creating a downtime
+returns the booked jobs it overlaps (`affectedJobs`, firmed or not, at most
+500, each with the span of all its segments) and lists them in the event;
+those jobs are not moved automatically, the planner moves them or runs the
+schedule again. Until then every Gantt bar that lies outside its resource's
+open capacity, calendar and overrides applied, carries `outsideCapacity`
+(SCHED-0002) and the workspace outlines it and badges it in the jobs table.
+Web: capacity overrides list
+(by resource, remove) and create form (UTC times, reason, affected jobs shown
+after saving), linked from the resource detail screen and the navigation. The
+OpenAPI document and the AsyncAPI messages (title and summary on every message)
+pass the doc gates with no FAIL lines.
+
 Everything else in the ticket and PRD 4.23 is listed here.
 
 No file outside the wave 23 ownership entry was changed, so there are no
@@ -231,9 +252,8 @@ moved-out handoff rows.
 
 | Item | Status | Reason |
 |---|---|---|
-| FR-23.1 ResourceCapacity table materialized for 365 days, rebuilt on calendar events; efficiency % and capacity overrides | later slice of PSG-23 (calendar events from wave 9) | Open intervals are computed from the weekly calendar on every read and run (`GET /resources/{id}/capacity`). A stored table is worth building together with overrides and calendar events, which are what make it differ from the calendar; the swarm's table without them was not taken (see slice 6 above). |
-| `POST /v1/scheduling/resources/{id}/capacity-overrides` (downtime, extra shift) and the *Maintain capacity* screen for overrides | later slice of PSG-23 | Needs the materialized capacity table. |
-| AC-23.7 calendar change closes capacity and flags affected jobs (SCHED-0002 warnings on existing jobs) | later slice of PSG-23 | Depends on calendar events and the capacity table. |
+| FR-23.1 ResourceCapacity table materialized for 365 days, rebuilt on calendar events; efficiency % and per-day capacity overrides | later slice of PSG-23 (calendar events from wave 9) | Open intervals are computed from the weekly calendar plus downtimes and extra shifts (slice 9) on every read and run (`GET /resources/{id}/capacity`). A stored table is not needed while nothing else reads it; efficiency % and calendar events are wave 9. |
+| AC-23.7 calendar change closes capacity and flags affected jobs (SCHED-0002 warnings on existing jobs) | partial (slice 9) | A downtime closes capacity at once (no 30 s lag: capacity is computed on read), returns the overlapping jobs when it is created, and the Gantt flags every bar outside open capacity (`outsideCapacity`) until it is moved. A change of the weekly calendar itself needs wave 9 calendar events (scheduling resources have no calendar update endpoint), and no per-job warning rows are stored. |
 | FR-23.8 pegs fed from master planning | handoff — wave 22 (pegging) | Pegs are entered through `POST /order-pegs`; a consumer of wave 22 pegging events would fill the same table. Propagation itself is built (slice 4). |
 | AC-23.3 sales line delay in the move preview | handoff — wave 27 (sales lines) and wave 22 (pegging to demand) | Pegs link orders to orders; the preview lists every pegged order with its old and new dates, but sales lines are not pegged here. |
 | Schedule runs honouring pegs (a dependent placed no earlier than its parent ends) | later slice of PSG-23 | Only moves with `propagate` push dependents; a site run places orders independently. |

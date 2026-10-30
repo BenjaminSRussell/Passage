@@ -5,11 +5,13 @@ import { CampaignProposalsPage } from "./CampaignProposalsPage";
 import { CampaignsPage } from "./CampaignsPage";
 import { CapacityBlocksPage } from "./CapacityBlocksPage";
 import { CapacityLoadPage } from "./CapacityLoadPage";
+import { CapacityOverridesPage } from "./CapacityOverridesPage";
 import { CleanoutRulesPage } from "./CleanoutRulesPage";
 import { NetworkDetailPage } from "./NetworkDetailPage";
 import { NetworksPage } from "./NetworksPage";
 import { NewCampaignPage } from "./NewCampaignPage";
 import { NewCapacityBlockPage } from "./NewCapacityBlockPage";
+import { NewCapacityOverridePage } from "./NewCapacityOverridePage";
 import { NewCleanoutRulePage } from "./NewCleanoutRulePage";
 import { NewNetworkPage } from "./NewNetworkPage";
 import { NewOperationPage } from "./NewOperationPage";
@@ -31,7 +33,7 @@ const scheduling: PassageModule = {
   id: "scheduling",
   title: "Scheduling",
   description:
-    "Finite capacity scheduling: the Gantt workspace, schedule runs, capacity load, resources, operations, order pegs, campaigns and campaign proposals, setup matrices, cleanout rules, resource networks and capacity blocks.",
+    "Finite capacity scheduling: the Gantt workspace, schedule runs, capacity load, resources, operations, order pegs, campaigns and campaign proposals, setup matrices, cleanout rules, resource networks, capacity blocks and capacity overrides (downtimes and extra shifts).",
   routes: [
     { path: "/scheduling", element: createElement(WorkspacePage), handle: { title: "Scheduling workspace" } },
     { path: "/scheduling/load", element: createElement(CapacityLoadPage), handle: { title: "Capacity load" } },
@@ -57,6 +59,8 @@ const scheduling: PassageModule = {
     { path: "/scheduling/networks", element: createElement(NetworksPage), handle: { title: "Resource networks" } },
     { path: "/scheduling/networks/new", element: createElement(NewNetworkPage), handle: { title: "New resource network" } },
     { path: "/scheduling/networks/:id", element: createElement(NetworkDetailPage), handle: { title: "Resource network" } },
+    { path: "/scheduling/capacity-overrides", element: createElement(CapacityOverridesPage), handle: { title: "Capacity overrides" } },
+    { path: "/scheduling/capacity-overrides/new", element: createElement(NewCapacityOverridePage), handle: { title: "New capacity override" } },
     { path: "/scheduling/capacity-blocks", element: createElement(CapacityBlocksPage), handle: { title: "Capacity blocks" } },
     { path: "/scheduling/capacity-blocks/new", element: createElement(NewCapacityBlockPage), handle: { title: "New capacity block" } },
   ],
@@ -73,6 +77,7 @@ const scheduling: PassageModule = {
     { label: "Cleanout rules", to: "/scheduling/cleanout-rules", duty: "scheduling.read" },
     { label: "Resource networks", to: "/scheduling/networks", duty: "scheduling.read" },
     { label: "Capacity blocks", to: "/scheduling/capacity-blocks", duty: "scheduling.read" },
+    { label: "Capacity overrides", to: "/scheduling/capacity-overrides", duty: "scheduling.read" },
   ],
 };
 

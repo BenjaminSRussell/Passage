@@ -73,6 +73,7 @@ export function jobsOf(bars: GanttBar[]): GanttBar[] {
     }
     if (bar.start < seen.start) seen.start = bar.start;
     if (bar.end > seen.end) seen.end = bar.end;
+    if (bar.outsideCapacity) seen.outsideCapacity = true;
   }
   return [...byJob.values()].sort((a, b) => a.start.localeCompare(b.start) || a.operNumber - b.operNumber);
 }

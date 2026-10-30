@@ -10,11 +10,13 @@ import (
 
 func TestEveryTypeFollowsTheNamingRule(t *testing.T) {
 	want := map[string]bool{
-		"dev.passage.scheduling.run.completed.v1":      true,
-		"dev.passage.scheduling.job.scheduled.v1":      true,
-		"dev.passage.scheduling.orderdates.changed.v1": true,
-		"dev.passage.scheduling.campaign.sequenced.v1": true,
-		"dev.passage.scheduling.campaign.started.v1":   true,
+		"dev.passage.scheduling.run.completed.v1":            true,
+		"dev.passage.scheduling.job.scheduled.v1":            true,
+		"dev.passage.scheduling.orderdates.changed.v1":       true,
+		"dev.passage.scheduling.campaign.sequenced.v1":       true,
+		"dev.passage.scheduling.campaign.started.v1":         true,
+		"dev.passage.scheduling.capacityoverride.created.v1": true,
+		"dev.passage.scheduling.capacityoverride.deleted.v1": true,
 	}
 	for _, typ := range All() {
 		if !events.ValidType(typ) {

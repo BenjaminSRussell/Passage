@@ -132,6 +132,10 @@ type Bar struct {
 	ChangeoverCost     *decimal.Decimal `json:"changeoverCost"`
 	ChangeoverCurrency *string          `json:"changeoverCurrency"`
 	CleaningSetID      *string          `json:"cleaningSetId"`
+	// OutsideCapacity is true when part of the segment lies outside the
+	// resource's open capacity as it is now, for example inside a downtime
+	// added after the job was booked (SCHED-0002, AC-23.7).
+	OutsideCapacity bool `json:"outsideCapacity"`
 }
 
 type RunRequest struct {
@@ -233,6 +237,7 @@ type Store interface {
 	CapacityLoad(ctx context.Context, f LoadFilter) ([]domain.WeekLoad, error)
 	SetupStore
 	PegStore
+	OverrideStore
 	CampaignStore
 	Ping(ctx context.Context) error
 }
@@ -655,12 +660,12 @@ func (s *Postgres) Gantt(ctx context.Context, from, to time.Time, resourceIDs []
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
 		for rows.Next() {
 			var b Bar
 			var cost *string
 			if err := rows.Scan(&b.JobID, &b.OrderID, &b.OperNumber, &b.ResourceID, &b.Segment, &b.Start, &b.End, &b.LateMinutes, &b.Firmed,
 				&b.SetupGroup, &b.ChangeoverMinutes, &cost, &b.ChangeoverCurrency, &b.CleaningSetID); err != nil {
+				rows.Close()
 				return err
 			}
 			if cost != nil {
@@ -669,7 +674,14 @@ func (s *Postgres) Gantt(ctx context.Context, from, to time.Time, resourceIDs []
 			}
 			bars = append(bars, b)
 		}
-		return rows.Err()
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if len(bars) == 0 || len(bars) > MaxBars {
+			return nil
+		}
+		return flagOutsideCapacity(ctx, tx, bars)
 	})
 	if err != nil {
 		return nil, err
@@ -678,6 +690,35 @@ func (s *Postgres) Gantt(ctx context.Context, from, to time.Time, resourceIDs []
 		return nil, httpx.NewProblem(http.StatusUnprocessableEntity, CodeWindowTooLarge, "the window holds more than 5000 bars; narrow the window or the resources")
 	}
 	return bars, nil
+}
+
+// flagOutsideCapacity marks the bars that are no longer inside their
+// resource's open capacity, calendar and overrides applied (AC-23.7).
+func flagOutsideCapacity(ctx context.Context, tx pgx.Tx, bars []Bar) error {
+	resources, _, err := loadResources(ctx, tx)
+	if err != nil {
+		return err
+	}
+	lo, hi := bars[0].Start, bars[0].End
+	for _, b := range bars {
+		if b.Start.Before(lo) {
+			lo = b.Start
+		}
+		if b.End.After(hi) {
+			hi = b.End
+		}
+	}
+	// A day either side so the local days straddling the window are whole.
+	from := lo.Add(-24 * time.Hour)
+	days := int(hi.Sub(from)/(24*time.Hour)) + 2
+	open := make(map[string][]domain.Interval, len(resources))
+	for _, r := range resources {
+		open[r.ID] = r.Open(from, days)
+	}
+	for i := range bars {
+		bars[i].OutsideCapacity = domain.OutsideOpen(open[bars[i].ResourceID], bars[i].Start, bars[i].End)
+	}
+	return nil
 }
 
 // writePlacements inserts one scheduled_job row per segment, pipelined in a

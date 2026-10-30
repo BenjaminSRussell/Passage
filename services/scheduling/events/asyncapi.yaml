@@ -30,6 +30,13 @@ channels:
         $ref: '#/components/messages/CampaignSequenced'
       campaignStarted:
         $ref: '#/components/messages/CampaignStarted'
+  capacityOverride:
+    address: passage.scheduling.capacityoverride
+    messages:
+      capacityOverrideCreated:
+        $ref: '#/components/messages/CapacityOverrideCreated'
+      capacityOverrideDeleted:
+        $ref: '#/components/messages/CapacityOverrideDeleted'
 operations:
   publishRunCompleted:
     action: send
@@ -55,29 +62,65 @@ operations:
     messages:
       - $ref: '#/channels/campaign/messages/campaignStarted'
     summary: A campaign started and is frozen (production and planning consume it)
+  publishCapacityOverrideCreated:
+    action: send
+    channel: { $ref: '#/channels/capacityOverride' }
+    messages:
+      - $ref: '#/channels/capacityOverride/messages/capacityOverrideCreated'
+    summary: A downtime or extra shift was added to a resource calendar (production and the planner consume the affected jobs)
+  publishCapacityOverrideDeleted:
+    action: send
+    channel: { $ref: '#/channels/capacityOverride' }
+    messages:
+      - $ref: '#/channels/capacityOverride/messages/capacityOverrideDeleted'
+    summary: A downtime or extra shift was removed from a resource calendar
 components:
   messages:
+    CapacityOverrideCreated:
+      title: Capacity override created
+      summary: A downtime or extra shift was added to a resource calendar; lists the booked jobs a downtime overlaps.
+      name: dev.passage.scheduling.capacityoverride.created.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/CapacityOverrideData'
+    CapacityOverrideDeleted:
+      title: Capacity override deleted
+      summary: A downtime or extra shift was removed from a resource calendar.
+      name: dev.passage.scheduling.capacityoverride.deleted.v1
+      contentType: application/cloudevents+json
+      payload:
+        $ref: '#/components/schemas/CapacityOverrideData'
     RunCompleted:
+      title: Schedule run completed
+      summary: A schedule run finished; carries the counts, makespan and total lateness.
       name: dev.passage.scheduling.run.completed.v1
       contentType: application/cloudevents+json
       payload:
         $ref: '#/components/schemas/RunCompletedData'
     JobScheduled:
+      title: Job scheduled
+      summary: A job was placed or moved on a resource, with its changeover.
       name: dev.passage.scheduling.job.scheduled.v1
       contentType: application/cloudevents+json
       payload:
         $ref: '#/components/schemas/JobScheduledData'
     OrderDatesChanged:
+      title: Order dates changed
+      summary: An order start or end changed, including pegged orders pushed by a propagated move.
       name: dev.passage.scheduling.orderdates.changed.v1
       contentType: application/cloudevents+json
       payload:
         $ref: '#/components/schemas/OrderDatesChangedData'
     CampaignSequenced:
+      title: Campaign sequenced
+      summary: A campaign was sequenced; carries the order sequence and cleanouts.
       name: dev.passage.scheduling.campaign.sequenced.v1
       contentType: application/cloudevents+json
       payload:
         $ref: '#/components/schemas/CampaignSequencedData'
     CampaignStarted:
+      title: Campaign started
+      summary: A campaign started and is frozen.
       name: dev.passage.scheduling.campaign.started.v1
       contentType: application/cloudevents+json
       payload:
@@ -145,6 +188,20 @@ components:
               minutes: { type: integer }
               reason: { type: string, enum: [batches, run-time, campaign-end] }
         version: { type: integer }
+    CapacityOverrideData:
+      type: object
+      required: [overrideId, resourceId, kind, start, end, reason, affectedJobs]
+      properties:
+        overrideId: { type: string, format: uuid }
+        resourceId: { type: string, format: uuid }
+        kind: { type: string, enum: [downtime, extra] }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        reason: { type: string }
+        affectedJobs:
+          type: array
+          description: Booked jobs a downtime overlaps when it is created (empty for extra shifts and on delete).
+          items: { type: string, format: uuid }
     CampaignStartedData:
       type: object
       required: [campaignId, resourceId, startedAt, version]

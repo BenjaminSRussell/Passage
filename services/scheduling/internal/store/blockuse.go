@@ -53,7 +53,11 @@ func (s *Postgres) BlockUtilization(ctx context.Context, resourceID string, from
 		// so windows crossing the range edges in the site's time zone are whole.
 		start := from.Add(-24 * time.Hour)
 		days := int(to.Sub(from)/(24*time.Hour)) + 3
-		open := domain.OpenIntervals(loc, r.Shifts, start, days)
+		ovm, err := loadOverrides(ctx, tx, resourceID)
+		if err != nil {
+			return err
+		}
+		open := domain.OpenWithOverrides(loc, r.Shifts, ovm[resourceID], start, days)
 
 		rows, err := tx.Query(ctx, `select `+blockCols+` from scheduling_capacity_block where active and resource_id = $1 order by priority desc, code`, resourceID)
 		if err != nil {

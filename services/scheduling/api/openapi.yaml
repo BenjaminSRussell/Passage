@@ -91,6 +91,79 @@ paths:
                     items: { $ref: '#/components/schemas/Interval' }
         '400': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/resources/{id}/capacity-overrides:
+    post:
+      operationId: createCapacityOverride
+      summary: Close a span of a resource calendar (downtime) or open one (extra shift) (FR-23.1)
+      description: >
+        A downtime removes the span from the resource's open capacity and
+        wins over an overlapping extra shift; an extra shift adds it. Runs,
+        moves, the capacity inquiry, block utilization and the weekly load all
+        read the calendar with overrides applied. The booked jobs a downtime
+        overlaps are returned in affectedJobs and stay where they are until
+        they are moved or the schedule is run again (AC-23.7). A span is at
+        most 31 days.
+      x-passage-duty: scheduling.capacity.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CapacityOverrideRequest' }
+      responses:
+        '201':
+          description: 'Created. A replay returns 200 with Idempotent-Replayed: true.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CapacityOverrideResult' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listCapacityOverrides
+      summary: Downtimes and extra shifts of a resource, optionally those overlapping a window
+      x-passage-duty: scheduling.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: from
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Overrides by start (at most 1,000)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/CapacityOverride' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/scheduling/resources/{id}/capacity-overrides/{overrideId}:
+    delete:
+      operationId: deleteCapacityOverride
+      summary: Remove a downtime or extra shift; later runs and moves see the plain calendar again
+      x-passage-duty: scheduling.capacity.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: overrideId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Removed }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
   /v1/scheduling/operations:
     post:
       operationId: createOperation
@@ -1046,6 +1119,7 @@ components:
             - { type: 'null' }
         changeoverCurrency: { type: [string, 'null'], pattern: '^[A-Z]{3}$', description: 'ISO 4217 currency of changeoverCost (the setup matrix currency); null with it.' }
         cleaningSetId: { type: [string, 'null'], description: 'Cleaning standard operation set the matrix entry requires (recipe-dependent cleaning); null when none.' }
+        outsideCapacity: { type: boolean, description: 'True when part of the segment lies outside the resource''s open capacity as it is now, calendar and overrides applied, such as inside a downtime added after the job was booked (SCHED-0002, AC-23.7).' }
     MoveRequest:
       type: object
       required: [start]
@@ -1108,6 +1182,43 @@ components:
       properties:
         parentOrderId: { type: string, format: uuid, description: Order whose output is consumed. }
         dependentOrderId: { type: string, format: uuid, description: Order that consumes it; must differ from the parent. }
+    CapacityOverrideRequest:
+      type: object
+      required: [kind, start, end]
+      properties:
+        kind: { type: string, enum: [downtime, extra] }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time, description: After start, at most 31 days later. }
+        reason: { type: string, maxLength: 200 }
+    CapacityOverride:
+      allOf:
+        - $ref: '#/components/schemas/CapacityOverrideRequest'
+        - type: object
+          required: [id, resourceId, reason, createdAt]
+          properties:
+            id: { type: string, format: uuid }
+            resourceId: { type: string, format: uuid }
+            createdAt: { type: string, format: date-time }
+    AffectedJob:
+      type: object
+      required: [jobId, orderId, operNumber, start, end, firmed]
+      properties:
+        jobId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        operNumber: { type: integer }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        firmed: { type: boolean }
+    CapacityOverrideResult:
+      allOf:
+        - $ref: '#/components/schemas/CapacityOverride'
+        - type: object
+          required: [affectedJobs]
+          properties:
+            affectedJobs:
+              type: array
+              description: Booked jobs a downtime overlaps (empty for extra shifts); at most 500.
+              items: { $ref: '#/components/schemas/AffectedJob' }
     Peg:
       allOf:
         - $ref: '#/components/schemas/PegRequest'

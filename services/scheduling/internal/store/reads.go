@@ -122,7 +122,11 @@ func (s *Postgres) ResourceCapacity(ctx context.Context, id string, from, to tim
 	}
 	days := int(to.Sub(from)/(24*time.Hour)) + 2
 	out := []domain.Interval{}
-	for _, iv := range domain.OpenIntervals(loc, r.Shifts, from.Add(-24*time.Hour), days+1) {
+	ovs, err := s.resourceOverrides(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	for _, iv := range domain.OpenWithOverrides(loc, r.Shifts, ovs, from.Add(-24*time.Hour), days+1) {
 		if !iv.End.After(from) || !iv.Start.Before(to) {
 			continue
 		}
@@ -338,7 +342,18 @@ func loadResources(ctx context.Context, tx pgx.Tx) ([]domain.Resource, map[strin
 		finite[r.ID] = r.Finite
 		out = append(out, r)
 	}
-	return out, finite, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	rows.Close()
+	ovs, err := loadOverrides(ctx, tx, "")
+	if err != nil {
+		return nil, nil, err
+	}
+	for i := range out {
+		out[i].Overrides = ovs[out[i].ID]
+	}
+	return out, finite, nil
 }
 
 // loadOperations reads operations matching where (bound positionally, columns

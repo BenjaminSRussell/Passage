@@ -36,6 +36,9 @@ type Resource struct {
 	Blocks       []CapacityBlock
 	Matrix       SetupMatrix
 	CurrentGroup string
+	// Overrides are downtimes and extra shifts layered over the calendar
+	// (FR-23.1).
+	Overrides []CapacityOverride
 }
 
 // Operation is one schedulable operation of an order. Candidates are resource
@@ -183,7 +186,7 @@ type capacity struct {
 func capacities(rs []Resource, from time.Time, days int) map[string]capacity {
 	out := make(map[string]capacity, len(rs))
 	for _, r := range rs {
-		iv := OpenIntervals(r.Location, r.Shifts, from, days)
+		iv := r.Open(from, days)
 		open := 0
 		for _, i := range iv {
 			open += i.Minutes()

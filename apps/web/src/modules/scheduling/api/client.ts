@@ -131,6 +131,11 @@ export interface GanttBar {
   changeoverCurrency: string | null;
   /** Cleaning standard operation set the matrix entry requires; null when none. */
   cleaningSetId: string | null;
+  /**
+   * Part of the segment lies outside the resource's open capacity as it is
+   * now, e.g. inside a downtime added after it was booked (SCHED-0002, AC-23.7).
+   */
+  outsideCapacity: boolean;
 }
 
 export interface MoveRequest {
@@ -757,6 +762,61 @@ export function createPeg(input: NewOrderPeg, key: string = newKey()): Promise<O
 /** Removes a peg; the service answers 204 with no body. */
 export async function deletePeg(id: string): Promise<void> {
   const res = await fetch(`${base}/order-pegs/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: { Accept: "application/json" },
+    credentials: "same-origin",
+  });
+  if (!res.ok) {
+    throw await toError(res);
+  }
+}
+
+// Slice 9: capacity overrides, downtimes and extra shifts (FR-23.1, AC-23.7)
+
+export type OverrideKind = "downtime" | "extra";
+
+export interface CapacityOverride {
+  id: string;
+  resourceId: string;
+  kind: OverrideKind;
+  start: string;
+  end: string;
+  reason: string;
+  createdAt: string;
+}
+
+export interface NewCapacityOverride {
+  kind: OverrideKind;
+  start: string;
+  end: string;
+  reason?: string;
+}
+
+/** A booked job a downtime overlaps. */
+export interface AffectedJob {
+  jobId: string;
+  orderId: string;
+  operNumber: number;
+  start: string;
+  end: string;
+  firmed: boolean;
+}
+
+export interface CapacityOverrideResult extends CapacityOverride {
+  affectedJobs: AffectedJob[];
+}
+
+export function listCapacityOverrides(resourceId: string, signal?: AbortSignal): Promise<CapacityOverride[]> {
+  return items<CapacityOverride>(`/resources/${encodeURIComponent(resourceId)}/capacity-overrides`, signal);
+}
+
+export function createCapacityOverride(resourceId: string, input: NewCapacityOverride, key: string = newKey()): Promise<CapacityOverrideResult> {
+  return post<CapacityOverrideResult>(`/resources/${encodeURIComponent(resourceId)}/capacity-overrides`, input, key);
+}
+
+/** Removes an override; the service answers 204 with no body. */
+export async function deleteCapacityOverride(resourceId: string, id: string): Promise<void> {
+  const res = await fetch(`${base}/resources/${encodeURIComponent(resourceId)}/capacity-overrides/${encodeURIComponent(id)}`, {
     method: "DELETE",
     headers: { Accept: "application/json" },
     credentials: "same-origin",

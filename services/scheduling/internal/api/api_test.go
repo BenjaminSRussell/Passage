@@ -49,7 +49,8 @@ type fakeStore struct {
 	lastFilter   store.CampaignFilter
 
 	// slice 4
-	lastPeg store.Peg
+	lastPeg      store.Peg
+	lastOverride store.CapacityOverride
 
 	// slice 5
 	lastUseID              string

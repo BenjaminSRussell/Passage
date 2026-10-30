@@ -174,13 +174,16 @@ All routes need the tenant headers set by the gateway; duties in brackets.
 | GET | `/v1/scheduling/operations?orderId&status&limit` | `scheduling.read` |
 | POST | `/v1/scheduling/runs` (Idempotency-Key) | `scheduling.run` |
 | GET | `/v1/scheduling/runs`, `/v1/scheduling/runs/{id}` | `scheduling.read` |
-| GET | `/v1/scheduling/gantt?from&to&resourceIds` (at most 5,000 bars) | `scheduling.read` |
+| GET | `/v1/scheduling/gantt?from&to&resourceIds` (at most 5,000 bars; `outsideCapacity` per bar) | `scheduling.read` |
 | POST | `/v1/scheduling/jobs/{id}:move` (Idempotency-Key unless `dryRun`) | `scheduling.schedule.write` |
 | POST | `/v1/scheduling/jobs/{id}:firm` (Idempotency-Key) | `scheduling.schedule.write` |
 | GET | `/v1/scheduling/capacity-load?from&weeks&resourceIds` | `scheduling.read` |
 | POST | `/v1/scheduling/order-pegs` (Idempotency-Key) | `scheduling.schedule.write` |
 | GET | `/v1/scheduling/order-pegs?orderId` | `scheduling.read` |
 | DELETE | `/v1/scheduling/order-pegs/{id}` | `scheduling.schedule.write` |
+| POST | `/v1/scheduling/resources/{id}/capacity-overrides` (Idempotency-Key) | `scheduling.capacity.write` |
+| GET | `/v1/scheduling/resources/{id}/capacity-overrides?from&to` | `scheduling.read` |
+| DELETE | `/v1/scheduling/resources/{id}/capacity-overrides/{overrideId}` | `scheduling.capacity.write` |
 | POST | `/v1/scheduling/networks`, `/setup-matrices`, `/cleanout-rules` (Idempotency-Key) | `scheduling.setup.write` |
 | GET | `/v1/scheduling/networks[/{id}]`, `/setup-matrices[/{id}]?resourceId`, `/cleanout-rules` | `scheduling.read` |
 | POST | `/v1/scheduling/capacity-blocks` (Idempotency-Key) | `scheduling.capacity.write` |
@@ -251,6 +254,7 @@ platform naming rule allows no hyphen in the verb, so the entity is
 | `SCHED-0120` | 422 | An order to peg has no operations in scheduling |
 | `SCHED-0121` | 422 | The peg would make the parent order depend on its own dependent |
 | `SCHED-0122` | 404 | Order peg not found |
+| `SCHED-0130` | 404 | Capacity override not found |
 | `SCHED-0123` | 409 | Campaign start: the resource's cleanout counter moved after the campaign was sequenced; sequence it again |
 | `precondition_required` | 428 | A campaign command was sent without If-Match |
 

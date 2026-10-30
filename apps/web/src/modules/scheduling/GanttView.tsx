@@ -125,6 +125,8 @@ export function GanttView({ bars, resources, from, days, selectedJobId, violatio
                 const pos = barPosition(bar, from, to);
                 if (!pos) return null;
                 const violation = violations[bar.jobId];
+                // AC-23.7: a booked job a later downtime overlaps is outlined like a violation.
+                const outside = bar.outsideCapacity ? ", outside open capacity (SCHED-0002)" : "";
                 const dragging = drag?.bar.jobId === bar.jobId;
                 const shift = dragging && drag.trackPx > 0 ? (drag.dx / drag.trackPx) * VIEW_WIDTH : 0;
                 const late = bar.lateMinutes > 0 ? `, late by ${bar.lateMinutes} min` : "";
@@ -152,7 +154,7 @@ export function GanttView({ bars, resources, from, days, selectedJobId, violatio
                         styles[`tone${orderTone(bar.orderId)}`],
                         bar.lateMinutes > 0 && styles.late,
                         bar.firmed && styles.firmed,
-                        violation && styles.violation,
+                        (violation || bar.outsideCapacity) && styles.violation,
                         selectedJobId === bar.jobId && styles.selected,
                         dragging && styles.dragging,
                       )}
@@ -163,7 +165,7 @@ export function GanttView({ bars, resources, from, days, selectedJobId, violatio
                     >
                       <title>
                         {violation ??
-                          `Order ${bar.orderId.slice(0, 8)} operation ${bar.operNumber}: ${formatDateTime(bar.start)} to ${formatDateTime(bar.end)}${setup}${late}${bar.firmed ? ", firmed" : ""}`}
+                          `Order ${bar.orderId.slice(0, 8)} operation ${bar.operNumber}: ${formatDateTime(bar.start)} to ${formatDateTime(bar.end)}${setup}${late}${bar.firmed ? ", firmed" : ""}${outside}`}
                       </title>
                     </rect>
                     {changeoverPos ? (

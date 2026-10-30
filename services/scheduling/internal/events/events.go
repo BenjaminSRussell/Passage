@@ -12,11 +12,14 @@ var (
 	OrderDatesChanged = events.Type(Context, "orderdates", "changed", 1)
 	CampaignSequenced = events.Type(Context, "campaign", "sequenced", 1)
 	CampaignStarted   = events.Type(Context, "campaign", "started", 1)
+
+	CapacityOverrideCreated = events.Type(Context, "capacityoverride", "created", 1)
+	CapacityOverrideDeleted = events.Type(Context, "capacityoverride", "deleted", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
-	return []string{RunCompleted, JobScheduled, OrderDatesChanged, CampaignSequenced, CampaignStarted}
+	return []string{RunCompleted, JobScheduled, OrderDatesChanged, CampaignSequenced, CampaignStarted, CapacityOverrideCreated, CapacityOverrideDeleted}
 }
 
 type RunCompletedData struct {
@@ -88,4 +91,17 @@ type CampaignStartedData struct {
 	ResourceID string `json:"resourceId"`
 	StartedAt  string `json:"startedAt"`
 	Version    int    `json:"version"`
+}
+
+// CapacityOverrideData announces a downtime or extra shift on a resource
+// (FR-23.1). AffectedJobs are the booked jobs a downtime overlaps; production
+// and the planner move them.
+type CapacityOverrideData struct {
+	OverrideID   string   `json:"overrideId"`
+	ResourceID   string   `json:"resourceId"`
+	Kind         string   `json:"kind"`
+	Start        string   `json:"start"`
+	End          string   `json:"end"`
+	Reason       string   `json:"reason"`
+	AffectedJobs []string `json:"affectedJobs"`
 }

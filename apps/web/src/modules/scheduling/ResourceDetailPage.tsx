@@ -104,9 +104,14 @@ export function ResourceDetailPage() {
         description={resource.name}
         meta={<Badge tone={resource.finite ? "info" : "neutral"}>{resource.finite ? "Finite" : "Infinite"}</Badge>}
         actions={
-          <Link className={buttonClassName("secondary")} to="/scheduling/load">
-            Capacity load
-          </Link>
+          <>
+            <Link className={buttonClassName("secondary")} to={`/scheduling/capacity-overrides?resourceId=${resource.id}`}>
+              Downtimes and extra shifts
+            </Link>
+            <Link className={buttonClassName("secondary")} to="/scheduling/load">
+              Capacity load
+            </Link>
+          </>
         }
       />
       <Card title="Weekly calendar">
