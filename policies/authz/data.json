@@ -320,7 +320,10 @@
       {"resource": "/v1/receiving/consignment-settlements:run", "methods": ["POST"]},
       {"resource": "/v1/receiving/ers-settlements:run", "methods": ["POST"]}
     ]},
-    "VendorInvoiceAuditRelease": {"permissions": [{"resource": "/v1/receiving/invoices/*:release-audit-block", "methods": ["POST"]}]},
+    "InvoiceAuditRelease": {"permissions": [
+      {"resource": "/v1/receiving/invoices/*:release-audit-block", "methods": ["POST"]},
+      {"resource": "/v1/receiving/invoices/*:reject-audit-block", "methods": ["POST"]}
+    ]},
     "APInquire": {"permissions": [{"resource": "/v1/receiving/grir", "methods": ["GET"]}]},
     "ReceivingAdmin": {"permissions": [
       {"resource": "/v1/receiving/pending-postings", "methods": ["GET"]},

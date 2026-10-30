@@ -1,6 +1,7 @@
 package domain_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -8,48 +9,70 @@ import (
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 )
 
-func TestSampler_SameSeedGivesTheSameDecisions(t *testing.T) {
-	a, b := domain.NewSampler(7, 11), domain.NewSampler(7, 11)
-	other := domain.NewSampler(8, 11)
-	rate := dec("37.5")
+func sampler(t *testing.T, seed string) *domain.Sampler {
+	t.Helper()
+	s, err := domain.NewSampler([]byte(seed))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+func TestSampler_DecisionIsAFunctionOfSeedInvoiceAndRate(t *testing.T) {
+	a, b, other := sampler(t, "seed-aaaaaaaaaaaaaaaa"), sampler(t, "seed-aaaaaaaaaaaaaaaa"), sampler(t, "seed-bbbbbbbbbbbbbbbb")
 	differs := false
-	for range 200 {
-		x, y, z := a.Blocks(rate), b.Blocks(rate), other.Blocks(rate)
-		if x != y {
-			t.Fatal("two samplers with one seed disagree")
+	for i := range 300 {
+		id := fmt.Sprintf("00000000-0000-4000-8000-%012d", i)
+		first := a.Blocks(id, dec("37.5"))
+		if first != a.Blocks(id, dec("37.5")) || first != b.Blocks(id, dec("37.5")) {
+			t.Fatalf("invoice %s: the decision is not reproducible", id)
 		}
-		differs = differs || x != z
+		differs = differs || first != other.Blocks(id, dec("37.5"))
 	}
 	if !differs {
-		t.Fatal("a different seed gave the identical sequence")
+		t.Fatal("a different seed gave identical decisions")
+	}
+	if a.Blocks("ABCDEF00-0000-4000-8000-000000000001", dec("50")) != a.Blocks("abcdef00-0000-4000-8000-000000000001", dec("50")) {
+		t.Fatal("the invoice id case changes the decision")
+	}
+}
+
+func TestSampler_RateIsMonotonic(t *testing.T) {
+	s := sampler(t, "seed-aaaaaaaaaaaaaaaa")
+	for i := range 500 {
+		id := fmt.Sprintf("00000000-0000-4000-8000-%012d", i)
+		if s.Blocks(id, dec("10")) && !s.Blocks(id, dec("20")) {
+			t.Fatalf("invoice %s blocked at 10%% but not at 20%%", id)
+		}
 	}
 }
 
 func TestSampler_Boundaries(t *testing.T) {
-	s := domain.NewSampler(1, 2)
-	for range 500 {
-		if s.Blocks(dec("0")) {
+	s := sampler(t, "seed-aaaaaaaaaaaaaaaa")
+	for i := range 500 {
+		id := fmt.Sprintf("00000000-0000-4000-8000-%012d", i)
+		if s.Blocks(id, dec("0")) {
 			t.Fatal("0% blocked an invoice")
 		}
-		if !s.Blocks(dec("100")) {
+		if !s.Blocks(id, dec("100")) {
 			t.Fatal("100% let an invoice through")
 		}
 	}
 	var none *domain.Sampler
-	if none.Blocks(dec("100")) {
+	if none.Blocks("x", dec("100")) {
 		t.Fatal("a missing sampler must never block")
 	}
 }
 
 func TestSampler_BlocksAboutTheConfiguredShare(t *testing.T) {
+	s := sampler(t, "seed-aaaaaaaaaaaaaaaa")
 	for _, tc := range []struct {
 		rate     string
 		min, max int
 	}{{"10", 900, 1100}, {"0.50", 20, 80}, {"99.99", 9980, 10000}} {
-		s := domain.NewSampler(42, 99)
 		blocked := 0
-		for range 10000 {
-			if s.Blocks(dec(tc.rate)) {
+		for i := range 10000 {
+			if s.Blocks(fmt.Sprintf("00000000-0000-4000-8000-%012d", i), dec(tc.rate)) {
 				blocked++
 			}
 		}
@@ -59,21 +82,22 @@ func TestSampler_BlocksAboutTheConfiguredShare(t *testing.T) {
 	}
 }
 
-func TestSampler_RandomSeedsDiffer(t *testing.T) {
+func TestNewSampler_NeedsASeedOfSomeLength(t *testing.T) {
+	if _, err := domain.NewSampler([]byte("short")); err == nil {
+		t.Fatal("a 5 byte seed was accepted")
+	}
 	a, err := domain.NewRandomSampler()
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := domain.NewRandomSampler()
-	if err != nil {
-		t.Fatal(err)
-	}
+	b, _ := domain.NewRandomSampler()
 	same := true
-	for range 64 {
-		same = same && a.Blocks(dec("50")) == b.Blocks(dec("50"))
+	for i := range 64 {
+		id := fmt.Sprintf("00000000-0000-4000-8000-%012d", i)
+		same = same && a.Blocks(id, dec("50")) == b.Blocks(id, dec("50"))
 	}
 	if same {
-		t.Fatal("two randomly seeded samplers produced 64 identical decisions")
+		t.Fatal("two randomly seeded samplers agree on 64 invoices")
 	}
 }
 

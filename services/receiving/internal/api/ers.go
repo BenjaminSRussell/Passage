@@ -28,6 +28,7 @@ const (
 	skipNoPOLine    = "NO_PO_LINE"
 	skipManyPOLines = "AMBIGUOUS_PO_LINE"
 	skipPlanSettled = "PLAN_SETTLED"
+	skipPartial     = "PARTIALLY_INVOICED"
 )
 
 type ersRunRequest struct {
@@ -140,6 +141,17 @@ func (r *ersRun) invoiceFor(rec store.Receipt, po domain.PurchaseOrder) (store.I
 		InvoiceDate: r.base.postingDate, PostingDate: r.base.postingDate, Currency: rec.Currency, LedgerID: r.base.ledgerID, FiscalPeriodID: r.base.fiscalPeriodID,
 		Source: domain.InvoiceSourceERS,
 	}
+	open, invoiced := 0, 0
+	for _, l := range rec.Lines {
+		if l.InvoicedQty.IsPositive() {
+			invoiced++
+		} else {
+			open++
+		}
+	}
+	if open > 0 && invoiced > 0 {
+		return store.Invoice{}, skipPartial
+	}
 	for _, l := range rec.Lines {
 		if l.InvoicedQty.IsPositive() {
 			continue
@@ -222,6 +234,10 @@ func (r *ersRun) receipt(receiptID string) error {
 }
 
 func (a *API) runErsSettlement(w http.ResponseWriter, r *http.Request) {
+	p, ok := principalWithUser(w, r)
+	if !ok {
+		return
+	}
 	start, req, ok := a.startRun(w, r, &ersRunRequest{}, false)
 	if !ok {
 		return
@@ -240,7 +256,6 @@ func (a *API) runErsSettlement(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, validationProblem(fields))
 		return
 	}
-	p, _ := tenant.FromContext(r.Context())
 	run := &ersRun{
 		api: a, ctx: r.Context(), principal: p, base: start.req, orders: map[string]ersOrder{}, vendors: map[string]bool{},
 		body: ersRunBody{Settled: []ersSettledBody{}, Skipped: []skippedBody{}},
@@ -253,12 +268,26 @@ func (a *API) runErsSettlement(w http.ResponseWriter, r *http.Request) {
 }
 
 func (r *ersRun) scan(req settlementRunRequest) error {
-	filter := store.GrirFilter{VendorID: req.VendorID, PurchaseOrderID: req.PurchaseOrderID, Status: "OPEN", Limit: ersPageSize}
 	seen := map[string]struct{}{}
+	for _, status := range []string{"OPEN", "PARTIAL"} {
+		more, err := r.scanStatus(req, status, seen)
+		if err != nil {
+			return err
+		}
+		if more {
+			r.body.HasMore = true
+			return nil
+		}
+	}
+	return nil
+}
+
+func (r *ersRun) scanStatus(req settlementRunRequest, status string, seen map[string]struct{}) (bool, error) {
+	filter := store.GrirFilter{VendorID: req.VendorID, PurchaseOrderID: req.PurchaseOrderID, Status: status, Limit: ersPageSize}
 	for page := 0; page < ersScanPages; page++ {
 		got, err := r.api.store.ListGrir(r.ctx, filter)
 		if err != nil {
-			return err
+			return false, err
 		}
 		items := got.Items
 		more := len(items) > filter.Limit
@@ -270,20 +299,32 @@ func (r *ersRun) scan(req settlementRunRequest) error {
 				continue
 			}
 			if r.full() {
-				r.body.HasMore = true
-				return nil
+				return true, nil
 			}
 			seen[item.ReceiptID] = struct{}{}
-			if err := r.receipt(item.ReceiptID); err != nil {
-				return err
+			if err := r.item(item, status); err != nil {
+				return false, err
 			}
 		}
 		if !more {
-			return nil
+			return false, nil
 		}
 		last := items[len(items)-1]
 		filter.CursorCreatedAt, filter.CursorID = last.CreatedAt, last.ID
 	}
-	r.body.HasMore = true
+	return true, nil
+}
+
+func (r *ersRun) item(item store.GrirItem, status string) error {
+	if status == "OPEN" {
+		return r.receipt(item.ReceiptID)
+	}
+	enabled, err := r.ersVendor(item.VendorID)
+	if err != nil {
+		return err
+	}
+	if enabled {
+		r.skip(item.ReceiptNumber, skipPartial)
+	}
 	return nil
 }

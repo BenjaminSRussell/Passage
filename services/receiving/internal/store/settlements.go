@@ -25,7 +25,7 @@ func PlanSettled(poID string, lineNo int) *domain.Error {
 }
 
 func AuditBlocked(invoiceID string) *domain.Error {
-	return &domain.Error{Code: domain.CodeAuditBlocked, Detail: fmt.Sprintf("invoice %s is blocked for audit and cannot be adjusted until an auditor releases it", invoiceID)}
+	return &domain.Error{Code: domain.CodeAuditBlocked, Detail: fmt.Sprintf("invoice %s is held or rejected by the audit block and cannot be adjusted", invoiceID)}
 }
 
 func DuplicateAdjustment(number string) *domain.Error {
@@ -56,7 +56,7 @@ func (s *Postgres) PostInvoiceAdjustment(ctx context.Context, in InvoiceAdjustme
 		if base.Invoice.LegalEntityID != in.LegalEntityID {
 			return &domain.Error{Code: domain.CodeInvalidReceipt, Detail: "legalEntityId differs from the legal entity of the original invoice"}
 		}
-		if base.Invoice.Status == domain.InvoiceStatusAuditBlocked {
+		if base.Invoice.Status != domain.InvoiceStatusPosted {
 			return AuditBlocked(base.Invoice.ID)
 		}
 		outcome, err := fn(base)

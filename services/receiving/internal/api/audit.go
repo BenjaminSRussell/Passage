@@ -2,9 +2,12 @@ package api
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
@@ -12,7 +15,7 @@ import (
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
 )
 
-const dutyInvoiceAuditRelease = "VendorInvoiceAuditRelease"
+const dutyInvoiceAuditRelease = "InvoiceAuditRelease"
 
 type auditPolicyRequest struct {
 	LegalEntityID string        `json:"legalEntityId"`
@@ -38,6 +41,13 @@ type ersVendorBody struct {
 type releaseRequest struct {
 	LegalEntityID string `json:"legalEntityId"`
 }
+
+type rejectRequest struct {
+	LegalEntityID string `json:"legalEntityId"`
+	Reason        string `json:"reason"`
+}
+
+const maxRejectReason = 500
 
 func principalWithUser(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) {
 	p, ok := tenant.FromContext(r.Context())
@@ -76,7 +86,10 @@ func (a *API) setAuditPolicy(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	if err := a.store.SetAuditRate(r.Context(), req.LegalEntityID, rate, p.UserID); err != nil {
+	err := a.store.SetAuditRate(r.Context(), req.LegalEntityID, rate, p.UserID, func(old decimal.Decimal) (events.Event, error) {
+		return auditPolicyChangedEvent(p.TenantID, req.LegalEntityID, old, rate, p.UserID)
+	})
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -108,7 +121,10 @@ func (a *API) setErsVendor(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	if err := a.store.SetErsVendor(r.Context(), req.LegalEntityID, vendorID, *req.Enabled, p.UserID); err != nil {
+	err := a.store.SetErsVendor(r.Context(), req.LegalEntityID, vendorID, *req.Enabled, p.UserID, func(old bool) (events.Event, error) {
+		return ersVendorChangedEvent(p.TenantID, req.LegalEntityID, vendorID, old, *req.Enabled, p.UserID)
+	})
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
@@ -164,4 +180,39 @@ func (a *API) releaseAuditBlock(w http.ResponseWriter, r *http.Request) {
 	a.auditReleased.Add(1)
 	a.invoiced.Add(1)
 	httpx.JSON(w, http.StatusOK, toInvoiceBody(released))
+}
+
+func (a *API) rejectAuditBlock(w http.ResponseWriter, r *http.Request) {
+	p, ok := principalWithUser(w, r)
+	if !ok {
+		return
+	}
+	var req rejectRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	id := chi.URLParam(r, "id")
+	reason := strings.TrimSpace(req.Reason)
+	fields := map[string]string{}
+	checkUUID(fields, "id", id)
+	checkUUID(fields, "legalEntityId", req.LegalEntityID)
+	checkLength(fields, "reason", reason, 1, maxRejectReason)
+	if len(fields) > 0 {
+		httpx.Fail(w, r, validationProblem(fields))
+		return
+	}
+	if err := inScope(p, req.LegalEntityID); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	rejected, err := a.store.RejectInvoice(r.Context(), id, req.LegalEntityID, p.UserID, reason, func(inv store.Invoice) (events.Event, error) {
+		return invoiceRejectedEvent(p.TenantID, inv, reason, p.UserID)
+	})
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	a.auditRejected.Add(1)
+	httpx.JSON(w, http.StatusOK, toInvoiceBody(rejected))
 }

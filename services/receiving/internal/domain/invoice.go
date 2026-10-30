@@ -130,8 +130,11 @@ func PostInvoice(ctx context.Context, in VendorInvoice, periods PeriodControl, l
 	return entry, nil
 }
 
-func HoldInvoice(in VendorInvoice, profile PostingProfile) (JournalEntry, error) {
+func HoldInvoice(ctx context.Context, in VendorInvoice, periods PeriodControl, profile PostingProfile) (JournalEntry, error) {
 	if err := checkInvoiceHeader(in, len(in.Lines)); err != nil {
+		return JournalEntry{}, err
+	}
+	if err := checkAPPeriod(ctx, periods, in.LegalEntityID, in.LedgerID, in.FiscalPeriodID, in.PostingDate, in.ID); err != nil {
 		return JournalEntry{}, err
 	}
 	entry, err := assessInvoice(in, profile)

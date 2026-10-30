@@ -33,6 +33,11 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.databaseSecret }}
                   key: DATABASE_URL
+            - name: AUDIT_SAMPLE_SEED
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auditSeedSecret }}
+                  key: AUDIT_SAMPLE_SEED
             - name: MIGRATE_ON_START
               value: {{ .Values.migrateOnStart | quote }}
             - name: LEDGER_URL

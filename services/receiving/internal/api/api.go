@@ -72,6 +72,7 @@ type API struct {
 	ersSettled    atomic.Int64
 	auditBlocked  atomic.Int64
 	auditReleased atomic.Int64
+	auditRejected atomic.Int64
 
 	pendingPostings pendingTracker
 	http            requestMetrics
@@ -120,6 +121,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/consignment-settlements:run", a.idempotent(a.runConsignmentSettlement))
 	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/ers-settlements:run", a.idempotent(a.runErsSettlement))
 	r.With(authz.RequireDuty(dutyInvoiceAuditRelease)).Post("/v1/receiving/invoices/{id}:release-audit-block", a.idempotent(a.releaseAuditBlock))
+	r.With(authz.RequireDuty(dutyInvoiceAuditRelease)).Post("/v1/receiving/invoices/{id}:reject-audit-block", a.idempotent(a.rejectAuditBlock))
 	r.With(authz.RequireDuty(dutyMatchingPolicy)).Put("/v1/receiving/audit-policy", a.setAuditPolicy)
 	r.With(authz.RequireDuty(dutyMatchingPolicy)).Put("/v1/receiving/ers-vendors/{vendorId}", a.setErsVendor)
 }
@@ -141,6 +143,7 @@ func (a *API) Metrics() http.Handler {
 		{"receiving_ers_invoices_posted_total", "Self-billed invoices created by evaluated receipt settlement runs, including those held for audit.", &a.ersSettled},
 		{"receiving_invoices_audit_blocked_total", "Invoices held by the stochastic audit block.", &a.auditBlocked},
 		{"receiving_invoices_audit_released_total", "Audit-blocked invoices released by an auditor and posted.", &a.auditReleased},
+		{"receiving_invoices_audit_rejected_total", "Audit-blocked invoices rejected by an auditor, freeing their GR/IR quantity.", &a.auditRejected},
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")

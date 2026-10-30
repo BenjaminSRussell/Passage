@@ -40,9 +40,49 @@ func (s *Store) ReleaseInvoice(ctx context.Context, id, legalEntityID, by string
 
 func policyKey(legalEntityID, subject string) string { return legalEntityID + "|" + subject }
 
-func (s *Store) SetErsVendor(ctx context.Context, legalEntityID, vendorID string, enabled bool, _ string) error {
+func (s *Store) RejectInvoice(ctx context.Context, id, legalEntityID, by, reason string, fn store.RejectFunc) (out store.Invoice, err error) {
+	err = s.with(ctx, func(t *tenantData) error {
+		inv, ok := t.invoiceDocs[id]
+		if !ok {
+			return store.ErrInvoiceNotFound
+		}
+		if err := store.CheckRelease(inv, legalEntityID, by); err != nil {
+			return err
+		}
+		evt, err := fn(inv)
+		if err != nil {
+			return err
+		}
+		for _, l := range inv.Lines {
+			g := &t.grir[t.grirFor(l.ReceiptID, l.ReceiptLineNo)]
+			g.InvoicedQty, g.ClearedAmount = g.InvoicedQty.Sub(l.Qty), g.ClearedAmount.Sub(l.GrirCleared)
+			g.Status = grirStatus(g.InvoicedQty, g.ReceivedQty)
+			r := t.receipts[l.ReceiptID]
+			for i := range r.Lines {
+				if r.Lines[i].LineNo == l.ReceiptLineNo {
+					r.Lines[i].InvoicedQty = r.Lines[i].InvoicedQty.Sub(l.Qty)
+				}
+			}
+			t.receipts[l.ReceiptID] = r
+		}
+		now := time.Now().UTC()
+		inv.Status, inv.RejectedBy, inv.RejectedAt, inv.RejectReason = domain.InvoiceStatusAuditRejected, by, &now, reason
+		t.invoiceDocs[id] = inv
+		s.events = append(s.events, evt)
+		out = inv
+		return nil
+	})
+	return out, err
+}
+
+func (s *Store) SetErsVendor(ctx context.Context, legalEntityID, vendorID string, enabled bool, _ string, fn store.ErsVendorFunc) error {
 	return s.with(ctx, func(t *tenantData) error {
+		evt, err := fn(t.ersVendors[policyKey(legalEntityID, vendorID)])
+		if err != nil {
+			return err
+		}
 		t.ersVendors[policyKey(legalEntityID, vendorID)] = enabled
+		s.events = append(s.events, evt)
 		return nil
 	})
 }
@@ -55,9 +95,14 @@ func (s *Store) ErsVendor(ctx context.Context, legalEntityID, vendorID string) (
 	return enabled, err
 }
 
-func (s *Store) SetAuditRate(ctx context.Context, legalEntityID string, ratePct decimal.Decimal, _ string) error {
+func (s *Store) SetAuditRate(ctx context.Context, legalEntityID string, ratePct decimal.Decimal, _ string, fn store.AuditRateFunc) error {
 	return s.with(ctx, func(t *tenantData) error {
+		evt, err := fn(t.auditRates[legalEntityID])
+		if err != nil {
+			return err
+		}
 		t.auditRates[legalEntityID] = ratePct
+		s.events = append(s.events, evt)
 		return nil
 	})
 }

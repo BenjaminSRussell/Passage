@@ -10,7 +10,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
-	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
@@ -65,6 +64,9 @@ type invoiceBody struct {
 	Status         string            `json:"status"`
 	ReleasedBy     string            `json:"releasedBy,omitempty"`
 	ReleasedAt     string            `json:"releasedAt,omitempty"`
+	RejectedBy     string            `json:"rejectedBy,omitempty"`
+	RejectedAt     string            `json:"rejectedAt,omitempty"`
+	RejectReason   string            `json:"rejectReason,omitempty"`
 	CreatedAt      string            `json:"createdAt"`
 	Lines          []invoiceLineBody `json:"lines"`
 }
@@ -141,9 +143,8 @@ func invoiceSubjects(in store.Invoice) []string {
 }
 
 func (a *API) postVendorInvoice(w http.ResponseWriter, r *http.Request) {
-	p, ok := tenant.FromContext(r.Context())
-	if !ok || !ids.Valid(p.TenantID) {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "missing or malformed tenant"))
+	p, ok := principalWithUser(w, r)
+	if !ok {
 		return
 	}
 	var req invoiceRequest
@@ -178,7 +179,7 @@ func (a *API) submitInvoice(ctx context.Context, p tenant.Principal, in store.In
 	if err != nil {
 		return store.Invoice{}, err
 	}
-	blocked := a.ports.AuditSampler.Blocks(ratePct)
+	blocked := a.ports.AuditSampler.Blocks(in.ID, ratePct)
 	posted, err := a.store.PostInvoice(ctx, in, func(items []*domain.GrirItem) (store.InvoiceOutcome, error) {
 		lines := make([]domain.PostLine, len(in.Lines))
 		for i, l := range in.Lines {
@@ -189,7 +190,7 @@ func (a *API) submitInvoice(ctx context.Context, p tenant.Principal, in store.In
 			PostingDate: in.PostingDate, InvoiceDate: in.InvoiceDate, Currency: in.Currency, Lines: lines,
 		}
 		if blocked {
-			entry, err := domain.HoldInvoice(doc, a.ports.Profile)
+			entry, err := domain.HoldInvoice(ctx, doc, a.ports.Periods, a.ports.Profile)
 			if err != nil {
 				return store.InvoiceOutcome{}, err
 			}
@@ -222,10 +223,13 @@ func toInvoiceBody(in store.Invoice) invoiceBody {
 	out := invoiceBody{
 		ID: in.ID, VendorID: in.VendorID, LegalEntityID: in.LegalEntityID, InvoiceNumber: in.InvoiceNumber, InvoiceDate: in.InvoiceDate.Format(dateLayout),
 		PostingDate: in.PostingDate.Format(dateLayout), Currency: in.Currency, LedgerID: in.LedgerID, FiscalPeriodID: in.FiscalPeriodID,
-		Total: in.Total.StringFixed(scale), LedgerEntryID: in.LedgerEntryID, Source: in.Source, Status: in.Status, ReleasedBy: in.ReleasedBy, CreatedAt: in.CreatedAt.UTC().Format(time.RFC3339), Lines: make([]invoiceLineBody, 0, len(in.Lines)),
+		Total: in.Total.StringFixed(scale), LedgerEntryID: in.LedgerEntryID, Source: in.Source, Status: in.Status, ReleasedBy: in.ReleasedBy, RejectedBy: in.RejectedBy, RejectReason: in.RejectReason, CreatedAt: in.CreatedAt.UTC().Format(time.RFC3339), Lines: make([]invoiceLineBody, 0, len(in.Lines)),
 	}
 	if in.ReleasedAt != nil {
 		out.ReleasedAt = in.ReleasedAt.UTC().Format(time.RFC3339)
+	}
+	if in.RejectedAt != nil {
+		out.RejectedAt = in.RejectedAt.UTC().Format(time.RFC3339)
 	}
 	for i, l := range in.Lines {
 		out.Lines = append(out.Lines, invoiceLineBody{

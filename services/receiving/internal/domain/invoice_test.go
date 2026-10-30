@@ -168,7 +168,7 @@ func TestHoldInvoice_ReservesQuantityWithoutPostingAndPostHeldInvoiceMatchesPost
 	}
 
 	held := received()
-	hold, err := domain.HoldInvoice(split(held), testProfile)
+	hold, err := domain.HoldInvoice(context.Background(), split(held), open, testProfile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func TestHoldInvoice_ReservesQuantityWithoutPostingAndPostHeldInvoiceMatchesPost
 
 func TestHoldInvoice_ValuesTheDifferenceFromTheReceipt(t *testing.T) {
 	item := grirItem("10", "5")
-	entry, err := domain.HoldInvoice(invoiceFor(item, "10", "5.10", august15), testProfile)
+	entry, err := domain.HoldInvoice(context.Background(), invoiceFor(item, "10", "5.10", august15), domain.FakePeriods{Status: domain.PeriodOpen}, testProfile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,19 +222,35 @@ func TestHoldInvoice_ValuesTheDifferenceFromTheReceipt(t *testing.T) {
 	}
 }
 
-func TestHoldInvoice_RejectionsLeaveTheItemUntouchedAndAClosedPeriodIsCheckedOnRelease(t *testing.T) {
+func TestHoldInvoice_RejectionsLeaveTheItemUntouched(t *testing.T) {
+	open := domain.FakePeriods{Status: domain.PeriodOpen}
 	item := grirItem("10", "5")
-	if _, err := domain.HoldInvoice(invoiceFor(item, "11", "5", august15), testProfile); codeOf(t, err) != domain.CodeOverInvoice || !item.InvoicedQty.IsZero() {
+	if _, err := domain.HoldInvoice(context.Background(), invoiceFor(item, "11", "5", august15), open, testProfile); codeOf(t, err) != domain.CodeOverInvoice || !item.InvoicedQty.IsZero() {
 		t.Fatalf("over-invoice err %v item %+v", err, item)
 	}
-	if _, err := domain.HoldInvoice(domain.VendorInvoice{ID: "vi-1", Currency: "USD"}, testProfile); codeOf(t, err) != domain.CodeInvalidReceipt {
+	if _, err := domain.HoldInvoice(context.Background(), domain.VendorInvoice{ID: "vi-1", Currency: "USD"}, open, testProfile); codeOf(t, err) != domain.CodeInvalidReceipt {
 		t.Fatalf("empty invoice err %v", err)
 	}
-	if _, err := domain.HoldInvoice(invoiceFor(item, "10", "5", august15), testProfile); err != nil {
-		t.Fatalf("a hold does not consult the period: %v", err)
+}
+
+func TestHoldInvoice_RefusesAClosedPeriodExactlyLikePostInvoice(t *testing.T) {
+	boom := errors.New("down")
+	for _, status := range []domain.PeriodStatus{domain.PeriodClosed, domain.PeriodOnHold, domain.PeriodPermanentlyClosed} {
+		item := grirItem("10", "5")
+		_, err := domain.HoldInvoice(context.Background(), invoiceFor(item, "10", "5", august15), domain.FakePeriods{Status: status}, testProfile)
+		if codeOf(t, err) != domain.CodePeriodClosed || !item.InvoicedQty.IsZero() {
+			t.Fatalf("%s: err %v item %+v: want PER-AP-001 and nothing reserved", status, err, item)
+		}
 	}
+	item := grirItem("10", "5")
+	if _, err := domain.HoldInvoice(context.Background(), invoiceFor(item, "10", "5", august15), domain.FakePeriods{Err: boom}, testProfile); !errors.Is(err, boom) || !item.InvoicedQty.IsZero() {
+		t.Fatalf("period service down must fail closed: %v", err)
+	}
+}
+
+func TestPostHeldInvoice_ClosedPeriodIsCheckedOnRelease(t *testing.T) {
 	ledger := &domain.FakeLedger{}
-	_, err := domain.PostHeldInvoice(context.Background(), invoiceFor(item, "10", "5", august15), []domain.HeldLine{{Qty: dec("10"), UnitPrice: dec("5"), Clearing: dec("50")}},
+	_, err := domain.PostHeldInvoice(context.Background(), invoiceFor(grirItem("10", "5"), "10", "5", august15), []domain.HeldLine{{Qty: dec("10"), UnitPrice: dec("5"), Clearing: dec("50")}},
 		domain.FakePeriods{Status: domain.PeriodClosed}, ledger, testProfile)
 	if codeOf(t, err) != domain.CodePeriodClosed || len(ledger.Entries) != 0 {
 		t.Fatalf("release into a closed period err %v entries %d", err, len(ledger.Entries))

@@ -44,6 +44,41 @@ func blockedInvoice(t *testing.T, b backend, p tenant.Principal, postedBy string
 	return held
 }
 
+func policyEvent(t *testing.T, p tenant.Principal) events.Event {
+	t.Helper()
+	return invoiceEvent(t, p, "sampled", p.LegalEntityID)
+}
+
+func setRate(t *testing.T, b backend, p tenant.Principal, entity, rate, by string) (old decimal.Decimal) {
+	t.Helper()
+	err := b.st.SetAuditRate(ctxOf(p), entity, decimal.RequireFromString(rate), by, func(o decimal.Decimal) (events.Event, error) {
+		old = o
+		return policyEvent(t, p), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return old
+}
+
+func setErs(t *testing.T, b backend, p tenant.Principal, entity, vendor string, enabled bool, by string) (old bool) {
+	t.Helper()
+	err := b.st.SetErsVendor(ctxOf(p), entity, vendor, enabled, by, func(o bool) (events.Event, error) {
+		old = o
+		return policyEvent(t, p), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return old
+}
+
+func reject(b backend, p tenant.Principal, inv store.Invoice, by, reason string) (store.Invoice, error) {
+	return b.st.RejectInvoice(ctxOf(p), inv.ID, inv.LegalEntityID, by, reason, func(held store.Invoice) (events.Event, error) {
+		return events.New(events.Type("payables", "invoice", "rejected", 1), "/passage/receiving/receiving", held.ID, p.TenantID, map[string]string{"invoice": held.ID})
+	})
+}
+
 func release(t *testing.T, b backend, p tenant.Principal, inv store.Invoice, by string, seen *store.Invoice) (store.Invoice, error) {
 	t.Helper()
 	return b.st.ReleaseInvoice(ctxOf(p), inv.ID, inv.LegalEntityID, by, func(held store.Invoice) (store.InvoiceOutcome, error) {
@@ -151,11 +186,12 @@ var auditCases = []struct {
 		if rate, err := b.st.AuditRate(ctx, p.LegalEntityID); err != nil || !rate.IsZero() {
 			t.Fatalf("default rate=%s err=%v", rate, err)
 		}
-		if err := b.st.SetErsVendor(ctx, p.LegalEntityID, vendorID, true, "alice"); err != nil {
-			t.Fatal(err)
+		eventsBefore := b.events(p)
+		if old := setErs(t, b, p, p.LegalEntityID, vendorID, true, "alice"); old {
+			t.Fatal("the flag started on")
 		}
-		if err := b.st.SetAuditRate(ctx, p.LegalEntityID, decimal.RequireFromString("12.50"), "alice"); err != nil {
-			t.Fatal(err)
+		if old := setRate(t, b, p, p.LegalEntityID, "12.50", "alice"); !old.IsZero() {
+			t.Fatalf("the rate started at %s", old)
 		}
 		for _, tc := range []struct {
 			name   string
@@ -176,17 +212,91 @@ var auditCases = []struct {
 				t.Fatalf("%s: ers=%v (%v) rate=%s (%v)", tc.name, on, err, rate, rateErr)
 			}
 		}
-		if err := b.st.SetErsVendor(ctx, p.LegalEntityID, vendorID, false, "bob"); err != nil {
-			t.Fatal(err)
+		if old := setErs(t, b, p, p.LegalEntityID, vendorID, false, "bob"); !old {
+			t.Fatal("the builder was not told the flag was on")
 		}
-		if err := b.st.SetAuditRate(ctx, p.LegalEntityID, decimal.Zero, "bob"); err != nil {
-			t.Fatal(err)
+		if old := setRate(t, b, p, p.LegalEntityID, "0", "bob"); !old.Equal(decimal.RequireFromString("12.5")) {
+			t.Fatalf("the builder saw old rate %s, want 12.5", old)
+		}
+		if got := b.events(p) - eventsBefore; got != 4 {
+			t.Fatalf("emitted %d policy events, want 4", got)
 		}
 		if on, _ := b.st.ErsVendor(ctx, p.LegalEntityID, vendorID); on {
 			t.Fatal("the flag was not turned off")
 		}
 		if rate, _ := b.st.AuditRate(ctx, p.LegalEntityID); !rate.IsZero() {
 			t.Fatalf("rate %s after reset", rate)
+		}
+	}},
+	{"release and reject fail closed when the poster is unknown and compare users by canonical id", func(t *testing.T, b backend) {
+		p := principal(1)
+		anonymous := blockedInvoice(t, b, p, "")
+		_, err := release(t, b, p, anonymous, "bob", nil)
+		wantCode(t, err, domain.CodeAuditSelfRelease)
+		_, err = reject(b, p, anonymous, "bob", "no poster")
+		wantCode(t, err, domain.CodeAuditSelfRelease)
+
+		b2 := newMemstore(t)
+		poster := "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA"
+		held := blockedInvoice(t, b2, p, poster)
+		_, err = release(t, b2, p, held, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", nil)
+		wantCode(t, err, domain.CodeAuditSelfRelease)
+		_, err = reject(b2, p, held, " Aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa ", "same person")
+		wantCode(t, err, domain.CodeAuditSelfRelease)
+	}},
+	{"reject frees the GR/IR quantity, records who when and why, emits once and excludes release and adjustment", func(t *testing.T, b backend) {
+		p := principal(1)
+		held := blockedInvoice(t, b, p, "alice")
+		eventsBefore := b.events(p)
+		out, err := reject(b, p, held, "bob", "duplicate of INV-0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out.Status != domain.InvoiceStatusAuditRejected || out.RejectedBy != "bob" || out.RejectReason != "duplicate of INV-0" || out.RejectedAt == nil || out.LedgerEntryID != "" {
+			t.Fatalf("rejected %+v", out)
+		}
+		page, err := b.st.ListGrir(ctxOf(p), store.GrirFilter{})
+		if err != nil || len(page.Items) != 1 || page.Items[0].Status != "OPEN" || !page.Items[0].InvoicedQty.IsZero() || !page.Items[0].ClearedAmount.IsZero() {
+			t.Fatalf("grir %+v err=%v", page, err)
+		}
+		if got := b.events(p) - eventsBefore; got != 1 {
+			t.Fatalf("emitted %d events, want 1", got)
+		}
+		_, err = release(t, b, p, held, "carol", nil)
+		wantCode(t, err, domain.CodeNotAuditBlocked)
+		_, err = reject(b, p, held, "carol", "again")
+		wantCode(t, err, domain.CodeNotAuditBlocked)
+		_, err = b.st.PostInvoiceAdjustment(ctxOf(p), adjustment(p, held, domain.AdjustmentDebit, "DN-1", line(1, "1.00")), func(store.InvoiceBase) (store.AdjustmentOutcome, error) {
+			return store.AdjustmentOutcome{}, nil
+		})
+		wantCode(t, err, domain.CodeAuditBlocked)
+		again := store.Invoice{
+			ID: ids.New(), LegalEntityID: p.LegalEntityID, VendorID: vendorID, InvoiceNumber: "INV-AGAIN", InvoiceDate: day(3, 2), PostingDate: day(3, 2), Currency: "USD", LedgerID: locationA, FiscalPeriodID: locationA,
+			Lines: held.Lines,
+		}
+		if _, err := b.st.PostInvoice(ctxOf(p), again, func(items []*domain.GrirItem) (store.InvoiceOutcome, error) {
+			if !items[0].InvoicedQty.IsZero() || !items[0].ClearedAmount.Value.IsZero() {
+				t.Fatalf("freed item still reads %+v", items[0])
+			}
+			return store.InvoiceOutcome{LedgerEntryID: "again", Total: decimal.RequireFromString("7.8"), Event: invoiceEvent(t, p, "posted", again.ID)}, nil
+		}); err != nil {
+			t.Fatalf("invoicing the freed quantity: %v", err)
+		}
+	}},
+	{"reject refuses a foreign legal entity, an unknown invoice and another tenant", func(t *testing.T, b backend) {
+		p := principal(1)
+		held := blockedInvoice(t, b, p, "alice")
+		foreign := held
+		foreign.LegalEntityID = locationA
+		_, err := reject(b, p, foreign, "bob", "x")
+		wantCode(t, err, domain.CodeInvalidReceipt)
+		unknown := held
+		unknown.ID = ids.New()
+		if _, err := reject(b, p, unknown, "bob", "x"); !errors.Is(err, store.ErrInvoiceNotFound) {
+			t.Fatalf("unknown err=%v", err)
+		}
+		if _, err := reject(b, principal(2), held, "bob", "x"); !errors.Is(err, store.ErrInvoiceNotFound) {
+			t.Fatalf("other tenant err=%v", err)
 		}
 	}},
 }

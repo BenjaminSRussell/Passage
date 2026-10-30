@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -78,6 +79,14 @@ type auditedInvoiceJSON struct {
 	LedgerEntryID string `json:"ledgerEntryId"`
 	ReleasedBy    string `json:"releasedBy"`
 	ReleasedAt    string `json:"releasedAt"`
+}
+
+func testSampler(seed string) *domain.Sampler {
+	s, err := domain.NewSampler([]byte(seed))
+	if err != nil {
+		panic(err)
+	}
+	return s
 }
 
 func ersOrder(price string, mutate func(*domain.PurchaseOrder)) domain.PurchaseOrder {
@@ -159,7 +168,7 @@ func (h *httpResult) invoice(t *testing.T, want int) auditedInvoiceJSON {
 }
 
 func (rg *rig) release(invoiceID, user string) (int, string) {
-	rec := rg.call(http.MethodPost, invoicesBase+invoiceID+releaseSuffix, fmt.Sprintf(`{"legalEntityId":%q}`, legalEntityID), userDuty("VendorInvoiceAuditRelease", rg.key(), user))
+	rec := rg.call(http.MethodPost, invoicesBase+invoiceID+releaseSuffix, fmt.Sprintf(`{"legalEntityId":%q}`, legalEntityID), userDuty("InvoiceAuditRelease", rg.key(), user))
 	return rec.Code, rec.Body.String()
 }
 
@@ -407,7 +416,7 @@ func TestErsAndNormalInvoicingOfOneLineExcludeEachOtherInBothOrders(t *testing.T
 
 		run := rg.ersRun(t, http.StatusOK)
 
-		if len(run.Settled) != 0 || len(rg.ledger.Entries) != 2 || grirStatus(t, rg) != "PARTIAL" {
+		if len(run.Settled) != 0 || strings.Join(run.reasons(), ",") != "PARTIALLY_INVOICED" || len(rg.ledger.Entries) != 2 || grirStatus(t, rg) != "PARTIAL" {
 			t.Fatalf("run %+v ledger entries %d GR/IR %s", run, len(rg.ledger.Entries), grirStatus(t, rg))
 		}
 	})
@@ -495,7 +504,7 @@ func TestErsAndManualInvoiceRacingForOneReceiptPostOnce(t *testing.T) {
 }
 
 func TestAuditBlock_HoldsTheInvoiceUntilAnAuditorReleasesIt(t *testing.T) {
-	rg := ersRig("2.60", nil, domain.NewSampler(1, 1))
+	rg := ersRig("2.60", nil, testSampler("seed-one-0123456789"))
 	rg.sampleRate(t, "100")
 	r := rg.posted(t, "PS-1", 10, 4)
 	receiptEntries := len(rg.ledger.Entries)
@@ -548,7 +557,7 @@ func TestAuditBlock_HoldsTheInvoiceUntilAnAuditorReleasesIt(t *testing.T) {
 
 func TestAuditRelease_DutyIdentityAndScopeChecks(t *testing.T) {
 	periods := &switchPeriods{status: domain.PeriodOpen}
-	rg := ersRig("2.60", periods, domain.NewSampler(1, 1))
+	rg := ersRig("2.60", periods, testSampler("seed-one-0123456789"))
 	rg.sampleRate(t, "100")
 	r := rg.posted(t, "PS-1", 10, 4)
 	held := rg.manualInvoice(t, "INV-1", r.ID, 4, "alice").invoice(t, http.StatusCreated)
@@ -566,13 +575,13 @@ func TestAuditRelease_DutyIdentityAndScopeChecks(t *testing.T) {
 	}{
 		{"the poster's duty is not the release duty", path, body, userDuty("VendorInvoicePost", rg.key(), "bob"), http.StatusForbidden, "AUTH-0003"},
 		{"the policy duty is not the release duty", path, body, userDuty("MatchingPolicyMaintain", rg.key(), "bob"), http.StatusForbidden, "AUTH-0003"},
-		{"the releaser must not be the poster", path, body, userDuty("VendorInvoiceAuditRelease", rg.key(), "alice"), http.StatusForbidden, "AP-AUD-003"},
-		{"a release needs a user", path, body, duty("VendorInvoiceAuditRelease", rg.key()), http.StatusUnauthorized, "AUTH-0001"},
-		{"legal entity outside the caller's scope", path, strings.Replace(body, legalEntityID, ledgerID, 1), userDuty("VendorInvoiceAuditRelease", rg.key(), "bob", entityHeader, legalEntityID), http.StatusForbidden, "AUTH-0003"},
-		{"legal entity of another invoice owner", path, strings.Replace(body, legalEntityID, ledgerID, 1), userDuty("VendorInvoiceAuditRelease", rg.key(), "bob", entityHeader, legalEntityID+","+ledgerID), http.StatusUnprocessableEntity, "RCV-VAL-001"},
-		{"legal entity missing", path, `{}`, userDuty("VendorInvoiceAuditRelease", rg.key(), "bob"), http.StatusBadRequest, "COM-0001"},
-		{"id not a uuid", invoicesBase + "x" + releaseSuffix, body, userDuty("VendorInvoiceAuditRelease", rg.key(), "bob"), http.StatusBadRequest, "COM-0001"},
-		{"unknown invoice", invoicesBase + poID + releaseSuffix, body, userDuty("VendorInvoiceAuditRelease", rg.key(), "bob"), http.StatusNotFound, "RCV-NF-005"},
+		{"the releaser must not be the poster", path, body, userDuty("InvoiceAuditRelease", rg.key(), "alice"), http.StatusForbidden, "AP-AUD-003"},
+		{"a release needs a user", path, body, userDuty("InvoiceAuditRelease", rg.key(), ""), http.StatusUnauthorized, "AUTH-0001"},
+		{"legal entity outside the caller's scope", path, strings.Replace(body, legalEntityID, ledgerID, 1), userDuty("InvoiceAuditRelease", rg.key(), "bob", entityHeader, legalEntityID), http.StatusForbidden, "AUTH-0003"},
+		{"legal entity of another invoice owner", path, strings.Replace(body, legalEntityID, ledgerID, 1), userDuty("InvoiceAuditRelease", rg.key(), "bob", entityHeader, legalEntityID+","+ledgerID), http.StatusUnprocessableEntity, "RCV-VAL-001"},
+		{"legal entity missing", path, `{}`, userDuty("InvoiceAuditRelease", rg.key(), "bob"), http.StatusBadRequest, "COM-0001"},
+		{"id not a uuid", invoicesBase + "x" + releaseSuffix, body, userDuty("InvoiceAuditRelease", rg.key(), "bob"), http.StatusBadRequest, "COM-0001"},
+		{"unknown invoice", invoicesBase + poID + releaseSuffix, body, userDuty("InvoiceAuditRelease", rg.key(), "bob"), http.StatusNotFound, "RCV-NF-005"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			problemCode(t, rg.call(http.MethodPost, tc.path, tc.body, tc.hdr), tc.status, tc.code)
@@ -593,7 +602,7 @@ func TestAuditRelease_DutyIdentityAndScopeChecks(t *testing.T) {
 }
 
 func TestAuditBlock_AppliesToSelfBilledInvoicesToo(t *testing.T) {
-	rg := ersRig("2.60", nil, domain.NewSampler(3, 4))
+	rg := ersRig("2.60", nil, testSampler("seed-two-0123456789"))
 	rg.enableErs(t, true)
 	rg.sampleRate(t, "100.00")
 	rg.posted(t, "PS-1", 10, 4)
@@ -615,22 +624,22 @@ func TestAuditBlock_AppliesToSelfBilledInvoicesToo(t *testing.T) {
 	wantLines(t, lastEntry(t, rg), "2100=10", "1400=0.4", "2000=-10.4")
 }
 
-func TestAuditBlock_DrawsFollowTheSeededSequenceAndTheConfiguredRate(t *testing.T) {
+func TestAuditBlock_DecisionIsReproduciblePerInvoiceAndFollowsTheRate(t *testing.T) {
 	const invoices = 12
 	rate := dec("40")
-	twin := domain.NewSampler(5, 6)
-	rg := ersRig("2.60", nil, domain.NewSampler(5, 6))
+	twin := testSampler("seed-one-0123456789")
+	rg := ersRig("2.60", nil, testSampler("seed-one-0123456789"))
 	rg.sampleRate(t, "40")
 	blockedAny, postedAny := false, false
 	for i := range invoices {
 		r := rg.posted(t, fmt.Sprintf("PS-%02d", i), 10, 1)
 		got := rg.manualInvoice(t, fmt.Sprintf("INV-%02d", i), r.ID, 1, "alice").invoice(t, http.StatusCreated)
 		want := "POSTED"
-		if twin.Blocks(rate) {
+		if twin.Blocks(got.ID, rate) {
 			want = "AUDIT_BLOCKED"
 		}
 		if got.Status != want {
-			t.Fatalf("invoice %d is %s, want %s from the seeded sequence", i, got.Status, want)
+			t.Fatalf("invoice %d (%s) is %s, want %s from HMAC(seed, invoice id)", i, got.ID, got.Status, want)
 		}
 		blockedAny, postedAny = blockedAny || want == "AUDIT_BLOCKED", postedAny || want == "POSTED"
 	}
@@ -640,7 +649,7 @@ func TestAuditBlock_DrawsFollowTheSeededSequenceAndTheConfiguredRate(t *testing.
 }
 
 func TestAuditBlock_DefaultRateIsZeroAndRatesAreKeptPerLegalEntity(t *testing.T) {
-	rg := ersRig("2.60", nil, domain.NewSampler(1, 1))
+	rg := ersRig("2.60", nil, testSampler("seed-one-0123456789"))
 	r := rg.posted(t, "PS-1", 10, 4)
 	if got := rg.manualInvoice(t, "INV-1", r.ID, 1, "alice").invoice(t, http.StatusCreated); got.Status != "POSTED" {
 		t.Fatalf("with no policy the invoice is %s", got.Status)
@@ -676,13 +685,13 @@ func TestPolicyEndpoints_ValidateAndAuthorise(t *testing.T) {
 		{"three decimals", http.MethodPut, auditPolicyPath, `{` + entity + `,"sampleRatePct":"12.345"}`, rg.policyMaker(), http.StatusBadRequest, "COM-0001"},
 		{"rate missing", http.MethodPut, auditPolicyPath, `{` + entity + `}`, rg.policyMaker(), http.StatusBadRequest, "COM-0001"},
 		{"entity not a uuid", http.MethodPut, auditPolicyPath, `{"legalEntityId":"x","sampleRatePct":5}`, rg.policyMaker(), http.StatusBadRequest, "COM-0001"},
-		{"no user", http.MethodPut, auditPolicyPath, `{` + entity + `,"sampleRatePct":5}`, duty("MatchingPolicyMaintain", rg.key()), http.StatusUnauthorized, "AUTH-0001"},
+		{"no user", http.MethodPut, auditPolicyPath, `{` + entity + `,"sampleRatePct":5}`, userDuty("MatchingPolicyMaintain", rg.key(), ""), http.StatusUnauthorized, "AUTH-0001"},
 		{"wrong duty", http.MethodPut, auditPolicyPath, `{` + entity + `,"sampleRatePct":5}`, userDuty("VendorInvoicePost", rg.key(), "u"), http.StatusForbidden, "AUTH-0003"},
 		{"entity outside scope", http.MethodPut, auditPolicyPath, `{"legalEntityId":"` + ledgerID + `","sampleRatePct":5}`, rg.policyMaker(), http.StatusForbidden, "AUTH-0003"},
 		{"enabled missing", http.MethodPut, ersVendorPath, `{` + entity + `}`, rg.policyMaker(), http.StatusBadRequest, "COM-0001"},
 		{"vendor not a uuid", http.MethodPut, "/v1/receiving/ers-vendors/x", `{` + entity + `,"enabled":true}`, rg.policyMaker(), http.StatusBadRequest, "COM-0001"},
 		{"ers wrong duty", http.MethodPut, ersVendorPath, `{` + entity + `,"enabled":true}`, userDuty("VendorInvoicePost", rg.key(), "u"), http.StatusForbidden, "AUTH-0003"},
-		{"ers no user", http.MethodPut, ersVendorPath, `{` + entity + `,"enabled":true}`, duty("MatchingPolicyMaintain", rg.key()), http.StatusUnauthorized, "AUTH-0001"},
+		{"ers no user", http.MethodPut, ersVendorPath, `{` + entity + `,"enabled":true}`, userDuty("MatchingPolicyMaintain", rg.key(), ""), http.StatusUnauthorized, "AUTH-0001"},
 		{"ers entity outside scope", http.MethodPut, ersVendorPath, `{"legalEntityId":"` + ledgerID + `","enabled":true}`, rg.policyMaker(), http.StatusForbidden, "AUTH-0003"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -700,13 +709,18 @@ func TestAsyncAPIDocumentsTheAuditAndSelfBillingEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rg := ersRig("2.60", nil, domain.NewSampler(1, 1))
+	rg := ersRig("2.60", nil, testSampler("seed-one-0123456789"))
 	rg.enableErs(t, true)
 	rg.sampleRate(t, "100")
 	rg.posted(t, "PS-1", 10, 4)
 	run := rg.ersRun(t, http.StatusOK)
 	if code, body := rg.release(run.Settled[0].InvoiceID, "auditor"); code != http.StatusOK {
 		t.Fatalf("release %d %s", code, body)
+	}
+	rg.posted(t, "PS-2", 10, 1)
+	other := rg.ersRun(t, http.StatusOK)
+	if code, body := rg.reject(other.Settled[0].InvoiceID, "auditor", "duplicate"); code != http.StatusOK {
+		t.Fatalf("reject %d %s", code, body)
 	}
 	seen := map[string]bool{}
 	for _, evt := range rg.st.Events() {
@@ -724,7 +738,7 @@ func TestAsyncAPIDocumentsTheAuditAndSelfBillingEvents(t *testing.T) {
 			}
 		}
 	}
-	for _, want := range []string{"dev.passage.payables.invoice.sampled.v1", "dev.passage.payables.invoice.posted.v1"} {
+	for _, want := range []string{"dev.passage.payables.invoice.sampled.v1", "dev.passage.payables.invoice.posted.v1", "dev.passage.payables.invoice.rejected.v1", "dev.passage.receiving.auditpolicy.changed.v1", "dev.passage.receiving.ersvendor.changed.v1"} {
 		if !seen[want] {
 			t.Errorf("scenario did not emit %s", want)
 		}
@@ -732,7 +746,7 @@ func TestAsyncAPIDocumentsTheAuditAndSelfBillingEvents(t *testing.T) {
 }
 
 func TestMetrics_CountSelfBillingAndAuditBlocks(t *testing.T) {
-	rg := ersRig("2.60", nil, domain.NewSampler(1, 1))
+	rg := ersRig("2.60", nil, testSampler("seed-one-0123456789"))
 	rg.enableErs(t, true)
 	rg.sampleRate(t, "100")
 	rg.posted(t, "PS-1", 10, 4)
@@ -752,4 +766,166 @@ func metricsText(rg *rig) string {
 	rec := httptest.NewRecorder()
 	rg.api.Metrics().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	return rec.Body.String()
+}
+
+func TestInvoicePostingAndErsRunRecordTheirActor(t *testing.T) {
+	rg := ersRig("2.60", nil, nil)
+	rg.enableErs(t, true)
+	r := rg.posted(t, "PS-1", 10, 4)
+	noUser := func(name string) headers { return userDuty(name, rg.key(), "") }
+
+	problemCode(t, rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-1", r.ID, 1, ""), noUser("VendorInvoicePost")), http.StatusUnauthorized, "AUTH-0001")
+	problemCode(t, rg.call(http.MethodPost, ersRunPath, runBody("", `"vendorId":"`+vendorID+`"`), noUser("VendorInvoicePost")), http.StatusUnauthorized, "AUTH-0001")
+
+	if len(rg.ledger.Entries) != 1 || grirStatus(t, rg) != "OPEN" {
+		t.Fatalf("a request without an actor posted: ledger entries %d GR/IR %s", len(rg.ledger.Entries), grirStatus(t, rg))
+	}
+}
+
+func TestAuditBlock_ClosedPeriodIsRefusedWhetherOrNotTheInvoiceIsDrawn(t *testing.T) {
+	for _, rate := range []string{"0", "100"} {
+		t.Run("rate "+rate, func(t *testing.T) {
+			periods := &switchPeriods{status: domain.PeriodOpen}
+			rg := ersRig("2.60", periods, testSampler("seed-one-0123456789"))
+			rg.sampleRate(t, rate)
+			r := rg.posted(t, "PS-1", 10, 4)
+			periods.set(domain.PeriodClosed)
+
+			problemCode(t, rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-1", r.ID, 4, ""), userDuty("VendorInvoicePost", rg.key(), "alice")), http.StatusUnprocessableEntity, "PER-AP-001")
+
+			if len(rg.ledger.Entries) != 1 || grirStatus(t, rg) != "OPEN" {
+				t.Fatalf("ledger entries %d GR/IR %s: a refused invoice must reserve nothing", len(rg.ledger.Entries), grirStatus(t, rg))
+			}
+		})
+	}
+}
+
+func (rg *rig) reject(invoiceID, user, reason string) (int, string) {
+	body := fmt.Sprintf(`{"legalEntityId":%q,"reason":%q}`, legalEntityID, reason)
+	rec := rg.call(http.MethodPost, invoicesBase+invoiceID+":reject-audit-block", body, userDuty("InvoiceAuditRelease", rg.key(), user))
+	return rec.Code, rec.Body.String()
+}
+
+func TestAuditReject_FreesTheQuantityPostsNothingAndIsAudited(t *testing.T) {
+	rg := ersRig("2.60", nil, testSampler("seed-one-0123456789"))
+	rg.sampleRate(t, "100")
+	r := rg.posted(t, "PS-1", 10, 4)
+	held := rg.manualInvoice(t, "INV-1", r.ID, 4, "alice").invoice(t, http.StatusCreated)
+	entries := len(rg.ledger.Entries)
+
+	code, body := rg.reject(held.ID, "auditor", "  duplicate of INV-0  ")
+
+	if code != http.StatusOK {
+		t.Fatalf("reject %d %s", code, body)
+	}
+	var out struct {
+		Status       string `json:"status"`
+		RejectedBy   string `json:"rejectedBy"`
+		RejectedAt   string `json:"rejectedAt"`
+		RejectReason string `json:"rejectReason"`
+	}
+	if err := json.Unmarshal([]byte(body), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Status != "AUDIT_REJECTED" || out.RejectedBy != "auditor" || out.RejectedAt == "" || out.RejectReason != "duplicate of INV-0" || len(rg.ledger.Entries) != entries {
+		t.Fatalf("rejected %+v ledger entries %d (was %d)", out, len(rg.ledger.Entries), entries)
+	}
+	if grirStatus(t, rg) != "OPEN" {
+		t.Fatalf("GR/IR %s, want the reservation freed", grirStatus(t, rg))
+	}
+	evts := rg.st.Events()
+	if evt := evts[len(evts)-1]; evt.Type != "dev.passage.payables.invoice.rejected.v1" || !strings.Contains(string(evt.Data), `"rejected_by":"auditor"`) || !strings.Contains(string(evt.Data), `"reason":"duplicate of INV-0"`) {
+		t.Fatalf("event %s %s", evt.Type, evt.Data)
+	}
+	if code, body := rg.release(held.ID, "second"); code != http.StatusConflict || !strings.Contains(body, "AP-AUD-002") {
+		t.Fatalf("release after reject %d %s", code, body)
+	}
+	if code, body := rg.reject(held.ID, "second", "again"); code != http.StatusConflict || !strings.Contains(body, "AP-AUD-002") {
+		t.Fatalf("second reject %d %s", code, body)
+	}
+	problemCode(t, rg.call(http.MethodPost, adjustmentsPath, adjustmentBody(held.ID, "DEBIT", "DN-1", adjLine(1, "1.00")), rg.apPosterFor(legalEntityID)), http.StatusConflict, "AP-AUD-001")
+	rg.sampleRate(t, "0")
+	if again := rg.manualInvoice(t, "INV-2", r.ID, 4, "alice").invoice(t, http.StatusCreated); again.Status != "POSTED" {
+		t.Fatalf("invoicing the freed quantity: %+v", again)
+	}
+}
+
+func TestAuditReject_ValidationDutyAndSegregation(t *testing.T) {
+	rg := ersRig("2.60", nil, testSampler("seed-one-0123456789"))
+	rg.sampleRate(t, "100")
+	r := rg.posted(t, "PS-1", 10, 4)
+	held := rg.manualInvoice(t, "INV-1", r.ID, 4, "alice").invoice(t, http.StatusCreated)
+	path := invoicesBase + held.ID + ":reject-audit-block"
+	good := fmt.Sprintf(`{"legalEntityId":%q,"reason":"no PO match"}`, legalEntityID)
+	for _, tc := range []struct {
+		name   string
+		body   string
+		hdr    headers
+		status int
+		code   string
+	}{
+		{"a reason is required", fmt.Sprintf(`{"legalEntityId":%q}`, legalEntityID), userDuty("InvoiceAuditRelease", rg.key(), "bob"), http.StatusBadRequest, "COM-0001"},
+		{"a blank reason is no reason", fmt.Sprintf(`{"legalEntityId":%q,"reason":"   "}`, legalEntityID), userDuty("InvoiceAuditRelease", rg.key(), "bob"), http.StatusBadRequest, "COM-0001"},
+		{"the reason is bounded", fmt.Sprintf(`{"legalEntityId":%q,"reason":%q}`, legalEntityID, strings.Repeat("x", 501)), userDuty("InvoiceAuditRelease", rg.key(), "bob"), http.StatusBadRequest, "COM-0001"},
+		{"the poster's duty is not enough", good, userDuty("VendorInvoicePost", rg.key(), "bob"), http.StatusForbidden, "AUTH-0003"},
+		{"the poster cannot reject", good, userDuty("InvoiceAuditRelease", rg.key(), "alice"), http.StatusForbidden, "AP-AUD-003"},
+		{"the poster cannot reject in other letters", good, userDuty("InvoiceAuditRelease", rg.key(), " ALICE "), http.StatusForbidden, "AP-AUD-003"},
+		{"a reject needs a user", good, userDuty("InvoiceAuditRelease", rg.key(), ""), http.StatusUnauthorized, "AUTH-0001"},
+		{"scope", strings.Replace(good, legalEntityID, ledgerID, 1), userDuty("InvoiceAuditRelease", rg.key(), "bob"), http.StatusForbidden, "AUTH-0003"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			problemCode(t, rg.call(http.MethodPost, path, tc.body, tc.hdr), tc.status, tc.code)
+			if grirStatus(t, rg) != "CLEARED" {
+				t.Fatal("a refused reject freed the quantity")
+			}
+		})
+	}
+	problemCode(t, rg.call(http.MethodPost, invoicesBase+poID+":reject-audit-block", good, userDuty("InvoiceAuditRelease", rg.key(), "bob")), http.StatusNotFound, "RCV-NF-005")
+}
+
+func TestPolicyChangesEmitEventsWithOldAndNewValues(t *testing.T) {
+	rg := ersRig("2.60", nil, nil)
+	rg.sampleRate(t, "5")
+	rg.sampleRate(t, "7.5")
+	rg.enableErs(t, true)
+	rg.enableErs(t, false)
+	var got []string
+	for _, evt := range rg.st.Events() {
+		got = append(got, evt.Type+" "+string(evt.Data))
+	}
+	for _, want := range []string{
+		`dev.passage.receiving.auditpolicy.changed.v1 {"legal_entity_id":"` + legalEntityID + `","old_rate_pct":"0","new_rate_pct":"5","changed_by":"policy-admin"}`,
+		`dev.passage.receiving.auditpolicy.changed.v1 {"legal_entity_id":"` + legalEntityID + `","old_rate_pct":"5","new_rate_pct":"7.5","changed_by":"policy-admin"}`,
+		`dev.passage.receiving.ersvendor.changed.v1 {"legal_entity_id":"` + legalEntityID + `","vendor_id":"` + vendorID + `","old_enabled":false,"new_enabled":true,"changed_by":"policy-admin"}`,
+		`dev.passage.receiving.ersvendor.changed.v1 {"legal_entity_id":"` + legalEntityID + `","vendor_id":"` + vendorID + `","old_enabled":true,"new_enabled":false,"changed_by":"policy-admin"}`,
+	} {
+		if !slices.Contains(got, want) {
+			t.Errorf("missing event %s in %v", want, got)
+		}
+	}
+}
+
+func TestErs_ReceiptWithSomeLinesInvoicedIsSkippedWholeAndKeepsItsNumber(t *testing.T) {
+	second := "99999999-9999-4999-8999-999999999990"
+	rg := newRigPorts(memstore.New(), domain.PeriodOpen, func(p *api.Ports) {
+		p.PurchaseOrders = domain.FakePurchaseOrders{Orders: map[string]domain.PurchaseOrder{poID: ersOrder("2.60", func(po *domain.PurchaseOrder) {
+			po.Lines = append(po.Lines, domain.PurchaseOrderLine{LineNo: 2, ProductID: second, Unit: "EA", UnitPrice: dec("2"), PriceUnit: dec("1"), Status: "OPEN"})
+		})}}
+	})
+	rg.enableErs(t, true)
+	body := strings.Replace(directBody("PS-2L", 10, 4, ""), `"lines":[`, `"lines":[{"poLineId":"`+poLineID[:len(poLineID)-1]+`6","productId":"`+second+`","orderedRemaining":10,"overDeliveryPct":5,"unitPrice":1.5,"unit":"EA","qty":10,"locationId":"`+locationID+`"},`, 1)
+	r := decode[receiptJSON](t, rg.call(http.MethodPost, receiptsPath, body, rg.maintain()), http.StatusCreated)
+	decode[receiptJSON](t, rg.call(http.MethodPost, receiptsPath+"/"+r.ID+":post", "", rg.poster(r.Version)), http.StatusOK)
+	lineOne := strings.Replace(invoiceBody("INV-L1", r.ID, 10, ""), `"unitPrice":2.5`, `"unitPrice":1.5`, 1)
+	rg.call(http.MethodPost, invoicesPath, lineOne, rg.apPoster())
+	entries := len(rg.ledger.Entries)
+
+	run := rg.ersRun(t, http.StatusOK)
+
+	if len(run.Settled) != 0 || strings.Join(run.reasons(), ",") != "PARTIALLY_INVOICED" || len(rg.ledger.Entries) != entries {
+		t.Fatalf("run %+v ledger entries %d (was %d): the receipt must be skipped whole", run, len(rg.ledger.Entries), entries)
+	}
+	if again := rg.ersRun(t, http.StatusOK); len(again.Settled) != 0 {
+		t.Fatalf("second run %+v", again)
+	}
 }

@@ -74,6 +74,7 @@ func TestNotImplementedListsEveryDeliverable(t *testing.T) {
 }
 
 func withAccounts(env map[string]string) map[string]string {
+	env["AUDIT_SAMPLE_SEED"] = "0123456789abcdef"
 	env["POSTING_LEDGER_ID"] = "0a1b2c3d-0000-4000-8000-000000000001"
 	env["POSTING_ACCOUNT_INVENTORY"], env["POSTING_ACCOUNT_GRIR"], env["POSTING_ACCOUNT_PPV"], env["POSTING_ACCOUNT_VENDOR_CONTROL"] = "1400", "2100", "5200", "2000"
 	return env
@@ -160,7 +161,7 @@ func TestBuildPortsUsesRealAdaptersWhenConfigured(t *testing.T) {
 
 func TestBuildPortsWiresPlanAndOwnershipLookups(t *testing.T) {
 	base := map[string]string{"LEDGER_URL": "http://l", "CLOSE_URL": "http://c", "PURCHASING_URL": "http://p", "POSTING_LEDGER_ID": "0a1b2c3d-0000-4000-8000-000000000001",
-		"POSTING_ACCOUNT_INVENTORY": "1", "POSTING_ACCOUNT_GRIR": "2", "POSTING_ACCOUNT_PPV": "3", "POSTING_ACCOUNT_VENDOR_CONTROL": "4"}
+		"POSTING_ACCOUNT_INVENTORY": "1", "POSTING_ACCOUNT_GRIR": "2", "POSTING_ACCOUNT_PPV": "3", "POSTING_ACCOUNT_VENDOR_CONTROL": "4", "AUDIT_SAMPLE_SEED": "0123456789abcdef"}
 	build := func(extra map[string]string) api.Ports {
 		t.Helper()
 		env := map[string]string{}
@@ -214,5 +215,28 @@ func TestSmallPoolConfigCapsConnectionsForURLAndKeywordDSNs(t *testing.T) {
 	}
 	if _, err := smallPoolConfig("://bad"); err == nil {
 		t.Fatal("an unparseable DSN must fail")
+	}
+}
+
+func TestBuildPortsRequiresTheAuditSampleSeed(t *testing.T) {
+	env := func(seed string) func(string) string {
+		return func(k string) string {
+			e := withAccounts(map[string]string{"LEDGER_URL": "http://l", "CLOSE_URL": "http://c", "PURCHASING_URL": "http://p"})
+			e["AUDIT_SAMPLE_SEED"] = seed
+			return e[k]
+		}
+	}
+	if _, err := buildPorts(env("")); err == nil || !strings.Contains(err.Error(), "AUDIT_SAMPLE_SEED is required") {
+		t.Fatalf("empty seed err %v", err)
+	}
+	if _, err := buildPorts(env("short")); err == nil || !strings.Contains(err.Error(), "AUDIT_SAMPLE_SEED") {
+		t.Fatalf("short seed err %v", err)
+	}
+	if ports, err := buildPorts(env("0123456789abcdef")); err != nil || ports.AuditSampler == nil {
+		t.Fatalf("ports %+v err %v", ports, err)
+	}
+	fakes, err := buildPorts(func(k string) string { return map[string]string{"PASSAGE_ALLOW_FAKES": "1"}[k] })
+	if err != nil || fakes.AuditSampler == nil {
+		t.Fatalf("fakes %+v err %v", fakes, err)
 	}
 }
