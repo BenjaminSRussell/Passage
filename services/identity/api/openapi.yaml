@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: identity
   version: 0.1.0
-  description: Identity service. This slice exposes the read-only effective-permission report.
+  description: Identity service. This slice exposes tenant, legal-entity and role-assignment administration plus the read-only effective-permission report.
 servers:
   - url: https://app.local.passage.dev
 paths:
@@ -46,6 +46,196 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /v1/tenants:
+    post:
+      operationId: createTenant
+      x-passage-duty: Maintain tenants
+      description: Operator only. Provisions a tenant; the caller must hold Maintain tenants and belong to the platform operator tenant. Audited and emitted as dev.passage.identity.tenant.created.v1.
+      security: [{ gatewayHeaders: [] }]
+      parameters: [{ $ref: '#/components/parameters/TenantHeader' }, { $ref: '#/components/parameters/UserHeader' }, { $ref: '#/components/parameters/Duties' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTenant' }
+      responses:
+        '201': { description: Created., content: { application/json: { schema: { $ref: '#/components/schemas/Tenant' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listTenants
+      x-passage-duty: Maintain tenants
+      description: Operator only. Lists all tenants by id, keyset-paged.
+      security: [{ gatewayHeaders: [] }]
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/Duties'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/After'
+      responses:
+        '200': { description: A page of tenants., content: { application/json: { schema: { $ref: '#/components/schemas/TenantPage' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/tenants/{id}:
+    get:
+      operationId: getTenant
+      x-passage-duty: Maintain tenants
+      description: Operator only.
+      security: [{ gatewayHeaders: [] }]
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/Duties'
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: The tenant., content: { application/json: { schema: { $ref: '#/components/schemas/Tenant' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/legal-entities:
+    post:
+      operationId: createLegalEntity
+      x-passage-duty: Maintain legal entities
+      description: Creates a legal entity in the caller's tenant. Requires access to all legal entities. Audited and emitted as dev.passage.identity.legalentity.created.v1.
+      security: [{ gatewayHeaders: [] }]
+      parameters: [{ $ref: '#/components/parameters/TenantHeader' }, { $ref: '#/components/parameters/UserHeader' }, { $ref: '#/components/parameters/Duties' }, { $ref: '#/components/parameters/LegalEntityHeader' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateLegalEntity' }
+      responses:
+        '201': { description: Created., content: { application/json: { schema: { $ref: '#/components/schemas/LegalEntity' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listLegalEntities
+      x-passage-duty: Maintain legal entities
+      description: Lists the caller's tenant's legal entities that are inside the caller's legal-entity scope.
+      security: [{ gatewayHeaders: [] }]
+      parameters: [{ $ref: '#/components/parameters/TenantHeader' }, { $ref: '#/components/parameters/Duties' }, { $ref: '#/components/parameters/LegalEntityHeader' }, { $ref: '#/components/parameters/Limit' }, { $ref: '#/components/parameters/After' }]
+      responses:
+        '200': { description: A page of legal entities., content: { application/json: { schema: { $ref: '#/components/schemas/LegalEntityPage' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/legal-entities/{id}:
+    get:
+      operationId: getLegalEntity
+      x-passage-duty: Maintain legal entities
+      security: [{ gatewayHeaders: [] }]
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/Duties'
+        - $ref: '#/components/parameters/LegalEntityHeader'
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: The legal entity., content: { application/json: { schema: { $ref: '#/components/schemas/LegalEntity' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/authz/assignments:
+    post:
+      operationId: assignRole
+      x-passage-duty: Maintain security roles
+      description: >-
+        Assigns a role (a seeded duty name until the role catalogue exists) to a user, tenant-wide or for one
+        legal entity, effective from validFrom (default now) until validTo (default open-ended). The database
+        rejects an overlapping assignment of the same role for the same user and legal entity (409
+        IDN-ASSIGNMENT-OVERLAP). A tenant-wide assignment needs access to all legal entities. Audited and
+        emitted as dev.passage.identity.roleassignment.assigned.v1.
+      security: [{ gatewayHeaders: [] }]
+      parameters: [{ $ref: '#/components/parameters/TenantHeader' }, { $ref: '#/components/parameters/UserHeader' }, { $ref: '#/components/parameters/Duties' }, { $ref: '#/components/parameters/LegalEntityHeader' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AssignRole' }
+      responses:
+        '201': { description: Created., content: { application/json: { schema: { $ref: '#/components/schemas/RoleAssignment' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listRoleAssignments
+      x-passage-duty: Maintain security roles
+      description: Lists assignments by user (userId), by role (role), or both; active=true keeps assignments in effect now.
+      security: [{ gatewayHeaders: [] }]
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/Duties'
+        - $ref: '#/components/parameters/LegalEntityHeader'
+        - { name: userId, in: query, schema: { type: string, format: uuid } }
+        - { name: role, in: query, schema: { type: string } }
+        - { name: active, in: query, schema: { type: boolean } }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/After'
+      responses:
+        '200': { description: A page of assignments., content: { application/json: { schema: { $ref: '#/components/schemas/RoleAssignmentPage' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/authz/assignments/{id}:
+    get:
+      operationId: getRoleAssignment
+      x-passage-duty: Maintain security roles
+      security: [{ gatewayHeaders: [] }]
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/Duties'
+        - $ref: '#/components/parameters/LegalEntityHeader'
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: The assignment., content: { application/json: { schema: { $ref: '#/components/schemas/RoleAssignment' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/authz/assignments/{id}/end:
+    post:
+      operationId: endRoleAssignment
+      x-passage-duty: Maintain security roles
+      description: >-
+        End-dates an assignment at validTo (default now). validTo must not be in the past, must be after
+        validFrom and must not extend an existing end date; an assignment that has already ended returns 409
+        IDN-ASSIGNMENT-ENDED. Audited and emitted as dev.passage.identity.roleassignment.ended.v1.
+      security: [{ gatewayHeaders: [] }]
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/UserHeader'
+        - $ref: '#/components/parameters/Duties'
+        - $ref: '#/components/parameters/LegalEntityHeader'
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EndRoleAssignment' }
+      responses:
+        '200': { description: The ended assignment., content: { application/json: { schema: { $ref: '#/components/schemas/RoleAssignment' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
 components:
   securitySchemes:
     gatewayHeaders:
@@ -72,7 +262,94 @@ components:
       required: false
       description: Legal-entity scope of the caller; absent means all entities. Any other value yields 403.
       schema: { type: string }
+    UserHeader:
+      name: X-Passage-User
+      in: header
+      required: true
+      description: Authenticated caller recorded as the actor in the audit trail and events; mutations without it return 401.
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    After:
+      name: after
+      in: query
+      description: Cursor; the next value of the previous page.
+      schema: { type: string, format: uuid }
   schemas:
+    CreateTenant:
+      type: object
+      required: [realmName, displayName]
+      properties:
+        realmName: { type: string, pattern: '^[a-z0-9][a-z0-9-]{1,62}$' }
+        displayName: { type: string, minLength: 1, maxLength: 200 }
+    Tenant:
+      type: object
+      required: [tenantId, realmName, displayName, status, createdAt]
+      properties:
+        tenantId: { type: string, format: uuid }
+        realmName: { type: string }
+        displayName: { type: string }
+        status: { type: string, enum: [active, suspended, deprovisioned] }
+        createdAt: { type: string, format: date-time }
+    TenantPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Tenant' } }
+        next: { type: string, format: uuid }
+    CreateLegalEntity:
+      type: object
+      required: [code, displayName]
+      properties:
+        code: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$' }
+        displayName: { type: string, minLength: 1, maxLength: 200 }
+    LegalEntity:
+      type: object
+      required: [legalEntityId, code, displayName, status, createdAt]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        code: { type: string }
+        displayName: { type: string }
+        status: { type: string, enum: [active, inactive] }
+        createdAt: { type: string, format: date-time }
+    LegalEntityPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/LegalEntity' } }
+        next: { type: string, format: uuid }
+    AssignRole:
+      type: object
+      required: [userId, role]
+      properties:
+        userId: { type: string, format: uuid }
+        role: { type: string, description: Name of a seeded duty. }
+        legalEntityId: { type: string, format: uuid, description: Omit for a tenant-wide assignment. }
+        validFrom: { type: string, format: date-time }
+        validTo: { type: string, format: date-time }
+    EndRoleAssignment:
+      type: object
+      properties:
+        validTo: { type: string, format: date-time }
+    RoleAssignment:
+      type: object
+      required: [assignmentId, userId, role, validFrom, createdAt]
+      properties:
+        assignmentId: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        role: { type: string }
+        legalEntityId: { type: string, format: uuid }
+        validFrom: { type: string, format: date-time }
+        validTo: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+    RoleAssignmentPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/RoleAssignment' } }
+        next: { type: string, format: uuid }
     EffectivePermissions:
       type: object
       required: [userId, duties, ignoredRoles, permissions]
