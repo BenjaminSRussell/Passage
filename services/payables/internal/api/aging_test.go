@@ -49,7 +49,7 @@ type fakeLedger struct {
 	ownErr  error
 }
 
-func (f *fakeLedger) LegalEntity(context.Context, string) (string, error) {
+func (f *fakeLedger) LegalEntity(context.Context, string, string) (string, error) {
 	if f.ownErr != nil {
 		return "", f.ownErr
 	}
@@ -59,7 +59,7 @@ func (f *fakeLedger) LegalEntity(context.Context, string) (string, error) {
 	return f.owner, nil
 }
 
-func (f *fakeLedger) AccountBalance(_ context.Context, _, account, period string) (ledger.Balance, error) {
+func (f *fakeLedger) AccountBalance(_ context.Context, _, _, account, period string) (ledger.Balance, error) {
 	f.account, f.period = account, period
 	return f.bal, f.err
 }

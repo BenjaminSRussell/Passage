@@ -100,7 +100,7 @@ func closeService(t *testing.T, status int, body string) *periods.Client {
 }
 
 func tenantCtx() context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: "00000000-0000-0000-0000-000000000001"})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: "00000000-0000-0000-0000-000000000001", LegalEntityID: testEntityID})
 }
 
 func TestPostInvoice_GrirNetsToZeroThroughRealLedgerAdapter(t *testing.T) {

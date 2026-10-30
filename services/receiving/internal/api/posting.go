@@ -207,7 +207,7 @@ func (a *API) resolvePending(w http.ResponseWriter, r *http.Request) {
 		abandon(unavailable("the ledger could not be reached; try again"))
 		return
 	}
-	switch err := reverser.Reverse(ctx, id, row.Key+":reverse", entry.PostingDate); {
+	switch err := reverser.Reverse(ctx, id, row.Key+":reverse", entry.LegalEntityID, entry.PostingDate); {
 	case errors.Is(err, domain.ErrPeriodClosed):
 		abandon(httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodePeriodClosed, "the ledger period of the entry is closed, so the entry cannot be reversed"))
 		return

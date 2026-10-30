@@ -33,6 +33,12 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.databaseSecret }}
                   key: DATABASE_URL
+            - name: PASSAGE_SERVICE_NAME
+              value: close
+{{- if .Values.serviceIdentity.publicKeys }}
+            - name: PASSAGE_SERVICE_PUBLIC_KEYS
+              value: {{ .Values.serviceIdentity.publicKeys | quote }}
+{{- end }}
             - name: CLOSE_REOPEN_DEFAULT_DAYS
               value: {{ .Values.config.reopenDefaultDays | quote }}
             - name: CLOSE_REOPEN_APPROVERS
