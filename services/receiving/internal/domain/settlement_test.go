@@ -86,6 +86,11 @@ func TestPostSettlement_Rejections(t *testing.T) {
 
 type recordingPeriods struct{ got *domain.PeriodQuery }
 
+func (r recordingPeriods) Resolve(_ context.Context, q domain.PeriodQuery) (domain.ResolvedPeriod, error) {
+	*r.got = q
+	return domain.ResolvedPeriod{FiscalPeriodID: "fp-1", Status: domain.PeriodOpen}, nil
+}
+
 func (r recordingPeriods) AP(_ context.Context, q domain.PeriodQuery) (domain.PeriodStatus, error) {
 	*r.got = q
 	return domain.PeriodOpen, nil
@@ -103,5 +108,35 @@ func TestPostSettlementAndAdjustment_PeriodQueryCarriesTheDocumentsLegalEntity(t
 	in.LegalEntityID = "le-2"
 	if _, err := domain.PostInvoiceAdjustment(context.Background(), in, periods, &domain.FakeLedger{}, testProfile); err != nil || got.LegalEntityID != "le-2" {
 		t.Fatalf("adjustment: err %v query %+v", err, got)
+	}
+}
+
+func TestResolveFiscalPeriod(t *testing.T) {
+	boom := errors.New("close down")
+	q := domain.PeriodQuery{LegalEntityID: "le-1", LedgerID: "l-1", PostingDate: august15}
+	tests := []struct {
+		name     string
+		periods  domain.FakePeriods
+		supplied string
+		want     string
+		code     string
+		err      error
+	}{
+		{name: "derived", periods: domain.FakePeriods{Status: domain.PeriodOpen, PeriodID: "fp-9"}, want: "fp-9"},
+		{name: "matching supplied", periods: domain.FakePeriods{Status: domain.PeriodOpen, PeriodID: "fp-9"}, supplied: "fp-9", want: "fp-9"},
+		{name: "different supplied", periods: domain.FakePeriods{Status: domain.PeriodOpen, PeriodID: "fp-9"}, supplied: "fp-1", code: domain.CodePeriodUnresolved},
+		{name: "no period", periods: domain.FakePeriods{ResolveErr: domain.ErrFiscalPeriodNotFound}, code: domain.CodePeriodUnresolved},
+		{name: "ambiguous", periods: domain.FakePeriods{ResolveErr: domain.ErrFiscalPeriodAmbiguous}, code: domain.CodePeriodUnresolved},
+		{name: "unavailable", periods: domain.FakePeriods{ResolveErr: boom}, err: boom},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := domain.ResolveFiscalPeriod(context.Background(), tc.periods, q, tc.supplied)
+			var de *domain.Error
+			switch {
+			case tc.err != nil && !errors.Is(err, tc.err), tc.code != "" && (!errors.As(err, &de) || de.Code != tc.code), tc.code == "" && tc.err == nil && err != nil, got != tc.want:
+				t.Fatalf("got %q err %v, want %q code %q err %v", got, err, tc.want, tc.code, tc.err)
+			}
+		})
 	}
 }

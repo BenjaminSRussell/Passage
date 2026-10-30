@@ -28,6 +28,7 @@ const (
 
 type Store interface {
 	PeriodRows(ctx context.Context, ledgerID, periodID string) ([]domain.Row, error)
+	PeriodSpans(ctx context.Context, legalEntityID, ledgerID string, date time.Time) ([]domain.Span, error)
 	Ping(ctx context.Context) error
 }
 
@@ -52,6 +53,14 @@ type checkResponse struct {
 	Status  domain.Status `json:"status"`
 }
 
+type resolveResponse struct {
+	FiscalPeriodID string        `json:"fiscalPeriodId"`
+	StartDate      string        `json:"startDate"`
+	EndDate        string        `json:"endDate"`
+	Module         domain.Module `json:"module"`
+	Status         domain.Status `json:"status"`
+}
+
 type problemBody struct {
 	Type        string            `json:"type"`
 	Title       string            `json:"title"`
@@ -65,16 +74,20 @@ type problemBody struct {
 }
 
 var problemSlugs = map[string]string{
-	domain.CodeValidation:   "validation_failed",
-	domain.CodePeriodClosed: "period_closed",
-	"COM-0001":              "validation_failed",
-	"AUTH-0001":             "forbidden_tenant",
+	domain.CodeValidation:      "validation_failed",
+	domain.CodePeriodClosed:    "period_closed",
+	domain.CodeNoPeriod:        "period_not_found",
+	domain.CodeAmbiguousPeriod: "period_ambiguous",
+	"COM-0001":                 "validation_failed",
+	"AUTH-0001":                "forbidden_tenant",
 }
 
 var problemStatuses = map[string]int{
-	domain.CodeValidation:   http.StatusBadRequest,
-	domain.CodePeriodClosed: http.StatusUnprocessableEntity,
-	domain.CodePeriodOnHold: http.StatusForbidden,
+	domain.CodeValidation:      http.StatusBadRequest,
+	domain.CodePeriodClosed:    http.StatusUnprocessableEntity,
+	domain.CodePeriodOnHold:    http.StatusForbidden,
+	domain.CodeNoPeriod:        http.StatusNotFound,
+	domain.CodeAmbiguousPeriod: http.StatusConflict,
 }
 
 func New(store Store) *API { return &API{store: store} }
@@ -82,6 +95,7 @@ func New(store Store) *API { return &API{store: store} }
 func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutyPeriodCheck)).Post("/v1/close/period-statuses:check", a.check)
+	r.With(authz.RequireDuty(dutyPeriodCheck)).Get("/v1/close/periods:resolve", a.resolve)
 }
 
 func (a *API) ready(w http.ResponseWriter, r *http.Request) {
@@ -125,6 +139,51 @@ func (a *API) check(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, checkResponse{Allowed: true, Module: module, Status: status})
+}
+
+func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
+	p, ok := tenant.FromContext(r.Context())
+	if !ok || !ids.Valid(p.TenantID) {
+		fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "missing or malformed tenant"))
+		return
+	}
+	q := r.URL.Query()
+	module := domain.ModuleForSource(q.Get("sourceSystem"))
+	errs := map[string]string{}
+	if !ids.Valid(p.LegalEntityID) {
+		errs["legalEntityId"] = "a single legal entity is required"
+	}
+	if !ids.Valid(q.Get("ledgerId")) {
+		errs["ledgerId"] = "must be a UUID"
+	}
+	date, err := time.Parse(dateLayout, q.Get("postingDate"))
+	if err != nil {
+		errs["postingDate"] = "must be an ISO date (YYYY-MM-DD)"
+	}
+	if len(errs) > 0 {
+		v := httpx.NewProblem(http.StatusBadRequest, domain.CodeValidation, "request failed validation")
+		v.Errors = errs
+		fail(w, r, v)
+		return
+	}
+	spans, err := a.store.PeriodSpans(r.Context(), p.LegalEntityID, q.Get("ledgerId"), date)
+	if err != nil {
+		a.failures.Add(1)
+		slog.Error("period resolve failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		fail(w, r, err)
+		return
+	}
+	span, err := domain.SelectSpan(spans, date)
+	if err != nil {
+		slog.Warn("period resolve rejected", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+		fail(w, r, err)
+		return
+	}
+	row := domain.Resolve(span.Rows, module)
+	httpx.JSON(w, http.StatusOK, resolveResponse{
+		FiscalPeriodID: span.FiscalPeriodID, StartDate: span.Start.Format(dateLayout), EndDate: span.End.Format(dateLayout),
+		Module: row.Module, Status: row.Status,
+	})
 }
 
 func validate(req checkRequest) error {

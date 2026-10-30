@@ -30,7 +30,7 @@ The ledger (wave 11) enforces the rule inside its posting transaction by reading
 
 ## API
 
-`POST /v1/close/period-statuses:check` (duty `period.check`), `GET /healthz`, `GET /readyz` (database ping, 503 when down), `GET /metrics` on the admin port. Contract: `api/openapi.yaml`. The AsyncAPI file declares `dev.passage.close.period.statuschanged.v1` (the PRD spells the verb `status-changed`, which the kernel `events.ValidType` pattern rejects); nothing publishes it yet.
+`POST /v1/close/period-statuses:check` and `GET /v1/close/periods:resolve?ledgerId=&postingDate=&sourceSystem=` (duty `period.check` for both; the resolver needs the caller's single legal entity and returns the fiscal period id, its dates and the module status, or 404 `CLOSE-0005` / 409 `CLOSE-0006`), `GET /healthz`, `GET /readyz` (database ping, 503 when down), `GET /metrics` on the admin port. Contract: `api/openapi.yaml`. The AsyncAPI file declares `dev.passage.close.period.statuschanged.v1` (the PRD spells the verb `status-changed`, which the kernel `events.ValidType` pattern rejects); nothing publishes it yet.
 
 ## Error codes
 

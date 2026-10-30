@@ -27,6 +27,31 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /v1/close/periods:resolve:
+    get:
+      operationId: resolveFiscalPeriod
+      x-passage-duty: period.check
+      description: Maps a posting date to the fiscal period of one ledger and legal entity (the single legal entity of the caller's identity, required) and returns the period id with the status of the requested source system's module (module row, then ALL row, then never_opened). A closed or held period is a normal answer; the caller decides. Only periods with start and end dates registered are resolvable.
+      parameters:
+        - { name: ledgerId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: postingDate, in: query, required: true, schema: { type: string, format: date } }
+        - name: sourceSystem
+          in: query
+          required: false
+          schema: { type: string }
+          description: Same values as the check endpoint; any other value, including empty, reads the ALL module.
+      responses:
+        '200':
+          description: The period covering the date.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PeriodResolveResult' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /healthz:
     get:
       operationId: liveness
@@ -74,6 +99,15 @@ components:
         allowed: { type: boolean, const: true }
         module: { type: string, enum: [all, gl, ap, ar, inventory, assets, cash, production, projects, tax, bank, payroll] }
         status: { type: string, enum: [open, on_hold] }
+    PeriodResolveResult:
+      type: object
+      required: [fiscalPeriodId, startDate, endDate, module, status]
+      properties:
+        fiscalPeriodId: { type: string, format: uuid }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date }
+        module: { type: string, enum: [all, gl, ap, ar, inventory, assets, cash, production, projects, tax, bank, payroll] }
+        status: { type: string, enum: [open, on_hold, closed, permanently_closed, never_opened] }
     Problem:
       type: object
       required: [type, title, status, code, serviceCode]
@@ -89,7 +123,7 @@ components:
         errors: { type: object, additionalProperties: { type: string } }
   responses:
     Problem:
-      description: RFC 9457 problem details (application/problem+json). 422 LEDGER-0013 period closed or never opened; 403 LEDGER-0014 period on hold; 400 CLOSE-0004 or COM-0001 validation.
+      description: RFC 9457 problem details (application/problem+json). 422 LEDGER-0013 period closed or never opened; 403 LEDGER-0014 period on hold; 400 CLOSE-0004 or COM-0001 validation; 404 CLOSE-0005 no fiscal period covers the date; 409 CLOSE-0006 several periods cover it.
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }

@@ -41,3 +41,20 @@ func TestCheckAcceptsReceivingServiceTokenOnly(t *testing.T) {
 		t.Fatalf("replayed token: %d", rec.Code)
 	}
 }
+
+func TestResolveAcceptsReceivingServiceToken(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	tenant.SetServiceVerifier(tenant.NewServiceVerifier("close", map[string]ed25519.PublicKey{"receiving": pub}))
+	t.Cleanup(func() { tenant.SetServiceVerifier(nil) })
+	signer, _ := tenant.NewServiceSigner("receiving", priv)
+	user := tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: testkit.TenantID(9), UserID: "warehouse-user"}
+	token, _ := signer.Mint("close", user, "")
+	r, _ := newRouter(fakeStore{spans: []domain.Span{span(testkit.TenantID(8), domain.Row{Module: domain.ModuleAP, Status: domain.StatusOpen})}})
+	req := httptest.NewRequest(http.MethodGet, resolveQuery(testkit.TenantID(7), "2026-01-15"), nil)
+	req.Header.Set(tenant.HeaderServiceToken, token)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"open"`) {
+		t.Fatalf("receiving token: %d %s", rec.Code, rec.Body.String())
+	}
+}

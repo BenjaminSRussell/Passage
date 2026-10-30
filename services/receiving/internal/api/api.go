@@ -88,6 +88,10 @@ func New(s store.Store, ports Ports) *API {
 	return &API{store: s, ports: ports, resolveMinAge: minAge, resolveLease: lease, http: newRequestMetrics()}
 }
 
+func (a *API) resolveFiscalPeriod(ctx context.Context, legalEntityID string, postingDate time.Time, supplied string) (string, error) {
+	return domain.ResolveFiscalPeriod(ctx, a.ports.Periods, domain.PeriodQuery{LegalEntityID: legalEntityID, LedgerID: a.ports.Profile.LedgerID, PostingDate: postingDate}, supplied)
+}
+
 func (a *API) PostInvoice(ctx context.Context, in domain.VendorInvoice, profile domain.PostingProfile) (domain.JournalEntry, error) {
 	subjects := []string{in.ID}
 	for _, l := range in.Lines {

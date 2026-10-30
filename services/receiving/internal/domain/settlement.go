@@ -122,6 +122,20 @@ type Settlement struct {
 	Amount         decimal.Decimal
 }
 
+func ResolveFiscalPeriod(ctx context.Context, periods PeriodControl, q PeriodQuery, supplied string) (string, error) {
+	resolved, err := periods.Resolve(ctx, q)
+	switch {
+	case errors.Is(err, ErrFiscalPeriodNotFound), errors.Is(err, ErrFiscalPeriodAmbiguous):
+		return "", fail(CodePeriodUnresolved, "%s for %s", err, q.PostingDate.Format(time.DateOnly))
+	case err != nil:
+		slog.ErrorContext(ctx, "fiscal period resolution unavailable", "err", err, "postingDate", q.PostingDate.Format(time.DateOnly))
+		return "", fmt.Errorf("resolve fiscal period: %w", err)
+	case supplied != "" && supplied != resolved.FiscalPeriodID:
+		return "", fail(CodePeriodUnresolved, "fiscalPeriodId %s is not the period of %s; the service derives it from the posting date", supplied, q.PostingDate.Format(time.DateOnly))
+	}
+	return resolved.FiscalPeriodID, nil
+}
+
 func checkAPPeriod(ctx context.Context, periods PeriodControl, legalEntityID, ledgerID, fiscalPeriodID string, date time.Time, documentID string) error {
 	status, err := periods.AP(ctx, PeriodQuery{LegalEntityID: legalEntityID, LedgerID: ledgerID, FiscalPeriodID: fiscalPeriodID, PostingDate: date})
 	if err != nil {

@@ -19,6 +19,7 @@ var domainStatus = map[string]int{
 	domain.CodeInvalidReceipt:    http.StatusUnprocessableEntity,
 	domain.CodeInvalidTransition: http.StatusConflict,
 	domain.CodePeriodClosed:      http.StatusUnprocessableEntity,
+	domain.CodePeriodUnresolved:  http.StatusUnprocessableEntity,
 	domain.CodeOverInvoice:       http.StatusUnprocessableEntity,
 	domain.CodeDuplicateInvoice:  http.StatusConflict,
 	domain.CodeCorrectionBelow:   http.StatusConflict,

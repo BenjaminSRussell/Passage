@@ -178,7 +178,9 @@ func (a *API) startRun(w http.ResponseWriter, r *http.Request, dst runRequestBod
 	req := dst.common()
 	fields := map[string]string{}
 	checkUUID(fields, "legalEntityId", req.LegalEntityID)
-	checkUUID(fields, "fiscalPeriodId", req.FiscalPeriodID)
+	if req.FiscalPeriodID != "" {
+		checkUUID(fields, "fiscalPeriodId", req.FiscalPeriodID)
+	}
 	if needPurchaseOrder {
 		checkUUID(fields, "purchaseOrderId", req.PurchaseOrderID)
 	}
@@ -201,9 +203,14 @@ func (a *API) startRun(w http.ResponseWriter, r *http.Request, dst runRequestBod
 		writeError(w, r, &domain.Error{Code: domain.CodeInvalidReceipt, Detail: "ledgerId differs from the ledger this service posts to"})
 		return nil, req, false
 	}
+	fiscalPeriodID, err := a.resolveFiscalPeriod(r.Context(), req.LegalEntityID, postingDate, req.FiscalPeriodID)
+	if err != nil {
+		writeError(w, r, err)
+		return nil, req, false
+	}
 	run := &settlementRun{
 		api: a, ctx: r.Context(), tenantID: p.TenantID,
-		req:  settlementRunBase{legalEntityID: req.LegalEntityID, ledgerID: a.ports.Profile.LedgerID, fiscalPeriodID: req.FiscalPeriodID, postingDate: postingDate},
+		req:  settlementRunBase{legalEntityID: req.LegalEntityID, ledgerID: a.ports.Profile.LedgerID, fiscalPeriodID: fiscalPeriodID, postingDate: postingDate},
 		body: settlementRunBody{Settled: []settlementBody{}, Skipped: []skippedBody{}},
 	}
 	return run, req, true
