@@ -162,6 +162,18 @@ func TestSplit_PassesTheRequestToTheStore(t *testing.T) {
 	}
 }
 
+func TestSplit_AllocationDefaultsToProportional(t *testing.T) {
+	f := &fakeStore{}
+	_, h := newServer(t, f)
+	id := ids.New()
+	do(h, splitCall(id, `{"splitQty":"40"}`, DutyRelease))
+	do(h, splitCall(id, `{"splitQty":"40","allocation":"keep-on-original"}`, DutyRelease))
+	if len(f.splits) != 2 || f.splits[0].Allocation != domain.AllocProportional || f.splits[1].Allocation != domain.AllocKeepOnOriginal ||
+		f.splits[0].RequestHash == f.splits[1].RequestHash {
+		t.Fatalf("allocations: %+v", f.splits)
+	}
+}
+
 func TestSplit_ValidationDutyAndRefusals(t *testing.T) {
 	id := ids.New()
 	for body, field := range map[string]string{
@@ -170,6 +182,7 @@ func TestSplit_ValidationDutyAndRefusals(t *testing.T) {
 		`{"splitQty":"1.1234567"}`:           "splitQty",
 		`{"splitQty":"5","minimumQty":"-1"}`: "minimumQty",
 		`{"splitQty":"5","multiple":"-2"}`:   "multiple",
+		`{"splitQty":"5","allocation":"x"}`:  "allocation",
 	} {
 		f := &fakeStore{}
 		_, h := newServer(t, f)

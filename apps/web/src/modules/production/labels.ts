@@ -6,7 +6,7 @@ import type {
   CostGroup,
   EditOp,
   Flushing,
-  JournalType,
+  ListedJournalType,
   LoggedCommand,
   OperStatus,
   ProductionCommand,
@@ -92,10 +92,11 @@ export const costGroupLabel: Record<CostGroup, string> = {
   subcontract: "Subcontract",
 };
 
-export const journalTypeLabel: Record<JournalType, string> = {
+export const journalTypeLabel: Record<ListedJournalType, string> = {
   "picking-list": "Picking list",
   "route-card": "Route card",
   "report-as-finished": "Report as finished",
+  "split-transfer": "Split transfer",
 };
 
 export const proposalLabel: Record<Proposal, string> = {

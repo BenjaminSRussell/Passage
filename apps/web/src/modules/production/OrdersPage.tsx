@@ -7,7 +7,7 @@ import {
   SPLIT,
   STATUSES,
   bulkStatus,
-  canSplit,
+  canMerge,
   describeProblem,
   listOrders,
   mergeOrders,
@@ -185,7 +185,7 @@ export function ProductionOrdersPage({ onOpen, onCreate }: ProductionOrdersPageP
   };
 
   const tooMany = selected.length > MAX_BULK;
-  const mergeable = selected.length >= 2 && !tooMany && selected.every((o) => canSplit(o.status));
+  const mergeable = selected.length >= 2 && !tooMany && selected.every((o) => canMerge(o.status));
   const columns: DataTableColumn<OrderSummary>[] = [
     ...baseColumns,
     {

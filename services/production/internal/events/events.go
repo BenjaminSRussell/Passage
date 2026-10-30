@@ -167,16 +167,18 @@ type Posting struct {
 // JournalPostedData is the payload of journal.posted.v1 (PRD 4.21.5).
 // JournalEntryID stays null until the general ledger (wave 11) books the postings.
 type JournalPostedData struct {
-	JournalID      string        `json:"journalId"`
-	JournalNumber  string        `json:"journalNumber"`
-	OrderID        string        `json:"orderId"`
-	Type           string        `json:"type"`
-	PostingDate    string        `json:"postingDate"`
-	Currency       string        `json:"currency"`
-	ReversalOf     *string       `json:"reversalOf"`
-	Lines          []JournalLine `json:"lines"`
-	Postings       []Posting     `json:"postings"`
-	JournalEntryID *string       `json:"journalEntryId"`
+	JournalID     string  `json:"journalId"`
+	JournalNumber string  `json:"journalNumber"`
+	OrderID       string  `json:"orderId"`
+	Type          string  `json:"type"`
+	PostingDate   string  `json:"postingDate"`
+	Currency      string  `json:"currency"`
+	ReversalOf    *string `json:"reversalOf"`
+	// CounterpartOrderID is the other order of a split-transfer journal (BR-21.11); null otherwise.
+	CounterpartOrderID *string       `json:"counterpartOrderId"`
+	Lines              []JournalLine `json:"lines"`
+	Postings           []Posting     `json:"postings"`
+	JournalEntryID     *string       `json:"journalEntryId"`
 }
 
 // CostByGroup is planned or actual cost per cost group, to the currency's minor unit.

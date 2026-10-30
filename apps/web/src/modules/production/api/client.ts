@@ -52,6 +52,9 @@ export type Flushing = "manual" | "start" | "finish" | "available-at-location";
 
 export type JournalType = "picking-list" | "route-card" | "report-as-finished";
 
+/** A journal as listed: also the system journal a split of a Started order posts on both orders (BR-21.11). */
+export type ListedJournalType = JournalType | "split-transfer";
+
 export type Proposal = "remaining" | "proportional" | "none";
 
 /** The four variance types of BR-21.6, and rework for a rework order (FR-21.20). */
@@ -275,7 +278,7 @@ export interface Posting {
 export interface Journal {
   id: string;
   orderId: string;
-  type: JournalType;
+  type: ListedJournalType;
   journalNumber: string;
   postingDate: string;
   posted: boolean;
@@ -285,6 +288,8 @@ export interface Journal {
   qtyError: string;
   reversalOf?: string;
   reversedBy?: string;
+  /** On a split-transfer journal: the other order of the pair (BR-21.11). */
+  counterpartOrderId?: string;
   journalEntryId?: string;
   createdBy: string;
   createdAt: string;
@@ -485,7 +490,11 @@ export interface SplitInput {
   splitQty: string;
   minimumQty?: string;
   multiple?: string;
+  /** Started orders only: proportional moves the share of posted consumption, hours and WIP; keep-on-original moves nothing (BR-21.11). */
+  allocation?: SplitAllocation;
 }
+
+export type SplitAllocation = "proportional" | "keep-on-original";
 
 export interface SplitResult {
   original: ProductionOrder;
@@ -1007,7 +1016,7 @@ export async function listOrderEdits(id: string, signal?: AbortSignal): Promise<
 
 /** The BOM and route can be edited after explosion and before Started (FR-21.18). */
 export function canEditBOM(status: ProductionStatus): boolean {
-  return canSplit(status);
+  return canMerge(status);
 }
 
 function query(values: Record<string, string | number | undefined>): string {
@@ -1195,9 +1204,14 @@ export function dismissOrderChange(id: string, version: number, note: string): P
   });
 }
 
-/** Split and merge take orders before Started (FR-21.15; a Started split needs the WIP transfer of a later slice). */
-export function canSplit(status: ProductionStatus): boolean {
+/** Merge takes orders before Started, where nothing is posted yet (FR-21.15). */
+export function canMerge(status: ProductionStatus): boolean {
   return status === "Created" || status === "Estimated" || status === "Scheduled" || status === "Released";
+}
+
+/** A split takes Created to Started orders; a Started one moves its posted share (FR-21.15, BR-21.11). */
+export function canSplit(status: ProductionStatus): boolean {
+  return canMerge(status) || status === "Started";
 }
 
 /** The forward command for a status, or null at the end of the line (BR-21.1). */

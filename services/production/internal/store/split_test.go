@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"reflect"
 	"testing"
@@ -281,4 +282,206 @@ func TestBulkTransition(t *testing.T) {
 	if !items[0].OK || items[0].Status != domain.Released || items[1].OK || items[1].Code != domain.CodeIllegalTransition || items[1].Detail == "" {
 		t.Fatalf("bulk release: %+v", items)
 	}
+}
+
+// AC-21.11 (FR-21.15, BR-21.11): a Started order with posted consumption and
+// hours is split 40 of 100 with proportional allocation. The worked example of
+// BR-21.7 (203 + 102 kg at 10.20, 46 h at 30.00 + 10.00) gives the new order
+// 40 % of everything and both WIP balances reconcile.
+func TestSplit_StartedOrderMovesConsumptionHoursAndWIP(t *testing.T) {
+	pool, s := migrated(t)
+	ctx := tenantCtx(testkit.TenantID(63))
+	st := startedOrder(t, s, ctx, sampleOrder(t, "split-started", ids.New()))
+	pick := st.mustJournal(NewJournal{Type: domain.JournalPickingList, Issues: []IssueInput{
+		{LineNo: "10", Qty: d("203"), UnitCost: qty("10.20")}, {LineNo: "20.1", Qty: d("102"), UnitCost: qty("10.20")}}})
+	st.mustPost(pick.ID)
+	route := st.mustJournal(NewJournal{Type: domain.JournalRouteCard, Hours: []HoursInput{{OperNumber: 10, Hours: d("46"), QtyGood: d("100")}}})
+	st.mustPost(route.ID)
+	before := st.costs()
+	if !before.WIPBalance.Equal(d("4951")) { // 3111 + 1380 + 460
+		t.Fatalf("WIP before the split: %s", before.WIPBalance)
+	}
+
+	in := Split{OrderID: st.orderID, IfMatch: st.version, SplitQty: d("40"), Actor: "planner-1", TraceID: "t", IdempotencyKey: "split-st-1", RequestHash: "h1"}
+	res, err := s.SplitOrder(ctx, in)
+	if err != nil {
+		t.Fatalf("split: %v", err)
+	}
+	orig, split := res.Original, res.New
+	if orig.Status != domain.Started || split.Status != domain.Started || !orig.Quantity.Equal(d("60")) || !split.Quantity.Equal(d("40")) {
+		t.Fatalf("orders: %s %s / %s %s", orig.Status, orig.Quantity, split.Status, split.Quantity)
+	}
+	// Consumption: 40 % of 203 and 102 moves; the original keeps the rest.
+	if !split.Lines[0].QtyConsumed.Equal(d("81.2")) || !orig.Lines[0].QtyConsumed.Equal(d("121.8")) ||
+		!split.Lines[1].QtyConsumed.Equal(d("40.8")) || !orig.Lines[1].QtyConsumed.Equal(d("61.2")) {
+		t.Fatalf("consumed: original %+v, new %+v", orig.Lines, split.Lines)
+	}
+	if !split.Operations[0].HoursReported.Equal(d("18.4")) || !orig.Operations[0].HoursReported.Equal(d("27.6")) ||
+		!split.Operations[0].QtyGood.Equal(d("40")) || !orig.Operations[0].QtyGood.Equal(d("60")) ||
+		split.Operations[0].Status != domain.OperStarted || orig.Operations[0].Status != domain.OperStarted {
+		t.Fatalf("hours: original %+v, new %+v", orig.Operations, split.Operations)
+	}
+	// WIP: 40 % of 4951.00 moves (material 1244.40, labor 552.00, overhead 184.00).
+	oc, err := s.Costs(ctx, orig.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nc, err := s.Costs(ctx, split.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !nc.WIPBalance.Equal(d("1980.4")) || !oc.WIPBalance.Equal(d("2970.6")) || !nc.WIPBalance.Add(oc.WIPBalance).Equal(before.WIPBalance) {
+		t.Fatalf("WIP balances: original %s, new %s", oc.WIPBalance, nc.WIPBalance)
+	}
+	if !groupSum(nc.Actual, domain.GroupMaterial).Equal(d("1244.4")) || !groupSum(oc.Actual, domain.GroupMaterial).Equal(d("1866.6")) ||
+		!groupSum(nc.Actual, domain.GroupLabor).Equal(d("552")) || !groupSum(oc.Actual, domain.GroupLabor).Equal(d("828")) {
+		t.Fatalf("actual cost: original %+v, new %+v", oc.Actual, nc.Actual)
+	}
+	if !ledgerNet(t, pool, orig.ID).IsZero() || !ledgerNet(t, pool, split.ID).IsZero() {
+		t.Fatalf("a subledger does not balance: %s %s", ledgerNet(t, pool, orig.ID), ledgerNet(t, pool, split.ID))
+	}
+
+	// One posted split-transfer journal on each order, pointing at the other.
+	oj, err := s.ListJournals(ctx, orig.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nj, err := s.ListJournals(ctx, split.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := oj[len(oj)-1]
+	if len(nj) != 1 || nj[0].Type != domain.JournalSplitTransfer || last.Type != domain.JournalSplitTransfer || !last.Posted || !nj[0].Posted ||
+		last.CounterpartOrderID == nil || *last.CounterpartOrderID != split.ID || nj[0].CounterpartOrderID == nil || *nj[0].CounterpartOrderID != orig.ID ||
+		!last.Lines[0].Qty.Equal(d("-81.2")) || !nj[0].Lines[0].Qty.Equal(d("81.2")) {
+		t.Fatalf("transfer journals: %+v / %+v", last, nj)
+	}
+	if got := outboxTypes(t, pool, split.ID); !reflect.DeepEqual(got, []string{prodevents.OrderCreated, prodevents.JournalPosted}) {
+		t.Fatalf("new order events: %v", got)
+	}
+	var payload json.RawMessage
+	if err := pool.QueryRow(context.Background(), `select payload from outbox where aggregate_id = $1 and type = $2`, split.ID, prodevents.JournalPosted).Scan(&payload); err != nil {
+		t.Fatal(err)
+	}
+	var evt struct {
+		Data prodevents.JournalPostedData `json:"data"`
+	}
+	if err := json.Unmarshal(payload, &evt); err != nil || evt.Data.Type != string(domain.JournalSplitTransfer) ||
+		evt.Data.CounterpartOrderID == nil || *evt.Data.CounterpartOrderID != orig.ID {
+		t.Fatalf("journal.posted of the transfer: %s", payload)
+	}
+
+	replay, err := s.SplitOrder(ctx, in)
+	if err != nil || !replay.Replayed || replay.New.ID != split.ID {
+		t.Fatalf("replay: %+v %v", replay, err)
+	}
+	if again, _ := s.ListJournals(ctx, split.ID); len(again) != 1 {
+		t.Fatalf("a replay posted more transfers: %d", len(again))
+	}
+
+	// A reset would reverse the original's journals past what it now holds.
+	ost := &stepper{t: t, s: s, ctx: ctx, orderID: orig.ID, version: orig.Version}
+	_, _, err = ost.s.Transition(ctx, Transition{OrderID: orig.ID, IfMatch: ost.version, Command: domain.CmdResetStatus, ResetTo: domain.Released, Actor: "p", IdempotencyKey: "reset-1", RequestHash: "r"})
+	expectProblem(t, err, http.StatusConflict, domain.CodeIllegalTransition)
+
+	// A second split of the original shares what it holds after the first
+	// transfer, the earlier transfer journal included: r = 30 / 60.
+	o2, err := s.GetOrder(ctx, orig.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res2, err := s.SplitOrder(ctx, Split{OrderID: orig.ID, IfMatch: o2.Version, SplitQty: d("30"), Actor: "planner-1", IdempotencyKey: "split-st-1b", RequestHash: "h1b"})
+	if err != nil {
+		t.Fatalf("second split: %v", err)
+	}
+	if !res2.New.Lines[0].QtyConsumed.Equal(d("60.9")) || !res2.Original.Lines[0].QtyConsumed.Equal(d("60.9")) ||
+		!res2.New.Lines[1].QtyConsumed.Equal(d("30.6")) || !res2.New.Operations[0].HoursReported.Equal(d("13.8")) ||
+		!res2.Original.Operations[0].HoursReported.Equal(d("13.8")) {
+		t.Fatalf("second split: original %+v %+v, new %+v %+v", res2.Original.Lines, res2.Original.Operations, res2.New.Lines, res2.New.Operations)
+	}
+	for _, id := range []string{orig.ID, res2.New.ID} {
+		c, err := s.Costs(ctx, id)
+		if err != nil || !c.WIPBalance.Equal(d("1485.3")) || !groupSum(c.Actual, domain.GroupMaterial).Equal(d("933.3")) {
+			t.Fatalf("second split %s: WIP %s, material %s, %v", id, c.WIPBalance, groupSum(c.Actual, domain.GroupMaterial), err)
+		}
+	}
+
+	// Leaving ReportedAsFinished still works after a transfer: it reverses only
+	// the reports as finished, which a split never shares.
+	o3, _ := s.GetOrder(ctx, orig.ID)
+	rst := &stepper{t: t, s: s, ctx: ctx, orderID: orig.ID, version: o3.Version}
+	rst.must(domain.CmdReportFinished, func(tr *Transition) { tr.Good = d("10") })
+	if back := rst.must(domain.CmdResetStatus, func(tr *Transition) { tr.ResetTo = domain.Started }); back.Status != domain.Started || !back.QtyRAF.IsZero() {
+		t.Fatalf("reset from ReportedAsFinished: %s %s", back.Status, back.QtyRAF)
+	}
+	if c, _ := s.Costs(ctx, orig.ID); !c.WIPBalance.Equal(d("1485.3")) {
+		t.Fatalf("WIP after the RAF reset: %s", c.WIPBalance)
+	}
+
+	// The three orders still run to End on their own: the planned cost is split
+	// too, so each order's actual cost clears its own WIP.
+	for _, id := range []string{orig.ID, split.ID, res2.New.ID} {
+		o, _ := s.GetOrder(ctx, id)
+		e := &stepper{t: t, s: s, ctx: ctx, orderID: id, version: o.Version, n: 10} // past rst's keys
+		e.must(domain.CmdReportFinished, func(tr *Transition) { tr.Good = o.Quantity })
+		e.must(domain.CmdEnd, nil)
+		c, err := s.Costs(ctx, id)
+		if err != nil || !c.WIPBalance.IsZero() {
+			t.Fatalf("End of %s: WIP %s %v", id, c.WIPBalance, err)
+		}
+	}
+}
+
+func TestSplit_StartedOrderRefusalsAndKeepOnOriginal(t *testing.T) {
+	_, s := migrated(t)
+	ctx := tenantCtx(testkit.TenantID(64))
+	st := startedOrder(t, s, ctx, sampleOrder(t, "split-started-2", ids.New()))
+	pick := st.mustJournal(NewJournal{Type: domain.JournalPickingList, Issues: []IssueInput{{LineNo: "10", Qty: d("100"), UnitCost: qty("10")}}})
+	st.mustPost(pick.ID)
+	draft := st.mustJournal(NewJournal{Type: domain.JournalRouteCard, Hours: []HoursInput{{OperNumber: 10, Hours: d("5"), QtyGood: d("10")}}})
+
+	in := Split{OrderID: st.orderID, IfMatch: st.version, SplitQty: d("40"), IdempotencyKey: "split-st-2", RequestHash: "h"}
+	_, err := s.SplitOrder(ctx, in)
+	expectProblem(t, err, http.StatusConflict, domain.CodeSplitRefused)
+	if err := s.DeleteJournal(ctx, draft.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	in.Allocation = domain.AllocKeepOnOriginal
+	res, err := s.SplitOrder(ctx, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Original.Lines[0].QtyConsumed.Equal(d("100")) || !res.New.Lines[0].QtyConsumed.IsZero() {
+		t.Fatalf("keep-on-original moved consumption: %+v / %+v", res.Original.Lines, res.New.Lines)
+	}
+	if nj, _ := s.ListJournals(ctx, res.New.ID); len(nj) != 0 {
+		t.Fatalf("keep-on-original posted %d journals on the new order", len(nj))
+	}
+	nc, _ := s.Costs(ctx, res.New.ID)
+	if !nc.WIPBalance.IsZero() {
+		t.Fatalf("new order WIP: %s", nc.WIPBalance)
+	}
+
+	// An as-built record names a finished serial of the original and is held
+	// against its consumption, so it blocks a split until it is detached.
+	o := res.Original
+	ab, _, err := s.AssignAsBuilt(ctx, NewAsBuilt{OrderID: o.ID, Actor: "operator-1", IdempotencyKey: "split-ab", RequestHash: "split-ab",
+		AsBuilt: domain.AsBuilt{FinishedSerial: "S-1", ComponentItemID: o.Lines[0].ItemID, Tracking: domain.TrackBatch, ComponentSerial: "B-1", Qty: d("50")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	o, _ = s.GetOrder(ctx, o.ID)
+	_, err = s.SplitOrder(ctx, Split{OrderID: o.ID, IfMatch: o.Version, SplitQty: d("5"), IdempotencyKey: "split-st-ab", RequestHash: "hab"})
+	expectProblem(t, err, http.StatusConflict, domain.CodeSplitRefused)
+	if _, err := s.DetachAsBuilt(ctx, ab.ID, "operator-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reported output blocks a further split.
+	o, _ = s.GetOrder(ctx, o.ID)
+	st2 := &stepper{t: t, s: s, ctx: ctx, orderID: o.ID, version: o.Version}
+	st2.must(domain.CmdReportFinished, func(tr *Transition) { tr.Good = d("10") })
+	_, err = s.SplitOrder(ctx, Split{OrderID: o.ID, IfMatch: st2.version, SplitQty: d("5"), IdempotencyKey: "split-st-3", RequestHash: "h3"})
+	expectProblem(t, err, http.StatusConflict, domain.CodeIllegalTransition)
 }

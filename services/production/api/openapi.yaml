@@ -461,7 +461,8 @@ components:
         postingType:
           type: string
           enum: [wip-material, inventory-issue, wip-labor, labor-absorption, wip-overhead, overhead-absorption, raf-receipt, wip-raf-offset, wip-settlement,
-            variance-lot-size, variance-production-quantity, variance-production-price, variance-production-substitution]
+            variance-lot-size, variance-production-quantity, variance-production-price, variance-production-substitution, variance-rework, split-transfer]
+          description: 'split-transfer is the counter row of a split transfer (BR-21.11), on the WIP account with wip false, so the pair nets to zero in the ledger.'
         account: { type: string }
         dr: { $ref: '#/components/schemas/Decimal' }
         cr: { $ref: '#/components/schemas/Decimal' }
@@ -471,7 +472,7 @@ components:
       properties:
         id: { type: string, format: uuid }
         orderId: { type: string, format: uuid }
-        type: { $ref: '#/components/schemas/JournalType' }
+        type: { type: string, enum: [picking-list, route-card, report-as-finished, split-transfer], description: 'split-transfer is the system journal of a split of a Started order (BR-21.11); users create the other three.' }
         journalNumber: { type: string, description: 'PJ-000001, per legal entity.' }
         postingDate: { type: string, format: date }
         posted: { type: boolean }
@@ -481,6 +482,7 @@ components:
         qtyError: { $ref: '#/components/schemas/Decimal' }
         reversalOf: { type: string, format: uuid, description: Set on a reversal journal written by a reset (FR-21.9). }
         reversedBy: { type: string, format: uuid }
+        counterpartOrderId: { type: string, format: uuid, description: 'The other order of a split-transfer pair (BR-21.11).' }
         journalEntryId: { type: string, format: uuid, description: The general-ledger entry (wave 11); absent until the ledger books it. }
         createdBy: { type: string }
         createdAt: { type: string, format: date-time }
@@ -608,6 +610,11 @@ components:
         splitQty: { $ref: '#/components/schemas/Decimal', description: 'The quantity the new order receives; above zero and below the order quantity.' }
         minimumQty: { $ref: '#/components/schemas/Decimal', description: 'The item''s minimum order quantity (released-product settings, wave 8, are not read yet); 0 or absent: no minimum.' }
         multiple: { $ref: '#/components/schemas/Decimal', description: 'The item''s order multiple; 0 or absent: any quantity.' }
+        allocation:
+          type: string
+          enum: [proportional, keep-on-original]
+          default: proportional
+          description: 'For a Started order: proportional moves the split''s share of the posted consumption, route hours and WIP to the new order (BR-21.11); keep-on-original leaves them on the original. Ignored before Started.'
     SplitResult:
       type: object
       properties:
@@ -1216,14 +1223,14 @@ paths:
         '400': { description: Body, Idempotency-Key or If-Match malformed (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { description: Unknown order or command (PRODUCTION_ORDER_NOT_FOUND, PRODUCTION_UNKNOWN_ACTION), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '409': { description: 'PRODUCTION_ILLEGAL_TRANSITION; PRODUCTION_UNPOSTED_JOURNALS on end', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: 'PRODUCTION_ILLEGAL_TRANSITION (also a reset back before Started of an order that took part in a split transfer, BR-21.11); PRODUCTION_UNPOSTED_JOURNALS on end', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: conflict_version, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: 'Guard failed (PRODUCTION_END_REQUIRES_RAF, PRODUCTION_ZERO_OUTPUT_NOT_PERMITTED, PRODUCTION_RAF_EXCEEDS_REMAINING, PRODUCTION_INVALID_INPUT, PRODUCTION_POSTING_PROFILE_MISSING, PRODUCTION_END_BEFORE_LAST_JOURNAL, PRODUCTION_POSTING_NOT_BALANCED) or key reused (idempotency_key_reuse)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: precondition_required, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/production/orders/{id}:split:
     post:
       operationId: splitProductionOrder
-      summary: Split a Created to Released order in two (FR-21.15)
+      summary: Split a Created to Started order in two (FR-21.15)
       description: |
         The original keeps quantity − splitQty; the new order receives splitQty with the same
         header, BOM and route snapshot and status, a new number, originType Split, originId
@@ -1232,8 +1239,16 @@ paths:
         BR-21.8; each keeps its setup) and, once estimated, re-estimated. Emits
         dev.passage.production.order.created.v1 for the new order and
         dev.passage.production.order.updated.v1 for the original, and writes a `split`
-        status-log row on both. Started orders (the WIP transfer of BR-21.11) are not split
-        yet: 409 PRODUCTION_ILLEGAL_TRANSITION.
+        status-log row on both. A Started order also moves its share of the posted consumption,
+        route hours and WIP to the new order (BR-21.11): with r = splitQty ÷ order quantity,
+        quantities move at round(x × r, 6), hours at round(x × r, 2) and amounts at round(x × r)
+        in the currency's minor unit, the rounding residual stays on the original. The move is a
+        pair of posted `split-transfer` journals (one per order, linked by counterpartOrderId)
+        with balanced WIP postings, each announced by dev.passage.production.journal.posted.v1.
+        `allocation` `keep-on-original` moves nothing. A Started order with reported output, draft
+        journals or as-built records is refused (409 PRODUCTION_SPLIT_REFUSED). After a transfer,
+        a reset of either order back before Started is refused (409 PRODUCTION_ILLEGAL_TRANSITION);
+        leaving ReportedAsFinished still reverses the reports as finished.
       x-passage-duty: production.order.release
       parameters:
         - { $ref: '#/components/parameters/OrderId' }
@@ -1264,7 +1279,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { description: PRODUCTION_ORDER_NOT_FOUND, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '409': { description: 'PRODUCTION_ILLEGAL_TRANSITION: the order is not Created to Released', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: 'PRODUCTION_ILLEGAL_TRANSITION: the order is not Created to Started; PRODUCTION_SPLIT_REFUSED: a Started order has reported output, draft journals or as-built records', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: conflict_version, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: 'PRODUCTION_SPLIT_QUANTITY (PROD-0015) or idempotency_key_reuse', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: precondition_required, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }

@@ -2,7 +2,7 @@
 
 Production orders for Passage (wave 21, ticket PSG-21, PRD section 4.21). Slice 1 covers the
 order itself; slice 2 adds journals, WIP postings and settlement; slice 3 adds rework orders and
-as-built genealogy; slice 4 adds the bulk status update, and split and merge; slice 5 adds
+as-built genealogy; slice 4 adds the bulk status update, and split and merge (slice 11: split of a Started order with the WIP transfer); slice 5 adds
 order-specific BOM and route edits and the WIP balance and variance reports; slice 6 adds trigger
 points on operation feedback; slice 7 adds subcontract purchase requests; slice 9 adds the item's
 order quantity rules, estimate on create and the operation finish and reopen commands; slice 10 adds

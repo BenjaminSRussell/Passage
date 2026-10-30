@@ -41,23 +41,25 @@ const (
 // Journal is a production journal (PRD 4.21.4 ProductionJournal) with its
 // lines and, once posted, its WIP postings.
 type Journal struct {
-	ID             string             `json:"id"`
-	OrderID        string             `json:"orderId"`
-	Type           domain.JournalType `json:"type"`
-	JournalNumber  string             `json:"journalNumber"`
-	PostingDate    string             `json:"postingDate"`
-	Posted         bool               `json:"posted"`
-	PostedAt       *time.Time         `json:"postedAt,omitempty"`
-	PostedBy       *string            `json:"postedBy,omitempty"`
-	QtyGood        decimal.Decimal    `json:"qtyGood"`
-	QtyError       decimal.Decimal    `json:"qtyError"`
-	ReversalOf     *string            `json:"reversalOf,omitempty"`
-	ReversedBy     *string            `json:"reversedBy,omitempty"`
-	JournalEntryID *string            `json:"journalEntryId,omitempty"`
-	CreatedBy      string             `json:"createdBy"`
-	CreatedAt      time.Time          `json:"createdAt"`
-	Lines          []JournalLine      `json:"lines"`
-	Postings       []domain.Posting   `json:"postings"`
+	ID            string             `json:"id"`
+	OrderID       string             `json:"orderId"`
+	Type          domain.JournalType `json:"type"`
+	JournalNumber string             `json:"journalNumber"`
+	PostingDate   string             `json:"postingDate"`
+	Posted        bool               `json:"posted"`
+	PostedAt      *time.Time         `json:"postedAt,omitempty"`
+	PostedBy      *string            `json:"postedBy,omitempty"`
+	QtyGood       decimal.Decimal    `json:"qtyGood"`
+	QtyError      decimal.Decimal    `json:"qtyError"`
+	ReversalOf    *string            `json:"reversalOf,omitempty"`
+	ReversedBy    *string            `json:"reversedBy,omitempty"`
+	// CounterpartOrderID is the other order of a split transfer (BR-21.11).
+	CounterpartOrderID *string          `json:"counterpartOrderId,omitempty"`
+	JournalEntryID     *string          `json:"journalEntryId,omitempty"`
+	CreatedBy          string           `json:"createdBy"`
+	CreatedAt          time.Time        `json:"createdAt"`
+	Lines              []JournalLine    `json:"lines"`
+	Postings           []domain.Posting `json:"postings"`
 	// TriggerFirings are the trigger points a posted route card made due (FR-21.17).
 	TriggerFirings []TriggerFiring `json:"triggerFirings,omitempty"`
 }
@@ -628,7 +630,7 @@ func eventPostings(ps []domain.Posting) []prodevents.Posting {
 
 func enqueueJournalPosted(ctx context.Context, tx pgx.Tx, tenantID string, h orderHead, j Journal, actor string) error {
 	data := prodevents.JournalPostedData{JournalID: j.ID, JournalNumber: j.JournalNumber, OrderID: h.id, Type: string(j.Type),
-		PostingDate: j.PostingDate, Currency: h.currency, ReversalOf: j.ReversalOf, Lines: []prodevents.JournalLine{}, Postings: eventPostings(j.Postings)}
+		PostingDate: j.PostingDate, Currency: h.currency, ReversalOf: j.ReversalOf, CounterpartOrderID: j.CounterpartOrderID, Lines: []prodevents.JournalLine{}, Postings: eventPostings(j.Postings)}
 	for _, l := range j.Lines {
 		line := prodevents.JournalLine{Kind: l.Kind, LineNo: l.LineNo, OperNumber: l.OperNumber, ItemID: l.ItemID, Qty: l.Qty.String(),
 			UnitCost: l.UnitCost.String(), Amount: l.Amount.Add(l.OverheadAmount).String()}
@@ -1043,10 +1045,10 @@ func loadJournal(ctx context.Context, q querier, tenantID, id string, lock ...st
 		suffix = " " + lock[0]
 	}
 	err := q.QueryRow(ctx, `select id::text, order_id::text, journal_type, journal_number, posting_date::text, posted, posted_at, posted_by,
-			qty_good::text, qty_error::text, reversal_of::text, journal_entry_id::text, created_by, created_at,
+			qty_good::text, qty_error::text, reversal_of::text, journal_entry_id::text, created_by, created_at, counterpart_order_id::text,
 			(select r.id::text from production_journal r where r.tenant_id = j.tenant_id and r.reversal_of = j.id)
 		from production_journal j where tenant_id = $1 and id = $2`+suffix, tenantID, id).Scan(&j.ID, &j.OrderID, &typ, &j.JournalNumber,
-		&j.PostingDate, &j.Posted, &j.PostedAt, &j.PostedBy, &qg, &qe, &j.ReversalOf, &j.JournalEntryID, &j.CreatedBy, &j.CreatedAt, &j.ReversedBy)
+		&j.PostingDate, &j.Posted, &j.PostedAt, &j.PostedBy, &qg, &qe, &j.ReversalOf, &j.JournalEntryID, &j.CreatedBy, &j.CreatedAt, &j.CounterpartOrderID, &j.ReversedBy)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Journal{}, journalNotFound()
 	}

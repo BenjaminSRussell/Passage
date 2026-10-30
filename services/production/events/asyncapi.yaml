@@ -239,17 +239,23 @@ components:
         journals posted by :start and :report-finished and the reversal journals of
         :reset-status (reversalOf set, negative quantities). journalEntryId stays null until the
         general ledger books the postings (consumers: inventory, ledger, planning).
+        A split of a Started order (BR-21.11) emits one `split-transfer` journal on each order,
+        linked by counterpartOrderId: negative lines and Cr WIP on the original, positive lines and
+        Dr WIP on the new order. It moves consumption, hours and WIP between the two orders only:
+        no stock moves (inventory must not book its issue lines) and its postings net to zero on
+        the WIP account.
       payload:
         type: object
-        required: [journalId, journalNumber, orderId, type, postingDate, currency, reversalOf, lines, postings, journalEntryId]
+        required: [journalId, journalNumber, orderId, type, postingDate, currency, reversalOf, counterpartOrderId, lines, postings, journalEntryId]
         properties:
           journalId: { type: string, format: uuid }
           journalNumber: { type: string }
           orderId: { type: string, format: uuid }
-          type: { type: string, enum: [picking-list, route-card, report-as-finished] }
+          type: { type: string, enum: [picking-list, route-card, report-as-finished, split-transfer] }
           postingDate: { type: string, format: date }
           currency: { type: string }
           reversalOf: { type: [string, 'null'], format: uuid }
+          counterpartOrderId: { type: [string, 'null'], format: uuid, description: 'The other order of a split-transfer journal; null for every other type.' }
           lines: { type: array, items: { $ref: '#/components/schemas/journalLine' } }
           postings: { type: array, items: { $ref: '#/components/schemas/posting' } }
           journalEntryId: { type: [string, 'null'], format: uuid }

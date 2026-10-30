@@ -107,13 +107,24 @@ func TestCheckSplitQty(t *testing.T) {
 }
 
 func TestCheckSplittable(t *testing.T) {
-	for _, s := range []Status{Created, Estimated, Scheduled, Released} {
+	for _, s := range []Status{Created, Estimated, Scheduled, Released, Started} {
 		if err := CheckSplittable(s); err != nil {
 			t.Errorf("%s: %v", s, err)
 		}
 	}
-	for _, s := range []Status{Started, ReportedAsFinished, Ended, Cancelled, Status("Bogus")} {
+	for _, s := range []Status{ReportedAsFinished, Ended, Cancelled, Status("Bogus")} {
 		wantCode(t, CheckSplittable(s), CodeIllegalTransition)
+	}
+}
+
+func TestCheckMergeable(t *testing.T) {
+	for _, s := range []Status{Created, Estimated, Scheduled, Released} {
+		if err := CheckMergeable(s); err != nil {
+			t.Errorf("%s: %v", s, err)
+		}
+	}
+	for _, s := range []Status{Started, ReportedAsFinished, Ended, Cancelled, Status("Bogus")} {
+		wantCode(t, CheckMergeable(s), CodeIllegalTransition)
 	}
 }
 

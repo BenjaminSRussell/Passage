@@ -1,11 +1,12 @@
 import { useRef, useState, type FormEvent } from "react";
-import { Alert, Button, Card, FormField, Input } from "../../shell/ui";
+import { Alert, Button, Card, FormField, Input, Select } from "../../shell/ui";
 import {
   describeProblem,
   newIdempotencyKey,
   splitOrder,
   type Problem,
   type ProductionOrder,
+  type SplitAllocation,
   type SplitInput,
   type SplitResult,
 } from "./api/client";
@@ -26,14 +27,15 @@ interface SplitValues {
   splitQty: string;
   minimumQty: string;
   multiple: string;
+  allocation: SplitAllocation;
 }
 
 type SplitErrors = Partial<Record<keyof SplitValues, string>>;
 
-const empty: SplitValues = { splitQty: "", minimumQty: "", multiple: "" };
+const empty: SplitValues = { splitQty: "", minimumQty: "", multiple: "", allocation: "proportional" };
 
 /** Checks the form; the service applies the same rules (FR-21.15, PROD-0015). */
-export function validateSplit(values: SplitValues, orderQty: string): SplitErrors {
+export function validateSplit(values: Pick<SplitValues, "splitQty" | "minimumQty" | "multiple">, orderQty: string): SplitErrors {
   const errors: SplitErrors = {};
   if (!quantityPattern.test(values.splitQty) || isZero(values.splitQty)) {
     errors.splitQty = "Enter a positive quantity with up to 6 decimals.";
@@ -51,7 +53,7 @@ export function validateSplit(values: SplitValues, orderQty: string): SplitError
   return errors;
 }
 
-/** Splits part of a Created to Released order off into a new order (FR-21.15). */
+/** Splits part of a Created to Started order off into a new order (FR-21.15); a Started one moves its share of what was posted (BR-21.11). */
 export function SplitPanel({ order, onSplit, onOpenOrder }: SplitPanelProps) {
   const [values, setValues] = useState<SplitValues>(empty);
   const [errors, setErrors] = useState<SplitErrors>({});
@@ -60,6 +62,8 @@ export function SplitPanel({ order, onSplit, onOpenOrder }: SplitPanelProps) {
   const [created, setCreated] = useState<ProductionOrder | null>(null);
   // One Idempotency-Key per version and body, so a retry after a lost response replays.
   const keys = useRef(new Map<string, string>());
+
+  const started = order.status === "Started";
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -74,6 +78,9 @@ export function SplitPanel({ order, onSplit, onOpenOrder }: SplitPanelProps) {
     }
     if (values.multiple !== "") {
       input.multiple = values.multiple;
+    }
+    if (started) {
+      input.allocation = values.allocation;
     }
     const slot = `${order.version}:${JSON.stringify(input)}`;
     const key = keys.current.get(slot) ?? newIdempotencyKey();
@@ -93,7 +100,7 @@ export function SplitPanel({ order, onSplit, onOpenOrder }: SplitPanelProps) {
     }
   };
 
-  const field = (name: keyof SplitValues) => ({
+  const field = (name: "splitQty" | "minimumQty" | "multiple") => ({
     inputMode: "decimal" as const,
     value: values[name],
     onChange: (event: { target: { value: string } }) => setValues({ ...values, [name]: event.target.value }),
@@ -105,6 +112,11 @@ export function SplitPanel({ order, onSplit, onOpenOrder }: SplitPanelProps) {
         <p className={styles.hint}>
           The new order receives the split quantity with the same BOM, route and status; this order keeps the rest. Both are
           re-exploded and, once estimated, re-estimated.
+          {started
+            ? values.allocation === "proportional"
+              ? " Posted consumption, route hours and WIP move to the new order in proportion to the quantity; the rounding residual stays here."
+              : " Posted consumption, route hours and WIP stay on this order; the new order starts with nothing posted."
+            : ""}
         </p>
         <Alert tone="success" live="status">
           {created ? (
@@ -133,6 +145,20 @@ export function SplitPanel({ order, onSplit, onOpenOrder }: SplitPanelProps) {
           <FormField id="split-multiple" label="Order multiple" optional error={errors.multiple}>
             {(control) => <Input {...control} {...field("multiple")} />}
           </FormField>
+          {started ? (
+            <FormField id="split-allocation" label="Posted consumption and WIP">
+              {(control) => (
+                <Select
+                  {...control}
+                  value={values.allocation}
+                  onChange={(event) => setValues({ ...values, allocation: event.target.value as SplitAllocation })}
+                >
+                  <option value="proportional">Move in proportion</option>
+                  <option value="keep-on-original">Keep on this order</option>
+                </Select>
+              )}
+            </FormField>
+          ) : null}
           <Button type="submit" icon="box" loading={busy}>
             Split off
           </Button>

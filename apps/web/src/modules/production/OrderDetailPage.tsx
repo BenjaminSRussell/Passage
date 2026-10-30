@@ -580,7 +580,7 @@ export function ProductionOrderDetail({ orderId, onBack, onCreateRework, onOpenO
         />
       ) : null}
 
-      <JournalsPanel order={current} onChanged={reload} />
+      <JournalsPanel order={current} onChanged={reload} onOpenOrder={onOpenOrder} />
 
       <TriggerPointsPanel order={current} onOpenOrder={onOpenOrder} />
 

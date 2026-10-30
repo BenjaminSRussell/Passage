@@ -29,6 +29,8 @@ export interface JournalsPanelProps {
   order: ProductionOrder;
   /** Called after a post changed the order (consumption, status, costs). */
   onChanged(): void;
+  /** Opens another order: the counterpart of a split-transfer journal. */
+  onOpenOrder?(orderId: string): void;
 }
 
 export interface Draft {
@@ -164,7 +166,7 @@ const postingColumns: DataTableColumn<Posting>[] = [
 ];
 
 /** Journals of an order (PRD 4.21.6 Journals tab and journal editor): list, create with a proposal or by hand, post, delete drafts. */
-export function JournalsPanel({ order, onChanged }: JournalsPanelProps) {
+export function JournalsPanel({ order, onChanged, onOpenOrder }: JournalsPanelProps) {
   const types = useMemo(() => journalTypesFor(order.status), [order.status]);
   const [journals, setJournals] = useState<{ rows: Journal[]; loading: boolean; error: Problem | null }>({ rows: [], loading: true, error: null });
   const [draft, setDraft] = useState<Draft>(() => emptyDraft(types[0] ?? ""));
@@ -348,6 +350,20 @@ export function JournalsPanel({ order, onChanged }: JournalsPanelProps) {
                 </div>
               ) : null}
             </div>
+            {current.type === "split-transfer" && current.counterpartOrderId ? (
+              <div className={styles.toolbar}>
+                <p className={styles.hint}>
+                  {current.counterpartOrderId === order.splitFromOrderId
+                    ? "Moves this order's share of the consumption, hours and WIP posted on the order it was split from."
+                    : "Moves the share of the consumption, hours and WIP posted here to the order split off from this one."}
+                </p>
+                {onOpenOrder ? (
+                  <Button variant="ghost" size="sm" onClick={() => onOpenOrder(current.counterpartOrderId!)}>
+                    Open the other order
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
             {confirmDelete ? (
               <Alert
                 tone="warning"

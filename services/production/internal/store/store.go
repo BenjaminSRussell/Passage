@@ -729,6 +729,9 @@ func (s *Postgres) Transition(ctx context.Context, t Transition) (Order, bool, e
 		case domain.CmdResetStatus:
 			// FR-21.9: a reset reverses what the statuses it leaves posted.
 			if types := reversedBy(from, to); len(types) > 0 {
+				if err := checkNoSplitTransfer(ctx, tx, p.TenantID, t.OrderID, types); err != nil {
+					return err
+				}
 				if err := reverseJournals(ctx, tx, p.TenantID, &h, types, t.Actor, "sys:reset:"+t.IdempotencyKey); err != nil {
 					return err
 				}
@@ -830,7 +833,7 @@ func domainProblem(err error) error {
 	switch de.Code {
 	case domain.CodeIllegalTransition, domain.CodeNotEditable, domain.CodeAsBuiltState,
 		domain.CodeEditNotAllowed, domain.CodeEditTargetExists, domain.CodeEditTargetInUse, domain.CodeOperationState, domain.CodeChangeNotEligible,
-		domain.CodeChangeSuperseded:
+		domain.CodeChangeSuperseded, domain.CodeSplitRefused:
 		status = http.StatusConflict
 	}
 	return httpx.NewProblem(status, de.Code, de.Detail)

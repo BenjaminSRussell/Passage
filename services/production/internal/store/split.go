@@ -24,11 +24,14 @@ import (
 // minimum order quantity and multiple (zero: no rule); the caller passes them
 // until released-product settings (wave 8) are read here.
 type Split struct {
-	OrderID        string
-	IfMatch        int
-	SplitQty       decimal.Decimal
-	MinQty         decimal.Decimal
-	Multiple       decimal.Decimal
+	OrderID  string
+	IfMatch  int
+	SplitQty decimal.Decimal
+	MinQty   decimal.Decimal
+	Multiple decimal.Decimal
+	// Allocation decides, for a Started order, whether the posted consumption,
+	// hours and WIP move in proportion (default) or stay on the original (BR-21.11).
+	Allocation     domain.Allocation
 	Actor          string
 	TraceID        string
 	IdempotencyKey string
@@ -42,7 +45,7 @@ type SplitResult struct {
 	Replayed bool  `json:"-"`
 }
 
-// SplitOrder splits a Created to Released order (FR-21.15). The original keeps
+// SplitOrder splits a Created to Started order (FR-21.15). The original keeps
 // quantity − splitQty; the new order receives splitQty, the same header, BOM and
 // route snapshot and status, a number from the legal entity's sequence, origin
 // Split with originId and splitFromOrderId set to the original. Both orders are
@@ -50,6 +53,9 @@ type SplitResult struct {
 // order is announced by order.created and the original by order.updated. The
 // Idempotency-Key is stored on the new order: a replay with the same request
 // returns the pair with replayed=true, any other request is refused.
+// A Started order also moves its share of the posted consumption, route hours
+// and WIP to the new order (BR-21.11) through a pair of posted split-transfer
+// journals, unless the allocation keeps everything on the original.
 func (s *Postgres) SplitOrder(ctx context.Context, in Split) (SplitResult, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out SplitResult
@@ -99,6 +105,17 @@ func (s *Postgres) SplitOrder(ctx context.Context, in Split) (SplitResult, error
 		plan, err := domain.SplitOrder(h.quantity, in.SplitQty, in.MinQty, in.Multiple, lines, ops)
 		if err != nil {
 			return domainProblem(err)
+		}
+		var transfer domain.Transfer
+		if h.status == domain.Started {
+			if err := checkStartedSplit(ctx, tx, p.TenantID, h); err != nil {
+				return err
+			}
+			if in.Allocation != domain.AllocKeepOnOriginal {
+				if transfer, err = planTransfer(ctx, tx, p.TenantID, h, in.SplitQty, lines, ops); err != nil {
+					return err
+				}
+			}
 		}
 
 		var seq int64
@@ -150,7 +167,7 @@ func (s *Postgres) SplitOrder(ctx context.Context, in Split) (SplitResult, error
 		// FR-21.10: the new order of a released split needs its own vendor PO; the
 		// original keeps its request (the PO quantity change is purchasing's).
 		var requests []prodevents.SubcontractPORequestedData
-		if h.status == domain.Released {
+		if h.status == domain.Released || h.status == domain.Started {
 			if requests, err = claimSubcontractRequests(ctx, tx, p.TenantID, newID, in.Actor); err != nil {
 				return err
 			}
@@ -173,6 +190,19 @@ func (s *Postgres) SplitOrder(ctx context.Context, in Split) (SplitResult, error
 		}
 		if err := enqueueSubcontractRequests(ctx, tx, p.TenantID, newID, in.Actor, requests); err != nil {
 			return err
+		}
+		// The transfer follows order.created, so a consumer knows the new order
+		// before the journals that name it; the orders are read again with the moved figures.
+		if !transfer.Empty() {
+			if err := applyTransfer(ctx, tx, p.TenantID, h, newID, transfer, ops, in); err != nil {
+				return err
+			}
+			if out.Original, err = loadOrder(ctx, tx, p.TenantID, in.OrderID); err != nil {
+				return err
+			}
+			if out.New, err = loadOrder(ctx, tx, p.TenantID, newID); err != nil {
+				return err
+			}
 		}
 		return enqueueUpdated(ctx, tx, p.TenantID, in.Actor, out.Original)
 	})

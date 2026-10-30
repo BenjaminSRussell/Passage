@@ -141,6 +141,35 @@ describe("Journals on the order detail", () => {
     expect(checkAxeAA(container)).toEqual([]);
   });
 
+  it("names the split-transfer journal a split of a Started order posted (BR-21.11)", async () => {
+    serve({
+      order: order({ status: "Started", version: 8 }),
+      costs,
+      journals: [postedJournal({ id: "j4", journalNumber: "PJ-000009", type: "split-transfer", counterpartOrderId: "0195d6a0-0000-7000-8000-00000000b009" })],
+    });
+    renderAt(`/production/${orderId}`);
+    const table = await findTable({ name: "Production journals" });
+    await waitFor(() => expect(within(table).getByText("PJ-000009")).toBeInTheDocument());
+    expect(within(table).getByText("Split transfer")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "PJ-000009" }));
+    const detail = await screen.findByRole("region", { name: "Journal PJ-000009" });
+    expect(detail).toHaveTextContent("to the order split off from this one");
+    expect(within(detail).getByRole("button", { name: "Open the other order" })).toBeInTheDocument();
+  });
+
+  it("names the order a split-transfer journal came from on the new order", async () => {
+    const from = "0195d6a0-0000-7000-8000-00000000b001";
+    serve({
+      order: order({ status: "Started", version: 2, splitFromOrderId: from }),
+      costs,
+      journals: [postedJournal({ id: "j5", journalNumber: "PJ-000010", type: "split-transfer", counterpartOrderId: from })],
+    });
+    renderAt(`/production/${orderId}`);
+    await userEvent.click(await screen.findByRole("button", { name: "PJ-000010" }));
+    const detail = await screen.findByRole("region", { name: "Journal PJ-000010" });
+    expect(detail).toHaveTextContent("posted on the order it was split from");
+  });
+
   it("creates a proposed picking list, shows its lines, then posts it and reloads the order", async () => {
     const server: Server = { order: order({ status: "Started", version: 5 }), costs, journals: [] };
     const fetchMock = serve(server);
