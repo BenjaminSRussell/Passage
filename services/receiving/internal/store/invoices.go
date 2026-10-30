@@ -147,9 +147,9 @@ func lockGrirItem(ctx context.Context, tx pgx.Tx, tenantID string, in Invoice, k
 
 func insertInvoice(ctx context.Context, tx pgx.Tx, tenantID string, in *Invoice) error {
 	if err := tx.QueryRow(ctx, `INSERT INTO receiving_vendor_invoice (tenant_id, id, legal_entity_id, vendor_id, invoice_number, invoice_date, posting_date,
-		currency, ledger_id, fiscal_period_id, ledger_entry_id, total, source, status, posted_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING created_at`,
+		currency, ledger_id, fiscal_period_id, ledger_entry_id, total, source, status, posted_by, audit_reason) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING created_at`,
 		tenantID, in.ID, in.LegalEntityID, in.VendorID, in.InvoiceNumber, in.InvoiceDate, in.PostingDate, in.Currency, in.LedgerID, in.FiscalPeriodID,
-		in.LedgerEntryID, in.Total, in.Source, in.Status, in.PostedBy).Scan(&in.CreatedAt); err != nil {
+		in.LedgerEntryID, in.Total, in.Source, in.Status, in.PostedBy, in.AuditReason).Scan(&in.CreatedAt); err != nil {
 		return err
 	}
 	rows := make([][]any, len(in.Lines))

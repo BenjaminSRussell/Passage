@@ -90,6 +90,7 @@ type invoiceSampledData struct {
 	Currency      string `json:"currency"`
 	Total         string `json:"total"`
 	SampleRatePct string `json:"sample_rate_pct"`
+	Reason        string `json:"reason"`
 }
 
 type invoiceRejectedData struct {
@@ -190,7 +191,7 @@ func receiptCorrectedEvent(tenantID, kind string, r store.Receipt, seq int, ledg
 func invoiceSampledEvent(tenantID string, in store.Invoice, total, ratePct decimal.Decimal) (events.Event, error) {
 	return newEvent("payables", "invoice", "sampled", in.ID, tenantID, invoiceSampledData{
 		InvoiceID: in.ID, LegalEntityID: in.LegalEntityID, VendorID: in.VendorID, InvoiceNumber: in.InvoiceNumber, Source: in.Source,
-		Currency: in.Currency, Total: total.String(), SampleRatePct: ratePct.String(),
+		Currency: in.Currency, Total: total.String(), SampleRatePct: ratePct.String(), Reason: in.AuditReason,
 	})
 }
 

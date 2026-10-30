@@ -16,7 +16,11 @@ import (
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
 )
 
-const maxInvoiceNumber = 64
+const (
+	maxInvoiceNumber   = 64
+	auditReasonSample  = "stochastic sample"
+	auditReasonReissue = "re-issue after audit rejection"
+)
 
 type invoiceLineRequest struct {
 	ReceiptID     string        `json:"receiptId"`
@@ -62,6 +66,7 @@ type invoiceBody struct {
 	LedgerEntryID  string            `json:"ledgerEntryId"`
 	Source         string            `json:"source"`
 	Status         string            `json:"status"`
+	AuditReason    string            `json:"auditReason,omitempty"`
 	ReleasedBy     string            `json:"releasedBy,omitempty"`
 	ReleasedAt     string            `json:"releasedAt,omitempty"`
 	RejectedBy     string            `json:"rejectedBy,omitempty"`
@@ -179,7 +184,10 @@ func (a *API) submitInvoice(ctx context.Context, p tenant.Principal, in store.In
 	if err != nil {
 		return store.Invoice{}, err
 	}
-	blocked := a.ports.AuditSampler.Blocks(in.ID, ratePct)
+	if in.AuditReason == "" && a.ports.AuditSampler.Blocks(in.ID, ratePct) {
+		in.AuditReason = auditReasonSample
+	}
+	blocked := in.AuditReason != ""
 	posted, err := a.store.PostInvoice(ctx, in, func(items []*domain.GrirItem) (store.InvoiceOutcome, error) {
 		lines := make([]domain.PostLine, len(in.Lines))
 		for i, l := range in.Lines {
@@ -223,7 +231,7 @@ func toInvoiceBody(in store.Invoice) invoiceBody {
 	out := invoiceBody{
 		ID: in.ID, VendorID: in.VendorID, LegalEntityID: in.LegalEntityID, InvoiceNumber: in.InvoiceNumber, InvoiceDate: in.InvoiceDate.Format(dateLayout),
 		PostingDate: in.PostingDate.Format(dateLayout), Currency: in.Currency, LedgerID: in.LedgerID, FiscalPeriodID: in.FiscalPeriodID,
-		Total: in.Total.StringFixed(scale), LedgerEntryID: in.LedgerEntryID, Source: in.Source, Status: in.Status, ReleasedBy: in.ReleasedBy, RejectedBy: in.RejectedBy, RejectReason: in.RejectReason, CreatedAt: in.CreatedAt.UTC().Format(time.RFC3339), Lines: make([]invoiceLineBody, 0, len(in.Lines)),
+		Total: in.Total.StringFixed(scale), LedgerEntryID: in.LedgerEntryID, Source: in.Source, Status: in.Status, AuditReason: in.AuditReason, ReleasedBy: in.ReleasedBy, RejectedBy: in.RejectedBy, RejectReason: in.RejectReason, CreatedAt: in.CreatedAt.UTC().Format(time.RFC3339), Lines: make([]invoiceLineBody, 0, len(in.Lines)),
 	}
 	if in.ReleasedAt != nil {
 		out.ReleasedAt = in.ReleasedAt.UTC().Format(time.RFC3339)

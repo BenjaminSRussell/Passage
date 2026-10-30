@@ -2,6 +2,7 @@ ALTER TABLE receiving_vendor_invoice
   ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'MANUAL' CHECK (source IN ('MANUAL', 'ERS')),
   ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'POSTED' CHECK (status IN ('POSTED', 'AUDIT_BLOCKED', 'AUDIT_REJECTED')),
   ADD COLUMN IF NOT EXISTS posted_by text NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS audit_reason text NOT NULL DEFAULT '',
   ADD COLUMN IF NOT EXISTS released_by text,
   ADD COLUMN IF NOT EXISTS released_at timestamptz,
   ADD COLUMN IF NOT EXISTS rejected_by text,

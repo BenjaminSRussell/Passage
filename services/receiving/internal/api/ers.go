@@ -172,6 +172,9 @@ func (r *ersRun) invoiceFor(rec store.Receipt, po domain.PurchaseOrder, rejected
 	if len(in.Lines) == 0 {
 		return store.Invoice{}, skipAlreadyInvoiced
 	}
+	if rejected > 0 {
+		in.AuditReason = auditReasonReissue
+	}
 	return in, ""
 }
 

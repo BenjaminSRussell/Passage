@@ -947,11 +947,18 @@ func TestErs_RejectedSelfBilledInvoiceFreesTheReceiptForANewNumberedRun(t *testi
 
 	second := rg.ersRun(t, http.StatusOK)
 
-	if len(second.Settled) != 1 || second.Settled[0].InvoiceNumber != base+"-R1" || second.Settled[0].Status != "POSTED" || second.Settled[0].Total != "10.40" || len(rg.ledger.Entries) != 2 {
-		t.Fatalf("second run %+v ledger entries %d: want %s-R1 posted once", second, len(rg.ledger.Entries), base)
+	if len(second.Settled) != 1 || second.Settled[0].InvoiceNumber != base+"-R1" || second.Settled[0].Status != "AUDIT_BLOCKED" || second.Settled[0].Total != "10.40" || len(rg.ledger.Entries) != 1 {
+		t.Fatalf("second run %+v ledger entries %d: want %s-R1 held for audit at a 0%% rate and nothing posted", second, len(rg.ledger.Entries), base)
 	}
-	if third := rg.ersRun(t, http.StatusOK); len(third.Settled) != 0 || len(rg.ledger.Entries) != 2 {
+	evts := rg.st.Events()
+	if sampled := evts[len(evts)-1]; sampled.Type != "dev.passage.payables.invoice.sampled.v1" || !strings.Contains(string(sampled.Data), `"reason":"re-issue after audit rejection"`) || !strings.Contains(string(sampled.Data), `"sample_rate_pct":"0"`) {
+		t.Fatalf("event %s %s", sampled.Type, sampled.Data)
+	}
+	if third := rg.ersRun(t, http.StatusOK); len(third.Settled) != 0 {
 		t.Fatalf("third run %+v", third)
+	}
+	if code, body := rg.release(second.Settled[0].InvoiceID, "auditor"); code != http.StatusOK || !strings.Contains(body, `"auditReason":"re-issue after audit rejection"`) || len(rg.ledger.Entries) != 2 {
+		t.Fatalf("release %d %s ledger entries %d", code, body, len(rg.ledger.Entries))
 	}
 }
 

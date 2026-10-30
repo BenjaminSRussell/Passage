@@ -923,6 +923,7 @@ components:
       required: [id, vendorId, legalEntityId, invoiceNumber, invoiceDate, postingDate, currency, ledgerId, fiscalPeriodId, total, ledgerEntryId, source, status, createdAt, lines]
       properties:
         source: { type: string, enum: [MANUAL, ERS] }
+        auditReason: { type: string, enum: [stochastic sample, re-issue after audit rejection], description: Why an invoice is or was held for audit. }
         status: { type: string, enum: [POSTED, AUDIT_BLOCKED, AUDIT_REJECTED], description: 'AUDIT_BLOCKED invoices have an empty ledgerEntryId until released.' }
         releasedBy: { type: string, description: The user who released the audit block. }
         releasedAt: { type: string, format: date-time }

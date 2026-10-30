@@ -153,6 +153,7 @@ type Invoice struct {
 	Source         string
 	Status         string
 	PostedBy       string
+	AuditReason    string
 	ReleasedBy     string
 	ReleasedAt     *time.Time
 	RejectedBy     string

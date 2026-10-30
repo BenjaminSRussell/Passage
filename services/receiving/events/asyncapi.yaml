@@ -243,7 +243,7 @@ components:
               grir_cleared_amount: { type: string, description: "decimal string; the GR/IR amount this line cleared (pro rata, the exact remainder on the last quantity)" }
     InvoiceSampledData:
       type: object
-      required: [invoice_id, legal_entity_id, vendor_id, invoice_number, source, currency, total, sample_rate_pct]
+      required: [invoice_id, legal_entity_id, vendor_id, invoice_number, source, currency, total, sample_rate_pct, reason]
       properties:
         invoice_id: { type: string, format: uuid }
         legal_entity_id: { type: string, format: uuid }
@@ -253,6 +253,7 @@ components:
         currency: { type: string, pattern: "^[A-Z]{3}$" }
         total: { type: string, description: "decimal string; the vendor control credit that will post on release" }
         sample_rate_pct: { type: string, description: "decimal string, 0 to 100; the legal entity's sample rate when the draw was made" }
+        reason: { type: string, enum: ["stochastic sample", "re-issue after audit rejection"], description: "why the invoice was held; a re-issue of a rejected ERS invoice is always held" }
     InvoiceRejectedData:
       type: object
       required: [invoice_id, legal_entity_id, vendor_id, invoice_number, source, currency, total, reason, rejected_by]
