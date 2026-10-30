@@ -11,6 +11,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/services/fx/internal/api"
 	"github.com/BenjaminSRussell/passage/services/fx/internal/importer"
 	"github.com/BenjaminSRussell/passage/services/fx/internal/provider"
 	"github.com/BenjaminSRussell/passage/services/fx/internal/store"
@@ -69,12 +70,16 @@ func parseInterval(getenv func(string) string) (time.Duration, error) {
 }
 
 func buildProvider(getenv func(string) string) (provider.Provider, error) {
+	return buildNamedProvider(getenv, addr(getenv, "FX_IMPORT_PROVIDER", "ecb"))
+}
+
+func buildNamedProvider(getenv func(string) string, name string) (provider.Provider, error) {
 	timeout, err := parseTimeout(getenv)
 	if err != nil {
 		return nil, err
 	}
 	client := &http.Client{Timeout: timeout}
-	switch name := addr(getenv, "FX_IMPORT_PROVIDER", "ecb"); name {
+	switch name {
 	case "ecb":
 		return provider.NewECB(client, addr(getenv, "FX_ECB_URL", defaultECBURL)), nil
 	case "openexchangerates":
@@ -82,6 +87,18 @@ func buildProvider(getenv func(string) string) (provider.Provider, error) {
 	default:
 		return nil, fmt.Errorf("FX_IMPORT_PROVIDER must be ecb or openexchangerates, got %q", name)
 	}
+}
+
+func newManualImporters(getenv func(string) string, st store.Store, metrics *importer.Metrics) (map[string]api.Importer, error) {
+	out := map[string]api.Importer{}
+	for _, name := range []string{"ecb", "openexchangerates"} {
+		p, err := buildNamedProvider(getenv, name)
+		if err != nil {
+			return nil, err
+		}
+		out[name] = importer.New(p, st, importer.DefaultConfig, metrics)
+	}
+	return out, nil
 }
 
 func newImportSchedule(ctx context.Context, getenv func(string) string, st store.Store, metrics *importer.Metrics) (*importSchedule, error) {

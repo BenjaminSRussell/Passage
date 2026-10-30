@@ -237,7 +237,7 @@ components:
       required: [code, handler]
       properties:
         code: { type: string }
-        handler: { type: string }
+        handler: { type: string, description: "Registered handler code. product.explode and product.group-change page through the product service (500 items per page, checkpointed per run)." }
         partitionCount: { type: integer }
         concurrency: { type: integer }
         exclusive: { type: boolean }
