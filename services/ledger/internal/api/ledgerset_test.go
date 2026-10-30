@@ -160,3 +160,53 @@ func TestReverseAndValidate_PassTheLedgerSpecificDutyOnlyWhenHeld(t *testing.T) 
 		}
 	}
 }
+
+const setLedgerLinesBody = `{"documentId":"` + testDoc + `","postingDate":"2026-03-31",
+  "source":{"system":"ap","type":"vendor_invoice","id":"7F3A"},
+  "lines":[{"account":"6010","debitCredit":"D","amount":{"currency":"USD","value":"10.00"}}],
+  "ledgerLines":[{"ledgerId":"` + testLedger + `","lines":[{"account":"2100","debitCredit":"C","amount":{"currency":"USD","value":"10.00"}}]}]}`
+
+func TestPostSetEntry_LedgerLinesReachTheStoreWithTheDutyFlagAndChangeTheHash(t *testing.T) {
+	fs := &fakeStore{}
+	h := server(fs)
+	path := "/v1/ledger/ledger-sets/" + testSet + "/journal-entries"
+	headers := map[string]string{"Idempotency-Key": "k1"}
+	rec := call(h, http.MethodPost, path, setLedgerLinesBody, dutyPost+","+store.DutyPostLedgerSpecific, headers)
+	if rec.Code != http.StatusCreated || len(fs.setPosts) != 1 {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	got := fs.setPosts[0].in
+	if lines := got.LedgerLines[testLedger]; len(lines) != 1 || lines[0].Account != "2100" || lines[0].Side != domain.SideCredit || len(got.Lines) != 1 || !got.CanPostLedgerSpecific {
+		t.Fatalf("set post: %+v", got)
+	}
+	changed := strings.Replace(setLedgerLinesBody, `"value":"10.00"}}]}]`, `"value":"11.00"}}]}]`, 1)
+	call(h, http.MethodPost, path, changed, dutyPost, headers)
+	if len(fs.setPosts) != 2 || string(fs.setPosts[1].in.Hash) == string(got.Hash) || fs.setPosts[1].in.CanPostLedgerSpecific {
+		t.Fatalf("a changed ledger line must change the payload hash and the duty flag follows the caller: %+v", fs.setPosts)
+	}
+}
+
+func TestPostSetEntry_LedgerLinesValidation(t *testing.T) {
+	fs := &fakeStore{}
+	h := server(fs)
+	path := "/v1/ledger/ledger-sets/" + testSet + "/journal-entries"
+	group := `{"ledgerId":"` + testLedger + `","lines":[{"account":"2100","debitCredit":"C","amount":{"currency":"USD","value":"10.00"}}]}`
+	for name, body := range map[string]string{
+		"bad ledger id":   strings.Replace(setLedgerLinesBody, `"ledgerId":"`+testLedger, `"ledgerId":"nope`, 1),
+		"duplicate":       strings.Replace(setLedgerLinesBody, `}}]}]}`, `}}]},`+group+`]}`, 1),
+		"empty group":     strings.Replace(setLedgerLinesBody, `"lines":[{"account":"2100","debitCredit":"C","amount":{"currency":"USD","value":"10.00"}}]}]`, `"lines":[]}]`, 1),
+		"bad side":        strings.Replace(setLedgerLinesBody, `"debitCredit":"C"`, `"debitCredit":"X"`, 1),
+		"no lines at all": strings.Replace(strings.Replace(setLedgerLinesBody, `"lines":[{"account":"6010","debitCredit":"D","amount":{"currency":"USD","value":"10.00"}}],`, `"lines":[],`, 1), `"ledgerLines":[`+group+`]`, `"ledgerLines":[]`, 1),
+	} {
+		if rec := call(h, http.MethodPost, path, body, dutyPost, map[string]string{"Idempotency-Key": "k"}); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: status %d: %s", name, rec.Code, rec.Body.String())
+		}
+	}
+	if len(fs.setPosts) != 0 {
+		t.Fatalf("invalid requests must not reach the store: %d", len(fs.setPosts))
+	}
+	onlyLedgerLines := strings.Replace(setLedgerLinesBody, `"lines":[{"account":"6010","debitCredit":"D","amount":{"currency":"USD","value":"10.00"}}],`, `"lines":[],`, 1)
+	if rec := call(h, http.MethodPost, path, onlyLedgerLines, dutyPost, map[string]string{"Idempotency-Key": "k"}); rec.Code != http.StatusCreated {
+		t.Errorf("empty common lines with ledger lines: status %d: %s", rec.Code, rec.Body.String())
+	}
+}

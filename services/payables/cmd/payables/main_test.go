@@ -57,3 +57,13 @@ func TestLedgerBalancesTimeoutOverride(t *testing.T) {
 		t.Fatal("LEDGER_TIMEOUT must not disable the ledger client")
 	}
 }
+
+func TestRateSourceWiring(t *testing.T) {
+	if rateSource(func(string) string { return "" }) != nil {
+		t.Fatal("no FX_URL must leave valuation without a rate source")
+	}
+	env := map[string]string{"FX_URL": "http://fx", "FX_RATE_TYPE": "closing", "FX_TIMEOUT": "750ms"}
+	if rateSource(func(k string) string { return env[k] }) == nil {
+		t.Fatal("FX_URL must configure the fx client")
+	}
+}

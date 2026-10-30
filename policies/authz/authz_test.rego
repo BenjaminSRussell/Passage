@@ -22,7 +22,7 @@ has_route_permissions(spec) if {
 }
 
 test_all_seeded_duties_allow_their_declared_permissions if {
-	count(data.duties) == 105
+	count(data.duties) == 109
 	every duty, spec in data.duties {
 		has_route_permissions(spec)
 		every permission in spec.permissions {
@@ -398,4 +398,26 @@ test_aging_duties_open_only_their_routes if {
 	not allowed("aging.read", "GET", "/v1/payables/aging:reconcile")
 	allowed("aging.reconcile", "GET", "/v1/payables/aging:reconcile")
 	not allowed("aging.reconcile", "GET", "/v1/payables/aging")
+}
+
+test_open_item_read_duty_opens_list_and_get_only if {
+	allowed("open-item.read", "GET", "/v1/payables/open-items")
+	allowed("open-item.read", "GET", "/v1/payables/open-items/i1")
+	not allowed("open-item.read", "POST", "/v1/payables/open-items")
+	not allowed("open-item.read", "GET", "/v1/payables/payment-proposals/p1")
+}
+
+test_payment_proposal_duties_are_separate if {
+	allowed("payment-proposal.write", "POST", "/v1/payables/payment-proposals")
+	not allowed("payment-proposal.write", "POST", "/v1/payables/payment-proposals/p1:approve")
+	allowed("payment-proposal.write", "POST", "/v1/payables/payment-proposals/p1:cancel")
+	not allowed("payment-proposal.write", "GET", "/v1/payables/payment-proposals/p1:cancel")
+	not allowed("payment-proposal.read", "POST", "/v1/payables/payment-proposals/p1:cancel")
+	not allowed("payment-proposal.approve", "POST", "/v1/payables/payment-proposals/p1:cancel")
+	not allowed("payment-proposal.write", "GET", "/v1/payables/payment-proposals/p1")
+	allowed("payment-proposal.read", "GET", "/v1/payables/payment-proposals/p1")
+	not allowed("payment-proposal.read", "POST", "/v1/payables/payment-proposals/p1:approve")
+	allowed("payment-proposal.approve", "POST", "/v1/payables/payment-proposals/p1:approve")
+	not allowed("payment-proposal.approve", "POST", "/v1/payables/payment-proposals")
+	not allowed("payment-proposal.approve", "GET", "/v1/payables/payment-proposals/p1")
 }

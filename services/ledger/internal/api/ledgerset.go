@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"unicode/utf8"
 
@@ -135,13 +136,47 @@ func (a *API) createAccountMapping(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, m)
 }
 
+type ledgerLinesDTO struct {
+	LedgerID string    `json:"ledgerId"`
+	Lines    []lineDTO `json:"lines"`
+}
+
 type setEntryRequest struct {
-	DocumentID   string    `json:"documentId"`
-	PostingDate  string    `json:"postingDate"`
-	DocumentDate *string   `json:"documentDate"`
-	Description  string    `json:"description"`
-	Source       sourceDTO `json:"source"`
-	Lines        []lineDTO `json:"lines"`
+	DocumentID   string           `json:"documentId"`
+	PostingDate  string           `json:"postingDate"`
+	DocumentDate *string          `json:"documentDate"`
+	Description  string           `json:"description"`
+	Source       sourceDTO        `json:"source"`
+	Lines        []lineDTO        `json:"lines"`
+	LedgerLines  []ledgerLinesDTO `json:"ledgerLines"`
+}
+
+type setEntryPayload struct {
+	postEntryRequest
+	LedgerLines []ledgerLinesDTO `json:"ledgerLines,omitempty"`
+}
+
+func ledgerLinesInput(body []ledgerLinesDTO, fields map[string]string) map[string][]domain.LineInput {
+	out := make(map[string][]domain.LineInput, len(body))
+	for i, group := range body {
+		prefix := fmt.Sprintf("ledgerLines[%d]", i)
+		id, ok := ids.Canonical(group.LedgerID)
+		if !ok {
+			fields[prefix+".ledgerId"] = "must be a UUID"
+		}
+		if _, dup := out[id]; dup && ok {
+			fields[prefix+".ledgerId"] = "each ledger may appear once"
+		}
+		if len(group.Lines) == 0 {
+			fields[prefix+".lines"] = "at least one line is required"
+		}
+		lines := make([]domain.LineInput, len(group.Lines))
+		for j, l := range group.Lines {
+			lines[j] = lineInput(fmt.Sprintf("%s.lines[%d]", prefix, j), l, fields)
+		}
+		out[id] = lines
+	}
+	return out
 }
 
 func (a *API) postSetEntry(w http.ResponseWriter, r *http.Request) {
@@ -162,17 +197,22 @@ func (a *API) postSetEntry(w http.ResponseWriter, r *http.Request) {
 	req := postEntryRequest{LedgerID: setID, DocumentID: body.DocumentID, PostingDate: body.PostingDate,
 		DocumentDate: body.DocumentDate, Description: body.Description, Source: body.Source, Lines: body.Lines}
 	in, fields := a.toPostInput(req, r)
+	if len(body.LedgerLines) > 0 && len(body.Lines) == 0 {
+		delete(fields, "lines")
+	}
+	in.LedgerLines = ledgerLinesInput(body.LedgerLines, fields)
 	key := idempotencyKey(r, fields)
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)
 		return
 	}
-	hash, err := domain.HashPayload(req)
+	hash, err := domain.HashPayload(setEntryPayload{postEntryRequest: req, LedgerLines: body.LedgerLines})
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
 	}
 	in.Key, in.Hash, in.Actor = key, hash, p.UserID
+	in.CanPostLedgerSpecific = p.HasDuty(store.DutyPostLedgerSpecific)
 	res, err := a.store.PostSetEntry(r.Context(), setID, in)
 	if err != nil {
 		a.fail(w, r, err)

@@ -23,7 +23,7 @@ import (
 
 const (
 	contractTenant   = "tenant-a"
-	seededDutyCount  = 105
+	seededDutyCount  = 109
 	unassignedUserID = "user-without-duty"
 )
 

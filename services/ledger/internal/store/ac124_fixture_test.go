@@ -21,11 +21,25 @@ type fixtureLine struct {
 	Amount  string `json:"amount"`
 }
 
+type fixtureLedgerLines struct {
+	Ledger string        `json:"ledger"`
+	Lines  []fixtureLine `json:"lines"`
+}
+
 type fixtureDocument struct {
-	N           int           `json:"n"`
-	PostingDate string        `json:"postingDate"`
-	Target      string        `json:"target"`
-	Lines       []fixtureLine `json:"lines"`
+	N           int                  `json:"n"`
+	PostingDate string               `json:"postingDate"`
+	Target      string               `json:"target"`
+	Lines       []fixtureLine        `json:"lines"`
+	LedgerLines []fixtureLedgerLines `json:"ledgerLines"`
+}
+
+func (d fixtureDocument) domainLines(lines []fixtureLine) []domain.LineInput {
+	out := make([]domain.LineInput, len(lines))
+	for i, l := range lines {
+		out[i] = domain.LineInput{Account: l.Account, Side: l.Side, Amount: decimal.RequireFromString(l.Amount), Currency: "USD"}
+	}
+	return out
 }
 
 type fixtureExpectedRow struct {
@@ -60,27 +74,30 @@ func loadAC124Fixture(t *testing.T) ac124Fixture {
 	return f
 }
 
-func (d fixtureDocument) postInput(t *testing.T, ledgerID string) PostInput {
+func (d fixtureDocument) postInput(t *testing.T, ledgerID string, ledgerOf map[string]string) PostInput {
 	t.Helper()
 	date, err := time.Parse(time.DateOnly, d.PostingDate)
 	if err != nil {
 		t.Fatal(err)
 	}
 	key := fmt.Sprintf("AC124-%02d", d.N)
-	hash, _ := domain.HashPayload(map[string]any{"key": key, "lines": d.Lines})
-	lines := make([]domain.LineInput, len(d.Lines))
-	for i, l := range d.Lines {
-		lines[i] = domain.LineInput{Account: l.Account, Side: l.Side, Amount: decimal.RequireFromString(l.Amount), Currency: "USD"}
+	hash, _ := domain.HashPayload(map[string]any{"key": key, "lines": d.Lines, "ledgerLines": d.LedgerLines})
+	var ledgerLines map[string][]domain.LineInput
+	for _, g := range d.LedgerLines {
+		if ledgerLines == nil {
+			ledgerLines = map[string][]domain.LineInput{}
+		}
+		ledgerLines[ledgerOf[g.Ledger]] = d.domainLines(g.Lines)
 	}
 	return PostInput{LedgerID: ledgerID, DocumentID: ids.New(), PostingDate: date, Description: "AC-12.4 document " + key,
 		Source: ledgerevents.Source{System: "ap", Type: "vendor_invoice", ID: key, URI: "passage://ap/invoices/" + key},
-		Lines:  lines, Key: key, Hash: hash, Actor: "test-user", TraceID: testTrace, Today: testToday}
+		Lines:  d.domainLines(d.Lines), LedgerLines: ledgerLines, CanPostLedgerSpecific: len(ledgerLines) > 0, Key: key, Hash: hash, Actor: "test-user", TraceID: testTrace, Today: testToday}
 }
 
-func TestPostgres_AC124TwentyDocumentsKeepEveryLedgerBalancedWithExpectedBalances(t *testing.T) {
+func TestPostgres_AC124TwentyThreeDocumentsKeepEveryLedgerBalancedWithExpectedBalances(t *testing.T) {
 	f := loadAC124Fixture(t)
-	if len(f.Documents) != 20 {
-		t.Fatalf("fixture has %d documents, want 20", len(f.Documents))
+	if len(f.Documents) != 23 {
+		t.Fatalf("fixture has %d documents, want 23", len(f.Documents))
 	}
 	e := setupLedgerSet(t)
 	for ledgerCode, accounts := range map[string]map[string]Account{
@@ -107,22 +124,22 @@ func TestPostgres_AC124TwentyDocumentsKeepEveryLedgerBalancedWithExpectedBalance
 	entries := 0
 	for _, d := range f.Documents {
 		if d.Target == "set" {
-			out, err := e.store.PostSetEntry(e.ctx, e.set.ID, d.postInput(t, ""))
+			out, err := e.store.PostSetEntry(e.ctx, e.set.ID, d.postInput(t, "", ledgerOf))
 			if err != nil || len(out.Entries) != 3 {
 				t.Fatalf("document %d through the set: %d entries, err %v", d.N, len(out.Entries), err)
 			}
 			entries += 3
 			continue
 		}
-		in := d.postInput(t, ledgerOf[d.Target])
+		in := d.postInput(t, ledgerOf[d.Target], ledgerOf)
 		in.CanPostLedgerSpecific = true
 		if _, err := e.store.PostEntry(e.ctx, in); err != nil {
 			t.Fatalf("document %d to %s only: %v", d.N, d.Target, err)
 		}
 		entries++
 	}
-	if got := e.entryCount(t); got != entries || entries != 5+15*3 {
-		t.Fatalf("entries = %d (counted %d), want %d", got, entries, 5+15*3)
+	if got := e.entryCount(t); got != entries || entries != 5+18*3 {
+		t.Fatalf("entries = %d (counted %d), want %d", got, entries, 5+18*3)
 	}
 	if len(f.ExpectedTrialBalance) != len(ledgerOf) {
 		t.Fatalf("fixture expects %d ledgers, want %d", len(f.ExpectedTrialBalance), len(ledgerOf))
