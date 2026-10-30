@@ -105,6 +105,10 @@ func (u unreachableStore) RunProjectWIP(context.Context, store.Idem, store.Proje
 	u.fail()
 	return domain.PackRun{}, false, nil
 }
+func (u unreachableStore) RunGLBalances(context.Context, store.Idem, store.GLBalancesRun) (domain.PackRun, bool, error) {
+	u.fail()
+	return domain.PackRun{}, false, nil
+}
 func (u unreachableStore) GetProjectOpening(context.Context, store.OpeningFilter) (store.ProjectOpening, error) {
 	u.fail()
 	return store.ProjectOpening{}, nil
@@ -173,7 +177,7 @@ func TestRequestsRejectedBeforeTheStore(t *testing.T) {
 		{"pack run needs MigrationRun", request{method: "POST", path: runsPath, tenant: tenantA, duties: "MigrationView", body: openItemsBody(1)}, 403, "AUTH-0003", ""},
 		{"no tenant", request{method: "POST", path: runsPath, duties: allDuties, body: openItemsBody(1)}, 401, "", ""},
 		{"late cutoff MIG-1501", request{method: "POST", path: runsPath, tenant: tenantA, duties: allDuties, body: late}, 422, CodeInvalid, "MIG-1501"},
-		{"pack not built yet", request{method: "POST", path: "/api/v1/migration/packs/gl_balances/runs", tenant: tenantA, duties: allDuties, body: openItemsBody(1)}, 422, CodeUnsupported, ""},
+		{"pack not built yet", request{method: "POST", path: "/api/v1/migration/packs/onhand/runs", tenant: tenantA, duties: allDuties, body: openItemsBody(1)}, 422, CodeUnsupported, ""},
 		{"unknown pack", request{method: "POST", path: "/api/v1/migration/packs/nonsense/runs", tenant: tenantA, duties: allDuties, body: openItemsBody(1)}, 422, CodeUnsupported, ""},
 		{"unknown source system", request{method: "POST", path: runsPath, tenant: tenantA, duties: allDuties, body: strings.Replace(openItemsBody(1), "AX2012", "AX4", 1)}, 422, CodeInvalid, ""},
 		{"blank company", request{method: "POST", path: runsPath, tenant: tenantA, duties: allDuties, body: strings.Replace(openItemsBody(1), `"USMF"`, `" "`, 1)}, 422, CodeInvalid, "sourceCompany"},
@@ -237,6 +241,18 @@ func TestRequestsRejectedBeforeTheStore(t *testing.T) {
 		{"start unknown field", request{method: "POST", path: planPath + "/steps/1/start", tenant: tenantA, duties: allDuties, body: `{"startedAt":"2027-01-01T00:00:00Z"}`}, 400, "COM-0001", ""},
 		{"catalog needs MigrationView", request{method: "GET", path: "/api/v1/migration/packs", tenant: tenantA, duties: "MigrationRun,CutoverManager"}, 403, "AUTH-0003", ""},
 		{"catalog needs a tenant", request{method: "GET", path: "/api/v1/migration/packs", duties: "MigrationView"}, 401, "", ""},
+		// Slice 5: the gl_balances pack.
+		{"gl run needs MigrationRun", request{method: "POST", path: glPath, tenant: tenantA, duties: "MigrationView", body: glBody("USMF", "", cleanGL...)}, 403, "AUTH-0003", ""},
+		{"gl run unbalanced extract", request{method: "POST", path: glPath, tenant: tenantA, duties: allDuties, body: glBody("USMF", "", glRec("A", "1100", "", "10"), glRec("B", "3000", "", "-9.99"))}, 422, CodeInvalid, "not balanced in USD"},
+		{"gl run without chart of accounts", request{method: "POST", path: glPath, tenant: tenantA, duties: allDuties, body: strings.Replace(glBody("USMF", "", cleanGL...), `"accounts":["1100","2100","3000"]`, `"accounts":[" "]`, 1)}, 422, CodeInvalid, "chart of accounts"},
+		{"gl run without balances", request{method: "POST", path: glPath, tenant: tenantA, duties: allDuties, body: glBody("USMF", "")}, 422, CodeInvalid, "at least one balance"},
+		{"gl run bad balance", request{method: "POST", path: glPath, tenant: tenantA, duties: allDuties, body: glBody("USMF", "", glRec("A", "1100", "", "1.000,00"))}, 422, CodeInvalid, "not a decimal"},
+		{"gl run balance finer than numeric(28,6)", request{method: "POST", path: glPath, tenant: tenantA, duties: allDuties, body: glBody("USMF", "", glRec("A", "1100", "", "0.0000001"), glRec("B", "3000", "", "-0.0000001"))}, 422, CodeInvalid, "more than 6 decimal places"},
+		{"gl run late cutoff", request{method: "POST", path: glPath, tenant: tenantA, duties: allDuties, body: strings.Replace(glBody("USMF", "", cleanGL...), "2026-12-31T00:00:00Z", "2027-01-02T00:00:00Z", 1)}, 422, CodeInvalid, "MIG-1501"},
+		{"gl run blank company", request{method: "POST", path: glPath, tenant: tenantA, duties: allDuties, body: glBody(" ", "", cleanGL...)}, 422, CodeInvalid, "sourceCompany"},
+		{"gl run open items run not a UUID", request{method: "POST", path: glPath, tenant: tenantA, duties: allDuties, body: glBody("USMF", `,"openItemsRunId":"OI-RUN"`, cleanGL...)}, 422, CodeInvalid, "UUID"},
+		{"gl run quarantine share MIG-1504", request{method: "POST", path: glPath, tenant: tenantA, duties: allDuties, body: glBody("USMF", "", glRec("A", "1100", "", "10"), glRec("B", "9999", "", "-10"))}, 422, CodeInvalid, "MIG-1504"},
+		{"gl run open-items shaped records", request{method: "POST", path: glPath, tenant: tenantA, duties: allDuties, body: openItemsBody(1)}, 400, "COM-0001", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

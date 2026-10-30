@@ -240,3 +240,12 @@ func TestBuildPortsRequiresTheAuditSampleSeed(t *testing.T) {
 		t.Fatalf("fakes %+v err %v", fakes, err)
 	}
 }
+
+func TestBuildPorts_MalformedServiceSigningKeyStopsStartup(t *testing.T) {
+	_, err := buildPorts(func(k string) string {
+		return map[string]string{"PASSAGE_ALLOW_FAKES": "1", "PASSAGE_SERVICE_SIGNING_KEY": "not-a-seed"}[k]
+	})
+	if err == nil {
+		t.Fatal("a malformed service signing key must fail startup, not silently fall back to forwarding user duties")
+	}
+}

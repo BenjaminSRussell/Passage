@@ -8,6 +8,7 @@ import { useLoad } from "./useLoad";
 /** Where a run of an available pack is started. */
 const startPath: Partial<Record<Pack, string>> = {
   open_items: "/migration-factory/runs/new",
+  gl_balances: "/migration-factory/runs/new-gl",
   project_wip: "/migration-factory/runs/new-project",
 };
 

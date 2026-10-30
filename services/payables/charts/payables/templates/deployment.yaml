@@ -16,11 +16,20 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
+        {{- if .Values.serviceIdentity.signingKeySecret }}
+        fsGroup: 65532
+        {{- end }}
         seccompProfile:
           type: RuntimeDefault
       volumes:
         - name: tmp
           emptyDir: { sizeLimit: 64Mi }
+{{- if .Values.serviceIdentity.signingKeySecret }}
+        - name: service-identity
+          secret:
+            secretName: {{ .Values.serviceIdentity.signingKeySecret }}
+            defaultMode: 0440
+{{- end }}
       containers:
         - name: payables
           image: {{ include "payables.image" . | quote }}
@@ -36,12 +45,25 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.databaseSecret }}
                   key: DATABASE_URL
+            - name: PASSAGE_SERVICE_NAME
+              value: payables
+{{- if .Values.serviceIdentity.signingKeySecret }}
+            - name: PASSAGE_SERVICE_SIGNING_KEY_FILE
+              value: /var/run/passage/service-identity/signing-key
+{{- if .Values.serviceIdentity.keyId }}
+            - name: PASSAGE_SERVICE_KEY_ID
+              value: {{ .Values.serviceIdentity.keyId | quote }}
+{{- end }}
+{{- end }}
             - { name: LEDGER_URL, value: {{ .Values.ledgerUrl | quote }} }
             - { name: AP_CONTROL_ACCOUNT, value: {{ .Values.controlAccount | quote }} }
             - { name: FX_URL, value: {{ .Values.fxUrl | quote }} }
             - { name: FX_RATE_TYPE, value: {{ .Values.fxRateType | quote }} }
           volumeMounts:
             - { name: tmp, mountPath: /tmp }
+{{- if .Values.serviceIdentity.signingKeySecret }}
+            - { name: service-identity, mountPath: /var/run/passage/service-identity, readOnly: true }
+{{- end }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }

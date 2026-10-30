@@ -42,3 +42,12 @@ func TestNewLogger_EmitsServiceAndMessageKeys(t *testing.T) {
 		t.Fatalf("log line missing required keys: %v", line)
 	}
 }
+
+func TestRun_MalformedServicePublicKeysStopStartup(t *testing.T) {
+	err := run(context.Background(), func(k string) string {
+		return map[string]string{"PASSAGE_SERVICE_NAME": "svc", "PASSAGE_SERVICE_PUBLIC_KEYS": "receiving=zzz"}[k]
+	})
+	if err == nil || !strings.Contains(err.Error(), "PASSAGE_SERVICE_PUBLIC_KEYS") {
+		t.Fatalf("err = %v, want the malformed public keys to stop startup", err)
+	}
+}

@@ -53,6 +53,7 @@ class GatewayManifests(unittest.TestCase):
             "X-Passage-User",
             "X-Passage-Duties",
             "X-Passage-Tier",
+            "X-Passage-Service-Token",
         }
         self.assertTrue(explicit <= removed, explicit - removed)
         gateway = of_kind(self.docs, "Gateway")[0]["metadata"]["name"]

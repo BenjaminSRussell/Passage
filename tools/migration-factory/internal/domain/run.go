@@ -29,6 +29,9 @@ type PackRun struct {
 	// Parties is the master-data snapshot the run validated against; a release checks a
 	// corrected party against it and the parties the release names.
 	Parties []string
+	// OpenItemsRunID is the open_items run a gl_balances run reconciled its control accounts
+	// with (BR-49.2), or "".
+	OpenItemsRunID string
 	// Version counts the run's writes; a release bumps it (optimistic concurrency).
 	Version   int
 	CreatedAt time.Time
