@@ -116,6 +116,12 @@ func TestLegalEntityScope_VoyagesAndRoutePlans(t *testing.T) {
 		if _, err := s.CreateGoodsInTransit(ctxA, legacy, "FOB", site, "", []int{1}, store.Idem{}); problemCode(t, err) != domain.CodeNotFound {
 			t.Errorf("entity A order on an unassigned voyage = %v", err)
 		}
+		if _, err := s.CreateGoodsInTransit(all, legacy, "FOB", site, "", []int{1}, store.Idem{}); problemStatus(err) != http.StatusUnprocessableEntity || problemCode(t, err) != domain.CodeGITState {
+			t.Errorf("all-entity order on an unassigned voyage = %v, want 422 TMS-0119", err)
+		}
+		if _, err := s.CreateGoodsInTransit(all, legacy, "FOB", site, entityA, []int{1}, store.Idem{}); problemStatus(err) != http.StatusUnprocessableEntity {
+			t.Errorf("all-entity order naming an entity on an unassigned voyage = %v, want 422", err)
+		}
 	})
 
 	t.Run("an idempotency key held by another entity's voyage is refused, not a 500", func(t *testing.T) {

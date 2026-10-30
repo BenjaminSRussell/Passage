@@ -447,7 +447,7 @@ entity yet, is 409 `PLAN-CODE-TAKEN`.
 |---|---|---|
 | `firming_batch` (with its `response` document) | entity-specific root (migration 0013) | the entity of the planned orders' plan version, for a planner's firming and for the run's auto-firm batch; a request mixing entities is 422 `PLAN-FIRM-ENTITY` |
 | `item_coverage` | entity-specific root | `legalEntityId` on the create, default the caller's single entity (422 for several or all; 403 outside the scope); an update keeps the owner |
-| `ddmrp_buffer` | entity-specific root | `legalEntityId` on `:recalculate`, same rules; a buffer of the same item, site and warehouse held by another entity is 409 `PLAN-BUFFER-ENTITY` and is never overwritten |
+| `ddmrp_buffer` | entity-specific root | `legalEntityId` on `:recalculate`, same rules; a buffer of the same item, site and warehouse that the caller's scope cannot write is 409 `PLAN-BUFFER-ENTITY` and is never overwritten |
 | `coverage_group`, `buffer_profile` | stay tenant-level: shared planning setup that coverages and buffers of every entity refer to by id | n/a |
 
 Orders the caller cannot see are 404 `PLAN-ORDER-NOT-FOUND` when firming, so a batch

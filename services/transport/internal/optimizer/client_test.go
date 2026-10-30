@@ -63,6 +63,23 @@ func TestClientSolve_PostsRequestAndDecodesRoutes(t *testing.T) {
 	}
 }
 
+func TestClientSolve_OmitsLegalEntityID(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		_, _ = w.Write([]byte(`{"routes":[],"dropped":[]}`))
+	}))
+	defer srv.Close()
+	req := sampleRequest()
+	req.LegalEntityID = "0190f0a0-0000-7000-8000-00000000000a"
+	if _, err := New(srv.URL, nil).Solve(context.Background(), req); err != nil {
+		t.Fatalf("solve: %v", err)
+	}
+	if _, present := got["legalEntityId"]; present {
+		t.Fatalf("solver body carries legalEntityId: %v", got)
+	}
+}
+
 func TestClientSolve_FailuresWrapErrUnavailable(t *testing.T) {
 	cases := map[string]http.HandlerFunc{
 		"http 503": func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) },

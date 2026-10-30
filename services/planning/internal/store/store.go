@@ -65,7 +65,8 @@ type Store interface {
 	SubmitForecastConsensus(ctx context.Context, modelCode string, expectedVersion int) (ForecastModel, error)
 	DecideForecastConsensus(ctx context.Context, modelCode string, expectedVersion int, approve bool) (ForecastModel, *ForecastPublication, error)
 	ListNetRequirements(ctx context.Context, planCode, itemID string, limit int) ([]NetRequirement, error)
-	RunCoverages(ctx context.Context, siteID string, itemIDs []string) (map[string]RunCoverage, error)
+	PlanLegalEntity(ctx context.Context, planCode, requestedEntity string) (string, error)
+	RunCoverages(ctx context.Context, siteID, planEntity string, itemIDs []string) (map[string]RunCoverage, error)
 	ListCoverageGroups(ctx context.Context, limit int) ([]CoverageGroup, error)
 	GetCoverageGroup(ctx context.Context, code string) (CoverageGroup, error)
 	CreateCoverageGroup(ctx context.Context, req CoverageCreate) (CoverageGroup, bool, error)
@@ -430,6 +431,26 @@ func lockPlan(ctx context.Context, tx pgx.Tx, tenantID, code, requestedEntity st
 		return "", "", codeTaken("plan", code)
 	}
 	return id, entity, err
+}
+
+// PlanLegalEntity is the entity a run of planCode works in: the owner of the
+// existing plan (requestedEntity is only an assertion), else the entity a new
+// plan would be created under.
+func (s *Postgres) PlanLegalEntity(ctx context.Context, planCode, requestedEntity string) (string, error) {
+	p, _ := tenant.FromContext(ctx)
+	var entity string
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `select coalesce(legal_entity_id::text, '') from plan where tenant_id = $1 and code = $2`, p.TenantID, planCode).Scan(&entity)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			entity, err = httpx.OwnerLegalEntity(ctx, requestedEntity)
+			return err
+		case err != nil:
+			return err
+		}
+		return assertOwner(requestedEntity, entity)
+	})
+	return entity, err
 }
 
 func codeTaken(what, code string) error {

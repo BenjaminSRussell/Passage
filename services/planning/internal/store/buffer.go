@@ -28,7 +28,7 @@ const (
 	profileIdempotencyConstraint = "buffer_profile_idempotency_key"
 
 	// CodeBufferEntity is returned when the buffer of the item, site and
-	// warehouse scope is held by another legal entity.
+	// warehouse scope cannot be written in the caller's legal-entity scope.
 	CodeBufferEntity = "PLAN-BUFFER-ENTITY"
 )
 
@@ -248,8 +248,10 @@ func (s *Postgres) UpsertDdmrpBuffer(ctx context.Context, b DdmrpBuffer) (DdmrpB
 				red_base = excluded.red_base, red_safety = excluded.red_safety, yellow = excluded.yellow, green = excluded.green,
 				top_of_red = excluded.top_of_red, top_of_yellow = excluded.top_of_yellow, top_of_green = excluded.top_of_green,
 				qualified_demand = excluded.qualified_demand, net_flow = excluded.net_flow, planned_qty = excluded.planned_qty,
-				priority = excluded.priority, zone = excluded.zone, calculated_at = now()
+				priority = excluded.priority, zone = excluded.zone, legal_entity_id = excluded.legal_entity_id,
+					calculated_at = now()
 				where ddmrp_buffer.legal_entity_id is not distinct from excluded.legal_entity_id
+						or ddmrp_buffer.legal_entity_id is null
 			returning id::text`,
 			p.TenantID, ids.New(), b.ItemID, b.SiteID, optional(b.WarehouseID), b.ProfileID,
 			b.ADU.String(), b.DLTDays.String(), b.DAF.String(), z.RedBase.String(), z.RedSafety.String(), z.Yellow.String(),
@@ -264,7 +266,7 @@ func (s *Postgres) UpsertDdmrpBuffer(ctx context.Context, b DdmrpBuffer) (DdmrpB
 	var pgErr *pgconn.PgError
 	switch {
 	case errors.Is(err, pgx.ErrNoRows), errors.As(err, &pgErr) && pgErr.Code == insufficientPrivilege:
-		return DdmrpBuffer{}, httpx.NewProblem(http.StatusConflict, CodeBufferEntity, "the buffer of this item and site is held by another legal entity")
+		return DdmrpBuffer{}, httpx.NewProblem(http.StatusConflict, CodeBufferEntity, "the buffer of this item and site cannot be written in this legal-entity scope")
 	case errors.As(err, &pgErr) && pgErr.Code == foreignKeyViolation:
 		return DdmrpBuffer{}, httpx.NewProblem(http.StatusUnprocessableEntity, CodeProfileNotFound, "buffer profile "+b.ProfileID+" does not exist")
 	}

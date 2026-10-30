@@ -43,7 +43,7 @@ type RunCoverage struct {
 // subcontractor scopes are never returned: those are planned in their own
 // scope (FR-22.18), not at site level. The scope key of item_coverage allows
 // at most one site-scope row per item and site. itemIDs must be UUIDs.
-func (s *Postgres) RunCoverages(ctx context.Context, siteID string, itemIDs []string) (map[string]RunCoverage, error) {
+func (s *Postgres) RunCoverages(ctx context.Context, siteID, planEntity string, itemIDs []string) (map[string]RunCoverage, error) {
 	out := map[string]RunCoverage{}
 	if len(itemIDs) == 0 {
 		return out, nil
@@ -58,8 +58,9 @@ func (s *Postgres) RunCoverages(ctx context.Context, siteID string, itemIDs []st
 			from item_coverage c
 			join coverage_group g on g.tenant_id = c.tenant_id and g.id = c.coverage_group_id
 			where c.tenant_id = $1 and c.site_id = $2::uuid and c.planning_scope = 'site'
-			  and c.item_id = any($3::uuid[])`,
-			p.TenantID, siteID, itemIDs)
+			  and c.item_id = any($3::uuid[])
+				  and ($4::text = '' or c.legal_entity_id::text = $4::text)`,
+			p.TenantID, siteID, itemIDs, planEntity)
 		if err != nil {
 			return err
 		}

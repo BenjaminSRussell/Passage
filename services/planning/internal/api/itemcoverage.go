@@ -189,7 +189,7 @@ func (a *API) createItemCoverage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	body, _ := json.Marshal(spec)
+	body, _ := json.Marshal([]any{legalEntityID, spec})
 	c, replayed, err := a.store.CreateItemCoverage(r.Context(), store.ItemCoverageCreate{
 		LegalEntityID: legalEntityID, IdempotencyKey: key, InputHash: fmt.Sprintf("%x", sha256.Sum256(body)), Spec: spec,
 	})

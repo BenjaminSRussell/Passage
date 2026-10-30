@@ -16,8 +16,12 @@ import (
 
 // RunCoverages returns the stored coverage of the requested items; the fake
 // holds coverage for siteID only.
-func (f *fakeStore) RunCoverages(_ context.Context, site string, itemIDs []string) (map[string]store.RunCoverage, error) {
-	f.runCovSite = site
+func (f *fakeStore) PlanLegalEntity(_ context.Context, _, requested string) (string, error) {
+	return requested, nil
+}
+
+func (f *fakeStore) RunCoverages(_ context.Context, site, planEntity string, itemIDs []string) (map[string]store.RunCoverage, error) {
+	f.runCovSite, f.runCovEntity = site, planEntity
 	out := map[string]store.RunCoverage{}
 	if site != siteID {
 		return out, nil
@@ -86,6 +90,16 @@ func TestRun_StoredCoverageFillsBareItem(t *testing.T) {
 	o := onlyOrder(t, req)
 	if o.OrderType != domain.OrderProduction || o.DeliveryDate-o.OrderDate != 7 || !o.Qty.Equal(decimal.NewFromInt(110)) {
 		t.Fatalf("planned order %+v; want production, 7 days lead, qty 110", o)
+	}
+}
+
+func TestRun_StoredCoverageLookupUsesThePlansEntity(t *testing.T) {
+	entity := "0190f0a0-0000-7000-8000-00000000000a"
+	st := &fakeStore{runCovs: map[string]store.RunCoverage{fgID: requirementCoverage()}}
+	body := strings.Replace(bareBody, `{"asOf"`, `{"legalEntityId":"`+entity+`","asOf"`, 1)
+	runVersion(t, st, body, "k-entity")
+	if st.runCovEntity != entity {
+		t.Fatalf("coverage read for entity %q, want %q", st.runCovEntity, entity)
 	}
 }
 

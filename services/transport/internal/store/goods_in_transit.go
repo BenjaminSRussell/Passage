@@ -71,6 +71,10 @@ func (s *Postgres) CreateGoodsInTransit(ctx context.Context, voyageID, incoterm,
 		if err := assertParentEntity(parentVoyage, legalEntityID, v.LegalEntityID); err != nil {
 			return err
 		}
+		if v.LegalEntityID == "" {
+			return httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeGITState,
+				"voyage "+v.Reference+" has no legal entity; an all-entity admin must assign one before goods-in-transit orders can be opened")
+		}
 		// A concurrent request with the same key may have committed while this one waited.
 		if done, err := replay(); done || err != nil {
 			return err

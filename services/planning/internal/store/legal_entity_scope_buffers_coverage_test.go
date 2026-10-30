@@ -185,15 +185,31 @@ func TestLegalEntityScope_FirmingBatchesCoveragesAndBuffers(t *testing.T) {
 		if _, err := st.UpdateItemCoverage(ctxB, covA.ID, 1, covA.Spec); problemCode(err) != store.CodeItemCoverageNotFound {
 			t.Errorf("entity B update = %v", err)
 		}
-		if got, err := st.RunCoverages(ctxB, site, []string{item}); err != nil || len(got) != 0 {
+		if got, err := st.RunCoverages(ctxB, site, entityB, []string{item}); err != nil || len(got) != 0 {
 			t.Errorf("entity B run coverage = %v, %v", got, err)
 		}
-		if got, err := st.RunCoverages(ctxA, site, []string{item}); err != nil || len(got) != 1 {
+		if got, err := st.RunCoverages(ctxA, site, entityA, []string{item}); err != nil || len(got) != 1 {
 			t.Errorf("entity A run coverage = %v, %v", got, err)
 		}
-		if got, err := st.RunCoverages(all, site, []string{item}); err != nil || len(got) != 1 {
-			t.Errorf("all-entity run coverage = %v, %v", got, err)
+		if got, err := st.RunCoverages(all, site, entityA, []string{item}); err != nil || len(got) != 1 {
+			t.Errorf("all-entity run of entity A's plan = %v, %v", got, err)
 		}
+		if got, err := st.RunCoverages(all, site, entityB, []string{item}); err != nil || len(got) != 0 {
+			t.Errorf("all-entity run of entity B's plan used entity A's coverage = %v, %v", got, err)
+		}
+		if got, err := st.RunCoverages(ctxAB, site, entityA, []string{item}); err != nil || len(got) != 1 {
+			t.Errorf("two-entity run of entity A's plan = %v, %v", got, err)
+		}
+		if e, err := st.PlanLegalEntity(all, "A-PLAN", ""); err != nil || e != entityA {
+			t.Errorf("plan entity of A-PLAN = %q, %v", e, err)
+		}
+		_, err := st.PlanLegalEntity(all, "A-PLAN", entityB)
+		requireStatus(t, err, http.StatusUnprocessableEntity, "asserting the wrong entity for A-PLAN")
+		if e, err := st.PlanLegalEntity(ctxA, "NEW-PLAN", ""); err != nil || e != entityA {
+			t.Errorf("plan entity of a new plan for entity A = %q, %v", e, err)
+		}
+		_, err = st.PlanLegalEntity(all, "NEW-PLAN", "")
+		requireStatus(t, err, http.StatusUnprocessableEntity, "new plan for an all-entity caller without an entity")
 		if _, err := st.UpdateItemCoverage(ctxA, covA.ID, 1, covA.Spec); err != nil {
 			t.Errorf("entity A update: %v", err)
 		}
@@ -267,6 +283,22 @@ func TestLegalEntityScope_FirmingBatchesCoveragesAndBuffers(t *testing.T) {
 		}
 		if _, err := st.GetItemCoverage(all, covA.ID); err != nil {
 			t.Errorf("all-entity caller cannot read an unassigned coverage: %v", err)
+		}
+	})
+
+	t.Run("an all-entity caller naming an entity claims a legacy buffer without an entity", func(t *testing.T) {
+		if _, err := admin.Exec(context.Background(), `update ddmrp_buffer set legal_entity_id = null where item_id = $1 and site_id = $2`, item, site); err != nil {
+			t.Fatal(err)
+		}
+		_, err := st.UpsertDdmrpBuffer(ctxA, br2211Buffer(t, item, site, "", profile.ID, 300))
+		requireStatus(t, err, http.StatusConflict, "entity A recalculating an unassigned buffer")
+		claim := br2211Buffer(t, item, site, "", profile.ID, 300)
+		claim.LegalEntityID = entityA
+		if _, err := st.UpsertDdmrpBuffer(all, claim); err != nil {
+			t.Fatalf("all-entity claim of an unassigned buffer: %v", err)
+		}
+		if list, err := st.ListDdmrpBuffers(ctxA, store.BufferQuery{SiteID: site, Limit: 10}); err != nil || len(list) != 1 {
+			t.Errorf("entity A lists %d buffers after the claim (%v), want 1", len(list), err)
 		}
 	})
 }
