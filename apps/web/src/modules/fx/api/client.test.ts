@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { convertAmounts, createRateType, fetchHistory, FxApiError, lookupRate, publishRate, putRateType, type FetchLike } from "./client";
+import { convertAmounts, createRateType, fetchHistory, FxApiError, importNow, lookupRate, publishRate, putRateType, type FetchLike } from "./client";
 
 function reply(status: number, body: unknown) {
   return vi.fn<FetchLike>(async () => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } }));
@@ -47,5 +47,13 @@ describe("fx client", () => {
   it("falls back to a generic message for a non-JSON error body", async () => {
     const fetchImpl: FetchLike = async () => new Response("<html>", { status: 502 });
     await expect(lookupRate({ rateType: "CLOSING", from: "EUR", to: "USD" }, fetchImpl)).rejects.toMatchObject({ code: "COM-0500", message: "request failed with status 502" });
+  });
+
+  it("posts the import to the provider action route with the rate type", async () => {
+    const fetchImpl = reply(200, { runId: "r1", provider: "ecb", rateType: "AVERAGE", date: "2026-03-02", attempts: 1, imported: 3, unchanged: 0, alreadyDone: false, degraded: false });
+    const run = await importNow("ecb", "AVERAGE", fetchImpl);
+    expect(fetchImpl.mock.calls[0][0]).toBe("/api/v1/fx/providers/ecb:import");
+    expect(fetchImpl.mock.calls[0][1]).toMatchObject({ method: "POST", body: JSON.stringify({ rateType: "AVERAGE" }) });
+    expect(run.imported).toBe(3);
   });
 });

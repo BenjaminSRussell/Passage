@@ -42,6 +42,7 @@ type RatePoint struct {
 
 type Provider interface {
 	Name() string
+	SupportsHistory() bool
 	Fetch(ctx context.Context, rateType string, date time.Time) ([]RatePoint, error)
 }
 

@@ -93,7 +93,7 @@ export class AesGcmSealer implements SealCipher {
   }
 
   async seal(plain: string): Promise<string> {
-    const iv = this.random(12);
+    const iv = new Uint8Array(this.random(12));
     const data = new TextEncoder().encode(plain);
     const ct = new Uint8Array(await this.subtle.encrypt({ name: "AES-GCM", iv }, this.key, data));
     const out = new Uint8Array(iv.length + ct.length);

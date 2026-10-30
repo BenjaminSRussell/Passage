@@ -503,31 +503,34 @@ func (a *API) toPostInput(req postEntryRequest, r *http.Request) (store.PostInpu
 		fields["lines"] = fmt.Sprintf("at most %d lines per entry; split the document with a shared documentId", domain.MaxLinesPerEntry)
 	}
 	for i, l := range req.Lines {
-		prefix := fmt.Sprintf("lines[%d]", i)
-		if l.Account == "" || len(l.Account) > 20 {
-			fields[prefix+".account"] = "is required and must be at most 20 characters"
-		}
-		if l.DebitCredit != domain.SideDebit && l.DebitCredit != domain.SideCredit {
-			fields[prefix+".debitCredit"] = "must be D or C"
-		}
-		amount, err := decimal.NewFromString(l.Amount.Value)
-		switch {
-		case err != nil:
-			fields[prefix+".amount.value"] = "must be a decimal string"
-		case amount.IsNegative():
-			fields[prefix+".amount.value"] = "must not be negative; use the opposite side"
-		}
-		if utf8.RuneCountInString(l.Text) > maxTextLength {
-			fields[prefix+".text"] = fmt.Sprintf("must be at most %d characters", maxTextLength)
-		}
-		if utf8.RuneCountInString(l.SourceLineRef) > maxSourceRefLength {
-			fields[prefix+".sourceLineRef"] = fmt.Sprintf("must be at most %d characters", maxSourceRefLength)
-		}
-		in.Lines = append(in.Lines, domain.LineInput{Account: l.Account, Dimensions: l.Dimensions, Side: l.DebitCredit,
-			Amount: amount, Currency: l.Amount.Currency, Text: l.Text, SourceLineRef: l.SourceLineRef})
+		in.Lines = append(in.Lines, lineInput(fmt.Sprintf("lines[%d]", i), l, fields))
 	}
 	in.TraceID = traceID(r)
 	return in, fields
+}
+
+func lineInput(prefix string, l lineDTO, fields map[string]string) domain.LineInput {
+	if l.Account == "" || len(l.Account) > 20 {
+		fields[prefix+".account"] = "is required and must be at most 20 characters"
+	}
+	if l.DebitCredit != domain.SideDebit && l.DebitCredit != domain.SideCredit {
+		fields[prefix+".debitCredit"] = "must be D or C"
+	}
+	amount, err := decimal.NewFromString(l.Amount.Value)
+	switch {
+	case err != nil:
+		fields[prefix+".amount.value"] = "must be a decimal string"
+	case amount.IsNegative():
+		fields[prefix+".amount.value"] = "must not be negative; use the opposite side"
+	}
+	if utf8.RuneCountInString(l.Text) > maxTextLength {
+		fields[prefix+".text"] = fmt.Sprintf("must be at most %d characters", maxTextLength)
+	}
+	if utf8.RuneCountInString(l.SourceLineRef) > maxSourceRefLength {
+		fields[prefix+".sourceLineRef"] = fmt.Sprintf("must be at most %d characters", maxSourceRefLength)
+	}
+	return domain.LineInput{Account: l.Account, Dimensions: l.Dimensions, Side: l.DebitCredit,
+		Amount: amount, Currency: l.Amount.Currency, Text: l.Text, SourceLineRef: l.SourceLineRef}
 }
 
 func (a *API) postEntry(w http.ResponseWriter, r *http.Request) {
@@ -552,6 +555,7 @@ func (a *API) postEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.Key, in.Hash, in.Actor = key, hash, p.UserID
+	in.CanPostLedgerSpecific = p.HasDuty(store.DutyPostLedgerSpecific)
 	res, err := a.store.PostEntry(r.Context(), in)
 	if err != nil {
 		a.fail(w, r, err)
@@ -609,7 +613,7 @@ func (a *API) reverseEntry(w http.ResponseWriter, r *http.Request) {
 	}
 	fields := map[string]string{}
 	in := store.ReverseInput{EntryID: id, Description: req.Description, Actor: p.UserID, TraceID: traceID(r), Today: a.today(),
-		ReasonCode: req.ReasonCode, ReasonComment: req.ReasonComment}
+		ReasonCode: req.ReasonCode, ReasonComment: req.ReasonComment, CanPostLedgerSpecific: p.HasDuty(store.DutyPostLedgerSpecific)}
 	if req.PostingDate != nil {
 		d, ok := parseDate(*req.PostingDate)
 		if !ok {
@@ -672,7 +676,8 @@ type validateResponse struct {
 
 // validateEntry is the dry run: every violation in one response, no writes.
 func (a *API) validateEntry(w http.ResponseWriter, r *http.Request) {
-	if _, ok := principal(w, r); !ok {
+	p, ok := principal(w, r)
+	if !ok {
 		return
 	}
 	var req postEntryRequest
@@ -685,6 +690,7 @@ func (a *API) validateEntry(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
+	in.CanPostLedgerSpecific = p.HasDuty(store.DutyPostLedgerSpecific)
 	res, err := a.store.ValidateEntry(r.Context(), in)
 	if err != nil {
 		a.fail(w, r, err)

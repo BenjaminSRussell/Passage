@@ -31,6 +31,8 @@ func NewCSV(r io.Reader) (*CSV, error) {
 
 func (*CSV) Name() string { return "csv" }
 
+func (*CSV) SupportsHistory() bool { return false }
+
 func (c *CSV) Fetch(_ context.Context, rateType string, _ time.Time) ([]RatePoint, error) {
 	points := []RatePoint{}
 	for _, row := range c.rows {

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { createRateType, FxApiError, fetchRateTypes, putRateType, type RateType } from "./api/client";
+import { ImportNow } from "./ImportNow";
 import { ApiFailure, fieldsOwnFailure, mapServerFields, useFocusFirstInvalid, withoutFields } from "./formSupport";
 import styles from "./pages.module.css";
 import { emptyRateType, normalizeCode, validateRateType, type Errors, type RateTypeValues } from "./validate";
@@ -133,6 +134,7 @@ export function RateTypesPage() {
           </div>
         </form>
       </Card>
+      {editing ? <ImportNow key={values.code} rateType={types.data?.find((t) => t.code === values.code)} /> : null}
       <Alert tone="success" live="status" title={saved ? `Rate type ${saved} saved` : undefined} />
       {saveFailure ? <ApiFailure error={save.error} title="Could not save the rate type" duty={DUTY} /> : null}
       {types.isError ? (

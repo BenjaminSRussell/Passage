@@ -23,7 +23,7 @@ import (
 
 const (
 	contractTenant   = "tenant-a"
-	seededDutyCount  = 101
+	seededDutyCount  = 103
 	unassignedUserID = "user-without-duty"
 )
 
@@ -285,6 +285,7 @@ func TestDutyContractExpectations(t *testing.T) {
 		{duty: "ledger.journal.approve", method: http.MethodPost, resource: "/v1/ledger/journal-batches/b1/post"},
 		{duty: "ledger.journal.post", method: http.MethodPost, resource: "/v1/ledger/journal-entries/e1/reverse"},
 		{duty: "ledger.journal.reverse", method: http.MethodPost, resource: "/v1/ledger/journal-entries"},
+		{duty: "ledger.journal.postledger", method: http.MethodPost, resource: "/v1/ledger/journal-entries"},
 		{duty: "ReceivingMaintain", method: http.MethodPost, resource: "/v1/receiving/receipts/r1:post"},
 		{duty: "ReceivingMaintain", method: http.MethodPost, resource: "/v1/receiving/receipts/r1:correct"},
 		{duty: "ReceivingMaintain", method: http.MethodPost, resource: "/v1/receiving/receipts/r1:cancel"},

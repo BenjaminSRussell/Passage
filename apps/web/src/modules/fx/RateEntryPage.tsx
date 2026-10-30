@@ -1,8 +1,9 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Alert, Button, FormField, Input, PageHeader } from "../../shell/ui";
-import { fetchHistory, publishRate, type HistoryEntry, type RateEntryInput } from "./api/client";
+import { fetchHistory, fetchRateTypes, publishRate, type HistoryEntry, type RateEntryInput } from "./api/client";
 import { ApiFailure, fieldsOwnFailure, mapServerFields, useFocusFirstInvalid, withoutFields } from "./formSupport";
+import { ImportNow } from "./ImportNow";
 import { RateTypeField } from "./RateTypeField";
 import styles from "./pages.module.css";
 import { deviationBeyondLimit, DEVIATION_LIMIT_PERCENT, emptyEntry, formatRate, normalizeCurrency, SAME_CURRENCY_ERROR, validateEntry, type Deviation, type Errors, type RateEntry } from "./validate";
@@ -34,6 +35,7 @@ export function RateEntryPage() {
   const [errors, setErrors] = useState<Errors>({});
   const [review, setReview] = useState<Review | null>(null);
   const [saved, setSaved] = useState<{ version: number; unchanged: boolean } | null>(null);
+  const types = useQuery({ queryKey: ["fx", "rate-types"], queryFn: () => fetchRateTypes() });
   useFocusFirstInvalid(form, errors);
   useEffect(() => {
     if (review) confirmButton.current?.focus();
@@ -157,6 +159,7 @@ export function RateEntryPage() {
       </Alert>
       {check.isError ? <ApiFailure error={check.error} title="Could not compare with the previous rate" duty="View exchange rates" /> : null}
       {publishFailure ? <ApiFailure error={publish.error} title="Could not save the rate" duty={DUTY} /> : null}
+      <ImportNow key={values.rateType} rateType={types.data?.find((t) => t.code === values.rateType)} />
       <Alert tone="success" live="status" title={saved ? "Rate saved" : undefined}>
         {saved ? (saved.unchanged ? "This rate was already stored, so nothing changed." : `Stored as version ${saved.version}.`) : undefined}
       </Alert>

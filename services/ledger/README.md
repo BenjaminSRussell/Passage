@@ -150,6 +150,7 @@ what is not is listed in [NOT-IMPLEMENTED.md](NOT-IMPLEMENTED.md).
   (or validated) and records `lastError`. The same key on the posted batch replays.
   Posting a validated batch (journal name without workflow) also needs
   `ledger.journal.postdirect` ("Post ledger journals without approval").
+- Ledger sets (FR-12.7): the PRD's ledger group is implemented as the ledger set, under `/ledger-sets` (`POST /ledger-sets`, `GET /ledger-sets/{id}`, `POST /ledger-sets/{setId}/journal-entries`, `POST /ledgers/{id}/account-mappings`). The PRD's `ledger-groups` naming is not adopted (issue #222). Posting to one non-leading ledger on its own needs `ledger.journal.postledger` (FB50L). `POST /ledger-sets/{setId}/journal-entries` also takes `ledgerLines` (BR-12.6 `ledger_lines`): per-ledger line groups posted to that ledger only, unmapped, on top of the common `lines` (which go to every ledger through its account mappings). Each ledger's entry must balance by itself; otherwise 422 `LEDGER_UNBALANCED` names the ledger (`ledger TAX: entry does not balance ...`) and nothing is written. A ledger outside the set is 422 `LEDGER_LINES_LEDGER_NOT_IN_SET`. Ledger lines for a non-leading ledger need `ledger.journal.postledger` (403 `AUTH-0003`), since they are ledger-specific adjustments; common lines and leading-ledger lines do not (decision recorded on issue #222).
 - Reversal: an entry posted from a batch whose journal name sets `reversalReasonRequired`
   needs a reason code even when the ledger does not (FR-11.15, AC-11.11).
 - Events: every transition writes `dev.passage.ledger.batch.statuschanged.v1` (aggregate
@@ -210,6 +211,7 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
 | `ledger.account.write` | `PUT /charts/{chart}/accounts/{number}` |
 | `ledger.journal.read` | `GET /ledgers/{id}`, `GET /charts/{chart}/accounts`, `GET /journal-entries/{id}`, `GET /reason-codes[/{code}]`, `GET /ledgers/{ledger}/account-structures[/{id}]`, `GET /ledgers/{ledger}/dimension-values`, `GET /description-templates[/{id}]`, `GET /journal-names[/{code}]`, `GET /journal-batches[/{id}]`, `GET /journal-lines` |
 | `ledger.journal.post` | `POST /journal-entries`, `POST /validate`, `POST /journal-batches/{id}/post` (PRD "Post ledger journals") |
+| `ledger.journal.postledger` | Flag duty checked with `ledger.journal.post` on `POST /journal-entries` and `POST /journal-batches/{id}/post` when the entry's ledger is a non-leading member of a ledger set (FB50L, PRD "Post to ledger-specific ledger"); without it the post is refused 403 `AUTH-0003` |
 | `ledger.journal.postdirect` | Checked inside `POST /journal-batches/{id}/post` for a validated batch whose journal name has no workflow (PRD "Post ledger journals without approval") |
 | `ledger.journal.write` | `POST /journal-batches`, `PATCH /journal-batches/{id}`, `POST .../submit`, `POST .../cancel` (PRD "Maintain ledger journals") |
 | `ledger.journal.approve` | `POST .../approve`, `POST .../reject` (PRD "Approve ledger journals") |

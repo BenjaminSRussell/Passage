@@ -147,13 +147,31 @@ components:
     SetEntryRequest:
       type: object
       required: [documentId, postingDate, source, lines]
-      description: PostEntryRequest without ledgerId; the ledger set in the path chooses the ledgers. A ledgerId is rejected with 400.
+      description: |
+        PostEntryRequest without ledgerId; the ledger set in the path chooses the ledgers. A ledgerId is rejected with 400.
+        lines are the common lines, posted to every ledger of the set through that ledger's account mappings.
+        ledgerLines add lines to single ledgers of the set (BR-12.6 ledger_lines): they are posted to that ledger
+        only, in that ledger's own accounts, with no mapping. lines may be empty when ledgerLines is present.
       properties:
         documentId: { type: string, format: uuid }
         postingDate: { type: string, format: date }
         documentDate: { type: string, format: date }
         description: { type: string, maxLength: 255 }
         source: { $ref: "#/components/schemas/Source" }
+        lines:
+          type: array
+          minItems: 0
+          maxItems: 10000
+          items: { $ref: "#/components/schemas/PostLine" }
+        ledgerLines:
+          type: array
+          description: At most one group per ledger of the set; a ledger outside the set is rejected with 422 LEDGER_LINES_LEDGER_NOT_IN_SET.
+          items: { $ref: "#/components/schemas/LedgerLines" }
+    LedgerLines:
+      type: object
+      required: [ledgerId, lines]
+      properties:
+        ledgerId: { type: string, format: uuid }
         lines:
           type: array
           minItems: 1
@@ -945,7 +963,8 @@ paths:
         the posting pipeline, and marks the batch posted with the entry id in the same transaction. An
         approved batch can be posted; a validated batch only when its journal name has no workflow (409
         LEDGER_BATCH_APPROVAL_REQUIRED otherwise) and the caller also holds ledger.journal.postdirect
-        ("Post ledger journals without approval", 403 AUTH-0003 otherwise). On a rule rejection (422) or
+        ("Post ledger journals without approval", 403 AUTH-0003 otherwise). A batch addressed to a
+        non-leading ledger of a ledger set also needs ledger.journal.postledger (FB50L, 403 AUTH-0003). On a rule rejection (422) or
         other failure nothing is posted, the batch stays approved or validated and lastError records the
         cause. The same key on the posted batch replays the stored response (200); another key is 409
         LEDGER_BATCH_STATE.
@@ -1268,6 +1287,11 @@ paths:
         Retries with the same Idempotency-Key and payload replay the stored response (200 with
         idempotency.replayed = true). Idempotency records are kept 400 days; replays after expiry
         are new requests.
+
+        Posting to a ledger that is a non-leading member of a ledger set also needs the duty
+        ledger.journal.postledger (FB50L); without it the response is 403 AUTH-0003. POST
+        /ledger/validate applies the same check, and reversing an entry of such a ledger needs the
+        duty on top of ledger.journal.reverse.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/Traceparent"
@@ -1348,6 +1372,13 @@ paths:
         date) to the request lines, then the ordinary posting pipeline; a violation on any ledger rejects the whole
         request with 422, its message prefixed with the ledger code. The Idempotency-Key covers the whole set:
         a retry with the same payload replays the stored response (200).
+
+        ledgerLines: each ledger's entry is its mapped common lines plus its own ledgerLines, and each entry must
+        balance by itself. A ledger that does not balance rejects the whole request with 422 LEDGER_UNBALANCED whose
+        message names it ("ledger TAX: entry does not balance in USD: debits ..., credits ..."); nothing is written.
+        Line indexes in violations count the common lines first, then that ledger's own lines. Ledger lines for a
+        non-leading ledger need ledger.journal.postledger (FB50L) on top of ledger.journal.post, else 403 AUTH-0003
+        before anything is written; ledger lines for the leading ledger and common lines alone do not.
       parameters:
         - $ref: "#/components/parameters/LedgerSetId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -1431,6 +1462,8 @@ paths:
         reversalOfLineId). An entry can be reversed once (LEDGER_REVERSAL_ALREADY_REVERSED); a
         reversal can itself be reversed to re-instate the original. The reversal date defaults to
         the original posting date and may not precede it (LEDGER_DATE_INVALID).
+        Reversing an entry of a non-leading ledger of a ledger set also needs ledger.journal.postledger
+        (FB50L, 403 AUTH-0003).
         A reason code (FR-11.15) is required when the ledger's reversalReasonRequired is true; it must
         be active and apply to the ledger module, and a comment is required when the code says so. A
         code with alternativePostingDateAllowed = false refuses any date other than the original. A code
@@ -1473,7 +1506,7 @@ paths:
       tags: [journal]
       operationId: validateEntry
       x-passage-duty: ledger.journal.post
-      description: Dry run of the posting rules. Returns every violation in one response; writes nothing.
+      description: Dry run of the posting rules. Returns every violation in one response; writes nothing. A dry run against a non-leading ledger of a ledger set also needs ledger.journal.postledger (FB50L, 403 AUTH-0003), as the real post does.
       requestBody:
         required: true
         content:

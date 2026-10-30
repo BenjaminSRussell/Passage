@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sort"
 	"strings"
 	"testing"
 
@@ -75,9 +76,26 @@ func (f *fakeStore) GetProduct(_ context.Context, id string) (domain.Product, er
 func (f *fakeStore) ListProducts(context.Context, int) ([]domain.Product, error) {
 	return f.created, nil
 }
-func (f *fakeStore) ExplodeVariants(_ context.Context, masterID string, selected map[string][]string) (domain.ExplosionResult, error) {
+func (f *fakeStore) ListReleasedIDs(_ context.Context, after string, limit int) ([]string, error) {
+	var out []string
+	for id := range f.released {
+		if id > after {
+			out = append(out, id)
+		}
+	}
+	sort.Strings(out)
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+func (f *fakeStore) ExplodeVariants(_ context.Context, masterID string, selected map[string][]string, limit int) (domain.ExplosionResult, error) {
 	g := f.groups["dg-1"]
 	res, err := domain.Explode(nil, domain.ExplosionRequest{MasterNumber: "SHIRT", Dimensions: g.Fields, Selected: selected})
+	if limit > 0 && len(res.Created) > limit {
+		res.Remaining = len(res.Created) - limit
+		res.Created = res.Created[:limit]
+	}
 	f.lastExplode = res
 	return res, err
 }
@@ -416,4 +434,49 @@ func TestOpenAPIDocumentsEveryRoute(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+func TestExplodePagesWithLimit(t *testing.T) {
+	f := newFake()
+	f.groups["dg-1"] = domain.DimensionGroup{Fields: []domain.Dimension{{Code: "size", Values: []string{"S", "M", "L"}}, {Code: "color", Values: []string{"R", "B"}}}}
+	r := newRouter(f)
+	rec := do(r, http.MethodPost, "/v1/product/products/m-1/variants:explode", `{"limit":4}`, "product.write")
+	var body struct{ Created, Skipped, Remaining int }
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || rec.Code != http.StatusOK || body.Created != 4 || body.Remaining != 2 {
+		t.Fatalf("paged explode %d %s", rec.Code, rec.Body.String())
+	}
+	for _, limit := range []string{"-1", "501"} {
+		if bad := do(r, http.MethodPost, "/v1/product/products/m-1/variants:explode", `{"limit":`+limit+`}`, "product.write"); bad.Code != http.StatusBadRequest {
+			t.Fatalf("limit %s = %d", limit, bad.Code)
+		}
+	}
+}
+
+func TestListReleasedPagesByKeyset(t *testing.T) {
+	f := newFake()
+	for n := 1; n <= 3; n++ {
+		f.released[testkit.TenantID(n)] = domain.ReleasedProduct{ID: testkit.TenantID(n)}
+	}
+	r := newRouter(f)
+	var page struct {
+		Items []struct{ ID string }
+		Next  string
+	}
+	rec := do(r, http.MethodGet, "/v1/product/released-products?limit=2", "", "product.read")
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil || len(page.Items) != 2 || page.Next != testkit.TenantID(2) {
+		t.Fatalf("first page %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(r, http.MethodGet, "/v1/product/released-products?limit=2&after="+testkit.TenantID(2), "", "product.read")
+	page.Items = nil
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil || len(page.Items) != 1 || page.Next != "" {
+		t.Fatalf("last page %d %s", rec.Code, rec.Body.String())
+	}
+	for _, query := range []string{"limit=0", "limit=501", "limit=x", "after=not-a-uuid"} {
+		if bad := do(r, http.MethodGet, "/v1/product/released-products?"+query, "", "product.read"); bad.Code != http.StatusBadRequest {
+			t.Fatalf("%s = %d", query, bad.Code)
+		}
+	}
+	if denied := do(r, http.MethodGet, "/v1/product/released-products", "", "product.write"); denied.Code != http.StatusForbidden {
+		t.Fatalf("missing read duty %d", denied.Code)
+	}
 }
