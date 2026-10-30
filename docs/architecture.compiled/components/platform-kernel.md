@@ -25,7 +25,7 @@ Consume side (C.5): in one tx SET LOCAL tenant/legal entities from event `tenant
 internal: none (everything depends on it). external: Postgres (CNPG), OPA sidecar, Keycloak JWKS, Vault (file-projected dynamic creds), OTel Collector.
 
 ## Gotchas & Constraints
-- `dbx` CURRENTLY sets GUC `app.tenant_id`; must change to `passage.tenant_id` (also `passage.legal_entity_ids`, `passage.actor`) in wave 2. `platform/go/ids` switches ULID -> UUIDv7 in wave 3.
+- `dbx` sets GUCs `passage.tenant_id` and `passage.legal_entity_scopes` per transaction. `platform/go/ids` switches ULID -> UUIDv7 in wave 3.
 - Pool role `passage_app` has no BYPASSRLS; missing tenant GUC yields zero rows. SET LOCAL only (PgBouncer transaction mode); no session state or session advisory locks in request paths.
 - Config: 12-factor env vars validated at startup (exit non-zero): PASSAGE_ENV, SERVICE_NAME, SERVICE_VERSION, HTTP_ADDR, ADMIN_ADDR, DATABASE_URL|DATABASE_URL_FILE, DATABASE_MIGRATOR_URL, MIGRATE_ON_START (dev only), KAFKA_*, SCHEMA_REGISTRY_URL, OPA_URL (127.0.0.1:8181), OIDC_ISSUER_REGISTRY_URL, OIDC_AUDIENCE=passage-api, TEMPORAL_*, OTEL_*, LEDGER_URL, VALKEY_URL (optional). Rotating creds/certs projected as files and re-read (file watch).
 - Logging: JSON lines; required timestamp, level, message, service, correlationId; never log P2/P3 values or bodies; no console.log/fmt.Println (lint bans). Go `log/slog`, TS `pino`, Python structlog.

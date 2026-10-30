@@ -376,7 +376,7 @@ type reverseFails struct {
 	dates *[]time.Time
 }
 
-func (r reverseFails) Reverse(_ context.Context, _, _ string, postingDate time.Time) error {
+func (r reverseFails) Reverse(_ context.Context, _, _, _ string, postingDate time.Time) error {
 	*r.dates = append(*r.dates, postingDate)
 	return r.err
 }
@@ -515,7 +515,7 @@ func resolveRouter(st store.Store, ledger domain.LedgerPoster, lease time.Durati
 
 func assertClaimHeldThenLeaseTakeover(t *testing.T, rg *rig, broken *commitFails, r receiptJSON, key string, takeover http.Handler) {
 	t.Helper()
-	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1)})
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: legalEntityID})
 	if _, err := rg.st.ClaimPending(ctx, key, 0, time.Hour); !errors.Is(err, store.ErrPendingClaimed) {
 		t.Fatalf("claim after the unknown outcome: err=%v, want it still held", err)
 	}

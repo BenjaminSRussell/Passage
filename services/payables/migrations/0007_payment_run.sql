@@ -30,6 +30,10 @@ BEGIN
                                        ('APPROVED', 'EXECUTING'), ('EXECUTING', 'EXECUTED'), ('EXECUTING', 'FAILED'))) THEN
     RAISE EXCEPTION 'payment proposal % is % and can no longer change to %', OLD.id, OLD.status, NEW.status USING ERRCODE = '55000';
   END IF;
+  IF OLD.status = 'EXECUTING' AND NEW.status = 'FAILED' AND EXISTS (
+    SELECT 1 FROM ap_payment_run r WHERE r.tenant_id = OLD.tenant_id AND r.proposal_id = OLD.id AND r.journal_requested_at IS NOT NULL AND (r.journal_rejected_at IS NULL OR r.journal_posted_at IS NOT NULL)) THEN
+    RAISE EXCEPTION 'payment proposal % cannot fail once its journal was requested', OLD.id USING ERRCODE = '55000';
+  END IF;
   RETURN NEW;
 END
 $$;
@@ -59,17 +63,17 @@ CREATE TABLE IF NOT EXISTS ap_payment_run (
   proposal_id uuid NOT NULL,
   status text NOT NULL CHECK (status IN ('RUNNING', 'COMPLETED', 'FAILED')),
   requested_by text NOT NULL CHECK (requested_by <> ''),
-  request_hash text NOT NULL,
   ledger_id uuid NOT NULL,
   bank_account text NOT NULL CHECK (bank_account <> ''),
   control_account text NOT NULL CHECK (control_account <> ''),
   discount_account text,
-  file_request jsonb NOT NULL,
   file_number text,
   file_content text,
   file_sha256 text,
   payment_count integer,
   file_generated_at timestamptz,
+  journal_requested_at timestamptz,
+  journal_rejected_at timestamptz,
   journal_entry_id text,
   journal_posted_at timestamptz,
   settled_at timestamptz,
@@ -81,13 +85,39 @@ CREATE TABLE IF NOT EXISTS ap_payment_run (
   FOREIGN KEY (tenant_id, proposal_id) REFERENCES ap_payment_proposal (tenant_id, id),
   CHECK ((file_generated_at IS NULL) = (file_content IS NULL)),
   CHECK ((journal_posted_at IS NULL) = (journal_entry_id IS NULL)),
-  CHECK (journal_posted_at IS NULL OR file_generated_at IS NOT NULL),
+  CHECK (journal_requested_at IS NULL OR file_generated_at IS NOT NULL),
+  CHECK (journal_posted_at IS NULL OR journal_requested_at IS NOT NULL),
   CHECK (settled_at IS NULL OR journal_posted_at IS NOT NULL),
   CHECK ((status = 'COMPLETED') = (completed_at IS NOT NULL)),
   CHECK (status <> 'COMPLETED' OR settled_at IS NOT NULL),
   CHECK ((status = 'FAILED') = (failure_reason IS NOT NULL)),
-  CHECK (status <> 'FAILED' OR journal_posted_at IS NULL)
+  CHECK (status <> 'FAILED' OR journal_requested_at IS NULL OR (journal_rejected_at IS NOT NULL AND journal_posted_at IS NULL))
 );
+CREATE OR REPLACE FUNCTION ap_payment_run_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE p record;
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    SELECT created_by, approved_by INTO p FROM ap_payment_proposal WHERE tenant_id = NEW.tenant_id AND id = NEW.proposal_id;
+    IF NEW.requested_by IN (p.created_by, p.approved_by) THEN
+      RAISE EXCEPTION 'a payment run must be started by a user who neither created nor approved the proposal' USING ERRCODE = '55000';
+    END IF;
+    RETURN NEW;
+  END IF;
+  IF (OLD.journal_requested_at IS NOT NULL AND NEW.journal_requested_at IS DISTINCT FROM OLD.journal_requested_at)
+     OR (OLD.journal_posted_at IS NOT NULL AND NEW.journal_posted_at IS DISTINCT FROM OLD.journal_posted_at)
+     OR (OLD.journal_entry_id IS NOT NULL AND NEW.journal_entry_id IS DISTINCT FROM OLD.journal_entry_id) THEN
+    RAISE EXCEPTION 'the payment journal of run % cannot be cleared or changed' ,OLD.id USING ERRCODE = '55000';
+  END IF;
+  IF OLD.status <> 'RUNNING' AND NEW.status IS DISTINCT FROM OLD.status THEN
+    RAISE EXCEPTION 'payment run % is % and can no longer change status', OLD.id, OLD.status USING ERRCODE = '55000';
+  END IF;
+  IF OLD.status <> 'RUNNING' AND (NEW.failure_reason IS DISTINCT FROM OLD.failure_reason OR NEW.completed_at IS DISTINCT FROM OLD.completed_at) THEN
+    RAISE EXCEPTION 'payment run % is % and can no longer change' , OLD.id, OLD.status USING ERRCODE = '55000';
+  END IF;
+  RETURN NEW;
+END
+$$;
+CREATE TRIGGER ap_payment_run_guard BEFORE INSERT OR UPDATE ON ap_payment_run FOR EACH ROW EXECUTE FUNCTION ap_payment_run_guard();
 ALTER TABLE ap_payment_run ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ap_payment_run FORCE ROW LEVEL SECURITY;
 CREATE POLICY ap_payment_run_tenant_access ON ap_payment_run AS PERMISSIVE
@@ -125,13 +155,32 @@ CREATE POLICY ap_payment_legal_entity_scope ON ap_payment AS RESTRICTIVE
   USING (current_setting('passage.legal_entity_scopes', true) = '*'
          OR legal_entity_id::text = ANY(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));
 
+CREATE TABLE IF NOT EXISTS ap_payment_proposal_payee (
+  tenant_id uuid NOT NULL,
+  proposal_id uuid NOT NULL,
+  vendor_id uuid NOT NULL,
+  legal_entity_id uuid NOT NULL,
+  sealed bytea NOT NULL,
+  PRIMARY KEY (tenant_id, proposal_id, vendor_id),
+  FOREIGN KEY (tenant_id, proposal_id) REFERENCES ap_payment_proposal (tenant_id, id)
+);
+ALTER TABLE ap_payment_proposal_payee ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ap_payment_proposal_payee FORCE ROW LEVEL SECURITY;
+CREATE POLICY ap_payment_proposal_payee_tenant_access ON ap_payment_proposal_payee AS PERMISSIVE
+  USING (tenant_id = current_setting('passage.tenant_id', true)::uuid)
+  WITH CHECK (tenant_id = current_setting('passage.tenant_id', true)::uuid);
+CREATE POLICY ap_payment_proposal_payee_legal_entity_scope ON ap_payment_proposal_payee AS RESTRICTIVE
+  USING (current_setting('passage.legal_entity_scopes', true) = '*'
+         OR legal_entity_id::text = ANY(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));
+
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'passage_app') THEN
+    EXECUTE 'GRANT SELECT, INSERT ON ap_payment_proposal_payee TO passage_app';
     EXECUTE 'GRANT UPDATE (executed_at, failed_at) ON ap_payment_proposal TO passage_app';
     EXECUTE 'GRANT UPDATE (settled) ON ap_payment_proposal_line TO passage_app';
     EXECUTE 'GRANT SELECT, INSERT ON ap_payment_run, ap_payment TO passage_app';
-    EXECUTE 'GRANT UPDATE (status, file_number, file_content, file_sha256, payment_count, file_generated_at, journal_entry_id, journal_posted_at, settled_at, failure_reason, completed_at) ON ap_payment_run TO passage_app';
+    EXECUTE 'GRANT UPDATE (status, file_number, file_content, file_sha256, payment_count, file_generated_at, journal_requested_at, journal_rejected_at, journal_entry_id, journal_posted_at, settled_at, failure_reason, completed_at) ON ap_payment_run TO passage_app';
   END IF;
 END
 $$;

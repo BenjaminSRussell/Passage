@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/payables"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/api"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/domain"
@@ -59,8 +61,24 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return err
 	}
 	defer validator.Close()
-	items := store.New(pool)
-	a := api.New(pool, validator, time.Now).WithAging(items, ledgerBalances(getenv), getenv("AP_CONTROL_ACCOUNT")).WithProposals(items, rateSource(getenv)).WithPaymentRuns(items, ledgerPoster(getenv), getenv("AP_CONTROL_ACCOUNT"))
+	keys, err := fieldcrypt.FromEnv(getenv)
+	if err != nil {
+		return err
+	}
+	profiles, err := api.LoadPostingProfiles(getenv)
+	if err != nil {
+		return err
+	}
+	items := store.New(pool).WithFieldCrypt(keys)
+	balances, err := ledgerBalances(getenv)
+	if err != nil {
+		return err
+	}
+	poster, err := ledgerPoster(getenv)
+	if err != nil {
+		return err
+	}
+	a := api.New(pool, validator, time.Now).WithAging(items, balances, getenv("AP_CONTROL_ACCOUNT")).WithProposals(items, rateSource(getenv)).WithPaymentRuns(items, poster, profiles)
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
@@ -74,30 +92,36 @@ func run(ctx context.Context, getenv func(string) string) error {
 	return <-errs
 }
 
-func ledgerClient(getenv func(string) string) *ledger.Client {
+func ledgerClient(getenv func(string) string) (*ledger.Client, error) {
 	url := getenv("LEDGER_URL")
 	if url == "" {
-		return nil
+		return nil, nil
+	}
+	signer, err := tenant.ServiceSignerFromEnv(getenv)
+	if err != nil {
+		return nil, err
 	}
 	timeout := ledger.Timeout
 	if v, err := time.ParseDuration(getenv("LEDGER_TIMEOUT")); err == nil && v > 0 {
 		timeout = v
 	}
-	return ledger.New(url, &http.Client{Timeout: timeout})
+	return ledger.New(url, &http.Client{Timeout: timeout}).WithSigner(signer), nil
 }
 
-func ledgerBalances(getenv func(string) string) api.LedgerBalances {
-	if c := ledgerClient(getenv); c != nil {
-		return c
+func ledgerBalances(getenv func(string) string) (api.LedgerBalances, error) {
+	c, err := ledgerClient(getenv)
+	if c == nil || err != nil {
+		return nil, err
 	}
-	return nil
+	return c, nil
 }
 
-func ledgerPoster(getenv func(string) string) api.LedgerPoster {
-	if c := ledgerClient(getenv); c != nil {
-		return c
+func ledgerPoster(getenv func(string) string) (api.LedgerPoster, error) {
+	c, err := ledgerClient(getenv)
+	if c == nil || err != nil {
+		return nil, err
 	}
-	return nil
+	return c, nil
 }
 
 func rateSource(getenv func(string) string) api.RateSource {

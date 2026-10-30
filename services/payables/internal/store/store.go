@@ -10,6 +10,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/events"
+	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/outbox"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
@@ -69,7 +70,15 @@ type Filter struct {
 	AfterID       string
 }
 
-type Postgres struct{ pool *pgxpool.Pool }
+type Postgres struct {
+	pool  *pgxpool.Pool
+	crypt *fieldcrypt.Keys
+}
+
+func (s *Postgres) WithFieldCrypt(k *fieldcrypt.Keys) *Postgres {
+	s.crypt = k
+	return s
+}
 
 func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
 

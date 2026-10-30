@@ -56,7 +56,8 @@ const posts = (suffix: string) => calls.filter((c) => c.method === "POST" && c.u
 const systems: CatalogEntry["sourceSystems"] = ["AX2012", "D365FO", "SAPECC", "S4HANA"];
 const catalog: CatalogEntry[] = [
   { pack: "open_items", sourceSystems: systems, controlTotals: "count, amount per currency, amount per (entity, account, currency)", available: true },
-  { pack: "gl_balances", sourceSystems: systems, controlTotals: "balance per (entity, account, dimensions, currency)", available: false },
+  { pack: "gl_balances", sourceSystems: systems, controlTotals: "balance per (entity, account, dimensions, currency)", available: true },
+  { pack: "onhand", sourceSystems: systems, controlTotals: "quantity per (item, site, warehouse, location, batch, serial)", available: false },
   { pack: "project_wip", sourceSystems: systems, controlTotals: "cost, sales, WIP cost and WIP sales per (project, category)", available: true },
 ];
 
@@ -132,12 +133,13 @@ describe("Pack catalog", () => {
     expect(screen.getByRole("heading", { name: "Transactional packs" })).toBeInTheDocument();
     const table = await findTable({ name: "Transactional packs" });
     await waitFor(() => expect(within(table).getAllByRole("row")).toHaveLength(catalog.length + 1));
-    const [, openItems, glBalances] = within(table).getAllByRole("row");
+    const [, openItems, , onhand] = within(table).getAllByRole("row");
     expect(openItems).toHaveTextContent("AX 2012, D365 F&O, SAP ECC, SAP S/4HANA");
     expect(openItems).toHaveTextContent("Available");
-    expect(glBalances).toHaveTextContent("Later slice");
-    expect(within(glBalances).queryByRole("link")).not.toBeInTheDocument();
+    expect(onhand).toHaveTextContent("Later slice");
+    expect(within(onhand).queryByRole("link")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Start open_items run" })).toHaveAttribute("href", "/migration-factory/runs/new");
+    expect(screen.getByRole("link", { name: "Start gl_balances run" })).toHaveAttribute("href", "/migration-factory/runs/new-gl");
     expect(screen.getByRole("link", { name: "Start project_wip run" })).toHaveAttribute("href", "/migration-factory/runs/new-project");
     expect(pageViolations(container)).toEqual([]);
   });

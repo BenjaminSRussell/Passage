@@ -6,7 +6,6 @@ export interface PaymentRunInput {
   legalEntityId: string;
   proposalId: string;
   executedBy: string;
-  request: Record<string, unknown>;
 }
 
 export interface PaymentRunRef {

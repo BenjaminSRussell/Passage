@@ -37,7 +37,14 @@ export class FakePayables {
   private readonly refusals = new Map<Action, { status: number; times: number }>();
   startsFailed = false;
 
+  readonly tokens: ServiceClaims[] = [];
+
   readonly fetch: typeof fetch = async (input, init) => {
+    const claims = decodeClaims(new Headers(init?.headers).get("X-Passage-Service-Token"));
+    if (!claims || claims.iss !== "workflow-ts" || claims.aud !== "payables" || claims.duties.join() !== "payment-run.execute" || !claims.act) {
+      return problem(401, "missing or wrong service token");
+    }
+    this.tokens.push(claims);
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
     const [, runId, action] = /^\/v1\/payables\/payment-runs(?:\/([^:]+):(.+))?$/.exec(url.pathname) ?? [];
     const name = (action ?? "start") as Action;
@@ -140,4 +147,22 @@ function json(run: Run, status = 200): Response {
 
 function problem(status: number, detail: string): Response {
   return new Response(JSON.stringify({ status, detail }), { status, headers: { "Content-Type": "application/problem+json" } });
+}
+
+export interface ServiceClaims {
+  iss: string;
+  aud: string;
+  tid: string;
+  le: string;
+  act: string;
+  duties: string[];
+  iat: number;
+  exp: number;
+  jti: string;
+}
+
+function decodeClaims(token: string | null): ServiceClaims | undefined {
+  const body = token?.split(".")[0];
+  if (!body) return undefined;
+  return JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as ServiceClaims;
 }

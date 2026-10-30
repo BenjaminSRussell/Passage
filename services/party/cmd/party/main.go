@@ -11,6 +11,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/party/internal/api"
 	"github.com/BenjaminSRussell/passage/services/party/internal/numbering"
 	"github.com/BenjaminSRussell/passage/services/party/internal/store"
@@ -64,7 +65,11 @@ func run(ctx context.Context, getenv func(string) string) error {
 	}
 	var sequencer api.Sequencer = numbering.Unavailable{}
 	if url := getenv("NUMBERING_URL"); url != "" {
-		sequencer = numbering.New(url)
+		signer, err := tenant.ServiceSignerFromEnv(getenv)
+		if err != nil {
+			return err
+		}
+		sequencer = numbering.New(url).WithSigner(signer)
 	} else {
 		slog.Warn("NUMBERING_URL is empty, party creation returns 503 until it is set")
 	}

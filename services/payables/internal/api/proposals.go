@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"regexp"
 	"slices"
@@ -335,13 +336,14 @@ func (a *API) rateFailure(w http.ResponseWriter, r *http.Request, from, to strin
 }
 
 type proposalRequest struct {
-	LegalEntityID        string            `json:"legalEntityId"`
-	LegalEntityCurrency  string            `json:"legalEntityCurrency"`
-	RunDate              string            `json:"runDate"`
-	RunID                string            `json:"runId"`
-	DueBy                string            `json:"dueBy"`
-	PaymentMethod        string            `json:"paymentMethod"`
-	VendorPaymentMethods map[string]string `json:"vendorPaymentMethods"`
+	LegalEntityID        string                        `json:"legalEntityId"`
+	LegalEntityCurrency  string                        `json:"legalEntityCurrency"`
+	RunDate              string                        `json:"runDate"`
+	RunID                string                        `json:"runId"`
+	DueBy                string                        `json:"dueBy"`
+	PaymentMethod        string                        `json:"paymentMethod"`
+	VendorPaymentMethods map[string]string             `json:"vendorPaymentMethods"`
+	Creditors            map[string]domain.CreditorDTO `json:"creditors,omitempty"`
 }
 
 func (p proposalRequest) validate() (runDate time.Time, fields map[string]string) {
@@ -367,6 +369,7 @@ func (p proposalRequest) validate() (runDate time.Time, fields map[string]string
 			fields["vendorPaymentMethods"] = "keys must be vendor UUIDs and values payment methods"
 		}
 	}
+	maps.Copy(fields, domain.ValidateCreditors(p.Creditors))
 	return runDate, fields
 }
 
@@ -455,10 +458,14 @@ func (a *API) createProposal(w http.ResponseWriter, r *http.Request) {
 	}
 	proposal, created, err := a.proposals.store.CreateProposal(ctx, store.NewProposal{
 		LegalEntityID: le, RunDate: req.RunDate, RunID: req.RunID, DueBy: req.DueBy, RateDate: rateDate.Format(time.DateOnly),
-		LegalEntityCurrency: req.LegalEntityCurrency, PaymentMethod: req.PaymentMethod, RequestHash: req.hash(), CreatedBy: caller.UserID, Groups: groups,
+		LegalEntityCurrency: req.LegalEntityCurrency, PaymentMethod: req.PaymentMethod, RequestHash: req.hash(), CreatedBy: caller.UserID, Groups: groups, Payees: req.Creditors,
 	})
 	if errors.Is(err, store.ErrItemsChanged) {
 		a.problem(w, r, http.StatusConflict, domain.CodeProposalConflict, err.Error()+"; retry the request")
+		return
+	}
+	if errors.Is(err, store.ErrNoFieldCrypt) {
+		a.problem(w, r, http.StatusServiceUnavailable, codeRatesUnconfigured, err.Error())
 		return
 	}
 	if err != nil {

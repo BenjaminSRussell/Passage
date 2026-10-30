@@ -1,6 +1,7 @@
 // Client for the fieldservice service (services/fieldservice/api/openapi.yaml).
 // Browser calls use /api/v1/service/..., which the web BFF rewrites to /v1/service/...;
-// generic case calls use /api/v1/cases, /api/v1/case-categories and /api/v1/case-processes.
+// generic case calls use /api/v1/cases, /api/v1/case-categories, /api/v1/case-processes,
+// /api/v1/case-mailboxes and /api/v1/inbound-messages.
 // No npm dependencies: fetch only. Decimals travel as strings, never floats.
 
 export const base = "/api/v1/service";
@@ -837,7 +838,7 @@ export interface CaseAssociation {
 export interface CaseLogEntry {
   at: string;
   actor: string;
-  kind: "CREATED" | "STAGE" | "STATUS" | "ASSOCIATION" | "REOPENED";
+  kind: "CREATED" | "STAGE" | "STATUS" | "ASSOCIATION" | "REOPENED" | "EMAIL";
   text: string;
 }
 
@@ -957,4 +958,206 @@ export function reopenGenericCase(caseId: string, etag: string, reason: string, 
 /** Associates any registry record with a case (FR-45.12). */
 export function associateCase(caseId: string, association: CaseAssociation, key: string = newKey()): Promise<Versioned<GenericCase>> {
   return versioned<GenericCase>(`/cases/${id(caseId)}/associations`, post(association, key), undefined, caseBase);
+}
+
+// --- Supplier warranty claims (FR-45.15, BR-45.12) ---
+
+export const CLAIM_STATUSES = ["DRAFT", "SUBMITTED", "ACCEPTED", "PARTIALLY_ACCEPTED", "REJECTED", "SETTLED", "CLOSED"] as const;
+export type ClaimStatus = (typeof CLAIM_STATUSES)[number];
+
+export const CLAIM_SOURCES = ["SERVICE_WO", "EAM_WO"] as const;
+export type ClaimSource = (typeof CLAIM_SOURCES)[number];
+
+export const CLAIM_DECISIONS = ["ACCEPTED", "PARTIALLY_ACCEPTED", "REJECTED"] as const;
+export type ClaimDecision = (typeof CLAIM_DECISIONS)[number];
+
+export interface ClaimLineInput {
+  itemId: string;
+  serial?: string;
+  failureCode?: string;
+  partAmount: Decimal;
+  laborHours: Decimal;
+}
+
+export interface ClaimInput {
+  vendorPartyId: string;
+  sourceKind: ClaimSource;
+  /** Posted service work orders (SERVICE_WO) or EAM work orders (EAM_WO). */
+  sourceIds: string[];
+  /** The vendor's labor rate per hour; "0" when the vendor does not cover labor. */
+  laborRate?: Decimal;
+  failureCode?: string;
+  windowDays?: number;
+  returnRequired?: boolean;
+  /** EAM_WO only: a SERVICE_WO claim takes these from its work orders. */
+  legalEntityId?: string;
+  currency?: string;
+  completedOn?: string;
+  lines?: ClaimLineInput[];
+}
+
+export interface ClaimLine {
+  sourceId: string;
+  itemId?: string;
+  serial?: string;
+  failureCode?: string;
+  partAmount: Decimal;
+  laborHours: Decimal;
+  laborRate: Decimal;
+  claimedAmount: Decimal;
+  acceptedAmount: Decimal;
+}
+
+export interface SupplierClaim {
+  id: string;
+  number: string;
+  vendorPartyId: string;
+  legalEntityId: string;
+  sourceKind: ClaimSource;
+  sourceIds: string[];
+  currency: string;
+  laborRate: Decimal;
+  lines: ClaimLine[];
+  claimedTotal: Decimal;
+  acceptedTotal: Decimal;
+  recoveredAmount: Decimal;
+  status: ClaimStatus;
+  completedOn: string;
+  windowDays: number;
+  /** The last day the claim can be submitted (BR-45.12). */
+  windowEndsOn: string;
+  returnRequired: boolean;
+  returnOrderId: string;
+  submittedOn?: string;
+  vendorReference: string;
+  decisionReason: string;
+  decidedAt?: string;
+  creditNoteId: string;
+  settledAt?: string;
+  closedAt?: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ClaimFilter {
+  status?: ClaimStatus | "";
+  vendorPartyId?: string;
+  cursor?: string;
+}
+
+export function listSupplierClaims(f: ClaimFilter = {}, signal?: AbortSignal): Promise<Page<SupplierClaim>> {
+  return json<Page<SupplierClaim>>(`/supplier-claims${query({ status: f.status, vendorPartyId: f.vendorPartyId, cursor: f.cursor })}`, {}, signal);
+}
+
+export function getSupplierClaim(claimId: string, signal?: AbortSignal): Promise<Versioned<SupplierClaim>> {
+  return versioned<SupplierClaim>(`/supplier-claims/${id(claimId)}`, {}, signal);
+}
+
+/** Drafts a claim; each line claims part + labor hours × the vendor's labor rate. */
+export function createSupplierClaim(input: ClaimInput, key: string = newKey()): Promise<Versioned<SupplierClaim>> {
+  return versioned<SupplierClaim>("/supplier-claims", post(input, key));
+}
+
+/** Submits a DRAFT claim today, inside the vendor's window (SVC-SWC-001), with the return order when required (SVC-SWC-002). */
+export function submitSupplierClaim(
+  claimId: string,
+  etag: string,
+  body: { vendorReference?: string; returnOrderId?: string },
+  key: string = newKey(),
+): Promise<Versioned<SupplierClaim>> {
+  return versioned<SupplierClaim>(`/supplier-claims/${id(claimId)}:submit`, guarded(body, etag, key));
+}
+
+export interface ClaimDecisionInput {
+  decision: ClaimDecision;
+  reason?: string;
+  vendorReference?: string;
+  /** One per claim line; omitted for ACCEPTED in full and for REJECTED. */
+  acceptedAmounts?: Decimal[];
+}
+
+/** Records the vendor decision on a SUBMITTED claim. */
+export function decideSupplierClaim(claimId: string, etag: string, body: ClaimDecisionInput, key: string = newKey()): Promise<Versioned<SupplierClaim>> {
+  return versioned<SupplierClaim>(`/supplier-claims/${id(claimId)}/decision`, guarded(body, etag, key));
+}
+
+export interface CreditNoteMatch {
+  creditNoteId: string;
+  vendorReference: string;
+  amount: Decimal;
+  currency: string;
+}
+
+/** Matches the vendor credit note: the claim becomes SETTLED with the credit recovered. */
+export function settleSupplierClaim(claimId: string, etag: string, body: CreditNoteMatch, key: string = newKey()): Promise<Versioned<SupplierClaim>> {
+  return versioned<SupplierClaim>(`/supplier-claims/${id(claimId)}:settle`, guarded(body, etag, key));
+}
+
+/** Closes a REJECTED or SETTLED claim. */
+export function closeSupplierClaim(claimId: string, etag: string, key: string = newKey()): Promise<Versioned<SupplierClaim>> {
+  return versioned<SupplierClaim>(`/supplier-claims/${id(claimId)}:close`, { method: "POST", headers: { "If-Match": etag, "Idempotency-Key": key } });
+}
+
+// --- Email-to-case intake (FR-45.16, BR-45.13) ---
+
+export interface CaseMailboxInput {
+  address: string;
+  legalEntityId: string;
+  categoryId: string;
+}
+
+export interface CaseMailbox extends CaseMailboxInput {
+  categoryCode: string;
+  updatedAt: string;
+}
+
+export interface MailAttachment {
+  name: string;
+  contentType?: string;
+  sizeBytes?: number;
+  objectRef: string;
+}
+
+export type InboundRoute = "ATTACHED" | "NEW_CASE";
+
+export interface InboundMessage {
+  id: string;
+  mailbox: string;
+  messageId: string;
+  inReplyTo: string;
+  fromAddress: string;
+  subject: string;
+  body: string;
+  receivedAt: string;
+  caseId: string;
+  caseNumber: string;
+  route: InboundRoute;
+  reopenedFrom?: string;
+  reopenedFromNumber?: string;
+  automated: boolean;
+  acknowledge: boolean;
+  attachments: MailAttachment[];
+  createdAt: string;
+}
+
+export interface InboundFilter {
+  mailbox?: string;
+  caseId?: string;
+  route?: InboundRoute | "";
+  cursor?: string;
+}
+
+export function listCaseMailboxes(signal?: AbortSignal): Promise<Page<CaseMailbox>> {
+  return json<Page<CaseMailbox>>("/case-mailboxes", {}, signal, caseBase);
+}
+
+/** Sets a mailbox's legal entity and default category; the address is the key, so a repeat is safe. */
+export function saveCaseMailbox(input: CaseMailboxInput): Promise<CaseMailbox> {
+  return json<CaseMailbox>("/case-mailboxes", { method: "POST", body: JSON.stringify(input) }, undefined, caseBase);
+}
+
+/** Inbound email newest first, without the messages of cases the caller may not read. */
+export function listInboundMessages(f: InboundFilter = {}, signal?: AbortSignal): Promise<Page<InboundMessage>> {
+  return json<Page<InboundMessage>>(`/inbound-messages${query({ mailbox: f.mailbox, caseId: f.caseId, route: f.route, cursor: f.cursor })}`, {}, signal, caseBase);
 }

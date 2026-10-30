@@ -141,13 +141,15 @@ describe("service module", () => {
   });
 
   it("gates every nav entry by a PRD duty", () => {
-    const prdDuties = new Set(["SvcInquire", "SvcCaseCreate", "ActivityMaintain", "KbRead", "CaseMaintain", "CaseSetupAdmin"]);
+    const prdDuties = new Set(["SvcInquire", "SvcCaseCreate", "ActivityMaintain", "KbRead", "CaseMaintain", "CaseSetupAdmin", "SvcClaimMaintain"]);
     expect(service.nav.every((n) => n.to.startsWith("/service/") && prdDuties.has(n.duty ?? ""))).toBe(true);
     expect(service.nav.find((n) => n.to === "/service/knowledge")?.duty).toBe("KbRead");
     expect(service.nav.find((n) => n.to === "/service/activities")?.duty).toBe("ActivityMaintain");
     expect(service.nav.find((n) => n.to === "/service/cases/new")?.duty).toBe("SvcCaseCreate");
     expect(service.nav.find((n) => n.to === "/service/case-management")?.duty).toBe("CaseMaintain");
     expect(service.nav.find((n) => n.to === "/service/case-setup")?.duty).toBe("CaseSetupAdmin");
+    expect(service.nav.find((n) => n.to === "/service/supplier-claims")?.duty).toBe("SvcClaimMaintain");
+    expect(service.nav.find((n) => n.to === "/service/case-mailbox")?.duty).toBe("CaseMaintain");
   });
 
   it("is auto-discovered by the registry", () => {

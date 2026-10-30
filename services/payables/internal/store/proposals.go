@@ -2,7 +2,10 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -28,6 +31,7 @@ var (
 	ErrItemsChanged     = errors.New("open items changed, were held or were reserved while the proposal was built")
 	ErrTooManyItems     = errors.New("more open items are due than one proposal can hold")
 	ErrRunDateElapsed   = errors.New("the proposal's run date has passed")
+	ErrNoFieldCrypt     = errors.New("field encryption keys are not configured; bank details cannot be stored or read")
 )
 
 type LinesChangedError struct{ OpenItemIDs []string }
@@ -55,6 +59,7 @@ type Proposal struct {
 	ExecutedAt          *time.Time             `json:"executedAt,omitempty"`
 	FailedAt            *time.Time             `json:"failedAt,omitempty"`
 	Groups              []domain.ProposalGroup `json:"groups"`
+	Payees              []domain.PayeeSummary  `json:"payees,omitempty"`
 	TotalValued         decimal.Decimal        `json:"totalValued"`
 	RequestHash         string                 `json:"-"`
 }
@@ -70,6 +75,7 @@ type NewProposal struct {
 	RequestHash         string
 	CreatedBy           string
 	Groups              []domain.ProposalGroup
+	Payees              map[string]domain.CreditorDTO
 }
 
 func (s *Postgres) Candidates(ctx context.Context, legalEntityID, dueBy string) ([]domain.ProposalCandidate, error) {
@@ -148,7 +154,10 @@ func (s *Postgres) CreateProposal(ctx context.Context, in NewProposal) (Proposal
 		if err != nil {
 			return err
 		}
-		return insertGroups(ctx, tx, p.TenantID, id, in)
+		if err := insertGroups(ctx, tx, p.TenantID, id, in); err != nil {
+			return err
+		}
+		return s.insertPayees(ctx, tx, p.TenantID, id, in)
 	})
 	if isUnique(err) {
 		return Proposal{}, false, ErrItemsChanged
@@ -218,8 +227,15 @@ func (s *Postgres) GetProposal(ctx context.Context, id string) (Proposal, error)
 			return err
 		}
 		out.Groups, err = loadGroups(ctx, tx, id)
+		if err != nil {
+			return err
+		}
 		for _, g := range out.Groups {
 			out.TotalValued = out.TotalValued.Add(g.Valued)
+		}
+		payees, err := s.openPayees(ctx, tx, out.ID)
+		for _, vendor := range slices.Sorted(maps.Keys(payees)) {
+			out.Payees = append(out.Payees, domain.SummarizePayee(vendor, payees[vendor]))
 		}
 		return err
 	})
@@ -371,4 +387,69 @@ func (s *Postgres) CancelProposal(ctx context.Context, id, user string) (Proposa
 		return Proposal{}, err
 	}
 	return s.GetProposal(ctx, id)
+}
+
+func payeeField(vendorID string) string { return "ap_payment_proposal_payee:" + vendorID }
+
+func (s *Postgres) insertPayees(ctx context.Context, tx pgx.Tx, tenantID, proposalID string, in NewProposal) error {
+	if len(in.Payees) == 0 {
+		return nil
+	}
+	if s.crypt == nil {
+		return ErrNoFieldCrypt
+	}
+	for vendor, details := range in.Payees {
+		plain, err := json.Marshal(details)
+		if err != nil {
+			return err
+		}
+		sealed, err := s.crypt.Seal(tenantID, payeeField(vendor), plain)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `insert into ap_payment_proposal_payee (tenant_id, proposal_id, vendor_id, legal_entity_id, sealed) values ($1, $2::uuid, $3::uuid, $4::uuid, $5)`,
+			tenantID, proposalID, vendor, in.LegalEntityID, sealed); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Postgres) openPayees(ctx context.Context, tx pgx.Tx, proposalID string) (map[string]domain.CreditorDTO, error) {
+	rows, err := tx.Query(ctx, `select tenant_id::text, vendor_id::text, sealed from ap_payment_proposal_payee where proposal_id = $1::uuid`, proposalID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]domain.CreditorDTO{}
+	for rows.Next() {
+		var tenantID, vendor string
+		var sealed []byte
+		if err := rows.Scan(&tenantID, &vendor, &sealed); err != nil {
+			return nil, err
+		}
+		if s.crypt == nil {
+			return nil, ErrNoFieldCrypt
+		}
+		plain, err := s.crypt.Open(tenantID, payeeField(vendor), sealed)
+		if err != nil {
+			return nil, err
+		}
+		var details domain.CreditorDTO
+		if err := json.Unmarshal(plain, &details); err != nil {
+			return nil, err
+		}
+		out[vendor] = details
+	}
+	return out, rows.Err()
+}
+
+func (s *Postgres) ProposalPayees(ctx context.Context, proposalID string) (map[string]domain.CreditorDTO, error) {
+	var out map[string]domain.CreditorDTO
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		out, err = s.openPayees(ctx, tx, proposalID)
+		return err
+	})
+	return out, err
 }

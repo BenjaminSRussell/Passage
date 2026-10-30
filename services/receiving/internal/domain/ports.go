@@ -162,7 +162,7 @@ type FakePeriods struct {
 func (f FakePeriods) AP(context.Context, PeriodQuery) (PeriodStatus, error) { return f.Status, f.Err }
 
 type LedgerReverser interface {
-	Reverse(ctx context.Context, entryID, idempotencyKey string, postingDate time.Time) error
+	Reverse(ctx context.Context, entryID, idempotencyKey, legalEntityID string, postingDate time.Time) error
 }
 
 type fakePosting struct {
@@ -202,7 +202,7 @@ func (f *FakeLedger) Post(_ context.Context, entry JournalEntry) (string, error)
 	return id, nil
 }
 
-func (f *FakeLedger) Reverse(_ context.Context, entryID, _ string, _ time.Time) error {
+func (f *FakeLedger) Reverse(_ context.Context, entryID, _, _ string, _ time.Time) error {
 	if f.Err != nil {
 		return f.Err
 	}

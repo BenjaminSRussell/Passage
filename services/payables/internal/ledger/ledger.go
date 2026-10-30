@@ -37,9 +37,17 @@ type Balance struct {
 	Credit   decimal.Decimal
 }
 
+const audience = "ledger"
+
 type Client struct {
 	baseURL string
 	http    *http.Client
+	signer  *tenant.ServiceSigner
+}
+
+func (c *Client) WithSigner(s *tenant.ServiceSigner) *Client {
+	c.signer = s
+	return c
 }
 
 func New(baseURL string, httpClient *http.Client) *Client {
@@ -61,11 +69,18 @@ type balancesBody struct {
 	} `json:"rows"`
 }
 
-type StatusError struct{ Status int }
+type StatusError struct {
+	Status int
+	Code   string
+}
 
 func (e *StatusError) Error() string { return fmt.Sprintf("ledger: unexpected status %d", e.Status) }
 
-func (c *Client) get(ctx context.Context, path string, q url.Values, subject string) ([]byte, error) {
+const CodeIdempotencyInProgress = "LEDGER_IDEMPOTENCY_IN_PROGRESS"
+
+var readDuties = []string{"ledger.balance.read", "ledger.journal.read"}
+
+func (c *Client) get(ctx context.Context, legalEntityID, path string, q url.Values, subject string) ([]byte, error) {
 	principal, ok := tenant.FromContext(ctx)
 	if !ok {
 		return nil, errors.New("ledger: no principal in context")
@@ -78,7 +93,13 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, subject str
 	if err != nil {
 		return nil, fmt.Errorf("ledger: %w", err)
 	}
-	identity.Forward(req, principal)
+	signed, err := c.signer.ApplyFor(req, principal, audience, legalEntityID, readDuties)
+	if err != nil {
+		return nil, fmt.Errorf("ledger: %w", err)
+	}
+	if !signed {
+		identity.Forward(req, principal)
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		slog.ErrorContext(ctx, "ledger request failed", "err", err, "subject", subject, "correlationId", middleware.GetReqID(ctx))
@@ -97,17 +118,17 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, subject str
 	return raw, nil
 }
 
-func (c *Client) AccountBalance(ctx context.Context, ledgerID, account, periodTo string) (Balance, error) {
+func (c *Client) AccountBalance(ctx context.Context, legalEntityID, ledgerID, account, periodTo string) (Balance, error) {
 	q := url.Values{"ledger": {ledgerID}, "period_to": {periodTo}, "account_from": {account}, "account_to": {account}}
-	raw, err := c.get(ctx, balancesPath, q, account)
+	raw, err := c.get(ctx, legalEntityID, balancesPath, q, account)
 	if err != nil {
 		return Balance{}, err
 	}
 	return parse(ctx, raw, account)
 }
 
-func (c *Client) LegalEntity(ctx context.Context, ledgerID string) (string, error) {
-	raw, err := c.get(ctx, ledgersPath+url.PathEscape(ledgerID), nil, ledgerID)
+func (c *Client) LegalEntity(ctx context.Context, legalEntityID, ledgerID string) (string, error) {
+	raw, err := c.get(ctx, legalEntityID, ledgersPath+url.PathEscape(ledgerID), nil, ledgerID)
 	if err != nil {
 		return "", err
 	}
@@ -143,6 +164,7 @@ func parse(ctx context.Context, raw []byte, account string) (Balance, error) {
 }
 
 type Entry struct {
+	LegalEntityID  string
 	LedgerID       string
 	DocumentID     string
 	PostingDate    string
@@ -207,7 +229,13 @@ func (c *Client) Post(ctx context.Context, e Entry) (string, error) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Idempotency-Key", e.IdempotencyKey)
-	identity.Forward(req, principal)
+	signed, err := c.signer.ApplyFor(req, principal, audience, e.LegalEntityID, []string{"ledger.journal.post"})
+	if err != nil {
+		return "", fmt.Errorf("ledger: %w", err)
+	}
+	if !signed {
+		identity.Forward(req, principal)
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		slog.ErrorContext(ctx, "ledger post failed", "err", err, "key", e.IdempotencyKey, "correlationId", middleware.GetReqID(ctx))
@@ -221,7 +249,11 @@ func (c *Client) Post(ctx context.Context, e Entry) (string, error) {
 	}
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		slog.ErrorContext(ctx, "ledger rejected the entry", "status", resp.StatusCode, "key", e.IdempotencyKey, "correlationId", middleware.GetReqID(ctx))
-		return "", &StatusError{Status: resp.StatusCode}
+		var problem struct {
+			Code string `json:"code"`
+		}
+		_ = json.Unmarshal(raw, &problem)
+		return "", &StatusError{Status: resp.StatusCode, Code: problem.Code}
 	}
 	var result entryResult
 	if err := json.Unmarshal(raw, &result); err != nil || len(result.Entries) == 0 || result.Entries[0].ID == "" {

@@ -2,9 +2,12 @@ package store_test
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
@@ -249,7 +252,7 @@ func TestMigration0005_InvoiceTablesIsolationAndUniqueNumber(t *testing.T) {
 		return n
 	}
 	st := store.New(pool)
-	if _, err := st.ReservePosting(tenant.With(ctx, one), store.PendingPosting{BaseKey: "k", Subjects: []string{receiptID, invoiceID}, Hash: "h", Journal: []byte(`{}`)}); err != nil {
+	if _, err := st.ReservePosting(tenant.With(ctx, one), store.PendingPosting{BaseKey: "k", Subjects: []string{receiptID, invoiceID}, Hash: "h", Journal: []byte(`{"legalEntityId":"` + one.LegalEntityID + `"}`)}); err != nil {
 		t.Fatal(err)
 	}
 	for _, table := range []string{"receiving_pending_posting", "receiving_pending_posting_subject"} {
@@ -259,6 +262,12 @@ func TestMigration0005_InvoiceTablesIsolationAndUniqueNumber(t *testing.T) {
 		if got := pending(principal(2), table); got != 0 {
 			t.Errorf("%s: other tenant sees %d rows, want 0", table, got)
 		}
+		if got := pending(otherEntity, table); got != 0 {
+			t.Errorf("%s: other legal entity sees %d rows, want 0", table, got)
+		}
+	}
+	if _, err := st.ClaimPending(tenant.With(ctx, otherEntity), "k", 0, time.Minute); !errors.Is(err, store.ErrPendingNotFound) {
+		t.Errorf("an admin of another legal entity must not see or claim the pending posting: %v", err)
 	}
 	if err := st.EnsureNoPending(tenant.With(ctx, principal(2)), receiptID); err != nil {
 		t.Errorf("another tenant must not see the pending posting: %v", err)
@@ -268,5 +277,22 @@ func TestMigration0005_InvoiceTablesIsolationAndUniqueNumber(t *testing.T) {
 	}
 	if err := run(one, `update receiving_vendor_invoice set total = 0 where tenant_id = $1`, one.TenantID); err == nil {
 		t.Error("passage_app must not be able to update invoices")
+	}
+}
+
+func TestMigration0008_EmptyLegalEntityIsACheckViolationNotACastError(t *testing.T) {
+	admin, pool := testkit.DBWithApp(t)
+	ctx := context.Background()
+	one := principal(1)
+	if err := dbx.Migrate(tenant.With(ctx, one), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	st := store.New(pool)
+	for name, journal := range map[string]string{"empty": `{"legalEntityId":""}`, "absent": `{}`} {
+		_, err := st.ReservePosting(tenant.With(ctx, one), store.PendingPosting{BaseKey: "k-" + name, Subjects: []string{"s-" + name}, Hash: "h", Journal: []byte(journal)})
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || (pgErr.Code != "23514" && pgErr.Code != "42501") {
+			t.Errorf("%s: err %v, want a check or row-level-security violation, not a cast error", name, err)
+		}
 	}
 }

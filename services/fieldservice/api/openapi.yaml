@@ -7,13 +7,16 @@ info:
     service work orders with follow-ups, service KPIs, the installed base with warranties,
     activities on any record, the knowledge base (wave 45, slices 1 to 3) and generic
     case management: case processes, the case category tree and cases in any
-    non-service category with stages, associations and a log (slice 4).
+    non-service category with stages, associations and a log (slice 4), supplier warranty
+    claims with vendor recovery, case mailboxes and email-to-case intake (slice 5).
     Service routes are mounted under /v1/service and generic case routes under
-    /v1/cases, /v1/case-categories and /v1/case-processes (PRD 8.45.5); the browser
+    /v1/cases, /v1/case-categories, /v1/case-processes, /v1/case-mailboxes and
+    /v1/inbound-messages (PRD 8.45.5); the browser
     reaches them as /api/v1/... through the web BFF. Every mutating operation requires an
     Idempotency-Key header, except the case transition, where it is optional because
     If-Match already makes a retry safe, the If-Match-guarded custom methods of slice 3 (a retry after success
-    is answered 412 and the client reloads), and the shipment receipt, which is idempotent per serial. Custom
+    is answered 412 and the client reloads), the shipment receipt, which is idempotent per serial, the mailbox upsert (keyed by address) and the
+    inbound message (keyed by its Message-ID). Custom
     methods (`:transition`, `:post`, `:follow-up`, `:install`, `:complete`, `:publish`, ...) and PUT require If-Match
     with the current aggregate version. Errors are RFC 9457 problem details whose
     `code` is listed in the service README.
@@ -1262,6 +1265,342 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
+  /v1/service/supplier-claims:
+    post:
+      operationId: createSupplierClaim
+      summary: Draft a supplier warranty claim (FR-45.15, BR-45.12)
+      description: |
+        A SERVICE_WO claim names POSTED work orders and gets one line per order from its WARRANTY lines: the
+        warranty cost of its part lines and the hours of its labor lines, with the item and serial of the
+        case's service object. Legal entity, currency and the completion date (the earliest of the orders)
+        come from the orders. An EAM_WO claim (standing in for the wave-44 `eam.warranty.claimable.v1`
+        consumer) carries one line per source and its legal entity, currency and completion date. Each line
+        claims partAmount + laborHours × laborRate, rounded half-even to the currency (laborRate 0 when the
+        vendor does not cover labor). A work order is claimed once (SVC-SWC-009).
+      x-passage-duty: SvcClaimMaintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [vendorPartyId, sourceKind, sourceIds]
+              properties:
+                vendorPartyId: { type: string, format: uuid }
+                sourceKind: { type: string, enum: [SERVICE_WO, EAM_WO] }
+                sourceIds: { type: array, minItems: 1, maxItems: 50, uniqueItems: true, items: { type: string, format: uuid } }
+                laborRate: { type: string, description: "Vendor labor rate per hour as a decimal string; default 0", example: "60.00" }
+                failureCode: { type: string, maxLength: 40 }
+                windowDays: { type: integer, minimum: 1, maximum: 365, default: 30 }
+                returnRequired: { type: boolean, default: false, description: The vendor requires the failed part back before submission. }
+                legalEntityId: { type: string, format: uuid, description: EAM_WO only. }
+                currency: { type: string, pattern: "^[A-Z]{3}$", description: EAM_WO only. }
+                completedOn: { type: string, format: date, description: EAM_WO only. }
+                lines:
+                  type: array
+                  description: EAM_WO only; one per source id, in order.
+                  items:
+                    type: object
+                    required: [itemId]
+                    properties:
+                      itemId: { type: string, format: uuid }
+                      serial: { type: string, maxLength: 100 }
+                      failureCode: { type: string, maxLength: 40 }
+                      partAmount: { type: string }
+                      laborHours: { type: string }
+      responses:
+        "201":
+          description: The DRAFT claim
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SupplierClaim" }
+        "200": { $ref: "#/components/responses/Replayed" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: listSupplierClaims
+      summary: List supplier claims newest first
+      x-passage-duty: SvcClaimMaintain or SvcInquire
+      parameters:
+        - { name: vendorPartyId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [DRAFT, SUBMITTED, ACCEPTED, PARTIALLY_ACCEPTED, REJECTED, SETTLED, CLOSED] } }
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: One page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/SupplierClaim" } }
+                  nextCursor: { type: string, format: uuid }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/service/supplier-claims/{id}:
+    get:
+      operationId: getSupplierClaim
+      summary: Read one supplier claim; ETag carries its version
+      x-passage-duty: SvcClaimMaintain or SvcInquire
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: The claim
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SupplierClaim" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/service/supplier-claims/{id}:submit:
+    post:
+      operationId: submitSupplierClaim
+      summary: Submit a DRAFT claim to the vendor today (BR-45.12)
+      description: Refused after the vendor's claim window (SVC-SWC-001) and, when the vendor requires the failed part back, without a return order (SVC-SWC-002).
+      x-passage-duty: SvcClaimMaintain
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                vendorReference: { type: string, maxLength: 100 }
+                returnOrderId: { type: string, maxLength: 100, description: The wave-30/17 vendor return of the failed part. }
+      responses:
+        "200": { $ref: "#/components/responses/ClaimMoved" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/service/supplier-claims/{id}/decision:
+    post:
+      operationId: decideSupplierClaim
+      summary: Record the vendor decision on a SUBMITTED claim (BR-45.12)
+      description: |
+        ACCEPTED accepts every line in full (acceptedAmounts may be omitted); PARTIALLY_ACCEPTED needs one
+        amount per line totalling more than zero and less than the claim; REJECTED needs a reason and
+        accepts nothing. No line accepts more than it claimed (SVC-SWC-003).
+      x-passage-duty: SvcClaimMaintain
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [ACCEPTED, PARTIALLY_ACCEPTED, REJECTED] }
+                reason: { type: string, maxLength: 500 }
+                vendorReference: { type: string, maxLength: 100 }
+                acceptedAmounts: { type: array, items: { type: string }, description: One decimal string per claim line, in order. }
+      responses:
+        "200": { $ref: "#/components/responses/ClaimMoved" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/service/supplier-claims/{id}:settle:
+    post:
+      operationId: settleSupplierClaim
+      summary: Match the vendor credit note to an accepted claim (BR-45.12, AC-45.13)
+      description: |
+        The credit note quotes the claim's vendor reference (SVC-SWC-010) and credits exactly the accepted
+        total in the claim currency (SVC-SWC-005). The claim becomes SETTLED with the credit as the recovered
+        amount, and `dev.passage.service.supplierclaim.settled.v1` goes to the outbox for the GL warranty
+        recovery.
+      x-passage-duty: SvcClaimMaintain
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [creditNoteId, vendorReference, amount, currency]
+              properties:
+                creditNoteId: { type: string, maxLength: 100, description: The wave-18 vendor credit note. }
+                vendorReference: { type: string, maxLength: 100 }
+                amount: { type: string, example: "250.00" }
+                currency: { type: string, pattern: "^[A-Z]{3}$" }
+      responses:
+        "200": { $ref: "#/components/responses/ClaimMoved" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/service/supplier-claims/{id}:close:
+    post:
+      operationId: closeSupplierClaim
+      summary: Close a REJECTED (with its reason, no posting) or SETTLED claim
+      x-passage-duty: SvcClaimMaintain
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200": { $ref: "#/components/responses/ClaimMoved" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "412": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "428": { $ref: "#/components/responses/Problem" }
+  /v1/case-mailboxes:
+    post:
+      operationId: upsertCaseMailbox
+      summary: Set the legal entity and default category of a case mailbox (BR-45.13)
+      description: |
+        The lower-cased address is the natural key, so the call is idempotent without an Idempotency-Key.
+        The default category cannot be SERVICE or CUSTOMER_SERVICE (CASE-CAT-002) or require a customer
+        (COLLECTIONS, CASE-MAIL-003).
+      x-passage-duty: CaseSetupAdmin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [address, legalEntityId, categoryId]
+              properties:
+                address: { type: string, format: email, maxLength: 320 }
+                legalEntityId: { type: string, format: uuid }
+                categoryId: { type: string, format: uuid }
+      responses:
+        "201":
+          description: A new mailbox
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CaseMailbox" }
+        "200":
+          description: The mailbox was updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CaseMailbox" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: listCaseMailboxes
+      summary: List the case mailboxes by address
+      x-passage-duty: CaseMaintain, CaseCreate or CaseSetupAdmin
+      responses:
+        "200":
+          description: Every mailbox in the caller's legal-entity scope
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/CaseMailbox" } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+  /v1/inbound-messages:
+    post:
+      operationId: ingestInboundMessage
+      summary: Record one inbound email from the integration hub and thread it onto a case (FR-45.16, BR-45.13)
+      description: |
+        The message is attached to the case a `[CS-n]` subject token names (with or without the zero padding)
+        or, failing that, the case holding the message In-Reply-To names, unless that case is CLOSED or
+        CANCELED: then a new case continues it, linked by reopenedFrom. Otherwise a new case is opened in the
+        mailbox's default category, the caller owning it. A case the caller may not access (BR-45.10) is not
+        matched. A new case answers 201 with `acknowledge` true unless the mail is an auto-reply
+        (Auto-Submitted other than "no", or X-Autoreply); the hub sends the acknowledgment. An attached
+        message answers 200 with the info message CASE-MAIL-001. The Message-ID is the idempotency key: a
+        redelivery answers 200 with Idempotent-Replayed true and the stored result.
+      x-passage-duty: CaseCreate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mailbox, messageId, fromAddress, receivedAt]
+              properties:
+                mailbox: { type: string, format: email }
+                messageId: { type: string, maxLength: 998 }
+                inReplyTo: { type: string, maxLength: 998 }
+                fromAddress: { type: string, format: email }
+                subject: { type: string, maxLength: 998 }
+                body: { type: string, maxLength: 100000, description: Plain-text body; the first 4000 characters describe a new case. }
+                receivedAt: { type: string, format: date-time }
+                customerPartyId: { type: string, format: uuid, description: The sender's party when the hub matched it to a contact. }
+                attachments: { type: array, maxItems: 50, items: { $ref: "#/components/schemas/MailAttachment" } }
+                autoSubmitted: { type: string, maxLength: 100, description: The Auto-Submitted header (RFC 3834). }
+                xAutoreply: { type: boolean, description: An X-Autoreply header was present. }
+      responses:
+        "201":
+          description: A new case was opened for the message
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InboundResult" }
+        "200":
+          description: The message was attached to an open case (message CASE-MAIL-001), or a redelivery (Idempotent-Replayed true)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InboundResult" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+    get:
+      operationId: listInboundMessages
+      summary: List inbound email newest first, without the messages of cases the caller may not read
+      x-passage-duty: CaseMaintain
+      parameters:
+        - { name: mailbox, in: query, schema: { type: string, format: email } }
+        - { name: caseId, in: query, schema: { type: string, format: uuid } }
+        - { name: route, in: query, schema: { type: string, enum: [ATTACHED, NEW_CASE] } }
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: One page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/InboundMessage" } }
+                  nextCursor: { type: string, format: uuid }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
 components:
   parameters:
     Id:
@@ -1301,6 +1640,13 @@ components:
           schema: { $ref: "#/components/schemas/Problem" }
     Replayed:
       description: The stored result of an earlier request with the same Idempotency-Key and body (header Idempotent-Replayed true).
+    ClaimMoved:
+      description: The claim after the move (or a replay, with Idempotent-Replayed true); the ETag carries its new version
+      headers:
+        ETag: { $ref: "#/components/headers/ETag" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/SupplierClaim" }
   schemas:
     Problem:
       type: object
@@ -1895,3 +2241,100 @@ components:
       properties:
         case: { $ref: "#/components/schemas/GenericCase" }
         created: { type: boolean, description: True when a new case linked by reopenedFrom was created. }
+    ClaimLine:
+      type: object
+      required: [sourceId, partAmount, laborHours, laborRate, claimedAmount, acceptedAmount]
+      properties:
+        sourceId: { type: string, format: uuid }
+        itemId: { type: string, format: uuid }
+        serial: { type: string }
+        failureCode: { type: string }
+        partAmount: { type: string }
+        laborHours: { type: string }
+        laborRate: { type: string }
+        claimedAmount: { type: string, description: partAmount + laborHours × laborRate }
+        acceptedAmount: { type: string }
+    SupplierClaim:
+      type: object
+      required: [id, number, vendorPartyId, legalEntityId, sourceKind, sourceIds, currency, laborRate, lines, claimedTotal, acceptedTotal,
+        recoveredAmount, status, completedOn, windowDays, windowEndsOn, returnRequired, returnOrderId, vendorReference, decisionReason,
+        creditNoteId, version, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: string, example: SWC-000001 }
+        vendorPartyId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        sourceKind: { type: string, enum: [SERVICE_WO, EAM_WO] }
+        sourceIds: { type: array, items: { type: string, format: uuid } }
+        currency: { type: string }
+        laborRate: { type: string }
+        lines: { type: array, items: { $ref: "#/components/schemas/ClaimLine" } }
+        claimedTotal: { type: string }
+        acceptedTotal: { type: string }
+        recoveredAmount: { type: string }
+        status: { type: string, enum: [DRAFT, SUBMITTED, ACCEPTED, PARTIALLY_ACCEPTED, REJECTED, SETTLED, CLOSED] }
+        completedOn: { type: string, format: date }
+        windowDays: { type: integer }
+        windowEndsOn: { type: string, format: date, description: The last day the claim can be submitted. }
+        returnRequired: { type: boolean }
+        returnOrderId: { type: string }
+        submittedOn: { type: string, format: date }
+        vendorReference: { type: string }
+        decisionReason: { type: string }
+        decidedAt: { type: string, format: date-time }
+        creditNoteId: { type: string }
+        settledAt: { type: string, format: date-time }
+        closedAt: { type: string, format: date-time }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    CaseMailbox:
+      type: object
+      required: [address, legalEntityId, categoryId, categoryCode, updatedAt]
+      properties:
+        address: { type: string, format: email }
+        legalEntityId: { type: string, format: uuid }
+        categoryId: { type: string, format: uuid }
+        categoryCode: { type: string }
+        updatedAt: { type: string, format: date-time }
+    MailAttachment:
+      type: object
+      required: [name, objectRef]
+      properties:
+        name: { type: string, maxLength: 255 }
+        contentType: { type: string, maxLength: 255 }
+        sizeBytes: { type: integer, minimum: 0, maximum: 26214400 }
+        objectRef: { type: string, maxLength: 512, description: Where the hub stored the bytes. }
+    InboundMessage:
+      type: object
+      required: [id, mailbox, messageId, inReplyTo, fromAddress, subject, body, receivedAt, caseId, caseNumber, route, automated, acknowledge,
+        attachments, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        mailbox: { type: string }
+        messageId: { type: string }
+        inReplyTo: { type: string }
+        fromAddress: { type: string }
+        subject: { type: string }
+        body: { type: string }
+        receivedAt: { type: string, format: date-time }
+        caseId: { type: string, format: uuid }
+        caseNumber: { type: string, example: CS-001042 }
+        route: { type: string, enum: [ATTACHED, NEW_CASE] }
+        reopenedFrom: { type: string, format: uuid, description: The closed case a NEW_CASE message continued. }
+        reopenedFromNumber: { type: string }
+        automated: { type: boolean }
+        acknowledge: { type: boolean, description: The hub sends the one acknowledgment of the new case. }
+        attachments: { type: array, items: { $ref: "#/components/schemas/MailAttachment" } }
+        createdAt: { type: string, format: date-time }
+    InboundResult:
+      allOf:
+        - $ref: "#/components/schemas/InboundMessage"
+        - type: object
+          properties:
+            message:
+              type: object
+              description: The info message CASE-MAIL-001 when the email was attached to a case.
+              properties:
+                code: { type: string, example: CASE-MAIL-001 }
+                text: { type: string }

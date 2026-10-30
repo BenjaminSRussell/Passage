@@ -4,6 +4,7 @@ import { ActivitiesPage, ActivityDetailPage, NewActivityPage } from "./Activitie
 import { AgreementDetailPage } from "./AgreementDetailPage";
 import { AgreementsPage, NewAgreementPage } from "./AgreementsPage";
 import { CaseDetailPage } from "./CaseDetailPage";
+import { CaseMailboxPage } from "./CaseMailboxPage";
 import { CaseSetupPage, NewCaseCategoryPage, NewCaseProcessPage } from "./CaseSetupPage";
 import { CasesPage, OpenCasePage } from "./CasesPage";
 import { GenericCaseDetailPage } from "./GenericCaseDetailPage";
@@ -13,13 +14,15 @@ import { KpisPage } from "./KpisPage";
 import { ServiceObjectDetailPage } from "./ServiceObjectDetailPage";
 import { NewServiceObjectPage, ReceiveShipmentPage, ServiceObjectsPage } from "./ServiceObjectsPage";
 import { NewSlaProfilePage, SlaProfilesPage } from "./SlaProfilesPage";
+import { SupplierClaimDetailPage } from "./SupplierClaimDetailPage";
+import { NewSupplierClaimPage, SupplierClaimsPage } from "./SupplierClaimsPage";
 import { WorkOrderDetailPage } from "./WorkOrderDetailPage";
 import { NewWorkOrderPage, WorkOrdersPage } from "./WorkOrdersPage";
 
 const service: PassageModule = {
   id: "service",
   title: "Service",
-  description: "Open service cases with entitlement and SLA clocks, pause and resolve them, maintain service agreements and SLA profiles, run work orders through to billing and follow-up, track SLA attainment and first-time fix, keep the installed base with its warranties, plan activities on any record, maintain the knowledge base, and run HR, collections, audit and other cases through their category's stages.",
+  description: "Open service cases with entitlement and SLA clocks, pause and resolve them, maintain service agreements and SLA profiles, run work orders through to billing and follow-up, track SLA attainment and first-time fix, keep the installed base with its warranties, plan activities on any record, maintain the knowledge base, run HR, collections, audit and other cases through their category's stages, recover warranty cost from vendors with supplier claims, and turn inbound email into cases.",
   routes: [
     { path: "/service", element: createElement(CasesPage), handle: { title: "Service cases" } },
     { path: "/service/cases", element: createElement(CasesPage) },
@@ -50,6 +53,10 @@ const service: PassageModule = {
     { path: "/service/case-setup", element: createElement(CaseSetupPage), handle: { title: "Case setup" } },
     { path: "/service/case-setup/categories/new", element: createElement(NewCaseCategoryPage), handle: { title: "New case category" } },
     { path: "/service/case-setup/processes/new", element: createElement(NewCaseProcessPage), handle: { title: "New case process" } },
+    { path: "/service/supplier-claims", element: createElement(SupplierClaimsPage), handle: { title: "Supplier warranty claims" } },
+    { path: "/service/supplier-claims/new", element: createElement(NewSupplierClaimPage), handle: { title: "New supplier claim" } },
+    { path: "/service/supplier-claims/:id", element: createElement(SupplierClaimDetailPage), handle: { title: "Supplier claim" } },
+    { path: "/service/case-mailbox", element: createElement(CaseMailboxPage), handle: { title: "Case mailbox" } },
   ],
   nav: [
     { label: "Service cases", to: "/service/cases", duty: "SvcInquire" },
@@ -63,6 +70,8 @@ const service: PassageModule = {
     { label: "Knowledge base", to: "/service/knowledge", duty: "KbRead" },
     { label: "Cases (all categories)", to: "/service/case-management", duty: "CaseMaintain" },
     { label: "Case setup", to: "/service/case-setup", duty: "CaseSetupAdmin" },
+    { label: "Supplier claims", to: "/service/supplier-claims", duty: "SvcClaimMaintain" },
+    { label: "Case mailbox", to: "/service/case-mailbox", duty: "CaseMaintain" },
   ],
 };
 

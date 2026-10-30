@@ -14,3 +14,14 @@ resources:
   limits: { cpu: 500m, memory: 512Mi }
 serviceMonitor:
   enabled: false
+
+serviceIdentity:
+  signingKeySecret: ""
+  keyId: ""
+  publicKeys: ""
+
+postingProfilesSecret: ""
+
+fieldCrypt:
+  keysSecret: ""
+  currentKeyId: ""

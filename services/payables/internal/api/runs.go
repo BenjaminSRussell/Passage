@@ -2,9 +2,6 @@ package api
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -36,7 +33,11 @@ const (
 
 type RunStore interface {
 	GetProposal(ctx context.Context, id string) (store.Proposal, error)
+	ProposalPayees(ctx context.Context, proposalID string) (map[string]domain.CreditorDTO, error)
 	StartRun(ctx context.Context, in store.NewRun) (store.PaymentRun, bool, error)
+	VerifyRunLines(ctx context.Context, id string) (store.PaymentRun, error)
+	BeginJournal(ctx context.Context, id string) (store.PaymentRun, error)
+	RejectJournal(ctx context.Context, id string) (store.PaymentRun, error)
 	GetRun(ctx context.Context, id string) (store.PaymentRun, error)
 	RunFileContent(ctx context.Context, id string) (string, error)
 	InvoiceNumbers(ctx context.Context, proposalID string) (map[string]string, error)
@@ -49,25 +50,24 @@ type RunStore interface {
 
 type LedgerPoster interface {
 	Post(ctx context.Context, e ledger.Entry) (string, error)
-	LegalEntity(ctx context.Context, ledgerID string) (string, error)
+	LegalEntity(ctx context.Context, legalEntityID, ledgerID string) (string, error)
 }
 
 type runDeps struct {
-	store          RunStore
-	ledger         LedgerPoster
-	controlAccount string
-	started        atomic.Int64
-	replayed       atomic.Int64
-	completed      atomic.Int64
-	failed         atomic.Int64
-	ledgerFaults   atomic.Int64
+	store        RunStore
+	ledger       LedgerPoster
+	profiles     PostingProfiles
+	started      atomic.Int64
+	replayed     atomic.Int64
+	completed    atomic.Int64
+	failed       atomic.Int64
+	ledgerFaults atomic.Int64
+	stuck        atomic.Int64
+	fileReads    atomic.Int64
 }
 
-func (a *API) WithPaymentRuns(s RunStore, l LedgerPoster, controlAccount string) *API {
-	if controlAccount == "" {
-		controlAccount = DefaultControlAcct
-	}
-	a.runs = &runDeps{store: s, ledger: l, controlAccount: controlAccount}
+func (a *API) WithPaymentRuns(s RunStore, l LedgerPoster, profiles PostingProfiles) *API {
+	a.runs = &runDeps{store: s, ledger: l, profiles: profiles}
 	return a
 }
 
@@ -85,47 +85,12 @@ func (a *API) registerRuns(r chi.Router) {
 	run.Post(pathRuns+"/{id}:complete", a.completeRun)
 	run.Post(pathRuns+"/{id}:fail", a.failRun)
 	r.With(authz.RequireDuty(dutyRunRead)).Get(pathRuns+"/{id}", a.getRun)
-	r.With(authz.RequireDuty(dutyRunRead)).Get(pathRuns+"/{id}/file", a.getRunFile)
+	run.Get(pathRuns+"/{id}/file", a.getRunFile)
 }
 
 type runRequest struct {
-	LegalEntityID   string               `json:"legalEntityId"`
-	ProposalID      string               `json:"proposalId"`
-	LedgerID        string               `json:"ledgerId"`
-	BankAccount     string               `json:"bankAccount"`
-	ControlAccount  string               `json:"controlAccount"`
-	DiscountAccount string               `json:"discountAccount"`
-	File            domain.RunFileConfig `json:"file"`
-}
-
-func (q runRequest) validate() map[string]string {
-	fields := map[string]string{}
-	if !ids.Valid(q.ProposalID) {
-		fields["proposalId"] = "is required and must be a UUID"
-	}
-	if !ids.Valid(q.LedgerID) {
-		fields["ledgerId"] = "is required and must be a UUID"
-	}
-	for name, v := range map[string]string{"bankAccount": q.BankAccount, "controlAccount": q.ControlAccount} {
-		if v == "" || len(v) > maxAccountLen {
-			fields[name] = fmt.Sprintf("is required, at most %d characters", maxAccountLen)
-		}
-	}
-	if len(q.DiscountAccount) > maxAccountLen {
-		fields["discountAccount"] = fmt.Sprintf("at most %d characters", maxAccountLen)
-	}
-	for vendor := range q.File.Creditors {
-		if !ids.Valid(vendor) {
-			fields["file.creditors"] = "keys must be vendor UUIDs"
-		}
-	}
-	return fields
-}
-
-func (q runRequest) hash() string {
-	raw, _ := json.Marshal(q)
-	sum := sha256.Sum256(raw)
-	return hex.EncodeToString(sum[:])
+	LegalEntityID string `json:"legalEntityId"`
+	ProposalID    string `json:"proposalId"`
 }
 
 func (a *API) runLog(r *http.Request, msg string, run store.PaymentRun) {
@@ -150,26 +115,23 @@ func (a *API) startRun(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	req.LegalEntityID = le
-	if req.ControlAccount == "" {
-		req.ControlAccount = a.runs.controlAccount
-	}
-	if fields := req.validate(); len(fields) > 0 {
-		a.invalid(w, r, fields)
+	if !ids.Valid(req.ProposalID) {
+		a.invalid(w, r, map[string]string{"proposalId": "is required and must be a UUID"})
 		return
 	}
 	ctx := r.Context()
-	if a.runs.ledger == nil {
-		a.problem(w, r, http.StatusServiceUnavailable, codeRatesUnconfigured, "ledger is not configured")
+	profile, configured := a.runs.profiles.For(le)
+	if !configured || a.runs.ledger == nil {
+		a.problem(w, r, http.StatusUnprocessableEntity, domain.CodeRunConfig, "the legal entity has no payment run posting profile or the ledger is not configured")
 		return
 	}
-	ledgerEntity, err := a.runs.ledger.LegalEntity(ctx, req.LedgerID)
+	ledgerEntity, err := a.runs.ledger.LegalEntity(ctx, le, profile.LedgerID)
 	if err != nil {
 		a.runLedgerFailure(w, r, err)
 		return
 	}
 	if want, _ := ids.Canonical(ledgerEntity); want != le {
-		a.problem(w, r, http.StatusUnprocessableEntity, domain.CodeRunConfig, "the ledger belongs to a different legal entity")
+		a.problem(w, r, http.StatusUnprocessableEntity, domain.CodeRunConfig, "the configured ledger belongs to a different legal entity")
 		return
 	}
 	proposal, err := a.runs.store.GetProposal(ctx, req.ProposalID)
@@ -181,22 +143,37 @@ func (a *API) startRun(w http.ResponseWriter, r *http.Request) {
 		a.fault(w, r, "payment proposal get failed", err)
 		return
 	}
-	if err := req.File.CheckVendors(proposal.Groups); err != nil {
+	payees, err := a.runs.store.ProposalPayees(ctx, req.ProposalID)
+	if errors.Is(err, store.ErrNoFieldCrypt) {
+		a.problem(w, r, http.StatusServiceUnavailable, codeRatesUnconfigured, err.Error())
+		return
+	}
+	if err != nil {
+		a.fault(w, r, "payment proposal payees failed", err)
+		return
+	}
+	if err := domain.CheckRunnable(proposal.LegalEntityCurrency, proposal.Groups, payees); err != nil {
 		a.reject(w, r, err)
 		return
 	}
-	fileRequest, _ := json.Marshal(req.File)
+	if domain.HasDiscount(proposal.Groups) && profile.DiscountAccount == "" {
+		a.problem(w, r, http.StatusUnprocessableEntity, domain.CodeRunConfig, "the proposal takes cash discounts and the posting profile has no discount account")
+		return
+	}
 	run, created, err := a.runs.store.StartRun(ctx, store.NewRun{
-		LegalEntityID: le, ProposalID: req.ProposalID, RequestedBy: caller.UserID, RequestHash: req.hash(), LedgerID: req.LedgerID,
-		BankAccount: req.BankAccount, ControlAccount: req.ControlAccount, DiscountAccount: req.DiscountAccount, FileRequest: fileRequest,
+		LegalEntityID: le, ProposalID: req.ProposalID, RequestedBy: caller.UserID, Today: a.today().Format(time.DateOnly), LedgerID: profile.LedgerID,
+		BankAccount: profile.BankAccount, ControlAccount: profile.ControlAccount, DiscountAccount: profile.DiscountAccount,
 	})
 	switch {
 	case errors.Is(err, store.ErrProposalNotFound):
 		a.problem(w, r, http.StatusNotFound, codeNotFound, "payment proposal not found")
 	case errors.Is(err, store.ErrNotApproved):
 		a.problem(w, r, http.StatusConflict, domain.CodeProposalState, "payment proposal is not approved")
-	case errors.Is(err, store.ErrRunConflict):
-		a.problem(w, r, http.StatusConflict, domain.CodeRunConflict, err.Error())
+	case errors.Is(err, store.ErrRunDateElapsed):
+		a.problem(w, r, http.StatusConflict, domain.CodeRunDatePassed, "run date has passed; create a new proposal")
+	case errors.Is(err, store.ErrExecutorConflict):
+		slog.Warn("payment run refused: executor created or approved the proposal", "proposalId", req.ProposalID, "userId", caller.UserID, "correlationId", middleware.GetReqID(ctx))
+		a.problem(w, r, http.StatusForbidden, domain.CodeSegregation, err.Error())
 	case errors.Is(err, store.ErrUnsupportedMethod), errors.Is(err, store.ErrDiscountAccount):
 		a.problem(w, r, http.StatusUnprocessableEntity, domain.CodeRunConfig, err.Error())
 	case err != nil:
@@ -229,15 +206,20 @@ func (a *API) runID(w http.ResponseWriter, r *http.Request) (string, bool) {
 }
 
 func (a *API) runResult(w http.ResponseWriter, r *http.Request, msg string, run store.PaymentRun, err error) {
+	var changed *store.LinesChangedError
 	switch {
 	case errors.Is(err, store.ErrRunNotFound):
 		a.problem(w, r, http.StatusNotFound, codeNotFound, "payment run not found")
-	case errors.Is(err, store.ErrRunState), errors.Is(err, store.ErrJournalPosted):
+	case errors.Is(err, store.ErrRunState), errors.Is(err, store.ErrJournalRequested):
 		a.problem(w, r, http.StatusConflict, domain.CodeRunState, err.Error())
 	case errors.Is(err, store.ErrRunOutOfOrder):
 		a.problem(w, r, http.StatusConflict, domain.CodeRunOutOfOrder, err.Error())
 	case errors.Is(err, store.ErrVersionConflict), errors.Is(err, store.ErrOverSettled), errors.Is(err, store.ErrNotFound):
+		a.runs.stuck.Add(1)
+		slog.Error("payment run stuck: an open item changed after the journal posted; manual action needed", "runId", chi.URLParam(r, "id"), "step", msg, "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		a.problem(w, r, http.StatusConflict, domain.CodeRunItemChanged, "an open item changed since the proposal was approved: "+err.Error())
+	case errors.As(err, &changed):
+		a.problem(w, r, http.StatusConflict, domain.CodeRunItemChanged, changed.Error())
 	case err != nil:
 		a.fault(w, r, "payment run "+msg+" failed", err)
 	default:
@@ -317,12 +299,15 @@ func (a *API) getRunFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	content, err := a.runs.store.RunFileContent(r.Context(), id)
+	caller, _ := tenant.FromContext(r.Context())
 	switch {
 	case errors.Is(err, store.ErrRunNotFound), err == nil && content == "":
 		a.problem(w, r, http.StatusNotFound, codeNotFound, "payment file not found")
 	case err != nil:
 		a.fault(w, r, "payment file get failed", err)
 	default:
+		a.runs.fileReads.Add(1)
+		slog.Info("audit: payment file read", "audit", true, "runId", id, "userId", caller.UserID, "service", caller.Service, "tenantId", caller.TenantID, "correlationId", middleware.GetReqID(r.Context()))
 		w.Header().Set("Content-Type", "application/xml")
 		_, _ = w.Write([]byte(content))
 	}
@@ -346,9 +331,23 @@ func (a *API) generateRunFile(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, http.StatusOK, run)
 		return
 	}
+	if _, err := a.runs.store.VerifyRunLines(ctx, id); err != nil {
+		a.runResult(w, r, "generate-file", run, err)
+		return
+	}
+	profile, configured := a.runs.profiles.For(run.LegalEntityID)
+	if !configured {
+		a.problem(w, r, http.StatusUnprocessableEntity, domain.CodeRunConfig, "the legal entity has no payment run posting profile")
+		return
+	}
 	proposal, err := a.runs.store.GetProposal(ctx, run.ProposalID)
 	if err != nil {
 		a.fault(w, r, "payment proposal get failed", err)
+		return
+	}
+	payees, err := a.runs.store.ProposalPayees(ctx, run.ProposalID)
+	if err != nil {
+		a.fault(w, r, "payment proposal payees failed", err)
 		return
 	}
 	numbers, err := a.runs.store.InvoiceNumbers(ctx, run.ProposalID)
@@ -356,17 +355,12 @@ func (a *API) generateRunFile(w http.ResponseWriter, r *http.Request) {
 		a.fault(w, r, "invoice numbers failed", err)
 		return
 	}
-	var cfg domain.RunFileConfig
-	if err := json.Unmarshal(run.FileRequest, &cfg); err != nil {
-		a.fault(w, r, "stored file request unreadable", err)
-		return
-	}
 	runDate, err := time.Parse(time.DateOnly, proposal.RunDate)
 	if err != nil {
 		a.fault(w, r, "proposal run date unreadable", err)
 		return
 	}
-	file, payments, err := domain.BuildRunFile(cfg, run.ID, runDate, a.now(), proposal.Groups, numbers)
+	file, payments, err := domain.BuildRunFile(profile.File, payees, run.ID, runDate, a.now(), proposal.Groups, numbers)
 	if err != nil {
 		a.reject(w, r, err)
 		return
@@ -409,6 +403,10 @@ func (a *API) postRunJournal(w http.ResponseWriter, r *http.Request) {
 		a.problem(w, r, http.StatusServiceUnavailable, codeRatesUnconfigured, "ledger is not configured")
 		return
 	}
+	if _, err := a.runs.store.BeginJournal(ctx, id); err != nil {
+		a.runResult(w, r, "post-journal", run, err)
+		return
+	}
 	proposal, err := a.runs.store.GetProposal(ctx, run.ProposalID)
 	if err != nil {
 		a.fault(w, r, "payment proposal get failed", err)
@@ -419,11 +417,17 @@ func (a *API) postRunJournal(w http.ResponseWriter, r *http.Request) {
 		discountAccount = *run.DiscountAccount
 	}
 	entryID, err := a.runs.ledger.Post(ctx, ledger.Entry{
-		LedgerID: run.LedgerID, DocumentID: run.ID, PostingDate: proposal.RunDate, Currency: proposal.LegalEntityCurrency,
+		LegalEntityID: run.LegalEntityID, LedgerID: run.LedgerID, DocumentID: run.ID, PostingDate: proposal.RunDate, Currency: proposal.LegalEntityCurrency,
 		IdempotencyKey: runKeyPrefix + run.ID, SourceType: runSourceType,
 		Lines: domain.RunJournal(proposal.LegalEntityCurrency, proposal.Groups, run.ControlAccount, run.BankAccount, discountAccount),
 	})
 	if err != nil {
+		if ledgerRejected(err) {
+			if _, rerr := a.runs.store.RejectJournal(ctx, id); rerr != nil {
+				a.fault(w, r, "payment run journal rejection not recorded", rerr)
+				return
+			}
+		}
 		a.runLedgerFailure(w, r, err)
 		return
 	}
@@ -431,14 +435,24 @@ func (a *API) postRunJournal(w http.ResponseWriter, r *http.Request) {
 	a.runResult(w, r, "post-journal", recorded, err)
 }
 
+func ledgerRejected(err error) bool {
+	var se *ledger.StatusError
+	if !errors.As(err, &se) || se.Status < 400 || se.Status >= 500 {
+		return false
+	}
+	return se.Status != http.StatusRequestTimeout && se.Status != http.StatusTooManyRequests &&
+		!(se.Status == http.StatusConflict && se.Code == ledger.CodeIdempotencyInProgress)
+}
+
 func (a *API) runLedgerFailure(w http.ResponseWriter, r *http.Request, err error) {
 	var se *ledger.StatusError
-	if errors.As(err, &se) && se.Status >= 400 && se.Status < 500 && se.Status != http.StatusRequestTimeout && se.Status != http.StatusTooManyRequests {
+	if ledgerRejected(err) && errors.As(err, &se) {
 		a.problem(w, r, http.StatusUnprocessableEntity, domain.CodeRunLedger, fmt.Sprintf("the ledger rejected the request with status %d", se.Status))
 		return
 	}
 	a.runs.ledgerFaults.Add(1)
 	slog.Error("ledger unavailable", "err", err, "correlationId", middleware.GetReqID(r.Context()))
+	w.Header().Set("Retry-After", "1")
 	fail(w, r, httpx.NewProblem(http.StatusBadGateway, "COM-0502", "ledger unavailable"))
 }
 
@@ -449,4 +463,6 @@ func (a *API) writeRunMetrics(w http.ResponseWriter) {
 	fmt.Fprintf(w, "# HELP payables_payment_runs_total Payment run commands by outcome.\n# TYPE payables_payment_runs_total counter\npayables_payment_runs_total{outcome=\"started\"} %d\npayables_payment_runs_total{outcome=\"replayed\"} %d\npayables_payment_runs_total{outcome=\"completed\"} %d\npayables_payment_runs_total{outcome=\"failed\"} %d\n",
 		a.runs.started.Load(), a.runs.replayed.Load(), a.runs.completed.Load(), a.runs.failed.Load())
 	fmt.Fprintf(w, "# HELP payables_payment_run_ledger_faults_total Payment run ledger calls that failed on a server or transport fault.\n# TYPE payables_payment_run_ledger_faults_total counter\npayables_payment_run_ledger_faults_total %d\n", a.runs.ledgerFaults.Load())
+	fmt.Fprintf(w, "# HELP payables_payment_run_stuck Runs whose settlement found an item changed after the journal posted; each needs manual action.\n# TYPE payables_payment_run_stuck counter\npayables_payment_run_stuck %d\n", a.runs.stuck.Load())
+	fmt.Fprintf(w, "# HELP payables_payment_file_reads_total Audited reads of a generated payment file.\n# TYPE payables_payment_file_reads_total counter\npayables_payment_file_reads_total %d\n", a.runs.fileReads.Load())
 }

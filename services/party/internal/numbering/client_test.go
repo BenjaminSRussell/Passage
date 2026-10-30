@@ -2,6 +2,7 @@ package numbering_test
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -104,5 +105,26 @@ func TestNext_RequiresASingleLegalEntity(t *testing.T) {
 	}
 	if calls != 0 {
 		t.Fatalf("numbering called %d times without a legal entity", calls)
+	}
+}
+
+func TestNext_SignedSendsPartyServiceTokenWithoutUserDuties(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	signer, _ := tenant.NewServiceSigner("party", priv)
+	var got http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		_, _ = w.Write([]byte(`{"formatted":"PTY-000007"}`))
+	}))
+	defer srv.Close()
+	if _, err := numbering.New(srv.URL).WithSigner(signer).Next(principalContext(), "PARTY", "key-1"); err != nil {
+		t.Fatal(err)
+	}
+	if got.Get(tenant.HeaderDuties) != "" || got.Get("Idempotency-Key") != "key-1" {
+		t.Fatalf("headers %v", got)
+	}
+	claims, err := tenant.NewServiceVerifier("numbering", map[string]ed25519.PublicKey{"party": pub}).Verify(got.Get(tenant.HeaderServiceToken))
+	if err != nil || claims.Le != entityID || claims.Act != "user-1" || !claims.Principal().HasDuty("numbering.write") || claims.Principal().HasDuty("party.write") {
+		t.Fatalf("claims %+v err %v", claims, err)
 	}
 }

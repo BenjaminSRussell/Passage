@@ -33,6 +33,10 @@
     "Send notifications": {"permissions": [{"resource": "/v1/notify/messages{,/**}", "methods": ["POST"]}]},
     "View number sequences": {"permissions": [{"resource": "/v1/numbering{,/**}", "methods": ["GET"]}]},
     "Maintain number sequences": {"permissions": [{"resource": "/v1/numbering{,/**}", "methods": ["GET", "POST"]}]},
+    "numbering.write": {"permissions": [
+      {"resource": "/v1/numbering/sequences", "methods": ["POST"]},
+      {"resource": "/v1/numbering/sequences/*/next", "methods": ["POST"]}
+    ]},
     "View audit log": {"permissions": [{"resource": "/v1/audit{,/**}", "methods": ["GET"]}]},
     "Record audit changes": {"permissions": [{"resource": "/v1/audit{,/**}", "methods": ["POST"]}]},
     "Import data": {"permissions": [{"resource": "/v1/imports{,/**}", "methods": ["GET", "POST"]}]},
@@ -338,11 +342,11 @@
       {"resource": "/v1/payables/payment-runs/*:post-journal", "methods": ["POST"]},
       {"resource": "/v1/payables/payment-runs/*:settle", "methods": ["POST"]},
       {"resource": "/v1/payables/payment-runs/*:complete", "methods": ["POST"]},
-      {"resource": "/v1/payables/payment-runs/*:fail", "methods": ["POST"]}
+      {"resource": "/v1/payables/payment-runs/*:fail", "methods": ["POST"]},
+      {"resource": "/v1/payables/payment-runs/*/file", "methods": ["GET"]}
     ]},
     "payment-run.read": {"permissions": [
-      {"resource": "/v1/payables/payment-runs/*", "methods": ["GET"]},
-      {"resource": "/v1/payables/payment-runs/*/file", "methods": ["GET"]}
+      {"resource": "/v1/payables/payment-runs/*", "methods": ["GET"]}
     ]},
     "party.write": {"permissions": [
       {"resource": "/v1/party/tax-registrations:validate", "methods": ["POST"]},
@@ -363,5 +367,20 @@
     "party.approval_policy.write": {"permissions": [
       {"resource": "/v1/party/legal-entities/*/protected-fields", "methods": ["PUT"]}
     ]}
+  },
+  "service_grants": {
+    "receiving": {
+      "ledger": ["ledger.journal.post", "ledger.journal.reverse"],
+      "close": ["period.check"]
+    },
+    "payables": {
+      "ledger": ["ledger.balance.read", "ledger.journal.read", "ledger.journal.post"]
+    },
+    "workflow-ts": {
+      "payables": ["payment-run.execute"]
+    },
+    "party": {
+      "numbering": ["numbering.write"]
+    }
   }
 }

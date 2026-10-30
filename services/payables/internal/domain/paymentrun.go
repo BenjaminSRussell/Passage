@@ -6,11 +6,11 @@ import (
 
 	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/money"
 )
 
 const (
-	CodeRunConflict    = "AP-RUN-010"
 	CodeRunState       = "AP-RUN-011"
 	CodeRunOutOfOrder  = "AP-RUN-012"
 	CodeRunConfig      = "AP-RUN-013"
@@ -31,12 +31,18 @@ const (
 )
 
 type RunFileConfig struct {
-	FileNumber    string                 `json:"fileNumber,omitempty"`
-	Debtor        PartyDTO               `json:"debtor"`
-	DebtorAccount AccountDTO             `json:"debtorAccount"`
-	DebtorBIC     string                 `json:"debtorBic"`
-	Profile       BankProfileDTO         `json:"profile"`
-	Creditors     map[string]CreditorDTO `json:"creditors"`
+	FileNumber    string         `json:"fileNumber,omitempty"`
+	Debtor        PartyDTO       `json:"debtor"`
+	DebtorAccount AccountDTO     `json:"debtorAccount"`
+	DebtorBIC     string         `json:"debtorBic"`
+	Profile       BankProfileDTO `json:"profile"`
+}
+
+type PayeeSummary struct {
+	VendorID string `json:"vendorId"`
+	Name     string `json:"name"`
+	Account  string `json:"account"`
+	Bank     string `json:"bank"`
 }
 
 type RunPayment struct {
@@ -59,16 +65,54 @@ type RunJournalLine struct {
 
 func RunSupportsMethod(method string) bool { return method == MethodTransfer || method == MethodWire }
 
-func (c RunFileConfig) CheckVendors(groups []ProposalGroup) error {
+func CheckRunnable(currency string, groups []ProposalGroup, creditors map[string]CreditorDTO) error {
 	for _, g := range groups {
-		if !RunSupportsMethod(g.Method) {
+		switch {
+		case !RunSupportsMethod(g.Method):
 			return &Error{Code: CodeRunConfig, Detail: "payment method " + g.Method + " cannot be sent as pain.001; a run supports TRANSFER and WIRE groups only"}
+		case g.Currency != currency:
+			return &Error{Code: CodeRunConfig, Detail: "group " + g.ID + " is in " + g.Currency + " but the legal entity currency is " + currency + "; foreign-currency payments need realized FX, which is not built"}
 		}
-		if _, ok := c.Creditors[g.VendorID]; !ok {
-			return &Error{Code: CodeRunConfig, Detail: "file.creditors has no bank details for vendor " + g.VendorID}
+		if _, ok := creditors[g.VendorID]; !ok {
+			return &Error{Code: CodeRunConfig, Detail: "the proposal has no bank details for vendor " + g.VendorID}
 		}
 	}
 	return nil
+}
+
+func ValidateCreditors(creditors map[string]CreditorDTO) map[string]string {
+	fields := map[string]string{}
+	if len(creditors) > 500 {
+		fields["creditors"] = "at most 500 entries"
+	}
+	for vendor, c := range creditors {
+		if !ids.Valid(vendor) {
+			fields["creditors"] = "keys must be vendor UUIDs"
+		} else if strings.TrimSpace(c.Name) == "" || (c.IBAN == "" && c.OtherID == "") {
+			fields["creditors."+vendor] = "needs a name and an iban or otherId"
+		}
+	}
+	return fields
+}
+
+func SummarizePayee(vendorID string, c CreditorDTO) PayeeSummary {
+	account := c.IBAN
+	if account == "" {
+		account = c.OtherID
+	}
+	bank := c.BIC
+	if bank == "" {
+		bank = c.RoutingNumber
+	}
+	return PayeeSummary{VendorID: vendorID, Name: c.Name, Account: MaskBank(account), Bank: MaskBank(bank)}
+}
+
+func MaskBank(v string) string {
+	v = strings.TrimSpace(v)
+	if len(v) < 4 {
+		return "****"
+	}
+	return "****" + v[len(v)-4:]
 }
 
 func PaymentNumber(groupID string) string {
@@ -80,9 +124,11 @@ func RunFileNumber(runID string) string {
 	return fileNumberPrefix + hex[max(0, len(hex)-fileNumberSuffixLen):]
 }
 
-func BuildRunFile(cfg RunFileConfig, runID string, runDate, created time.Time, groups []ProposalGroup, invoiceNumbers map[string]string) (PaymentFile, []RunPayment, error) {
-	if err := cfg.CheckVendors(groups); err != nil {
-		return PaymentFile{}, nil, err
+func BuildRunFile(cfg RunFileConfig, creditors map[string]CreditorDTO, runID string, runDate, created time.Time, groups []ProposalGroup, invoiceNumbers map[string]string) (PaymentFile, []RunPayment, error) {
+	for _, g := range groups {
+		if _, ok := creditors[g.VendorID]; !ok || !RunSupportsMethod(g.Method) {
+			return PaymentFile{}, nil, &Error{Code: CodeRunConfig, Detail: "group " + g.ID + " cannot be sent: no bank details or unsupported method"}
+		}
 	}
 	fileNumber := cfg.FileNumber
 	if fileNumber == "" {
@@ -97,7 +143,7 @@ func BuildRunFile(cfg RunFileConfig, runID string, runDate, created time.Time, g
 		number := PaymentNumber(g.ID)
 		payment := Pain001PaymentDTO{
 			Method: PaymentMethodDTO{Type: g.Method, Format: FormatPain001}, ExecutionDate: runDate.Format(dateLayout), Number: number,
-			Amount: g.Net.String(), Currency: g.Currency, Creditor: cfg.Creditors[g.VendorID],
+			Amount: g.Net.String(), Currency: g.Currency, Creditor: creditors[g.VendorID],
 		}
 		for _, l := range g.Lines {
 			payment.Invoices = append(payment.Invoices, RemittanceInvoiceDTO{Number: invoiceNumbers[l.OpenItemID], Amount: l.Pay.String()})

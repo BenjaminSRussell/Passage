@@ -1,8 +1,8 @@
 package store
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -12,14 +12,17 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
+	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/domain"
 )
 
 const ledger1 = "00000000-0000-0000-0000-0000000000b1"
 
 func runInput(proposalID, le string) NewRun {
-	return NewRun{LegalEntityID: le, ProposalID: proposalID, RequestedBy: "erin", RequestHash: "hash-1", LedgerID: ledger1,
-		BankAccount: "1010", ControlAccount: "2000", DiscountAccount: "4900", FileRequest: json.RawMessage(`{}`)}
+	return NewRun{LegalEntityID: le, ProposalID: proposalID, RequestedBy: "erin", Today: runDay, LedgerID: ledger1,
+		BankAccount: "1010", ControlAccount: "2000", DiscountAccount: "4900"}
 }
 
 func approvedProposal(t *testing.T, s *Postgres, runID string, seedItems func(ctx context.Context)) (Proposal, context.Context) {
@@ -75,6 +78,9 @@ func runThrough(t *testing.T, s *Postgres, ctx context.Context, run PaymentRun, 
 	if run, err = s.SaveRunFile(ctx, run.ID, RunFile{Number: "F1", SHA256: "abc", Content: "<xml/>", PaymentCount: len(payments), Payments: payments}); err != nil {
 		t.Fatal(err)
 	}
+	if run, err = s.BeginJournal(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
 	if run, err = s.RecordJournal(ctx, run.ID, "entry-1"); err != nil {
 		t.Fatal(err)
 	}
@@ -101,11 +107,6 @@ func TestPaymentRun_ExecutesApprovedProposalExactlyOnce(t *testing.T) {
 	again, created, err := s.StartRun(erin, runInput(proposal.ID, leA))
 	if err != nil || created || again.ID != run.ID {
 		t.Fatalf("replayed start: created=%v id=%s want %s err=%v", created, again.ID, run.ID, err)
-	}
-	conflicting := runInput(proposal.ID, leA)
-	conflicting.RequestHash = "hash-2"
-	if _, _, err := s.StartRun(erin, conflicting); !errors.Is(err, ErrRunConflict) {
-		t.Fatalf("different request on the same proposal = %v, want ErrRunConflict", err)
 	}
 
 	for pass := 1; pass <= 2; pass++ {
@@ -139,8 +140,11 @@ func TestPaymentRun_StepsRunInOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.BeginJournal(erin, run.ID); !errors.Is(err, ErrRunOutOfOrder) {
+		t.Errorf("journal request before file = %v", err)
+	}
 	if _, err := s.RecordJournal(erin, run.ID, "e"); !errors.Is(err, ErrRunOutOfOrder) {
-		t.Errorf("journal before file = %v", err)
+		t.Errorf("journal before request = %v", err)
 	}
 	if _, err := s.SettleRun(erin, run.ID); !errors.Is(err, ErrRunOutOfOrder) {
 		t.Errorf("settle before journal = %v", err)
@@ -184,24 +188,183 @@ func TestPaymentRun_FailBeforeJournalReleasesItemsForANewProposal(t *testing.T) 
 	}
 }
 
-func TestPaymentRun_CannotFailOnceJournalIsPosted(t *testing.T) {
+func TestPaymentRun_CannotFailOnceTheJournalWasRequested(t *testing.T) {
 	s := setup(t)
 	proposal, erin := approvedProposal(t, s, "run-1", threeItems(t, s))
 	run, _, _ := s.StartRun(erin, runInput(proposal.ID, leA))
 	if _, err := s.SaveRunFile(erin, run.ID, RunFile{Number: "F1", SHA256: "abc", Content: "<xml/>"}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.BeginJournal(erin, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.FailRun(erin, run.ID, "ledger answered slowly"); !errors.Is(err, ErrJournalRequested) {
+		t.Fatalf("fail while the ledger call may be in flight = %v, want ErrJournalRequested", err)
+	}
+	if got := candidateIDs(t, s, erin, leA, runDay); len(got) != 0 {
+		t.Fatalf("items must stay reserved once the journal was requested: %v", got)
+	}
+	exec := func(sql string) error {
+		return dbx.WithTenantTx(erin, s.pool, func(tx pgx.Tx) error {
+			_, err := tx.Exec(erin, sql)
+			return err
+		})
+	}
+	wantGuard := func(name string, err error) {
+		t.Helper()
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || (pgErr.Code != "55000" && pgErr.Code != "23514") {
+			t.Errorf("%s: %v, want a guard or check error", name, err)
+		}
+	}
+	wantGuard("fail the proposal in SQL", exec(fmt.Sprintf(`update ap_payment_proposal set status = 'FAILED', failed_at = now() where id = '%s'`, proposal.ID)))
+	wantGuard("fail the run in SQL", exec(fmt.Sprintf(`update ap_payment_run set status = 'FAILED', failure_reason = 'x' where id = '%s'`, run.ID)))
+	wantGuard("clear the request", exec(fmt.Sprintf(`update ap_payment_run set journal_requested_at = null where id = '%s'`, run.ID)))
 	if _, err := s.RecordJournal(erin, run.ID, "entry-1"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.FailRun(erin, run.ID, "late"); !errors.Is(err, ErrJournalPosted) {
-		t.Fatalf("fail after journal = %v, want ErrJournalPosted", err)
+	wantGuard("clear the entry id", exec(fmt.Sprintf(`update ap_payment_run set journal_entry_id = null, journal_posted_at = null where id = '%s'`, run.ID)))
+	if _, err := s.RejectJournal(erin, run.ID); err != nil {
+		t.Fatal(err)
 	}
-	if got := candidateIDs(t, s, erin, leA, runDay); len(got) != 0 {
-		t.Fatalf("items must stay reserved after the journal posted: %v", got)
+	if _, err := s.FailRun(erin, run.ID, "late"); !errors.Is(err, ErrJournalRequested) {
+		t.Fatalf("a posted journal can never be failed, even if a rejection was recorded: %v", err)
 	}
 }
 
+func TestPaymentRun_RejectedJournalMayFailAndReleaseLines(t *testing.T) {
+	s := setup(t)
+	proposal, erin := approvedProposal(t, s, "run-1", threeItems(t, s))
+	run, _, _ := s.StartRun(erin, runInput(proposal.ID, leA))
+	if _, err := s.RejectJournal(erin, run.ID); !errors.Is(err, ErrRunOutOfOrder) {
+		t.Fatalf("reject before a request = %v", err)
+	}
+	_, _ = s.SaveRunFile(erin, run.ID, RunFile{Number: "F1", SHA256: "abc", Content: "<xml/>"})
+	if _, err := s.BeginJournal(erin, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RejectJournal(erin, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	failed, err := s.FailRun(erin, run.ID, "ledger rejected the journal")
+	if err != nil || failed.Status != domain.RunFailed {
+		t.Fatalf("fail after a definitive ledger rejection: %+v %v", failed, err)
+	}
+	if got := candidateIDs(t, s, erin, leA, runDay); len(got) != 3 {
+		t.Fatalf("candidates = %v, want the released items", got)
+	}
+}
+
+func TestPaymentRun_VerifyRunLinesCatchesAHoldBeforeTheFileIsBuilt(t *testing.T) {
+	s := setup(t)
+	proposal, erin := approvedProposal(t, s, "run-1", threeItems(t, s))
+	run, _, _ := s.StartRun(erin, runInput(proposal.ID, leA))
+	if _, err := s.VerifyRunLines(erin, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPaymentHold(erin, proposal.Groups[0].Lines[0].OpenItemID, true); err != nil {
+		t.Fatal(err)
+	}
+	var changed *LinesChangedError
+	if _, err := s.VerifyRunLines(erin, run.ID); !errors.As(err, &changed) || len(changed.OpenItemIDs) != 1 {
+		t.Fatalf("verify over a held item = %v", err)
+	}
+}
+
+func TestPaymentRun_ExecutorCannotBeTheCreatorOrTheApprover(t *testing.T) {
+	s := setup(t)
+	proposal, _ := approvedProposal(t, s, "run-1", threeItems(t, s))
+	for _, user := range []string{"alice", "bob"} {
+		in := runInput(proposal.ID, leA)
+		in.RequestedBy = user
+		if _, _, err := s.StartRun(ctxAs(1, leA, user), in); !errors.Is(err, ErrExecutorConflict) {
+			t.Errorf("%s: %v, want ErrExecutorConflict", user, err)
+		}
+	}
+	if p, _ := s.GetProposal(ctxAs(1, leA, "x"), proposal.ID); p.Status != domain.ProposalApproved {
+		t.Fatalf("a refused executor left the proposal %s", p.Status)
+	}
+	raw := ctxAs(1, leA, "bob")
+	err := dbx.WithTenantTx(raw, s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(raw, `insert into ap_payment_run (tenant_id, id, legal_entity_id, proposal_id, status, requested_by, ledger_id, bank_account, control_account)
+			values ($1, $2::uuid, $3::uuid, $4::uuid, 'RUNNING', 'bob', $5::uuid, '1010', '2000')`, testkit.TenantID(1), ids.New(), leA, proposal.ID, ledger1)
+		return err
+	})
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "55000" {
+		t.Fatalf("the database must refuse an approver as executor: %v", err)
+	}
+}
+
+func TestPaymentRun_StartAfterTheRunDateIsRefused(t *testing.T) {
+	s := setup(t)
+	proposal, erin := approvedProposal(t, s, "run-1", threeItems(t, s))
+	late := runInput(proposal.ID, leA)
+	late.Today = "2027-04-01"
+	if _, _, err := s.StartRun(erin, late); !errors.Is(err, ErrRunDateElapsed) {
+		t.Fatalf("start after the run date = %v, want ErrRunDateElapsed", err)
+	}
+	if run, created, err := s.StartRun(erin, runInput(proposal.ID, leA)); err != nil || !created {
+		t.Fatalf("start on the run date: %+v %v", run, err)
+	}
+	if _, created, err := s.StartRun(erin, late); err != nil || created {
+		t.Fatalf("replaying an existing run after its day stays allowed: created=%v %v", created, err)
+	}
+}
+
+func TestProposalPayees_AreEncryptedBoundToTheirTenantAndShownMasked(t *testing.T) {
+	s := setup(t)
+	keys, _ := fieldcrypt.NewKeys("k1", map[string][]byte{"k1": bytes.Repeat([]byte{7}, 32)})
+	s.WithFieldCrypt(keys)
+	alice := ctxAs(1, leA, "alice")
+	seed(t, s, alice, leA, vendor1, 1, "2027-03-10", "USD", "100.00")
+	in := proposalFor(t, s, alice, leA, "run-1")
+	in.Payees = map[string]domain.CreditorDTO{vendor1: {PartyDTO: domain.PartyDTO{Name: "Acme Supply Co"}, AccountDTO: domain.AccountDTO{IBAN: "DE89370400440532013000"}, BIC: "COBADEFF"}}
+	created, _, err := s.CreateProposal(alice, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(created.Payees) != 1 || created.Payees[0].Account != "****3000" || created.Payees[0].Bank != "****DEFF" || created.Payees[0].Name != "Acme Supply Co" {
+		t.Fatalf("payees = %+v, want the masked summary the approver sees", created.Payees)
+	}
+	var sealed []byte
+	_ = dbx.WithTenantTx(alice, s.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(alice, `select sealed from ap_payment_proposal_payee where proposal_id = $1::uuid`, created.ID).Scan(&sealed)
+	})
+	if len(sealed) == 0 || bytes.Contains(sealed, []byte("DE89")) || bytes.Contains(sealed, []byte("Acme")) {
+		t.Fatalf("bank details must be encrypted at rest: %q", sealed)
+	}
+	full, err := s.ProposalPayees(alice, created.ID)
+	if err != nil || full[vendor1].IBAN != "DE89370400440532013000" {
+		t.Fatalf("decrypted = %+v err %v", full, err)
+	}
+	if _, err := s.ProposalPayees(ctxAs(2, leA, "x"), created.ID); err != nil {
+		t.Fatalf("another tenant sees no rows: %v", err)
+	}
+	exec := func(sql string) error {
+		return dbx.WithTenantTx(alice, s.pool, func(tx pgx.Tx) error {
+			_, err := tx.Exec(alice, sql, created.ID)
+			return err
+		})
+	}
+	if err := exec(`update ap_payment_proposal_payee set sealed = '\x00' where proposal_id = $1::uuid`); err == nil {
+		t.Fatal("the application role must not be able to rewrite payee bank details")
+	}
+	if err := exec(`delete from ap_payment_proposal_payee where proposal_id = $1::uuid`); err == nil {
+		t.Fatal("the application role must not be able to delete payee bank details")
+	}
+	bare := setup(t)
+	bareCtx := ctxAs(1, leA, "alice")
+	seed(t, bare, bareCtx, leA, vendor1, 1, "2027-03-10", "USD", "100.00")
+	if _, _, err := bare.CreateProposal(bareCtx, withPayees(proposalFor(t, bare, bareCtx, leA, "run-1"), in.Payees)); !errors.Is(err, ErrNoFieldCrypt) {
+		t.Fatalf("without keys = %v, want ErrNoFieldCrypt", err)
+	}
+}
+
+func withPayees(in NewProposal, payees map[string]domain.CreditorDTO) NewProposal {
+	in.Payees = payees
+	return in
+}
 func TestPaymentRun_HoldPlacedAfterApprovalFailsTheRunAndReleasesLines(t *testing.T) {
 	s := setup(t)
 	proposal, erin := approvedProposal(t, s, "run-1", threeItems(t, s))
@@ -314,6 +477,9 @@ func TestPaymentRun_ConcurrentStepsSettleOnce(t *testing.T) {
 	if _, err := s.SaveRunFile(erin, run.ID, RunFile{Number: "F1", SHA256: "abc", Content: "<xml/>"}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.BeginJournal(erin, run.ID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.RecordJournal(erin, run.ID, "entry-1"); err != nil {
 		t.Fatal(err)
 	}
@@ -338,6 +504,7 @@ func TestPaymentRun_ChangedItemFailsSettlementWithoutPartialEffects(t *testing.T
 	proposal, erin := approvedProposal(t, s, "run-1", threeItems(t, s))
 	run, _, _ := s.StartRun(erin, runInput(proposal.ID, leA))
 	_, _ = s.SaveRunFile(erin, run.ID, RunFile{Number: "F1", SHA256: "abc", Content: "<xml/>"})
+	_, _ = s.BeginJournal(erin, run.ID)
 	_, _ = s.RecordJournal(erin, run.ID, "entry-1")
 	last := proposal.Groups[len(proposal.Groups)-1].Lines[0]
 	if _, err := s.Settle(erin, last.OpenItemID, 1, dec("1.00"), "other"); err != nil {

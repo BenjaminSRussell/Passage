@@ -1,5 +1,6 @@
 import { ApplicationFailure, Context } from "@temporalio/activity";
 import type { PaymentRunInput, PaymentRunRef, PaymentRunState } from "./paymentRunWorkflow.js";
+import type { ServiceTokenSigner } from "./serviceToken.js";
 
 export interface PaymentRunActivities {
   startPaymentRun(input: PaymentRunInput): Promise<PaymentRunState>;
@@ -10,25 +11,36 @@ export interface PaymentRunActivities {
   failPaymentRun(ref: PaymentRunRef & { reason: string }): Promise<PaymentRunState>;
 }
 
+const REJECTED = "PaymentRunRejected";
+const RETRYABLE_CLIENT_STATUSES = [408, 429];
+export const MAX_REASON_BYTES = 500;
+
 interface Identity {
   tenantId: string;
   legalEntityId: string;
   executedBy: string;
 }
 
-const REJECTED = "PaymentRunRejected";
-const RETRYABLE_CLIENT_STATUSES = [408, 429];
+export function truncateToBytes(text: string, maxBytes: number): string {
+  const bytes = new TextEncoder().encode(text);
+  if (bytes.length <= maxBytes) return text;
+  return new TextDecoder().decode(bytes.slice(0, maxBytes)).replace(/\uFFFD+$/, "");
+}
 
-export function createPaymentRunActivities(baseUrl: string, fetchImpl: typeof fetch = fetch): PaymentRunActivities {
-  // TODO: #226 the hardcoded execute and ledger duties and the header actor are interim until service identity lands.
+export function createPaymentRunActivities(
+  baseUrl: string,
+  signer: ServiceTokenSigner,
+  fetchImpl: typeof fetch = fetch,
+): PaymentRunActivities {
   async function call(identity: Identity, path: string, body?: unknown): Promise<PaymentRunState> {
     const response = await fetchImpl(`${baseUrl}/v1/payables/payment-runs${path}`, {
       method: "POST",
       headers: {
-        "X-Passage-Tenant": identity.tenantId,
-        "X-Passage-Legal-Entity": identity.legalEntityId,
-        "X-Passage-User": identity.executedBy,
-        "X-Passage-Duties": "payment-run.execute,ledger.journal.post,ledger.journal.read",
+        "X-Passage-Service-Token": signer.mintForPayables({
+          tenantId: identity.tenantId,
+          legalEntityId: identity.legalEntityId,
+          actor: identity.executedBy,
+        }),
         ...(body === undefined ? {} : { "Content-Type": "application/json" }),
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -41,13 +53,12 @@ export function createPaymentRunActivities(baseUrl: string, fetchImpl: typeof fe
   const step = (action: string) => (ref: PaymentRunRef) => call(ref, `/${ref.runId}:${action}`);
 
   return {
-    startPaymentRun: (input) =>
-      call(input, "", { ...input.request, legalEntityId: input.legalEntityId, proposalId: input.proposalId }),
+    startPaymentRun: (input) => call(input, "", { legalEntityId: input.legalEntityId, proposalId: input.proposalId }),
     generatePaymentFile: step("generate-file"),
     postPaymentJournal: step("post-journal"),
     settlePaymentRun: step("settle"),
     completePaymentRun: step("complete"),
-    failPaymentRun: (ref) => call(ref, `/${ref.runId}:fail`, { reason: ref.reason }),
+    failPaymentRun: (ref) => call(ref, `/${ref.runId}:fail`, { reason: truncateToBytes(ref.reason, MAX_REASON_BYTES) }),
   };
 }
 

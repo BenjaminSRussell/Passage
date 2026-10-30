@@ -17,8 +17,18 @@ spec:
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
+        {{- if .Values.serviceIdentity.signingKeySecret }}
+        fsGroup: 65532
+        {{- end }}
         seccompProfile:
           type: RuntimeDefault
+{{- if .Values.serviceIdentity.signingKeySecret }}
+      volumes:
+        - name: service-identity
+          secret:
+            secretName: {{ .Values.serviceIdentity.signingKeySecret }}
+            defaultMode: 0440
+{{- end }}
       containers:
         - name: workflow
           image: {{ include "workflow.image" . | quote }}
@@ -35,5 +45,17 @@ spec:
               value: {{ .Values.temporal.namespace | quote }}
             - name: TEMPORAL_TASK_QUEUE
               value: {{ .Values.temporal.taskQueue | quote }}
+            - { name: PAYABLES_BASE_URL, value: {{ .Values.payablesUrl | quote }} }
+            - { name: PASSAGE_SERVICE_NAME, value: workflow-ts }
+{{- if .Values.serviceIdentity.signingKeySecret }}
+            - { name: PASSAGE_SERVICE_SIGNING_KEY_FILE, value: /var/run/passage/service-identity/signing-key }
+{{- if .Values.serviceIdentity.keyId }}
+            - { name: PASSAGE_SERVICE_KEY_ID, value: {{ .Values.serviceIdentity.keyId | quote }} }
+{{- end }}
+{{- end }}
+{{- if .Values.serviceIdentity.signingKeySecret }}
+          volumeMounts:
+            - { name: service-identity, mountPath: /var/run/passage/service-identity, readOnly: true }
+{{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}

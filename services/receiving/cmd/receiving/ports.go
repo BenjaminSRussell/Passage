@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/api"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/inventory"
@@ -16,9 +17,13 @@ import (
 func buildPorts(getenv func(string) string) (api.Ports, error) {
 	allowFakes := getenv("PASSAGE_ALLOW_FAKES") == "1"
 	var ports api.Ports
+	signer, err := tenant.ServiceSignerFromEnv(getenv)
+	if err != nil {
+		return api.Ports{}, err
+	}
 	switch url := getenv("LEDGER_URL"); {
 	case url != "":
-		ports.Ledger = ledger.New(url, nil)
+		ports.Ledger = ledger.New(url, nil).WithSigner(signer)
 	case allowFakes:
 		slog.Warn("LEDGER_URL is empty: journal entries go to an in-memory fake and are lost on restart", "flag", "PASSAGE_ALLOW_FAKES")
 		ports.Ledger = &domain.FakeLedger{}
@@ -27,7 +32,7 @@ func buildPorts(getenv func(string) string) (api.Ports, error) {
 	}
 	switch url := getenv("CLOSE_URL"); {
 	case url != "":
-		ports.Periods = periods.New(url, nil)
+		ports.Periods = periods.New(url, nil).WithSigner(signer)
 	case allowFakes:
 		slog.Warn("CLOSE_URL is empty: every AP period reads as open", "flag", "PASSAGE_ALLOW_FAKES")
 		ports.Periods = domain.FakePeriods{Status: domain.PeriodOpen}

@@ -4,7 +4,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { ApplicationFailure } from "@temporalio/activity";
 import { bundleWorkflowCode, Worker, type WorkflowBundle } from "@temporalio/worker";
 import { TestWorkflowEnvironment } from "@temporalio/testing";
-import { createPaymentRunActivities, type PaymentRunActivities } from "../src/paymentRunActivities.js";
+import { createPaymentRunActivities, MAX_REASON_BYTES, truncateToBytes, type PaymentRunActivities } from "../src/paymentRunActivities.js";
+import { createServiceTokenSigner } from "../src/serviceToken.js";
 import { startPaymentRunWorkflow } from "../src/startPaymentRun.js";
 import { paymentRunWorkflow, paymentRunWorkflowId, validatePaymentRunInput, type PaymentRunInput } from "../src/workflows.js";
 import { FakePayables } from "./fakePayables.js";
@@ -14,8 +15,9 @@ const input: PaymentRunInput = {
   legalEntityId: "le1",
   proposalId: "p1",
   executedBy: "erin",
-  request: { ledgerId: "led1", bankAccount: "1010", file: {} },
 };
+
+const signer = createServiceTokenSigner({ seedBase64: Buffer.alloc(32, 5).toString("base64") });
 
 const COMPLETED_ONCE = {
   runs: 1,
@@ -55,7 +57,7 @@ describe("payment run workflow", () => {
   function setup() {
     sequence += 1;
     const fake = new FakePayables();
-    return { fake, taskQueue: `payment-run-${sequence}`, activities: createPaymentRunActivities("http://payables", fake.fetch) };
+    return { fake, taskQueue: `payment-run-${sequence}`, activities: createPaymentRunActivities("http://payables", signer, fake.fetch) };
   }
 
   async function execute(taskQueue: string, activities: PaymentRunActivities) {
@@ -124,7 +126,7 @@ describe("payment run workflow", () => {
       first.shutdown();
       await firstRun;
 
-      const second = await worker(taskQueue, createPaymentRunActivities("http://payables", fake.fetch));
+      const second = await worker(taskQueue, createPaymentRunActivities("http://payables", signer, fake.fetch));
       const result = await second.runUntil(handle.result());
       expect(result.status).toBe("COMPLETED");
       expect(fake.effects()).toMatchObject(COMPLETED_ONCE);
@@ -176,6 +178,14 @@ describe("payment run workflow", () => {
     expect(fake.effects().calls.start).toBe(1);
   }, 60_000);
 
+  it("every call carries a token for the starting user and the run's legal entity", async () => {
+    const { fake, taskQueue, activities } = setup();
+    await execute(taskQueue, activities);
+    expect(fake.tokens.length).toBeGreaterThanOrEqual(5);
+    for (const claims of fake.tokens) expect(claims).toMatchObject({ tid: "t1", le: "le1", act: "erin", duties: ["payment-run.execute"] });
+    expect(new Set(fake.tokens.map((c) => c.jti)).size).toBe(fake.tokens.length);
+  }, 60_000);
+
   it("starting the same proposal twice starts one workflow", async () => {
     sequence += 1;
     const proposalInput = { ...input, proposalId: `dup-${sequence}` };
@@ -201,7 +211,7 @@ describe("payment run http activities", () => {
 
   function activitiesWith(response: Response) {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(response);
-    return { fetchImpl, activities: createPaymentRunActivities("http://payables", fetchImpl) };
+    return { fetchImpl, activities: createPaymentRunActivities("http://payables", signer, fetchImpl) };
   }
 
   async function inActivity<T>(fn: () => Promise<T>): Promise<T> {
@@ -209,15 +219,26 @@ describe("payment run http activities", () => {
     return new MockActivityEnvironment().run(fn);
   }
 
-  it("posts the start with the legal entity, proposal and identity headers", async () => {
+  it("posts the start as workflow-ts with a service token and nothing a caller could redirect", async () => {
     const { fetchImpl, activities } = activitiesWith(new Response(JSON.stringify({ id: "r1", status: "RUNNING" }), { status: 201 }));
     const state = await inActivity(() => activities.startPaymentRun(input));
     expect(state).toEqual({ id: "r1", status: "RUNNING" });
     const [url, init] = fetchImpl.mock.calls[0]!;
     expect(url).toBe("http://payables/v1/payables/payment-runs");
-    expect(init?.headers).toMatchObject({ "X-Passage-Tenant": "t1", "X-Passage-Legal-Entity": "le1", "X-Passage-User": "erin" });
-    expect(String((init?.headers as Record<string, string>)["X-Passage-Duties"])).toContain("payment-run.execute");
-    expect(JSON.parse(init?.body as string)).toEqual({ ledgerId: "led1", bankAccount: "1010", file: {}, legalEntityId: "le1", proposalId: "p1" });
+    const headers = init?.headers as Record<string, string>;
+    expect(Object.keys(headers).sort()).toEqual(["Content-Type", "X-Passage-Service-Token"]);
+    const claims = JSON.parse(Buffer.from(headers["X-Passage-Service-Token"]!.split(".")[0]!, "base64url").toString());
+    expect(claims).toMatchObject({ iss: "workflow-ts", aud: "payables", tid: "t1", le: "le1", act: "erin", duties: ["payment-run.execute"] });
+    expect(JSON.parse(init?.body as string)).toEqual({ legalEntityId: "le1", proposalId: "p1" });
+  });
+
+  it("mints a fresh token for every call so a retry is not a replay", async () => {
+    const { fetchImpl, activities } = activitiesWith(new Response(JSON.stringify({ id: "r1", status: "RUNNING" }), { status: 200 }));
+    await inActivity(() => activities.settlePaymentRun(ref));
+    fetchImpl.mockResolvedValue(new Response(JSON.stringify({ id: "r1", status: "RUNNING" }), { status: 200 }));
+    await inActivity(() => activities.settlePaymentRun(ref));
+    const jtis = fetchImpl.mock.calls.map(([, init]) => (init?.headers as Record<string, string>)["X-Passage-Service-Token"]!.split(".")[0]!);
+    expect(new Set(jtis.map((b) => JSON.parse(Buffer.from(b, "base64url").toString()).jti)).size).toBe(2);
   });
 
   it.each([
@@ -229,6 +250,18 @@ describe("payment run http activities", () => {
     const { fetchImpl, activities } = activitiesWith(new Response(JSON.stringify({ id: "r1", status: "RUNNING" }), { status: 200 }));
     await inActivity(() => activities[method](ref));
     expect(fetchImpl.mock.calls[0]![0]).toBe(`http://payables/v1/payables/payment-runs/r1:${action}`);
+  });
+
+  it("truncates the failure reason to the 500 bytes payables accepts, never splitting a character", async () => {
+    const { fetchImpl, activities } = activitiesWith(new Response(JSON.stringify({ id: "r1", status: "FAILED" }), { status: 200 }));
+    const reason = "é".repeat(400);
+    expect(reason.length).toBe(400);
+    await inActivity(() => activities.failPaymentRun({ ...ref, reason }));
+    const sent = (JSON.parse(fetchImpl.mock.calls[0]![1]?.body as string) as { reason: string }).reason;
+    expect(new TextEncoder().encode(sent).length).toBeLessThanOrEqual(MAX_REASON_BYTES);
+    expect(sent).toBe("é".repeat(250));
+    expect(truncateToBytes("short", 500)).toBe("short");
+    expect(truncateToBytes("a€".repeat(300), 500)).not.toContain("\uFFFD");
   });
 
   it("sends the failure reason", async () => {

@@ -88,7 +88,7 @@ func LegalEntityScopes(p tenant.Principal) string {
 	return ""
 }
 
-// WithTenantTx begins a transaction with app.tenant_id set from the context
+// WithTenantTx begins a transaction with passage.tenant_id and passage.legal_entity_scopes set from the context
 // principal so RLS policies apply, runs fn, and commits or rolls back.
 func WithTenantTx(ctx context.Context, pool *pgxpool.Pool, fn func(tx pgx.Tx) error) error {
 	p, ok := tenant.FromContext(ctx)

@@ -264,7 +264,7 @@ paths:
       operationId: startPaymentRun
       x-passage-duty: payment-run.execute
       description: |
-        Starts the payment run of an APPROVED proposal (duty payment-run.execute, distinct from payment-proposal.approve so execution is a separate duty). Idempotent per (legal entity, proposal): repeating the same request returns the stored run with 200 and Idempotent-Replayed: true; the same proposal with a different request is a 409 (AP-RUN-010). The call verifies the ledger belongs to the legal entity, that every group is TRANSFER or WIRE (pain.001 only) and has bank details in file.creditors, and that discountAccount is set when the proposal takes a discount (422 AP-RUN-013), then locks the proposal, moves it APPROVED to EXECUTING and re-checks every line like approval does. If a line changed (hold, vendor block, version, amount) the run is created FAILED, the proposal becomes FAILED and its lines are released, and the response is 201 with status FAILED. A proposal that is not APPROVED is a 409 (AP-PRP-002). The activity calls below are driven by the workflow in services/workflow-ts and are each safe to repeat.
+        Starts the payment run of an APPROVED proposal (duty payment-run.execute, distinct from payment-proposal.approve). The body names only the legal entity and the proposal: the ledger, GL accounts and paying bank account come from the server-side posting profile of the legal entity (PAYABLES_POSTING_PROFILES; none is a 422 AP-RUN-013) and the payee bank details are the ones approved with the proposal (encrypted at rest), so any other field is a 400 and a request can redirect nothing. The executor must be neither the proposal's creator nor its approver (403 AP-PRP-003; the database refuses it too). Idempotent per (legal entity, proposal): repeating returns the stored run with 200 and Idempotent-Replayed: true, also after the run date. The call verifies the profile's ledger belongs to the legal entity, that every group is TRANSFER or WIRE, in the legal-entity currency (foreign-currency groups are a 422 until realized FX exists) and has approved bank details, and that the profile has a discount account when the proposal takes a discount (422 AP-RUN-013); a run date before today (UTC) is a 409 AP-PRP-004. It then locks the proposal, moves it APPROVED to EXECUTING and re-checks every line like approval does. If a line changed (hold, vendor block, version, amount) the run is created FAILED, the proposal becomes FAILED and its lines are released, and the response is 201 with status FAILED. A proposal that is not APPROVED is a 409 (AP-PRP-002). The activity calls below are driven by the workflow in services/workflow-ts with a signed service token and are each safe to repeat.
       requestBody:
         required: true
         content:
@@ -312,8 +312,8 @@ paths:
   /v1/payables/payment-runs/{id}/file:
     get:
       operationId: getPaymentRunFile
-      x-passage-duty: payment-run.read
-      description: The generated pain.001.001.09 file; 404 until the generate-file step has run.
+      x-passage-duty: payment-run.execute
+      description: The generated pain.001.001.09 file, which carries the payees' full bank details, so it needs the execute duty and every read is audited (log line "audit: payment file read" and payables_payment_file_reads_total). 404 until the generate-file step has run.
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -577,6 +577,11 @@ components:
           maxProperties: 500
           description: Vendor id to payment method, overriding paymentMethod.
           additionalProperties: { type: string, enum: [TRANSFER, ACH, CHECK, CARD, WIRE] }
+        creditors:
+          type: object
+          maxProperties: 500
+          description: Vendor id to the vendor's bank details (name, address, iban or otherId, bic or routingNumber). Part of the proposal, so part of the request hash (a replay with different details is a 409 AP-PRP-001) and of what the approver reviews. Stored encrypted (platform fieldcrypt); a service without field encryption keys answers 503 COM-0503. Never accepted at run start.
+          additionalProperties: { type: object }
     PaymentProposal:
       type: object
       required: [id, legalEntityId, runDate, runId, dueBy, rateDate, legalEntityCurrency, paymentMethod, status, createdBy, createdAt, groups, totalValued]
@@ -599,6 +604,16 @@ components:
         executedAt: { type: string, format: date-time }
         failedAt: { type: string, format: date-time }
         totalValued: { type: string, description: Sum of group valued amounts in legalEntityCurrency. }
+        payees:
+          type: array
+          description: The bank details the approver approves, masked to the last four characters.
+          items:
+            type: object
+            properties:
+              vendorId: { type: string, format: uuid }
+              name: { type: string }
+              account: { type: string }
+              bank: { type: string }
         groups:
           type: array
           items:
@@ -628,29 +643,10 @@ components:
     PaymentRunRequest:
       type: object
       additionalProperties: false
-      required: [proposalId, ledgerId, bankAccount, file]
+      required: [proposalId]
       properties:
         legalEntityId: { type: string, format: uuid, description: Defaults to the caller's legal-entity scope; required for an unscoped caller. }
         proposalId: { type: string, format: uuid }
-        ledgerId: { type: string, format: uuid, description: Must belong to the legal entity. }
-        bankAccount: { type: string, maxLength: 20, description: Bank clearing account credited by the journal. }
-        controlAccount: { type: string, maxLength: 20, description: Vendor control account debited by the journal; defaults to AP_CONTROL_ACCOUNT (2000). }
-        discountAccount: { type: string, maxLength: 20, description: Credited with discounts taken; required when the proposal takes a discount. }
-        file:
-          type: object
-          additionalProperties: false
-          required: [debtor, debtorAccount, debtorBic, profile, creditors]
-          description: Bank details of the pain.001 file, same shapes as POST /v1/payables/payment-files:preview. Held until the party service exposes vendor bank accounts.
-          properties:
-            fileNumber: { type: string, description: Defaults to R plus the last 24 hex digits of the run id. }
-            debtor: { $ref: '#/components/schemas/Party' }
-            debtorAccount: { $ref: '#/components/schemas/Account' }
-            debtorBic: { type: string }
-            profile: { type: object }
-            creditors:
-              type: object
-              description: Vendor id to creditor bank details; every vendor in the proposal needs an entry.
-              additionalProperties: { type: object }
     PaymentRun:
       type: object
       required: [id, legalEntityId, proposalId, status, requestedBy, ledgerId, bankAccount, controlAccount, createdAt, payments]
@@ -668,6 +664,8 @@ components:
         fileSha256: { type: string }
         paymentCount: { type: integer }
         fileGeneratedAt: { type: string, format: date-time }
+        journalRequestedAt: { type: string, format: date-time, description: Set before the ledger is called; from then on the run can no longer be failed unless the ledger rejected the journal. }
+        journalRejectedAt: { type: string, format: date-time }
         journalEntryId: { type: string }
         journalPostedAt: { type: string, format: date-time }
         settledAt: { type: string, format: date-time }

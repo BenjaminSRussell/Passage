@@ -8,13 +8,16 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// Record is one legacy open item as extracted, before load (open_items pack shape).
+// Record is one legacy open item as extracted, before load (open_items pack shape). A
+// gl_balances balance is kept in the same shape when quarantined, with its dimension combination
+// in Dimensions and no party.
 type Record struct {
-	LegacyID string
-	Party    string
-	Account  string
-	Currency string
-	Amount   decimal.Decimal
+	LegacyID   string
+	Party      string
+	Account    string
+	Dimensions string
+	Currency   string
+	Amount     decimal.Decimal
 }
 
 // Rule kinds from FR-49.11 Great Expectations suites.

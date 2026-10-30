@@ -67,20 +67,42 @@ func TestPaymentAndFileNumbers_FitTheBankReferencePattern(t *testing.T) {
 	}
 }
 
-func TestCheckVendors_RejectsUnsupportedMethodAndMissingBankDetails(t *testing.T) {
+func TestCheckRunnable_RejectsMethodCurrencyAndMissingBankDetails(t *testing.T) {
 	groups := twoGroups()
-	cfg := domain.RunFileConfig{Creditors: map[string]domain.CreditorDTO{groups[0].VendorID: {}, groups[1].VendorID: {}}}
-	if err := cfg.CheckVendors(groups); err != nil {
+	groups[0].Currency = "USD"
+	creditors := map[string]domain.CreditorDTO{groups[0].VendorID: {}, groups[1].VendorID: {}}
+	if err := domain.CheckRunnable("USD", groups, creditors); err != nil {
 		t.Fatal(err)
 	}
 	var de *domain.Error
-	delete(cfg.Creditors, groups[1].VendorID)
-	if err := cfg.CheckVendors(groups); !errors.As(err, &de) || de.Code != domain.CodeRunConfig || !strings.Contains(de.Detail, groups[1].VendorID) {
+	if err := domain.CheckRunnable("USD", twoGroups(), creditors); !errors.As(err, &de) || de.Code != domain.CodeRunConfig || !strings.Contains(de.Detail, "EUR") || !strings.Contains(de.Detail, "realized FX") {
+		t.Fatalf("a EUR group in a USD legal entity = %v", err)
+	}
+	delete(creditors, groups[1].VendorID)
+	if err := domain.CheckRunnable("USD", groups, creditors); !errors.As(err, &de) || !strings.Contains(de.Detail, groups[1].VendorID) {
 		t.Fatalf("missing creditor = %v", err)
 	}
+	creditors[groups[1].VendorID] = domain.CreditorDTO{}
 	groups[0].Method = "ACH"
-	if err := cfg.CheckVendors(groups); !errors.As(err, &de) || !strings.Contains(de.Detail, "ACH") {
+	if err := domain.CheckRunnable("USD", groups, creditors); !errors.As(err, &de) || !strings.Contains(de.Detail, "ACH") {
 		t.Fatalf("ACH group = %v", err)
+	}
+}
+
+func TestValidateCreditorsAndMaskedSummary(t *testing.T) {
+	good := domain.CreditorDTO{PartyDTO: domain.PartyDTO{Name: "Acme"}, AccountDTO: domain.AccountDTO{IBAN: "DE89370400440532013000"}, BIC: "COBADEFF"}
+	if f := domain.ValidateCreditors(map[string]domain.CreditorDTO{groupOne: good}); len(f) != 0 {
+		t.Fatalf("valid creditor = %v", f)
+	}
+	if f := domain.ValidateCreditors(map[string]domain.CreditorDTO{"x": good, groupTwo: {}}); len(f) != 2 {
+		t.Fatalf("bad key and empty details = %v", f)
+	}
+	got := domain.SummarizePayee(groupOne, good)
+	if got.Account != "****3000" || got.Bank != "****DEFF" || got.Name != "Acme" || strings.Contains(got.Account, "DE89") {
+		t.Fatalf("summary = %+v", got)
+	}
+	if domain.MaskBank("123") != "****" {
+		t.Fatal("short values are fully masked")
 	}
 }
 
@@ -90,13 +112,13 @@ func TestBuildRunFile_OnePaymentPerGroupWithInvoiceRemittance(t *testing.T) {
 		Debtor:        domain.PartyDTO{Name: "Passage Holding Inc", Address: domain.PostalAddressDTO{StreetName: "1 Market Street", PostCode: "94105", TownName: "San Francisco", Country: "US"}},
 		DebtorAccount: domain.AccountDTO{OtherID: "000123456789"}, DebtorBIC: "CHASUS33",
 		Profile: domain.BankProfileDTO{Variant: "US"},
-		Creditors: map[string]domain.CreditorDTO{
-			groups[0].VendorID: {PartyDTO: domain.PartyDTO{Name: "Acme", Address: domain.PostalAddressDTO{StreetName: "1 A St", PostCode: "10001", TownName: "New York", Country: "US"}}, AccountDTO: domain.AccountDTO{OtherID: "000111222333"}, RoutingNumber: "021000021"},
-			groups[1].VendorID: {PartyDTO: domain.PartyDTO{Name: "Widgets", Address: domain.PostalAddressDTO{StreetName: "2 B St", PostCode: "10001", TownName: "New York", Country: "US"}}, AccountDTO: domain.AccountDTO{OtherID: "000444555666"}, RoutingNumber: "011000015"},
-		},
+	}
+	creditors := map[string]domain.CreditorDTO{
+		groups[0].VendorID: {PartyDTO: domain.PartyDTO{Name: "Acme", Address: domain.PostalAddressDTO{StreetName: "1 A St", PostCode: "10001", TownName: "New York", Country: "US"}}, AccountDTO: domain.AccountDTO{OtherID: "000111222333"}, RoutingNumber: "021000021"},
+		groups[1].VendorID: {PartyDTO: domain.PartyDTO{Name: "Widgets", Address: domain.PostalAddressDTO{StreetName: "2 B St", PostCode: "10001", TownName: "New York", Country: "US"}}, AccountDTO: domain.AccountDTO{OtherID: "000444555666"}, RoutingNumber: "011000015"},
 	}
 	run := time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC)
-	file, payments, err := domain.BuildRunFile(cfg, runUUID, run, run, groups, map[string]string{"i1": "INV-1", "i2": "INV-2"})
+	file, payments, err := domain.BuildRunFile(cfg, creditors, runUUID, run, run, groups, map[string]string{"i1": "INV-1", "i2": "INV-2"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +134,7 @@ func TestBuildRunFile_OnePaymentPerGroupWithInvoiceRemittance(t *testing.T) {
 		}
 	}
 	cfg.FileNumber = "CUSTOM-1"
-	file, _, err = domain.BuildRunFile(cfg, runUUID, run, run, groups, map[string]string{"i1": "INV-1", "i2": "INV-2"})
+	file, _, err = domain.BuildRunFile(cfg, creditors, runUUID, run, run, groups, map[string]string{"i1": "INV-1", "i2": "INV-2"})
 	if err != nil || file.FileNumber != "CUSTOM-1" {
 		t.Fatalf("custom file number: %s %v", file.FileNumber, err)
 	}
