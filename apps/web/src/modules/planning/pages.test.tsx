@@ -282,6 +282,22 @@ describe("Run plan page", () => {
     expect(body.items[0].demand[0].ref).toBe("SO-1");
   });
 
+  it("sends carryForward only when firmed orders are counted as supply", async () => {
+    const fetchMock = stubApi([":run", () => json(version, 201)]);
+    renderAt("/planning/runs/new?plan=MAIN");
+    fireEvent.change(screen.getByLabelText("Site"), { target: { value: site } });
+    fireEvent.click(screen.getByRole("button", { name: "Run plan" }));
+    await findStatus();
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).not.toHaveProperty("carryForward");
+
+    fireEvent.click(screen.getByLabelText("Count firmed orders as supply"));
+    fireEvent.click(screen.getByRole("button", { name: "Run plan" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(fetchMock.mock.calls[1][1]?.body as string)).toMatchObject({ carryForward: true });
+    const key = (i: number) => (fetchMock.mock.calls[i][1]?.headers as Record<string, string>)["Idempotency-Key"];
+    expect(key(1)).not.toBe(key(0));
+  });
+
   it("reuses the Idempotency-Key when the same request is retried", async () => {
     let calls = 0;
     const fetchMock = stubApi([":run", () => (++calls === 1 ? problem(503, "COM-0503", "unavailable") : json(version, 200))]);

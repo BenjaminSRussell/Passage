@@ -311,6 +311,7 @@ function RunScenarioCard({ scenario, today }: { scenario: Scenario; today: strin
   const [asOf, setAsOf] = useState(today);
   const [siteId, setSiteId] = useState("");
   const [items, setItems] = useState(SAMPLE_ITEMS);
+  const [carryForward, setCarryForward] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [failure, setFailure] = useState<LoadError | null>(null);
   const [result, setResult] = useState<PlanVersion | null>(null);
@@ -328,7 +329,7 @@ function RunScenarioCard({ scenario, today }: { scenario: Scenario; today: strin
     setFailure(null);
     setResult(null);
     try {
-      setResult(await runScenario(scenario.code, key.current, { asOf, siteId: siteId.trim(), items: parsed }));
+      setResult(await runScenario(scenario.code, key.current, { asOf, siteId: siteId.trim(), ...(carryForward ? { carryForward: true } : {}), items: parsed }));
       key.current = newKey();
     } catch (err) {
       setFailure(describeError(err));
@@ -400,6 +401,24 @@ function RunScenarioCard({ scenario, today }: { scenario: Scenario; today: strin
               />
             )}
           </FormField>
+        </div>
+        <div className={styles.wide}>
+          <label className={styles.check} htmlFor="sim-carry">
+            <Input
+              id="sim-carry"
+              type="checkbox"
+              aria-describedby="sim-carry-hint"
+              checked={carryForward}
+              onChange={(e) => {
+                key.current = newKey();
+                setCarryForward(e.target.checked);
+              }}
+            />
+            Count firmed orders as supply
+          </label>
+          <p id="sim-carry-hint" className={styles.summary}>
+            Adds the plan's firmed orders that are not yet delivered as receipts of their items, as a plan run with this option does.
+          </p>
         </div>
         <div className={styles.formActions}>
           <Button type="submit" variant="primary" loading={busy} disabled={!scenario.active}>

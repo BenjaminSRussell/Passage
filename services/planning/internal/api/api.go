@@ -150,7 +150,11 @@ type runRequest struct {
 	// Calendar is the site work calendar of the run (FR-22.5, BR-22.8); without
 	// it lead times and margins count calendar days.
 	Calendar *calendarDTO `json:"calendar,omitempty"`
-	Items    []itemDTO    `json:"items"`
+	// CarryForward adds the plan's firmed planned orders that are not yet
+	// delivered as scheduled receipts of the run (FR-22.1, FR-22.10), so a
+	// firmed order is supply and is not planned a second time.
+	CarryForward bool      `json:"carryForward,omitempty"`
+	Items        []itemDTO `json:"items"`
 }
 
 // calendarDTO names the closed days of the site: whole weekdays (0 Sunday to
@@ -411,6 +415,14 @@ func (a *API) buildSnapshot(w http.ResponseWriter, r *http.Request, code string,
 		}
 		addForecastDemand(items, req.ForecastModel, asOf, lines)
 	}
+	if req.CarryForward {
+		firmed, err := a.store.FirmedSupply(r.Context(), code, req.SiteID, asOf)
+		if err != nil {
+			httpx.Fail(w, r, err)
+			return time.Time{}, nil, false
+		}
+		addFirmedSupply(items, asOf, firmed)
+	}
 	return asOf, items, true
 }
 
@@ -497,6 +509,24 @@ func addForecastDemand(items []domain.Item, model string, asOf time.Time, lines 
 		day := int(l.PeriodStart.Sub(asOf) / (24 * time.Hour))
 		it.Demand = append(it.Demand, domain.Requirement{Ref: "FC:" + model + ":" + start, RefType: domain.RefForecast,
 			Date: day, Qty: l.ReducedQty, Priority: domain.PriorityForecast})
+	}
+}
+
+// addFirmedSupply appends each firmed planned order that is still to be
+// delivered to the receipts of its item as a planned-order receipt on its
+// delivery day. Orders of items outside the snapshot are not planned.
+func addFirmedSupply(items []domain.Item, asOf time.Time, firmed []store.FirmedSupply) {
+	index := make(map[string]*domain.Item, len(items))
+	for i := range items {
+		index[items[i].ID] = &items[i]
+	}
+	for _, f := range firmed {
+		it := index[f.ItemID]
+		if it == nil {
+			continue
+		}
+		day := int(f.DeliveryDate.Sub(asOf) / (24 * time.Hour))
+		it.Receipts = append(it.Receipts, domain.Requirement{Ref: "FP:" + f.OrderID, RefType: domain.RefPlanned, Date: day, Qty: f.Qty})
 	}
 }
 

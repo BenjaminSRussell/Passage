@@ -215,8 +215,28 @@ describe("Scenario page", () => {
     expect(post?.[0]).toBe("/api/v1/planning/scenarios/UP20:run");
     expect((post?.[1]?.headers as Record<string, string>)["Idempotency-Key"]).toBeTruthy();
     expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({ siteId: SITE });
+    expect(JSON.parse(String(post?.[1]?.body))).not.toHaveProperty("carryForward");
     expect(screen.getByRole("link", { name: "View simulated orders" })).toHaveAttribute("href", "/planning/planned-orders?plan=MAIN&version=3");
     expect(screen.getByRole("link", { name: /Compare with the operational plan/ })).toHaveAttribute("href", "/planning/runs/compare?plan=MAIN&to=3");
+  });
+
+  it("sends carryForward on a simulation only when firmed orders are counted as supply, under a new key", async () => {
+    const version = {
+      id: "00000000-0000-0000-0000-0000000000d1", planCode: "MAIN", number: 3, status: "complete", kind: "simulation", scenarioCode: "UP20",
+      asOf: "2026-11-02", itemsPlanned: 1, plannedOrders: 0, messages: 0, durationMs: 2, planHash: "abc",
+    };
+    const fetchMock = stubApi(
+      ["/scenarios/UP20:run", () => json(version, 201)],
+      ["/scenarios/UP20", () => json(up20)],
+    );
+    renderAt("/planning/scenarios/UP20");
+    await screen.findByRole("form", { name: "Run scenario UP20" });
+    fireEvent.change(screen.getByLabelText("Site"), { target: { value: SITE } });
+    fireEvent.click(screen.getByLabelText("Count firmed orders as supply"));
+    fireEvent.click(screen.getByRole("button", { name: "Run simulation" }));
+    expect(await screen.findByText("Simulation version 3 of plan MAIN stored")).toBeInTheDocument();
+    const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
+    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({ siteId: SITE, carryForward: true });
   });
 
   it("cannot run an inactive scenario", async () => {

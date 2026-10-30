@@ -40,6 +40,8 @@ interface Draft {
   closedWeekdays?: number[];
   /** Closed dates (holidays) separated by commas, spaces or new lines. */
   closedDates?: string;
+  /** Count the plan's firmed, undelivered orders as supply (FR-22.1). */
+  carryForward?: boolean;
   items: string;
 }
 
@@ -103,6 +105,7 @@ export function RunPlanPage({ today = new Date().toISOString().slice(0, 10) }: {
     forecastModel: "",
     closedWeekdays: [],
     closedDates: "",
+    carryForward: false,
     items: SAMPLE_ITEMS,
   });
   const [errors, setErrors] = useState<Errors>({});
@@ -123,6 +126,11 @@ export function RunPlanPage({ today = new Date().toISOString().slice(0, 10) }: {
     });
   };
 
+  const toggleCarry = (on: boolean) => {
+    key.current = newKey();
+    setDraft((d) => ({ ...d, carryForward: on }));
+  };
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (busy) return;
@@ -141,6 +149,7 @@ export function RunPlanPage({ today = new Date().toISOString().slice(0, 10) }: {
           siteId: draft.siteId.trim(),
           ...(forecastModel ? { forecastModel } : {}),
           ...(calendar ? { calendar } : {}),
+          ...(draft.carryForward ? { carryForward: true } : {}),
           items,
         }),
       );
@@ -226,6 +235,22 @@ export function RunPlanPage({ today = new Date().toISOString().slice(0, 10) }: {
             >
               {(a11y) => <Input {...a11y} value={draft.closedDates ?? ""} onChange={(e) => set("closedDates")(e.target.value)} />}
             </FormField>
+          </div>
+          <div className={styles.wide}>
+            <label className={styles.check} htmlFor="run-carry">
+              <Input
+                id="run-carry"
+                type="checkbox"
+                aria-describedby="run-carry-hint"
+                checked={draft.carryForward ?? false}
+                onChange={(e) => toggleCarry(e.target.checked)}
+              />
+              Count firmed orders as supply
+            </label>
+            <p id="run-carry-hint" className={styles.summary}>
+              Adds this plan's firmed orders that are not yet delivered as receipts of their items, so they are not planned again.
+              Leave it off when the target orders already arrive in the receipts below.
+            </p>
           </div>
           <div className={styles.wide}>
             <FormField

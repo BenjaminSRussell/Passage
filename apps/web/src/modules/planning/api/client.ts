@@ -102,6 +102,8 @@ export interface RunPlanRequest {
   forecastModel?: string;
   /** Without a calendar the run counts calendar days. */
   calendar?: WorkCalendar;
+  /** Adds the plan's undelivered firmed orders as scheduled receipts (FR-22.1). */
+  carryForward?: boolean;
   items: unknown[];
 }
 

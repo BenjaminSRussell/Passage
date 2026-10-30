@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shopspring/decimal"
 
@@ -45,6 +46,10 @@ type fakeStore struct {
 	firms    map[string]fakeFirm
 	firmed   map[string]bool
 	lastFirm store.FirmRequest
+	// firmedSupply is what FirmedSupply returns for plan MAIN (carry_test.go).
+	firmedSupply   []store.FirmedSupply
+	firmedErr      error
+	lastFirmedFrom time.Time
 	// lastLimit is the page size the last list read received.
 	lastLimit int
 	// editors are the users who wrote cells of each forecast model

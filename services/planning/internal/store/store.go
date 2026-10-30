@@ -70,6 +70,7 @@ type Store interface {
 	DecideForecastConsensus(ctx context.Context, modelCode string, expectedVersion int, approve bool) (ForecastModel, *ForecastPublication, error)
 	ListNetRequirements(ctx context.Context, planCode, itemID string, limit int) ([]NetRequirement, error)
 	PlanLegalEntity(ctx context.Context, planCode, requestedEntity string) (string, error)
+	FirmedSupply(ctx context.Context, planCode, siteID string, from time.Time) ([]FirmedSupply, error)
 	RunCoverages(ctx context.Context, siteID, planEntity string, itemIDs []string) (map[string]RunCoverage, error)
 	ListCoverageGroups(ctx context.Context, limit int) ([]CoverageGroup, error)
 	GetCoverageGroup(ctx context.Context, code string) (CoverageGroup, error)

@@ -1,6 +1,6 @@
-# NOT-IMPLEMENTED (PSG-22, planning service, slices 1 to 13)
+# NOT-IMPLEMENTED (PSG-22, planning service, slices 1 to 14)
 
-Every ticket deliverable and acceptance criterion that slices 1 to 13 do not
+Every ticket deliverable and acceptance criterion that slices 1 to 14 do not
 build. Slice 2 added the freeze, action and futures fences (BR-22.4),
 planned-order maintenance (FR-22.11) and forecast cells with reduction that a
 run nets as demand (FR-22.8, AC-22.6). Slice 3 added five stateless calculators
@@ -56,6 +56,12 @@ a new version of kind `simulation` that is never current, publishes only
 `scenario.simulated.v1`, and whose planned orders cannot be firmed or changed (409
 `PLAN-0003`), the `version` filter on `GET /planned-orders`, and the scenario screens and
 simulation marks in the run history of the web module.
+Slice 14 adds `carryForward` on the run input (also used by scenario runs): the plan's
+firmed planned orders at the site that are not yet delivered (delivery date on or after
+the plan date, from every operational version, never a simulation) are added as
+scheduled receipts of their items (`FirmedSupply` in the store), so a firmed order is
+supply of the next run and is not planned a second time (FR-22.1, FR-22.10); the run
+screen has a "Count firmed orders as supply" option.
 Status is `later slice of PSG-22` (planned work in this wave), `partly built`
 (the stated part exists and is tested; the rest is named) or `handoff`
 (needs another wave or owner; the handoff is recorded here because this wave may
@@ -83,7 +89,7 @@ not edit that code).
 | 2 | Dependent demand explosion from BOM and route versions (BR-22.1 step 9) | later slice of PSG-22 | Components are accepted on the run input; BOM and route version effectivity is not resolved. |
 | 3 | Firming into production, purchase and transfer orders (FR-22.10, BR-22.9) | partly built | `POST /planned-orders:firm` (1 to 1,000 ids, Idempotency-Key, all or nothing) marks each order `firmed` with the id and type of its target order, stores the batch for replay, and writes one `plannedorder.firmed.v1` per order (item, site, vendor, qty, dates, target id) to the outbox in the same transaction; 409 `PLAN-0002` on an order firmed before. Not built: the target orders themselves and the saga compensation of BR-22.9 (handoff PSG-17 purchase orders, PSG-21 production and transfer orders: they create the order with the given id from the event; planning does not yet consume a failure event to un-firm), production `:estimate`, and re-pointing pegging to the created order (a firmed planned order keeps the pegging of its version). |
 | 3 | Planned-order maintenance: PATCH change qty/date/vendor, approve, delete (FR-22.11) | built | `PATCH`/`DELETE /planned-orders/{id}` under If-Match on open orders of the current version; delete is a soft delete. A changed quantity is not re-pegged, so after an edit the explain tree shows the pegging of the planned quantity. |
-| 3 | Approved orders "become firmed on next run" (FR-22.11), and firmed orders as supply of the next run (FR-22.1) | later slice of PSG-22 | A run replaces the whole version from its inline snapshot and does not carry approved, edited or firmed orders of the previous version forward. Until the target orders reach the snapshot as receipts (source contexts, see deliverable 2), send them as `receipts` on the run. |
+| 3 | Approved orders "become firmed on next run" (FR-22.11), and firmed orders as supply of the next run (FR-22.1) | partly built | Firmed orders as supply: built opt-in (slice 14, `carryForward`; `TestRun_CarryForwardCountsFirmedOrdersAsSupply`, `TestFirmedSupply`). It is off by default because a caller that already sends the target orders as `receipts` would count them twice; an order whose delivery date has passed is taken as received (part of on-hand). Not built: approved orders becoming firmed (with their firming batch and event) by the next run, and carrying edited or approved orders of the previous version forward; matching a carried order to the target order once it reaches the snapshot (handoff PSG-17, PSG-21: the target order must name the planned order id), and knowing whether a target order was delivered (an order whose delivery date has passed is dropped rather than read from the target order). The firmed orders are read before the run's transaction, so an order firmed while a run is computing is first carried by the following run. |
 | 3 | Vendor check against w17 vendors on PATCH | handoff (PSG-17) | `vendorId` is checked as a UUID and only on purchase orders; whether the vendor exists is not checked. |
 | 3 | Order grouping on firm (vendor, vendor-date, vendor-week) | built | `domain.GroupForFirming`: planned purchases of one site and vendor merge per grouping (weeks run Monday to Sunday); production and transfer orders never merge. AC-22.8 is `TestGroupForFirming_AC228` and the store test `TestFirmPlannedOrders`. The legal-entity default is the request default `vendor-date`; the parameter itself is not persisted (setup, see "Coverage groups API"). |
 | 3 | Decrease, increase, cancel and derived action messages for existing supply (FR-22.7) | partly built | Built: delay (with propagation to parents and to the sales line or forecast), postpone, advance, shortage, Cancel/Decrease for receipts at or beyond the coverage time fence whose quantity is not (fully) pegged, inside the action fence, and (slice 6) Increase: a shortage inside the freeze fence, where no planned order may be created, raises Increase on the latest existing receipt dated on or before it inside the action fence (`domain/increase_test.go`, with a property that increases never exceed the reported shortages; stored and filtered in `TestRunPlan_StoresIncrease`). Outside the freeze fence a shortfall still becomes a new planned order rather than an Increase of existing supply, and a receipt after the shortage gets no combined Advance-and-Increase. Not built: Derived (a parent's message passed to its components). |
