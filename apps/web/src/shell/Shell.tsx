@@ -3,8 +3,10 @@ import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import type { PassageModule } from "../modules/registry";
 import { CommandPalette, type PaletteEntry } from "./CommandPalette";
 import { copy } from "./copy";
+import { holdsDuty, requiredDuty, visibleModules } from "./dutyGate";
 import { useOnlineStatus } from "./hooks/useOnlineStatus";
 import { demoNote } from "./metadata";
+import { NotAvailablePage } from "./pages/NotAvailablePage";
 import { resolvePage } from "./pageMeta";
 import { devDuties, PrincipalProvider } from "./principal";
 import { applyView, saveView, type Density, type Personalization, type SavedView } from "./personalization";
@@ -40,8 +42,9 @@ function PageSkeleton() {
   );
 }
 
-export function Shell({ modules, duties }: ShellProps) {
+export function Shell({ modules: allModules, duties }: ShellProps) {
   const principalDuties = useMemo(() => duties ?? devDuties(), [duties]);
+  const modules = useMemo(() => visibleModules(allModules, principalDuties), [allModules, principalDuties]);
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const online = useOnlineStatus();
@@ -62,7 +65,11 @@ export function Shell({ modules, duties }: ShellProps) {
   const announceFrame = useRef<number | undefined>(undefined);
   const toastTimer = useRef<number | undefined>(undefined);
 
-  const page = useMemo(() => resolvePage(pathname, modules, shellNav), [pathname, modules]);
+  const available = holdsDuty(principalDuties, requiredDuty(pathname, allModules));
+  const page = useMemo(
+    () => (available ? resolvePage(pathname, allModules, shellNav) : { title: copy.notAvailable.pageTitle }),
+    [available, pathname, allModules],
+  );
 
   const entries = useMemo<PaletteEntry[]>(
     () => [
@@ -261,7 +268,7 @@ export function Shell({ modules, duties }: ShellProps) {
             <div className={styles.content}>
               <RouteErrorBoundary key={pathname}>
                 <Suspense fallback={<PageSkeleton />}>
-                  <Outlet />
+                  {available ? <Outlet /> : <NotAvailablePage />}
                 </Suspense>
               </RouteErrorBoundary>
             </div>
