@@ -3,6 +3,9 @@ import {
   activateRouteVersion,
   ApiError,
   computeLeadTime,
+  createBomVersion,
+  getBomVersion,
+  listBomVersions,
   getCalendarDays,
   getResource,
   getRouteVersion,
@@ -19,6 +22,32 @@ function stub(response: object) {
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
 }
+
+describe("engineering client BOM calls", () => {
+  it("prefers the problem detail over the status title and keeps field errors", async () => {
+    stub({
+      ok: false,
+      status: 400,
+      json: async () => ({ code: "COM-0001", title: "Bad Request", detail: "request failed validation", errors: { productId: "must be 1 to 64 characters", bad: 3 } }),
+    });
+    const error = await createBomVersion({ productId: "", effectiveFrom: "", lines: [] }, "k").catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ message: "request failed validation", status: 400, code: "COM-0001", errors: { productId: "must be 1 to 64 characters" } });
+  });
+
+
+  it("encodes list filters, reads one version and posts with an idempotency key", async () => {
+    const fetchMock = stub({ ok: true, json: async () => ({ items: [] }) });
+    await listBomVersions({ productId: "A B", siteId: "", status: "draft", asOf: "2026-06-01" }, "c9");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/bom-versions?productId=A+B&status=draft&asOf=2026-06-01&cursor=c9");
+    await getBomVersion("x/y");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/bom-versions/x%2Fy");
+    await createBomVersion({ productId: "P", effectiveFrom: "2026-01-01", lines: [] }, "key-1");
+    const init = fetchMock.mock.calls.at(-1)?.[1] as RequestInit;
+    expect(init.method).toBe("POST");
+    expect(new Headers(init.headers).get("Idempotency-Key")).toBe("key-1");
+  });
+});
 
 describe("engineering client", () => {
   it("encodes filters and cursor and omits empty filters", async () => {

@@ -45,18 +45,19 @@ type releaseCall struct {
 
 type fakeStore struct {
 	store.Store
-	err      error
-	pingErr  error
-	relErr   error
-	catalog  store.Snapshot
-	listed   []domain.BomVersion
-	record   store.EcoRecord
-	byKey    map[string]domain.BomVersion
-	hashes   map[string]string
-	created  []domain.BomVersion
-	released []releaseCall
-	res      *resourceState
-	routes   []domain.RouteVersion
+	err        error
+	pingErr    error
+	relErr     error
+	catalog    store.Snapshot
+	listed     []domain.BomVersion
+	lastFilter store.BomVersionFilter
+	record     store.EcoRecord
+	byKey      map[string]domain.BomVersion
+	hashes     map[string]string
+	created    []domain.BomVersion
+	released   []releaseCall
+	res        *resourceState
+	routes     []domain.RouteVersion
 
 	activateErr error
 	resList     []store.ResourceRecord
@@ -86,10 +87,11 @@ func (f *fakeStore) CreateBomVersion(_ context.Context, v domain.BomVersion, ide
 	return v, nil
 }
 
-func (f *fakeStore) ListBomVersions(_ context.Context, after string, limit int) (store.BomVersionPage, error) {
+func (f *fakeStore) ListBomVersions(_ context.Context, flt store.BomVersionFilter, after string, limit int) (store.BomVersionPage, error) {
 	if f.err != nil {
 		return store.BomVersionPage{}, f.err
 	}
+	f.lastFilter = flt
 	page := store.BomVersionPage{Items: f.listed}
 	if len(page.Items) > limit {
 		page.Items = page.Items[:limit]
@@ -251,6 +253,20 @@ func TestListBomVersions(t *testing.T) {
 	for _, bad := range []string{"?limit=0", "?limit=101", "?limit=x", "?cursor=!!", "?cursor=YWJj"} {
 		if rec := do(r, http.MethodGet, versions+bad, "", allDuties, true); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "COM-0001") {
 			t.Fatalf("%s = %d %s; want 400 COM-0001", bad, rec.Code, rec.Body)
+		}
+	}
+	want := store.BomVersionFilter{ProductID: "A", SiteID: "S1", Status: "superseded", AsOf: day("2026-03-01")}
+	if rec := do(r, http.MethodGet, versions+"?productId=A&siteId=S1&status=superseded&asOf=2026-03-01", "", allDuties, true); rec.Code != http.StatusOK || f.lastFilter != want {
+		t.Fatalf("filtered list = %d, filter %+v; want %+v", rec.Code, f.lastFilter, want)
+	}
+	for bad, field := range map[string]string{
+		"?status=bogus":                         `"status"`,
+		"?productId=" + strings.Repeat("x", 65): `"productId"`,
+		"?siteId=" + strings.Repeat("x", 65):    `"siteId"`,
+		"?asOf=2026-13-01":                      `"asOf"`,
+	} {
+		if rec := do(r, http.MethodGet, versions+bad, "", allDuties, true); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), field) {
+			t.Fatalf("%s = %d %s; want 400 naming %s", bad, rec.Code, rec.Body, field)
 		}
 	}
 	if rec := do(r, http.MethodGet, versions, "", "", true); rec.Code != http.StatusForbidden {

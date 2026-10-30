@@ -8,6 +8,47 @@ export interface UsedBy {
   parents?: UsedBy[];
 }
 
+export interface BomLine {
+  lineNo?: number;
+  componentProductId: string;
+  quantity: string;
+  series?: string;
+  lineType?: string;
+  scrapConst: string;
+  scrapVarPct: string;
+  roundUp?: string;
+  effectiveFrom?: string;
+  effectiveTo?: string;
+}
+
+export interface BomVersion {
+  id: string;
+  productId: string;
+  siteId?: string;
+  effectiveFrom: string;
+  effectiveTo?: string;
+  fromQty?: string;
+  toQty?: string;
+  status: string;
+  lines?: BomLine[];
+}
+
+export interface BomVersionInput {
+  productId: string;
+  siteId?: string;
+  effectiveFrom: string;
+  effectiveTo?: string;
+  status?: string;
+  lines: BomLine[];
+}
+
+export interface BomVersionFilters {
+  productId?: string;
+  siteId?: string;
+  status?: string;
+  asOf?: string;
+}
+
 export interface RouteVersionHeader {
   id: string;
   productId: string;
@@ -159,21 +200,26 @@ export class ApiError extends Error {
     message: string,
     readonly status: number,
     readonly code?: string,
+    /** Per-field validation messages from a 400 COM-0001 problem. */
+    readonly errors: Record<string, string> = {},
   ) {
     super(message);
     this.name = "ApiError";
   }
 }
 
+function fieldErrors(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== "object") return {};
+  return Object.fromEntries(Object.entries(raw).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = init ? await fetch(`${base}${path}`, init) : await fetch(`${base}${path}`);
   if (!res.ok) {
-    const problem: { code?: unknown; title?: unknown } = await res.json().catch(() => ({}));
-    throw new ApiError(
-      typeof problem.title === "string" ? problem.title : "Request failed",
-      res.status,
-      typeof problem.code === "string" ? problem.code : undefined,
-    );
+    const problem: { code?: unknown; title?: unknown; detail?: unknown; errors?: unknown } = await res.json().catch(() => ({}));
+    // The service puts the readable reason in detail; title is only the HTTP status text.
+    const message = typeof problem.detail === "string" && problem.detail ? problem.detail : typeof problem.title === "string" ? problem.title : "Request failed";
+    throw new ApiError(message, res.status, typeof problem.code === "string" ? problem.code : undefined, fieldErrors(problem.errors));
   }
   return res.json();
 }
@@ -245,4 +291,20 @@ export function listCalendars(cursor?: string): Promise<Page<WorkCalendar>> {
 
 export function getCalendar(id: string): Promise<WorkCalendar> {
   return request(`/calendars/${encodeURIComponent(id)}`);
+}
+
+export function listBomVersions(filters: BomVersionFilters, cursor?: string): Promise<Page<BomVersion>> {
+  return request(`/bom-versions${query({ ...filters, cursor })}`);
+}
+
+export function getBomVersion(id: string): Promise<BomVersion> {
+  return request(`/bom-versions/${encodeURIComponent(id)}`);
+}
+
+export function createBomVersion(body: BomVersionInput, idempotencyKey: string): Promise<BomVersion> {
+  return request("/bom-versions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(body),
+  });
 }

@@ -28,9 +28,13 @@ paths:
       parameters:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
         - { name: cursor, in: query, schema: { type: string } }
+        - { name: productId, in: query, schema: { type: string, maxLength: 64 } }
+        - { name: siteId, in: query, schema: { type: string, maxLength: 64 } }
+        - { name: status, in: query, schema: { type: string, enum: [draft, active, expired, superseded] } }
+        - { name: asOf, in: query, description: Only versions whose effective range covers this date., schema: { type: string, format: date } }
       responses:
         '200':
-          description: One page of BOM version headers ordered by id. Pass nextCursor as cursor for the next page.
+          description: One page of BOM version headers ordered by id. Pass nextCursor as cursor for the next page. A bad filter, limit or cursor is 400 COM-0001 with the offending fields in errors.
           content:
             application/json:
               schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/BomVersion' } }, nextCursor: { type: string } } }

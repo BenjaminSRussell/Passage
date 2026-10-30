@@ -15,6 +15,7 @@ import styles from "./pages.module.css";
 
 export function EngineeringHome({
   onOpenWhereUsed,
+  onOpenBoms,
   onOpenRoutes,
   onOpenResources,
   onOpenResourceGroups,
@@ -22,6 +23,7 @@ export function EngineeringHome({
   onOpenCalendars,
 }: {
   onOpenWhereUsed?: () => void;
+  onOpenBoms?: () => void;
   onOpenRoutes?: () => void;
   onOpenResources?: () => void;
   onOpenResourceGroups?: () => void;
@@ -37,6 +39,18 @@ export function EngineeringHome({
   return (
     <>
       <PageHeader title="Engineering data" description="Bills of material, routings and change orders." />
+      <Card
+        title="Bills of material"
+        actions={
+          onOpenBoms ? (
+            <Button size="sm" onClick={onOpenBoms}>
+              Open Bills of material
+            </Button>
+          ) : undefined
+        }
+      >
+        <p className={styles.lead}>Browse BOM versions and their components, and create new versions.</p>
+      </Card>
       <Card
         title="Routings"
         actions={

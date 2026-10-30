@@ -320,7 +320,27 @@ func (a *API) listBomVersions(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
 	}
-	listPage(a, w, r, "list bom versions", &a.bomFailed, a.store.ListBomVersions, bodyFromVersion)
+	q := r.URL.Query()
+	f := store.BomVersionFilter{ProductID: q.Get("productId"), SiteID: q.Get("siteId"), Status: q.Get("status")}
+	fields := map[string]string{}
+	for field, value := range map[string]string{"productId": f.ProductID, "siteId": f.SiteID} {
+		if len(value) > maxIDLength {
+			fields[field] = fmt.Sprintf("must be at most %d characters", maxIDLength)
+		}
+	}
+	switch f.Status {
+	case "", domain.StatusDraft, domain.StatusActive, domain.StatusExpired, domain.StatusSuperseded:
+	default:
+		fields["status"] = "must be draft, active, expired or superseded"
+	}
+	f.AsOf = optionalDate("asOf", q.Get("asOf"), fields)
+	if len(fields) > 0 {
+		invalid(w, r, fields)
+		return
+	}
+	listPage(a, w, r, "list bom versions", &a.bomFailed, func(ctx context.Context, after string, limit int) (store.BomVersionPage, error) {
+		return a.store.ListBomVersions(ctx, f, after, limit)
+	}, bodyFromVersion)
 }
 
 func pageParams(r *http.Request) (int, string, error) {

@@ -4,11 +4,13 @@ import type { PassageModule } from "../registry";
 import { EngineeringHome, WhereUsedPage } from "./pages";
 import { CalendarDetailPage, CalendarsPage, CapabilityDetailPage, ResourceGroupDetailPage } from "./detail";
 import { CalendarDaysPage, CapabilitiesPage, ResourceDetailPage, ResourceGroupsPage, ResourcesPage } from "./resources";
+import { BomVersionCreatePage, BomVersionPage, BomVersionsPage } from "./bom";
 import { RouteVersionPage, RouteVersionsPage } from "./screens";
 
 function EngineeringRoute() {
   const navigate = useNavigate();
   return createElement(EngineeringHome, {
+    onOpenBoms: () => navigate("/engineering/boms"),
     onOpenWhereUsed: () => navigate("/engineering/where-used"),
     onOpenRoutes: () => navigate("/engineering/routes"),
     onOpenResources: () => navigate("/engineering/resources"),
@@ -16,6 +18,38 @@ function EngineeringRoute() {
     onOpenCapabilities: () => navigate("/engineering/capabilities"),
     onOpenCalendars: () => navigate("/engineering/calendars"),
   });
+}
+
+function BomVersionsRoute() {
+  const navigate = useNavigate();
+  return createElement(BomVersionsPage, {
+    onOpen: (id: string) => navigate(`/engineering/boms/${encodeURIComponent(id)}`),
+    onCreate: () => navigate("/engineering/boms/new"),
+  });
+}
+
+function BomVersionRoute() {
+  const navigate = useNavigate();
+  const { id = "" } = useParams();
+  return createElement(BomVersionPage, {
+    id,
+    onBack: () => navigate("/engineering/boms"),
+    onWhereUsed: (component: string) => navigate(`/engineering/where-used?component=${encodeURIComponent(component)}`),
+  });
+}
+
+function BomVersionCreateRoute() {
+  const navigate = useNavigate();
+  return createElement(BomVersionCreatePage, {
+    onCreated: (id: string) => navigate(`/engineering/boms/${encodeURIComponent(id)}`),
+    onCancel: () => navigate("/engineering/boms"),
+  });
+}
+
+function WhereUsedRoute() {
+  const [params] = useSearchParams();
+  const component = params.get("component") ?? "";
+  return createElement(WhereUsedPage, { key: component, initialComponent: component });
 }
 
 function RouteVersionsRoute() {
@@ -75,7 +109,10 @@ const engineering: PassageModule = {
   description: "Bills of material, routings and change orders.",
   routes: [
     { path: "/engineering", element: createElement(EngineeringRoute) },
-    { path: "/engineering/where-used", element: createElement(WhereUsedPage) },
+    { path: "/engineering/where-used", element: createElement(WhereUsedRoute) },
+    { path: "/engineering/boms", element: createElement(BomVersionsRoute), handle: { title: "Bills of material" } },
+    { path: "/engineering/boms/new", element: createElement(BomVersionCreateRoute), handle: { title: "New BOM version" } },
+    { path: "/engineering/boms/:id", element: createElement(BomVersionRoute), handle: { title: "BOM version" } },
     { path: "/engineering/routes", element: createElement(RouteVersionsRoute) },
     { path: "/engineering/routes/:id", element: createElement(RouteVersionRoute), handle: { title: "Route version" } },
     { path: "/engineering/resources", element: createElement(ResourcesRoute), handle: { title: "Resources" } },
@@ -90,6 +127,7 @@ const engineering: PassageModule = {
   ],
   nav: [
     { label: "Overview", to: "/engineering", duty: "engineering.read" },
+    { label: "Bills of material", to: "/engineering/boms", duty: "engineering.read" },
     { label: "Routings", to: "/engineering/routes", duty: "engineering.read" },
     { label: "Resources", to: "/engineering/resources", duty: "engineering.read" },
     { label: "Resource groups", to: "/engineering/resource-groups", duty: "engineering.read" },

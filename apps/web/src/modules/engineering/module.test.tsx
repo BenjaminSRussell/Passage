@@ -20,6 +20,13 @@ describe("engineering module", () => {
     expect(engineering.nav.every((n) => n.to.startsWith("/engineering") && n.duty === "engineering.read")).toBe(true);
   });
 
+  it("declares the BOM routes and nav entry", () => {
+    expect(engineering.routes.map((r) => r.path)).toEqual(
+      expect.arrayContaining(["/engineering/boms", "/engineering/boms/new", "/engineering/boms/:id"]),
+    );
+    expect(engineering.nav.find((n) => n.label === "Bills of material")).toMatchObject({ to: "/engineering/boms", duty: "engineering.read" });
+  });
+
   it("declares the routing routes and nav entries", () => {
     expect(engineering.routes.map((r) => r.path)).toEqual(
       expect.arrayContaining(["/engineering/routes", "/engineering/routes/:id"]),

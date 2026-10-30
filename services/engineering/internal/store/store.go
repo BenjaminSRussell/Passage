@@ -86,7 +86,7 @@ type EcoRecord struct {
 
 type Store interface {
 	CreateBomVersion(ctx context.Context, v domain.BomVersion, idem Idem, check func(Snapshot) error) (domain.BomVersion, error)
-	ListBomVersions(ctx context.Context, afterID string, limit int) (BomVersionPage, error)
+	ListBomVersions(ctx context.Context, f BomVersionFilter, afterID string, limit int) (BomVersionPage, error)
 	GetBomVersion(ctx context.Context, id string) (domain.BomVersion, error)
 	Catalog(ctx context.Context, roots []string, up bool) (Snapshot, error)
 	CreateEco(ctx context.Context, e domain.Eco, idem Idem) (domain.Eco, error)
@@ -385,14 +385,39 @@ func (s *Postgres) CreateBomVersion(ctx context.Context, v domain.BomVersion, id
 	return created, conflictOnDuplicate(err)
 }
 
-func (s *Postgres) ListBomVersions(ctx context.Context, afterID string, limit int) (BomVersionPage, error) {
+// BomVersionFilter narrows the BOM version list; empty fields match everything.
+// AsOf keeps the versions whose effective range covers that date.
+type BomVersionFilter struct {
+	ProductID, SiteID, Status string
+	AsOf                      time.Time
+}
+
+func (s *Postgres) ListBomVersions(ctx context.Context, f BomVersionFilter, afterID string, limit int) (BomVersionPage, error) {
 	p, _ := tenant.FromContext(ctx)
 	if afterID == "" {
 		afterID = ids.Nil
 	}
+	query := `select ` + versionColumns + ` from bom_version v where v.tenant_id = $1 and v.id > $2::uuid`
+	args := []any{p.TenantID, afterID}
+	for _, c := range []struct {
+		value  any
+		clause string
+		set    bool
+	}{
+		{f.ProductID, `v.product_id = $%d`, f.ProductID != ""},
+		{f.SiteID, `v.site_id = $%d`, f.SiteID != ""},
+		{f.Status, `v.status = $%d`, f.Status != ""},
+		{f.AsOf, `v.effective_from <= $%[1]d and (v.effective_to is null or v.effective_to >= $%[1]d)`, !f.AsOf.IsZero()},
+	} {
+		if c.set {
+			args = append(args, c.value)
+			query += ` and ` + fmt.Sprintf(c.clause, len(args))
+		}
+	}
+	query += fmt.Sprintf(` order by v.id limit $%d`, len(args)+1)
 	var items []domain.BomVersion
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) (err error) {
-		items, err = queryVersions(ctx, tx, `select `+versionColumns+` from bom_version v where tenant_id = $1 and id > $2::uuid order by id limit $3`, p.TenantID, afterID, limit+1)
+		items, err = queryVersions(ctx, tx, query, append(args, limit+1)...)
 		return err
 	})
 	return trimPage(items, limit, func(v domain.BomVersion) string { return v.ID }), err
