@@ -1,11 +1,11 @@
-# NOT-IMPLEMENTED — PSG-50 (wave 50), slices 1 to 8
+# NOT-IMPLEMENTED — PSG-50 (wave 50), slices 1 to 9
 
 Wave 50 owns only `deploy/multi-region/`, `load/` and `docs/ops/`, and its ownership entry lists no web
 module. It has no service directory, so there is no Go module, database table, OpenAPI/AsyncAPI file or
 web screen in this slice. Items below are either later slices of PSG-50 or handoffs to the wave that owns
 the code or the infrastructure.
 
-Status key: **built** = in slices 1 to 8. **later slice of PSG-50** = same wave, next slice. **handoff** =
+Status key: **built** = in slices 1 to 9. **later slice of PSG-50** = same wave, next slice. **handoff** =
 needs another owner or an out-of-path edit.
 
 ## Deliverable 1: performance campaign
@@ -107,7 +107,8 @@ needs another owner or an out-of-path edit.
 | Rendering the reference pages in the docs site build (`passage-docs`) | handoff (deployment-cicd) | the site is not built; `--out` writes the pages the site picks up |
 | Functional guides for phases 1 to 3 (waves 6 to 20): one guide per phase, one section per wave with its owning service, its web module and what the user does there, from the phase PRDs | built | `functional-guides/phase-1-master-data.md`, `phase-2-financial-core.md`, `phase-3-procure-to-pay.md` (slice 8). They describe intended behaviour and defer to each service's `NOT-IMPLEMENTED.md` for build status; `check_docs.py` fails if a guide names a `services/` or `apps/` path that does not exist |
 | Screens the phase 1 guide relies on: the party web module (wave 7) and the migration web module (wave 10) | handoff (wave 7 party, wave 10 migration) | neither module is on main; the guide says so in those sections |
-| Functional guides for phases 4 to 8 (manufacturing, order-to-cash, logistics, treasury and controlling, projects, people and service) | later slice of PSG-50 | same pattern, from `docs/prd/phase-4-manufacturing.md` to `phase-8-projects-people-service.md` |
+| Functional guides for phases 4 to 8 (waves 21 to 45): one guide per phase, one section per wave with its owning service, its web module and what the user does there, rules cited by BR/AC number, and a month-end sequence per phase | built | `functional-guides/phase-4-manufacturing.md`, `phase-5-order-to-cash.md`, `phase-6-logistics.md`, `phase-7-treasury-controlling.md`, `phase-8-projects-people-service.md` (slice 9), from `docs/prd/phase-4-manufacturing.md` to `phase-8-projects-people-service.md`. Like phases 1 to 3 they describe intended behaviour and defer to each service's `NOT-IMPLEMENTED.md`; `check_docs.py` checks every service and app path they name |
+| The shop-floor kiosk PWA the phase 4 guide mentions (wave 25 owns apps/shopfloor/) | handoff (wave 25 shopfloor) | not on main; the kiosk pages are in the shopfloor web module meanwhile, and the guide says so |
 | Training curriculum, 6 role tracks with labs and assessments (FR-50.11) | built | `docs/ops/training-curriculum.md` |
 | Lab verifiers and learner records against role grants | later slice of PSG-50 | the curriculum names them; they need the sandbox tier and the ops service |
 | Link and runbook check for `docs/ops`: relative links and anchors resolve, every alert's `runbook_url` page exists, no stray files in `runbooks/`, every backticked `services/` or `apps/` path exists | built | `docs/ops/tools/check_docs.py`, tests in `test_check_docs.py` |
