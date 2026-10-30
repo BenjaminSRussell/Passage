@@ -273,6 +273,9 @@ func TestPostgres_RLSHidesOtherTenantsAndRequiresTenantWideScope(t *testing.T) {
 	if _, err := app.SaveRun(one, sampleRun(), ""); err != nil {
 		t.Fatal(err)
 	}
+	if _, _, err := app.SaveMappingSpec(one, sampleSpec(1, "c1"), ""); err != nil {
+		t.Fatal(err)
+	}
 	if err := app.Xref().Put(one, domain.XrefKey{SourceSystem: "ax2012", Entity: "customer", SourceKey: "C1"}, domain.XrefEntry{TargetID: "00000000-0000-7000-8000-000000000001"}); err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +290,7 @@ func TestPostgres_RLSHidesOtherTenantsAndRequiresTenantWideScope(t *testing.T) {
 		return n
 	}
 	scoped := tenant.With(ctx, tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: testkit.TenantID(9)})
-	for _, table := range []string{"run", "run_ledger", "xref"} {
+	for _, table := range []string{"run", "run_ledger", "xref", "mapping_spec"} {
 		if own := count(one, table); own == 0 {
 			t.Errorf("%s: tenant 1 must see its rows", table)
 		}
@@ -297,5 +300,119 @@ func TestPostgres_RLSHidesOtherTenantsAndRequiresTenantWideScope(t *testing.T) {
 		if narrowed := count(scoped, table); narrowed != 0 {
 			t.Errorf("%s: a legal-entity-scoped session sees %d tenant-wide rows", table, narrowed)
 		}
+	}
+}
+
+func sampleSpec(version int, checksum string) store.MappingSpec {
+	return store.MappingSpec{Entity: "customer", Version: version, Checksum: checksum, FieldCount: 2, TestCount: 1, Spec: json.RawMessage(`{"entity":"customer"}`)}
+}
+
+func TestPostgres_MappingSpecVersionsAreImmutableAndIdempotent(t *testing.T) {
+	s := newStore(t)
+	ctx := principalContext(1)
+	first, created, err := s.SaveMappingSpec(ctx, sampleSpec(1, "c1"), "k1")
+	if err != nil || !created || first.ID == "" {
+		t.Fatalf("first save = %+v, %v, %v", first, created, err)
+	}
+	same, created, err := s.SaveMappingSpec(ctx, sampleSpec(1, "c1"), "")
+	if err != nil || created || same.ID != first.ID {
+		t.Fatalf("same checksum must return the stored version: %+v, %v, %v", same, created, err)
+	}
+	replay, created, err := s.SaveMappingSpec(ctx, sampleSpec(1, "c1"), "k1")
+	if err != nil || created || replay.ID != first.ID {
+		t.Fatalf("key replay = %+v, %v, %v", replay, created, err)
+	}
+	var problem *httpx.Problem
+	if _, _, err := s.SaveMappingSpec(ctx, sampleSpec(1, "other"), ""); !errors.As(err, &problem) || problem.Code != store.CodeSpecVersionUsed {
+		t.Fatalf("changed checksum must conflict, got %v", err)
+	}
+	if _, _, err := s.SaveMappingSpec(ctx, sampleSpec(2, "c2"), "k1"); !errors.As(err, &problem) || problem.Code != store.CodeSpecKeyReuse {
+		t.Fatalf("key reuse must be rejected, got %v", err)
+	}
+	if _, _, err := s.SaveMappingSpec(ctx, sampleSpec(2, "c2"), ""); err != nil {
+		t.Fatal(err)
+	}
+	list, err := s.ListMappingSpecs(ctx, "customer", 10)
+	if err != nil || len(list) != 2 || list[0].Version != 2 {
+		t.Fatalf("list = %+v, %v", list, err)
+	}
+	if none, _ := s.ListMappingSpecs(ctx, "vendor", 10); len(none) != 0 {
+		t.Fatalf("entity filter leaked %v", none)
+	}
+	got, err := s.GetMappingSpec(ctx, first.ID)
+	if err != nil || got.Checksum != "c1" || string(got.Spec) != `{"entity": "customer"}` {
+		t.Fatalf("get = %+v, %v", got, err)
+	}
+	if _, err := s.GetMappingSpec(principalContext(2), first.ID); !errors.As(err, &problem) || problem.Code != store.CodeSpecNotFound {
+		t.Fatalf("other tenant must not read the spec, got %v", err)
+	}
+	if _, err := s.GetMappingSpec(ctx, "bad"); err == nil {
+		t.Fatal("malformed id must error")
+	}
+}
+
+func TestPostgres_ListRunsFiltersAndLinksMappingSpec(t *testing.T) {
+	s := newStore(t)
+	ctx := principalContext(1)
+	spec, _, err := s.SaveMappingSpec(ctx, sampleSpec(1, "c1"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := sampleRun()
+	a.MappingSpecID = spec.ID
+	savedA, err := s.SaveRun(ctx, a, "")
+	if err != nil || savedA.MappingSpecID != spec.ID {
+		t.Fatalf("spec link = %+v, %v", savedA, err)
+	}
+	b := sampleRun()
+	b.Entity = "vendor"
+	b.Report.Status = domain.StatusSucceeded
+	savedB, _ := s.SaveRun(ctx, b, "")
+	all, err := s.ListRuns(ctx, store.RunFilter{})
+	if err != nil || len(all) != 2 || all[0].ID != savedB.ID {
+		t.Fatalf("newest first, got %+v, %v", all, err)
+	}
+	if v, _ := s.ListRuns(ctx, store.RunFilter{Entity: "vendor"}); len(v) != 1 {
+		t.Fatalf("entity filter = %d", len(v))
+	}
+	if p, _ := s.ListRuns(ctx, store.RunFilter{Status: domain.StatusPartial}); len(p) != 1 || p[0].ID != savedA.ID {
+		t.Fatalf("status filter = %+v", p)
+	}
+	if one, _ := s.ListRuns(ctx, store.RunFilter{Limit: 1}); len(one) != 1 {
+		t.Fatalf("limit = %d", len(one))
+	}
+	if other, _ := s.ListRuns(principalContext(2), store.RunFilter{}); len(other) != 0 {
+		t.Fatalf("tenant 2 sees %d runs", len(other))
+	}
+}
+
+func TestMem_SpecContract(t *testing.T) {
+	m := store.NewMem()
+	ctx := context.Background()
+	first, created, _ := m.SaveMappingSpec(ctx, sampleSpec(1, "c1"), "k")
+	again, created2, _ := m.SaveMappingSpec(ctx, sampleSpec(1, "c1"), "k")
+	if !created || created2 || again.ID != first.ID {
+		t.Fatal("same spec must replay")
+	}
+	if _, _, err := m.SaveMappingSpec(ctx, sampleSpec(1, "x"), ""); err == nil {
+		t.Fatal("changed checksum must conflict")
+	}
+	if _, _, err := m.SaveMappingSpec(ctx, sampleSpec(3, "x"), "k"); err == nil {
+		t.Fatal("key reuse must fail")
+	}
+	if got, err := m.GetMappingSpec(ctx, first.ID); err != nil || got.ID != first.ID {
+		t.Fatal("get")
+	}
+	if _, err := m.GetMappingSpec(ctx, "x"); err == nil {
+		t.Fatal("missing must error")
+	}
+	if _, _, err := m.SaveMappingSpec(ctx, sampleSpec(2, "c2"), ""); err != nil {
+		t.Fatal(err)
+	}
+	if l, _ := m.ListMappingSpecs(ctx, "customer", 0); len(l) != 2 || l[0].Version != 2 {
+		t.Fatalf("list must put the newest version first like Postgres: %+v", l)
+	}
+	if l, _ := m.ListMappingSpecs(ctx, "customer", 1); len(l) != 1 {
+		t.Fatalf("limit = %d", len(l))
 	}
 }

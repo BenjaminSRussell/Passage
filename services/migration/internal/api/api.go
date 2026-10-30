@@ -1,13 +1,17 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"slices"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -27,10 +31,13 @@ const (
 	runTimeout        = 35 * time.Minute
 	idempotencyHeader = "Idempotency-Key"
 	dutyRun           = "migration.run"
+	dutySpecWrite     = "migration.spec.write"
 	runsPath          = "/v1/integration/migration-runs"
+	specsPath         = "/v1/integration/mapping-specs"
 	validationDetail  = "request failed validation"
 	CodeNotConfigured = "MIG-BACKEND-NOT-CONFIGURED"
 	CodeDeferred      = "MIG-PARALLEL-RUN-DEFERRED"
+	CodeSpecUnknown   = "MIG-SPEC-UNKNOWN"
 	codeKeyReuse      = "idempotency_key_reuse"
 )
 
@@ -60,10 +67,26 @@ type API struct {
 }
 
 type createRunRequest struct {
-	SourceSystem string          `json:"sourceSystem"`
-	Mode         string          `json:"mode"`
-	DryRun       bool            `json:"dryRun"`
-	Mapping      json.RawMessage `json:"mapping"`
+	SourceSystem  string          `json:"sourceSystem"`
+	Mode          string          `json:"mode"`
+	DryRun        bool            `json:"dryRun"`
+	Mapping       json.RawMessage `json:"mapping"`
+	MappingSpecID string          `json:"mappingSpecId"`
+}
+
+type publishSpecRequest struct {
+	Mapping json.RawMessage `json:"mapping"`
+}
+
+type specView struct {
+	ID         string          `json:"id"`
+	Entity     string          `json:"entity"`
+	Version    int             `json:"version"`
+	Checksum   string          `json:"checksum"`
+	FieldCount int             `json:"fieldCount"`
+	TestCount  int             `json:"testCount"`
+	CreatedAt  time.Time       `json:"createdAt"`
+	Mapping    json.RawMessage `json:"mapping,omitempty"`
 }
 
 type runResponse struct {
@@ -81,6 +104,7 @@ type runView struct {
 	Status         string                  `json:"status"`
 	DryRun         bool                    `json:"dryRun"`
 	MappingVersion int                     `json:"mappingVersion"`
+	MappingSpecID  string                  `json:"mappingSpecId,omitempty"`
 	ParentRunID    string                  `json:"parentRunId,omitempty"`
 	Counts         counts                  `json:"counts"`
 	Rejects        []domain.RowReject      `json:"rejects"`
@@ -105,6 +129,10 @@ func New(s store.Store, backends BackendFactory) *API { return &API{store: s, ba
 func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutyRun)).Post(runsPath, a.createRun)
+	r.With(authz.RequireDuty(dutyRun)).Get(runsPath, a.listRuns)
+	r.With(authz.RequireDuty(dutySpecWrite)).Post(specsPath, a.publishSpec)
+	r.With(authz.RequireDuty(dutyRun)).Get(specsPath, a.listSpecs)
+	r.With(authz.RequireDuty(dutyRun)).Get(specsPath+"/{id}", a.getSpec)
 	r.With(authz.RequireDuty(dutyRun)).Get(runsPath+"/{id}", a.getRun)
 	r.With(authz.RequireDuty(dutyRun)).Post(runsPath+"/{id}:rerun", a.rerun)
 	r.With(authz.RequireDuty(dutyRun)).Post("/v1/integration/parallel-run-diffs", a.parallelRunDiffs)
@@ -153,7 +181,24 @@ func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, p)
 		return
 	}
-	mapping, err := domain.ParseMapping(req.Mapping)
+	raw, specID := req.Mapping, ""
+	if req.MappingSpecID != "" {
+		spec, err := a.store.GetMappingSpec(r.Context(), req.MappingSpecID)
+		if err != nil {
+			var p *httpx.Problem
+			if errors.As(err, &p) && p.Status == http.StatusNotFound {
+				p = httpx.NewProblem(http.StatusUnprocessableEntity, CodeSpecUnknown, "mappingSpecId names no published mapping spec")
+				p.Errors = map[string]string{"mappingSpecId": "no published mapping spec has this id"}
+				err = p
+			} else {
+				a.logFailure(r, "load mapping spec for run failed", err)
+			}
+			fail(w, r, err)
+			return
+		}
+		raw, specID = spec.Spec, spec.ID
+	}
+	mapping, err := domain.ParseMapping(raw)
 	if err != nil {
 		fail(w, r, problemFrom(err))
 		return
@@ -168,7 +213,7 @@ func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, p)
 		return
 	}
-	a.execute(w, r, store.Run{SourceSystem: req.SourceSystem, Mode: req.Mode, Entity: mapping.Entity, DryRun: req.DryRun, MappingVersion: mapping.Version, Mapping: req.Mapping}, mapping, nil)
+	a.execute(w, r, store.Run{SourceSystem: req.SourceSystem, Mode: req.Mode, Entity: mapping.Entity, DryRun: req.DryRun, MappingVersion: mapping.Version, Mapping: raw, MappingSpecID: specID}, mapping, nil)
 }
 
 func (a *API) rerun(w http.ResponseWriter, r *http.Request) {
@@ -187,7 +232,7 @@ func (a *API) rerun(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, problemFrom(err))
 		return
 	}
-	next := store.Run{SourceSystem: prev.SourceSystem, Mode: prev.Mode, Entity: prev.Entity, DryRun: prev.DryRun, MappingVersion: prev.MappingVersion, Mapping: prev.Mapping, ParentRunID: prev.ID}
+	next := store.Run{SourceSystem: prev.SourceSystem, Mode: prev.Mode, Entity: prev.Entity, DryRun: prev.DryRun, MappingVersion: prev.MappingVersion, Mapping: prev.Mapping, MappingSpecID: prev.MappingSpecID, ParentRunID: prev.ID}
 	a.execute(w, r, next, mapping, &prev.Report)
 }
 
@@ -266,6 +311,162 @@ func (a *API) getRun(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, view(run))
 }
 
+func (a *API) listRuns(w http.ResponseWriter, r *http.Request) {
+	if !tenantWide(w, r) {
+		return
+	}
+	q := r.URL.Query()
+	limit, ok := parseLimit(w, r)
+	if !ok {
+		return
+	}
+	if st := q.Get("status"); st != "" && !slices.Contains([]string{domain.StatusSucceeded, domain.StatusPartial, domain.StatusFailed}, st) {
+		fail(w, r, validation(map[string]string{"status": "must be one of succeeded, partial, failed"}))
+		return
+	}
+	runs, err := a.store.ListRuns(r.Context(), store.RunFilter{Entity: q.Get("entity"), Status: q.Get("status"), Limit: limit})
+	if err != nil {
+		a.logFailure(r, "list migration runs failed", err)
+		fail(w, r, err)
+		return
+	}
+	items := make([]runView, 0, len(runs))
+	for _, run := range runs {
+		items = append(items, view(run))
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (a *API) publishSpec(w http.ResponseWriter, r *http.Request) {
+	if !tenantWide(w, r) {
+		return
+	}
+	var req publishSpecRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		fail(w, r, err)
+		return
+	}
+	if len(req.Mapping) == 0 {
+		fail(w, r, validation(map[string]string{"mapping": "is required"}))
+		return
+	}
+	mapping, err := domain.ParseMapping(req.Mapping)
+	if err != nil {
+		fail(w, r, problemFrom(err))
+		return
+	}
+	// A published spec carries at least one test case (PRD MappingSpec.tests: "at least 1 case").
+	if len(mapping.Tests) == 0 {
+		fail(w, r, problemFrom(&domain.Error{Code: domain.CodeMapInvalid, Detail: "a published mapping spec needs at least one test case"}))
+		return
+	}
+	if failures := mapping.RunTests(); len(failures) > 0 {
+		p := httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodeMapTestFail, fmt.Sprintf("%d mapping tests failed for %s.", len(failures), mapping.Entity))
+		p.Errors = make(map[string]string, len(failures))
+		for _, f := range failures {
+			p.Errors[f.Name] = f.Reason
+		}
+		fail(w, r, p)
+		return
+	}
+	canonical, sum, err := canonicalize(req.Mapping)
+	if err != nil {
+		fail(w, r, problemFrom(&domain.Error{Code: domain.CodeMapInvalid, Detail: "mapping JSON: " + err.Error()}))
+		return
+	}
+	saved, created, err := a.store.SaveMappingSpec(r.Context(), store.MappingSpec{
+		Entity: mapping.Entity, Version: mapping.Version, Checksum: sum, FieldCount: len(mapping.Fields), TestCount: len(mapping.Tests), Spec: canonical,
+	}, r.Header.Get(idempotencyHeader))
+	if err != nil {
+		a.logFailure(r, "publish mapping spec failed", err)
+		fail(w, r, err)
+		return
+	}
+	status := http.StatusOK
+	if created {
+		status = http.StatusCreated
+		w.Header().Set("Location", specsPath+"/"+saved.ID)
+	}
+	httpx.JSON(w, status, specToView(saved, false))
+}
+
+func (a *API) listSpecs(w http.ResponseWriter, r *http.Request) {
+	if !tenantWide(w, r) {
+		return
+	}
+	limit, ok := parseLimit(w, r)
+	if !ok {
+		return
+	}
+	specs, err := a.store.ListMappingSpecs(r.Context(), r.URL.Query().Get("entity"), limit)
+	if err != nil {
+		a.logFailure(r, "list mapping specs failed", err)
+		fail(w, r, err)
+		return
+	}
+	items := make([]specView, 0, len(specs))
+	for _, s := range specs {
+		items = append(items, specToView(s, false))
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (a *API) getSpec(w http.ResponseWriter, r *http.Request) {
+	if !tenantWide(w, r) {
+		return
+	}
+	spec, err := a.store.GetMappingSpec(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		a.logFailure(r, "get mapping spec failed", err)
+		fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, specToView(spec, true))
+}
+
+func specToView(s store.MappingSpec, withMapping bool) specView {
+	v := specView{ID: s.ID, Entity: s.Entity, Version: s.Version, Checksum: s.Checksum, FieldCount: s.FieldCount, TestCount: s.TestCount, CreatedAt: s.CreatedAt}
+	if withMapping {
+		v.Mapping = s.Spec
+	}
+	return v
+}
+
+// canonicalize re-encodes the mapping with sorted keys so formatting and key order never change the checksum.
+func canonicalize(raw json.RawMessage) (json.RawMessage, string, error) {
+	var v any
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if err := dec.Decode(&v); err != nil {
+		return nil, "", err
+	}
+	out, err := json.Marshal(v)
+	if err != nil {
+		return nil, "", err
+	}
+	sum := sha256.Sum256(out)
+	return out, hex.EncodeToString(sum[:]), nil
+}
+
+func parseLimit(w http.ResponseWriter, r *http.Request) (int, bool) {
+	raw := r.URL.Query().Get("limit")
+	if raw == "" {
+		return 0, true
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 || n > 200 {
+		fail(w, r, validation(map[string]string{"limit": "must be an integer from 1 to 200"}))
+		return 0, false
+	}
+	return n, true
+}
+
+func validation(fields map[string]string) error {
+	p := httpx.NewProblem(http.StatusBadRequest, "COM-0001", validationDetail)
+	p.Errors = fields
+	return p
+}
+
 func (a *API) parallelRunDiffs(w http.ResponseWriter, r *http.Request) {
 	fail(w, r, httpx.NewProblem(http.StatusNotImplemented, CodeDeferred, "parallel-run diffs belong to wave 49"))
 }
@@ -284,7 +485,7 @@ func view(run store.Run) runView {
 	rep := run.Report
 	v := runView{
 		ID: run.ID, SourceSystem: run.SourceSystem, Mode: run.Mode, Entity: run.Entity, Status: rep.Status, DryRun: run.DryRun,
-		MappingVersion: run.MappingVersion, ParentRunID: run.ParentRunID, Rejects: rep.Rejects, Warnings: rep.Warnings, Absent: rep.Absent,
+		MappingVersion: run.MappingVersion, MappingSpecID: run.MappingSpecID, ParentRunID: run.ParentRunID, Rejects: rep.Rejects, Warnings: rep.Warnings, Absent: rep.Absent,
 		Reconciliation: rep.Reconciliation, CreatedAt: run.CreatedAt,
 		Counts: counts{Extracted: rep.Extracted, Mapped: rep.Mapped, Created: rep.Created, Updated: rep.Updated, Unchanged: rep.Unchanged, Rejected: len(rep.Rejects), Warned: len(rep.Warnings)},
 	}
@@ -301,7 +502,8 @@ func view(run store.Run) runView {
 }
 
 func sameRequest(a, b store.Run) bool {
-	return a.SourceSystem == b.SourceSystem && a.Mode == b.Mode && a.Entity == b.Entity && a.DryRun == b.DryRun && a.ParentRunID == b.ParentRunID
+	return a.SourceSystem == b.SourceSystem && a.Mode == b.Mode && a.Entity == b.Entity && a.DryRun == b.DryRun && a.ParentRunID == b.ParentRunID &&
+		a.MappingVersion == b.MappingVersion && a.MappingSpecID == b.MappingSpecID
 }
 
 func validateRun(req createRunRequest) map[string]string {
@@ -312,8 +514,13 @@ func validateRun(req createRunRequest) map[string]string {
 	if !slices.Contains(modes, req.Mode) {
 		fields["mode"] = "must be one of rehearsal, cutover, delta"
 	}
-	if len(req.Mapping) == 0 {
-		fields["mapping"] = "is required"
+	switch {
+	case len(req.Mapping) == 0 && req.MappingSpecID == "":
+		fields["mapping"] = "is required unless mappingSpecId is given"
+	case len(req.Mapping) > 0 && req.MappingSpecID != "":
+		fields["mapping"] = "give either mapping or mappingSpecId, not both"
+	case req.MappingSpecID != "" && !ids.Valid(req.MappingSpecID):
+		fields["mappingSpecId"] = "must be a UUID"
 	}
 	return fields
 }
