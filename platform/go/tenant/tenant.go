@@ -127,6 +127,8 @@ const DutyAllScope = "org.switcher.all_scope"
 
 type allScopeAskedKey struct{}
 
+type allScopeAsked struct{ tenantID, userID string }
+
 // ReadOnlyPOST marks a POST route that performs no write (a query whose body is
 // too rich for a URL). On it, Middleware's all-scope duty is restored when the
 // caller held it and sent the ALL scope header, exactly as on a GET. It is the
@@ -134,8 +136,8 @@ type allScopeAskedKey struct{}
 // method other than POST, still loses it.
 func ReadOnlyPOST(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, asked := r.Context().Value(allScopeAskedKey{}).(struct{}); asked && r.Method == http.MethodPost {
-			if p, ok := FromContext(r.Context()); ok {
+		if asked, ok := r.Context().Value(allScopeAskedKey{}).(allScopeAsked); ok && r.Method == http.MethodPost {
+			if p, ok := FromContext(r.Context()); ok && p.Service == "" && p.TenantID == asked.tenantID && p.UserID == asked.userID {
 				duties := make(map[string]struct{}, len(p.Duties)+1)
 				for d := range p.Duties {
 					duties[d] = struct{}{}
@@ -233,7 +235,7 @@ func middlewareWith(verifier func() *ServiceVerifier, next http.Handler) http.Ha
 			delete(p.Duties, DutyAllScope)
 		} else if !isRead(r.Method) {
 			if p.HasDuty(DutyAllScope) {
-				ctx = context.WithValue(ctx, allScopeAskedKey{}, struct{}{})
+				ctx = context.WithValue(ctx, allScopeAskedKey{}, allScopeAsked{tenantID: p.TenantID, userID: p.UserID})
 			}
 			delete(p.Duties, DutyAllScope)
 		}

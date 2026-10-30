@@ -278,3 +278,32 @@ func TestReadOnlyPOSTKeepsAllScopeOnlyWhereDeclared(t *testing.T) {
 		}
 	}
 }
+
+func TestReadOnlyPOSTDoesNotLetASwappedPrincipalInheritTheGrant(t *testing.T) {
+	var got bool
+	inner := tenant.ReadOnlyPOST(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		p, _ := tenant.FromContext(r.Context())
+		got = p.HasDuty(tenant.DutyAllScope)
+	}))
+	swap := func(p tenant.Principal) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			inner.ServeHTTP(w, r.WithContext(tenant.With(r.Context(), p)))
+		})
+	}
+	for name, p := range map[string]tenant.Principal{
+		"other user":    {TenantID: validTenant, UserID: "someone-else"},
+		"other tenant":  {TenantID: "00000000-0000-7000-8000-000000000002", UserID: "u1"},
+		"service token": {TenantID: validTenant, UserID: "u1", Service: "billing"},
+	} {
+		got = false
+		r := httptest.NewRequest(http.MethodPost, "/x", nil)
+		r.Header.Set(tenant.HeaderTenant, validTenant)
+		r.Header.Set(tenant.HeaderUser, "u1")
+		r.Header.Set(tenant.HeaderDuties, tenant.DutyAllScope)
+		r.Header.Set(tenant.HeaderLegalEntityScopeAll, tenant.LegalEntityScopeAll)
+		tenant.Middleware(swap(p)).ServeHTTP(httptest.NewRecorder(), r)
+		if got {
+			t.Fatalf("%s: swapped principal inherited the all-scope grant", name)
+		}
+	}
+}

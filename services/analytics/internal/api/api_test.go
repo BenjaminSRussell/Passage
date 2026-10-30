@@ -122,6 +122,20 @@ func TestQuery_AllScopeCallerGetsUnrestrictedPlan(t *testing.T) {
 	}
 }
 
+func TestQuery_EntityHeaderPlusALLStillNarrows(t *testing.T) {
+	h := newTestServer()
+	body := `{"measures":["revenue"],"dimensions":["account_code"],"from":"2026-01-01","to":"2026-03-31"}`
+	headers := map[string]string{tenant.HeaderDuties: DutyView + "," + tenant.DutyAllScope, tenant.HeaderLegalEntity: usmf, tenant.HeaderLegalEntityScopeAll: tenant.LegalEntityScopeAll}
+	rec := do(t, h, http.MethodPost, "/v1/analytics/query", body, headers)
+	var got QueryResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("status %d err %v", rec.Code, err)
+	}
+	if len(got.Plan.Filters) != 1 || got.Plan.Filters[0].Values[0] != usmf {
+		t.Fatalf("filters = %+v, want narrowed to %s", got.Plan.Filters, usmf)
+	}
+}
+
 func TestExport_AllScopeIsStillStripped(t *testing.T) {
 	h := newTestServer()
 	body := `{"measures":["revenue"],"from":"2026-01-01","to":"2026-01-31","format":"CSV"}`
