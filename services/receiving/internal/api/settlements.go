@@ -29,6 +29,7 @@ const (
 	skipAlreadyInvoiced  = "ALREADY_INVOICED"
 	skipUnknownRowStatus = "UNKNOWN_ROW_STATUS"
 	skipLineInvoiced     = "LINE_INVOICED"
+	skipNoProduct        = "NO_PRODUCT"
 	skipAlreadySettled   = "ALREADY_SETTLED"
 	skipOtherVendor      = "OTHER_VENDOR"
 	skipOtherEntity      = "OTHER_LEGAL_ENTITY"
@@ -250,6 +251,8 @@ planLoop:
 				run.skip(sourceRef, skipUnknownRowStatus)
 			case !found || !line.Usable():
 				run.skip(sourceRef, skipLineCancelled)
+			case line.ProductID == "":
+				run.skip(sourceRef, skipNoProduct)
 			case !plan.SettleWithoutReceipt:
 				run.skip(sourceRef, skipAwaitsReceipt)
 			case plan.Currency != "" && plan.Currency != po.Currency:

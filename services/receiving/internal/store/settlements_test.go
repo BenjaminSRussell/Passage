@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -222,7 +223,7 @@ func TestPostSettlement_ConcurrentRunsSettleASourceOnce(t *testing.T) {
 			in := store.Settlement{
 				ID:   []string{"00000000-0000-0000-0000-0000000000f1", "00000000-0000-0000-0000-0000000000f2", "00000000-0000-0000-0000-0000000000f3", "00000000-0000-0000-0000-0000000000f4"}[i],
 				Kind: domain.SettlementPlanRow, SourceRef: "po/1/1", LegalEntityID: db.one.LegalEntityID, VendorID: vendorID, Currency: "USD", Amount: decimal.NewFromInt(7),
-				PostingDate: postDay(), LedgerID: ledgerUUID, FiscalPeriodID: ledgerUUID,
+				PostingDate: postDay(), LedgerID: ledgerUUID, FiscalPeriodID: ledgerUUID, PurchaseOrderID: poID, POLineNo: 1, ProductID: poID,
 			}
 			_, again, err := st.PostSettlement(ctx, in, func() (store.SettlementOutcome, error) {
 				mu.Lock()
@@ -352,6 +353,39 @@ func TestPlanSettlementThenInvoiceIsRefusedAndInvoiceThenPlanSettlementIsSkipped
 		seedGrir(db)
 		st := store.New(db.pool)
 		if err := settle(st, db); err != nil {
+			t.Fatal(err)
+		}
+		var de *domain.Error
+		if err := invoice(st, db); !errors.As(err, &de) || de.Code != domain.CodePlanSettled {
+			t.Fatalf("invoice err %v, want %s", err, domain.CodePlanSettled)
+		}
+	})
+	t.Run("a product-less plan row is refused", func(t *testing.T) {
+		db := seedInvoice(t)
+		st := store.New(db.pool)
+		in := store.Settlement{
+			ID: "00000000-0000-0000-0000-00000000b100", Kind: domain.SettlementPlanRow, SourceRef: "po/1/1", LegalEntityID: db.one.LegalEntityID, VendorID: vendorID, Currency: "USD",
+			Amount: decimal.NewFromInt(7), PostingDate: postDay(), LedgerID: ledgerUUID, FiscalPeriodID: ledgerUUID, PurchaseOrderID: poID, POLineNo: 1,
+		}
+		_, _, err := st.PostSettlement(tenant.With(context.Background(), db.one), in, func() (store.SettlementOutcome, error) {
+			t.Fatal("ledger must not be reached")
+			return store.SettlementOutcome{}, nil
+		})
+		if err == nil || db.rows(db.one, "receiving_settlement") != 0 {
+			t.Fatalf("err %v", err)
+		}
+	})
+	t.Run("uppercase ids still exclude", func(t *testing.T) {
+		db := seedInvoice(t)
+		seedGrir(db)
+		st := store.New(db.pool)
+		in := store.Settlement{
+			ID: "00000000-0000-0000-0000-00000000b100", Kind: domain.SettlementPlanRow, SourceRef: "po/1/1", LegalEntityID: db.one.LegalEntityID, VendorID: vendorID, Currency: "USD",
+			Amount: decimal.NewFromInt(7), PostingDate: postDay(), LedgerID: ledgerUUID, FiscalPeriodID: ledgerUUID, PurchaseOrderID: strings.ToUpper(poID), POLineNo: 1, ProductID: strings.ToUpper(poID),
+		}
+		if _, _, err := st.PostSettlement(tenant.With(context.Background(), db.one), in, func() (store.SettlementOutcome, error) {
+			return store.SettlementOutcome{LedgerEntryID: "e", Event: event(t, db.one, "settlement", "posted")}, nil
+		}); err != nil {
 			t.Fatal(err)
 		}
 		var de *domain.Error

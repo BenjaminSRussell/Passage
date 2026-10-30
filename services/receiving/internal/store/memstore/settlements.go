@@ -79,7 +79,7 @@ func (t *tenantData) productOf(receiptID string, lineNo int) (string, string) {
 
 func (t *tenantData) planSettledLine(purchaseOrderID, productID string) (int, bool) {
 	for _, s := range t.settlements {
-		if s.Kind == domain.SettlementPlanRow && s.PurchaseOrderID == purchaseOrderID && s.ProductID == productID {
+		if s.Kind == domain.SettlementPlanRow && strings.EqualFold(s.PurchaseOrderID, purchaseOrderID) && strings.EqualFold(s.ProductID, productID) {
 			return s.POLineNo, true
 		}
 	}
@@ -89,7 +89,7 @@ func (t *tenantData) planSettledLine(purchaseOrderID, productID string) (int, bo
 func (t *tenantData) lineInvoiced(purchaseOrderID, productID string) bool {
 	return slices.ContainsFunc(t.grir, func(g store.GrirItem) bool {
 		po, product := t.productOf(g.ReceiptID, g.LineNo)
-		return po == purchaseOrderID && product == productID && g.InvoicedQty.IsPositive()
+		return strings.EqualFold(po, purchaseOrderID) && strings.EqualFold(product, productID) && g.InvoicedQty.IsPositive()
 	})
 }
 
@@ -101,7 +101,10 @@ func (s *Store) PostSettlement(ctx context.Context, in store.Settlement, fn stor
 			out, replayed = prior, true
 			return nil
 		}
-		if in.Kind == domain.SettlementPlanRow && in.ProductID != "" && t.lineInvoiced(in.PurchaseOrderID, in.ProductID) {
+		if in.Kind == domain.SettlementPlanRow && in.ProductID == "" {
+			return &domain.Error{Code: domain.CodeInvalidReceipt, Detail: "a plan row settlement needs the product of its purchase order line"}
+		}
+		if in.Kind == domain.SettlementPlanRow && t.lineInvoiced(in.PurchaseOrderID, in.ProductID) {
 			return store.ErrLineInvoiced
 		}
 		outcome, err := fn()

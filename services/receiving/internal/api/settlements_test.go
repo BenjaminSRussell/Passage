@@ -86,7 +86,7 @@ func day(y int, m time.Month, d int) time.Time { return time.Date(y, m, d, 0, 0,
 
 func planPO() domain.PurchaseOrder {
 	line := func(no int, status string) domain.PurchaseOrderLine {
-		return domain.PurchaseOrderLine{LineNo: no, Status: status}
+		return domain.PurchaseOrderLine{LineNo: no, Status: status, ProductID: productID}
 	}
 	return domain.PurchaseOrder{
 		ID: poID, VendorID: vendorID, Currency: "USD", LegalEntityID: legalEntityID, ApprovalStatus: "APPROVED",
@@ -407,9 +407,11 @@ func TestConsignmentSettlement_ValidationAuthAndScope(t *testing.T) {
 	}
 }
 
-func productPlanRig() *rig {
+func productPlanRig() *rig { return productPlanRigFor(productID) }
+
+func productPlanRigFor(product string) *rig {
 	po := planPO()
-	po.Lines[0].ProductID = productID
+	po.Lines[0].ProductID = product
 	plans := []domain.InvoicingPlan{{PurchaseOrderID: poID, LineNo: 1, SettleWithoutReceipt: true, Currency: "USD", Rows: planRows(row(1, day(2026, 9, 1), "1000.00", "OPEN"))}}
 	return newRigPorts(memstore.New(), domain.PeriodOpen, func(p *api.Ports) {
 		p.PurchaseOrders = domain.FakePurchaseOrders{Orders: map[string]domain.PurchaseOrder{poID: po}}
@@ -531,4 +533,22 @@ func TestConsignmentSettlement_TruncatedJournalListMarksTheRunAsHavingMore(t *te
 	if !run.HasMore || run.settledRefs() != "journal-1,journal-2" {
 		t.Fatalf("run %+v", run)
 	}
+}
+
+func TestPlanSettlement_LineWithoutProductIsSkippedNotPaid(t *testing.T) {
+	rg := productPlanRigFor("")
+
+	run := decode[runJSON](t, rg.call(http.MethodPost, planRunPath, planBody(), rg.settle()), http.StatusOK)
+
+	if len(run.Settled) != 0 || run.skips()[poID+"/1/1"] != "NO_PRODUCT" || len(rg.ledger.Entries) != 0 {
+		t.Fatalf("run %+v", run)
+	}
+}
+
+func TestPlanSettlement_UppercaseProductIDStillExcludesInvoicing(t *testing.T) {
+	rg := productPlanRigFor(strings.ToUpper(productID))
+	receipt := rg.posted(t, "PS-1", 100, 100)
+	decode[runJSON](t, rg.call(http.MethodPost, planRunPath, planBody(), rg.settle()), http.StatusOK)
+
+	problemCode(t, rg.invoiceFor(receipt.ID, "INV-1"), http.StatusUnprocessableEntity, "AP-PLN-001")
 }

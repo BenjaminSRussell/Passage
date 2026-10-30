@@ -163,7 +163,10 @@ func (s *Postgres) PostSettlement(ctx context.Context, in Settlement, fn Settlem
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		if in.Kind == domain.SettlementPlanRow && in.ProductID != "" {
+		if in.Kind == domain.SettlementPlanRow && in.ProductID == "" {
+			return &domain.Error{Code: domain.CodeInvalidReceipt, Detail: "a plan row settlement needs the product of its purchase order line"}
+		}
+		if in.Kind == domain.SettlementPlanRow {
 			if err := lockPurchaseOrderLine(ctx, tx, tenantID, in.PurchaseOrderID, in.ProductID); err != nil {
 				return err
 			}
@@ -224,7 +227,7 @@ func (s *Postgres) SettledSources(ctx context.Context, kind string, sources []st
 }
 
 func lockPurchaseOrderLine(ctx context.Context, tx pgx.Tx, tenantID, purchaseOrderID, productID string) error {
-	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, strings.Join([]string{tenantID, "poline", purchaseOrderID, productID}, "|"))
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, strings.ToLower(strings.Join([]string{tenantID, "poline", purchaseOrderID, productID}, "|")))
 	return err
 }
 
@@ -258,8 +261,8 @@ func refuseSettledPlanLines(ctx context.Context, tx pgx.Tx, tenantID string, key
 			return err
 		}
 		var lineNo int
-		err := tx.QueryRow(ctx, `SELECT po_line_no FROM receiving_settlement WHERE tenant_id = $1 AND kind = $2 AND purchase_order_id = $3 AND product_id = $4 LIMIT 1`,
-			tenantID, domain.SettlementPlanRow, line[0], line[1]).Scan(&lineNo)
+		err := tx.QueryRow(ctx, `SELECT po_line_no FROM receiving_settlement WHERE tenant_id = $1 AND kind = 'PLAN_ROW' AND purchase_order_id = $2 AND product_id = $3 LIMIT 1`,
+			tenantID, line[0], line[1]).Scan(&lineNo)
 		if err == nil {
 			return PlanSettled(line[0], lineNo)
 		}
