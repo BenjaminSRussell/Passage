@@ -15,7 +15,7 @@ import (
 // 5.28.14: warehouse, period). WarehouseID "" means every warehouse. From and
 // To are inclusive UTC dates on the first short pick; a zero time leaves that
 // bound open. IncludeClosed also returns lines whose remainder was re-picked
-// or whose shipment was cancelled. AfterLineID is the keyset cursor: the last
+// or closed (FR-28.8), or whose shipment was cancelled. AfterLineID is the keyset cursor: the last
 // shipment line of the previous page.
 type BackorderFilter struct {
 	WarehouseID   string
@@ -40,7 +40,10 @@ type BackorderRow struct {
 	Planned        decimal.Decimal       `json:"qtyPlanned"`
 	Picked         decimal.Decimal       `json:"qtyPicked"`
 	Shipped        decimal.Decimal       `json:"qtyShipped"`
-	ShortPickedAt  time.Time             `json:"shortPickedAt"`
+	// Closed is the planned quantity given up when the shipment's remainder
+	// was closed (FR-28.8); Planned is then what shipped.
+	Closed        decimal.Decimal `json:"qtyClosed"`
+	ShortPickedAt time.Time       `json:"shortPickedAt"`
 }
 
 // ListBackorders returns the short-picked lines, newest short pick first, at
@@ -52,7 +55,7 @@ func (s *Postgres) ListBackorders(ctx context.Context, f BackorderFilter) ([]Bac
 		rows, err := tx.Query(ctx, `
 			select sl.id::text, sh.id::text, sh.shipment_number, sh.status, sh.warehouse_id::text, sh.order_id::text,
 				sh.customer_id::text, sl.order_line_id::text, sl.product_id::text, sl.unit,
-				sl.qty_planned::text, sl.qty_picked::text, sl.qty_shipped::text, sl.short_picked_at
+				sl.qty_planned::text, sl.qty_picked::text, sl.qty_shipped::text, sl.qty_closed::text, sl.short_picked_at
 			from shipment_line sl
 			join shipment sh on sh.tenant_id = sl.tenant_id and sh.id = sl.shipment_id
 			where sl.short_picked_at is not null
@@ -71,12 +74,12 @@ func (s *Postgres) ListBackorders(ctx context.Context, f BackorderFilter) ([]Bac
 		defer rows.Close()
 		for rows.Next() {
 			var r BackorderRow
-			var planned, picked, shipped string
+			var planned, picked, shipped, closed string
 			if err := rows.Scan(&r.ShipmentLineID, &r.ShipmentID, &r.ShipmentNumber, &r.Status, &r.WarehouseID, &r.OrderID,
-				&r.CustomerID, &r.OrderLineID, &r.ProductID, &r.Unit, &planned, &picked, &shipped, &r.ShortPickedAt); err != nil {
+				&r.CustomerID, &r.OrderLineID, &r.ProductID, &r.Unit, &planned, &picked, &shipped, &closed, &r.ShortPickedAt); err != nil {
 				return err
 			}
-			r.Planned, r.Picked, r.Shipped = dec(planned), dec(picked), dec(shipped)
+			r.Planned, r.Picked, r.Shipped, r.Closed = dec(planned), dec(picked), dec(shipped), dec(closed)
 			r.ShortPickedAt = r.ShortPickedAt.UTC()
 			out = append(out, r)
 		}

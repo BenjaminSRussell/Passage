@@ -5,6 +5,7 @@ import { useState, type FormEvent } from "react";
 import { Alert, Button, Card, DataTable, FormField, Input, Select, type DataTableColumn } from "../../shell/ui";
 import {
   cancelShipment,
+  closeShipmentRemainder,
   containerLabel,
   describeProblem,
   listTracking,
@@ -84,6 +85,74 @@ export function CancelShipmentPanel({ shipment, onDone }: { shipment: Shipment; 
         Its order lines can be released again, and inventory releases their reservations.
       </Alert>
       <ProblemAlert title="Could not cancel the shipment" problem={failure} />
+    </div>
+  );
+}
+
+const CLOSABLE: Shipment["status"][] = ["PARTIALLY_SHIPPED", "PICKING", "PICKED"];
+
+/** FR-28.8: a shipment that shipped part of its quantity, owes the rest and has nothing packed waiting can give the remainder up. */
+export function canCloseRemainder(shipment: Shipment): boolean {
+  return (
+    CLOSABLE.includes(shipment.status) &&
+    shipment.lines.some((l) => compareDecimal(l.qtyShipped, "0") > 0) &&
+    shipment.lines.some((l) => compareDecimal(l.qtyPlanned, l.qtyShipped) > 0) &&
+    shipment.lines.every((l) => compareDecimal(l.qtyPacked, l.qtyShipped) <= 0)
+  );
+}
+
+/** The close-remainder button with its confirmation; the service re-checks the rule. */
+export function CloseRemainderPanel({ shipment, onDone }: { shipment: Shipment; onDone(): void }) {
+  const [confirming, setConfirming] = useState(false);
+  const [failure, setFailure] = useState<Problem | null>(null);
+  const [busy, setBusy] = useState(false);
+  const key = useCommandKey();
+
+  async function close() {
+    setBusy(true);
+    setFailure(null);
+    try {
+      await closeShipmentRemainder(shipment.id, shipment.version, key.current());
+      key.renew();
+      setConfirming(false);
+      onDone();
+    } catch (error) {
+      const problem = explain(describeProblem(error));
+      setFailure(problem);
+      if (problem.code === "idempotency_key_reuse") key.renew();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!confirming) {
+    return (
+      <div className={styles.actions}>
+        <Button variant="secondary" onClick={() => setConfirming(true)}>
+          Close remainder
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <div className={styles.stack}>
+      <Alert
+        tone="warning"
+        title="Close the remainder of this shipment?"
+        action={
+          <span className={styles.actions}>
+            <Button variant="danger" size="sm" loading={busy} onClick={close}>
+              Yes, close it
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setConfirming(false)}>
+              Keep it open
+            </Button>
+          </span>
+        }
+      >
+        The quantity still to ship is given up and the shipment becomes Shipped at what has shipped. Picked stock that was never packed goes back to stock. This cannot be undone.
+      </Alert>
+      <ProblemAlert title="Could not close the remainder" problem={failure} />
     </div>
   );
 }

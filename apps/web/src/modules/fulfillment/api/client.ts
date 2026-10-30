@@ -20,6 +20,8 @@ export interface ShipmentLine {
   qtyPicked: string;
   qtyPacked: string;
   qtyShipped: string;
+  /** Planned quantity given up when the remainder was closed (FR-28.8); absent or 0 when none. */
+  qtyClosed?: string;
   pickConfirmed: boolean;
   /** Pick zone given at release; null when none. */
   zone: string | null;
@@ -217,6 +219,8 @@ export interface BackorderRow {
   qtyPlanned: string;
   qtyPicked: string;
   qtyShipped: string;
+  /** Planned quantity given up when the remainder was closed (FR-28.8). */
+  qtyClosed: string;
   /** Planned minus picked. */
   qtyRemainder: string;
   /** A remainder is left and the shipment is not cancelled. */
@@ -508,6 +512,11 @@ export function cancelPackingSlip(id: string, key: string): Promise<PackingSlip>
 /** Cancels a shipment that shipped nothing and holds no container (BR-28.6). */
 export function cancelShipment(id: string, version: number, key: string): Promise<Shipment> {
   return command<Shipment>(`${shipmentPath(id)}:cancel`, undefined, key, version);
+}
+
+/** Closes the open remainder of a partially shipped shipment at what shipped (FR-28.8, CANCEL_REMAINDER). */
+export function closeShipmentRemainder(id: string, version: number, key: string): Promise<Shipment> {
+  return command<Shipment>(`${shipmentPath(id)}:close-remainder`, undefined, key, version);
 }
 
 /** Read-only workbench preview: the waves the create would make now (FR-28.13). */

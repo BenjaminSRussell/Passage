@@ -15,6 +15,7 @@ var (
 	PackingSlipPosted    = events.Type(Context, "packingslip", "posted", 1)
 	PackingSlipCancelled = events.Type(Context, "packingslip", "cancelled", 1)
 	ShipmentCancelled    = events.Type(Context, "shipment", "cancelled", 1)
+	ShipmentClosed       = events.Type(Context, "shipment", "closed", 1)
 	WaveCreated          = events.Type(Context, "wave", "created", 1)
 	ASNIssued            = events.Type(Context, "asn", "issued", 1)
 	TrackingUpdated      = events.Type(Context, "tracking", "updated", 1)
@@ -24,7 +25,7 @@ var (
 func All() []string {
 	return []string{
 		ShipmentReleased, PickConfirmed, PackingSlipPosted, PackingSlipCancelled,
-		ShipmentCancelled, WaveCreated, ASNIssued, TrackingUpdated,
+		ShipmentCancelled, ShipmentClosed, WaveCreated, ASNIssued, TrackingUpdated,
 	}
 }
 
@@ -37,6 +38,26 @@ type ShipmentCancelledData struct {
 	OrderID        string    `json:"order_id"`
 	WarehouseID    string    `json:"warehouse"`
 	Lines          []LineRef `json:"lines"`
+}
+
+// ClosedLine is one line of a closed remainder: Qty is the planned quantity
+// given up (it will not ship), PickedUnpacked the part of it that was picked but
+// never packed and goes back to stock (inventory releases it).
+type ClosedLine struct {
+	OrderLineID    string `json:"order_line_id"`
+	Qty            string `json:"qty"`
+	PickedUnpacked string `json:"picked_unpacked"`
+}
+
+// ShipmentClosedData is published when the open remainder of a partially
+// shipped shipment is closed (FR-28.8, CANCEL_REMAINDER). Sales may cancel or
+// re-order the remainder; inventory releases the reservation of Qty.
+type ShipmentClosedData struct {
+	ShipmentID     string       `json:"shipment_id"`
+	ShipmentNumber string       `json:"shipment_number"`
+	OrderID        string       `json:"order_id"`
+	WarehouseID    string       `json:"warehouse"`
+	Lines          []ClosedLine `json:"lines"`
 }
 
 // WaveCreatedData is published for each wave the picking workbench creates

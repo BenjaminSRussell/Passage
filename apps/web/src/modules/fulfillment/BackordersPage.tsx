@@ -23,6 +23,7 @@ const columns: DataTableColumn<BackorderRow>[] = [
   { key: "qtyPlanned", header: "Planned", align: "end", render: (row) => `${row.qtyPlanned} ${row.unit}` },
   { key: "qtyPicked", header: "Picked", align: "end", render: (row) => `${row.qtyPicked} ${row.unit}` },
   { key: "qtyRemainder", header: "Backorder", align: "end", render: (row) => `${row.qtyRemainder} ${row.unit}` },
+  { key: "qtyClosed", header: "Qty closed", align: "end", render: (row) => `${row.qtyClosed} ${row.unit}` },
   {
     key: "open",
     header: "Backorder state",
@@ -53,7 +54,8 @@ function validate(values: Filter): Record<string, string> {
 /**
  * Short picks and backorders (FR-28.2, section 5.28.14): shipment lines picked
  * below plan, newest short pick first. The remainder stays a backorder until
- * it is re-picked on the shipment detail or the shipment is cancelled.
+ * it is re-picked on the shipment detail, its remainder is closed there, or the
+ * shipment is cancelled.
  */
 export function BackordersPage() {
   const [values, setValues] = useState<Filter>(blank);

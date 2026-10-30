@@ -129,6 +129,54 @@ func CancelShipment(from ShipmentStatus, lines []LineQty, containers int) (Shipm
 	return Advance(from, StatusCancelled)
 }
 
+// ErrNothingShipped rejects closing a remainder when no quantity has shipped:
+// such a shipment is cancelled, not closed.
+var ErrNothingShipped = fmt.Errorf("%w: nothing has shipped, cancel the shipment instead", ErrInvalidMove)
+
+// ClosedQty is what closing the remainder of one line gives up: Closed of the
+// planned quantity will not ship, PickedUnpacked of the picked quantity was never
+// packed and returns to stock.
+type ClosedQty struct {
+	Closed         decimal.Decimal
+	PickedUnpacked decimal.Decimal
+}
+
+// CloseRemainder applies FR-28.8 CANCEL_REMAINDER: a shipment that has shipped
+// something and still owes quantity (PARTIALLY_SHIPPED, or its remainder
+// being picked) is closed at what shipped. Nothing may be packed and waiting
+// to ship, so the packer posts or the shipment is left open. It returns the
+// per-line quantities in line order (zero for a fully shipped line) and the
+// new status SHIPPED.
+func CloseRemainder(from ShipmentStatus, lines []LineQty) (ShipmentStatus, []ClosedQty, error) {
+	switch from {
+	case StatusPartiallyShipped, StatusPicking, StatusPicked:
+	default:
+		return from, nil, fmt.Errorf("%w: a %s shipment has no open remainder to close", ErrInvalidMove, from)
+	}
+	shippedAny := false
+	open := false
+	out := make([]ClosedQty, len(lines))
+	for i, l := range lines {
+		if l.Shipped.IsPositive() {
+			shippedAny = true
+		}
+		if l.Packed.GreaterThan(l.Shipped) {
+			return from, nil, fmt.Errorf("%w: packed quantity is waiting to ship, post it first", ErrInvalidMove)
+		}
+		out[i] = ClosedQty{Closed: l.Planned.Sub(l.Shipped), PickedUnpacked: l.Picked.Sub(l.Shipped)}
+		if out[i].Closed.IsPositive() {
+			open = true
+		}
+	}
+	if !shippedAny {
+		return from, nil, ErrNothingShipped
+	}
+	if !open {
+		return from, nil, fmt.Errorf("%w: every line has shipped its planned quantity", ErrInvalidMove)
+	}
+	return StatusShipped, out, nil
+}
+
 // CanPack checks that packing qty more keeps packed <= picked (BR-28.1 invariant).
 func CanPack(l LineQty, qty decimal.Decimal) error {
 	if !qty.IsPositive() {

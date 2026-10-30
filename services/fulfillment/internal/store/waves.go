@@ -22,6 +22,7 @@ import (
 // and carrier tracking (FR-28.10) part of the store.
 type WorkbenchStore interface {
 	CancelShipment(ctx context.Context, id string, version int, idem Idem) (Shipment, error)
+	CloseRemainder(ctx context.Context, id string, version int, idem Idem) (Shipment, error)
 	PreviewWaves(ctx context.Context, req WaveRequest) ([]WavePlan, error)
 	CreateWaves(ctx context.Context, req WaveRequest, idem Idem) ([]Wave, error)
 	ListWaves(ctx context.Context, f WaveFilter) ([]WaveSummary, error)

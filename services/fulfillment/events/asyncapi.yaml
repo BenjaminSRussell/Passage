@@ -36,6 +36,11 @@ channels:
     messages:
       shipmentCancelled:
         $ref: "#/components/messages/ShipmentCancelled"
+  shipmentClosed:
+    address: passage.fulfillment.shipment
+    messages:
+      shipmentClosed:
+        $ref: "#/components/messages/ShipmentClosed"
   waveCreated:
     address: passage.fulfillment.wave
     messages:
@@ -77,6 +82,11 @@ operations:
     channel: { $ref: "#/channels/shipmentCancelled" }
     messages:
       - $ref: "#/channels/shipmentCancelled/messages/shipmentCancelled"
+  publishShipmentClosed:
+    action: send
+    channel: { $ref: "#/channels/shipmentClosed" }
+    messages:
+      - $ref: "#/channels/shipmentClosed/messages/shipmentClosed"
   publishWaveCreated:
     action: send
     channel: { $ref: "#/channels/waveCreated" }
@@ -96,6 +106,10 @@ components:
   messages:
     ShipmentReleased:
       name: dev.passage.fulfillment.shipment.released.v1
+      title: Shipment released
+      summary: >
+        An order was released to the warehouse as a shipment (FR-28.1). Inventory
+        reserves and picking starts from it.
       contentType: application/json
       payload:
         type: object
@@ -214,6 +228,32 @@ components:
               properties:
                 order_line_id: { type: string, format: uuid }
                 qty: { type: string, description: The planned quantity that no longer ships. }
+    ShipmentClosed:
+      name: dev.passage.fulfillment.shipment.closed.v1
+      title: Shipment remainder closed
+      summary: >
+        The open remainder of a partially shipped shipment was closed (FR-28.8,
+        CANCEL_REMAINDER). Inventory releases the reservation of the closed
+        quantity and returns picked stock that was never packed; sales may cancel
+        or re-order the remainder.
+      contentType: application/json
+      payload:
+        type: object
+        required: [shipment_id, shipment_number, order_id, warehouse, lines]
+        properties:
+          shipment_id: { type: string, format: uuid }
+          shipment_number: { type: string }
+          order_id: { type: string, format: uuid }
+          warehouse: { type: string, format: uuid }
+          lines:
+            type: array
+            items:
+              type: object
+              required: [order_line_id, qty, picked_unpacked]
+              properties:
+                order_line_id: { type: string, format: uuid }
+                qty: { type: string, description: The planned quantity that will not ship. }
+                picked_unpacked: { type: string, description: The part of qty that was picked but never packed and goes back to stock. }
     WaveCreated:
       name: dev.passage.fulfillment.wave.created.v1
       summary: >

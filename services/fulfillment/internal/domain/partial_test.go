@@ -132,3 +132,43 @@ func TestCancelShipmentRules(t *testing.T) {
 		})
 	}
 }
+
+func TestCloseRemainderRules(t *testing.T) {
+	d := partialQ
+	cases := []struct {
+		name         string
+		from         ShipmentStatus
+		lines        []LineQty
+		wantErr      bool
+		closed, left string // line 0 closed and picked-but-unpacked quantities
+	}{
+		{"partially shipped closes at shipped", StatusPartiallyShipped,
+			[]LineQty{{Planned: d("10"), Picked: d("6"), Packed: d("6"), Shipped: d("6")}, {Planned: d("5"), Picked: d("5"), Packed: d("5"), Shipped: d("5")}}, false, "4", "0"},
+		{"re-picked remainder returns the unpacked stock", StatusPicked,
+			[]LineQty{{Planned: d("10"), Picked: d("8"), Packed: d("6"), Shipped: d("6")}}, false, "4", "2"},
+		{"nothing shipped is a cancel", StatusPicked, []LineQty{{Planned: d("10"), Picked: d("10")}}, true, "", ""},
+		{"packed waiting to ship blocks", StatusPicked,
+			[]LineQty{{Planned: d("10"), Picked: d("8"), Packed: d("8"), Shipped: d("6")}}, true, "", ""},
+		{"fully shipped has no remainder", StatusPartiallyShipped,
+			[]LineQty{{Planned: d("5"), Picked: d("5"), Packed: d("5"), Shipped: d("5")}}, true, "", ""},
+		{"shipped shipment", StatusShipped, []LineQty{{Planned: d("5"), Shipped: d("5")}}, true, "", ""},
+		{"packed shipment", StatusPacked, []LineQty{{Planned: d("5"), Shipped: d("2")}}, true, "", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, out, err := CloseRemainder(c.from, c.lines)
+			if (err != nil) != c.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, c.wantErr)
+			}
+			if err != nil {
+				if !errors.Is(err, ErrInvalidMove) {
+					t.Fatalf("err = %v, want FUL-0021", err)
+				}
+				return
+			}
+			if got != StatusShipped || out[0].Closed.String() != c.closed || out[0].PickedUnpacked.String() != c.left {
+				t.Fatalf("status %s closed %s picked-unpacked %s, want SHIPPED %s %s", got, out[0].Closed, out[0].PickedUnpacked, c.closed, c.left)
+			}
+		})
+	}
+}

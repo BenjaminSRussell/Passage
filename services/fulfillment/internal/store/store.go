@@ -117,6 +117,7 @@ type ShipmentLine struct {
 	Picked        decimal.Decimal `json:"qtyPicked"`
 	Packed        decimal.Decimal `json:"qtyPacked"`
 	Shipped       decimal.Decimal `json:"qtyShipped"`
+	Closed        decimal.Decimal `json:"qtyClosed"`
 	PickConfirmed bool            `json:"pickConfirmed"`
 	Zone          *string         `json:"zone"`
 }
@@ -643,19 +644,19 @@ func loadShipment(ctx context.Context, tx pgx.Tx, id string) (Shipment, error) {
 	}
 	sh.Status = domain.ShipmentStatus(status)
 	sh.Lines = []ShipmentLine{}
-	rows, err := tx.Query(ctx, `select id, order_line_id, product_id, unit, qty_planned::text, qty_picked::text, qty_packed::text, qty_shipped::text, pick_confirmed, zone_code
+	rows, err := tx.Query(ctx, `select id, order_line_id, product_id, unit, qty_planned::text, qty_picked::text, qty_packed::text, qty_shipped::text, pick_confirmed, zone_code, qty_closed::text
 		from shipment_line where shipment_id = $1 order by id`, id)
 	if err != nil {
 		return sh, err
 	}
 	for rows.Next() {
 		var l ShipmentLine
-		var planned, picked, packed, shipped string
-		if err := rows.Scan(&l.ID, &l.OrderLineID, &l.ProductID, &l.Unit, &planned, &picked, &packed, &shipped, &l.PickConfirmed, &l.Zone); err != nil {
+		var planned, picked, packed, shipped, closed string
+		if err := rows.Scan(&l.ID, &l.OrderLineID, &l.ProductID, &l.Unit, &planned, &picked, &packed, &shipped, &l.PickConfirmed, &l.Zone, &closed); err != nil {
 			rows.Close()
 			return sh, err
 		}
-		l.Planned, l.Picked, l.Packed, l.Shipped = dec(planned), dec(picked), dec(packed), dec(shipped)
+		l.Planned, l.Picked, l.Packed, l.Shipped, l.Closed = dec(planned), dec(picked), dec(packed), dec(shipped), dec(closed)
 		sh.Lines = append(sh.Lines, l)
 	}
 	rows.Close()

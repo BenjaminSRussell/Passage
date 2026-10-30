@@ -148,6 +148,7 @@ components:
         qtyPicked: { $ref: "#/components/schemas/Decimal" }
         qtyPacked: { $ref: "#/components/schemas/Decimal" }
         qtyShipped: { $ref: "#/components/schemas/Decimal" }
+        qtyClosed: { $ref: "#/components/schemas/Decimal", description: "Planned quantity given up when the remainder was closed (FR-28.8); the line then plans what shipped." }
         pickConfirmed: { type: boolean }
         zone: { type: [string, "null"], description: "Pick zone, given at release (FR-28.13)." }
     Container:
@@ -1024,8 +1025,8 @@ paths:
       summary: Short picks and backorders (FR-28.2, AC-28.4, section 5.28.14)
       description: >-
         Shipment lines a pick confirmed below their planned quantity, newest short pick first. The
-        remainder (qtyPlanned - qtyPicked) is open until a re-pick reaches the planned quantity or the shipment
-        is cancelled. status=open (default) lists open backorders only; status=all also lists closed ones. from
+        remainder (qtyPlanned - qtyPicked) is open until a re-pick reaches the planned quantity, the remainder is
+        closed (qtyClosed, FR-28.8) or the shipment is cancelled. status=open (default) lists open backorders only; status=all also lists closed ones. from
         and to bound the date of the line's first short pick. Page with limit and the nextCursor of the previous
         page.
       x-passage-duty: WarehouseView
@@ -1049,7 +1050,7 @@ paths:
                     type: array
                     items:
                       type: object
-                      required: [shipmentLineId, shipmentId, shipmentNumber, status, warehouseId, orderId, customerId, orderLineId, productId, unit, qtyPlanned, qtyPicked, qtyShipped, qtyRemainder, open, shortPickedAt]
+                      required: [shipmentLineId, shipmentId, shipmentNumber, status, warehouseId, orderId, customerId, orderLineId, productId, unit, qtyPlanned, qtyPicked, qtyShipped, qtyClosed, qtyRemainder, open, shortPickedAt]
                       properties:
                         shipmentLineId: { type: string, format: uuid }
                         shipmentId: { type: string, format: uuid }
@@ -1064,6 +1065,7 @@ paths:
                         qtyPlanned: { $ref: "#/components/schemas/Decimal" }
                         qtyPicked: { $ref: "#/components/schemas/Decimal" }
                         qtyShipped: { $ref: "#/components/schemas/Decimal" }
+                        qtyClosed: { $ref: "#/components/schemas/Decimal", description: "Planned quantity given up when the remainder was closed (FR-28.8); qtyPlanned is then what shipped." }
                         qtyRemainder: { $ref: "#/components/schemas/Decimal" }
                         open: { type: boolean, description: "A remainder is left and the shipment is not cancelled." }
                         shortPickedAt: { type: string, format: date-time, description: "The line's first short pick." }
@@ -1185,6 +1187,35 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { description: FUL-0020, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "409": { description: "FUL-0021 already cancelled, shipped quantity, or containers packed", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/fulfillment/shipments/{id}:close-remainder:
+    post:
+      operationId: closeShipmentRemainder
+      summary: Close the open remainder of a partially shipped shipment (FR-28.8)
+      description: >
+        CANCEL_REMAINDER: allowed while the shipment is PARTIALLY_SHIPPED, or its
+        remainder is being picked (PICKING, PICKED), after at least one slip has
+        shipped and with nothing packed waiting to ship. Every line shrinks to the
+        quantity that shipped (qtyClosed records what was given up), the backorder
+        closes and the shipment becomes SHIPPED. shipment.closed tells inventory
+        which reservation and which picked-but-unpacked stock to release.
+      x-passage-duty: WarehouseRelease
+      parameters:
+        - { $ref: "#/components/parameters/ShipmentId" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      responses:
+        "200":
+          description: Shipment SHIPPED with its remainder closed; ETag carries the new version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Shipment" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: FUL-0020, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "409": { description: "FUL-0021 no open remainder, nothing shipped yet, or packed quantity waiting to ship", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "422": { description: idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }

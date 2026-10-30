@@ -6,7 +6,7 @@ import { ShipmentStatusBadge, SlipStatusBadge } from "./badges";
 import { dash, formatDate, formatDateTime, formatMoney, shortId, subtractDecimal } from "./format";
 import styles from "./pages.module.css";
 import { AutoPackForm, PackForm, PickForm, PostForm } from "./ShipmentActions";
-import { canCancelShipment, CancelShipmentPanel, LabelButton, LabelPanel, TrackingCard } from "./ShipmentTracking";
+import { canCancelShipment, canCloseRemainder, CancelShipmentPanel, CloseRemainderPanel, LabelButton, LabelPanel, TrackingCard } from "./ShipmentTracking";
 import { useLoad } from "./useLoad";
 
 interface Detail {
@@ -23,6 +23,7 @@ const lineColumns: DataTableColumn<ShipmentLine>[] = [
   { key: "qtyPacked", header: "Packed", align: "end" },
   { key: "qtyShipped", header: "Shipped", align: "end" },
   { key: "remaining", header: "To ship", align: "end", render: (row) => subtractDecimal(row.qtyPlanned, row.qtyShipped) },
+  { key: "qtyClosed", header: "Closed", align: "end", render: (row) => row.qtyClosed ?? "0" },
   { key: "zone", header: "Zone", render: (row) => row.zone ?? dash },
 ];
 
@@ -114,9 +115,10 @@ export function ShipmentDetailPage() {
         </dl>
       </Card>
       {canCancelShipment(shipment) ? <CancelShipmentPanel key={`cancel-${shipment.version}`} shipment={shipment} onDone={state.reload} /> : null}
+      {canCloseRemainder(shipment) ? <CloseRemainderPanel key={`close-${shipment.version}`} shipment={shipment} onDone={state.reload} /> : null}
       {shipment.status === "PARTIALLY_SHIPPED" ? (
         <Alert tone="info" title="Partially shipped">
-          A packing slip has shipped part of this shipment. Pick the remainder below; the shipment is Shipped once every line has shipped its planned quantity.
+          A packing slip has shipped part of this shipment. Pick the remainder below; the shipment is Shipped once every line has shipped its planned quantity. If the remainder will not ship, close it instead.
         </Alert>
       ) : null}
       <DataTable label="Shipment lines" columns={lineColumns} rows={shipment.lines} getRowKey={(row) => row.id} />

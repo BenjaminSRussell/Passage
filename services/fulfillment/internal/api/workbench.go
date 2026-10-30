@@ -35,6 +35,7 @@ var (
 // GS1-128 container label (FR-28.3).
 func (a *API) routesWorkbench(r chi.Router) {
 	r.With(authz.RequireDuty("WarehouseRelease")).Post("/v1/fulfillment/shipments/{id}:cancel", a.cancelShipment)
+	r.With(authz.RequireDuty("WarehouseRelease")).Post("/v1/fulfillment/shipments/{id}:close-remainder", a.closeRemainder)
 	r.With(authz.RequireDuty("WarehouseRelease")).Post("/v1/fulfillment/waves:preview", a.previewWaves)
 	r.With(authz.RequireDuty("WarehouseRelease")).Post("/v1/fulfillment/waves", a.createWaves)
 	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/waves", a.listWaves)
@@ -172,6 +173,25 @@ func (a *API) cancelShipment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sh, err := a.store.CancelShipment(r.Context(), id, version, idem)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	etag(w, sh.Version)
+	httpx.JSON(w, http.StatusOK, sh)
+}
+
+func (a *API) closeRemainder(w http.ResponseWriter, r *http.Request) {
+	id, version, ok := a.shipmentCommand(w, r)
+	if !ok {
+		return
+	}
+	_, idem, err := command(r, nil)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	sh, err := a.store.CloseRemainder(r.Context(), id, version, idem)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return
