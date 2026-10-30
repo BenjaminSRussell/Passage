@@ -105,3 +105,25 @@ func TestHandleInvoicePosted_RejectsInvalidEvents(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleInvoicePosted_StoresVendorGroupAndBackfillsOnRedelivery(t *testing.T) {
+	const group = "00000000-0000-0000-0000-0000000000b1"
+	s := setup(t)
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: le})
+	if err := HandleInvoicePosted(context.Background(), s, event(t, InvoicePostedType, payload(nil))); err != nil {
+		t.Fatal(err)
+	}
+	if items, _ := s.List(ctx, store.Filter{}, 10); len(items) != 1 || items[0].VendorGroupID != "" {
+		t.Fatalf("legacy event must leave the group empty: %+v", items)
+	}
+	if err := HandleInvoicePosted(context.Background(), s, event(t, InvoicePostedType, payload(map[string]any{"vendor_group_id": group}))); err != nil {
+		t.Fatal(err)
+	}
+	if items, _ := s.List(ctx, store.Filter{}, 10); len(items) != 1 || items[0].VendorGroupID != group {
+		t.Fatalf("redelivery with a group must backfill: %+v", items)
+	}
+	err := HandleInvoicePosted(context.Background(), s, event(t, InvoicePostedType, payload(map[string]any{"vendor_group_id": "nope"})))
+	if !errors.Is(err, ErrInvalidEvent) {
+		t.Fatalf("bad vendor_group_id err = %v, want ErrInvalidEvent", err)
+	}
+}
