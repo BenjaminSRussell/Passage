@@ -107,3 +107,20 @@ func TestStatusErrorIsTyped(t *testing.T) {
 		t.Fatalf("legal entity err = %v", err)
 	}
 }
+
+func TestLedgerClient_DoesNotFollowRedirectsWithTenantHeaders(t *testing.T) {
+	leaked := false
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { leaked = true }))
+	defer target.Close()
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	defer redirector.Close()
+	for name, client := range map[string]*http.Client{"default": nil, "custom": {}} {
+		_, err := ledger.New(redirector.URL, client).LegalEntity(ctx(), "ledger-1")
+		var se *ledger.StatusError
+		if !errors.As(err, &se) || se.Status != http.StatusFound || leaked {
+			t.Fatalf("%s client: err=%v leaked=%v, want the 302 returned without following it", name, err, leaked)
+		}
+	}
+}

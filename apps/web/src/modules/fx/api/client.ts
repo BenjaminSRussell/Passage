@@ -188,3 +188,28 @@ export function convertAmounts(input: ConvertInput, fetchImpl: FetchLike = defau
     fetchImpl,
   );
 }
+
+const importRunSchema = z.object({
+  runId: z.string(),
+  provider: z.string(),
+  rateType: z.string(),
+  date: z.string(),
+  attempts: z.number().int(),
+  imported: z.number().int(),
+  unchanged: z.number().int(),
+  alreadyDone: z.boolean(),
+  degraded: z.boolean(),
+  pending: z.boolean().optional(),
+  lastSuccessAt: z.string().optional(),
+});
+export const IMPORT_PROVIDERS: readonly string[] = ["ecb", "openexchangerates"];
+export type ImportRun = z.infer<typeof importRunSchema>;
+
+export function importNow(provider: string, rateType: string, fetchImpl: FetchLike = defaultFetch): Promise<ImportRun> {
+  return send(
+    `/api/v1/fx/providers/${encodeURIComponent(provider)}:import`,
+    { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" }, body: JSON.stringify({ rateType }) },
+    importRunSchema,
+    fetchImpl,
+  );
+}

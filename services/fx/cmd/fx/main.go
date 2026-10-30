@@ -64,7 +64,11 @@ func run(ctx context.Context, getenv func(string) string) error {
 	}
 
 	router := httpx.NewRouter()
-	api.New(st).Register(router)
+	manual, err := newManualImporters(getenv, st, metrics)
+	if err != nil {
+		return err
+	}
+	api.New(st).WithImporters(manual).Register(router)
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

@@ -13,13 +13,14 @@ function history(rate: string, extra: Record<string, unknown> = {}) {
   return { id: "h1", version: 1, validFrom: "2026-01-02", rate, source: "manual", createdAt: "2026-01-02T09:00:00Z", ...extra };
 }
 
-function answer(routes: { history?: Reply; publish?: Reply; put?: Reply; create?: Reply; list?: Reply }) {
+function answer(routes: { history?: Reply; publish?: Reply; put?: Reply; create?: Reply; list?: Reply; importRun?: Reply }) {
   server.handler = (url, method) => {
     if (url.pathname === "/api/v1/fx/rate-types" && method === "GET") return routes.list ?? json(200, [closing, average]);
     if (url.pathname === "/api/v1/fx/rate-types" && method === "POST") return routes.create;
     if (url.pathname.startsWith("/api/v1/fx/rate-types/") && method === "PUT") return routes.put;
     if (url.pathname === "/api/v1/fx/rates/history") return routes.history ?? json(200, { entries: [] });
     if (url.pathname === "/api/v1/fx/rates" && method === "POST") return routes.publish;
+    if (url.pathname === "/api/v1/fx/providers/ecb:import" && method === "POST") return routes.importRun;
     return undefined;
   };
 }
@@ -630,5 +631,120 @@ describe("rate types page", () => {
     await user.click(screen.getByRole("button", { name: "New rate type" }));
     expect(screen.getByLabelText("Code")).toHaveValue("");
     expect(screen.getByLabelText("Code")).not.toHaveAttribute("readonly");
+  });
+});
+
+const importRun = (extra: Record<string, unknown> = {}) =>
+  json(200, { runId: "r1", provider: "ecb", rateType: "AVERAGE", date: "2026-03-02", attempts: 1, imported: 30, unchanged: 2, alreadyDone: false, degraded: false, ...extra });
+const importCalls = () => server.calls.filter((c) => c.url.pathname.endsWith(":import"));
+
+describe("import now", () => {
+  it("is offered only for a rate type that has a provider", async () => {
+    answer({});
+    const user = userEvent.setup();
+    renderAt("/fx/rate-types");
+    await user.click(await screen.findByRole("button", { name: "CLOSING" }));
+    expect(screen.queryByRole("button", { name: "Import now" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "AVERAGE" }));
+    expect(await screen.findByRole("button", { name: "Import now" })).toBeInTheDocument();
+  });
+
+  it("is not offered for a provider the server cannot import from", async () => {
+    answer({ list: json(200, [{ id: "t3", code: "BUDGET", name: "Budget", allowInverse: false, provider: "csv" }]) });
+    const user = userEvent.setup();
+    renderAt("/fx/rate-types");
+    await user.click(await screen.findByRole("button", { name: "BUDGET" }));
+    expect(screen.queryByRole("button", { name: "Import now" })).not.toBeInTheDocument();
+  });
+
+  it("imports through the provider route, locks the button while pending and reports the summary", async () => {
+    answer({ importRun: importRun() });
+    const release = holdRequests("POST");
+    const user = userEvent.setup();
+    const { container } = renderAt("/fx/rate-types");
+    await user.click(await screen.findByRole("button", { name: "AVERAGE" }));
+    const button = await screen.findByRole("button", { name: "Import now" });
+    await user.click(button);
+    await waitFor(() => expect(button).toHaveAttribute("aria-busy", "true"));
+    await user.click(button);
+    release();
+    expect(await screen.findByText("Import finished")).toBeInTheDocument();
+    expect(screen.getByText(/30 rates stored and 2 unchanged from ecb dated 2026-03-02/)).toBeInTheDocument();
+    expect(importCalls()).toHaveLength(1);
+    expect(importCalls()[0].body).toEqual({ rateType: "AVERAGE" });
+    expect(button).not.toHaveAttribute("aria-busy");
+    expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("reports the cube date and asks to retry when the provider has not published today", async () => {
+    answer({ importRun: importRun({ pending: true, date: "2026-02-27" }) });
+    const user = userEvent.setup();
+    renderAt("/fx/rate-types");
+    await user.click(await screen.findByRole("button", { name: "AVERAGE" }));
+    await user.click(await screen.findByRole("button", { name: "Import now" }));
+    expect(await screen.findByText("Latest rates stored")).toBeInTheDocument();
+    expect(screen.getByText(/rates dated 2026-02-27 were stored.*import again later/)).toBeInTheDocument();
+  });
+
+  it("says when the day was already imported", async () => {
+    answer({ importRun: importRun({ alreadyDone: true }) });
+    const user = userEvent.setup();
+    renderAt("/fx/rate-types");
+    await user.click(await screen.findByRole("button", { name: "AVERAGE" }));
+    await user.click(await screen.findByRole("button", { name: "Import now" }));
+    expect(await screen.findByText("Already imported")).toBeInTheDocument();
+  });
+
+  it("says the import is still running on a 409 instead of reporting a failure", async () => {
+    answer({ importRun: json(409, { code: "FX_IMPORT_IN_PROGRESS", detail: "an import is still running" }) });
+    const user = userEvent.setup();
+    renderAt("/fx/rate-types");
+    await user.click(await screen.findByRole("button", { name: "AVERAGE" }));
+    await user.click(await screen.findByRole("button", { name: "Import now" }));
+    expect(await screen.findByText("Import still running")).toBeInTheDocument();
+    expect(screen.getByText(/Try again shortly/)).toBeInTheDocument();
+    expect(screen.queryByText("Could not import the rates")).not.toBeInTheDocument();
+    expect(screen.queryByText("Already imported")).not.toBeInTheDocument();
+  });
+
+  it("warns when the provider is down and last-known rates stay in use", async () => {
+    answer({ importRun: importRun({ degraded: true, lastSuccessAt: "2026-03-01T09:00:00Z" }) });
+    const user = userEvent.setup();
+    renderAt("/fx/rate-types");
+    await user.click(await screen.findByRole("button", { name: "AVERAGE" }));
+    await user.click(await screen.findByRole("button", { name: "Import now" }));
+    expect(await screen.findByText("The provider is unavailable")).toBeInTheDocument();
+    expect(screen.getByText(/from 2026-03-01T09:00:00Z/)).toBeInTheDocument();
+  });
+
+  it("names the Administer exchange rates duty on a 403", async () => {
+    answer({ importRun: json(403, { code: "AUTH-0003", detail: "duty missing" }) });
+    const user = userEvent.setup();
+    renderAt("/fx/rate-types");
+    await user.click(await screen.findByRole("button", { name: "AVERAGE" }));
+    await user.click(await screen.findByRole("button", { name: "Import now" }));
+    expect(await screen.findByText(/Administer exchange rates/)).toBeInTheDocument();
+    expect(screen.queryByText("Import finished")).not.toBeInTheDocument();
+  });
+
+  it("shows the server message when the import fails", async () => {
+    answer({ importRun: json(502, { code: "FX_PROVIDER_FAILED", detail: "provider outage and no last-known rate" }) });
+    const user = userEvent.setup();
+    renderAt("/fx/rate-types");
+    await user.click(await screen.findByRole("button", { name: "AVERAGE" }));
+    await user.click(await screen.findByRole("button", { name: "Import now" }));
+    expect(await screen.findByText("Could not import the rates")).toBeInTheDocument();
+    expect(screen.getByText("provider outage and no last-known rate")).toBeInTheDocument();
+  });
+
+  it("is also offered on the rate entry screen once a provider rate type is picked", async () => {
+    answer({ importRun: importRun() });
+    const user = userEvent.setup();
+    renderAt("/fx/rate-entry");
+    await screen.findByRole("option", { name: "AVERAGE – Monthly average" });
+    expect(screen.queryByRole("button", { name: "Import now" })).not.toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("Rate type"), "AVERAGE");
+    await user.click(await screen.findByRole("button", { name: "Import now" }));
+    expect(await screen.findByText("Import finished")).toBeInTheDocument();
   });
 });

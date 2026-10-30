@@ -503,31 +503,34 @@ func (a *API) toPostInput(req postEntryRequest, r *http.Request) (store.PostInpu
 		fields["lines"] = fmt.Sprintf("at most %d lines per entry; split the document with a shared documentId", domain.MaxLinesPerEntry)
 	}
 	for i, l := range req.Lines {
-		prefix := fmt.Sprintf("lines[%d]", i)
-		if l.Account == "" || len(l.Account) > 20 {
-			fields[prefix+".account"] = "is required and must be at most 20 characters"
-		}
-		if l.DebitCredit != domain.SideDebit && l.DebitCredit != domain.SideCredit {
-			fields[prefix+".debitCredit"] = "must be D or C"
-		}
-		amount, err := decimal.NewFromString(l.Amount.Value)
-		switch {
-		case err != nil:
-			fields[prefix+".amount.value"] = "must be a decimal string"
-		case amount.IsNegative():
-			fields[prefix+".amount.value"] = "must not be negative; use the opposite side"
-		}
-		if utf8.RuneCountInString(l.Text) > maxTextLength {
-			fields[prefix+".text"] = fmt.Sprintf("must be at most %d characters", maxTextLength)
-		}
-		if utf8.RuneCountInString(l.SourceLineRef) > maxSourceRefLength {
-			fields[prefix+".sourceLineRef"] = fmt.Sprintf("must be at most %d characters", maxSourceRefLength)
-		}
-		in.Lines = append(in.Lines, domain.LineInput{Account: l.Account, Dimensions: l.Dimensions, Side: l.DebitCredit,
-			Amount: amount, Currency: l.Amount.Currency, Text: l.Text, SourceLineRef: l.SourceLineRef})
+		in.Lines = append(in.Lines, lineInput(fmt.Sprintf("lines[%d]", i), l, fields))
 	}
 	in.TraceID = traceID(r)
 	return in, fields
+}
+
+func lineInput(prefix string, l lineDTO, fields map[string]string) domain.LineInput {
+	if l.Account == "" || len(l.Account) > 20 {
+		fields[prefix+".account"] = "is required and must be at most 20 characters"
+	}
+	if l.DebitCredit != domain.SideDebit && l.DebitCredit != domain.SideCredit {
+		fields[prefix+".debitCredit"] = "must be D or C"
+	}
+	amount, err := decimal.NewFromString(l.Amount.Value)
+	switch {
+	case err != nil:
+		fields[prefix+".amount.value"] = "must be a decimal string"
+	case amount.IsNegative():
+		fields[prefix+".amount.value"] = "must not be negative; use the opposite side"
+	}
+	if utf8.RuneCountInString(l.Text) > maxTextLength {
+		fields[prefix+".text"] = fmt.Sprintf("must be at most %d characters", maxTextLength)
+	}
+	if utf8.RuneCountInString(l.SourceLineRef) > maxSourceRefLength {
+		fields[prefix+".sourceLineRef"] = fmt.Sprintf("must be at most %d characters", maxSourceRefLength)
+	}
+	return domain.LineInput{Account: l.Account, Dimensions: l.Dimensions, Side: l.DebitCredit,
+		Amount: amount, Currency: l.Amount.Currency, Text: l.Text, SourceLineRef: l.SourceLineRef}
 }
 
 func (a *API) postEntry(w http.ResponseWriter, r *http.Request) {
