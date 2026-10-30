@@ -15,7 +15,20 @@ const (
 	// naming rule allows only letters and digits in the verb, so the verb is
 	// written statuschanged, as in production.order.statuschanged.v1.
 	BatchStatusChanged = "dev.passage.ledger.batch.statuschanged.v1"
+	// RecurringGenerated is announced when a recurring journal (FR-11.10) creates a draft batch.
+	RecurringGenerated = "dev.passage.ledger.recurring.generated.v1"
 )
+
+// RecurringGeneratedData is the payload of dev.passage.ledger.recurring.generated.v1.
+// ScheduledDate is the run date, which is also the posting date of the draft batch.
+type RecurringGeneratedData struct {
+	RecurringID   string `json:"recurringId"`
+	BatchID       string `json:"batchId"`
+	LedgerID      string `json:"ledgerId"`
+	JournalName   string `json:"journalName"`
+	ScheduledDate string `json:"scheduledDate"`
+	Actor         string `json:"actor"`
+}
 
 // BatchStatusChangedData is the payload of dev.passage.ledger.batch.statuschanged.v1
 // (BR-11.10). From and To are batch statuses; Actor is the user who caused the

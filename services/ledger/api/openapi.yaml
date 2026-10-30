@@ -20,6 +20,7 @@ tags:
   - name: journal
   - name: balances
   - name: structures
+  - name: recurring
   - name: ops
 components:
   parameters:
@@ -581,6 +582,92 @@ components:
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         text: { type: string }
         sourceLineRef: { type: string }
+    RecurringLine:
+      type: object
+      required: [lineNumber, account, debitCredit, amountKind, amount, currency]
+      properties:
+        lineNumber: { type: integer, minimum: 1 }
+        account: { type: string }
+        dimensions:
+          type: object
+          additionalProperties: { type: string }
+        debitCredit: { type: string, enum: [D, C] }
+        amountKind: { type: string, enum: [fixed, percent] }
+        amount: { type: string, description: "A decimal string at the currency's minor-unit scale for fixed lines; a percentage of the base amount (0 to 1000) for percent lines" }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        text: { type: string }
+    RecurringLineBody:
+      type: object
+      required: [account, debitCredit, amountKind, amount]
+      properties:
+        account: { type: string }
+        dimensions:
+          type: object
+          additionalProperties: { type: string }
+        debitCredit: { type: string, enum: [D, C] }
+        amountKind: { type: string, enum: [fixed, percent] }
+        amount:
+          type: object
+          required: [currency, value]
+          properties:
+            currency: { type: string, pattern: '^[A-Z]{3}$' }
+            value: { type: string, description: Decimal string; a percentage when amountKind is percent }
+        text: { type: string, maxLength: 255 }
+    RecurringJournalBody:
+      type: object
+      required: [ledgerId, journalName, name, frequency, dayOfMonth, startDate, lines]
+      properties:
+        ledgerId: { type: string, format: uuid, description: Cannot change after creation }
+        journalName: { type: string, description: Active journal name that the generated batches use }
+        name: { type: string, minLength: 1, maxLength: 80 }
+        description: { type: string, maxLength: 255, description: Description of every generated batch }
+        frequency: { type: string, enum: [monthly, quarterly, yearly] }
+        dayOfMonth: { type: integer, minimum: 0, maximum: 31, description: 0 is the last day of the month; a day beyond the month's length is clipped to its last day }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date, description: No run is scheduled after this date }
+        baseAmount: { type: string, description: Base for percent lines; a generation can override it }
+        lines:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/RecurringLineBody" }
+    RecurringJournal:
+      type: object
+      required: [id, ledgerId, legalEntityId, journalName, name, description, frequency, dayOfMonth, startDate, status, version,
+        lineCount, createdBy, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        ledgerId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        journalName: { type: string }
+        name: { type: string }
+        description: { type: string }
+        frequency: { type: string, enum: [monthly, quarterly, yearly] }
+        dayOfMonth: { type: integer }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date }
+        baseAmount: { type: string }
+        status: { type: string, enum: [active, paused] }
+        nextRunDate: { type: string, format: date, description: Absent when the schedule is past its end date }
+        lastRunDate: { type: string, format: date }
+        version: { type: integer, minimum: 1, description: Optimistic concurrency token, also sent as the ETag }
+        lineCount: { type: integer }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        lines:
+          type: array
+          description: Present on single reads, absent in lists
+          items: { $ref: "#/components/schemas/RecurringLine" }
+    RecurringRun:
+      type: object
+      required: [id, recurringId, scheduledDate, batchId, generatedBy, generatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        recurringId: { type: string, format: uuid }
+        scheduledDate: { type: string, format: date, description: The run date, also the posting date of the batch }
+        batchId: { type: string, format: uuid, description: The draft journal batch that the run created }
+        generatedBy: { type: string }
+        generatedAt: { type: string, format: date-time }
     JournalBatch:
       type: object
       required: [id, ledgerId, legalEntityId, journalName, description, postingDate, currency, status, version,
@@ -659,12 +746,25 @@ components:
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
+    RecurringProblem409:
+      description: LEDGER_RECURRING_PAUSED (the template is paused and the date has no run yet)
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    RecurringProblem422:
+      description: LEDGER_RECURRING_DATE_INVALID (outside the start and end dates, or not a date of the schedule), LEDGER_RECURRING_BASE_REQUIRED (percent lines without a base amount), LEDGER_RECURRING_LEDGER_FIXED, LEDGER_JOURNAL_NAME_INVALID or LEDGER_LINE_LIMIT; nothing changed
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
     BatchProblem422:
       description: Rule violations (violations[]), LEDGER_JOURNAL_NAME_INVALID or LEDGER_LINE_LIMIT; nothing changed
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/ViolationProblem" }
   headers:
+    RecurringETag:
+      description: The recurring journal version as an entity tag, for If-Match on the next change
+      schema: { type: string, example: '"2"' }
     BatchETag:
       description: The batch version as an entity tag, for If-Match on the next change
       schema: { type: string, example: '"3"' }
@@ -673,6 +773,7 @@ paths:
     get:
       tags: [journal]
       operationId: listJournalNames
+      summary: List journal names
       x-passage-duty: ledger.journal.read
       responses:
         "200":
@@ -692,6 +793,7 @@ paths:
     get:
       tags: [journal]
       operationId: getJournalName
+      summary: Get a journal name
       x-passage-duty: ledger.journal.read
       parameters:
         - $ref: "#/components/parameters/JournalNameCode"
@@ -737,6 +839,7 @@ paths:
     get:
       tags: [journal]
       operationId: listJournalBatches
+      summary: List manual journal batches
       x-passage-duty: ledger.journal.read
       parameters:
         - { name: ledger, in: query, schema: { type: string, format: uuid } }
@@ -788,6 +891,7 @@ paths:
     get:
       tags: [journal]
       operationId: getJournalBatch
+      summary: Get a manual journal batch with its lines
       x-passage-duty: ledger.journal.read
       parameters:
         - name: id
@@ -1002,6 +1106,7 @@ paths:
     get:
       tags: [structures]
       operationId: listAccountStructures
+      summary: List the account structures of a ledger
       x-passage-duty: ledger.journal.read
       responses:
         "200":
@@ -1031,6 +1136,7 @@ paths:
     get:
       tags: [structures]
       operationId: getAccountStructure
+      summary: Get an account structure
       x-passage-duty: ledger.journal.read
       responses:
         "200":
@@ -1087,6 +1193,7 @@ paths:
     get:
       tags: [structures]
       operationId: listDimensionValues
+      summary: List the dimension values of a ledger
       x-passage-duty: ledger.journal.read
       responses:
         "200":
@@ -1147,6 +1254,7 @@ paths:
     post:
       tags: [ledgers]
       operationId: createLedger
+      summary: Create a ledger
       x-passage-duty: ledger.ledger.write
       requestBody:
         required: true
@@ -1184,6 +1292,7 @@ paths:
     get:
       tags: [ledgers]
       operationId: getLedger
+      summary: Get a ledger
       x-passage-duty: ledger.journal.read
       parameters:
         - $ref: "#/components/parameters/LedgerId"
@@ -1200,6 +1309,7 @@ paths:
     get:
       tags: [charts]
       operationId: listAccounts
+      summary: List the accounts of a chart
       x-passage-duty: ledger.journal.read
       parameters:
         - $ref: "#/components/parameters/ChartCode"
@@ -1349,6 +1459,7 @@ paths:
     get:
       tags: [journal]
       operationId: getLedgerSet
+      summary: Get a ledger set with its members
       x-passage-duty: ledger.journal.read
       parameters:
         - $ref: "#/components/parameters/LedgerSetId"
@@ -1440,6 +1551,7 @@ paths:
     get:
       tags: [journal]
       operationId: getEntry
+      summary: Get a posted journal entry with its lines
       x-passage-duty: ledger.journal.read
       parameters:
         - $ref: "#/components/parameters/EntryId"
@@ -1648,6 +1760,7 @@ paths:
     get:
       tags: [reasons]
       operationId: getReasonCode
+      summary: Get a reason code
       x-passage-duty: ledger.journal.read
       parameters:
         - name: code
@@ -1733,6 +1846,7 @@ paths:
     get:
       tags: [templates]
       operationId: getDescriptionTemplate
+      summary: Get a default description template
       x-passage-duty: ledger.journal.read
       parameters:
         - name: id
@@ -1785,6 +1899,228 @@ paths:
         "401": { $ref: "#/components/responses/Problem401" }
         "403": { $ref: "#/components/responses/Problem403" }
         "409": { $ref: "#/components/responses/Problem409" }
+  /v1/ledger/recurring-journals:
+    get:
+      tags: [recurring]
+      operationId: listRecurringJournals
+      summary: List recurring journals
+      x-passage-duty: ledger.journal.read
+      description: Recurring journal templates (FR-11.10) in the caller's legal-entity scope, by next run date then name.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [active, paused] }
+      responses:
+        "200":
+          description: Recurring journals without their lines
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/RecurringJournal" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+  /v1/ledger/recurring-journals/{id}:
+    get:
+      tags: [recurring]
+      operationId: getRecurringJournal
+      summary: Get a recurring journal with its lines
+      x-passage-duty: ledger.journal.read
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Recurring journal
+          headers:
+            ETag: { $ref: "#/components/headers/RecurringETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecurringJournal" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+    put:
+      tags: [recurring]
+      operationId: putRecurringJournal
+      summary: Create or replace a recurring journal
+      x-passage-duty: ledger.journal.write
+      description: |
+        Creates (201) or replaces (200) a recurring journal (FR-11.10): a journal template with a calendar
+        schedule. Lines are fixed amounts or percentages of the base amount. Naturally idempotent. A
+        replace sends If-Match when the caller read the template first (412 LEDGER_VERSION_CONFLICT when
+        stale), replaces every line, and recomputes the next run date from the last run. The ledger cannot
+        change (422 LEDGER_RECURRING_LEDGER_FIXED). Generated batches use the journal name's approval
+        rules; a template never posts by itself.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecurringJournalBody" }
+      responses:
+        "200":
+          description: Recurring journal replaced
+          headers:
+            ETag: { $ref: "#/components/headers/RecurringETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecurringJournal" }
+        "201":
+          description: Recurring journal created
+          headers:
+            ETag: { $ref: "#/components/headers/RecurringETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecurringJournal" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409":
+          description: LEDGER_RECURRING_ID_CONFLICT (a concurrent create took the id, or the id belongs to a template outside the caller's legal entities)
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "412": { $ref: "#/components/responses/Problem412" }
+        "422": { $ref: "#/components/responses/RecurringProblem422" }
+  /v1/ledger/recurring-journals/{id}/pause:
+    post:
+      tags: [recurring]
+      operationId: pauseRecurringJournal
+      summary: Pause a recurring journal
+      x-passage-duty: ledger.journal.write
+      description: A paused template generates nothing until it is resumed.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: Paused recurring journal
+          headers:
+            ETag: { $ref: "#/components/headers/RecurringETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecurringJournal" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "412": { $ref: "#/components/responses/Problem412" }
+  /v1/ledger/recurring-journals/{id}/resume:
+    post:
+      tags: [recurring]
+      operationId: resumeRecurringJournal
+      summary: Resume a recurring journal
+      x-passage-duty: ledger.journal.write
+      description: Resumes a paused template. Runs missed while paused are skipped; the next run date moves to the first scheduled date on or after today.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: Active recurring journal
+          headers:
+            ETag: { $ref: "#/components/headers/RecurringETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecurringJournal" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "412": { $ref: "#/components/responses/Problem412" }
+  /v1/ledger/recurring-journals/{id}/generate:
+    post:
+      tags: [recurring]
+      operationId: generateRecurringJournal
+      summary: Generate the draft batch of a scheduled date
+      x-passage-duty: ledger.journal.write
+      description: |
+        Creates one draft journal batch for the scheduled date, with the date as posting date, and
+        records the run, in one transaction. The date is required (send the template's nextRunDate for
+        the next run) and must be one of the schedule's dates between the start and end dates, so a
+        period has at most one run and a retried call never generates the following period. Percent
+        lines are base amount times percentage, rounded half up to the currency's minor units. A date
+        that already has a run returns that run with 200 and creates nothing, so a scheduler that fires
+        twice is safe. A run at or after the next run date advances the schedule to the next date after
+        it; an earlier (catch-up) date leaves it. The batch then follows the normal lifecycle (submit,
+        approve, post). Emits dev.passage.ledger.recurring.generated.v1.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scheduledDate]
+              properties:
+                scheduledDate: { type: string, format: date, description: A date of the schedule, such as the template's nextRunDate }
+                baseAmount: { type: string, description: Overrides the template's base amount for this run }
+      responses:
+        "200":
+          description: The date already had a run; nothing was created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecurringRun" }
+        "201":
+          description: Draft batch created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecurringRun" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/RecurringProblem409" }
+        "422": { $ref: "#/components/responses/RecurringProblem422" }
+  /v1/ledger/recurring-journals/{id}/runs:
+    get:
+      tags: [recurring]
+      operationId: listRecurringJournalRuns
+      summary: List the generated batches of a recurring journal
+      x-passage-duty: ledger.journal.read
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Runs, newest scheduled date first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/RecurringRun" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
   /readyz:
     get:
       tags: [ops]

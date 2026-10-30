@@ -28,6 +28,7 @@ const (
 // fakeStore records the inputs the handlers pass down and answers with the
 // configured result or error.
 type fakeStore struct {
+	rec      recurringFake
 	posted   []store.PostInput
 	reversed []store.ReverseInput
 	err      error

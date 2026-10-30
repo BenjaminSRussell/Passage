@@ -35,7 +35,19 @@ channels:
     messages:
       batchStatusChanged:
         $ref: "#/components/messages/BatchStatusChanged"
+  recurringGenerated:
+    address: passage.ledger.recurring
+    description: |
+      A recurring journal (FR-11.10) created a draft batch for a scheduled date, written to the outbox
+      in the transaction that created the batch (aggregate type recurring_journal).
+    messages:
+      recurringGenerated:
+        $ref: "#/components/messages/RecurringGenerated"
 operations:
+  publishRecurringGenerated:
+    action: send
+    channel: { $ref: "#/channels/recurringGenerated" }
+    summary: A recurring journal generated a draft batch.
   publishBatchStatusChanged:
     action: send
     channel: { $ref: "#/channels/batchStatusChanged" }
@@ -56,6 +68,8 @@ components:
   messages:
     JournalPosted:
       name: dev.passage.ledger.journal.posted.v1
+      title: Journal entry posted
+      summary: Journal entry posted.
       contentType: application/cloudevents+json
       payload:
         type: object
@@ -93,6 +107,8 @@ components:
               traceId: { type: string, minLength: 32, maxLength: 32 }
     JournalReversed:
       name: dev.passage.ledger.journal.reversed.v1
+      title: Journal entry reversed
+      summary: Journal entry reversed.
       contentType: application/cloudevents+json
       payload:
         type: object
@@ -114,6 +130,8 @@ components:
               reasonComment: { type: string, maxLength: 255 }
     BatchStatusChanged:
       name: dev.passage.ledger.batch.statuschanged.v1
+      title: Journal batch changed status
+      summary: Journal batch changed status.
       contentType: application/cloudevents+json
       payload:
         type: object
@@ -134,8 +152,33 @@ components:
               to: { type: string, enum: [draft, validated, in_approval, approved, rejected, posted, cancelled] }
               actor: { type: string, description: User who caused the transition }
               postedEntryId: { type: string, format: uuid, description: Set when to = posted }
+    RecurringGenerated:
+      name: dev.passage.ledger.recurring.generated.v1
+      title: Recurring journal generated
+      summary: Recurring journal generated a draft batch.
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, tenantid, subject, data]
+        properties:
+          type: { const: dev.passage.ledger.recurring.generated.v1 }
+          source: { const: /passage/ledger/ledger }
+          tenantid: { type: string, format: uuid }
+          subject: { type: string, format: uuid, description: Recurring journal id }
+          data:
+            type: object
+            required: [recurringId, batchId, ledgerId, journalName, scheduledDate, actor]
+            properties:
+              recurringId: { type: string, format: uuid }
+              batchId: { type: string, format: uuid }
+              ledgerId: { type: string, format: uuid }
+              journalName: { type: string }
+              scheduledDate: { type: string, format: date, description: Run date, also the posting date of the draft batch }
+              actor: { type: string, description: User who generated the batch }
     BalanceRebuilt:
       name: dev.passage.ledger.balance.rebuilt.v1
+      title: Balance projection rebuilt
+      summary: Balance projection rebuilt.
       contentType: application/cloudevents+json
       payload:
         type: object

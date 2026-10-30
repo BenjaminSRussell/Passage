@@ -704,3 +704,120 @@ export function fetchJournalLines(q: JournalLineQuery, fetchImpl: FetchLike = de
   if (q.limit) params.set("limit", String(q.limit));
   return getJSON(`/api/v1/ledger/journal-lines?${params.toString()}`, journalLinePageSchema, fetchImpl);
 }
+
+/** Recurring journal frequencies (FR-11.10). */
+export const RECURRING_FREQUENCIES = ["monthly", "quarterly", "yearly"] as const;
+export type RecurringFrequency = (typeof RECURRING_FREQUENCIES)[number];
+
+/** A template line: a fixed amount, or a percentage of the base amount. */
+export const recurringLineSchema = z.object({
+  lineNumber: z.number().int(),
+  account: z.string(),
+  dimensions: z.record(z.string()).optional(),
+  debitCredit: z.enum(["D", "C"]),
+  amountKind: z.enum(["fixed", "percent"]),
+  amount: z.string(),
+  currency: z.string(),
+  text: z.string().optional(),
+});
+export type RecurringLine = z.infer<typeof recurringLineSchema>;
+
+/** Recurring journal (FR-11.10). `lines` is present on single reads only. */
+export const recurringJournalSchema = z.object({
+  id: z.string(),
+  ledgerId: z.string(),
+  legalEntityId: z.string(),
+  journalName: z.string(),
+  name: z.string(),
+  description: z.string(),
+  frequency: z.enum(RECURRING_FREQUENCIES),
+  dayOfMonth: z.number().int(),
+  startDate: z.string(),
+  endDate: z.string().optional(),
+  baseAmount: z.string().optional(),
+  status: z.enum(["active", "paused"]),
+  nextRunDate: z.string().optional(),
+  lastRunDate: z.string().optional(),
+  version: z.number().int(),
+  lineCount: z.number().int(),
+  createdBy: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  lines: z.array(recurringLineSchema).optional(),
+});
+export type RecurringJournal = z.infer<typeof recurringJournalSchema>;
+
+export const recurringRunSchema = z.object({
+  id: z.string(),
+  recurringId: z.string(),
+  scheduledDate: z.string(),
+  batchId: z.string(),
+  generatedBy: z.string(),
+  generatedAt: z.string(),
+});
+export type RecurringRun = z.infer<typeof recurringRunSchema>;
+
+/** Body of PUT /api/v1/ledger/recurring-journals/{id}; amounts are decimal strings, percent lines carry the percentage. */
+export interface RecurringJournalInput {
+  ledgerId: string;
+  journalName: string;
+  name: string;
+  description: string;
+  frequency: RecurringFrequency;
+  dayOfMonth: number;
+  startDate: string;
+  endDate?: string;
+  baseAmount?: string;
+  lines: {
+    account: string;
+    dimensions?: Record<string, string>;
+    debitCredit: "D" | "C";
+    amountKind: "fixed" | "percent";
+    amount: { currency: string; value: string };
+    text?: string;
+  }[];
+}
+
+const recurringListSchema = z.object({ items: z.array(recurringJournalSchema) });
+const recurringRunListSchema = z.object({ items: z.array(recurringRunSchema) });
+
+/** GET /api/v1/ledger/recurring-journals, optionally only active or paused ones. */
+export async function fetchRecurringJournals(status = "", fetchImpl: FetchLike = defaultFetch): Promise<RecurringJournal[]> {
+  const body = await getJSON(`/api/v1/ledger/recurring-journals${status ? `?status=${encodeURIComponent(status)}` : ""}`, recurringListSchema, fetchImpl);
+  return body.items;
+}
+
+/** GET /api/v1/ledger/recurring-journals/{id} with its lines. */
+export function fetchRecurringJournal(id: string, fetchImpl: FetchLike = defaultFetch): Promise<RecurringJournal> {
+  return getJSON(`/api/v1/ledger/recurring-journals/${encodeURIComponent(id)}`, recurringJournalSchema, fetchImpl);
+}
+
+/** PUT /api/v1/ledger/recurring-journals/{id}: creates, or replaces at `version` (If-Match) when given. */
+export function putRecurringJournal(
+  id: string,
+  input: RecurringJournalInput,
+  version?: number,
+  fetchImpl: FetchLike = defaultFetch,
+): Promise<RecurringJournal> {
+  return sendJSON("PUT", `/api/v1/ledger/recurring-journals/${encodeURIComponent(id)}`, recurringJournalSchema, fetchImpl, input, version ? ifMatch(version) : {});
+}
+
+/** POST .../pause or .../resume at the version the user saw. */
+export function recurringStatusAction(id: string, action: "pause" | "resume", version: number, fetchImpl: FetchLike = defaultFetch): Promise<RecurringJournal> {
+  return sendJSON("POST", `/api/v1/ledger/recurring-journals/${encodeURIComponent(id)}/${action}`, recurringJournalSchema, fetchImpl, undefined, ifMatch(version));
+}
+
+/** POST .../generate: the draft batch of a scheduled date of the schedule (required); a date with a run replays it. */
+export function generateRecurringJournal(
+  id: string,
+  input: { scheduledDate: string; baseAmount?: string },
+  fetchImpl: FetchLike = defaultFetch,
+): Promise<RecurringRun> {
+  return sendJSON("POST", `/api/v1/ledger/recurring-journals/${encodeURIComponent(id)}/generate`, recurringRunSchema, fetchImpl, input);
+}
+
+/** GET .../runs: generated batches, newest scheduled date first. */
+export async function fetchRecurringRuns(id: string, fetchImpl: FetchLike = defaultFetch): Promise<RecurringRun[]> {
+  const body = await getJSON(`/api/v1/ledger/recurring-journals/${encodeURIComponent(id)}/runs`, recurringRunListSchema, fetchImpl);
+  return body.items;
+}

@@ -167,7 +167,7 @@ internal/domain/       pure rules: validation, combination hashing, balance aggr
 internal/store/        Postgres repositories (pgx, RLS through dbx.WithTenantTx)
 internal/api/          HTTP handlers, DTOs, duties (authz.RequireDuty)
 internal/events/       event type constants and payloads
-migrations/            0001..0009 SQL, applied in order by dbx.Migrate (0005: passage_app grants; 0006: reason codes; 0007: account structures, dimension values; 0008: description templates; 0009: journal names and batches)
+migrations/            0001..0013 SQL, applied in order by dbx.Migrate (0005: passage_app grants; 0006: reason codes; 0007: account structures, dimension values; 0008: description templates; 0009: journal names and batches; 0013: recurring journals)
 api/openapi.yaml       OpenAPI 3.1 for every route
 events/asyncapi.yaml   AsyncAPI 3 for every event
 charts/ledger/         Helm chart (ports 8080 http, 9090 admin; readiness on admin /readyz)
@@ -209,11 +209,11 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
 |---|---|
 | `ledger.ledger.write` | `POST /ledgers` |
 | `ledger.account.write` | `PUT /charts/{chart}/accounts/{number}` |
-| `ledger.journal.read` | `GET /ledgers/{id}`, `GET /charts/{chart}/accounts`, `GET /journal-entries/{id}`, `GET /reason-codes[/{code}]`, `GET /ledgers/{ledger}/account-structures[/{id}]`, `GET /ledgers/{ledger}/dimension-values`, `GET /description-templates[/{id}]`, `GET /journal-names[/{code}]`, `GET /journal-batches[/{id}]`, `GET /journal-lines` |
+| `ledger.journal.read` | `GET /ledgers/{id}`, `GET /charts/{chart}/accounts`, `GET /journal-entries/{id}`, `GET /reason-codes[/{code}]`, `GET /ledgers/{ledger}/account-structures[/{id}]`, `GET /ledgers/{ledger}/dimension-values`, `GET /description-templates[/{id}]`, `GET /journal-names[/{code}]`, `GET /journal-batches[/{id}]`, `GET /journal-lines`, `GET /recurring-journals[/{id}[/runs]]` |
 | `ledger.journal.post` | `POST /journal-entries`, `POST /validate`, `POST /journal-batches/{id}/post` (PRD "Post ledger journals") |
 | `ledger.journal.postledger` | Flag duty checked with `ledger.journal.post` on `POST /journal-entries` and `POST /journal-batches/{id}/post` when the entry's ledger is a non-leading member of a ledger set (FB50L, PRD "Post to ledger-specific ledger"); without it the post is refused 403 `AUTH-0003` |
 | `ledger.journal.postdirect` | Checked inside `POST /journal-batches/{id}/post` for a validated batch whose journal name has no workflow (PRD "Post ledger journals without approval") |
-| `ledger.journal.write` | `POST /journal-batches`, `PATCH /journal-batches/{id}`, `POST .../submit`, `POST .../cancel` (PRD "Maintain ledger journals") |
+| `ledger.journal.write` | `POST /journal-batches`, `PATCH /journal-batches/{id}`, `POST .../submit`, `POST .../cancel`, `PUT /recurring-journals/{id}`, `POST /recurring-journals/{id}/pause`, `/resume`, `/generate` (PRD "Maintain ledger journals") |
 | `ledger.journal.approve` | `POST .../approve`, `POST .../reject` (PRD "Approve ledger journals") |
 | `ledger.journal.reverse` | `POST /journal-entries/{id}/reverse` |
 | `ledger.balance.read` | `GET /balances` |
@@ -222,6 +222,23 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
 | `ledger.structure.write` | `PUT /ledgers/{ledger}/account-structures/{id}` (PRD duty "Maintain account structures") |
 | `ledger.dimension.write` | `PUT /ledgers/{ledger}/dimension-values/{attribute}/{value}` (PRD duty "Maintain financial dimensions") |
 | `ledger.setup.write` | `PUT /description-templates/{id}`, `PUT /journal-names/{code}` (PRD duty "Maintain ledger setup") |
+
+## Recurring journals (slice 7, FR-11.10)
+
+- `PUT /v1/ledger/recurring-journals/{id}` creates (201) or replaces (200) a template of lines
+  (`fixed` amounts, or `percent` of a base amount) with a monthly, quarterly or yearly schedule on
+  a day of month (0 is the last day). `If-Match` is checked when sent. `POST .../pause`,
+  `.../resume` (skips runs missed while paused), `GET` list and read, `GET .../runs`.
+- `POST .../generate` creates the draft batch for a required `scheduledDate`, which must be one of
+  the schedule's dates (quarterly and yearly schedules keep the month of the start date as anchor),
+  and records the run in one transaction; a date that already has a run replays it (200). Codes:
+  `LEDGER_RECURRING_NOT_FOUND`, `_PAUSED`, `_DATE_INVALID`, `_BASE_REQUIRED`, `_LEDGER_FIXED`,
+  `_ID_CONFLICT`.
+  Event `dev.passage.ledger.recurring.generated.v1`.
+- Replacing a template keeps its next run date while frequency, day and start date are unchanged
+  (runs skipped by a resume stay skipped); a changed schedule recomputes it from the last run.
+- The web batch screen has "Save as recurring journal", which opens the new recurring journal form
+  filled from the batch (fixed amounts, its ledger, journal name, description and posting date).
 
 ## Error codes
 

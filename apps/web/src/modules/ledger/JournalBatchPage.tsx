@@ -439,9 +439,16 @@ export function JournalBatchPage() {
         description={batch ? batch.description || "No description: the default description template applies when it is posted." : undefined}
         meta={batch ? <BatchStatusBadge status={batch.status} /> : undefined}
         actions={
-          <Link className={buttonClassName("ghost")} to="/ledger/journal-batches">
-            All batches
-          </Link>
+          <>
+            {batch && (batch.lines?.length ?? 0) > 0 ? (
+              <Link className={buttonClassName("ghost")} to={`/ledger/recurring-journals/new?fromBatch=${batch.id}`}>
+                Save as recurring journal
+              </Link>
+            ) : null}
+            <Link className={buttonClassName("ghost")} to="/ledger/journal-batches">
+              All batches
+            </Link>
+          </>
         }
       />
       {done ? (
