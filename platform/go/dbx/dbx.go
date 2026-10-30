@@ -5,6 +5,7 @@ package dbx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"sort"
@@ -108,6 +109,28 @@ func WithTenantTx(ctx context.Context, pool *pgxpool.Pool, fn func(tx pgx.Tx) er
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+var ErrNotTenantWide = errors.New("dbx: a tenant-wide transaction needs a principal with no legal-entity claim and the named duty")
+
+// TenantWide reports whether p may run a transaction spanning every legal entity of its tenant:
+// no legal-entity claim AND the named duty.
+func TenantWide(p tenant.Principal, duty string) bool {
+	return p.LegalEntityID == "" && p.HasDuty(duty)
+}
+
+// WithTenantWideAdminTx runs fn with passage.legal_entity_scopes set to '*' for p's tenant, or
+// returns ErrNotTenantWide when p fails TenantWide(p, duty).
+func WithTenantWideAdminTx(ctx context.Context, pool *pgxpool.Pool, p tenant.Principal, duty string, fn func(tx pgx.Tx) error) error {
+	if !TenantWide(p, duty) {
+		return ErrNotTenantWide
+	}
+	return pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `select set_config('passage.tenant_id', $1, true), set_config('passage.legal_entity_scopes', '*', true)`, p.TenantID); err != nil {
+			return err
+		}
+		return fn(tx)
+	})
 }
 
 // RLSPolicy returns the DDL that enables tenant row-level security on table:

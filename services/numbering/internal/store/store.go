@@ -21,6 +21,7 @@ import (
 const (
 	CodeDuplicate   = "NUM-SEQ-DUPLICATE"
 	CodeIdempotency = "idempotency_key_reuse"
+	CodeAmbiguous   = "NUM-SEQ-AMBIGUOUS"
 	uniqueViolation = "23505"
 	allocatedType   = "dev.passage.numbering.sequence.allocated.v1"
 )
@@ -98,25 +99,12 @@ func (s *Postgres) Create(ctx context.Context, in Sequence, idempotencyKey strin
 // Get loads a sequence by code in the caller's legal-entity scope.
 func (s *Postgres) Get(ctx context.Context, code string) (Sequence, error) {
 	p, _ := tenant.FromContext(ctx)
-	entities, err := scopeEntities(p)
-	if err != nil {
-		return Sequence{}, err
-	}
 	var e Sequence
-	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		q := `select id, code, name, format, legal_entity_id, mode, start_from from number_sequence where tenant_id=$1 and code=$2`
-		args := []any{p.TenantID, code}
-		if entities != nil {
-			q += ` and legal_entity_id = any($3::uuid[])`
-			args = append(args, entities)
-		}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
-		e, err = scanSeq(tx.QueryRow(ctx, q, args...))
+		e, err = selectSequence(ctx, tx, p, code, "")
 		return err
 	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return Sequence{}, httpx.NewProblem(http.StatusNotFound, domain.CodeUnknown, "sequence not found")
-	}
 	return e, err
 }
 
@@ -197,6 +185,10 @@ func scopeEntities(p tenant.Principal) ([]string, error) {
 }
 
 func loadForUpdate(ctx context.Context, tx pgx.Tx, p tenant.Principal, code string) (Sequence, error) {
+	return selectSequence(ctx, tx, p, code, " for update")
+}
+
+func selectSequence(ctx context.Context, tx pgx.Tx, p tenant.Principal, code, lock string) (Sequence, error) {
 	entities, err := scopeEntities(p)
 	if err != nil {
 		return Sequence{}, err
@@ -208,10 +200,19 @@ func loadForUpdate(ctx context.Context, tx pgx.Tx, p tenant.Principal, code stri
 		q += ` and legal_entity_id = any($3::uuid[])`
 		args = append(args, entities)
 	}
-	q += ` for update`
-	e, err := scanSeq(tx.QueryRow(ctx, q, args...))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return Sequence{}, httpx.NewProblem(http.StatusNotFound, domain.CodeUnknown, "sequence not found")
+	rows, err := tx.Query(ctx, q+` order by legal_entity_id limit 2`+lock, args...)
+	if err != nil {
+		return Sequence{}, err
 	}
-	return e, err
+	found, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Sequence, error) { return scanSeq(row) })
+	if err != nil {
+		return Sequence{}, err
+	}
+	switch len(found) {
+	case 0:
+		return Sequence{}, httpx.NewProblem(http.StatusNotFound, domain.CodeUnknown, "sequence not found")
+	case 1:
+		return found[0], nil
+	}
+	return Sequence{}, httpx.NewProblem(http.StatusConflict, CodeAmbiguous, "several legal entities in scope own this sequence code; narrow the request with the Passage-Legal-Entity header")
 }

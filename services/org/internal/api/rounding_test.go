@@ -184,6 +184,20 @@ func TestRoundCurrency_ScopedCaller(t *testing.T) {
 	}
 }
 
+func TestRoundCurrency_RefusesMultiEntityClaim(t *testing.T) {
+	f := &fakeStore{}
+	r, _ := newRouter(f)
+	claim := entityA + "," + entityB
+	rec := do(r, http.MethodGet, "/v1/org/currencies/CHF/round?amount=1", "", "org.read", true, scopeHeader, claim)
+	if rec.Code != http.StatusBadRequest || f.resolveArgs != [3]string{} {
+		t.Fatalf("several entities, no query: %d %s resolved %v", rec.Code, rec.Body, f.resolveArgs)
+	}
+	rec = do(r, http.MethodGet, "/v1/org/currencies/CHF/round?amount=1&legalEntityId="+entityB, "", "org.read", true, scopeHeader, claim)
+	if rec.Code != http.StatusBadRequest || f.resolveArgs != [3]string{} {
+		t.Fatalf("several entities, named: %d %s resolved %v", rec.Code, rec.Body, f.resolveArgs)
+	}
+}
+
 func TestRoundCurrency_FormatsTheResolvedRule(t *testing.T) {
 	f := &fakeStore{resolved: store.RoundingRule{Unit: decimal.RequireFromString("0.050000"), Method: domain.HalfUp, Source: store.RoundingSourceTenant}}
 	r, _ := newRouter(f)

@@ -79,15 +79,10 @@ const DutyReference = "org.reference.write"
 
 func (s *Postgres) tenantWriteTx(ctx context.Context, fn func(tx pgx.Tx) error) error {
 	p, _ := tenant.FromContext(ctx)
-	if p.LegalEntityID != "" || !p.HasDuty(DutyReference) {
+	if !dbx.TenantWide(p, DutyReference) {
 		return dbx.WithTenantTx(ctx, s.pool, fn)
 	}
-	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `select set_config('passage.tenant_id', $1, true), set_config('passage.legal_entity_scopes', '*', true)`, p.TenantID); err != nil {
-			return err
-		}
-		return fn(tx)
-	})
+	return dbx.WithTenantWideAdminTx(ctx, s.pool, p, DutyReference, fn)
 }
 
 func (s *Postgres) PutCurrencyRounding(ctx context.Context, in CurrencyRounding) (CurrencyRounding, bool, error) {

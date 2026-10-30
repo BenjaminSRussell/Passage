@@ -202,6 +202,13 @@ func TestMerge_RejectsInvalidRequests(t *testing.T) {
 	if _, err := s.Merge(principalContext(1, legalEntityA), store.MergeRequest{WinnerID: f.winner, LoserID: f.loser}); !errors.Is(err, store.ErrScopedPrincipal) {
 		t.Errorf("scoped principal = %v, want ErrScopedPrincipal", err)
 	}
+	scopedMerger := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), UserID: "merger", LegalEntityID: legalEntityA, Duties: map[string]struct{}{store.DutyMerge: {}}})
+	if _, err := s.Merge(scopedMerger, store.MergeRequest{WinnerID: f.winner, LoserID: f.loser}); !errors.Is(err, store.ErrScopedPrincipal) {
+		t.Errorf("legal-entity-scoped caller holding party.merge = %v, want ErrScopedPrincipal", err)
+	}
+	if _, err := s.Audit(scopedMerger); !errors.Is(err, store.ErrScopedPrincipal) {
+		t.Errorf("scoped audit = %v, want ErrScopedPrincipal", err)
+	}
 	if _, err := s.Merge(f.merger, store.MergeRequest{WinnerID: f.winner, LoserID: f.loser}); err != nil {
 		t.Fatal(err)
 	}

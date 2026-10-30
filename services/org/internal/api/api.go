@@ -33,7 +33,7 @@ const (
 	maxIdempotencyKeyLength = 200
 	dutyRead                = "org.read"
 	dutyLegalEntity         = "org.legal-entity.write"
-	dutyReference           = "org.reference.write"
+	dutyReference           = store.DutyReference
 	maxNameLength           = 120
 	maxRegistration         = 40
 	maxQuantityExp          = 18

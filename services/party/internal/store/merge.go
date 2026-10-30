@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/outbox"
@@ -68,19 +69,14 @@ func fullScope(ctx context.Context) (tenant.Principal, error) {
 	if !ok {
 		return p, errors.New("store: no principal in context")
 	}
-	if p.LegalEntityID != "" || !p.HasDuty(DutyMerge) {
+	if !dbx.TenantWide(p, DutyMerge) {
 		return p, ErrScopedPrincipal
 	}
 	return p, nil
 }
 
 func adminTx(ctx context.Context, pool *pgxpool.Pool, p tenant.Principal, fn func(tx pgx.Tx) error) error {
-	return pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `select set_config('passage.tenant_id', $1, true), set_config('passage.legal_entity_scopes', '*', true)`, p.TenantID); err != nil {
-			return err
-		}
-		return fn(tx)
-	})
+	return dbx.WithTenantWideAdminTx(ctx, pool, p, DutyMerge, fn)
 }
 
 func (s *Postgres) Merge(ctx context.Context, req MergeRequest) (MergeResult, error) {

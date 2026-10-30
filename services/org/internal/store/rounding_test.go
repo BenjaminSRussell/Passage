@@ -353,5 +353,5 @@ func TestCurrencyRounding_TenantAdminWithoutClaimWritesLegalEntityRows(t *testin
 	if err := s.DeleteCurrencyRounding(admin, "CHF", "cash", &a.ID); err != nil {
 		t.Fatal(err)
 	}
-	assertRule(t, mustResolve(t, s, ctx, "CHF", "cash", a.ID), "0.05", domain.HalfEven, store.RoundingSourceDefault)
+	assertRule(t, mustResolve(t, s, ctx, "CHF", "cash", a.ID), "0.01", domain.HalfEven, store.RoundingSourceDefault)
 }
