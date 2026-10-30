@@ -50,6 +50,7 @@ func New(baseURL string, hc *http.Client) *Client {
 // Solve posts a normalized VRP request to /v1/routes:solve.
 func (c *Client) Solve(ctx context.Context, req domain.RouteRequest) (domain.RouteSolution, error) {
 	var sol domain.RouteSolution
+	req.LegalEntityID = ""
 	if err := c.post(ctx, "/v1/routes:solve", req, &sol); err != nil {
 		return domain.RouteSolution{}, err
 	}

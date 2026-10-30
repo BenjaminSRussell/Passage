@@ -441,6 +441,22 @@ writes and quota-arrangement creates take `legalEntityId` the same way. A plan o
 forecast model code held outside the caller's scope, including by a row with no
 entity yet, is 409 `PLAN-CODE-TAKEN`.
 
+### Firming batches, item coverage and DDMRP buffers (#292)
+
+| Table | Decision | Owner of a new row |
+|---|---|---|
+| `firming_batch` (with its `response` document) | entity-specific root (migration 0013) | the entity of the planned orders' plan version, for a planner's firming and for the run's auto-firm batch; a request mixing entities is 422 `PLAN-FIRM-ENTITY` |
+| `item_coverage` | entity-specific root | `legalEntityId` on the create, default the caller's single entity (422 for several or all; 403 outside the scope); an update keeps the owner |
+| `ddmrp_buffer` | entity-specific root | `legalEntityId` on `:recalculate`, same rules; a buffer of the same item, site and warehouse that the caller's scope cannot write is 409 `PLAN-BUFFER-ENTITY` and is never overwritten |
+| `coverage_group`, `buffer_profile` | stay tenant-level: shared planning setup that coverages and buffers of every entity refer to by id | n/a |
+
+Orders the caller cannot see are 404 `PLAN-ORDER-NOT-FOUND` when firming, so a batch
+never forms from, or replays into, another entity's orders. The item-coverage scope
+key and the firming and profile idempotency keys stay unique per tenant: a clash with
+another entity's row is the same 409 or 422 as a clash inside the entity, without
+revealing the row. The run reads item coverage under the caller's scope, so a coverage
+held by an entity the caller cannot see is as good as absent.
+
 The quota-arrangement overlap rule (409 `PLAN-QUOTA-OVERLAP`) runs per legal entity
 as well as per item and site. That assumes a site belongs to exactly one legal
 entity; the site register lives in the org service, so a site shared between

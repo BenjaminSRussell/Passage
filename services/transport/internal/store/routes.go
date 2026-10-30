@@ -8,19 +8,20 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/transport/internal/domain"
 )
 
-const routePlanSummaryColumns = `id, request_hash, stop_count, vehicle_count, route_count, dropped_count,
+const routePlanSummaryColumns = `id, coalesce(legal_entity_id::text, ''), request_hash, stop_count, vehicle_count, route_count, dropped_count,
 	total_distance_km::float8, time_limit_s, created_by, created_at`
 
 const routePlanColumns = routePlanSummaryColumns + `, request, solution`
 
 func scanRoutePlanSummary(row pgx.Row, extra ...any) (domain.RoutePlanSummary, error) {
 	var p domain.RoutePlanSummary
-	dest := append([]any{&p.ID, &p.RequestHash, &p.StopCount, &p.VehicleCount, &p.RouteCount, &p.DroppedCount,
+	dest := append([]any{&p.ID, &p.LegalEntityID, &p.RequestHash, &p.StopCount, &p.VehicleCount, &p.RouteCount, &p.DroppedCount,
 		&p.TotalDistanceKm, &p.TimeLimitS, &p.CreatedBy, &p.CreatedAt}, extra...)
 	err := row.Scan(dest...)
 	return p, err
@@ -42,15 +43,20 @@ func scanRoutePlan(row pgx.Row) (domain.RoutePlan, error) {
 	return plan, nil
 }
 
-// FindRoutePlan returns the plan stored for a request hash, if any. The hash is
-// the idempotency key of route optimization (§6.34.5).
-func (s *Postgres) FindRoutePlan(ctx context.Context, hash string) (domain.RoutePlan, bool, error) {
+// FindRoutePlan returns the plan the legal entity stored for a request hash, if
+// any. The hash is the idempotency key of route optimization (§6.34.5) within
+// one legal entity.
+func (s *Postgres) FindRoutePlan(ctx context.Context, hash, legalEntityID string) (domain.RoutePlan, bool, error) {
 	p, _ := tenant.FromContext(ctx)
+	entity, err := httpx.OwnerLegalEntity(ctx, legalEntityID)
+	if err != nil {
+		return domain.RoutePlan{}, false, err
+	}
 	var plan domain.RoutePlan
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
 		plan, err = scanRoutePlan(tx.QueryRow(ctx, `select `+routePlanColumns+` from route_plan
-			where tenant_id = $1 and request_hash = $2`, p.TenantID, hash))
+			where tenant_id = $1 and request_hash = $2 and legal_entity_id = $3::uuid`, p.TenantID, hash, entity))
 		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -63,6 +69,11 @@ func (s *Postgres) FindRoutePlan(ctx context.Context, hash string) (domain.Route
 // hash committed first, that plan is returned and created is false.
 func (s *Postgres) SaveRoutePlan(ctx context.Context, plan domain.RoutePlan) (domain.RoutePlan, bool, error) {
 	p, _ := tenant.FromContext(ctx)
+	entity, err := httpx.OwnerLegalEntity(ctx, plan.Request.LegalEntityID)
+	if err != nil {
+		return domain.RoutePlan{}, false, err
+	}
+	plan.Request.LegalEntityID = ""
 	request, err := json.Marshal(plan.Request)
 	if err != nil {
 		return domain.RoutePlan{}, false, err
@@ -76,16 +87,16 @@ func (s *Postgres) SaveRoutePlan(ctx context.Context, plan domain.RoutePlan) (do
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
 		out, err = scanRoutePlan(tx.QueryRow(ctx, `insert into route_plan (tenant_id, id, request_hash, request, solution,
-			stop_count, vehicle_count, route_count, dropped_count, total_distance_km, time_limit_s, created_by)
-			values ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7, $8, $9, $10, $11, $12)
-			on conflict (tenant_id, request_hash) do nothing
+			stop_count, vehicle_count, route_count, dropped_count, total_distance_km, time_limit_s, created_by, legal_entity_id)
+			values ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13::uuid)
+			on conflict (tenant_id, legal_entity_id, request_hash) do nothing
 			returning `+routePlanColumns,
 			p.TenantID, ids.New(), plan.RequestHash, string(request), string(solution), plan.StopCount, plan.VehicleCount,
-			plan.RouteCount, plan.DroppedCount, plan.TotalDistanceKm, plan.TimeLimitS, p.UserID))
+			plan.RouteCount, plan.DroppedCount, plan.TotalDistanceKm, plan.TimeLimitS, p.UserID, entity))
 		if errors.Is(err, pgx.ErrNoRows) {
 			created = false
 			out, err = scanRoutePlan(tx.QueryRow(ctx, `select `+routePlanColumns+` from route_plan
-				where tenant_id = $1 and request_hash = $2`, p.TenantID, plan.RequestHash))
+				where tenant_id = $1 and request_hash = $2 and legal_entity_id = $3::uuid`, p.TenantID, plan.RequestHash, entity))
 		}
 		return err
 	})

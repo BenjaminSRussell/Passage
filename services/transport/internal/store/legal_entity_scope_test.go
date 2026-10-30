@@ -76,7 +76,7 @@ func TestLegalEntityScope_LoadsBillsVisitsAndGoodsInTransit(t *testing.T) {
 	if _, err := s.CheckIn(ctxA, checkIn(t, site, domain.DirectionInbound, "TR-1", "555"), store.Idem{}); err != nil {
 		t.Fatalf("entity A check-in: %v", err)
 	}
-	voyage, err := s.CreateVoyage(all, newVoyage(), store.Idem{})
+	voyage, err := s.CreateVoyage(ctxA, newVoyage(), store.Idem{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestLegalEntityScope_LoadsBillsVisitsAndGoodsInTransit(t *testing.T) {
 	}
 
 	tables := []string{"load", "load_shipment", "dg_check", "screening_hold", "freight_bill", "carrier_invoice", "freight_bill_decision",
-		"gate_visit", "gate_event", "goods_in_transit_order", "goods_in_transit_line"}
+		"gate_visit", "gate_event", "goods_in_transit_order", "goods_in_transit_line", "voyage"}
 	for _, table := range tables {
 		t.Run(table, func(t *testing.T) {
 			q := "select count(*) from " + table
@@ -158,13 +158,17 @@ func TestLegalEntityScope_LoadsBillsVisitsAndGoodsInTransit(t *testing.T) {
 		}
 	})
 
-	t.Run("a voyage line on another entity's order is a conflict, not a 500", func(t *testing.T) {
+	t.Run("another entity cannot open an order on a voyage it cannot see", func(t *testing.T) {
 		_, err := s.CreateGoodsInTransit(ctxB, voyage.ID, "FOB", site, "", []int{1}, store.Idem{})
-		if got := problemStatus(err); got != http.StatusConflict {
-			t.Fatalf("entity B order on a line held by entity A = %v, want 409", err)
+		if got := problemCode(t, err); got != domain.CodeNotFound {
+			t.Fatalf("entity B order on entity A's voyage = %v, want %s", err, domain.CodeNotFound)
 		}
-		if got := problemCode(t, err); got != domain.CodeGITState {
-			t.Fatalf("code = %s, want %s", got, domain.CodeGITState)
+	})
+
+	t.Run("a voyage line already on an order is a conflict inside the entity", func(t *testing.T) {
+		_, err := s.CreateGoodsInTransit(ctxA, voyage.ID, "FOB", site, "", []int{1}, store.Idem{})
+		if got := problemCode(t, err); got != domain.CodeGITState || problemStatus(err) != http.StatusConflict {
+			t.Fatalf("second order on a line held by the entity's own order = %v, want 409 %s", err, domain.CodeGITState)
 		}
 	})
 }
@@ -303,8 +307,8 @@ func TestLegalEntityScope_ChildrenFollowTheirLoad(t *testing.T) {
 		if _, _, err := s.RegisterCarrierInvoice(all, newInvoice(ids.New(), "INV-ALL", nil, "5.00")); problemStatus(err) != http.StatusUnprocessableEntity {
 			t.Errorf("all-entity unmatched invoice without an entity = %v, want 422", err)
 		}
-		if _, err := s.CreateGoodsInTransit(all, ids.New(), "FOB", ids.New(), "", []int{1}, store.Idem{}); problemStatus(err) != http.StatusUnprocessableEntity {
-			t.Errorf("all-entity goods in transit without an entity = %v, want 422", err)
+		if _, err := s.CreateVoyage(all, newVoyage(), store.Idem{}); problemStatus(err) != http.StatusUnprocessableEntity {
+			t.Errorf("all-entity voyage without an entity = %v, want 422", err)
 		}
 	})
 }

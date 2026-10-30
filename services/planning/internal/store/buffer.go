@@ -26,6 +26,10 @@ const (
 
 	profileCodeConstraint        = "buffer_profile_code_key"
 	profileIdempotencyConstraint = "buffer_profile_idempotency_key"
+
+	// CodeBufferEntity is returned when the buffer of the item, site and
+	// warehouse scope cannot be written in the caller's legal-entity scope.
+	CodeBufferEntity = "PLAN-BUFFER-ENTITY"
 )
 
 // BufferProfile is a stored buffer profile (FR-22.16). Version is its ETag.
@@ -47,17 +51,18 @@ type BufferProfileCreate struct {
 // row per item, site and warehouse scope. ProfileCode is read from the profile
 // for display; CalculatedAt is an RFC 3339 UTC timestamp.
 type DdmrpBuffer struct {
-	ID           string
-	ItemID       string
-	SiteID       string
-	WarehouseID  string // empty for the site scope
-	ProfileID    string
-	ProfileCode  string
-	ADU          decimal.Decimal
-	DLTDays      decimal.Decimal
-	DAF          decimal.Decimal
-	Status       domain.BufferStatus
-	CalculatedAt string
+	ID            string
+	LegalEntityID string
+	ItemID        string
+	SiteID        string
+	WarehouseID   string // empty for the site scope
+	ProfileID     string
+	ProfileCode   string
+	ADU           decimal.Decimal
+	DLTDays       decimal.Decimal
+	DAF           decimal.Decimal
+	Status        domain.BufferStatus
+	CalculatedAt  string
 }
 
 // BufferQuery filters the buffer status inquiry (4.22.14): site, zone and a
@@ -227,24 +232,31 @@ func (s *Postgres) UpsertDdmrpBuffer(ctx context.Context, b DdmrpBuffer) (DdmrpB
 	p, _ := tenant.FromContext(ctx)
 	z, st := b.Status.Zones, b.Status
 	var out DdmrpBuffer
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	entity, err := httpx.OwnerLegalEntity(ctx, b.LegalEntityID)
+	if err != nil {
+		return DdmrpBuffer{}, err
+	}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var id string
 		if err := tx.QueryRow(ctx, `insert into ddmrp_buffer (tenant_id, id, item_id, site_id, warehouse_id, profile_id,
 			adu, dlt_days, daf, red_base, red_safety, yellow, green, top_of_red, top_of_yellow, top_of_green,
-			qualified_demand, net_flow, planned_qty, priority, zone)
+			qualified_demand, net_flow, planned_qty, priority, zone, legal_entity_id)
 			values ($1, $2, $3, $4, $5, $6, $7::numeric, $8::numeric, $9::numeric, $10::numeric, $11::numeric, $12::numeric,
-			$13::numeric, $14::numeric, $15::numeric, $16::numeric, $17::numeric, $18::numeric, $19::numeric, $20::numeric, $21)
+			$13::numeric, $14::numeric, $15::numeric, $16::numeric, $17::numeric, $18::numeric, $19::numeric, $20::numeric, $21, $22::uuid)
 			on conflict (tenant_id, item_id, site_id, coalesce(warehouse_id, '00000000-0000-0000-0000-000000000000'::uuid))
 			do update set profile_id = excluded.profile_id, adu = excluded.adu, dlt_days = excluded.dlt_days, daf = excluded.daf,
 				red_base = excluded.red_base, red_safety = excluded.red_safety, yellow = excluded.yellow, green = excluded.green,
 				top_of_red = excluded.top_of_red, top_of_yellow = excluded.top_of_yellow, top_of_green = excluded.top_of_green,
 				qualified_demand = excluded.qualified_demand, net_flow = excluded.net_flow, planned_qty = excluded.planned_qty,
-				priority = excluded.priority, zone = excluded.zone, calculated_at = now()
+				priority = excluded.priority, zone = excluded.zone, legal_entity_id = excluded.legal_entity_id,
+					calculated_at = now()
+				where ddmrp_buffer.legal_entity_id is not distinct from excluded.legal_entity_id
+						or ddmrp_buffer.legal_entity_id is null
 			returning id::text`,
 			p.TenantID, ids.New(), b.ItemID, b.SiteID, optional(b.WarehouseID), b.ProfileID,
 			b.ADU.String(), b.DLTDays.String(), b.DAF.String(), z.RedBase.String(), z.RedSafety.String(), z.Yellow.String(),
 			z.Green.String(), z.TopOfRed.String(), z.TopOfYellow.String(), z.TopOfGreen.String(), st.QualifiedDemand.String(),
-			st.NetFlow.String(), st.PlannedQty.String(), st.Priority.String(), st.Zone).Scan(&id); err != nil {
+			st.NetFlow.String(), st.PlannedQty.String(), st.Priority.String(), st.Zone, entity).Scan(&id); err != nil {
 			return err
 		}
 		var err error
@@ -252,7 +264,10 @@ func (s *Postgres) UpsertDdmrpBuffer(ctx context.Context, b DdmrpBuffer) (DdmrpB
 		return err
 	})
 	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == foreignKeyViolation {
+	switch {
+	case errors.Is(err, pgx.ErrNoRows), errors.As(err, &pgErr) && pgErr.Code == insufficientPrivilege:
+		return DdmrpBuffer{}, httpx.NewProblem(http.StatusConflict, CodeBufferEntity, "the buffer of this item and site cannot be written in this legal-entity scope")
+	case errors.As(err, &pgErr) && pgErr.Code == foreignKeyViolation:
 		return DdmrpBuffer{}, httpx.NewProblem(http.StatusUnprocessableEntity, CodeProfileNotFound, "buffer profile "+b.ProfileID+" does not exist")
 	}
 	return out, err

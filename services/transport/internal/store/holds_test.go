@@ -169,7 +169,7 @@ func TestRoutePlan_StoredOncePerRequestHashAndIsolated(t *testing.T) {
 	hash, _ := req.Hash()
 	sol := domain.RouteSolution{Routes: []domain.RouteSolutionRoute{{VehicleID: "V1", DistanceKm: 10.25,
 		Stops: []domain.RouteSolutionStop{{StopID: "S1", ArrivalMin: 5}}, EndMin: 20}}, Dropped: []string{}}
-	if _, found, err := s.FindRoutePlan(ctx, hash); err != nil || found {
+	if _, found, err := s.FindRoutePlan(ctx, hash, ""); err != nil || found {
 		t.Fatalf("find before save = %v, %v", found, err)
 	}
 	plan, created, err := s.SaveRoutePlan(ctx, domain.NewRoutePlan(req, hash, sol))
@@ -183,7 +183,7 @@ func TestRoutePlan_StoredOncePerRequestHashAndIsolated(t *testing.T) {
 	if err != nil || created || again.ID != plan.ID {
 		t.Fatalf("second save = %+v created %v, %v", again, created, err)
 	}
-	found, ok, err := s.FindRoutePlan(ctx, hash)
+	found, ok, err := s.FindRoutePlan(ctx, hash, "")
 	if err != nil || !ok || found.ID != plan.ID {
 		t.Fatalf("find = %+v %v, %v", found, ok, err)
 	}
@@ -198,7 +198,7 @@ func TestRoutePlan_StoredOncePerRequestHashAndIsolated(t *testing.T) {
 	}
 
 	t2 := tenantCtx(2)
-	if _, ok, err := s.FindRoutePlan(t2, hash); err != nil || ok {
+	if _, ok, err := s.FindRoutePlan(t2, hash, ""); err != nil || ok {
 		t.Fatalf("other tenant find = %v, %v", ok, err)
 	}
 	if _, err := s.GetRoutePlan(t2, plan.ID); problemCode(t, err) != domain.CodeNotFound {

@@ -174,10 +174,10 @@ not edit that code).
 
 ## Legal-entity scope follow-ups (#241)
 
-- **later slice**: `firming_batch`, `coverage_group`, `item_coverage`, `buffer_profile`
-  and `ddmrp_buffer` are still tenant-level; they have no line tables.
-- **later slice**: `firming_batch.response` and the rows of `ddmrp_buffer` and
-  `item_coverage` stay tenant-level (tracked in the #241 follow-up issue).
+- `firming_batch` (with its `response` document), `item_coverage` and `ddmrp_buffer`
+  carry `legal_entity_id` since #292 (migration 0013). `coverage_group` and
+  `buffer_profile` stay tenant-level on purpose: they are shared planning setup that the
+  coverages and buffers of every entity refer to by id.
 - **handoff**: when the scope-claim hardening of PR #256 lands, `httpx.OwnerLegalEntity`
   must also require `tenant.DutyAllScope` for a caller with no legal entity.
 - **handoff**: existing rows keep a NULL `legal_entity_id`; assigning them is a

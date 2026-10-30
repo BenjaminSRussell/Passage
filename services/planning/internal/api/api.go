@@ -400,7 +400,12 @@ func (a *API) runPlan(w http.ResponseWriter, r *http.Request) {
 		PlanCode string     `json:"planCode"`
 		Request  runRequest `json:"request"`
 	}{code, req})
-	stored, err := a.store.RunCoverages(r.Context(), req.SiteID, itemIDsOf(req.Items))
+	planEntity, err := a.store.PlanLegalEntity(r.Context(), code, req.LegalEntityID)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	stored, err := a.store.RunCoverages(r.Context(), req.SiteID, planEntity, itemIDsOf(req.Items))
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return

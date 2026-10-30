@@ -22,7 +22,7 @@ import (
 )
 
 const voyageColumns = `id, reference, currency, status, legs, containers, folios, cost_lines, receipt_lines,
-	cost_allocations, allocations, version, created_at, posted_at, request_hash`
+	cost_allocations, allocations, version, created_at, posted_at, request_hash, coalesce(legal_entity_id::text, '')`
 
 // VoyageFilter narrows the voyage list. Empty fields match everything.
 type VoyageFilter struct {
@@ -47,7 +47,11 @@ type VoyageSummary struct {
 func (s *Postgres) CreateVoyage(ctx context.Context, in domain.Voyage, idem Idem) (domain.Voyage, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out domain.Voyage
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	entity, err := httpx.OwnerLegalEntity(ctx, in.LegalEntityID)
+	if err != nil {
+		return out, err
+	}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		replay := func() (bool, error) {
 			if idem.Key == "" {
 				return false, nil
@@ -73,16 +77,17 @@ func (s *Postgres) CreateVoyage(ctx context.Context, in domain.Voyage, idem Idem
 			return err
 		}
 		out, _, err = scanVoyage(tx.QueryRow(ctx, `insert into voyage (tenant_id, id, reference, currency, status, legs, containers, folios,
-			cost_lines, receipt_lines, cost_total, idempotency_key, request_hash)
-			values ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb, $11::numeric, $12, $13)
+			cost_lines, receipt_lines, cost_total, idempotency_key, request_hash, legal_entity_id)
+			values ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb, $11::numeric, $12, $13, $14::uuid)
 			on conflict (tenant_id, idempotency_key) do nothing
 			returning `+voyageColumns,
 			p.TenantID, ids.New(), in.Reference, in.Currency, domain.VoyageEstimated, docs[0], docs[1], docs[2], docs[3], docs[4],
-			in.CostTotal().String(), nullable(idem.Key), nullable(idem.Fingerprint)))
+			in.CostTotal().String(), nullable(idem.Key), nullable(idem.Fingerprint), entity))
 		if errors.Is(err, pgx.ErrNoRows) {
 			if done, err := replay(); done || err != nil {
 				return err
 			}
+			return reuse()
 		}
 		return err
 	})
@@ -207,7 +212,7 @@ func scanVoyage(row pgx.Row) (domain.Voyage, string, error) {
 	var legs, containers, folios, costs, receipts, costAllocs, allocs []byte
 	var hash *string
 	if err := row.Scan(&v.ID, &v.Reference, &v.Currency, &v.Status, &legs, &containers, &folios, &costs, &receipts,
-		&costAllocs, &allocs, &v.Version, &v.CreatedAt, &v.PostedAt, &hash); err != nil {
+		&costAllocs, &allocs, &v.Version, &v.CreatedAt, &v.PostedAt, &hash, &v.LegalEntityID); err != nil {
 		return domain.Voyage{}, "", err
 	}
 	for _, doc := range []struct {
