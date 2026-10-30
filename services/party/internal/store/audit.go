@@ -4,8 +4,6 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5"
-
-	"github.com/BenjaminSRussell/passage/platform/dbx"
 )
 
 type IntegrityReport struct {
@@ -26,7 +24,7 @@ func (s *Postgres) Audit(ctx context.Context) (IntegrityReport, error) {
 	if err != nil {
 		return r, err
 	}
-	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err = adminTx(ctx, s.pool, p, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `select
 			(select count(*) from customer_role where tenant_id = $1),
 			(select count(*) from customer_role c join party p on p.tenant_id = c.tenant_id and p.id = c.party_id

@@ -2,6 +2,7 @@ package dbx_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -84,5 +85,31 @@ func TestWithTenantTxLegalEntityVisibility(t *testing.T) {
 	}
 	if got := count(principal(leA)); got != 1 {
 		t.Fatalf("single-entity principal saw %d rows, want 1", got)
+	}
+}
+
+func TestTenantWidePredicate(t *testing.T) {
+	const duty = "x.maintain"
+	holds := map[string]struct{}{duty: {}}
+	cases := []struct {
+		name string
+		p    tenant.Principal
+		want bool
+	}{
+		{"no claim and duty", tenant.Principal{Duties: holds}, true},
+		{"claim and duty", tenant.Principal{LegalEntityID: testkit.TenantID(9), Duties: holds}, false},
+		{"no claim and no duty", tenant.Principal{}, false},
+		{"other duty only", tenant.Principal{Duties: map[string]struct{}{"y": {}}}, false},
+	}
+	for _, c := range cases {
+		if got := dbx.TenantWide(c.p, duty); got != c.want {
+			t.Errorf("%s: TenantWide = %v, want %v", c.name, got, c.want)
+		}
+		if c.want {
+			continue
+		}
+		if err := dbx.WithTenantWideAdminTx(context.Background(), nil, c.p, duty, func(pgx.Tx) error { return nil }); !errors.Is(err, dbx.ErrNotTenantWide) {
+			t.Errorf("%s: err = %v, want ErrNotTenantWide", c.name, err)
+		}
 	}
 }

@@ -13,7 +13,6 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
-	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/org/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/org/internal/store"
 )
@@ -86,14 +85,6 @@ func (a *API) registerUnits(r chi.Router) {
 	r.With(authz.RequireDuty(dutyReference)).Post(conversions, a.createConversion)
 }
 
-func refuseScopedCaller(w http.ResponseWriter, r *http.Request, action string) bool {
-	if p, _ := tenant.FromContext(r.Context()); p.LegalEntityID != "" {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "a legal-entity-scoped caller cannot "+action))
-		return true
-	}
-	return false
-}
-
 func (a *API) listUnits(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -131,7 +122,7 @@ func (a *API) getUnit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) createUnit(w http.ResponseWriter, r *http.Request) {
-	if !validTenant(w, r) || refuseScopedCaller(w, r, "create units") {
+	if !validTenant(w, r) || rejectScopedCaller(w, r, "create units") {
 		return
 	}
 	idemKey, keyOK := idempotencyKeyOf(w, r)
@@ -174,7 +165,7 @@ func (a *API) createUnit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) patchUnit(w http.ResponseWriter, r *http.Request) {
-	if !validTenant(w, r) || refuseScopedCaller(w, r, "change unit status") {
+	if !validTenant(w, r) || rejectScopedCaller(w, r, "change unit status") {
 		return
 	}
 	var req referenceStatusRequest
@@ -224,7 +215,7 @@ func (a *API) listConversions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) createConversion(w http.ResponseWriter, r *http.Request) {
-	if !validTenant(w, r) || refuseScopedCaller(w, r, "create conversions") {
+	if !validTenant(w, r) || rejectScopedCaller(w, r, "create conversions") {
 		return
 	}
 	idemKey, keyOK := idempotencyKeyOf(w, r)

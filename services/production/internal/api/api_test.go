@@ -702,3 +702,25 @@ func TestParseIfMatch(t *testing.T) {
 		}
 	}
 }
+
+func TestWrites_RefuseACallerWithNoLegalEntityScope(t *testing.T) {
+	f := &fakeStore{}
+	_, h := newServer(t, f)
+	noScope := map[string]string{tenant.HeaderLegalEntity: ""}
+	create := createBody(func(m map[string]any) { m["legalEntityId"] = entityID })
+	rec := do(h, call{method: http.MethodPost, path: "/v1/production/orders", body: create, duties: []string{DutyWrite},
+		headers: map[string]string{idempotencyName: "k", tenant.HeaderLegalEntity: ""}})
+	if p := expectProblem(t, rec, http.StatusBadRequest, validationCode); p.Errors["legalEntityId"] == "" {
+		t.Fatalf("create errors: %v", p.Errors)
+	}
+	profile := `{"legalEntityId":"` + entityID + `","itemGroup":"All","siteId":"All","wipAccount":"1400","inventoryAccount":"1300","finishedGoodsAccount":"1350",
+		"laborAbsorptionAccount":"5100","overheadAbsorptionAccount":"5200","lotSizeVarianceAccount":"5810","quantityVarianceAccount":"5820",
+		"priceVarianceAccount":"5830","substitutionVarianceAccount":"5840"}`
+	rec = do(h, call{method: http.MethodPut, path: "/v1/production/posting-profiles", body: profile, duties: []string{DutySetupWrite}, headers: noScope})
+	if p := expectProblem(t, rec, http.StatusBadRequest, validationCode); p.Errors["legalEntityId"] == "" {
+		t.Fatalf("profile errors: %v", p.Errors)
+	}
+	if len(f.created) != 0 || len(f.saved) != 0 {
+		t.Fatal("a caller with no legal-entity scope reached the store")
+	}
+}

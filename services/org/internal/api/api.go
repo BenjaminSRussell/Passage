@@ -33,7 +33,7 @@ const (
 	maxIdempotencyKeyLength = 200
 	dutyRead                = "org.read"
 	dutyLegalEntity         = "org.legal-entity.write"
-	dutyReference           = "org.reference.write"
+	dutyReference           = store.DutyReference
 	maxNameLength           = 120
 	maxRegistration         = 40
 	maxQuantityExp          = 18
@@ -252,8 +252,7 @@ func (a *API) createLegalEntity(w http.ResponseWriter, r *http.Request) {
 	if !keyOK {
 		return
 	}
-	if p, _ := tenant.FromContext(r.Context()); p.LegalEntityID != "" {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "a legal-entity-scoped caller cannot create legal entities"))
+	if rejectScopedCaller(w, r, "create legal entities") {
 		return
 	}
 	var req createLegalEntityRequest
@@ -442,8 +441,7 @@ func (a *API) patchReference(kind store.ReferenceKind) http.HandlerFunc {
 		if !validTenant(w, r) {
 			return
 		}
-		if p, _ := tenant.FromContext(r.Context()); p.LegalEntityID != "" {
-			httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "a legal-entity-scoped caller cannot change reference status"))
+		if rejectScopedCaller(w, r, "change reference status") {
 			return
 		}
 		var req referenceStatusRequest

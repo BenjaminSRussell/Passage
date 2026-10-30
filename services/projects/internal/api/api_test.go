@@ -175,7 +175,7 @@ func router(s store.Store) http.Handler {
 	return r
 }
 
-// ctxFor returns a tenant-1 principal with no legal-entity restriction ("*").
+// ctxFor returns a tenant-1 principal with no legal-entity claim and no all-scope duty.
 func ctxFor(duties ...string) context.Context {
 	return principalCtx("", duties...)
 }
@@ -186,6 +186,15 @@ func principalCtx(legalEntity string, duties ...string) context.Context {
 		p.Duties[d] = struct{}{}
 	}
 	return tenant.With(context.Background(), p)
+}
+
+func TestCreateProject_UnscopedCallerIsForbidden(t *testing.T) {
+	h := router(newFake())
+	body := `{"id":"P-NOSCOPE","legalEntityId":"` + ids.New() + `","projectGroupId":"ENG","projectType":"INTERNAL","currency":"USD","startDate":"2026-10-01"}`
+	rec := do(t, h, ctxFor(DutyMaintain), http.MethodPost, "/v1/projects", body, map[string]string{"Idempotency-Key": "noscope"})
+	if rec.Code != http.StatusForbidden || errorCode(t, rec) != "AUTH-0003" {
+		t.Fatalf("empty-scope create: status %d body %s", rec.Code, rec.Body.String())
+	}
 }
 
 func TestCreateProject_LegalEntityOutsideScopeIsForbidden(t *testing.T) {
@@ -223,8 +232,8 @@ func errorCode(t *testing.T, rec *httptest.ResponseRecorder) string {
 
 func TestCreateProject_ValidatesAndRequiresIdempotencyKey(t *testing.T) {
 	h := router(newFake())
-	ctx := ctxFor(DutyMaintain)
 	legal := ids.New()
+	ctx := principalCtx(legal, DutyMaintain)
 	valid := `{"id":"PROJ-0001","legalEntityId":"` + legal + `","projectGroupId":"ENG","projectType":"TIME_MATERIAL",` +
 		`"customerPartyId":"` + ids.New() + `","currency":"USD","startDate":"2026-10-01"}`
 
@@ -265,8 +274,9 @@ func TestCreateProject_ValidatesAndRequiresIdempotencyKey(t *testing.T) {
 
 func TestCreateProject_ReplayReturnsStoredProject(t *testing.T) {
 	h := router(newFake())
-	ctx := ctxFor(DutyMaintain)
-	body := `{"id":"P-9","legalEntityId":"` + ids.New() + `","projectGroupId":"ENG","projectType":"INTERNAL","currency":"USD","startDate":"2026-10-01"}`
+	legal := ids.New()
+	ctx := principalCtx(legal, DutyMaintain)
+	body := `{"id":"P-9","legalEntityId":"` + legal + `","projectGroupId":"ENG","projectType":"INTERNAL","currency":"USD","startDate":"2026-10-01"}`
 	first := do(t, h, ctx, http.MethodPost, "/v1/projects", body, map[string]string{"Idempotency-Key": "same"})
 	if first.Code != http.StatusCreated {
 		t.Fatalf("first status = %d", first.Code)
@@ -369,8 +379,8 @@ func TestMissingTenant_IsUnauthenticated(t *testing.T) {
 func TestCreateProject_SubProjectInheritsAndCannotChangeCustomer(t *testing.T) {
 	f := newFake()
 	h := router(f)
-	ctx := ctxFor(DutyMaintain)
 	legal, customer := ids.New(), ids.New()
+	ctx := principalCtx(legal, DutyMaintain)
 	parent := `{"id":"P-100","legalEntityId":"` + legal + `","projectGroupId":"ENG","projectType":"FIXED_PRICE","customerPartyId":"` + customer + `","currency":"USD","startDate":"2026-10-01"}`
 	if rec := do(t, h, ctx, http.MethodPost, "/v1/projects", parent, map[string]string{"Idempotency-Key": "parent"}); rec.Code != http.StatusCreated {
 		t.Fatalf("parent: status %d %s", rec.Code, rec.Body.String())
@@ -405,8 +415,9 @@ func TestCreateProject_SubProjectInheritsAndCannotChangeCustomer(t *testing.T) {
 
 func TestCreateProject_KeyReusedWithOtherBodyIsRefused(t *testing.T) {
 	h := router(newFake())
-	ctx := ctxFor(DutyMaintain)
-	body := `{"id":"P-K","legalEntityId":"` + ids.New() + `","projectGroupId":"ENG","projectType":"INTERNAL","currency":"USD","startDate":"2026-10-01"}`
+	legal := ids.New()
+	ctx := principalCtx(legal, DutyMaintain)
+	body := `{"id":"P-K","legalEntityId":"` + legal + `","projectGroupId":"ENG","projectType":"INTERNAL","currency":"USD","startDate":"2026-10-01"}`
 	if rec := do(t, h, ctx, http.MethodPost, "/v1/projects", body, map[string]string{"Idempotency-Key": "k"}); rec.Code != http.StatusCreated {
 		t.Fatalf("first: status %d", rec.Code)
 	}

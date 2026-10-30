@@ -2,10 +2,13 @@ package store_test
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"sync"
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/numbering/internal/domain"
@@ -125,5 +128,42 @@ func TestMigrationsApplyWithRLS(t *testing.T) {
 	other := tenant.With(context.Background(), principal(2))
 	if _, err := app.Get(other, "INV"); err == nil {
 		t.Fatal("tenant 2 must not see tenant 1 sequence through the app role")
+	}
+}
+
+func TestPostgresMultiEntityScopeRefusesAmbiguousCode(t *testing.T) {
+	s, _ := migrated(t)
+	entityA, entityB := testkit.TenantID(7), testkit.TenantID(8)
+	scoped := func(claim string) context.Context {
+		p := principal(1)
+		p.LegalEntityID = claim
+		return tenant.With(context.Background(), p)
+	}
+	both := scoped(entityA + "," + entityB)
+	for _, in := range []store.Sequence{
+		{Code: "DUP", Name: "Dup A", Format: "A-{####}", LegalEntityID: entityA, Mode: domain.ModeGapFree, StartFrom: 1},
+		{Code: "DUP", Name: "Dup B", Format: "B-{####}", LegalEntityID: entityB, Mode: domain.ModeGapFree, StartFrom: 1},
+		{Code: "SOLO", Name: "Solo B", Format: "S-{####}", LegalEntityID: entityB, Mode: domain.ModeGapFree, StartFrom: 1},
+	} {
+		if _, err := s.Create(both, in, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, call := range map[string]func() error{
+		"allocate": func() error { _, err := s.Allocate(both, "DUP", ""); return err },
+		"get":      func() error { _, err := s.Get(both, "DUP"); return err },
+	} {
+		var problem *httpx.Problem
+		if err := call(); !errors.As(err, &problem) || problem.Status != http.StatusConflict || problem.Code != store.CodeAmbiguous {
+			t.Errorf("%s with two owners = %v; want 409 %s", name, err, store.CodeAmbiguous)
+		}
+	}
+	solo, err := s.Allocate(both, "SOLO", "")
+	if err != nil || solo.LegalEntityID != entityB || solo.Formatted != "S-0001" {
+		t.Fatalf("allocate with one owner = %+v, %v", solo, err)
+	}
+	narrowed, err := s.Allocate(scoped(entityA), "DUP", "")
+	if err != nil || narrowed.LegalEntityID != entityA || narrowed.Formatted != "A-0001" {
+		t.Fatalf("allocate narrowed to one entity = %+v, %v", narrowed, err)
 	}
 }

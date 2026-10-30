@@ -233,7 +233,7 @@ func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {
 	key, fields := idempotencyKey(r)
 	validateCreate(req, fields)
 	rules := quantityRules(req.MinimumQty, req.MaximumQty, req.Multiple, fields)
-	if p.LegalEntityID != "" && req.LegalEntityID != p.LegalEntityID {
+	if ids.Valid(req.LegalEntityID) && !tenant.InLegalEntityScope(p, req.LegalEntityID) {
 		fields["legalEntityId"] = "must be the legal entity of the caller"
 	}
 	if len(fields) > 0 {

@@ -386,3 +386,14 @@ func TestCoProductAllocate(t *testing.T) {
 		t.Fatalf("no currency: %d", rec.Code)
 	}
 }
+
+func TestCreateBatchOrder_RefusesACallerWithNoLegalEntityScope(t *testing.T) {
+	fs := &fakeStore{}
+	body := `{"formulaId":"` + formulaID + `","batchSize":"2500","legalEntityId":"` + entityID + `"}`
+	headers := key("o-1")
+	headers["X-Passage-Legal-Entity"] = ""
+	rec := call{method: "POST", path: "/v1/production/batch-orders", body: body, duties: DutyBatchOrderWrite, headers: headers}.do(newRouter(fs))
+	if rec.Code != http.StatusForbidden || problemOf(t, rec).Code != "AUTH-0003" || fs.gotOrder.FormulaID != "" {
+		t.Fatalf("no scope: %d %s", rec.Code, rec.Body)
+	}
+}

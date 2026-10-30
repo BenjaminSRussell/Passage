@@ -72,11 +72,20 @@ func serve(t *testing.T, s store.Store, method, path string, p tenant.Principal,
 	return rec
 }
 
+const testLE = "00000000-0000-0000-0000-0000000000b1"
+
 func principal(duties ...string) tenant.Principal {
-	p := tenant.Principal{TenantID: testkit.TenantID(1), UserID: "u1", Duties: map[string]struct{}{tenant.DutyAllScope: {}}}
+	p := tenant.Principal{TenantID: testkit.TenantID(1), UserID: "u1", LegalEntityID: testLE, Duties: map[string]struct{}{}}
 	for _, d := range duties {
 		p.Duties[d] = struct{}{}
 	}
+	return p
+}
+
+func allScopePrincipal(duties ...string) tenant.Principal {
+	p := principal(duties...)
+	p.LegalEntityID = ""
+	p.Duties[tenant.DutyAllScope] = struct{}{}
 	return p
 }
 
@@ -146,7 +155,7 @@ func TestListOrders_ValidatesAndPassesFilters(t *testing.T) {
 }
 
 func TestCreditProfile_LegalEntityAndWireDates(t *testing.T) {
-	le, customer := ids.New(), ids.New()
+	le, customer := testLE, ids.New()
 	review := time.Date(2027, 6, 30, 0, 0, 0, 0, time.UTC)
 	f := &fakeStore{profile: store.CreditProfile{LegalEntityID: le, CustomerID: customer, Version: 3,
 		CreditProfile: domain.CreditProfile{Limit: decimal.NewFromInt(10000), Currency: "USD", LimitType: domain.LimitBalance, ReviewDate: &review}}}
@@ -157,7 +166,7 @@ func TestCreditProfile_LegalEntityAndWireDates(t *testing.T) {
 	if body := rec.Body.String(); !strings.Contains(body, `"reviewDate":"2027-06-30"`) || !strings.Contains(body, `"limit":"10000"`) || rec.Header().Get("ETag") != `"3"` {
 		t.Fatalf("wire form %s etag %s", body, rec.Header().Get("ETag"))
 	}
-	if rec := serve(t, f, http.MethodGet, creditProfiles+"/"+customer, principal(dutyRead), nil); rec.Code != http.StatusBadRequest {
+	if rec := serve(t, f, http.MethodGet, creditProfiles+"/"+customer, allScopePrincipal(dutyRead), nil); rec.Code != http.StatusBadRequest {
 		t.Fatalf("no legal entity: %d", rec.Code)
 	}
 	scoped := principal(dutyRead)
@@ -165,14 +174,14 @@ func TestCreditProfile_LegalEntityAndWireDates(t *testing.T) {
 	if rec := serve(t, f, http.MethodGet, creditProfiles+"/"+customer+"?legalEntityId="+le, scoped, nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("another legal entity than the caller's scope: %d", rec.Code)
 	}
-	if rec := serve(t, f, http.MethodGet, creditProfiles, principal(dutyRead), nil); rec.Code != http.StatusOK || f.listedLE == nil || *f.listedLE != "" {
+	if rec := serve(t, f, http.MethodGet, creditProfiles, allScopePrincipal(dutyRead), nil); rec.Code != http.StatusOK || f.listedLE == nil || *f.listedLE != "" {
 		t.Fatalf("list across the caller's scope: %d %v", rec.Code, f.listedLE)
 	}
 }
 
 func TestLegalEntityScope_RefusesCallerWithoutScope(t *testing.T) {
 	noScope := principal(dutyRead, dutyWrite)
-	delete(noScope.Duties, tenant.DutyAllScope)
+	noScope.LegalEntityID = ""
 	le, customer := ids.New(), ids.New()
 	if rec := serve(t, &fakeStore{}, http.MethodGet, creditProfiles+"/"+customer+"?legalEntityId="+le, noScope, nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("credit profile get: %d", rec.Code)

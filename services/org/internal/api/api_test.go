@@ -1741,3 +1741,11 @@ func TestNilTenantIsUnauthorized(t *testing.T) {
 		t.Fatalf("nil tenant = %d %s", rec.Code, rec.Body)
 	}
 }
+
+func TestScopedCallerCannotChangeReferenceStatus(t *testing.T) {
+	r, _ := newRouter(&fakeStore{})
+	rec := do(r, http.MethodPatch, "/v1/org/currencies/USD", `{"status":"inactive"}`, referenceDuties, true, "X-Passage-Legal-Entity", testkit.TenantID(2))
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "AUTH-0003") {
+		t.Fatalf("got %d %s; want 403 AUTH-0003", rec.Code, rec.Body.String())
+	}
+}

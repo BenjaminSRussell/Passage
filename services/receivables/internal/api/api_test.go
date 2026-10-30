@@ -170,6 +170,7 @@ func do(h http.Handler, method, path, body string, duties string, headers map[st
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Header.Set("X-Passage-Tenant", testTenant)
 	req.Header.Set("X-Passage-Duties", duties)
+	req.Header.Set("X-Passage-Legal-Entity", testLE)
 	req.Header.Set("Content-Type", "application/json")
 	for k, v := range headers {
 		req.Header.Set(k, v)

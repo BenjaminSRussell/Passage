@@ -65,7 +65,7 @@ func costItem(le, key, kind, qty, amount string) string {
 
 func TestCostTransactions_RecordCountsOnlyNewSourceKeys(t *testing.T) {
 	h, f := server()
-	le := ids.New()
+	le := testLE
 	body := `{"items":[` + costItem(le, "gr-1", "FINANCIAL", "100", "1000.00") + `,` + costItem(le, "ppv-1", "PPV", "100", "50.00") + `]}`
 	rec := call(h, http.MethodPost, "/internal/v1/costing/cost-transactions", body, reportDuties, nil)
 	m, _ := decodeMap(rec)
@@ -93,7 +93,7 @@ func TestCostTransactions_RecordCountsOnlyNewSourceKeys(t *testing.T) {
 
 func TestCostTransactions_ValidatesEachItem(t *testing.T) {
 	h, _ := server()
-	le := ids.New()
+	le := testLE
 	tests := []struct {
 		name, items, field string
 	}{
@@ -214,8 +214,9 @@ func TestValueReport_SelectsTheValuationLedger(t *testing.T) {
 			t.Errorf("%s: status %d code %q", name, rec.Code, problemCode(t, m))
 		}
 	}
-	other := "/v1/costing/value-report?legalEntityId=" + ids.New() + "&asOf=2026-03-31&valuationLedgerId=" + gaapID
-	if rec := call(h, http.MethodGet, other, "", allDuties, nil); rec.Code != http.StatusNotFound {
+	otherLE := ids.New()
+	other := "/v1/costing/value-report?legalEntityId=" + otherLE + "&asOf=2026-03-31&valuationLedgerId=" + gaapID
+	if rec := call(h, http.MethodGet, other, "", allDuties, scopedTo(otherLE)); rec.Code != http.StatusNotFound {
 		t.Errorf("ledger of another legal entity: status %d, want 404", rec.Code)
 	}
 }
