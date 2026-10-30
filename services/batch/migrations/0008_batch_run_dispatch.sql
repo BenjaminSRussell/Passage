@@ -9,7 +9,9 @@ CREATE POLICY batch_run_legal_entity_scope ON batch_run AS RESTRICTIVE
   USING (current_setting('passage.legal_entity_scopes', true) = '*'
          OR (legal_entity_id IS NOT NULL
              AND legal_entity_id::text = ANY (string_to_array(current_setting('passage.legal_entity_scopes', true), ','))))
-  WITH CHECK (legal_entity_id IS NOT NULL);
+  WITH CHECK (legal_entity_id IS NOT NULL
+              AND (current_setting('passage.legal_entity_scopes', true) = '*'
+                   OR legal_entity_id::text = ANY (string_to_array(current_setting('passage.legal_entity_scopes', true), ','))));
 
 DO $do$
 BEGIN
