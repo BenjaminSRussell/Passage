@@ -6,6 +6,7 @@ import type { PassageModule } from "../modules/registry";
 import { checkAxeAA } from "./a11y";
 import { FormRenderer } from "./forms";
 import { demoNote } from "./metadata";
+import { pageViolations } from "./testing/fakeServer";
 import { HomePage } from "./pages/HomePage";
 import { NotesPage } from "./pages/NotesPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
@@ -450,5 +451,91 @@ describe("route error boundary", () => {
     broken = false;
     await user.click(screen.getByRole("button", { name: "Try again" }));
     expect(screen.getByText("Recovered page")).toBeInTheDocument();
+  });
+});
+
+describe("duty gating", () => {
+  const gated: PassageModule[] = [
+    {
+      id: "ledger",
+      title: "Ledger",
+      description: "Journals and balances.",
+      routes: [],
+      nav: [
+        { label: "Journals", to: "/ledger/journals", duty: "ledger.journal.read" },
+        { label: "Open items", to: "/ledger/open-items" },
+      ],
+    },
+    {
+      id: "treasury",
+      title: "Treasury",
+      description: "Cash and loans.",
+      routes: [],
+      nav: [{ label: "Loans", to: "/treasury/loans", duty: "treasury.view" }],
+    },
+  ];
+
+  function renderGated(path: string, duties: string[]) {
+    return render(
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route element={<Shell modules={gated} duties={duties} />}>
+            <Route path="/" element={<HomePage modules={gated} />} />
+            <Route path="/ledger/journals" element={<p>Journals page</p>} />
+            <Route path="/ledger/journals/:id" element={<p>Journal detail page</p>} />
+            <Route path="/ledger/open-items" element={<p>Open items page</p>} />
+            <Route path="*" element={<NotFoundPage />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it("hides gated entries and empty workspaces from the sidebar and home cards, keeping ungated entries", () => {
+    renderGated("/", []);
+    const nav = screen.getByRole("navigation", { name: "Workspaces" });
+    expect(within(nav).queryByRole("link", { name: "Journals" })).not.toBeInTheDocument();
+    expect(within(nav).getByRole("link", { name: "Open items" })).toBeInTheDocument();
+    expect(within(nav).queryByRole("button", { name: /Treasury/ })).not.toBeInTheDocument();
+    const cards = screen.getByRole("list", { name: "Workspaces" });
+    expect(within(cards).queryByText("Treasury")).not.toBeInTheDocument();
+    expect(within(cards).queryByRole("link", { name: "Journals" })).not.toBeInTheDocument();
+    expect(within(cards).getByRole("link", { name: "Open items" })).toBeInTheDocument();
+  });
+
+  it("shows gated entries to a principal holding the duty", () => {
+    renderGated("/", ["ledger.journal.read", "treasury.view"]);
+    const nav = screen.getByRole("navigation", { name: "Workspaces" });
+    expect(within(nav).getByRole("link", { name: "Journals" })).toBeInTheDocument();
+    expect(within(nav).getByRole("button", { name: /Treasury/ })).toBeInTheDocument();
+  });
+
+  it("leaves hidden entries out of search", async () => {
+    const user = userEvent.setup();
+    renderGated("/", []);
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    const dialog = screen.getByRole("dialog", { name: "Search" });
+    expect(within(dialog).queryByText("Journals")).not.toBeInTheDocument();
+    expect(within(dialog).getByText("Open items")).toBeInTheDocument();
+  });
+
+  it("renders the not-available page, not the route, for a direct URL to a gated page or its detail route", () => {
+    const first = renderGated("/ledger/journals", []);
+    expect(screen.getByRole("heading", { name: "This page isn't available to you" })).toBeInTheDocument();
+    expect(screen.queryByText("Journals page")).not.toBeInTheDocument();
+    expect(document.title).toBe("Page not available · Passage");
+    expect(pageViolations(first.container)).toEqual([]);
+    first.unmount();
+    renderGated("/ledger/journals/42", []);
+    expect(screen.getByRole("heading", { name: "This page isn't available to you" })).toBeInTheDocument();
+    expect(screen.queryByText("Journal detail page")).not.toBeInTheDocument();
+  });
+
+  it("serves the gated route to a principal holding the duty and ungated routes to everyone", () => {
+    const first = renderGated("/ledger/journals/42", ["ledger.journal.read"]);
+    expect(screen.getByText("Journal detail page")).toBeInTheDocument();
+    first.unmount();
+    renderGated("/ledger/open-items", []);
+    expect(screen.getByText("Open items page")).toBeInTheDocument();
   });
 });

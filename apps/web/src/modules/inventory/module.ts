@@ -37,7 +37,7 @@ const inventory: PassageModule = {
   description:
     "On-hand stock by any dimension, the journals that move it with their approval workflow, transactions with their status history and backward moves, reservations, blocking, cycle and tag counts, journal reversals, transfer orders, vendor consignment, ABC classification and the daily inventory-to-ledger reconciliation.",
   routes: [
-    { path: "/inventory", element: createElement(OnHandPage), handle: { title: "On-hand inquiry" } },
+    { path: "/inventory", element: createElement(OnHandPage), handle: { title: "On-hand inquiry", duty: "inventory.read" } },
     { path: "/inventory/onhand", element: createElement(OnHandPage) },
     { path: "/inventory/journals", element: createElement(JournalsPage) },
     { path: "/inventory/journals/new", element: createElement(NewJournalPage) },
