@@ -3,11 +3,11 @@ import { useMemo, useRef, useState, type FormEvent } from "react";
 import { Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../../shell/ui";
 import { fetchEffectivePermissions, SecurityApiError, UUID, type Permission } from "./api";
 import styles from "./security.module.css";
-import { ApiFailure, useFocusFirstInvalid, withoutFields, type Errors } from "./support";
+import { ApiFailure, canRetry, useFocusFirstInvalid, withoutFields, type Errors } from "./support";
 
 const DUTY = "View effective permissions";
 const SCOPE_NOTE =
-  "Effective permissions can only be reported for callers whose legal-entity scope is all entities. Switch to an all-entity scope, or ask an administrator who has it, then try again.";
+  'This report needs the "View effective permissions" or "Maintain users" duty and a legal-entity scope of all entities. A caller scoped to one entity cannot see tenant-wide assignments, so the report would be incomplete.';
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
 
 interface Request {
@@ -77,7 +77,6 @@ export function EffectivePermissionsPage() {
     }
   }
 
-  const scopeBlocked = report.error instanceof SecurityApiError && report.error.status === 403;
   const notFound = report.error instanceof SecurityApiError && report.error.status === 404;
 
   return (
@@ -114,17 +113,17 @@ export function EffectivePermissionsPage() {
           error={report.error}
           title={notFound ? "User not found" : "Could not load the effective permissions"}
           duty={DUTY}
-          scopeNote={scopeBlocked ? SCOPE_NOTE : undefined}
+          scopeNote={SCOPE_NOTE}
           action={
-            scopeBlocked || notFound ? undefined : (
+            canRetry(report.error) ? (
               <Button variant="secondary" loading={report.isFetching} onClick={() => void report.refetch()}>
                 Try again
               </Button>
-            )
+            ) : undefined
           }
         />
       ) : null}
-      {report.isFetching && !report.data ? <p className={styles.note}>Loading permissions…</p> : null}
+      <p className={styles.note} role="status">{report.isFetching && !report.data ? "Loading permissions…" : null}</p>
       {report.data ? (
         <>
           <Card title="Duties in effect">
@@ -162,7 +161,7 @@ export function EffectivePermissionsPage() {
                 )}
               </FormField>
             </div>
-            <p className={styles.note} role="status">{`Showing ${visible.length} of ${report.data.permissions.length} routes.`}</p>
+            <p className={styles.note}>{`Showing ${visible.length} of ${report.data.permissions.length} routes.`}</p>
             <DataTable
               label="Route permissions"
               columns={columns}

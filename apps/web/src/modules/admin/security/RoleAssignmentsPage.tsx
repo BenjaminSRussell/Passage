@@ -13,6 +13,7 @@ import {
 import styles from "./security.module.css";
 import {
   ApiFailure,
+  canRetry,
   fieldsOwnFailure,
   mapServerFields,
   toIsoFromLocal,
@@ -45,6 +46,7 @@ const emptyAssign: AssignValues = { userId: "", role: "", legalEntityId: "", val
 type Standing = "scheduled" | "active" | "ended";
 
 function standing(a: RoleAssignment, now: number): Standing {
+  if (a.validTo !== undefined && Date.parse(a.validTo) <= Date.parse(a.validFrom)) return "ended";
   if (Date.parse(a.validFrom) > now) return "scheduled";
   if (a.validTo !== undefined && Date.parse(a.validTo) <= now) return "ended";
   return "active";
@@ -66,7 +68,7 @@ function validateAssign(values: AssignValues): Errors {
   const from = toIsoFromLocal(values.validFrom);
   const to = toIsoFromLocal(values.validTo);
   if (from && to && Date.parse(to) <= Date.parse(from)) errors.validTo = "The end must be after the start.";
-  if (values.reason.length > REASON_MAX) errors.reason = `Keep the reason to ${REASON_MAX} characters or fewer.`;
+  if (new TextEncoder().encode(values.reason.trim()).length > REASON_MAX) errors.reason = `Keep the reason to ${REASON_MAX} bytes or fewer; accented and non-Latin characters take more than one.`;
   return errors;
 }
 
@@ -77,6 +79,7 @@ function when(value?: string) {
 export function RoleAssignmentsPage() {
   const queryClient = useQueryClient();
   const findForm = useRef<HTMLFormElement>(null);
+  const resultsHeading = useRef<HTMLHeadingElement>(null);
   const assignForm = useRef<HTMLFormElement>(null);
   const [find, setFind] = useState<FindValues>({ userId: "", role: "", activeOnly: true });
   const [findErrors, setFindErrors] = useState<Errors>({});
@@ -119,6 +122,7 @@ export function RoleAssignmentsPage() {
     onSuccess: async (stored) => {
       setEnded(`${stored.role} ended`);
       await queryClient.invalidateQueries({ queryKey: ["admin", "assignments"] });
+      resultsHeading.current?.focus();
     },
     onError: () => setEnded(null),
   });
@@ -183,7 +187,7 @@ export function RoleAssignmentsPage() {
       header: "Actions",
       render: (a) =>
         standing(a, now) === "ended" ? null : (
-          <Button size="sm" variant="secondary" onClick={() => setEnding(a)} aria-label={`${standing(a, now) === "scheduled" ? "Cancel" : "End"} ${a.role} for user ${a.userId}`}>
+          <Button size="sm" variant="secondary" disabled={end.isPending} onClick={() => setEnding(a)} aria-label={`${standing(a, now) === "scheduled" ? "Cancel" : "End"} ${a.role} for user ${a.userId}`}>
             {standing(a, now) === "scheduled" ? "Cancel" : "End"}
           </Button>
         ),
@@ -211,7 +215,7 @@ export function RoleAssignmentsPage() {
               id="as-entity"
               label="Legal entity"
               optional
-              hint="Leave empty to assign the role across the whole tenant."
+              hint={entities.isError || entities.data?.next ? "Leave empty to assign the role across the whole tenant. Suggestions show only the first legal entities you can see; paste any other id." : "Leave empty to assign the role across the whole tenant."}
               error={errors.legalEntityId}
             >
               {(c) => (
@@ -267,6 +271,9 @@ export function RoleAssignmentsPage() {
           </div>
         </form>
       </Card>
+      <h2 ref={resultsHeading} tabIndex={-1} className={styles.resultsHeading}>
+        Assignments
+      </h2>
       <Alert tone="success" live="status" title={ended ?? undefined} />
       {end.isError ? <ApiFailure error={end.error} title="Could not end the assignment" duty={DUTY} /> : null}
       {assignments.isError ? (
@@ -275,9 +282,11 @@ export function RoleAssignmentsPage() {
           title="Could not load the assignments"
           duty={DUTY}
           action={
-            <Button variant="secondary" loading={assignments.isFetching} onClick={() => void assignments.refetch()}>
-              Try again
-            </Button>
+            canRetry(assignments.error) ? (
+              <Button variant="secondary" loading={assignments.isFetching} onClick={() => void assignments.refetch()}>
+                Try again
+              </Button>
+            ) : undefined
           }
         />
       ) : applied ? (

@@ -1,9 +1,8 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { createElement } from "react";
 import { describe, expect, it } from "vitest";
 import { PrincipalProvider } from "../../../shell/principal";
-import { json, pageViolations, server, useFakeServer } from "../../fx/testServer";
+import { json, pageViolations, renderRoutes, server as fake, useFakeServer, type Reply } from "../../../shell/testing/fakeServer";
 import admin from "../module";
 
 useFakeServer();
@@ -13,20 +12,19 @@ const ENTITY = "22222222-2222-4222-8222-222222222222";
 const A1 = "33333333-3333-4333-8333-333333333333";
 const A2 = "44444444-4444-4444-8444-444444444444";
 
+const server = {
+  get calls() {
+    return fake.calls;
+  },
+  set handler(h: (url: URL, method: string) => Reply | undefined) {
+    fake.handler = (url, init) => h(url, init.method ?? "GET");
+  },
+};
+
 function renderAt(path: string, duties: string[] = []) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return render(
-    <QueryClientProvider client={client}>
-      <PrincipalProvider duties={duties}>
-        <MemoryRouter initialEntries={[path]}>
-          <Routes>
-            {admin.routes.map((route) => (
-              <Route key={route.path} path={route.path} element={route.element} />
-            ))}
-          </Routes>
-        </MemoryRouter>
-      </PrincipalProvider>
-    </QueryClientProvider>,
+  return renderRoutes(
+    admin.routes.map((route) => ({ path: route.path, element: createElement(PrincipalProvider, { duties, children: route.element }) })),
+    path,
   );
 }
 
@@ -77,23 +75,36 @@ describe("effective permissions page", () => {
     expect(screen.getByText(/Legacy role/)).toBeInTheDocument();
     expect(within(table).getByText("Missing: Maintain exchange rates")).toBeInTheDocument();
     expect(within(table).getByText("No duty grants this route")).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Showing 3 of 3 routes.");
+    expect(screen.getByText("Showing 3 of 3 routes.")).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Decision"), { target: { value: "denied" } });
     fireEvent.change(screen.getByLabelText("Method"), { target: { value: "POST" } });
-    expect(screen.getByRole("status")).toHaveTextContent("Showing 1 of 3 routes.");
+    expect(screen.getByText("Showing 1 of 3 routes.")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Search routes"), { target: { value: "zzz" } });
     expect(screen.getByText("No routes match")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
   });
 
-  it("explains that a scoped caller needs all-entity scope on 403", async () => {
-    server.handler = () => json(403, { code: "IAM-0403", detail: "scope" });
-    renderAt("/admin/security/permissions");
+  it("shows the server reason first, then the scope hint, with no retry on 403", async () => {
+    server.handler = () => json(403, { code: "IAM-0403", detail: "legal-entity scope must be all entities" });
+    const { container } = renderAt("/admin/security/permissions");
     await fill("User id", USER);
     fireEvent.click(screen.getByRole("button", { name: "Show permissions" }));
-    expect(await screen.findByText(/all entities/)).toBeInTheDocument();
+    const alert = await screen.findByText("legal-entity scope must be all entities");
+    expect(alert.parentElement).toHaveTextContent(/scope of all entities/);
     expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+    expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("announces loading in an already mounted live region", async () => {
+    server.handler = () => json(200, report);
+    renderAt("/admin/security/permissions");
+    const region = document.querySelector<HTMLElement>('p[role="status"]')!;
+    expect(region).toBeEmptyDOMElement();
+    await fill("User id", USER);
+    fireEvent.click(screen.getByRole("button", { name: "Show permissions" }));
+    await waitFor(() => expect(region).toHaveTextContent("Loading permissions…"));
+    await screen.findByRole("table", { name: "Route permissions" });
   });
 
   it("reports an unknown user and offers retry on a server error", async () => {
@@ -344,5 +355,135 @@ describe("legal entities page", () => {
     await fill("Name", "Germany");
     fireEvent.click(screen.getByRole("button", { name: "Create legal entity" }));
     expect(await screen.findByText("That code is already in use")).toBeInTheDocument();
+  });
+});
+
+describe("role assignments follow-ups", () => {
+  const cancelled = { ...assignments[0], validFrom: future, validTo: future };
+
+  it("treats a cancelled future assignment as ended with no action", async () => {
+    server.handler = (url) => (url.pathname === "/api/v1/authz/assignments" ? json(200, { items: [cancelled] }) : json(200, { items: [] }));
+    renderAt("/admin/security/assignments");
+    await find(USER);
+    await screen.findByText("Ended");
+    expect(screen.queryByText("Scheduled")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^(End|Cancel) / })).toBeNull();
+  });
+
+  it("shows the server reason before the hint for a tenant-wide scope 403", async () => {
+    assignmentsServer((_url, method) => (method === "POST" ? json(403, { code: "IAM-0403", detail: "a tenant-wide assignment needs access to all legal entities" }) : undefined));
+    renderAt("/admin/security/assignments");
+    await fill("User to assign", USER);
+    await fill("Role to assign", "Maintain security roles");
+    fireEvent.click(screen.getByRole("button", { name: "Assign role" }));
+    const reason = await screen.findByText("a tenant-wide assignment needs access to all legal entities");
+    expect(reason.parentElement).toHaveTextContent(/Maintain security roles" duty/);
+  });
+
+  it("shows the server reason for an operator-only 403", async () => {
+    assignmentsServer((_url, method) => (method === "POST" ? json(403, { code: "IAM-0403", detail: "Maintain tenants can only be granted in the operator tenant" }) : undefined));
+    renderAt("/admin/security/assignments");
+    await fill("User to assign", USER);
+    await fill("Role to assign", "Maintain tenants");
+    fireEvent.click(screen.getByRole("button", { name: "Assign role" }));
+    expect(await screen.findByText("Maintain tenants can only be granted in the operator tenant")).toBeInTheDocument();
+  });
+
+  it("refetches the list after assigning and after ending and moves focus to the results heading", async () => {
+    assignmentsServer((url, method) => {
+      if (method === "POST" && url.pathname.endsWith("/end")) return json(200, { ...assignments[0], validTo: "2026-03-01T00:00:00Z" });
+      if (method === "POST") return json(201, assignments[0]);
+      return undefined;
+    });
+    const listCalls = () => server.calls.filter((c) => c.method === "GET" && c.url.pathname === "/api/v1/authz/assignments" && !c.url.searchParams.get("after")).length;
+    renderAt("/admin/security/assignments");
+    await find(USER);
+    const endButton = await screen.findByRole("button", { name: `End Maintain security roles for user ${USER}` });
+    expect(listCalls()).toBe(1);
+    await fill("User to assign", USER);
+    await fill("Role to assign", "Approve invoices");
+    fireEvent.click(screen.getByRole("button", { name: "Assign role" }));
+    await screen.findByText("Maintain security roles assigned");
+    await waitFor(() => expect(listCalls()).toBe(2));
+    fireEvent.click(endButton);
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "End assignment" }));
+    await screen.findByText("Maintain security roles ended");
+    await waitFor(() => expect(listCalls()).toBe(3));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Assignments" })).toHaveFocus());
+  });
+
+  it("disables the row action while the end request is in flight", async () => {
+    let finish: (r: Reply) => void = () => undefined;
+    const pending = new Promise<Reply>((resolve) => {
+      finish = resolve;
+    });
+    assignmentsServer();
+    const base = fake.handler;
+    renderAt("/admin/security/assignments");
+    await find(USER);
+    const endButton = await screen.findByRole("button", { name: `End Maintain security roles for user ${USER}` });
+    const stubbed = globalThis.fetch;
+    globalThis.fetch = (async (input: string, init?: RequestInit) =>
+      init?.method === "POST" ? pending.then((r) => new Response(JSON.stringify(r.body), { status: r.status })) : stubbed(input, init)) as typeof fetch;
+    fireEvent.click(endButton);
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "End assignment" }));
+    await waitFor(() => expect(endButton).toBeDisabled());
+    finish(json(200, { ...assignments[0], validTo: "2026-03-01T00:00:00Z" }));
+    await screen.findByText("Maintain security roles ended");
+    fake.handler = base;
+    globalThis.fetch = stubbed;
+  });
+
+  it("trims the reason and counts bytes like the server", async () => {
+    assignmentsServer((_url, method) => (method === "POST" ? json(201, assignments[0]) : undefined));
+    renderAt("/admin/security/assignments");
+    await fill("User to assign", USER);
+    await fill("Role to assign", "Approve invoices");
+    await fill("Reason", `  ${"a".repeat(500)}  `);
+    fireEvent.click(screen.getByRole("button", { name: "Assign role" }));
+    await screen.findByText("Maintain security roles assigned");
+    expect(server.calls.find((c) => c.method === "POST")?.body).toMatchObject({ reason: "a".repeat(500) });
+    await fill("Reason", "é".repeat(251));
+    fireEvent.click(screen.getByRole("button", { name: "Assign role" }));
+    expect(await screen.findByText(/500 bytes or fewer/)).toBeInTheDocument();
+  });
+
+  it("is axe clean with the dialog open and in the error state", async () => {
+    assignmentsServer();
+    const { container } = renderAt("/admin/security/assignments");
+    await find(USER);
+    fireEvent.click(await screen.findByRole("button", { name: `End Maintain security roles for user ${USER}` }));
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    expect(pageViolations(container)).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Keep assignment" }));
+    server.handler = () => json(500, { code: "COM-0500", detail: "down" });
+    fireEvent.click(screen.getByRole("button", { name: "Find assignments" }));
+    fireEvent.change(screen.getByLabelText("Find by role"), { target: { value: "x" } });
+    fireEvent.click(screen.getByRole("button", { name: "Find assignments" }));
+    expect(await screen.findByText("down")).toBeInTheDocument();
+    expect(pageViolations(container)).toEqual([]);
+  });
+
+  it("offers no retry when the assignment list is forbidden", async () => {
+    server.handler = (url) => (url.pathname === "/api/v1/authz/assignments" ? json(403, { code: "IAM-0403", detail: "denied" }) : json(200, { items: [] }));
+    renderAt("/admin/security/assignments");
+    await find(USER);
+    expect(await screen.findByText("denied")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  });
+});
+
+describe("legal entities follow-ups", () => {
+  it("shows the server reason and no retry on a forbidden list", async () => {
+    server.handler = () => json(403, { code: "IAM-0403", detail: "needs all entities" });
+    renderAt("/admin/security/legal-entities");
+    expect(await screen.findByText("needs all entities")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  });
+
+  it("assignment form stays usable when the entity suggestions are forbidden", async () => {
+    server.handler = (url) => (url.pathname === "/api/v1/legal-entities" ? json(403, { code: "IAM-0403", detail: "no" }) : undefined);
+    renderAt("/admin/security/assignments");
+    expect(await screen.findByLabelText("Legal entity")).toHaveAccessibleDescription(/paste any other id/);
   });
 });

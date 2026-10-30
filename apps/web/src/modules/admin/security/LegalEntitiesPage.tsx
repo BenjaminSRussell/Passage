@@ -4,7 +4,7 @@ import { usePrincipalDuties } from "../../../shell/principal";
 import { Alert, Button, Card, DataTable, FormField, Input, PageHeader, StatusPill, type DataTableColumn } from "../../../shell/ui";
 import { createLegalEntity, listLegalEntities, type LegalEntity } from "./api";
 import styles from "./security.module.css";
-import { ApiFailure, fieldsOwnFailure, mapServerFields, useFocusFirstInvalid, withoutFields, type Errors } from "./support";
+import { ApiFailure, canRetry, fieldsOwnFailure, mapServerFields, useFocusFirstInvalid, withoutFields, type Errors } from "./support";
 
 const DUTY = "Maintain legal entities";
 const FIELDS = ["code", "displayName"] as const;
@@ -99,9 +99,11 @@ export function LegalEntitiesPage() {
           title="Could not load the legal entities"
           duty={DUTY}
           action={
-            <Button variant="secondary" loading={entities.isFetching} onClick={() => void entities.refetch()}>
-              Try again
-            </Button>
+            canRetry(entities.error) ? (
+              <Button variant="secondary" loading={entities.isFetching} onClick={() => void entities.refetch()}>
+                Try again
+              </Button>
+            ) : undefined
           }
         />
       ) : (

@@ -43,6 +43,11 @@ interface Notice {
   tone: "warning" | "danger";
   title: string;
   message: string;
+  hint?: string;
+}
+
+export function canRetry(error: unknown): boolean {
+  return !(error instanceof SecurityApiError && (error.status === 403 || error.status === 404));
 }
 
 function noticeFor(error: SecurityApiError, title: string, duty: string, scopeNote?: string): Notice {
@@ -57,7 +62,8 @@ function noticeFor(error: SecurityApiError, title: string, duty: string, scopeNo
     return {
       tone: "danger",
       title: "You do not have permission",
-      message: scopeNote ?? `This needs the "${duty}" duty. Ask an administrator to grant it, then try again.`,
+      message: error.message,
+      hint: scopeNote ?? `This needs the "${duty}" duty. Ask an administrator to grant it, then try again.`,
     };
   }
   if (error.status === 409 && error.code === ASSIGNMENT_OVERLAP) {
@@ -95,6 +101,7 @@ export function ApiFailure({ error, title, duty, scopeNote, action }: ApiFailure
   return (
     <Alert tone={notice.tone} title={notice.title} live="alert" action={action}>
       {notice.message}
+      {notice.hint ? <p>{notice.hint}</p> : null}
     </Alert>
   );
 }

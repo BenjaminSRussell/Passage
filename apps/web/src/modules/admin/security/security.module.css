@@ -46,3 +46,8 @@
   line-height: var(--text-sm-leading);
   max-inline-size: var(--reading-max);
 }
+
+.resultsHeading {
+  margin: 0;
+  font-size: var(--text-lg-size, 1.125rem);
+}
