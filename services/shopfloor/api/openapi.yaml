@@ -313,7 +313,9 @@ paths:
         same transaction. A clock-in or clock-out takes no `stoppedAt`; a closed
         registration lasts at most 24 hours; a bundled job registration, and a job-start
         that a job-stop already closed (correct the job-stop), cannot be corrected
-        (SF-0127); an invalid or unchanged correction is SF-0128. A day
+        (SF-0127); an invalid or unchanged correction is SF-0128, except that sending
+        the stored `startedAt` of an auto clock-out nobody has reviewed yet confirms it
+        (BR-25.3), which clears the day's `missing-clock-out` flag on recalculation. A day
         calculated before the correction cannot be approved until it is recalculated
         (SF-0104). You cannot correct your own registrations (SF-0106). Corrections to
         approved days are paid through `pay:revise`.
@@ -357,7 +359,7 @@ paths:
       operationId: listRegistrationCorrections
       summary: Registration corrections made in a date range
       x-passage-duty: shopfloor.view
-      description: Lists corrections by the day they were made (UTC range), newest first.
+      description: Lists corrections by the day they were made (local days in `timeZone`, UTC by default), newest first.
       parameters:
         - name: workerId
           in: query
@@ -367,6 +369,7 @@ paths:
           description: Omit to list every worker.
         - $ref: "#/components/parameters/From"
         - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/TimeZone"
         - $ref: "#/components/parameters/Limit"
       responses:
         "200":
@@ -381,6 +384,111 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/Correction"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "500":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/registrations:auto-clock-out:
+    post:
+      operationId: autoClockOut
+      summary: Auto clock-out sweep - close clock-ins left open too long
+      x-passage-duty: shopfloor.time.autoclockout
+      description: |
+        The hourly auto clock-out job (D2h, BR-25.3). The platform scheduler calls it for
+        each tenant with a service identity holding the duty; a supervisor may run it by
+        hand. For every worker whose latest clock punch is a clock-in older than
+        `afterHours`, it writes a clock-out at the clock-in plus `afterHours` (so the
+        segment is exactly that long, however late the sweep ran), flagged
+        `auto-clock-out`, and publishes `registration.posted` in the same transaction.
+        Workers are locked with `skip locked`, so concurrent sweeps close each shift
+        once, and a clock-out that arrives meanwhile wins. At most `limit` shifts are
+        closed per call, oldest first. Calling it again is safe, so it takes no
+        Idempotency-Key. Until a supervisor confirms the clock-out (a
+        `correctRegistration` that keeps its time) or corrects it, the calculated day
+        counts the hours but carries the flag `missing-clock-out`, so it cannot be
+        approved (BR-25.3, SF-0006). The flagged clock-outs are listed by
+        `listAutoClockOuts`. A day calculated before the sweep is stale for approval
+        until it is calculated again (SF-0104).
+      parameters:
+        - name: afterHours
+          in: query
+          description: Hours a clock-in may stay open before it is closed (4 to 24).
+          schema:
+            type: integer
+            minimum: 4
+            maximum: 24
+            default: 16
+        - name: limit
+          in: query
+          description: Most shifts closed by this call.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        "200":
+          description: The threshold used and the clock-ins this sweep closed (empty when none was stale).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [afterHours, items]
+                properties:
+                  afterHours:
+                    type: integer
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AutoClosed"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "500":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/auto-clock-outs:
+    get:
+      operationId: listAutoClockOuts
+      summary: Clock-outs written by the auto clock-out sweep, for review
+      x-passage-duty: shopfloor.view
+      description: |
+        Lists the flagged clock-outs the sweep wrote between `from` and `to` (local days
+        in `timeZone`, by the time the server wrote them), newest first, with the worker,
+        the clock-in they close and whether a supervisor has reviewed (confirmed or
+        corrected) them.
+      parameters:
+        - name: workerId
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Omit to list every worker.
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/TimeZone"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Auto clock-outs, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AutoClockOutReview"
         "400":
           $ref: "#/components/responses/Problem"
         "401":
@@ -1536,8 +1644,8 @@ components:
           type: array
           items:
             type: string
-            enum: [job-finished-conflict, auto-stopped, auto-stop-capped]
-          description: Review flags (BR-25.7, FR-25.3).
+            enum: [job-finished-conflict, auto-stopped, auto-stop-capped, auto-clock-out]
+          description: Review flags (BR-25.7, FR-25.3); `auto-clock-out` marks a clock-out the auto clock-out sweep wrote.
     WorkerDay:
       type: object
       required: [workerId, workerName, workDate, hours, flags, status, timeZone, calculatedAt, approvedBy, approvedAt, revision, revisedBy, revisedAt, payLines]
@@ -1755,6 +1863,57 @@ components:
           type: string
           minLength: 1
           maxLength: 500
+    AutoClosed:
+      type: object
+      required: [registrationId, workerId, clockInId, clockedInAt, clockedOutAt]
+      properties:
+        registrationId:
+          type: string
+          format: uuid
+          description: The clock-out the sweep wrote.
+        workerId:
+          type: string
+          format: uuid
+        clockInId:
+          type: string
+          format: uuid
+          description: The open clock-in it closes.
+        clockedInAt:
+          type: string
+          format: date-time
+        clockedOutAt:
+          type: string
+          format: date-time
+          description: Clock-in plus the threshold.
+    AutoClockOutReview:
+      type: object
+      required: [registrationId, workerId, workerName, clockedInAt, clockedOutAt, closedAt, reviewed]
+      properties:
+        registrationId:
+          type: string
+          format: uuid
+        workerId:
+          type: string
+          format: uuid
+        workerName:
+          type: string
+        clockedInAt:
+          type: [string, "null"]
+          format: date-time
+          description: The clock-in the clock-out closes; null when none precedes it.
+        clockedOutAt:
+          type: string
+          format: date-time
+          description: The clock-out time as it stands now, after any correction.
+        closedAt:
+          type: string
+          format: date-time
+          description: When the server wrote the clock-out.
+        reviewed:
+          type: boolean
+          description: |
+            A supervisor has confirmed or corrected the clock-out. Until then its day
+            carries `missing-clock-out` and cannot be approved (BR-25.3).
     Correction:
       type: object
       required: [id, registrationId, workerId, reason, oldStartedAt, oldStoppedAt, oldHours, newStartedAt, newStoppedAt, newHours, correctedBy, correctedAt]

@@ -94,6 +94,8 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		"/v1/shopfloor/registrations/{id}:correct post":                            DutyTimeCorrect,
 		"/v1/shopfloor/registration-corrections get":                               DutyView,
 		"/v1/shopfloor/pay:revise post":                                            DutyPayRevise,
+		"/v1/shopfloor/registrations:auto-clock-out post":                          DutyAutoClockOut,
+		"/v1/shopfloor/auto-clock-outs get":                                        DutyView,
 	}
 	keyed := map[string]bool{
 		"/v1/shopfloor/workers post":                                               true,

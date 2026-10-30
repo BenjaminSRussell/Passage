@@ -133,6 +133,12 @@ describe("Correct a registration", () => {
     });
   });
 
+  it("sends the stored instant, seconds included, for a time left as the form filled it", () => {
+    const stored = { ...registration, startedAt: "2026-10-20T19:30:37Z" };
+    expect(validateCorrection({ startedAt: "2026-10-20T19:30", stoppedAt: "", reason: "confirmed" }, stored).input?.startedAt).toBe("2026-10-20T19:30:37Z");
+    expect(validateCorrection({ startedAt: "2026-10-20T19:31", stoppedAt: "", reason: "moved" }, stored).input?.startedAt).toBe("2026-10-20T19:31:00.000Z");
+  });
+
   it("sends the correction with an Idempotency-Key and offers pay revision", async () => {
     handler = (url, init) => (init.method === "POST" && url.pathname.endsWith(":correct") ? json(200, correction) : undefined);
     const { container } = renderAt({ pathname: `/shopfloor/registrations/${REG}/correct`, state: { registration } });

@@ -84,6 +84,8 @@ type Store interface {
 	SavePay(ctx context.Context, calc store.PayCalculation, idem store.Idem, response any) error
 	CorrectRegistration(ctx context.Context, id string, req domain.CorrectionRequest, correctedBy string, idem store.Idem) (store.Correction, error)
 	ListCorrections(ctx context.Context, workerID string, from, to time.Time, limit int) ([]store.Correction, error)
+	AutoClockOut(ctx context.Context, now time.Time, afterHours, limit int) ([]store.AutoClosed, error)
+	ListAutoClockOuts(ctx context.Context, workerID string, start, end time.Time, limit int) ([]store.AutoClockOutReview, error)
 	RevisePay(ctx context.Context, calc store.PayCalculation, reason, revisedBy string, idem store.Idem) (store.RevisionResult, error)
 	ApprovePay(ctx context.Context, workerID, fromDate, toDate, approvedBy string, idem store.Idem) (store.ApproveResult, error)
 	ListWorkerDays(ctx context.Context, f store.DayFilter) ([]store.WorkerDay, error)
@@ -134,6 +136,8 @@ type API struct {
 	processReprocessed atomic.Int64
 	// processRetried counts destinations the retry sweep published again.
 	processRetried atomic.Int64
+	// autoClockedOut counts clock-ins the auto clock-out sweep closed.
+	autoClockedOut atomic.Int64
 	// processDeleted counts process messages deleted with a reason.
 	processDeleted atomic.Int64
 	// oeeChanged and oeeRemoved count stored OEE buckets the rollup wrote or removed.
@@ -245,6 +249,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerKiosk(r)
 	a.registerJobs(r)
 	a.registerCorrections(r)
+	a.registerAutoClock(r)
 }
 
 // Metrics serves the counters in Prometheus text format on the admin port.
@@ -266,6 +271,7 @@ func (a *API) Metrics() http.Handler {
 		counter("shopfloor_process_messages_stored_total", "Process messages stored (FR-25.17).", a.processStored.Load())
 		counter("shopfloor_process_message_replays_total", "Process messages replayed by (source, sourceMessageId) and not stored again.", a.processReplays.Load())
 		counter("shopfloor_process_deliveries_reprocessed_total", "Process message destinations in error sent again by a supervisor.", a.processReprocessed.Load())
+		counter("shopfloor_auto_clock_outs_total", "Clock-ins closed by the auto clock-out sweep.", a.autoClockedOut.Load())
 		counter("shopfloor_process_deliveries_retried_total", "Process message destinations published again by the retry sweep.", a.processRetried.Load())
 		counter("shopfloor_process_messages_deleted_total", "Process messages deleted with a reason by a supervisor.", a.processDeleted.Load())
 		counter("shopfloor_oee_buckets_changed_total", "Stored OEE buckets the rollup inserted or changed (FR-25.10).", a.oeeChanged.Load())

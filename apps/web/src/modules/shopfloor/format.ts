@@ -107,6 +107,7 @@ export const REGISTRATION_FLAG_LABELS: Record<string, string> = {
   "job-finished-conflict": "Started after finish",
   "auto-stopped": "Auto-stopped",
   "auto-stop-capped": "Capped at 24 h",
+  "auto-clock-out": "Closed automatically",
 };
 
 export const FLAG_LABELS: Record<string, string> = {

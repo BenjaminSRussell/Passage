@@ -27,6 +27,9 @@ type StoredRegistration struct {
 	Bundled   bool
 	StartedAt time.Time
 	StoppedAt *time.Time
+	// Unconfirmed is an auto clock-out (FlagAutoClockOut) that no supervisor has
+	// confirmed or corrected yet; sending its stored time confirms it.
+	Unconfirmed bool
 }
 
 // Correction is the planned result: the new times and the new hours (nil while open).
@@ -40,7 +43,8 @@ type Correction struct {
 // job registration cannot be corrected, because its hours are a share of the bundle
 // split (BR-25.1) that was already published. Clock-in and clock-out are points in
 // time and take no stop time. A closed registration lasts at most 24 hours, and a
-// correction must change something.
+// correction must change something, except that a supervisor confirms an unconfirmed
+// auto clock-out by sending its stored time (BR-25.3: confirm or edit).
 func PlanCorrection(reg StoredRegistration, req CorrectionRequest) (Correction, error) {
 	if req.Reason == "" {
 		return Correction{}, &Error{Code: CodeCorrectionInvalid, Detail: "a reason is required"}
@@ -75,7 +79,7 @@ func PlanCorrection(reg StoredRegistration, req CorrectionRequest) (Correction, 
 	}
 	sameStop := (reg.StoppedAt == nil && out.StoppedAt == nil) ||
 		(reg.StoppedAt != nil && out.StoppedAt != nil && reg.StoppedAt.Equal(*out.StoppedAt))
-	if out.StartedAt.Equal(reg.StartedAt) && sameStop {
+	if out.StartedAt.Equal(reg.StartedAt) && sameStop && !reg.Unconfirmed {
 		return Correction{}, &Error{Code: CodeCorrectionInvalid, Detail: "the correction does not change the registration"}
 	}
 	return out, nil

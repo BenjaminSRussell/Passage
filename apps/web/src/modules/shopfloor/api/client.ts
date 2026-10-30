@@ -52,7 +52,7 @@ export interface RegistrationInput {
 }
 
 /** Review flags on a registration (BR-25.7, FR-25.3). */
-export type RegistrationFlag = "job-finished-conflict" | "auto-stopped" | "auto-stop-capped";
+export type RegistrationFlag = "job-finished-conflict" | "auto-stopped" | "auto-stop-capped" | "auto-clock-out";
 
 /** A job the server stopped because the worker started another one (FR-25.3, SF-0002). */
 export interface AutoStop {
@@ -372,6 +372,48 @@ export function listCorrections(
 /** Recalculates a range and revises approved days with reversal lines (SF-0129 when nothing differs). */
 export function revisePay(input: PayRange & { reason: string }, key: string = newKey()): Promise<PayRevision> {
   return post<PayRevision>("/pay:revise", input, key);
+}
+
+// --- Auto clock-out (slice 10, D2h) ---
+
+/** Hours a clock-in may stay open before the sweep closes it (SF-0130 outside the bounds). */
+export const AUTO_CLOCK_OUT_HOURS = { min: 4, max: 24, default: 16 } as const;
+
+/** A clock-out the auto clock-out sweep wrote, for supervisor review. */
+export interface AutoClockOutReview {
+  registrationId: string;
+  workerId: string;
+  workerName: string;
+  clockedInAt: string | null;
+  clockedOutAt: string;
+  closedAt: string;
+  /** A supervisor confirmed or corrected the clock-out; until then its day cannot be approved (BR-25.3). */
+  reviewed: boolean;
+}
+
+export interface AutoClosed {
+  registrationId: string;
+  workerId: string;
+  clockInId: string;
+  clockedInAt: string;
+  clockedOutAt: string;
+}
+
+export interface AutoClockOutRun {
+  afterHours: number;
+  items: AutoClosed[];
+}
+
+export function listAutoClockOuts(
+  filter: { from: string; to: string; workerId?: string; timeZone?: string },
+  signal?: AbortSignal,
+): Promise<AutoClockOutReview[]> {
+  return items<AutoClockOutReview>(`/auto-clock-outs${query(filter)}`, signal);
+}
+
+/** Closes the clock-ins left open for more than afterHours (the hourly job, run by hand). */
+export function runAutoClockOut(afterHours: number): Promise<AutoClockOutRun> {
+  return post<AutoClockOutRun>(`/registrations:auto-clock-out${query({ afterHours })}`, {});
 }
 
 // --- Machines, downtime, andon, OEE and payroll export (slice 2) ---

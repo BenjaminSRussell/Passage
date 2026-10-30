@@ -43,8 +43,11 @@ export function validateCorrection(values: Values, original?: Registration): { e
   if (reason.length < 1 || reason.length > 500) errors.reason = "Say why the time changes, up to 500 characters.";
   if (Object.keys(errors).length > 0) return { errors };
   const input: CorrectionInput = { reason };
-  if (started !== "") input.startedAt = fromLocalInput(started);
-  if (stopped !== "") input.stoppedAt = fromLocalInput(stopped);
+  // A field left as the form filled it sends the stored instant, seconds included, so
+  // keeping a time (or confirming an auto clock-out) does not move it to the minute.
+  const keep = (value: string, stored?: string | null) => (stored && value === toLocalInput(stored) ? stored : fromLocalInput(value));
+  if (started !== "") input.startedAt = keep(started, original?.startedAt);
+  if (stopped !== "") input.stoppedAt = keep(stopped, original?.stoppedAt);
   return { errors, input };
 }
 
@@ -106,7 +109,9 @@ export function CorrectRegistrationPage() {
       <div className={styles.stack}>
         <PageHeader title="Registration corrected" />
         <Alert tone="success" title="Correction saved" live="status">
-          {`Start ${formatDateTime(saved.oldStartedAt)} is now ${formatDateTime(saved.newStartedAt)}${saved.newStoppedAt ? `, stop ${formatDateTime(saved.newStoppedAt)}` : ""}. Recalculate the worker's pay; an approved day is revised with reversal lines.`}
+          {saved.oldStartedAt === saved.newStartedAt && saved.oldStoppedAt === saved.newStoppedAt
+            ? `Confirmed at ${formatDateTime(saved.newStartedAt)}. Recalculate the worker's pay to clear the missing clock-out flag.`
+            : `Start ${formatDateTime(saved.oldStartedAt)} is now ${formatDateTime(saved.newStartedAt)}${saved.newStoppedAt ? `, stop ${formatDateTime(saved.newStoppedAt)}` : ""}. Recalculate the worker's pay; an approved day is revised with reversal lines.`}
         </Alert>
         <div className={styles.formActions}>
           <Link className={buttonClassName("primary")} to={`/shopfloor/workers/${saved.workerId}/revise`}>
@@ -150,7 +155,16 @@ export function CorrectRegistrationPage() {
       ) : null}
       <Card>
         <form className={styles.form} onSubmit={submit} noValidate>
-          <FormField id="correct-startedAt" label="Started (UTC)" hint="Leave as it is to keep the stored start." error={errors.startedAt}>
+          <FormField
+            id="correct-startedAt"
+            label="Started (UTC)"
+            hint={
+              original?.flags.includes("auto-clock-out")
+                ? "Closed automatically. Keep this time to confirm it, or change it."
+                : "Leave as it is to keep the stored start."
+            }
+            error={errors.startedAt}
+          >
             {(control) => (
               <Input {...control} type="datetime-local" value={values.startedAt} invalid={Boolean(errors.startedAt)} onChange={(event) => update({ startedAt: event.target.value })} />
             )}

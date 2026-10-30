@@ -36,6 +36,9 @@ func TestPlanCorrection(t *testing.T) {
 		{"stop before start", StoredRegistration{Kind: "job-start", StartedAt: ts(8, 0)}, CorrectionRequest{StoppedAt: ptr(ts(7, 0)), Reason: "x"}, CodeCorrectionInvalid, ""},
 		{"over 24 hours", StoredRegistration{Kind: "job-start", StartedAt: ts(8, 0)}, CorrectionRequest{StoppedAt: ptr(ts(8, 0).Add(25 * time.Hour)), Reason: "x"}, CodeCorrectionInvalid, ""},
 		{"no change", StoredRegistration{Kind: KindClockIn, StartedAt: ts(7, 0)}, CorrectionRequest{StartedAt: ptr(ts(7, 0)), Reason: "x"}, CodeCorrectionInvalid, ""},
+		{"unconfirmed auto clock-out confirmed with its own time", StoredRegistration{Kind: KindClockOut, StartedAt: ts(22, 0), Unconfirmed: true}, CorrectionRequest{StartedAt: ptr(ts(22, 0)), Reason: "x"}, "", ""},
+		{"confirmed auto clock-out needs a change", StoredRegistration{Kind: KindClockOut, StartedAt: ts(22, 0)}, CorrectionRequest{StartedAt: ptr(ts(22, 0)), Reason: "x"}, CodeCorrectionInvalid, ""},
+		{"confirming still needs a reason", StoredRegistration{Kind: KindClockOut, StartedAt: ts(22, 0), Unconfirmed: true}, CorrectionRequest{StartedAt: ptr(ts(22, 0))}, CodeCorrectionInvalid, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

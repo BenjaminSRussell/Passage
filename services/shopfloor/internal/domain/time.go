@@ -28,6 +28,10 @@ type Punch struct {
 	ID   string
 	Kind string
 	At   time.Time
+	// Unconfirmed marks a clock-out the auto clock-out sweep wrote that no supervisor
+	// has confirmed or corrected yet (BR-25.3). It closes the segment, so the hours
+	// show, but the day keeps the missing-clock-out flag and cannot be approved.
+	Unconfirmed bool
 }
 
 // Window is a daily window expressed as offsets from local midnight.
@@ -98,7 +102,9 @@ func Round(at time.Time, kind string, p Profile, loc *time.Location) time.Time {
 
 // BuildDays pairs punches (in time order) into segments and groups them by the
 // local date on which each segment starts. An unpaired clock-in is flagged
-// missing-clock-out and contributes no hours; a clock-out with no open clock-in
+// missing-clock-out and contributes no hours; a segment closed by an unconfirmed
+// auto clock-out counts its hours and is flagged missing-clock-out too, until a
+// supervisor confirms or corrects it (BR-25.3); a clock-out with no open clock-in
 // is flagged orphan-clock-out. Segments that cross midnight belong to their
 // start day in this slice.
 func BuildDays(punches []Punch, loc *time.Location, p Profile) []Day {
@@ -134,6 +140,9 @@ func BuildDays(punches []Punch, loc *time.Location, p Profile) []Day {
 			if end.After(start) {
 				d := dayOf(start)
 				d.Segments = append(d.Segments, Segment{Start: start, End: end, Sources: []string{open.ID, pu.ID}})
+			}
+			if pu.Unconfirmed {
+				addFlag(dayOf(start), FlagMissingClockOut)
 			}
 			open = nil
 		}

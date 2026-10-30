@@ -92,6 +92,19 @@ Shop floor execution service. Wave reference: **PSG-25 / Wave 25**
   export. Event `dev.passage.shopfloor.payday.revised.v1`. No difference in any day is
   SF-0129; an approved day that would carry open flags is SF-0006.
 - `GET registration-corrections?from&to[&workerId]` lists the audit trail.
+- `POST registrations:auto-clock-out[?afterHours=16&limit=100]` (duty `shopfloor.time.autoclockout`)
+  is the hourly auto clock-out job (D2h). Each worker whose latest clock punch is a clock-in
+  older than `afterHours` (4 to 24, else SF-0130) gets a clock-out at clock-in plus
+  `afterHours`, flagged `auto-clock-out`, with `registration.posted` in the same transaction.
+  Workers are locked `skip locked` (concurrent sweeps close a shift once) and the insert
+  re-checks that no later clock punch exists. Repeating is safe. BR-25.3: the calculated day
+  counts the hours but carries `missing-clock-out` (approval is SF-0006) until a supervisor
+  confirms the clock-out (`registrations/{id}:correct` with its stored `startedAt`, allowed
+  once for an unreviewed auto clock-out) or corrects its time; then recalculate and approve.
+  `GET auto-clock-outs?from&to[&timeZone][&workerId]` lists the flagged clock-outs with
+  `reviewed` once a supervisor confirmed or corrected them.
+  Web: *Auto clock-outs* (`/shopfloor/auto-clock-outs`) with the run-now button and a
+  confirm-or-correct link per row.
 - Web: *Time corrections* list (`/shopfloor/corrections`), the correction form
   (`/shopfloor/registrations/:id/correct`, linked from the worker's registrations), and the
   revise form with the reversed and added lines (`/shopfloor/workers/:id/revise`).
@@ -348,6 +361,7 @@ OpenAPI and AsyncAPI files in step with the router and the published event types
 | POST `/v1/shopfloor/pay:export`, GET `/pay-exports`, `/pay-exports/{id}` | `shopfloor.pay.export` (Export time to payroll) |
 | POST `/v1/shopfloor/registrations/{id}:correct` | `shopfloor.time.correct` (supervisor; not in the PRD duty table) |
 | POST `/v1/shopfloor/pay:revise` | `shopfloor.pay.revise` (supervisor; not in the PRD duty table) |
+| POST `/v1/shopfloor/registrations:auto-clock-out` | `shopfloor.time.autoclockout` (platform scheduler identity or supervisor; not in the PRD duty table) |
 | GET `/v1/shopfloor/registration-corrections` | `shopfloor.view` |
 | POST `/v1/shopfloor/jobs` | `shopfloor.job.schedule` (w23 schedule service identity; not in the PRD duty table) |
 | GET `/v1/shopfloor/jobs`, `/jobs/{id}`; POST `/jobs/{id}:feedback` | `shopfloor.time.register`; an `override` also needs `shopfloor.check.override` (shop floor supervisor; not in the PRD duty table) |
@@ -398,8 +412,9 @@ Problem details use `application/problem+json` with `type` `https://passage.dev/
 | `SF-0125` | 422 | A check value cannot be evaluated (not a number, not pass or fail, or blank); `errors` names it |
 | `SF-0126` | 404 | The registration to correct does not exist |
 | `SF-0127` | 422 | The registration cannot be corrected (a bundled job registration, a job-start already closed by a job-stop, or a stop time on a clock-in or clock-out) |
-| `SF-0128` | 422 | The correction is invalid (no reason, stop before start, over 24 hours, or nothing changes) |
+| `SF-0128` | 422 | The correction is invalid (no reason, stop before start, over 24 hours, or nothing changes; keeping the time is allowed once, to confirm an unreviewed auto clock-out) |
 | `SF-0129` | 422 | `pay:revise` found the recalculated pay equal to the stored pay in every day of the range |
+| `SF-0130` | 422 | `registrations:auto-clock-out` got `afterHours` outside 4 to 24 |
 | `idempotency_key_reuse` | 422 | `Idempotency-Key` already used with a different request |
 
 Warnings on an accepted registration (`items[].warnings`, the request succeeds):

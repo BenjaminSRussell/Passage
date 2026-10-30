@@ -199,7 +199,7 @@ components:
       name: dev.passage.shopfloor.registration.corrected.v1
       contentType: application/cloudevents+json
       summary: Registration corrected
-      description: Published once per supervisor correction of a registration, in the same transaction; hours is the new elapsed time of a closed registration.
+      description: Published once per supervisor correction of a registration, in the same transaction; hours is the new elapsed time of a closed registration. A supervisor's confirmation of an auto clock-out (BR-25.3) is published the same way with the new times equal to the old ones.
       payload:
         $ref: "#/components/schemas/RegistrationCorrectedData"
     PaydayRevised:
@@ -547,9 +547,10 @@ components:
           type: array
           items:
             type: string
-            enum: [job-finished-conflict, auto-stopped, auto-stop-capped]
+            enum: [job-finished-conflict, auto-stopped, auto-stop-capped, auto-clock-out]
           description: |
-            Review flags. `job-finished-conflict` on a job-start for a job the
+            Review flags. `auto-clock-out` on a clock-out the auto clock-out
+            sweep wrote (D2h). `job-finished-conflict` on a job-start for a job the
             server had already finished (BR-25.7); `auto-stopped` (and
             `auto-stop-capped` past 24 hours) on a closed job-stop the server
             wrote when the worker started another job (FR-25.3). Empty otherwise.

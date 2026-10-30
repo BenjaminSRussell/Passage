@@ -179,7 +179,8 @@ type RegistrationPostedData struct {
 	Offline        bool             `json:"offline"`
 	// Flags are the registration's review flags: job-finished-conflict on a
 	// job-start (BR-25.7), auto-stopped and auto-stop-capped on a job-stop the
-	// server wrote when the worker started another job (FR-25.3).
+	// server wrote when the worker started another job (FR-25.3), auto-clock-out on
+	// a clock-out the auto clock-out sweep wrote (D2h).
 	Flags []string `json:"flags"`
 }
 

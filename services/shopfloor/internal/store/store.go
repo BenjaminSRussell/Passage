@@ -294,7 +294,8 @@ func lockWorker(ctx context.Context, tx pgx.Tx, tenantID, workerID string) (user
 }
 
 // LoadPunches reads the clock registrations of a worker in [start, end) and the
-// worker's cost rate and currency.
+// worker's cost rate and currency. An auto clock-out without a correction (a
+// supervisor's confirmation or edit) is marked unconfirmed (BR-25.3).
 func (s *Postgres) LoadPunches(ctx context.Context, workerID string, start, end time.Time) (PunchInput, error) {
 	p, _ := tenant.FromContext(ctx)
 	var in PunchInput
@@ -308,16 +309,19 @@ func (s *Postgres) LoadPunches(ctx context.Context, workerID string, start, end 
 		if err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `select id::text, kind, started_at from time_registration
-			where tenant_id = $1 and worker_id = $2 and kind in ('clock-in', 'clock-out') and started_at >= $3 and started_at < $4
-			order by started_at, id`, p.TenantID, workerID, start, end)
+		rows, err := tx.Query(ctx, `select t.id::text, t.kind, t.started_at,
+				t.kind = 'clock-out' and $5 = any(t.flags)
+				and not exists (select 1 from registration_correction c where c.tenant_id = t.tenant_id and c.registration_id = t.id)
+			from time_registration t
+			where t.tenant_id = $1 and t.worker_id = $2 and t.kind in ('clock-in', 'clock-out') and t.started_at >= $3 and t.started_at < $4
+			order by t.started_at, t.id`, p.TenantID, workerID, start, end, domain.FlagAutoClockOut)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
 			var pu domain.Punch
-			if err := rows.Scan(&pu.ID, &pu.Kind, &pu.At); err != nil {
+			if err := rows.Scan(&pu.ID, &pu.Kind, &pu.At, &pu.Unconfirmed); err != nil {
 				return err
 			}
 			in.Punches = append(in.Punches, pu)

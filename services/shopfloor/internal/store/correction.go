@@ -52,7 +52,8 @@ func parseHours(s *string) (*decimal.Decimal, error) {
 // dev.passage.shopfloor.registration.corrected.v1 in the same transaction (FR-25.8).
 // A day calculated before the correction can no longer be approved until it is
 // recalculated (SF-0104). The worker's own user cannot correct their time (SF-0106).
-// The domain rules decide what may change (SF-0127, SF-0128); a job-start already
+// The domain rules decide what may change (SF-0127, SF-0128); an auto clock-out not
+// yet reviewed is confirmed by a correction that keeps its time (BR-25.3); a job-start already
 // closed by a job-stop is SF-0127 too. An unknown id is SF-0126.
 func (s *Postgres) CorrectRegistration(ctx context.Context, id string, req domain.CorrectionRequest, correctedBy string, idem Idem) (Correction, error) {
 	p, _ := tenant.FromContext(ctx)
@@ -82,8 +83,12 @@ func (s *Postgres) CorrectRegistration(ctx context.Context, id string, req domai
 			return httpx.NewProblem(http.StatusForbidden, CodeOwnApproval, "you cannot correct your own time registrations")
 		}
 		// Re-read under the worker lock so two corrections apply one after the other.
-		if err := tx.QueryRow(ctx, `select started_at, stopped_at, hours::text from time_registration where tenant_id = $1 and id = $2 for update`,
-			p.TenantID, id).Scan(&oldStart, &oldStop, &oldHoursText); err != nil {
+		// An auto clock-out no supervisor has reviewed yet may be confirmed as it is.
+		var unconfirmed bool
+		if err := tx.QueryRow(ctx, `select started_at, stopped_at, hours::text,
+				$3 = any(flags) and not exists (select 1 from registration_correction c where c.tenant_id = $1 and c.registration_id = $2)
+			from time_registration where tenant_id = $1 and id = $2 for update`,
+			p.TenantID, id, domain.FlagAutoClockOut).Scan(&oldStart, &oldStop, &oldHoursText, &unconfirmed); err != nil {
 			return err
 		}
 		// A job-start that a job-stop already closed holds no hours: the job-stop carries
@@ -102,7 +107,7 @@ func (s *Postgres) CorrectRegistration(ctx context.Context, id string, req domai
 					"this job-start was closed by a job-stop; correct the job-stop instead")
 			}
 		}
-		plan, err := domain.PlanCorrection(domain.StoredRegistration{Kind: kind, Bundled: bundleID != nil, StartedAt: oldStart, StoppedAt: oldStop}, req)
+		plan, err := domain.PlanCorrection(domain.StoredRegistration{Kind: kind, Bundled: bundleID != nil, StartedAt: oldStart, StoppedAt: oldStop, Unconfirmed: unconfirmed}, req)
 		if err != nil {
 			var de *domain.Error
 			if errors.As(err, &de) {
