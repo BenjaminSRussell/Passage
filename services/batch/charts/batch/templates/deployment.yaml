@@ -16,6 +16,9 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
+        {{- if .Values.notify.enabled }}
+        fsGroup: {{ .Values.notify.fsGroup }}
+        {{- end }}
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -35,6 +38,28 @@ spec:
                   key: DATABASE_URL
             - name: MIGRATE_ON_START
               value: {{ .Values.migrateOnStart | quote }}
+            {{- if .Values.notify.enabled }}
+            - name: NOTIFY_SECRETS_DIR
+              value: {{ .Values.notify.mountPath | quote }}
+            {{- if .Values.notify.smtp.enabled }}
+            - name: NOTIFY_SMTP_ENABLED
+              value: "true"
+            - name: NOTIFY_SMTP_FROM
+              value: {{ .Values.notify.smtp.from | quote }}
+            {{- end }}
+            {{- if .Values.notify.webhook.enabled }}
+            - name: NOTIFY_WEBHOOK_ENABLED
+              value: "true"
+            - name: NOTIFY_WEBHOOK_URL
+              value: {{ .Values.notify.webhook.url | quote }}
+            {{- end }}
+            {{- end }}
+          {{- if .Values.notify.enabled }}
+          volumeMounts:
+            - name: notify-secrets
+              mountPath: {{ .Values.notify.mountPath | quote }}
+              readOnly: true
+          {{- end }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }
@@ -48,3 +73,10 @@ spec:
             httpGet: { path: /readyz, port: http }
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      {{- if .Values.notify.enabled }}
+      volumes:
+        - name: notify-secrets
+          secret:
+            secretName: {{ .Values.notify.secretName }}
+            defaultMode: 0440
+      {{- end }}

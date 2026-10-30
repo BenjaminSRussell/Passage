@@ -12,6 +12,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/services/batch/internal/api"
+	"github.com/BenjaminSRussell/passage/services/batch/internal/notifyout"
 	"github.com/BenjaminSRussell/passage/services/batch/internal/store"
 	"github.com/BenjaminSRussell/passage/services/batch/migrations"
 )
@@ -45,6 +46,11 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if databaseURL == "" {
 		return errors.New("DATABASE_URL is required")
 	}
+	notifyCfg, err := notifyout.Load(getenv)
+	if err != nil {
+		return fmt.Errorf("notify config: %w", err)
+	}
+	slog.Info("notify adapters configured", "adapters", notifyCfg.Enabled())
 	pool, err := dbx.Connect(ctx, databaseURL)
 	if err != nil {
 		return fmt.Errorf("connect database: %w", err)
