@@ -74,6 +74,8 @@ type RunSpec struct {
 	Mapping      Mapping
 	DryRun       bool
 	OnlyKeys     map[string]bool
+	// Passthrough loads extracted fields unchanged (copy projects); Mapping is then ignored.
+	Passthrough bool
 }
 
 type RowReject struct {
@@ -155,7 +157,10 @@ func (p *Pipeline) Run(ctx context.Context, spec RunSpec) (Report, error) {
 			continue
 		}
 		seen[r.Key] = true
-		out, warnings, rejects := spec.Mapping.ApplyWithWarnings(r.Fields)
+		out, warnings, rejects := r.Fields, []Warning(nil), []Reject(nil)
+		if !spec.Passthrough {
+			out, warnings, rejects = spec.Mapping.ApplyWithWarnings(r.Fields)
+		}
 		if len(rejects) > 0 {
 			rep.Rejects = append(rep.Rejects, RowReject{r.Key, rejects})
 			continue

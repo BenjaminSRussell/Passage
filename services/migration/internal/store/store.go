@@ -78,6 +78,15 @@ type Store interface {
 	SaveMappingSpec(ctx context.Context, spec MappingSpec, idempotencyKey string) (saved MappingSpec, created bool, err error)
 	GetMappingSpec(ctx context.Context, id string) (MappingSpec, error)
 	ListMappingSpecs(ctx context.Context, entity string, limit int) ([]MappingSpec, error)
+	// SaveConfigPackage records an applied package once; a repeated Idempotency-Key returns the stored row
+	// (created false) or a 422 when the stored package differs.
+	SaveConfigPackage(ctx context.Context, pkg ConfigPackage, idempotencyKey string) (saved ConfigPackage, created bool, err error)
+	ConfigPackageByKey(ctx context.Context, idempotencyKey string) (ConfigPackage, bool, error)
+	AppendPackageApplied(ctx context.Context, id string, entry PackageApplied) (ConfigPackage, error)
+	GetConfigPackage(ctx context.Context, id string) (ConfigPackage, error)
+	ListConfigPackages(ctx context.Context, limit int) ([]ConfigPackage, error)
+	SaveRewriteRules(ctx context.Context, projectID string, rules []domain.KeyRewrite) error
+	RewriteRules(ctx context.Context, projectID string) ([]domain.KeyRewrite, error)
 	Xref() domain.XrefStore
 	Ping(ctx context.Context) error
 }
@@ -454,6 +463,9 @@ type Mem struct {
 	xref    *domain.MemXref
 	PingErr error
 	SaveErr error
+
+	pkgOnce  sync.Once
+	pkgState *memPackages
 }
 
 func NewMem() *Mem {

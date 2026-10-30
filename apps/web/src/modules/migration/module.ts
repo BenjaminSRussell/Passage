@@ -1,9 +1,10 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
+import { NewPackagePage, PackageDetailPage, PackagesPage } from "./PackagePages";
 import { NewRunPage, RunDetailPage, RunsPage } from "./RunPages";
 import { NewSpecPage, SpecDetailPage, SpecsPage } from "./SpecPages";
 
-// migration.run and migration.spec.write are enforced by the service but not seeded in
+// migration.run, migration.spec.write and migration.package.apply are enforced by the service but not seeded in
 // policies/authz/data.json yet (handoff for #313), so the nav items carry no duty and the
 // actions are gated on the routes below.
 const migration: PassageModule = {
@@ -17,10 +18,14 @@ const migration: PassageModule = {
     { path: "/migration/specs", element: createElement(SpecsPage), handle: { title: "Mapping specs" } },
     { path: "/migration/specs/new", element: createElement(NewSpecPage), handle: { title: "Publish mapping spec", duty: "migration.spec.write" } },
     { path: "/migration/specs/:id", element: createElement(SpecDetailPage), handle: { title: "Mapping spec" } },
+    { path: "/migration/packages", element: createElement(PackagesPage), handle: { title: "Configuration packages" } },
+    { path: "/migration/packages/new", element: createElement(NewPackagePage), handle: { title: "Apply configuration package", duty: "migration.package.apply" } },
+    { path: "/migration/packages/:id", element: createElement(PackageDetailPage), handle: { title: "Configuration package" } },
   ],
   nav: [
     { label: "Migration runs", to: "/migration" },
     { label: "Mapping specs", to: "/migration/specs" },
+    { label: "Configuration packages", to: "/migration/packages" },
   ],
 };
 

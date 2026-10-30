@@ -60,6 +60,7 @@ func NotConfigured(context.Context, string) (Backend, error) { return Backend{},
 type API struct {
 	store    store.Store
 	backends BackendFactory
+	packages PackageFactory
 	runs     atomic.Int64
 	failed   atomic.Int64
 	loaded   atomic.Int64
@@ -124,7 +125,9 @@ type counts struct {
 	Warned    int `json:"warned"`
 }
 
-func New(s store.Store, backends BackendFactory) *API { return &API{store: s, backends: backends} }
+func New(s store.Store, backends BackendFactory) *API {
+	return &API{store: s, backends: backends, packages: PackagesNotConfigured}
+}
 
 func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
@@ -136,6 +139,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRun)).Get(runsPath+"/{id}", a.getRun)
 	r.With(authz.RequireDuty(dutyRun)).Post(runsPath+"/{id}:rerun", a.rerun)
 	r.With(authz.RequireDuty(dutyRun)).Post("/v1/integration/parallel-run-diffs", a.parallelRunDiffs)
+	a.registerPackages(r)
 }
 
 func (a *API) Metrics() http.Handler {

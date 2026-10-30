@@ -125,3 +125,51 @@ export const getSpec = (id: string, signal?: AbortSignal) => send<MappingSpec>(`
 
 export const publishSpec = (mapping: unknown, key: string = newKey()) =>
   send<MappingSpec>("/mapping-specs", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify({ mapping }) });
+
+export interface PackageCounts {
+  create: number;
+  update: number;
+  unchanged: number;
+}
+
+export interface ManifestFile {
+  name: string;
+  sha256: string;
+  dependsOn: string[];
+}
+
+export interface ConfigPackage {
+  id: string;
+  version: string;
+  schemaVersion: number;
+  fileCount: number;
+  files?: ManifestFile[];
+  applied: { tenantId: string; appliedAt: string; idempotencyKey?: string; diffCounts: PackageCounts }[];
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface PackageDiff {
+  version: string;
+  schemaVersion: number;
+  counts: PackageCounts;
+  files: { name: string; entity: string; create: string[]; update: string[]; unchanged: string[] }[];
+}
+
+export interface PackageApplied {
+  packageId: string;
+  version: string;
+  schemaVersion: number;
+  appliedAt: string;
+  counts: PackageCounts;
+}
+
+export const listPackages = (signal?: AbortSignal) => items<ConfigPackage>("/config-packages", signal);
+
+export const getPackage = (id: string, signal?: AbortSignal) => send<ConfigPackage>(`/config-packages/${encodeURIComponent(id)}`, {}, signal);
+
+export const diffPackage = (pkg: unknown, signature: string) =>
+  send<PackageDiff>("/config-packages:diff", { method: "POST", body: JSON.stringify({ package: pkg, signature }) });
+
+export const applyPackage = (pkg: unknown, signature: string, key: string = newKey()) =>
+  send<PackageApplied>("/config-packages:apply", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify({ package: pkg, signature }) });

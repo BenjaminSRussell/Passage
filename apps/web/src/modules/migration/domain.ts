@@ -27,3 +27,21 @@ export function parseMappingText(text: string): { mapping?: unknown; error?: str
     return { error: `Not valid JSON: ${error instanceof Error ? error.message : "parse error"}` };
   }
 }
+
+/** Parses the pasted configuration package JSON and its signature; the service verifies both. */
+export function parsePackageInput(text: string, signature: string): { pkg?: unknown; errors: { package?: string; signature?: string } } {
+  const errors: { package?: string; signature?: string } = {};
+  let pkg: unknown;
+  if (text.trim() === "") errors.package = "Paste the package JSON.";
+  else {
+    try {
+      const value: unknown = JSON.parse(text);
+      if (typeof value !== "object" || value === null || Array.isArray(value)) errors.package = "The package must be a JSON object.";
+      else pkg = value;
+    } catch (error) {
+      errors.package = `Not valid JSON: ${error instanceof Error ? error.message : "parse error"}`;
+    }
+  }
+  if (signature.trim() === "") errors.signature = "Paste the base64 signature.";
+  return { pkg: errors.package ? undefined : pkg, errors };
+}

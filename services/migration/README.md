@@ -14,6 +14,9 @@ Test: `go vet ./... && go test ./...` (`-short` skips the full-size 50k/20k/100k
 | `GET /v1/integration/migration-runs` | `migration.run` | runs newest first; filters `entity`, `status`, `limit` |
 | `POST /v1/integration/mapping-specs` | `migration.spec.write` | parses the mapping, requires at least one test case and runs the tests, stores an immutable (entity, version); same content returns 200, different content under a used version 409 `MIG-SPEC-VERSION-EXISTS` |
 | `GET /v1/integration/mapping-specs`, `GET .../{id}` | `migration.run` | published versions; the single read includes the mapping |
+| `POST /v1/integration/config-packages:diff` | `migration.run` | verifies a signed package and reports per file, in dependency order, the records apply would create or update; writes nothing |
+| `POST /v1/integration/config-packages:apply` | `migration.package.apply` | verifies, writes created and updated records in dependency order, never deletes, appends an `applied` entry; `Idempotency-Key` is required and a replay returns the original answer; `version` is required and at most 20 characters (400 otherwise) |
+| `GET /v1/integration/config-packages`, `GET .../{id}` | `migration.run` | applied packages newest first; the single read includes the manifest files |
 | `POST /v1/integration/parallel-run-diffs` | `migration.run` | 501 `MIG-PARALLEL-RUN-DEFERRED` (wave 49) |
 
 `POST /migration-runs` takes either an inline `mapping` or a `mappingSpecId` (an unknown id is 422 `MIG-SPEC-UNKNOWN`); an `Idempotency-Key` replays only for the same source, mode, entity, dry-run flag, mapping version and spec. Runs execute inside the request. Callers must be tenant-wide: a legal-entity-scoped caller gets 403. The deployment wires no extract or load backend yet, so `POST` returns 501 `MIG-BACKEND-NOT-CONFIGURED` until a later slice supplies the connectors and the batch-API loader.
@@ -72,9 +75,23 @@ Warnings are reported per row in `warnings` and counted in `counts.warned` on th
 | MIG-ROW-DUPLICATE-KEY | source key repeated within one extract |
 | MIG-LOAD-FAILED | target loader error for the batch |
 | MIG-BACKEND-NOT-CONFIGURED | no extract and load backend wired (501) |
+| MIG-PKG-SIGNATURE | package signature or a file sha256 does not match the manifest (422) |
+| MIG-PKG-SCHEMA-NEWER | package schema is newer than the target supports (422) |
+| MIG-PKG-INVALID | cyclic or unknown-file dependency, repeated file or record key, bad schema version (422) |
+| MIG-NOT-CONFIGURED | no package target or signing key wired (501) |
+| COPY-KEY-EXISTS | row rejected: rewritten key already exists in the target and was not created by this copy project |
+| MIG-COPY-INVALID | copy into the same legal entity or one of another tenant, missing project, entity, legal entities or tenants, or no target reader to detect existing keys without `Upsert` |
 | MIG-PARALLEL-RUN-DEFERRED | parallel-run diffs not built (501) |
 | AUTH-0404 | unknown run, or a run of another tenant (404) |
 | idempotency_key_reuse | `Idempotency-Key` replayed with a different request (422) |
+
+## Configuration packages and legal-entity copy
+
+A package is `{version, schemaVersion, manifest, files}`. Each file is `{name, entity, records: [{key, body}]}`; the manifest lists the files with `sha256` of each file's canonical JSON (sorted keys, numbers in shortest decimal form) and `dependsOn`. The signature is an HMAC-SHA256 (`domain.HMACSigner`; the tenant key from Vault is a handoff) over the canonical `{version, schemaVersion, files}` of the manifest, so a package cannot be relabelled as an older schema. `domain.Seal` fills the file hashes and `domain.Sign` signs.
+
+Diff and apply (`domain.Diff`, `domain.Apply`) check the signature and every file hash, then the schema version, then apply files in dependency order. Records are compared by canonical content hash into `create`, `update` and `unchanged`; only create and update records are written, records present only in the target are never deleted, a second apply reports no changes, and a dry run returns the same diff and writes nothing. The deployment wires no package target or signing key, so both routes answer 501 `MIG-NOT-CONFIGURED` until a later slice supplies them (`api.API.WithPackages`). Applied packages are stored in `migration.config_package` with an append-only `applied` history (`tenant_id`, `applied_at`, idempotency key, `diff_counts`).
+
+Legal-entity copy (`domain.CopyRun`) copies one entity through the migration pipeline: `domain.RewriteKeys` rewrites every legal-entity-scoped natural key (a field value starting with `from` gets `to` in its place, the first matching rule per field wins, `@key` names the record key) before hashing. The copy project id is the xref source system, so a second run over unchanged rows skips every row. A rewritten key that already exists in the target and was not created by the project is rejected `COPY-KEY-EXISTS` unless `Upsert` is set. Copying into the same legal entity, or into one of another tenant, is `MIG-COPY-INVALID`, and so is a copy wired without a target reader (existing keys could not be detected) unless `Upsert` is set. Rewrite rules persist in `migration.key_rewrite_rule`. The extractor, loader and reader are tagged with the source or target legal entity through `domain.WithLegalEntity`; wiring to real contexts is listed in `NOT-IMPLEMENTED.md`.
 
 ## Pipeline rules
 

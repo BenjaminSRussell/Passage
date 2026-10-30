@@ -126,6 +126,74 @@ paths:
           description: The spec with its mapping.
           content: { application/json: { schema: { $ref: '#/components/schemas/MappingSpec' } } }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/config-packages:
+    get:
+      operationId: listConfigPackages
+      summary: List applied configuration packages
+      description: Packages applied to this tenant, newest first, with their applied history. The manifest files are returned by the single-package read.
+      x-passage-duty: migration.run
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: Packages without their manifest files.
+          content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/ConfigPackage' } } } } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/config-packages/{id}:
+    get:
+      operationId: getConfigPackage
+      summary: Get a configuration package
+      description: Returns one applied package with its manifest files and applied history.
+      x-passage-duty: migration.run
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The package with its manifest files.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ConfigPackage' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/config-packages:diff:
+    post:
+      operationId: diffConfigPackage
+      summary: Diff a configuration package against the target
+      description: Verifies the signature, file hashes and schema version, then reports per file, in dependency order, which records apply would create or update. Nothing is written and nothing is recorded.
+      x-passage-duty: migration.run
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ConfigPackageRequest' } } }
+      responses:
+        '200':
+          description: Counts and record keys per bucket; deletes are never reported because apply never deletes.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ConfigPackageDiff' } } }
+        '422':
+          description: MIG-PKG-SIGNATURE, the signature or a file sha256 does not match; MIG-PKG-SCHEMA-NEWER, the package schema is newer than the target supports; MIG-PKG-INVALID, the manifest is cyclic, lists an unknown file or repeats a record key. Messages never include record bodies.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '501':
+          description: MIG-NOT-CONFIGURED, no package target or tenant signing key is wired in this deployment.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/integration/config-packages:apply:
+    post:
+      operationId: applyConfigPackage
+      summary: Apply a configuration package
+      description: Verifies the package, writes created and updated records in manifest dependency order, never deletes target records, and appends an applied entry with the diff counts. A second apply of the same package reports no changes. The Idempotency-Key header is required; a replay returns the original response.
+      x-passage-duty: migration.package.apply
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ConfigPackageRequest' } } }
+      responses:
+        '200':
+          description: Applied counts and the stored package id, or the original response on an Idempotency-Key replay.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ConfigPackageApplied' } } }
+        '422':
+          description: MIG-PKG-SIGNATURE, MIG-PKG-SCHEMA-NEWER or MIG-PKG-INVALID as for diff; idempotency_key_reuse, the key was used with a different package. Nothing is written.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '501':
+          description: MIG-NOT-CONFIGURED, no package target or tenant signing key is wired in this deployment.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/integration/parallel-run-diffs:
     post:
       operationId: createParallelRunDiff
@@ -159,7 +227,7 @@ paths:
 components:
   responses:
     Problem:
-      description: RFC 9457 problem. 400 COM-0001, 401 AUTH-0001, 403 AUTH-0003, 404 AUTH-0404, 422 idempotency_key_reuse or MIG-MAP-*.
+      description: RFC 9457 problem. 400 COM-0001, 401 AUTH-0001, 403 AUTH-0003, 404 AUTH-0404, 422 idempotency_key_reuse, MIG-MAP-* or MIG-PKG-*.
       content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
   schemas:
     CreateMigrationRun:
@@ -236,6 +304,84 @@ components:
         testCount: { type: integer }
         createdAt: { type: string, format: date-time }
         mapping: { type: object, description: Present on the single-spec read only. }
+    ConfigPackageRequest:
+      type: object
+      additionalProperties: false
+      required: [package, signature]
+      properties:
+        package:
+          type: object
+          required: [version, schemaVersion, manifest, files]
+          properties:
+            version: { type: string, minLength: 1, maxLength: 20 }
+            schemaVersion: { type: integer, minimum: 1 }
+            manifest: { type: object, required: [files], properties: { files: { type: array, items: { $ref: '#/components/schemas/ManifestFile' } } } }
+            files:
+              type: array
+              items:
+                type: object
+                required: [name, entity, records]
+                properties:
+                  name: { type: string }
+                  entity: { type: string }
+                  records: { type: array, items: { type: object, required: [key, body], properties: { key: { type: string }, body: { type: object } } } }
+        signature: { type: string, format: byte, description: Base64 signature over the canonical manifest (version, schemaVersion and file hashes). }
+    ManifestFile:
+      type: object
+      required: [name, sha256, dependsOn]
+      properties:
+        name: { type: string }
+        sha256: { type: string, description: SHA-256 of the file's canonical JSON. }
+        dependsOn: { type: array, items: { type: string } }
+    PackageCounts:
+      type: object
+      required: [create, update, unchanged]
+      properties: { create: { type: integer }, update: { type: integer }, unchanged: { type: integer } }
+    ConfigPackageDiff:
+      type: object
+      required: [version, schemaVersion, counts, files]
+      properties:
+        version: { type: string }
+        schemaVersion: { type: integer }
+        counts: { $ref: '#/components/schemas/PackageCounts' }
+        files:
+          type: array
+          description: In dependency order.
+          items:
+            type: object
+            required: [name, entity, create, update, unchanged]
+            properties:
+              name: { type: string }
+              entity: { type: string }
+              create: { type: array, items: { type: string } }
+              update: { type: array, items: { type: string } }
+              unchanged: { type: array, items: { type: string } }
+    ConfigPackageApplied:
+      type: object
+      required: [packageId, version, schemaVersion, appliedAt, counts]
+      properties:
+        packageId: { type: string, format: uuid }
+        version: { type: string }
+        schemaVersion: { type: integer }
+        appliedAt: { type: string, format: date-time }
+        counts: { $ref: '#/components/schemas/PackageCounts' }
+    ConfigPackage:
+      type: object
+      required: [id, version, schemaVersion, fileCount, applied, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        version: { type: string }
+        schemaVersion: { type: integer }
+        fileCount: { type: integer }
+        files: { type: array, items: { $ref: '#/components/schemas/ManifestFile' }, description: Present on the single-package read only. }
+        applied:
+          type: array
+          items:
+            type: object
+            required: [tenantId, appliedAt, diffCounts]
+            properties: { tenantId: { type: string, format: uuid }, appliedAt: { type: string, format: date-time }, idempotencyKey: { type: string }, diffCounts: { $ref: '#/components/schemas/PackageCounts' } }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
     Problem:
       type: object
       required: [type, title, status]
