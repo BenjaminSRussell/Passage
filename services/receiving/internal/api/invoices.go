@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"net/http"
@@ -60,6 +61,10 @@ type invoiceBody struct {
 	FiscalPeriodID string            `json:"fiscalPeriodId"`
 	Total          string            `json:"total"`
 	LedgerEntryID  string            `json:"ledgerEntryId"`
+	Source         string            `json:"source"`
+	Status         string            `json:"status"`
+	ReleasedBy     string            `json:"releasedBy,omitempty"`
+	ReleasedAt     string            `json:"releasedAt,omitempty"`
 	CreatedAt      string            `json:"createdAt"`
 	Lines          []invoiceLineBody `json:"lines"`
 }
@@ -100,7 +105,7 @@ func buildVendorInvoice(tenantID, ledgerID string, req invoiceRequest) (store.In
 	in := store.Invoice{
 		ID: stableID(tenantID, req.VendorID, strings.ToLower(number)), LegalEntityID: req.LegalEntityID, VendorID: req.VendorID, InvoiceNumber: number,
 		InvoiceDate: invoiceDate, PostingDate: postingDate, Currency: req.Currency, LedgerID: ledgerID, FiscalPeriodID: req.FiscalPeriodID,
-		Lines: make([]store.InvoiceLine, 0, len(req.Lines)),
+		Source: domain.InvoiceSourceManual, Lines: make([]store.InvoiceLine, 0, len(req.Lines)),
 	}
 	for i, l := range req.Lines {
 		name := func(field string) string { return fmt.Sprintf("lines[%d].%s", i, field) }
@@ -159,30 +164,57 @@ func (a *API) postVendorInvoice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, &domain.Error{Code: domain.CodeInvalidReceipt, Detail: "ledgerId differs from the ledger this service posts to"})
 		return
 	}
-	ctx := r.Context()
+	posted, err := a.submitInvoice(r.Context(), p, in)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, toInvoiceBody(posted))
+}
+
+func (a *API) submitInvoice(ctx context.Context, p tenant.Principal, in store.Invoice) (store.Invoice, error) {
+	in.PostedBy = p.UserID
+	ratePct, err := a.store.AuditRate(ctx, in.LegalEntityID)
+	if err != nil {
+		return store.Invoice{}, err
+	}
+	blocked := a.ports.AuditSampler.Blocks(ratePct)
 	posted, err := a.store.PostInvoice(ctx, in, func(items []*domain.GrirItem) (store.InvoiceOutcome, error) {
 		lines := make([]domain.PostLine, len(in.Lines))
 		for i, l := range in.Lines {
 			lines[i] = domain.PostLine{Item: items[i], Qty: l.Qty, UnitPrice: l.UnitPrice, StandardCost: l.StandardCost}
 		}
-		entry, err := a.PostInvoice(ctx, domain.VendorInvoice{
+		doc := domain.VendorInvoice{
 			ID: in.ID, LegalEntityID: in.LegalEntityID, LedgerID: in.LedgerID, FiscalPeriodID: in.FiscalPeriodID,
 			PostingDate: in.PostingDate, InvoiceDate: in.InvoiceDate, Currency: in.Currency, Lines: lines,
-		}, a.ports.Profile)
+		}
+		if blocked {
+			entry, err := domain.HoldInvoice(doc, a.ports.Profile)
+			if err != nil {
+				return store.InvoiceOutcome{}, err
+			}
+			total := entry.Lines[len(entry.Lines)-1].Amount.Value.Neg()
+			evt, err := invoiceSampledEvent(p.TenantID, in, total, ratePct)
+			return store.InvoiceOutcome{Total: total, Blocked: true, Clearings: entry.GrirCleared, Event: evt}, err
+		}
+		entry, err := a.PostInvoice(ctx, doc, a.ports.Profile)
 		if err != nil {
 			return store.InvoiceOutcome{}, err
 		}
 		total := entry.Lines[len(entry.Lines)-1].Amount.Value.Neg()
 		evt, err := invoicePostedEvent(p.TenantID, in, entry.LedgerEntryID, total, entry.GrirCleared)
-		return store.InvoiceOutcome{LedgerEntryID: entry.LedgerEntryID, Total: total, Event: evt}, err
+		return store.InvoiceOutcome{LedgerEntryID: entry.LedgerEntryID, Total: total, Clearings: entry.GrirCleared, Event: evt}, err
 	})
 	if err != nil {
-		writeError(w, r, err)
-		return
+		return store.Invoice{}, err
+	}
+	if blocked {
+		a.auditBlocked.Add(1)
+		return posted, nil
 	}
 	a.pendingPostings.finish(invoiceSubjects(posted)...)
 	a.invoiced.Add(1)
-	httpx.JSON(w, http.StatusCreated, toInvoiceBody(posted))
+	return posted, nil
 }
 
 func toInvoiceBody(in store.Invoice) invoiceBody {
@@ -190,7 +222,10 @@ func toInvoiceBody(in store.Invoice) invoiceBody {
 	out := invoiceBody{
 		ID: in.ID, VendorID: in.VendorID, LegalEntityID: in.LegalEntityID, InvoiceNumber: in.InvoiceNumber, InvoiceDate: in.InvoiceDate.Format(dateLayout),
 		PostingDate: in.PostingDate.Format(dateLayout), Currency: in.Currency, LedgerID: in.LedgerID, FiscalPeriodID: in.FiscalPeriodID,
-		Total: in.Total.StringFixed(scale), LedgerEntryID: in.LedgerEntryID, CreatedAt: in.CreatedAt.UTC().Format(time.RFC3339), Lines: make([]invoiceLineBody, 0, len(in.Lines)),
+		Total: in.Total.StringFixed(scale), LedgerEntryID: in.LedgerEntryID, Source: in.Source, Status: in.Status, ReleasedBy: in.ReleasedBy, CreatedAt: in.CreatedAt.UTC().Format(time.RFC3339), Lines: make([]invoiceLineBody, 0, len(in.Lines)),
+	}
+	if in.ReleasedAt != nil {
+		out.ReleasedAt = in.ReleasedAt.UTC().Format(time.RFC3339)
 	}
 	for i, l := range in.Lines {
 		out.Lines = append(out.Lines, invoiceLineBody{

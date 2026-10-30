@@ -49,6 +49,9 @@ func (s *Store) PostInvoiceAdjustment(ctx context.Context, in store.InvoiceAdjus
 		if base.Invoice.LegalEntityID != in.LegalEntityID {
 			return &domain.Error{Code: domain.CodeInvalidReceipt, Detail: "legalEntityId differs from the legal entity of the original invoice"}
 		}
+		if base.Invoice.Status == domain.InvoiceStatusAuditBlocked {
+			return store.AuditBlocked(base.Invoice.ID)
+		}
 		outcome, err := fn(base)
 		if err != nil {
 			return err

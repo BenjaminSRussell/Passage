@@ -53,6 +53,11 @@ func buildPorts(getenv func(string) string) (api.Ports, error) {
 	default:
 		slog.Warn("INVENTORY_URL is empty: consignment settlement answers 503 until it is set")
 	}
+	sampler, err := domain.NewRandomSampler()
+	if err != nil {
+		return api.Ports{}, fmt.Errorf("seed the audit sampler: %w", err)
+	}
+	ports.AuditSampler = sampler
 	profile, err := buildProfile(getenv, allowFakes)
 	ports.Profile = profile
 	return ports, err

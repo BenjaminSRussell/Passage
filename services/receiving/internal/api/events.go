@@ -72,12 +72,24 @@ type invoicePostedData struct {
 	LegalEntityID string                  `json:"legal_entity_id"`
 	VendorID      string                  `json:"vendor_id"`
 	InvoiceNumber string                  `json:"invoice_number"`
+	Source        string                  `json:"source"`
 	InvoiceDate   string                  `json:"invoice_date"`
 	PostingDate   string                  `json:"posting_date"`
 	Currency      string                  `json:"currency"`
 	Total         string                  `json:"total"`
 	LedgerEntryID string                  `json:"ledger_entry_id"`
 	Lines         []invoicePostedLineData `json:"lines"`
+}
+
+type invoiceSampledData struct {
+	InvoiceID     string `json:"invoice_id"`
+	LegalEntityID string `json:"legal_entity_id"`
+	VendorID      string `json:"vendor_id"`
+	InvoiceNumber string `json:"invoice_number"`
+	Source        string `json:"source"`
+	Currency      string `json:"currency"`
+	Total         string `json:"total"`
+	SampleRatePct string `json:"sample_rate_pct"`
 }
 
 type invoiceAdjustedLineData struct {
@@ -148,9 +160,16 @@ func receiptCorrectedEvent(tenantID, kind string, r store.Receipt, seq int, ledg
 	})
 }
 
+func invoiceSampledEvent(tenantID string, in store.Invoice, total, ratePct decimal.Decimal) (events.Event, error) {
+	return newEvent("payables", "invoice", "sampled", in.ID, tenantID, invoiceSampledData{
+		InvoiceID: in.ID, LegalEntityID: in.LegalEntityID, VendorID: in.VendorID, InvoiceNumber: in.InvoiceNumber, Source: in.Source,
+		Currency: in.Currency, Total: total.String(), SampleRatePct: ratePct.String(),
+	})
+}
+
 func invoicePostedEvent(tenantID string, in store.Invoice, ledgerEntryID string, total decimal.Decimal, cleared []decimal.Decimal) (events.Event, error) {
 	data := invoicePostedData{
-		InvoiceID: in.ID, LegalEntityID: in.LegalEntityID, VendorID: in.VendorID, InvoiceNumber: in.InvoiceNumber,
+		InvoiceID: in.ID, LegalEntityID: in.LegalEntityID, VendorID: in.VendorID, InvoiceNumber: in.InvoiceNumber, Source: in.Source,
 		InvoiceDate: in.InvoiceDate.Format(dateLayout), PostingDate: in.PostingDate.Format(dateLayout), Currency: in.Currency,
 		Total: total.String(), LedgerEntryID: ledgerEntryID, Lines: make([]invoicePostedLineData, 0, len(in.Lines)),
 	}

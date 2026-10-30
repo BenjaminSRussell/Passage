@@ -152,3 +152,91 @@ func TestPostInvoice_CurrencyMismatchRejected(t *testing.T) {
 		t.Fatalf("rejection must not touch ledger or GR/IR")
 	}
 }
+
+func TestHoldInvoice_ReservesQuantityWithoutPostingAndPostHeldInvoiceMatchesPostInvoice(t *testing.T) {
+	received := func() *domain.GrirItem { return grirItem("3", "3.3333") }
+	split := func(item *domain.GrirItem) domain.VendorInvoice {
+		in := invoiceFor(item, "1", "3.40", august15)
+		in.Lines = append(in.Lines, in.Lines[0], in.Lines[0])
+		return in
+	}
+	open := domain.FakePeriods{Status: domain.PeriodOpen}
+
+	direct, directLedger := received(), &domain.FakeLedger{}
+	if _, err := domain.PostInvoice(context.Background(), split(direct), open, directLedger, testProfile); err != nil {
+		t.Fatal(err)
+	}
+
+	held := received()
+	hold, err := domain.HoldInvoice(split(held), testProfile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hold.LedgerEntryID != "" || !held.InvoicedQty.Equal(dec("3")) || !held.OpenAmount().IsZero() {
+		t.Fatalf("hold %+v item %+v: want the quantity reserved and nothing posted", hold, held)
+	}
+	wantCleared := []decimal.Decimal{dec("3.33"), dec("3.33"), dec("3.3399")}
+	for i, c := range hold.GrirCleared {
+		if !c.Equal(wantCleared[i]) {
+			t.Fatalf("clearings %v, want %v", hold.GrirCleared, wantCleared)
+		}
+	}
+
+	stored := make([]domain.HeldLine, len(hold.GrirCleared))
+	for i, c := range hold.GrirCleared {
+		stored[i] = domain.HeldLine{Qty: dec("1"), UnitPrice: dec("3.40"), Clearing: c}
+	}
+	releaseLedger := &domain.FakeLedger{}
+	doc := split(held)
+	if _, err := domain.PostHeldInvoice(context.Background(), doc, stored, open, releaseLedger, testProfile); err != nil {
+		t.Fatal(err)
+	}
+	if len(releaseLedger.Entries) != 1 || len(directLedger.Entries) != 1 {
+		t.Fatalf("entries %d and %d", len(releaseLedger.Entries), len(directLedger.Entries))
+	}
+	a, b := directLedger.Entries[0], releaseLedger.Entries[0]
+	if a.IdempotencyKey != b.IdempotencyKey || len(a.Lines) != len(b.Lines) {
+		t.Fatalf("released entry %+v differs from the direct one %+v", b, a)
+	}
+	for i := range a.Lines {
+		if a.Lines[i].Account != b.Lines[i].Account || !a.Lines[i].Amount.Value.Equal(b.Lines[i].Amount.Value) {
+			t.Fatalf("line %d: released %+v, direct %+v", i, b.Lines[i], a.Lines[i])
+		}
+	}
+	if got := releaseLedger.Balance("2000"); !got.Equal(dec("-10.20")) {
+		t.Fatalf("vendor control %s, want -10.20 (3 x 3.40)", got)
+	}
+}
+
+func TestHoldInvoice_ValuesTheDifferenceFromTheReceipt(t *testing.T) {
+	item := grirItem("10", "5")
+	entry, err := domain.HoldInvoice(invoiceFor(item, "10", "5.10", august15), testProfile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"2100": "50", "1400": "1", "2000": "-51"}
+	for _, l := range entry.Lines {
+		if !l.Amount.Value.Equal(dec(want[l.Account])) {
+			t.Fatalf("%s = %s, want %s", l.Account, l.Amount.Value, want[l.Account])
+		}
+	}
+}
+
+func TestHoldInvoice_RejectionsLeaveTheItemUntouchedAndAClosedPeriodIsCheckedOnRelease(t *testing.T) {
+	item := grirItem("10", "5")
+	if _, err := domain.HoldInvoice(invoiceFor(item, "11", "5", august15), testProfile); codeOf(t, err) != domain.CodeOverInvoice || !item.InvoicedQty.IsZero() {
+		t.Fatalf("over-invoice err %v item %+v", err, item)
+	}
+	if _, err := domain.HoldInvoice(domain.VendorInvoice{ID: "vi-1", Currency: "USD"}, testProfile); codeOf(t, err) != domain.CodeInvalidReceipt {
+		t.Fatalf("empty invoice err %v", err)
+	}
+	if _, err := domain.HoldInvoice(invoiceFor(item, "10", "5", august15), testProfile); err != nil {
+		t.Fatalf("a hold does not consult the period: %v", err)
+	}
+	ledger := &domain.FakeLedger{}
+	_, err := domain.PostHeldInvoice(context.Background(), invoiceFor(item, "10", "5", august15), []domain.HeldLine{{Qty: dec("10"), UnitPrice: dec("5"), Clearing: dec("50")}},
+		domain.FakePeriods{Status: domain.PeriodClosed}, ledger, testProfile)
+	if codeOf(t, err) != domain.CodePeriodClosed || len(ledger.Entries) != 0 {
+		t.Fatalf("release into a closed period err %v entries %d", err, len(ledger.Entries))
+	}
+}

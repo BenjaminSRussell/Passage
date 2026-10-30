@@ -134,6 +134,7 @@ type InvoiceLine struct {
 	UnitPrice     decimal.Decimal
 	Amount        decimal.Decimal
 	StandardCost  bool
+	GrirCleared   decimal.Decimal
 }
 
 type Invoice struct {
@@ -149,16 +150,25 @@ type Invoice struct {
 	LedgerEntryID  string
 	Total          decimal.Decimal
 	CreatedAt      time.Time
+	Source         string
+	Status         string
+	PostedBy       string
+	ReleasedBy     string
+	ReleasedAt     *time.Time
 	Lines          []InvoiceLine
 }
 
 type InvoiceOutcome struct {
 	LedgerEntryID string
 	Total         decimal.Decimal
+	Blocked       bool
+	Clearings     []decimal.Decimal
 	Event         events.Event
 }
 
 type InvoiceFunc func(items []*domain.GrirItem) (InvoiceOutcome, error)
+
+type ReleaseFunc func(inv Invoice) (InvoiceOutcome, error)
 
 type InvoiceAdjustment struct {
 	ID                string
@@ -240,6 +250,11 @@ type Store interface {
 	Correct(ctx context.Context, id string, fn AdjustFunc) (Receipt, error)
 	Cancel(ctx context.Context, id string, fn AdjustFunc) (Receipt, error)
 	PostInvoice(ctx context.Context, in Invoice, fn InvoiceFunc) (Invoice, error)
+	ReleaseInvoice(ctx context.Context, id, legalEntityID, by string, fn ReleaseFunc) (Invoice, error)
+	SetErsVendor(ctx context.Context, legalEntityID, vendorID string, enabled bool, by string) error
+	ErsVendor(ctx context.Context, legalEntityID, vendorID string) (bool, error)
+	SetAuditRate(ctx context.Context, legalEntityID string, ratePct decimal.Decimal, by string) error
+	AuditRate(ctx context.Context, legalEntityID string) (decimal.Decimal, error)
 	PostInvoiceAdjustment(ctx context.Context, in InvoiceAdjustment, fn InvoiceAdjustmentFunc) (InvoiceAdjustment, error)
 	PostSettlement(ctx context.Context, in Settlement, fn SettlementFunc) (out Settlement, replayed bool, err error)
 	SettledSources(ctx context.Context, kind string, sources []string) (map[string]struct{}, error)

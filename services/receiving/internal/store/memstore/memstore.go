@@ -49,6 +49,8 @@ type tenantData struct {
 	invoiceDocs map[string]store.Invoice
 	adjustments map[string]store.InvoiceAdjustment
 	settlements map[string]store.Settlement
+	ersVendors  map[string]bool
+	auditRates  map[string]decimal.Decimal
 }
 
 type pendingRow struct {
@@ -84,7 +86,8 @@ func (s *Store) with(ctx context.Context, fn func(*tenantData) error) error {
 	t := s.tenants[p.TenantID]
 	if t == nil {
 		t = &tenantData{receipts: map[string]store.Receipt{}, serials: map[domain.SerialKey]struct{}{}, keys: map[string]*claim{}, invoices: map[string]struct{}{},
-			invoiceDocs: map[string]store.Invoice{}, adjustments: map[string]store.InvoiceAdjustment{}, settlements: map[string]store.Settlement{}}
+			invoiceDocs: map[string]store.Invoice{}, adjustments: map[string]store.InvoiceAdjustment{}, settlements: map[string]store.Settlement{},
+			ersVendors: map[string]bool{}, auditRates: map[string]decimal.Decimal{}}
 		s.tenants[p.TenantID] = t
 	}
 	return fn(t)
@@ -762,8 +765,10 @@ func (s *Store) PostInvoice(ctx context.Context, in store.Invoice, fn store.Invo
 		if err != nil {
 			return err
 		}
-		if err := s.markDone(ctx, in.ID, outcome.LedgerEntryID != ""); err != nil {
-			return err
+		if !outcome.Blocked {
+			if err := s.markDone(ctx, in.ID, outcome.LedgerEntryID != ""); err != nil {
+				return err
+			}
 		}
 		for k, item := range working {
 			g := &t.grir[indexes[k]]
@@ -780,7 +785,17 @@ func (s *Store) PostInvoice(ctx context.Context, in store.Invoice, fn store.Invo
 		t.invoices[key] = struct{}{}
 		s.events = append(s.events, outcome.Event)
 		in.LedgerEntryID, in.Total, in.CreatedAt = outcome.LedgerEntryID, outcome.Total, time.Now().UTC()
+		in.Source = cmp.Or(in.Source, domain.InvoiceSourceManual)
+		in.Status = domain.InvoiceStatusPosted
+		if outcome.Blocked {
+			in.Status = domain.InvoiceStatusAuditBlocked
+		}
 		in.Lines = slices.Clone(in.Lines)
+		for i := range in.Lines {
+			if i < len(outcome.Clearings) {
+				in.Lines[i].GrirCleared = outcome.Clearings[i]
+			}
+		}
 		t.invoiceDocs[in.ID] = in
 		out = in
 		return nil

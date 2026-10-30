@@ -22,7 +22,7 @@ has_route_permissions(spec) if {
 }
 
 test_all_seeded_duties_allow_their_declared_permissions if {
-	count(data.duties) == 107
+	count(data.duties) == 108
 	every duty, spec in data.duties {
 		has_route_permissions(spec)
 		every permission in spec.permissions {
@@ -61,7 +61,14 @@ segregation_denials := [
 	["ReceivingPost", "POST", "/v1/receiving/invoice-adjustments:post"],
 	["ReceivingPost", "POST", "/v1/receiving/plan-settlements:run"],
 	["ReceivingPost", "POST", "/v1/receiving/consignment-settlements:run"],
+	["ReceivingPost", "POST", "/v1/receiving/ers-settlements:run"],
 	["VendorInvoicePost", "POST", "/v1/receiving/receipts/r1:post"],
+	["VendorInvoicePost", "POST", "/v1/receiving/invoices/i1:release-audit-block"],
+	["MatchingPolicyMaintain", "POST", "/v1/receiving/invoices/i1:release-audit-block"],
+	["VendorInvoiceAuditRelease", "POST", "/v1/receiving/invoices:post"],
+	["VendorInvoiceAuditRelease", "PUT", "/v1/receiving/audit-policy"],
+	["VendorInvoicePost", "PUT", "/v1/receiving/audit-policy"],
+	["VendorInvoicePost", "PUT", "/v1/receiving/ers-vendors/v1"],
 	["PurchaseOrderMaintain", "POST", "/v1/procurement/purchase-orders/p1:approve"],
 	["RFQMaintain", "POST", "/v1/procurement/rfqs/q1:award"],
 	["ledger.journal.read", "GET", "/v1/reporting/runs/r1"],
@@ -88,6 +95,10 @@ segregation_grants := [
 	["VendorInvoicePost", "POST", "/v1/receiving/invoice-adjustments:post"],
 	["VendorInvoicePost", "POST", "/v1/receiving/plan-settlements:run"],
 	["VendorInvoicePost", "POST", "/v1/receiving/consignment-settlements:run"],
+	["VendorInvoicePost", "POST", "/v1/receiving/ers-settlements:run"],
+	["VendorInvoiceAuditRelease", "POST", "/v1/receiving/invoices/i1:release-audit-block"],
+	["MatchingPolicyMaintain", "PUT", "/v1/receiving/audit-policy"],
+	["MatchingPolicyMaintain", "PUT", "/v1/receiving/ers-vendors/v1"],
 	["PurchaseOrderConfirm", "POST", "/v1/procurement/purchase-orders/p1:approve"],
 	["RFQAward", "POST", "/v1/procurement/rfqs/q1:award"],
 	["ledger.journal.read", "GET", "/v1/reporting/runs/r1/cells/a/b/lines"],

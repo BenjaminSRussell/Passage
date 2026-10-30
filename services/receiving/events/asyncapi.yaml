@@ -25,6 +25,8 @@ channels:
         $ref: "#/components/messages/InvoicePosted"
       invoiceAdjusted:
         $ref: "#/components/messages/InvoiceAdjusted"
+      invoiceSampled:
+        $ref: "#/components/messages/InvoiceSampled"
   settlementEvents:
     address: passage.payables.settlement
     messages:
@@ -51,6 +53,11 @@ operations:
     channel: { $ref: "#/channels/invoiceEvents" }
     messages:
       - { $ref: "#/channels/invoiceEvents/messages/invoiceAdjusted" }
+  publishInvoiceSampled:
+    action: send
+    channel: { $ref: "#/channels/invoiceEvents" }
+    messages:
+      - { $ref: "#/channels/invoiceEvents/messages/invoiceSampled" }
   publishSettlementPosted:
     action: send
     channel: { $ref: "#/channels/settlementEvents" }
@@ -77,8 +84,10 @@ components:
     InvoicePosted:
       name: dev.passage.payables.invoice.posted.v1
       summary: >-
-        POST /v1/receiving/invoices:post posted a vendor invoice against GR/IR items and persisted it. Consumers: ledger
-        reconciliation, costing, tax, analytics.
+        POST /v1/receiving/invoices:post or POST /v1/receiving/ers-settlements:run (source ERS) posted a vendor invoice
+        against GR/IR items and persisted it, or POST /v1/receiving/invoices/{id}:release-audit-block released an invoice the
+        stochastic audit block had held and posted it to the ledger. Consumers: ledger reconciliation, costing, tax,
+        analytics.
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/InvoicePostedData"
@@ -91,6 +100,15 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/InvoiceAdjustedData"
+    InvoiceSampled:
+      name: dev.passage.payables.invoice.sampled.v1
+      summary: >-
+        The stochastic audit block selected an invoice (manual or ERS) at posting. GR/IR quantity is reserved but nothing is
+        posted to the ledger until POST /v1/receiving/invoices/{id}:release-audit-block; the invoice.posted event follows
+        then. Consumers: workflow, notifications, audit.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/InvoiceSampledData"
     SettlementPosted:
       name: dev.passage.payables.settlement.posted.v1
       summary: >-
@@ -154,9 +172,10 @@ components:
               amount_acct_delta: { type: string, description: "decimal string, accounting currency" }
     InvoicePostedData:
       type: object
-      required: [invoice_id, legal_entity_id, vendor_id, invoice_number, invoice_date, posting_date, currency, total, ledger_entry_id, lines]
+      required: [invoice_id, legal_entity_id, vendor_id, invoice_number, source, invoice_date, posting_date, currency, total, ledger_entry_id, lines]
       properties:
         invoice_id: { type: string, format: uuid, description: "derived from tenant, vendor and invoice number; stable across retries" }
+        source: { type: string, enum: [MANUAL, ERS] }
         legal_entity_id: { type: string, format: uuid }
         vendor_id: { type: string, format: uuid }
         invoice_number: { type: string }
@@ -178,6 +197,18 @@ components:
               unit_price: { type: string }
               amount: { type: string }
               grir_cleared_amount: { type: string, description: "decimal string; the GR/IR amount this line cleared (pro rata, the exact remainder on the last quantity)" }
+    InvoiceSampledData:
+      type: object
+      required: [invoice_id, legal_entity_id, vendor_id, invoice_number, source, currency, total, sample_rate_pct]
+      properties:
+        invoice_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        vendor_id: { type: string, format: uuid }
+        invoice_number: { type: string }
+        source: { type: string, enum: [MANUAL, ERS] }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        total: { type: string, description: "decimal string; the vendor control credit that will post on release" }
+        sample_rate_pct: { type: string, description: "decimal string, 0 to 100; the legal entity's sample rate when the draw was made" }
     InvoiceAdjustedData:
       type: object
       required: [adjustment_id, original_invoice_id, kind, legal_entity_id, vendor_id, document_number, document_date, posting_date, currency, total, ledger_entry_id, lines]

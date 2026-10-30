@@ -24,6 +24,10 @@ func PlanSettled(poID string, lineNo int) *domain.Error {
 	return &domain.Error{Code: domain.CodePlanSettled, Detail: fmt.Sprintf("line %d of purchase order %s is settled by its invoicing plan and cannot also be invoiced against a receipt", lineNo, poID)}
 }
 
+func AuditBlocked(invoiceID string) *domain.Error {
+	return &domain.Error{Code: domain.CodeAuditBlocked, Detail: fmt.Sprintf("invoice %s is blocked for audit and cannot be adjusted until an auditor releases it", invoiceID)}
+}
+
 func DuplicateAdjustment(number string) *domain.Error {
 	return &domain.Error{Code: domain.CodeDuplicateInvoice, Detail: fmt.Sprintf("adjustment %q is already posted for the invoice", number)}
 }
@@ -51,6 +55,9 @@ func (s *Postgres) PostInvoiceAdjustment(ctx context.Context, in InvoiceAdjustme
 		}
 		if base.Invoice.LegalEntityID != in.LegalEntityID {
 			return &domain.Error{Code: domain.CodeInvalidReceipt, Detail: "legalEntityId differs from the legal entity of the original invoice"}
+		}
+		if base.Invoice.Status == domain.InvoiceStatusAuditBlocked {
+			return AuditBlocked(base.Invoice.ID)
 		}
 		outcome, err := fn(base)
 		if err != nil {
@@ -85,9 +92,9 @@ func (s *Postgres) PostInvoiceAdjustment(ctx context.Context, in InvoiceAdjustme
 
 func loadInvoiceBase(ctx context.Context, tx pgx.Tx, tenantID, invoiceID string) (InvoiceBase, error) {
 	inv := Invoice{ID: invoiceID}
-	err := tx.QueryRow(ctx, `SELECT legal_entity_id::text, vendor_id::text, invoice_number, invoice_date, posting_date, currency, ledger_id::text, fiscal_period_id::text, ledger_entry_id, total, created_at
+	err := tx.QueryRow(ctx, `SELECT legal_entity_id::text, vendor_id::text, invoice_number, invoice_date, posting_date, currency, ledger_id::text, fiscal_period_id::text, ledger_entry_id, total, created_at, status
 		FROM receiving_vendor_invoice WHERE tenant_id = $1 AND id = $2`, tenantID, invoiceID).
-		Scan(&inv.LegalEntityID, &inv.VendorID, &inv.InvoiceNumber, &inv.InvoiceDate, &inv.PostingDate, &inv.Currency, &inv.LedgerID, &inv.FiscalPeriodID, &inv.LedgerEntryID, &inv.Total, &inv.CreatedAt)
+		Scan(&inv.LegalEntityID, &inv.VendorID, &inv.InvoiceNumber, &inv.InvoiceDate, &inv.PostingDate, &inv.Currency, &inv.LedgerID, &inv.FiscalPeriodID, &inv.LedgerEntryID, &inv.Total, &inv.CreatedAt, &inv.Status)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return InvoiceBase{}, ErrInvoiceNotFound
 	}

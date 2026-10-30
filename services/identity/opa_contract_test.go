@@ -23,7 +23,7 @@ import (
 
 const (
 	contractTenant   = "tenant-a"
-	seededDutyCount  = 107
+	seededDutyCount  = 108
 	unassignedUserID = "user-without-duty"
 )
 
@@ -298,6 +298,11 @@ func TestDutyContractExpectations(t *testing.T) {
 		{duty: "VendorInvoicePost", method: http.MethodPost, resource: "/v1/receiving/invoice-adjustments:post", wantAllowed: true},
 		{duty: "VendorInvoicePost", method: http.MethodPost, resource: "/v1/receiving/plan-settlements:run", wantAllowed: true},
 		{duty: "VendorInvoicePost", method: http.MethodPost, resource: "/v1/receiving/consignment-settlements:run", wantAllowed: true},
+		{duty: "VendorInvoicePost", method: http.MethodPost, resource: "/v1/receiving/ers-settlements:run", wantAllowed: true},
+		{duty: "VendorInvoiceAuditRelease", method: http.MethodPost, resource: "/v1/receiving/invoices/i1:release-audit-block", wantAllowed: true},
+		{duty: "VendorInvoicePost", method: http.MethodPost, resource: "/v1/receiving/invoices/i1:release-audit-block"},
+		{duty: "VendorInvoiceAuditRelease", method: http.MethodPost, resource: "/v1/receiving/invoices:post"},
+		{duty: "MatchingPolicyMaintain", method: http.MethodPut, resource: "/v1/receiving/audit-policy", wantAllowed: true},
 		{duty: "ReceivingPost", method: http.MethodPost, resource: "/v1/receiving/invoice-adjustments:post"},
 		{duty: "ledger.journal.read", method: http.MethodGet, resource: "/v1/reporting/runs/r1/cells/a/b/lines", wantAllowed: true},
 		{duty: "party.read", method: http.MethodGet, resource: "/v1/party/parties/p1", wantAllowed: true},
