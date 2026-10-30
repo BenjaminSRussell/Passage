@@ -60,7 +60,24 @@ func buildPorts(getenv func(string) string) (api.Ports, error) {
 	}
 	profile, err := buildProfile(getenv, allowFakes)
 	ports.Profile = profile
-	return ports, err
+	if err != nil {
+		return ports, err
+	}
+	var sampler *domain.Sampler
+	switch seed := getenv("AUDIT_SAMPLE_SEED"); {
+	case seed != "":
+		sampler, err = domain.NewSampler([]byte(seed))
+	case allowFakes:
+		slog.Warn("AUDIT_SAMPLE_SEED is empty: using a random seed, so audit draws are not reproducible across restarts", "flag", "PASSAGE_ALLOW_FAKES")
+		sampler, err = domain.NewRandomSampler()
+	default:
+		return api.Ports{}, fmt.Errorf("AUDIT_SAMPLE_SEED is required (at least 16 characters, from a secret; set PASSAGE_ALLOW_FAKES=1 only for local development)")
+	}
+	if err != nil {
+		return api.Ports{}, fmt.Errorf("AUDIT_SAMPLE_SEED: %w", err)
+	}
+	ports.AuditSampler = sampler
+	return ports, nil
 }
 
 var profileEnv = []struct {
