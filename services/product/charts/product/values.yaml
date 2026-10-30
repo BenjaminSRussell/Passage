@@ -8,3 +8,5 @@ resources:
 serviceMonitor: { enabled: false }
 configuratorURL: ""
 orgBaseURL: "http://org:8080"
+serviceIdentity:
+  publicKeys: ""

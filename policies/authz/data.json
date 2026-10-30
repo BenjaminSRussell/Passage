@@ -67,6 +67,9 @@
       {"resource": "/v1/fx/rates{,/**}", "methods": ["GET", "POST"]}
     ]},
     "Administer exchange rates": {"permissions": [{"resource": "/v1/fx/providers/*:import", "methods": ["POST"]}]},
+    "product.released.read": {"permissions": [{"resource": "/v1/product/released-products", "methods": ["GET"]}]},
+    "product.variants.explode": {"permissions": [{"resource": "/v1/product/products/*/variants:explode", "methods": ["POST"]}]},
+    "product.jobs.write": {"permissions": [{"resource": "/v1/product/jobs/group-change", "methods": ["POST"]}]},
     "ledger.ledger.write": {"permissions": [{"resource": "/v1/ledger/ledgers", "methods": ["POST"]}]},
     "ledger.account.write": {"permissions": [{"resource": "/v1/ledger/charts/*/accounts/*", "methods": ["PUT"]}]},
     "ledger.journal.read": {"permissions": [
@@ -369,6 +372,9 @@
     ]}
   },
   "service_grants": {
+    "batch": {
+      "product": ["product.variants.explode", "product.released.read", "product.jobs.write"]
+    },
     "receiving": {
       "ledger": ["ledger.journal.post", "ledger.journal.reverse"],
       "close": ["period.check"]

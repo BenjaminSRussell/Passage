@@ -22,7 +22,7 @@ has_route_permissions(spec) if {
 }
 
 test_all_seeded_duties_allow_their_declared_permissions if {
-	count(data.duties) == 109
+	count(data.duties) == 112
 	every duty, spec in data.duties {
 		has_route_permissions(spec)
 		every permission in spec.permissions {
@@ -472,4 +472,20 @@ test_service_grants_hold_no_flag_or_all_scope_duty if {
 			}
 		}
 	}
+}
+
+test_batch_service_grant_reaches_only_the_product_job_routes if {
+	data.service_grants.batch.product == ["product.variants.explode", "product.released.read", "product.jobs.write"]
+	allowed("product.released.read", "GET", "/v1/product/released-products")
+	allowed("product.variants.explode", "POST", "/v1/product/products/p-1/variants:explode")
+	allowed("product.jobs.write", "POST", "/v1/product/jobs/group-change")
+	every duty in data.service_grants.batch.product {
+		not allowed(duty, "POST", "/v1/product/products")
+		not allowed(duty, "POST", "/v1/product/releases")
+		not allowed(duty, "PUT", "/v1/product/released-products/r-1")
+		not allowed(duty, "POST", "/v1/ledger/journal-entries")
+	}
+	not allowed("product.released.read", "POST", "/v1/product/jobs/group-change")
+	not allowed("product.variants.explode", "GET", "/v1/product/released-products")
+	not allowed("product.jobs.write", "GET", "/v1/product/released-products")
 }

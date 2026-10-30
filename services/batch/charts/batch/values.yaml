@@ -20,3 +20,12 @@ notify:
     pathPrefix: passage/{env}/batch/notify
     refreshInterval: 1h
 serviceMonitor: { enabled: false }
+productUrl: ""
+serviceIdentity:
+  signingKeySecret: ""
+  keyId: ""
+dispatcher:
+  interval: 5s
+  concurrency: 4
+  maxRunAttempts: 5
+  retryAfter: 1m
