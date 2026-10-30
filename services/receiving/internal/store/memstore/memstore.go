@@ -45,6 +45,10 @@ type tenantData struct {
 	keys     map[string]*claim
 	invoices map[string]struct{}
 	counter  int
+
+	invoiceDocs map[string]store.Invoice
+	adjustments map[string]store.InvoiceAdjustment
+	settlements map[string]store.Settlement
 }
 
 type pendingRow struct {
@@ -79,7 +83,8 @@ func (s *Store) with(ctx context.Context, fn func(*tenantData) error) error {
 	defer s.mu.Unlock()
 	t := s.tenants[p.TenantID]
 	if t == nil {
-		t = &tenantData{receipts: map[string]store.Receipt{}, serials: map[domain.SerialKey]struct{}{}, keys: map[string]*claim{}, invoices: map[string]struct{}{}}
+		t = &tenantData{receipts: map[string]store.Receipt{}, serials: map[domain.SerialKey]struct{}{}, keys: map[string]*claim{}, invoices: map[string]struct{}{},
+			invoiceDocs: map[string]store.Invoice{}, adjustments: map[string]store.InvoiceAdjustment{}, settlements: map[string]store.Settlement{}}
 		s.tenants[p.TenantID] = t
 	}
 	return fn(t)
@@ -748,6 +753,11 @@ func (s *Store) PostInvoice(ctx context.Context, in store.Invoice, fn store.Invo
 			}
 			items[i] = working[k]
 		}
+		for k := range working {
+			if lineNo, settled := t.planSettledLine(t.productOf(k.ReceiptID, k.LineNo)); settled {
+				return store.PlanSettled(t.receipts[k.ReceiptID].PurchaseOrderID, lineNo)
+			}
+		}
 		outcome, err := fn(items)
 		if err != nil {
 			return err
@@ -770,6 +780,8 @@ func (s *Store) PostInvoice(ctx context.Context, in store.Invoice, fn store.Invo
 		t.invoices[key] = struct{}{}
 		s.events = append(s.events, outcome.Event)
 		in.LedgerEntryID, in.Total, in.CreatedAt = outcome.LedgerEntryID, outcome.Total, time.Now().UTC()
+		in.Lines = slices.Clone(in.Lines)
+		t.invoiceDocs[in.ID] = in
 		out = in
 		return nil
 	})

@@ -21,6 +21,8 @@ var (
 	ErrPostingSuperseded = errors.New("the pending posting was resolved while the command was running")
 	ErrNotFound          = errors.New("receipt not found")
 	ErrGrirNotFound      = errors.New("no open GR/IR item for the receipt line")
+	ErrLineInvoiced      = errors.New("the purchase order line has invoiced GR/IR quantity")
+	ErrInvoiceNotFound   = errors.New("vendor invoice not found")
 )
 
 type DuplicatePackingSlipError struct{ ReceiptNumber string }
@@ -158,6 +160,62 @@ type InvoiceOutcome struct {
 
 type InvoiceFunc func(items []*domain.GrirItem) (InvoiceOutcome, error)
 
+type InvoiceAdjustment struct {
+	ID                string
+	OriginalInvoiceID string
+	LegalEntityID     string
+	VendorID          string
+	Kind              string
+	DocumentNumber    string
+	DocumentDate      time.Time
+	PostingDate       time.Time
+	Currency          string
+	LedgerID          string
+	FiscalPeriodID    string
+	LedgerEntryID     string
+	Total             decimal.Decimal
+	CreatedAt         time.Time
+	Lines             []domain.AdjustmentLine
+}
+
+type InvoiceBase struct {
+	Invoice Invoice
+	Lines   []domain.InvoiceLineState
+}
+
+type AdjustmentOutcome struct {
+	LedgerEntryID string
+	Total         decimal.Decimal
+	Event         events.Event
+}
+
+type InvoiceAdjustmentFunc func(base InvoiceBase) (AdjustmentOutcome, error)
+
+type Settlement struct {
+	ID              string
+	Kind            string
+	SourceRef       string
+	LegalEntityID   string
+	VendorID        string
+	Currency        string
+	Amount          decimal.Decimal
+	PostingDate     time.Time
+	LedgerID        string
+	FiscalPeriodID  string
+	LedgerEntryID   string
+	CreatedAt       time.Time
+	PurchaseOrderID string
+	POLineNo        int
+	ProductID       string
+}
+
+type SettlementOutcome struct {
+	LedgerEntryID string
+	Event         events.Event
+}
+
+type SettlementFunc func() (SettlementOutcome, error)
+
 type ReceiptFilter struct {
 	VendorID        string
 	PurchaseOrderID string
@@ -182,6 +240,9 @@ type Store interface {
 	Correct(ctx context.Context, id string, fn AdjustFunc) (Receipt, error)
 	Cancel(ctx context.Context, id string, fn AdjustFunc) (Receipt, error)
 	PostInvoice(ctx context.Context, in Invoice, fn InvoiceFunc) (Invoice, error)
+	PostInvoiceAdjustment(ctx context.Context, in InvoiceAdjustment, fn InvoiceAdjustmentFunc) (InvoiceAdjustment, error)
+	PostSettlement(ctx context.Context, in Settlement, fn SettlementFunc) (out Settlement, replayed bool, err error)
+	SettledSources(ctx context.Context, kind string, sources []string) (map[string]struct{}, error)
 	GetReceipt(ctx context.Context, id string) (Receipt, error)
 	ListReceipts(ctx context.Context, f ReceiptFilter) ([]Receipt, error)
 	ListGrir(ctx context.Context, f GrirFilter) (GrirPage, error)

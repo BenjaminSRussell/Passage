@@ -8,7 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/api"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/inventory"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/ledger"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/periods"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/purchasing"
@@ -153,6 +155,45 @@ func TestBuildPortsUsesRealAdaptersWhenConfigured(t *testing.T) {
 	}
 	if _, real := ports.PurchaseOrders.(*purchasing.Client); !real {
 		t.Fatalf("purchase orders is %T despite PURCHASING_URL", ports.PurchaseOrders)
+	}
+}
+
+func TestBuildPortsWiresPlanAndOwnershipLookups(t *testing.T) {
+	base := map[string]string{"LEDGER_URL": "http://l", "CLOSE_URL": "http://c", "PURCHASING_URL": "http://p", "POSTING_LEDGER_ID": "0a1b2c3d-0000-4000-8000-000000000001",
+		"POSTING_ACCOUNT_INVENTORY": "1", "POSTING_ACCOUNT_GRIR": "2", "POSTING_ACCOUNT_PPV": "3", "POSTING_ACCOUNT_VENDOR_CONTROL": "4"}
+	build := func(extra map[string]string) api.Ports {
+		t.Helper()
+		env := map[string]string{}
+		for k, v := range base {
+			env[k] = v
+		}
+		for k, v := range extra {
+			env[k] = v
+		}
+		ports, err := buildPorts(func(k string) string { return env[k] })
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ports
+	}
+
+	real := build(map[string]string{"INVENTORY_URL": "http://i"})
+	if _, ok := real.OwnershipChanges.(*inventory.Client); !ok {
+		t.Fatalf("ownership changes is %T despite INVENTORY_URL", real.OwnershipChanges)
+	}
+	if plans, ok := real.InvoicingPlans.(*purchasing.Client); !ok || plans != real.PurchaseOrders {
+		t.Fatalf("invoicing plans is %T, want the purchasing client that serves purchase orders", real.InvoicingPlans)
+	}
+	if unset := build(nil); unset.OwnershipChanges != nil {
+		t.Fatalf("ownership changes is %T with INVENTORY_URL unset and no fakes: the endpoint must answer 503", unset.OwnershipChanges)
+	}
+	fakes := build(map[string]string{"PASSAGE_ALLOW_FAKES": "1"})
+	if _, ok := fakes.OwnershipChanges.(domain.FakeOwnershipChanges); !ok {
+		t.Fatalf("ownership changes is %T with fakes allowed", fakes.OwnershipChanges)
+	}
+	noPurchasing, err := buildPorts(func(k string) string { return map[string]string{"PASSAGE_ALLOW_FAKES": "1"}[k] })
+	if _, ok := noPurchasing.InvoicingPlans.(domain.FakeInvoicingPlans); !ok || err != nil {
+		t.Fatalf("invoicing plans is %T err %v with fakes allowed", noPurchasing.InvoicingPlans, err)
 	}
 }
 

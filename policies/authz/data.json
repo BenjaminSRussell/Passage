@@ -309,7 +309,12 @@
       {"resource": "/v1/receiving/receipts/*:correct", "methods": ["POST"]},
       {"resource": "/v1/receiving/receipts/*:cancel", "methods": ["POST"]}
     ]},
-    "VendorInvoicePost": {"permissions": [{"resource": "/v1/receiving/invoices:post", "methods": ["POST"]}]},
+    "VendorInvoicePost": {"permissions": [
+      {"resource": "/v1/receiving/invoices:post", "methods": ["POST"]},
+      {"resource": "/v1/receiving/invoice-adjustments:post", "methods": ["POST"]},
+      {"resource": "/v1/receiving/plan-settlements:run", "methods": ["POST"]},
+      {"resource": "/v1/receiving/consignment-settlements:run", "methods": ["POST"]}
+    ]},
     "APInquire": {"permissions": [{"resource": "/v1/receiving/grir", "methods": ["GET"]}]},
     "ReceivingAdmin": {"permissions": [
       {"resource": "/v1/receiving/pending-postings", "methods": ["GET"]},

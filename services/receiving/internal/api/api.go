@@ -46,7 +46,9 @@ type Ports struct {
 	Ledger  domain.LedgerPoster
 	Profile domain.PostingProfile
 
-	PurchaseOrders domain.PurchaseOrders
+	PurchaseOrders   domain.PurchaseOrders
+	InvoicingPlans   domain.InvoicingPlans
+	OwnershipChanges domain.OwnershipChanges
 
 	ResolveMinAge time.Duration
 	ResolveLease  time.Duration
@@ -64,6 +66,8 @@ type API struct {
 	posted        atomic.Int64
 	adjusted      atomic.Int64
 	invoiced      atomic.Int64
+	adjustments   atomic.Int64
+	settlements   atomic.Int64
 
 	pendingPostings pendingTracker
 	http            requestMetrics
@@ -107,6 +111,9 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyReceivingAdmin)).Get("/v1/receiving/pending-postings", a.listPending)
 	r.With(authz.RequireDuty(dutyReceivingAdmin)).Post("/v1/receiving/pending-postings/{key}/resolve", a.idempotent(a.resolvePending))
 	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/invoices:post", a.idempotent(a.postVendorInvoice))
+	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/invoice-adjustments:post", a.idempotent(a.postInvoiceAdjustment))
+	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/plan-settlements:run", a.idempotent(a.runPlanSettlement))
+	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/consignment-settlements:run", a.idempotent(a.runConsignmentSettlement))
 }
 
 func (a *API) Metrics() http.Handler {
@@ -121,6 +128,8 @@ func (a *API) Metrics() http.Handler {
 		{"receiving_receipts_posted_total", "Receipts posted to the ledger.", &a.posted},
 		{"receiving_receipts_adjusted_total", "Posted receipts corrected or cancelled.", &a.adjusted},
 		{"receiving_invoices_posted_total", "Vendor invoices posted against GR/IR items.", &a.invoiced},
+		{"receiving_invoice_adjustments_posted_total", "Subsequent debits and credits posted against vendor invoices.", &a.adjustments},
+		{"receiving_settlements_posted_total", "Invoicing plan rows and consignment journals settled.", &a.settlements},
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
@@ -321,26 +330,34 @@ func purchaseOrderReferenceFields(req evaluateRequest) map[string]string {
 	return fields
 }
 
+func (a *API) loadPurchaseOrder(ctx context.Context, id string) (domain.PurchaseOrder, error) {
+	if a.ports.PurchaseOrders == nil {
+		return domain.PurchaseOrder{}, httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "purchase order lookup is not configured")
+	}
+	po, err := a.ports.PurchaseOrders.Get(ctx, id)
+	switch {
+	case errors.Is(err, domain.ErrPurchaseOrderNotFound):
+		return domain.PurchaseOrder{}, httpx.NewProblem(http.StatusNotFound, "RCV-NF-004", "purchase order not found")
+	case errors.Is(err, domain.ErrPurchaseOrderForbidden):
+		return domain.PurchaseOrder{}, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "purchase order is outside the caller's access")
+	case err != nil:
+		slog.ErrorContext(ctx, "purchase order lookup failed", "err", err, "purchaseOrderId", id, "correlationId", middleware.GetReqID(ctx))
+		return domain.PurchaseOrder{}, httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "purchase order lookup unavailable")
+	}
+	if !po.Usable() {
+		return domain.PurchaseOrder{}, httpx.NewProblem(http.StatusUnprocessableEntity, "RCV-PO-001", "purchase order is not approved or confirmed")
+	}
+	return po, nil
+}
+
 func (a *API) fillFromPurchaseOrder(ctx context.Context, req *evaluateRequest) (map[string]string, error) {
 	fields := map[string]string{}
 	if !slices.ContainsFunc(req.Lines, func(l lineRequest) bool { return l.POLineNo != nil }) {
 		return fields, nil
 	}
-	if a.ports.PurchaseOrders == nil {
-		return nil, httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "purchase order lookup is not configured")
-	}
-	po, err := a.ports.PurchaseOrders.Get(ctx, req.PurchaseOrderID)
-	switch {
-	case errors.Is(err, domain.ErrPurchaseOrderNotFound):
-		return nil, httpx.NewProblem(http.StatusNotFound, "RCV-NF-004", "purchase order not found")
-	case errors.Is(err, domain.ErrPurchaseOrderForbidden):
-		return nil, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "purchase order is outside the caller's access")
-	case err != nil:
-		slog.ErrorContext(ctx, "purchase order lookup failed", "err", err, "purchaseOrderId", req.PurchaseOrderID, "correlationId", middleware.GetReqID(ctx))
-		return nil, httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "purchase order lookup unavailable")
-	}
-	if !po.Usable() {
-		return nil, httpx.NewProblem(http.StatusUnprocessableEntity, "RCV-PO-001", "purchase order is not approved or confirmed")
+	po, err := a.loadPurchaseOrder(ctx, req.PurchaseOrderID)
+	if err != nil {
+		return nil, err
 	}
 	byNo := make(map[int]domain.PurchaseOrderLine, len(po.Lines))
 	for _, l := range po.Lines {
