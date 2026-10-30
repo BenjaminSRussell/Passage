@@ -25,6 +25,7 @@ const (
 	problemNoTenantID  = "no-tenant-id-column"
 	problemNoTenantPol = "no-tenant-policy"
 	problemNoEntityPol = "no-legal-entity-policy"
+	problemExtraPolicy = "extra-permissive-policy"
 )
 
 type tableFacts struct {
@@ -35,6 +36,7 @@ type tableFacts struct {
 	TenantPolicy bool
 	HasEntity    bool
 	EntityPolicy bool
+	ExtraPolicy  bool
 }
 
 type violation struct {
@@ -45,7 +47,9 @@ type violation struct {
 
 func (v violation) key() string { return v.Service + "." + v.Table + ":" + v.Problem }
 
-const tenantExpr = `tenant_id[^=]*= *[A-Za-z_(]*current_setting\(.passage\.tenant_id.`
+const tenantColumn = `(^|[^._[:alnum:]])tenant_id([^._[:alnum:]]|$)`
+
+const tenantExpr = tenantColumn + `[^=]*= *[A-Za-z_(]*current_setting\(.passage\.tenant_id.`
 
 const tableFactsQuery = `
 select c.relname, c.relrowsecurity, c.relforcerowsecurity,
@@ -56,8 +60,12 @@ select c.relname, c.relrowsecurity, c.relforcerowsecurity,
           and (p.with_check is null or p.with_check ~ '` + tenantExpr + `')),
   exists (select 1 from pg_attribute a where a.attrelid = c.oid and a.attname = 'legal_entity_id' and not a.attisdropped),
   exists (select 1 from pg_policies p where p.schemaname = n.nspname and p.tablename = c.relname and p.permissive = 'RESTRICTIVE'
-          and p.cmd in ('ALL', 'SELECT') and (p.roles = '{public}' or 'passage_app' = any (p.roles))
-          and p.qual like '%legal_entity_id%' and p.qual like '%passage.legal_entity_scopes%')
+          and p.cmd = 'ALL' and (p.roles = '{public}' or 'passage_app' = any (p.roles))
+          and p.qual like '%legal_entity_id%' and p.qual like '%passage.legal_entity_scopes%'
+          and (p.with_check is null or p.with_check like '%passage.legal_entity_scopes%')),
+  exists (select 1 from pg_policies p where p.schemaname = n.nspname and p.tablename = c.relname and p.permissive = 'PERMISSIVE'
+          and (p.roles = '{public}' or 'passage_app' = any (p.roles))
+          and (coalesce(p.qual, '') || ' ' || coalesce(p.with_check, '')) !~ '` + tenantColumn + `')
 from pg_class c
 join pg_namespace n on n.oid = c.relnamespace
 where n.nspname = $1 and c.relkind in ('r', 'p') and not c.relispartition and c.relname <> 'schema_migrations'
@@ -153,7 +161,7 @@ func collect(t *testing.T, ctx context.Context, pool *pgxpool.Pool, service, sch
 	tables := 0
 	for rows.Next() {
 		var f tableFacts
-		if err := rows.Scan(&f.Name, &f.Enabled, &f.Forced, &f.HasTenantID, &f.TenantPolicy, &f.HasEntity, &f.EntityPolicy); err != nil {
+		if err := rows.Scan(&f.Name, &f.Enabled, &f.Forced, &f.HasTenantID, &f.TenantPolicy, &f.HasEntity, &f.EntityPolicy, &f.ExtraPolicy); err != nil {
 			t.Fatal(err)
 		}
 		tables++
@@ -178,6 +186,9 @@ func judge(service string, f tableFacts) []violation {
 	}
 	if f.HasEntity && !f.EntityPolicy {
 		add(problemNoEntityPol)
+	}
+	if f.ExtraPolicy {
+		add(problemExtraPolicy)
 	}
 	return out
 }
@@ -215,10 +226,12 @@ func TestEveryTableEnforcesRLS(t *testing.T) {
 	sort.Strings(services)
 
 	var all []violation
+	failed := map[string]bool{}
 	for _, s := range services {
-		t.Run(s, func(t *testing.T) {
+		ok := t.Run(s, func(t *testing.T) {
 			all = append(all, schemaViolations(t, s, dirs[s])...)
 		})
+		failed[s] = !ok
 	}
 
 	var unexpected, allowed []violation
@@ -233,7 +246,7 @@ func TestEveryTableEnforcesRLS(t *testing.T) {
 	}
 	var stale []string
 	for k := range allowlist {
-		if !seen[k] {
+		if !seen[k] && !failed[strings.SplitN(k, ".", 2)[0]] {
 			stale = append(stale, k)
 		}
 	}
@@ -253,10 +266,30 @@ func TestEveryTableEnforcesRLS(t *testing.T) {
 func table(vs []violation) string {
 	var b strings.Builder
 	w := tabwriter.NewWriter(&b, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "SERVICE\tTABLE\tPROBLEM")
+	_, _ = fmt.Fprintln(w, "SERVICE\tTABLE\tPROBLEM")
 	for _, v := range vs {
-		fmt.Fprintf(w, "%s\t%s\t%s\n", v.Service, v.Table, v.Problem)
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", v.Service, v.Table, v.Problem)
 	}
 	_ = w.Flush()
 	return b.String()
+}
+
+func TestFixtureViolationsArePinned(t *testing.T) {
+	testkit.DB(t)
+	got := schemaViolations(t, "fixture", "testdata/fixture")
+	var keys []string
+	for _, v := range got {
+		keys = append(keys, v.key())
+	}
+	sort.Strings(keys)
+	want := []string{
+		"fixture.bad_column:" + problemExtraPolicy,
+		"fixture.bad_column:" + problemNoTenantPol,
+		"fixture.extra_true:" + problemExtraPolicy,
+		"fixture.insert_true:" + problemExtraPolicy,
+		"fixture.select_restrictive:" + problemNoEntityPol,
+	}
+	if strings.Join(keys, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("fixture violations:\n%s\nwant:\n%s", strings.Join(keys, "\n"), strings.Join(want, "\n"))
+	}
 }
