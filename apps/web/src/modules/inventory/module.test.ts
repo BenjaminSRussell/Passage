@@ -21,6 +21,7 @@ describe("inventory module", () => {
       "/inventory/count-plans": "inventory.read",
       "/inventory/count-sheets": "inventory.read",
       "/inventory/transfer-orders": "inventory.read",
+      "/inventory/transfer-lines": "inventory.read",
       "/inventory/in-transit": "inventory.read",
       "/inventory/abc-runs": "inventory.read",
       "/inventory/consignment-orders": "inventory.read",
@@ -49,6 +50,7 @@ describe("inventory module", () => {
   it("routes every slice 3 screen", () => {
     const paths = inventory.routes.map((r) => r.path);
     for (const path of [
+      "/inventory/transfer-lines",
       "/inventory/transfer-orders",
       "/inventory/transfer-orders/new",
       "/inventory/transfer-orders/:id",

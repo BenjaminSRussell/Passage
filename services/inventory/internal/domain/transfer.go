@@ -281,3 +281,52 @@ func InTransitDays(shipDate, now time.Time) int {
 	}
 	return int(now.Sub(shipDate).Hours() / 24)
 }
+
+// Lateness of a transfer order line (transfer order overview, PRD 3.16.14).
+const (
+	LateShipment = "LATE_SHIPMENT" // not shipped and the planned ship date has passed
+	LateReceipt  = "LATE_RECEIPT"  // shipped, still in transit beyond the receipt allowance
+)
+
+// DefaultLateReceiptDays is how many days a shipment may stay in transit before
+// the overview calls it late.
+const DefaultLateReceiptDays = 7
+
+// TransferLineLateness classifies a line of an order in orderStatus as of asOf
+// and returns how many days it is overdue. A line is late once its due date has
+// passed, mirroring "days in transit > N" of the stock in transit inquiry:
+//   - an order still CREATED is due on its planned ship date, so it is a late
+//     shipment from the day after;
+//   - an open shipment (not closed short, quantity still in transit) is due
+//     lateReceiptDays after its ship date, so it is a late receipt once it has
+//     been in transit longer than that.
+//
+// Received and cancelled orders, and lines closed short (in transit for
+// investigation, AC-16.11), are never late. The empty string means on time,
+// with zero days.
+func TransferLineLateness(orderStatus string, l TransferLine, shipDate, asOf time.Time, lateReceiptDays int) (string, int) {
+	switch orderStatus {
+	case TransferCreated:
+		if days := InTransitDays(shipDate, asOf); days > 0 {
+			return LateShipment, days
+		}
+	case TransferShipped, TransferPartial:
+		if days := InTransitDays(shipDate, asOf) - lateReceiptDays; days > 0 && !l.Closed && l.InTransit().IsPositive() {
+			return LateReceipt, days
+		}
+	}
+	return "", 0
+}
+
+// TransferLineRemaining is the quantity of the line still to be received: the
+// ordered quantity less what was received, zero once the line is closed short,
+// over-received or its order is cancelled.
+func TransferLineRemaining(orderStatus string, l TransferLine) decimal.Decimal {
+	if l.Closed || orderStatus == TransferCancelled {
+		return decimal.Zero
+	}
+	if q := l.Qty.Sub(l.ReceivedQty); q.IsPositive() {
+		return q
+	}
+	return decimal.Zero
+}

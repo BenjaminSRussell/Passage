@@ -90,8 +90,19 @@ product dimensions (config, size, color, style) cannot change; BLOCKED / QUARANT
 cannot be both a source and a destination in one journal; the negative policy, count freeze, currency
 and vendor-owned rules apply to both legs. The receipt leg is an origin of type `TRANSFER_IN`
 (migration 0012; no new table, so no new grant). Web: the transfer journal type on the new-journal form,
-destination fields on the add-line form and a destination column on the line list. Every other item in
-the ticket and PRD 3.16 is listed here.
+destination fields on the add-line form and a destination column on the line list.
+
+Slice 10 adds the cross-order transfer order line inquiry with a late overview (FR-16.15, PRD 3.16.14):
+`GET /v1/inventory/transfer-order-lines` lists the lines of every order in the caller's legal entities with
+order status, route, ship date, ordered, shipped, received, remaining and in-transit quantities and days in
+transit, filtered by legal entity, status, product, shipping or receiving warehouse and a ship-date range.
+It flags LATE_SHIPMENT (order still CREATED after its planned ship date) and LATE_RECEIPT (open shipment, not
+closed short, in transit more than `lateReceiptDays`, default 7) as of `asOf`, with `daysLate` counted past the
+due date; `late=true` returns only late lines. The list is capped at 1,000 lines and says when it was cut
+(`truncated`). It is read only: no migration, table, grant, duty or event. Web: the transfer order lines page
+with every filter, a late summary and a notice when the list is capped. The OpenAPI and AsyncAPI documents have
+no FAIL lines on the documentation gates.
+Every other item in the ticket and PRD 3.16 is listed here.
 
 ## Ticket deliverables
 
@@ -176,7 +187,7 @@ the ticket and PRD 3.16 is listed here.
 | FR-16.13 export and GL voucher drill-down | later slice of PSG-16 / handoff — wave 11 | Export is a web grid feature (wave 5 shell); `ledger_entry_id` stays null until the ledger Post exists. |
 | FR-16.14 opening balance load from AX / SAP extracts via wave 10 migration framework | handoff — wave 10 (migration framework) | Mapping rules belong to the migration pack; the OPENING_BALANCE journal it targets is built. |
 | FR-16.16 in-transit inquiry | built (slice 3) | `GET /transfers/in-transit` (see item 6). |
-| FR-16.15 transfer order lines inquiry and transfer order overview report (3.16.14) | partial (slice 3) | The transfer order list shows status and received progress, the order shows ordered / shipped / received / in transit per line. A cross-order line inquiry with filters and the late-shipment overview are a later slice. |
+| FR-16.15 transfer order overview report (3.16.14): orders-by-status counts, export and a scheduled late-shipment notification | later slice of PSG-16 / handoff — wave 15 (documents, export) | Slice 10 builds the cross-order line inquiry and the late overview (`GET /v1/inventory/transfer-order-lines`), with the overview's legal entity, date range and status filters. Lateness is derived: an unshipped order after its planned ship date, or a shipment in transit more than `lateReceiptDays` (default 7, not yet a legal-entity parameter); there is no planned receipt date on the order yet (see item 6), so a late receipt is measured from the ship date. The late summary on the page counts the lines listed; there is no orders-by-status aggregate, no export and no notification. |
 | FR-16.17 customer consignment warehouse (`CUSTOMER_CONSIGNMENT`, `customer_id`, SAP MB58 report) | later slice of PSG-16 (documents in wave 27) | Warehouse type belongs to wave 6 master data; stock there stays legal-entity owned. |
 | FR-16.18 to FR-16.20 tag counting, ABC, segments | built (slices 3, 4, 5) | ABC classification by value (slice 3), tag counting (slice 4) and segments (slice 5) are built (item 8), with the gaps listed there. |
 | 3.16.1 valuation by product x site per item model group (running average across dimension sets) | handoff — wave 20 (costing) | Slice 1 values issues at the running average of the on-hand row being issued (one dimension set), the finest consistent level under the row lock. Wave 20 replaces it with the costing engine. |

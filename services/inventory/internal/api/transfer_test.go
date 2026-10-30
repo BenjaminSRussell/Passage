@@ -67,6 +67,27 @@ func (f *fakeStore) ListInTransit(context.Context) ([]store.InTransitRow, error)
 		ToWarehouse: "W2", TransitWarehouse: "T1", ShipDate: time.Now().UTC().AddDate(0, 0, -3), InTransit: decimal.NewFromInt(5), Closed: true}}, nil
 }
 
+// fakeLegalEntity owns every line the fake transfer line inquiry returns.
+const fakeLegalEntity = "11111111-1111-4111-8111-111111111111"
+
+func (f *fakeStore) ListTransferLines(_ context.Context, flt store.TransferLineFilter) ([]store.TransferLineRow, bool, error) {
+	f.lineFilter = flt
+	line := func(qty, shipped, received string, closed bool) domain.TransferLine {
+		return domain.TransferLine{ID: ids.New(), LineNo: 1, ProductID: ids.New(), Unit: "EA", Qty: decimal.RequireFromString(qty),
+			ShippedQty: decimal.RequireFromString(shipped), ReceivedQty: decimal.RequireFromString(received), Closed: closed}
+	}
+	row := func(number, status string, shippedDaysAgo int, l domain.TransferLine) store.TransferLineRow {
+		return store.TransferLineRow{OrderID: ids.New(), LegalEntityID: fakeLegalEntity, Number: number, Status: status, FromWarehouse: "W1",
+			ToWarehouse: "W2", ShipDate: flt.AsOf.AddDate(0, 0, -shippedDaysAgo), Line: l}
+	}
+	return []store.TransferLineRow{
+		row("TO-1", domain.TransferCreated, 10, line("10", "0", "0", false)),
+		row("TO-2", domain.TransferShipped, 2, line("10", "10", "0", false)),
+		row("TO-3", domain.TransferPartial, 12, line("10", "10", "4", false)),
+		row("TO-4", domain.TransferReceived, 30, line("10", "10", "8", true)),
+	}, true, nil
+}
+
 func (f *fakeStore) RunABC(_ context.Context, in store.AbcRunInput) (domain.AbcRun, bool, error) {
 	f.abcIn = in
 	return domain.AbcRun{ID: ids.New(), LegalEntityID: in.LegalEntityID, Criterion: in.Criterion, Thresholds: in.Thresholds, ZeroClass: in.ZeroClass,
@@ -347,5 +368,83 @@ func TestABCRunsNeedDutyAndList(t *testing.T) {
 	}
 	if rec := do(t, h, http.MethodGet, "/v1/inventory/abc-runs/nope", "", []string{"inventory.read"}, nil); rec.Code != http.StatusNotFound {
 		t.Fatalf("bad id: status %d", rec.Code)
+	}
+}
+
+func TestTransferLinesInquiryClassifiesLateness(t *testing.T) {
+	fs := &fakeStore{}
+	h := newServer(t, fs)
+	le := fakeLegalEntity
+	rec := do(t, h, http.MethodGet, "/v1/inventory/transfer-order-lines?late=true&asOf=2026-09-30&status=CREATED&fromWarehouseId=W1&toWarehouseId=W2"+
+		"&legalEntityId="+le+"&from=2026-09-01&to=2026-09-30&lateReceiptDays=5", "", []string{"inventory.read"}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+	flt := fs.lineFilter
+	if !flt.LateOnly || flt.Status != "CREATED" || flt.FromWarehouse != "W1" || flt.ToWarehouse != "W2" || flt.LegalEntityID != le ||
+		flt.LateReceiptDays != 5 || flt.AsOf.Format("2006-01-02") != "2026-09-30" || flt.From == nil || flt.From.Format("2006-01-02") != "2026-09-01" ||
+		flt.To == nil || flt.To.Format("2006-01-02") != "2026-09-30" {
+		t.Fatalf("filter %+v", flt)
+	}
+	var out struct {
+		Items []struct {
+			Number        string `json:"number"`
+			LegalEntityID string `json:"legalEntityId"`
+			Late          string `json:"late"`
+			DaysLate      int    `json:"daysLate"`
+			DaysInTransit int    `json:"daysInTransit"`
+			InTransit     string `json:"inTransit"`
+			RemainingQty  string `json:"remainingQty"`
+		} `json:"items"`
+		Truncated bool `json:"truncated"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Items) != 4 || !out.Truncated {
+		t.Fatalf("items %+v truncated %v", out.Items, out.Truncated)
+	}
+	type want struct {
+		late                         string
+		daysLate, daysInTransit      int
+		inTransit, remaining, entity string
+	}
+	for i, w := range []want{
+		{domain.LateShipment, 10, 0, "0", "10", le}, // unshipped 10 days past the planned date
+		{"", 0, 2, "10", "10", le},                  // in transit inside the 5-day allowance
+		{domain.LateReceipt, 7, 12, "6", "6", le},   // 12 days in transit, 7 beyond the allowance
+		{"", 0, 30, "2", "0", le},                   // closed short: 2 left in transit for investigation, never late
+	} {
+		got := out.Items[i]
+		if got.Late != w.late || got.DaysLate != w.daysLate || got.DaysInTransit != w.daysInTransit || got.InTransit != w.inTransit ||
+			got.RemainingQty != w.remaining || got.LegalEntityID != w.entity {
+			t.Errorf("%s: %+v, want %+v", got.Number, got, w)
+		}
+	}
+}
+
+func TestTransferLinesInquiryRejectsBadFilters(t *testing.T) {
+	fs := &fakeStore{}
+	h := newServer(t, fs)
+	rec := do(t, h, http.MethodGet, "/v1/inventory/transfer-order-lines?status=X&productId=nope&legalEntityId=nope&late=maybe&lateReceiptDays=-1&asOf=yesterday&from=2026-13-01",
+		"", []string{"inventory.read"}, nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	p := decodeProblem(t, rec)
+	for _, f := range []string{"status", "productId", "legalEntityId", "late", "lateReceiptDays", "asOf", "from"} {
+		if _, ok := p.Errors[f]; !ok {
+			t.Errorf("missing field error for %s: %v", f, p.Errors)
+		}
+	}
+	rec = do(t, h, http.MethodGet, "/v1/inventory/transfer-order-lines?from=2026-09-10&to=2026-09-01", "", []string{"inventory.read"}, nil)
+	if p := decodeProblem(t, rec); rec.Code != http.StatusBadRequest || p.Errors["to"] == "" {
+		t.Fatalf("inverted range: status %d %v", rec.Code, p.Errors)
+	}
+	if !fs.lineFilter.AsOf.IsZero() {
+		t.Fatalf("the store was queried with invalid filters: %+v", fs.lineFilter)
+	}
+	if rec := do(t, h, http.MethodGet, "/v1/inventory/transfer-order-lines", "", []string{"inventory.transfer.write"}, nil); rec.Code != http.StatusForbidden {
+		t.Fatalf("without inventory.read: status %d", rec.Code)
 	}
 }

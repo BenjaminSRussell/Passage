@@ -25,6 +25,7 @@ web BFF to the service's `/v1/inventory/...`). Built from the shell primitives i
 | `/inventory/transfer-orders` | Transfer orders by status with route and received progress | `inventory.read` |
 | `/inventory/transfer-orders/new` | New transfer order: legal entity, shipping / receiving / transit warehouse (or one-step), receiving site, planned ship date, one or more lines with source dimensions and under / over-delivery % | `inventory.transfer.write` |
 | `/inventory/transfer-orders/:id` | Transfer order: route, lines (ordered, shipped, received, in transit), Ship with date, Receive per open line with close-short, Cancel (If-Match) | `inventory.read` (ship / receive need `inventory.transfer.post`, cancel `inventory.transfer.write`) |
+| `/inventory/transfer-lines` | Transfer order lines across orders (ordered, shipped, received, remaining, in transit, days in transit) filtered by status, late only, shipping / receiving warehouse, product, legal entity and ship-date range; late shipments and late receipts flagged with days overdue, short-closed lines flagged for investigation, a notice when the 1,000-line cap cuts the list | `inventory.read` |
 | `/inventory/in-transit` | Stock in transit by order line with days in transit; lines closed short flagged for investigation | `inventory.read` |
 | `/inventory/abc-runs` | ABC classification runs with class counts | `inventory.read` |
 | `/inventory/abc-runs/new` | Run classification: legal entity, A / B / C shares (sum 100), class for zero-value products | `inventory.abc.write` |

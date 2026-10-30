@@ -24,6 +24,7 @@ import (
 
 // fakeStore records the calls the HTTP layer makes; it never touches Postgres.
 type fakeStore struct {
+	lineFilter  store.TransferLineFilter
 	postVersion int
 	onHand      store.OnHandFilter
 	journals    store.JournalFilter
@@ -610,8 +611,8 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		served[route+" "+strings.ToLower(method)] = true
 		return nil
 	})
-	if len(served) != 62 {
-		t.Fatalf("router walk yielded %d operations, want 62: %v", len(served), served)
+	if len(served) != 63 {
+		t.Fatalf("router walk yielded %d operations, want 63: %v", len(served), served)
 	}
 	declared := declaredOperations(string(spec))
 	for op := range served {

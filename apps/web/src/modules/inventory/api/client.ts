@@ -957,6 +957,66 @@ export async function listInTransit(signal?: AbortSignal): Promise<InTransitItem
   return body.items ?? [];
 }
 
+export type TransferLateness = "LATE_SHIPMENT" | "LATE_RECEIPT";
+
+/** One transfer order line with its order header; `late` is absent when the line is on time. */
+export interface TransferLineItem {
+  orderId: string;
+  legalEntityId: string;
+  number: string;
+  orderStatus: TransferStatus;
+  fromWarehouseId: string;
+  toWarehouseId: string;
+  /** Planned until the order ships, then the actual ship date. */
+  shipDate: string;
+  lineId: string;
+  lineNo: number;
+  productId: string;
+  dimensions: Partial<Record<string, string>>;
+  unit: string;
+  qty: string;
+  shippedQty: string;
+  receivedQty: string;
+  remainingQty: string;
+  inTransit: string;
+  daysInTransit: number;
+  closed: boolean;
+  late?: TransferLateness;
+  /** Days past the due date (planned ship date, or ship date plus the receipt allowance); 0 when on time. */
+  daysLate: number;
+}
+
+export interface TransferLineQuery {
+  legalEntityId?: string;
+  status?: TransferStatus | "";
+  productId?: string;
+  fromWarehouseId?: string;
+  toWarehouseId?: string;
+  /** Ship date range, inclusive (YYYY-MM-DD). */
+  from?: string;
+  to?: string;
+  lateOnly?: boolean;
+}
+
+export interface TransferLinePage {
+  items: TransferLineItem[];
+  /** More than the service's 1,000-line cap matched. */
+  truncated: boolean;
+}
+
+/** Transfer order line inquiry across all orders, oldest ship date first (FR-16.15). */
+export async function listTransferLines(query: TransferLineQuery = {}, signal?: AbortSignal): Promise<TransferLinePage> {
+  const params = new URLSearchParams();
+  for (const key of ["legalEntityId", "status", "productId", "fromWarehouseId", "toWarehouseId", "from", "to"] as const) {
+    const value = query[key]?.trim();
+    if (value) params.set(key, value);
+  }
+  if (query.lateOnly) params.set("late", "true");
+  const qs = params.toString();
+  const { body } = await send<{ items?: TransferLineItem[]; truncated?: boolean }>(`/transfer-order-lines${qs ? `?${qs}` : ""}`, {}, signal);
+  return { items: body.items ?? [], truncated: body.truncated ?? false };
+}
+
 // ---- ABC classification (FR-16.19) ----
 
 export const ABC_CLASSES = ["A", "B", "C", "N"] as const;

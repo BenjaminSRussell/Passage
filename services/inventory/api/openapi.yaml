@@ -965,6 +965,46 @@ paths:
                     items: { $ref: '#/components/schemas/InTransitItem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/transfer-order-lines:
+    get:
+      operationId: listTransferOrderLines
+      summary: Transfer order line inquiry with late-shipment and late-receipt overview (FR-16.15)
+      description: |
+        Lines of every transfer order in the caller's legal entities, oldest planned or actual ship date
+        first, at most 1,000 (truncated is true when more matched). from and to bound the ship date
+        (inclusive). A line is late once its due date is before asOf: a line of an order still CREATED is
+        due on its planned ship date (LATE_SHIPMENT); a line of a SHIPPED or PARTIALLY_RECEIVED order with
+        quantity still in transit and not closed short is due lateReceiptDays after its ship date
+        (LATE_RECEIPT). daysLate counts the days past the due date and is 0 for a line on time. With
+        late=true only late lines are returned.
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid }, description: Legal entity owning the order }
+        - { name: status, in: query, schema: { type: string, enum: [CREATED, SHIPPED, PARTIALLY_RECEIVED, RECEIVED, CANCELLED] }, description: Order status }
+        - { name: productId, in: query, schema: { type: string, format: uuid }, description: Product }
+        - { name: fromWarehouseId, in: query, schema: { type: string }, description: Shipping warehouse }
+        - { name: toWarehouseId, in: query, schema: { type: string }, description: Receiving warehouse }
+        - { name: from, in: query, schema: { type: string, format: date }, description: Earliest planned or actual ship date }
+        - { name: to, in: query, schema: { type: string, format: date }, description: Latest planned or actual ship date; not before from }
+        - { name: late, in: query, schema: { type: boolean }, description: Return only late lines }
+        - { name: lateReceiptDays, in: query, schema: { type: integer, minimum: 0, maximum: 3650, default: 7 }, description: Days a shipment may stay in transit before its receipt is late }
+        - { name: asOf, in: query, schema: { type: string, format: date }, description: Date lateness is measured at (default today, UTC) }
+      responses:
+        '200':
+          description: Transfer order lines
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, truncated]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/TransferLineInquiryItem' }
+                  truncated: { type: boolean, description: More than 1,000 lines matched; narrow the filters to see the rest }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
   /v1/inventory/abc-runs:
     post:
       operationId: runAbcClassification
@@ -2415,6 +2455,31 @@ components:
         daysInTransit: { type: integer }
         inTransitQty: { $ref: '#/components/schemas/Decimal' }
         closedShort: { type: boolean, description: The line was closed short; the quantity is left in transit for investigation }
+    TransferLineInquiryItem:
+      type: object
+      required: [orderId, legalEntityId, number, orderStatus, fromWarehouseId, toWarehouseId, shipDate, lineId, lineNo, productId, dimensions, unit, qty, shippedQty, receivedQty, remainingQty, inTransit, daysInTransit, closed, daysLate]
+      properties:
+        orderId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        number: { type: string }
+        orderStatus: { type: string, enum: [CREATED, SHIPPED, PARTIALLY_RECEIVED, RECEIVED, CANCELLED] }
+        fromWarehouseId: { type: string }
+        toWarehouseId: { type: string }
+        shipDate: { type: string, format: date, description: Planned until the order ships, then the actual ship date }
+        lineId: { type: string, format: uuid }
+        lineNo: { type: integer }
+        productId: { type: string, format: uuid }
+        dimensions: { $ref: '#/components/schemas/Dimensions' }
+        unit: { type: string }
+        qty: { $ref: '#/components/schemas/Decimal' }
+        shippedQty: { $ref: '#/components/schemas/Decimal' }
+        receivedQty: { $ref: '#/components/schemas/Decimal' }
+        remainingQty: { $ref: '#/components/schemas/Decimal' }
+        inTransit: { $ref: '#/components/schemas/Decimal' }
+        daysInTransit: { type: integer, description: Days since the ship date while quantity is in transit, otherwise 0 }
+        closed: { type: boolean, description: The line was closed short }
+        late: { type: string, enum: [LATE_SHIPMENT, LATE_RECEIPT], description: Absent when the line is on time }
+        daysLate: { type: integer, description: Days past the due date for a late line, otherwise 0 }
     AbcRunRequest:
       type: object
       additionalProperties: false

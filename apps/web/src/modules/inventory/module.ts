@@ -28,6 +28,7 @@ import { ReservationsPage } from "./ReservationsPage";
 import { StatusChangesPage } from "./StatusChangesPage";
 import { TransactionPage } from "./TransactionPage";
 import { TransactionsPage } from "./TransactionsPage";
+import { TransferLinesPage } from "./TransferLinesPage";
 import { TransferOrderPage } from "./TransferOrderPage";
 import { TransferOrdersPage } from "./TransferOrdersPage";
 
@@ -57,6 +58,7 @@ const inventory: PassageModule = {
     { path: "/inventory/transfer-orders", element: createElement(TransferOrdersPage) },
     { path: "/inventory/transfer-orders/new", element: createElement(NewTransferPage) },
     { path: "/inventory/transfer-orders/:id", element: createElement(TransferOrderPage), handle: { title: "Transfer order" } },
+    { path: "/inventory/transfer-lines", element: createElement(TransferLinesPage) },
     { path: "/inventory/in-transit", element: createElement(InTransitPage) },
     { path: "/inventory/abc-runs", element: createElement(AbcRunsPage) },
     { path: "/inventory/abc-runs/new", element: createElement(NewAbcRunPage) },
@@ -80,6 +82,7 @@ const inventory: PassageModule = {
     { label: "Count plans", to: "/inventory/count-plans", duty: "inventory.read" },
     { label: "Count sheets", to: "/inventory/count-sheets", duty: "inventory.read" },
     { label: "Transfer orders", to: "/inventory/transfer-orders", duty: "inventory.read" },
+    { label: "Transfer lines", to: "/inventory/transfer-lines", duty: "inventory.read" },
     { label: "Stock in transit", to: "/inventory/in-transit", duty: "inventory.read" },
     { label: "ABC classification", to: "/inventory/abc-runs", duty: "inventory.read" },
     { label: "Consignment orders", to: "/inventory/consignment-orders", duty: "inventory.read" },

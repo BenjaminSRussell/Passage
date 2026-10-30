@@ -78,6 +78,7 @@ type Store interface {
 	ReceiveTransfer(ctx context.Context, id string, version int, receipts []TransferReceipt, receiptDate time.Time, neg domain.NegativePolicy) (domain.TransferOrder, error)
 	CancelTransfer(ctx context.Context, id string, version int) (domain.TransferOrder, error)
 	ListInTransit(ctx context.Context) ([]InTransitRow, error)
+	ListTransferLines(ctx context.Context, f TransferLineFilter) ([]TransferLineRow, bool, error)
 	RunABC(ctx context.Context, in AbcRunInput) (domain.AbcRun, bool, error)
 	GetABCRun(ctx context.Context, id string) (domain.AbcRun, error)
 	ListABCRuns(ctx context.Context) ([]AbcRunSummary, error)
