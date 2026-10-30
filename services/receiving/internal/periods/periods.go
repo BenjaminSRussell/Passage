@@ -30,9 +30,17 @@ const (
 	dateFormat      = "2006-01-02"
 )
 
+const audience = "close"
+
 type Client struct {
 	baseURL string
 	http    *http.Client
+	signer  *tenant.ServiceSigner
+}
+
+func (c *Client) WithSigner(s *tenant.ServiceSigner) *Client {
+	c.signer = s
+	return c
 }
 
 func New(baseURL string, httpClient *http.Client) *Client {
@@ -87,11 +95,17 @@ func (c *Client) AP(ctx context.Context, q domain.PeriodQuery) (domain.PeriodSta
 		return "", fmt.Errorf("period check: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(tenant.HeaderDuties, dutyPeriodCheck)
-	req.Header.Set(tenant.HeaderTenant, principal.TenantID)
-	req.Header.Set(tenant.HeaderLegalEntity, legalEntity)
-	if id := middleware.GetReqID(ctx); id != "" {
-		req.Header.Set(middleware.RequestIDHeader, id)
+	signed, err := c.signer.Apply(req, principal, audience, legalEntity)
+	if err != nil {
+		return "", fmt.Errorf("period check: %w", err)
+	}
+	if !signed {
+		req.Header.Set(tenant.HeaderDuties, dutyPeriodCheck)
+		req.Header.Set(tenant.HeaderTenant, principal.TenantID)
+		req.Header.Set(tenant.HeaderLegalEntity, legalEntity)
+		if id := middleware.GetReqID(ctx); id != "" {
+			req.Header.Set(middleware.RequestIDHeader, id)
+		}
 	}
 
 	resp, err := c.http.Do(req)

@@ -422,3 +422,41 @@ test_payment_proposal_duties_are_separate if {
 	not allowed("payment-proposal.approve", "POST", "/v1/payables/payment-proposals")
 	not allowed("payment-proposal.approve", "GET", "/v1/payables/payment-proposals/p1")
 }
+
+granted_duty_known(duty) if data.duties[duty]
+
+granted_duty_known("numbering.write")
+
+test_service_grants_allow_only_their_declared_routes if {
+	every _, targets in data.service_grants {
+		every _, duties in targets {
+			count(duties) > 0
+			every duty in duties {
+				granted_duty_known(duty)
+			}
+		}
+	}
+	allowed("ledger.journal.post", "POST", "/v1/ledger/journal-entries")
+	allowed("ledger.journal.reverse", "POST", "/v1/ledger/journal-entries/je-1/reverse")
+	allowed("period.check", "POST", "/v1/close/period-statuses:check")
+	every duty in data.service_grants.receiving.ledger {
+		not allowed(duty, "POST", "/v1/ledger/ledgers")
+		not allowed(duty, "PUT", "/v1/ledger/charts/c1/accounts/1000")
+		not allowed(duty, "POST", "/v1/ledger/balances:rebuild")
+	}
+	every duty in data.service_grants.payables.ledger {
+		not allowed(duty, "POST", "/v1/ledger/journal-entries")
+		not allowed(duty, "POST", "/v1/ledger/journal-entries/je-1/reverse")
+	}
+}
+
+test_service_grants_hold_no_flag_or_all_scope_duty if {
+	every _, targets in data.service_grants {
+		every _, duties in targets {
+			every duty in duties {
+				not data.duties[duty].flag
+				duty != "org.switcher.all_scope"
+			}
+		}
+	}
+}

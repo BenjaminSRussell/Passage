@@ -9,6 +9,7 @@ package tenant
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -24,6 +25,7 @@ type Principal struct {
 	LegalEntityID string
 	UserID        string
 	Duties        map[string]struct{}
+	Service       string
 }
 
 // HasDuty reports whether the principal holds the named duty.
@@ -121,7 +123,9 @@ func requestLegalEntity(r *http.Request) (string, bool) {
 	return primary, true
 }
 
-// Middleware extracts the principal from headers. Requests without a tenant,
+// Middleware extracts the principal from headers, or from a verified service
+// token in X-Passage-Service-Token (which then replaces every user header; an
+// invalid token is a 401, never a fallback to the user headers). Requests without a tenant,
 // with a malformed tenant, or with the nil system tenant are rejected with 401;
 // a malformed or conflicting legal entity scope is rejected with 400. Health
 // endpoints pass through. The nil tenant is server-side only and is never
@@ -129,9 +133,31 @@ func requestLegalEntity(r *http.Request) (string, bool) {
 // explicitly asks for the ALL scope; on any other request it is dropped so an
 // unscoped call sees no legal-entity rows.
 func Middleware(next http.Handler) http.Handler {
+	return middlewareWith(currentServiceVerifier, next)
+}
+
+// MiddlewareWith is Middleware verifying service tokens against v instead of
+// the process-wide verifier.
+func MiddlewareWith(v *ServiceVerifier) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return middlewareWith(func() *ServiceVerifier { return v }, next)
+	}
+}
+
+func middlewareWith(verifier func() *ServiceVerifier, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
 			next.ServeHTTP(w, r)
+			return
+		}
+		if tokens := r.Header.Values(HeaderServiceToken); len(tokens) > 0 {
+			claims, err := verifier().Verify(tokens[0])
+			if err != nil || len(tokens) > 1 {
+				slog.WarnContext(r.Context(), "service token rejected", "path", r.URL.Path, "correlationId", middleware.GetReqID(r.Context()))
+				reject(w, r, http.StatusUnauthorized, "AUTH-0001", "Unauthorized", "invalid service token")
+				return
+			}
+			next.ServeHTTP(w, r.WithContext(With(r.Context(), claims.Principal())))
 			return
 		}
 		raw := r.Header.Get(HeaderTenant)

@@ -32,9 +32,17 @@ type Balance struct {
 	Credit   decimal.Decimal
 }
 
+const audience = "ledger"
+
 type Client struct {
 	baseURL string
 	http    *http.Client
+	signer  *tenant.ServiceSigner
+}
+
+func (c *Client) WithSigner(s *tenant.ServiceSigner) *Client {
+	c.signer = s
+	return c
 }
 
 func New(baseURL string, httpClient *http.Client) *Client {
@@ -73,7 +81,13 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, subject str
 	if err != nil {
 		return nil, fmt.Errorf("ledger: %w", err)
 	}
-	identity.Forward(req, principal)
+	signed, err := c.signer.Apply(req, principal, audience, "")
+	if err != nil {
+		return nil, fmt.Errorf("ledger: %w", err)
+	}
+	if !signed {
+		identity.Forward(req, principal)
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		slog.ErrorContext(ctx, "ledger request failed", "err", err, "subject", subject, "correlationId", middleware.GetReqID(ctx))

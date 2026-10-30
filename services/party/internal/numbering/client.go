@@ -26,9 +26,17 @@ const (
 	maxResponse        = 1 << 20
 )
 
+const audience = "numbering"
+
 type Client struct {
 	baseURL string
 	http    *http.Client
+	signer  *tenant.ServiceSigner
+}
+
+func (c *Client) WithSigner(s *tenant.ServiceSigner) *Client {
+	c.signer = s
+	return c
 }
 
 func New(baseURL string) *Client { return NewWithTimeout(baseURL, timeout) }
@@ -65,15 +73,21 @@ func (c *Client) allocate(ctx context.Context, code, idempotencyKey string) (str
 		return "", err
 	}
 	p, _ := tenant.FromContext(ctx)
-	duties := make([]string, 0, len(p.Duties))
-	for d := range p.Duties {
-		duties = append(duties, d)
+	signed, err := c.signer.Apply(req, p, audience, "")
+	if err != nil {
+		return "", err
 	}
-	sort.Strings(duties)
-	req.Header.Set(tenant.HeaderTenant, p.TenantID)
-	req.Header.Set(tenant.HeaderLegalEntity, p.LegalEntityID)
-	req.Header.Set(tenant.HeaderUser, p.UserID)
-	req.Header.Set(tenant.HeaderDuties, strings.Join(duties, ","))
+	if !signed {
+		duties := make([]string, 0, len(p.Duties))
+		for d := range p.Duties {
+			duties = append(duties, d)
+		}
+		sort.Strings(duties)
+		req.Header.Set(tenant.HeaderTenant, p.TenantID)
+		req.Header.Set(tenant.HeaderLegalEntity, p.LegalEntityID)
+		req.Header.Set(tenant.HeaderUser, p.UserID)
+		req.Header.Set(tenant.HeaderDuties, strings.Join(duties, ","))
+	}
 	req.Header.Set("Idempotency-Key", idempotencyKey)
 	resp, err := c.http.Do(req)
 	if err != nil {

@@ -42,18 +42,23 @@ func TestLoggerEmitsKernelLogFields(t *testing.T) {
 }
 
 func TestLedgerBalancesWiring(t *testing.T) {
-	if ledgerBalances(func(string) string { return "" }) != nil {
+	if lb, err := ledgerBalances(func(string) string { return "" }); lb != nil || err != nil {
 		t.Fatal("no LEDGER_URL must leave reconciliation without a ledger")
 	}
-	if ledgerBalances(func(string) string { return "http://ledger" }) == nil {
+	if lb, err := ledgerBalances(func(k string) string { return map[string]string{"LEDGER_URL": "http://ledger"}[k] }); lb == nil || err != nil {
 		t.Fatal("LEDGER_URL must configure the ledger client")
+	}
+	if _, err := ledgerBalances(func(k string) string {
+		return map[string]string{"LEDGER_URL": "http://ledger", "PASSAGE_SERVICE_SIGNING_KEY": "not-a-seed"}[k]
+	}); err == nil {
+		t.Fatal("a malformed service signing key must stop startup")
 	}
 }
 
 func TestLedgerBalancesTimeoutOverride(t *testing.T) {
-	if ledgerBalances(func(k string) string {
+	if lb, _ := ledgerBalances(func(k string) string {
 		return map[string]string{"LEDGER_URL": "http://ledger", "LEDGER_TIMEOUT": "750ms"}[k]
-	}) == nil {
+	}); lb == nil {
 		t.Fatal("LEDGER_TIMEOUT must not disable the ledger client")
 	}
 }

@@ -2,6 +2,7 @@ package periods
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -131,5 +132,28 @@ func TestAP_DoesNotFollowRedirectsWithTheCallersIdentity(t *testing.T) {
 
 	if err == nil || followed {
 		t.Fatalf("redirect followed %v, err %v", followed, err)
+	}
+}
+
+func TestAP_SignedSendsServiceTokenForTheQueriedLegalEntity(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	signer, _ := tenant.NewServiceSigner("receiving", priv)
+	var got http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		_, _ = w.Write([]byte(`{"allowed":true,"status":"open"}`))
+	}))
+	defer srv.Close()
+	principal := tenant.Principal{TenantID: tenantID, LegalEntityID: "ignored", UserID: "u-1"}
+	status, err := New(srv.URL, nil).WithSigner(signer).AP(tenant.With(context.Background(), principal), query())
+	if err != nil || status != domain.PeriodOpen {
+		t.Fatalf("status %q err %v", status, err)
+	}
+	if got.Get(tenant.HeaderDuties) != "" || got.Get(tenant.HeaderTenant) != "" {
+		t.Fatalf("user identity headers sent alongside the token: %v", got)
+	}
+	claims, err := tenant.NewServiceVerifier("close", map[string]ed25519.PublicKey{"receiving": pub}).Verify(got.Get(tenant.HeaderServiceToken))
+	if err != nil || claims.Le != entityID || claims.Act != "u-1" || !claims.Principal().HasDuty("period.check") {
+		t.Fatalf("claims %+v err %v", claims, err)
 	}
 }

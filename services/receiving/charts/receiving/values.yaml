@@ -31,3 +31,7 @@ alerts:
   severity: page
   errorRatio: 0.01
   p99LatencySeconds: 4
+
+serviceIdentity:
+  publicKeys: ""
+  signingKeySecret: ""

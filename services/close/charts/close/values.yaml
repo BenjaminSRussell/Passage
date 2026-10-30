@@ -15,3 +15,7 @@ config:
   reopenApprovers: 2
   lockWaitMs: 5000
   reopenSweepInterval: 1m
+
+serviceIdentity:
+  publicKeys: ""
+  signingKeySecret: ""

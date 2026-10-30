@@ -2,6 +2,7 @@ package ledger_test
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -122,5 +123,38 @@ func TestLedgerClient_DoesNotFollowRedirectsWithTenantHeaders(t *testing.T) {
 		if !errors.As(err, &se) || se.Status != http.StatusFound || leaked {
 			t.Fatalf("%s client: err=%v leaked=%v, want the 302 returned without following it", name, err, leaked)
 		}
+	}
+}
+
+func TestAccountBalance_SignedSendsPayablesServiceTokenWithoutUserDuties(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	signer, _ := tenant.NewServiceSigner("payables", priv)
+	var got http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		_, _ = w.Write([]byte(`{"currency":"USD","rows":[]}`))
+	}))
+	defer srv.Close()
+	principal := tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: testkit.TenantID(9), UserID: "u1"}
+	if _, err := ledger.New(srv.URL, nil).WithSigner(signer).AccountBalance(tenant.With(context.Background(), principal), "led-1", "2000", "2027-06"); err != nil {
+		t.Fatal(err)
+	}
+	if got.Get(tenant.HeaderDuties) != "" {
+		t.Fatalf("user duties sent alongside the token: %v", got)
+	}
+	claims, err := tenant.NewServiceVerifier("ledger", map[string]ed25519.PublicKey{"payables": pub}).Verify(got.Get(tenant.HeaderServiceToken))
+	if err != nil || claims.Act != "u1" || !claims.Principal().HasDuty("ledger.balance.read") || claims.Principal().HasDuty("ledger.journal.post") {
+		t.Fatalf("claims %+v err %v", claims, err)
+	}
+}
+
+func TestAccountBalance_SignedWithoutALegalEntityFailsBeforeSending(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(nil)
+	signer, _ := tenant.NewServiceSigner("payables", priv)
+	sent := false
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { sent = true }))
+	defer srv.Close()
+	if _, err := ledger.New(srv.URL, nil).WithSigner(signer).AccountBalance(ctx(), "led-1", "2000", "2027-06"); err == nil || sent {
+		t.Fatalf("err %v sent %v", err, sent)
 	}
 }

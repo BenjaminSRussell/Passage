@@ -36,6 +36,19 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.databaseSecret }}
                   key: DATABASE_URL
+            - name: PASSAGE_SERVICE_NAME
+              value: payables
+{{- if .Values.serviceIdentity.publicKeys }}
+            - name: PASSAGE_SERVICE_PUBLIC_KEYS
+              value: {{ .Values.serviceIdentity.publicKeys | quote }}
+{{- end }}
+{{- if .Values.serviceIdentity.signingKeySecret }}
+            - name: PASSAGE_SERVICE_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.serviceIdentity.signingKeySecret }}
+                  key: signing-key
+{{- end }}
             - { name: LEDGER_URL, value: {{ .Values.ledgerUrl | quote }} }
             - { name: AP_CONTROL_ACCOUNT, value: {{ .Values.controlAccount | quote }} }
             - { name: FX_URL, value: {{ .Values.fxUrl | quote }} }

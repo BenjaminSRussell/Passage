@@ -351,5 +351,17 @@
     "party.approval_policy.write": {"permissions": [
       {"resource": "/v1/party/legal-entities/*/protected-fields", "methods": ["PUT"]}
     ]}
+  },
+  "service_grants": {
+    "receiving": {
+      "ledger": ["ledger.journal.post", "ledger.journal.reverse"],
+      "close": ["period.check"]
+    },
+    "payables": {
+      "ledger": ["ledger.balance.read", "ledger.journal.read"]
+    },
+    "party": {
+      "numbering": ["numbering.write"]
+    }
   }
 }

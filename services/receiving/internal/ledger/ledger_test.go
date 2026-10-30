@@ -2,6 +2,7 @@ package ledger
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -351,5 +352,61 @@ func TestPost_DoesNotFollowRedirectsWithTheCallersIdentity(t *testing.T) {
 
 	if err == nil || followed {
 		t.Fatalf("redirect followed %v, err %v", followed, err)
+	}
+}
+
+func testSigner(t *testing.T) (*tenant.ServiceSigner, *tenant.ServiceVerifier) {
+	t.Helper()
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	signer, err := tenant.NewServiceSigner("receiving", priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return signer, tenant.NewServiceVerifier("ledger", map[string]ed25519.PublicKey{"receiving": pub})
+}
+
+func TestSignedPostSendsServiceTokenInsteadOfUserDuties(t *testing.T) {
+	const entity = "00000000-0000-4000-8000-0000000000e1"
+	signer, verifier := testSigner(t)
+	client, got, _ := serve(t, http.StatusCreated, `{"journalEntryId":"je-1"}`)
+	client.WithSigner(signer)
+	entry := testEntry()
+	entry.LegalEntityID = entity
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: "other", UserID: "u-1", Duties: map[string]struct{}{"ReceivingPost": {}}})
+	if _, err := client.Post(ctx, entry); err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range []string{"X-Passage-Duties", "X-Passage-User", "X-Passage-Tenant", "X-Passage-Legal-Entity"} {
+		if got.Header.Get(h) != "" {
+			t.Fatalf("%s must not be sent with a service token: %v", h, got.Header)
+		}
+	}
+	claims, err := verifier.Verify(got.Header.Get(tenant.HeaderServiceToken))
+	if err != nil || claims.Le != entity || claims.Act != "u-1" || claims.Tid != tenantID || claims.Aud != "ledger" {
+		t.Fatalf("claims %+v err %v", claims, err)
+	}
+}
+
+func TestSignedReverseUsesPrincipalLegalEntity(t *testing.T) {
+	const entity = "00000000-0000-4000-8000-0000000000e1"
+	signer, verifier := testSigner(t)
+	client, got, _ := serve(t, http.StatusCreated, `{}`)
+	client.WithSigner(signer)
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: entity, UserID: "u-1"})
+	if err := client.Reverse(ctx, "je-1", "rev-key", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if claims, err := verifier.Verify(got.Header.Get(tenant.HeaderServiceToken)); err != nil || claims.Le != entity {
+		t.Fatalf("claims %+v err %v", claims, err)
+	}
+}
+
+func TestSignedPostWithoutExplicitSingleLegalEntityFailsBeforeSending(t *testing.T) {
+	signer, _ := testSigner(t)
+	client, got, _ := serve(t, http.StatusCreated, `{"journalEntryId":"je-1"}`)
+	client.WithSigner(signer)
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, UserID: "u-1"})
+	if _, err := client.Post(ctx, testEntry()); err == nil || got.Method != "" {
+		t.Fatalf("err %v, request sent: %q", err, got.Method)
 	}
 }

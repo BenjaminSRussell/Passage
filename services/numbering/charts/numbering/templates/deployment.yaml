@@ -33,6 +33,19 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.databaseSecret }}
                   key: DATABASE_URL
+            - name: PASSAGE_SERVICE_NAME
+              value: numbering
+{{- if .Values.serviceIdentity.publicKeys }}
+            - name: PASSAGE_SERVICE_PUBLIC_KEYS
+              value: {{ .Values.serviceIdentity.publicKeys | quote }}
+{{- end }}
+{{- if .Values.serviceIdentity.signingKeySecret }}
+            - name: PASSAGE_SERVICE_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.serviceIdentity.signingKeySecret }}
+                  key: signing-key
+{{- end }}
             - name: MIGRATE_ON_START
               value: {{ .Values.migrateOnStart | quote }}
           ports:

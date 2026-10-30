@@ -35,9 +35,17 @@ const (
 
 var periodClosedCodes = []string{"period_closed", "LEDGER_PERIOD_CLOSED"}
 
+const audience = "ledger"
+
 type Client struct {
 	baseURL string
 	http    *http.Client
+	signer  *tenant.ServiceSigner
+}
+
+func (c *Client) WithSigner(s *tenant.ServiceSigner) *Client {
+	c.signer = s
+	return c
 }
 
 func New(baseURL string, httpClient *http.Client) *Client {
@@ -147,7 +155,7 @@ func buildBody(entry domain.JournalEntry) (requestBody, error) {
 	return body, nil
 }
 
-func (c *Client) newRequest(ctx context.Context, path, idempotencyKey string, payload any) (*http.Request, error) {
+func (c *Client) newRequest(ctx context.Context, path, idempotencyKey, legalEntity string, payload any) (*http.Request, error) {
 	principal, ok := tenant.FromContext(ctx)
 	if !ok {
 		return nil, errors.New("no principal in context")
@@ -162,7 +170,13 @@ func (c *Client) newRequest(ctx context.Context, path, idempotencyKey string, pa
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Idempotency-Key", idempotencyKey)
-	identity.Forward(req, principal)
+	signed, err := c.signer.Apply(req, principal, audience, legalEntity)
+	if err != nil {
+		return nil, err
+	}
+	if !signed {
+		identity.Forward(req, principal)
+	}
 	return req, nil
 }
 
@@ -200,7 +214,7 @@ func (c *Client) Post(ctx context.Context, entry domain.JournalEntry) (string, e
 	if err != nil {
 		return "", fmt.Errorf("ledger post %s: %w", entry.IdempotencyKey, err)
 	}
-	req, err := c.newRequest(ctx, domain.LedgerPostPath, entry.IdempotencyKey, body)
+	req, err := c.newRequest(ctx, domain.LedgerPostPath, entry.IdempotencyKey, entry.LegalEntityID, body)
 	if err != nil {
 		return "", fmt.Errorf("ledger post %s: %w", entry.IdempotencyKey, err)
 	}
@@ -233,7 +247,7 @@ func (c *Client) rejection(ctx context.Context, op, subject string, status int, 
 
 func (c *Client) Reverse(ctx context.Context, entryID, idempotencyKey string, postingDate time.Time) error {
 	body := reverseBody{PostingDate: postingDate.Format(dateFormat), Description: reversalDescription}
-	req, err := c.newRequest(ctx, fmt.Sprintf(domain.LedgerReversePathTmpl, url.PathEscape(entryID)), idempotencyKey, body)
+	req, err := c.newRequest(ctx, fmt.Sprintf(domain.LedgerReversePathTmpl, url.PathEscape(entryID)), idempotencyKey, "", body)
 	if err != nil {
 		return fmt.Errorf("ledger reverse %s: %w", entryID, err)
 	}
