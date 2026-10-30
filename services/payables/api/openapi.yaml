@@ -482,7 +482,10 @@ components:
                 additionalProperties: false
                 required: [type, format]
                 properties:
-                  type: { type: string, enum: [TRANSFER, WIRE] }
+                  type:
+                    type: string
+                    enum: [TRANSFER, WIRE]
+                    description: Narrower than the bank profile method enum (TRANSFER, ACH, CHECK, CARD, WIRE) on purpose. The preview only renders pain.001, and only TRANSFER and WIRE map to the PAIN001 format; ACH (NACHA), CHECK and CARD cannot be sent as pain.001.
                   format: { type: string, enum: [PAIN001] }
                   minPayment: { $ref: '#/components/schemas/DecimalString' }
                   maxPayment: { $ref: '#/components/schemas/DecimalString' }
