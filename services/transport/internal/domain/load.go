@@ -82,6 +82,7 @@ type Load struct {
 	ShipmentIDs    []string        `json:"shipmentIds"`
 	Version        int             `json:"version"`
 	CreatedAt      time.Time       `json:"createdAt"`
+	LegalEntityID  string          `json:"-"`
 }
 
 // ValidateLoadBuild reports field errors for a rule-based load build.

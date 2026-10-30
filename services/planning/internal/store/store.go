@@ -28,6 +28,8 @@ const (
 	CodeVersionNotFound  = "PLAN-VERSION-NOT-FOUND"
 	CodeOrderNotFound    = "PLAN-ORDER-NOT-FOUND"
 	CodeAlreadyRunning   = "PLAN-0001"
+	CodeCodeTaken        = "PLAN-CODE-TAKEN"
+	CodeForecastEntity   = "PLAN-FORECAST-ENTITY"
 	CodeOrderNotEditable = "PLAN-ORDER-NOT-EDITABLE"
 	CodeOrderInvalid     = "PLAN-ORDER-INVALID"
 	CodeForecastNotFound = "PLAN-FORECAST-NOT-FOUND"
@@ -57,7 +59,7 @@ type Store interface {
 	UpdatePlannedOrder(ctx context.Context, id string, expectedVersion int, patch OrderPatch) (PlannedOrder, error)
 	DeletePlannedOrder(ctx context.Context, id string, expectedVersion int) error
 	FirmPlannedOrders(ctx context.Context, req FirmRequest) (FirmBatch, bool, error)
-	UpsertForecastLines(ctx context.Context, modelCode string, expectedVersion int, spec *ModelSpec, cells []ForecastCellInput) (ForecastModel, error)
+	UpsertForecastLines(ctx context.Context, modelCode, legalEntityID string, expectedVersion int, spec *ModelSpec, cells []ForecastCellInput) (ForecastModel, error)
 	ListForecastLines(ctx context.Context, modelCode, itemID, siteID string, limit int) (ForecastModel, []ForecastLine, error)
 	ForecastDemand(ctx context.Context, modelCode, siteID string, from time.Time) ([]ForecastDemandLine, error)
 	SubmitForecastConsensus(ctx context.Context, modelCode string, expectedVersion int) (ForecastModel, error)
@@ -116,6 +118,8 @@ func (s *Postgres) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 // RunRequest is one persisted plan run.
 type RunRequest struct {
 	PlanCode       string
+	LegalEntityID  string
+	ForecastModel  string
 	SiteID         string
 	AsOf           time.Time
 	ItemsPlanned   int
@@ -219,9 +223,14 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 				return err
 			}
 		}
-		planID, err := lockPlan(ctx, tx, p.TenantID, req.PlanCode)
+		planID, planEntity, err := lockPlan(ctx, tx, p.TenantID, req.PlanCode, req.LegalEntityID)
 		if err != nil {
 			return err
+		}
+		if req.ForecastModel != "" {
+			if err := requireModelEntity(ctx, tx, p.TenantID, req.ForecastModel, planEntity); err != nil {
+				return err
+			}
 		}
 		var number int
 		if err := tx.QueryRow(ctx, `select coalesce(max(number), 0) + 1 from plan_version where tenant_id = $1 and plan_id = $2`, p.TenantID, planID).Scan(&number); err != nil {
@@ -246,9 +255,9 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 		}); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `insert into plan_version (tenant_id, id, plan_id, number, site_id, as_of, status, items_planned, planned_orders_count, messages_count, duration_ms, plan_hash, input_hash, idempotency_key)
-			values ($1, $2, $3, $4, $5, $6::date, 'current', $7, $8, $9, $10, $11, $12, $13)`,
-			p.TenantID, versionID, planID, number, req.SiteID, asOf, req.ItemsPlanned, len(r.Orders), len(r.Messages), req.DurationMs, r.Hash, req.InputHash, key); err != nil {
+		if _, err := tx.Exec(ctx, `insert into plan_version (tenant_id, id, plan_id, number, site_id, as_of, status, items_planned, planned_orders_count, messages_count, duration_ms, plan_hash, input_hash, idempotency_key, legal_entity_id)
+			values ($1, $2, $3, $4, $5, $6::date, 'current', $7, $8, $9, $10, $11, $12, $13, nullif($14, '')::uuid)`,
+			p.TenantID, versionID, planID, number, req.SiteID, asOf, req.ItemsPlanned, len(r.Orders), len(r.Messages), req.DurationMs, r.Hash, req.InputHash, key, planEntity); err != nil {
 			return err
 		}
 		// One round trip per kind of output row instead of one per row; COPY is
@@ -387,18 +396,71 @@ func purgeVersions(ctx context.Context, tx pgx.Tx, tenantID, planID string, cut 
 }
 
 // lockPlan creates the plan on first use and locks its row for the run; a second
-// run that cannot take the lock immediately is refused (FR-22.1, AC-22.9).
-func lockPlan(ctx context.Context, tx pgx.Tx, tenantID, code string) (string, error) {
-	if _, err := tx.Exec(ctx, `insert into plan (tenant_id, id, code) values ($1, $2, $3) on conflict (tenant_id, code) do nothing`, tenantID, ids.New(), code); err != nil {
-		return "", err
+// run that cannot take the lock immediately is refused (FR-22.1, AC-22.9). An
+// existing plan keeps its owner and the requested entity is only an assertion
+// (422 when it differs); a new plan is owned by the entity OwnerLegalEntity
+// resolves.
+func lockPlan(ctx context.Context, tx pgx.Tx, tenantID, code, requestedEntity string) (string, string, error) {
+	var visible string
+	err := tx.QueryRow(ctx, `select coalesce(legal_entity_id::text, '') from plan where tenant_id = $1 and code = $2`, tenantID, code).Scan(&visible)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		newEntity, err := httpx.OwnerLegalEntity(ctx, requestedEntity)
+		if err != nil {
+			return "", "", err
+		}
+		if _, err := tx.Exec(ctx, `insert into plan (tenant_id, id, code, legal_entity_id) values ($1, $2, $3, nullif($4, '')::uuid) on conflict (tenant_id, code) do nothing`,
+			tenantID, ids.New(), code, newEntity); err != nil {
+			return "", "", err
+		}
+	case err != nil:
+		return "", "", err
+	default:
+		if err := assertOwner(requestedEntity, visible); err != nil {
+			return "", "", err
+		}
 	}
-	var id string
-	err := tx.QueryRow(ctx, `select id::text from plan where tenant_id = $1 and code = $2 for update nowait`, tenantID, code).Scan(&id)
+	var id, entity string
+	err = tx.QueryRow(ctx, `select id::text, coalesce(legal_entity_id::text, '') from plan where tenant_id = $1 and code = $2 for update nowait`, tenantID, code).Scan(&id, &entity)
 	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == lockNotAvailable {
-		return "", httpx.NewProblem(http.StatusConflict, CodeAlreadyRunning, "a run of plan "+code+" is already in progress")
+	switch {
+	case errors.As(err, &pgErr) && pgErr.Code == lockNotAvailable:
+		return "", "", httpx.NewProblem(http.StatusConflict, CodeAlreadyRunning, "a run of plan "+code+" is already in progress")
+	case errors.Is(err, pgx.ErrNoRows):
+		return "", "", codeTaken("plan", code)
 	}
-	return id, err
+	return id, entity, err
+}
+
+func codeTaken(what, code string) error {
+	return httpx.NewProblem(http.StatusConflict, CodeCodeTaken, what+" code "+code+" is already used by a "+what+" outside the caller's legal-entity scope, including one that has no legal entity yet; an administrator must assign one")
+}
+
+func assertOwner(requested, owner string) error {
+	if requested == "" {
+		return nil
+	}
+	if asserted, ok := ids.Canonical(requested); !ok || asserted != owner {
+		bad := httpx.NewProblem(http.StatusUnprocessableEntity, "COM-0001", "request failed validation")
+		bad.Errors = map[string]string{"legalEntityId": "does not match the legal entity that owns the existing record"}
+		return bad
+	}
+	return nil
+}
+
+func requireModelEntity(ctx context.Context, tx pgx.Tx, tenantID, modelCode, planEntity string) error {
+	var entity string
+	err := tx.QueryRow(ctx, `select coalesce(legal_entity_id::text, '') from forecast_model where tenant_id = $1 and code = $2`, tenantID, modelCode).Scan(&entity)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeForecastNotFound, "forecast model "+modelCode+" does not exist")
+	}
+	if err != nil {
+		return err
+	}
+	if entity != planEntity {
+		return httpx.NewProblem(http.StatusUnprocessableEntity, CodeForecastEntity, "forecast model "+modelCode+" belongs to a different legal entity than the plan")
+	}
+	return nil
 }
 
 const versionSelect = `select v.id::text, p.code, v.number, v.status, to_char(v.as_of, 'YYYY-MM-DD'), v.items_planned,

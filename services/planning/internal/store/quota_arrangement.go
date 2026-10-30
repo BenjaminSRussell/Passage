@@ -39,6 +39,7 @@ type QuotaArrangement struct {
 // QuotaCreate is one create command; IdempotencyKey and InputHash are empty
 // when the caller sent no Idempotency-Key.
 type QuotaCreate struct {
+	LegalEntityID  string
 	IdempotencyKey string
 	InputHash      string
 	Spec           domain.QuotaArrangementSpec
@@ -139,7 +140,11 @@ func (s *Postgres) CreateQuotaArrangement(ctx context.Context, req QuotaCreate) 
 		key, hash = &req.IdempotencyKey, &req.InputHash
 	}
 	spec := req.Spec
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	entity, err := httpx.OwnerLegalEntity(ctx, req.LegalEntityID)
+	if err != nil {
+		return QuotaArrangement{}, false, err
+	}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if key != nil {
 			var stored string
 			err := tx.QueryRow(ctx, `select input_hash from quota_arrangement where tenant_id = $1 and idempotency_key = $2`,
@@ -161,9 +166,9 @@ func (s *Postgres) CreateQuotaArrangement(ctx context.Context, req QuotaCreate) 
 			return err
 		}
 		if _, err := tx.Exec(ctx, `insert into quota_arrangement (tenant_id, id, item_id, site_id, valid_from, valid_to,
-			split, min_split_qty, idempotency_key, input_hash) values ($1, $2, $3, $4, $5, $6, $7, $8::numeric, $9, $10)`,
+			split, min_split_qty, idempotency_key, input_hash, legal_entity_id) values ($1, $2, $3, $4, $5, $6, $7, $8::numeric, $9, $10, nullif($11, '')::uuid)`,
 			p.TenantID, id, spec.ItemID, spec.SiteID, spec.ValidFrom, spec.ValidTo, spec.Split, spec.MinSplitQty.String(),
-			key, hash); err != nil {
+			key, hash, entity); err != nil {
 			return err
 		}
 		if err := insertQuotaSources(ctx, tx, p.TenantID, id, spec.Sources); err != nil {

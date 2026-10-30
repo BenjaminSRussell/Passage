@@ -171,3 +171,17 @@ not edit that code).
 - PSG-20 inventory costing: current item cost for the inventory forecast value (FR-22.22).
 - PSG-48 sanctions screening.
 - Policies (`policies/`, not owned by this wave): register the duty `planning.forecast.approve` (Approve forecast consensus) for the supply chain manager role, apart from `planning.forecast.maintain` (Demand planner), and `planning.setup.maintain` (Maintain planning setup: coverage groups, item coverage, buffer profiles, quota arrangements) for the planning administrator role. The buffer recalculation uses `planning.run` (Run master planning, including the batch service account).
+
+## Legal-entity scope follow-ups (#241)
+
+- **later slice**: `firming_batch`, `coverage_group`, `item_coverage`, `buffer_profile`
+  and `ddmrp_buffer` are still tenant-level; they have no line tables.
+- **later slice**: `firming_batch.response` and the rows of `ddmrp_buffer` and
+  `item_coverage` stay tenant-level (tracked in the #241 follow-up issue).
+- **handoff**: when the scope-claim hardening of PR #256 lands, `httpx.OwnerLegalEntity`
+  must also require `tenant.DutyAllScope` for a caller with no legal entity.
+- **handoff**: existing rows keep a NULL `legal_entity_id`; assigning them is a
+  data migration owned by the tenant administrator. Until it runs, a scoped caller
+  that reuses the code of such a plan or forecast model gets 409 `PLAN-CODE-TAKEN`
+  (the message says an administrator must assign a legal entity), and an
+  all-entity caller must name the owner when it creates.

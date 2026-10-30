@@ -77,7 +77,7 @@ func TestTender_AC343(t *testing.T) {
 	s, admin := setup(t)
 	ctx := tenantCtx(1)
 	c1, c2, c3 := ids.New(), ids.New(), ids.New()
-	in := sentTender(ids.New(), 10*time.Minute, c1, c2, c3)
+	in := sentTender(seedLoad(t, s, ctx), 10*time.Minute, c1, c2, c3)
 	in.Currency, in.Rates = "USD", map[string]decimal.Decimal{c3: dec("412.5")}
 	created, err := s.CreateTender(ctx, in, store.Idem{}, t0)
 	if err != nil {
@@ -143,7 +143,7 @@ func TestTender_LateAcceptanceSavesTheCascade(t *testing.T) {
 	s, admin := setup(t)
 	ctx := tenantCtx(1)
 	c1, c2 := ids.New(), ids.New()
-	created, err := s.CreateTender(ctx, sentTender(ids.New(), 10*time.Minute, c1, c2), store.Idem{}, t0)
+	created, err := s.CreateTender(ctx, sentTender(seedLoad(t, s, ctx), 10*time.Minute, c1, c2), store.Idem{}, t0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestTender_LateAcceptanceSavesTheCascade(t *testing.T) {
 func TestTender_OneOpenTenderPerLoad(t *testing.T) {
 	s, admin := setup(t)
 	ctx := tenantCtx(1)
-	load, c1 := ids.New(), ids.New()
+	load, c1 := seedLoad(t, s, ctx), ids.New()
 	first, err := s.CreateTender(ctx, sentTender(load, 10*time.Minute, c1), store.Idem{}, t0)
 	if err != nil {
 		t.Fatal(err)
@@ -210,7 +210,7 @@ func TestTender_OneOpenTenderPerLoad(t *testing.T) {
 func TestTender_IdempotentAndTenantIsolated(t *testing.T) {
 	s, _ := setup(t)
 	ctx := tenantCtx(1)
-	in := sentTender(ids.New(), 10*time.Minute, ids.New())
+	in := sentTender(seedLoad(t, s, ctx), 10*time.Minute, ids.New())
 	key := store.Idem{Key: "tender-1", Fingerprint: "a"}
 	first, err := s.CreateTender(ctx, in, key, t0)
 	if err != nil {
@@ -243,7 +243,7 @@ func TestTender_IdempotentAndTenantIsolated(t *testing.T) {
 func TestTracking_IngestReplayAndTimeline(t *testing.T) {
 	s, admin := setup(t)
 	ctx := tenantCtx(1)
-	load := ids.New()
+	load := seedLoad(t, s, ctx)
 	d1 := domain.TrackingEvent{LoadID: load, StopNo: 2, Code: "D1", OccurredAt: t0.Add(3 * time.Hour), Location: "Dallas TX", Source: "EDI214", Ref: "ISA-1"}
 	saved, inserted, err := s.RecordTrackingEvent(ctx, d1)
 	if err != nil || !inserted || saved.ID == "" || !saved.OccurredAt.Equal(d1.OccurredAt) || saved.ReceivedAt.IsZero() {
@@ -281,6 +281,7 @@ func TestTracking_IngestReplayAndTimeline(t *testing.T) {
 		t.Fatalf("tenant 2 sees %+v", other)
 	}
 	// Tenant 2 may use the same source and ref for its own report.
+	changed.LoadID = seedLoad(t, s, tenantCtx(2))
 	if _, inserted, err := s.RecordTrackingEvent(tenantCtx(2), changed); err != nil || !inserted {
 		t.Fatalf("tenant 2 ingest = %v %v", inserted, err)
 	}

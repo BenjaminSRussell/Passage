@@ -98,22 +98,23 @@ type quotaSourceInput struct {
 // quotaArrangementRequest is the body of a create or a full update. Dates are
 // YYYY-MM-DD and inclusive.
 type quotaArrangementRequest struct {
-	ItemID      string             `json:"itemId"`
-	SiteID      string             `json:"siteId"`
-	ValidFrom   string             `json:"validFrom"`
-	ValidTo     string             `json:"validTo"`
-	Split       bool               `json:"split"`
-	MinSplitQty decimal.Decimal    `json:"minSplitQty"`
-	Sources     []quotaSourceInput `json:"sources"`
+	LegalEntityID string             `json:"legalEntityId"`
+	ItemID        string             `json:"itemId"`
+	SiteID        string             `json:"siteId"`
+	ValidFrom     string             `json:"validFrom"`
+	ValidTo       string             `json:"validTo"`
+	Split         bool               `json:"split"`
+	MinSplitQty   decimal.Decimal    `json:"minSplitQty"`
+	Sources       []quotaSourceInput `json:"sources"`
 }
 
 // decodeQuotaArrangement reads and validates the body; it answers the request
 // itself and returns false when the body is unusable.
-func decodeQuotaArrangement(w http.ResponseWriter, r *http.Request) (domain.QuotaArrangementSpec, bool) {
+func decodeQuotaArrangement(w http.ResponseWriter, r *http.Request) (domain.QuotaArrangementSpec, string, bool) {
 	var req quotaArrangementRequest
 	if err := httpx.Decode(r, &req); err != nil {
 		httpx.Fail(w, r, err)
-		return domain.QuotaArrangementSpec{}, false
+		return domain.QuotaArrangementSpec{}, "", false
 	}
 	// An unparsable date stays zero, which Validate reports.
 	from, _ := time.Parse(dateLayout, req.ValidFrom)
@@ -128,9 +129,9 @@ func decodeQuotaArrangement(w http.ResponseWriter, r *http.Request) (domain.Quot
 	}
 	if fields := spec.Validate(); len(fields) > 0 {
 		validationFailed(w, r, fields)
-		return domain.QuotaArrangementSpec{}, false
+		return domain.QuotaArrangementSpec{}, "", false
 	}
-	return spec, true
+	return spec, req.LegalEntityID, true
 }
 
 // quotaArrangementID reads {id}; an ill-formed id cannot exist, so it is 404.
@@ -216,13 +217,13 @@ func (a *API) createQuotaArrangement(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, map[string]string{idempotencyKey: "must be at most 255 characters"})
 		return
 	}
-	spec, ok := decodeQuotaArrangement(w, r)
+	spec, legalEntityID, ok := decodeQuotaArrangement(w, r)
 	if !ok {
 		return
 	}
 	body, _ := json.Marshal(spec)
 	arr, replayed, err := a.store.CreateQuotaArrangement(r.Context(), store.QuotaCreate{
-		IdempotencyKey: key, InputHash: fmt.Sprintf("%x", sha256.Sum256(body)), Spec: spec,
+		LegalEntityID: legalEntityID, IdempotencyKey: key, InputHash: fmt.Sprintf("%x", sha256.Sum256(body)), Spec: spec,
 	})
 	if err != nil {
 		httpx.Fail(w, r, err)
@@ -249,7 +250,7 @@ func (a *API) updateQuotaArrangement(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	spec, ok := decodeQuotaArrangement(w, r)
+	spec, _, ok := decodeQuotaArrangement(w, r)
 	if !ok {
 		return
 	}

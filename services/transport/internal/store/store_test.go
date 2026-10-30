@@ -64,6 +64,22 @@ func newBill(carrier string, amount string) domain.FreightBill {
 		ExpectedLines: []domain.Line{{ChargeCode: "BASE", Amount: dec(amount)}}}
 }
 
+func seedLoad(t *testing.T, s *store.Postgres, ctx context.Context) string {
+	t.Helper()
+	loads, err := s.BuildLoads(ctx, built(t, shipments(1, ids.New(), "10")), store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return loads[0].ID
+}
+
+func billOn(t *testing.T, s *store.Postgres, ctx context.Context, carrier, amount string) domain.FreightBill {
+	t.Helper()
+	bill := newBill(carrier, amount)
+	bill.LoadID = seedLoad(t, s, ctx)
+	return bill
+}
+
 func newInvoice(carrier, number string, bill *string, amount string) domain.CarrierInvoice {
 	return domain.CarrierInvoice{CarrierID: carrier, InvoiceNo: number, InvoiceDate: "2026-06-03", Source: "EDI210", FreightBillID: bill,
 		Currency: "USD", Lines: []domain.Line{{ChargeCode: "BASE", Amount: dec(amount)}}}
@@ -181,14 +197,14 @@ func TestFreightBill_IdempotentAndTenantIsolated(t *testing.T) {
 	s, _ := setup(t)
 	ctx := tenantCtx(1)
 	idem := store.Idem{Key: "bill-1", Fingerprint: "fp"}
-	bill, err := s.CreateFreightBill(ctx, newBill(ids.New(), "412.50"), idem)
+	bill, err := s.CreateFreightBill(ctx, billOn(t, s, ctx, ids.New(), "412.50"), idem)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if bill.MatchStatus != domain.BillUnmatched || !bill.ExpectedTotal.Equal(dec("412.50")) || bill.Version != 1 || bill.CreatedAt.IsZero() {
 		t.Fatalf("bill = %+v", bill)
 	}
-	replay, err := s.CreateFreightBill(ctx, newBill(ids.New(), "1"), store.Idem{Key: "bill-1", Fingerprint: "fp"})
+	replay, err := s.CreateFreightBill(ctx, billOn(t, s, ctx, ids.New(), "1"), store.Idem{Key: "bill-1", Fingerprint: "fp"})
 	if err != nil || replay.ID != bill.ID {
 		t.Fatalf("replay = %+v, %v", replay, err)
 	}
@@ -200,7 +216,7 @@ func TestFreightBill_IdempotentAndTenantIsolated(t *testing.T) {
 		t.Fatalf("other tenant list = %v, %v", list, err)
 	}
 	// The same key in another tenant is a different command.
-	if _, err := s.CreateFreightBill(other, newBill(ids.New(), "10"), store.Idem{Key: "bill-1", Fingerprint: "other"}); err != nil {
+	if _, err := s.CreateFreightBill(other, billOn(t, s, other, ids.New(), "10"), store.Idem{Key: "bill-1", Fingerprint: "other"}); err != nil {
 		t.Fatalf("same key in another tenant: %v", err)
 	}
 }
@@ -212,7 +228,7 @@ func TestRegisterCarrierInvoice_AC344(t *testing.T) {
 	s, admin := setup(t)
 	ctx := tenantCtx(1)
 	carrier := ids.New()
-	bill, err := s.CreateFreightBill(ctx, newBill(carrier, "412.50"), store.Idem{})
+	bill, err := s.CreateFreightBill(ctx, billOn(t, s, ctx, carrier, "412.50"), store.Idem{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +261,7 @@ func TestRegisterCarrierInvoice_Rejections(t *testing.T) {
 	s, admin := setup(t)
 	ctx := tenantCtx(1)
 	carrier := ids.New()
-	bill, err := s.CreateFreightBill(ctx, newBill(carrier, "100.00"), store.Idem{})
+	bill, err := s.CreateFreightBill(ctx, billOn(t, s, ctx, carrier, "100.00"), store.Idem{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +271,7 @@ func TestRegisterCarrierInvoice_Rejections(t *testing.T) {
 	unknown := ids.New()
 	euro := newInvoice(carrier, "INV-EUR", &bill.ID, "100.00")
 	euro.Currency = "EUR"
-	freshBill, err := s.CreateFreightBill(ctx, newBill(carrier, "50.00"), store.Idem{})
+	freshBill, err := s.CreateFreightBill(ctx, billOn(t, s, ctx, carrier, "50.00"), store.Idem{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,14 +333,14 @@ func TestListFreightBills_FiltersByStatusAndCarrier(t *testing.T) {
 	s, _ := setup(t)
 	ctx := tenantCtx(1)
 	a, b := ids.New(), ids.New()
-	matched, err := s.CreateFreightBill(ctx, newBill(a, "100.00"), store.Idem{})
+	matched, err := s.CreateFreightBill(ctx, billOn(t, s, ctx, a, "100.00"), store.Idem{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := s.RegisterCarrierInvoice(ctx, newInvoice(a, "M-1", &matched.ID, "101.00")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateFreightBill(ctx, newBill(b, "50.00"), store.Idem{}); err != nil {
+	if _, err := s.CreateFreightBill(ctx, billOn(t, s, ctx, b, "50.00"), store.Idem{}); err != nil {
 		t.Fatal(err)
 	}
 	all, err := s.ListFreightBills(ctx, store.FreightBillFilter{})

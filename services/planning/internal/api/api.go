@@ -139,6 +139,8 @@ func validationFailed(w http.ResponseWriter, r *http.Request, fields map[string]
 type runRequest struct {
 	AsOf   string `json:"asOf"`
 	SiteID string `json:"siteId"`
+	// LegalEntityID owns the plan when this run creates it; for an existing plan it is an assertion of its owner.
+	LegalEntityID string `json:"legalEntityId,omitempty"`
 	// ForecastModel, when set, adds the model's reduced forecast at the site
 	// as forecast demand of the snapshot's items (FR-22.8).
 	ForecastModel string `json:"forecastModel,omitempty"`
@@ -434,7 +436,7 @@ func (a *API) runPlan(w http.ResponseWriter, r *http.Request) {
 	}
 	elapsed := a.now().Sub(started).Milliseconds()
 	v, replayed, err := a.store.RunPlan(r.Context(), store.RunRequest{
-		PlanCode: code, SiteID: req.SiteID, AsOf: asOf, ItemsPlanned: len(items), DurationMs: elapsed,
+		PlanCode: code, SiteID: req.SiteID, LegalEntityID: req.LegalEntityID, ForecastModel: req.ForecastModel, AsOf: asOf, ItemsPlanned: len(items), DurationMs: elapsed,
 		InputHash: fmt.Sprintf("%x", sha256.Sum256(body)), IdempotencyKey: key, Result: result,
 	})
 	if err != nil {

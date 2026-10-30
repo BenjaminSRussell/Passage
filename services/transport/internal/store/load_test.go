@@ -191,7 +191,7 @@ func matchedBill(t *testing.T, s *store.Postgres, invoiced string) domain.Freigh
 	t.Helper()
 	ctx := tenantCtx(1)
 	carrier := ids.New()
-	bill, err := s.CreateFreightBill(ctx, newBill(carrier, "412.50"), store.Idem{})
+	bill, err := s.CreateFreightBill(ctx, billOn(t, s, ctx, carrier, "412.50"), store.Idem{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,7 +282,7 @@ func TestDecideFreightBill_MatchedAndUnmatched(t *testing.T) {
 	if approved, err := s.DecideFreightBill(ctx, bill.ID, domain.ActionApprove, "", bill.Version, store.Idem{}, t0); err != nil || approved.MatchStatus != domain.BillApproved {
 		t.Fatalf("approve matched = %+v, %v", approved, err)
 	}
-	open, err := s.CreateFreightBill(ctx, newBill(ids.New(), "100"), store.Idem{})
+	open, err := s.CreateFreightBill(ctx, billOn(t, s, ctx, ids.New(), "100"), store.Idem{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -42,6 +42,7 @@ type checkInRequest struct {
 	ArrivedAt       string `json:"arrivedAt"`
 	FreeTimeMin     *int   `json:"freeTimeMin"`
 	ToleranceMin    *int   `json:"toleranceMin"`
+	LegalEntityID   string `json:"legalEntityId"`
 }
 
 type checkOutRequest struct {
@@ -127,6 +128,7 @@ func (a *API) checkIn(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, ruleError(err))
 		return
 	}
+	visit.LegalEntityID = req.LegalEntityID
 	saved, err := a.store.CheckIn(r.Context(), visit, idem)
 	if err != nil {
 		a.fail(w, r, "gate check-in failed", err)
