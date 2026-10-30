@@ -119,7 +119,10 @@
       {"resource": "/v1/ledger/ledgers/*/account-mappings", "methods": ["POST"]}
     ]},
     "Calculate tax": {"permissions": [{"resource": "/v1/tax/calculate", "methods": ["POST"]}]},
-    "period.check": {"permissions": [{"resource": "/v1/close/period-statuses:check", "methods": ["POST"]}]},
+    "period.check": {"permissions": [
+      {"resource": "/v1/close/period-statuses:check", "methods": ["POST"]},
+      {"resource": "/v1/close/periods:resolve", "methods": ["GET"]}
+    ]},
     "reporting.statement.view": {"permissions": [
       {"resource": "/v1/reporting/definitions", "methods": ["GET"]},
       {"resource": "/v1/reporting/definitions/*", "methods": ["GET"]},

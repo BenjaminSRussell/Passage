@@ -56,23 +56,24 @@ type Ports struct {
 }
 
 type API struct {
-	store         store.Store
-	ports         Ports
-	resolveMinAge time.Duration
-	resolveLease  time.Duration
-	evaluated     atomic.Int64
-	rejected      atomic.Int64
-	arrived       atomic.Int64
-	registered    atomic.Int64
-	posted        atomic.Int64
-	adjusted      atomic.Int64
-	invoiced      atomic.Int64
-	adjustments   atomic.Int64
-	settlements   atomic.Int64
-	ersSettled    atomic.Int64
-	auditBlocked  atomic.Int64
-	auditReleased atomic.Int64
-	auditRejected atomic.Int64
+	store           store.Store
+	ports           Ports
+	resolveMinAge   time.Duration
+	resolveLease    time.Duration
+	evaluated       atomic.Int64
+	rejected        atomic.Int64
+	arrived         atomic.Int64
+	registered      atomic.Int64
+	posted          atomic.Int64
+	adjusted        atomic.Int64
+	invoiced        atomic.Int64
+	adjustments     atomic.Int64
+	settlements     atomic.Int64
+	ersSettled      atomic.Int64
+	auditBlocked    atomic.Int64
+	resolveFallback atomic.Int64
+	auditReleased   atomic.Int64
+	auditRejected   atomic.Int64
 
 	pendingPostings pendingTracker
 	http            requestMetrics
@@ -91,6 +92,15 @@ func New(s store.Store, ports Ports) *API {
 		lease = 2*ledger.Timeout + httpx.RequestTimeout
 	}
 	return &API{store: s, ports: ports, resolveMinAge: minAge, resolveLease: lease, http: newRequestMetrics()}
+}
+
+func (a *API) resolveFiscalPeriod(ctx context.Context, legalEntityID string, postingDate time.Time, supplied string) (string, error) {
+	id, fellBack, err := domain.ResolveFiscalPeriod(ctx, a.ports.Periods, domain.PeriodQuery{LegalEntityID: legalEntityID, LedgerID: a.ports.Profile.LedgerID, PostingDate: postingDate}, supplied)
+	if fellBack {
+		a.resolveFallback.Add(1)
+		slog.WarnContext(ctx, "close has no dated period; using the caller-supplied fiscal period", "fiscalPeriodId", id, "legalEntityId", legalEntityID, "postingDate", postingDate.Format(dateLayout), "correlationId", middleware.GetReqID(ctx))
+	}
+	return id, err
 }
 
 func (a *API) PostInvoice(ctx context.Context, in domain.VendorInvoice, profile domain.PostingProfile) (domain.JournalEntry, error) {
@@ -142,6 +152,7 @@ func (a *API) Metrics() http.Handler {
 		{"receiving_settlements_posted_total", "Invoicing plan rows and consignment journals settled.", &a.settlements},
 		{"receiving_ers_invoices_posted_total", "Self-billed invoices created by evaluated receipt settlement runs, including those held for audit.", &a.ersSettled},
 		{"receiving_invoices_audit_blocked_total", "Invoices held by the stochastic audit block.", &a.auditBlocked},
+		{"receiving_period_resolve_fallback_total", "Documents posted with the caller-supplied fiscal period because close has no dated period (temporary).", &a.resolveFallback},
 		{"receiving_invoices_audit_released_total", "Audit-blocked invoices released by an auditor and posted.", &a.auditReleased},
 		{"receiving_invoices_audit_rejected_total", "Audit-blocked invoices rejected by an auditor, freeing their GR/IR quantity.", &a.auditRejected},
 	}

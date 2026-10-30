@@ -45,12 +45,14 @@ func (r *recorder) snapshot() []seenCall {
 func downstream(t *testing.T, self string, keys map[string]ed25519.PublicKey, duty, path, reply string, status int, rec *recorder) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
-	mux.Handle("POST "+path, authz.RequireDuty(duty)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rec.record(r)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(status)
-		_, _ = w.Write([]byte(reply))
-	})))
+	for pattern, body := range map[string]string{"POST " + path: reply, "GET /v1/close/periods:resolve": `{"fiscalPeriodId":"` + periodID + `","status":"open"}`} {
+		mux.Handle(pattern, authz.RequireDuty(duty)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			rec.record(r)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte(body))
+		})))
+	}
 	srv := httptest.NewServer(tenant.MiddlewareWith(tenant.NewServiceVerifier(self, keys))(mux))
 	t.Cleanup(srv.Close)
 	return srv
