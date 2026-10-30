@@ -22,7 +22,7 @@ has_route_permissions(spec) if {
 }
 
 test_all_seeded_duties_allow_their_declared_permissions if {
-	count(data.duties) == 112
+	count(data.duties) == 114
 	every duty, spec in data.duties {
 		has_route_permissions(spec)
 		every permission in spec.permissions {
@@ -421,6 +421,26 @@ test_open_item_read_duty_opens_list_and_get_only if {
 	not allowed("open-item.read", "GET", "/v1/payables/payment-proposals/p1")
 }
 
+test_payment_run_duties_are_separate_from_proposal_duties if {
+	allowed("payment-run.execute", "POST", "/v1/payables/payment-runs")
+	allowed("payment-run.execute", "POST", "/v1/payables/payment-runs/r1:generate-file")
+	allowed("payment-run.execute", "POST", "/v1/payables/payment-runs/r1:post-journal")
+	allowed("payment-run.execute", "POST", "/v1/payables/payment-runs/r1:settle")
+	allowed("payment-run.execute", "POST", "/v1/payables/payment-runs/r1:complete")
+	allowed("payment-run.execute", "POST", "/v1/payables/payment-runs/r1:fail")
+	not allowed("payment-run.execute", "POST", "/v1/payables/payment-runs/r1:approve")
+	not allowed("payment-run.execute", "GET", "/v1/payables/payment-runs/r1")
+	not allowed("payment-run.execute", "POST", "/v1/payables/payment-proposals/p1:approve")
+	allowed("payment-run.read", "GET", "/v1/payables/payment-runs/r1")
+	allowed("payment-run.execute", "GET", "/v1/payables/payment-runs/r1/file")
+	not allowed("payment-run.read", "GET", "/v1/payables/payment-runs/r1/file")
+	not allowed("payment-run.read", "POST", "/v1/payables/payment-runs")
+	not allowed("payment-run.read", "POST", "/v1/payables/payment-runs/r1:settle")
+	not allowed("payment-proposal.approve", "POST", "/v1/payables/payment-runs")
+	not allowed("payment-proposal.write", "POST", "/v1/payables/payment-runs")
+	not allowed("payment-proposal.read", "GET", "/v1/payables/payment-runs/r1")
+}
+
 test_payment_proposal_duties_are_separate if {
 	allowed("payment-proposal.write", "POST", "/v1/payables/payment-proposals")
 	not allowed("payment-proposal.write", "POST", "/v1/payables/payment-proposals/p1:approve")
@@ -458,8 +478,18 @@ test_service_grants_allow_only_their_declared_routes if {
 		not allowed(duty, "POST", "/v1/ledger/balances:rebuild")
 	}
 	every duty in data.service_grants.payables.ledger {
-		not allowed(duty, "POST", "/v1/ledger/journal-entries")
 		not allowed(duty, "POST", "/v1/ledger/journal-entries/je-1/reverse")
+		not allowed(duty, "POST", "/v1/ledger/ledgers")
+		not allowed(duty, "POST", "/v1/ledger/balances:rebuild")
+	}
+	allowed("ledger.journal.post", "POST", "/v1/ledger/journal-entries")
+	not allowed("ledger.balance.read", "POST", "/v1/ledger/journal-entries")
+	not allowed("ledger.journal.read", "POST", "/v1/ledger/journal-entries")
+	data.service_grants["workflow-ts"].payables == ["payment-run.execute"]
+	every duty in data.service_grants["workflow-ts"].payables {
+		not allowed(duty, "POST", "/v1/payables/payment-proposals/p1:approve")
+		not allowed(duty, "POST", "/v1/payables/payment-proposals")
+		not allowed(duty, "GET", "/v1/payables/payment-runs/r1")
 	}
 }
 

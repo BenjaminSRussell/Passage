@@ -3,14 +3,18 @@ package ledger_test
 import (
 	"context"
 	"crypto/ed25519"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
+	"github.com/BenjaminSRussell/passage/services/payables/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/ledger"
 )
 
@@ -126,6 +130,75 @@ func TestLedgerClient_DoesNotFollowRedirectsWithTenantHeaders(t *testing.T) {
 	}
 }
 
+func postClient(url string) *ledger.Client {
+	_, priv, _ := ed25519.GenerateKey(nil)
+	signer, _ := tenant.NewServiceSigner("payables", priv)
+	return ledger.New(url, nil).WithSigner(signer)
+}
+
+func postCtx() context.Context {
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: testkit.TenantID(9), UserID: "u1"})
+}
+
+func postEntry() ledger.Entry {
+	return ledger.Entry{LegalEntityID: testkit.TenantID(9), LedgerID: "led-1", DocumentID: "run-1", PostingDate: "2026-01-10", Currency: "USD", IdempotencyKey: "payables:payment-run:run-1", SourceType: "payment_run",
+		Lines: []domain.RunJournalLine{{Account: "2000", Amount: decimal.RequireFromString("150"), Text: "vendor v1"}, {Account: "1010", Credit: true, Amount: decimal.RequireFromString("150")}}}
+}
+
+func TestPost_SendsABalancedEntryWithTheIdempotencyKeyAndAServiceToken(t *testing.T) {
+	var key, tenantHeader, path string
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key, tenantHeader, path = r.Header.Get("Idempotency-Key"), r.Header.Get(tenant.HeaderServiceToken), r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"entries":[{"id":"entry-9"}]}`))
+	}))
+	defer srv.Close()
+	id, err := postClient(srv.URL).Post(postCtx(), postEntry())
+	if err != nil || id != "entry-9" {
+		t.Fatalf("id=%s err=%v", id, err)
+	}
+	if key != "payables:payment-run:run-1" || tenantHeader == "" || path != "/v1/ledger/journal-entries" {
+		t.Fatalf("key=%s tenant=%s path=%s", key, tenantHeader, path)
+	}
+	lines := body["lines"].([]any)
+	first, second := lines[0].(map[string]any), lines[1].(map[string]any)
+	if body["ledgerId"] != "led-1" || body["documentId"] != "run-1" || first["debitCredit"] != "D" || second["debitCredit"] != "C" ||
+		first["amount"].(map[string]any)["value"] != "150.00" || body["source"].(map[string]any)["system"] != "payables" {
+		t.Fatalf("body = %v", body)
+	}
+}
+
+func TestPost_Failures(t *testing.T) {
+	for name, tc := range map[string]struct {
+		status int
+		body   string
+	}{
+		"rejected":         {http.StatusUnprocessableEntity, `{}`},
+		"server error":     {http.StatusInternalServerError, `{}`},
+		"no entry id":      {http.StatusCreated, `{"entries":[]}`},
+		"unreadable reply": {http.StatusOK, `not json`},
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(tc.status)
+			_, _ = w.Write([]byte(tc.body))
+		}))
+		_, err := postClient(srv.URL).Post(postCtx(), postEntry())
+		srv.Close()
+		var se *ledger.StatusError
+		if err == nil || (tc.status >= 400) != errors.As(err, &se) || (se != nil && se.Status != tc.status) {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+	if _, err := postClient("http://127.0.0.1:1").Post(postCtx(), postEntry()); err == nil {
+		t.Error("an unreachable ledger must fail")
+	}
+	if _, err := postClient("http://ledger").Post(context.Background(), postEntry()); err == nil {
+		t.Error("a call without a principal must fail")
+	}
+}
+
 func TestAccountBalance_SignedSendsPayablesServiceTokenWithoutUserDuties(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	signer, _ := tenant.NewServiceSigner("payables", priv)
@@ -186,5 +259,78 @@ func TestAccountBalance_SignedForMultiEntityAndAllScopeUsersUsesTheExplicitEntit
 	outside := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: entityA, UserID: "u1"})
 	if _, err := client.LegalEntity(outside, entityB, "led-1"); err == nil || token != "" {
 		t.Fatalf("an entity outside the user's scope must not be signed: err %v token %q", err, token)
+	}
+}
+
+func TestPost_SignedSendsOnlyThePostingDutyForTheRunsLegalEntity(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	signer, _ := tenant.NewServiceSigner("payables", priv)
+	var got http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"entries":[{"id":"entry-1"}]}`))
+	}))
+	defer srv.Close()
+	le := testkit.TenantID(9)
+	entry := postEntry()
+	entry.LegalEntityID = le
+	principal := tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: le, UserID: "erin"}
+	if _, err := ledger.New(srv.URL, nil).WithSigner(signer).Post(tenant.With(context.Background(), principal), entry); err != nil {
+		t.Fatal(err)
+	}
+	if got.Get(tenant.HeaderDuties) != "" || got.Get("Idempotency-Key") != "payables:payment-run:run-1" {
+		t.Fatalf("headers %v", got)
+	}
+	claims, err := tenant.NewServiceVerifier("ledger", map[string]ed25519.PublicKey{"payables": pub}).Verify(got.Get(tenant.HeaderServiceToken))
+	if err != nil || claims.Act != "erin" || claims.Le != le || len(claims.Duties) != 1 || claims.Duties[0] != "ledger.journal.post" {
+		t.Fatalf("claims %+v err %v", claims, err)
+	}
+}
+
+func TestPost_SignedRefusesAnAllScopeUserAndAnUnnamedEntity(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(nil)
+	signer, _ := tenant.NewServiceSigner("payables", priv)
+	sent := false
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { sent = true }))
+	defer srv.Close()
+	client := ledger.New(srv.URL, nil).WithSigner(signer)
+	entry := postEntry()
+	entry.LegalEntityID = testkit.TenantID(9)
+	allScope := tenant.Principal{TenantID: testkit.TenantID(1), UserID: "erin", Duties: map[string]struct{}{tenant.DutyAllScope: {}}}
+	if _, err := client.Post(tenant.With(context.Background(), allScope), entry); err == nil || sent {
+		t.Fatalf("an all-scope user must not get a posting token: err %v sent %v", err, sent)
+	}
+	scoped := tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: testkit.TenantID(8) + "," + testkit.TenantID(9), UserID: "erin"}
+	unnamed := postEntry()
+	unnamed.LegalEntityID = ""
+	if _, err := client.Post(tenant.With(context.Background(), scoped), unnamed); err == nil || sent {
+		t.Fatalf("a multi-entity user needs the run's entity named: err %v sent %v", err, sent)
+	}
+}
+
+func TestPost_InProgressConflictCarriesTheLedgerCode(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"code":"LEDGER_IDEMPOTENCY_IN_PROGRESS"}`))
+	}))
+	defer srv.Close()
+	_, err := postClient(srv.URL).Post(postCtx(), postEntry())
+	var se *ledger.StatusError
+	if !errors.As(err, &se) || se.Status != http.StatusConflict || se.Code != ledger.CodeIdempotencyInProgress {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestPost_RefusesToSendUnsigned(t *testing.T) {
+	sent := false
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { sent = true }))
+	defer srv.Close()
+	client := ledger.New(srv.URL, nil)
+	if client.Signed() {
+		t.Fatal("a client without a signer is not signed")
+	}
+	if _, err := client.Post(postCtx(), postEntry()); err == nil || sent {
+		t.Fatalf("a journal must never go out with forwarded user headers: err %v sent %v", err, sent)
 	}
 }

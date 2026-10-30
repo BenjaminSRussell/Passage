@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/domain"
@@ -35,7 +37,11 @@ func setup(t *testing.T) *Postgres {
 	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	return New(app)
+	keys, err := fieldcrypt.NewKeys("k1", map[string][]byte{"k1": bytes.Repeat([]byte{3}, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return New(app).WithFieldCrypt(keys)
 }
 
 func invoice(le, vendor, source, due string) OpenItem {

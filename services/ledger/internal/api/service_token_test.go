@@ -83,10 +83,34 @@ func TestServiceTokenCarriesOnlyTheServiceGrantNotForwardedUserDuties(t *testing
 		t.Fatalf("receiving must not create ledgers by smuggling user headers: %d %s", rec.Code, rec.Body.String())
 	}
 
-	token, _ = rig.payables.Mint("ledger", endUser(), "")
-	rec = serviceCall(rig.handler, http.MethodPost, "/v1/ledger/journal-entries", entryBody, token, nil)
+}
+
+func TestPayablesGrantPostsOnlyWithThePostingDutyAndNeverReversesOrCreatesLedgers(t *testing.T) {
+	rig := newTokenRig(t)
+	reads, _ := rig.payables.MintDuties("ledger", endUser(), "", []string{"ledger.balance.read", "ledger.journal.read"})
+	rec := serviceCall(rig.handler, http.MethodPost, "/v1/ledger/journal-entries", entryBody, reads, nil)
 	if rec.Code != http.StatusForbidden || len(rig.store.posted) != 0 {
-		t.Fatalf("payables holds no posting grant: %d %s", rec.Code, rec.Body.String())
+		t.Fatalf("a payables read token must not post: %d %s", rec.Code, rec.Body.String())
+	}
+	post, _ := rig.payables.MintDuties("ledger", endUser(), "", []string{"ledger.journal.post"})
+	if rec = serviceCall(rig.handler, http.MethodPost, "/v1/ledger/journal-entries", entryBody, post, nil); rec.Code != http.StatusCreated || len(rig.store.posted) != 1 {
+		t.Fatalf("payables posting token: %d %s", rec.Code, rec.Body.String())
+	}
+	if rig.store.posted[0].Actor != "warehouse-user" {
+		t.Fatalf("actor = %q, want the end user", rig.store.posted[0].Actor)
+	}
+	mints := map[string][]string{"reads": {"ledger.balance.read", "ledger.journal.read"}, "posting": {"ledger.journal.post"}, "whole grant": nil}
+	for name, duties := range mints {
+		token, _ := rig.payables.MintDuties("ledger", endUser(), "", duties)
+		rec = serviceCall(rig.handler, http.MethodPost, "/v1/ledger/journal-entries/"+testEntry+"/reverse", `{"postingDate":"2026-03-31","description":"undo"}`, token, nil)
+		if rec.Code != http.StatusForbidden || len(rig.store.reversed) != 0 {
+			t.Errorf("%s: payables must not reverse: %d %s", name, rec.Code, rec.Body.String())
+		}
+		token, _ = rig.payables.MintDuties("ledger", endUser(), "", duties)
+		rec = serviceCall(rig.handler, http.MethodPost, "/v1/ledger/ledgers", `{}`, token, nil)
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("%s: payables must not create ledgers: %d %s", name, rec.Code, rec.Body.String())
+		}
 	}
 }
 

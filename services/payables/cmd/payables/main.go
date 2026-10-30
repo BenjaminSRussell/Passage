@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/payables"
@@ -60,12 +61,25 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return err
 	}
 	defer validator.Close()
-	items := store.New(pool)
+	keys, err := fieldcrypt.FromEnv(getenv)
+	if err != nil {
+		return err
+	}
+	profiles, err := api.LoadPostingProfiles(getenv)
+	if err != nil {
+		return err
+	}
+	items := store.New(pool).WithFieldCrypt(keys)
 	balances, err := ledgerBalances(getenv)
 	if err != nil {
 		return err
 	}
-	a := api.New(pool, validator, time.Now).WithAging(items, balances, getenv("AP_CONTROL_ACCOUNT")).WithProposals(items, rateSource(getenv))
+	poster, err := ledgerPoster(getenv)
+	if err != nil {
+		slog.Warn("payment runs are disabled", "reason", err)
+		poster = nil
+	}
+	a := api.New(pool, validator, time.Now).WithAging(items, balances, getenv("AP_CONTROL_ACCOUNT")).WithProposals(items, rateSource(getenv)).WithPaymentRuns(items, poster, profiles)
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
@@ -79,7 +93,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 	return <-errs
 }
 
-func ledgerBalances(getenv func(string) string) (api.LedgerBalances, error) {
+func ledgerClient(getenv func(string) string) (*ledger.Client, error) {
 	url := getenv("LEDGER_URL")
 	if url == "" {
 		return nil, nil
@@ -93,6 +107,25 @@ func ledgerBalances(getenv func(string) string) (api.LedgerBalances, error) {
 		timeout = v
 	}
 	return ledger.New(url, &http.Client{Timeout: timeout}).WithSigner(signer), nil
+}
+
+func ledgerBalances(getenv func(string) string) (api.LedgerBalances, error) {
+	c, err := ledgerClient(getenv)
+	if c == nil || err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+func ledgerPoster(getenv func(string) string) (api.LedgerPoster, error) {
+	c, err := ledgerClient(getenv)
+	if c == nil || err != nil {
+		return nil, err
+	}
+	if !c.Signed() {
+		return nil, errors.New("LEDGER_URL is set but payment runs need PASSAGE_SERVICE_SIGNING_KEY or PASSAGE_SERVICE_SIGNING_KEY_FILE: journals are never posted with forwarded user headers")
+	}
+	return c, nil
 }
 
 func rateSource(getenv func(string) string) api.RateSource {
