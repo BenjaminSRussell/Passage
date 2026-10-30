@@ -185,6 +185,9 @@ func (s *Postgres) CreateTransaction(ctx context.Context, in CreateTransactionIn
 		if err := checkStepNegative(r, vendorOwned, in.Negative); err != nil {
 			return err
 		}
+		if err := checkStepFreeze(ctx, tx, tp.TenantID, in.LegalEntityID, r); err != nil {
+			return err
+		}
 		if err := saveRow(ctx, tx, tp.TenantID, in.LegalEntityID, r, 1); err != nil {
 			return err
 		}
@@ -284,6 +287,9 @@ func (s *Postgres) ApplyStatusStep(ctx context.Context, in StatusStepInput) (Sta
 			return err
 		}
 		if err := checkStepNegative(r, vendorOwned, in.Negative); err != nil {
+			return err
+		}
+		if err := checkStepFreeze(ctx, tx, tp.TenantID, t.legalEntityID, r); err != nil {
 			return err
 		}
 		if err := saveRow(ctx, tx, tp.TenantID, t.legalEntityID, r, 1); err != nil {
@@ -609,4 +615,15 @@ func (s *Postgres) GetTransaction(ctx context.Context, id string) (TransactionRo
 	}
 	slices.Reverse(history)
 	return rows[0], history, nil
+}
+
+// checkStepFreeze applies the count freeze (INV-CNT-002) to a status change
+// that moves the row's physical inventory. Steps that only touch the ordered,
+// arrived or reserved buckets (for example ON_ORDER to ARRIVED) are not
+// movements of counted stock and pass.
+func checkStepFreeze(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID string, r *row) error {
+	if r.before.PhysicalInvent().Equal(r.oh.PhysicalInvent()) {
+		return nil
+	}
+	return checkCountFreeze(ctx, tx, tenantID, legalEntityID, "", []*row{r})
 }

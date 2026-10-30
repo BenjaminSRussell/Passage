@@ -62,7 +62,22 @@ entity, inventory account, currency and day comparing the on-hand posted value w
 inventory account's net over the posted journals (or a ledger balance supplied by the
 caller), flagging negative on-hand rows (FR-16.4), stored in `reconciliation_run` and
 raising `reconciliation.diff` on a non-zero difference; the run list and run read; and web
-screens (reconciliation runs, run reconciliation, run detail). Every other item in the
+screens (reconciliation runs, run reconciliation, run detail).
+
+Slice 8 adds cycle-count control (FR-16.9): plan selection by location range (byte-wise, C
+collation), ABC class (the class of the row's product x site in the latest ABC run) and a
+sample percent drawn per sheet (a hash seeded with the sheet id, so successive sheets rotate
+through the stock and each sheet's draw can be recomputed); the stock freeze (INV-CNT-002) that
+refuses every movement of a row held by an unfinished sheet of a `freeze_stock` plan (journal
+postings including other COUNT journals and count reversals, transfer ship / receive, blocking
+and release, and status steps that change physical stock; only the sheet's own COUNT journal
+passes); the COUNTED / APPROVED / CANCELLED sheet statuses with `:submit`, `:approve` and
+`:cancel`; supervisor recount requests per line (INV-CNT-006) that reopen the sheet; the
+four-eyes rule (INV-CNT-007, INV-CNT-008); blind sheets that stay blind to counters until
+POSTED or CANCELLED; the `countsheet.changed` event (SUBMITTED, APPROVED, RECOUNT_REQUESTED,
+CANCELLED, POSTED); and web screens (selection, freeze and four-eyes options on the plan, review
+actions, confirmed cancel and recount on the sheet). It also gives every AsyncAPI message a title and
+summary, so the OpenAPI and AsyncAPI doc gates report no FAIL lines. Every other item in the
 ticket and PRD 3.16 is listed here.
 
 ## Ticket deliverables
@@ -96,9 +111,9 @@ ticket and PRD 3.16 is listed here.
 | 3 | Blocking of reserved stock, blocking in another warehouse than the source | not planned | Reserved stock must be released first (INV-BLK-003 counts only available stock). |
 | 4 | Cycle counting: count plan, `:generate`, count entry, tolerance approval (AC-16.6), blind count, `:post` as a COUNT journal | built (slice 2) | Variances are measured against the book quantity at posting (BR-16.8). Approval is the `inventory.count.approve` duty of the poster (403 `INV-CNT-001` without it). |
 | 4 | Vendor-owned stock in cycle counts (SAP MIK1) | later slice of PSG-16 | Sheet generation leaves vendor-owned rows out: a count variance posts a valued COUNT journal, which vendor-owned stock never carries (BR-16.14). Counting it needs a quantity-only variance posting. Tags refuse the owner dimension for the same reason. |
-| 4 | Count freeze (`count_lock`, `INV-CNT-002`) and the recount flag | later slice of PSG-16 | Movements are not blocked while a sheet is open; BR-16.8's posting-time variance keeps the result right but no recount is flagged. |
-| 4 | Plan selection by ABC class, location range, last-count age, sample percent; plan frequency (cron) and the generation job | later slice of PSG-16 | A plan selects one legal entity and optionally one warehouse; sheets are generated on demand. ABC needs item 8. |
-| 4 | Sheet statuses COUNTED and APPROVED, separate approval step, four-eyes (`CycleCountApprove` vs `CycleCountMaintain`) | later slice of PSG-16 / platform OPA policy | A sheet is OPEN until posted; approval happens at posting. Segregation of duties belongs to the OPA bundle. |
+| 4 | Count freeze (`INV-CNT-002`) for reservations; plan option "allow movement with recount" (BR-16.8 recount flag on movement) | later slice of PSG-16 | Slice 8 freezes every path that moves physical stock (journals, transfers, blocking, physical status steps) on a row held by an unfinished sheet of a `freeze_stock` plan. Reservations do not move physical stock and are not refused. A plan without `freeze_stock` lets movements through and the posting-time variance absorbs them (BR-16.8); it does not yet raise a recount flag on the lines a movement touched. |
+| 4 | Plan selection by last-count age; plan frequency (cron) and the generation job | later slice of PSG-16 | Slice 8 selects by location range, ABC class (latest ABC run, matched per site) and a per-sheet sample percent. Last-count age and scheduled generation are not built; sheets are generated on demand. |
+| 4 | Platform OPA policy for count separation of duties | handoff — platform authz | Slice 8 builds the statuses (OPEN, COUNTED, APPROVED, POSTED, CANCELLED), `:submit` / `:approve` / `:cancel`, per-line recount requests and the service-side four-eyes rule (the approver may not be a counter, INV-CNT-007). Duty separation between `CycleCountMaintain` and `CycleCountApprove` as roles stays with the OPA bundle. |
 | 4 | Count sheet number from the wave 5 `CNT-` sequence | handoff — wave 5 (numbering) | `CNT-` plus 8 random hex digits from the sheet id, unique per tenant. |
 | 4 | PWA count screen with offline queue | later slice of PSG-16 | The web count sheet works online only. |
 | 5 | Unit conversions on movements (UoM table lookup, product unit decimals) | partial — handoff to wave 6/8 UoM service | The API accepts `qty` in the inventory unit plus `enteredQty` / `enteredUnit` (same sign required), stores both, and rejects more than 6 decimals (`INV-UOM-002`). Conversion lookup and the product's own unit decimals need the wave 6/8 service. |

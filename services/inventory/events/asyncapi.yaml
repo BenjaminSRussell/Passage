@@ -49,6 +49,11 @@ channels:
     messages:
       ownershipChanged:
         $ref: '#/components/messages/OwnershipChanged'
+  countSheet:
+    address: passage.inventory.countsheet
+    messages:
+      countSheetChanged:
+        $ref: '#/components/messages/CountSheetChanged'
   reconciliationDiff:
     address: passage.inventory.reconciliation
     messages:
@@ -83,6 +88,10 @@ operations:
     action: send
     channel: { $ref: '#/channels/ownershipChanged' }
     summary: An OWNERSHIP_CHANGE journal posted, moving vendor-owned stock to the legal entity (FR-16.17); wave 18 settles it
+  publishCountSheetChanged:
+    action: send
+    channel: { $ref: '#/channels/countSheet' }
+    summary: A count sheet was submitted for review, approved, had a recount requested, was cancelled or was posted (FR-16.9); POSTED and CANCELLED lift the stock freeze
   publishReconciliationDiff:
     action: send
     channel: { $ref: '#/channels/reconciliationDiff' }
@@ -90,66 +99,96 @@ operations:
 components:
   messages:
     TransactionPosted:
+      title: Inventory transaction posted
+      summary: An inventory transaction was registered or moved to a new status; carries the dimension, quantity and posted value.
       name: dev.passage.inventory.transaction.posted.v1
       x-passage-type: dev.passage.inventory.transaction.posted.v1
       contentType: application/json
       payload:
         $ref: '#/components/schemas/TransactionPostedData'
     OnhandChanged:
+      title: On-hand changed
+      summary: The on-hand projection of one dimension combination changed.
       name: dev.passage.inventory.onhand.changed.v1
       x-passage-type: dev.passage.inventory.onhand.changed.v1
       contentType: application/json
       payload:
         $ref: '#/components/schemas/OnhandChangedData'
     JournalPosted:
+      title: Inventory journal posted
+      summary: An inventory journal was posted and its lines became ledger transactions.
       name: dev.passage.inventory.journal.posted.v1
       x-passage-type: dev.passage.inventory.journal.posted.v1
       contentType: application/json
       payload:
         $ref: '#/components/schemas/JournalPostedData'
     ReservationCreated:
+      title: Reservation created
+      summary: Stock was reserved against a dimension combination.
       name: dev.passage.inventory.reservation.created.v1
       x-passage-type: dev.passage.inventory.reservation.created.v1
       contentType: application/json
       payload:
         $ref: '#/components/schemas/ReservationData'
     ReservationReleased:
+      title: Reservation released
+      summary: A reservation was released and its quantity returned to available.
       name: dev.passage.inventory.reservation.released.v1
       x-passage-type: dev.passage.inventory.reservation.released.v1
       contentType: application/json
       payload:
         $ref: '#/components/schemas/ReservationData'
     BlockingCreated:
+      title: Blocking created
+      summary: A quantity was blocked or quarantined with a reason.
       name: dev.passage.inventory.blocking.created.v1
       x-passage-type: dev.passage.inventory.blocking.created.v1
       contentType: application/json
       payload:
         $ref: '#/components/schemas/BlockingData'
     BlockingReleased:
+      title: Blocking released
+      summary: A blocking was released back to a usable inventory status.
       name: dev.passage.inventory.blocking.released.v1
       x-passage-type: dev.passage.inventory.blocking.released.v1
       contentType: application/json
       payload:
         $ref: '#/components/schemas/BlockingData'
     TransferShipped:
+      title: Transfer shipped
+      summary: A transfer order shipped and stock moved into the in-transit warehouse.
       name: dev.passage.inventory.transfer.shipped.v1
       x-passage-type: dev.passage.inventory.transfer.shipped.v1
       contentType: application/json
       payload:
         $ref: '#/components/schemas/TransferData'
     TransferReceived:
+      title: Transfer received
+      summary: A transfer order was received at the destination warehouse.
       name: dev.passage.inventory.transfer.received.v1
       x-passage-type: dev.passage.inventory.transfer.received.v1
       contentType: application/json
       payload:
         $ref: '#/components/schemas/TransferData'
     OwnershipChanged:
+      title: Ownership changed
+      summary: Vendor-owned consignment stock became legal-entity owned.
       name: dev.passage.inventory.ownership.changed.v1
       x-passage-type: dev.passage.inventory.ownership.changed.v1
       contentType: application/json
       payload:
         $ref: '#/components/schemas/OwnershipChangedData'
+    CountSheetChanged:
+      title: Count sheet changed
+      summary: A count sheet moved through its review steps; the action names which one.
+      name: dev.passage.inventory.countsheet.changed.v1
+      x-passage-type: dev.passage.inventory.countsheet.changed.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/CountSheetChangedData'
     ReconciliationDiff:
+      title: Reconciliation difference
+      summary: A daily inventory-to-ledger run found a non-zero difference.
       name: dev.passage.inventory.reconciliation.diff.v1
       x-passage-type: dev.passage.inventory.reconciliation.diff.v1
       contentType: application/json
@@ -299,6 +338,21 @@ components:
         reason: { type: string, enum: [QUALITY, DAMAGE, RECALL, LEGAL, OTHER] }
         state: { type: string, enum: [ACTIVE, RELEASED] }
         disposition: { type: [string, 'null'], enum: [RELEASE, SCRAP, RETURN, null] }
+    CountSheetChangedData:
+      type: object
+      required: [sheetId, legalEntityId, planId, number, action, status, lineCount, countedCount, recountLines, lineId, reason]
+      properties:
+        sheetId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        planId: { type: string, format: uuid }
+        number: { type: string, description: Count sheet number }
+        action: { type: string, enum: [SUBMITTED, APPROVED, RECOUNT_REQUESTED, CANCELLED, POSTED] }
+        status: { type: string, enum: [OPEN, COUNTED, APPROVED, POSTED, CANCELLED], description: Sheet status after the action }
+        lineCount: { type: integer }
+        countedCount: { type: integer }
+        recountLines: { type: integer, description: Lines still flagged for recount after the action }
+        lineId: { type: [string, 'null'], format: uuid, description: The line a recount was requested for }
+        reason: { type: [string, 'null'], description: The supervisor's recount reason }
     ReconciliationDiffData:
       type: object
       required: [account, currency, diff, inventoryValue, ledgerBalance, ledgerSource, legalEntityId, negativeRows, runDate, runId]

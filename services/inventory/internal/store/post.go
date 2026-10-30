@@ -113,7 +113,7 @@ func (s *Postgres) PostJournal(ctx context.Context, id string, version int, p Po
 		if j.Status != domain.JournalDraft && j.Status != domain.JournalApproved {
 			return problem(http.StatusConflict, CodeJournalState, "journal cannot be posted from status "+string(j.Status))
 		}
-		if err := s.postLoaded(ctx, tx, tp.TenantID, j, p); err != nil {
+		if err := s.postLoaded(ctx, tx, tp.TenantID, j, p, ""); err != nil {
 			return err
 		}
 		out, err = loadJournal(ctx, tx, id, false)
@@ -126,7 +126,10 @@ func (s *Postgres) PostJournal(ctx context.Context, id string, version int, p Po
 // row locks, valuation, negative and serial checks, transactions, the GL
 // entry, the POSTED status and the events. Count sheets reuse it for their
 // COUNT journal.
-func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j domain.Journal, p PostParams) error {
+//
+// countSheet is the sheet whose own COUNT journal this is (empty for any other
+// journal); only that sheet's freeze does not apply to it.
+func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j domain.Journal, p PostParams, countSheet string) error {
 	if err := domain.ValidateJournal(j, s.rules); err != nil {
 		return domainProblem(err)
 	}
@@ -137,6 +140,9 @@ func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j
 	plan := domain.PlanPosting(j)
 	rows, order, err := groupRows(plan)
 	if err != nil {
+		return err
+	}
+	if err := checkCountFreeze(ctx, tx, tenantID, j.LegalEntityID, countSheet, orderedRows(rows, order)); err != nil {
 		return err
 	}
 	serials := receiptSerials(plan)

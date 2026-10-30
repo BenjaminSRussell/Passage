@@ -1,7 +1,19 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Alert, Badge, Button, buttonClassName, Card, DataTable, EmptyState, Input, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
-import { describeProblem, enterCount, getCountSheet, postCountSheet, type CountLine, type CountSheet, type Problem } from "./api/client";
+import { Alert, Badge, Button, buttonClassName, Card, ConfirmDialog, DataTable, EmptyState, Input, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
+import {
+  approveCountSheet,
+  cancelCountSheet,
+  describeProblem,
+  enterCount,
+  getCountSheet,
+  postCountSheet,
+  requestCountRecount,
+  submitCountSheet,
+  type CountLine,
+  type CountSheet,
+  type Problem,
+} from "./api/client";
 import { dash, DECIMAL, describeDimensions, formatDateTime, sentence, shortId, signed } from "./format";
 import { ALL_DIMENSIONS, Detail, ProblemAlert, stateTones } from "./parts";
 import styles from "./pages.module.css";
@@ -48,6 +60,49 @@ function CountEntry({ sheet, line, onSaved, onError }: { sheet: CountSheet; line
   );
 }
 
+/** Supervisor's recount request for one counted line: a reason, then the sheet reopens. */
+function RecountRequest({ sheet, line, onDone, onError }: { sheet: CountSheet; line: CountLine; onDone(next: CountSheet): void; onError(p: Problem): void }) {
+  const [shown, setShown] = useState(false);
+  const [reason, setReason] = useState("");
+  const [invalid, setInvalid] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function send(event: FormEvent) {
+    event.preventDefault();
+    if (reason.trim() === "" || reason.trim().length > 500) {
+      setInvalid(true);
+      return;
+    }
+    setInvalid(false);
+    setBusy(true);
+    try {
+      onDone(await requestCountRecount(sheet.id, line.id, sheet.version, reason.trim()));
+      setShown(false);
+      setReason("");
+    } catch (error) {
+      onError(describeProblem(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!shown) {
+    return (
+      <Button size="sm" onClick={() => setShown(true)} aria-label={`Request recount, line ${line.lineNo}`}>
+        Recount
+      </Button>
+    );
+  }
+  return (
+    <form onSubmit={send} noValidate className={styles.inline}>
+      <Input aria-label={`Recount reason, line ${line.lineNo}`} value={reason} maxLength={500} onChange={(event) => setReason(event.target.value)} invalid={invalid} />
+      <Button type="submit" size="sm" loading={busy} aria-label={`Send recount request, line ${line.lineNo}`}>
+        Send
+      </Button>
+    </form>
+  );
+}
+
 /** Count sheet (PRD 3.16.6): enter counted quantities, then post the variances. */
 export function CountSheetPage() {
   const { id = "" } = useParams();
@@ -56,6 +111,8 @@ export function CountSheetPage() {
   const [failure, setFailure] = useState<Problem | null>(null);
   const [notice, setNotice] = useState("");
   const [posting, setPosting] = useState(false);
+  const [acting, setActing] = useState("");
+  const [confirmCancel, setConfirmCancel] = useState(false);
 
   useEffect(() => {
     setSheet(state.data);
@@ -74,6 +131,21 @@ export function CountSheetPage() {
       setFailure(describeProblem(error));
     } finally {
       setPosting(false);
+    }
+  }
+
+  async function move(name: string, run: (id: string, version: number) => Promise<CountSheet>, done: string) {
+    if (!sheet) return;
+    setActing(name);
+    setFailure(null);
+    setNotice("");
+    try {
+      setSheet(await run(sheet.id, sheet.version));
+      setNotice(done);
+    } catch (error) {
+      setFailure(describeProblem(error));
+    } finally {
+      setActing("");
     }
   }
 
@@ -100,6 +172,8 @@ export function CountSheetPage() {
   }
 
   const open = sheet.status === "OPEN";
+  const reviewable = open || sheet.status === "COUNTED" || sheet.status === "APPROVED";
+  const canPost = reviewable && (!sheet.fourEyes || sheet.status === "APPROVED");
   const hidden = sheet.lines.some((l) => l.expectedQty === null);
   const columns: DataTableColumn<CountLine>[] = [
     { key: "lineNo", header: "Line", align: "end" },
@@ -127,6 +201,28 @@ export function CountSheetPage() {
         ),
     },
     { key: "postedVariance", header: "Variance", align: "end", mono: true, render: (row) => (row.postedVariance === null ? dash : signed(row.postedVariance)) },
+    {
+      key: "recount",
+      header: "Recount",
+      render: (row) =>
+        row.recountRequested ? (
+          <Badge tone="warning">{`Recount: ${row.recountReason ?? "requested"}`}</Badge>
+        ) : reviewable && row.countedQty !== null ? (
+          <RecountRequest
+            key={`${row.id}-${sheet.version}`}
+            sheet={sheet}
+            line={row}
+            onDone={(next) => {
+              setFailure(null);
+              setSheet(next);
+              setNotice(`Line ${row.lineNo} sent back for recount. The sheet is open again.`);
+            }}
+            onError={setFailure}
+          />
+        ) : (
+          dash
+        ),
+    },
   ];
 
   return (
@@ -138,8 +234,27 @@ export function CountSheetPage() {
         actions={
           <>
             {back}
+            {reviewable ? (
+              <Button loading={acting === "cancel"} onClick={() => setConfirmCancel(true)}>
+                Cancel sheet
+              </Button>
+            ) : null}
             {open ? (
-              <Button variant="primary" loading={posting} disabled={sheet.countedCount === 0} onClick={post}>
+              <Button
+                loading={acting === "submit"}
+                disabled={sheet.countedCount === 0 || sheet.recountLines > 0}
+                onClick={() => move("submit", submitCountSheet, "Count submitted for review.")}
+              >
+                Submit for review
+              </Button>
+            ) : null}
+            {sheet.status === "COUNTED" ? (
+              <Button variant={sheet.fourEyes ? "primary" : undefined} loading={acting === "approve"} onClick={() => move("approve", approveCountSheet, "Count approved.")}>
+                Approve count
+              </Button>
+            ) : null}
+            {canPost ? (
+              <Button variant="primary" loading={posting} disabled={sheet.countedCount === 0 || sheet.recountLines > 0} onClick={post}>
                 Post count
               </Button>
             ) : null}
@@ -149,6 +264,19 @@ export function CountSheetPage() {
       <Alert tone="success" live="status">
         {notice}
       </Alert>
+      {confirmCancel ? (
+        <ConfirmDialog
+          title="Cancel this count sheet?"
+          description={`${sheet.number} will be closed without posting. Its counts are kept for reference but can no longer be posted${sheet.freezeStock ? ", and the stock freeze is lifted" : ""}.`}
+          confirmLabel="Cancel sheet"
+          cancelLabel="Keep sheet"
+          onCancel={() => setConfirmCancel(false)}
+          onConfirm={() => {
+            setConfirmCancel(false);
+            void move("cancel", cancelCountSheet, sheet.freezeStock ? "Count sheet cancelled. Its stock is no longer frozen." : "Count sheet cancelled.");
+          }}
+        />
+      ) : null}
       {failure ? (
         <Alert
           tone="danger"
@@ -159,7 +287,22 @@ export function CountSheetPage() {
           {failure.message} ({failure.code})
         </Alert>
       ) : null}
-      {open && hidden ? (
+      {sheet.freezeStock && reviewable ? (
+        <Alert tone="warning" title="Stock is frozen">
+          Journals, transfers, blockings and receipts or issues that move the counted rows are refused (INV-CNT-002) until this sheet is posted or cancelled.
+        </Alert>
+      ) : null}
+      {sheet.recountLines > 0 ? (
+        <Alert tone="warning" title="Recount requested">
+          {sheet.recountLines} line(s) must be entered again before the sheet can be submitted or posted.
+        </Alert>
+      ) : null}
+      {sheet.fourEyes && reviewable && sheet.status !== "APPROVED" ? (
+        <Alert tone="info" title="Separate approval required">
+          Submit the sheet, then a supervisor who did not count must approve it before it can post.
+        </Alert>
+      ) : null}
+      {hidden ? (
         <Alert tone="info" title="Blind count">
           Expected quantities are hidden until the sheet is posted. Count what is on the shelf.
         </Alert>
@@ -172,6 +315,9 @@ export function CountSheetPage() {
           </Detail>
           <Detail term="Generated">{formatDateTime(sheet.createdAt)}</Detail>
           <Detail term="Posted">{formatDateTime(sheet.postedAt)}</Detail>
+          <Detail term="Submitted by" mono>
+            {sheet.submittedBy || dash}
+          </Detail>
           <Detail term="Approved by" mono>
             {sheet.approvedBy || dash}
           </Detail>

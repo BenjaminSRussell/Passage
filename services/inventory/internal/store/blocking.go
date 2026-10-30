@@ -165,6 +165,9 @@ func moveStock(ctx context.Context, tx pgx.Tx, tenantID string, doc document, fr
 			return err
 		}
 	}
+	if err := checkCountFreeze(ctx, tx, tenantID, doc.legalEntityID, "", []*row{first, second}); err != nil {
+		return err
+	}
 	if check != nil {
 		if err := check(from.oh.AvailPhysical()); err != nil {
 			return domainProblem(err)

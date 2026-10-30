@@ -143,6 +143,7 @@ paths:
         projection, stores a balanced GL entry and enqueues the outbox events in the same
         transaction. Rejections roll everything back. Posting a POSTED journal returns it
         unchanged.
+        A row held by an unfinished sheet of a freezeStock count plan is refused (409 INV-CNT-002).
       x-passage-duty: inventory.journal.post
       parameters:
         - $ref: '#/components/parameters/JournalId'
@@ -357,6 +358,7 @@ paths:
         issue and a PURCHASED receipt valued at the source's running average (no GL effect: both
         legs are on the inventory account). Physical stock is unchanged and availability drops
         (BR-16.10). The quantity must be available physical stock at the source (INV-BLK-003).
+        A row held by an unfinished sheet of a freezeStock count plan is refused (409 INV-CNT-002).
       x-passage-duty: inventory.blocking.write
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -384,6 +386,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
     get:
       operationId: listInventoryBlockings
@@ -416,6 +419,7 @@ paths:
         RELEASE moves the quantity back to unrestricted stock. A QUARANTINE blocking must name its
         disposition (INV-BLK-001); a BLOCKED one without a disposition is released. SCRAP and RETURN
         are not supported yet (INV-BLK-005). Requires If-Match. A released blocking is returned unchanged.
+        A row held by an unfinished sheet of a freezeStock count plan is refused (409 INV-CNT-002).
       x-passage-duty: inventory.blocking.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -440,6 +444,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
         '412': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
@@ -528,7 +533,7 @@ paths:
       x-passage-duty: inventory.read
       parameters:
         - { name: planId, in: query, schema: { type: string, format: uuid } }
-        - { name: status, in: query, schema: { type: string, enum: [OPEN, POSTED] } }
+        - { name: status, in: query, schema: { type: string, enum: [OPEN, COUNTED, APPROVED, POSTED, CANCELLED] } }
       responses:
         '200':
           description: Count sheets (no lines)
@@ -548,7 +553,7 @@ paths:
     get:
       operationId: getInventoryCountSheet
       summary: Read a count sheet with its lines
-      description: While a blind sheet is OPEN, expectedQty is null for callers without inventory.count.approve.
+      description: Until a blind sheet is POSTED or CANCELLED, expectedQty is null for callers without inventory.count.approve.
       x-passage-duty: inventory.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -608,7 +613,11 @@ paths:
         inventory.count.approve; otherwise 403 INV-CNT-001 and nothing is written. Uncounted lines are
         skipped; a sheet with no counted line is INV-CNT-005. The COUNT journal posts like an
         ADJUSTMENT (inventory against the adjustment account) with the negative policy applied.
-        Requires If-Match. Posting a POSTED sheet returns it unchanged.
+        Requires If-Match. Posting a POSTED sheet returns it unchanged. A sheet with an outstanding
+        recount is refused (409 INV-CNT-006); a plan with fourEyes needs the sheet APPROVED first
+        (409 INV-CNT-008); an APPROVED sheet posts its above-tolerance variances without the
+        posting caller holding inventory.count.approve.
+        Its COUNT journal is exempt from the sheet's own freeze but not from another unfinished freezeStock sheet on the same rows (409 INV-CNT-002). Emits countsheet.changed (POSTED).
       x-passage-duty: inventory.count.post
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -616,6 +625,128 @@ paths:
       responses:
         '200':
           description: Sheet posted (or already posted)
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CountSheet' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/count-sheets/{id}:submit:
+    post:
+      operationId: submitInventoryCountSheet
+      summary: Submit an OPEN count sheet for review (FR-16.9)
+      description: |
+        Closes counting: the sheet becomes COUNTED and takes no further entries. Needs at least one
+        counted line (INV-CNT-005) and no outstanding recount (INV-CNT-006). Requires If-Match.
+        Emits countsheet.changed (SUBMITTED).
+      x-passage-duty: inventory.count.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Sheet after the action (or unchanged when it was already there)
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CountSheet' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/count-sheets/{id}:approve:
+    post:
+      operationId: approveInventoryCountSheet
+      summary: Approve a COUNTED count sheet (FR-16.9)
+      description: |
+        A supervisor accepts the counted quantities, including variances above tolerance, which then
+        post without a further approval. On a four-eyes plan the approver must not be one of the
+        counters (403 INV-CNT-007). Requires If-Match. Emits countsheet.changed (APPROVED).
+      x-passage-duty: inventory.count.approve
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Sheet after the action (or unchanged when it was already there)
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CountSheet' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/count-sheets/{id}:cancel:
+    post:
+      operationId: cancelInventoryCountSheet
+      summary: Cancel an unposted count sheet and lift its freeze
+      description: |
+        A sheet that is OPEN, COUNTED or APPROVED becomes CANCELLED; a POSTED sheet cannot be
+        cancelled. Requires If-Match. Emits countsheet.changed (CANCELLED).
+      x-passage-duty: inventory.count.write
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Sheet after the action (or unchanged when it was already there)
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CountSheet' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/count-sheets/{id}/lines/{lineId}:recount:
+    post:
+      operationId: requestInventoryCountRecount
+      summary: Ask for one counted line to be counted again
+      description: |
+        A supervisor flags a counted line with a reason. The sheet returns to OPEN, any approval is
+        cleared, and the line must be entered again before the sheet can be submitted or posted
+        (INV-CNT-006). Requires If-Match. Emits countsheet.changed (RECOUNT_REQUESTED).
+      x-passage-duty: inventory.count.approve
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: lineId, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 500 }
+      responses:
+        '200':
+          description: Sheet after the action (or unchanged when it was already there)
           headers:
             ETag: { $ref: '#/components/headers/ETag' }
           content:
@@ -722,6 +853,7 @@ paths:
         (default today) becomes the order's ship date and the transactions' date. Emits
         dev.passage.inventory.transfer.shipped.v1. Requires If-Match (428 when absent, 412 on
         mismatch); an order not CREATED is INV-TRF-006.
+        A row held by an unfinished sheet of a freezeStock count plan is refused (409 INV-CNT-002).
       x-passage-duty: inventory.transfer.post
       parameters:
         - $ref: '#/components/parameters/TransferId'
@@ -746,6 +878,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
         '412': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
@@ -761,6 +894,7 @@ paths:
         INV-TRF-002; an allowed over-delivery moves straight from the shipping warehouse and raises
         the line's shipped quantity. A closed line is INV-TRF-006, an unknown line INV-TRF-004.
         Emits dev.passage.inventory.transfer.received.v1. Requires If-Match.
+        A row held by an unfinished sheet of a freezeStock count plan is refused (409 INV-CNT-002).
       x-passage-duty: inventory.transfer.post
       parameters:
         - $ref: '#/components/parameters/TransferId'
@@ -782,6 +916,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
         '412': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
@@ -1204,6 +1339,7 @@ paths:
         written. 200 with valid=true when the post would succeed now; otherwise the problem the post
         would return (for example INV-NEG-001, INV-OWN-002, INV-SER-001). Any other status is
         INV-JNL-004 (409). The result holds for the stock at the time of the call.
+        A row held by an unfinished sheet of a freezeStock count plan answers 409 INV-CNT-002.
       x-passage-duty: inventory.journal.write
       parameters:
         - $ref: '#/components/parameters/JournalId'
@@ -1553,6 +1689,7 @@ paths:
         negative policy checked (INV-NEG-001 / INV-NEG-002), writes a status-change audit row and
         emits transaction.posted and onhand.changed in the same database transaction. A transaction
         at another status is INV-STP-001.
+        Refused with 409 INV-CNT-002 while the row is held by an unfinished sheet of a freezeStock count plan.
       x-passage-duty: inventory.transaction.step
       parameters:
         - $ref: '#/components/parameters/TransactionId'
@@ -1588,6 +1725,7 @@ paths:
         negative policy checked (INV-NEG-001 / INV-NEG-002), writes a status-change audit row and
         emits transaction.posted and onhand.changed in the same database transaction. A transaction
         at another status is INV-STP-001.
+        Refused with 409 INV-CNT-002 while the row is held by an unfinished sheet of a freezeStock count plan.
       x-passage-duty: inventory.transaction.step
       parameters:
         - $ref: '#/components/parameters/TransactionId'
@@ -1706,6 +1844,7 @@ paths:
         (splitting, BR-16.2, is not built). The projection, the audit row and the events are
         written in one database transaction. No GL entry is produced here: the calling document
         posts its own ledger entry. Internal path: not exposed by the web BFF.
+        A move that changes the physical quantity of a row held by an unfinished sheet of a freezeStock count plan is refused (409 INV-CNT-002).
       x-passage-duty: inventory.transaction.apply
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -2093,6 +2232,12 @@ components:
         tolerancePct: { $ref: '#/components/schemas/Decimal' }
         toleranceValue: { $ref: '#/components/schemas/Decimal' }
         blind: { type: boolean, default: false }
+        freezeStock: { type: boolean, default: false, description: 'While a sheet of the plan is OPEN, COUNTED or APPROVED, refuse movements of its rows (409 INV-CNT-002): journal postings (including other COUNT journals), transfer ship / receive, blocking and release, and status steps that change physical stock. Reservations are not refused.' }
+        fourEyes: { type: boolean, default: false, description: 'The sheet needs :submit and a separate :approve by someone who did not count before it posts (INV-CNT-007)' }
+        locationFrom: { type: string, maxLength: 60, description: 'Inclusive lower bound of the location dimension, compared byte-wise (C collation)' }
+        locationTo: { type: string, maxLength: 60, description: Inclusive upper bound of the location dimension }
+        abcClass: { type: string, enum: [A, B, C], description: 'Select only rows whose product x site has this class in the latest ABC run of the legal entity' }
+        samplePct: { $ref: '#/components/schemas/Decimal', description: 'Count only this percent (0 to 100, rounded up) of the selected rows; the rows are chosen by a hash seeded with the sheet id, so each sheet draws a different, reproducible sample. 0 counts all' }
     CountPlan:
       type: object
       required: [id, legalEntityId, name, currency, unit, tolerancePct, toleranceValue, blind, createdAt]
@@ -2106,19 +2251,29 @@ components:
         tolerancePct: { $ref: '#/components/schemas/Decimal' }
         toleranceValue: { $ref: '#/components/schemas/Decimal' }
         blind: { type: boolean }
+        freezeStock: { type: boolean }
+        fourEyes: { type: boolean }
+        locationFrom: { type: string }
+        locationTo: { type: string }
+        abcClass: { type: string, enum: [A, B, C] }
+        samplePct: { type: string, description: Sample percent; absent when every selected row is counted }
         createdAt: { type: string, format: date-time }
     CountSheetSummary:
       type: object
-      required: [id, legalEntityId, planId, planName, number, status, blind, version, lineCount, countedCount, createdAt]
+      required: [id, legalEntityId, planId, planName, number, status, blind, fourEyes, freezeStock, recountLines, version, lineCount, countedCount, createdAt]
       properties:
         id: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
         planId: { type: string, format: uuid }
         planName: { type: string }
         number: { type: string, description: 'CNT- number (the wave 5 sequence replaces it)' }
-        status: { type: string, enum: [OPEN, POSTED] }
+        status: { type: string, enum: [OPEN, COUNTED, APPROVED, POSTED, CANCELLED] }
         blind: { type: boolean }
-        approvedBy: { type: string, description: User who approved a variance above tolerance }
+        approvedBy: { type: string, description: User who approved the sheet, or a variance above tolerance at posting }
+        submittedBy: { type: string, description: User who submitted the sheet for review }
+        fourEyes: { type: boolean }
+        freezeStock: { type: boolean }
+        recountLines: { type: integer, description: Lines with an outstanding recount request }
         journalId: { type: string, format: uuid, description: COUNT journal of a posted sheet with variances }
         version: { type: integer }
         lineCount: { type: integer }
@@ -2135,17 +2290,20 @@ components:
               type: array
               items:
                 type: object
-                required: [id, lineNo, productId, dimensions, expectedQty, countedQty, postedVariance]
+                required: [id, lineNo, productId, dimensions, expectedQty, countedQty, postedVariance, recountRequested, recountRounds]
                 properties:
                   id: { type: string, format: uuid }
                   lineNo: { type: integer }
                   productId: { type: string, format: uuid }
                   dimensions: { $ref: '#/components/schemas/Dimensions' }
-                  expectedQty: { type: [string, 'null'], description: Book quantity at generation; null while a blind sheet is open (unless approver) }
+                  expectedQty: { type: [string, 'null'], description: 'Book quantity at generation; null until a blind sheet is POSTED or CANCELLED (unless approver)' }
                   countedQty: { type: [string, 'null'] }
                   countedBy: { type: string }
                   countedAt: { type: string, format: date-time }
                   postedVariance: { type: [string, 'null'], description: Counted minus book at posting }
+                  recountRequested: { type: boolean, description: A supervisor asked for this line to be counted again; enter it again to clear }
+                  recountReason: { type: string }
+                  recountRounds: { type: integer }
     TransferStatus:
       type: string
       enum: [CREATED, SHIPPED, PARTIALLY_RECEIVED, RECEIVED, CANCELLED]

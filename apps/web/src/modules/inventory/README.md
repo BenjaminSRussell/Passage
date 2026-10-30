@@ -17,11 +17,11 @@ web BFF to the service's `/v1/inventory/...`). Built from the shell primitives i
 | `/inventory/reservations/new` | Reservation dialog: policy (FIFO, FEFO, LIFO, manual), demand, demand segment (sales order or project, with fallback to unsegmented stock), required date, shelf-life margin, dimensions, partial; shows the allocations and any shortfall | `inventory.reservation.write` |
 | `/inventory/blockings` | Blocked and quarantined stock by state with Release | `inventory.read` (release needs `inventory.blocking.write`) |
 | `/inventory/blockings/new` | Block stock: quantity, unit, BLOCKED or QUARANTINE, reason, note, dimensions | `inventory.blocking.write` |
-| `/inventory/count-plans` | Count plans with Generate sheet (opens the new sheet) and Tags | `inventory.read` (generate needs `inventory.count.write`) |
+| `/inventory/count-plans` | Count plans with selection (location range, ABC class, sample) and control (freeze, four eyes), Generate sheet and Tags | `inventory.read` (generate needs `inventory.count.write`) |
 | `/inventory/count-plans/:id/tags` | Count tags of a plan: list with status filter, generate a range, count (product, quantity, dimensions) or void a tag (If-Match), transfer the used tags to a new count sheet, marking open tags missing as supervisor | `inventory.read` (generate / count / void / transfer need `inventory.count.write`, mark missing `inventory.count.approve`) |
-| `/inventory/count-plans/new` | New count plan: legal entity, warehouse, currency, unit, tolerances, blind | `inventory.count.write` |
-| `/inventory/count-sheets` | Count sheets by status | `inventory.read` |
-| `/inventory/count-sheets/:id` | Count sheet: expected (hidden on blind sheets), inline count entry per line (If-Match), post; variance and count journal once posted | `inventory.read` (entry / post need `inventory.count.write` / `.post`, approval above tolerance `.approve`) |
+| `/inventory/count-plans/new` | New count plan: legal entity, warehouse, currency, unit, tolerances, blind, location range, ABC class, sample percent, freeze stock, separate approval | `inventory.count.write` |
+| `/inventory/count-sheets` | Count sheets by status (open, counted, approved, posted, cancelled), with outstanding recounts | `inventory.read` |
+| `/inventory/count-sheets/:id` | Count sheet: expected (hidden from counters on blind sheets until posted or cancelled), inline count entry per line (If-Match), submit for review, approve, cancel (confirmed in a dialog), per-line recount request with reason, post; freeze and four-eyes notices; variance and count journal once posted | `inventory.read` (entry / post need `inventory.count.write` / `.post`, approval above tolerance `.approve`) |
 | `/inventory/transfer-orders` | Transfer orders by status with route and received progress | `inventory.read` |
 | `/inventory/transfer-orders/new` | New transfer order: legal entity, shipping / receiving / transit warehouse (or one-step), receiving site, planned ship date, one or more lines with source dimensions and under / over-delivery % | `inventory.transfer.write` |
 | `/inventory/transfer-orders/:id` | Transfer order: route, lines (ordered, shipped, received, in transit), Ship with date, Receive per open line with close-short, Cancel (If-Match) | `inventory.read` (ship / receive need `inventory.transfer.post`, cancel `inventory.transfer.write`) |
@@ -47,7 +47,7 @@ show the service's problem code.
 - `format.ts` — labels, tones and small formatters.
 - `parts.tsx` — shared detail entry, problem alert, row action button and field-error mapping.
 
-Tests: `api/client.test.ts`, `module.test.ts`, `pages.test.tsx`, `slice2.test.tsx`, `slice3.test.tsx`, `slice4.test.tsx`, `slice5.test.tsx`, `slice6.test.tsx`, `slice7.test.tsx` (`npx vitest --run src/modules/inventory`).
+Tests: `api/client.test.ts`, `module.test.ts`, `pages.test.tsx`, `slice2.test.tsx`, `slice3.test.tsx`, `slice4.test.tsx`, `slice5.test.tsx`, `slice6.test.tsx`, `slice7.test.tsx`, `slice8.test.tsx` (`npx vitest --run src/modules/inventory`).
 
 Needs: none. No npm dependencies were added. Product and legal-entity pickers (the forms take
 ids), the workspace tiles, the quarantine disposition choice and the offline count PWA are later

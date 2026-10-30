@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -89,5 +90,72 @@ func TestValidatePlanAndCounted(t *testing.T) {
 	}
 	if err := RequireOpen(CountPosted); domainCode(err) != CodeCountSheetState {
 		t.Fatalf("posted sheet accepted a change: %v", err)
+	}
+}
+
+func TestFourEyesRefusesAnApproverWhoCounted(t *testing.T) {
+	lines := []CountLine{{LineNo: 1, CountedBy: "alice"}, {LineNo: 2, CountedBy: "bob"}}
+	if err := CheckFourEyes("carol", lines); err != nil {
+		t.Fatalf("separate approver: %v", err)
+	}
+	for _, who := range []string{"bob", ""} {
+		err := CheckFourEyes(who, lines)
+		if e, ok := err.(*Error); !ok || e.Code != CodeCountFourEyes {
+			t.Fatalf("approver %q: %v", who, err)
+		}
+	}
+}
+
+func TestOutstandingRecountsCountsFlaggedLines(t *testing.T) {
+	if n := OutstandingRecounts([]CountLine{{RecountRequested: true}, {}, {RecountRequested: true}}); n != 2 {
+		t.Fatalf("got %d", n)
+	}
+}
+
+func TestSampleKeysIsRepeatablePerSheetAndRotatesAcrossSheets(t *testing.T) {
+	keys := []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"}
+	pct := decimal.NewFromInt(25)
+	first, second := SampleKeys("sheet-1", keys, pct), SampleKeys("sheet-1", keys, pct)
+	if len(first) != 3 {
+		t.Fatalf("25%% of 10 rounds up to 3, got %d", len(first))
+	}
+	for k := range first {
+		if !second[k] {
+			t.Fatalf("the same sheet's sample changed between runs: %s", k)
+		}
+	}
+	// Successive sheets must not count the same subset forever: over a few
+	// sheets every key is drawn at least once.
+	seen := map[string]bool{}
+	for i := range 20 {
+		for k := range SampleKeys(fmt.Sprintf("sheet-%d", i), keys, pct) {
+			seen[k] = true
+		}
+	}
+	if len(seen) != len(keys) {
+		t.Fatalf("20 sheets of a 25%% sample drew only %d of %d keys", len(seen), len(keys))
+	}
+	if len(SampleKeys("s", keys, decimal.Zero)) != 10 || len(SampleKeys("s", keys, decimal.NewFromInt(100))) != 10 {
+		t.Fatal("zero or 100 percent keeps every key")
+	}
+	if len(SampleKeys("s", nil, pct)) != 0 {
+		t.Fatal("no keys, no sample")
+	}
+}
+
+func TestValidatePlanSelection(t *testing.T) {
+	base := CountPlan{Name: "p", Currency: "EUR", Unit: "PCS", TolerancePct: DefaultTolerancePct, ToleranceValue: DefaultToleranceValue}
+	if err := ValidatePlan(base); err != nil {
+		t.Fatal(err)
+	}
+	bad := []CountPlan{
+		{Name: "p", Currency: "EUR", Unit: "PCS", ABCClass: "N"},
+		{Name: "p", Currency: "EUR", Unit: "PCS", LocationFrom: "B", LocationTo: "A"},
+		{Name: "p", Currency: "EUR", Unit: "PCS", SamplePct: decimal.NewFromInt(101)},
+	}
+	for i, p := range bad {
+		if ValidatePlan(p) == nil {
+			t.Fatalf("case %d should fail", i)
+		}
 	}
 }

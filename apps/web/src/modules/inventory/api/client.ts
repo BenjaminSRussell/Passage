@@ -586,7 +586,8 @@ export async function releaseBlocking(id: string, version: number): Promise<Bloc
 
 // ---- Cycle counting (FR-16.9) ----
 
-export type CountSheetStatus = "OPEN" | "POSTED";
+export type CountSheetStatus = "OPEN" | "COUNTED" | "APPROVED" | "POSTED" | "CANCELLED";
+export type CountAbcClass = "A" | "B" | "C";
 
 export interface CountPlan {
   id: string;
@@ -598,6 +599,12 @@ export interface CountPlan {
   tolerancePct: string;
   toleranceValue: string;
   blind: boolean;
+  freezeStock: boolean;
+  fourEyes: boolean;
+  locationFrom?: string;
+  locationTo?: string;
+  abcClass?: CountAbcClass;
+  samplePct?: string;
   createdAt: string;
 }
 
@@ -610,6 +617,12 @@ export interface CountPlanInput {
   tolerancePct?: string;
   toleranceValue?: string;
   blind: boolean;
+  freezeStock?: boolean;
+  fourEyes?: boolean;
+  locationFrom?: string;
+  locationTo?: string;
+  abcClass?: CountAbcClass | "";
+  samplePct?: string;
 }
 
 export interface CountSheetSummary {
@@ -621,6 +634,11 @@ export interface CountSheetSummary {
   status: CountSheetStatus;
   blind: boolean;
   approvedBy?: string;
+  submittedBy?: string;
+  fourEyes: boolean;
+  freezeStock: boolean;
+  /** Lines a supervisor asked to be counted again and that are not yet re-entered. */
+  recountLines: number;
   journalId?: string;
   version: number;
   lineCount: number;
@@ -640,6 +658,9 @@ export interface CountLine {
   countedBy?: string;
   countedAt?: string;
   postedVariance: string | null;
+  recountRequested: boolean;
+  recountReason?: string;
+  recountRounds: number;
 }
 
 export interface CountSheet extends CountSheetSummary {
@@ -648,7 +669,7 @@ export interface CountSheet extends CountSheetSummary {
 
 export async function createCountPlan(input: CountPlanInput, key: string = newKey()): Promise<CountPlan> {
   const body: Record<string, unknown> = { ...input };
-  for (const name of ["warehouse", "tolerancePct", "toleranceValue"] as const) {
+  for (const name of ["warehouse", "tolerancePct", "toleranceValue", "locationFrom", "locationTo", "abcClass", "samplePct"] as const) {
     if (!input[name] || input[name]?.trim() === "") delete body[name];
   }
   return (await send<CountPlan>("/count-plans", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(body) })).body;
@@ -685,6 +706,28 @@ export async function enterCount(sheetId: string, lineId: string, version: numbe
 
 export async function postCountSheet(sheetId: string, version: number): Promise<CountSheet> {
   return (await send<CountSheet>(`/count-sheets/${encodeURIComponent(sheetId)}:post`, { method: "POST", headers: { "If-Match": `"${version}"` } })).body;
+}
+
+async function sheetAction(sheetId: string, action: string, version: number): Promise<CountSheet> {
+  return (await send<CountSheet>(`/count-sheets/${encodeURIComponent(sheetId)}:${action}`, { method: "POST", headers: { "If-Match": `"${version}"` } })).body;
+}
+
+/** Closes counting: the sheet becomes COUNTED. */
+export const submitCountSheet = (sheetId: string, version: number) => sheetAction(sheetId, "submit", version);
+/** A supervisor's approval of a COUNTED sheet (a four-eyes plan needs it before posting). */
+export const approveCountSheet = (sheetId: string, version: number) => sheetAction(sheetId, "approve", version);
+/** Abandons an unposted sheet and lifts its stock freeze. */
+export const cancelCountSheet = (sheetId: string, version: number) => sheetAction(sheetId, "cancel", version);
+
+/** Flags a counted line for recount; the sheet returns to OPEN. */
+export async function requestCountRecount(sheetId: string, lineId: string, version: number, reason: string): Promise<CountSheet> {
+  return (
+    await send<CountSheet>(`/count-sheets/${encodeURIComponent(sheetId)}/lines/${encodeURIComponent(lineId)}:recount`, {
+      method: "POST",
+      headers: { "If-Match": `"${version}"` },
+      body: JSON.stringify({ reason }),
+    })
+  ).body;
 }
 
 // ---- Tag counting (FR-16.18) ----

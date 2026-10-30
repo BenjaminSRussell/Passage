@@ -1,6 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader } from "../../shell/ui";
+import { Alert, Button, buttonClassName, Card, FormField, Input, PageHeader, Select } from "../../shell/ui";
 import { createCountPlan, describeProblem, type Problem } from "./api/client";
 import { DECIMAL, UUID } from "./format";
 import { fieldErrorsOf } from "./parts";
@@ -15,9 +15,27 @@ export interface CountPlanValues {
   tolerancePct: string;
   toleranceValue: string;
   blind: boolean;
+  freezeStock: boolean;
+  fourEyes: boolean;
+  locationFrom: string;
+  locationTo: string;
+  abcClass: "" | "A" | "B" | "C";
+  samplePct: string;
 }
 
-const fields = ["legalEntityId", "name", "warehouse", "currency", "unit", "tolerancePct", "toleranceValue"] as const;
+const fields = [
+  "legalEntityId",
+  "name",
+  "warehouse",
+  "currency",
+  "unit",
+  "tolerancePct",
+  "toleranceValue",
+  "locationFrom",
+  "locationTo",
+  "abcClass",
+  "samplePct",
+] as const;
 type Errors = Partial<Record<(typeof fields)[number], string>>;
 
 /** Client checks that mirror the service. */
@@ -31,6 +49,13 @@ export function validateCountPlan(values: CountPlanValues): Errors {
   if (pct !== "" && (!DECIMAL.test(pct) || Number(pct) < 0 || Number(pct) > 100)) errors.tolerancePct = "Enter a percentage from 0 to 100.";
   const value = values.toleranceValue.trim();
   if (value !== "" && (!DECIMAL.test(value) || Number(value) < 0)) errors.toleranceValue = "Enter an amount of zero or more.";
+  const from = values.locationFrom.trim();
+  const to = values.locationTo.trim();
+  if (from.length > 60) errors.locationFrom = "Up to 60 characters.";
+  if (to.length > 60) errors.locationTo = "Up to 60 characters.";
+  if (from !== "" && to !== "" && from > to) errors.locationTo = "The range end must not be before its start.";
+  const sample = values.samplePct.trim();
+  if (sample !== "" && (!DECIMAL.test(sample) || Number(sample) < 0 || Number(sample) > 100)) errors.samplePct = "Enter a percentage from 0 to 100.";
   return errors;
 }
 
@@ -46,6 +71,12 @@ export function NewCountPlanPage() {
     tolerancePct: "5",
     toleranceValue: "100",
     blind: false,
+    freezeStock: false,
+    fourEyes: false,
+    locationFrom: "",
+    locationTo: "",
+    abcClass: "",
+    samplePct: "",
   });
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
@@ -70,6 +101,12 @@ export function NewCountPlanPage() {
           tolerancePct: values.tolerancePct.trim(),
           toleranceValue: values.toleranceValue.trim(),
           blind: values.blind,
+          freezeStock: values.freezeStock,
+          fourEyes: values.fourEyes,
+          locationFrom: values.locationFrom.trim(),
+          locationTo: values.locationTo.trim(),
+          abcClass: values.abcClass,
+          samplePct: values.samplePct.trim(),
         },
         key.current,
       );
@@ -89,7 +126,7 @@ export function NewCountPlanPage() {
     setValues(next);
     key.current = crypto.randomUUID();
   };
-  const set = (name: Exclude<keyof CountPlanValues, "blind">) => (event: { target: { value: string } }) =>
+  const set = (name: Exclude<keyof CountPlanValues, "blind" | "freezeStock" | "fourEyes">) => (event: { target: { value: string } }) =>
     change({ ...values, [name]: name === "currency" || name === "unit" ? event.target.value.toUpperCase() : event.target.value });
 
   return (
@@ -120,6 +157,39 @@ export function NewCountPlanPage() {
               <Input {...control} inputMode="decimal" value={values.toleranceValue} onChange={set("toleranceValue")} invalid={Boolean(errors.toleranceValue)} />
             )}
           </FormField>
+          <FormField id="plan-loc-from" label="Locations from" optional hint="Counts locations from this value on, in alphabetical order." error={errors.locationFrom}>
+            {(control) => <Input {...control} value={values.locationFrom} maxLength={60} onChange={set("locationFrom")} invalid={Boolean(errors.locationFrom)} />}
+          </FormField>
+          <FormField id="plan-loc-to" label="Locations to" optional error={errors.locationTo}>
+            {(control) => <Input {...control} value={values.locationTo} maxLength={60} onChange={set("locationTo")} invalid={Boolean(errors.locationTo)} />}
+          </FormField>
+          <FormField id="plan-abc" label="ABC class" optional hint="Only products of this class in the latest ABC run." error={errors.abcClass}>
+            {(control) => (
+              <Select {...control} value={values.abcClass} onChange={(event) => change({ ...values, abcClass: event.target.value as CountPlanValues["abcClass"] })}>
+                <option value="">All classes</option>
+                <option value="A">A</option>
+                <option value="B">B</option>
+                <option value="C">C</option>
+              </Select>
+            )}
+          </FormField>
+          <FormField id="plan-sample" label="Sample (%)" optional hint="Count only this share of the selected rows." error={errors.samplePct}>
+            {(control) => <Input {...control} inputMode="decimal" value={values.samplePct} onChange={set("samplePct")} invalid={Boolean(errors.samplePct)} />}
+          </FormField>
+          <div className={styles.formActions}>
+            <span className={styles.check}>
+              <Input type="checkbox" id="plan-freeze" checked={values.freezeStock} onChange={(event) => change({ ...values, freezeStock: event.target.checked })} />
+              <label htmlFor="plan-freeze">Freeze stock while counting</label>
+            </span>
+            <span className={styles.muted}>Journals, transfers, blockings and receipts or issues that move a counted row are refused until the sheet is posted or cancelled.</span>
+          </div>
+          <div className={styles.formActions}>
+            <span className={styles.check}>
+              <Input type="checkbox" id="plan-four-eyes" checked={values.fourEyes} onChange={(event) => change({ ...values, fourEyes: event.target.checked })} />
+              <label htmlFor="plan-four-eyes">Separate approval</label>
+            </span>
+            <span className={styles.muted}>A supervisor who did not count must approve the sheet before it posts.</span>
+          </div>
           <div className={styles.formActions}>
             <span className={styles.check}>
               <Input type="checkbox" id="plan-blind" checked={values.blind} onChange={(event) => change({ ...values, blind: event.target.checked })} />

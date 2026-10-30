@@ -52,6 +52,7 @@ type fakeStore struct {
 	sheet            domain.CountSheet
 	countVersion     int
 	counted          decimal.Decimal
+	recountReason    string
 	countCanApprove  bool
 	postedParams     store.PostParams
 	transferVersion  int
@@ -250,6 +251,42 @@ func (f *fakeStore) PostCountSheet(_ context.Context, _ string, version int, can
 		return domain.CountSheet{}, f.err
 	}
 	f.sheet.Status = domain.CountPosted
+	return f.sheet, nil
+}
+
+func (f *fakeStore) SubmitCountSheet(_ context.Context, _ string, version int) (domain.CountSheet, error) {
+	f.countVersion = version
+	if f.err != nil {
+		return domain.CountSheet{}, f.err
+	}
+	f.sheet.Status = domain.CountCounted
+	return f.sheet, nil
+}
+
+func (f *fakeStore) ApproveCountSheet(_ context.Context, _ string, version int) (domain.CountSheet, error) {
+	f.countVersion = version
+	if f.err != nil {
+		return domain.CountSheet{}, f.err
+	}
+	f.sheet.Status = domain.CountApproved
+	return f.sheet, nil
+}
+
+func (f *fakeStore) CancelCountSheet(_ context.Context, _ string, version int) (domain.CountSheet, error) {
+	f.countVersion = version
+	if f.err != nil {
+		return domain.CountSheet{}, f.err
+	}
+	f.sheet.Status = domain.CountCancelled
+	return f.sheet, nil
+}
+
+func (f *fakeStore) RequestRecount(_ context.Context, _, _ string, version int, reason string) (domain.CountSheet, error) {
+	f.countVersion, f.recountReason = version, reason
+	if f.err != nil {
+		return domain.CountSheet{}, f.err
+	}
+	f.sheet.Status = domain.CountOpen
 	return f.sheet, nil
 }
 
@@ -573,8 +610,8 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		served[route+" "+strings.ToLower(method)] = true
 		return nil
 	})
-	if len(served) != 58 {
-		t.Fatalf("router walk yielded %d operations, want 58: %v", len(served), served)
+	if len(served) != 62 {
+		t.Fatalf("router walk yielded %d operations, want 62: %v", len(served), served)
 	}
 	declared := declaredOperations(string(spec))
 	for op := range served {
