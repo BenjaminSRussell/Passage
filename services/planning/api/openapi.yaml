@@ -1203,6 +1203,7 @@ paths:
               type: object
               required: [itemId, siteId, profileId, dltDays]
               properties:
+                legalEntityId: {type: string, format: uuid, description: "Owning legal entity of the stored buffer: the caller's single legal entity by default, required (422) for a caller scoped to several or to all; 403 outside the caller's scope. A buffer of the same item, site and warehouse held by another legal entity is 409 PLAN-BUFFER-ENTITY."}
                 itemId: {type: string, format: uuid}
                 siteId: {type: string, format: uuid}
                 warehouseId: {type: string, format: uuid, description: Absent for the site scope}
@@ -1422,6 +1423,7 @@ components:
       required: [itemId, siteId, coverageGroupId]
       description: Omitted fields (and explicit nulls) take the defaults below.
       properties:
+        legalEntityId: {type: string, format: uuid, description: "Owning legal entity on create: the caller's single legal entity by default, required (422) for a caller scoped to several or to all; 403 outside the caller's scope; ignored on update."}
         itemId: {type: string, format: uuid}
         siteId: {type: string, format: uuid}
         warehouseId: {type: [string, 'null'], format: uuid, description: 'Required for warehouse scope, absent otherwise'}

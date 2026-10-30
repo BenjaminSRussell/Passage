@@ -19,7 +19,7 @@ import (
 
 const planID = "0190f0a0-0000-7000-8000-0000000000f2"
 
-func (f *fakeStore) FindRoutePlan(_ context.Context, hash string) (domain.RoutePlan, bool, error) {
+func (f *fakeStore) FindRoutePlan(_ context.Context, hash, _ string) (domain.RoutePlan, bool, error) {
 	p, ok := f.plans[hash]
 	return p, ok, f.findPlanErr
 }

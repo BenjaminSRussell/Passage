@@ -21,6 +21,7 @@ func ownerOrParentTx(ctx context.Context, tx pgx.Tx, table, tenantID, parentID, 
 const (
 	parentLoad        = "load"
 	parentFreightBill = "freight_bill"
+	parentVoyage      = "voyage"
 )
 
 func parentEntityTx(ctx context.Context, tx pgx.Tx, table, tenantID, id, requested string) (string, error) {
@@ -32,12 +33,17 @@ func parentEntityTx(ctx context.Context, tx pgx.Tx, table, tenantID, id, request
 	if err != nil {
 		return "", err
 	}
-	if requested != "" {
-		if asserted, ok := ids.Canonical(requested); !ok || asserted != entity {
-			bad := httpx.NewProblem(http.StatusUnprocessableEntity, "COM-0001", "request failed validation")
-			bad.Errors = map[string]string{"legalEntityId": "does not match the legal entity of the referenced " + table}
-			return "", bad
-		}
+	return entity, assertParentEntity(table, requested, entity)
+}
+
+func assertParentEntity(table, requested, entity string) error {
+	if requested == "" {
+		return nil
 	}
-	return entity, nil
+	if asserted, ok := ids.Canonical(requested); !ok || asserted != entity {
+		bad := httpx.NewProblem(http.StatusUnprocessableEntity, "COM-0001", "request failed validation")
+		bad.Errors = map[string]string{"legalEntityId": "does not match the legal entity of the referenced " + table}
+		return bad
+	}
+	return nil
 }

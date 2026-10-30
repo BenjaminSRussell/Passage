@@ -279,9 +279,9 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 			if err != nil {
 				return err
 			}
-			batch.Queue(`insert into firming_batch (tenant_id, id, idempotency_key, input_hash, grouping, firmed_count, response)
-				values ($1, $2, $3, $4, $5, $6, $7)`, p.TenantID, autoFirm.batch.ID, autoFirmKeyPrefix+versionID, r.Hash,
-				autoFirm.batch.Grouping, autoFirm.batch.Firmed, body)
+			batch.Queue(`insert into firming_batch (tenant_id, id, idempotency_key, input_hash, grouping, firmed_count, response, legal_entity_id)
+				values ($1, $2, $3, $4, $5, $6, $7, nullif($8, '')::uuid)`, p.TenantID, autoFirm.batch.ID, autoFirmKeyPrefix+versionID, r.Hash,
+				autoFirm.batch.Grouping, autoFirm.batch.Firmed, body, planEntity)
 		}
 		for i, o := range r.Orders {
 			var futures *string

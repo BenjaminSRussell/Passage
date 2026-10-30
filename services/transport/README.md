@@ -347,5 +347,20 @@ of them must send it (422). A freight bill, gate visit with a load, and matched
 invoice inherit the entity of the load or bill they reference, and `legalEntityId`
 is then an assertion (422 on mismatch). Tendering, tracking and billing against a
 load the caller cannot see is 404, never a pass through the child gates. A row with
-no entity is visible only to all-entity callers. Rate cards, voyages and route plans
-stay tenant-level.
+no entity is visible only to all-entity callers.
+
+### Voyages, folios and route plans (#292)
+
+| Table | Decision | Owner of a new row |
+|---|---|---|
+| `voyage` | entity-specific root (migration 0008) | `legalEntityId` on the request, default the caller's single entity (422 for several or all; 403 outside the scope) |
+| voyage cost lines, folios, legs, containers, receipt lines | JSON documents inside the `voyage` row, so they follow it; there are no tables to scope | the voyage's |
+| `goods_in_transit_order` on a voyage | already scoped (0006); now takes the voyage's entity, and `legalEntityId` is an assertion (422 on mismatch) | the voyage's |
+| `route_plan` | entity-specific root (migration 0008) | `legalEntityId` on the optimize request, same rules as a voyage |
+| `rate_card` | stays tenant-level: negotiated carrier rates are shared by every entity of the tenant when rating | n/a |
+
+A voyage or goods-in-transit order on a voyage the caller cannot see is 404. The
+route-plan request hash (which excludes `legalEntityId`) is the idempotency key within
+one legal entity: two entities that send the same request each get their own plan.
+A voyage `Idempotency-Key` held by another entity's voyage is 422
+`idempotency_key_reuse`, not a replay.

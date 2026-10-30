@@ -75,7 +75,7 @@ func (a *API) optimizeRoutes(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, "hash route request failed", err)
 		return
 	}
-	stored, found, err := a.store.FindRoutePlan(r.Context(), hash)
+	stored, found, err := a.store.FindRoutePlan(r.Context(), hash, req.LegalEntityID)
 	if err != nil {
 		a.fail(w, r, "find route plan failed", err)
 		return

@@ -28,6 +28,7 @@ const (
 	CodeCoverageGroupUnknown = "PLAN-COVERAGE-GROUP-UNKNOWN"
 
 	foreignKeyViolation               = "23503"
+	insufficientPrivilege             = "42501"
 	itemCoverageScopeConstraint       = "item_coverage_scope_key"
 	itemCoverageIdempotencyConstraint = "item_coverage_idempotency_key"
 	itemCoverageGroupConstraint       = "item_coverage_group_fkey"
@@ -46,6 +47,7 @@ type ItemCoverage struct {
 // ItemCoverageCreate is one create command; IdempotencyKey and InputHash are
 // empty when the caller sent no Idempotency-Key.
 type ItemCoverageCreate struct {
+	LegalEntityID  string
 	IdempotencyKey string
 	InputHash      string
 	Spec           domain.ItemCoverageSpec
@@ -156,7 +158,11 @@ func (s *Postgres) CreateItemCoverage(ctx context.Context, req ItemCoverageCreat
 	if req.IdempotencyKey != "" {
 		key, hash = &req.IdempotencyKey, &req.InputHash
 	}
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	entity, err := httpx.OwnerLegalEntity(ctx, req.LegalEntityID)
+	if err != nil {
+		return ItemCoverage{}, false, err
+	}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if key != nil {
 			var stored, id string
 			err := tx.QueryRow(ctx, `select input_hash, id::text from item_coverage where tenant_id = $1 and idempotency_key = $2`,
@@ -177,11 +183,11 @@ func (s *Postgres) CreateItemCoverage(ctx context.Context, req ItemCoverageCreat
 		id := ids.New()
 		if _, err := tx.Exec(ctx, `insert into item_coverage (tenant_id, id, item_id, site_id, warehouse_id, coverage_group_id,
 			min_qty, max_qty, safety_margin_receipt_days, lead_time_days, vendor_id, planned_order_type, planning_strategy_code,
-			planning_scope, decoupling_point, buffer_profile_id, required_shelf_life_days, priority_based, idempotency_key, input_hash)
-			values ($1, $2, $3, $4, $5, $6, $7::numeric, $8::numeric, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
+			planning_scope, decoupling_point, buffer_profile_id, required_shelf_life_days, priority_based, idempotency_key, input_hash, legal_entity_id)
+			values ($1, $2, $3, $4, $5, $6, $7::numeric, $8::numeric, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21::uuid)`,
 			p.TenantID, id, c.ItemID, c.SiteID, optional(c.WarehouseID), c.CoverageGroupID, c.MinQty.String(), c.MaxQty.String(),
 			c.SafetyMarginReceiptDays, c.LeadTimeDays, optional(c.VendorID), c.PlannedOrderType, c.PlanningStrategy,
-			c.PlanningScope, c.DecouplingPoint, optional(c.BufferProfileID), c.RequiredShelfLifeDays, c.PriorityBased, key, hash); err != nil {
+			c.PlanningScope, c.DecouplingPoint, optional(c.BufferProfileID), c.RequiredShelfLifeDays, c.PriorityBased, key, hash, entity); err != nil {
 			return err
 		}
 		var err error
