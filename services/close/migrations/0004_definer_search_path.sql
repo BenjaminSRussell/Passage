@@ -28,4 +28,3 @@ $do$;
 
 REVOKE ALL ON FUNCTION period_status_track_reopen_expiry() FROM PUBLIC;
 REVOKE ALL ON FUNCTION close_reopen_due_tenants() FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION close_reopen_due_tenants() TO passage_app;

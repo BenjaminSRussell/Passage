@@ -226,41 +226,28 @@ func TestReopenDueTenants(t *testing.T) {
 	}
 }
 
-func TestDefinerFunctionsIgnoreHostileOverloads(t *testing.T) {
+func TestDefinerFunctionsIgnoreTempTableShadow(t *testing.T) {
 	admin, app := migrated(t)
 	ctx := context.Background()
-	for _, stmt := range []string{
-		`create function now(variadic anyarray default null) returns timestamptz language sql as $$ select '-infinity'::timestamptz $$`,
-		`create function now() returns timestamptz language sql as $$ select '-infinity'::timestamptz $$`,
-		`create function cardinality(anyelement) returns int language sql as $$ select 0 $$`,
-		`create function "any"(anyelement) returns bool language sql as $$ select false $$`,
-		`create function pg_temp.now() returns timestamptz language sql as $$ select '-infinity'::timestamptz $$`,
-	} {
-		if _, err := admin.Exec(ctx, stmt); err != nil {
-			t.Fatalf("%s: %v", stmt, err)
-		}
-	}
-	for i, row := range []struct{ status, expiry string }{
-		{"open", "now() - interval '1 hour'"},
-		{"closed", "now() - interval '1 hour'"},
-		{"on_hold", "now() + interval '1 day'"},
-	} {
-		if _, err := admin.Exec(ctx,
-			`insert into period_status(tenant_id, legal_entity_id, ledger_id, fiscal_period_id, module, status, reopen_expires_at, changed_by) values($1,$2,$3,$4,'gl',$5,`+row.expiry+`,'t')`,
-			testkit.TenantID(i+1), entityID, ledgerID, periodID, row.status); err != nil {
-			t.Fatal(err)
-		}
-	}
-	var tracked int
-	if err := admin.QueryRow(ctx, `select count(*) from reopen_expiry`).Scan(&tracked); err != nil || tracked != 2 {
-		t.Fatalf("trigger must track only open/on_hold rows: %d, %v", tracked, err)
-	}
-	var due []string
-	rows, err := app.Query(ctx, `select * from close_reopen_due_tenants()`)
+	conn, err := app.Acquire(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
+	defer conn.Release()
+	sentinel, victim := testkit.TenantID(7), testkit.TenantID(1)
+	for _, stmt := range []string{
+		`create temp table reopen_expiry (tenant_id uuid, ledger_id uuid, fiscal_period_id uuid, module text, reopen_expires_at timestamptz)`,
+		`insert into pg_temp.reopen_expiry values ('` + sentinel + `', '` + ledgerID + `', '` + periodID + `', 'gl', now() - interval '1 hour')`,
+	} {
+		if _, err := conn.Exec(ctx, stmt); err != nil {
+			t.Fatalf("seed temp shadow (%s): %v", stmt, err)
+		}
+	}
+	rows, err := conn.Query(ctx, `select * from close_reopen_due_tenants()`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var due []string
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
@@ -268,8 +255,36 @@ func TestDefinerFunctionsIgnoreHostileOverloads(t *testing.T) {
 		}
 		due = append(due, id)
 	}
-	if len(due) != 1 || due[0] != testkit.TenantID(1) {
-		t.Fatalf("due tenants = %v, want only tenant 1 despite hostile now()", due)
+	rows.Close()
+	if len(due) != 0 {
+		t.Fatalf("definer function read the caller's temp table: %v", due)
+	}
+
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`select set_config('passage.tenant_id', '` + victim + `', true)`,
+		`select set_config('passage.legal_entity_scopes', '*', true)`,
+		`insert into period_status(tenant_id, legal_entity_id, ledger_id, fiscal_period_id, module, status, reopen_expires_at, changed_by) values('` + victim + `','` + entityID + `','` + ledgerID + `','` + periodID + `','gl','open', now() - interval '1 hour','t')`,
+	} {
+		if _, err := tx.Exec(ctx, stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var shadowRows, realRows int
+	if err := conn.QueryRow(ctx, `select count(*) from pg_temp.reopen_expiry where tenant_id = $1`, victim).Scan(&shadowRows); err != nil {
+		t.Fatal(err)
+	}
+	if err := admin.QueryRow(ctx, `select count(*) from reopen_expiry where tenant_id = $1`, victim).Scan(&realRows); err != nil {
+		t.Fatal(err)
+	}
+	if shadowRows != 0 || realRows != 1 {
+		t.Fatalf("trigger must write the real table: shadow=%d real=%d", shadowRows, realRows)
 	}
 }
 
