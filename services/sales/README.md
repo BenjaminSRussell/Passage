@@ -107,6 +107,9 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | GET | `/v1/sales/orders/{id}/schedule-lines` | `sales.order.read` | The order's active schedule lines |
 | GET | `/v1/sales/backorders` | `sales.order.read` | Backorder list by promised date, undated last (`legalEntityId`, `productId`, `customerId`, `promisedTo`, `limit`) |
 | POST | `/v1/sales/atp:check` | `sales.order.read` | Stateless BR-27.1 check over supplied buckets |
+| GET / POST | `/v1/sales/backorder-runs` | `sales.order.read` / `sales.backorder.run` | Stored backorder runs (`legalEntityId`, `productId`, `status`, `limit`); plan a run (`Idempotency-Key`, `legalEntityId`, `productId`, `siteId`, `warehouseId`, `strategy`, `supply`, `supplyDate`, optional `loseThreshold`, `defaultPriorityClass`, `priorityClasses`) over the open lines of the CONFIRMED orders and store it as a PREVIEW that changes nothing (FR-27.17, BR-27.11); `SLS-0027` when no line is open or a protected confirmation cannot be kept |
+| GET | `/v1/sales/backorder-runs/{id}` | `sales.order.read` | The run with its lines in processing order (promised quantity before and after, gain date, order version the preview used) |
+| POST | `/v1/sales/backorder-runs/{id}:commit` | `sales.backorder.run` | `If-Match`; applies a PREVIEW in one transaction serialised per product, site and warehouse: rewrites the schedule lines of each changed line, moves confirmed dates, versions each order, emits `order.changed`, `atp.promised` per changed line and `backorderrun.committed`; an order changed since the preview, or another line of the product promised differently since, is `SLS-0042` and nothing is applied; a committed run is `SLS-0041` |
 | POST | `/v1/sales/schedule-releases:check` | `sales.agreement.maintain` | Stateless BR-27.12 reconciliation; a mismatch returns `held: true`, `code: CUM_QTY_MISMATCH` and no schedule lines |
 | POST | `/v1/sales/backorder-runs:preview` | `sales.backorder.run` | Stateless FR-27.17 preview over supplied lines; nothing is committed |
 | GET | `/v1/sales/credit-profiles` | `sales.order.read` | Optional `legalEntityId`, `limit` |
@@ -250,7 +253,7 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0024` | 422 | Change refused: unknown line, a line that is not OPEN or RESERVED, a supplementary line's own quantity or date, invalid quantity, bad price or date, or reason too long |
 | `SLS-0025` | 422 | Order cannot be cancelled: shipped, closed or cancelled, or a line is picked, delivered or invoiced |
 | `SLS-0026` | 422 | Scheduling release refused: negative quantities, unordered or decreasing buckets |
-| `SLS-0027` | 422 | Backorder run refused: unknown strategy, supply below zero, or a WIN, GAIN or LOSE run that cannot keep a protected confirmation |
+| `SLS-0027` | 422 | Backorder run refused: unknown strategy, supply below zero, a WIN, GAIN or LOSE run that cannot keep a protected confirmation, or (stored runs) no open line for the product, site and warehouse or more than 10,000 |
 | `SLS-0028` | 422 | Hold cannot be applied: CREDIT by hand, the order is shipped, closed or cancelled, or an ACTIVE hold of the type exists |
 | `SLS-0029` | 422 | Agreement is not valid on the release date |
 | `SLS-0030` | 422 | Quotation status does not allow the action (send a non-DRAFT, convert a DRAFT or LOST, lose a CONVERTED) |
@@ -264,6 +267,8 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0038` | 409 | A release with this number was already received for the agreement |
 | `SLS-0039` | 422 | The release is not HELD, or a newer release is already in effect |
 | `SLS-0040` | 422 | Cumulative shipped quantity would fall without a later reset date, or the reset date moves back |
+| `SLS-0041` | 409 | The backorder run was already committed |
+| `SLS-0042` | 409 | The run is out of date, so nothing was applied: an order of a changed line moved since the preview (version, status or line state), or another open line of the product, site and warehouse now holds another promised quantity than the preview saw |
 | `SLS-0100` | 404 | Order not found |
 | `SLS-0101` | 404 | Hold not found |
 | `SLS-0102` | 404 | Credit profile not found |
@@ -275,6 +280,7 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0108` | 404 | Allocation quota not found |
 | `SLS-0109` | 404 | Order line not found |
 | `SLS-0110` | 404 | Scheduling release not found |
+| `SLS-0111` | 404 | Backorder run not found |
 | `idempotency_key_reuse` | 422 | Same `Idempotency-Key` with a different body (kernel) |
 | `COM-0001` | 400 | Request failed validation; field errors in `errors` |
 | `AUTH-0001` | 401 | Missing or malformed tenant |

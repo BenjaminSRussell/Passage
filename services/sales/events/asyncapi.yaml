@@ -62,6 +62,11 @@ channels:
     messages:
       scheduleReleaseRecalculated:
         $ref: "#/components/messages/ScheduleReleaseRecalculated"
+  backorderRunCommitted:
+    address: passage.sales.backorderrun
+    messages:
+      backorderRunCommitted:
+        $ref: "#/components/messages/BackorderRunCommitted"
   quotationConverted:
     address: passage.sales.quotation
     messages:
@@ -117,6 +122,12 @@ operations:
     summary: The open lines of the release in effect were recalculated after the cumulative shipped quantity changed. Consumers - planning, fulfillment.
     messages:
       - {$ref: "#/channels/scheduleReleaseRecalculated/messages/scheduleReleaseRecalculated"}
+  publishBackorderRunCommitted:
+    action: send
+    channel: {$ref: "#/channels/backorderRunCommitted"}
+    summary: A backorder processing run was committed and the schedule lines of its changed lines were rewritten in one transaction (FR-27.17, BR-27.11). atp.promised is written per changed line. Consumers - planning, fulfillment, analytics.
+    messages:
+      - {$ref: "#/channels/backorderRunCommitted/messages/backorderRunCommitted"}
   publishAgreementReleased:
     action: send
     channel: {$ref: "#/channels/agreementReleased"}
@@ -273,6 +284,14 @@ components:
         $ref: "#/components/schemas/CloudEventHeaders"
       payload:
         $ref: "#/components/schemas/ScheduleReleaseData"
+    BackorderRunCommitted:
+      name: dev.passage.sales.backorderrun.committed.v1
+      title: Backorder run committed
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/BackorderRunCommittedData"
     OrderChanged:
       name: dev.passage.sales.order.changed.v1
       title: Sales order changed
@@ -342,7 +361,7 @@ components:
         warehouse_id: {type: string}
         quantity: {type: string, description: line quantity (decimal string)}
         requested_ship_date: {type: string, format: date, description: the line's requested ship date}
-        source: {type: string, enum: [ATP, ALLOCATION], description: ALLOCATION when the quota period the line drew from held the promise back (BR-27.15)}
+        source: {type: string, enum: [ATP, ALLOCATION, BACKORDER_RUN], description: ALLOCATION when the quota period the line drew from held the promise back (BR-27.15); BACKORDER_RUN when a committed backorder run changed the line (FR-27.17)}
         complete: {type: boolean, description: true when the whole quantity was placed on dated schedule lines}
         promised_date: {type: string, format: date, description: the line's new confirmed ship date - the date of the first dated schedule line; absent when nothing could be promised}
         backorder_qty: {type: string, description: quantity promised after the requested date or not at all (decimal string)}
@@ -489,6 +508,34 @@ components:
         status: {type: string, enum: [ACTIVE, EXHAUSTED]}
         version: {type: integer, description: the agreement version after the release}
         actor: {type: string}
+    BackorderRunCommittedData:
+      type: object
+      required: [run_id, legal_entity_id, product_id, site_id, warehouse_id, strategy, supply, allocated, deconfirmed_count, lines, actor, version]
+      properties:
+        run_id: {type: string, format: uuid}
+        legal_entity_id: {type: string, format: uuid}
+        product_id: {type: string, format: uuid}
+        site_id: {type: string, format: uuid}
+        warehouse_id: {type: string, format: uuid}
+        strategy: {type: string, enum: [WIN, GAIN, REDISTRIBUTE, FILL, LOSE]}
+        supply: {type: string, description: supply the run distributed (decimal string)}
+        allocated: {type: string, description: quantity carrying a promised date across the run's lines after the run}
+        deconfirmed_count: {type: integer, description: lines whose dated quantity fell}
+        lines:
+          type: array
+          description: only the lines whose dated quantity changed
+          items:
+            type: object
+            required: [order_id, line_id, line_no, before_qty, after_qty, deconfirmed]
+            properties:
+              order_id: {type: string, format: uuid}
+              line_id: {type: string, format: uuid}
+              line_no: {type: integer}
+              before_qty: {type: string}
+              after_qty: {type: string}
+              deconfirmed: {type: boolean}
+        actor: {type: string}
+        version: {type: integer, description: the run version after the commit}
     ScheduleReleaseData:
       type: object
       required: [release_id, release_no, release_type, legal_entity_id, agreement_id, agreement_number, customer_id, product_id, status, cum_received, cum_shipped, difference, open_qty, lines, actor]

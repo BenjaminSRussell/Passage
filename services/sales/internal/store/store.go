@@ -257,6 +257,10 @@ type Store interface {
 	PromiseLine(ctx context.Context, orderID string, version int, req PromiseRequest, actor string, now time.Time) (PromiseResult, error)
 	ListScheduleLines(ctx context.Context, orderID string) ([]ScheduleLine, error)
 	ListBackorders(ctx context.Context, f BackorderFilter) ([]BackorderItem, error)
+	CreateBackorderRun(ctx context.Context, in NewBackorderRun, now time.Time) (BackorderRun, bool, error)
+	ListBackorderRuns(ctx context.Context, f BackorderRunFilter) ([]BackorderRun, error)
+	GetBackorderRun(ctx context.Context, id string) (BackorderRun, error)
+	CommitBackorderRun(ctx context.Context, id string, version int, actor string, now time.Time) (BackorderRun, error)
 	Ping(ctx context.Context) error
 }
 

@@ -1150,3 +1150,94 @@ export function recordAgreementShipped(agreementId: string, etag: string, cumShi
     headers: { "If-Match": etag },
   });
 }
+
+export const BACKORDER_RUN_STATUSES = ["PREVIEW", "COMMITTED"] as const;
+export type BackorderRunStatus = (typeof BACKORDER_RUN_STATUSES)[number];
+
+export interface BackorderRunInput {
+  legalEntityId: string;
+  productId: string;
+  siteId: string;
+  warehouseId: string;
+  strategy: BackorderStrategy;
+  supply: Decimal;
+  supplyDate: string;
+  loseThreshold?: number;
+  defaultPriorityClass?: number;
+  priorityClasses?: Record<string, number>;
+}
+
+/** One open order line of a stored run: the quantity with a promised date now and after the run (FR-27.17). */
+export interface BackorderRunLine {
+  seq: number;
+  orderId: string;
+  orderNumber: string;
+  orderVersion: number;
+  lineId: string;
+  lineNo: number;
+  customerId: string;
+  priorityClass: number;
+  requestedDate: string;
+  orderValue: Decimal;
+  demand: Decimal;
+  before: Decimal;
+  after: Decimal;
+  changed: boolean;
+  deconfirmed: boolean;
+  gainDate?: string;
+}
+
+export interface BackorderRun {
+  id: string;
+  legalEntityId: string;
+  productId: string;
+  siteId: string;
+  warehouseId: string;
+  strategy: BackorderStrategy;
+  supply: Decimal;
+  supplyDate: string;
+  loseThreshold: number;
+  defaultPriorityClass: number;
+  status: BackorderRunStatus;
+  allocated: Decimal;
+  deconfirmedCount: number;
+  changedCount: number;
+  version: number;
+  createdBy: string;
+  createdAt: string;
+  committedBy?: string;
+  committedAt?: string;
+  warning?: string;
+  warningCode?: string;
+  lines?: BackorderRunLine[];
+}
+
+export interface BackorderRunFilter {
+  legalEntityId?: string;
+  productId?: string;
+  status?: BackorderRunStatus | "";
+}
+
+/** Stored backorder runs, newest first, without their lines. */
+export async function listBackorderRuns(filter: BackorderRunFilter = {}, signal?: AbortSignal): Promise<BackorderRun[]> {
+  const body = await json<{ items?: BackorderRun[] }>(
+    `/backorder-runs${query({ legalEntityId: filter.legalEntityId, productId: filter.productId, status: filter.status, limit: 200 })}`,
+    {},
+    signal,
+  );
+  return body.items ?? [];
+}
+
+export function getBackorderRun(id: string, signal?: AbortSignal): Promise<Versioned<BackorderRun>> {
+  return versioned<BackorderRun>(`/backorder-runs/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Plans a run over the open lines held by the service and stores it as a PREVIEW; nothing changes until commit. */
+export function createBackorderRun(input: BackorderRunInput, key: string = newKey()): Promise<Versioned<BackorderRun>> {
+  return versioned<BackorderRun>("/backorder-runs", { method: "POST", body: JSON.stringify(input), headers: { "Idempotency-Key": key } });
+}
+
+/** Applies a PREVIEW run at its ETag in one transaction; an order changed since the preview is refused (SLS-0042). */
+export function commitBackorderRun(id: string, etag: string): Promise<Versioned<BackorderRun>> {
+  return versioned<BackorderRun>(`/backorder-runs/${encodeURIComponent(id)}:commit`, { method: "POST", headers: { "If-Match": etag } });
+}

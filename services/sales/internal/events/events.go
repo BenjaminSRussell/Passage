@@ -26,13 +26,15 @@ var (
 	ScheduleReleaseReceived     = events.Type(Context, "schedulerelease", "received", 1)
 	ScheduleReleaseResolved     = events.Type(Context, "schedulerelease", "resolved", 1)
 	ScheduleReleaseRecalculated = events.Type(Context, "schedulerelease", "recalculated", 1)
+
+	BackorderRunCommitted = events.Type(Context, "backorderrun", "committed", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
 	return []string{OrderConfirmed, OrderHoldApplied, OrderHoldReleased, CreditCheckEvaluated, OrderChanged, OrderCancelled, AgreementReleased,
 		QuotationConverted, AllocationQuotaSet, AllocationQuotaMoved, AllocationConsumed, AllocationReturned, ATPPromised,
-		ScheduleReleaseReceived, ScheduleReleaseResolved, ScheduleReleaseRecalculated}
+		ScheduleReleaseReceived, ScheduleReleaseResolved, ScheduleReleaseRecalculated, BackorderRunCommitted}
 }
 
 // PromisedSlice is one schedule line of an ATP promise.
@@ -237,4 +239,33 @@ type ScheduleReleaseData struct {
 	Decision            string                `json:"decision,omitempty"`
 	Reason              string                `json:"reason,omitempty"`
 	Actor               string                `json:"actor"`
+}
+
+// BackorderRunLineData is one changed line of a committed backorder run.
+type BackorderRunLineData struct {
+	OrderID     string `json:"order_id"`
+	LineID      string `json:"line_id"`
+	LineNo      int    `json:"line_no"`
+	Before      string `json:"before_qty"`
+	After       string `json:"after_qty"`
+	Deconfirmed bool   `json:"deconfirmed"`
+}
+
+// BackorderRunCommittedData is the data member of backorderrun.committed.v1: a
+// backorder run was applied to the schedule lines of its changed lines
+// (FR-27.17). atp.promised.v1 is written per changed line in the same
+// transaction.
+type BackorderRunCommittedData struct {
+	RunID            string                 `json:"run_id"`
+	LegalEntityID    string                 `json:"legal_entity_id"`
+	ProductID        string                 `json:"product_id"`
+	SiteID           string                 `json:"site_id"`
+	WarehouseID      string                 `json:"warehouse_id"`
+	Strategy         string                 `json:"strategy"`
+	Supply           string                 `json:"supply"`
+	Allocated        string                 `json:"allocated"`
+	DeconfirmedCount int                    `json:"deconfirmed_count"`
+	Lines            []BackorderRunLineData `json:"lines"`
+	Actor            string                 `json:"actor"`
+	Version          int                    `json:"version"`
 }

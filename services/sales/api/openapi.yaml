@@ -897,6 +897,111 @@ paths:
         "400": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "422": {$ref: "#/components/responses/Problem"}
+  /v1/sales/backorder-runs:
+    get:
+      summary: Stored backorder runs in the caller's scope, newest first, without their lines (Backorder run results)
+      operationId: listBackorderRuns
+      x-passage-duty: sales.order.read
+      parameters:
+        - $ref: "#/components/parameters/LegalEntityQuery"
+        - {name: productId, in: query, schema: {type: string, format: uuid}}
+        - {name: status, in: query, schema: {type: string, enum: [PREVIEW, COMMITTED]}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        "200":
+          description: runs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/BackorderRun"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+    post:
+      summary: >-
+        Plan a backorder processing run over the open lines of one product at a site and warehouse, read from
+        the CONFIRMED orders, and store it as a PREVIEW; no order changes until it is committed (FR-27.17, BR-27.11)
+      operationId: createBackorderRun
+      x-passage-duty: sales.backorder.run
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/BackorderRunRequest"}
+      responses:
+        "200":
+          description: the stored run of an earlier request with the same Idempotency-Key and body
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BackorderRun"}
+        "201":
+          description: the PREVIEW run with its lines in processing order; warningCode SLS-0015 when lines would be deconfirmed
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BackorderRun"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "422":
+          description: SLS-0027 no open line, more than 10000 lines, or a WIN, GAIN or LOSE run that cannot keep a protected confirmation; or the Idempotency-Key was used with another body
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+  /v1/sales/backorder-runs/{id}:
+    get:
+      summary: One stored backorder run with its lines in processing order
+      operationId: getBackorderRun
+      x-passage-duty: sales.order.read
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: the run
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BackorderRun"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/sales/backorder-runs/{id}:commit:
+    post:
+      summary: >-
+        Commit a PREVIEW run at its ETag: in one transaction, serialised per product, site and warehouse, rewrite the
+        schedule lines of every changed line, move confirmed dates, version each order and emit order.changed,
+        atp.promised per changed line and backorderrun.committed
+      operationId: commitBackorderRun
+      x-passage-duty: sales.backorder.run
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: the COMMITTED run
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BackorderRun"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409":
+          description: >-
+            SLS-0041 the run was already committed (also for a retry at the old ETag), or SLS-0042 an order changed since the
+            preview or another open line of the product, site and warehouse holds another promised quantity, and nothing was applied
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
   /v1/sales/quotations:
     get:
       summary: Quotations in the caller's scope, newest first, without lines (Quotations pipeline)
@@ -2015,6 +2120,70 @@ components:
               unitPrice: {$ref: "#/components/schemas/Money"}
               discPct: {$ref: "#/components/schemas/Money"}
               requestedShipDate: {type: string, format: date}
+    BackorderRunRequest:
+      type: object
+      required: [legalEntityId, productId, siteId, warehouseId, strategy, supply, supplyDate]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        productId: {type: string, format: uuid}
+        siteId: {type: string, format: uuid}
+        warehouseId: {type: string, format: uuid}
+        strategy: {type: string, enum: [WIN, GAIN, REDISTRIBUTE, FILL, LOSE]}
+        supply: {$ref: "#/components/schemas/Money", description: the whole quantity available for the open lines, what they hold today included}
+        supplyDate: {type: string, format: date, description: the date the supply is available; a line that gains is promised no earlier}
+        loseThreshold: {type: integer, minimum: 1, maximum: 9, default: 3, description: LOSE may deconfirm only lines of this priority class or above}
+        defaultPriorityClass: {type: integer, minimum: 1, maximum: 9, default: 5, description: priority class of customers not listed in priorityClasses}
+        priorityClasses:
+          type: object
+          description: priority class (1 is highest) by customer id until the party master carries it
+          additionalProperties: {type: integer, minimum: 1, maximum: 9}
+    BackorderRunLine:
+      type: object
+      properties:
+        seq: {type: integer, description: position in processing order}
+        orderId: {type: string, format: uuid}
+        orderNumber: {type: string}
+        orderVersion: {type: integer, description: the order version the preview was computed on; a commit refuses a newer one}
+        lineId: {type: string, format: uuid}
+        lineNo: {type: integer}
+        customerId: {type: string, format: uuid}
+        priorityClass: {type: integer}
+        requestedDate: {type: string, format: date}
+        orderValue: {$ref: "#/components/schemas/Money"}
+        demand: {$ref: "#/components/schemas/Money"}
+        before: {$ref: "#/components/schemas/Money", description: quantity with a promised date now}
+        after: {$ref: "#/components/schemas/Money", description: quantity with a promised date after the run}
+        changed: {type: boolean}
+        deconfirmed: {type: boolean}
+        gainDate: {type: string, format: date, description: date a gaining line is promised on}
+    BackorderRun:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        productId: {type: string, format: uuid}
+        siteId: {type: string, format: uuid}
+        warehouseId: {type: string, format: uuid}
+        strategy: {type: string, enum: [WIN, GAIN, REDISTRIBUTE, FILL, LOSE]}
+        supply: {$ref: "#/components/schemas/Money"}
+        supplyDate: {type: string, format: date}
+        loseThreshold: {type: integer}
+        defaultPriorityClass: {type: integer}
+        status: {type: string, enum: [PREVIEW, COMMITTED]}
+        allocated: {$ref: "#/components/schemas/Money", description: quantity with a promised date across the lines after the run}
+        deconfirmedCount: {type: integer}
+        changedCount: {type: integer}
+        version: {type: integer}
+        createdBy: {type: string}
+        createdAt: {type: string, format: date-time}
+        committedBy: {type: string}
+        committedAt: {type: string, format: date-time}
+        warning: {type: string}
+        warningCode: {type: string, example: SLS-0015}
+        lines:
+          type: array
+          description: absent from the list
+          items: {$ref: "#/components/schemas/BackorderRunLine"}
     BackorderPreviewRequest:
       type: object
       required: [strategy, available, lines]
