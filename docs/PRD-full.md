@@ -783,8 +783,8 @@ AX 2012 authorizes through `SecurityRole` → `SecurityDuty` → `SecurityPrivil
   - Notes: deprovision sets `status=deprovisioned`, revokes sessions within 60 s, never deletes the row (audit needs it).
 - **FR-2.3 Tenant and legal entity model** — Must. The system shall model `Tenant` → `LegalEntity` → `Site` (shell only; detailed in wave 6) and stamp `tenant_id` on every table in every domain database.
   - Notes: `legal_entity_id` is stamped on per-company tables (AX `SaveDataPerCompany=Yes` equivalent, declared in metadata in wave 3); a user's current legal entity is a session attribute, not a token claim, so switching does not require re-login.
-- **FR-2.4 Row-level security** — Must. Every table shall have `ENABLE ROW LEVEL SECURITY` and `FORCE ROW LEVEL SECURITY` with policy `tenant_id = current_setting('app.tenant_id')::uuid`; services connect as role `passage_app` with `NOBYPASSRLS` and set the variable with `SET LOCAL` inside every transaction.
-  - Notes: a missing `app.tenant_id` yields zero rows, not an error; migrations run as `passage_migrate`, which is also NOBYPASSRLS; a CI check fails if any table lacks the policy.
+- **FR-2.4 Row-level security** — Must. Every table shall have `ENABLE ROW LEVEL SECURITY` and `FORCE ROW LEVEL SECURITY` with policy `tenant_id = current_setting('passage.tenant_id')::uuid`; services connect as role `passage_app` with `NOBYPASSRLS` and set the variable with `SET LOCAL` inside every transaction.
+  - Notes: a missing `passage.tenant_id` yields zero rows, not an error; migrations run as `passage_owner`, which is also NOBYPASSRLS; a CI check fails if any table lacks the policy.
 - **FR-2.5 Role/duty/privilege model** — Must. The system shall store Role → Duty → Privilege → Permission where Permission = (entity, action, field_mask?, condition?), and compile the closure into one Rego bundle per tenant.
   - Notes: actions are read, create, update, correct, delete, post, approve, export; `correct` retains AX semantics (edit date-effective rows); 20 seeded duties ship (Maintain users, Maintain security roles, Maintain vendors, View vendors, Maintain entity metadata, Apply extensions, Maintain workflows, Approve workflow, Maintain batch jobs, View batch history, Maintain number sequences, View audit log, Import data, Export data, Maintain platform releases, View platform releases, Maintain tenants, Maintain legal entities, Maintain saved views, Maintain hello ledger).
 - **FR-2.6 Policy compilation** — Must. The system shall compile a bundle within 5 s of any role/duty/privilege/assignment change and distribute it to OPA sidecars via bundle polling (interval 10 s) with the version in `pv`.
@@ -22668,7 +22668,7 @@ The metadata generator emits one OpenAPI 3.1 document per context (`openapi/<con
 
 A tenant is one customer organization: one Keycloak realm, one `tenant_id`, one row-level security scope across all 12 databases, one Kafka ACL principal set, one Vault namespace, one cost budget. Legal entities are scopes inside the tenant; users are assigned roles per legal entity (or `*`). Data residency is per tenant (wave 48): a tenant is pinned to a region's cluster set and its Iceberg warehouse. Cross-tenant access does not exist in the application; only the analytics and platform-operations principals can read across tenants and only through audited service accounts.
 
-The request path sets the scope: Envoy validates the JWT, the service opens a Postgres connection from a pool bound to the non-superuser application role and executes `SET LOCAL passage.tenant_id = '<uuid>'; SET LOCAL passage.legal_entity_ids = '<uuid>,<uuid>'; SET LOCAL passage.actor = '<sub>'` inside the transaction. The application role has no `BYPASSRLS`.
+The request path sets the scope: Envoy validates the JWT, the service opens a Postgres connection from a pool bound to the non-superuser application role and executes `SET LOCAL passage.tenant_id = '<uuid>'; SET LOCAL passage.legal_entity_scopes = '<uuid>,<uuid>'` inside the transaction. The application role has no `BYPASSRLS`.
 
 ### E.2 RLS policy template
 
@@ -22686,11 +22686,11 @@ CREATE POLICY tenant_isolation ON ledger.journal_entry
 CREATE POLICY legal_entity_scope ON ledger.journal_entry
   AS RESTRICTIVE FOR ALL TO passage_app
   USING (
-    current_setting('passage.legal_entity_ids', true) = '*'
-    OR legal_entity_id = ANY (string_to_array(current_setting('passage.legal_entity_ids', true), ',')::uuid[])
+    current_setting('passage.legal_entity_scopes', true) = '*'
+    OR legal_entity_id = ANY (string_to_array(current_setting('passage.legal_entity_scopes', true), ',')::uuid[])
   )
   WITH CHECK (
-    legal_entity_id = ANY (string_to_array(current_setting('passage.legal_entity_ids', true), ',')::uuid[])
+    legal_entity_id = ANY (string_to_array(current_setting('passage.legal_entity_scopes', true), ',')::uuid[])
   );
 
 -- Batch and CDC roles: separate role with the same policies; Debezium reads the WAL and is outside RLS by design,
