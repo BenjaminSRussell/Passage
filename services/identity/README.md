@@ -14,7 +14,7 @@ if err != nil {
 r.With(verifier.Middleware, identity.RequireOPA(policy, http.MethodPut, "/v1/vendors")).Put("/v1/vendors/{id}", handler)
 ```
 
-Run `go test ./...` from this directory. The bundle is under `../../policies/authz`; `opa test ../../policies/authz` runs its Rego contract tests. The policy bundle defines 108 duties and starts with no assignments; the policy compiler must populate assignments per tenant before access is granted. Each route passes its HTTP method and resource path to the policy middleware.
+Run `go test ./...` from this directory. The bundle is under `../../policies/authz`; `opa test ../../policies/authz` runs its Rego contract tests. The policy bundle defines 113 duties and starts with no assignments; the policy compiler must populate assignments per tenant before access is granted. Each route passes its HTTP method and resource path to the policy middleware.
 
 Stable problem codes in this slice: `AUTH-0001` unauthenticated or invalid token, `AUTH-0003` policy denial, `AUTH-0404` tenant or gateway identity mismatch, `AUTH-0502` JWKS unavailable, `AUTH-0503` OPA unavailable.
 
@@ -36,7 +36,7 @@ This is the first isolated slice, not a complete Wave 2 implementation. The foll
 
 ## Tenant, legal-entity and role-assignment APIs
 
-`NewTenantsAPI(pool, operatorTenantID)`, `NewLegalEntitiesAPI(pool)` and `NewRoleAssignmentsAPI(pool, catalogue, operatorTenantID)` serve `/v1/tenants` (create, list, get), `/v1/legal-entities` (create, list, get) and `/v1/authz/assignments` (assign, list by `userId` and/or `role` (one is required), get, `POST .../{id}/end` and its alias `DELETE .../{id}`). They reuse the seeded duties `Maintain tenants`, `Maintain legal entities` and `Maintain security roles` and the catalogue's resource patterns, so the duty count stays at 108.
+`NewTenantsAPI(pool, operatorTenantID)`, `NewLegalEntitiesAPI(pool)` and `NewRoleAssignmentsAPI(pool, catalogue, operatorTenantID)` serve `/v1/tenants` (create, list, get), `/v1/legal-entities` (create, list, get) and `/v1/authz/assignments` (assign, list by `userId` and/or `role` (one is required), get, `POST .../{id}/end` and its alias `DELETE .../{id}`). They reuse the seeded duties `Maintain tenants`, `Maintain legal entities` and `Maintain security roles` and the catalogue's resource patterns, so the duty count stays unchanged.
 
 All three run on the ordinary `passage_app` pool; no path bypasses RLS. Tenant routes are operator-only: the caller must hold `Maintain tenants` and belong to `operatorTenantID`. Create sets `passage.tenant_id` to the new tenant's id inside its transaction so the row passes its own RLS check (`passage_app` holds INSERT, not UPDATE or DELETE, on `identity_tenants`) and writes the audit row in the operator tenant too. List and get read through the `identity_tenants_operator_read` policy, which admits SELECT only when the caller's tenant is the single row of `identity_operator`; the migrator or deploy seeds that row with the same id as `operatorTenantID`.
 

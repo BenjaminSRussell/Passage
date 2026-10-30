@@ -201,3 +201,73 @@ func TestInvoicingPlan_PartialListDeleteAndIsolation(t *testing.T) {
 		t.Fatalf("second delete = %v", err)
 	}
 }
+
+// #289: receiving reports a settled row; it turns INVOICED once, a repeat is a
+// no-op, a different settlement or amount is refused, and a later line amount
+// change leaves the row alone and re-splits only the open ones.
+func TestMarkPlanRowInvoiced_FlipsOnceAndRepriceSkipsIt(t *testing.T) {
+	pool := migrated(t)
+	s := store.New(pool)
+	ctx := principalContext(62)
+	po, err := s.CreatePurchaseOrder(ctx, lifecyclePO(t, ids.New(), "1200", "2027-01-05"), store.Idem{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := s.PutInvoicingPlan(ctx, po.ID, 1, po.RowVersion, monthly(t, "1000"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := s.MarkPlanRowInvoiced(ctx, po.ID, 1, 1, "settle-1", dec("1000"))
+	if err != nil || first.Replayed || first.Status != domain.PlanRowInvoiced {
+		t.Fatalf("first mark = %+v, %v", first, err)
+	}
+	got, _ := s.GetInvoicingPlan(ctx, po.ID, 1)
+	if got.Rows[0].Status != domain.PlanRowInvoiced || got.Rows[1].Status != domain.PlanRowOpen || got.PORowVersion != plan.PORowVersion+1 {
+		t.Fatalf("after the mark: %+v at version %d (was %d)", got.Rows[:2], got.PORowVersion, plan.PORowVersion)
+	}
+
+	again, err := s.MarkPlanRowInvoiced(ctx, po.ID, 1, 1, "settle-1", dec("1000"))
+	if err != nil || !again.Replayed {
+		t.Fatalf("repeat = %+v, %v", again, err)
+	}
+	if after, _ := s.GetInvoicingPlan(ctx, po.ID, 1); after.PORowVersion != got.PORowVersion {
+		t.Fatalf("a replay bumped the row version to %d", after.PORowVersion)
+	}
+	if _, err := s.MarkPlanRowInvoiced(ctx, po.ID, 1, 1, "settle-2", dec("1000")); problemCode(err) != domain.CodePlanRowSettlement {
+		t.Fatalf("another reference = %v", err)
+	}
+	if _, err := s.MarkPlanRowInvoiced(ctx, po.ID, 1, 1, "settle-1", dec("999")); problemCode(err) != domain.CodePlanRowSettlement {
+		t.Fatalf("another amount on a settled row = %v", err)
+	}
+	if _, err := s.MarkPlanRowInvoiced(ctx, po.ID, 1, 2, "settle-3", dec("999")); problemCode(err) != domain.CodePlanRowSettlement {
+		t.Fatalf("amount that differs from the open row = %v", err)
+	}
+	if _, err := s.MarkPlanRowInvoiced(ctx, po.ID, 1, 99, "settle-4", dec("1000")); problemCode(err) != store.CodeInvoicingPlanNotFound {
+		t.Fatalf("missing row = %v", err)
+	}
+	if _, err := s.MarkPlanRowInvoiced(ctx, ids.New(), 1, 1, "settle-5", dec("1000")); problemCode(err) != store.CodePurchaseOrderNotFound {
+		t.Fatalf("missing PO = %v", err)
+	}
+	var settled int
+	admin, _ := adminPools.Load(pool)
+	if err := admin.(*pgxpool.Pool).QueryRow(ctx, `select count(*) from purchase_invoicing_plan_row_settlement where purchase_order_id = $1`, po.ID).Scan(&settled); err != nil || settled != 1 {
+		t.Fatalf("settlement records = %d, %v", settled, err)
+	}
+
+	cur, _ := s.GetPurchaseOrder(ctx, po.ID)
+	if _, err := s.EditPurchaseOrder(ctx, po.ID, cur.RowVersion, edited(cur, lifecyclePO(t, "", "1320", "2027-01-05"))); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = s.GetInvoicingPlan(ctx, po.ID, 1)
+	if !got.Rows[0].Amount.Equal(dec("1000")) || got.Rows[0].Status != domain.PlanRowInvoiced || !domain.PlanTotal(got.Rows).Equal(dec("13200")) {
+		t.Fatalf("after the reprice the settled row moved: %+v", got.Rows[0])
+	}
+	if replay, err := s.MarkPlanRowInvoiced(ctx, po.ID, 1, 1, "settle-1", dec("1000")); err != nil || !replay.Replayed {
+		t.Fatalf("a repeat after the reprice = %+v, %v", replay, err)
+	}
+	cur, _ = s.GetPurchaseOrder(ctx, po.ID)
+	if _, err := s.EditPurchaseOrder(ctx, po.ID, cur.RowVersion, edited(cur, lifecyclePO(t, "", "90", "2027-01-05"))); problemCode(err) != domain.CodeInvoicingPlan {
+		t.Fatalf("a reprice below the settled 1000 = %v, want %s", err, domain.CodeInvoicingPlan)
+	}
+}

@@ -1558,6 +1558,47 @@ paths:
         '412': { description: If-Match is not the current PO row version (PRC-PO-009), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: The plan has invoiced rows (PRC-IP-002), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: If-Match absent (PRC-IFMATCH-001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/procurement/purchase-orders/{id}/lines/{lineNo}/invoicing-plan/rows/{seq}/settlement:
+    put:
+      operationId: settleInvoicingPlanRow
+      summary: Receiving reports that it settled a plan row; the row becomes INVOICED (#289; duty procurement.invoicing-plan.settle, held only by receiving's service grant)
+      description: >-
+        Idempotent per row and settlementRef. Only an OPEN row whose amount equals the settled amount is flipped; the
+        same reference and amount again answers 200 with replayed true. An INVOICED row is never re-split by a later
+        line amount change (BR-17.17). The record keeps the settlement reference, amount and actor.
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/LineNo' }
+        - { name: seq, in: path, required: true, schema: { type: integer, minimum: 1, maximum: 120 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [settlementRef, amount]
+              additionalProperties: false
+              properties:
+                settlementRef: { type: string, maxLength: 255, description: The receiving settlement id }
+                amount: { type: string, description: Decimal string, the amount receiving settled }
+      responses:
+        '200':
+          description: The row is INVOICED
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  purchaseOrderId: { type: string, format: uuid }
+                  lineNo: { type: integer }
+                  seq: { type: integer }
+                  status: { type: string, enum: [INVOICED] }
+                  settlementRef: { type: string }
+                  amount: { type: string }
+                  replayed: { type: boolean }
+        '404': { description: Purchase order (PRC-PO-NOT-FOUND) or plan row (PRC-IP-NOT-FOUND) not found, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: The row is settled under another reference or amount, or its amount is no longer the settled one (PRC-IP-004), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: Validation (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/procurement/pricing/lookup:
     get:
       operationId: lookupPrice

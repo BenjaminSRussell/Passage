@@ -11,6 +11,12 @@ database:
   secretName: purchasing-db
   secretKey: url
 
+# Public keys of the services that call purchasing with a signed service token
+# (caller[:kid]=base64 Ed25519 public key, comma separated; not secret). receiving
+# reports settled invoicing-plan rows this way (#289).
+serviceIdentity:
+  publicKeys: ""
+
 env:
   httpAddr: ":8080"
   adminAddr: ":9090"

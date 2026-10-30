@@ -48,6 +48,12 @@ spec:
               value: {{ .Values.env.adminAddr | quote }}
             - name: MIGRATE_ON_START
               value: {{ .Values.env.migrateOnStart | quote }}
+            - name: PASSAGE_SERVICE_NAME
+              value: purchasing
+            {{- if .Values.serviceIdentity.publicKeys }}
+            - name: PASSAGE_SERVICE_PUBLIC_KEYS
+              value: {{ .Values.serviceIdentity.publicKeys | quote }}
+            {{- end }}
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:

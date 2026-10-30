@@ -35,6 +35,7 @@ const (
 	skipOtherEntity      = "OTHER_LEGAL_ENTITY"
 	skipNoAmount         = "NO_AMOUNT"
 	skipUnusableCurrency = "CURRENCY_MISMATCH"
+	skipAmountChanged    = "SETTLED_AMOUNT_CHANGED"
 )
 
 type planRunRequest struct {
@@ -77,6 +78,7 @@ func (q *consignmentRunRequest) common() settlementRunRequest {
 type planLink struct {
 	purchaseOrderID string
 	lineNo          int
+	seq             int
 	productID       string
 }
 
@@ -111,6 +113,8 @@ type settlementRun struct {
 	tenantID string
 	req      settlementRunBase
 	body     settlementRunBody
+
+	purchasingDown bool
 }
 
 type settlementRunBase struct {
@@ -152,10 +156,16 @@ func (r *settlementRun) settle(kind, sourceRef, vendorID, currency, debitAccount
 		return err
 	}
 	if replayed {
+		if link.seq > 0 && !posted.Amount.Equal(amount) {
+			r.skip(sourceRef, skipAmountChanged)
+			return nil
+		}
+		r.markInvoiced(link, posted.ID, posted.Amount)
 		r.skip(sourceRef, skipAlreadySettled)
 		return nil
 	}
 	r.api.pendingPostings.finish(s.ID)
+	r.markInvoiced(link, posted.ID, posted.Amount)
 	r.api.settlements.Add(1)
 	scale := money.MinorUnits(currency)
 	r.body.Settled = append(r.body.Settled, settlementBody{
@@ -163,6 +173,20 @@ func (r *settlementRun) settle(kind, sourceRef, vendorID, currency, debitAccount
 		Currency: currency, Amount: amount.StringFixed(scale), LedgerID: posted.LedgerID, FiscalPeriodID: posted.FiscalPeriodID, LedgerEntryID: posted.LedgerEntryID,
 	})
 	return nil
+}
+
+func (r *settlementRun) markInvoiced(link planLink, settlementID string, amount decimal.Decimal) {
+	if link.seq == 0 || r.api.ports.PlanRowSettlements == nil || r.purchasingDown {
+		return
+	}
+	err := r.api.ports.PlanRowSettlements.MarkInvoiced(r.ctx, r.req.legalEntityID, link.purchaseOrderID, link.lineNo, link.seq, settlementID, amount)
+	if err == nil {
+		return
+	}
+	r.api.planMarkFailed.Add(1)
+	r.purchasingDown = !errors.Is(err, domain.ErrPlanRowMarkRejected)
+	slog.ErrorContext(r.ctx, "plan row settled but purchasing not told; a later plan run retries", "err", err, "purchaseOrderId", link.purchaseOrderID,
+		"lineNo", link.lineNo, "seq", link.seq, "settlementId", settlementID, "correlationId", middleware.GetReqID(r.ctx))
 }
 
 func (a *API) startRun(w http.ResponseWriter, r *http.Request, dst runRequestBody, needPurchaseOrder bool) (*settlementRun, settlementRunRequest, bool) {
@@ -270,7 +294,7 @@ planLoop:
 				run.body.HasMore = true
 				break planLoop
 			default:
-				link := planLink{purchaseOrderID: po.ID, lineNo: plan.LineNo, productID: line.ProductID}
+				link := planLink{purchaseOrderID: po.ID, lineNo: plan.LineNo, seq: row.Seq, productID: line.ProductID}
 				if err := run.settle(domain.SettlementPlanRow, sourceRef, po.VendorID, po.Currency, a.ports.Profile.GRIR, row.DueDate, row.Amount, link); err != nil {
 					writeError(w, r, err)
 					return

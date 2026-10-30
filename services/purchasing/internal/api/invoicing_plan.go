@@ -188,6 +188,59 @@ func (a *API) putInvoicingPlan(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, out)
 }
 
+type planRowSettlementBody struct {
+	SettlementRef string `json:"settlementRef"`
+	Amount        string `json:"amount"`
+}
+
+const maxSettlementRef = 255
+
+// settlePlanRow handles PUT .../invoicing-plan/rows/{seq}/settlement: receiving
+// reports that it settled the row (#289), which flips it OPEN -> INVOICED. PUT is
+// idempotent per row and settlementRef, so a retry after a lost answer is safe.
+func (a *API) settlePlanRow(w http.ResponseWriter, r *http.Request) {
+	id, lineNo, err := planLine(r)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	seq, err := strconv.Atoi(chi.URLParam(r, "seq"))
+	if err != nil || seq < 1 || seq > domain.MaxPlanRows {
+		fail(w, r, invalid("seq", "must be a row number from 1 to "+strconv.Itoa(domain.MaxPlanRows)))
+		return
+	}
+	if _, err := caller(r.Context()); err != nil {
+		fail(w, r, err)
+		return
+	}
+	var body planRowSettlementBody
+	if err := httpx.Decode(r, &body); err != nil {
+		fail(w, r, err)
+		return
+	}
+	if body.SettlementRef == "" || len(body.SettlementRef) > maxSettlementRef {
+		fail(w, r, invalid("settlementRef", "is required and at most "+strconv.Itoa(maxSettlementRef)+" characters"))
+		return
+	}
+	amount, err := decimalField("amount", body.Amount, "")
+	if err == nil && !amount.IsPositive() {
+		err = invalid("amount", "must be positive")
+	}
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	out, err := a.store.MarkPlanRowInvoiced(r.Context(), id, lineNo, seq, body.SettlementRef, amount)
+	if err != nil {
+		fail(w, r, err)
+		return
+	}
+	if !out.Replayed {
+		a.planRowsInvoiced.Add(1)
+	}
+	httpx.JSON(w, http.StatusOK, out)
+}
+
 // deleteInvoicingPlan handles DELETE /purchase-orders/{id}/lines/{lineNo}/invoicing-plan.
 // If-Match is the PO row version; 204 with the new one as the ETag.
 func (a *API) deleteInvoicingPlan(w http.ResponseWriter, r *http.Request) {

@@ -136,6 +136,78 @@ func (s *Postgres) ListInvoicingPlans(ctx context.Context, poID string) ([]domai
 	return out, err
 }
 
+// PlanRowSettlement is the record of a plan row settled by receiving (#289).
+type PlanRowSettlement struct {
+	PurchaseOrderID string          `json:"purchaseOrderId"`
+	LineNo          int             `json:"lineNo"`
+	Seq             int             `json:"seq"`
+	Status          string          `json:"status"`
+	SettlementRef   string          `json:"settlementRef"`
+	Amount          decimal.Decimal `json:"amount"`
+	Replayed        bool            `json:"replayed"`
+}
+
+// MarkPlanRowInvoiced flips one OPEN plan row to INVOICED for the settlement
+// receiving posted (#289) and keeps who settled it. It is idempotent per row and
+// settlement reference: the same reference and amount again answers Replayed,
+// another reference or amount for a settled row, or an amount that differs from
+// the row's (a reprice re-split it after receiving read it), is PRC-IP-004 (409).
+// It takes the PO lock, so a concurrent reprice sees either the OPEN row or the
+// INVOICED one, and bumps the PO row version because the plan changed.
+func (s *Postgres) MarkPlanRowInvoiced(ctx context.Context, poID string, lineNo, seq int, ref string, amount decimal.Decimal) (PlanRowSettlement, error) {
+	p, _ := tenant.FromContext(ctx)
+	out := PlanRowSettlement{PurchaseOrderID: poID, LineNo: lineNo, Seq: seq, Status: domain.PlanRowInvoiced, SettlementRef: ref, Amount: amount}
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		out.Replayed = false
+		if err := lockPurchaseOrder(ctx, tx, poID); err != nil {
+			return err
+		}
+		var priorRef string
+		var priorAmount decimal.Decimal
+		err := tx.QueryRow(ctx, `select settlement_ref, amount from purchase_invoicing_plan_row_settlement
+			where tenant_id = $1 and purchase_order_id = $2 and line_no = $3 and seq = $4`, p.TenantID, poID, lineNo, seq).Scan(&priorRef, &priorAmount)
+		if err == nil {
+			if priorRef != ref || !priorAmount.Equal(amount) {
+				return planRowConflict(lineNo, seq, "is already settled by %s for %s", priorRef, priorAmount.String())
+			}
+			out.Replayed = true
+			return nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		var status string
+		var rowAmount decimal.Decimal
+		err = tx.QueryRow(ctx, `select status, amount from purchase_invoicing_plan_row
+			where tenant_id = $1 and purchase_order_id = $2 and line_no = $3 and seq = $4 for update`, p.TenantID, poID, lineNo, seq).Scan(&status, &rowAmount)
+		if err != nil {
+			return notFound(err, CodeInvoicingPlanNotFound, fmt.Sprintf("line %d has no plan row %d", lineNo, seq))
+		}
+		if status != domain.PlanRowOpen {
+			return planRowConflict(lineNo, seq, "is %s without a settlement record", status)
+		}
+		if !rowAmount.Equal(amount) {
+			return planRowConflict(lineNo, seq, "is now %s; the settlement was for %s", rowAmount.String(), amount.String())
+		}
+		if _, err := tx.Exec(ctx, `update purchase_invoicing_plan_row set status = $5
+			where tenant_id = $1 and purchase_order_id = $2 and line_no = $3 and seq = $4`, p.TenantID, poID, lineNo, seq, domain.PlanRowInvoiced); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `insert into purchase_invoicing_plan_row_settlement (tenant_id, purchase_order_id, line_no, seq, settlement_ref, amount, settled_by, settled_via)
+			values ($1, $2, $3, $4, $5, $6, $7, $8)`, p.TenantID, poID, lineNo, seq, ref, amount, p.UserID, p.Service); err != nil {
+			return err
+		}
+		_, err = bumpPORowVersion(ctx, tx, poID)
+		return err
+	})
+	return out, err
+}
+
+func planRowConflict(lineNo, seq int, format string, args ...any) error {
+	return httpx.NewProblem(http.StatusConflict, domain.CodePlanRowSettlement,
+		fmt.Sprintf("plan row %d of line %d ", seq, lineNo)+fmt.Sprintf(format, args...))
+}
+
 // syncInvoicingPlans keeps every plan of a PO equal to its line after the
 // lines changed (BR-17.17): a changed line amount is reproportioned over the
 // open rows, and the plan of a cancelled line is removed. A plan with invoiced

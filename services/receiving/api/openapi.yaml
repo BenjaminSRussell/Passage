@@ -1054,7 +1054,7 @@ components:
             required: [sourceRef, reason]
             properties:
               sourceRef: { type: string }
-              reason: { type: string, enum: [ALREADY_INVOICED, UNKNOWN_ROW_STATUS, ALREADY_SETTLED, AWAITS_RECEIPT, LINE_CANCELLED, LINE_INVOICED, NO_PRODUCT, CURRENCY_MISMATCH, NO_AMOUNT, OTHER_VENDOR, OTHER_LEGAL_ENTITY] }
+              reason: { type: string, enum: [ALREADY_INVOICED, UNKNOWN_ROW_STATUS, ALREADY_SETTLED, SETTLED_AMOUNT_CHANGED, AWAITS_RECEIPT, LINE_CANCELLED, LINE_INVOICED, NO_PRODUCT, CURRENCY_MISMATCH, NO_AMOUNT, OTHER_VENDOR, OTHER_LEGAL_ENTITY] }
         hasMore: { type: boolean, description: True when the run stopped at 100 settlements or the inventory journal list was cut at its page bound; run again. }
     ReleaseAuditBlockRequest:
       type: object

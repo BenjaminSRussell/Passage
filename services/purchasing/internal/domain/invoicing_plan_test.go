@@ -263,3 +263,25 @@ func TestInvoicingPlan_SumIdentityProperty(t *testing.T) {
 		}
 	})
 }
+
+func TestReproportion_SettledRowsKeepTheirAmountAndOpenRowsShareTheRest(t *testing.T) {
+	rows := []PlanRow{
+		{Seq: 1, Amount: decimal.NewFromInt(1000), Status: PlanRowInvoiced},
+		{Seq: 2, Amount: decimal.NewFromInt(1000), Status: PlanRowOpen},
+		{Seq: 3, Amount: decimal.NewFromInt(1000), Status: PlanRowOpen},
+	}
+	got, err := Reproportion(rows, decimal.NewFromInt(3500), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got[0].Amount.Equal(decimal.NewFromInt(1000)) || got[0].Status != PlanRowInvoiced ||
+		!got[1].Amount.Equal(decimal.NewFromInt(1250)) || !got[2].Amount.Equal(decimal.NewFromInt(1250)) {
+		t.Fatalf("rows = %+v", got)
+	}
+	if !rows[1].Amount.Equal(decimal.NewFromInt(1000)) {
+		t.Fatal("the input was modified")
+	}
+	if _, err := Reproportion(rows, decimal.NewFromInt(999), 2); err == nil {
+		t.Fatal("a line amount below the settled rows must be refused")
+	}
+}

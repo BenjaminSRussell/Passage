@@ -53,8 +53,9 @@ var serviceGrants = map[string]map[string][]string{
 		"product": {"product.variants.explode", "product.released.read", "product.jobs.write"},
 	},
 	"receiving": {
-		"ledger": {"ledger.journal.post", "ledger.journal.reverse"},
-		"close":  {"period.check"},
+		"ledger":     {"ledger.journal.post", "ledger.journal.reverse"},
+		"close":      {"period.check"},
+		"purchasing": {"procurement.invoicing-plan.settle"},
 	},
 	"payables": {
 		"ledger": {"ledger.balance.read", "ledger.journal.read"},
