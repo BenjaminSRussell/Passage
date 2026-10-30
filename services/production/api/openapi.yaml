@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Passage production orders
-  version: 0.21.9
+  version: 0.21.10
   description: |
     Wave 21 slices 1 to 4 of PSG-21. Creates production orders with BOM and route
     explosion, lists and reads them, edits the header, runs the status state machine
@@ -26,6 +26,9 @@ info:
     Slice 9 adds the item's minimum, maximum and multiple order quantity on create and on a
     quantity PATCH (FR-21.1), estimate on create (PRODUCTION_ESTIMATE_ON_CREATE, 4.21.13), and
     the operation commands :finish and :reopen (FR-21.6).
+    Slice 10 adds order change management (FR-21.16, BR-21.12): OCM profiles, detection of the
+    open orders an ECO's new BOM and route supersede, the worklist, the change preview with its
+    change cost, and :apply and :dismiss.
     Problems are RFC 9457 with a stable `code` (see README). The gateway serves these paths
     under `/api`.
 servers:
@@ -829,6 +832,118 @@ components:
         errors:
           type: object
           additionalProperties: { type: string }
+    OCMMode:
+      type: string
+      enum: [automatic, manual, none]
+      description: automatic applies the change at the order's next status command (except cancel) unless the order was edited by hand or the change is blocked, and lists it until then; manual lists it for the planner to apply; none ignores superseded versions.
+    OCMProfileInput:
+      type: object
+      required: [mode]
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid, description: Defaults to the caller's legal entity. }
+        itemGroup: { type: string, maxLength: 40, description: 'Default All.' }
+        siteId: { type: string, description: 'A site UUID, or All (the default).' }
+        mode: { $ref: '#/components/schemas/OCMMode' }
+        surchargeFixed: { $ref: '#/components/schemas/Decimal', description: 'Fixed change-cost surcharge, 0 or more, in the order currency (BR-21.12).' }
+        surchargePct: { $ref: '#/components/schemas/Decimal', description: 'Percentage of a positive planned-cost delta added to the change cost, 0 to 1000.' }
+    OCMProfile:
+      allOf:
+        - $ref: '#/components/schemas/OCMProfileInput'
+        - type: object
+          properties:
+            version: { type: integer }
+            updatedBy: { type: string }
+            updatedAt: { type: string, format: date-time }
+    ChangeDelta:
+      type: object
+      properties:
+        linesAdded: { type: integer }
+        linesRemoved: { type: integer }
+        linesChanged: { type: integer }
+        operationsAdded: { type: integer }
+        operationsRemoved: { type: integer }
+        operationsChanged: { type: integer }
+    OrderChange:
+      type: object
+      description: An OrderChangeRecord (FR-21.16).
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        orderNumber: { type: string }
+        productId: { type: string, format: uuid }
+        siteId: { type: string, format: uuid }
+        ecoId: { type: string }
+        status: { type: string, enum: [pending, applied, dismissed] }
+        profileMode: { type: string, enum: [automatic, manual], description: The profile mode that applied at detection. }
+        needsReview: { type: boolean, description: 'The order was edited by hand (FR-21.18), before detection or since: never applied automatically, flagged for manual review.' }
+        changesBom: { type: boolean }
+        changesRoute: { type: boolean }
+        delta: { $ref: '#/components/schemas/ChangeDelta' }
+        deltaCount: { type: integer }
+        currency: { type: string }
+        changeCost: { $ref: '#/components/schemas/Decimal', description: 'New minus old planned cost plus the profile surcharge (BR-21.12), at detection and, once applied, as applied.' }
+        beforeHash: { type: [string, 'null'], description: SHA-256 of the order's lines and operations before the change, set when applied. }
+        afterHash: { type: [string, 'null'], description: SHA-256 after the change, set when applied. }
+        note: { type: string }
+        version: { type: integer, description: For If-Match on :apply and :dismiss. }
+        detectedBy: { type: string }
+        detectedAt: { type: string, format: date-time }
+        resolvedBy: { type: [string, 'null'] }
+        resolvedAt: { type: [string, 'null'], format: date-time }
+    DetectChangesRequest:
+      type: object
+      required: [ecoId, productId]
+      additionalProperties: false
+      description: The ECO notice (wave 9 hands over the new version until the service reads it). At least one of bom and operations is required; a part left out is not changed on the orders.
+      properties:
+        ecoId: { type: string, maxLength: 100 }
+        productId: { type: string, format: uuid }
+        siteId: { type: string, format: uuid, description: Only orders of this site. }
+        bom: { type: array, items: { $ref: '#/components/schemas/BOMComponent' }, description: The new BOM snapshot; replaces the lines of every open order of the product. }
+        operations: { type: array, minItems: 1, items: { $ref: '#/components/schemas/OperationInput' }, description: The new route; replaces the operations of every open order of the product. }
+    DetectChangesResult:
+      type: object
+      properties:
+        ecoId: { type: string }
+        items: { type: array, items: { $ref: '#/components/schemas/OrderChange' }, description: The records created by this call. }
+        existing: { type: integer, description: Open orders already recorded for the ECO (a repeated notice). }
+        skippedByProfile: { type: integer, description: Open orders whose OCM profile is none. }
+        skippedNoDelta: { type: integer, description: Open orders that already match the new BOM and route. }
+    ChangeCost:
+      type: object
+      properties:
+        oldPlanned: { $ref: '#/components/schemas/Decimal' }
+        newPlanned: { $ref: '#/components/schemas/Decimal' }
+        delta: { $ref: '#/components/schemas/Decimal' }
+        surcharge: { $ref: '#/components/schemas/Decimal' }
+        total: { $ref: '#/components/schemas/Decimal', description: delta + surcharge. }
+    ChangePreview:
+      type: object
+      properties:
+        change: { $ref: '#/components/schemas/OrderChange' }
+        delta: { $ref: '#/components/schemas/ChangeDelta' }
+        cost: { $ref: '#/components/schemas/ChangeCost' }
+        edits: { $ref: '#/components/schemas/OrderEdits', description: The order edits that applying performs. }
+        blocked:
+          description: Why applying would be refused now (null when it can be applied).
+          oneOf:
+            - type: 'null'
+            - type: object
+              properties:
+                code: { type: string }
+                detail: { type: string }
+    AppliedChange:
+      type: object
+      properties:
+        change: { $ref: '#/components/schemas/OrderChange' }
+        order: { $ref: '#/components/schemas/Order' }
+    DismissChange:
+      type: object
+      additionalProperties: false
+      properties:
+        note: { type: string, maxLength: 500 }
 paths:
   /v1/production/orders:
     get:
@@ -1050,6 +1165,12 @@ paths:
         PRODUCTION_ILLEGAL_TRANSITION (PROD-0001). Each applied command writes a status-log
         row; a status change (and every report-as-finished) emits
         dev.passage.production.order.statuschanged.v1.
+
+        Order change management (FR-21.16): on an order before Started, every command but cancel
+        first applies the order's pending changes detected under an automatic OCM profile (oldest
+        first, through the order-edit rules, with order.bomedited and orderchange.applied), unless
+        the order was edited by hand or the change is blocked; the order version then moves by more
+        than one.
 
         Posting effects (BR-21.1), in the same transaction: start posts a picking list for
         the start-flushed lines; report-finished posts a report-as-finished journal (Dr
@@ -1686,3 +1807,184 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { description: PRODUCTION_TRIGGER_POINT_NOT_FOUND, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '409': { description: PRODUCTION_TRIGGER_POINT_FIRED, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/production/ocm-profiles:
+    get:
+      operationId: listProductionOCMProfiles
+      summary: The OCM profiles of a legal entity, and the one that resolves for an item group and site (FR-21.16)
+      description: |
+        Resolution order: item group × site, item group × All, All × site, All × All. With siteId
+        (and optionally itemGroup) the response carries `resolved`; with no stored profile that is
+        the default, mode manual and no surcharge.
+      x-passage-duty: production.setup.read
+      parameters:
+        - { name: legalEntityId, in: query, description: Defaults to the caller's legal entity., schema: { type: string, format: uuid } }
+        - { name: itemGroup, in: query, schema: { type: string } }
+        - { name: siteId, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The profiles.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  legalEntityId: { type: string, format: uuid }
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/OCMProfile' }
+                  resolved: { $ref: '#/components/schemas/OCMProfileInput' }
+        '400': { description: COM-0001, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+    put:
+      operationId: saveProductionOCMProfile
+      summary: Create or replace the OCM profile of a legal entity × item group × site
+      description: Creating takes no If-Match; replacing needs If-Match with the profile version.
+      x-passage-duty: production.setup.write
+      parameters:
+        - { name: If-Match, in: header, required: false, description: 'The profile version, quoted; required to replace.', schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OCMProfileInput' }
+      responses:
+        '201':
+          description: Created.
+          headers:
+            ETag: { description: 'The profile version, quoted.', schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OCMProfile' }
+        '200':
+          description: Replaced.
+          headers:
+            ETag: { description: 'The profile version, quoted.', schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OCMProfile' }
+        '400': { description: COM-0001, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '412': { description: conflict_version (stale If-Match, or If-Match on a profile that does not exist), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: precondition_required (replacing without If-Match), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/production/order-changes:detect:
+    post:
+      operationId: detectProductionOrderChanges
+      summary: Record the open orders an ECO's new BOM and route supersede (FR-21.16)
+      description: |
+        For each open order (Created to Released) of the product, optionally of one site, whose
+        OCM profile is not none and that differs from the new snapshot, writes an
+        OrderChangeRecord with the delta and the change cost (BR-21.12) and emits
+        dev.passage.production.orderchange.detected.v1, all in one transaction. An (order, ECO)
+        pair is recorded once, so repeating the notice records nothing more; the same ecoId with
+        another snapshot is 422 idempotency_key_reuse. An order edited by hand is recorded with
+        needsReview. Started orders are not changed (their BOM and route are locked). Older pending
+        changes of an order that this ECO covers (it replaces every part they replace) are
+        dismissed with the note "superseded by <ecoId>" and orderchange.dismissed.
+      x-passage-duty: production.order.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DetectChangesRequest' }
+      responses:
+        '200':
+          description: The records created and the counts of orders already recorded or skipped.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DetectChangesResult' }
+        '400': { description: COM-0001, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { description: idempotency_key_reuse (the ECO was detected with another snapshot), PRODUCTION_INVALID_INPUT (a snapshot that does not explode), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/production/order-changes:
+    get:
+      operationId: listProductionOrderChanges
+      summary: The order change management worklist, newest first (4.21.14)
+      x-passage-duty: production.order.read
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [pending, applied, dismissed] } }
+        - { name: siteId, in: query, schema: { type: string, format: uuid } }
+        - { name: orderId, in: query, schema: { type: string, format: uuid } }
+        - { name: ecoId, in: query, schema: { type: string } }
+        - { name: needsReview, in: query, schema: { type: boolean } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 50 } }
+        - { name: cursor, in: query, description: The nextCursor of the previous page., schema: { type: string } }
+      responses:
+        '200':
+          description: A page of change records.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/OrderChange' }
+                  nextCursor: { type: string }
+        '400': { description: COM-0001, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/production/order-changes/{id}:
+    get:
+      operationId: getProductionOrderChange
+      summary: One order change record
+      x-passage-duty: production.order.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The record; the ETag is its version for If-Match.
+          headers:
+            ETag: { description: 'The change version, quoted.', schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrderChange' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: PRODUCTION_ORDER_CHANGE_NOT_FOUND, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/production/order-changes/{id}:{command}:
+    post:
+      operationId: commandProductionOrderChange
+      summary: Preview, apply or dismiss an order change (FR-21.16)
+      description: |
+        `:preview` reads the order as it is now and answers the delta, the planned cost before and
+        after, the change cost and the order edits that applying performs; `blocked` says why
+        applying would be refused (PRODUCTION_ORDER_CHANGE_SUPERSEDED when a later ECO replaces the
+        same BOM or route, PRODUCTION_ORDER_CHANGE_NOT_ELIGIBLE once the order started, or
+        PRODUCTION_ORDER_EDIT_TARGET_IN_USE when a line to
+        remove has consumption: lines already consumed are never removed, so the planner dismisses
+        the change or finishes the order on its version). `:apply` takes the change's If-Match
+        version and an Idempotency-Key and, under the order lock, re-explodes the order through the
+        order-edit rules, re-estimates its planned cost, stores the before and after snapshot hashes
+        and emits order.bomedited and orderchange.applied in one transaction; a Released order also
+        needs production.order.bom-after-release. Applied orders are not flagged orderBomModified.
+        `:dismiss` sets a pending change aside with an optional note. All three need
+        production.order.apply-change.
+      x-passage-duty: production.order.apply-change
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: command, in: path, required: true, schema: { type: string, enum: [preview, apply, dismiss] } }
+        - { name: If-Match, in: header, required: false, description: 'The change version, quoted; required by :apply and :dismiss.', schema: { type: string } }
+        - { name: Idempotency-Key, in: header, required: false, description: 'Required by :apply; a replay returns the first result with Idempotent-Replayed.', schema: { type: string, maxLength: 255 } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DismissChange' }
+      responses:
+        '200':
+          description: The preview, the applied change with its order, or the dismissed change.
+          headers:
+            ETag: { description: 'The change version, quoted.', schema: { type: string } }
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ChangePreview' }
+                  - { $ref: '#/components/schemas/AppliedChange' }
+                  - { $ref: '#/components/schemas/OrderChange' }
+        '400': { description: Body, Idempotency-Key or If-Match malformed (COM-0001), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { description: Unknown change or command (PRODUCTION_ORDER_CHANGE_NOT_FOUND, PRODUCTION_UNKNOWN_ACTION), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: The change was already applied or dismissed (PRODUCTION_ORDER_CHANGE_RESOLVED), the order is Started or later (PRODUCTION_ORDER_CHANGE_NOT_ELIGIBLE), a later ECO on the order replaces the same BOM or route (PRODUCTION_ORDER_CHANGE_SUPERSEDED), or a consumed line cannot be removed (PRODUCTION_ORDER_EDIT_TARGET_IN_USE), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '412': { description: conflict_version, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: The order already matches (PRODUCTION_ORDER_CHANGE_NO_DELTA), or the key was used for another change (idempotency_key_reuse), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: precondition_required, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }

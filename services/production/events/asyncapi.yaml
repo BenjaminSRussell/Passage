@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: production
-  version: 0.21.9
+  version: 0.21.10
   description: |
     CloudEvents 1.0 envelope from platform/go/events; payloads below are the data member.
     Every event is written to the outbox in the same transaction as the change it reports and
@@ -17,6 +17,8 @@ info:
     (FR-21.18) with the requirement lines planning needs. triggerpoint.fired reports each trigger
     point that route-card feedback made due (FR-21.17): what its function did, or why it failed.
     operation.statuschanged reports an operation finished or reopened by its command (FR-21.6).
+    orderchange.detected, .applied and .dismissed report order change management (FR-21.16): an
+    open order whose BOM or route an ECO superseded, and what the planner did with the change.
 channels:
   passage.production.order:
     address: passage.production.order
@@ -64,6 +66,16 @@ channels:
     messages:
       statuschanged:
         $ref: '#/components/messages/operationStatusChanged'
+  passage.production.orderchange:
+    address: passage.production.orderchange
+    description: Keyed by order id (the outbox aggregate), so an order's changes stay ordered with its other events.
+    messages:
+      detected:
+        $ref: '#/components/messages/orderChangeDetected'
+      applied:
+        $ref: '#/components/messages/orderChangeApplied'
+      dismissed:
+        $ref: '#/components/messages/orderChangeDismissed'
 operations:
   onOrderCreated:
     action: send
@@ -109,6 +121,18 @@ operations:
     action: send
     channel: { $ref: '#/channels/passage.production.operation' }
     messages: [{ $ref: '#/channels/passage.production.operation/messages/statuschanged' }]
+  onOrderChangeDetected:
+    action: send
+    channel: { $ref: '#/channels/passage.production.orderchange' }
+    messages: [{ $ref: '#/channels/passage.production.orderchange/messages/detected' }]
+  onOrderChangeApplied:
+    action: send
+    channel: { $ref: '#/channels/passage.production.orderchange' }
+    messages: [{ $ref: '#/channels/passage.production.orderchange/messages/applied' }]
+  onOrderChangeDismissed:
+    action: send
+    channel: { $ref: '#/channels/passage.production.orderchange' }
+    messages: [{ $ref: '#/channels/passage.production.orderchange/messages/dismissed' }]
 components:
   messages:
     orderCreated:
@@ -350,6 +374,72 @@ components:
           actor: { type: string }
           occurredAt: { type: string, format: date-time }
       x-passage-type: dev.passage.production.operation.statuschanged.v1
+    orderChangeDetected:
+      name: detected
+      title: Order change detected
+      description: 'Emitted in the transaction of `POST /v1/production/order-changes:detect` for each open order whose BOM or route snapshot an ECO superseded and whose OCM profile is not none; a repeated ECO emits nothing for orders already recorded (FR-21.16). Consumers: the planner worklist, notifications.'
+      payload:
+        type: object
+        required: [changeId, orderId, orderNumber, ecoId, status, profileMode, needsReview, deltaCount, changeCost, currency, orderVersion, actor, occurredAt]
+        properties:
+          changeId: { type: string, format: uuid }
+          orderId: { type: string, format: uuid }
+          orderNumber: { type: string }
+          ecoId: { type: string, description: The engineering change order (wave 9) that superseded the order's BOM or route version. }
+          status: { type: string, enum: [pending, applied, dismissed] }
+          profileMode: { type: string, enum: [automatic, manual], description: The OCM profile mode that applied at detection. }
+          needsReview: { type: boolean, description: 'True when the order was edited by hand (FR-21.18); such an order is never applied automatically.' }
+          deltaCount: { type: integer, description: Lines and operations added, removed or changed. }
+          changeCost: { type: string, description: 'New minus old planned cost plus the profile surcharge (BR-21.12), to the currency minor unit.' }
+          currency: { type: string }
+          orderVersion: { type: integer, description: The order version after the event. }
+          actor: { type: string }
+          occurredAt: { type: string, format: date-time }
+      x-passage-type: dev.passage.production.orderchange.detected.v1
+    orderChangeApplied:
+      name: applied
+      title: Order change applied
+      description: 'Emitted in the transaction of `POST /v1/production/order-changes/{id}:apply`, or of the order status command that applies a change detected under an automatic OCM profile (note "applied automatically at :<command>"), after order.bomedited for the same re-explosion and re-estimate (FR-21.16). Consumers: planning, analytics.'
+      payload:
+        type: object
+        required: [changeId, orderId, orderNumber, ecoId, status, profileMode, needsReview, deltaCount, changeCost, currency, orderVersion, actor, occurredAt]
+        properties:
+          changeId: { type: string, format: uuid }
+          orderId: { type: string, format: uuid }
+          orderNumber: { type: string }
+          ecoId: { type: string, description: The engineering change order (wave 9) that superseded the order's BOM or route version. }
+          status: { type: string, enum: [pending, applied, dismissed] }
+          profileMode: { type: string, enum: [automatic, manual], description: The OCM profile mode that applied at detection. }
+          needsReview: { type: boolean, description: 'True when the order was edited by hand (FR-21.18); such an order is never applied automatically.' }
+          deltaCount: { type: integer, description: Lines and operations added, removed or changed. }
+          changeCost: { type: string, description: 'New minus old planned cost plus the profile surcharge (BR-21.12), to the currency minor unit.' }
+          currency: { type: string }
+          orderVersion: { type: integer, description: The order version after the event. }
+          actor: { type: string }
+          occurredAt: { type: string, format: date-time }
+      x-passage-type: dev.passage.production.orderchange.applied.v1
+    orderChangeDismissed:
+      name: dismissed
+      title: Order change dismissed
+      description: 'Emitted in the transaction of `POST /v1/production/order-changes/{id}:dismiss`, or of `POST /v1/production/order-changes:detect` when a later ECO covers an older pending change of the order (note "superseded by <ecoId>") (FR-21.16).'
+      payload:
+        type: object
+        required: [changeId, orderId, orderNumber, ecoId, status, profileMode, needsReview, deltaCount, changeCost, currency, orderVersion, actor, occurredAt]
+        properties:
+          changeId: { type: string, format: uuid }
+          orderId: { type: string, format: uuid }
+          orderNumber: { type: string }
+          ecoId: { type: string, description: The engineering change order (wave 9) that superseded the order's BOM or route version. }
+          status: { type: string, enum: [pending, applied, dismissed] }
+          profileMode: { type: string, enum: [automatic, manual], description: The OCM profile mode that applied at detection. }
+          needsReview: { type: boolean, description: 'True when the order was edited by hand (FR-21.18); such an order is never applied automatically.' }
+          deltaCount: { type: integer, description: Lines and operations added, removed or changed. }
+          changeCost: { type: string, description: 'New minus old planned cost plus the profile surcharge (BR-21.12), to the currency minor unit.' }
+          currency: { type: string }
+          orderVersion: { type: integer, description: The order version after the event. }
+          actor: { type: string }
+          occurredAt: { type: string, format: date-time }
+      x-passage-type: dev.passage.production.orderchange.dismissed.v1
   schemas:
     reworkReference:
       type: object

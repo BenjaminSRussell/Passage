@@ -5,7 +5,8 @@ order itself; slice 2 adds journals, WIP postings and settlement; slice 3 adds r
 as-built genealogy; slice 4 adds the bulk status update, and split and merge; slice 5 adds
 order-specific BOM and route edits and the WIP balance and variance reports; slice 6 adds trigger
 points on operation feedback; slice 7 adds subcontract purchase requests; slice 9 adds the item's
-order quantity rules, estimate on create and the operation finish and reopen commands.
+order quantity rules, estimate on create and the operation finish and reopen commands; slice 10 adds
+order change management (OCM profiles, ECO detection, change preview and cost, apply and dismiss).
 
 Slice 1:
 
@@ -206,6 +207,35 @@ Slice 9:
   emits `operation.statuschanged`; a command already in effect changes nothing. Migration
   `0008_operation_log.sql` adds the log with RLS and grants.
 
+Slice 10:
+
+- OCM profiles (FR-21.16, 4.21.13): `PUT /v1/production/ocm-profiles` (If-Match to replace) and `GET`
+  per legal entity × item group × site (either may be `All`), resolved item group × site, item group ×
+  All, All × site, All × All; with none stored the default is manual and no surcharge. Mode
+  `automatic`, `manual` or `none`; surcharge = a fixed amount plus a percentage of a positive delta
+  (BR-21.12). Needs `production.setup.write` / `.read`.
+- Detection: `POST /v1/production/order-changes:detect` takes an ECO notice (`ecoId`, `productId`,
+  optional `siteId`, and the new `bom` and/or `operations`, as on create) and records every open order
+  (Created to Released) of the product that differs from it and whose profile is not `none`, once per
+  (order, ECO), with the delta counts and the change cost; a hand-edited order is flagged
+  `needsReview` (an edit after detection flags its pending changes too). `orderchange.detected` per
+  record. Older pending changes of the order that the ECO covers are dismissed as superseded; one it
+  covers only in part is blocked (409 `PRODUCTION_ORDER_CHANGE_SUPERSEDED`). Needs
+  `production.order.write`.
+- Automatic profile: every status command (except `:cancel`) on an order before Started first
+  applies its pending automatic changes, oldest first, unless the order was edited by hand or the
+  change is blocked; the record notes `applied automatically at :<command>`.
+- Worklist and record: `GET /v1/production/order-changes` (status, site, order, ECO, needsReview,
+  keyset-paged) and `/{id}` (ETag is the record version).
+- `POST …/order-changes/{id}:preview` shows the delta, the planned cost before and after, the
+  surcharge and change cost, and why applying is blocked now; `:apply` (If-Match on the record,
+  Idempotency-Key, `production.order.apply-change`) re-explodes the order through the order-edit
+  rules, re-estimates, stores the before and after snapshot hashes and emits `order.bomedited` and
+  `orderchange.applied`; lines with consumption or journals are never removed or re-pointed (409
+  `PRODUCTION_ORDER_EDIT_TARGET_IN_USE`); `:dismiss` sets it aside with a note.
+- Migration `0009_order_change.sql` adds `production_ocm_profile` and `production_order_change`
+  with RLS, a legal-entity policy and grants (select, insert, update).
+
 Inventory transactions (wave 16), GL booking (wave 11) and period control (wave 14) are
 handoffs. Everything not built is listed in `NOT-IMPLEMENTED.md`.
 
@@ -221,13 +251,14 @@ internal/domain/       pure rules: status.go (BR-21.1 state machine, reset, RAF 
                        order_edit.go (FR-21.18 BOM and route edits), inquiry.go (variance % of planned),
                        trigger.go (FR-21.17 conditions, due triggers, inserted numbering, rework route),
                        subcontract.go (FR-21.10 purchase requests),
-                       operation.go (FR-21.1 order quantity rules, FR-21.6 finish and reopen)
+                       operation.go (FR-21.1 order quantity rules, FR-21.6 finish and reopen),
+                       ocm.go (FR-21.16 profiles, snapshot diff, BR-21.12 change cost)
 internal/domain/testdata/  prod-orders-50.json and the exact-fraction generator that computed it
 internal/store/        Postgres repositories (pgx), tenant-scoped transactions, row locks, outbox writes:
                        store.go (orders, commands), journal.go (journals, postings, settlement, reversals),
                        profile.go (posting profiles), asbuilt.go (as-built genealogy),
                        split.go (split, merge, bulk status), order_edit.go (BOM and route edits, audit),
-                       inquiry.go (WIP balance and variance reports), trigger.go (trigger points, firing on route cards),
+                       inquiry.go (WIP balance and variance reports), trigger.go (trigger points, firing on route cards), ocm.go (OCM profiles, detection, preview, apply, dismiss),
                        subcontract.go (purchase requests at release, subcontract operations inquiry),
                        operation.go (finish and reopen)
 internal/api/          HTTP handlers, request validation, platform authz duties
@@ -342,6 +373,11 @@ Problems are RFC 9457 with `type` `https://passage.dev/problems/<code>`.
 | `PRODUCTION_ORDER_EDIT_TARGET_EXISTS` | 409 | The line or operation to add is already on the order |
 | `PRODUCTION_ORDER_EDIT_TARGET_IN_USE` | 409 | The line or operation has consumption, feedback or journals |
 | `PRODUCTION_ORDER_EDIT_TARGET_NOT_FOUND` | 422 | The line or operation to change or remove is not on the order |
+| `PRODUCTION_ORDER_CHANGE_NOT_FOUND` | 404 | No order change with that id in the caller's scope |
+| `PRODUCTION_ORDER_CHANGE_RESOLVED` | 409 | Applying or dismissing a change already applied (or dismissing one applied) |
+| `PRODUCTION_ORDER_CHANGE_NOT_ELIGIBLE` | 409 | Applying a change to an order that is Started or later (FR-21.16) |
+| `PRODUCTION_ORDER_CHANGE_SUPERSEDED` | 409 | A later ECO on the order replaces the same BOM or route; applying would undo it |
+| `PRODUCTION_ORDER_CHANGE_NO_DELTA` | 422 | The order already matches the change's BOM and route; dismiss it |
 | `PRODUCTION_TRIGGER_CONDITION_INVALID` | 422 | The trigger condition is not `<field> <op> <number>` |
 | `PRODUCTION_TRIGGER_FUNCTION_UNSUPPORTED` | 422 | `release-next` or `start-workflow` (waves 23 and 4) |
 | `PRODUCTION_TRIGGER_OPERATION_NOT_FOUND` | 422 | The trigger's operation is not on the order's route |

@@ -4,6 +4,9 @@ import type { PassageModule } from "../registry";
 import type { ProductionOrder } from "./api/client";
 import { AsBuiltInquiryPage } from "./AsBuiltInquiryPage";
 import { CreateProductionOrderPage, type OrderValues } from "./CreateOrderPage";
+import { OcmProfilesPage } from "./OcmProfilesPage";
+import { OrderChangeDetailPage } from "./OrderChangeDetailPage";
+import { OrderChangesPage } from "./OrderChangesPage";
 import { ProductionOrderDetail } from "./OrderDetailPage";
 import { ProductionOrdersPage } from "./OrdersPage";
 import { PostingProfilesPage } from "./PostingProfilesPage";
@@ -79,11 +82,27 @@ function SubcontractRoute() {
   return createElement(SubcontractOperationsPage, { onOpenOrder: (orderId) => navigate(open(orderId)) });
 }
 
+function ChangesRoute() {
+  const navigate = useNavigate();
+  return createElement(OrderChangesPage, { onOpenChange: (change) => navigate(`${list}/order-changes/${encodeURIComponent(change.id)}`) });
+}
+
+function ChangeDetailRoute() {
+  const { changeId = "" } = useParams();
+  const navigate = useNavigate();
+  return createElement(OrderChangeDetailPage, {
+    key: changeId,
+    changeId,
+    onBack: () => navigate(`${list}/order-changes`),
+    onOpenOrder: (orderId) => navigate(open(orderId)),
+  });
+}
+
 const production: PassageModule = {
   id: "production",
   title: "Production",
   description:
-    "Production orders: create, estimate, release, start, post picking lists, route cards and reports as finished, end with settlement; bulk status updates, split and merge, order-specific BOM and route edits; WIP balance and variance reports; subcontract operations with their vendor PO requests; rework orders, as-built genealogy and posting profiles.",
+    "Production orders: create, estimate, release, start, post picking lists, route cards and reports as finished, end with settlement; bulk status updates, split and merge, order-specific BOM and route edits; WIP balance and variance reports; subcontract operations with their vendor PO requests; order changes from engineering changes with preview, change cost, apply and dismiss; rework orders, as-built genealogy and posting profiles.",
   routes: [
     { path: list, element: createElement(OrdersRoute) },
     { path: `${list}/new`, element: createElement(CreateRoute), handle: { title: "New production order" } },
@@ -92,6 +111,9 @@ const production: PassageModule = {
     { path: `${list}/wip-balances`, element: createElement(WIPRoute), handle: { title: "WIP balance by order" } },
     { path: `${list}/variances`, element: createElement(VariancesRoute), handle: { title: "Production variances" } },
     { path: `${list}/subcontract-operations`, element: createElement(SubcontractRoute), handle: { title: "Subcontract operations" } },
+    { path: `${list}/order-changes`, element: createElement(ChangesRoute), handle: { title: "Order changes" } },
+    { path: `${list}/order-changes/:changeId`, element: createElement(ChangeDetailRoute), handle: { title: "Order change" } },
+    { path: `${list}/ocm-profiles`, element: createElement(OcmProfilesPage), handle: { title: "Order change profiles" } },
     { path: `${list}/:id`, element: createElement(DetailRoute), handle: { title: "Production order" } },
   ],
   nav: [
@@ -101,6 +123,8 @@ const production: PassageModule = {
     { label: "WIP balance", to: `${list}/wip-balances`, duty: "production.cost.read" },
     { label: "Production variances", to: `${list}/variances`, duty: "production.cost.read" },
     { label: "Subcontract operations", to: `${list}/subcontract-operations`, duty: "production.order.read" },
+    { label: "Order changes", to: `${list}/order-changes`, duty: "production.order.read" },
+    { label: "Order change profiles", to: `${list}/ocm-profiles`, duty: "production.setup.read" },
     { label: "Posting profiles", to: `${list}/posting-profiles`, duty: "production.setup.read" },
   ],
 };

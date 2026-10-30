@@ -145,6 +145,12 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutySetupWrite)).Post("/v1/production/orders/{id}/trigger-points", a.createTriggerPoint)
 	r.With(authz.RequireDuty(DutySetupWrite)).Delete("/v1/production/trigger-points/{id}", a.deleteTriggerPoint)
 	r.With(authz.RequireDuty(DutyJournalPost)).Post("/v1/production/orders/{id}/operations/{operCommand}", a.operationCommand)
+	r.With(authz.RequireDuty(DutySetupRead)).Get("/v1/production/ocm-profiles", a.listOCMProfiles)
+	r.With(authz.RequireDuty(DutySetupWrite)).Put("/v1/production/ocm-profiles", a.saveOCMProfile)
+	r.With(authz.RequireDuty(DutyWrite)).Post("/v1/production/order-changes:detect", a.detectChanges)
+	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/order-changes", a.listChanges)
+	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/order-changes/{id}", a.getChange)
+	r.Post("/v1/production/order-changes/{id}", a.changeCommand)
 }
 
 // Metrics serves Prometheus text for the admin port.
@@ -676,41 +682,8 @@ func validateCreate(req createRequest, fields map[string]string) {
 	case len(req.Operations) > maxOperations:
 		fields["operations"] = fmt.Sprintf("at most %d operations", maxOperations)
 	}
-	for i, op := range req.Operations {
-		at := fmt.Sprintf("operations[%d]", i)
-		if op.OperNumber < 1 {
-			fields[at+".operNumber"] = "must be a positive whole number"
-		}
-		if !ids.Valid(op.ResourceID) {
-			fields[at+".resourceId"] = "must be a UUID"
-		}
-		for name, v := range map[string]decimal.Decimal{"setupTimeH": op.SetupH, "runTimeHPer": op.RunHPer, "scrapPct": op.ScrapPct,
-			"laborRate": op.LaborRate, "overheadRate": op.OverheadRate, "subcontractPrice": op.SubcontractPrice} {
-			checkQuantity(at+"."+name, v, false, fields)
-		}
-		if !op.ProcessQty.IsZero() {
-			fields[at+".processQty"] = "is computed by the service"
-		}
-		if !op.HoursReported.IsZero() || !op.QtyGood.IsZero() || !op.QtyError.IsZero() || op.Status != "" {
-			fields[at+".status"] = "hours, quantities and status are reported by route cards"
-		}
-	}
-	count := 0
-	seen := map[string]bool{}
-	for i, c := range req.BOM {
-		at := fmt.Sprintf("bom[%d]", i)
-		switch {
-		case c.LineNo == "" || len(c.LineNo) > maxLineNo:
-			fields[at+".lineNo"] = fmt.Sprintf("is required, at most %d characters", maxLineNo)
-		case seen[c.LineNo]:
-			fields[at+".lineNo"] = "must be unique in the BOM"
-		}
-		seen[c.LineNo] = true
-	}
-	validateBOM(req.BOM, "bom", 1, &count, fields)
-	if count > maxBOMLines {
-		fields["bom"] = fmt.Sprintf("at most %d lines", maxBOMLines)
-	}
+	validateRouteSnapshot(req.Operations, fields)
+	validateBOMSnapshot(req.BOM, fields)
 }
 
 // validateBOM checks item ids and quantities at every level. Line numbers of
@@ -759,4 +732,48 @@ func problemFrom(err error) error {
 		return httpx.NewProblem(http.StatusUnprocessableEntity, de.Code, de.Detail)
 	}
 	return err
+}
+
+// validateRouteSnapshot checks the operations of a route snapshot: the shape a
+// create request and an ECO notice (FR-21.16) share.
+func validateRouteSnapshot(ops []domain.Operation, fields map[string]string) {
+	for i, op := range ops {
+		at := fmt.Sprintf("operations[%d]", i)
+		if op.OperNumber < 1 {
+			fields[at+".operNumber"] = "must be a positive whole number"
+		}
+		if !ids.Valid(op.ResourceID) {
+			fields[at+".resourceId"] = "must be a UUID"
+		}
+		for name, v := range map[string]decimal.Decimal{"setupTimeH": op.SetupH, "runTimeHPer": op.RunHPer, "scrapPct": op.ScrapPct,
+			"laborRate": op.LaborRate, "overheadRate": op.OverheadRate, "subcontractPrice": op.SubcontractPrice} {
+			checkQuantity(at+"."+name, v, false, fields)
+		}
+		if !op.ProcessQty.IsZero() {
+			fields[at+".processQty"] = "is computed by the service"
+		}
+		if !op.HoursReported.IsZero() || !op.QtyGood.IsZero() || !op.QtyError.IsZero() || op.Status != "" {
+			fields[at+".status"] = "hours, quantities and status are reported by route cards"
+		}
+	}
+}
+
+// validateBOMSnapshot checks a BOM snapshot's line numbers, depth and quantities.
+func validateBOMSnapshot(bom []domain.BOMComponent, fields map[string]string) {
+	count := 0
+	seen := map[string]bool{}
+	for i, c := range bom {
+		at := fmt.Sprintf("bom[%d]", i)
+		switch {
+		case c.LineNo == "" || len(c.LineNo) > maxLineNo:
+			fields[at+".lineNo"] = fmt.Sprintf("is required, at most %d characters", maxLineNo)
+		case seen[c.LineNo]:
+			fields[at+".lineNo"] = "must be unique in the BOM"
+		}
+		seen[c.LineNo] = true
+	}
+	validateBOM(bom, "bom", 1, &count, fields)
+	if count > maxBOMLines {
+		fields["bom"] = fmt.Sprintf("at most %d lines", maxBOMLines)
+	}
 }

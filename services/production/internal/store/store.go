@@ -208,6 +208,14 @@ type Store interface {
 	DeleteTriggerPoint(ctx context.Context, id string) error
 	SubcontractOperations(ctx context.Context, f SubcontractFilter) (SubcontractReport, error)
 	ApplyOperationCommand(ctx context.Context, c OperationCommand) (Order, OperationOutcome, error)
+	ListOCMProfiles(ctx context.Context, legalEntityID string) ([]OCMProfile, error)
+	SaveOCMProfile(ctx context.Context, in OCMProfileSave) (OCMProfile, bool, error)
+	DetectOrderChanges(ctx context.Context, in ChangeDetect) (ChangeDetectResult, error)
+	ListOrderChanges(ctx context.Context, f ChangeFilter) (ChangePage, error)
+	GetOrderChange(ctx context.Context, id string) (OrderChange, error)
+	PreviewOrderChange(ctx context.Context, id string) (ChangePreview, error)
+	ApplyOrderChange(ctx context.Context, in ChangeApply) (ChangeApplyResult, error)
+	DismissOrderChange(ctx context.Context, in ChangeDismiss) (OrderChange, error)
 }
 
 // Postgres is the production store.
@@ -687,6 +695,13 @@ func (s *Postgres) Transition(ctx context.Context, t Transition) (Order, bool, e
 		if err != nil {
 			return domainProblem(err)
 		}
+		// FR-21.16: an automatic OCM profile applies the order's pending changes at
+		// its next status transition, before the command takes effect.
+		if domain.CheckChangeEligible(from) == nil {
+			if err := autoApplyChanges(ctx, tx, p.TenantID, t.OrderID, t.Command, t.Actor, t.TraceID); err != nil {
+				return err
+			}
+		}
 		switch t.Command {
 		case domain.CmdEnd:
 			if err := domain.CheckEnd(from, h.qtyRAF, t.ZeroOutputDuty); err != nil {
@@ -814,7 +829,8 @@ func domainProblem(err error) error {
 	status := http.StatusUnprocessableEntity
 	switch de.Code {
 	case domain.CodeIllegalTransition, domain.CodeNotEditable, domain.CodeAsBuiltState,
-		domain.CodeEditNotAllowed, domain.CodeEditTargetExists, domain.CodeEditTargetInUse, domain.CodeOperationState:
+		domain.CodeEditNotAllowed, domain.CodeEditTargetExists, domain.CodeEditTargetInUse, domain.CodeOperationState, domain.CodeChangeNotEligible,
+		domain.CodeChangeSuperseded:
 		status = http.StatusConflict
 	}
 	return httpx.NewProblem(status, de.Code, de.Detail)

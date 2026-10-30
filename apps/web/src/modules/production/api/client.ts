@@ -1055,6 +1055,146 @@ export async function getSubcontractOperations(
   };
 }
 
+// ---- Order change management (FR-21.16, BR-21.12) ----
+
+export type OCMMode = "automatic" | "manual" | "none";
+
+export const OCM_MODES: OCMMode[] = ["automatic", "manual", "none"];
+
+export type ChangeStatus = "pending" | "applied" | "dismissed";
+
+export const CHANGE_STATUSES: ChangeStatus[] = ["pending", "applied", "dismissed"];
+
+export interface OCMProfileInput {
+  /** An item group, or All. */
+  itemGroup: string;
+  /** A site id, or All. */
+  siteId: string;
+  mode: OCMMode;
+  surchargeFixed: string;
+  surchargePct: string;
+}
+
+export interface OCMProfile extends OCMProfileInput {
+  version: number;
+  updatedBy?: string;
+  updatedAt?: string;
+}
+
+export interface ChangeDelta {
+  linesAdded: number;
+  linesRemoved: number;
+  linesChanged: number;
+  operationsAdded: number;
+  operationsRemoved: number;
+  operationsChanged: number;
+}
+
+/** An OrderChangeRecord: an open order an ECO's BOM or route supersedes. */
+export interface OrderChange {
+  id: string;
+  orderId: string;
+  orderNumber: string;
+  productId: string;
+  siteId: string;
+  ecoId: string;
+  status: ChangeStatus;
+  profileMode: "automatic" | "manual";
+  /** The order was edited by hand (FR-21.18): flagged for manual review. */
+  needsReview: boolean;
+  changesBom: boolean;
+  changesRoute: boolean;
+  delta: ChangeDelta;
+  deltaCount: number;
+  currency: string;
+  changeCost: string;
+  beforeHash: string | null;
+  afterHash: string | null;
+  note: string;
+  version: number;
+  detectedBy: string;
+  detectedAt: string;
+  resolvedBy: string | null;
+  resolvedAt: string | null;
+}
+
+export interface ChangeQuery {
+  status?: ChangeStatus | "";
+  needsReview?: boolean;
+  ecoId?: string;
+  orderId?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface ChangePage {
+  items: OrderChange[];
+  nextCursor?: string;
+}
+
+export interface ChangeCost {
+  oldPlanned: string;
+  newPlanned: string;
+  delta: string;
+  surcharge: string;
+  total: string;
+}
+
+export interface ChangePreview {
+  change: OrderChange;
+  delta: ChangeDelta;
+  cost: ChangeCost;
+  /** Why applying would be refused now, or null. */
+  blocked: { code: string; detail: string } | null;
+}
+
+export async function listOCMProfiles(signal?: AbortSignal): Promise<OCMProfile[]> {
+  const body = await requestAt<{ items?: OCMProfile[] }>(`${root}/ocm-profiles`, { signal });
+  return Array.isArray(body.items) ? body.items : [];
+}
+
+/** Creates an OCM profile (no version) or replaces it under If-Match. */
+export function saveOCMProfile(input: OCMProfileInput, version?: number): Promise<OCMProfile> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (version !== undefined) {
+    headers["If-Match"] = `"${version}"`;
+  }
+  return requestAt<OCMProfile>(`${root}/ocm-profiles`, { method: "PUT", headers, body: JSON.stringify(input) });
+}
+
+/** The order change worklist, newest first. */
+export async function listOrderChanges({ limit = 50, ...filter }: ChangeQuery = {}, signal?: AbortSignal): Promise<ChangePage> {
+  const params = query({ ...filter, needsReview: filter.needsReview === undefined ? undefined : String(filter.needsReview), limit });
+  const body = await requestAt<Partial<ChangePage>>(`${root}/order-changes?${params}`, { signal });
+  return { items: Array.isArray(body.items) ? body.items : [], nextCursor: body.nextCursor };
+}
+
+export function getOrderChange(id: string, signal?: AbortSignal): Promise<OrderChange> {
+  return requestAt<OrderChange>(`${root}/order-changes/${encodeURIComponent(id)}`, { signal });
+}
+
+/** What applying the change does to the order as it is now, with the change cost. */
+export function previewOrderChange(id: string, signal?: AbortSignal): Promise<ChangePreview> {
+  return requestAt<ChangePreview>(`${root}/order-changes/${encodeURIComponent(id)}:preview`, { method: "POST", signal });
+}
+
+/** Applies a pending change; a retry with the same key replays the first result. */
+export function applyOrderChange(id: string, version: number, idempotencyKey: string): Promise<{ change: OrderChange; order: ProductionOrder }> {
+  return requestAt(`${root}/order-changes/${encodeURIComponent(id)}:apply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey, "If-Match": `"${version}"` },
+    body: "{}",
+  });
+}
+
+export function dismissOrderChange(id: string, version: number, note: string): Promise<OrderChange> {
+  return requestAt<OrderChange>(`${root}/order-changes/${encodeURIComponent(id)}:dismiss`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "If-Match": `"${version}"` },
+    body: JSON.stringify({ note }),
+  });
+}
+
 /** Split and merge take orders before Started (FR-21.15; a Started split needs the WIP transfer of a later slice). */
 export function canSplit(status: ProductionStatus): boolean {
   return status === "Created" || status === "Estimated" || status === "Scheduled" || status === "Released";

@@ -27,12 +27,38 @@ var (
 	// OperationStatusChanged reports an operation finished or reopened by its
 	// `:finish` or `:reopen` command (FR-21.6), for scheduling and the shop floor.
 	OperationStatusChanged = events.Type(Context, "operation", "statuschanged", 1)
+	// OrderChangeDetected reports an open order whose BOM or route snapshot an ECO
+	// superseded (FR-21.16); OrderChangeApplied that the planner applied the change,
+	// OrderChangeDismissed that it was set aside.
+	OrderChangeDetected  = events.Type(Context, "orderchange", "detected", 1)
+	OrderChangeApplied   = events.Type(Context, "orderchange", "applied", 1)
+	OrderChangeDismissed = events.Type(Context, "orderchange", "dismissed", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
 	return []string{OrderCreated, OrderUpdated, OrderStatusChanged, OrderSettled, JournalPosted, AsBuiltAssigned, AsBuiltDetached, OrderBOMEdited, TriggerPointFired,
-		SubcontractPORequested, OperationStatusChanged}
+		SubcontractPORequested, OperationStatusChanged, OrderChangeDetected, OrderChangeApplied, OrderChangeDismissed}
+}
+
+// OrderChangeData is the payload of orderchange.detected.v1, .applied.v1 and
+// .dismissed.v1: the change record after the event. Counts are the delta between
+// the order and the ECO's BOM and route; ChangeCost is BR-21.12's new minus old
+// planned cost plus the profile surcharge, in the order currency.
+type OrderChangeData struct {
+	ChangeID     string `json:"changeId"`
+	OrderID      string `json:"orderId"`
+	OrderNumber  string `json:"orderNumber"`
+	EcoID        string `json:"ecoId"`
+	Status       string `json:"status"`
+	ProfileMode  string `json:"profileMode"`
+	NeedsReview  bool   `json:"needsReview"`
+	DeltaCount   int    `json:"deltaCount"`
+	ChangeCost   string `json:"changeCost"`
+	Currency     string `json:"currency"`
+	OrderVersion int    `json:"orderVersion"`
+	Actor        string `json:"actor"`
+	OccurredAt   string `json:"occurredAt"`
 }
 
 // OperationStatusChangedData is the payload of operation.statuschanged.v1: one

@@ -1,6 +1,8 @@
 import type { BadgeTone } from "../../shell/ui";
 import type {
   BulkCommand,
+  ChangeStatus,
+  OCMMode,
   CostGroup,
   EditOp,
   Flushing,
@@ -226,4 +228,34 @@ export function describeCondition(condition: string): string {
     return condition;
   }
   return `${fieldLabel} ${opLabel} ${value}`;
+}
+
+export const changeStatusLabel: Record<ChangeStatus, string> = { pending: "Pending", applied: "Applied", dismissed: "Dismissed" };
+
+export const changeStatusTone: Record<ChangeStatus, BadgeTone> = { pending: "warning", applied: "success", dismissed: "neutral" };
+
+export const ocmModeLabel: Record<OCMMode, string> = {
+  automatic: "Automatic (applied at the next status command)",
+  manual: "Manual (the planner confirms)",
+  none: "None (ignore new versions)",
+};
+
+/** A one-line summary of what an ECO changes on an order, for the worklist. */
+export function describeDelta(d: {
+  linesAdded: number;
+  linesRemoved: number;
+  linesChanged: number;
+  operationsAdded: number;
+  operationsRemoved: number;
+  operationsChanged: number;
+}): string {
+  const parts: string[] = [];
+  const add = (n: number, what: string) => n > 0 && parts.push(`${n} ${what}`);
+  add(d.linesAdded, "lines added");
+  add(d.linesRemoved, "lines removed");
+  add(d.linesChanged, "lines changed");
+  add(d.operationsAdded, "operations added");
+  add(d.operationsRemoved, "operations removed");
+  add(d.operationsChanged, "operations changed");
+  return parts.length > 0 ? parts.join(", ") : "No difference";
 }

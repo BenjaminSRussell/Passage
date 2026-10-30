@@ -38,6 +38,17 @@ by the shell through `module.ts`.
 Tests: `npx vitest --run src/modules/production` and `npx tsc --noEmit` in `apps/web`. The page
 tests render the module routes inside a stand-in shell frame and run the in-repo AA checks.
 
+## Order changes (slice 10)
+
+- `/production/order-changes`: the OCM worklist (status, ECO and edited-by-hand filters, load more);
+  a row opens `/production/order-changes/:changeId`, which shows the record, previews the delta and the
+  change cost against the order as it is now, and applies it (If-Match on the record, one
+  Idempotency-Key per intent so a retry replays) or dismisses it with a note. A blocked change shows
+  the service's reason and disables Apply.
+- `/production/ocm-profiles`: OCM profile setup (mode, fixed surcharge and percentage) per item group
+  and site. Detecting a change is done by the ECO notice (`order-changes:detect`), which has no
+  screen: wave 9 and the wave 4 consumer call it.
+
 ## Needs
 
 - Lookups for product (wave 8), site and warehouse (wave 6), resource (wave 9) and the active BOM
