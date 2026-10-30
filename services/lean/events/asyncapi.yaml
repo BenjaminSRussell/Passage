@@ -79,22 +79,27 @@ components:
   messages:
     FlowActivated:
       name: dev.passage.lean.flow.activated.v1
+      summary: A production flow was activated and its activities are fixed
       contentType: application/cloudevents+json
       payload: { $ref: '#/components/schemas/FlowActivatedData' }
     KanbanCreated:
       name: dev.passage.lean.kanban.created.v1
+      summary: A kanban card was generated from a rule or a demand line
       contentType: application/cloudevents+json
       payload: { $ref: '#/components/schemas/KanbanCreatedData' }
     KanbanStateChanged:
       name: dev.passage.lean.kanban.statechanged.v1
+      summary: A kanban card moved to another state (completion drives the replenishment transfer or order)
       contentType: application/cloudevents+json
       payload: { $ref: '#/components/schemas/KanbanStateChangedData' }
     JobStateChanged:
       name: dev.passage.lean.kanbanjob.statechanged.v1
+      summary: A kanban job moved to another state (service-activity completions drive subcontract POs)
       contentType: application/cloudevents+json
       payload: { $ref: '#/components/schemas/JobStateChangedData' }
     FlowPeriodSettled:
       name: dev.passage.lean.flowperiod.settled.v1
+      summary: A flow costing period was settled; the ledger posts the variance from it
       contentType: application/cloudevents+json
       payload: { $ref: '#/components/schemas/FlowPeriodSettledData' }
   schemas:

@@ -1,4 +1,4 @@
-# Not implemented in PSG-24 slices 1, 2, 4, 5, 6, 7 and 8 (lean)
+# Not implemented in PSG-24 slices 1, 2, 4, 5, 6, 7, 8 and 9 (lean)
 
 Built in slice 1: production flows with activities, connectivity check and activation
 (FR-24.8, LEAN-0004); kanban rules (FR-24.9); kanban generation for fixed rules with the
@@ -65,6 +65,9 @@ and a separate `/lean/demand` page; both were dropped in review: the ledger dupl
 `kanban_job_completion`, which slice 6 already writes with every job completion and the backflush
 already reads, and the demand page duplicated event-kanban generation on the rule detail screen
 and called a `kanbans:generate-preview` route the service does not serve.
+
+Slice 9 changed no lean behavior; it gave every message of events/asyncapi.yaml a summary so the
+AsyncAPI documentation gate has no FAIL lines.
 
 | Deliverable or AC | Status | Reason |
 |---|---|---|

@@ -1,13 +1,14 @@
 openapi: 3.1.0
 info:
   title: Passage Process Manufacturing
-  version: 0.3.0
+  version: 0.4.0
   description: >
-    Process manufacturing (wave 24, PSG-24 slices 1 to 3): formulas, batch orders
+    Process manufacturing (wave 24, PSG-24 slices 1 to 3 and 9): formulas, batch orders
     scaled from a formula snapshot, the potency, catch-weight and co-product
     allocation calculators (slice 1), the batch derivation, merge, consolidation,
     customer requirement and EBR approval previews (slice 2), and the batch
-    attribute check, the picking proposal and the rework plan (slice 3). Routes
+    attribute check, the picking proposal and the rework plan (slice 3), and the
+    batch-order lifecycle with co-product cost allocation at End (slice 9). Routes
     match the handlers in internal/api (checked by internal/api/openapi_test.go).
     Errors are RFC 9457 problem details (application/problem+json) with a stable
     `code`; see README.md. The gateway routes /api/v1/production/* paths listed
@@ -188,6 +189,110 @@ paths:
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         '422':
           description: idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batch-orders/{id}:release:
+    post:
+      operationId: releaseBatchOrder
+      summary: Release a planned batch order (PRD 4.24.5)
+      x-passage-duty: production.batch-order.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/VersionRequest' } } }
+      responses:
+        '200':
+          description: 'The released order with version + 1. Writes dev.passage.production.batchorder.statechanged.v1. A replay returns the first answer with Idempotent-Replayed: true.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/BatchOrder' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: PMF-0102
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: PMF-0104 when the version is stale; PMF-0106 when the order is not planned.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batch-orders/{id}:start:
+    post:
+      operationId: startBatchOrder
+      summary: Start a released batch order (PRD 4.24.5)
+      x-passage-duty: production.batch-order.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/VersionRequest' } } }
+      responses:
+        '200':
+          description: 'The started order with version + 1; it can no longer be rescaled. Writes dev.passage.production.batchorder.statechanged.v1. A replay returns the first answer with Idempotent-Replayed: true.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/BatchOrder' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: PMF-0102
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: PMF-0104 when the version is stale; PMF-0106 when the order is not released.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batch-orders/{id}:report-finished:
+    post:
+      operationId: reportBatchOrderFinished
+      summary: Report the finished quantities of a started batch order (RAF)
+      x-passage-duty: production.batch-order.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ReportRequest' } } }
+      responses:
+        '200':
+          description: 'The reported order with the main quantity and the reported quantity of each co- and by-product line. Writes dev.passage.production.batchorder.statechanged.v1 with the outputs. A replay returns the first answer with Idempotent-Replayed: true.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/BatchOrder' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: PMF-0102
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: PMF-0104 when the version is stale; PMF-0106 when the order is not started.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: PMF-0107 when a reported quantity is invalid; idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batch-orders/{id}:end:
+    post:
+      operationId: endBatchOrder
+      summary: End a reported batch order and allocate its cost (FR-24.4, BR-24.3)
+      x-passage-duty: production.journal.post
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/EndRequest' } } }
+      responses:
+        '200':
+          description: 'The ended order with its allocation; the shares add up to the batch cost exactly. Writes dev.passage.production.batchorder.statechanged.v1 and dev.passage.production.coproduct.allocated.v1 in one transaction. A replay returns the first answer with Idempotent-Replayed: true.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/BatchOrder' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: PMF-0102
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: PMF-0104 when the version is stale; PMF-0106 when the order is not reported.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: PMF-0021 when the by-product burden exceeds the batch cost or the allocation weights sum to zero; PMF-0107 when no quantity was reported; idempotency_key_reuse.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/production/potency:consume:
@@ -487,6 +592,67 @@ components:
         scalable: { type: boolean }
         percentControlled: { type: boolean }
         qty: { $ref: '#/components/schemas/Decimal', description: Quantity at the order's batch size. }
+        rafQty: { $ref: '#/components/schemas/Decimal', description: Quantity reported as finished of a co- or by-product line, once the order is reported. }
+    VersionRequest:
+      type: object
+      required: [version]
+      properties:
+        version: { type: integer, minimum: 1, description: The order version the caller read (optimistic concurrency). }
+    ReportOutput:
+      type: object
+      required: [lineNumber, qty]
+      properties:
+        lineNumber: { type: integer, description: Line number of a co-product or by-product line of the order. }
+        qty: { $ref: '#/components/schemas/Decimal', description: Quantity reported as finished, zero or more. }
+    ReportRequest:
+      type: object
+      required: [version, mainQty]
+      properties:
+        version: { type: integer, minimum: 1 }
+        mainQty: { $ref: '#/components/schemas/Quantity', description: Quantity of the order's own item reported as finished. }
+        outputs: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/ReportOutput' }, description: A co- or by-product line left out is reported at its planned quantity. }
+    EndBasis:
+      type: object
+      properties:
+        lineNumber: { type: integer, description: Co-product line number; not used for the main item. }
+        standardCost: { $ref: '#/components/schemas/Decimal', description: 'Weight for the tca method (standard cost times reported quantity); zero or more, below 10^12, at most 6 decimals.' }
+        percent: { $ref: '#/components/schemas/Decimal', description: 'Weight for the manual method; 0 to 100, at most 6 decimals. Percentages are normalized, so they need not add up to 100.' }
+    EndByProduct:
+      type: object
+      required: [lineNumber, costType]
+      properties:
+        lineNumber: { type: integer, description: By-product line number. }
+        costType: { type: string, enum: [per-series, per-quantity, percent, recycled] }
+        rate: { $ref: '#/components/schemas/Decimal', description: 'Percent of the batch cost for percent, else the amount per unit of the reported quantity; zero or more, at most 6 decimals.' }
+    EndRequest:
+      type: object
+      required: [version, method, currency, batchCost]
+      properties:
+        version: { type: integer, minimum: 1 }
+        method: { type: string, enum: [none, manual, tca, quantity] }
+        currency: { type: string, pattern: '^[A-Z]{3}$', description: ISO 4217 code. }
+        batchCost: { $ref: '#/components/schemas/Decimal', description: Cost the order ends with, at most the currency's minor-unit decimals. }
+        main: { $ref: '#/components/schemas/EndBasis' }
+        coProducts: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/EndBasis' } }
+        byProducts: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/EndByProduct' }, description: A by-product line without an entry carries no burden. }
+    AllocationShare:
+      type: object
+      required: [role, lineNumber, itemId, rafQty, amount, percent]
+      properties:
+        role: { type: string, enum: [main, co-product, by-product-burden] }
+        lineNumber: { type: integer, description: 0 for the order's own item. }
+        itemId: { type: string, format: uuid }
+        rafQty: { $ref: '#/components/schemas/Decimal' }
+        amount: { $ref: '#/components/schemas/Decimal', description: Amount with 4 decimals. }
+        percent: { $ref: '#/components/schemas/Decimal' }
+    OrderAllocation:
+      type: object
+      required: [method, currency, batchCost, shares]
+      properties:
+        method: { type: string, enum: [none, manual, tca, quantity] }
+        currency: { type: string }
+        batchCost: { $ref: '#/components/schemas/Decimal' }
+        shares: { type: array, items: { $ref: '#/components/schemas/AllocationShare' }, description: Main item first, then co-products, then by-product burdens; the amounts add up to batchCost exactly. }
     BatchOrder:
       type: object
       required: [id, legalEntityId, orderNumber, formulaId, formulaCode, formulaVersion, itemId, unit, formulaSize, batchSize, scaleFactor, status, version, createdBy, createdAt, updatedAt]
@@ -507,7 +673,13 @@ components:
         createdBy: { type: string }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
-        lines: { type: array, items: { $ref: '#/components/schemas/OrderLine' }, description: Present on create, get and rescale, omitted in lists. }
+        releasedAt: { type: string, format: date-time }
+        startedAt: { type: string, format: date-time }
+        reportedAt: { type: string, format: date-time }
+        endedAt: { type: string, format: date-time }
+        actualQty: { $ref: '#/components/schemas/Decimal', description: Quantity of the order's own item reported as finished. }
+        lines: { type: array, items: { $ref: '#/components/schemas/OrderLine' }, description: Present on create, get and the commands, omitted in lists. }
+        allocation: { $ref: '#/components/schemas/OrderAllocation', description: Present once the order has ended. }
     ScaledLine:
       type: object
       properties:

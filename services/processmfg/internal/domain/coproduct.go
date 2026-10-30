@@ -49,7 +49,8 @@ type AllocationResult struct {
 // cost first; the remainder is split by the method's weights (none: main only;
 // manual: percentages; tca: standard cost × raf qty; quantity: raf qty), each
 // co-product is rounded to 4 places and the residual goes to the main product,
-// so the parts always add to the batch cost exactly.
+// so the parts always add to the batch cost exactly. A residual that would be
+// negative (a weightless main product) comes off the largest co-product.
 func AllocateCost(batchCost decimal.Decimal, method AllocationMethod, main Product, coProducts []Product, byProducts []ByProduct) (AllocationResult, error) {
 	var res AllocationResult
 	cost := batchCost.Round(AmountPrecision)
@@ -107,9 +108,34 @@ func AllocateCost(batchCost decimal.Decimal, method AllocationMethod, main Produ
 		coSum = coSum.Add(amt)
 		coPct = coPct.Add(pct)
 	}
+	// When the main product weighs (almost) nothing, rounding every co-product
+	// up can overshoot the remainder by a few ten-thousandths; the main product
+	// cannot take a negative residual, so the overshoot comes off the largest
+	// co-product instead (amounts and percentages alike).
+	if over := coSum.Sub(net); over.IsPositive() {
+		i := largest(res.CoProducts, func(a Allocated) decimal.Decimal { return a.Amount })
+		res.CoProducts[i].Amount = res.CoProducts[i].Amount.Sub(over)
+		coSum = net
+	}
+	if over := coPct.Sub(oneHundred()); over.IsPositive() {
+		i := largest(res.CoProducts, func(a Allocated) decimal.Decimal { return a.Percent })
+		res.CoProducts[i].Percent = res.CoProducts[i].Percent.Sub(over)
+		coPct = oneHundred()
+	}
 	res.Main = Allocated{ItemID: main.ItemID, Amount: net.Sub(coSum), Percent: oneHundred().Sub(coPct)}
 	res.Total = res.Main.Amount.Add(coSum).Add(burdenTotal)
 	return res, nil
+}
+
+// largest returns the index of the first co-product with the largest value.
+func largest(xs []Allocated, v func(Allocated) decimal.Decimal) int {
+	best := 0
+	for i := range xs {
+		if v(xs[i]).GreaterThan(v(xs[best])) {
+			best = i
+		}
+	}
+	return best
 }
 
 func percentOf(w, total decimal.Decimal) decimal.Decimal {

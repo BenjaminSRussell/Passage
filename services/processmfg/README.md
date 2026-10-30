@@ -29,7 +29,7 @@ internal/domain       pure rules (no I/O): scale.go (FR-24.1 validation, BR-24.1
                       attributes.go (FR-24.5), pickable.go (FR-24.3, FR-24.6, BR-24.10,
                       AC-24.4, AC-24.10), rework.go (FR-24.18);
                       property tests use rapid
-internal/store        Postgres repository: formulas, batch orders, rescale, idempotency, outbox
+internal/store        Postgres repository: formulas, batch orders, rescale, lifecycle and cost allocation, idempotency, outbox
 internal/api          HTTP handlers: decode → validate → tenant → store/domain → JSON/problem
 internal/events       event types and payloads
 migrations/           0001_init.sql (formula, formula_line, batch_order_sequence, batch_order,
@@ -107,6 +107,10 @@ skipped when `PASSAGE_TEST_DATABASE_URL` is unset.
 | GET | `/v1/production/batch-orders` | `production.batch-order.read` | Orders, newest first; `status`, `formulaId`, `limit` |
 | GET | `/v1/production/batch-orders/{id}` | `production.batch-order.read` | One order with its scaled lines |
 | POST | `/v1/production/batch-orders/{id}:rescale` | `production.batch-order.write` | New batch size before Started; `version`; Idempotency-Key |
+| POST | `/v1/production/batch-orders/{id}:release` | `production.batch-order.write` | planned to released; `version`; Idempotency-Key |
+| POST | `/v1/production/batch-orders/{id}:start` | `production.batch-order.write` | released to started (no more rescale); `version`; Idempotency-Key |
+| POST | `/v1/production/batch-orders/{id}:report-finished` | `production.batch-order.write` | started to reported: main quantity and the reported quantity of each co-/by-product line (a line left out is reported at its plan) |
+| POST | `/v1/production/batch-orders/{id}:end` | `production.journal.post` | reported to ended: splits the batch cost over the main item, co-products and by-product burdens (BR-24.3) and stores the shares; the order then carries `allocation` |
 | POST | `/v1/production/potency:consume` | `production.batch-order.read` | Potency consumption and filler adjustment (BR-24.2) |
 | POST | `/v1/production/catch-weight:validate` | `production.batch-order.read` | Catch-weight range check (BR-24.5) |
 | POST | `/v1/production/co-products:allocate` | `production.journal.post` | Co-product allocation preview (BR-24.3) |
@@ -133,6 +137,8 @@ Duties are enforced with the kernel `authz.RequireDuty`. The OPA entries are a h
 | `dev.passage.production.formula.created.v1` | a formula is created |
 | `dev.passage.production.batchorder.created.v1` | a batch order is created (PRD `batch-order.created`) |
 | `dev.passage.production.batchorder.rescaled.v1` | a batch order's size changes |
+| `dev.passage.production.batchorder.statechanged.v1` | a batch order is released, started, reported as finished or ended |
+| `dev.passage.production.coproduct.allocated.v1` | an order ends and its batch cost is split (same transaction as the end) |
 
 ## Error codes
 
@@ -156,6 +162,8 @@ Duties are enforced with the kernel `authz.RequireDuty`. The OPA entries are a h
 | `PMF-0103` | 409 | Formula code already used |
 | `PMF-0104` | 409 | Stale `version` on rescale |
 | `PMF-0105` | 409 | Order has started; only planned or released orders can be rescaled |
+| `PMF-0106` | 409 | The order's status does not allow the command (release needs planned, start released, report-finished started, end reported) |
+| `PMF-0107` | 422 | Report as finished with a non-positive main quantity, a negative line quantity, or a line that is not a co-/by-product line |
 | `idempotency_key_reuse` | 422 | Idempotency-Key reused with a different request |
 | `idempotency_key_in_flight` | 409 | A concurrent request with the same key committed first; retry for its answer |
 | `AUTH-0001` | 401 | No tenant or principal |

@@ -42,6 +42,9 @@ type fakeStore struct {
 	gotLimit   int
 	gotVersion int
 	gotSize    decimal.Decimal
+	gotCmd     string
+	gotReport  store.ReportInput
+	gotEnd     store.EndInput
 }
 
 func (f *fakeStore) CreateFormula(_ context.Context, in store.Formula, idem store.Idem) (store.Formula, bool, error) {
@@ -78,6 +81,21 @@ func (f *fakeStore) GetBatchOrder(_ context.Context, _ string) (store.BatchOrder
 
 func (f *fakeStore) RescaleBatchOrder(_ context.Context, _ string, size decimal.Decimal, version int, idem store.Idem) (store.BatchOrder, bool, error) {
 	f.gotSize, f.gotVersion, f.gotIdem = size, version, idem
+	return f.order, !f.replay, f.err
+}
+
+func (f *fakeStore) AdvanceBatchOrder(_ context.Context, _ string, cmd string, version int, idem store.Idem) (store.BatchOrder, bool, error) {
+	f.gotCmd, f.gotVersion, f.gotIdem = cmd, version, idem
+	return f.order, !f.replay, f.err
+}
+
+func (f *fakeStore) ReportBatchOrder(_ context.Context, _ string, in store.ReportInput, version int, idem store.Idem) (store.BatchOrder, bool, error) {
+	f.gotReport, f.gotVersion, f.gotIdem = in, version, idem
+	return f.order, !f.replay, f.err
+}
+
+func (f *fakeStore) EndBatchOrder(_ context.Context, _ string, in store.EndInput, version int, idem store.Idem) (store.BatchOrder, bool, error) {
+	f.gotEnd, f.gotVersion, f.gotIdem = in, version, idem
 	return f.order, !f.replay, f.err
 }
 

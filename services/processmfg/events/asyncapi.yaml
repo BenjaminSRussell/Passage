@@ -1,16 +1,15 @@
 asyncapi: 3.0.0
 info:
   title: Passage Process Manufacturing events
-  version: 0.2.0
+  version: 0.3.0
   description: >
     CloudEvents 1.0 published through the transactional outbox (Debezium
     outbox router), each in the same transaction as the change it reports.
     Event types follow dev.passage.<context>.<entity>.<verb>.v<n>; the context
     is production, as in PRD 4.24.5, and the entity drops the PRD hyphen
     (batch-order → batchorder) because the kernel rule allows none. Payloads
-    match internal/events/events.go. batch.attributes-recorded and
-    co-product.allocated arrive with the slices that persist them (see
-    NOT-IMPLEMENTED.md).
+    match internal/events/events.go. batch.attributes-recorded arrives with the
+    slice that persists batch attributes (see NOT-IMPLEMENTED.md).
 defaultContentType: application/cloudevents+json
 channels:
   formula:
@@ -25,6 +24,13 @@ channels:
         $ref: '#/components/messages/BatchOrderCreated'
       batchOrderRescaled:
         $ref: '#/components/messages/BatchOrderRescaled'
+      batchOrderStateChanged:
+        $ref: '#/components/messages/BatchOrderStateChanged'
+  coProduct:
+    address: passage.production.coproduct
+    messages:
+      coProductAllocated:
+        $ref: '#/components/messages/CoProductAllocated'
 operations:
   publishFormulaCreated:
     action: send
@@ -41,20 +47,43 @@ operations:
     channel: { $ref: '#/channels/batchOrder' }
     messages: [{ $ref: '#/channels/batchOrder/messages/batchOrderRescaled' }]
     summary: A batch order's size changed before it started (planning, scheduling consume it)
+  publishBatchOrderStateChanged:
+    action: send
+    channel: { $ref: '#/channels/batchOrder' }
+    messages: [{ $ref: '#/channels/batchOrder/messages/batchOrderStateChanged' }]
+    summary: A batch order was released, started, reported as finished or ended (planning, costing, analytics consume it)
+  publishCoProductAllocated:
+    action: send
+    channel: { $ref: '#/channels/coProduct' }
+    messages: [{ $ref: '#/channels/coProduct/messages/coProductAllocated' }]
+    summary: The batch cost of an ended order was split over its main item, co-products and by-product burdens (the ledger posts from it)
 components:
   messages:
     FormulaCreated:
       name: dev.passage.production.formula.created.v1
+      summary: A formula was created with its lines
       contentType: application/cloudevents+json
       payload: { $ref: '#/components/schemas/FormulaCreatedData' }
     BatchOrderCreated:
       name: dev.passage.production.batchorder.created.v1
+      summary: A batch order was created from a formula snapshot
       contentType: application/cloudevents+json
       payload: { $ref: '#/components/schemas/BatchOrderCreatedData' }
     BatchOrderRescaled:
       name: dev.passage.production.batchorder.rescaled.v1
+      summary: A batch order was rescaled before it started
       contentType: application/cloudevents+json
       payload: { $ref: '#/components/schemas/BatchOrderRescaledData' }
+    BatchOrderStateChanged:
+      name: dev.passage.production.batchorder.statechanged.v1
+      summary: A batch order moved to released, started, reported or ended
+      contentType: application/cloudevents+json
+      payload: { $ref: '#/components/schemas/BatchOrderStateChangedData' }
+    CoProductAllocated:
+      name: dev.passage.production.coproduct.allocated.v1
+      summary: The batch cost of an ended order was allocated; the shares add up to the batch cost exactly
+      contentType: application/cloudevents+json
+      payload: { $ref: '#/components/schemas/CoProductAllocatedData' }
   schemas:
     FormulaCreatedData:
       type: object
@@ -97,3 +126,48 @@ components:
         scaleFactor: { type: string }
         version: { type: integer }
         coProducts: { type: array, items: { $ref: '#/components/schemas/OutputLine' } }
+    ReportedLine:
+      type: object
+      required: [lineNumber, itemId, type, rafQty]
+      properties:
+        lineNumber: { type: integer }
+        itemId: { type: string, format: uuid }
+        type: { type: string, enum: [co-product, by-product] }
+        rafQty: { type: string, description: Quantity reported as finished. }
+    BatchOrderStateChangedData:
+      type: object
+      required: [orderId, orderNumber, legalEntityId, itemId, from, to, version]
+      properties:
+        orderId: { type: string, format: uuid }
+        orderNumber: { type: string }
+        legalEntityId: { type: string, format: uuid }
+        itemId: { type: string, format: uuid }
+        from: { type: string, enum: [planned, released, started, reported] }
+        to: { type: string, enum: [released, started, reported, ended] }
+        version: { type: integer, description: The order version after the change. }
+        actualQty: { type: string, description: Quantity of the order's own item reported as finished; set when to is reported. }
+        outputs: { type: array, items: { $ref: '#/components/schemas/ReportedLine' }, description: Set when to is reported. }
+        batchCost: { type: string, description: Cost the order ended with; set when to is ended. }
+        currency: { type: string, description: ISO 4217 code; set when to is ended. }
+        method: { type: string, enum: [none, manual, tca, quantity], description: Allocation method; set when to is ended. }
+    AllocationShare:
+      type: object
+      required: [role, lineNumber, itemId, rafQty, amount, percent]
+      properties:
+        role: { type: string, enum: [main, co-product, by-product-burden] }
+        lineNumber: { type: integer, description: 0 for the order's own item. }
+        itemId: { type: string, format: uuid }
+        rafQty: { type: string }
+        amount: { type: string, description: Decimal with 4 places. }
+        percent: { type: string }
+    CoProductAllocatedData:
+      type: object
+      required: [orderId, orderNumber, legalEntityId, method, currency, batchCost, shares]
+      properties:
+        orderId: { type: string, format: uuid }
+        orderNumber: { type: string }
+        legalEntityId: { type: string, format: uuid }
+        method: { type: string, enum: [none, manual, tca, quantity] }
+        currency: { type: string }
+        batchCost: { type: string }
+        shares: { type: array, items: { $ref: '#/components/schemas/AllocationShare' } }

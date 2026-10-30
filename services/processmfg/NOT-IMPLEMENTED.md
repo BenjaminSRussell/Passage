@@ -1,4 +1,4 @@
-# Not implemented in PSG-24 slices 1 to 3 (processmfg)
+# Not implemented in PSG-24 slices 1 to 3 and 9 (processmfg)
 
 Built in slice 1: formulas with their lines (FR-24.1, PMF-0001), batch orders from a formula
 snapshot scaled to the batch size (FR-24.2, BR-24.1), rescale before Started with optimistic
@@ -26,10 +26,29 @@ plan with the FR-24.18 parameters (`POST /v1/production/rework-orders:preview`).
 of slice 3 also re-implemented lean flow and kanban-rule persistence; main already held the
 reviewed slice-1 version of that, so the duplicate was dropped (see services/lean).
 
+Built in slice 9: the batch-order lifecycle and co-product cost allocation on an order
+(Deliverable 1, FR-24.4, BR-24.3, AC-24.3 and the ticket's AC2). `:release`, `:start`,
+`:report-finished` and `:end` move a planned order through released, started and reported to
+ended, each with the order version, an Idempotency-Key (a retry replays the first answer and
+writes no second event) and one `batchorder.statechanged` event in the same transaction. Report
+as finished records the main quantity and the reported quantity of each co- and by-product line
+(a line left out is reported at its plan); End takes the batch cost (platform money rounding, a
+cost with more decimals than the currency's minor unit is refused) and the allocation method,
+splits it with the BR-24.3 rule over the main item, the co-products and the by-product
+burdens, stores the shares in `batch_order_allocation` (migration 0002; the shares add up to the
+batch cost exactly, checked in the rule and again by the test against the stored rows; when the
+main item weighs nothing, as with a zero standard cost under TCA, the few ten-thousandths that
+rounding the co-products up can overshoot come off the largest co-product, so no share is
+negative), writes
+`dev.passage.production.coproduct.allocated.v1` in the same transaction, and the order then
+carries its `allocation`. Rescale is refused from Started on (PMF-0105). The order detail screen
+gains the release, start, report and end steps and the cost split. Both AsyncAPI documents
+(processmfg and lean) now pass the documentation gate with no FAIL lines.
+
 | Deliverable or AC | Status | Reason |
 |---|---|---|
-| Deliverable 1: batch order state machine (release, start, report as finished, end) and journals "as w21" | later slice of PSG-24 | slice 1 stores orders in `planned` and allows rescale while planned or released; status transitions and journals reuse the wave-21 order engine (services/production), which this slice does not call yet |
-| Deliverable 1: co-product allocation on an order (`/batch-orders/{id}/co-products:allocate`, End with journal lines, `co-product.allocated` event, CoProductLine table) | later slice of PSG-24 | the allocation rule is built and exposed as a preview (`POST /v1/production/co-products:allocate`); binding it to an order's actual cost needs the wave-21 End and the ledger posting |
+| Deliverable 1: journals "as w21" on release, start, report and end (material issue, finished-goods receipt, WIP) | handoff | the status machine and the cost split are built here; posting issues, receipts and WIP journals is the wave-21 order engine (services/production) and the ledger, which consume `batchorder.statechanged` and `coproduct.allocated`. The `closed` status (period close) is not entered by this service; the batch cost is entered by the caller at End, because actual cost comes from wave-20 inventory costing and wave-21 WIP |
+| Deliverable 1: co-product allocation on an order: standard costs and by-product rates read from item cost records, the `/co-products:allocate` command path, CoProductLine table, ledger journal lines | partial | the allocation is bound to the order and stored at End (slice 9), with standard costs, percentages and by-product rates entered by the caller; the stand-alone preview stays at `POST /v1/production/co-products:allocate`. Reading standard costs from wave-20 costing, the per-line `allocation_pct` and `by_product_cost_type` formula columns, reversing an ended order's allocation, and the journal lines for the ledger are later slices |
 | Deliverable 1: potency role on items, pickability of batches outside min/max, consumption proposal (FR-24.3, AC-24.2 end to end) | partial | `ConsumePotency` and `PotencyInRange` are built and tested against pmf-potency-20 and exposed as a calculator; slice 3 adds the potency band to the picking proposal (`domain.CheckPickable`, PMF-0005) over batches the caller passes in. Reading the batches and the item's potency role from wave-16 inventory, and proposing the potency-adjusted quantity per picked batch on a batch order, need the batch store and the order engine; `PMF_POTENCY_TOLERANCE_PCT` is not read |
 | Deliverable 2: batch attributes and dispositions (PUT `/inventory/batches/{id}/attributes`, `:disposition`, history, `batch.attributes-recorded` event, AC-24.10) | partial | slice 3 builds the value check against attribute definitions (`domain.CheckAttributes`, `POST /v1/production/batch-attributes:check`) and the disposition block at picking (AC-24.10, PMF-0016, in the picking proposal). The BatchAttribute definition and BatchAttributeValue tables, the PUT and `:disposition` commands with their history, the `batch.attributes-recorded` event and the segregation between *Maintain batch attributes* and *Maintain batch disposition* need the wave-16 InventoryBatch store, so they are later slices; date limits on date attributes are not checked |
 | Deliverable 2: shelf life at RAF, FEFO on batch orders, expired-batch override duty (FR-24.6, BR-24.10, AC-24.4 `BATCH_EXPIRED`) | partial | `ShelfDates` and `ShortestExpiry` are built and tested; slice 3 builds FEFO, the PMF-0003 exclusion and the override with duty `production.batch.consume-expired` and a reason of at least 10 characters in the picking proposal. Dates at RAF, the audit-log entry of the override reason (it is returned as `expiredOverride` for the EBR exception, not stored) and picking on a real batch order belong with the order engine and inventory batches; the shelf-advice job is not built |

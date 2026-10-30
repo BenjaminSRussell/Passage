@@ -59,6 +59,27 @@ export interface ScalePreview {
 
 export interface OrderLine extends FormulaLine {
   formulaQty: string;
+  /** Quantity reported as finished of a co- or by-product line, once the order is reported. */
+  rafQty?: string;
+}
+
+export type ShareRole = "main" | "co-product" | "by-product-burden";
+
+export interface AllocationShare {
+  role: ShareRole;
+  lineNumber: number;
+  itemId: string;
+  rafQty: string;
+  amount: string;
+  percent: string;
+}
+
+/** The cost split an ended order carries; the amounts add up to batchCost exactly. */
+export interface OrderAllocation {
+  method: AllocationMethod;
+  currency: string;
+  batchCost: string;
+  shares: AllocationShare[];
 }
 
 export interface BatchOrder {
@@ -78,7 +99,13 @@ export interface BatchOrder {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  releasedAt?: string;
+  startedAt?: string;
+  reportedAt?: string;
+  endedAt?: string;
+  actualQty?: string;
   lines?: OrderLine[];
+  allocation?: OrderAllocation;
 }
 
 export interface PotencyRequest {
@@ -245,6 +272,37 @@ export function createBatchOrder(input: { formulaId: string; batchSize: string }
 /** Changes the batch size of a planned or released order; version is the one the page read. */
 export function rescaleBatchOrder(id: string, input: { batchSize: string; version: number }, key: string = newKey()): Promise<BatchOrder> {
   return post<BatchOrder>(`/batch-orders/${encodeURIComponent(id)}:rescale`, input, key);
+}
+
+/** Release (planned) or start (released) an order; version is the one the page read. */
+export function advanceBatchOrder(id: string, command: "release" | "start", version: number, key: string = newKey()): Promise<BatchOrder> {
+  return post<BatchOrder>(`/batch-orders/${encodeURIComponent(id)}:${command}`, { version }, key);
+}
+
+export interface ReportInput {
+  version: number;
+  mainQty: string;
+  outputs: { lineNumber: number; qty: string }[];
+}
+
+/** Records the quantities reported as finished and moves a started order to reported. */
+export function reportBatchOrder(id: string, input: ReportInput, key: string = newKey()): Promise<BatchOrder> {
+  return post<BatchOrder>(`/batch-orders/${encodeURIComponent(id)}:report-finished`, input, key);
+}
+
+export interface EndInput {
+  version: number;
+  method: AllocationMethod;
+  currency: string;
+  batchCost: string;
+  main: { standardCost?: string; percent?: string };
+  coProducts: { lineNumber: number; standardCost?: string; percent?: string }[];
+  byProducts: { lineNumber: number; costType: ByProductCostType; rate: string }[];
+}
+
+/** Ends a reported order and allocates its cost (BR-24.3). */
+export function endBatchOrder(id: string, input: EndInput, key: string = newKey()): Promise<BatchOrder> {
+  return post<BatchOrder>(`/batch-orders/${encodeURIComponent(id)}:end`, input, key);
 }
 
 export function consumePotency(req: PotencyRequest): Promise<PotencyResult> {
