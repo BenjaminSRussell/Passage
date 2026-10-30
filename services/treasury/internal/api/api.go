@@ -170,7 +170,7 @@ func validTenant(w http.ResponseWriter, r *http.Request) bool {
 // scoped caller works in. Row-level security would refuse the insert anyway,
 // but as an unhandled SQLSTATE 42501 that reached the client as a 500.
 func outsideScope(w http.ResponseWriter, r *http.Request, legalEntityID string) bool {
-	if p, _ := tenant.FromContext(r.Context()); p.LegalEntityID != "" && p.LegalEntityID != legalEntityID {
+	if p, _ := tenant.FromContext(r.Context()); !tenant.InLegalEntityScope(p, legalEntityID) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "the legal entity is outside the caller's scope"))
 		return true
 	}

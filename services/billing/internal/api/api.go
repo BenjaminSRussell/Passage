@@ -303,7 +303,7 @@ func (a *API) createProposal(w http.ResponseWriter, r *http.Request) {
 		writeFields(w, r, fields)
 		return
 	}
-	if p, _ := tenant.FromContext(r.Context()); p.LegalEntityID != "" && p.LegalEntityID != req.LegalEntityID {
+	if p, _ := tenant.FromContext(r.Context()); !tenant.InLegalEntityScope(p, req.LegalEntityID) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "the caller is scoped to another legal entity"))
 		return
 	}

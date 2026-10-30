@@ -98,7 +98,7 @@ func (c *Client) Get(ctx context.Context, orderID string) (domain.PurchaseOrder,
 			slog.ErrorContext(ctx, "purchase order response unusable", "err", err, "purchaseOrderId", orderID, "correlationId", middleware.GetReqID(ctx))
 			return domain.PurchaseOrder{}, fmt.Errorf("purchase order get %s: response has no usable order", orderID)
 		}
-		if !inScope(principal.LegalEntityID, out.LegalEntityID) {
+		if !tenant.InLegalEntityScope(principal, out.LegalEntityID) {
 			return domain.PurchaseOrder{}, fmt.Errorf("purchase order get %s: %w", orderID, domain.ErrPurchaseOrderForbidden)
 		}
 		return out.toDomain(), nil
@@ -110,18 +110,6 @@ func (c *Client) Get(ctx context.Context, orderID string) (domain.PurchaseOrder,
 	err = fmt.Errorf("purchase order get %s: unexpected status %d", orderID, status)
 	slog.ErrorContext(ctx, "purchase order get rejected", "err", err, "status", status, "purchaseOrderId", orderID, "correlationId", middleware.GetReqID(ctx))
 	return domain.PurchaseOrder{}, err
-}
-
-func inScope(scope, legalEntityID string) bool {
-	if scope == "" || scope == "*" {
-		return true
-	}
-	for _, s := range strings.Split(scope, ",") {
-		if strings.TrimSpace(s) == legalEntityID {
-			return true
-		}
-	}
-	return false
 }
 
 func (o orderBody) badLine() bool {

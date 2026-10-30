@@ -15,6 +15,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/platform/outbox"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/expense/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/expense/internal/events"
 )
@@ -109,7 +110,7 @@ func (s *Store) RequestAdvance(ctx context.Context, key, hash string, in NewAdva
 	if err != nil {
 		return Advance{}, false, err
 	}
-	if !inScope(p, in.LegalEntityID) {
+	if !tenant.InLegalEntityScope(p, in.LegalEntityID) {
 		return Advance{}, false, outOfScope()
 	}
 	var out Advance

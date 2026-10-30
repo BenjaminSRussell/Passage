@@ -21,7 +21,6 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/authz"
-	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
@@ -354,18 +353,9 @@ func hashBody(operation string, v any) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// inScope rejects a write for a legal entity outside the caller's scope as
-// derived by dbx.LegalEntityScopes; an empty scope admits nothing.
 func inScope(p tenant.Principal, legalEntityID string) error {
-	scopes := dbx.LegalEntityScopes(p)
-	if scopes == "*" {
+	if tenant.InLegalEntityScope(p, legalEntityID) {
 		return nil
-	}
-	canonical, _ := ids.Canonical(legalEntityID)
-	for _, scope := range strings.Split(scopes, ",") {
-		if scope != "" && scope == canonical {
-			return nil
-		}
 	}
 	return httpx.NewProblem(http.StatusForbidden, codeScope, "legal entity "+legalEntityID+" is outside the caller's scope")
 }

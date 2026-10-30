@@ -221,6 +221,7 @@ func call(h http.Handler, method, path string, body *bytes.Buffer, contentType s
 	req := httptest.NewRequest(method, path, rd)
 	req.Header.Set(tenant.HeaderTenant, testTenant)
 	req.Header.Set(tenant.HeaderDuties, allDuties)
+	req.Header.Set(tenant.HeaderLegalEntity, testLE)
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
@@ -681,5 +682,14 @@ func TestImportStatement_CamtParseErrorReportsEntry(t *testing.T) {
 	}
 	if rec.Code != http.StatusUnprocessableEntity || p.Errors["entry"] != "1" || p.Errors["line"] != "" {
 		t.Fatalf("status %d errors %v, want entry 1", rec.Code, p.Errors)
+	}
+}
+
+func TestCreateBankAccount_RefusesCallerWithoutLegalEntityScope(t *testing.T) {
+	h, _ := newTestServer(t)
+	rec := call(h, http.MethodPost, "/v1/treasury/bank-accounts", createAccountBody(t), "application/json",
+		map[string]string{idempotencyKey: "k-noscope", tenant.HeaderLegalEntity: ""})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body %s", rec.Code, rec.Body)
 	}
 }

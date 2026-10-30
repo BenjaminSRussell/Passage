@@ -14,6 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 )
 
 // CodeDuplicateFile refuses a feed file whose hash was already imported (FR-43.13,
@@ -95,7 +96,7 @@ func (s *Store) ImportCardFeed(ctx context.Context, key, hash string, in NewImpo
 	if err != nil {
 		return Import{}, false, err
 	}
-	if !inScope(p, in.LegalEntityID) {
+	if !tenant.InLegalEntityScope(p, in.LegalEntityID) {
 		return Import{}, false, outOfScope()
 	}
 	quarantined, err := json.Marshal(nonNilSlice(in.Quarantined))

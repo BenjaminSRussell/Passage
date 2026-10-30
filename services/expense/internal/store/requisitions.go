@@ -13,6 +13,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/expense/internal/domain"
 )
 
@@ -87,7 +88,7 @@ func (s *Store) CreateRequisition(ctx context.Context, key, hash string, in NewR
 	if err != nil {
 		return Requisition{}, false, err
 	}
-	if !inScope(p, in.LegalEntityID) {
+	if !tenant.InLegalEntityScope(p, in.LegalEntityID) {
 		return Requisition{}, false, outOfScope()
 	}
 	dests, err := json.Marshal(nonNilSlice(in.Destinations))

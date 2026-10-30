@@ -73,7 +73,7 @@ func serve(t *testing.T, s store.Store, method, path string, p tenant.Principal,
 }
 
 func principal(duties ...string) tenant.Principal {
-	p := tenant.Principal{TenantID: testkit.TenantID(1), UserID: "u1", Duties: map[string]struct{}{}}
+	p := tenant.Principal{TenantID: testkit.TenantID(1), UserID: "u1", Duties: map[string]struct{}{tenant.DutyAllScope: {}}}
 	for _, d := range duties {
 		p.Duties[d] = struct{}{}
 	}
@@ -167,5 +167,20 @@ func TestCreditProfile_LegalEntityAndWireDates(t *testing.T) {
 	}
 	if rec := serve(t, f, http.MethodGet, creditProfiles, principal(dutyRead), nil); rec.Code != http.StatusOK || f.listedLE == nil || *f.listedLE != "" {
 		t.Fatalf("list across the caller's scope: %d %v", rec.Code, f.listedLE)
+	}
+}
+
+func TestLegalEntityScope_RefusesCallerWithoutScope(t *testing.T) {
+	noScope := principal(dutyRead, dutyWrite)
+	delete(noScope.Duties, tenant.DutyAllScope)
+	le, customer := ids.New(), ids.New()
+	if rec := serve(t, &fakeStore{}, http.MethodGet, creditProfiles+"/"+customer+"?legalEntityId="+le, noScope, nil); rec.Code != http.StatusForbidden {
+		t.Fatalf("credit profile get: %d", rec.Code)
+	}
+	if rec := serve(t, &fakeStore{}, http.MethodGet, creditProfiles, noScope, nil); rec.Code != http.StatusForbidden {
+		t.Fatalf("credit profile list: %d", rec.Code)
+	}
+	if rec := serveBody(t, &fakeStore{}, http.MethodPost, orders, orderBody(le), noScope, map[string]string{idempotencyKey: "k-noscope"}); rec.Code != http.StatusForbidden {
+		t.Fatalf("create order: %d %s", rec.Code, rec.Body.String())
 	}
 }

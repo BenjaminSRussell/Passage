@@ -53,8 +53,8 @@ func TestAllocateOverHTTPUnderAppRole(t *testing.T) {
 		}, http.StatusOK},
 		{"all-scope caller without an entity", map[string]string{
 			tenant.HeaderDuties: "numbering.write," + tenant.DutyAllScope, tenant.HeaderLegalEntityScopeAll: tenant.LegalEntityScopeAll,
-		}, http.StatusNotFound},
-		{"caller without an entity", nil, http.StatusNotFound},
+		}, http.StatusForbidden},
+		{"caller without an entity", nil, http.StatusForbidden},
 		{"caller scoped to another entity", map[string]string{tenant.HeaderLegalEntity: testkit.TenantID(8)}, http.StatusNotFound},
 	}
 	for _, tc := range tests {

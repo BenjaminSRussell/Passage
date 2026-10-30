@@ -28,7 +28,6 @@ type Principal struct {
 	Service       string
 }
 
-// HasDuty reports whether the principal holds the named duty.
 // LegalEntityScopeList is the one parser of the legal-entity claim: each
 // comma-separated part is trimmed and canonicalised, and a part that is not a
 // non-nil UUID is dropped. dbx sets the database scope from it and httpx checks
@@ -43,7 +42,29 @@ func LegalEntityScopeList(p Principal) []string {
 	return scopes
 }
 
+// HasDuty reports whether the principal holds the named duty.
 func (p Principal) HasDuty(duty string) bool { _, ok := p.Duties[duty]; return ok }
+
+// InLegalEntityScope reports whether the principal may act on legal entity le.
+// It fails closed like the database scope: a claim lists the entities it grants
+// (le must be a non-nil UUID among them, compared canonically), and a principal
+// with no legal-entity claim is in scope of any valid entity only when it holds
+// DutyAllScope, which Middleware keeps only on an explicit ALL-scope read.
+func InLegalEntityScope(p Principal, le string) bool {
+	id, ok := ids.Canonical(strings.TrimSpace(le))
+	if !ok || id == ids.Nil {
+		return false
+	}
+	if p.LegalEntityID == "" {
+		return p.HasDuty(DutyAllScope)
+	}
+	for _, s := range LegalEntityScopeList(p) {
+		if s == id {
+			return true
+		}
+	}
+	return false
+}
 
 type ctxKey struct{}
 
