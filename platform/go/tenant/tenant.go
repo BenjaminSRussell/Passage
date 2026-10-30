@@ -27,6 +27,20 @@ type Principal struct {
 }
 
 // HasDuty reports whether the principal holds the named duty.
+// LegalEntityScopeList is the one parser of the legal-entity claim: each
+// comma-separated part is trimmed and canonicalised, and a part that is not a
+// non-nil UUID is dropped. dbx sets the database scope from it and httpx checks
+// request entities against it, so the two never disagree.
+func LegalEntityScopeList(p Principal) []string {
+	var scopes []string
+	for _, part := range strings.Split(p.LegalEntityID, ",") {
+		if id, ok := ids.Canonical(strings.TrimSpace(part)); ok && id != ids.Nil {
+			scopes = append(scopes, id)
+		}
+	}
+	return scopes
+}
+
 func (p Principal) HasDuty(duty string) bool { _, ok := p.Duties[duty]; return ok }
 
 type ctxKey struct{}

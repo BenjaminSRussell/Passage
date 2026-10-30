@@ -3,7 +3,6 @@ package httpx
 import (
 	"context"
 	"net/http"
-	"strings"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
@@ -46,22 +45,20 @@ func OwnerLegalEntity(ctx context.Context, requested string) (string, error) {
 
 // CallerLegalEntities returns the legal entities the caller's scope claim
 // grants, empty for an all-entity caller. A claim part counts only when it is
-// already a canonical UUID, exactly as the database scope policy matches it
-// (dbx sets the claim verbatim), so this and row-level security never disagree.
+// non-nil UUID after tenant.LegalEntityScopeList, the parser dbx uses for the
+// database scope, so this and row-level security never disagree.
 func CallerLegalEntities(ctx context.Context) ([]string, error) {
 	p, ok := tenant.FromContext(ctx)
 	if !ok {
 		return nil, NewProblem(http.StatusUnauthorized, "AUTH-0001", "no principal")
 	}
 	if p.LegalEntityID == "" {
-		return nil, nil
-	}
-	var scopes []string
-	for _, part := range strings.Split(p.LegalEntityID, ",") {
-		if id, ok := ids.Canonical(part); ok && id == part && id != ids.Nil {
-			scopes = append(scopes, id)
+		if p.HasDuty(tenant.DutyAllScope) {
+			return nil, nil
 		}
+		return nil, NewProblem(http.StatusForbidden, "AUTH-0003", "the caller has no legal-entity scope")
 	}
+	scopes := tenant.LegalEntityScopeList(p)
 	if len(scopes) == 0 {
 		return nil, NewProblem(http.StatusForbidden, "AUTH-0003", "the caller's legal-entity scope holds no valid legal entity")
 	}

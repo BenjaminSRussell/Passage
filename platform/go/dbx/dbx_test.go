@@ -2,6 +2,7 @@ package dbx_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -30,6 +31,7 @@ func TestLegalEntityScopes(t *testing.T) {
 		{"entity list", principal(leA + "," + leB), leA + "," + leB},
 		{"entity wins over all-scope duty", principal(leA, tenant.DutyAllScope), leA},
 		{"wildcard entity dropped", principal("*", tenant.DutyAllScope), ""},
+		{"spaces trimmed and case folded", principal(" " + strings.ToUpper(leA) + " , " + leB), leA + "," + leB},
 		{"wildcard in list dropped", principal(leA + ",*"), leA},
 		{"all keyword dropped", principal("all", tenant.DutyAllScope), ""},
 		{"no entity, no duty fails closed", principal(""), ""},

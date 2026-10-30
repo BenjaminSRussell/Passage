@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -81,13 +80,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, migrations fs.FS) error {
 // legal entity that holds tenant.DutyAllScope, otherwise the empty list.
 func LegalEntityScopes(p tenant.Principal) string {
 	if p.LegalEntityID != "" {
-		var ids []string
-		for _, part := range strings.Split(p.LegalEntityID, ",") {
-			if id, err := uuid.Parse(strings.TrimSpace(part)); err == nil {
-				ids = append(ids, id.String())
-			}
-		}
-		return strings.Join(ids, ",")
+		return strings.Join(tenant.LegalEntityScopeList(p), ",")
 	}
 	if p.HasDuty(tenant.DutyAllScope) {
 		return "*"
