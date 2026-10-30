@@ -44,6 +44,7 @@ const (
 	dutyListing        = "sales.listing.maintain"
 	dutyOrderApprove   = "sales.order.approve"
 	dutyQuotation      = "sales.quotation.maintain"
+	dutyAllocation     = "sales.allocation.maintain"
 
 	orders          = "/v1/sales/orders"
 	creditProfiles  = "/v1/sales/credit-profiles"
@@ -58,6 +59,7 @@ const (
 	proposalRules   = "/v1/sales/product-proposal-rules"
 	proposalEval    = "/v1/sales/product-proposals:evaluate"
 	proposalRespond = "/v1/sales/product-proposals:respond"
+	allocationQuota = "/v1/sales/allocation-quotas"
 )
 
 var (
@@ -142,6 +144,10 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyListing)).Delete(proposalRules+"/{id}", a.deleteProposalRule)
 	r.With(authz.RequireDuty(dutyRead)).Post(proposalEval, a.evaluateProposals)
 	r.With(requireAny(dutyWrite, dutyIntake)).Post(proposalRespond, a.respondToProposal)
+	r.With(authz.RequireDuty(dutyAllocation)).Post(allocationQuota, a.createAllocationQuota)
+	r.With(authz.RequireDuty(dutyRead)).Get(allocationQuota, a.listAllocationQuotas)
+	r.With(authz.RequireDuty(dutyRead)).Get(allocationQuota+"/{id}", a.getAllocationQuota)
+	r.With(authz.RequireDuty(dutyAllocation)).Patch(allocationQuota+"/{id}", a.changeAllocationQuota)
 }
 
 // Metrics serves the admin port's Prometheus text.

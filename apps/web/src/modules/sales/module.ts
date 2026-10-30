@@ -1,5 +1,7 @@
 import { createElement } from "react";
 import type { PassageModule } from "../registry";
+import { AllocationQuotaDetailPage } from "./AllocationQuotaDetailPage";
+import { AllocationQuotasPage, NewAllocationQuotaPage } from "./AllocationQuotasPage";
 import { AgreementDetailPage } from "./AgreementDetailPage";
 import { AgreementsPage, NewAgreementPage } from "./AgreementsPage";
 import { AtpCheckPage } from "./AtpCheckPage";
@@ -22,7 +24,7 @@ const sales: PassageModule = {
   id: "sales",
   title: "Sales",
   description:
-    "Quote and convert to orders, enter, confirm, change and cancel sales orders, apply holds and work the release queue, maintain credit profiles, product listings, supplementary items, product proposals and sales agreements, check available-to-promise, reconcile scheduling releases and preview backorder runs.",
+    "Quote and convert to orders, enter, confirm, change and cancel sales orders, apply holds and work the release queue, maintain credit profiles, product listings, supplementary items, product proposals, allocation quotas and sales agreements, check available-to-promise, reconcile scheduling releases and preview backorder runs.",
   routes: [
     { path: "/sales", element: createElement(OrdersPage), handle: { title: "Sales orders", duty: "sales.order.read" } },
     { path: "/sales/orders", element: createElement(OrdersPage) },
@@ -47,6 +49,9 @@ const sales: PassageModule = {
     { path: "/sales/supplementary-items", element: createElement(SupplementaryRulesPage) },
     { path: "/sales/supplementary-items/new", element: createElement(NewSupplementaryRulePage), handle: { title: "New supplementary item rule" } },
     { path: "/sales/product-proposals", element: createElement(ProposalRulesPage) },
+    { path: "/sales/allocation-quotas", element: createElement(AllocationQuotasPage) },
+    { path: "/sales/allocation-quotas/new", element: createElement(NewAllocationQuotaPage), handle: { title: "New allocation quota" } },
+    { path: "/sales/allocation-quotas/:id", element: createElement(AllocationQuotaDetailPage), handle: { title: "Allocation quota" } },
     { path: "/sales/product-proposals/new", element: createElement(NewProposalRulePage), handle: { title: "New product proposal rule" } },
   ],
   nav: [
@@ -62,6 +67,7 @@ const sales: PassageModule = {
     { label: "Sales agreements", to: "/sales/agreements", duty: "sales.order.read" },
     { label: "Supplementary items", to: "/sales/supplementary-items", duty: "sales.order.read" },
     { label: "Product proposals", to: "/sales/product-proposals", duty: "sales.order.read" },
+    { label: "Allocation quotas", to: "/sales/allocation-quotas", duty: "sales.order.read" },
   ],
 };
 

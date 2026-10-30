@@ -88,8 +88,8 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | POST | `/v1/sales/orders` | `sales.order.write` or `sales.channel.intake` | `Idempotency-Key` required; `(channel, externalRef)` dedup |
 | GET | `/v1/sales/orders` | `sales.order.read` | Newest first; `status`, `customerId`, `hold` (orders with an ACTIVE hold of the type), `cursor`, `limit` |
 | GET | `/v1/sales/orders/{id}` | `sales.order.read` | ETag = version |
-| POST | `/v1/sales/orders/{id}:confirm` | `sales.order.confirm` | `If-Match`; failing credit check places a CREDIT hold |
-| POST | `/v1/sales/orders/{id}/holds/{holdId}:release` | `sales.credit.release` (CREDIT) or `sales.order.hold` (other types) | `If-Match`; releasing the CREDIT hold confirms the order when nothing else blocks it (AC-27.3) |
+| POST | `/v1/sales/orders/{id}:confirm` | `sales.order.confirm` | `If-Match`; failing credit check places a CREDIT hold; draws allocation quota per line (`SLS-0013` warning when a line moves to a later period, 422 when none can cover it) |
+| POST | `/v1/sales/orders/{id}/holds/{holdId}:release` | `sales.credit.release` (CREDIT) or `sales.order.hold` (other types) | `If-Match`; releasing the CREDIT hold confirms the order when nothing else blocks it (AC-27.3); when allocation quota cannot cover that confirmation the hold is still released and the order stays unconfirmed with an `SLS-0013` warning |
 | PATCH | `/v1/sales/orders/{id}` | `sales.order.write` | `If-Match`; header and OPEN/RESERVED line edits; new version with a field-level diff; re-promises changed quantities/dates of a CONFIRMED order and re-runs credit when its total rises; emits `order.changed` |
 | POST | `/v1/sales/orders/{id}:cancel` | `sales.order.confirm` | `If-Match`; optional `reason`; cancels OPEN/RESERVED lines, clears ACTIVE holds; emits `order.cancelled` |
 | GET | `/v1/sales/orders/{id}/versions` | `sales.order.read` | Change history, newest first, with each version's diff |
@@ -115,6 +115,8 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | POST | `/v1/sales/supplementary-items:evaluate` | `sales.order.read` | Stateless: the MANDATORY and OPTIONAL supplementary lines a parent product and quantity trigger for a customer |
 | GET / POST | `/v1/sales/product-proposal-rules` | `sales.order.read` / `sales.listing.maintain` | List (`legalEntityId`, repeated `orderedProductId`, `limit`) with each rule's accepted and declined counts; create a rule (one per ordered product, customer or all customers, and proposed product) |
 | DELETE | `/v1/sales/product-proposal-rules/{id}` | `sales.listing.maintain` | Remove a rule; recorded responses stay |
+| GET / POST | `/v1/sales/allocation-quotas` | `sales.order.read` / `sales.allocation.maintain` | Quota inquiry per product and period (`legalEntityId`, `productId`, `customerId`, `onDate`, `limit`) with quota, consumed and remaining; set a quota for a product, period and customer or every customer (`Idempotency-Key`; overlapping periods are `SLS-0035`) |
+| GET / PATCH | `/v1/sales/allocation-quotas/{id}` | `sales.order.read` / `sales.allocation.maintain` | One quota with its draw history; change the quantity under `If-Match` (below the consumed quantity is `SLS-0036`) |
 | POST | `/v1/sales/product-proposals:evaluate` | `sales.order.read` | Stateless: the products to propose for the products being committed, excluding those already on the order |
 | POST | `/v1/sales/product-proposals:respond` | `sales.order.write` or `sales.channel.intake` | `Idempotency-Key`; records an accept or decline of one proposal |
 | GET | `/readyz` | none | Postgres `SELECT` within 500 ms |
@@ -231,6 +233,7 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0008` | 422 | Agreement commitment exhausted (`AGREEMENT_EXHAUSTED`) |
 | `SLS-0011` | 422 | Product not listed for the customer (`PRODUCT_NOT_LISTED`) |
 | `SLS-0012` | 201 (warning) | Mandatory supplementary item added at commit (`warnings[]` on the order) |
+| `SLS-0013` | 422 / warning | Allocation for a line is exhausted (FR-27.16, BR-27.15): 422 on a confirm or change when no period from the requested one on has enough left; a warning in `warnings[]` when the line moved to a later period, and when a CREDIT release could not confirm the order (the hold is still released) |
 | `SLS-0014` | 200 (held) | Cumulative quantity mismatch; the scheduling release is held (`code` = `CUM_QTY_MISMATCH`) |
 | `SLS-0015` | 200 (warning) | Backorder run preview would deconfirm lines (`warningCode`) |
 | `SLS-0019` | 422 | Order not confirmable in its current state |
@@ -248,6 +251,8 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0032` | 422 | Selected quotation lines are not open (already converted, unknown or repeated) or none remain |
 | `SLS-0033` | 409 | A supplementary item rule for the parent, customer (or all customers) and item exists |
 | `SLS-0034` | 409 | A product proposal rule for the ordered product, customer (or all customers) and proposed product exists |
+| `SLS-0035` | 409 | An allocation quota for the product and customer (or all customers) already covers part of the period |
+| `SLS-0036` | 409 | Allocation quota set below the consumed quantity |
 | `SLS-0100` | 404 | Order not found |
 | `SLS-0101` | 404 | Hold not found |
 | `SLS-0102` | 404 | Credit profile not found |
@@ -256,6 +261,7 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0105` | 404 | Quotation not found |
 | `SLS-0106` | 404 | Supplementary item rule not found |
 | `SLS-0107` | 404 | Product proposal rule not found (also on `:respond` for a rule outside the legal entity) |
+| `SLS-0108` | 404 | Allocation quota not found |
 | `idempotency_key_reuse` | 422 | Same `Idempotency-Key` with a different body (kernel) |
 | `COM-0001` | 400 | Request failed validation; field errors in `errors` |
 | `AUTH-0001` | 401 | Missing or malformed tenant |

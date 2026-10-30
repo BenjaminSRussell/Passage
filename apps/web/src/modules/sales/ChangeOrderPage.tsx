@@ -204,11 +204,12 @@ export function ChangeOrderPage() {
       const newHold = res.value.holds.some((h) => h.holdType === "CREDIT" && h.status === "ACTIVE") && !order.holds.some((h) => h.holdType === "CREDIT" && h.status === "ACTIVE");
       setLatest(res);
       setValues(null);
-      setOutcome(
-        newHold
-          ? { tone: "warning", text: `Saved as version ${res.value.version}. The higher total failed the credit check, so a credit hold was placed.` }
-          : { tone: "success", text: `Saved as version ${res.value.version}.` },
-      );
+      const moved = (res.value.warnings ?? []).filter((w) => w.code === "SLS-0013").map((w) => w.message);
+      const notes = [
+        newHold ? "The higher total failed the credit check, so a credit hold was placed." : "",
+        ...moved,
+      ].filter(Boolean);
+      setOutcome({ tone: notes.length > 0 ? "warning" : "success", text: [`Saved as version ${res.value.version}.`, ...notes].join(" ") });
     } catch (error) {
       setFailure(describeProblem(error));
     } finally {

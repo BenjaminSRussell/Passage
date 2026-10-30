@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -174,6 +175,40 @@ func netOf(lines []Line) decimal.Decimal {
 	return total
 }
 
+// withAllocationMoves makes the version diff record the confirmed ship date a
+// line really ends up with when allocation moved it to a later period: the
+// re-promise to the requested date that ApplyChange recorded is replaced by
+// the moved date, and an entry that no longer changes anything is dropped.
+func withAllocationMoves(diff []domain.FieldChange, before map[int]Line, moved map[int]string) []domain.FieldChange {
+	if len(moved) == 0 {
+		return diff
+	}
+	out := make([]domain.FieldChange, 0, len(diff)+len(moved))
+	seen := map[int]bool{}
+	for _, c := range diff {
+		if date, ok := moved[c.LineNo]; ok && c.Field == "confirmedShipDate" {
+			seen[c.LineNo] = true
+			c.New = date
+			if c.Old == c.New {
+				continue
+			}
+		}
+		out = append(out, c)
+	}
+	nos := make([]int, 0, len(moved))
+	for no := range moved {
+		nos = append(nos, no)
+	}
+	sort.Ints(nos)
+	for _, no := range nos {
+		old := dayOrEmpty(before[no].ConfirmedShipDate)
+		if !seen[no] && old != moved[no] {
+			out = append(out, domain.FieldChange{LineNo: no, Field: "confirmedShipDate", Old: old, New: moved[no]})
+		}
+	}
+	return out
+}
+
 func sameDay(a, b *string) bool {
 	if a == nil || b == nil {
 		return a == b
@@ -225,8 +260,12 @@ func (s *Postgres) ChangeOrder(ctx context.Context, id string, version int, req 
 			out = o
 			return nil
 		}
+		reallocate := map[int]bool{}
 		for _, l := range o.Lines {
 			b := before[l.LineNo]
+			if !l.Quantity.Equal(b.Quantity) || l.RequestedShipDate != b.RequestedShipDate || l.LineStatus != b.LineStatus {
+				reallocate[l.LineNo] = true
+			}
 			if l.Quantity.Equal(b.Quantity) && l.UnitPrice.Equal(b.UnitPrice) && l.DiscPct.Equal(b.DiscPct) &&
 				l.RequestedShipDate == b.RequestedShipDate && sameDay(l.ConfirmedShipDate, b.ConfirmedShipDate) && l.LineStatus == b.LineStatus {
 				continue
@@ -238,6 +277,20 @@ func (s *Postgres) ChangeOrder(ctx context.Context, id string, version int, req 
 				l.RequestedShipDate, l.ConfirmedShipDate, l.LineStatus); err != nil {
 				return err
 			}
+		}
+		var notices []Notice
+		if o.Status == domain.OrderConfirmed && len(reallocate) > 0 {
+			// A confirmed line that changed quantity or date, or was cancelled or
+			// reopened, gives back what it drew and draws again (BR-27.15).
+			if err := returnAllocationTx(ctx, tx, p.TenantID, o, reallocate, now); err != nil {
+				return err
+			}
+			alloc, err := allocateOrderTx(ctx, tx, p.TenantID, o, reallocate)
+			if err != nil {
+				return err
+			}
+			notices = alloc.Notices
+			diff = withAllocationMoves(diff, before, alloc.Moved)
 		}
 		next := o.Version + 1
 		if _, err := tx.Exec(ctx, `update sales_order set requested_ship_date = $3::date, net_total = $4::numeric, version = $5, updated_at = $6
@@ -264,6 +317,7 @@ func (s *Postgres) ChangeOrder(ctx context.Context, id string, version int, req 
 			}
 		}
 		out, err = loadOrder(ctx, tx, p.TenantID, id, false)
+		out.Warnings = notices
 		return err
 	})
 	return out, err
@@ -302,6 +356,9 @@ func (s *Postgres) CancelOrder(ctx context.Context, id string, version int, reas
 		}
 		if _, err := tx.Exec(ctx, `update sales_order_line set line_status = 'CANCELLED'
 			where tenant_id = $1 and order_id = $2 and line_status in ('OPEN', 'RESERVED')`, p.TenantID, id); err != nil {
+			return err
+		}
+		if err := returnAllocationTx(ctx, tx, p.TenantID, o, nil, now); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `update order_hold set status = 'CLEARED' where tenant_id = $1 and order_id = $2 and status = 'ACTIVE'`, p.TenantID, id); err != nil {

@@ -17,12 +17,48 @@ var (
 	OrderCancelled       = events.Type(Context, "order", "cancelled", 1)
 	AgreementReleased    = events.Type(Context, "agreement", "released", 1)
 	QuotationConverted   = events.Type(Context, "quotation", "converted", 1)
+	AllocationQuotaSet   = events.Type(Context, "allocationquota", "created", 1)
+	AllocationQuotaMoved = events.Type(Context, "allocationquota", "changed", 1)
+	AllocationConsumed   = events.Type(Context, "allocation", "consumed", 1)
+	AllocationReturned   = events.Type(Context, "allocation", "returned", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
 	return []string{OrderConfirmed, OrderHoldApplied, OrderHoldReleased, CreditCheckEvaluated, OrderChanged, OrderCancelled, AgreementReleased,
-		QuotationConverted}
+		QuotationConverted, AllocationQuotaSet, AllocationQuotaMoved, AllocationConsumed, AllocationReturned}
+}
+
+// AllocationQuotaData is the data member of allocationquota.created.v1 and
+// allocationquota.changed.v1 (FR-27.16). previous_qty is empty on created.
+type AllocationQuotaData struct {
+	QuotaID     string  `json:"quota_id"`
+	ProductID   string  `json:"product_id"`
+	CustomerID  *string `json:"customer_id,omitempty"`
+	PeriodStart string  `json:"period_start"`
+	PeriodEnd   string  `json:"period_end"`
+	QuotaQty    string  `json:"quota_qty"`
+	PreviousQty string  `json:"previous_qty,omitempty"`
+	Consumed    string  `json:"consumed_qty"`
+	Actor       string  `json:"actor"`
+	Version     int     `json:"version"`
+}
+
+// AllocationData is the data member of allocation.consumed.v1 and
+// allocation.returned.v1: one order line drew quantity from a quota at
+// confirmation, or gave it back (BR-27.15). confirmed_ship_date is set on
+// consumed and is the first day of the period when the line moved to a later
+// one (source ALLOCATION).
+type AllocationData struct {
+	QuotaID           string `json:"quota_id"`
+	OrderID           string `json:"order_id"`
+	LineID            string `json:"line_id"`
+	ProductID         string `json:"product_id"`
+	Quantity          string `json:"quantity"`
+	Consumed          string `json:"consumed_qty"`
+	Remaining         string `json:"remaining_qty"`
+	ConfirmedShipDate string `json:"confirmed_ship_date,omitempty"`
+	Source            string `json:"source,omitempty"`
 }
 
 // QuotationConvertedData is the data member of quotation.converted.v1: the

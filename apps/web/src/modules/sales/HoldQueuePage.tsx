@@ -46,7 +46,7 @@ export function HoldQueuePage() {
   const [draft, setDraft] = useState<{ legalEntityId: string; holdType: HoldType | "" }>({ legalEntityId: "", holdType: "CREDIT" });
   const [filter, setFilter] = useState<HoldQueueFilter>({ holdType: "CREDIT" });
   const [busy, setBusy] = useState<string | null>(null);
-  const [outcome, setOutcome] = useState<{ tone: "success"; text: ReactNode } | { tone: "danger"; problem: Problem } | null>(null);
+  const [outcome, setOutcome] = useState<{ tone: "success" | "warning"; text: ReactNode } | { tone: "danger"; problem: Problem } | null>(null);
   const invalid = draft.legalEntityId.trim() && !UUID.test(draft.legalEntityId.trim()) ? "Enter a legal entity UUID." : undefined;
   const state = useLoad((signal) => listHolds(filter, signal), JSON.stringify(filter));
 
@@ -56,11 +56,14 @@ export function HoldQueuePage() {
     try {
       const res = await releaseHold(item.orderId, item.holdId, etagOf(item.orderVersion));
       const o = res.value;
+      const allocation = (o.warnings ?? []).filter((w) => w.code === "SLS-0013").map((w) => w.message);
       setOutcome({
-        tone: "success",
+        tone: allocation.length > 0 ? "warning" : "success",
         text: (
           <>
-            {sentence(item.holdType)} hold on <Link to={`/sales/orders/${o.id}`}>{o.orderNumber}</Link> released{o.confirmed ? " and the order confirmed" : ""}.
+            {sentence(item.holdType)} hold on <Link to={`/sales/orders/${o.id}`}>{o.orderNumber}</Link> released
+            {o.confirmed ? " and the order confirmed" : allocation.length > 0 ? ", but the order is not confirmed" : ""}.
+            {allocation.length > 0 ? ` ${allocation.join(" ")}` : null}
           </>
         ),
       });
@@ -134,8 +137,8 @@ export function HoldQueuePage() {
           {outcome.problem.message} ({outcome.problem.code})
         </Alert>
       ) : null}
-      <Alert tone="success" live="status">
-        {outcome?.tone === "success" ? outcome.text : null}
+      <Alert tone={outcome?.tone === "warning" ? "warning" : "success"} live="status">
+        {outcome && outcome.tone !== "danger" ? outcome.text : null}
       </Alert>
       {state.error ? (
         <Alert tone="danger" title="Could not load the release queue" live="alert" action={<Button size="sm" onClick={state.reload}>Try again</Button>}>

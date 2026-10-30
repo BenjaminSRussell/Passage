@@ -5,7 +5,7 @@ info:
   description: >-
     Sales orders, ATP promise checks, credit profiles and order holds, change
     management, listings, agreements, quotations, the hold release queue and
-    supplementary item rules and product proposals (wave 27, slices 1 to 6). Every operation carries x-passage-duty. Errors are RFC 9457
+    supplementary item rules and product proposals (wave 27, slices 1 to 7). Every operation carries x-passage-duty. Errors are RFC 9457
     application/problem+json with a stable code listed in the service README.
 servers:
   - url: https://api.{env}.passage.dev
@@ -117,6 +117,11 @@ paths:
         parent's quantity recomputes it, cancels it when the parent drops below
         the rule's base quantity, and a change of the parent's dates moves it
         with the parent. Those follow-on changes are part of the version's diff.
+        On a CONFIRMED order, a line whose quantity or requested date changes,
+        or that is cancelled or reopened with its parent, returns its allocation
+        quota draw and draws again (BR-27.15); a line moved to a later period
+        gets an SLS-0013 entry in warnings and the moved date in the diff, and a
+        line no period can cover refuses the change with 422 SLS-0013.
       operationId: changeOrder
       x-passage-duty: sales.order.write
       parameters:
@@ -138,7 +143,11 @@ paths:
         "403": {$ref: "#/components/responses/Problem"}
         "404": {$ref: "#/components/responses/Problem"}
         "412": {$ref: "#/components/responses/Problem"}
-        "422": {$ref: "#/components/responses/Problem"}
+        "422":
+          description: SLS-0023 the order cannot be changed; SLS-0024 the change is invalid; SLS-0013 allocation quota cannot cover a changed line in any period
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
         "428": {$ref: "#/components/responses/Problem"}
   /v1/sales/orders/{id}:confirm:
     post:
@@ -150,7 +159,9 @@ paths:
         - $ref: "#/components/parameters/IfMatch"
       responses:
         "200":
-          description: outcome; confirmed=false means the credit check failed and a CREDIT hold is now ACTIVE (creditCheck lists every rule)
+          description: >-
+            outcome; confirmed=false means the credit check failed and a CREDIT hold is now ACTIVE (creditCheck lists every rule).
+            A line moved to a later period because its allocation quota was used up has an SLS-0013 entry in order.warnings (FR-27.16).
           headers:
             ETag: {$ref: "#/components/headers/ETag"}
           content:
@@ -159,7 +170,7 @@ paths:
         "404": {$ref: "#/components/responses/Problem"}
         "412": {$ref: "#/components/responses/Problem"}
         "422":
-          description: SLS-0019 the order is not DRAFT or OPEN; SLS-0005 an ACTIVE CREDIT hold blocks confirmation; SLS-0021 an ACTIVE FRAUD hold blocks it
+          description: SLS-0019 the order is not DRAFT or OPEN; SLS-0005 an ACTIVE CREDIT hold blocks confirmation; SLS-0021 an ACTIVE FRAUD hold blocks it; SLS-0013 allocation is exhausted for a line in every later period
           content:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
@@ -170,7 +181,9 @@ paths:
         Release an ACTIVE hold. CREDIT holds need sales.credit.release, other types
         sales.order.hold; the user who applied the hold may not release it. Releasing
         the CREDIT hold of an unconfirmed order confirms it when no other hold blocks
-        confirmation (confirmed=true).
+        confirmation (confirmed=true). When allocation quota cannot cover a line of
+        that confirmation, the hold is still released, the order stays unconfirmed
+        (confirmed=false) and order.warnings carries the SLS-0013 refusal.
       operationId: releaseHold
       x-passage-duty: sales.credit.release | sales.order.hold
       parameters:
@@ -894,6 +907,126 @@ paths:
                     items: {$ref: "#/components/schemas/SupplementaryLine"}
         "400": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
+  /v1/sales/allocation-quotas:
+    get:
+      summary: Allocation quota inquiry per product and period - quota, consumed and remaining (FR-27.16)
+      operationId: listAllocationQuotas
+      x-passage-duty: sales.order.read
+      parameters:
+        - $ref: "#/components/parameters/LegalEntityQuery"
+        - {name: productId, in: query, schema: {type: string, format: uuid}}
+        - {name: customerId, in: query, schema: {type: string, format: uuid}}
+        - {name: onDate, in: query, description: keeps quotas whose period contains this day, schema: {type: string, format: date}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        "200":
+          description: quotas ordered by product and period, latest period first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/AllocationQuota"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+    post:
+      summary: >-
+        Set a product allocation quota for a period, for one customer or every customer (FR-27.16, SAP OVZJ).
+        Confirmation of an order consumes it in requested-period order (BR-27.15).
+      operationId: createAllocationQuota
+      x-passage-duty: sales.allocation.maintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/AllocationQuotaRequest"}
+      responses:
+        "201":
+          description: the stored quota with consumed quantity 0; ETag carries the version
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AllocationQuota"}
+        "200":
+          description: a repeat of the Idempotency-Key with the same body returns the stored quota
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AllocationQuota"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "409":
+          description: SLS-0035 a quota for this product and customer already covers part of the period
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "422":
+          description: the Idempotency-Key was used with a different request body
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+  /v1/sales/allocation-quotas/{id}:
+    get:
+      summary: One allocation quota with its draw history, newest first
+      operationId: getAllocationQuota
+      x-passage-duty: sales.order.read
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: the quota with its consumptions
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AllocationQuota"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+    patch:
+      summary: Change a quota quantity under If-Match; below the consumed quantity is refused (BR-27.15)
+      operationId: changeAllocationQuota
+      x-passage-duty: sales.allocation.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [quotaQty]
+              properties:
+                quotaQty: {type: string, description: new quota quantity as a decimal string, greater than 0, below 10^14, at most 6 places, example: "120"}
+      responses:
+        "200":
+          description: the quota after the change
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AllocationQuota"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409":
+          description: SLS-0036 the quantity is below what is consumed
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "412":
+          description: SLS-0006 the If-Match version is stale (every draw and return also moves the version)
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
   /v1/sales/product-proposal-rules:
     get:
       summary: Product proposal rules in the caller's scope with their recorded accept and decline counts (FR-27.21)
@@ -1065,6 +1198,47 @@ components:
         application/problem+json:
           schema: {$ref: "#/components/schemas/Problem"}
   schemas:
+    AllocationQuotaRequest:
+      type: object
+      required: [legalEntityId, productId, periodStart, periodEnd, quotaQty]
+      properties:
+        legalEntityId: {type: string, format: uuid}
+        productId: {type: string, format: uuid}
+        customerId: {type: string, format: uuid, description: absent means every customer of the legal entity}
+        periodStart: {type: string, format: date}
+        periodEnd: {type: string, format: date, description: inclusive; not before periodStart}
+        quotaQty: {type: string, description: decimal string greater than 0 and below 10^14 with at most 6 places, example: "100"}
+    AllocationQuota:
+      type: object
+      required: [id, legalEntityId, productId, periodStart, periodEnd, quotaQty, consumedQty, remainingQty, version, createdBy, createdAt, updatedAt]
+      properties:
+        id: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        productId: {type: string, format: uuid}
+        customerId: {type: string, format: uuid}
+        periodStart: {type: string, format: date}
+        periodEnd: {type: string, format: date}
+        quotaQty: {type: string}
+        consumedQty: {type: string}
+        remainingQty: {type: string}
+        version: {type: integer}
+        createdBy: {type: string}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+        consumptions:
+          type: array
+          description: draw history, newest first; only on a single read
+          items:
+            type: object
+            required: [id, orderId, lineId, lineNo, quantity, consumedAt]
+            properties:
+              id: {type: string, format: uuid}
+              orderId: {type: string, format: uuid}
+              lineId: {type: string, format: uuid}
+              lineNo: {type: integer}
+              quantity: {type: string}
+              consumedAt: {type: string, format: date-time}
+              returnedAt: {type: string, format: date-time, description: set when the order or line was cancelled or changed}
     Problem:
       type: object
       required: [type, title, status]
@@ -1261,7 +1435,9 @@ components:
           items: {$ref: "#/components/schemas/ListingOverride"}
         warnings:
           type: array
-          description: set only on the result of a create (and its replay), a quotation conversion or an agreement release
+          description: >-
+            set only on the result of a create (and its replay), a quotation conversion or an agreement release (SLS-0012),
+            and of a confirm, a CREDIT release or a change of a confirmed order that allocation quota affected (SLS-0013)
           items: {$ref: "#/components/schemas/Notice"}
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}

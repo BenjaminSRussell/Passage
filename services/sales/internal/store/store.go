@@ -245,6 +245,10 @@ type Store interface {
 	ListProposalRules(ctx context.Context, f ProposalRuleFilter) ([]domain.ProposalRule, error)
 	DeleteProposalRule(ctx context.Context, id string) error
 	RecordProposalResponse(ctx context.Context, in NewProposalResponse) (ProposalResponse, bool, error)
+	CreateAllocationQuota(ctx context.Context, in NewAllocationQuota) (AllocationQuota, bool, error)
+	ListAllocationQuotas(ctx context.Context, f AllocationFilter) ([]AllocationQuota, error)
+	GetAllocationQuota(ctx context.Context, id string) (AllocationQuota, error)
+	ChangeAllocationQuota(ctx context.Context, id string, version int, qty decimal.Decimal, actor string, now time.Time) (AllocationQuota, error)
 	Ping(ctx context.Context) error
 }
 
@@ -605,11 +609,16 @@ func applyCreditHoldTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order,
 }
 
 // confirmOrderTx confirms every line at its requested ship date (delivery date
-// control NONE until the ATP projection exists), moves the order to CONFIRMED
+// control NONE until the ATP projection exists) unless allocation quota moves
+// it to a later period (FR-27.16), moves the order to CONFIRMED
 // and writes order.confirmed in the same transaction.
 func confirmOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order) (Order, error) {
 	if _, err := tx.Exec(ctx, `update sales_order_line set confirmed_ship_date = requested_ship_date
 		where tenant_id = $1 and order_id = $2 and line_status <> 'CANCELLED'`, tenantID, o.ID); err != nil {
+		return Order{}, err
+	}
+	alloc, err := allocateOrderTx(ctx, tx, tenantID, o, nil)
+	if err != nil {
 		return Order{}, err
 	}
 	if err := setOrderState(ctx, tx, tenantID, o.ID, domain.OrderConfirmed); err != nil {
@@ -619,6 +628,7 @@ func confirmOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order) (O
 	if err != nil {
 		return Order{}, err
 	}
+	confirmed.Warnings = alloc.Notices
 	lines := make([]salesevents.ConfirmedLine, 0, len(confirmed.Lines))
 	for _, l := range confirmed.Lines {
 		if l.ConfirmedShipDate == nil {
@@ -682,9 +692,32 @@ func (s *Postgres) ReleaseHold(ctx context.Context, orderID, holdID string, vers
 			out = ConfirmResult{Order: released}
 			return nil
 		}
-		confirmed, err := confirmOrderTx(ctx, tx, p.TenantID, released)
+		// The credit decision stands even when allocation quota cannot cover the
+		// order: the confirmation runs under a savepoint, and an SLS-0013 refusal
+		// rolls back only the confirmation, so the hold is released and the order
+		// stays unconfirmed with the refusal as a warning (FR-27.16).
+		sp, err := tx.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		confirmed, err := confirmOrderTx(ctx, sp, p.TenantID, released)
+		var refused *httpx.Problem
+		if errors.As(err, &refused) && refused.Code == CodeAllocationExhausted {
+			if err := sp.Rollback(ctx); err != nil {
+				return err
+			}
+			released.Warnings = []Notice{{Code: CodeAllocationExhausted, Message: refused.Detail}}
+			out = ConfirmResult{Order: released}
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if err := sp.Commit(ctx); err != nil {
+			return err
+		}
 		out = ConfirmResult{Order: confirmed, Confirmed: true}
-		return err
+		return nil
 	})
 	return out, err
 }

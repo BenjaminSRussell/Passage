@@ -917,3 +917,71 @@ export async function evaluateProposals(input: ProposalEvaluationInput, signal?:
 export function respondToProposal(input: ProposalResponseInput, key: string = newKey()): Promise<ProposalResponse> {
   return json<ProposalResponse>("/product-proposals:respond", { method: "POST", body: JSON.stringify(input), headers: { "Idempotency-Key": key } });
 }
+
+export interface AllocationQuotaInput {
+  legalEntityId: string;
+  productId: string;
+  /** Absent means every customer of the legal entity. */
+  customerId?: string;
+  periodStart: string;
+  periodEnd: string;
+  quotaQty: Decimal;
+}
+
+export interface AllocationConsumption {
+  id: string;
+  orderId: string;
+  lineId: string;
+  lineNo: number;
+  quantity: Decimal;
+  consumedAt: string;
+  /** Set when the order or line was cancelled or changed. */
+  returnedAt?: string;
+}
+
+export interface AllocationQuota extends Omit<AllocationQuotaInput, "quotaQty"> {
+  id: string;
+  quotaQty: Decimal;
+  consumedQty: Decimal;
+  remainingQty: Decimal;
+  version: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  /** Present on a single read, newest first. */
+  consumptions?: AllocationConsumption[];
+}
+
+export interface AllocationFilter {
+  legalEntityId?: string;
+  productId?: string;
+  customerId?: string;
+  onDate?: string;
+}
+
+/** The quota inquiry per product and period (FR-27.16). */
+export async function listAllocationQuotas(filter: AllocationFilter = {}, signal?: AbortSignal): Promise<AllocationQuota[]> {
+  const body = await json<{ items?: AllocationQuota[] }>(
+    `/allocation-quotas${query({ legalEntityId: filter.legalEntityId, productId: filter.productId, customerId: filter.customerId, onDate: filter.onDate, limit: 200 })}`,
+    {},
+    signal,
+  );
+  return body.items ?? [];
+}
+
+export function getAllocationQuota(id: string, signal?: AbortSignal): Promise<Versioned<AllocationQuota>> {
+  return versioned<AllocationQuota>(`/allocation-quotas/${encodeURIComponent(id)}`, {}, signal);
+}
+
+export function createAllocationQuota(input: AllocationQuotaInput, key: string = newKey()): Promise<Versioned<AllocationQuota>> {
+  return versioned<AllocationQuota>("/allocation-quotas", { method: "POST", body: JSON.stringify(input), headers: { "Idempotency-Key": key } });
+}
+
+/** Sets a new quota quantity at the given ETag; below the consumed quantity is refused (BR-27.15). */
+export function changeAllocationQuota(id: string, etag: string, quotaQty: Decimal): Promise<Versioned<AllocationQuota>> {
+  return versioned<AllocationQuota>(`/allocation-quotas/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ quotaQty }),
+    headers: { "If-Match": etag },
+  });
+}

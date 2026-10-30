@@ -4,7 +4,7 @@ info:
   version: 1.0.0
   description: >-
     CloudEvents 1.0 events published by the sales service through the outbox
-    (wave 27, slices 1 to 4). Types follow dev.passage.<context>.<entity>.<verb>.v<n>.
+    (wave 27, slices 1 to 7). Types follow dev.passage.<context>.<entity>.<verb>.v<n>.
     Topic passage.sales.<entity> is relayed by Debezium's outbox router.
 defaultContentType: application/cloudevents+json
 servers:
@@ -52,6 +52,26 @@ channels:
     messages:
       quotationConverted:
         $ref: "#/components/messages/QuotationConverted"
+  allocationQuotaCreated:
+    address: passage.sales.allocationquota
+    messages:
+      allocationQuotaCreated:
+        $ref: "#/components/messages/AllocationQuotaCreated"
+  allocationQuotaChanged:
+    address: passage.sales.allocationquota
+    messages:
+      allocationQuotaChanged:
+        $ref: "#/components/messages/AllocationQuotaChanged"
+  allocationConsumed:
+    address: passage.sales.allocation
+    messages:
+      allocationConsumed:
+        $ref: "#/components/messages/AllocationConsumed"
+  allocationReturned:
+    address: passage.sales.allocation
+    messages:
+      allocationReturned:
+        $ref: "#/components/messages/AllocationReturned"
 operations:
   publishQuotationConverted:
     action: send
@@ -105,10 +125,39 @@ operations:
       collections.
     messages:
       - {$ref: "#/channels/creditCheckEvaluated/messages/creditCheckEvaluated"}
+  publishAllocationQuotaCreated:
+    action: send
+    channel: {$ref: "#/channels/allocationQuotaCreated"}
+    summary: An allocation quota was set for a product, customer scope and period (FR-27.16). Consumers - planning, analytics.
+    messages:
+      - {$ref: "#/channels/allocationQuotaCreated/messages/allocationQuotaCreated"}
+  publishAllocationQuotaChanged:
+    action: send
+    channel: {$ref: "#/channels/allocationQuotaChanged"}
+    summary: An allocation quota quantity changed; never below the consumed quantity (BR-27.15). Consumers - planning, analytics.
+    messages:
+      - {$ref: "#/channels/allocationQuotaChanged/messages/allocationQuotaChanged"}
+  publishAllocationConsumed:
+    action: send
+    channel: {$ref: "#/channels/allocationConsumed"}
+    summary: >-
+      An order line drew quota at confirmation (a confirm, a CREDIT release that confirms, or a change of a confirmed line), in that
+      transaction (BR-27.15). Keyed by the quota id, so one quota's draws and returns arrive in order. Consumers - planning, analytics.
+    messages:
+      - {$ref: "#/channels/allocationConsumed/messages/allocationConsumed"}
+  publishAllocationReturned:
+    action: send
+    channel: {$ref: "#/channels/allocationReturned"}
+    summary: >-
+      An order line gave quota back to the period it drew from because its order or line was cancelled or changed (BR-27.15).
+      Keyed by the quota id. Consumers - planning, analytics.
+    messages:
+      - {$ref: "#/channels/allocationReturned/messages/allocationReturned"}
 components:
   messages:
     QuotationConverted:
       name: dev.passage.sales.quotation.converted.v1
+      title: Quotation converted to a sales order
       contentType: application/cloudevents+json
       headers:
         $ref: "#/components/schemas/CloudEventHeaders"
@@ -116,6 +165,7 @@ components:
         $ref: "#/components/schemas/QuotationConvertedData"
     OrderConfirmed:
       name: dev.passage.sales.order.confirmed.v1
+      title: Sales order confirmed
       contentType: application/cloudevents+json
       headers:
         $ref: "#/components/schemas/CloudEventHeaders"
@@ -123,6 +173,7 @@ components:
         $ref: "#/components/schemas/OrderConfirmedData"
     OrderHoldApplied:
       name: dev.passage.sales.orderhold.applied.v1
+      title: Order hold applied
       contentType: application/cloudevents+json
       headers:
         $ref: "#/components/schemas/CloudEventHeaders"
@@ -130,6 +181,7 @@ components:
         $ref: "#/components/schemas/OrderHoldData"
     OrderHoldReleased:
       name: dev.passage.sales.orderhold.released.v1
+      title: Order hold released
       contentType: application/cloudevents+json
       headers:
         $ref: "#/components/schemas/CloudEventHeaders"
@@ -137,6 +189,7 @@ components:
         $ref: "#/components/schemas/OrderHoldData"
     CreditCheckEvaluated:
       name: dev.passage.sales.creditcheck.evaluated.v1
+      title: Credit check evaluated
       contentType: application/cloudevents+json
       headers:
         $ref: "#/components/schemas/CloudEventHeaders"
@@ -144,6 +197,7 @@ components:
         $ref: "#/components/schemas/CreditCheckData"
     AgreementReleased:
       name: dev.passage.sales.agreement.released.v1
+      title: Sales agreement released into an order
       contentType: application/cloudevents+json
       headers:
         $ref: "#/components/schemas/CloudEventHeaders"
@@ -151,6 +205,7 @@ components:
         $ref: "#/components/schemas/AgreementReleasedData"
     OrderChanged:
       name: dev.passage.sales.order.changed.v1
+      title: Sales order changed
       contentType: application/cloudevents+json
       headers:
         $ref: "#/components/schemas/CloudEventHeaders"
@@ -158,12 +213,72 @@ components:
         $ref: "#/components/schemas/OrderChangedData"
     OrderCancelled:
       name: dev.passage.sales.order.cancelled.v1
+      title: Sales order cancelled
       contentType: application/cloudevents+json
       headers:
         $ref: "#/components/schemas/CloudEventHeaders"
       payload:
         $ref: "#/components/schemas/OrderCancelledData"
+    AllocationQuotaCreated:
+      name: dev.passage.sales.allocationquota.created.v1
+      title: Allocation quota created
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/AllocationQuotaData"
+    AllocationQuotaChanged:
+      name: dev.passage.sales.allocationquota.changed.v1
+      title: Allocation quota changed
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/AllocationQuotaData"
+    AllocationConsumed:
+      name: dev.passage.sales.allocation.consumed.v1
+      title: Allocation quota consumed by an order line
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/AllocationData"
+    AllocationReturned:
+      name: dev.passage.sales.allocation.returned.v1
+      title: Allocation quota returned by an order line
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/AllocationData"
   schemas:
+    AllocationQuotaData:
+      type: object
+      required: [quota_id, product_id, period_start, period_end, quota_qty, consumed_qty, actor, version]
+      properties:
+        quota_id: {type: string, format: uuid}
+        product_id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid, description: absent when the quota applies to every customer of the legal entity}
+        period_start: {type: string, format: date}
+        period_end: {type: string, format: date}
+        quota_qty: {type: string, description: quota quantity as a decimal string}
+        previous_qty: {type: string, description: quota quantity before a change; absent on created}
+        consumed_qty: {type: string}
+        actor: {type: string}
+        version: {type: integer, description: quota version after the change}
+    AllocationData:
+      type: object
+      required: [quota_id, order_id, line_id, product_id, quantity, consumed_qty, remaining_qty]
+      properties:
+        quota_id: {type: string, format: uuid}
+        order_id: {type: string, format: uuid}
+        line_id: {type: string, format: uuid}
+        product_id: {type: string, format: uuid}
+        quantity: {type: string, description: quantity drawn or returned}
+        consumed_qty: {type: string, description: quota consumed after the change}
+        remaining_qty: {type: string}
+        confirmed_ship_date: {type: string, format: date, description: on consumed, the date the line is confirmed for}
+        source: {type: string, enum: [ALLOCATION], description: on consumed, present when the line moved to a later period because the requested one was exhausted}
     CloudEventHeaders:
       type: object
       required: [specversion, id, source, type, tenantid, sequence, dataschema]

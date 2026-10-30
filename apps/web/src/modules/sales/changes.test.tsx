@@ -111,6 +111,17 @@ describe("buildChange", () => {
 });
 
 describe("Change sales order page", () => {
+  it("reports a line that allocation quota moved to a later period", async () => {
+    const warnings = [{ code: "SLS-0013", lineNo: 1, message: "Allocation for product x in the period of 2027-03-04 is exhausted; line 1 is promised for 2027-04-01 (source ALLOCATION)" }];
+    handler = (_url, init) =>
+      init.method === "PATCH" ? { status: 200, body: { ...order({ version: 4 }), warnings }, etag: '"4"' } : { status: 200, body: order(), etag: '"3"' };
+    renderAt(`/sales/orders/${ORDER_ID}/change`);
+    const line1 = await screen.findByRole("group", { name: "Line 1" });
+    fireEvent.change(within(line1).getByLabelText("Quantity"), { target: { value: "8" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByText(/Saved as version 4\. Allocation for product x .* promised for 2027-04-01 \(source ALLOCATION\)/)).toBeInTheDocument();
+  });
+
   it("shows the diff, saves with If-Match and reports the new version", async () => {
     handler = (_url, init) =>
       init.method === "PATCH" ? { status: 200, body: order({ version: 4, netTotal: "87" }), etag: '"4"' } : { status: 200, body: order(), etag: '"3"' };
