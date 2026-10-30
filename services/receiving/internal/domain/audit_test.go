@@ -59,8 +59,11 @@ func TestSampler_Boundaries(t *testing.T) {
 		}
 	}
 	var none *domain.Sampler
-	if none.Blocks("x", dec("100")) {
-		t.Fatal("a missing sampler must never block")
+	if !none.Blocks("x", dec("0.01")) {
+		t.Fatal("a missing sampler with a positive rate must fail closed and block")
+	}
+	if none.Blocks("x", dec("0")) {
+		t.Fatal("a zero rate blocks nothing, sampler or not")
 	}
 }
 

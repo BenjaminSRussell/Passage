@@ -52,6 +52,8 @@ type tenantData struct {
 	settlements map[string]store.Settlement
 	ersVendors  map[string]bool
 	auditRates  map[string]decimal.Decimal
+
+	policyHistory []PolicyChange
 }
 
 type pendingRow struct {

@@ -2,6 +2,7 @@ package memstore_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -297,6 +298,29 @@ var auditCases = []struct {
 		}
 		if _, err := reject(b, principal(2), held, "bob", "x"); !errors.Is(err, store.ErrInvoiceNotFound) {
 			t.Fatalf("other tenant err=%v", err)
+		}
+	}},
+	{"ids are matched in canonical form, and rejected invoice numbers are counted for the ERS suffix", func(t *testing.T, b backend) {
+		p := principal(1)
+		held := blockedInvoice(t, b, p, "alice")
+		upper := held
+		upper.ID = strings.ToUpper(held.ID)
+		if n, err := b.st.RejectedInvoiceCount(ctxOf(p), vendorID, "ERS-RCV-1"); err != nil || n != 0 {
+			t.Fatalf("count before %d err=%v", n, err)
+		}
+		if _, err := reject(b, p, upper, "bob", "dup"); err != nil {
+			t.Fatalf("reject by upper-case id: %v", err)
+		}
+		for number, want := range map[string]int{"ERS-RCV-1": 1, "ers-rcv-1": 1, "ERS-RCV-2": 0, "ERS-RCV": 0} {
+			if n, err := b.st.RejectedInvoiceCount(ctxOf(p), vendorID, number); err != nil || n != want {
+				t.Fatalf("count of %s = %d err=%v, want %d", number, n, err, want)
+			}
+		}
+		if n, _ := b.st.RejectedInvoiceCount(ctxOf(p), poID, "ERS-RCV-1"); n != 0 {
+			t.Fatalf("another vendor's count %d", n)
+		}
+		if n, _ := b.st.RejectedInvoiceCount(ctxOf(principal(2)), vendorID, "ERS-RCV-1"); n != 0 {
+			t.Fatalf("another tenant's count %d", n)
 		}
 	}},
 }

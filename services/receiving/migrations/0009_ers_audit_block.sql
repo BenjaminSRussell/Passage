@@ -55,8 +55,8 @@ CREATE TABLE IF NOT EXISTS receiving_audit_policy_history (
 
 CREATE OR REPLACE FUNCTION receiving_invoice_status_guard() RETURNS trigger AS $fn$
 BEGIN
-  IF NEW.status IS DISTINCT FROM OLD.status AND NOT (OLD.status = 'AUDIT_BLOCKED' AND NEW.status IN ('POSTED', 'AUDIT_REJECTED')) THEN
-    RAISE EXCEPTION 'invoice status cannot change from % to %', OLD.status, NEW.status USING ERRCODE = 'check_violation';
+  IF OLD.status <> 'AUDIT_BLOCKED' THEN
+    RAISE EXCEPTION 'invoice in status % cannot be updated', OLD.status USING ERRCODE = 'check_violation';
   END IF;
   RETURN NEW;
 END

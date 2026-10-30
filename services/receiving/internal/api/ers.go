@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -134,8 +135,11 @@ func matchPOLine(po domain.PurchaseOrder, productID string) (domain.PurchaseOrde
 	return domain.PurchaseOrderLine{}, skipManyPOLines
 }
 
-func (r *ersRun) invoiceFor(rec store.Receipt, po domain.PurchaseOrder) (store.Invoice, string) {
+func (r *ersRun) invoiceFor(rec store.Receipt, po domain.PurchaseOrder, rejected int) (store.Invoice, string) {
 	number := "ERS-" + rec.Number
+	if rejected > 0 {
+		number = fmt.Sprintf("%s-R%d", number, rejected)
+	}
 	in := store.Invoice{
 		ID: stableID(r.principal.TenantID, rec.VendorID, strings.ToLower(number)), LegalEntityID: rec.LegalEntityID, VendorID: rec.VendorID, InvoiceNumber: number,
 		InvoiceDate: r.base.postingDate, PostingDate: r.base.postingDate, Currency: rec.Currency, LedgerID: r.base.ledgerID, FiscalPeriodID: r.base.fiscalPeriodID,
@@ -208,7 +212,11 @@ func (r *ersRun) receipt(receiptID string) error {
 		r.skip(ref, skipOtherVendor)
 		return nil
 	}
-	in, reason := r.invoiceFor(rec, order.po)
+	rejected, err := r.api.store.RejectedInvoiceCount(r.ctx, rec.VendorID, "ERS-"+rec.Number)
+	if err != nil {
+		return err
+	}
+	in, reason := r.invoiceFor(rec, order.po, rejected)
 	if reason != "" {
 		r.skip(ref, reason)
 		return nil

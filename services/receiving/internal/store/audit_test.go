@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
@@ -54,7 +55,7 @@ func holdFunc(t *testing.T, db settlementDB, in store.Invoice, blocked bool) sto
 	}
 }
 
-func TestMigration0008_AuditColumnsPolicyTablesIsolationAndGrants(t *testing.T) {
+func TestMigration0009_AuditColumnsPolicyTablesIsolationAndGrants(t *testing.T) {
 	db := seedInvoice(t)
 	one := db.one
 	other := tenant.Principal{TenantID: one.TenantID, LegalEntityID: testkit.TenantID(8)}
@@ -97,6 +98,18 @@ func TestMigration0008_AuditColumnsPolicyTablesIsolationAndGrants(t *testing.T) 
 	}
 	if got := scalar(t, db, `select status || '/' || released_by || '/' || ledger_entry_id from receiving_vendor_invoice where invoice_number = 'HELD-2'`); got != "POSTED/bob/e9" {
 		t.Errorf("released invoice columns: %q", got)
+	}
+	for name, sql := range map[string]string{
+		"a rewritten ledger entry on a released invoice": `update receiving_vendor_invoice set ledger_entry_id = 'forged' where invoice_number = 'HELD-2'`,
+		"a rewritten releaser":                           `update receiving_vendor_invoice set released_by = 'mallory' where invoice_number = 'HELD-2'`,
+		"a rewritten rejection reason":                   `update receiving_vendor_invoice set reject_reason = 'forged' where invoice_number = 'HELD-1'`,
+		"a rewritten rejecter":                           `update receiving_vendor_invoice set rejected_by = 'mallory' where invoice_number = 'HELD-1'`,
+		"a no-op update of a decided invoice":            `update receiving_vendor_invoice set status = status where invoice_number = 'HELD-1'`,
+		"a rewritten ledger entry on a posted invoice":   `update receiving_vendor_invoice set ledger_entry_id = 'forged' where invoice_number = 'INV-1'`,
+	} {
+		if err := db.run(one, sql); err == nil {
+			t.Errorf("%s must be refused once the invoice is decided", name)
+		}
 	}
 	for _, table := range []string{"receiving_ers_vendor_history", "receiving_audit_policy_history"} {
 		cols := "(tenant_id, legal_entity_id, vendor_id, old_enabled, new_enabled, changed_by) values ($1, $2, $3, false, true, 'a')"
@@ -328,13 +341,18 @@ func TestRejectAndReleaseRacingForOneBlockedInvoiceDecideOnce(t *testing.T) {
 	}
 	const racers = 4
 	var wg sync.WaitGroup
+	var mu sync.Mutex
+	ranRelease := 0
 	results := make([]error, racers)
 	for i := range racers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			if i%2 == 0 {
-				_, results[i] = st.ReleaseInvoice(ctx, held.ID, db.one.LegalEntityID, "bob", func(inv store.Invoice) (store.InvoiceOutcome, error) {
+				_, results[i] = st.ReleaseInvoice(ctx, strings.ToUpper(held.ID), db.one.LegalEntityID, "bob", func(inv store.Invoice) (store.InvoiceOutcome, error) {
+					mu.Lock()
+					ranRelease++
+					mu.Unlock()
 					return store.InvoiceOutcome{LedgerEntryID: "released", Total: inv.Total, Event: event(t, db.one, "vendorinvoice", "posted")}, nil
 				})
 				return
@@ -360,6 +378,9 @@ func TestRejectAndReleaseRacingForOneBlockedInvoiceDecideOnce(t *testing.T) {
 	status := scalar(t, db, `select status from receiving_vendor_invoice where invoice_number = 'ERS-RCV-7'`)
 	grir := scalar(t, db, `select invoiced_qty::text || '/' || status from receiving_grir_open_item`)
 	line := scalar(t, db, `select invoiced_qty::text from receiving_receipt_line`)
+	if (status == "POSTED") != (ranRelease == 1) || ranRelease > 1 {
+		t.Fatalf("status %s but the ledger-posting function ran %d times: it may run only when the release won", status, ranRelease)
+	}
 	switch status {
 	case "POSTED":
 		if grir != "5.000000/CLEARED" {
@@ -417,5 +438,17 @@ func TestPolicyChangesWriteAppendOnlyHistoryWithTheOldValue(t *testing.T) {
 	}
 	if olds[0] != "0" || olds[1] != "5" {
 		t.Errorf("old values seen by the event builder %v", olds)
+	}
+}
+
+func TestDecisionOnAnUnknownOrMalformedInvoiceIdIsNotFound(t *testing.T) {
+	db := seedInvoice(t)
+	st := store.New(db.pool)
+	ctx := tenant.With(context.Background(), db.one)
+	if _, err := st.ReleaseInvoice(ctx, "not-a-uuid", db.one.LegalEntityID, "bob", nil); !errors.Is(err, store.ErrInvoiceNotFound) {
+		t.Fatalf("release err %v", err)
+	}
+	if _, err := st.RejectInvoice(ctx, "not-a-uuid", db.one.LegalEntityID, "bob", "x", nil); !errors.Is(err, store.ErrInvoiceNotFound) {
+		t.Fatalf("reject err %v", err)
 	}
 }

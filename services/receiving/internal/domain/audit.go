@@ -51,8 +51,11 @@ func ValidSampleRate(ratePct decimal.Decimal) bool {
 }
 
 func (s *Sampler) Blocks(invoiceID string, ratePct decimal.Decimal) bool {
-	if s == nil || !ratePct.IsPositive() {
+	if !ratePct.IsPositive() {
 		return false
+	}
+	if s == nil {
+		return true
 	}
 	mac := hmac.New(sha256.New, s.seed)
 	mac.Write([]byte(strings.ToLower(invoiceID)))

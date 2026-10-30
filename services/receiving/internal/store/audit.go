@@ -16,6 +16,26 @@ import (
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 )
 
+func notBlockedIfNoRow(err error, id string) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return &domain.Error{Code: domain.CodeNotAuditBlocked, Detail: fmt.Sprintf("invoice %s is not blocked for audit", id)}
+	}
+	return err
+}
+
+func (s *Postgres) RejectedInvoiceCount(ctx context.Context, vendorID, number string) (int, error) {
+	tenantID, err := tenantOf(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*) FROM receiving_vendor_invoice WHERE tenant_id = $1 AND vendor_id = $2 AND status = 'AUDIT_REJECTED'
+			AND (lower(invoice_number) = lower($3) OR left(lower(invoice_number), length($3) + 2) = lower($3) || '-r')`, tenantID, vendorID, number).Scan(&n)
+	})
+	return n, err
+}
+
 func sameActor(a, b string) bool {
 	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
 	ca, okA := ids.Canonical(a)
@@ -45,13 +65,17 @@ func (s *Postgres) ReleaseInvoice(ctx context.Context, id, legalEntityID, by str
 	if err != nil {
 		return Invoice{}, err
 	}
+	id, ok := ids.Canonical(id)
+	if !ok {
+		return Invoice{}, ErrInvoiceNotFound
+	}
 	inv := Invoice{ID: id}
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, tenantID+"|release|"+id); err != nil {
 			return err
 		}
 		err := tx.QueryRow(ctx, `SELECT legal_entity_id::text, vendor_id::text, invoice_number, invoice_date, posting_date, currency, ledger_id::text, fiscal_period_id::text,
-			ledger_entry_id, total, created_at, source, status, posted_by FROM receiving_vendor_invoice WHERE tenant_id = $1 AND id = $2`, tenantID, id).
+			ledger_entry_id, total, created_at, source, status, posted_by FROM receiving_vendor_invoice WHERE tenant_id = $1 AND id = $2 FOR UPDATE`, tenantID, id).
 			Scan(&inv.LegalEntityID, &inv.VendorID, &inv.InvoiceNumber, &inv.InvoiceDate, &inv.PostingDate, &inv.Currency, &inv.LedgerID, &inv.FiscalPeriodID,
 				&inv.LedgerEntryID, &inv.Total, &inv.CreatedAt, &inv.Source, &inv.Status, &inv.PostedBy)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -73,7 +97,7 @@ func (s *Postgres) ReleaseInvoice(ctx context.Context, id, legalEntityID, by str
 		inv.LedgerEntryID, inv.Status, inv.ReleasedBy = outcome.LedgerEntryID, domain.InvoiceStatusPosted, by
 		if err := tx.QueryRow(ctx, `UPDATE receiving_vendor_invoice SET ledger_entry_id = $3, status = 'POSTED', released_by = $4, released_at = now()
 			WHERE tenant_id = $1 AND id = $2 AND status = 'AUDIT_BLOCKED' RETURNING released_at`, tenantID, id, inv.LedgerEntryID, by).Scan(&inv.ReleasedAt); err != nil {
-			return err
+			return notBlockedIfNoRow(err, id)
 		}
 		if err := markPostingsDone(ctx, tx, tenantID, id, outcome.LedgerEntryID != ""); err != nil {
 			return err
@@ -105,13 +129,17 @@ func (s *Postgres) RejectInvoice(ctx context.Context, id, legalEntityID, by, rea
 	if err != nil {
 		return Invoice{}, err
 	}
+	id, ok := ids.Canonical(id)
+	if !ok {
+		return Invoice{}, ErrInvoiceNotFound
+	}
 	inv := Invoice{ID: id}
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, tenantID+"|release|"+id); err != nil {
 			return err
 		}
 		err := tx.QueryRow(ctx, `SELECT legal_entity_id::text, vendor_id::text, invoice_number, invoice_date, posting_date, currency, ledger_id::text, fiscal_period_id::text,
-			ledger_entry_id, total, created_at, source, status, posted_by FROM receiving_vendor_invoice WHERE tenant_id = $1 AND id = $2`, tenantID, id).
+			ledger_entry_id, total, created_at, source, status, posted_by FROM receiving_vendor_invoice WHERE tenant_id = $1 AND id = $2 FOR UPDATE`, tenantID, id).
 			Scan(&inv.LegalEntityID, &inv.VendorID, &inv.InvoiceNumber, &inv.InvoiceDate, &inv.PostingDate, &inv.Currency, &inv.LedgerID, &inv.FiscalPeriodID,
 				&inv.LedgerEntryID, &inv.Total, &inv.CreatedAt, &inv.Source, &inv.Status, &inv.PostedBy)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -154,7 +182,7 @@ func (s *Postgres) RejectInvoice(ctx context.Context, id, legalEntityID, by, rea
 		inv.Status, inv.RejectedBy, inv.RejectReason = domain.InvoiceStatusAuditRejected, by, reason
 		if err := tx.QueryRow(ctx, `UPDATE receiving_vendor_invoice SET status = 'AUDIT_REJECTED', rejected_by = $3, rejected_at = now(), reject_reason = $4
 			WHERE tenant_id = $1 AND id = $2 AND status = 'AUDIT_BLOCKED' RETURNING rejected_at`, tenantID, id, by, reason).Scan(&inv.RejectedAt); err != nil {
-			return err
+			return notBlockedIfNoRow(err, id)
 		}
 		return outbox.Enqueue(ctx, tx, invoiceAggregate, id, evt)
 	})

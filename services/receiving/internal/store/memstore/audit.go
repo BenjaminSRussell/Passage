@@ -3,20 +3,25 @@ package memstore
 import (
 	"context"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
 )
 
 func (s *Store) ReleaseInvoice(ctx context.Context, id, legalEntityID, by string, fn store.ReleaseFunc) (out store.Invoice, err error) {
 	err = s.with(ctx, func(t *tenantData) error {
-		inv, ok := t.invoiceDocs[id]
-		if !ok {
+		canonical, valid := ids.Canonical(id)
+		inv, ok := t.invoiceDocs[canonical]
+		if !valid || !ok {
 			return store.ErrInvoiceNotFound
 		}
+		id = canonical
 		if err := store.CheckRelease(inv, legalEntityID, by); err != nil {
 			return err
 		}
@@ -42,10 +47,12 @@ func policyKey(legalEntityID, subject string) string { return legalEntityID + "|
 
 func (s *Store) RejectInvoice(ctx context.Context, id, legalEntityID, by, reason string, fn store.RejectFunc) (out store.Invoice, err error) {
 	err = s.with(ctx, func(t *tenantData) error {
-		inv, ok := t.invoiceDocs[id]
-		if !ok {
+		canonical, valid := ids.Canonical(id)
+		inv, ok := t.invoiceDocs[canonical]
+		if !valid || !ok {
 			return store.ErrInvoiceNotFound
 		}
+		id = canonical
 		if err := store.CheckRelease(inv, legalEntityID, by); err != nil {
 			return err
 		}
@@ -75,12 +82,14 @@ func (s *Store) RejectInvoice(ctx context.Context, id, legalEntityID, by, reason
 	return out, err
 }
 
-func (s *Store) SetErsVendor(ctx context.Context, legalEntityID, vendorID string, enabled bool, _ string, fn store.ErsVendorFunc) error {
+func (s *Store) SetErsVendor(ctx context.Context, legalEntityID, vendorID string, enabled bool, by string, fn store.ErsVendorFunc) error {
 	return s.with(ctx, func(t *tenantData) error {
-		evt, err := fn(t.ersVendors[policyKey(legalEntityID, vendorID)])
+		old := t.ersVendors[policyKey(legalEntityID, vendorID)]
+		evt, err := fn(old)
 		if err != nil {
 			return err
 		}
+		t.policyHistory = append(t.policyHistory, PolicyChange{Kind: "ers", LegalEntityID: legalEntityID, Subject: vendorID, Old: strconv.FormatBool(old), New: strconv.FormatBool(enabled), By: by})
 		t.ersVendors[policyKey(legalEntityID, vendorID)] = enabled
 		s.events = append(s.events, evt)
 		return nil
@@ -95,12 +104,14 @@ func (s *Store) ErsVendor(ctx context.Context, legalEntityID, vendorID string) (
 	return enabled, err
 }
 
-func (s *Store) SetAuditRate(ctx context.Context, legalEntityID string, ratePct decimal.Decimal, _ string, fn store.AuditRateFunc) error {
+func (s *Store) SetAuditRate(ctx context.Context, legalEntityID string, ratePct decimal.Decimal, by string, fn store.AuditRateFunc) error {
 	return s.with(ctx, func(t *tenantData) error {
-		evt, err := fn(t.auditRates[legalEntityID])
+		old := t.auditRates[legalEntityID]
+		evt, err := fn(old)
 		if err != nil {
 			return err
 		}
+		t.policyHistory = append(t.policyHistory, PolicyChange{Kind: "audit", LegalEntityID: legalEntityID, Old: old.String(), New: ratePct.String(), By: by})
 		t.auditRates[legalEntityID] = ratePct
 		s.events = append(s.events, evt)
 		return nil
@@ -113,4 +124,30 @@ func (s *Store) AuditRate(ctx context.Context, legalEntityID string) (rate decim
 		return nil
 	})
 	return rate, err
+}
+
+func (s *Store) RejectedInvoiceCount(ctx context.Context, vendorID, number string) (n int, err error) {
+	err = s.with(ctx, func(t *tenantData) error {
+		base := strings.ToLower(number)
+		for _, inv := range t.invoiceDocs {
+			name := strings.ToLower(inv.InvoiceNumber)
+			if inv.Status == domain.InvoiceStatusAuditRejected && inv.VendorID == vendorID && (name == base || strings.HasPrefix(name, base+"-r")) {
+				n++
+			}
+		}
+		return nil
+	})
+	return n, err
+}
+
+type PolicyChange struct {
+	Kind, LegalEntityID, Subject, Old, New, By string
+}
+
+func (s *Store) PolicyHistory(ctx context.Context) (out []PolicyChange, err error) {
+	err = s.with(ctx, func(t *tenantData) error {
+		out = slices.Clone(t.policyHistory)
+		return nil
+	})
+	return out, err
 }

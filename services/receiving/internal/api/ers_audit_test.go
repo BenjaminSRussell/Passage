@@ -929,3 +929,41 @@ func TestErs_ReceiptWithSomeLinesInvoicedIsSkippedWholeAndKeepsItsNumber(t *test
 		t.Fatalf("second run %+v", again)
 	}
 }
+
+func TestErs_RejectedSelfBilledInvoiceFreesTheReceiptForANewNumberedRun(t *testing.T) {
+	rg := ersRig("2.60", nil, testSampler("seed-one-0123456789"))
+	rg.enableErs(t, true)
+	rg.sampleRate(t, "100")
+	rg.posted(t, "PS-1", 10, 4)
+	first := rg.ersRun(t, http.StatusOK)
+	if len(first.Settled) != 1 || first.Settled[0].Status != "AUDIT_BLOCKED" {
+		t.Fatalf("first run %+v", first)
+	}
+	base := first.Settled[0].InvoiceNumber
+	if code, body := rg.reject(first.Settled[0].InvoiceID, "auditor", "wrong price"); code != http.StatusOK {
+		t.Fatalf("reject %d %s", code, body)
+	}
+	rg.sampleRate(t, "0")
+
+	second := rg.ersRun(t, http.StatusOK)
+
+	if len(second.Settled) != 1 || second.Settled[0].InvoiceNumber != base+"-R1" || second.Settled[0].Status != "POSTED" || second.Settled[0].Total != "10.40" || len(rg.ledger.Entries) != 2 {
+		t.Fatalf("second run %+v ledger entries %d: want %s-R1 posted once", second, len(rg.ledger.Entries), base)
+	}
+	if third := rg.ersRun(t, http.StatusOK); len(third.Settled) != 0 || len(rg.ledger.Entries) != 2 {
+		t.Fatalf("third run %+v", third)
+	}
+}
+
+func TestAuditRelease_AcceptsTheInvoiceIdInAnyCase(t *testing.T) {
+	rg := ersRig("2.60", nil, testSampler("seed-one-0123456789"))
+	rg.sampleRate(t, "100")
+	r := rg.posted(t, "PS-1", 10, 4)
+	held := rg.manualInvoice(t, "INV-1", r.ID, 4, "alice").invoice(t, http.StatusCreated)
+
+	code, body := rg.release(strings.ToUpper(held.ID), "auditor")
+
+	if code != http.StatusOK || !strings.Contains(body, `"status":"POSTED"`) {
+		t.Fatalf("release %d %s", code, body)
+	}
+}
