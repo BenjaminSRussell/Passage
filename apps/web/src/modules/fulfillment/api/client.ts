@@ -25,6 +25,8 @@ export interface ShipmentLine {
   pickConfirmed: boolean;
   /** Pick zone given at release; null when none. */
   zone: string | null;
+  /** Reason given for the latest short pick; null or absent when none. */
+  shortPickReason?: ShortPickReason | null;
 }
 
 export interface Container {
@@ -228,6 +230,8 @@ export interface BackorderRow {
   open: boolean;
   /** The line's first short pick. */
   shortPickedAt: string;
+  /** Reason given for the latest short pick, if any. */
+  reason: ShortPickReason | null;
 }
 
 export interface BackorderPage {
@@ -359,8 +363,33 @@ export interface WaveSummary {
   createdAt: string;
 }
 
+/** Reason codes of a short pick. */
+export type ShortPickReason = "OUT_OF_STOCK" | "DAMAGED" | "NOT_FOUND" | "QUALITY_HOLD" | "OTHER";
+
+export interface WaveLine {
+  shipmentLineId: string;
+  shipmentId: string;
+  shipmentNumber: string;
+  productId: string;
+  unit: string;
+  zone: string | null;
+  qtyPlanned: string;
+  qtyPicked: string;
+  pickConfirmed: boolean;
+  shortPickReason: ShortPickReason | null;
+}
+
 export interface Wave extends WaveSummary {
   shipments: WaveShipment[];
+  /** The wave's lines with their pick state (wave detail only). */
+  lines?: WaveLine[];
+}
+
+export interface WavePickResult {
+  waveId: string;
+  linesConfirmed: number;
+  shortLines: number;
+  shipments: { id: string; shipmentNumber: string; status: ShipmentStatus; version: number; linesConfirmed: number }[];
 }
 
 export interface WavesResult<T> {
@@ -477,7 +506,7 @@ export function getShipment(id: string, signal?: AbortSignal): Promise<Shipment>
   return send<Shipment>(shipmentPath(id), {}, signal);
 }
 
-export function confirmPick(id: string, version: number, picks: { shipmentLineId: string; picked: string }[], key: string): Promise<Shipment> {
+export function confirmPick(id: string, version: number, picks: { shipmentLineId: string; picked: string; reason?: ShortPickReason }[], key: string): Promise<Shipment> {
   return command<Shipment>(`${shipmentPath(id)}:confirm-pick`, { picks }, key, version);
 }
 
@@ -541,6 +570,18 @@ export function listWaves(filter: { warehouseId?: string; limit?: number } = {},
 
 export function getWave(id: string, signal?: AbortSignal): Promise<Wave> {
   return send<Wave>(`/waves/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/**
+ * Confirms the picks of a whole wave in one command (FR-28.13). With pickRest,
+ * every line not listed and not yet confirmed is picked in full. Reuse one key per submit.
+ */
+export function confirmWavePick(
+  id: string,
+  input: { picks: { shipmentLineId: string; picked: string; reason?: ShortPickReason }[]; pickRest: boolean },
+  key: string,
+): Promise<WavePickResult> {
+  return command<WavePickResult>(`/waves/${encodeURIComponent(id)}:confirm-pick`, input, key);
 }
 
 export function listTracking(id: string, signal?: AbortSignal): Promise<TrackingEvent[]> {

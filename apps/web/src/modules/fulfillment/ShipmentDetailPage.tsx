@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, buttonClassName, Card, DataTable, PageHeader, Skeleton, type DataTableColumn } from "../../shell/ui";
 import { getShipment, listPackingSlips, type AutoPackResult, type Container, type PackingSlipSummary, type Problem, type Shipment, type ShipmentLine } from "./api/client";
 import { ShipmentStatusBadge, SlipStatusBadge } from "./badges";
-import { dash, formatDate, formatDateTime, formatMoney, shortId, subtractDecimal } from "./format";
+import { dash, formatDate, formatDateTime, formatMoney, shortId, SHORT_PICK_REASONS, subtractDecimal } from "./format";
 import styles from "./pages.module.css";
 import { AutoPackForm, PackForm, PickForm, PostForm } from "./ShipmentActions";
 import { canCancelShipment, canCloseRemainder, CancelShipmentPanel, CloseRemainderPanel, canUnpack, LabelButton, LabelPanel, TrackingCard, UnpackButton } from "./ShipmentTracking";
@@ -25,6 +25,7 @@ const lineColumns: DataTableColumn<ShipmentLine>[] = [
   { key: "remaining", header: "To ship", align: "end", render: (row) => subtractDecimal(row.qtyPlanned, row.qtyShipped) },
   { key: "qtyClosed", header: "Closed", align: "end", render: (row) => row.qtyClosed ?? "0" },
   { key: "zone", header: "Zone", render: (row) => row.zone ?? dash },
+  { key: "shortPickReason", header: "Short reason", render: (row) => (row.shortPickReason ? (SHORT_PICK_REASONS[row.shortPickReason] ?? row.shortPickReason) : dash) },
 ];
 
 function containerColumns(lines: ShipmentLine[], label: (row: Container) => ReactNode): DataTableColumn<Container>[] {

@@ -382,3 +382,42 @@ func TestPostPackingSlip_PassesAsnFlag(t *testing.T) {
 		t.Fatalf("status = %d emitASN = %v body = %s", rec.Code, fs.lastPost.EmitASN, rec.Body.String())
 	}
 }
+
+func (f *fakeStore) ConfirmWavePick(_ context.Context, waveID string, picks []store.PickInput, pickRest bool, idem store.Idem) (store.WavePickResult, error) {
+	f.lastIdem = idem
+	f.picks = picks
+	return store.WavePickResult{WaveID: waveID, LinesConfirmed: len(picks), Shipments: []store.WavePickShipment{}}, nil
+}
+
+func TestConfirmWavePick_ValidationKeyAndDuty(t *testing.T) {
+	fs := &fakeStore{}
+	h := newServer(t, fs)
+	path := "/v1/fulfillment/waves/" + ids.New() + ":confirm-pick"
+	line := ids.New()
+	good := `{"picks":[{"shipmentLineId":"` + line + `","picked":"0","reason":"OUT_OF_STOCK"}],"pickRest":true}`
+	if rec := do(t, h, http.MethodPost, path, good, nil); rec.Code != http.StatusBadRequest {
+		t.Fatalf("no key: status = %d, want 400", rec.Code)
+	}
+	for name, body := range map[string]string{
+		"empty":      `{}`,
+		"bad reason": `{"picks":[{"shipmentLineId":"` + line + `","picked":"0","reason":"LOST"}]}`,
+		"bad qty":    `{"picks":[{"shipmentLineId":"` + line + `","picked":"-1"}]}`,
+		"duplicate":  `{"picks":[{"shipmentLineId":"` + line + `","picked":"1"},{"shipmentLineId":"` + line + `","picked":"1"}]}`,
+		"bad id":     `{"picks":[{"shipmentLineId":"x","picked":"1"}]}`,
+	} {
+		if rec := do(t, h, http.MethodPost, path, body, map[string]string{"Idempotency-Key": "w-" + name}); rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s: status = %d, want 400 (%s)", name, rec.Code, rec.Body.String())
+		}
+	}
+	rec := do(t, h, http.MethodPost, path, good, map[string]string{"Idempotency-Key": "w-ok"})
+	if rec.Code != http.StatusOK || len(fs.picks) != 1 || fs.picks[0].Reason != "OUT_OF_STOCK" || fs.lastIdem.Key != "w-ok" {
+		t.Fatalf("status = %d picks = %+v body = %s", rec.Code, fs.picks, rec.Body.String())
+	}
+	if rec := do(t, h, http.MethodPost, "/v1/fulfillment/waves/nope:confirm-pick", good, map[string]string{"Idempotency-Key": "w-404"}); rec.Code != http.StatusNotFound {
+		t.Fatalf("bad wave id: status = %d, want 404", rec.Code)
+	}
+	rec = do(t, h, http.MethodPost, path, good, map[string]string{"Idempotency-Key": "w-403", "X-Passage-Duties": "WarehouseView"})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("viewer: status = %d, want 403", rec.Code)
+	}
+}

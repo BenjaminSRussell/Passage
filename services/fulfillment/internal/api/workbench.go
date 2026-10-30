@@ -41,6 +41,7 @@ func (a *API) routesWorkbench(r chi.Router) {
 	r.With(authz.RequireDuty("WarehouseRelease")).Post("/v1/fulfillment/waves", a.createWaves)
 	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/waves", a.listWaves)
 	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/waves/{id}", a.getWave)
+	r.With(authz.RequireDuty("WarehousePick")).Post("/v1/fulfillment/waves/{id}:confirm-pick", a.confirmWavePick)
 	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/shipments/{id}/tracking", a.listTracking)
 	r.With(authz.RequireDuty("WarehouseShip")).Post("/v1/fulfillment/shipments/{id}/tracking", a.recordTracking)
 	r.With(authz.RequireDuty("WarehouseView")).Get("/v1/fulfillment/shipments/{id}/containers/{cid}/label", a.containerLabel)
@@ -417,4 +418,40 @@ func plural(n int, noun string) string {
 		return "1 " + noun
 	}
 	return strconv.Itoa(n) + " " + noun + "s"
+}
+
+type confirmWavePickRequest struct {
+	Picks []pickDTO `json:"picks"`
+	// PickRest picks every other unconfirmed line of the wave in full.
+	PickRest bool `json:"pickRest"`
+}
+
+// confirmWavePick answers POST /v1/fulfillment/waves/{id}:confirm-pick: the
+// picks of a whole wave in one command, optionally picking the rest in full.
+func (a *API) confirmWavePick(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeWaveNotFound, "wave not found"))
+		return
+	}
+	var req confirmWavePickRequest
+	_, idem, err := command(r, &req)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	if len(req.Picks) == 0 && !req.PickRest {
+		fail(w, r, "picks", "at least one pick is required unless pickRest is true")
+		return
+	}
+	picks, ok := pickInputs(w, r, req.Picks)
+	if !ok {
+		return
+	}
+	res, err := a.store.ConfirmWavePick(r.Context(), id, picks, req.PickRest, idem)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, res)
 }

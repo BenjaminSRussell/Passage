@@ -142,11 +142,16 @@ type PickLine struct {
 	OrderLineID string `json:"order_line_id"`
 	Qty         string `json:"qty"`
 	Backordered string `json:"backordered"`
+	// ShortReason is the short pick reason code, when one was given.
+	ShortReason string `json:"short_reason,omitempty"`
 }
 
 type PickConfirmedData struct {
-	ShipmentID string     `json:"shipment_id"`
-	Lines      []PickLine `json:"lines"`
+	ShipmentID string `json:"shipment_id"`
+	// WaveID is the wave whose confirmation picked the lines; absent for a
+	// single-shipment pick.
+	WaveID string     `json:"wave_id,omitempty"`
+	Lines  []PickLine `json:"lines"`
 }
 
 type JournalEntry struct {

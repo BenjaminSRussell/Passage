@@ -44,6 +44,8 @@ type BackorderRow struct {
 	// was closed (FR-28.8); Planned is then what shipped.
 	Closed        decimal.Decimal `json:"qtyClosed"`
 	ShortPickedAt time.Time       `json:"shortPickedAt"`
+	// Reason is the short pick reason code, nil when none was given.
+	Reason *string `json:"reason"`
 }
 
 // ListBackorders returns the short-picked lines, newest short pick first, at
@@ -55,7 +57,7 @@ func (s *Postgres) ListBackorders(ctx context.Context, f BackorderFilter) ([]Bac
 		rows, err := tx.Query(ctx, `
 			select sl.id::text, sh.id::text, sh.shipment_number, sh.status, sh.warehouse_id::text, sh.order_id::text,
 				sh.customer_id::text, sl.order_line_id::text, sl.product_id::text, sl.unit,
-				sl.qty_planned::text, sl.qty_picked::text, sl.qty_shipped::text, sl.qty_closed::text, sl.short_picked_at
+				sl.qty_planned::text, sl.qty_picked::text, sl.qty_shipped::text, sl.qty_closed::text, sl.short_picked_at, sl.short_pick_reason
 			from shipment_line sl
 			join shipment sh on sh.tenant_id = sl.tenant_id and sh.id = sl.shipment_id
 			where sl.short_picked_at is not null
@@ -76,7 +78,7 @@ func (s *Postgres) ListBackorders(ctx context.Context, f BackorderFilter) ([]Bac
 			var r BackorderRow
 			var planned, picked, shipped, closed string
 			if err := rows.Scan(&r.ShipmentLineID, &r.ShipmentID, &r.ShipmentNumber, &r.Status, &r.WarehouseID, &r.OrderID,
-				&r.CustomerID, &r.OrderLineID, &r.ProductID, &r.Unit, &planned, &picked, &shipped, &closed, &r.ShortPickedAt); err != nil {
+				&r.CustomerID, &r.OrderLineID, &r.ProductID, &r.Unit, &planned, &picked, &shipped, &closed, &r.ShortPickedAt, &r.Reason); err != nil {
 				return err
 			}
 			r.Planned, r.Picked, r.Shipped, r.Closed = dec(planned), dec(picked), dec(shipped), dec(closed)

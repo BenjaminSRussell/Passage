@@ -3,7 +3,7 @@
 // (FR-28.4). Each form keeps one
 // Idempotency-Key until its values change, and sends the shipment version as If-Match.
 import { useState, type FormEvent } from "react";
-import { Button, Card, DataTable, FormField, Input, type DataTableColumn } from "../../shell/ui";
+import { Button, Card, DataTable, FormField, Input, Select, type DataTableColumn } from "../../shell/ui";
 import {
   confirmPick,
   autoPack,
@@ -15,8 +15,9 @@ import {
   type Problem,
   type Shipment,
   type ShipmentLine,
+  type ShortPickReason,
 } from "./api/client";
-import { compareDecimal, COUNTRY, CURRENCY, DECIMAL, multiplyDecimal, shortId, subtractDecimal, sumDecimals, today } from "./format";
+import { compareDecimal, COUNTRY, CURRENCY, DECIMAL, multiplyDecimal, shortId, SHORT_PICK_REASONS, subtractDecimal, sumDecimals, today } from "./format";
 import { explain, ProblemAlert, useCommandKey } from "./forms";
 import styles from "./pages.module.css";
 
@@ -33,10 +34,15 @@ export function PickForm({ shipment, onDone }: { shipment: Shipment; onDone(next
   const remainder = shipment.status === "PARTIALLY_SHIPPED";
   const open = shipment.lines.filter((l) => (remainder ? compareDecimal(l.qtyPicked, l.qtyPlanned) < 0 : !l.pickConfirmed));
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(open.map((l) => [l.id, l.qtyPlanned])));
+  const [reasons, setReasons] = useState<Record<string, string>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [failure, setFailure] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const key = useCommandKey();
+  const isShort = (l: ShipmentLine) => {
+    const v = (values[l.id] ?? "").trim();
+    return DECIMAL.test(v) && compareDecimal(v, l.qtyPlanned) < 0;
+  };
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -52,7 +58,11 @@ export function PickForm({ shipment, onDone }: { shipment: Shipment; onDone(next
     if (Object.keys(found).length > 0) return;
     setBusy(true);
     try {
-      const next = await confirmPick(shipment.id, shipment.version, open.map((l) => ({ shipmentLineId: l.id, picked: values[l.id].trim() })), key.current());
+      const picks = open.map((l) => {
+        const reason = isShort(l) ? reasons[l.id] : "";
+        return { shipmentLineId: l.id, picked: values[l.id].trim(), ...(reason ? { reason: reason as ShortPickReason } : {}) };
+      });
+      const next = await confirmPick(shipment.id, shipment.version, picks, key.current());
       key.renew();
       onDone(next);
     } catch (error) {
@@ -74,26 +84,48 @@ export function PickForm({ shipment, onDone }: { shipment: Shipment; onDone(next
             : "Enter what was picked. Less than planned is a short pick; the remainder goes to backorder and its reservation is released."}
         </p>
         {open.map((l) => (
-          <FormField
-            key={l.id}
-            id={`pick-${l.id}`}
-            label={`${lineLabel(l)} picked`}
-            hint={remainder ? `Planned ${l.qtyPlanned}, shipped ${l.qtyShipped}` : `Planned ${l.qtyPlanned}`}
-            error={errors[l.id]}
-          >
-            {(control) => (
-              <Input
-                {...control}
-                inputMode="decimal"
-                value={values[l.id] ?? ""}
-                invalid={Boolean(errors[l.id])}
-                onChange={(event) => {
-                  setValues({ ...values, [l.id]: event.target.value });
-                  key.renew();
-                }}
-              />
-            )}
-          </FormField>
+          <div key={l.id} className={styles.form}>
+            <FormField
+              id={`pick-${l.id}`}
+              label={`${lineLabel(l)} picked`}
+              hint={remainder ? `Planned ${l.qtyPlanned}, shipped ${l.qtyShipped}` : `Planned ${l.qtyPlanned}`}
+              error={errors[l.id]}
+            >
+              {(control) => (
+                <Input
+                  {...control}
+                  inputMode="decimal"
+                  value={values[l.id] ?? ""}
+                  invalid={Boolean(errors[l.id])}
+                  onChange={(event) => {
+                    setValues({ ...values, [l.id]: event.target.value });
+                    key.renew();
+                  }}
+                />
+              )}
+            </FormField>
+            {isShort(l) ? (
+              <FormField id={`pick-reason-${l.id}`} label={`${lineLabel(l)} short pick reason`} optional>
+                {(control) => (
+                  <Select
+                    {...control}
+                    value={reasons[l.id] ?? ""}
+                    onChange={(event) => {
+                      setReasons({ ...reasons, [l.id]: event.target.value });
+                      key.renew();
+                    }}
+                  >
+                    <option value="">No reason given</option>
+                    {Object.entries(SHORT_PICK_REASONS).map(([code, label]) => (
+                      <option key={code} value={code}>
+                        {label}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </FormField>
+            ) : null}
+          </div>
         ))}
         <ProblemAlert title="Could not confirm the pick" problem={failure} />
         <div className={styles.formActions}>

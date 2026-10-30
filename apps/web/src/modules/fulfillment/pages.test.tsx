@@ -216,6 +216,28 @@ describe("shipment detail", () => {
     expect(screen.queryByRole("button", { name: "Confirm pick" })).toBeNull();
   });
 
+  it("sends the short pick reason and shows it on the line", async () => {
+    let current = shipment("RELEASED");
+    serve(() => current);
+    const base = server.handler;
+    server.handler = (url, init) => {
+      if (init.method === "POST" && url.pathname.endsWith(":confirm-pick")) {
+        current = shipment("PICKED", { qtyPicked: "60", pickConfirmed: true, shortPickReason: "DAMAGED" }, 4);
+        return json(200, current);
+      }
+      return base(url, init);
+    };
+    renderAt(`/fulfillment/shipments/${SH}`);
+    const field = await screen.findByLabelText(/picked$/);
+    expect(screen.queryByLabelText(/short pick reason/)).toBeNull();
+    fireEvent.change(field, { target: { value: "60" } });
+    fireEvent.change(await screen.findByLabelText(/short pick reason/), { target: { value: "DAMAGED" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm pick" }));
+    await screen.findByRole("button", { name: "Close container" });
+    expect(posts(":confirm-pick")[0].body).toEqual({ picks: [{ shipmentLineId: LINE, picked: "60", reason: "DAMAGED" }] });
+    expect(await screen.findByText("Damaged")).toBeInTheDocument();
+  });
+
   it("packs the picked quantity and reports the SSCC", async () => {
     let current = shipment("PICKED", { qtyPicked: "30", pickConfirmed: true }, 4);
     serve(() => current);

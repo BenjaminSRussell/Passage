@@ -132,6 +132,9 @@ type confirmPickRequest struct {
 type pickDTO struct {
 	ShipmentLineID string `json:"shipmentLineId"`
 	Picked         string `json:"picked"`
+	// Reason is the short pick reason code (OUT_OF_STOCK, DAMAGED, NOT_FOUND,
+	// QUALITY_HOLD, OTHER); optional, and only for a pick below plan.
+	Reason string `json:"reason,omitempty"`
 }
 
 type packRequest struct {
@@ -302,24 +305,9 @@ func (a *API) confirmPick(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, "picks", "at least one pick is required")
 		return
 	}
-	picks := make([]store.PickInput, 0, len(req.Picks))
-	seen := map[string]bool{}
-	for i, p := range req.Picks {
-		if !ids.Valid(p.ShipmentLineID) {
-			fail(w, r, fmt.Sprintf("picks[%d].shipmentLineId", i), "must be a UUID")
-			return
-		}
-		if seen[p.ShipmentLineID] {
-			fail(w, r, fmt.Sprintf("picks[%d].shipmentLineId", i), "appears more than once")
-			return
-		}
-		seen[p.ShipmentLineID] = true
-		q, err := nonNegative(p.Picked)
-		if err != nil {
-			fail(w, r, fmt.Sprintf("picks[%d].picked", i), "must be a non-negative decimal with at most 6 decimals")
-			return
-		}
-		picks = append(picks, store.PickInput{ShipmentLineID: p.ShipmentLineID, Picked: q})
+	picks, ok := pickInputs(w, r, req.Picks)
+	if !ok {
+		return
 	}
 	sh, err := a.store.ConfirmPick(r.Context(), id, version, picks, idem)
 	if err != nil {
@@ -608,4 +596,32 @@ func fail(w http.ResponseWriter, r *http.Request, field, rule string) {
 
 func etag(w http.ResponseWriter, version int) {
 	w.Header().Set("ETag", fmt.Sprintf(`"%d"`, version))
+}
+
+// pickInputs validates the pick lines of a confirm-pick body.
+func pickInputs(w http.ResponseWriter, r *http.Request, in []pickDTO) ([]store.PickInput, bool) {
+	picks := make([]store.PickInput, 0, len(in))
+	seen := map[string]bool{}
+	for i, p := range in {
+		if !ids.Valid(p.ShipmentLineID) {
+			fail(w, r, fmt.Sprintf("picks[%d].shipmentLineId", i), "must be a UUID")
+			return nil, false
+		}
+		if seen[p.ShipmentLineID] {
+			fail(w, r, fmt.Sprintf("picks[%d].shipmentLineId", i), "appears more than once")
+			return nil, false
+		}
+		seen[p.ShipmentLineID] = true
+		q, err := nonNegative(p.Picked)
+		if err != nil {
+			fail(w, r, fmt.Sprintf("picks[%d].picked", i), "must be a non-negative decimal with at most 6 decimals")
+			return nil, false
+		}
+		if !store.ValidShortPickReason(p.Reason) {
+			fail(w, r, fmt.Sprintf("picks[%d].reason", i), "must be one of "+strings.Join(store.ShortPickReasons, ", "))
+			return nil, false
+		}
+		picks = append(picks, store.PickInput{ShipmentLineID: p.ShipmentLineID, Picked: q, Reason: p.Reason})
+	}
+	return picks, true
 }

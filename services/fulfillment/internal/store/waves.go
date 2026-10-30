@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -85,6 +86,23 @@ type WaveSummary struct {
 type Wave struct {
 	WaveSummary
 	Shipments []WaveShipment `json:"shipments"`
+	// Lines are the wave's shipment lines with their pick state; GetWave fills
+	// them so the wave can be picked from one screen (confirm-pick).
+	Lines []WaveLine `json:"lines,omitempty"`
+}
+
+// WaveLine is one shipment line of a wave and what is picked of it.
+type WaveLine struct {
+	ShipmentLineID  string          `json:"shipmentLineId"`
+	ShipmentID      string          `json:"shipmentId"`
+	ShipmentNumber  string          `json:"shipmentNumber"`
+	ProductID       string          `json:"productId"`
+	Unit            string          `json:"unit"`
+	Zone            *string         `json:"zone"`
+	Planned         decimal.Decimal `json:"qtyPlanned"`
+	Picked          decimal.Decimal `json:"qtyPicked"`
+	PickConfirmed   bool            `json:"pickConfirmed"`
+	ShortPickReason *string         `json:"shortPickReason"`
 }
 
 // WaveFilter narrows the waves list. Empty fields do not filter.
@@ -338,7 +356,31 @@ func (s *Postgres) GetWave(ctx context.Context, id string) (Wave, error) {
 			ws.Status = domain.ShipmentStatus(status)
 			w.Shipments = append(w.Shipments, ws)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		rows.Close()
+		lrows, err := tx.Query(ctx, `select sl.id::text, s.id::text, s.shipment_number, sl.product_id::text, sl.unit, sl.zone_code,
+				sl.qty_planned::text, sl.qty_picked::text, sl.pick_confirmed, sl.short_pick_reason
+			from wave_line wl
+			join shipment_line sl on sl.tenant_id = wl.tenant_id and sl.id = wl.shipment_line_id
+			join shipment s on s.tenant_id = sl.tenant_id and s.id = sl.shipment_id
+			where wl.wave_id = $1 order by s.shipment_number, sl.id`, id)
+		if err != nil {
+			return err
+		}
+		defer lrows.Close()
+		w.Lines = []WaveLine{}
+		for lrows.Next() {
+			var l WaveLine
+			var planned, picked string
+			if err := lrows.Scan(&l.ShipmentLineID, &l.ShipmentID, &l.ShipmentNumber, &l.ProductID, &l.Unit, &l.Zone, &planned, &picked, &l.PickConfirmed, &l.ShortPickReason); err != nil {
+				return err
+			}
+			l.Planned, l.Picked = dec(planned), dec(picked)
+			w.Lines = append(w.Lines, l)
+		}
+		return lrows.Err()
 	})
 	return w, err
 }

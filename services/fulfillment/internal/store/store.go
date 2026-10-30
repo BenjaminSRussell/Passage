@@ -120,6 +120,8 @@ type ShipmentLine struct {
 	Closed        decimal.Decimal `json:"qtyClosed"`
 	PickConfirmed bool            `json:"pickConfirmed"`
 	Zone          *string         `json:"zone"`
+	// ShortPickReason is the reason given for the latest short pick, if any.
+	ShortPickReason *string `json:"shortPickReason"`
 }
 
 // Container is a closed package with its SSCC (BR-28.5). Tare, returnable and
@@ -211,6 +213,8 @@ type PackResult struct {
 type PickInput struct {
 	ShipmentLineID string
 	Picked         decimal.Decimal
+	// Reason is the short pick reason code; only valid when Picked is below plan.
+	Reason string
 }
 
 // PackInput moves a quantity of one shipment line into the container.
@@ -264,6 +268,7 @@ type Store interface {
 	ListBackorders(ctx context.Context, f BackorderFilter) ([]BackorderRow, error)
 	PackingStore
 	WorkbenchStore
+	WavePickStore
 	Ping(ctx context.Context) error
 }
 
@@ -644,7 +649,7 @@ func loadShipment(ctx context.Context, tx pgx.Tx, id string) (Shipment, error) {
 	}
 	sh.Status = domain.ShipmentStatus(status)
 	sh.Lines = []ShipmentLine{}
-	rows, err := tx.Query(ctx, `select id, order_line_id, product_id, unit, qty_planned::text, qty_picked::text, qty_packed::text, qty_shipped::text, pick_confirmed, zone_code, qty_closed::text
+	rows, err := tx.Query(ctx, `select id, order_line_id, product_id, unit, qty_planned::text, qty_picked::text, qty_packed::text, qty_shipped::text, pick_confirmed, zone_code, qty_closed::text, short_pick_reason
 		from shipment_line where shipment_id = $1 order by id`, id)
 	if err != nil {
 		return sh, err
@@ -652,7 +657,7 @@ func loadShipment(ctx context.Context, tx pgx.Tx, id string) (Shipment, error) {
 	for rows.Next() {
 		var l ShipmentLine
 		var planned, picked, packed, shipped, closed string
-		if err := rows.Scan(&l.ID, &l.OrderLineID, &l.ProductID, &l.Unit, &planned, &picked, &packed, &shipped, &l.PickConfirmed, &l.Zone, &closed); err != nil {
+		if err := rows.Scan(&l.ID, &l.OrderLineID, &l.ProductID, &l.Unit, &planned, &picked, &packed, &shipped, &l.PickConfirmed, &l.Zone, &closed, &l.ShortPickReason); err != nil {
 			rows.Close()
 			return sh, err
 		}
@@ -721,51 +726,93 @@ func (s *Postgres) ConfirmPick(ctx context.Context, id string, version int, pick
 			if err := checkVersion(sh, version); err != nil {
 				return sh, err
 			}
-			// A partially shipped shipment re-picks its remainder (FR-28.8).
-			if sh.Status != domain.StatusReleased && sh.Status != domain.StatusPicking && sh.Status != domain.StatusPartiallyShipped {
-				return sh, statusProblem("pick", sh.Status)
-			}
-			refs := []fulevents.PickLine{}
-			for _, pk := range picks {
-				idx := lineIndex(sh, pk.ShipmentLineID)
-				if idx < 0 {
-					return sh, httpx.NewProblem(http.StatusNotFound, CodeLineNotFound, "shipment line not found")
-				}
-				next, backorder, err := domain.ConfirmPick(lineQty(sh.Lines[idx]), pk.Picked)
-				if err != nil {
-					return sh, mapDomain(err)
-				}
-				l := sh.Lines[idx]
-				// A pick below the planned quantity opens a backorder; the first
-				// short pick dates it for the short-pick report (FR-28.2, backorders.go).
-				if _, err := tx.Exec(ctx, `update shipment_line set qty_picked = $3, pick_confirmed = true,
-						short_picked_at = case when $4::boolean then coalesce(short_picked_at, now()) else short_picked_at end
-					where tenant_id = $1 and id = $2`,
-					p.TenantID, l.ID, next.Picked, backorder.IsPositive()); err != nil {
-					return sh, err
-				}
-				l.Picked, l.PickConfirmed = next.Picked, true
-				sh.Lines[idx] = l
-				refs = append(refs, fulevents.PickLine{OrderLineID: l.OrderLineID, Qty: next.Picked.String(), Backordered: backorder.String()})
-			}
-			target, err := domain.Advance(sh.Status, domain.StatusPicking)
-			if err != nil {
-				return sh, mapDomain(err)
-			}
-			if domain.AllConfirmed(lineQtys(sh)) {
-				if target, err = domain.Advance(target, domain.StatusPicked); err != nil {
-					return sh, mapDomain(err)
-				}
-			}
-			if err := bumpShipment(ctx, tx, p.TenantID, &sh, target); err != nil {
-				return sh, err
-			}
-			return sh, enqueue(ctx, tx, sh.ID, fulevents.PickConfirmed, p.TenantID, fulevents.PickConfirmedData{ShipmentID: sh.ID, Lines: refs})
+			return sh, confirmPickTx(ctx, tx, p.TenantID, "", &sh, picks)
 		})
 		out = res
 		return err
 	})
 	return out, err
+}
+
+// ShortPickReasons are the reason codes a short pick can carry (section
+// 5.28.14, short picks report "reason" column).
+var ShortPickReasons = []string{"OUT_OF_STOCK", "DAMAGED", "NOT_FOUND", "QUALITY_HOLD", "OTHER"}
+
+// ValidShortPickReason reports whether code is a known reason ("" is allowed).
+func ValidShortPickReason(code string) bool {
+	if code == "" {
+		return true
+	}
+	for _, r := range ShortPickReasons {
+		if r == code {
+			return true
+		}
+	}
+	return false
+}
+
+// confirmPickTx applies the picks to a loaded shipment inside the caller's
+// transaction: it records each line, advances the shipment to PICKING (PICKED
+// once every line is confirmed) and writes pick.confirmed (FR-28.2, BR-28.7).
+// The caller has checked the version. waveID is set when the picks come from a
+// wave confirmation and is carried in the event.
+func confirmPickTx(ctx context.Context, tx pgx.Tx, tenantID, waveID string, sh *Shipment, picks []PickInput) error {
+	// A partially shipped shipment re-picks its remainder (FR-28.8).
+	if !pickable(sh.Status) {
+		return statusProblem("pick", sh.Status)
+	}
+	refs := []fulevents.PickLine{}
+	for _, pk := range picks {
+		idx := lineIndex(*sh, pk.ShipmentLineID)
+		if idx < 0 {
+			return httpx.NewProblem(http.StatusNotFound, CodeLineNotFound, "shipment line not found")
+		}
+		if !ValidShortPickReason(pk.Reason) {
+			return httpx.NewProblem(http.StatusUnprocessableEntity, CodeValidation, "unknown short pick reason "+pk.Reason)
+		}
+		next, backorder, err := domain.ConfirmPick(lineQty(sh.Lines[idx]), pk.Picked)
+		if err != nil {
+			return mapDomain(err)
+		}
+		if pk.Reason != "" && !backorder.IsPositive() {
+			return httpx.NewProblem(http.StatusUnprocessableEntity, CodeValidation, "a reason applies to a short pick only")
+		}
+		l := sh.Lines[idx]
+		// A pick below the planned quantity opens a backorder; the first
+		// short pick dates it for the short-pick report (FR-28.2, backorders.go)
+		// and a reason, when given, is kept (the last one wins).
+		if _, err := tx.Exec(ctx, `update shipment_line set qty_picked = $3, pick_confirmed = true,
+				short_picked_at = case when $4::boolean then coalesce(short_picked_at, now()) else short_picked_at end,
+				short_pick_reason = case when $5::text <> '' then $5::text else short_pick_reason end
+			where tenant_id = $1 and id = $2`,
+			tenantID, l.ID, next.Picked, backorder.IsPositive(), pk.Reason); err != nil {
+			return err
+		}
+		l.Picked, l.PickConfirmed = next.Picked, true
+		if pk.Reason != "" {
+			r := pk.Reason
+			l.ShortPickReason = &r
+		}
+		sh.Lines[idx] = l
+		ref := fulevents.PickLine{OrderLineID: l.OrderLineID, Qty: next.Picked.String(), Backordered: backorder.String()}
+		if pk.Reason != "" {
+			ref.ShortReason = pk.Reason
+		}
+		refs = append(refs, ref)
+	}
+	target, err := domain.Advance(sh.Status, domain.StatusPicking)
+	if err != nil {
+		return mapDomain(err)
+	}
+	if domain.AllConfirmed(lineQtys(*sh)) {
+		if target, err = domain.Advance(target, domain.StatusPicked); err != nil {
+			return mapDomain(err)
+		}
+	}
+	if err := bumpShipment(ctx, tx, tenantID, sh, target); err != nil {
+		return err
+	}
+	return enqueue(ctx, tx, sh.ID, fulevents.PickConfirmed, tenantID, fulevents.PickConfirmedData{ShipmentID: sh.ID, WaveID: waveID, Lines: refs})
 }
 
 func (s *Postgres) PackContainer(ctx context.Context, id string, version int, containerType string, lines []PackInput, idem Idem) (PackResult, error) {

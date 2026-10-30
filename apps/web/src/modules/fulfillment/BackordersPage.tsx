@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
 import { listBackorders, type BackorderRow } from "./api/client";
 import { ShipmentStatusBadge } from "./badges";
-import { formatDateTime, shortId, UUID } from "./format";
+import { dash, formatDateTime, shortId, SHORT_PICK_REASONS, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -29,6 +29,7 @@ const columns: DataTableColumn<BackorderRow>[] = [
     header: "Backorder state",
     render: (row) => (row.open ? <Badge tone="warning">Open</Badge> : <Badge tone="neutral">Closed</Badge>),
   },
+  { key: "reason", header: "Reason", render: (row) => (row.reason ? (SHORT_PICK_REASONS[row.reason] ?? row.reason) : dash) },
   { key: "shortPickedAt", header: "Short-picked", render: (row) => formatDateTime(row.shortPickedAt) },
 ];
 

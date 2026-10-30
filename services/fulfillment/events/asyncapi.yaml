@@ -145,6 +145,7 @@ components:
         required: [shipment_id, lines]
         properties:
           shipment_id: { type: string, format: uuid }
+          wave_id: { type: string, format: uuid, description: "The wave whose confirmation picked the lines (FR-28.13); absent for a single-shipment pick." }
           lines:
             type: array
             items:
@@ -153,6 +154,7 @@ components:
                 order_line_id: { type: string, format: uuid }
                 qty: { type: string }
                 backordered: { type: string }
+                short_reason: { type: string, enum: [OUT_OF_STOCK, DAMAGED, NOT_FOUND, QUALITY_HOLD, OTHER], description: "Reason of the short pick, present when one was given." }
     PackingSlipPosted:
       name: dev.passage.fulfillment.packingslip.posted.v1
       summary: >

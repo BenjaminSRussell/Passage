@@ -155,3 +155,12 @@ export const TRACKING_LABELS: Record<TrackingStatus, string> = {
 
 /** Carrier or pick zone code, as the service accepts it. */
 export const LOGISTICS_CODE = /^[A-Za-z0-9_.-]{1,32}$/;
+
+/** Labels of the short pick reason codes. */
+export const SHORT_PICK_REASONS: Record<string, string> = {
+  OUT_OF_STOCK: "Out of stock",
+  DAMAGED: "Damaged",
+  NOT_FOUND: "Not found at the location",
+  QUALITY_HOLD: "Quality hold",
+  OTHER: "Other",
+};

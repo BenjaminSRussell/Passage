@@ -114,6 +114,31 @@ unpacking everything, the partial-shipment case, the concurrent unpack, the
 replay, tenant and legal-entity scope. The shipment detail drops unpacked
 containers and has an Unpack button per closed container with a confirmation; the
 SSCC register shows them as "Unpacked".
+
+Slice 9 adds wave-level pick confirmation and short pick reasons (FR-28.13,
+section 5.28.14). `POST /waves/{id}:confirm-pick` (`WarehousePick`,
+`Idempotency-Key`) confirms the listed picks across all shipments of a wave in
+one transaction and, with `pickRest`, picks every other unconfirmed line in
+full; it writes one `pick.confirmed` per shipment carrying `wave_id`, refuses a
+line outside the wave (FUL-0041) and a listed line on a shipment that can no
+longer pick (FUL-0001), and answers FUL-0050 when nothing is left to pick.
+`pickRest` leaves a cancelled or already picked shipment of the wave alone and
+decides what to add only after locking each shipment, so it never overwrites a
+pick another command confirmed meanwhile. A pick below plan
+may carry a `reason` (OUT_OF_STOCK, DAMAGED, NOT_FOUND, QUALITY_HOLD, OTHER;
+migration 0010 adds `shipment_line.short_pick_reason`), also on the single
+shipment `:confirm-pick`; it is stored on the line, carried in `pick.confirmed`
+as `short_reason`, and shown in the short picks report (`reason`) and the
+shipment line. `GET /waves/{id}` now returns the wave's lines with their pick
+state. Store tests against Postgres cover the all-shipments command, the
+atomic refusals, the replay, a cancelled shipment in the wave, a line already
+confirmed by a single-shipment pick, `wave_id` and `short_reason` in the
+event, and tenant and legal-entity isolation. The wave detail page has a
+"Confirm picks for the wave" card (planned quantity by default, reason when
+short, only lines of shipments that still pick), the shipment pick form offers
+the reason on a short line, the shipment lines show it, and the backorders
+screen has a Reason column. The reason is optional and the latest one given
+for a line is kept.
 The OpenAPI and AsyncAPI have zero FAIL lines on the doc gates.
 
 ## Important gaps (read first)
@@ -203,7 +228,7 @@ slips to 5); the comparison with the ledger's GL 1405 is a handoff to ledger.
 | Item | Status | Reason |
 |---|---|---|
 | Endpoints `:rate`, `:label` (carrier label), `:manifest`, drop-ship vendor-confirm, carrier webhook | later slice of PSG-28 and handoff (carrier-gateway) | Carrier work is not in this slice. Tracking GET and POST are built (slice 3). |
-| Pick confirmation per wave (`/waves/{id}:confirm-pick`) | later slice of PSG-28 | `/waves` (create, list), `/waves:preview` and `/waves/{id}` are built (slice 3). Picks are confirmed per shipment with `/shipments/{id}:confirm-pick`. |
+| Pick confirmation per wave (`/waves/{id}:confirm-pick`) | built (slice 9) | Confirms all shipments of a wave in one command with optional `pickRest`; directed pick work per line and pick-by-scan remain wave 31. |
 | `PackingSlipPost` cancel requires `If-Match` (convention) | deviation | A posted slip is immutable and has no version. Only Idempotency-Key is required. |
 | Idempotency keys are scoped per tenant and key, not per principal | deviation | The stored fingerprint covers the method, path and body, so a key reused on another resource is refused, not replayed. The table matches `dbx.IdempotencyDDL`. Records are not expired after 24 hours yet (no cleanup job). |
 | Duties on handlers (`x-passage-duty`) | built as route-level checks | OPA decision point is handled by the kernel `authz` package. Slice 2 uses `PackingRuleMaintain` (container types, packing rules, packaging materials), `PackagingFeeMaintain` (rates and report) and `WarehouseReceive` (return receipts); the config lists are `WarehouseView`. Slice 3 uses `WarehouseRelease` (workbench preview and create, shipment cancel), `WarehouseView` (waves, tracking list, container label) and `WarehouseShip` (recording a tracking event). Slice 4 uses `WarehouseView` for the DNI report (section 5.28.17: "GET shipments, tracking, DNI"); slices 5 and 6 use it for the SSCC register, the backorders report and returnable aging. The `CarrierAdmin` and `ReturnablePackagingMaintain` duties are not used yet (no carrier configuration or balance-adjustment endpoints). Segregation of duties (WarehousePick with PackingSlipPost under `pick_post_separation`; PackingSlipPost with SalesOrderMaintain; ReturnablePackagingMaintain with WarehouseReceive; PackagingFeeMaintain with InvoiceMaintain) is not enforced. The web nav carries the duty per entry. |
@@ -237,7 +262,8 @@ slips to 5); the comparison with the ledger's GL 1405 is a handoff to ledger.
 | Container `:close` endpoint and label reference | later slice of PSG-28 | See D1. |
 | Migration from AX/SAP | later slice of PSG-28 | |
 | Reporting: carrier exceptions and cost | later slice of PSG-28 | Needs carrier-gateway. Shipments list (with the PARTIALLY_SHIPPED filter), release board, pick waves, packing slip journal, delivered not invoiced, packaging weights per country and month, RTP balances and aging, the SSCC register and short picks and backorders are built. |
-| Short picks report: the "reason" column (section 5.28.14) | later slice of PSG-28 | Pick confirmation takes no reason code yet; the report shows planned, picked, shipped and remainder. |
+| Short picks report: the "reason" column (section 5.28.14) | built (slice 9) | Reason codes (OUT_OF_STOCK, DAMAGED, NOT_FOUND, QUALITY_HOLD, OTHER) on pick confirmation, single shipment and wave, in the API and the web forms, and in the report. The code list is fixed in the service (a check constraint); a tenant-maintained reason list is not built. |
+| Wave / pick list screen: picker, reassign and print (section 5.28.6) | later slice of PSG-28 / wave 31 | Waves carry no picker yet, so there is nothing to reassign or show in a picker column; printing the pick list is not built. |
 | Short picks report: "period" filters the line's first short pick | deviation | A line keeps the time of its first short pick, so a later short re-pick of the same line does not move it to another period. Lines short-picked before migration 0005 take their shipment's last change time. |
 | Returnable aging is as of today (UTC) only | deviation | The balance is the current one, so aging it as of a past date would mix in containers shipped later. The nightly job (not built) would run it daily. |
 | Returnable aging is computed on read and returns at most `limit` balances (default 100, max 500) | deviation | `count` and `chargeDueCount` cover every outstanding balance; the screen asks for 500 and says when the list is cut. Paging is not built. |
