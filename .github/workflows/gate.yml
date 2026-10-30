@@ -20,7 +20,8 @@ jobs:
       go: ${{ steps.filter.outputs.go }}
       web: ${{ steps.filter.outputs.web }}
       py: ${{ steps.filter.outputs.py }}
-      run: ${{ steps.filter.outputs.go == 'true' || steps.filter.outputs.web == 'true' || steps.filter.outputs.py == 'true' || steps.filter.outputs.charts == 'true' }}
+      warehouse: ${{ steps.filter.outputs.warehouse }}
+      run: ${{ steps.filter.outputs.go == 'true' || steps.filter.outputs.web == 'true' || steps.filter.outputs.py == 'true' || steps.filter.outputs.warehouse == 'true' || steps.filter.outputs.charts == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - id: filter
@@ -34,6 +35,10 @@ jobs:
               - '.github/workflows/**'
             web:
               - 'apps/web/**'
+              - '.github/workflows/**'
+            warehouse:
+              - 'apps/warehouse-mobile/**'
+              - 'apps/web/src/modules/mobile-flows/**'
               - '.github/workflows/**'
             py:
               - 'services/configurator-py/**'
@@ -51,6 +56,7 @@ jobs:
       go: ${{ needs.changes.outputs.go == 'true' || startsWith(github.ref, 'refs/tags/') }}
       web: ${{ needs.changes.outputs.web == 'true' }}
       py: ${{ needs.changes.outputs.py == 'true' }}
+      warehouse: ${{ needs.changes.outputs.warehouse == 'true' }}
     permissions:
       contents: read
       packages: write
