@@ -73,6 +73,11 @@ type fakeStore struct {
 	runCovs      map[string]store.RunCoverage
 	runCovSite   string
 	runCovEntity string
+	// Scenarios and simulation runs (scenario_test.go).
+	scenarios   []store.Scenario
+	scenarioKey map[string]string
+	lastSim     store.SimulationRequest
+	simulations int
 }
 
 func (f *fakeStore) RunPlan(_ context.Context, req store.RunRequest) (store.Version, bool, error) {

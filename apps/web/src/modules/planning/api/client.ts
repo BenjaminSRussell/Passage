@@ -73,6 +73,9 @@ export const PlanVersion = z.object({
   planCode: z.string(),
   number: z.number().int(),
   status: z.enum(["running", "complete", "failed", "current"]),
+  /** A simulation version comes from a scenario run, is never current and cannot be firmed (FR-22.15). */
+  kind: z.enum(["static", "simulation"]).optional(),
+  scenarioCode: z.string().nullish(),
   asOf: z.string(),
   itemsPlanned: z.number().int(),
   plannedOrders: z.number().int(),
@@ -196,6 +199,8 @@ export interface OrderQuery {
   planCode: string;
   status?: z.infer<typeof OrderStatus>;
   itemId?: string;
+  /** A version number, e.g. a simulation; without it the current version is read. */
+  version?: number;
   limit?: number;
 }
 
@@ -203,6 +208,7 @@ export async function listPlannedOrders(q: OrderQuery, init?: RequestInit): Prom
   const params = new URLSearchParams({ planCode: q.planCode });
   if (q.status) params.set("status", q.status);
   if (q.itemId) params.set("itemId", q.itemId);
+  if (q.version) params.set("version", String(q.version));
   if (q.limit) params.set("limit", String(q.limit));
   const body = await request(
     `/planned-orders?${params.toString()}`,
@@ -846,5 +852,70 @@ export async function updateQuotaArrangement(id: string, version: number, input:
     method: "PUT",
     headers: { "Content-Type": "application/json", "If-Match": ifMatch(version) },
     body: JSON.stringify(input),
+  });
+}
+
+/** Settings of a planning scenario (FR-22.15). Factors and quantities are decimal strings. */
+export const ScenarioSettings = z.object({
+  planCode: z.string(),
+  name: z.string(),
+  /** Multiplies the independent demand of every item without its own factor; 1 leaves demand as it is. */
+  demandFactor: z.string(),
+  itemFactors: z.array(z.object({ itemId: z.string(), factor: z.string() })),
+  addedDemand: z.array(z.object({ itemId: z.string(), date: z.string(), qty: z.string() })),
+  leadTimeOverrides: z.array(z.object({ itemId: z.string(), leadTimeDays: z.number().int() })),
+  active: z.boolean(),
+});
+export type ScenarioSettings = z.infer<typeof ScenarioSettings>;
+
+export const Scenario = ScenarioSettings.extend({
+  id: z.string(),
+  code: z.string(),
+  /** The scenario's ETag: send it back as If-Match on PUT. */
+  version: z.number().int().min(1),
+});
+export type Scenario = z.infer<typeof Scenario>;
+
+/** At most this many scenarios of one plan are active (FR-22.15). */
+export const MAX_ACTIVE_SCENARIOS = 10;
+
+export async function listScenarios(planCode = "", init?: RequestInit): Promise<Scenario[]> {
+  const q = planCode ? `&planCode=${encodeURIComponent(planCode)}` : "";
+  const out = await request(`/scenarios?limit=500${q}`, z.object({ items: z.array(Scenario) }), init);
+  return out.items;
+}
+
+export async function getScenario(code: string, init?: RequestInit): Promise<Scenario> {
+  return request(`/scenarios/${encodeURIComponent(code)}`, Scenario, init);
+}
+
+/** Creates a scenario (Run simulations). 409 `PLAN-SCENARIO-EXISTS` means the code is taken, `PLAN-SCENARIO-LIMIT` that the plan has 10 active ones. */
+export async function createScenario(code: string, settings: ScenarioSettings, idempotencyKey: string): Promise<Scenario> {
+  return request(`/scenarios`, Scenario, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ code, ...settings }),
+  });
+}
+
+/** Replaces the settings of a scenario under If-Match; 412 means someone else changed it. */
+export async function updateScenario(code: string, version: number, settings: ScenarioSettings): Promise<Scenario> {
+  return request(`/scenarios/${encodeURIComponent(code)}`, Scenario, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", "If-Match": ifMatch(version) },
+    body: JSON.stringify(settings),
+  });
+}
+
+/**
+ * Runs a scenario on a snapshot and stores a simulation version of its plan.
+ * The operational plan, its messages and events stay as they are; the
+ * Idempotency-Key makes a retry replay the same simulation.
+ */
+export async function runScenario(code: string, idempotencyKey: string, body: RunPlanRequest): Promise<PlanVersion> {
+  return request(`/scenarios/${encodeURIComponent(code)}:run`, PlanVersion, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(body),
   });
 }

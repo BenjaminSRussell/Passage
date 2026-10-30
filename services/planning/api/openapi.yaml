@@ -160,6 +160,10 @@ paths:
         - name: itemId
           in: query
           schema: {type: string, format: uuid}
+        - name: version
+          in: query
+          description: Read this version number instead of the current one, e.g. a simulation version (FR-22.15)
+          schema: {type: integer, minimum: 1}
         - $ref: '#/components/parameters/Limit'
       responses:
         '200':
@@ -294,7 +298,7 @@ paths:
             application/problem+json:
               schema: {$ref: '#/components/schemas/Problem'}
         '409':
-          description: PLAN-0002 (an order is already firmed) or PLAN-ORDER-NOT-EDITABLE (deleted, or not in the current version)
+          description: PLAN-0002 (an order is already firmed), PLAN-ORDER-NOT-EDITABLE (deleted, or not in the current version) or PLAN-0003 (the order belongs to a simulation, BR-22.14)
           content:
             application/problem+json:
               schema: {$ref: '#/components/schemas/Problem'}
@@ -976,6 +980,175 @@ paths:
         '404': {$ref: '#/components/responses/Problem'}
         '412': {$ref: '#/components/responses/Problem'}
         '428': {$ref: '#/components/responses/Problem'}
+  /v1/planning/scenarios:
+    get:
+      operationId: listScenarios
+      summary: Planning scenarios of the tenant, optionally of one plan (FR-22.15)
+      x-passage-duty: planning.read
+      parameters:
+        - name: planCode
+          in: query
+          schema: {type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,19}$'}
+          description: Only the scenarios of this plan
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Scenarios ordered by plan and code
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/Scenario'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+    post:
+      operationId: createScenario
+      summary: Create a planning scenario (FR-22.15)
+      description: |
+        A scenario is a named set of changes a simulation run applies to its
+        snapshot: a demand factor overall and per item, added sales demand,
+        lead-time overrides. Omitted fields take demand factor 1 and active
+        true. The scenario belongs to the plan and to the plan's legal
+        entity: the plan must have run once and be visible to the caller
+        (404 PLAN-NOT-FOUND otherwise), and callers outside that entity
+        cannot read, change or run the scenario. A code already in use is
+        409 PLAN-SCENARIO-EXISTS; an 11th
+        active scenario of a plan is 409 PLAN-SCENARIO-LIMIT. With an
+        Idempotency-Key, a retry of the same body returns the created
+        scenario with 200 and Idempotent-Replayed: true; another body under
+        the key is 422.
+      x-passage-duty: planning.simulate
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: {type: string, maxLength: 255}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - type: object
+                  required: [code, planCode, name]
+                  properties:
+                    code: {type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,19}$'}
+                - $ref: '#/components/schemas/ScenarioSettings'
+      responses:
+        '201':
+          description: The created scenario; the ETag header carries its version
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Scenario'}
+        '200':
+          description: 'Idempotent replay of an earlier create (Idempotent-Replayed: true)'
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Scenario'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+  /v1/planning/scenarios/{code}:
+    get:
+      operationId: getScenario
+      summary: One planning scenario by code
+      x-passage-duty: planning.read
+      parameters:
+        - $ref: '#/components/parameters/CoverageCode'
+      responses:
+        '200':
+          description: The scenario; the ETag header carries its version
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Scenario'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+    put:
+      operationId: updateScenario
+      summary: Replace the settings of a scenario under If-Match; omitted fields take the defaults
+      description: The plan of a scenario cannot change; planCode may be left out or must equal the stored one (422 PLAN-SCENARIO-PLAN). Activating a scenario past the limit of 10 active per plan is 409 PLAN-SCENARIO-LIMIT.
+      x-passage-duty: planning.simulate
+      parameters:
+        - $ref: '#/components/parameters/CoverageCode'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ScenarioUpdate'}
+      responses:
+        '200':
+          description: The changed scenario with its new ETag
+          headers:
+            ETag: {$ref: '#/components/headers/ETag'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Scenario'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '412': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
+        '428': {$ref: '#/components/responses/Problem'}
+  /v1/planning/scenarios/{code}:run:
+    post:
+      operationId: runScenario
+      summary: Run a scenario as a simulation version of its plan (FR-22.15, BR-22.14)
+      description: |
+        Takes the same snapshot as a plan run (stored item coverage and the
+        forecast model are read the same way), applies the scenario to it and
+        stores the result as a new version of kind simulation. The plan's
+        current version, its messages and its events are untouched: no
+        plan.completed.v1, message.raised.v1 or plannedorder.firmed.v1 is
+        published, only scenario.simulated.v1. Nothing is auto-firmed and
+        firming a planned order of the version is 409 PLAN-0003. Compare it
+        with the operational version through the version diff. The plan must
+        already have an operational run (404 PLAN-NOT-FOUND); an inactive
+        scenario is 409 PLAN-SCENARIO-INACTIVE. The Idempotency-Key
+        fingerprint covers the stored scenario and the request.
+      x-passage-duty: planning.simulate
+      parameters:
+        - $ref: '#/components/parameters/CoverageCode'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RunRequest'}
+      responses:
+        '201':
+          description: Simulation version created; it is never current
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlanVersion'}
+        '200':
+          description: 'Replay of an earlier simulation with the same Idempotency-Key (Idempotent-Replayed: true)'
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlanVersion'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+        '422': {$ref: '#/components/responses/Problem'}
   /v1/planning/item-coverages:
     get:
       operationId: listItemCoverages
@@ -1751,6 +1924,62 @@ components:
         date: {type: string, format: date}
         qty: {type: string, description: Positive decimal string}
         priority: {type: integer, description: 'Lower nets first; default sales-line 1, forecast 2, others 4'}
+    ScenarioSettings:
+      type: object
+      required: [planCode, name]
+      properties:
+        planCode: {type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,19}$', description: The plan the scenario simulates against; at most 10 active scenarios per plan}
+        name: {type: string, minLength: 1, maxLength: 120}
+        demandFactor: {type: string, default: '1', description: 'Multiplies the independent demand (sales lines and forecast) of every item without its own factor; 0 to 100, at most 4 decimals. Safety-stock and transfer-issue demand is not scaled; dependent demand follows from the explosion.'}
+        itemFactors:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            required: [itemId, factor]
+            properties:
+              itemId: {type: string, format: uuid}
+              factor: {type: string, description: 'Replaces demandFactor for this item; 0 to 100'}
+        addedDemand:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            required: [itemId, date, qty]
+            properties:
+              itemId: {type: string, format: uuid}
+              date: {type: string, format: date, description: A date before the run date is due on the run date}
+              qty: {type: string, description: Decimal greater than 0, at most 6 decimals}
+        leadTimeOverrides:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            required: [itemId, leadTimeDays]
+            properties:
+              itemId: {type: string, format: uuid}
+              leadTimeDays: {type: integer, minimum: 0, maximum: 3650}
+        active: {type: boolean, default: true}
+    ScenarioUpdate:
+      type: object
+      description: Same fields as ScenarioSettings; planCode may be left out on update
+      properties:
+        planCode: {type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,19}$'}
+        name: {type: string, minLength: 1, maxLength: 120}
+        demandFactor: {type: string, default: '1'}
+        itemFactors: {$ref: '#/components/schemas/ScenarioSettings/properties/itemFactors'}
+        addedDemand: {$ref: '#/components/schemas/ScenarioSettings/properties/addedDemand'}
+        leadTimeOverrides: {$ref: '#/components/schemas/ScenarioSettings/properties/leadTimeOverrides'}
+        active: {type: boolean, default: true}
+    Scenario:
+      allOf:
+        - type: object
+          required: [id, version, code]
+          properties:
+            id: {type: string, format: uuid}
+            version: {type: integer, minimum: 1, description: Same as the ETag}
+            code: {type: string}
+        - $ref: '#/components/schemas/ScenarioSettings'
     PlanVersion:
       type: object
       properties:
@@ -1758,6 +1987,8 @@ components:
         planCode: {type: string}
         number: {type: integer}
         status: {type: string, enum: [running, complete, failed, current]}
+        kind: {type: string, enum: [static, simulation], description: 'A simulation version is written by a scenario run, is never current and cannot be firmed (FR-22.15)'}
+        scenarioCode: {type: string, description: Set on a simulation version}
         asOf: {type: string, format: date}
         itemsPlanned: {type: integer}
         plannedOrders: {type: integer}

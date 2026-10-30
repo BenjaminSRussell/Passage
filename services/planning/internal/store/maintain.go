@@ -43,11 +43,11 @@ type editableOrder struct {
 // PLAN-ORDER-NOT-EDITABLE) and expectedVersion is its version (412).
 func lockEditableOrder(ctx context.Context, tx pgx.Tx, tenantID, id string, expectedVersion int) (editableOrder, error) {
 	var o editableOrder
-	var status, versionStatus string
-	err := tx.QueryRow(ctx, `select o.status, v.status, o.version, o.order_type, o.order_date, o.delivery_date from planned_order o
+	var status, versionStatus, kind string
+	err := tx.QueryRow(ctx, `select o.status, v.status, v.kind, o.version, o.order_type, o.order_date, o.delivery_date from planned_order o
 		join plan_version v on v.tenant_id = o.tenant_id and v.id = o.plan_version_id
 		where o.tenant_id = $1 and o.id = $2 for update of o`, tenantID, id).
-		Scan(&status, &versionStatus, &o.version, &o.orderType, &o.orderDate, &o.deliveryDate)
+		Scan(&status, &versionStatus, &kind, &o.version, &o.orderType, &o.orderDate, &o.deliveryDate)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return o, httpx.NewProblem(http.StatusNotFound, CodeOrderNotFound, "planned order not found")
 	}
@@ -55,6 +55,8 @@ func lockEditableOrder(ctx context.Context, tx pgx.Tx, tenantID, id string, expe
 		return o, err
 	}
 	switch {
+	case kind == "simulation":
+		return o, simulationNotFirmable("")
 	case status == "firmed":
 		return o, httpx.NewProblem(http.StatusConflict, CodeOrderNotEditable, "the planned order is firmed")
 	case status == "deleted":

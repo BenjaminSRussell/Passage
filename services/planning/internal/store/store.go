@@ -31,10 +31,13 @@ const (
 	CodeCodeTaken        = "PLAN-CODE-TAKEN"
 	CodeForecastEntity   = "PLAN-FORECAST-ENTITY"
 	CodeOrderNotEditable = "PLAN-ORDER-NOT-EDITABLE"
-	CodeOrderInvalid     = "PLAN-ORDER-INVALID"
-	CodeForecastNotFound = "PLAN-FORECAST-NOT-FOUND"
-	CodeVersionConflict  = "conflict_version"
-	CodeIdempotencyReuse = "idempotency_key_reuse"
+	// CodeSimulationNotFirmable is 409 for firming or changing a planned order
+	// of a simulation version (FR-22.15, BR-22.14; PLAN_SIMULATION_NOT_FIRMABLE in the PRD).
+	CodeSimulationNotFirmable = "PLAN-0003"
+	CodeOrderInvalid          = "PLAN-ORDER-INVALID"
+	CodeForecastNotFound      = "PLAN-FORECAST-NOT-FOUND"
+	CodeVersionConflict       = "conflict_version"
+	CodeIdempotencyReuse      = "idempotency_key_reuse"
 
 	uniqueViolation = "23505"
 	// idempotencyConstraint is Postgres' default name for UNIQUE (tenant_id, idempotency_key).
@@ -86,6 +89,11 @@ type Store interface {
 	GetQuotaArrangement(ctx context.Context, id string) (QuotaArrangement, error)
 	CreateQuotaArrangement(ctx context.Context, req QuotaCreate) (QuotaArrangement, bool, error)
 	UpdateQuotaArrangement(ctx context.Context, id string, expectedVersion int, spec domain.QuotaArrangementSpec) (QuotaArrangement, error)
+	ListScenarios(ctx context.Context, q ScenarioQuery) ([]Scenario, error)
+	GetScenario(ctx context.Context, code string) (Scenario, error)
+	CreateScenario(ctx context.Context, req ScenarioCreate) (Scenario, bool, error)
+	UpdateScenario(ctx context.Context, expectedVersion int, spec domain.ScenarioSpec) (Scenario, error)
+	RunSimulation(ctx context.Context, req SimulationRequest) (Version, bool, error)
 	Ping(ctx context.Context) error
 }
 
@@ -143,7 +151,11 @@ type Version struct {
 	Messages      int    `json:"messages"`
 	DurationMs    int64  `json:"durationMs"`
 	PlanHash      string `json:"planHash"`
-	inputHash     string
+	// Kind is static or simulation (FR-22.15); a simulation version names the
+	// scenario that produced it and is never the plan's current version.
+	Kind         string `json:"kind"`
+	ScenarioCode string `json:"scenarioCode,omitempty"`
+	inputHash    string
 }
 
 // PlannedOrder is one planned order row of a plan version. Status is
@@ -184,6 +196,8 @@ type Message struct {
 // OrderFilter narrows planned-order reads.
 type OrderFilter struct {
 	Status, ItemID string
+	// Version selects a version by number (a simulation, FR-22.15); 0 reads the current one.
+	Version int
 }
 
 func idempotencyReuse() error {
@@ -364,7 +378,7 @@ func (s *Postgres) RunPlan(ctx context.Context, req RunRequest) (Version, bool, 
 			return err
 		}
 		v = Version{ID: versionID, PlanCode: req.PlanCode, Number: number, Status: "current", AsOf: asOf, ItemsPlanned: req.ItemsPlanned,
-			PlannedOrders: len(r.Orders), Messages: len(r.Messages), DurationMs: req.DurationMs, PlanHash: r.Hash, inputHash: req.InputHash}
+			PlannedOrders: len(r.Orders), Messages: len(r.Messages), DurationMs: req.DurationMs, PlanHash: r.Hash, Kind: planKindStatic, inputHash: req.InputHash}
 		return enqueue(ctx, tx, planevents.PlanCompleted, planID, p.TenantID, versionID, planevents.PlanCompletedData{
 			PlanID: planID, PlanCode: req.PlanCode, VersionID: versionID, VersionNumber: number, ItemsPlanned: req.ItemsPlanned,
 			PlannedOrders: counts, Messages: len(r.Messages), DurationMs: req.DurationMs, PlanHash: r.Hash,
@@ -486,12 +500,13 @@ func requireModelEntity(ctx context.Context, tx pgx.Tx, tenantID, modelCode, pla
 }
 
 const versionSelect = `select v.id::text, p.code, v.number, v.status, to_char(v.as_of, 'YYYY-MM-DD'), v.items_planned,
-	v.planned_orders_count, v.messages_count, v.duration_ms, v.plan_hash, v.input_hash
-	from plan_version v join plan p on p.tenant_id = v.tenant_id and p.id = v.plan_id`
+	v.planned_orders_count, v.messages_count, v.duration_ms, v.plan_hash, v.input_hash, v.kind, coalesce(sc.code, '')
+	from plan_version v join plan p on p.tenant_id = v.tenant_id and p.id = v.plan_id
+	left join planning_scenario sc on sc.tenant_id = v.tenant_id and sc.id = v.scenario_id`
 
 func scanVersion(row pgx.Row) (Version, error) {
 	var v Version
-	err := row.Scan(&v.ID, &v.PlanCode, &v.Number, &v.Status, &v.AsOf, &v.ItemsPlanned, &v.PlannedOrders, &v.Messages, &v.DurationMs, &v.PlanHash, &v.inputHash)
+	err := row.Scan(&v.ID, &v.PlanCode, &v.Number, &v.Status, &v.AsOf, &v.ItemsPlanned, &v.PlannedOrders, &v.Messages, &v.DurationMs, &v.PlanHash, &v.inputHash, &v.Kind, &v.ScenarioCode)
 	return v, err
 }
 
@@ -550,9 +565,9 @@ func (s *Postgres) ListPlannedOrders(ctx context.Context, planCode string, f Ord
 	p, _ := tenant.FromContext(ctx)
 	out := []PlannedOrder{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, orderSelect+` where o.tenant_id = $1 and p.code = $2 and v.status = 'current'
+		rows, err := tx.Query(ctx, orderSelect+` where o.tenant_id = $1 and p.code = $2 and (case when $6::int = 0 then v.status = 'current' else v.number = $6 end)
 			and (case when $3::text = '' then o.status <> 'deleted' else o.status = $3 end) and ($4::text = '' or o.item_id::text = $4)
-			order by o.number limit $5`, p.TenantID, planCode, f.Status, f.ItemID, limit)
+			order by o.number limit $5`, p.TenantID, planCode, f.Status, f.ItemID, limit, f.Version)
 		if err != nil {
 			return err
 		}

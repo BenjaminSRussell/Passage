@@ -72,7 +72,7 @@ type FirmedGroup struct {
 type firmRow struct {
 	versionID, itemID, orderDate, deliveryDate string
 	status, entity                             string
-	current                                    bool
+	current, simulation                        bool
 	cand                                       domain.FirmCandidate
 }
 
@@ -120,6 +120,8 @@ func (s *Postgres) FirmPlannedOrders(ctx context.Context, req FirmRequest) (Firm
 				return httpx.NewProblem(http.StatusConflict, CodeAlreadyFirmed, "planned order "+id+" is already firmed")
 			case o.status == "deleted":
 				return httpx.NewProblem(http.StatusConflict, CodeOrderNotEditable, "planned order "+id+" is deleted")
+			case o.simulation:
+				return simulationNotFirmable(id)
 			case !o.current:
 				return httpx.NewProblem(http.StatusConflict, CodeOrderNotEditable, "planned order "+id+" belongs to a version that is no longer current")
 			}
@@ -190,7 +192,7 @@ func (s *Postgres) FirmPlannedOrders(ctx context.Context, req FirmRequest) (Firm
 func lockForFirming(ctx context.Context, tx pgx.Tx, tenantID string, orderIDs []string) (map[string]firmRow, error) {
 	rows, err := tx.Query(ctx, `select o.id::text, o.plan_version_id::text, o.item_id::text, v.site_id::text, o.order_type,
 		coalesce(o.vendor_id::text, ''), o.qty::text, to_char(o.order_date, 'YYYY-MM-DD'), to_char(o.delivery_date, 'YYYY-MM-DD'),
-		(o.delivery_date - date '1970-01-01'), o.status, v.status = 'current', coalesce(v.legal_entity_id::text, '')
+		(o.delivery_date - date '1970-01-01'), o.status, v.status = 'current', v.kind = 'simulation', coalesce(v.legal_entity_id::text, '')
 		from planned_order o join plan_version v on v.tenant_id = o.tenant_id and v.id = o.plan_version_id
 		where o.tenant_id = $1 and o.id = any($2::uuid[]) order by o.id for update of o`, tenantID, orderIDs)
 	if err != nil {
@@ -202,7 +204,7 @@ func lockForFirming(ctx context.Context, tx pgx.Tx, tenantID string, orderIDs []
 		var r firmRow
 		var id, qty string
 		if err := rows.Scan(&id, &r.versionID, &r.itemID, &r.cand.SiteID, &r.cand.OrderType, &r.cand.VendorID, &qty,
-			&r.orderDate, &r.deliveryDate, &r.cand.DeliveryDay, &r.status, &r.current, &r.entity); err != nil {
+			&r.orderDate, &r.deliveryDate, &r.cand.DeliveryDay, &r.status, &r.current, &r.simulation, &r.entity); err != nil {
 			return nil, err
 		}
 		if r.cand.Qty, err = decimal.NewFromString(qty); err != nil {

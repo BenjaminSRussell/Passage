@@ -34,6 +34,7 @@ const (
 	dutyFirmOrders       = "planning.order.firm"        // Firm planned orders
 	dutyApproveForecast  = "planning.forecast.approve"  // Approve forecast consensus
 	dutyMaintainSetup    = "planning.setup.maintain"    // Maintain planning setup (4.22.17)
+	dutySimulate         = "planning.simulate"          // Run simulations: scenario create, run, compare (4.22.17)
 
 	idempotencyKey = "Idempotency-Key"
 	dateLayout     = "2006-01-02"
@@ -97,6 +98,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyMaintainSetup)).Post("/v1/planning/item-coverages", a.createItemCoverage)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/item-coverages/{id}", a.getItemCoverage)
 	r.With(authz.RequireDuty(dutyMaintainSetup)).Put("/v1/planning/item-coverages/{id}", a.updateItemCoverage)
+	a.registerScenarios(r)
 	a.registerBuffers(r)
 	a.registerQuotaArrangements(r)
 	a.registerCalculators(r)
@@ -371,6 +373,47 @@ func toRequirements(in []requirementDTO, asOf time.Time) ([]domain.Requirement, 
 	return out, nil
 }
 
+// buildSnapshot turns a validated run request into the engine's items: stored
+// site-scope item coverage fills what the request leaves out (FR-22.2,
+// FR-22.5) and the forecast model's reduced cells are added as demand
+// (FR-22.8). On failure it has written the problem response and returns false.
+// An operational run and a simulation (FR-22.15) take the same snapshot.
+func (a *API) buildSnapshot(w http.ResponseWriter, r *http.Request, code string, req runRequest) (time.Time, []domain.Item, bool) {
+	planEntity, err := a.store.PlanLegalEntity(r.Context(), code, req.LegalEntityID)
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return time.Time{}, nil, false
+	}
+	stored, err := a.store.RunCoverages(r.Context(), req.SiteID, planEntity, itemIDsOf(req.Items))
+	if err != nil {
+		httpx.Fail(w, r, err)
+		return time.Time{}, nil, false
+	}
+	if fields := withStoredCoverage(req.Items, stored); len(fields) > 0 {
+		validationFailed(w, r, fields)
+		return time.Time{}, nil, false
+	}
+	asOf, _ := time.Parse(dateLayout, req.AsOf)
+	items, err := req.toDomain(asOf)
+	if err != nil {
+		validationFailed(w, r, map[string]string{"items": err.Error()})
+		return time.Time{}, nil, false
+	}
+	if req.ForecastModel != "" {
+		lines, err := a.store.ForecastDemand(r.Context(), req.ForecastModel, req.SiteID, asOf)
+		if err != nil {
+			var p *httpx.Problem
+			if errors.As(err, &p) && p.Code == store.CodeForecastNotFound {
+				err = httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeForecastNotFound, "forecast model "+req.ForecastModel+" does not exist")
+			}
+			httpx.Fail(w, r, err)
+			return time.Time{}, nil, false
+		}
+		addForecastDemand(items, req.ForecastModel, asOf, lines)
+	}
+	return asOf, items, true
+}
+
 func (a *API) runPlan(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -401,37 +444,9 @@ func (a *API) runPlan(w http.ResponseWriter, r *http.Request) {
 		PlanCode string     `json:"planCode"`
 		Request  runRequest `json:"request"`
 	}{code, req})
-	planEntity, err := a.store.PlanLegalEntity(r.Context(), code, req.LegalEntityID)
-	if err != nil {
-		httpx.Fail(w, r, err)
+	asOf, items, ok := a.buildSnapshot(w, r, code, req)
+	if !ok {
 		return
-	}
-	stored, err := a.store.RunCoverages(r.Context(), req.SiteID, planEntity, itemIDsOf(req.Items))
-	if err != nil {
-		httpx.Fail(w, r, err)
-		return
-	}
-	if fields := withStoredCoverage(req.Items, stored); len(fields) > 0 {
-		validationFailed(w, r, fields)
-		return
-	}
-	asOf, _ := time.Parse(dateLayout, req.AsOf)
-	items, err := req.toDomain(asOf)
-	if err != nil {
-		validationFailed(w, r, map[string]string{"items": err.Error()})
-		return
-	}
-	if req.ForecastModel != "" {
-		lines, err := a.store.ForecastDemand(r.Context(), req.ForecastModel, req.SiteID, asOf)
-		if err != nil {
-			var p *httpx.Problem
-			if errors.As(err, &p) && p.Code == store.CodeForecastNotFound {
-				err = httpx.NewProblem(http.StatusUnprocessableEntity, store.CodeForecastNotFound, "forecast model "+req.ForecastModel+" does not exist")
-			}
-			httpx.Fail(w, r, err)
-			return
-		}
-		addForecastDemand(items, req.ForecastModel, asOf, lines)
 	}
 	started := a.now()
 	result, err := domain.RunWithCalendar(0, req.Calendar.toDomain(asOf), items)
@@ -572,6 +587,13 @@ func (a *API) listPlannedOrders(w http.ResponseWriter, r *http.Request) {
 	}
 	if f.ItemID != "" && !ids.Valid(f.ItemID) {
 		fields["itemId"] = "must be a UUID"
+	}
+	if raw := q.Get("version"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 {
+			fields["version"] = "must be a positive version number"
+		}
+		f.Version = n
 	}
 	if len(fields) > 0 {
 		validationFailed(w, r, fields)

@@ -25,9 +25,33 @@ var MessageRaised = events.Type(Context, "message", "raised", 1)
 // forecast consensus (FR-22.9), in the publishing transaction.
 var ForecastPublished = events.Type(Context, "forecast", "published", 1)
 
+// ScenarioSimulated is published when a simulation run finishes (FR-22.15,
+// BR-22.14). It is a separate type from plan.completed.v1 so that consumers of
+// the operational plan never see a simulation: no messages, firmed orders or
+// plan.completed.v1 are published for a simulation version.
+var ScenarioSimulated = events.Type(Context, "scenario", "simulated", 1)
+
 // All lists the event types this service publishes.
 func All() []string {
-	return []string{PlanStarted, PlanCompleted, PlannedOrderFirmed, MessageRaised, ForecastPublished}
+	return []string{PlanStarted, PlanCompleted, PlannedOrderFirmed, MessageRaised, ForecastPublished, ScenarioSimulated}
+}
+
+// ScenarioSimulatedData is the data member of scenario.simulated.v1. The
+// version is a simulation version of the plan; it is never current.
+type ScenarioSimulatedData struct {
+	PlanID        string        `json:"plan_id"`
+	PlanCode      string        `json:"plan_code"`
+	ScenarioID    string        `json:"scenario_id"`
+	ScenarioCode  string        `json:"scenario_code"`
+	VersionID     string        `json:"version_id"`
+	VersionNumber int           `json:"version_number"`
+	SiteID        string        `json:"site_id"`
+	AsOf          string        `json:"as_of"`
+	ItemsPlanned  int           `json:"items_planned"`
+	PlannedOrders PlannedCounts `json:"planned_orders"`
+	Messages      int           `json:"messages"`
+	DurationMs    int64         `json:"duration_ms"`
+	PlanHash      string        `json:"plan_hash"`
 }
 
 // ForecastPublishedData is the data member of forecast.published.v1. Version

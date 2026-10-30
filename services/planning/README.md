@@ -449,6 +449,7 @@ entity yet, is 409 `PLAN-CODE-TAKEN`.
 | `firming_batch` (with its `response` document) | entity-specific root (migration 0013) | the entity of the planned orders' plan version, for a planner's firming and for the run's auto-firm batch; a request mixing entities is 422 `PLAN-FIRM-ENTITY` |
 | `item_coverage` | entity-specific root | `legalEntityId` on the create, default the caller's single entity (422 for several or all; 403 outside the scope); an update keeps the owner |
 | `ddmrp_buffer` | entity-specific root | `legalEntityId` on `:recalculate`, same rules; a buffer of the same item, site and warehouse that the caller's scope cannot write is 409 `PLAN-BUFFER-ENTITY` and is never overwritten |
+| `planning_scenario` | entity-specific root (migration 0014): belongs to one plan (`plan_id`) and carries that plan's legal entity | copied from the plan when the scenario is created; the plan must have run and be visible to the caller (404 `PLAN-NOT-FOUND`), so a scenario is never created, read, changed or run outside the plan's entity; the simulation version it writes carries the same entity |
 | `coverage_group`, `buffer_profile` | stay tenant-level: shared planning setup that coverages and buffers of every entity refer to by id | n/a |
 
 Orders the caller cannot see are 404 `PLAN-ORDER-NOT-FOUND` when firming, so a batch
@@ -462,3 +463,15 @@ The quota-arrangement overlap rule (409 `PLAN-QUOTA-OVERLAP`) runs per legal ent
 as well as per item and site. That assumes a site belongs to exactly one legal
 entity; the site register lives in the org service, so a site shared between
 entities would let each entity hold an arrangement for it.
+
+### Simulation scenarios (FR-22.15, BR-22.14)
+
+A scenario belongs to a plan that has run at least once and to that plan's legal entity.
+Its demand factor (overall, or per item) scales independent demand only: sales lines and
+forecast; safety-stock and transfer-issue lines keep their quantity and dependent demand
+follows from the explosion. `POST /v1/planning/scenarios/{code}:run` applies a stored
+scenario to the plan-run snapshot and stores a `simulation` version of the scenario's plan. It never becomes current, never
+auto-firms, publishes only `scenario.simulated.v1` (no `plan.completed.v1`, `message.raised.v1`
+or `plannedorder.firmed.v1`), and its planned orders are 409 `PLAN-0003` on firm, change and
+delete. Read its orders with `GET /planned-orders?planCode=&version=N` and compare it with the
+operational version through `GET /plans/{planCode}/diff`. Duty `planning.simulate`.

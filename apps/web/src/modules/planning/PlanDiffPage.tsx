@@ -103,7 +103,9 @@ function DiffView({ diff }: { diff: VersionDiff }) {
 /**
  * Compare two versions of a plan (FR-22.14): which planned orders were added,
  * removed or changed between runs. The two versions are kept in `?from=` and
- * `?to=`; they default to the previous and the newest run.
+ * `?to=`; the later one defaults to the newest run and the earlier one to the
+ * current operational version (or the run before the later one when that is
+ * the current version), so a simulation is compared with the operational plan.
  */
 export function PlanDiffPage() {
   const [plan] = usePlanCode();
@@ -115,7 +117,10 @@ export function PlanDiffPage() {
     return numbers.includes(n) ? n : fallback;
   };
   const to = pick("to", numbers[numbers.length - 1] ?? 0);
-  const from = pick("from", numbers[numbers.length - 2] ?? 0);
+  // A simulation (FR-22.15) is compared with the operational plan by default:
+  // the earlier version is the current one unless that is the later version.
+  const current = (versions.data ?? []).find((v) => v.status === "current")?.number;
+  const from = pick("from", current !== undefined && current !== to ? current : (numbers.filter((n) => n !== to).pop() ?? 0));
   const ready = numbers.length >= 2 && from > 0 && to > 0 && from !== to;
   const diff = useLoad(
     (signal) => (ready ? diffVersions(plan, Math.min(from, to), Math.max(from, to), diffLimit, { signal }) : Promise.resolve(null)),
@@ -126,9 +131,15 @@ export function PlanDiffPage() {
     next.set(name, value);
     setParams(next);
   };
+  const byNumber = new Map((versions.data ?? []).map((v) => [v.number, v]));
+  const optionLabel = (n: number) => {
+    const v = byNumber.get(n);
+    if (v?.kind === "simulation") return `Version ${n} (simulation${v.scenarioCode ? ` ${v.scenarioCode}` : ""})`;
+    return v?.status === "current" ? `Version ${n} (current)` : `Version ${n}`;
+  };
   const options = numbers.map((n) => (
     <option key={n} value={n}>
-      Version {n}
+      {optionLabel(n)}
     </option>
   ));
   return (

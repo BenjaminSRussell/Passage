@@ -1,6 +1,6 @@
-# NOT-IMPLEMENTED (PSG-22, planning web module, slices 1 to 11)
+# NOT-IMPLEMENTED (PSG-22, planning web module, slices 1 to 13)
 
-Screens of slices 1 to 11, all registered in `module.ts` and built from the
+Screens of slices 1 to 13, all registered in `module.ts` and built from the
 shell primitives (`src/shell/ui`) with CSS Modules:
 
 - `/planning`: master planning workspace with plan picker, summary tiles
@@ -99,6 +99,22 @@ shell primitives (`src/shell/ui`) with CSS Modules:
   maximum per period, blocked) under an Idempotency-Key, checks the rules
   first and names 409 `PLAN-QUOTA-OVERLAP`. Tests in `buffers.test.tsx` and
   `quota.test.tsx`.
+- `/planning/scenarios` (slice 13, `ScenarioPages.tsx`): the planning scenarios
+  of the plan in view (code, name, plan, demand factor, number of item
+  changes, active badge) with loading, empty and error states; a row opens
+  `/planning/scenarios/:code`, which edits the scenario under If-Match
+  (reload offer on 412) and holds the "Run simulation" card: plan date, site
+  and the snapshot as JSON, posted with an Idempotency-Key kept across
+  retries; the result links to the simulation's planned orders
+  (`/planning/planned-orders?version=N`, read only, no firming card) and to
+  the version comparison, which compares a simulation with the current
+  operational version by default and labels simulation and current versions
+  in its pickers. `/planning/scenarios/new` creates one (code, plan,
+  name, demand factor, item factors, added demand and lead-time overrides as
+  JSON lines) for a plan that has run at least once, checks the service's
+  rules first and names 409 `PLAN-SCENARIO-EXISTS` and `PLAN-SCENARIO-LIMIT`
+  (404 `PLAN-NOT-FOUND` is shown as the service words it). The run history marks
+  simulation versions with their scenario. Tests in `scenario.test.tsx` and `plandiff.test.tsx`.
 
 Each list has loading, empty and error states; the plan in view is kept in the
 `?plan=` query. Needs: none (uses only libraries already in `apps/web`).
@@ -131,6 +147,9 @@ Each list has loading, empty and error states; the plan in view is kept in the
 | Supply schedule workbench over the stored plan (item selection, inline planned-order creation, quantity edits, firming, printable report) | later slice of PSG-22 | The service projects only the figures sent to it; requirements of a plan version are not readable per period yet. |
 | Buffer profiles: list, create, edit; DDMRP buffer status by site, zone and priority; recalculate one buffer | built | `BufferPages.tsx` (slice 10). |
 | Quota arrangements: list, create, edit with sources and ratings | built | `QuotaPages.tsx` (slice 10). |
+| Scenarios: list, create, edit, run a simulation, read its planned orders, mark simulations in the run history | built | `ScenarioPages.tsx` (slice 13). |
+| Scenario comparison report (planned qty and value deltas by item group, capacity load, purchase volume by vendor) | later slice of PSG-22 | The comparison is the existing planned-order version diff; value, item groups, capacity and vendor volume are not computed (service NOT-IMPLEMENTED.md, deliverable 6). |
+| Scenario lines as a table instead of JSON; messages and net requirements of a simulation | later slice of PSG-22 | The three line lists are JSON text like the run snapshot; the service reads messages and net requirements of the current version only. |
 | Buffer profile chosen by code on the item coverage form | later slice of PSG-22 | The item coverage form still takes the profile id; the service now checks it (422 `PLAN-PROFILE-NOT-FOUND`, shown by the form). |
 | Planner worklist sorted by planning priority with the planned orders of red buffers; quota arrangement analysis (planned vs actual split, MEQ6/MEQ8); expiring-supply messages | later slice of PSG-22 | The run does not plan from buffers or arrangements and books no allocated quantity yet, and batches are not persisted (service NOT-IMPLEMENTED.md, deliverables 7 to 9). |
 | Paging beyond 500 rows | later slice of PSG-22 | The list endpoints return at most 500 rows and no cursor yet; the workspace tiles say when they count only the first 500. |

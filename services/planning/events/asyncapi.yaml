@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: Passage Planning events
-  version: 0.4.0
+  version: 0.5.0
   description: CloudEvents 1.0 with Passage extensions (tenantid, correlationid, causationid, actor). Published through the outbox in the same transaction as the plan version change, the firming or the forecast publication.
 defaultContentType: application/cloudevents+json
 channels:
@@ -24,6 +24,11 @@ channels:
     messages:
       forecastPublishedV1:
         $ref: '#/components/messages/ForecastPublishedV1'
+  scenario:
+    address: passage.planning.scenario
+    messages:
+      scenarioSimulatedV1:
+        $ref: '#/components/messages/ScenarioSimulatedV1'
 operations:
   publishPlanStarted:
     action: send
@@ -58,6 +63,13 @@ operations:
     messages:
       - $ref: '#/channels/forecast/messages/forecastPublishedV1'
     summary: An approver published a submitted forecast consensus (FR-22.9). Written in the publishing transaction; the model's cells are locked from then on.
+  publishScenarioSimulated:
+    action: send
+    channel:
+      $ref: '#/channels/scenario'
+    messages:
+      - $ref: '#/channels/scenario/messages/scenarioSimulatedV1'
+    summary: A scenario run finished as a simulation version of its plan (FR-22.15, BR-22.14). Written in the run's transaction. Simulations publish no plan.completed.v1, message.raised.v1 or plannedorder.firmed.v1, so operational consumers never see them.
 components:
   messages:
     PlanStartedV1:
@@ -95,7 +107,37 @@ components:
       contentType: application/json
       payload:
         $ref: '#/components/schemas/ForecastPublishedData'
+    ScenarioSimulatedV1:
+      name: dev.passage.planning.scenario.simulated.v1
+      title: A scenario simulation finished
+      summary: A scenario simulation finished (CloudEvent dev.passage.planning.scenario.simulated.v1).
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ScenarioSimulatedData'
   schemas:
+    ScenarioSimulatedData:
+      type: object
+      required: [plan_id, plan_code, scenario_id, scenario_code, version_id, version_number, site_id, as_of, items_planned, planned_orders, messages, duration_ms, plan_hash]
+      properties:
+        plan_id: {type: string, format: uuid}
+        plan_code: {type: string}
+        scenario_id: {type: string, format: uuid}
+        scenario_code: {type: string}
+        version_id: {type: string, format: uuid, description: The simulation version; it is never the plan's current version}
+        version_number: {type: integer}
+        site_id: {type: string, format: uuid}
+        as_of: {type: string, format: date}
+        items_planned: {type: integer}
+        planned_orders:
+          type: object
+          required: [purchase, production, transfer]
+          properties:
+            purchase: {type: integer}
+            production: {type: integer}
+            transfer: {type: integer}
+        messages: {type: integer, description: Messages stored with the version; none of them is published}
+        duration_ms: {type: integer}
+        plan_hash: {type: string, description: sha256 hex over orders, pegging and messages}
     PlanStartedData:
       type: object
       required: [plan_id, plan_code, version_id, version_number, kind, site_id, as_of, items_planned]

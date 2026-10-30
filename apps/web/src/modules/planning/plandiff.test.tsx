@@ -75,6 +75,19 @@ describe("Compare plan versions", () => {
     expect(screen.queryByText("Showing the first orders of each list")).not.toBeInTheDocument();
   });
 
+  it("compares a newest simulation with the current operational version, not the run before it", async () => {
+    const sim = (n: number) => ({ ...version(n, "ccc"), status: "complete", kind: "simulation", scenarioCode: "UP20" });
+    const f = stub([
+      ["/diff", () => json({ ...diff, from: version(2, "bbb"), to: sim(4) })],
+      ["/versions", () => json({ items: [sim(4), sim(3), version(2, "bbb"), version(1, "aaa")] })],
+    ]);
+    renderAt("/planning/runs/compare?plan=MAIN&to=4");
+    await waitFor(() => expect(f.mock.calls.some(([u]) => String(u).includes("/plans/MAIN/diff?from=2&to=4"))).toBe(true));
+    expect(f.mock.calls.some(([u]) => String(u).includes("diff?from=3"))).toBe(false);
+    expect(screen.getAllByRole("option", { name: "Version 4 (simulation UP20)" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("option", { name: "Version 2 (current)" }).length).toBeGreaterThan(0);
+  });
+
   it("counts every order and says when the lists are cut", async () => {
     stub([
       ["/diff", () => json({ ...diff, addedCount: 812, truncated: true })],

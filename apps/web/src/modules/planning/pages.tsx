@@ -239,9 +239,12 @@ export function PlannedOrdersPage() {
   const navigate = useNavigate();
   const [reload, setReload] = useState(0);
   const [selected, setSelected] = useState<string[]>([]);
+  // `?version=N` reads a version by number: a simulation, whose orders cannot be firmed (FR-22.15).
+  const versionParam = Number(params.get("version"));
+  const version = Number.isInteger(versionParam) && versionParam > 0 ? versionParam : undefined;
   const state = useLoad(
-    (signal) => listPlannedOrders({ planCode: plan, status, limit: PAGE_LIMIT }, { signal }),
-    [plan, status, reload],
+    (signal) => listPlannedOrders({ planCode: plan, status, version, limit: PAGE_LIMIT }, { signal }),
+    [plan, status, version, reload],
   );
   const open = (state.data ?? []).filter(isFirmable);
   // Only orders still listed and open stay selected when the list changes.
@@ -278,7 +281,7 @@ export function PlannedOrdersPage() {
       key: "select",
       header: "Firm",
       render: (o) =>
-        isFirmable(o) ? (
+        isFirmable(o) && !version ? (
           <Input
             type="checkbox"
             aria-label={`Select ${o.number} for firming`}
@@ -302,7 +305,14 @@ export function PlannedOrdersPage() {
   };
   return (
     <div className={styles.stack}>
-      <PageHeader title="Planned orders" description={`Current version of plan ${plan}. Open an order to see the demand it serves.`} />
+      <PageHeader
+        title="Planned orders"
+        description={
+          version
+            ? `Version ${version} of plan ${plan}, read only: planned orders of a simulation cannot be firmed or changed.`
+            : `Current version of plan ${plan}. Open an order to see the demand it serves.`
+        }
+      />
       <PlanPicker>
         <div className={styles.toolbarField}>
           <FormField id="planning-status" label="Status">
@@ -320,7 +330,7 @@ export function PlannedOrdersPage() {
         </div>
       </PlanPicker>
       <LoadAlert what="planned orders" error={state.error} />
-      {state.error ? null : (
+      {state.error || version ? null : (
         <FirmCard
           selected={picked}
           openCount={open.length}
@@ -555,6 +565,11 @@ export function MessagesPage() {
 const versionColumns: DataTableColumn<PlanVersion>[] = [
   { key: "number", header: "Version", align: "end" },
   { key: "status", header: "Status", render: (v) => <StatusPill status={v.status} /> },
+  {
+    key: "kind",
+    header: "Kind",
+    render: (v) => (v.kind === "simulation" ? <Badge tone="info">{`Simulation ${v.scenarioCode ?? ""}`.trim()}</Badge> : "Operational"),
+  },
   { key: "asOf", header: "As of" },
   { key: "itemsPlanned", header: "Items", align: "end" },
   { key: "plannedOrders", header: "Planned orders", align: "end" },
