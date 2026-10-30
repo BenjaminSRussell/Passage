@@ -69,7 +69,7 @@ select c.relname, c.relrowsecurity, c.relforcerowsecurity,
           and (p.roles = '{public}' or 'passage_app' = any (p.roles))
           and (coalesce(p.qual, '') || ' ' || coalesce(p.with_check, '')) !~ '` + tenantColumn + `'),
   exists (select 1 from pg_policies p where p.schemaname = n.nspname and p.tablename = c.relname and p.permissive = 'RESTRICTIVE'
-          and p.qual ~* 'legal_entity_id[[:space:])]+is[[:space:]]+null')
+          and (coalesce(p.qual, '') || ' ' || coalesce(p.with_check, '')) ~* 'legal_entity_id[[:space:])]+is[[:space:]]+null')
 from pg_class c
 join pg_namespace n on n.oid = c.relnamespace
 where n.nspname = $1 and c.relkind in ('r', 'p') and not c.relispartition and c.relname <> 'schema_migrations'
@@ -295,6 +295,7 @@ func TestFixtureViolationsArePinned(t *testing.T) {
 		"fixture.extra_true:" + problemExtraPolicy,
 		"fixture.insert_true:" + problemExtraPolicy,
 		"fixture.null_admitting:" + problemNullEntity,
+		"fixture.null_check:" + problemNullEntity,
 		"fixture.select_restrictive:" + problemNoEntityPol,
 	}
 	if strings.Join(keys, "\n") != strings.Join(want, "\n") {

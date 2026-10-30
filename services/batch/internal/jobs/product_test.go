@@ -549,7 +549,7 @@ func TestHTTPProductClientTreats5xxAndBrokenBodyAsRetryable(t *testing.T) {
 			_, _ = w.Write([]byte("not json"))
 		}
 	}))
-	for _, code := range []int{http.StatusBadGateway, http.StatusOK} {
+	for _, code := range []int{http.StatusBadGateway, http.StatusOK, http.StatusUnauthorized} {
 		status = code
 		if _, err := client.ReleasedPage(runCtx(1), "", 1); err == nil || errors.Is(err, jobs.ErrRejected) {
 			t.Fatalf("status %d: err = %v; want a retryable error", code, err)

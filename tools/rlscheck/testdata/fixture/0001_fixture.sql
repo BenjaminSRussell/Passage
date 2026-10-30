@@ -47,3 +47,13 @@ create policy null_admitting_tenant on null_admitting as permissive
   with check (tenant_id = current_setting('passage.tenant_id', true)::uuid);
 create policy null_admitting_entity on null_admitting as restrictive
   using (legal_entity_id is null or current_setting('passage.legal_entity_scopes', true) = '*' or legal_entity_id::text = any(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));
+
+create table null_check (tenant_id uuid not null, legal_entity_id uuid);
+alter table null_check enable row level security;
+alter table null_check force row level security;
+create policy null_check_tenant on null_check as permissive
+  using (tenant_id = current_setting('passage.tenant_id', true)::uuid)
+  with check (tenant_id = current_setting('passage.tenant_id', true)::uuid);
+create policy null_check_entity on null_check as restrictive
+  using (current_setting('passage.legal_entity_scopes', true) = '*' or legal_entity_id::text = any(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')))
+  with check (legal_entity_id is null or current_setting('passage.legal_entity_scopes', true) = '*' or legal_entity_id::text = any(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));

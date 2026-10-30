@@ -138,7 +138,7 @@ func (c *HTTPProductClient) once(ctx context.Context, method, path, duty string,
 	if resp.StatusCode != http.StatusOK {
 		detail, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorDetail))
 		err := fmt.Errorf("product responded with status %d: %s", resp.StatusCode, strings.TrimSpace(string(detail)))
-		if resp.StatusCode < 500 && resp.StatusCode != http.StatusRequestTimeout && resp.StatusCode != http.StatusTooManyRequests {
+		if resp.StatusCode < 500 && resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusRequestTimeout && resp.StatusCode != http.StatusTooManyRequests {
 			return 0, fmt.Errorf("%w: %w", ErrRejected, err)
 		}
 		return retryAfter(resp.Header.Get("Retry-After")), err

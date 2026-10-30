@@ -53,6 +53,7 @@ func TestGrants_AppRoleWorkflowAndAppendOnlyTables(t *testing.T) {
 		`update batch_run set triggered_by = triggered_by`,
 		`update batch_run set legal_entity_id = legal_entity_id`,
 		`update batch_run set params = params`,
+		`update batch_run set service_duties = service_duties`,
 		`delete from batch_run_pages`,
 		`delete from workflow_work_item`,
 	} {

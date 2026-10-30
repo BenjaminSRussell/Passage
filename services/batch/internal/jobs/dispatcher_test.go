@@ -414,3 +414,22 @@ func TestExhaustedRunsBecomeFailedAndTheScanSeesPastRowSecurity(t *testing.T) {
 	cancel()
 	<-stopped
 }
+
+func TestDispatchFunctionsIgnoreAShadowingMakeIntervalInTheSchema(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.Exec(context.Background(), `create function make_interval(secs integer) returns interval language sql as $$ select interval '0 seconds' $$`); err != nil {
+		t.Fatal(err)
+	}
+	runs := store.New(app)
+	cooling := startProductRun(t, runs, scoped(1), "cooling", jobs.HandlerProductGroupChange)
+	setRun(t, admin, cooling.ID, "status = 'error', ended_at = now() - interval '30 seconds'")
+	if ids := runnableIDs(t, jobs.NewPgRunSource(app)); len(ids) != 0 {
+		t.Fatalf("a hijacked make_interval made a run 30s into its 60s wait runnable: %v", ids)
+	}
+	if failed, err := jobs.NewPgRunSource(app).FailExhausted(context.Background(), dispatchHandlers, 0); err != nil || len(failed) != 0 {
+		t.Fatalf("max_attempts 0 must fail nothing: %v, %v", failed, err)
+	}
+}

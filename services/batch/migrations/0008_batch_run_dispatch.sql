@@ -4,6 +4,11 @@ alter table batch_run add column if not exists service_duties text[];
 
 create index if not exists ix_batch_run_dispatch on batch_run (status, scheduled_at) where status in ('executing', 'error');
 
+update batch_run set status = 'failed', ended_at = now(), claimed_until = null,
+  error = 'run predates legal-entity binding and cannot be dispatched; start it again'
+where legal_entity_id is null and status = 'executing'
+  and job_id in (select id from batch_job where handler in ('product.explode', 'product.group-change'));
+
 DROP POLICY IF EXISTS batch_run_legal_entity_scope ON batch_run;
 CREATE POLICY batch_run_legal_entity_scope ON batch_run AS RESTRICTIVE
   USING (current_setting('passage.legal_entity_scopes', true) = '*'
@@ -25,11 +30,11 @@ BEGIN
         JOIN batch_job j ON j.tenant_id = r.tenant_id AND j.id = r.job_id
         WHERE j.handler = ANY (handlers)
           AND r.legal_entity_id IS NOT NULL AND r.triggered_by IS NOT NULL
-          AND coalesce(cardinality(r.service_duties), 0) > 0
+          AND coalesce(pg_catalog.cardinality(r.service_duties), 0) > 0
           AND r.attempts < max_attempts
-          AND (r.claimed_until IS NULL OR r.claimed_until < now())
+          AND (r.claimed_until IS NULL OR r.claimed_until < pg_catalog.now())
           AND (r.status = 'executing'
-               OR (r.status = 'error' AND coalesce(r.ended_at, '-infinity') < now() - make_interval(secs => retry_after_secs)))
+               OR (r.status = 'error' AND coalesce(r.ended_at, '-infinity') < pg_catalog.now() - pg_catalog.make_interval(secs => retry_after_secs::float8)))
         ORDER BY r.scheduled_at, r.id
         LIMIT max_rows
       $body$;
@@ -38,12 +43,12 @@ BEGIN
       LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, %1$I, pg_temp
       AS $body$
         UPDATE batch_run r
-        SET status = 'failed', ended_at = now(), claimed_until = NULL,
+        SET status = 'failed', ended_at = pg_catalog.now(), claimed_until = NULL,
             error = coalesce(nullif(r.error, ''), 'dispatch attempts exhausted')
         FROM batch_job j
         WHERE j.tenant_id = r.tenant_id AND j.id = r.job_id AND j.handler = ANY (handlers)
-          AND r.status IN ('executing', 'error') AND r.attempts >= max_attempts
-          AND (r.claimed_until IS NULL OR r.claimed_until < now())
+          AND max_attempts >= 1 AND r.status IN ('executing', 'error') AND r.attempts >= max_attempts
+          AND (r.claimed_until IS NULL OR r.claimed_until < pg_catalog.now())
         RETURNING r.tenant_id, r.id
       $body$;
     CREATE OR REPLACE FUNCTION batch_dispatch_can_scan()
