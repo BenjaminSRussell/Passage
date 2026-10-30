@@ -1,6 +1,6 @@
 # receiving
 
-Wave 18 deployable: receiving, product receipts and three-way match. One Go module, one image (`receiving`). Delivered so far: the pure domain, the policy tester endpoint, the Postgres receipt store, and the HTTP surface for arrivals, direct receipts, registration, posting, correction, cancellation, receipt and GR/IR inquiry and vendor invoice posting, with `receipt.posted`, `receipt.corrected` and `invoice.posted` written to the outbox in the same transaction (`events/asyncapi.yaml`). Deliverables 2 to 8 are open; see `NOT-IMPLEMENTED.md`.
+Wave 18 deployable: receiving, product receipts and three-way match. One Go module, one image (`receiving`). Delivered so far: the pure domain, the policy tester endpoint, the Postgres receipt store, and the HTTP surface for arrivals, direct receipts, registration, posting, correction, cancellation, receipt and GR/IR inquiry and vendor invoice posting, subsequent debits and credits, invoicing plan settlement and consignment settlement, with `receipt.posted`, `receipt.corrected`, `invoice.posted`, `invoice.adjusted` and `settlement.posted` written to the outbox in the same transaction (`events/asyncapi.yaml`). Deliverables 2 to 7 and the one-time payee invoice are open; see `NOT-IMPLEMENTED.md`.
 
 ## Run and test
 
@@ -21,6 +21,7 @@ Store tests run only when `PASSAGE_TEST_DATABASE_URL` is set, against a role wit
 | `LEDGER_URL` | base URL of the ledger service (`POST /v1/ledger/journal-entries`, 3 s timeout); required |
 | `CLOSE_URL` | base URL of `services/close` (`POST /v1/close/period-statuses:check`, 2 s timeout, source system `ap`); required |
 | `PURCHASING_URL` | base URL of `services/purchasing` (`GET /v1/procurement/purchase-orders/{id}`, 2 s timeout); the caller's own tenant, legal entity, user and duties are forwarded, so the caller needs `PurchaseOrderInquire`; required |
+| `INVENTORY_URL` | base URL of `services/inventory` (`GET /v1/inventory/journals` and `/{id}`, 2 s timeout); the caller's identity is forwarded, so the caller needs `inventory.read`; optional: without it (and without `PASSAGE_ALLOW_FAKES=1`) the consignment settlement answers 503 `COM-0503` |
 | `POSTING_LEDGER_ID` | UUID of the ledger that receipt journals post to (`ledgerId` in the ledger's entry request); invoices carry their own `ledgerId`; required |
 | `POSTING_ACCOUNT_INVENTORY`, `POSTING_ACCOUNT_GRIR`, `POSTING_ACCOUNT_PPV`, `POSTING_ACCOUNT_VENDOR_CONTROL` | ledger account codes for receipt and invoice journals (posting profile); all four required |
 | `PASSAGE_ALLOW_FAKES` | `1` lets an empty `LEDGER_URL`, `CLOSE_URL`, `PURCHASING_URL` or posting account fall back to the in-memory fakes with a warning log; local development only, any other value fails start-up |
@@ -36,7 +37,7 @@ Store tests run only when `PASSAGE_TEST_DATABASE_URL` is set, against a role wit
 | `POST /v1/receiving/receipts/{id}:post`, `:correct`, `:cancel` | `ReceivingPost` |
 | `GET /v1/receiving/grir` | `APInquire` |
 | `GET /v1/receiving/pending-postings`, `POST /v1/receiving/pending-postings/{key}/resolve` | `ReceivingAdmin` |
-| `POST /v1/receiving/invoices:post` | `VendorInvoicePost` |
+| `POST /v1/receiving/invoices:post`, `POST /v1/receiving/invoice-adjustments:post`, `POST /v1/receiving/plan-settlements:run`, `POST /v1/receiving/consignment-settlements:run` | `VendorInvoicePost` |
 
 Every POST except the tester requires `Idempotency-Key`; replays carry `Idempotent-Replayed: true`. Commands on an existing receipt (`:register`, `:post`, `:correct`, `:cancel`) also require `If-Match` with the receipt `version` (428 when absent, 412 when stale); every receipt response carries `version` and an `ETag`. Lists page with an opaque `nextCursor`. Also: `GET /healthz`, `GET /readyz` (database ping within 500 ms, 503 when down), `GET /metrics` on the admin port. Contract: `api/openapi.yaml`. The PRD lists the tester under `/payables/`; wave 19 owns that service, so it is hosted here and moving it is a path rename.
 
@@ -52,6 +53,10 @@ Every POST except the tester requires `Idempotency-Key`; replays carry `Idempote
 - Money and quantities are accepted as JSON numbers or as decimal strings (`"2.50"`); strings are validated as plain decimals.
 - `:correct` and `:cancel` take an optional `postingDate` (default the receipt date, never earlier). When a correction brings a line to its invoiced quantity the amount becomes the cleared amount, so no rounding residual is left on the closed GR/IR item.
 - A correction changes quantities on a POSTED receipt and leaves it POSTED; it cannot go below the invoiced quantity or to zero, and serial-tracked lines are refused. Cancelling a POSTED receipt reverses the ledger entry and closes its GR/IR items at zero; a cancelled receipt keeps its packing slip.
+- Subsequent debit and credit (`invoice-adjustments:post`) is value only: it references lines of a posted invoice, never changes GR/IR items or quantities, and posts to the difference account that line used (inventory, or PPV for a `standardCost` line) against vendor control. GR/IR is not touched because the invoice already cleared it by quantity at the receipt value; only the price difference is adjusted. A credit may not exceed invoiced amount + earlier debits - earlier credits on the line (`AP-CRD-001`), counted across the lines of the request and serialised per original invoice. The ledger key is `post:receiving:invoiceadjustment:<id>`, so a retry as the other kind meets the first posting instead of posting a second one; the id derives from tenant, original invoice and document number, which is unique per invoice ignoring case.
+- Invoicing plan settlement (`plan-settlements:run`) takes one purchase order, reads its plans from purchasing and settles OPEN rows due on or before `postingDate` as Dr GR/IR / Cr vendor control (an invoice before receipt leaves a GR/IR debit that the receipt posting later offsets; the per-receipt GR/IR open items do not carry it). Plans without `settleWithoutReceipt` are skipped (`AWAITS_RECEIPT`). Settlement is recorded once per (order, line, row) in `receiving_settlement`; purchasing keeps the row OPEN because it has no endpoint to mark it INVOICED (#289). To keep that from paying twice, a PO line (order and product, because receipts carry no PO line number) with PLAN_ROW settlements refuses invoices against its receipts (`AP-PLN-001`), and the run skips a line that already has invoiced GR/IR quantity (`LINE_INVOICED`); both checks take the same per-line advisory lock inside the posting transaction.
+- Consignment settlement (`consignment-settlements:run`) turns each POSTED inventory `OWNERSHIP_CHANGE` journal of the legal entity into Dr consignment accrual / Cr vendor control, using the accrual account and amount of the journal's GL entry, once per journal. The inventory vendor is the owner text, so `receiving_settlement.vendor_id` is text. A journal whose amount is zero is skipped (`NO_AMOUNT`) and listed again on every run.
+- Settlement runs settle at most 100 sources (`hasMore`) and stop on the first failure; settled sources stay settled and a repeat continues.
 - The invoice endpoint lives here until wave 19 owns payables; its event uses the `payables` context the PRD names.
 
 ## Error codes
@@ -75,6 +80,9 @@ Every POST except the tester requires `Idempotency-Key`; replays carry `Idempote
 | RCV-COR-001 | 409 | correction would take a line below its invoiced quantity |
 | RCV-IDM-001 | 409 | an earlier ledger posting for the receipt or invoice is unfinished (the ledger accepted it, the local commit did not) or differs; repeat the original request first |
 | RCV-NF-001 / RCV-NF-002 / RCV-NF-003 / RCV-NF-004 | 404 | receipt not found / receipt line has no open GR/IR item / pending posting not found / purchase order not found |
+| RCV-NF-005 / RCV-NF-006 | 404 | adjustment: original invoice not found / consignment settlement: inventory journal not found |
+| AP-CRD-001 | 422 | credit above what is left to credit on the invoice line |
+| AP-PLN-001 | 422 | invoice against a receipt line whose PO line is settled by its invoicing plan |
 | RCV-PO-001 | 422 | evaluate: purchase order is not APPROVED or CONFIRMED |
 | RCV-PO-002 | 422 | evaluate: purchase order line is cancelled |
 | RCV-LDG-001 | 422 | the ledger refused the reversal made by a resolve; not retryable |
@@ -98,7 +106,7 @@ When the original request cannot be repeated (the client is gone, the data chang
 
 ## Metrics
 
-`receiving_matches_evaluated_total`, `receiving_evaluate_rejected_total`, `receiving_receipts_arrived_total`, `receiving_receipts_registered_total`, `receiving_receipts_posted_total`, `receiving_receipts_adjusted_total`, `receiving_invoices_posted_total`, `receiving_pending_postings_open`, `receiving_pending_postings_oldest_age_seconds`, `receiving_http_requests_total`, `receiving_http_request_duration_seconds`. No Prometheus client dependency.
+`receiving_matches_evaluated_total`, `receiving_evaluate_rejected_total`, `receiving_receipts_arrived_total`, `receiving_receipts_registered_total`, `receiving_receipts_posted_total`, `receiving_receipts_adjusted_total`, `receiving_invoices_posted_total`, `receiving_invoice_adjustments_posted_total`, `receiving_settlements_posted_total`, `receiving_pending_postings_open`, `receiving_pending_postings_oldest_age_seconds`, `receiving_http_requests_total`, `receiving_http_request_duration_seconds`. No Prometheus client dependency.
 
 ## Needs
 

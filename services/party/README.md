@@ -65,6 +65,7 @@ Protected fields per legal entity (FR-7.10, `party.protected_fields`): `GET /v1/
 | `PTY-VERSION-REQUIRED` | 428 | PATCH without a usable `If-Match` or body `version` |
 | `PTY-VERSION-CONFLICT` | 409 | PATCH with a stale version (error class `conflict_version`) |
 | `PTY-STATUS-TRANSITION` | 422 | status other than `active` or `inactive`, or the party is merged |
+| `PTY-LEGAL-ENTITY-REQUIRED` | 422 | party create needs a caller scoped to exactly one legal entity (the party number is allocated per entity); none or several is refused |
 | `PTY-CUSTOMER-NOT-FOUND` | 404 | unknown customer id, another tenant or legal entity, or a malformed id |
 | `PTY-CHANGE-NOT-FOUND` | 404 | unknown pending change, another tenant or legal entity, or a malformed id |
 | `PTY-CHANGE-PENDING` | 409 | a credit limit change is already awaiting approval for this customer |

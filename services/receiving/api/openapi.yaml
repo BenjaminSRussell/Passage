@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: receiving
   version: 0.1.0
-  description: Receiving, product receipts, GR/IR and vendor invoice posting, and the pure matching policy tester.
+  description: Receiving, product receipts, GR/IR, vendor invoice posting, subsequent debits and credits, invoicing plan and consignment settlement, and the pure matching policy tester.
 servers:
   - url: https://app.local.passage.dev
 paths:
@@ -279,8 +279,108 @@ paths:
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
         '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-002 receipt line has no open GR/IR item.' }
         '409': { $ref: '#/components/responses/Problem', description: 'AP-DUP-001 invoice number already posted for the vendor; RCV-IDM-001 an earlier posting for this invoice is unfinished or differs; COM-0410.' }
-        '422': { $ref: '#/components/responses/Problem', description: 'PER-AP-001 closed AP period; AP-QTY-001 more than received and uninvoiced; RCV-VAL-001 other vendor or entity; COM-0409.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PER-AP-001 closed AP period; AP-QTY-001 more than received and uninvoiced; AP-PLN-001 the PO line is settled by its invoicing plan; RCV-VAL-001 other vendor or entity; COM-0409.' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/invoice-adjustments:post:
+    post:
+      operationId: postInvoiceAdjustment
+      x-passage-duty: VendorInvoicePost
+      description: >-
+        Posts a subsequent debit (kind DEBIT, the vendor charges more) or a credit note (kind CREDIT, the vendor charges less)
+        against a posted vendor invoice. The adjustment is value only: each line names a line of the original invoice and a
+        positive amount, GR/IR items and quantities are untouched, and the amount posts to the difference account that line used
+        (inventory, or PPV when the invoice line was standardCost) against vendor control (DEBIT: Dr difference / Cr vendor
+        control; CREDIT: Dr vendor control / Cr difference). The vendor and currency come from the original invoice. Credits are
+        capped per invoice line at invoiced amount + earlier debits - earlier credits, counting every line of the request
+        (AP-CRD-001). The adjustment id derives from tenant, original invoice and document number (unique per invoice ignoring
+        case), so the ledger idempotency key is stable across retries. Writes dev.passage.payables.invoice.adjusted.v1 to the outbox.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InvoiceAdjustmentRequest' }
+      responses:
+        '201':
+          description: Posted adjustment.
+          headers:
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] }, description: Present on replays only. }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceAdjustment' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-005 original invoice not found.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'AP-DUP-001 document number already posted for the invoice; RCV-IDM-001 an earlier posting is unfinished or differs; COM-0410.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'AP-CRD-001 credit above what is left to credit; PER-AP-001 closed AP period; RCV-VAL-001 unknown invoice line, amount with more decimals than the currency, other entity or ledger; COM-0409.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/plan-settlements:run:
+    post:
+      operationId: runPlanSettlement
+      x-passage-duty: VendorInvoicePost
+      description: >-
+        Settles the due rows of a purchase order's invoicing plans (purchasing GET .../invoicing-plans). A row is settled when its
+        due date is on or before postingDate, it is OPEN in purchasing, its line is not cancelled, the plan has
+        settleWithoutReceipt, its currency is the order's and its amount is positive. Each settled row posts Dr GR/IR / Cr vendor
+        control for its amount and is recorded once per (order, line, row), so a repeated run settles nothing twice. Other due rows
+        come back in skipped with a reason. At most 100 rows are settled per run (hasMore); a failure stops the run, rows already
+        settled stay settled and a repeat continues. Rows stay OPEN in purchasing (it has no marking endpoint yet). The caller
+        needs the purchasing duty PurchaseOrderInquire. Writes dev.passage.payables.settlement.posted.v1 per row.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlanSettlementRequest' }
+      responses:
+        '200':
+          description: Rows settled by this run and rows skipped.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SettlementRun' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-004 purchase order not found.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'RCV-IDM-001, COM-0410.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PER-AP-001 closed AP period; RCV-PO-001 order not approved; RCV-VAL-001 order of another entity or foreign ledger; COM-0409.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+        '503': { $ref: '#/components/responses/Problem', description: 'COM-0503 purchasing unavailable or not configured.' }
+  /v1/receiving/consignment-settlements:run:
+    post:
+      operationId: runConsignmentSettlement
+      x-passage-duty: VendorInvoicePost
+      description: >-
+        Settles consumed consignment stock. Reads the legal entity's POSTED OWNERSHIP_CHANGE journals from inventory (GET
+        /v1/inventory/journals and /{id}; the vendor is the owner dimension of the lines, the accrual account and amount come from
+        the journal's GL entry credit) and, for every journal not settled yet, posts Dr consignment accrual / Cr vendor control
+        for the journal amount, once per journal. vendorId limits the run to one vendor (the owner text, case-insensitive). At most
+        100 journals are settled per run (hasMore); a failure stops the run and a repeat continues. The caller needs the inventory
+        duty inventory.read. Answers 503 when INVENTORY_URL is not set. Writes dev.passage.payables.settlement.posted.v1 per journal.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConsignmentSettlementRequest' }
+      responses:
+        '200':
+          description: Journals settled by this run and journals skipped.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SettlementRun' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-006 journal not found in inventory.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'RCV-IDM-001, COM-0410.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PER-AP-001 closed AP period; RCV-VAL-001 foreign ledger; COM-0409.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+        '503': { $ref: '#/components/responses/Problem', description: 'COM-0503 inventory unavailable or not configured.' }
   /v1/receiving/pending-postings:
     get:
       operationId: listPendingPostings
@@ -694,6 +794,107 @@ components:
               unitPrice: { type: string }
               amount: { type: string }
               standardCost: { type: boolean }
+    InvoiceAdjustmentRequest:
+      type: object
+      additionalProperties: false
+      required: [originalInvoiceId, legalEntityId, kind, documentNumber, documentDate, postingDate, fiscalPeriodId, lines]
+      properties:
+        originalInvoiceId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid, description: Must be the legal entity of the original invoice. }
+        kind: { type: string, enum: [CREDIT, DEBIT] }
+        documentNumber: { type: string, minLength: 1, maxLength: 64, description: The vendor's credit or debit note number. Trimmed; unique per original invoice ignoring case. }
+        documentDate: { type: string, format: date }
+        postingDate: { type: string, format: date }
+        ledgerId: { type: string, format: uuid, description: Optional. The service posts to its configured ledger; a different value is refused with 422 RCV-VAL-001. }
+        fiscalPeriodId: { type: string, format: uuid }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: object
+            additionalProperties: false
+            required: [invoiceLineNo, amount]
+            properties:
+              invoiceLineNo: { type: integer, minimum: 1, description: The line of the original invoice (lineNo in the Invoice response). The same line may appear more than once. }
+              amount: { type: [number, string], exclusiveMinimum: 0, description: In the invoice currency with at most its minor-unit decimals. }
+    InvoiceAdjustment:
+      type: object
+      required: [id, originalInvoiceId, legalEntityId, vendorId, kind, documentNumber, documentDate, postingDate, currency, ledgerId, fiscalPeriodId, total, ledgerEntryId, createdAt, lines]
+      properties:
+        id: { type: string, format: uuid }
+        originalInvoiceId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        vendorId: { type: string, format: uuid }
+        kind: { type: string, enum: [CREDIT, DEBIT] }
+        documentNumber: { type: string }
+        documentDate: { type: string, format: date }
+        postingDate: { type: string, format: date }
+        currency: { type: string }
+        ledgerId: { type: string, format: uuid }
+        fiscalPeriodId: { type: string, format: uuid }
+        total: { type: string }
+        ledgerEntryId: { type: string }
+        createdAt: { type: string, format: date-time }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [lineNo, invoiceLineNo, amount]
+            properties:
+              lineNo: { type: integer }
+              invoiceLineNo: { type: integer }
+              amount: { type: string }
+    PlanSettlementRequest:
+      type: object
+      additionalProperties: false
+      required: [purchaseOrderId, legalEntityId, postingDate, fiscalPeriodId]
+      properties:
+        purchaseOrderId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid, description: Must be the legal entity of the purchase order. }
+        postingDate: { type: string, format: date, description: Rows due on or before this date are settled; it is also the ledger posting date. }
+        ledgerId: { type: string, format: uuid }
+        fiscalPeriodId: { type: string, format: uuid }
+    ConsignmentSettlementRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, postingDate, fiscalPeriodId]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        vendorId: { type: string, description: Optional. Limits the run to one vendor (inventory owner text). }
+        postingDate: { type: string, format: date, description: The ledger posting date. }
+        ledgerId: { type: string, format: uuid }
+        fiscalPeriodId: { type: string, format: uuid }
+    SettlementRun:
+      type: object
+      required: [settled, skipped, hasMore]
+      properties:
+        settled:
+          type: array
+          items:
+            type: object
+            required: [id, kind, sourceRef, legalEntityId, vendorId, postingDate, currency, amount, ledgerId, fiscalPeriodId, ledgerEntryId]
+            properties:
+              id: { type: string, format: uuid }
+              kind: { type: string, enum: [PLAN_ROW, CONSIGNMENT] }
+              sourceRef: { type: string, description: '<order id>/<line no>/<row seq> for PLAN_ROW; the inventory journal id for CONSIGNMENT.' }
+              legalEntityId: { type: string, format: uuid }
+              vendorId: { type: string }
+              postingDate: { type: string, format: date }
+              currency: { type: string }
+              amount: { type: string }
+              ledgerId: { type: string, format: uuid }
+              fiscalPeriodId: { type: string, format: uuid }
+              ledgerEntryId: { type: string }
+        skipped:
+          type: array
+          items:
+            type: object
+            required: [sourceRef, reason]
+            properties:
+              sourceRef: { type: string }
+              reason: { type: string, enum: [ALREADY_INVOICED, UNKNOWN_ROW_STATUS, ALREADY_SETTLED, AWAITS_RECEIPT, LINE_CANCELLED, LINE_INVOICED, NO_PRODUCT, CURRENCY_MISMATCH, NO_AMOUNT, OTHER_VENDOR, OTHER_LEGAL_ENTITY] }
+        hasMore: { type: boolean, description: True when the run stopped at 100 settlements or the inventory journal list was cut at its page bound; run again. }
     Status:
       type: string
       enum: [NOT_MATCHED, MATCHED, PRICE_VARIANCE, QTY_VARIANCE, TOTAL_VARIANCE, NO_RECEIPT, WAITING_RECEIPT]

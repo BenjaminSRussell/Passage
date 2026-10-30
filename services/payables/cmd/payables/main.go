@@ -15,6 +15,7 @@ import (
 	"github.com/BenjaminSRussell/passage/services/payables"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/api"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/payables/internal/fx"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/ledger"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/store"
 )
@@ -58,7 +59,8 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return err
 	}
 	defer validator.Close()
-	a := api.New(pool, validator, time.Now).WithAging(store.New(pool), ledgerBalances(getenv), getenv("AP_CONTROL_ACCOUNT"))
+	items := store.New(pool)
+	a := api.New(pool, validator, time.Now).WithAging(items, ledgerBalances(getenv), getenv("AP_CONTROL_ACCOUNT")).WithProposals(items, rateSource(getenv))
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
@@ -82,6 +84,18 @@ func ledgerBalances(getenv func(string) string) api.LedgerBalances {
 		timeout = v
 	}
 	return ledger.New(url, &http.Client{Timeout: timeout})
+}
+
+func rateSource(getenv func(string) string) api.RateSource {
+	url := getenv("FX_URL")
+	if url == "" {
+		return nil
+	}
+	timeout := fx.Timeout
+	if v, err := time.ParseDuration(getenv("FX_TIMEOUT")); err == nil && v > 0 {
+		timeout = v
+	}
+	return fx.New(url, getenv("FX_RATE_TYPE"), &http.Client{Timeout: timeout})
 }
 
 func addr(getenv func(string) string, key, fallback string) string {

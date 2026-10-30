@@ -119,6 +119,145 @@ paths:
         '500': { $ref: '#/components/responses/Problem' }
         '502': { $ref: '#/components/responses/Problem' }
         '503': { $ref: '#/components/responses/Problem' }
+  /v1/payables/open-items:
+    get:
+      operationId: listOpenItems
+      x-passage-duty: open-item.read
+      description: Open items of one legal entity, ordered by due date then id, with keyset pagination (limit 1 to 200, default 50; pass the previous nextCursor as cursor). legal_entity defaults to the caller's legal-entity scope and is required for an unscoped caller; naming an entity outside the caller's scope is a 403. With value_in, every item carries a valuation in that currency at the spot rate of today (UTC) from the fx service; the call forwards the caller's identity and duties, so the caller also needs the fx rate-read duty until service identity (#226) replaces forwarding.
+      parameters:
+        - { name: legal_entity, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: vendor, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: due_from, in: query, required: false, description: Due date on or after., schema: { type: string, format: date } }
+        - { name: due_to, in: query, required: false, description: Due date on or before., schema: { type: string, format: date } }
+        - { name: currency, in: query, required: false, schema: { type: string, pattern: '^[A-Z]{3}$' } }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [OPEN, PARTIALLY_SETTLED, SETTLED, REVERSED] } }
+        - { name: value_in, in: query, required: false, description: Currency to value each item in (normally the legal entity currency)., schema: { type: string, pattern: '^[A-Z]{3}$' } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, required: false, description: The nextCursor of the previous page (opaque)., schema: { type: string } }
+      responses:
+        '200':
+          description: One page of open items.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpenItemPage' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+        '502': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/payables/open-items/{id}:
+    get:
+      operationId: getOpenItem
+      x-passage-duty: open-item.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: value_in, in: query, required: false, schema: { type: string, pattern: '^[A-Z]{3}$' } }
+      responses:
+        '200':
+          description: The open item.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpenItem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+        '502': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/payables/payment-proposals:
+    post:
+      operationId: createPaymentProposal
+      x-passage-duty: payment-proposal.write
+      description: |
+        Selects the legal entity's open items with due_date on or before dueBy (default runDate) that are not on payment hold, whose vendor is not blocked and that are not already on a proposal. A cash discount is taken when runDate is on or before the item's discount date, the item is still OPEN (not partially settled) and the discount is smaller than the open amount. Items are grouped per vendor, currency and payment method (vendorPaymentMethods overrides paymentMethod per vendor) and valued in legalEntityCurrency at the spot rate of runDate (today when runDate is in the future) from the fx service. The proposal is saved as DRAFT with the caller as creator.
+        runDate is the payment date and may not be earlier than today (UTC; 400 on the runDate field); cash-discount eligibility is decided against it, so a backdated date cannot revive an expired discount. Replaying an existing run is still allowed after its day has passed. Creation is idempotent per (legal entity, runDate, runId): repeating the same request returns the stored proposal with 200 and Idempotent-Replayed: true; the same key with a different request is a 409 (AP-PRP-001). A 409 with the same code also reports that items changed, were held or were taken by another proposal while it was built; retry. Withholding tax is not applied (wave 13). A run with nothing due after the filters is a 422 (AP-PRP-005) and nothing is stored. Null and an empty vendorPaymentMethods are the same request for replay.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PaymentProposalRequest' }
+      responses:
+        '200':
+          description: Replay of an existing proposal.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentProposal' }
+        '201':
+          description: Proposal created as a draft.
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentProposal' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+        '502': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /v1/payables/payment-proposals/{id}:
+    get:
+      operationId: getPaymentProposal
+      x-passage-duty: payment-proposal.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The proposal with its groups and lines.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentProposal' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/payables/payment-proposals/{id}:approve:
+    post:
+      operationId: approvePaymentProposal
+      x-passage-duty: payment-proposal.approve
+      description: |
+        Moves a DRAFT proposal to APPROVED. Segregation of duties: the approver must be a different user than the creator (403, AP-PRP-003); the database also refuses a row whose approver equals its creator. Approval locks every line's open item and re-checks version, open amount, payment hold, vendor block and status; if any line changed since the proposal was created the call is a 409 (AP-PRP-001) naming the open item ids. A proposal that is not a draft is a 409 (AP-PRP-002). A proposal whose runDate is before today (UTC) can no longer be approved: 409 AP-PRP-004, create a new proposal. Both the creator and the approver need an identified user (X-Passage-User). Executing an approved proposal as a payment run is a later slice (#102).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The approved proposal.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentProposal' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/payables/payment-proposals/{id}:cancel:
+    post:
+      operationId: cancelPaymentProposal
+      x-passage-duty: payment-proposal.write
+      description: |
+        Cancels a DRAFT proposal (status CANCELLED, cancelledBy and cancelledAt recorded) and releases its open items so a new proposal can select them. The lines stay on the cancelled proposal for audit. An APPROVED or already cancelled proposal is a 409 (AP-PRP-002). The runId of a cancelled proposal stays used: repeating its request replays the cancelled proposal, so a new proposal needs a new runId. The caller needs an identified user (X-Passage-User).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The cancelled proposal.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentProposal' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /healthz:
     get:
       operationId: liveness
@@ -186,6 +325,105 @@ components:
               ledgerAvailable: { type: boolean }
               comparable: { type: boolean }
               reason: { type: string }
+    OpenItem:
+      type: object
+      required: [id, legalEntityId, vendorId, sourceInvoiceId, invoiceNumber, invoiceDate, dueDate, dueDateSource, currency, amount, openAmount, discountAmount, status, version, paymentHold]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        vendorId: { type: string, format: uuid }
+        sourceInvoiceId: { type: string, format: uuid }
+        invoiceNumber: { type: string }
+        invoiceDate: { type: string, format: date }
+        dueDate: { type: string, format: date }
+        dueDateSource: { type: string, enum: [EVENT, DEFAULTED] }
+        currency: { type: string }
+        amount: { type: string }
+        openAmount: { type: string }
+        discountDate: { type: string, format: date }
+        discountAmount: { type: string }
+        status: { type: string, enum: [OPEN, PARTIALLY_SETTLED, SETTLED, REVERSED] }
+        version: { type: integer }
+        paymentHold: { type: boolean }
+        valuation:
+          type: object
+          description: Present when value_in is set. amount is openAmount times rate rounded to the minor unit of currency.
+          required: [currency, amount, rate, rateDate]
+          properties:
+            currency: { type: string }
+            amount: { type: string }
+            rate: { type: string }
+            rateDate: { type: string, format: date }
+    OpenItemPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/OpenItem' }
+        nextCursor: { type: string, description: Absent on the last page. }
+    PaymentProposalRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityCurrency, runDate, runId, paymentMethod]
+      properties:
+        legalEntityId: { type: string, format: uuid, description: Defaults to the caller's legal-entity scope; required for an unscoped caller. }
+        legalEntityCurrency: { type: string, pattern: '^[A-Z]{3}$', description: Currency every group is valued in. }
+        runDate: { type: string, format: date }
+        runId: { type: string, minLength: 1, maxLength: 64 }
+        dueBy: { type: string, format: date, description: Selection cut-off; defaults to runDate and may not be earlier. }
+        paymentMethod: { type: string, enum: [TRANSFER, ACH, CHECK, CARD, WIRE] }
+        vendorPaymentMethods:
+          type: object
+          maxProperties: 500
+          description: Vendor id to payment method, overriding paymentMethod.
+          additionalProperties: { type: string, enum: [TRANSFER, ACH, CHECK, CARD, WIRE] }
+    PaymentProposal:
+      type: object
+      required: [id, legalEntityId, runDate, runId, dueBy, rateDate, legalEntityCurrency, paymentMethod, status, createdBy, createdAt, groups, totalValued]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        runDate: { type: string, format: date }
+        runId: { type: string }
+        dueBy: { type: string, format: date }
+        rateDate: { type: string, format: date }
+        legalEntityCurrency: { type: string }
+        paymentMethod: { type: string }
+        status: { type: string, enum: [DRAFT, APPROVED, CANCELLED] }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        approvedBy: { type: string }
+        approvedAt: { type: string, format: date-time }
+        cancelledBy: { type: string }
+        cancelledAt: { type: string, format: date-time }
+        totalValued: { type: string, description: Sum of group valued amounts in legalEntityCurrency. }
+        groups:
+          type: array
+          items:
+            type: object
+            required: [id, vendorId, currency, paymentMethod, gross, discount, net, valued, lines]
+            properties:
+              id: { type: string, format: uuid }
+              vendorId: { type: string, format: uuid }
+              currency: { type: string }
+              paymentMethod: { type: string }
+              gross: { type: string, description: Sum of open amounts in the group currency. }
+              discount: { type: string }
+              net: { type: string, description: Gross minus discount; the amount to pay in the group currency. }
+              valued: { type: string, description: Sum of line valued amounts in legalEntityCurrency. }
+              lines:
+                type: array
+                items:
+                  type: object
+                  required: [openItemId, openAmount, discount, pay, rate, valued]
+                  properties:
+                    openItemId: { type: string, format: uuid }
+                    openAmount: { type: string }
+                    discount: { type: string }
+                    pay: { type: string }
+                    rate: { type: string, description: Group currency to legalEntityCurrency; 1 for the same currency. }
+                    valued: { type: string, description: pay times rate rounded to the minor unit of legalEntityCurrency. }
     DecimalString:
       type: string
       pattern: '^[0-9]+(\.[0-9]+)?$'

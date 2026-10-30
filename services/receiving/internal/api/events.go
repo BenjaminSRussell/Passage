@@ -80,6 +80,39 @@ type invoicePostedData struct {
 	Lines         []invoicePostedLineData `json:"lines"`
 }
 
+type invoiceAdjustedLineData struct {
+	LineNo        int    `json:"line_no"`
+	InvoiceLineNo int    `json:"invoice_line_no"`
+	Amount        string `json:"amount"`
+}
+
+type invoiceAdjustedData struct {
+	AdjustmentID      string                    `json:"adjustment_id"`
+	OriginalInvoiceID string                    `json:"original_invoice_id"`
+	Kind              string                    `json:"kind"`
+	LegalEntityID     string                    `json:"legal_entity_id"`
+	VendorID          string                    `json:"vendor_id"`
+	DocumentNumber    string                    `json:"document_number"`
+	DocumentDate      string                    `json:"document_date"`
+	PostingDate       string                    `json:"posting_date"`
+	Currency          string                    `json:"currency"`
+	Total             string                    `json:"total"`
+	LedgerEntryID     string                    `json:"ledger_entry_id"`
+	Lines             []invoiceAdjustedLineData `json:"lines"`
+}
+
+type settlementPostedData struct {
+	SettlementID  string `json:"settlement_id"`
+	Kind          string `json:"kind"`
+	SourceRef     string `json:"source_ref"`
+	LegalEntityID string `json:"legal_entity_id"`
+	VendorID      string `json:"vendor_id"`
+	PostingDate   string `json:"posting_date"`
+	Currency      string `json:"currency"`
+	Amount        string `json:"amount"`
+	LedgerEntryID string `json:"ledger_entry_id"`
+}
+
 func newEvent(context, entity, verb, subject, tenantID string, data any) (events.Event, error) {
 	return events.New(events.Type(context, entity, verb, 1), eventSource, subject, tenantID, data)
 }
@@ -127,4 +160,23 @@ func invoicePostedEvent(tenantID string, in store.Invoice, ledgerEntryID string,
 		})
 	}
 	return newEvent("payables", "invoice", "posted", in.ID, tenantID, data)
+}
+
+func invoiceAdjustedEvent(tenantID string, in store.InvoiceAdjustment, vendorID, currency, ledgerEntryID string, total decimal.Decimal) (events.Event, error) {
+	data := invoiceAdjustedData{
+		AdjustmentID: in.ID, OriginalInvoiceID: in.OriginalInvoiceID, Kind: in.Kind, LegalEntityID: in.LegalEntityID, VendorID: vendorID,
+		DocumentNumber: in.DocumentNumber, DocumentDate: in.DocumentDate.Format(dateLayout), PostingDate: in.PostingDate.Format(dateLayout),
+		Currency: currency, Total: total.String(), LedgerEntryID: ledgerEntryID, Lines: make([]invoiceAdjustedLineData, 0, len(in.Lines)),
+	}
+	for i, l := range in.Lines {
+		data.Lines = append(data.Lines, invoiceAdjustedLineData{LineNo: i + 1, InvoiceLineNo: l.InvoiceLineNo, Amount: l.Amount.String()})
+	}
+	return newEvent("payables", "invoice", "adjusted", in.ID, tenantID, data)
+}
+
+func settlementPostedEvent(tenantID string, in store.Settlement, ledgerEntryID string) (events.Event, error) {
+	return newEvent("payables", "settlement", "posted", in.ID, tenantID, settlementPostedData{
+		SettlementID: in.ID, Kind: in.Kind, SourceRef: in.SourceRef, LegalEntityID: in.LegalEntityID, VendorID: in.VendorID,
+		PostingDate: in.PostingDate.Format(dateLayout), Currency: in.Currency, Amount: in.Amount.String(), LedgerEntryID: ledgerEntryID,
+	})
 }
