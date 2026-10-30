@@ -2,10 +2,12 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -40,6 +42,7 @@ type RunStore interface {
 	RejectJournal(ctx context.Context, id string) (store.PaymentRun, error)
 	GetRun(ctx context.Context, id string) (store.PaymentRun, error)
 	RunFileContent(ctx context.Context, id string) (string, error)
+	RunFileConfig(ctx context.Context, id string) ([]byte, error)
 	InvoiceNumbers(ctx context.Context, proposalID string) (map[string]string, error)
 	SaveRunFile(ctx context.Context, id string, f store.RunFile) (store.PaymentRun, error)
 	RecordJournal(ctx context.Context, id, entryID string) (store.PaymentRun, error)
@@ -160,7 +163,12 @@ func (a *API) startRun(w http.ResponseWriter, r *http.Request) {
 		a.problem(w, r, http.StatusUnprocessableEntity, domain.CodeRunConfig, "the proposal takes cash discounts and the posting profile has no discount account")
 		return
 	}
-	run, created, err := a.runs.store.StartRun(ctx, store.NewRun{
+	fileConfig, err := json.Marshal(profile.File)
+	if err != nil {
+		a.fault(w, r, "posting profile unreadable", err)
+		return
+	}
+	run, created, err := a.runs.store.StartRun(ctx, store.NewRun{FileConfig: fileConfig,
 		LegalEntityID: le, ProposalID: req.ProposalID, RequestedBy: caller.UserID, Today: a.today().Format(time.DateOnly), LedgerID: profile.LedgerID,
 		BankAccount: profile.BankAccount, ControlAccount: profile.ControlAccount, DiscountAccount: profile.DiscountAccount,
 	})
@@ -176,6 +184,8 @@ func (a *API) startRun(w http.ResponseWriter, r *http.Request) {
 		a.problem(w, r, http.StatusForbidden, domain.CodeSegregation, err.Error())
 	case errors.Is(err, store.ErrUnsupportedMethod), errors.Is(err, store.ErrDiscountAccount):
 		a.problem(w, r, http.StatusUnprocessableEntity, domain.CodeRunConfig, err.Error())
+	case errors.Is(err, store.ErrNoFieldCrypt):
+		a.problem(w, r, http.StatusServiceUnavailable, codeRatesUnconfigured, err.Error())
 	case err != nil:
 		a.fault(w, r, "payment run start failed", err)
 	case !created:
@@ -200,6 +210,33 @@ func (a *API) runID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	id := chi.URLParam(r, "id")
 	if !ids.Valid(id) {
 		a.invalid(w, r, map[string]string{"id": "must be a UUID"})
+		return "", false
+	}
+	return id, true
+}
+
+func subject(user string) string { return strings.ToLower(strings.TrimSpace(user)) }
+
+func (a *API) executorRunID(w http.ResponseWriter, r *http.Request) (string, bool) {
+	id, ok := a.runID(w, r)
+	if !ok {
+		return "", false
+	}
+	caller, _ := tenant.FromContext(r.Context())
+	run, err := a.runs.store.GetRun(r.Context(), id)
+	if err != nil {
+		a.runResult(w, r, "authorize", run, err)
+		return "", false
+	}
+	proposal, err := a.runs.store.GetProposal(r.Context(), run.ProposalID)
+	if err != nil {
+		a.fault(w, r, "payment proposal get failed", err)
+		return "", false
+	}
+	actor := subject(caller.UserID)
+	if actor == "" || actor == subject(proposal.CreatedBy) || (proposal.ApprovedBy != nil && actor == subject(*proposal.ApprovedBy)) {
+		slog.Warn("payment run step refused: the actor created or approved the proposal", "runId", id, "userId", caller.UserID, "correlationId", middleware.GetReqID(r.Context()))
+		a.problem(w, r, http.StatusForbidden, domain.CodeSegregation, "a payment run is executed by a user who neither created nor approved the proposal")
 		return "", false
 	}
 	return id, true
@@ -230,7 +267,7 @@ func (a *API) runResult(w http.ResponseWriter, r *http.Request, msg string, run 
 
 func (a *API) runStep(name string, do func(ctx context.Context, s RunStore, id string) (store.PaymentRun, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id, ok := a.runID(w, r)
+		id, ok := a.executorRunID(w, r)
 		if !ok {
 			return
 		}
@@ -240,7 +277,7 @@ func (a *API) runStep(name string, do func(ctx context.Context, s RunStore, id s
 }
 
 func (a *API) completeRun(w http.ResponseWriter, r *http.Request) {
-	id, ok := a.runID(w, r)
+	id, ok := a.executorRunID(w, r)
 	if !ok {
 		return
 	}
@@ -256,7 +293,7 @@ type failRequest struct {
 }
 
 func (a *API) failRun(w http.ResponseWriter, r *http.Request) {
-	id, ok := a.runID(w, r)
+	id, ok := a.executorRunID(w, r)
 	if !ok {
 		return
 	}
@@ -294,7 +331,7 @@ func (a *API) getRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) getRunFile(w http.ResponseWriter, r *http.Request) {
-	id, ok := a.runID(w, r)
+	id, ok := a.executorRunID(w, r)
 	if !ok {
 		return
 	}
@@ -314,7 +351,7 @@ func (a *API) getRunFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) generateRunFile(w http.ResponseWriter, r *http.Request) {
-	id, ok := a.runID(w, r)
+	id, ok := a.executorRunID(w, r)
 	if !ok {
 		return
 	}
@@ -335,9 +372,13 @@ func (a *API) generateRunFile(w http.ResponseWriter, r *http.Request) {
 		a.runResult(w, r, "generate-file", run, err)
 		return
 	}
-	profile, configured := a.runs.profiles.For(run.LegalEntityID)
-	if !configured {
-		a.problem(w, r, http.StatusUnprocessableEntity, domain.CodeRunConfig, "the legal entity has no payment run posting profile")
+	rawConfig, err := a.runs.store.RunFileConfig(ctx, id)
+	var config domain.RunFileConfig
+	if err == nil {
+		err = json.Unmarshal(rawConfig, &config)
+	}
+	if err != nil {
+		a.fault(w, r, "run file configuration unreadable", err)
 		return
 	}
 	proposal, err := a.runs.store.GetProposal(ctx, run.ProposalID)
@@ -360,7 +401,7 @@ func (a *API) generateRunFile(w http.ResponseWriter, r *http.Request) {
 		a.fault(w, r, "proposal run date unreadable", err)
 		return
 	}
-	file, payments, err := domain.BuildRunFile(profile.File, payees, run.ID, runDate, a.now(), proposal.Groups, numbers)
+	file, payments, err := domain.BuildRunFile(config, payees, run.ID, runDate, a.now(), proposal.Groups, numbers)
 	if err != nil {
 		a.reject(w, r, err)
 		return
@@ -379,7 +420,7 @@ func (a *API) generateRunFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) postRunJournal(w http.ResponseWriter, r *http.Request) {
-	id, ok := a.runID(w, r)
+	id, ok := a.executorRunID(w, r)
 	if !ok {
 		return
 	}
@@ -437,11 +478,7 @@ func (a *API) postRunJournal(w http.ResponseWriter, r *http.Request) {
 
 func ledgerRejected(err error) bool {
 	var se *ledger.StatusError
-	if !errors.As(err, &se) || se.Status < 400 || se.Status >= 500 {
-		return false
-	}
-	return se.Status != http.StatusRequestTimeout && se.Status != http.StatusTooManyRequests &&
-		!(se.Status == http.StatusConflict && se.Code == ledger.CodeIdempotencyInProgress)
+	return errors.As(err, &se) && (se.Status == http.StatusBadRequest || se.Status == http.StatusUnprocessableEntity)
 }
 
 func (a *API) runLedgerFailure(w http.ResponseWriter, r *http.Request, err error) {
@@ -463,6 +500,6 @@ func (a *API) writeRunMetrics(w http.ResponseWriter) {
 	fmt.Fprintf(w, "# HELP payables_payment_runs_total Payment run commands by outcome.\n# TYPE payables_payment_runs_total counter\npayables_payment_runs_total{outcome=\"started\"} %d\npayables_payment_runs_total{outcome=\"replayed\"} %d\npayables_payment_runs_total{outcome=\"completed\"} %d\npayables_payment_runs_total{outcome=\"failed\"} %d\n",
 		a.runs.started.Load(), a.runs.replayed.Load(), a.runs.completed.Load(), a.runs.failed.Load())
 	fmt.Fprintf(w, "# HELP payables_payment_run_ledger_faults_total Payment run ledger calls that failed on a server or transport fault.\n# TYPE payables_payment_run_ledger_faults_total counter\npayables_payment_run_ledger_faults_total %d\n", a.runs.ledgerFaults.Load())
-	fmt.Fprintf(w, "# HELP payables_payment_run_stuck Runs whose settlement found an item changed after the journal posted; each needs manual action.\n# TYPE payables_payment_run_stuck counter\npayables_payment_run_stuck %d\n", a.runs.stuck.Load())
+	fmt.Fprintf(w, "# HELP payables_payment_run_stuck_total Runs whose settlement found an item changed after the journal posted; each needs manual action.\n# TYPE payables_payment_run_stuck_total counter\npayables_payment_run_stuck_total %d\n", a.runs.stuck.Load())
 	fmt.Fprintf(w, "# HELP payables_payment_file_reads_total Audited reads of a generated payment file.\n# TYPE payables_payment_file_reads_total counter\npayables_payment_file_reads_total %d\n", a.runs.fileReads.Load())
 }

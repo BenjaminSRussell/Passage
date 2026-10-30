@@ -37,7 +37,7 @@ func (p PostingProfiles) For(legalEntityID string) (PostingProfile, bool) {
 // A request can never supply these; it returns nil, nil when unset so payment runs answer 422.
 func LoadPostingProfiles(getenv func(string) string) (PostingProfiles, error) {
 	raw := strings.TrimSpace(getenv(EnvPostingProfiles))
-	if file := getenv(EnvPostingProfilesFile); raw == "" && file != "" {
+	if file := getenv(EnvPostingProfilesFile); file != "" {
 		b, err := os.ReadFile(file)
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", EnvPostingProfilesFile, err)
@@ -48,7 +48,9 @@ func LoadPostingProfiles(getenv func(string) string) (PostingProfiles, error) {
 		return nil, nil
 	}
 	var parsed map[string]PostingProfile
-	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+	dec := json.NewDecoder(strings.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&parsed); err != nil {
 		return nil, fmt.Errorf("%s: %w", EnvPostingProfiles, err)
 	}
 	out := make(PostingProfiles, len(parsed))

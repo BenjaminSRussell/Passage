@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -51,6 +52,7 @@ type PaymentRun struct {
 }
 
 type NewRun struct {
+	FileConfig      []byte
 	LegalEntityID   string
 	ProposalID      string
 	RequestedBy     string
@@ -120,20 +122,37 @@ func (s *Postgres) GetRun(ctx context.Context, id string) (PaymentRun, error) {
 	return run, err
 }
 
-func (s *Postgres) RunFileContent(ctx context.Context, id string) (string, error) {
-	var content *string
+func runField(kind, runID string) string { return "ap_payment_run." + kind + ":" + runID }
+
+func (s *Postgres) openRunField(ctx context.Context, id, column, kind string) ([]byte, error) {
+	p, _ := tenant.FromContext(ctx)
+	var sealed []byte
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `select file_content from ap_payment_run where id = $1::uuid`, id).Scan(&content)
+		err := tx.QueryRow(ctx, `select `+column+` from ap_payment_run where id = $1::uuid`, id).Scan(&sealed)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrRunNotFound
 		}
 		return err
 	})
-	if err != nil || content == nil {
-		return "", err
+	if err != nil || sealed == nil {
+		return nil, err
 	}
-	return *content, nil
+	if s.crypt == nil {
+		return nil, ErrNoFieldCrypt
+	}
+	return s.crypt.Open(p.TenantID, runField(kind, id), sealed)
 }
+
+func (s *Postgres) RunFileContent(ctx context.Context, id string) (string, error) {
+	plain, err := s.openRunField(ctx, id, "file_sealed", "file")
+	return string(plain), err
+}
+
+func (s *Postgres) RunFileConfig(ctx context.Context, id string) ([]byte, error) {
+	return s.openRunField(ctx, id, "file_config_sealed", "config")
+}
+
+func canonicalSubject(user string) string { return strings.ToLower(strings.TrimSpace(user)) }
 
 func (s *Postgres) InvoiceNumbers(ctx context.Context, proposalID string) (map[string]string, error) {
 	out := map[string]string{}
@@ -181,7 +200,7 @@ func (s *Postgres) StartRun(ctx context.Context, in NewRun) (PaymentRun, bool, e
 		if status != domain.ProposalApproved {
 			return ErrNotApproved
 		}
-		if in.RequestedBy == createdBy || in.RequestedBy == approvedBy {
+		if canonicalSubject(in.RequestedBy) == canonicalSubject(createdBy) || canonicalSubject(in.RequestedBy) == canonicalSubject(approvedBy) {
 			return ErrExecutorConflict
 		}
 		if elapsed {
@@ -190,10 +209,17 @@ func (s *Postgres) StartRun(ctx context.Context, in NewRun) (PaymentRun, bool, e
 		if err := checkRunnable(ctx, tx, in); err != nil {
 			return err
 		}
+		if s.crypt == nil {
+			return ErrNoFieldCrypt
+		}
 		runID, created = ids.New(), true
+		config, err := s.crypt.Seal(p.TenantID, runField("config", runID), in.FileConfig)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `insert into ap_payment_run (tenant_id, id, legal_entity_id, proposal_id, status, requested_by, ledger_id, bank_account,
-			control_account, discount_account) values ($1, $2::uuid, $3::uuid, $4::uuid, 'RUNNING', $5, $6::uuid, $7, $8, $9)`,
-			p.TenantID, runID, in.LegalEntityID, in.ProposalID, in.RequestedBy, in.LedgerID, in.BankAccount, in.ControlAccount, nullable(in.DiscountAccount)); err != nil {
+			control_account, discount_account, file_config_sealed) values ($1, $2::uuid, $3::uuid, $4::uuid, 'RUNNING', $5, $6::uuid, $7, $8, $9, $10)`,
+			p.TenantID, runID, in.LegalEntityID, in.ProposalID, in.RequestedBy, in.LedgerID, in.BankAccount, in.ControlAccount, nullable(in.DiscountAccount), config); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `update ap_payment_proposal set status = 'EXECUTING' where id = $1::uuid`, in.ProposalID); err != nil {
@@ -281,6 +307,16 @@ func (s *Postgres) SaveRunFile(ctx context.Context, id string, f RunFile) (Payme
 		case l.status != domain.RunRunning:
 			return ErrRunState
 		}
+		if s.crypt == nil {
+			return ErrNoFieldCrypt
+		}
+		if err := verifyLines(ctx, tx, l.proposalID); err != nil {
+			return err
+		}
+		sealed, err := s.crypt.Seal(p.TenantID, runField("file", id), []byte(f.Content))
+		if err != nil {
+			return err
+		}
 		var le string
 		if err := tx.QueryRow(ctx, `select legal_entity_id::text from ap_payment_run where id = $1::uuid`, id).Scan(&le); err != nil {
 			return err
@@ -301,8 +337,8 @@ func (s *Postgres) SaveRunFile(ctx context.Context, id string, f RunFile) (Payme
 		if err := results.Close(); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `update ap_payment_run set file_number = $2, file_sha256 = $3, file_content = $4, payment_count = $5, file_generated_at = now() where id = $1::uuid`,
-			id, f.Number, f.SHA256, f.Content, f.PaymentCount)
+		_, err = tx.Exec(ctx, `update ap_payment_run set file_number = $2, file_sha256 = $3, file_sealed = $4, payment_count = $5, file_generated_at = now() where id = $1::uuid`,
+			id, f.Number, f.SHA256, sealed, f.PaymentCount)
 		return err
 	})
 }
@@ -310,6 +346,8 @@ func (s *Postgres) SaveRunFile(ctx context.Context, id string, f RunFile) (Payme
 func (s *Postgres) BeginJournal(ctx context.Context, id string) (PaymentRun, error) {
 	return s.step(ctx, id, func(tx pgx.Tx, l runLock) error {
 		switch {
+		case l.journalRejected && !l.journalDone:
+			return ErrRunState
 		case l.journalRequested:
 			return nil
 		case l.status != domain.RunRunning:

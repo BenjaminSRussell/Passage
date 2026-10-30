@@ -98,7 +98,7 @@ func TestValidateCreditorsAndMaskedSummary(t *testing.T) {
 		t.Fatalf("bad key and empty details = %v", f)
 	}
 	got := domain.SummarizePayee(groupOne, good)
-	if got.Account != "****3000" || got.Bank != "****DEFF" || got.Name != "Acme" || strings.Contains(got.Account, "DE89") {
+	if got.Account != "****3000" || got.Bank != "COBADEFF" || got.Name != "Acme" || strings.Contains(got.Account, "DE89") {
 		t.Fatalf("summary = %+v", got)
 	}
 	if domain.MaskBank("123") != "****" {

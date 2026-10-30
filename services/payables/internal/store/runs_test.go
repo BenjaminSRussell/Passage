@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
-	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/domain"
@@ -22,7 +21,7 @@ const ledger1 = "00000000-0000-0000-0000-0000000000b1"
 
 func runInput(proposalID, le string) NewRun {
 	return NewRun{LegalEntityID: le, ProposalID: proposalID, RequestedBy: "erin", Today: runDay, LedgerID: ledger1,
-		BankAccount: "1010", ControlAccount: "2000", DiscountAccount: "4900"}
+		BankAccount: "1010", ControlAccount: "2000", DiscountAccount: "4900", FileConfig: []byte(`{"debtorBic":"CHASUS33"}`)}
 }
 
 func approvedProposal(t *testing.T, s *Postgres, runID string, seedItems func(ctx context.Context)) (Proposal, context.Context) {
@@ -286,8 +285,8 @@ func TestPaymentRun_ExecutorCannotBeTheCreatorOrTheApprover(t *testing.T) {
 	}
 	raw := ctxAs(1, leA, "bob")
 	err := dbx.WithTenantTx(raw, s.pool, func(tx pgx.Tx) error {
-		_, err := tx.Exec(raw, `insert into ap_payment_run (tenant_id, id, legal_entity_id, proposal_id, status, requested_by, ledger_id, bank_account, control_account)
-			values ($1, $2::uuid, $3::uuid, $4::uuid, 'RUNNING', 'bob', $5::uuid, '1010', '2000')`, testkit.TenantID(1), ids.New(), leA, proposal.ID, ledger1)
+		_, err := tx.Exec(raw, `insert into ap_payment_run (tenant_id, id, legal_entity_id, proposal_id, status, requested_by, ledger_id, bank_account, control_account, file_config_sealed)
+			values ($1, $2::uuid, $3::uuid, $4::uuid, 'RUNNING', 'bob', $5::uuid, '1010', '2000', '\x00')`, testkit.TenantID(1), ids.New(), leA, proposal.ID, ledger1)
 		return err
 	})
 	var pgErr *pgconn.PgError
@@ -314,8 +313,6 @@ func TestPaymentRun_StartAfterTheRunDateIsRefused(t *testing.T) {
 
 func TestProposalPayees_AreEncryptedBoundToTheirTenantAndShownMasked(t *testing.T) {
 	s := setup(t)
-	keys, _ := fieldcrypt.NewKeys("k1", map[string][]byte{"k1": bytes.Repeat([]byte{7}, 32)})
-	s.WithFieldCrypt(keys)
 	alice := ctxAs(1, leA, "alice")
 	seed(t, s, alice, leA, vendor1, 1, "2027-03-10", "USD", "100.00")
 	in := proposalFor(t, s, alice, leA, "run-1")
@@ -324,7 +321,7 @@ func TestProposalPayees_AreEncryptedBoundToTheirTenantAndShownMasked(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(created.Payees) != 1 || created.Payees[0].Account != "****3000" || created.Payees[0].Bank != "****DEFF" || created.Payees[0].Name != "Acme Supply Co" {
+	if len(created.Payees) != 1 || created.Payees[0].Account != "****3000" || created.Payees[0].Bank != "COBADEFF" || created.Payees[0].Name != "Acme Supply Co" {
 		t.Fatalf("payees = %+v, want the masked summary the approver sees", created.Payees)
 	}
 	var sealed []byte
@@ -333,6 +330,9 @@ func TestProposalPayees_AreEncryptedBoundToTheirTenantAndShownMasked(t *testing.
 	})
 	if len(sealed) == 0 || bytes.Contains(sealed, []byte("DE89")) || bytes.Contains(sealed, []byte("Acme")) {
 		t.Fatalf("bank details must be encrypted at rest: %q", sealed)
+	}
+	if _, err := s.crypt.Open(testkit.TenantID(1), "ap_payment_proposal_payee:"+"00000000-0000-0000-0000-000000000000:"+vendor1, sealed); err == nil {
+		t.Fatal("the ciphertext must be bound to its proposal id")
 	}
 	full, err := s.ProposalPayees(alice, created.ID)
 	if err != nil || full[vendor1].IBAN != "DE89370400440532013000" {
@@ -347,13 +347,20 @@ func TestProposalPayees_AreEncryptedBoundToTheirTenantAndShownMasked(t *testing.
 			return err
 		})
 	}
+	if err := s.rawApprove(alice, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec(`insert into ap_payment_proposal_payee (tenant_id, proposal_id, vendor_id, legal_entity_id, sealed)
+		select tenant_id, proposal_id, '00000000-0000-0000-0000-0000000000c9', legal_entity_id, sealed from ap_payment_proposal_payee where proposal_id = $1::uuid`); err == nil {
+		t.Fatal("payee bank details must not be insertable once the proposal left DRAFT")
+	}
 	if err := exec(`update ap_payment_proposal_payee set sealed = '\x00' where proposal_id = $1::uuid`); err == nil {
 		t.Fatal("the application role must not be able to rewrite payee bank details")
 	}
 	if err := exec(`delete from ap_payment_proposal_payee where proposal_id = $1::uuid`); err == nil {
 		t.Fatal("the application role must not be able to delete payee bank details")
 	}
-	bare := setup(t)
+	bare := setup(t).WithFieldCrypt(nil)
 	bareCtx := ctxAs(1, leA, "alice")
 	seed(t, bare, bareCtx, leA, vendor1, 1, "2027-03-10", "USD", "100.00")
 	if _, _, err := bare.CreateProposal(bareCtx, withPayees(proposalFor(t, bare, bareCtx, leA, "run-1"), in.Payees)); !errors.Is(err, ErrNoFieldCrypt) {
@@ -590,5 +597,111 @@ func TestSetPaymentHold_DoesNotBumpVersionLikeAVendorBlock(t *testing.T) {
 	}
 	if _, err := s.ApproveProposal(ctxAs(1, leA, "bob"), created.ID, "bob", runDay); err != nil {
 		t.Fatalf("approval after the hold was released: %v", err)
+	}
+}
+
+func (s *Postgres) rawApprove(ctx context.Context, id string) error {
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `update ap_payment_proposal set status = 'APPROVED', approved_by = 'bob', approved_at = now() where id = $1::uuid`, id)
+		return err
+	})
+}
+
+func TestPaymentRun_FileAndConfigAreSealedAtRest(t *testing.T) {
+	s := setup(t)
+	proposal, erin := approvedProposal(t, s, "run-1", threeItems(t, s))
+	run, _, err := s.StartRun(erin, runInput(proposal.ID, leA))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SaveRunFile(erin, run.ID, RunFile{Number: "F1", SHA256: "abc", Content: "<Document>DE89370400440532013000</Document>"}); err != nil {
+		t.Fatal(err)
+	}
+	var file, config []byte
+	_ = dbx.WithTenantTx(erin, s.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(erin, `select file_sealed, file_config_sealed from ap_payment_run where id = $1::uuid`, run.ID).Scan(&file, &config)
+	})
+	if len(file) == 0 || bytes.Contains(file, []byte("DE89")) || bytes.Contains(config, []byte("CHASUS33")) {
+		t.Fatalf("file or config in the clear: %q %q", file, config)
+	}
+	if got, err := s.RunFileContent(erin, run.ID); err != nil || got != "<Document>DE89370400440532013000</Document>" {
+		t.Fatalf("file = %q err %v", got, err)
+	}
+	if got, err := s.RunFileConfig(erin, run.ID); err != nil || string(got) != `{"debtorBic":"CHASUS33"}` {
+		t.Fatalf("config = %q err %v", got, err)
+	}
+	if _, err := s.RunFileContent(ctxAs(2, leA, "x"), run.ID); !errors.Is(err, ErrRunNotFound) {
+		t.Fatalf("another tenant: %v", err)
+	}
+	if _, err := s.WithFieldCrypt(nil).RunFileContent(erin, run.ID); !errors.Is(err, ErrNoFieldCrypt) {
+		t.Fatalf("without keys: %v", err)
+	}
+}
+
+func TestPaymentRun_SaveRunFileRechecksHoldsUnderTheRunLock(t *testing.T) {
+	s := setup(t)
+	proposal, erin := approvedProposal(t, s, "run-1", threeItems(t, s))
+	run, _, _ := s.StartRun(erin, runInput(proposal.ID, leA))
+	if err := s.SetPaymentHold(erin, proposal.Groups[0].Lines[0].OpenItemID, true); err != nil {
+		t.Fatal(err)
+	}
+	var changed *LinesChangedError
+	if _, err := s.SaveRunFile(erin, run.ID, RunFile{Number: "F1", SHA256: "abc", Content: "<xml/>"}); !errors.As(err, &changed) {
+		t.Fatalf("save over a held item = %v, want LinesChangedError", err)
+	}
+	if got, _ := s.GetRun(erin, run.ID); got.FileGeneratedAt != nil || len(got.Payments) != 0 {
+		t.Fatalf("nothing may be stored: %+v", got)
+	}
+}
+
+func TestPaymentRun_BeginJournalAfterARejectionIsRefusedAndRacesWithFailAreExclusive(t *testing.T) {
+	for i := 0; i < 3; i++ {
+		s := setup(t)
+		proposal, erin := approvedProposal(t, s, "run-1", threeItems(t, s))
+		run, _, _ := s.StartRun(erin, runInput(proposal.ID, leA))
+		_, _ = s.SaveRunFile(erin, run.ID, RunFile{Number: "F1", SHA256: "abc", Content: "<xml/>"})
+		var wg sync.WaitGroup
+		var beginErr, failErr error
+		wg.Add(2)
+		go func() { defer wg.Done(); _, beginErr = s.BeginJournal(erin, run.ID) }()
+		go func() { defer wg.Done(); _, failErr = s.FailRun(erin, run.ID, "racing") }()
+		wg.Wait()
+		switch {
+		case beginErr == nil && errors.Is(failErr, ErrJournalRequested):
+		case failErr == nil && errors.Is(beginErr, ErrRunState):
+		default:
+			t.Fatalf("begin=%v fail=%v: exactly one side may win", beginErr, failErr)
+		}
+	}
+	s := setup(t)
+	proposal, erin := approvedProposal(t, s, "run-1", threeItems(t, s))
+	run, _, _ := s.StartRun(erin, runInput(proposal.ID, leA))
+	_, _ = s.SaveRunFile(erin, run.ID, RunFile{Number: "F1", SHA256: "abc", Content: "<xml/>"})
+	_, _ = s.BeginJournal(erin, run.ID)
+	_, _ = s.RejectJournal(erin, run.ID)
+	if _, err := s.BeginJournal(erin, run.ID); !errors.Is(err, ErrRunState) {
+		t.Fatalf("a rejected journal must not be requested again: %v", err)
+	}
+}
+
+func TestPaymentRun_ExecutorComparisonIsCanonical(t *testing.T) {
+	s := setup(t)
+	proposal, erin := approvedProposal(t, s, "run-1", threeItems(t, s))
+	for _, user := range []string{"ALICE", " Bob "} {
+		in := runInput(proposal.ID, leA)
+		in.RequestedBy = user
+		if _, _, err := s.StartRun(erin, in); !errors.Is(err, ErrExecutorConflict) {
+			t.Errorf("%q: %v, want ErrExecutorConflict", user, err)
+		}
+	}
+	raw := ctxAs(1, leA, "x")
+	err := dbx.WithTenantTx(raw, s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(raw, `insert into ap_payment_run (tenant_id, id, legal_entity_id, proposal_id, status, requested_by, ledger_id, bank_account, control_account, file_config_sealed)
+			values ($1, $2::uuid, $3::uuid, $4::uuid, 'RUNNING', ' BOB ', $5::uuid, '1010', '2000', '\x00')`, testkit.TenantID(1), ids.New(), leA, proposal.ID, ledger1)
+		return err
+	})
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "55000" {
+		t.Fatalf("the trigger must compare canonically: %v", err)
 	}
 }

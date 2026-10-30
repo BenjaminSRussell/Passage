@@ -54,6 +54,7 @@ type PageStore interface {
 	Resume(ctx context.Context, runID string) (Resume, error)
 	Record(ctx context.Context, runID, token string, page Page) error
 	Finish(ctx context.Context, runID, token, status, errMsg string) error
+	Renew(ctx context.Context, runID, token string) error
 }
 
 type PgPageStore struct{ pool *pgxpool.Pool }
@@ -92,7 +93,7 @@ func (s *PgPageStore) Claim(ctx context.Context, runID, handler string) (Claim, 
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		err := tx.QueryRow(ctx, `
 			update batch_run r set status = 'executing', error = null, ended_at = null,
-			       started_at = coalesce(r.started_at, now()), claimed_until = now() + make_interval(secs => $4), lease_token = gen_random_uuid()
+			       started_at = coalesce(r.started_at, now()), claimed_until = now() + make_interval(secs => $4), lease_token = gen_random_uuid(), attempts = r.attempts + 1
 			from batch_job j
 			where r.tenant_id = $1 and r.id = $2 and j.tenant_id = r.tenant_id and j.id = r.job_id and j.handler = $3
 			  and r.status in ('executing', 'error') and (r.claimed_until is null or r.claimed_until < now())
@@ -181,6 +182,25 @@ func (s *PgPageStore) Finish(ctx context.Context, runID, token, status, errMsg s
 			where tenant_id = $1 and id = $2 and status = 'executing' and lease_token = nullif($5, '')::uuid`, tenantID, runID, status, errMsg, token)
 		if err != nil {
 			return fmt.Errorf("finish run: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return runNotActive(ctx, tx, tenantID, runID, token)
+		}
+		return nil
+	})
+}
+
+func (s *PgPageStore) Renew(ctx context.Context, runID, token string) error {
+	tenantID, err := tenantID(ctx)
+	if err != nil {
+		return err
+	}
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `
+			update batch_run set claimed_until = now() + make_interval(secs => $3)
+			where tenant_id = $1 and id = $2 and status = 'executing' and lease_token = nullif($4, '')::uuid`, tenantID, runID, RunLease.Seconds(), token)
+		if err != nil {
+			return fmt.Errorf("renew run lease: %w", err)
 		}
 		if tag.RowsAffected() == 0 {
 			return runNotActive(ctx, tx, tenantID, runID, token)

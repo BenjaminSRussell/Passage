@@ -3,6 +3,7 @@ package api_test
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -43,6 +44,7 @@ type fakeJournalLedger struct {
 	bodies      []map[string]any
 	keys        []string
 	rejectWith  int
+	rejectCode  string
 	dropReplies int
 	entity      string
 	gate        chan struct{}
@@ -61,6 +63,9 @@ func (f *fakeJournalLedger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if f.rejectWith != 0 {
 		defer f.mu.Unlock()
 		w.WriteHeader(f.rejectWith)
+		if f.rejectCode != "" {
+			_, _ = fmt.Fprintf(w, `{"code":%q}`, f.rejectCode)
+		}
 		return
 	}
 	if f.inflight[key] {
@@ -223,11 +228,13 @@ func newRunFixture(t *testing.T, opts fixtureOptions) *runFixture {
 	fl := &fakeJournalLedger{entries: map[string]string{}, entity: entityA, inflight: map[string]bool{}, entered: make(chan struct{}, 4)}
 	srv := httptest.NewServer(fl)
 	t.Cleanup(srv.Close)
+	_, signingKey, _ := ed25519.GenerateKey(nil)
+	signer, _ := tenant.NewServiceSigner("payables", signingKey)
 	runProfiles := profiles()
 	if opts.noProfile {
 		runProfiles = nil
 	}
-	a := api.New(app, opts.validator, func() time.Time { return clock }).WithProposals(pg, fx.New(fxServer(t).URL, "", nil)).WithPaymentRuns(pg, ledger.New(srv.URL, nil), runProfiles)
+	a := api.New(app, opts.validator, func() time.Time { return clock }).WithProposals(pg, fx.New(fxServer(t).URL, "", nil)).WithPaymentRuns(pg, ledger.New(srv.URL, nil).WithSigner(signer), runProfiles)
 	router := httpx.NewRouter()
 	a.Register(router)
 
@@ -331,7 +338,7 @@ func TestPaymentRun_EndToEndWithRealXSDAndLedgerReplay(t *testing.T) {
 		t.Fatalf("proposal = %s, want EXECUTED", f.proposalStatus())
 	}
 	metrics := scrape(f.api)
-	for _, want := range []string{`payables_payment_runs_total{outcome="started"} 1`, `payables_payment_runs_total{outcome="replayed"} 1`, `payables_payment_runs_total{outcome="completed"} 2`, "payables_payment_file_reads_total 1", "payables_payment_run_stuck 0"} {
+	for _, want := range []string{`payables_payment_runs_total{outcome="started"} 1`, `payables_payment_runs_total{outcome="replayed"} 1`, `payables_payment_runs_total{outcome="completed"} 2`, "payables_payment_file_reads_total 1", "payables_payment_run_stuck_total 0"} {
 		if !strings.Contains(metrics, want) {
 			t.Errorf("metrics lack %q:\n%s", want, metrics)
 		}
@@ -341,8 +348,8 @@ func TestPaymentRun_EndToEndWithRealXSDAndLedgerReplay(t *testing.T) {
 func TestPaymentRun_BankDetailsAreProposalContentShownMaskedAndCoveredByTheRequestHash(t *testing.T) {
 	f := newRunFixture(t, fixtureOptions{})
 	body := f.created.Body.String()
-	if !strings.Contains(body, `"payees"`) || !strings.Contains(body, "Acme Supply Co") || !strings.Contains(body, "****2333") || strings.Contains(body, "000111222333") {
-		t.Fatalf("approver view must show names and masked accounts only: %s", body)
+	if !strings.Contains(body, `"payees"`) || !strings.Contains(body, "Acme Supply Co") || !strings.Contains(body, "****2333") || !strings.Contains(body, "021000021") || strings.Contains(body, "000111222333") {
+		t.Fatalf("approver view must show names, bank identifiers and masked accounts only: %s", body)
 	}
 	replay := f.alice.send(f.router, http.MethodPost, "/v1/payables/payment-proposals", proposalWithCreditors("run-1", creditors()))
 	if replay.Code != http.StatusOK || replay.Header().Get("Idempotent-Replayed") != "true" {
@@ -581,7 +588,7 @@ func TestPaymentRun_ItemChangedAfterTheJournalIsStuckAndAlerted(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantProblem(t, f.step(f.erin, runID, "settle"), http.StatusConflict, "AP-RUN-015")
-	if !strings.Contains(scrape(f.api), "payables_payment_run_stuck 1") {
+	if !strings.Contains(scrape(f.api), "payables_payment_run_stuck_total 1") {
 		t.Fatalf("a stuck run must raise the alert metric:\n%s", scrape(f.api))
 	}
 	if got := decode(t, f.erin.send(f.router, http.MethodGet, runsPath+"/"+runID, "")); got["status"] != "RUNNING" || got["settledAt"] != nil {
@@ -676,17 +683,106 @@ func TestLoadPostingProfiles(t *testing.T) {
 		t.Fatalf("mounted file: %v", err)
 	}
 	for name, raw := range map[string]string{
-		"not json":        `{`,
-		"bad entity":      `{"x":{"ledgerId":"` + runLedgerID + `","bankAccount":"1","controlAccount":"2"}}`,
-		"no ledger":       `{"` + entityA + `":{"bankAccount":"1","controlAccount":"2"}}`,
-		"no bank account": `{"` + entityA + `":{"ledgerId":"` + runLedgerID + `","controlAccount":"2"}}`,
-		"unknown field":   `{"` + entityA + `":{"ledgerId":"` + runLedgerID + `","bankAccount":"1","controlAccount":"2","extra":1}}`,
+		"not json":           `{`,
+		"bad entity":         `{"x":{"ledgerId":"` + runLedgerID + `","bankAccount":"1","controlAccount":"2"}}`,
+		"no ledger":          `{"` + entityA + `":{"bankAccount":"1","controlAccount":"2"}}`,
+		"no bank account":    `{"` + entityA + `":{"ledgerId":"` + runLedgerID + `","controlAccount":"2"}}`,
+		"unknown field":      `{"` + entityA + `":{"ledgerId":"` + runLedgerID + `","bankAccount":"1","controlAccount":"2","extra":1}}`,
+		"unknown file field": `{"` + entityA + `":{"ledgerId":"` + runLedgerID + `","bankAccount":"1","controlAccount":"2","file":{"creditors":{}}}}`,
 	} {
-		if _, err := api.LoadPostingProfiles(get(map[string]string{api.EnvPostingProfiles: raw})); err == nil && name != "unknown field" {
+		if _, err := api.LoadPostingProfiles(get(map[string]string{api.EnvPostingProfiles: raw})); err == nil {
 			t.Errorf("%s must fail", name)
 		}
 	}
+	envOnly := get(map[string]string{api.EnvPostingProfiles: `{"x":{}}`, api.EnvPostingProfilesFile: file})
+	if p, err := api.LoadPostingProfiles(envOnly); err != nil || len(p) != 1 {
+		t.Fatalf("the mounted file must win over the environment: %v %v", p, err)
+	}
 	if _, err := api.LoadPostingProfiles(get(map[string]string{api.EnvPostingProfilesFile: t.TempDir() + "/missing"})); err == nil {
 		t.Error("a missing file must fail")
+	}
+}
+
+func TestPaymentRun_OnlyDefinitiveLedgerRejectionsAreRecordedAndNothingElseReleasesLines(t *testing.T) {
+	cases := map[string]struct {
+		status int
+		code   string
+	}{
+		"401": {http.StatusUnauthorized, ""}, "403": {http.StatusForbidden, ""}, "404": {http.StatusNotFound, ""},
+		"408": {http.StatusRequestTimeout, ""}, "429": {http.StatusTooManyRequests, ""}, "500": {http.StatusInternalServerError, ""},
+		"409 conflict": {http.StatusConflict, "LEDGER_IDEMPOTENCY_CONFLICT"}, "409 in progress": {http.StatusConflict, "LEDGER_IDEMPOTENCY_IN_PROGRESS"},
+	}
+	for name, tc := range cases {
+		f := newRunFixture(t, fixtureOptions{})
+		f.approve()
+		runID := f.start()["id"].(string)
+		f.step(f.erin, runID, "generate-file")
+		f.ledger.dropReplies = 1
+		wantProblem(t, f.step(f.erin, runID, "post-journal"), http.StatusBadGateway, "COM-0502")
+		f.ledger.rejectWith, f.ledger.rejectCode = tc.status, tc.code
+		wantProblem(t, f.step(f.erin, runID, "post-journal"), http.StatusBadGateway, "COM-0502")
+		got := decode(t, f.erin.send(f.router, http.MethodGet, runsPath+"/"+runID, ""))
+		if got["journalRejectedAt"] != nil || got["status"] != "RUNNING" {
+			t.Errorf("%s: a non-definitive answer was recorded as a rejection: %v", name, got)
+		}
+		wantProblem(t, f.erin.send(f.router, http.MethodPost, runsPath+"/"+runID+":fail", `{"reason":"must be refused"}`), http.StatusConflict, "AP-RUN-011")
+		if f.proposalStatus() != "EXECUTING" {
+			t.Errorf("%s: proposal = %s, the lines must stay reserved", name, f.proposalStatus())
+		}
+		f.ledger.rejectWith, f.ledger.rejectCode = 0, ""
+		if rec := f.step(f.erin, runID, "post-journal"); rec.Code != http.StatusOK || f.ledger.posted() != 1 {
+			t.Errorf("%s: the next retry must find the committed entry: %d %s entries=%d", name, rec.Code, rec.Body, f.ledger.posted())
+		}
+	}
+}
+
+func TestPaymentRun_RejectedJournalCannotBeRequestedAgain(t *testing.T) {
+	f := newRunFixture(t, fixtureOptions{})
+	f.approve()
+	runID := f.start()["id"].(string)
+	f.step(f.erin, runID, "generate-file")
+	f.ledger.rejectWith = http.StatusBadRequest
+	wantProblem(t, f.step(f.erin, runID, "post-journal"), http.StatusUnprocessableEntity, "AP-RUN-014")
+	f.ledger.rejectWith = 0
+	wantProblem(t, f.step(f.erin, runID, "post-journal"), http.StatusConflict, "AP-RUN-011")
+	if f.ledger.posted() != 0 {
+		t.Fatal("nothing may be posted after a definitive rejection")
+	}
+}
+
+func TestPaymentRun_EveryStepAndTheFileReadRefuseTheCreatorAndApprover(t *testing.T) {
+	f := newRunFixture(t, fixtureOptions{})
+	f.approve()
+	runID := f.start()["id"].(string)
+	f.step(f.erin, runID, "generate-file")
+	for _, user := range []string{"alice", "BOB", " bob "} {
+		c := caller{duties: "payment-run.execute,payment-run.read", user: user, entity: entityA}
+		for _, action := range []string{"generate-file", "post-journal", "settle", "complete", "fail"} {
+			wantProblem(t, f.step(c, runID, action), http.StatusForbidden, "AP-PRP-003")
+		}
+		wantProblem(t, c.send(f.router, http.MethodGet, runsPath+"/"+runID+"/file", ""), http.StatusForbidden, "AP-PRP-003")
+	}
+	if f.ledger.posted() != 0 {
+		t.Fatal("a refused actor must not reach the ledger")
+	}
+}
+
+func TestPaymentRun_FileUsesTheProfileSnapshotTakenAtStart(t *testing.T) {
+	f := newRunFixture(t, fixtureOptions{})
+	f.approve()
+	runID := f.start()["id"].(string)
+	changed := profiles()
+	profile := changed[entityA]
+	profile.File.DebtorBIC = "EVILUS33"
+	profile.BankAccount = "9999"
+	changed[entityA] = profile
+	f.api.WithPaymentRuns(f.pg, nil, changed)
+	f.step(f.erin, runID, "generate-file")
+	file := f.erin.send(f.router, http.MethodGet, runsPath+"/"+runID+"/file", "").Body.String()
+	if !strings.Contains(file, "CHASUS33") || strings.Contains(file, "EVILUS33") {
+		t.Fatalf("the file must use the snapshot: %s", file)
+	}
+	if got := decode(t, f.erin.send(f.router, http.MethodGet, runsPath+"/"+runID, "")); got["bankAccount"] != "1010" {
+		t.Fatalf("the run keeps its snapshot accounts: %v", got)
 	}
 }

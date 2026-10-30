@@ -352,10 +352,10 @@ func TestMintRequiresExplicitEntityInTheUsersScope(t *testing.T) {
 	_, priv, _ := ed25519.GenerateKey(nil)
 	payables, _ := tenant.NewServiceSigner("payables", priv)
 	reads := []string{"ledger.balance.read", "ledger.journal.read"}
-	if _, err := payables.MintFor("ledger", allScope, other, reads); err != nil {
+	if _, err := payables.MintDuties("ledger", allScope, other, reads); err != nil {
 		t.Fatalf("an ALL-scope read-only token may name any entity: %v", err)
 	}
-	if _, err := payables.MintFor("ledger", allScope, other, []string{"ledger.journal.post"}); err == nil {
+	if _, err := payables.MintDuties("ledger", allScope, other, []string{"ledger.journal.post"}); err == nil {
 		t.Fatal("an ALL-scope user must not get a posting token")
 	}
 	if _, err := payables.Mint("ledger", allScope, other); err == nil {
@@ -442,14 +442,14 @@ func TestReplayCacheEvictsExpiredAndFailsClosedWhenFull(t *testing.T) {
 	}
 }
 
-func TestMintForRestrictsDutiesToTheGrant(t *testing.T) {
+func TestMintDutiesRestrictsDutiesToTheGrant(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	signer, _ := tenant.NewServiceSigner("payables", priv)
 	clock := func() time.Time { return epoch }
 	signer = signer.WithClock(clock)
 	verifier := tenant.NewServiceVerifier("ledger", map[string]ed25519.PublicKey{"payables": pub}).WithClock(clock)
 	p := tenant.Principal{TenantID: validTenant, LegalEntityID: validLE, UserID: "erin"}
-	token, err := signer.MintFor("ledger", p, validLE, []string{"ledger.journal.post"})
+	token, err := signer.MintDuties("ledger", p, validLE, []string{"ledger.journal.post"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -457,7 +457,7 @@ func TestMintForRestrictsDutiesToTheGrant(t *testing.T) {
 	if err != nil || !claims.Principal().HasDuty("ledger.journal.post") || claims.Principal().HasDuty("ledger.balance.read") || claims.Act != "erin" {
 		t.Fatalf("claims %+v err %v", claims, err)
 	}
-	if _, err := signer.MintFor("ledger", p, validLE, []string{"ledger.journal.reverse"}); !errors.Is(err, tenant.ErrNoServiceGrant) {
+	if _, err := signer.MintDuties("ledger", p, validLE, []string{"ledger.journal.reverse"}); !errors.Is(err, tenant.ErrNoServiceGrant) {
 		t.Fatalf("a duty outside the grant: %v", err)
 	}
 }
@@ -519,5 +519,23 @@ func TestTypeScriptMintedWorkflowTokenVerifies(t *testing.T) {
 	other := tenant.NewServiceVerifierKids("ledger", map[string]map[string]ed25519.PublicKey{"workflow-ts": {v.KeyID: pub}}).WithClock(at(v.Iat + 1))
 	if _, err := other.Verify(v.Token); err == nil {
 		t.Fatal("a token addressed to payables verified at the ledger")
+	}
+}
+
+func TestMintDutiesCarriesOnlyTheIntersectionWithTheGrant(t *testing.T) {
+	f := newFixture(t)
+	token, err := f.signer.MintDuties("ledger", f.principal, "", []string{"ledger.journal.post", "ledger.account.write", "org.switcher.all_scope"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := f.verifier.Verify(token)
+	if err != nil || len(claims.Duties) != 1 || claims.Duties[0] != "ledger.journal.post" {
+		t.Fatalf("claims = %+v, %v", claims, err)
+	}
+	if _, err := f.signer.MintDuties("ledger", f.principal, "", []string{"ledger.account.write"}); !errors.Is(err, tenant.ErrNoServiceGrant) {
+		t.Fatalf("a duty outside the grant must not be signed: %v", err)
+	}
+	if _, err := f.signer.MintDuties("ledger", f.principal, "", []string{}); err == nil {
+		t.Fatal("an empty duty list must not fall back to the whole grant")
 	}
 }

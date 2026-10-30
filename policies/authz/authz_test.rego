@@ -22,7 +22,7 @@ has_route_permissions(spec) if {
 }
 
 test_all_seeded_duties_allow_their_declared_permissions if {
-	count(data.duties) == 110
+	count(data.duties) == 114
 	every duty, spec in data.duties {
 		has_route_permissions(spec)
 		every permission in spec.permissions {
@@ -61,7 +61,15 @@ segregation_denials := [
 	["ReceivingPost", "POST", "/v1/receiving/invoice-adjustments:post"],
 	["ReceivingPost", "POST", "/v1/receiving/plan-settlements:run"],
 	["ReceivingPost", "POST", "/v1/receiving/consignment-settlements:run"],
+	["ReceivingPost", "POST", "/v1/receiving/ers-settlements:run"],
 	["VendorInvoicePost", "POST", "/v1/receiving/receipts/r1:post"],
+	["VendorInvoicePost", "POST", "/v1/receiving/invoices/i1:release-audit-block"],
+	["VendorInvoicePost", "POST", "/v1/receiving/invoices/i1:reject-audit-block"],
+	["MatchingPolicyMaintain", "POST", "/v1/receiving/invoices/i1:release-audit-block"],
+	["InvoiceAuditRelease", "POST", "/v1/receiving/invoices:post"],
+	["InvoiceAuditRelease", "PUT", "/v1/receiving/audit-policy"],
+	["VendorInvoicePost", "PUT", "/v1/receiving/audit-policy"],
+	["VendorInvoicePost", "PUT", "/v1/receiving/ers-vendors/v1"],
 	["PurchaseOrderMaintain", "POST", "/v1/procurement/purchase-orders/p1:approve"],
 	["RFQMaintain", "POST", "/v1/procurement/rfqs/q1:award"],
 	["ledger.journal.read", "GET", "/v1/reporting/runs/r1"],
@@ -88,6 +96,11 @@ segregation_grants := [
 	["VendorInvoicePost", "POST", "/v1/receiving/invoice-adjustments:post"],
 	["VendorInvoicePost", "POST", "/v1/receiving/plan-settlements:run"],
 	["VendorInvoicePost", "POST", "/v1/receiving/consignment-settlements:run"],
+	["VendorInvoicePost", "POST", "/v1/receiving/ers-settlements:run"],
+	["InvoiceAuditRelease", "POST", "/v1/receiving/invoices/i1:release-audit-block"],
+	["InvoiceAuditRelease", "POST", "/v1/receiving/invoices/i1:reject-audit-block"],
+	["MatchingPolicyMaintain", "PUT", "/v1/receiving/audit-policy"],
+	["MatchingPolicyMaintain", "PUT", "/v1/receiving/ers-vendors/v1"],
 	["PurchaseOrderConfirm", "POST", "/v1/procurement/purchase-orders/p1:approve"],
 	["RFQAward", "POST", "/v1/procurement/rfqs/q1:award"],
 	["ledger.journal.read", "GET", "/v1/reporting/runs/r1/cells/a/b/lines"],
@@ -457,6 +470,8 @@ test_service_grants_allow_only_their_declared_routes if {
 	allowed("ledger.journal.post", "POST", "/v1/ledger/journal-entries")
 	allowed("ledger.journal.reverse", "POST", "/v1/ledger/journal-entries/je-1/reverse")
 	allowed("period.check", "POST", "/v1/close/period-statuses:check")
+	allowed("period.check", "GET", "/v1/close/periods:resolve")
+	not allowed("period.check", "POST", "/v1/close/periods:resolve")
 	every duty in data.service_grants.receiving.ledger {
 		not allowed(duty, "POST", "/v1/ledger/ledgers")
 		not allowed(duty, "PUT", "/v1/ledger/charts/c1/accounts/1000")
@@ -487,4 +502,20 @@ test_service_grants_hold_no_flag_or_all_scope_duty if {
 			}
 		}
 	}
+}
+
+test_batch_service_grant_reaches_only_the_product_job_routes if {
+	data.service_grants.batch.product == ["product.variants.explode", "product.released.read", "product.jobs.write"]
+	allowed("product.released.read", "GET", "/v1/product/released-products")
+	allowed("product.variants.explode", "POST", "/v1/product/products/p-1/variants:explode")
+	allowed("product.jobs.write", "POST", "/v1/product/jobs/group-change")
+	every duty in data.service_grants.batch.product {
+		not allowed(duty, "POST", "/v1/product/products")
+		not allowed(duty, "POST", "/v1/product/releases")
+		not allowed(duty, "PUT", "/v1/product/released-products/r-1")
+		not allowed(duty, "POST", "/v1/ledger/journal-entries")
+	}
+	not allowed("product.released.read", "POST", "/v1/product/jobs/group-change")
+	not allowed("product.variants.explode", "GET", "/v1/product/released-products")
+	not allowed("product.jobs.write", "GET", "/v1/product/released-products")
 }

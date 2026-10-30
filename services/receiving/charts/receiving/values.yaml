@@ -4,6 +4,7 @@ image:
   tag: ""
   pullPolicy: IfNotPresent
 databaseSecret: receiving-db
+auditSeedSecret: receiving-audit-seed
 migrateOnStart: false
 serviceUrls:
   ledger: ""

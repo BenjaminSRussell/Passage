@@ -80,13 +80,16 @@ func TestPg_CrashBetweenPublishAndAckDeliversExactlyOnce(t *testing.T) {
 
 func TestPgInbox_Once(t *testing.T) {
 	pool := testkit.DB(t)
-	ctx := context.Background()
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1)})
 	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
 	inbox := eventing.NewPgInbox(pool)
 	noop := func(pgx.Tx) error { return nil }
 
+	if _, err := inbox.Once(context.Background(), "c", "e1", noop); !errors.Is(err, eventing.ErrInvalidArgument) {
+		t.Fatalf("no tenant err = %v", err)
+	}
 	if _, err := inbox.Once(ctx, "", "e1", noop); !errors.Is(err, eventing.ErrInvalidArgument) {
 		t.Fatalf("empty consumer err = %v", err)
 	}
@@ -112,5 +115,9 @@ func TestPgInbox_Once(t *testing.T) {
 	}
 	if runs != 1 {
 		t.Fatalf("effect ran %d times", runs)
+	}
+	other := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(2)})
+	if applied, err := inbox.Once(other, "c", "e1", noop); err != nil || !applied {
+		t.Fatalf("the same event for another tenant must apply once: %v, %v", applied, err)
 	}
 }

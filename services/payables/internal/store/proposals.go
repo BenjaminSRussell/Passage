@@ -389,7 +389,9 @@ func (s *Postgres) CancelProposal(ctx context.Context, id, user string) (Proposa
 	return s.GetProposal(ctx, id)
 }
 
-func payeeField(vendorID string) string { return "ap_payment_proposal_payee:" + vendorID }
+func payeeField(proposalID, vendorID string) string {
+	return "ap_payment_proposal_payee:" + proposalID + ":" + vendorID
+}
 
 func (s *Postgres) insertPayees(ctx context.Context, tx pgx.Tx, tenantID, proposalID string, in NewProposal) error {
 	if len(in.Payees) == 0 {
@@ -403,7 +405,7 @@ func (s *Postgres) insertPayees(ctx context.Context, tx pgx.Tx, tenantID, propos
 		if err != nil {
 			return err
 		}
-		sealed, err := s.crypt.Seal(tenantID, payeeField(vendor), plain)
+		sealed, err := s.crypt.Seal(tenantID, payeeField(proposalID, vendor), plain)
 		if err != nil {
 			return err
 		}
@@ -431,7 +433,7 @@ func (s *Postgres) openPayees(ctx context.Context, tx pgx.Tx, proposalID string)
 		if s.crypt == nil {
 			return nil, ErrNoFieldCrypt
 		}
-		plain, err := s.crypt.Open(tenantID, payeeField(vendor), sealed)
+		plain, err := s.crypt.Open(tenantID, payeeField(proposalID, vendor), sealed)
 		if err != nil {
 			return nil, err
 		}

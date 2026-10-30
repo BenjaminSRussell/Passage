@@ -67,6 +67,9 @@
       {"resource": "/v1/fx/rates{,/**}", "methods": ["GET", "POST"]}
     ]},
     "Administer exchange rates": {"permissions": [{"resource": "/v1/fx/providers/*:import", "methods": ["POST"]}]},
+    "product.released.read": {"permissions": [{"resource": "/v1/product/released-products", "methods": ["GET"]}]},
+    "product.variants.explode": {"permissions": [{"resource": "/v1/product/products/*/variants:explode", "methods": ["POST"]}]},
+    "product.jobs.write": {"permissions": [{"resource": "/v1/product/jobs/group-change", "methods": ["POST"]}]},
     "ledger.ledger.write": {"permissions": [{"resource": "/v1/ledger/ledgers", "methods": ["POST"]}]},
     "ledger.account.write": {"permissions": [{"resource": "/v1/ledger/charts/*/accounts/*", "methods": ["PUT"]}]},
     "ledger.journal.read": {"permissions": [
@@ -119,7 +122,10 @@
       {"resource": "/v1/ledger/ledgers/*/account-mappings", "methods": ["POST"]}
     ]},
     "Calculate tax": {"permissions": [{"resource": "/v1/tax/calculate", "methods": ["POST"]}]},
-    "period.check": {"permissions": [{"resource": "/v1/close/period-statuses:check", "methods": ["POST"]}]},
+    "period.check": {"permissions": [
+      {"resource": "/v1/close/period-statuses:check", "methods": ["POST"]},
+      {"resource": "/v1/close/periods:resolve", "methods": ["GET"]}
+    ]},
     "reporting.statement.view": {"permissions": [
       {"resource": "/v1/reporting/definitions", "methods": ["GET"]},
       {"resource": "/v1/reporting/definitions/*", "methods": ["GET"]},
@@ -301,7 +307,11 @@
       {"resource": "/v1/procurement/rfqs/*:award", "methods": ["POST"]},
       {"resource": "/v1/procurement/rfqs/*/scores/*", "methods": ["PUT"]}
     ]},
-    "MatchingPolicyMaintain": {"permissions": [{"resource": "/v1/receiving/matching:evaluate", "methods": ["POST"]}]},
+    "MatchingPolicyMaintain": {"permissions": [
+      {"resource": "/v1/receiving/matching:evaluate", "methods": ["POST"]},
+      {"resource": "/v1/receiving/audit-policy", "methods": ["PUT"]},
+      {"resource": "/v1/receiving/ers-vendors/*", "methods": ["PUT"]}
+    ]},
     "ReceivingMaintain": {"permissions": [
       {"resource": "/v1/receiving/arrivals", "methods": ["POST"]},
       {"resource": "/v1/receiving/receipts", "methods": ["GET", "POST"]},
@@ -317,7 +327,12 @@
       {"resource": "/v1/receiving/invoices:post", "methods": ["POST"]},
       {"resource": "/v1/receiving/invoice-adjustments:post", "methods": ["POST"]},
       {"resource": "/v1/receiving/plan-settlements:run", "methods": ["POST"]},
-      {"resource": "/v1/receiving/consignment-settlements:run", "methods": ["POST"]}
+      {"resource": "/v1/receiving/consignment-settlements:run", "methods": ["POST"]},
+      {"resource": "/v1/receiving/ers-settlements:run", "methods": ["POST"]}
+    ]},
+    "InvoiceAuditRelease": {"permissions": [
+      {"resource": "/v1/receiving/invoices/*:release-audit-block", "methods": ["POST"]},
+      {"resource": "/v1/receiving/invoices/*:reject-audit-block", "methods": ["POST"]}
     ]},
     "APInquire": {"permissions": [{"resource": "/v1/receiving/grir", "methods": ["GET"]}]},
     "ReceivingAdmin": {"permissions": [
@@ -369,6 +384,9 @@
     ]}
   },
   "service_grants": {
+    "batch": {
+      "product": ["product.variants.explode", "product.released.read", "product.jobs.write"]
+    },
     "receiving": {
       "ledger": ["ledger.journal.post", "ledger.journal.reverse"],
       "close": ["period.check"]

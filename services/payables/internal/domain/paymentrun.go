@@ -104,7 +104,7 @@ func SummarizePayee(vendorID string, c CreditorDTO) PayeeSummary {
 	if bank == "" {
 		bank = c.RoutingNumber
 	}
-	return PayeeSummary{VendorID: vendorID, Name: c.Name, Account: MaskBank(account), Bank: MaskBank(bank)}
+	return PayeeSummary{VendorID: vendorID, Name: c.Name, Account: MaskBank(account), Bank: bank}
 }
 
 func MaskBank(v string) string {

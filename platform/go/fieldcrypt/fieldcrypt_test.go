@@ -107,6 +107,15 @@ func TestFromEnv(t *testing.T) {
 	if _, err := fieldcrypt.FromEnv(get(map[string]string{fieldcrypt.EnvKeysFile: file, fieldcrypt.EnvCurrentID: "k8"})); err != nil {
 		t.Fatalf("mounted file: %v", err)
 	}
+	other := base64.StdEncoding.EncodeToString(key(8))
+	both, err := fieldcrypt.FromEnv(get(map[string]string{fieldcrypt.EnvKeys: "k9=" + other, fieldcrypt.EnvKeysFile: file, fieldcrypt.EnvCurrentID: "k8"}))
+	if err != nil {
+		t.Fatalf("the mounted file must take precedence over the environment: %v", err)
+	}
+	sealed, _ := both.Seal("t", "f", []byte("x"))
+	if string(sealed[2:4]) != "k8" {
+		t.Fatalf("sealed with %q, want the file's key k8", sealed[2:4])
+	}
 	for name, env := range map[string]map[string]string{
 		"bad base64":   {fieldcrypt.EnvKeys: "k=!!", fieldcrypt.EnvCurrentID: "k"},
 		"duplicate":    {fieldcrypt.EnvKeys: "k=" + enc + ",k=" + enc, fieldcrypt.EnvCurrentID: "k"},

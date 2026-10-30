@@ -50,7 +50,7 @@ func NewKeys(current string, keys map[string][]byte) (*Keys, error) {
 // comma-separated id=base64(32 bytes) pairs and FIELDCRYPT_CURRENT_KEY_ID; it returns nil, nil when unset.
 func FromEnv(getenv func(string) string) (*Keys, error) {
 	raw := strings.TrimSpace(getenv(EnvKeys))
-	if file := getenv(EnvKeysFile); raw == "" && file != "" {
+	if file := getenv(EnvKeysFile); file != "" {
 		b, err := os.ReadFile(file)
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", EnvKeysFile, err)

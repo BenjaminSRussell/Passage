@@ -43,6 +43,11 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.databaseSecret }}
                   key: DATABASE_URL
+            - name: AUDIT_SAMPLE_SEED
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auditSeedSecret }}
+                  key: AUDIT_SAMPLE_SEED
             - name: PASSAGE_SERVICE_NAME
               value: receiving
 {{- if .Values.serviceIdentity.signingKeySecret }}

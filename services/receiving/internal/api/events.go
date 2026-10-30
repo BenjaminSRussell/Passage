@@ -72,12 +72,52 @@ type invoicePostedData struct {
 	LegalEntityID string                  `json:"legal_entity_id"`
 	VendorID      string                  `json:"vendor_id"`
 	InvoiceNumber string                  `json:"invoice_number"`
+	Source        string                  `json:"source"`
 	InvoiceDate   string                  `json:"invoice_date"`
 	PostingDate   string                  `json:"posting_date"`
 	Currency      string                  `json:"currency"`
 	Total         string                  `json:"total"`
 	LedgerEntryID string                  `json:"ledger_entry_id"`
 	Lines         []invoicePostedLineData `json:"lines"`
+}
+
+type invoiceSampledData struct {
+	InvoiceID     string `json:"invoice_id"`
+	LegalEntityID string `json:"legal_entity_id"`
+	VendorID      string `json:"vendor_id"`
+	InvoiceNumber string `json:"invoice_number"`
+	Source        string `json:"source"`
+	Currency      string `json:"currency"`
+	Total         string `json:"total"`
+	SampleRatePct string `json:"sample_rate_pct"`
+	Reason        string `json:"reason"`
+}
+
+type invoiceRejectedData struct {
+	InvoiceID     string `json:"invoice_id"`
+	LegalEntityID string `json:"legal_entity_id"`
+	VendorID      string `json:"vendor_id"`
+	InvoiceNumber string `json:"invoice_number"`
+	Source        string `json:"source"`
+	Currency      string `json:"currency"`
+	Total         string `json:"total"`
+	Reason        string `json:"reason"`
+	RejectedBy    string `json:"rejected_by"`
+}
+
+type auditPolicyChangedData struct {
+	LegalEntityID string `json:"legal_entity_id"`
+	OldRatePct    string `json:"old_rate_pct"`
+	NewRatePct    string `json:"new_rate_pct"`
+	ChangedBy     string `json:"changed_by"`
+}
+
+type ersVendorChangedData struct {
+	LegalEntityID string `json:"legal_entity_id"`
+	VendorID      string `json:"vendor_id"`
+	OldEnabled    bool   `json:"old_enabled"`
+	NewEnabled    bool   `json:"new_enabled"`
+	ChangedBy     string `json:"changed_by"`
 }
 
 type invoiceAdjustedLineData struct {
@@ -148,9 +188,35 @@ func receiptCorrectedEvent(tenantID, kind string, r store.Receipt, seq int, ledg
 	})
 }
 
+func invoiceSampledEvent(tenantID string, in store.Invoice, total, ratePct decimal.Decimal) (events.Event, error) {
+	return newEvent("payables", "invoice", "sampled", in.ID, tenantID, invoiceSampledData{
+		InvoiceID: in.ID, LegalEntityID: in.LegalEntityID, VendorID: in.VendorID, InvoiceNumber: in.InvoiceNumber, Source: in.Source,
+		Currency: in.Currency, Total: total.String(), SampleRatePct: ratePct.String(), Reason: in.AuditReason,
+	})
+}
+
+func invoiceRejectedEvent(tenantID string, in store.Invoice, reason, by string) (events.Event, error) {
+	return newEvent("payables", "invoice", "rejected", in.ID, tenantID, invoiceRejectedData{
+		InvoiceID: in.ID, LegalEntityID: in.LegalEntityID, VendorID: in.VendorID, InvoiceNumber: in.InvoiceNumber, Source: in.Source,
+		Currency: in.Currency, Total: in.Total.String(), Reason: reason, RejectedBy: by,
+	})
+}
+
+func auditPolicyChangedEvent(tenantID, legalEntityID string, oldRate, newRate decimal.Decimal, by string) (events.Event, error) {
+	return newEvent("receiving", "auditpolicy", "changed", legalEntityID, tenantID, auditPolicyChangedData{
+		LegalEntityID: legalEntityID, OldRatePct: oldRate.String(), NewRatePct: newRate.String(), ChangedBy: by,
+	})
+}
+
+func ersVendorChangedEvent(tenantID, legalEntityID, vendorID string, oldEnabled, newEnabled bool, by string) (events.Event, error) {
+	return newEvent("receiving", "ersvendor", "changed", vendorID, tenantID, ersVendorChangedData{
+		LegalEntityID: legalEntityID, VendorID: vendorID, OldEnabled: oldEnabled, NewEnabled: newEnabled, ChangedBy: by,
+	})
+}
+
 func invoicePostedEvent(tenantID string, in store.Invoice, ledgerEntryID string, total decimal.Decimal, cleared []decimal.Decimal) (events.Event, error) {
 	data := invoicePostedData{
-		InvoiceID: in.ID, LegalEntityID: in.LegalEntityID, VendorID: in.VendorID, InvoiceNumber: in.InvoiceNumber,
+		InvoiceID: in.ID, LegalEntityID: in.LegalEntityID, VendorID: in.VendorID, InvoiceNumber: in.InvoiceNumber, Source: in.Source,
 		InvoiceDate: in.InvoiceDate.Format(dateLayout), PostingDate: in.PostingDate.Format(dateLayout), Currency: in.Currency,
 		Total: total.String(), LedgerEntryID: ledgerEntryID, Lines: make([]invoicePostedLineData, 0, len(in.Lines)),
 	}

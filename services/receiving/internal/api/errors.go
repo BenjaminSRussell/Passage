@@ -19,6 +19,7 @@ var domainStatus = map[string]int{
 	domain.CodeInvalidReceipt:    http.StatusUnprocessableEntity,
 	domain.CodeInvalidTransition: http.StatusConflict,
 	domain.CodePeriodClosed:      http.StatusUnprocessableEntity,
+	domain.CodePeriodUnresolved:  http.StatusUnprocessableEntity,
 	domain.CodeOverInvoice:       http.StatusUnprocessableEntity,
 	domain.CodeDuplicateInvoice:  http.StatusConflict,
 	domain.CodeCorrectionBelow:   http.StatusConflict,
@@ -26,6 +27,9 @@ var domainStatus = map[string]int{
 	domain.CodeLedgerRejected:    http.StatusUnprocessableEntity,
 	domain.CodeOverCredit:        http.StatusUnprocessableEntity,
 	domain.CodePlanSettled:       http.StatusUnprocessableEntity,
+	domain.CodeAuditBlocked:      http.StatusConflict,
+	domain.CodeNotAuditBlocked:   http.StatusConflict,
+	domain.CodeAuditSelfRelease:  http.StatusForbidden,
 }
 
 func writeError(w http.ResponseWriter, r *http.Request, err error) {

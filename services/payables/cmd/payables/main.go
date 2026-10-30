@@ -76,7 +76,8 @@ func run(ctx context.Context, getenv func(string) string) error {
 	}
 	poster, err := ledgerPoster(getenv)
 	if err != nil {
-		return err
+		slog.Warn("payment runs are disabled", "reason", err)
+		poster = nil
 	}
 	a := api.New(pool, validator, time.Now).WithAging(items, balances, getenv("AP_CONTROL_ACCOUNT")).WithProposals(items, rateSource(getenv)).WithPaymentRuns(items, poster, profiles)
 	router := httpx.NewRouter()
@@ -120,6 +121,9 @@ func ledgerPoster(getenv func(string) string) (api.LedgerPoster, error) {
 	c, err := ledgerClient(getenv)
 	if c == nil || err != nil {
 		return nil, err
+	}
+	if !c.Signed() {
+		return nil, errors.New("LEDGER_URL is set but payment runs need PASSAGE_SERVICE_SIGNING_KEY or PASSAGE_SERVICE_SIGNING_KEY_FILE: journals are never posted with forwarded user headers")
 	}
 	return c, nil
 }

@@ -63,16 +63,18 @@ export function createPaymentRunActivities(
 }
 
 async function failure(path: string, response: Response): Promise<Error> {
-  const detail = await problemDetail(response);
-  const message = `payables payment run ${path || "start"} failed with ${response.status}${detail ? `: ${detail}` : ""}`;
-  const client = response.status >= 400 && response.status < 500 && !RETRYABLE_CLIENT_STATUSES.includes(response.status);
+  const problem = await problemBody(response);
+  const message = `payables payment run ${path || "start"} failed with ${response.status}${problem.detail ? `: ${problem.detail}` : ""}`;
+  const businessRule = problem.serviceCode?.startsWith("AP-") === true;
+  const authFault = response.status === 401 || (response.status === 403 && !businessRule);
+  const client = response.status >= 400 && response.status < 500 && !RETRYABLE_CLIENT_STATUSES.includes(response.status) && !authFault;
   return client ? ApplicationFailure.nonRetryable(message, REJECTED) : new Error(message);
 }
 
-async function problemDetail(response: Response): Promise<string | undefined> {
+async function problemBody(response: Response): Promise<{ detail?: string; serviceCode?: string }> {
   try {
-    return ((await response.json()) as { detail?: string }).detail;
+    return (await response.json()) as { detail?: string; serviceCode?: string };
   } catch {
-    return undefined;
+    return {};
   }
 }

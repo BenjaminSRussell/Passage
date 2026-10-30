@@ -77,7 +77,6 @@ export interface InvoiceInput {
   postingDate: string;
   currency: string;
   ledgerId: string;
-  fiscalPeriodId: string;
   lines: InvoiceLineInput[];
 }
 

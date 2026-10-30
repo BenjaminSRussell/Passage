@@ -93,7 +93,7 @@ func (c *Client) get(ctx context.Context, legalEntityID, path string, q url.Valu
 	if err != nil {
 		return nil, fmt.Errorf("ledger: %w", err)
 	}
-	signed, err := c.signer.ApplyFor(req, principal, audience, legalEntityID, readDuties)
+	signed, err := c.signer.ApplyDuties(req, principal, audience, legalEntityID, readDuties)
 	if err != nil {
 		return nil, fmt.Errorf("ledger: %w", err)
 	}
@@ -206,7 +206,12 @@ type entryResult struct {
 	} `json:"entries"`
 }
 
+func (c *Client) Signed() bool { return c.signer != nil }
+
 func (c *Client) Post(ctx context.Context, e Entry) (string, error) {
+	if c.signer == nil {
+		return "", errors.New("ledger: posting needs a service signing key; the end user's headers are never forwarded for a journal")
+	}
 	principal, ok := tenant.FromContext(ctx)
 	if !ok {
 		return "", errors.New("ledger: no principal in context")
@@ -229,12 +234,8 @@ func (c *Client) Post(ctx context.Context, e Entry) (string, error) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Idempotency-Key", e.IdempotencyKey)
-	signed, err := c.signer.ApplyFor(req, principal, audience, e.LegalEntityID, []string{"ledger.journal.post"})
-	if err != nil {
+	if _, err := c.signer.ApplyDuties(req, principal, audience, e.LegalEntityID, []string{"ledger.journal.post"}); err != nil {
 		return "", fmt.Errorf("ledger: %w", err)
-	}
-	if !signed {
-		identity.Forward(req, principal)
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {

@@ -171,6 +171,22 @@ describe("payment run workflow", () => {
     expect(fake.effects()).toMatchObject({ proposal: "FAILED", reservedLines: 0 });
   }, 60_000);
 
+  it("an authorization fault while settling is retried until it clears", async () => {
+    const { fake, taskQueue, activities } = setup();
+    fake.refuse("settle", 403, 3);
+    const result = await execute(taskQueue, activities);
+    expect(result.status).toBe("COMPLETED");
+    expect(fake.effects().calls.settle).toBe(4);
+    expect(fake.effects()).toMatchObject(COMPLETED_ONCE);
+  }, 60_000);
+
+  it("a settlement that never clears surfaces as a failed workflow after the retry budget", async () => {
+    const { fake, taskQueue, activities } = setup();
+    fake.refuse("settle", 401);
+    await expect(execute(taskQueue, activities)).rejects.toThrow();
+    expect(fake.effects()).toMatchObject({ ledgerEntries: 1, proposal: "EXECUTING", settleCounts: [0, 0, 0] });
+  }, 90_000);
+
   it("a start the service refuses is terminal and fails the workflow", async () => {
     const { fake, taskQueue, activities } = setup();
     fake.refuse("start", 409);
@@ -270,7 +286,20 @@ describe("payment run http activities", () => {
     expect(JSON.parse(fetchImpl.mock.calls[0]![1]?.body as string)).toEqual({ reason: "bad bank details" });
   });
 
-  it.each([400, 403, 404, 409, 422])("treats %i as terminal", async (status) => {
+  it("keeps 401 and an authorization 403 retryable but a business 403 terminal", async () => {
+    for (const [status, body, retryable] of [
+      [401, { serviceCode: "AUTH-0001" }, true],
+      [403, { serviceCode: "AUTH-0003" }, true],
+      [403, {}, true],
+      [403, { serviceCode: "AP-PRP-003", detail: "same person" }, false],
+    ] as const) {
+      const { activities } = activitiesWith(new Response(JSON.stringify(body), { status }));
+      const error = await inActivity(() => activities.settlePaymentRun(ref)).catch((e: unknown) => e);
+      expect(error instanceof ApplicationFailure && error.nonRetryable).toBe(!retryable);
+    }
+  });
+
+  it.each([400, 404, 409, 422])("treats %i as terminal", async (status) => {
     const { activities } = activitiesWith(new Response(JSON.stringify({ detail: "no" }), { status }));
     const error = await inActivity(() => activities.settlePaymentRun(ref)).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ApplicationFailure);

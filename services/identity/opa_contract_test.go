@@ -23,7 +23,7 @@ import (
 
 const (
 	contractTenant   = "tenant-a"
-	seededDutyCount  = 110
+	seededDutyCount  = 114
 	unassignedUserID = "user-without-duty"
 )
 
@@ -298,6 +298,16 @@ func TestDutyContractExpectations(t *testing.T) {
 		{duty: "VendorInvoicePost", method: http.MethodPost, resource: "/v1/receiving/invoice-adjustments:post", wantAllowed: true},
 		{duty: "VendorInvoicePost", method: http.MethodPost, resource: "/v1/receiving/plan-settlements:run", wantAllowed: true},
 		{duty: "VendorInvoicePost", method: http.MethodPost, resource: "/v1/receiving/consignment-settlements:run", wantAllowed: true},
+		{duty: "VendorInvoicePost", method: http.MethodPost, resource: "/v1/receiving/ers-settlements:run", wantAllowed: true},
+		{duty: "InvoiceAuditRelease", method: http.MethodPost, resource: "/v1/receiving/invoices/i1:release-audit-block", wantAllowed: true},
+		{duty: "VendorInvoicePost", method: http.MethodPost, resource: "/v1/receiving/invoices/i1:release-audit-block"},
+		{duty: "InvoiceAuditRelease", method: http.MethodPost, resource: "/v1/receiving/invoices:post"},
+		{duty: "MatchingPolicyMaintain", method: http.MethodPut, resource: "/v1/receiving/audit-policy", wantAllowed: true},
+		{duty: "MatchingPolicyMaintain", method: http.MethodPut, resource: "/v1/receiving/ers-vendors/v1", wantAllowed: true},
+		{duty: "InvoiceAuditRelease", method: http.MethodPost, resource: "/v1/receiving/invoices/i1:reject-audit-block", wantAllowed: true},
+		{duty: "VendorInvoicePost", method: http.MethodPost, resource: "/v1/receiving/invoices/i1:reject-audit-block"},
+		{duty: "VendorInvoicePost", method: http.MethodPut, resource: "/v1/receiving/audit-policy"},
+		{duty: "VendorInvoicePost", method: http.MethodPut, resource: "/v1/receiving/ers-vendors/v1"},
 		{duty: "ReceivingPost", method: http.MethodPost, resource: "/v1/receiving/invoice-adjustments:post"},
 		{duty: "ledger.journal.read", method: http.MethodGet, resource: "/v1/reporting/runs/r1/cells/a/b/lines", wantAllowed: true},
 		{duty: "party.read", method: http.MethodGet, resource: "/v1/party/parties/p1", wantAllowed: true},

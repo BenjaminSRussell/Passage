@@ -354,7 +354,7 @@ paths:
       operationId: postPaymentRunJournal
       x-passage-duty: payment-run.execute
       description: |
-        Posts one balanced journal to the ledger through POST /v1/ledger/journal-entries with Idempotency-Key payables:payment-run:<run id>: debit the control account per group (gross, valued in the legal-entity currency), credit the bank clearing account (paid, valued) and credit the discount account (the rounding-exact difference) when a discount is taken. Crash-safe: a retry after a lost reply replays the same ledger entry. Needs the file step (409 AP-RUN-012). A ledger 4xx is terminal (422 AP-RUN-014); a ledger 5xx or transport failure is 502 and retryable.
+        Posts one balanced journal to the ledger through POST /v1/ledger/journal-entries with Idempotency-Key payables:payment-run:<run id>: debit the control account per group (gross, valued in the legal-entity currency), credit the bank clearing account (paid, valued) and credit the discount account (the rounding-exact difference) when a discount is taken. Crash-safe: a retry after a lost reply replays the same ledger entry. Needs the file step (409 AP-RUN-012). Only a ledger 400 or 422 is terminal (422 AP-RUN-014, recorded; the journal is never requested again). Any other ledger answer or a transport failure is a retryable 502 that records nothing.
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -606,7 +606,7 @@ components:
         totalValued: { type: string, description: Sum of group valued amounts in legalEntityCurrency. }
         payees:
           type: array
-          description: The bank details the approver approves, masked to the last four characters.
+          description: The bank details the approver approves, with the bank identifier in full and the account number masked to its last four characters.
           items:
             type: object
             properties:

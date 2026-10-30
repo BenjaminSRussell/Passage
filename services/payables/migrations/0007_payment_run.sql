@@ -68,7 +68,8 @@ CREATE TABLE IF NOT EXISTS ap_payment_run (
   control_account text NOT NULL CHECK (control_account <> ''),
   discount_account text,
   file_number text,
-  file_content text,
+  file_sealed bytea,
+  file_config_sealed bytea NOT NULL,
   file_sha256 text,
   payment_count integer,
   file_generated_at timestamptz,
@@ -83,7 +84,7 @@ CREATE TABLE IF NOT EXISTS ap_payment_run (
   PRIMARY KEY (tenant_id, id),
   UNIQUE (tenant_id, legal_entity_id, proposal_id),
   FOREIGN KEY (tenant_id, proposal_id) REFERENCES ap_payment_proposal (tenant_id, id),
-  CHECK ((file_generated_at IS NULL) = (file_content IS NULL)),
+  CHECK ((file_generated_at IS NULL) = (file_sealed IS NULL)),
   CHECK ((journal_posted_at IS NULL) = (journal_entry_id IS NULL)),
   CHECK (journal_requested_at IS NULL OR file_generated_at IS NOT NULL),
   CHECK (journal_posted_at IS NULL OR journal_requested_at IS NOT NULL),
@@ -98,7 +99,7 @@ DECLARE p record;
 BEGIN
   IF TG_OP = 'INSERT' THEN
     SELECT created_by, approved_by INTO p FROM ap_payment_proposal WHERE tenant_id = NEW.tenant_id AND id = NEW.proposal_id;
-    IF NEW.requested_by IN (p.created_by, p.approved_by) THEN
+    IF lower(btrim(NEW.requested_by)) IN (lower(btrim(p.created_by)), lower(btrim(p.approved_by))) THEN
       RAISE EXCEPTION 'a payment run must be started by a user who neither created nor approved the proposal' USING ERRCODE = '55000';
     END IF;
     RETURN NEW;
@@ -164,6 +165,15 @@ CREATE TABLE IF NOT EXISTS ap_payment_proposal_payee (
   PRIMARY KEY (tenant_id, proposal_id, vendor_id),
   FOREIGN KEY (tenant_id, proposal_id) REFERENCES ap_payment_proposal (tenant_id, id)
 );
+CREATE OR REPLACE FUNCTION ap_payment_proposal_payee_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM ap_payment_proposal p WHERE p.tenant_id = NEW.tenant_id AND p.id = NEW.proposal_id AND p.status = 'DRAFT') THEN
+    RAISE EXCEPTION 'payee bank details can only be added while the proposal is a draft' USING ERRCODE = '55000';
+  END IF;
+  RETURN NEW;
+END
+$$;
+CREATE TRIGGER ap_payment_proposal_payee_guard BEFORE INSERT ON ap_payment_proposal_payee FOR EACH ROW EXECUTE FUNCTION ap_payment_proposal_payee_guard();
 ALTER TABLE ap_payment_proposal_payee ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ap_payment_proposal_payee FORCE ROW LEVEL SECURITY;
 CREATE POLICY ap_payment_proposal_payee_tenant_access ON ap_payment_proposal_payee AS PERMISSIVE
@@ -180,7 +190,7 @@ BEGIN
     EXECUTE 'GRANT UPDATE (executed_at, failed_at) ON ap_payment_proposal TO passage_app';
     EXECUTE 'GRANT UPDATE (settled) ON ap_payment_proposal_line TO passage_app';
     EXECUTE 'GRANT SELECT, INSERT ON ap_payment_run, ap_payment TO passage_app';
-    EXECUTE 'GRANT UPDATE (status, file_number, file_content, file_sha256, payment_count, file_generated_at, journal_requested_at, journal_rejected_at, journal_entry_id, journal_posted_at, settled_at, failure_reason, completed_at) ON ap_payment_run TO passage_app';
+    EXECUTE 'GRANT UPDATE (status, file_number, file_sealed, file_sha256, payment_count, file_generated_at, journal_requested_at, journal_rejected_at, journal_entry_id, journal_posted_at, settled_at, failure_reason, completed_at) ON ap_payment_run TO passage_app';
   END IF;
 END
 $$;
