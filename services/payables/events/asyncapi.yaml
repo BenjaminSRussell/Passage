@@ -53,6 +53,7 @@ components:
         open_item_id: { type: string, format: uuid }
         legal_entity_id: { type: string, format: uuid }
         vendor_id: { type: string, format: uuid }
+        vendor_group_id: { type: string, format: uuid, description: "vendor group the open item was created under; absent when unknown" }
         currency: { type: string, pattern: "^[A-Z]{3}$" }
         open_amount: { type: string, description: "decimal string; the amount still open after this change" }
         status: { type: string, enum: [OPEN, PARTIALLY_SETTLED, SETTLED, REVERSED] }
