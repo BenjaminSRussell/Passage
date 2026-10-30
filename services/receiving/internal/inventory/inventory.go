@@ -30,11 +30,20 @@ const (
 	postedStatus    = "POSTED"
 	ownerDimension  = "owner"
 	dateLayout      = "2006-01-02"
+
+	audience                = "inventory"
+	dutyOwnershipChangeRead = "inventory.ownership-change.read"
 )
 
 type Client struct {
 	baseURL string
 	http    *http.Client
+	signer  *tenant.ServiceSigner
+}
+
+func (c *Client) WithSigner(s *tenant.ServiceSigner) *Client {
+	c.signer = s
+	return c
 }
 
 func New(baseURL string, httpClient *http.Client) *Client {
@@ -69,7 +78,7 @@ type journalBody struct {
 	} `json:"glEntry"`
 }
 
-func (c *Client) get(ctx context.Context, path string) (int, []byte, error) {
+func (c *Client) get(ctx context.Context, legalEntityID, path string) (int, []byte, error) {
 	principal, ok := tenant.FromContext(ctx)
 	if !ok {
 		return 0, nil, errors.New("inventory get: no principal in context")
@@ -78,7 +87,11 @@ func (c *Client) get(ctx context.Context, path string) (int, []byte, error) {
 	if err != nil {
 		return 0, nil, fmt.Errorf("inventory get %s: %w", path, err)
 	}
-	identity.Forward(req, principal)
+	if c.signer == nil {
+		identity.Forward(req, principal)
+	} else if _, err := c.signer.ApplyDuties(req, principal, audience, legalEntityID, []string{dutyOwnershipChangeRead}); err != nil {
+		return 0, nil, fmt.Errorf("inventory get %s: %w", path, err)
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		slog.ErrorContext(ctx, "inventory get transport failed", "err", err, "path", path, "correlationId", middleware.GetReqID(ctx))
@@ -111,7 +124,7 @@ func (c *Client) List(ctx context.Context, legalEntityID string) ([]string, bool
 		if cursor != "" {
 			query.Set("cursor", cursor)
 		}
-		_, raw, err := c.get(ctx, domain.InventoryJournalsPath+"?"+query.Encode())
+		_, raw, err := c.get(ctx, legalEntityID, domain.InventoryJournalsPath+"?"+query.Encode())
 		if err != nil {
 			return nil, false, err
 		}
@@ -137,8 +150,8 @@ func (c *Client) List(ctx context.Context, legalEntityID string) ([]string, bool
 	return out, true, nil
 }
 
-func (c *Client) Get(ctx context.Context, journalID string) (domain.OwnershipChange, error) {
-	_, raw, err := c.get(ctx, fmt.Sprintf(domain.InventoryJournalPathTmpl, url.PathEscape(journalID)))
+func (c *Client) Get(ctx context.Context, legalEntityID, journalID string) (domain.OwnershipChange, error) {
+	_, raw, err := c.get(ctx, legalEntityID, fmt.Sprintf(domain.InventoryJournalPathTmpl, url.PathEscape(journalID)))
 	if err != nil {
 		return domain.OwnershipChange{}, err
 	}

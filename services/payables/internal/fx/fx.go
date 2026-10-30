@@ -32,10 +32,21 @@ type StatusError struct{ Status int }
 
 func (e *StatusError) Error() string { return fmt.Sprintf("fx: unexpected status %d", e.Status) }
 
+const (
+	audience       = "fx"
+	dutyRateLookup = "fx.rate.lookup"
+)
+
 type Client struct {
 	baseURL  string
 	rateType string
 	http     *http.Client
+	signer   *tenant.ServiceSigner
+}
+
+func (c *Client) WithSigner(s *tenant.ServiceSigner) *Client {
+	c.signer = s
+	return c
 }
 
 func New(baseURL, rateType string, httpClient *http.Client) *Client {
@@ -51,7 +62,7 @@ func New(baseURL, rateType string, httpClient *http.Client) *Client {
 	return &Client{baseURL: strings.TrimRight(baseURL, "/"), rateType: rateType, http: httpClient}
 }
 
-func (c *Client) Rate(ctx context.Context, from, to string, date time.Time) (decimal.Decimal, error) {
+func (c *Client) Rate(ctx context.Context, legalEntityID, from, to string, date time.Time) (decimal.Decimal, error) {
 	principal, ok := tenant.FromContext(ctx)
 	if !ok {
 		return decimal.Decimal{}, errors.New("fx: no principal in context")
@@ -61,7 +72,11 @@ func (c *Client) Rate(ctx context.Context, from, to string, date time.Time) (dec
 	if err != nil {
 		return decimal.Decimal{}, fmt.Errorf("fx: %w", err)
 	}
-	identity.Forward(req, principal)
+	if c.signer == nil {
+		identity.Forward(req, principal)
+	} else if _, err := c.signer.ApplyDuties(req, principal, audience, legalEntityID, []string{dutyRateLookup}); err != nil {
+		return decimal.Decimal{}, fmt.Errorf("fx: %w", err)
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		slog.ErrorContext(ctx, "fx request failed", "err", err, "from", from, "to", to, "correlationId", middleware.GetReqID(ctx))

@@ -55,10 +55,12 @@ var serviceGrants = map[string]map[string][]string{
 	"receiving": {
 		"ledger":     {"ledger.journal.post", "ledger.journal.reverse"},
 		"close":      {"period.check"},
-		"purchasing": {"procurement.invoicing-plan.settle"},
+		"purchasing": {"procurement.invoicing-plan.settle", "procurement.purchase-order.lookup"},
+		"inventory":  {"inventory.ownership-change.read"},
 	},
 	"payables": {
 		"ledger": {"ledger.balance.read", "ledger.journal.read", "ledger.journal.post"},
+		"fx":     {"fx.rate.lookup"},
 	},
 	"workflow-ts": {
 		"payables": {"payment-run.execute"},
@@ -217,7 +219,10 @@ func (s *ServiceSigner) legalEntityFor(p Principal, explicit string, duties []st
 	return le, (p.LegalEntityID == "" && p.HasDuty(DutyAllScope) && onlyReads(duties)) || slices.Contains(scopes, le)
 }
 
-var readDuties = map[string]struct{}{"ledger.balance.read": {}, "ledger.journal.read": {}}
+var readDuties = map[string]struct{}{
+	"ledger.balance.read": {}, "ledger.journal.read": {}, "procurement.purchase-order.lookup": {},
+	"inventory.ownership-change.read": {}, "fx.rate.lookup": {},
+}
 
 func onlyReads(duties []string) bool {
 	return !slices.ContainsFunc(duties, func(d string) bool { _, ok := readDuties[d]; return !ok })

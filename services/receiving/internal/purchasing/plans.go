@@ -32,9 +32,9 @@ type planBody struct {
 	Rows                 []planRowBody `json:"rows"`
 }
 
-func (c *Client) List(ctx context.Context, orderID string) ([]domain.InvoicingPlan, error) {
+func (c *Client) List(ctx context.Context, legalEntityID, orderID string) ([]domain.InvoicingPlan, error) {
 	const what = "invoicing plans get"
-	status, raw, err := c.fetch(ctx, what, orderID, fmt.Sprintf(domain.InvoicingPlansPathTmpl, url.PathEscape(orderID)))
+	status, raw, err := c.fetch(ctx, what, legalEntityID, orderID, fmt.Sprintf(domain.InvoicingPlansPathTmpl, url.PathEscape(orderID)))
 	if err != nil {
 		return nil, err
 	}

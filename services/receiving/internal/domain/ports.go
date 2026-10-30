@@ -144,7 +144,7 @@ func (o PurchaseOrder) Usable() bool {
 func (l PurchaseOrderLine) Usable() bool { return l.Status != StatusCancelled }
 
 type PurchaseOrders interface {
-	Get(ctx context.Context, id string) (PurchaseOrder, error)
+	Get(ctx context.Context, legalEntityID, id string) (PurchaseOrder, error)
 }
 
 type FakePurchaseOrders struct {
@@ -152,7 +152,7 @@ type FakePurchaseOrders struct {
 	Err    error
 }
 
-func (f FakePurchaseOrders) Get(_ context.Context, id string) (PurchaseOrder, error) {
+func (f FakePurchaseOrders) Get(_ context.Context, _, id string) (PurchaseOrder, error) {
 	if f.Err != nil {
 		return PurchaseOrder{}, f.Err
 	}

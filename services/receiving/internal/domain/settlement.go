@@ -47,7 +47,7 @@ type InvoicingPlan struct {
 }
 
 type InvoicingPlans interface {
-	List(ctx context.Context, purchaseOrderID string) ([]InvoicingPlan, error)
+	List(ctx context.Context, legalEntityID, purchaseOrderID string) ([]InvoicingPlan, error)
 }
 
 type PlanRowSettlements interface {
@@ -66,7 +66,7 @@ type OwnershipChange struct {
 
 type OwnershipChanges interface {
 	List(ctx context.Context, legalEntityID string) (journalIDs []string, truncated bool, err error)
-	Get(ctx context.Context, journalID string) (OwnershipChange, error)
+	Get(ctx context.Context, legalEntityID, journalID string) (OwnershipChange, error)
 }
 
 type FakeInvoicingPlans struct {
@@ -74,7 +74,7 @@ type FakeInvoicingPlans struct {
 	Err   error
 }
 
-func (f FakeInvoicingPlans) List(_ context.Context, purchaseOrderID string) ([]InvoicingPlan, error) {
+func (f FakeInvoicingPlans) List(_ context.Context, _, purchaseOrderID string) ([]InvoicingPlan, error) {
 	if f.Err != nil {
 		return nil, f.Err
 	}
@@ -109,7 +109,7 @@ func (f FakeOwnershipChanges) List(_ context.Context, legalEntityID string) ([]s
 	return out, f.Truncated, nil
 }
 
-func (f FakeOwnershipChanges) Get(_ context.Context, journalID string) (OwnershipChange, error) {
+func (f FakeOwnershipChanges) Get(_ context.Context, _, journalID string) (OwnershipChange, error) {
 	if f.Err != nil {
 		return OwnershipChange{}, f.Err
 	}

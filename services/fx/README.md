@@ -43,4 +43,6 @@ No module beyond what `platform/go` already requires: `shopspring/decimal` (MIT)
 - `Book.Add` accepts rates in (0, 1e9] with at most 10 decimals (`domain.MaxRate`, `domain.MaxRateScale`, shared with the provider adapters, which reject anything above). Lookups go through a map keyed by (type, from, to) to a date-ordered series, then a binary search for the latest row on or before the date; duplicate-ID checks are map lookups. `CurrentBook` skips and logs a stored row the book rejects instead of failing the whole tenant book.
 - `ConvertEntry` and `Revalue` name every offending currency in sorted order, so errors are stable across runs.
 
+`GET /v1/fx/rates` takes `View exchange rates` or the service-only `fx.rate.lookup` (payables' signed service token, #305; no other fx route accepts it). Set `PASSAGE_SERVICE_NAME=fx` and `PASSAGE_SERVICE_PUBLIC_KEYS` (chart `serviceIdentity.publicKeys`); a malformed key stops startup.
+
 See `NOT-IMPLEMENTED.md` for the deliverables outside this slice.

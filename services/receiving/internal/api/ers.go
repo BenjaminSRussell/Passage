@@ -91,7 +91,7 @@ func (r *ersRun) order(id string) (ersOrder, error) {
 	if r.api.ports.PurchaseOrders == nil {
 		return ersOrder{}, unavailable("purchase order lookup is not configured")
 	}
-	po, err := r.api.ports.PurchaseOrders.Get(r.ctx, id)
+	po, err := r.api.ports.PurchaseOrders.Get(r.ctx, r.base.legalEntityID, id)
 	out := ersOrder{po: po}
 	switch {
 	case errors.Is(err, domain.ErrPurchaseOrderNotFound):

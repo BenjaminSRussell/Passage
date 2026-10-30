@@ -65,12 +65,16 @@ func TestLedgerBalancesTimeoutOverride(t *testing.T) {
 }
 
 func TestRateSourceWiring(t *testing.T) {
-	if rateSource(func(string) string { return "" }) != nil {
+	if src, err := rateSource(func(string) string { return "" }); src != nil || err != nil {
 		t.Fatal("no FX_URL must leave valuation without a rate source")
 	}
 	env := map[string]string{"FX_URL": "http://fx", "FX_RATE_TYPE": "closing", "FX_TIMEOUT": "750ms"}
-	if rateSource(func(k string) string { return env[k] }) == nil {
+	if src, err := rateSource(func(k string) string { return env[k] }); src == nil || err != nil {
 		t.Fatal("FX_URL must configure the fx client")
+	}
+	env["PASSAGE_SERVICE_SIGNING_KEY"] = "not-a-seed"
+	if _, err := rateSource(func(k string) string { return env[k] }); err == nil {
+		t.Fatal("a malformed service signing key must stop startup")
 	}
 }
 

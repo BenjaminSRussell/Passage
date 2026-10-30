@@ -22,6 +22,7 @@ import (
 const (
 	Timeout         = 2 * time.Second
 	maxResponseSize = 1 << 20
+	dutyLookup      = "procurement.purchase-order.lookup"
 )
 
 type Client struct {
@@ -60,7 +61,7 @@ type orderBody struct {
 	Lines          []lineBody `json:"lines"`
 }
 
-func (c *Client) fetch(ctx context.Context, what, orderID, path string) (int, []byte, error) {
+func (c *Client) fetch(ctx context.Context, what, legalEntityID, orderID, path string) (int, []byte, error) {
 	principal, ok := tenant.FromContext(ctx)
 	if !ok {
 		return 0, nil, fmt.Errorf("%s: no principal in context", what)
@@ -69,7 +70,9 @@ func (c *Client) fetch(ctx context.Context, what, orderID, path string) (int, []
 	if err != nil {
 		return 0, nil, fmt.Errorf("%s %s: %w", what, orderID, err)
 	}
-	identity.Forward(req, principal)
+	if err := c.authenticate(req, principal, legalEntityID); err != nil {
+		return 0, nil, fmt.Errorf("%s %s: %w", what, orderID, err)
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -85,9 +88,18 @@ func (c *Client) fetch(ctx context.Context, what, orderID, path string) (int, []
 	return resp.StatusCode, raw, nil
 }
 
-func (c *Client) Get(ctx context.Context, orderID string) (domain.PurchaseOrder, error) {
+func (c *Client) authenticate(req *http.Request, p tenant.Principal, legalEntityID string) error {
+	if c.signer == nil || (legalEntityID == "" && len(tenant.LegalEntityScopeList(p)) != 1) {
+		identity.Forward(req, p)
+		return nil
+	}
+	_, err := c.signer.ApplyDuties(req, p, audience, legalEntityID, []string{dutyLookup})
+	return err
+}
+
+func (c *Client) Get(ctx context.Context, legalEntityID, orderID string) (domain.PurchaseOrder, error) {
 	const what = "purchase order get"
-	status, raw, err := c.fetch(ctx, what, orderID, fmt.Sprintf(domain.PurchaseOrderPathTmpl, url.PathEscape(orderID)))
+	status, raw, err := c.fetch(ctx, what, legalEntityID, orderID, fmt.Sprintf(domain.PurchaseOrderPathTmpl, url.PathEscape(orderID)))
 	if err != nil {
 		return domain.PurchaseOrder{}, err
 	}

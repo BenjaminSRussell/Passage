@@ -53,6 +53,7 @@ const (
 	dutyTradeAgreementMaintain = "TradeAgreementMaintain"
 	dutyAgreementMaintain      = "AgreementMaintain"
 	dutyPlanRowSettle          = "procurement.invoicing-plan.settle"
+	dutyPurchaseOrderLookup    = "procurement.purchase-order.lookup"
 )
 
 // maxRequisitionLines is the FR-17.1 cap on lines per requisition.
@@ -144,7 +145,8 @@ func (a *API) Register(r chi.Router) {
 		maintain.Post("/requisitions:consolidate", a.consolidateRequisitions)
 		r.With(authz.RequireDuty(dutyPurchaseOrderInquire)).Get("/purchase-orders", a.listOrders)
 		inquire := r.With(authz.RequireDuty(dutyPurchaseOrderInquire))
-		inquire.Get("/purchase-orders/{id}", a.getOrder)
+		lookup := r.With(authz.RequireAnyDuty(dutyPurchaseOrderInquire, dutyPurchaseOrderLookup))
+		lookup.Get("/purchase-orders/{id}", a.getOrder)
 		// PO lifecycle (FR-17.7, FR-17.8): PATCH edits or creates a change
 		// version; custom methods (":submit", ":approve", ":reject", ":confirm",
 		// ":cancel") arrive as one path segment and check their own duty in
@@ -158,7 +160,7 @@ func (a *API) Register(r chi.Router) {
 		inquire.Get("/purchase-orders/{id}/versions/{n}/diff", a.orderVersionDiff)
 		// Invoicing plans per PO line (FR-17.21); a line amount change
 		// reproportions them inside the PO edit (BR-17.17).
-		inquire.Get("/purchase-orders/{id}/invoicing-plans", a.listInvoicingPlans)
+		lookup.Get("/purchase-orders/{id}/invoicing-plans", a.listInvoicingPlans)
 		inquire.Get("/purchase-orders/{id}/lines/{lineNo}/invoicing-plan", a.getInvoicingPlan)
 		maintain.Put("/purchase-orders/{id}/lines/{lineNo}/invoicing-plan", a.putInvoicingPlan)
 		maintain.Delete("/purchase-orders/{id}/lines/{lineNo}/invoicing-plan", a.deleteInvoicingPlan)

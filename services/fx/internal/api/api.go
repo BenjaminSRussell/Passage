@@ -17,10 +17,11 @@ import (
 )
 
 const (
-	dutyRead     = "View exchange rates"
-	dutyWrite    = "Maintain exchange rates"
-	dutyAdmin    = "Administer exchange rates"
-	readyTimeout = 500 * time.Millisecond
+	dutyRead       = "View exchange rates"
+	dutyWrite      = "Maintain exchange rates"
+	dutyAdmin      = "Administer exchange rates"
+	dutyRateLookup = "fx.rate.lookup"
+	readyTimeout   = 500 * time.Millisecond
 )
 
 type API struct {
@@ -37,7 +38,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyWrite)).Post("/v1/fx/rate-types", a.createRateType)
 	r.With(authz.RequireDuty(dutyWrite)).Put("/v1/fx/rate-types/{code}", a.putRateType)
 	r.With(authz.RequireDuty(dutyWrite)).Post("/v1/fx/rates", a.publishRates)
-	r.With(authz.RequireDuty(dutyRead)).Get("/v1/fx/rates", a.lookupRate)
+	r.With(authz.RequireAnyDuty(dutyRead, dutyRateLookup)).Get("/v1/fx/rates", a.lookupRate)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/fx/rates/history", a.rateHistory)
 	r.With(authz.RequireDuty(dutyRead)).Post("/v1/fx/convert", a.convert)
 	r.With(authz.RequireDuty(dutyAdmin)).Post("/v1/fx/providers/{p}:import", a.importNow)

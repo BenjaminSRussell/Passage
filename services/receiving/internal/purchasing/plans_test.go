@@ -19,7 +19,7 @@ const plansJSON = `{"items":[
 func TestList_MapsPlansAndForwardsIdentity(t *testing.T) {
 	client, got := serve(t, http.StatusOK, plansJSON)
 
-	plans, err := client.List(middlewareCtx(testCtx(), "req-9"), orderID)
+	plans, err := client.List(middlewareCtx(testCtx(), "req-9"), legalEntityID, orderID)
 
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +57,7 @@ func TestList_MapsStatusesAndRefusesUnusableBodies(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			client, _ := serve(t, tc.status, tc.body)
 
-			plans, err := client.List(testCtx(), orderID)
+			plans, err := client.List(testCtx(), legalEntityID, orderID)
 
 			if err == nil || plans != nil || (tc.is != nil && !errors.Is(err, tc.is)) {
 				t.Fatalf("plans %+v err %v", plans, err)
@@ -69,7 +69,7 @@ func TestList_MapsStatusesAndRefusesUnusableBodies(t *testing.T) {
 func TestList_NeedsAPrincipal(t *testing.T) {
 	client, _ := serve(t, http.StatusOK, plansJSON)
 
-	if _, err := client.List(t.Context(), orderID); err == nil {
+	if _, err := client.List(t.Context(), legalEntityID, orderID); err == nil {
 		t.Fatal("a list without a principal must not call purchasing")
 	}
 }
@@ -79,7 +79,7 @@ func TestPlansPathMatchesThePurchasingRouteTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(src), `inquire.Get("/purchase-orders/{id}/invoicing-plans", a.listInvoicingPlans)`) {
+	if !strings.Contains(string(src), `lookup.Get("/purchase-orders/{id}/invoicing-plans", a.listInvoicingPlans)`) {
 		t.Fatal("purchasing route table no longer lists invoicing plans; update domain.InvoicingPlansPathTmpl")
 	}
 	if domain.InvoicingPlansPathTmpl != "/v1/procurement/purchase-orders/%s/invoicing-plans" {

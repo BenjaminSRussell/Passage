@@ -152,7 +152,7 @@ type fakeRates struct {
 	calls []string
 }
 
-func (f *fakeRates) Rate(_ context.Context, from, to string, date time.Time) (decimal.Decimal, error) {
+func (f *fakeRates) Rate(_ context.Context, _, from, to string, date time.Time) (decimal.Decimal, error) {
 	f.calls = append(f.calls, from+">"+to+"@"+date.Format(time.DateOnly))
 	if f.err != nil {
 		return decimal.Decimal{}, f.err

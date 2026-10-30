@@ -152,14 +152,25 @@ func (c *Catalogue) Evaluate(duties []string, method, resource string) Grant {
 			return grant
 		}
 	}
-	smallest := -1
-	for _, name := range c.names {
-		duty := c.duties[name]
-		if duty.grants(method, resource) && (smallest < 0 || duty.size < smallest) {
-			smallest, grant.DutyMissing = duty.size, name
-		}
+	grant.DutyMissing = c.leastPrivileged(method, resource, false)
+	if grant.DutyMissing == "" {
+		grant.DutyMissing = c.leastPrivileged(method, resource, true)
 	}
 	return grant
+}
+
+// leastPrivileged names the smallest duty granting the request among duties of
+// the given kind; a person is only pointed at service-only duties when no
+// person duty grants the route.
+func (c *Catalogue) leastPrivileged(method, resource string, serviceOnly bool) string {
+	smallest, best := -1, ""
+	for _, name := range c.names {
+		duty := c.duties[name]
+		if duty.serviceOnly == serviceOnly && duty.grants(method, resource) && (smallest < 0 || duty.size < smallest) {
+			smallest, best = duty.size, name
+		}
+	}
+	return best
 }
 
 // Effective evaluates every catalogue route, at its sample resource, for a

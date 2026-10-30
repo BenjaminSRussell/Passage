@@ -5,6 +5,11 @@ image:
   pullPolicy: IfNotPresent
 databaseSecret: fx-db
 migrateOnStart: false
+# Public keys of the services that call fx with a signed service token
+# (caller[:kid]=base64 Ed25519 public key, comma separated; not secret). payables
+# reads rates this way (#305).
+serviceIdentity:
+  publicKeys: ""
 replicaCount: 1
 import:
   tenantId: ""

@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"context"
+	"strings"
+	"testing"
+)
 
 func env(overrides map[string]string) func(string) string {
 	base := map[string]string{"DATABASE_URL": "postgres://x", "INV_INVENTORY_ACCOUNT": "1300",
@@ -58,5 +62,12 @@ func TestLoadConfig_consignmentAccrualIsOptional(t *testing.T) {
 	c, err = loadConfig(env(map[string]string{"INV_CONSIGNMENT_ACCRUAL_ACCOUNT": "2190"}))
 	if err != nil || c.post.ConsignmentAccount != "2190" {
 		t.Fatalf("with the account: err %v, account %q; want nil, 2190", err, c.post.ConsignmentAccount)
+	}
+}
+
+func TestRun_StopsOnMalformedServicePublicKeys(t *testing.T) {
+	err := run(context.Background(), env(map[string]string{"PASSAGE_SERVICE_NAME": "inventory", "PASSAGE_SERVICE_PUBLIC_KEYS": "receiving=zzz"}))
+	if err == nil || !strings.Contains(err.Error(), "PASSAGE_SERVICE_PUBLIC_KEYS") {
+		t.Fatalf("run with a malformed key = %v", err)
 	}
 }

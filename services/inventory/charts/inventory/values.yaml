@@ -5,6 +5,11 @@ image:
   pullPolicy: IfNotPresent
 databaseSecret: inventory-db
 migrateOnStart: false
+# Public keys of the services that call inventory with a signed service token
+# (caller[:kid]=base64 Ed25519 public key, comma separated; not secret). receiving
+# reads ownership-change journals this way (#305).
+serviceIdentity:
+  publicKeys: ""
 replicaCount: 3
 autoscaling:
   enabled: true

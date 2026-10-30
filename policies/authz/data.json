@@ -62,6 +62,7 @@
       {"resource": "/v1/fx/rates{,/**}", "methods": ["GET"]},
       {"resource": "/v1/fx/convert{,/**}", "methods": ["POST"]}
     ]},
+    "fx.rate.lookup": {"service_only": true, "permissions": [{"resource": "/v1/fx/rates", "methods": ["GET"]}]},
     "Maintain exchange rates": {"permissions": [
       {"resource": "/v1/fx/rate-types{,/**}", "methods": ["GET", "POST", "PUT"]},
       {"resource": "/v1/fx/rates{,/**}", "methods": ["GET", "POST"]}
@@ -183,6 +184,10 @@
       {"resource": "/v1/inventory/abc-runs", "methods": ["GET"]},
       {"resource": "/v1/inventory/abc-runs/*", "methods": ["GET"]}
     ]},
+    "inventory.ownership-change.read": {"service_only": true, "permissions": [
+      {"resource": "/v1/inventory/journals", "methods": ["GET"]},
+      {"resource": "/v1/inventory/journals/*", "methods": ["GET"]}
+    ]},
     "inventory.journal.write": {"permissions": [
       {"resource": "/v1/inventory/journals", "methods": ["POST"]},
       {"resource": "/v1/inventory/journals/*/lines:bulk", "methods": ["POST"]},
@@ -257,6 +262,10 @@
     ]},
     "procurement.invoicing-plan.settle": {"service_only": true, "permissions": [
       {"resource": "/v1/procurement/purchase-orders/*/lines/*/invoicing-plan/rows/*/settlement", "methods": ["PUT"]}
+    ]},
+    "procurement.purchase-order.lookup": {"service_only": true, "permissions": [
+      {"resource": "/v1/procurement/purchase-orders/*", "methods": ["GET"]},
+      {"resource": "/v1/procurement/purchase-orders/*/invoicing-plans", "methods": ["GET"]}
     ]},
     "PurchaseOrderInquire": {"permissions": [
       {"resource": "/v1/procurement/purchase-orders", "methods": ["GET"]},
@@ -393,10 +402,12 @@
     "receiving": {
       "ledger": ["ledger.journal.post", "ledger.journal.reverse"],
       "close": ["period.check"],
-      "purchasing": ["procurement.invoicing-plan.settle"]
+      "purchasing": ["procurement.invoicing-plan.settle", "procurement.purchase-order.lookup"],
+      "inventory": ["inventory.ownership-change.read"]
     },
     "payables": {
-      "ledger": ["ledger.balance.read", "ledger.journal.read", "ledger.journal.post"]
+      "ledger": ["ledger.balance.read", "ledger.journal.read", "ledger.journal.post"],
+      "fx": ["fx.rate.lookup"]
     },
     "workflow-ts": {
       "payables": ["payment-run.execute"]

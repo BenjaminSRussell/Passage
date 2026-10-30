@@ -66,7 +66,7 @@ type PayablesStore interface {
 }
 
 type RateSource interface {
-	Rate(ctx context.Context, from, to string, date time.Time) (decimal.Decimal, error)
+	Rate(ctx context.Context, legalEntityID, from, to string, date time.Time) (decimal.Decimal, error)
 }
 
 type proposalDeps struct {
@@ -239,7 +239,7 @@ func (a *API) listOpenItems(w http.ResponseWriter, r *http.Request) {
 		items = items[:limit]
 		page.NextCursor = encodeCursor(items[limit-1])
 	}
-	valued, ok := a.valueItems(w, r, items, valueIn)
+	valued, ok := a.valueItems(w, r, le, items, valueIn)
 	if !ok {
 		return
 	}
@@ -272,7 +272,7 @@ func (a *API) getOpenItem(w http.ResponseWriter, r *http.Request) {
 		a.fault(w, r, "open item get failed", err)
 		return
 	}
-	valued, ok := a.valueItems(w, r, []store.OpenItem{item}, valueIn)
+	valued, ok := a.valueItems(w, r, item.LegalEntityID, []store.OpenItem{item}, valueIn)
 	if !ok {
 		return
 	}
@@ -281,7 +281,7 @@ func (a *API) getOpenItem(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) today() time.Time { return a.now().UTC().Truncate(24 * time.Hour) }
 
-func (a *API) valueItems(w http.ResponseWriter, r *http.Request, items []store.OpenItem, valueIn string) ([]*valuation, bool) {
+func (a *API) valueItems(w http.ResponseWriter, r *http.Request, legalEntityID string, items []store.OpenItem, valueIn string) ([]*valuation, bool) {
 	out := make([]*valuation, len(items))
 	if valueIn == "" || len(items) == 0 {
 		return out, true
@@ -291,7 +291,7 @@ func (a *API) valueItems(w http.ResponseWriter, r *http.Request, items []store.O
 	for i, it := range items {
 		currencies[i] = it.Currency
 	}
-	rates, ok := a.ratesFor(w, r, currencies, valueIn, date)
+	rates, ok := a.ratesFor(w, r, legalEntityID, currencies, valueIn, date)
 	if !ok {
 		return nil, false
 	}
@@ -301,7 +301,7 @@ func (a *API) valueItems(w http.ResponseWriter, r *http.Request, items []store.O
 	return out, true
 }
 
-func (a *API) ratesFor(w http.ResponseWriter, r *http.Request, currencies []string, to string, date time.Time) (map[string]decimal.Decimal, bool) {
+func (a *API) ratesFor(w http.ResponseWriter, r *http.Request, legalEntityID string, currencies []string, to string, date time.Time) (map[string]decimal.Decimal, bool) {
 	rates := map[string]decimal.Decimal{to: decimal.NewFromInt(1)}
 	for _, c := range currencies {
 		if _, done := rates[c]; done {
@@ -311,7 +311,7 @@ func (a *API) ratesFor(w http.ResponseWriter, r *http.Request, currencies []stri
 			a.problem(w, r, http.StatusServiceUnavailable, codeRatesUnconfigured, "exchange rate source is not configured")
 			return nil, false
 		}
-		rate, err := a.proposals.rates.Rate(r.Context(), c, to, date)
+		rate, err := a.proposals.rates.Rate(r.Context(), legalEntityID, c, to, date)
 		if err != nil {
 			a.rateFailure(w, r, c, to, err)
 			return nil, false
@@ -440,7 +440,7 @@ func (a *API) createProposal(w http.ResponseWriter, r *http.Request) {
 	for i, c := range candidates {
 		currencies[i] = c.Currency
 	}
-	rates, ok := a.ratesFor(w, r, currencies, req.LegalEntityCurrency, rateDate)
+	rates, ok := a.ratesFor(w, r, le, currencies, req.LegalEntityCurrency, rateDate)
 	if !ok {
 		return
 	}

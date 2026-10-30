@@ -52,7 +52,7 @@ func buildPorts(getenv func(string) string) (api.Ports, error) {
 	}
 	switch url := getenv("INVENTORY_URL"); {
 	case url != "":
-		ports.OwnershipChanges = inventory.New(url, nil)
+		ports.OwnershipChanges = inventory.New(url, nil).WithSigner(signer)
 	case allowFakes:
 		slog.Warn("INVENTORY_URL is empty: consignment settlement finds no ownership changes", "flag", "PASSAGE_ALLOW_FAKES")
 		ports.OwnershipChanges = domain.FakeOwnershipChanges{}
