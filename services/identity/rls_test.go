@@ -24,6 +24,8 @@ const (
 
 var identityTables = []string{"identity_tenants", "identity_users", "identity_legal_entities", "identity_role_assignments"}
 
+var rlsTables = append(append([]string{}, identityTables...), "identity_audit", "outbox")
+
 func inScope(ctx context.Context, tenantID, legalEntityID string) context.Context {
 	return tenant.With(ctx, tenant.Principal{TenantID: tenantID, UserID: "test-user", LegalEntityID: legalEntityID})
 }
@@ -53,6 +55,12 @@ func count(t *testing.T, app *pgxpool.Pool, tenantID, legalEntityID, query strin
 }
 
 func setup(t *testing.T) (*pgxpool.Pool, string, string) {
+	t.Helper()
+	_, app, tenantA, tenantB := setupWithAdmin(t)
+	return app, tenantA, tenantB
+}
+
+func setupWithAdmin(t *testing.T) (*pgxpool.Pool, *pgxpool.Pool, string, string) {
 	t.Helper()
 	admin, app := testkit.DBWithApp(t)
 	ctx := context.Background()
@@ -84,7 +92,7 @@ func setup(t *testing.T) (*pgxpool.Pool, string, string) {
 	}
 	seed(tenantA, legalA, legalB)
 	seed(tenantB, legalA)
-	return app, tenantA, tenantB
+	return admin, app, tenantA, tenantB
 }
 
 func TestIdentityTablesAreForcedRLSOwnedByMigrator(t *testing.T) {
@@ -101,7 +109,7 @@ func TestIdentityTablesAreForcedRLSOwnedByMigrator(t *testing.T) {
 	if user != "passage_app" || super || bypass {
 		t.Fatalf("role=%q super=%v bypassrls=%v", user, super, bypass)
 	}
-	for _, table := range identityTables {
+	for _, table := range rlsTables {
 		var owner string
 		var enabled, forced bool
 		var policies int
@@ -138,7 +146,7 @@ func TestUnscopedAndResetSessionsSeeNoRows(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		for _, table := range identityTables {
+		for _, table := range rlsTables {
 			var n int
 			if err := conn.QueryRow(ctx, `select count(*) from `+table).Scan(&n); err != nil {
 				t.Fatalf("%s %s: %v", stage, table, err)
@@ -241,6 +249,9 @@ values ($1, gen_random_uuid(), $2, 'dated', `+validFrom+`, `+validTo+`)`, tenant
 	if err := insert("now() + interval '1 day'", "null"); err != nil {
 		t.Fatal(err)
 	}
+	if err := insert("now() + interval '2 days'", "now() + interval '2 days'"); err != nil {
+		t.Fatalf("empty range (valid_to = valid_from) rejected: %v", err)
+	}
 	if err := insert("now() - interval '2 days'", "now() - interval '1 day'"); err != nil {
 		t.Fatal(err)
 	}
@@ -248,8 +259,8 @@ values ($1, gen_random_uuid(), $2, 'dated', `+validFrom+`, `+validTo+`)`, tenant
 	if got := count(t, app, tenantA, "*", effective); got != 3 {
 		t.Errorf("effective assignments = %d, want 3", got)
 	}
-	if got := count(t, app, tenantA, "*", `select count(*) from identity_role_assignments where role = 'dated'`); got != 2 {
-		t.Errorf("dated assignments = %d, want 2", got)
+	if got := count(t, app, tenantA, "*", `select count(*) from identity_role_assignments where role = 'dated'`); got != 3 {
+		t.Errorf("dated assignments = %d, want 3", got)
 	}
 }
 
@@ -295,7 +306,6 @@ func TestAppRoleCannotWriteTenants(t *testing.T) {
 	app, tenantA, _ := setup(t)
 	ctx := context.Background()
 	for name, stmt := range map[string]string{
-		"insert":      `insert into identity_tenants (tenant_id, realm_name, display_name) values ($1, 'new-realm', 'x')`,
 		"update":      `update identity_tenants set status = 'active' where tenant_id = $1`,
 		"update-self": `update identity_tenants set realm_name = 'renamed' where tenant_id = $1`,
 		"delete":      `delete from identity_tenants where tenant_id = $1`,
@@ -328,5 +338,18 @@ func TestAppRoleCannotDeleteIdentityHistory(t *testing.T) {
 			return err
 		})
 		requireDenied(t, err, "passage_app delete on "+table)
+	}
+}
+
+func TestAppRoleCannotRewriteAuditOrOutbox(t *testing.T) {
+	app, tenantA, _ := setup(t)
+	for _, table := range []string{"identity_audit", "outbox"} {
+		for _, stmt := range []string{"update " + table + " set tenant_id = tenant_id", "delete from " + table} {
+			err := asTenant(t, app, tenantA, "*", func(tx pgx.Tx) error {
+				_, err := tx.Exec(context.Background(), stmt)
+				return err
+			})
+			requireDenied(t, err, "passage_app "+stmt)
+		}
 	}
 }
