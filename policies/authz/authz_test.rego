@@ -22,7 +22,7 @@ has_route_permissions(spec) if {
 }
 
 test_all_seeded_duties_allow_their_declared_permissions if {
-	count(data.duties) == 107
+	count(data.duties) == 109
 	every duty, spec in data.duties {
 		has_route_permissions(spec)
 		every permission in spec.permissions {
@@ -406,6 +406,25 @@ test_open_item_read_duty_opens_list_and_get_only if {
 	allowed("open-item.read", "GET", "/v1/payables/open-items/i1")
 	not allowed("open-item.read", "POST", "/v1/payables/open-items")
 	not allowed("open-item.read", "GET", "/v1/payables/payment-proposals/p1")
+}
+
+test_payment_run_duties_are_separate_from_proposal_duties if {
+	allowed("payment-run.execute", "POST", "/v1/payables/payment-runs")
+	allowed("payment-run.execute", "POST", "/v1/payables/payment-runs/r1:generate-file")
+	allowed("payment-run.execute", "POST", "/v1/payables/payment-runs/r1:post-journal")
+	allowed("payment-run.execute", "POST", "/v1/payables/payment-runs/r1:settle")
+	allowed("payment-run.execute", "POST", "/v1/payables/payment-runs/r1:complete")
+	allowed("payment-run.execute", "POST", "/v1/payables/payment-runs/r1:fail")
+	not allowed("payment-run.execute", "POST", "/v1/payables/payment-runs/r1:approve")
+	not allowed("payment-run.execute", "GET", "/v1/payables/payment-runs/r1")
+	not allowed("payment-run.execute", "POST", "/v1/payables/payment-proposals/p1:approve")
+	allowed("payment-run.read", "GET", "/v1/payables/payment-runs/r1")
+	allowed("payment-run.read", "GET", "/v1/payables/payment-runs/r1/file")
+	not allowed("payment-run.read", "POST", "/v1/payables/payment-runs")
+	not allowed("payment-run.read", "POST", "/v1/payables/payment-runs/r1:settle")
+	not allowed("payment-proposal.approve", "POST", "/v1/payables/payment-runs")
+	not allowed("payment-proposal.write", "POST", "/v1/payables/payment-runs")
+	not allowed("payment-proposal.read", "GET", "/v1/payables/payment-runs/r1")
 }
 
 test_payment_proposal_duties_are_separate if {

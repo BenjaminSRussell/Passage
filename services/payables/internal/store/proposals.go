@@ -52,6 +52,8 @@ type Proposal struct {
 	ApprovedAt          *time.Time             `json:"approvedAt,omitempty"`
 	CancelledBy         *string                `json:"cancelledBy,omitempty"`
 	CancelledAt         *time.Time             `json:"cancelledAt,omitempty"`
+	ExecutedAt          *time.Time             `json:"executedAt,omitempty"`
+	FailedAt            *time.Time             `json:"failedAt,omitempty"`
 	Groups              []domain.ProposalGroup `json:"groups"`
 	TotalValued         decimal.Decimal        `json:"totalValued"`
 	RequestHash         string                 `json:"-"`
@@ -106,12 +108,12 @@ func (s *Postgres) Candidates(ctx context.Context, legalEntityID, dueBy string) 
 }
 
 const proposalColumns = `id::text, legal_entity_id::text, run_date::text, run_id, due_by::text, rate_date::text, legal_entity_currency, payment_method, status,
-	created_by, created_at, approved_by, approved_at, cancelled_by, cancelled_at, request_hash`
+	created_by, created_at, approved_by, approved_at, cancelled_by, cancelled_at, executed_at, failed_at, request_hash`
 
 func scanProposal(row pgx.Row) (Proposal, error) {
 	var p Proposal
 	err := row.Scan(&p.ID, &p.LegalEntityID, &p.RunDate, &p.RunID, &p.DueBy, &p.RateDate, &p.LegalEntityCurrency, &p.PaymentMethod, &p.Status,
-		&p.CreatedBy, &p.CreatedAt, &p.ApprovedBy, &p.ApprovedAt, &p.CancelledBy, &p.CancelledAt, &p.RequestHash)
+		&p.CreatedBy, &p.CreatedAt, &p.ApprovedBy, &p.ApprovedAt, &p.CancelledBy, &p.CancelledAt, &p.ExecutedAt, &p.FailedAt, &p.RequestHash)
 	return p, err
 }
 

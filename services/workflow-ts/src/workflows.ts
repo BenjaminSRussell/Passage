@@ -7,6 +7,8 @@ import {
 } from "@temporalio/workflow";
 import type { PartyDecisionActivities } from "./activities.js";
 
+export * from "./paymentRunWorkflow.js";
+
 const { decidePartyChange } = proxyActivities<PartyDecisionActivities>({
   startToCloseTimeout: "30 seconds",
   retry: { maximumInterval: "1 minute" },

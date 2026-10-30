@@ -221,7 +221,7 @@ func (s *Postgres) Get(ctx context.Context, id string) (OpenItem, error) {
 }
 
 func (s *Postgres) SetPaymentHold(ctx context.Context, id string, held bool) error {
-	return s.exec(ctx, `update ap_open_item set payment_hold = $2, version = version + 1, updated_at = now() where id = $1::uuid`, id, held)
+	return s.exec(ctx, `update ap_open_item set payment_hold = $2, updated_at = now() where id = $1::uuid`, id, held)
 }
 
 func (s *Postgres) BlockVendor(ctx context.Context, vendorID, reason string) error {
@@ -246,37 +246,43 @@ func (s *Postgres) exec(ctx context.Context, sql string, args ...any) error {
 
 func (s *Postgres) Settle(ctx context.Context, id string, version int, amount decimal.Decimal, settlementID string) (OpenItem, error) {
 	p, _ := tenant.FromContext(ctx)
+	var out OpenItem
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		out, err = settleTx(ctx, tx, p.TenantID, id, version, amount, settlementID)
+		return err
+	})
+	return out, err
+}
+
+func settleTx(ctx context.Context, tx pgx.Tx, tenantID, id string, version int, amount decimal.Decimal, settlementID string) (OpenItem, error) {
 	if !amount.IsPositive() {
 		return OpenItem{}, ErrInvalidAmount
 	}
-	var out OpenItem
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		cur, err := scan(tx.QueryRow(ctx, `select `+columns+` from ap_open_item where id = $1 for update`, id))
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrNotFound
-		}
-		if err != nil {
-			return err
-		}
-		if cur.Version != version {
-			return ErrVersionConflict
-		}
-		next := cur.OpenAmount.Sub(amount)
-		if next.IsNegative() {
-			return ErrOverSettled
-		}
-		status := "PARTIALLY_SETTLED"
-		if next.IsZero() {
-			status = "SETTLED"
-		}
-		out, err = scan(tx.QueryRow(ctx, `update ap_open_item set open_amount = $3::numeric, status = $4, version = version + 1, updated_at = now()
-			where tenant_id = $1 and id = $2 returning `+columns, p.TenantID, id, next.String(), status))
-		if err != nil {
-			return err
-		}
-		return enqueue(ctx, tx, OpenItemSettledType, out, p.TenantID, amount, settlementID)
-	})
-	return out, err
+	cur, err := scan(tx.QueryRow(ctx, `select `+columns+` from ap_open_item where id = $1 for update`, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return OpenItem{}, ErrNotFound
+	}
+	if err != nil {
+		return OpenItem{}, err
+	}
+	if cur.Version != version {
+		return OpenItem{}, ErrVersionConflict
+	}
+	next := cur.OpenAmount.Sub(amount)
+	if next.IsNegative() {
+		return OpenItem{}, ErrOverSettled
+	}
+	status := "PARTIALLY_SETTLED"
+	if next.IsZero() {
+		status = "SETTLED"
+	}
+	out, err := scan(tx.QueryRow(ctx, `update ap_open_item set open_amount = $3::numeric, status = $4, version = version + 1, updated_at = now()
+		where tenant_id = $1 and id = $2 returning `+columns, tenantID, id, next.String(), status))
+	if err != nil {
+		return OpenItem{}, err
+	}
+	return out, enqueue(ctx, tx, OpenItemSettledType, out, tenantID, amount, settlementID)
 }
 
 func (s *Postgres) AgingRows(ctx context.Context, legalEntityID, asOf string) ([]domain.AgingRow, error) {

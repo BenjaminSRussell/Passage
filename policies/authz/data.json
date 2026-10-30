@@ -332,6 +332,18 @@
     "payment-proposal.write": {"permissions": [{"resource": "/v1/payables/payment-proposals", "methods": ["POST"]}, {"resource": "/v1/payables/payment-proposals/*:cancel", "methods": ["POST"]}]},
     "payment-proposal.read": {"permissions": [{"resource": "/v1/payables/payment-proposals/*", "methods": ["GET"]}]},
     "payment-proposal.approve": {"permissions": [{"resource": "/v1/payables/payment-proposals/*:approve", "methods": ["POST"]}]},
+    "payment-run.execute": {"permissions": [
+      {"resource": "/v1/payables/payment-runs", "methods": ["POST"]},
+      {"resource": "/v1/payables/payment-runs/*:generate-file", "methods": ["POST"]},
+      {"resource": "/v1/payables/payment-runs/*:post-journal", "methods": ["POST"]},
+      {"resource": "/v1/payables/payment-runs/*:settle", "methods": ["POST"]},
+      {"resource": "/v1/payables/payment-runs/*:complete", "methods": ["POST"]},
+      {"resource": "/v1/payables/payment-runs/*:fail", "methods": ["POST"]}
+    ]},
+    "payment-run.read": {"permissions": [
+      {"resource": "/v1/payables/payment-runs/*", "methods": ["GET"]},
+      {"resource": "/v1/payables/payment-runs/*/file", "methods": ["GET"]}
+    ]},
     "party.write": {"permissions": [
       {"resource": "/v1/party/tax-registrations:validate", "methods": ["POST"]},
       {"resource": "/v1/party/parties", "methods": ["POST"]},

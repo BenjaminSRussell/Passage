@@ -67,3 +67,12 @@ func TestRateSourceWiring(t *testing.T) {
 		t.Fatal("FX_URL must configure the fx client")
 	}
 }
+
+func TestLedgerPosterWiring(t *testing.T) {
+	if ledgerPoster(func(string) string { return "" }) != nil {
+		t.Fatal("no LEDGER_URL must leave payment runs without a ledger")
+	}
+	if ledgerPoster(func(string) string { return "http://ledger" }) == nil {
+		t.Fatal("LEDGER_URL must configure the payment run ledger client")
+	}
+}
