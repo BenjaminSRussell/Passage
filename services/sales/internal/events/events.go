@@ -22,12 +22,17 @@ var (
 	AllocationConsumed   = events.Type(Context, "allocation", "consumed", 1)
 	AllocationReturned   = events.Type(Context, "allocation", "returned", 1)
 	ATPPromised          = events.Type(Context, "atp", "promised", 1)
+
+	ScheduleReleaseReceived     = events.Type(Context, "schedulerelease", "received", 1)
+	ScheduleReleaseResolved     = events.Type(Context, "schedulerelease", "resolved", 1)
+	ScheduleReleaseRecalculated = events.Type(Context, "schedulerelease", "recalculated", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
 	return []string{OrderConfirmed, OrderHoldApplied, OrderHoldReleased, CreditCheckEvaluated, OrderChanged, OrderCancelled, AgreementReleased,
-		QuotationConverted, AllocationQuotaSet, AllocationQuotaMoved, AllocationConsumed, AllocationReturned, ATPPromised}
+		QuotationConverted, AllocationQuotaSet, AllocationQuotaMoved, AllocationConsumed, AllocationReturned, ATPPromised,
+		ScheduleReleaseReceived, ScheduleReleaseResolved, ScheduleReleaseRecalculated}
 }
 
 // PromisedSlice is one schedule line of an ATP promise.
@@ -200,4 +205,36 @@ type CreditCheckData struct {
 	OrderID    string              `json:"order_id"`
 	Rules      []domain.RuleResult `json:"rules"`
 	Outcome    string              `json:"outcome"`
+}
+
+// ScheduleReleaseLine is one open schedule line of a scheduling-agreement release.
+type ScheduleReleaseLine struct {
+	Date     string `json:"date"`
+	Quantity string `json:"quantity"`
+}
+
+// ScheduleReleaseData is the data member of schedulerelease.received.v1,
+// .resolved.v1 and .recalculated.v1 (FR-27.20, BR-27.12). status is ACCEPTED
+// (the open lines replaced the previous release's), HELD (CUM_QTY_MISMATCH,
+// nothing changed) or REJECTED; decision and reason are set on resolved only;
+// superseded_release_id names the release whose open lines were replaced.
+type ScheduleReleaseData struct {
+	ReleaseID           string                `json:"release_id"`
+	ReleaseNo           string                `json:"release_no"`
+	ReleaseType         string                `json:"release_type"`
+	LegalEntityID       string                `json:"legal_entity_id"`
+	AgreementID         string                `json:"agreement_id"`
+	AgreementNumber     string                `json:"agreement_number"`
+	CustomerID          string                `json:"customer_id"`
+	ProductID           string                `json:"product_id"`
+	Status              string                `json:"status"`
+	CumReceived         string                `json:"cum_received"`
+	CumShipped          string                `json:"cum_shipped"`
+	Difference          string                `json:"difference"`
+	OpenQty             string                `json:"open_qty"`
+	Lines               []ScheduleReleaseLine `json:"lines"`
+	SupersededReleaseID string                `json:"superseded_release_id,omitempty"`
+	Decision            string                `json:"decision,omitempty"`
+	Reason              string                `json:"reason,omitempty"`
+	Actor               string                `json:"actor"`
 }

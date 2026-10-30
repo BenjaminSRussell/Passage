@@ -19,14 +19,16 @@ import { NewProposalRulePage, ProposalRulesPage } from "./ProposalRulesPage";
 import { PromiseLinePage } from "./PromiseLinePage";
 import { QuotationDetailPage } from "./QuotationDetailPage";
 import { NewQuotationPage, QuotationsPage } from "./QuotationsPage";
+import { ScheduleReleaseDetailPage } from "./ScheduleReleaseDetailPage";
 import { ScheduleReleasePage } from "./ScheduleReleasePage";
+import { NewScheduleReleasePage, ScheduleReleasesPage } from "./ScheduleReleasesPage";
 import { NewSupplementaryRulePage, SupplementaryRulesPage } from "./SupplementaryRulesPage";
 
 const sales: PassageModule = {
   id: "sales",
   title: "Sales",
   description:
-    "Quote and convert to orders, enter, confirm, change and cancel sales orders, apply holds and work the release queue, maintain credit profiles, product listings, supplementary items, product proposals, allocation quotas and sales agreements, check available-to-promise, reconcile scheduling releases and preview backorder runs.",
+    "Quote and convert to orders, enter, confirm, change and cancel sales orders, apply holds and work the release queue, maintain credit profiles, product listings, supplementary items, product proposals, allocation quotas and sales agreements, check available-to-promise, reconcile scheduling releases and store them against sales agreements and preview backorder runs.",
   routes: [
     { path: "/sales", element: createElement(OrdersPage), handle: { title: "Sales orders", duty: "sales.order.read" } },
     { path: "/sales/orders", element: createElement(OrdersPage) },
@@ -47,6 +49,9 @@ const sales: PassageModule = {
     { path: "/sales/agreements", element: createElement(AgreementsPage) },
     { path: "/sales/agreements/new", element: createElement(NewAgreementPage), handle: { title: "New sales agreement" } },
     { path: "/sales/agreements/:id", element: createElement(AgreementDetailPage), handle: { title: "Sales agreement" } },
+    { path: "/sales/agreements/:id/schedule-releases", element: createElement(ScheduleReleasesPage), handle: { title: "Scheduling releases" } },
+    { path: "/sales/agreements/:id/schedule-releases/new", element: createElement(NewScheduleReleasePage), handle: { title: "New scheduling release" } },
+    { path: "/sales/agreements/:id/schedule-releases/:releaseId", element: createElement(ScheduleReleaseDetailPage), handle: { title: "Scheduling release" } },
     { path: "/sales/quotations", element: createElement(QuotationsPage) },
     { path: "/sales/quotations/new", element: createElement(NewQuotationPage), handle: { title: "New sales quotation" } },
     { path: "/sales/quotations/:id", element: createElement(QuotationDetailPage), handle: { title: "Sales quotation" } },

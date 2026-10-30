@@ -31,6 +31,7 @@ export interface AgreementValues {
   commitmentQty: string;
   validFrom: string;
   validTo: string;
+  cumTolerance: string;
 }
 
 type Errors = Record<string, string>;
@@ -49,6 +50,7 @@ export function validateAgreement(values: AgreementValues): { errors: Errors; in
   if (!DECIMAL.test(values.commitmentQty) || /^0+(\.0+)?$/.test(values.commitmentQty)) errors.commitmentQty = "Enter a quantity above 0 with up to 6 decimals.";
   if (values.validFrom && !DATE.test(values.validFrom)) errors.validFrom = "Choose a date.";
   if (values.validTo && !DATE.test(values.validTo)) errors.validTo = "Choose a date.";
+  if (values.cumTolerance !== "" && !DECIMAL.test(values.cumTolerance)) errors.cumTolerance = "Enter 0 or more with up to 6 decimals, or leave it empty for 0.";
   if (values.validFrom && values.validTo && values.validTo < values.validFrom) errors.validTo = "The end must not be before the start.";
   if (Object.keys(errors).length > 0) return { errors };
   return {
@@ -64,6 +66,7 @@ export function validateAgreement(values: AgreementValues): { errors: Errors; in
       commitmentQty: values.commitmentQty,
       ...(values.validFrom ? { validFrom: values.validFrom } : {}),
       ...(values.validTo ? { validTo: values.validTo } : {}),
+      ...(values.cumTolerance !== "" ? { cumTolerance: values.cumTolerance } : {}),
     },
   };
 }
@@ -161,6 +164,7 @@ export function NewAgreementPage() {
     commitmentQty: "",
     validFrom: "",
     validTo: "",
+    cumTolerance: "",
   });
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
@@ -223,6 +227,7 @@ export function NewAgreementPage() {
           {field("currency", "Currency")}
           {field("validFrom", "Valid from", undefined, { type: "date", optional: true })}
           {field("validTo", "Valid to", undefined, { type: "date", optional: true })}
+          {field("cumTolerance", "Cumulative tolerance", "How far a scheduling release's cumulative received quantity may differ from shipped before it is held. Default 0.", { decimal: true, optional: true })}
           {failure ? (
             <div className={styles.formActions}>
               <Alert tone="danger" title="Could not save the agreement" live="alert">

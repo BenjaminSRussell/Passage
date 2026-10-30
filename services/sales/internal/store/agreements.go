@@ -33,6 +33,7 @@ type NewAgreement struct {
 	Commitment       decimal.Decimal
 	ValidFrom        *string
 	ValidTo          *string
+	CumTolerance     decimal.Decimal
 	IdempotencyKey   string
 	RequestHash      string
 	Actor            string
@@ -55,10 +56,17 @@ type Agreement struct {
 	Status           string          `json:"status"`
 	ValidFrom        *string         `json:"validFrom,omitempty"`
 	ValidTo          *string         `json:"validTo,omitempty"`
-	Version          int             `json:"version"`
-	CreatedBy        string          `json:"createdBy"`
-	CreatedAt        time.Time       `json:"createdAt"`
-	UpdatedAt        time.Time       `json:"updatedAt"`
+	// CumTolerance, CumShipped and CumResetDate are the cumulative quantity
+	// settings of scheduling-agreement releases (BR-27.12): the tolerance a
+	// release's cumulative received quantity may differ from CumShipped, the
+	// quantity shipped since CumResetDate.
+	CumTolerance decimal.Decimal `json:"cumTolerance"`
+	CumShipped   decimal.Decimal `json:"cumShipped"`
+	CumResetDate *string         `json:"cumResetDate,omitempty"`
+	Version      int             `json:"version"`
+	CreatedBy    string          `json:"createdBy"`
+	CreatedAt    time.Time       `json:"createdAt"`
+	UpdatedAt    time.Time       `json:"updatedAt"`
 	// Releases is the release history, newest first; filled only on a single read.
 	Releases []AgreementReleaseRecord `json:"releases,omitempty"`
 }
@@ -107,15 +115,17 @@ func agreementNotFound() error {
 
 const agreementColumns = `id::text, legal_entity_id::text, agreement_number, customer_id::text, invoice_account_id::text, product_id::text,
 	unit, unit_price::text, currency::text, commitment_qty::text, released_qty::text, status, valid_from::text, valid_to::text, version,
-	created_by, created_at, updated_at`
+	created_by, created_at, updated_at, cum_tolerance::text, cum_shipped::text, cum_reset_date::text`
 
 func scanAgreement(row pgx.Row) (Agreement, error) {
 	var a Agreement
-	var price, commitment, released string
+	var price, commitment, released, tol, shipped string
 	if err := row.Scan(&a.ID, &a.LegalEntityID, &a.AgreementNumber, &a.CustomerID, &a.InvoiceAccountID, &a.ProductID, &a.Unit, &price,
-		&a.Currency, &commitment, &released, &a.Status, &a.ValidFrom, &a.ValidTo, &a.Version, &a.CreatedBy, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		&a.Currency, &commitment, &released, &a.Status, &a.ValidFrom, &a.ValidTo, &a.Version, &a.CreatedBy, &a.CreatedAt, &a.UpdatedAt, &tol, &shipped, &a.CumResetDate); err != nil {
 		return Agreement{}, err
 	}
+	a.CumTolerance = decimal.RequireFromString(tol)
+	a.CumShipped = decimal.RequireFromString(shipped)
 	a.UnitPrice = decimal.RequireFromString(price)
 	a.Commitment = decimal.RequireFromString(commitment)
 	a.Released = decimal.RequireFromString(released)
@@ -162,10 +172,10 @@ func (s *Postgres) CreateAgreement(ctx context.Context, in NewAgreement) (Agreem
 		}
 		id := ids.New()
 		if _, err := tx.Exec(ctx, `insert into sales_agreement (tenant_id, id, legal_entity_id, agreement_number, customer_id, invoice_account_id,
-				product_id, unit, unit_price, currency, commitment_qty, valid_from, valid_to, idempotency_key, request_hash, created_by)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9::numeric, $10, $11::numeric, $12::date, $13::date, $14, $15, $16)`,
+				product_id, unit, unit_price, currency, commitment_qty, valid_from, valid_to, idempotency_key, request_hash, created_by, cum_tolerance)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9::numeric, $10, $11::numeric, $12::date, $13::date, $14, $15, $16, $17::numeric)`,
 			p.TenantID, id, in.LegalEntityID, domain.FormatAgreementNumber(seq), in.CustomerID, in.InvoiceAccountID, in.ProductID, in.Unit,
-			in.UnitPrice.String(), in.Currency, in.Commitment.String(), in.ValidFrom, in.ValidTo, in.IdempotencyKey, in.RequestHash, in.Actor); err != nil {
+			in.UnitPrice.String(), in.Currency, in.Commitment.String(), in.ValidFrom, in.ValidTo, in.IdempotencyKey, in.RequestHash, in.Actor, in.CumTolerance.String()); err != nil {
 			return err
 		}
 		created = true

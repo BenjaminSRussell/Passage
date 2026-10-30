@@ -47,6 +47,21 @@ channels:
     messages:
       agreementReleased:
         $ref: "#/components/messages/AgreementReleased"
+  scheduleReleaseReceived:
+    address: passage.sales.schedulerelease
+    messages:
+      scheduleReleaseReceived:
+        $ref: "#/components/messages/ScheduleReleaseReceived"
+  scheduleReleaseResolved:
+    address: passage.sales.schedulerelease
+    messages:
+      scheduleReleaseResolved:
+        $ref: "#/components/messages/ScheduleReleaseResolved"
+  scheduleReleaseRecalculated:
+    address: passage.sales.schedulerelease
+    messages:
+      scheduleReleaseRecalculated:
+        $ref: "#/components/messages/ScheduleReleaseRecalculated"
   quotationConverted:
     address: passage.sales.quotation
     messages:
@@ -84,6 +99,24 @@ operations:
     summary: Selected lines of a quotation became the lines of one DRAFT sales order (FR-27.1); consumed by analytics and CRM.
     messages:
       - {$ref: "#/channels/quotationConverted/messages/quotationConverted"}
+  publishScheduleReleaseReceived:
+    action: send
+    channel: {$ref: "#/channels/scheduleReleaseReceived"}
+    summary: A forecast or JIT release was stored against a sales agreement, ACCEPTED (its open lines replaced the previous release's) or HELD for a cumulative mismatch (FR-27.20, BR-27.12). Consumers - planning, fulfillment.
+    messages:
+      - {$ref: "#/channels/scheduleReleaseReceived/messages/scheduleReleaseReceived"}
+  publishScheduleReleaseResolved:
+    action: send
+    channel: {$ref: "#/channels/scheduleReleaseResolved"}
+    summary: A HELD scheduling release was accepted by override or rejected. Consumers - planning, fulfillment, audit.
+    messages:
+      - {$ref: "#/channels/scheduleReleaseResolved/messages/scheduleReleaseResolved"}
+  publishScheduleReleaseRecalculated:
+    action: send
+    channel: {$ref: "#/channels/scheduleReleaseRecalculated"}
+    summary: The open lines of the release in effect were recalculated after the cumulative shipped quantity changed. Consumers - planning, fulfillment.
+    messages:
+      - {$ref: "#/channels/scheduleReleaseRecalculated/messages/scheduleReleaseRecalculated"}
   publishAgreementReleased:
     action: send
     channel: {$ref: "#/channels/agreementReleased"}
@@ -216,6 +249,30 @@ components:
         $ref: "#/components/schemas/CloudEventHeaders"
       payload:
         $ref: "#/components/schemas/AgreementReleasedData"
+    ScheduleReleaseReceived:
+      name: dev.passage.sales.schedulerelease.received.v1
+      title: Scheduling release received
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/ScheduleReleaseData"
+    ScheduleReleaseResolved:
+      name: dev.passage.sales.schedulerelease.resolved.v1
+      title: Scheduling release resolved
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/ScheduleReleaseData"
+    ScheduleReleaseRecalculated:
+      name: dev.passage.sales.schedulerelease.recalculated.v1
+      title: Scheduling release recalculated
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/ScheduleReleaseData"
     OrderChanged:
       name: dev.passage.sales.order.changed.v1
       title: Sales order changed
@@ -431,6 +488,36 @@ components:
         remaining_qty: {type: string, description: commitment less released quantity}
         status: {type: string, enum: [ACTIVE, EXHAUSTED]}
         version: {type: integer, description: the agreement version after the release}
+        actor: {type: string}
+    ScheduleReleaseData:
+      type: object
+      required: [release_id, release_no, release_type, legal_entity_id, agreement_id, agreement_number, customer_id, product_id, status, cum_received, cum_shipped, difference, open_qty, lines, actor]
+      properties:
+        release_id: {type: string, format: uuid}
+        release_no: {type: string, description: the customer's release number}
+        release_type: {type: string, enum: [FORECAST, JIT]}
+        legal_entity_id: {type: string, format: uuid}
+        agreement_id: {type: string, format: uuid}
+        agreement_number: {type: string, example: SA-0000001}
+        customer_id: {type: string, format: uuid}
+        product_id: {type: string, format: uuid}
+        status: {type: string, enum: [ACCEPTED, HELD, REJECTED], description: HELD means CUM_QTY_MISMATCH and no schedule line changed}
+        cum_received: {type: string, description: the customer's cumulative received quantity (decimal string)}
+        cum_shipped: {type: string, description: shipped quantity the release is reconciled against on its own cumulative basis (shipped since the reset plus the offset of closed periods)}
+        difference: {type: string, description: cum_received less cum_shipped}
+        open_qty: {type: string, description: cumulative required less shipped, at least 0}
+        lines:
+          type: array
+          description: the open schedule lines now owned by the release; empty when HELD or REJECTED
+          items:
+            type: object
+            required: [date, quantity]
+            properties:
+              date: {type: string, format: date}
+              quantity: {type: string}
+        superseded_release_id: {type: string, format: uuid, description: the release whose open lines were replaced}
+        decision: {type: string, enum: [ACCEPT, REJECT], description: resolved only}
+        reason: {type: string, description: resolved only}
         actor: {type: string}
     QuotationConvertedData:
       type: object

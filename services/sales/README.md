@@ -14,7 +14,7 @@ a stateless evaluation at line commit and recorded acceptance. Wave 27, slices
 `docs/prd/phase-5-order-to-cash.md` §5.27.
 
 Out of these slices (see `NOT-IMPLEMENTED.md`): amount-based agreements and
-scheduling-agreement release storage, the ATP projection and reservations,
+scheduling releases driven by w28 shipments and EDI, the ATP projection and reservations,
 change approval and `:cancel-remainder`, the committed backorder run,
 allocation, consignment, OPTIONAL supplementary items prompted in an order-entry
 grid, w8 related products as a proposal source, quotation expiry job and PDF, the intake dedup window beyond the
@@ -99,6 +99,10 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | GET / POST | `/v1/sales/agreements` | `sales.order.read` / `sales.agreement.maintain` | List (`legalEntityId`, `customerId`, `status`, `limit`); create with `Idempotency-Key`, numbered `SA-` |
 | GET | `/v1/sales/agreements/{id}` | `sales.order.read` | With remaining quantity and release history |
 | POST | `/v1/sales/agreements/{id}:release-order` | `sales.agreement.maintain` | `Idempotency-Key`; creates a DRAFT order at the agreement price and decrements the commitment atomically; emits `agreement.released` |
+| GET / POST | `/v1/sales/agreements/{id}/schedule-releases` | `sales.order.read` / `sales.agreement.maintain` | Releases newest first; store a FORECAST or JIT release (`Idempotency-Key`, `releaseNo`, `cumReceived`, `buckets`): ACCEPTED replaces the previous release's open lines, a cumulative mismatch beyond the agreement tolerance is stored HELD (`CUM_QTY_MISMATCH`, `SLS-0014`) and changes nothing; refused with `SLS-0029` outside the agreement's validity; emits `schedulerelease.received` |
+| GET | `/v1/sales/agreements/{id}/schedule-releases/{releaseId}` | `sales.order.read` | The release with its schedule lines |
+| POST | `/v1/sales/agreements/{id}/schedule-releases/{releaseId}:resolve` | `sales.agreement.maintain` | `If-Match`; `ACCEPT` (override) or `REJECT` a HELD release with a reason; emits `schedulerelease.resolved` |
+| POST | `/v1/sales/agreements/{id}:record-shipped` | `sales.agreement.maintain` | `If-Match`; sets the cumulative shipped quantity (and optionally a later reset date, which carries the closed period's shipped quantity into the releases' `shippedOffset`) and recalculates the open lines of the release in effect; emits `schedulerelease.recalculated` |
 | POST | `/v1/sales/orders/{id}/lines/{lineNo}:promise` | `sales.order.write` | `If-Match`; places one line of a CONFIRMED order against the supplied ATP buckets (`periods`, `completeOnly`) and stores its schedule lines: CONFIRMED up to the requested date, BACKORDER after it, UNPROMISED for quantity no bucket covers (FR-27.6, AC-27.8). New order version, `order.changed` and `atp.promised` |
 | GET | `/v1/sales/orders/{id}/schedule-lines` | `sales.order.read` | The order's active schedule lines |
 | GET | `/v1/sales/backorders` | `sales.order.read` | Backorder list by promised date, undated last (`legalEntityId`, `productId`, `customerId`, `promisedTo`, `limit`) |
@@ -257,6 +261,9 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0035` | 409 | An allocation quota for the product and customer (or all customers) already covers part of the period |
 | `SLS-0036` | 409 | Allocation quota set below the consumed quantity |
 | `SLS-0037` | 422 | The order is not CONFIRMED or is a JOURNAL order (BR-27.7), the line is past RESERVED, or the line is a supplementary line, so it cannot be promised |
+| `SLS-0038` | 409 | A release with this number was already received for the agreement |
+| `SLS-0039` | 422 | The release is not HELD, or a newer release is already in effect |
+| `SLS-0040` | 422 | Cumulative shipped quantity would fall without a later reset date, or the reset date moves back |
 | `SLS-0100` | 404 | Order not found |
 | `SLS-0101` | 404 | Hold not found |
 | `SLS-0102` | 404 | Credit profile not found |
@@ -267,6 +274,7 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0107` | 404 | Product proposal rule not found (also on `:respond` for a rule outside the legal entity) |
 | `SLS-0108` | 404 | Allocation quota not found |
 | `SLS-0109` | 404 | Order line not found |
+| `SLS-0110` | 404 | Scheduling release not found |
 | `idempotency_key_reuse` | 422 | Same `Idempotency-Key` with a different body (kernel) |
 | `COM-0001` | 400 | Request failed validation; field errors in `errors` |
 | `AUTH-0001` | 401 | Missing or malformed tenant |

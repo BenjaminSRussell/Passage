@@ -198,6 +198,8 @@ export interface AgreementInput {
   commitmentQty: Decimal;
   validFrom?: string;
   validTo?: string;
+  /** How far a scheduling release's cumulative received quantity may differ from the shipped quantity (default 0). */
+  cumTolerance?: Decimal;
 }
 
 export interface AgreementRelease {
@@ -209,7 +211,7 @@ export interface AgreementRelease {
   releasedAt: string;
 }
 
-export interface Agreement extends Required<Omit<AgreementInput, "validFrom" | "validTo">> {
+export interface Agreement extends Required<Omit<AgreementInput, "validFrom" | "validTo" | "cumTolerance">> {
   id: string;
   agreementNumber: string;
   releasedQty: Decimal;
@@ -217,6 +219,10 @@ export interface Agreement extends Required<Omit<AgreementInput, "validFrom" | "
   status: AgreementStatus;
   validFrom?: string;
   validTo?: string;
+  /** Cumulative settings of scheduling releases (BR-27.12); absent on older responses. */
+  cumTolerance?: Decimal;
+  cumShipped?: Decimal;
+  cumResetDate?: string;
   version: number;
   createdBy: string;
   createdAt: string;
@@ -1062,4 +1068,85 @@ export async function listBackorders(filter: BackorderFilter = {}, signal?: Abor
     signal,
   );
   return body.items ?? [];
+}
+
+export const RELEASE_TYPES = ["FORECAST", "JIT"] as const;
+export type ReleaseType = (typeof RELEASE_TYPES)[number];
+export type ScheduleReleaseStatus = "ACCEPTED" | "HELD" | "REJECTED" | "SUPERSEDED";
+
+export interface ScheduleReleaseLine {
+  id: string;
+  dueDate: string;
+  quantity: Decimal;
+  status: "OPEN" | "SUPERSEDED";
+}
+
+/** A stored scheduling-agreement release (FR-27.20); lines are present on a single read and after a write. */
+export interface ScheduleRelease {
+  id: string;
+  agreementId: string;
+  agreementNumber: string;
+  releaseNo: string;
+  releaseType: ReleaseType;
+  status: ScheduleReleaseStatus;
+  cumReceived: Decimal;
+  cumShipped: Decimal;
+  /** Shipped quantity of cumulative periods closed by a later reset date that still counts against this release. */
+  shippedOffset?: Decimal;
+  tolerance: Decimal;
+  difference: Decimal;
+  openQuantity: Decimal;
+  code?: string;
+  serviceCode?: string;
+  buckets: ReleaseBucket[];
+  lines?: ScheduleReleaseLine[];
+  receivedBy: string;
+  receivedAt: string;
+  resolvedBy?: string;
+  resolvedAt?: string;
+  resolutionReason?: string;
+  version: number;
+}
+
+export interface ScheduleReleaseInput {
+  releaseNo: string;
+  releaseType: ReleaseType;
+  cumReceived: Decimal;
+  buckets: ReleaseBucket[];
+}
+
+export async function listScheduleReleases(agreementId: string, signal?: AbortSignal): Promise<ScheduleRelease[]> {
+  const body = await json<{ items?: ScheduleRelease[] }>(`/agreements/${encodeURIComponent(agreementId)}/schedule-releases?limit=200`, {}, signal);
+  return body.items ?? [];
+}
+
+export function getScheduleRelease(agreementId: string, id: string, signal?: AbortSignal): Promise<Versioned<ScheduleRelease>> {
+  return versioned<ScheduleRelease>(`/agreements/${encodeURIComponent(agreementId)}/schedule-releases/${encodeURIComponent(id)}`, {}, signal);
+}
+
+/** Stores a release; a cumulative mismatch answers 201 with status HELD, not an error (BR-27.12). */
+export function createScheduleRelease(agreementId: string, input: ScheduleReleaseInput, key: string = newKey()): Promise<Versioned<ScheduleRelease>> {
+  return versioned<ScheduleRelease>(`/agreements/${encodeURIComponent(agreementId)}/schedule-releases`, {
+    method: "POST",
+    body: JSON.stringify(input),
+    headers: { "Idempotency-Key": key },
+  });
+}
+
+/** Accepts (override) or rejects a HELD release at its ETag. */
+export function resolveScheduleRelease(agreementId: string, id: string, etag: string, decision: "ACCEPT" | "REJECT", reason: string): Promise<Versioned<ScheduleRelease>> {
+  return versioned<ScheduleRelease>(`/agreements/${encodeURIComponent(agreementId)}/schedule-releases/${encodeURIComponent(id)}:resolve`, {
+    method: "POST",
+    body: JSON.stringify({ decision, reason }),
+    headers: { "If-Match": etag },
+  });
+}
+
+/** Sets the agreement's cumulative shipped quantity at its ETag and recalculates the release in effect. */
+export function recordAgreementShipped(agreementId: string, etag: string, cumShipped: Decimal, cumResetDate?: string): Promise<Versioned<Agreement>> {
+  return versioned<Agreement>(`/agreements/${encodeURIComponent(agreementId)}:record-shipped`, {
+    method: "POST",
+    body: JSON.stringify({ cumShipped, ...(cumResetDate ? { cumResetDate } : {}) }),
+    headers: { "If-Match": etag },
+  });
 }

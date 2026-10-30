@@ -408,6 +408,171 @@ paths:
           content:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
+  /v1/sales/agreements/{id}/schedule-releases:
+    get:
+      summary: Scheduling releases stored against an agreement, newest first, without schedule lines (FR-27.20)
+      operationId: listAgreementScheduleReleases
+      x-passage-duty: sales.order.read
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        "200":
+          description: the releases with status, cumulative quantities, open quantity and requirement buckets
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/ScheduleRelease"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+    post:
+      summary: >-
+        Store a forecast or JIT release against an agreement and reconcile its cumulative received
+        quantity with the shipped quantity (FR-27.20, BR-27.12). Within the tolerance it is ACCEPTED and
+        replaces the previous release's open schedule lines atomically; beyond it, it is stored HELD
+        with CUM_QTY_MISMATCH (SLS-0014) and no schedule line changes (AC-27.13).
+      operationId: createAgreementScheduleRelease
+      x-passage-duty: sales.agreement.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ScheduleReleaseRequest"}
+      responses:
+        "201":
+          description: the release was stored, ACCEPTED or HELD
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ScheduleRelease"}
+        "200":
+          description: a repeat of the Idempotency-Key with the same body returns the stored release
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ScheduleRelease"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409":
+          description: SLS-0038 the release number was already received for the agreement, or a concurrent request stored this release first
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "422":
+          description: SLS-0026 negative, unordered or decreasing buckets, SLS-0029 the agreement is not valid on the receipt date, or idempotency_key_reuse
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+  /v1/sales/agreements/{id}/schedule-releases/{releaseId}:
+    get:
+      summary: One scheduling release with its schedule lines, open and superseded
+      operationId: getAgreementScheduleRelease
+      x-passage-duty: sales.order.read
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: the release
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ScheduleRelease"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/sales/agreements/{id}/schedule-releases/{releaseId}:resolve:
+    post:
+      summary: >-
+        Decide a HELD release at its ETag. ACCEPT overrides the cumulative mismatch and replaces the
+        open schedule lines, with open quantity against the agreement's current shipped quantity;
+        REJECT closes it and changes nothing. Emits schedulerelease.resolved.
+      operationId: resolveAgreementScheduleRelease
+      x-passage-duty: sales.agreement.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision, reason]
+              properties:
+                decision: {type: string, enum: [ACCEPT, REJECT]}
+                reason: {type: string, minLength: 1, maxLength: 500}
+      responses:
+        "200":
+          description: the release after the decision
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ScheduleRelease"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422":
+          description: SLS-0039 the release is not HELD, or a newer release is already in effect, or SLS-0026 invalid buckets
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/agreements/{id}:record-shipped:
+    post:
+      summary: >-
+        Set the agreement's cumulative shipped quantity at its ETag (until wave 28 shipments drive it)
+        and recalculate the open schedule lines of the release in effect (cumulative required less
+        shipped). The quantity may fall only when the reset date moves forward; the closed period's
+        shipped quantity then moves into the shippedOffset of the ACCEPTED and HELD releases.
+      operationId: recordAgreementShipped
+      x-passage-duty: sales.agreement.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cumShipped]
+              properties:
+                cumShipped: {$ref: "#/components/schemas/Money"}
+                cumResetDate: {type: string, format: date, description: moving it forward starts a new cumulative period}
+      responses:
+        "200":
+          description: the agreement with its new cumulative shipped quantity
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SalesAgreement"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422":
+          description: SLS-0040 the quantity would fall without a later reset date, or the reset date moves back
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
   /v1/sales/atp:check:
     post:
       summary: Stateless ATP promise check over caller-supplied buckets (BR-27.1)
@@ -1445,6 +1610,7 @@ components:
         commitmentQty: {$ref: "#/components/schemas/Money"}
         validFrom: {type: string, format: date}
         validTo: {type: string, format: date}
+        cumTolerance: {$ref: "#/components/schemas/Money", description: how far a release's cumulative received quantity may differ from the shipped quantity (BR-27.12); default 0}
     SalesAgreement:
       type: object
       required: [id, legalEntityId, agreementNumber, customerId, invoiceAccountId, productId, unit, unitPrice, currency, commitmentQty, releasedQty, remainingQty, status, version]
@@ -1468,10 +1634,73 @@ components:
         createdBy: {type: string}
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
+        cumTolerance: {$ref: "#/components/schemas/Money"}
+        cumShipped: {$ref: "#/components/schemas/Money", description: quantity shipped since the cumulative reset date}
+        cumResetDate: {type: string, format: date}
         releases:
           type: array
           description: release history, newest first; present on GET /agreements/{id} only
           items: {$ref: "#/components/schemas/AgreementReleaseRecord"}
+    ScheduleReleaseRequest:
+      type: object
+      required: [releaseNo, releaseType, cumReceived, buckets]
+      properties:
+        releaseNo: {type: string, minLength: 1, maxLength: 40, description: the customer's release number, unique per agreement}
+        releaseType: {type: string, enum: [FORECAST, JIT]}
+        cumReceived: {$ref: "#/components/schemas/Money", description: the customer's cumulative received quantity}
+        buckets:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            type: object
+            required: [date, cumRequired]
+            properties:
+              date: {type: string, format: date}
+              cumRequired: {$ref: "#/components/schemas/Money"}
+    ScheduleRelease:
+      type: object
+      required: [id, agreementId, agreementNumber, releaseNo, releaseType, status, cumReceived, cumShipped, shippedOffset, tolerance, difference, openQuantity, buckets, receivedBy, receivedAt, version]
+      properties:
+        id: {type: string, format: uuid}
+        agreementId: {type: string, format: uuid}
+        agreementNumber: {type: string}
+        releaseNo: {type: string}
+        releaseType: {type: string, enum: [FORECAST, JIT]}
+        status: {type: string, enum: [ACCEPTED, HELD, REJECTED, SUPERSEDED]}
+        cumReceived: {$ref: "#/components/schemas/Money"}
+        cumShipped: {$ref: "#/components/schemas/Money", description: shipped quantity the release was last reconciled or recalculated against, on its own cumulative basis (shippedOffset included)}
+        shippedOffset: {$ref: "#/components/schemas/Money", description: shipped quantity of cumulative periods closed by a later reset date that still counts against this release}
+        tolerance: {$ref: "#/components/schemas/Money"}
+        difference: {$ref: "#/components/schemas/Money", description: cumulative received less shipped}
+        openQuantity: {$ref: "#/components/schemas/Money"}
+        code: {type: string, example: CUM_QTY_MISMATCH, description: present while the release is HELD}
+        serviceCode: {type: string, example: SLS-0014}
+        buckets:
+          type: array
+          items:
+            type: object
+            required: [date, cumRequired]
+            properties:
+              date: {type: string, format: date}
+              cumRequired: {$ref: "#/components/schemas/Money"}
+        lines:
+          type: array
+          description: schedule lines; present on a single read and after a write
+          items:
+            type: object
+            required: [id, dueDate, quantity, status]
+            properties:
+              id: {type: string, format: uuid}
+              dueDate: {type: string, format: date}
+              quantity: {$ref: "#/components/schemas/Money"}
+              status: {type: string, enum: [OPEN, SUPERSEDED]}
+        receivedBy: {type: string}
+        receivedAt: {type: string, format: date-time}
+        resolvedBy: {type: string}
+        resolvedAt: {type: string, format: date-time}
+        resolutionReason: {type: string}
+        version: {type: integer, minimum: 1}
     AgreementReleaseRecord:
       type: object
       required: [id, quantity, salesOrderId, orderNumber, actor, releasedAt]
