@@ -95,6 +95,8 @@ func (a *RoleAssignmentsAPI) assign(w http.ResponseWriter, r *http.Request) {
 	}
 	if !a.catalogue.HasDuty(req.Role) {
 		fields["role"] = "must be the name of a seeded duty"
+	} else if a.catalogue.ServiceOnly(req.Role) {
+		fields["role"] = "is held by a service grant only and cannot be assigned to a user"
 	}
 	oldest := time.Now().Add(-clockSkew)
 	if req.ValidFrom != nil && req.ValidFrom.Before(oldest) {

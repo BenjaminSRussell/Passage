@@ -519,6 +519,13 @@ func TestRoleAssignmentRejections(t *testing.T) {
 		wantProblem(t, f.do(c, http.MethodPost, "/v1/authz/assignments/x/end", nil), http.StatusBadRequest, "COM-0001")
 	})
 
+	t.Run("a service-only duty cannot be assigned to a user", func(t *testing.T) {
+		p := wantProblem(t, assign(c, map[string]any{"userId": userID, "role": "procurement.invoicing-plan.settle"}), http.StatusBadRequest, "COM-0001")
+		if p.Errors["role"] == "" {
+			t.Fatalf("errors = %v", p.Errors)
+		}
+	})
+
 	t.Run("unknown user, legal entity and assignment are 404", func(t *testing.T) {
 		wantProblem(t, assign(c, map[string]any{"userId": "20000000-0000-0000-0000-0000000000ff", "role": "View vendors"}), http.StatusNotFound, "IDN-USER-NOT-FOUND")
 		wantProblem(t, assign(c, map[string]any{"userId": userID, "role": "View vendors", "legalEntityId": legalNone}), http.StatusNotFound, "IDN-LEGAL-ENTITY-NOT-FOUND")

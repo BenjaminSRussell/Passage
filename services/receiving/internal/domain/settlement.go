@@ -12,21 +12,23 @@ import (
 )
 
 const (
-	InvoicingPlansPathTmpl   = "/v1/procurement/purchase-orders/%s/invoicing-plans"
-	InventoryJournalsPath    = "/v1/inventory/journals"
-	InventoryJournalPathTmpl = "/v1/inventory/journals/%s"
-	SettlementPlanRow        = "PLAN_ROW"
-	SettlementConsignment    = "CONSIGNMENT"
-	PlanRowOpen              = "OPEN"
-	PlanRowInvoiced          = "INVOICED"
-	CodeOverCredit           = "AP-CRD-001"
-	CodePlanSettled          = "AP-PLN-001"
-	settlementKeyFormat      = "post:receiving:settlement:%s:%s"
+	InvoicingPlansPathTmpl    = "/v1/procurement/purchase-orders/%s/invoicing-plans"
+	PlanRowSettlementPathTmpl = "/v1/procurement/purchase-orders/%s/lines/%d/invoicing-plan/rows/%d/settlement"
+	InventoryJournalsPath     = "/v1/inventory/journals"
+	InventoryJournalPathTmpl  = "/v1/inventory/journals/%s"
+	SettlementPlanRow         = "PLAN_ROW"
+	SettlementConsignment     = "CONSIGNMENT"
+	PlanRowOpen               = "OPEN"
+	PlanRowInvoiced           = "INVOICED"
+	CodeOverCredit            = "AP-CRD-001"
+	CodePlanSettled           = "AP-PLN-001"
+	settlementKeyFormat       = "post:receiving:settlement:%s:%s"
 )
 
 var (
 	ErrOwnershipChangeNotFound = errors.New("ownership change journal not found")
 	ErrInventoryForbidden      = errors.New("inventory journals are not accessible to the caller")
+	ErrPlanRowMarkRejected     = errors.New("purchasing refused to mark the plan row invoiced")
 )
 
 type PlanRow struct {
@@ -46,6 +48,10 @@ type InvoicingPlan struct {
 
 type InvoicingPlans interface {
 	List(ctx context.Context, purchaseOrderID string) ([]InvoicingPlan, error)
+}
+
+type PlanRowSettlements interface {
+	MarkInvoiced(ctx context.Context, legalEntityID, purchaseOrderID string, lineNo, seq int, settlementRef string, amount decimal.Decimal) error
 }
 
 type OwnershipChange struct {
@@ -76,6 +82,12 @@ func (f FakeInvoicingPlans) List(_ context.Context, purchaseOrderID string) ([]I
 		return plans, nil
 	}
 	return nil, ErrPurchaseOrderNotFound
+}
+
+type FakePlanRowSettlements struct{}
+
+func (FakePlanRowSettlements) MarkInvoiced(context.Context, string, string, int, int, string, decimal.Decimal) error {
+	return nil
 }
 
 type FakeOwnershipChanges struct {

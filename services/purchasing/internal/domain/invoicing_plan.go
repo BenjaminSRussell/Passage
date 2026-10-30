@@ -16,7 +16,8 @@ const (
 )
 
 // Plan row statuses. Wave 18 (FR-18.17) moves a row to INVOICED when its
-// settlement run invoices it; this service only writes OPEN rows.
+// settlement run invoices it: receiving reports the settlement and this service
+// flips the row (MarkPlanRowInvoiced); it only ever generates OPEN rows.
 const (
 	PlanRowOpen     = "OPEN"
 	PlanRowInvoiced = "INVOICED"
@@ -31,6 +32,9 @@ const (
 	CodePlanInvoiced = "PRC-IP-002"
 	// CodePlanTarget: the PO or line cannot carry a plan (cancelled or finalized).
 	CodePlanTarget = "PRC-IP-003"
+	// CodePlanRowSettlement is PRC-IP-004 (409): the row is already settled under
+	// another reference, or the settled amount differs from the row's.
+	CodePlanRowSettlement = "PRC-IP-004"
 )
 
 // MaxPlanRows bounds the rows of one plan (ten years of monthly periods).
