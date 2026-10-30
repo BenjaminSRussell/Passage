@@ -63,7 +63,7 @@ function noticeFor(error: SecurityApiError, title: string, duty: string, scopeNo
       tone: "danger",
       title: "You do not have permission",
       message: error.message,
-      hint: scopeNote ?? `This needs the "${duty}" duty. Ask an administrator to grant it, then try again.`,
+      hint: scopeNote ?? `This needs the "${duty}" duty or an all-entities scope. Ask an administrator to grant it, then try again.`,
     };
   }
   if (error.status === 409 && error.code === ASSIGNMENT_OVERLAP) {

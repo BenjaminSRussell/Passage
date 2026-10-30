@@ -22,7 +22,7 @@ function validate(values: { code: string; displayName: string }): Errors {
   const errors: Errors = {};
   if (!CODE.test(values.code)) errors.code = "Use up to 32 letters, digits, hyphens or underscores, starting with a letter or digit.";
   if (values.displayName.trim() === "") errors.displayName = "Enter a name.";
-  else if (values.displayName.length > NAME_MAX) errors.displayName = `Keep the name to ${NAME_MAX} characters or fewer.`;
+  else if (new TextEncoder().encode(values.displayName.trim()).length > NAME_MAX) errors.displayName = `Keep the name to ${NAME_MAX} bytes or fewer; accented and non-Latin characters take more than one.`;
   return errors;
 }
 

@@ -44,7 +44,7 @@ const report = {
 };
 
 describe("admin security nav", () => {
-  it("gates each security entry on its duty", () => {
+  it("declares each security entry's duty", () => {
     const duties = Object.fromEntries(admin.nav.filter((n) => n.to.startsWith("/admin/security")).map((n) => [n.to, n.duty]));
     expect(duties).toEqual({
       "/admin/security/permissions": "View effective permissions",
@@ -348,6 +348,16 @@ describe("legal entities page", () => {
     expect(pageViolations(container)).toEqual([]);
   });
 
+  it("counts the name in trimmed UTF-8 bytes", async () => {
+    server.handler = () => json(200, { items: [] });
+    renderAt("/admin/security/legal-entities", ["Maintain legal entities"]);
+    await fill("Code", "DE01");
+    await fill("Name", "é".repeat(101));
+    fireEvent.click(await screen.findByRole("button", { name: "Create legal entity" }));
+    expect(await screen.findByText(/200 bytes or fewer/)).toBeInTheDocument();
+    expect(server.calls.some((c) => c.method === "POST")).toBe(false);
+  });
+
   it("reports a duplicate code", async () => {
     server.handler = (_url, method) => (method === "POST" ? json(409, { code: "IDN-LEGAL-ENTITY-EXISTS", detail: "exists" }) : json(200, { items: [] }));
     renderAt("/admin/security/legal-entities", ["Maintain legal entities"]);
@@ -377,7 +387,7 @@ describe("role assignments follow-ups", () => {
     await fill("Role to assign", "Maintain security roles");
     fireEvent.click(screen.getByRole("button", { name: "Assign role" }));
     const reason = await screen.findByText("a tenant-wide assignment needs access to all legal entities");
-    expect(reason.parentElement).toHaveTextContent(/Maintain security roles" duty/);
+    expect(reason.parentElement).toHaveTextContent(/Maintain security roles" duty or an all-entities scope/);
   });
 
   it("shows the server reason for an operator-only 403", async () => {
@@ -418,7 +428,6 @@ describe("role assignments follow-ups", () => {
       finish = resolve;
     });
     assignmentsServer();
-    const base = fake.handler;
     renderAt("/admin/security/assignments");
     await find(USER);
     const endButton = await screen.findByRole("button", { name: `End Maintain security roles for user ${USER}` });
@@ -430,7 +439,6 @@ describe("role assignments follow-ups", () => {
     await waitFor(() => expect(endButton).toBeDisabled());
     finish(json(200, { ...assignments[0], validTo: "2026-03-01T00:00:00Z" }));
     await screen.findByText("Maintain security roles ended");
-    fake.handler = base;
     globalThis.fetch = stubbed;
   });
 
@@ -457,7 +465,6 @@ describe("role assignments follow-ups", () => {
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Keep assignment" }));
     server.handler = () => json(500, { code: "COM-0500", detail: "down" });
-    fireEvent.click(screen.getByRole("button", { name: "Find assignments" }));
     fireEvent.change(screen.getByLabelText("Find by role"), { target: { value: "x" } });
     fireEvent.click(screen.getByRole("button", { name: "Find assignments" }));
     expect(await screen.findByText("down")).toBeInTheDocument();
@@ -484,6 +491,6 @@ describe("legal entities follow-ups", () => {
   it("assignment form stays usable when the entity suggestions are forbidden", async () => {
     server.handler = (url) => (url.pathname === "/api/v1/legal-entities" ? json(403, { code: "IAM-0403", detail: "no" }) : undefined);
     renderAt("/admin/security/assignments");
-    expect(await screen.findByLabelText("Legal entity")).toHaveAccessibleDescription(/paste any other id/);
+    await waitFor(() => expect(screen.getByLabelText("Legal entity")).toHaveAccessibleDescription(/paste any other id/));
   });
 });
