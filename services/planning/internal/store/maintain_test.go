@@ -133,7 +133,7 @@ func TestForecastLines(t *testing.T) {
 	if _, _, err := st.ListForecastLines(ctx, "BASE", "", "", 10); problemCode(err) != store.CodeForecastNotFound {
 		t.Fatalf("unknown model: %v", err)
 	}
-	m, err := st.UpsertForecastLines(ctx, "BASE", 0, nil, []store.ForecastCellInput{
+	m, err := st.UpsertForecastLines(ctx, "BASE", "", 0, nil, []store.ForecastCellInput{
 		cellIn(itemA, site, "2026-11-02", "2026-11-08", "100", "30"),
 		cellIn(itemA, site, "2026-11-09", "2026-11-15", "50", "0"),
 		cellIn(itemB, site, "2026-11-02", "2026-11-08", "40", "10"),
@@ -160,12 +160,12 @@ func TestForecastLines(t *testing.T) {
 		t.Fatalf("item A reduced = %v; want 70 then 50 (AC-22.6)", got)
 	}
 
-	if _, err := st.UpsertForecastLines(ctx, "BASE", 0, nil, []store.ForecastCellInput{cellIn(itemA, site, "2026-11-02", "2026-11-08", "1", "0")}); problemCode(err) != store.CodeVersionConflict {
+	if _, err := st.UpsertForecastLines(ctx, "BASE", "", 0, nil, []store.ForecastCellInput{cellIn(itemA, site, "2026-11-02", "2026-11-08", "1", "0")}); problemCode(err) != store.CodeVersionConflict {
 		t.Fatalf("stale write: %v; want %s", err, store.CodeVersionConflict)
 	}
 
 	// Switching to percent 20 recomputes item B too, although only A is written.
-	m, err = st.UpsertForecastLines(ctx, "BASE", 1, &store.ModelSpec{ReductionPrinciple: "percent", ReductionPercent: decimal.NewFromInt(20)},
+	m, err = st.UpsertForecastLines(ctx, "BASE", "", 1, &store.ModelSpec{ReductionPrinciple: "percent", ReductionPercent: decimal.NewFromInt(20)},
 		[]store.ForecastCellInput{cellIn(itemA, site, "2026-11-02", "2026-11-08", "90", "30")})
 	if err != nil {
 		t.Fatal(err)
@@ -197,7 +197,7 @@ func TestForecastLines(t *testing.T) {
 		t.Fatalf("tenant 2 reads tenant 1's model: %v", err)
 	}
 	// Tenant 2 has its own model BASE, created at version 0.
-	if m2, err := st.UpsertForecastLines(two, "BASE", 0, nil, []store.ForecastCellInput{cellIn(itemA, site, "2026-11-02", "2026-11-08", "5", "0")}); err != nil || m2.Version != 1 {
+	if m2, err := st.UpsertForecastLines(two, "BASE", "", 0, nil, []store.ForecastCellInput{cellIn(itemA, site, "2026-11-02", "2026-11-08", "5", "0")}); err != nil || m2.Version != 1 {
 		t.Fatalf("tenant 2 first write: %+v, %v", m2, err)
 	}
 }

@@ -39,6 +39,7 @@ type QuotaArrangement struct {
 // QuotaCreate is one create command; IdempotencyKey and InputHash are empty
 // when the caller sent no Idempotency-Key.
 type QuotaCreate struct {
+	LegalEntityID  string
 	IdempotencyKey string
 	InputHash      string
 	Spec           domain.QuotaArrangementSpec
@@ -139,7 +140,7 @@ func (s *Postgres) CreateQuotaArrangement(ctx context.Context, req QuotaCreate) 
 		key, hash = &req.IdempotencyKey, &req.InputHash
 	}
 	spec := req.Spec
-	entity, err := httpx.OwnerLegalEntity(ctx, "")
+	entity, err := httpx.OwnerLegalEntity(ctx, req.LegalEntityID)
 	if err != nil {
 		return QuotaArrangement{}, false, err
 	}

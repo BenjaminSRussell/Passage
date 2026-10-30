@@ -432,8 +432,11 @@ shopspring/decimal, google/uuid, and `pgregory.net/rapid` for property tests).
 `legal_entity_id` (migration 0012) with a RESTRICTIVE legal-entity policy;
 `planned_order`, `pegging`, `action_message`, `net_requirement`, `forecast_line` and
 `quota_source` follow their parent. A row with no entity is visible only to
-all-entity callers. A plan run takes an optional `legalEntityId` (default: the
-caller's single entity; 403 outside the caller's scope) that owns the plan when
-the run creates it; an existing plan keeps its owner and a plan or forecast model
-code owned by another legal entity is 409 `PLAN-CODE-TAKEN`. Forecast models and
-quota arrangements belong to the caller's single legal entity.
+all-entity callers. A plan run takes an optional `legalEntityId` that owns the plan
+when the run creates it (default: the caller's single entity; required for a caller
+scoped to several or to all entities; 403 outside the caller's scope). For an existing
+plan it is an assertion (422 when it differs), and a forecast model netted into the
+run must belong to the plan's entity (422 `PLAN-FORECAST-ENTITY`). Forecast-model
+writes and quota-arrangement creates take `legalEntityId` the same way. A plan or
+forecast model code held outside the caller's scope, including by a row with no
+entity yet, is 409 `PLAN-CODE-TAKEN`.

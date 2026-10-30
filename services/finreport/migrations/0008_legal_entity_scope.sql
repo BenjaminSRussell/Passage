@@ -30,8 +30,6 @@ CREATE POLICY audit_trail_entry_legal_entity_scope ON audit_trail_entry AS RESTR
          OR legal_entity_id::text = ANY(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));
 
 -- Cells inherit the scope of their run.
-ALTER TABLE statement_cell ENABLE ROW LEVEL SECURITY;
-ALTER TABLE statement_cell FORCE ROW LEVEL SECURITY;
 CREATE POLICY statement_cell_legal_entity_scope ON statement_cell AS RESTRICTIVE
   USING (
     current_setting('passage.legal_entity_scopes', true) = '*'

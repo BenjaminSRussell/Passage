@@ -102,7 +102,7 @@ type Store interface {
 	CheckOut(ctx context.Context, id, declaredSeal string, at time.Time, hourlyRate decimal.Decimal, idem Idem) (domain.GateVisit, error)
 	GetGateVisit(ctx context.Context, id string) (domain.GateVisit, []domain.GateLogEntry, error)
 	ListGateVisits(ctx context.Context, f GateVisitFilter) ([]domain.GateVisit, error)
-	CreateGoodsInTransit(ctx context.Context, voyageID, incoterm, siteID string, lines []int, idem Idem) (domain.GoodsInTransit, error)
+	CreateGoodsInTransit(ctx context.Context, voyageID, incoterm, siteID, legalEntityID string, lines []int, idem Idem) (domain.GoodsInTransit, error)
 	GetGoodsInTransit(ctx context.Context, id string) (domain.GoodsInTransit, error)
 	ListGoodsInTransit(ctx context.Context, f GoodsInTransitFilter) ([]domain.GoodsInTransit, error)
 	ShipGoodsInTransit(ctx context.Context, id string, at time.Time) (domain.GoodsInTransit, error)
@@ -216,11 +216,7 @@ func (s *Postgres) ListRateCards(ctx context.Context, f RateCardFilter) ([]domai
 func (s *Postgres) CreateFreightBill(ctx context.Context, in domain.FreightBill, idem Idem) (domain.FreightBill, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out domain.FreightBill
-	entity, err := httpx.OwnerLegalEntity(ctx, "")
-	if err != nil {
-		return out, err
-	}
-	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		replay := func() (bool, error) {
 			if idem.Key == "" {
 				return false, nil
@@ -239,6 +235,10 @@ func (s *Postgres) CreateFreightBill(ctx context.Context, in domain.FreightBill,
 			return true, nil
 		}
 		if done, err := replay(); done || err != nil {
+			return err
+		}
+		entity, err := parentEntityTx(ctx, tx, parentLoad, p.TenantID, in.LoadID, in.LegalEntityID)
+		if err != nil {
 			return err
 		}
 		lines, err := json.Marshal(in.ExpectedLines)
@@ -312,11 +312,7 @@ func (s *Postgres) RegisterCarrierInvoice(ctx context.Context, in domain.Carrier
 	in.Total = domain.SumLines(in.Lines)
 	var saved domain.CarrierInvoice
 	var bill *domain.FreightBill
-	entity, err := httpx.OwnerLegalEntity(ctx, "")
-	if err != nil {
-		return domain.CarrierInvoice{}, nil, err
-	}
-	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var result domain.MatchResult
 		if in.FreightBillID == nil {
 			in.MatchStatus, in.VarianceTotal = domain.MatchUnexpected, nil
@@ -340,7 +336,14 @@ func (s *Postgres) RegisterCarrierInvoice(ctx context.Context, in domain.Carrier
 			variance := result.VarianceTotal
 			in.MatchStatus, in.VarianceTotal = result.Status, &variance
 		}
-		var err error
+		billID := ""
+		if in.FreightBillID != nil {
+			billID = *in.FreightBillID
+		}
+		entity, err := ownerOrParentTx(ctx, tx, parentFreightBill, p.TenantID, billID, in.LegalEntityID)
+		if err != nil {
+			return err
+		}
 		saved, err = insertInvoice(ctx, tx, p.TenantID, entity, in)
 		if err != nil || in.FreightBillID == nil {
 			return err
@@ -406,8 +409,7 @@ func insertInvoice(ctx context.Context, tx pgx.Tx, tenantID, entity string, in d
 	}
 	saved, err := scanInvoice(tx.QueryRow(ctx, `insert into carrier_invoice (tenant_id, id, carrier_id, invoice_no, invoice_date, source, freight_bill_id,
 		currency, lines, total, match_status, variance_total, legal_entity_id)
-		values ($1, $2, $3, $4, $5::date, $6, $7, $8, $9::jsonb, $10::numeric, $11, $12::numeric,
-			coalesce((select b.legal_entity_id from freight_bill b where b.tenant_id = $1 and b.id = $7), nullif($13, '')::uuid))
+		values ($1, $2, $3, $4, $5::date, $6, $7, $8, $9::jsonb, $10::numeric, $11, $12::numeric, nullif($13, '')::uuid)
 		returning `+carrierInvoiceColumns,
 		tenantID, in.ID, in.CarrierID, in.InvoiceNo, in.InvoiceDate, in.Source, in.FreightBillID, in.Currency, string(lines),
 		in.Total.String(), in.MatchStatus, varianceString(in.VarianceTotal), entity))

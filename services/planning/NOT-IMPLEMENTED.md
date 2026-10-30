@@ -176,8 +176,12 @@ not edit that code).
 
 - **later slice**: `firming_batch`, `coverage_group`, `item_coverage`, `buffer_profile`
   and `ddmrp_buffer` are still tenant-level; they have no line tables.
-- **later slice**: forecast-model and quota-arrangement creates take the caller's
-  single legal entity; an all-entity caller leaves them unassigned and a caller
-  scoped to several gets 422 until the create bodies accept `legalEntityId`.
+- **later slice**: `firming_batch.response` and the rows of `ddmrp_buffer` and
+  `item_coverage` stay tenant-level (tracked in the #241 follow-up issue).
+- **handoff**: when the scope-claim hardening of PR #256 lands, `httpx.OwnerLegalEntity`
+  must also require `tenant.DutyAllScope` for a caller with no legal entity.
 - **handoff**: existing rows keep a NULL `legal_entity_id`; assigning them is a
-  data migration owned by the tenant administrator.
+  data migration owned by the tenant administrator. Until it runs, a scoped caller
+  that reuses the code of such a plan or forecast model gets 409 `PLAN-CODE-TAKEN`
+  (the message says an administrator must assign a legal entity), and an
+  all-entity caller must name the owner when it creates.

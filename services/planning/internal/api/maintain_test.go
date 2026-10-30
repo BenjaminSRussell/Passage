@@ -60,7 +60,7 @@ func (f *fakeStore) DeletePlannedOrder(_ context.Context, _ string, expected int
 	return nil
 }
 
-func (f *fakeStore) UpsertForecastLines(ctx context.Context, code string, expected int, spec *store.ModelSpec, _ []store.ForecastCellInput) (store.ForecastModel, error) {
+func (f *fakeStore) UpsertForecastLines(ctx context.Context, code, _ string, expected int, spec *store.ModelSpec, _ []store.ForecastCellInput) (store.ForecastModel, error) {
 	if f.models == nil {
 		f.models = map[string]store.ForecastModel{}
 	}

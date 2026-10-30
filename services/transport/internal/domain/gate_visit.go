@@ -94,6 +94,7 @@ type GateVisit struct {
 	Status          string     `json:"status"`
 	Detention       *Detention `json:"detention,omitempty"`
 	Version         int        `json:"version"`
+	LegalEntityID   string     `json:"-"`
 }
 
 // GateLogEntry is one append-only row of the gate log. Detail never carries

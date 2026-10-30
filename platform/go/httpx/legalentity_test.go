@@ -23,7 +23,9 @@ func TestOwnerLegalEntity(t *testing.T) {
 		status    int
 	}{
 		{"single scope defaults to its entity", a, "", a, 0},
-		{"all-entity caller leaves it unassigned", "", "", "", 0},
+		{"all-entity caller must name the entity", "", "", "", http.StatusUnprocessableEntity},
+		{"claim without a valid UUID fails closed", "le-test", "", "", http.StatusForbidden},
+		{"invalid entries are dropped from the scope", "le-test," + a, "", a, 0},
 		{"all-entity caller may name one", "", a, a, 0},
 		{"several scopes require a choice", a + "," + b, "", "", http.StatusUnprocessableEntity},
 		{"several scopes accept a member", a + "," + b, b, b, 0},

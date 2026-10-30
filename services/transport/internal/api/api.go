@@ -218,6 +218,7 @@ type freightBillRequest struct {
 	CarrierID     string        `json:"carrierId"`
 	Currency      string        `json:"currency"`
 	ExpectedLines []domain.Line `json:"expectedLines"`
+	LegalEntityID string        `json:"legalEntityId"`
 }
 
 type carrierInvoiceRequest struct {
@@ -228,6 +229,7 @@ type carrierInvoiceRequest struct {
 	FreightBillID *string       `json:"freightBillId"`
 	Currency      string        `json:"currency"`
 	Lines         []domain.Line `json:"lines"`
+	LegalEntityID string        `json:"legalEntityId"`
 }
 
 type invoiceResponse struct {
@@ -442,6 +444,7 @@ func (a *API) createFreightBill(w http.ResponseWriter, r *http.Request) {
 		CarrierID:     req.CarrierID,
 		Currency:      req.Currency,
 		ExpectedLines: req.ExpectedLines,
+		LegalEntityID: req.LegalEntityID,
 	}
 	fields := domain.ValidateFreightBill(bill)
 	if !uuidRe.MatchString(bill.LoadID) {
@@ -539,6 +542,7 @@ func (a *API) registerCarrierInvoice(w http.ResponseWriter, r *http.Request) {
 		Currency:      req.Currency,
 		Lines:         req.Lines,
 		FreightBillID: req.FreightBillID,
+		LegalEntityID: req.LegalEntityID,
 	}
 	fields := domain.ValidateCarrierInvoice(inv)
 	if !uuidRe.MatchString(inv.CarrierID) {

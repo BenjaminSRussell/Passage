@@ -124,14 +124,14 @@ func TestLegalEntityScope_RunsCellsAndReadModel(t *testing.T) {
 		}
 	})
 
-	t.Run("a scoped caller cannot create a run for another entity", func(t *testing.T) {
+	t.Run("a requested entity that is not the ledger's owner is refused", func(t *testing.T) {
 		other := spec
 		other.LegalEntityID = entityB
 		other.RequestHash = "h-other"
 		_, err := st.CreateRun(ctxA, other)
 		var p *httpx.Problem
-		if !errors.As(err, &p) || p.Status != http.StatusForbidden {
-			t.Fatalf("err = %v, want 403 problem", err)
+		if !errors.As(err, &p) || p.Status != http.StatusUnprocessableEntity || p.Code != CodeLedgerEntity {
+			t.Fatalf("err = %v, want 422 %s", err, CodeLedgerEntity)
 		}
 		if n := countAs(t, app, all, `select count(*) from statement_run`); n != 1 {
 			t.Errorf("rejected run left %d rows, want 1", n)
@@ -171,8 +171,8 @@ func TestLegalEntityScope_RunsCellsAndReadModel(t *testing.T) {
 		lineB.LegalEntityID = entityA
 		err := st.PutJournalLines(ctxB, []domain.JournalLine{lineB})
 		var p *httpx.Problem
-		if !errors.As(err, &p) || p.Status != http.StatusForbidden {
-			t.Fatalf("entity B line for entity A: %v, want 403 problem", err)
+		if !errors.As(err, &p) || p.Status != http.StatusNotFound {
+			t.Fatalf("entity B line for entity A's ledger: %v, want 404 problem", err)
 		}
 		q := `select count(*) from reporting_journal_line`
 		if countAs(t, app, ctxA, q) != 1 || countAs(t, app, all, q) != 1 || countAs(t, app, ctxB, q) != 0 {
@@ -184,6 +184,92 @@ func TestLegalEntityScope_RunsCellsAndReadModel(t *testing.T) {
 		}
 		if n := countAs(t, app, ctxB, `select count(*) from audit_trail_entry where ledger_id is null`); n == 0 {
 			t.Error("tenant-level reporting audit entries must stay visible to every entity")
+		}
+	})
+}
+
+func TestLegalEntityScope_RunOwnerIsTheLedgers(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	all := scopedCtx(testkit.TenantID(1), "")
+	if err := dbx.Migrate(all, admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	st := New(app)
+	entityA, entityB := ids.New(), ids.New()
+	ctxA, ctxB := scopedCtx(testkit.TenantID(1), entityA), scopedCtx(testkit.TenantID(1), entityB)
+	ctxAB := scopedCtx(testkit.TenantID(1), entityA+","+entityB)
+	if _, _, err := st.SaveDraft(all, storeFixtureDefinition("OWN"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Publish(all, "OWN", "tester"); err != nil {
+		t.Fatal(err)
+	}
+	ledgerB := ids.New()
+	seedBalance(t, ctxB, admin, ledgerB, 2026, 3, "1000", "acct", "777", 9)
+	spec := RunSpec{Code: "OWN", LedgerID: ledgerB, CurrencyType: "acct", PeriodYear: 2026, PeriodNo: 3, Calendar: storeFixtureCalendar(), RequestedBy: "tester", RequestHash: "h"}
+	runs := func() int { return countAs(t, app, all, `select count(*) from statement_run`) }
+
+	t.Run("a caller scoped to both entities cannot label another entity's ledger", func(t *testing.T) {
+		mislabel := spec
+		mislabel.LegalEntityID = entityA
+		_, err := st.CreateRun(ctxAB, mislabel)
+		if got := problemCode(err); got != CodeLedgerEntity {
+			t.Fatalf("err = %v, want %s", err, CodeLedgerEntity)
+		}
+		if runs() != 0 {
+			t.Fatal("refused run was stored")
+		}
+	})
+	t.Run("the run takes the ledger's owner when none is requested", func(t *testing.T) {
+		run, err := st.CreateRun(ctxAB, spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := countAs(t, app, all, `select count(*) from statement_run where id=$1 and legal_entity_id=$2`, run.ID, entityB); n != 1 {
+			t.Fatal("run is not owned by the ledger's entity")
+		}
+		if _, err := st.GetRun(ctxA, run.ID); err == nil {
+			t.Fatal("entity A read entity B's run")
+		}
+	})
+	t.Run("a caller who cannot see the ledger gets 404, not an empty statement", func(t *testing.T) {
+		before := runs()
+		other := spec
+		other.RequestHash = "h-a"
+		_, err := st.CreateRun(ctxA, other)
+		var p *httpx.Problem
+		if !errors.As(err, &p) || p.Status != http.StatusNotFound || p.Code != CodeLedgerNotFound {
+			t.Fatalf("err = %v, want 404 %s", err, CodeLedgerNotFound)
+		}
+		if runs() != before {
+			t.Fatal("a run was stored for a hidden ledger")
+		}
+	})
+	t.Run("a ledger spanning entities is refused", func(t *testing.T) {
+		mixed := ids.New()
+		seedBalance(t, ctxA, admin, mixed, 2026, 3, "1000", "acct", "1", 1)
+		if _, err := admin.Exec(all, `insert into reporting_balance(tenant_id, ledger_id, period_year, period_no, quarter, account, combination, currency_type, net, legal_entity_id)
+			values($1,$2,2026,3,1,'2000','-','acct',1,$3)`, testkit.TenantID(1), mixed, entityB); err != nil {
+			t.Fatal(err)
+		}
+		mixedSpec := spec
+		mixedSpec.LedgerID, mixedSpec.RequestHash = mixed, "h-mixed"
+		_, err := st.CreateRun(ctxAB, mixedSpec)
+		var p *httpx.Problem
+		if !errors.As(err, &p) || p.Status != http.StatusUnprocessableEntity {
+			t.Fatalf("err = %v, want 422", err)
+		}
+		err = st.PutJournalLines(ctxAB, []domain.JournalLine{line(mixed, 1, "2026-03-01", 3, "1000", "5", "0")})
+		if !errors.As(err, &p) || p.Status != http.StatusUnprocessableEntity {
+			t.Fatalf("journal line err = %v, want 422", err)
+		}
+	})
+	t.Run("journal lines take the ledger's owner", func(t *testing.T) {
+		if err := st.PutJournalLines(ctxAB, []domain.JournalLine{line(ledgerB, 1, "2026-03-01", 3, "1000", "5", "0")}); err != nil {
+			t.Fatal(err)
+		}
+		if n := countAs(t, app, all, `select count(*) from reporting_journal_line where ledger_id=$1 and legal_entity_id=$2`, ledgerB, entityB); n != 1 {
+			t.Fatal("journal line is not owned by the ledger's entity")
 		}
 	})
 }

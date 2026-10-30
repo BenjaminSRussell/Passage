@@ -26,7 +26,7 @@ func TestGoodsInTransit_AC349(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := s.CreateGoodsInTransit(ctx, voyage.ID, "FOB", site, []int{1}, store.Idem{Key: "git-1", Fingerprint: "a"})
+	first, err := s.CreateGoodsInTransit(ctx, voyage.ID, "FOB", site, "", []int{1}, store.Idem{Key: "git-1", Fingerprint: "a"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,25 +34,25 @@ func TestGoodsInTransit_AC349(t *testing.T) {
 		len(first.Lines) != 1 || first.Lines[0].Line != 1 || first.Version != 1 || first.Code != "" {
 		t.Fatalf("first = %+v", first)
 	}
-	if replay, err := s.CreateGoodsInTransit(ctx, voyage.ID, "FOB", site, []int{1}, store.Idem{Key: "git-1", Fingerprint: "a"}); err != nil || replay.ID != first.ID {
+	if replay, err := s.CreateGoodsInTransit(ctx, voyage.ID, "FOB", site, "", []int{1}, store.Idem{Key: "git-1", Fingerprint: "a"}); err != nil || replay.ID != first.ID {
 		t.Fatalf("replay = %+v, %v", replay, err)
 	}
-	if _, err := s.CreateGoodsInTransit(ctx, voyage.ID, "FOB", site, []int{2}, store.Idem{Key: "git-1", Fingerprint: "b"}); problemCode(t, err) != store.CodeIdempotencyReuse {
+	if _, err := s.CreateGoodsInTransit(ctx, voyage.ID, "FOB", site, "", []int{2}, store.Idem{Key: "git-1", Fingerprint: "b"}); problemCode(t, err) != store.CodeIdempotencyReuse {
 		t.Fatalf("reuse = %v", err)
 	}
-	if _, err := s.CreateGoodsInTransit(ctx, voyage.ID, "FOB", site, []int{1, 2}, store.Idem{}); problemCode(t, err) != domain.CodeGITState {
+	if _, err := s.CreateGoodsInTransit(ctx, voyage.ID, "FOB", site, "", []int{1, 2}, store.Idem{}); problemCode(t, err) != domain.CodeGITState {
 		t.Fatalf("line 1 twice = %v, want TMS-0119", err)
 	}
-	if _, err := s.CreateGoodsInTransit(ctx, voyage.ID, "FOB", site, []int{7}, store.Idem{}); problemCode(t, err) != domain.CodeGITState {
+	if _, err := s.CreateGoodsInTransit(ctx, voyage.ID, "FOB", site, "", []int{7}, store.Idem{}); problemCode(t, err) != domain.CodeGITState {
 		t.Fatalf("line not on voyage = %v, want TMS-0119", err)
 	}
-	if _, err := s.CreateGoodsInTransit(ctx, voyage.ID, "DDP", site, nil, store.Idem{}); problemCode(t, err) != domain.CodeNoGoodsInTransit {
+	if _, err := s.CreateGoodsInTransit(ctx, voyage.ID, "DDP", site, "", nil, store.Idem{}); problemCode(t, err) != domain.CodeNoGoodsInTransit {
 		t.Fatalf("DDP = %v, want TMS-0120", err)
 	}
-	if _, err := s.CreateGoodsInTransit(ctx, ids.New(), "FOB", site, nil, store.Idem{}); problemCode(t, err) != domain.CodeNotFound {
+	if _, err := s.CreateGoodsInTransit(ctx, ids.New(), "FOB", site, "", nil, store.Idem{}); problemCode(t, err) != domain.CodeNotFound {
 		t.Fatalf("unknown voyage = %v", err)
 	}
-	rest, err := s.CreateGoodsInTransit(ctx, voyage.ID, "FOB", site, []int{3, 2}, store.Idem{})
+	rest, err := s.CreateGoodsInTransit(ctx, voyage.ID, "FOB", site, "", []int{3, 2}, store.Idem{})
 	if err != nil || len(rest.Lines) != 2 || rest.Lines[0].Line != 2 {
 		t.Fatalf("rest = %+v, %v", rest, err)
 	}
@@ -129,7 +129,7 @@ func TestGoodsInTransit_PostedVoyageTenantAndConcurrency(t *testing.T) {
 	if _, err := s.AllocateVoyage(ctx, posted.ID, t0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateGoodsInTransit(ctx, posted.ID, "FOB", site, nil, store.Idem{}); problemCode(t, err) != domain.CodeGITState {
+	if _, err := s.CreateGoodsInTransit(ctx, posted.ID, "FOB", site, "", nil, store.Idem{}); problemCode(t, err) != domain.CodeGITState {
 		t.Fatalf("posted voyage = %v, want TMS-0119", err)
 	}
 
@@ -138,7 +138,7 @@ func TestGoodsInTransit_PostedVoyageTenantAndConcurrency(t *testing.T) {
 		t.Fatal(err)
 	}
 	other := tenantCtx(2)
-	if _, err := s.CreateGoodsInTransit(other, open.ID, "FOB", site, nil, store.Idem{}); problemCode(t, err) != domain.CodeNotFound {
+	if _, err := s.CreateGoodsInTransit(other, open.ID, "FOB", site, "", nil, store.Idem{}); problemCode(t, err) != domain.CodeNotFound {
 		t.Fatalf("tenant 2 create = %v", err)
 	}
 	var wg sync.WaitGroup
@@ -147,7 +147,7 @@ func TestGoodsInTransit_PostedVoyageTenantAndConcurrency(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, errs[i] = s.CreateGoodsInTransit(ctx, open.ID, "CIF", site, nil, store.Idem{})
+			_, errs[i] = s.CreateGoodsInTransit(ctx, open.ID, "CIF", site, "", nil, store.Idem{})
 		}(i)
 	}
 	wg.Wait()

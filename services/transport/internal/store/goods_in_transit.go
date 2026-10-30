@@ -37,10 +37,10 @@ type GoodsInTransitFilter struct {
 // the order is written, and a receipt line already on another order is refused
 // with TMS-0119 (the goods_in_transit_line key holds under concurrent requests).
 // A repeat with the same Idempotency-Key and body returns the first order.
-func (s *Postgres) CreateGoodsInTransit(ctx context.Context, voyageID, incoterm, siteID string, lines []int, idem Idem) (domain.GoodsInTransit, error) {
+func (s *Postgres) CreateGoodsInTransit(ctx context.Context, voyageID, incoterm, siteID, legalEntityID string, lines []int, idem Idem) (domain.GoodsInTransit, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out domain.GoodsInTransit
-	entity, err := httpx.OwnerLegalEntity(ctx, "")
+	entity, err := httpx.OwnerLegalEntity(ctx, legalEntityID)
 	if err != nil {
 		return out, err
 	}

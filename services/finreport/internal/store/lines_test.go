@@ -24,19 +24,23 @@ import (
 // below hwm only, closing lines also in closing_net), and sets the HWM.
 func loadLedger(t testing.TB, ctx context.Context, pool *pgxpool.Pool, st *Postgres, ledger string, hwm int64, lines []domain.JournalLine) {
 	t.Helper()
+	err := dbx.WithTenantTx(ctx, pool, func(tx pgx.Tx) error {
+		p, _ := tenant.FromContext(ctx)
+		_, err := tx.Exec(ctx, `insert into reporting_hwm(tenant_id, ledger_id, posting_sequence, legal_entity_id) values($1,$2,$3,nullif($4,'')::uuid)`, p.TenantID, ledger, hwm, p.LegalEntityID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := st.PutJournalLines(ctx, lines); err != nil {
 		t.Fatal(err)
 	}
-	err := dbx.WithTenantTx(ctx, pool, func(tx pgx.Tx) error {
-		p, _ := tenant.FromContext(ctx)
-		if _, err := tx.Exec(ctx, `insert into reporting_balance(tenant_id, ledger_id, period_year, period_no, quarter, account, combination, currency_type, net, closing_net, legal_entity_id)
+	err = dbx.WithTenantTx(ctx, pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `insert into reporting_balance(tenant_id, ledger_id, period_year, period_no, quarter, account, combination, currency_type, net, closing_net, legal_entity_id)
 			select tenant_id, ledger_id, period_year, period_no, 1, account, combination, currency_type, sum(net),
 			       coalesce(sum(net) filter (where closing_entry), 0), legal_entity_id
 			from reporting_journal_line where ledger_id = $1 and posting_sequence <= $2
-			group by tenant_id, ledger_id, period_year, period_no, account, combination, currency_type, legal_entity_id`, ledger, hwm); err != nil {
-			return err
-		}
-		_, err := tx.Exec(ctx, `insert into reporting_hwm(tenant_id, ledger_id, posting_sequence, legal_entity_id) values($1,$2,$3,nullif($4,'')::uuid)`, p.TenantID, ledger, hwm, p.LegalEntityID)
+			group by tenant_id, ledger_id, period_year, period_no, account, combination, currency_type, legal_entity_id`, ledger, hwm)
 		return err
 	})
 	if err != nil {
@@ -232,6 +236,7 @@ func TestDrillLines_PagesReconcileToCell(t *testing.T) {
 func TestPutJournalLines_ValidatesAndIsReplaySafe(t *testing.T) {
 	st, ctx := migrated(t)
 	ledger := ids.New()
+	seedBalance(t, ctx, st.pool, ledger, 2026, 3, "9999", "acct", "0", 1)
 	good := line(ledger, 1, "2026-03-05", 3, "4000", "0", "10")
 	bad := line(ledger, 2, "2026-03-05", 3, "4000", "0", "10")
 	bad.SourceURI = "javascript:alert(1)"

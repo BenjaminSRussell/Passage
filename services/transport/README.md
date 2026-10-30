@@ -338,9 +338,14 @@ No new third-party dependencies beyond the platform module and what it pulls in
 
 `load`, `freight_bill`, `carrier_invoice`, `gate_visit` and `goods_in_transit_order`
 carry a nullable `legal_entity_id` (migration 0006) with a RESTRICTIVE legal-entity
-policy, set from the caller's single legal entity on create; `load_shipment`,
-`dg_check`, `screening_hold`, `freight_bill_decision`, `gate_event` and
-`goods_in_transit_line` follow their parent. A carrier invoice matched to a freight
-bill takes the bill's entity. A row with no entity is visible only to all-entity
-callers. Rate cards, tenders, tracking events, voyages and route plans stay
-tenant-level.
+policy; `load_shipment`, `dg_check`, `screening_hold`, `freight_bill_decision`,
+`gate_event` and `goods_in_transit_line` follow their parent, and `tender` and
+`tracking_event` follow their load (migration 0007). A new load, goods-in-transit
+order, or invoice or visit without a parent takes `legalEntityId` from the request
+(default: the caller's single entity); a caller scoped to several entities or to all
+of them must send it (422). A freight bill, gate visit with a load, and matched
+invoice inherit the entity of the load or bill they reference, and `legalEntityId`
+is then an assertion (422 on mismatch). Tendering, tracking and billing against a
+load the caller cannot see is 404, never a pass through the child gates. A row with
+no entity is visible only to all-entity callers. Rate cards, voyages and route plans
+stay tenant-level.

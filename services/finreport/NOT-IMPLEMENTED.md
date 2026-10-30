@@ -134,8 +134,8 @@ platform change outside the wave's owned paths).
 - **later slice**: the ledger consumer that fills `reporting_balance` and
   `reporting_hwm` must write `legal_entity_id` from the ledger's legal entity;
   rows written without it are visible only to all-entity callers.
-- **later slice**: a caller scoped to several legal entities cannot export the
-  audit trail filtered by ledger (422) until the ledger-to-entity mapping is
-  known; callers scoped to one entity or to all entities are unaffected.
+- **later slice**: the consumer must write a ledger's `reporting_hwm` row (with
+  its entity) before the journal lines; lines for a ledger without visible
+  reporting rows are refused with 404 REPORT-0031.
 - **handoff**: existing rows keep a NULL `legal_entity_id`; assigning them is a
   data migration owned by the tenant administrator.

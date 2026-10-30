@@ -1289,6 +1289,7 @@ components:
       type: object
       required: [capacity, shipments]
       properties:
+        legalEntityId: { type: string, format: uuid, description: "Owning legal entity of the loads. Defaults to the caller's single legal entity; required (422) for a caller scoped to several or to all legal entities; 403 outside the caller's scope." }
         capacity: { $ref: '#/components/schemas/Capacity' }
         shipments:
           type: array
@@ -1537,7 +1538,8 @@ components:
       type: object
       required: [loadId, carrierId, currency, expectedLines]
       properties:
-        loadId: { type: string, format: uuid }
+        loadId: { type: string, format: uuid, description: The load the bill is for; it must be visible to the caller (404 otherwise) and the bill inherits its legal entity }
+        legalEntityId: { type: string, format: uuid, description: "Assertion only: 422 when it differs from the load's legal entity." }
         carrierId: { type: string, format: uuid }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         expectedLines:
@@ -1595,7 +1597,8 @@ components:
         invoiceNo: { type: string, minLength: 1, maxLength: 40 }
         invoiceDate: { type: string, format: date }
         source: { type: string, enum: [EDI210, MANUAL, API] }
-        freightBillId: { type: string, format: uuid, description: The bill to match; absent makes the invoice UNEXPECTED_INVOICE }
+        freightBillId: { type: string, format: uuid, description: The bill to match; absent makes the invoice UNEXPECTED_INVOICE. A matched invoice inherits the bill's legal entity }
+        legalEntityId: { type: string, format: uuid, description: "Owning legal entity of an invoice without a bill; same rules as on a load build. Assertion only when freightBillId is present." }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         lines:
           type: array
@@ -1817,6 +1820,7 @@ components:
         incoterm: { type: string, description: Incoterms 2020 rule; only EXW, FCA, FAS, FOB, CFR, CIF, CPT and CIP open an order }
         siteId: { type: string, format: uuid, description: 'Destination site; the in-transit warehouse is TRANSIT-{site}' }
         receiptLines: { type: array, items: { type: integer, minimum: 1 }, maxItems: 3000, description: Voyage receipt lines, each once; empty means every line }
+        legalEntityId: { type: string, format: uuid, description: "Owning legal entity of the order; same rules as on a load build." }
     GoodsInTransit:
       type: object
       required: [id, voyageId, voyageReference, siteId, incoterm, transferEvent, inTransitWarehouse, currency, status, lines, goodsValue, estimatedTotal, version, createdAt]
@@ -1860,7 +1864,8 @@ components:
       properties:
         siteId: { type: string, format: uuid }
         direction: { type: string, enum: [INBOUND, OUTBOUND] }
-        loadId: { type: string, format: uuid }
+        loadId: { type: string, format: uuid, description: When present the load must be visible to the caller (404 otherwise) and the visit inherits its legal entity }
+        legalEntityId: { type: string, format: uuid, description: "Owning legal entity of a visit without a load; assertion only when loadId is present." }
         carrierScac: { type: string, pattern: '^[A-Za-z]{2,4}$' }
         trailerNo: { type: string, minLength: 1, maxLength: 20, description: Trailer or container number }
         sealNo: { type: string, maxLength: 20, description: Seal of an inbound sealed trailer }

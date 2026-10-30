@@ -50,7 +50,11 @@ type LoadFilter struct {
 func (s *Postgres) BuildLoads(ctx context.Context, loads []domain.Load, idem Idem) ([]domain.Load, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out []domain.Load
-	entity, err := httpx.OwnerLegalEntity(ctx, "")
+	requested := ""
+	if len(loads) > 0 {
+		requested = loads[0].LegalEntityID
+	}
+	entity, err := httpx.OwnerLegalEntity(ctx, requested)
 	if err != nil {
 		return nil, err
 	}

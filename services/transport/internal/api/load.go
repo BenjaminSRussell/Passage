@@ -19,6 +19,8 @@ var loadStatuses = []string{domain.LoadPlanned, "RATED", "TENDERED", "ACCEPTED",
 type loadBuildRequest struct {
 	Capacity  domain.Capacity       `json:"capacity"`
 	Shipments []domain.LoadShipment `json:"shipments"`
+	// LegalEntityID owns the loads; required for callers scoped to several entities or all of them.
+	LegalEntityID string `json:"legalEntityId"`
 }
 
 // loadDetail is a load with its DG checks, newest first.
@@ -77,6 +79,9 @@ func (a *API) buildLoads(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.fail(w, r, "build loads failed", err)
 		return
+	}
+	for i := range loads {
+		loads[i].LegalEntityID = req.LegalEntityID
 	}
 	created, err := a.store.BuildLoads(r.Context(), loads, idem)
 	if err != nil {

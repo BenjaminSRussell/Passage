@@ -3,13 +3,16 @@ package store_test
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
@@ -60,7 +63,7 @@ func TestLegalEntityScope_LoadsBillsVisitsAndGoodsInTransit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("entity A loads: %v", err)
 	}
-	bill, err := s.CreateFreightBill(ctxA, newBill(carrier, "100.00"), store.Idem{})
+	bill, err := s.CreateFreightBill(ctxA, billOn(t, s, ctxA, carrier, "100.00"), store.Idem{})
 	if err != nil {
 		t.Fatalf("entity A freight bill: %v", err)
 	}
@@ -77,7 +80,7 @@ func TestLegalEntityScope_LoadsBillsVisitsAndGoodsInTransit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateGoodsInTransit(ctxA, voyage.ID, "FOB", site, []int{1}, store.Idem{}); err != nil {
+	if _, err := s.CreateGoodsInTransit(ctxA, voyage.ID, "FOB", site, "", []int{1}, store.Idem{}); err != nil {
 		t.Fatalf("entity A goods in transit: %v", err)
 	}
 	for _, stmt := range []string{
@@ -143,7 +146,7 @@ func TestLegalEntityScope_LoadsBillsVisitsAndGoodsInTransit(t *testing.T) {
 	})
 
 	t.Run("each entity owns what it creates", func(t *testing.T) {
-		billB, err := s.CreateFreightBill(ctxB, newBill(carrier, "50.00"), store.Idem{})
+		billB, err := s.CreateFreightBill(ctxB, billOn(t, s, ctxB, carrier, "50.00"), store.Idem{})
 		if err != nil {
 			t.Fatalf("entity B freight bill: %v", err)
 		}
@@ -152,6 +155,133 @@ func TestLegalEntityScope_LoadsBillsVisitsAndGoodsInTransit(t *testing.T) {
 		}
 		if _, err := s.GetFreightBill(all, billB.ID); err != nil {
 			t.Errorf("all-entity caller cannot fetch entity B's freight bill: %v", err)
+		}
+	})
+}
+
+func problemStatus(err error) int {
+	var p *httpx.Problem
+	if errors.As(err, &p) {
+		return p.Status
+	}
+	return 0
+}
+
+func TestLegalEntityScope_ChildrenFollowTheirLoad(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	s := store.New(app)
+	entityA, entityB := ids.New(), ids.New()
+	ctxA, ctxB := scopedCtx(testkit.TenantID(1), entityA), scopedCtx(testkit.TenantID(1), entityB)
+	all := scopedCtx(testkit.TenantID(1), "")
+	loadA := seedLoad(t, s, ctxA)
+	exec := func(stmt string, args ...any) {
+		t.Helper()
+		if _, err := admin.Exec(context.Background(), stmt, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("another entity cannot tender a load held by screening", func(t *testing.T) {
+		exec(`insert into screening_hold (tenant_id, id, load_id, status, parties, created_by) values ($1, gen_random_uuid(), $2, 'OPEN', '[]', 'u')`, testkit.TenantID(1), loadA)
+		_, err := s.CreateTender(ctxB, sentTender(loadA, time.Hour, ids.New()), store.Idem{}, t0)
+		if got := problemCode(t, err); got != domain.CodeNotFound {
+			t.Fatalf("entity B tender = %v, want %s", err, domain.CodeNotFound)
+		}
+		if _, err := s.CreateTender(ctxA, sentTender(loadA, time.Hour, ids.New()), store.Idem{}, t0); problemCode(t, err) != domain.CodeScreeningHold {
+			t.Fatalf("entity A tender = %v, want the hold to block it", err)
+		}
+	})
+
+	t.Run("a scoped caller cannot tender a load without an entity", func(t *testing.T) {
+		legacy := seedLoad(t, s, ctxA)
+		exec(`update load set legal_entity_id = null where id = $1`, legacy)
+		if _, err := s.CreateTender(ctxA, sentTender(legacy, time.Hour, ids.New()), store.Idem{}, t0); problemCode(t, err) != domain.CodeNotFound {
+			t.Fatalf("scoped tender of an unassigned load = %v", err)
+		}
+		if _, err := s.CreateTender(all, sentTender(legacy, time.Hour, ids.New()), store.Idem{}, t0); err != nil {
+			t.Fatalf("all-entity tender of an unassigned load: %v", err)
+		}
+	})
+
+	t.Run("tenders and tracking follow the load", func(t *testing.T) {
+		open := seedLoad(t, s, ctxA)
+		if _, err := s.CreateTender(ctxA, sentTender(open, time.Hour, ids.New()), store.Idem{}, t0); err != nil {
+			t.Fatal(err)
+		}
+		event := domain.TrackingEvent{LoadID: open, StopNo: 1, Code: "AF", OccurredAt: t0, Source: "API", Ref: "a-1"}
+		if _, _, err := s.RecordTrackingEvent(ctxA, event); err != nil {
+			t.Fatal(err)
+		}
+		for _, table := range []string{"tender", "tracking_event"} {
+			q := "select count(*) from " + table + " where load_id = $1"
+			if countAs(t, app, ctxA, q, open) != 1 || countAs(t, app, all, q, open) != 1 || countAs(t, app, ctxB, q, open) != 0 {
+				t.Errorf("%s visibility must be A=1 all=1 B=0", table)
+			}
+		}
+		if list, err := s.ListTenders(ctxB, store.TenderFilter{}); err != nil || len(list) != 0 {
+			t.Errorf("entity B lists %d tenders (%v)", len(list), err)
+		}
+		other := event
+		other.Ref = "b-1"
+		if _, _, err := s.RecordTrackingEvent(ctxB, other); problemCode(t, err) != domain.CodeNotFound {
+			t.Errorf("entity B tracking on entity A's load = %v", err)
+		}
+	})
+
+	t.Run("children inherit the parent's entity", func(t *testing.T) {
+		if _, err := s.CreateFreightBill(ctxB, billOn(t, s, ctxA, ids.New(), "10.00"), store.Idem{}); problemCode(t, err) != domain.CodeNotFound {
+			t.Errorf("entity B bill on entity A's load = %v", err)
+		}
+		bill := billOn(t, s, ctxA, ids.New(), "10.00")
+		bill.LoadID = loadA
+		created, err := s.CreateFreightBill(all, bill, store.Idem{})
+		if err != nil {
+			t.Fatalf("all-entity bill on entity A's load: %v", err)
+		}
+		if countAs(t, app, ctxA, `select count(*) from freight_bill where id = $1`, created.ID) != 1 {
+			t.Error("the bill did not inherit entity A")
+		}
+		mismatch := bill
+		mismatch.LegalEntityID = entityB
+		if _, err := s.CreateFreightBill(all, mismatch, store.Idem{}); problemStatus(err) != http.StatusUnprocessableEntity {
+			t.Errorf("mismatched asserted entity = %v, want 422", err)
+		}
+		visit := checkIn(t, ids.New(), domain.DirectionInbound, "TR-9", "777")
+		visit.LoadID = loadA
+		saved, err := s.CheckIn(all, visit, store.Idem{})
+		if err != nil {
+			t.Fatalf("all-entity check-in on entity A's load: %v", err)
+		}
+		if countAs(t, app, ctxA, `select count(*) from gate_visit where id = $1`, saved.ID) != 1 {
+			t.Error("the visit did not inherit entity A")
+		}
+		visit.TrailerNo = "TR-10"
+		if _, err := s.CheckIn(ctxB, visit, store.Idem{}); problemCode(t, err) != domain.CodeNotFound {
+			t.Errorf("entity B check-in on entity A's load = %v", err)
+		}
+	})
+
+	t.Run("all-entity callers must name the owner of a new parent", func(t *testing.T) {
+		if _, err := s.BuildLoads(all, built(t, shipments(1, ids.New(), "10")), store.Idem{}); problemStatus(err) != http.StatusUnprocessableEntity {
+			t.Errorf("all-entity load build without an entity = %v, want 422", err)
+		}
+		loads := built(t, shipments(1, ids.New(), "10"))
+		loads[0].LegalEntityID = entityB
+		created, err := s.BuildLoads(all, loads, store.Idem{})
+		if err != nil {
+			t.Fatalf("all-entity load build naming entity B: %v", err)
+		}
+		if countAs(t, app, ctxB, `select count(*) from load where id = $1`, created[0].ID) != 1 {
+			t.Error("the load is not owned by the named entity")
+		}
+		if _, _, err := s.RegisterCarrierInvoice(all, newInvoice(ids.New(), "INV-ALL", nil, "5.00")); problemStatus(err) != http.StatusUnprocessableEntity {
+			t.Errorf("all-entity unmatched invoice without an entity = %v, want 422", err)
+		}
+		if _, err := s.CreateGoodsInTransit(all, ids.New(), "FOB", ids.New(), "", []int{1}, store.Idem{}); problemStatus(err) != http.StatusUnprocessableEntity {
+			t.Errorf("all-entity goods in transit without an entity = %v, want 422", err)
 		}
 	})
 }

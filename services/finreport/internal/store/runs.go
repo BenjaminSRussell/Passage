@@ -12,7 +12,6 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
-	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 
 	"github.com/BenjaminSRussell/passage/services/finreport/internal/domain"
@@ -72,11 +71,7 @@ type LagRow struct {
 func (s *Postgres) CreateRun(ctx context.Context, spec RunSpec) (Run, error) {
 	var run Run
 	started := time.Now()
-	entity, err := httpx.OwnerLegalEntity(ctx, spec.LegalEntityID)
-	if err != nil {
-		return run, err
-	}
-	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if spec.IdempotencyKey != "" {
 			var id, hash string
 			err := tx.QueryRow(ctx, `select id::text, request_hash from statement_run where idempotency_key=$1`, spec.IdempotencyKey).Scan(&id, &hash)
@@ -103,6 +98,10 @@ func (s *Postgres) CreateRun(ctx context.Context, spec RunSpec) (Run, error) {
 		at, ok := cal.Index(spec.PeriodYear, spec.PeriodNo)
 		if !ok {
 			return problem(422, domain.CodePeriodNotFound, fmt.Sprintf("period %04d-%02d does not exist in ledger %s", spec.PeriodYear, spec.PeriodNo, spec.LedgerID))
+		}
+		entity, err := requireLedgerEntityTx(ctx, tx, spec.LedgerID, spec.LegalEntityID)
+		if err != nil {
+			return err
 		}
 		balances, hwm, err := loadBalancesTx(ctx, tx, spec.LedgerID, def.CurrencyTypes(spec.CurrencyType), cal)
 		if err != nil {

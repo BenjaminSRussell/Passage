@@ -31,6 +31,7 @@ type FreightBill struct {
 	VarianceTotal    *decimal.Decimal `json:"varianceTotal,omitempty"`
 	Version          int              `json:"version"`
 	CreatedAt        time.Time        `json:"createdAt"`
+	LegalEntityID    string           `json:"-"`
 }
 
 // CarrierInvoice is an invoice received from a carrier. FreightBillID is nil
@@ -48,6 +49,7 @@ type CarrierInvoice struct {
 	MatchStatus   string           `json:"matchStatus"`
 	VarianceTotal *decimal.Decimal `json:"varianceTotal,omitempty"`
 	CreatedAt     time.Time        `json:"createdAt"`
+	LegalEntityID string           `json:"-"`
 }
 
 // SumLines adds the amounts of lines.

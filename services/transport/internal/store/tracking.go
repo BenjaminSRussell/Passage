@@ -39,6 +39,9 @@ func (s *Postgres) RecordTrackingEvent(ctx context.Context, in domain.TrackingEv
 	var out domain.TrackingEvent
 	inserted := false
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := parentEntityTx(ctx, tx, parentLoad, p.TenantID, in.LoadID, ""); err != nil {
+			return err
+		}
 		saved, err := scanTracking(tx.QueryRow(ctx, `insert into tracking_event (tenant_id, id, load_id, source, ref, stop_no, code, occurred_at, location)
 			values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 			on conflict (tenant_id, source, ref) do nothing returning `+trackingColumns,

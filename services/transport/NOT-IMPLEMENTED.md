@@ -140,3 +140,8 @@ owner's work, or a change outside this wave's paths).
   are still tenant-level.
 - **handoff**: existing rows keep a NULL `legal_entity_id`; assigning them is a
   data migration owned by the tenant administrator.
+- **handoff**: existing rows keep a NULL `legal_entity_id` and are invisible to
+  scoped callers (a tender or tracking report on such a load answers 404) until the
+  tenant administrator assigns an entity; the backfill is a data migration.
+- **handoff**: when the scope-claim hardening of PR #256 lands, `httpx.OwnerLegalEntity`
+  must also require `tenant.DutyAllScope` for a caller with no legal entity.

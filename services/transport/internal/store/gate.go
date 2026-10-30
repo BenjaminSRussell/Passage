@@ -51,11 +51,7 @@ type gateVisitRow struct {
 func (s *Postgres) CheckIn(ctx context.Context, in domain.GateVisit, idem Idem) (domain.GateVisit, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out domain.GateVisit
-	entity, err := httpx.OwnerLegalEntity(ctx, "")
-	if err != nil {
-		return out, err
-	}
-	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		replay := func() (bool, error) {
 			if idem.Key == "" {
 				return false, nil
@@ -92,6 +88,10 @@ func (s *Postgres) CheckIn(ctx context.Context, in domain.GateVisit, idem Idem) 
 				"trailer "+in.TrailerNo+" of "+in.CarrierSCAC+" is already in the yard on visit "+inYard+"; check it out first")
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		entity, err := ownerOrParentTx(ctx, tx, parentLoad, p.TenantID, in.LoadID, in.LegalEntityID)
+		if err != nil {
 			return err
 		}
 		var status *string

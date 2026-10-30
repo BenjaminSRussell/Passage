@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
-	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 
@@ -79,7 +78,7 @@ func insertAuditRowTx(ctx context.Context, tx pgx.Tx, e domain.AuditEntry) (bool
 	entity := ""
 	if e.LedgerID != "" {
 		var err error
-		if entity, err = httpx.OwnerLegalEntity(ctx, e.LegalEntityID); err != nil {
+		if entity, err = auditEntityTx(ctx, tx, e.LedgerID, e.LegalEntityID); err != nil {
 			return false, err
 		}
 	}

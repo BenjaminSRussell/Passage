@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -64,7 +65,7 @@ func TestLegalEntityScope_PlansForecastsAndQuotas(t *testing.T) {
 	if err != nil {
 		t.Fatalf("entity A plan run: %v", err)
 	}
-	if _, err := st.UpsertForecastLines(ctxA, "BASE", 0, nil, []store.ForecastCellInput{cellIn(item, site, "2026-11-02", "2026-11-08", "5", "0")}); err != nil {
+	if _, err := st.UpsertForecastLines(ctxA, "BASE", "", 0, nil, []store.ForecastCellInput{cellIn(item, site, "2026-11-02", "2026-11-08", "5", "0")}); err != nil {
 		t.Fatalf("entity A forecast: %v", err)
 	}
 	if _, _, err := st.CreateQuotaArrangement(ctxA, store.QuotaCreate{Spec: br2212(item, site, day(2026, 11, 1), day(2026, 12, 31))}); err != nil {
@@ -137,7 +138,7 @@ func TestLegalEntityScope_PlansForecastsAndQuotas(t *testing.T) {
 	t.Run("another entity cannot take over a code or write into the model", func(t *testing.T) {
 		_, _, err := st.RunPlan(ctxB, runRequest(oneItemPlan(t), "kb", "in"))
 		requireStatus(t, err, http.StatusConflict, "entity B run of entity A's plan code")
-		_, err = st.UpsertForecastLines(ctxB, "BASE", 1, nil, []store.ForecastCellInput{cellIn(item, site, "2026-11-09", "2026-11-15", "5", "0")})
+		_, err = st.UpsertForecastLines(ctxB, "BASE", "", 1, nil, []store.ForecastCellInput{cellIn(item, site, "2026-11-09", "2026-11-15", "5", "0")})
 		requireStatus(t, err, http.StatusConflict, "entity B write to entity A's forecast model")
 		req := runRequest(oneItemPlan(t), "kc", "in")
 		req.PlanCode, req.LegalEntityID = "OTHER", entityB
@@ -170,4 +171,89 @@ func versionID(t *testing.T, admin *pgxpool.Pool) (id string) {
 		t.Fatal(err)
 	}
 	return id
+}
+
+func TestLegalEntityScope_OwnersAreDerivedOrNamed(t *testing.T) {
+	st, admin, app := setup(t)
+	entityA, entityB := ids.New(), ids.New()
+	ctxA, ctxB := scopedCtx(testkit.TenantID(1), entityA), scopedCtx(testkit.TenantID(1), entityB)
+	ctxAB := scopedCtx(testkit.TenantID(1), entityA+","+entityB)
+	all := scopedCtx(testkit.TenantID(1), "")
+	site, item := ids.New(), ids.New()
+	cell := []store.ForecastCellInput{cellIn(item, site, "2026-11-02", "2026-11-08", "5", "0")}
+
+	if _, err := st.UpsertForecastLines(ctxA, "A-MODEL", "", 0, nil, cell); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpsertForecastLines(ctxB, "B-MODEL", "", 0, nil, cell); err != nil {
+		t.Fatal(err)
+	}
+	planA := runRequest(oneItemPlan(t), "ka", "in")
+	planA.PlanCode = "A-PLAN"
+	if _, _, err := st.RunPlan(ctxA, planA); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("a plan cannot net another entity's forecast", func(t *testing.T) {
+		req := runRequest(oneItemPlan(t), "k-mismatch", "in")
+		req.PlanCode, req.ForecastModel = "A-PLAN", "B-MODEL"
+		_, _, err := st.RunPlan(ctxAB, req)
+		var p *httpx.Problem
+		if !errors.As(err, &p) || p.Code != store.CodeForecastEntity {
+			t.Fatalf("run with a foreign model = %v, want %s", err, store.CodeForecastEntity)
+		}
+		req.IdempotencyKey, req.ForecastModel = "k-match", "A-MODEL"
+		if _, _, err := st.RunPlan(ctxAB, req); err != nil {
+			t.Fatalf("run with the plan's own model: %v", err)
+		}
+	})
+
+	t.Run("a requested entity that is not the plan owner is refused", func(t *testing.T) {
+		req := runRequest(oneItemPlan(t), "k-assert", "in")
+		req.PlanCode, req.LegalEntityID = "A-PLAN", entityB
+		_, _, err := st.RunPlan(ctxAB, req)
+		requireStatus(t, err, http.StatusUnprocessableEntity, "run asserting the wrong owner")
+	})
+
+	t.Run("an all-entity caller inherits an existing owner and names a new one", func(t *testing.T) {
+		req := runRequest(oneItemPlan(t), "k-all", "in")
+		req.PlanCode = "A-PLAN"
+		if _, _, err := st.RunPlan(all, req); err != nil {
+			t.Fatalf("all-entity run of an existing plan: %v", err)
+		}
+		fresh := runRequest(oneItemPlan(t), "k-new", "in")
+		fresh.PlanCode = "NEW-PLAN"
+		_, _, err := st.RunPlan(all, fresh)
+		requireStatus(t, err, http.StatusUnprocessableEntity, "all-entity run creating a plan without an entity")
+		fresh.LegalEntityID = entityB
+		if _, _, err := st.RunPlan(all, fresh); err != nil {
+			t.Fatalf("all-entity run naming the owner: %v", err)
+		}
+		if n := countAs(t, app, ctxB, `select count(*) from plan where code = 'NEW-PLAN'`); n != 1 {
+			t.Errorf("entity B sees %d of the plans created for it, want 1", n)
+		}
+		_, err = st.UpsertForecastLines(all, "ALL-MODEL", "", 0, nil, cell)
+		requireStatus(t, err, http.StatusUnprocessableEntity, "all-entity forecast model without an entity")
+		if _, err := st.UpsertForecastLines(all, "ALL-MODEL", entityA, 0, nil, cell); err != nil {
+			t.Fatalf("all-entity forecast model naming the owner: %v", err)
+		}
+		_, _, err = st.CreateQuotaArrangement(all, store.QuotaCreate{Spec: br2212(item, site, day(2026, 11, 1), day(2026, 12, 31))})
+		requireStatus(t, err, http.StatusUnprocessableEntity, "all-entity quota without an entity")
+		if _, _, err := st.CreateQuotaArrangement(all, store.QuotaCreate{LegalEntityID: entityA, Spec: br2212(item, site, day(2026, 11, 1), day(2026, 12, 31))}); err != nil {
+			t.Fatalf("all-entity quota naming the owner: %v", err)
+		}
+	})
+
+	t.Run("a code held by an unassigned plan says so", func(t *testing.T) {
+		if _, err := admin.Exec(context.Background(), `insert into plan (tenant_id, id, code) values ($1, $2, 'UNASSIGNED')`, testkit.TenantID(1), ids.New()); err != nil {
+			t.Fatal(err)
+		}
+		req := runRequest(oneItemPlan(t), "k-legacy", "in")
+		req.PlanCode = "UNASSIGNED"
+		_, _, err := st.RunPlan(ctxA, req)
+		var p *httpx.Problem
+		if !errors.As(err, &p) || p.Code != store.CodeCodeTaken || !strings.Contains(p.Detail, "no legal entity") {
+			t.Fatalf("run of an unassigned plan code = %v", err)
+		}
+	})
 }
