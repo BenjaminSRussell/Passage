@@ -16,6 +16,7 @@ func TestRun(t *testing.T) {
 	}{
 		{"missing database url", map[string]string{}, "DATABASE_URL is required"},
 		{"unparseable database url", map[string]string{"DATABASE_URL": "://bad"}, "connect database"},
+		{"smtp enabled without credentials", map[string]string{"DATABASE_URL": "://bad", "NOTIFY_SMTP_ENABLED": "true"}, "notify config: smtp notify adapter enabled but missing smtp-host"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
