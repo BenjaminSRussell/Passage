@@ -254,3 +254,64 @@ func TestAging_MetricsCountOutcomes(t *testing.T) {
 		t.Fatalf("metrics = %s", rec.Body)
 	}
 }
+
+func groupedRows() []domain.AgingRow {
+	due := time.Date(2026, 1, 20, 0, 0, 0, 0, time.UTC)
+	return []domain.AgingRow{
+		{VendorID: "v1", VendorGroupID: "g-b", Currency: "USD", DueDate: due, OpenAmount: dec("600.00")},
+		{VendorID: "v2", VendorGroupID: "g-a", Currency: "USD", DueDate: due, OpenAmount: dec("250.25")},
+		{VendorID: "v3", VendorGroupID: "g-a", Currency: "USD", DueDate: due.AddDate(0, 0, 40), OpenAmount: dec("149.75")},
+		{VendorID: "v4", Currency: "USD", DueDate: due, OpenAmount: dec("0.50")},
+	}
+}
+
+func TestAging_ReconcileByVendorGroup(t *testing.T) {
+	l := &fakeLedger{bal: ledger.Balance{Currency: "USD", Credit: dec("1000.50")}}
+	rec := get(agingRouter(&fakeAgingStore{rows: groupedRows()}, l, ""), reconcile+"&group_by=vendorGroup", "aging.reconcile", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+	body := rec.Body.String()
+	order := []string{`"vendorGroupId":"g-a","currency":"USD","subledgerTotal":"400"`, `"vendorGroupId":"g-b","currency":"USD","subledgerTotal":"600"`, `"vendorGroupId":"UNASSIGNED","currency":"USD","subledgerTotal":"0.5"`}
+	last := -1
+	for _, want := range order {
+		i := strings.Index(body, want)
+		if i <= last {
+			t.Fatalf("vendorGroups out of order or missing %s: %s", want, body)
+		}
+		last = i
+	}
+	for _, want := range []string{`"reconciled":true`, `"difference":"0"`, `"comparable":false,"reason":"the ledger exposes one AP control balance`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body lacks %s: %s", want, body)
+		}
+	}
+}
+
+func TestAging_ReconcileWithoutGroupByOmitsVendorGroups(t *testing.T) {
+	l := &fakeLedger{bal: ledger.Balance{Currency: "USD", Credit: dec("1000.00")}}
+	rec := get(agingRouter(&fakeAgingStore{rows: groupedRows()}, l, ""), reconcile, "aging.reconcile", "")
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "vendorGroups") {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestAging_ReportRejectsVendorGroupGrouping(t *testing.T) {
+	rec := get(agingRouter(&fakeAgingStore{rows: groupedRows()}, nil, ""), agingURL+"&group_by=vendorGroup", "aging.read", "")
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "aging:reconcile") {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestAging_ReconcileByVendorGroupNeedsExplicitEntityScope(t *testing.T) {
+	r := agingRouter(&fakeAgingStore{rows: groupedRows()}, &fakeLedger{}, "")
+	for name, rec := range map[string]*httptest.ResponseRecorder{
+		"entity outside scope":    get(r, reconcile+"&group_by=vendorGroup", "aging.reconcile", entityB),
+		"unscoped names a entity": getScoped(r, reconcile+"&group_by=vendorGroup", "aging.reconcile", ""),
+		"no entity at all":        get(r, "/v1/payables/aging:reconcile?ledger="+ledgerID+"&group_by=vendorGroup", "aging.reconcile", ""),
+	} {
+		if rec.Code != http.StatusForbidden && rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: got %d %s", name, rec.Code, rec.Body)
+		}
+	}
+}
