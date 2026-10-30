@@ -27,6 +27,9 @@ const adminCards = [
     description: "Check documents in and out, track versions and apply legal holds.",
   },
   { to: "/admin/texts", title: "Standard texts", description: "Reusable text in every language you support." },
+  { to: "/admin/security/permissions", title: "Effective permissions", description: "See what a user can and cannot do." },
+  { to: "/admin/security/assignments", title: "Role assignments", description: "Assign, review and end roles." },
+  { to: "/admin/security/legal-entities", title: "Legal entities", description: "The legal entities roles can be scoped to." },
 ];
 
 export function AdminHome() {
