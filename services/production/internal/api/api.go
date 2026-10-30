@@ -56,6 +56,7 @@ const (
 	maxBOMDepth       = 12
 	maxBOMLines       = 5000
 	maxOperations     = 500
+	maxCoProducts     = 50
 	defaultPageSize   = 50
 	maxPageSize       = 200
 	readyTimeout      = 500 * time.Millisecond
@@ -201,6 +202,18 @@ type createRequest struct {
 	MinimumQty *decimal.Decimal `json:"minimumQty,omitempty"`
 	MaximumQty *decimal.Decimal `json:"maximumQty,omitempty"`
 	Multiple   *decimal.Decimal `json:"multiple,omitempty"`
+	// CoProducts are co-products and by-products the order yields besides its
+	// product (FR-21.14); omitempty keeps the request hash of a body without them.
+	CoProducts []coProductRequest `json:"coProducts,omitempty"`
+}
+
+// coProductRequest declares a co-product or by-product: the item and its planned
+// quantity per unit of the product. An empty type is a co-product.
+type coProductRequest struct {
+	LineNo string          `json:"lineNo"`
+	Type   string          `json:"type,omitempty"`
+	ItemID string          `json:"itemId"`
+	QtyPer decimal.Decimal `json:"qtyPer"`
 }
 
 // quantityRules validates the optional item order settings of a create or a
@@ -270,10 +283,19 @@ func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, problemFrom(err))
 		return
 	}
+	declared := make([]domain.CoProduct, len(req.CoProducts))
+	for i, c := range req.CoProducts {
+		declared[i] = domain.CoProduct{LineNo: c.LineNo, Type: c.Type, ItemID: c.ItemID, QtyPer: c.QtyPer}
+	}
+	coProducts, err := domain.PlanCoProducts(declared, req.Quantity)
+	if err != nil {
+		httpx.Fail(w, r, problemFrom(err))
+		return
+	}
 	order, created, err := a.store.CreateOrder(r.Context(), store.NewOrder{
 		LegalEntityID: req.LegalEntityID, ProductID: req.ProductID, SiteID: req.SiteID, WarehouseID: req.WarehouseID, ItemGroup: req.ItemGroup,
 		Currency: req.Currency, Quantity: req.Quantity, DeliveryDate: req.DeliveryDate, OriginType: req.OriginType, OriginID: req.OriginID,
-		ReworkReference: req.ReworkReference, Lines: lines, Operations: ops, EstimateOnCreate: a.cfg.EstimateOnCreate,
+		ReworkReference: req.ReworkReference, Lines: lines, Operations: ops, CoProducts: coProducts, EstimateOnCreate: a.cfg.EstimateOnCreate,
 		TraceID: middleware.GetReqID(r.Context()), IdempotencyKey: key, RequestHash: hashOf(req),
 	})
 	if err != nil {
@@ -684,6 +706,42 @@ func validateCreate(req createRequest, fields map[string]string) {
 	}
 	validateRouteSnapshot(req.Operations, fields)
 	validateBOMSnapshot(req.BOM, fields)
+	validateCoProducts(req, fields)
+}
+
+// validateCoProducts checks the declared co-products: a rework order yields none,
+// each line has a unique number, a known type, an item and a positive quantity
+// per unit, and no line yields the order's own product.
+func validateCoProducts(req createRequest, fields map[string]string) {
+	if len(req.CoProducts) == 0 {
+		return
+	}
+	if req.OriginType == domain.OriginRework {
+		fields["coProducts"] = "a rework order yields no co-products"
+		return
+	}
+	if len(req.CoProducts) > maxCoProducts {
+		fields["coProducts"] = fmt.Sprintf("at most %d co-products", maxCoProducts)
+		return
+	}
+	seen := map[string]bool{}
+	for i, c := range req.CoProducts {
+		at := fmt.Sprintf("coProducts[%d]", i)
+		if c.LineNo == "" || len(c.LineNo) > maxLineNo || seen[c.LineNo] {
+			fields[at+".lineNo"] = fmt.Sprintf("is required, at most %d characters, listed once", maxLineNo)
+		}
+		seen[c.LineNo] = true
+		if c.Type != "" && c.Type != domain.CoProductTypeCo && c.Type != domain.CoProductTypeBy {
+			fields[at+".type"] = "must be co-product or by-product"
+		}
+		switch {
+		case !ids.Valid(c.ItemID):
+			fields[at+".itemId"] = "must be a UUID"
+		case c.ItemID == req.ProductID:
+			fields[at+".itemId"] = "must not be the order's product"
+		}
+		checkQuantity(at+".qtyPer", c.QtyPer, true, fields)
+	}
 }
 
 // validateBOM checks item ids and quantities at every level. Line numbers of

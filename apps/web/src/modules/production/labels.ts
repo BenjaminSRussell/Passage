@@ -2,6 +2,7 @@ import type { BadgeTone } from "../../shell/ui";
 import type {
   BulkCommand,
   ChangeStatus,
+  CoProductType,
   OCMMode,
   CostGroup,
   EditOp,
@@ -21,6 +22,11 @@ import type {
   TriggerOperator,
   VarianceType,
 } from "./api/client";
+
+export const coProductTypeLabel: Record<CoProductType, string> = {
+  "co-product": "Co-product",
+  "by-product": "By-product",
+};
 
 export const commandLabel: Record<ProductionCommand, string> = {
   estimate: "Estimate",

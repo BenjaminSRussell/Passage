@@ -148,6 +148,8 @@ export interface ProductionOrder {
   version: number;
   lines: OrderLine[];
   operations: Operation[];
+  /** Co-products and by-products (FR-21.14); absent on an order without them. */
+  coProducts?: CoProduct[];
   costs: CostRow[];
   createdAt: string;
   updatedAt: string;
@@ -210,6 +212,31 @@ export interface OperationInput {
   scrapPct?: string;
 }
 
+/** A co-product shares the order's cost by quantity; a by-product carries none (BR-9.12). */
+export type CoProductType = "co-product" | "by-product";
+
+/** A co-product or by-product declared on a new order (FR-21.14). */
+export interface CoProductInput {
+  lineNo: string;
+  /** Defaults to co-product. */
+  type?: CoProductType;
+  itemId: string;
+  /** Planned quantity per unit of the order's product. */
+  qtyPer: string;
+}
+
+/** A declared co-product with its planned and received quantities. */
+export interface CoProduct extends CoProductInput {
+  type: CoProductType;
+  qtyPlanned: string;
+  qtyReported: string;
+}
+
+export interface CoProductReport {
+  lineNo: string;
+  quantity: string;
+}
+
 export interface CreateOrderInput {
   itemGroup?: string;
   /** Rework makes a rework order; it needs the Create rework orders duty. */
@@ -227,6 +254,8 @@ export interface CreateOrderInput {
   multiple?: string;
   bom: BOMComponentInput[];
   operations: OperationInput[];
+  /** Not allowed on a rework order. */
+  coProducts?: CoProductInput[];
 }
 
 export interface Variance {
@@ -254,8 +283,10 @@ export interface CostView {
 }
 
 export interface JournalLine {
-  kind: "issue" | "hours" | "receipt";
+  kind: "issue" | "hours" | "receipt" | "coproduct";
   lineNo?: string;
+  /** On a coproduct receipt: the order's co-product line. */
+  coProductLineNo?: string;
   operNumber?: number;
   itemId?: string;
   qty: string;
@@ -393,6 +424,8 @@ export interface CreateJournalInput {
   errorQuantity?: string;
   issues?: IssueInput[];
   hours?: HoursInput[];
+  /** Co-product receipts of a report as finished (FR-21.14). */
+  coProducts?: CoProductReport[];
 }
 
 export interface PostingProfileAccounts {

@@ -62,9 +62,11 @@ type Order struct {
 	Version          int                `json:"version"`
 	Lines            []domain.OrderLine `json:"lines"`
 	Operations       []domain.Operation `json:"operations"`
-	Costs            []domain.CostRow   `json:"costs"`
-	CreatedAt        time.Time          `json:"createdAt"`
-	UpdatedAt        time.Time          `json:"updatedAt"`
+	// CoProducts are the co-products and by-products declared on the order (FR-21.14).
+	CoProducts []domain.CoProduct `json:"coProducts"`
+	Costs      []domain.CostRow   `json:"costs"`
+	CreatedAt  time.Time          `json:"createdAt"`
+	UpdatedAt  time.Time          `json:"updatedAt"`
 }
 
 // OrderSummary is one row of the order list (PRD 4.21.14 "Production orders list").
@@ -138,6 +140,8 @@ type NewOrder struct {
 	ReworkReference *domain.ReworkRef
 	Lines           []domain.OrderLine
 	Operations      []domain.Operation
+	// CoProducts are the co-products and by-products the order yields (FR-21.14), planned.
+	CoProducts []domain.CoProduct
 	// EstimateOnCreate runs `:estimate` in the create transaction (PRD 4.21.13
 	// "Estimate on create"), so the order is created Estimated with its planned cost.
 	EstimateOnCreate bool
@@ -359,6 +363,9 @@ func insertOrder(ctx context.Context, tx pgx.Tx, tenantID, actor string, in NewO
 		return "", err
 	}
 	if err := insertOperations(ctx, tx, tenantID, id, in.Operations); err != nil {
+		return "", err
+	}
+	if err := insertCoProducts(ctx, tx, tenantID, id, in.LegalEntityID, in.CoProducts); err != nil {
 		return "", err
 	}
 	data := prodevents.OrderCreatedData{
@@ -630,6 +637,9 @@ func requantify(ctx context.Context, tx pgx.Tx, tenantID, orderID string, qty de
 	if ops, err = domain.PlanOperations(ops, qty); err != nil {
 		return domainProblem(err)
 	}
+	if err := replanCoProducts(ctx, tx, tenantID, orderID, qty); err != nil {
+		return err
+	}
 	return writeQuantities(ctx, tx, tenantID, orderID, lines, ops)
 }
 
@@ -718,7 +728,8 @@ func (s *Postgres) Transition(ctx context.Context, t Transition) (Order, bool, e
 			if err := domain.CheckReportFinished(h.quantity, h.qtyRAF, h.qtyError, t.Good, t.Error, t.RAFTolerancePct); err != nil {
 				return domainProblem(err)
 			}
-			raf := NewJournal{Type: domain.JournalReportFinished, Proposal: domain.ProposeProportional, QtyGood: t.Good, QtyError: t.Error}
+			raf := NewJournal{Type: domain.JournalReportFinished, Proposal: domain.ProposeProportional, QtyGood: t.Good, QtyError: t.Error,
+				CoProductsProportional: true}
 			if err := autoPost(ctx, tx, p.TenantID, &h, raf, t.Actor, "sys:raf:"+t.IdempotencyKey, t.RAFTolerancePct); err != nil {
 				return err
 			}
@@ -862,6 +873,9 @@ func loadOrder(ctx context.Context, q querier, tenantID, id string) (Order, erro
 		return Order{}, err
 	}
 	if o.Operations, err = loadOperations(ctx, q, tenantID, id); err != nil {
+		return Order{}, err
+	}
+	if o.CoProducts, err = loadCoProducts(ctx, q, tenantID, id); err != nil {
 		return Order{}, err
 	}
 	o.Costs, err = loadCosts(ctx, q, tenantID, id)

@@ -49,6 +49,12 @@ Slice 2:
   Cr labor and overhead absorption at the operation's rates, RAF Dr finished goods / Cr WIP at the
   planned unit cost (cumulative rounding, so receipts never drift). Amounts round to the
   currency's minor unit with `platform/go/money`.
+- Co-products and by-products (slice 12, FR-21.14): `coProducts` on order create declares items the
+  order yields besides its product (planned quantity = quantity per unit × order quantity). A report
+  as finished may carry `coProducts` receipt lines (the `:report-finished` command reports them in
+  proportion); planned cost is spread over product and co-products by quantity only, and End measures
+  earned output over the same base so WIP still clears to 0. A line typed `by-product` carries no cost
+  (BR-9.12) and is received at zero. Split and merge refuse such orders.
 - Flushing principles on BOM lines: `start` lines are issued for their remaining quantity by a
   picking list that `:start` posts; `finish` lines are consumed in proportion to each report as
   finished (AC-21.4: the full quantity consumes exactly qty per × quantity × (1 + scrap%));

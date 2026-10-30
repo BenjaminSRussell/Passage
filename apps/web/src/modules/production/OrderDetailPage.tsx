@@ -34,6 +34,7 @@ import {
   type CostView,
   type Operation,
   type OperationCommand,
+  type CoProduct,
   type OrderLine,
   type OrderSummary,
   type Problem,
@@ -52,6 +53,7 @@ import {
   addDecimals,
   amount,
   commandLabel,
+  coProductTypeLabel,
   costGroupLabel,
   dash,
   describeReference,
@@ -94,6 +96,15 @@ const lineColumns: DataTableColumn<OrderLine>[] = [
   { key: "qtyConsumed", header: "Consumed", align: "end", render: (row) => row.qtyConsumed ?? "0" },
   { key: "flushing", header: "Flushing", render: (row) => flushingLabel[row.flushing ?? "manual"] },
   { key: "unitCost", header: "Unit cost", align: "end" },
+];
+
+const coProductColumns: DataTableColumn<CoProduct>[] = [
+  { key: "lineNo", header: "Line", mono: true },
+  { key: "type", header: "Type", render: (row) => coProductTypeLabel[row.type] ?? row.type },
+  { key: "itemId", header: "Item", mono: true },
+  { key: "qtyPer", header: "Per unit", align: "end" },
+  { key: "qtyPlanned", header: "Planned", align: "end" },
+  { key: "qtyReported", header: "Received", align: "end" },
 ];
 
 const operationColumns: DataTableColumn<Operation>[] = [
@@ -552,6 +563,12 @@ export function ProductionOrderDetail({ orderId, onBack, onCreateRework, onOpenO
           empty={{ title: "No components", description: "This order consumes no material, for example a rework order." }}
         />
       </Card>
+
+      {(current.coProducts ?? []).length > 0 ? (
+        <Card title="Co-products and by-products" padded={false}>
+          <DataTable label="Order co-products" columns={coProductColumns} rows={current.coProducts ?? []} getRowKey={(row) => row.lineNo} />
+        </Card>
+      ) : null}
 
       <Card title="Route" padded={false}>
         <DataTable

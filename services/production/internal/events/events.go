@@ -142,7 +142,7 @@ type OrderStatusChangedData struct {
 }
 
 // JournalLine is one posted line of journal.posted.v1: an issue of a BOM line,
-// hours on an operation, or the finished receipt. Quantities and amounts are
+// hours on an operation, the finished receipt, or a co-product receipt. Quantities and amounts are
 // decimal strings, negative on a reversal journal.
 type JournalLine struct {
 	Kind       string  `json:"kind"`
@@ -153,6 +153,8 @@ type JournalLine struct {
 	UnitCost   string  `json:"unitCost"`
 	Amount     string  `json:"amount"`
 	Hours      *string `json:"hours"`
+	// CoProductLineNo names the co-product line of a coproduct receipt (FR-21.14).
+	CoProductLineNo *string `json:"coProductLineNo,omitempty"`
 }
 
 // Posting is one ledger line of a journal or settlement, for the general

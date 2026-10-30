@@ -94,6 +94,9 @@ func (s *Postgres) SplitOrder(ctx context.Context, in Split) (SplitResult, error
 		if err := domain.CheckSplittable(h.status); err != nil {
 			return domainProblem(err)
 		}
+		if err := checkNoCoProducts(ctx, tx, p.TenantID, in.OrderID); err != nil {
+			return err
+		}
 		lines, err := loadLines(ctx, tx, p.TenantID, in.OrderID)
 		if err != nil {
 			return err
@@ -275,6 +278,9 @@ func (s *Postgres) MergeOrders(ctx context.Context, in Merge) (MergeResult, erro
 			heads[ref.OrderID] = h
 		}
 		if err := checkMergeJournals(ctx, tx, p.TenantID, survivorID, out.Merged); err != nil {
+			return err
+		}
+		if err := checkNoCoProducts(ctx, tx, p.TenantID, append([]string{survivorID}, out.Merged...)...); err != nil {
 			return err
 		}
 		inputs := make([]domain.MergeInput, 0, len(in.Orders))

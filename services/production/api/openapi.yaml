@@ -278,6 +278,36 @@ components:
           minItems: 1
           maxItems: 500
           items: { $ref: '#/components/schemas/OperationInput' }
+        coProducts:
+          type: array
+          maxItems: 50
+          description: 'Co-products and by-products the order yields besides its product (FR-21.14). Not allowed on a rework order.'
+          items: { $ref: '#/components/schemas/CoProductInput' }
+    CoProductInput:
+      type: object
+      required: [lineNo, itemId, qtyPer]
+      additionalProperties: false
+      properties:
+        lineNo: { type: string, maxLength: 20, description: 'Unique on the order.' }
+        type: { type: string, enum: [co-product, by-product], default: co-product, description: 'A co-product takes its share of the order''s cost by quantity; a by-product carries no cost (BR-9.12) and is received at zero.' }
+        itemId: { type: string, format: uuid, description: 'Not the order''s own product.' }
+        qtyPer: { $ref: '#/components/schemas/Decimal', description: 'Planned quantity per unit of the order''s product, above zero.' }
+    CoProduct:
+      type: object
+      properties:
+        lineNo: { type: string }
+        type: { type: string, enum: [co-product, by-product] }
+        itemId: { type: string, format: uuid }
+        qtyPer: { $ref: '#/components/schemas/Decimal' }
+        qtyPlanned: { $ref: '#/components/schemas/Decimal', description: 'qtyPer times the order quantity, rounded up to 6 places; follows a quantity change.' }
+        qtyReported: { $ref: '#/components/schemas/Decimal', description: 'Received so far by posted reports as finished, net of reversals.' }
+    CoProductReport:
+      type: object
+      required: [lineNo, quantity]
+      additionalProperties: false
+      properties:
+        lineNo: { type: string, maxLength: 20, description: 'A co-product line of the order, listed once.' }
+        quantity: { $ref: '#/components/schemas/Decimal', description: 'Above zero; reported plus this may not exceed the planned quantity plus the RAF tolerance.' }
     PatchOrder:
       type: object
       additionalProperties: false
@@ -297,7 +327,8 @@ components:
       additionalProperties: false
       description: |
         Optional. `report-finished` requires `quantity` (good quantity, > 0) and accepts
-        `errorQuantity`; `reset-status` accepts `status`, an earlier status to reset to
+        `errorQuantity`, and receipts the order's co-products and by-products in proportion
+        to the good quantity (FR-21.14); `reset-status` accepts `status`, an earlier status to reset to
         (default: the previous one). Other commands take no body.
       properties:
         quantity: { $ref: '#/components/schemas/Decimal' }
@@ -332,6 +363,10 @@ components:
         operations:
           type: array
           items: { $ref: '#/components/schemas/Operation' }
+        coProducts:
+          type: array
+          description: 'Co-products and by-products of the order (FR-21.14); the planned cost is spread over the product and its co-products by quantity, by-products carry none.'
+          items: { $ref: '#/components/schemas/CoProduct' }
         costs:
           type: array
           items: { $ref: '#/components/schemas/CostRow' }
@@ -441,11 +476,17 @@ components:
           type: array
           maxItems: 5000
           items: { $ref: '#/components/schemas/HoursInput' }
+        coProducts:
+          type: array
+          maxItems: 50
+          description: 'Co-product and by-product receipts of a report as finished (FR-21.14): a co-product is valued at the planned unit cost by quantity, a by-product at zero. Without them a journal receipts none; the `:report-finished` command reports every line in proportion.'
+          items: { $ref: '#/components/schemas/CoProductReport' }
     JournalLine:
       type: object
       properties:
-        kind: { type: string, enum: [issue, hours, receipt] }
+        kind: { type: string, enum: [issue, hours, receipt, coproduct] }
         lineNo: { type: string }
+        coProductLineNo: { type: string, description: 'The order''s co-product line of a coproduct receipt.' }
         operNumber: { type: integer }
         itemId: { type: string, format: uuid }
         qty: { $ref: '#/components/schemas/Decimal', description: 'Issued quantity, hours, or received good quantity; negative on a reversal.' }
@@ -1081,6 +1122,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { description: PRODUCTION_ORDER_NOT_FOUND, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: 'PRODUCTION_COPRODUCT_NOT_SUPPORTED: an order has co-products (FR-21.14)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: 'An order version is stale (conflict_version)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: 'PRODUCTION_MERGE_REFUSED (PROD-0016) or idempotency_key_reuse', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/production/orders/{id}:
@@ -1279,7 +1321,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { description: PRODUCTION_ORDER_NOT_FOUND, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '409': { description: 'PRODUCTION_ILLEGAL_TRANSITION: the order is not Created to Started; PRODUCTION_SPLIT_REFUSED: a Started order has reported output, draft journals or as-built records', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: 'PRODUCTION_ILLEGAL_TRANSITION: the order is not Created to Started; PRODUCTION_COPRODUCT_NOT_SUPPORTED: the order has co-products; PRODUCTION_SPLIT_REFUSED: a Started order has reported output, draft journals or as-built records', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: conflict_version, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '422': { description: 'PRODUCTION_SPLIT_QUANTITY (PROD-0015) or idempotency_key_reuse', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: precondition_required, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
@@ -1396,7 +1438,7 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { description: 'PRODUCTION_JOURNAL_NOT_FOUND, PRODUCTION_UNKNOWN_ACTION', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '409': { description: 'PRODUCTION_JOURNAL_ALREADY_POSTED, PRODUCTION_JOURNAL_NOT_ALLOWED, PRODUCTION_OPERATION_FINISHED', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: 'PRODUCTION_OVER_CONSUMPTION (PROD-0007), PRODUCTION_RAF_EXCEEDS_REMAINING (PROD-0008), PRODUCTION_POSTING_DATE_BEFORE_ORDER (BR-21.3), PRODUCTION_POSTING_PROFILE_MISSING, PRODUCTION_INVALID_JOURNAL_LINE, idempotency_key_reuse', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'PRODUCTION_OVER_CONSUMPTION (PROD-0007), PRODUCTION_RAF_EXCEEDS_REMAINING (PROD-0008), PRODUCTION_COPRODUCT_EXCEEDS_PLANNED (FR-21.14), PRODUCTION_POSTING_DATE_BEFORE_ORDER (BR-21.3), PRODUCTION_POSTING_PROFILE_MISSING, PRODUCTION_INVALID_JOURNAL_LINE, idempotency_key_reuse', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/production/posting-profiles:
     get:
       operationId: listProductionPostingProfiles

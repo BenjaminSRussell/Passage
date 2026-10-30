@@ -457,8 +457,9 @@ components:
       type: object
       required: [kind, lineNo, operNumber, itemId, qty, unitCost, amount, hours]
       properties:
-        kind: { type: string, enum: [issue, hours, receipt] }
+        kind: { type: string, enum: [issue, hours, receipt, coproduct] }
         lineNo: { type: [string, 'null'] }
+        coProductLineNo: { type: [string, 'null'], description: 'The order''s co-product line of a coproduct receipt (FR-21.14); absent on other lines.' }
         operNumber: { type: [integer, 'null'] }
         itemId: { type: [string, 'null'], format: uuid }
         qty: { type: string }
