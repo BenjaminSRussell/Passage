@@ -10,6 +10,7 @@ import {
   describeProblem,
   listTracking,
   recordTracking,
+  unpackContainer,
   TRACKING_STATUSES,
   type Container,
   type Problem,
@@ -299,6 +300,58 @@ export function LabelButton({ shipmentId, container, onLoaded }: { shipmentId: s
     <Button size="sm" variant="ghost" loading={busy} onClick={load} aria-label={`ZPL label ${container.sscc}`}>
       ZPL label
     </Button>
+  );
+}
+
+const UNPACKABLE: Shipment["status"][] = ["PICKING", "PICKED", "PACKED"];
+
+/** A CLOSED container of a shipment that has not posted it yet can be taken apart. */
+export function canUnpack(shipment: Shipment, container: Container): boolean {
+  return UNPACKABLE.includes(shipment.status) && container.status === "CLOSED";
+}
+
+/** Unpack button with an inline confirmation; the service re-checks the rule. */
+export function UnpackButton({ shipment, container, onDone }: { shipment: Shipment; container: Container; onDone(): void }) {
+  const [confirming, setConfirming] = useState(false);
+  const [failure, setFailure] = useState<Problem | null>(null);
+  const [busy, setBusy] = useState(false);
+  const key = useCommandKey();
+
+  async function unpack() {
+    setBusy(true);
+    setFailure(null);
+    try {
+      await unpackContainer(shipment.id, container.id, shipment.version, key.current());
+      key.renew();
+      onDone();
+    } catch (error) {
+      const problem = explain(describeProblem(error));
+      setFailure(problem);
+      if (problem.code === "idempotency_key_reuse") key.renew();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!confirming) {
+    return (
+      <Button size="sm" variant="ghost" onClick={() => setConfirming(true)} aria-label={`Unpack ${container.sscc}`}>
+        Unpack
+      </Button>
+    );
+  }
+  return (
+    <span className={styles.stack}>
+      <span className={styles.actions}>
+        <Button size="sm" variant="danger" loading={busy} onClick={unpack} aria-label={`Confirm unpack ${container.sscc}`}>
+          Unpack it
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => setConfirming(false)}>
+          Keep it
+        </Button>
+      </span>
+      <ProblemAlert title="Could not unpack the container" problem={failure} />
+    </span>
   );
 }
 

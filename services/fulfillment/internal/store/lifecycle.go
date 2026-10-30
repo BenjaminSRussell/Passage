@@ -2,10 +2,12 @@ package store
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/domain"
 	fulevents "github.com/BenjaminSRussell/passage/services/fulfillment/internal/events"
@@ -41,6 +43,68 @@ func (s *Postgres) CancelShipment(ctx context.Context, id string, version int, i
 			}
 			return sh, enqueue(ctx, tx, sh.ID, fulevents.ShipmentCancelled, p.TenantID, fulevents.ShipmentCancelledData{
 				ShipmentID: sh.ID, ShipmentNumber: sh.ShipmentNumber, OrderID: sh.OrderID, WarehouseID: sh.WarehouseID, Lines: refs,
+			})
+		})
+		out = res
+		return err
+	})
+	return out, err
+}
+
+// UnpackContainer takes a CLOSED container apart before it ships. The packed
+// quantities of its lines return to the unpacked pool, a PACKED shipment goes
+// back to PICKED (so it can be repacked or, once empty, cancelled) and
+// container.unpacked tells consumers the SSCC is void. The container row stays
+// with status UNPACKED so the SSCC is never issued again (BR-28.5).
+func (s *Postgres) UnpackContainer(ctx context.Context, id string, version int, containerID string, idem Idem) (Shipment, error) {
+	p, _ := tenant.FromContext(ctx)
+	var out Shipment
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		res, err := runIdempotent(ctx, tx, p.TenantID, idem, func() (Shipment, error) {
+			sh, err := loadShipment(ctx, tx, id)
+			if err != nil {
+				return sh, err
+			}
+			if err := checkVersion(sh, version); err != nil {
+				return sh, err
+			}
+			idx := -1
+			for i, c := range sh.Containers {
+				if c.ID == containerID {
+					idx = i
+				}
+			}
+			if idx < 0 {
+				return sh, httpx.NewProblem(http.StatusNotFound, CodeContainerNotFound, "container not found on this shipment")
+			}
+			cont := sh.Containers[idx]
+			next, err := domain.UnpackContainer(sh.Status, cont.Status)
+			if err != nil {
+				return sh, mapDomain(err)
+			}
+			// Bump the shipment first: a concurrent command on the same version
+			// then waits on the shipment row and fails the version check (412)
+			// instead of unpacking the container a second time.
+			if err := bumpShipment(ctx, tx, p.TenantID, &sh, next); err != nil {
+				return sh, err
+			}
+			if _, err := tx.Exec(ctx, `update container set status = 'UNPACKED', unpacked_at = now() where tenant_id = $1 and id = $2 and status = 'CLOSED'`,
+				p.TenantID, cont.ID); err != nil {
+				return sh, err
+			}
+			refs := []fulevents.LineRef{}
+			for _, cl := range cont.Lines {
+				if _, err := tx.Exec(ctx, `update shipment_line set qty_packed = qty_packed - $3 where tenant_id = $1 and id = $2`,
+					p.TenantID, cl.ShipmentLineID, cl.Qty); err != nil {
+					return sh, err
+				}
+				li := lineIndex(sh, cl.ShipmentLineID)
+				sh.Lines[li].Packed = sh.Lines[li].Packed.Sub(cl.Qty)
+				refs = append(refs, fulevents.LineRef{OrderLineID: sh.Lines[li].OrderLineID, Qty: cl.Qty.String()})
+			}
+			sh.Containers = append(sh.Containers[:idx], sh.Containers[idx+1:]...)
+			return sh, enqueue(ctx, tx, sh.ID, fulevents.ContainerUnpacked, p.TenantID, fulevents.ContainerUnpackedData{
+				ShipmentID: sh.ID, ShipmentNumber: sh.ShipmentNumber, ContainerID: cont.ID, SSCC: cont.SSCC, Lines: refs,
 			})
 		})
 		out = res

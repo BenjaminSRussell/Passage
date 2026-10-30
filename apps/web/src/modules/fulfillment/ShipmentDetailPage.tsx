@@ -6,7 +6,7 @@ import { ShipmentStatusBadge, SlipStatusBadge } from "./badges";
 import { dash, formatDate, formatDateTime, formatMoney, shortId, subtractDecimal } from "./format";
 import styles from "./pages.module.css";
 import { AutoPackForm, PackForm, PickForm, PostForm } from "./ShipmentActions";
-import { canCancelShipment, canCloseRemainder, CancelShipmentPanel, CloseRemainderPanel, LabelButton, LabelPanel, TrackingCard } from "./ShipmentTracking";
+import { canCancelShipment, canCloseRemainder, CancelShipmentPanel, CloseRemainderPanel, canUnpack, LabelButton, LabelPanel, TrackingCard, UnpackButton } from "./ShipmentTracking";
 import { useLoad } from "./useLoad";
 
 interface Detail {
@@ -154,7 +154,10 @@ export function ShipmentDetailPage() {
         <DataTable
           label="Containers"
           columns={containerColumns(shipment.lines, (row) => (
-            <LabelButton shipmentId={shipment.id} container={row} onLoaded={(sscc, loaded) => setLabel({ sscc, label: loaded })} />
+            <span className={styles.actions}>
+              <LabelButton shipmentId={shipment.id} container={row} onLoaded={(sscc, loaded) => setLabel({ sscc, label: loaded })} />
+              {canUnpack(shipment, row) ? <UnpackButton key={`unpack-${shipment.version}-${row.id}`} shipment={shipment} container={row} onDone={state.reload} /> : null}
+            </span>
           ))}
           rows={shipment.containers}
           getRowKey={(row) => row.id}

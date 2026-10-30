@@ -172,3 +172,30 @@ func TestCloseRemainderRules(t *testing.T) {
 		})
 	}
 }
+
+func TestUnpackContainerRules(t *testing.T) {
+	cases := []struct {
+		name      string
+		from      ShipmentStatus
+		container string
+		want      ShipmentStatus
+		err       bool
+	}{
+		{"packed goes back to picked", StatusPacked, "CLOSED", StatusPicked, false},
+		{"picked stays picked", StatusPicked, "CLOSED", StatusPicked, false},
+		{"picking stays picking", StatusPicking, "CLOSED", StatusPicking, false},
+		{"shipped container", StatusPacked, "SHIPPED", StatusPacked, true},
+		{"unpacked container", StatusPacked, "UNPACKED", StatusPacked, true},
+		{"shipped shipment", StatusShipped, "CLOSED", StatusShipped, true},
+		{"cancelled shipment", StatusCancelled, "CLOSED", StatusCancelled, true},
+	}
+	for _, c := range cases {
+		got, err := UnpackContainer(c.from, c.container)
+		if c.err != (err != nil) || got != c.want {
+			t.Errorf("%s: got %s, %v; want %s err=%v", c.name, got, err, c.want, c.err)
+		}
+		if c.err && !errors.Is(err, ErrInvalidMove) {
+			t.Errorf("%s: %v is not FUL-0021", c.name, err)
+		}
+	}
+}

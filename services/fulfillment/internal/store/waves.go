@@ -23,6 +23,7 @@ import (
 type WorkbenchStore interface {
 	CancelShipment(ctx context.Context, id string, version int, idem Idem) (Shipment, error)
 	CloseRemainder(ctx context.Context, id string, version int, idem Idem) (Shipment, error)
+	UnpackContainer(ctx context.Context, id string, version int, containerID string, idem Idem) (Shipment, error)
 	PreviewWaves(ctx context.Context, req WaveRequest) ([]WavePlan, error)
 	CreateWaves(ctx context.Context, req WaveRequest, idem Idem) ([]Wave, error)
 	ListWaves(ctx context.Context, f WaveFilter) ([]WaveSummary, error)

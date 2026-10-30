@@ -41,6 +41,11 @@ channels:
     messages:
       shipmentClosed:
         $ref: "#/components/messages/ShipmentClosed"
+  containerUnpacked:
+    address: passage.fulfillment.container
+    messages:
+      containerUnpacked:
+        $ref: "#/components/messages/ContainerUnpacked"
   waveCreated:
     address: passage.fulfillment.wave
     messages:
@@ -87,6 +92,11 @@ operations:
     channel: { $ref: "#/channels/shipmentClosed" }
     messages:
       - $ref: "#/channels/shipmentClosed/messages/shipmentClosed"
+  publishContainerUnpacked:
+    action: send
+    channel: { $ref: "#/channels/containerUnpacked" }
+    messages:
+      - $ref: "#/channels/containerUnpacked/messages/containerUnpacked"
   publishWaveCreated:
     action: send
     channel: { $ref: "#/channels/waveCreated" }
@@ -254,6 +264,30 @@ components:
                 order_line_id: { type: string, format: uuid }
                 qty: { type: string, description: The planned quantity that will not ship. }
                 picked_unpacked: { type: string, description: The part of qty that was picked but never packed and goes back to stock. }
+    ContainerUnpacked:
+      name: dev.passage.fulfillment.container.unpacked.v1
+      title: Container unpacked
+      summary: >
+        A CLOSED container was taken apart before it shipped. Its SSCC stays issued
+        and is never reused; the line quantities return to the unpacked pool of the
+        shipment, which goes back to PICKED when it had been PACKED.
+      contentType: application/json
+      payload:
+        type: object
+        required: [shipment_id, shipment_number, container_id, sscc, lines]
+        properties:
+          shipment_id: { type: string, format: uuid }
+          shipment_number: { type: string }
+          container_id: { type: string, format: uuid }
+          sscc: { type: string, description: The 18-digit SSCC of the unpacked container. }
+          lines:
+            type: array
+            items:
+              type: object
+              required: [order_line_id, qty]
+              properties:
+                order_line_id: { type: string, format: uuid }
+                qty: { type: string, description: The quantity that was in the container. }
     WaveCreated:
       name: dev.passage.fulfillment.wave.created.v1
       summary: >

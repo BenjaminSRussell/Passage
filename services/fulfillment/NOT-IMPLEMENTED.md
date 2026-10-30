@@ -98,6 +98,24 @@ Everything listed below is missing. Each row gives a status and a reason.
 Status is `later slice of PSG-28` (same service, next slice) or `handoff`
 (needs another wave, the kernel, or a path outside this wave's ownership).
 
+Slice 8 adds unpacking (BR-28.6): `POST /shipments/{id}/containers/{cid}:unpack`
+(`WarehousePack`, `If-Match` and `Idempotency-Key`) takes a CLOSED container apart
+while the shipment is PICKING, PICKED or PACKED. The container's packed quantities
+return to the unpacked pool, a PACKED shipment goes back to PICKED (repack, or
+cancel once it holds no container), the container row stays with status
+`UNPACKED` (migration 0009) so its SSCC is never issued again and still shows in
+the SSCC register, and `dev.passage.fulfillment.container.unpacked.v1` is
+written through the outbox. A container on a posted slip (SHIPPED) is refused
+with FUL-0021, including the shipped container of a partially shipped shipment
+whose remainder was repacked. The shipment version is bumped before the container
+and lines change, so two concurrent unpacks of one container give one success and
+one 412. Store tests against Postgres cover repack with a fresh SSCC, cancel after
+unpacking everything, the partial-shipment case, the concurrent unpack, the
+replay, tenant and legal-entity scope. The shipment detail drops unpacked
+containers and has an Unpack button per closed container with a confirmation; the
+SSCC register shows them as "Unpacked".
+The OpenAPI and AsyncAPI have zero FAIL lines on the doc gates.
+
 ## Important gaps (read first)
 
 | Item | Status | Reason |
@@ -204,7 +222,7 @@ slips to 5); the comparison with the ledger's GL 1405 is a handoff to ledger.
 | SSCC sequence check (nightly 00:30, alert on duplicates or check-digit failures) | later slice of PSG-28 | No scheduler is wired in this service. The database refuses duplicates and the label endpoint checks the check digit (FUL-0007). |
 | Period check (FUL-0002), negative on-hand (FUL-0003), tolerance (FUL-0005), tracking dims (FUL-0006) on post | later slice of PSG-28 | Period control is wave 14. Negative on-hand is wave 16. |
 | Consolidation (BR-28.8, FUL-0011, `consolidation_enabled`, flag `fulfillment.consolidation`) | later slice of PSG-28 | A shipment holds one order (`order_id`), has no delivery address, and the order's `ship_separately` flag is not read from sales (wave 27). Consolidating needs multi-order shipments, the address on the shipment and the flag, so the FUL-0011 check is not built until release can use it. |
-| Shipment cancel of a packed shipment | later slice of PSG-28 | `POST /shipments/{id}:cancel` (slice 3) cancels from OPEN to PACKED while nothing has shipped and the shipment holds no container. Unpacking containers is not built, so a shipment with containers cannot cancel (FUL-0021). |
+| Shipment cancel of a packed shipment | built (unpack first, slice 8) | `POST /shipments/{id}:cancel` (slice 3) cancels from OPEN to PACKED while nothing has shipped and the shipment holds no container. A shipment with containers cannot cancel (FUL-0021) until they are unpacked one by one (slice 8, `:unpack`). |
 | DNI report (FR-28.12) | built | `GET /delivered-not-invoiced` (`WarehouseView`) and the web screen. It is computed from the slip journals on read, not from a stored projection. |
 | DNI daily reconciliation job (02:00, `dni_check_time`), the "GL 1405 diff" column and the DNI diff alert | handoff to ledger (wave 11) and later slice of PSG-28 | The diff needs the ledger's GL 1405 balance per legal entity; the ledger client is a kernel item not yet built. No scheduler is wired in this service. |
 | DNI report is per packing slip, not per slip line (section 5.28.14 lists "slip, line, qty, cost") | deviation | The 1405 balance is posted per slip; lines with quantities are on the packing slip detail the row opens. |

@@ -291,6 +291,57 @@ describe("shipment detail, slice 3", () => {
     expect(screen.queryByRole("button", { name: "Close remainder" })).toBeNull();
   });
 
+  it("unpacks a closed container after confirmation, then the shipment can be cancelled", async () => {
+    const container: Shipment["containers"][number] = { id: CONTAINER, containerType: "PALLET", sscc: "106141411234567897", status: "CLOSED", tareKg: "25", grossKg: "25", returnable: true, packagingMaterial: null, packingSlipId: null, lines: [{ shipmentLineId: LINE, qty: "100" }] };
+    let current = shipment("PACKED", { qtyPicked: "100", qtyPacked: "100", pickConfirmed: true });
+    current.containers = [container];
+    serveShipment(() => current);
+    const base = server.handler;
+    server.handler = (url, init) => {
+      if (init.method === "POST" && url.pathname.endsWith(`/containers/${CONTAINER}:unpack`)) {
+        current = shipment("PICKED", { qtyPicked: "100", qtyPacked: "0", pickConfirmed: true }, 4);
+        return json(200, current);
+      }
+      return base(url, init);
+    };
+    renderAt(`/fulfillment/shipments/${SH}`);
+    expect(screen.queryByRole("button", { name: "Cancel shipment" })).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: "Unpack 106141411234567897" }));
+    expect(posts(":unpack")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Confirm unpack 106141411234567897" }));
+    expect(await screen.findByRole("button", { name: "Cancel shipment" })).toBeInTheDocument();
+    const call = posts(":unpack")[0];
+    expect(header(call, "If-Match")).toBe('"3"');
+    expect(idempotencyKey(call)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Unpack 106141411234567897" })).toBeNull();
+  });
+
+  it("shows the service refusal when a container cannot be unpacked", async () => {
+    const packed = shipment("PACKED", { qtyPicked: "100", qtyPacked: "100", pickConfirmed: true });
+    packed.containers = [{ id: CONTAINER, containerType: "PALLET", sscc: "106141411234567897", status: "CLOSED", tareKg: "25", grossKg: "25", returnable: true, packagingMaterial: null, packingSlipId: null, lines: [{ shipmentLineId: LINE, qty: "100" }] }];
+    serveShipment(() => packed);
+    const base = server.handler;
+    server.handler = (url, init) => {
+      if (init.method === "POST" && url.pathname.endsWith(":unpack")) {
+        return json(409, { type: "about:blank", title: "Conflict", status: 409, code: "FUL-0021", detail: "FUL-0021: only a CLOSED container can be unpacked" });
+      }
+      return base(url, init);
+    };
+    renderAt(`/fulfillment/shipments/${SH}`);
+    fireEvent.click(await screen.findByRole("button", { name: "Unpack 106141411234567897" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm unpack 106141411234567897" }));
+    expect(await screen.findByText("Could not unpack the container")).toBeInTheDocument();
+  });
+
+  it("offers no unpack for a shipped container", async () => {
+    const done = shipment("PARTIALLY_SHIPPED", { qtyPicked: "50", qtyPacked: "50", qtyShipped: "50", pickConfirmed: true });
+    done.containers = [{ id: CONTAINER, containerType: "PALLET", sscc: "106141411234567897", status: "SHIPPED", tareKg: "25", grossKg: "25", returnable: true, packagingMaterial: null, packingSlipId: ID, lines: [{ shipmentLineId: LINE, qty: "50" }] }];
+    serveShipment(() => done);
+    renderAt(`/fulfillment/shipments/${SH}`);
+    await findTable({ name: "Containers" });
+    expect(screen.queryByRole("button", { name: /^Unpack/ })).toBeNull();
+  });
+
   it("offers no cancel once a container is packed", async () => {
     const packed = shipment("PACKED", { qtyPicked: "100", qtyPacked: "100", pickConfirmed: true });
     packed.containers = [{ id: CONTAINER, containerType: "PALLET", sscc: "106141411234567897", status: "CLOSED", tareKg: "25", grossKg: "25", returnable: true, packagingMaterial: null, packingSlipId: null, lines: [{ shipmentLineId: LINE, qty: "100" }] }];

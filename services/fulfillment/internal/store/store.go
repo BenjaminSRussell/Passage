@@ -669,7 +669,7 @@ func loadShipment(ctx context.Context, tx pgx.Tx, id string) (Shipment, error) {
 
 func loadContainers(ctx context.Context, tx pgx.Tx, shipmentID string) ([]Container, error) {
 	rows, err := tx.Query(ctx, `select id, container_type, sscc, status, tare_weight_kg::text, gross_weight_kg::text, returnable, packaging_material_code, packing_slip_id
-		from container where shipment_id = $1 order by sscc`, shipmentID)
+		from container where shipment_id = $1 and status <> 'UNPACKED' order by sscc`, shipmentID)
 	if err != nil {
 		return nil, err
 	}

@@ -33,7 +33,7 @@ const calls = () => server.calls.filter((c) => c.url.pathname === PATH);
 
 describe("SSCC register", () => {
   it("lists the register on open with status and the no-reuse date", async () => {
-    server.handler = (url) => (url.pathname === PATH ? json(200, { items: [row("006141410123456789"), row("006141410123456796", "CLOSED")] } satisfies SsccPage) : undefined);
+    server.handler = (url) => (url.pathname === PATH ? json(200, { items: [row("006141410123456789"), row("006141410123456796", "CLOSED"), row("006141410123456802", "UNPACKED")] } satisfies SsccPage) : undefined);
     const { container } = renderAt("/fulfillment/sscc-register");
     expect(screen.getByRole("table", { name: "SSCC register" })).toHaveAttribute("aria-busy", "true");
 
@@ -42,6 +42,7 @@ describe("SSCC register", () => {
     const cells = Array.from(first?.querySelectorAll("td, th") ?? []).map((cell) => cell.textContent);
     expect(cells).toEqual(["006141410123456789", "Shipped", "CARTON-C12", "SH-0000007", "0195f0a0", "2026-10-21 14:05 UTC", "2027-10-21"]);
     expect(within(table).getByText("Closed")).toBeInTheDocument();
+    expect(within(table).getByText("Unpacked")).toBeInTheDocument();
     expect(within(first as HTMLElement).getByRole("link", { name: "SH-0000007" })).toHaveAttribute("href", `/fulfillment/shipments/${SHIPMENT}`);
     expect(calls()[0].url.searchParams.get("limit")).toBe(String(SSCC_PAGE));
     expect(calls()[0].url.searchParams.has("cursor")).toBe(false);

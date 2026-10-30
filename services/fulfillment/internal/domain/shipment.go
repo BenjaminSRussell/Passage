@@ -42,7 +42,8 @@ var transitions = map[ShipmentStatus][]ShipmentStatus{
 	StatusReleased: {StatusPicking, StatusCancelled},
 	StatusPicking:  {StatusPicked, StatusCancelled},
 	StatusPicked:   {StatusPacked, StatusCancelled},
-	StatusPacked:   {StatusShipped, StatusPartiallyShipped, StatusCancelled},
+	// Unpacking a container takes a PACKED shipment back to PICKED.
+	StatusPacked: {StatusShipped, StatusPartiallyShipped, StatusPicked, StatusCancelled},
 	// A partial shipment re-enters picking for the remaining schedule
 	// quantity (FR-28.8), or returns to PACKED when its slip is cancelled.
 	StatusPartiallyShipped: {StatusPicking, StatusPacked},
@@ -112,8 +113,7 @@ func PostTarget(lines []LineQty) ShipmentStatus {
 }
 
 // CancelShipment applies BR-28.6: a shipment cancels only before anything ships
-// and only while it holds no container (unpack first is not built, so a packed
-// shipment cannot cancel). It returns the status after cancelling.
+// and only while it holds no container (unpack the containers first). It returns the status after cancelling.
 func CancelShipment(from ShipmentStatus, lines []LineQty, containers int) (ShipmentStatus, error) {
 	if from == StatusCancelled {
 		return from, fmt.Errorf("%w: shipment is already cancelled", ErrInvalidMove)
@@ -217,4 +217,27 @@ func Backorder(status ShipmentStatus, planned, picked decimal.Decimal) (remainde
 		remainder = decimal.Zero
 	}
 	return remainder, remainder.IsPositive() && status != StatusCancelled
+}
+
+// ErrContainerNotUnpackable rejects unpacking a container that already left
+// on a packing slip or was unpacked before.
+var ErrContainerNotUnpackable = fmt.Errorf("%w: only a CLOSED container can be unpacked", ErrInvalidMove)
+
+// UnpackContainer applies the unpack rule: a CLOSED container of a shipment
+// that is PICKING, PICKED or PACKED is taken apart and its quantities return
+// to the unpacked pool. A PACKED shipment is no longer fully packed and goes
+// back to PICKED. It returns the shipment status after unpacking.
+func UnpackContainer(from ShipmentStatus, containerStatus string) (ShipmentStatus, error) {
+	switch from {
+	case StatusPicking, StatusPicked, StatusPacked:
+	default:
+		return from, fmt.Errorf("%w: a %s shipment has no containers to unpack", ErrInvalidMove, from)
+	}
+	if containerStatus != "CLOSED" {
+		return from, fmt.Errorf("%w (container is %s)", ErrContainerNotUnpackable, containerStatus)
+	}
+	if from == StatusPacked {
+		return StatusPicked, nil
+	}
+	return from, nil
 }

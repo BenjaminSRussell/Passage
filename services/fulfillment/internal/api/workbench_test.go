@@ -40,6 +40,14 @@ func (f *fakeStore) CloseRemainder(_ context.Context, id string, version int, id
 	return store.Shipment{ID: id, Version: 4, Status: domain.StatusShipped}, nil
 }
 
+func (f *fakeStore) UnpackContainer(_ context.Context, id string, version int, _ string, idem store.Idem) (store.Shipment, error) {
+	f.lastIdem = idem
+	if version != 3 {
+		return store.Shipment{}, httpx.NewProblem(http.StatusPreconditionFailed, store.CodeVersion, "shipment version changed")
+	}
+	return store.Shipment{ID: id, Version: 4, Status: domain.StatusPicked}, nil
+}
+
 func (f *fakeStore) PreviewWaves(_ context.Context, req store.WaveRequest) ([]store.WavePlan, error) {
 	f.workbench.waveReq = req
 	return []store.WavePlan{
@@ -124,6 +132,32 @@ func TestCloseRemainder_RequiresKeyVersionAndDuty(t *testing.T) {
 	rec = do(t, h, http.MethodPost, path, "", map[string]string{"Idempotency-Key": "r-4", "If-Match": `"3"`, "X-Passage-Duties": "WarehousePick"})
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("picker close: status = %d, want 403", rec.Code)
+	}
+}
+
+func TestUnpackContainer_RequiresKeyVersionAndDuty(t *testing.T) {
+	h := newServer(t, &fakeStore{})
+	path := "/v1/fulfillment/shipments/" + ids.New() + "/containers/" + ids.New() + ":unpack"
+	if rec := do(t, h, http.MethodPost, path, "", map[string]string{"Idempotency-Key": "u-1"}); rec.Code != http.StatusPreconditionRequired {
+		t.Fatalf("no If-Match: status = %d, want 428", rec.Code)
+	}
+	if rec := do(t, h, http.MethodPost, path, "", map[string]string{"If-Match": `"3"`}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("no key: status = %d, want 400", rec.Code)
+	}
+	if rec := do(t, h, http.MethodPost, path, "", map[string]string{"Idempotency-Key": "u-2", "If-Match": `"2"`}); rec.Code != http.StatusPreconditionFailed {
+		t.Fatalf("stale version: status = %d, want 412", rec.Code)
+	}
+	rec := do(t, h, http.MethodPost, path, "", map[string]string{"Idempotency-Key": "u-3", "If-Match": `"3"`})
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"PICKED"`) || rec.Header().Get("ETag") != `"4"` {
+		t.Fatalf("status = %d etag = %q body = %s", rec.Code, rec.Header().Get("ETag"), rec.Body.String())
+	}
+	bad := "/v1/fulfillment/shipments/" + ids.New() + "/containers/not-a-uuid:unpack"
+	if rec := do(t, h, http.MethodPost, bad, "", map[string]string{"Idempotency-Key": "u-4", "If-Match": `"3"`}); rec.Code != http.StatusNotFound {
+		t.Fatalf("bad container id: status = %d, want 404", rec.Code)
+	}
+	rec = do(t, h, http.MethodPost, path, "", map[string]string{"Idempotency-Key": "u-5", "If-Match": `"3"`, "X-Passage-Duties": "WarehousePick"})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("picker unpack: status = %d, want 403", rec.Code)
 	}
 }
 

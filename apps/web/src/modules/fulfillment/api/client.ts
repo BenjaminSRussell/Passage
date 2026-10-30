@@ -162,7 +162,8 @@ export interface DniReport {
   lines: DniLine[];
 }
 
-export type ContainerStatus = "OPEN" | "CLOSED" | "SHIPPED";
+/** UNPACKED containers were taken apart before shipping; only the SSCC register lists them. */
+export type ContainerStatus = "OPEN" | "CLOSED" | "SHIPPED" | "UNPACKED";
 
 /** One issued SSCC in the register (section 5.28.14, BR-28.5). */
 export interface SsccRow {
@@ -512,6 +513,11 @@ export function cancelPackingSlip(id: string, key: string): Promise<PackingSlip>
 /** Cancels a shipment that shipped nothing and holds no container (BR-28.6). */
 export function cancelShipment(id: string, version: number, key: string): Promise<Shipment> {
   return command<Shipment>(`${shipmentPath(id)}:cancel`, undefined, key, version);
+}
+
+/** Takes a CLOSED container apart before it ships; a PACKED shipment goes back to PICKED. */
+export function unpackContainer(shipmentId: string, containerId: string, version: number, key: string): Promise<Shipment> {
+  return command<Shipment>(`${shipmentPath(shipmentId)}/containers/${encodeURIComponent(containerId)}:unpack`, undefined, key, version);
 }
 
 /** Closes the open remainder of a partially shipped shipment at what shipped (FR-28.8, CANCEL_REMAINDER). */

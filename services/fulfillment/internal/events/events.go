@@ -16,6 +16,7 @@ var (
 	PackingSlipCancelled = events.Type(Context, "packingslip", "cancelled", 1)
 	ShipmentCancelled    = events.Type(Context, "shipment", "cancelled", 1)
 	ShipmentClosed       = events.Type(Context, "shipment", "closed", 1)
+	ContainerUnpacked    = events.Type(Context, "container", "unpacked", 1)
 	WaveCreated          = events.Type(Context, "wave", "created", 1)
 	ASNIssued            = events.Type(Context, "asn", "issued", 1)
 	TrackingUpdated      = events.Type(Context, "tracking", "updated", 1)
@@ -25,7 +26,7 @@ var (
 func All() []string {
 	return []string{
 		ShipmentReleased, PickConfirmed, PackingSlipPosted, PackingSlipCancelled,
-		ShipmentCancelled, ShipmentClosed, WaveCreated, ASNIssued, TrackingUpdated,
+		ShipmentCancelled, ShipmentClosed, ContainerUnpacked, WaveCreated, ASNIssued, TrackingUpdated,
 	}
 }
 
@@ -37,6 +38,17 @@ type ShipmentCancelledData struct {
 	ShipmentNumber string    `json:"shipment_number"`
 	OrderID        string    `json:"order_id"`
 	WarehouseID    string    `json:"warehouse"`
+	Lines          []LineRef `json:"lines"`
+}
+
+// ContainerUnpackedData is published when a CLOSED container is taken apart
+// before it ships: its SSCC stays issued (never reused) and Lines are the
+// quantities that return to the unpacked pool of the shipment.
+type ContainerUnpackedData struct {
+	ShipmentID     string    `json:"shipment_id"`
+	ShipmentNumber string    `json:"shipment_number"`
+	ContainerID    string    `json:"container_id"`
+	SSCC           string    `json:"sscc"`
 	Lines          []LineRef `json:"lines"`
 }
 
