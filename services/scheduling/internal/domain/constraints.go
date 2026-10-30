@@ -255,9 +255,11 @@ type stop struct {
 // placeChain places the operations of one order. While a network's maximum
 // wait cannot be met, the predecessor is delayed and the chain tried again,
 // up to the delay limit from the predecessor's first start; past it the whole
-// order is unplaced as NETWORK_INFEASIBLE (SCHED-0009).
-func (e *engine) placeChain(chain []Operation, fixed []Placement, start time.Time, res *Result) {
+// order is unplaced as NETWORK_INFEASIBLE (SCHED-0009). A non-zero seed is the
+// earliest start of the first operation (backward scheduling, BR-23.2).
+func (e *engine) placeChain(chain []Operation, fixed []Placement, start, seed time.Time, res *Result) {
 	notBefore := make([]time.Time, len(chain))
+	notBefore[0] = seed
 	first := make([]time.Time, len(chain))
 	for {
 		pls, ws, st := e.attempt(chain, fixed, start, notBefore)

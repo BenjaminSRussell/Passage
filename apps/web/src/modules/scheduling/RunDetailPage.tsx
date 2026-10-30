@@ -10,7 +10,8 @@ import { useLoad } from "./useLoad";
 /**
  * One schedule run with its metrics, the operations it could not place (with
  * SCHED-0009 NETWORK_INFEASIBLE among the reasons) and the warnings on placed
- * operations: network wait (SCHED-0010), missing setup matrix entry
+ * operations: late order after backward scheduling fell back to forward
+ * (SCHED-0003), network wait (SCHED-0010), missing setup matrix entry
  * (SCHED-0012) and no matching capacity block (SCHED-0014).
  */
 export function RunDetailPage() {

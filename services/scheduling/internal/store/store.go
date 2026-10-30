@@ -87,7 +87,7 @@ type Operation struct {
 }
 
 // RunWarning is a finding about a placed operation that did not stop the run
-// (SCHED-0010, SCHED-0012, SCHED-0014).
+// (SCHED-0003, SCHED-0010, SCHED-0012, SCHED-0014).
 type RunWarning struct {
 	Code        string `json:"code"`
 	OperationID string `json:"operationId"`
@@ -145,6 +145,8 @@ type RunRequest struct {
 	OperationIDs []string
 	Start        time.Time
 	HorizonDays  int
+	// Backward schedules each order from its due date (FR-23.2, BR-23.2).
+	Backward bool
 }
 
 type MoveRequest struct {
@@ -360,8 +362,12 @@ func (s *Postgres) RunSchedule(ctx context.Context, req RunRequest, idem Idem) (
 			return err
 		}
 		res := domain.Schedule(domain.Problem{Resources: resources, Operations: todo, Booked: booked, Fixed: fixed,
-			Networks: networks, Start: req.Start, HorizonDays: req.HorizonDays, Infinite: !req.Finite})
-		run := Run{ID: ids.New(), Scope: req.Scope, Mode: req.Mode, Direction: "forward", Finite: req.Finite, Algorithm: "heuristic",
+			Networks: networks, Start: req.Start, HorizonDays: req.HorizonDays, Infinite: !req.Finite, Backward: req.Backward})
+		direction := "forward"
+		if req.Backward {
+			direction = "backward"
+		}
+		run := Run{ID: ids.New(), Scope: req.Scope, Mode: req.Mode, Direction: direction, Finite: req.Finite, Algorithm: "heuristic",
 			Status: "completed", OperationsCount: len(todo), MakespanMinutes: domain.Makespan(res.Placements),
 			TotalLatenessMinutes: domain.TotalLateness(res.Placements), Messages: unplacedMessages(res.Unplaced),
 			Warnings: runWarnings(res.Warnings)}

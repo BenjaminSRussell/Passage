@@ -17,6 +17,7 @@ const ORDER = "b1000000-0000-4000-8000-000000000001";
 const JOB1 = "0a000000-0000-4000-8000-000000000001";
 const JOB2 = "0a000000-0000-4000-8000-000000000002";
 const RUN = "7e000000-0000-4000-8000-000000000001";
+const RUN2 = "7f000000-0000-4000-8000-000000000002";
 const NETWORK = "4e000000-0000-4000-8000-000000000001";
 
 type Reply = { status: number; body: unknown };
@@ -299,11 +300,13 @@ describe("Capacity load", () => {
 
 describe("Schedule runs", () => {
   it("lists runs and opens one", async () => {
-    handler = (url) => (url.pathname.endsWith(`/runs/${RUN}`) ? json(200, { ...run, messages: [`${JOB1}: no candidate resource has open capacity in the horizon`] }) : json(200, { items: [run] }));
+    handler = (url) => (url.pathname.endsWith(`/runs/${RUN}`) ? json(200, { ...run, messages: [`${JOB1}: no candidate resource has open capacity in the horizon`] }) : json(200, { items: [run, { ...run, id: RUN2, direction: "backward" }] }));
     const { container } = renderAt("/scheduling/runs");
     const table = await findTable({ name: "Schedule runs" });
     await waitFor(() => expect(table).toHaveTextContent("2 h 30 min"));
     expect(table).toHaveTextContent("Whole site");
+    expect(within(table).getByText("Forward")).toBeInTheDocument();
+    expect(within(table).getByText("Backward")).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
     fireEvent.click(within(table).getByRole("button", { name: "7e000000" }));
     expect(await screen.findByRole("heading", { name: "Schedule run" })).toBeInTheDocument();
@@ -341,7 +344,7 @@ describe("Schedule runs", () => {
   });
 
   it("validates a selection run before calling the service", () => {
-    const base = { scope: "selection" as const, mode: "jobs" as const, finite: true, operationIds: "", start: "", horizonDays: "" };
+    const base = { scope: "selection" as const, mode: "jobs" as const, direction: "forward" as const, finite: true, operationIds: "", start: "", horizonDays: "" };
     expect(validateRun(base).operationIds).toBe("List at least one operation id.");
     expect(validateRun({ ...base, operationIds: "nope" }).operationIds).toBe("Every entry must be an operation id (a UUID).");
     expect(validateRun({ ...base, operationIds: JOB1, horizonDays: "10" })).toEqual({ horizonDays: "Enter a whole number of days from 30 to 730." });
@@ -357,9 +360,23 @@ describe("Schedule runs", () => {
     expect(await screen.findByRole("heading", { name: "Schedule run" })).toBeInTheDocument();
     const post = calls.find((c) => c.method === "POST")!;
     expect(post.url.pathname).toBe("/api/v1/scheduling/runs");
-    expect(post.body).toEqual({ scope: "site", mode: "jobs", finite: false });
+    expect(post.body).toEqual({ scope: "site", mode: "jobs", direction: "forward", finite: false });
     expect(header(post, "Idempotency-Key")).toBeTruthy();
     expect(await screen.findByText("Infinite")).toBeInTheDocument();
+  });
+
+  it("starts a backward run and shows the late-fallback warning on the run", async () => {
+    const warning = { code: "SCHED-0003", operationId: JOB1, detail: "order a is late by 90 min (backward scheduling fell back to forward)" };
+    handler = (_url, init) => json(init.method === "POST" ? 201 : 200, { ...run, direction: "backward", warnings: [warning] });
+    renderAt("/scheduling/runs/new");
+    fireEvent.change(screen.getByLabelText("Direction"), { target: { value: "backward" } });
+    fireEvent.click(screen.getByRole("button", { name: "Start run" }));
+    const list = await screen.findByRole("list", { name: "Run warnings" });
+    expect(list).toHaveTextContent("SCHED-0003 Order late after backward fallback");
+    expect(list).toHaveTextContent("fell back to forward");
+    expect(screen.getByText("Backward")).toBeInTheDocument();
+    const post = calls.find((c) => c.method === "POST")!;
+    expect(post.body).toEqual({ scope: "site", mode: "jobs", direction: "backward", finite: true });
   });
 
   it("puts server field errors next to the field", async () => {

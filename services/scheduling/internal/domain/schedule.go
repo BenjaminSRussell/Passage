@@ -152,6 +152,9 @@ type Problem struct {
 	HorizonDays      int
 	NetworkDelayDays int
 	Infinite         bool
+	// Backward schedules each order with a due date as late as it can run
+	// and still end by that date (FR-23.2); BR-23.2 describes the fallback.
+	Backward bool
 }
 
 // Unplaced is an operation the heuristic could not place within the horizon.
@@ -405,7 +408,11 @@ func Schedule(p Problem) Result {
 		for j < len(ops) && ops[j].OrderID == ops[i].OrderID {
 			j++
 		}
-		e.placeChain(ops[i:j], fixed[ops[i].OrderID], p.Start, &res)
+		if p.Backward {
+			e.placeBackward(ops[i:j], fixed[ops[i].OrderID], p.Start, &res)
+		} else {
+			e.placeChain(ops[i:j], fixed[ops[i].OrderID], p.Start, time.Time{}, &res)
+		}
 		i = j
 	}
 	return res

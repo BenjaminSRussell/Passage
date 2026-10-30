@@ -14,6 +14,11 @@ screens (Gantt workspace with drag, preview and firm; capacity load; runs list,
 start run and run detail; resources list, create and detail; operations list
 and create).
 
+Slice 10 builds: backward schedule runs with the BR-23.2 forward fallback and
+SCHED-0003 (domain, store, `direction` on `POST /runs`, migration 0008, direction
+selector and warning label on the web run screens); the OpenAPI and AsyncAPI
+specs have no FAIL lines on the doc gates.
+
 Slice 2 builds: resource networks with allowed transitions, transfer time,
 maximum wait and transfer resource (FR-23.13 data and the BR-23.11 edge
 rules in `domain/network.go`); versioned setup matrices per resource with
@@ -205,7 +210,7 @@ moved-out handoff rows.
 | # | Deliverable | Status | Reason |
 |---|---|---|---|
 | 1 | Forward operation scheduling, finite and infinite | built | `domain.Schedule`; `finite: false` runs ignore bookings but keep calendar time. |
-| 1 | Backward scheduling and the BR-23.2 fallback to forward with `late_minutes` | later slice of PSG-23 | `schedule_run.direction` is constrained to `forward`. Late minutes are already computed against the due time on forward runs. |
+| 1 | Backward scheduling and the BR-23.2 fallback to forward with `late_minutes` (FR-23.2) | built (slice 10) | `direction: backward` on `POST /runs`; `domain.placeBackward` searches the latest start of each order's first operation that still ends by the order's earliest due date, using the forward engine so calendars, bookings, blocks, changeovers and networks apply unchanged. A latest start before run start + 1 h, or an order that cannot end on time, is placed forward; late orders carry `late_minutes` and a SCHED-0003 warning. Orders without a due date are placed forward. Operations after the first are placed as early as possible after it (no slack is spread between them), lateness is measured against the due timestamp, not end-of-day of the delivery date, and moves and the CP-SAT campaign path are unchanged. |
 | 1 | Job scheduling (queue-before, setup, process, overlap, transport, queue-after; FR-23.3) and operations mode in daily buckets (FR-23.2) | later slice of PSG-23 | An operation is one block of process minutes. `mode` is accepted and recorded, and both modes place at minute granularity. Setup that must not split (BR-23.3), overlap quantity (BR-23.5) and transit time are not modelled. |
 | 1 | Duration from route times and efficiency (BR-23.1) | handoff — wave 21 (production operations) | Operations arrive with their minutes through `POST /v1/scheduling/operations`; deriving minutes from `run_time_h_per`, quantity and efficiency needs wave 21 route operations. |
 | 1 | Secondary resources booked with the primary (BR-23.4, SCHED-0005) | later slice of PSG-23 | No `secondary_resource_ids` on operations or jobs yet. |

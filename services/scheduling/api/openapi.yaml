@@ -218,7 +218,7 @@ paths:
   /v1/scheduling/runs:
     post:
       operationId: createRun
-      summary: Run the forward heuristic over the site or a selection of operations
+      summary: Run the forward or backward heuristic over the site or a selection of operations
       description: >
         The run applies resource networks (FR-23.13: an operation naming a
         network runs only on a resource with an edge from its predecessor's,
@@ -1051,8 +1051,13 @@ components:
     RunRequest:
       type: object
       description: >
-        Heuristic run, always forward from start (backward direction and the
-        cp-sat algorithm are later slices; see NOT-IMPLEMENTED.md). finite
+        Heuristic run, forward from start or backward from each order's due
+        date (the cp-sat algorithm is a later slice; see NOT-IMPLEMENTED.md).
+        A backward run starts each order with a due date as late as it can
+        while ending by that date; an order that cannot (or whose latest start
+        is within an hour of the run start) is scheduled forward and, when
+        late, reported with a SCHED-0003 warning (BR-23.2). Orders without a
+        due date are scheduled forward. finite
         false is an infinite-capacity run: jobs stay inside open calendar time
         but may overlap and do not reserve capacity.
       required: [scope]
@@ -1060,6 +1065,7 @@ components:
         scope: { type: string, enum: [site, selection], description: 'site (every operation) or selection (operationIds)' }
         mode: { type: string, enum: [operations, jobs], default: jobs, description: Recorded on the run; both modes place at minute granularity in this slice. }
         finite: { type: boolean, default: true }
+        direction: { type: string, enum: [forward, backward], default: forward, description: 'backward schedules from each order''s due date (FR-23.2, BR-23.2)' }
         operationIds:
           type: array
           maxItems: 5000
@@ -1073,7 +1079,7 @@ components:
         id: { type: string, format: uuid }
         scope: { type: string, enum: [site, selection, move] }
         mode: { type: string }
-        direction: { type: string }
+        direction: { type: string, enum: [forward, backward] }
         finite: { type: boolean }
         algorithm: { type: string, enum: [heuristic] }
         status: { type: string }
@@ -1089,13 +1095,13 @@ components:
           items: { type: string }
         warnings:
           type: array
-          description: Findings on placed operations (SCHED-0010, SCHED-0012, SCHED-0014).
+          description: Findings on placed operations (SCHED-0003, SCHED-0010, SCHED-0012, SCHED-0014).
           items: { $ref: '#/components/schemas/RunWarning' }
         createdAt: { type: string, format: date-time }
     RunWarning:
       type: object
       properties:
-        code: { type: string, enum: [SCHED-0010, SCHED-0012, SCHED-0014] }
+        code: { type: string, enum: [SCHED-0003, SCHED-0010, SCHED-0012, SCHED-0014] }
         operationId: { type: string, format: uuid }
         detail: { type: string }
     Bar:

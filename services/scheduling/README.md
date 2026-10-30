@@ -34,8 +34,9 @@ campaigns yet. What is not built is listed in `NOT-IMPLEMENTED.md`.
   network governing the step from the order's previous operation (FR-23.13).
   Status `open`, `scheduled` or `unplaced`.
 - **ScheduleRun** (`schedule_run`): scope `site`, `selection` or `move`, mode,
-  direction (`forward`), `finite`, algorithm (`heuristic`), metrics, messages
-  (unplaced operations) and warnings (SCHED-0010, SCHED-0012, SCHED-0014).
+  direction (`forward` or `backward`), `finite`, algorithm (`heuristic`),
+  metrics, messages (unplaced operations) and warnings (SCHED-0003,
+  SCHED-0010, SCHED-0012, SCHED-0014).
 - **ScheduledJob** (`scheduled_job`): one row per contiguous segment of an
   operation on a resource, with `run_id`, `firmed`, `finite`, `late_minutes`
   and, on the first segment, `changeover_minutes` with the `changeover_cost`
@@ -160,6 +161,21 @@ Slice 8:
   with the earliest start as planned start; more than 1000 are split into
   consecutive proposals. Nothing is stored: the planner enters each order's
   quantity and creates the campaign with `POST /campaigns`.
+
+Slice 10:
+
+- **Backward runs** (`direction: backward` on `POST /runs`, FR-23.2): each
+  order with a due date (the earliest due date of its operations) starts its
+  first remaining operation as late as it can while its last operation still
+  ends by that date. The latest start is found by a binary search over the
+  first operation's earliest start, placing with the forward engine and
+  releasing each probe, so calendars, bookings, blocks, changeovers and
+  networks apply as they do forward. BR-23.2: when the latest start is less
+  than one hour after the run start, or the order cannot end by its due date
+  even started at once, the order is placed forward from the run start; when
+  it then ends after the due date its jobs carry `late_minutes` and the run
+  reports SCHED-0003 on the order's last operation. Orders without a due date
+  are placed forward.
 
 ## API
 

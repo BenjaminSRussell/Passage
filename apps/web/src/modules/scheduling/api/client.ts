@@ -69,6 +69,7 @@ export interface NewOperation {
 
 /** Codes a run reports on placed operations (PRD 4.23.18). */
 export const RUN_WARNING_LABELS: Record<string, string> = {
+  "SCHED-0003": "Order late after backward fallback",
   "SCHED-0010": "Network wait over the maximum",
   "SCHED-0012": "No setup matrix entry",
   "SCHED-0014": "No matching capacity block",
@@ -103,6 +104,7 @@ export interface NewRun {
   scope: "site" | "selection";
   mode: "jobs" | "operations";
   finite: boolean;
+  direction?: "forward" | "backward";
   operationIds?: string[];
   start?: string;
   horizonDays?: number;

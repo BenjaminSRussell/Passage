@@ -110,6 +110,7 @@ type runRequest struct {
 	OperationIDs []string   `json:"operationIds"`
 	Start        *time.Time `json:"start"`
 	HorizonDays  *int       `json:"horizonDays"`
+	Direction    string     `json:"direction"`
 }
 
 type moveRequest struct {
@@ -476,6 +477,9 @@ func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
 	if mode != "jobs" && mode != "operations" {
 		fields["mode"] = "must be jobs or operations"
 	}
+	if req.Direction != "" && req.Direction != "forward" && req.Direction != "backward" {
+		fields["direction"] = "must be forward or backward"
+	}
 	if req.Scope == "selection" && (len(req.OperationIDs) == 0 || len(req.OperationIDs) > maxSelection) {
 		fields["operationIds"] = fmt.Sprintf("must list 1 to %d operations for selection scope", maxSelection)
 	}
@@ -513,7 +517,7 @@ func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
 	}
 	a.runs.Add(1)
 	run, created, err := a.store.RunSchedule(r.Context(), store.RunRequest{Scope: req.Scope, Mode: mode, Finite: finite,
-		OperationIDs: req.OperationIDs, Start: start, HorizonDays: horizon}, idem)
+		OperationIDs: req.OperationIDs, Start: start, HorizonDays: horizon, Backward: req.Direction == "backward"}, idem)
 	if err != nil {
 		slog.Error("schedule run failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 		httpx.Fail(w, r, err)
