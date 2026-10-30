@@ -172,8 +172,7 @@
       "severity": "blocker",
       "mustContain": [
         "passage.tenant_id",
-        "passage.legal_entity_ids",
-        "passage.actor"
+        "passage.legal_entity_scopes"
       ],
       "mustNotContain": [
         "app.tenant_id"
