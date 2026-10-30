@@ -75,11 +75,26 @@ func requireLegalEntity(ctx context.Context, tx pgx.Tx, tenantID, id string) err
 	return nil
 }
 
+const DutyReference = "org.reference.write"
+
+func (s *Postgres) tenantWriteTx(ctx context.Context, fn func(tx pgx.Tx) error) error {
+	p, _ := tenant.FromContext(ctx)
+	if p.LegalEntityID != "" || !p.HasDuty(DutyReference) {
+		return dbx.WithTenantTx(ctx, s.pool, fn)
+	}
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `select set_config('passage.tenant_id', $1, true), set_config('passage.legal_entity_scopes', '*', true)`, p.TenantID); err != nil {
+			return err
+		}
+		return fn(tx)
+	})
+}
+
 func (s *Postgres) PutCurrencyRounding(ctx context.Context, in CurrencyRounding) (CurrencyRounding, bool, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out CurrencyRounding
 	changed := false
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err := s.tenantWriteTx(ctx, func(tx pgx.Tx) error {
 		currency, err := requireCurrency(ctx, tx, p.TenantID, in.CurrencyCode)
 		if err != nil {
 			return err
@@ -195,7 +210,7 @@ func (s *Postgres) ResolveCurrencyRounding(ctx context.Context, currency, purpos
 
 func (s *Postgres) DeleteCurrencyRounding(ctx context.Context, currency, purpose string, legalEntityID *string) error {
 	p, _ := tenant.FromContext(ctx)
-	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	return s.tenantWriteTx(ctx, func(tx pgx.Tx) error {
 		item, err := requireCurrency(ctx, tx, p.TenantID, currency)
 		if err != nil {
 			return err

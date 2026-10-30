@@ -343,3 +343,15 @@ func TestCurrencyRounding_DeleteRefusalsAndTenantIsolation(t *testing.T) {
 		t.Fatalf("outbox rows after refusals = %d; want 1", len(events))
 	}
 }
+
+func TestCurrencyRounding_TenantAdminWithoutClaimWritesLegalEntityRows(t *testing.T) {
+	s, ctx, _ := lifecycleStore(t)
+	a := mustCreate(t, s, ctx, newEntity("EA"))
+	admin := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), UserID: "admin", Duties: map[string]struct{}{store.DutyReference: {}}})
+	mustPut(t, s, admin, rule(t, "CHF", "cash", "1", "up", &a.ID))
+	assertRule(t, mustResolve(t, s, ctx, "CHF", "cash", a.ID), "1", domain.Up, store.RoundingSourceLegalEntity)
+	if err := s.DeleteCurrencyRounding(admin, "CHF", "cash", &a.ID); err != nil {
+		t.Fatal(err)
+	}
+	assertRule(t, mustResolve(t, s, ctx, "CHF", "cash", a.ID), "0.05", domain.HalfEven, store.RoundingSourceDefault)
+}

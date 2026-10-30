@@ -10,14 +10,16 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/outbox"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/party/internal/domain"
 )
+
+const DutyMerge = "party.merge"
 
 var (
 	ErrNotFound        = errors.New("party not found")
@@ -56,17 +58,29 @@ func canonicalID(raw string) (string, error) {
 	return id.String(), nil
 }
 
-// fullScope guards party merge, a tenant-level operation: parties are shared
-// across legal entities, so only a caller with no legal-entity claim may merge.
+// fullScope guards party merge and audit, tenant-level operations: parties are
+// shared across legal entities. The predicate is no legal-entity claim AND
+// DutyMerge; the transaction then runs with an explicit all-entity database
+// scope (as identity withAdminTx), since a no-claim write otherwise has an empty
+// scope and RLS hides customer_role.
 func fullScope(ctx context.Context) (tenant.Principal, error) {
 	p, ok := tenant.FromContext(ctx)
 	if !ok {
 		return p, errors.New("store: no principal in context")
 	}
-	if p.LegalEntityID != "" {
+	if p.LegalEntityID != "" || !p.HasDuty(DutyMerge) {
 		return p, ErrScopedPrincipal
 	}
 	return p, nil
+}
+
+func adminTx(ctx context.Context, pool *pgxpool.Pool, p tenant.Principal, fn func(tx pgx.Tx) error) error {
+	return pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `select set_config('passage.tenant_id', $1, true), set_config('passage.legal_entity_scopes', '*', true)`, p.TenantID); err != nil {
+			return err
+		}
+		return fn(tx)
+	})
 }
 
 func (s *Postgres) Merge(ctx context.Context, req MergeRequest) (MergeResult, error) {
@@ -84,7 +98,7 @@ func (s *Postgres) Merge(ctx context.Context, req MergeRequest) (MergeResult, er
 	if req.WinnerID == req.LoserID {
 		return res, ErrNotMergeable
 	}
-	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err = adminTx(ctx, s.pool, p, func(tx pgx.Tx) error {
 		rows, err := lockParties(ctx, tx, p.TenantID, req.WinnerID, req.LoserID)
 		if err != nil {
 			return err
