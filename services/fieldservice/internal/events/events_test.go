@@ -71,6 +71,12 @@ func TestPayloadsMatchAsyncAPI(t *testing.T) {
 	if got, want := keysOf(t, CaseStageChangedData{}), requiredOf(t, "CaseStageChanged"); !reflect.DeepEqual(got, want) {
 		t.Errorf("CaseStageChangedData keys %v, AsyncAPI requires %v", got, want)
 	}
+	if got, want := keysOf(t, SupplierClaimSettledData{}), requiredOf(t, "SupplierClaimSettled"); !reflect.DeepEqual(got, want) {
+		t.Errorf("SupplierClaimSettledData keys %v, AsyncAPI requires %v", got, want)
+	}
+	if SupplierClaimSettled != "dev.passage.service.supplierclaim.settled.v1" {
+		t.Errorf("event type %s", SupplierClaimSettled)
+	}
 	if CaseStageChanged != "dev.passage.case.stage.changed.v1" {
 		t.Errorf("event type %s", CaseStageChanged)
 	}

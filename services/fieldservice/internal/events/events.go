@@ -124,3 +124,26 @@ type PostedLine struct {
 	WarrantyCost   string `json:"warrantyCost"`
 	AgreementHours string `json:"agreementHours"`
 }
+
+// SupplierClaimSettled is dev.passage.service.supplierclaim.settled.v1: a vendor
+// credit note was matched to an accepted supplier warranty claim (FR-45.15,
+// BR-45.12). The PRD writes the entity as "supplier-claim"; the kernel's event type
+// rule allows no hyphen in a segment, so it is "supplierclaim".
+var SupplierClaimSettled = events.Type(Context, "supplierclaim", "settled", 1)
+
+// SupplierClaimSettledData is the payload of SupplierClaimSettled (PRD 8.45.5:
+// claimId, vendorId, claimedAmount, recoveredAmount). The GL warranty recovery
+// credits the warranty expense account of LegalEntityID with RecoveredAmount.
+// Amounts are decimal strings in Currency.
+type SupplierClaimSettledData struct {
+	ClaimID         string `json:"claimId"`
+	Number          string `json:"number"`
+	VendorID        string `json:"vendorId"`
+	LegalEntityID   string `json:"legalEntityId"`
+	Currency        string `json:"currency"`
+	ClaimedAmount   string `json:"claimedAmount"`
+	RecoveredAmount string `json:"recoveredAmount"`
+	CreditNoteID    string `json:"creditNoteId"`
+	VendorReference string `json:"vendorReference"`
+	SettledAt       string `json:"settledAt"`
+}

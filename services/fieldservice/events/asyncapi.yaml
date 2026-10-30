@@ -3,7 +3,7 @@ info:
   title: Passage Field Service events
   version: 0.1.0
   description: |
-    Events published by the fieldservice service (wave 45, slices 1 to 4). Every event is
+    Events published by the fieldservice service (wave 45, slices 1 to 5). Every event is
     written to the service outbox in the same transaction as the state change and
     relayed by Debezium to Kafka. Envelope: CloudEvents 1.0 (source /passage/service/fieldservice).
 defaultContentType: application/json
@@ -35,6 +35,11 @@ channels:
     messages:
       caseStageChanged:
         $ref: "#/components/messages/CaseStageChanged"
+  supplierClaimSettled:
+    address: passage.service.supplierclaim
+    messages:
+      supplierClaimSettled:
+        $ref: "#/components/messages/SupplierClaimSettled"
 operations:
   publishCaseOpened:
     action: send
@@ -72,6 +77,12 @@ operations:
     summary: A case in any non-service category moved to the next stage (its gate passed) or back one stage with a reason (FR-45.12, BR-45.9).
     messages:
       - $ref: "#/channels/caseStageChanged/messages/caseStageChanged"
+  publishSupplierClaimSettled:
+    action: send
+    channel: { $ref: "#/channels/supplierClaimSettled" }
+    summary: A vendor credit note was matched to an accepted supplier warranty claim, which is now SETTLED (FR-45.15, BR-45.12); analytics and the GL warranty recovery consume it.
+    messages:
+      - $ref: "#/channels/supplierClaimSettled/messages/supplierClaimSettled"
 components:
   messages:
     CaseOpened:
@@ -204,3 +215,26 @@ components:
           at: { type: string, format: date-time }
           actor: { type: string, description: User id of the caller who moved the case. }
           reason: { type: string, description: The reason of a move back one stage; empty on a forward move. }
+    SupplierClaimSettled:
+      name: dev.passage.service.supplierclaim.settled.v1
+      contentType: application/cloudevents+json
+      description: |
+        PRD 8.45.5 `dev.passage.service.supplier-claim.settled.v1` (claimId, vendorId, claimedAmount,
+        recoveredAmount) plus the number, legal entity, currency, credit note and vendor reference. The
+        kernel event type rule allows no hyphen in a segment, so the entity is `supplierclaim`. The GL
+        warranty recovery credits the warranty expense account of the legal entity with recoveredAmount.
+      payload:
+        type: object
+        required: [claimId, number, vendorId, legalEntityId, currency, claimedAmount, recoveredAmount, creditNoteId, vendorReference, settledAt]
+        additionalProperties: false
+        properties:
+          claimId: { type: string, format: uuid }
+          number: { type: string, example: SWC-000001 }
+          vendorId: { type: string, format: uuid, description: The vendor party. }
+          legalEntityId: { type: string, format: uuid }
+          currency: { type: string, pattern: "^[A-Z]{3}$" }
+          claimedAmount: { type: string, description: Claimed total as a decimal string. }
+          recoveredAmount: { type: string, description: The matched credit as a decimal string; equals the accepted total. }
+          creditNoteId: { type: string, description: The vendor credit note (wave 18) that settled the claim. }
+          vendorReference: { type: string, description: The vendor's reference of the claim, quoted on the credit note. }
+          settledAt: { type: string, format: date-time }
