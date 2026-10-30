@@ -1,12 +1,16 @@
 package api
 
 import (
+	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/purchasing/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/purchasing/internal/store"
 )
@@ -193,7 +197,10 @@ type planRowSettlementBody struct {
 	Amount        string `json:"amount"`
 }
 
-const maxSettlementRef = 255
+const (
+	maxSettlementRef = 255
+	settlingService  = "receiving"
+)
 
 // settlePlanRow handles PUT .../invoicing-plan/rows/{seq}/settlement: receiving
 // reports that it settled the row (#289), which flips it OPEN -> INVOICED. PUT is
@@ -211,6 +218,10 @@ func (a *API) settlePlanRow(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := caller(r.Context()); err != nil {
 		fail(w, r, err)
+		return
+	}
+	if p, _ := tenant.FromContext(r.Context()); p.Service != settlingService {
+		fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "plan row settlements are accepted from the receiving service only"))
 		return
 	}
 	var body planRowSettlementBody
@@ -231,6 +242,12 @@ func (a *API) settlePlanRow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := a.store.MarkPlanRowInvoiced(r.Context(), id, lineNo, seq, body.SettlementRef, amount)
+	var problem *httpx.Problem
+	if errors.As(err, &problem) && problem.Code == domain.CodePlanRowSettlement {
+		a.planRowConflicts.Add(1)
+		slog.ErrorContext(r.Context(), "plan row settlement conflicts with the purchase order; a person must resolve it", "err", err,
+			"purchaseOrderId", id, "lineNo", lineNo, "seq", seq, "settlementRef", body.SettlementRef, "correlationId", middleware.GetReqID(r.Context()))
+	}
 	if err != nil {
 		fail(w, r, err)
 		return

@@ -255,7 +255,7 @@
       {"resource": "/v1/procurement/pricing/lookup", "methods": ["GET"]},
       {"resource": "/v1/procurement/purchase-orders/*/lines/*/invoicing-plan", "methods": ["PUT", "DELETE"]}
     ]},
-    "procurement.invoicing-plan.settle": {"permissions": [
+    "procurement.invoicing-plan.settle": {"service_only": true, "permissions": [
       {"resource": "/v1/procurement/purchase-orders/*/lines/*/invoicing-plan/rows/*/settlement", "methods": ["PUT"]}
     ]},
     "PurchaseOrderInquire": {"permissions": [

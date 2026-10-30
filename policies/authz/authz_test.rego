@@ -493,6 +493,18 @@ test_service_grants_allow_only_their_declared_routes if {
 	}
 }
 
+service_granted(duty) if {
+	some _, targets in data.service_grants
+	some _, duties in targets
+	duty in duties
+}
+
+test_service_only_duties_are_service_granted if {
+	data.duties["procurement.invoicing-plan.settle"].service_only
+	orphans := {d | data.duties[d].service_only; not service_granted(d)}
+	count(orphans) == 0
+}
+
 test_service_grants_hold_no_flag_or_all_scope_duty if {
 	every _, targets in data.service_grants {
 		every _, duties in targets {

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -133,7 +135,7 @@ func TestPlanSettlement_RejectedMarkDoesNotStopTheOtherRows(t *testing.T) {
 	}
 }
 
-func TestPlanSettlement_SettledRowWhoseAmountChangedIsReportedNotRemarked(t *testing.T) {
+func TestPlanSettlement_ReplayResendsTheSettledAmountNotTheRowsCurrentOne(t *testing.T) {
 	p := &purchasingDouble{plans: twoRowPlan(), err: errors.New("down")}
 	rg := markingRig(p)
 	rg.run(t)
@@ -142,10 +144,24 @@ func TestPlanSettlement_SettledRowWhoseAmountChangedIsReportedNotRemarked(t *tes
 	p.plans[0].Rows[0].Amount = dec("900.00")
 	next := rg.run(t)
 
-	if next.skips()[poID+"/1/1"] != "SETTLED_AMOUNT_CHANGED" || next.skips()[poID+"/1/2"] != "ALREADY_SETTLED" {
+	if next.skips()[poID+"/1/1"] != "ALREADY_SETTLED" || next.skips()[poID+"/1/2"] != "ALREADY_SETTLED" {
 		t.Fatalf("skips %v", next.skips())
 	}
-	if len(p.calls) != 2 || p.plans[0].Rows[0].Status != domain.PlanRowOpen {
-		t.Fatalf("a changed row must not be marked: calls %d rows %+v", len(p.calls), p.plans[0].Rows)
+	last := p.calls[len(p.calls)-2]
+	if last.seq != 1 || last.amount.String() != "1000" {
+		t.Fatalf("catch-up sent %+v, want the settled 1000.00", last)
+	}
+}
+
+func TestPlanSettlement_EveryRowSkippedAfterATransportFailureIsCounted(t *testing.T) {
+	p := &purchasingDouble{plans: twoRowPlan(), err: errors.New("down")}
+	rg := markingRig(p)
+
+	rg.run(t)
+
+	metrics := httptest.NewRecorder()
+	rg.api.Metrics().ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(metrics.Body.String(), "receiving_plan_row_marks_failed_total 2\n") {
+		t.Fatalf("both unmarked rows must be counted:\n%s", metrics.Body)
 	}
 }

@@ -107,6 +107,7 @@ type API struct {
 
 	invoicingPlansSaved atomic.Int64
 	planRowsInvoiced    atomic.Int64
+	planRowConflicts    atomic.Int64
 	repricesApplied     atomic.Int64
 
 	schedulingAgreementsCreated atomic.Int64
@@ -229,6 +230,7 @@ func (a *API) Metrics() http.Handler {
 			{"purchasing_sealed_rfqs_opened_total", "Sealed RFQs whose replies were opened after the deadline.", a.sealedRFQsOpened.Load()},
 			{"purchasing_invoicing_plans_saved_total", "Invoicing plans written by PUT.", a.invoicingPlansSaved.Load()},
 			{"purchasing_invoicing_plan_rows_invoiced_total", "Plan rows flipped to INVOICED for a settlement from receiving; replays are not counted.", a.planRowsInvoiced.Load()},
+			{"purchasing_invoicing_plan_row_settlement_conflicts_total", "Plan row settlements from receiving refused with PRC-IP-004 (a person must resolve them).", a.planRowConflicts.Load()},
 			{"purchasing_purchase_orders_repriced_total", "Subsequent price changes applied to a purchase order.", a.repricesApplied.Load()},
 			{"purchasing_scheduling_agreements_created_total", "Scheduling agreements created; idempotent replays are counted.", a.schedulingAgreementsCreated.Load()},
 			{"purchasing_scheduling_agreement_releases_created_total", "Scheduling agreement releases created (FRC and JIT).", a.saReleasesCreated.Load()},

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/purchasing/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/purchasing/internal/store"
 )
@@ -210,10 +212,27 @@ const settlePath = planPath + "/rows/2/settlement"
 
 var settleDuty = []string{dutyPlanRowSettle}
 
+func serviceToken(t *testing.T, issuer string) map[string]string {
+	t.Helper()
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	signer, err := tenant.NewServiceSigner(issuer, priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenant.SetServiceVerifier(tenant.NewServiceVerifier("purchasing", map[string]ed25519.PublicKey{issuer: pub}))
+	t.Cleanup(func() { tenant.SetServiceVerifier(nil) })
+	token, err := signer.Mint("purchasing", tenant.Principal{TenantID: tenantA, LegalEntityID: leA, UserID: userA}, leA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return map[string]string{tenant.HeaderServiceToken: token}
+}
+
 func TestSettlePlanRow_FlipsTheRowAndCountsOnlyTheFirstCall(t *testing.T) {
 	h := newHarness(t)
+	token := serviceToken(t, "receiving")
 	body := `{"settlementRef":"set-1","amount":"250.00"}`
-	rec := h.do(call{method: "PUT", path: settlePath, user: userA, duties: settleDuty, body: body})
+	rec := h.do(call{method: "PUT", path: settlePath, headers: token, body: body})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body)
 	}
@@ -222,7 +241,7 @@ func TestSettlePlanRow_FlipsTheRowAndCountsOnlyTheFirstCall(t *testing.T) {
 		t.Errorf("store got po %s line %d seq %d ref %q amount %s", got.poID, got.lineNo, got.markSeq, got.markRef, got.markAmount)
 	}
 	h.fake.planLog.markReplay = true
-	if rec := h.do(call{method: "PUT", path: settlePath, user: userA, duties: settleDuty, body: body}); rec.Code != http.StatusOK {
+	if rec := h.do(call{method: "PUT", path: settlePath, headers: serviceToken(t, "receiving"), body: body}); rec.Code != http.StatusOK {
 		t.Fatalf("replay status %d: %s", rec.Code, rec.Body)
 	}
 	metrics := httptest.NewRecorder()
@@ -232,27 +251,57 @@ func TestSettlePlanRow_FlipsTheRowAndCountsOnlyTheFirstCall(t *testing.T) {
 	}
 }
 
-func TestSettlePlanRow_Rejections(t *testing.T) {
+func TestSettlePlanRow_OnlyTheReceivingServiceMayCall(t *testing.T) {
+	ok := `{"settlementRef":"s","amount":"1"}`
 	tests := []struct {
-		name, path, body, user, field string
-		duties                        []string
-		status                        int
+		name string
+		call func(t *testing.T) call
 	}{
-		{"maintain duty is not enough", settlePath, `{"settlementRef":"s","amount":"1"}`, userA, "", maintainDuty, http.StatusForbidden},
-		{"no duty", settlePath, `{"settlementRef":"s","amount":"1"}`, userA, "", nil, http.StatusForbidden},
-		{"no acting user", settlePath, `{"settlementRef":"s","amount":"1"}`, "", "", settleDuty, http.StatusUnauthorized},
-		{"seq zero", planPath + "/rows/0/settlement", `{"settlementRef":"s","amount":"1"}`, userA, "seq", settleDuty, 422},
-		{"seq past the plan limit", planPath + "/rows/121/settlement", `{"settlementRef":"s","amount":"1"}`, userA, "seq", settleDuty, 422},
-		{"missing reference", settlePath, `{"amount":"1"}`, userA, "settlementRef", settleDuty, 422},
-		{"reference too long", settlePath, `{"settlementRef":"` + strings.Repeat("x", 256) + `","amount":"1"}`, userA, "settlementRef", settleDuty, 422},
-		{"amount not a decimal", settlePath, `{"settlementRef":"s","amount":"ten"}`, userA, "amount", settleDuty, 422},
-		{"amount zero", settlePath, `{"settlementRef":"s","amount":"0"}`, userA, "amount", settleDuty, 422},
-		{"amount missing", settlePath, `{"settlementRef":"s"}`, userA, "amount", settleDuty, 422},
+		{"a person holding the duty", func(*testing.T) call {
+			return call{method: "PUT", path: settlePath, user: userA, duties: settleDuty, body: ok}
+		}},
+		{"a person holding every duty header value", func(*testing.T) call {
+			return call{method: "PUT", path: settlePath, user: userA, duties: []string{dutyPlanRowSettle, dutyPurchaseOrderMaintain, tenant.DutyAllScope}, body: ok}
+		}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t)
-			rec := h.do(call{method: "PUT", path: tc.path, user: tc.user, duties: tc.duties, body: tc.body})
+			rec := h.do(tc.call(t))
+			if rec.Code != http.StatusForbidden || problemCode(t, rec) != "AUTH-0003" || h.fake.planLog.marks != 0 {
+				t.Fatalf("status %d marks %d: %s", rec.Code, h.fake.planLog.marks, rec.Body)
+			}
+		})
+	}
+}
+
+func TestSettlePlanRow_Rejections(t *testing.T) {
+	tests := []struct {
+		name, path, body, field string
+		duties                  []string
+		human                   bool
+		status                  int
+	}{
+		{"maintain duty is not enough", settlePath, `{"settlementRef":"s","amount":"1"}`, "", maintainDuty, true, http.StatusForbidden},
+		{"no duty", settlePath, `{"settlementRef":"s","amount":"1"}`, "", nil, true, http.StatusForbidden},
+		{"seq zero", planPath + "/rows/0/settlement", `{"settlementRef":"s","amount":"1"}`, "seq", nil, false, 422},
+		{"seq past the plan limit", planPath + "/rows/121/settlement", `{"settlementRef":"s","amount":"1"}`, "seq", nil, false, 422},
+		{"missing reference", settlePath, `{"amount":"1"}`, "settlementRef", nil, false, 422},
+		{"reference too long", settlePath, `{"settlementRef":"` + strings.Repeat("x", 256) + `","amount":"1"}`, "settlementRef", nil, false, 422},
+		{"amount not a decimal", settlePath, `{"settlementRef":"s","amount":"ten"}`, "amount", nil, false, 422},
+		{"amount zero", settlePath, `{"settlementRef":"s","amount":"0"}`, "amount", nil, false, 422},
+		{"amount missing", settlePath, `{"settlementRef":"s"}`, "amount", nil, false, 422},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			c := call{method: "PUT", path: tc.path, body: tc.body}
+			if tc.human {
+				c.user, c.duties = userA, tc.duties
+			} else {
+				c.headers = serviceToken(t, "receiving")
+			}
+			rec := h.do(c)
 			if rec.Code != tc.status {
 				t.Fatalf("status %d, want %d: %s", rec.Code, tc.status, rec.Body)
 			}
@@ -270,11 +319,16 @@ func TestSettlePlanRow_Rejections(t *testing.T) {
 	}
 }
 
-func TestSettlePlanRow_StoreConflictIs409(t *testing.T) {
+func TestSettlePlanRow_StoreConflictIs409AndCounted(t *testing.T) {
 	h := newHarness(t)
-	h.fake.planLog.err = httpx.NewProblem(http.StatusConflict, domain.CodePlanRowSettlement, "settled elsewhere")
-	rec := h.do(call{method: "PUT", path: settlePath, user: userA, duties: settleDuty, body: `{"settlementRef":"s","amount":"1"}`})
+	h.fake.planLog.err = httpx.NewProblem(http.StatusConflict, domain.CodePlanRowSettlement, "cannot be absorbed")
+	rec := h.do(call{method: "PUT", path: settlePath, headers: serviceToken(t, "receiving"), body: `{"settlementRef":"s","amount":"1"}`})
 	if rec.Code != http.StatusConflict || problemCode(t, rec) != domain.CodePlanRowSettlement {
-		t.Fatalf("status %d code %s: %s", rec.Code, problemCode(t, rec), rec.Body)
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	metrics := httptest.NewRecorder()
+	h.api.Metrics().ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(metrics.Body.String(), "purchasing_invoicing_plan_row_settlement_conflicts_total 1\n") {
+		t.Errorf("the conflict was not counted:\n%s", metrics.Body)
 	}
 }

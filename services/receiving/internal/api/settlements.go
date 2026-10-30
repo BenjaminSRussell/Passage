@@ -35,7 +35,6 @@ const (
 	skipOtherEntity      = "OTHER_LEGAL_ENTITY"
 	skipNoAmount         = "NO_AMOUNT"
 	skipUnusableCurrency = "CURRENCY_MISMATCH"
-	skipAmountChanged    = "SETTLED_AMOUNT_CHANGED"
 )
 
 type planRunRequest struct {
@@ -156,10 +155,6 @@ func (r *settlementRun) settle(kind, sourceRef, vendorID, currency, debitAccount
 		return err
 	}
 	if replayed {
-		if link.seq > 0 && !posted.Amount.Equal(amount) {
-			r.skip(sourceRef, skipAmountChanged)
-			return nil
-		}
 		r.markInvoiced(link, posted.ID, posted.Amount)
 		r.skip(sourceRef, skipAlreadySettled)
 		return nil
@@ -176,7 +171,13 @@ func (r *settlementRun) settle(kind, sourceRef, vendorID, currency, debitAccount
 }
 
 func (r *settlementRun) markInvoiced(link planLink, settlementID string, amount decimal.Decimal) {
-	if link.seq == 0 || r.api.ports.PlanRowSettlements == nil || r.purchasingDown {
+	if link.seq == 0 || r.api.ports.PlanRowSettlements == nil {
+		return
+	}
+	if r.purchasingDown {
+		r.api.planMarkFailed.Add(1)
+		slog.WarnContext(r.ctx, "plan row settled but purchasing not told: purchasing was unreachable earlier in this run", "purchaseOrderId", link.purchaseOrderID,
+			"lineNo", link.lineNo, "seq", link.seq, "settlementId", settlementID, "correlationId", middleware.GetReqID(r.ctx))
 		return
 	}
 	err := r.api.ports.PlanRowSettlements.MarkInvoiced(r.ctx, r.req.legalEntityID, link.purchaseOrderID, link.lineNo, link.seq, settlementID, amount)

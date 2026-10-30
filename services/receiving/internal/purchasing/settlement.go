@@ -15,7 +15,6 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
-	"github.com/BenjaminSRussell/passage/services/receiving/internal/identity"
 )
 
 const audience = "purchasing"
@@ -36,6 +35,9 @@ func (c *Client) MarkInvoiced(ctx context.Context, legalEntityID, orderID string
 	if !ok {
 		return fmt.Errorf("%s: no principal in context", what)
 	}
+	if c.signer == nil {
+		return fmt.Errorf("%s: no service signing key configured", what)
+	}
 	raw, err := json.Marshal(settlementBody{SettlementRef: settlementRef, Amount: amount.String()})
 	if err != nil {
 		return fmt.Errorf("%s: %w", what, err)
@@ -46,12 +48,8 @@ func (c *Client) MarkInvoiced(ctx context.Context, legalEntityID, orderID string
 		return fmt.Errorf("%s: %w", what, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	signed, err := c.signer.Apply(req, principal, audience, legalEntityID)
-	if err != nil {
+	if _, err := c.signer.Apply(req, principal, audience, legalEntityID); err != nil {
 		return fmt.Errorf("%s: %w", what, err)
-	}
-	if !signed {
-		identity.Forward(req, principal)
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {

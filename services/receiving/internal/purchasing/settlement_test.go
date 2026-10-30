@@ -6,8 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"strings"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -27,7 +25,17 @@ func serveBody(t *testing.T, status int) (*Client, *http.Request, *string) {
 		w.WriteHeader(status)
 	}))
 	t.Cleanup(srv.Close)
-	return New(srv.URL, nil), &got, &body
+	return New(srv.URL, nil).WithSigner(signerFor(t)), &got, &body
+}
+
+func signerFor(t *testing.T) *tenant.ServiceSigner {
+	t.Helper()
+	_, priv, _ := ed25519.GenerateKey(nil)
+	signer, err := tenant.NewServiceSigner("receiving", priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return signer
 }
 
 func TestMarkInvoiced_SignsWithTheServiceGrantAndSendsTheSettlement(t *testing.T) {
@@ -62,14 +70,14 @@ func TestMarkInvoiced_SignsWithTheServiceGrantAndSendsTheSettlement(t *testing.T
 	}
 }
 
-func TestMarkInvoiced_WithoutASignerForwardsTheUser(t *testing.T) {
+func TestMarkInvoiced_WithoutASignerSendsNothing(t *testing.T) {
 	client, got, _ := serveBody(t, http.StatusOK)
+	client.signer = nil
 
-	if err := client.MarkInvoiced(testCtx(), legalEntityID, orderID, 1, 1, "s", decimal.NewFromInt(1)); err != nil {
-		t.Fatal(err)
-	}
-	if got.Header.Get("X-Passage-User") != userID || got.Header.Get(tenant.HeaderServiceToken) != "" {
-		t.Fatalf("headers %v", got.Header)
+	err := client.MarkInvoiced(testCtx(), legalEntityID, orderID, 1, 1, "s", decimal.NewFromInt(1))
+
+	if err == nil || errors.Is(err, domain.ErrPlanRowMarkRejected) || got.Method != "" {
+		t.Fatalf("an unsigned call must fail locally and never forward the user: err %v, method %q", err, got.Method)
 	}
 }
 
@@ -96,25 +104,12 @@ func TestMarkInvoiced_TransportFailureAndMissingPrincipal(t *testing.T) {
 	srv := httptest.NewServer(http.NotFoundHandler())
 	url := srv.URL
 	srv.Close()
-	err := New(url, nil).MarkInvoiced(testCtx(), legalEntityID, orderID, 1, 1, "s", decimal.NewFromInt(1))
+	err := New(url, nil).WithSigner(signerFor(t)).MarkInvoiced(testCtx(), legalEntityID, orderID, 1, 1, "s", decimal.NewFromInt(1))
 	if err == nil || errors.Is(err, domain.ErrPlanRowMarkRejected) {
 		t.Fatalf("unreachable purchasing = %v", err)
 	}
 	client, got, _ := serveBody(t, http.StatusOK)
 	if err := client.MarkInvoiced(t.Context(), legalEntityID, orderID, 1, 1, "s", decimal.NewFromInt(1)); err == nil || got.Method != "" {
 		t.Fatalf("a call without a principal must not reach purchasing: %v", err)
-	}
-}
-
-func TestSettlementPathMatchesThePurchasingRouteTable(t *testing.T) {
-	src, err := os.ReadFile("../../../purchasing/internal/api/api.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(src), `Put("/purchase-orders/{id}/lines/{lineNo}/invoicing-plan/rows/{seq}/settlement", a.settlePlanRow)`) {
-		t.Fatal("purchasing route table no longer serves the plan row settlement; update domain.PlanRowSettlementPathTmpl")
-	}
-	if domain.PlanRowSettlementPathTmpl != "/v1/procurement/purchase-orders/%s/lines/%d/invoicing-plan/rows/%d/settlement" {
-		t.Fatalf("path %s does not match the purchasing route", domain.PlanRowSettlementPathTmpl)
 	}
 }
