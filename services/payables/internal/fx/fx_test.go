@@ -2,6 +2,7 @@ package fx_test
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,8 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/fx"
 )
+
+const entity = "00000000-0000-0000-0000-0000000000a1"
 
 var day = time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC)
 
@@ -31,7 +34,7 @@ func TestRate_RequestAndParse(t *testing.T) {
 		_, _ = w.Write([]byte(`{"rateType":"spot","from":"EUR","to":"USD","date":"2027-03-31","path":"direct","rate":"1.0825","hops":[]}`))
 	}))
 	defer srv.Close()
-	rate, err := fx.New(srv.URL+"/", "", nil).Rate(ctx(), "EUR", "USD", day)
+	rate, err := fx.New(srv.URL+"/", "", nil).Rate(ctx(), entity, "EUR", "USD", day)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +58,7 @@ func TestRate_ConfiguredRateType(t *testing.T) {
 		_, _ = w.Write([]byte(`{"rate":"2"}`))
 	}))
 	defer srv.Close()
-	if _, err := fx.New(srv.URL, "closing", nil).Rate(ctx(), "EUR", "USD", day); err != nil || !strings.Contains(gotQuery, "type=closing") {
+	if _, err := fx.New(srv.URL, "closing", nil).Rate(ctx(), entity, "EUR", "USD", day); err != nil || !strings.Contains(gotQuery, "type=closing") {
 		t.Fatalf("query=%s err=%v", gotQuery, err)
 	}
 }
@@ -84,7 +87,7 @@ func TestRate_Failures(t *testing.T) {
 				_, _ = w.Write([]byte(tc.body))
 			}))
 			defer srv.Close()
-			_, err := fx.New(srv.URL, "", nil).Rate(tc.ctx, "EUR", "USD", day)
+			_, err := fx.New(srv.URL, "", nil).Rate(tc.ctx, entity, "EUR", "USD", day)
 			if err == nil {
 				t.Fatal("expected an error")
 			}
@@ -102,7 +105,7 @@ func TestRate_Failures(t *testing.T) {
 func TestRate_TransportFailure(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	srv.Close()
-	if _, err := fx.New(srv.URL, "", nil).Rate(ctx(), "EUR", "USD", day); err == nil {
+	if _, err := fx.New(srv.URL, "", nil).Rate(ctx(), entity, "EUR", "USD", day); err == nil {
 		t.Fatal("expected a transport error")
 	}
 }
@@ -116,10 +119,58 @@ func TestRate_DoesNotFollowRedirectsWithTenantHeaders(t *testing.T) {
 	}))
 	defer redirector.Close()
 	for name, client := range map[string]*http.Client{"default": nil, "custom": {}} {
-		_, err := fx.New(redirector.URL, "", client).Rate(ctx(), "EUR", "USD", day)
+		_, err := fx.New(redirector.URL, "", client).Rate(ctx(), entity, "EUR", "USD", day)
 		var se *fx.StatusError
 		if !errors.As(err, &se) || se.Status != http.StatusFound || leaked {
 			t.Fatalf("%s client: err=%v leaked=%v, want the 302 returned without following it", name, err, leaked)
 		}
+	}
+}
+
+func signerAndVerifier(t *testing.T) (*tenant.ServiceSigner, *tenant.ServiceVerifier) {
+	t.Helper()
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	signer, err := tenant.NewServiceSigner("payables", priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return signer, tenant.NewServiceVerifier("fx", map[string]ed25519.PublicKey{"payables": pub})
+}
+
+func TestRate_SignsWithOnlyTheRateLookupDutyAndNeverForwardsTheUser(t *testing.T) {
+	signer, verifier := signerAndVerifier(t)
+	var got http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		_, _ = w.Write([]byte(`{"rate":"1.0825"}`))
+	}))
+	defer srv.Close()
+
+	rate, err := fx.New(srv.URL, "", nil).WithSigner(signer).Rate(ctx(), entity, "EUR", "USD", day)
+
+	if err != nil || rate.String() != "1.0825" {
+		t.Fatalf("rate %s err %v", rate, err)
+	}
+	for _, h := range []string{tenant.HeaderTenant, tenant.HeaderLegalEntity, tenant.HeaderUser, tenant.HeaderDuties} {
+		if got.Get(h) != "" {
+			t.Errorf("%s must not be sent with a service token", h)
+		}
+	}
+	claims, err := verifier.Verify(got.Get(tenant.HeaderServiceToken))
+	if err != nil || claims.Aud != "fx" || claims.Act != "u1" || claims.Le != entity || len(claims.Duties) != 1 || claims.Duties[0] != "fx.rate.lookup" {
+		t.Fatalf("claims %+v err %v", claims, err)
+	}
+}
+
+func TestRate_RefusesToSignForAnEntityOutsideTheUsersScope(t *testing.T) {
+	signer, _ := signerAndVerifier(t)
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	defer srv.Close()
+
+	_, err := fx.New(srv.URL, "", nil).WithSigner(signer).Rate(ctx(), "00000000-0000-0000-0000-0000000000b2", "EUR", "USD", day)
+
+	if err == nil || called {
+		t.Fatalf("err %v, called %v: a token for an entity the user cannot act in must never be sent", err, called)
 	}
 }

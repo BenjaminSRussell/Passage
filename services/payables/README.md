@@ -88,7 +88,7 @@ Configuration: `AP_CONTROL_ACCOUNT` (default `2000`) and `LEDGER_URL` (unset: re
 
 `GET /v1/payables/open-items` and `GET /v1/payables/open-items/{id}` (duty `open-item.read`) read the open-item store. The list filters by `vendor`, `due_from`, `due_to`, `currency` and `status`, is ordered by due date then id and pages with `limit` (1 to 200, default 50) and the opaque `cursor` returned as `nextCursor`. Every request names its legal entity (`legal_entity` or the caller's single legal-entity scope); an unscoped caller without `legal_entity` gets 400, and an entity outside the caller's scope gets 403. With `value_in=USD` each item carries a `valuation` (open amount times the spot rate of today, rounded to the currency's minor unit).
 
-Rates come from `GET /v1/fx/rates` of the fx service (`internal/fx`, same adapter shape as `internal/ledger`). The call forwards the caller's tenant, legal-entity, user and duty headers, so the caller also needs the fx duty `View exchange rates`; a service identity (#226) will replace the forwarding. A pair without a rate is a 422 (`PAY-0002`), a caller fx refuses is a 403, anything else is a 502.
+Rates come from `GET /v1/fx/rates` of the fx service (`internal/fx`, same adapter shape as `internal/ledger`). With a service signing key (`PASSAGE_SERVICE_SIGNING_KEY[_FILE]`) the call carries a signed service token holding only `fx.rate.lookup` for the request's legal entity, so the caller needs no fx duty (#305); without a key it forwards the caller's headers and the caller needs `View exchange rates`. A pair without a rate is a 422 (`PAY-0002`), a caller fx refuses is a 403, anything else is a 502.
 
 `POST /v1/payables/payment-proposals` (duty `payment-proposal.write`) builds a payment proposal for a legal entity:
 

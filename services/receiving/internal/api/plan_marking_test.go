@@ -30,7 +30,7 @@ type purchasingDouble struct {
 	rejectAt map[int]bool
 }
 
-func (p *purchasingDouble) List(context.Context, string) ([]domain.InvoicingPlan, error) {
+func (p *purchasingDouble) List(context.Context, string, string) ([]domain.InvoicingPlan, error) {
 	out := make([]domain.InvoicingPlan, len(p.plans))
 	for i, pl := range p.plans {
 		pl.Rows = append([]domain.PlanRow(nil), pl.Rows...)

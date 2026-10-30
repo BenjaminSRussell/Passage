@@ -17,7 +17,10 @@ import (
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 )
 
-const audience = "purchasing"
+const (
+	audience          = "purchasing"
+	dutyPlanRowSettle = "procurement.invoicing-plan.settle"
+)
 
 type settlementBody struct {
 	SettlementRef string `json:"settlementRef"`
@@ -48,7 +51,7 @@ func (c *Client) MarkInvoiced(ctx context.Context, legalEntityID, orderID string
 		return fmt.Errorf("%s: %w", what, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if _, err := c.signer.Apply(req, principal, audience, legalEntityID); err != nil {
+	if _, err := c.signer.ApplyDuties(req, principal, audience, legalEntityID, []string{dutyPlanRowSettle}); err != nil {
 		return fmt.Errorf("%s: %w", what, err)
 	}
 	resp, err := c.http.Do(req)

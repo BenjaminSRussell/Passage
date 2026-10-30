@@ -22,7 +22,7 @@ has_route_permissions(spec) if {
 }
 
 test_all_seeded_duties_allow_their_declared_permissions if {
-	count(data.duties) == 116
+	count(data.duties) == 119
 	every duty, spec in data.duties {
 		has_route_permissions(spec)
 		every permission in spec.permissions {
@@ -517,7 +517,7 @@ test_service_grants_hold_no_flag_or_all_scope_duty if {
 }
 
 test_receiving_purchasing_grant_reaches_only_the_plan_row_settlement_route if {
-	data.service_grants.receiving.purchasing == ["procurement.invoicing-plan.settle"]
+	data.service_grants.receiving.purchasing == ["procurement.invoicing-plan.settle", "procurement.purchase-order.lookup"]
 	allowed("procurement.invoicing-plan.settle", "PUT", "/v1/procurement/purchase-orders/po-1/lines/1/invoicing-plan/rows/2/settlement")
 	not allowed("procurement.invoicing-plan.settle", "GET", "/v1/procurement/purchase-orders/po-1/lines/1/invoicing-plan/rows/2/settlement")
 	not allowed("procurement.invoicing-plan.settle", "PUT", "/v1/procurement/purchase-orders/po-1/lines/1/invoicing-plan")
@@ -526,6 +526,73 @@ test_receiving_purchasing_grant_reaches_only_the_plan_row_settlement_route if {
 	not allowed("procurement.invoicing-plan.settle", "POST", "/v1/procurement/purchase-orders")
 	not allowed("procurement.invoicing-plan.settle", "POST", "/v1/ledger/journal-entries")
 	not allowed("PurchaseOrderMaintain", "PUT", "/v1/procurement/purchase-orders/po-1/lines/1/invoicing-plan/rows/2/settlement")
+}
+
+test_service_only_read_duties_are_not_offered_as_the_missing_duty if {
+	every duty in ["procurement.purchase-order.lookup", "inventory.ownership-change.read", "fx.rate.lookup"] {
+		data.duties[duty].service_only
+	}
+	result := decision with input as {
+		"subject": {"tenant_id": "tenant-a", "user_id": "user-a"},
+		"action": "GET",
+		"resource": "/v1/fx/rates",
+	}
+		with data.assignments as {"tenant-a": {"user-a": []}}
+	result.duty_missing == "View exchange rates"
+	result2 := decision with input as {
+		"subject": {"tenant_id": "tenant-a", "user_id": "user-a"},
+		"action": "GET",
+		"resource": "/v1/procurement/purchase-orders/po-1/invoicing-plans",
+	}
+		with data.assignments as {"tenant-a": {"user-a": []}}
+	result2.duty_missing == "PurchaseOrderInquire"
+	result3 := decision with input as {
+		"subject": {"tenant_id": "tenant-a", "user_id": "user-a"},
+		"action": "PUT",
+		"resource": "/v1/procurement/purchase-orders/po-1/lines/1/invoicing-plan/rows/2/settlement",
+	}
+		with data.assignments as {"tenant-a": {"user-a": []}}
+	result3.duty_missing == "procurement.invoicing-plan.settle"
+}
+
+test_receiving_purchasing_lookup_grant_reaches_only_the_order_and_plan_reads if {
+	"procurement.purchase-order.lookup" in data.service_grants.receiving.purchasing
+	allowed("procurement.purchase-order.lookup", "GET", "/v1/procurement/purchase-orders/po-1")
+	allowed("procurement.purchase-order.lookup", "GET", "/v1/procurement/purchase-orders/po-1/invoicing-plans")
+	not allowed("procurement.purchase-order.lookup", "GET", "/v1/procurement/purchase-orders")
+	not allowed("procurement.purchase-order.lookup", "GET", "/v1/procurement/purchase-orders/po-1/versions")
+	not allowed("procurement.purchase-order.lookup", "GET", "/v1/procurement/purchase-orders/po-1/lines/1/invoicing-plan")
+	not allowed("procurement.purchase-order.lookup", "GET", "/v1/procurement/scheduling-agreements")
+	not allowed("procurement.purchase-order.lookup", "POST", "/v1/procurement/purchase-orders")
+	not allowed("procurement.purchase-order.lookup", "PATCH", "/v1/procurement/purchase-orders/po-1")
+	not allowed("procurement.purchase-order.lookup", "POST", "/v1/procurement/purchase-orders/po-1:approve")
+	not allowed("procurement.purchase-order.lookup", "PUT", "/v1/procurement/purchase-orders/po-1/lines/1/invoicing-plan/rows/2/settlement")
+	not allowed("procurement.purchase-order.lookup", "POST", "/v1/ledger/journal-entries")
+	not allowed("procurement.invoicing-plan.settle", "GET", "/v1/procurement/purchase-orders/po-1")
+}
+
+test_receiving_inventory_grant_reaches_only_journal_reads if {
+	data.service_grants.receiving.inventory == ["inventory.ownership-change.read"]
+	allowed("inventory.ownership-change.read", "GET", "/v1/inventory/journals")
+	allowed("inventory.ownership-change.read", "GET", "/v1/inventory/journals/j-1")
+	not allowed("inventory.ownership-change.read", "POST", "/v1/inventory/journals")
+	not allowed("inventory.ownership-change.read", "POST", "/v1/inventory/journals/j-1:post")
+	not allowed("inventory.ownership-change.read", "POST", "/v1/inventory/journals/j-1:reverse")
+	not allowed("inventory.ownership-change.read", "GET", "/v1/inventory/onhand")
+	not allowed("inventory.ownership-change.read", "GET", "/v1/inventory/transactions")
+	not allowed("inventory.ownership-change.read", "GET", "/v1/inventory/consignment/stock")
+	not allowed("inventory.ownership-change.read", "POST", "/v1/ledger/journal-entries")
+}
+
+test_payables_fx_grant_reaches_only_rate_lookup if {
+	data.service_grants.payables.fx == ["fx.rate.lookup"]
+	allowed("fx.rate.lookup", "GET", "/v1/fx/rates")
+	not allowed("fx.rate.lookup", "POST", "/v1/fx/rates")
+	not allowed("fx.rate.lookup", "GET", "/v1/fx/rates/history")
+	not allowed("fx.rate.lookup", "GET", "/v1/fx/rate-types")
+	not allowed("fx.rate.lookup", "POST", "/v1/fx/convert")
+	not allowed("fx.rate.lookup", "POST", "/v1/fx/providers/ecb:import")
+	not allowed("fx.rate.lookup", "POST", "/v1/ledger/journal-entries")
 }
 
 test_batch_service_grant_reaches_only_the_product_job_routes if {

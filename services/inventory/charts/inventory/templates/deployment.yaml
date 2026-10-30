@@ -37,6 +37,12 @@ spec:
                   key: DATABASE_URL
             - name: MIGRATE_ON_START
               value: {{ .Values.migrateOnStart | quote }}
+            - name: PASSAGE_SERVICE_NAME
+              value: inventory
+            {{- if .Values.serviceIdentity.publicKeys }}
+            - name: PASSAGE_SERVICE_PUBLIC_KEYS
+              value: {{ .Values.serviceIdentity.publicKeys | quote }}
+            {{- end }}
             - name: INV_NEGATIVE_DEFAULT
               value: {{ .Values.inventory.negativeDefault | quote }}
             - name: INV_RESERVATION_TTL_HOURS

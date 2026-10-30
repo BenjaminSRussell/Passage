@@ -79,7 +79,11 @@ func run(ctx context.Context, getenv func(string) string) error {
 		slog.Warn("payment runs are disabled", "reason", err)
 		poster = nil
 	}
-	a := api.New(pool, validator, time.Now).WithAging(items, balances, getenv("AP_CONTROL_ACCOUNT")).WithProposals(items, rateSource(getenv)).WithPaymentRuns(items, poster, profiles)
+	rates, err := rateSource(getenv)
+	if err != nil {
+		return err
+	}
+	a := api.New(pool, validator, time.Now).WithAging(items, balances, getenv("AP_CONTROL_ACCOUNT")).WithProposals(items, rates).WithPaymentRuns(items, poster, profiles)
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
@@ -128,16 +132,20 @@ func ledgerPoster(getenv func(string) string) (api.LedgerPoster, error) {
 	return c, nil
 }
 
-func rateSource(getenv func(string) string) api.RateSource {
+func rateSource(getenv func(string) string) (api.RateSource, error) {
 	url := getenv("FX_URL")
 	if url == "" {
-		return nil
+		return nil, nil
+	}
+	signer, err := tenant.ServiceSignerFromEnv(getenv)
+	if err != nil {
+		return nil, err
 	}
 	timeout := fx.Timeout
 	if v, err := time.ParseDuration(getenv("FX_TIMEOUT")); err == nil && v > 0 {
 		timeout = v
 	}
-	return fx.New(url, getenv("FX_RATE_TYPE"), &http.Client{Timeout: timeout})
+	return fx.New(url, getenv("FX_RATE_TYPE"), &http.Client{Timeout: timeout}).WithSigner(signer), nil
 }
 
 func addr(getenv func(string) string, key, fallback string) string {

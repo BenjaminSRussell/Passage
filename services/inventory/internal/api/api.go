@@ -29,18 +29,19 @@ import (
 
 // Privilege codes (<entity>.<action>; see README).
 const (
-	dutyRead          = "inventory.read"
-	dutyJournalWrite  = "inventory.journal.write"
-	dutyJournalPost   = "inventory.journal.post"
-	journalsPath      = "/v1/inventory/journals"
-	onHandPath        = "/v1/inventory/onhand"
-	idempotencyHeader = "Idempotency-Key"
-	ifMatchHeader     = "If-Match"
-	validationDetail  = "one or more fields are invalid"
-	codeValidation    = "COM-0001"
-	codePrecondition  = "COM-0428"
-	maxKeyLength      = 255
-	maxJournalPage    = 200
+	dutyRead                = "inventory.read"
+	dutyOwnershipChangeRead = "inventory.ownership-change.read"
+	dutyJournalWrite        = "inventory.journal.write"
+	dutyJournalPost         = "inventory.journal.post"
+	journalsPath            = "/v1/inventory/journals"
+	onHandPath              = "/v1/inventory/onhand"
+	idempotencyHeader       = "Idempotency-Key"
+	ifMatchHeader           = "If-Match"
+	validationDetail        = "one or more fields are invalid"
+	codeValidation          = "COM-0001"
+	codePrecondition        = "COM-0428"
+	maxKeyLength            = 255
+	maxJournalPage          = 200
 )
 
 var (
@@ -66,8 +67,9 @@ func New(s store.Store, post store.PostParams) *API {
 // Register mounts the routes on r.
 func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyJournalWrite)).Post(journalsPath, a.createJournal)
-	r.With(authz.RequireDuty(dutyRead)).Get(journalsPath, a.listJournals)
-	r.With(authz.RequireDuty(dutyRead)).Get(journalsPath+"/{id}", journalRoute(a.getJournal))
+	journalRead := r.With(authz.RequireAnyDuty(dutyRead, dutyOwnershipChangeRead))
+	journalRead.Get(journalsPath, a.listJournals)
+	journalRead.Get(journalsPath+"/{id}", journalRoute(a.getJournal))
 	r.With(authz.RequireDuty(dutyJournalWrite)).Post(journalsPath+"/{id}/lines:bulk", journalRoute(a.addLines))
 	r.With(authz.RequireDuty(dutyJournalPost)).Post(journalsPath+"/{id}:post", journalRoute(a.postJournal))
 	r.With(authz.RequireDuty(dutyRead)).Get(onHandPath, a.onHand)
@@ -266,7 +268,16 @@ func (a *API) getJournal(w http.ResponseWriter, r *http.Request, id string) {
 		a.failed(w, r, "get journal", err)
 		return
 	}
+	if ownershipChangeOnly(r) && j.Type != domain.JournalOwnershipChange {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, store.CodeJournalNotFound, "inventory journal not found"))
+		return
+	}
 	writeJournal(w, http.StatusOK, j)
+}
+
+func ownershipChangeOnly(r *http.Request) bool {
+	p, ok := tenant.FromContext(r.Context())
+	return ok && !p.HasDuty(dutyRead)
 }
 
 func (a *API) addLines(w http.ResponseWriter, r *http.Request, id string) {
@@ -303,6 +314,13 @@ func (a *API) listJournals(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	f := store.JournalFilter{Status: domain.JournalStatus(q.Get("status")), Type: domain.JournalType(q.Get("type")), Cursor: q.Get("cursor"), Limit: 50}
+	if ownershipChangeOnly(r) {
+		if f.Type != "" && f.Type != domain.JournalOwnershipChange {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "missing duty: "+dutyRead))
+			return
+		}
+		f.Type = domain.JournalOwnershipChange
+	}
 	fields := map[string]string{}
 	if f.Status != "" && !slices.Contains(domain.JournalStatuses, f.Status) {
 		fields["status"] = "unknown journal status"

@@ -250,7 +250,7 @@ func (a *API) runPlanSettlement(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, unavailable("invoicing plan lookup is not configured"))
 		return
 	}
-	po, err := a.loadPurchaseOrder(run.ctx, req.PurchaseOrderID)
+	po, err := a.loadPurchaseOrder(run.ctx, req.LegalEntityID, req.PurchaseOrderID)
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -259,7 +259,7 @@ func (a *API) runPlanSettlement(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, &domain.Error{Code: domain.CodeInvalidReceipt, Detail: "the purchase order belongs to another legal entity"})
 		return
 	}
-	plans, err := a.ports.InvoicingPlans.List(run.ctx, po.ID)
+	plans, err := a.ports.InvoicingPlans.List(run.ctx, req.LegalEntityID, po.ID)
 	if err != nil {
 		writeError(w, r, a.planLookupProblem(run.ctx, err, po.ID))
 		return
@@ -345,7 +345,7 @@ func (a *API) runConsignmentSettlement(w http.ResponseWriter, r *http.Request) {
 			run.body.HasMore = true
 			break
 		}
-		change, err := a.ports.OwnershipChanges.Get(run.ctx, id)
+		change, err := a.ports.OwnershipChanges.Get(run.ctx, req.LegalEntityID, id)
 		if err != nil {
 			writeError(w, r, a.inventoryProblem(run.ctx, err))
 			return

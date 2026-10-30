@@ -359,11 +359,11 @@ func purchaseOrderReferenceFields(req evaluateRequest) map[string]string {
 	return fields
 }
 
-func (a *API) loadPurchaseOrder(ctx context.Context, id string) (domain.PurchaseOrder, error) {
+func (a *API) loadPurchaseOrder(ctx context.Context, legalEntityID, id string) (domain.PurchaseOrder, error) {
 	if a.ports.PurchaseOrders == nil {
 		return domain.PurchaseOrder{}, httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "purchase order lookup is not configured")
 	}
-	po, err := a.ports.PurchaseOrders.Get(ctx, id)
+	po, err := a.ports.PurchaseOrders.Get(ctx, legalEntityID, id)
 	switch {
 	case errors.Is(err, domain.ErrPurchaseOrderNotFound):
 		return domain.PurchaseOrder{}, httpx.NewProblem(http.StatusNotFound, "RCV-NF-004", "purchase order not found")
@@ -384,7 +384,7 @@ func (a *API) fillFromPurchaseOrder(ctx context.Context, req *evaluateRequest) (
 	if !slices.ContainsFunc(req.Lines, func(l lineRequest) bool { return l.POLineNo != nil }) {
 		return fields, nil
 	}
-	po, err := a.loadPurchaseOrder(ctx, req.PurchaseOrderID)
+	po, err := a.loadPurchaseOrder(ctx, "", req.PurchaseOrderID)
 	if err != nil {
 		return nil, err
 	}

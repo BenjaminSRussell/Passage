@@ -367,6 +367,33 @@ func TestMintRequiresExplicitEntityInTheUsersScope(t *testing.T) {
 	}
 }
 
+func TestAllScopeUserGetsOnlyReadLookupTokensForAnExplicitEntity(t *testing.T) {
+	const other = "0190a5f2-7b1c-7d3e-8a4f-1234567890ad"
+	allScope := tenant.Principal{TenantID: validTenant, UserID: "u", Duties: map[string]struct{}{tenant.DutyAllScope: {}}}
+	_, priv, _ := ed25519.GenerateKey(nil)
+	receiving, _ := tenant.NewServiceSigner("receiving", priv)
+	payables, _ := tenant.NewServiceSigner("payables", priv)
+	for _, read := range []struct {
+		signer      *tenant.ServiceSigner
+		aud, duty   string
+		wholeIsRead bool
+	}{
+		{receiving, "purchasing", "procurement.purchase-order.lookup", false},
+		{receiving, "inventory", "inventory.ownership-change.read", true},
+		{payables, "fx", "fx.rate.lookup", true},
+	} {
+		if _, err := read.signer.MintDuties(read.aud, allScope, other, []string{read.duty}); err != nil {
+			t.Errorf("%s: an ALL-scope read token may name any entity: %v", read.duty, err)
+		}
+		if _, err := read.signer.Mint(read.aud, allScope, other); (err == nil) != read.wholeIsRead {
+			t.Errorf("%s: whole-grant mint for an ALL-scope user = %v, want success=%v", read.aud, err, read.wholeIsRead)
+		}
+	}
+	if _, err := receiving.MintDuties("purchasing", allScope, other, []string{"procurement.invoicing-plan.settle"}); err == nil {
+		t.Fatal("an ALL-scope user must not get a settlement token")
+	}
+}
+
 func TestKeyRotationSeveralKeysPerIssuerSelectedByKid(t *testing.T) {
 	oldPub, oldPriv, _ := ed25519.GenerateKey(nil)
 	newPub, newPriv, _ := ed25519.GenerateKey(nil)

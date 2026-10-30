@@ -2,6 +2,7 @@ package inventory
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -63,7 +64,7 @@ func respond(status int, body string) func(http.ResponseWriter, *http.Request) {
 func TestGet_MapsAnOwnershipChangeFromTheJournalAndItsGLEntry(t *testing.T) {
 	client, rec := serve(t, respond(http.StatusOK, journalJSON))
 
-	got, err := client.Get(testCtx(), journalID)
+	got, err := client.Get(testCtx(), legalEntityID, journalID)
 
 	if err != nil {
 		t.Fatal(err)
@@ -97,7 +98,7 @@ func TestGet_RefusesJournalsItCannotSettle(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			client, _ := serve(t, respond(http.StatusOK, tc.body))
 
-			if got, err := client.Get(testCtx(), journalID); err == nil {
+			if got, err := client.Get(testCtx(), legalEntityID, journalID); err == nil {
 				t.Fatalf("got %+v", got)
 			}
 		})
@@ -112,7 +113,7 @@ func TestGet_MapsStatuses(t *testing.T) {
 	for _, tc := range tests {
 		client, _ := serve(t, respond(tc.status, `{}`))
 
-		_, err := client.Get(testCtx(), journalID)
+		_, err := client.Get(testCtx(), legalEntityID, journalID)
 
 		if err == nil || (tc.is != nil && !errors.Is(err, tc.is)) {
 			t.Fatalf("status %d err %v", tc.status, err)
@@ -161,7 +162,7 @@ func TestClient_DoesNotFollowRedirectsWithTheCallersIdentity(t *testing.T) {
 	t.Cleanup(target.Close)
 	client, _ := serve(t, func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, target.URL, http.StatusFound) })
 
-	_, getErr := client.Get(testCtx(), journalID)
+	_, getErr := client.Get(testCtx(), legalEntityID, journalID)
 	_, _, listErr := client.List(testCtx(), legalEntityID)
 
 	if followed || getErr == nil || listErr == nil {
@@ -207,5 +208,58 @@ func TestPathsMatchTheInventoryRouteTable(t *testing.T) {
 	}
 	if !strings.Contains(string(api), `"inventory.read"`) || domain.InventoryJournalsPath != "/v1/inventory/journals" || domain.InventoryJournalPathTmpl != "/v1/inventory/journals/%s" {
 		t.Fatal("journal paths no longer match the inventory service")
+	}
+}
+
+func signedClient(t *testing.T, handler func(w http.ResponseWriter, r *http.Request)) (*Client, *recorder, *tenant.ServiceVerifier) {
+	t.Helper()
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	signer, err := tenant.NewServiceSigner("receiving", priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, rec := serve(t, handler)
+	return client.WithSigner(signer), rec, tenant.NewServiceVerifier("inventory", map[string]ed25519.PublicKey{"receiving": pub})
+}
+
+func endUserCtx(scope string) context.Context {
+	return tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: scope, UserID: "user-1", Duties: map[string]struct{}{"ReceivingPost": {}}})
+}
+
+func TestSigned_ReadsSendOnlyTheOwnershipChangeDutyForTheSettlementEntity(t *testing.T) {
+	client, rec, verifier := signedClient(t, respond(http.StatusOK, journalJSON))
+	ctx := endUserCtx(legalEntityID + "," + otherEntityID)
+
+	if _, err := client.Get(ctx, legalEntityID, journalID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := client.List(ctx, legalEntityID); err != nil && !strings.Contains(err.Error(), "journal page") {
+		t.Fatal(err)
+	}
+
+	for _, r := range rec.requests {
+		for _, h := range []string{tenant.HeaderTenant, tenant.HeaderLegalEntity, tenant.HeaderUser, tenant.HeaderDuties} {
+			if r.Header.Get(h) != "" {
+				t.Errorf("%s must not be sent with a service token", h)
+			}
+		}
+		claims, err := verifier.Verify(r.Header.Get(tenant.HeaderServiceToken))
+		if err != nil || claims.Aud != "inventory" || claims.Act != "user-1" || claims.Le != legalEntityID || len(claims.Duties) != 1 || claims.Duties[0] != "inventory.ownership-change.read" {
+			t.Fatalf("claims %+v err %v", claims, err)
+		}
+	}
+	if len(rec.requests) != 2 {
+		t.Fatalf("%d requests", len(rec.requests))
+	}
+}
+
+func TestSigned_RefusesAnEntityOutsideTheUsersScope(t *testing.T) {
+	client, rec, _ := signedClient(t, respond(http.StatusOK, journalJSON))
+
+	_, getErr := client.Get(endUserCtx(legalEntityID), otherEntityID, journalID)
+	_, _, listErr := client.List(endUserCtx(legalEntityID), otherEntityID)
+
+	if getErr == nil || listErr == nil || len(rec.requests) != 0 {
+		t.Fatalf("get %v list %v requests %d: a token for an entity the user cannot act in must never be sent", getErr, listErr, len(rec.requests))
 	}
 }
