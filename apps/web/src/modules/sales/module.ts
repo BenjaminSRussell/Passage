@@ -24,7 +24,7 @@ const sales: PassageModule = {
   description:
     "Quote and convert to orders, enter, confirm, change and cancel sales orders, apply holds and work the release queue, maintain credit profiles, product listings, supplementary items, product proposals and sales agreements, check available-to-promise, reconcile scheduling releases and preview backorder runs.",
   routes: [
-    { path: "/sales", element: createElement(OrdersPage), handle: { title: "Sales orders" } },
+    { path: "/sales", element: createElement(OrdersPage), handle: { title: "Sales orders", duty: "sales.order.read" } },
     { path: "/sales/orders", element: createElement(OrdersPage) },
     { path: "/sales/orders/new", element: createElement(NewOrderPage), handle: { title: "New sales order" } },
     { path: "/sales/orders/:id", element: createElement(OrderDetailPage), handle: { title: "Sales order" } },

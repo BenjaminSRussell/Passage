@@ -24,7 +24,7 @@ const service: PassageModule = {
   title: "Service",
   description: "Open service cases with entitlement and SLA clocks, pause and resolve them, maintain service agreements and SLA profiles, run work orders through to billing and follow-up, track SLA attainment and first-time fix, keep the installed base with its warranties, plan activities on any record, maintain the knowledge base, run HR, collections, audit and other cases through their category's stages, recover warranty cost from vendors with supplier claims, and turn inbound email into cases.",
   routes: [
-    { path: "/service", element: createElement(CasesPage), handle: { title: "Service cases" } },
+    { path: "/service", element: createElement(CasesPage), handle: { title: "Service cases", duty: "SvcInquire" } },
     { path: "/service/cases", element: createElement(CasesPage) },
     { path: "/service/cases/new", element: createElement(OpenCasePage), handle: { title: "Open service case" } },
     { path: "/service/cases/:id", element: createElement(CaseDetailPage), handle: { title: "Service case" } },

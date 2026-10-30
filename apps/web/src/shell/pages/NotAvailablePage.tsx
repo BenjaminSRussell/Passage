@@ -6,7 +6,7 @@ export function NotAvailablePage() {
   return (
     <Card>
       <EmptyState
-        icon="search"
+        icon="lock"
         headingLevel={2}
         title={copy.notAvailable.title}
         description={copy.notAvailable.description}

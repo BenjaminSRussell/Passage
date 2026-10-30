@@ -21,7 +21,7 @@ const quality: PassageModule = {
   description:
     "Quality orders with results, incoming vendor certificates, physical samples, usage decisions and certificates of analysis, receipts against source inspection, nonconformances with their 8D correction, test groups, instruments and their calibration due list, quality associations, AQL sampling, product compliance, stability studies with their lifecycle and SPC charts.",
   routes: [
-    { path: "/quality", element: createElement(OrdersPage), handle: { title: "Quality orders" } },
+    { path: "/quality", element: createElement(OrdersPage), handle: { title: "Quality orders", duty: "QM_VIEW" } },
     { path: "/quality/orders", element: createElement(OrdersPage) },
     { path: "/quality/orders/new", element: createElement(NewOrderPage), handle: { title: "New quality order" } },
     { path: "/quality/orders/:id", element: createElement(OrderDetailPage), handle: { title: "Quality order" } },

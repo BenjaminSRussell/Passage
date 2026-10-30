@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import policyJson from "../../../../policies/authz/data.json?raw";
+import { hasEffectiveDutyScope, routeDuty } from "../shell/dutyGate";
 import { loadModules } from "./registry";
 import { UNSEEDED_DUTIES } from "./unseededDuties";
 
@@ -20,6 +21,18 @@ describe("module registry", () => {
     for (const m of loadModules()) {
       expect(m.description, m.id).toBeTruthy();
     }
+  });
+
+  it("leaves no route of a gated module outside every nav prefix without its own duty", () => {
+    const modules = loadModules();
+    const unguarded = modules
+      .filter((m) => m.nav.some((n) => n.duty !== undefined))
+      .flatMap((m) =>
+        m.routes
+          .filter((r) => r.path !== undefined && r.path !== "*" && routeDuty(r) === undefined && !hasEffectiveDutyScope(r.path, modules))
+          .map((r) => `${m.id} ${r.path}`),
+      );
+    expect(unguarded).toEqual([]);
   });
 
   describe("nav duties", () => {

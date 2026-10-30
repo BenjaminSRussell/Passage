@@ -29,7 +29,7 @@ const shopfloor: PassageModule = {
     { path: "/shopfloor/workers", element: createElement(WorkersPage), handle: { title: "Workers" } },
     { path: "/shopfloor/workers/new", element: createElement(NewWorkerPage), handle: { title: "New worker" } },
     { path: "/shopfloor/workers/:id", element: createElement(WorkerDetailPage), handle: { title: "Worker" } },
-    { path: "/shopfloor/bundles/:id", element: createElement(BundleDetailPage), handle: { title: "Bundle" } },
+    { path: "/shopfloor/bundles/:id", element: createElement(BundleDetailPage), handle: { title: "Bundle", duty: "shopfloor.view" } },
     { path: "/shopfloor/kiosk", element: createElement(KioskPage), handle: { title: "Kiosk" } },
     { path: "/shopfloor/jobs", element: createElement(JobsPage), handle: { title: "Dispatch list" } },
     { path: "/shopfloor/jobs/:id", element: createElement(JobDetailPage), handle: { title: "Job" } },

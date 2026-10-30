@@ -17,8 +17,13 @@ export default defineConfig(({ mode, command }) => {
     define: {
       __PASSAGE_REMOTES__: JSON.stringify(federationRemotes),
       __PASSAGE_DEV_DUTIES__: JSON.stringify(command === "serve" && mode !== "test" ? (env.PASSAGE_DEV_DUTIES ?? "") : ""),
+      __PASSAGE_DEV_SHOW_ALL_NAV__: JSON.stringify(command === "serve" && mode !== "test" && env.PASSAGE_DEV_SHOW_ALL_NAV === "1"),
     },
-    server: { port: 5173, proxy: devProxy(env), fs: { allow: ["../warehouse-mobile/public", "../../policies/authz", "."] } },
+    server: {
+      port: 5173,
+      proxy: devProxy(env),
+      fs: { allow: ["../warehouse-mobile/public", ...(mode === "test" ? ["../../policies/authz"] : []), "."] },
+    },
     test: { environment: "jsdom", globals: true, setupFiles: ["./src/test-setup.ts"], exclude: [...configDefaults.exclude, "e2e/**"] },
   };
 });

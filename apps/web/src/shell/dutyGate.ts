@@ -1,9 +1,13 @@
-import { matchPath } from "react-router-dom";
+import { matchPath, type RouteObject } from "react-router-dom";
 import type { NavItem, PassageModule } from "../modules/registry";
+
+declare const __PASSAGE_DEV_SHOW_ALL_NAV__: boolean | undefined;
+
+const showAllNav = typeof __PASSAGE_DEV_SHOW_ALL_NAV__ === "boolean" && __PASSAGE_DEV_SHOW_ALL_NAV__;
 
 // UX hardening only: hiding entries and guarding routes never replaces server-side authorization.
 export function holdsDuty(duties: readonly string[], duty: string | undefined): boolean {
-  return duty === undefined || duties.includes(duty);
+  return showAllNav || duty === undefined || duties.includes(duty);
 }
 
 export function visibleNav(items: NavItem[], duties: readonly string[]): NavItem[] {
@@ -16,7 +20,11 @@ export function visibleModules(modules: PassageModule[], duties: readonly string
     .filter((m) => m.nav.length > 0);
 }
 
-export function requiredDuty(pathname: string, modules: PassageModule[]): string | undefined {
+export function routeDuty(route: RouteObject): string | undefined {
+  return (route.handle as { duty?: string } | undefined)?.duty;
+}
+
+function longestNavMatch(pathname: string, modules: PassageModule[]): NavItem | undefined {
   let best: NavItem | undefined;
   for (const module of modules) {
     for (const entry of module.nav) {
@@ -26,5 +34,21 @@ export function requiredDuty(pathname: string, modules: PassageModule[]): string
       }
     }
   }
-  return best?.duty;
+  return best;
+}
+
+export function hasEffectiveDutyScope(pathname: string, modules: PassageModule[]): boolean {
+  return longestNavMatch(pathname, modules) !== undefined;
+}
+
+export function requiredDuty(pathname: string, modules: PassageModule[]): string | undefined {
+  for (const module of modules) {
+    for (const route of module.routes) {
+      const declared = routeDuty(route);
+      if (declared !== undefined && route.path !== undefined && matchPath({ path: route.path, end: true }, pathname) !== null) {
+        return declared;
+      }
+    }
+  }
+  return longestNavMatch(pathname, modules)?.duty;
 }

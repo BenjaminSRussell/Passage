@@ -16,6 +16,16 @@ test.describe("landmarks and headings", () => {
   }
 });
 
+test.describe("duty gating", () => {
+  test("a gated URL without the duty shows the not-available page and no nav entry", async ({ page }) => {
+    const shell = new ShellPage(page);
+    await shell.goto("/inventory/onhand");
+    await expect(shell.title).toHaveText("Page not available");
+    await expect(page.getByRole("heading", { name: "This page isn't available to you" })).toBeVisible();
+    await expect(shell.workspaceNav.getByRole("link", { name: "On-hand" })).toHaveCount(0);
+  });
+});
+
 test.describe("skip link", () => {
   test("is the first focusable element and moves focus to main", async ({ page }) => {
     const shell = new ShellPage(page);
