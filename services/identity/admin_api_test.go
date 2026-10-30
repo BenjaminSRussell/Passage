@@ -24,6 +24,7 @@ const (
 	dutyTenants       = "Maintain tenants"
 	dutyLegalEntities = "Maintain legal entities"
 	dutyRoles         = "Maintain security roles"
+	dutyAllScope      = "org.switcher.all_scope"
 )
 
 type caller struct {
@@ -50,10 +51,20 @@ func newAdminFixture(t *testing.T) *adminFixture {
 		t.Fatal(err)
 	}
 	f := &adminFixture{admin: admin, app: app, tenantA: tenantA, tenantB: tenantB, operator: testkit.TenantID(9)}
+	ctx := context.Background()
+	for _, stmt := range []string{
+		`insert into identity_tenants (tenant_id, realm_name, display_name) values ($1, 'operator', 'Operator')`,
+		`insert into identity_operator (tenant_id) values ($1)`,
+		`insert into identity_users (tenant_id, user_id, idp_subject) values ($1, '` + userID + `', 'subject-operator')`,
+	} {
+		if _, err := admin.Exec(ctx, stmt, f.operator); err != nil {
+			t.Fatal(err)
+		}
+	}
 	r := chi.NewRouter()
-	identity.NewTenantsAPI(admin, f.operator).Register(r)
+	identity.NewTenantsAPI(app, f.operator).Register(r)
 	identity.NewLegalEntitiesAPI(app).Register(r)
-	identity.NewRoleAssignmentsAPI(app, catalogue).Register(r)
+	identity.NewRoleAssignmentsAPI(app, catalogue, f.operator).Register(r)
 	identity.NewEffectivePermissionsAPI(app, catalogue).Register(r)
 	f.router = r
 	return f
@@ -68,6 +79,9 @@ func (f *adminFixture) do(c caller, method, path string, body any) *httptest.Res
 		reader = bytes.NewReader(raw)
 	}
 	req := httptest.NewRequest(method, path, reader)
+	if body == nil {
+		req.ContentLength = -1
+	}
 	held := map[string]struct{}{}
 	for _, d := range c.duties {
 		held[d] = struct{}{}
@@ -83,7 +97,7 @@ func (f *adminFixture) operatorCaller() caller {
 }
 
 func (f *adminFixture) adminOf(tenantID string, duties ...string) caller {
-	return caller{tenantID: tenantID, legalEntity: "*", user: "admin-1", duties: duties}
+	return caller{tenantID: tenantID, user: "admin-1", duties: append([]string{dutyAllScope}, duties...)}
 }
 
 func decode[T any](t *testing.T, rec *httptest.ResponseRecorder, want int) T {
@@ -133,6 +147,8 @@ type assignmentRow struct {
 	LegalEntityID string     `json:"legalEntityId"`
 	ValidFrom     time.Time  `json:"validFrom"`
 	ValidTo       *time.Time `json:"validTo"`
+	Reason        string     `json:"reason"`
+	GrantedBy     string     `json:"grantedBy"`
 }
 
 type pageOf[T any] struct {
@@ -179,10 +195,10 @@ func TestTenantsAreOperatorOnly(t *testing.T) {
 		}
 		first := decode[pageOf[tenantRow]](t, f.do(f.operatorCaller(), http.MethodGet, "/v1/tenants?limit=2", nil), http.StatusOK)
 		if len(first.Items) != 2 || first.Next == "" {
-			t.Fatalf("first page = %+v, want 2 items and a cursor (3 tenants exist)", first)
+			t.Fatalf("first page = %+v, want 2 items and a cursor (operator, A, B and the new tenant exist)", first)
 		}
 		second := decode[pageOf[tenantRow]](t, f.do(f.operatorCaller(), http.MethodGet, "/v1/tenants?limit=2&after="+first.Next, nil), http.StatusOK)
-		if len(second.Items) != 1 || second.Next != "" || second.Items[0].TenantID == first.Items[0].TenantID {
+		if len(second.Items) != 2 || second.Next != "" || second.Items[0].TenantID == first.Items[0].TenantID {
 			t.Fatalf("second page = %+v", second)
 		}
 	})
@@ -195,6 +211,10 @@ func TestTenantsAreOperatorOnly(t *testing.T) {
 		audit, events := f.auditAndEvents(t, tenantID)
 		if len(audit) != 1 || audit[0] != "tenant.created|operator-1" || len(events) != 1 || events[0] != "dev.passage.identity.tenant.created.v1" {
 			t.Fatalf("audit = %v events = %v", audit, events)
+		}
+		operatorAudit, operatorEvents := f.auditAndEvents(t, f.operator)
+		if len(operatorAudit) != 1 || operatorAudit[0] != "tenant.created|operator-1" || len(operatorEvents) != 0 {
+			t.Fatalf("operator audit = %v events = %v, want one tenant.created row and no event", operatorAudit, operatorEvents)
 		}
 	})
 
@@ -240,6 +260,37 @@ func TestTenantsAreOperatorOnly(t *testing.T) {
 		c.user = ""
 		wantProblem(t, f.do(c, http.MethodPost, "/v1/tenants", map[string]string{"realmName": "no-actor", "displayName": "x"}), http.StatusUnauthorized, "AUTH-0001")
 	})
+
+	t.Run("a failed create leaves no tenant or audit row", func(t *testing.T) {
+		before, _ := f.auditAndEvents(t, f.operator)
+		wantProblem(t, f.do(f.operatorCaller(), http.MethodPost, "/v1/tenants", body), http.StatusConflict, "IDN-TENANT-EXISTS")
+		after, _ := f.auditAndEvents(t, f.operator)
+		if len(before) != len(after) {
+			t.Fatalf("operator audit %d -> %d", len(before), len(after))
+		}
+	})
+}
+
+func TestOperatorTableIsOperatorReadOnly(t *testing.T) {
+	f := newAdminFixture(t)
+	for tenantID, want := range map[string]int{f.operator: 1, f.tenantA: 0} {
+		if got := count(t, f.app, tenantID, "", `select count(*) from identity_operator`); got != want {
+			t.Errorf("tenant %s sees %d identity_operator rows, want %d", tenantID, got, want)
+		}
+	}
+	if got := count(t, f.app, f.tenantA, "", `select count(*) from identity_tenants`); got != 1 {
+		t.Errorf("a non-operator tenant sees %d tenants, want only its own", got)
+	}
+	if got := count(t, f.app, f.operator, "", `select count(*) from identity_tenants`); got != 3 {
+		t.Errorf("operator sees %d tenants, want all 3", got)
+	}
+	for _, stmt := range []string{`insert into identity_operator (tenant_id) values ($1)`, `delete from identity_operator where tenant_id = $1`, `update identity_tenants set status = 'suspended' where tenant_id = $1`} {
+		err := asTenant(t, f.app, f.operator, "*", func(tx pgx.Tx) error {
+			_, err := tx.Exec(context.Background(), stmt, f.tenantA)
+			return err
+		})
+		requireDenied(t, err, "passage_app "+stmt)
+	}
 }
 
 func TestLegalEntities(t *testing.T) {
@@ -301,6 +352,12 @@ func TestLegalEntities(t *testing.T) {
 		wantProblem(t, f.do(c, http.MethodGet, "/v1/legal-entities/not-a-uuid", nil), http.StatusBadRequest, "COM-0001")
 	})
 
+	t.Run("create needs an authenticated actor", func(t *testing.T) {
+		noActor := f.adminOf(f.tenantA, dutyLegalEntities)
+		noActor.user = ""
+		wantProblem(t, f.do(noActor, http.MethodPost, "/v1/legal-entities", map[string]string{"code": "NA", "displayName": "x"}), http.StatusUnauthorized, "AUTH-0001")
+	})
+
 	t.Run("duty is required", func(t *testing.T) {
 		for _, duties := range [][]string{nil, {dutyRoles}} {
 			if rec := f.do(f.adminOf(f.tenantA, duties...), http.MethodGet, "/v1/legal-entities", nil); rec.Code != http.StatusForbidden {
@@ -326,7 +383,7 @@ func TestRoleAssignmentLifecycle(t *testing.T) {
 
 	t.Run("overlapping assignment of the same role, user and entity conflicts", func(t *testing.T) {
 		wantProblem(t, assign(map[string]any{"userId": userID, "role": "View vendors"}), http.StatusConflict, "IDN-ASSIGNMENT-OVERLAP")
-		wantProblem(t, assign(map[string]any{"userId": userID, "role": "View vendors", "validFrom": now.Add(-10 * day), "validTo": now.Add(day)}), http.StatusConflict, "IDN-ASSIGNMENT-OVERLAP")
+		wantProblem(t, assign(map[string]any{"userId": userID, "role": "View vendors", "validFrom": now.Add(-time.Minute), "validTo": now.Add(day)}), http.StatusConflict, "IDN-ASSIGNMENT-OVERLAP")
 	})
 
 	t.Run("same role on another legal entity or another role is allowed", func(t *testing.T) {
@@ -342,6 +399,15 @@ func TestRoleAssignmentLifecycle(t *testing.T) {
 		}
 		wantProblem(t, assign(map[string]any{"userId": userID, "role": "View vendors", "validFrom": end.Add(-day)}), http.StatusConflict, "IDN-ASSIGNMENT-OVERLAP")
 		decode[assignmentRow](t, assign(map[string]any{"userId": userID, "role": "View vendors", "validFrom": end}), http.StatusCreated)
+	})
+
+	t.Run("ending at exactly the current end is a no-op without an audit row", func(t *testing.T) {
+		before, _ := f.auditAndEvents(t, f.tenantA)
+		again := decode[assignmentRow](t, f.do(c, http.MethodPost, "/v1/authz/assignments/"+first.AssignmentID+"/end", map[string]any{"validTo": now.Add(2 * day)}), http.StatusOK)
+		after, _ := f.auditAndEvents(t, f.tenantA)
+		if again.ValidTo == nil || len(before) != len(after) {
+			t.Fatalf("again = %+v audit %d -> %d", again, len(before), len(after))
+		}
 	})
 
 	t.Run("end date cannot extend, precede the start or be in the past", func(t *testing.T) {
@@ -369,8 +435,8 @@ func TestRoleAssignmentLifecycle(t *testing.T) {
 			t.Fatalf("by user first page = %+v", byUser)
 		}
 		rest := decode[pageOf[assignmentRow]](t, f.do(c, http.MethodGet, "/v1/authz/assignments?userId="+userID+"&limit=100&after="+byUser.Next, nil), http.StatusOK)
-		if len(byUser.Items)+len(rest.Items) != 7 {
-			t.Fatalf("user has %d assignments, want 7 (2 seeded + 5 created)", len(byUser.Items)+len(rest.Items))
+		if len(byUser.Items)+len(rest.Items) != 8 {
+			t.Fatalf("user has %d assignments, want 8 (3 seeded + 5 created)", len(byUser.Items)+len(rest.Items))
 		}
 		byRole := decode[pageOf[assignmentRow]](t, f.do(c, http.MethodGet, "/v1/authz/assignments?role=View+vendors", nil), http.StatusOK)
 		if len(byRole.Items) != 3 {
@@ -511,5 +577,135 @@ func TestRoleAssignmentRejections(t *testing.T) {
 				t.Errorf("%s: status = %d, want %d", name, rec.Code, tc.want)
 			}
 		}
+	})
+}
+
+func TestRoleAssignmentFutureDatedRevoke(t *testing.T) {
+	f := newAdminFixture(t)
+	c := f.adminOf(f.tenantA, dutyRoles, "View effective permissions")
+	day := 24 * time.Hour
+	start := time.Now().UTC().Add(day)
+	path := func(id string) string { return "/v1/authz/assignments/" + id }
+	report := func() string {
+		rec := f.do(c, http.MethodGet, "/v1/identity/users/"+userID+"/effective-permissions", nil)
+		return strings.Join(decode[struct {
+			Duties []string `json:"duties"`
+		}](t, rec, http.StatusOK).Duties, ",")
+	}
+
+	future := decode[assignmentRow](t, f.do(c, http.MethodPost, "/v1/authz/assignments", map[string]any{"userId": userID, "role": "View vendors", "validFrom": start}), http.StatusCreated)
+
+	t.Run("ending a future-dated assignment cancels it", func(t *testing.T) {
+		ended := decode[assignmentRow](t, f.do(c, http.MethodPost, path(future.AssignmentID)+"/end", nil), http.StatusOK)
+		if ended.ValidTo == nil || !ended.ValidTo.Equal(future.ValidFrom) {
+			t.Fatalf("ended = %+v, want validTo = validFrom", ended)
+		}
+		active := decode[pageOf[assignmentRow]](t, f.do(c, http.MethodGet, "/v1/authz/assignments?role=View+vendors&active=true", nil), http.StatusOK)
+		if len(active.Items) != 0 {
+			t.Fatalf("active = %+v", active.Items)
+		}
+	})
+
+	t.Run("ending again is a no-op without a new audit row", func(t *testing.T) {
+		before, _ := f.auditAndEvents(t, f.tenantA)
+		decode[assignmentRow](t, f.do(c, http.MethodDelete, path(future.AssignmentID), nil), http.StatusOK)
+		after, _ := f.auditAndEvents(t, f.tenantA)
+		if len(before) != len(after) {
+			t.Fatalf("audit %d -> %d", len(before), len(after))
+		}
+	})
+
+	t.Run("the empty range does not block a real assignment of the same period", func(t *testing.T) {
+		decode[assignmentRow](t, f.do(c, http.MethodPost, "/v1/authz/assignments", map[string]any{"userId": userID, "role": "View vendors", "validFrom": start}), http.StatusCreated)
+	})
+
+	t.Run("an empty range grants nothing", func(t *testing.T) {
+		if _, err := f.admin.Exec(context.Background(), `insert into identity_role_assignments (tenant_id, assignment_id, user_id, role, valid_from, valid_to)
+values ($1, gen_random_uuid(), $2, 'Maintain vendors', now() - interval '1 hour', now() - interval '1 hour')`, f.tenantA, userID); err != nil {
+			t.Fatal(err)
+		}
+		if got := report(); got != "" {
+			t.Fatalf("duties = %q, want none", got)
+		}
+	})
+
+	t.Run("end dates before the start are still refused", func(t *testing.T) {
+		other := decode[assignmentRow](t, f.do(c, http.MethodPost, "/v1/authz/assignments", map[string]any{"userId": userID, "role": "View audit log", "validFrom": start}), http.StatusCreated)
+		wantProblem(t, f.do(c, http.MethodPost, path(other.AssignmentID)+"/end", map[string]any{"validTo": start.Add(-time.Hour)}), http.StatusBadRequest, "COM-0001")
+	})
+}
+
+func TestRoleAssignmentGuards(t *testing.T) {
+	f := newAdminFixture(t)
+	c := f.adminOf(f.tenantA, dutyRoles)
+	assign := func(c caller, body map[string]any) *httptest.ResponseRecorder {
+		return f.do(c, http.MethodPost, "/v1/authz/assignments", body)
+	}
+
+	t.Run("a caller cannot grant a role to themselves", func(t *testing.T) {
+		byUserID := c
+		byUserID.user = userID
+		wantProblem(t, assign(byUserID, map[string]any{"userId": userID, "role": "View vendors"}), http.StatusForbidden, "IAM-0416")
+		bySubject := c
+		bySubject.user = "subject-" + f.tenantA
+		wantProblem(t, assign(bySubject, map[string]any{"userId": userID, "role": "View vendors"}), http.StatusForbidden, "IAM-0416")
+		if got := count(t, f.app, f.tenantA, "", `select count(*) from identity_role_assignments where role = 'View vendors'`); got != 0 {
+			t.Fatalf("a refused self-grant left %d rows", got)
+		}
+	})
+
+	t.Run("Maintain tenants is grantable only in the operator tenant", func(t *testing.T) {
+		wantProblem(t, assign(c, map[string]any{"userId": userID, "role": dutyTenants}), http.StatusForbidden, "AUTH-0003")
+		operator := caller{tenantID: f.operator, user: "operator-1", duties: []string{dutyRoles, dutyAllScope}}
+		decode[assignmentRow](t, assign(operator, map[string]any{"userId": userID, "role": dutyTenants}), http.StatusCreated)
+	})
+
+	t.Run("past validity is refused beyond the clock-skew allowance", func(t *testing.T) {
+		now := time.Now().UTC()
+		p := wantProblem(t, assign(c, map[string]any{"userId": userID, "role": "View vendors", "validFrom": now.Add(-time.Hour)}), http.StatusBadRequest, "COM-0001")
+		if p.Errors["validFrom"] == "" {
+			t.Fatalf("errors = %v", p.Errors)
+		}
+		decode[assignmentRow](t, assign(c, map[string]any{"userId": userID, "role": "View vendors", "validFrom": now.Add(-time.Minute)}), http.StatusCreated)
+	})
+
+	t.Run("reason and granted-by are stored and returned", func(t *testing.T) {
+		created := decode[assignmentRow](t, assign(c, map[string]any{"userId": userID, "role": "Maintain vendors", "reason": " covering leave "}), http.StatusCreated)
+		if created.Reason != "covering leave" || created.GrantedBy != "admin-1" {
+			t.Fatalf("created = %+v", created)
+		}
+		got := decode[assignmentRow](t, f.do(c, http.MethodGet, "/v1/authz/assignments/"+created.AssignmentID, nil), http.StatusOK)
+		if got.Reason != created.Reason || got.GrantedBy != created.GrantedBy {
+			t.Fatalf("get = %+v", got)
+		}
+		p := wantProblem(t, assign(c, map[string]any{"userId": userID, "role": "View audit log", "reason": strings.Repeat("x", 501)}), http.StatusBadRequest, "COM-0001")
+		if p.Errors["reason"] == "" {
+			t.Fatalf("errors = %v", p.Errors)
+		}
+	})
+
+	t.Run("an inactive legal entity cannot receive an assignment", func(t *testing.T) {
+		const inactive = "10000000-0000-0000-0000-000000000077"
+		if _, err := f.admin.Exec(context.Background(), `insert into identity_legal_entities (tenant_id, legal_entity_id, code, display_name, status) values ($1, $2, 'OLD', 'Old', 'inactive')`, f.tenantA, inactive); err != nil {
+			t.Fatal(err)
+		}
+		wantProblem(t, assign(c, map[string]any{"userId": userID, "role": "View vendors", "legalEntityId": inactive}), http.StatusUnprocessableEntity, "IDN-LEGAL-ENTITY-INACTIVE")
+	})
+
+	t.Run("an end date slightly in the past is accepted as now", func(t *testing.T) {
+		created := decode[assignmentRow](t, assign(c, map[string]any{"userId": userID, "role": "View audit log"}), http.StatusCreated)
+		ended := decode[assignmentRow](t, f.do(c, http.MethodPost, "/v1/authz/assignments/"+created.AssignmentID+"/end", map[string]any{"validTo": time.Now().Add(-time.Minute)}), http.StatusOK)
+		if ended.ValidTo == nil || ended.ValidTo.Before(created.ValidFrom) {
+			t.Fatalf("ended = %+v", ended)
+		}
+	})
+
+	t.Run("DELETE ends an assignment like POST end", func(t *testing.T) {
+		created := decode[assignmentRow](t, assign(c, map[string]any{"userId": userID, "role": "View number sequences"}), http.StatusCreated)
+		ended := decode[assignmentRow](t, f.do(c, http.MethodDelete, "/v1/authz/assignments/"+created.AssignmentID, nil), http.StatusOK)
+		if ended.ValidTo == nil {
+			t.Fatalf("ended = %+v", ended)
+		}
+		wantProblem(t, f.do(c, http.MethodDelete, "/v1/authz/assignments/"+created.AssignmentID, nil), http.StatusConflict, "IDN-ASSIGNMENT-ENDED")
 	})
 }

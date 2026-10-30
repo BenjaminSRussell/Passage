@@ -38,9 +38,5 @@ BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'passage_app') THEN
     EXECUTE 'GRANT SELECT, INSERT ON identity_audit, outbox TO passage_app';
   END IF;
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'passage_provisioner') THEN
-    EXECUTE format('GRANT USAGE ON SCHEMA %I TO passage_provisioner', current_schema());
-    EXECUTE 'GRANT SELECT, INSERT ON identity_tenants, identity_audit, outbox TO passage_provisioner';
-  END IF;
 END
 $$;

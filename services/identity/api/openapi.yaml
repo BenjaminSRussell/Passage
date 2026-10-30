@@ -154,8 +154,11 @@ paths:
         Assigns a role (a seeded duty name until the role catalogue exists) to a user, tenant-wide or for one
         legal entity, effective from validFrom (default now) until validTo (default open-ended). The database
         rejects an overlapping assignment of the same role for the same user and legal entity (409
-        IDN-ASSIGNMENT-OVERLAP). A tenant-wide assignment needs access to all legal entities. Audited and
-        emitted as dev.passage.identity.roleassignment.assigned.v1.
+        IDN-ASSIGNMENT-OVERLAP). A tenant-wide assignment needs a request without a legal-entity scope from a
+        caller holding Maintain security roles. validFrom and validTo more than five minutes in the past are
+        refused. A caller cannot grant a role to themselves (403 IAM-0416), Maintain tenants can only be granted
+        in the operator tenant (403), and an inactive legal entity is refused (422 IDN-LEGAL-ENTITY-INACTIVE).
+        Audited and emitted as dev.passage.identity.roleassignment.assigned.v1.
       security: [{ gatewayHeaders: [] }]
       parameters: [{ $ref: '#/components/parameters/TenantHeader' }, { $ref: '#/components/parameters/UserHeader' }, { $ref: '#/components/parameters/Duties' }, { $ref: '#/components/parameters/LegalEntityHeader' }]
       requestBody:
@@ -170,18 +173,19 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
     get:
       operationId: listRoleAssignments
       x-passage-duty: Maintain security roles
-      description: Lists assignments by user (userId), by role (role), or both; active=true keeps assignments in effect now.
+      description: Lists assignments by user (userId), by role (role), or both; at least one of userId or role is required (400 otherwise). active=true keeps assignments in effect now.
       security: [{ gatewayHeaders: [] }]
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
         - $ref: '#/components/parameters/Duties'
         - $ref: '#/components/parameters/LegalEntityHeader'
-        - { name: userId, in: query, schema: { type: string, format: uuid } }
-        - { name: role, in: query, schema: { type: string } }
+        - { name: userId, in: query, description: Required unless role is given., schema: { type: string, format: uuid } }
+        - { name: role, in: query, description: Required unless userId is given., schema: { type: string } }
         - { name: active, in: query, schema: { type: boolean } }
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/After'
@@ -208,14 +212,39 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+    delete:
+      operationId: revokeRoleAssignment
+      x-passage-duty: Maintain security roles
+      description: Alias of POST .../end; the assignment is end-dated, never deleted. An optional body may carry validTo.
+      security: [{ gatewayHeaders: [] }]
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/UserHeader'
+        - $ref: '#/components/parameters/Duties'
+        - $ref: '#/components/parameters/LegalEntityHeader'
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EndRoleAssignment' }
+      responses:
+        '200': { description: The ended assignment., content: { application/json: { schema: { $ref: '#/components/schemas/RoleAssignment' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /v1/authz/assignments/{id}/end:
     post:
       operationId: endRoleAssignment
       x-passage-duty: Maintain security roles
       description: >-
-        End-dates an assignment at validTo (default now). validTo must not be in the past, must be after
-        validFrom and must not extend an existing end date; an assignment that has already ended returns 409
-        IDN-ASSIGNMENT-ENDED. Audited and emitted as dev.passage.identity.roleassignment.ended.v1.
+        End-dates an assignment at validTo (default now, or validFrom for a future-dated assignment, which cancels
+        it: the empty range grants nothing). validTo may lag the server clock by up to five minutes, must not
+        precede validFrom and must not extend an existing end date; ending at exactly the current end is a no-op
+        with no audit row; an assignment that has already ended returns 409 IDN-ASSIGNMENT-ENDED. Audited and emitted as dev.passage.identity.roleassignment.ended.v1.
       security: [{ gatewayHeaders: [] }]
       parameters:
         - $ref: '#/components/parameters/TenantHeader'
@@ -329,6 +358,7 @@ components:
         legalEntityId: { type: string, format: uuid, description: Omit for a tenant-wide assignment. }
         validFrom: { type: string, format: date-time }
         validTo: { type: string, format: date-time }
+        reason: { type: string, maxLength: 500, description: Optional justification; stored and audited. }
     EndRoleAssignment:
       type: object
       properties:
@@ -343,6 +373,8 @@ components:
         legalEntityId: { type: string, format: uuid }
         validFrom: { type: string, format: date-time }
         validTo: { type: string, format: date-time }
+        reason: { type: string }
+        grantedBy: { type: string, description: Caller who made the assignment. }
         createdAt: { type: string, format: date-time }
     RoleAssignmentPage:
       type: object

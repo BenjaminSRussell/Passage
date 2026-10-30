@@ -249,6 +249,9 @@ values ($1, gen_random_uuid(), $2, 'dated', `+validFrom+`, `+validTo+`)`, tenant
 	if err := insert("now() + interval '1 day'", "null"); err != nil {
 		t.Fatal(err)
 	}
+	if err := insert("now() + interval '2 days'", "now() + interval '2 days'"); err != nil {
+		t.Fatalf("empty range (valid_to = valid_from) rejected: %v", err)
+	}
 	if err := insert("now() - interval '2 days'", "now() - interval '1 day'"); err != nil {
 		t.Fatal(err)
 	}
@@ -256,8 +259,8 @@ values ($1, gen_random_uuid(), $2, 'dated', `+validFrom+`, `+validTo+`)`, tenant
 	if got := count(t, app, tenantA, "*", effective); got != 3 {
 		t.Errorf("effective assignments = %d, want 3", got)
 	}
-	if got := count(t, app, tenantA, "*", `select count(*) from identity_role_assignments where role = 'dated'`); got != 2 {
-		t.Errorf("dated assignments = %d, want 2", got)
+	if got := count(t, app, tenantA, "*", `select count(*) from identity_role_assignments where role = 'dated'`); got != 3 {
+		t.Errorf("dated assignments = %d, want 3", got)
 	}
 }
 
@@ -303,7 +306,6 @@ func TestAppRoleCannotWriteTenants(t *testing.T) {
 	app, tenantA, _ := setup(t)
 	ctx := context.Background()
 	for name, stmt := range map[string]string{
-		"insert":      `insert into identity_tenants (tenant_id, realm_name, display_name) values ($1, 'new-realm', 'x')`,
 		"update":      `update identity_tenants set status = 'active' where tenant_id = $1`,
 		"update-self": `update identity_tenants set realm_name = 'renamed' where tenant_id = $1`,
 		"delete":      `delete from identity_tenants where tenant_id = $1`,

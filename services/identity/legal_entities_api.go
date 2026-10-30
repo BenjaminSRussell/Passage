@@ -64,8 +64,8 @@ func (a *LegalEntitiesAPI) create(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !allLegalEntities(p) {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, codeForbidden, "creating a legal entity requires access to all legal entities"))
+	if !tenantWide(p, dutyMaintainLegalEntities) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, codeForbidden, "creating a legal entity requires a tenant-level request without a legal-entity scope"))
 		return
 	}
 	var req createLegalEntityRequest
@@ -87,7 +87,7 @@ func (a *LegalEntitiesAPI) create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	created := legalEntityResource{}
-	err := dbx.WithTenantTx(r.Context(), a.pool, func(tx pgx.Tx) error {
+	err := withAdminTx(r.Context(), a.pool, p, true, func(tx pgx.Tx) error {
 		rows, err := tx.Query(r.Context(), `insert into identity_legal_entities (tenant_id, legal_entity_id, code, display_name)
 values ($1, $2, $3, $4) returning `+legalEntityColumns, p.TenantID, ids.New(), req.Code, req.DisplayName)
 		if err != nil {

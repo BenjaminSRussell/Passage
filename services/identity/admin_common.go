@@ -1,14 +1,20 @@
 package identity
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
@@ -22,6 +28,8 @@ const (
 	dutyMaintainSecurityRoles = "Maintain security roles"
 
 	codeForbidden = "AUTH-0003"
+
+	clockSkew = 5 * time.Minute
 
 	defaultPageSize = 50
 	maxPageSize     = 200
@@ -47,7 +55,8 @@ func pgCode(err error) string {
 }
 
 func failWrite(w http.ResponseWriter, r *http.Request, err error) {
-	if pgCode(err) == pgDenied {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == pgDenied && strings.Contains(pgErr.Message, "row-level security") {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, codeForbidden, "outside the caller's legal-entity scope"))
 		return
 	}
@@ -60,8 +69,41 @@ func invalidFields(w http.ResponseWriter, r *http.Request, detail string, fields
 	httpx.Fail(w, r, problem)
 }
 
-func allLegalEntities(p tenant.Principal) bool {
-	return p.LegalEntityID == "" || p.LegalEntityID == "*"
+func tenantWide(p tenant.Principal, duty string) bool {
+	return p.LegalEntityID == "" && p.HasDuty(duty)
+}
+
+func withAdminTx(ctx context.Context, pool *pgxpool.Pool, p tenant.Principal, wide bool, fn func(tx pgx.Tx) error) error {
+	if !wide {
+		return dbx.WithTenantTx(ctx, pool, fn)
+	}
+	return pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `select set_config('passage.tenant_id', $1, true), set_config('passage.legal_entity_scopes', '*', true)`, p.TenantID); err != nil {
+			return err
+		}
+		return fn(tx)
+	})
+}
+
+func decodeOptional(r *http.Request, v any) error {
+	body, err := io.ReadAll(http.MaxBytesReader(nil, r.Body, 1<<20))
+	if err != nil {
+		return httpx.NewProblem(http.StatusBadRequest, codeInvalid, "unreadable request body")
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return nil
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	return httpx.Decode(r, v)
+}
+
+func latest(first time.Time, rest ...time.Time) time.Time {
+	for _, t := range rest {
+		if t.After(first) {
+			first = t
+		}
+	}
+	return first
 }
 
 func principal(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) {
@@ -115,14 +157,19 @@ func paged[T any](rows []T, limit int, id func(T) string) page[T] {
 	return out
 }
 
+func insertAudit(ctx context.Context, tx pgx.Tx, tenantID, actor, entityType, entityID, verb string, detail []byte) error {
+	_, err := tx.Exec(ctx, `insert into identity_audit (tenant_id, audit_id, actor, action, entity_type, entity_id, detail)
+values ($1, $2, $3, $4, $5, $6, $7)`, tenantID, ids.New(), actor, entityType+"."+verb, entityType, entityID, detail)
+	return err
+}
+
 func record(ctx context.Context, tx pgx.Tx, tenantID, actor, entityType, entityID, verb string, data any) error {
 	evt, err := events.New(events.Type("identity", entityType, verb, 1), "identity", entityID, tenantID, data)
 	if err != nil {
 		return err
 	}
 	evt.Actor = actor
-	if _, err := tx.Exec(ctx, `insert into identity_audit (tenant_id, audit_id, actor, action, entity_type, entity_id, detail)
-values ($1, $2, $3, $4, $5, $6, $7)`, tenantID, ids.New(), actor, entityType+"."+verb, entityType, entityID, evt.Data); err != nil {
+	if err := insertAudit(ctx, tx, tenantID, actor, entityType, entityID, verb, evt.Data); err != nil {
 		return err
 	}
 	return outbox.Enqueue(ctx, tx, entityType, entityID, evt)

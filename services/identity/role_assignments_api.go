@@ -16,21 +16,26 @@ import (
 )
 
 const (
-	codeAssignmentNotFound = "IDN-ASSIGNMENT-NOT-FOUND"
-	codeAssignmentOverlap  = "IDN-ASSIGNMENT-OVERLAP"
-	codeAssignmentEnded    = "IDN-ASSIGNMENT-ENDED"
-	codeUserDeprovisioned  = "IDN-USER-DEPROVISIONED"
+	codeAssignmentNotFound  = "IDN-ASSIGNMENT-NOT-FOUND"
+	codeAssignmentOverlap   = "IDN-ASSIGNMENT-OVERLAP"
+	codeAssignmentEnded     = "IDN-ASSIGNMENT-ENDED"
+	codeUserDeprovisioned   = "IDN-USER-DEPROVISIONED"
+	codeLegalEntityInactive = "IDN-LEGAL-ENTITY-INACTIVE"
+	codeSelfGrant           = "IAM-0416"
+
+	maxReason = 500
 )
 
 // RoleAssignmentsAPI manages effective-dated role assignments. A role holds a duty name until the role
 // catalogue exists, so assigned roles are validated against the seeded duty catalogue.
 type RoleAssignmentsAPI struct {
-	pool      *pgxpool.Pool
-	catalogue *Catalogue
+	pool             *pgxpool.Pool
+	catalogue        *Catalogue
+	operatorTenantID string
 }
 
-func NewRoleAssignmentsAPI(pool *pgxpool.Pool, catalogue *Catalogue) *RoleAssignmentsAPI {
-	return &RoleAssignmentsAPI{pool: pool, catalogue: catalogue}
+func NewRoleAssignmentsAPI(pool *pgxpool.Pool, catalogue *Catalogue, operatorTenantID string) *RoleAssignmentsAPI {
+	return &RoleAssignmentsAPI{pool: pool, catalogue: catalogue, operatorTenantID: operatorTenantID}
 }
 
 func (a *RoleAssignmentsAPI) Register(r chi.Router) {
@@ -39,6 +44,7 @@ func (a *RoleAssignmentsAPI) Register(r chi.Router) {
 	r.With(guard).Get("/v1/authz/assignments", a.list)
 	r.With(guard).Get("/v1/authz/assignments/{id}", a.get)
 	r.With(guard).Post("/v1/authz/assignments/{id}/end", a.end)
+	r.With(guard).Delete("/v1/authz/assignments/{id}", a.end)
 }
 
 type roleAssignmentResource struct {
@@ -48,14 +54,16 @@ type roleAssignmentResource struct {
 	LegalEntityID string     `json:"legalEntityId,omitempty"`
 	ValidFrom     time.Time  `json:"validFrom"`
 	ValidTo       *time.Time `json:"validTo,omitempty"`
+	Reason        string     `json:"reason,omitempty"`
+	GrantedBy     string     `json:"grantedBy,omitempty"`
 	CreatedAt     time.Time  `json:"createdAt"`
 }
 
-const assignmentColumns = `assignment_id::text, user_id::text, role, coalesce(legal_entity_id::text, ''), valid_from, valid_to, created_at`
+const assignmentColumns = `assignment_id::text, user_id::text, role, coalesce(legal_entity_id::text, ''), valid_from, valid_to, coalesce(reason, ''), coalesce(granted_by, ''), created_at`
 
 func scanAssignment(row pgx.CollectableRow) (roleAssignmentResource, error) {
 	var a roleAssignmentResource
-	err := row.Scan(&a.AssignmentID, &a.UserID, &a.Role, &a.LegalEntityID, &a.ValidFrom, &a.ValidTo, &a.CreatedAt)
+	err := row.Scan(&a.AssignmentID, &a.UserID, &a.Role, &a.LegalEntityID, &a.ValidFrom, &a.ValidTo, &a.Reason, &a.GrantedBy, &a.CreatedAt)
 	return a, err
 }
 
@@ -65,6 +73,7 @@ type assignRequest struct {
 	LegalEntityID string     `json:"legalEntityId"`
 	ValidFrom     *time.Time `json:"validFrom"`
 	ValidTo       *time.Time `json:"validTo"`
+	Reason        string     `json:"reason"`
 }
 
 func (a *RoleAssignmentsAPI) assign(w http.ResponseWriter, r *http.Request) {
@@ -87,43 +96,66 @@ func (a *RoleAssignmentsAPI) assign(w http.ResponseWriter, r *http.Request) {
 	if !a.catalogue.HasDuty(req.Role) {
 		fields["role"] = "must be the name of a seeded duty"
 	}
-	if req.ValidFrom != nil && req.ValidTo != nil && !req.ValidTo.After(*req.ValidFrom) {
+	oldest := time.Now().Add(-clockSkew)
+	if req.ValidFrom != nil && req.ValidFrom.Before(oldest) {
+		fields["validFrom"] = "must not be in the past"
+	}
+	if req.ValidTo != nil && req.ValidTo.Before(oldest) {
+		fields["validTo"] = "must not be in the past"
+	}
+	if fields["validTo"] == "" && req.ValidFrom != nil && req.ValidTo != nil && !req.ValidTo.After(*req.ValidFrom) {
 		fields["validTo"] = "must be after validFrom"
+	}
+	req.Reason = strings.TrimSpace(req.Reason)
+	if len(req.Reason) > maxReason {
+		fields["reason"] = "must be at most 500 characters"
 	}
 	if len(fields) > 0 {
 		invalidFields(w, r, "invalid role assignment", fields)
 		return
 	}
-	if req.LegalEntityID == "" && !allLegalEntities(p) {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, codeForbidden, "a tenant-wide assignment requires access to all legal entities"))
+	wide := tenantWide(p, dutyMaintainSecurityRoles)
+	if req.LegalEntityID == "" && !wide {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, codeForbidden, "a tenant-wide assignment requires a tenant-level request without a legal-entity scope"))
+		return
+	}
+	if req.Role == dutyMaintainTenants && (a.operatorTenantID == "" || p.TenantID != a.operatorTenantID) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, codeForbidden, "Maintain tenants can only be granted in the operator tenant"))
 		return
 	}
 
 	created := roleAssignmentResource{}
-	err := dbx.WithTenantTx(r.Context(), a.pool, func(tx pgx.Tx) error {
-		var status string
-		err := tx.QueryRow(r.Context(), `select status from identity_users where tenant_id = $1 and user_id = $2`, p.TenantID, req.UserID).Scan(&status)
+	err := withAdminTx(r.Context(), a.pool, p, wide, func(tx pgx.Tx) error {
+		var status, idpSubject string
+		err := tx.QueryRow(r.Context(), `select status, idp_subject from identity_users where tenant_id = $1 and user_id = $2`, p.TenantID, req.UserID).Scan(&status, &idpSubject)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return httpx.NewProblem(http.StatusNotFound, codeUserNotFound, "user not found")
 		}
 		if err != nil {
 			return err
 		}
+		if p.UserID == req.UserID || p.UserID == idpSubject {
+			return httpx.NewProblem(http.StatusForbidden, codeSelfGrant, "You cannot grant a role to yourself")
+		}
 		if status != "active" {
 			return httpx.NewProblem(http.StatusConflict, codeUserDeprovisioned, "user is deprovisioned")
 		}
 		if req.LegalEntityID != "" {
-			var exists bool
-			if err := tx.QueryRow(r.Context(), `select exists(select 1 from identity_legal_entities where tenant_id = $1 and legal_entity_id = $2)`, p.TenantID, req.LegalEntityID).Scan(&exists); err != nil {
-				return err
-			}
-			if !exists {
+			var entityStatus string
+			err := tx.QueryRow(r.Context(), `select status from identity_legal_entities where tenant_id = $1 and legal_entity_id = $2`, p.TenantID, req.LegalEntityID).Scan(&entityStatus)
+			if errors.Is(err, pgx.ErrNoRows) {
 				return httpx.NewProblem(http.StatusNotFound, codeLegalEntityNotFound, "legal entity not found")
 			}
+			if err != nil {
+				return err
+			}
+			if entityStatus != "active" {
+				return httpx.NewProblem(http.StatusUnprocessableEntity, codeLegalEntityInactive, "legal entity is inactive")
+			}
 		}
-		rows, err := tx.Query(r.Context(), `insert into identity_role_assignments (tenant_id, assignment_id, user_id, role, legal_entity_id, valid_from, valid_to)
-values ($1, $2, $3, $4, nullif($5, '')::uuid, coalesce($6::timestamptz, now()), $7::timestamptz) returning `+assignmentColumns,
-			p.TenantID, ids.New(), req.UserID, req.Role, req.LegalEntityID, req.ValidFrom, req.ValidTo)
+		rows, err := tx.Query(r.Context(), `insert into identity_role_assignments (tenant_id, assignment_id, user_id, role, legal_entity_id, valid_from, valid_to, reason, granted_by)
+values ($1, $2, $3, $4, nullif($5, '')::uuid, coalesce($6::timestamptz, now()), $7::timestamptz, nullif($8, ''), $9) returning `+assignmentColumns,
+			p.TenantID, ids.New(), req.UserID, req.Role, req.LegalEntityID, req.ValidFrom, req.ValidTo, req.Reason, p.UserID)
 		if err != nil {
 			return err
 		}
@@ -234,39 +266,45 @@ func (a *RoleAssignmentsAPI) end(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req endRequest
-	if r.ContentLength != 0 {
-		if err := httpx.Decode(r, &req); err != nil {
-			httpx.Fail(w, r, err)
-			return
-		}
+	if err := decodeOptional(r, &req); err != nil {
+		httpx.Fail(w, r, err)
+		return
 	}
 
-	var ended roleAssignmentResource
-	err := dbx.WithTenantTx(r.Context(), a.pool, func(tx pgx.Tx) error {
-		var validFrom, now time.Time
-		var currentTo *time.Time
-		err := tx.QueryRow(r.Context(), `select valid_from, valid_to, now() from identity_role_assignments where tenant_id = $1 and assignment_id = $2 for update`,
-			p.TenantID, id).Scan(&validFrom, &currentTo, &now)
+	var result roleAssignmentResource
+	err := withAdminTx(r.Context(), a.pool, p, tenantWide(p, dutyMaintainSecurityRoles), func(tx pgx.Tx) error {
+		rows, err := tx.Query(r.Context(), `select `+assignmentColumns+` from identity_role_assignments where tenant_id = $1 and assignment_id = $2 for update`, p.TenantID, id)
+		if err != nil {
+			return err
+		}
+		current, err := pgx.CollectExactlyOneRow(rows, scanAssignment)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return httpx.NewProblem(http.StatusNotFound, codeAssignmentNotFound, "assignment not found")
 		}
 		if err != nil {
 			return err
 		}
-		if currentTo != nil && !currentTo.After(now) {
+		var now time.Time
+		if err := tx.QueryRow(r.Context(), `select now()`).Scan(&now); err != nil {
+			return err
+		}
+		if current.ValidTo != nil && !current.ValidTo.After(now) {
 			return httpx.NewProblem(http.StatusConflict, codeAssignmentEnded, "assignment has already ended")
 		}
-		validTo := now
+		requested := latest(now, current.ValidFrom)
 		if req.ValidTo != nil {
-			validTo = *req.ValidTo
+			requested = req.ValidTo.Truncate(time.Microsecond)
+			if requested.Before(now) && !requested.Before(now.Add(-clockSkew)) {
+				requested = now
+			}
 		}
 		fields := map[string]string{}
 		switch {
-		case validTo.Before(now):
+		case requested.Before(now.Add(-clockSkew)):
 			fields["validTo"] = "must not be in the past"
-		case !validTo.After(validFrom):
-			fields["validTo"] = "must be after validFrom"
-		case currentTo != nil && validTo.After(*currentTo):
+		case requested.Before(current.ValidFrom):
+			fields["validTo"] = "must not be before validFrom"
+		case current.ValidTo != nil && requested.After(*current.ValidTo):
 			fields["validTo"] = "must not extend the current end date"
 		}
 		if len(fields) > 0 {
@@ -274,19 +312,24 @@ func (a *RoleAssignmentsAPI) end(w http.ResponseWriter, r *http.Request) {
 			problem.Errors = fields
 			return problem
 		}
-		rows, err := tx.Query(r.Context(), `update identity_role_assignments set valid_to = $3 where tenant_id = $1 and assignment_id = $2 returning `+assignmentColumns,
+		validTo := latest(requested, now, current.ValidFrom)
+		if current.ValidTo != nil && validTo.Equal(*current.ValidTo) {
+			result = current
+			return nil
+		}
+		rows, err = tx.Query(r.Context(), `update identity_role_assignments set valid_to = $3 where tenant_id = $1 and assignment_id = $2 returning `+assignmentColumns,
 			p.TenantID, id, validTo)
 		if err != nil {
 			return err
 		}
-		if ended, err = pgx.CollectExactlyOneRow(rows, scanAssignment); err != nil {
+		if result, err = pgx.CollectExactlyOneRow(rows, scanAssignment); err != nil {
 			return err
 		}
-		return record(r.Context(), tx, p.TenantID, p.UserID, "roleassignment", id, "ended", ended)
+		return record(r.Context(), tx, p.TenantID, p.UserID, "roleassignment", id, "ended", result)
 	})
 	if err != nil {
 		failWrite(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, ended)
+	httpx.JSON(w, http.StatusOK, result)
 }
