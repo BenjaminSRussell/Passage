@@ -1136,7 +1136,7 @@ Validation in every service (kernel `authz`, re-done even behind Envoy because e
 
 - **Model:** AX-style Role ⊃ Duty ⊃ Privilege (E.3). `platform-ts` compiles roles, duties, privileges, user-role grants (with legal entity and validity), SoD rules, agent allow-lists/kill switches, posting-source grants and the **route→privilege table** (from `x-passage-duty` in the OpenAPI documents) into one OPA bundle served at `/v1/platform/policy-bundles/current`; delta bundles keep propagation ≤ 10 s.
 - **Two enforcement points (E.4):** Envoy's ext_authz calls a standalone OPA-Envoy instance that checks token, tenant, and the route's privilege (coarse). Each service then calls its **sidecar** `POST /v1/data/passage/authz/allow` with `{principal, action, resource}` for the record-level decision (fine). No service branches on role names or Keycloak groups.
-- **Decision shape:** the kernel queries one document `data.passage.authz.decision` returning `{allow, legalEntityScopes[], obligations{maskFields[], requiresAcr, approvalWorkflow}}`. Appendix E.4 defines only `allow`; the `legalEntityScopes` and `obligations` rules live in the same Rego package as an extension (needed to set `passage.legal_entity_ids` for RLS and to apply P2/P3 masking). Listed under assumptions.
+- **Decision shape:** the kernel queries one document `data.passage.authz.decision` returning `{allow, legalEntityScopes[], obligations{maskFields[], requiresAcr, approvalWorkflow}}`. Appendix E.4 defines only `allow`; the `legalEntityScopes` and `obligations` rules live in the same Rego package as an extension (needed to set `passage.legal_entity_scopes` for RLS and to apply P2/P3 masking). Listed under assumptions.
 - **List endpoints** compute scope once per request (`legalEntityScopes`) and let RLS filter rows; there is no per-row OPA call. Batch actions use a single multi-resource query.
 - **SoD at runtime:** `deny` rules on document pairs (prepare/approve journals, create/approve vendor invoice, enter/release payment, maintain bank account/run payments, create PO/post receipt over threshold). Services supply `resource.prepared_by`, `amount_usd`, `owner`. Role design and user assignment SoD run in `platform-ts` at write time.
 - **Approvals:** when the decision carries `approvalWorkflow`, the service starts `POST /v1/platform/workflow-instances`, returns `403 approval_required` with the task id, and re-executes the action when `workflowtask.completed.v1` arrives, passing the `approvalId`, which OPA validates against bundle data on the retried request.
@@ -1148,7 +1148,7 @@ Validation in every service (kernel `authz`, re-done even behind Envoy because e
 
 1. Envoy validates the JWT and maps `tenant_id`, `azp`, `tier` to request headers used only for rate limiting and logs (the service re-derives tenant from the token, never from those headers, except the `_internal` path).
 2. The kernel `tenant` middleware builds `Tenant{id, legalEntityIDs, actor}` from the verified principal and OPA scopes and stores it in the request context (`tenant.FromContext`). Missing tenant = `401`. The optional request header `Passage-Legal-Entity: <uuid | *>` (sent by the UI on every API call) narrows the token's legal-entity scopes from OPA to the named entity; it can narrow but never widen.
-3. `dbx` begins every transaction with `SET LOCAL passage.tenant_id`, `passage.legal_entity_ids`, `passage.actor` (E.1) and emits a transactional logical-decoding message `passage.ctx` carrying `{actor, traceId, correlationId}` so CDC audit entries know who and which trace caused the change (Debezium reads logical decoding messages with pgoutput).
+3. `dbx` begins every transaction with `SET LOCAL passage.tenant_id`, `passage.legal_entity_scopes` (E.1) and emits a transactional logical-decoding message `passage.ctx` carrying `{actor, traceId, correlationId}` so CDC audit entries know who and which trace caused the change (Debezium reads logical decoding messages with pgoutput).
 4. The pool connects as `passage_app` (no `BYPASSRLS`); a missing setting yields zero rows, never cross-tenant rows. A kernel test iterates every table and proves isolation (NFR-SEC2). Batch/CDC roles are separate with the same policies; Debezium sits outside RLS and the outbox payload carries `tenant_id`.
 5. Outbound calls forward `traceparent`, `tracestate`, `X-Correlation-Id`, `Authorization` (user token) or the `_internal` token + `X-Passage-Tenant`. Events carry `tenantid`, `legalentityid`, `correlationid`, `causationid`, `actor`, `traceparent`.
 6. Kafka consumers set the tenant from the event's `tenantid` before opening the transaction; an event without it goes to the DLQ.
@@ -1554,7 +1554,7 @@ Supersedes E.2 (defects D1, D2). Generated for every tenant-scoped table; the `l
 CREATE FUNCTION passage.le_allowed(le uuid) RETURNS boolean
 LANGUAGE sql STABLE PARALLEL SAFE AS $$
   SELECT s = '*' OR le::text = ANY (string_to_array(s, ','))
-  FROM (SELECT coalesce(current_setting('passage.legal_entity_ids', true), '') AS s) x
+  FROM (SELECT coalesce(current_setting('passage.legal_entity_scopes', true), '') AS s) x
 $$;
 
 ALTER TABLE ledger.journal_entry ENABLE ROW LEVEL SECURITY;
@@ -4169,7 +4169,7 @@ Snapshot topics are fed by the same outbox relay: the generated `created`/`chang
 
 C.2 uses one shared topic per entity across tenants, while L.2 and 0A.2 promise "topic ACLs per tenant" for external consumers. Kafka ACLs are per topic, not per key, so a shared topic cannot be ACL-restricted to one tenant.
 
-- **Internal consumers** are trusted platform services: they read the shared topic and set `SET LOCAL passage.tenant_id = <event.tenantid>` (and `legal_entity_ids`) before any statement, so RLS governs their writes (E.1, E.2).
+- **Internal consumers** are trusted platform services: they read the shared topic and set `SET LOCAL passage.tenant_id = <event.tenantid>` (and `legal_entity_scopes`) before any statement, so RLS governs their writes (E.1, E.2).
 - **External consumers (MES, WMS, BI, partner Kafka clients) [P]:** a tenant-filtering router (Kafka Streams or Connect SMT, `passage-tenant-egress`) copies events for subscribed topics into `passage.ext.<tenantslug>.<context>.<entity>`, authorized per tenant principal. This is the topic a customer subscribes to in the "add an MES" scenario (L.2). Needs an ADR amendment; see OQ-5.
 - **Noisy neighbour:** per-principal produce/consume quotas (`KafkaUser` quotas) and per-tenant webhook limits (D.7) bound one tenant's impact; partitioning by `tenantid:subject` spreads load.
 
@@ -4335,7 +4335,7 @@ Covered by section 2.4 and 2.5: one transaction for state and outbox; Debezium r
 
 Per C.5, in one database transaction:
 
-1. `SET LOCAL passage.tenant_id` / `legal_entity_ids` from `tenantid`/`legalentityid` (RLS applies to the effect).
+1. `SET LOCAL passage.tenant_id` / `passage.legal_entity_scopes` from `tenantid`/`legalentityid` (RLS applies to the effect).
 2. `INSERT INTO consumer_inbox (consumer, event_id) ... ON CONFLICT DO NOTHING`. Zero rows inserted means duplicate: commit the Kafka offset and stop.
 3. Apply the effect; write outgoing outbox rows (copying `correlationid`, setting `causationid` = incoming `id`, `actor` = `system:<consumer-id>` unless the effect is on behalf of a user); commit.
 4. Commit the Kafka offset after the database commit.
@@ -7014,7 +7014,7 @@ Several read tools above wrap endpoints whose exact path is unconfirmed (`accoun
 1. **Interactive (copilot, user-started runs).** The BFF/runtime exchanges the user's access token at Keycloak (RFC 8693 token exchange) for a 15-minute token. Its `sub` is the user and its `act` claim is `agent:<agent_id>`. A Temporal activity refreshes it while the run is active (FR-47.2).
 2. **Event or schedule triggers (no user present).** The run executes as the **configured run owner** of the agent in that tenant and legal entity. This user is set in Agent administration and recorded as immutable `invoked_by_user_id`. The delegation mechanism for a user who is not present (offline token with recorded consent versus Keycloak impersonation permission) is OQ-3. Until it is decided, event-triggered runs cannot start.
 3. **Gateway check.** OPA input `{principal: {sub: agent id, agent, on_behalf_of: user, tenant}, action: <privilege>, resource: {...}}`. This evaluates the user's grant, then the agent allow-list, then the kill switch, then SoD `deny` rules (E.4 example 3).
-4. **Domain API check.** The domain API re-evaluates OPA with the same token and applies RLS (`SET LOCAL passage.actor`). The gateway check never substitutes for it (phase-9 risk table: "OPA evaluated at the API, never in the agent").
+4. **Domain API check.** The domain API re-evaluates OPA with the same token and applies RLS (`SET LOCAL passage.tenant_id` and `passage.legal_entity_scopes`). The gateway check never substitutes for it (phase-9 risk table: "OPA evaluated at the API, never in the agent").
 5. **Event attribution.** Emitted CloudEvents carry `actor = agent:<agent-id>@user:<sub>` (C.1).
 6. **Contract test (NFR-SEC6, AC-47.2).** For each of the ~400 tools and each of 20 duty profiles, a user without the duty gets 403 from both the gateway and the API, and the action is logged `DENIED`. Pass criterion: 0 cases where the agent exceeds the user.
 
@@ -7745,7 +7745,7 @@ All six domains converge on the requirements' OpenTelemetry stack rather than th
 
 - **Identity:** Keycloak with a realm per tenant plus an `_internal` realm for service and saga identities; OIDC for browsers via a BFF token handler (tokens never reach the browser; `__Host-` `HttpOnly` `SameSite=Strict` session cookie, CSRF token, back-channel logout); SAML/OIDC federation to Entra ID/Okta/Google; SCIM provisioning through a `platform-ts` facade over the Keycloak Admin API (backend Q3); kiosk device enrollment with badge + PIN (frontend Q13 pending security sign-off).
 - **Authorization:** AX-style roles → duties → privileges compiled to OPA/Rego; Envoy validates the JWT and every service re-verifies it (no service trusts Envoy or mTLS alone); the service's `authz.Require` asks OPA per request with `tenantId`, `legalEntityScopes`, `duty`, `resource`, and receives `allow` plus `obligations` (step-up is required, not recommended: sensitive actions carry the OPA obligation `requires_acr: mfa`); the UI consumes one batch decision set per user × legal entity only to show or hide, never to authorize. Segregation-of-duties rules evaluated at role assignment, at approval, and in the agent allow-lists.
-- **Tenancy:** every table carries `tenant_id`; `dbx.WithTenantTx` sets the GUC `passage.tenant_id` per transaction and Postgres RLS enforces it with the data section §4.5 template (permissive `tenant_access` plus restrictive `legal_entity_scope`; the Appendix E template is superseded). Note: `platform/go/dbx` currently sets `app.tenant_id`; it changes to `passage.tenant_id` in wave 2; Kafka topics are shared per entity with tenant isolation by consumer-side filtering inside the cluster, and tenant-scoped egress topics (`passage.ext.<tenant>.<context>.<entity>`) for external consumers (eventing OQ-5 / backend Q5 — needs an ADR amendment).
+- **Tenancy:** every table carries `tenant_id`; `dbx.WithTenantTx` sets the GUC `passage.tenant_id` per transaction and Postgres RLS enforces it with the data section §4.5 template (permissive `tenant_access` plus restrictive `legal_entity_scope`; the Appendix E template is superseded). Note: `platform/go/dbx` sets `passage.tenant_id` and `passage.legal_entity_scopes`; Kafka topics are shared per entity with tenant isolation by consumer-side filtering inside the cluster, and tenant-scoped egress topics (`passage.ext.<tenant>.<context>.<entity>`) for external consumers (eventing OQ-5 / backend Q5 — needs an ADR amendment).
 - **Events and sagas:** saga workers run under the `_internal` realm with a named service principal scoped to the duties its activities need (never a `*` legal-entity scope; the legal-entity scope is set from the triggering event's `legalEntityId`) (eventing OQ-6/7); every event carries `actor`; consumer inboxes make redelivery idempotent.
 - **Encryption at rest** (every datastore encrypted on every target; the key owner is Vault transit or the provider KMS):
 

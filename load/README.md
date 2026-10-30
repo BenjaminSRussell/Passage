@@ -36,8 +36,11 @@ a checker that fails a campaign when any SLO is missed or unmeasured.
 - `tools/verify_paths.py` — resolves every `http.<method>` call in `k6/scenarios.js` (method and path, through
   the gateway's `/api/v1` -> `/v1` rewrite) against `services/*/api/openapi.yaml`. Exit 1 when a `PATHS` call has
   no route, or when an `UNVERIFIED_PATHS` call now has one (move it to `PATHS`). `tools/test_verify_paths.py`
-  runs it on this branch, so the campaign cannot drift from the services. `tools/openapi_routes.py` is the
+  runs it on this branch, so the campaign cannot drift from the services. `--gateway deploy/gateway` also checks
+  that an HTTPRoute `/api/v1/...` prefix forwards every `PATHS` call. `tools/openapi_routes.py` is the
   route reader it shares with `test_smoke12.py`.
+- `PATH-CHECK.md` — the recorded run of `verify_paths.py` (services and edge) on main, with the findings: the
+  service routes all resolve, the gateway forwards none of the campaign's contexts yet.
 - `tools/top_sql.py` — reads a `pg_stat_statements` CSV export, prints the top 50 by total time as a Markdown
   table, and exits 1 when any statement's mean time exceeds 1000 ms (AC-50.2). Maxima over the limit are
   printed as warnings: one maximum is kept per statement since the last reset, so a single outlier is reviewed,
@@ -45,7 +48,7 @@ a checker that fails a campaign when any SLO is missed or unmeasured.
 
 ## Run
 ```
-python3 load/tools/verify_paths.py   # before the campaign: routes still match the services
+python3 load/tools/verify_paths.py --gateway deploy/gateway   # before the campaign: services and edge serve every route
 k6 run --env BASE_URL=https://api.perf.passage.dev --env TOKEN="$TOKEN" --env POOL_FILE=/data/pool.json \
   --env CAMPAIGN_ID=c-2026-10 --summary-export=results/summary.json load/k6/scenarios.js
 python3 load/tools/check_campaign.py results/summary.json

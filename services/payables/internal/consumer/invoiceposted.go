@@ -31,6 +31,7 @@ type invoicePosted struct {
 	InvoiceID     string  `json:"invoice_id"`
 	LegalEntityID string  `json:"legal_entity_id"`
 	VendorID      string  `json:"vendor_id"`
+	VendorGroupID string  `json:"vendor_group_id"`
 	InvoiceNumber string  `json:"invoice_number"`
 	InvoiceDate   string  `json:"invoice_date"`
 	DueDate       string  `json:"due_date"`
@@ -52,6 +53,9 @@ func HandleInvoicePosted(ctx context.Context, items *store.Postgres, evt events.
 		if !uuidPattern.MatchString(id) {
 			return fmt.Errorf("%w: %s %q is not a uuid", ErrInvalidEvent, field, id)
 		}
+	}
+	if d.VendorGroupID != "" && !uuidPattern.MatchString(d.VendorGroupID) {
+		return fmt.Errorf("%w: vendor_group_id %q is not a uuid", ErrInvalidEvent, d.VendorGroupID)
 	}
 	if d.InvoiceNumber == "" || !currencyPattern.MatchString(d.Currency) {
 		return fmt.Errorf("%w: invoice_number or currency %q", ErrInvalidEvent, d.Currency)
@@ -88,7 +92,7 @@ func HandleInvoicePosted(ctx context.Context, items *store.Postgres, evt events.
 	}
 	ctx = tenant.With(ctx, tenant.Principal{TenantID: evt.TenantID, LegalEntityID: d.LegalEntityID, UserID: "system:invoice.posted"})
 	_, _, err = items.CreateFromInvoice(ctx, store.OpenItem{
-		LegalEntityID: d.LegalEntityID, VendorID: d.VendorID, SourceInvoiceID: d.InvoiceID, InvoiceNumber: d.InvoiceNumber,
+		LegalEntityID: d.LegalEntityID, VendorID: d.VendorID, VendorGroupID: d.VendorGroupID, SourceInvoiceID: d.InvoiceID, InvoiceNumber: d.InvoiceNumber,
 		InvoiceDate: d.InvoiceDate, DueDate: due, DueDateSource: dueSource, Currency: d.Currency, Amount: total, DiscountDate: d.DiscountDate, DiscountAmount: discount,
 	})
 	return err

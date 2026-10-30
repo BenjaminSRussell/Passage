@@ -21,10 +21,11 @@ const (
 var bucketRank = map[Bucket]int{BucketCurrent: 0, Bucket1to30: 1, Bucket31to60: 2, Bucket61to90: 3, Bucket91to180: 4, BucketOver180: 5}
 
 type AgingRow struct {
-	VendorID   string
-	Currency   string
-	DueDate    time.Time
-	OpenAmount decimal.Decimal
+	VendorID      string
+	VendorGroupID string
+	Currency      string
+	DueDate       time.Time
+	OpenAmount    decimal.Decimal
 }
 
 type AgingTotal struct {
@@ -114,6 +115,47 @@ func Reconcile(totals []AgingTotal, ledgerCurrency string, ledgerBalance decimal
 		out = append(out, r)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Currency < out[j].Currency })
+	return out
+}
+
+const UnassignedGroup = "UNASSIGNED"
+
+const ReasonSingleControlAccount = "the ledger exposes one AP control balance per ledger; group lines break down the currency total"
+
+type GroupReconciliation struct {
+	VendorGroupID  string          `json:"vendorGroupId"`
+	Currency       string          `json:"currency"`
+	SubledgerTotal decimal.Decimal `json:"subledgerTotal"`
+	Comparable     bool            `json:"comparable"`
+	Reason         string          `json:"reason"`
+}
+
+func GroupBreakdown(rows []AgingRow) []GroupReconciliation {
+	sums := map[[2]string]decimal.Decimal{}
+	for _, r := range rows {
+		if !r.OpenAmount.IsPositive() {
+			continue
+		}
+		group := r.VendorGroupID
+		if group == "" {
+			group = UnassignedGroup
+		}
+		k := [2]string{r.Currency, group}
+		sums[k] = sums[k].Add(r.OpenAmount)
+	}
+	out := make([]GroupReconciliation, 0, len(sums))
+	for k, v := range sums {
+		out = append(out, GroupReconciliation{VendorGroupID: k[1], Currency: k[0], SubledgerTotal: v, Reason: ReasonSingleControlAccount})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Currency != out[j].Currency {
+			return out[i].Currency < out[j].Currency
+		}
+		if (out[i].VendorGroupID == UnassignedGroup) != (out[j].VendorGroupID == UnassignedGroup) {
+			return out[j].VendorGroupID == UnassignedGroup
+		}
+		return out[i].VendorGroupID < out[j].VendorGroupID
+	})
 	return out
 }
 

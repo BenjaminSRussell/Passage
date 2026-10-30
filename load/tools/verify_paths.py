@@ -10,6 +10,10 @@ path (``/api/v1/...``) and looked up in ``services/*/api/openapi.yaml`` through 
     it, the entry moves to ``PATHS`` (its body must then follow the published schema);
   * every entry of either object must be used by a call, so neither list can go stale.
 
+With ``--gateway DIR`` it also checks the edge: every ``PATHS`` call must fall under an ``/api/v1/...``
+``PathPrefix`` match of an HTTPRoute in ``DIR/*.yaml`` (``deploy/gateway``). A route the service declares
+but the gateway does not forward is a 404 at the edge, so the campaign would fail on it.
+
 A request URL that starts from neither object is an error, so a new call cannot skip the check.
 Interpolations after the base path (``${POOL.mrp.planCode}``) match one template segment; the query
 string is ignored. A variable URL (``${BASE}${path}``) is resolved through the ``path = ...``
@@ -17,6 +21,7 @@ assignments in the script, and every object entry they name is checked with the 
 
 Usage:
     python3 load/tools/verify_paths.py [--scenarios load/k6/scenarios.js] [--services services]
+        [--gateway deploy/gateway]
 
 Exit status: 0 every check passes, 1 a check fails, 2 the script cannot be read or parsed.
 Stdlib only, Python 3.11+.
@@ -41,6 +46,7 @@ CALL_RE = re.compile(r"\bhttp\.(get|post|put|patch|del)\(\s*`([^`]*)`")
 REF_RE = re.compile(r"\b(PATHS|UNVERIFIED_PATHS)\.(\w+)\b")
 LEAD_RE = re.compile(r"^\$\{\s*(?:(PATHS|UNVERIFIED_PATHS)\.(\w+)|(\w+))\s*\}")
 INTERP_RE = re.compile(r"\$\{[^}]*\}")
+GATEWAY_PREFIX_RE = re.compile(r"type:\s*PathPrefix\s*\n\s*value:\s*['\"]?(/api/v1/[^\s'\"]+)")
 METHODS = {"get": "GET", "post": "POST", "put": "PUT", "patch": "PATCH", "del": "DELETE"}
 
 
@@ -133,10 +139,34 @@ def check(text: str, routes) -> list[str]:
     return failures
 
 
+def gateway_prefixes(gateway: Path) -> list[str]:
+    """The public ``/api/v1/...`` PathPrefix values of the HTTPRoutes in ``gateway/*.yaml``.
+
+    Stdlib only, so it reads ``type: PathPrefix`` followed by ``value:`` instead of parsing YAML (the
+    layout of ``deploy/gateway/httproutes.yaml``).
+    """
+    found: set[str] = set()
+    for f in sorted(gateway.glob("*.yaml")):
+        found.update(p.rstrip("/") for p in GATEWAY_PREFIX_RE.findall(f.read_text(encoding="utf-8")))
+    return sorted(found)
+
+
+def check_gateway(text: str, prefixes: list[str]) -> list[str]:
+    """Failures for ``PATHS`` calls no gateway prefix forwards (Gateway API prefixes match whole segments)."""
+    failures: list[str] = []
+    for c in extract_calls(text):
+        if c.obj != "PATHS":
+            continue
+        if not any(c.path == p or c.path.startswith(p + "/") for p in prefixes):
+            failures.append(f"line {c.line}: {c.method} {c.path} (PATHS.{c.key}) has no gateway route")
+    return failures
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--scenarios", type=Path, default=DEFAULT_SCENARIOS)
     parser.add_argument("--services", type=Path, default=SERVICES, help="directory holding <svc>/api/openapi.yaml")
+    parser.add_argument("--gateway", type=Path, help="also check the edge: HTTPRoute YAML directory (deploy/gateway)")
     args = parser.parse_args(argv)
     try:
         text = args.scenarios.read_text(encoding="utf-8")
@@ -149,6 +179,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: no operations found under {args.services}/*/api/openapi.yaml", file=sys.stderr)
         return 2
     failures = check(text, routes)
+    if args.gateway is not None:
+        prefixes = gateway_prefixes(args.gateway)
+        if not prefixes:
+            print(f"error: no /api/v1 PathPrefix routes found under {args.gateway}/*.yaml", file=sys.stderr)
+            return 2
+        failures += check_gateway(text, prefixes)
     for c in calls:
         print(f"{c.obj:<16} {c.method:<6} {c.path}")
     for f in failures:

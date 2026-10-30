@@ -133,7 +133,8 @@ verify is LIC-1804: reinstall the issued file. Do not edit a license file by han
 ## 8. Performance, cost and capacity
 
 - Before each minor release and before cutover, run the load campaign and soak from [load/README.md](../../load/README.md):
-  `load/tools/verify_paths.py` first (the campaign's routes still exist), then k6, then `check_campaign.py`
+  `load/tools/verify_paths.py --gateway deploy/gateway` first (the campaign's routes exist in the services and the
+  gateway forwards them), then k6, then `check_campaign.py`
   and `check_soak.py`. Any SLO miss blocks the release.
 - After the campaign, export `pg_stat_statements` from the ledger cluster and run `load/tools/top_sql.py`. A
   statement with a mean above 1 s fails AC-50.2; review the top 50 and add indexes in the owning service's

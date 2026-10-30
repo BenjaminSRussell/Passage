@@ -1,4 +1,4 @@
-# fieldservice (wave 45, slices 1 to 4)
+# fieldservice (wave 45, slices 1 to 5)
 
 Service management core of Passage: service agreements with SLA profiles, the
 entitlement resolver, SLA clocks on service cases with the case status machine,
@@ -9,10 +9,11 @@ work-order lines, activities on any record with an iCalendar export, and the
 knowledge base with versioned articles, review, publishing and suggestions, and
 generic case management: case processes with stage gates, a case category tree with
 per-category SLA profile, resolution codes and access duty, cases in any non-service
-category with associations to any record, a case log and reopen. It replaces AX
+category with associations to any record, a case log and reopen, supplier warranty
+claims with vendor recovery, and email-to-case intake through case mailboxes. It replaces AX
 service management (agreements, service orders, service objects), the AX/D365 case
 framework (CaseDetail, CaseCategory, CaseProcess) and SAP CS (service orders,
-installed base, warranty check, solution database) for these slices.
+installed base, warranty check, solution database, WTY warranty claims) for these slices.
 
 Wave reference: PSG-45 / `docs/prd/phase-8-projects-people-service.md` section 8.45.
 Dependencies on earlier waves (locations, pricing, serial shipments, invoicing,
@@ -82,6 +83,13 @@ charts/fieldservice     Helm chart (deployment, service, optional ServiceMonitor
 | GET | `/v1/cases` (`categoryId`, `status`, `stage`, `ownerId`, `entityType` with `entityId`), `/v1/cases/{id}` | CaseMaintain (and BR-45.10 access) |
 | POST | `/v1/cases/{id}/stage`, `/v1/cases/{id}:transition`, `/v1/cases/{id}:reopen` | CaseMaintain (If-Match, Idempotency-Key) |
 | POST | `/v1/cases/{id}/associations` | CaseMaintain (Idempotency-Key) |
+| POST | `/v1/service/supplier-claims` | SvcClaimMaintain (Idempotency-Key) |
+| GET | `/v1/service/supplier-claims` (`vendorPartyId`, `status`), `/v1/service/supplier-claims/{id}` | SvcClaimMaintain or SvcInquire |
+| POST | `/v1/service/supplier-claims/{id}:submit`, `/{id}/decision`, `/{id}:settle`, `/{id}:close` | SvcClaimMaintain (If-Match, Idempotency-Key) |
+| POST | `/v1/case-mailboxes` | CaseSetupAdmin (upsert by address) |
+| GET | `/v1/case-mailboxes` | any of CaseMaintain, CaseCreate, CaseSetupAdmin |
+| POST | `/v1/inbound-messages` | CaseCreate (idempotent per Message-ID; and the default category's access duty for a new case) |
+| GET | `/v1/inbound-messages` (`mailbox`, `caseId`, `route`) | CaseMaintain (and BR-45.10 access) |
 
 Lists are newest first (activities: earliest due first, undated last) and page with `cursor` (the previous page's `nextCursor`)
 and `limit` (1 to 200, default 50); they see only the caller's legal entities.
@@ -118,6 +126,11 @@ the current stage's required activities and "Add" links that create them on the
 case, advance, back with a reason, resolve with a category code, close, cancel,
 reopen, associated records, the case log and the activities panel) and case setup
 (`/service/case-setup`: category and process lists, new category, new process).
+Slice 5 adds supplier warranty claims (`/service/supplier-claims`: list by status,
+create from posted work orders or EAM work order lines, detail with lines, submit,
+the vendor decision, the credit-note match and close) and the case mailbox
+(`/service/case-mailbox`: mailboxes and their default categories, set up a mailbox,
+and the inbound email list with where each message landed, linking to its case).
 
 ## Run
 
@@ -253,6 +266,31 @@ without `PASSAGE_TEST_DATABASE_URL`.
   `idempotency_keys`, so a retry with the same key and body returns the first
   answer (even after the version moved on); the fingerprint includes the command and
   the case, so a key reused elsewhere is refused (`idempotency_key_reuse`).
+- Supplier warranty claims (FR-45.15, BR-45.12): a SERVICE_WO claim names POSTED
+  work orders and takes one line per order from its WARRANTY lines (part warranty
+  cost and labor hours, with the item and serial of the case's service object); an
+  EAM_WO claim carries its lines. A line claims part + hours × the vendor's labor
+  rate, rounded half-even to the currency; a rate of 0 is a vendor that does not
+  cover labor. A work order is on one claim only (`SVC-SWC-009`). DRAFT →
+  SUBMITTED (today inside `windowDays` after the completion, default 30:
+  `SVC-SWC-001`; a return order first when `returnRequired`: `SVC-SWC-002`) →
+  ACCEPTED, PARTIALLY_ACCEPTED or REJECTED (`/decision`; never more than claimed per
+  line: `SVC-SWC-003`) → SETTLED by the credit note quoting the vendor reference and
+  crediting exactly the accepted total, which writes
+  `dev.passage.service.supplierclaim.settled.v1` for the GL warranty recovery →
+  CLOSED. A REJECTED claim closes with its reason and posts nothing.
+- Email intake (FR-45.16, BR-45.13): a mailbox maps an address to a legal entity
+  and a default category (not SERVICE, CUSTOMER_SERVICE or COLLECTIONS). An inbound
+  message is attached to the case its `[CS-n]` subject token names (padding
+  optional: `[CS-1042]` is CS-001042) or the case already holding its In-Reply-To,
+  token first, and logged on that case (`EMAIL`, info `CASE-MAIL-001`); when that case
+  is CLOSED or CANCELED a new case continues it (same category, customer and
+  associations) linked by `reopenedFrom`; otherwise a new case opens in the
+  mailbox's default category, owned by the caller (the hub principal). Only a new
+  case is acknowledged, and never for an auto-reply (Auto-Submitted other than
+  `no`, or X-Autoreply): the response says `acknowledge` and the hub sends it. A
+  case the caller may not access is never matched. The Message-ID is unique per
+  tenant; a redelivery answers the stored result with `Idempotent-Replayed`.
 - Money is decimal (`shopspring/decimal` at `numeric(20,6)`), never float.
 
 ## Error codes
@@ -308,12 +346,25 @@ Problem details use `application/problem+json`; `type` is `https://passage.dev/p
 | `CASE-RES-002` | 422 | The resolution code is not one of the category's codes |
 | `CASE-ST-001` | 422 | Case status move not allowed, or a stage move, association or reopen in a status that does not allow it |
 | `CASE-SEC-001` | 403 | The caller has no access to cases of this category (BR-45.10) |
+| `CASE-MAIL-001` | — | Info returned when an inbound email is attached to a case (PRD message catalog) |
+| `CASE-MAIL-002` | 422 | No case mailbox is set up for the address |
+| `CASE-MAIL-003` | 422 | A mailbox cannot default to a category whose cases require a customer |
+| `SVC-SWC-001` | 422 | The vendor's claim window ended (PRD message catalog) |
+| `SVC-SWC-002` | 422 | A failed-part return is required before submission (PRD message catalog) |
+| `SVC-SWC-003` | 422 | An accepted amount exceeds the claimed amount (PRD message catalog) |
+| `SVC-SWC-004` | 422 | The claim's status does not allow the move |
+| `SVC-SWC-005` | 422 | The credit note does not credit the accepted total in the claim currency |
+| `SVC-SWC-006` | 422 | The vendor decision is inconsistent (ACCEPTED not in full, partial bounds, amounts per line, rejection without a reason or with an amount) |
+| `SVC-SWC-007` | 404 | Supplier claim not found |
+| `SVC-SWC-008` | 422 | A source work order is unknown, not POSTED, has no WARRANTY line, or differs in legal entity or currency, or the claim claims nothing |
+| `SVC-SWC-009` | 409 | A source work order is already on a supplier claim |
+| `SVC-SWC-010` | 422 | The credit note's vendor reference does not match the claim's |
 
 `SVC-SLA-001` (warning) and `SVC-SLA-002` (breach) are the messages of the
 `sla.warning` and `sla.breached` events, not HTTP errors. `KB-PUB-002` (publishing
 retires version {v}) is a warning in the publish response. The PRD message catalog
 (8.45.18) also reserves `SVC-WO-001/002`,
-`SVC-DSP-*`, `SVC-TRK-001`, `SVC-SYNC-001` and `SVC-SWC-*` for the features that raise
+`SVC-DSP-*`, `SVC-TRK-001` and `SVC-SYNC-001` for the features that raise
 them; this service does not reuse those numbers.
 
 Codes are stable; new codes are additive. Error codes returned by the platform kernel

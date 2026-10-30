@@ -39,7 +39,7 @@ ADR-0001 fixed: Kubernetes (any conformant), Argo CD GitOps, Helm + OpenTofu; Go
 - Polyglot suffixes: `-ts` TypeScript, `-py` Python; tests `Test<Unit>_<Behaviour>`; Playwright ids `E<WW>-<NN>`; proof tags `@proof:wNN-k`.
 
 ## Cross-Cutting Non-Negotiables
-- Tenancy: every tenant table has permissive `tenant_access` + restrictive `legal_entity_scope` RLS (data §4.5 template, supersedes Appendix E.2); `SET LOCAL passage.tenant_id|legal_entity_ids|actor` per tx; app role has no BYPASSRLS; CDC role outside RLS.
+- Tenancy: every tenant table has permissive `tenant_access` + restrictive `legal_entity_scope` RLS (data §4.5 template, supersedes Appendix E.2); `SET LOCAL passage.tenant_id|legal_entity_scopes` per tx; app role has no BYPASSRLS; CDC role outside RLS.
 - Auth: Keycloak JWT RS256, `aud=passage-api`, re-verified by every service; duties live in OPA, never in JWT; OPA unavailable/bundle >5 min = 503 fail-secure; access 15 min, refresh 12 h single-use; tokens never reach browser (BFF cookie `__Host-passage_sid`, `X-Passage-CSRF`); step-up via OPA obligation `requires_acr: mfa`.
 - Event envelope: CloudEvents 1.0 with `tenantid, correlationid, causationid, traceparent, actor, sequence, dataschema`; outbox in the same tx as state change, validated before insert; consumers use `consumer_inbox` + 5 attempts (1/4/16/60 s) then DLQ; order by `sequence`; additive-only schema evolution (BACKWARD_TRANSITIVE).
 - Error envelope: RFC 9457 `application/problem+json` with `type,title,status,detail,instance,code,serviceCode,traceId,errors[]`.

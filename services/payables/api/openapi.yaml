@@ -107,6 +107,7 @@ paths:
         - { name: legal_entity, in: query, required: false, schema: { type: string, format: uuid } }
         - { name: as_of, in: query, required: false, schema: { type: string, format: date } }
         - { name: ledger, in: query, required: true, description: Ledger holding the control account for the legal entity., schema: { type: string, format: uuid } }
+        - { name: group_by, in: query, required: false, description: "vendorGroup adds vendorGroups, the open AP per currency and vendor group (open items without a group are UNASSIGNED). The ledger exposes one AP control balance per ledger, so group lines are a breakdown of the currency total and are never comparable; reconciled still reflects the per-currency comparison. The aging report rejects vendorGroup.", schema: { type: string, enum: [vendor, vendorGroup, none], default: none } }
       responses:
         '200':
           description: Per-currency differences and the overall reconciled flag.
@@ -311,6 +312,18 @@ components:
         controlAccount: { type: string }
         ledgerPeriod: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
         reconciled: { type: boolean, description: True only when every currency reconciles. }
+        vendorGroups:
+          type: array
+          description: Present with group_by=vendorGroup; the subledger total per currency and vendor group, UNASSIGNED last per currency.
+          items:
+            type: object
+            required: [vendorGroupId, currency, subledgerTotal, comparable, reason]
+            properties:
+              vendorGroupId: { type: string, description: Vendor group uuid or UNASSIGNED. }
+              currency: { type: string }
+              subledgerTotal: { type: string }
+              comparable: { type: boolean }
+              reason: { type: string }
         currencies:
           type: array
           items:
@@ -332,6 +345,7 @@ components:
         id: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
         vendorId: { type: string, format: uuid }
+        vendorGroupId: { type: string, format: uuid, description: Vendor group at creation (invoice.posted vendor_group_id); absent when the event carried none. }
         sourceInvoiceId: { type: string, format: uuid }
         invoiceNumber: { type: string }
         invoiceDate: { type: string, format: date }
