@@ -198,7 +198,8 @@ const groupBody = `{"legalEntityId":"%s","groupCode":"SP-2026","name":"Sammelpos
 func TestCreateGroupAsset_DutyAndInput(t *testing.T) {
 	f := newFake()
 	h := server(f)
-	le, m1, m2 := ids.New(), ids.New(), ids.New()
+	m1, m2 := ids.New(), ids.New()
+	le := testLE
 	full := sprintf(groupBody, le, m1, m2)
 	if rec := call(h, http.MethodPost, "/v1/assets/group-assets", full, maintainDuties, true); rec.Code != http.StatusForbidden {
 		t.Fatalf("without AssetConfigure status = %d", rec.Code)

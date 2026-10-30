@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/party/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/party/internal/store"
@@ -20,12 +21,17 @@ import (
 type mergeFixture struct {
 	app                  *pgxpool.Pool
 	ctx                  context.Context
+	merger               context.Context
 	winner, loser, payer string
+}
+
+func mergerContext(tenantNumber int) context.Context {
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(tenantNumber), UserID: "merger", Duties: map[string]struct{}{store.DutyMerge: {}}})
 }
 
 func seedMerge(t *testing.T, loserLegalEntity string) mergeFixture {
 	t.Helper()
-	f := mergeFixture{app: migratedApp(t), ctx: principalContext(1, "")}
+	f := mergeFixture{app: migratedApp(t), ctx: principalContext(1, ""), merger: mergerContext(1)}
 	tenantID := testkit.TenantID(1)
 	var err error
 	for i, target := range []*string{&f.winner, &f.loser, &f.payer} {
@@ -73,14 +79,14 @@ func scalar(t *testing.T, f mergeFixture, sql string, args ...any) string {
 func TestMerge_RewritesAtomicallyAndAuditIsClean(t *testing.T) {
 	f := seedMerge(t, legalEntityB)
 	s := store.New(f.app)
-	before, err := s.Audit(f.ctx)
+	before, err := s.Audit(f.merger)
 	if err != nil || !before.Clean() || before.CustomerRoles != 3 {
 		t.Fatalf("pre-merge audit = %+v, %v; want clean with 3 roles", before, err)
 	}
 
 	loserRole := scalar(t, f, `select id::text from customer_role where party_id = $1`, f.loser)
 	rules := map[string]domain.Rule{"time_zone": domain.KeepLoser, "org_trade_name": domain.NonEmpty}
-	res, err := s.Merge(f.ctx, store.MergeRequest{WinnerID: f.winner, LoserID: f.loser, Rules: rules})
+	res, err := s.Merge(f.merger, store.MergeRequest{WinnerID: f.winner, LoserID: f.loser, Rules: rules})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +94,7 @@ func TestMerge_RewritesAtomicallyAndAuditIsClean(t *testing.T) {
 		t.Fatalf("result = %+v, want 1 role moved and 1 reference rewritten", res)
 	}
 
-	after, err := s.Audit(f.ctx)
+	after, err := s.Audit(f.merger)
 	if err != nil || !after.Clean() || after.CustomerRoles != before.CustomerRoles {
 		t.Fatalf("post-merge audit = %+v, %v; want clean with %d roles", after, err, before.CustomerRoles)
 	}
@@ -133,11 +139,11 @@ func TestMerge_FailureAfterOutboxWriteRollsBackEverything(t *testing.T) {
 	s := store.WithFailpoint(store.New(f.app), func() error { return injected })
 
 	rules := map[string]domain.Rule{"time_zone": domain.KeepLoser}
-	if _, err := s.Merge(f.ctx, store.MergeRequest{WinnerID: f.winner, LoserID: f.loser, Rules: rules}); !errors.Is(err, injected) {
+	if _, err := s.Merge(f.merger, store.MergeRequest{WinnerID: f.winner, LoserID: f.loser, Rules: rules}); !errors.Is(err, injected) {
 		t.Fatalf("merge error = %v, want the injected failure", err)
 	}
 
-	report, err := store.New(f.app).Audit(f.ctx)
+	report, err := store.New(f.app).Audit(f.merger)
 	if err != nil || !report.Clean() || report.CustomerRoles != 3 {
 		t.Fatalf("audit after rollback = %+v, %v; want clean with 3 roles", report, err)
 	}
@@ -162,7 +168,7 @@ func TestMerge_FailureAfterOutboxWriteRollsBackEverything(t *testing.T) {
 
 func TestMerge_SameLegalEntityRoleConflictIsRejected(t *testing.T) {
 	f := seedMerge(t, legalEntityA)
-	_, err := store.New(f.app).Merge(f.ctx, store.MergeRequest{WinnerID: f.winner, LoserID: f.loser})
+	_, err := store.New(f.app).Merge(f.merger, store.MergeRequest{WinnerID: f.winner, LoserID: f.loser})
 	if !errors.Is(err, store.ErrRoleConflict) {
 		t.Fatalf("merge error = %v, want ErrRoleConflict", err)
 	}
@@ -174,28 +180,39 @@ func TestMerge_SameLegalEntityRoleConflictIsRejected(t *testing.T) {
 func TestMerge_RejectsInvalidRequests(t *testing.T) {
 	f := seedMerge(t, legalEntityB)
 	s := store.New(f.app)
-	if _, err := s.Merge(f.ctx, store.MergeRequest{WinnerID: f.winner, LoserID: f.winner}); !errors.Is(err, store.ErrNotMergeable) {
+	if _, err := s.Merge(f.merger, store.MergeRequest{WinnerID: f.winner, LoserID: f.winner}); !errors.Is(err, store.ErrNotMergeable) {
 		t.Errorf("self merge = %v, want ErrNotMergeable", err)
 	}
-	if _, err := s.Merge(f.ctx, store.MergeRequest{WinnerID: strings.ToUpper(f.winner), LoserID: f.winner}); !errors.Is(err, store.ErrNotMergeable) {
+	if _, err := s.Merge(f.merger, store.MergeRequest{WinnerID: strings.ToUpper(f.winner), LoserID: f.winner}); !errors.Is(err, store.ErrNotMergeable) {
 		t.Errorf("upper-case winner equal to loser = %v, want ErrNotMergeable", err)
 	}
-	if _, err := s.Merge(f.ctx, store.MergeRequest{WinnerID: f.winner, LoserID: "not-a-uuid"}); !errors.Is(err, store.ErrInvalidID) {
+	if _, err := s.Merge(f.merger, store.MergeRequest{WinnerID: f.winner, LoserID: "not-a-uuid"}); !errors.Is(err, store.ErrInvalidID) {
 		t.Errorf("malformed id = %v, want ErrInvalidID", err)
 	}
-	if _, err := s.Merge(f.ctx, store.MergeRequest{WinnerID: f.winner, LoserID: testkit.TenantID(9)}); !errors.Is(err, store.ErrNotFound) {
+	if _, err := s.Merge(f.merger, store.MergeRequest{WinnerID: f.winner, LoserID: testkit.TenantID(9)}); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("unknown loser = %v, want ErrNotFound", err)
 	}
-	if _, err := s.Merge(principalContext(2, ""), store.MergeRequest{WinnerID: f.winner, LoserID: f.loser}); !errors.Is(err, store.ErrNotFound) {
+	if _, err := s.Merge(mergerContext(2), store.MergeRequest{WinnerID: f.winner, LoserID: f.loser}); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("other tenant = %v, want ErrNotFound", err)
+	}
+	noDuty := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), UserID: "u"})
+	if _, err := s.Merge(noDuty, store.MergeRequest{WinnerID: f.winner, LoserID: f.loser}); !errors.Is(err, store.ErrScopedPrincipal) {
+		t.Errorf("no claim and no merge duty = %v, want ErrScopedPrincipal", err)
 	}
 	if _, err := s.Merge(principalContext(1, legalEntityA), store.MergeRequest{WinnerID: f.winner, LoserID: f.loser}); !errors.Is(err, store.ErrScopedPrincipal) {
 		t.Errorf("scoped principal = %v, want ErrScopedPrincipal", err)
 	}
-	if _, err := s.Merge(f.ctx, store.MergeRequest{WinnerID: f.winner, LoserID: f.loser}); err != nil {
+	scopedMerger := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), UserID: "merger", LegalEntityID: legalEntityA, Duties: map[string]struct{}{store.DutyMerge: {}}})
+	if _, err := s.Merge(scopedMerger, store.MergeRequest{WinnerID: f.winner, LoserID: f.loser}); !errors.Is(err, store.ErrScopedPrincipal) {
+		t.Errorf("legal-entity-scoped caller holding party.merge = %v, want ErrScopedPrincipal", err)
+	}
+	if _, err := s.Audit(scopedMerger); !errors.Is(err, store.ErrScopedPrincipal) {
+		t.Errorf("scoped audit = %v, want ErrScopedPrincipal", err)
+	}
+	if _, err := s.Merge(f.merger, store.MergeRequest{WinnerID: f.winner, LoserID: f.loser}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Merge(f.ctx, store.MergeRequest{WinnerID: f.winner, LoserID: f.loser}); !errors.Is(err, store.ErrNotMergeable) {
+	if _, err := s.Merge(f.merger, store.MergeRequest{WinnerID: f.winner, LoserID: f.loser}); !errors.Is(err, store.ErrNotMergeable) {
 		t.Errorf("second merge of the same loser = %v, want ErrNotMergeable", err)
 	}
 }
@@ -203,7 +220,7 @@ func TestMerge_RejectsInvalidRequests(t *testing.T) {
 func TestAudit_FlagsNonAtomicMerge(t *testing.T) {
 	f := seedMerge(t, legalEntityB)
 	exec(t, f, `update party set status = 'merged', merged_into_id = $2 where id = $1`, f.loser, f.winner)
-	report, err := store.New(f.app).Audit(f.ctx)
+	report, err := store.New(f.app).Audit(f.merger)
 	if err != nil {
 		t.Fatal(err)
 	}

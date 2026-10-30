@@ -195,7 +195,7 @@ func requireTenant(next http.Handler) http.Handler {
 // inScope refuses a legal entity outside the caller's scope.
 func inScope(w http.ResponseWriter, r *http.Request, legalEntityID string) bool {
 	p, _ := tenant.FromContext(r.Context())
-	if p.LegalEntityID != "" && legalEntityID != p.LegalEntityID {
+	if !tenant.InLegalEntityScope(p, legalEntityID) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "the legal entity is outside the caller's scope"))
 		return false
 	}

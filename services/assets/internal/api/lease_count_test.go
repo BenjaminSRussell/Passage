@@ -63,7 +63,7 @@ func (f *fakeStore) InsuranceReport(_ context.Context, filter store.InsuranceRep
 
 func newLease(t *testing.T, h http.Handler) store.Lease {
 	t.Helper()
-	body := `{"legalEntityId":"` + ids.New() + `","leaseNumber":"L-9","commencementDate":"2026-01-01","termMonths":60,
+	body := `{"legalEntityId":"` + testLE + `","leaseNumber":"L-9","commencementDate":"2026-01-01","termMonths":60,
 		"paymentsPerYear":1,"paymentAmount":"10000","paymentTiming":"arrears","ibrRate":"0.05","currency":"USD"}`
 	rec := call(h, http.MethodPost, "/v1/leases", body, "LeaseMaintain", true)
 	if rec.Code != http.StatusCreated || rec.Header().Get("ETag") != `"1"` {
@@ -138,7 +138,7 @@ func TestModifyLease_PreconditionsValidationAndHappyPath(t *testing.T) {
 func TestCreateLease_RateMethod(t *testing.T) {
 	f := newFake()
 	h := server(f)
-	body := `{"legalEntityId":"` + ids.New() + `","leaseNumber":"L-E","commencementDate":"2026-01-01","termMonths":12,
+	body := `{"legalEntityId":"` + testLE + `","leaseNumber":"L-E","commencementDate":"2026-01-01","termMonths":12,
 		"paymentsPerYear":12,"paymentAmount":"1000","paymentTiming":"arrears","ibrRate":"0.05","currency":"USD","rateMethod":"Effective"}`
 	rec := call(h, http.MethodPost, "/v1/leases", body, "LeaseMaintain", true)
 	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"rateMethod":"Effective"`) {
@@ -159,7 +159,7 @@ func TestCreateLease_RateMethod(t *testing.T) {
 
 func TestCountSession_ValidationScopeAndDuties(t *testing.T) {
 	h := server(newFake())
-	le := ids.New()
+	le := testLE
 	body := `{"legalEntityId":"` + le + `","location":" Warehouse 1 ","countedDate":"2026-04-10","barcodes":[" BC-1 ","BC-2","BC-1"]}`
 	if rec := call(h, http.MethodPost, "/v1/assets/count-sessions", body, "AssetView", true); rec.Code != http.StatusForbidden {
 		t.Fatalf("without AssetCount status = %d", rec.Code)
@@ -215,7 +215,7 @@ func TestCountSession_ValidationScopeAndDuties(t *testing.T) {
 
 func TestInsuranceReport_FiltersAndDefaults(t *testing.T) {
 	h := server(newFake())
-	le := ids.New()
+	le := testLE
 	if rec := call(h, http.MethodGet, "/v1/assets/insurance-report?legalEntityId="+le, "LeaseMaintain", "LeaseMaintain", false); rec.Code != http.StatusForbidden {
 		t.Fatalf("without AssetView status = %d", rec.Code)
 	}

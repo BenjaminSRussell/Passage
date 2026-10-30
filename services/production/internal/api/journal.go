@@ -12,6 +12,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/money"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/production/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/production/internal/store"
 )
@@ -338,7 +339,7 @@ func (a *API) saveProfile(w http.ResponseWriter, r *http.Request) {
 	fields := map[string]string{}
 	if !ids.Valid(req.LegalEntityID) {
 		fields["legalEntityId"] = "must be a UUID"
-	} else if p.LegalEntityID != "" && req.LegalEntityID != p.LegalEntityID {
+	} else if !tenant.InLegalEntityScope(p, req.LegalEntityID) {
 		fields["legalEntityId"] = "must be the legal entity of the caller"
 	}
 	if len(req.ItemGroup) > maxItemGroup {

@@ -479,7 +479,7 @@ func require(w http.ResponseWriter, r *http.Request, duty string) bool {
 // scopeAllows refuses a legal entity outside the caller's scope (AUTH-0003).
 func scopeAllows(w http.ResponseWriter, r *http.Request, legalEntityID string) bool {
 	p, _ := tenant.FromContext(r.Context())
-	if p.LegalEntityID != "" && p.LegalEntityID != legalEntityID {
+	if !tenant.InLegalEntityScope(p, legalEntityID) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "legal entity is outside the caller's scope"))
 		return false
 	}

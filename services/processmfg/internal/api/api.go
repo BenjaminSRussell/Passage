@@ -400,7 +400,7 @@ func (a *API) createBatchOrder(w http.ResponseWriter, r *http.Request) {
 		invalid(w, r, fields)
 		return
 	}
-	if p.LegalEntityID != "" && p.LegalEntityID != req.LegalEntityID {
+	if !tenant.InLegalEntityScope(p, req.LegalEntityID) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "legal entity "+req.LegalEntityID+" is outside your scope"))
 		return
 	}

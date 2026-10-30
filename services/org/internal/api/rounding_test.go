@@ -184,6 +184,20 @@ func TestRoundCurrency_ScopedCaller(t *testing.T) {
 	}
 }
 
+func TestRoundCurrency_RefusesMultiEntityClaim(t *testing.T) {
+	f := &fakeStore{}
+	r, _ := newRouter(f)
+	claim := entityA + "," + entityB
+	rec := do(r, http.MethodGet, "/v1/org/currencies/CHF/round?amount=1", "", "org.read", true, scopeHeader, claim)
+	if rec.Code != http.StatusBadRequest || f.resolveArgs != [3]string{} {
+		t.Fatalf("several entities, no query: %d %s resolved %v", rec.Code, rec.Body, f.resolveArgs)
+	}
+	rec = do(r, http.MethodGet, "/v1/org/currencies/CHF/round?amount=1&legalEntityId="+entityB, "", "org.read", true, scopeHeader, claim)
+	if rec.Code != http.StatusBadRequest || f.resolveArgs != [3]string{} {
+		t.Fatalf("several entities, named: %d %s resolved %v", rec.Code, rec.Body, f.resolveArgs)
+	}
+}
+
 func TestRoundCurrency_FormatsTheResolvedRule(t *testing.T) {
 	f := &fakeStore{resolved: store.RoundingRule{Unit: decimal.RequireFromString("0.050000"), Method: domain.HalfUp, Source: store.RoundingSourceTenant}}
 	r, _ := newRouter(f)
@@ -289,5 +303,18 @@ func TestDeleteCurrencyRounding_AuthorizationAndStoreFailures(t *testing.T) {
 	f.err = errors.New("boom")
 	if rec := do(r, http.MethodDelete, chfCash, "", referenceDuties, true); rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), "COM-0500") {
 		t.Fatalf("store failure: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestRoundCurrency_CallerWithNoLegalEntityScope(t *testing.T) {
+	f := &fakeStore{}
+	r, _ := newRouter(f)
+	rec := do(r, http.MethodGet, "/v1/org/currencies/CHF/round?amount=1&legalEntityId="+entityA, "", "org.read", true)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "AUTH-0003") || f.resolveArgs != [3]string{} {
+		t.Fatalf("named entity without scope: %d %s", rec.Code, rec.Body)
+	}
+	rec = do(r, http.MethodGet, "/v1/org/currencies/CHF/round?amount=1", "", "org.read", true)
+	if rec.Code != http.StatusOK || f.resolveArgs != [3]string{"CHF", "general", ""} {
+		t.Fatalf("tenant-level rule without scope: %d %s resolved %v", rec.Code, rec.Body, f.resolveArgs)
 	}
 }

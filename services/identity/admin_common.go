@@ -69,20 +69,11 @@ func invalidFields(w http.ResponseWriter, r *http.Request, detail string, fields
 	httpx.Fail(w, r, problem)
 }
 
-func tenantWide(p tenant.Principal, duty string) bool {
-	return p.LegalEntityID == "" && p.HasDuty(duty)
-}
-
-func withAdminTx(ctx context.Context, pool *pgxpool.Pool, p tenant.Principal, wide bool, fn func(tx pgx.Tx) error) error {
-	if !wide {
+func withAdminTx(ctx context.Context, pool *pgxpool.Pool, p tenant.Principal, duty string, fn func(tx pgx.Tx) error) error {
+	if !dbx.TenantWide(p, duty) {
 		return dbx.WithTenantTx(ctx, pool, fn)
 	}
-	return pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `select set_config('passage.tenant_id', $1, true), set_config('passage.legal_entity_scopes', '*', true)`, p.TenantID); err != nil {
-			return err
-		}
-		return fn(tx)
-	})
+	return dbx.WithTenantWideAdminTx(ctx, pool, p, duty, fn)
 }
 
 func decodeOptional(r *http.Request, v any) error {

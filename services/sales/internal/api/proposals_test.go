@@ -49,7 +49,8 @@ func (s *proposalStore) RecordProposalResponse(_ context.Context, in store.NewPr
 }
 
 func TestBuildProposalRule_Table(t *testing.T) {
-	le, a, b := ids.New(), ids.New(), ids.New()
+	a, b := ids.New(), ids.New()
+	le := testLE
 	bad := "C9"
 	cases := []struct {
 		name string
@@ -80,7 +81,8 @@ func TestBuildProposalRule_Table(t *testing.T) {
 }
 
 func TestProposalRuleHandlers(t *testing.T) {
-	le, fg, acc := ids.New(), ids.New(), ids.New()
+	fg, acc := ids.New(), ids.New()
+	le := testLE
 	s := &proposalStore{}
 	body := `{"legalEntityId":"` + le + `","orderedProductId":"` + fg + `","proposedProductId":"` + acc + `","reason":"ACCESSORY"}`
 	if rec := serveBody(t, s, http.MethodPost, proposalRules, body, principal(dutyRead), nil); rec.Code != http.StatusForbidden {
@@ -124,7 +126,8 @@ func TestProposalRuleHandlers(t *testing.T) {
 }
 
 func TestEvaluateProposalsHandler(t *testing.T) {
-	le, fg, acc, up, customer := ids.New(), ids.New(), ids.New(), ids.New(), ids.New()
+	fg, acc, up, customer := ids.New(), ids.New(), ids.New(), ids.New()
+	le := testLE
 	s := &proposalStore{rules: []domain.ProposalRule{
 		{ID: "r1", LegalEntityID: le, OrderedProductID: fg, ProposedProductID: acc, Reason: domain.ProposalAccessory},
 		{ID: "r2", LegalEntityID: le, OrderedProductID: fg, ProposedProductID: up, Reason: domain.ProposalUpSell},
@@ -167,7 +170,8 @@ func TestEvaluateProposalsHandler(t *testing.T) {
 }
 
 func TestRespondToProposalHandler(t *testing.T) {
-	le, rule, order := ids.New(), ids.New(), ids.New()
+	rule, order := ids.New(), ids.New()
+	le := testLE
 	s := &proposalStore{}
 	body := `{"legalEntityId":"` + le + `","ruleId":"` + rule + `","orderId":"` + order + `","accepted":true}`
 	key := map[string]string{idempotencyKey: "k-1"}

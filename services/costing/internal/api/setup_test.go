@@ -189,7 +189,8 @@ func ledgerBody(le, group, code, method string, primary bool) string {
 // reused code and a ledger group carrying two valuation ledgers are refused.
 func TestValuationLedgers_RegisterAndRefuse(t *testing.T) {
 	h, _ := server()
-	le, ifrs, gaap := ids.New(), ids.New(), ids.New()
+	ifrs, gaap := ids.New(), ids.New()
+	le := testLE
 	post := func(body string) *httptest.ResponseRecorder {
 		return call(h, http.MethodPost, "/v1/costing/valuation-ledgers", body, setupDuties, nil)
 	}
@@ -212,13 +213,14 @@ func TestValuationLedgers_RegisterAndRefuse(t *testing.T) {
 		}
 	}
 	// Another legal entity may reuse the code.
-	if rec := post(ledgerBody(ids.New(), ids.New(), "IFRS", "FIFO", true)); rec.Code != http.StatusCreated {
+	otherLE := ids.New()
+	if rec := call(h, http.MethodPost, "/v1/costing/valuation-ledgers", ledgerBody(otherLE, ids.New(), "IFRS", "FIFO", true), setupDuties, scopedTo(otherLE)); rec.Code != http.StatusCreated {
 		t.Errorf("other legal entity: %d", rec.Code)
 	}
 	if got := items(t, call(h, http.MethodGet, "/v1/costing/valuation-ledgers?legalEntityId="+le, "", allDuties, nil)); len(got) != 2 {
 		t.Errorf("legal entity ledgers = %d, want 2", len(got))
 	}
-	if rec := call(h, http.MethodGet, "/v1/costing/valuation-ledgers", "", allDuties, nil); rec.Code != http.StatusForbidden {
+	if rec := call(h, http.MethodGet, "/v1/costing/valuation-ledgers", "", allDuties, scopedTo("")); rec.Code != http.StatusForbidden {
 		t.Errorf("unfiltered list without legal-entity scope: %d, want 403", rec.Code)
 	}
 	allScope := map[string]string{"X-Passage-LegalEntity-Scope": "ALL"}
@@ -303,7 +305,7 @@ func TestValuationCategories(t *testing.T) {
 
 func TestBucketSets(t *testing.T) {
 	h, _ := server()
-	le := ids.New()
+	le := testLE
 	post := func(body string) *httptest.ResponseRecorder {
 		return call(h, http.MethodPost, "/v1/costing/aging/bucket-sets", body, setupDuties, nil)
 	}
@@ -353,7 +355,8 @@ func bucketValues(t *testing.T, m map[string]any) map[string]string {
 
 func TestAgingSnapshot_StoresReplaysAndRefusesKeyReuse(t *testing.T) {
 	h, fs := server()
-	le, p, s := ids.New(), ids.New(), ids.New()
+	p, s := ids.New(), ids.New()
+	le := testLE
 	key := map[string]string{idempotencyKey: "snap-2026-01"}
 	body := snapshotBody(le, p, s, `,"method":"FIFO","currency":"EUR"`)
 	rec := call(h, http.MethodPost, "/v1/costing/aging/snapshots", body, setupDuties, key)
@@ -402,7 +405,8 @@ func TestAgingSnapshot_StoresReplaysAndRefusesKeyReuse(t *testing.T) {
 // a saved bucket set of the same legal entity sets the buckets.
 func TestAgingSnapshot_LedgerAndBucketSet(t *testing.T) {
 	h, fs := server()
-	le, p, s := ids.New(), ids.New(), ids.New()
+	p, s := ids.New(), ids.New()
+	le := testLE
 	fs.ledgers = []store.ValuationLedger{{ID: ids.New(), LegalEntityID: le, Code: "USGAAP", Method: "LIFO_DATE", Currency: "USD", Primary: true}}
 	fs.bucketSets = []store.BucketSet{{ID: ids.New(), LegalEntityID: le, Name: "Quarter", Bounds: []int{90}}, {ID: ids.New(), LegalEntityID: ids.New(), Name: "Other", Bounds: []int{30}}}
 	ledger := fs.ledgers[0].ID
@@ -431,13 +435,16 @@ func TestAgingSnapshot_LedgerAndBucketSet(t *testing.T) {
 	}
 	for name, tc := range refusals {
 		body := snapshotBody(le, p, s, tc.extra)
+		headers := map[string]string{idempotencyKey: name}
 		if name == "ledger of another legal entity" {
-			body = snapshotBody(ids.New(), p, s, tc.extra)
+			otherLE := ids.New()
+			body = snapshotBody(otherLE, p, s, tc.extra)
+			headers["X-Passage-Legal-Entity"] = otherLE
 		}
 		if name == "transactions dated after the day" {
 			body = strings.Replace(body, `"asOf":"2026-01-31",`, "", 1)
 		}
-		rec := call(h, http.MethodPost, "/v1/costing/aging/snapshots", body, setupDuties, map[string]string{idempotencyKey: name})
+		rec := call(h, http.MethodPost, "/v1/costing/aging/snapshots", body, setupDuties, headers)
 		if _, ok := fieldErrors(rec)[tc.field]; rec.Code != http.StatusBadRequest || !ok {
 			t.Errorf("%s: %d %s", name, rec.Code, rec.Body.String())
 		}
@@ -450,7 +457,8 @@ func TestAgingSnapshot_LedgerAndBucketSet(t *testing.T) {
 
 func TestAgingSnapshot_RequestRefusals(t *testing.T) {
 	h, _ := server()
-	le, p, s := ids.New(), ids.New(), ids.New()
+	p, s := ids.New(), ids.New()
+	le := testLE
 	body := snapshotBody(le, p, s, `,"method":"FIFO","currency":"EUR"`)
 	if rec := call(h, http.MethodPost, "/v1/costing/aging/snapshots", body, setupDuties, nil); rec.Code != http.StatusBadRequest {
 		t.Errorf("no Idempotency-Key: %d", rec.Code)

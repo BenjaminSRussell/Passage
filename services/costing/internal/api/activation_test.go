@@ -314,7 +314,7 @@ func TestImportItemCosts_CSV(t *testing.T) {
 func TestVersionReads(t *testing.T) {
 	h, fs := server()
 	fs.version = draftVersion()
-	le := ids.New()
+	le := testLE
 	rec := call(h, http.MethodGet, "/v1/costing/versions?legalEntityId="+le+"&status=DRAFT&type=STANDARD&limit=10", "", "costing.read", nil)
 	m, _ := decodeMap(rec)
 	if rec.Code != http.StatusOK || fs.listFilter != (store.VersionFilter{LegalEntityID: le, Status: "DRAFT", Type: "STANDARD"}) || fs.listLimit != 10 {

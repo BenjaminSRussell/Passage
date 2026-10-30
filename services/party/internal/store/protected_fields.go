@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -24,7 +23,7 @@ func scopedLegalEntity(caller tenant.Principal, legalEntityID string) (string, e
 	if err != nil {
 		return "", httpx.NewProblem(http.StatusUnprocessableEntity, CodeFieldsInvalid, "legal entity id is not a UUID")
 	}
-	if caller.LegalEntityID != "" && !strings.EqualFold(caller.LegalEntityID, id) {
+	if !tenant.InLegalEntityScope(caller, id) {
 		return "", httpx.NewProblem(http.StatusForbidden, CodeOutOfScope, "the caller is not scoped to this legal entity")
 	}
 	return id, nil

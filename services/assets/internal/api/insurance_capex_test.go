@@ -180,7 +180,7 @@ func TestCapex_CreateSubmitRoutesToCFO(t *testing.T) {
 	// AC-37.11: a USD 320,000.00 request routes to the CFO level on submit.
 	f := newFake()
 	h := server(f)
-	body := `{"legalEntityId":"` + ids.New() + `","number":"CR-1","title":"New press line","requesterId":"plant.manager","currency":"USD",
+	body := `{"legalEntityId":"` + testLE + `","number":"CR-1","title":"New press line","requesterId":"plant.manager","currency":"USD",
 		"variants":[{"description":"Base","amountsByYear":{"2026":"200000.00","2027":"120000.00"},"inServiceDate":"2027-06-01","profileAssumption":"SL-120"}]}`
 	if rec := call(h, http.MethodPost, "/v1/assets/capex-requests", body, "AssetView", true); rec.Code != http.StatusForbidden {
 		t.Fatalf("without CapexRequestCreate status = %d", rec.Code)
@@ -198,7 +198,7 @@ func TestCapex_CreateSubmitRoutesToCFO(t *testing.T) {
 	}
 
 	cases := map[string]struct{ body, field string }{
-		"no variants":           {`{"legalEntityId":"` + ids.New() + `","number":"CR-2","title":"T","requesterId":"r","currency":"USD","variants":[]}`, "variants"},
+		"no variants":           {`{"legalEntityId":"` + testLE + `","number":"CR-2","title":"T","requesterId":"r","currency":"USD","variants":[]}`, "variants"},
 		"year key not a year":   {strings.Replace(body, `"2027":`, `"next":`, 1), "variants[0].amountsByYear"},
 		"zero amount":           {strings.Replace(body, `"120000.00"`, `"0"`, 1), "variants[0].amountsByYear"},
 		"bad in-service date":   {strings.Replace(body, `"2027-06-01"`, `"June"`, 1), "variants[0].inServiceDate"},

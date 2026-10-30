@@ -116,7 +116,7 @@ func (a *RoleAssignmentsAPI) assign(w http.ResponseWriter, r *http.Request) {
 		invalidFields(w, r, "invalid role assignment", fields)
 		return
 	}
-	wide := tenantWide(p, dutyMaintainSecurityRoles)
+	wide := dbx.TenantWide(p, dutyMaintainSecurityRoles)
 	if req.LegalEntityID == "" && !wide {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, codeForbidden, "a tenant-wide assignment requires a tenant-level request without a legal-entity scope"))
 		return
@@ -127,7 +127,7 @@ func (a *RoleAssignmentsAPI) assign(w http.ResponseWriter, r *http.Request) {
 	}
 
 	created := roleAssignmentResource{}
-	err := withAdminTx(r.Context(), a.pool, p, wide, func(tx pgx.Tx) error {
+	err := withAdminTx(r.Context(), a.pool, p, dutyMaintainSecurityRoles, func(tx pgx.Tx) error {
 		var status, idpSubject string
 		err := tx.QueryRow(r.Context(), `select status, idp_subject from identity_users where tenant_id = $1 and user_id = $2`, p.TenantID, req.UserID).Scan(&status, &idpSubject)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -274,7 +274,7 @@ func (a *RoleAssignmentsAPI) end(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var result roleAssignmentResource
-	err := withAdminTx(r.Context(), a.pool, p, tenantWide(p, dutyMaintainSecurityRoles), func(tx pgx.Tx) error {
+	err := withAdminTx(r.Context(), a.pool, p, dutyMaintainSecurityRoles, func(tx pgx.Tx) error {
 		rows, err := tx.Query(r.Context(), `select `+assignmentColumns+` from identity_role_assignments where tenant_id = $1 and assignment_id = $2 for update`, p.TenantID, id)
 		if err != nil {
 			return err

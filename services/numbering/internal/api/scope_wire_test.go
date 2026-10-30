@@ -55,6 +55,9 @@ func TestAllocateOverHTTPUnderAppRole(t *testing.T) {
 			tenant.HeaderDuties: "numbering.write," + tenant.DutyAllScope, tenant.HeaderLegalEntityScopeAll: tenant.LegalEntityScopeAll,
 		}, http.StatusForbidden},
 		{"caller without an entity", nil, http.StatusForbidden},
+		{"multi-entity claim allocates from the entity that owns the sequence", map[string]string{
+			tenant.HeaderLegalEntity: testkit.TenantID(8) + "," + entity,
+		}, http.StatusOK},
 		{"caller scoped to another entity", map[string]string{tenant.HeaderLegalEntity: testkit.TenantID(8)}, http.StatusNotFound},
 	}
 	for _, tc := range tests {

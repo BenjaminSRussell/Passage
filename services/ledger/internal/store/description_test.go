@@ -10,6 +10,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/ledger/internal/domain"
 )
 
@@ -270,5 +271,23 @@ func TestPostgres_DescriptionTemplateLegalEntityScope(t *testing.T) {
 	}
 	if got, err := wide.store.GetDescriptionTemplate(wide.ctx, otherTpl.ID); err != nil || got.Template != "O" {
 		t.Fatalf("other entity's template changed: %+v %v", got, err)
+	}
+}
+
+// A caller with no legal-entity claim and no all-scope duty is tenant-level:
+// it may maintain tenant templates (reference data) but is refused for any
+// legal entity's template, as the database scope would also hide it.
+func TestPostgres_DescriptionTemplateUnscopedCallerWritesOnlyTenantTemplates(t *testing.T) {
+	e, _ := setup(t)
+	e.ctx = tenant.With(e.ctx, tenant.Principal{TenantID: e.tenant, UserID: "test-user"})
+	le := e.ledger.LegalEntityID
+	_, _, err := e.store.PutDescriptionTemplate(e.ctx, ids.New(), DescriptionTemplate{Scope: ScopeLegalEntity, LegalEntityID: &le,
+		SourceType: "vendor_invoice", Language: "en", Template: "X"})
+	if status, code := problemStatus(err); status != http.StatusForbidden || code != "AUTH-0003" {
+		t.Fatalf("legal-entity template without scope: want 403 AUTH-0003, got %v", err)
+	}
+	if _, _, err := e.store.PutDescriptionTemplate(e.ctx, ids.New(), DescriptionTemplate{Scope: ScopeTenant,
+		SourceType: "vendor_invoice", Language: "en", Template: "T"}); err != nil {
+		t.Fatalf("tenant template without scope: %v", err)
 	}
 }
