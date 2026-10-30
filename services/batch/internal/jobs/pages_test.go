@@ -2,6 +2,7 @@ package jobs_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
@@ -29,7 +30,11 @@ func startProductRun(t *testing.T, s *store.Postgres, ctx context.Context, code,
 	if _, err := s.SaveJob(ctx, store.Job{Code: code, Handler: handler}); err != nil {
 		t.Fatal(err)
 	}
-	run, err := s.StartRun(ctx, code, 0, testkit.TenantID(8))
+	var params json.RawMessage
+	if handler == jobs.HandlerProductExplode {
+		params = explodeParams()
+	}
+	run, err := s.StartRun(ctx, code, 0, testkit.TenantID(8), params)
 	if err != nil {
 		t.Fatal(err)
 	}

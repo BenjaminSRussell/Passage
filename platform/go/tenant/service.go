@@ -49,6 +49,9 @@ var (
 // serviceGrants is the static per-service duty table: caller -> target -> duties.
 // policies/authz/data.json "service_grants" mirrors it and a test keeps them equal.
 var serviceGrants = map[string]map[string][]string{
+	"batch": {
+		"product": {"product.read", "product.write", "product.jobs.write"},
+	},
 	"receiving": {
 		"ledger": {"ledger.journal.post", "ledger.journal.reverse"},
 		"close":  {"period.check"},

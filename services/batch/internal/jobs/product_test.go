@@ -2,6 +2,7 @@ package jobs_test
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,6 +27,8 @@ type memoryPages struct {
 	params   json.RawMessage
 	claimErr error
 	finished bool
+	renewals int
+	renewErr error
 }
 
 func newMemoryPages() *memoryPages {
@@ -64,6 +67,13 @@ func (m *memoryPages) Record(_ context.Context, _, _ string, page jobs.Page) err
 		m.pages[page.No] = page
 	}
 	return nil
+}
+
+func (m *memoryPages) Renew(context.Context, string, string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.renewals++
+	return m.renewErr
 }
 
 func (m *memoryPages) Finish(_ context.Context, _, _, status, errMsg string) error {
@@ -367,11 +377,32 @@ func TestExplodeCreditsVariantsCreatedByACallThatCrashedBeforeItsCheckpoint(t *t
 	}
 }
 
+func serviceClient(t *testing.T, h http.Handler) *jobs.HTTPProductClient {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := tenant.NewServiceSigner("batch", priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier := tenant.NewServiceVerifier("product", map[string]ed25519.PublicKey{"batch": pub})
+	server := httptest.NewServer(tenant.MiddlewareWith(verifier)(h))
+	t.Cleanup(server.Close)
+	return jobs.NewHTTPProductClient(server.URL+"/", signer)
+}
+
+func runCtx(tenantN int) context.Context {
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(tenantN), LegalEntityID: testkit.TenantID(9), UserID: testkit.TenantID(8)})
+}
+
 func TestHTTPProductClientSpeaksProductContract(t *testing.T) {
 	var seen []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := serviceClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen = append(seen, r.Method+" "+r.URL.RequestURI())
-		if r.Header.Get(tenant.HeaderTenant) != testkit.TenantID(1) || r.Header.Get(tenant.HeaderLegalEntity) != testkit.TenantID(9) {
+		p, _ := tenant.FromContext(r.Context())
+		if p.TenantID != testkit.TenantID(1) || p.LegalEntityID != testkit.TenantID(9) || p.UserID != testkit.TenantID(8) || p.Service != "batch" {
 			http.Error(w, "scope", http.StatusForbidden)
 			return
 		}
@@ -403,9 +434,7 @@ func TestHTTPProductClientSpeaksProductContract(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	defer server.Close()
-	client := jobs.NewHTTPProductClient(server.URL + "/")
-	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: testkit.TenantID(9), UserID: "u", Duties: map[string]struct{}{"product.write": {}}})
+	ctx := runCtx(1)
 
 	explode, err := client.ExplodePage(ctx, testkit.TenantID(50), map[string][]string{"size": {"S"}}, 500)
 	if err != nil || explode.Created != 500 || explode.Remaining != 20 {
@@ -423,58 +452,106 @@ func TestHTTPProductClientSpeaksProductContract(t *testing.T) {
 		t.Fatalf("released query = %q", seen[1])
 	}
 
-	_, err = client.ReleasedPage(tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(2)}), "", 1)
+	_, err = client.ReleasedPage(runCtx(2), "", 1)
 	if !errors.Is(err, jobs.ErrRejected) {
 		t.Fatalf("4xx must be ErrRejected, got %v", err)
 	}
 }
 
+func TestHTTPProductClientSendsAServiceTokenWithTheBatchGrantAndNoUserHeaders(t *testing.T) {
+	var got []tenant.Principal
+	var leaked []string
+	client := serviceClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, _ := tenant.FromContext(r.Context())
+		got = append(got, p)
+		leaked = append(leaked, r.Header.Get(tenant.HeaderDuties), r.Header.Get(tenant.HeaderTenant))
+		_, _ = w.Write([]byte(`{"items":[],"created":0,"remaining":0}`))
+	}))
+	forged := tenant.With(runCtx(1), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: testkit.TenantID(9), UserID: testkit.TenantID(8), Duties: map[string]struct{}{"product.release": {}}})
+	if _, err := client.ExplodePage(forged, testkit.TenantID(50), nil, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.ReleasedPage(forged, "", 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.GroupChange(forged, []string{testkit.TenantID(1)}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"product.jobs.write", "product.read", "product.write"}
+	for _, p := range got {
+		held := make([]string, 0, len(p.Duties))
+		for d := range p.Duties {
+			held = append(held, d)
+		}
+		sort.Strings(held)
+		if len(got) != 3 || fmt.Sprint(held) != fmt.Sprint(want) || p.Service != "batch" || p.UserID != testkit.TenantID(8) || p.LegalEntityID != testkit.TenantID(9) {
+			t.Fatalf("principal = %+v held=%v", p, held)
+		}
+	}
+	for _, header := range leaked {
+		if header != "" {
+			t.Fatalf("user identity headers were forwarded: %q", leaked)
+		}
+	}
+}
+
+func TestHTTPProductClientRefusesToCallWithoutAValidServicePrincipal(t *testing.T) {
+	var hits int
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits++ }))
+	defer server.Close()
+	_, priv, _ := ed25519.GenerateKey(nil)
+	signer, _ := tenant.NewServiceSigner("batch", priv)
+	multi := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: testkit.TenantID(9) + "," + testkit.TenantID(10), UserID: testkit.TenantID(8)})
+	noUser := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: testkit.TenantID(9)})
+	cases := map[string]struct {
+		client *jobs.HTTPProductClient
+		ctx    context.Context
+	}{
+		"no signer":        {jobs.NewHTTPProductClient(server.URL, nil), runCtx(1)},
+		"no principal":     {jobs.NewHTTPProductClient(server.URL, signer), context.Background()},
+		"several entities": {jobs.NewHTTPProductClient(server.URL, signer), multi},
+		"no acting user":   {jobs.NewHTTPProductClient(server.URL, signer), noUser},
+		"wrong service":    {jobs.NewHTTPProductClient(server.URL, mustSigner(t, "receiving")), runCtx(1)},
+	}
+	for name, c := range cases {
+		if _, err := c.client.ReleasedPage(c.ctx, "", 1); !errors.Is(err, jobs.ErrRejected) {
+			t.Errorf("%s: err = %v; want ErrRejected", name, err)
+		}
+	}
+	if hits != 0 {
+		t.Fatalf("product was called %d times without a valid service token", hits)
+	}
+}
+
+func mustSigner(t *testing.T, name string) *tenant.ServiceSigner {
+	t.Helper()
+	_, priv, _ := ed25519.GenerateKey(nil)
+	signer, err := tenant.NewServiceSigner(name, priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return signer
+}
+
 func TestHTTPProductClientTreats5xxAndBrokenBodyAsRetryable(t *testing.T) {
 	status := http.StatusBadGateway
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	client := serviceClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(status)
 		if status == http.StatusOK {
 			_, _ = w.Write([]byte("not json"))
 		}
 	}))
-	defer server.Close()
-	client := jobs.NewHTTPProductClient(server.URL)
-	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1)})
 	for _, code := range []int{http.StatusBadGateway, http.StatusOK} {
 		status = code
-		if _, err := client.ReleasedPage(ctx, "", 1); err == nil || errors.Is(err, jobs.ErrRejected) {
+		if _, err := client.ReleasedPage(runCtx(1), "", 1); err == nil || errors.Is(err, jobs.ErrRejected) {
 			t.Fatalf("status %d: err = %v; want a retryable error", code, err)
 		}
 	}
 }
 
-func TestHTTPProductClientForwardsOnlyTheDutiesTheCallNeeds(t *testing.T) {
-	var duties []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		duties = append(duties, r.Header.Get(tenant.HeaderDuties))
-		_, _ = w.Write([]byte(`{"items":[],"created":0,"remaining":0}`))
-	}))
-	defer server.Close()
-	client := jobs.NewHTTPProductClient(server.URL)
-	held := map[string]struct{}{"product.read": {}, "product.write": {}, "product.jobs.write": {}, "product.release": {}}
-	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), Duties: held})
-	if _, err := client.ExplodePage(ctx, testkit.TenantID(50), nil, 1); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := client.ReleasedPage(ctx, "", 1); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := client.GroupChange(ctx, []string{testkit.TenantID(1)}); err != nil {
-		t.Fatal(err)
-	}
-	if fmt.Sprint(duties) != "[product.write product.read product.jobs.write]" {
-		t.Fatalf("duties = %v", duties)
-	}
-}
-
 func TestHTTPProductClientRetriesTransientStatusesAndReportsBodyDetail(t *testing.T) {
 	var calls int
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	client := serviceClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls++
 		if calls < 3 {
 			w.Header().Set("Retry-After", "0")
@@ -483,20 +560,16 @@ func TestHTTPProductClientRetriesTransientStatusesAndReportsBodyDetail(t *testin
 		}
 		_, _ = w.Write([]byte(`{"items":[],"next":""}`))
 	}))
-	defer server.Close()
-	client := jobs.NewHTTPProductClient(server.URL)
-	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1)})
-	if _, err := client.ReleasedPage(ctx, "", 1); err != nil || calls != 3 {
-		t.Fatalf("429 must be retried: err=%v calls=%d", err, calls)
+	if _, err := client.ReleasedPage(runCtx(1), "", 1); err != nil || calls != 3 {
+		t.Fatalf("429 must be retried with a fresh token each time: err=%v calls=%d", err, calls)
 	}
 
 	calls = 0
-	rejecting := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	rejecting := serviceClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls++
 		http.Error(w, strings.Repeat("x", 5000), http.StatusUnprocessableEntity)
 	}))
-	defer rejecting.Close()
-	_, err := jobs.NewHTTPProductClient(rejecting.URL).ReleasedPage(ctx, "", 1)
+	_, err := rejecting.ReleasedPage(runCtx(1), "", 1)
 	if !errors.Is(err, jobs.ErrRejected) || calls != 1 || len(err.Error()) > 700 || !strings.Contains(err.Error(), "xxx") {
 		t.Fatalf("422 must be final with bounded detail: err=%v calls=%d", err, calls)
 	}
@@ -506,12 +579,42 @@ func TestHTTPProductClientRefusesRedirects(t *testing.T) {
 	var leaked bool
 	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { leaked = true }))
 	defer target.Close()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client := serviceClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
 	}))
-	defer server.Close()
-	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1)})
-	if _, err := jobs.NewHTTPProductClient(server.URL).ReleasedPage(ctx, "", 1); !errors.Is(err, jobs.ErrRejected) || leaked {
+	if _, err := client.ReleasedPage(runCtx(1), "", 1); !errors.Is(err, jobs.ErrRejected) || leaked {
 		t.Fatalf("redirect followed: err=%v leaked=%v", err, leaked)
+	}
+}
+
+func TestRunRenewsTheLeaseBeforeEveryAttemptAndStopsWhenItIsLost(t *testing.T) {
+	product := &fakeProduct{variantsLeft: 10, failExplode: 2}
+	pages := newMemoryPages()
+	if _, err := (jobs.ProductJobs{Client: product, Pages: pages, MaxAttempts: 3}).Run(context.Background(), jobs.HandlerProductExplode, runID); err != nil {
+		t.Fatal(err)
+	}
+	if pages.renewals != 3 || product.explodeCalls != 3 {
+		t.Fatalf("renewals=%d calls=%d; want one renewal per attempt", pages.renewals, product.explodeCalls)
+	}
+
+	lost := newMemoryPages()
+	lost.renewErr = jobs.ErrLostLease
+	stolen := &fakeProduct{variantsLeft: 10}
+	if _, err := (jobs.ProductJobs{Client: stolen, Pages: lost, MaxAttempts: 3}).Run(context.Background(), jobs.HandlerProductExplode, runID); !errors.Is(err, jobs.ErrLostLease) {
+		t.Fatalf("err = %v", err)
+	}
+	if stolen.explodeCalls != 0 || lost.finished {
+		t.Fatalf("a worker that lost its lease called product or finished the run: calls=%d finished=%v", stolen.explodeCalls, lost.finished)
+	}
+}
+
+func TestRunReturnsWithoutFinishingWhenTheRunStoppedBeingActive(t *testing.T) {
+	pages := newMemoryPages()
+	pages.renewErr = jobs.ErrRunNotActive
+	if _, err := (jobs.ProductJobs{Client: &fakeProduct{released: releasedIDs(2)}, Pages: pages, MaxAttempts: 1}).Run(context.Background(), jobs.HandlerProductGroupChange, runID); !errors.Is(err, jobs.ErrRunNotActive) {
+		t.Fatalf("err = %v", err)
+	}
+	if pages.finished {
+		t.Fatal("a canceled run must not be finished by the worker")
 	}
 }

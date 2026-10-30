@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -28,6 +29,7 @@ type fakeStore struct {
 	msg     store.Message
 	schema  schema.JSONSchema
 	overlap bool
+	params  json.RawMessage
 }
 
 func (f *fakeStore) Ping(context.Context) error { return f.ping }
@@ -75,7 +77,8 @@ func (f *fakeStore) SaveJob(_ context.Context, job store.Job) (store.Job, error)
 	return job, nil
 }
 func (f *fakeStore) GetJob(context.Context, string) (store.Job, error) { return f.job, f.err }
-func (f *fakeStore) StartRun(context.Context, string, int64, string) (store.Run, error) {
+func (f *fakeStore) StartRun(_ context.Context, _ string, _ int64, _ string, params json.RawMessage) (store.Run, error) {
+	f.params = params
 	if f.overlap {
 		return store.Run{}, httpx.NewProblem(http.StatusConflict, domain.CodeRunOverlap, "job already has a running instance")
 	}
@@ -167,5 +170,24 @@ func TestAPI(t *testing.T) {
 	}
 	if rec := do(r, http.MethodPost, "/v1/workflows/instances", `{}`, allDuties, false); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("no tenant %d", rec.Code)
+	}
+}
+
+func TestStartRunPassesParamsToTheStoreAndRejectsUnknownFields(t *testing.T) {
+	f := &fakeStore{run: store.Run{ID: "r1", Status: domain.RunExecuting}}
+	r := newRouter(f)
+	body := `{"rows":5,"params":{"masterId":"` + testkit.TenantID(50) + `","selected":{"size":["S"]}}}`
+	if rec := do(r, http.MethodPost, "/v1/batch/jobs/explode/runs", body, allDuties, true); rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(string(f.params), `"masterId"`) || !strings.Contains(string(f.params), `"size"`) {
+		t.Fatalf("params not forwarded: %s", f.params)
+	}
+	f.params = nil
+	if rec := do(r, http.MethodPost, "/v1/batch/jobs/explode/runs", `{"rows":5,"param":{}}`, allDuties, true); rec.Code != http.StatusBadRequest || f.params != nil {
+		t.Fatalf("a misspelt params key must be a 400, got %d", rec.Code)
+	}
+	if rec := do(r, http.MethodPost, "/v1/batch/jobs/explode/runs", body, "batch.read", true); rec.Code != http.StatusForbidden {
+		t.Fatalf("starting a run needs batch.write, got %d", rec.Code)
 	}
 }

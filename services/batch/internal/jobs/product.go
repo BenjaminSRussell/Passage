@@ -14,8 +14,8 @@ import (
 )
 
 const (
-	HandlerProductExplode     = "product.explode"
-	HandlerProductGroupChange = "product.group-change"
+	HandlerProductExplode     = domain.HandlerProductExplode
+	HandlerProductGroupChange = domain.HandlerProductGroupChange
 	MaxPageSize               = 500
 
 	statusChanged = "changed"
@@ -54,10 +54,7 @@ type Summary struct {
 	Skipped   int
 }
 
-type ExplodeParams struct {
-	MasterID string              `json:"masterId"`
-	Selected map[string][]string `json:"selected"`
-}
+type ExplodeParams = domain.ExplodeParams
 
 type ProductJobs struct {
 	Client      ProductClient
@@ -71,8 +68,7 @@ func (p ProductJobs) Run(ctx context.Context, handler, runID string) (Summary, e
 	if size == 0 {
 		size = MaxPageSize
 	}
-	known := handler == HandlerProductExplode || handler == HandlerProductGroupChange
-	if p.Client == nil || p.Pages == nil || p.MaxAttempts <= 0 || size < 1 || size > MaxPageSize || !ids.Valid(runID) || !known {
+	if p.Client == nil || p.Pages == nil || p.MaxAttempts <= 0 || size < 1 || size > MaxPageSize || !ids.Valid(runID) || !domain.IsProductHandler(handler) {
 		return Summary{}, ErrInvalidArgument
 	}
 	claim, err := p.Pages.Claim(ctx, runID, handler)
@@ -91,7 +87,7 @@ func (p ProductJobs) Run(ctx context.Context, handler, runID string) (Summary, e
 	case HandlerProductGroupChange:
 		summary, err = p.groupChange(ctx, runID, claim.Token, size)
 	}
-	if errors.Is(err, ErrLostLease) {
+	if errors.Is(err, ErrLostLease) || errors.Is(err, ErrRunNotActive) {
 		return summary, err
 	}
 	status, msg := domain.RunEnded, ""
@@ -114,7 +110,7 @@ func (p ProductJobs) explode(ctx context.Context, runID, token string, in Explod
 	previous := remainingIn(resume.Cursor)
 	for pageNo := resume.NextPage; ; pageNo++ {
 		var res ExplodePage
-		err := p.attempt(ctx, func() (err error) {
+		err := p.attempt(ctx, runID, token, func() (err error) {
 			res, err = p.Client.ExplodePage(ctx, in.MasterID, in.Selected, size)
 			return err
 		})
@@ -161,7 +157,7 @@ func (p ProductJobs) groupChange(ctx context.Context, runID, token string, size 
 	for pageNo, after := resume.NextPage, resume.Cursor; ; pageNo++ {
 		var released ReleasedPage
 		var results []ItemResult
-		err := p.attempt(ctx, func() (err error) {
+		err := p.attempt(ctx, runID, token, func() (err error) {
 			if released, err = p.Client.ReleasedPage(ctx, after, size); err != nil || len(released.IDs) == 0 {
 				return err
 			}
@@ -204,9 +200,12 @@ func (p ProductJobs) settle(ctx context.Context, runID, token string, page *Page
 	return nil
 }
 
-func (p ProductJobs) attempt(ctx context.Context, call func() error) error {
+func (p ProductJobs) attempt(ctx context.Context, runID, token string, call func() error) error {
 	var err error
 	for range p.MaxAttempts {
+		if err = p.Pages.Renew(ctx, runID, token); err != nil {
+			return err
+		}
 		if err = call(); err == nil || errors.Is(err, ErrRejected) || ctx.Err() != nil {
 			return err
 		}
