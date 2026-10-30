@@ -26,6 +26,7 @@ const (
 	CodeSetLeadingConflict  = "LEDGER_SET_LEADING_CONFLICT"
 	CodeMappingOnLeading    = "LEDGER_MAPPING_ON_LEADING_LEDGER"
 	CodeSetCurrencyMismatch = "LEDGER_SET_CURRENCY_MISMATCH"
+	CodeLedgerLinesNotInSet = "LEDGER_LINES_LEDGER_NOT_IN_SET"
 )
 
 type LedgerSet struct {
@@ -266,6 +267,10 @@ func postSetTx(ctx context.Context, tx pgx.Tx, tenantID, setID string, in PostIn
 		}
 		ledgers = append(ledgers, l)
 	}
+	ledgerLines, err := checkLedgerLines(set, in)
+	if err != nil {
+		return out, err
+	}
 	replayed, err := replayIdempotent(ctx, tx, tenantID, set.LegalEntityID, in.Key, in.Hash, &out)
 	if err != nil || replayed {
 		return out, err
@@ -281,6 +286,7 @@ func postSetTx(ctx context.Context, tx pgx.Tx, tenantID, setID string, in PostIn
 			}
 			li.Lines = domain.ApplyMappings(in.Lines, mappings, in.PostingDate)
 		}
+		li.Lines = append(slices.Clone(li.Lines), ledgerLines[ledger.ID]...)
 		li.Key = setEntryKey(in.Key, ledger.ID)
 		entry, notices, err := postToLedger(ctx, tx, tenantID, ledger, li)
 		var rej *domain.RejectedError
@@ -299,6 +305,24 @@ func postSetTx(ctx context.Context, tx pgx.Tx, tenantID, setID string, in PostIn
 		}
 	}
 	return out, storeIdempotent(ctx, tx, tenantID, set.LegalEntityID, in.Key, in.Hash, out)
+}
+
+// checkLedgerLines canonicalises the per-ledger line groups, refuses a ledger outside the set
+// (422) and a non-leading ledger without the ledger-specific duty (403, FB50L).
+func checkLedgerLines(set LedgerSet, in PostInput) (map[string][]domain.LineInput, error) {
+	out := make(map[string][]domain.LineInput, len(in.LedgerLines))
+	for raw, lines := range in.LedgerLines {
+		id, ok := ids.Canonical(raw)
+		if !ok || !slices.Contains(set.LedgerIDs, id) {
+			return nil, setViolation(CodeLedgerLinesNotInSet, "ledgerLines", "ledger "+raw+" is not a member of ledger set "+set.Code)
+		}
+		if id != set.LeadingLedgerID && !in.CanPostLedgerSpecific {
+			return nil, httpx.NewProblem(http.StatusForbidden, "AUTH-0003",
+				"ledger-specific lines for a parallel ledger need duty "+DutyPostLedgerSpecific)
+		}
+		out[id] = lines
+	}
+	return out, nil
 }
 
 // Each set entry needs its own journal_entry.idempotency_key (unique per legal entity), so the

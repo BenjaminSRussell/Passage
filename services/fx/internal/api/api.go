@@ -19,11 +19,13 @@ import (
 const (
 	dutyRead     = "View exchange rates"
 	dutyWrite    = "Maintain exchange rates"
+	dutyAdmin    = "Administer exchange rates"
 	readyTimeout = 500 * time.Millisecond
 )
 
 type API struct {
-	store store.Store
+	store     store.Store
+	importers map[string]Importer
 }
 
 func New(s store.Store) *API { return &API{store: s} }
@@ -38,6 +40,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/fx/rates", a.lookupRate)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/fx/rates/history", a.rateHistory)
 	r.With(authz.RequireDuty(dutyRead)).Post("/v1/fx/convert", a.convert)
+	r.With(authz.RequireDuty(dutyAdmin)).Post("/v1/fx/providers/{p}:import", a.importNow)
 }
 
 func (a *API) ready(w http.ResponseWriter, r *http.Request) {

@@ -344,68 +344,195 @@
      "amount": "1000.00"
     }
    ]
+  },
+  {
+   "n": 21,
+   "postingDate": "2026-03-16",
+   "target": "set",
+   "lines": [
+    {
+     "account": "1000",
+     "side": "D",
+     "amount": "1000.00"
+    },
+    {
+     "account": "4000",
+     "side": "C",
+     "amount": "900.00"
+    }
+   ],
+   "ledgerLines": [
+    {
+     "ledger": "GL",
+     "lines": [
+      {
+       "account": "2100",
+       "side": "C",
+       "amount": "100.00"
+      }
+     ]
+    },
+    {
+     "ledger": "LOC",
+     "lines": [
+      {
+       "account": "4000",
+       "side": "C",
+       "amount": "100.00"
+      }
+     ]
+    },
+    {
+     "ledger": "TAX",
+     "lines": [
+      {
+       "account": "2100",
+       "side": "C",
+       "amount": "100.00"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "n": 22,
+   "postingDate": "2026-03-17",
+   "target": "set",
+   "lines": [
+    {
+     "account": "6020",
+     "side": "D",
+     "amount": "400.00"
+    },
+    {
+     "account": "1000",
+     "side": "C",
+     "amount": "400.00"
+    }
+   ],
+   "ledgerLines": [
+    {
+     "ledger": "LOC",
+     "lines": [
+      {
+       "account": "7020",
+       "side": "D",
+       "amount": "50.00"
+      },
+      {
+       "account": "2100",
+       "side": "C",
+       "amount": "50.00"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "n": 23,
+   "postingDate": "2026-03-18",
+   "target": "set",
+   "lines": [
+    {
+     "account": "6010",
+     "side": "D",
+     "amount": "300.00"
+    }
+   ],
+   "ledgerLines": [
+    {
+     "ledger": "GL",
+     "lines": [
+      {
+       "account": "2100",
+       "side": "C",
+       "amount": "300.00"
+      }
+     ]
+    },
+    {
+     "ledger": "LOC",
+     "lines": [
+      {
+       "account": "2100",
+       "side": "C",
+       "amount": "300.00"
+      }
+     ]
+    },
+    {
+     "ledger": "TAX",
+     "lines": [
+      {
+       "account": "1000",
+       "side": "C",
+       "amount": "300.00"
+      }
+     ]
+    }
+   ]
   }
  ],
  "expectedTrialBalance": {
   "GL": {
-   "debit": "17350.50",
-   "credit": "17350.50",
+   "debit": "19050.50",
+   "credit": "19050.50",
    "net": "0.00",
    "rows": [
     {
      "account": "1000",
-     "debit": "10500.00",
-     "credit": "4100.00",
-     "net": "6400.00"
+     "debit": "11500.00",
+     "credit": "4500.00",
+     "net": "7000.00"
     },
     {
      "account": "2100",
      "debit": "1500.00",
-     "credit": "2750.50",
-     "net": "-1250.50"
+     "credit": "3150.50",
+     "net": "-1650.50"
     },
     {
      "account": "4000",
      "debit": "0.00",
-     "credit": "10500.00",
-     "net": "-10500.00"
+     "credit": "11400.00",
+     "net": "-11400.00"
     },
     {
      "account": "6010",
-     "debit": "2450.51",
+     "debit": "2750.51",
      "credit": "0.00",
-     "net": "2450.51"
+     "net": "2750.51"
     },
     {
      "account": "6020",
-     "debit": "2899.99",
+     "debit": "3299.99",
      "credit": "0.00",
-     "net": "2899.99"
+     "net": "3299.99"
     }
    ]
   },
   "LOC": {
-   "debit": "17471.08",
-   "credit": "17471.08",
+   "debit": "19221.08",
+   "credit": "19221.08",
    "net": "0.00",
    "rows": [
     {
      "account": "1000",
-     "debit": "10500.00",
-     "credit": "4112.00",
-     "net": "6388.00"
+     "debit": "11500.00",
+     "credit": "4512.00",
+     "net": "6988.00"
     },
     {
      "account": "2100",
      "debit": "1500.00",
-     "credit": "2859.08",
-     "net": "-1359.08"
+     "credit": "3209.08",
+     "net": "-1709.08"
     },
     {
      "account": "4000",
      "debit": "0.00",
-     "credit": "10500.00",
-     "net": "-10500.00"
+     "credit": "11500.00",
+     "net": "-11500.00"
     },
     {
      "account": "6020",
@@ -415,46 +542,46 @@
     },
     {
      "account": "7010",
-     "debit": "2525.76",
+     "debit": "2825.76",
      "credit": "0.00",
-     "net": "2525.76"
+     "net": "2825.76"
     },
     {
      "account": "7020",
-     "debit": "2111.99",
+     "debit": "2561.99",
      "credit": "0.00",
-     "net": "2111.99"
+     "net": "2561.99"
     }
    ]
   },
   "TAX": {
-   "debit": "17400.50",
-   "credit": "17400.50",
+   "debit": "19100.50",
+   "credit": "19100.50",
    "net": "0.00",
    "rows": [
     {
      "account": "1000",
-     "debit": "10510.00",
-     "credit": "4100.00",
-     "net": "6410.00"
+     "debit": "11510.00",
+     "credit": "4800.00",
+     "net": "6710.00"
     },
     {
      "account": "2100",
      "debit": "1500.00",
-     "credit": "2790.50",
-     "net": "-1290.50"
+     "credit": "2890.50",
+     "net": "-1390.50"
     },
     {
      "account": "4000",
      "debit": "0.00",
-     "credit": "10510.00",
-     "net": "-10510.00"
+     "credit": "11410.00",
+     "net": "-11410.00"
     },
     {
      "account": "6010",
-     "debit": "4590.50",
+     "debit": "5290.50",
      "credit": "0.00",
-     "net": "4590.50"
+     "net": "5290.50"
     },
     {
      "account": "6020",
