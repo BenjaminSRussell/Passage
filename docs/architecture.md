@@ -4335,7 +4335,7 @@ Covered by section 2.4 and 2.5: one transaction for state and outbox; Debezium r
 
 Per C.5, in one database transaction:
 
-1. `SET LOCAL passage.tenant_id` / `legal_entity_ids` from `tenantid`/`legalentityid` (RLS applies to the effect).
+1. `SET LOCAL passage.tenant_id` / `passage.legal_entity_scopes` from `tenantid`/`legalentityid` (RLS applies to the effect).
 2. `INSERT INTO consumer_inbox (consumer, event_id) ... ON CONFLICT DO NOTHING`. Zero rows inserted means duplicate: commit the Kafka offset and stop.
 3. Apply the effect; write outgoing outbox rows (copying `correlationid`, setting `causationid` = incoming `id`, `actor` = `system:<consumer-id>` unless the effect is on behalf of a user); commit.
 4. Commit the Kafka offset after the database commit.

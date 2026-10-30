@@ -894,7 +894,7 @@ The metadata generator emits one OpenAPI 3.1 document per context (`openapi/<con
 
 A tenant is one customer organization: one Keycloak realm, one `tenant_id`, one row-level security scope across all 12 databases, one Kafka ACL principal set, one Vault namespace, one cost budget. Legal entities are scopes inside the tenant; users are assigned roles per legal entity (or `*`). Data residency is per tenant (wave 48): a tenant is pinned to a region's cluster set and its Iceberg warehouse. Cross-tenant access does not exist in the application; only the analytics and platform-operations principals can read across tenants and only through audited service accounts.
 
-The request path sets the scope: Envoy validates the JWT, the service opens a Postgres connection from a pool bound to the non-superuser application role and executes `SET LOCAL passage.tenant_id = '<uuid>'; SET LOCAL passage.legal_entity_scopes = '<uuid>,<uuid>'; SET LOCAL passage.actor = '<sub>'` inside the transaction. The application role has no `BYPASSRLS`.
+The request path sets the scope: Envoy validates the JWT, the service opens a Postgres connection from a pool bound to the non-superuser application role and executes `SET LOCAL passage.tenant_id = '<uuid>'; SET LOCAL passage.legal_entity_scopes = '<uuid>,<uuid>'` inside the transaction. The application role has no `BYPASSRLS`.
 
 ### E.2 RLS policy template
 

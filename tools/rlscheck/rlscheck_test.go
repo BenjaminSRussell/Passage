@@ -11,6 +11,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
@@ -18,6 +19,13 @@ import (
 )
 
 const appRole = "passage_app"
+
+const (
+	problemNotForced   = "rls-not-enabled-and-forced"
+	problemNoTenantID  = "no-tenant-id-column"
+	problemNoTenantPol = "no-tenant-policy"
+	problemNoEntityPol = "no-legal-entity-policy"
+)
 
 type tableFacts struct {
 	Name         string
@@ -35,20 +43,27 @@ type violation struct {
 	Problem string
 }
 
-func (v violation) key() string { return v.Service + "." + v.Table }
+func (v violation) key() string { return v.Service + "." + v.Table + ":" + v.Problem }
+
+const tenantExpr = `tenant_id[^=]*= *[A-Za-z_(]*current_setting\(.passage\.tenant_id.`
 
 const tableFactsQuery = `
 select c.relname, c.relrowsecurity, c.relforcerowsecurity,
   exists (select 1 from pg_attribute a where a.attrelid = c.oid and a.attname = 'tenant_id' and not a.attisdropped),
   exists (select 1 from pg_policies p where p.schemaname = n.nspname and p.tablename = c.relname and p.permissive = 'PERMISSIVE'
-          and p.qual like '%passage.tenant_id%' and p.with_check like '%passage.tenant_id%'),
+          and p.cmd in ('ALL', 'SELECT') and (p.roles = '{public}' or 'passage_app' = any (p.roles))
+          and p.qual ~ '` + tenantExpr + `'
+          and (p.with_check is null or p.with_check ~ '` + tenantExpr + `')),
   exists (select 1 from pg_attribute a where a.attrelid = c.oid and a.attname = 'legal_entity_id' and not a.attisdropped),
   exists (select 1 from pg_policies p where p.schemaname = n.nspname and p.tablename = c.relname and p.permissive = 'RESTRICTIVE'
-          and p.qual like '%passage.legal_entity_scopes%')
+          and p.cmd in ('ALL', 'SELECT') and (p.roles = '{public}' or 'passage_app' = any (p.roles))
+          and p.qual like '%legal_entity_id%' and p.qual like '%passage.legal_entity_scopes%')
 from pg_class c
 join pg_namespace n on n.oid = c.relnamespace
-where n.nspname = current_schema() and c.relkind in ('r', 'p') and not c.relispartition and c.relname <> 'schema_migrations'
+where n.nspname = $1 and c.relkind in ('r', 'p') and not c.relispartition and c.relname <> 'schema_migrations'
 order by c.relname`
+
+const userSchemasQuery = `select nspname from pg_namespace where nspname not like 'pg\_%' and nspname <> 'information_schema'`
 
 func migrationDirs(t *testing.T) map[string]string {
 	t.Helper()
@@ -68,31 +83,20 @@ func migrationDirs(t *testing.T) map[string]string {
 	return dirs
 }
 
-func schemaViolations(t *testing.T, service, dir string) []violation {
+func userSchemas(t *testing.T, ctx context.Context, pool *pgxpool.Pool) map[string]bool {
 	t.Helper()
-	pool := testkit.DB(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-	if err := dbx.Migrate(ctx, pool, os.DirFS(dir)); err != nil {
-		t.Fatalf("%s: migrate: %v", service, err)
-	}
-	return collect(t, ctx, pool, service)
-}
-
-func collect(t *testing.T, ctx context.Context, pool *pgxpool.Pool, service string) []violation {
-	t.Helper()
-	rows, err := pool.Query(ctx, tableFactsQuery)
+	rows, err := pool.Query(ctx, userSchemasQuery)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer rows.Close()
-	var out []violation
+	out := map[string]bool{}
 	for rows.Next() {
-		var f tableFacts
-		if err := rows.Scan(&f.Name, &f.Enabled, &f.Forced, &f.HasTenantID, &f.TenantPolicy, &f.HasEntity, &f.EntityPolicy); err != nil {
+		var n string
+		if err := rows.Scan(&n); err != nil {
 			t.Fatal(err)
 		}
-		out = append(out, judge(service, f)...)
+		out[n] = true
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
@@ -100,19 +104,80 @@ func collect(t *testing.T, ctx context.Context, pool *pgxpool.Pool, service stri
 	return out
 }
 
+func schemaViolations(t *testing.T, service, dir string) []violation {
+	t.Helper()
+	pool := testkit.DB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	var current string
+	if err := pool.QueryRow(ctx, "select current_schema()").Scan(&current); err != nil {
+		t.Fatal(err)
+	}
+	before := userSchemas(t, ctx, pool)
+	var extra []string
+	t.Cleanup(func() {
+		for _, s := range extra {
+			_, _ = pool.Exec(context.Background(), "drop schema if exists "+pgx.Identifier{s}.Sanitize()+" cascade")
+		}
+	})
+	if err := dbx.Migrate(ctx, pool, os.DirFS(dir)); err != nil {
+		t.Fatalf("%s: migrate: %v", service, err)
+	}
+	for s := range userSchemas(t, ctx, pool) {
+		if !before[s] {
+			extra = append(extra, s)
+		}
+	}
+	sort.Strings(extra)
+	var out []violation
+	tables := 0
+	for _, schema := range append([]string{current}, extra...) {
+		n, vs := collect(t, ctx, pool, service, schema)
+		tables += n
+		out = append(out, vs...)
+	}
+	if tables == 0 {
+		t.Fatalf("%s: migrations yielded no tables to check", service)
+	}
+	return out
+}
+
+func collect(t *testing.T, ctx context.Context, pool *pgxpool.Pool, service, schema string) (int, []violation) {
+	t.Helper()
+	rows, err := pool.Query(ctx, tableFactsQuery, schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []violation
+	tables := 0
+	for rows.Next() {
+		var f tableFacts
+		if err := rows.Scan(&f.Name, &f.Enabled, &f.Forced, &f.HasTenantID, &f.TenantPolicy, &f.HasEntity, &f.EntityPolicy); err != nil {
+			t.Fatal(err)
+		}
+		tables++
+		out = append(out, judge(service, f)...)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return tables, out
+}
+
 func judge(service string, f tableFacts) []violation {
 	var out []violation
 	add := func(problem string) { out = append(out, violation{service, f.Name, problem}) }
 	if !f.Enabled || !f.Forced {
-		add(fmt.Sprintf("RLS enabled=%v forced=%v", f.Enabled, f.Forced))
+		add(problemNotForced)
 	}
 	if !f.HasTenantID {
-		add("no tenant_id column")
+		add(problemNoTenantID)
 	} else if !f.TenantPolicy {
-		add("no permissive tenant policy with USING and WITH CHECK")
+		add(problemNoTenantPol)
 	}
 	if f.HasEntity && !f.EntityPolicy {
-		add("legal_entity_id without restrictive legal-entity policy")
+		add(problemNoEntityPol)
 	}
 	return out
 }
@@ -156,11 +221,13 @@ func TestEveryTableEnforcesRLS(t *testing.T) {
 		})
 	}
 
-	var unexpected []violation
+	var unexpected, allowed []violation
 	seen := map[string]bool{}
 	for _, v := range all {
 		seen[v.key()] = true
-		if _, ok := allowlist[v.key()]; !ok {
+		if _, ok := allowlist[v.key()]; ok {
+			allowed = append(allowed, v)
+		} else {
 			unexpected = append(unexpected, v)
 		}
 	}
@@ -172,8 +239,8 @@ func TestEveryTableEnforcesRLS(t *testing.T) {
 	}
 	sort.Strings(stale)
 
-	if len(all) > len(unexpected) {
-		t.Logf("%d allowlisted violations remain (see allowlist.go)", len(all)-len(unexpected))
+	if len(allowed) > 0 {
+		t.Logf("allowlisted (see allowlist.go):\n%s", table(allowed))
 	}
 	if len(unexpected) > 0 {
 		t.Errorf("RLS coverage violations (%d):\n%s", len(unexpected), table(unexpected))
