@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -70,5 +71,19 @@ func TestRateSourceWiring(t *testing.T) {
 	env := map[string]string{"FX_URL": "http://fx", "FX_RATE_TYPE": "closing", "FX_TIMEOUT": "750ms"}
 	if rateSource(func(k string) string { return env[k] }) == nil {
 		t.Fatal("FX_URL must configure the fx client")
+	}
+}
+
+func TestLedgerPosterWiring(t *testing.T) {
+	if lp, err := ledgerPoster(func(string) string { return "" }); lp != nil || err != nil {
+		t.Fatal("no LEDGER_URL must leave payment runs without a ledger")
+	}
+	if lp, err := ledgerPoster(func(k string) string { return map[string]string{"LEDGER_URL": "http://ledger"}[k] }); lp != nil || err == nil {
+		t.Fatalf("a ledger without a signing key must not become a poster: %v %v", lp, err)
+	}
+	seed := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{4}, 32))
+	env := map[string]string{"LEDGER_URL": "http://ledger", "PASSAGE_SERVICE_NAME": "payables", "PASSAGE_SERVICE_SIGNING_KEY": seed}
+	if lp, err := ledgerPoster(func(k string) string { return env[k] }); lp == nil || err != nil {
+		t.Fatalf("a signed ledger client is the poster: %v %v", lp, err)
 	}
 }

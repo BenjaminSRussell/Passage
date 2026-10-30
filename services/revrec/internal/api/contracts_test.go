@@ -226,7 +226,7 @@ func callAs(t *testing.T, h http.Handler, method, path, body, duties, scope stri
 
 func call(t *testing.T, h http.Handler, method, path, body string, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
-	return callAs(t, h, method, path, body, allDuties, "", headers)
+	return callAs(t, h, method, path, body, allDuties, entityID, headers)
 }
 
 func postContract(t *testing.T, h http.Handler, body, key string) *httptest.ResponseRecorder {
@@ -694,5 +694,13 @@ func TestRollForward_ContractDrillDown(t *testing.T) {
 	mixed := call(t, h, http.MethodGet, "/v1/revrec/roll-forward?contractId="+created.ID+"&currency=EUR&period=2027-03", "", nil)
 	if p := decodeProblem(t, mixed); mixed.Code != http.StatusBadRequest || p.Errors["contractId"] == "" {
 		t.Errorf("contractId with currency %d %+v, want 400 with a contractId error", mixed.Code, p.Errors)
+	}
+}
+
+func TestCreateContract_RefusesCallerWithoutLegalEntityScope(t *testing.T) {
+	f := newFakeStore()
+	rec := callAs(t, newHandler(f), http.MethodPost, "/v1/revrec/contracts", bundleContract, allDuties, "", map[string]string{idempotencyKey: "k-noscope"})
+	if p := decodeProblem(t, rec); rec.Code != http.StatusForbidden || p.Code != "AUTH-0003" {
+		t.Fatalf("status %d code %s, want 403 AUTH-0003", rec.Code, p.Code)
 	}
 }

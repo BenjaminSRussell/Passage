@@ -44,6 +44,7 @@ type API struct {
 	http             requestMetrics
 	aging            *agingDeps
 	proposals        *proposalDeps
+	runs             *runDeps
 }
 
 type problemBody struct {
@@ -72,6 +73,7 @@ var unprocessableCodes = map[string]bool{
 	domain.CodeCurrency:    true,
 	domain.CodeRunInvalid:  true,
 	domain.CodeFileInvalid: true,
+	domain.CodeRunConfig:   true,
 }
 
 func New(db Pinger, files FileValidator, now func() time.Time) *API {
@@ -85,6 +87,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyPaymentStatusParse)).Post(pathPaymentStatusParse, a.parsePaymentStatus)
 	a.registerAging(r)
 	a.registerProposals(r)
+	a.registerRuns(r)
 }
 
 func (a *API) ready(w http.ResponseWriter, r *http.Request) {
@@ -190,6 +193,7 @@ func (a *API) Metrics() http.Handler {
 		fmt.Fprintf(w, "# HELP payables_payment_file_server_faults_total Preview and status-parse requests that failed on a server fault (5xx).\n# TYPE payables_payment_file_server_faults_total counter\npayables_payment_file_server_faults_total %d\n", a.fileServerFaults.Load())
 		a.writeAgingMetrics(w)
 		a.writeProposalMetrics(w)
+		a.writeRunMetrics(w)
 		a.http.write(w)
 	})
 }

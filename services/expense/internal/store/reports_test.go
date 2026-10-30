@@ -109,6 +109,16 @@ func TestPostgres_CreateReplayKeyReuseAndScope(t *testing.T) {
 	}
 }
 
+func TestPostgres_CreateRefusesCallerWithoutLegalEntityScope(t *testing.T) {
+	s, _, le, _ := setup(t, 12)
+	unscoped := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(12)})
+	in := store.NewReport{LegalEntityID: le, WorkerID: ids.New(), Purpose: "Client visit", Currency: "USD"}
+	_, _, err := s.CreateReport(unscoped, "create-noscope", "h-noscope", in)
+	if p := problemOf(t, err); p.Code != store.CodeOutOfScope || p.Status != http.StatusForbidden {
+		t.Fatalf("no legal-entity scope = %s/%d; want %s/403", p.Code, p.Status, store.CodeOutOfScope)
+	}
+}
+
 // Lines are evaluated at commit across the report: a second 40.00 meal on the same
 // day takes the day over 75.00, so both meal lines carry EXP-MEAL-075, and the
 // stored totals follow the lines.

@@ -7,7 +7,7 @@ const close: PassageModule = {
   title: "Period close",
   description: "Close your books on time with tasks, reviews and period locks.",
   routes: [{ path: "/close", element: createElement(CloseHome) }],
-  nav: [{ label: "Period close", to: "/close", duty: "period.read" }],
+  nav: [{ label: "Period close", to: "/close", duty: "period.check" }],
 };
 
 export default close;

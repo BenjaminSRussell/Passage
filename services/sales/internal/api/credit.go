@@ -147,13 +147,17 @@ func creditLegalEntity(w http.ResponseWriter, r *http.Request, required bool) (s
 		le = p.LegalEntityID
 	}
 	if le == "" && !required {
+		if !p.HasDuty(tenant.DutyAllScope) {
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "the caller has no legal-entity scope"))
+			return "", false
+		}
 		return "", true
 	}
 	if !ids.Valid(le) {
 		validationFailed(w, r, map[string]string{"legalEntityId": "a legal entity UUID is required"})
 		return "", false
 	}
-	if p.LegalEntityID != "" && le != p.LegalEntityID {
+	if !tenant.InLegalEntityScope(p, le) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "the legal entity is outside the caller's scope"))
 		return "", false
 	}

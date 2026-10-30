@@ -16,7 +16,7 @@ const analytics: PassageModule = {
   description:
     "Governed metrics, dashboards, the explorer and its exports, the daily reconciliation of metrics against the ledger, data-quality rules, scheduled reports and their deliveries, catalog lineage and archive partitions.",
   routes: [
-    { path: "/analytics", element: createElement(MetricsPage), handle: { title: "Governed metrics" } },
+    { path: "/analytics", element: createElement(MetricsPage), handle: { title: "Governed metrics", duty: "AnalyticsView" } },
     { path: "/analytics/metrics", element: createElement(MetricsPage) },
     { path: "/analytics/metrics/:id", element: createElement(MetricDetailPage), handle: { title: "Governed metric" } },
     { path: "/analytics/dashboards", element: createElement(DashboardsPage), handle: { title: "Dashboards" } },

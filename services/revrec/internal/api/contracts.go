@@ -639,11 +639,9 @@ func fmtDate(t *time.Time) *string {
 	return &s
 }
 
-// inScope reports whether the caller may act on legalEntityID: a principal
-// scoped to one legal entity may act only on it; an unscoped one on any.
 func inScope(r *http.Request, legalEntityID string) bool {
 	p, _ := tenant.FromContext(r.Context())
-	return p.LegalEntityID == "" || p.LegalEntityID == legalEntityID
+	return tenant.InLegalEntityScope(p, legalEntityID)
 }
 
 func outOfScope() error {

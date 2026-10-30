@@ -18,3 +18,10 @@ serviceMonitor:
 serviceIdentity:
   signingKeySecret: ""
   keyId: ""
+  publicKeys: ""
+
+postingProfilesSecret: ""
+
+fieldCrypt:
+  keysSecret: ""
+  currentKeyId: ""

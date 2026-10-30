@@ -85,10 +85,10 @@ func optionalDay(raw *string) (*time.Time, error) {
 	return &t, nil
 }
 
-// inScope refuses a body legal entity outside a caller scoped to one entity.
+// inScope refuses a body legal entity outside the caller's legal-entity scope.
 func inScope(w http.ResponseWriter, r *http.Request, legalEntityID string) bool {
 	p, _ := tenant.FromContext(r.Context())
-	if p.LegalEntityID != "" && legalEntityID != p.LegalEntityID {
+	if !tenant.InLegalEntityScope(p, legalEntityID) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "the legal entity is outside the caller's scope"))
 		return false
 	}

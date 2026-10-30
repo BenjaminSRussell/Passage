@@ -188,7 +188,7 @@ func (a *API) createOrder(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	if p.LegalEntityID != "" && in.LegalEntityID != p.LegalEntityID {
+	if !tenant.InLegalEntityScope(p, in.LegalEntityID) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "the order's legal entity is outside the caller's scope"))
 		return
 	}

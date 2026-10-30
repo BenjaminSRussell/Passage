@@ -351,8 +351,15 @@ func TestMintRequiresExplicitEntityInTheUsersScope(t *testing.T) {
 	}
 	_, priv, _ := ed25519.GenerateKey(nil)
 	payables, _ := tenant.NewServiceSigner("payables", priv)
-	if _, err := payables.Mint("ledger", allScope, other); err != nil {
-		t.Fatalf("an ALL-scope read-only grant may name any entity: %v", err)
+	reads := []string{"ledger.balance.read", "ledger.journal.read"}
+	if _, err := payables.MintDuties("ledger", allScope, other, reads); err != nil {
+		t.Fatalf("an ALL-scope read-only token may name any entity: %v", err)
+	}
+	if _, err := payables.MintDuties("ledger", allScope, other, []string{"ledger.journal.post"}); err == nil {
+		t.Fatal("an ALL-scope user must not get a posting token")
+	}
+	if _, err := payables.Mint("ledger", allScope, other); err == nil {
+		t.Fatal("the whole payables grant includes posting, so the all-scope exception must not apply")
 	}
 	allScope.LegalEntityID = validLE
 	if _, err := f.signer.Mint("ledger", allScope, other); err == nil {
@@ -432,6 +439,86 @@ func TestReplayCacheEvictsExpiredAndFailsClosedWhenFull(t *testing.T) {
 	*f.now = epoch.Add(tenant.ServiceTokenMaxTTL + time.Second)
 	if _, err := small.Verify(mint()); err != nil {
 		t.Fatalf("expired entries must be evicted to make room: %v", err)
+	}
+}
+
+func TestMintDutiesRestrictsDutiesToTheGrant(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	signer, _ := tenant.NewServiceSigner("payables", priv)
+	clock := func() time.Time { return epoch }
+	signer = signer.WithClock(clock)
+	verifier := tenant.NewServiceVerifier("ledger", map[string]ed25519.PublicKey{"payables": pub}).WithClock(clock)
+	p := tenant.Principal{TenantID: validTenant, LegalEntityID: validLE, UserID: "erin"}
+	token, err := signer.MintDuties("ledger", p, validLE, []string{"ledger.journal.post"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := verifier.Verify(token)
+	if err != nil || !claims.Principal().HasDuty("ledger.journal.post") || claims.Principal().HasDuty("ledger.balance.read") || claims.Act != "erin" {
+		t.Fatalf("claims %+v err %v", claims, err)
+	}
+	if _, err := signer.MintDuties("ledger", p, validLE, []string{"ledger.journal.reverse"}); !errors.Is(err, tenant.ErrNoServiceGrant) {
+		t.Fatalf("a duty outside the grant: %v", err)
+	}
+}
+
+func TestWorkflowTokenCarriesOnlyPaymentRunExecuteAndTheStartingUser(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	signer, _ := tenant.NewServiceSigner("workflow-ts", priv)
+	verifier := tenant.NewServiceVerifier("payables", map[string]ed25519.PublicKey{"workflow-ts": pub})
+	token, err := signer.Mint("payables", tenant.Principal{TenantID: validTenant, LegalEntityID: validLE, UserID: "erin"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := verifier.Verify(token)
+	if err != nil || claims.Act != "erin" || !reflect.DeepEqual(claims.Duties, []string{"payment-run.execute"}) {
+		t.Fatalf("claims %+v err %v", claims, err)
+	}
+	if _, err := signer.Mint("ledger", tenant.Principal{TenantID: validTenant, LegalEntityID: validLE, UserID: "erin"}, ""); !errors.Is(err, tenant.ErrNoServiceGrant) {
+		t.Fatalf("workflow-ts has no ledger grant: %v", err)
+	}
+}
+
+func TestTypeScriptMintedWorkflowTokenVerifies(t *testing.T) {
+	raw, err := os.ReadFile("testdata/workflow_ts_token_vector.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v struct {
+		PublicKeyBase64 string `json:"publicKeyBase64"`
+		KeyID           string `json:"keyId"`
+		Iat             int64  `json:"iat"`
+		TenantID        string `json:"tenantId"`
+		LegalEntityID   string `json:"legalEntityId"`
+		Actor           string `json:"actor"`
+		Token           string `json:"token"`
+	}
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatal(err)
+	}
+	pub, err := base64.StdEncoding.DecodeString(v.PublicKeyBase64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := func(sec int64) func() time.Time { return func() time.Time { return time.Unix(sec, 0) } }
+	verifier := tenant.NewServiceVerifierKids("payables", map[string]map[string]ed25519.PublicKey{"workflow-ts": {v.KeyID: pub}}).WithClock(at(v.Iat + 1))
+	claims, err := verifier.Verify(v.Token)
+	if err != nil {
+		t.Fatalf("the Go verifier rejected the TypeScript token: %v", err)
+	}
+	if claims.Iss != "workflow-ts" || claims.Aud != "payables" || claims.Tid != v.TenantID || claims.Le != v.LegalEntityID || claims.Act != v.Actor ||
+		!reflect.DeepEqual(claims.Duties, []string{"payment-run.execute"}) || claims.Exp-claims.Iat != 60 {
+		t.Fatalf("claims %+v", claims)
+	}
+	if _, err := verifier.Verify(v.Token); err == nil {
+		t.Fatal("a replayed token verified")
+	}
+	if _, err := verifier.WithClock(at(v.Iat + 61)).Verify(v.Token); err == nil {
+		t.Fatal("an expired token verified")
+	}
+	other := tenant.NewServiceVerifierKids("ledger", map[string]map[string]ed25519.PublicKey{"workflow-ts": {v.KeyID: pub}}).WithClock(at(v.Iat + 1))
+	if _, err := other.Verify(v.Token); err == nil {
+		t.Fatal("a token addressed to payables verified at the ledger")
 	}
 }
 

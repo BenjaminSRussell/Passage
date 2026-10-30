@@ -75,21 +75,24 @@ func TestGet_RefusesAnOrderOfAnotherLegalEntity(t *testing.T) {
 	}
 }
 
-func TestGet_LegalEntityScopeIsAListOrWildcard(t *testing.T) {
+func TestGet_LegalEntityScopeFailsClosed(t *testing.T) {
 	other := "00000000-0000-0000-0000-0000000000e2"
 	tests := []struct {
 		name, scope string
+		duties      map[string]struct{}
 		allowed     bool
 	}{
-		{"wildcard", "*", true},
-		{"list including the order entity", other + ", " + legalEntityID, true},
-		{"list excluding the order entity", other + ",00000000-0000-0000-0000-0000000000e3", false},
-		{"exact match", legalEntityID, true},
+		{"star claim", "*", map[string]struct{}{tenant.DutyAllScope: {}}, false},
+		{"empty scope without all-scope duty", "", nil, false},
+		{"empty scope with all-scope duty", "", map[string]struct{}{tenant.DutyAllScope: {}}, true},
+		{"list including the order entity", other + ", " + legalEntityID, nil, true},
+		{"list excluding the order entity", other + ",00000000-0000-0000-0000-0000000000e3", nil, false},
+		{"exact match", legalEntityID, nil, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			client, _ := serve(t, http.StatusOK, orderJSON)
-			ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: tc.scope})
+			ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: tc.scope, Duties: tc.duties})
 			_, err := client.Get(ctx, orderID)
 			if tc.allowed != (err == nil) || (!tc.allowed && !errors.Is(err, domain.ErrPurchaseOrderForbidden)) {
 				t.Fatalf("scope %q: err %v", tc.scope, err)
@@ -108,8 +111,8 @@ func TestGet_ForbiddenIsNotAnOutage(t *testing.T) {
 func TestGet_OmitsLegalEntityHeaderWhenPrincipalHasNone(t *testing.T) {
 	client, got := serve(t, http.StatusOK, orderJSON)
 	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID})
-	if _, err := client.Get(ctx, orderID); err != nil {
-		t.Fatal(err)
+	if _, err := client.Get(ctx, orderID); !errors.Is(err, domain.ErrPurchaseOrderForbidden) {
+		t.Fatalf("err %v", err)
 	}
 	for _, header := range []string{"X-Passage-Legal-Entity", "X-Passage-User", "X-Passage-Duties"} {
 		if _, present := got.Header[header]; present {

@@ -28,7 +28,7 @@ const hr: PassageModule = {
   description:
     "Workers with masked personal data and an audited reveal, effective-dated employments, positions with FTE and reports-to lines, assignments, each worker's position and manager on any date, absence plans, accrual, balances and requests, benefit plans with eligibility simulation, life events and enrollments, and skills: the catalog, worker ratings and certificates, position skill profiles, gap analysis, skill search and expiring certifications, and courses: the catalog, sessions with seats and a waitlist, registrations with approval, and attendance that writes skills and certificates.",
   routes: [
-    { path: "/hr", element: createElement(WorkersPage), handle: { title: "Workers" } },
+    { path: "/hr", element: createElement(WorkersPage), handle: { title: "Workers", duty: "HcmWorkerInquire" } },
     { path: "/hr/workers", element: createElement(WorkersPage), handle: { title: "Workers" } },
     { path: "/hr/workers/new", element: createElement(NewWorkerPage), handle: { title: "New worker" } },
     { path: "/hr/workers/:id", element: createElement(WorkerDetailPage), handle: { title: "Worker" } },

@@ -1,6 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { createElement } from "react";
 import { describe, expect, it } from "vitest";
+import { visibleNav } from "../../../shell/dutyGate";
 import { PrincipalProvider } from "../../../shell/principal";
 import { json, pageViolations, renderRoutes, server as fake, useFakeServer, type Reply } from "../../../shell/testing/fakeServer";
 import admin from "../module";
@@ -44,13 +45,16 @@ const report = {
 };
 
 describe("admin security nav", () => {
-  it("declares each security entry's duty", () => {
+  it("gates each security entry on its duty", () => {
     const duties = Object.fromEntries(admin.nav.filter((n) => n.to.startsWith("/admin/security")).map((n) => [n.to, n.duty]));
     expect(duties).toEqual({
       "/admin/security/permissions": "View effective permissions",
       "/admin/security/assignments": "Maintain security roles",
       "/admin/security/legal-entities": "Maintain legal entities",
     });
+    const shown = (held: string[]) => visibleNav(admin.nav, held).map((n) => n.to).filter((to) => to.startsWith("/admin/security"));
+    expect(shown([])).toEqual([]);
+    expect(shown(["Maintain security roles"])).toEqual(["/admin/security/assignments"]);
   });
 });
 

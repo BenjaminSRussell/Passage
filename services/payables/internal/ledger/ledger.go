@@ -1,6 +1,7 @@
 package ledger
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,7 +16,9 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/shopspring/decimal"
 
+	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/services/payables/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/identity"
 )
 
@@ -23,6 +26,8 @@ const (
 	Timeout         = 3 * time.Second
 	balancesPath    = "/v1/ledger/balances"
 	ledgersPath     = "/v1/ledger/ledgers/"
+	entriesPath     = "/v1/ledger/journal-entries"
+	sourceSystem    = "payables"
 	maxResponseSize = 1 << 20
 )
 
@@ -64,9 +69,16 @@ type balancesBody struct {
 	} `json:"rows"`
 }
 
-type StatusError struct{ Status int }
+type StatusError struct {
+	Status int
+	Code   string
+}
 
 func (e *StatusError) Error() string { return fmt.Sprintf("ledger: unexpected status %d", e.Status) }
+
+const CodeIdempotencyInProgress = "LEDGER_IDEMPOTENCY_IN_PROGRESS"
+
+var readDuties = []string{"ledger.balance.read", "ledger.journal.read"}
 
 func (c *Client) get(ctx context.Context, legalEntityID, path string, q url.Values, subject string) ([]byte, error) {
 	principal, ok := tenant.FromContext(ctx)
@@ -81,7 +93,7 @@ func (c *Client) get(ctx context.Context, legalEntityID, path string, q url.Valu
 	if err != nil {
 		return nil, fmt.Errorf("ledger: %w", err)
 	}
-	signed, err := c.signer.Apply(req, principal, audience, legalEntityID)
+	signed, err := c.signer.ApplyDuties(req, principal, audience, legalEntityID, readDuties)
 	if err != nil {
 		return nil, fmt.Errorf("ledger: %w", err)
 	}
@@ -149,4 +161,105 @@ func parse(ctx context.Context, raw []byte, account string) (Balance, error) {
 		out.Debit, out.Credit = out.Debit.Add(d), out.Credit.Add(c)
 	}
 	return out, nil
+}
+
+type Entry struct {
+	LegalEntityID  string
+	LedgerID       string
+	DocumentID     string
+	PostingDate    string
+	Currency       string
+	IdempotencyKey string
+	SourceType     string
+	Lines          []domain.RunJournalLine
+}
+
+type entryBody struct {
+	LedgerID    string     `json:"ledgerId"`
+	DocumentID  string     `json:"documentId"`
+	PostingDate string     `json:"postingDate"`
+	Source      sourceBody `json:"source"`
+	Lines       []lineBody `json:"lines"`
+}
+
+type sourceBody struct {
+	System string `json:"system"`
+	Type   string `json:"type"`
+	ID     string `json:"id"`
+}
+
+type lineBody struct {
+	Account     string     `json:"account"`
+	DebitCredit string     `json:"debitCredit"`
+	Amount      amountBody `json:"amount"`
+	Text        string     `json:"text,omitempty"`
+}
+
+type amountBody struct {
+	Currency string `json:"currency"`
+	Value    string `json:"value"`
+}
+
+type entryResult struct {
+	Entries []struct {
+		ID string `json:"id"`
+	} `json:"entries"`
+}
+
+func (c *Client) Signed() bool { return c.signer != nil }
+
+func (c *Client) Post(ctx context.Context, e Entry) (string, error) {
+	if c.signer == nil {
+		return "", errors.New("ledger: posting needs a service signing key; the end user's headers are never forwarded for a journal")
+	}
+	principal, ok := tenant.FromContext(ctx)
+	if !ok {
+		return "", errors.New("ledger: no principal in context")
+	}
+	body := entryBody{LedgerID: e.LedgerID, DocumentID: e.DocumentID, PostingDate: e.PostingDate, Source: sourceBody{System: sourceSystem, Type: e.SourceType, ID: e.DocumentID}}
+	for _, l := range e.Lines {
+		side := "D"
+		if l.Credit {
+			side = "C"
+		}
+		body.Lines = append(body.Lines, lineBody{Account: l.Account, DebitCredit: side, Text: l.Text, Amount: amountBody{Currency: e.Currency, Value: l.Amount.StringFixed(money.MinorUnits(e.Currency))}})
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return "", fmt.Errorf("ledger: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+entriesPath, bytes.NewReader(payload))
+	if err != nil {
+		return "", fmt.Errorf("ledger: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", e.IdempotencyKey)
+	if _, err := c.signer.ApplyDuties(req, principal, audience, e.LegalEntityID, []string{"ledger.journal.post"}); err != nil {
+		return "", fmt.Errorf("ledger: %w", err)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		slog.ErrorContext(ctx, "ledger post failed", "err", err, "key", e.IdempotencyKey, "correlationId", middleware.GetReqID(ctx))
+		return "", fmt.Errorf("ledger: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+	if err != nil {
+		slog.ErrorContext(ctx, "ledger post read failed", "err", err, "key", e.IdempotencyKey, "correlationId", middleware.GetReqID(ctx))
+		return "", fmt.Errorf("ledger: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		slog.ErrorContext(ctx, "ledger rejected the entry", "status", resp.StatusCode, "key", e.IdempotencyKey, "correlationId", middleware.GetReqID(ctx))
+		var problem struct {
+			Code string `json:"code"`
+		}
+		_ = json.Unmarshal(raw, &problem)
+		return "", &StatusError{Status: resp.StatusCode, Code: problem.Code}
+	}
+	var result entryResult
+	if err := json.Unmarshal(raw, &result); err != nil || len(result.Entries) == 0 || result.Entries[0].ID == "" {
+		slog.ErrorContext(ctx, "ledger post response unusable", "err", err, "key", e.IdempotencyKey, "correlationId", middleware.GetReqID(ctx))
+		return "", errors.New("ledger post: response has no entry id")
+	}
+	return result.Entries[0].ID, nil
 }

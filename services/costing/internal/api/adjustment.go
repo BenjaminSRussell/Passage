@@ -159,7 +159,7 @@ func (a *API) decodeAdjustment(w http.ResponseWriter, r *http.Request, post bool
 		validationFailed(w, r, fields)
 		return store.AdjustmentRequest{}, false
 	}
-	if p, _ := tenant.FromContext(r.Context()); !inScope(p, in.LegalEntityID) {
+	if p, _ := tenant.FromContext(r.Context()); !tenant.InLegalEntityScope(p, in.LegalEntityID) {
 		httpx.Fail(w, r, outOfScope())
 		return store.AdjustmentRequest{}, false
 	}

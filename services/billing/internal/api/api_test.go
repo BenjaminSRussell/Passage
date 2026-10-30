@@ -199,6 +199,7 @@ func doAs(h http.Handler, method, path, idemKey, body, duties string, headers ma
 	req.Header.Set(tenant.HeaderTenant, testkit.TenantID(1))
 	req.Header.Set(tenant.HeaderUser, "clerk")
 	req.Header.Set(tenant.HeaderDuties, duties)
+	req.Header.Set(tenant.HeaderLegalEntity, leID)
 	if idemKey != "" {
 		req.Header.Set("Idempotency-Key", idemKey)
 	}
@@ -394,6 +395,16 @@ func TestCreateProposal_ScopedCallerCannotInvoiceAnotherEntity(t *testing.T) {
 	}
 }
 
+func TestCreateProposal_RefusesCallerWithoutLegalEntityScope(t *testing.T) {
+	s := newFakeStore()
+	h := setup(t, s, &fakeTax{perLine: "0"})
+	rec := doAs(h, http.MethodPost, "/v1/billing/free-text-invoices", key, proposal("1", "1", "4900"), allDuties,
+		map[string]string{tenant.HeaderLegalEntity: ""})
+	if rec.Code != http.StatusForbidden || s.creates != 0 {
+		t.Fatalf("status %d creates %d, want 403 and nothing stored", rec.Code, s.creates)
+	}
+}
+
 func TestCreateProposal_FieldErrors(t *testing.T) {
 	h := setup(t, newFakeStore(), &fakeTax{perLine: "0"})
 	body := fmt.Sprintf(`{"legalEntityId":%q,"customerId":"x","invoiceAccountId":%q,"currency":"eur","invoiceDate":"10.03.2027","paymentTermDays":400,"chargeAmount":"-1",`+
@@ -561,6 +572,7 @@ func TestMetricsAndReady(t *testing.T) {
 		rq := httptest.NewRequest(method, path, strings.NewReader(body))
 		rq.Header.Set(tenant.HeaderTenant, testkit.TenantID(1))
 		rq.Header.Set(tenant.HeaderDuties, allDuties)
+		rq.Header.Set(tenant.HeaderLegalEntity, leID)
 		rq.Header.Set("Idempotency-Key", key)
 		rec := httptest.NewRecorder()
 		r.ServeHTTP(rec, rq)

@@ -9,9 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"slices"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -110,7 +108,7 @@ func (s *Store) CreateReport(ctx context.Context, key, hash string, in NewReport
 	if err != nil {
 		return Report{}, false, err
 	}
-	if !inScope(p, in.LegalEntityID) {
+	if !tenant.InLegalEntityScope(p, in.LegalEntityID) {
 		return Report{}, false, outOfScope()
 	}
 	var out Report
@@ -539,15 +537,6 @@ func principal(ctx context.Context) (tenant.Principal, error) {
 		return tenant.Principal{}, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "missing or malformed tenant")
 	}
 	return p, nil
-}
-
-// inScope mirrors the legal-entity RLS policy: an empty or "*" scope sees every
-// legal entity, otherwise the scope is a comma list of legal-entity ids.
-func inScope(p tenant.Principal, legalEntityID string) bool {
-	if p.LegalEntityID == "" || p.LegalEntityID == "*" {
-		return true
-	}
-	return slices.Contains(strings.Split(p.LegalEntityID, ","), legalEntityID)
 }
 
 func notFoundOr(err error) error {

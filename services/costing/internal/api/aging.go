@@ -23,10 +23,16 @@ const (
 	maxBucketSetName = 64
 )
 
-// legalEntityInScope refuses a principal narrowed to one legal entity acting on
-// another, as createVersion does. It writes the 403 and returns false.
+// legalEntityInScope refuses a caller outside the legal-entity scope, as
+// createVersion does; an empty legalEntityID is an unfiltered list and needs a
+// scoped or all-scope caller. It writes the 403 and returns false.
 func legalEntityInScope(w http.ResponseWriter, r *http.Request, legalEntityID string) bool {
-	if p, _ := tenant.FromContext(r.Context()); p.LegalEntityID != "" && legalEntityID != "" && !strings.EqualFold(p.LegalEntityID, legalEntityID) {
+	p, _ := tenant.FromContext(r.Context())
+	allowed := tenant.InLegalEntityScope(p, legalEntityID)
+	if legalEntityID == "" {
+		allowed = p.LegalEntityID != "" || p.HasDuty(tenant.DutyAllScope)
+	}
+	if !allowed {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "legal entity is outside the caller's scope"))
 		return false
 	}
