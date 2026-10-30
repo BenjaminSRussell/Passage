@@ -226,6 +226,78 @@ func TestReopenDueTenants(t *testing.T) {
 	}
 }
 
+func TestDefinerFunctionsIgnoreHostileOverloads(t *testing.T) {
+	admin, app := migrated(t)
+	ctx := context.Background()
+	for _, stmt := range []string{
+		`create function now(variadic anyarray default null) returns timestamptz language sql as $$ select '-infinity'::timestamptz $$`,
+		`create function now() returns timestamptz language sql as $$ select '-infinity'::timestamptz $$`,
+		`create function cardinality(anyelement) returns int language sql as $$ select 0 $$`,
+		`create function "any"(anyelement) returns bool language sql as $$ select false $$`,
+		`create function pg_temp.now() returns timestamptz language sql as $$ select '-infinity'::timestamptz $$`,
+	} {
+		if _, err := admin.Exec(ctx, stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	for i, row := range []struct{ status, expiry string }{
+		{"open", "now() - interval '1 hour'"},
+		{"closed", "now() - interval '1 hour'"},
+		{"on_hold", "now() + interval '1 day'"},
+	} {
+		if _, err := admin.Exec(ctx,
+			`insert into period_status(tenant_id, legal_entity_id, ledger_id, fiscal_period_id, module, status, reopen_expires_at, changed_by) values($1,$2,$3,$4,'gl',$5,`+row.expiry+`,'t')`,
+			testkit.TenantID(i+1), entityID, ledgerID, periodID, row.status); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var tracked int
+	if err := admin.QueryRow(ctx, `select count(*) from reopen_expiry`).Scan(&tracked); err != nil || tracked != 2 {
+		t.Fatalf("trigger must track only open/on_hold rows: %d, %v", tracked, err)
+	}
+	var due []string
+	rows, err := app.Query(ctx, `select * from close_reopen_due_tenants()`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		due = append(due, id)
+	}
+	if len(due) != 1 || due[0] != testkit.TenantID(1) {
+		t.Fatalf("due tenants = %v, want only tenant 1 despite hostile now()", due)
+	}
+}
+
+func TestDefinerFunctionsPinSearchPath(t *testing.T) {
+	admin, _ := migrated(t)
+	rows, err := admin.Query(context.Background(), `select proname, proconfig[1] from pg_proc
+		where proname in ('close_reopen_due_tenants', 'period_status_track_reopen_expiry') and prosecdef
+		  and pronamespace = current_schema()::regnamespace`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	n := 0
+	for rows.Next() {
+		var name, cfg string
+		if err := rows.Scan(&name, &cfg); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasPrefix(cfg, "search_path=pg_catalog, ") || !strings.HasSuffix(cfg, ", pg_temp") {
+			t.Fatalf("%s search_path = %q, want pg_catalog first and pg_temp last", name, cfg)
+		}
+		n++
+	}
+	if n != 2 {
+		t.Fatalf("found %d definer functions, want 2", n)
+	}
+}
+
 func idempotentStore(t *testing.T) (*pgxpool.Pool, *pgxpool.Pool, *store.Postgres) {
 	admin, app := migrated(t)
 	return admin, app, store.New(app)
