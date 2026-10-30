@@ -157,6 +157,16 @@ func TestLegalEntityScope_LoadsBillsVisitsAndGoodsInTransit(t *testing.T) {
 			t.Errorf("all-entity caller cannot fetch entity B's freight bill: %v", err)
 		}
 	})
+
+	t.Run("a voyage line on another entity's order is a conflict, not a 500", func(t *testing.T) {
+		_, err := s.CreateGoodsInTransit(ctxB, voyage.ID, "FOB", site, "", []int{1}, store.Idem{})
+		if got := problemStatus(err); got != http.StatusConflict {
+			t.Fatalf("entity B order on a line held by entity A = %v, want 409", err)
+		}
+		if got := problemCode(t, err); got != domain.CodeGITState {
+			t.Fatalf("code = %s, want %s", got, domain.CodeGITState)
+		}
+	})
 }
 
 func problemStatus(err error) int {
@@ -228,6 +238,19 @@ func TestLegalEntityScope_ChildrenFollowTheirLoad(t *testing.T) {
 		other.Ref = "b-1"
 		if _, _, err := s.RecordTrackingEvent(ctxB, other); problemCode(t, err) != domain.CodeNotFound {
 			t.Errorf("entity B tracking on entity A's load = %v", err)
+		}
+	})
+
+	t.Run("a report key held by another entity's event is a conflict, not a 500", func(t *testing.T) {
+		loadB := seedLoad(t, s, ctxB)
+		held := domain.TrackingEvent{LoadID: loadA, StopNo: 1, Code: "AF", OccurredAt: t0, Source: "API", Ref: "shared-1"}
+		if _, _, err := s.RecordTrackingEvent(ctxA, held); err != nil {
+			t.Fatal(err)
+		}
+		clash := held
+		clash.LoadID = loadB
+		if _, _, err := s.RecordTrackingEvent(ctxB, clash); problemStatus(err) != http.StatusConflict {
+			t.Errorf("entity B reusing entity A's source and ref = %v, want 409", err)
 		}
 	})
 

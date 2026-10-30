@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -272,4 +273,30 @@ func TestLegalEntityScope_RunOwnerIsTheLedgers(t *testing.T) {
 			t.Fatal("journal line is not owned by the ledger's entity")
 		}
 	})
+}
+
+func TestLegalEntityScope_AuditExportForLedgerWithoutReportingRows(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	all := scopedCtx(testkit.TenantID(1), "")
+	if err := dbx.Migrate(all, admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	st := New(app)
+	entityA, entityB := ids.New(), ids.New()
+	ctxAB := scopedCtx(testkit.TenantID(1), entityA+","+entityB)
+	ledger := ids.New()
+	window := domain.AuditFilter{From: time.Now().Add(-time.Hour), To: time.Now().Add(time.Hour), LedgerID: ledger}
+
+	if exp, err := st.ExportAuditTrail(ctxAB, window); err != nil || exp.Entries != 0 {
+		t.Fatalf("multi-scope export of a ledger without reporting rows = %+v, %v, want 200 with no entries", exp, err)
+	}
+	if n := countAs(t, app, ctxAB, `select count(*) from audit_trail_entry where ledger_id=$1 and kind=$2`, ledger, domain.AuditExported); n != 1 {
+		t.Fatalf("the export left %d audit entries visible to the caller, want 1", n)
+	}
+	if exp, err := st.ExportAuditTrail(scopedCtx(testkit.TenantID(1), entityB), window); err != nil || exp.Entries != 0 {
+		t.Fatalf("entity B sees the export entry filed under entity A: %+v, %v", exp, err)
+	}
+	if exp, err := st.ExportAuditTrail(all, window); err != nil || exp.Entries < 1 {
+		t.Fatalf("all-entity export = %+v, %v", exp, err)
+	}
 }

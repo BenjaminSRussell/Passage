@@ -125,7 +125,6 @@ owner's work, or a change outside this wave's paths).
 | OpenTelemetry traces and latency histograms (rating p95 SLO) | handoff (platform kernel, wave 0) | The admin port serves `/metrics` with request counters only |
 | `/readyz` checks only the process; no Postgres SELECT 1, OPA bundle or migration check | handoff (platform kernel) | `httpx.NewRouter` provides the static probe |
 | OPA duty decisions (`data.passage.authz.decision`) | handoff (platform kernel, edge identity) | Slice 1 uses the kernel's local duty check through `authz.RequireDuty` |
-| `legal_entity_scope` RLS policy | later slice of PSG-34 | The tables do not carry `legal_entity_id` yet; add with the legal-entity-scoped tables |
 | Rate-card overlap enforced at database level | later slice of PSG-34 | Enforced in the store (`Overlaps`) only |
 | Events `dev.passage.tms.shipment.rated.v1`, and load, DG or gate check-out events | later slice of PSG-34 | Published: `freightbill.matched`, `freightbill.approved` (slice 3), `tender.accepted/declined/expired`, `tracking.event`, `landedcost.posted`, `gate.checkedin` and `goodsintransit.shipped` (slice 4; the latter is not in the PRD's event table and is added for wave 20). Load builds, DG checks and check-outs publish nothing yet. Screening holds, their release and route plans publish nothing: the PRD's event table has no event for them |
 | BFF route registration for `/api/v1/transport` | handoff (web-bff owner) | The service follows the `/v1/<service>` convention the BFF rewrites; registering the upstream is outside this wave's paths |
@@ -133,15 +132,13 @@ owner's work, or a change outside this wave's paths).
 
 ## Legal-entity scope follow-ups (#241)
 
-- **later slice**: create bodies for loads, freight bills, gate check-ins and
-  goods-in-transit orders do not accept `legalEntityId`; an all-entity caller
-  leaves the row unassigned and a caller scoped to several gets 422.
-- **later slice**: `tender`, `tracking_event`, `voyage`, `rate_card` and `route_plan`
-  are still tenant-level.
-- **handoff**: existing rows keep a NULL `legal_entity_id`; assigning them is a
-  data migration owned by the tenant administrator.
+- **later slice**: `voyage`, `rate_card` and `route_plan` are still tenant-level;
+  `tender` and `tracking_event` follow their load.
 - **handoff**: existing rows keep a NULL `legal_entity_id` and are invisible to
   scoped callers (a tender or tracking report on such a load answers 404) until the
   tenant administrator assigns an entity; the backfill is a data migration.
+- **handoff**: an all-entity caller may name any UUID as `legalEntityId`; the
+  existence of that legal entity is not checked here because the legal-entity
+  register lives in the org service and no cross-service lookup exists yet.
 - **handoff**: when the scope-claim hardening of PR #256 lands, `httpx.OwnerLegalEntity`
   must also require `tenant.DutyAllScope` for a caller with no legal entity.

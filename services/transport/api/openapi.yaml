@@ -541,7 +541,8 @@ paths:
         Expires each pending attempt whose deadline has passed, offers the load
         to the next carrier or fails the tender with a planner task (TMS-0106)
         after the last one, and publishes one tender.expired event per expired
-        attempt. At most 500 tenders per call. A Temporal TenderWorkflow timer
+        attempt. At most 500 tenders per call. Only tenders in the caller's legal
+        entities expire, so the sweep must run as an all-entity principal. A Temporal TenderWorkflow timer
         will drive the same rule; until then a scheduler or the tender board calls this.
       x-passage-duty: TMS_TENDER
       responses:

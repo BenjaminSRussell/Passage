@@ -440,3 +440,8 @@ run must belong to the plan's entity (422 `PLAN-FORECAST-ENTITY`). Forecast-mode
 writes and quota-arrangement creates take `legalEntityId` the same way. A plan or
 forecast model code held outside the caller's scope, including by a row with no
 entity yet, is 409 `PLAN-CODE-TAKEN`.
+
+The quota-arrangement overlap rule (409 `PLAN-QUOTA-OVERLAP`) runs per legal entity
+as well as per item and site. That assumes a site belongs to exactly one legal
+entity; the site register lives in the org service, so a site shared between
+entities would let each entity hold an arrangement for it.

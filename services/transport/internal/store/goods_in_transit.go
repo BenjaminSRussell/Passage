@@ -116,6 +116,10 @@ func (s *Postgres) CreateGoodsInTransit(ctx context.Context, voyageID, incoterm,
 		for _, line := range lineNos {
 			if _, err := tx.Exec(ctx, `insert into goods_in_transit_line (tenant_id, voyage_id, receipt_line, order_id) values ($1, $2, $3, $4)`,
 				p.TenantID, voyageID, line, id); err != nil {
+				if isUnique(err) {
+					return httpx.NewProblem(http.StatusConflict, domain.CodeGITState,
+						"receipt line "+strconv.Itoa(line)+" of voyage "+v.Reference+" is already on another goods-in-transit order")
+				}
 				return err
 			}
 		}

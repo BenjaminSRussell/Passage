@@ -49,6 +49,10 @@ func (s *Postgres) RecordTrackingEvent(ctx context.Context, in domain.TrackingEv
 		if errors.Is(err, pgx.ErrNoRows) {
 			existing, err := scanTracking(tx.QueryRow(ctx, `select `+trackingColumns+` from tracking_event where tenant_id = $1 and source = $2 and ref = $3`,
 				p.TenantID, in.Source, in.Ref))
+			if errors.Is(err, pgx.ErrNoRows) {
+				return httpx.NewProblem(http.StatusConflict, CodeIdempotencyReuse,
+					"source "+in.Source+" and ref "+in.Ref+" are already used by a status report outside the caller's legal entities")
+			}
 			if err != nil {
 				return err
 			}

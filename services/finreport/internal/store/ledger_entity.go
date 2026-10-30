@@ -7,7 +7,6 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
-	"github.com/BenjaminSRussell/passage/platform/tenant"
 )
 
 const (
@@ -76,8 +75,12 @@ func auditEntityTx(ctx context.Context, tx pgx.Tx, ledgerID, requested string) (
 	if err != nil || found {
 		return owner, err
 	}
-	if p, _ := tenant.FromContext(ctx); p.LegalEntityID == "" && requested == "" {
-		return "", nil
+	if requested == "" {
+		scopes, err := httpx.CallerLegalEntities(ctx)
+		if err != nil || len(scopes) == 0 {
+			return "", nil
+		}
+		return scopes[0], nil
 	}
 	return httpx.OwnerLegalEntity(ctx, requested)
 }

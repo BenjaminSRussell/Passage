@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
@@ -26,6 +27,9 @@ func TestOwnerLegalEntity(t *testing.T) {
 		{"all-entity caller must name the entity", "", "", "", http.StatusUnprocessableEntity},
 		{"claim without a valid UUID fails closed", "le-test", "", "", http.StatusForbidden},
 		{"invalid entries are dropped from the scope", "le-test," + a, "", a, 0},
+		{"a spaced entry is not a scope, as the database sees it", a + ", " + b, b, "", http.StatusForbidden},
+		{"a spaced claim still scopes its exact entries", a + ", " + b, a, a, 0},
+		{"an upper-case entry is not a scope, as the database sees it", strings.ToUpper(a), "", "", http.StatusForbidden},
 		{"all-entity caller may name one", "", a, a, 0},
 		{"several scopes require a choice", a + "," + b, "", "", http.StatusUnprocessableEntity},
 		{"several scopes accept a member", a + "," + b, b, b, 0},

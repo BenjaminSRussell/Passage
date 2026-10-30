@@ -19,20 +19,9 @@ import (
 // parent instead and treat the request value as an assertion. A legal-entity
 // claim with no valid UUID in it fails closed (403), as the scope GUC does.
 func OwnerLegalEntity(ctx context.Context, requested string) (string, error) {
-	p, ok := tenant.FromContext(ctx)
-	if !ok {
-		return "", NewProblem(http.StatusUnauthorized, "AUTH-0001", "no principal")
-	}
-	var scopes []string
-	if p.LegalEntityID != "" {
-		for _, part := range strings.Split(p.LegalEntityID, ",") {
-			if id, ok := ids.Canonical(strings.TrimSpace(part)); ok && id != ids.Nil {
-				scopes = append(scopes, id)
-			}
-		}
-		if len(scopes) == 0 {
-			return "", NewProblem(http.StatusForbidden, "AUTH-0003", "the caller's legal-entity scope holds no valid legal entity")
-		}
+	scopes, err := CallerLegalEntities(ctx)
+	if err != nil {
+		return "", err
 	}
 	if requested == "" {
 		if len(scopes) == 1 {
@@ -53,6 +42,30 @@ func OwnerLegalEntity(ctx context.Context, requested string) (string, error) {
 		}
 	}
 	return "", NewProblem(http.StatusForbidden, "AUTH-0003", "legalEntityId is outside the caller's legal-entity scope")
+}
+
+// CallerLegalEntities returns the legal entities the caller's scope claim
+// grants, empty for an all-entity caller. A claim part counts only when it is
+// already a canonical UUID, exactly as the database scope policy matches it
+// (dbx sets the claim verbatim), so this and row-level security never disagree.
+func CallerLegalEntities(ctx context.Context) ([]string, error) {
+	p, ok := tenant.FromContext(ctx)
+	if !ok {
+		return nil, NewProblem(http.StatusUnauthorized, "AUTH-0001", "no principal")
+	}
+	if p.LegalEntityID == "" {
+		return nil, nil
+	}
+	var scopes []string
+	for _, part := range strings.Split(p.LegalEntityID, ",") {
+		if id, ok := ids.Canonical(part); ok && id == part && id != ids.Nil {
+			scopes = append(scopes, id)
+		}
+	}
+	if len(scopes) == 0 {
+		return nil, NewProblem(http.StatusForbidden, "AUTH-0003", "the caller's legal-entity scope holds no valid legal entity")
+	}
+	return scopes, nil
 }
 
 func fieldProblem(message string) *Problem {

@@ -67,7 +67,7 @@ charts/transport/       Helm chart (image, DATABASE_URL from a secret, probes, S
 |---|---|---|---|
 | POST | /v1/transport/loads/{id}:tender | TMS_TENDER | Carriers in rank order with optional quoted rates; `timeoutMin` 5 to 1440 (default 120); one open tender per load (TMS-0114); `Idempotency-Key` optional |
 | GET | /v1/transport/tenders | TMS_TENDER | Tender board, newest first, at most 500; filter by `status`, `loadId`; `overdue` flags a pending attempt past its deadline |
-| POST | /v1/transport/tenders:expire | TMS_TENDER | Expiry sweep for the tenant: cascades every overdue tender (at most 500 per call) |
+| POST | /v1/transport/tenders:expire | TMS_TENDER | Expiry sweep for the tenant: cascades every overdue tender (at most 500 per call); it expires only tenders in the caller's legal entities, so schedule it as an all-entity principal |
 | GET | /v1/transport/tenders/{id} | TMS_TENDER | One tender with its attempts |
 | POST | /v1/transport/tenders/{id}:respond | TMS_CARRIER_RESPOND | `{carrierId, accept}`; late is TMS-0105, wrong carrier TMS-0113; the same response again returns the tender unchanged |
 | POST | /v1/transport/tracking-events | TMS_TRACK_INGEST | EDI 214 codes X3, AF, X1, D1; source + ref is the idempotency key (201 stored, 200 replay with `Idempotent-Replayed: true`) |
