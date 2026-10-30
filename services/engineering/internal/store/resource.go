@@ -71,18 +71,23 @@ func notFound(code, detail string) error {
 	return httpx.NewProblem(http.StatusNotFound, code, detail)
 }
 
+func scanCalendar(row pgx.Row) (c Calendar, err error) {
+	var from, to *time.Time
+	if err = row.Scan(&c.ID, &c.Code, &c.Name, &c.Template, &c.ClosedDates, &from, &to, &c.Version); err == nil {
+		c.GeneratedFrom, c.GeneratedTo = valueOrZero(from), valueOrZero(to)
+	}
+	return c, err
+}
+
 func getCalendar(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (Calendar, error) {
 	query := `select ` + calendarColumns + ` from work_calendar where tenant_id = $1 and id = $2::uuid`
 	if lock {
 		query += ` for update`
 	}
-	var c Calendar
-	var from, to *time.Time
-	err := tx.QueryRow(ctx, query, tenantID, id).Scan(&c.ID, &c.Code, &c.Name, &c.Template, &c.ClosedDates, &from, &to, &c.Version)
+	c, err := scanCalendar(tx.QueryRow(ctx, query, tenantID, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return c, notFound(CodeCalNotFound, "calendar not found")
 	}
-	c.GeneratedFrom, c.GeneratedTo = valueOrZero(from), valueOrZero(to)
 	return c, err
 }
 
@@ -460,4 +465,38 @@ func (s *Postgres) ListCapabilities(ctx context.Context, afterID string, limit i
 			err = row.Scan(&c.ID, &c.Code, &c.Name)
 			return c, err
 		}, func(c domain.Capability) string { return c.ID })
+}
+
+func (s *Postgres) GetCalendar(ctx context.Context, id string) (c Calendar, err error) {
+	p, _ := tenant.FromContext(ctx)
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) (err error) {
+		c, err = getCalendar(ctx, tx, p.TenantID, id, false)
+		return err
+	})
+	return c, err
+}
+
+func (s *Postgres) ListCalendars(ctx context.Context, afterID string, limit int) (Page[Calendar], error) {
+	return listByCode(ctx, s, "work_calendar", calendarColumns, "", afterID, limit, scanCalendar, func(c Calendar) string { return c.ID })
+}
+
+func (s *Postgres) GetResourceGroup(ctx context.Context, id string) (g domain.ResourceGroup, err error) {
+	p, _ := tenant.FromContext(ctx)
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) (err error) {
+		g, err = getGroup(ctx, tx, p.TenantID, id)
+		return err
+	})
+	return g, err
+}
+
+func (s *Postgres) GetCapability(ctx context.Context, id string) (c domain.Capability, err error) {
+	p, _ := tenant.FromContext(ctx)
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `select id::text, code, name from capability where tenant_id = $1 and id = $2::uuid`, p.TenantID, id).Scan(&c.ID, &c.Code, &c.Name)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return notFound(CodeResNotFound, "capability not found")
+		}
+		return err
+	})
+	return c, err
 }

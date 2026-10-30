@@ -101,7 +101,7 @@ describe("ResourceDetailPage", () => {
     expect(screen.getByText("85")).toBeInTheDocument();
     expect(screen.getByText("16")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "g/1" })).toHaveAttribute("href", "/engineering/resources?groupId=g%2F1");
-    expect(screen.getByRole("link", { name: "Calendar days" })).toHaveAttribute("href", "/engineering/calendars/cal%201");
+    expect(screen.getByRole("link", { name: "Calendar days" })).toHaveAttribute("href", "/engineering/calendars/cal%201/days");
     const table = screen.getByRole("table", { name: "Capabilities" });
     expect(table).toHaveTextContent("cap-1");
     expect(table).toHaveTextContent("3");
@@ -134,12 +134,12 @@ describe("ResourceDetailPage", () => {
 });
 
 describe("ResourceGroupsPage", () => {
-  it("lists groups with links that seed the resources filter and a calendar link", async () => {
+  it("lists groups with links to the group detail and a calendar link", async () => {
     stub(() => ok({ items: [{ id: "g/1", code: "GRP-1", name: "Lathes", siteId: "S1", calendarId: "cal-1" }] }));
     renderInRouter(<ResourceGroupsPage />);
     expect(screen.getByRole("table", { name: "Resource groups" })).toHaveAttribute("aria-busy", "true");
-    expect(await screen.findByRole("link", { name: "GRP-1" })).toHaveAttribute("href", "/engineering/resources?groupId=g%2F1");
-    expect(screen.getByRole("link", { name: "Calendar days" })).toHaveAttribute("href", "/engineering/calendars/cal-1");
+    expect(await screen.findByRole("link", { name: "GRP-1" })).toHaveAttribute("href", "/engineering/resource-groups/g%2F1");
+    expect(screen.getByRole("link", { name: "Calendar days" })).toHaveAttribute("href", "/engineering/calendars/cal-1/days");
   });
 
   it("filters by site, shows the empty state and the error with Retry", async () => {
@@ -157,14 +157,14 @@ describe("ResourceGroupsPage", () => {
 });
 
 describe("CapabilitiesPage", () => {
-  it("lists capabilities with links that seed the resources filter and loads more", async () => {
+  it("lists capabilities with links to the capability detail and loads more", async () => {
     const fetchMock = stub((url) =>
       url.includes("cursor=c1")
         ? ok({ items: [{ id: "c2", code: "WELD", name: "Welding" }] })
         : ok({ items: [{ id: "c/1", code: "CNC", name: "Milling" }], nextCursor: "c1" }),
     );
     renderInRouter(<CapabilitiesPage />);
-    expect(await screen.findByRole("link", { name: "CNC" })).toHaveAttribute("href", "/engineering/resources?capabilityId=c%2F1");
+    expect(await screen.findByRole("link", { name: "CNC" })).toHaveAttribute("href", "/engineering/capabilities/c%2F1");
     fireEvent.click(screen.getByRole("button", { name: "Load more" }));
     expect(await screen.findByRole("link", { name: "WELD" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenLastCalledWith("/api/v1/engineering/capabilities?cursor=c1");

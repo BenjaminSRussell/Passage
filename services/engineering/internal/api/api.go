@@ -98,6 +98,10 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/resources/{id}", a.getResource)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/resource-groups", a.listResourceGroups)
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/capabilities", a.listCapabilities)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/capabilities/{id}", a.getCapability)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/resource-groups/{id}", a.getResourceGroup)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/calendars", a.listCalendars)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/calendars/{id}", a.getCalendar)
 	})
 }
 

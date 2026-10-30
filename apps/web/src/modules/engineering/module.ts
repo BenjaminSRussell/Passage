@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import type { PassageModule } from "../registry";
 import { EngineeringHome, WhereUsedPage } from "./pages";
+import { CalendarDetailPage, CalendarsPage, CapabilityDetailPage, ResourceGroupDetailPage } from "./detail";
 import { CalendarDaysPage, CapabilitiesPage, ResourceDetailPage, ResourceGroupsPage, ResourcesPage } from "./resources";
 import { RouteVersionPage, RouteVersionsPage } from "./screens";
 
@@ -13,6 +14,7 @@ function EngineeringRoute() {
     onOpenResources: () => navigate("/engineering/resources"),
     onOpenResourceGroups: () => navigate("/engineering/resource-groups"),
     onOpenCapabilities: () => navigate("/engineering/capabilities"),
+    onOpenCalendars: () => navigate("/engineering/calendars"),
   });
 }
 
@@ -49,6 +51,24 @@ function CalendarRoute() {
   return createElement(CalendarDaysPage, { id });
 }
 
+function GroupRoute() {
+  const navigate = useNavigate();
+  const { id = "" } = useParams();
+  return createElement(ResourceGroupDetailPage, { id, onBack: () => navigate("/engineering/resource-groups") });
+}
+
+function CapabilityRoute() {
+  const navigate = useNavigate();
+  const { id = "" } = useParams();
+  return createElement(CapabilityDetailPage, { id, onBack: () => navigate("/engineering/capabilities") });
+}
+
+function CalendarDetailRoute() {
+  const navigate = useNavigate();
+  const { id = "" } = useParams();
+  return createElement(CalendarDetailPage, { id, onBack: () => navigate("/engineering/calendars") });
+}
+
 const engineering: PassageModule = {
   id: "engineering",
   title: "Engineering data",
@@ -62,7 +82,11 @@ const engineering: PassageModule = {
     { path: "/engineering/resources/:id", element: createElement(ResourceRoute), handle: { title: "Resource" } },
     { path: "/engineering/resource-groups", element: createElement(ResourceGroupsPage), handle: { title: "Resource groups" } },
     { path: "/engineering/capabilities", element: createElement(CapabilitiesPage), handle: { title: "Capabilities" } },
-    { path: "/engineering/calendars/:id", element: createElement(CalendarRoute), handle: { title: "Calendar days" } },
+    { path: "/engineering/resource-groups/:id", element: createElement(GroupRoute), handle: { title: "Resource group" } },
+    { path: "/engineering/capabilities/:id", element: createElement(CapabilityRoute), handle: { title: "Capability" } },
+    { path: "/engineering/calendars", element: createElement(CalendarsPage), handle: { title: "Work calendars" } },
+    { path: "/engineering/calendars/:id", element: createElement(CalendarDetailRoute), handle: { title: "Calendar" } },
+    { path: "/engineering/calendars/:id/days", element: createElement(CalendarRoute), handle: { title: "Calendar days" } },
   ],
   nav: [
     { label: "Overview", to: "/engineering", duty: "engineering.read" },
@@ -70,6 +94,7 @@ const engineering: PassageModule = {
     { label: "Resources", to: "/engineering/resources", duty: "engineering.read" },
     { label: "Resource groups", to: "/engineering/resource-groups", duty: "engineering.read" },
     { label: "Capabilities", to: "/engineering/capabilities", duty: "engineering.read" },
+    { label: "Work calendars", to: "/engineering/calendars", duty: "engineering.read" },
     { label: "Where-used", to: "/engineering/where-used", duty: "engineering.read" },
   ],
 };

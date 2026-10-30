@@ -19,17 +19,20 @@ export function EngineeringHome({
   onOpenResources,
   onOpenResourceGroups,
   onOpenCapabilities,
+  onOpenCalendars,
 }: {
   onOpenWhereUsed?: () => void;
   onOpenRoutes?: () => void;
   onOpenResources?: () => void;
   onOpenResourceGroups?: () => void;
   onOpenCapabilities?: () => void;
+  onOpenCalendars?: () => void;
 }) {
   const resourceCards = [
     { title: "Resources", text: "Machines, tools, labor, vendors and locations, with their capabilities and calendars.", open: onOpenResources },
     { title: "Resource groups", text: "Groups of resources by site, each linking to its members.", open: onOpenResourceGroups },
     { title: "Capabilities", text: "Skills and abilities, each linking to the resources that hold it.", open: onOpenCapabilities },
+    { title: "Work calendars", text: "Shift calendars with their weekly template, closed dates and generated days.", open: onOpenCalendars },
   ];
   return (
     <>

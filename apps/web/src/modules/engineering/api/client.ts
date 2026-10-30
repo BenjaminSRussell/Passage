@@ -120,6 +120,24 @@ export interface CalendarDay {
   totalH: string;
 }
 
+export interface Shift {
+  start: string;
+  end: string;
+  efficiencyPct?: string;
+}
+
+export interface WorkCalendar {
+  id: string;
+  code: string;
+  name: string;
+  template: Shift[][];
+  closedDates: string[];
+  version: number;
+  generatedFrom?: string;
+  generatedTo?: string;
+  warnings?: string[];
+}
+
 export interface ResourceFilters {
   siteId?: string;
   type?: string;
@@ -211,4 +229,20 @@ export function listCapabilities(cursor?: string): Promise<Page<Capability>> {
 
 export function getCalendarDays(id: string, from: string, to: string): Promise<Page<CalendarDay>> {
   return request(`/calendars/${encodeURIComponent(id)}/days${query({ from, to })}`);
+}
+
+export function getResourceGroup(id: string): Promise<ResourceGroup> {
+  return request(`/resource-groups/${encodeURIComponent(id)}`);
+}
+
+export function getCapability(id: string): Promise<Capability> {
+  return request(`/capabilities/${encodeURIComponent(id)}`);
+}
+
+export function listCalendars(cursor?: string): Promise<Page<WorkCalendar>> {
+  return request(`/calendars${query({ cursor })}`);
+}
+
+export function getCalendar(id: string): Promise<WorkCalendar> {
+  return request(`/calendars/${encodeURIComponent(id)}`);
 }

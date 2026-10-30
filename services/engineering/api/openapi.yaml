@@ -9,6 +9,7 @@ paths:
   /v1/engineering/bom-versions:
     post:
       operationId: createBomVersion
+      summary: Create a BOM version
       x-passage-duty: engineering.bom.write
       parameters:
         - { $ref: '#/components/parameters/IdempotencyKey' }
@@ -22,6 +23,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     get:
       operationId: listBomVersions
+      summary: List BOM versions
       x-passage-duty: engineering.read
       parameters:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
@@ -36,6 +38,7 @@ paths:
   /v1/engineering/bom-versions/{id}:
     get:
       operationId: getBomVersion
+      summary: Get a BOM version with its lines
       x-passage-duty: engineering.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -48,6 +51,7 @@ paths:
   /v1/engineering/route-versions:
     get:
       operationId: listRouteVersions
+      summary: List route versions
       x-passage-duty: engineering.read
       parameters:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
@@ -66,6 +70,7 @@ paths:
   /v1/engineering/route-versions:active:
     get:
       operationId: getActiveRouteVersion
+      summary: Get the active route version as of a date
       x-passage-duty: engineering.read
       parameters:
         - { name: productId, in: query, required: true, schema: { type: string, maxLength: 64 } }
@@ -80,6 +85,7 @@ paths:
   /v1/engineering/route-versions/{id}:
     get:
       operationId: getRouteVersion
+      summary: Get a route version with its operations
       x-passage-duty: engineering.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -92,6 +98,7 @@ paths:
   /v1/engineering/route-versions/{id}:activate:
     post:
       operationId: activateRouteVersion
+      summary: Activate a route version
       x-passage-duty: engineering.route.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -111,6 +118,7 @@ paths:
   /v1/engineering/boms:explode:
     post:
       operationId: explodeBom
+      summary: Explode a BOM to its components
       x-passage-duty: engineering.read
       requestBody:
         required: true
@@ -123,6 +131,7 @@ paths:
   /v1/engineering/boms:where-used:
     get:
       operationId: whereUsedBom
+      summary: List where a component is used
       x-passage-duty: engineering.read
       parameters:
         - { name: component, in: query, required: true, schema: { type: string } }
@@ -138,6 +147,7 @@ paths:
   /v1/engineering/routes:lead-time:
     post:
       operationId: computeRouteLeadTime
+      summary: Compute routing lead time
       x-passage-duty: engineering.read
       requestBody:
         required: true
@@ -150,6 +160,7 @@ paths:
   /v1/engineering/ecos:
     post:
       operationId: createEco
+      summary: Create an engineering change order
       x-passage-duty: engineering.bom.write
       parameters:
         - { $ref: '#/components/parameters/IdempotencyKey' }
@@ -164,6 +175,7 @@ paths:
   /v1/engineering/ecos/{id}:release:
     post:
       operationId: releaseEco
+      summary: Approve and release an engineering change order
       x-passage-duty: engineering.eco.approve
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -174,8 +186,24 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/Eco' } } }
         default: { $ref: '#/components/responses/Problem' }
   /v1/engineering/calendars:
+    get:
+      operationId: listCalendars
+      summary: List work calendars
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: One page of work calendars with their templates and generated range. Ordered by code then id. Pass nextCursor as cursor for the next page.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Calendar' } }, nextCursor: { type: string } } }
+        '422': { $ref: '#/components/responses/InvalidQuery' }
+        default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: createCalendar
+      summary: Create a work calendar
       x-passage-duty: engineering.resource.write
       parameters:
         - { $ref: '#/components/parameters/IdempotencyKey' }
@@ -189,9 +217,24 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/Unprocessable' }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/calendars/{id}:
+    get:
+      operationId: getCalendar
+      summary: Get a work calendar
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The work calendar with its weekly template, closed dates, version and generated range. An unknown id is 404 ENG-CAL-NOTFOUND.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Calendar' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/engineering/calendars/{id}:generate:
     post:
       operationId: generateCalendar
+      summary: Generate calendar days for a range
       x-passage-duty: engineering.resource.write
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -209,6 +252,7 @@ paths:
   /v1/engineering/calendars/{id}/days:
     get:
       operationId: listCalendarDays
+      summary: List generated calendar days
       x-passage-duty: engineering.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -226,6 +270,7 @@ paths:
   /v1/engineering/resource-groups:
     get:
       operationId: listResourceGroups
+      summary: List resource groups
       x-passage-duty: engineering.read
       parameters:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
@@ -241,6 +286,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: createResourceGroup
+      summary: Create a resource group
       x-passage-duty: engineering.resource.write
       parameters:
         - { $ref: '#/components/parameters/IdempotencyKey' }
@@ -257,6 +303,7 @@ paths:
   /v1/engineering/capabilities:
     get:
       operationId: listCapabilities
+      summary: List capabilities
       x-passage-duty: engineering.read
       parameters:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
@@ -271,6 +318,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: createCapability
+      summary: Create a capability
       x-passage-duty: engineering.resource.write
       parameters:
         - { $ref: '#/components/parameters/IdempotencyKey' }
@@ -283,9 +331,38 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/Capability' } } }
         '409': { $ref: '#/components/responses/Conflict' }
         default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/capabilities/{id}:
+    get:
+      operationId: getCapability
+      summary: Get a capability
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The capability. An unknown id is 404 ENG-RES-NOTFOUND.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Capability' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/resource-groups/{id}:
+    get:
+      operationId: getResourceGroup
+      summary: Get a resource group
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The resource group with its site and calendar. An unknown id is 404 ENG-RES-NOTFOUND.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ResourceGroup' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/engineering/resources:
     get:
       operationId: listResources
+      summary: List resources
       x-passage-duty: engineering.read
       parameters:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
@@ -304,6 +381,7 @@ paths:
         default: { $ref: '#/components/responses/Problem' }
     post:
       operationId: createResource
+      summary: Create a resource
       x-passage-duty: engineering.resource.write
       parameters:
         - { $ref: '#/components/parameters/IdempotencyKey' }
@@ -321,6 +399,7 @@ paths:
   /v1/engineering/resources/{id}:
     get:
       operationId: getResource
+      summary: Get a resource
       x-passage-duty: engineering.read
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -333,12 +412,14 @@ paths:
   /healthz:
     get:
       operationId: liveness
+      summary: Liveness probe
       x-passage-duty: public
       responses:
         '200': { description: Process is alive. }
   /readyz:
     get:
       operationId: readiness
+      summary: Readiness probe
       x-passage-duty: public
       responses:
         '200': { description: Database reachable. }

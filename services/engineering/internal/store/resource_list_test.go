@@ -2,10 +2,13 @@ package store_test
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"slices"
 	"testing"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/engineering/internal/domain"
@@ -204,5 +207,62 @@ func TestPostgres_Lists_RLSHideOtherTenant(t *testing.T) {
 	}
 	if page, err := s.ListResources(intruder, store.ResourceFilter{}, owner.Items[0].Resource.ID, store.MaxPageSize); err != nil || len(page.Items) != 0 {
 		t.Fatalf("tenant 2 with tenant 1 cursor = %+v, %v; want nothing", page, err)
+	}
+}
+
+func TestPostgres_DetailReadsAndCalendarList(t *testing.T) {
+	s, _, ctx := newStore(t, 1)
+	l := seedListing(t, s, ctx)
+	_, wc := loadFixture(t)
+	wc.Code = "AAA"
+	second := newCalendar(t, s, ctx, wc)
+	if g, err := s.GetResourceGroup(ctx, l.west.ID); err != nil || g.Code != "WEST" || g.CalendarID != l.westCalendar {
+		t.Fatalf("group = %+v, %v", g, err)
+	}
+	if c, err := s.GetCapability(ctx, l.weld.ID); err != nil || c.Code != "WELD" {
+		t.Fatalf("capability = %+v, %v", c, err)
+	}
+	if c, err := s.GetCalendar(ctx, l.westCalendar); err != nil || c.Code != "FIX" || c.Version != 1 {
+		t.Fatalf("calendar = %+v, %v", c, err)
+	}
+	for name, err := range map[string]error{
+		"group":      func() error { _, err := s.GetResourceGroup(ctx, ids.New()); return err }(),
+		"capability": func() error { _, err := s.GetCapability(ctx, ids.New()); return err }(),
+		"calendar":   func() error { _, err := s.GetCalendar(ctx, ids.New()); return err }(),
+	} {
+		var problem *httpx.Problem
+		if !errors.As(err, &problem) || problem.Status != http.StatusNotFound {
+			t.Fatalf("missing %s = %v; want a 404 problem", name, err)
+		}
+	}
+	first, err := s.ListCalendars(ctx, "", 1)
+	if err != nil || len(first.Items) != 1 || first.Items[0].ID != second.ID || first.NextID != second.ID {
+		t.Fatalf("first page = %+v, %v; want AAA with a cursor", first, err)
+	}
+	rest, err := s.ListCalendars(ctx, first.NextID, store.MaxPageSize)
+	if err != nil || len(rest.Items) != 1 || rest.Items[0].ID != l.westCalendar || rest.NextID != "" {
+		t.Fatalf("second page = %+v, %v; want FIX only", rest, err)
+	}
+}
+
+func TestPostgres_DetailReads_RLSHideOtherTenant(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	s := store.New(app)
+	l := seedListing(t, s, principalContext(1))
+	intruder := principalContext(2)
+	if _, err := s.GetResourceGroup(intruder, l.west.ID); err == nil {
+		t.Fatal("tenant 2 read tenant 1 group")
+	}
+	if _, err := s.GetCapability(intruder, l.weld.ID); err == nil {
+		t.Fatal("tenant 2 read tenant 1 capability")
+	}
+	if _, err := s.GetCalendar(intruder, l.westCalendar); err == nil {
+		t.Fatal("tenant 2 read tenant 1 calendar")
+	}
+	if page, err := s.ListCalendars(intruder, "", store.MaxPageSize); err != nil || len(page.Items) != 0 {
+		t.Fatalf("tenant 2 calendars = %+v, %v; want none", page, err)
 	}
 }

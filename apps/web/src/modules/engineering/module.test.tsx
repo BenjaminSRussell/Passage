@@ -34,15 +34,20 @@ describe("engineering module", () => {
         "/engineering/resources/:id",
         "/engineering/resource-groups",
         "/engineering/capabilities",
+        "/engineering/calendars",
         "/engineering/calendars/:id",
+        "/engineering/calendars/:id/days",
+        "/engineering/resource-groups/:id",
+        "/engineering/capabilities/:id",
       ]),
     );
     expect(engineering.routes.filter((r) => r.path !== "/engineering" && r.path !== "/engineering/where-used" && r.path !== "/engineering/routes").every((r) => r.handle?.title)).toBe(true);
-    const entries = engineering.nav.filter((n) => ["Resources", "Resource groups", "Capabilities"].includes(n.label));
+    const entries = engineering.nav.filter((n) => ["Resources", "Resource groups", "Capabilities", "Work calendars"].includes(n.label));
     expect(entries.map((n) => [n.label, n.to, n.duty])).toEqual([
       ["Resources", "/engineering/resources", "engineering.read"],
       ["Resource groups", "/engineering/resource-groups", "engineering.read"],
       ["Capabilities", "/engineering/capabilities", "engineering.read"],
+      ["Work calendars", "/engineering/calendars", "engineering.read"],
     ]);
   });
 

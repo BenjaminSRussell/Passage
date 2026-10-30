@@ -62,6 +62,7 @@ type fakeStore struct {
 	resList     []store.ResourceRecord
 	groupList   []domain.ResourceGroup
 	capList     []domain.Capability
+	calList     []store.Calendar
 }
 
 func (f *fakeStore) CreateBomVersion(_ context.Context, v domain.BomVersion, idem store.Idem, check func(store.Snapshot) error) (domain.BomVersion, error) {
