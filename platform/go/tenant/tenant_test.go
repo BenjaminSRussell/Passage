@@ -238,3 +238,72 @@ func TestMiddlewareBothLegalEntityHeaders(t *testing.T) {
 		t.Fatalf("identical headers: %d %+v", rec.Code, p)
 	}
 }
+
+func TestReadOnlyPOSTKeepsAllScopeOnlyWhereDeclared(t *testing.T) {
+	duty := map[string]string{tenant.HeaderDuties: tenant.DutyAllScope}
+	withALL := map[string]string{tenant.HeaderDuties: tenant.DutyAllScope, tenant.HeaderLegalEntityScopeAll: tenant.LegalEntityScopeAll}
+	noDuty := map[string]string{tenant.HeaderLegalEntityScopeAll: tenant.LegalEntityScopeAll}
+	probe := func(method string, headers map[string]string, readOnly bool) bool {
+		var got bool
+		var inner http.Handler = http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			p, _ := tenant.FromContext(r.Context())
+			got = p.HasDuty(tenant.DutyAllScope)
+		})
+		if readOnly {
+			inner = tenant.ReadOnlyPOST(inner)
+		}
+		r := httptest.NewRequest(method, "/x", nil)
+		r.Header.Set(tenant.HeaderTenant, validTenant)
+		for k, v := range headers {
+			r.Header.Set(k, v)
+		}
+		tenant.Middleware(inner).ServeHTTP(httptest.NewRecorder(), r)
+		return got
+	}
+	if !probe(http.MethodPost, withALL, true) {
+		t.Fatal("allowlisted POST with ALL and duty must keep the duty, like a GET")
+	}
+	if probe(http.MethodPost, withALL, false) {
+		t.Fatal("a non-allowlisted POST must still drop the duty")
+	}
+	if probe(http.MethodPost, duty, true) {
+		t.Fatal("allowlisted POST without the ALL header must drop the duty")
+	}
+	if probe(http.MethodPost, noDuty, true) {
+		t.Fatal("ALL without the duty must grant nothing")
+	}
+	for _, m := range []string{http.MethodPut, http.MethodPatch, http.MethodDelete} {
+		if probe(m, withALL, true) {
+			t.Fatalf("%s must never carry the duty, even under ReadOnlyPOST", m)
+		}
+	}
+}
+
+func TestReadOnlyPOSTDoesNotLetASwappedPrincipalInheritTheGrant(t *testing.T) {
+	var got bool
+	inner := tenant.ReadOnlyPOST(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		p, _ := tenant.FromContext(r.Context())
+		got = p.HasDuty(tenant.DutyAllScope)
+	}))
+	swap := func(p tenant.Principal) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			inner.ServeHTTP(w, r.WithContext(tenant.With(r.Context(), p)))
+		})
+	}
+	for name, p := range map[string]tenant.Principal{
+		"other user":    {TenantID: validTenant, UserID: "someone-else"},
+		"other tenant":  {TenantID: "00000000-0000-7000-8000-000000000002", UserID: "u1"},
+		"service token": {TenantID: validTenant, UserID: "u1", Service: "billing"},
+	} {
+		got = false
+		r := httptest.NewRequest(http.MethodPost, "/x", nil)
+		r.Header.Set(tenant.HeaderTenant, validTenant)
+		r.Header.Set(tenant.HeaderUser, "u1")
+		r.Header.Set(tenant.HeaderDuties, tenant.DutyAllScope)
+		r.Header.Set(tenant.HeaderLegalEntityScopeAll, tenant.LegalEntityScopeAll)
+		tenant.Middleware(swap(p)).ServeHTTP(httptest.NewRecorder(), r)
+		if got {
+			t.Fatalf("%s: swapped principal inherited the all-scope grant", name)
+		}
+	}
+}

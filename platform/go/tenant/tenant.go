@@ -125,6 +125,32 @@ func canonicalLegalEntities(raw string) (string, bool) {
 
 const DutyAllScope = "org.switcher.all_scope"
 
+type allScopeAskedKey struct{}
+
+type allScopeAsked struct{ tenantID, userID string }
+
+// ReadOnlyPOST marks a POST route that performs no write (a query whose body is
+// too rich for a URL). On it, Middleware's all-scope duty is restored when the
+// caller held it and sent the ALL scope header, exactly as on a GET. It is the
+// only way a non-read method keeps the duty; every unwrapped route, and any
+// method other than POST, still loses it.
+func ReadOnlyPOST(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if asked, ok := r.Context().Value(allScopeAskedKey{}).(allScopeAsked); ok && r.Method == http.MethodPost {
+			if p, ok := FromContext(r.Context()); ok && p.Service == "" && p.TenantID == asked.tenantID && p.UserID == asked.userID {
+				duties := make(map[string]struct{}, len(p.Duties)+1)
+				for d := range p.Duties {
+					duties[d] = struct{}{}
+				}
+				duties[DutyAllScope] = struct{}{}
+				p.Duties = duties
+				r = r.WithContext(With(r.Context(), p))
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func isRead(method string) bool {
 	return method == http.MethodGet || method == http.MethodHead || method == http.MethodOptions
 }
@@ -151,8 +177,9 @@ func requestLegalEntity(r *http.Request) (string, bool) {
 // a malformed or conflicting legal entity scope is rejected with 400. Health
 // endpoints pass through. The nil tenant is server-side only and is never
 // accepted from headers. The all-entity duty survives only on a read that
-// explicitly asks for the ALL scope; on any other request it is dropped so an
-// unscoped call sees no legal-entity rows.
+// explicitly asks for the ALL scope, or on a POST route wrapped in
+// ReadOnlyPOST; on any other request it is dropped so an unscoped call sees no
+// legal-entity rows.
 func Middleware(next http.Handler) http.Handler {
 	return middlewareWith(currentServiceVerifier, next)
 }
@@ -203,10 +230,16 @@ func middlewareWith(verifier func() *ServiceVerifier, next http.Handler) http.Ha
 				p.Duties[d] = struct{}{}
 			}
 		}
-		if r.Header.Get(HeaderLegalEntityScopeAll) != LegalEntityScopeAll || !isRead(r.Method) {
+		ctx := r.Context()
+		if r.Header.Get(HeaderLegalEntityScopeAll) != LegalEntityScopeAll {
+			delete(p.Duties, DutyAllScope)
+		} else if !isRead(r.Method) {
+			if p.HasDuty(DutyAllScope) {
+				ctx = context.WithValue(ctx, allScopeAskedKey{}, allScopeAsked{tenantID: p.TenantID, userID: p.UserID})
+			}
 			delete(p.Duties, DutyAllScope)
 		}
-		next.ServeHTTP(w, r.WithContext(With(r.Context(), p)))
+		next.ServeHTTP(w, r.WithContext(With(ctx, p)))
 	})
 }
 
