@@ -19,7 +19,7 @@ Store tests run only when `PASSAGE_TEST_DATABASE_URL` is set, against a role wit
 | `DATABASE_URL` | required; Postgres URL, from a Secret in the cluster |
 | `MIGRATE_ON_START` | `true` applies embedded migrations at start (dev only) |
 | `LEDGER_URL` | base URL of the ledger service (`POST /v1/ledger/journal-entries`, 3 s timeout); required |
-| `CLOSE_URL` | base URL of `services/close` (`POST /v1/close/period-statuses:check`, 2 s timeout, source system `ap`); required |
+| `CLOSE_URL` | base URL of `services/close` (`POST /v1/close/period-statuses:check` and `GET /v1/close/periods:resolve`, 2 s timeout, source system `ap`); required. Invoices, ERS runs, adjustments and settlements take their fiscal period from `periods:resolve`; a supplied `fiscalPeriodId` must match it (422 `PER-AP-002`). Temporary fallback until close dates its periods (slice B): on `CLOSE-0005` the supplied id is used, with a warning and `receiving_period_resolve_fallback_total` |
 | `PURCHASING_URL` | base URL of `services/purchasing` (`GET /v1/procurement/purchase-orders/{id}`, 2 s timeout); the caller's own tenant, legal entity, user and duties are forwarded, so the caller needs `PurchaseOrderInquire`; required |
 | `INVENTORY_URL` | base URL of `services/inventory` (`GET /v1/inventory/journals` and `/{id}`, 2 s timeout); the caller's identity is forwarded, so the caller needs `inventory.read`; optional: without it (and without `PASSAGE_ALLOW_FAKES=1`) the consignment settlement answers 503 `COM-0503` |
 | `POSTING_LEDGER_ID` | UUID of the ledger that receipt journals post to (`ledgerId` in the ledger's entry request); invoices carry their own `ledgerId`; required |

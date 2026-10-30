@@ -44,6 +44,12 @@ func (s *switchPeriods) AP(context.Context, domain.PeriodQuery) (domain.PeriodSt
 	return s.status, nil
 }
 
+func (s *switchPeriods) Resolve(context.Context, domain.PeriodQuery) (domain.ResolvedPeriod, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return domain.ResolvedPeriod{FiscalPeriodID: periodID, Status: s.status}, nil
+}
+
 type ersRunJSON struct {
 	Settled []struct {
 		InvoiceID     string `json:"invoiceId"`

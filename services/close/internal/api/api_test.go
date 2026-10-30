@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -23,12 +24,17 @@ const checkPath = "/v1/close/period-statuses:check"
 
 type fakeStore struct {
 	rows    []domain.Row
+	spans   []domain.Span
 	readErr error
 	pingErr error
 }
 
 func (f fakeStore) PeriodRows(context.Context, string, string) ([]domain.Row, error) {
 	return f.rows, f.readErr
+}
+
+func (f fakeStore) PeriodSpans(context.Context, string, string, time.Time) ([]domain.Span, error) {
+	return f.spans, f.readErr
 }
 
 func (f fakeStore) Ping(context.Context) error { return f.pingErr }
@@ -153,5 +159,69 @@ func TestMetrics_CountChecksAndRejections(t *testing.T) {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Errorf("metrics missing %q: %s", want, rec.Body.String())
 		}
+	}
+}
+
+const resolvePath = "/v1/close/periods:resolve"
+
+func resolveQuery(ledger, date string) string {
+	return resolvePath + "?ledgerId=" + ledger + "&postingDate=" + date + "&sourceSystem=ap"
+}
+
+func doResolve(r http.Handler, target, legalEntity, duties string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
+	req.Header.Set("X-Passage-Duties", duties)
+	if legalEntity != "" {
+		req.Header.Set("X-Passage-Legal-Entity", legalEntity)
+	}
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	return rec
+}
+
+func span(id string, rows ...domain.Row) domain.Span {
+	return domain.Span{FiscalPeriodID: id, Start: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), End: time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC), Rows: rows}
+}
+
+func TestResolve(t *testing.T) {
+	ledger, entity := testkit.TenantID(7), testkit.TenantID(9)
+	period := testkit.TenantID(8)
+	apClosed := span(period, domain.Row{Module: domain.ModuleAP, Status: domain.StatusClosed})
+	tests := []struct {
+		name       string
+		store      fakeStore
+		target     string
+		entity     string
+		duties     string
+		wantStatus int
+		wantBody   string
+	}{
+		{"open period", fakeStore{spans: []domain.Span{span(period, domain.Row{Module: domain.ModuleAP, Status: domain.StatusOpen})}}, resolveQuery(ledger, "2026-01-15"), entity, "period.check", http.StatusOK, `"fiscalPeriodId":"` + period + `","startDate":"2026-01-01","endDate":"2026-01-31","module":"ap","status":"open"`},
+		{"closed period is returned, not rejected", fakeStore{spans: []domain.Span{apClosed}}, resolveQuery(ledger, "2026-01-15"), entity, "period.check", http.StatusOK, `"status":"closed"`},
+		{"falls back to the ALL row", fakeStore{spans: []domain.Span{span(period, domain.Row{Module: domain.ModuleAll, Status: domain.StatusOnHold})}}, resolveQuery(ledger, "2026-01-15"), entity, "period.check", http.StatusOK, `"module":"all","status":"on_hold"`},
+		{"no statuses yet is never opened", fakeStore{spans: []domain.Span{span(period)}}, resolveQuery(ledger, "2026-01-15"), entity, "period.check", http.StatusOK, `"status":"never_opened"`},
+		{"no period", fakeStore{}, resolveQuery(ledger, "2026-01-15"), entity, "period.check", http.StatusNotFound, `"serviceCode":"CLOSE-0005"`},
+		{"ambiguous", fakeStore{spans: []domain.Span{span(period), span(testkit.TenantID(10))}}, resolveQuery(ledger, "2026-01-15"), entity, "period.check", http.StatusConflict, `"serviceCode":"CLOSE-0006"`},
+		{"missing duty", fakeStore{}, resolveQuery(ledger, "2026-01-15"), entity, "", http.StatusForbidden, "AUTH-0003"},
+		{"no legal entity", fakeStore{}, resolveQuery(ledger, "2026-01-15"), "", "period.check", http.StatusBadRequest, `"legalEntityId"`},
+		{"several legal entities", fakeStore{}, resolveQuery(ledger, "2026-01-15"), entity + "," + testkit.TenantID(11), "period.check", http.StatusBadRequest, `"legalEntityId"`},
+		{"ledger not a UUID", fakeStore{}, resolveQuery("ledger-1", "2026-01-15"), entity, "period.check", http.StatusBadRequest, `"ledgerId"`},
+		{"posting date not a date", fakeStore{}, resolveQuery(ledger, "15/01/2026"), entity, "period.check", http.StatusBadRequest, `"postingDate"`},
+		{"store unavailable fails closed", fakeStore{readErr: errors.New("db down")}, resolveQuery(ledger, "2026-01-15"), entity, "period.check", http.StatusInternalServerError, "COM-0500"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r, _ := newRouter(tc.store)
+			rec := doResolve(r, tc.target, tc.entity, tc.duties)
+			if rec.Code != tc.wantStatus || !strings.Contains(rec.Body.String(), tc.wantBody) {
+				t.Fatalf("got %d %s, want %d containing %q", rec.Code, rec.Body.String(), tc.wantStatus, tc.wantBody)
+			}
+			if rec.Code >= 400 && rec.Code != http.StatusForbidden {
+				if ct := rec.Header().Get("Content-Type"); ct != "application/problem+json" {
+					t.Fatalf("content type %q", ct)
+				}
+			}
+		})
 	}
 }

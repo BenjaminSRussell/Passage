@@ -1,6 +1,10 @@
 package domain
 
-import "errors"
+import (
+	"errors"
+	"strings"
+	"time"
+)
 
 type Module string
 
@@ -139,4 +143,25 @@ func ValidateTransition(rows []Row, to Status, module Module) error {
 		}
 	}
 	return nil
+}
+
+type Span struct {
+	FiscalPeriodID string
+	Start          time.Time
+	End            time.Time
+	Rows           []Row
+}
+
+func SelectSpan(spans []Span, date time.Time) (Span, error) {
+	switch len(spans) {
+	case 0:
+		return Span{}, fail(CodeNoPeriod, "no fiscal period covers "+date.Format("2006-01-02"))
+	case 1:
+		return spans[0], nil
+	}
+	found := make([]string, len(spans))
+	for i, s := range spans {
+		found[i] = s.FiscalPeriodID
+	}
+	return Span{}, fail(CodeAmbiguousPeriod, "several fiscal periods cover "+date.Format("2006-01-02")+": "+strings.Join(found, ", "))
 }

@@ -90,7 +90,9 @@ func buildVendorInvoice(tenantID, ledgerID string, req invoiceRequest) (store.In
 	if req.LedgerID != "" {
 		checkUUID(fields, "ledgerId", req.LedgerID)
 	}
-	checkUUID(fields, "fiscalPeriodId", req.FiscalPeriodID)
+	if req.FiscalPeriodID != "" {
+		checkUUID(fields, "fiscalPeriodId", req.FiscalPeriodID)
+	}
 	number := strings.TrimSpace(req.InvoiceNumber)
 	if n := utf8.RuneCountInString(number); n < 1 || n > maxInvoiceNumber {
 		fields["invoiceNumber"] = fmt.Sprintf("must be 1 to %d characters", maxInvoiceNumber)
@@ -111,7 +113,7 @@ func buildVendorInvoice(tenantID, ledgerID string, req invoiceRequest) (store.In
 	}
 	in := store.Invoice{
 		ID: stableID(tenantID, req.VendorID, strings.ToLower(number)), LegalEntityID: req.LegalEntityID, VendorID: req.VendorID, InvoiceNumber: number,
-		InvoiceDate: invoiceDate, PostingDate: postingDate, Currency: req.Currency, LedgerID: ledgerID, FiscalPeriodID: req.FiscalPeriodID,
+		InvoiceDate: invoiceDate, PostingDate: postingDate, Currency: req.Currency, LedgerID: ledgerID,
 		Source: domain.InvoiceSourceManual, Lines: make([]store.InvoiceLine, 0, len(req.Lines)),
 	}
 	for i, l := range req.Lines {
@@ -168,6 +170,11 @@ func (a *API) postVendorInvoice(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.LedgerID != "" && req.LedgerID != a.ports.Profile.LedgerID {
 		writeError(w, r, &domain.Error{Code: domain.CodeInvalidReceipt, Detail: "ledgerId differs from the ledger this service posts to"})
+		return
+	}
+	var err error
+	if in.FiscalPeriodID, err = a.resolveFiscalPeriod(r.Context(), in.LegalEntityID, in.PostingDate, req.FiscalPeriodID); err != nil {
+		writeError(w, r, err)
 		return
 	}
 	posted, err := a.submitInvoice(r.Context(), p, in)

@@ -19,6 +19,7 @@ const (
 	CodeInvalidReceipt    = "RCV-VAL-001"
 	CodeInvalidTransition = "RCV-STA-001"
 	CodePeriodClosed      = "PER-AP-001"
+	CodePeriodUnresolved  = "PER-AP-002"
 	CodeOverInvoice       = "AP-QTY-001"
 	CodeDuplicateInvoice  = "AP-DUP-001"
 	CodeCorrectionBelow   = "RCV-COR-001"

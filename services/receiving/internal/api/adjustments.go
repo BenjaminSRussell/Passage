@@ -62,7 +62,9 @@ func buildAdjustment(tenantID, ledgerID string, req adjustmentRequest) (store.In
 	fields := map[string]string{}
 	checkUUID(fields, "originalInvoiceId", req.OriginalInvoiceID)
 	checkUUID(fields, "legalEntityId", req.LegalEntityID)
-	checkUUID(fields, "fiscalPeriodId", req.FiscalPeriodID)
+	if req.FiscalPeriodID != "" {
+		checkUUID(fields, "fiscalPeriodId", req.FiscalPeriodID)
+	}
 	if req.LedgerID != "" {
 		checkUUID(fields, "ledgerId", req.LedgerID)
 	}
@@ -87,7 +89,7 @@ func buildAdjustment(tenantID, ledgerID string, req adjustmentRequest) (store.In
 	in := store.InvoiceAdjustment{
 		ID: stableID(tenantID, "adjustment", req.OriginalInvoiceID, strings.ToLower(number)), OriginalInvoiceID: req.OriginalInvoiceID,
 		LegalEntityID: req.LegalEntityID, Kind: req.Kind, DocumentNumber: number, DocumentDate: documentDate, PostingDate: postingDate,
-		LedgerID: ledgerID, FiscalPeriodID: req.FiscalPeriodID, Lines: make([]domain.AdjustmentLine, 0, len(req.Lines)),
+		LedgerID: ledgerID, Lines: make([]domain.AdjustmentLine, 0, len(req.Lines)),
 	}
 	for i, l := range req.Lines {
 		name := func(field string) string { return fmt.Sprintf("lines[%d].%s", i, field) }
@@ -130,7 +132,12 @@ func (a *API) postInvoiceAdjustment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, &domain.Error{Code: domain.CodeInvalidReceipt, Detail: "ledgerId differs from the ledger this service posts to"})
 		return
 	}
+	var err error
 	ctx := r.Context()
+	if in.FiscalPeriodID, err = a.resolveFiscalPeriod(ctx, in.LegalEntityID, in.PostingDate, req.FiscalPeriodID); err != nil {
+		writeError(w, r, err)
+		return
+	}
 	posted, err := a.store.PostInvoiceAdjustment(ctx, in, func(base store.InvoiceBase) (store.AdjustmentOutcome, error) {
 		entry, err := domain.PostInvoiceAdjustment(ctx, domain.InvoiceAdjustment{
 			ID: in.ID, Kind: in.Kind, LegalEntityID: in.LegalEntityID, LedgerID: in.LedgerID, FiscalPeriodID: in.FiscalPeriodID,

@@ -5,6 +5,8 @@ const (
 	CodeBusy                = "CLOSE-0002"
 	CodeBlockedByDependency = "CLOSE-0003"
 	CodeValidation          = "CLOSE-0004"
+	CodeNoPeriod            = "CLOSE-0005"
+	CodeAmbiguousPeriod     = "CLOSE-0006"
 	CodePeriodClosed        = "LEDGER-0013"
 	CodePeriodOnHold        = "LEDGER-0014"
 	CodeNoConvergence       = "ALLOC-0001"
