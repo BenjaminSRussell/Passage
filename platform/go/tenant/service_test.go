@@ -272,6 +272,12 @@ func TestEnvLoaders(t *testing.T) {
 	if err != nil || fromFile == nil {
 		t.Fatalf("file signer %v err %v", fromFile, err)
 	}
+	fileWins, err := tenant.ServiceSignerFromEnv(func(k string) string {
+		return map[string]string{tenant.EnvServiceName: "receiving", tenant.EnvServiceSigningKey: "stale-not-a-seed", tenant.EnvServiceSigningFile: file}[k]
+	})
+	if err != nil || fileWins == nil {
+		t.Fatalf("a mounted key file must win over the environment variable, got %v err %v", fileWins, err)
+	}
 	none, err := tenant.ServiceSignerFromEnv(func(string) string { return "" })
 	if none != nil || err != nil {
 		t.Fatalf("unset must be nil,nil, got %v %v", none, err)

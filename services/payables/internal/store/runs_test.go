@@ -705,3 +705,104 @@ func TestPaymentRun_ExecutorComparisonIsCanonical(t *testing.T) {
 		t.Fatalf("the trigger must compare canonically: %v", err)
 	}
 }
+
+func TestPaymentRun_RejectionMarkIsFrozenAndOnlySettableForARequestedUnpostedJournal(t *testing.T) {
+	s := setup(t)
+	proposal, erin := approvedProposal(t, s, "run-1", threeItems(t, s))
+	run, _, _ := s.StartRun(erin, runInput(proposal.ID, leA))
+	_, _ = s.SaveRunFile(erin, run.ID, RunFile{Number: "F1", SHA256: "abc", Content: "<xml/>"})
+	mark := func(sql string) error {
+		return dbx.WithTenantTx(erin, s.pool, func(tx pgx.Tx) error {
+			_, err := tx.Exec(erin, sql, run.ID)
+			return err
+		})
+	}
+	wantGuard := func(what string, err error) {
+		t.Helper()
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "55000" {
+			t.Fatalf("%s: %v, want the guard's 55000", what, err)
+		}
+	}
+	const set = `update ap_payment_run set journal_rejected_at = now() where id = $1::uuid`
+	wantGuard("marking a run whose journal was never requested", mark(set))
+	if _, err := s.BeginJournal(erin, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := mark(set); err != nil {
+		t.Fatalf("a requested, unposted journal may be marked rejected: %v", err)
+	}
+	wantGuard("clearing the mark", mark(`update ap_payment_run set journal_rejected_at = null where id = $1::uuid`))
+	wantGuard("moving the mark", mark(`update ap_payment_run set journal_rejected_at = now() + interval '1 day' where id = $1::uuid`))
+	if err := mark(`update ap_payment_run set journal_rejected_at = journal_rejected_at where id = $1::uuid`); err != nil {
+		t.Fatalf("an unchanged mark is not a change: %v", err)
+	}
+}
+
+func TestPaymentRun_RejectionCannotBeMarkedOnceTheJournalPosted(t *testing.T) {
+	s := setup(t)
+	proposal, erin := approvedProposal(t, s, "run-1", threeItems(t, s))
+	run, _, _ := s.StartRun(erin, runInput(proposal.ID, leA))
+	_, _ = s.SaveRunFile(erin, run.ID, RunFile{Number: "F1", SHA256: "abc", Content: "<xml/>"})
+	_, _ = s.BeginJournal(erin, run.ID)
+	if _, err := s.RecordJournal(erin, run.ID, "entry-1"); err != nil {
+		t.Fatal(err)
+	}
+	err := dbx.WithTenantTx(erin, s.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(erin, `update ap_payment_run set journal_rejected_at = now() where id = $1::uuid`, run.ID)
+		return err
+	})
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "55000" {
+		t.Fatalf("a posted journal must not be markable as rejected: %v", err)
+	}
+	if got, _ := s.GetRun(erin, run.ID); got.JournalRejected != nil {
+		t.Fatalf("rejected = %v", got.JournalRejected)
+	}
+}
+
+func TestPaymentRun_RejectedRequiresRequestedConstraintExists(t *testing.T) {
+	s := setup(t)
+	ctx := ctxAs(1, leA, "x")
+	var def string
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `select pg_get_constraintdef(oid) from pg_constraint where conname = 'ap_payment_run_rejected_check' and conrelid = 'ap_payment_run'::regclass`).Scan(&def)
+	})
+	if err != nil || !bytes.Contains([]byte(def), []byte("journal_requested_at IS NOT NULL")) {
+		t.Fatalf("constraint = %q err %v", def, err)
+	}
+}
+
+func TestPaymentRun_StartReplayByTheCreatorOrApproverIsRefused(t *testing.T) {
+	s := setup(t)
+	proposal, erin := approvedProposal(t, s, "run-1", threeItems(t, s))
+	first, created, err := s.StartRun(erin, runInput(proposal.ID, leA))
+	if err != nil || !created {
+		t.Fatalf("start: %v", err)
+	}
+	if again, created, err := s.StartRun(erin, runInput(proposal.ID, leA)); err != nil || created || again.ID != first.ID {
+		t.Fatalf("the executor's replay: %+v created=%v %v", again, created, err)
+	}
+	for _, user := range []string{"alice", "ALICE", " Bob "} {
+		in := runInput(proposal.ID, leA)
+		in.RequestedBy = user
+		if run, _, err := s.StartRun(ctxAs(1, leA, user), in); !errors.Is(err, ErrExecutorConflict) || run.ID != "" {
+			t.Errorf("%q: replay = %+v %v, want ErrExecutorConflict and no run", user, run, err)
+		}
+	}
+}
+
+func TestProposalParties_ReadsMetadataWithoutFieldKeys(t *testing.T) {
+	s := setup(t)
+	proposal, erin := approvedProposal(t, s, "run-1", threeItems(t, s))
+	got, err := s.WithFieldCrypt(nil).ProposalParties(erin, proposal.ID)
+	if err != nil || got.CreatedBy != "alice" || got.ApprovedBy != "bob" {
+		t.Fatalf("parties = %+v err %v", got, err)
+	}
+	if _, err := s.ProposalParties(erin, "00000000-0000-0000-0000-00000000dead"); !errors.Is(err, ErrProposalNotFound) {
+		t.Fatalf("missing proposal = %v", err)
+	}
+	if _, err := s.ProposalParties(ctxAs(2, leA, "x"), proposal.ID); !errors.Is(err, ErrProposalNotFound) {
+		t.Fatalf("another tenant = %v", err)
+	}
+}

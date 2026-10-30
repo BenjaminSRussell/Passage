@@ -418,22 +418,23 @@ func (s *Postgres) insertPayees(ctx context.Context, tx pgx.Tx, tenantID, propos
 }
 
 func (s *Postgres) openPayees(ctx context.Context, tx pgx.Tx, proposalID string) (map[string]domain.CreditorDTO, error) {
-	rows, err := tx.Query(ctx, `select tenant_id::text, vendor_id::text, sealed from ap_payment_proposal_payee where proposal_id = $1::uuid`, proposalID)
+	p, _ := tenant.FromContext(ctx)
+	rows, err := tx.Query(ctx, `select vendor_id::text, sealed from ap_payment_proposal_payee where proposal_id = $1::uuid`, proposalID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := map[string]domain.CreditorDTO{}
 	for rows.Next() {
-		var tenantID, vendor string
+		var vendor string
 		var sealed []byte
-		if err := rows.Scan(&tenantID, &vendor, &sealed); err != nil {
+		if err := rows.Scan(&vendor, &sealed); err != nil {
 			return nil, err
 		}
 		if s.crypt == nil {
 			return nil, ErrNoFieldCrypt
 		}
-		plain, err := s.crypt.Open(tenantID, payeeField(proposalID, vendor), sealed)
+		plain, err := s.crypt.Open(p.TenantID, payeeField(proposalID, vendor), sealed)
 		if err != nil {
 			return nil, err
 		}
