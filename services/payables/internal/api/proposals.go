@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/authz"
+	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/money"
@@ -106,9 +108,23 @@ func (a *API) invalid(w http.ResponseWriter, r *http.Request, fields map[string]
 	fail(w, r, p)
 }
 
+func inScope(p tenant.Principal, legalEntityID string) bool {
+	scopes := dbx.LegalEntityScopes(p)
+	if scopes == "*" {
+		return true
+	}
+	canonical, _ := ids.Canonical(legalEntityID)
+	for _, scope := range strings.Split(scopes, ",") {
+		if scope != "" && scope == canonical {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *API) resolveEntity(w http.ResponseWriter, r *http.Request, requested string) (string, bool) {
 	p, _ := tenant.FromContext(r.Context())
-	if p.LegalEntityID != "" && requested != "" && requested != p.LegalEntityID {
+	if requested != "" && !inScope(p, requested) {
 		a.problem(w, r, http.StatusForbidden, "AUTH-0003", "legal entity is outside the caller's legal-entity scope")
 		return "", false
 	}

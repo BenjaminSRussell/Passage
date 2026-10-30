@@ -40,7 +40,7 @@ func setup(t *testing.T) (*store.Postgres, *pgxpool.Pool) {
 
 func ctxFor(tenantN int, legalEntity string) context.Context {
 	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(tenantN), LegalEntityID: legalEntity,
-		UserID: "planner-1", Duties: map[string]struct{}{}})
+		UserID: "planner-1", Duties: testkit.ScopeDuties(legalEntity)})
 }
 
 func dec(s string) decimal.Decimal { return decimal.RequireFromString(s) }

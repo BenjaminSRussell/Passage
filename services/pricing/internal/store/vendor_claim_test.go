@@ -18,7 +18,7 @@ import (
 const vendor = "00000000-0000-0000-0008-000000000001"
 
 func user(n int, id string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), UserID: id})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), UserID: id, Duties: map[string]struct{}{tenant.DutyAllScope: {}}})
 }
 
 func vendorAgreement() domain.RebateAgreement {

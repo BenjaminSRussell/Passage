@@ -33,7 +33,7 @@ func setup(t *testing.T) (*store.Postgres, *pgxpool.Pool, context.Context) {
 }
 
 func scoped(tenantN int, legalEntity string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(tenantN), LegalEntityID: legalEntity, Duties: map[string]struct{}{}})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(tenantN), LegalEntityID: legalEntity, Duties: testkit.ScopeDuties(legalEntity)})
 }
 
 func d(s string) decimal.Decimal { return decimal.RequireFromString(s) }

@@ -91,7 +91,7 @@ func PostInvoiceAdjustment(ctx context.Context, in InvoiceAdjustment, periods Pe
 		total = total.Add(l.Amount)
 	}
 	entry.Lines = append(entry.Lines, JournalLine{Account: profile.VendorControl, Amount: money.Amount{Value: total.Mul(sign.Neg()), Currency: in.Currency}})
-	if err := checkAPPeriod(ctx, periods, in.LedgerID, in.FiscalPeriodID, in.PostingDate, in.ID); err != nil {
+	if err := checkAPPeriod(ctx, periods, in.LegalEntityID, in.LedgerID, in.FiscalPeriodID, in.PostingDate, in.ID); err != nil {
 		return JournalEntry{}, err
 	}
 	entryID, err := postEntry(ctx, ledger, entry, in.ID)

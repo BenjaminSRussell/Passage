@@ -22,7 +22,7 @@ import (
 
 // ctxAllEntities is a tenant principal with access to every legal entity.
 func ctxAllEntities(tenantID string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, UserID: "user-test", Duties: map[string]struct{}{}})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, UserID: "user-test", Duties: map[string]struct{}{tenant.DutyAllScope: {}}})
 }
 
 func newProposal(t *testing.T, le string) Invoice {

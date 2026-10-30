@@ -13,9 +13,11 @@ import (
 	"github.com/BenjaminSRussell/passage/services/party/internal/numbering"
 )
 
+const entityID = "00000000-0000-0000-0000-0000000000e1"
+
 func principalContext() context.Context {
 	return tenant.With(context.Background(), tenant.Principal{
-		TenantID: "00000000-0000-0000-0000-000000000001", UserID: "user-1",
+		TenantID: "00000000-0000-0000-0000-000000000001", LegalEntityID: entityID, UserID: "user-1",
 		Duties: map[string]struct{}{"party.write": {}, "party.read": {}},
 	})
 }
@@ -44,7 +46,7 @@ func TestNext_PostsWithPrincipalHeadersAndReturnsFormatted(t *testing.T) {
 	}
 	for header, want := range map[string]string{
 		"Idempotency-Key": "key-1", "X-Passage-Tenant": "00000000-0000-0000-0000-000000000001",
-		"X-Passage-User": "user-1", "X-Passage-Duties": "party.read,party.write",
+		"X-Passage-Legal-Entity": entityID, "X-Passage-User": "user-1", "X-Passage-Duties": "party.read,party.write",
 	} {
 		if got.Header.Get(header) != want {
 			t.Errorf("%s = %q, want %q", header, got.Header.Get(header), want)
@@ -84,4 +86,23 @@ func TestNext_TransportErrorIsUnavailable(t *testing.T) {
 func TestUnavailable_AlwaysFails(t *testing.T) {
 	_, err := numbering.Unavailable{}.Next(principalContext(), "PARTY", "k")
 	wantUnavailable(t, err)
+}
+
+func TestNext_RequiresASingleLegalEntity(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { calls++ }))
+	defer srv.Close()
+	for name, entity := range map[string]string{"none": "", "list": entityID + ",00000000-0000-0000-0000-0000000000e2"} {
+		t.Run(name, func(t *testing.T) {
+			ctx := tenant.With(context.Background(), tenant.Principal{TenantID: "00000000-0000-0000-0000-000000000001", LegalEntityID: entity})
+			_, err := numbering.New(srv.URL).Next(ctx, "PARTY", "k")
+			var p *httpx.Problem
+			if !errors.As(err, &p) || p.Status != http.StatusUnprocessableEntity || p.Code != numbering.CodeEntityRequired {
+				t.Fatalf("got %v, want 422 %s", err, numbering.CodeEntityRequired)
+			}
+		})
+	}
+	if calls != 0 {
+		t.Fatalf("numbering called %d times without a legal entity", calls)
+	}
 }

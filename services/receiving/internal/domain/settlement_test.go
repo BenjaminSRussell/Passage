@@ -83,3 +83,25 @@ func TestPostSettlement_Rejections(t *testing.T) {
 		})
 	}
 }
+
+type recordingPeriods struct{ got *domain.PeriodQuery }
+
+func (r recordingPeriods) AP(_ context.Context, q domain.PeriodQuery) (domain.PeriodStatus, error) {
+	*r.got = q
+	return domain.PeriodOpen, nil
+}
+
+func TestPostSettlementAndAdjustment_PeriodQueryCarriesTheDocumentsLegalEntity(t *testing.T) {
+	var got domain.PeriodQuery
+	periods := recordingPeriods{got: &got}
+
+	if _, err := domain.PostSettlement(context.Background(), settlementFor("10.00", "USD"), periods, &domain.FakeLedger{}, testProfile); err != nil || got.LegalEntityID != "le-1" {
+		t.Fatalf("settlement: err %v query %+v", err, got)
+	}
+	got = domain.PeriodQuery{}
+	in := adjustment(domain.AdjustmentDebit, domain.AdjustmentLine{InvoiceLineNo: 1, Amount: dec("3.50")})
+	in.LegalEntityID = "le-2"
+	if _, err := domain.PostInvoiceAdjustment(context.Background(), in, periods, &domain.FakeLedger{}, testProfile); err != nil || got.LegalEntityID != "le-2" {
+		t.Fatalf("adjustment: err %v query %+v", err, got)
+	}
+}

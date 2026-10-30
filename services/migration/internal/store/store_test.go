@@ -21,7 +21,7 @@ import (
 )
 
 func principalContext(n int) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n)})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), Duties: map[string]struct{}{tenant.DutyAllScope: {}}})
 }
 
 func newStore(t *testing.T) *store.Postgres {

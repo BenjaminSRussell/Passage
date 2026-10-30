@@ -23,7 +23,7 @@ const (
 )
 
 func ctxAs(n int, le, user string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), LegalEntityID: le, UserID: user, Duties: map[string]struct{}{}})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), LegalEntityID: le, UserID: user, Duties: testkit.ScopeDuties(le)})
 }
 
 func dec(s string) decimal.Decimal { return decimal.RequireFromString(s) }

@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 )
 
 func day(y int, m time.Month, d int) time.Time { return time.Date(y, m, d, 0, 0, 0, 0, time.UTC) }
@@ -52,7 +54,7 @@ func TestBuildPlan_Table(t *testing.T) {
 	t.Run("revenue by entity for one entity scope", func(t *testing.T) {
 		q := span("revenue", "cogs")
 		q.Dimensions = []string{"legal_entity_id", "fiscal_period"}
-		plan, err := BuildPlan(q, cat, ScopeFromPrincipal(usmf))
+		plan, err := BuildPlan(q, cat, ScopeFromPrincipal(tenant.Principal{LegalEntityID: usmf}))
 		if err != nil {
 			t.Fatal(err)
 		}

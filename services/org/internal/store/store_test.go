@@ -18,7 +18,7 @@ import (
 )
 
 func principalContext(n int) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n)})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), Duties: testkit.ScopeDuties("")})
 }
 
 func seed(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {

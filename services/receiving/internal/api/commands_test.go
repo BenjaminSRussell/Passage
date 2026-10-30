@@ -162,6 +162,15 @@ func TestDirectReceipt_ValidationAndAuth(t *testing.T) {
 	problemCode(t, rg.call(http.MethodPost, receiptsPath, directBody("P", 10, 4, ""), headers{"X-Passage-Tenant": testkit.TenantID(1), "X-Passage-Duties": "ReceivingMaintain"}), http.StatusBadRequest, "COM-0001")
 }
 
+func TestDirectReceipt_CallerWithoutEntityScopeIsForbidden(t *testing.T) {
+	rg := newRig(domain.PeriodOpen)
+	problemCode(t, rg.call(http.MethodPost, receiptsPath, directBody("NS-1", 10, 4, ""), rg.maintain(entityHeader, "")), http.StatusForbidden, "AUTH-0003")
+	problemCode(t, rg.call(http.MethodPost, receiptsPath, directBody("NS-1", 10, 4, ""), rg.maintain(entityHeader, ledgerID)), http.StatusForbidden, "AUTH-0003")
+	if rec := rg.call(http.MethodPost, receiptsPath, directBody("NS-1", 10, 4, ""), rg.maintain()); rec.Code != http.StatusCreated {
+		t.Fatalf("scoped caller: %d %s", rec.Code, rec.Body)
+	}
+}
+
 func TestDirectReceipt_DomainConflicts(t *testing.T) {
 	rg := newRig(domain.PeriodOpen)
 	rg.direct(t, "PS-1", 10, 4)

@@ -21,7 +21,7 @@ import (
 const legalEntity = "00000000-0000-0000-0000-0000000000a1"
 
 func tenantCtx(n int) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), Duties: map[string]struct{}{}})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), Duties: map[string]struct{}{tenant.DutyAllScope: {}}})
 }
 
 func setup(t *testing.T) *Postgres {
