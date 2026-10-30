@@ -5,9 +5,15 @@ COPY services/payables services/payables
 WORKDIR /src/services/payables
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -buildid=" -o /out/payables ./cmd/payables
 
-FROM alpine:3.22@sha256:2e0b81d60597f449baa56dc25d355367869d2dca4cd57e866f1e2b52af3eb55f
-RUN apk add --no-cache libxml2-utils && apk del --no-cache apk-tools
+FROM debian:12-slim@sha256:99c0b25c46d0214d5a2091092e7908907dcaecd6a962cde0ac700acee222b6f3 AS xmllint
+RUN apt-get update && apt-get install -y --no-install-recommends libxml2-utils \
+    && mkdir -p /rootfs/usr/bin \
+    && cp /usr/bin/xmllint /rootfs/usr/bin/ \
+    && ldd /usr/bin/xmllint | awk '/=> \//{print $3}' | grep -E 'libxml2|libicu|libz|liblzma' \
+        | xargs -I{} cp --parents -L {} /rootfs
+
+FROM gcr.io/distroless/cc-debian12:nonroot
+COPY --from=xmllint /rootfs/ /
 COPY --from=build /out/payables /payables
-USER 65532:65532
 EXPOSE 8080 9090
 ENTRYPOINT ["/payables"]
