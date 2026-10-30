@@ -157,6 +157,7 @@ func middlewareWith(verifier func() *ServiceVerifier, next http.Handler) http.Ha
 				reject(w, r, http.StatusUnauthorized, "AUTH-0001", "Unauthorized", "invalid service token")
 				return
 			}
+			slog.InfoContext(r.Context(), "service call", "service", claims.Iss, "actor", claims.Act, "legalEntityId", claims.Le, "path", r.URL.Path, "correlationId", middleware.GetReqID(r.Context()))
 			next.ServeHTTP(w, r.WithContext(With(r.Context(), claims.Principal())))
 			return
 		}

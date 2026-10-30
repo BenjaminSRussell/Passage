@@ -245,9 +245,9 @@ func (c *Client) rejection(ctx context.Context, op, subject string, status int, 
 	return err
 }
 
-func (c *Client) Reverse(ctx context.Context, entryID, idempotencyKey string, postingDate time.Time) error {
+func (c *Client) Reverse(ctx context.Context, entryID, idempotencyKey, legalEntityID string, postingDate time.Time) error {
 	body := reverseBody{PostingDate: postingDate.Format(dateFormat), Description: reversalDescription}
-	req, err := c.newRequest(ctx, fmt.Sprintf(domain.LedgerReversePathTmpl, url.PathEscape(entryID)), idempotencyKey, "", body)
+	req, err := c.newRequest(ctx, fmt.Sprintf(domain.LedgerReversePathTmpl, url.PathEscape(entryID)), idempotencyKey, legalEntityID, body)
 	if err != nil {
 		return fmt.Errorf("ledger reverse %s: %w", entryID, err)
 	}

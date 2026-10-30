@@ -318,10 +318,113 @@ func TestGrantTableMatchesPolicyData(t *testing.T) {
 	for iss, targets := range data.ServiceGrants {
 		for aud, duties := range targets {
 			for _, d := range duties {
-				if _, ok := data.Duties[d]; !ok && d != "numbering.write" {
+				if _, ok := data.Duties[d]; !ok {
 					t.Errorf("%s -> %s grants %q which is not a seeded duty", iss, aud, d)
 				}
 			}
 		}
+	}
+}
+
+func TestMintRequiresExplicitEntityInTheUsersScope(t *testing.T) {
+	f := newFixture(t)
+	const other = "0190a5f2-7b1c-7d3e-8a4f-1234567890ad"
+	multi := f.principal
+	multi.LegalEntityID = validLE + "," + other
+	if _, err := f.signer.Mint("ledger", f.principal, other); err == nil {
+		t.Fatal("an entity outside the user's scope was signed")
+	}
+	if _, err := f.signer.Mint("ledger", multi, ""); err == nil {
+		t.Fatal("a multi-entity user needs an explicit entity")
+	}
+	token, err := f.signer.Mint("ledger", multi, other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims, err := f.verifier.Verify(token); err != nil || claims.Le != other {
+		t.Fatalf("claims %+v err %v", claims, err)
+	}
+	allScope := tenant.Principal{TenantID: validTenant, UserID: "u", Duties: map[string]struct{}{tenant.DutyAllScope: {}}}
+	if _, err := f.signer.Mint("ledger", allScope, other); err != nil {
+		t.Fatalf("an ALL-scope read may name any entity: %v", err)
+	}
+	allScope.LegalEntityID = validLE
+	if _, err := f.signer.Mint("ledger", allScope, other); err == nil {
+		t.Fatal("the all-scope duty must not widen a user who is scoped to an entity")
+	}
+}
+
+func TestKeyRotationSeveralKeysPerIssuerSelectedByKid(t *testing.T) {
+	oldPub, oldPriv, _ := ed25519.GenerateKey(nil)
+	newPub, newPriv, _ := ed25519.GenerateKey(nil)
+	oldSigner, _ := tenant.NewServiceSigner("receiving", oldPriv)
+	newSigner, _ := tenant.NewServiceSigner("receiving", newPriv)
+	oldSigner, newSigner = oldSigner.WithKeyID("k1"), newSigner.WithKeyID("k2")
+	verifier := tenant.NewServiceVerifierKids("ledger", map[string]map[string]ed25519.PublicKey{"receiving": {"k1": oldPub, "k2": newPub}})
+	p := tenant.Principal{TenantID: validTenant, LegalEntityID: validLE, UserID: "u"}
+	for name, s := range map[string]*tenant.ServiceSigner{"k1": oldSigner, "k2": newSigner} {
+		token, _ := s.Mint("ledger", p, "")
+		if claims, err := verifier.Verify(token); err != nil || claims.Kid != name {
+			t.Fatalf("%s: %+v %v", name, claims, err)
+		}
+	}
+	mislabelled, _ := newSigner.WithKeyID("k1").Mint("ledger", p, "")
+	if _, err := verifier.Verify(mislabelled); err == nil {
+		t.Fatal("a token labelled with another key's kid verified")
+	}
+	unknown, _ := newSigner.WithKeyID("k9").Mint("ledger", p, "")
+	if _, err := verifier.Verify(unknown); err == nil {
+		t.Fatal("unknown kid verified")
+	}
+}
+
+func TestVerifierEnvKeysAndDuplicates(t *testing.T) {
+	pubA, _, _ := ed25519.GenerateKey(nil)
+	pubB, _, _ := ed25519.GenerateKey(nil)
+	a, b := base64.StdEncoding.EncodeToString(pubA), base64.StdEncoding.EncodeToString(pubB)
+	env := func(keys, size string) func(string) string {
+		return func(k string) string {
+			return map[string]string{tenant.EnvServiceName: "ledger", tenant.EnvServicePublicKeys: keys, tenant.EnvServiceReplaySize: size}[k]
+		}
+	}
+	if v, err := tenant.ServiceVerifierFromEnv(env("receiving:k1="+a+",receiving:k2="+b, "")); err != nil || v == nil {
+		t.Fatalf("rotation keys: %v", err)
+	}
+	for name, keys := range map[string]string{
+		"duplicate issuer and kid": "receiving:k1=" + a + ",receiving:k1=" + b,
+		"duplicate bare issuer":    "receiving=" + a + ",receiving=" + b,
+		"short key":                "receiving=AAAA",
+	} {
+		if _, err := tenant.ServiceVerifierFromEnv(env(keys, "")); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+	if _, err := tenant.ServiceVerifierFromEnv(env("receiving="+a, "0")); err == nil {
+		t.Error("non-positive replay cache size accepted")
+	}
+	if err := tenant.ConfigureServiceVerifier(env("receiving=zzz", "")); err == nil {
+		t.Error("ConfigureServiceVerifier accepted malformed keys")
+	}
+	t.Cleanup(func() { tenant.SetServiceVerifier(nil) })
+	if err := tenant.ConfigureServiceVerifier(env("receiving="+a, "")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReplayCacheEvictsExpiredAndFailsClosedWhenFull(t *testing.T) {
+	f := newFixture(t)
+	small := f.verifier.WithReplayCapacity(3)
+	mint := func() string { return f.mint(t, "ledger") }
+	for i := 0; i < 3; i++ {
+		if _, err := small.Verify(mint()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := small.Verify(mint()); err == nil {
+		t.Fatal("a full cache must reject rather than forget")
+	}
+	*f.now = epoch.Add(tenant.ServiceTokenMaxTTL + time.Second)
+	if _, err := small.Verify(mint()); err != nil {
+		t.Fatalf("expired entries must be evicted to make room: %v", err)
 	}
 }

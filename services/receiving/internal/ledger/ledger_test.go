@@ -92,7 +92,7 @@ func TestReverseBodyDecodesIntoTheLedgersRequestShape(t *testing.T) {
 		w.WriteHeader(http.StatusCreated)
 	}))
 	t.Cleanup(srv.Close)
-	if err := New(srv.URL, nil).Reverse(testCtx(), "E1", "k:reverse", time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+	if err := New(srv.URL, nil).Reverse(testCtx(), "E1", "k:reverse", "", time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatal(err)
 	}
 	var got ledgerReverseRequest
@@ -298,7 +298,7 @@ func TestReverseCallsTheReverseRouteWithItsOwnKey(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	day := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
-	if err := New(srv.URL, nil).Reverse(testCtx(), "E1", "k:reverse", day); err != nil {
+	if err := New(srv.URL, nil).Reverse(testCtx(), "E1", "k:reverse", "", day); err != nil {
 		t.Fatal(err)
 	}
 	if got.URL.Path != "/v1/ledger/journal-entries/E1/reverse" || got.Header.Get("Idempotency-Key") != "k:reverse" {
@@ -306,7 +306,7 @@ func TestReverseCallsTheReverseRouteWithItsOwnKey(t *testing.T) {
 	}
 	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusBadGateway) }))
 	t.Cleanup(failing.Close)
-	if err := New(failing.URL, nil).Reverse(testCtx(), "E1", "k", day); err == nil {
+	if err := New(failing.URL, nil).Reverse(testCtx(), "E1", "k", "", day); err == nil {
 		t.Fatal("a failed reversal must surface")
 	}
 }
@@ -331,7 +331,7 @@ func TestReverseClassifiesLedgerRejectionsApartFromOutages(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			client, _, _ := serve(t, tc.status, tc.body)
-			err := client.Reverse(testCtx(), "E1", "k", day)
+			err := client.Reverse(testCtx(), "E1", "k", "", day)
 			if err == nil || errors.Is(err, domain.ErrPeriodClosed) != tc.closed || errors.Is(err, domain.ErrLedgerRejected) != tc.rejected || errors.Is(err, domain.ErrLedgerConflict) != tc.conflict {
 				t.Fatalf("err=%v, want closed=%v rejected=%v conflict=%v", err, tc.closed, tc.rejected, tc.conflict)
 			}
@@ -372,7 +372,7 @@ func TestSignedPostSendsServiceTokenInsteadOfUserDuties(t *testing.T) {
 	client.WithSigner(signer)
 	entry := testEntry()
 	entry.LegalEntityID = entity
-	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: "other", UserID: "u-1", Duties: map[string]struct{}{"ReceivingPost": {}}})
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: "00000000-0000-4000-8000-0000000000e2," + entity, UserID: "u-1", Duties: map[string]struct{}{"ReceivingPost": {}}})
 	if _, err := client.Post(ctx, entry); err != nil {
 		t.Fatal(err)
 	}
@@ -393,7 +393,7 @@ func TestSignedReverseUsesPrincipalLegalEntity(t *testing.T) {
 	client, got, _ := serve(t, http.StatusCreated, `{}`)
 	client.WithSigner(signer)
 	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: entity, UserID: "u-1"})
-	if err := client.Reverse(ctx, "je-1", "rev-key", time.Now()); err != nil {
+	if err := client.Reverse(ctx, "je-1", "rev-key", "", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if claims, err := verifier.Verify(got.Header.Get(tenant.HeaderServiceToken)); err != nil || claims.Le != entity {
@@ -408,5 +408,34 @@ func TestSignedPostWithoutExplicitSingleLegalEntityFailsBeforeSending(t *testing
 	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, UserID: "u-1"})
 	if _, err := client.Post(ctx, testEntry()); err == nil || got.Method != "" {
 		t.Fatalf("err %v, request sent: %q", err, got.Method)
+	}
+}
+
+func TestSignedPostForAnotherEntityThanTheUsersScopeIsRefusedAndNothingIsSent(t *testing.T) {
+	signer, _ := testSigner(t)
+	client, got, _ := serve(t, http.StatusCreated, `{"journalEntryId":"je-1"}`)
+	client.WithSigner(signer)
+	entry := testEntry()
+	entry.LegalEntityID = "00000000-0000-4000-8000-0000000000e1"
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: "00000000-0000-4000-8000-0000000000e2", UserID: "admin-a"})
+	if _, err := client.Post(ctx, entry); err == nil || got.Method != "" {
+		t.Fatalf("err %v, request sent: %q", err, got.Method)
+	}
+	if err := client.Reverse(ctx, "je-1", "k", entry.LegalEntityID, time.Now()); err == nil || got.Method != "" {
+		t.Fatalf("reverse err %v, request sent: %q", err, got.Method)
+	}
+}
+
+func TestSignedReverseForAMultiEntityUserSignsTheExplicitEntity(t *testing.T) {
+	const entity = "00000000-0000-4000-8000-0000000000e1"
+	signer, verifier := testSigner(t)
+	client, got, _ := serve(t, http.StatusCreated, `{}`)
+	client.WithSigner(signer)
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: entity + ",00000000-0000-4000-8000-0000000000e2", UserID: "u-1"})
+	if err := client.Reverse(ctx, "je-1", "rev-key", entity, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if claims, err := verifier.Verify(got.Header.Get(tenant.HeaderServiceToken)); err != nil || claims.Le != entity {
+		t.Fatalf("claims %+v err %v", claims, err)
 	}
 }

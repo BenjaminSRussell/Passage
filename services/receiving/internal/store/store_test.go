@@ -2,7 +2,9 @@ package store_test
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -249,7 +251,7 @@ func TestMigration0005_InvoiceTablesIsolationAndUniqueNumber(t *testing.T) {
 		return n
 	}
 	st := store.New(pool)
-	if _, err := st.ReservePosting(tenant.With(ctx, one), store.PendingPosting{BaseKey: "k", Subjects: []string{receiptID, invoiceID}, Hash: "h", Journal: []byte(`{}`)}); err != nil {
+	if _, err := st.ReservePosting(tenant.With(ctx, one), store.PendingPosting{BaseKey: "k", Subjects: []string{receiptID, invoiceID}, Hash: "h", Journal: []byte(`{"legalEntityId":"` + one.LegalEntityID + `"}`)}); err != nil {
 		t.Fatal(err)
 	}
 	for _, table := range []string{"receiving_pending_posting", "receiving_pending_posting_subject"} {
@@ -259,6 +261,12 @@ func TestMigration0005_InvoiceTablesIsolationAndUniqueNumber(t *testing.T) {
 		if got := pending(principal(2), table); got != 0 {
 			t.Errorf("%s: other tenant sees %d rows, want 0", table, got)
 		}
+		if got := pending(otherEntity, table); got != 0 {
+			t.Errorf("%s: other legal entity sees %d rows, want 0", table, got)
+		}
+	}
+	if _, err := st.ClaimPending(tenant.With(ctx, otherEntity), "k", 0, time.Minute); !errors.Is(err, store.ErrPendingNotFound) {
+		t.Errorf("an admin of another legal entity must not see or claim the pending posting: %v", err)
 	}
 	if err := st.EnsureNoPending(tenant.With(ctx, principal(2)), receiptID); err != nil {
 		t.Errorf("another tenant must not see the pending posting: %v", err)

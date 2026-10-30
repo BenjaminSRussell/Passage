@@ -9,4 +9,3 @@ serviceMonitor: { enabled: false }
 
 serviceIdentity:
   publicKeys: ""
-  signingKeySecret: ""

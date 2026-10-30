@@ -35,3 +35,4 @@ alerts:
 serviceIdentity:
   publicKeys: ""
   signingKeySecret: ""
+  keyId: ""

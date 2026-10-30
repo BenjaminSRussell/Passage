@@ -68,7 +68,7 @@ type StatusError struct{ Status int }
 
 func (e *StatusError) Error() string { return fmt.Sprintf("ledger: unexpected status %d", e.Status) }
 
-func (c *Client) get(ctx context.Context, path string, q url.Values, subject string) ([]byte, error) {
+func (c *Client) get(ctx context.Context, legalEntityID, path string, q url.Values, subject string) ([]byte, error) {
 	principal, ok := tenant.FromContext(ctx)
 	if !ok {
 		return nil, errors.New("ledger: no principal in context")
@@ -81,7 +81,7 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, subject str
 	if err != nil {
 		return nil, fmt.Errorf("ledger: %w", err)
 	}
-	signed, err := c.signer.Apply(req, principal, audience, "")
+	signed, err := c.signer.Apply(req, principal, audience, legalEntityID)
 	if err != nil {
 		return nil, fmt.Errorf("ledger: %w", err)
 	}
@@ -106,17 +106,17 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, subject str
 	return raw, nil
 }
 
-func (c *Client) AccountBalance(ctx context.Context, ledgerID, account, periodTo string) (Balance, error) {
+func (c *Client) AccountBalance(ctx context.Context, legalEntityID, ledgerID, account, periodTo string) (Balance, error) {
 	q := url.Values{"ledger": {ledgerID}, "period_to": {periodTo}, "account_from": {account}, "account_to": {account}}
-	raw, err := c.get(ctx, balancesPath, q, account)
+	raw, err := c.get(ctx, legalEntityID, balancesPath, q, account)
 	if err != nil {
 		return Balance{}, err
 	}
 	return parse(ctx, raw, account)
 }
 
-func (c *Client) LegalEntity(ctx context.Context, ledgerID string) (string, error) {
-	raw, err := c.get(ctx, ledgersPath+url.PathEscape(ledgerID), nil, ledgerID)
+func (c *Client) LegalEntity(ctx context.Context, legalEntityID, ledgerID string) (string, error) {
+	raw, err := c.get(ctx, legalEntityID, ledgersPath+url.PathEscape(ledgerID), nil, ledgerID)
 	if err != nil {
 		return "", err
 	}

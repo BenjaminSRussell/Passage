@@ -39,13 +39,6 @@ spec:
             - name: PASSAGE_SERVICE_PUBLIC_KEYS
               value: {{ .Values.serviceIdentity.publicKeys | quote }}
 {{- end }}
-{{- if .Values.serviceIdentity.signingKeySecret }}
-            - name: PASSAGE_SERVICE_SIGNING_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.serviceIdentity.signingKeySecret }}
-                  key: signing-key
-{{- end }}
             - name: CLOSE_REOPEN_DEFAULT_DAYS
               value: {{ .Values.config.reopenDefaultDays | quote }}
             - name: CLOSE_REOPEN_APPROVERS

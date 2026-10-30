@@ -18,3 +18,4 @@ serviceMonitor:
 serviceIdentity:
   publicKeys: ""
   signingKeySecret: ""
+  keyId: ""

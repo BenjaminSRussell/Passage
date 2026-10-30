@@ -181,8 +181,8 @@ func (s *ServiceSigner) Mint(aud string, p Principal, legalEntity string) (strin
 }
 
 // legalEntityFor resolves the token's legal entity: the explicit one must lie
-// in the end user's legal-entity scope (or the user holds the all-scope duty,
-// which only survives on explicit ALL-scope reads); with none given the user
+// in the end user's legal-entity scope (or the user has no entity and holds the all-scope
+// duty, which only survives on explicit ALL-scope reads); with none given the user
 // must be scoped to exactly one.
 func (s *ServiceSigner) legalEntityFor(p Principal, explicit string) (string, bool) {
 	scopes := LegalEntityScopeList(p)
@@ -196,7 +196,7 @@ func (s *ServiceSigner) legalEntityFor(p Principal, explicit string) (string, bo
 	if !ok || le == ids.Nil {
 		return "", false
 	}
-	return le, p.HasDuty(DutyAllScope) || slices.Contains(scopes, le)
+	return le, (p.LegalEntityID == "" && p.HasDuty(DutyAllScope)) || slices.Contains(scopes, le)
 }
 
 // Apply signs a token for aud and sets it on req together with the request id.

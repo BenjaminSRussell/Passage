@@ -38,8 +38,8 @@ type AgingStore interface {
 }
 
 type LedgerBalances interface {
-	AccountBalance(ctx context.Context, ledgerID, account, periodTo string) (ledger.Balance, error)
-	LegalEntity(ctx context.Context, ledgerID string) (string, error)
+	AccountBalance(ctx context.Context, legalEntityID, ledgerID, account, periodTo string) (ledger.Balance, error)
+	LegalEntity(ctx context.Context, legalEntityID, ledgerID string) (string, error)
 }
 
 type agingDeps struct {
@@ -161,7 +161,7 @@ func (a *API) agingReconcile(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, httpx.NewProblem(http.StatusServiceUnavailable, "COM-0503", "ledger balance source is not configured"))
 		return
 	}
-	owner, err := a.aging.ledger.LegalEntity(r.Context(), ledgerID)
+	owner, err := a.aging.ledger.LegalEntity(r.Context(), q.legalEntityID, ledgerID)
 	if err != nil {
 		a.ledgerFailure(w, r, ledgerID, err)
 		return
@@ -176,7 +176,7 @@ func (a *API) agingReconcile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	period := q.asOf.Format(periodLayout)
-	bal, err := a.aging.ledger.AccountBalance(r.Context(), ledgerID, a.aging.controlAccount, period)
+	bal, err := a.aging.ledger.AccountBalance(r.Context(), q.legalEntityID, ledgerID, a.aging.controlAccount, period)
 	if err != nil {
 		a.ledgerFailure(w, r, ledgerID, err)
 		return

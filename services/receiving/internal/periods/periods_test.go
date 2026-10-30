@@ -144,7 +144,7 @@ func TestAP_SignedSendsServiceTokenForTheQueriedLegalEntity(t *testing.T) {
 		_, _ = w.Write([]byte(`{"allowed":true,"status":"open"}`))
 	}))
 	defer srv.Close()
-	principal := tenant.Principal{TenantID: tenantID, LegalEntityID: "ignored", UserID: "u-1"}
+	principal := tenant.Principal{TenantID: tenantID, LegalEntityID: entityID, UserID: "u-1"}
 	status, err := New(srv.URL, nil).WithSigner(signer).AP(tenant.With(context.Background(), principal), query())
 	if err != nil || status != domain.PeriodOpen {
 		t.Fatalf("status %q err %v", status, err)

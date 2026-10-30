@@ -22,7 +22,7 @@ has_route_permissions(spec) if {
 }
 
 test_all_seeded_duties_allow_their_declared_permissions if {
-	count(data.duties) == 107
+	count(data.duties) == 108
 	every duty, spec in data.duties {
 		has_route_permissions(spec)
 		every permission in spec.permissions {
@@ -424,8 +424,6 @@ test_payment_proposal_duties_are_separate if {
 }
 
 granted_duty_known(duty) if data.duties[duty]
-
-granted_duty_known("numbering.write")
 
 test_service_grants_allow_only_their_declared_routes if {
 	every _, targets in data.service_grants {

@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"context"
 	"crypto/ed25519"
 	"net/http"
 	"net/http/httptest"
@@ -12,10 +13,12 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/authz"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/api"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/ledger"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/periods"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store/memstore"
 )
 
@@ -55,11 +58,17 @@ func downstream(t *testing.T, self string, keys map[string]ed25519.PublicKey, du
 
 func signedRig(t *testing.T, signer *tenant.ServiceSigner, pub ed25519.PublicKey) (http.Handler, *recorder, *recorder) {
 	t.Helper()
+	h, ledgerSeen, closeSeen, _ := signedRigOn(t, memstore.New(), signer, pub)
+	return h, ledgerSeen, closeSeen
+}
+
+func signedRigOn(t *testing.T, st *memstore.Store, signer *tenant.ServiceSigner, pub ed25519.PublicKey) (http.Handler, *recorder, *recorder, *memstore.Store) {
+	t.Helper()
 	keys := map[string]ed25519.PublicKey{"receiving": pub}
 	ledgerSeen, closeSeen := &recorder{}, &recorder{}
 	ledgerSrv := downstream(t, "ledger", keys, "ledger.journal.post", "/v1/ledger/journal-entries", `{"journalEntryId":"je-1"}`, http.StatusCreated, ledgerSeen)
 	closeSrv := downstream(t, "close", keys, "period.check", "/v1/close/period-statuses:check", `{"allowed":true,"status":"open"}`, http.StatusOK, closeSeen)
-	a := api.New(memstore.New(), api.Ports{
+	a := api.New(st, api.Ports{
 		Periods:       periods.New(closeSrv.URL, nil).WithSigner(signer),
 		Ledger:        ledger.New(ledgerSrv.URL, nil).WithSigner(signer),
 		Profile:       domain.PostingProfile{LedgerID: ledgerID, Inventory: "1400", GRIR: "2100", PPV: "5200", VendorControl: "2000"},
@@ -67,7 +76,7 @@ func signedRig(t *testing.T, signer *tenant.ServiceSigner, pub ed25519.PublicKey
 	})
 	router := httpx.NewRouter()
 	a.Register(router)
-	return router, ledgerSeen, closeSeen
+	return router, ledgerSeen, closeSeen, st
 }
 
 func TestServiceIdentity_UserWithoutLedgerDutiesPostsReceiptAndInvoice(t *testing.T) {
@@ -124,5 +133,26 @@ func TestServiceIdentity_ForgedSignerIsRejectedByDownstream(t *testing.T) {
 	rec := rg.call(http.MethodPost, receiptsPath+"/"+receipt.ID+":post", "", hdr(rg.poster(receipt.Version)))
 	if rec.Code == http.StatusOK || strings.Contains(rec.Body.String(), "je-1") || len(ledgerSeen.snapshot()) != 0 {
 		t.Fatalf("a token signed by an unknown key must not post: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestServiceIdentity_AnAdminOfOneEntityCannotResolveAnotherEntitysPendingPosting(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	signer, _ := tenant.NewServiceSigner("receiving", priv)
+	st := memstore.New()
+	h, ledgerSeen, _, _ := signedRigOn(t, st, signer, pub)
+	const entityB = "0190a000-0000-7000-8000-0000000000b2"
+	journal := `{"legalEntityId":"` + entityB + `","ledgerId":"` + ledgerID + `","postingDate":"2026-10-25T00:00:00Z","source":{"documentType":"productreceipt","documentId":"` + productID + `"},"lines":[{"account":"1400","amount":{"Value":"5","Currency":"USD"}},{"account":"2100","amount":{"Value":"-5","Currency":"USD"}}]}`
+	owner := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: entityB, UserID: "poster-b"})
+	if _, err := st.ReservePosting(owner, store.PendingPosting{BaseKey: "post:b", Subjects: []string{productID}, Hash: "h", Journal: []byte(journal)}); err != nil {
+		t.Fatal(err)
+	}
+	rg := &rig{h: h}
+	hdr := admin("k1")
+	hdr["X-Passage-User"] = "admin-a"
+	hdr[entityHeader] = legalEntityID
+	rec := rg.call(http.MethodPost, resolvePath("post:b"), "", hdr)
+	if rec.Code == http.StatusOK || len(ledgerSeen.snapshot()) != 0 {
+		t.Fatalf("entity A's admin resolved entity B's posting: %d %s, ledger calls %v", rec.Code, rec.Body.String(), ledgerSeen.snapshot())
 	}
 }

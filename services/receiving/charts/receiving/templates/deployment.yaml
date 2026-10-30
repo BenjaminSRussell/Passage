@@ -18,6 +18,13 @@ spec:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
+      {{- if .Values.serviceIdentity.signingKeySecret }}
+      volumes:
+        - name: service-identity
+          secret:
+            secretName: {{ .Values.serviceIdentity.signingKeySecret }}
+            defaultMode: 0400
+      {{- end }}
       containers:
         - name: receiving
           image: {{ include "receiving.image" . | quote }}
@@ -40,11 +47,12 @@ spec:
               value: {{ .Values.serviceIdentity.publicKeys | quote }}
 {{- end }}
 {{- if .Values.serviceIdentity.signingKeySecret }}
-            - name: PASSAGE_SERVICE_SIGNING_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.serviceIdentity.signingKeySecret }}
-                  key: signing-key
+            - name: PASSAGE_SERVICE_SIGNING_KEY_FILE
+              value: /var/run/passage/service-identity/signing-key
+{{- if .Values.serviceIdentity.keyId }}
+            - name: PASSAGE_SERVICE_KEY_ID
+              value: {{ .Values.serviceIdentity.keyId | quote }}
+{{- end }}
 {{- end }}
             - name: MIGRATE_ON_START
               value: {{ .Values.migrateOnStart | quote }}
@@ -66,6 +74,10 @@ spec:
               value: {{ .Values.postingProfile.ppvAccount | quote }}
             - name: POSTING_ACCOUNT_VENDOR_CONTROL
               value: {{ .Values.postingProfile.vendorControlAccount | quote }}
+          {{- if .Values.serviceIdentity.signingKeySecret }}
+          volumeMounts:
+            - { name: service-identity, mountPath: /var/run/passage/service-identity, readOnly: true }
+          {{- end }}
           ports:
             - { name: http, containerPort: 8080 }
             - { name: admin, containerPort: 9090 }

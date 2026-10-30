@@ -376,7 +376,7 @@ type reverseFails struct {
 	dates *[]time.Time
 }
 
-func (r reverseFails) Reverse(_ context.Context, _, _ string, postingDate time.Time) error {
+func (r reverseFails) Reverse(_ context.Context, _, _, _ string, postingDate time.Time) error {
 	*r.dates = append(*r.dates, postingDate)
 	return r.err
 }
