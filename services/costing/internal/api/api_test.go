@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -56,16 +55,16 @@ func server() (http.Handler, *fakeStore) {
 	return r, fs
 }
 
-var bodyLegalEntity = regexp.MustCompile(`(?i)legalEntityId"?[=:]\s*"?([0-9a-f-]{36})`)
+const testLE = repLE
+
+func scopedTo(le string) map[string]string { return map[string]string{"X-Passage-Legal-Entity": le} }
 
 func call(h http.Handler, method, path, body, duties string, headers map[string]string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Passage-Tenant", testTenant)
 	req.Header.Set("X-Passage-Duties", duties)
-	if m := bodyLegalEntity.FindStringSubmatch(path + body); m != nil {
-		req.Header.Set("X-Passage-Legal-Entity", m[1])
-	}
+	req.Header.Set("X-Passage-Legal-Entity", testLE)
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
@@ -161,7 +160,7 @@ func TestPPV_AC204(t *testing.T) {
 
 func TestCreateVersion_RequiresIdempotencyKeyAndScope(t *testing.T) {
 	h, _ := server()
-	le := ids.New()
+	le := testLE
 	body := `{"legalEntityId":"` + le + `","code":"STD-2026","type":"STANDARD","currency":"EUR","effectiveFrom":"2026-01-01"}`
 	rec := call(h, http.MethodPost, "/v1/costing/versions", body, allDuties, nil)
 	if rec.Code != http.StatusBadRequest {
@@ -241,7 +240,7 @@ func TestCreateVersion_ReplayIsNotCountedAsCreated(t *testing.T) {
 	a := New(fs)
 	r := httpx.NewRouter()
 	a.Register(r)
-	body := `{"legalEntityId":"` + ids.New() + `","code":"STD-2026","type":"STANDARD","currency":"EUR","effectiveFrom":"2026-01-01"}`
+	body := `{"legalEntityId":"` + testLE + `","code":"STD-2026","type":"STANDARD","currency":"EUR","effectiveFrom":"2026-01-01"}`
 	for i := 0; i < 2; i++ {
 		if rec := call(r, http.MethodPost, "/v1/costing/versions", body, allDuties, map[string]string{"Idempotency-Key": "same"}); rec.Code != http.StatusCreated {
 			t.Fatalf("call %d status %d: %s", i, rec.Code, rec.Body.String())
@@ -254,7 +253,7 @@ func TestCreateVersion_ReplayIsNotCountedAsCreated(t *testing.T) {
 
 func TestCreateVersion_RefusesCallerWithoutLegalEntityScope(t *testing.T) {
 	h, fs := server()
-	body := `{"legalEntityId":"` + ids.New() + `","code":"STD-2026","type":"STANDARD","currency":"EUR","effectiveFrom":"2026-01-01"}`
+	body := `{"legalEntityId":"` + testLE + `","code":"STD-2026","type":"STANDARD","currency":"EUR","effectiveFrom":"2026-01-01"}`
 	rec := call(h, http.MethodPost, "/v1/costing/versions", body, allDuties, map[string]string{"Idempotency-Key": "k-noscope", "X-Passage-Legal-Entity": ""})
 	if rec.Code != http.StatusForbidden || len(fs.versions) != 0 {
 		t.Fatalf("status %d versions %d, want 403 and nothing stored: %s", rec.Code, len(fs.versions), rec.Body)
@@ -263,7 +262,7 @@ func TestCreateVersion_RefusesCallerWithoutLegalEntityScope(t *testing.T) {
 
 func TestListAgingBucketSets_RefusesCallerWithoutLegalEntityScope(t *testing.T) {
 	h, _ := server()
-	rec := call(h, http.MethodGet, "/v1/costing/aging/bucket-sets", "", allDuties, nil)
+	rec := call(h, http.MethodGet, "/v1/costing/aging/bucket-sets", "", allDuties, scopedTo(""))
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status %d, want 403: %s", rec.Code, rec.Body)
 	}

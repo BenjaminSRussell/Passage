@@ -56,6 +56,8 @@ func canonicalID(raw string) (string, error) {
 	return id.String(), nil
 }
 
+// fullScope guards party merge, a tenant-level operation: parties are shared
+// across legal entities, so only a caller with no legal-entity claim may merge.
 func fullScope(ctx context.Context) (tenant.Principal, error) {
 	p, ok := tenant.FromContext(ctx)
 	if !ok {

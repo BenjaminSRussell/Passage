@@ -91,7 +91,7 @@ func validMemberKinds(kinds []string) bool {
 }
 
 func (a *API) createTeamType(w http.ResponseWriter, r *http.Request) {
-	if !validTenant(w, r) || refuseScopedCaller(w, r, "create team types") {
+	if !validTenant(w, r) || rejectScopedCaller(w, r, "create team types") {
 		return
 	}
 	idemKey, keyOK := idempotencyKeyOf(w, r)
@@ -190,7 +190,7 @@ func parseDate(value string) (time.Time, bool) {
 }
 
 func (a *API) createTeam(w http.ResponseWriter, r *http.Request) {
-	if !validTenant(w, r) || refuseScopedCaller(w, r, "create teams") {
+	if !validTenant(w, r) || rejectScopedCaller(w, r, "create teams") {
 		return
 	}
 	idemKey, keyOK := idempotencyKeyOf(w, r)
@@ -328,7 +328,7 @@ func (a *API) getTeam(w http.ResponseWriter, r *http.Request, id string) {
 }
 
 func (a *API) updateTeam(w http.ResponseWriter, r *http.Request, id string) {
-	if refuseScopedCaller(w, r, "update teams") {
+	if rejectScopedCaller(w, r, "update teams") {
 		return
 	}
 	var req updateTeamRequest
@@ -391,7 +391,7 @@ func teamMemberRowID(w http.ResponseWriter, r *http.Request) (string, bool) {
 }
 
 func (a *API) endTeamMember(w http.ResponseWriter, r *http.Request, teamID string) {
-	if refuseScopedCaller(w, r, "end team members") {
+	if rejectScopedCaller(w, r, "end team members") {
 		return
 	}
 	memberRowID, ok := teamMemberRowID(w, r)
@@ -425,7 +425,7 @@ func (a *API) endTeamMember(w http.ResponseWriter, r *http.Request, teamID strin
 }
 
 func (a *API) removeTeamMember(w http.ResponseWriter, r *http.Request, teamID string) {
-	if refuseScopedCaller(w, r, "remove team members") {
+	if rejectScopedCaller(w, r, "remove team members") {
 		return
 	}
 	memberRowID, ok := teamMemberRowID(w, r)
@@ -442,7 +442,7 @@ func (a *API) removeTeamMember(w http.ResponseWriter, r *http.Request, teamID st
 }
 
 func (a *API) addTeamMember(w http.ResponseWriter, r *http.Request, teamID string) {
-	if refuseScopedCaller(w, r, "add team members") {
+	if rejectScopedCaller(w, r, "add team members") {
 		return
 	}
 	idemKey, keyOK := idempotencyKeyOf(w, r)

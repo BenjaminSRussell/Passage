@@ -215,7 +215,7 @@ func TestAdditions_FinancialRulesAndList(t *testing.T) {
 func TestRuns_ProposePostIfMatchAndDuties(t *testing.T) {
 	f := newFake()
 	h := server(f)
-	le := ids.New()
+	le := testLE
 	body := `{"legalEntityId":"` + le + `","bookCode":"IFRS","period":"2026-03"}`
 	if rec := call(h, http.MethodPost, "/v1/assets/depreciation-runs", body, "AssetView,AssetPostJournal", true); rec.Code != http.StatusForbidden {
 		t.Fatalf("without AssetDepreciate status = %d", rec.Code)

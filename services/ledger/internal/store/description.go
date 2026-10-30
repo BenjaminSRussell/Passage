@@ -14,6 +14,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/money"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/ledger/internal/domain"
 )
 
@@ -107,6 +108,16 @@ func (s *Postgres) GetDescriptionTemplate(ctx context.Context, id string) (Descr
 	return out, err
 }
 
+// mayWriteDescription is the fail-closed write rule: a legal-entity template
+// needs its entity inside the caller's scope; a tenant template is tenant-level
+// reference data and only a caller with no legal-entity claim may write it.
+func mayWriteDescription(p tenant.Principal, in DescriptionTemplate) bool {
+	if in.Scope == ScopeTenant {
+		return p.LegalEntityID == ""
+	}
+	return in.LegalEntityID != nil && tenant.InLegalEntityScope(p, *in.LegalEntityID)
+}
+
 // PutDescriptionTemplate creates or replaces a template by id; created reports
 // whether the id is new. A second template for the same scope, legal entity,
 // source type and language is refused with 409
@@ -118,7 +129,7 @@ func (s *Postgres) PutDescriptionTemplate(ctx context.Context, id string, in Des
 	if err != nil {
 		return DescriptionTemplate{}, false, err
 	}
-	if p.LegalEntityID != "" && (in.Scope != ScopeLegalEntity || in.LegalEntityID == nil || *in.LegalEntityID != p.LegalEntityID) {
+	if !mayWriteDescription(p, in) {
 		return DescriptionTemplate{}, false, outOfScope()
 	}
 	if in.FieldBindings == nil {

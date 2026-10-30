@@ -291,3 +291,16 @@ func TestDeleteCurrencyRounding_AuthorizationAndStoreFailures(t *testing.T) {
 		t.Fatalf("store failure: %d %s", rec.Code, rec.Body)
 	}
 }
+
+func TestRoundCurrency_CallerWithNoLegalEntityScope(t *testing.T) {
+	f := &fakeStore{}
+	r, _ := newRouter(f)
+	rec := do(r, http.MethodGet, "/v1/org/currencies/CHF/round?amount=1&legalEntityId="+entityA, "", "org.read", true)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "AUTH-0003") || f.resolveArgs != [3]string{} {
+		t.Fatalf("named entity without scope: %d %s", rec.Code, rec.Body)
+	}
+	rec = do(r, http.MethodGet, "/v1/org/currencies/CHF/round?amount=1", "", "org.read", true)
+	if rec.Code != http.StatusOK || f.resolveArgs != [3]string{"CHF", "general", ""} {
+		t.Fatalf("tenant-level rule without scope: %d %s resolved %v", rec.Code, rec.Body, f.resolveArgs)
+	}
+}

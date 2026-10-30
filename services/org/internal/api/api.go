@@ -252,8 +252,7 @@ func (a *API) createLegalEntity(w http.ResponseWriter, r *http.Request) {
 	if !keyOK {
 		return
 	}
-	if p, _ := tenant.FromContext(r.Context()); p.LegalEntityID != "" {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "a legal-entity-scoped caller cannot create legal entities"))
+	if rejectScopedCaller(w, r, "create legal entities") {
 		return
 	}
 	var req createLegalEntityRequest
@@ -442,8 +441,7 @@ func (a *API) patchReference(kind store.ReferenceKind) http.HandlerFunc {
 		if !validTenant(w, r) {
 			return
 		}
-		if p, _ := tenant.FromContext(r.Context()); p.LegalEntityID != "" {
-			httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "a legal-entity-scoped caller cannot change reference status"))
+		if rejectScopedCaller(w, r, "change reference status") {
 			return
 		}
 		var req referenceStatusRequest
