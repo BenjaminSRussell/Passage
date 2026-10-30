@@ -33,8 +33,10 @@ export interface QuarantinedRecord {
   status: "OPEN" | "RELEASED";
   party?: string;
   account?: string;
+  /** Dimension combination of a quarantined GL balance. */
+  dimensions?: string;
   currency?: string;
-  /** Decimal string as extracted (the cost amount for a project line). */
+  /** Decimal string as extracted (the cost amount for a project line, the balance for a GL balance). */
   amount: string;
   released?: OpenItemRecord;
   releasedBy?: string;
@@ -54,6 +56,8 @@ export interface PackRun {
   recordsQuarantined: number;
   alreadyPresent: number;
   message?: string;
+  /** The open_items run a gl_balances run reconciled its control accounts with (BR-49.2). */
+  openItemsRunId?: string;
   /** Bumped by every release; a release sends the version the user saw. */
   version: number;
   createdAt: string;
@@ -62,6 +66,8 @@ export interface PackRun {
 export interface PackRunDetail extends PackRun {
   controlTotals: ControlTotal[];
   quarantined: QuarantinedRecord[];
+  /** MIG-1506 text for every control account whose open items differ from the GL balance. */
+  mismatchMessages?: string[];
 }
 
 export interface OpenItemRecord {
@@ -81,6 +87,29 @@ export interface PackRunRequest {
   quarantineMaxPct?: string;
   parties: string[];
   records: OpenItemRecord[];
+}
+
+/** One legacy GL balance at (account, dimension combination, currency). Balance is signed: debit positive, credit negative. */
+export interface GLBalanceRecord {
+  legacyId: string;
+  account: string;
+  dimensions?: string;
+  currency: string;
+  /** Decimal string; never a float. */
+  balance: string;
+}
+
+export interface GLRunRequest {
+  sourceSystem: SourceSystem;
+  sourceCompany: string;
+  cutoffTs: string;
+  freezeTs: string;
+  quarantineMaxPct?: string;
+  /** The chart of accounts the balances are checked against. */
+  accounts: string[];
+  /** An open_items run of the same company to reconcile the control accounts with (BR-49.2). */
+  openItemsRunId?: string;
+  records: GLBalanceRecord[];
 }
 
 /** A correction to a quarantined open item (FR-49.11). Blank fields keep the extracted value. */
@@ -370,6 +399,11 @@ export function getRun(runId: string, signal?: AbortSignal): Promise<PackRunDeta
 /** POST /migration/packs/{pack}/runs. */
 export function startPackRun(pack: Pack, body: PackRunRequest, key: string = newKey()): Promise<PackRunDetail> {
   return post(`/migration/packs/${encodeURIComponent(pack)}/runs`, body, key);
+}
+
+/** POST /migration/packs/gl_balances/runs: GL opening balances (FR-49.1, BR-49.2). */
+export function startGLRun(body: GLRunRequest, key: string = newKey()): Promise<PackRunDetail> {
+  return post("/migration/packs/gl_balances/runs", body, key);
 }
 
 /** POST /migration/packs/project_wip/runs: project beginning balances (FR-49.12). */
