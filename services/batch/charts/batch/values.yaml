@@ -10,11 +10,13 @@ notify:
   secretName: batch-notify
   mountPath: /var/run/secrets/notify
   fsGroup: 65532
-  smtp: { enabled: false, from: "" }
+  reloader: false
+  smtp: { enabled: false, from: "", tls: starttls }
   webhook: { enabled: false, url: "" }
   externalSecret:
     enabled: true
     storeName: passage
-    pathPrefix: passage/dev/batch/notify
+    environment: ""
+    pathPrefix: passage/{env}/batch/notify
     refreshInterval: 1h
 serviceMonitor: { enabled: false }

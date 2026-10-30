@@ -3,18 +3,25 @@ package notifyout
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime"
 	"net"
 	"net/http"
+	"net/mail"
 	"net/smtp"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
 )
 
-const webhookTimeout = 10 * time.Second
+const (
+	webhookTimeout = 10 * time.Second
+	smtpTimeout    = 30 * time.Second
+)
 
 type Message struct {
 	To      string
@@ -26,27 +33,119 @@ type Sender interface {
 	Send(ctx context.Context, msg Message) error
 }
 
-type SMTPSender struct{ cfg SMTPConfig }
+type SMTPSender struct {
+	cfg       SMTPConfig
+	timeout   time.Duration
+	tlsConfig *tls.Config
+}
 
-func NewSMTPSender(cfg SMTPConfig) *SMTPSender { return &SMTPSender{cfg: cfg} }
+func NewSMTPSender(cfg SMTPConfig) *SMTPSender {
+	return &SMTPSender{cfg: cfg, timeout: smtpTimeout}
+}
+
+func parseSingleAddress(field, value string) (string, error) {
+	if strings.ContainsAny(value, "\r\n") {
+		return "", fmt.Errorf("smtp %s contains a line break", field)
+	}
+	addr, err := mail.ParseAddress(value)
+	if err != nil {
+		return "", fmt.Errorf("smtp %s is not a single valid address", field)
+	}
+	return addr.Address, nil
+}
 
 func (s *SMTPSender) Send(ctx context.Context, msg Message) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	for _, field := range []string{msg.To, msg.Subject, s.cfg.From} {
-		if strings.ContainsAny(field, "\r\n") {
-			return errors.New("smtp header value contains a line break")
-		}
+	if strings.ContainsAny(msg.Subject, "\r\n") {
+		return errors.New("smtp subject contains a line break")
 	}
-	addr := net.JoinHostPort(s.cfg.Host, strconv.Itoa(s.cfg.Port))
-	auth := smtp.PlainAuth("", s.cfg.User, s.cfg.Password, s.cfg.Host)
-	raw := "From: " + s.cfg.From + "\r\nTo: " + msg.To + "\r\nSubject: " + msg.Subject +
+	to, err := parseSingleAddress("to", msg.To)
+	if err != nil {
+		return err
+	}
+	from, err := parseSingleAddress("from", s.cfg.From)
+	if err != nil {
+		return err
+	}
+	raw := "From: " + from + "\r\nTo: " + to + "\r\nSubject: " + mime.QEncoding.Encode("utf-8", msg.Subject) +
 		"\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n" + msg.Body
-	if err := smtp.SendMail(addr, auth, s.cfg.From, []string{msg.To}, []byte(raw)); err != nil {
+	if err := s.deliver(ctx, from, to, []byte(raw)); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return fmt.Errorf("smtp send: %w", ctxErr)
+		}
 		return fmt.Errorf("smtp send: %w", err)
 	}
 	return nil
+}
+
+func (s *SMTPSender) clientTLSConfig() *tls.Config {
+	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
+	if s.tlsConfig != nil {
+		cfg = s.tlsConfig.Clone()
+	}
+	cfg.ServerName = s.cfg.Host
+	return cfg
+}
+
+func (s *SMTPSender) dial(ctx context.Context, addr string) (net.Conn, error) {
+	dialer := &net.Dialer{Timeout: s.timeout}
+	if s.cfg.TLS == TLSImplicit {
+		return (&tls.Dialer{NetDialer: dialer, Config: s.clientTLSConfig()}).DialContext(ctx, "tcp", addr)
+	}
+	return dialer.DialContext(ctx, "tcp", addr)
+}
+
+func (s *SMTPSender) deliver(ctx context.Context, from, to string, raw []byte) error {
+	conn, err := s.dial(ctx, net.JoinHostPort(s.cfg.Host, strconv.Itoa(s.cfg.Port)))
+	if err != nil {
+		return err
+	}
+	stop := context.AfterFunc(ctx, func() { conn.Close() })
+	defer stop()
+	deadline := time.Now().Add(s.timeout)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+	if err := conn.SetDeadline(deadline); err != nil {
+		conn.Close()
+		return err
+	}
+	client, err := smtp.NewClient(conn, s.cfg.Host)
+	if err != nil {
+		conn.Close()
+		return err
+	}
+	defer client.Close()
+	if s.cfg.TLS == TLSStartTLS || s.cfg.TLS == "" {
+		if ok, _ := client.Extension("STARTTLS"); !ok {
+			return errors.New("server does not advertise STARTTLS")
+		}
+		if err := client.StartTLS(s.clientTLSConfig()); err != nil {
+			return err
+		}
+	}
+	if err := client.Auth(smtp.PlainAuth("", s.cfg.User, s.cfg.Password, s.cfg.Host)); err != nil {
+		return err
+	}
+	if err := client.Mail(from); err != nil {
+		return err
+	}
+	if err := client.Rcpt(to); err != nil {
+		return err
+	}
+	w, err := client.Data()
+	if err != nil {
+		return err
+	}
+	if _, err := w.Write(raw); err != nil {
+		return err
+	}
+	if err := w.Close(); err != nil {
+		return err
+	}
+	return client.Quit()
 }
 
 type WebhookSender struct {
@@ -55,10 +154,25 @@ type WebhookSender struct {
 }
 
 func NewWebhookSender(cfg WebhookConfig, client *http.Client) *WebhookSender {
-	if client == nil {
-		client = &http.Client{Timeout: webhookTimeout}
+	c := &http.Client{Timeout: webhookTimeout}
+	if client != nil {
+		copied := *client
+		c = &copied
 	}
-	return &WebhookSender{cfg: cfg, client: client}
+	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &WebhookSender{cfg: cfg, client: c}
+}
+
+func redactURLError(err error) error {
+	var ue *url.Error
+	if !errors.As(err, &ue) {
+		return err
+	}
+	redacted := &url.Error{Op: ue.Op, Err: ue.Err}
+	if u, perr := url.Parse(ue.URL); perr == nil && u.Host != "" {
+		redacted.URL = u.Scheme + "://" + u.Host
+	}
+	return redacted
 }
 
 func (w *WebhookSender) Send(ctx context.Context, msg Message) error {
@@ -74,7 +188,7 @@ func (w *WebhookSender) Send(ctx context.Context, msg Message) error {
 	req.Header.Set("Authorization", "Bearer "+w.cfg.Token)
 	resp, err := w.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("webhook send: %w", err)
+		return fmt.Errorf("webhook send: %w", redactURLError(err))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {

@@ -3,6 +3,8 @@ package notifyout
 import (
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -12,6 +14,10 @@ import (
 const (
 	AdapterSMTP = "smtp"
 	AdapterHTTP = "http"
+
+	TLSStartTLS = "starttls"
+	TLSImplicit = "implicit"
+	TLSNone     = "none"
 )
 
 type SMTPConfig struct {
@@ -20,6 +26,7 @@ type SMTPConfig struct {
 	User     string
 	Password string
 	From     string
+	TLS      string
 }
 
 type WebhookConfig struct {
@@ -49,32 +56,33 @@ type secretSource struct {
 }
 
 func (s secretSource) get(file, envKey string) (string, error) {
-	if s.dir != "" {
-		raw, err := os.ReadFile(filepath.Join(s.dir, file))
-		switch {
-		case err == nil:
-			if v := strings.TrimSpace(string(raw)); v != "" {
-				return v, nil
-			}
-		case !errors.Is(err, os.ErrNotExist):
-			return "", fmt.Errorf("read secret file %s: %w", file, err)
-		}
+	if s.dir == "" {
+		return strings.TrimSpace(s.getenv(envKey)), nil
 	}
-	return strings.TrimSpace(s.getenv(envKey)), nil
+	raw, err := os.ReadFile(filepath.Join(s.dir, file))
+	switch {
+	case err == nil:
+		return strings.TrimSpace(string(raw)), nil
+	case errors.Is(err, os.ErrNotExist):
+		return "", nil
+	default:
+		return "", fmt.Errorf("read secret file %s: %w", file, err)
+	}
 }
 
 func Load(getenv func(string) string) (Config, error) {
 	src := secretSource{dir: getenv("NOTIFY_SECRETS_DIR"), getenv: getenv}
+	allowInsecure := getenv("NOTIFY_ALLOW_INSECURE") == "true"
 	var cfg Config
 	if getenv("NOTIFY_SMTP_ENABLED") == "true" {
-		smtp, err := loadSMTP(src)
+		smtp, err := loadSMTP(src, allowInsecure)
 		if err != nil {
 			return Config{}, err
 		}
 		cfg.SMTP = smtp
 	}
 	if getenv("NOTIFY_WEBHOOK_ENABLED") == "true" {
-		hook, err := loadWebhook(src)
+		hook, err := loadWebhook(src, allowInsecure)
 		if err != nil {
 			return Config{}, err
 		}
@@ -83,7 +91,7 @@ func Load(getenv func(string) string) (Config, error) {
 	return cfg, nil
 }
 
-func loadSMTP(src secretSource) (*SMTPConfig, error) {
+func loadSMTP(src secretSource, allowInsecure bool) (*SMTPConfig, error) {
 	values := map[string]string{}
 	for _, f := range []struct{ file, env string }{
 		{"smtp-host", "NOTIFY_SMTP_HOST"},
@@ -114,24 +122,51 @@ func loadSMTP(src secretSource) (*SMTPConfig, error) {
 	if err != nil || port < 1 || port > 65535 {
 		return nil, errors.New("smtp notify adapter enabled but smtp-port is not a valid port")
 	}
-	return &SMTPConfig{Host: values["smtp-host"], Port: port, User: values["smtp-user"], Password: values["smtp-password"], From: from}, nil
+	tlsMode := strings.ToLower(strings.TrimSpace(src.getenv("NOTIFY_SMTP_TLS")))
+	switch tlsMode {
+	case "":
+		tlsMode = TLSStartTLS
+	case TLSStartTLS, TLSImplicit:
+	case TLSNone:
+		if !allowInsecure && !isLoopback(values["smtp-host"]) {
+			return nil, errors.New("smtp notify adapter tls mode none is only allowed for a loopback host or NOTIFY_ALLOW_INSECURE=true")
+		}
+	default:
+		return nil, errors.New("smtp notify adapter NOTIFY_SMTP_TLS must be starttls, implicit or none")
+	}
+	return &SMTPConfig{Host: values["smtp-host"], Port: port, User: values["smtp-user"], Password: values["smtp-password"], From: from, TLS: tlsMode}, nil
 }
 
-func loadWebhook(src secretSource) (*WebhookConfig, error) {
+func loadWebhook(src secretSource, allowInsecure bool) (*WebhookConfig, error) {
 	token, err := src.get("webhook-token", "NOTIFY_WEBHOOK_TOKEN")
 	if err != nil {
 		return nil, err
 	}
-	url := strings.TrimSpace(src.getenv("NOTIFY_WEBHOOK_URL"))
+	rawURL := strings.TrimSpace(src.getenv("NOTIFY_WEBHOOK_URL"))
 	var missing []string
 	if token == "" {
 		missing = append(missing, "webhook-token")
 	}
-	if url == "" {
+	if rawURL == "" {
 		missing = append(missing, "NOTIFY_WEBHOOK_URL")
 	}
 	if len(missing) > 0 {
 		return nil, fmt.Errorf("http notify adapter enabled but missing %s", strings.Join(missing, ", "))
 	}
-	return &WebhookConfig{URL: url, Token: token}, nil
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Host == "" {
+		return nil, errors.New("http notify adapter NOTIFY_WEBHOOK_URL is not a valid absolute url")
+	}
+	if parsed.Scheme != "https" && !(allowInsecure && parsed.Scheme == "http") {
+		return nil, errors.New("http notify adapter NOTIFY_WEBHOOK_URL must use https (NOTIFY_ALLOW_INSECURE=true permits http for dev)")
+	}
+	return &WebhookConfig{URL: rawURL, Token: token}, nil
+}
+
+func isLoopback(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

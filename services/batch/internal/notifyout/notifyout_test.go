@@ -3,7 +3,10 @@ package notifyout
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func env(m map[string]string) func(string) string {
@@ -47,22 +51,67 @@ func TestLoadSMTPFromMountedFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if *cfg.SMTP != (SMTPConfig{Host: "mail.example.test", Port: 587, User: "u", Password: "p", From: "noreply@example.test"}) {
+	if *cfg.SMTP != (SMTPConfig{Host: "mail.example.test", Port: 587, User: "u", Password: "p", From: "noreply@example.test", TLS: TLSStartTLS}) {
 		t.Fatalf("smtp=%+v", *cfg.SMTP)
 	}
 }
 
-func TestLoadFileWinsOverEnvAndEnvFallsBack(t *testing.T) {
-	dir := writeSecrets(t, map[string]string{"smtp-host": "from-file"})
-	cfg, err := Load(env(map[string]string{
+func TestLoadSecretsDirIgnoresEnvAndTreatsEmptyFileAsMissing(t *testing.T) {
+	dir := writeSecrets(t, map[string]string{"smtp-host": "from-file", "smtp-port": "25", "smtp-user": "u", "smtp-password": " \n"})
+	_, err := Load(env(map[string]string{
 		"NOTIFY_SMTP_ENABLED": "true", "NOTIFY_SECRETS_DIR": dir, "NOTIFY_SMTP_FROM": "a@b.test",
-		"NOTIFY_SMTP_HOST": "from-env", "NOTIFY_SMTP_PORT": "25", "NOTIFY_SMTP_USER": "u", "NOTIFY_SMTP_PASSWORD": "p",
+		"NOTIFY_SMTP_PASSWORD": "from-env",
 	}))
-	if err != nil {
-		t.Fatal(err)
+	if err == nil || !strings.Contains(err.Error(), "smtp-password") {
+		t.Fatalf("err=%v", err)
 	}
-	if cfg.SMTP.Host != "from-file" || cfg.SMTP.Port != 25 {
-		t.Fatalf("smtp=%+v", *cfg.SMTP)
+}
+
+func TestLoadEnvUsedWhenNoSecretsDir(t *testing.T) {
+	cfg, err := Load(env(map[string]string{
+		"NOTIFY_SMTP_ENABLED": "true", "NOTIFY_SMTP_FROM": "a@b.test", "NOTIFY_SMTP_HOST": "h", "NOTIFY_SMTP_PORT": "25",
+		"NOTIFY_SMTP_USER": "u", "NOTIFY_SMTP_PASSWORD": "p",
+	}))
+	if err != nil || cfg.SMTP.Host != "h" || cfg.SMTP.Port != 25 || cfg.SMTP.TLS != TLSStartTLS {
+		t.Fatalf("cfg=%+v err=%v", cfg, err)
+	}
+}
+
+func smtpEnv(extra map[string]string) func(string) string {
+	m := map[string]string{
+		"NOTIFY_SMTP_ENABLED": "true", "NOTIFY_SMTP_FROM": "a@b.test", "NOTIFY_SMTP_HOST": "mail.example.test",
+		"NOTIFY_SMTP_PORT": "25", "NOTIFY_SMTP_USER": "u", "NOTIFY_SMTP_PASSWORD": "p",
+	}
+	for k, v := range extra {
+		m[k] = v
+	}
+	return env(m)
+}
+
+func TestLoadSMTPTLSModes(t *testing.T) {
+	cases := []struct {
+		name    string
+		extra   map[string]string
+		wantTLS string
+		wantErr bool
+	}{
+		{"implicit", map[string]string{"NOTIFY_SMTP_TLS": "implicit"}, TLSImplicit, false},
+		{"bogus", map[string]string{"NOTIFY_SMTP_TLS": "ssl"}, "", true},
+		{"none remote refused", map[string]string{"NOTIFY_SMTP_TLS": "none"}, "", true},
+		{"none remote with dev flag", map[string]string{"NOTIFY_SMTP_TLS": "none", "NOTIFY_ALLOW_INSECURE": "true"}, TLSNone, false},
+		{"none loopback", map[string]string{"NOTIFY_SMTP_TLS": "none", "NOTIFY_SMTP_HOST": "127.0.0.1"}, TLSNone, false},
+		{"none localhost", map[string]string{"NOTIFY_SMTP_TLS": "none", "NOTIFY_SMTP_HOST": "localhost"}, TLSNone, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := Load(smtpEnv(tc.extra))
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err=%v", err)
+			}
+			if err == nil && cfg.SMTP.TLS != tc.wantTLS {
+				t.Fatalf("tls=%q", cfg.SMTP.TLS)
+			}
+		})
 	}
 }
 
@@ -99,14 +148,14 @@ func TestLoadFailsOnUnreadableSecretPath(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(dir, "webhook-token"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Load(env(map[string]string{"NOTIFY_WEBHOOK_ENABLED": "true", "NOTIFY_SECRETS_DIR": dir, "NOTIFY_WEBHOOK_URL": "http://x"}))
+	_, err := Load(env(map[string]string{"NOTIFY_WEBHOOK_ENABLED": "true", "NOTIFY_SECRETS_DIR": dir, "NOTIFY_WEBHOOK_URL": "https://x.example.test/hook"}))
 	if err == nil {
 		t.Fatal("expected read error")
 	}
 }
 
 func TestLoadWebhookMissingToken(t *testing.T) {
-	_, err := Load(env(map[string]string{"NOTIFY_WEBHOOK_ENABLED": "true", "NOTIFY_WEBHOOK_URL": "http://x"}))
+	_, err := Load(env(map[string]string{"NOTIFY_WEBHOOK_ENABLED": "true", "NOTIFY_WEBHOOK_URL": "https://x.example.test/hook"}))
 	if err == nil || !strings.Contains(err.Error(), "webhook-token") {
 		t.Fatalf("err=%v", err)
 	}
@@ -114,9 +163,37 @@ func TestLoadWebhookMissingToken(t *testing.T) {
 
 func TestLoadWebhookFromFile(t *testing.T) {
 	dir := writeSecrets(t, map[string]string{"webhook-token": "tok\n"})
-	cfg, err := Load(env(map[string]string{"NOTIFY_WEBHOOK_ENABLED": "true", "NOTIFY_SECRETS_DIR": dir, "NOTIFY_WEBHOOK_URL": "http://x"}))
+	cfg, err := Load(env(map[string]string{"NOTIFY_WEBHOOK_ENABLED": "true", "NOTIFY_SECRETS_DIR": dir, "NOTIFY_WEBHOOK_URL": "https://x.example.test/hook"}))
 	if err != nil || cfg.Webhook.Token != "tok" || len(cfg.Enabled()) != 1 || cfg.Enabled()[0] != AdapterHTTP {
 		t.Fatalf("cfg=%+v err=%v", cfg, err)
+	}
+}
+
+func TestLoadWebhookURLValidation(t *testing.T) {
+	dir := writeSecrets(t, map[string]string{"webhook-token": "tok"})
+	cases := []struct {
+		name    string
+		url     string
+		insec   string
+		wantErr bool
+	}{
+		{"https ok", "https://x.example.test/hook", "", false},
+		{"http refused", "http://x.example.test/hook", "", true},
+		{"http dev flag", "http://x.example.test/hook", "true", false},
+		{"ftp refused even with flag", "ftp://x.example.test", "true", true},
+		{"no host", "https:///hook", "", true},
+		{"relative", "/hook", "", true},
+		{"garbage", "ht!tp://%zz", "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(env(map[string]string{
+				"NOTIFY_WEBHOOK_ENABLED": "true", "NOTIFY_SECRETS_DIR": dir, "NOTIFY_WEBHOOK_URL": tc.url, "NOTIFY_ALLOW_INSECURE": tc.insec,
+			}))
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err=%v", err)
+			}
+		})
 	}
 }
 
@@ -150,21 +227,84 @@ func TestWebhookSenderErrorOmitsToken(t *testing.T) {
 	}
 }
 
-type fakeSMTP struct {
-	ln   net.Listener
-	mu   sync.Mutex
-	auth string
-	data string
-	rcpt string
+func TestWebhookSenderTreatsRedirectAsFailureAndDoesNotFollow(t *testing.T) {
+	var followed bool
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		followed = true
+	}))
+	defer target.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	defer srv.Close()
+	original := srv.Client()
+	for name, client := range map[string]*http.Client{"default": nil, "injected": original} {
+		err := NewWebhookSender(WebhookConfig{URL: srv.URL, Token: "tok"}, client).Send(context.Background(), Message{})
+		if err == nil || !strings.Contains(err.Error(), "302") {
+			t.Fatalf("%s: err=%v", name, err)
+		}
+	}
+	if followed {
+		t.Fatal("redirect was followed")
+	}
+	if original.CheckRedirect != nil {
+		t.Fatal("injected client was mutated")
+	}
 }
 
-func startFakeSMTP(t *testing.T) *fakeSMTP {
+func TestWebhookSenderErrorStripsURLPathAndQuery(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	url := srv.URL + "/hook/secret-path?key=secret-query"
+	srv.Close()
+	err := NewWebhookSender(WebhookConfig{URL: url, Token: "t"}, nil).Send(context.Background(), Message{})
+	if err == nil || strings.Contains(err.Error(), "secret-path") || strings.Contains(err.Error(), "secret-query") {
+		t.Fatalf("err=%v", err)
+	}
+	if !strings.Contains(err.Error(), "127.0.0.1") {
+		t.Fatalf("host missing: %v", err)
+	}
+}
+
+type smtpMode int
+
+const (
+	modePlain smtpMode = iota
+	modeStartTLS
+	modeStartTLSNotAdvertised
+	modeImplicitTLS
+	modeHang
+)
+
+type fakeSMTP struct {
+	ln        net.Listener
+	mode      smtpMode
+	tlsConf   *tls.Config
+	mu        sync.Mutex
+	auth      string
+	data      string
+	rcpt      string
+	startedAt int
+}
+
+func testTLS(t *testing.T) (*tls.Config, *x509.CertPool) {
+	t.Helper()
+	srv := httptest.NewTLSServer(http.NotFoundHandler())
+	t.Cleanup(srv.Close)
+	pool := x509.NewCertPool()
+	pool.AddCert(srv.Certificate())
+	return &tls.Config{Certificates: srv.TLS.Certificates}, pool
+}
+
+func startFakeSMTP(t *testing.T, mode smtpMode, tlsConf *tls.Config) *fakeSMTP {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &fakeSMTP{ln: ln}
+	if mode == modeImplicitTLS {
+		ln = tls.NewListener(ln, tlsConf)
+	}
+	f := &fakeSMTP{ln: ln, mode: mode, tlsConf: tlsConf}
 	t.Cleanup(func() { ln.Close() })
 	go func() {
 		conn, err := ln.Accept()
@@ -172,6 +312,10 @@ func startFakeSMTP(t *testing.T) *fakeSMTP {
 			return
 		}
 		defer conn.Close()
+		if mode == modeHang {
+			time.Sleep(5 * time.Second)
+			return
+		}
 		f.serve(conn)
 	}()
 	return f
@@ -204,7 +348,19 @@ func (f *fakeSMTP) serve(conn net.Conn) {
 		switch {
 		case strings.HasPrefix(line, "EHLO"), strings.HasPrefix(line, "HELO"):
 			say("250-fake")
+			if f.mode == modeStartTLS && f.startedAt == 0 {
+				say("250-STARTTLS")
+			}
 			say("250 AUTH PLAIN")
+		case line == "STARTTLS":
+			say("220 go ahead")
+			tc := tls.Server(conn, f.tlsConf)
+			if err := tc.Handshake(); err != nil {
+				return
+			}
+			conn = tc
+			r = bufio.NewReader(tc)
+			f.startedAt = 1
 		case strings.HasPrefix(line, "AUTH PLAIN "):
 			raw, _ := base64.StdEncoding.DecodeString(strings.TrimPrefix(line, "AUTH PLAIN "))
 			f.mu.Lock()
@@ -230,12 +386,22 @@ func (f *fakeSMTP) serve(conn net.Conn) {
 	}
 }
 
-func TestSMTPSenderDeliversWithAuth(t *testing.T) {
-	f := startFakeSMTP(t)
+func (f *fakeSMTP) config(tlsMode string) SMTPConfig {
 	host, portStr, _ := net.SplitHostPort(f.ln.Addr().String())
 	port, _ := strconv.Atoi(portStr)
-	sender := NewSMTPSender(SMTPConfig{Host: host, Port: port, User: "u", Password: "p", From: "noreply@example.test"})
-	if err := sender.Send(context.Background(), Message{To: "to@example.test", Subject: "Hello", Body: "World"}); err != nil {
+	return SMTPConfig{Host: host, Port: port, User: "u", Password: "p", From: "noreply@example.test", TLS: tlsMode}
+}
+
+func trustedSender(cfg SMTPConfig, pool *x509.CertPool) *SMTPSender {
+	s := NewSMTPSender(cfg)
+	s.tlsConfig = &tls.Config{RootCAs: pool}
+	return s
+}
+
+func TestSMTPSenderDeliversWithAuthPlain(t *testing.T) {
+	f := startFakeSMTP(t, modePlain, nil)
+	err := NewSMTPSender(f.config(TLSNone)).Send(context.Background(), Message{To: "to@example.test", Subject: "Hello", Body: "World"})
+	if err != nil {
 		t.Fatal(err)
 	}
 	f.mu.Lock()
@@ -248,20 +414,126 @@ func TestSMTPSenderDeliversWithAuth(t *testing.T) {
 	}
 }
 
-func TestSMTPSenderRejectsHeaderInjection(t *testing.T) {
-	sender := NewSMTPSender(SMTPConfig{Host: "127.0.0.1", Port: 1, From: "a@b.test"})
-	err := sender.Send(context.Background(), Message{To: "x@y.test", Subject: "hi\r\nBcc: evil@z.test"})
-	if err == nil || !strings.Contains(err.Error(), "line break") {
-		t.Fatalf("err=%v", err)
+func TestSMTPSenderStartTLSDelivers(t *testing.T) {
+	tlsConf, pool := testTLS(t)
+	f := startFakeSMTP(t, modeStartTLS, tlsConf)
+	if err := trustedSender(f.config(TLSStartTLS), pool).Send(context.Background(), Message{To: "to@example.test", Subject: "s", Body: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.auth != "|u|p" || !strings.Contains(f.data, "b") {
+		t.Fatalf("auth=%q data=%q", f.auth, f.data)
+	}
+}
+
+func TestSMTPSenderRefusesWhenStartTLSNotAdvertised(t *testing.T) {
+	f := startFakeSMTP(t, modeStartTLSNotAdvertised, nil)
+	for _, mode := range []string{TLSStartTLS, ""} {
+		err := NewSMTPSender(f.config(mode)).Send(context.Background(), Message{To: "to@example.test"})
+		if err == nil || !strings.Contains(err.Error(), "STARTTLS") {
+			t.Fatalf("mode=%q err=%v", mode, err)
+		}
+		f = startFakeSMTP(t, modeStartTLSNotAdvertised, nil)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.auth != "" {
+		t.Fatalf("credentials sent in cleartext: %q", f.auth)
+	}
+}
+
+func TestSMTPSenderImplicitTLSDelivers(t *testing.T) {
+	tlsConf, pool := testTLS(t)
+	f := startFakeSMTP(t, modeImplicitTLS, tlsConf)
+	if err := trustedSender(f.config(TLSImplicit), pool).Send(context.Background(), Message{To: "to@example.test", Subject: "s", Body: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.auth != "|u|p" {
+		t.Fatalf("auth=%q", f.auth)
+	}
+}
+
+func TestSMTPSenderImplicitTLSRejectsUntrustedCert(t *testing.T) {
+	tlsConf, _ := testTLS(t)
+	f := startFakeSMTP(t, modeImplicitTLS, tlsConf)
+	if err := NewSMTPSender(f.config(TLSImplicit)).Send(context.Background(), Message{To: "to@example.test"}); err == nil {
+		t.Fatal("expected certificate error")
+	}
+}
+
+func TestSMTPSenderHungServerTimesOut(t *testing.T) {
+	f := startFakeSMTP(t, modeHang, nil)
+	sender := NewSMTPSender(f.config(TLSNone))
+	sender.timeout = 200 * time.Millisecond
+	start := time.Now()
+	err := sender.Send(context.Background(), Message{To: "to@example.test"})
+	if err == nil || time.Since(start) > 3*time.Second {
+		t.Fatalf("err=%v elapsed=%s", err, time.Since(start))
+	}
+}
+
+func TestSMTPSenderHonoursContextCancel(t *testing.T) {
+	f := startFakeSMTP(t, modeHang, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(100*time.Millisecond, cancel)
+	start := time.Now()
+	err := NewSMTPSender(f.config(TLSNone)).Send(ctx, Message{To: "to@example.test"})
+	if !errors.Is(err, context.Canceled) || time.Since(start) > 3*time.Second {
+		t.Fatalf("err=%v elapsed=%s", err, time.Since(start))
+	}
+}
+
+func TestSMTPSenderEncodesNonASCIISubject(t *testing.T) {
+	f := startFakeSMTP(t, modePlain, nil)
+	if err := NewSMTPSender(f.config(TLSNone)).Send(context.Background(), Message{To: "to@example.test", Subject: "Caf\u00e9 approval", Body: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !strings.Contains(f.data, "Subject: =?utf-8?q?Caf=C3=A9_approval?=") {
+		t.Fatalf("data=%q", f.data)
+	}
+}
+
+func TestSMTPSenderRejectsInvalidAddressesAndHeaderInjection(t *testing.T) {
+	cases := []struct {
+		name string
+		from string
+		msg  Message
+	}{
+		{"subject crlf", "a@b.test", Message{To: "x@y.test", Subject: "hi\r\nBcc: evil@z.test"}},
+		{"to crlf", "a@b.test", Message{To: "x@y.test\r\nBcc: evil@z.test"}},
+		{"to lf", "a@b.test", Message{To: "x@y.test\nBcc: evil@z.test"}},
+		{"from crlf", "a@b.test\r\nBcc: evil@z.test", Message{To: "x@y.test"}},
+		{"two recipients", "a@b.test", Message{To: "a@x.test, b@y.test"}},
+		{"two senders", "a@b.test, c@d.test", Message{To: "x@y.test"}},
+		{"not an address", "a@b.test", Message{To: "nobody"}},
+		{"empty from", "", Message{To: "x@y.test"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sender := NewSMTPSender(SMTPConfig{Host: "127.0.0.1", Port: 1, From: tc.from, TLS: TLSNone})
+			if err := sender.Send(context.Background(), tc.msg); err == nil {
+				t.Fatal("expected rejection before dialing")
+			} else if strings.Contains(err.Error(), "connect") || strings.Contains(err.Error(), "refused") {
+				t.Fatalf("reached the network: %v", err)
+			}
+		})
 	}
 }
 
 func TestSMTPSenderConnectionFailure(t *testing.T) {
-	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
 	host, portStr, _ := net.SplitHostPort(ln.Addr().String())
 	ln.Close()
 	port, _ := strconv.Atoi(portStr)
-	err := NewSMTPSender(SMTPConfig{Host: host, Port: port, User: "u", Password: "pw-secret", From: "a@b.test"}).
+	err = NewSMTPSender(SMTPConfig{Host: host, Port: port, User: "u", Password: "pw-secret", From: "a@b.test", TLS: TLSNone}).
 		Send(context.Background(), Message{To: "x@y.test"})
 	if err == nil || strings.Contains(err.Error(), "pw-secret") {
 		t.Fatalf("err=%v", err)

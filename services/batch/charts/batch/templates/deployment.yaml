@@ -1,3 +1,6 @@
+{{- if and .Values.notify.enabled (not .Values.notify.smtp.enabled) (not .Values.notify.webhook.enabled) }}
+{{- fail "notify.enabled requires notify.smtp.enabled or notify.webhook.enabled" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -13,6 +16,10 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: batch
+      {{- if and .Values.notify.enabled .Values.notify.reloader }}
+      annotations:
+        reloader.stakater.com/auto: "true"
+      {{- end }}
     spec:
       securityContext:
         runAsNonRoot: true
@@ -44,14 +51,16 @@ spec:
             {{- if .Values.notify.smtp.enabled }}
             - name: NOTIFY_SMTP_ENABLED
               value: "true"
+            - name: NOTIFY_SMTP_TLS
+              value: {{ .Values.notify.smtp.tls | quote }}
             - name: NOTIFY_SMTP_FROM
-              value: {{ .Values.notify.smtp.from | quote }}
+              value: {{ required "notify.smtp.from is required when notify.smtp.enabled" .Values.notify.smtp.from | quote }}
             {{- end }}
             {{- if .Values.notify.webhook.enabled }}
             - name: NOTIFY_WEBHOOK_ENABLED
               value: "true"
             - name: NOTIFY_WEBHOOK_URL
-              value: {{ .Values.notify.webhook.url | quote }}
+              value: {{ required "notify.webhook.url is required when notify.webhook.enabled" .Values.notify.webhook.url | quote }}
             {{- end }}
             {{- end }}
           {{- if .Values.notify.enabled }}
