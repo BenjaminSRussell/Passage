@@ -252,6 +252,43 @@ export async function listVersions(planCode: string, limit = 50, init?: RequestI
   return body.items;
 }
 
+export const DiffOrder = z.object({
+  number: z.string(),
+  itemId: z.string(),
+  orderType: OrderType,
+  qty: z.string(),
+  orderDate: z.string(),
+  deliveryDate: z.string(),
+  vendorId: z.string().nullish(),
+});
+export type DiffOrder = z.infer<typeof DiffOrder>;
+
+/**
+ * Response of GET /plans/{code}/diff: planned-order differences between two versions (FR-22.14).
+ * The counts cover every order; the lists stop at the request's limit (`truncated`).
+ */
+export const VersionDiff = z.object({
+  from: PlanVersion,
+  to: PlanVersion,
+  identical: z.boolean(),
+  messagesDelta: z.number().int(),
+  addedCount: z.number().int(),
+  removedCount: z.number().int(),
+  changedCount: z.number().int(),
+  truncated: z.boolean(),
+  added: z.array(DiffOrder),
+  removed: z.array(DiffOrder),
+  changed: z.array(z.object({ from: DiffOrder, to: DiffOrder, qtyDelta: z.string() })),
+  unchanged: z.number().int(),
+  qtyDeltaByOrderType: z.record(z.string(), z.string()),
+});
+export type VersionDiff = z.infer<typeof VersionDiff>;
+
+/** Compares version `from` with the later version `to` of a plan, listing at most `limit` orders per list. */
+export async function diffVersions(planCode: string, from: number, to: number, limit = 500, init?: RequestInit): Promise<VersionDiff> {
+  return request(`/plans/${encodeURIComponent(planCode)}/diff?from=${from}&to=${to}&limit=${limit}`, VersionDiff, init);
+}
+
 /** Requests a static plan run. The Idempotency-Key makes retries safe (409 when a run is already in progress). */
 export async function runPlan(planCode: string, idempotencyKey: string, body: RunPlanRequest): Promise<PlanVersion> {
   return request(`/plans/${encodeURIComponent(planCode)}:run`, PlanVersion, {

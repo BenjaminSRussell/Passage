@@ -75,6 +75,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRun)).Post("/v1/planning/plans/{planCode}:run", a.runPlan)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/plans/{planCode}/versions", a.listVersions)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/plans/{planCode}/versions/{number}", a.getVersion)
+	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/plans/{planCode}/diff", a.diffVersions)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/planned-orders", a.listPlannedOrders)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/planning/planned-orders/{id}", a.getPlannedOrder)
 	r.With(authz.RequireDuty(dutyMaintainOrders)).Patch("/v1/planning/planned-orders/{id}", a.patchPlannedOrder)

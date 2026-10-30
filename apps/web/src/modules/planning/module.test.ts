@@ -40,6 +40,7 @@ describe("planning module", () => {
       "/planning/messages",
       "/planning/net-requirements",
       "/planning/runs",
+      "/planning/runs/compare",
       "/planning/runs/new",
       "/planning/forecast",
       "/planning/calculators",

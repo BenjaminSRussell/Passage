@@ -5,6 +5,7 @@ import { CalculatorsPage } from "./calculators";
 import { CoverageGroupPage, CoverageGroupsPage, NewCoverageGroupPage } from "./CoverageGroupsPage";
 import { ForecastPage } from "./ForecastPage";
 import { ItemCoveragePage, ItemCoveragesPage, NewItemCoveragePage } from "./ItemCoveragePage";
+import { PlanDiffPage } from "./PlanDiffPage";
 import { NetRequirementsPage } from "./NetRequirementsPage";
 import { MessagesPage, PlannedOrderPage, PlannedOrdersPage, PlanningHome, PlanRunsPage } from "./pages";
 import { NewQuotaArrangementPage, QuotaArrangementPage, QuotaArrangementsPage } from "./QuotaPages";
@@ -22,6 +23,7 @@ const planning: PassageModule = {
     { path: "/planning/messages", element: createElement(MessagesPage) },
     { path: "/planning/net-requirements", element: createElement(NetRequirementsPage) },
     { path: "/planning/runs", element: createElement(PlanRunsPage) },
+    { path: "/planning/runs/compare", element: createElement(PlanDiffPage) },
     { path: "/planning/runs/new", element: createElement(RunPlanPage) },
     { path: "/planning/forecast", element: createElement(ForecastPage) },
     { path: "/planning/calculators", element: createElement(CalculatorsPage) },
@@ -45,6 +47,7 @@ const planning: PassageModule = {
     { label: "Action messages", to: "/planning/messages", duty: "planning.read" },
     { label: "Net requirements", to: "/planning/net-requirements", duty: "planning.read" },
     { label: "Plan runs", to: "/planning/runs", duty: "planning.read" },
+    { label: "Compare runs", to: "/planning/runs/compare", duty: "planning.read" },
     { label: "Run plan", to: "/planning/runs/new", duty: "planning.run" },
     { label: "Forecast", to: "/planning/forecast", duty: "planning.read" },
     { label: "Calculators", to: "/planning/calculators", duty: "planning.read" },

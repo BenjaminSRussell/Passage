@@ -104,6 +104,46 @@ paths:
               schema: {$ref: '#/components/schemas/PlanVersion'}
         '400': {$ref: '#/components/responses/Problem'}
         '404': {$ref: '#/components/responses/Problem'}
+  /v1/planning/plans/{planCode}/diff:
+    get:
+      operationId: diffVersions
+      summary: Compare the planned orders of two plan versions
+      description: >-
+        Version-to-version diff (FR-22.14). Planned orders match on item, order
+        type and delivery day; orders equal in quantity, order date and vendor
+        pair first and are unchanged, the remaining ones pair in quantity order
+        and are changed, and the leftovers are added (only in `to`) or removed
+        (only in `from`). Deleted orders are left out. `identical` is true when
+        both plan hashes are equal. The counts and quantity deltas cover every
+        order; `added`, `removed` and `changed` list at most `limit` entries
+        each, and `truncated` says when one was cut.
+      x-passage-duty: planning.read
+      parameters:
+        - name: planCode
+          in: path
+          required: true
+          schema: {type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,19}$'}
+        - name: from
+          in: query
+          required: true
+          description: Earlier version number.
+          schema: {type: integer, minimum: 1}
+        - name: to
+          in: query
+          required: true
+          description: Later version number.
+          schema: {type: integer, minimum: 1}
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Differences between the two versions
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/VersionDiff'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {$ref: '#/components/responses/Problem'}
+        '403': {$ref: '#/components/responses/Problem'}
+        '404': {$ref: '#/components/responses/Problem'}
   /v1/planning/planned-orders:
     get:
       operationId: listPlannedOrders
@@ -1393,6 +1433,49 @@ components:
         application/problem+json:
           schema: {$ref: '#/components/schemas/Problem'}
   schemas:
+    DiffOrder:
+      type: object
+      required: [number, itemId, orderType, qty, orderDate, deliveryDate]
+      properties:
+        number: {type: string}
+        itemId: {type: string, format: uuid}
+        orderType: {type: string, enum: [purchase, production, transfer]}
+        qty: {type: string, description: Decimal string}
+        orderDate: {type: string, format: date}
+        deliveryDate: {type: string, format: date}
+        vendorId: {type: string, format: uuid, description: Absent when the order has no vendor}
+    VersionDiff:
+      type: object
+      required: [from, to, identical, messagesDelta, addedCount, removedCount, changedCount, unchanged, truncated, added, removed, changed, qtyDeltaByOrderType]
+      properties:
+        from: {$ref: '#/components/schemas/PlanVersion'}
+        to: {$ref: '#/components/schemas/PlanVersion'}
+        identical: {type: boolean, description: True when both plan hashes are equal}
+        messagesDelta: {type: integer, description: Messages of `to` minus messages of `from`}
+        addedCount: {type: integer, minimum: 0, description: All added orders, including any beyond the limit}
+        removedCount: {type: integer, minimum: 0, description: All removed orders, including any beyond the limit}
+        changedCount: {type: integer, minimum: 0, description: All changed orders, including any beyond the limit}
+        truncated: {type: boolean, description: True when added, removed or changed lists fewer orders than its count}
+        added:
+          type: array
+          items: {$ref: '#/components/schemas/DiffOrder'}
+        removed:
+          type: array
+          items: {$ref: '#/components/schemas/DiffOrder'}
+        changed:
+          type: array
+          items:
+            type: object
+            required: [from, to, qtyDelta]
+            properties:
+              from: {$ref: '#/components/schemas/DiffOrder'}
+              to: {$ref: '#/components/schemas/DiffOrder'}
+              qtyDelta: {type: string, description: Decimal string, to minus from}
+        unchanged: {type: integer, minimum: 0}
+        qtyDeltaByOrderType:
+          type: object
+          description: Net planned quantity change per order type over every order (to minus from)
+          additionalProperties: {type: string, description: Decimal string}
     CoverageSettings:
       type: object
       required: [coverageCode]

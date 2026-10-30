@@ -339,6 +339,7 @@ NOT-IMPLEMENTED.md):
 | POST | `/v1/planning/plans/{planCode}:run` | `planning.run` (Idempotency-Key required) |
 | GET | `/v1/planning/plans/{planCode}/versions?limit=` | `planning.read` |
 | GET | `/v1/planning/plans/{planCode}/versions/{number}` | `planning.read` |
+| GET | `/v1/planning/plans/{planCode}/diff?from=&to=&limit=` | `planning.read` |
 | GET | `/v1/planning/planned-orders?planCode=&status=&itemId=&limit=` | `planning.read` |
 | GET | `/v1/planning/planned-orders/{id}` | `planning.read` |
 | PATCH | `/v1/planning/planned-orders/{id}` | `planning.order.maintain` (If-Match required) |

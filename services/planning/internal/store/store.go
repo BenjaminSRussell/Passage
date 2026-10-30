@@ -52,6 +52,7 @@ type Store interface {
 	RunPlan(ctx context.Context, req RunRequest) (Version, bool, error)
 	GetVersion(ctx context.Context, planCode string, number int) (Version, error)
 	ListVersions(ctx context.Context, planCode string, limit int) ([]Version, error)
+	DiffVersions(ctx context.Context, planCode string, from, to, limit int) (VersionDiff, error)
 	ListPlannedOrders(ctx context.Context, planCode string, f OrderFilter, limit int) ([]PlannedOrder, error)
 	GetPlannedOrder(ctx context.Context, id string) (PlannedOrder, error)
 	PegsOf(ctx context.Context, versionID, supplyRef string) ([]domain.PegLine, error)

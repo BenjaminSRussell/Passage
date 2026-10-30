@@ -89,7 +89,7 @@ function LoadAlert({ what, error }: { what: string; error: LoadError | null }) {
 }
 
 /** Picks the plan every planning page shows; the choice lives in `?plan=`. */
-function PlanPicker({ children }: { children?: ReactNode }) {
+export function PlanPicker({ children }: { children?: ReactNode }) {
   const [plan, setPlan] = usePlanCode();
   const [draft, setDraft] = useState(plan);
   const [error, setError] = useState<string | undefined>();
@@ -162,9 +162,14 @@ export function PlanningHome() {
         title="Master planning"
         description="Planned orders, action and delay messages of the current plan version, each explained back to its demand."
         actions={
-          <Link className={buttonClassName("primary")} to={withPlan("/planning/runs/new", plan)}>
-            Run plan
-          </Link>
+          <>
+            <Link className={buttonClassName("secondary")} to={withPlan("/planning/runs/compare", plan)}>
+              Compare versions
+            </Link>
+            <Link className={buttonClassName("primary")} to={withPlan("/planning/runs/new", plan)}>
+              Run plan
+            </Link>
+          </>
         }
       />
       <PlanPicker />
@@ -568,9 +573,14 @@ export function PlanRunsPage() {
         title="Plan runs"
         description={`Versions of plan ${plan}, newest first. Identical input gives an identical plan hash.`}
         actions={
-          <Link className={buttonClassName("primary")} to={withPlan("/planning/runs/new", plan)}>
-            Run plan
-          </Link>
+          <>
+            <Link className={buttonClassName("secondary")} to={withPlan("/planning/runs/compare", plan)}>
+              Compare versions
+            </Link>
+            <Link className={buttonClassName("primary")} to={withPlan("/planning/runs/new", plan)}>
+              Run plan
+            </Link>
+          </>
         }
       />
       <PlanPicker />

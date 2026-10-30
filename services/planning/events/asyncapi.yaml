@@ -62,26 +62,36 @@ components:
   messages:
     PlanStartedV1:
       name: dev.passage.planning.plan.started.v1
+      title: A plan run started its version
+      summary: A plan run started its version (CloudEvent dev.passage.planning.plan.started.v1).
       contentType: application/json
       payload:
         $ref: '#/components/schemas/PlanStartedData'
     MessageRaisedV1:
       name: dev.passage.planning.message.raised.v1
+      title: The run raised an action or delay message
+      summary: The run raised an action or delay message (CloudEvent dev.passage.planning.message.raised.v1).
       contentType: application/json
       payload:
         $ref: '#/components/schemas/MessageRaisedData'
     PlanCompletedV1:
       name: dev.passage.planning.plan.completed.v1
+      title: A plan version became the current version
+      summary: A plan version became the current version (CloudEvent dev.passage.planning.plan.completed.v1).
       contentType: application/json
       payload:
         $ref: '#/components/schemas/PlanCompletedData'
     PlannedOrderFirmedV1:
       name: dev.passage.planning.plannedorder.firmed.v1
+      title: A planned order was firmed
+      summary: A planned order was firmed (CloudEvent dev.passage.planning.plannedorder.firmed.v1).
       contentType: application/json
       payload:
         $ref: '#/components/schemas/PlannedOrderFirmedData'
     ForecastPublishedV1:
       name: dev.passage.planning.forecast.published.v1
+      title: A forecast consensus was published
+      summary: A forecast consensus was published (CloudEvent dev.passage.planning.forecast.published.v1).
       contentType: application/json
       payload:
         $ref: '#/components/schemas/ForecastPublishedData'
