@@ -1,6 +1,7 @@
 package tenant
 
 import (
+	"container/heap"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
@@ -12,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -30,11 +32,13 @@ const (
 	EnvServicePublicKeys  = "PASSAGE_SERVICE_PUBLIC_KEYS"
 	EnvServiceSigningKey  = "PASSAGE_SERVICE_SIGNING_KEY"
 	EnvServiceSigningFile = "PASSAGE_SERVICE_SIGNING_KEY_FILE"
+	EnvServiceKeyID       = "PASSAGE_SERVICE_KEY_ID"
+	EnvServiceReplaySize  = "PASSAGE_SERVICE_REPLAY_CACHE_SIZE"
 
-	serviceTokenContext = "passage.service-token.v1."
-	serviceClockSkew    = 5 * time.Second
-	maxReplayEntries    = 100_000
-	maxServiceTokenSize = 4096
+	serviceTokenContext  = "passage.service-token.v1."
+	serviceClockSkew     = 5 * time.Second
+	defaultReplayEntries = 100_000
+	maxServiceTokenSize  = 4096
 )
 
 var (
@@ -75,6 +79,7 @@ func serviceGrant(iss, aud string) []string { return serviceGrants[iss][aud] }
 // entity le on behalf of end user act, holding only the service's own duties.
 type ServiceClaims struct {
 	Iss    string   `json:"iss"`
+	Kid    string   `json:"kid,omitempty"`
 	Aud    string   `json:"aud"`
 	Tid    string   `json:"tid"`
 	Le     string   `json:"le"`
@@ -88,6 +93,7 @@ type ServiceClaims struct {
 // ServiceSigner mints short-lived Ed25519 service tokens for one calling service.
 type ServiceSigner struct {
 	name string
+	kid  string
 	key  ed25519.PrivateKey
 	now  func() time.Time
 }
@@ -97,6 +103,14 @@ func NewServiceSigner(name string, key ed25519.PrivateKey) (*ServiceSigner, erro
 		return nil, errors.New("service signer needs a name and an Ed25519 private key")
 	}
 	return &ServiceSigner{name: name, key: key, now: time.Now}, nil
+}
+
+// WithKeyID returns a copy of the signer that stamps kid on its tokens so a
+// target holding several keys for this service can pick the right one.
+func (s *ServiceSigner) WithKeyID(kid string) *ServiceSigner {
+	c := *s
+	c.kid = kid
+	return &c
 }
 
 // WithClock returns a copy of the signer reading time from now.
@@ -126,7 +140,11 @@ func ServiceSignerFromEnv(getenv func(string) string) (*ServiceSigner, error) {
 	if err != nil || len(seed) != ed25519.SeedSize {
 		return nil, fmt.Errorf("%s must be a base64 %d-byte Ed25519 seed", EnvServiceSigningKey, ed25519.SeedSize)
 	}
-	return NewServiceSigner(getenv(EnvServiceName), ed25519.NewKeyFromSeed(seed))
+	signer, err := NewServiceSigner(getenv(EnvServiceName), ed25519.NewKeyFromSeed(seed))
+	if err != nil {
+		return nil, err
+	}
+	return signer.WithKeyID(getenv(EnvServiceKeyID)), nil
 }
 
 // Mint signs a token for aud carrying the end user from p as act. The legal
@@ -137,13 +155,10 @@ func (s *ServiceSigner) Mint(aud string, p Principal, legalEntity string) (strin
 	if len(duties) == 0 {
 		return "", fmt.Errorf("%w: %s -> %s", ErrNoServiceGrant, s.name, aud)
 	}
-	if legalEntity == "" {
-		legalEntity = p.LegalEntityID
-	}
-	le, ok := canonicalUUID(legalEntity)
+	le, ok := s.legalEntityFor(p, legalEntity)
 	tid, tok := canonicalUUID(p.TenantID)
-	if !ok || le == ids.Nil || !tok || tid == ids.Nil {
-		return "", errors.New("service token needs one explicit legal entity and a tenant")
+	if !ok || !tok || tid == ids.Nil {
+		return "", errors.New("service token needs a tenant and one legal entity within the end user's scope")
 	}
 	if p.UserID == "" {
 		return "", errors.New("service token needs the end user as act")
@@ -154,7 +169,7 @@ func (s *ServiceSigner) Mint(aud string, p Principal, legalEntity string) (strin
 	}
 	now := s.now()
 	payload, err := json.Marshal(ServiceClaims{
-		Iss: s.name, Aud: aud, Tid: tid, Le: le, Act: p.UserID, Duties: duties,
+		Iss: s.name, Kid: s.kid, Aud: aud, Tid: tid, Le: le, Act: p.UserID, Duties: duties,
 		Iat: now.Unix(), Exp: now.Add(ServiceTokenMaxTTL).Unix(), Jti: hex.EncodeToString(jti),
 	})
 	if err != nil {
@@ -163,6 +178,25 @@ func (s *ServiceSigner) Mint(aud string, p Principal, legalEntity string) (strin
 	body := base64.RawURLEncoding.EncodeToString(payload)
 	sig := ed25519.Sign(s.key, []byte(serviceTokenContext+body))
 	return body + "." + base64.RawURLEncoding.EncodeToString(sig), nil
+}
+
+// legalEntityFor resolves the token's legal entity: the explicit one must lie
+// in the end user's legal-entity scope (or the user holds the all-scope duty,
+// which only survives on explicit ALL-scope reads); with none given the user
+// must be scoped to exactly one.
+func (s *ServiceSigner) legalEntityFor(p Principal, explicit string) (string, bool) {
+	scopes := LegalEntityScopeList(p)
+	if explicit == "" {
+		if len(scopes) != 1 {
+			return "", false
+		}
+		return scopes[0], true
+	}
+	le, ok := canonicalUUID(explicit)
+	if !ok || le == ids.Nil {
+		return "", false
+	}
+	return le, p.HasDuty(DutyAllScope) || slices.Contains(scopes, le)
 }
 
 // Apply signs a token for aud and sets it on req together with the request id.
@@ -185,42 +219,109 @@ func (s *ServiceSigner) Apply(req *http.Request, p Principal, aud, legalEntity s
 
 // ServiceVerifier checks service tokens addressed to one service.
 type ServiceVerifier struct {
-	self string
-	keys map[string]ed25519.PublicKey
-	now  func() time.Time
-	mu   sync.Mutex
-	seen map[string]int64
+	self     string
+	keys     map[string]map[string]ed25519.PublicKey
+	now      func() time.Time
+	capacity int
+	mu       sync.Mutex
+	seen     map[string]struct{}
+	expiries expiryHeap
 }
 
+type expiry struct {
+	exp int64
+	jti string
+}
+
+type expiryHeap []expiry
+
+func (h expiryHeap) Len() int           { return len(h) }
+func (h expiryHeap) Less(i, j int) bool { return h[i].exp < h[j].exp }
+func (h expiryHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *expiryHeap) Push(x any)        { *h = append(*h, x.(expiry)) }
+func (h *expiryHeap) Pop() any {
+	old := *h
+	last := old[len(old)-1]
+	*h = old[:len(old)-1]
+	return last
+}
+
+// NewServiceVerifier trusts one key (empty kid) per issuing service.
 func NewServiceVerifier(self string, keys map[string]ed25519.PublicKey) *ServiceVerifier {
-	return &ServiceVerifier{self: self, keys: keys, now: time.Now, seen: map[string]int64{}}
+	byKid := make(map[string]map[string]ed25519.PublicKey, len(keys))
+	for iss, key := range keys {
+		byKid[iss] = map[string]ed25519.PublicKey{"": key}
+	}
+	return NewServiceVerifierKids(self, byKid)
+}
+
+// NewServiceVerifierKids trusts several keys per issuing service, selected by
+// the token's kid, so a key can be rotated without an outage.
+func NewServiceVerifierKids(self string, keys map[string]map[string]ed25519.PublicKey) *ServiceVerifier {
+	return &ServiceVerifier{self: self, keys: keys, now: time.Now, capacity: defaultReplayEntries, seen: map[string]struct{}{}}
+}
+
+// WithReplayCapacity returns a verifier remembering at most n unexpired token ids.
+func (v *ServiceVerifier) WithReplayCapacity(n int) *ServiceVerifier {
+	c := NewServiceVerifierKids(v.self, v.keys)
+	c.now, c.capacity = v.now, n
+	return c
 }
 
 // WithClock returns a verifier sharing keys but with its own clock and replay cache.
 func (v *ServiceVerifier) WithClock(now func() time.Time) *ServiceVerifier {
-	c := NewServiceVerifier(v.self, v.keys)
-	c.now = now
+	c := NewServiceVerifierKids(v.self, v.keys)
+	c.now, c.capacity = now, v.capacity
 	return c
 }
 
 // ServiceVerifierFromEnv reads PASSAGE_SERVICE_NAME (this service, the expected
-// aud) and PASSAGE_SERVICE_PUBLIC_KEYS (comma-separated name=base64 Ed25519
-// public keys). It returns nil, nil when either is unset.
+// aud) and PASSAGE_SERVICE_PUBLIC_KEYS (comma-separated name=base64 or
+// name:kid=base64 Ed25519 public keys; a repeated name+kid is an error) and the
+// optional PASSAGE_SERVICE_REPLAY_CACHE_SIZE. It returns nil, nil when the name
+// or keys are unset.
 func ServiceVerifierFromEnv(getenv func(string) string) (*ServiceVerifier, error) {
 	self, raw := getenv(EnvServiceName), strings.TrimSpace(getenv(EnvServicePublicKeys))
 	if self == "" || raw == "" {
 		return nil, nil
 	}
-	keys := map[string]ed25519.PublicKey{}
+	keys := map[string]map[string]ed25519.PublicKey{}
 	for _, entry := range strings.Split(raw, ",") {
-		name, enc, ok := strings.Cut(strings.TrimSpace(entry), "=")
+		id, enc, ok := strings.Cut(strings.TrimSpace(entry), "=")
+		name, kid, _ := strings.Cut(id, ":")
 		pub, err := base64.StdEncoding.DecodeString(enc)
 		if !ok || name == "" || err != nil || len(pub) != ed25519.PublicKeySize {
-			return nil, fmt.Errorf("%s entry %q is not name=base64 Ed25519 public key", EnvServicePublicKeys, name)
+			return nil, fmt.Errorf("%s entry %q is not name[:kid]=base64 Ed25519 public key", EnvServicePublicKeys, id)
 		}
-		keys[name] = ed25519.PublicKey(pub)
+		if _, dup := keys[name][kid]; dup {
+			return nil, fmt.Errorf("%s repeats %s:%s", EnvServicePublicKeys, name, kid)
+		}
+		if keys[name] == nil {
+			keys[name] = map[string]ed25519.PublicKey{}
+		}
+		keys[name][kid] = ed25519.PublicKey(pub)
 	}
-	return NewServiceVerifier(self, keys), nil
+	v := NewServiceVerifierKids(self, keys)
+	if size := getenv(EnvServiceReplaySize); size != "" {
+		n, err := strconv.Atoi(size)
+		if err != nil || n <= 0 {
+			return nil, fmt.Errorf("%s must be a positive integer", EnvServiceReplaySize)
+		}
+		v.capacity = n
+	}
+	return v, nil
+}
+
+// ConfigureServiceVerifier installs the verifier built from getenv and fails on
+// a malformed configuration so a target service stops at startup instead of
+// rejecting every service token.
+func ConfigureServiceVerifier(getenv func(string) string) error {
+	v, err := ServiceVerifierFromEnv(getenv)
+	if err != nil {
+		return err
+	}
+	SetServiceVerifier(v)
+	return nil
 }
 
 // Verify returns the claims of a token that is signed by a known service,
@@ -239,7 +340,7 @@ func (v *ServiceVerifier) Verify(token string) (ServiceClaims, error) {
 	if err := json.Unmarshal(payload, &c); err != nil {
 		return ServiceClaims{}, ErrServiceToken
 	}
-	pub, known := v.keys[c.Iss]
+	pub, known := v.keys[c.Iss][c.Kid]
 	if !known || !ed25519.Verify(pub, []byte(serviceTokenContext+body), sig) {
 		return ServiceClaims{}, ErrServiceToken
 	}
@@ -264,24 +365,20 @@ func (v *ServiceVerifier) Verify(token string) (ServiceClaims, error) {
 	return c, nil
 }
 
-// ponytail: replay memory is per process, so a token replays at most once per replica within its 60s life; a shared store is the upgrade.
+// remember records jti until exp and reports false on a replay or a full cache.
+// Eviction pops the expiry min-heap, so each token is evicted once (amortized O(log n)).
+// ponytail: memory is per process, so a token can be replayed once per other replica inside its 60s life; a shared store closes that.
 func (v *ServiceVerifier) remember(jti string, exp int64, now time.Time) bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	if _, replayed := v.seen[jti]; replayed {
+	for len(v.expiries) > 0 && v.expiries[0].exp <= now.Unix() {
+		delete(v.seen, heap.Pop(&v.expiries).(expiry).jti)
+	}
+	if _, replayed := v.seen[jti]; replayed || len(v.seen) >= v.capacity {
 		return false
 	}
-	if len(v.seen) >= maxReplayEntries {
-		for k, e := range v.seen {
-			if e <= now.Unix() {
-				delete(v.seen, k)
-			}
-		}
-		if len(v.seen) >= maxReplayEntries {
-			return false
-		}
-	}
-	v.seen[jti] = exp
+	v.seen[jti] = struct{}{}
+	heap.Push(&v.expiries, expiry{exp: exp, jti: jti})
 	return true
 }
 
