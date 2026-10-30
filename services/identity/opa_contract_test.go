@@ -23,7 +23,7 @@ import (
 
 const (
 	contractTenant   = "tenant-a"
-	seededDutyCount  = 103
+	seededDutyCount  = 107
 	unassignedUserID = "user-without-duty"
 )
 
@@ -295,6 +295,10 @@ func TestDutyContractExpectations(t *testing.T) {
 		{duty: "reporting.statement.view", method: http.MethodGet, resource: "/v1/reporting/runs/r1/cells/a/b/lines"},
 		{duty: "reporting.statement.view", method: http.MethodGet, resource: "/v1/reporting/definitions/d1/export"},
 		{duty: "ReceivingPost", method: http.MethodPost, resource: "/v1/receiving/receipts/r1:post", wantAllowed: true},
+		{duty: "VendorInvoicePost", method: http.MethodPost, resource: "/v1/receiving/invoice-adjustments:post", wantAllowed: true},
+		{duty: "VendorInvoicePost", method: http.MethodPost, resource: "/v1/receiving/plan-settlements:run", wantAllowed: true},
+		{duty: "VendorInvoicePost", method: http.MethodPost, resource: "/v1/receiving/consignment-settlements:run", wantAllowed: true},
+		{duty: "ReceivingPost", method: http.MethodPost, resource: "/v1/receiving/invoice-adjustments:post"},
 		{duty: "ledger.journal.read", method: http.MethodGet, resource: "/v1/reporting/runs/r1/cells/a/b/lines", wantAllowed: true},
 		{duty: "party.read", method: http.MethodGet, resource: "/v1/party/parties/p1", wantAllowed: true},
 		{duty: "party.write", method: http.MethodPost, resource: "/v1/party/pending-changes/x:approve"},

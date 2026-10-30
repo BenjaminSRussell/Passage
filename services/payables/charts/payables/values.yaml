@@ -6,6 +6,8 @@ image:
 databaseSecret: payables-db
 ledgerUrl: ""
 controlAccount: "2000"
+fxUrl: ""
+fxRateType: "spot"
 replicaCount: 1
 resources:
   requests: { cpu: 50m, memory: 128Mi }

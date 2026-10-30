@@ -68,6 +68,9 @@ func (s *Postgres) PostInvoice(ctx context.Context, in Invoice, fn InvoiceFunc) 
 		for i, l := range in.Lines {
 			items[i] = byKey[l.ItemKey()]
 		}
+		if err := refuseSettledPlanLines(ctx, tx, tenantID, distinct); err != nil {
+			return err
+		}
 		outcome, err := fn(items)
 		if err != nil {
 			return err
