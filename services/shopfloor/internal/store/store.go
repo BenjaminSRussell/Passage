@@ -104,6 +104,10 @@ type PayLine struct {
 	Multiplier decimal.Decimal `json:"multiplier"`
 	Amount     decimal.Decimal `json:"amount"`
 	Currency   string          `json:"currency"`
+	// Revision is the worker-day revision that added the line (0 for the original
+	// calculation); Reversal marks a line that cancels an earlier one (AC-25.8).
+	Revision int  `json:"revision"`
+	Reversal bool `json:"reversal"`
 }
 
 // ApprovedDay is one worker-day in an approval response.
@@ -358,24 +362,8 @@ func (s *Postgres) SavePay(ctx context.Context, calc PayCalculation, idem Idem, 
 			return err
 		}
 		for _, d := range calc.Days {
-			flags := d.Flags
-			if flags == nil {
-				flags = []string{}
-			}
-			if _, err := tx.Exec(ctx, `insert into worker_day (tenant_id, worker_id, work_date, hours, flags, time_zone, status)
-				values ($1, $2, $3::date, $4, $5, $6, 'calculated')`, p.TenantID, calc.WorkerID, d.Date.Format(dateLayout), d.Hours.String(), flags, calc.TimeZone); err != nil {
+			if err := insertDay(ctx, tx, p.TenantID, calc.WorkerID, currency, calc.TimeZone, d); err != nil {
 				return err
-			}
-			for _, l := range d.Lines {
-				sources := l.Sources
-				if sources == nil {
-					sources = []string{}
-				}
-				if _, err := tx.Exec(ctx, `insert into pay_line (tenant_id, id, worker_id, work_date, pay_type, hours, rate_multiplier, amount, currency, source_registration_ids)
-					values ($1, $2, $3, $4::date, $5, $6, $7, $8, $9, $10::text[]::uuid[])`,
-					p.TenantID, ids.New(), calc.WorkerID, d.Date.Format(dateLayout), l.Type, l.Hours.String(), l.Multiplier.String(), l.Amount.String(), currency, sources); err != nil {
-					return err
-				}
 			}
 		}
 		if idem.Key != "" {
@@ -383,6 +371,30 @@ func (s *Postgres) SavePay(ctx context.Context, calc PayCalculation, idem Idem, 
 		}
 		return nil
 	})
+}
+
+// insertDay stores a calculated worker-day and its pay lines.
+func insertDay(ctx context.Context, tx pgx.Tx, tenantID, workerID, currency, zone string, d domain.DayPay) error {
+	flags := d.Flags
+	if flags == nil {
+		flags = []string{}
+	}
+	if _, err := tx.Exec(ctx, `insert into worker_day (tenant_id, worker_id, work_date, hours, flags, time_zone, status)
+		values ($1, $2, $3::date, $4, $5, $6, 'calculated')`, tenantID, workerID, d.Date.Format(dateLayout), d.Hours.String(), flags, zone); err != nil {
+		return err
+	}
+	for _, l := range d.Lines {
+		sources := l.Sources
+		if sources == nil {
+			sources = []string{}
+		}
+		if _, err := tx.Exec(ctx, `insert into pay_line (tenant_id, id, worker_id, work_date, pay_type, hours, rate_multiplier, amount, currency, source_registration_ids)
+			values ($1, $2, $3, $4::date, $5, $6, $7, $8, $9, $10::text[]::uuid[])`,
+			tenantID, ids.New(), workerID, d.Date.Format(dateLayout), l.Type, l.Hours.String(), l.Multiplier.String(), l.Amount.String(), currency, sources); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ApproveResult is the outcome of an approval, stored for Idempotency-Key replays.
@@ -422,7 +434,13 @@ func (s *Postgres) ApprovePay(ctx context.Context, workerID, fromDate, toDate, a
 					where r.tenant_id = d.tenant_id and r.worker_id = d.worker_id and r.kind in ('clock-in', 'clock-out')
 					  and r.started_at >= (d.work_date::timestamp at time zone d.time_zone)
 					  and r.started_at < ((d.work_date + 1)::timestamp at time zone d.time_zone)
-					  and r.server_received_at > d.calculated_at)
+					  and (r.server_received_at > d.calculated_at
+					       or exists (select 1 from registration_correction c where c.tenant_id = r.tenant_id and c.registration_id = r.id and c.corrected_at > d.calculated_at)))
+					or (d.status = 'calculated' and exists (
+					select 1 from registration_correction c join time_registration r on r.tenant_id = c.tenant_id and r.id = c.registration_id
+					where c.tenant_id = d.tenant_id and c.worker_id = d.worker_id and r.kind in ('clock-in', 'clock-out') and c.corrected_at > d.calculated_at
+					  and ((c.old_started_at >= (d.work_date::timestamp at time zone d.time_zone) and c.old_started_at < ((d.work_date + 1)::timestamp at time zone d.time_zone))
+					    or (c.new_started_at >= (d.work_date::timestamp at time zone d.time_zone) and c.new_started_at < ((d.work_date + 1)::timestamp at time zone d.time_zone)))))
 			from worker_day d
 			where d.tenant_id = $1 and d.worker_id = $2 and d.work_date between $3::date and $4::date
 			order by d.work_date for update of d`,
@@ -490,8 +508,8 @@ func (s *Postgres) ApprovePay(ctx context.Context, workerID, fromDate, toDate, a
 }
 
 func loadLines(ctx context.Context, tx pgx.Tx, tenantID, workerID, date string) ([]PayLine, error) {
-	rows, err := tx.Query(ctx, `select pay_type, hours::text, rate_multiplier::text, amount::text, currency from pay_line
-		where tenant_id = $1 and worker_id = $2 and work_date = $3::date order by pay_type`, tenantID, workerID, date)
+	rows, err := tx.Query(ctx, `select pay_type, hours::text, rate_multiplier::text, amount::text, currency, revision, reversal_of is not null from pay_line
+		where tenant_id = $1 and worker_id = $2 and work_date = $3::date order by revision, pay_type, id`, tenantID, workerID, date)
 	if err != nil {
 		return nil, err
 	}
@@ -499,13 +517,16 @@ func loadLines(ctx context.Context, tx pgx.Tx, tenantID, workerID, date string) 
 	lines := []PayLine{}
 	for rows.Next() {
 		var typ, hours, mult, amount, currency string
-		if err := rows.Scan(&typ, &hours, &mult, &amount, &currency); err != nil {
+		var revision int
+		var reversal bool
+		if err := rows.Scan(&typ, &hours, &mult, &amount, &currency, &revision, &reversal); err != nil {
 			return nil, err
 		}
 		l, err := parseLine(typ, hours, mult, amount, currency)
 		if err != nil {
 			return nil, err
 		}
+		l.Revision, l.Reversal = revision, reversal
 		lines = append(lines, l)
 	}
 	return lines, rows.Err()

@@ -301,6 +301,135 @@ paths:
           $ref: "#/components/responses/Problem"
         "500":
           $ref: "#/components/responses/Problem"
+  /v1/shopfloor/registrations/{id}:correct:
+    post:
+      operationId: correctRegistration
+      summary: Correct the times of a registration with a reason
+      x-passage-duty: shopfloor.time.correct
+      description: |
+        A supervisor changes `startedAt` and/or `stoppedAt` of one registration (FR-25.8).
+        The before and after, the reason and the user are kept in the correction audit
+        trail and `dev.passage.shopfloor.registration.corrected.v1` is published in the
+        same transaction. A clock-in or clock-out takes no `stoppedAt`; a closed
+        registration lasts at most 24 hours; a bundled job registration, and a job-start
+        that a job-stop already closed (correct the job-stop), cannot be corrected
+        (SF-0127); an invalid or unchanged correction is SF-0128. A day
+        calculated before the correction cannot be approved until it is recalculated
+        (SF-0104). You cannot correct your own registrations (SF-0106). Corrections to
+        approved days are paid through `pay:revise`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CorrectRegistration"
+      responses:
+        "200":
+          description: The correction as stored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Correction"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "500":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/registration-corrections:
+    get:
+      operationId: listRegistrationCorrections
+      summary: Registration corrections made in a date range
+      x-passage-duty: shopfloor.view
+      description: Lists corrections by the day they were made (UTC range), newest first.
+      parameters:
+        - name: workerId
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Omit to list every worker.
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Corrections, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Correction"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "500":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/pay:revise:
+    post:
+      operationId: revisePay
+      summary: Recalculate a range and revise approved days with reversal lines
+      x-passage-duty: shopfloor.pay.revise
+      description: |
+        Recalculates the range from the stored registrations (BR-25.8, AC-25.8). Days
+        that are not approved are replaced as `pay:calculate` does. An approved day keeps
+        every line: lines that differ from the recalculation are cancelled by reversal
+        lines (negative hours and amount) and the new lines are added, all with the
+        day's next revision number, and `dev.passage.shopfloor.payday.revised.v1` is
+        published. Reversal and new lines join the next payroll export. A range where
+        nothing differs fails with SF-0129; an approved day that would carry open flags
+        fails with SF-0006; revising your own pay fails with SF-0106.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevisePay"
+      responses:
+        "200":
+          description: The days of the range and the lines each revision reversed and added.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayRevision"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        "500":
+          $ref: "#/components/responses/Problem"
   /v1/shopfloor/worker-days:
     get:
       operationId: listWorkerDays
@@ -1411,7 +1540,7 @@ components:
           description: Review flags (BR-25.7, FR-25.3).
     WorkerDay:
       type: object
-      required: [workerId, workerName, workDate, hours, flags, status, timeZone, calculatedAt, approvedBy, approvedAt, payLines]
+      required: [workerId, workerName, workDate, hours, flags, status, timeZone, calculatedAt, approvedBy, approvedAt, revision, revisedBy, revisedAt, payLines]
       properties:
         workerId:
           type: string
@@ -1439,6 +1568,14 @@ components:
         approvedBy:
           type: [string, "null"]
         approvedAt:
+          type: [string, "null"]
+          format: date-time
+        revision:
+          type: integer
+          description: Number of supervisor revisions of an approved day (AC-25.8); payLines then include reversal lines.
+        revisedBy:
+          type: [string, "null"]
+        revisedAt:
           type: [string, "null"]
           format: date-time
         payLines:
@@ -1596,6 +1733,126 @@ components:
         currency:
           type: string
           pattern: "^[A-Z]{3}$"
+        revision:
+          type: integer
+          description: Worker-day revision that added the line; 0 for the original calculation.
+        reversal:
+          type: boolean
+          description: True for a line with negative hours and amount that cancels an earlier line (AC-25.8).
+    CorrectRegistration:
+      type: object
+      required: [reason]
+      description: At least one of startedAt and stoppedAt is required.
+      properties:
+        startedAt:
+          type: string
+          format: date-time
+        stoppedAt:
+          type: string
+          format: date-time
+          description: Closes an open registration or moves its stop; not allowed on clock-in and clock-out.
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+    Correction:
+      type: object
+      required: [id, registrationId, workerId, reason, oldStartedAt, oldStoppedAt, oldHours, newStartedAt, newStoppedAt, newHours, correctedBy, correctedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        registrationId:
+          type: string
+          format: uuid
+        workerId:
+          type: string
+          format: uuid
+        reason:
+          type: string
+        oldStartedAt:
+          type: string
+          format: date-time
+        oldStoppedAt:
+          type: [string, "null"]
+          format: date-time
+        oldHours:
+          type: [string, "null"]
+        newStartedAt:
+          type: string
+          format: date-time
+        newStoppedAt:
+          type: [string, "null"]
+          format: date-time
+        newHours:
+          type: [string, "null"]
+        correctedBy:
+          type: string
+        correctedAt:
+          type: string
+          format: date-time
+    RevisePay:
+      type: object
+      required: [workerId, from, to, reason]
+      properties:
+        workerId:
+          type: string
+          format: uuid
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+          description: Inclusive, at most 28 days after from.
+        timeZone:
+          type: string
+          default: UTC
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+    PayRevision:
+      type: object
+      required: [workerId, from, to, reason, days]
+      properties:
+        workerId:
+          type: string
+          format: uuid
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        reason:
+          type: string
+        days:
+          type: array
+          items:
+            type: object
+            required: [workDate, status, revision, changed, reversedLines, addedLines]
+            properties:
+              workDate:
+                type: string
+                format: date
+              status:
+                type: string
+                enum: [calculated, approved]
+              revision:
+                type: integer
+                description: The day's revision after the call (0 for a day never revised).
+              changed:
+                type: boolean
+              reversedLines:
+                type: array
+                description: Lines with negative hours and amount that cancel approved lines.
+                items:
+                  $ref: "#/components/schemas/PayLine"
+              addedLines:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PayLine"
     PayApproveResponse:
       type: object
       required: [workerId, from, to, days]

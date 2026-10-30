@@ -82,6 +82,9 @@ type Store interface {
 	ListBundleRegistrations(ctx context.Context, bundleID string, limit int) ([]store.RegistrationView, error)
 	LoadPunches(ctx context.Context, workerID string, start, end time.Time) (store.PunchInput, error)
 	SavePay(ctx context.Context, calc store.PayCalculation, idem store.Idem, response any) error
+	CorrectRegistration(ctx context.Context, id string, req domain.CorrectionRequest, correctedBy string, idem store.Idem) (store.Correction, error)
+	ListCorrections(ctx context.Context, workerID string, from, to time.Time, limit int) ([]store.Correction, error)
+	RevisePay(ctx context.Context, calc store.PayCalculation, reason, revisedBy string, idem store.Idem) (store.RevisionResult, error)
 	ApprovePay(ctx context.Context, workerID, fromDate, toDate, approvedBy string, idem store.Idem) (store.ApproveResult, error)
 	ListWorkerDays(ctx context.Context, f store.DayFilter) ([]store.WorkerDay, error)
 	RegisterMachine(ctx context.Context, m store.Machine, idem store.Idem) (store.Machine, error)
@@ -143,6 +146,9 @@ type API struct {
 	feedbackStored  atomic.Int64
 	feedbackReplays atomic.Int64
 	finishBlocked   atomic.Int64
+	// corrections counts registration corrections; revisedDays approved days revised with reversal.
+	corrections atomic.Int64
+	revisedDays atomic.Int64
 }
 
 // New returns the API over s.
@@ -238,6 +244,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerProcess(r)
 	a.registerKiosk(r)
 	a.registerJobs(r)
+	a.registerCorrections(r)
 }
 
 // Metrics serves the counters in Prometheus text format on the admin port.
@@ -267,6 +274,8 @@ func (a *API) Metrics() http.Handler {
 		counter("shopfloor_job_feedback_stored_total", "Job feedback postings stored (FR-25.4).", a.feedbackStored.Load())
 		counter("shopfloor_job_feedback_replays_total", "Job feedback replayed by feedbackId and not stored again.", a.feedbackReplays.Load())
 		counter("shopfloor_job_finish_blocked_total", "Job finishes refused because a mandatory check has no passing result (SF-0005).", a.finishBlocked.Load())
+		counter("shopfloor_registration_corrections_total", "Registrations corrected by a supervisor with a reason (FR-25.8).", a.corrections.Load())
+		counter("shopfloor_pay_days_revised_total", "Approved worker-days revised with reversal lines (AC-25.8).", a.revisedDays.Load())
 		counter("shopfloor_failed_total", "Requests that failed in the store.", a.failed.Load())
 	})
 }
@@ -820,23 +829,37 @@ func (a *API) calculatePay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	days, currency, err := a.recalculate(ctx, win)
+	if err != nil {
+		a.fail(w, r, "calculate pay", err)
+		return
+	}
+	resp := payCalculateResponse{WorkerID: win.workerID, From: win.fromDate, To: win.toDate, TimeZone: win.zone, Days: dayViews(days, currency)}
+	if err := a.store.SavePay(ctx, store.PayCalculation{WorkerID: win.workerID, FromDate: win.fromDate, ToDate: win.toDate, TimeZone: win.zone, Days: days}, idem, resp); err != nil {
+		a.fail(w, r, "save pay", err)
+		return
+	}
+	a.calculations.Add(1)
+	httpx.JSON(w, http.StatusOK, resp)
+}
+
+// recalculate builds the worker-days of a window from the stored clock registrations.
+// A rule violation (more than 24 hours in a day) comes back as a 422 problem.
+func (a *API) recalculate(ctx context.Context, win rangeWindow) ([]domain.DayPay, string, error) {
 	rules := domain.DefaultRules()
 	loadFrom := domain.WeekStartOf(win.from, rules.WeekStart).AddDate(0, 0, -1)
 	in, err := a.store.LoadPunches(ctx, win.workerID, loadFrom, win.end.AddDate(0, 0, 1))
 	if err != nil {
-		a.fail(w, r, "load punches", err)
-		return
+		return nil, "", err
 	}
 	calc := domain.Calculation{Profile: domain.DefaultProfile(), Location: win.loc, Rules: rules, Rate: in.Rate, Currency: in.Currency}
 	all, err := calc.Run(domain.BuildDays(in.Punches, win.loc, calc.Profile))
 	if err != nil {
 		var de *domain.Error
 		if errors.As(err, &de) {
-			httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, de.Code, de.Detail))
-			return
+			return nil, "", httpx.NewProblem(http.StatusUnprocessableEntity, de.Code, de.Detail)
 		}
-		a.fail(w, r, "calculate pay", err)
-		return
+		return nil, "", err
 	}
 	days := make([]domain.DayPay, 0, len(all))
 	for _, d := range all {
@@ -844,13 +867,7 @@ func (a *API) calculatePay(w http.ResponseWriter, r *http.Request) {
 			days = append(days, d)
 		}
 	}
-	resp := payCalculateResponse{WorkerID: win.workerID, From: win.fromDate, To: win.toDate, TimeZone: win.zone, Days: dayViews(days, in.Currency)}
-	if err := a.store.SavePay(ctx, store.PayCalculation{WorkerID: win.workerID, FromDate: win.fromDate, ToDate: win.toDate, TimeZone: win.zone, Days: days}, idem, resp); err != nil {
-		a.fail(w, r, "save pay", err)
-		return
-	}
-	a.calculations.Add(1)
-	httpx.JSON(w, http.StatusOK, resp)
+	return days, in.Currency, nil
 }
 
 func dayViews(days []domain.DayPay, currency string) []payDayView {

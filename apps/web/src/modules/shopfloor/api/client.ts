@@ -117,6 +117,10 @@ export interface PayLine {
   multiplier: string;
   amount: string;
   currency: string;
+  /** Worker-day revision that added the line; 0 or absent for the original calculation (AC-25.8). */
+  revision?: number;
+  /** A line with negative hours and amount that cancels an earlier line. */
+  reversal?: boolean;
 }
 
 export type DayFlag = "missing-clock-out" | "orphan-clock-out";
@@ -164,6 +168,10 @@ export interface WorkerDay {
   calculatedAt: string;
   approvedBy: string | null;
   approvedAt: string | null;
+  /** Supervisor revisions of an approved day; its pay lines then include reversal lines (AC-25.8). */
+  revision?: number;
+  revisedBy?: string | null;
+  revisedAt?: string | null;
   payLines: PayLine[];
 }
 
@@ -305,6 +313,65 @@ export function chunk<T>(list: readonly T[], size: number = MAX_BATCH): T[][] {
     out.push(list.slice(i, i + size));
   }
   return out;
+}
+
+// --- Supervisor corrections and pay revision (slice 9, FR-25.8, AC-25.8) ---
+
+/** The audit record of one supervisor edit of a registration. */
+export interface Correction {
+  id: string;
+  registrationId: string;
+  workerId: string;
+  reason: string;
+  oldStartedAt: string;
+  oldStoppedAt: string | null;
+  oldHours: string | null;
+  newStartedAt: string;
+  newStoppedAt: string | null;
+  newHours: string | null;
+  correctedBy: string;
+  correctedAt: string;
+}
+
+export interface CorrectionInput {
+  startedAt?: string;
+  stoppedAt?: string;
+  /** 1 to 500 characters, kept for audit. */
+  reason: string;
+}
+
+export interface RevisedDay {
+  workDate: string;
+  status: DayStatus;
+  revision: number;
+  changed: boolean;
+  /** Lines with negative hours and amount that cancel approved lines. */
+  reversedLines: PayLine[];
+  addedLines: PayLine[];
+}
+
+export interface PayRevision {
+  workerId: string;
+  from: string;
+  to: string;
+  reason: string;
+  days: RevisedDay[];
+}
+
+export function correctRegistration(id: string, input: CorrectionInput, key: string = newKey()): Promise<Correction> {
+  return post<Correction>(`/registrations/${encodeURIComponent(id)}:correct`, input, key);
+}
+
+export function listCorrections(
+  filter: { from: string; to: string; workerId?: string; timeZone?: string },
+  signal?: AbortSignal,
+): Promise<Correction[]> {
+  return items<Correction>(`/registration-corrections${query(filter)}`, signal);
+}
+
+/** Recalculates a range and revises approved days with reversal lines (SF-0129 when nothing differs). */
+export function revisePay(input: PayRange & { reason: string }, key: string = newKey()): Promise<PayRevision> {
+  return post<PayRevision>("/pay:revise", input, key);
 }
 
 // --- Machines, downtime, andon, OEE and payroll export (slice 2) ---

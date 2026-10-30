@@ -191,7 +191,12 @@ type WorkerDay struct {
 	CalculatedAt time.Time       `json:"calculatedAt"`
 	ApprovedBy   *string         `json:"approvedBy"`
 	ApprovedAt   *time.Time      `json:"approvedAt"`
-	PayLines     []PayLine       `json:"payLines"`
+	// Revision counts the supervisor revisions of an approved day (AC-25.8); its pay
+	// lines then include the reversal lines.
+	Revision  int        `json:"revision"`
+	RevisedBy *string    `json:"revisedBy"`
+	RevisedAt *time.Time `json:"revisedAt"`
+	PayLines  []PayLine  `json:"payLines"`
 }
 
 // DayFilter selects worker-days for the approval list. WorkerID and Status are optional.
@@ -207,7 +212,7 @@ func (s *Postgres) ListWorkerDays(ctx context.Context, f DayFilter) ([]WorkerDay
 	out := []WorkerDay{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select d.worker_id::text, w.name, d.work_date::text, d.hours::text, d.flags, d.status, d.time_zone,
-				d.calculated_at, d.approved_by, d.approved_at
+				d.calculated_at, d.approved_by, d.approved_at, d.revision, d.revised_by, d.revised_at
 			from worker_day d join worker w on w.tenant_id = d.tenant_id and w.id = d.worker_id
 			where d.work_date between $1::date and $2::date
 			  and ($3 = '' or d.worker_id::text = $3) and ($4 = '' or d.status = $4)
@@ -219,7 +224,7 @@ func (s *Postgres) ListWorkerDays(ctx context.Context, f DayFilter) ([]WorkerDay
 			var d WorkerDay
 			var hours string
 			if err := rows.Scan(&d.WorkerID, &d.WorkerName, &d.WorkDate, &hours, &d.Flags, &d.Status, &d.TimeZone,
-				&d.CalculatedAt, &d.ApprovedBy, &d.ApprovedAt); err != nil {
+				&d.CalculatedAt, &d.ApprovedBy, &d.ApprovedAt, &d.Revision, &d.RevisedBy, &d.RevisedAt); err != nil {
 				rows.Close()
 				return err
 			}
@@ -239,16 +244,18 @@ func (s *Postgres) ListWorkerDays(ctx context.Context, f DayFilter) ([]WorkerDay
 			out[i].PayLines = []PayLine{}
 			index[out[i].WorkerID+"|"+out[i].WorkDate] = i
 		}
-		lines, err := tx.Query(ctx, `select worker_id::text, work_date::text, pay_type, hours::text, rate_multiplier::text, amount::text, currency
+		lines, err := tx.Query(ctx, `select worker_id::text, work_date::text, pay_type, hours::text, rate_multiplier::text, amount::text, currency, revision, reversal_of is not null
 			from pay_line where tenant_id = $1 and work_date between $2::date and $3::date and ($4 = '' or worker_id::text = $4)
-			order by worker_id, work_date, pay_type`, p.TenantID, f.FromDate, f.ToDate, f.WorkerID)
+			order by worker_id, work_date, revision, pay_type, id`, p.TenantID, f.FromDate, f.ToDate, f.WorkerID)
 		if err != nil {
 			return err
 		}
 		defer lines.Close()
 		for lines.Next() {
 			var worker, date, typ, hours, mult, amount, currency string
-			if err := lines.Scan(&worker, &date, &typ, &hours, &mult, &amount, &currency); err != nil {
+			var revision int
+			var reversal bool
+			if err := lines.Scan(&worker, &date, &typ, &hours, &mult, &amount, &currency, &revision, &reversal); err != nil {
 				return err
 			}
 			i, ok := index[worker+"|"+date]
@@ -259,6 +266,7 @@ func (s *Postgres) ListWorkerDays(ctx context.Context, f DayFilter) ([]WorkerDay
 			if err != nil {
 				return err
 			}
+			l.Revision, l.Reversal = revision, reversal
 			out[i].PayLines = append(out[i].PayLines, l)
 		}
 		return lines.Err()

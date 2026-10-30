@@ -53,6 +53,18 @@ const registrationColumns: DataTableColumn<Registration>[] = [
     render: (row) => (row.bundleId ? <Link to={`/shopfloor/bundles/${row.bundleId}`}>View bundle</Link> : dash),
   },
   {
+    key: "correct",
+    header: "Action",
+    render: (row) =>
+      row.bundleId ? (
+        dash
+      ) : (
+        <Link to={`/shopfloor/registrations/${row.id}/correct`} state={{ registration: row }} aria-label={`Correct ${row.kind} at ${formatDateTime(row.startedAt)}`}>
+          Correct
+        </Link>
+      ),
+  },
+  {
     key: "offline",
     header: "Source",
     render: (row) => (
@@ -147,6 +159,9 @@ export function WorkerDetailPage() {
             <Button variant="primary" loading={busy} onClick={calculate}>
               Calculate pay
             </Button>
+            <Link className={buttonClassName("secondary")} to={`/shopfloor/workers/${id}/revise`}>
+              Revise pay
+            </Link>
             <Link className={buttonClassName("secondary")} to="/shopfloor/time">
               Time approval
             </Link>

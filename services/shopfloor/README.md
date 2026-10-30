@@ -71,6 +71,31 @@ Shop floor execution service. Wave reference: **PSG-25 / Wave 25**
   scrap reason, check values, *Save report* and *Report and finish*) and the supervisor
   override form shown when a finish is blocked.
 
+## Slice 9: supervisor corrections and pay revision with reversal (FR-25.8, AC-25.8)
+
+- `POST registrations/{id}:correct` (duty `shopfloor.time.correct`, `Idempotency-Key`, a reason
+  of 1 to 500 characters) changes `startedAt` and/or `stoppedAt` of one registration. Rules
+  in `domain.PlanCorrection`: a clock-in or clock-out takes no stop, a closed registration
+  lasts at most 24 hours and its hours are recomputed, a bundled job registration is refused
+  (SF-0127), a job-start already closed by a job-stop is refused (SF-0127; the job-stop
+  carries the interval and hours, so it is the one to correct), a missing reason or no change is SF-0128, and the worker's own user cannot
+  correct (SF-0106). The before and after are kept in `registration_correction`
+  (migration 0009) and `dev.passage.shopfloor.registration.corrected.v1` is written through
+  the outbox. A day calculated before a correction is stale for approval (SF-0104).
+- `POST pay:revise` (duty `shopfloor.pay.revise`) recalculates a range and applies it:
+  days that are not approved are replaced as in `pay:calculate`; an approved day keeps its
+  lines. `domain.PlanRevision` compares the effective lines with the recalculation; lines
+  that differ are cancelled by reversal lines (`reversal_of`, negative hours and amount) and
+  the new lines are added, all with the day's next `revision`. The pay of a day is the sum of
+  its lines. The `pay_line` trigger still refuses updates and deletes of approved lines and
+  only admits inserts that carry a revision. Reversal and new lines join the next payroll
+  export. Event `dev.passage.shopfloor.payday.revised.v1`. No difference in any day is
+  SF-0129; an approved day that would carry open flags is SF-0006.
+- `GET registration-corrections?from&to[&workerId]` lists the audit trail.
+- Web: *Time corrections* list (`/shopfloor/corrections`), the correction form
+  (`/shopfloor/registrations/:id/correct`, linked from the worker's registrations), and the
+  revise form with the reversed and added lines (`/shopfloor/workers/:id/revise`).
+
 ## Slice 6: idle detection, OEE rollup, kiosk badge login, who is clocked in
 
 - Idle detection (BR-25.6): each machine has an idle threshold (`idleThresholdSeconds` on
@@ -321,6 +346,9 @@ OpenAPI and AsyncAPI files in step with the router and the published event types
 | POST `/v1/shopfloor/machine-events` | `shopfloor.machine.ingest` (edge gateway service identity) |
 | POST `/v1/shopfloor/downtimes/{id}:code` | `shopfloor.time.register` |
 | POST `/v1/shopfloor/pay:export`, GET `/pay-exports`, `/pay-exports/{id}` | `shopfloor.pay.export` (Export time to payroll) |
+| POST `/v1/shopfloor/registrations/{id}:correct` | `shopfloor.time.correct` (supervisor; not in the PRD duty table) |
+| POST `/v1/shopfloor/pay:revise` | `shopfloor.pay.revise` (supervisor; not in the PRD duty table) |
+| GET `/v1/shopfloor/registration-corrections` | `shopfloor.view` |
 | POST `/v1/shopfloor/jobs` | `shopfloor.job.schedule` (w23 schedule service identity; not in the PRD duty table) |
 | GET `/v1/shopfloor/jobs`, `/jobs/{id}`; POST `/jobs/{id}:feedback` | `shopfloor.time.register`; an `override` also needs `shopfloor.check.override` (shop floor supervisor; not in the PRD duty table) |
 | POST `/v1/shopfloor/process-messages`, `/process-messages/{id}:reprocess`, `/process-messages/{id}:delete` | `shopfloor.process.create` (Create process messages: manual, reprocess/delete with reason) |
@@ -368,6 +396,10 @@ Problem details use `application/problem+json` with `type` `https://passage.dev/
 | `SF-0123` | 422 | A check value names a check that is not defined on the job |
 | `SF-0124` | 422 | The `feedbackId` was already used for another job |
 | `SF-0125` | 422 | A check value cannot be evaluated (not a number, not pass or fail, or blank); `errors` names it |
+| `SF-0126` | 404 | The registration to correct does not exist |
+| `SF-0127` | 422 | The registration cannot be corrected (a bundled job registration, a job-start already closed by a job-stop, or a stop time on a clock-in or clock-out) |
+| `SF-0128` | 422 | The correction is invalid (no reason, stop before start, over 24 hours, or nothing changes) |
+| `SF-0129` | 422 | `pay:revise` found the recalculated pay equal to the stored pay in every day of the range |
 | `idempotency_key_reuse` | 422 | `Idempotency-Key` already used with a different request |
 
 Warnings on an accepted registration (`items[].warnings`, the request succeeds):

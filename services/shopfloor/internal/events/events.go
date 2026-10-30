@@ -28,12 +28,16 @@ var (
 	// JobReported is not in the PRD event table: production (w21) needs the reported
 	// quantities and the finish of an operation, quality (w33) the failed checks.
 	JobReported = events.Type(Context, "job", "reported", 1)
+	// RegistrationCorrected and PaydayRevised are not in the PRD event table: payroll and
+	// the w21 job-card consumer must learn that approved or posted time changed (FR-25.8, AC-25.8).
+	RegistrationCorrected = events.Type(Context, "registration", "corrected", 1)
+	PaydayRevised         = events.Type(Context, "payday", "revised", 1)
 )
 
 // All lists every event type the service publishes (used by the startup registry check).
 func All() []string {
 	return []string{RegistrationPosted, PaydayApproved, PaydayExported, AndonRaised, ProcessMessageReceived, ProcessMessageDelivered, ProcessMessageDeleted,
-		OEEBucketUpdated, OEEBucketRemoved, JobReported}
+		OEEBucketUpdated, OEEBucketRemoved, JobReported, RegistrationCorrected, PaydayRevised}
 }
 
 // ProcessMessageReceivedData is the payload of dev.passage.shopfloor.processmessage.received.v1,
@@ -194,4 +198,36 @@ type PaydayApprovedData struct {
 	WorkDate   string        `json:"workDate"`
 	PayLines   []PayLineData `json:"payLines"`
 	ApprovedBy string        `json:"approvedBy"`
+}
+
+// RegistrationCorrectedData is the payload of dev.passage.shopfloor.registration.corrected.v1,
+// published when a supervisor changes the times of a registration with a reason (FR-25.8).
+// Hours is the new elapsed time of a closed registration; consumers that posted the old
+// hours (w21 job card) replace them.
+type RegistrationCorrectedData struct {
+	RegistrationID string           `json:"registrationId"`
+	WorkerID       string           `json:"workerId"`
+	Kind           string           `json:"kind"`
+	JobID          *string          `json:"jobId"`
+	OldStartedAt   time.Time        `json:"oldStartedAt"`
+	OldStoppedAt   *time.Time       `json:"oldStoppedAt"`
+	NewStartedAt   time.Time        `json:"newStartedAt"`
+	NewStoppedAt   *time.Time       `json:"newStoppedAt"`
+	Hours          *decimal.Decimal `json:"hours"`
+	Reason         string           `json:"reason"`
+	CorrectedBy    string           `json:"correctedBy"`
+}
+
+// PaydayRevisedData is the payload of dev.passage.shopfloor.payday.revised.v1, published
+// when a supervisor revises an approved worker-day (BR-25.8, AC-25.8). ReversedLines
+// carry negative hours and amounts and cancel lines that were approved (and possibly
+// exported); AddedLines are the new pay lines. Revision counts the day's revisions.
+type PaydayRevisedData struct {
+	WorkerID      string        `json:"workerId"`
+	WorkDate      string        `json:"workDate"`
+	Revision      int           `json:"revision"`
+	Reason        string        `json:"reason"`
+	ReversedLines []PayLineData `json:"reversedLines"`
+	AddedLines    []PayLineData `json:"addedLines"`
+	RevisedBy     string        `json:"revisedBy"`
 }

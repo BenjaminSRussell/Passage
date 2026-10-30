@@ -91,6 +91,9 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		"/v1/shopfloor/jobs get":                                                   DutyRegister,
 		"/v1/shopfloor/jobs/{id} get":                                              DutyRegister,
 		"/v1/shopfloor/jobs/{id}:feedback post":                                    DutyRegister,
+		"/v1/shopfloor/registrations/{id}:correct post":                            DutyTimeCorrect,
+		"/v1/shopfloor/registration-corrections get":                               DutyView,
+		"/v1/shopfloor/pay:revise post":                                            DutyPayRevise,
 	}
 	keyed := map[string]bool{
 		"/v1/shopfloor/workers post":                                               true,
@@ -102,6 +105,8 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		"/v1/shopfloor/process-messages/{id}/deliveries/{destination}:report post": true,
 		"/v1/shopfloor/process-messages/{id}:reprocess post":                       true,
 		"/v1/shopfloor/process-messages/{id}:delete post":                          true,
+		"/v1/shopfloor/registrations/{id}:correct post":                            true,
+		"/v1/shopfloor/pay:revise post":                                            true,
 	}
 	for op := range served {
 		d, ok := declared[op]
