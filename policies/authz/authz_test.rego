@@ -22,7 +22,7 @@ has_route_permissions(spec) if {
 }
 
 test_all_seeded_duties_allow_their_declared_permissions if {
-	count(data.duties) == 114
+	count(data.duties) == 115
 	every duty, spec in data.duties {
 		has_route_permissions(spec)
 		every permission in spec.permissions {
@@ -493,6 +493,18 @@ test_service_grants_allow_only_their_declared_routes if {
 	}
 }
 
+service_granted(duty) if {
+	some _, targets in data.service_grants
+	some _, duties in targets
+	duty in duties
+}
+
+test_service_only_duties_are_service_granted if {
+	data.duties["procurement.invoicing-plan.settle"].service_only
+	orphans := {d | data.duties[d].service_only; not service_granted(d)}
+	count(orphans) == 0
+}
+
 test_service_grants_hold_no_flag_or_all_scope_duty if {
 	every _, targets in data.service_grants {
 		every _, duties in targets {
@@ -502,6 +514,18 @@ test_service_grants_hold_no_flag_or_all_scope_duty if {
 			}
 		}
 	}
+}
+
+test_receiving_purchasing_grant_reaches_only_the_plan_row_settlement_route if {
+	data.service_grants.receiving.purchasing == ["procurement.invoicing-plan.settle"]
+	allowed("procurement.invoicing-plan.settle", "PUT", "/v1/procurement/purchase-orders/po-1/lines/1/invoicing-plan/rows/2/settlement")
+	not allowed("procurement.invoicing-plan.settle", "GET", "/v1/procurement/purchase-orders/po-1/lines/1/invoicing-plan/rows/2/settlement")
+	not allowed("procurement.invoicing-plan.settle", "PUT", "/v1/procurement/purchase-orders/po-1/lines/1/invoicing-plan")
+	not allowed("procurement.invoicing-plan.settle", "DELETE", "/v1/procurement/purchase-orders/po-1/lines/1/invoicing-plan")
+	not allowed("procurement.invoicing-plan.settle", "PATCH", "/v1/procurement/purchase-orders/po-1")
+	not allowed("procurement.invoicing-plan.settle", "POST", "/v1/procurement/purchase-orders")
+	not allowed("procurement.invoicing-plan.settle", "POST", "/v1/ledger/journal-entries")
+	not allowed("PurchaseOrderMaintain", "PUT", "/v1/procurement/purchase-orders/po-1/lines/1/invoicing-plan/rows/2/settlement")
 }
 
 test_batch_service_grant_reaches_only_the_product_job_routes if {

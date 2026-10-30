@@ -27,6 +27,7 @@ const (
 type Client struct {
 	baseURL string
 	http    *http.Client
+	signer  *tenant.ServiceSigner
 }
 
 func New(baseURL string, httpClient *http.Client) *Client {

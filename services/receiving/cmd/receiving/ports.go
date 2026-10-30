@@ -41,11 +41,12 @@ func buildPorts(getenv func(string) string) (api.Ports, error) {
 	}
 	switch url := getenv("PURCHASING_URL"); {
 	case url != "":
-		client := purchasing.New(url, nil)
-		ports.PurchaseOrders, ports.InvoicingPlans = client, client
+		client := purchasing.New(url, nil).WithSigner(signer)
+		ports.PurchaseOrders, ports.InvoicingPlans, ports.PlanRowSettlements = client, client, client
 	case allowFakes:
 		slog.Warn("PURCHASING_URL is empty: purchase order and invoicing plan lookups find nothing", "flag", "PASSAGE_ALLOW_FAKES")
 		ports.PurchaseOrders, ports.InvoicingPlans = domain.FakePurchaseOrders{}, domain.FakeInvoicingPlans{}
+		ports.PlanRowSettlements = domain.FakePlanRowSettlements{}
 	default:
 		return api.Ports{}, fmt.Errorf("PURCHASING_URL is required (set PASSAGE_ALLOW_FAKES=1 only for local development)")
 	}

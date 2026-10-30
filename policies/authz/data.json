@@ -255,6 +255,9 @@
       {"resource": "/v1/procurement/pricing/lookup", "methods": ["GET"]},
       {"resource": "/v1/procurement/purchase-orders/*/lines/*/invoicing-plan", "methods": ["PUT", "DELETE"]}
     ]},
+    "procurement.invoicing-plan.settle": {"service_only": true, "permissions": [
+      {"resource": "/v1/procurement/purchase-orders/*/lines/*/invoicing-plan/rows/*/settlement", "methods": ["PUT"]}
+    ]},
     "PurchaseOrderInquire": {"permissions": [
       {"resource": "/v1/procurement/purchase-orders", "methods": ["GET"]},
       {"resource": "/v1/procurement/purchase-orders/*", "methods": ["GET"]},
@@ -389,7 +392,8 @@
     },
     "receiving": {
       "ledger": ["ledger.journal.post", "ledger.journal.reverse"],
-      "close": ["period.check"]
+      "close": ["period.check"],
+      "purchasing": ["procurement.invoicing-plan.settle"]
     },
     "payables": {
       "ledger": ["ledger.balance.read", "ledger.journal.read", "ledger.journal.post"]

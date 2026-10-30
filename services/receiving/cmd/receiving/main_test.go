@@ -185,6 +185,9 @@ func TestBuildPortsWiresPlanAndOwnershipLookups(t *testing.T) {
 	if plans, ok := real.InvoicingPlans.(*purchasing.Client); !ok || plans != real.PurchaseOrders {
 		t.Fatalf("invoicing plans is %T, want the purchasing client that serves purchase orders", real.InvoicingPlans)
 	}
+	if marks, ok := real.PlanRowSettlements.(*purchasing.Client); !ok || marks != real.PurchaseOrders {
+		t.Fatalf("plan row settlements is %T, want the purchasing client", real.PlanRowSettlements)
+	}
 	if unset := build(nil); unset.OwnershipChanges != nil {
 		t.Fatalf("ownership changes is %T with INVENTORY_URL unset and no fakes: the endpoint must answer 503", unset.OwnershipChanges)
 	}
@@ -195,6 +198,9 @@ func TestBuildPortsWiresPlanAndOwnershipLookups(t *testing.T) {
 	noPurchasing, err := buildPorts(func(k string) string { return map[string]string{"PASSAGE_ALLOW_FAKES": "1"}[k] })
 	if _, ok := noPurchasing.InvoicingPlans.(domain.FakeInvoicingPlans); !ok || err != nil {
 		t.Fatalf("invoicing plans is %T err %v with fakes allowed", noPurchasing.InvoicingPlans, err)
+	}
+	if _, ok := noPurchasing.PlanRowSettlements.(domain.FakePlanRowSettlements); !ok {
+		t.Fatalf("plan row settlements is %T with fakes allowed", noPurchasing.PlanRowSettlements)
 	}
 }
 

@@ -19,6 +19,7 @@ type compiledPermission struct {
 type catalogueDuty struct {
 	permissions []compiledPermission
 	size        int
+	serviceOnly bool
 }
 
 func (d *catalogueDuty) grants(method, resource string) bool {
@@ -58,6 +59,7 @@ type Catalogue struct {
 
 type catalogueFile struct {
 	Duties map[string]struct {
+		ServiceOnly bool `json:"service_only"`
 		Permissions []struct {
 			Resource string   `json:"resource"`
 			Methods  []string `json:"methods"`
@@ -92,7 +94,7 @@ func LoadCatalogue(raw []byte) (*Catalogue, error) {
 	c := &Catalogue{duties: map[string]*catalogueDuty{}}
 	seen := map[Route]bool{}
 	for name, spec := range file.Duties {
-		duty := &catalogueDuty{}
+		duty := &catalogueDuty{serviceOnly: spec.ServiceOnly}
 		for _, p := range spec.Permissions {
 			pattern, err := compileGlob(p.Resource)
 			if err != nil {
@@ -122,6 +124,13 @@ func LoadCatalogue(raw []byte) (*Catalogue, error) {
 
 // HasDuty reports whether name is a seeded duty.
 func (c *Catalogue) HasDuty(name string) bool { _, ok := c.duties[name]; return ok }
+
+// ServiceOnly reports whether the duty is held only through a service grant
+// and must never be assigned to a person.
+func (c *Catalogue) ServiceOnly(name string) bool {
+	d, ok := c.duties[name]
+	return ok && d.serviceOnly
+}
 
 // Routes lists every distinct resource pattern and method, sorted.
 func (c *Catalogue) Routes() []Route { return slices.Clone(c.routes) }

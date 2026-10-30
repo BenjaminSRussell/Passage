@@ -46,10 +46,12 @@ type Ports struct {
 	Ledger  domain.LedgerPoster
 	Profile domain.PostingProfile
 
-	PurchaseOrders   domain.PurchaseOrders
-	InvoicingPlans   domain.InvoicingPlans
-	OwnershipChanges domain.OwnershipChanges
-	AuditSampler     *domain.Sampler
+	PurchaseOrders domain.PurchaseOrders
+	InvoicingPlans domain.InvoicingPlans
+
+	PlanRowSettlements domain.PlanRowSettlements
+	OwnershipChanges   domain.OwnershipChanges
+	AuditSampler       *domain.Sampler
 
 	ResolveMinAge time.Duration
 	ResolveLease  time.Duration
@@ -69,6 +71,7 @@ type API struct {
 	invoiced        atomic.Int64
 	adjustments     atomic.Int64
 	settlements     atomic.Int64
+	planMarkFailed  atomic.Int64
 	ersSettled      atomic.Int64
 	auditBlocked    atomic.Int64
 	resolveFallback atomic.Int64
@@ -141,6 +144,7 @@ func (a *API) Metrics() http.Handler {
 		name, help string
 		value      *atomic.Int64
 	}{
+		{"receiving_plan_row_marks_failed_total", "Plan row settlements purchasing could not be told about; the next plan run retries them.", &a.planMarkFailed},
 		{"receiving_matches_evaluated_total", "Invoices evaluated by the matching engine.", &a.evaluated},
 		{"receiving_evaluate_rejected_total", "Evaluate requests rejected by validation.", &a.rejected},
 		{"receiving_receipts_arrived_total", "Receipts recorded at arrival.", &a.arrived},
