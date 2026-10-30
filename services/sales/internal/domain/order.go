@@ -17,6 +17,9 @@ const (
 	OrderOpen      = "OPEN"
 	OrderConfirmed = "CONFIRMED"
 
+	// OrderTypeJournal orders never reserve or consume ATP (BR-27.7).
+	OrderTypeJournal = "JOURNAL"
+
 	HoldCredit      = "CREDIT"
 	HoldFraud       = "FRAUD"
 	HoldManual      = "MANUAL"

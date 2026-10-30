@@ -21,12 +21,46 @@ var (
 	AllocationQuotaMoved = events.Type(Context, "allocationquota", "changed", 1)
 	AllocationConsumed   = events.Type(Context, "allocation", "consumed", 1)
 	AllocationReturned   = events.Type(Context, "allocation", "returned", 1)
+	ATPPromised          = events.Type(Context, "atp", "promised", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
 	return []string{OrderConfirmed, OrderHoldApplied, OrderHoldReleased, CreditCheckEvaluated, OrderChanged, OrderCancelled, AgreementReleased,
-		QuotationConverted, AllocationQuotaSet, AllocationQuotaMoved, AllocationConsumed, AllocationReturned}
+		QuotationConverted, AllocationQuotaSet, AllocationQuotaMoved, AllocationConsumed, AllocationReturned, ATPPromised}
+}
+
+// PromisedSlice is one schedule line of an ATP promise.
+type PromisedSlice struct {
+	Date       string `json:"date,omitempty"`
+	BucketDate string `json:"bucket_date,omitempty"`
+	Quantity   string `json:"quantity"`
+	Status     string `json:"status"`
+}
+
+// ATPPromisedData is the data member of atp.promised.v1: an order line was
+// promised against cumulative ATP and split into schedule lines (FR-27.6).
+// requested_ship_date is the line's requested date; promised_date (the
+// confirmed date) is the date of the first dated slice; source is ATP, or
+// ALLOCATION when the line's quota period held the promise back; each slice
+// names the ATP bucket it drew on; backorder_qty is the quantity promised
+// after the requested date or not at all.
+type ATPPromisedData struct {
+	OrderID           string          `json:"order_id"`
+	LineID            string          `json:"line_id"`
+	LineNo            int             `json:"line_no"`
+	ProductID         string          `json:"product_id"`
+	SiteID            string          `json:"site_id"`
+	WarehouseID       string          `json:"warehouse_id"`
+	Quantity          string          `json:"quantity"`
+	RequestedShipDate string          `json:"requested_ship_date"`
+	Source            string          `json:"source"`
+	Complete          bool            `json:"complete"`
+	PromisedDate      string          `json:"promised_date,omitempty"`
+	BackorderQty      string          `json:"backorder_qty"`
+	Schedule          []PromisedSlice `json:"schedule"`
+	Actor             string          `json:"actor"`
+	Version           int             `json:"version"`
 }
 
 // AllocationQuotaData is the data member of allocationquota.created.v1 and

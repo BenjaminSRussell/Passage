@@ -21,6 +21,7 @@ import {
 } from "./api/client";
 import { dash, formatDateTime, money, sentence } from "./format";
 import { OrderHistory } from "./OrderHistory";
+import { OrderSchedule } from "./OrderSchedule";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -275,6 +276,7 @@ export function OrderDetailPage() {
         </dl>
       </Card>
       <DataTable label="Order lines" columns={lineColumns} rows={order.lines} getRowKey={(l) => l.id} empty={{ title: "No lines" }} />
+      {order.status === "CONFIRMED" ? <OrderSchedule order={order} /> : null}
       <Card title="Holds">
         {order.holds.length === 0 ? (
           <EmptyState compact headingLevel={3} title="No holds" description="Holds placed by the credit check or by a sales manager appear here." />

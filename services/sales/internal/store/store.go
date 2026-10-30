@@ -249,6 +249,9 @@ type Store interface {
 	ListAllocationQuotas(ctx context.Context, f AllocationFilter) ([]AllocationQuota, error)
 	GetAllocationQuota(ctx context.Context, id string) (AllocationQuota, error)
 	ChangeAllocationQuota(ctx context.Context, id string, version int, qty decimal.Decimal, actor string, now time.Time) (AllocationQuota, error)
+	PromiseLine(ctx context.Context, orderID string, version int, req PromiseRequest, actor string, now time.Time) (PromiseResult, error)
+	ListScheduleLines(ctx context.Context, orderID string) ([]ScheduleLine, error)
+	ListBackorders(ctx context.Context, f BackorderFilter) ([]BackorderItem, error)
 	Ping(ctx context.Context) error
 }
 
@@ -622,6 +625,9 @@ func confirmOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order) (O
 		return Order{}, err
 	}
 	if err := setOrderState(ctx, tx, tenantID, o.ID, domain.OrderConfirmed); err != nil {
+		return Order{}, err
+	}
+	if err := syncScheduleTx(ctx, tx, tenantID, o.ID); err != nil {
 		return Order{}, err
 	}
 	confirmed, err := loadOrder(ctx, tx, tenantID, o.ID, false)

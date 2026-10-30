@@ -5,6 +5,7 @@ import { AllocationQuotasPage, NewAllocationQuotaPage } from "./AllocationQuotas
 import { AgreementDetailPage } from "./AgreementDetailPage";
 import { AgreementsPage, NewAgreementPage } from "./AgreementsPage";
 import { AtpCheckPage } from "./AtpCheckPage";
+import { BackordersPage } from "./BackordersPage";
 import { BackorderRunPage } from "./BackorderRunPage";
 import { ChangeOrderPage } from "./ChangeOrderPage";
 import { CreditProfilePage, NewCreditProfilePage } from "./CreditProfileFormPage";
@@ -15,6 +16,7 @@ import { HoldQueuePage } from "./HoldQueuePage";
 import { OrdersPage } from "./OrdersPage";
 import { NewProductListingPage, ProductListingsPage } from "./ProductListingsPage";
 import { NewProposalRulePage, ProposalRulesPage } from "./ProposalRulesPage";
+import { PromiseLinePage } from "./PromiseLinePage";
 import { QuotationDetailPage } from "./QuotationDetailPage";
 import { NewQuotationPage, QuotationsPage } from "./QuotationsPage";
 import { ScheduleReleasePage } from "./ScheduleReleasePage";
@@ -31,6 +33,8 @@ const sales: PassageModule = {
     { path: "/sales/orders/new", element: createElement(NewOrderPage), handle: { title: "New sales order" } },
     { path: "/sales/orders/:id", element: createElement(OrderDetailPage), handle: { title: "Sales order" } },
     { path: "/sales/orders/:id/change", element: createElement(ChangeOrderPage), handle: { title: "Change sales order" } },
+    { path: "/sales/orders/:id/promise", element: createElement(PromiseLinePage), handle: { title: "Promise order line" } },
+    { path: "/sales/backorders", element: createElement(BackordersPage), handle: { title: "Backorders" } },
     { path: "/sales/credit-holds", element: createElement(HoldQueuePage) },
     { path: "/sales/credit-profiles", element: createElement(CreditProfilesPage) },
     { path: "/sales/credit-profiles/new", element: createElement(NewCreditProfilePage), handle: { title: "New credit profile" } },
@@ -62,6 +66,7 @@ const sales: PassageModule = {
     { label: "Credit profiles", to: "/sales/credit-profiles", duty: "sales.order.read" },
     { label: "ATP check", to: "/sales/atp", duty: "sales.order.read" },
     { label: "Scheduling release check", to: "/sales/schedule-releases", duty: "sales.agreement.maintain" },
+    { label: "Backorders", to: "/sales/backorders", duty: "sales.order.read" },
     { label: "Backorder run preview", to: "/sales/backorder-runs", duty: "sales.backorder.run" },
     { label: "Product listings", to: "/sales/product-listings", duty: "sales.order.read" },
     { label: "Sales agreements", to: "/sales/agreements", duty: "sales.order.read" },

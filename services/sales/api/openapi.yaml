@@ -543,6 +543,109 @@ paths:
                     items: {$ref: "#/components/schemas/OrderVersion"}
         "403": {$ref: "#/components/responses/Problem"}
         "404": {$ref: "#/components/responses/Problem"}
+  /v1/sales/orders/{id}/lines/{lineNo}:promise:
+    post:
+      summary: Promise one line of a confirmed order against ATP buckets and store its schedule lines (FR-27.6, BR-27.1, AC-27.8)
+      description: >-
+        Places the line quantity against the supplied buckets. The part that can ship by the requested date stays CONFIRMED, supply that
+        arrives later becomes BACKORDER lines and quantity no bucket covers an UNPROMISED line. The line's confirmed ship date becomes the
+        first dated schedule line (never earlier than the quota period it drew from, BR-27.15), its supplementary lines follow, the order
+        gets a new version with the diff, and order.changed and atp.promised are written in the same transaction.
+      operationId: promiseOrderLine
+      x-passage-duty: sales.order.write
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: lineNo, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [periods]
+              properties:
+                completeOnly: {type: boolean, default: false, description: ship the whole quantity on one date or backorder it in full}
+                periods:
+                  type: array
+                  minItems: 1
+                  maxItems: 1000
+                  items: {$ref: "#/components/schemas/AtpPeriod"}
+      responses:
+        "200":
+          description: the order after the promise and the active schedule lines of the order
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [order, scheduleLines]
+                properties:
+                  order: {$ref: "#/components/schemas/Order"}
+                  scheduleLines:
+                    type: array
+                    items: {$ref: "#/components/schemas/ScheduleLine"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404":
+          description: SLS-0100 the order does not exist; SLS-0109 the order has no such line
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422":
+          description: SLS-0037 the order is not CONFIRMED or is a JOURNAL order, the line is past RESERVED or the line is a supplementary line
+          content:
+            application/problem+json:
+              schema: {$ref: "#/components/schemas/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/orders/{id}/schedule-lines:
+    get:
+      summary: The active schedule lines of an order by line and sequence (FR-27.6)
+      operationId: listScheduleLines
+      x-passage-duty: sales.order.read
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: CONFIRMED, BACKORDER and UNPROMISED schedule lines; superseded and cancelled lines are not listed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/ScheduleLine"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+  /v1/sales/backorders:
+    get:
+      summary: Backorder list - schedule lines promised after the requested date or not at all, by promised date (FR-27.6, AC-27.8)
+      operationId: listBackorders
+      x-passage-duty: sales.order.read
+      parameters:
+        - {name: legalEntityId, in: query, schema: {type: string, format: uuid}}
+        - {name: productId, in: query, schema: {type: string, format: uuid}}
+        - {name: customerId, in: query, schema: {type: string, format: uuid}}
+        - {name: promisedTo, in: query, description: only lines promised on or before this date (undated lines are always listed), schema: {type: string, format: date}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        "200":
+          description: backorder lines of CONFIRMED orders, earliest promised date first, undated lines last
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/BackorderItem"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
   /v1/sales/schedule-releases:check:
     post:
       summary: Stateless reconciliation of a scheduling-agreement release; a cumulative mismatch holds the release (BR-27.12, FR-27.20)
@@ -1614,6 +1717,38 @@ components:
           items: {type: string, enum: [CREDIT, FRAUD, MANUAL, PRICE_REVIEW]}
         version: {type: integer}
         createdAt: {type: string, format: date-time}
+    ScheduleLine:
+      type: object
+      required: [id, lineNo, seq, quantity, status, source]
+      properties:
+        id: {type: string, format: uuid}
+        lineNo: {type: integer}
+        seq: {type: integer}
+        quantity: {$ref: "#/components/schemas/Money"}
+        deliveryDate: {type: string, format: date, description: absent on an UNPROMISED line}
+        status: {type: string, enum: [CONFIRMED, BACKORDER, UNPROMISED]}
+        source: {type: string, enum: [LINE, ATP], description: LINE copies the line's confirmed ship date (confirm or change); ATP was placed by a promise}
+        bucketDate: {type: string, format: date, description: the ATP bucket a dated ATP slice drew on}
+    BackorderItem:
+      type: object
+      required: [scheduleLineId, legalEntityId, orderId, orderNumber, orderVersion, customerId, lineId, lineNo, productId, siteId, warehouseId, quantity, requestedShipDate, status]
+      properties:
+        scheduleLineId: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid}
+        orderId: {type: string, format: uuid}
+        orderNumber: {type: string}
+        orderVersion: {type: integer}
+        customerId: {type: string, format: uuid}
+        lineId: {type: string, format: uuid}
+        lineNo: {type: integer}
+        productId: {type: string, format: uuid}
+        siteId: {type: string}
+        warehouseId: {type: string}
+        quantity: {$ref: "#/components/schemas/Money"}
+        requestedShipDate: {type: string, format: date}
+        promisedDate: {type: string, format: date, description: absent when no supply covers the quantity}
+        daysLate: {type: integer, description: promised date minus requested date}
+        status: {type: string, enum: [BACKORDER, UNPROMISED]}
     OrderVersion:
       type: object
       required: [version, actor, reason, diff, changedAt]

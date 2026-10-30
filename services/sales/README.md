@@ -99,6 +99,9 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | GET / POST | `/v1/sales/agreements` | `sales.order.read` / `sales.agreement.maintain` | List (`legalEntityId`, `customerId`, `status`, `limit`); create with `Idempotency-Key`, numbered `SA-` |
 | GET | `/v1/sales/agreements/{id}` | `sales.order.read` | With remaining quantity and release history |
 | POST | `/v1/sales/agreements/{id}:release-order` | `sales.agreement.maintain` | `Idempotency-Key`; creates a DRAFT order at the agreement price and decrements the commitment atomically; emits `agreement.released` |
+| POST | `/v1/sales/orders/{id}/lines/{lineNo}:promise` | `sales.order.write` | `If-Match`; places one line of a CONFIRMED order against the supplied ATP buckets (`periods`, `completeOnly`) and stores its schedule lines: CONFIRMED up to the requested date, BACKORDER after it, UNPROMISED for quantity no bucket covers (FR-27.6, AC-27.8). New order version, `order.changed` and `atp.promised` |
+| GET | `/v1/sales/orders/{id}/schedule-lines` | `sales.order.read` | The order's active schedule lines |
+| GET | `/v1/sales/backorders` | `sales.order.read` | Backorder list by promised date, undated last (`legalEntityId`, `productId`, `customerId`, `promisedTo`, `limit`) |
 | POST | `/v1/sales/atp:check` | `sales.order.read` | Stateless BR-27.1 check over supplied buckets |
 | POST | `/v1/sales/schedule-releases:check` | `sales.agreement.maintain` | Stateless BR-27.12 reconciliation; a mismatch returns `held: true`, `code: CUM_QTY_MISMATCH` and no schedule lines |
 | POST | `/v1/sales/backorder-runs:preview` | `sales.backorder.run` | Stateless FR-27.17 preview over supplied lines; nothing is committed |
@@ -253,6 +256,7 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0034` | 409 | A product proposal rule for the ordered product, customer (or all customers) and proposed product exists |
 | `SLS-0035` | 409 | An allocation quota for the product and customer (or all customers) already covers part of the period |
 | `SLS-0036` | 409 | Allocation quota set below the consumed quantity |
+| `SLS-0037` | 422 | The order is not CONFIRMED or is a JOURNAL order (BR-27.7), the line is past RESERVED, or the line is a supplementary line, so it cannot be promised |
 | `SLS-0100` | 404 | Order not found |
 | `SLS-0101` | 404 | Hold not found |
 | `SLS-0102` | 404 | Credit profile not found |
@@ -262,6 +266,7 @@ Problem details are `application/problem+json` with `type` =
 | `SLS-0106` | 404 | Supplementary item rule not found |
 | `SLS-0107` | 404 | Product proposal rule not found (also on `:respond` for a rule outside the legal entity) |
 | `SLS-0108` | 404 | Allocation quota not found |
+| `SLS-0109` | 404 | Order line not found |
 | `idempotency_key_reuse` | 422 | Same `Idempotency-Key` with a different body (kernel) |
 | `COM-0001` | 400 | Request failed validation; field errors in `errors` |
 | `AUTH-0001` | 401 | Missing or malformed tenant |

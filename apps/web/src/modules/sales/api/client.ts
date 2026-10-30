@@ -985,3 +985,81 @@ export function changeAllocationQuota(id: string, etag: string, quotaQty: Decima
     headers: { "If-Match": etag },
   });
 }
+
+export const SCHEDULE_STATUSES = ["CONFIRMED", "BACKORDER", "UNPROMISED"] as const;
+export type ScheduleStatus = (typeof SCHEDULE_STATUSES)[number];
+
+/** One delivery slice of an order line (FR-27.6); no date while UNPROMISED. */
+export interface ScheduleLine {
+  id: string;
+  lineNo: number;
+  seq: number;
+  quantity: Decimal;
+  deliveryDate?: string;
+  status: ScheduleStatus;
+  /** LINE copies the line's confirmed ship date; ATP was placed by a promise. */
+  source: "LINE" | "ATP";
+  /** The ATP bucket a dated ATP slice drew on. */
+  bucketDate?: string;
+}
+
+export interface PromiseLineInput {
+  completeOnly: boolean;
+  periods: AtpPeriod[];
+}
+
+export interface PromiseLineResult {
+  order: Order;
+  scheduleLines: ScheduleLine[];
+}
+
+export interface BackorderItem {
+  scheduleLineId: string;
+  legalEntityId: string;
+  orderId: string;
+  orderNumber: string;
+  orderVersion: number;
+  customerId: string;
+  lineId: string;
+  lineNo: number;
+  productId: string;
+  siteId: string;
+  warehouseId: string;
+  quantity: Decimal;
+  requestedShipDate: string;
+  promisedDate?: string;
+  daysLate?: number;
+  status: "BACKORDER" | "UNPROMISED";
+}
+
+export interface BackorderFilter {
+  legalEntityId?: string;
+  productId?: string;
+  customerId?: string;
+  promisedTo?: string;
+}
+
+/** Places a line of a confirmed order against ATP buckets and stores its schedule lines (FR-27.6). */
+export function promiseLine(orderId: string, lineNo: number, etag: string, input: PromiseLineInput): Promise<Versioned<PromiseLineResult>> {
+  return versioned<PromiseLineResult>(`/orders/${encodeURIComponent(orderId)}/lines/${lineNo}:promise`, {
+    method: "POST",
+    body: JSON.stringify(input),
+    headers: { "If-Match": etag },
+  });
+}
+
+/** The order's active schedule lines by line and sequence. */
+export async function listScheduleLines(orderId: string, signal?: AbortSignal): Promise<ScheduleLine[]> {
+  const body = await json<{ items?: ScheduleLine[] }>(`/orders/${encodeURIComponent(orderId)}/schedule-lines`, {}, signal);
+  return body.items ?? [];
+}
+
+/** Lines promised after the requested date or not at all, by promised date (AC-27.8). */
+export async function listBackorders(filter: BackorderFilter = {}, signal?: AbortSignal): Promise<BackorderItem[]> {
+  const body = await json<{ items?: BackorderItem[] }>(
+    `/backorders${query({ legalEntityId: filter.legalEntityId, productId: filter.productId, customerId: filter.customerId, promisedTo: filter.promisedTo, limit: 200 })}`,
+    {},
+    signal,
+  );
+  return body.items ?? [];
+}

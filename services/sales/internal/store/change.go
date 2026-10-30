@@ -292,6 +292,11 @@ func (s *Postgres) ChangeOrder(ctx context.Context, id string, version int, req 
 			notices = alloc.Notices
 			diff = withAllocationMoves(diff, before, alloc.Moved)
 		}
+		if o.Status == domain.OrderConfirmed {
+			if err := syncScheduleTx(ctx, tx, p.TenantID, id); err != nil {
+				return err
+			}
+		}
 		next := o.Version + 1
 		if _, err := tx.Exec(ctx, `update sales_order set requested_ship_date = $3::date, net_total = $4::numeric, version = $5, updated_at = $6
 			where tenant_id = $1 and id = $2`, p.TenantID, id, o.RequestedShipDate, o.NetTotal.String(), next, now); err != nil {
@@ -359,6 +364,9 @@ func (s *Postgres) CancelOrder(ctx context.Context, id string, version int, reas
 			return err
 		}
 		if err := returnAllocationTx(ctx, tx, p.TenantID, o, nil, now); err != nil {
+			return err
+		}
+		if err := syncScheduleTx(ctx, tx, p.TenantID, id); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `update order_hold set status = 'CLEARED' where tenant_id = $1 and order_id = $2 and status = 'ACTIVE'`, p.TenantID, id); err != nil {

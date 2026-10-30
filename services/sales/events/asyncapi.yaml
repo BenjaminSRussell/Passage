@@ -72,6 +72,11 @@ channels:
     messages:
       allocationReturned:
         $ref: "#/components/messages/AllocationReturned"
+  atpPromised:
+    address: passage.sales.atp
+    messages:
+      atpPromised:
+        $ref: "#/components/messages/ATPPromised"
 operations:
   publishQuotationConverted:
     action: send
@@ -153,6 +158,14 @@ operations:
       Keyed by the quota id. Consumers - planning, analytics.
     messages:
       - {$ref: "#/channels/allocationReturned/messages/allocationReturned"}
+  publishATPPromised:
+    action: send
+    channel: {$ref: "#/channels/atpPromised"}
+    summary: >-
+      An order line was promised against cumulative ATP and split into schedule lines, in the transaction that stored them (FR-27.6).
+      Keyed by the order id. Consumers - fulfillment, planning, portal.
+    messages:
+      - {$ref: "#/channels/atpPromised/messages/atpPromised"}
 components:
   messages:
     QuotationConverted:
@@ -251,7 +264,43 @@ components:
         $ref: "#/components/schemas/CloudEventHeaders"
       payload:
         $ref: "#/components/schemas/AllocationData"
+    ATPPromised:
+      name: dev.passage.sales.atp.promised.v1
+      title: Order line promised against ATP
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/ATPPromisedData"
   schemas:
+    ATPPromisedData:
+      type: object
+      required: [order_id, line_id, line_no, product_id, site_id, warehouse_id, quantity, requested_ship_date, source, complete, backorder_qty, schedule, actor, version]
+      properties:
+        order_id: {type: string, format: uuid}
+        line_id: {type: string, format: uuid}
+        line_no: {type: integer}
+        product_id: {type: string, format: uuid}
+        site_id: {type: string}
+        warehouse_id: {type: string}
+        quantity: {type: string, description: line quantity (decimal string)}
+        requested_ship_date: {type: string, format: date, description: the line's requested ship date}
+        source: {type: string, enum: [ATP, ALLOCATION], description: ALLOCATION when the quota period the line drew from held the promise back (BR-27.15)}
+        complete: {type: boolean, description: true when the whole quantity was placed on dated schedule lines}
+        promised_date: {type: string, format: date, description: the line's new confirmed ship date - the date of the first dated schedule line; absent when nothing could be promised}
+        backorder_qty: {type: string, description: quantity promised after the requested date or not at all (decimal string)}
+        schedule:
+          type: array
+          items:
+            type: object
+            required: [quantity, status]
+            properties:
+              date: {type: string, format: date, description: absent on an UNPROMISED slice}
+              bucket_date: {type: string, format: date, description: date of the ATP bucket the slice drew on (with product, site and warehouse the atp_bucket key); absent on an UNPROMISED slice}
+              quantity: {type: string}
+              status: {type: string, enum: [CONFIRMED, BACKORDER, UNPROMISED]}
+        actor: {type: string}
+        version: {type: integer, description: order version after the promise}
     AllocationQuotaData:
       type: object
       required: [quota_id, product_id, period_start, period_end, quota_qty, consumed_qty, actor, version]
