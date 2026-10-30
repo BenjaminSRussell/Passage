@@ -19,6 +19,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/ledger"
+	"github.com/BenjaminSRussell/passage/services/payables/internal/store"
 )
 
 const (
@@ -219,6 +220,10 @@ func apBalance(b ledger.Balance) decimal.Decimal { return b.Credit.Sub(b.Debit) 
 func (a *API) fault(w http.ResponseWriter, r *http.Request, msg string, err error) {
 	a.serverFaults.Add(1)
 	slog.Error(msg, "err", err, "correlationId", middleware.GetReqID(r.Context()))
+	if errors.Is(err, store.ErrNoFieldCrypt) {
+		a.problem(w, r, http.StatusServiceUnavailable, codeRatesUnconfigured, err.Error())
+		return
+	}
 	fail(w, r, err)
 }
 

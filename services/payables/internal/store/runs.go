@@ -175,6 +175,23 @@ func (s *Postgres) InvoiceNumbers(ctx context.Context, proposalID string) (map[s
 	return out, err
 }
 
+type ProposalParties struct {
+	CreatedBy  string
+	ApprovedBy string
+}
+
+func (s *Postgres) ProposalParties(ctx context.Context, id string) (ProposalParties, error) {
+	var out ProposalParties
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `select created_by, coalesce(approved_by, '') from ap_payment_proposal where id = $1::uuid`, id).Scan(&out.CreatedBy, &out.ApprovedBy)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrProposalNotFound
+		}
+		return err
+	})
+	return out, err
+}
+
 func (s *Postgres) StartRun(ctx context.Context, in NewRun) (PaymentRun, bool, error) {
 	p, _ := tenant.FromContext(ctx)
 	runID, created := "", false
@@ -189,8 +206,13 @@ func (s *Postgres) StartRun(ctx context.Context, in NewRun) (PaymentRun, bool, e
 		if err != nil {
 			return err
 		}
+		executor := canonicalSubject(in.RequestedBy)
+		executorConflict := executor == canonicalSubject(createdBy) || executor == canonicalSubject(approvedBy)
 		existing, err := loadRun(ctx, tx, `legal_entity_id = $1::uuid and proposal_id = $2::uuid`, in.LegalEntityID, in.ProposalID)
 		if err == nil {
+			if executorConflict {
+				return ErrExecutorConflict
+			}
 			runID = existing.ID
 			return nil
 		}
@@ -200,7 +222,7 @@ func (s *Postgres) StartRun(ctx context.Context, in NewRun) (PaymentRun, bool, e
 		if status != domain.ProposalApproved {
 			return ErrNotApproved
 		}
-		if canonicalSubject(in.RequestedBy) == canonicalSubject(createdBy) || canonicalSubject(in.RequestedBy) == canonicalSubject(approvedBy) {
+		if executorConflict {
 			return ErrExecutorConflict
 		}
 		if elapsed {

@@ -786,3 +786,43 @@ func TestPaymentRun_FileUsesTheProfileSnapshotTakenAtStart(t *testing.T) {
 		t.Fatalf("the run keeps its snapshot accounts: %v", got)
 	}
 }
+
+func TestPaymentRun_StartReplayAppliesTheExecutorCheckBeforeReturningTheRun(t *testing.T) {
+	f := newRunFixture(t, fixtureOptions{})
+	f.approve()
+	runID := f.start()["id"].(string)
+	replay := f.erin.send(f.router, http.MethodPost, runsPath, f.startBody())
+	if replay.Code != http.StatusOK || replay.Header().Get("Idempotent-Replayed") != "true" {
+		t.Fatalf("the executor's own replay = %d %s", replay.Code, replay.Body)
+	}
+	executor := "payment-run.execute,payment-run.read"
+	for _, user := range []string{"alice", "BOB", " bob "} {
+		rec := caller{duties: executor, user: user, entity: entityA}.send(f.router, http.MethodPost, runsPath, f.startBody())
+		wantProblem(t, rec, http.StatusForbidden, "AP-PRP-003")
+		if strings.Contains(rec.Body.String(), runID) || strings.Contains(rec.Body.String(), "bankAccount") {
+			t.Fatalf("%q: a refused replay must not describe the run: %s", user, rec.Body)
+		}
+	}
+}
+
+func TestPaymentRun_StartNeedsAnIdentifiedUserWithAnApplicationCodeNotAnAuthFault(t *testing.T) {
+	f := newRunFixture(t, fixtureOptions{})
+	f.approve()
+	anonymous := caller{duties: runDuties, entity: entityA}
+	wantProblem(t, anonymous.send(f.router, http.MethodPost, runsPath, f.startBody()), http.StatusForbidden, "AP-RUN-016")
+	if f.proposalStatus() != "APPROVED" {
+		t.Fatalf("proposal = %s", f.proposalStatus())
+	}
+}
+
+func TestPaymentRun_MissingFieldKeysAre503NotAnInternalErrorAndNeverBlockTheExecutorCheck(t *testing.T) {
+	f := newRunFixture(t, fixtureOptions{})
+	f.approve()
+	runID := f.start()["id"].(string)
+	f.pg.WithFieldCrypt(nil)
+	wantProblem(t, f.bob.send(f.router, http.MethodGet, "/v1/payables/payment-proposals/"+f.proposal, ""), http.StatusServiceUnavailable, "COM-0503")
+	executor := "payment-run.execute,payment-run.read"
+	wantProblem(t, f.step(caller{duties: executor, user: "alice", entity: entityA}, runID, "settle"), http.StatusForbidden, "AP-PRP-003")
+	wantProblem(t, f.step(f.erin, runID, "settle"), http.StatusConflict, "AP-RUN-012")
+	wantProblem(t, f.step(f.erin, runID, "generate-file"), http.StatusServiceUnavailable, "COM-0503")
+}

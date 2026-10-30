@@ -16,6 +16,7 @@ const (
 	CodeRunConfig      = "AP-RUN-013"
 	CodeRunLedger      = "AP-RUN-014"
 	CodeRunItemChanged = "AP-RUN-015"
+	CodeRunIdentity    = "AP-RUN-016"
 
 	RunRunning   = "RUNNING"
 	RunCompleted = "COMPLETED"

@@ -131,11 +131,12 @@ func (s *ServiceSigner) WithClock(now func() time.Time) *ServiceSigner {
 
 // ServiceSignerFromEnv builds the signer from PASSAGE_SERVICE_NAME and the
 // base64 32-byte seed in PASSAGE_SERVICE_SIGNING_KEY or the file named by
-// PASSAGE_SERVICE_SIGNING_KEY_FILE (a mounted secret). It returns nil, nil when
+// PASSAGE_SERVICE_SIGNING_KEY_FILE (a mounted secret that wins over the
+// variable, so a stale variable never shadows a rotated mount). It returns nil, nil when
 // no signing key is configured so callers keep forwarding the end user.
 func ServiceSignerFromEnv(getenv func(string) string) (*ServiceSigner, error) {
 	raw := strings.TrimSpace(getenv(EnvServiceSigningKey))
-	if file := getenv(EnvServiceSigningFile); raw == "" && file != "" {
+	if file := getenv(EnvServiceSigningFile); file != "" {
 		b, err := os.ReadFile(file)
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", EnvServiceSigningFile, err)

@@ -35,6 +35,7 @@ const (
 
 type RunStore interface {
 	GetProposal(ctx context.Context, id string) (store.Proposal, error)
+	ProposalParties(ctx context.Context, id string) (store.ProposalParties, error)
 	ProposalPayees(ctx context.Context, proposalID string) (map[string]domain.CreditorDTO, error)
 	StartRun(ctx context.Context, in store.NewRun) (store.PaymentRun, bool, error)
 	VerifyRunLines(ctx context.Context, id string) (store.PaymentRun, error)
@@ -106,7 +107,7 @@ func (a *API) startRun(w http.ResponseWriter, r *http.Request) {
 	}
 	caller, _ := tenant.FromContext(r.Context())
 	if caller.UserID == "" {
-		a.problem(w, r, http.StatusForbidden, "AUTH-0003", "a payment run needs an identified user")
+		a.problem(w, r, http.StatusForbidden, domain.CodeRunIdentity, "a payment run needs an identified user")
 		return
 	}
 	var req runRequest
@@ -228,13 +229,13 @@ func (a *API) executorRunID(w http.ResponseWriter, r *http.Request) (string, boo
 		a.runResult(w, r, "authorize", run, err)
 		return "", false
 	}
-	proposal, err := a.runs.store.GetProposal(r.Context(), run.ProposalID)
+	parties, err := a.runs.store.ProposalParties(r.Context(), run.ProposalID)
 	if err != nil {
-		a.fault(w, r, "payment proposal get failed", err)
+		a.fault(w, r, "payment proposal parties failed", err)
 		return "", false
 	}
 	actor := subject(caller.UserID)
-	if actor == "" || actor == subject(proposal.CreatedBy) || (proposal.ApprovedBy != nil && actor == subject(*proposal.ApprovedBy)) {
+	if actor == "" || actor == subject(parties.CreatedBy) || (parties.ApprovedBy != "" && actor == subject(parties.ApprovedBy)) {
 		slog.Warn("payment run step refused: the actor created or approved the proposal", "runId", id, "userId", caller.UserID, "correlationId", middleware.GetReqID(r.Context()))
 		a.problem(w, r, http.StatusForbidden, domain.CodeSegregation, "a payment run is executed by a user who neither created nor approved the proposal")
 		return "", false

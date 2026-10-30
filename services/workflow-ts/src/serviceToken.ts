@@ -60,7 +60,7 @@ export function serviceTokenSignerFromEnv(
   readFile: (path: string) => string,
 ): ServiceTokenSigner {
   const file = env.PASSAGE_SERVICE_SIGNING_KEY_FILE;
-  const seedBase64 = env.PASSAGE_SERVICE_SIGNING_KEY || (file ? readFile(file) : "");
+  const seedBase64 = file ? readFile(file) : (env.PASSAGE_SERVICE_SIGNING_KEY ?? "");
   if (!seedBase64.trim()) throw new Error("PASSAGE_SERVICE_SIGNING_KEY or PASSAGE_SERVICE_SIGNING_KEY_FILE is required");
   return createServiceTokenSigner({ seedBase64, keyId: env.PASSAGE_SERVICE_KEY_ID });
 }

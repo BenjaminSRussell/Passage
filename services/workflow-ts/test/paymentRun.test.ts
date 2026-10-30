@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { ApplicationFailure } from "@temporalio/activity";
 import { bundleWorkflowCode, Worker, type WorkflowBundle } from "@temporalio/worker";
 import { TestWorkflowEnvironment } from "@temporalio/testing";
-import { createPaymentRunActivities, MAX_REASON_BYTES, truncateToBytes, type PaymentRunActivities } from "../src/paymentRunActivities.js";
+import { createPaymentRunActivities, MAX_REASON_BYTES, PRE_JOURNAL_AUTH_BUDGET_MS, truncateToBytes, type PaymentRunActivities } from "../src/paymentRunActivities.js";
 import { createServiceTokenSigner } from "../src/serviceToken.js";
 import { startPaymentRunWorkflow } from "../src/startPaymentRun.js";
 import { paymentRunWorkflow, paymentRunWorkflowId, validatePaymentRunInput, type PaymentRunInput } from "../src/workflows.js";
@@ -292,11 +292,50 @@ describe("payment run http activities", () => {
       [403, { serviceCode: "AUTH-0003" }, true],
       [403, {}, true],
       [403, { serviceCode: "AP-PRP-003", detail: "same person" }, false],
+      [403, { serviceCode: "AP-RUN-016", detail: "a payment run needs an identified user" }, false],
     ] as const) {
       const { activities } = activitiesWith(new Response(JSON.stringify(body), { status }));
       const error = await inActivity(() => activities.settlePaymentRun(ref)).catch((e: unknown) => e);
       expect(error instanceof ApplicationFailure && error.nonRetryable).toBe(!retryable);
     }
+  });
+
+  describe("auth retry budget", () => {
+    const authFaults = [[401, {}], [403, { serviceCode: "AUTH-0003" }]] as const;
+    const scheduledAgo = (ms: number) => ({ scheduledTimestampMs: Date.now() - ms });
+
+    async function outcome(call: (a: PaymentRunActivities) => Promise<unknown>, status: number, body: object, ageMs: number) {
+      const { MockActivityEnvironment } = await import("@temporalio/testing");
+      const { activities } = activitiesWith(new Response(JSON.stringify(body), { status }));
+      const error = await new MockActivityEnvironment(scheduledAgo(ageMs)).run(() => call(activities)).catch((e: unknown) => e);
+      return error instanceof ApplicationFailure && error.nonRetryable ? "terminal" : "retryable";
+    }
+
+    const preJournal = [
+      ["start", (a: PaymentRunActivities) => a.startPaymentRun(input)],
+      ["generate-file", (a: PaymentRunActivities) => a.generatePaymentFile(ref)],
+      ["fail", (a: PaymentRunActivities) => a.failPaymentRun({ ...ref, reason: "x" })],
+    ] as const;
+    const overBudget = PRE_JOURNAL_AUTH_BUDGET_MS + 1000;
+
+    it.each(preJournal)("%s keeps retrying an auth fault inside the budget and gives up after it", async (_name, call) => {
+      for (const [status, body] of authFaults) {
+        expect(await outcome(call, status, body, 60_000)).toBe("retryable");
+        expect(await outcome(call, status, body, overBudget)).toBe("terminal");
+      }
+    });
+
+    it.each(preJournal)("%s keeps retrying a server fault past the auth budget", async (_name, call) => {
+      expect(await outcome(call, 503, {}, overBudget)).toBe("retryable");
+    });
+
+    it.each([
+      ["post-journal", (a: PaymentRunActivities) => a.postPaymentJournal(ref)],
+      ["settle", (a: PaymentRunActivities) => a.settlePaymentRun(ref)],
+      ["complete", (a: PaymentRunActivities) => a.completePaymentRun(ref)],
+    ] as const)("%s retries forward on an auth fault however long it has lasted", async (_name, call) => {
+      for (const [status, body] of authFaults) expect(await outcome(call, status, body, overBudget * 100)).toBe("retryable");
+    });
   });
 
   it.each([400, 404, 409, 422])("treats %i as terminal", async (status) => {

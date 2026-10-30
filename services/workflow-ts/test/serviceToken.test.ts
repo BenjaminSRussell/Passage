@@ -1,3 +1,4 @@
+import { createPrivateKey, createPublicKey, verify } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -49,5 +50,14 @@ describe("service token", () => {
     expect(() => serviceTokenSignerFromEnv({ PASSAGE_SERVICE_SIGNING_KEY: seed }, () => "")).not.toThrow();
     expect(() => serviceTokenSignerFromEnv({ PASSAGE_SERVICE_SIGNING_KEY_FILE: "/secret" }, () => `${seed}\n`)).not.toThrow();
     expect(() => serviceTokenSignerFromEnv({}, () => "")).toThrow(/required/);
+  });
+
+  it("prefers the mounted key file over the environment variable", () => {
+    const mounted = Buffer.alloc(32, 7);
+    const stale = Buffer.alloc(32, 9).toString("base64");
+    const signer = serviceTokenSignerFromEnv({ PASSAGE_SERVICE_SIGNING_KEY: stale, PASSAGE_SERVICE_SIGNING_KEY_FILE: "/secret" }, () => `${mounted.toString("base64")}\n`);
+    const [body, signature] = signer.mintForPayables({ tenantId: "t", legalEntityId: "l", actor: "a" }).split(".");
+    const publicKey = createPublicKey(createPrivateKey({ key: Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), mounted]), format: "der", type: "pkcs8" }));
+    expect(verify(null, Buffer.from(`passage.service-token.v1.${body}`), publicKey, Buffer.from(signature!, "base64url"))).toBe(true);
   });
 });
