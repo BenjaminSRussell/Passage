@@ -29,6 +29,7 @@ const (
 	dateLayout         = "2006-01-02"
 	periodLayout       = "2006-01"
 	groupByVendor      = "vendor"
+	groupByVendorGroup = "vendorGroup"
 	DefaultControlAcct = "2000"
 )
 
@@ -70,6 +71,7 @@ type agingQuery struct {
 	asOf          time.Time
 	legalEntityID string
 	byVendor      bool
+	byVendorGroup bool
 }
 
 func (a *API) parseAgingQuery(w http.ResponseWriter, r *http.Request) (agingQuery, bool) {
@@ -78,7 +80,7 @@ func (a *API) parseAgingQuery(w http.ResponseWriter, r *http.Request) (agingQuer
 	}
 	p, _ := tenant.FromContext(r.Context())
 	q := r.URL.Query()
-	out := agingQuery{asOf: a.now().UTC().Truncate(24 * time.Hour), legalEntityID: q.Get("legal_entity"), byVendor: q.Get("group_by") == groupByVendor}
+	out := agingQuery{asOf: a.now().UTC().Truncate(24 * time.Hour), legalEntityID: q.Get("legal_entity"), byVendor: q.Get("group_by") == groupByVendor, byVendorGroup: q.Get("group_by") == groupByVendorGroup}
 	if v := q.Get("as_of"); v != "" {
 		t, err := time.Parse(dateLayout, v)
 		if err != nil {
@@ -87,8 +89,8 @@ func (a *API) parseAgingQuery(w http.ResponseWriter, r *http.Request) (agingQuer
 		}
 		out.asOf = t
 	}
-	if g := q.Get("group_by"); g != "" && g != groupByVendor && g != "none" {
-		a.reject(w, r, &domain.Error{Code: domain.CodeValidation, Detail: "group_by must be vendor or none"})
+	if g := q.Get("group_by"); g != "" && g != groupByVendor && g != groupByVendorGroup && g != "none" {
+		a.reject(w, r, &domain.Error{Code: domain.CodeValidation, Detail: "group_by must be vendor, vendorGroup or none"})
 		return agingQuery{}, false
 	}
 	if out.legalEntityID != "" && !inScope(p, out.legalEntityID) {
@@ -118,6 +120,10 @@ func (a *API) agingReport(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if q.byVendorGroup {
+		a.reject(w, r, &domain.Error{Code: domain.CodeValidation, Detail: "group_by=vendorGroup applies to aging:reconcile only"})
+		return
+	}
 	rows, err := a.aging.store.AgingRows(r.Context(), q.legalEntityID, q.asOf.Format(dateLayout))
 	if err != nil {
 		a.fault(w, r, "aging query failed", err)
@@ -131,13 +137,14 @@ func (a *API) agingReport(w http.ResponseWriter, r *http.Request) {
 }
 
 type reconcileResponse struct {
-	AsOf           string                  `json:"asOf"`
-	LegalEntityID  string                  `json:"legalEntityId"`
-	LedgerID       string                  `json:"ledgerId"`
-	ControlAccount string                  `json:"controlAccount"`
-	LedgerPeriod   string                  `json:"ledgerPeriod"`
-	Currencies     []domain.Reconciliation `json:"currencies"`
-	Reconciled     bool                    `json:"reconciled"`
+	AsOf           string                       `json:"asOf"`
+	LegalEntityID  string                       `json:"legalEntityId"`
+	LedgerID       string                       `json:"ledgerId"`
+	ControlAccount string                       `json:"controlAccount"`
+	LedgerPeriod   string                       `json:"ledgerPeriod"`
+	Currencies     []domain.Reconciliation      `json:"currencies"`
+	VendorGroups   []domain.GroupReconciliation `json:"vendorGroups,omitempty"`
+	Reconciled     bool                         `json:"reconciled"`
 }
 
 func (a *API) agingReconcile(w http.ResponseWriter, r *http.Request) {
@@ -185,9 +192,13 @@ func (a *API) agingReconcile(w http.ResponseWriter, r *http.Request) {
 		a.aging.mismatched.Add(1)
 		slog.Warn("ap subledger does not reconcile to the control account", "legalEntityId", q.legalEntityID, "ledgerId", ledgerID, "asOf", q.asOf.Format(dateLayout), "correlationId", middleware.GetReqID(r.Context()))
 	}
+	var groups []domain.GroupReconciliation
+	if q.byVendorGroup {
+		groups = domain.GroupBreakdown(rows)
+	}
 	httpx.JSON(w, http.StatusOK, reconcileResponse{
 		AsOf: q.asOf.Format(dateLayout), LegalEntityID: q.legalEntityID, LedgerID: ledgerID, ControlAccount: a.aging.controlAccount,
-		LedgerPeriod: period, Currencies: currencies, Reconciled: all,
+		LedgerPeriod: period, Currencies: currencies, VendorGroups: groups, Reconciled: all,
 	})
 }
 

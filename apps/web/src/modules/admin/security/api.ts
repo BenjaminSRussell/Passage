@@ -1,0 +1,155 @@
+import { z } from "zod";
+
+export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+
+const defaultFetch: FetchLike = (input, init) => globalThis.fetch(input, init);
+
+export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export const SELF_GRANT = "IAM-0416";
+export const ASSIGNMENT_OVERLAP = "IDN-ASSIGNMENT-OVERLAP";
+export const ASSIGNMENT_ENDED = "IDN-ASSIGNMENT-ENDED";
+export const LEGAL_ENTITY_EXISTS = "IDN-LEGAL-ENTITY-EXISTS";
+export const LEGAL_ENTITY_INACTIVE = "IDN-LEGAL-ENTITY-INACTIVE";
+
+export class SecurityApiError extends Error {
+  readonly status: number;
+  readonly code: string;
+  readonly fields: Record<string, string>;
+  readonly traceId?: string;
+
+  constructor(status: number, code: string, message: string, fields: Record<string, string> = {}, traceId?: string) {
+    super(message);
+    this.name = "SecurityApiError";
+    this.status = status;
+    this.code = code;
+    this.fields = fields;
+    this.traceId = traceId;
+  }
+}
+
+async function readProblem(res: Response): Promise<SecurityApiError> {
+  let body: { code?: unknown; detail?: unknown; title?: unknown; errors?: unknown; traceId?: unknown } = {};
+  try {
+    body = (await res.json()) as typeof body;
+  } catch {
+    body = {};
+  }
+  const code = typeof body.code === "string" ? body.code : "COM-0500";
+  const message =
+    typeof body.detail === "string" ? body.detail : typeof body.title === "string" ? body.title : `request failed with status ${res.status}`;
+  const fields = z.record(z.string()).safeParse(body.errors ?? {});
+  return new SecurityApiError(res.status, code, message, fields.success ? fields.data : {}, typeof body.traceId === "string" ? body.traceId : undefined);
+}
+
+async function send<T>(url: string, init: RequestInit, schema: z.ZodType<T>, fetchImpl: FetchLike): Promise<T> {
+  const res = await fetchImpl(url, init);
+  if (!res.ok) throw await readProblem(res);
+  return schema.parse(await res.json());
+}
+
+const GET = { headers: { Accept: "application/json" } };
+const JSON_HEADERS = { Accept: "application/json", "Content-Type": "application/json" };
+
+const permissionSchema = z.object({
+  resource: z.string(),
+  method: z.string(),
+  allow: z.boolean(),
+  duty: z.string().optional(),
+  dutyMissing: z.string().optional(),
+});
+export type Permission = z.infer<typeof permissionSchema>;
+
+const effectivePermissionsSchema = z.object({
+  userId: z.string(),
+  legalEntityId: z.string().optional(),
+  duties: z.array(z.string()),
+  ignoredRoles: z.array(z.string()),
+  permissions: z.array(permissionSchema),
+});
+export type EffectivePermissions = z.infer<typeof effectivePermissionsSchema>;
+
+export function fetchEffectivePermissions(userId: string, legalEntityId?: string, fetchImpl: FetchLike = defaultFetch): Promise<EffectivePermissions> {
+  const query = legalEntityId ? `?${new URLSearchParams({ legalEntityId }).toString()}` : "";
+  return send(`/api/v1/identity/users/${encodeURIComponent(userId)}/effective-permissions${query}`, GET, effectivePermissionsSchema, fetchImpl);
+}
+
+const assignmentSchema = z.object({
+  assignmentId: z.string(),
+  userId: z.string(),
+  role: z.string(),
+  legalEntityId: z.string().optional(),
+  validFrom: z.string(),
+  validTo: z.string().optional(),
+  reason: z.string().optional(),
+  grantedBy: z.string().optional(),
+  createdAt: z.string(),
+});
+export type RoleAssignment = z.infer<typeof assignmentSchema>;
+
+const assignmentPageSchema = z.object({ items: z.array(assignmentSchema), next: z.string().optional() });
+export type RoleAssignmentPage = z.infer<typeof assignmentPageSchema>;
+
+export interface AssignmentQuery {
+  userId?: string;
+  role?: string;
+  active: boolean;
+  after?: string;
+}
+
+export function listAssignments(q: AssignmentQuery, fetchImpl: FetchLike = defaultFetch): Promise<RoleAssignmentPage> {
+  const params = new URLSearchParams();
+  if (q.userId) params.set("userId", q.userId);
+  if (q.role) params.set("role", q.role);
+  if (q.active) params.set("active", "true");
+  if (q.after) params.set("after", q.after);
+  return send(`/api/v1/authz/assignments?${params.toString()}`, GET, assignmentPageSchema, fetchImpl);
+}
+
+export interface AssignRoleInput {
+  userId: string;
+  role: string;
+  legalEntityId?: string;
+  validFrom?: string;
+  validTo?: string;
+  reason?: string;
+}
+
+export function assignRole(input: AssignRoleInput, fetchImpl: FetchLike = defaultFetch): Promise<RoleAssignment> {
+  return send("/api/v1/authz/assignments", { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(input) }, assignmentSchema, fetchImpl);
+}
+
+export function endAssignment(assignmentId: string, fetchImpl: FetchLike = defaultFetch): Promise<RoleAssignment> {
+  return send(
+    `/api/v1/authz/assignments/${encodeURIComponent(assignmentId)}/end`,
+    { method: "POST", headers: JSON_HEADERS, body: "{}" },
+    assignmentSchema,
+    fetchImpl,
+  );
+}
+
+const legalEntitySchema = z.object({
+  legalEntityId: z.string(),
+  code: z.string(),
+  displayName: z.string(),
+  status: z.string(),
+  createdAt: z.string(),
+});
+export type LegalEntity = z.infer<typeof legalEntitySchema>;
+
+const legalEntityPageSchema = z.object({ items: z.array(legalEntitySchema), next: z.string().optional() });
+export type LegalEntityPage = z.infer<typeof legalEntityPageSchema>;
+
+export function listLegalEntities(after?: string, fetchImpl: FetchLike = defaultFetch): Promise<LegalEntityPage> {
+  const query = after ? `?${new URLSearchParams({ after }).toString()}` : "";
+  return send(`/api/v1/legal-entities${query}`, GET, legalEntityPageSchema, fetchImpl);
+}
+
+export interface CreateLegalEntityInput {
+  code: string;
+  displayName: string;
+}
+
+export function createLegalEntity(input: CreateLegalEntityInput, fetchImpl: FetchLike = defaultFetch): Promise<LegalEntity> {
+  return send("/api/v1/legal-entities", { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(input) }, legalEntitySchema, fetchImpl);
+}
