@@ -49,3 +49,12 @@ func TestOrgChecker(t *testing.T) {
 		t.Fatal("ORG_BASE_URL must enable the check")
 	}
 }
+
+func TestRun_MalformedServicePublicKeysStopStartup(t *testing.T) {
+	err := run(context.Background(), func(k string) string {
+		return map[string]string{"PASSAGE_SERVICE_NAME": "product", "PASSAGE_SERVICE_PUBLIC_KEYS": "batch=zzz"}[k]
+	})
+	if err == nil || !strings.Contains(err.Error(), "PASSAGE_SERVICE_PUBLIC_KEYS") {
+		t.Fatalf("err = %v, want the malformed public keys to stop startup", err)
+	}
+}

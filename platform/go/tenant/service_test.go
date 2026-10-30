@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -431,5 +432,23 @@ func TestReplayCacheEvictsExpiredAndFailsClosedWhenFull(t *testing.T) {
 	*f.now = epoch.Add(tenant.ServiceTokenMaxTTL + time.Second)
 	if _, err := small.Verify(mint()); err != nil {
 		t.Fatalf("expired entries must be evicted to make room: %v", err)
+	}
+}
+
+func TestMintDutiesCarriesOnlyTheIntersectionWithTheGrant(t *testing.T) {
+	f := newFixture(t)
+	token, err := f.signer.MintDuties("ledger", f.principal, "", []string{"ledger.journal.post", "ledger.account.write", "org.switcher.all_scope"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := f.verifier.Verify(token)
+	if err != nil || len(claims.Duties) != 1 || claims.Duties[0] != "ledger.journal.post" {
+		t.Fatalf("claims = %+v, %v", claims, err)
+	}
+	if _, err := f.signer.MintDuties("ledger", f.principal, "", []string{"ledger.account.write"}); !errors.Is(err, tenant.ErrNoServiceGrant) {
+		t.Fatalf("a duty outside the grant must not be signed: %v", err)
+	}
+	if _, err := f.signer.MintDuties("ledger", f.principal, "", []string{}); err == nil {
+		t.Fatal("an empty duty list must not fall back to the whole grant")
 	}
 }

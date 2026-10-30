@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -32,7 +33,7 @@ type Store interface {
 	Act(ctx context.Context, workItemID string, act domain.Action) (WorkItem, error)
 	SaveJob(ctx context.Context, job Job) (Job, error)
 	GetJob(ctx context.Context, code string) (Job, error)
-	StartRun(ctx context.Context, code string, rows int64, triggeredBy string) (Run, error)
+	StartRun(ctx context.Context, code string, in RunInput) (Run, error)
 	GetRun(ctx context.Context, id string) (Run, error)
 	PublishTemplate(ctx context.Context, tpl Template, allowed map[string]bool) (Template, error)
 	EnqueueMessage(ctx context.Context, msg Message) (Message, error)
@@ -386,6 +387,9 @@ func (s *Postgres) SaveJob(ctx context.Context, job Job) (Job, error) {
 	if err != nil {
 		return Job{}, err
 	}
+	if _, err := requireProductDuties(p, job.Handler); err != nil {
+		return Job{}, err
+	}
 	if job.ID == "" {
 		job.ID = ids.New()
 	}
@@ -438,7 +442,14 @@ func (s *Postgres) GetJob(ctx context.Context, code string) (Job, error) {
 	return job, err
 }
 
-func (s *Postgres) StartRun(ctx context.Context, code string, rows int64, triggeredBy string) (Run, error) {
+type RunInput struct {
+	Rows          int64
+	TriggeredBy   string
+	Params        json.RawMessage
+	LegalEntityID string
+}
+
+func (s *Postgres) StartRun(ctx context.Context, code string, in RunInput) (Run, error) {
 	p, err := principal(ctx)
 	if err != nil {
 		return Run{}, err
@@ -446,6 +457,26 @@ func (s *Postgres) StartRun(ctx context.Context, code string, rows int64, trigge
 	job, err := s.GetJob(ctx, code)
 	if err != nil {
 		return Run{}, err
+	}
+	if fields := domain.ValidateRunParams(job.Handler, in.Params); len(fields) > 0 {
+		prob := httpx.NewProblem(http.StatusBadRequest, domain.CodeInvalid, "request failed validation")
+		prob.Errors = fields
+		return Run{}, prob
+	}
+	serviceDuties, err := requireProductDuties(p, job.Handler)
+	if err != nil {
+		return Run{}, err
+	}
+	if serviceDuties != nil && !ids.Valid(in.TriggeredBy) {
+		return Run{}, fieldProblem(http.StatusUnprocessableEntity, "triggeredBy", "product runs need the creating user")
+	}
+	legalEntity, err := runLegalEntity(p, in.LegalEntityID)
+	if err != nil {
+		return Run{}, err
+	}
+	var storedParams any
+	if len(in.Params) > 0 && string(in.Params) != "null" {
+		storedParams = []byte(in.Params)
 	}
 	var run Run
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
@@ -457,15 +488,55 @@ func (s *Postgres) StartRun(ctx context.Context, code string, rows int64, trigge
 		if err := domain.CanStartRun(domain.Job{Exclusive: job.Exclusive, Status: job.Status}, running > 0); err != nil {
 			return problem(err)
 		}
-		run = Run{ID: ids.New(), JobID: job.ID, Status: domain.RunExecuting, RowsTotal: rows}
-		if _, err := tx.Exec(ctx, `insert into batch_run (tenant_id, id, job_id, status, started_at, rows_total, triggered_by)
-			values ($1,$2,$3,$4,now(),$5,nullif($6,'')::uuid)`,
-			p.TenantID, run.ID, job.ID, run.Status, rows, triggeredBy); err != nil {
+		run = Run{ID: ids.New(), JobID: job.ID, Status: domain.RunExecuting, RowsTotal: in.Rows}
+		if _, err := tx.Exec(ctx, `insert into batch_run (tenant_id, id, job_id, status, started_at, rows_total, triggered_by, params, legal_entity_id, service_duties)
+			values ($1,$2,$3,$4,now(),$5,nullif($6,'')::uuid,$7::jsonb,$8::uuid,$9)`,
+			p.TenantID, run.ID, job.ID, run.Status, in.Rows, in.TriggeredBy, storedParams, legalEntity, serviceDuties); err != nil {
 			return err
 		}
 		return enqueue(ctx, tx, p.TenantID, "run", run.ID, svcevents.BatchRunStarted, map[string]string{"job_code": code, "run_id": run.ID})
 	})
 	return run, err
+}
+
+// requireProductDuties is the confused-deputy guard: a run of a product handler
+// will call product as a service, so its creator must hold the product duties
+// the run needs. It returns those duties, which are stored on the run as the
+// snapshot the service token is later limited to (nil for other handlers).
+func requireProductDuties(p tenant.Principal, handler string) ([]string, error) {
+	if !domain.IsProductHandler(handler) {
+		return nil, nil
+	}
+	duties, ok := domain.ProductServiceDuties(handler, p.HasDuty)
+	if !ok {
+		return nil, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "missing the product duties "+handler+" runs need")
+	}
+	return duties, nil
+}
+
+// runLegalEntity binds a run to exactly one legal entity: the explicit one when
+// it lies in the caller's scope (or the caller holds the all-scope duty), else
+// the caller's only one. There is no unscoped run.
+func runLegalEntity(p tenant.Principal, explicit string) (string, error) {
+	scopes := tenant.LegalEntityScopeList(p)
+	allScope := p.LegalEntityID == "" && p.HasDuty(tenant.DutyAllScope)
+	if explicit != "" {
+		le, ok := ids.Canonical(explicit)
+		if !ok || le == ids.Nil || !(allScope || slices.Contains(scopes, le)) {
+			return "", fieldProblem(http.StatusUnprocessableEntity, "legalEntityId", "must be a legal entity within the caller's scope")
+		}
+		return le, nil
+	}
+	if len(scopes) != 1 {
+		return "", fieldProblem(http.StatusUnprocessableEntity, "legalEntityId", "required when the caller is scoped to none, several or all legal entities")
+	}
+	return scopes[0], nil
+}
+
+func fieldProblem(status int, field, message string) error {
+	prob := httpx.NewProblem(status, domain.CodeInvalid, "request failed validation")
+	prob.Errors = map[string]string{field: message}
+	return prob
 }
 
 func (s *Postgres) GetRun(ctx context.Context, id string) (Run, error) {

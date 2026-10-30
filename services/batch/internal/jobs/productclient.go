@@ -13,8 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5/middleware"
-
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 )
 
@@ -25,18 +23,21 @@ const (
 	maxRetryAfter   = 5 * time.Second
 	maxErrorDetail  = 512
 
-	dutyProductRead  = "product.read"
-	dutyProductWrite = "product.write"
-	dutyProductJobs  = "product.jobs.write"
+	productAudience = "product"
+
+	dutyProductExplode      = "product.variants.explode"
+	dutyProductReleasedRead = "product.released.read"
+	dutyProductJobsWrite    = "product.jobs.write"
 )
 
 type HTTPProductClient struct {
 	baseURL string
+	signer  *tenant.ServiceSigner
 	client  *http.Client
 }
 
-func NewHTTPProductClient(baseURL string) *HTTPProductClient {
-	return &HTTPProductClient{baseURL: strings.TrimRight(baseURL, "/"), client: &http.Client{
+func NewHTTPProductClient(baseURL string, signer *tenant.ServiceSigner) *HTTPProductClient {
+	return &HTTPProductClient{baseURL: strings.TrimRight(baseURL, "/"), signer: signer, client: &http.Client{
 		Timeout:       productTimeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}}
@@ -45,7 +46,7 @@ func NewHTTPProductClient(baseURL string) *HTTPProductClient {
 func (c *HTTPProductClient) ExplodePage(ctx context.Context, masterID string, selected map[string][]string, limit int) (ExplodePage, error) {
 	var out struct{ Created, Remaining int }
 	body := map[string]any{"selected": selected, "limit": limit}
-	err := c.do(ctx, http.MethodPost, "/v1/product/products/"+url.PathEscape(masterID)+"/variants:explode", []string{dutyProductWrite}, body, &out)
+	err := c.do(ctx, http.MethodPost, "/v1/product/products/"+url.PathEscape(masterID)+"/variants:explode", dutyProductExplode, body, &out)
 	return ExplodePage{Created: out.Created, Remaining: out.Remaining}, err
 }
 
@@ -58,7 +59,7 @@ func (c *HTTPProductClient) ReleasedPage(ctx context.Context, after string, limi
 	if after != "" {
 		query.Set("after", after)
 	}
-	if err := c.do(ctx, http.MethodGet, "/v1/product/released-products?"+query.Encode(), []string{dutyProductRead}, nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/product/released-products?"+query.Encode(), dutyProductReleasedRead, nil, &out); err != nil {
 		return ReleasedPage{}, err
 	}
 	page := ReleasedPage{Next: out.Next, IDs: make([]string, len(out.Items))}
@@ -76,7 +77,7 @@ func (c *HTTPProductClient) GroupChange(ctx context.Context, releasedIDs []strin
 	var out struct {
 		Items []struct{ ID, Status, Code string } `json:"items"`
 	}
-	if err := c.do(ctx, http.MethodPost, "/v1/product/jobs/group-change", []string{dutyProductJobs}, map[string]any{"items": items}, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/product/jobs/group-change", dutyProductJobsWrite, map[string]any{"items": items}, &out); err != nil {
 		return nil, err
 	}
 	results := make([]ItemResult, len(out.Items))
@@ -86,7 +87,7 @@ func (c *HTTPProductClient) GroupChange(ctx context.Context, releasedIDs []strin
 	return results, nil
 }
 
-func (c *HTTPProductClient) do(ctx context.Context, method, path string, duties []string, in, out any) error {
+func (c *HTTPProductClient) do(ctx context.Context, method, path, duty string, in, out any) error {
 	var payload []byte
 	if in != nil {
 		var err error
@@ -97,7 +98,7 @@ func (c *HTTPProductClient) do(ctx context.Context, method, path string, duties 
 	var err error
 	for attempt := 0; attempt < productAttempts; attempt++ {
 		var wait time.Duration
-		if wait, err = c.once(ctx, method, path, duties, payload, out); err == nil || errors.Is(err, ErrRejected) || attempt == productAttempts-1 {
+		if wait, err = c.once(ctx, method, path, duty, payload, out); err == nil || errors.Is(err, ErrRejected) || attempt == productAttempts-1 {
 			return err
 		}
 		select {
@@ -109,26 +110,25 @@ func (c *HTTPProductClient) do(ctx context.Context, method, path string, duties 
 	return err
 }
 
-func (c *HTTPProductClient) once(ctx context.Context, method, path string, duties []string, payload []byte, out any) (time.Duration, error) {
+func (c *HTTPProductClient) once(ctx context.Context, method, path, duty string, payload []byte, out any) (time.Duration, error) {
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bytes.NewReader(payload))
 	if err != nil {
 		return 0, fmt.Errorf("%w: %v", ErrRejected, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if p, ok := tenant.FromContext(ctx); ok {
-		held := make([]string, 0, len(duties))
-		for _, d := range duties {
-			if _, has := p.Duties[d]; has {
-				held = append(held, d)
-			}
-		}
-		req.Header.Set(tenant.HeaderTenant, p.TenantID)
-		req.Header.Set(tenant.HeaderLegalEntity, p.LegalEntityID)
-		req.Header.Set(tenant.HeaderUser, p.UserID)
-		req.Header.Set(tenant.HeaderDuties, strings.Join(held, ","))
+	p, ok := tenant.FromContext(ctx)
+	if !ok {
+		return 0, fmt.Errorf("%w: no principal in context", ErrRejected)
 	}
-	if id := middleware.GetReqID(ctx); id != "" {
-		req.Header.Set(middleware.RequestIDHeader, id)
+	if !p.HasDuty(duty) {
+		return 0, fmt.Errorf("%w: the run holds no %s duty", ErrRejected, duty)
+	}
+	signed, err := c.signer.ApplyDuties(req, p, productAudience, p.LegalEntityID, []string{duty})
+	if err == nil && !signed {
+		err = errors.New("no service signer configured")
+	}
+	if err != nil {
+		return 0, fmt.Errorf("%w: sign product request: %w", ErrRejected, err)
 	}
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -138,7 +138,7 @@ func (c *HTTPProductClient) once(ctx context.Context, method, path string, dutie
 	if resp.StatusCode != http.StatusOK {
 		detail, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorDetail))
 		err := fmt.Errorf("product responded with status %d: %s", resp.StatusCode, strings.TrimSpace(string(detail)))
-		if resp.StatusCode < 500 && resp.StatusCode != http.StatusRequestTimeout && resp.StatusCode != http.StatusTooManyRequests {
+		if resp.StatusCode < 500 && resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusRequestTimeout && resp.StatusCode != http.StatusTooManyRequests {
 			return 0, fmt.Errorf("%w: %w", ErrRejected, err)
 		}
 		return retryAfter(resp.Header.Get("Retry-After")), err

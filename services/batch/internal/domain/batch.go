@@ -9,6 +9,7 @@ const (
 	RunExecuting = "executing"
 	RunEnded     = "ended"
 	RunError     = "error"
+	RunFailed    = "failed"
 	RunHold      = "hold"
 	RunCanceling = "canceling"
 	RunCanceled  = "canceled"

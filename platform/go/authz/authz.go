@@ -5,6 +5,7 @@ package authz
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
@@ -26,6 +27,26 @@ func (DutyPolicy) Allow(_ context.Context, p tenant.Principal, action, _ string)
 // RequireDuty is route middleware: 401 without a principal, 403 without the duty.
 func RequireDuty(duty string) func(http.Handler) http.Handler {
 	return Require(DutyPolicy{}, duty, "")
+}
+
+// RequireAnyDuty is RequireDuty satisfied by any one of duties; with none it denies everything.
+func RequireAnyDuty(duties ...string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			p, ok := tenant.FromContext(r.Context())
+			if !ok {
+				httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "no principal"))
+				return
+			}
+			for _, d := range duties {
+				if p.HasDuty(d) {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+			httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "missing duty, need one of: "+strings.Join(duties, ", ")))
+		})
+	}
 }
 
 // Require is route middleware over an arbitrary Policy.
