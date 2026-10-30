@@ -39,6 +39,11 @@ const lineColumns: DataTableColumn<JournalLine>[] = [
   { key: "lineNo", header: "Line", align: "end" },
   { key: "productId", header: "Product", mono: true },
   { key: "dimensions", header: "Dimensions", render: (row) => describeDimensions(row.dimensions, LINE_DIMENSIONS) },
+  {
+    key: "toDimensions",
+    header: "Destination",
+    render: (row) => (row.toDimensions ? describeDimensions(row.toDimensions, LINE_DIMENSIONS) : dash),
+  },
   { key: "qty", header: "Quantity", align: "end", mono: true },
   { key: "enteredUnit", header: "Unit" },
   { key: "costPrice", header: "Cost price", align: "end", mono: true },
@@ -56,9 +61,15 @@ interface LineValues {
   enteredUnit: string;
   costPrice: string;
   dimensions: Record<LineDimension, string>;
+  /** Destination of a TRANSFER line (only the dimensions a transfer may change). */
+  toDimensions?: Record<TransferDimension, string>;
 }
 
-type LineErrors = Partial<Record<"productId" | "qty" | "enteredUnit" | "costPrice" | LineDimension, string>>;
+/** Dimensions the destination of a transfer line can name; batch and serial never change. */
+const TRANSFER_DIMENSIONS = ["site", "warehouse", "location", "segment"] as const;
+type TransferDimension = (typeof TRANSFER_DIMENSIONS)[number];
+
+type LineErrors = Partial<Record<"productId" | "qty" | "enteredUnit" | "costPrice" | LineDimension | "toSite" | "toSegment" | "toSame", string>>;
 
 const emptyLine = (): LineValues => ({
   productId: "",
@@ -66,6 +77,7 @@ const emptyLine = (): LineValues => ({
   enteredUnit: "EA",
   costPrice: "",
   dimensions: { site: "", warehouse: "", location: "", batch: "", serial: "", inventory_status: "", owner: "", segment: "" },
+  toDimensions: { site: "", warehouse: "", location: "", segment: "" },
 });
 
 /** Dimensions the add-line form offers: owner only on an ownership change (FR-16.17). */
@@ -81,10 +93,15 @@ function lineDimensionsFor(type: JournalType): readonly LineDimension[] {
 export function validateLine(values: LineValues, type: JournalType = "MOVEMENT"): LineErrors {
   const errors: LineErrors = {};
   const ownership = type === "OWNERSHIP_CHANGE";
+  const transfer = type === "TRANSFER";
   if (!UUID.test(values.productId.trim())) errors.productId = "Enter the product id (a UUID).";
   const qty = values.qty.trim();
-  if (!DECIMAL.test(qty) || Number(qty) === 0 || (ownership && Number(qty) < 0)) {
-    errors.qty = ownership ? "Enter the quantity to take into company ownership (above zero)." : "Enter a non-zero quantity, such as 12 or -3.5.";
+  if (!DECIMAL.test(qty) || Number(qty) === 0 || ((ownership || transfer) && Number(qty) < 0)) {
+    errors.qty = ownership
+      ? "Enter the quantity to take into company ownership (above zero)."
+      : transfer
+        ? "Enter the quantity to move (above zero)."
+        : "Enter a non-zero quantity, such as 12 or -3.5.";
   } else if (values.dimensions.serial.trim() !== "" && Math.abs(Number(qty)) !== 1) {
     errors.qty = "A serial number moves one unit at a time: use 1 or -1.";
   }
@@ -95,10 +112,22 @@ export function validateLine(values: LineValues, type: JournalType = "MOVEMENT")
   const cost = values.costPrice.trim();
   if (cost !== "" && (!DECIMAL.test(cost) || Number(cost) < 0)) errors.costPrice = "Enter a cost of zero or more.";
   if (values.dimensions.site.trim() === "") errors.site = "Site is required on every line.";
+  if (transfer) {
+    const to = values.toDimensions ?? { site: "", warehouse: "", location: "", segment: "" };
+    if (to.site.trim() === "") errors.toSite = "Enter the destination site.";
+    if (to.segment.trim() !== "" && !/^(SALES_ORDER|PROJECT):\S.*$/.test(to.segment.trim())) errors.toSegment = "Use SALES_ORDER:reference or PROJECT:reference.";
+    const same = (["site", "warehouse", "location", "segment"] as const).every((name) => values.dimensions[name].trim() === to[name].trim());
+    if (errors.toSite === undefined && same) errors.toSame = "The destination must differ from the source.";
+    const status = values.dimensions.inventory_status.trim();
+    if (status === "BLOCKED" || status === "QUARANTINE") {
+      errors.inventory_status = "Blocked or quarantined stock is moved by releasing its blocking, not by a transfer.";
+    }
+  }
   return errors;
 }
 
 function AddLineForm({ journal, onAdded }: { journal: Journal; onAdded(updated: Journal): void }) {
+  const transfer = journal.journalType === "TRANSFER";
   const [values, setValues] = useState<LineValues>(emptyLine);
   const [errors, setErrors] = useState<LineErrors>({});
   const [failure, setFailure] = useState<Problem | null>(null);
@@ -119,6 +148,15 @@ function AddLineForm({ journal, onAdded }: { journal: Journal; onAdded(updated: 
           enteredUnit: values.enteredUnit.trim(),
           costPrice: values.costPrice,
           dimensions: journal.journalType === "OWNERSHIP_CHANGE" ? values.dimensions : { ...values.dimensions, owner: "" },
+          // A transfer keeps the source's batch, serial and status at the destination.
+          toDimensions: transfer
+            ? {
+                ...values.toDimensions,
+                batch: values.dimensions.batch,
+                serial: values.dimensions.serial,
+                inventory_status: values.dimensions.inventory_status,
+              }
+            : undefined,
         },
       ]);
       setValues({
@@ -138,6 +176,8 @@ function AddLineForm({ journal, onAdded }: { journal: Journal; onAdded(updated: 
     setValues({ ...values, [name]: name === "enteredUnit" ? event.target.value.toUpperCase() : event.target.value });
   const setDim = (name: LineDimension) => (event: { target: { value: string } }) =>
     setValues({ ...values, dimensions: { ...values.dimensions, [name]: event.target.value } });
+  const setTo = (name: TransferDimension) => (event: { target: { value: string } }) =>
+    setValues({ ...values, toDimensions: { ...emptyLine().toDimensions!, ...values.toDimensions, [name]: event.target.value } });
   const ownership = journal.journalType === "OWNERSHIP_CHANGE";
 
   return (
@@ -149,7 +189,13 @@ function AddLineForm({ journal, onAdded }: { journal: Journal; onAdded(updated: 
         <FormField
           id="line-qty"
           label="Quantity"
-          hint={ownership ? "Quantity taken from the vendor into company ownership." : "Positive receives stock, negative issues it."}
+          hint={
+            ownership
+              ? "Quantity taken from the vendor into company ownership."
+              : transfer
+                ? "Quantity moved from the source to the destination."
+                : "Positive receives stock, negative issues it."
+          }
           error={errors.qty}
         >
           {(control) => <Input {...control} inputMode="decimal" value={values.qty} onChange={set("qty")} invalid={Boolean(errors.qty)} />}
@@ -161,7 +207,13 @@ function AddLineForm({ journal, onAdded }: { journal: Journal; onAdded(updated: 
           id="line-cost"
           label={ownership ? "Consignment price" : "Cost price"}
           optional
-          hint={ownership ? "Per unit; the company stock is valued at it." : "Per unit, for receipts. Issues use the running average."}
+          hint={
+            ownership
+              ? "Per unit; the company stock is valued at it."
+              : transfer
+                ? "Only used when the source has no valued stock. Otherwise the running average moves with the stock."
+                : "Per unit, for receipts. Issues use the running average."
+          }
           error={errors.costPrice}
         >
           {(control) => <Input {...control} inputMode="decimal" value={values.costPrice} onChange={set("costPrice")} invalid={Boolean(errors.costPrice)} />}
@@ -177,6 +229,24 @@ function AddLineForm({ journal, onAdded }: { journal: Journal; onAdded(updated: 
             {(control) => <Input {...control} value={values.dimensions[name]} maxLength={60} onChange={setDim(name)} invalid={Boolean(errors[name])} />}
           </FormField>
         ))}
+        {transfer ? (
+          <fieldset className={styles.fieldset}>
+            <legend>Destination</legend>
+            {TRANSFER_DIMENSIONS.map((name) => {
+              const error = name === "site" ? errors.toSite : name === "segment" ? errors.toSegment : undefined;
+              return (
+                <FormField key={name} id={`line-to-${name}`} label={`To ${name}`} optional={name !== "site"} error={error}>
+                  {(control) => <Input {...control} value={values.toDimensions?.[name] ?? ""} maxLength={60} onChange={setTo(name)} invalid={Boolean(error)} />}
+                </FormField>
+              );
+            })}
+            {errors.toSame ? (
+              <Alert tone="danger" title="Nothing to move" live="alert">
+                {errors.toSame}
+              </Alert>
+            ) : null}
+          </fieldset>
+        ) : null}
         {failure ? (
           <div className={styles.formActions}>
             <Alert tone="danger" title="Could not add the line" live="alert">
@@ -350,7 +420,7 @@ export function JournalDetailPage() {
 
   const draft = journal.status === "DRAFT";
   const reversal = Boolean(journal.reversesJournalId);
-  const canReverse = journal.status === "POSTED" && !journal.reversedByJournalId && journal.journalType !== "OWNERSHIP_CHANGE";
+  const canReverse = journal.status === "POSTED" && !journal.reversedByJournalId && journal.journalType !== "OWNERSHIP_CHANGE" && journal.journalType !== "TRANSFER";
   const hasLines = journal.lines.length > 0;
   const button = (action: Action, label: string, variant: "primary" | "secondary" | "danger" = "secondary", disabled = false) => (
     <Button variant={variant} loading={busy === action} disabled={busy !== "" || disabled} onClick={() => act(action)}>

@@ -462,7 +462,7 @@ func loadStepTxn(ctx context.Context, tx pgx.Tx, tenantID, id string) (stepTxn, 
 		from inventory_transaction t
 		join inventory_transaction_origin o on o.tenant_id = t.tenant_id and o.id = t.origin_id
 		join dimension_set d on d.tenant_id = t.tenant_id and d.hash = t.dimension_set_hash
-		left join inventory_journal_line l on o.source_type in ('INVENT_JOURNAL_LINE', 'OWNERSHIP_CHANGE') and l.tenant_id = o.tenant_id and l.id = o.source_id
+		left join inventory_journal_line l on o.source_type in ('INVENT_JOURNAL_LINE', 'OWNERSHIP_CHANGE', 'TRANSFER_IN') and l.tenant_id = o.tenant_id and l.id = o.source_id
 		where t.tenant_id = $1 and t.id = $2 for update of t`, tenantID, id).Scan(
 		&t.legalEntityID, &t.originID, &t.sourceType, &t.journalID, &t.reference, &t.product, &t.hash, &raw, &qty, &entered, &t.unit,
 		&t.currency, &physical, &posted, &issue, &receipt, &t.physicalDate, &t.financialDate, &t.corrects)

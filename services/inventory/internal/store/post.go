@@ -26,6 +26,7 @@ const (
 	sourceBlocking        = "BLOCKING"
 	sourceOwnershipChange = "OWNERSHIP_CHANGE" // receipt leg of an ownership-change line
 	sourceConsignmentLine = "CONSIGNMENT_LINE" // vendor-owned receipt of a replenishment line
+	sourceTransferIn      = "TRANSFER_IN"      // destination receipt of a TRANSFER journal line
 )
 
 // PostParams are the posting-profile and policy inputs of a journal post.
@@ -134,7 +135,7 @@ func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j
 		return domainProblem(err)
 	}
 	offset := offsetAccount(j, p)
-	if offset == "" {
+	if offset == "" && j.Type != domain.JournalTransfer {
 		return problem(http.StatusUnprocessableEntity, CodeAccountMissing, fmt.Sprintf("no offset account is configured for %s journals", j.Type))
 	}
 	plan := domain.PlanPosting(j)
@@ -153,6 +154,11 @@ func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j
 	if err != nil {
 		return err
 	}
+	if j.Type == domain.JournalTransfer {
+		if err := valueTransfer(ctx, tx, tenantID, j, plan, rows, order); err != nil {
+			return err
+		}
+	}
 	for _, k := range order {
 		r := rows[k]
 		vendorOwned := domain.VendorOwned(r.dims)
@@ -168,6 +174,8 @@ func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j
 			if vendorOwned {
 				// Vendor-owned stock never carries value (BR-16.14).
 				plan[i].Value = decimal.Zero
+			} else if j.Type == domain.JournalTransfer {
+				// Valued before the row locks of the loop (valueTransfer).
 			} else if orig, ok := corrected[l.ReversesLineID]; ok {
 				// A reversal line mirrors the transaction it corrects (BR-16.12).
 				plan[i].Value, plan[i].Corrects = orig.value.Neg(), orig.id
@@ -197,9 +205,13 @@ func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j
 	if err := checkSerials(ctx, tx, tenantID, j.LegalEntityID, serials); err != nil {
 		return err
 	}
-	entry, err := domain.BuildEntry(plan, p.InventoryAccount, offset, j.Currency)
-	if err != nil {
-		return err
+	entry := domain.JournalEntry{Currency: j.Currency, Lines: []domain.GLLine{}}
+	if j.Type != domain.JournalTransfer {
+		// A transfer moves value between dimension sets of the same inventory
+		// account: both legs cancel and there is no GL entry.
+		if entry, err = domain.BuildEntry(plan, p.InventoryAccount, offset, j.Currency); err != nil {
+			return err
+		}
 	}
 	if !entry.Balanced() {
 		return errors.New("inventory: journal entry does not balance")
@@ -211,6 +223,9 @@ func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j
 			d := doc
 			if plan[i].Paired {
 				d.sourceType = sourceOwnershipChange
+				if j.Type == domain.JournalTransfer {
+					d.sourceType = sourceTransferIn
+				}
 			}
 			if _, err := writeTransaction(ctx, tx, tenantID, d, plan[i].Line.ID, r, plan[i]); err != nil {
 				return err
@@ -237,6 +252,34 @@ func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j
 	}
 	if j.Type == domain.JournalOwnershipChange {
 		return enqueue(ctx, tx, "journal", j.ID, invevents.OwnershipChanged, tenantID, ownershipChanged(j, plan))
+	}
+	return nil
+}
+
+// valueTransfer values the legs of a TRANSFER journal before the posting loop:
+// it locks every row in key order, values each issue at its source row's
+// running average (lines of one source row in line order), and gives the
+// paired receipt the same value with the opposite sign, so the inventory
+// account does not move. CheckTransferLines guarantees that no row is both a
+// source and a destination.
+func valueTransfer(ctx context.Context, tx pgx.Tx, tenantID string, j domain.Journal, plan []domain.PostedLine, rows map[string]*row, order []string) error {
+	for _, k := range order {
+		r := rows[k]
+		if err := lockRow(ctx, tx, tenantID, j.LegalEntityID, j.Currency, r); err != nil {
+			return err
+		}
+		oh := r.oh
+		for _, i := range r.lines {
+			l := plan[i].Line
+			if l.Qty.Sign() >= 0 {
+				continue
+			}
+			v := oh.IssueValue(l.Qty, l.CostPrice, j.Currency)
+			plan[i].Value, plan[i+1].Value = v, v.Neg()
+			if err := oh.Post(plan[i].Status, l.Qty, v, 1); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

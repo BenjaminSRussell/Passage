@@ -20,6 +20,7 @@ const (
 	CodeDuplicateSerial    = "INV-SER-001"
 	CodeSerialQty          = "INV-SER-002"
 	CodeDimensionMandatory = "INV-DIM-001"
+	CodeTransferLine       = "INV-JNL-006" // a transfer line breaks the transfer rules
 )
 
 // Error is a domain rule violation with a stable code.
@@ -51,14 +52,22 @@ const (
 	// names the vendor-owned source; it posts a paired issue and receipt that
 	// differ only in the owner, and offsets to the consignment accrual account.
 	JournalOwnershipChange JournalType = "OWNERSHIP_CHANGE"
+	// JournalTransfer moves stock of one legal entity between two dimension
+	// sets (location to location, warehouse to warehouse, segment to segment)
+	// without a document in transit. Each line names the source (dimensions),
+	// the destination (toDimensions) and the positive quantity moved; it posts
+	// an issue at the source at its running average and a receipt of the same
+	// value at the destination, so the inventory account does not move and no
+	// offset account is needed.
+	JournalTransfer JournalType = "TRANSFER"
 )
 
 // JournalTypes are the journal types stored and listed.
-var JournalTypes = []JournalType{JournalMovement, JournalAdjustment, JournalOpeningBalance, JournalCount, JournalOwnershipChange}
+var JournalTypes = []JournalType{JournalMovement, JournalAdjustment, JournalOpeningBalance, JournalCount, JournalOwnershipChange, JournalTransfer}
 
 // KeyedJournalTypes are the journal types a user may create directly; COUNT
 // journals come from count sheets.
-var KeyedJournalTypes = []JournalType{JournalMovement, JournalAdjustment, JournalOpeningBalance, JournalOwnershipChange}
+var KeyedJournalTypes = []JournalType{JournalMovement, JournalAdjustment, JournalOpeningBalance, JournalOwnershipChange, JournalTransfer}
 
 // JournalStatus is the journal state machine of BR-16.11.
 type JournalStatus string
@@ -105,6 +114,9 @@ type JournalLine struct {
 	EnteredQty     decimal.Decimal
 	EnteredUnit    string
 	CostPrice      decimal.Decimal
+	// ToDims is the destination dimension set of a TRANSFER line; nil on any
+	// other line.
+	ToDims Dimensions
 }
 
 // SameContent reports whether two lines carry the same keyed values; it is the
@@ -113,7 +125,14 @@ func (l JournalLine) SameContent(o JournalLine) bool {
 	a, errA := l.Dims.Normalize()
 	b, errB := o.Dims.Normalize()
 	return errA == nil && errB == nil && l.ProductID == o.ProductID && a.Canonical() == b.Canonical() &&
-		l.Qty.Equal(o.Qty) && l.EnteredQty.Equal(o.EnteredQty) && l.EnteredUnit == o.EnteredUnit && l.CostPrice.Equal(o.CostPrice)
+		l.Qty.Equal(o.Qty) && l.EnteredQty.Equal(o.EnteredQty) && l.EnteredUnit == o.EnteredUnit && l.CostPrice.Equal(o.CostPrice) &&
+		l.sameDestination(o)
+}
+
+func (l JournalLine) sameDestination(o JournalLine) bool {
+	a, errA := l.ToDims.Normalize()
+	b, errB := o.ToDims.Normalize()
+	return errA == nil && errB == nil && a.Canonical() == b.Canonical()
 }
 
 // Journal is an inventory journal with its lines. ReversesJournalID is set on
@@ -219,6 +238,13 @@ func ValidateLineFor(t JournalType, l JournalLine, maxScale int32) error {
 	if dims[DimLicensePlate] != "" {
 		return fail(CodeInvalid, "line %d: dimension %s is reserved and cannot be set yet", l.LineNo, DimLicensePlate)
 	}
+	if t == JournalTransfer {
+		if err := validateTransferLine(l, dims); err != nil {
+			return err
+		}
+	} else if len(l.ToDims) > 0 {
+		return fail(CodeInvalid, "line %d: toDimensions apply only to TRANSFER journals", l.LineNo)
+	}
 	if dims[DimSite] == "" {
 		return fail(CodeDimensionMandatory, "dimension %s is mandatory for product %s (line %d)", DimSite, l.ProductID, l.LineNo)
 	}
@@ -248,6 +274,75 @@ func ValidateJournal(j Journal, r JournalRules) error {
 	if j.Type == JournalOwnershipChange {
 		return CheckOwnershipLines(j.Lines)
 	}
+	if j.Type == JournalTransfer {
+		return CheckTransferLines(j.Lines)
+	}
+	return nil
+}
+
+// transferFixedDimensions are the dimensions a TRANSFER line keeps from source
+// to destination: the tracking dimensions (batch, serial) and the product
+// dimensions (config, size, color, style), which identify what the stock is
+// rather than where it sits.
+var transferFixedDimensions = []string{DimBatch, DimSerial, DimConfig, DimSize, DimColor, DimStyle}
+
+// validateTransferLine checks one TRANSFER line: a positive quantity, a
+// destination with a site that differs from the source, no restricted status
+// on either side (blocking and release own those moves), and unchanged
+// tracking and product dimensions (transferFixedDimensions).
+func validateTransferLine(l JournalLine, from Dimensions) error {
+	if l.Qty.Sign() < 0 {
+		return fail(CodeTransferLine, "line %d: a transfer quantity is the positive quantity moved from the source to the destination", l.LineNo)
+	}
+	to, err := l.ToDims.Normalize()
+	if err != nil {
+		return fail(CodeTransferLine, "line %d destination: %v", l.LineNo, err)
+	}
+	if to[DimSite] == "" {
+		return fail(CodeDimensionMandatory, "dimension %s is mandatory on the destination of line %d", DimSite, l.LineNo)
+	}
+	if VendorOwned(to) || to[DimLicensePlate] != "" {
+		return fail(CodeTransferLine, "line %d: the destination cannot be vendor-owned or carry a license plate", l.LineNo)
+	}
+	if string(to.Hash()) == string(from.Hash()) {
+		return fail(CodeTransferLine, "line %d: the destination equals the source", l.LineNo)
+	}
+	for _, name := range transferFixedDimensions {
+		if to[name] != from[name] {
+			return fail(CodeTransferLine, "line %d: a transfer cannot change the %s (it moves stock, it does not relabel it)", l.LineNo, name)
+		}
+	}
+	for _, s := range []string{from[DimStatus], to[DimStatus]} {
+		if s == StockBlocked || s == StockQuarantine {
+			return fail(CodeTransferLine, "line %d: stock is blocked or quarantined through a blocking, not a transfer", l.LineNo)
+		}
+	}
+	return nil
+}
+
+// CheckTransferLines rejects a TRANSFER journal in which one projection row
+// (product and dimension set) is both a source and a destination: the
+// receipts take the value of the issues, so a row must be one or the other
+// within a journal. Chain the moves in two journals.
+func CheckTransferLines(lines []JournalLine) error {
+	from, to := map[string]int{}, map[string]int{}
+	for _, l := range lines {
+		src, err := l.Dims.Normalize()
+		if err != nil {
+			return fail(CodeInvalid, "line %d: %v", l.LineNo, err)
+		}
+		dst, err := l.ToDims.Normalize()
+		if err != nil {
+			return fail(CodeTransferLine, "line %d destination: %v", l.LineNo, err)
+		}
+		from[l.ProductID+"|"+string(src.Hash())] = l.LineNo
+		to[l.ProductID+"|"+string(dst.Hash())] = l.LineNo
+	}
+	for k, n := range from {
+		if m, ok := to[k]; ok {
+			return fail(CodeTransferLine, "line %d is the source of one transfer line and line %d its destination; split the chain into two journals", n, m)
+		}
+	}
 	return nil
 }
 
@@ -276,6 +371,19 @@ type PostedLine struct {
 // owned by the legal entity, valued at the consignment price. Physical stock
 // summed across owners is unchanged.
 func PlanPosting(j Journal) []PostedLine {
+	if j.Type == JournalTransfer {
+		// Issue at the source and receipt at the destination, adjacent: the
+		// receipt of plan[i] is plan[i+1]. The receipt takes the issue's value.
+		out := make([]PostedLine, 0, 2*len(j.Lines))
+		for _, l := range j.Lines {
+			issue := l
+			issue.Qty, issue.EnteredQty = l.Qty.Neg(), l.EnteredQty.Neg()
+			receipt := l
+			receipt.Dims = l.ToDims
+			out = append(out, PostedLine{Line: issue, Status: StatusSold}, PostedLine{Line: receipt, Status: StatusPurchased, Paired: true})
+		}
+		return out
+	}
 	if j.Type == JournalOwnershipChange {
 		out := make([]PostedLine, 0, 2*len(j.Lines))
 		for _, l := range j.Lines {
@@ -311,6 +419,9 @@ func ReverseJournal(orig Journal, newID string, postingDate time.Time) (Journal,
 	}
 	if orig.Type == JournalOwnershipChange {
 		return Journal{}, fail(CodeJournalNotReady, "an ownership change cannot be reversed: returning stock to the vendor is a later slice")
+	}
+	if orig.Type == JournalTransfer {
+		return Journal{}, fail(CodeJournalNotReady, "a transfer cannot be reversed: post a transfer back from the destination")
 	}
 	if orig.ReversedByJournalID != "" {
 		return Journal{}, fail(CodeJournalNotReady, "journal is already reversed by %s", orig.ReversedByJournalID)

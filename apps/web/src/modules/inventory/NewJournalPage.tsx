@@ -20,6 +20,7 @@ const typeHints: Record<KeyedJournalType, string> = {
   ADJUSTMENT: "Stock corrections posted to the inventory adjustment account.",
   OPENING_BALANCE: "Initial stock posted against the migration clearing account.",
   OWNERSHIP_CHANGE: "Takes vendor-owned consignment stock into company ownership at the consignment price, against the consignment accrual account.",
+  TRANSFER: "Moves stock between two locations, warehouses or segments of the legal entity at its running average cost. No ledger entry.",
 };
 
 /** Client-side checks that mirror the service, so most mistakes never leave the form. */

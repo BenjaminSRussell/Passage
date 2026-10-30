@@ -24,6 +24,7 @@ const sourceLabels: Record<SourceType, string> = {
   TRANSFER_LINE: "Transfer order",
   CONSIGNMENT_LINE: "Consignment receipt",
   OWNERSHIP_CHANGE: "Ownership change",
+  TRANSFER_IN: "Journal transfer receipt",
   PURCH_LINE: "Purchase order line",
   RECEIPT_LINE: "Receipt line",
   SALES_LINE: "Sales order line",

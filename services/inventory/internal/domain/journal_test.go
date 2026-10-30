@@ -21,7 +21,7 @@ func TestValidateJournal_Table(t *testing.T) {
 		code string
 	}{
 		{"movement ok", Journal{Type: JournalMovement, Currency: "USD", OffsetAccountID: "500100", Lines: []JournalLine{ok}}, ""},
-		{"unsupported type", Journal{Type: "TRANSFER", Currency: "USD", Lines: []JournalLine{ok}}, CodeInvalid},
+		{"unsupported type", Journal{Type: "BOM", Currency: "USD", Lines: []JournalLine{ok}}, CodeInvalid},
 		{"bad currency", Journal{Type: JournalAdjustment, Currency: "US", Lines: []JournalLine{ok}}, CodeInvalid},
 		{"no lines", Journal{Type: JournalAdjustment, Currency: "USD"}, CodeInvalid},
 		{"movement without offset", Journal{Type: JournalMovement, Currency: "USD", Lines: []JournalLine{ok}}, CodeOffsetRequired},

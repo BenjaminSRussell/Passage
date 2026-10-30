@@ -104,6 +104,8 @@ type lineRequest struct {
 	EnteredQty  *string           `json:"enteredQty"`
 	EnteredUnit string            `json:"enteredUnit"`
 	CostPrice   string            `json:"costPrice"`
+	// ToDimensions is the destination of a TRANSFER journal line.
+	ToDimensions map[string]string `json:"toDimensions"`
 }
 
 type addLinesRequest struct {
@@ -121,6 +123,7 @@ type lineResponse struct {
 	EnteredQty     string            `json:"enteredQty"`
 	EnteredUnit    string            `json:"enteredUnit"`
 	CostPrice      string            `json:"costPrice"`
+	ToDimensions   map[string]string `json:"toDimensions,omitempty"`
 }
 
 type glLineResponse struct {
@@ -215,7 +218,7 @@ func (a *API) createJournal(w http.ResponseWriter, r *http.Request) {
 		fields["legalEntityId"] = "must be a UUID"
 	}
 	if !slices.Contains(domain.KeyedJournalTypes, domain.JournalType(req.JournalType)) {
-		fields["journalType"] = "must be MOVEMENT, ADJUSTMENT, OPENING_BALANCE or OWNERSHIP_CHANGE"
+		fields["journalType"] = "must be MOVEMENT, ADJUSTMENT, OPENING_BALANCE, OWNERSHIP_CHANGE or TRANSFER"
 	}
 	date, err := time.Parse("2006-01-02", req.PostingDate)
 	if err != nil {
@@ -387,7 +390,7 @@ func parseLines(in []lineRequest) ([]domain.JournalLine, map[string]string) {
 			fields[prefix+"enteredUnit"] = "is required (1 to 12 characters of A-Z, 0-9, _ or -)"
 		}
 		out = append(out, domain.JournalLine{ClientKey: l.ClientKey, ProductID: l.ProductID, Dims: domain.Dimensions(l.Dimensions), Qty: qty,
-			EnteredQty: entered, EnteredUnit: l.EnteredUnit, CostPrice: cost, LineNo: i + 1})
+			EnteredQty: entered, EnteredUnit: l.EnteredUnit, CostPrice: cost, LineNo: i + 1, ToDims: domain.Dimensions(l.ToDimensions)})
 	}
 	return out, fields
 }
@@ -480,7 +483,7 @@ func writeJournal(w http.ResponseWriter, status int, j domain.Journal) {
 	resp := journalResponse{journalSummary: summaryOf(j), Lines: []lineResponse{}}
 	for _, l := range j.Lines {
 		resp.Lines = append(resp.Lines, lineResponse{ID: l.ID, LineNo: l.LineNo, ClientKey: l.ClientKey, ReversesLineID: l.ReversesLineID, ProductID: l.ProductID, Dimensions: l.Dims,
-			Qty: l.Qty.String(), EnteredQty: l.EnteredQty.String(), EnteredUnit: l.EnteredUnit, CostPrice: l.CostPrice.String()})
+			Qty: l.Qty.String(), EnteredQty: l.EnteredQty.String(), EnteredUnit: l.EnteredUnit, CostPrice: l.CostPrice.String(), ToDimensions: l.ToDims})
 	}
 	resp.LineCount = len(j.Lines)
 	if j.GLEntry != nil {

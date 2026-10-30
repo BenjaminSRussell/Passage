@@ -532,7 +532,7 @@ func TestListJournalsFiltersAndPages(t *testing.T) {
 	if len(out.Items) != 1 || out.Items[0].LineCount != 3 || out.Items[0].Lines != nil || out.NextCursor != "next-page" {
 		t.Fatalf("unexpected body %s", rec.Body.String())
 	}
-	for _, q := range []string{"status=OPEN", "type=TRANSFER", "limit=0", "limit=500"} {
+	for _, q := range []string{"status=OPEN", "type=BOM", "limit=0", "limit=500"} {
 		if rec := do(t, h, http.MethodGet, "/v1/inventory/journals?"+q, "", []string{"inventory.read"}, nil); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: status %d, want 400", q, rec.Code)
 		}

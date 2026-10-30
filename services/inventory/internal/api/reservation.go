@@ -36,7 +36,7 @@ const (
 
 // inquirySourceTypes are the origin types the transaction inquiry filters by:
 // the service's own documents and the external origins of transactions:apply.
-var inquirySourceTypes = append([]string{"INVENT_JOURNAL_LINE", "BLOCKING", "TRANSFER_LINE", "CONSIGNMENT_LINE", "OWNERSHIP_CHANGE"},
+var inquirySourceTypes = append([]string{"INVENT_JOURNAL_LINE", "BLOCKING", "TRANSFER_LINE", "CONSIGNMENT_LINE", "OWNERSHIP_CHANGE", "TRANSFER_IN"},
 	store.ExternalSourceTypes...)
 
 func (a *API) registerReservations(r chi.Router) {

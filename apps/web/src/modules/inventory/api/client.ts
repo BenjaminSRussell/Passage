@@ -3,14 +3,15 @@
 
 export const base = "/api/v1/inventory";
 
-export const JOURNAL_TYPES = ["MOVEMENT", "ADJUSTMENT", "OPENING_BALANCE", "COUNT", "OWNERSHIP_CHANGE"] as const;
+export const JOURNAL_TYPES = ["MOVEMENT", "ADJUSTMENT", "OPENING_BALANCE", "COUNT", "OWNERSHIP_CHANGE", "TRANSFER"] as const;
 export type JournalType = (typeof JOURNAL_TYPES)[number];
 
 /**
  * Types a user creates directly; COUNT journals come from posted count sheets.
- * OWNERSHIP_CHANGE also needs inventory.consignment.write (FR-16.17).
+ * OWNERSHIP_CHANGE also needs inventory.consignment.write (FR-16.17). TRANSFER
+ * moves stock between two dimension sets of the legal entity.
  */
-export const KEYED_JOURNAL_TYPES = ["MOVEMENT", "ADJUSTMENT", "OPENING_BALANCE", "OWNERSHIP_CHANGE"] as const;
+export const KEYED_JOURNAL_TYPES = ["MOVEMENT", "ADJUSTMENT", "OPENING_BALANCE", "OWNERSHIP_CHANGE", "TRANSFER"] as const;
 export type KeyedJournalType = (typeof KEYED_JOURNAL_TYPES)[number];
 
 export const JOURNAL_STATUSES = ["DRAFT", "SUBMITTED", "APPROVED", "POSTING", "POSTED", "REJECTED", "CANCELLED"] as const;
@@ -53,6 +54,8 @@ export interface JournalLine {
   reversesLineId?: string;
   productId: string;
   dimensions: Partial<Record<string, string>>;
+  /** Destination dimension set of a TRANSFER journal line. */
+  toDimensions?: Partial<Record<string, string>>;
   qty: string;
   enteredQty: string;
   enteredUnit: string;
@@ -86,6 +89,8 @@ export interface CreateJournalInput {
 export interface LineInput {
   productId: string;
   dimensions: Partial<Record<LineDimension, string>>;
+  /** Destination of a TRANSFER line. */
+  toDimensions?: Partial<Record<LineDimension, string>>;
   qty: string;
   enteredUnit: string;
   costPrice?: string;
@@ -235,6 +240,13 @@ export async function addLines(journalId: string, lines: LineInput[]): Promise<J
     }
     const out: Record<string, unknown> = { clientKey: newKey(), productId: line.productId, dimensions, qty: line.qty, enteredUnit: line.enteredUnit };
     if (line.costPrice && line.costPrice.trim() !== "") out.costPrice = line.costPrice.trim();
+    if (line.toDimensions) {
+      const to: Record<string, string> = {};
+      for (const [name, value] of Object.entries(line.toDimensions)) {
+        if (value && value.trim() !== "") to[name] = value.trim();
+      }
+      out.toDimensions = to;
+    }
     return out;
   });
   return (
@@ -303,6 +315,7 @@ export const SOURCE_TYPES = [
   "TRANSFER_LINE",
   "CONSIGNMENT_LINE",
   "OWNERSHIP_CHANGE",
+  "TRANSFER_IN",
   "PURCH_LINE",
   "RECEIPT_LINE",
   "SALES_LINE",

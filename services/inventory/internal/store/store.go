@@ -233,20 +233,25 @@ func loadJournal(ctx context.Context, tx pgx.Tx, id string, forUpdate bool) (dom
 		return j, err
 	}
 	rows, err := tx.Query(ctx, `select id::text, line_no, coalesce(client_key, ''), coalesce(reverses_line_id::text, ''), product_id::text, dims, qty::text,
-		entered_qty::text, entered_unit, cost_price::text from inventory_journal_line where tenant_id = $1 and journal_id = $2 order by line_no`, p.TenantID, id)
+		entered_qty::text, entered_unit, cost_price::text, to_dims from inventory_journal_line where tenant_id = $1 and journal_id = $2 order by line_no`, p.TenantID, id)
 	if err != nil {
 		return j, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var l domain.JournalLine
-		var raw []byte
+		var raw, rawTo []byte
 		var qty, entered, cost string
-		if err := rows.Scan(&l.ID, &l.LineNo, &l.ClientKey, &l.ReversesLineID, &l.ProductID, &raw, &qty, &entered, &l.EnteredUnit, &cost); err != nil {
+		if err := rows.Scan(&l.ID, &l.LineNo, &l.ClientKey, &l.ReversesLineID, &l.ProductID, &raw, &qty, &entered, &l.EnteredUnit, &cost, &rawTo); err != nil {
 			return j, err
 		}
 		if err := json.Unmarshal(raw, &l.Dims); err != nil {
 			return j, err
+		}
+		if len(rawTo) > 0 {
+			if err := json.Unmarshal(rawTo, &l.ToDims); err != nil {
+				return j, err
+			}
 		}
 		l.Qty, l.EnteredQty, l.CostPrice = decimal.RequireFromString(qty), decimal.RequireFromString(entered), decimal.RequireFromString(cost)
 		j.Lines = append(j.Lines, l)
@@ -324,6 +329,11 @@ func (s *Postgres) AddJournalLines(ctx context.Context, journalID string, lines 
 				return domainProblem(err)
 			}
 		}
+		if j.Type == domain.JournalTransfer {
+			if err := domain.CheckTransferLines(append(slices.Clone(j.Lines), lines...)); err != nil {
+				return domainProblem(err)
+			}
+		}
 		existing := map[string]domain.JournalLine{}
 		for _, l := range j.Lines {
 			if l.ClientKey != "" {
@@ -360,9 +370,15 @@ func (s *Postgres) AddJournalLines(ctx context.Context, journalID string, lines 
 			if l.ClientKey != "" {
 				key = &l.ClientKey
 			}
-			if _, err := tx.Exec(ctx, `insert into inventory_journal_line (tenant_id, journal_id, id, line_no, client_key, product_id, dimension_set_hash, dims, qty, entered_qty, entered_unit, cost_price)
-				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-				p.TenantID, journalID, ids.New(), next, key, l.ProductID, hash, raw, l.Qty.String(), l.EnteredQty.String(), l.EnteredUnit, l.CostPrice.String()); err != nil {
+			var toHash, toRaw []byte
+			if j.Type == domain.JournalTransfer {
+				if toHash, toRaw, err = upsertDimensionSet(ctx, tx, p.TenantID, l.ToDims); err != nil {
+					return err
+				}
+			}
+			if _, err := tx.Exec(ctx, `insert into inventory_journal_line (tenant_id, journal_id, id, line_no, client_key, product_id, dimension_set_hash, dims, qty, entered_qty, entered_unit, cost_price, to_dimension_set_hash, to_dims)
+				values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+				p.TenantID, journalID, ids.New(), next, key, l.ProductID, hash, raw, l.Qty.String(), l.EnteredQty.String(), l.EnteredUnit, l.CostPrice.String(), toHash, toRaw); err != nil {
 				return err
 			}
 		}

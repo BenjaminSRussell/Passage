@@ -12,6 +12,7 @@ export const typeLabels: Record<JournalType, string> = {
   OPENING_BALANCE: "Opening balance",
   COUNT: "Count",
   OWNERSHIP_CHANGE: "Ownership change",
+  TRANSFER: "Transfer",
 };
 
 const statusTones: Record<JournalStatus, BadgeTone> = {
