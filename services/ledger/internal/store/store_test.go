@@ -42,7 +42,7 @@ type env struct {
 }
 
 func principalCtx(tenantID, legalEntityID string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: legalEntityID, UserID: "test-user", Duties: map[string]struct{}{}})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: legalEntityID, UserID: "test-user", Duties: testkit.ScopeDuties(legalEntityID)})
 }
 
 // setup migrates a fresh schema as the owner, then works through the

@@ -12,7 +12,7 @@ import (
 // narrowedCtx is a principal limited to one legal entity, so the restrictive
 // legal-entity policy applies.
 func narrowedCtx(tenantID, legalEntityID string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: legalEntityID, Duties: map[string]struct{}{}})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: legalEntityID, Duties: testkit.ScopeDuties(legalEntityID)})
 }
 
 func TestPostgres_ValuationLedgers(t *testing.T) {

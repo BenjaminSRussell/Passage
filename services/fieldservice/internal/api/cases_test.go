@@ -162,7 +162,7 @@ func genericRouter(t *testing.T) (http.Handler, func(user string, duties ...stri
 	t.Helper()
 	admin, pool := testkit.DBWithApp(t)
 	as := func(user string, duties ...string) context.Context {
-		d := map[string]struct{}{}
+		d := testkit.ScopeDuties("")
 		for _, x := range duties {
 			d[x] = struct{}{}
 		}

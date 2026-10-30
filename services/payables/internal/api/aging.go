@@ -91,7 +91,7 @@ func (a *API) parseAgingQuery(w http.ResponseWriter, r *http.Request) (agingQuer
 		a.reject(w, r, &domain.Error{Code: domain.CodeValidation, Detail: "group_by must be vendor or none"})
 		return agingQuery{}, false
 	}
-	if p.LegalEntityID != "" && out.legalEntityID != "" && out.legalEntityID != p.LegalEntityID {
+	if out.legalEntityID != "" && !inScope(p, out.legalEntityID) {
 		a.countClientError(r)
 		fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "legal_entity is outside the caller's legal-entity scope"))
 		return agingQuery{}, false

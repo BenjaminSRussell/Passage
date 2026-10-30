@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/pricing/internal/domain"
 )
 
@@ -38,7 +39,7 @@ func (s *countingStore) SetCampaignKilled(context.Context, string, int, bool, st
 }
 
 func cacheCtx(tenantID, scope string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: scope})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: scope, Duties: testkit.ScopeDuties(scope)})
 }
 
 func query(le, group string) ActiveQuery {

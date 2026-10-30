@@ -12,10 +12,13 @@ import (
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 )
 
-const tenantID = "00000000-0000-0000-0000-000000000001"
+const (
+	tenantID = "00000000-0000-0000-0000-000000000001"
+	entityID = "00000000-0000-0000-0000-0000000000e1"
+)
 
 func query() domain.PeriodQuery {
-	return domain.PeriodQuery{LedgerID: "l-1", FiscalPeriodID: "p-1", PostingDate: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)}
+	return domain.PeriodQuery{LegalEntityID: entityID, LedgerID: "l-1", FiscalPeriodID: "p-1", PostingDate: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)}
 }
 
 func ctx() context.Context {
@@ -58,7 +61,7 @@ func TestAP_SendsCheckRequestAndMapsOutcomes(t *testing.T) {
 			if (err != nil) != tc.wantErr || status != tc.want {
 				t.Fatalf("status %q err %v, want %q wantErr %v", status, err, tc.want, tc.wantErr)
 			}
-			if got.Method != http.MethodPost || got.URL.Path != checkPath || got.Header.Get(tenant.HeaderDuties) != dutyPeriodCheck || got.Header.Get(tenant.HeaderTenant) != tenantID {
+			if got.Method != http.MethodPost || got.URL.Path != checkPath || got.Header.Get(tenant.HeaderDuties) != dutyPeriodCheck || got.Header.Get(tenant.HeaderTenant) != tenantID || got.Header.Get(tenant.HeaderLegalEntity) != entityID {
 				t.Fatalf("request %s %s headers %v", got.Method, got.URL.Path, got.Header)
 			}
 			if sent != (requestBody{LedgerID: "l-1", FiscalPeriodID: "p-1", PostingDate: "2026-09-01", SourceSystem: "ap"}) {
@@ -78,6 +81,40 @@ func TestAP_FailsWithoutPrincipalAndOnTimeout(t *testing.T) {
 	status, err := New(srv.URL, &http.Client{Timeout: 50 * time.Millisecond}).AP(ctx(), query())
 	if err == nil || status != "" {
 		t.Fatalf("status %q err %v, want timeout error", status, err)
+	}
+}
+
+func TestAP_ForwardsLegalEntity(t *testing.T) {
+	tests := []struct {
+		name      string
+		queryID   string
+		principal string
+		want      string
+		wantErr   bool
+	}{
+		{name: "invoice entity wins", queryID: entityID, principal: "", want: entityID},
+		{name: "falls back to the caller's single entity", queryID: "", principal: entityID, want: entityID},
+		{name: "no entity fails closed", wantErr: true},
+		{name: "multi-entity caller without an invoice entity fails closed", principal: entityID + "," + tenantID, wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var got string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				got = r.Header.Get(tenant.HeaderLegalEntity)
+				_, _ = w.Write([]byte(`{"allowed":true,"status":"open"}`))
+			}))
+			t.Cleanup(srv.Close)
+			q := query()
+			q.LegalEntityID = tc.queryID
+			c := tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, LegalEntityID: tc.principal})
+
+			_, err := New(srv.URL, nil).AP(c, q)
+
+			if (err != nil) != tc.wantErr || got != tc.want {
+				t.Fatalf("err %v entity header %q, want %q wantErr %v", err, got, tc.want, tc.wantErr)
+			}
+		})
 	}
 }
 

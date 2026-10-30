@@ -72,6 +72,8 @@ func TestSlice4_ValidationBeforeStore(t *testing.T) {
 		{"export without key", http.MethodPost, "/v1/analytics/exports", exportBody, exporter, 400, domain.CodeValidation, "Idempotency-Key"},
 		{"export bad format and ttl", http.MethodPost, "/v1/analytics/exports",
 			strings.Replace(exportBody, `"XLSX"`, `"PDF","linkTtlHours":200`, 1), with(exporter, headerIdempotency, "e1"), 400, domain.CodeValidation, "linkTtlHours"},
+		{"export without an entity has no scope", http.MethodPost, "/v1/analytics/exports", exportBody,
+			with(exporter, tenant.HeaderLegalEntity, "", headerIdempotency, "e0"), 403, domain.CodeNoScope, ""},
 		{"export over the cap", http.MethodPost, "/v1/analytics/exports",
 			strings.Replace(exportBody, "250000", "1000001", 1), with(exporter, headerIdempotency, "e1"), 422, domain.CodeExportTooLarge, ""},
 		{"export cap cannot be raised", http.MethodPost, "/v1/analytics/exports",

@@ -6,7 +6,32 @@ import (
 	"testing"
 
 	"pgregory.net/rapid"
+
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 )
+
+func TestScopeFromPrincipal_OnlyAllScopeDutyIsUnrestricted(t *testing.T) {
+	usmf, demf := "00000000-0000-0000-0000-00000000000a", "00000000-0000-0000-0000-00000000000b"
+	allScope := map[string]struct{}{tenant.DutyAllScope: {}}
+	tests := []struct {
+		name string
+		p    tenant.Principal
+		want Scope
+	}{
+		{"no entity and no duty sees nothing", tenant.Principal{}, Scope{}},
+		{"all-scope duty with no entity is unrestricted", tenant.Principal{Duties: allScope}, Scope{Unrestricted: true}},
+		{"entity beats the duty", tenant.Principal{LegalEntityID: usmf, Duties: allScope}, Scope{LegalEntityIDs: []string{usmf}}},
+		{"entity list", tenant.Principal{LegalEntityID: usmf + "," + demf}, Scope{LegalEntityIDs: []string{usmf, demf}}},
+		{"star is not an entity", tenant.Principal{LegalEntityID: "*"}, Scope{}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ScopeFromPrincipal(tc.p); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("got %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
 
 func TestCompileScope_Table(t *testing.T) {
 	usmf, demf := "00000000-0000-0000-0000-00000000000a", "00000000-0000-0000-0000-00000000000b"
@@ -19,7 +44,7 @@ func TestCompileScope_Table(t *testing.T) {
 		wantCode   string
 	}{
 		{"unrestricted adds no filter", "fin_journal_line", Scope{Unrestricted: true}, nil, "", ""},
-		{"one entity filters by its id", "fin_journal_line", ScopeFromPrincipal(usmf),
+		{"one entity filters by its id", "fin_journal_line", ScopeFromPrincipal(tenant.Principal{LegalEntityID: usmf}),
 			[]Filter{{Member: "fin_journal_line.legal_entity_id", Operator: "equals", Values: []string{usmf}}}, "", ""},
 		{"two entities sorted and deduplicated", "sales_line", Scope{LegalEntityIDs: []string{demf, usmf, demf}},
 			[]Filter{{Member: "sales_line.legal_entity_id", Operator: "equals", Values: []string{usmf, demf}}}, "", ""},

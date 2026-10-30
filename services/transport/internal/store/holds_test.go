@@ -14,7 +14,7 @@ import (
 )
 
 func asUser(n int, user string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), UserID: user, Duties: map[string]struct{}{}})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), UserID: user, Duties: testkit.ScopeDuties("")})
 }
 
 func heldParties(statuses ...string) []domain.PartyScreening {

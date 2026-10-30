@@ -122,8 +122,8 @@ type Settlement struct {
 	Amount         decimal.Decimal
 }
 
-func checkAPPeriod(ctx context.Context, periods PeriodControl, ledgerID, fiscalPeriodID string, date time.Time, documentID string) error {
-	status, err := periods.AP(ctx, PeriodQuery{LedgerID: ledgerID, FiscalPeriodID: fiscalPeriodID, PostingDate: date})
+func checkAPPeriod(ctx context.Context, periods PeriodControl, legalEntityID, ledgerID, fiscalPeriodID string, date time.Time, documentID string) error {
+	status, err := periods.AP(ctx, PeriodQuery{LegalEntityID: legalEntityID, LedgerID: ledgerID, FiscalPeriodID: fiscalPeriodID, PostingDate: date})
 	if err != nil {
 		slog.ErrorContext(ctx, "period control unavailable", "err", err, "documentId", documentID)
 		return fmt.Errorf("check AP period for document %s: %w", documentID, err)
@@ -157,7 +157,7 @@ func PostSettlement(ctx context.Context, s Settlement, periods PeriodControl, le
 	case !s.Amount.IsPositive() || !s.Amount.Equal(roundedMoney(s.Amount, s.Currency).Value):
 		return JournalEntry{}, fail(CodeInvalidReceipt, "settlement %s amount %s must be positive with at most the currency's decimals", s.ID, s.Amount)
 	}
-	if err := checkAPPeriod(ctx, periods, s.LedgerID, s.FiscalPeriodID, s.PostingDate, s.ID); err != nil {
+	if err := checkAPPeriod(ctx, periods, s.LegalEntityID, s.LedgerID, s.FiscalPeriodID, s.PostingDate, s.ID); err != nil {
 		return JournalEntry{}, err
 	}
 	documentDate := s.DocumentDate

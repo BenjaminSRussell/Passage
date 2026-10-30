@@ -274,7 +274,7 @@ func SeedReference(ctx context.Context, pool *pgxpool.Pool, files fs.FS) error {
 	if _, err := SeedConversions(files); err != nil {
 		return err
 	}
-	ctx = tenant.With(ctx, tenant.Principal{TenantID: SysTenantID})
+	ctx = tenant.With(ctx, tenant.Principal{TenantID: SysTenantID, Duties: map[string]struct{}{tenant.DutyAllScope: {}}})
 	return dbx.WithTenantTx(ctx, pool, func(tx pgx.Tx) error {
 		for i, d := range datasets {
 			if err := d.insert(ctx, tx, loaded[i]); err != nil {

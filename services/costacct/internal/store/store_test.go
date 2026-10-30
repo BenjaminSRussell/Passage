@@ -22,7 +22,7 @@ import (
 )
 
 func testCtx(tenantID string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, Duties: map[string]struct{}{}})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: tenantID, Duties: testkit.ScopeDuties("")})
 }
 
 func dec(s string) decimal.Decimal { return decimal.RequireFromString(s) }

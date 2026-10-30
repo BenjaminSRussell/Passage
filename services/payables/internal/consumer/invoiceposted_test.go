@@ -70,7 +70,7 @@ func TestHandleInvoicePosted_DueDateDefaultsToInvoiceDate(t *testing.T) {
 	if err := HandleInvoicePosted(context.Background(), s, event(t, InvoicePostedType, payload(nil))); err != nil {
 		t.Fatal(err)
 	}
-	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: "*"})
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), Duties: testkit.ScopeDuties("")})
 	items, _ := s.List(ctx, store.Filter{}, 10)
 	if len(items) != 1 || items[0].DueDate != "2027-03-01" || items[0].DueDateSource != store.DueDateDefaulted {
 		t.Fatalf("items = %+v", items)

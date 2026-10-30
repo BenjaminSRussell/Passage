@@ -30,7 +30,7 @@ func tenantCtx(tid string) context.Context {
 }
 
 func scopedCtx(tid, legalEntity string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: tid, LegalEntityID: legalEntity, UserID: "planner-1", Duties: map[string]struct{}{}})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: tid, LegalEntityID: legalEntity, UserID: "planner-1", Duties: testkit.ScopeDuties(legalEntity)})
 }
 
 func migrated(t *testing.T) (*pgxpool.Pool, *Postgres) {

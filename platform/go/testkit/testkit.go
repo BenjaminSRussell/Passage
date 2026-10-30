@@ -93,5 +93,15 @@ func Ctx(tenantID string, duties ...string) context.Context {
 	return tenant.With(context.Background(), p)
 }
 
+// ScopeDuties returns the duties for a test principal in legalEntity: the
+// all-entity duty when legalEntity is empty, none otherwise.
+func ScopeDuties(legalEntity string) map[string]struct{} {
+	d := map[string]struct{}{}
+	if legalEntity == "" {
+		d[tenant.DutyAllScope] = struct{}{}
+	}
+	return d
+}
+
 // TenantID returns a deterministic UUID for tests: 00000000-0000-0000-0000-00000000000N.
 func TenantID(n int) string { return fmt.Sprintf("00000000-0000-0000-0000-%012d", n) }

@@ -42,7 +42,7 @@ func entry(from, to string) store.Entry {
 }
 
 func principal(n int, legalEntityID string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), LegalEntityID: legalEntityID})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), LegalEntityID: legalEntityID, Duties: testkit.ScopeDuties(legalEntityID)})
 }
 
 var adminByApp sync.Map

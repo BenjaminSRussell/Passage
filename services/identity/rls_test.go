@@ -27,7 +27,12 @@ var identityTables = []string{"identity_tenants", "identity_users", "identity_le
 var rlsTables = append(append([]string{}, identityTables...), "identity_audit", "outbox")
 
 func inScope(ctx context.Context, tenantID, legalEntityID string) context.Context {
-	return tenant.With(ctx, tenant.Principal{TenantID: tenantID, UserID: "test-user", LegalEntityID: legalEntityID})
+	p := tenant.Principal{TenantID: tenantID, UserID: "test-user", LegalEntityID: legalEntityID, Duties: map[string]struct{}{}}
+	if legalEntityID == "*" {
+		p.LegalEntityID = ""
+		p.Duties[tenant.DutyAllScope] = struct{}{}
+	}
+	return tenant.With(ctx, p)
 }
 
 func requireDenied(t *testing.T, err error, what string) {

@@ -37,7 +37,7 @@ func TestRowLevelSecurity(t *testing.T) {
 	s := New(app, sealer, 10)
 	le, otherLE := ids.New(), ids.New()
 	scoped := func(tenantID, entity string) context.Context {
-		return tenant.With(bg, tenant.Principal{TenantID: tenantID, LegalEntityID: entity, UserID: "user-test", Duties: map[string]struct{}{}})
+		return tenant.With(bg, tenant.Principal{TenantID: tenantID, LegalEntityID: entity, UserID: "user-test", Duties: testkit.ScopeDuties(entity)})
 	}
 	one := scoped(testkit.TenantID(1), "")
 	w := mustWorker(t, s, one, "Rls")

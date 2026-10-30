@@ -12,6 +12,18 @@ Run: `DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/batch`. Tes
 | `MIGRATE_ON_START` | `true` applies embedded migrations at start (dev only) |
 | `HTTP_ADDR`, `ADMIN_ADDR` | default `:8080`, and `:9090` serving `/metrics` only |
 
+### Notification senders
+
+| Variable | Meaning |
+|---|---|
+| `NOTIFY_SMTP_ENABLED`, `NOTIFY_WEBHOOK_ENABLED` | `true` enables an adapter; startup fails if its credentials are missing |
+| `NOTIFY_SECRETS_DIR` | when set, credentials are read from files in it only (no env fallback); an empty file counts as missing |
+| `NOTIFY_SMTP_FROM`, `NOTIFY_WEBHOOK_URL` | non-secret settings; the webhook URL must be `https` |
+| `NOTIFY_SMTP_TLS` | `starttls` (default; refuses servers that do not advertise it), `implicit` (port 465), or `none` (loopback host only) |
+| `NOTIFY_ALLOW_INSECURE` | dev only: `true` permits `http` webhooks and `none` TLS to a non-loopback host |
+
+Secrets are read once at startup, so an ESO rotation needs a pod restart: set `notify.reloader=true` to add the `reloader.stakater.com/auto` annotation (requires Stakater Reloader in the cluster). The `ExternalSecret` uses `external-secrets.io/v1`, needs `notify.externalSecret.environment`, and reads `<pathPrefix>/<key>` with `property: value` from the `ClusterSecretStore` named by `notify.externalSecret.storeName`.
+
 ## API
 
 | Operation | Duty |

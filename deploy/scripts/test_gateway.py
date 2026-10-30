@@ -25,6 +25,9 @@ def target_names(policy):
     return {(t["kind"], t["name"]) for t in policy["spec"]["targetRefs"]}
 
 
+CLIENT_SUPPLIED = {"X-Passage-LegalEntity-Scope"}
+
+
 class GatewayManifests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -40,12 +43,13 @@ class GatewayManifests(unittest.TestCase):
         self.assertTrue(header_consts)
         (ctp,) = of_kind(self.docs, "ClientTrafficPolicy")
         removed = set(ctp["spec"]["headers"]["earlyRequestHeaders"]["remove"])
-        self.assertTrue(header_consts <= removed, header_consts - removed)
+        self.assertTrue(header_consts - CLIENT_SUPPLIED <= removed, header_consts - CLIENT_SUPPLIED - removed)
+        self.assertFalse(CLIENT_SUPPLIED & removed)
+        self.assertLessEqual(CLIENT_SUPPLIED, header_consts)
         explicit = {
             "X-Passage-Tenant",
             "X-Passage-Legal-Entity",
             "X-Passage-LegalEntity",
-            "X-Passage-LegalEntity-Scope",
             "X-Passage-User",
             "X-Passage-Duties",
             "X-Passage-Tier",

@@ -49,7 +49,7 @@ func entityCtx(tenantN int, legalEntityID string) context.Context {
 
 // tenantWideCtx is a principal with no legal-entity narrowing ('*' scope).
 func tenantWideCtx(tenantN int) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(tenantN), UserID: ids.New(), Duties: map[string]struct{}{}})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(tenantN), UserID: ids.New(), Duties: map[string]struct{}{tenant.DutyAllScope: {}}})
 }
 
 func dims(extra ...string) domain.Dimensions {

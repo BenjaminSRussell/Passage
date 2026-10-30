@@ -25,7 +25,7 @@ const (
 )
 
 func principalContext(tenantNumber int, legalEntityID string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(tenantNumber), LegalEntityID: legalEntityID})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(tenantNumber), LegalEntityID: legalEntityID, Duties: testkit.ScopeDuties(legalEntityID)})
 }
 
 func migratedApp(t *testing.T) *pgxpool.Pool {

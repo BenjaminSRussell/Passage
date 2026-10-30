@@ -5,4 +5,18 @@ replicaCount: 2
 resources:
   requests: { cpu: 50m, memory: 64Mi }
   limits: { cpu: 250m, memory: 128Mi }
+notify:
+  enabled: false
+  secretName: batch-notify
+  mountPath: /var/run/secrets/notify
+  fsGroup: 65532
+  reloader: false
+  smtp: { enabled: false, from: "", tls: starttls }
+  webhook: { enabled: false, url: "" }
+  externalSecret:
+    enabled: true
+    storeName: passage
+    environment: ""
+    pathPrefix: passage/{env}/batch/notify
+    refreshInterval: 1h
 serviceMonitor: { enabled: false }

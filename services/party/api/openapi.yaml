@@ -37,7 +37,7 @@ paths:
     post:
       operationId: createParty
       x-passage-duty: party.write
-      description: Creates an organization or person. The party number comes from numbering sequence PARTY. A replay with the same Idempotency-Key and body returns the original party; the same key with another body is 409 idempotency_key_reuse. Emits dev.passage.party.party.created.v1.
+      description: Creates an organization or person. The party number comes from numbering sequence PARTY. A replay with the same Idempotency-Key and body returns the original party; the same key with another body is 409 idempotency_key_reuse. Emits dev.passage.party.party.created.v1. The caller must carry exactly one legal entity (X-Passage-Legal-Entity), because the party number is allocated for that entity; a caller with none or several gets 422 PTY-LEGAL-ENTITY-REQUIRED.
       parameters:
         - name: Idempotency-Key
           in: header
@@ -60,7 +60,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '409': { description: 'idempotency_key_reuse: the key was used with a different body.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: 'PTY-PARTY-INVALID; errors names each failing field.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'PTY-PARTY-INVALID; errors names each failing field. PTY-LEGAL-ENTITY-REQUIRED: the caller has no legal entity or more than one.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '500': { $ref: '#/components/responses/Problem' }
         '503': { description: 'PTY-NUMBERING-UNAVAILABLE: the numbering service failed, timed out or NUMBERING_URL is empty. No party is written.', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/party/parties/{id}:

@@ -112,7 +112,7 @@ func TestSlice3_ValidationBeforeStore(t *testing.T) {
 func slice3Router(t *testing.T) (http.Handler, func(user string) context.Context) {
 	t.Helper()
 	admin, pool := testkit.DBWithApp(t)
-	duties := map[string]struct{}{}
+	duties := testkit.ScopeDuties("")
 	for _, d := range []string{dutyObject, dutyInquire, dutyActivity, dutyKbRead, dutyKbAuthor, dutyKbPublish, dutyCaseCreate} {
 		duties[d] = struct{}{}
 	}

@@ -177,7 +177,7 @@ func (a *API) createExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	plan, qerr := domain.BuildPlan(domain.Query{Measures: req.Measures, Dimensions: req.Dimensions, From: from, To: to},
-		a.catalog, domain.ScopeFromPrincipal(p.LegalEntityID))
+		a.catalog, domain.ScopeFromPrincipal(p))
 	if qerr != nil {
 		fail(w, r, qerr)
 		return

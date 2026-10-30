@@ -13,6 +13,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/api"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/domain"
@@ -81,9 +82,17 @@ func agingRouter(store *fakeAgingStore, l api.LedgerBalances, account string) *c
 }
 
 func get(r http.Handler, path, duties, legalEntity string) *httptest.ResponseRecorder {
+	if legalEntity == "" {
+		duties += "," + tenant.DutyAllScope
+	}
+	return getScoped(r, path, duties, legalEntity)
+}
+
+func getScoped(r http.Handler, path, duties, legalEntity string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodGet, path, nil)
 	req.Header.Set("X-Passage-Tenant", testkit.TenantID(1))
 	req.Header.Set("X-Passage-Duties", duties)
+	req.Header.Set(tenant.HeaderLegalEntityScopeAll, tenant.LegalEntityScopeAll)
 	if legalEntity != "" {
 		req.Header.Set("X-Passage-Legal-Entity", legalEntity)
 	}
@@ -130,6 +139,13 @@ func TestAging_ReportRejections(t *testing.T) {
 				t.Fatalf("got %d %s; want %d containing %s", rec.Code, rec.Body, tc.want, tc.wantBody)
 			}
 		})
+	}
+}
+
+func TestAging_CallerWithoutEntityScopeCannotNameAnEntity(t *testing.T) {
+	rec := getScoped(agingRouter(&fakeAgingStore{rows: agingRows()}, nil, ""), agingURL, "aging.read", "")
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "AUTH-0003") {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
 	}
 }
 

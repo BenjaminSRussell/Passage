@@ -14,7 +14,7 @@ import (
 )
 
 func scopedCtx(le string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: le, UserID: "u", Duties: map[string]struct{}{}})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: le, UserID: "u", Duties: testkit.ScopeDuties(le)})
 }
 
 func TestChildTablesFollowParentLegalEntityScope(t *testing.T) {

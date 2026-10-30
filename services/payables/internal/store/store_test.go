@@ -26,7 +26,7 @@ const (
 )
 
 func ctxFor(n int, le string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), LegalEntityID: le, Duties: map[string]struct{}{}})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), LegalEntityID: le, Duties: testkit.ScopeDuties(le)})
 }
 
 func setup(t *testing.T) *Postgres {

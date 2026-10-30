@@ -18,7 +18,7 @@ import (
 
 // userCtx is a principal of tenant n named user, unrestricted by legal entity.
 func userCtx(n int, user string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), UserID: user, Duties: map[string]struct{}{}})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(n), UserID: user, Duties: testkit.ScopeDuties("")})
 }
 
 // seedBaseline creates a project with contract value 500,000.00, a WORKING plan

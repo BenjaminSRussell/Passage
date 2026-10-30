@@ -3,6 +3,9 @@ package domain
 import (
 	"slices"
 	"strings"
+
+	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 )
 
 // Reasons and codes for the row-level scope mirror (FR-46.7, BR-46.9).
@@ -18,13 +21,19 @@ type Scope struct {
 	LegalEntityIDs []string
 }
 
-// ScopeFromPrincipal maps the gateway's legal-entity header to a scope: no
-// header means the whole tenant, one id narrows to that entity.
-func ScopeFromPrincipal(legalEntityID string) Scope {
-	if legalEntityID == "" {
+// ScopeFromPrincipal maps the principal to a scope with the same rule dbx
+// applies to row-level security: its UUID legal entities when set, the whole
+// tenant only for a principal with no entity that holds the all-scope duty,
+// and nothing otherwise.
+func ScopeFromPrincipal(p tenant.Principal) Scope {
+	scopes := dbx.LegalEntityScopes(p)
+	switch scopes {
+	case "":
+		return Scope{}
+	case "*":
 		return Scope{Unrestricted: true}
 	}
-	return Scope{LegalEntityIDs: []string{legalEntityID}}
+	return Scope{LegalEntityIDs: strings.Split(scopes, ",")}
 }
 
 // Filter is a Cube queryRewrite member filter.
