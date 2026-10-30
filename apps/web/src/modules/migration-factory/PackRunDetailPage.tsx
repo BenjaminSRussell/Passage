@@ -16,7 +16,7 @@ import {
   type DataTableColumn,
 } from "../../shell/ui";
 import { describeProblem, getRun, newKey, releaseQuarantined, type Problem, type QuarantinedRecord } from "./api/client";
-import { canReconcile, formatDateTime, formatKey, money, projectsOf, projectStatus, SOURCE_LABELS, splitList, type ControlTotal } from "./domain";
+import { canReconcile, dash, formatDateTime, formatKey, money, projectsOf, projectStatus, SOURCE_LABELS, splitList, type ControlTotal } from "./domain";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -60,6 +60,7 @@ export function PackRunDetailPage() {
     { key: "legacyId", header: "Record", mono: true },
     { key: "rule", header: "Rule failed" },
     { key: "reason", header: "Reason" },
+    { key: "dimensions", header: run?.pack === "gl_balances" ? "Account and dimensions" : "Party and account", render: (row) => (run?.pack === "gl_balances" ? [row.account, row.dimensions] : [row.party, row.account]).filter(Boolean).join(" / ") || dash },
     { key: "amount", header: "Amount", align: "end", mono: true, render: (row) => `${money(row.amount)} ${row.currency ?? ""}`.trim() },
     { key: "status", header: "Status", render: (row) => <StatusPill status={row.status} /> },
     {
@@ -164,6 +165,15 @@ export function PackRunDetailPage() {
               {run.message}
             </Alert>
           ) : null}
+          {run.mismatchMessages && run.mismatchMessages.length > 0 ? (
+            <Alert tone="danger" title="Open items differ from the GL">
+              <ul className={styles.plainList}>
+                {run.mismatchMessages.map((m) => (
+                  <li key={m}>{m}</li>
+                ))}
+              </ul>
+            </Alert>
+          ) : null}
           <StatGroup label="Records">
             <StatTile label="Records" value={run.recordsIn} />
             <StatTile label="Loaded" value={run.recordsLoaded} />
@@ -186,6 +196,14 @@ export function PackRunDetailPage() {
                 <dt className={styles.term}>Started</dt>
                 <dd className={styles.value}>{formatDateTime(run.createdAt)}</dd>
               </div>
+              {run.openItemsRunId ? (
+                <div className={styles.entry}>
+                  <dt className={styles.term}>Reconciled with open items</dt>
+                  <dd className={`${styles.value} ${styles.mono}`}>
+                    <Link to={`/migration-factory/runs/${run.openItemsRunId}`}>{run.openItemsRunId}</Link>
+                  </dd>
+                </div>
+              ) : null}
               <div className={styles.entry}>
                 <dt className={styles.term}>Input hash</dt>
                 <dd className={`${styles.value} ${styles.mono}`}>{run.inputHash}</dd>

@@ -258,7 +258,7 @@ paths:
     post:
       operationId: postVendorInvoice
       x-passage-duty: VendorInvoicePost
-      description: Posts a vendor invoice against GR/IR items. Checks the AP period, clears GR/IR pro rata (the last quantity clears the exact remainder), posts to the ledger, persists the invoice and writes dev.passage.payables.invoice.posted.v1 to the outbox. The invoice id derives from tenant, vendor and invoice number, so the ledger idempotency key is stable across retries.
+      description: Posts a vendor invoice against GR/IR items. Checks the AP period, clears GR/IR pro rata (the last quantity clears the exact remainder), posts to the ledger, persists the invoice and writes dev.passage.payables.invoice.posted.v1 to the outbox. The invoice id derives from tenant, vendor and invoice number, so the ledger idempotency key is stable across retries. When the legal entity has a stochastic audit sample rate (PUT /v1/receiving/audit-policy), the invoice may be drawn for audit: it is stored with status AUDIT_BLOCKED, reserves its GR/IR quantity (so no other invoice, ERS run or plan settlement can take it), posts nothing to the ledger and writes dev.passage.payables.invoice.sampled.v1 instead, until an auditor calls :release-audit-block. Subsequent debits and credits against a blocked invoice are refused (AP-AUD-001).
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -381,6 +381,159 @@ paths:
         '422': { $ref: '#/components/responses/Problem', description: 'PER-AP-001 closed AP period; RCV-VAL-001 foreign ledger; COM-0409.' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
         '503': { $ref: '#/components/responses/Problem', description: 'COM-0503 inventory unavailable or not configured.' }
+  /v1/receiving/invoices/{id}:release-audit-block:
+    post:
+      operationId: releaseInvoiceAuditBlock
+      x-passage-duty: InvoiceAuditRelease
+      description: >-
+        Releases an invoice held by the stochastic audit block: checks the AP period for the invoice's posting date, posts the
+        journal (the GR/IR clearings fixed when the invoice was drawn, so the entry equals the one a normal post would have made)
+        under the invoice's own idempotency key, sets the status to POSTED, records the releasing user and time, and writes
+        dev.passage.payables.invoice.posted.v1. The duty is separate from VendorInvoicePost (segregation of duties), and the user
+        who posted the invoice cannot release it (AP-AUD-003). The caller needs an authenticated user.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReleaseAuditBlockRequest' }
+      responses:
+        '200':
+          description: The released invoice (status POSTED, releasedBy and releasedAt set).
+          headers:
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] }, description: Present on replays only. }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Invoice' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001 no tenant or no user.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003; AP-AUD-003 the releaser posted the invoice.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-005 invoice not found.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'AP-AUD-002 the invoice is not blocked for audit (also a second release); RCV-IDM-001; COM-0410.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PER-AP-001 closed AP period; RCV-VAL-001 other legal entity; COM-0409.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/invoices/{id}:reject-audit-block:
+    post:
+      operationId: rejectInvoiceAuditBlock
+      x-passage-duty: InvoiceAuditRelease
+      description: >-
+        Rejects an invoice held by the stochastic audit block. Nothing is posted; the GR/IR quantity and cleared amount the invoice
+        reserved are freed, the status becomes AUDIT_REJECTED, and the rejecting user, time and reason are stored. The invoice number
+        stays used for the vendor. Same duty and segregation as the release: the user who posted the invoice cannot reject it
+        (AP-AUD-003), nor can anyone when the poster is unknown. Writes dev.passage.payables.invoice.rejected.v1.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RejectAuditBlockRequest' }
+      responses:
+        '200':
+          description: The rejected invoice.
+          headers:
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] }, description: Present on replays only. }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Invoice' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001 including a missing reason.' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001 no tenant or no user.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003; AP-AUD-003 the rejecter posted the invoice.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-005 invoice not found.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'AP-AUD-002 the invoice is not blocked for audit; RCV-IDM-001; COM-0410.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'RCV-VAL-001 other legal entity; COM-0409.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/ers-settlements:run:
+    post:
+      operationId: runErsSettlement
+      x-passage-duty: VendorInvoicePost
+      description: >-
+        Evaluated receipt settlement (self-billing). Scans the OPEN GR/IR items (no quantity invoiced yet) of the vendor and/or
+        purchase order, and for each POSTED receipt of an ERS-enabled vendor (PUT /v1/receiving/ers-vendors/{vendorId}) creates
+        and posts one self-billed invoice numbered ERS-{receipt number}: every open receipt line at the received quantity times
+        the PO line's net unit price (the PO line is the usable line of the order with the line's product; none or several skip
+        the receipt), Dr GR/IR (the receipt's value) with the difference to inventory or PPV, Cr vendor control. The PO is read
+        through the purchasing adapter with the caller's identity. A receipt with some lines already invoiced is skipped whole (PARTIALLY_INVOICED) so its ERS number is not used up. The caller must carry an authenticated end user (401 otherwise): the user is stored as the invoice's poster for segregation of duties, so a scheduler needs a user actor. Lines settled by an invoicing plan are not
+        touched: the run uses the same per-line locks and checks as POST /v1/receiving/invoices:post, so an ERS-settled line
+        cannot be invoiced again and an invoiced line is skipped. Idempotent per receipt (ALREADY_SETTLED). The invoice goes
+        through the stochastic audit block like any other (status AUDIT_BLOCKED in the result). At most 100 invoices are created
+        per run and 1000 GR/IR items scanned (hasMore); a failure stops the run and a repeat continues. Quantity discrepancies
+        and BR-18.9 price-change confirmation are not handled. Writes dev.passage.payables.invoice.posted.v1 (source ERS) or
+        invoice.sampled.v1 per invoice.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ErsRunRequest' }
+      responses:
+        '200':
+          description: Self-billed invoices created by this run and receipts skipped.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErsRun' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001 including neither vendorId nor purchaseOrderId.' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '409': { $ref: '#/components/responses/Problem', description: 'RCV-IDM-001, COM-0410.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PER-AP-001 closed AP period; RCV-VAL-001 foreign ledger; COM-0409.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+        '503': { $ref: '#/components/responses/Problem', description: 'COM-0503 purchasing unavailable or not configured.' }
+  /v1/receiving/ers-vendors/{vendorId}:
+    put:
+      operationId: setErsVendor
+      x-passage-duty: MatchingPolicyMaintain
+      description: Turns evaluated receipt settlement on or off for a vendor in a legal entity. Neither purchasing nor party carries an ERS flag, so receiving owns it. The change records the user. Absent means off.
+      parameters:
+        - name: vendorId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ErsVendorRequest' }
+      responses:
+        '200':
+          description: The stored setting.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErsVendor' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001 no tenant or no user.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/audit-policy:
+    put:
+      operationId: setAuditPolicy
+      x-passage-duty: MatchingPolicyMaintain
+      description: Sets the stochastic audit sample rate of a legal entity, a percentage from 0 to 100 with at most two decimals (default 0, nothing is sampled). Each invoice posted afterwards (manual or ERS) is drawn from a seedable random source and blocked with that probability. The change records the user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AuditPolicyRequest' }
+      responses:
+        '200':
+          description: The stored policy.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditPolicy' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001 no tenant or no user.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
   /v1/receiving/pending-postings:
     get:
       operationId: listPendingPostings
@@ -767,8 +920,16 @@ components:
               standardCost: { type: boolean, default: false, description: Price difference posts to PPV instead of inventory. }
     Invoice:
       type: object
-      required: [id, vendorId, legalEntityId, invoiceNumber, invoiceDate, postingDate, currency, ledgerId, fiscalPeriodId, total, ledgerEntryId, createdAt, lines]
+      required: [id, vendorId, legalEntityId, invoiceNumber, invoiceDate, postingDate, currency, ledgerId, fiscalPeriodId, total, ledgerEntryId, source, status, createdAt, lines]
       properties:
+        source: { type: string, enum: [MANUAL, ERS] }
+        auditReason: { type: string, enum: [stochastic sample, re-issue after audit rejection], description: Why an invoice is or was held for audit. }
+        status: { type: string, enum: [POSTED, AUDIT_BLOCKED, AUDIT_REJECTED], description: 'AUDIT_BLOCKED invoices have an empty ledgerEntryId until released.' }
+        releasedBy: { type: string, description: The user who released the audit block. }
+        releasedAt: { type: string, format: date-time }
+        rejectedBy: { type: string }
+        rejectedAt: { type: string, format: date-time }
+        rejectReason: { type: string }
         id: { type: string, format: uuid }
         vendorId: { type: string, format: uuid }
         legalEntityId: { type: string, format: uuid }
@@ -895,6 +1056,86 @@ components:
               sourceRef: { type: string }
               reason: { type: string, enum: [ALREADY_INVOICED, UNKNOWN_ROW_STATUS, ALREADY_SETTLED, AWAITS_RECEIPT, LINE_CANCELLED, LINE_INVOICED, NO_PRODUCT, CURRENCY_MISMATCH, NO_AMOUNT, OTHER_VENDOR, OTHER_LEGAL_ENTITY] }
         hasMore: { type: boolean, description: True when the run stopped at 100 settlements or the inventory journal list was cut at its page bound; run again. }
+    ReleaseAuditBlockRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId]
+      properties:
+        legalEntityId: { type: string, format: uuid, description: Must be the legal entity of the invoice. }
+    RejectAuditBlockRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, reason]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        reason: { type: string, minLength: 1, maxLength: 500, description: Trimmed. }
+    ErsRunRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, postingDate, fiscalPeriodId]
+      description: At least one of vendorId and purchaseOrderId is required.
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        vendorId: { type: string, format: uuid }
+        purchaseOrderId: { type: string, format: uuid }
+        postingDate: { type: string, format: date, description: The invoice date and the ledger posting date of the self-billed invoices. }
+        ledgerId: { type: string, format: uuid }
+        fiscalPeriodId: { type: string, format: uuid }
+    ErsRun:
+      type: object
+      required: [settled, skipped, hasMore]
+      properties:
+        settled:
+          type: array
+          items:
+            type: object
+            required: [invoiceId, invoiceNumber, receiptId, receiptNumber, vendorId, currency, total, status, ledgerEntryId]
+            properties:
+              invoiceId: { type: string, format: uuid }
+              invoiceNumber: { type: string, description: 'ERS-{receipt number}' }
+              receiptId: { type: string, format: uuid }
+              receiptNumber: { type: string }
+              vendorId: { type: string, format: uuid }
+              currency: { type: string }
+              total: { type: string }
+              status: { type: string, enum: [POSTED, AUDIT_BLOCKED] }
+              ledgerEntryId: { type: string }
+        skipped:
+          type: array
+          items:
+            type: object
+            required: [sourceRef, reason]
+            properties:
+              sourceRef: { type: string, description: The receipt number. }
+              reason: { type: string, enum: [RECEIPT_NOT_POSTED, OTHER_LEGAL_ENTITY, NOT_ERS_VENDOR, PO_NOT_FOUND, PO_FORBIDDEN, PO_NOT_APPROVED, CURRENCY_MISMATCH, OTHER_VENDOR, NO_PO_LINE, AMBIGUOUS_PO_LINE, ALREADY_INVOICED, PARTIALLY_INVOICED, ALREADY_SETTLED, PLAN_SETTLED, LINE_INVOICED] }
+        hasMore: { type: boolean, description: True when the run stopped at 100 invoices or at the scan bound; run again. }
+    ErsVendorRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, enabled]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        enabled: { type: boolean }
+    ErsVendor:
+      type: object
+      required: [legalEntityId, vendorId, enabled]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        vendorId: { type: string, format: uuid }
+        enabled: { type: boolean }
+    AuditPolicyRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, sampleRatePct]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        sampleRatePct: { type: [number, string], minimum: 0, maximum: 100, description: At most two decimals. }
+    AuditPolicy:
+      type: object
+      required: [legalEntityId, sampleRatePct]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        sampleRatePct: { type: string }
     Status:
       type: string
       enum: [NOT_MATCHED, MATCHED, PRICE_VARIANCE, QTY_VARIANCE, TOTAL_VARIANCE, NO_RECEIPT, WAITING_RECEIPT]

@@ -25,6 +25,17 @@ channels:
         $ref: "#/components/messages/InvoicePosted"
       invoiceAdjusted:
         $ref: "#/components/messages/InvoiceAdjusted"
+      invoiceSampled:
+        $ref: "#/components/messages/InvoiceSampled"
+      invoiceRejected:
+        $ref: "#/components/messages/InvoiceRejected"
+  policyEvents:
+    address: passage.receiving.policy
+    messages:
+      auditPolicyChanged:
+        $ref: "#/components/messages/AuditPolicyChanged"
+      ersVendorChanged:
+        $ref: "#/components/messages/ErsVendorChanged"
   settlementEvents:
     address: passage.payables.settlement
     messages:
@@ -51,6 +62,26 @@ operations:
     channel: { $ref: "#/channels/invoiceEvents" }
     messages:
       - { $ref: "#/channels/invoiceEvents/messages/invoiceAdjusted" }
+  publishInvoiceSampled:
+    action: send
+    channel: { $ref: "#/channels/invoiceEvents" }
+    messages:
+      - { $ref: "#/channels/invoiceEvents/messages/invoiceSampled" }
+  publishInvoiceRejected:
+    action: send
+    channel: { $ref: "#/channels/invoiceEvents" }
+    messages:
+      - { $ref: "#/channels/invoiceEvents/messages/invoiceRejected" }
+  publishAuditPolicyChanged:
+    action: send
+    channel: { $ref: "#/channels/policyEvents" }
+    messages:
+      - { $ref: "#/channels/policyEvents/messages/auditPolicyChanged" }
+  publishErsVendorChanged:
+    action: send
+    channel: { $ref: "#/channels/policyEvents" }
+    messages:
+      - { $ref: "#/channels/policyEvents/messages/ersVendorChanged" }
   publishSettlementPosted:
     action: send
     channel: { $ref: "#/channels/settlementEvents" }
@@ -77,8 +108,10 @@ components:
     InvoicePosted:
       name: dev.passage.payables.invoice.posted.v1
       summary: >-
-        POST /v1/receiving/invoices:post posted a vendor invoice against GR/IR items and persisted it. Consumers: ledger
-        reconciliation, costing, tax, analytics.
+        POST /v1/receiving/invoices:post or POST /v1/receiving/ers-settlements:run (source ERS) posted a vendor invoice
+        against GR/IR items and persisted it, or POST /v1/receiving/invoices/{id}:release-audit-block released an invoice the
+        stochastic audit block had held and posted it to the ledger. Consumers: ledger reconciliation, costing, tax,
+        analytics.
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/InvoicePostedData"
@@ -91,6 +124,35 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/InvoiceAdjustedData"
+    InvoiceSampled:
+      name: dev.passage.payables.invoice.sampled.v1
+      summary: >-
+        The stochastic audit block selected an invoice (manual or ERS) at posting. GR/IR quantity is reserved but nothing is
+        posted to the ledger until POST /v1/receiving/invoices/{id}:release-audit-block; the invoice.posted event follows
+        then. Consumers: workflow, notifications, audit.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/InvoiceSampledData"
+    InvoiceRejected:
+      name: dev.passage.payables.invoice.rejected.v1
+      summary: >-
+        An auditor rejected an invoice held by the stochastic audit block (POST /v1/receiving/invoices/{id}:reject-audit-block).
+        Nothing was posted to the ledger and the reserved GR/IR quantity is free again. Consumers: workflow, notifications, audit.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/InvoiceRejectedData"
+    AuditPolicyChanged:
+      name: dev.passage.receiving.auditpolicy.changed.v1
+      summary: PUT /v1/receiving/audit-policy changed the stochastic audit sample rate of a legal entity. Consumers: audit.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/AuditPolicyChangedData"
+    ErsVendorChanged:
+      name: dev.passage.receiving.ersvendor.changed.v1
+      summary: PUT /v1/receiving/ers-vendors/{vendorId} turned evaluated receipt settlement on or off for a vendor. Consumers: audit.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/ErsVendorChangedData"
     SettlementPosted:
       name: dev.passage.payables.settlement.posted.v1
       summary: >-
@@ -154,9 +216,10 @@ components:
               amount_acct_delta: { type: string, description: "decimal string, accounting currency" }
     InvoicePostedData:
       type: object
-      required: [invoice_id, legal_entity_id, vendor_id, invoice_number, invoice_date, posting_date, currency, total, ledger_entry_id, lines]
+      required: [invoice_id, legal_entity_id, vendor_id, invoice_number, source, invoice_date, posting_date, currency, total, ledger_entry_id, lines]
       properties:
         invoice_id: { type: string, format: uuid, description: "derived from tenant, vendor and invoice number; stable across retries" }
+        source: { type: string, enum: [MANUAL, ERS] }
         legal_entity_id: { type: string, format: uuid }
         vendor_id: { type: string, format: uuid }
         invoice_number: { type: string }
@@ -178,6 +241,49 @@ components:
               unit_price: { type: string }
               amount: { type: string }
               grir_cleared_amount: { type: string, description: "decimal string; the GR/IR amount this line cleared (pro rata, the exact remainder on the last quantity)" }
+    InvoiceSampledData:
+      type: object
+      required: [invoice_id, legal_entity_id, vendor_id, invoice_number, source, currency, total, sample_rate_pct, reason]
+      properties:
+        invoice_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        vendor_id: { type: string, format: uuid }
+        invoice_number: { type: string }
+        source: { type: string, enum: [MANUAL, ERS] }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        total: { type: string, description: "decimal string; the vendor control credit that will post on release" }
+        sample_rate_pct: { type: string, description: "decimal string, 0 to 100; the legal entity's sample rate when the draw was made" }
+        reason: { type: string, enum: ["stochastic sample", "re-issue after audit rejection"], description: "why the invoice was held; a re-issue of a rejected ERS invoice is always held" }
+    InvoiceRejectedData:
+      type: object
+      required: [invoice_id, legal_entity_id, vendor_id, invoice_number, source, currency, total, reason, rejected_by]
+      properties:
+        invoice_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
+        vendor_id: { type: string, format: uuid }
+        invoice_number: { type: string }
+        source: { type: string, enum: [MANUAL, ERS] }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        total: { type: string }
+        reason: { type: string, description: "the auditor's reason, 1 to 500 characters" }
+        rejected_by: { type: string }
+    AuditPolicyChangedData:
+      type: object
+      required: [legal_entity_id, old_rate_pct, new_rate_pct, changed_by]
+      properties:
+        legal_entity_id: { type: string, format: uuid }
+        old_rate_pct: { type: string, description: decimal string, 0 to 100 }
+        new_rate_pct: { type: string, description: decimal string, 0 to 100 }
+        changed_by: { type: string }
+    ErsVendorChangedData:
+      type: object
+      required: [legal_entity_id, vendor_id, old_enabled, new_enabled, changed_by]
+      properties:
+        legal_entity_id: { type: string, format: uuid }
+        vendor_id: { type: string, format: uuid }
+        old_enabled: { type: boolean }
+        new_enabled: { type: boolean }
+        changed_by: { type: string }
     InvoiceAdjustedData:
       type: object
       required: [adjustment_id, original_invoice_id, kind, legal_entity_id, vendor_id, document_number, document_date, posting_date, currency, total, ledger_entry_id, lines]

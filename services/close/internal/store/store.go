@@ -44,7 +44,7 @@ func (s *Postgres) PeriodRows(ctx context.Context, ledgerID, periodID string) ([
 func (s *Postgres) PeriodSpans(ctx context.Context, legalEntityID, ledgerID string, date time.Time) ([]domain.Span, error) {
 	var spans []domain.Span
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		found, err := tx.Query(ctx, `select fiscal_period_id::text, start_date, end_date, module, status, coalesce(allowed_group_id, '') from period_status where legal_entity_id = $1 and ledger_id = $2 and start_date <= $3 and end_date >= $3 order by fiscal_period_id, module for share`, legalEntityID, ledgerID, date)
+		found, err := tx.Query(ctx, `select fiscal_period_id::text, start_date, end_date, module, status, coalesce(allowed_group_id, '') from period_status where legal_entity_id = $1 and ledger_id = $2 and start_date <= $3 and end_date >= $3 order by fiscal_period_id, module`, legalEntityID, ledgerID, date)
 		if err != nil {
 			return err
 		}

@@ -304,7 +304,11 @@
       {"resource": "/v1/procurement/rfqs/*:award", "methods": ["POST"]},
       {"resource": "/v1/procurement/rfqs/*/scores/*", "methods": ["PUT"]}
     ]},
-    "MatchingPolicyMaintain": {"permissions": [{"resource": "/v1/receiving/matching:evaluate", "methods": ["POST"]}]},
+    "MatchingPolicyMaintain": {"permissions": [
+      {"resource": "/v1/receiving/matching:evaluate", "methods": ["POST"]},
+      {"resource": "/v1/receiving/audit-policy", "methods": ["PUT"]},
+      {"resource": "/v1/receiving/ers-vendors/*", "methods": ["PUT"]}
+    ]},
     "ReceivingMaintain": {"permissions": [
       {"resource": "/v1/receiving/arrivals", "methods": ["POST"]},
       {"resource": "/v1/receiving/receipts", "methods": ["GET", "POST"]},
@@ -320,7 +324,12 @@
       {"resource": "/v1/receiving/invoices:post", "methods": ["POST"]},
       {"resource": "/v1/receiving/invoice-adjustments:post", "methods": ["POST"]},
       {"resource": "/v1/receiving/plan-settlements:run", "methods": ["POST"]},
-      {"resource": "/v1/receiving/consignment-settlements:run", "methods": ["POST"]}
+      {"resource": "/v1/receiving/consignment-settlements:run", "methods": ["POST"]},
+      {"resource": "/v1/receiving/ers-settlements:run", "methods": ["POST"]}
+    ]},
+    "InvoiceAuditRelease": {"permissions": [
+      {"resource": "/v1/receiving/invoices/*:release-audit-block", "methods": ["POST"]},
+      {"resource": "/v1/receiving/invoices/*:reject-audit-block", "methods": ["POST"]}
     ]},
     "APInquire": {"permissions": [{"resource": "/v1/receiving/grir", "methods": ["GET"]}]},
     "ReceivingAdmin": {"permissions": [

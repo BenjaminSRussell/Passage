@@ -1,5 +1,17 @@
 /** Pure helpers for the migration-factory screens. Mirrors tools/migration-factory/internal/domain. */
-import type { Area, Category, BillingStatus, LegacyCategoryTotal, OpeningLine, OpenItemRecord, ParallelState, ProjectExtract, RekeyPosting, Tuple } from "./api/client";
+import type {
+  Area,
+  Category,
+  BillingStatus,
+  GLBalanceRecord,
+  LegacyCategoryTotal,
+  OpeningLine,
+  OpenItemRecord,
+  ParallelState,
+  ProjectExtract,
+  RekeyPosting,
+  Tuple,
+} from "./api/client";
 
 /** The nine transactional packs (FR-49.1). */
 export const PACKS = [
@@ -209,6 +221,67 @@ export function parseTuples(text: string): { tuples: Tuple[]; errors: string[] }
     return undefined;
   });
   return { tuples, errors };
+}
+
+const GL_HEADER = ["legacyId", "account", "dimensions", "currency", "balance"];
+
+/**
+ * Parses a pasted gl_balances extract, one balance per line: legacyId, account, dimensions,
+ * currency, balance. Dimensions may be blank and use "-" or "|" between values, since commas,
+ * semicolons and tabs separate the columns. The balance is signed (debit positive, credit
+ * negative) and stays a decimal string. The service applies the FR-49.11 rules; this checks the shape.
+ */
+export function parseGLBalances(text: string): { records: GLBalanceRecord[]; errors: string[] } {
+  const records: GLBalanceRecord[] = [];
+  const errors = rows(text, GL_HEADER, ([legacyId, account, dimensions, currency, balance], n) => {
+    if (!legacyId || !account) return `Line ${n}: the legacy id and account are required.`;
+    const cur = currency.toUpperCase();
+    if (!CURRENCY.test(cur)) return `Line ${n}: currency "${currency}" is not a three-letter code.`;
+    if (!DECIMAL.test(balance)) return `Line ${n}: balance "${balance}" is not a decimal such as -1250.00.`;
+    const record: GLBalanceRecord = { legacyId, account, currency: cur, balance };
+    if (dimensions) record.dimensions = dimensions;
+    records.push(record);
+    return undefined;
+  });
+  return { records, errors };
+}
+
+const MICRO = BigInt(1_000_000);
+
+/** A decimal string (at most six places) as integer millionths, so sums are exact. Null when not a decimal. */
+export function toMicro(value: string): bigint | null {
+  const v = value.trim();
+  if (!DECIMAL.test(v)) return null;
+  const negative = v.startsWith("-");
+  const [whole, frac = ""] = (negative ? v.slice(1) : v).split(".");
+  const micro = BigInt(whole) * MICRO + BigInt(frac.padEnd(6, "0"));
+  return negative ? -micro : micro;
+}
+
+/** Integer millionths as a decimal string with two places at least: -1500000n -> "-1.50". */
+export function fromMicro(micro: bigint): string {
+  const negative = micro < BigInt(0);
+  const abs = negative ? -micro : micro;
+  const frac = (abs % MICRO).toString().padStart(6, "0");
+  return money(`${negative ? "-" : ""}${(abs / MICRO).toString()}.${frac}`);
+}
+
+/**
+ * The currencies in which a GL extract's debits differ from its credits, with the difference
+ * (debits less credits). The service refuses such an extract (FR-49.2 trial balance), so the form
+ * shows it before sending. Empty when every currency balances.
+ */
+export function glImbalances(records: GLBalanceRecord[]): { currency: string; net: string }[] {
+  const net = new Map<string, bigint>();
+  for (const r of records) {
+    const micro = toMicro(r.balance);
+    if (micro === null) continue;
+    net.set(r.currency, (net.get(r.currency) ?? BigInt(0)) + micro);
+  }
+  return [...net.entries()]
+    .filter(([, n]) => n !== BigInt(0))
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([currency, n]) => ({ currency, net: fromMicro(n) }));
 }
 
 const LINE_HEADER = ["projectId", "legacyId", "category", "transactionDate", "qty", "costAmount", "salesAmount", "currency", "billingStatus", "wipCost", "wipSales"];
