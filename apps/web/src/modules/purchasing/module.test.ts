@@ -11,7 +11,7 @@ describe("purchasing module", () => {
 
   it("gives every nav entry a route and a PRD duty", () => {
     const paths = new Set(purchasing.routes.map((r) => r.path));
-    const duties = new Set(["PurchaseOrderInquire", "RequisitionCreate", "PurchaseOrderMaintain", "TradeAgreementMaintain", "AgreementMaintain", "RFQMaintain"]);
+    const duties = new Set(["PurchaseOrderInquire", "RequisitionCreate", "PurchaseOrderMaintain", "TradeAgreementMaintain", "AgreementMaintain", "RFQMaintain", "ProcurementPolicyMaintain"]);
     for (const n of purchasing.nav) {
       expect(paths.has(n.to)).toBe(true);
       expect(duties.has(n.duty ?? "")).toBe(true);
@@ -45,6 +45,10 @@ describe("purchasing module", () => {
 
   it("routes the consolidation board", () => {
     expect(purchasing.routes.map((r) => r.path)).toContain("/purchasing/consolidation");
+  });
+
+  it("routes the purchasing policy list and detail", () => {
+    expect(purchasing.routes.map((r) => r.path)).toEqual(expect.arrayContaining(["/purchasing/policies", "/purchasing/policies/:legalEntityId"]));
   });
 
   it("is auto-discovered by the registry", () => {

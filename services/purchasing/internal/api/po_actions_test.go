@@ -22,6 +22,9 @@ func (f *fakeStore) EditPurchaseOrder(_ context.Context, id string, ifMatch int,
 
 func (f *fakeStore) ActOnPurchaseOrder(_ context.Context, id string, ifMatch int, action string, idem store.Idem) (store.PurchaseOrder, error) {
 	f.lastAction.id, f.lastAction.action, f.lastAction.ifMatch, f.lastAction.idem = id, action, ifMatch, idem
+	if f.pol.actErr != nil {
+		return store.PurchaseOrder{}, f.pol.actErr
+	}
 	po, ok := f.poByID[id]
 	if !ok {
 		return store.PurchaseOrder{}, httpx.NewProblem(http.StatusNotFound, store.CodePurchaseOrderNotFound, "purchase order not found")

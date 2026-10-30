@@ -3,6 +3,7 @@ import type { PassageModule } from "../registry";
 import { PurchaseAgreementCreatePage, PurchaseAgreementDetailPage, PurchaseAgreementsPage } from "./AgreementPages";
 import { ConsolidationPage } from "./ConsolidationPage";
 import { InvoicingPlanPage } from "./InvoicingPlanPage";
+import { PolicyDetailPage, PolicyListPage } from "./PolicyPages";
 import { PriceLookupPage } from "./PricingPage";
 import { PurchaseOrderCreatePage, PurchaseOrderDetailPage, PurchaseOrderEditPage, PurchaseOrdersPage } from "./PurchaseOrderPages";
 import { RepricePage, RepriceRunPage } from "./RepricePages";
@@ -21,7 +22,7 @@ const purchasing: PassageModule = {
   id: "purchasing",
   title: "Purchasing",
   description:
-    "Requisitions, consolidation, requests for quotation with sealed bids and scoring, purchase orders with approval, change versions, invoicing plans and subsequent price changes, purchase, scheduling and trade agreements with releases, and price lookup.",
+    "Requisitions, consolidation, requests for quotation with sealed bids and scoring, purchase orders with approval, change versions, invoicing plans and subsequent price changes, purchase, scheduling and trade agreements with releases, price lookup, and the purchasing policy per legal entity.",
   routes: [
     { path: "/purchasing", element: createElement(WorkspacePage) },
     { path: "/purchasing/requisitions", element: createElement(RequisitionsPage) },
@@ -61,6 +62,8 @@ const purchasing: PassageModule = {
     { path: "/purchasing/trade-agreements/new", element: createElement(TradeAgreementCreatePage), handle: { title: "New price row" } },
     { path: "/purchasing/trade-agreements/:id", element: createElement(TradeAgreementDetailPage), handle: { title: "Price row" } },
     { path: "/purchasing/pricing", element: createElement(PriceLookupPage) },
+    { path: "/purchasing/policies", element: createElement(PolicyListPage) },
+    { path: "/purchasing/policies/:legalEntityId", element: createElement(PolicyDetailPage), handle: { title: "Purchasing policy" } },
   ],
   nav: [
     { label: "Overview", to: "/purchasing", duty: "PurchaseOrderInquire" },
@@ -73,6 +76,7 @@ const purchasing: PassageModule = {
     { label: "Scheduling agreements", to: "/purchasing/scheduling-agreements", duty: "AgreementMaintain" },
     { label: "Trade agreements", to: "/purchasing/trade-agreements", duty: "TradeAgreementMaintain" },
     { label: "Price lookup", to: "/purchasing/pricing", duty: "PurchaseOrderMaintain" },
+    { label: "Policies", to: "/purchasing/policies", duty: "PurchaseOrderInquire" },
   ],
 };
 

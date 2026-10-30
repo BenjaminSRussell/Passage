@@ -70,6 +70,9 @@ type fakeStore struct {
 
 	// Scheduling agreements: what the scheduling methods received.
 	sa saLog
+
+	// Purchasing policy: what the policy methods received.
+	pol policyLog
 }
 
 func newFake() *fakeStore {

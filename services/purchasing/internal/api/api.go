@@ -204,6 +204,12 @@ func (a *API) Register(r chi.Router) {
 		pa.Put("/scheduling-agreements/{id}/schedule", a.replaceSchedule)
 		saRead.Get("/scheduling-agreements/{id}/releases", a.listSchedulingReleases)
 		saRead.Get("/scheduling-agreements/{id}/releases/{releaseNo}", a.getSchedulingRelease)
+		// Purchasing policy per legal entity (FR-17.13).
+		policyRead := r.With(authz.Require(anyDuty{dutyPolicyMaintain, dutyPurchaseOrderInquire},
+			dutyPolicyMaintain+" or "+dutyPurchaseOrderInquire, ""))
+		policyRead.Get("/purchasing-policies", a.listPolicies)
+		policyRead.Get("/purchasing-policies/{legalEntityId}", a.getPolicy)
+		r.With(authz.RequireDuty(dutyPolicyMaintain)).Put("/purchasing-policies/{legalEntityId}", a.putPolicy)
 	})
 }
 
@@ -287,7 +293,7 @@ func fail(w http.ResponseWriter, r *http.Request, err error) {
 	var de *domain.Error
 	if errors.As(err, &de) {
 		status := http.StatusUnprocessableEntity
-		if de.Code == domain.CodeRFQSealed {
+		if de.Code == domain.CodeRFQSealed || de.Code == domain.CodeFourEyes {
 			status = http.StatusForbidden
 		}
 		err = httpx.NewProblem(status, de.Code, de.Detail)

@@ -122,7 +122,17 @@ func (a *API) buildOrder(ctx context.Context, body orderBody) (store.PurchaseOrd
 		SiteID:           body.SiteID,
 		WarehouseID:      body.WarehouseID,
 		Currency:         cur,
-		ChangeManagement: body.ChangeManagement == nil || *body.ChangeManagement,
+		ChangeManagement: true,
+	}
+	if body.ChangeManagement != nil {
+		out.ChangeManagement = *body.ChangeManagement
+	} else {
+		// FR-17.13: the legal entity's policy sets the default.
+		pol, err := a.store.GetPolicy(ctx, body.LegalEntityID)
+		if err != nil {
+			return store.PurchaseOrder{}, err
+		}
+		out.ChangeManagement = pol.ChangeManagementDefault
 	}
 	inputs := make([]domain.LineInput, 0, len(body.Lines))
 	for i, l := range body.Lines {

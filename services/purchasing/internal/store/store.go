@@ -88,6 +88,9 @@ type Store interface {
 	RunSchedulingRelease(ctx context.Context, id, kind string, runDate domain.Day, reset bool, idem Idem) (domain.SARelease, bool, error)
 	ListSchedulingReleases(ctx context.Context, agreementID string) ([]domain.SARelease, error)
 	GetSchedulingRelease(ctx context.Context, agreementID string, releaseNo int) (domain.SARelease, error)
+	GetPolicy(ctx context.Context, legalEntityID string) (domain.Policy, error)
+	ListPolicies(ctx context.Context) ([]domain.Policy, error)
+	PutPolicy(ctx context.Context, in domain.Policy, ifMatch int) (domain.Policy, error)
 	Ping(ctx context.Context) error
 }
 

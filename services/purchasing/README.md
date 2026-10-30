@@ -116,6 +116,9 @@ row-level-security test also needs `PASSAGE_TEST_APP_DATABASE_URL` (a non-owner
 | POST `/scheduling-agreements/{id}:release` | AgreementMaintain | Idempotency-Key required; `kind` FRC or JIT, `runDate` (default today), `cumulativeReset`; 201 for a new release, 200 for the release of the same kind, date and schedule version |
 | GET `/scheduling-agreements/{id}/releases` | AgreementMaintain or PurchaseOrderInquire | Release headers in release order |
 | GET `/scheduling-agreements/{id}/releases/{releaseNo}` | AgreementMaintain or PurchaseOrderInquire | Release documentation with every line |
+| GET `/purchasing-policies` | ProcurementPolicyMaintain or PurchaseOrderInquire | Saved purchasing policies of the caller's legal entities |
+| GET `/purchasing-policies/{legalEntityId}` | ProcurementPolicyMaintain or PurchaseOrderInquire | The policy, or the defaults at version 0; ETag is the version |
+| PUT `/purchasing-policies/{legalEntityId}` | ProcurementPolicyMaintain | If-Match required (0 creates); body has all three flags; writes `policy.changed.v1`; no Idempotency-Key (PUT is idempotent) |
 
 Writes for a legal entity outside the caller's `X-Passage-Legal-Entity` scope are
 refused with AUTH-0003 before they reach the database (RLS would refuse them too).
@@ -284,6 +287,18 @@ down). Metrics: `GET :9090/metrics` (Prometheus text counters).
   reset (`cumulativeReset`, kept on the release). The monitor's next release due
   is the validity start before any release, else the last run plus one release
   period, and is empty after the validity ends.
+- **Purchasing policy (FR-17.13).** One row per legal entity with three flags;
+  a legal entity with no row has the defaults (change management on, the other
+  two off) at version 0. `changeManagementDefault` is the `changeManagement` of a
+  new PO that does not say. `allowInvoiceBeforeReceipt` lowers the PO edit floor
+  of BR-17.7 from invoiced to received (never below received, PRC-PO-007).
+  `poFourEyes` keeps the user who created (`created_by`), submitted
+  (`submitted_by`) or last changed the content of (`changed_by`, an edit or a
+  reprice apply) a PO from `:approve` and `:confirm` (403 PRC-POL-002), so the
+  editor of a change order cannot approve it either. A caller with no user id is
+  refused while the policy is on; an actor not recorded on an older PO blocks no
+  one. The routes live under `/purchasing-policies` so `/policies` stays free for
+  the FR-17.16 policy framework.
 - **Idempotency.** Creates and custom methods store the key with a hash of the operation
   and body; a replay returns the original resource, a different body (or endpoint)
   with the same key is `idempotency_key_reuse`.
@@ -347,6 +362,8 @@ store codes are returned as the `code` field.
 | PRC-IP-NOT-FOUND | 404 | The PO line has no invoicing plan (or no such row on a settlement report) |
 | PRC-IP-004 | 409 | The plan row is settled under another reference or amount, or the line cannot absorb the settled amount |
 | PRC-PO-LINE-NOT-FOUND | 404 | The PO has no line with that number |
+| PRC-POL-002 | 403 | Four-eyes policy: a user who created, submitted or last changed the PO (or a caller with no user id) cannot approve or confirm it |
+| PRC-POL-003 | 412 | If-Match is not the saved purchasing policy version (0 when none is saved) |
 | PRC-SA-001 | 422 | A firm-zone schedule line is reduced, moved or removed without a reason code |
 | PRC-SA-002 | 422 | A schedule line would drop below the quantity already received against it |
 | PRC-SA-003 | 422 | A release would lower cumulative released below the previous release without a cumulative reset |
@@ -368,4 +385,4 @@ and detail pages, the consolidation board, the price lookup with explain, sealed
 and scoring screens on the RFQ, the invoicing plan page per PO line, the price
 change pages (one PO, and the run over many), and the scheduling agreement
 monitor, create form, detail page (schedule editor, release run, releases) and
-release documentation. See its README.
+release documentation, and the purchasing policy list and editor. See its README.

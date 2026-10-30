@@ -1,9 +1,9 @@
 asyncapi: 3.0.0
 info:
   title: Passage Purchasing events
-  version: 0.8.0
+  version: 0.9.0
   description: |
-    Events published by the purchasing service in wave 17 slices 1 to 8. Each is written to the
+    Events published by the purchasing service in wave 17 slices 1 to 9. Each is written to the
     outbox in the same transaction as the state change and relayed by Debezium to the topic
     passage.<context>.<entity>. Payload structs live in internal/events. Schema evolution is
     additive only (BACKWARD_TRANSITIVE).
@@ -47,6 +47,12 @@ channels:
         $ref: '#/components/messages/RFQSent'
       rfqAwarded:
         $ref: '#/components/messages/RFQAwarded'
+  policy:
+    address: passage.procurement.policy
+    description: Purchasing policy changes (FR-17.13); the Kafka key is the legal entity id.
+    messages:
+      policyChanged:
+        $ref: '#/components/messages/PolicyChanged'
   sarelease:
     address: passage.procurement.sarelease
     description: Scheduling agreement releases (FR-17.15); the Kafka key is the scheduling agreement id so releases stay ordered.
@@ -114,11 +120,32 @@ operations:
       $ref: '#/channels/sarelease'
     messages:
       - $ref: '#/channels/sarelease/messages/saReleaseCreated'
+  publishPolicyChanged:
+    action: send
+    channel:
+      $ref: '#/channels/policy'
+    messages:
+      - $ref: '#/channels/policy/messages/policyChanged'
 components:
   messages:
+    PolicyChanged:
+      name: PolicyChanged
+      title: policy.changed.v1
+      x-passage-type: dev.passage.procurement.policy.changed.v1
+      summary: The purchasing policy of a legal entity was saved (FR-17.13); carries the full policy at its new version. Audit and workflow consumers read it.
+      contentType: application/cloudevents+json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              type: { type: string, const: dev.passage.procurement.policy.changed.v1 }
+              subject: { type: string, format: uuid, description: legal entity id }
+              data: { $ref: '#/components/schemas/PolicyChangedData' }
     SAReleaseCreated:
       name: SAReleaseCreated
       title: sarelease.created.v1
+      x-passage-type: dev.passage.procurement.sarelease.created.v1
       summary: >-
         A scheduling agreement release run created release REL-<agreement>-<n> of kind FRC or JIT
         (FR-17.15). The PRD's sa.release.created.v1, renamed to one entity segment. A run on an
@@ -134,6 +161,7 @@ components:
     RequisitionSubmitted:
       name: RequisitionSubmitted
       title: requisition.submitted.v1
+      x-passage-type: dev.passage.procurement.requisition.submitted.v1
       summary: A DRAFT requisition was submitted; status is IN_REVIEW, or APPROVED when the policy chain is empty.
       contentType: application/cloudevents+json
       payload:
@@ -146,6 +174,7 @@ components:
     RequisitionApproved:
       name: RequisitionApproved
       title: requisition.approved.v1
+      x-passage-type: dev.passage.procurement.requisition.approved.v1
       summary: A requisition reached APPROVED. In this slice that is the auto-approval band on submit (written right after requisition.submitted in the same transaction).
       contentType: application/cloudevents+json
       payload:
@@ -158,6 +187,7 @@ components:
     AgreementThreshold:
       name: AgreementThreshold
       title: agreement.threshold.v1
+      x-passage-type: dev.passage.procurement.agreement.threshold.v1
       summary: A PO line released against a purchase agreement line took it to the threshold (90 % of the commitment) or over a SOFT limit (FR-17.5, BR-17.10). Written in the PO's transaction; the threshold fires once per line, a SOFT overrun on every release that exceeds.
       contentType: application/cloudevents+json
       payload:
@@ -171,6 +201,7 @@ components:
     POConfirmed:
       name: POConfirmed
       title: po.confirmed.v1
+      x-passage-type: dev.passage.procurement.po.confirmed.v1
       summary: A version of a purchase order was confirmed, by :confirm or by a post-confirmation change that needed no re-approval (FR-17.7, FR-17.8). Carries the whole order at that version.
       contentType: application/cloudevents+json
       payload:
@@ -184,6 +215,7 @@ components:
     POVersionCreated:
       name: POVersionCreated
       title: poversion.created.v1
+      x-passage-type: dev.passage.procurement.poversion.created.v1
       summary: A confirmed purchase order version above 1 (change order, FR-17.8), written right after po.confirmed in the same transaction. The PRD calls it po.version.created; the platform type grammar allows one entity segment.
       contentType: application/cloudevents+json
       payload:
@@ -197,6 +229,7 @@ components:
     POCancelled:
       name: POCancelled
       title: po.cancelled.v1
+      x-passage-type: dev.passage.procurement.po.cancelled.v1
       summary: A purchase order with nothing received or invoiced was cancelled (BR-17.2); its open lines are CANCELLED and their remaining quantity is released.
       contentType: application/cloudevents+json
       payload:
@@ -210,6 +243,7 @@ components:
     PORepriced:
       name: PORepriced
       title: po.repriced.v1
+      x-passage-type: dev.passage.procurement.po.repriced.v1
       summary: A subsequent price change was applied to a CONFIRMED purchase order (FR-17.22, BR-17.18). Consumed by payables (wave 18 FR-18.18 subsequent debit/credit for invoiced_lines) and analytics.
       contentType: application/cloudevents+json
       payload:
@@ -223,6 +257,7 @@ components:
     RFQSent:
       name: RFQSent
       title: rfq.sent.v1
+      x-passage-type: dev.passage.procurement.rfq.sent.v1
       summary: A DRAFT RFQ was sent; carries the invited vendors, the deadline and the lines to quote (FR-17.4). Consumed by the supplier portal (wave 20) and notifications.
       contentType: application/cloudevents+json
       payload:
@@ -236,6 +271,7 @@ components:
     RFQAwarded:
       name: RFQAwarded
       title: rfq.awarded.v1
+      x-passage-type: dev.passage.procurement.rfq.awarded.v1
       summary: RFQ lines were awarded and their DRAFT purchase orders created in the same transaction (FR-17.4); one entry per awarded line with the winning vendor, price and purchase order.
       contentType: application/cloudevents+json
       payload:
@@ -511,3 +547,14 @@ components:
               cumulative_received: { type: string, description: "decimal string; running Σ received up to this line" }
               zone: { type: string, enum: [FIRM, TRADEOFF, FORECAST], description: "zone on the run date (BR-17.13)" }
               in_horizon: { type: boolean, description: "inside the FRC or JIT horizon of the kind" }
+    PolicyChangedData:
+      type: object
+      required: [legal_entity_id, version, change_management_default, po_four_eyes, allow_invoice_before_receipt]
+      additionalProperties: false
+      properties:
+        legal_entity_id: { type: string, format: uuid }
+        version: { type: integer, minimum: 1 }
+        change_management_default: { type: boolean }
+        po_four_eyes: { type: boolean }
+        allow_invoice_before_receipt: { type: boolean }
+        updated_by: { type: string, format: uuid }
