@@ -46,7 +46,7 @@ func PostInvoice(ctx context.Context, in VendorInvoice, periods PeriodControl, l
 	if in.LedgerID == "" || in.FiscalPeriodID == "" {
 		return JournalEntry{}, fail(CodeInvalidReceipt, "invoice %s needs a ledger and a fiscal period", in.ID)
 	}
-	status, err := periods.AP(ctx, PeriodQuery{LedgerID: in.LedgerID, FiscalPeriodID: in.FiscalPeriodID, PostingDate: in.PostingDate})
+	status, err := periods.AP(ctx, PeriodQuery{LegalEntityID: in.LegalEntityID, LedgerID: in.LedgerID, FiscalPeriodID: in.FiscalPeriodID, PostingDate: in.PostingDate})
 	if err != nil {
 		slog.ErrorContext(ctx, "period control unavailable", "err", err, "invoiceId", in.ID)
 		return JournalEntry{}, fmt.Errorf("check AP period for invoice %s: %w", in.ID, err)

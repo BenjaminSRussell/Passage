@@ -358,3 +358,19 @@ func TestPostgres_LegalEntitiesAreTenantLevelForNoEntityPrincipal(t *testing.T) 
 		t.Fatalf("another tenant saw %d entities", len(other.Items))
 	}
 }
+
+func TestPostgres_NoEntityPrincipalCannotReachAnotherTenantsEntities(t *testing.T) {
+	s, _, _ := lifecycleStore(t)
+	foreign := mustCreate(t, s, principalContext(2), newEntity("US01"))
+	noEntity := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1)})
+	name := "hijacked"
+	if _, err := s.UpdateLegalEntity(noEntity, foreign.ID, foreign.Version, store.LegalEntityPatch{Name: &name}); err == nil {
+		t.Fatal("no-entity principal updated another tenant's legal entity")
+	}
+	if _, err := s.GetLegalEntity(noEntity, foreign.ID); err == nil {
+		t.Fatal("no-entity principal read another tenant's legal entity")
+	}
+	if got, err := s.GetLegalEntity(principalContext(2), foreign.ID); err != nil || got.Name == name {
+		t.Fatalf("foreign entity after attempted update = %+v, %v", got, err)
+	}
+}

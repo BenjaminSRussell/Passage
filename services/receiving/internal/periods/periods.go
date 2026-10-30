@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 )
@@ -70,6 +71,13 @@ func (c *Client) AP(ctx context.Context, q domain.PeriodQuery) (domain.PeriodSta
 	if !ok {
 		return "", errors.New("period check: no principal in context")
 	}
+	legalEntity := q.LegalEntityID
+	if legalEntity == "" {
+		legalEntity = principal.LegalEntityID
+	}
+	if !ids.Valid(legalEntity) {
+		return "", errors.New("period check: a single legal entity is required")
+	}
 	payload, err := json.Marshal(requestBody{LedgerID: q.LedgerID, FiscalPeriodID: q.FiscalPeriodID, PostingDate: q.PostingDate.Format(dateFormat), SourceSystem: sourceAP})
 	if err != nil {
 		return "", fmt.Errorf("period check: %w", err)
@@ -81,6 +89,7 @@ func (c *Client) AP(ctx context.Context, q domain.PeriodQuery) (domain.PeriodSta
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(tenant.HeaderDuties, dutyPeriodCheck)
 	req.Header.Set(tenant.HeaderTenant, principal.TenantID)
+	req.Header.Set(tenant.HeaderLegalEntity, legalEntity)
 	if id := middleware.GetReqID(ctx); id != "" {
 		req.Header.Set(middleware.RequestIDHeader, id)
 	}

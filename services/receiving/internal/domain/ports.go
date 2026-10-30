@@ -72,6 +72,7 @@ type PostingProfile struct {
 }
 
 type PeriodQuery struct {
+	LegalEntityID  string
 	LedgerID       string
 	FiscalPeriodID string
 	PostingDate    time.Time

@@ -361,8 +361,9 @@ func inScope(p tenant.Principal, legalEntityID string) error {
 	if scopes == "*" {
 		return nil
 	}
+	canonical, _ := ids.Canonical(legalEntityID)
 	for _, scope := range strings.Split(scopes, ",") {
-		if scope != "" && scope == legalEntityID {
+		if scope != "" && scope == canonical {
 			return nil
 		}
 	}

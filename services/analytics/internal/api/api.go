@@ -100,7 +100,7 @@ func (a *API) query(w http.ResponseWriter, r *http.Request) {
 	}
 	plan, qerr := domain.BuildPlan(domain.Query{
 		Measures: req.Measures, Dimensions: req.Dimensions, From: from, To: to,
-	}, a.catalog, domain.ScopeFromPrincipal(p.LegalEntityID))
+	}, a.catalog, domain.ScopeFromPrincipal(p))
 	if qerr != nil {
 		httpx.Fail(w, r, problemOf(qerr))
 		return
