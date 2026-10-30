@@ -106,6 +106,7 @@ type AuditEntry struct {
 	ID            string
 	OccurredAt    time.Time
 	LedgerID      string
+	LegalEntityID string
 	Period        string
 	Kind          string
 	ActorID       string

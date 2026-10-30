@@ -102,7 +102,7 @@ type Store interface {
 	CheckOut(ctx context.Context, id, declaredSeal string, at time.Time, hourlyRate decimal.Decimal, idem Idem) (domain.GateVisit, error)
 	GetGateVisit(ctx context.Context, id string) (domain.GateVisit, []domain.GateLogEntry, error)
 	ListGateVisits(ctx context.Context, f GateVisitFilter) ([]domain.GateVisit, error)
-	CreateGoodsInTransit(ctx context.Context, voyageID, incoterm, siteID string, lines []int, idem Idem) (domain.GoodsInTransit, error)
+	CreateGoodsInTransit(ctx context.Context, voyageID, incoterm, siteID, legalEntityID string, lines []int, idem Idem) (domain.GoodsInTransit, error)
 	GetGoodsInTransit(ctx context.Context, id string) (domain.GoodsInTransit, error)
 	ListGoodsInTransit(ctx context.Context, f GoodsInTransitFilter) ([]domain.GoodsInTransit, error)
 	ShipGoodsInTransit(ctx context.Context, id string, at time.Time) (domain.GoodsInTransit, error)
@@ -237,17 +237,21 @@ func (s *Postgres) CreateFreightBill(ctx context.Context, in domain.FreightBill,
 		if done, err := replay(); done || err != nil {
 			return err
 		}
+		entity, err := parentEntityTx(ctx, tx, parentLoad, p.TenantID, in.LoadID, in.LegalEntityID)
+		if err != nil {
+			return err
+		}
 		lines, err := json.Marshal(in.ExpectedLines)
 		if err != nil {
 			return err
 		}
 		out, _, err = scanFreightBill(tx.QueryRow(ctx, `insert into freight_bill (tenant_id, id, load_id, carrier_id, currency, expected_lines, expected_total,
-			match_status, idempotency_key, request_hash)
-			values ($1, $2, $3, $4, $5, $6::jsonb, $7::numeric, $8, $9, $10)
+			match_status, idempotency_key, request_hash, legal_entity_id)
+			values ($1, $2, $3, $4, $5, $6::jsonb, $7::numeric, $8, $9, $10, nullif($11, '')::uuid)
 			on conflict (tenant_id, idempotency_key) do nothing
 			returning `+freightBillColumns,
 			p.TenantID, ids.New(), in.LoadID, in.CarrierID, in.Currency, string(lines), domain.SumLines(in.ExpectedLines).String(),
-			domain.BillUnmatched, nullable(idem.Key), nullable(idem.Fingerprint)))
+			domain.BillUnmatched, nullable(idem.Key), nullable(idem.Fingerprint), entity))
 		if errors.Is(err, pgx.ErrNoRows) {
 			if done, err := replay(); done || err != nil {
 				return err
@@ -332,8 +336,15 @@ func (s *Postgres) RegisterCarrierInvoice(ctx context.Context, in domain.Carrier
 			variance := result.VarianceTotal
 			in.MatchStatus, in.VarianceTotal = result.Status, &variance
 		}
-		var err error
-		saved, err = insertInvoice(ctx, tx, p.TenantID, in)
+		billID := ""
+		if in.FreightBillID != nil {
+			billID = *in.FreightBillID
+		}
+		entity, err := ownerOrParentTx(ctx, tx, parentFreightBill, p.TenantID, billID, in.LegalEntityID)
+		if err != nil {
+			return err
+		}
+		saved, err = insertInvoice(ctx, tx, p.TenantID, entity, in)
 		if err != nil || in.FreightBillID == nil {
 			return err
 		}
@@ -391,17 +402,17 @@ func (s *Postgres) ListCarrierInvoices(ctx context.Context, f InvoiceFilter) ([]
 	return invoices, err
 }
 
-func insertInvoice(ctx context.Context, tx pgx.Tx, tenantID string, in domain.CarrierInvoice) (domain.CarrierInvoice, error) {
+func insertInvoice(ctx context.Context, tx pgx.Tx, tenantID, entity string, in domain.CarrierInvoice) (domain.CarrierInvoice, error) {
 	lines, err := json.Marshal(in.Lines)
 	if err != nil {
 		return domain.CarrierInvoice{}, err
 	}
 	saved, err := scanInvoice(tx.QueryRow(ctx, `insert into carrier_invoice (tenant_id, id, carrier_id, invoice_no, invoice_date, source, freight_bill_id,
-		currency, lines, total, match_status, variance_total)
-		values ($1, $2, $3, $4, $5::date, $6, $7, $8, $9::jsonb, $10::numeric, $11, $12::numeric)
+		currency, lines, total, match_status, variance_total, legal_entity_id)
+		values ($1, $2, $3, $4, $5::date, $6, $7, $8, $9::jsonb, $10::numeric, $11, $12::numeric, nullif($13, '')::uuid)
 		returning `+carrierInvoiceColumns,
 		tenantID, in.ID, in.CarrierID, in.InvoiceNo, in.InvoiceDate, in.Source, in.FreightBillID, in.Currency, string(lines),
-		in.Total.String(), in.MatchStatus, varianceString(in.VarianceTotal)))
+		in.Total.String(), in.MatchStatus, varianceString(in.VarianceTotal), entity))
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
 		return domain.CarrierInvoice{}, httpx.NewProblem(http.StatusConflict, domain.CodeDuplicateInvoice,

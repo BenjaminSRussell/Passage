@@ -50,7 +50,15 @@ type LoadFilter struct {
 func (s *Postgres) BuildLoads(ctx context.Context, loads []domain.Load, idem Idem) ([]domain.Load, error) {
 	p, _ := tenant.FromContext(ctx)
 	var out []domain.Load
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+	requested := ""
+	if len(loads) > 0 {
+		requested = loads[0].LegalEntityID
+	}
+	entity, err := httpx.OwnerLegalEntity(ctx, requested)
+	if err != nil {
+		return nil, err
+	}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		replay := func() (bool, error) {
 			if idem.Key == "" {
 				return false, nil
@@ -100,7 +108,7 @@ func (s *Postgres) BuildLoads(ctx context.Context, loads []domain.Load, idem Ide
 		}
 		out = make([]domain.Load, 0, len(loads))
 		for i, l := range loads {
-			created, err := insertLoad(ctx, tx, p.TenantID, buildID, i+1, l)
+			created, err := insertLoad(ctx, tx, p.TenantID, entity, buildID, i+1, l)
 			if err != nil {
 				return err
 			}
@@ -111,15 +119,15 @@ func (s *Postgres) BuildLoads(ctx context.Context, loads []domain.Load, idem Ide
 	return out, err
 }
 
-func insertLoad(ctx context.Context, tx pgx.Tx, tenantID, buildID string, position int, l domain.Load) (domain.Load, error) {
+func insertLoad(ctx context.Context, tx pgx.Tx, tenantID, entity, buildID string, position int, l domain.Load) (domain.Load, error) {
 	l.ID, l.Status, l.Version = ids.New(), domain.LoadPlanned, 1
 	if err := tx.QueryRow(ctx, `insert into load (tenant_id, id, build_id, build_position, mode, status, ship_from_site_id, ship_to_region, pickup_date,
-		total_weight_kg, total_volume_m3, pallets, max_weight_kg, max_volume_m3, max_pallets)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9::date, $10::numeric, $11::numeric, $12, $13::numeric, $14::numeric, $15)
+		total_weight_kg, total_volume_m3, pallets, max_weight_kg, max_volume_m3, max_pallets, legal_entity_id)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9::date, $10::numeric, $11::numeric, $12, $13::numeric, $14::numeric, $15, nullif($16, '')::uuid)
 		returning created_at`,
 		tenantID, l.ID, buildID, position, l.Mode, l.Status, l.ShipFromSiteID, l.ShipToRegion, l.PickupDate,
 		l.TotalWeightKg.String(), l.TotalVolumeM3.String(), l.Pallets,
-		l.Capacity.MaxWeightKg.String(), l.Capacity.MaxVolumeM3.String(), l.Capacity.MaxPallets).Scan(&l.CreatedAt); err != nil {
+		l.Capacity.MaxWeightKg.String(), l.Capacity.MaxVolumeM3.String(), l.Capacity.MaxPallets, entity).Scan(&l.CreatedAt); err != nil {
 		return domain.Load{}, err
 	}
 	for i, shipment := range l.ShipmentIDs {

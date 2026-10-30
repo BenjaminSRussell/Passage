@@ -425,3 +425,23 @@ PSG-9 (BOM and low-level codes), PSG-27 (sales demand, later).
 
 Only the platform kernel and the modules it already pulls in (chi, pgx/v5,
 shopspring/decimal, google/uuid, and `pgregory.net/rapid` for property tests).
+
+## Legal-entity scope (#241)
+
+`plan`, `plan_version`, `forecast_model` and `quota_arrangement` carry a nullable
+`legal_entity_id` (migration 0012) with a RESTRICTIVE legal-entity policy;
+`planned_order`, `pegging`, `action_message`, `net_requirement`, `forecast_line` and
+`quota_source` follow their parent. A row with no entity is visible only to
+all-entity callers. A plan run takes an optional `legalEntityId` that owns the plan
+when the run creates it (default: the caller's single entity; required for a caller
+scoped to several or to all entities; 403 outside the caller's scope). For an existing
+plan it is an assertion (422 when it differs), and a forecast model netted into the
+run must belong to the plan's entity (422 `PLAN-FORECAST-ENTITY`). Forecast-model
+writes and quota-arrangement creates take `legalEntityId` the same way. A plan or
+forecast model code held outside the caller's scope, including by a row with no
+entity yet, is 409 `PLAN-CODE-TAKEN`.
+
+The quota-arrangement overlap rule (409 `PLAN-QUOTA-OVERLAP`) runs per legal entity
+as well as per item and site. That assumes a site belongs to exactly one legal
+entity; the site register lives in the org service, so a site shared between
+entities would let each entity hold an arrangement for it.

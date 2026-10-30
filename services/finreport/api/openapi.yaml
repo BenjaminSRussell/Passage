@@ -940,6 +940,7 @@ components:
         definition: {type: string}
         definitionVersion: {type: integer, minimum: 0, description: 0 or omitted means the latest published version}
         ledgerId: {type: string, format: uuid}
+        legalEntityId: {type: string, format: uuid, description: "Assertion only: the run is owned by the legal entity of the ledger's reporting rows. A different value is refused with 422 REPORT-0032."}
         currencyType: {type: string, enum: [acct, rpt, txn]}
         period: {$ref: '#/components/schemas/Period'}
         calendar:

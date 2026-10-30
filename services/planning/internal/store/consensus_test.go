@@ -18,7 +18,7 @@ import (
 
 // asUser is a tenant context for one named user.
 func asUser(tenantN int, user string) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(tenantN), UserID: user, Duties: map[string]struct{}{}})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(tenantN), LegalEntityID: "00000000-0000-0000-0000-0000000000e1", UserID: user, Duties: map[string]struct{}{}})
 }
 
 // TestForecastConsensus covers FR-22.9 on the database: submit locks the
@@ -33,13 +33,13 @@ func TestForecastConsensus(t *testing.T) {
 	if _, err := st.SubmitForecastConsensus(alice, "BASE", 1); problemCode(err) != store.CodeForecastNotFound {
 		t.Fatalf("submit of an unknown model: %v", err)
 	}
-	if _, err := st.UpsertForecastLines(alice, "BASE", 0, nil, []store.ForecastCellInput{
+	if _, err := st.UpsertForecastLines(alice, "BASE", "", 0, nil, []store.ForecastCellInput{
 		cellIn(itemA, site, "2026-11-02", "2026-11-08", "100", "30"),
 		cellIn(itemA, site, "2026-11-09", "2026-11-15", "50", "0"),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.UpsertForecastLines(carol, "BASE", 1, nil, []store.ForecastCellInput{
+	if _, err := st.UpsertForecastLines(carol, "BASE", "", 1, nil, []store.ForecastCellInput{
 		cellIn(itemB, site, "2026-11-02", "2026-11-08", "40", "0"),
 	}); err != nil {
 		t.Fatal(err)
@@ -52,7 +52,7 @@ func TestForecastConsensus(t *testing.T) {
 	if m.Status != domain.ConsensusSubmitted || m.Version != 3 || m.SubmittedBy == nil || *m.SubmittedBy != "alice" {
 		t.Fatalf("submitted = %+v", m)
 	}
-	if _, err := st.UpsertForecastLines(alice, "BASE", 3, nil, []store.ForecastCellInput{cellIn(itemA, site, "2026-11-02", "2026-11-08", "1", "0")}); problemCode(err) != store.CodeForecastLocked {
+	if _, err := st.UpsertForecastLines(alice, "BASE", "", 3, nil, []store.ForecastCellInput{cellIn(itemA, site, "2026-11-02", "2026-11-08", "1", "0")}); problemCode(err) != store.CodeForecastLocked {
 		t.Fatalf("write on a submitted model: %v", err)
 	}
 	if _, err := st.SubmitForecastConsensus(alice, "BASE", 3); problemCode(err) != store.CodeConsensusState {
@@ -72,7 +72,7 @@ func TestForecastConsensus(t *testing.T) {
 	if err != nil || pub != nil || m.Status != domain.ConsensusDraft || m.SubmittedBy != nil || m.DecidedBy == nil || *m.DecidedBy != "bob" {
 		t.Fatalf("reject = %+v, %+v, %v", m, pub, err)
 	}
-	if m, err = st.UpsertForecastLines(alice, "BASE", 4, nil, []store.ForecastCellInput{cellIn(itemA, site, "2026-11-09", "2026-11-15", "60", "0")}); err != nil {
+	if m, err = st.UpsertForecastLines(alice, "BASE", "", 4, nil, []store.ForecastCellInput{cellIn(itemA, site, "2026-11-09", "2026-11-15", "60", "0")}); err != nil {
 		t.Fatal(err)
 	}
 	if m, err = st.SubmitForecastConsensus(alice, "BASE", m.Version); err != nil {
@@ -99,7 +99,7 @@ func TestForecastConsensus(t *testing.T) {
 			t.Fatalf("published cell %+v; want source consensus", l)
 		}
 	}
-	if _, err := st.UpsertForecastLines(alice, "BASE", m.Version, nil, []store.ForecastCellInput{cellIn(itemA, site, "2026-11-02", "2026-11-08", "1", "0")}); problemCode(err) != store.CodeForecastLocked {
+	if _, err := st.UpsertForecastLines(alice, "BASE", "", m.Version, nil, []store.ForecastCellInput{cellIn(itemA, site, "2026-11-02", "2026-11-08", "1", "0")}); problemCode(err) != store.CodeForecastLocked {
 		t.Fatalf("write on a published model: %v", err)
 	}
 	if _, _, err := st.DecideForecastConsensus(bob, "BASE", m.Version, false); problemCode(err) != store.CodeConsensusState {
@@ -135,7 +135,7 @@ func TestForecastConsensus(t *testing.T) {
 // API never writes an empty model, so the row is inserted directly.
 func TestForecastConsensus_EmptyModelIsRefused(t *testing.T) {
 	st, admin, _ := setup(t)
-	if _, err := admin.Exec(context.Background(), `insert into forecast_model (tenant_id, id, code, version) values ($1, $2, 'EMPTY', 1)`,
+	if _, err := admin.Exec(context.Background(), `insert into forecast_model (tenant_id, id, code, version, legal_entity_id) values ($1, $2, 'EMPTY', 1, '00000000-0000-0000-0000-0000000000e1')`,
 		testkit.TenantID(1), ids.New()); err != nil {
 		t.Fatal(err)
 	}

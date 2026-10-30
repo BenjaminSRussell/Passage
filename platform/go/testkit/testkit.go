@@ -86,7 +86,7 @@ func DBWithApp(t *testing.T) (*pgxpool.Pool, *pgxpool.Pool) {
 
 // Ctx returns a context carrying a test principal for tenantID with the given duties.
 func Ctx(tenantID string, duties ...string) context.Context {
-	p := tenant.Principal{TenantID: tenantID, LegalEntityID: "le-test", UserID: "user-test", Duties: map[string]struct{}{}}
+	p := tenant.Principal{TenantID: tenantID, LegalEntityID: "00000000-0000-0000-0000-0000000000e1", UserID: "user-test", Duties: map[string]struct{}{}}
 	for _, d := range duties {
 		p.Duties[d] = struct{}{}
 	}

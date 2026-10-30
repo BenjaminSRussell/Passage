@@ -25,6 +25,7 @@ var hundred = decimal.NewFromInt(100)
 // override). A reductionPrinciple, with an optional reductionPercent, replaces
 // the model's reduction setup (FR-22.8).
 type forecastLinesRequest struct {
+	LegalEntityID      string            `json:"legalEntityId"`
 	ReductionPrinciple *string           `json:"reductionPrinciple"`
 	ReductionPercent   *decimal.Decimal  `json:"reductionPercent"`
 	Lines              []forecastLineDTO `json:"lines"`
@@ -153,7 +154,7 @@ func (a *API) putForecastLines(w http.ResponseWriter, r *http.Request) {
 		cells = append(cells, store.ForecastCellInput{ItemID: l.ItemID, SiteID: l.SiteID, PeriodStart: l.PeriodStart,
 			PeriodEnd: l.PeriodEnd, Source: source, Qty: *l.Qty, SalesQty: l.SalesQty})
 	}
-	m, err := a.store.UpsertForecastLines(r.Context(), code, expected, spec, cells)
+	m, err := a.store.UpsertForecastLines(r.Context(), code, req.LegalEntityID, expected, spec, cells)
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return

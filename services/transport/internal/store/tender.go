@@ -65,6 +65,9 @@ func (s *Postgres) CreateTender(ctx context.Context, in domain.Tender, idem Idem
 		if done, err := replay(); done || err != nil {
 			return err
 		}
+		if _, err := parentEntityTx(ctx, tx, parentLoad, p.TenantID, in.LoadID, ""); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtext('transport.tender:' || $1 || ':' || $2))`, p.TenantID, in.LoadID); err != nil {
 			return err
 		}

@@ -39,6 +39,9 @@ func (s *Postgres) RecordTrackingEvent(ctx context.Context, in domain.TrackingEv
 	var out domain.TrackingEvent
 	inserted := false
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := parentEntityTx(ctx, tx, parentLoad, p.TenantID, in.LoadID, ""); err != nil {
+			return err
+		}
 		saved, err := scanTracking(tx.QueryRow(ctx, `insert into tracking_event (tenant_id, id, load_id, source, ref, stop_no, code, occurred_at, location)
 			values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 			on conflict (tenant_id, source, ref) do nothing returning `+trackingColumns,
@@ -46,6 +49,10 @@ func (s *Postgres) RecordTrackingEvent(ctx context.Context, in domain.TrackingEv
 		if errors.Is(err, pgx.ErrNoRows) {
 			existing, err := scanTracking(tx.QueryRow(ctx, `select `+trackingColumns+` from tracking_event where tenant_id = $1 and source = $2 and ref = $3`,
 				p.TenantID, in.Source, in.Ref))
+			if errors.Is(err, pgx.ErrNoRows) {
+				return httpx.NewProblem(http.StatusConflict, CodeIdempotencyReuse,
+					"source "+in.Source+" and ref "+in.Ref+" are already used by a status report outside the caller's legal entities")
+			}
 			if err != nil {
 				return err
 			}
