@@ -53,12 +53,19 @@ type OpenItem struct {
 	DiscountAmount  decimal.Decimal `json:"discountAmount"`
 	Status          string          `json:"status"`
 	Version         int             `json:"version"`
+	PaymentHold     bool            `json:"paymentHold"`
 }
 
 type Filter struct {
-	VendorID  string
-	DueOnOrBy string
-	OpenOnly  bool
+	LegalEntityID string
+	VendorID      string
+	DueFrom       string
+	DueOnOrBy     string
+	Currency      string
+	Status        string
+	OpenOnly      bool
+	AfterDue      string
+	AfterID       string
 }
 
 type Postgres struct{ pool *pgxpool.Pool }
@@ -66,7 +73,7 @@ type Postgres struct{ pool *pgxpool.Pool }
 func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
 
 const columns = `id, legal_entity_id, vendor_id, source_invoice_id, invoice_number, invoice_date::text, due_date::text, due_date_source, currency,
-	amount::text, open_amount::text, discount_date::text, discount_amount::text, status, version`
+	amount::text, open_amount::text, discount_date::text, discount_amount::text, status, version, payment_hold`
 
 type rowScanner interface{ Scan(dest ...any) error }
 
@@ -74,7 +81,7 @@ func scan(row rowScanner) (OpenItem, error) {
 	var o OpenItem
 	var amount, open, discount string
 	if err := row.Scan(&o.ID, &o.LegalEntityID, &o.VendorID, &o.SourceInvoiceID, &o.InvoiceNumber, &o.InvoiceDate, &o.DueDate, &o.DueDateSource,
-		&o.Currency, &amount, &open, &o.DiscountDate, &discount, &o.Status, &o.Version); err != nil {
+		&o.Currency, &amount, &open, &o.DiscountDate, &discount, &o.Status, &o.Version, &o.PaymentHold); err != nil {
 		return OpenItem{}, err
 	}
 	var err error
@@ -151,6 +158,13 @@ func (s *Postgres) CreateFromInvoice(ctx context.Context, in OpenItem) (OpenItem
 	return out, created, err
 }
 
+func nullable(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
 func (s *Postgres) List(ctx context.Context, f Filter, limit int) ([]OpenItem, error) {
 	if limit <= 0 {
 		limit = defaultLimit
@@ -159,10 +173,17 @@ func (s *Postgres) List(ctx context.Context, f Filter, limit int) ([]OpenItem, e
 	items := []OpenItem{}
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `select `+columns+` from ap_open_item
-			where ($1::text = '' or vendor_id::text = $1::text)
-			and ($2::text = '' or due_date <= $2::date)
-			and (not $3::bool or status not in ('SETTLED', 'REVERSED'))
-			order by due_date, id limit $4`, f.VendorID, f.DueOnOrBy, f.OpenOnly, limit)
+			where ($1::uuid is null or legal_entity_id = $1::uuid)
+			and ($2::uuid is null or vendor_id = $2::uuid)
+			and ($3::date is null or due_date >= $3::date)
+			and ($4::date is null or due_date <= $4::date)
+			and ($5::text is null or currency = $5::text)
+			and ($6::text is null or status = $6::text)
+			and (not $7::bool or status not in ('SETTLED', 'REVERSED'))
+			and ($8::date is null or (due_date, id) > ($8::date, $9::uuid))
+			order by due_date, id limit $10`,
+			nullable(f.LegalEntityID), nullable(f.VendorID), nullable(f.DueFrom), nullable(f.DueOnOrBy), nullable(f.Currency), nullable(f.Status),
+			f.OpenOnly, nullable(f.AfterDue), nullable(f.AfterID), limit)
 		if err != nil {
 			return err
 		}
@@ -177,6 +198,43 @@ func (s *Postgres) List(ctx context.Context, f Filter, limit int) ([]OpenItem, e
 		return rows.Err()
 	})
 	return items, err
+}
+
+func (s *Postgres) Get(ctx context.Context, id string) (OpenItem, error) {
+	var out OpenItem
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		out, err = scan(tx.QueryRow(ctx, `select `+columns+` from ap_open_item where id = $1::uuid`, id))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	})
+	return out, err
+}
+
+func (s *Postgres) SetPaymentHold(ctx context.Context, id string, held bool) error {
+	return s.exec(ctx, `update ap_open_item set payment_hold = $2, version = version + 1, updated_at = now() where id = $1::uuid`, id, held)
+}
+
+func (s *Postgres) BlockVendor(ctx context.Context, vendorID, reason string) error {
+	p, _ := tenant.FromContext(ctx)
+	return s.exec(ctx, `insert into ap_vendor_block (tenant_id, vendor_id, reason) values ($1, $2::uuid, $3)
+		on conflict (tenant_id, vendor_id) do update set reason = excluded.reason`, p.TenantID, vendorID, reason)
+}
+
+func (s *Postgres) UnblockVendor(ctx context.Context, vendorID string) error {
+	return s.exec(ctx, `delete from ap_vendor_block where vendor_id = $1::uuid`, vendorID)
+}
+
+func (s *Postgres) exec(ctx context.Context, sql string, args ...any) error {
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, sql, args...)
+		if err == nil && tag.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+		return err
+	})
 }
 
 func (s *Postgres) Settle(ctx context.Context, id string, version int, amount decimal.Decimal, settlementID string) (OpenItem, error) {
