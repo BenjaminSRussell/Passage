@@ -49,8 +49,8 @@ charts/inventory/         Helm chart (Deployment, Service, HPA, ServiceMonitor t
 | Method | Path | Duty | PRD duty |
 |---|---|---|---|
 | POST | `/v1/inventory/journals` | `inventory.journal.write` | InventoryJournalMaintain |
-| GET | `/v1/inventory/journals` | `inventory.read`, or the service-only `inventory.ownership-change.read` (receiving's signed token, #305) | InventoryInquire |
-| GET | `/v1/inventory/journals/{id}` | `inventory.read`, or the service-only `inventory.ownership-change.read` | InventoryInquire |
+| GET | `/v1/inventory/journals` | `inventory.read`, or the service-only `inventory.ownership-change.read` (receiving's signed token, #305; sees only OWNERSHIP_CHANGE journals: other types answer 403 on list, 404 on get) | InventoryInquire |
+| GET | `/v1/inventory/journals/{id}` | `inventory.read`, or the service-only `inventory.ownership-change.read` (OWNERSHIP_CHANGE journals only) | InventoryInquire |
 | POST | `/v1/inventory/journals/{id}/lines:bulk` | `inventory.journal.write` | InventoryJournalMaintain |
 | POST | `/v1/inventory/journals/{id}:post` | `inventory.journal.post` | InventoryJournalPost |
 | GET | `/v1/inventory/onhand` | `inventory.read` | InventoryInquire |

@@ -13,6 +13,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/api"
+	"github.com/BenjaminSRussell/passage/services/inventory/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/inventory/internal/store"
 )
 
@@ -21,6 +22,7 @@ const tokenLegalEntity = "00000000-0000-0000-0000-0000000000e1"
 type tokenRig struct {
 	handler http.Handler
 	signer  *tenant.ServiceSigner
+	fake    *fakeStore
 }
 
 func newTokenRig(t *testing.T) *tokenRig {
@@ -33,8 +35,9 @@ func newTokenRig(t *testing.T) *tokenRig {
 	tenant.SetServiceVerifier(tenant.NewServiceVerifier("inventory", map[string]ed25519.PublicKey{"receiving": pub}))
 	t.Cleanup(func() { tenant.SetServiceVerifier(nil) })
 	router := httpx.NewRouter()
-	api.New(&fakeStore{}, store.PostParams{InventoryAccount: "1300", AdjustmentAccount: "5100", OpeningAccount: "3900"}).Register(router)
-	return &tokenRig{handler: router, signer: signer}
+	fake := &fakeStore{journalType: domain.JournalOwnershipChange}
+	api.New(fake, store.PostParams{InventoryAccount: "1300", AdjustmentAccount: "5100", OpeningAccount: "3900"}).Register(router)
+	return &tokenRig{handler: router, signer: signer, fake: fake}
 }
 
 func (r *tokenRig) token(t *testing.T, signer *tenant.ServiceSigner, duties []string) string {
@@ -66,6 +69,37 @@ func TestOwnershipChangeToken_ReadsJournalsForAUserWithoutInventoryRead(t *testi
 		if rec := r.call(http.MethodGet, path, r.token(t, r.signer, journalDuty), nil); rec.Code != http.StatusOK {
 			t.Errorf("GET %s: %d %s", path, rec.Code, rec.Body)
 		}
+	}
+}
+
+func TestOwnershipChangeToken_SeesOnlyOwnershipChangeJournals(t *testing.T) {
+	r := newTokenRig(t)
+	token := func() string { return r.token(t, r.signer, journalDuty) }
+
+	if rec := r.call(http.MethodGet, "/v1/inventory/journals?type=ADJUSTMENT", token(), nil); rec.Code != http.StatusForbidden {
+		t.Errorf("list type=ADJUSTMENT: %d, want 403", rec.Code)
+	}
+	if rec := r.call(http.MethodGet, "/v1/inventory/journals", token(), nil); rec.Code != http.StatusOK || r.fake.journals.Type != domain.JournalOwnershipChange {
+		t.Errorf("list without type: %d, store type %q, want 200 forced to OWNERSHIP_CHANGE", rec.Code, r.fake.journals.Type)
+	}
+	r.fake.journalType = domain.JournalAdjustment
+	if rec := r.call(http.MethodGet, "/v1/inventory/journals/"+ids.New(), token(), nil); rec.Code != http.StatusNotFound {
+		t.Errorf("get ADJUSTMENT journal: %d, want 404", rec.Code)
+	}
+	r.fake.journalType = domain.JournalOwnershipChange
+	if rec := r.call(http.MethodGet, "/v1/inventory/journals/"+ids.New(), token(), nil); rec.Code != http.StatusOK {
+		t.Errorf("get OWNERSHIP_CHANGE journal: %d, want 200", rec.Code)
+	}
+}
+
+func TestInventoryReadUserStillSeesEveryJournalType(t *testing.T) {
+	fs := &fakeStore{journalType: domain.JournalAdjustment}
+	h := newServer(t, fs)
+	if rec := do(t, h, http.MethodGet, "/v1/inventory/journals?type=ADJUSTMENT", "", []string{"inventory.read"}, nil); rec.Code != http.StatusOK || fs.journals.Type != domain.JournalAdjustment {
+		t.Errorf("list: %d, store type %q", rec.Code, fs.journals.Type)
+	}
+	if rec := do(t, h, http.MethodGet, "/v1/inventory/journals/"+ids.New(), "", []string{"inventory.read"}, nil); rec.Code != http.StatusOK {
+		t.Errorf("get ADJUSTMENT: %d, want 200", rec.Code)
 	}
 }
 

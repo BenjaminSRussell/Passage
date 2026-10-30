@@ -27,6 +27,7 @@ type fakeStore struct {
 	postVersion int
 	onHand      store.OnHandFilter
 	journals    store.JournalFilter
+	journalType domain.JournalType
 	keys        map[string]domain.Journal
 	lines       []domain.JournalLine
 	err         error
@@ -124,7 +125,7 @@ func (f *fakeStore) AddJournalLines(_ context.Context, id string, lines []domain
 
 func (f *fakeStore) GetJournal(_ context.Context, id string) (domain.Journal, error) {
 	posted := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
-	return domain.Journal{ID: id, Status: domain.JournalPosted, Version: 4, Currency: "USD", PostedAt: &posted,
+	return domain.Journal{ID: id, Type: f.journalType, Status: domain.JournalPosted, Version: 4, Currency: "USD", PostedAt: &posted,
 		Lines: []domain.JournalLine{{ID: ids.New(), LineNo: 1, ProductID: ids.New(), Qty: decimal.NewFromInt(2), EnteredQty: decimal.NewFromInt(2)}},
 		GLEntry: &domain.JournalEntry{Currency: "USD", Lines: []domain.GLLine{
 			{Account: "1300", Debit: decimal.RequireFromString("8.5"), Credit: decimal.Zero},
