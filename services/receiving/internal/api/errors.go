@@ -25,6 +25,7 @@ var domainStatus = map[string]int{
 	domain.CodePostingPending:    http.StatusConflict,
 	domain.CodeLedgerRejected:    http.StatusUnprocessableEntity,
 	domain.CodeOverCredit:        http.StatusUnprocessableEntity,
+	domain.CodePlanSettled:       http.StatusUnprocessableEntity,
 }
 
 func writeError(w http.ResponseWriter, r *http.Request, err error) {

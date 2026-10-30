@@ -20,6 +20,10 @@ const (
 	settlementAggregate        = "settlement"
 )
 
+func PlanSettled(poID string, lineNo int) *domain.Error {
+	return &domain.Error{Code: domain.CodePlanSettled, Detail: fmt.Sprintf("line %d of purchase order %s is settled by its invoicing plan and cannot also be invoiced against a receipt", lineNo, poID)}
+}
+
 func DuplicateAdjustment(number string) *domain.Error {
 	return &domain.Error{Code: domain.CodeDuplicateInvoice, Detail: fmt.Sprintf("adjustment %q is already posted for the invoice", number)}
 }
@@ -159,14 +163,32 @@ func (s *Postgres) PostSettlement(ctx context.Context, in Settlement, fn Settlem
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		if in.Kind == domain.SettlementPlanRow && in.ProductID != "" {
+			if err := lockPurchaseOrderLine(ctx, tx, tenantID, in.PurchaseOrderID, in.ProductID); err != nil {
+				return err
+			}
+			var invoiced bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM receiving_grir_open_item g
+				JOIN receiving_receipt r ON r.tenant_id = g.tenant_id AND r.id = g.receipt_id
+				JOIN receiving_receipt_line l ON l.tenant_id = g.tenant_id AND l.receipt_id = g.receipt_id AND l.line_no = g.line_no
+				WHERE g.tenant_id = $1 AND r.purchase_order_id = $2 AND l.product_id = $3 AND g.invoiced_qty > 0)`,
+				tenantID, in.PurchaseOrderID, in.ProductID).Scan(&invoiced); err != nil {
+				return err
+			}
+			if invoiced {
+				return ErrLineInvoiced
+			}
+		}
 		outcome, err := fn()
 		if err != nil {
 			return err
 		}
 		in.LedgerEntryID = outcome.LedgerEntryID
-		if err := tx.QueryRow(ctx, `INSERT INTO receiving_settlement (tenant_id, id, legal_entity_id, kind, source_ref, vendor_id, currency, amount, posting_date, ledger_id, fiscal_period_id, ledger_entry_id)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING created_at`,
-			tenantID, in.ID, in.LegalEntityID, in.Kind, in.SourceRef, in.VendorID, in.Currency, in.Amount, in.PostingDate, in.LedgerID, in.FiscalPeriodID, in.LedgerEntryID).Scan(&in.CreatedAt); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO receiving_settlement (tenant_id, id, legal_entity_id, kind, source_ref, vendor_id, currency, amount, posting_date, ledger_id, fiscal_period_id, ledger_entry_id,
+			purchase_order_id, po_line_no, product_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULLIF($13::text, '')::uuid, NULLIF($14::int, 0), NULLIF($15::text, '')::uuid) RETURNING created_at`,
+			tenantID, in.ID, in.LegalEntityID, in.Kind, in.SourceRef, in.VendorID, in.Currency, in.Amount, in.PostingDate, in.LedgerID, in.FiscalPeriodID, in.LedgerEntryID,
+			in.PurchaseOrderID, in.POLineNo, in.ProductID).Scan(&in.CreatedAt); err != nil {
 			return err
 		}
 		if err := markPostingsDone(ctx, tx, tenantID, in.ID, outcome.LedgerEntryID != ""); err != nil {
@@ -199,4 +221,51 @@ func (s *Postgres) SettledSources(ctx context.Context, kind string, sources []st
 		return rows.Err()
 	})
 	return settled, err
+}
+
+func lockPurchaseOrderLine(ctx context.Context, tx pgx.Tx, tenantID, purchaseOrderID, productID string) error {
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, strings.Join([]string{tenantID, "poline", purchaseOrderID, productID}, "|"))
+	return err
+}
+
+func refuseSettledPlanLines(ctx context.Context, tx pgx.Tx, tenantID string, keys []ItemKey) error {
+	receiptIDs, lineNos := make([]string, len(keys)), make([]int, len(keys))
+	for i, k := range keys {
+		receiptIDs[i], lineNos[i] = k.ReceiptID, k.LineNo
+	}
+	rows, err := tx.Query(ctx, `SELECT DISTINCT r.purchase_order_id::text, l.product_id::text FROM receiving_receipt_line l
+		JOIN receiving_receipt r ON r.tenant_id = l.tenant_id AND r.id = l.receipt_id
+		JOIN unnest($2::uuid[], $3::int[]) AS k(receipt_id, line_no) ON k.receipt_id = l.receipt_id AND k.line_no = l.line_no
+		WHERE l.tenant_id = $1 ORDER BY 1, 2`, tenantID, receiptIDs, lineNos)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var lines [][2]string
+	for rows.Next() {
+		var line [2]string
+		if err := rows.Scan(&line[0], &line[1]); err != nil {
+			return err
+		}
+		lines = append(lines, line)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	rows.Close()
+	for _, line := range lines {
+		if err := lockPurchaseOrderLine(ctx, tx, tenantID, line[0], line[1]); err != nil {
+			return err
+		}
+		var lineNo int
+		err := tx.QueryRow(ctx, `SELECT po_line_no FROM receiving_settlement WHERE tenant_id = $1 AND kind = $2 AND purchase_order_id = $3 AND product_id = $4 LIMIT 1`,
+			tenantID, domain.SettlementPlanRow, line[0], line[1]).Scan(&lineNo)
+		if err == nil {
+			return PlanSettled(line[0], lineNo)
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+	}
+	return nil
 }

@@ -36,7 +36,7 @@ type Client struct {
 
 func New(baseURL string, httpClient *http.Client) *Client {
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: Timeout}
+		httpClient = &http.Client{Timeout: Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	}
 	return &Client{baseURL: strings.TrimRight(baseURL, "/"), http: httpClient}
 }

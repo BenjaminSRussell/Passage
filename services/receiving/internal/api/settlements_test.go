@@ -1,11 +1,13 @@
 package api_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -402,5 +404,131 @@ func TestConsignmentSettlement_ValidationAuthAndScope(t *testing.T) {
 	problemCode(t, rg.call(http.MethodPost, consignmentRunPath, runBody(""), headers{}), http.StatusUnauthorized, "AUTH-0001")
 	if len(rg.ledger.Entries) != 0 {
 		t.Fatal("an invalid or unauthorised run reached the ledger")
+	}
+}
+
+func productPlanRig() *rig {
+	po := planPO()
+	po.Lines[0].ProductID = productID
+	plans := []domain.InvoicingPlan{{PurchaseOrderID: poID, LineNo: 1, SettleWithoutReceipt: true, Currency: "USD", Rows: planRows(row(1, day(2026, 9, 1), "1000.00", "OPEN"))}}
+	return newRigPorts(memstore.New(), domain.PeriodOpen, func(p *api.Ports) {
+		p.PurchaseOrders = domain.FakePurchaseOrders{Orders: map[string]domain.PurchaseOrder{poID: po}}
+		p.InvoicingPlans = domain.FakeInvoicingPlans{Plans: map[string][]domain.InvoicingPlan{poID: plans}}
+	})
+}
+
+func (rg *rig) invoiceFor(receiptID, number string) *httptest.ResponseRecorder {
+	return rg.call(http.MethodPost, invoicesPath, invoiceBody(number, receiptID, 4, ""), rg.apPosterFor(legalEntityID))
+}
+
+func TestPlanSettlement_SettledLineCannotBeInvoicedAgainstItsReceipt(t *testing.T) {
+	rg := productPlanRig()
+	receipt := rg.posted(t, "PS-1", 100, 100)
+	settled := decode[runJSON](t, rg.call(http.MethodPost, planRunPath, planBody(), rg.settle()), http.StatusOK)
+	entries := len(rg.ledger.Entries)
+
+	problemCode(t, rg.invoiceFor(receipt.ID, "INV-1"), http.StatusUnprocessableEntity, "AP-PLN-001")
+
+	if settled.settledRefs() != poID+"/1/1" || len(rg.ledger.Entries) != entries {
+		t.Fatalf("settled %s, ledger entries %d (was %d): the refused invoice must not post", settled.settledRefs(), len(rg.ledger.Entries), entries)
+	}
+}
+
+func TestPlanSettlement_InvoicedLineIsSkippedByTheRun(t *testing.T) {
+	rg := productPlanRig()
+	receipt := rg.posted(t, "PS-1", 100, 100)
+	decode[invoiceJSON](t, rg.invoiceFor(receipt.ID, "INV-1"), http.StatusCreated)
+	entries := len(rg.ledger.Entries)
+
+	run := decode[runJSON](t, rg.call(http.MethodPost, planRunPath, planBody(), rg.settle()), http.StatusOK)
+
+	if len(run.Settled) != 0 || run.skips()[poID+"/1/1"] != "LINE_INVOICED" || len(rg.ledger.Entries) != entries {
+		t.Fatalf("settled %d, skips %v, ledger entries %d (was %d)", len(run.Settled), run.skips(), len(rg.ledger.Entries), entries)
+	}
+}
+
+func TestPlanSettlement_ConcurrentInvoiceAndRunNeverBothPost(t *testing.T) {
+	for round := range 20 {
+		rg := productPlanRig()
+		receipt := rg.posted(t, "PS-1", 100, 100)
+		entries := len(rg.ledger.Entries)
+		invoiceHdr, runHdr := rg.apPosterFor(legalEntityID), rg.settle()
+		var invoiceRec, runRec *httptest.ResponseRecorder
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			invoiceRec = rg.call(http.MethodPost, invoicesPath, invoiceBody("INV-1", receipt.ID, 4, ""), invoiceHdr)
+		}()
+		go func() {
+			defer wg.Done()
+			runRec = rg.call(http.MethodPost, planRunPath, planBody(), runHdr)
+		}()
+		wg.Wait()
+
+		invoiced := invoiceRec.Code == http.StatusCreated
+		settled := runRec.Code == http.StatusOK && strings.Contains(runRec.Body.String(), `"kind":"PLAN_ROW"`)
+		if runRec.Code != http.StatusOK || (!invoiced && invoiceRec.Code != http.StatusUnprocessableEntity) || invoiced == settled || len(rg.ledger.Entries) != entries+1 {
+			t.Fatalf("round %d: invoice %d %s, run %d %s, ledger entries %d (was %d)", round, invoiceRec.Code, invoiceRec.Body.String(), runRec.Code, runRec.Body.String(), len(rg.ledger.Entries), entries)
+		}
+	}
+}
+
+func TestPlanSettlement_UnknownRowStatusHasItsOwnSkipReason(t *testing.T) {
+	plans := []domain.InvoicingPlan{{PurchaseOrderID: poID, LineNo: 1, SettleWithoutReceipt: true, Currency: "USD", Rows: planRows(
+		row(1, day(2026, 9, 1), "10.00", "INVOICED"), row(2, day(2026, 9, 1), "10.00", "VOID"))}}
+	rg := planRig(domain.PeriodOpen, plans)
+
+	run := decode[runJSON](t, rg.call(http.MethodPost, planRunPath, planBody(), rg.settle()), http.StatusOK)
+
+	if run.skips()[poID+"/1/1"] != "ALREADY_INVOICED" || run.skips()[poID+"/1/2"] != "UNKNOWN_ROW_STATUS" || len(run.Settled) != 0 {
+		t.Fatalf("run %+v", run)
+	}
+}
+
+func TestSettlementRuns_RejectFieldsOfTheOtherRun(t *testing.T) {
+	plan := planRig(domain.PeriodOpen, plansForPO())
+	consignment := consignmentRig(domain.PeriodOpen, domain.FakeOwnershipChanges{Changes: ownershipChanges()})
+
+	for name, rec := range map[string]*httptest.ResponseRecorder{
+		"vendorId on a plan run":           plan.call(http.MethodPost, planRunPath, planBody(`"vendorId":"V-1"`), plan.settle()),
+		"purchaseOrderId on a consignment": consignment.call(http.MethodPost, consignmentRunPath, runBody("", `"purchaseOrderId":"`+poID+`"`), consignment.settle()),
+	} {
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "COM-0001") {
+			t.Fatalf("%s: got %d %s", name, rec.Code, rec.Body.String())
+		}
+	}
+	if len(plan.ledger.Entries)+len(consignment.ledger.Entries) != 0 {
+		t.Fatal("a rejected run reached the ledger")
+	}
+}
+
+func TestConsignmentSettlement_SkipsAJournalOfAnotherLegalEntityReturnedByGet(t *testing.T) {
+	foreign := domain.OwnershipChange{JournalID: "journal-9", LegalEntityID: ledgerID, VendorID: "V-1", Currency: "USD", AccrualAccount: "2300", PostingDate: day(2026, 9, 30), Amount: dec("5.00")}
+	rg := consignmentRig(domain.PeriodOpen, mislabelled{FakeOwnershipChanges: domain.FakeOwnershipChanges{Changes: []domain.OwnershipChange{foreign}}, listed: []string{"journal-9"}})
+
+	run := decode[runJSON](t, rg.call(http.MethodPost, consignmentRunPath, runBody(""), rg.settle()), http.StatusOK)
+
+	if len(run.Settled) != 0 || run.skips()["journal-9"] != "OTHER_LEGAL_ENTITY" || len(rg.ledger.Entries) != 0 {
+		t.Fatalf("run %+v ledger entries %d", run, len(rg.ledger.Entries))
+	}
+}
+
+type mislabelled struct {
+	domain.FakeOwnershipChanges
+	listed []string
+}
+
+func (m mislabelled) List(context.Context, string) ([]string, bool, error) {
+	return m.listed, false, nil
+}
+
+func TestConsignmentSettlement_TruncatedJournalListMarksTheRunAsHavingMore(t *testing.T) {
+	rg := consignmentRig(domain.PeriodOpen, domain.FakeOwnershipChanges{Changes: ownershipChanges(), Truncated: true})
+
+	run := decode[runJSON](t, rg.call(http.MethodPost, consignmentRunPath, runBody(""), rg.settle()), http.StatusOK)
+
+	if !run.HasMore || run.settledRefs() != "journal-1,journal-2" {
+		t.Fatalf("run %+v", run)
 	}
 }

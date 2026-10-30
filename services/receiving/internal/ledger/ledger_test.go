@@ -337,3 +337,19 @@ func TestReverseClassifiesLedgerRejectionsApartFromOutages(t *testing.T) {
 		})
 	}
 }
+
+func TestPost_DoesNotFollowRedirectsWithTheCallersIdentity(t *testing.T) {
+	followed := false
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { followed = true }))
+	t.Cleanup(target.Close)
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(redirector.Close)
+
+	_, err := New(redirector.URL, nil).Post(testCtx(), testEntry())
+
+	if err == nil || followed {
+		t.Fatalf("redirect followed %v, err %v", followed, err)
+	}
+}

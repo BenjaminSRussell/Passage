@@ -31,7 +31,7 @@ func TestPostInvoiceAdjustment_DebitPostsPriceDifferenceAndCreditsVendor(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if entry.LedgerEntryID != "fake-entry-1" || entry.IdempotencyKey != "post:receiving:invoiceadjustment:adj-1:DEBIT" {
+	if entry.LedgerEntryID != "fake-entry-1" || entry.IdempotencyKey != "post:receiving:invoiceadjustment:adj-1" {
 		t.Fatalf("entry %+v", entry)
 	}
 	if ledger.Balance("1400").String() != "3.5" || ledger.Balance("5200").String() != "1.25" || ledger.Balance("2000").String() != "-4.75" || !ledger.Balance("2100").IsZero() {
@@ -153,5 +153,21 @@ func TestPostInvoiceAdjustment_RepeatingTheSameAdjustmentReusesTheLedgerEntry(t 
 
 	if err != nil || second.LedgerEntryID != first.LedgerEntryID || len(ledger.Entries) != 1 {
 		t.Fatalf("second %+v err %v entries %d", second, err, len(ledger.Entries))
+	}
+}
+
+func TestPostInvoiceAdjustment_RetryAsTheOtherKindNeverPostsASecondEntry(t *testing.T) {
+	ledger := &domain.FakeLedger{}
+	debit := adjustment(domain.AdjustmentDebit, domain.AdjustmentLine{InvoiceLineNo: 1, Amount: dec("3.50")})
+	credit := adjustment(domain.AdjustmentCredit, domain.AdjustmentLine{InvoiceLineNo: 1, Amount: dec("3.50")})
+	if _, err := domain.PostInvoiceAdjustment(context.Background(), debit, domain.FakePeriods{Status: domain.PeriodOpen}, ledger, testProfile); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := domain.PostInvoiceAdjustment(context.Background(), credit, domain.FakePeriods{Status: domain.PeriodOpen}, ledger, testProfile)
+
+	var de *domain.Error
+	if !errors.As(err, &de) || de.Code != domain.CodePostingPending || len(ledger.Entries) != 1 {
+		t.Fatalf("err %v, ledger entries %d, want %s and 1", err, len(ledger.Entries), domain.CodePostingPending)
 	}
 }

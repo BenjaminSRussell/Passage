@@ -27,19 +27,56 @@ const (
 	skipAwaitsReceipt    = "AWAITS_RECEIPT"
 	skipLineCancelled    = "LINE_CANCELLED"
 	skipAlreadyInvoiced  = "ALREADY_INVOICED"
+	skipUnknownRowStatus = "UNKNOWN_ROW_STATUS"
+	skipLineInvoiced     = "LINE_INVOICED"
 	skipAlreadySettled   = "ALREADY_SETTLED"
 	skipOtherVendor      = "OTHER_VENDOR"
+	skipOtherEntity      = "OTHER_LEGAL_ENTITY"
 	skipNoAmount         = "NO_AMOUNT"
 	skipUnusableCurrency = "CURRENCY_MISMATCH"
 )
 
-type settlementRunRequest struct {
+type planRunRequest struct {
 	PurchaseOrderID string `json:"purchaseOrderId"`
 	LegalEntityID   string `json:"legalEntityId"`
-	VendorID        string `json:"vendorId"`
 	PostingDate     string `json:"postingDate"`
 	LedgerID        string `json:"ledgerId"`
 	FiscalPeriodID  string `json:"fiscalPeriodId"`
+}
+
+type consignmentRunRequest struct {
+	LegalEntityID  string `json:"legalEntityId"`
+	VendorID       string `json:"vendorId"`
+	PostingDate    string `json:"postingDate"`
+	LedgerID       string `json:"ledgerId"`
+	FiscalPeriodID string `json:"fiscalPeriodId"`
+}
+
+type settlementRunRequest struct {
+	PurchaseOrderID string
+	LegalEntityID   string
+	VendorID        string
+	PostingDate     string
+	LedgerID        string
+	FiscalPeriodID  string
+}
+
+type runRequestBody interface {
+	common() settlementRunRequest
+}
+
+func (q *planRunRequest) common() settlementRunRequest {
+	return settlementRunRequest{PurchaseOrderID: q.PurchaseOrderID, LegalEntityID: q.LegalEntityID, PostingDate: q.PostingDate, LedgerID: q.LedgerID, FiscalPeriodID: q.FiscalPeriodID}
+}
+
+func (q *consignmentRunRequest) common() settlementRunRequest {
+	return settlementRunRequest{LegalEntityID: q.LegalEntityID, VendorID: q.VendorID, PostingDate: q.PostingDate, LedgerID: q.LedgerID, FiscalPeriodID: q.FiscalPeriodID}
+}
+
+type planLink struct {
+	purchaseOrderID string
+	lineNo          int
+	productID       string
 }
 
 type settlementBody struct {
@@ -88,7 +125,7 @@ func (r *settlementRun) skip(sourceRef, reason string) {
 	r.body.Skipped = append(r.body.Skipped, skippedBody{SourceRef: sourceRef, Reason: reason})
 }
 
-func (r *settlementRun) settle(kind, sourceRef, vendorID, currency, debitAccount string, documentDate time.Time, amount decimal.Decimal) error {
+func (r *settlementRun) settle(kind, sourceRef, vendorID, currency, debitAccount string, documentDate time.Time, amount decimal.Decimal, link planLink) error {
 	s := domain.Settlement{
 		ID: stableID(r.tenantID, "settlement", kind, sourceRef), Kind: kind, LegalEntityID: r.req.legalEntityID, LedgerID: r.req.ledgerID,
 		FiscalPeriodID: r.req.fiscalPeriodID, PostingDate: r.req.postingDate, DocumentDate: documentDate, Currency: currency, DebitAccount: debitAccount, Amount: amount,
@@ -96,6 +133,7 @@ func (r *settlementRun) settle(kind, sourceRef, vendorID, currency, debitAccount
 	in := store.Settlement{
 		ID: s.ID, Kind: kind, SourceRef: sourceRef, LegalEntityID: s.LegalEntityID, VendorID: vendorID, Currency: currency, Amount: amount,
 		PostingDate: s.PostingDate, LedgerID: s.LedgerID, FiscalPeriodID: s.FiscalPeriodID,
+		PurchaseOrderID: link.purchaseOrderID, POLineNo: link.lineNo, ProductID: link.productID,
 	}
 	posted, replayed, err := r.api.store.PostSettlement(r.ctx, in, func() (store.SettlementOutcome, error) {
 		entry, err := domain.PostSettlement(r.ctx, s, r.api.ports.Periods, r.api.ledgerFor(s.ID), r.api.ports.Profile)
@@ -105,6 +143,10 @@ func (r *settlementRun) settle(kind, sourceRef, vendorID, currency, debitAccount
 		evt, err := settlementPostedEvent(r.tenantID, in, entry.LedgerEntryID)
 		return store.SettlementOutcome{LedgerEntryID: entry.LedgerEntryID, Event: evt}, err
 	})
+	if errors.Is(err, store.ErrLineInvoiced) {
+		r.skip(sourceRef, skipLineInvoiced)
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -122,17 +164,17 @@ func (r *settlementRun) settle(kind, sourceRef, vendorID, currency, debitAccount
 	return nil
 }
 
-func (a *API) startRun(w http.ResponseWriter, r *http.Request, needPurchaseOrder bool) (*settlementRun, settlementRunRequest, bool) {
+func (a *API) startRun(w http.ResponseWriter, r *http.Request, dst runRequestBody, needPurchaseOrder bool) (*settlementRun, settlementRunRequest, bool) {
 	p, ok := tenant.FromContext(r.Context())
 	if !ok || !ids.Valid(p.TenantID) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "missing or malformed tenant"))
 		return nil, settlementRunRequest{}, false
 	}
-	var req settlementRunRequest
-	if err := httpx.Decode(r, &req); err != nil {
+	if err := httpx.Decode(r, dst); err != nil {
 		writeError(w, r, err)
-		return nil, req, false
+		return nil, settlementRunRequest{}, false
 	}
+	req := dst.common()
 	fields := map[string]string{}
 	checkUUID(fields, "legalEntityId", req.LegalEntityID)
 	checkUUID(fields, "fiscalPeriodId", req.FiscalPeriodID)
@@ -167,7 +209,7 @@ func (a *API) startRun(w http.ResponseWriter, r *http.Request, needPurchaseOrder
 }
 
 func (a *API) runPlanSettlement(w http.ResponseWriter, r *http.Request) {
-	run, req, ok := a.startRun(w, r, true)
+	run, req, ok := a.startRun(w, r, &planRunRequest{}, true)
 	if !ok {
 		return
 	}
@@ -202,8 +244,10 @@ planLoop:
 			}
 			sourceRef := fmt.Sprintf("%s/%d/%d", po.ID, plan.LineNo, row.Seq)
 			switch line, found := linesByNo[plan.LineNo]; {
-			case row.Status != domain.PlanRowOpen:
+			case row.Status == domain.PlanRowInvoiced:
 				run.skip(sourceRef, skipAlreadyInvoiced)
+			case row.Status != domain.PlanRowOpen:
+				run.skip(sourceRef, skipUnknownRowStatus)
 			case !found || !line.Usable():
 				run.skip(sourceRef, skipLineCancelled)
 			case !plan.SettleWithoutReceipt:
@@ -216,7 +260,8 @@ planLoop:
 				run.body.HasMore = true
 				break planLoop
 			default:
-				if err := run.settle(domain.SettlementPlanRow, sourceRef, po.VendorID, po.Currency, a.ports.Profile.GRIR, row.DueDate, row.Amount); err != nil {
+				link := planLink{purchaseOrderID: po.ID, lineNo: plan.LineNo, productID: line.ProductID}
+				if err := run.settle(domain.SettlementPlanRow, sourceRef, po.VendorID, po.Currency, a.ports.Profile.GRIR, row.DueDate, row.Amount, link); err != nil {
 					writeError(w, r, err)
 					return
 				}
@@ -238,7 +283,7 @@ func (a *API) planLookupProblem(ctx context.Context, err error, orderID string) 
 }
 
 func (a *API) runConsignmentSettlement(w http.ResponseWriter, r *http.Request) {
-	run, req, ok := a.startRun(w, r, false)
+	run, req, ok := a.startRun(w, r, &consignmentRunRequest{}, false)
 	if !ok {
 		return
 	}
@@ -246,11 +291,12 @@ func (a *API) runConsignmentSettlement(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, unavailable("inventory ownership change lookup is not configured"))
 		return
 	}
-	journalIDs, err := a.ports.OwnershipChanges.List(run.ctx, req.LegalEntityID)
+	journalIDs, truncated, err := a.ports.OwnershipChanges.List(run.ctx, req.LegalEntityID)
 	if err != nil {
 		writeError(w, r, a.inventoryProblem(run.ctx, err))
 		return
 	}
+	run.body.HasMore = truncated
 	settled, err := a.store.SettledSources(run.ctx, domain.SettlementConsignment, journalIDs)
 	if err != nil {
 		writeError(w, r, err)
@@ -270,12 +316,14 @@ func (a *API) runConsignmentSettlement(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		switch {
+		case change.LegalEntityID != req.LegalEntityID:
+			run.skip(id, skipOtherEntity)
 		case req.VendorID != "" && !strings.EqualFold(change.VendorID, req.VendorID):
 			run.skip(id, skipOtherVendor)
 		case !change.Amount.IsPositive():
 			run.skip(id, skipNoAmount)
 		default:
-			if err := run.settle(domain.SettlementConsignment, id, change.VendorID, change.Currency, change.AccrualAccount, change.PostingDate, change.Amount); err != nil {
+			if err := run.settle(domain.SettlementConsignment, id, change.VendorID, change.Currency, change.AccrualAccount, change.PostingDate, change.Amount, planLink{}); err != nil {
 				writeError(w, r, err)
 				return
 			}

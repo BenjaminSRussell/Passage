@@ -90,7 +90,7 @@ func TestAdjustment_DebitPostsPriceDifferenceAndLeavesGrirAlone(t *testing.T) {
 	}
 	entry := lastEntry(t, rg)
 	wantLines(t, entry, "1400=3.5", "2000=-3.5")
-	if entry.IdempotencyKey != "post:receiving:invoiceadjustment:"+got.ID+":DEBIT" || len(rg.ledger.Entries) != entriesBefore+1 || !rg.ledger.Balance("2100").Equal(grirBefore) {
+	if entry.IdempotencyKey != "post:receiving:invoiceadjustment:"+got.ID || len(rg.ledger.Entries) != entriesBefore+1 || !rg.ledger.Balance("2100").Equal(grirBefore) {
 		t.Fatalf("key %s entries %d grir %s (was %s)", entry.IdempotencyKey, len(rg.ledger.Entries), rg.ledger.Balance("2100"), grirBefore)
 	}
 }

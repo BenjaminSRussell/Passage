@@ -21,6 +21,7 @@ var (
 	ErrPostingSuperseded = errors.New("the pending posting was resolved while the command was running")
 	ErrNotFound          = errors.New("receipt not found")
 	ErrGrirNotFound      = errors.New("no open GR/IR item for the receipt line")
+	ErrLineInvoiced      = errors.New("the purchase order line has invoiced GR/IR quantity")
 	ErrInvoiceNotFound   = errors.New("vendor invoice not found")
 )
 
@@ -191,18 +192,21 @@ type AdjustmentOutcome struct {
 type InvoiceAdjustmentFunc func(base InvoiceBase) (AdjustmentOutcome, error)
 
 type Settlement struct {
-	ID             string
-	Kind           string
-	SourceRef      string
-	LegalEntityID  string
-	VendorID       string
-	Currency       string
-	Amount         decimal.Decimal
-	PostingDate    time.Time
-	LedgerID       string
-	FiscalPeriodID string
-	LedgerEntryID  string
-	CreatedAt      time.Time
+	ID              string
+	Kind            string
+	SourceRef       string
+	LegalEntityID   string
+	VendorID        string
+	Currency        string
+	Amount          decimal.Decimal
+	PostingDate     time.Time
+	LedgerID        string
+	FiscalPeriodID  string
+	LedgerEntryID   string
+	CreatedAt       time.Time
+	PurchaseOrderID string
+	POLineNo        int
+	ProductID       string
 }
 
 type SettlementOutcome struct {

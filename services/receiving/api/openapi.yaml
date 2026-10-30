@@ -279,7 +279,7 @@ paths:
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
         '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-002 receipt line has no open GR/IR item.' }
         '409': { $ref: '#/components/responses/Problem', description: 'AP-DUP-001 invoice number already posted for the vendor; RCV-IDM-001 an earlier posting for this invoice is unfinished or differs; COM-0410.' }
-        '422': { $ref: '#/components/responses/Problem', description: 'PER-AP-001 closed AP period; AP-QTY-001 more than received and uninvoiced; RCV-VAL-001 other vendor or entity; COM-0409.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PER-AP-001 closed AP period; AP-QTY-001 more than received and uninvoiced; AP-PLN-001 the PO line is settled by its invoicing plan; RCV-VAL-001 other vendor or entity; COM-0409.' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
   /v1/receiving/invoice-adjustments:post:
     post:
@@ -893,8 +893,8 @@ components:
             required: [sourceRef, reason]
             properties:
               sourceRef: { type: string }
-              reason: { type: string, enum: [ALREADY_INVOICED, ALREADY_SETTLED, AWAITS_RECEIPT, LINE_CANCELLED, CURRENCY_MISMATCH, NO_AMOUNT, OTHER_VENDOR] }
-        hasMore: { type: boolean, description: True when the run stopped at 100 settlements; run again. }
+              reason: { type: string, enum: [ALREADY_INVOICED, UNKNOWN_ROW_STATUS, ALREADY_SETTLED, AWAITS_RECEIPT, LINE_CANCELLED, LINE_INVOICED, CURRENCY_MISMATCH, NO_AMOUNT, OTHER_VENDOR, OTHER_LEGAL_ENTITY] }
+        hasMore: { type: boolean, description: True when the run stopped at 100 settlements or the inventory journal list was cut at its page bound; run again. }
     Status:
       type: string
       enum: [NOT_MATCHED, MATCHED, PRICE_VARIANCE, QTY_VARIANCE, TOTAL_VARIANCE, NO_RECEIPT, WAITING_RECEIPT]

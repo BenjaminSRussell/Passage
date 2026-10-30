@@ -753,6 +753,11 @@ func (s *Store) PostInvoice(ctx context.Context, in store.Invoice, fn store.Invo
 			}
 			items[i] = working[k]
 		}
+		for k := range working {
+			if lineNo, settled := t.planSettledLine(t.productOf(k.ReceiptID, k.LineNo)); settled {
+				return store.PlanSettled(t.receipts[k.ReceiptID].PurchaseOrderID, lineNo)
+			}
+		}
 		outcome, err := fn(items)
 		if err != nil {
 			return err

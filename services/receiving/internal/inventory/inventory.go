@@ -39,7 +39,7 @@ type Client struct {
 
 func New(baseURL string, httpClient *http.Client) *Client {
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: Timeout}
+		httpClient = &http.Client{Timeout: Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	}
 	return &Client{baseURL: strings.TrimRight(baseURL, "/"), http: httpClient}
 }
@@ -103,7 +103,7 @@ func (c *Client) get(ctx context.Context, path string) (int, []byte, error) {
 	return resp.StatusCode, nil, err
 }
 
-func (c *Client) List(ctx context.Context, legalEntityID string) ([]string, error) {
+func (c *Client) List(ctx context.Context, legalEntityID string) ([]string, bool, error) {
 	var out []string
 	cursor := ""
 	for range maxPages {
@@ -113,7 +113,7 @@ func (c *Client) List(ctx context.Context, legalEntityID string) ([]string, erro
 		}
 		_, raw, err := c.get(ctx, domain.InventoryJournalsPath+"?"+query.Encode())
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		var page struct {
 			Items      []summaryBody `json:"items"`
@@ -121,7 +121,7 @@ func (c *Client) List(ctx context.Context, legalEntityID string) ([]string, erro
 		}
 		if err := json.Unmarshal(raw, &page); err != nil {
 			slog.ErrorContext(ctx, "inventory journal list unusable", "err", err, "correlationId", middleware.GetReqID(ctx))
-			return nil, errors.New("inventory journal list: response is not a journal page")
+			return nil, false, errors.New("inventory journal list: response is not a journal page")
 		}
 		for _, item := range page.Items {
 			if item.LegalEntityID == legalEntityID && item.ID != "" {
@@ -129,12 +129,12 @@ func (c *Client) List(ctx context.Context, legalEntityID string) ([]string, erro
 			}
 		}
 		if page.NextCursor == "" {
-			return out, nil
+			return out, false, nil
 		}
 		cursor = page.NextCursor
 	}
 	slog.WarnContext(ctx, "inventory journal list truncated", "pages", maxPages, "correlationId", middleware.GetReqID(ctx))
-	return out, nil
+	return out, true, nil
 }
 
 func (c *Client) Get(ctx context.Context, journalID string) (domain.OwnershipChange, error) {

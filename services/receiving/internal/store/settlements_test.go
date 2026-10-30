@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -247,3 +248,126 @@ func TestPostSettlement_ConcurrentRunsSettleASourceOnce(t *testing.T) {
 }
 
 func postDay() time.Time { return time.Date(2026, 3, 6, 0, 0, 0, 0, time.UTC) }
+
+func TestPlanSettlementAndInvoicingOfTheSameLineExcludeEachOther(t *testing.T) {
+	db := seedInvoice(t)
+	if err := db.run(db.one, `insert into receiving_grir_open_item (tenant_id, id, legal_entity_id, receipt_id, line_no, received_qty, received_amount, currency, vendor_id, po_line_id)
+		values ($1, gen_random_uuid(), $2, $3, 1, 5, 10, 'USD', $4, $5)`, db.one.TenantID, db.one.LegalEntityID, receiptID, vendorID, poID); err != nil {
+		t.Fatal(err)
+	}
+	st := store.New(db.pool)
+	ctx := tenant.With(context.Background(), db.one)
+	const racers = 3
+	var wg sync.WaitGroup
+	invoiceErrs := make([]error, racers)
+	settleErrs := make([]error, racers)
+	for i := range racers {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			in := store.Invoice{
+				ID: fmt.Sprintf("00000000-0000-0000-0000-00000000a0%02d", i), LegalEntityID: db.one.LegalEntityID, VendorID: vendorID, InvoiceNumber: fmt.Sprintf("RACE-%d", i),
+				InvoiceDate: postDay(), PostingDate: postDay(), Currency: "USD", LedgerID: ledgerUUID, FiscalPeriodID: ledgerUUID,
+				Lines: []store.InvoiceLine{{ReceiptID: receiptID, ReceiptLineNo: 1, Qty: decimal.NewFromInt(1), UnitPrice: decimal.NewFromInt(2), Amount: decimal.NewFromInt(2)}},
+			}
+			_, invoiceErrs[i] = st.PostInvoice(ctx, in, func(items []*domain.GrirItem) (store.InvoiceOutcome, error) {
+				items[0].InvoicedQty = items[0].InvoicedQty.Add(decimal.NewFromInt(1))
+				items[0].ClearedAmount.Value = items[0].ClearedAmount.Value.Add(decimal.NewFromInt(2))
+				return store.InvoiceOutcome{LedgerEntryID: "e", Total: decimal.NewFromInt(2), Event: event(t, db.one, "vendorinvoice", "posted")}, nil
+			})
+		}()
+		go func() {
+			defer wg.Done()
+			in := store.Settlement{
+				ID: fmt.Sprintf("00000000-0000-0000-0000-00000000b0%02d", i), Kind: domain.SettlementPlanRow, SourceRef: fmt.Sprintf("po/1/%d", i), LegalEntityID: db.one.LegalEntityID,
+				VendorID: vendorID, Currency: "USD", Amount: decimal.NewFromInt(7), PostingDate: postDay(), LedgerID: ledgerUUID, FiscalPeriodID: ledgerUUID,
+				PurchaseOrderID: poID, POLineNo: 1, ProductID: poID,
+			}
+			_, _, settleErrs[i] = st.PostSettlement(ctx, in, func() (store.SettlementOutcome, error) {
+				return store.SettlementOutcome{LedgerEntryID: "e", Event: event(t, db.one, "settlement", "posted")}, nil
+			})
+		}()
+	}
+	wg.Wait()
+
+	invoiced, settled := 0, 0
+	for i := range racers {
+		var de *domain.Error
+		switch {
+		case invoiceErrs[i] == nil:
+			invoiced++
+		case errors.As(invoiceErrs[i], &de) && de.Code == domain.CodePlanSettled:
+		default:
+			t.Fatalf("invoice %d: %v", i, invoiceErrs[i])
+		}
+		switch {
+		case settleErrs[i] == nil:
+			settled++
+		case errors.Is(settleErrs[i], store.ErrLineInvoiced):
+		default:
+			t.Fatalf("settlement %d: %v", i, settleErrs[i])
+		}
+	}
+	if (invoiced > 0) == (settled > 0) {
+		t.Fatalf("%d invoices and %d plan settlements committed for one PO line, want exactly one side", invoiced, settled)
+	}
+	if got := db.rows(db.one, "receiving_settlement"); got != settled {
+		t.Fatalf("%d settlement rows for %d reported settlements", got, settled)
+	}
+}
+
+func TestPlanSettlementThenInvoiceIsRefusedAndInvoiceThenPlanSettlementIsSkipped(t *testing.T) {
+	seedGrir := func(db settlementDB) {
+		if err := db.run(db.one, `insert into receiving_grir_open_item (tenant_id, id, legal_entity_id, receipt_id, line_no, received_qty, received_amount, currency, vendor_id, po_line_id)
+			values ($1, gen_random_uuid(), $2, $3, 1, 5, 10, 'USD', $4, $5)`, db.one.TenantID, db.one.LegalEntityID, receiptID, vendorID, poID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	invoice := func(st store.Store, db settlementDB) error {
+		in := store.Invoice{
+			ID: "00000000-0000-0000-0000-00000000a100", LegalEntityID: db.one.LegalEntityID, VendorID: vendorID, InvoiceNumber: "SEQ-1", InvoiceDate: postDay(), PostingDate: postDay(),
+			Currency: "USD", LedgerID: ledgerUUID, FiscalPeriodID: ledgerUUID,
+			Lines: []store.InvoiceLine{{ReceiptID: receiptID, ReceiptLineNo: 1, Qty: decimal.NewFromInt(1), UnitPrice: decimal.NewFromInt(2), Amount: decimal.NewFromInt(2)}},
+		}
+		_, err := st.PostInvoice(tenant.With(context.Background(), db.one), in, func(items []*domain.GrirItem) (store.InvoiceOutcome, error) {
+			items[0].InvoicedQty = items[0].InvoicedQty.Add(decimal.NewFromInt(1))
+			items[0].ClearedAmount.Value = items[0].ClearedAmount.Value.Add(decimal.NewFromInt(2))
+			return store.InvoiceOutcome{LedgerEntryID: "e", Total: decimal.NewFromInt(2), Event: event(t, db.one, "vendorinvoice", "posted")}, nil
+		})
+		return err
+	}
+	settle := func(st store.Store, db settlementDB) error {
+		in := store.Settlement{
+			ID: "00000000-0000-0000-0000-00000000b100", Kind: domain.SettlementPlanRow, SourceRef: "po/1/1", LegalEntityID: db.one.LegalEntityID, VendorID: vendorID, Currency: "USD",
+			Amount: decimal.NewFromInt(7), PostingDate: postDay(), LedgerID: ledgerUUID, FiscalPeriodID: ledgerUUID, PurchaseOrderID: poID, POLineNo: 1, ProductID: poID,
+		}
+		_, _, err := st.PostSettlement(tenant.With(context.Background(), db.one), in, func() (store.SettlementOutcome, error) {
+			return store.SettlementOutcome{LedgerEntryID: "e", Event: event(t, db.one, "settlement", "posted")}, nil
+		})
+		return err
+	}
+
+	t.Run("settled line refuses the invoice", func(t *testing.T) {
+		db := seedInvoice(t)
+		seedGrir(db)
+		st := store.New(db.pool)
+		if err := settle(st, db); err != nil {
+			t.Fatal(err)
+		}
+		var de *domain.Error
+		if err := invoice(st, db); !errors.As(err, &de) || de.Code != domain.CodePlanSettled {
+			t.Fatalf("invoice err %v, want %s", err, domain.CodePlanSettled)
+		}
+	})
+	t.Run("invoiced line refuses the settlement", func(t *testing.T) {
+		db := seedInvoice(t)
+		seedGrir(db)
+		st := store.New(db.pool)
+		if err := invoice(st, db); err != nil {
+			t.Fatal(err)
+		}
+		if err := settle(st, db); !errors.Is(err, store.ErrLineInvoiced) || db.rows(db.one, "receiving_settlement") != 0 {
+			t.Fatalf("settle err %v", err)
+		}
+	})
+}

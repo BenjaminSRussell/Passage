@@ -67,6 +67,32 @@ func (s *Store) PostInvoiceAdjustment(ctx context.Context, in store.InvoiceAdjus
 	return out, err
 }
 
+func (t *tenantData) productOf(receiptID string, lineNo int) (string, string) {
+	r := t.receipts[receiptID]
+	for _, l := range r.Lines {
+		if l.LineNo == lineNo {
+			return r.PurchaseOrderID, l.ProductID
+		}
+	}
+	return r.PurchaseOrderID, ""
+}
+
+func (t *tenantData) planSettledLine(purchaseOrderID, productID string) (int, bool) {
+	for _, s := range t.settlements {
+		if s.Kind == domain.SettlementPlanRow && s.PurchaseOrderID == purchaseOrderID && s.ProductID == productID {
+			return s.POLineNo, true
+		}
+	}
+	return 0, false
+}
+
+func (t *tenantData) lineInvoiced(purchaseOrderID, productID string) bool {
+	return slices.ContainsFunc(t.grir, func(g store.GrirItem) bool {
+		po, product := t.productOf(g.ReceiptID, g.LineNo)
+		return po == purchaseOrderID && product == productID && g.InvoicedQty.IsPositive()
+	})
+}
+
 func settlementKey(kind, source string) string { return kind + "|" + source }
 
 func (s *Store) PostSettlement(ctx context.Context, in store.Settlement, fn store.SettlementFunc) (out store.Settlement, replayed bool, err error) {
@@ -74,6 +100,9 @@ func (s *Store) PostSettlement(ctx context.Context, in store.Settlement, fn stor
 		if prior, ok := t.settlements[settlementKey(in.Kind, in.SourceRef)]; ok {
 			out, replayed = prior, true
 			return nil
+		}
+		if in.Kind == domain.SettlementPlanRow && in.ProductID != "" && t.lineInvoiced(in.PurchaseOrderID, in.ProductID) {
+			return store.ErrLineInvoiced
 		}
 		outcome, err := fn()
 		if err != nil {

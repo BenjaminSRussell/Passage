@@ -14,7 +14,7 @@ const (
 	AdjustmentCredit = "CREDIT"
 	AdjustmentDebit  = "DEBIT"
 
-	adjustmentKeyFormat = "post:receiving:invoiceadjustment:%s:%s"
+	adjustmentKeyFormat = "post:receiving:invoiceadjustment:%s"
 )
 
 type InvoiceLineState struct {
@@ -60,7 +60,7 @@ func PostInvoiceAdjustment(ctx context.Context, in InvoiceAdjustment, periods Pe
 		sign = sign.Neg()
 	}
 	entry := JournalEntry{
-		IdempotencyKey: fmt.Sprintf(adjustmentKeyFormat, in.ID, in.Kind),
+		IdempotencyKey: fmt.Sprintf(adjustmentKeyFormat, in.ID),
 		LegalEntityID:  in.LegalEntityID,
 		LedgerID:       in.LedgerID,
 		PostingDate:    in.PostingDate,

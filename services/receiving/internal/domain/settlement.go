@@ -20,6 +20,7 @@ const (
 	PlanRowOpen              = "OPEN"
 	PlanRowInvoiced          = "INVOICED"
 	CodeOverCredit           = "AP-CRD-001"
+	CodePlanSettled          = "AP-PLN-001"
 	settlementKeyFormat      = "post:receiving:settlement:%s:%s"
 )
 
@@ -58,7 +59,7 @@ type OwnershipChange struct {
 }
 
 type OwnershipChanges interface {
-	List(ctx context.Context, legalEntityID string) ([]string, error)
+	List(ctx context.Context, legalEntityID string) (journalIDs []string, truncated bool, err error)
 	Get(ctx context.Context, journalID string) (OwnershipChange, error)
 }
 
@@ -78,13 +79,14 @@ func (f FakeInvoicingPlans) List(_ context.Context, purchaseOrderID string) ([]I
 }
 
 type FakeOwnershipChanges struct {
-	Changes []OwnershipChange
-	Err     error
+	Changes   []OwnershipChange
+	Truncated bool
+	Err       error
 }
 
-func (f FakeOwnershipChanges) List(_ context.Context, legalEntityID string) ([]string, error) {
+func (f FakeOwnershipChanges) List(_ context.Context, legalEntityID string) ([]string, bool, error) {
 	if f.Err != nil {
-		return nil, f.Err
+		return nil, false, f.Err
 	}
 	var out []string
 	for _, c := range f.Changes {
@@ -92,7 +94,7 @@ func (f FakeOwnershipChanges) List(_ context.Context, legalEntityID string) ([]s
 			out = append(out, c.JournalID)
 		}
 	}
-	return out, nil
+	return out, f.Truncated, nil
 }
 
 func (f FakeOwnershipChanges) Get(_ context.Context, journalID string) (OwnershipChange, error) {

@@ -129,12 +129,12 @@ func TestList_PagesThroughPostedOwnershipChangesOfTheLegalEntity(t *testing.T) {
 		_, _ = w.Write([]byte(`{"items":[{"id":"j3","legalEntityId":"` + legalEntityID + `"}]}`))
 	})
 
-	got, err := client.List(testCtx(), legalEntityID)
+	got, truncated, err := client.List(testCtx(), legalEntityID)
 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(got, ",") != "j1,j3" || len(rec.requests) != 2 {
+	if truncated || strings.Join(got, ",") != "j1,j3" || len(rec.requests) != 2 {
 		t.Fatalf("ids %v after %d requests", got, len(rec.requests))
 	}
 	if q := rec.requests[0].URL.Query(); q.Get("type") != "OWNERSHIP_CHANGE" || q.Get("status") != "POSTED" || q.Get("limit") != "200" {
@@ -145,13 +145,27 @@ func TestList_PagesThroughPostedOwnershipChangesOfTheLegalEntity(t *testing.T) {
 	}
 }
 
-func TestList_StopsAtThePageBoundWithoutFailing(t *testing.T) {
+func TestList_StopsAtThePageBoundAndReportsTruncation(t *testing.T) {
 	client, rec := serve(t, respond(http.StatusOK, `{"items":[{"id":"j1","legalEntityId":"`+legalEntityID+`"}],"nextCursor":"again"}`))
 
-	got, err := client.List(testCtx(), legalEntityID)
+	got, truncated, err := client.List(testCtx(), legalEntityID)
 
-	if err != nil || len(got) != maxPages || len(rec.requests) != maxPages {
-		t.Fatalf("ids %d requests %d err %v", len(got), len(rec.requests), err)
+	if err != nil || !truncated || len(got) != maxPages || len(rec.requests) != maxPages {
+		t.Fatalf("ids %d requests %d truncated %v err %v", len(got), len(rec.requests), truncated, err)
+	}
+}
+
+func TestClient_DoesNotFollowRedirectsWithTheCallersIdentity(t *testing.T) {
+	var followed bool
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { followed = true }))
+	t.Cleanup(target.Close)
+	client, _ := serve(t, func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, target.URL, http.StatusFound) })
+
+	_, getErr := client.Get(testCtx(), journalID)
+	_, _, listErr := client.List(testCtx(), legalEntityID)
+
+	if followed || getErr == nil || listErr == nil {
+		t.Fatalf("redirect followed %v, get err %v, list err %v", followed, getErr, listErr)
 	}
 }
 
@@ -162,7 +176,7 @@ func TestList_FailuresSurface(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			client, _ := serve(t, handler)
 
-			if got, err := client.List(testCtx(), legalEntityID); err == nil || got != nil {
+			if got, _, err := client.List(testCtx(), legalEntityID); err == nil || got != nil {
 				t.Fatalf("ids %v err %v", got, err)
 			}
 		})
@@ -172,7 +186,7 @@ func TestList_FailuresSurface(t *testing.T) {
 func TestClient_NeedsAPrincipal(t *testing.T) {
 	client, rec := serve(t, respond(http.StatusOK, `{}`))
 
-	if _, err := client.List(context.Background(), legalEntityID); err == nil || len(rec.requests) != 0 {
+	if _, _, err := client.List(context.Background(), legalEntityID); err == nil || len(rec.requests) != 0 {
 		t.Fatalf("err %v after %d requests", err, len(rec.requests))
 	}
 }
