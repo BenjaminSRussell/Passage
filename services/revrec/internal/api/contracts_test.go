@@ -327,6 +327,7 @@ func TestCreateContract_ValidationProblems(t *testing.T) {
 		{"ratable without a term", strings.Replace(bundleContract, `"termStart": "2027-03-10", "termEnd": "2028-03-09"`, `"termStart": "2027-03-10"`, 1), "k-term", "obligations[2].term", "COM-0001", http.StatusBadRequest},
 		{"zero SSP", strings.Replace(bundleContract, `"ssp": "1500"`, `"ssp": "0"`, 1), "k-ssp", "obligations[1].ssp", "COM-0001", http.StatusBadRequest},
 		{"two residual obligations", strings.Replace(bundleContract, `"sspSource": "EXPLICIT"`, `"sspSource": "RESIDUAL"`, 2), "k-res2", "", "REV-0003", http.StatusUnprocessableEntity},
+		{"residual SSP not positive", strings.Replace(strings.Replace(bundleContract, `"ssp": "1500", "sspSource": "EXPLICIT"`, `"ssp": "1500", "sspSource": "RESIDUAL"`, 1), `"10800.00"`, `"10500.00"`, 1), "k-resneg", "", "REV-0008", http.StatusUnprocessableEntity},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

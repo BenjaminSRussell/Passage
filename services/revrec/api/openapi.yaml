@@ -359,7 +359,7 @@ components:
             properties:
               productId: { type: string, format: uuid, description: "May repeat across lines." }
               ssp: { type: string, pattern: "^[0-9]{1,14}(\\.[0-9]{1,6})?$", description: "Positive standalone selling price." }
-              sspSource: { type: string, enum: [EXPLICIT, LIST, PCT_OF_LIST, RESIDUAL], description: "At most one RESIDUAL per contract (REV-0003)." }
+              sspSource: { type: string, enum: [EXPLICIT, LIST, PCT_OF_LIST, RESIDUAL], description: "At most one RESIDUAL per contract (REV-0003); its ssp is derived as the transaction price less the other SSPs and is refused when not positive (REV-0008)." }
               method: { type: string, enum: [POINT_IN_TIME, RATABLE, MILESTONE, USAGE] }
               termStart: { type: string, format: date, description: "Required for RATABLE." }
               termEnd: { type: string, format: date, description: "Required for RATABLE; on or after termStart." }

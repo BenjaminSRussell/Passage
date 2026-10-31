@@ -227,3 +227,39 @@ func TestRatableSchedule_SumsToAmount(t *testing.T) {
 		}
 	})
 }
+
+func TestAllocate_ResidualSSPIsDerived(t *testing.T) {
+	obs := []Obligation{
+		{ID: "equipment", SSP: d("700"), SSPSource: "LIST", Method: "POINT_IN_TIME"},
+		{ID: "service", SSP: d("999"), SSPSource: SSPResidual, Method: "RATABLE"},
+	}
+	got, err := Allocate(money.Must("1000.00", "USD"), obs, ResidualFirst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got[1].SSP.Equal(d("300")) || !got[0].Allocated.Equal(d("700.00")) || !got[1].Allocated.Equal(d("300.00")) {
+		t.Errorf("residual SSP %s, allocated %s / %s; want 300, 700.00 / 300.00", got[1].SSP, got[0].Allocated, got[1].Allocated)
+	}
+	if !obs[1].SSP.Equal(d("999")) {
+		t.Errorf("input obligation mutated: SSP %s", obs[1].SSP)
+	}
+}
+
+func TestAllocate_ResidualSSPNotPositiveIsRejected(t *testing.T) {
+	for _, price := range []string{"700.00", "500.00", "0.00"} {
+		obs := []Obligation{
+			{ID: "equipment", SSP: d("700"), SSPSource: "LIST", Method: "POINT_IN_TIME"},
+			{ID: "service", SSP: d("333"), SSPSource: SSPResidual, Method: "RATABLE"},
+		}
+		if _, err := Allocate(money.Must(price, "USD"), obs, ResidualLargest); code(err) != "REV-0008" {
+			t.Errorf("price %s: error %v, want REV-0008", price, err)
+		}
+	}
+}
+
+func TestAllocate_TwoResidualsRejected(t *testing.T) {
+	obs := []Obligation{{ID: "a", SSP: d("1"), SSPSource: SSPResidual}, {ID: "b", SSP: d("1"), SSPSource: SSPResidual}}
+	if _, err := Allocate(money.Must("10.00", "USD"), obs, ResidualLargest); code(err) != "REV-0003" {
+		t.Errorf("error %v, want REV-0003", err)
+	}
+}

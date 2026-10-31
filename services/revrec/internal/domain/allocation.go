@@ -64,6 +64,8 @@ func ValidResidualRule(r string) bool {
 }
 
 // Allocate splits price across obligations in proportion to their SSP (BR-29.1).
+// The SSP of a RESIDUAL obligation is derived: the transaction price less the
+// other SSPs (BR-29.2); one that is not positive is refused (REV-0008).
 // Each share is truncated to the currency's minor unit; the residual goes to the
 // obligation chosen by rule (LARGEST means largest SSP, first index on ties).
 // The returned obligations sum to price exactly.
@@ -77,16 +79,31 @@ func Allocate(price money.Amount, obs []Obligation, rule string) ([]Obligation, 
 	if price.Value.IsNegative() {
 		return nil, &Error{Code: "REV-0001", Detail: "transaction price must not be negative"}
 	}
-	total := decimal.Zero
-	for _, o := range obs {
+	if err := CheckSSPSources(obs); err != nil {
+		return nil, err
+	}
+	out := make([]Obligation, len(obs))
+	copy(out, obs)
+	total, residual := decimal.Zero, -1
+	for i, o := range out {
+		if o.SSPSource == SSPResidual {
+			residual = i
+			continue
+		}
 		if !o.SSP.IsPositive() {
 			return nil, &Error{Code: "REV-0001", Detail: "every obligation needs a positive standalone selling price"}
 		}
 		total = total.Add(o.SSP)
 	}
+	if residual >= 0 {
+		derived := price.Value.Sub(total)
+		if !derived.IsPositive() {
+			return nil, &Error{Code: "REV-0008", Detail: "the residual SSP (transaction price less the other SSPs) is not positive; the residual approach cannot be used"}
+		}
+		out[residual].SSP = derived
+		total = price.Value
+	}
 	exp := money.MinorUnits(price.Currency)
-	out := make([]Obligation, len(obs))
-	copy(out, obs)
 	sum := decimal.Zero
 	for i := range out {
 		share := price.Value.Mul(out[i].SSP).Shift(exp).DivRound(total, 18).Truncate(0).Shift(-exp)
