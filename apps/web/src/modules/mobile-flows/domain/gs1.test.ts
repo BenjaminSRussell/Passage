@@ -117,9 +117,28 @@ describe("parseGS1 vectors", () => {
     },
     {
       name: "PO number AI 400 and GLN AI 410",
-      raw: "400" + "0045" + GS + "410" + "1234567890123",
-      fields: { "400": "0045", "410": "1234567890123" },
+      // 1234567890128 is GS1's own valid check-digit vector (lint_csum.c).
+      raw: "400" + "0045" + GS + "410" + "1234567890128",
+      fields: { "400": "0045", "410": "1234567890128" },
       errors: [],
+    },
+    {
+      name: "GLN with bad check digit (AI 410 and 412 are N13 with check digit)",
+      raw: "410" + "1234567890123",
+      fields: {},
+      errors: ["MOB-0102"],
+    },
+    {
+      name: "an AI repeated with a different value is malformed",
+      raw: "10ABC" + GS + "10ABD",
+      fields: { "10": "ABC" },
+      errors: ["MOB-0103"],
+    },
+    {
+      name: "a symbology identifier with no element string is malformed",
+      raw: "]C1",
+      fields: {},
+      errors: ["MOB-0103"],
     },
     {
       name: "ship-to postal code AI 420 followed by a GTIN",

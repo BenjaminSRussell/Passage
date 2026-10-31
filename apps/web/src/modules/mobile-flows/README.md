@@ -8,9 +8,11 @@ Flow designer for warehouse handheld flows, plus the pure domain shared with
 - `domain/gs1.ts`: GS1 application identifier parser (BR-32.1). Covers AI 00, 01, 10, 11,
   17, 21, 37, 400, 410, 412, 420 (ship-to postal code, on the print service's carton label),
   310n and 91 to 99.
-  Check digits, YYMMDD dates (DD=00 is last day of month, century window -49/+50), set 82
+  Check digits (AI 00, 01, 410, 412), YYMMDD dates (DD=00 is last day of month, century window -49/+50), set 82
   charset, FNC1 substitutes, and the GS1 symbology identifiers `]C1`, `]d2`, `]Q3`. Any other
   symbology identifier (`]C0`, `]E0`, ...) is stripped and the rest is a plain value.
+  An AI repeated with a different element string, and a barcode with no element string, are
+  MOB-0103 (GS1 General Specifications 4.14).
   Scan classes (LP, GTIN, LOCATION, ANY), BR-32.2 routing (`matchScanClass`) and `checkScan`,
   which reports a label's parse error (MOB-0102..0104) before a class mismatch (MOB-0101).
 - `domain/flowGraph.ts`: flow graph validation for publish (FR-32.2, BR-32.9). Rejects
@@ -109,6 +111,16 @@ npx tsc --noEmit
 The GS1 AI vectors and the queue property tests are deterministic (seeded generator), so a
 failure reproduces exactly.
 
+`domain/testdata/gs1-ai-vectors.json` (AC-32.1, §6.32.9) holds 459 vectors from the GS1
+Barcode Syntax Engine unit tests (commit pinned in the file) that fall within the BR-32.1 AI
+table, plus 60 Passage edge vectors; `gs1.vectors.test.ts` parses each without a symbology
+identifier and with `]C1`, `]d2` and `]Q3`. Regenerate it with
+`python3 -I domain/testdata/gen_gs1_ai_vectors.py > domain/testdata/gs1-ai-vectors.json`: the
+script has its own reference parser, written from BR-32.1 and the GS1 General Specifications,
+and stops if that parser disagrees with GS1's verdict on any suite vector. Suite tests left out
+are listed in the file with the reason (AIs outside the table, AI association rules, encoder
+limits, bracketed-input syntax).
+
 ## Notes
 
 - The PRD's BR-32.1 example GTIN `09501234567893` has a wrong mod-10 check digit (the correct
@@ -125,6 +137,8 @@ already present in `apps/web`. No npm dependencies were added.
 - The simulator runs a flow by hand; smoke scripts that replay every core path before publish
   (BR-32.9) are not built.
 - Flow list, version history, diff, and the four-eyes approval UI are not built (§6.32.14).
-- GS1 AIs 710 to 715 are not in the parser table yet.
-  Unknown AIs report MOB-0103 with their position. The GS1 AI test suite vectors (the external
-  suite file `gs1-ai-vectors.json`) are not imported yet; the vectors are inline in the tests.
+- GS1 AIs 710 to 715, and every other AI outside BR-32.1, are not in the parser table yet.
+  Unknown AIs report MOB-0103 with their position, so suite vectors for those AIs are excluded
+  from `gs1-ai-vectors.json`, not passed.
+- AI association rules (GS1 General Specifications 4.13 mandatory pairs and 4.14 invalid pairs,
+  for example AI 21 without AI 01) are not checked: the device parses each label on its own.
