@@ -361,8 +361,13 @@ func (s *Postgres) RunSchedule(ctx context.Context, req RunRequest, idem Idem) (
 		if err != nil {
 			return err
 		}
+		pegs, parentEnds, unplacedParents, err := pegsForRun(ctx, tx, orderIDs)
+		if err != nil {
+			return err
+		}
 		res := domain.Schedule(domain.Problem{Resources: resources, Operations: todo, Booked: booked, Fixed: fixed,
-			Networks: networks, Start: req.Start, HorizonDays: req.HorizonDays, Infinite: !req.Finite, Backward: req.Backward})
+			Networks: networks, Start: req.Start, HorizonDays: req.HorizonDays, Infinite: !req.Finite, Backward: req.Backward,
+			Pegs: pegs, ParentEnds: parentEnds, UnplacedParents: unplacedParents})
 		direction := "forward"
 		if req.Backward {
 			direction = "backward"

@@ -19,6 +19,13 @@ SCHED-0003 (domain, store, `direction` on `POST /runs`, migration 0008, directio
 selector and warning label on the web run screens); the OpenAPI and AsyncAPI
 specs have no FAIL lines on the doc gates.
 
+Slice 11 builds: schedule runs honour order pegs (FR-23.8). Parents are placed
+before their dependents, a dependent's first operation starts no earlier than
+its parents' last end (forward and backward runs, parents inside or outside the
+run selection), and a dependent behind an unplaced parent (placed in this run,
+or outside it with an operation stored as unplaced) is unplaced. No migration,
+no new endpoint; the createRun description and README say so.
+
 Slice 2 builds: resource networks with allowed transitions, transfer time,
 maximum wait and transfer resource (FR-23.13 data and the BR-23.11 edge
 rules in `domain/network.go`); versioned setup matrices per resource with
@@ -261,7 +268,7 @@ moved-out handoff rows.
 | AC-23.7 calendar change closes capacity and flags affected jobs (SCHED-0002 warnings on existing jobs) | partial (slice 9) | A downtime closes capacity at once (no 30 s lag: capacity is computed on read), returns the overlapping jobs when it is created, and the Gantt flags every bar outside open capacity (`outsideCapacity`) until it is moved. A change of the weekly calendar itself needs wave 9 calendar events (scheduling resources have no calendar update endpoint), and no per-job warning rows are stored. |
 | FR-23.8 pegs fed from master planning | handoff — wave 22 (pegging) | Pegs are entered through `POST /order-pegs`; a consumer of wave 22 pegging events would fill the same table. Propagation itself is built (slice 4). |
 | AC-23.3 sales line delay in the move preview | handoff — wave 27 (sales lines) and wave 22 (pegging to demand) | Pegs link orders to orders; the preview lists every pegged order with its old and new dates, but sales lines are not pegged here. |
-| Schedule runs honouring pegs (a dependent placed no earlier than its parent ends) | later slice of PSG-23 | Only moves with `propagate` push dependents; a site run places orders independently. |
+| Schedule runs honouring pegs (a dependent placed no earlier than its parent ends) | built (slice 11) | `domain.Schedule` places parents first (`pegPlan`) and floors the dependent's first operation at the parents' last end (`pegFloor`; `store.pegsForRun` loads pegs and the ends of parents outside the run); an unplaced parent (in the run, or outside it with an operation stored as unplaced) leaves the dependent unplaced. Not yet: a peg-forced delay is not reported as a warning; `:move` without propagate still ignores pegs; a selection run that moves a parent later does not push its dependents outside the selection (run them too, or the site); a parent outside the run that was never scheduled sets no floor; a backward run schedules a parent against its own due date, not back from its dependent's start. |
 | PRD 4.23.17 limit of 100 orders in the propagation preview | later slice of PSG-23 | The preview walks the same 500 orders / 5 levels as the commit, so what is previewed is what is saved. |
 | FR-23.11 runs as Temporal jobs with checkpoints every 500 operations; nightly site run at 00:30; per-order `:schedule` (scope `order`) | later slice of PSG-23 | Runs execute synchronously inside one transaction (5,000 operations schedule in well under the 60 s budget in the domain test). |
 | Sites: `siteId` on resources, runs and the Gantt query | handoff — wave 9 (sites on resources) | Slice 1 schedules every resource of the tenant as one plant. |

@@ -84,10 +84,11 @@ func TestMoveJob_PropagatesToPeggedOrders(t *testing.T) {
 	a2 := mustOperation(t, ctx, s, a, 20, 60, mix.ID)
 	b1 := mustOperation(t, ctx, s, b, 10, 60, fill.ID)
 	b2 := mustOperation(t, ctx, s, b, 20, 30, fill.ID)
-	if _, _, err := s.CreatePeg(ctx, store.Peg{ParentOrderID: a, DependentOrderID: b}, store.Idem{}); err != nil {
+	// The run goes first: runs honour pegs, and this test wants both orders at 08:00.
+	if _, _, err := s.RunSchedule(ctx, siteRun(at(0, 6, 0)), store.Idem{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.RunSchedule(ctx, siteRun(at(0, 6, 0)), store.Idem{}); err != nil {
+	if _, _, err := s.CreatePeg(ctx, store.Peg{ParentOrderID: a, DependentOrderID: b}, store.Idem{}); err != nil {
 		t.Fatal(err)
 	}
 	if bars := barsOf(t, ctx, s); !bars[a1.ID].Start.Equal(at(0, 8, 0)) || !bars[b1.ID].Start.Equal(at(0, 8, 0)) {
@@ -141,14 +142,15 @@ func TestMoveJob_PropagationStopsAtFiveLevels(t *testing.T) {
 		orders[i] = ids.New()
 		r := mustResource(t, ctx, s, "R-"+string(rune('A'+i)), true)
 		jobs[i] = mustOperation(t, ctx, s, orders[i], 10, 60, r.ID)
-		if i > 0 {
-			if _, _, err := s.CreatePeg(ctx, store.Peg{ParentOrderID: orders[i-1], DependentOrderID: orders[i]}, store.Idem{}); err != nil {
-				t.Fatal(err)
-			}
-		}
 	}
+	// The run goes first: runs honour pegs, and this test wants every level at 08:00.
 	if _, _, err := s.RunSchedule(ctx, siteRun(at(0, 6, 0)), store.Idem{}); err != nil {
 		t.Fatal(err)
+	}
+	for i := 1; i < len(orders); i++ {
+		if _, _, err := s.CreatePeg(ctx, store.Peg{ParentOrderID: orders[i-1], DependentOrderID: orders[i]}, store.Idem{}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	out, _, err := s.MoveJob(ctx, store.MoveRequest{JobID: jobs[0].ID, Start: at(0, 14, 0), HorizonDays: 60, Propagate: true}, store.Idem{Key: "deep", Fingerprint: "fp"})
 	if err != nil || out.Conflict != nil || !out.Truncated || len(out.Dependents) != 5 {

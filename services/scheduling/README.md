@@ -78,7 +78,12 @@ campaigns yet. What is not built is listed in `NOT-IMPLEMENTED.md`.
 - **OrderPeg** (`scheduling_order_peg`): the dependent order consumes the
   parent order's output (FR-23.8). Both orders need operations in scheduling,
   a pair is pegged once, and a peg that would close a loop is refused. Pegs
-  are entered through the API until wave 22 pegging publishes them.
+  are entered through the API until wave 22 pegging publishes them. Schedule
+  runs honour pegs: parents are placed first, a dependent's first operation
+  starts no earlier than its parents' last end (in this run, or the stored
+  jobs of a parent outside the selection), and a dependent behind an unplaced
+  parent (in the run, or outside it with an unplaced operation) is unplaced.
+  Forward and backward runs both apply it.
 
 Rules the heuristic applies: orders sorted by (earliest due date, priority,
 order id), operations in number order; each operation starts after its

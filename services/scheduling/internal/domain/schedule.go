@@ -155,6 +155,14 @@ type Problem struct {
 	// Backward schedules each order with a due date as late as it can run
 	// and still end by that date (FR-23.2); BR-23.2 describes the fallback.
 	Backward bool
+	// Pegs link a parent order to the orders that consume its output; a
+	// dependent starts no earlier than its parents end (FR-23.8). ParentEnds
+	// holds the last end of each parent order that is not part of this run;
+	// UnplacedParents names the parent orders outside the run that hold an
+	// unplaced operation, whose dependents cannot be placed either.
+	Pegs            []Peg
+	ParentEnds      map[string]time.Time
+	UnplacedParents map[string]bool
 }
 
 // Unplaced is an operation the heuristic could not place within the horizon.
@@ -403,17 +411,57 @@ func Schedule(p Problem) Result {
 	}
 	var res Result
 	ops := orderPlan(p.Operations)
+	var chains [][]Operation
 	for i := 0; i < len(ops); {
 		j := i + 1
 		for j < len(ops) && ops[j].OrderID == ops[i].OrderID {
 			j++
 		}
-		if p.Backward {
-			e.placeBackward(ops[i:j], fixed[ops[i].OrderID], p.Start, &res)
-		} else {
-			e.placeChain(ops[i:j], fixed[ops[i].OrderID], p.Start, time.Time{}, &res)
-		}
+		chains = append(chains, ops[i:j])
 		i = j
+	}
+	chains = pegPlan(chains, p.Pegs)
+	ends := map[string]time.Time{}
+	unplacedOrders := map[string]bool{}
+	for oid, un := range p.UnplacedParents {
+		unplacedOrders[oid] = un
+	}
+	for oid, fs := range fixed {
+		for _, f := range fs {
+			if f.End.After(ends[oid]) {
+				ends[oid] = f.End
+			}
+		}
+	}
+	for _, chain := range chains {
+		oid := chain[0].OrderID
+		if len(p.Pegs) > 0 {
+			floor, blocked := pegFloor(oid, p.Pegs, ends, p.ParentEnds, unplacedOrders)
+			if blocked != "" {
+				for _, op := range chain {
+					res.Unplaced = append(res.Unplaced, Unplaced{op.ID, pegBlockedReason(blocked)})
+				}
+				unplacedOrders[oid] = true
+				continue
+			}
+			if floor.After(chain[0].ReadyAt) {
+				chain[0].ReadyAt = floor
+			}
+		}
+		nPl, nUn := len(res.Placements), len(res.Unplaced)
+		if p.Backward {
+			e.placeBackward(chain, fixed[oid], p.Start, &res)
+		} else {
+			e.placeChain(chain, fixed[oid], p.Start, time.Time{}, &res)
+		}
+		for _, pl := range res.Placements[nPl:] {
+			if pl.End.After(ends[oid]) {
+				ends[oid] = pl.End
+			}
+		}
+		if len(res.Unplaced) > nUn {
+			unplacedOrders[oid] = true
+		}
 	}
 	return res
 }

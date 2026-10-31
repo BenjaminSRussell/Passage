@@ -228,7 +228,12 @@ paths:
         of the process minutes from the group the resource is in; a missing
         entry uses the route setup and warns SCHED-0012) and capacity blocks
         (FR-23.17: a job runs in a block only if it matches; a job matching no
-        block on its resource warns SCHED-0014).
+        block on its resource warns SCHED-0014). The run honours order pegs
+        (FR-23.8): an order is placed after its parent orders, and its first
+        operation starts no earlier than the last end of its parents, whether
+        the parent is scheduled in this run or already holds jobs; an order
+        whose parent could not be placed (in this run, or holding an unplaced
+        operation outside it) is unplaced too.
       x-passage-duty: scheduling.run
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
