@@ -110,6 +110,15 @@ type invoiceRejectedData struct {
 	RejectedBy    string `json:"rejected_by"`
 }
 
+type ersPriceConfirmedData struct {
+	ReceiptID     string `json:"receipt_id"`
+	LineNo        int    `json:"line_no"`
+	LegalEntityID string `json:"legal_entity_id"`
+	OldPrice      string `json:"old_price,omitempty"`
+	NewPrice      string `json:"new_price"`
+	ConfirmedBy   string `json:"confirmed_by"`
+}
+
 type auditPolicyChangedData struct {
 	LegalEntityID string `json:"legal_entity_id"`
 	OldRatePct    string `json:"old_rate_pct"`
@@ -218,6 +227,14 @@ func auditPolicyChangedEvent(tenantID, legalEntityID string, oldPolicy, next dom
 		data.Threshold, data.ThresholdCcy = next.Threshold.String(), next.ThresholdCurrency
 	}
 	return newEvent("receiving", "auditpolicy", "changed", legalEntityID, tenantID, data)
+}
+
+func ersPriceConfirmedEvent(tenantID string, rec store.Receipt, lineNo int, old decimal.NullDecimal, price decimal.Decimal, by string) (events.Event, error) {
+	data := ersPriceConfirmedData{ReceiptID: rec.ID, LineNo: lineNo, LegalEntityID: rec.LegalEntityID, NewPrice: price.String(), ConfirmedBy: by}
+	if old.Valid {
+		data.OldPrice = old.Decimal.String()
+	}
+	return newEvent("receiving", "erspriceconfirmation", "confirmed", rec.ID, tenantID, data)
 }
 
 func ersVendorChangedEvent(tenantID, legalEntityID, vendorID string, oldEnabled, newEnabled bool, by string) (events.Event, error) {

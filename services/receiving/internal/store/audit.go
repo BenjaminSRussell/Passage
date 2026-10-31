@@ -7,12 +7,13 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
+
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/outbox"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
-	"github.com/jackc/pgx/v5"
-	"github.com/shopspring/decimal"
 )
 
 func notBlockedIfNoRow(err error, id string) error {
@@ -296,48 +297,68 @@ func (s *Postgres) AuditPolicy(ctx context.Context, legalEntityID string) (domai
 	return p, err
 }
 
-func (s *Postgres) ConfirmErsPrice(ctx context.Context, legalEntityID, receiptID string, lineNo int, price decimal.Decimal, by string) error {
+func (s *Postgres) ConfirmErsPrice(ctx context.Context, legalEntityID, receiptID string, lineNo int, price decimal.Decimal, by string, fn ErsPriceFunc) error {
 	tenantID, err := tenantOf(ctx)
 	if err != nil {
 		return err
 	}
 	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `INSERT INTO receiving_ers_price_confirmation (tenant_id, legal_entity_id, receipt_id, line_no, confirmed_price, confirmed_by)
-			SELECT tenant_id, legal_entity_id, receipt_id, line_no, $5, $6 FROM receiving_receipt_line
-			WHERE tenant_id = $1 AND legal_entity_id = $2 AND receipt_id = $3 AND line_no = $4
-			ON CONFLICT (tenant_id, receipt_id, line_no) DO UPDATE SET confirmed_price = EXCLUDED.confirmed_price, confirmed_by = EXCLUDED.confirmed_by, confirmed_at = now()`,
-			tenantID, legalEntityID, receiptID, lineNo, price, by)
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM receiving_receipt_line WHERE tenant_id = $1 AND legal_entity_id = $2 AND receipt_id = $3 AND line_no = $4)`,
+			tenantID, legalEntityID, receiptID, lineNo).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return ErrNotFound
+		}
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, strings.ToLower(fmt.Sprintf("%s|ersprice|%s|%d", tenantID, receiptID, lineNo))); err != nil {
+			return err
+		}
+		var old decimal.NullDecimal
+		err := tx.QueryRow(ctx, `SELECT confirmed_price FROM receiving_ers_price_confirmation WHERE tenant_id = $1 AND receipt_id = $2 AND line_no = $3`, tenantID, receiptID, lineNo).Scan(&old)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		evt, err := fn(old)
 		if err != nil {
 			return err
 		}
-		if tag.RowsAffected() == 0 {
-			return ErrNotFound
+		if _, err := tx.Exec(ctx, `INSERT INTO receiving_ers_price_confirmation (tenant_id, legal_entity_id, receipt_id, line_no, confirmed_price, confirmed_by) VALUES ($1, $2, $3, $4, $5, $6)
+			ON CONFLICT (tenant_id, receipt_id, line_no) DO UPDATE SET confirmed_price = EXCLUDED.confirmed_price, confirmed_by = EXCLUDED.confirmed_by, confirmed_at = now()`,
+			tenantID, legalEntityID, receiptID, lineNo, price, by); err != nil {
+			return err
 		}
-		return nil
+		if _, err := tx.Exec(ctx, `INSERT INTO receiving_ers_price_confirmation_history (tenant_id, legal_entity_id, receipt_id, line_no, old_price, new_price, confirmed_by) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+			tenantID, legalEntityID, receiptID, lineNo, old, price, by); err != nil {
+			return err
+		}
+		return outbox.Enqueue(ctx, tx, "erspriceconfirmation", receiptID, evt)
 	})
 }
 
-func (s *Postgres) ErsPriceConfirmations(ctx context.Context, receiptID string) (map[int]decimal.Decimal, error) {
+func (s *Postgres) ErsPriceConfirmations(ctx context.Context, receiptID string) (map[int]PriceConfirmation, error) {
 	tenantID, err := tenantOf(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out := map[int]decimal.Decimal{}
+	out := map[int]PriceConfirmation{}
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT line_no, confirmed_price FROM receiving_ers_price_confirmation WHERE tenant_id = $1 AND receipt_id = $2`, tenantID, receiptID)
+		rows, err := tx.Query(ctx, `SELECT line_no, confirmed_price, confirmed_by FROM receiving_ers_price_confirmation WHERE tenant_id = $1 AND receipt_id = $2`, tenantID, receiptID)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
 			var lineNo int
-			var price decimal.Decimal
-			if err := rows.Scan(&lineNo, &price); err != nil {
+			var c PriceConfirmation
+			if err := rows.Scan(&lineNo, &c.Price, &c.By); err != nil {
 				return err
 			}
-			out[lineNo] = price
+			out[lineNo] = c
 		}
 		return rows.Err()
 	})
 	return out, err
 }
+
+func SameActor(a, b string) bool { return sameActor(a, b) }

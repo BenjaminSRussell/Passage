@@ -29,7 +29,7 @@ const (
 
 	receiptColumns = `id::text, COALESCE(receipt_number, ''), legal_entity_id::text, vendor_id::text, purchase_order_id::text, packing_slip,
 		COALESCE(carrier, ''), pallet_count, state, receipt_date, COALESCE(currency, ''), exchange_rate, posting_date, posted_at,
-		COALESCE(ledger_entry_id, ''), created_at, row_version, correction_seq`
+		COALESCE(ledger_entry_id, ''), created_at, row_version, correction_seq, posted_by`
 	lineColumns = `line_no, COALESCE(po_line_id::text, ''), COALESCE(po_line_no, 0), product_id::text, qty, invoiced_qty,
 		COALESCE((SELECT g.cleared_amount FROM receiving_grir_open_item g WHERE g.tenant_id = receiving_receipt_line.tenant_id AND g.receipt_id = receiving_receipt_line.receipt_id AND g.line_no = receiving_receipt_line.line_no), 0),
 		COALESCE(ordered_remaining, 0), COALESCE(over_delivery_pct, 0),
@@ -81,7 +81,7 @@ func allocateNumber(ctx context.Context, tx pgx.Tx, tenantID string) (string, er
 func scanReceipt(row scanner) (Receipt, error) {
 	var r Receipt
 	err := row.Scan(&r.ID, &r.Number, &r.LegalEntityID, &r.VendorID, &r.PurchaseOrderID, &r.PackingSlip, &r.Carrier, &r.PalletCount,
-		&r.State, &r.Date, &r.Currency, &r.ExchangeRate, &r.PostingDate, &r.PostedAt, &r.LedgerEntryID, &r.CreatedAt, &r.Version, &r.CorrectionSeq)
+		&r.State, &r.Date, &r.Currency, &r.ExchangeRate, &r.PostingDate, &r.PostedAt, &r.LedgerEntryID, &r.CreatedAt, &r.Version, &r.CorrectionSeq, &r.PostedBy)
 	return r, err
 }
 
@@ -419,6 +419,10 @@ func (s *Postgres) Post(ctx context.Context, id string, fn PostFunc) (Receipt, e
 		if err != nil {
 			return err
 		}
+		postedBy := ""
+		if p, ok := tenant.FromContext(ctx); ok {
+			postedBy = p.UserID
+		}
 		amounts := map[int]LineAmount{}
 		for _, a := range outcome.Amounts {
 			amounts[a.LineNo] = a
@@ -432,8 +436,8 @@ func (s *Postgres) Post(ctx context.Context, id string, fn PostFunc) (Receipt, e
 			lineRows = append(lineRows, []any{tenantID, id, l.LineNo, a.Amount, a.AmountAcct})
 			grirRows = append(grirRows, []any{tenantID, ids.New(), current.LegalEntityID, id, l.LineNo, l.Qty, a.Amount, l.Currency, current.VendorID, l.POLineID})
 		}
-		if _, err := tx.Exec(ctx, `UPDATE receiving_receipt SET state = 'POSTED', posting_date = $3, posted_at = now(), ledger_entry_id = $4, row_version = row_version + 1, updated_at = now()
-			WHERE tenant_id = $1 AND id = $2`, tenantID, id, outcome.PostingDate, outcome.LedgerEntryID); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE receiving_receipt SET state = 'POSTED', posting_date = $3, posted_at = now(), ledger_entry_id = $4, posted_by = $5, row_version = row_version + 1, updated_at = now()
+			WHERE tenant_id = $1 AND id = $2`, tenantID, id, outcome.PostingDate, outcome.LedgerEntryID, postedBy); err != nil {
 			return err
 		}
 		if err := execBatch(ctx, tx, `UPDATE receiving_receipt_line SET amount = $4, amount_acct = $5 WHERE tenant_id = $1 AND receipt_id = $2 AND line_no = $3`, lineRows); err != nil {

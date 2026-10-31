@@ -544,7 +544,7 @@ paths:
     put:
       operationId: confirmErsPrice
       x-passage-duty: ErsPriceConfirm
-      description: A buyer confirms the unit price an ERS run may settle a receipt line at when the PO price changed since receipt (BR-18.9, AP-ERS-001). Valid only while the PO line's net price still equals unitPrice. The change records the user.
+      description: A buyer confirms the unit price an ERS run may settle a receipt line at when the PO price changed since receipt (BR-18.9, AP-ERS-001). unitPrice must equal the PO line's current net price (409 AP-ERS-002). The receipt must be POSTED and its vendor ERS-enabled (409 AP-ERS-003). The user who posted the receipt cannot confirm it (403 AP-ERS-004), and an ERS run by the confirming user skips the line (PRICE_CONFIRMED_BY_RUNNER). Each confirmation is kept in an insert-only history and published as erspriceconfirmation.confirmed.
       parameters:
         - name: id
           in: path
@@ -581,6 +581,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001 no tenant or no user.' }
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
         '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-001 no such receipt line in the legal entity.' }
+        '409': { $ref: '#/components/responses/Problem', description: 'AP-ERS-002 price differs from the PO, AP-ERS-003 not confirmable.' }
   /v1/receiving/audit-policy:
     put:
       operationId: setAuditPolicy

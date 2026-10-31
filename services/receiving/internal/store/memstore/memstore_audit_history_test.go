@@ -1,12 +1,12 @@
 package memstore_test
 
 import (
-	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 	"testing"
 
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/events"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store/memstore"
 )
 

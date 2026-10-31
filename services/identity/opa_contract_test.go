@@ -23,7 +23,7 @@ import (
 
 const (
 	contractTenant   = "tenant-a"
-	seededDutyCount  = 122
+	seededDutyCount  = 123
 	unassignedUserID = "user-without-duty"
 )
 
@@ -306,6 +306,10 @@ func TestDutyContractExpectations(t *testing.T) {
 		{duty: "MatchingPolicyMaintain", method: http.MethodPut, resource: "/v1/receiving/ers-vendors/v1", wantAllowed: true},
 		{duty: "InvoiceAuditRelease", method: http.MethodPost, resource: "/v1/receiving/invoices/i1:reject-audit-block", wantAllowed: true},
 		{duty: "VendorInvoicePost", method: http.MethodPost, resource: "/v1/receiving/invoices/i1:reject-audit-block"},
+		{duty: "ErsPriceConfirm", method: http.MethodPut, resource: "/v1/receiving/receipts/r1/lines/1/ers-price-confirmation", wantAllowed: true},
+		{duty: "VendorInvoicePost", method: http.MethodPut, resource: "/v1/receiving/receipts/r1/lines/1/ers-price-confirmation"},
+		{duty: "ErsPriceConfirm", method: http.MethodPost, resource: "/v1/receiving/ers-settlements:run"},
+		{duty: "ErsPriceConfirm", method: http.MethodPost, resource: "/v1/receiving/invoices:post"},
 		{duty: "VendorInvoicePost", method: http.MethodPut, resource: "/v1/receiving/audit-policy"},
 		{duty: "VendorInvoicePost", method: http.MethodPut, resource: "/v1/receiving/ers-vendors/v1"},
 		{duty: "ReceivingPost", method: http.MethodPost, resource: "/v1/receiving/invoice-adjustments:post"},

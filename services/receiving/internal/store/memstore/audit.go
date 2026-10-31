@@ -3,11 +3,12 @@ package memstore
 import (
 	"context"
 	"fmt"
-	"github.com/shopspring/decimal"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
@@ -156,30 +157,41 @@ func (s *Store) PolicyHistory(ctx context.Context) (out []PolicyChange, err erro
 	return out, err
 }
 
-func (s *Store) ConfirmErsPrice(ctx context.Context, legalEntityID, receiptID string, lineNo int, price decimal.Decimal, _ string) error {
+func (s *Store) ConfirmErsPrice(ctx context.Context, legalEntityID, receiptID string, lineNo int, price decimal.Decimal, by string, fn store.ErsPriceFunc) error {
 	return s.with(ctx, func(t *tenantData) error {
 		rec, err := t.find(receiptID)
 		if err != nil || rec.LegalEntityID != legalEntityID || !slices.ContainsFunc(rec.Lines, func(l store.Line) bool { return l.LineNo == lineNo }) {
 			return store.ErrNotFound
 		}
 		if t.ersPrices == nil {
-			t.ersPrices = map[string]decimal.Decimal{}
+			t.ersPrices = map[string]store.PriceConfirmation{}
 		}
-		t.ersPrices[fmt.Sprintf("%s|%d", rec.ID, lineNo)] = price
+		key := fmt.Sprintf("%s|%d", rec.ID, lineNo)
+		var old decimal.NullDecimal
+		if prior, ok := t.ersPrices[key]; ok {
+			old = decimal.NullDecimal{Decimal: prior.Price, Valid: true}
+		}
+		evt, err := fn(old)
+		if err != nil {
+			return err
+		}
+		t.ersPrices[key] = store.PriceConfirmation{Price: price, By: by}
+		t.ersPriceHistory = append(t.ersPriceHistory, key+"|"+old.Decimal.String()+">"+price.String()+"|"+by)
+		s.events = append(s.events, evt)
 		return nil
 	})
 }
 
-func (s *Store) ErsPriceConfirmations(ctx context.Context, receiptID string) (map[int]decimal.Decimal, error) {
-	out := map[int]decimal.Decimal{}
+func (s *Store) ErsPriceConfirmations(ctx context.Context, receiptID string) (map[int]store.PriceConfirmation, error) {
+	out := map[int]store.PriceConfirmation{}
 	err := s.with(ctx, func(t *tenantData) error {
 		rec, err := t.find(receiptID)
 		if err != nil {
 			return nil
 		}
 		for _, l := range rec.Lines {
-			if price, ok := t.ersPrices[fmt.Sprintf("%s|%d", rec.ID, l.LineNo)]; ok {
-				out[l.LineNo] = price
+			if c, ok := t.ersPrices[fmt.Sprintf("%s|%d", rec.ID, l.LineNo)]; ok {
+				out[l.LineNo] = c
 			}
 		}
 		return nil

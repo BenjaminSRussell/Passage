@@ -1,11 +1,14 @@
 package api
 
 import (
+	"context"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -286,9 +289,68 @@ func (a *API) confirmErsPrice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	if err := a.store.ConfirmErsPrice(r.Context(), req.LegalEntityID, id, lineNo, price, p.UserID); err != nil {
+	ctx := r.Context()
+	rec, err := a.store.GetReceipt(ctx, id)
+	if err == nil && rec.LegalEntityID != req.LegalEntityID {
+		err = store.ErrNotFound
+	}
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	poPrice, err := a.ersConfirmablePrice(ctx, rec, lineNo, p.UserID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if !samePrice(price, poPrice) {
+		writeError(w, r, poProblem(http.StatusConflict, "AP-ERS-002", "unitPrice %s differs from the current purchase order price %s", price.String(), poPrice.Round(priceScale).String()))
+		return
+	}
+	err = a.store.ConfirmErsPrice(ctx, req.LegalEntityID, id, lineNo, price, p.UserID, func(old decimal.NullDecimal) (events.Event, error) {
+		return ersPriceConfirmedEvent(p.TenantID, rec, lineNo, old, price, p.UserID)
+	})
+	if err != nil {
 		writeError(w, r, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, ersPriceBody{ReceiptID: id, LineNo: lineNo, UnitPrice: price.String()})
+}
+
+func (a *API) ersConfirmablePrice(ctx context.Context, rec store.Receipt, lineNo int, by string) (decimal.Decimal, error) {
+	idx := slices.IndexFunc(rec.Lines, func(l store.Line) bool { return l.LineNo == lineNo })
+	switch {
+	case idx < 0:
+		return decimal.Zero, store.ErrNotFound
+	case rec.State != domain.Posted:
+		return decimal.Zero, poProblem(http.StatusConflict, "AP-ERS-003", "only a posted receipt can have its price confirmed, this one is %s", rec.State)
+	case strings.TrimSpace(rec.PostedBy) == "" || store.SameActor(rec.PostedBy, by):
+		return decimal.Zero, poProblem(http.StatusForbidden, "AP-ERS-004", "the user who posted a receipt cannot confirm its ERS price (and a receipt without a recorded poster cannot be confirmed)")
+	}
+	enabled, err := a.store.ErsVendor(ctx, rec.LegalEntityID, rec.VendorID)
+	if err != nil {
+		return decimal.Zero, err
+	}
+	if !enabled {
+		return decimal.Zero, poProblem(http.StatusConflict, "AP-ERS-003", "the vendor is not enabled for evaluated receipt settlement")
+	}
+	po, err := a.loadPurchaseOrder(ctx, rec.LegalEntityID, rec.PurchaseOrderID)
+	if err != nil {
+		return decimal.Zero, err
+	}
+	line := rec.Lines[idx]
+	var poLine domain.PurchaseOrderLine
+	if line.POLineNo > 0 {
+		at := slices.IndexFunc(po.Lines, func(l domain.PurchaseOrderLine) bool { return l.LineNo == line.POLineNo && l.Usable() })
+		if at < 0 {
+			return decimal.Zero, poProblem(http.StatusConflict, "AP-ERS-003", "purchase order line %d is gone or cancelled", line.POLineNo)
+		}
+		poLine = po.Lines[at]
+	} else {
+		var reason string
+		if poLine, reason = matchPOLine(po, line.ProductID); reason != "" {
+			return decimal.Zero, poProblem(http.StatusConflict, "AP-ERS-003", "the receipt line has no single purchase order line (%s)", reason)
+		}
+	}
+	return poLine.NetUnitPrice(), nil
 }

@@ -47,13 +47,14 @@ type tenantData struct {
 	invoices map[string]struct{}
 	counter  int
 
-	invoiceDocs map[string]store.Invoice
-	adjustments map[string]store.InvoiceAdjustment
-	settlements map[string]store.Settlement
-	ersVendors  map[string]bool
-	auditRates  map[string]domain.AuditPolicy
-	payees      map[string]store.OneTimePayee
-	ersPrices   map[string]decimal.Decimal
+	invoiceDocs     map[string]store.Invoice
+	adjustments     map[string]store.InvoiceAdjustment
+	settlements     map[string]store.Settlement
+	ersVendors      map[string]bool
+	auditRates      map[string]domain.AuditPolicy
+	payees          map[string]store.OneTimePayee
+	ersPrices       map[string]store.PriceConfirmation
+	ersPriceHistory []string
 
 	policyHistory []PolicyChange
 }
@@ -341,6 +342,9 @@ func (s *Store) Post(ctx context.Context, id string, fn store.PostFunc) (out sto
 			})
 		}
 		current.State, current.PostingDate, current.PostedAt, current.LedgerEntryID = domain.Posted, &outcome.PostingDate, &now, outcome.LedgerEntryID
+		if p, ok := tenant.FromContext(ctx); ok {
+			current.PostedBy = p.UserID
+		}
 		current.Version++
 		t.receipts[id] = current
 		t.grir = append(t.grir, items...)

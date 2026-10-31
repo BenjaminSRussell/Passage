@@ -36,6 +36,8 @@ channels:
         $ref: "#/components/messages/AuditPolicyChanged"
       ersVendorChanged:
         $ref: "#/components/messages/ErsVendorChanged"
+      ersPriceConfirmed:
+        $ref: "#/components/messages/ErsPriceConfirmed"
   settlementEvents:
     address: passage.payables.settlement
     messages:
@@ -82,6 +84,11 @@ operations:
     channel: { $ref: "#/channels/policyEvents" }
     messages:
       - { $ref: "#/channels/policyEvents/messages/ersVendorChanged" }
+  publishErsPriceConfirmed:
+    action: send
+    channel: { $ref: "#/channels/policyEvents" }
+    messages:
+      - { $ref: "#/channels/policyEvents/messages/ersPriceConfirmed" }
   publishSettlementPosted:
     action: send
     channel: { $ref: "#/channels/settlementEvents" }
@@ -153,6 +160,12 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/ErsVendorChangedData"
+    ErsPriceConfirmed:
+      name: dev.passage.receiving.erspriceconfirmation.confirmed.v1
+      summary: A buyer confirmed the PO price an ERS run may settle a receipt line at (BR-18.9). Consumers: audit.
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/ErsPriceConfirmedData"
     SettlementPosted:
       name: dev.passage.payables.settlement.posted.v1
       summary: >-
@@ -282,6 +295,16 @@ components:
         threshold_currency: { type: string, pattern: "^[A-Z]{3}$" }
         rule_version: { type: integer, minimum: 1, description: "policy version after this change; bumped whenever the rate or threshold changes" }
         changed_by: { type: string }
+    ErsPriceConfirmedData:
+      type: object
+      required: [receipt_id, line_no, legal_entity_id, new_price, confirmed_by]
+      properties:
+        receipt_id: { type: string, format: uuid }
+        line_no: { type: integer, minimum: 1 }
+        legal_entity_id: { type: string, format: uuid }
+        old_price: { type: string, description: "decimal string; omitted on the first confirmation" }
+        new_price: { type: string, description: "decimal string, the confirmed unit price" }
+        confirmed_by: { type: string }
     ErsVendorChangedData:
       type: object
       required: [legal_entity_id, vendor_id, old_enabled, new_enabled, changed_by]

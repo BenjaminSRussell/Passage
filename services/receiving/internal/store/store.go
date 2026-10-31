@@ -73,6 +73,7 @@ type Receipt struct {
 	ExchangeRate    decimal.Decimal
 	PostingDate     *time.Time
 	PostedAt        *time.Time
+	PostedBy        string
 	LedgerEntryID   string
 	CreatedAt       time.Time
 	Lines           []Line
@@ -181,6 +182,13 @@ type ReleaseFunc func(inv Invoice) (InvoiceOutcome, error)
 
 type RejectFunc func(inv Invoice) (events.Event, error)
 
+type PriceConfirmation struct {
+	Price decimal.Decimal
+	By    string
+}
+
+type ErsPriceFunc func(old decimal.NullDecimal) (events.Event, error)
+
 type AuditPolicyFunc func(old, next domain.AuditPolicy) (events.Event, error)
 
 type ErsVendorFunc func(old bool) (events.Event, error)
@@ -272,8 +280,8 @@ type Store interface {
 	SetErsVendor(ctx context.Context, legalEntityID, vendorID string, enabled bool, by string, fn ErsVendorFunc) error
 	ErsVendor(ctx context.Context, legalEntityID, vendorID string) (bool, error)
 	ReceivedOnPurchaseOrder(ctx context.Context, purchaseOrderID string) (map[int]decimal.Decimal, error)
-	ConfirmErsPrice(ctx context.Context, legalEntityID, receiptID string, lineNo int, price decimal.Decimal, by string) error
-	ErsPriceConfirmations(ctx context.Context, receiptID string) (map[int]decimal.Decimal, error)
+	ConfirmErsPrice(ctx context.Context, legalEntityID, receiptID string, lineNo int, price decimal.Decimal, by string, fn ErsPriceFunc) error
+	ErsPriceConfirmations(ctx context.Context, receiptID string) (map[int]PriceConfirmation, error)
 	SetAuditPolicy(ctx context.Context, legalEntityID string, policy domain.AuditPolicy, by string, fn AuditPolicyFunc) error
 	AuditPolicy(ctx context.Context, legalEntityID string) (domain.AuditPolicy, error)
 	PostInvoiceAdjustment(ctx context.Context, in InvoiceAdjustment, fn InvoiceAdjustmentFunc) (InvoiceAdjustment, error)

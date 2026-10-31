@@ -65,10 +65,6 @@ func (p AuditPolicy) Weight(total decimal.Decimal, currency string) decimal.Deci
 	return decimal.Max(total, decimal.Zero).Div(p.Threshold)
 }
 
-func (s *Sampler) Blocks(invoiceID string, ratePct decimal.Decimal) bool {
-	return s.Decide(invoiceID, AuditPolicy{RatePct: ratePct}, decimal.Zero, "")
-}
-
 func (s *Sampler) Decide(invoiceID string, p AuditPolicy, total decimal.Decimal, currency string) bool {
 	if !p.RatePct.IsPositive() {
 		return false

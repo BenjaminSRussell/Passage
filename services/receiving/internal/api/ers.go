@@ -23,16 +23,17 @@ const (
 	ersScanPages = 5
 	priceScale   = 6
 
-	skipNotPosted   = "RECEIPT_NOT_POSTED"
-	skipNotErs      = "NOT_ERS_VENDOR"
-	skipNoOrder     = "PO_NOT_FOUND"
-	skipOrderDenied = "PO_FORBIDDEN"
-	skipOrderOpen   = "PO_NOT_APPROVED"
-	skipNoPOLine    = "NO_PO_LINE"
-	skipManyPOLines = "AMBIGUOUS_PO_LINE"
-	skipPlanSettled = "PLAN_SETTLED"
-	skipPartial     = "PARTIALLY_INVOICED"
-	skipPriceChange = "PRICE_CHANGED"
+	skipNotPosted     = "RECEIPT_NOT_POSTED"
+	skipNotErs        = "NOT_ERS_VENDOR"
+	skipNoOrder       = "PO_NOT_FOUND"
+	skipOrderDenied   = "PO_FORBIDDEN"
+	skipOrderOpen     = "PO_NOT_APPROVED"
+	skipNoPOLine      = "NO_PO_LINE"
+	skipManyPOLines   = "AMBIGUOUS_PO_LINE"
+	skipPlanSettled   = "PLAN_SETTLED"
+	skipPartial       = "PARTIALLY_INVOICED"
+	skipPriceChange   = "PRICE_CHANGED"
+	skipSelfConfirmed = "PRICE_CONFIRMED_BY_RUNNER"
 )
 
 type ersRunRequest struct {
@@ -144,7 +145,7 @@ func matchPOLine(po domain.PurchaseOrder, productID string) (domain.PurchaseOrde
 	return domain.PurchaseOrderLine{}, skipManyPOLines
 }
 
-func (r *ersRun) invoiceFor(rec store.Receipt, po domain.PurchaseOrder, rejected int, confirmed map[int]decimal.Decimal) (store.Invoice, string, string) {
+func (r *ersRun) invoiceFor(rec store.Receipt, po domain.PurchaseOrder, rejected int, confirmed map[int]store.PriceConfirmation) (store.Invoice, string, string) {
 	number := "ERS-" + rec.Number
 	if rejected > 0 {
 		number = fmt.Sprintf("%s-R%d", number, rejected)
@@ -174,7 +175,11 @@ func (r *ersRun) invoiceFor(rec store.Receipt, po domain.PurchaseOrder, rejected
 			return store.Invoice{}, reason, ""
 		}
 		price := poLine.NetUnitPrice()
-		if confirmedPrice, ok := confirmed[l.LineNo]; !samePrice(l.UnitPrice, price) && (!ok || !samePrice(confirmedPrice, price)) {
+		confirmation, ok := confirmed[l.LineNo]
+		if !samePrice(l.UnitPrice, price) && ok && samePrice(confirmation.Price, price) && store.SameActor(confirmation.By, r.principal.UserID) {
+			return store.Invoice{}, skipSelfConfirmed, fmt.Sprintf("AP-ERS-004: the price on line %d was confirmed by the user running the settlement", l.LineNo)
+		}
+		if !samePrice(l.UnitPrice, price) && (!ok || !samePrice(confirmation.Price, price)) {
 			return store.Invoice{}, skipPriceChange, fmt.Sprintf("AP-ERS-001: PO price changed since receipt (%s -> %s) on line %d", l.UnitPrice.StringFixed(priceScale), price.Round(priceScale).StringFixed(priceScale), l.LineNo)
 		}
 		in.Lines = append(in.Lines, store.InvoiceLine{

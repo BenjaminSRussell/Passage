@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -498,26 +499,45 @@ func TestRegisterSeesWhatOtherReceiptsTookFromThePOLine(t *testing.T) {
 	}
 }
 
-func TestErsPriceConfirmationIsKeptPerReceiptLineAndScopedToTheEntity(t *testing.T) {
-	st := setup(t).st
+func TestErsPriceConfirmationKeepsHistoryAndIsScopedToTheEntity(t *testing.T) {
+	e := setup(t)
+	st := e.st
 	p := principal(1)
 	r := registered(t, st, p, "PS-CONFIRM", "S1", "S2", "S3")
+	var olds []string
+	confirm := func(price, by string) error {
+		return st.ConfirmErsPrice(ctxOf(p), p.LegalEntityID, r.ID, 1, decimal.RequireFromString(price), by, func(old decimal.NullDecimal) (events.Event, error) {
+			olds = append(olds, old.Decimal.String()+fmt.Sprint(old.Valid))
+			return events.New(events.Type("receiving", "erspriceconfirmation", "confirmed", 1), "/passage/receiving/receiving", r.ID, p.TenantID, map[string]string{"receiptId": r.ID})
+		})
+	}
 
-	if err := st.ConfirmErsPrice(ctxOf(p), p.LegalEntityID, r.ID, 1, decimal.RequireFromString("2.6"), "buyer"); err != nil {
+	if err := confirm("2.6", "buyer"); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.ConfirmErsPrice(ctxOf(p), p.LegalEntityID, r.ID, 1, decimal.RequireFromString("2.7"), "buyer"); err != nil {
-		t.Fatalf("a second confirmation must replace the first: %v", err)
+	if err := confirm("2.7", "buyer2"); err != nil {
+		t.Fatal(err)
 	}
+
 	got, err := st.ErsPriceConfirmations(ctxOf(p), r.ID)
-	if err != nil || len(got) != 1 || !got[1].Equal(decimal.RequireFromString("2.7")) {
+	if err != nil || len(got) != 1 || !got[1].Price.Equal(decimal.RequireFromString("2.7")) || got[1].By != "buyer2" {
 		t.Fatalf("confirmations %v err %v", got, err)
 	}
+	if olds[0] != "0false" || olds[1] != "2.6true" {
+		t.Fatalf("old prices seen by the event builder %v", olds)
+	}
+	if n := e.count(p, "receiving_ers_price_confirmation_history"); n != 2 {
+		t.Fatalf("history rows %d, want 2", n)
+	}
+	if n := e.count(p, "outbox"); n != 2 {
+		t.Fatalf("outbox rows %d, want 2", n)
+	}
+	nop := func(decimal.NullDecimal) (events.Event, error) { return events.Event{}, nil }
 	for name, err := range map[string]error{
-		"unknown line":  st.ConfirmErsPrice(ctxOf(p), p.LegalEntityID, r.ID, 9, decimal.NewFromInt(1), "buyer"),
-		"other entity":  st.ConfirmErsPrice(ctxOf(p), "99999999-9999-4999-8999-999999999990", r.ID, 1, decimal.NewFromInt(1), "buyer"),
-		"unknown order": st.ConfirmErsPrice(ctxOf(p), p.LegalEntityID, "99999999-9999-4999-8999-999999999991", 1, decimal.NewFromInt(1), "buyer"),
-		"other tenant":  st.ConfirmErsPrice(ctxOf(principal(2)), principal(2).LegalEntityID, r.ID, 1, decimal.NewFromInt(1), "buyer"),
+		"unknown line":  st.ConfirmErsPrice(ctxOf(p), p.LegalEntityID, r.ID, 9, decimal.NewFromInt(1), "buyer", nop),
+		"other entity":  st.ConfirmErsPrice(ctxOf(p), "99999999-9999-4999-8999-999999999990", r.ID, 1, decimal.NewFromInt(1), "buyer", nop),
+		"unknown order": st.ConfirmErsPrice(ctxOf(p), p.LegalEntityID, "99999999-9999-4999-8999-999999999991", 1, decimal.NewFromInt(1), "buyer", nop),
+		"other tenant":  st.ConfirmErsPrice(ctxOf(principal(2)), principal(2).LegalEntityID, r.ID, 1, decimal.NewFromInt(1), "buyer", nop),
 	} {
 		if !errors.Is(err, store.ErrNotFound) {
 			t.Errorf("%s: err %v, want ErrNotFound", name, err)
