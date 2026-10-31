@@ -346,3 +346,107 @@ func TestStore_WaitingPickIsNeverAssignedBeforeItsRefillCompletes(t *testing.T) 
 		t.Fatalf("forward = %s, want 150 (50 + 160 - 60)", got)
 	}
 }
+
+func waitingPickFixture(t *testing.T) (*Store, context.Context, string, Released) {
+	t.Helper()
+	st, ctx, wh := setup(t)
+	locs := []domain.Location{loc("F-01", "FWD", 1, domain.Capacity{}), loc("R-01", "RES", 2, domain.Capacity{}), loc("R-02", "RES", 3, domain.Capacity{})}
+	mustLocations(t, st, ctx, wh, locs...)
+	mustDirective(t, st, ctx, pickDirective(wh))
+	seedStock(t, st, ctx, "F-01", locs, "A", "50")
+	seedStock(t, st, ctx, "R-01", locs, "A", "20")
+	seedStock(t, st, ctx, "R-02", locs, "A", "5000")
+	rule := domain.ReplenishRule{ItemID: "A", PickZone: "FWD", ReserveZone: "RES", MinQty: dq("40"), MaxQty: dq("150")}
+	rel, _, err := st.ReleaseWave(ctx, key("wave"), WaveInput{WarehouseID: wh, Rules: []domain.ReplenishRule{rule},
+		Orders: []domain.WaveOrder{{ID: "SO", Lines: []domain.NewLine{{ItemID: "A", Direction: domain.DirectionPick, Qty: dq("60")}}}}})
+	if err != nil || len(rel.Replenishment) != 1 || len(rel.Picks) != 1 || rel.Picks[0].Status != domain.WorkWaiting {
+		t.Fatalf("ReleaseWave: %+v err=%v", rel, err)
+	}
+	return st, ctx, wh, rel
+}
+
+func statusOf(t *testing.T, st *Store, ctx context.Context, id string) domain.Work {
+	t.Helper()
+	w, err := st.GetWork(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return w
+}
+
+func confirmRest(t *testing.T, st *Store, ctx context.Context, id, user string) {
+	t.Helper()
+	for _, l := range statusOf(t, st, ctx, id).Lines {
+		if l.Status != domain.LineOpen {
+			continue
+		}
+		if _, _, err := st.ConfirmLine(ctx, key("c-"+ids.New()), ConfirmInput{WorkID: id, LineNo: l.LineNo, Qty: l.Qty, User: user, Now: time.Now()}); err != nil {
+			t.Fatalf("confirm line %d: %v", l.LineNo, err)
+		}
+	}
+}
+
+// A short-picked refill hands the wait to its remainder work; the pick opens
+// only when the remainder ends.
+func TestStore_ShortPickedRefillPassesTheWaitToItsRemainder(t *testing.T) {
+	st, ctx, wh, rel := waitingPickFixture(t)
+	pick, refill := rel.Picks[0], rel.Replenishment[0]
+	if w := assign(t, st, ctx, wh, "u1", time.Now()); w == nil || w.ID != refill.ID {
+		t.Fatalf("the refill must be assigned first: %+v", w)
+	}
+	ex, _, err := st.ExceptWork(ctx, key("short"), ExceptionInput{WorkID: refill.ID, Action: ActionShortPick, LineNo: 1, Qty: dq("10"), Reason: "DAMAGED", User: "u1", Now: time.Now()})
+	if err != nil || ex.Remainder == nil {
+		t.Fatalf("short pick: %+v err=%v", ex, err)
+	}
+	confirmRest(t, st, ctx, refill.ID, "u1")
+	if got := statusOf(t, st, ctx, refill.ID).Status; got != domain.WorkPartiallyComplete {
+		t.Fatalf("refill = %s, want PARTIALLY_COMPLETED", got)
+	}
+	if p := statusOf(t, st, ctx, pick.ID); p.Status != domain.WorkWaiting || len(p.DependsOn) != 1 || p.DependsOn[0] != ex.Remainder.ID {
+		t.Fatalf("the pick must wait for the remainder %s: %+v", ex.Remainder.ID, p)
+	}
+	next := assign(t, st, ctx, wh, "u2", time.Now())
+	if next == nil || next.ID != ex.Remainder.ID {
+		t.Fatalf("only the remainder is assignable: %+v", next)
+	}
+	confirmRest(t, st, ctx, next.ID, "u2")
+	if p := statusOf(t, st, ctx, pick.ID); p.Status != domain.WorkOpen || len(p.DependsOn) != 0 {
+		t.Fatalf("the pick must open once the remainder completes: %+v", p)
+	}
+	if n := outboxCount(t, adminOf(st), "dev.passage.wms.work.released.v1"); n != 1 {
+		t.Fatalf("work.released events = %d, want 1", n)
+	}
+	last := assign(t, st, ctx, wh, "u3", time.Now())
+	if last == nil || last.ID != pick.ID {
+		t.Fatalf("the released pick must be assignable: %+v", last)
+	}
+}
+
+// A cancelled refill opens its dependents: they run, and short pick honestly
+// when the stock is not there.
+func TestStore_CancelledRefillOpensTheWaitingPick(t *testing.T) {
+	st, ctx, wh, rel := waitingPickFixture(t)
+	pick, refill := rel.Picks[0], rel.Replenishment[0]
+	if w := assign(t, st, ctx, wh, "u1", time.Now()); w == nil || w.ID != refill.ID {
+		t.Fatalf("the refill must be assigned first: %+v", w)
+	}
+	if _, _, err := st.ExceptWork(ctx, key("cancel"), ExceptionInput{WorkID: refill.ID, Action: ActionCancel, Reason: "NO_RESERVE", User: "u1", Now: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if p := statusOf(t, st, ctx, pick.ID); p.Status != domain.WorkOpen || len(p.DependsOn) != 0 {
+		t.Fatalf("the pick must open: %+v", p)
+	}
+	w := assign(t, st, ctx, wh, "u2", time.Now())
+	if w == nil || w.ID != pick.ID {
+		t.Fatalf("assigned %+v, want the pick", w)
+	}
+	if _, _, err := st.ConfirmLine(ctx, key("over"), ConfirmInput{WorkID: w.ID, LineNo: 1, Qty: dq("60"), User: "u2", Now: time.Now()}); err == nil {
+		t.Fatal("confirming 60 against 50 on hand must be refused")
+	}
+	if _, _, err := st.ExceptWork(ctx, key("short"), ExceptionInput{WorkID: w.ID, Action: ActionShortPick, LineNo: 1, Qty: dq("50"), Reason: "STOCK", User: "u2", Now: time.Now()}); err != nil {
+		t.Fatalf("short pick: %v", err)
+	}
+	if got := stockAt(t, st, ctx, wh, "F-01", "A"); !got.IsZero() {
+		t.Fatalf("forward = %s, want 0", got)
+	}
+}

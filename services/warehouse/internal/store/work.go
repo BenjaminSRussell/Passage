@@ -327,6 +327,9 @@ func (s *Store) ExceptWork(ctx context.Context, idem Idem, in ExceptionInput) (E
 				if err := updateWork(ctx, tx, &w); err != nil {
 					return Excepted{}, err
 				}
+				if err := releaseDependents(ctx, tx, w); err != nil {
+					return Excepted{}, err
+				}
 				return Excepted{Work: w}, nil
 			}
 			return Excepted{}, fmt.Errorf("store: unknown exception %q", in.Action)
@@ -356,6 +359,9 @@ func shortPick(ctx context.Context, tx pgx.Tx, w domain.Work, in ExceptionInput)
 	}
 	if w.Completed() {
 		if err := enqueue(ctx, tx, w.ID, evts.WorkCompleted, completedData(w, in.Now)); err != nil {
+			return Excepted{}, err
+		}
+		if err := releaseDependents(ctx, tx, w); err != nil {
 			return Excepted{}, err
 		}
 	}
@@ -526,16 +532,85 @@ func eventLines(lines []domain.WorkLine) []evts.Line {
 	return out
 }
 
-// releaseDependents removes a completed refill from the DependsOn of the work
-// waiting for it; a WAITING work with nothing left to wait for becomes OPEN.
-// Only a fully COMPLETED refill releases: a short refill leaves its dependents
-// waiting for a supervisor.
+// releaseDependents settles the work waiting on a refill that has just ended.
+// Dependents are locked first, in id order, and only then updated. A COMPLETED
+// or CANCELLED refill is removed from their DependsOn; a WAITING work with
+// nothing left to wait for becomes OPEN and work.released is emitted. A
+// PARTIALLY_COMPLETED refill (short picked) hands the wait to its remainder
+// works: they wait for those instead, and release when those end.
 func releaseDependents(ctx context.Context, tx pgx.Tx, w domain.Work) error {
-	if w.WorkType != "REPLENISHMENT" || w.Status != domain.WorkCompleted {
+	if w.WorkType != "REPLENISHMENT" || !(w.Status == domain.WorkCompleted || w.Status == domain.WorkCancelled || w.Status == domain.WorkPartiallyComplete) {
 		return nil
 	}
-	_, err := tx.Exec(ctx, `update work set depends_on = array_remove(depends_on, $1::uuid),
+	rows, err := tx.Query(ctx, `select id::text, status from work where warehouse_id = $1 and depends_on @> array[$2::uuid]
+		order by id for update`, w.WarehouseID, w.ID)
+	if err != nil {
+		return err
+	}
+	before := map[string]string{}
+	var locked []string
+	for rows.Next() {
+		var id, status string
+		if err := rows.Scan(&id, &status); err != nil {
+			rows.Close()
+			return err
+		}
+		before[id] = status
+		locked = append(locked, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil || len(locked) == 0 {
+		return err
+	}
+	if w.Status == domain.WorkPartiallyComplete {
+		var children []string
+		crows, err := tx.Query(ctx, `select id::text from work where parent_work_id = $1 and work_type = 'REPLENISHMENT' order by id`, w.ID)
+		if err != nil {
+			return err
+		}
+		for crows.Next() {
+			var id string
+			if err := crows.Scan(&id); err != nil {
+				crows.Close()
+				return err
+			}
+			children = append(children, id)
+		}
+		crows.Close()
+		if err := crows.Err(); err != nil {
+			return err
+		}
+		if len(children) > 0 {
+			_, err := tx.Exec(ctx, `update work set depends_on = array_remove(depends_on, $1::uuid) || $2::text[]::uuid[],
+				version = version + 1, updated_at = now() where id = any($3::text[]::uuid[])`, w.ID, children, locked)
+			return err
+		}
+	}
+	urows, err := tx.Query(ctx, `update work set depends_on = array_remove(depends_on, $1::uuid),
 		status = case when status = 'WAITING' and cardinality(array_remove(depends_on, $1::uuid)) = 0 then 'OPEN' else status end,
-		version = version + 1, updated_at = now() where $1::uuid = any(depends_on)`, w.ID)
-	return err
+		version = version + 1, updated_at = now() where id = any($2::text[]::uuid[]) returning id::text, status`, w.ID, locked)
+	if err != nil {
+		return err
+	}
+	var released []string
+	for urows.Next() {
+		var id, status string
+		if err := urows.Scan(&id, &status); err != nil {
+			urows.Close()
+			return err
+		}
+		if before[id] == string(domain.WorkWaiting) && status == string(domain.WorkOpen) {
+			released = append(released, id)
+		}
+	}
+	urows.Close()
+	if err := urows.Err(); err != nil {
+		return err
+	}
+	for _, id := range released {
+		if err := enqueue(ctx, tx, id, evts.WorkReleased, evts.WorkReleasedData{WorkID: id, WarehouseID: w.WarehouseID, AfterWorkID: w.ID, AfterStatus: string(w.Status)}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

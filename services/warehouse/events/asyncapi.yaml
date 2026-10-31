@@ -17,6 +17,7 @@ channels:
     messages:
       workCreated: { $ref: "#/components/messages/workCreated" }
       workCompleted: { $ref: "#/components/messages/workCompleted" }
+      workReleased: { $ref: "#/components/messages/workReleased" }
   wmsReceipt:
     address: passage.wms.receipt
     description: Topic of every receipt event (platform events.Topic).
@@ -31,6 +32,10 @@ operations:
     action: send
     channel: { $ref: "#/channels/wmsWork" }
     messages: [{ $ref: "#/channels/wmsWork/messages/workCompleted" }]
+  publishWorkReleased:
+    action: send
+    channel: { $ref: "#/channels/wmsWork" }
+    messages: [{ $ref: "#/channels/wmsWork/messages/workReleased" }]
   publishReceiptRegistered:
     action: send
     channel: { $ref: "#/channels/wmsReceipt" }
@@ -53,6 +58,14 @@ components:
         PARTIALLY_COMPLETED. confirmed_qty per line is what moved. Consumers:
         inventory (post the transfer), sales fulfillment, production.
       payload: { $ref: "#/components/schemas/WorkCompleted" }
+    workReleased:
+      name: dev.passage.wms.work.released.v1
+      title: Work released
+      summary: >
+        A WAITING work (a pick that needs a refill) became OPEN because the
+        refill it waited for was completed or cancelled. A short-picked refill
+        passes the wait on to its remainder work instead. Consumers: wms-mobile.
+      payload: { $ref: "#/components/schemas/WorkReleased" }
     receiptRegistered:
       name: dev.passage.wms.receipt.registered.v1
       title: Receipt registered
@@ -102,6 +115,14 @@ components:
         user: { type: string }
         duration_s: { type: integer, description: Seconds from assignment to the last confirmation. }
         lines: { type: array, items: { $ref: "#/components/schemas/Line" } }
+    WorkReleased:
+      type: object
+      required: [work_id, warehouse_id, after_work_id, after_status]
+      properties:
+        work_id: { type: string, format: uuid }
+        warehouse_id: { type: string, format: uuid }
+        after_work_id: { type: string, format: uuid, description: The refill work whose end released this work. }
+        after_status: { type: string, enum: [COMPLETED, CANCELLED] }
     ItemQty:
       type: object
       required: [item_id, qty]
