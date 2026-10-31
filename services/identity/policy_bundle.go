@@ -60,21 +60,27 @@ type BundleSigner struct {
 	keyID string
 }
 
+const minBundleKeyBits = 2048
+
 func NewBundleSigner(privateKeyPEM []byte, keyID string) (*BundleSigner, error) {
 	block, _ := pem.Decode(privateKeyPEM)
 	if block == nil || keyID == "" {
 		return nil, errors.New("bundle signing key must be a PEM RSA private key with a key id")
 	}
-	if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
-		return &BundleSigner{key: key, keyID: keyID}, nil
-	}
-	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	key, err := x509.ParsePKCS1PrivateKey(block.Bytes)
 	if err != nil {
-		return nil, fmt.Errorf("parse bundle signing key: %w", err)
+		parsed, pkcs8Err := x509.ParsePKCS8PrivateKey(block.Bytes)
+		if pkcs8Err != nil {
+			return nil, fmt.Errorf("parse bundle signing key: %w", pkcs8Err)
+		}
+		rsaKey, ok := parsed.(*rsa.PrivateKey)
+		if !ok {
+			return nil, errors.New("bundle signing key must be RSA")
+		}
+		key = rsaKey
 	}
-	key, ok := parsed.(*rsa.PrivateKey)
-	if !ok {
-		return nil, errors.New("bundle signing key must be RSA")
+	if key.N.BitLen() < minBundleKeyBits {
+		return nil, fmt.Errorf("bundle signing key must be at least %d bits", minBundleKeyBits)
 	}
 	return &BundleSigner{key: key, keyID: keyID}, nil
 }

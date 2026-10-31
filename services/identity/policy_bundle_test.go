@@ -10,7 +10,9 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,6 +20,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -346,4 +349,108 @@ func TestBundleConstructorsRejectWeakInput(t *testing.T) {
 	if _, err := identity.NewPolicyBundleAPI(f.compiler, "short"); err == nil {
 		t.Error("a short bearer token must be rejected")
 	}
+}
+
+func TestBundleSignerRejectsKeysUnder2048Bits(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkcs1 := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkcs8 := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
+	for name, material := range map[string][]byte{"pkcs1": pkcs1, "pkcs8": pkcs8} {
+		if _, err := identity.NewBundleSigner(material, bundleKeyID); err == nil || !strings.Contains(err.Error(), "2048") {
+			t.Errorf("%s 1024-bit key: err = %v, want a 2048-bit minimum error", name, err)
+		}
+	}
+}
+
+func TestSidecarConfigActivatesTheSignedBundle(t *testing.T) {
+	bin, err := exec.LookPath("opa")
+	if err != nil {
+		if os.Getenv("CI") != "" {
+			t.Fatal("opa binary is required in CI")
+		}
+		t.Skip("opa binary not on PATH")
+	}
+	f := newBundleFixture(t, "")
+	api, err := identity.NewPolicyBundleAPI(f.compiler, bundleToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := chi.NewRouter()
+	api.Register(router)
+	server := httptest.NewTLSServer(router)
+	t.Cleanup(server.Close)
+
+	dir := t.TempDir()
+	caPath, tokenPath := filepath.Join(dir, "ca.pem"), filepath.Join(dir, "token")
+	if err := os.WriteFile(caPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tokenPath, []byte(bundleToken), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := os.ReadFile("../../deploy/policies/opa/opa-sidecar.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, block, found := strings.Cut(string(manifest), "  config.yaml: |\n")
+	if !found {
+		t.Fatal("opa-sidecar.yaml has no config.yaml")
+	}
+	var config strings.Builder
+	for _, line := range strings.Split(block, "\n") {
+		config.WriteString(strings.TrimPrefix(line, "    ") + "\n")
+	}
+	rendered := strings.NewReplacer(
+		"https://identity-bundle:8443", server.URL,
+		"/etc/passage/opa-bundle/ca.pem", caPath,
+		"/etc/passage/opa-bundle/token", tokenPath,
+		"min_delay_seconds: 10", "min_delay_seconds: 1",
+		"max_delay_seconds: 20", "max_delay_seconds: 2",
+		"persist: true", "persist: false",
+	).Replace(config.String())
+	configPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(rendered), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	publicPEM, err := os.ReadFile(f.pubPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := listener.Addr().String()
+	_ = listener.Close()
+	cmd := exec.Command(bin, "run", "--server", "--addr", addr, "--config-file", configPath)
+	cmd.Env = append(os.Environ(), "OPA_BUNDLE_PUBLIC_KEY="+strings.ReplaceAll(strings.TrimSpace(string(publicPEM)), "\n", `\n`))
+	var logs bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &logs, &logs
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+
+	query := `{"input":{"subject":{"tenant_id":"` + f.tenantA + `","user_id":"subject-` + f.tenantA + `"},"action":"GET","resource":"/v1/identity/users"}}`
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := http.Post("http://"+addr+"/v1/data/authz/decision/allow", "application/json", strings.NewReader(query))
+		if err == nil {
+			body, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if strings.Contains(string(body), `"result":true`) {
+				return
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	t.Fatal(fmt.Sprintf("sidecar never activated the signed bundle\n%s", logs.String()))
 }

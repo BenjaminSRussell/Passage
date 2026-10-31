@@ -6,7 +6,9 @@ data:
   config.yaml: |
     services:
       identity:
-        url: http://identity:8080
+        url: https://identity-bundle:8443
+        tls:
+          ca_cert: /etc/passage/opa-bundle/ca.pem
         credentials:
           bearer:
             token_path: /etc/passage/opa-bundle/token
@@ -23,6 +25,4 @@ data:
     keys:
       identity-policy:
         algorithm: RS256
-        key: /etc/passage/opa-bundle/public.pem
-    decision_logs:
-      console: true
+        key: "${OPA_BUNDLE_PUBLIC_KEY}"
