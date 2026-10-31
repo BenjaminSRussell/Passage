@@ -131,6 +131,7 @@
       {"resource": "/v1/ledger/ledgers/*/account-mappings", "methods": ["POST"]}
     ]},
     "Calculate tax": {"permissions": [{"resource": "/v1/tax/calculate", "methods": ["POST"]}]},
+    "Calculate withholding tax": {"permissions": [{"resource": "/v1/tax/withholding/calculate", "methods": ["POST"]}]},
     "period.check": {"permissions": [
       {"resource": "/v1/close/period-statuses:check", "methods": ["POST"]},
       {"resource": "/v1/close/periods:resolve", "methods": ["GET"]}

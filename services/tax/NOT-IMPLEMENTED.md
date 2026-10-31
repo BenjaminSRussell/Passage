@@ -11,7 +11,7 @@ Slice A ships the tax engine, provider failover, settlement reconciliation, the 
 | AC6: contracts and chart | partial | `api/openapi.yaml` is a minimal duty-annotated stub; full OpenAPI schemas, AsyncAPI, Helm chart and Dockerfile are slice B (no events or deployment artefacts yet) |
 | Deliverable 1: determination model | partial | groups x item groups, effective-dated rates, exemption certificates and brackets are in the engine; the jurisdiction hierarchy and persistence are slice B |
 | Deliverable 2: calculation | built | inclusive and exclusive, compound, rounding, reverse charge, use tax, partial recoverability |
-| Deliverable 3: withholding tax and reporting hooks | slice B | needs the store and the BR-13.8 withholding engine |
+| Deliverable 3: withholding tax and reporting hooks | partial | stateless `POST /v1/tax/withholding/calculate` is built (rates, thresholds, rounding); the store, 1099 / Form 26AS reporting hooks and certificate numbering are slice B |
 | Deliverable 4: provider adapters | partial | `TaxProvider` interface and the internal engine as default; Avalara and Vertex adapters need Vault credentials and the store |
 | Deliverable 5: settlement job, VAT return, ESL, Intrastat and SAF-T extracts | partial | settlement domain only; the job, extracts and statutory formats need the store and ledger |
 | Deliverables 6, 7, 8: Intrastat master data and journal, VAT recovery policies, withholding remittance runs | slice B | need the store, migrations and numbering for gap-free certificates |

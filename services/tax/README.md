@@ -27,6 +27,10 @@ The request carries the document and an inline `config` (tax groups, item groups
 
 Rounding: `per_line` rounds each line's tax per code; `per_document` rounds the code total once and distributes it to lines by largest remainder. For price-inclusive lines the base is the gross less the rounded taxes, so base plus taxes always equals the gross and the document tax equals the rounded sum of unrounded taxes. Brackets on inclusive lines are evaluated on the gross.
 
+### Withholding
+
+`POST /v1/tax/withholding/calculate` (duty `Calculate withholding tax`) is stateless like calculate. Body: `currency`, `party_type` (`vendor` or `customer`), `payment_date`, `code`, `gross_amount` (positive), `paid_to_date` (cumulative paid to this party this year before this payment, default 0) and inline `codes` (`code`, `jurisdiction`, `income_type`, effective-dated `rates` with `rate_pct`, optional `threshold` and `threshold_mode`). With a threshold, `excess` (default) withholds only on the part of the cumulative amount above it; `all` withholds on the whole payment once the cumulative amount exceeds it. Tax is rounded to the currency minor unit. Response: `taxable_base`, `withholding_amount`, `net_payable`, `rate_pct` and `determination_trace`. Errors: TAX-0001 (no rate on the date), TAX-0002 (rate outside 0 to 100 or overlapping rates), TAX-0003 (unknown code), COM-0001. Payables calls it with a signed service token whose role holds the duty; grant it in the role seed when payables is wired.
+
 Naming: the PRD calls the chart `passage-tax`; existing charts are named after the service, so the chart is `charts/tax` (slice B).
 
 ## Error codes

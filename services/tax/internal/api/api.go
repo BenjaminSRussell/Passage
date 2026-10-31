@@ -23,6 +23,8 @@ import (
 const (
 	readyTimeout  = 500 * time.Millisecond
 	dutyCalculate = "Calculate tax"
+
+	dutyWithholding = "Calculate withholding tax"
 )
 
 type Pinger interface {
@@ -68,6 +70,25 @@ func New(db Pinger, providers map[string]domain.TaxProvider, providerTimeout tim
 func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutyCalculate)).Post("/v1/tax/calculate", a.calculate)
+	r.With(authz.RequireDuty(dutyWithholding)).Post("/v1/tax/withholding/calculate", a.withholding)
+}
+
+func (a *API) withholding(w http.ResponseWriter, r *http.Request) {
+	if !validTenant(w, r) {
+		return
+	}
+	var req domain.WithholdingRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		a.reject(w, r, err)
+		return
+	}
+	res, err := domain.CalculateWithholding(req)
+	if err != nil {
+		a.reject(w, r, err)
+		return
+	}
+	a.calculations.Add(1)
+	httpx.JSON(w, http.StatusOK, res)
 }
 
 func (a *API) ready(w http.ResponseWriter, r *http.Request) {
