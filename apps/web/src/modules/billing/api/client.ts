@@ -179,7 +179,8 @@ export type RatableBasis = (typeof RATABLE_BASES)[number];
 
 export interface ObligationInput {
   id: string;
-  ssp: string;
+  /** Omitted for RESIDUAL: the service derives it as the price less the other SSPs. */
+  ssp?: string;
   sspSource: SspSource;
   method: RecognitionMethod;
   termStart?: string;
@@ -410,7 +411,8 @@ export interface RevenueContract extends RevenueContractSummary {
 
 export interface ContractObligationInput {
   productId: string;
-  ssp: string;
+  /** Omitted for RESIDUAL: the service derives it as the price less the other SSPs. */
+  ssp?: string;
   sspSource: SspSource;
   method: RecognitionMethod;
   termStart?: string;

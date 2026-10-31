@@ -32,6 +32,9 @@ export const SSP_SOURCE_LABELS: Record<SspSource, string> = {
   RESIDUAL: "Residual",
 };
 
+/** The service derives a RESIDUAL SSP, so the forms do not ask for it. */
+export const RESIDUAL_SSP_HINT = "The standalone selling price is the contract price less the other obligations' prices.";
+
 export const PERIOD = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 export const CONTRACT_STATUS_LABELS: Record<ContractStatus, string> = {

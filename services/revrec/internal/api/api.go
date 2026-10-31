@@ -179,7 +179,7 @@ func (a *API) preview(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := previewResponse{Currency: req.Currency, TransactionPrice: fixed(price.Value, req.Currency), ResidualRule: req.ResidualRule, RatableBasis: req.RatableBasis}
 	for i, o := range allocated {
-		item := allocationDTO{ID: o.ID, SSP: fixed(o.SSP, req.Currency), SSPSource: o.SSPSource, Method: o.Method, Allocated: fixed(o.Allocated, req.Currency)}
+		item := allocationDTO{ID: o.ID, SSP: sspText(o.SSP, req.Currency), SSPSource: o.SSPSource, Method: o.Method, Allocated: fixed(o.Allocated, req.Currency)}
 		if t := terms[i]; t != nil {
 			periods, err := domain.RatableSchedule(money.Amount{Value: o.Allocated, Currency: req.Currency}, t[0], t[1], req.RatableBasis)
 			if err != nil {
@@ -214,7 +214,15 @@ func toDomain(in []obligationDTO, fields map[string]string) ([]domain.Obligation
 		if decimalText.MatchString(o.SSP) {
 			ssp = decimal.RequireFromString(o.SSP)
 		}
-		if !ssp.IsPositive() && o.SSPSource != domain.SSPResidual {
+		// A RESIDUAL SSP is derived, so its ssp may be omitted; one that is sent
+		// must still be a decimal.
+		switch {
+		case o.SSPSource == domain.SSPResidual:
+			if o.SSP != "" && !decimalText.MatchString(o.SSP) {
+				fields[key("ssp")] = "must be omitted or a non-negative decimal with at most 6 fraction digits for RESIDUAL"
+				valid = false
+			}
+		case !ssp.IsPositive():
 			fields[key("ssp")] = "must be a positive decimal with at most 6 fraction digits"
 			valid = false
 		}
@@ -275,4 +283,14 @@ func writeFields(w http.ResponseWriter, r *http.Request, fields map[string]strin
 
 func fixed(v decimal.Decimal, currency string) string {
 	return v.StringFixed(money.MinorUnits(currency))
+}
+
+// sspText renders an SSP at the currency's minor unit, or with every fraction
+// digit it carries beyond that: SSPs take up to 6 fraction digits, and so does
+// a derived RESIDUAL SSP (the price less the other SSPs).
+func sspText(v decimal.Decimal, currency string) string {
+	if exp := money.MinorUnits(currency); !v.Round(exp).Equal(v) {
+		return v.String()
+	}
+	return fixed(v, currency)
 }

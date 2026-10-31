@@ -97,6 +97,8 @@ func TestPreview_ValidationProblems(t *testing.T) {
 		{"ratable without term", strings.Replace(bundleBody, `"termEnd": "2028-03-09"`, `"termEnd": null`, 1), "COM-0001", "obligations[2].term"},
 		{"zero ssp", strings.Replace(bundleBody, `"ssp": "8000"`, `"ssp": "0"`, 1), "COM-0001", "obligations[0].ssp"},
 		{"exponent ssp", strings.Replace(bundleBody, `"ssp": "8000"`, `"ssp": "8e3"`, 1), "COM-0001", "obligations[0].ssp"},
+		{"residual ssp not a decimal", strings.Replace(bundleBody, `"ssp": "1500", "sspSource": "EXPLICIT"`, `"ssp": "abc", "sspSource": "RESIDUAL"`, 1), "COM-0001", "obligations[1].ssp"},
+		{"residual ssp negative", strings.Replace(bundleBody, `"ssp": "1500", "sspSource": "EXPLICIT"`, `"ssp": "-5", "sspSource": "RESIDUAL"`, 1), "COM-0001", "obligations[1].ssp"},
 		{"duplicate id", strings.Replace(bundleBody, `"id": "installation"`, `"id": "hardware"`, 1), "COM-0001", "obligations[1].id"},
 		{"bad residual rule", strings.Replace(bundleBody, `"currency": "USD",`, `"currency": "USD", "residualRule": "MIDDLE",`, 1), "COM-0001", "residualRule"},
 		{"no obligations", `{"currency":"USD","transactionPrice":"1","obligations":[]}`, "COM-0001", "obligations"},
@@ -145,6 +147,32 @@ func TestPreview_RequiresDuty(t *testing.T) {
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status %d, want 403", rec.Code)
+	}
+}
+
+// TestPreview_ResidualSSPOmittedAndPrecise: a RESIDUAL obligation needs no ssp,
+// and its derived SSP (10800.00 - 8000 - 2500.123456) keeps every fraction
+// digit instead of being rounded to cents, as does the explicit 2500.123456.
+func TestPreview_ResidualSSPOmittedAndPrecise(t *testing.T) {
+	body := strings.Replace(bundleBody, `"ssp": "1500", "sspSource": "EXPLICIT"`, `"sspSource": "RESIDUAL"`, 1)
+	body = strings.Replace(body, `"ssp": "2500"`, `"ssp": "2500.123456"`, 1)
+	rec := serve(t, body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	var got struct {
+		Obligations []struct {
+			SSP string `json:"ssp"`
+		} `json:"obligations"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"8000.00", "299.876544", "2500.123456"}
+	for i, o := range got.Obligations {
+		if o.SSP != want[i] {
+			t.Errorf("obligation %d ssp %s, want %s", i, o.SSP, want[i])
+		}
 	}
 }
 

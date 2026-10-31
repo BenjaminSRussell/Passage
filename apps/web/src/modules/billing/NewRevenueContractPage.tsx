@@ -18,7 +18,7 @@ import {
   type RevenueContractInput,
   type SspSource,
 } from "./api/client";
-import { BASIS_HINT, BASIS_LABELS, CURRENCY, DAY, DECIMAL, METHOD_LABELS, SSP_SOURCE_LABELS, today, UUID } from "./format";
+import { BASIS_HINT, BASIS_LABELS, CURRENCY, DAY, DECIMAL, METHOD_LABELS, RESIDUAL_SSP_HINT, SSP_SOURCE_LABELS, today, UUID } from "./format";
 import styles from "./pages.module.css";
 
 type Errors = Record<string, string>;
@@ -78,8 +78,9 @@ export function validateContract(v: ContractValues): Errors {
   v.obligations.forEach((o, i) => {
     const at = (f: string) => `obligations[${i}].${f}`;
     if (!UUID.test(o.productId.trim())) errors[at("productId")] = "Enter the product id (a UUID).";
-    if (!DECIMAL.test(o.ssp.trim()) || Number(o.ssp) <= 0) errors[at("ssp")] = "Enter a standalone selling price above zero.";
+    // A residual SSP is derived by the service, so the form does not ask for it.
     if (o.sspSource === "RESIDUAL") residual += 1;
+    else if (!DECIMAL.test(o.ssp.trim()) || Number(o.ssp) <= 0) errors[at("ssp")] = "Enter a standalone selling price above zero.";
     if (o.method === "RATABLE" && (!DAY.test(o.termStart) || !DAY.test(o.termEnd) || o.termEnd < o.termStart)) {
       errors[at("term")] = "A ratable obligation needs a term start and an end on or after it.";
     }
@@ -102,7 +103,7 @@ export function toContractInput(v: ContractValues): RevenueContractInput {
     obligations: v.obligations.map(
       (o): ContractObligationInput => ({
         productId: o.productId.trim(),
-        ssp: o.ssp.trim(),
+        ...(o.sspSource === "RESIDUAL" ? {} : { ssp: o.ssp.trim() }),
         sspSource: o.sspSource,
         method: o.method,
         ...(o.method === "RATABLE" ? { termStart: o.termStart, termEnd: o.termEnd } : {}),
@@ -231,8 +232,7 @@ export function NewRevenueContractPage() {
             <fieldset key={i} className={styles.lineSet}>
               <legend className={styles.groupsLegend}>{`Obligation ${i + 1}`}</legend>
               {text(i, "productId", "Product id", { mono: true })}
-              {text(i, "ssp", "Standalone selling price", { mono: true, decimal: true })}
-              <FormField id={`rc-ob-${i}-source`} label="SSP source">
+              <FormField id={`rc-ob-${i}-source`} label="SSP source" hint={o.sspSource === "RESIDUAL" ? RESIDUAL_SSP_HINT : undefined}>
                 {(c) => (
                   <Select {...c} value={o.sspSource} onChange={(e) => setObligation(i, { sspSource: e.target.value as SspSource })}>
                     {SSP_SOURCES.map((s) => (
@@ -243,6 +243,7 @@ export function NewRevenueContractPage() {
                   </Select>
                 )}
               </FormField>
+              {o.sspSource === "RESIDUAL" ? null : text(i, "ssp", "Standalone selling price", { mono: true, decimal: true })}
               <FormField id={`rc-ob-${i}-method`} label="Recognition">
                 {(c) => (
                   <Select {...c} value={o.method} onChange={(e) => setObligation(i, { method: e.target.value as RecognitionMethod })}>

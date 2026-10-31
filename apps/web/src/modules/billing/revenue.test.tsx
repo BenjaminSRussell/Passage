@@ -295,8 +295,10 @@ describe("New revenue contract", () => {
   it("checks the form before calling the service", () => {
     const v = { ...emptyContract("2027-03-10"), transactionPrice: "10800" };
     v.obligations = [
-      { productId: "x", ssp: "0", sspSource: "RESIDUAL", method: "RATABLE", termStart: "2027-03-10", termEnd: "2027-03-01", satisfiedOn: "" },
-      { productId: PRODUCT, ssp: "1", sspSource: "RESIDUAL", method: "POINT_IN_TIME", termStart: "", termEnd: "", satisfiedOn: "" },
+      { productId: "x", ssp: "0", sspSource: "EXPLICIT", method: "RATABLE", termStart: "2027-03-10", termEnd: "2027-03-01", satisfiedOn: "" },
+      // A residual SSP is derived by the service: an empty one is not an error.
+      { productId: PRODUCT, ssp: "", sspSource: "RESIDUAL", method: "POINT_IN_TIME", termStart: "", termEnd: "", satisfiedOn: "" },
+      { productId: PRODUCT, ssp: "", sspSource: "RESIDUAL", method: "POINT_IN_TIME", termStart: "", termEnd: "", satisfiedOn: "2027-03-10" },
     ];
     expect(Object.keys(validateContract(v)).sort()).toEqual([
       "customerId",
@@ -308,8 +310,32 @@ describe("New revenue contract", () => {
       "obligations[1].satisfiedOn",
       "orderId",
     ]);
-    const input = toContractInput({ ...v, obligations: [{ ...v.obligations[1], satisfiedOn: "2027-03-10", termStart: "2027-01-01" }] });
-    expect(input.obligations[0]).toEqual({ productId: PRODUCT, ssp: "1", sspSource: "RESIDUAL", method: "POINT_IN_TIME", satisfiedOn: "2027-03-10" });
+    const input = toContractInput({ ...v, obligations: [{ ...v.obligations[1], ssp: "1", satisfiedOn: "2027-03-10", termStart: "2027-01-01" }] });
+    expect(input.obligations[0]).toEqual({ productId: PRODUCT, sspSource: "RESIDUAL", method: "POINT_IN_TIME", satisfiedOn: "2027-03-10" });
+  });
+
+  it("does not ask for a residual obligation's SSP and sends none", async () => {
+    server.handler = (url, init) => {
+      if (url.pathname === "/api/v1/revrec/contracts" && init.method === "POST") return json(201, contract);
+      if (isRollForward(url)) return json(200, contractMarch);
+      return json(200, contract);
+    };
+    const { container } = renderAt("/billing/revenue-contracts/new");
+    fill("Legal entity id", LE);
+    fill("Sales order id", ORDER);
+    fill("Customer id", CUST);
+    fill("Contract price", "10800.00");
+    fill("Product id", PRODUCT);
+    fireEvent.change(screen.getByLabelText("SSP source"), { target: { value: "RESIDUAL" } });
+    expect(screen.queryByLabelText("Standalone selling price")).not.toBeInTheDocument();
+    expect(screen.getByText(/contract price less the other obligations' prices/)).toBeInTheDocument();
+    fill("Transfer date", "2027-03-10");
+    expect(pageViolations(container)).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Create contract" }));
+    expect(await screen.findByRole("heading", { name: "Revenue contract" })).toBeInTheDocument();
+    const post = server.calls.find((c) => c.method === "POST");
+    expect(post?.body).toMatchObject({ obligations: [{ productId: PRODUCT, sspSource: "RESIDUAL", method: "POINT_IN_TIME" }] });
+    expect(post?.body).not.toHaveProperty("obligations.0.ssp");
   });
 
   it("creates a contract with an Idempotency-Key and opens it", async () => {
