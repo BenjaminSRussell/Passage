@@ -510,11 +510,16 @@ func (L *ledger) check(t int, rest, receipts []Requirement) error {
 		if !need.IsPositive() {
 			return nil
 		}
+		// Supply dated on or before netted is already netted against need (the
+		// walk adds what is due by t; negative days subtract what is waited
+		// for), so the period window below must not count it again.
+		netted := t
 		if it.NegativeDays > 0 {
 			// FR-22.2 negative days (AX semantics): supply already scheduled
 			// within NegativeDays after the shortage is waited for instead of
 			// planning a new order; finish raises Advance for it.
 			limit := t + it.NegativeDays
+			netted = limit
 			for _, r := range receipts {
 				if r.Date > limit {
 					break
@@ -538,7 +543,7 @@ func (L *ledger) check(t int, rest, receipts []Requirement) error {
 			// cumulative shortfall on any day of the window, so supply that
 			// arrives after a requirement in the window does not cover it. The
 			// order never covers less than what is short today.
-			need = decimal.Max(need, L.windowShortfall(need, t+it.PeriodDays-1, rest, receipts))
+			need = decimal.Max(need, L.windowShortfall(need, netted, t+it.PeriodDays-1, rest, receipts))
 		}
 		return L.order(t, need)
 	case CoverageMinMax:
@@ -556,8 +561,9 @@ func (L *ledger) check(t int, rest, receipts []Requirement) error {
 
 // windowShortfall walks the days up to limit from a shortfall of need and
 // returns the largest cumulative shortfall: requirements in rest add to it,
-// receipts and pending planned supply reduce it from their own day on.
-func (L *ledger) windowShortfall(need decimal.Decimal, limit int, rest, receipts []Requirement) decimal.Decimal {
+// receipts and pending planned supply dated after netted (supply on or before
+// it is already in need) reduce it from their own day on.
+func (L *ledger) windowShortfall(need decimal.Decimal, netted, limit int, rest, receipts []Requirement) decimal.Decimal {
 	type move struct {
 		day int
 		qty decimal.Decimal
@@ -569,12 +575,12 @@ func (L *ledger) windowShortfall(need decimal.Decimal, limit int, rest, receipts
 		}
 	}
 	for _, r := range receipts {
-		if r.Date <= limit {
+		if r.Date > netted && r.Date <= limit {
 			moves = append(moves, move{r.Date, r.Qty.Neg()})
 		}
 	}
 	for _, p := range L.pending {
-		if p.date <= limit {
+		if p.date > netted && p.date <= limit {
 			moves = append(moves, move{p.date, p.qty.Neg()})
 		}
 	}

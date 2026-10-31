@@ -3,21 +3,31 @@ package domain
 import (
 	"fmt"
 	"math/rand/v2"
+	"os"
 	"runtime"
 	"runtime/debug"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/shopspring/decimal"
 )
 
-// mrp50k generates the mrp-50k dataset of the PRD test plan (issue #22, AC2 and
-// AC-22.3): 50,000 items on a 5-level BOM, 200,000 sales lines over 12 monthly
-// periods, open purchase orders, and a mix of coverage codes and lot rules. The
-// generator is seeded, so every call returns the same snapshot.
-func mrp50k() []Item {
+// EnvScaleItems sets the size of the scale run. Unset, a 5,000-item snapshot
+// of the same shape keeps determinism covered in every test run; the issue's
+// scale (AC2, AC-22.3) is PASSAGE_PLANNING_SCALE_ITEMS=50000, which peaks near
+// 5.5 GB RSS and takes about 40 s, so it is opt-in.
+const EnvScaleItems = "PASSAGE_PLANNING_SCALE_ITEMS"
+
+// mrpSnapshot generates the mrp-50k dataset of the PRD test plan (issue #22,
+// AC2 and AC-22.3) at n items (a multiple of 20): a 5-level BOM holding 10%,
+// 20%, 20%, 25% and 25% of the items, 4n sales lines over 12 monthly periods,
+// open purchase orders, and a mix of coverage codes and lot rules; n = 50,000
+// gives 200,000 sales lines. The generator is seeded, so every call with the
+// same n returns the same snapshot.
+func mrpSnapshot(n int) []Item {
 	rng := rand.New(rand.NewPCG(22, 2026))
-	levels := []int{5000, 10000, 10000, 12500, 12500}
+	levels := []int{n / 10, n / 5, n / 5, n / 4, n / 4}
 	ids := make([][]string, len(levels))
 	var items []Item
 	for lvl, n := range levels {
@@ -85,7 +95,7 @@ func mrp50k() []Item {
 	for i := range items {
 		index[items[i].ID] = i
 	}
-	for k := 0; k < 200000; k++ {
+	for k := 0; k < 4*n; k++ {
 		var id string
 		if rng.IntN(10) < 7 {
 			id = ids[0][rng.IntN(levels[0])]
@@ -99,16 +109,25 @@ func mrp50k() []Item {
 	return items
 }
 
-// TestRun_Scale50kDeterministic is AC2 and AC-22.3 at engine level: the
-// 50k-item, 12-period, 5-level plan runs three times (the second with the
-// snapshot in reverse order) well inside 10 minutes, with one plan hash, and
-// the explain tree of every planned order covers its whole quantity (AC3).
-// Database persistence of the result is not part of this measurement.
+// TestRun_Scale50kDeterministic is AC2 and AC-22.3 at engine level when run
+// with PASSAGE_PLANNING_SCALE_ITEMS=50000: the 50k-item, 12-period, 5-level
+// plan runs three times (the second with the snapshot in reverse order) well
+// inside 10 minutes, with one plan hash, and the explain tree of every planned
+// order covers its whole quantity (AC3). Without the variable it runs the same
+// checks on a 5,000-item snapshot. Database persistence of the result is not
+// part of this measurement.
 func TestRun_Scale50kDeterministic(t *testing.T) {
 	if testing.Short() {
-		t.Skip("50k-item plan in -short mode")
+		t.Skip("scale plan in -short mode")
 	}
-	items := mrp50k()
+	n := 5000
+	if v := os.Getenv(EnvScaleItems); v != "" {
+		var err error
+		if n, err = strconv.Atoi(v); err != nil || n < 20 || n%20 != 0 {
+			t.Fatalf("%s=%q: want a positive multiple of 20", EnvScaleItems, v)
+		}
+	}
+	items := mrpSnapshot(n)
 	index := make(map[string]*Item, len(items))
 	sales := 0
 	for i := range items {
@@ -123,8 +142,8 @@ func TestRun_Scale50kDeterministic(t *testing.T) {
 	for _, it := range items {
 		perLevel[llc[it.ID]]++
 	}
-	if len(items) != 50000 || sales != 200000 || len(perLevel) != 5 {
-		t.Fatalf("dataset: %d items, %d sales lines, low-level codes %v; want 50,000, 200,000 and five levels", len(items), sales, perLevel)
+	if len(items) != n || sales != 4*n || len(perLevel) != 5 {
+		t.Fatalf("dataset: %d items, %d sales lines, low-level codes %v; want %d, %d and five levels", len(items), sales, perLevel, n, 4*n)
 	}
 	// The result of one run holds about 2 GiB (2.2 million planned orders);
 	// a soft limit keeps the test runner's footprint near the PRD's 8 GB
@@ -155,7 +174,7 @@ func TestRun_Scale50kDeterministic(t *testing.T) {
 			if len(r.Orders) == 0 {
 				t.Fatal("the dataset planned no orders")
 			}
-			assertPeggingExplainsOrders(t, "mrp-50k", r)
+			assertPeggingExplainsOrders(t, fmt.Sprintf("mrp-%d", n), r)
 		}
 	}
 	var mem runtime.MemStats

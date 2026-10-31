@@ -253,6 +253,25 @@ func TestRun_PeriodCoverageIgnoresSupplyAfterTheShortfall(t *testing.T) {
 	}
 }
 
+// A receipt waited for under negative days is netted once: the period window
+// must not subtract it a second time. 30 short on day 5, PO-1 10 on day 6
+// (inside negative days), 5 more due day 8: one order of 20 + 5 = 25.
+func TestRun_PeriodCoverageNetsWaitedReceiptOnce(t *testing.T) {
+	items := []Item{{ID: "P-3", Coverage: CoveragePeriod, PeriodDays: 14, NegativeDays: 2, OrderType: OrderPurchase,
+		Demand: []Requirement{
+			{Ref: "S-1", RefType: RefSales, Date: 5, Qty: d("30"), Priority: PrioritySales},
+			{Ref: "S-2", RefType: RefSales, Date: 8, Qty: d("5"), Priority: PrioritySales},
+		},
+		Receipts: []Requirement{{Ref: "PO-1", RefType: "purchase-line", Date: 6, Qty: d("10")}}}}
+	r, err := Run(0, items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Orders) != 1 || !r.Orders[0].Qty.Equal(d("25")) || r.Orders[0].DeliveryDate != 5 {
+		t.Fatalf("orders = %+v; want one order of 25 due day 5", r.Orders)
+	}
+}
+
 func TestRun_PeriodCoverageGroupsDemandInWindow(t *testing.T) {
 	items := []Item{{ID: "P-1", Coverage: CoveragePeriod, PeriodDays: 7, OrderType: OrderPurchase, LeadTimeDays: 0,
 		Demand: []Requirement{

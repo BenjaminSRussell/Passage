@@ -56,6 +56,10 @@ type textbookOrder struct {
 	Qty           string `json:"qty"`
 	ReleasePeriod int    `json:"releasePeriod"`
 	ReceiptPeriod int    `json:"receiptPeriod"`
+	// FuturesPeriod and DelayPeriods are set for an order expected later than
+	// its receipt (a past-due release, or a late component pegged to it).
+	FuturesPeriod *int `json:"futuresPeriod"`
+	DelayPeriods  int  `json:"delayPeriods"`
 }
 
 // textbookToday is period 1; period p is day 7p, so a lead time of n periods is
@@ -133,11 +137,16 @@ func textbookItems(t *testing.T, s textbookScenario) []Item {
 	return items
 }
 
-// plannedRows renders orders as comparable rows "item qty order-day delivery-day".
+// plannedRows renders orders as comparable rows "item qty order-day
+// delivery-day futures-day delay-days", with "-" for no futures date.
 func plannedRows(orders []PlannedOrder) []string {
 	rows := make([]string, 0, len(orders))
 	for _, o := range orders {
-		rows = append(rows, fmt.Sprintf("%s %s %d %d", o.ItemID, o.Qty, o.OrderDate, o.DeliveryDate))
+		futures := "-"
+		if o.FuturesDate != nil {
+			futures = strconv.Itoa(*o.FuturesDate)
+		}
+		rows = append(rows, fmt.Sprintf("%s %s %d %d %s %d", o.ItemID, o.Qty, o.OrderDate, o.DeliveryDate, futures, o.DelayDays))
 	}
 	slices.Sort(rows)
 	return rows
@@ -146,7 +155,11 @@ func plannedRows(orders []PlannedOrder) []string {
 func expectedRows(want []textbookOrder) []string {
 	rows := make([]string, 0, len(want))
 	for _, o := range want {
-		rows = append(rows, fmt.Sprintf("%s %s %d %d", o.Item, o.Qty, textbookDay(o.ReleasePeriod), textbookDay(o.ReceiptPeriod)))
+		futures := "-"
+		if o.FuturesPeriod != nil {
+			futures = strconv.Itoa(textbookDay(*o.FuturesPeriod))
+		}
+		rows = append(rows, fmt.Sprintf("%s %s %d %d %s %d", o.Item, o.Qty, textbookDay(o.ReleasePeriod), textbookDay(o.ReceiptPeriod), futures, 7*o.DelayPeriods))
 	}
 	slices.Sort(rows)
 	return rows
