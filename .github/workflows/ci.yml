@@ -15,6 +15,10 @@ on:
       warehouse:
         type: boolean
         required: true
+      agents:
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -115,6 +119,33 @@ jobs:
           node-version: '24'
           cache: npm
           cache-dependency-path: apps/warehouse-mobile/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  # Wave 47: agent runtime, MCP gateway and the eval harness (gate thresholds,
+  # metrics, authorization and audit contract tests). `npm run eval` is not a
+  # step: it gates the deterministic baselines, which fail the thresholds by
+  # design until an agent predictor exists (evals/README.md).
+  agents:
+    name: agents (${{ matrix.package }})
+    if: inputs.agents
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [services/agents-ts, services/mcp-ts, evals]
+    defaults:
+      run:
+        working-directory: ${{ matrix.package }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: ${{ matrix.package }}/package-lock.json
       - run: npm ci
       - run: npm run typecheck
       - run: npm test

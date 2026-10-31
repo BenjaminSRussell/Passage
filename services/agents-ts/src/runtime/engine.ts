@@ -200,6 +200,7 @@ export async function runAgent(deps: RunDeps, req: RunRequest): Promise<RunResul
     decision: Decision,
     approverUserId: string | null,
     committedEntityRef: string | null = null,
+    why?: string,
   ): void => {
     seq += 1;
     actions.push(
@@ -213,15 +214,30 @@ export async function runAgent(deps: RunDeps, req: RunRequest): Promise<RunResul
         decision,
         decidedAt: deps.now(),
         committedEntityRef,
+        ...(why !== undefined ? { reason: why } : {}),
       }),
     );
+  };
+  // AC-47.3: once the model has proposed an action, every way out of the run
+  // leaves exactly one action row for it. `pending` holds what that row must
+  // say if the run ends before an explicit record (kill switch, a port that
+  // throws): DENIED with no approver until a decision exists, then the
+  // decision and its approver, so a human approval is never lost.
+  let pending: { tool: string; inputRedacted: string; decision: Decision; approver: string | null } | undefined;
+  const closePending = (output: unknown, why: string): void => {
+    if (pending === undefined || actions.length > 0) return;
+    record(pending.tool, pending.inputRedacted, output, pending.decision, pending.approver, null, why);
+  };
+  const killed = (why: string): RunResult => {
+    closePending({ killed: why }, "KILLED");
+    return finish("KILLED", undefined, why);
   };
 
   try {
     const prompt = pseudo.redact(req.prompt);
     assertNoPii(prompt);
     // AC-47.6: once halted, no provider call is made at all, not only no tool call.
-    if (halted()) return finish("KILLED", undefined, "kill switch activated");
+    if (halted()) return killed("kill switch activated");
     const response = await deps.provider.complete({
       system: req.agent.systemPrompt,
       user: prompt,
@@ -243,9 +259,10 @@ export async function runAgent(deps: RunDeps, req: RunRequest): Promise<RunResul
 
     const p = response.proposal;
     if (!p) return finish("FAILED", undefined, "model returned no proposal");
-    if (halted()) return finish("KILLED", undefined, "kill switch activated");
-
     const inputRedacted = pseudo.redact(JSON.stringify(p.args));
+    pending = { tool: p.tool, inputRedacted, decision: "DENIED", approver: null };
+    if (halted()) return killed("kill switch activated");
+
     const desc = deps.tools.describe(p.tool);
     if (!req.agent.allowedTools.includes(p.tool) || !desc) {
       record(p.tool, inputRedacted, { error: "not_allowed" }, "DENIED", null);
@@ -256,6 +273,7 @@ export async function runAgent(deps: RunDeps, req: RunRequest): Promise<RunResul
       return finish("FAILED", "AGT-0203", `you do not hold duty ${desc.requiredDuty} required by ${p.tool}`);
     }
     if (desc.approvalMode === "none") {
+      record(p.tool, inputRedacted, { error: "read_only" }, "DENIED", null);
       return finish("FAILED", undefined, `tool ${p.tool} is read-only and cannot be proposed`);
     }
 
@@ -278,7 +296,7 @@ export async function runAgent(deps: RunDeps, req: RunRequest): Promise<RunResul
     let decision: Decision = "AUTO";
     let approver: string | null = null;
     if (disposition === "PROPOSE") {
-      if (halted()) return finish("KILLED", undefined, "kill switch activated");
+      if (halted()) return killed("kill switch activated");
       moveTo("AWAITING_APPROVAL");
       const d = await deps.approvals.request({
         runId: req.runId,
@@ -300,8 +318,9 @@ export async function runAgent(deps: RunDeps, req: RunRequest): Promise<RunResul
       }
       decision = "APPROVED";
     }
+    pending = { ...pending, decision, approver };
 
-    if (halted()) return finish("KILLED", undefined, "kill switch activated before commit");
+    if (halted()) return killed("kill switch activated before commit");
     const out = await deps.tools.call(p.tool, args);
     if (!out.ok) {
       record(p.tool, inputRedacted, { error: out.code }, decision, approver);
@@ -313,6 +332,12 @@ export async function runAgent(deps: RunDeps, req: RunRequest): Promise<RunResul
     // Once the run has started it always ends in a terminal status: a provider,
     // inbox or tool port that throws fails the run instead of leaving it open.
     if (isTerminal(current())) throw err;
+    // A fixed output: the error message is not scanned for PII and stays off the row.
+    try {
+      closePending({ error: "port_error" }, "run failed before the action was recorded");
+    } catch {
+      // The row itself was refused (AGT-0210: raw PII in the input); no lawful row exists.
+    }
     if (err instanceof AgentError) return finish("FAILED", err.code, err.message);
     return finish("FAILED", undefined, err instanceof Error ? err.message : String(err));
   }

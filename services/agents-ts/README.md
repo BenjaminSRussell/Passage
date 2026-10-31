@@ -12,7 +12,7 @@ deterministic in tests.
 
 | Module | Responsibility |
 |---|---|
-| `src/runtime/engine.ts` | `runAgent`: one model turn and one proposal. Checks the kill switch, budget, eval and policy at start and the kill switch before every step, redacts prompts, calls the provider, enforces the per-run token cap, and routes the proposal through the policy. `approve_before_commit` tools always wait for a human; AUTO applies only to `suggest` tools. The AUTO and self-approval limits use the document amount from `RiskPort`, not the model's figure. A port that throws ends the run FAILED |
+| `src/runtime/engine.ts` | `runAgent`: one model turn and one proposal. Checks the kill switch, budget, eval and policy at start and the kill switch before every step, redacts prompts, calls the provider, enforces the per-run token cap, and routes the proposal through the policy. `approve_before_commit` tools always wait for a human; AUTO applies only to `suggest` tools. The AUTO and self-approval limits use the document amount from `RiskPort`, not the model's figure. A port that throws ends the run FAILED. Once the model has proposed an action, every way out of the run (commit, rejection, denial, kill switch, a port that throws) leaves exactly one action row for it, keeping the approver of any human decision (AC-47.3; `test/audit-coverage.test.ts`) |
 | `src/domain/run.ts` | BR-47.1 state machine: PLANNING, ACTING, AWAITING_APPROVAL, COMMITTED, REJECTED, FAILED, KILLED. Terminal states cannot be left |
 | `src/domain/policy.ts` | `decideDisposition` (BR-47.2): OFF blocks, SUGGEST proposes, AUTO only when confidence, amount, vendor risk and SoD all pass. `validatePolicy` enforces the parameter ranges. `isApprovalExpired` (BR-47.3). `checkCashApplication` (BR-47.10): at most 20 invoices per payment (1 to 50 allowed), write-off within tolerance, never more than the payment; with open amounts, no allocation above its invoice's open amount and no write-off above what stays open |
 | `src/domain/approval.ts` | Approval rules (BR-47.3, 9.47.5): `agent.approval_expiry_h` range check, the hourly sweeper's selection `expiredApprovals`, and `decideApproval` for the decision endpoint (approver duty AGT-0203, expiry AGT-0208, self-approval above the limit AGT-0209) |
@@ -50,6 +50,14 @@ npm run build
 ```
 
 The tests run without a database or network. Ports are faked in `test/fakes.ts`.
+CI runs typecheck, tests and build for this package, `services/mcp-ts` and
+`evals` (the `agents` job in `.github/workflows/ci.yml`).
+
+Wave 47 proof tests: `test/audit-coverage.test.ts` (one audit row per
+proposal on every path, and a seeded 5,000-run property check that no tool is
+called past the invoker's duties or the allow-list), `test/cost-guard.test.ts`
+(a per-tenant ledger over the engine: alert at 80%, alert at 100%, start
+rejected with AGT-0202 and no provider call, tenants isolated).
 
 ## Wave reference
 
