@@ -278,6 +278,9 @@ const (
 	modeDropOnQuit
 	modeRejectRcpt
 	modeTempRcpt
+	modeRejectAuth
+	modeRejectMail
+	modeRejectData
 )
 
 type fakeSMTP struct {
@@ -344,7 +347,11 @@ func (f *fakeSMTP) serve(conn net.Conn) {
 				f.data = data.String()
 				f.mu.Unlock()
 				inData = false
-				say("250 queued")
+				if f.mode == modeRejectData {
+					say("554 message rejected")
+				} else {
+					say("250 queued")
+				}
 				continue
 			}
 			data.WriteString(line + "\n")
@@ -371,9 +378,17 @@ func (f *fakeSMTP) serve(conn net.Conn) {
 			f.mu.Lock()
 			f.auth = strings.ReplaceAll(string(raw), "\x00", "|")
 			f.mu.Unlock()
-			say("235 ok")
+			if f.mode == modeRejectAuth {
+				say("535 authentication failed")
+			} else {
+				say("235 ok")
+			}
 		case strings.HasPrefix(line, "MAIL"):
-			say("250 ok")
+			if f.mode == modeRejectMail {
+				say("550 sender not allowed")
+			} else {
+				say("250 ok")
+			}
 		case strings.HasPrefix(line, "RCPT"):
 			f.mu.Lock()
 			f.rcpt = line
@@ -593,7 +608,7 @@ func TestPermanentErrorClassification(t *testing.T) {
 		defer srv.Close()
 		return NewWebhookSender(WebhookConfig{URL: srv.URL, Token: "t"}, srv.Client()).Send(context.Background(), Message{})
 	}
-	for code, want := range map[int]bool{400: true, 404: true, 408: false, 429: false, 500: false, 503: false} {
+	for code, want := range map[int]bool{400: true, 410: true, 413: true, 422: true, 401: false, 403: false, 404: false, 408: false, 429: false, 500: false, 503: false} {
 		if got := IsPermanent(status(code)); got != want {
 			t.Fatalf("webhook %d permanent=%v want %v", code, got, want)
 		}
@@ -610,7 +625,7 @@ func TestPermanentErrorClassification(t *testing.T) {
 }
 
 func TestSMTPReplyCodesDecidePermanence(t *testing.T) {
-	for mode, want := range map[smtpMode]bool{modeRejectRcpt: true, modeTempRcpt: false} {
+	for mode, want := range map[smtpMode]bool{modeRejectRcpt: true, modeTempRcpt: false, modeRejectData: true, modeRejectAuth: false, modeRejectMail: false} {
 		f := startFakeSMTP(t, mode, nil)
 		err := NewSMTPSender(f.config(TLSNone)).Send(context.Background(), Message{To: "to@example.test", Subject: "s"})
 		if err == nil || IsPermanent(err) != want || errorClass(err) == "send error" {

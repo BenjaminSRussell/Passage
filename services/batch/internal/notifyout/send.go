@@ -37,6 +37,22 @@ func IsPermanent(err error) bool {
 	return errors.As(err, &p)
 }
 
+func rejectedByServer(err error) error {
+	var tpe *textproto.Error
+	if errors.As(err, &tpe) && tpe.Code >= 500 {
+		return permanentError{err}
+	}
+	return err
+}
+
+func permanentStatus(code int) bool {
+	switch code {
+	case http.StatusBadRequest, http.StatusGone, http.StatusRequestEntityTooLarge, http.StatusUnprocessableEntity:
+		return true
+	}
+	return false
+}
+
 type statusError struct{ code int }
 
 func (e statusError) Error() string { return fmt.Sprintf("webhook send: status %d", e.code) }
@@ -113,10 +129,6 @@ func (s *SMTPSender) Send(ctx context.Context, msg Message) error {
 	if err := s.deliver(ctx, from, to, raw); err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return fmt.Errorf("smtp send: %w", ctxErr)
-		}
-		var tpe *textproto.Error
-		if errors.As(err, &tpe) && tpe.Code >= 500 {
-			return permanentError{fmt.Errorf("smtp send: %w", err)}
 		}
 		return fmt.Errorf("smtp send: %w", err)
 	}
@@ -198,17 +210,17 @@ func (s *SMTPSender) deliver(ctx context.Context, from, to string, raw []byte) e
 		return err
 	}
 	if err := client.Rcpt(to); err != nil {
-		return err
+		return rejectedByServer(err)
 	}
 	w, err := client.Data()
 	if err != nil {
-		return err
+		return rejectedByServer(err)
 	}
 	if _, err := w.Write(raw); err != nil {
 		return err
 	}
 	if err := w.Close(); err != nil {
-		return err
+		return rejectedByServer(err)
 	}
 	_ = client.Quit()
 	return nil
@@ -262,7 +274,7 @@ func (w *WebhookSender) Send(ctx context.Context, msg Message) error {
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		err := statusError{resp.StatusCode}
-		if resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != http.StatusRequestTimeout && resp.StatusCode != http.StatusTooManyRequests {
+		if permanentStatus(resp.StatusCode) {
 			return permanentError{err}
 		}
 		return err
