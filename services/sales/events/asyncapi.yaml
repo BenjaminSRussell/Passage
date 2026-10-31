@@ -67,6 +67,11 @@ channels:
     messages:
       backorderRunCommitted:
         $ref: "#/components/messages/BackorderRunCommitted"
+  parametersChanged:
+    address: passage.sales.parameters
+    messages:
+      parametersChanged:
+        $ref: "#/components/messages/ParametersChanged"
   quotationConverted:
     address: passage.sales.quotation
     messages:
@@ -98,6 +103,12 @@ channels:
       atpPromised:
         $ref: "#/components/messages/ATPPromised"
 operations:
+  publishParametersChanged:
+    action: send
+    channel: {$ref: "#/channels/parametersChanged"}
+    summary: The sales parameters of a legal entity were created or replaced (PRD 5.27.13). Consumers - audit, analytics.
+    messages:
+      - {$ref: "#/channels/parametersChanged/messages/parametersChanged"}
   publishQuotationConverted:
     action: send
     channel: {$ref: "#/channels/quotationConverted"}
@@ -316,6 +327,14 @@ components:
         $ref: "#/components/schemas/CloudEventHeaders"
       payload:
         $ref: "#/components/schemas/AllocationQuotaData"
+    ParametersChanged:
+      name: dev.passage.sales.parameters.changed.v1
+      title: Sales parameters changed
+      contentType: application/cloudevents+json
+      headers:
+        $ref: "#/components/schemas/CloudEventHeaders"
+      payload:
+        $ref: "#/components/schemas/ParametersChangedData"
     AllocationQuotaChanged:
       name: dev.passage.sales.allocationquota.changed.v1
       title: Allocation quota changed
@@ -377,6 +396,18 @@ components:
               status: {type: string, enum: [CONFIRMED, BACKORDER, UNPROMISED]}
         actor: {type: string}
         version: {type: integer, description: order version after the promise}
+    ParametersChangedData:
+      type: object
+      required: [legal_entity_id, quotation_expiry_days, quotation_probability_default, credit_release_validity_days, credit_hold_sla_business_days, default_order_type, actor, version]
+      properties:
+        legal_entity_id: {type: string, format: uuid}
+        quotation_expiry_days: {type: integer, minimum: 1, maximum: 365}
+        quotation_probability_default: {type: integer, minimum: 0, maximum: 100}
+        credit_release_validity_days: {type: integer, minimum: 1, maximum: 30}
+        credit_hold_sla_business_days: {type: integer, minimum: 1, maximum: 10}
+        default_order_type: {type: string, enum: [JOURNAL, ORDER, SUBSCRIPTION]}
+        actor: {type: string}
+        version: {type: integer, description: version after the change}
     AllocationQuotaData:
       type: object
       required: [quota_id, product_id, period_start, period_end, quota_qty, consumed_qty, actor, version]

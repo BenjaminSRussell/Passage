@@ -39,6 +39,7 @@ const (
 	dutyHold           = "sales.order.hold"
 	dutyCreditRelease  = "sales.credit.release"
 	dutyCreditMaintain = "sales.credit.maintain"
+	dutyParameter      = "sales.parameter.maintain"
 	dutyAgreement      = "sales.agreement.maintain"
 	dutyBackorder      = "sales.backorder.run"
 	dutyListing        = "sales.listing.maintain"
@@ -60,6 +61,7 @@ const (
 	proposalEval    = "/v1/sales/product-proposals:evaluate"
 	proposalRespond = "/v1/sales/product-proposals:respond"
 	allocationQuota = "/v1/sales/allocation-quotas"
+	parameters      = "/v1/sales/parameters"
 )
 
 var (
@@ -140,6 +142,8 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRead)).Get(creditProfiles, a.listCreditProfiles)
 	r.With(authz.RequireDuty(dutyRead)).Get(creditProfiles+"/{customerId}", a.getCreditProfile)
 	r.With(authz.RequireDuty(dutyCreditMaintain)).Put(creditProfiles+"/{customerId}", a.putCreditProfile)
+	r.With(authz.RequireDuty(dutyRead)).Get(parameters, a.getParameters)
+	r.With(authz.RequireDuty(dutyParameter)).Put(parameters, a.putParameters)
 	r.With(authz.RequireDuty(dutyQuotation)).Post(quotations, a.createQuotation)
 	r.With(authz.RequireDuty(dutyRead)).Get(quotations, a.listQuotations)
 	r.With(authz.RequireDuty(dutyRead)).Get(quotations+"/{id}", a.getQuotation)

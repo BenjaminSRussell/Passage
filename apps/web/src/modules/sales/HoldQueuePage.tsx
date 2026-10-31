@@ -6,9 +6,6 @@ import { dash, formatDateTime, money, sentence, shortId, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
-/** Business days in the release SLA (credit_hold_sla_business_days, FR-27.8). */
-const SLA_DAYS = 2;
-
 /** "3 d 4 h", "5 h", "12 min": how long a hold has waited. */
 export function holdAge(appliedAt: string, now: Date = new Date()): string {
   const minutes = Math.max(0, Math.floor((now.getTime() - new Date(appliedAt).getTime()) / 60000));
@@ -20,9 +17,9 @@ export function holdAge(appliedAt: string, now: Date = new Date()): string {
   return `${minutes} min`;
 }
 
-/** Whether a hold has waited longer than the SLA, counted in calendar days until the work calendar exists. */
-export function overSla(appliedAt: string, now: Date = new Date()): boolean {
-  return now.getTime() - new Date(appliedAt).getTime() > SLA_DAYS * 24 * 3600 * 1000;
+/** Whether a hold is past its SLA due time (the service counts the legal entity's business days, FR-27.8). */
+export function overSla(slaDueAt: string, now: Date = new Date()): boolean {
+  return now.getTime() > new Date(slaDueAt).getTime();
 }
 
 /** "11500 vs 11000" for the failed rule, with its note when there is one. */
@@ -86,8 +83,8 @@ export function HoldQueuePage() {
       key: "age",
       header: "Waiting",
       render: (h) => (
-        <span title={formatDateTime(h.appliedAt)}>
-          {holdAge(h.appliedAt)} {overSla(h.appliedAt) ? <Badge tone="warning">Past SLA</Badge> : null}
+        <span title={`Waiting since ${formatDateTime(h.appliedAt)}; due ${formatDateTime(h.slaDueAt)}`}>
+          {holdAge(h.appliedAt)} {overSla(h.slaDueAt) ? <Badge tone="warning">Past SLA</Badge> : null}
         </span>
       ),
     },

@@ -261,6 +261,8 @@ type Store interface {
 	ListBackorderRuns(ctx context.Context, f BackorderRunFilter) ([]BackorderRun, error)
 	GetBackorderRun(ctx context.Context, id string) (BackorderRun, error)
 	CommitBackorderRun(ctx context.Context, id string, version int, actor string, now time.Time) (BackorderRun, error)
+	GetParameters(ctx context.Context, legalEntityID string) (SalesParameters, error)
+	PutParameters(ctx context.Context, in SalesParameters, version int, actor string) (SalesParameters, error)
 	Ping(ctx context.Context) error
 }
 
@@ -305,6 +307,13 @@ func (s *Postgres) CreateOrder(ctx context.Context, in NewOrder) (Order, bool, e
 			out = existing
 			out.Warnings = supplementaryWarnings(out)
 			return nil
+		}
+		if in.OrderType == "" {
+			params, err := loadParameters(ctx, tx, p.TenantID, in.LegalEntityID)
+			if err != nil {
+				return err
+			}
+			in.OrderType = params.DefaultOrderType
 		}
 		out, err = createOrderTx(ctx, tx, p.TenantID, in)
 		created = err == nil
@@ -657,8 +666,8 @@ func confirmOrderTx(ctx context.Context, tx pgx.Tx, tenantID string, o Order) (O
 	return confirmed, err
 }
 
-// ReleaseHold releases an active hold. A CREDIT release is valid for
-// CreditReleaseDays. The user who applied a hold may not release it (SoD).
+// ReleaseHold releases an active hold. A CREDIT release is valid for the
+// legal entity's credit_release_validity_days. The user who applied a hold may not release it (SoD).
 // Releasing the CREDIT hold that a confirm placed confirms the order in the
 // same transaction when no other hold blocks confirmation (AC-27.3).
 func (s *Postgres) ReleaseHold(ctx context.Context, orderID, holdID string, version int, actor string, now time.Time) (ConfirmResult, error) {
@@ -687,7 +696,11 @@ func (s *Postgres) ReleaseHold(ctx context.Context, orderID, holdID string, vers
 		if hold.AppliedBy == actor {
 			return problem(http.StatusForbidden, "AUTH-0003", "the user who applied a hold may not release it")
 		}
-		until := domain.ReleaseValidUntil(now)
+		params, err := loadParameters(ctx, tx, p.TenantID, o.LegalEntityID)
+		if err != nil {
+			return err
+		}
+		until := domain.ReleaseValidUntil(now, params.CreditReleaseValidityDays)
 		if _, err := tx.Exec(ctx, `update order_hold set status = 'RELEASED', released_by = $3, released_at = $4, released_until = $5
 			where tenant_id = $1 and id = $2`, p.TenantID, holdID, actor, now, until); err != nil {
 			return err

@@ -33,6 +33,9 @@ type HoldQueueItem struct {
 	// (CREDIT holds): for CR-1 its value is exposure plus the order and its
 	// threshold the limit with tolerance.
 	FailedRule *domain.RuleResult `json:"failedRule,omitempty"`
+	// SLADueAt is AppliedAt plus the legal entity's release SLA in business
+	// days (FR-27.8); the queue marks a hold past it.
+	SLADueAt time.Time `json:"slaDueAt"`
 	// CreditLimit and LimitCurrency come from the customer's credit profile
 	// when one exists.
 	CreditLimit   *decimal.Decimal `json:"creditLimit,omitempty"`
@@ -87,7 +90,19 @@ func (s *Postgres) ListHolds(ctx context.Context, f HoldQueueFilter) ([]HoldQueu
 			}
 			out = append(out, it)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		rows.Close()
+		params := newParameterCache(tx, p.TenantID)
+		for i := range out {
+			le, err := params.get(ctx, out[i].LegalEntityID)
+			if err != nil {
+				return err
+			}
+			out[i].SLADueAt = domain.AddBusinessDays(out[i].AppliedAt, le.CreditHoldSLABusinessDays)
+		}
+		return nil
 	})
 	return out, err
 }

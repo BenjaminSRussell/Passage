@@ -96,11 +96,11 @@ func TestBuildQuotation_DefaultsAndNets(t *testing.T) {
 	if len(fields) != 0 {
 		t.Fatalf("unexpected field errors: %v", fields)
 	}
-	if want := time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC); !in.ValidUntil.Equal(want) {
-		t.Fatalf("validUntil = %s, want %s (+30 days)", in.ValidUntil, want)
+	if !in.ValidUntil.IsZero() || !in.IssuedAt.Equal(today) {
+		t.Fatalf("validUntil %s issuedAt %s: an omitted validity is left to the store's parameters", in.ValidUntil, in.IssuedAt)
 	}
-	if in.ProbabilityPct != domain.DefaultProbabilityPct || in.InvoiceAccountID != req.CustomerID {
-		t.Fatalf("defaults: probability %d invoice %s", in.ProbabilityPct, in.InvoiceAccountID)
+	if in.ProbabilityPct != nil || in.InvoiceAccountID != req.CustomerID {
+		t.Fatalf("defaults: probability %v (an omitted one is left to the store's parameters) invoice %s", in.ProbabilityPct, in.InvoiceAccountID)
 	}
 	// 3 × 19.99 less 10% = 53.973 at four places.
 	if len(in.Lines) != 2 || in.Lines[1].LineNo != 2 || !in.Lines[0].LineNet.Equal(decimal.RequireFromString("53.973")) {

@@ -36,12 +36,17 @@ type NewQuotation struct {
 	CustomerID       string
 	InvoiceAccountID string
 	Currency         string
-	ValidUntil       time.Time
-	ProbabilityPct   int
-	IdempotencyKey   string
-	RequestHash      string
-	Actor            string
-	Lines            []Line
+	// ValidUntil is zero when the request gave none: the legal entity's
+	// quotation validity from IssuedAt applies.
+	ValidUntil time.Time
+	IssuedAt   time.Time
+	// ProbabilityPct is nil when the request gave none: the legal entity's
+	// quotation_probability_default applies.
+	ProbabilityPct *int
+	IdempotencyKey string
+	RequestHash    string
+	Actor          string
+	Lines          []Line
 }
 
 // QuotationLine is one quotation line. LineStatus is OPEN or CONVERTED; a
@@ -139,6 +144,18 @@ func (s *Postgres) CreateQuotation(ctx context.Context, in NewQuotation) (Quotat
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		if in.ValidUntil.IsZero() || in.ProbabilityPct == nil {
+			params, err := loadParameters(ctx, tx, p.TenantID, in.LegalEntityID)
+			if err != nil {
+				return err
+			}
+			if in.ValidUntil.IsZero() {
+				in.ValidUntil = domain.QuotationValidUntil(in.IssuedAt, params.QuotationExpiryDays)
+			}
+			if in.ProbabilityPct == nil {
+				in.ProbabilityPct = &params.QuotationProbabilityDefault
+			}
+		}
 		seq, err := nextSequence(ctx, tx, p.TenantID, in.LegalEntityID, quotationSequence)
 		if err != nil {
 			return err
@@ -152,7 +169,7 @@ func (s *Postgres) CreateQuotation(ctx context.Context, in NewQuotation) (Quotat
 				currency, status, probability_pct, valid_until, net_total, idempotency_key, request_hash, created_by)
 			values ($1, $2, $3, $4, $5, $6, $7, 'DRAFT', $8, $9::date, $10::numeric, $11, $12, $13)`,
 			p.TenantID, id, in.LegalEntityID, domain.FormatQuotationNumber(seq), in.CustomerID, in.InvoiceAccountID, in.Currency,
-			in.ProbabilityPct, in.ValidUntil.Format(dayLayout), domain.SumNets(nets).String(), in.IdempotencyKey, in.RequestHash, in.Actor); err != nil {
+			*in.ProbabilityPct, in.ValidUntil.Format(dayLayout), domain.SumNets(nets).String(), in.IdempotencyKey, in.RequestHash, in.Actor); err != nil {
 			return err
 		}
 		for _, l := range in.Lines {

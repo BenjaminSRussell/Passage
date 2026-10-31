@@ -15,9 +15,10 @@ import (
 // threeLineQuotation is a quotation of three lines priced 10 a unit, line n
 // with quantity n (nets 10, 20, 30).
 func threeLineQuotation(le, customer, key string) NewQuotation {
+	sixty := 60
 	site, wh := ids.New(), ids.New()
 	in := NewQuotation{LegalEntityID: le, CustomerID: customer, InvoiceAccountID: customer, Currency: "USD",
-		ValidUntil: time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC), ProbabilityPct: 60, IdempotencyKey: key, RequestHash: key + "-hash",
+		ValidUntil: time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC), ProbabilityPct: &sixty, IdempotencyKey: key, RequestHash: key + "-hash",
 		Actor: "sales-rep"}
 	for i := 1; i <= 3; i++ {
 		in.Lines = append(in.Lines, Line{LineNo: i, ProductID: ids.New(), Quantity: d(int64(i)), Unit: "EA", SiteID: site,

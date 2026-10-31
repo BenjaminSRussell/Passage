@@ -28,13 +28,14 @@ var (
 	ScheduleReleaseRecalculated = events.Type(Context, "schedulerelease", "recalculated", 1)
 
 	BackorderRunCommitted = events.Type(Context, "backorderrun", "committed", 1)
+	ParametersChanged     = events.Type(Context, "parameters", "changed", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
 	return []string{OrderConfirmed, OrderHoldApplied, OrderHoldReleased, CreditCheckEvaluated, OrderChanged, OrderCancelled, AgreementReleased,
 		QuotationConverted, AllocationQuotaSet, AllocationQuotaMoved, AllocationConsumed, AllocationReturned, ATPPromised,
-		ScheduleReleaseReceived, ScheduleReleaseResolved, ScheduleReleaseRecalculated, BackorderRunCommitted}
+		ScheduleReleaseReceived, ScheduleReleaseResolved, ScheduleReleaseRecalculated, BackorderRunCommitted, ParametersChanged}
 }
 
 // PromisedSlice is one schedule line of an ATP promise.
@@ -268,4 +269,17 @@ type BackorderRunCommittedData struct {
 	Lines            []BackorderRunLineData `json:"lines"`
 	Actor            string                 `json:"actor"`
 	Version          int                    `json:"version"`
+}
+
+// ParametersChangedData is the data member of parameters.changed.v1: the
+// sales parameters of one legal entity were created or replaced.
+type ParametersChangedData struct {
+	LegalEntityID               string `json:"legal_entity_id"`
+	QuotationExpiryDays         int    `json:"quotation_expiry_days"`
+	QuotationProbabilityDefault int    `json:"quotation_probability_default"`
+	CreditReleaseValidityDays   int    `json:"credit_release_validity_days"`
+	CreditHoldSLABusinessDays   int    `json:"credit_hold_sla_business_days"`
+	DefaultOrderType            string `json:"default_order_type"`
+	Actor                       string `json:"actor"`
+	Version                     int    `json:"version"`
 }

@@ -590,6 +590,46 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/AtpCheckResponse"}
         "400": {$ref: "#/components/responses/Problem"}
+  /v1/sales/parameters:
+    parameters:
+      - {name: legalEntityId, in: query, required: true, schema: {type: string, format: uuid}}
+    get:
+      summary: Read the sales parameters of a legal entity (the defaults, at version 0, when none were saved)
+      operationId: getSalesParameters
+      x-passage-duty: sales.order.read
+      responses:
+        "200":
+          description: the parameters; the ETag is the version, 0 when the legal entity never saved them
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SalesParameters"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+    put:
+      summary: Replace the sales parameters (If-Match carries the current ETag; first save uses "0")
+      operationId: putSalesParameters
+      x-passage-duty: sales.parameter.maintain
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/SalesParametersRequest"}
+      responses:
+        "200":
+          description: saved parameters; parameters.changed is written in the same transaction
+          headers:
+            ETag: {$ref: "#/components/headers/ETag"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SalesParameters"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "428": {$ref: "#/components/responses/Problem"}
   /v1/sales/credit-profiles:
     get:
       summary: List credit profiles of one legal entity, or of every legal entity in the caller's scope
@@ -1638,7 +1678,7 @@ components:
         legalEntityId: {type: string, format: uuid}
         customerId: {type: string, format: uuid}
         invoiceAccountId: {type: string, format: uuid}
-        orderType: {type: string, enum: [JOURNAL, ORDER, SUBSCRIPTION, RETURNED], default: ORDER}
+        orderType: {type: string, enum: [JOURNAL, ORDER, SUBSCRIPTION, RETURNED], description: "omitted: the legal entity's defaultOrderType (ORDER unless set in the sales parameters)"}
         currency: {type: string, pattern: "^[A-Z]{3}$"}
         requestedShipDate: {type: string, format: date}
         channel: {type: string, pattern: "^[A-Za-z0-9_-]{1,40}$", default: UI}
@@ -1978,6 +2018,26 @@ components:
         exposure: {$ref: "#/components/schemas/Exposure"}
         version: {type: integer}
         updatedAt: {type: string, format: date-time}
+    SalesParametersRequest:
+      type: object
+      description: every value is required; the PUT replaces them all. Names are the PRD 5.27.13 parameter names.
+      required: [quotationExpiryDays, quotationProbabilityDefault, creditReleaseValidityDays, creditHoldSlaBusinessDays, defaultOrderType]
+      properties:
+        quotationExpiryDays: {type: integer, minimum: 1, maximum: 365, description: validity in days of a quotation created without validUntil (quotation_expiry_days)}
+        quotationProbabilityDefault: {type: integer, minimum: 0, maximum: 100, description: win probability of a quotation created without probabilityPct (quotation_probability_default)}
+        creditReleaseValidityDays: {type: integer, minimum: 1, maximum: 30, description: how long a CREDIT release stays valid (credit_release_validity_days, BR-27.4)}
+        creditHoldSlaBusinessDays: {type: integer, minimum: 1, maximum: 10, description: "business days (Monday to Friday) a hold may wait for release; the queue reports slaDueAt (credit_hold_sla_business_days, FR-27.8)"}
+        defaultOrderType: {type: string, enum: [JOURNAL, ORDER, SUBSCRIPTION], description: order type of an order created without one (default_order_type)}
+    SalesParameters:
+      allOf:
+        - $ref: "#/components/schemas/SalesParametersRequest"
+        - type: object
+          required: [legalEntityId, version]
+          properties:
+            legalEntityId: {type: string, format: uuid}
+            version: {type: integer, description: 0 when never saved}
+            updatedBy: {type: string, description: absent when never saved}
+            updatedAt: {type: string, format: date-time, description: absent when never saved}
     CreditProfileRequest:
       type: object
       required: [limit, currency, limitType]
@@ -2213,8 +2273,8 @@ components:
         customerId: {type: string, format: uuid}
         invoiceAccountId: {type: string, format: uuid, description: defaults to the customer}
         currency: {type: string, pattern: "^[A-Z]{3}$"}
-        validUntil: {type: string, format: date, description: "today to today + 365 days; default today + 30 (quotation_expiry_days)"}
-        probabilityPct: {type: integer, minimum: 0, maximum: 100, default: 50}
+        validUntil: {type: string, format: date, description: "today to today + 365 days; default today + the legal entity's quotationExpiryDays (30 unless set)"}
+        probabilityPct: {type: integer, minimum: 0, maximum: 100, description: "default the legal entity's quotationProbabilityDefault (50 unless set)"}
         lines:
           type: array
           minItems: 1
@@ -2272,7 +2332,7 @@ components:
         order: {$ref: "#/components/schemas/Order"}
     HoldQueueItem:
       type: object
-      required: [holdId, legalEntityId, orderId, orderNumber, orderVersion, customerId, holdType, reasonCode, amount, currency, appliedBy, appliedAt]
+      required: [holdId, legalEntityId, orderId, orderNumber, orderVersion, customerId, holdType, reasonCode, amount, currency, appliedBy, appliedAt, slaDueAt]
       properties:
         holdId: {type: string, format: uuid}
         legalEntityId: {type: string, format: uuid}
@@ -2286,6 +2346,7 @@ components:
         currency: {type: string}
         appliedBy: {type: string}
         appliedAt: {type: string, format: date-time}
+        slaDueAt: {type: string, format: date-time, description: appliedAt plus the legal entity's creditHoldSlaBusinessDays (Monday to Friday); a hold past it is overdue}
         failedRule:
           type: object
           description: the failed rule of the order's last credit check (CREDIT holds); for CR-1 value is exposure plus the order and threshold the limit with tolerance

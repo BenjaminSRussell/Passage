@@ -18,6 +18,7 @@ import { HoldQueuePage } from "./HoldQueuePage";
 import { OrdersPage } from "./OrdersPage";
 import { NewProductListingPage, ProductListingsPage } from "./ProductListingsPage";
 import { NewProposalRulePage, ProposalRulesPage } from "./ProposalRulesPage";
+import { ParametersPage } from "./ParametersPage";
 import { PromiseLinePage } from "./PromiseLinePage";
 import { QuotationDetailPage } from "./QuotationDetailPage";
 import { NewQuotationPage, QuotationsPage } from "./QuotationsPage";
@@ -30,7 +31,7 @@ const sales: PassageModule = {
   id: "sales",
   title: "Sales",
   description:
-    "Quote and convert to orders, enter, confirm, change and cancel sales orders, apply holds and work the release queue, maintain credit profiles, product listings, supplementary items, product proposals, allocation quotas and sales agreements, check available-to-promise, reconcile scheduling releases and store them against sales agreements, preview backorder runs and plan and commit them over the open order lines.",
+    "Quote and convert to orders, enter, confirm, change and cancel sales orders, apply holds and work the release queue, maintain credit profiles, the per legal entity sales parameters, product listings, supplementary items, product proposals, allocation quotas and sales agreements, check available-to-promise, reconcile scheduling releases and store them against sales agreements, preview backorder runs and plan and commit them over the open order lines.",
   routes: [
     { path: "/sales", element: createElement(OrdersPage), handle: { title: "Sales orders", duty: "sales.order.read" } },
     { path: "/sales/orders", element: createElement(OrdersPage) },
@@ -63,6 +64,7 @@ const sales: PassageModule = {
     { path: "/sales/supplementary-items", element: createElement(SupplementaryRulesPage) },
     { path: "/sales/supplementary-items/new", element: createElement(NewSupplementaryRulePage), handle: { title: "New supplementary item rule" } },
     { path: "/sales/product-proposals", element: createElement(ProposalRulesPage) },
+    { path: "/sales/parameters", element: createElement(ParametersPage), handle: { title: "Sales parameters" } },
     { path: "/sales/allocation-quotas", element: createElement(AllocationQuotasPage) },
     { path: "/sales/allocation-quotas/new", element: createElement(NewAllocationQuotaPage), handle: { title: "New allocation quota" } },
     { path: "/sales/allocation-quotas/:id", element: createElement(AllocationQuotaDetailPage), handle: { title: "Allocation quota" } },
@@ -84,6 +86,7 @@ const sales: PassageModule = {
     { label: "Supplementary items", to: "/sales/supplementary-items", duty: "sales.order.read" },
     { label: "Product proposals", to: "/sales/product-proposals", duty: "sales.order.read" },
     { label: "Allocation quotas", to: "/sales/allocation-quotas", duty: "sales.order.read" },
+    { label: "Sales parameters", to: "/sales/parameters", duty: "sales.order.read" },
   ],
 };
 

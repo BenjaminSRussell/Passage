@@ -69,11 +69,8 @@ func buildOrder(req createOrderRequest) (store.NewOrder, map[string]string) {
 	if !ids.Valid(req.InvoiceAccountID) {
 		f["invoiceAccountId"] = "must be a UUID"
 	}
-	orderType := req.OrderType
-	if orderType == "" {
-		orderType = "ORDER"
-	}
-	if !orderTypes[orderType] {
+	orderType := req.OrderType // empty: the legal entity's default order type applies
+	if orderType != "" && !orderTypes[orderType] {
 		f["orderType"] = "must be JOURNAL, ORDER, SUBSCRIPTION or RETURNED"
 	}
 	if !currencyCode.MatchString(req.Currency) {

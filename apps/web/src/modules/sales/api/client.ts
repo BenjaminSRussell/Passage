@@ -6,6 +6,10 @@ export const base = "/api/v1/sales";
 export const ORDER_TYPES = ["ORDER", "JOURNAL", "SUBSCRIPTION", "RETURNED"] as const;
 export type OrderType = (typeof ORDER_TYPES)[number];
 
+/** The order types a legal entity may set as its default_order_type (PRD §5.27.13); RETURNED is not one. */
+export const DEFAULT_ORDER_TYPES = ["ORDER", "JOURNAL", "SUBSCRIPTION"] as const;
+export type DefaultOrderType = (typeof DEFAULT_ORDER_TYPES)[number];
+
 export const ORDER_STATUSES = ["DRAFT", "OPEN", "CONFIRMED", "PARTIALLY_SHIPPED", "SHIPPED", "INVOICED", "CLOSED", "CANCELLED"] as const;
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
 
@@ -161,7 +165,8 @@ export interface NewOrder {
   legalEntityId: string;
   customerId: string;
   invoiceAccountId: string;
-  orderType: OrderType;
+  /** Omitted: the legal entity's default order type applies. */
+  orderType?: OrderType;
   currency: string;
   requestedShipDate: string;
   channel?: string;
@@ -538,6 +543,36 @@ export function putCreditProfile(legalEntityId: string, customerId: string, inpu
   });
 }
 
+/** The per legal entity sales parameters (PRD §5.27.13), named as in the PRD. */
+export interface SalesParametersInput {
+  quotationExpiryDays: number;
+  quotationProbabilityDefault: number;
+  creditReleaseValidityDays: number;
+  creditHoldSlaBusinessDays: number;
+  defaultOrderType: DefaultOrderType;
+}
+
+/** The parameters of a legal entity; version 0 means none were saved and these are the defaults. */
+export interface SalesParameters extends SalesParametersInput {
+  legalEntityId: string;
+  version: number;
+  updatedBy?: string;
+  updatedAt?: string;
+}
+
+export function getSalesParameters(legalEntityId: string, signal?: AbortSignal): Promise<Versioned<SalesParameters>> {
+  return versioned<SalesParameters>(`/parameters${query({ legalEntityId })}`, {}, signal);
+}
+
+/** Creates (etag "0") or replaces the parameters at the given ETag. */
+export function putSalesParameters(legalEntityId: string, input: SalesParametersInput, etag: string): Promise<Versioned<SalesParameters>> {
+  return versioned<SalesParameters>(`/parameters${query({ legalEntityId })}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+    headers: { "If-Match": etag },
+  });
+}
+
 /** Stateless ATP promise check over entered buckets (BR-27.1). */
 export function atpCheck(input: AtpCheckInput): Promise<AtpCheckResult> {
   return json<AtpCheckResult>("/atp:check", { method: "POST", body: JSON.stringify(input) });
@@ -746,6 +781,8 @@ export interface HoldQueueItem {
   currency: string;
   appliedBy: string;
   appliedAt: string;
+  /** When the hold is due for release: appliedAt plus the legal entity's SLA in business days. */
+  slaDueAt: string;
   /** The failed rule of the last credit check (CREDIT holds). */
   failedRule?: CreditRule;
   creditLimit?: Decimal;

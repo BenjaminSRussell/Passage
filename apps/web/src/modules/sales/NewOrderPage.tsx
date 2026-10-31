@@ -14,7 +14,8 @@ export interface OrderValues {
   legalEntityId: string;
   customerId: string;
   invoiceAccountId: string;
-  orderType: OrderType;
+  /** Empty: the legal entity's default order type (Sales parameters) applies. */
+  orderType: OrderType | "";
   currency: string;
   requestedShipDate: string;
   externalRef: string;
@@ -50,7 +51,7 @@ export function validateOrder(values: OrderValues): { errors: Errors; input?: Ne
       legalEntityId: values.legalEntityId.trim(),
       customerId: values.customerId.trim(),
       invoiceAccountId: invoice,
-      orderType: values.orderType,
+      ...(values.orderType ? { orderType: values.orderType } : {}),
       currency: values.currency,
       requestedShipDate: values.requestedShipDate,
       ...(ref ? { externalRef: ref } : {}),
@@ -69,7 +70,7 @@ export function NewOrderPage() {
     legalEntityId: "",
     customerId: "",
     invoiceAccountId: "",
-    orderType: "ORDER",
+    orderType: "",
     currency: "USD",
     requestedShipDate: start,
     externalRef: "",
@@ -140,9 +141,10 @@ export function NewOrderPage() {
           {header("legalEntityId", "Legal entity", "UUID of the selling legal entity.", { mono: true })}
           {header("customerId", "Customer", "UUID of the customer party.", { mono: true })}
           {header("invoiceAccountId", "Invoice account", "Leave empty to invoice the customer.", { mono: true, optional: true })}
-          <FormField id="order-orderType" label="Order type" error={errors.orderType}>
+          <FormField id="order-orderType" label="Order type" hint="Legal entity default uses the type set in Sales parameters." error={errors.orderType}>
             {(control) => (
-              <Select {...control} value={values.orderType} onChange={(e) => update({ orderType: e.target.value as OrderType })}>
+              <Select {...control} value={values.orderType} onChange={(e) => update({ orderType: e.target.value as OrderType | "" })}>
+                <option value="">Legal entity default</option>
                 {ORDER_TYPES.map((t) => (
                   <option key={t} value={t}>
                     {sentence(t)}
