@@ -54,6 +54,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return fmt.Errorf("connect database: %w", err)
 	}
 	defer pool.Close()
+	tenant.ShareReplayCache(pool)
 	if getenv("MIGRATE_ON_START") == "true" {
 		if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
 			return fmt.Errorf("migrate: %w", err)

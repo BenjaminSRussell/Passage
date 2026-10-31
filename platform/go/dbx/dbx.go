@@ -177,3 +177,25 @@ const OutboxDDL = `create table if not exists outbox (
   payload jsonb not null,
   created_at timestamptz not null default now()
 );`
+
+// ServiceTokenReplayDDL is the table that lets every replica of a service
+// refuse a service token another replica already accepted
+// (tenant.ShareReplayCache). Copy it into the migration of each service that
+// verifies service tokens.
+var ServiceTokenReplayDDL = `create table service_token_replay (
+  tenant_id uuid not null,
+  jti text not null,
+  expires_at timestamptz not null,
+  primary key (tenant_id, jti)
+);
+create index service_token_replay_expires_idx on service_token_replay (tenant_id, expires_at);
+` + RLSPolicy("service_token_replay") + `
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'passage_app') THEN
+    EXECUTE format('GRANT USAGE ON SCHEMA %I TO passage_app', current_schema());
+    EXECUTE 'GRANT SELECT, INSERT, DELETE ON service_token_replay TO passage_app';
+  END IF;
+END
+$$;
+`

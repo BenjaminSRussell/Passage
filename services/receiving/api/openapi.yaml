@@ -763,6 +763,7 @@ components:
       required: [currency, headerTotal, lines]
       properties:
         purchaseOrderId: { type: string, format: uuid, description: 'Purchase order in services/purchasing that lines naming poLineNo are read from, with the caller identity.' }
+        legalEntityId: { type: string, format: uuid, description: 'Legal entity of the receipt or invoice being tested. When present, and a service signing key is configured, the purchase order read is signed for this entity even for a user scoped to several; it must lie in the caller scope. When absent, a user scoped to several entities has their own identity forwarded.' }
         policy: { $ref: '#/components/schemas/Policy' }
         currency: { type: string, minLength: 3, maxLength: 3 }
         headerTotal: { type: [number, string] }

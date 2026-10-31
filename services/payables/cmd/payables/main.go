@@ -56,6 +56,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return fmt.Errorf("connect database: %w", err)
 	}
 	defer pool.Close()
+	tenant.ShareReplayCache(pool)
 	validator, err := domain.NewXSDValidator(payables.Pain001XSD)
 	if err != nil {
 		return err
