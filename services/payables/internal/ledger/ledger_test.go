@@ -396,3 +396,30 @@ func TestEntryForDocument_AdoptsOnlyAnEntryWithTheRunsSourceAndLines(t *testing.
 		t.Fatal("an unreadable answer must be an error")
 	}
 }
+
+func TestEntryForDocument_FollowsNextCursorToTheRunsEntry(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(nil)
+	signer, _ := tenant.NewServiceSigner("payables", priv)
+	var cursors []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cursors = append(cursors, r.URL.Query().Get("cursor"))
+		if r.URL.Query().Get("cursor") == "" {
+			_, _ = w.Write([]byte(`{"items":[` + lookupLines("foreign", "manual", "run-1", "5.00") + `],"nextCursor":"7.2"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"items":[` + lookupLines("mine", "payment_run", "run-1", "150") + `]}`))
+	}))
+	defer srv.Close()
+	le := testkit.TenantID(9)
+	entry := postEntry()
+	entry.LegalEntityID = le
+	entry.Lines = []domain.RunJournalLine{
+		{Account: "2000", Amount: decimal.RequireFromString("150")},
+		{Account: "1000", Credit: true, Amount: decimal.RequireFromString("150")},
+	}
+	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: le, UserID: "erin"})
+	id, err := ledger.New(srv.URL, nil).WithSigner(signer).EntryForDocument(ctx, entry)
+	if err != nil || id != "mine" || len(cursors) != 2 || cursors[1] != "7.2" {
+		t.Fatalf("id %q err %v cursors %v", id, err, cursors)
+	}
+}

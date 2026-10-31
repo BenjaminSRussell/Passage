@@ -31,6 +31,7 @@ const (
 	linesPath       = "/v1/ledger/journal-lines"
 	sourceSystem    = "payables"
 	maxResponseSize = 1 << 20
+	maxLookupPages  = 5
 )
 
 type Balance struct {
@@ -161,24 +162,34 @@ type lookedUpLine struct {
 // EntryForDocument returns the id of an entry this service already posted for e: same ledger, document id,
 // payables source and exactly e's lines. An entry that merely shares the document id is never returned.
 func (c *Client) EntryForDocument(ctx context.Context, e Entry) (string, error) {
-	q := url.Values{"ledger": {e.LedgerID}, "documentId": {e.DocumentID}, "source_system": {sourceSystem}, "limit": {"1000"}}
-	raw, err := c.get(ctx, e.LegalEntityID, linesPath, q, e.DocumentID, dutyEntryLookup)
-	if err != nil {
-		return "", err
-	}
-	var body struct {
-		Items []lookedUpLine `json:"items"`
-	}
-	if err := json.Unmarshal(raw, &body); err != nil {
-		return "", fmt.Errorf("ledger: entry lookup response unusable: %w", err)
-	}
 	var order []string
 	byEntry := map[string][]lookedUpLine{}
-	for _, l := range body.Items {
-		if _, seen := byEntry[l.EntryID]; !seen {
-			order = append(order, l.EntryID)
+	cursor := ""
+	for page := 0; page < maxLookupPages; page++ {
+		q := url.Values{"ledger": {e.LedgerID}, "documentId": {e.DocumentID}, "source_system": {sourceSystem}, "limit": {"1000"}}
+		if cursor != "" {
+			q.Set("cursor", cursor)
 		}
-		byEntry[l.EntryID] = append(byEntry[l.EntryID], l)
+		raw, err := c.get(ctx, e.LegalEntityID, linesPath, q, e.DocumentID, dutyEntryLookup)
+		if err != nil {
+			return "", err
+		}
+		var body struct {
+			Items      []lookedUpLine `json:"items"`
+			NextCursor string         `json:"nextCursor"`
+		}
+		if err := json.Unmarshal(raw, &body); err != nil {
+			return "", fmt.Errorf("ledger: entry lookup response unusable: %w", err)
+		}
+		for _, l := range body.Items {
+			if _, seen := byEntry[l.EntryID]; !seen {
+				order = append(order, l.EntryID)
+			}
+			byEntry[l.EntryID] = append(byEntry[l.EntryID], l)
+		}
+		if cursor = body.NextCursor; cursor == "" {
+			break
+		}
 	}
 	for _, id := range order {
 		if sameLines(e, byEntry[id]) {
