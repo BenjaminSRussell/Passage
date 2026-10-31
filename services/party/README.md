@@ -98,11 +98,14 @@ Bank details live in `vendor_bank_account`. Account and routing numbers are seal
 | `FIELDCRYPT_KEYS`, `FIELDCRYPT_CURRENT_KEY_ID` | empty | `id=base64(32 bytes)` pairs and the current id (`platform/go/fieldcrypt`); the chart reads them optionally from the `existingSecret` secret |
 | `PARTY_VIES_URL` | empty | VIES REST base, `https://ec.europa.eu/taxation_customs/vies/rest-api`; when empty VAT numbers stay `unverified` |
 | `PARTY_VIES_TIMEOUT_MS` | `5000` | VIES request timeout |
+| `PASSAGE_SERVICE_NAME`, `PASSAGE_SERVICE_PUBLIC_KEYS` | empty | party accepts signed service tokens (`caller[:kid]=base64pub,...`) from receiving (`party.read`) and payables (`party.vendor_bank.reveal`); the chart sets them from `serviceIdentity.publicKeys`. Without keys only gateway headers are trusted |
 
 No new Go dependency: `pgx` and `chi` were already required, and the database helpers come from `platform/go/dbx`.
 
 ## Metrics
 
-`party_tax_validations_total{status}`, `party_tax_validations_rejected_total`, `party_tax_checker_failures_total`, `party_parties_created_total` (new parties only; an idempotent replay is not counted), `party_credit_limit_changes_total{outcome}` (requested, applied, approved, rejected).
+`party_tax_validations_total{status}`, `party_tax_validations_rejected_total`, `party_tax_checker_failures_total`, `party_parties_created_total` (new parties only; an idempotent replay is not counted), `party_credit_limit_changes_total{outcome}` (requested, applied, approved, rejected), and the shared service-token replay counters (`passage_service_token_replays_refused_total`, `passage_service_token_replay_store_failures_total`).
+
+Service tokens: migration `0009_service_token_replay.sql` (identical to `dbx.ServiceTokenReplayDDL`) records each accepted token id so a second replica refuses a replay. With public keys configured the service refuses to start until that table and `service_token_replay_purge()` exist, so migrate before rolling out. Deploy party and set its `publicKeys` before receiving or payables sign calls to it (see `deploy/gateway/README.md`).
 
 VAT numbers are format-checked, then looked up against VIES (`internal/vies`) when `PARTY_VIES_URL` is set: `VALID` is `valid`, `INVALID` is `invalid`, and any other verdict (`MS_UNAVAILABLE`, `TIMEOUT`, a non-200, a body that is not JSON) leaves the number `unverified`. `internal/vies/testdata` holds responses recorded from the live VIES REST service on 2026-10-31.
