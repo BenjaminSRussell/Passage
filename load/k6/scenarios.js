@@ -14,7 +14,7 @@ import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { Counter, Trend } from 'k6/metrics';
 import { SharedArray } from 'k6/data';
-import { journalEntry, thresholds, uuid } from './lib.js';
+import { arrivalRate, journalEntry, thresholds, uuid } from './lib.js';
 
 const SLO = JSON.parse(open('../slo/slo.json'));
 const BASE = __ENV.BASE_URL || 'https://api.perf.passage.dev';
@@ -75,8 +75,9 @@ const ORDER_LINES = 10;
 // S1 1M lines/h at 500 lines per entry = 2000 entries/h = 33.3/min -> 34/min (1.02M lines/h).
 // S2 100k lines/h at 10 lines per order = 10000 orders/h = 166.7/min -> 170/min (102k lines/h).
 // S4 2000 scanners at one scan per 5 s = 400 scans/s.
+// Scaled rates round up (lib.js arrivalRate) so a smoke run still meets its scaled target.
 function rate(perUnit) {
-  return Math.max(1, Math.round(perUnit * SCALE));
+  return arrivalRate(perUnit, SCALE);
 }
 
 // Virtual-user counts scale the same way; they are counts, not rates.
