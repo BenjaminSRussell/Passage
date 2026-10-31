@@ -6,13 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
-
-	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
@@ -63,7 +60,6 @@ func (c *Client) VendorGroupID(ctx context.Context, legalEntityID, vendorID stri
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		slog.ErrorContext(ctx, "party get transport failed", "err", err, "path", path, "correlationId", middleware.GetReqID(ctx))
 		return "", fmt.Errorf("party get %s: %w", path, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -79,10 +75,14 @@ func (c *Client) VendorGroupID(ctx context.Context, legalEntityID, vendorID stri
 		return "", fmt.Errorf("party get %s: %w", path, err)
 	}
 	var body struct {
+		LegalEntityID string `json:"legalEntityId"`
 		VendorGroupID string `json:"vendorGroupId"`
 	}
 	if err := json.Unmarshal(raw, &body); err != nil {
 		return "", fmt.Errorf("party get %s: response is not a vendor", path)
+	}
+	if !strings.EqualFold(body.LegalEntityID, legalEntityID) {
+		return "", fmt.Errorf("party get %s: vendor belongs to another legal entity: %w", path, domain.ErrVendorNotFound)
 	}
 	return body.VendorGroupID, nil
 }

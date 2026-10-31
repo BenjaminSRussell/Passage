@@ -276,6 +276,7 @@ type Store interface {
 	PostInvoice(ctx context.Context, in Invoice, fn InvoiceFunc) (Invoice, error)
 	ReleaseInvoice(ctx context.Context, id, legalEntityID, by string, fn ReleaseFunc) (Invoice, error)
 	RejectInvoice(ctx context.Context, id, legalEntityID, by, reason string, fn RejectFunc) (Invoice, error)
+	InvoiceVendor(ctx context.Context, id string) (string, error)
 	RejectedInvoiceCount(ctx context.Context, vendorID, number string) (int, error)
 	SetErsVendor(ctx context.Context, legalEntityID, vendorID string, enabled bool, by string, fn ErsVendorFunc) error
 	ErsVendor(ctx context.Context, legalEntityID, vendorID string) (bool, error)

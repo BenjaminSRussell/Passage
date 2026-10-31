@@ -35,7 +35,7 @@ func serve(t *testing.T, status int, body string) (*Client, *http.Request) {
 }
 
 func TestVendorGroupID_ReadsTheGroupFromTheVendorMaster(t *testing.T) {
-	c, seen := serve(t, http.StatusOK, `{"id":"`+vendorID+`","vendorGroupId":"`+groupID+`","blocked":"none"}`)
+	c, seen := serve(t, http.StatusOK, `{"id":"`+vendorID+`","legalEntityId":"`+legalEntityID+`","vendorGroupId":"`+groupID+`","blocked":"none"}`)
 	got, err := c.VendorGroupID(testCtx(), legalEntityID, vendorID)
 	if err != nil || got != groupID {
 		t.Fatalf("group %q err %v, want %q", got, err, groupID)
@@ -65,6 +65,14 @@ func TestVendorGroupID_MapsFailures(t *testing.T) {
 				t.Fatalf("group %q err %v, want an error (not found: %v)", got, err, tc.notFound)
 			}
 		})
+	}
+}
+
+func TestVendorGroupID_VendorOfAnotherLegalEntityReadsAsNotFound(t *testing.T) {
+	c, _ := serve(t, http.StatusOK, `{"id":"`+vendorID+`","legalEntityId":"00000000-0000-0000-0000-0000000000e2","vendorGroupId":"`+groupID+`"}`)
+	got, err := c.VendorGroupID(testCtx(), legalEntityID, vendorID)
+	if got != "" || !errors.Is(err, domain.ErrVendorNotFound) {
+		t.Fatalf("group %q err %v, want ErrVendorNotFound", got, err)
 	}
 }
 

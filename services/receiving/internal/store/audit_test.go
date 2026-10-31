@@ -441,6 +441,25 @@ func TestPolicyChangesWriteAppendOnlyHistoryWithTheOldValue(t *testing.T) {
 	}
 }
 
+func TestInvoiceVendor_ReadsTheStoredVendorAndMissesUnknownIds(t *testing.T) {
+	db := seedInvoice(t)
+	seedOpenGrir(t, db)
+	st := store.New(db.pool)
+	ctx := tenant.With(context.Background(), db.one)
+	held := fullInvoice(db, "00000000-0000-0000-0000-00000000c401", "ERS-RCV-10", domain.InvoiceSourceERS)
+	if _, err := st.PostInvoice(ctx, held, holdFunc(t, db, held, true)); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := st.InvoiceVendor(ctx, strings.ToUpper(held.ID)); err != nil || got != held.VendorID {
+		t.Fatalf("vendor %q err %v, want %q", got, err, held.VendorID)
+	}
+	for _, id := range []string{"not-a-uuid", "00000000-0000-4000-8000-00000000dead"} {
+		if _, err := st.InvoiceVendor(ctx, id); !errors.Is(err, store.ErrInvoiceNotFound) {
+			t.Fatalf("%s: err %v", id, err)
+		}
+	}
+}
+
 func TestDecisionOnAnUnknownOrMalformedInvoiceIdIsNotFound(t *testing.T) {
 	db := seedInvoice(t)
 	st := store.New(db.pool)

@@ -481,6 +481,7 @@ func TestInvoice_EventCarriesVendorGroupFromParty(t *testing.T) {
 		{"known vendor", domain.FakeVendorGroups{Groups: map[string]string{vendorID: group}}, `"vendor_group_id":"` + group + `"`, "0"},
 		{"party unreachable", domain.FakeVendorGroups{Err: errors.New("party down")}, "", "1"},
 		{"unknown vendor", domain.FakeVendorGroups{}, "", "1"},
+		{"group is not a uuid", domain.FakeVendorGroups{Groups: map[string]string{vendorID: "not-a-uuid"}}, "", "1"},
 		{"party not configured", nil, "", "0"},
 	}
 	for _, tc := range cases {

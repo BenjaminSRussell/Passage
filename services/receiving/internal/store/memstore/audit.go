@@ -15,6 +15,19 @@ import (
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
 )
 
+func (s *Store) InvoiceVendor(ctx context.Context, id string) (vendorID string, err error) {
+	err = s.with(ctx, func(t *tenantData) error {
+		canonical, valid := ids.Canonical(id)
+		inv, ok := t.invoiceDocs[canonical]
+		if !valid || !ok {
+			return store.ErrInvoiceNotFound
+		}
+		vendorID = inv.VendorID
+		return nil
+	})
+	return vendorID, err
+}
+
 func (s *Store) ReleaseInvoice(ctx context.Context, id, legalEntityID, by string, fn store.ReleaseFunc) (out store.Invoice, err error) {
 	err = s.with(ctx, func(t *tenantData) error {
 		canonical, valid := ids.Canonical(id)

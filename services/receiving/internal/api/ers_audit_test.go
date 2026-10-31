@@ -1077,3 +1077,63 @@ func withoutUser(h headers) headers {
 	delete(h, tenant.HeaderUser)
 	return h
 }
+
+type countingGroups struct {
+	group string
+	calls *int
+}
+
+func (c countingGroups) VendorGroupID(context.Context, string, string) (string, error) {
+	*c.calls++
+	return c.group, nil
+}
+
+func lastPostedData(t *testing.T, rg *rig) string {
+	t.Helper()
+	evts := rg.st.Events()
+	last := evts[len(evts)-1]
+	if last.Type != "dev.passage.payables.invoice.posted.v1" {
+		t.Fatalf("last event %s", last.Type)
+	}
+	return string(last.Data)
+}
+
+func TestAuditRelease_PostedEventCarriesVendorGroup(t *testing.T) {
+	const group = "00000000-0000-4000-8000-0000000000c1"
+	calls := 0
+	rg := newRigPorts(memstore.New(), domain.PeriodOpen, func(p *api.Ports) {
+		p.AuditSampler = testSampler("seed-one-0123456789")
+		p.VendorGroups = countingGroups{group: group, calls: &calls}
+	})
+	rg.sampleRate(t, "100")
+	r := rg.posted(t, "PS-1", 10, 4)
+	held := rg.manualInvoice(t, "INV-1", r.ID, 4, "alice").invoice(t, http.StatusCreated)
+	if calls != 0 {
+		t.Fatalf("a held invoice looked the vendor up %d times", calls)
+	}
+	if code, body := rg.release(held.ID, "auditor"); code != http.StatusOK {
+		t.Fatalf("release %d %s", code, body)
+	}
+	if data := lastPostedData(t, rg); !strings.Contains(data, `"vendor_group_id":"`+group+`"`) || calls != 1 {
+		t.Fatalf("event %s after %d lookups", data, calls)
+	}
+}
+
+func TestErs_PostedEventCarriesVendorGroupAndLooksTheVendorUpOncePerRun(t *testing.T) {
+	const group = "00000000-0000-4000-8000-0000000000c1"
+	calls := 0
+	rg := newRigPorts(memstore.New(), domain.PeriodOpen, func(p *api.Ports) {
+		p.PurchaseOrders = domain.FakePurchaseOrders{Orders: map[string]domain.PurchaseOrder{poID: ersOrder("2.60", nil)}}
+		p.VendorGroups = countingGroups{group: group, calls: &calls}
+	})
+	rg.confirmErsPrice = "2.60"
+	rg.enableErs(t, true)
+	rg.posted(t, "PS-1", 10, 2)
+	rg.posted(t, "PS-2", 8, 2)
+	if run := rg.ersRun(t, http.StatusOK); len(run.Settled) != 2 {
+		t.Fatalf("run %+v", run)
+	}
+	if data := lastPostedData(t, rg); !strings.Contains(data, `"source":"ERS"`) || !strings.Contains(data, `"vendor_group_id":"`+group+`"`) || calls != 1 {
+		t.Fatalf("event %s after %d lookups, want one for the run", data, calls)
+	}
+}

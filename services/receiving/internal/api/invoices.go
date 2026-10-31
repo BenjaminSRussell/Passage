@@ -193,7 +193,7 @@ func (a *API) postVendorInvoice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	posted, err := a.submitInvoice(r.Context(), p, in)
+	posted, err := a.submitInvoice(r.Context(), nil, p, in)
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -201,7 +201,7 @@ func (a *API) postVendorInvoice(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, toInvoiceBody(posted))
 }
 
-func (a *API) submitInvoice(ctx context.Context, p tenant.Principal, in store.Invoice) (store.Invoice, error) {
+func (a *API) submitInvoice(ctx context.Context, memo groupMemo, p tenant.Principal, in store.Invoice) (store.Invoice, error) {
 	in.PostedBy = p.UserID
 	policy, err := a.store.AuditPolicy(ctx, in.LegalEntityID)
 	if err != nil {
@@ -217,7 +217,7 @@ func (a *API) submitInvoice(ctx context.Context, p tenant.Principal, in store.In
 	blocked := in.AuditReason != ""
 	vendorGroupID := ""
 	if !blocked {
-		vendorGroupID = a.vendorGroupID(ctx, in)
+		vendorGroupID = a.vendorGroupID(ctx, memo, in.ID, in.LegalEntityID, in.VendorID)
 	}
 	posted, err := a.store.PostInvoice(ctx, in, func(items []*domain.GrirItem) (store.InvoiceOutcome, error) {
 		lines := make([]domain.PostLine, len(in.Lines))
@@ -257,15 +257,30 @@ func (a *API) submitInvoice(ctx context.Context, p tenant.Principal, in store.In
 	return posted, nil
 }
 
-func (a *API) vendorGroupID(ctx context.Context, in store.Invoice) string {
+type groupMemo map[string]string
+
+func (a *API) vendorGroupID(ctx context.Context, memo groupMemo, invoiceID, legalEntityID, vendorID string) string {
 	if a.ports.VendorGroups == nil {
 		return ""
 	}
-	group, err := a.ports.VendorGroups.VendorGroupID(ctx, in.LegalEntityID, in.VendorID)
+	key := legalEntityID + "|" + vendorID
+	if group, ok := memo[key]; ok {
+		return group
+	}
+	group, err := a.ports.VendorGroups.VendorGroupID(ctx, legalEntityID, vendorID)
+	if err == nil {
+		var ok bool
+		if group, ok = ids.Canonical(group); !ok {
+			err = errors.New("party returned a vendor group that is not a UUID")
+		}
+	}
 	if err != nil {
+		group = ""
 		a.groupMissing.Add(1)
-		slog.WarnContext(ctx, "invoice posts without vendor_group_id", "err", err, "invoiceId", in.ID, "vendorId", in.VendorID, "notFound", errors.Is(err, domain.ErrVendorNotFound), "correlationId", middleware.GetReqID(ctx))
-		return ""
+		slog.WarnContext(ctx, "invoice posts without vendor_group_id", "err", err, "invoiceId", invoiceID, "vendorId", vendorID, "notFound", errors.Is(err, domain.ErrVendorNotFound), "correlationId", middleware.GetReqID(ctx))
+	}
+	if memo != nil {
+		memo[key] = group
 	}
 	return group
 }

@@ -60,6 +60,25 @@ func CheckRelease(inv Invoice, legalEntityID, by string) error {
 	return nil
 }
 
+func (s *Postgres) InvoiceVendor(ctx context.Context, id string) (string, error) {
+	tenantID, err := tenantOf(ctx)
+	if err != nil {
+		return "", err
+	}
+	id, ok := ids.Canonical(id)
+	if !ok {
+		return "", ErrInvoiceNotFound
+	}
+	var vendorID string
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT vendor_id::text FROM receiving_vendor_invoice WHERE tenant_id = $1 AND id = $2`, tenantID, id).Scan(&vendorID)
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrInvoiceNotFound
+	}
+	return vendorID, err
+}
+
 func (s *Postgres) ReleaseInvoice(ctx context.Context, id, legalEntityID, by string, fn ReleaseFunc) (Invoice, error) {
 	tenantID, err := tenantOf(ctx)
 	if err != nil {
