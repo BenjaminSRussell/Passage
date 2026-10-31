@@ -398,7 +398,7 @@ func TestExportGovernanceAndReadLogEndpoints(t *testing.T) {
 	if rec.Code != http.StatusOK || !rc.Logged || len(rc.Fields) != 1 || rc.RetentionDays != 730 {
 		t.Fatalf("read-log: %d %s", rec.Code, rec.Body)
 	}
-	if rec := serve(t, h, call{method: http.MethodPost, path: "/v1/compliance/read-log:classify", duties: view, body: ReadClassifyRequest{Fields: []string{"a"}, RetentionDays: 30}}); rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("retention under 90 days: %d", rec.Code)
+	if rec := serve(t, h, call{method: http.MethodPost, path: "/v1/compliance/read-log:classify", duties: view, body: map[string]any{"fields": []string{"a"}, "retentionDays": 30}}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("retentionDays in body: %d", rec.Code)
 	}
 }

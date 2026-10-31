@@ -200,7 +200,7 @@ document, the case machine never skips a state and no break-glass session exceed
 | `BREAKGLASS_REVIEW_DAYS` | `3` | tenant policy `breakglass.review_days`, 1..10 business days |
 | `SCREENING_THRESHOLD` | `0.88` | tenant policy `screening.threshold`, 0.70..0.99 |
 | `TRADE_LICENSE_CHECK` | `BLOCK` | legal entity policy `trade.license_check`: `BLOCK`, `WARN` or `OFF` |
-| `FIELDCRYPT_KEYS_FILE` / `FIELDCRYPT_KEYS`, `FIELDCRYPT_CURRENT_KEY_ID` | `id=base64(32 bytes)` lines (a mounted secret; Helm `fieldCrypt.keysSecret` and `fieldCrypt.currentKeyId`) and the key id in use. Erasure pseudonyms are an HMAC under a tenant key derived from the current key, so the key must stay outside the database; without it the erasure preview is a 503 `PRV-1211` and nothing changes. Rotating the current key changes the tokens of later erasures |
+| `FIELDCRYPT_KEYS_FILE` / `FIELDCRYPT_KEYS`, `FIELDCRYPT_CURRENT_KEY_ID` | `id=base64(32 bytes)` lines (a mounted secret; Helm `fieldCrypt.keysSecret` and `fieldCrypt.currentKeyId`) and the key id in use. Erasure pseudonyms are an HMAC under a tenant key derived from the current key, so the key must stay outside the database; without it the erasure preview is a 503 `PRV-1211` and nothing changes. Rotating the current key changes the tokens of later erasures, so do not rotate `FIELDCRYPT_CURRENT_KEY_ID` while erasure requests are open |
 | `HTTP_ADDR` / `ADMIN_ADDR` | `:8080` / `:9090` | listeners |
 
 ## Error codes
@@ -253,8 +253,8 @@ document, the case machine never skips a state and no break-glass session exceed
 | `PRV-1207` | 422 | rejection without a reason |
 | `PRV-1208` | 200 (`code` in the purge check body) | record skipped by the retention purge (BR-48.6) |
 | `PRV-1209` | 404 | no subject request with that id |
-| `PRV-1211` | 503 | no pseudonymization key configured; the erasure changed nothing |
 | `PRV-1210` | 412 | stale `If-Match` on a subject request action (missing `If-Match` is 428 `SOD-1109`) |
+| `PRV-1211` | 503 | no pseudonymization key configured; the erasure changed nothing |
 | `SOD-1120` | 422 | campaign start or close missing, or window outside 3..60 days |
 | `SOD-1121` | 422 | a manager cannot certify their own roles |
 | `SOD-1122` | 422 | campaign line incomplete, duplicated or with an unknown decision |

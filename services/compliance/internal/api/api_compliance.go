@@ -73,10 +73,18 @@ type IncidentTransitionResponse struct {
 }
 
 // ReadClassifyRequest is the body of POST /v1/compliance/read-log:classify. The
-// shipped read-log rules always apply; retentionDays 0 means 730.
+// shipped read-log rules and the default retention always apply.
 type ReadClassifyRequest struct {
-	Fields        []string `json:"fields"`
-	RetentionDays int      `json:"retentionDays"`
+	Fields []string `json:"fields"`
+}
+
+// ExportEvaluateRequest is the body of POST /v1/compliance/export-governance:evaluate.
+// Only these fields are client-set; the policy is always the server's.
+type ExportEvaluateRequest struct {
+	Classification domain.ExportClassification `json:"classification"`
+	Channel        domain.ExportChannel        `json:"channel"`
+	Rows           int                         `json:"rows"`
+	Reason         string                      `json:"reason,omitempty"`
 }
 
 var (
@@ -273,7 +281,11 @@ func (a *API) previewErasure(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnprocessableEntity, domain.CodePrivacyTransition, fmt.Sprintf("an erasure can be previewed once scope is discovered, not in %s", req.State)))
 		return
 	}
-	p, _ := tenant.FromContext(r.Context())
+	p, ok := tenant.FromContext(r.Context())
+	if !ok {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "missing or malformed tenant"))
+		return
+	}
 	out, err := domain.PseudonymizeSubject(domain.PseudonymizeInput{Keys: a.cfg.Keys, TenantID: p.TenantID, SubjectRef: req.SubjectRef, HoldIDs: req.HoldIDs, Record: in.Record})
 	if err != nil {
 		httpx.Fail(w, r, domainProblem(err))
@@ -419,7 +431,7 @@ func (a *API) evaluateExportGovernance(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
 	}
-	var in domain.ExportRequest
+	var in ExportEvaluateRequest
 	if err := httpx.Decode(r, &in); err != nil {
 		httpx.Fail(w, r, err)
 		return
@@ -432,7 +444,7 @@ func (a *API) evaluateExportGovernance(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, invalid(fields))
 		return
 	}
-	out, err := domain.DecideExport(in)
+	out, err := domain.DecideExport(domain.ExportRequest{Classification: in.Classification, Channel: in.Channel, Rows: in.Rows, Reason: in.Reason})
 	if err != nil {
 		httpx.Fail(w, r, domainProblem(err))
 		return
@@ -457,7 +469,7 @@ func (a *API) classifyReadLog(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, invalid(fields))
 		return
 	}
-	out, err := domain.ClassifyRead(req.Fields, nil, req.RetentionDays)
+	out, err := domain.ClassifyRead(req.Fields, nil, 0)
 	if err != nil {
 		httpx.Fail(w, r, domainProblem(err))
 		return

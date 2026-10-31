@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -146,5 +147,15 @@ func TestMACIsKeyedPerTenantAndSeparateFromSeal(t *testing.T) {
 	}
 	if _, err := k.MAC("", []byte("x")); err == nil {
 		t.Fatal("mac without a tenant id must fail")
+	}
+}
+
+func TestMACKnownAnswer(t *testing.T) {
+	got, err := keysWith(t, "k1", "k1").MAC("tenant-a", []byte("subject|email"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hex := fmt.Sprintf("%x", got); hex != "9d68c037adb7f1ab6a7e652dc822e16f9ef453aa924977cca7363d4b0ecaacd9" {
+		t.Fatalf("mac drifted: %s", hex)
 	}
 }
