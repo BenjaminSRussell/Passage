@@ -158,6 +158,21 @@ func TestBuildPortsUsesRealAdaptersWhenConfigured(t *testing.T) {
 	if _, real := ports.PurchaseOrders.(*purchasing.Client); !real {
 		t.Fatalf("purchase orders is %T despite PURCHASING_URL", ports.PurchaseOrders)
 	}
+	if !ports.RequirePOLine || fakes.RequirePOLine {
+		t.Fatalf("poLineNo must be required exactly when PURCHASING_URL is set: real %v fake %v", ports.RequirePOLine, fakes.RequirePOLine)
+	}
+}
+
+func TestBuildPortsIgnoresTheRemovedLegacyPOLineFlag(t *testing.T) {
+	ports, err := buildPorts(func(k string) string {
+		return map[string]string{"LEDGER_URL": "http://l", "CLOSE_URL": "http://c", "PURCHASING_URL": "http://p", "PASSAGE_ALLOW_FAKES": "1", "RECEIVING_ALLOW_LEGACY_PO_LINE": "1"}[k]
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ports.RequirePOLine {
+		t.Fatal("RECEIVING_ALLOW_LEGACY_PO_LINE=1 must no longer waive poLineNo")
+	}
 }
 
 func TestBuildPortsWiresPlanAndOwnershipLookups(t *testing.T) {

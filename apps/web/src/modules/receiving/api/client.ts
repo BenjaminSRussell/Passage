@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { defaultFetch, request, type FetchLike } from "../../../shell/api/http";
+import { defaultFetch, readProblem, request, type FetchLike } from "../../../shell/api/http";
 
 export { ApiError, newKey } from "../../../shell/api/http";
 
@@ -52,12 +52,11 @@ export type Receipt = z.infer<typeof receiptSchema>;
 const receiptPageSchema = z.object({ items: z.array(receiptSchema), nextCursor: z.string().optional() });
 export type ReceiptPage = z.infer<typeof receiptPageSchema>;
 
+/** The service reads the open quantity, net price and poLineId from this purchase order line. */
 export interface ArrivalLineInput {
-  poLineId: string;
+  poLineNo: number;
   productId: string;
-  orderedRemaining: string;
   overDeliveryPct: string;
-  unitPrice: string;
   unit: string;
   batchTracked: boolean;
   serialTracked: boolean;
@@ -107,6 +106,25 @@ export function fetchReceipts(q: ReceiptQuery = {}, fetchImpl: FetchLike = defau
 
 export function fetchReceipt(id: string, fetchImpl: FetchLike = defaultFetch): Promise<Receipt> {
   return request("GET", `/receipts/${encodeURIComponent(id)}`, receiptSchema, fetchImpl);
+}
+
+const purchaseOrderLineSchema = z.object({
+  lineNo: z.number().int(),
+  productId: z.string().optional(),
+  description: z.string().optional(),
+  qty: z.string(),
+  unit: z.string(),
+  status: z.string(),
+});
+export type PurchaseOrderLine = z.infer<typeof purchaseOrderLineSchema>;
+
+const purchaseOrderSchema = z.object({ lines: z.array(purchaseOrderLineSchema) });
+
+/** Lines of a purchase order in services/purchasing, so an arrival line can name its poLineNo. */
+export async function fetchPurchaseOrderLines(purchaseOrderId: string, fetchImpl: FetchLike = defaultFetch): Promise<PurchaseOrderLine[]> {
+  const res = await fetchImpl(`/api/v1/procurement/purchase-orders/${encodeURIComponent(purchaseOrderId)}`, { method: "GET", headers: { Accept: "application/json" } });
+  if (!res.ok) throw await readProblem(res);
+  return purchaseOrderSchema.parse(await res.json()).lines;
 }
 
 /** POST /arrivals: records a delivery at the dock in state ARRIVED. */
