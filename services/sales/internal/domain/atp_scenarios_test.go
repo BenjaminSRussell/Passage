@@ -1,8 +1,10 @@
 package domain
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -11,10 +13,13 @@ import (
 )
 
 // atpFixture is one case of testdata/atp-100.json (PRD §5.27.9 "atp-100"). The
-// expected promises were computed by an oracle written separately from this
-// package (integer arithmetic over the BR-27.1 definitions); the first nine
-// cases are the worked examples of BR-27.1, AC-27.1 and AC-27.8 and the
-// bucket-boundary edge cases.
+// expected promises come from testdata/gen_atp100.py, an independent Python
+// reference (python3 -I, seed 27) that decides feasibility by simulating every
+// running balance rather than with this package's suffix minimum, checks itself
+// against hand-derived literals for the first nine cases (the worked examples
+// of BR-27.1, AC-27.1 and AC-27.8 and the bucket-boundary edge cases) and
+// re-verifies each generated expectation by brute force. Every scenario has a
+// receipt after on-hand stock; a fifth are over-committed projections.
 type atpFixture struct {
 	ID           string `json:"id"`
 	Note         string `json:"note"`
@@ -101,5 +106,46 @@ func TestATPScenarios_100(t *testing.T) {
 				t.Fatalf("source %s", got.Source)
 			}
 		})
+	}
+}
+
+// TestATPScenarios_EveryScenarioHasIncomingSupply: the AC asks for scenarios
+// "with incoming supply", so each one has a receipt after the on-hand bucket.
+func TestATPScenarios_EveryScenarioHasIncomingSupply(t *testing.T) {
+	for _, fx := range loadATPFixtures(t) {
+		incoming := false
+		for i, p := range fx.Periods {
+			if i > 0 && decimal.RequireFromString(p.Supply).IsPositive() {
+				incoming = true
+			}
+		}
+		if !incoming {
+			t.Errorf("%s (%s) has no receipt after on-hand", fx.ID, fx.Note)
+		}
+	}
+}
+
+// TestATPScenarios_FixtureMatchesReference: the committed fixture is exactly
+// what the independent reference generates (after its own self-checks pass),
+// so no expectation is edited by hand or taken from this engine.
+func TestATPScenarios_FixtureMatchesReference(t *testing.T) {
+	py, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not installed")
+	}
+	out := filepath.Join(t.TempDir(), "atp-100.json")
+	if msg, err := exec.Command(py, "-I", filepath.Join("..", "..", "testdata", "gen_atp100.py"), out).CombinedOutput(); err != nil {
+		t.Fatalf("reference generator failed: %v\n%s", err, msg)
+	}
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile(filepath.Join("..", "..", "testdata", "atp-100.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatal("testdata/atp-100.json differs from the reference output; regenerate it with python3 -I testdata/gen_atp100.py")
 	}
 }
