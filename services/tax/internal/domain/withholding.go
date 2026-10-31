@@ -12,17 +12,13 @@ import (
 const (
 	PartyVendor   = "vendor"
 	PartyCustomer = "customer"
-
-	ThresholdExcess = "excess"
-	ThresholdAll    = "all"
 )
 
 type WithholdingRate struct {
-	ValidFrom     Date   `json:"valid_from"`
-	ValidTo       Date   `json:"valid_to"`
-	RatePct       Dec    `json:"rate_pct"`
-	Threshold     *Dec   `json:"threshold"`
-	ThresholdMode string `json:"threshold_mode"`
+	ValidFrom Date `json:"valid_from"`
+	ValidTo   Date `json:"valid_to"`
+	RatePct   Dec  `json:"rate_pct"`
+	Threshold *Dec `json:"threshold"`
 }
 
 type WithholdingCode struct {
@@ -91,9 +87,6 @@ func taxableBase(rate WithholdingRate, gross, paid decimal.Decimal) decimal.Deci
 	if !cumulative.GreaterThan(rate.Threshold.Decimal) {
 		return decimal.Zero
 	}
-	if rate.ThresholdMode == ThresholdAll {
-		return gross
-	}
 	return decimal.Min(gross, cumulative.Sub(rate.Threshold.Decimal))
 }
 
@@ -134,17 +127,24 @@ func validateWithholding(req WithholdingRequest) error {
 		return invalid("code", "code is required")
 	case !req.GrossAmount.GreaterThan(decimal.Zero):
 		return invalid("gross_amount", "gross_amount must be positive")
+	case req.GrossAmount.Exponent() < -money.MinorUnits(req.Currency):
+		return invalid("gross_amount", "gross_amount has more decimals than %s allows", req.Currency)
 	case req.PaidToDate.IsNegative():
 		return invalid("paid_to_date", "paid_to_date must not be negative")
 	}
+	seen := map[string]bool{}
 	for i, c := range req.Codes {
+		if seen[c.Code] {
+			return invalid(fmt.Sprintf("codes[%d].code", i), "duplicate withholding code %q", c.Code)
+		}
+		seen[c.Code] = true
 		for j, r := range c.Rates {
 			field := fmt.Sprintf("codes[%d].rates[%d]", i, j)
 			switch {
 			case r.RatePct.IsNegative() || r.RatePct.GreaterThan(hundred):
 				return &Error{Code: CodeRateInvalid, Field: field + ".rate_pct", Detail: "rate_pct must be between 0 and 100"}
-			case !oneOf(r.ThresholdMode, "", ThresholdExcess, ThresholdAll):
-				return invalid(field+".threshold_mode", "unknown threshold_mode %q", r.ThresholdMode)
+			case !r.ValidTo.IsZero() && r.ValidTo.Before(r.ValidFrom.Time):
+				return invalid(field+".valid_to", "valid_to must not be before valid_from")
 			case r.Threshold != nil && r.Threshold.IsNegative():
 				return invalid(field+".threshold", "threshold must not be negative")
 			}

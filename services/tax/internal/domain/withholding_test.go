@@ -39,9 +39,7 @@ func TestCalculateWithholding(t *testing.T) {
 		{"below threshold", func(r *domain.WithholdingRequest) { r.GrossAmount = domain.D("500") }, "0", "0", "500"},
 		{"cumulative exactly at threshold", func(r *domain.WithholdingRequest) { r.GrossAmount = domain.D("100"); r.PaidToDate = domain.D("500") }, "0", "0", "100"},
 		{"one cent over threshold", func(r *domain.WithholdingRequest) { r.GrossAmount = domain.D("100.01"); r.PaidToDate = domain.D("500") }, "0.01", "0", "100.01"},
-		{"threshold all mode taxes the whole payment", func(r *domain.WithholdingRequest) {
-			r.Codes[0].Rates[0].ThresholdMode = domain.ThresholdAll
-		}, "1000", "240", "760"},
+		{"AC-13.9 550 paid plus 100 invoice over 600", func(r *domain.WithholdingRequest) { r.GrossAmount = domain.D("100"); r.PaidToDate = domain.D("550") }, "50", "12", "88"},
 		{"effective-dated rate before change", func(r *domain.WithholdingRequest) {
 			r.Code, r.PaymentDate = "TDS194C", domain.Day("2025-12-31")
 		}, "1000", "10", "990"},
@@ -96,7 +94,10 @@ func TestCalculateWithholding_Errors(t *testing.T) {
 		{"bad party type", func(r *domain.WithholdingRequest) { r.PartyType = "employee" }, domain.CodeValidation},
 		{"lower-case currency", func(r *domain.WithholdingRequest) { r.Currency = "usd" }, domain.CodeValidation},
 		{"missing payment date", func(r *domain.WithholdingRequest) { r.PaymentDate = domain.Date{} }, domain.CodeValidation},
-		{"unknown threshold mode", func(r *domain.WithholdingRequest) { r.Codes[0].Rates[0].ThresholdMode = "sideways" }, domain.CodeValidation},
+		{"valid_to before valid_from", func(r *domain.WithholdingRequest) { r.Codes[0].Rates[0].ValidTo = domain.Day("2023-01-01") }, domain.CodeValidation},
+		{"duplicate code", func(r *domain.WithholdingRequest) { r.Codes = append(r.Codes, r.Codes[0]) }, domain.CodeValidation},
+		{"gross with sub-cent decimals", func(r *domain.WithholdingRequest) { r.GrossAmount = domain.D("10.001") }, domain.CodeValidation},
+		{"gross with decimals in zero-decimal currency", func(r *domain.WithholdingRequest) { r.Currency, r.GrossAmount = "JPY", domain.D("10.5") }, domain.CodeValidation},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

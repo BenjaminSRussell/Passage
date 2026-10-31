@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -44,5 +45,17 @@ func TestWithholding(t *testing.T) {
 				t.Fatalf("got %d %s; want %d containing %s", rec.Code, rec.Body.String(), tc.wantStatus, tc.wantBody)
 			}
 		})
+	}
+}
+
+func TestWithholdingMetricIsSeparateFromCalculations(t *testing.T) {
+	r, a := newRouter(fakeDB{}, nil)
+	do(r, http.MethodPost, withholdingPath, withholdingBody, testkit.TenantID(1), withholdingDuty)
+	rec := httptest.NewRecorder()
+	a.Metrics().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	for _, want := range []string{"tax_withholding_calculations_total 1", "tax_calculations_total 0"} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("metrics missing %q: %s", want, rec.Body.String())
+		}
 	}
 }

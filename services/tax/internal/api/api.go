@@ -38,6 +38,7 @@ type API struct {
 	calculations    atomic.Int64
 	failures        atomic.Int64
 	fallbacks       atomic.Int64
+	withholdings    atomic.Int64
 }
 
 type calculateRequest struct {
@@ -87,7 +88,7 @@ func (a *API) withholding(w http.ResponseWriter, r *http.Request) {
 		a.reject(w, r, err)
 		return
 	}
-	a.calculations.Add(1)
+	a.withholdings.Add(1)
 	httpx.JSON(w, http.StatusOK, res)
 }
 
@@ -194,6 +195,7 @@ func (a *API) Metrics() http.Handler {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		fmt.Fprintf(w, "# TYPE tax_calculations_total counter\ntax_calculations_total %d\n", a.calculations.Load())
 		fmt.Fprintf(w, "# TYPE tax_calculation_failures_total counter\ntax_calculation_failures_total %d\n", a.failures.Load())
+		fmt.Fprintf(w, "# TYPE tax_withholding_calculations_total counter\ntax_withholding_calculations_total %d\n", a.withholdings.Load())
 		fmt.Fprintf(w, "# TYPE tax_provider_fallbacks_total counter\ntax_provider_fallbacks_total %d\n", a.fallbacks.Load())
 	})
 }
