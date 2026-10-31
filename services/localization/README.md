@@ -10,7 +10,10 @@ seven first country packs from `countrypacks/` at start-up, validates them, and 
   `vatDueSales` … `totalAcquisitionsExVAT`, `finalised`): every box present within HMRC's range and scale
   (boxes 1 to 4 signed with pence, box 5 non-negative, boxes 6 to 9 signed whole pounds), `finalised` true,
   box 3 = box 1 + box 2 and box 5 = |box 3 - box 4|. Amounts are decimals, never floats;
-- (slice 2) the India TDS calculation for one payment, `POST /v1/localization/in/tds:withhold` (see Wave reference).
+- (slice 2) the India TDS calculation for one payment, `POST /v1/localization/in/tds:withhold` (see Wave reference);
+- (Wave 48 proof, AC1) a statutory validator per pack, `domain.ValidateStatutory(report, fileName, raw)`, and
+  one statutory-report fixture per pack under `countrypacks/<code>/fixtures/` (fx-statutory-7). No endpoint;
+  the validators are pure and run in the tests. See "Statutory fixtures" below.
 
 The compliance workspace (`apps/web/src/modules/compliance`, routes `/compliance/packs` and
 `/compliance/packs/:code`) lists the packs, shows a pack's contents and runs the install and tax-id checks;
@@ -28,6 +31,26 @@ go vet ./... && go test ./...
 
 The tests read `countrypacks/` directly; they do not need a database. The service refuses to start when
 any pack fails validation, or when the directory does not hold the seven packs.
+
+## Statutory fixtures (AC1, fx-statutory-7)
+
+| Pack | Report | Fixture | Checked against |
+|---|---|---|---|
+| UK | `UK_MTD_VAT` | `uk/fixtures/mtd-vat-26a1.json` | HMRC VAT (MTD) API 1.0 submit-return body and its two submission rules |
+| US | `US_1099_FIRE` | `us/fixtures/fire-1099nec-2025.txt` | IRS Publication 1220 (Rev. 05-2026, TY 2025) T/A/B/C/F record layouts for Form 1099-NEC: 750 positions, blank and numeric fields, sequence numbers, payee counts, C control totals |
+| DE | `DE_UStVA` | `de/fixtures/ustva-2025-01.xml` | the ELSTER UStVA Nutzdaten conventions: Zeitraum, 13-digit Steuernummer, whole-euro bases, Kz35/Kz36 pair, Kz83 recomputed |
+| FR | `FR_FEC` | `fr/fixtures/732829320FEC20251231.txt` | article A47 A-1 LPF: file name with SIREN check digit, 18 named columns, dates, comma amounts, paired columns, validation order, balanced entries |
+| IN | `IN_GSTR1` | `in/fixtures/gstr1-082025.json` | GSTN offline-tool GSTR-1 JSON, b2b and hsn: GSTIN check characters, period, invoice number and date, place of supply, rate slabs, IGST or CGST = SGST, HSN summary reconciled |
+| MX | `MX_CFDI40` | `mx/fixtures/cfdi40-ingreso.xml` | SAT cfdv40.xsd and tdCFDI.xsd patterns and the Anexo 20 arithmetic; also SAT's own XSD with `xmllint` when `PASSAGE_SAT_CFDI_XSD` points at a local copy (`TestMXFixtureAgainstSATXSD`) |
+| CA | `CA_GST34` | `ca/fixtures/gst34-2025q3.xml` | the GST34 form: BN with Luhn check digit and RT account, period, line 101 whole dollars, 105 = 103 + 104, 108 = 106 + 107, 109 = 105 - 108 |
+
+`TestEveryPackShipsAValidStatutoryFixture` validates the seven fixtures with 0 errors;
+`stat_mutation_test.go` holds about 120 adversarial mutations (one regulator-rejected change each, plus
+legal variations that must pass). `internal/domain/testdata/statutory_ref.py` (stdlib, `python3 -I`)
+rebuilds the FIRE file from Pub 1220 positions and recomputes every derived value of the other fixtures
+without the Go code; `TestStatutoryReferenceScriptAgrees` runs it. The validators encode the published
+layouts; only MX has a regulator-published machine schema we can run, and its catalogue file (about 6 MB)
+is not committed, so that check is opt-in. What stays open is in `NOT-IMPLEMENTED.md`.
 
 ## Deploy
 

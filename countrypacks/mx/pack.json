@@ -18,6 +18,12 @@
       "format": "CSV",
       "mandate": "SAT DIOT informative return",
       "requiredFields": ["rfc", "tipoTercero", "tipoOperacion", "importe"]
+    },
+    {
+      "code": "MX_CFDI40",
+      "format": "XML",
+      "mandate": "SAT CFDI 4.0 (Anexo 20, cfdv40.xsd)",
+      "requiredFields": ["Version", "Fecha", "SubTotal", "Total", "Emisor", "Receptor", "Conceptos"]
     }
   ]
 }

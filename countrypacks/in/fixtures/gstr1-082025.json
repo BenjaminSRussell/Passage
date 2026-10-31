@@ -1,0 +1,46 @@
+{
+  "gstin": "27AAPFU0939F1ZV",
+  "fp": "082025",
+  "b2b": [
+    {
+      "ctin": "29AAACR5055K1Z3",
+      "inv": [
+        {
+          "inum": "INV/25-26/0101",
+          "idt": "05-08-2025",
+          "val": 118000.00,
+          "pos": "29",
+          "rchrg": "N",
+          "inv_typ": "R",
+          "itms": [
+            { "num": 1, "itm_det": { "txval": 100000.00, "rt": 18, "iamt": 18000.00, "camt": 0, "samt": 0, "csamt": 0 } }
+          ]
+        }
+      ]
+    },
+    {
+      "ctin": "27AABCS1429B1ZU",
+      "inv": [
+        {
+          "inum": "INV/25-26/0102",
+          "idt": "19-08-2025",
+          "val": 10850.00,
+          "pos": "27",
+          "rchrg": "N",
+          "inv_typ": "R",
+          "itms": [
+            { "num": 1, "itm_det": { "txval": 5000.00, "rt": 12, "iamt": 0, "camt": 300.00, "samt": 300.00, "csamt": 0 } },
+            { "num": 2, "itm_det": { "txval": 5000.00, "rt": 5, "iamt": 0, "camt": 125.00, "samt": 125.00, "csamt": 0 } }
+          ]
+        }
+      ]
+    }
+  ],
+  "hsn": {
+    "data": [
+      { "num": 1, "hsn_sc": "8471", "desc": "Portable computers", "uqc": "NOS", "qty": 10, "rt": 18, "txval": 100000.00, "iamt": 18000.00, "camt": 0, "samt": 0, "csamt": 0 },
+      { "num": 2, "hsn_sc": "3004", "desc": "Medicaments", "uqc": "BOX", "qty": 50, "rt": 12, "txval": 5000.00, "iamt": 0, "camt": 300.00, "samt": 300.00, "csamt": 0 },
+      { "num": 3, "hsn_sc": "610910", "desc": "Cotton T-shirts", "uqc": "PCS", "qty": 100, "rt": 5, "txval": 5000.00, "iamt": 0, "camt": 125.00, "samt": 125.00, "csamt": 0 }
+    ]
+  }
+}

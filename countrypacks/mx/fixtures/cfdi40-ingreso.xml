@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- MX_CFDI40 fixture: an income (I) CFDI 4.0 before stamping. Sello and Certificado are placeholders
+     (the seal is applied by the PAC flow, wave 35); the structure follows SAT's cfdv40.xsd.
+     Line 1: 2 x 15500.00 = 31000.00, IVA 16% 4960.00. Line 2: 3 x 1250.50 = 3751.50, IVA 16% 600.24.
+     SubTotal 34751.50; TotalImpuestosTrasladados 5560.24; Total 40311.74. -->
+<cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/4" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://www.sat.gob.mx/cfd/4 http://www.sat.gob.mx/sitio_internet/cfd/4/cfdv40.xsd"
+  Version="4.0" Serie="A" Folio="1024" Fecha="2025-08-05T10:15:00"
+  Sello="UExBQ0VIT0xERVI=" NoCertificado="30001000000500003416" Certificado="UExBQ0VIT0xERVI="
+  FormaPago="03" MetodoPago="PUE" SubTotal="34751.50" Moneda="MXN" Total="40311.74"
+  TipoDeComprobante="I" Exportacion="01" LugarExpedicion="64000">
+  <cfdi:Emisor Rfc="EKU9003173C9" Nombre="ESCUELA KEMPER URGATE" RegimenFiscal="601"/>
+  <cfdi:Receptor Rfc="XOJI740919U48" Nombre="INGRID XODAR JIMENEZ" DomicilioFiscalReceptor="88380"
+    RegimenFiscalReceptor="612" UsoCFDI="G03"/>
+  <cfdi:Conceptos>
+    <cfdi:Concepto ClaveProdServ="43211503" NoIdentificacion="NB-14" Cantidad="2" ClaveUnidad="H87" Unidad="Pieza"
+      Descripcion="Computadora portatil 14 pulgadas" ValorUnitario="15500.00" Importe="31000.00" ObjetoImp="02">
+      <cfdi:Impuestos>
+        <cfdi:Traslados>
+          <cfdi:Traslado Base="31000.00" Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.160000" Importe="4960.00"/>
+        </cfdi:Traslados>
+      </cfdi:Impuestos>
+    </cfdi:Concepto>
+    <cfdi:Concepto ClaveProdServ="84111506" Cantidad="3" ClaveUnidad="E48" Unidad="Servicio"
+      Descripcion="Servicio de facturacion mensual" ValorUnitario="1250.50" Importe="3751.50" ObjetoImp="02">
+      <cfdi:Impuestos>
+        <cfdi:Traslados>
+          <cfdi:Traslado Base="3751.50" Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.160000" Importe="600.24"/>
+        </cfdi:Traslados>
+      </cfdi:Impuestos>
+    </cfdi:Concepto>
+  </cfdi:Conceptos>
+  <cfdi:Impuestos TotalImpuestosTrasladados="5560.24">
+    <cfdi:Traslados>
+      <cfdi:Traslado Base="34751.50" Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.160000" Importe="5560.24"/>
+    </cfdi:Traslados>
+  </cfdi:Impuestos>
+</cfdi:Comprobante>

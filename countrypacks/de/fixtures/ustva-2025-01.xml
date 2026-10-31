@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DE_UStVA fixture: January 2025 monthly advance VAT return, the Nutzdaten part of the ELSTER UStVA
+     transfer. Kz81 and Kz86 are tax bases in whole euros; Kz66 and Kz83 carry cents with a period as
+     the decimal separator. Kz83 = 19% x 48250 + 7% x 3120 - 4711.38 = 9167.50 + 218.40 - 4711.38 = 4674.52.
+     Kz41 (intra-Community supplies) is tax free and does not enter Kz83. -->
+<Anmeldungssteuern art="UStVA" version="2025">
+  <Erstellungsdatum>20250210</Erstellungsdatum>
+  <Steuerfall>
+    <Umsatzsteuervoranmeldung>
+      <Jahr>2025</Jahr>
+      <Zeitraum>01</Zeitraum>
+      <Steuernummer>9198011310010</Steuernummer>
+      <Kz41>12000</Kz41>
+      <Kz81>48250</Kz81>
+      <Kz86>3120</Kz86>
+      <Kz66>4711.38</Kz66>
+      <Kz83>4674.52</Kz83>
+    </Umsatzsteuervoranmeldung>
+  </Steuerfall>
+</Anmeldungssteuern>

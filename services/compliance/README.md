@@ -182,7 +182,13 @@ check the append-only tables refuse UPDATE and DELETE.
 Fixture `testdata/sod-50.json` (fx-sod-50) plants 50 users across the seed rules.
 `TestDetect_PlantedFixtureNoFalseNegatives` asserts every planted conflict is detected and nothing else
 fires; `TestEvaluate_PlantedFiftyReconcileWithRecomputation` stores them and reconciles the OPEN count and
-the `conflict.detected` events with an independent recomputation (PRD §9.48.9). Rapid property tests
+the `conflict.detected` events with an independent recomputation (PRD §9.48.9). Fixture
+`testdata/sod-50-distinct.json` plants 50 pairwise distinct role combinations (roles holding both duties
+of a rule, several conflicts per user, all 11 seed rules; 81 conflicts) and 12 near misses;
+`testdata/sod_ref.py` (stdlib, `python3 -I`) recomputes its expectations from the seed rules.
+`TestDetect_FiftyDistinctCombinationsAndNearMisses` checks detection and the simulate block, and
+`TestMitigate_FiftyDistinctCombinationsRecordEveryApproval` stores them, refuses self-approval and records
+a second approver's mitigation on all 81. Rapid property tests
 assert a role set holding both duties of any seed rule is never missed, sampling at 100% selects every
 document, the case machine never skips a state and no break-glass session exceeds 240 minutes.
 
