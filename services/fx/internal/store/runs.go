@@ -47,16 +47,17 @@ type Run struct {
 	StartedAt      time.Time  `json:"startedAt"`
 	FinishedAt     *time.Time `json:"finishedAt,omitempty"`
 	LastSuccessAt  *time.Time `json:"lastSuccessAt,omitempty"`
+	ValidFrom      *time.Time `json:"validFrom,omitempty"`
 }
 
 const runColumns = `r.id, r.provider, t.code, r.run_date, r.status, r.attempts, r.pairs_imported, r.pairs_unchanged,
-	coalesce(r.error, ''), r.started_at, r.finished_at, r.last_success_at
+	coalesce(r.error, ''), r.started_at, r.finished_at, r.last_success_at, r.valid_from
 	from provider_import_run r join exchange_rate_type t on t.tenant_id = r.tenant_id and t.id = r.rate_type_id`
 
 func scanRun(row pgx.Row) (Run, error) {
 	var r Run
 	err := row.Scan(&r.ID, &r.Provider, &r.RateType, &r.RunDate, &r.Status, &r.Attempts, &r.PairsImported, &r.PairsUnchanged,
-		&r.Error, &r.StartedAt, &r.FinishedAt, &r.LastSuccessAt)
+		&r.Error, &r.StartedAt, &r.FinishedAt, &r.LastSuccessAt, &r.ValidFrom)
 	return r, err
 }
 
@@ -161,10 +162,10 @@ func (s *Postgres) RecordAttempt(ctx context.Context, runID string, attempts int
 	return s.ownedUpdate(ctx, runID, `update provider_import_run set attempts=$4 where tenant_id=$1 and id=$2 and status='running' and started_at=$3`, attempts)
 }
 
-func (s *Postgres) FinishRunSucceeded(ctx context.Context, runID string, imported, unchanged int) error {
+func (s *Postgres) FinishRunSucceeded(ctx context.Context, runID string, imported, unchanged int, validFrom time.Time) error {
 	err := s.ownedUpdate(ctx, runID, `update provider_import_run
-		set status='succeeded', pairs_imported=$4, pairs_unchanged=$5, error=null, finished_at=$6, last_success_at=$6
-		where tenant_id=$1 and id=$2 and status='running' and started_at=$3`, imported, unchanged, s.now())
+		set status='succeeded', pairs_imported=$4, pairs_unchanged=$5, error=null, finished_at=$6, last_success_at=$6, valid_from=$7
+		where tenant_id=$1 and id=$2 and status='running' and started_at=$3`, imported, unchanged, s.now(), nullDate(validFrom))
 	if err == nil {
 		s.release(ctx, runID)
 	}
@@ -268,4 +269,11 @@ func (s *Postgres) LastSuccess(ctx context.Context, provider, rateType string) (
 			where r.tenant_id=$1 and r.provider=$2 and t.code=$3`, p.TenantID, provider, rateType).Scan(&at)
 	})
 	return at, err
+}
+
+func nullDate(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
 }

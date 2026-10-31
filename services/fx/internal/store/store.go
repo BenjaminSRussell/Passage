@@ -88,7 +88,7 @@ type Store interface {
 	Ping(ctx context.Context) error
 	StartRun(ctx context.Context, provider, rateType string, runDate time.Time) (Run, bool, error)
 	RecordAttempt(ctx context.Context, runID string, attempts int) error
-	FinishRunSucceeded(ctx context.Context, runID string, imported, unchanged int) error
+	FinishRunSucceeded(ctx context.Context, runID string, imported, unchanged int, validFrom time.Time) error
 	FinishRunFailed(ctx context.Context, runID string, attempts int, cause error, retryable bool) error
 	FinishRunDegraded(ctx context.Context, runID string, attempts int, cause error, retryable bool) error
 	FinishRunAborted(ctx context.Context, runID string, attempts int, cause error) error
