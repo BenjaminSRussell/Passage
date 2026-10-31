@@ -144,6 +144,27 @@ func TestProperty_LinesAreOrderIndependent(t *testing.T) {
 	})
 }
 
+// TestDecompose_HalfMinorUnitRoundsOnTheExactValue is fixture order PO-0036 of
+// testdata/variance-200, worked by hand: 55 of 76 finished, setup estimate
+// 2,264.42 per lot, standard 4.1998 per unit, 2 lots charged at 4,697.29.
+// Absorbed estimate 2,264.42 × 55 ÷ 76 = 1,638.725; PV = 9,394.58 − 1,638.725 =
+// 7,755.855 → 7,755.86; LSV = 1,638.725 − 230.989 = 1,407.736 → 1,407.74;
+// total = 9,394.58 − 230.989 = 9,163.591 → 9,163.59, so the −0.01 residual
+// goes to QV. Dividing 55 by 76 first rounded PV to 7,755.85.
+func TestDecompose_HalfMinorUnitRoundsOnTheExactValue(t *testing.T) {
+	o := Order{PlannedQty: d("76"), RAFQty: d("55"), Lines: []OrderLine{
+		{Component: CompIndMat, Planned: true, Fixed: true, EstPerLot: d("2264.42"), StdUnitCost: d("4.1998"), ActualQty: d("2"), ActualUnitCost: d("4697.29")},
+	}}
+	got, err := Decompose(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Types.Price.Equal(d("7755.86")) || !got.Types.LotSize.Equal(d("1407.74")) ||
+		!got.Types.Quantity.Equal(d("-0.01")) || !got.Total.Equal(d("9163.59")) {
+		t.Errorf("decomposition = %+v, want PV 7755.86 LSV 1407.74 QV -0.01 total 9163.59", got.Types)
+	}
+}
+
 func TestDecompose_RoundsToTheCurrencyMinorUnit(t *testing.T) {
 	// 10 consumed against 9.5 standard at 101.4 JPY: QV 50.7 rounds to 51 yen, and the identity holds in whole yen.
 	o := Order{Currency: "JPY", PlannedQty: d("2"), RAFQty: d("2"), Lines: []OrderLine{
