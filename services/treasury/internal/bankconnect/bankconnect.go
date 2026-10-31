@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -137,7 +138,7 @@ func (s Sender) Send(ctx context.Context, f File) (Receipt, error) {
 
 // VaultTransit signs through Vault's transit engine (POST /v1/transit/sign/:key/sha2-256).
 // Only the token, key name and input travel; Vault hashes and signs the input
-// itself. The algorithm is pinned to RSASSA-PSS with SHA-256 (EBICS A006).
+// itself. The algorithm is pinned to RSASSA-PSS with SHA-256 and a salt as long as the hash (EBICS A006).
 type VaultTransit struct {
 	Addr   string
 	Token  string
@@ -148,7 +149,7 @@ func (v VaultTransit) Sign(ctx context.Context, keyName string, payload []byte) 
 	if err := checkURL(v.Addr); err != nil {
 		return Signature{}, err
 	}
-	body, err := json.Marshal(map[string]string{"input": base64.StdEncoding.EncodeToString(payload), "signature_algorithm": "pss"})
+	body, err := json.Marshal(map[string]string{"input": base64.StdEncoding.EncodeToString(payload), "signature_algorithm": "pss", "salt_length": "hash"})
 	if err != nil {
 		return Signature{}, err
 	}
@@ -237,8 +238,15 @@ func (e EBICS) Send(ctx context.Context, f File, sig Signature) (Receipt, error)
 		return Receipt{}, err
 	}
 	req.Header.Set("Content-Type", "text/xml; charset=UTF-8")
+	if err := ctx.Err(); err != nil {
+		return Receipt{}, fmt.Errorf("ebics upload not started: %w", err)
+	}
 	resp, err := httpClient(e.Client).Do(req)
 	if err != nil {
+		var opErr *net.OpError
+		if errors.As(err, &opErr) && opErr.Op == "dial" {
+			return Receipt{}, fmt.Errorf("ebics upload not sent: %w", err)
+		}
 		return Receipt{}, fmt.Errorf("ebics upload: %w: %w", ErrAmbiguous, err)
 	}
 	defer resp.Body.Close()

@@ -63,8 +63,9 @@ func (v *fakeVault) serve(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Input     string `json:"input"`
 		Algorithm string `json:"signature_algorithm"`
+		Salt      string `json:"salt_length"`
 	}
-	if err := json.Unmarshal(raw, &in); err != nil || in.Algorithm != "pss" {
+	if err := json.Unmarshal(raw, &in); err != nil || in.Algorithm != "pss" || in.Salt != "hash" {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
@@ -221,7 +222,7 @@ func TestVaultTransit_OnlyTokenKeyNameAndInputLeaveTheService(t *testing.T) {
 	}
 	body := vault.bodies[0]
 	var in map[string]string
-	if err := json.Unmarshal([]byte(body), &in); err != nil || len(in) != 2 || in["input"] != base64.StdEncoding.EncodeToString(pain001.Data) || in["signature_algorithm"] != "pss" {
+	if err := json.Unmarshal([]byte(body), &in); err != nil || len(in) != 3 || in["salt_length"] != "hash" || in["input"] != base64.StdEncoding.EncodeToString(pain001.Data) || in["signature_algorithm"] != "pss" {
 		t.Fatalf("vault request body = %s", body)
 	}
 	if strings.Contains(body, base64.StdEncoding.EncodeToString(x509.MarshalPKCS1PrivateKey(vault.priv))) {
@@ -369,4 +370,19 @@ func (c *cancelCheckAudit) RecordBankFile(ctx context.Context, e AuditEntry) err
 		c.cancel()
 	}
 	return nil
+}
+
+func TestSender_ConnectionRefusedIsFailedNotUnknown(t *testing.T) {
+	vault := newFakeVault(t)
+	closed := httptest.NewServer(http.NotFoundHandler())
+	addr := closed.URL
+	closed.Close()
+	audit := &memoryAudit{}
+	_, err := Sender{Signer: vault.signer(), Transport: EBICS{URL: addr}, Audit: audit}.Send(context.Background(), pain001)
+	if err == nil || errors.Is(err, ErrAmbiguous) {
+		t.Fatalf("err = %v", err)
+	}
+	if len(audit.rows) != 2 || audit.rows[1].Event != EventFailed {
+		t.Fatalf("audit rows = %+v", audit.rows)
+	}
 }
