@@ -36,6 +36,11 @@ type asc606Scenario struct {
 		SatisfiedOn string `json:"satisfiedOn"`
 	} `json:"obligations"`
 	Expected struct {
+		Rejected       string `json:"rejected"`
+		ClosingByMonth []struct {
+			Month   string `json:"month"`
+			Closing string `json:"closing"`
+		} `json:"closingByMonth"`
 		RecognizedAsOf    string `json:"recognizedAsOf"`
 		DeferredAdditions string `json:"deferredAdditions"`
 		DeferredAsOf      string `json:"deferredAsOf"`
@@ -61,8 +66,12 @@ func scenarioContract(t *testing.T, sc asc606Scenario, legalEntityID string) Con
 	for i, o := range sc.Obligations {
 		obs[i] = domain.Obligation{ID: ids.New(), SSP: decimal.RequireFromString(o.SSP), SSPSource: o.SSPSource, Method: o.Method}
 	}
-	price := decimal.RequireFromString(sc.TransactionPrice)
-	allocated, err := domain.Allocate(money.Amount{Value: price, Currency: sc.Currency}, obs, sc.ResidualRule)
+	if err := domain.CheckSSPSources(obs); err != nil {
+		t.Fatal(err)
+	}
+	priceAmount := money.Amount{Value: decimal.RequireFromString(sc.TransactionPrice), Currency: sc.Currency}.Round()
+	price := priceAmount.Value
+	allocated, err := domain.Allocate(priceAmount, obs, sc.ResidualRule)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,6 +204,9 @@ func TestASC606Fixture40_RecognizeAndReconcileGL2400(t *testing.T) {
 	ctx := tenantCtx(1, "")
 	for _, sc := range fx.Scenarios {
 		t.Run(sc.ID, func(t *testing.T) {
+			if sc.Expected.Rejected != "" {
+				t.Skipf("rejected with %s, covered by the domain fixture test", sc.Expected.Rejected)
+			}
 			le := ids.New()
 			created, err := s.CreateContract(ctx, scenarioContract(t, sc, le))
 			if err != nil {
@@ -238,7 +250,10 @@ func TestASC606Fixture40_RecognizeAndReconcileGL2400(t *testing.T) {
 
 			gl := loadGL2400(t, pool, le)
 			prev := decimal.Zero
-			for _, m := range months {
+			if len(sc.Expected.ClosingByMonth) != len(months) {
+				t.Fatalf("fixture has %d monthly closings, want %d", len(sc.Expected.ClosingByMonth), len(months))
+			}
+			for i, m := range months {
 				end := m.AddDate(0, 1, -1)
 				rf, err := s.RollForward(ctx, le, sc.Currency, m, end)
 				if err != nil {
@@ -249,6 +264,10 @@ func TestASC606Fixture40_RecognizeAndReconcileGL2400(t *testing.T) {
 				}
 				if bal := gl.balance(end); !rf.Closing.Equal(bal) {
 					t.Errorf("%s roll-forward closes at %s, GL 2400 from events %s (diff %s)", m.Format("2006-01"), rf.Closing, bal, rf.Closing.Sub(bal))
+				}
+				want := sc.Expected.ClosingByMonth[i]
+				if want.Month != m.Format("2006-01") || !rf.Closing.Equal(decimal.RequireFromString(want.Closing)) {
+					t.Errorf("%s closes at %s, reference %s closes at %s", m.Format("2006-01"), rf.Closing, want.Month, want.Closing)
 				}
 				prev = rf.Closing
 			}

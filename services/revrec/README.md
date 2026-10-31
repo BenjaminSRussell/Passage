@@ -59,8 +59,11 @@ contracts and runs from its reads.
   (LARGEST by default). The BR-29.1 bundle gives 7,200.00 / 1,350.00 / 2,250.00;
   at 10,799.99 the hardware takes 7,200.01.
 - **SSP source** (BR-29.2): the caller sends the resolved SSP and its source. At
-  most one obligation per contract may be RESIDUAL (REV-0003); a RESIDUAL
-  obligation is returned with the BIL-0009 warning.
+  most one obligation per contract may be RESIDUAL (REV-0003). The engine derives
+  a RESIDUAL obligation's SSP as the transaction price less the other SSPs (its
+  input `ssp` is ignored and may be omitted) and refuses the contract when that
+  is not positive (REV-0008). A RESIDUAL obligation is returned with the BIL-0009
+  warning.
 - **Schedules** (FR-29.8): POINT_IN_TIME is one line recognized at `satisfiedOn`,
   the transfer date, when the contract is created; the invoice credits that
   revenue to 4000, so no `schedule.recognized` is emitted for it. MILESTONE is
@@ -139,6 +142,7 @@ duties in step.
 | `REV-0001` | 422 | Rule violation: no obligations, non-positive SSP, negative price, missing transfer date |
 | `REV-0002` | 422 | Ratable term missing or ending before it starts |
 | `REV-0003` | 422 | More than one RESIDUAL obligation in a contract (BR-29.2) |
+| `REV-0008` | 422 | RESIDUAL SSP (transaction price less the other SSPs) is not positive (BR-29.2) |
 | `REV-0004` | 409 | Milestone already satisfied on another date (or reversed) |
 | `REV-0005` | 422 | Only a MILESTONE obligation can be satisfied |
 | `REV-0006` | 422 | Milestone satisfied before the contract date |

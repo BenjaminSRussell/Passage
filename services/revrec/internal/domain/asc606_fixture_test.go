@@ -33,6 +33,7 @@ type asc606Scenario struct {
 		SatisfiedOn string `json:"satisfiedOn"`
 	} `json:"obligations"`
 	Expected struct {
+		Rejected  string   `json:"rejected"`
 		Allocated []string `json:"allocated"`
 		Schedules [][]struct {
 			Date   *string `json:"date"`
@@ -91,12 +92,21 @@ func TestASC606Fixture40_AllocateAndSchedule(t *testing.T) {
 				t.Fatal(err)
 			}
 			allocated, err := Allocate(money.Amount{Value: d(sc.TransactionPrice), Currency: sc.Currency}, obs, sc.ResidualRule)
+			if sc.Expected.Rejected != "" {
+				if got := code(err); got != sc.Expected.Rejected {
+					t.Fatalf("allocation error %q, want %s", got, sc.Expected.Rejected)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
-			recognized, deferred := decimal.Zero, decimal.Zero
+			recognized, deferred, additions := decimal.Zero, decimal.Zero, decimal.Zero
 			for i, o := range allocated {
 				in := sc.Obligations[i]
+				if o.Method != MethodPointInTime {
+					additions = additions.Add(o.Allocated)
+				}
 				if !o.Allocated.Equal(d(sc.Expected.Allocated[i])) {
 					t.Errorf("%s allocated %s, want %s", o.ID, o.Allocated, sc.Expected.Allocated[i])
 				}
@@ -131,6 +141,9 @@ func TestASC606Fixture40_AllocateAndSchedule(t *testing.T) {
 						deferred = deferred.Add(l.Amount)
 					}
 				}
+			}
+			if !additions.Equal(d(sc.Expected.DeferredAdditions)) {
+				t.Errorf("deferred additions %s, want %s", additions, sc.Expected.DeferredAdditions)
 			}
 			if !recognized.Equal(d(sc.Expected.RecognizedAsOf)) || !deferred.Equal(d(sc.Expected.DeferredAsOf)) {
 				t.Errorf("as of %s recognized %s deferred %s, want %s and %s", sc.AsOf, recognized, deferred, sc.Expected.RecognizedAsOf, sc.Expected.DeferredAsOf)

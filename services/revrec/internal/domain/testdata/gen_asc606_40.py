@@ -11,6 +11,10 @@
 #   allocation   share_i = truncate(price * ssp_i / sum(ssp)) to the minor unit;
 #                the residual goes to the FIRST, LAST or LARGEST-SSP (first on
 #                ties) obligation, so the shares sum to the price.
+#   RESIDUAL     BR-29.2: the SSP of a RESIDUAL obligation is the transaction
+#                price less the SSPs of the other obligations (its input "ssp" is
+#                ignored by the engine); when that is not positive the residual
+#                approach cannot be used and the contract is rejected (REV-0008).
 #   POINT_IN_TIME one line on the transfer date (the contract date here).
 #   MILESTONE    one undated line, recognized on its satisfaction date.
 #   RATABLE      one line per calendar month the term touches, dated at the
@@ -21,6 +25,9 @@
 #                satisfied by then).
 #   deferred     RATABLE and MILESTONE allocations less what of them is
 #                recognized (POINT_IN_TIME revenue never enters 2400).
+#   closing      per month from the contract month to the as-of month: the
+#                deferred allocations less the deferred lines recognized by that
+#                month end (the 2400 balance after each month's run).
 #
 # Run from this directory: python3 gen_asc606_40.py
 import calendar
@@ -104,22 +111,39 @@ def ratable(amount, start, end, basis, exp):
     return lines
 
 
+def effective_ssps(sc):
+    price = Fraction(sc["transactionPrice"])
+    obs = sc["obligations"]
+    others = sum(Fraction(o["ssp"]) for o in obs if o["sspSource"] != "RESIDUAL")
+    ssps = []
+    for o in obs:
+        ssps.append(price - others if o["sspSource"] == "RESIDUAL" else Fraction(o["ssp"]))
+    return ssps
+
+
 def expect(sc):
     exp = EXP[sc["currency"]]
     obs = sc["obligations"]
     as_of = datetime.date.fromisoformat(sc["asOf"])
-    shares = allocate(Fraction(sc["transactionPrice"]), [Fraction(o["ssp"]) for o in obs], sc["residualRule"], exp)
+    ssps = effective_ssps(sc)
+    if any(s <= 0 for s in ssps):
+        return {"rejected": "REV-0008"}
+    shares = allocate(Fraction(sc["transactionPrice"]), ssps, sc["residualRule"], exp)
     schedules, recognized, deferred_add, deferred_rec = [], Fraction(0), Fraction(0), Fraction(0)
+    deferred_lines = []
     for o, share in zip(obs, shares):
         m = o["method"]
         if m == "RATABLE":
             ls = ratable(share, datetime.date.fromisoformat(o["termStart"]), datetime.date.fromisoformat(o["termEnd"]), sc["ratableBasis"], exp)
             lines = [(d, a) for d, a in ls]
             done = sum((a for d, a in ls if d <= as_of), Fraction(0))
+            deferred_lines += ls
         elif m == "MILESTONE":
             lines = [(None, share)]
             sat = o.get("satisfiedOn")
             done = share if sat and datetime.date.fromisoformat(sat) <= as_of else Fraction(0)
+            if sat:
+                deferred_lines.append((datetime.date.fromisoformat(sat), share))
         else:
             lines = [(datetime.date.fromisoformat(o["satisfiedOn"]), share)]
             done = share
@@ -128,7 +152,15 @@ def expect(sc):
             deferred_add += share
             deferred_rec += done
         schedules.append([{"date": iso(d), "amount": fmt(a, exp)} for d, a in lines])
+    closing = []
+    month = datetime.date.fromisoformat(sc["contractDate"]).replace(day=1)
+    while month <= as_of:
+        end = month_end(month)
+        closing.append({"month": month.strftime("%Y-%m"), "closing": fmt(deferred_add - sum((a for d, a in deferred_lines if d <= end), Fraction(0)), exp)})
+        month = add_months(month, 1)
+    assert closing[-1]["closing"] == fmt(deferred_add - deferred_rec, exp), closing[-1]
     return {
+        "closingByMonth": closing,
         "allocated": [fmt(s, exp) for s in shares],
         "schedules": schedules,
         "recognizedAsOf": fmt(recognized, exp),
@@ -178,7 +210,7 @@ def curated():
             "transactionPrice": "1000.000", "residualRule": "FIRST", "ratableBasis": "DAILY", "contractDate": "2027-01-17", "asOf": "2027-06-30",
             "obligations": [
                 ob("equipment", "700.000", "POINT_IN_TIME", "LIST", satisfied="2027-01-17"),
-                ob("service", "333.333", "RATABLE", "RESIDUAL", term=("2027-01-17", "2027-12-31")),
+                ob("service", "300.000", "RATABLE", "RESIDUAL", term=("2027-01-17", "2027-12-31")),
             ],
         },
         {
@@ -244,6 +276,10 @@ def generated(rng, start_no, count):
         factor = Fraction(rng.randint(60, 110), 100)
         price = round_half_even(ssp_total * factor - Fraction(rng.randint(0, 99), 10**(exp + 2)), exp)
         as_of = month_end(add_months(contract.replace(day=1), rng.randint(0, 14)))
+        if residual_at >= 0:
+            derived = price - sum((Fraction(o["ssp"]) for i, o in enumerate(obs) if i != residual_at), Fraction(0))
+            if derived > 0:
+                obs[residual_at]["ssp"] = fmt(derived, exp)
         out.append({
             "id": "A606-%02d" % (start_no + k),
             "description": "seeded bundle: %d obligations, %s, price %s%% of SSP total" % (n, cur, factor * 100),
@@ -271,11 +307,16 @@ def main():
     assert len(scenarios) == 40
     for sc in scenarios:
         sc["expected"] = expect(sc)
+    residual_priced = [sc for sc in scenarios if any(o["sspSource"] == "RESIDUAL" for o in sc["obligations"])]
+    rejected = [sc for sc in residual_priced if "rejected" in sc["expected"]]
+    assert rejected and len(rejected) < len(residual_priced), (len(rejected), len(residual_priced))
+    assert all("rejected" not in sc["expected"] for sc in scenarios if sc not in residual_priced)
     by_id = {sc["id"]: sc for sc in scenarios}
     s1 = by_id["A606-01"]["expected"]["schedules"][2]
     assert [l["amount"] for l in s1] == ["133.06"] + ["187.50"] * 11 + ["54.44"], s1
     s3 = by_id["A606-03"]["expected"]["schedules"][2]
     assert [l["amount"] for l in s3] == ["173.08"] * 12 + ["173.04"], s3
+    assert by_id["A606-06"]["expected"]["allocated"] == ["700.000", "300.000"], by_id["A606-06"]["expected"]["allocated"]
     for sid, want in HAND.items():
         for k, v in want.items():
             got = by_id[sid]["expected"][k]

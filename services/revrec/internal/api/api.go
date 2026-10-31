@@ -214,7 +214,7 @@ func toDomain(in []obligationDTO, fields map[string]string) ([]domain.Obligation
 		if decimalText.MatchString(o.SSP) {
 			ssp = decimal.RequireFromString(o.SSP)
 		}
-		if !ssp.IsPositive() {
+		if !ssp.IsPositive() && o.SSPSource != domain.SSPResidual {
 			fields[key("ssp")] = "must be a positive decimal with at most 6 fraction digits"
 			valid = false
 		}
