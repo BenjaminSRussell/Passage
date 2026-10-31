@@ -1,15 +1,15 @@
 asyncapi: 3.0.0
 info:
   title: Passage Process Manufacturing events
-  version: 0.3.0
+  version: 0.4.0
   description: >
     CloudEvents 1.0 published through the transactional outbox (Debezium
     outbox router), each in the same transaction as the change it reports.
     Event types follow dev.passage.<context>.<entity>.<verb>.v<n>; the context
     is production, as in PRD 4.24.5, and the entity drops the PRD hyphen
     (batch-order → batchorder) because the kernel rule allows none. Payloads
-    match internal/events/events.go. batch.attributes-recorded arrives with the
-    slice that persists batch attributes (see NOT-IMPLEMENTED.md).
+    match internal/events/events.go. The PRD's batch.attributes-recorded is
+    batch.attributesrecorded for the same reason.
 defaultContentType: application/cloudevents+json
 channels:
   formula:
@@ -31,6 +31,20 @@ channels:
     messages:
       coProductAllocated:
         $ref: '#/components/messages/CoProductAllocated'
+  batchAttribute:
+    address: passage.production.batchattribute
+    messages:
+      batchAttributeDefined:
+        $ref: '#/components/messages/BatchAttributeDefined'
+  batch:
+    address: passage.production.batch
+    messages:
+      batchRegistered:
+        $ref: '#/components/messages/BatchRegistered'
+      batchAttributesRecorded:
+        $ref: '#/components/messages/BatchAttributesRecorded'
+      batchDispositionChanged:
+        $ref: '#/components/messages/BatchDispositionChanged'
 operations:
   publishFormulaCreated:
     action: send
@@ -57,6 +71,26 @@ operations:
     channel: { $ref: '#/channels/coProduct' }
     messages: [{ $ref: '#/channels/coProduct/messages/coProductAllocated' }]
     summary: The batch cost of an ended order was split over its main item, co-products and by-product burdens (the ledger posts from it)
+  publishBatchAttributeDefined:
+    action: send
+    channel: { $ref: '#/channels/batchAttribute' }
+    messages: [{ $ref: '#/channels/batchAttribute/messages/batchAttributeDefined' }]
+    summary: An item got a batch attribute definition (quality, inventory consume it)
+  publishBatchRegistered:
+    action: send
+    channel: { $ref: '#/channels/batch' }
+    messages: [{ $ref: '#/channels/batch/messages/batchRegistered' }]
+    summary: A batch got its quality record (inventory, traceability consume it)
+  publishBatchAttributesRecorded:
+    action: send
+    channel: { $ref: '#/channels/batch' }
+    messages: [{ $ref: '#/channels/batch/messages/batchAttributesRecorded' }]
+    summary: Attribute values were recorded on a batch; failures count the values outside their limits (quality raises exceptions from it)
+  publishBatchDispositionChanged:
+    action: send
+    channel: { $ref: '#/channels/batch' }
+    messages: [{ $ref: '#/channels/batch/messages/batchDispositionChanged' }]
+    summary: A batch moved to another disposition; picking, reservation and shipping honour it
 components:
   messages:
     FormulaCreated:
@@ -84,6 +118,26 @@ components:
       summary: The batch cost of an ended order was allocated; the shares add up to the batch cost exactly
       contentType: application/cloudevents+json
       payload: { $ref: '#/components/schemas/CoProductAllocatedData' }
+    BatchAttributeDefined:
+      name: dev.passage.production.batchattribute.defined.v1
+      summary: An item got a batch attribute definition
+      contentType: application/cloudevents+json
+      payload: { $ref: '#/components/schemas/BatchAttributeDefinedData' }
+    BatchRegistered:
+      name: dev.passage.production.batch.registered.v1
+      summary: A batch got its quality record
+      contentType: application/cloudevents+json
+      payload: { $ref: '#/components/schemas/BatchRegisteredData' }
+    BatchAttributesRecorded:
+      name: dev.passage.production.batch.attributesrecorded.v1
+      summary: Attribute values were recorded on a batch
+      contentType: application/cloudevents+json
+      payload: { $ref: '#/components/schemas/BatchAttributesRecordedData' }
+    BatchDispositionChanged:
+      name: dev.passage.production.batch.dispositionchanged.v1
+      summary: A batch moved to another disposition
+      contentType: application/cloudevents+json
+      payload: { $ref: '#/components/schemas/BatchDispositionChangedData' }
   schemas:
     FormulaCreatedData:
       type: object
@@ -171,3 +225,61 @@ components:
         currency: { type: string }
         batchCost: { type: string }
         shares: { type: array, items: { $ref: '#/components/schemas/AllocationShare' } }
+    BatchAttributeDefinedData:
+      type: object
+      required: [definitionId, itemId, name, kind, role]
+      properties:
+        definitionId: { type: string, format: uuid }
+        itemId: { type: string, format: uuid }
+        name: { type: string }
+        kind: { type: string, enum: [numeric, text, enum, date] }
+        role: { type: string, enum: [generic, potency] }
+        target: { type: string }
+        min: { type: string }
+        max: { type: string }
+        options: { type: array, items: { type: string } }
+    BatchRegisteredData:
+      type: object
+      required: [batchId, legalEntityId, itemId, batchNumber, disposition]
+      properties:
+        batchId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        itemId: { type: string, format: uuid }
+        batchNumber: { type: string }
+        batchOrderId: { type: string, format: uuid }
+        disposition: { type: string, enum: [available, on-hold, rejected, quarantine] }
+    RecordedAttribute:
+      type: object
+      required: [name, kind, value, pass]
+      properties:
+        name: { type: string }
+        kind: { type: string, enum: [numeric, text, enum, date] }
+        value: { type: string, description: The number, text or yyyy-mm-dd date as a string. }
+        pass: { type: boolean, description: False for a numeric value outside its limits (an EBR exception). }
+        detail: { type: string }
+    BatchAttributesRecordedData:
+      type: object
+      required: [batchId, legalEntityId, itemId, batchNumber, version, attributes, failures]
+      properties:
+        batchId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        itemId: { type: string, format: uuid }
+        batchNumber: { type: string }
+        version: { type: integer, description: The batch version after the change. }
+        expiryDate: { type: string, format: date, description: The batch's expiry date after the change, when it has one. }
+        potency: { type: string, description: The value recorded for the item's potency-role attribute, when this recording carries one. }
+        attributes: { type: array, items: { $ref: '#/components/schemas/RecordedAttribute' } }
+        failures: { type: integer, description: Values outside their limits. }
+    BatchDispositionChangedData:
+      type: object
+      required: [batchId, legalEntityId, itemId, batchNumber, from, to, reason, segregationConflict, version]
+      properties:
+        batchId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        itemId: { type: string, format: uuid }
+        batchNumber: { type: string }
+        from: { type: string, enum: [available, on-hold, rejected, quarantine] }
+        to: { type: string, enum: [available, on-hold, rejected, quarantine] }
+        reason: { type: string }
+        segregationConflict: { type: boolean, description: The same user recorded attribute values on this batch (PRD 4.24.17). }
+        version: { type: integer, description: The batch version after the change. }

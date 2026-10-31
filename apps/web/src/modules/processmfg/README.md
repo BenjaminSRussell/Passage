@@ -1,4 +1,4 @@
-# processmfg web module (PSG-24 slices 1 to 3)
+# processmfg web module (PSG-24 slices 1 to 3, 9 and 11)
 
 Front end for `services/processmfg`. Discovered by the shell through `module.ts`. Pages use the
 `shell/ui` primitives and `pages.module.css` (tokens only), as in `docs/design-system.md`.
@@ -14,6 +14,10 @@ Front end for `services/processmfg`. Discovered by the shell through `module.ts`
 | `/processmfg/batch-orders` | Batch order list with status filter | `GET /api/v1/production/batch-orders` | `production.batch-order.read` |
 | `/processmfg/batch-orders/new` | Create a batch order from a formula and batch size (FR-24.2) | `GET /formulas`, `POST /batch-orders` | `production.batch-order.write` |
 | `/processmfg/batch-orders/:id` | Batch order detail: facts, scaled lines, rescale while planned or released (version checked; a stale version offers a reload), then release, start, report as finished (reported quantities per output line) and end with the cost allocation (method, currency, batch cost, weights, by-product rates); an ended order shows its stored cost split | `GET /batch-orders/{id}`, `POST /batch-orders/{id}:rescale`, `:release`, `:start`, `:report-finished`, `:end` | `production.batch-order.read` / `.write`; `:end` needs `production.journal.post` |
+| `/processmfg/batches` | Batch list with disposition filter (loading, empty, error with retry); rows open the batch | `GET /api/v1/production/batches` | `production.batch-order.read` |
+| `/processmfg/batches/new` | Register a batch (item id, batch number, starting disposition) | `POST /batches` | `production.batch-attribute.write` |
+| `/processmfg/batches/:id` | Batch detail: current attributes with the limit result, recording form with one field per attribute definition (version checked, values outside limits reported), disposition form with a reason (hidden, with an explanation, without the duty), disposition history with the segregation flag (same user recorded attributes), attribute history, and a reload action on a stale version | `GET /batches/{id}`, `GET /batch-attribute-definitions`, `PUT /batches/{id}/attributes`, `POST /batches/{id}:disposition` | `production.batch-order.read`; recording `production.batch-attribute.write`; disposition `production.batch-disposition.write` |
+| `/processmfg/attribute-definitions` | Attribute definitions by item (filter by item id) and a form to define one: kind, role (generic or potency, numeric only), numeric limits and target, enum options | `GET` and `POST /batch-attribute-definitions` | `production.batch-attribute.write` |
 | `/processmfg/potency` | Potency consumption calculator (BR-24.2) | `POST /api/v1/production/potency:consume` | `production.batch-order.read` |
 | `/processmfg/allocation` | Co-product allocation preview (BR-24.3) | `POST /api/v1/production/co-products:allocate` | `production.journal.post` |
 | `/processmfg/derivation` | Batch derivation preview: rule (attribute, aggregation, fixed value) and sender batches; shows the derived value and warns about senders without a value (FR-24.15, PMF-0007) | `POST /api/v1/production/batch-derivation:preview` | `production.batch-attribute.write` |
@@ -37,7 +41,9 @@ npx vitest --run src/modules/processmfg
 npx tsc --noEmit
 ```
 
-`pages.test.tsx` stubs `fetch` and renders the module's routes in a MemoryRouter, so it needs no
+`batchrecords.test.tsx` covers the slice-11 screens (list filter, empty and error states, register,
+recording with the version and the outside-limits report, client-side validation, the disposition
+duty and reason, histories, definitions). `pages.test.tsx` stubs `fetch` and renders the module's routes in a MemoryRouter, so it needs no
 service. It covers the list, empty, error and detail states, the formula designer's percent
 check, create with Idempotency-Key, the scale preview (AC-24.1), rescale with version and its
 PMF-0104 path, the calculators (BR-24.2, BR-24.3), and the slice-2 previews: derivation
@@ -52,7 +58,6 @@ rule, refusal), plus the in-repo WCAG checks.
 
 - Item, site and legal-entity pickers: forms take item ids as UUIDs until a shared item lookup
   exists in the shell.
-- Recording batch attributes and changing disposition (with history), the derivation monitor,
-  EBR review and signature prompts wait for their endpoints (see
+- The derivation monitor, EBR review and signature prompts wait for their endpoints (see
   `services/processmfg/NOT-IMPLEMENTED.md`). The slice-2 and slice-3 pages take batches as typed
   input until a wave-16 batch lookup exists.

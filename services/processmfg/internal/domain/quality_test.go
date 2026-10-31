@@ -77,6 +77,8 @@ func TestCheckAttributes_Refusals(t *testing.T) {
 		{"enum without options", []AttributeDef{{Name: "g", Kind: AttrEnum}}, nil},
 		{"options on numeric", []AttributeDef{{Name: "p", Kind: AttrNumeric, Options: []string{"A"}}}, nil},
 		{"unnamed", []AttributeDef{{Kind: AttrText}}, nil},
+		{"empty option", []AttributeDef{{Name: "g", Kind: AttrEnum, Options: []string{"A", " "}}}, nil},
+		{"repeated option", []AttributeDef{{Name: "g", Kind: AttrEnum, Options: []string{"A", "A"}}}, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -84,6 +86,26 @@ func TestCheckAttributes_Refusals(t *testing.T) {
 				t.Fatalf("err = %v, want %s", err, CodeInvalid)
 			}
 		})
+	}
+}
+
+func TestCheckRole(t *testing.T) {
+	for _, tc := range []struct {
+		kind, role string
+		ok         bool
+	}{
+		{AttrNumeric, RoleGeneric, true},
+		{AttrNumeric, RolePotency, true},
+		{AttrText, RoleGeneric, true},
+		{AttrEnum, RolePotency, false},
+		{AttrDate, RolePotency, false},
+		{AttrNumeric, "assay", false},
+		{AttrNumeric, "", false},
+	} {
+		err := CheckRole("a", tc.kind, tc.role)
+		if (err == nil) != tc.ok || (err != nil && codeOf(err) != CodeInvalid) {
+			t.Errorf("%s/%q: err = %v, want ok=%v", tc.kind, tc.role, err, tc.ok)
+		}
 	}
 }
 

@@ -66,3 +66,36 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		t.Fatalf("router walk yielded %d operations: %v", len(served), served)
 	}
 }
+
+var componentKey = regexp.MustCompile(`^    ([A-Za-z0-9_]+):`)
+
+// A component defined twice is silently overwritten by most YAML readers, so
+// one of the two schemas would vanish from the contract.
+func TestOpenAPIComponentsAreUnique(t *testing.T) {
+	spec, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	section, seen := "", map[string]bool{}
+	inComponents := false
+	for _, line := range strings.Split(string(spec), "\n") {
+		switch {
+		case line == "components:":
+			inComponents = true
+		case line != "" && !strings.HasPrefix(line, " "):
+			inComponents = false
+		case !inComponents:
+		case strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "   ") && strings.HasSuffix(line, ":"):
+			section = strings.TrimSuffix(strings.TrimSpace(line), ":")
+		case componentKey.MatchString(line):
+			key := section + "." + componentKey.FindStringSubmatch(line)[1]
+			if seen[key] {
+				t.Errorf("components %s is defined twice", key)
+			}
+			seen[key] = true
+		}
+	}
+	if !seen["schemas.BatchRecord"] || !seen["schemas.Batch"] {
+		t.Fatalf("parser found no schemas: %d keys", len(seen))
+	}
+}

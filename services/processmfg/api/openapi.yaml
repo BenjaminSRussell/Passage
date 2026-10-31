@@ -3,12 +3,12 @@ info:
   title: Passage Process Manufacturing
   version: 0.4.0
   description: >
-    Process manufacturing (wave 24, PSG-24 slices 1 to 3 and 9): formulas, batch orders
+    Process manufacturing (wave 24, PSG-24 slices 1 to 3, 9 and 11): formulas, batch orders
     scaled from a formula snapshot, the potency, catch-weight and co-product
     allocation calculators (slice 1), the batch derivation, merge, consolidation,
     customer requirement and EBR approval previews (slice 2), and the batch
     attribute check, the picking proposal and the rework plan (slice 3), and the
-    batch-order lifecycle with co-product cost allocation at End (slice 9). Routes
+    batch-order lifecycle with co-product cost allocation at End (slice 9), and the batch quality record: attribute definitions, batches, recorded attribute values with the limit check and the disposition with its history (slice 11). Routes
     match the handlers in internal/api (checked by internal/api/openapi_test.go).
     Errors are RFC 9457 problem details (application/problem+json) with a stable
     `code`; see README.md. The gateway routes /api/v1/production/* paths listed
@@ -493,6 +493,167 @@ paths:
       responses:
         '200': { description: Ready }
         '503': { description: Database unreachable }
+  /v1/production/batch-attribute-definitions:
+    post:
+      operationId: defineBatchAttribute
+      summary: Define a batch attribute of an item (FR-24.5)
+      x-passage-duty: production.batch-attribute.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/BatchAttributeDefinitionRequest' } } }
+      responses:
+        '201':
+          description: 'Created. An idempotent replay returns 200 with Idempotent-Replayed: true. Writes dev.passage.production.batchattribute.defined.v1.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/BatchAttributeDefinition' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: PMF-0110 when the item already defines an attribute of that name, or already has a potency attribute.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listBatchAttributeDefinitions
+      summary: Batch attribute definitions by item and name
+      x-passage-duty: production.batch-order.read
+      parameters:
+        - { name: itemId, in: query, description: Only the definitions of this item., schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Definitions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/BatchAttributeDefinition' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batches:
+    post:
+      operationId: registerBatch
+      summary: Register a batch for quality records (FR-24.5)
+      x-passage-duty: production.batch-attribute.write
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/BatchRequest' } } }
+      responses:
+        '201':
+          description: 'Created at version 1 (disposition defaults to available). A replay returns 200 with Idempotent-Replayed: true. Writes dev.passage.production.batch.registered.v1.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/BatchRecord' } } }
+        '400':
+          description: COM-0001 for a malformed body, or a batch order of another legal entity than the batch.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '403':
+          description: AUTH-0003 when the duty is missing or legalEntityId is outside the caller's scope.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '404':
+          description: PMF-0102 when batchOrderId names no batch order in the caller's scope.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: PMF-0109 when the item already has a batch with that number.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listBatches
+      summary: Batches, newest first (attributes and histories omitted)
+      x-passage-duty: production.batch-order.read
+      parameters:
+        - { name: itemId, in: query, schema: { type: string, format: uuid } }
+        - { name: disposition, in: query, schema: { $ref: '#/components/schemas/Disposition' } }
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Batches
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/BatchRecord' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batches/{id}:
+    get:
+      operationId: getBatch
+      summary: One batch with its current attributes and both histories
+      x-passage-duty: production.batch-order.read
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The batch
+          content: { application/json: { schema: { $ref: '#/components/schemas/BatchRecord' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: PMF-0108
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batches/{id}/attributes:
+    put:
+      operationId: recordBatchAttributes
+      summary: Record attribute values on a batch with the limit check (FR-24.5)
+      x-passage-duty: production.batch-attribute.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RecordAttributesRequest' } } }
+      responses:
+        '200':
+          description: 'The batch at version + 1 and the check of each value; a numeric value outside min/max is recorded with pass false (an EBR exception, BR-24.15). A date under the expiry attribute sets expiryDate. Writes dev.passage.production.batch.attributesrecorded.v1. A replay returns the first answer with Idempotent-Replayed: true.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/AttributesResult' } } }
+        '400':
+          description: COM-0001 for a malformed body, an attribute the item does not define, a value of the wrong type or an enum value that is not an option.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '404':
+          description: PMF-0108
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: PMF-0104 when the version is stale.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/production/batches/{id}:disposition:
+    post:
+      operationId: changeBatchDisposition
+      summary: Change the disposition of a batch with a reason (AC-24.10)
+      x-passage-duty: production.batch-disposition.write
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/DispositionRequest' } } }
+      responses:
+        '200':
+          description: 'The batch at version + 1 with the change in its disposition history; the change is flagged segregationConflict when the caller recorded attribute values on this batch. Writes dev.passage.production.batch.dispositionchanged.v1. A replay returns the first answer with Idempotent-Replayed: true.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/BatchRecord' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404':
+          description: PMF-0108
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: PMF-0104 when the version is stale; PMF-0111 when the batch already has that disposition.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: idempotency_key_reuse.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        default: { $ref: '#/components/responses/Problem' }
 components:
   parameters:
     Id:
@@ -511,6 +672,117 @@ components:
       in: query
       schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
   schemas:
+    AttributeKind:
+      type: string
+      enum: [numeric, text, enum, date]
+    AttributeRole:
+      type: string
+      description: The potency attribute carries an item's active-ingredient percentage (PRD 4.24.4 role).
+      enum: [generic, potency]
+    BatchAttributeDefinitionRequest:
+      type: object
+      required: [itemId, name, kind]
+      properties:
+        itemId: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 40 }
+        kind: { $ref: '#/components/schemas/AttributeKind' }
+        role: { $ref: '#/components/schemas/AttributeRole', description: Defaults to generic; potency only on a numeric attribute, at most one per item. }
+        target: { $ref: '#/components/schemas/Decimal', description: Numeric attributes only. }
+        min: { $ref: '#/components/schemas/Decimal', description: Numeric attributes only; inclusive. }
+        max: { $ref: '#/components/schemas/Decimal', description: Numeric attributes only; inclusive. }
+        options: { type: array, maxItems: 50, items: { type: string, minLength: 1, maxLength: 200 }, uniqueItems: true, description: Enum attributes only; at least one. }
+    BatchAttributeDefinition:
+      type: object
+      required: [id, itemId, name, kind, role, options, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        itemId: { type: string, format: uuid }
+        name: { type: string }
+        kind: { $ref: '#/components/schemas/AttributeKind' }
+        role: { $ref: '#/components/schemas/AttributeRole' }
+        target: { $ref: '#/components/schemas/Decimal' }
+        min: { $ref: '#/components/schemas/Decimal' }
+        max: { $ref: '#/components/schemas/Decimal' }
+        options: { type: array, items: { type: string } }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+    BatchRequest:
+      type: object
+      required: [itemId, batchNumber]
+      properties:
+        legalEntityId: { type: string, format: uuid, description: Defaults to the caller's legal entity. }
+        itemId: { type: string, format: uuid }
+        batchNumber: { type: string, minLength: 1, maxLength: 40 }
+        batchOrderId: { type: [string, 'null'], format: uuid }
+        disposition: { $ref: '#/components/schemas/Disposition', description: Defaults to available. }
+    RecordAttributesRequest:
+      type: object
+      required: [version, values]
+      properties:
+        version: { type: integer, minimum: 1, description: The batch version you read. }
+        values: { type: object, minProperties: 1, maxProperties: 100, additionalProperties: { $ref: '#/components/schemas/AttributeValue' }, description: Attribute name to value. }
+    DispositionRequest:
+      type: object
+      required: [version, disposition, reason]
+      properties:
+        version: { type: integer, minimum: 1 }
+        disposition: { $ref: '#/components/schemas/Disposition' }
+        reason: { type: string, minLength: 1, maxLength: 500 }
+    BatchAttribute:
+      type: object
+      required: [name, kind, pass, recordedBy, recordedAt]
+      properties:
+        name: { type: string }
+        kind: { $ref: '#/components/schemas/AttributeKind' }
+        num: { $ref: '#/components/schemas/Decimal' }
+        text: { type: string }
+        date: { type: string, format: date }
+        pass: { type: boolean, description: False for a numeric value outside its limits. }
+        detail: { type: string }
+        recordedBy: { type: string }
+        recordedAt: { type: string, format: date-time }
+    DispositionChange:
+      type: object
+      required: [from, to, reason, segregationConflict, changedBy, changedAt]
+      properties:
+        from: { $ref: '#/components/schemas/Disposition' }
+        to: { $ref: '#/components/schemas/Disposition' }
+        reason: { type: string }
+        segregationConflict: { type: boolean, description: The user who changed the disposition also recorded attribute values on this batch (flagged segregation-of-duties conflict). }
+        changedBy: { type: string }
+        changedAt: { type: string, format: date-time }
+    BatchRecord:
+      type: object
+      description: The quality record of a batch (slice 11); not the Batch a preview takes as input.
+      required: [id, legalEntityId, itemId, batchNumber, disposition, version, createdBy, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        itemId: { type: string, format: uuid }
+        batchNumber: { type: string }
+        batchOrderId: { type: string, format: uuid }
+        disposition: { $ref: '#/components/schemas/Disposition' }
+        expiryDate: { type: string, format: date, description: Set from the expiry date attribute. }
+        version: { type: integer }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        attributes: { type: array, items: { $ref: '#/components/schemas/BatchAttribute' }, description: The latest value of each attribute; on the detail only. }
+        attributeHistory: { type: array, items: { $ref: '#/components/schemas/BatchAttribute' }, description: Every recorded value, newest first, at most 500; on the detail only. }
+        dispositions: { type: array, items: { $ref: '#/components/schemas/DispositionChange' }, description: Newest first; on the detail only. }
+    AttributeCheck:
+      type: object
+      required: [name, pass]
+      properties:
+        name: { type: string }
+        pass: { type: boolean }
+        detail: { type: string }
+    AttributesResult:
+      type: object
+      required: [batch, checks]
+      properties:
+        batch: { $ref: '#/components/schemas/BatchRecord' }
+        checks: { type: array, items: { $ref: '#/components/schemas/AttributeCheck' } }
     Decimal:
       type: string
       description: Decimal as a JSON string (numbers are accepted on input).

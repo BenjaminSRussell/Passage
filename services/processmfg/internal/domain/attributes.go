@@ -3,6 +3,7 @@ package domain
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/shopspring/decimal"
 )
@@ -14,6 +15,28 @@ const (
 	AttrEnum    = "enum"
 	AttrDate    = "date"
 )
+
+// Batch attribute roles (PRD 4.24.4 BatchAttribute.role). The potency
+// attribute of an item carries the active-ingredient percentage (FR-24.3).
+const (
+	RoleGeneric = "generic"
+	RolePotency = "potency"
+)
+
+// CheckRole validates the role of an attribute definition: generic or
+// potency, and a potency attribute is numeric.
+func CheckRole(name, kind, role string) error {
+	switch role {
+	case RoleGeneric:
+		return nil
+	case RolePotency:
+		if kind != AttrNumeric {
+			return errorf(CodeInvalid, "attribute %q is %s; only a numeric attribute can carry the potency role", name, kind)
+		}
+		return nil
+	}
+	return errorf(CodeInvalid, "attribute %q has unknown role %q (generic or potency)", name, role)
+}
 
 // AttributeDef is a batch attribute defined for an item (PRD 4.24.4
 // BatchAttribute). Min and Max bound a numeric attribute (inclusive, nil is
@@ -39,7 +62,7 @@ type AttributeCheck struct {
 
 // ValidateDefinitions checks the definitions themselves: names are unique and
 // set, the kind is known, limits and target only on numeric attributes with
-// min ≤ max, and an enum lists at least one option.
+// min ≤ max, and an enum lists at least one option, none empty or repeated.
 func ValidateDefinitions(defs []AttributeDef) error {
 	seen := make(map[string]bool, len(defs))
 	for _, d := range defs {
@@ -67,6 +90,16 @@ func ValidateDefinitions(defs []AttributeDef) error {
 		}
 		if d.Kind != AttrEnum && len(d.Options) > 0 {
 			return errorf(CodeInvalid, "attribute %q is %s; options apply to enum attributes only", d.Name, d.Kind)
+		}
+		opts := make(map[string]bool, len(d.Options))
+		for _, o := range d.Options {
+			if strings.TrimSpace(o) == "" {
+				return errorf(CodeInvalid, "enum attribute %q has an empty option", d.Name)
+			}
+			if opts[o] {
+				return errorf(CodeInvalid, "enum attribute %q lists the option %q twice", d.Name, o)
+			}
+			opts[o] = true
 		}
 	}
 	return nil

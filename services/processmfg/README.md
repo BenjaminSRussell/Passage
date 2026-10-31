@@ -1,6 +1,6 @@
 # processmfg
 
-Process manufacturing for Passage (wave 24, PSG-24, slices 1 to 3). Formulas, batch orders
+Process manufacturing for Passage (wave 24, PSG-24, slices 1 to 3, 9 and 11). Formulas, batch orders
 created from a formula snapshot and scaled to the batch size, rescale before the order starts,
 and the potency, catch-weight and co-product allocation rules (slice 1). Slice 2 adds the batch
 rules as stateless previews: batch derivation (FR-24.15), batch merge (FR-24.16), bulk
@@ -13,8 +13,9 @@ FR-24.5, FR-24.6, BR-24.10), and the rework batch order plan (FR-24.18).
 
 Slice 1 persists formulas and batch orders (Postgres, RLS on every table, outbox events in
 the same transaction). The slice-2 and slice-3 previews store nothing and emit no events: the batches they
-judge are wave-16 InventoryBatch rows that the caller passes in. Batch attributes, disposition,
-co-product allocation on an order, the derivation log, the EBR store and the signature log are
+judge are wave-16 InventoryBatch rows that the caller passes in. Slice 11 persists the batch quality record: attribute definitions, batches, recorded values with
+their limit check, and dispositions with history, all append-only apart from the batch row. The
+derivation log, the EBR store and the signature log are
 later slices; see `NOT-IMPLEMENTED.md`.
 
 ## Layout
@@ -122,6 +123,13 @@ skipped when `PASSAGE_TEST_DATABASE_URL` is unset.
 | POST | `/v1/production/batch-attributes:check` | `production.batch-attribute.write` | Check recorded attribute values against the item's definitions; out-of-limit values are flagged as exceptions (FR-24.5) |
 | POST | `/v1/production/batch-picking:proposal` | `production.batch-order.read` | Batches a line consumes: available only, FEFO, potency band, expired only on the `production.batch.consume-expired` override with a reason (FR-24.3, FR-24.5, FR-24.6, BR-24.10) |
 | POST | `/v1/production/rework-orders:preview` | `production.batch-order.write` | Rework batch order plan: output batch, disposition, quality order, variance type, genealogy (FR-24.18) |
+| POST | `/v1/production/batch-attribute-definitions` | `production.batch-attribute.write` | Define a batch attribute of an item, role generic or potency (one per item) (FR-24.5); Idempotency-Key |
+| GET | `/v1/production/batch-attribute-definitions` | `production.batch-order.read` | Definitions by item and name; `itemId`, `limit` |
+| POST | `/v1/production/batches` | `production.batch-attribute.write` | Register a batch for quality records, optionally linked to a batch order of the same legal entity; Idempotency-Key |
+| GET | `/v1/production/batches` | `production.batch-order.read` | Batches, newest first; `itemId`, `disposition`, `limit` |
+| GET | `/v1/production/batches/{id}` | `production.batch-order.read` | One batch with current attributes, attribute history and disposition history |
+| PUT | `/v1/production/batches/{id}/attributes` | `production.batch-attribute.write` | Record attribute values with the limit check; sets the expiry date; `version`; Idempotency-Key (FR-24.5, FR-24.6) |
+| POST | `/v1/production/batches/{id}:disposition` | `production.batch-disposition.write` | Change the disposition with a reason; a change by a user who recorded attributes on the batch is flagged `segregationConflict` (PRD 4.24.17); `version`; Idempotency-Key (AC-24.10) |
 
 The slice-2 and slice-3 previews live under `/v1/production` because `/v1/inventory` is routed to
 services/inventory (wave 16); the PRD's `/inventory/batches/{id}/...` commands arrive with the
@@ -164,6 +172,10 @@ Duties are enforced with the kernel `authz.RequireDuty`. The OPA entries are a h
 | `PMF-0105` | 409 | Order has started; only planned or released orders can be rescaled |
 | `PMF-0106` | 409 | The order's status does not allow the command (release needs planned, start released, report-finished started, end reported) |
 | `PMF-0107` | 422 | Report as finished with a non-positive main quantity, a negative line quantity, or a line that is not a co-/by-product line |
+| `PMF-0108` | 404 | Batch not found |
+| `PMF-0109` | 409 | The item already has a batch with that number |
+| `PMF-0110` | 409 | The item already defines a batch attribute of that name, or already has a potency attribute |
+| `PMF-0111` | 409 | The batch already has the requested disposition |
 | `idempotency_key_reuse` | 422 | Idempotency-Key reused with a different request |
 | `idempotency_key_in_flight` | 409 | A concurrent request with the same key committed first; retry for its answer |
 | `AUTH-0001` | 401 | No tenant or principal |

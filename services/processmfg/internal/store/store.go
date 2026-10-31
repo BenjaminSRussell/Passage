@@ -143,6 +143,13 @@ type Store interface {
 	AdvanceBatchOrder(ctx context.Context, id, command string, version int, idem Idem) (BatchOrder, bool, error)
 	ReportBatchOrder(ctx context.Context, id string, in ReportInput, version int, idem Idem) (BatchOrder, bool, error)
 	EndBatchOrder(ctx context.Context, id string, in EndInput, version int, idem Idem) (BatchOrder, bool, error)
+	DefineAttribute(ctx context.Context, in AttributeDefinition, idem Idem) (AttributeDefinition, bool, error)
+	ListAttributeDefinitions(ctx context.Context, itemID string, limit int) ([]AttributeDefinition, error)
+	RegisterBatch(ctx context.Context, in NewBatch, idem Idem) (Batch, bool, error)
+	ListBatches(ctx context.Context, f BatchFilter) ([]Batch, error)
+	GetBatch(ctx context.Context, id string) (Batch, error)
+	RecordAttributes(ctx context.Context, id string, values map[string]domain.Value, version int, idem Idem) (AttributesResult, bool, error)
+	ChangeDisposition(ctx context.Context, id, to, reason string, version int, idem Idem) (Batch, bool, error)
 	Ping(ctx context.Context) error
 }
 
