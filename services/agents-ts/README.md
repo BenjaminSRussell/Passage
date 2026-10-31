@@ -12,7 +12,7 @@ deterministic in tests.
 
 | Module | Responsibility |
 |---|---|
-| `src/runtime/engine.ts` | `runAgent`: one model turn and one proposal. Checks the kill switch, budget, eval and policy at start and the kill switch before every step, redacts prompts, calls the provider, enforces the per-run token cap, and routes the proposal through the policy. `approve_before_commit` tools always wait for a human; AUTO applies only to `suggest` tools. The AUTO and self-approval limits use the document amount from `RiskPort`, not the model's figure. A port that throws ends the run FAILED. Once the model has proposed an action, every way out of the run (commit, rejection, denial, kill switch, a port that throws) leaves exactly one action row for it, keeping the approver of any human decision (AC-47.3; `test/audit-coverage.test.ts`) |
+| `src/runtime/engine.ts` | `runAgent`: one model turn and one proposal. Checks the kill switch, budget, eval and policy at start and the kill switch before every step, redacts prompts, calls the provider, enforces the per-run token cap, and routes the proposal through the policy. `approve_before_commit` tools always wait for a human; AUTO applies only to `suggest` tools. The AUTO and self-approval limits use the document amount from `RiskPort`, not the model's figure. A port that throws ends the run FAILED. Once the model has proposed an action, every way out of the run (commit, rejection, denial, kill switch, a port that throws) leaves exactly one action row for it, keeping the approver of any human decision (AC-47.3; `test/audit-coverage.test.ts`). A row the write-time scanner refuses (AGT-0210) does not change how the run ends: a kill still ends KILLED, and a tool call that committed still ends COMMITTED, its row carrying the committed reference in place of the tool output |
 | `src/domain/run.ts` | BR-47.1 state machine: PLANNING, ACTING, AWAITING_APPROVAL, COMMITTED, REJECTED, FAILED, KILLED. Terminal states cannot be left |
 | `src/domain/policy.ts` | `decideDisposition` (BR-47.2): OFF blocks, SUGGEST proposes, AUTO only when confidence, amount, vendor risk and SoD all pass. `validatePolicy` enforces the parameter ranges. `isApprovalExpired` (BR-47.3). `checkCashApplication` (BR-47.10): at most 20 invoices per payment (1 to 50 allowed), write-off within tolerance, never more than the payment; with open amounts, no allocation above its invoice's open amount and no write-off above what stays open |
 | `src/domain/approval.ts` | Approval rules (BR-47.3, 9.47.5): `agent.approval_expiry_h` range check, the hourly sweeper's selection `expiredApprovals`, and `decideApproval` for the decision endpoint (approver duty AGT-0203, expiry AGT-0208, self-approval above the limit AGT-0209) |
@@ -55,7 +55,8 @@ CI runs typecheck, tests and build for this package, `services/mcp-ts` and
 
 Wave 47 proof tests: `test/audit-coverage.test.ts` (one audit row per
 proposal on every path, and a seeded 5,000-run property check that no tool is
-called past the invoker's duties or the allow-list), `test/cost-guard.test.ts`
+called past the invoker's duties or the allow-list and that raw IBANs in the
+model's tool arguments reach the row pseudonymized), `test/cost-guard.test.ts`
 (a per-tenant ledger over the engine: alert at 80%, alert at 100%, start
 rejected with AGT-0202 and no provider call, tenants isolated).
 
@@ -83,7 +84,7 @@ rejected with AGT-0202 and no provider call, tenants isolated).
 | `AGT-0204` | Agent version has no passing evaluation and cannot be promoted |
 | `AGT-0208` | Approval expired after the configured hours; nothing was posted |
 | `AGT-0209` | Approver is the invoker above the self-approval limit |
-| `AGT-0210` | Unredacted PII detected before a provider call or storage; the run fails |
+| `AGT-0210` | Unredacted PII detected before a provider call or storage; the run fails, except that a kill still ends KILLED and a tool call that already committed still ends COMMITTED |
 | `AGT-0206` | Provider unavailable (transport, timeout, 5xx), rate-limited or rejected (4xx), or an unusable response; the run fails. Only the first group counts towards failover |
 | `AGT-0212` | No knowledge source reaches citation similarity 0.75; the copilot says so instead of guessing |
 | `AGT-0214` | A tool call failed; 4xx is not retried |
