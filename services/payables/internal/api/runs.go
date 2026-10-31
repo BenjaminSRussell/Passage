@@ -55,7 +55,7 @@ type RunStore interface {
 type LedgerPoster interface {
 	Post(ctx context.Context, e ledger.Entry) (string, error)
 	LegalEntity(ctx context.Context, legalEntityID, ledgerID string) (string, error)
-	EntryForDocument(ctx context.Context, legalEntityID, ledgerID, documentID string) (string, error)
+	EntryForDocument(ctx context.Context, e ledger.Entry) (string, error)
 }
 
 type runDeps struct {
@@ -453,14 +453,15 @@ func (a *API) postRunJournal(w http.ResponseWriter, r *http.Request) {
 	if run.DiscountAccount != nil {
 		discountAccount = *run.DiscountAccount
 	}
-	entryID, err := a.runs.ledger.Post(ctx, ledger.Entry{
+	entry := ledger.Entry{
 		LegalEntityID: run.LegalEntityID, LedgerID: run.LedgerID, DocumentID: run.ID, PostingDate: proposal.RunDate, Currency: proposal.LegalEntityCurrency,
 		IdempotencyKey: runKeyPrefix + run.ID, SourceType: runSourceType,
 		Lines: domain.RunJournal(proposal.LegalEntityCurrency, proposal.Groups, run.ControlAccount, run.BankAccount, discountAccount),
-	})
+	}
+	entryID, err := a.runs.ledger.Post(ctx, entry)
 	if err != nil {
 		if ledgerRejected(err) {
-			existing, lookupErr := a.runs.ledger.EntryForDocument(ctx, run.LegalEntityID, run.LedgerID, run.ID)
+			existing, lookupErr := a.runs.ledger.EntryForDocument(ctx, entry)
 			if lookupErr != nil {
 				a.ledgerUnavailable(w, r, lookupErr)
 				return

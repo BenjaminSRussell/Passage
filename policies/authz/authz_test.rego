@@ -520,6 +520,14 @@ test_service_grants_allow_only_their_declared_routes if {
 		not allowed(duty, "POST", "/v1/ledger/ledgers")
 		not allowed(duty, "POST", "/v1/ledger/balances:rebuild")
 	}
+	transitional := {"ledger.journal.post", "ledger.journal.read"}
+	every grant in [data.service_grants.receiving.ledger, data.service_grants.payables.ledger] {
+		every duty in {d | some d in grant; not d in transitional} {
+			not allowed(duty, "POST", "/v1/ledger/validate")
+			not allowed(duty, "POST", "/v1/ledger/journal-batches/b1/post")
+			not allowed(duty, "POST", "/v1/ledger/ledger-sets/s1/journal-entries")
+		}
+	}
 	allowed("ledger.journal.post", "POST", "/v1/ledger/journal-entries")
 	not allowed("ledger.balance.read", "POST", "/v1/ledger/journal-entries")
 	not allowed("ledger.journal.read", "POST", "/v1/ledger/journal-entries")

@@ -335,36 +335,64 @@ func TestPost_RefusesToSendUnsigned(t *testing.T) {
 	}
 }
 
-func TestEntryForDocument_AsksTheLedgerForThatDocumentAndSignsOnlyTheLookupDuty(t *testing.T) {
+func lookupLines(entry, sourceType, sourceID, amount string) string {
+	line := func(account, side string) string {
+		return `{"entryId":"` + entry + `","account":"` + account + `","debitCredit":"` + side + `","amount":"` + amount + `","currency":"USD","sourceType":"` + sourceType + `","sourceId":"` + sourceID + `"}`
+	}
+	return line("2000", "D") + "," + line("1000", "C")
+}
+
+func TestEntryForDocument_AdoptsOnlyAnEntryWithTheRunsSourceAndLines(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	signer, _ := tenant.NewServiceSigner("payables", priv)
 	var got *http.Request
-	body := `{"items":[{"entryId":"entry-7"},{"entryId":"entry-8"}]}`
+	var items string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got = r.Clone(r.Context())
-		_, _ = w.Write([]byte(body))
+		_, _ = w.Write([]byte(`{"items":[` + items + `]}`))
 	}))
 	defer srv.Close()
 	le := testkit.TenantID(9)
+	entry := postEntry()
+	entry.LegalEntityID, entry.LedgerID, entry.DocumentID, entry.SourceType, entry.Currency = le, "led-1", "doc-1", "payment_run", "USD"
+	entry.Lines = []domain.RunJournalLine{
+		{Account: "2000", Credit: false, Amount: decimal.RequireFromString("100.00")},
+		{Account: "1000", Credit: true, Amount: decimal.RequireFromString("100.00")},
+	}
 	ctx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: le, UserID: "erin"})
 	client := ledger.New(srv.URL, nil).WithSigner(signer)
-	id, err := client.EntryForDocument(ctx, le, "led-1", "doc-1")
+
+	items = lookupLines("entry-7", "payment_run", "doc-1", "100.00") + "," + lookupLines("entry-8", "payment_run", "doc-1", "100.00")
+	id, err := client.EntryForDocument(ctx, entry)
 	if err != nil || id != "entry-7" {
 		t.Fatalf("id %q err %v", id, err)
 	}
-	if got.URL.Path != "/v1/ledger/journal-lines" || got.URL.Query().Get("ledger") != "led-1" || got.URL.Query().Get("documentId") != "doc-1" || got.URL.Query().Get("limit") != "1" {
+	q := got.URL.Query()
+	if got.URL.Path != "/v1/ledger/journal-lines" || q.Get("ledger") != "led-1" || q.Get("documentId") != "doc-1" || q.Get("source_system") != "payables" {
 		t.Fatalf("request %s", got.URL)
 	}
 	claims, err := tenant.NewServiceVerifier("ledger", map[string]ed25519.PublicKey{"payables": pub}).Verify(got.Header.Get(tenant.HeaderServiceToken))
 	if err != nil || len(claims.Duties) != 1 || claims.Duties[0] != "ledger.entry.lookup" {
 		t.Fatalf("claims %+v err %v", claims, err)
 	}
-	body = `{"items":[]}`
-	if id, err := client.EntryForDocument(ctx, le, "led-1", "doc-2"); err != nil || id != "" {
-		t.Fatalf("no entry: id %q err %v", id, err)
+
+	for name, foreign := range map[string]string{
+		"another amount":      lookupLines("entry-9", "payment_run", "doc-1", "1.00"),
+		"another source type": lookupLines("entry-9", "manual", "doc-1", "100.00"),
+		"another source id":   lookupLines("entry-9", "payment_run", "other", "100.00"),
+		"no entry":            "",
+	} {
+		items = foreign
+		if id, err := client.EntryForDocument(ctx, entry); err != nil || id != "" {
+			t.Errorf("%s: adopted %q err %v", name, id, err)
+		}
 	}
-	body = `nope`
-	if _, err := client.EntryForDocument(ctx, le, "led-1", "doc-3"); err == nil {
+	items = lookupLines("entry-9", "manual", "doc-1", "100.00") + "," + lookupLines("entry-10", "payment_run", "doc-1", "100.00")
+	if id, _ := client.EntryForDocument(ctx, entry); id != "entry-10" {
+		t.Errorf("a foreign entry sharing the document id must be skipped, got %q", id)
+	}
+	items = "nope"
+	if _, err := client.EntryForDocument(ctx, entry); err == nil {
 		t.Fatal("an unreadable answer must be an error")
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -147,24 +148,69 @@ func (c *Client) LegalEntity(ctx context.Context, legalEntityID, ledgerID string
 	return body.LegalEntityID, nil
 }
 
-func (c *Client) EntryForDocument(ctx context.Context, legalEntityID, ledgerID, documentID string) (string, error) {
-	q := url.Values{"ledger": {ledgerID}, "documentId": {documentID}, "limit": {"1"}}
-	raw, err := c.get(ctx, legalEntityID, linesPath, q, documentID, dutyEntryLookup)
+type lookedUpLine struct {
+	EntryID     string `json:"entryId"`
+	Account     string `json:"account"`
+	DebitCredit string `json:"debitCredit"`
+	Amount      string `json:"amount"`
+	Currency    string `json:"currency"`
+	SourceType  string `json:"sourceType"`
+	SourceID    string `json:"sourceId"`
+}
+
+// EntryForDocument returns the id of an entry this service already posted for e: same ledger, document id,
+// payables source and exactly e's lines. An entry that merely shares the document id is never returned.
+func (c *Client) EntryForDocument(ctx context.Context, e Entry) (string, error) {
+	q := url.Values{"ledger": {e.LedgerID}, "documentId": {e.DocumentID}, "source_system": {sourceSystem}, "limit": {"1000"}}
+	raw, err := c.get(ctx, e.LegalEntityID, linesPath, q, e.DocumentID, dutyEntryLookup)
 	if err != nil {
 		return "", err
 	}
 	var body struct {
-		Items []struct {
-			EntryID string `json:"entryId"`
-		} `json:"items"`
+		Items []lookedUpLine `json:"items"`
 	}
 	if err := json.Unmarshal(raw, &body); err != nil {
 		return "", fmt.Errorf("ledger: entry lookup response unusable: %w", err)
 	}
-	if len(body.Items) == 0 {
-		return "", nil
+	var order []string
+	byEntry := map[string][]lookedUpLine{}
+	for _, l := range body.Items {
+		if _, seen := byEntry[l.EntryID]; !seen {
+			order = append(order, l.EntryID)
+		}
+		byEntry[l.EntryID] = append(byEntry[l.EntryID], l)
 	}
-	return body.Items[0].EntryID, nil
+	for _, id := range order {
+		if sameLines(e, byEntry[id]) {
+			return id, nil
+		}
+	}
+	return "", nil
+}
+
+func sameLines(e Entry, got []lookedUpLine) bool {
+	if len(got) != len(e.Lines) {
+		return false
+	}
+	want := make([]string, 0, len(e.Lines))
+	for _, l := range e.Lines {
+		want = append(want, lineKey(l.Account, l.Credit, l.Amount, e.Currency))
+	}
+	have := make([]string, 0, len(got))
+	for _, l := range got {
+		amount, err := decimal.NewFromString(l.Amount)
+		if err != nil || l.SourceType != e.SourceType || l.SourceID != e.DocumentID {
+			return false
+		}
+		have = append(have, lineKey(l.Account, l.DebitCredit == "C", amount, l.Currency))
+	}
+	slices.Sort(want)
+	slices.Sort(have)
+	return slices.Equal(want, have)
+}
+
+func lineKey(account string, credit bool, amount decimal.Decimal, currency string) string {
+	return fmt.Sprintf("%s|%t|%s|%s", account, credit, amount.String(), currency)
 }
 
 func parse(ctx context.Context, raw []byte, account string) (Balance, error) {

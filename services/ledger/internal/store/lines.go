@@ -12,8 +12,9 @@ import (
 // LineFilter selects posted journal lines for the ledger transactions inquiry
 // (FR-11.14). AccountFrom and AccountTo compare account numbers as text, as the
 // trial balance does. Dates are YYYY-MM-DD or empty. Voucher and SourceSystem
-// match exactly, as does DocumentID (the entry's source document). Dimensions match the line's combination values exactly. After
-// is the keyset position of the last line already returned.
+// match exactly, as does DocumentID (the entry's source document). Dimensions
+// match the line's combination values exactly. After is the keyset position of
+// the last line already returned.
 type LineFilter struct {
 	LedgerID     string
 	AccountFrom  string

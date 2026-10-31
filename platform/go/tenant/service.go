@@ -47,26 +47,28 @@ var (
 )
 
 // serviceGrants is the static per-service duty table: caller -> target -> duties.
+// TODO: #321 transitional: ledger.journal.post, ledger.journal.read and numbering.write stay granted for one
+// release so old callers keep working during a rolling deploy; callers already sign only the narrow duties.
 // policies/authz/data.json "service_grants" mirrors it and a test keeps them equal.
 var serviceGrants = map[string]map[string][]string{
 	"batch": {
 		"product": {"product.variants.explode", "product.released.read", "product.jobs.write"},
 	},
 	"receiving": {
-		"ledger":     {"ledger.entry.post", "ledger.journal.reverse"},
+		"ledger":     {"ledger.entry.post", "ledger.journal.reverse", "ledger.journal.post"},
 		"close":      {"period.check"},
 		"purchasing": {"procurement.invoicing-plan.settle", "procurement.purchase-order.lookup"},
 		"inventory":  {"inventory.ownership-change.read"},
 	},
 	"payables": {
-		"ledger": {"ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post"},
+		"ledger": {"ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post", "ledger.journal.read", "ledger.journal.post"},
 		"fx":     {"fx.rate.lookup"},
 	},
 	"workflow-ts": {
 		"payables": {"payment-run.execute"},
 	},
 	"party": {
-		"numbering": {"numbering.sequence.allocate"},
+		"numbering": {"numbering.sequence.allocate", "numbering.write"},
 	},
 }
 
@@ -224,7 +226,7 @@ func (s *ServiceSigner) legalEntityFor(p Principal, explicit string, duties []st
 }
 
 var readDuties = map[string]struct{}{
-	"ledger.balance.read": {}, "ledger.ledger.lookup": {}, "ledger.entry.lookup": {}, "procurement.purchase-order.lookup": {},
+	"ledger.balance.read": {}, "ledger.journal.read": {}, "ledger.ledger.lookup": {}, "ledger.entry.lookup": {}, "procurement.purchase-order.lookup": {},
 	"inventory.ownership-change.read": {}, "fx.rate.lookup": {},
 }
 

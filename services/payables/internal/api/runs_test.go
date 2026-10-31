@@ -39,36 +39,56 @@ const (
 )
 
 type fakeJournalLedger struct {
-	mu          sync.Mutex
-	entries     map[string]string
-	bodies      []map[string]any
-	keys        []string
-	rejectWith  int
-	rejectCode  string
-	dropReplies int
-	entity      string
-	gate        chan struct{}
-	entered     chan struct{}
-	inflight    map[string]bool
-	existing    string
-	lookupFails bool
-	lookups     []string
+	mu           sync.Mutex
+	entries      map[string]string
+	bodies       []map[string]any
+	keys         []string
+	rejectWith   int
+	rejectCode   string
+	dropReplies  int
+	entity       string
+	gate         chan struct{}
+	entered      chan struct{}
+	inflight     map[string]bool
+	foreignEntry string
+	lookupFails  bool
+	lookups      []string
 }
 
 func (f *fakeJournalLedger) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	if r.Method == http.MethodGet && r.URL.Path == "/v1/ledger/journal-lines" {
 		defer f.mu.Unlock()
-		f.lookups = append(f.lookups, r.URL.Query().Get("documentId"))
+		q := r.URL.Query()
+		f.lookups = append(f.lookups, q.Get("documentId"))
 		if f.lookupFails {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		if f.existing == "" {
-			_, _ = w.Write([]byte(`{"items":[]}`))
+		if q.Get("ledger") != runLedgerID || q.Get("source_system") != "payables" || q.Get("documentId") == "" {
+			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		_, _ = fmt.Fprintf(w, `{"items":[{"entryId":%q}]}`, f.existing)
+		var items []string
+		if f.foreignEntry != "" {
+			items = append(items, fmt.Sprintf(`{"entryId":%q,"account":"2000","debitCredit":"D","amount":"1.00","currency":"USD","sourceType":"manual","sourceId":%q}`, f.foreignEntry, q.Get("documentId")))
+		}
+		for _, key := range f.keys {
+			if len(f.bodies) == 0 {
+				break
+			}
+			body := f.bodies[0]
+			src, _ := body["source"].(map[string]any)
+			lines, _ := body["lines"].([]any)
+			for _, raw := range lines {
+				l, _ := raw.(map[string]any)
+				amount, _ := l["amount"].(map[string]any)
+				items = append(items, fmt.Sprintf(`{"entryId":%q,"account":%q,"debitCredit":%q,"amount":%q,"currency":%q,"sourceType":%q,"sourceId":%q}`,
+					f.entries[key], l["account"], l["debitCredit"], amount["value"], amount["currency"], src["type"], src["id"]))
+			}
+			break
+		}
+		_, _ = fmt.Fprintf(w, `{"items":[%s]}`, strings.Join(items, ","))
 		return
 	}
 	if r.Method == http.MethodGet {
@@ -554,11 +574,14 @@ func TestPaymentRun_LedgerRejectionIsTerminalAndFailReleasesItems(t *testing.T) 
 	}
 }
 
-func TestPaymentRun_RejectionLooksUpTheRunsEntryByDocumentBeforeRecordingIt(t *testing.T) {
+func TestPaymentRun_RejectionAdoptsTheRunsOwnEntryButNeverAForeignOne(t *testing.T) {
 	f := newRunFixture(t, fixtureOptions{})
 	f.approve()
 	runID := f.start()["id"].(string)
 	f.step(f.erin, runID, "generate-file")
+
+	f.ledger.dropReplies = 1
+	wantProblem(t, f.step(f.erin, runID, "post-journal"), http.StatusBadGateway, "COM-0502")
 	f.ledger.rejectWith = http.StatusUnprocessableEntity
 
 	f.ledger.lookupFails = true
@@ -567,16 +590,29 @@ func TestPaymentRun_RejectionLooksUpTheRunsEntryByDocumentBeforeRecordingIt(t *t
 		t.Fatalf("a failed lookup must not record a rejection: %v", got)
 	}
 
-	f.ledger.lookupFails, f.ledger.existing = false, "entry-from-earlier-attempt"
+	f.ledger.lookupFails = false
 	rec := f.step(f.erin, runID, "post-journal")
-	if got := decode(t, rec); rec.Code != http.StatusOK || got["journalEntryId"] != "entry-from-earlier-attempt" || got["journalRejectedAt"] != nil {
-		t.Fatalf("an entry already in the ledger for the run is the journal: %d %s", rec.Code, rec.Body)
+	if got := decode(t, rec); rec.Code != http.StatusOK || got["journalEntryId"] != "entry-1" || got["journalRejectedAt"] != nil {
+		t.Fatalf("the entry this run posted earlier is the journal: %d %s", rec.Code, rec.Body)
 	}
 	if len(f.ledger.lookups) != 2 || f.ledger.lookups[1] != runID {
 		t.Fatalf("lookups = %v, want the run id as document id", f.ledger.lookups)
 	}
 	if f.step(f.erin, runID, "settle").Code != http.StatusOK || f.step(f.erin, runID, "complete").Code != http.StatusOK {
-		t.Fatal("the run must finish after adopting the existing entry")
+		t.Fatal("the run must finish after adopting its entry")
+	}
+}
+
+func TestPaymentRun_RejectionIgnoresAForeignEntrySharingTheRunsDocumentID(t *testing.T) {
+	f := newRunFixture(t, fixtureOptions{})
+	f.approve()
+	runID := f.start()["id"].(string)
+	f.step(f.erin, runID, "generate-file")
+	f.ledger.rejectWith = http.StatusUnprocessableEntity
+	f.ledger.foreignEntry = "entry-by-a-user"
+	wantProblem(t, f.step(f.erin, runID, "post-journal"), http.StatusUnprocessableEntity, "AP-RUN-014")
+	if got := decode(t, f.erin.send(f.router, http.MethodGet, runsPath+"/"+runID, "")); got["journalRejectedAt"] == nil || got["journalEntryId"] != nil {
+		t.Fatalf("a foreign entry must not be adopted: %v", got)
 	}
 }
 
