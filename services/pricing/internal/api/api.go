@@ -201,7 +201,7 @@ func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, r, problem)
 		return
 	}
-	records, err := a.store.ActiveRecords(r.Context(), store.ActiveQuery{LegalEntityID: req.LegalEntityID, Currency: req.Currency,
+	in, err := a.resolveInput(r.Context(), store.ActiveQuery{LegalEntityID: req.LegalEntityID, Currency: req.Currency,
 		CustomerGroupID: header.CustomerGroupID, AsOf: header.PricingDate})
 	if err != nil {
 		slog.Error("load active records failed", "err", err, "correlationId", middleware.GetReqID(r.Context()))
@@ -216,9 +216,25 @@ func (a *API) resolve(w http.ResponseWriter, r *http.Request) {
 	}
 	a.resolves.Add(1)
 	a.linesPriced.Add(int64(len(lines)))
-	res, free := domain.ResolveWithFreeGoods(domain.Input{Header: header, Lines: lines, Records: records,
-		SmallOrderThreshold: domain.SmallOrderThreshold(header.Currency)}, rules)
+	in.Header, in.Lines, in.SmallOrderThreshold = header, lines, domain.SmallOrderThreshold(header.Currency)
+	res, free := domain.ResolveWithFreeGoods(in, rules)
 	a.respond(w, r, res, free, r.URL.Query().Get("explain") == "true")
+}
+
+// recordSetSource is a store that serves the resolve snapshot pre-bucketed (store.Cache).
+type recordSetSource interface {
+	ActiveRecordSet(ctx context.Context, q store.ActiveQuery) (*domain.RecordSet, error)
+}
+
+// resolveInput loads the records for one resolve: the cache's shared RecordSet when the
+// store has one (FR-26.14), the plain record list otherwise.
+func (a *API) resolveInput(ctx context.Context, q store.ActiveQuery) (domain.Input, error) {
+	if src, ok := a.store.(recordSetSource); ok {
+		set, err := src.ActiveRecordSet(ctx, q)
+		return domain.Input{Set: set}, err
+	}
+	records, err := a.store.ActiveRecords(ctx, q)
+	return domain.Input{Records: records}, err
 }
 
 // simulate prices a tuple against records supplied in the body. Nothing is stored,

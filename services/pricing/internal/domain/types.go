@@ -112,7 +112,10 @@ type Input struct {
 	Header  Header
 	Lines   []Line
 	Records []Record
-	Steps   []ConditionType
+	// Set, when not nil, is used instead of Records: a pre-bucketed snapshot shared by
+	// many resolves (NewRecordSet).
+	Set   *RecordSet
+	Steps []ConditionType
 	// SmallOrderThreshold is the subtotal below which SURCHARGE applies. Zero disables it.
 	SmallOrderThreshold decimal.Decimal
 }

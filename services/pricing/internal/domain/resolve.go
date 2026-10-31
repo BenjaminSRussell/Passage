@@ -83,7 +83,10 @@ func Resolve(in Input) Result {
 	if len(steps) == 0 {
 		steps = DefaultSteps()
 	}
-	recs := sortedRecords(in.Records)
+	recs := in.Set.index()
+	if in.Set == nil {
+		recs = bucket(in.Records)
+	}
 	groups := groupQuantities(in.Lines)
 	res := Result{Currency: in.Header.Currency, Lines: make([]LineResult, 0, len(in.Lines)), Applied: []Applied{}, Trace: []TraceStep{}}
 	sum, base, qty, allQty := decimal.Zero, decimal.Zero, decimal.Zero, decimal.Zero
@@ -159,7 +162,7 @@ func SmallOrderThreshold(currency string) decimal.Decimal {
 	return decimal.Zero
 }
 
-func resolveLine(h Header, line Line, recs []Record, steps []ConditionType, groupQty decimal.Decimal) LineResult {
+func resolveLine(h Header, line Line, recs index, steps []ConditionType, groupQty decimal.Decimal) LineResult {
 	lr := LineResult{No: line.No, Unit: line.Unit, Quantity: line.ChargedQuantity(), Applied: []Applied{}, Trace: []TraceStep{}}
 	rec, value, access, step := evaluate(TypePrice, h, line, recs, decimal.Zero)
 	lr.Trace = append(lr.Trace, step)
@@ -198,7 +201,7 @@ func resolveLine(h Header, line Line, recs []Record, steps []ConditionType, grou
 // evaluate runs one condition type through the access sequence (BR-26.1 steps 2-6).
 // It returns the best winner (lowest value; equal values keep the earlier access),
 // the value it produces on current, the access sequence number and the trace.
-func evaluate(t ConditionType, h Header, line Line, recs []Record, current decimal.Decimal) (*Record, decimal.Decimal, int, TraceStep) {
+func evaluate(t ConditionType, h Header, line Line, recs index, current decimal.Decimal) (*Record, decimal.Decimal, int, TraceStep) {
 	step := TraceStep{Condition: t, Accesses: []TraceAccess{}}
 	var best *Record
 	var bestValue decimal.Decimal
@@ -244,11 +247,11 @@ func evaluate(t ConditionType, h Header, line Line, recs []Record, current decim
 // candidates returns the matching ACTIVE records for one access, best first:
 // greatest from_quantity, then most dimensions matched (a campaign record before a
 // plain one, BR-26.1 step 4), then lowest value, then id (deterministic).
-func candidates(t ConditionType, h Header, line Line, recs []Record, acc Access, current decimal.Decimal) []*Record {
+func candidates(t ConditionType, h Header, line Line, recs index, acc Access, current decimal.Decimal) []*Record {
 	var out []*Record
-	for i := range recs {
-		r := &recs[i]
-		if r.Type != t || r.Status != StatusActive || r.Currency != h.Currency || !inValidity(*r, h.PricingDate) {
+	day := dayNum(h.PricingDate)
+	for _, r := range recs[accessKey(t, acc, h, line)] {
+		if r.Status != StatusActive || r.Currency != h.Currency || dayNum(r.ValidFrom) > day || day > dayNum(r.ValidTo) {
 			continue
 		}
 		// TOTAL_DISC and SURCHARGE are order-level conditions: the order has no single unit,
@@ -259,9 +262,7 @@ func candidates(t ConditionType, h Header, line Line, recs []Record, acc Access,
 		if r.FromQuantity.GreaterThan(line.Quantity) {
 			continue
 		}
-		if matchesAccess(*r, acc, h, line) {
-			out = append(out, r)
-		}
+		out = append(out, r)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		a, b := out[i], out[j]
@@ -279,29 +280,96 @@ func candidates(t ConditionType, h Header, line Line, recs []Record, acc Access,
 	return out
 }
 
-func matchesAccess(r Record, acc Access, h Header, line Line) bool {
-	if r.CustomerKind != acc.Customer || r.ProductKind != acc.Product {
-		return false
+// RecordSet is a read-only set of condition records bucketed by access key, built once
+// and shared by any number of concurrent resolves (the record snapshot cache of FR-26.14:
+// a resolve reads only the buckets its lines' accesses name, so its cost does not grow
+// with the price list). Resolve never changes it.
+type RecordSet struct {
+	recs []Record
+	idx  index
+}
+
+// NewRecordSet copies recs and buckets the copy, so later changes to recs do not reach it.
+func NewRecordSet(recs []Record) *RecordSet {
+	own := append([]Record(nil), recs...)
+	return &RecordSet{recs: own, idx: bucket(own)}
+}
+
+// Records returns a copy of the set's records in the order they were given.
+func (s *RecordSet) Records() []Record {
+	return append([]Record(nil), s.recs...)
+}
+
+func (s *RecordSet) index() index {
+	if s == nil {
+		return nil
 	}
-	switch r.CustomerKind {
+	return s.idx
+}
+
+// index holds records bucketed by condition type and access key, each bucket in id order.
+type index map[indexKey][]*Record
+
+// indexKey is one access bucket. A key field is set only when its kind compares it: an
+// "all" kind ignores the key, and only the variant kind compares the variant.
+type indexKey struct {
+	typ         ConditionType
+	customer    CustomerKind
+	customerKey string
+	product     ProductKind
+	productKey  string
+	variant     string
+}
+
+// bucket indexes recs by access key. It reads recs and never changes them; status,
+// currency and validity are checked per candidate, so one index serves any header.
+func bucket(recs []Record) index {
+	idx := index{}
+	for i := range recs {
+		r := &recs[i]
+		k := indexKey{typ: r.Type, customer: r.CustomerKind, product: r.ProductKind}
+		if r.CustomerKind == CustomerKindCustomer || r.CustomerKind == CustomerKindGroup {
+			k.customerKey = r.CustomerKey
+		}
+		switch r.ProductKind {
+		case ProductKindProduct, ProductKindGroup:
+			k.productKey = r.ProductKey
+		case ProductKindVariant:
+			k.productKey, k.variant = r.ProductKey, r.Variant
+		}
+		idx[k] = append(idx[k], r)
+	}
+	for _, b := range idx {
+		sort.SliceStable(b, func(i, j int) bool { return b[i].ID < b[j].ID })
+	}
+	return idx
+}
+
+// accessKey is the bucket access acc reads for line: the header's customer or customer
+// group and the line's product, product group or product and variant (BR-26.1 step 3).
+func accessKey(t ConditionType, acc Access, h Header, line Line) indexKey {
+	k := indexKey{typ: t, customer: acc.Customer, product: acc.Product}
+	switch acc.Customer {
 	case CustomerKindCustomer:
-		if r.CustomerKey != h.CustomerID {
-			return false
-		}
+		k.customerKey = h.CustomerID
 	case CustomerKindGroup:
-		if r.CustomerKey != h.CustomerGroupID {
-			return false
-		}
+		k.customerKey = h.CustomerGroupID
 	}
-	switch r.ProductKind {
+	switch acc.Product {
 	case ProductKindProduct:
-		return r.ProductKey == line.ProductID
+		k.productKey = line.ProductID
 	case ProductKindGroup:
-		return r.ProductKey == line.ProductGroupID
+		k.productKey = line.ProductGroupID
 	case ProductKindVariant:
-		return r.ProductKey == line.ProductID && r.Variant == line.Variant
+		k.productKey, k.variant = line.ProductID, line.Variant
 	}
-	return true
+	return k
+}
+
+// dayNum is the calendar day of t as yyyymmdd, ordered like the days themselves.
+func dayNum(t time.Time) int {
+	y, m, d := t.Date()
+	return y*10000 + int(m)*100 + d
 }
 
 // apply computes the value a record produces on current, rounded to 6 decimals (BR-26.3).
@@ -349,11 +417,6 @@ func validityOverlaps(a, b Record) bool {
 	return dayOf(a.ValidFrom) <= dayOf(b.ValidTo) && dayOf(b.ValidFrom) <= dayOf(a.ValidTo)
 }
 
-func inValidity(r Record, date time.Time) bool {
-	d := dayOf(date)
-	return dayOf(r.ValidFrom) <= d && d <= dayOf(r.ValidTo)
-}
-
 // ExplainTrace returns the canonical JSON of the trace and its content address
 // (FR-26.4). Identical results always yield identical bytes and reference.
 func ExplainTrace(r Result) ([]byte, string, error) {
@@ -366,12 +429,6 @@ func ExplainTrace(r Result) ([]byte, string, error) {
 	}
 	sum := sha256.Sum256(body)
 	return body, "sha256:" + hex.EncodeToString(sum[:]), nil
-}
-
-func sortedRecords(in []Record) []Record {
-	out := append([]Record(nil), in...)
-	sort.SliceStable(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out
 }
 
 func hasStep(steps []ConditionType, t ConditionType) bool {
