@@ -16,17 +16,35 @@ func CeilQty(d decimal.Decimal) decimal.Decimal {
 	return d.Shift(QtyScale).Ceil().Shift(-QtyScale)
 }
 
+// ceilDiv rounds num ÷ den up to places decimals exactly. A decimal Div rounds
+// at 16 places first, so a quotient like 200 ÷ 3 comes back a hair above the
+// true value and a later multiply and round-up gains a whole unit at the last
+// place (80.000001 instead of 80); the integer remainder has no such error.
+func ceilDiv(num, den decimal.Decimal, places int32) decimal.Decimal {
+	q, r := num.Shift(places).QuoRem(den, 0)
+	if !r.IsZero() && num.Sign() == den.Sign() {
+		q = q.Add(one)
+	}
+	return q.Shift(-places)
+}
+
+// CeilQtyDiv is CeilQty(num ÷ den) computed without intermediate rounding.
+func CeilQtyDiv(num, den decimal.Decimal) decimal.Decimal { return ceilDiv(num, den, QtyScale) }
+
 // RequiredQty implements BR-21.2: qtyPer × orderQty / seriesSize × (1 + scrap/100),
-// rounded up to QtyScale places, or up to a whole unit when roundUp is set.
+// rounded up to QtyScale places, or up to a whole unit when roundUp is set. The
+// division by the series size comes last and is exact, so the round-up never
+// lifts a whole requirement (2 × 100 / 3 × 1.2 is 80, not 80.000001).
 func RequiredQty(qtyPer, orderQty, seriesSize, scrapPct decimal.Decimal, roundUp bool) (decimal.Decimal, error) {
 	if !seriesSize.IsPositive() {
 		return decimal.Zero, &Error{Code: CodeInvalidInput, Detail: "series size must be positive"}
 	}
-	q := qtyPer.Mul(orderQty).Div(seriesSize).Mul(one.Add(scrapPct.Div(hundred)))
+	num := qtyPer.Mul(orderQty).Mul(hundred.Add(scrapPct))
+	den := seriesSize.Mul(hundred)
 	if roundUp {
-		return q.Ceil(), nil
+		return ceilDiv(num, den, 0), nil
 	}
-	return CeilQty(q), nil
+	return ceilDiv(num, den, QtyScale), nil
 }
 
 // StartQuantities implements BR-21.8. scrapPcts is in route order. The quantity

@@ -307,7 +307,8 @@ The routes are `/v1/production/...`; the gateway serves them under `/api`.
 go vet ./... && go test ./...
 PASSAGE_TEST_DATABASE_URL=postgres://... go test ./...                     # store and HTTP tests on a database
 PASSAGE_TEST_APP_DATABASE_URL=postgres://passage_app:...@.../... (also)    # the RLS test under the app role
-python3 internal/domain/testdata/gen_prod_orders_50.py                     # regenerate the AC2 fixture
+python3 -I internal/domain/testdata/gen_prod_orders_50.py                  # regenerate the AC2 domain fixture
+python3 -I internal/store/testdata/gen_costing_50.py                       # regenerate the AC2 database fixture
 ```
 
 Database tests skip when `PASSAGE_TEST_DATABASE_URL` is unset; the RLS test also needs a

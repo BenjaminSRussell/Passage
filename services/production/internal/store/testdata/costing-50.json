@@ -1,0 +1,4626 @@
+{
+ "fixture": "costing-50",
+ "summary": {
+  "raf full": 25,
+  "raf partial": 16,
+  "raf zero": 9,
+  "item on two lines": 10,
+  "series not 1": 51,
+  "round up": 10,
+  "scrap": 60,
+  "operation scrap": 36,
+  "line not picked": 10,
+  "issue at another unit cost": 38,
+  "operation without hours": 7
+ },
+ "orders": [
+  {
+   "name": "order 1 (full, qty 10)",
+   "orderQty": "10",
+   "rafQty": "10",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-1-0",
+     "qtyPer": "3.128",
+     "series": "12",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "23.5692",
+     "expectedRequired": "2.606667"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-1-1",
+     "qtyPer": "3.387",
+     "series": "1",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "37.4266",
+     "expectedRequired": "33.870000"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-1-0",
+     "setup": "1.6",
+     "run": "0.0021",
+     "scrap": "0",
+     "labor": "23.73",
+     "overhead": "14.09",
+     "expectedProcessQty": "10.000000"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "2.789",
+     "unitCost": null,
+     "expectedAmount": "65.73"
+    },
+    {
+     "lineNo": "20",
+     "qty": "31.499",
+     "unitCost": null,
+     "expectedAmount": "1178.90"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "1.86",
+     "expectedLabor": "44.14",
+     "expectedOverhead": "26.21"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "38.4663",
+     "material": "1329.0760",
+     "overhead": "22.8399"
+    },
+    "receipt": "1390.38",
+    "wipBefore": "-75.40",
+    "accounts": {
+     "1400": "-1244.63",
+     "1410": "1390.38",
+     "5510": "-44.14",
+     "5520": "-26.21"
+    },
+    "variancesExact": {
+     "production-price/labor": "0.002234",
+     "production-price/material": "-0.004980",
+     "production-price/overhead": "0.002589",
+     "production-quantity/labor": "5.671466",
+     "production-quantity/material": "-84.441020",
+     "production-quantity/overhead": "3.367511"
+    }
+   }
+  },
+  {
+   "name": "order 2 (full, qty 25)",
+   "orderQty": "25",
+   "rafQty": "25",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-2-0",
+     "qtyPer": "1.437",
+     "series": "1",
+     "scrap": "2",
+     "roundUp": false,
+     "unitCost": "5.3927",
+     "expectedRequired": "36.643500"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-2-1",
+     "qtyPer": "2.297",
+     "series": "1",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "2.2586",
+     "expectedRequired": "57.425000"
+    },
+    {
+     "lineNo": "30",
+     "item": "RM-2-1",
+     "qtyPer": "0.105",
+     "series": "1",
+     "scrap": "5",
+     "roundUp": false,
+     "unitCost": "27.3928",
+     "expectedRequired": "2.756250"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-2-0",
+     "setup": "0.3",
+     "run": "0.0429",
+     "scrap": "5",
+     "labor": "43.68",
+     "overhead": "16.52",
+     "expectedProcessQty": "26.315790"
+    },
+    {
+     "oper": 20,
+     "resource": "WC-2-1",
+     "setup": "1.9",
+     "run": "0.0149",
+     "scrap": "0",
+     "labor": "48.12",
+     "overhead": "13.37",
+     "expectedProcessQty": "25.000000"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "38.109",
+     "unitCost": null,
+     "expectedAmount": "205.51"
+    },
+    {
+     "lineNo": "20",
+     "qty": "49.96",
+     "unitCost": null,
+     "expectedAmount": "112.84"
+    },
+    {
+     "lineNo": "30",
+     "qty": "2.426",
+     "unitCost": null,
+     "expectedAmount": "66.45"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 20,
+     "hours": "2.3",
+     "expectedLabor": "110.68",
+     "expectedOverhead": "30.75"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "171.7691",
+     "material": "402.8089",
+     "overhead": "53.9895"
+    },
+    "receipt": "628.57",
+    "wipBefore": "-102.34",
+    "accounts": {
+     "1400": "-384.80",
+     "1410": "628.57",
+     "5510": "-110.68",
+     "5520": "-30.75"
+    },
+    "variancesExact": {
+     "production-price/labor": "0.004000",
+     "production-price/material": "0.667755",
+     "production-price/overhead": "-0.000975",
+     "production-quantity/labor": "1.323300",
+     "production-quantity/material": "-18.676655",
+     "production-quantity/overhead": "0.367675",
+     "production-substitution/labor": "-62.416400",
+     "production-substitution/overhead": "-23.606200"
+    }
+   }
+  },
+  {
+   "name": "order 3 (partial, qty 100)",
+   "orderQty": "100",
+   "rafQty": "13",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-3-0",
+     "qtyPer": "0.834",
+     "series": "3",
+     "scrap": "2",
+     "roundUp": true,
+     "unitCost": "28.3347",
+     "expectedRequired": "29.000000"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-3-1",
+     "qtyPer": "2.576",
+     "series": "3",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "22.9396",
+     "expectedRequired": "85.866667"
+    },
+    {
+     "lineNo": "30",
+     "item": "RM-3-2",
+     "qtyPer": "3.726",
+     "series": "1",
+     "scrap": "5",
+     "roundUp": false,
+     "unitCost": "24.4458",
+     "expectedRequired": "391.230000"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-3-0",
+     "setup": "3.3",
+     "run": "0.0444",
+     "scrap": "5",
+     "labor": "51.91",
+     "overhead": "17.41",
+     "expectedProcessQty": "105.263158"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "3.544",
+     "unitCost": "29.7514",
+     "expectedAmount": "105.44"
+    },
+    {
+     "lineNo": "20",
+     "qty": "10.939",
+     "unitCost": null,
+     "expectedAmount": "250.94"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "3.17",
+     "expectedLabor": "164.55",
+     "expectedOverhead": "55.19"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "413.9139",
+     "material": "12355.3836",
+     "overhead": "138.8218"
+    },
+    "receipt": "1678.06",
+    "wipBefore": "-1101.94",
+    "accounts": {
+     "1400": "-356.38",
+     "1410": "1678.06",
+     "5510": "-164.55",
+     "5520": "-55.19"
+    },
+    "variancesExact": {
+     "lot-size/labor": "149.033610",
+     "lot-size/overhead": "49.984110",
+     "production-price/labor": "-0.004681",
+     "production-price/material": "5.025538",
+     "production-price/overhead": "0.000317",
+     "production-quantity/labor": "-38.287736",
+     "production-quantity/material": "-11.534467",
+     "production-quantity/overhead": "-12.841261",
+     "production-substitution/material": "-1243.310939"
+    }
+   }
+  },
+  {
+   "name": "order 4 (full, qty 250)",
+   "orderQty": "250",
+   "rafQty": "250",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-4-0",
+     "qtyPer": "3.074",
+     "series": "10",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "21.9368",
+     "expectedRequired": "76.850000"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-4-0",
+     "setup": "0.8",
+     "run": "0.0412",
+     "scrap": "5",
+     "labor": "36.93",
+     "overhead": "14.69",
+     "expectedProcessQty": "263.157895"
+    },
+    {
+     "oper": 20,
+     "resource": "WC-4-1",
+     "setup": "4",
+     "run": "0.0252",
+     "scrap": "0",
+     "labor": "50.37",
+     "overhead": "9.35",
+     "expectedProcessQty": "250.000000"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "70.702",
+     "unitCost": null,
+     "expectedAmount": "1550.98"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "12.11",
+     "expectedLabor": "447.22",
+     "expectedOverhead": "177.90"
+    },
+    {
+     "oper": 20,
+     "hours": "8.65",
+     "expectedLabor": "435.70",
+     "expectedOverhead": "80.88"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "948.7539",
+     "material": "1685.8431",
+     "overhead": "267.3275"
+    },
+    "receipt": "2901.92",
+    "wipBefore": "-209.24",
+    "accounts": {
+     "1400": "-1550.98",
+     "1410": "2901.92",
+     "5510": "-882.92",
+     "5520": "-258.78"
+    },
+    "variancesExact": {
+     "production-price/labor": "-0.002750",
+     "production-price/material": "0.004348",
+     "production-price/overhead": "0.006628",
+     "production-quantity/labor": "-65.831150",
+     "production-quantity/material": "-134.867448",
+     "production-quantity/overhead": "-8.554128"
+    }
+   }
+  },
+  {
+   "name": "order 5 (partial, qty 333)",
+   "orderQty": "333",
+   "rafQty": "113",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-5-0",
+     "qtyPer": "3.654",
+     "series": "12",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "26.9381",
+     "expectedRequired": "101.398500"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-5-1",
+     "qtyPer": "2.913",
+     "series": "1",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "35.3259",
+     "expectedRequired": "970.029000"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-5-0",
+     "setup": "0.8",
+     "run": "0.0054",
+     "scrap": "10",
+     "labor": "54.75",
+     "overhead": "9.71",
+     "expectedProcessQty": "370.000000"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "38.193",
+     "unitCost": null,
+     "expectedAmount": "1028.85"
+    },
+    {
+     "lineNo": "20",
+     "qty": "375.253",
+     "unitCost": null,
+     "expectedAmount": "13256.15"
+    }
+   ],
+   "hours": [],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "153.1905",
+     "material": "36998.6304",
+     "overhead": "27.1686"
+    },
+    "receipt": "12616.29",
+    "wipBefore": "1668.71",
+    "accounts": {
+     "1400": "-14285.00",
+     "1410": "12616.29",
+     "5510": "0.00",
+     "5520": "0.00"
+    },
+    "variancesExact": {
+     "production-price/material": "0.003187",
+     "production-quantity/material": "1729.906016",
+     "production-substitution/labor": "-51.983563",
+     "production-substitution/overhead": "-9.219375"
+    }
+   }
+  },
+  {
+   "name": "order 6 (zero, qty 120)",
+   "orderQty": "120",
+   "rafQty": "0",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-6-0",
+     "qtyPer": "3.08",
+     "series": "12",
+     "scrap": "2",
+     "roundUp": false,
+     "unitCost": "4.6733",
+     "expectedRequired": "31.416000"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-6-0",
+     "setup": "1.6",
+     "run": "0.0396",
+     "scrap": "0",
+     "labor": "38.27",
+     "overhead": "19",
+     "expectedProcessQty": "133.333334"
+    },
+    {
+     "oper": 20,
+     "resource": "WC-6-1",
+     "setup": "3.3",
+     "run": "0.0254",
+     "scrap": "10",
+     "labor": "24.51",
+     "overhead": "15.95",
+     "expectedProcessQty": "133.333334"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "17.304",
+     "unitCost": "4.8602",
+     "expectedAmount": "84.10"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "3.96",
+     "expectedLabor": "151.55",
+     "expectedOverhead": "75.24"
+    },
+    {
+     "oper": 20,
+     "hours": "5.39",
+     "expectedLabor": "132.11",
+     "expectedOverhead": "85.97"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "427.1878",
+     "material": "146.8164",
+     "overhead": "237.3723"
+    },
+    "receipt": "0.00",
+    "wipBefore": "528.97",
+    "accounts": {
+     "1400": "-84.10",
+     "1410": "0.00",
+     "5510": "-283.66",
+     "5520": "-161.21"
+    },
+    "variancesExact": {
+     "lot-size/labor": "142.115000",
+     "lot-size/overhead": "83.035000",
+     "production-price/labor": "0.001901",
+     "production-price/material": "3.233213",
+     "production-price/overhead": "-0.000473",
+     "production-quantity/labor": "141.543099",
+     "production-quantity/material": "80.866787",
+     "production-quantity/overhead": "78.175473"
+    }
+   }
+  },
+  {
+   "name": "order 7 (full, qty 25)",
+   "orderQty": "25",
+   "rafQty": "25",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-7-0",
+     "qtyPer": "2.087",
+     "series": "10",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "2.7155",
+     "expectedRequired": "5.217500"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-7-1",
+     "qtyPer": "0.419",
+     "series": "10",
+     "scrap": "20",
+     "roundUp": false,
+     "unitCost": "7.5197",
+     "expectedRequired": "1.257000"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-7-0",
+     "setup": "2.9",
+     "run": "0.0485",
+     "scrap": "0",
+     "labor": "28.58",
+     "overhead": "16.68",
+     "expectedProcessQty": "25.000000"
+    },
+    {
+     "oper": 20,
+     "resource": "WC-7-1",
+     "setup": "0.9",
+     "run": "0.0408",
+     "scrap": "0",
+     "labor": "30.16",
+     "overhead": "18.64",
+     "expectedProcessQty": "25.000000"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "5.791",
+     "unitCost": null,
+     "expectedAmount": "15.73"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 20,
+     "hours": "2.11",
+     "expectedLabor": "63.64",
+     "expectedOverhead": "39.33"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "175.4425",
+     "material": "23.6204",
+     "overhead": "104.3853"
+    },
+    "receipt": "303.45",
+    "wipBefore": "-184.75",
+    "accounts": {
+     "1400": "-15.73",
+     "1410": "303.45",
+     "5510": "-63.64",
+     "5520": "-39.33"
+    },
+    "variancesExact": {
+     "production-price/labor": "0.002400",
+     "production-price/material": "0.004563",
+     "production-price/overhead": "-0.000400",
+     "production-quantity/labor": "5.730400",
+     "production-quantity/material": "1.557337",
+     "production-quantity/overhead": "3.541600",
+     "production-substitution/labor": "-117.535300",
+     "production-substitution/material": "-9.452300",
+     "production-substitution/overhead": "-68.596500"
+    }
+   }
+  },
+  {
+   "name": "order 8 (full, qty 1)",
+   "orderQty": "1",
+   "rafQty": "1",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-8-0",
+     "qtyPer": "2.209",
+     "series": "10",
+     "scrap": "20",
+     "roundUp": false,
+     "unitCost": "18.8815",
+     "expectedRequired": "0.265080"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-8-1",
+     "qtyPer": "1.832",
+     "series": "1",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "21.1908",
+     "expectedRequired": "1.832000"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-8-0",
+     "setup": "0.4",
+     "run": "0.0161",
+     "scrap": "0",
+     "labor": "28.18",
+     "overhead": "11.45",
+     "expectedProcessQty": "1.111112"
+    },
+    {
+     "oper": 20,
+     "resource": "WC-8-1",
+     "setup": "3",
+     "run": "0.0473",
+     "scrap": "10",
+     "labor": "22.24",
+     "overhead": "11.27",
+     "expectedProcessQty": "1.111112"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "0.233",
+     "unitCost": "18.3151",
+     "expectedAmount": "4.27"
+    },
+    {
+     "lineNo": "20",
+     "qty": "1.887",
+     "unitCost": null,
+     "expectedAmount": "39.99"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "0.44",
+     "expectedLabor": "12.40",
+     "expectedOverhead": "5.04"
+    },
+    {
+     "oper": 20,
+     "hours": "2.69",
+     "expectedLabor": "59.83",
+     "expectedOverhead": "30.32"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "79.6649",
+     "material": "43.8266",
+     "overhead": "39.1871"
+    },
+    "receipt": "162.68",
+    "wipBefore": "-10.83",
+    "accounts": {
+     "1400": "-44.26",
+     "1410": "162.68",
+     "5510": "-72.23",
+     "5520": "-35.36"
+    },
+    "variancesExact": {
+     "production-price/labor": "0.005242",
+     "production-price/material": "-0.126375",
+     "production-price/overhead": "0.005731",
+     "production-quantity/labor": "-7.440142",
+     "production-quantity/material": "0.559775",
+     "production-quantity/overhead": "-3.832831"
+    }
+   }
+  },
+  {
+   "name": "order 9 (full, qty 7)",
+   "orderQty": "7",
+   "rafQty": "7",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-9-0",
+     "qtyPer": "0.775",
+     "series": "1",
+     "scrap": "5",
+     "roundUp": false,
+     "unitCost": "8.9934",
+     "expectedRequired": "5.696250"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-9-0",
+     "qtyPer": "1.319",
+     "series": "1",
+     "scrap": "12.5",
+     "roundUp": false,
+     "unitCost": "11.817",
+     "expectedRequired": "10.387125"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-9-0",
+     "setup": "0.2",
+     "run": "0.0258",
+     "scrap": "5",
+     "labor": "51.87",
+     "overhead": "16.78",
+     "expectedProcessQty": "7.368422"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "6.551",
+     "unitCost": "8.4538",
+     "expectedAmount": "55.38"
+    },
+    {
+     "lineNo": "20",
+     "qty": "10.283",
+     "unitCost": null,
+     "expectedAmount": "121.51"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "0.35",
+     "expectedLabor": "18.15",
+     "expectedOverhead": "5.87"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "20.2348",
+     "material": "173.9733",
+     "overhead": "6.5460"
+    },
+    "receipt": "200.75",
+    "wipBefore": "0.16",
+    "accounts": {
+     "1400": "-176.89",
+     "1410": "200.75",
+     "5510": "-18.15",
+     "5520": "-5.87"
+    },
+    "variancesExact": {
+     "production-price/labor": "-0.004535",
+     "production-price/material": "-5.202784",
+     "production-price/overhead": "-0.003030",
+     "production-quantity/labor": "-2.080265",
+     "production-quantity/material": "8.119484",
+     "production-quantity/overhead": "-0.672970"
+    }
+   }
+  },
+  {
+   "name": "order 10 (full, qty 120)",
+   "orderQty": "120",
+   "rafQty": "120",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-10-0",
+     "qtyPer": "3.924",
+     "series": "1",
+     "scrap": "2",
+     "roundUp": false,
+     "unitCost": "3.5066",
+     "expectedRequired": "480.297600"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-10-1",
+     "qtyPer": "2.45",
+     "series": "1",
+     "scrap": "12.5",
+     "roundUp": false,
+     "unitCost": "31.0572",
+     "expectedRequired": "330.750000"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-10-0",
+     "setup": "0.4",
+     "run": "0.0249",
+     "scrap": "0",
+     "labor": "22.93",
+     "overhead": "13.72",
+     "expectedProcessQty": "120.000000"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "446.677",
+     "unitCost": null,
+     "expectedAmount": "1566.32"
+    },
+    {
+     "lineNo": "20",
+     "qty": "353.903",
+     "unitCost": "32.6101",
+     "expectedAmount": "11540.81"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "3.69",
+     "expectedLabor": "84.61",
+     "expectedOverhead": "50.63"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "77.6868",
+     "material": "11956.3805",
+     "overhead": "46.4834"
+    },
+    "receipt": "12080.55",
+    "wipBefore": "1161.82",
+    "accounts": {
+     "1400": "-13107.13",
+     "1410": "12080.55",
+     "5510": "-84.61",
+     "5520": "-50.63"
+    },
+    "variancesExact": {
+     "production-price/labor": "-0.001656",
+     "production-price/material": "549.576147",
+     "production-price/overhead": "0.003156",
+     "production-quantity/labor": "6.924856",
+     "production-quantity/material": "601.173353",
+     "production-quantity/overhead": "4.143444"
+    }
+   }
+  },
+  {
+   "name": "order 11 (full, qty 7)",
+   "orderQty": "7",
+   "rafQty": "7",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-11-0",
+     "qtyPer": "3.248",
+     "series": "1",
+     "scrap": "20",
+     "roundUp": true,
+     "unitCost": "20.9576",
+     "expectedRequired": "28.000000"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-11-1",
+     "qtyPer": "2.693",
+     "series": "3",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "22.1697",
+     "expectedRequired": "6.283667"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-11-0",
+     "setup": "3.6",
+     "run": "0.0451",
+     "scrap": "0",
+     "labor": "37.63",
+     "overhead": "14.14",
+     "expectedProcessQty": "7.000000"
+    },
+    {
+     "oper": 20,
+     "resource": "WC-11-1",
+     "setup": "2.7",
+     "run": "0.0339",
+     "scrap": "0",
+     "labor": "37.2",
+     "overhead": "16.82",
+     "expectedProcessQty": "7.000000"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "26.04",
+     "unitCost": "18.8618",
+     "expectedAmount": "491.16"
+    },
+    {
+     "lineNo": "20",
+     "qty": "6.786",
+     "unitCost": "23.0565",
+     "expectedAmount": "156.46"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "3.84",
+     "expectedLabor": "144.50",
+     "expectedOverhead": "54.30"
+    },
+    {
+     "oper": 20,
+     "hours": "3.26",
+     "expectedLabor": "121.27",
+     "expectedOverhead": "54.83"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "256.6154",
+     "material": "726.1198",
+     "overhead": "104.7734"
+    },
+    "receipt": "1087.51",
+    "wipBefore": "-64.99",
+    "accounts": {
+     "1400": "-647.62",
+     "1410": "1087.51",
+     "5510": "-265.77",
+     "5520": "-109.13"
+    },
+    "variancesExact": {
+     "production-price/labor": "-0.001253",
+     "production-price/material": "-48.559475",
+     "production-price/overhead": "-0.000817",
+     "production-quantity/labor": "9.155853",
+     "production-quantity/material": "-29.940325",
+     "production-quantity/overhead": "4.357417"
+    }
+   }
+  },
+  {
+   "name": "order 12 (partial, qty 150)",
+   "orderQty": "150",
+   "rafQty": "58",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-12-0",
+     "qtyPer": "1.976",
+     "series": "1",
+     "scrap": "2",
+     "roundUp": true,
+     "unitCost": "17.9295",
+     "expectedRequired": "303.000000"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-12-1",
+     "qtyPer": "0.256",
+     "series": "10",
+     "scrap": "0",
+     "roundUp": true,
+     "unitCost": "25.3401",
+     "expectedRequired": "4.000000"
+    },
+    {
+     "lineNo": "30",
+     "item": "RM-12-2",
+     "qtyPer": "0.743",
+     "series": "1",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "9.4638",
+     "expectedRequired": "111.450000"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-12-0",
+     "setup": "2",
+     "run": "0.023",
+     "scrap": "5",
+     "labor": "49.39",
+     "overhead": "16.01",
+     "expectedProcessQty": "166.204987"
+    },
+    {
+     "oper": 20,
+     "resource": "WC-12-1",
+     "setup": "2.3",
+     "run": "0.0099",
+     "scrap": "5",
+     "labor": "27.41",
+     "overhead": "19.77",
+     "expectedProcessQty": "157.894737"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "133.562",
+     "unitCost": "18.6467",
+     "expectedAmount": "2490.49"
+    },
+    {
+     "lineNo": "20",
+     "qty": "1.717",
+     "unitCost": null,
+     "expectedAmount": "43.51"
+    },
+    {
+     "lineNo": "30",
+     "qty": "45.249",
+     "unitCost": null,
+     "expectedAmount": "428.23"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "3.76",
+     "expectedLabor": "185.71",
+     "expectedOverhead": "60.20"
+    },
+    {
+     "oper": 20,
+     "hours": "2.53",
+     "expectedLabor": "69.35",
+     "expectedOverhead": "50.02"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "393.4731",
+     "material": "6588.7394",
+     "overhead": "169.5963"
+    },
+    "receipt": "2765.37",
+    "wipBefore": "562.14",
+    "accounts": {
+     "1400": "-2962.23",
+     "1410": "2765.37",
+     "5510": "-255.06",
+     "5520": "-110.22"
+    },
+    "variancesExact": {
+     "lot-size/labor": "99.251440",
+     "lot-size/overhead": "47.527813",
+     "production-price/labor": "0.006259",
+     "production-price/material": "95.793687",
+     "production-price/overhead": "0.004296",
+     "production-quantity/labor": "3.659369",
+     "production-quantity/material": "318.790412",
+     "production-quantity/overhead": "-2.889346"
+    }
+   }
+  },
+  {
+   "name": "order 13 (full, qty 25)",
+   "orderQty": "25",
+   "rafQty": "25",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-13-0",
+     "qtyPer": "3.713",
+     "series": "3",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "28.4361",
+     "expectedRequired": "30.941667"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-13-1",
+     "qtyPer": "1.441",
+     "series": "10",
+     "scrap": "12.5",
+     "roundUp": false,
+     "unitCost": "20.4061",
+     "expectedRequired": "4.052813"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-13-0",
+     "setup": "0.1",
+     "run": "0.0304",
+     "scrap": "0",
+     "labor": "43.8",
+     "overhead": "14.78",
+     "expectedProcessQty": "25.000000"
+    },
+    {
+     "oper": 20,
+     "resource": "WC-13-1",
+     "setup": "3.6",
+     "run": "0.0081",
+     "scrap": "0",
+     "labor": "44.25",
+     "overhead": "13.42",
+     "expectedProcessQty": "25.000000"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "33.108",
+     "unitCost": null,
+     "expectedAmount": "941.46"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "0.89",
+     "expectedLabor": "38.98",
+     "expectedOverhead": "13.15"
+    },
+    {
+     "oper": 20,
+     "hours": "3.8",
+     "expectedLabor": "168.15",
+     "expectedOverhead": "51.00"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "205.9286",
+     "material": "962.5624",
+     "overhead": "63.7404"
+    },
+    "receipt": "1232.23",
+    "wipBefore": "-19.49",
+    "accounts": {
+     "1400": "-941.46",
+     "1410": "1232.23",
+     "5510": "-207.13",
+     "5520": "-64.15"
+    },
+    "variancesExact": {
+     "production-price/labor": "-0.001975",
+     "production-price/material": "-0.002359",
+     "production-price/overhead": "-0.000250",
+     "production-quantity/labor": "1.203375",
+     "production-quantity/material": "61.602059",
+     "production-quantity/overhead": "0.409850",
+     "production-substitution/material": "-82.702100"
+    }
+   }
+  },
+  {
+   "name": "order 14 (zero, qty 100)",
+   "orderQty": "100",
+   "rafQty": "0",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-14-0",
+     "qtyPer": "3.139",
+     "series": "1",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "19.7038",
+     "expectedRequired": "313.900000"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-14-1",
+     "qtyPer": "0.756",
+     "series": "1",
+     "scrap": "0",
+     "roundUp": true,
+     "unitCost": "22.07",
+     "expectedRequired": "76.000000"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-14-0",
+     "setup": "2.3",
+     "run": "0.0196",
+     "scrap": "0",
+     "labor": "35.55",
+     "overhead": "9.08",
+     "expectedProcessQty": "100.000000"
+    },
+    {
+     "oper": 20,
+     "resource": "WC-14-1",
+     "setup": "0.6",
+     "run": "0.0245",
+     "scrap": "0",
+     "labor": "46.83",
+     "overhead": "7.1",
+     "expectedProcessQty": "100.000000"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "184.291",
+     "unitCost": "18.9156",
+     "expectedAmount": "3485.97"
+    },
+    {
+     "lineNo": "20",
+     "qty": "45.053",
+     "unitCost": null,
+     "expectedAmount": "994.32"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "2.8",
+     "expectedLabor": "99.54",
+     "expectedOverhead": "25.42"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "294.2745",
+     "material": "7862.3428",
+     "overhead": "60.3358"
+    },
+    "receipt": "0.00",
+    "wipBefore": "4605.25",
+    "accounts": {
+     "1400": "-4480.29",
+     "1410": "0.00",
+     "5510": "-99.54",
+     "5520": "-25.42"
+    },
+    "variancesExact": {
+     "lot-size/labor": "81.765000",
+     "lot-size/overhead": "20.884000",
+     "production-price/material": "-145.262704",
+     "production-price/overhead": "-0.004000",
+     "production-quantity/labor": "17.775000",
+     "production-quantity/material": "4625.552704",
+     "production-quantity/overhead": "4.540000"
+    }
+   }
+  },
+  {
+   "name": "order 15 (full, qty 150)",
+   "orderQty": "150",
+   "rafQty": "150",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-15-0",
+     "qtyPer": "0.541",
+     "series": "12",
+     "scrap": "2",
+     "roundUp": false,
+     "unitCost": "42.4544",
+     "expectedRequired": "6.897750"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-15-0",
+     "qtyPer": "0.362",
+     "series": "1",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "43.0149",
+     "expectedRequired": "54.300000"
+    },
+    {
+     "lineNo": "30",
+     "item": "RM-15-0",
+     "qtyPer": "3.43",
+     "series": "1",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "8.0994",
+     "expectedRequired": "514.500000"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-15-0",
+     "setup": "3.5",
+     "run": "0.0051",
+     "scrap": "5",
+     "labor": "40.13",
+     "overhead": "15.37",
+     "expectedProcessQty": "157.894737"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "7.105",
+     "unitCost": null,
+     "expectedAmount": "301.64"
+    },
+    {
+     "lineNo": "20",
+     "qty": "59.73",
+     "unitCost": null,
+     "expectedAmount": "2569.28"
+    },
+    {
+     "lineNo": "30",
+     "qty": "545.37",
+     "unitCost": "8.8283",
+     "expectedAmount": "4814.69"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "4.95",
+     "expectedLabor": "198.64",
+     "expectedOverhead": "76.08"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "172.7702",
+     "material": "6795.6902",
+     "overhead": "66.1719"
+    },
+    "receipt": "7034.63",
+    "wipBefore": "925.70",
+    "accounts": {
+     "1400": "-7685.61",
+     "1410": "7034.63",
+     "5510": "-198.64",
+     "5520": "-76.08"
+    },
+    "variancesExact": {
+     "production-price/labor": "-0.003488",
+     "production-price/material": "458.978458",
+     "production-price/overhead": "-0.001506",
+     "production-quantity/labor": "25.873288",
+     "production-quantity/material": "430.941342",
+     "production-quantity/overhead": "9.909606"
+    }
+   }
+  },
+  {
+   "name": "order 16 (zero, qty 333)",
+   "orderQty": "333",
+   "rafQty": "0",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-16-0",
+     "qtyPer": "2.78",
+     "series": "10",
+     "scrap": "2",
+     "roundUp": false,
+     "unitCost": "3.4377",
+     "expectedRequired": "94.425480"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-16-0",
+     "setup": "2.1",
+     "run": "0.0057",
+     "scrap": "5",
+     "labor": "43.6",
+     "overhead": "18.43",
+     "expectedProcessQty": "350.526316"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "62.727",
+     "unitCost": "3.7127",
+     "expectedAmount": "232.89"
+    }
+   ],
+   "hours": [],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "178.6728",
+     "material": "324.6065",
+     "overhead": "75.5261"
+    },
+    "receipt": "0.00",
+    "wipBefore": "232.89",
+    "accounts": {
+     "1400": "-232.89",
+     "1410": "0.00",
+     "5510": "0.00",
+     "5520": "0.00"
+    },
+    "variancesExact": {
+     "production-price/material": "17.253374",
+     "production-quantity/material": "215.636626"
+    }
+   }
+  },
+  {
+   "name": "order 17 (full, qty 333)",
+   "orderQty": "333",
+   "rafQty": "333",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-17-0",
+     "qtyPer": "0.495",
+     "series": "1",
+     "scrap": "12.5",
+     "roundUp": false,
+     "unitCost": "18.2588",
+     "expectedRequired": "185.439375"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-17-1",
+     "qtyPer": "2.224",
+     "series": "12",
+     "scrap": "0",
+     "roundUp": true,
+     "unitCost": "17.7374",
+     "expectedRequired": "62.000000"
+    },
+    {
+     "lineNo": "30",
+     "item": "RM-17-2",
+     "qtyPer": "0.853",
+     "series": "3",
+     "scrap": "20",
+     "roundUp": false,
+     "unitCost": "17.6391",
+     "expectedRequired": "113.619600"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-17-0",
+     "setup": "2.5",
+     "run": "0.0207",
+     "scrap": "10",
+     "labor": "42.25",
+     "overhead": "12.11",
+     "expectedProcessQty": "370.000000"
+    },
+    {
+     "oper": 20,
+     "resource": "WC-17-1",
+     "setup": "3.8",
+     "run": "0.0114",
+     "scrap": "0",
+     "labor": "57.25",
+     "overhead": "6.29",
+     "expectedProcessQty": "333.000000"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "198.42",
+     "unitCost": "16.9807",
+     "expectedAmount": "3369.31"
+    },
+    {
+     "lineNo": "20",
+     "qty": "57.04",
+     "unitCost": null,
+     "expectedAmount": "1011.74"
+    },
+    {
+     "lineNo": "30",
+     "qty": "97.713",
+     "unitCost": null,
+     "expectedAmount": "1723.57"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "9.96",
+     "expectedLabor": "420.81",
+     "expectedOverhead": "120.62"
+    },
+    {
+     "oper": 20,
+     "hours": "8.96",
+     "expectedLabor": "512.96",
+     "expectedOverhead": "56.36"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "864.1003",
+     "material": "6489.7668",
+     "overhead": "170.8056"
+    },
+    "receipt": "7524.67",
+    "wipBefore": "-309.30",
+    "accounts": {
+     "1400": "-6104.62",
+     "1410": "7524.67",
+     "5510": "-933.77",
+     "5520": "-176.98"
+    },
+    "variancesExact": {
+     "production-price/labor": "-0.000108",
+     "production-price/material": "-253.601825",
+     "production-price/overhead": "0.005988",
+     "production-quantity/labor": "69.669808",
+     "production-quantity/material": "-131.544975",
+     "production-quantity/overhead": "6.168412"
+    }
+   }
+  },
+  {
+   "name": "order 18 (full, qty 333)",
+   "orderQty": "333",
+   "rafQty": "333",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-18-0",
+     "qtyPer": "1.521",
+     "series": "12",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "13.4003",
+     "expectedRequired": "42.207750"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-18-1",
+     "qtyPer": "1.642",
+     "series": "10",
+     "scrap": "12.5",
+     "roundUp": false,
+     "unitCost": "0.8838",
+     "expectedRequired": "61.513425"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-18-0",
+     "setup": "3.5",
+     "run": "0.0334",
+     "scrap": "0",
+     "labor": "41.04",
+     "overhead": "6.11",
+     "expectedProcessQty": "333.000000"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "36.721",
+     "unitCost": "12.8643",
+     "expectedAmount": "472.39"
+    },
+    {
+     "lineNo": "20",
+     "qty": "59.053",
+     "unitCost": "0.9192",
+     "expectedAmount": "54.28"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "11.7",
+     "expectedLabor": "480.17",
+     "expectedOverhead": "71.49"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "600.0951",
+     "material": "619.9621",
+     "overhead": "89.3416"
+    },
+    "receipt": "1309.40",
+    "wipBefore": "-231.07",
+    "accounts": {
+     "1400": "-526.67",
+     "1410": "1309.40",
+     "5510": "-480.17",
+     "5520": "-71.49"
+    },
+    "variancesExact": {
+     "production-price/labor": "0.001990",
+     "production-price/material": "-17.593481",
+     "production-price/overhead": "0.003034",
+     "production-quantity/labor": "-119.927090",
+     "production-quantity/material": "-75.698619",
+     "production-quantity/overhead": "-17.854634"
+    }
+   }
+  },
+  {
+   "name": "order 19 (zero, qty 500)",
+   "orderQty": "500",
+   "rafQty": "0",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-19-0",
+     "qtyPer": "1.492",
+     "series": "1",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "40.8999",
+     "expectedRequired": "746.000000"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-19-0",
+     "setup": "2",
+     "run": "0.0047",
+     "scrap": "0",
+     "labor": "51.77",
+     "overhead": "5.86",
+     "expectedProcessQty": "555.555556"
+    },
+    {
+     "oper": 20,
+     "resource": "WC-19-1",
+     "setup": "1.7",
+     "run": "0.0002",
+     "scrap": "10",
+     "labor": "49.96",
+     "overhead": "16.36",
+     "expectedProcessQty": "555.555556"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "389.412",
+     "unitCost": "37.6279",
+     "expectedAmount": "14652.76"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "4.17",
+     "expectedLabor": "215.88",
+     "expectedOverhead": "24.44"
+    },
+    {
+     "oper": 20,
+     "hours": "1.71",
+     "expectedLabor": "85.43",
+     "expectedOverhead": "27.98"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "329.2003",
+     "material": "30511.3254",
+     "overhead": "56.6509"
+    },
+    "receipt": "0.00",
+    "wipBefore": "15006.49",
+    "accounts": {
+     "1400": "-14652.76",
+     "1410": "0.00",
+     "5510": "-301.31",
+     "5520": "-52.42"
+    },
+    "variancesExact": {
+     "lot-size/labor": "188.472000",
+     "lot-size/overhead": "39.532000",
+     "production-price/labor": "-0.002469",
+     "production-price/material": "-1274.151859",
+     "production-price/overhead": "0.008189",
+     "production-quantity/labor": "112.840469",
+     "production-quantity/material": "15926.911859",
+     "production-quantity/overhead": "12.879811"
+    }
+   }
+  },
+  {
+   "name": "order 20 (full, qty 7)",
+   "orderQty": "7",
+   "rafQty": "7",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-20-0",
+     "qtyPer": "0.606",
+     "series": "1",
+     "scrap": "12.5",
+     "roundUp": false,
+     "unitCost": "11.2446",
+     "expectedRequired": "4.772250"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-20-1",
+     "qtyPer": "2.462",
+     "series": "1",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "27.7888",
+     "expectedRequired": "17.234000"
+    },
+    {
+     "lineNo": "30",
+     "item": "RM-20-2",
+     "qtyPer": "2.366",
+     "series": "12",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "39.8235",
+     "expectedRequired": "1.380167"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-20-0",
+     "setup": "2",
+     "run": "0.0205",
+     "scrap": "5",
+     "labor": "49.23",
+     "overhead": "13.55",
+     "expectedProcessQty": "7.368422"
+    },
+    {
+     "oper": 20,
+     "resource": "WC-20-1",
+     "setup": "0.1",
+     "run": "0.0349",
+     "scrap": "0",
+     "labor": "49.98",
+     "overhead": "7.66",
+     "expectedProcessQty": "7.000000"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "4.438",
+     "unitCost": null,
+     "expectedAmount": "49.90"
+    },
+    {
+     "lineNo": "20",
+     "qty": "19.302",
+     "unitCost": "25.8436",
+     "expectedAmount": "498.83"
+    },
+    {
+     "lineNo": "30",
+     "qty": "1.546",
+     "unitCost": null,
+     "expectedAmount": "61.57"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "2.67",
+     "expectedLabor": "131.44",
+     "expectedOverhead": "36.18"
+    },
+    {
+     "oper": 20,
+     "hours": "0.35",
+     "expectedLabor": "17.49",
+     "expectedOverhead": "2.68"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "123.1044",
+     "material": "587.5373",
+     "overhead": "31.7841"
+    },
+    "receipt": "742.43",
+    "wipBefore": "55.66",
+    "accounts": {
+     "1400": "-610.30",
+     "1410": "742.43",
+     "5510": "-148.93",
+     "5520": "-38.86"
+    },
+    "variancesExact": {
+     "production-price/labor": "-0.007058",
+     "production-price/material": "-37.550089",
+     "production-price/overhead": "0.000493",
+     "production-quantity/labor": "25.832658",
+     "production-quantity/material": "60.312789",
+     "production-quantity/overhead": "7.075407"
+    }
+   }
+  },
+  {
+   "name": "order 21 (zero, qty 25)",
+   "orderQty": "25",
+   "rafQty": "0",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-21-0",
+     "qtyPer": "2.645",
+     "series": "3",
+     "scrap": "20",
+     "roundUp": false,
+     "unitCost": "35.6987",
+     "expectedRequired": "26.450000"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-21-0",
+     "setup": "4",
+     "run": "0.0079",
+     "scrap": "0",
+     "labor": "31.42",
+     "overhead": "15.65",
+     "expectedProcessQty": "25.000000"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "15.973",
+     "unitCost": "34.9847",
+     "expectedAmount": "558.81"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "4.9",
+     "expectedLabor": "153.96",
+     "expectedOverhead": "76.69"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "131.8855",
+     "material": "944.2306",
+     "overhead": "65.6909"
+    },
+    "receipt": "0.00",
+    "wipBefore": "789.46",
+    "accounts": {
+     "1400": "-558.81",
+     "1410": "0.00",
+     "5510": "-153.96",
+     "5520": "-76.69"
+    },
+    "variancesExact": {
+     "lot-size/labor": "125.680000",
+     "lot-size/overhead": "62.600000",
+     "production-price/labor": "0.001942",
+     "production-price/material": "-11.405326",
+     "production-price/overhead": "0.004971",
+     "production-quantity/labor": "28.278058",
+     "production-quantity/material": "570.215326",
+     "production-quantity/overhead": "14.085029"
+    }
+   }
+  },
+  {
+   "name": "order 22 (partial, qty 120)",
+   "orderQty": "120",
+   "rafQty": "100",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-22-0",
+     "qtyPer": "1.243",
+     "series": "1",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "24.7871",
+     "expectedRequired": "149.160000"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-22-0",
+     "qtyPer": "2.047",
+     "series": "3",
+     "scrap": "20",
+     "roundUp": false,
+     "unitCost": "17.2067",
+     "expectedRequired": "98.256000"
+    },
+    {
+     "lineNo": "30",
+     "item": "RM-22-2",
+     "qtyPer": "1.981",
+     "series": "10",
+     "scrap": "2",
+     "roundUp": false,
+     "unitCost": "27.6403",
+     "expectedRequired": "24.247440"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-22-0",
+     "setup": "0.6",
+     "run": "0.0034",
+     "scrap": "10",
+     "labor": "35.45",
+     "overhead": "9.26",
+     "expectedProcessQty": "133.333334"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "131.758",
+     "unitCost": "26.2743",
+     "expectedAmount": "3461.85"
+    },
+    {
+     "lineNo": "20",
+     "qty": "80.242",
+     "unitCost": null,
+     "expectedAmount": "1380.70"
+    },
+    {
+     "lineNo": "30",
+     "qty": "20.61",
+     "unitCost": null,
+     "expectedAmount": "569.67"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "0.87",
+     "expectedLabor": "30.84",
+     "expectedOverhead": "8.06"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "37.3407",
+     "material": "6058.1119",
+     "overhead": "9.7539"
+    },
+    "receipt": "5087.67",
+    "wipBefore": "363.45",
+    "accounts": {
+     "1400": "-5412.22",
+     "1410": "5087.67",
+     "5510": "-30.84",
+     "5520": "-8.06"
+    },
+    "variancesExact": {
+     "lot-size/labor": "3.545000",
+     "lot-size/overhead": "0.926000",
+     "production-price/labor": "-0.001527",
+     "production-price/material": "225.891837",
+     "production-price/overhead": "0.003772",
+     "production-quantity/labor": "-3.820723",
+     "production-quantity/material": "137.901580",
+     "production-quantity/overhead": "-0.998022"
+    }
+   }
+  },
+  {
+   "name": "order 23 (partial, qty 10)",
+   "orderQty": "10",
+   "rafQty": "1",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-23-0",
+     "qtyPer": "3.535",
+     "series": "12",
+     "scrap": "2",
+     "roundUp": false,
+     "unitCost": "10.496",
+     "expectedRequired": "3.004750"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-23-1",
+     "qtyPer": "2.212",
+     "series": "3",
+     "scrap": "2",
+     "roundUp": false,
+     "unitCost": "19.5383",
+     "expectedRequired": "7.520800"
+    },
+    {
+     "lineNo": "30",
+     "item": "RM-23-2",
+     "qtyPer": "0.084",
+     "series": "1",
+     "scrap": "0",
+     "roundUp": true,
+     "unitCost": "1.1315",
+     "expectedRequired": "1.000000"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-23-0",
+     "setup": "3.9",
+     "run": "0.0023",
+     "scrap": "5",
+     "labor": "53.67",
+     "overhead": "13.93",
+     "expectedProcessQty": "10.526316"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "0.309",
+     "unitCost": "10.496",
+     "expectedAmount": "3.24"
+    },
+    {
+     "lineNo": "20",
+     "qty": "0.654",
+     "unitCost": null,
+     "expectedAmount": "12.78"
+    },
+    {
+     "lineNo": "30",
+     "qty": "0.088",
+     "unitCost": "1.2673",
+     "expectedAmount": "0.11"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "3.82",
+     "expectedLabor": "205.02",
+     "expectedOverhead": "53.21"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "210.6124",
+     "material": "179.6130",
+     "overhead": "54.6643"
+    },
+    "receipt": "44.49",
+    "wipBefore": "229.87",
+    "accounts": {
+     "1400": "-16.13",
+     "1410": "44.49",
+     "5510": "-205.02",
+     "5520": "-53.21"
+    },
+    "variancesExact": {
+     "lot-size/labor": "188.381700",
+     "lot-size/overhead": "48.894300",
+     "production-price/labor": "0.000580",
+     "production-price/material": "0.009115",
+     "production-price/overhead": "-0.002646",
+     "production-quantity/labor": "-4.423520",
+     "production-quantity/material": "-1.840415",
+     "production-quantity/overhead": "-1.148084"
+    }
+   }
+  },
+  {
+   "name": "order 24 (full, qty 1)",
+   "orderQty": "1",
+   "rafQty": "1",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-24-0",
+     "qtyPer": "2.41",
+     "series": "1",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "8.7857",
+     "expectedRequired": "2.410000"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-24-1",
+     "qtyPer": "3.19",
+     "series": "3",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "40.4156",
+     "expectedRequired": "1.063334"
+    },
+    {
+     "lineNo": "30",
+     "item": "RM-24-2",
+     "qtyPer": "1.388",
+     "series": "3",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "35.5115",
+     "expectedRequired": "0.462667"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-24-0",
+     "setup": "0.6",
+     "run": "0.0425",
+     "scrap": "0",
+     "labor": "33.73",
+     "overhead": "16.64",
+     "expectedProcessQty": "1.000000"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "20",
+     "qty": "1.117",
+     "unitCost": "42.8405",
+     "expectedAmount": "47.85"
+    },
+    {
+     "lineNo": "30",
+     "qty": "0.412",
+     "unitCost": null,
+     "expectedAmount": "14.63"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "0.69",
+     "expectedLabor": "23.27",
+     "expectedOverhead": "11.48"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "21.6715",
+     "material": "80.5788",
+     "overhead": "10.6912"
+    },
+    "receipt": "112.94",
+    "wipBefore": "-15.71",
+    "accounts": {
+     "1400": "-62.48",
+     "1410": "112.94",
+     "5510": "-23.27",
+     "5520": "-11.48"
+    },
+    "variancesExact": {
+     "production-price/labor": "-0.003673",
+     "production-price/material": "2.705017",
+     "production-price/overhead": "-0.001600",
+     "production-quantity/labor": "1.602173",
+     "production-quantity/material": "0.369683",
+     "production-quantity/overhead": "0.790400",
+     "production-substitution/material": "-21.173500"
+    }
+   }
+  },
+  {
+   "name": "order 25 (partial, qty 250)",
+   "orderQty": "250",
+   "rafQty": "173",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-25-0",
+     "qtyPer": "3.086",
+     "series": "1",
+     "scrap": "5",
+     "roundUp": false,
+     "unitCost": "49.0669",
+     "expectedRequired": "810.075000"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-25-1",
+     "qtyPer": "3.049",
+     "series": "3",
+     "scrap": "20",
+     "roundUp": false,
+     "unitCost": "41.6874",
+     "expectedRequired": "304.900000"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-25-0",
+     "setup": "0",
+     "run": "0.0369",
+     "scrap": "10",
+     "labor": "31.35",
+     "overhead": "10.37",
+     "expectedProcessQty": "277.777778"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "605.418",
+     "unitCost": null,
+     "expectedAmount": "29705.98"
+    },
+    {
+     "lineNo": "20",
+     "qty": "200.441",
+     "unitCost": "46.6899",
+     "expectedAmount": "9358.57"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "8.02",
+     "expectedLabor": "251.43",
+     "expectedOverhead": "83.17"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "321.3375",
+     "material": "52458.3573",
+     "overhead": "106.2925"
+    },
+    "receipt": "36597.10",
+    "wipBefore": "2802.05",
+    "accounts": {
+     "1400": "-39064.55",
+     "1410": "36597.10",
+     "5510": "-251.43",
+     "5520": "-83.17"
+    },
+    "variancesExact": {
+     "production-price/labor": "0.003000",
+     "production-price/material": "1002.701379",
+     "production-price/overhead": "0.002600",
+     "production-quantity/labor": "29.061450",
+     "production-quantity/material": "1760.665369",
+     "production-quantity/overhead": "9.612990"
+    }
+   }
+  },
+  {
+   "name": "order 26 (full, qty 150)",
+   "orderQty": "150",
+   "rafQty": "150",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-26-0",
+     "qtyPer": "1.948",
+     "series": "1",
+     "scrap": "5",
+     "roundUp": false,
+     "unitCost": "5.1011",
+     "expectedRequired": "306.810000"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-26-1",
+     "qtyPer": "3.028",
+     "series": "1",
+     "scrap": "5",
+     "roundUp": false,
+     "unitCost": "42.5178",
+     "expectedRequired": "476.910000"
+    },
+    {
+     "lineNo": "30",
+     "item": "RM-26-1",
+     "qtyPer": "1.8",
+     "series": "3",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "47.8357",
+     "expectedRequired": "90.000000"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-26-0",
+     "setup": "1.2",
+     "run": "0.0354",
+     "scrap": "5",
+     "labor": "43.9",
+     "overhead": "17.82",
+     "expectedProcessQty": "157.894737"
+    },
+    {
+     "oper": 20,
+     "resource": "WC-26-1",
+     "setup": "2.4",
+     "run": "0.0297",
+     "scrap": "0",
+     "labor": "54.66",
+     "overhead": "10.61",
+     "expectedProcessQty": "150.000000"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "352.832",
+     "unitCost": null,
+     "expectedAmount": "1799.83"
+    },
+    {
+     "lineNo": "20",
+     "qty": "462.603",
+     "unitCost": "46.3444",
+     "expectedAmount": "21439.06"
+    },
+    {
+     "lineNo": "30",
+     "qty": "76.5",
+     "unitCost": "43.0521",
+     "expectedAmount": "3293.49"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "6.86",
+     "expectedLabor": "301.15",
+     "expectedOverhead": "122.25"
+    },
+    {
+     "oper": 20,
+     "hours": "8.02",
+     "expectedLabor": "438.37",
+     "expectedOverhead": "85.09"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "672.7522",
+     "material": "26147.4455",
+     "overhead": "193.7200"
+    },
+    "receipt": "27013.92",
+    "wipBefore": "465.32",
+    "accounts": {
+     "1400": "-26532.38",
+     "1410": "27013.92",
+     "5510": "-739.52",
+     "5520": "-207.34"
+    },
+    "variancesExact": {
+     "production-price/labor": "-0.007205",
+     "production-price/material": "1355.940063",
+     "production-price/overhead": "0.002563",
+     "production-quantity/labor": "66.775005",
+     "production-quantity/material": "-971.005563",
+     "production-quantity/overhead": "13.617437"
+    }
+   }
+  },
+  {
+   "name": "order 27 (zero, qty 40)",
+   "orderQty": "40",
+   "rafQty": "0",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-27-0",
+     "qtyPer": "2.882",
+     "series": "12",
+     "scrap": "2",
+     "roundUp": true,
+     "unitCost": "3.7052",
+     "expectedRequired": "10.000000"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-27-1",
+     "qtyPer": "3.209",
+     "series": "10",
+     "scrap": "20",
+     "roundUp": false,
+     "unitCost": "15.3553",
+     "expectedRequired": "15.403200"
+    },
+    {
+     "lineNo": "30",
+     "item": "RM-27-2",
+     "qtyPer": "2.889",
+     "series": "1",
+     "scrap": "12.5",
+     "roundUp": false,
+     "unitCost": "23.1548",
+     "expectedRequired": "130.005000"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-27-0",
+     "setup": "0.5",
+     "run": "0.0498",
+     "scrap": "0",
+     "labor": "33.02",
+     "overhead": "9.98",
+     "expectedProcessQty": "40.000000"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "6.386",
+     "unitCost": null,
+     "expectedAmount": "23.66"
+    },
+    {
+     "lineNo": "20",
+     "qty": "10.6",
+     "unitCost": null,
+     "expectedAmount": "162.77"
+    },
+    {
+     "lineNo": "30",
+     "qty": "80.603",
+     "unitCost": null,
+     "expectedAmount": "1866.35"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "1.65",
+     "expectedLabor": "54.48",
+     "expectedOverhead": "16.47"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "82.2858",
+     "material": "3283.8126",
+     "overhead": "24.8702"
+    },
+    "receipt": "0.00",
+    "wipBefore": "2123.73",
+    "accounts": {
+     "1400": "-2052.78",
+     "1410": "0.00",
+     "5510": "-54.48",
+     "5520": "-16.47"
+    },
+    "variancesExact": {
+     "lot-size/labor": "16.510000",
+     "lot-size/overhead": "4.990000",
+     "production-price/labor": "-0.002974",
+     "production-price/material": "0.006023",
+     "production-price/overhead": "0.002974",
+     "production-quantity/labor": "37.972974",
+     "production-quantity/material": "2052.773977",
+     "production-quantity/overhead": "11.477026"
+    }
+   }
+  },
+  {
+   "name": "order 28 (partial, qty 120)",
+   "orderQty": "120",
+   "rafQty": "37",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-28-0",
+     "qtyPer": "2.419",
+     "series": "10",
+     "scrap": "5",
+     "roundUp": false,
+     "unitCost": "39.3002",
+     "expectedRequired": "30.479400"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-28-1",
+     "qtyPer": "2.741",
+     "series": "10",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "41.3368",
+     "expectedRequired": "32.892000"
+    },
+    {
+     "lineNo": "30",
+     "item": "RM-28-2",
+     "qtyPer": "1.396",
+     "series": "1",
+     "scrap": "2",
+     "roundUp": false,
+     "unitCost": "1.1338",
+     "expectedRequired": "170.870400"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-28-0",
+     "setup": "4",
+     "run": "0.0306",
+     "scrap": "10",
+     "labor": "58.47",
+     "overhead": "7.77",
+     "expectedProcessQty": "133.333334"
+    },
+    {
+     "oper": 20,
+     "resource": "WC-28-1",
+     "setup": "2.3",
+     "run": "0.0184",
+     "scrap": "0",
+     "labor": "28.24",
+     "overhead": "9.24",
+     "expectedProcessQty": "120.000000"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "8.27",
+     "unitCost": null,
+     "expectedAmount": "325.01"
+    },
+    {
+     "lineNo": "20",
+     "qty": "11.562",
+     "unitCost": null,
+     "expectedAmount": "477.94"
+    },
+    {
+     "lineNo": "30",
+     "qty": "57.427",
+     "unitCost": null,
+     "expectedAmount": "65.11"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "4.31",
+     "expectedLabor": "252.01",
+     "expectedOverhead": "33.49"
+    },
+    {
+     "oper": 20,
+     "hours": "2.56",
+     "expectedLabor": "72.29",
+     "expectedOverhead": "23.65"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "599.7435",
+     "material": "2751.2294",
+     "overhead": "104.4355"
+    },
+    "receipt": "1065.42",
+    "wipBefore": "184.08",
+    "accounts": {
+     "1400": "-868.06",
+     "1410": "1065.42",
+     "5510": "-324.30",
+     "5520": "-57.14"
+    },
+    "variancesExact": {
+     "lot-size/labor": "206.692133",
+     "lot-size/overhead": "36.196300",
+     "production-price/labor": "-0.000088",
+     "production-price/material": "0.000532",
+     "production-price/overhead": "-0.003089",
+     "production-quantity/labor": "-67.312958",
+     "production-quantity/material": "19.763737",
+     "production-quantity/overhead": "-11.254157"
+    }
+   }
+  },
+  {
+   "name": "order 29 (full, qty 120)",
+   "orderQty": "120",
+   "rafQty": "120",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-29-0",
+     "qtyPer": "0.966",
+     "series": "1",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "36.1775",
+     "expectedRequired": "115.920000"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-29-0",
+     "setup": "4",
+     "run": "0.0083",
+     "scrap": "0",
+     "labor": "39.33",
+     "overhead": "6.31",
+     "expectedProcessQty": "120.000000"
+    },
+    {
+     "oper": 20,
+     "resource": "WC-29-1",
+     "setup": "1.9",
+     "run": "0.0439",
+     "scrap": "0",
+     "labor": "52.45",
+     "overhead": "19.38",
+     "expectedProcessQty": "120.000000"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "125.194",
+     "unitCost": "40.5188",
+     "expectedAmount": "5072.71"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "6.1",
+     "expectedLabor": "239.91",
+     "expectedOverhead": "38.49"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "572.4543",
+     "material": "4193.6958",
+     "overhead": "170.4406"
+    },
+    "receipt": "4936.59",
+    "wipBefore": "414.52",
+    "accounts": {
+     "1400": "-5072.71",
+     "1410": "4936.59",
+     "5510": "-239.91",
+     "5520": "-38.49"
+    },
+    "variancesExact": {
+     "production-price/labor": "-0.003024",
+     "production-price/material": "543.504065",
+     "production-price/overhead": "-0.001049",
+     "production-quantity/labor": "43.420324",
+     "production-quantity/material": "335.510135",
+     "production-quantity/overhead": "6.966249",
+     "production-substitution/labor": "-375.961600",
+     "production-substitution/overhead": "-138.915800"
+    }
+   }
+  },
+  {
+   "name": "order 30 (partial, qty 40)",
+   "orderQty": "40",
+   "rafQty": "26",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-30-0",
+     "qtyPer": "0.798",
+     "series": "12",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "19.0004",
+     "expectedRequired": "2.660000"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-30-1",
+     "qtyPer": "3.774",
+     "series": "1",
+     "scrap": "20",
+     "roundUp": false,
+     "unitCost": "12.706",
+     "expectedRequired": "181.152000"
+    },
+    {
+     "lineNo": "30",
+     "item": "RM-30-2",
+     "qtyPer": "0.448",
+     "series": "12",
+     "scrap": "5",
+     "roundUp": false,
+     "unitCost": "34.9309",
+     "expectedRequired": "1.568000"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-30-0",
+     "setup": "1.1",
+     "run": "0.0137",
+     "scrap": "10",
+     "labor": "55.96",
+     "overhead": "18.12",
+     "expectedProcessQty": "44.444445"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "1.539",
+     "unitCost": null,
+     "expectedAmount": "29.24"
+    },
+    {
+     "lineNo": "20",
+     "qty": "133.056",
+     "unitCost": "12.5789",
+     "expectedAmount": "1673.70"
+    },
+    {
+     "lineNo": "30",
+     "qty": "1.029",
+     "unitCost": "38.7733",
+     "expectedAmount": "39.90"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "1.26",
+     "expectedLabor": "70.51",
+     "expectedOverhead": "22.83"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "95.6294",
+     "material": "2407.0301",
+     "overhead": "30.9651"
+    },
+    "receipt": "1646.86",
+    "wipBefore": "189.32",
+    "accounts": {
+     "1400": "-1742.84",
+     "1410": "1646.86",
+     "5510": "-70.51",
+     "5520": "-22.83"
+    },
+    "variancesExact": {
+     "lot-size/labor": "21.544600",
+     "lot-size/overhead": "6.976200",
+     "production-price/labor": "0.000417",
+     "production-price/material": "-12.955092",
+     "production-price/overhead": "-0.001224",
+     "production-quantity/labor": "-13.194127",
+     "production-quantity/material": "191.225527",
+     "production-quantity/overhead": "-4.272291"
+    }
+   }
+  },
+  {
+   "name": "order 31 (full, qty 7)",
+   "orderQty": "7",
+   "rafQty": "7",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-31-0",
+     "qtyPer": "0.116",
+     "series": "12",
+     "scrap": "20",
+     "roundUp": false,
+     "unitCost": "32.7522",
+     "expectedRequired": "0.081200"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-31-1",
+     "qtyPer": "2.892",
+     "series": "3",
+     "scrap": "12.5",
+     "roundUp": false,
+     "unitCost": "30.2255",
+     "expectedRequired": "7.591500"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-31-0",
+     "setup": "2.5",
+     "run": "0.0118",
+     "scrap": "0",
+     "labor": "59.95",
+     "overhead": "8.64",
+     "expectedProcessQty": "7.000000"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "0.072",
+     "unitCost": null,
+     "expectedAmount": "2.36"
+    },
+    {
+     "lineNo": "20",
+     "qty": "8.427",
+     "unitCost": null,
+     "expectedAmount": "254.71"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "3.05",
+     "expectedLabor": "182.85",
+     "expectedOverhead": "26.35"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "154.8269",
+     "material": "232.1164",
+     "overhead": "22.3137"
+    },
+    "receipt": "409.26",
+    "wipBefore": "57.01",
+    "accounts": {
+     "1400": "-257.07",
+     "1410": "409.26",
+     "5510": "-182.85",
+     "5520": "-26.35"
+    },
+    "variancesExact": {
+     "production-price/labor": "0.002465",
+     "production-price/material": "0.001516",
+     "production-price/overhead": "-0.002043",
+     "production-quantity/labor": "28.020635",
+     "production-quantity/material": "24.952084",
+     "production-quantity/overhead": "4.038343"
+    }
+   }
+  },
+  {
+   "name": "order 32 (partial, qty 25)",
+   "orderQty": "25",
+   "rafQty": "9",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-32-0",
+     "qtyPer": "1.265",
+     "series": "1",
+     "scrap": "0",
+     "roundUp": true,
+     "unitCost": "22.5567",
+     "expectedRequired": "32.000000"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-32-1",
+     "qtyPer": "3.375",
+     "series": "1",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "32.3994",
+     "expectedRequired": "84.375000"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-32-0",
+     "setup": "1.1",
+     "run": "0.0085",
+     "scrap": "5",
+     "labor": "34.9",
+     "overhead": "13.81",
+     "expectedProcessQty": "29.239767"
+    },
+    {
+     "oper": 20,
+     "resource": "WC-32-1",
+     "setup": "2.2",
+     "run": "0.0276",
+     "scrap": "10",
+     "labor": "57.49",
+     "overhead": "11.47",
+     "expectedProcessQty": "27.777778"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "20",
+     "qty": "32.198",
+     "unitCost": "32.3994",
+     "expectedAmount": "1043.20"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "1.37",
+     "expectedLabor": "47.81",
+     "expectedOverhead": "18.92"
+    },
+    {
+     "oper": 20,
+     "hours": "2.8",
+     "expectedLabor": "160.97",
+     "expectedOverhead": "32.12"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "217.6177",
+     "material": "3455.5138",
+     "overhead": "52.6510"
+    },
+    "receipt": "1341.28",
+    "wipBefore": "-38.26",
+    "accounts": {
+     "1400": "-1043.20",
+     "1410": "1341.28",
+     "5510": "-208.78",
+     "5520": "-51.04"
+    },
+    "variancesExact": {
+     "lot-size/labor": "105.515520",
+     "lot-size/overhead": "25.872000",
+     "production-price/labor": "-0.005055",
+     "production-price/material": "0.004109",
+     "production-price/overhead": "0.004279",
+     "production-quantity/labor": "24.927163",
+     "production-quantity/material": "59.064107",
+     "production-quantity/overhead": "6.209361",
+     "production-substitution/material": "-259.853184"
+    }
+   }
+  },
+  {
+   "name": "order 33 (partial, qty 150)",
+   "orderQty": "150",
+   "rafQty": "143",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-33-0",
+     "qtyPer": "1.988",
+     "series": "10",
+     "scrap": "20",
+     "roundUp": false,
+     "unitCost": "23.206",
+     "expectedRequired": "35.784000"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-33-0",
+     "qtyPer": "1.683",
+     "series": "1",
+     "scrap": "5",
+     "roundUp": false,
+     "unitCost": "0.3657",
+     "expectedRequired": "265.072500"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-33-0",
+     "setup": "1.3",
+     "run": "0.0003",
+     "scrap": "0",
+     "labor": "40.7",
+     "overhead": "12.03",
+     "expectedProcessQty": "166.666667"
+    },
+    {
+     "oper": 20,
+     "resource": "WC-33-1",
+     "setup": "1.3",
+     "run": "0.038",
+     "scrap": "10",
+     "labor": "21.2",
+     "overhead": "11.51",
+     "expectedProcessQty": "166.666667"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "20",
+     "qty": "247.648",
+     "unitCost": null,
+     "expectedAmount": "90.56"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "1.51",
+     "expectedLabor": "61.46",
+     "expectedOverhead": "18.17"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "216.7717",
+     "material": "927.3405",
+     "overhead": "104.1002"
+    },
+    "receipt": "1189.96",
+    "wipBefore": "-1019.77",
+    "accounts": {
+     "1400": "-90.56",
+     "1410": "1189.96",
+     "5510": "-61.46",
+     "5520": "-18.17"
+    },
+    "variancesExact": {
+     "lot-size/labor": "2.469133",
+     "lot-size/overhead": "0.729820",
+     "production-price/labor": "0.003000",
+     "production-price/material": "-672.774082",
+     "production-price/overhead": "0.004700",
+     "production-quantity/labor": "6.606967",
+     "production-quantity/material": "-120.730528",
+     "production-quantity/overhead": "1.952870",
+     "production-substitution/labor": "-154.274787",
+     "production-substitution/overhead": "-83.759581"
+    }
+   }
+  },
+  {
+   "name": "order 34 (zero, qty 250)",
+   "orderQty": "250",
+   "rafQty": "0",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-34-0",
+     "qtyPer": "3.735",
+     "series": "1",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "10.654",
+     "expectedRequired": "933.750000"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-34-0",
+     "qtyPer": "3.678",
+     "series": "1",
+     "scrap": "2",
+     "roundUp": false,
+     "unitCost": "41.9861",
+     "expectedRequired": "937.890000"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-34-0",
+     "setup": "0.1",
+     "run": "0.0424",
+     "scrap": "10",
+     "labor": "41.65",
+     "overhead": "10.23",
+     "expectedProcessQty": "308.641976"
+    },
+    {
+     "oper": 20,
+     "resource": "WC-34-1",
+     "setup": "1.6",
+     "run": "0.0208",
+     "scrap": "10",
+     "labor": "20.43",
+     "overhead": "13.16",
+     "expectedProcessQty": "277.777778"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "302.535",
+     "unitCost": null,
+     "expectedAmount": "3223.21"
+    },
+    {
+     "lineNo": "20",
+     "qty": "267.299",
+     "unitCost": null,
+     "expectedAmount": "11222.84"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "3.82",
+     "expectedLabor": "159.10",
+     "expectedOverhead": "39.08"
+    },
+    {
+     "oper": 20,
+     "hours": "3.87",
+     "expectedLabor": "79.06",
+     "expectedOverhead": "50.93"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "699.9424",
+     "material": "49326.5158",
+     "overhead": "231.9887"
+    },
+    "receipt": "0.00",
+    "wipBefore": "14774.22",
+    "accounts": {
+     "1400": "-14446.05",
+     "1410": "0.00",
+     "5510": "-238.16",
+     "5520": "-90.01"
+    },
+    "variancesExact": {
+     "lot-size/labor": "36.853000",
+     "lot-size/overhead": "22.079000",
+     "production-price/labor": "-0.007105",
+     "production-price/material": "-571.755670",
+     "production-price/overhead": "0.002169",
+     "production-quantity/labor": "201.314105",
+     "production-quantity/material": "15017.805670",
+     "production-quantity/overhead": "67.928831"
+    }
+   }
+  },
+  {
+   "name": "order 35 (full, qty 25)",
+   "orderQty": "25",
+   "rafQty": "25",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-35-0",
+     "qtyPer": "1.346",
+     "series": "12",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "24.2827",
+     "expectedRequired": "2.804167"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-35-1",
+     "qtyPer": "3.422",
+     "series": "1",
+     "scrap": "12.5",
+     "roundUp": false,
+     "unitCost": "42.9339",
+     "expectedRequired": "96.243750"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-35-0",
+     "setup": "2.1",
+     "run": "0.0158",
+     "scrap": "5",
+     "labor": "32.07",
+     "overhead": "10",
+     "expectedProcessQty": "26.315790"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "2.524",
+     "unitCost": "21.8544",
+     "expectedAmount": "55.16"
+    },
+    {
+     "lineNo": "20",
+     "qty": "88.544",
+     "unitCost": "38.6405",
+     "expectedAmount": "3421.38"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "2.42",
+     "expectedLabor": "77.61",
+     "expectedOverhead": "24.20"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "80.6814",
+     "material": "4200.2122",
+     "overhead": "25.1579"
+    },
+    "receipt": "4306.05",
+    "wipBefore": "-727.70",
+    "accounts": {
+     "1400": "-3476.54",
+     "1410": "4306.05",
+     "5510": "-77.61",
+     "5520": "-24.20"
+    },
+    "variancesExact": {
+     "production-price/labor": "0.000570",
+     "production-price/material": "-386.288700",
+     "production-price/overhead": "-0.000005",
+     "production-quantity/labor": "-3.071970",
+     "production-quantity/material": "-337.383500",
+     "production-quantity/overhead": "-0.957895"
+    }
+   }
+  },
+  {
+   "name": "order 36 (zero, qty 120)",
+   "orderQty": "120",
+   "rafQty": "0",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-36-0",
+     "qtyPer": "3.805",
+     "series": "3",
+     "scrap": "12.5",
+     "roundUp": false,
+     "unitCost": "42.1379",
+     "expectedRequired": "171.225000"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-36-0",
+     "setup": "0.7",
+     "run": "0.035",
+     "scrap": "10",
+     "labor": "22.15",
+     "overhead": "6.88",
+     "expectedProcessQty": "133.333334"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "160.01",
+     "unitCost": null,
+     "expectedAmount": "6742.49"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "4.22",
+     "expectedLabor": "93.47",
+     "expectedOverhead": "29.03"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "118.8717",
+     "material": "7215.0619",
+     "overhead": "36.9227"
+    },
+    "receipt": "0.00",
+    "wipBefore": "6864.99",
+    "accounts": {
+     "1400": "-6742.49",
+     "1410": "0.00",
+     "5510": "-93.47",
+     "5520": "-29.03"
+    },
+    "variancesExact": {
+     "lot-size/labor": "15.505000",
+     "lot-size/overhead": "4.816000",
+     "production-price/labor": "-0.003026",
+     "production-price/material": "0.004647",
+     "production-price/overhead": "-0.003626",
+     "production-quantity/labor": "77.968026",
+     "production-quantity/material": "6742.485353",
+     "production-quantity/overhead": "24.217626"
+    }
+   }
+  },
+  {
+   "name": "order 37 (partial, qty 7)",
+   "orderQty": "7",
+   "rafQty": "2",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-37-0",
+     "qtyPer": "3.582",
+     "series": "3",
+     "scrap": "5",
+     "roundUp": false,
+     "unitCost": "42.8267",
+     "expectedRequired": "8.775900"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-37-1",
+     "qtyPer": "0.583",
+     "series": "1",
+     "scrap": "5",
+     "roundUp": false,
+     "unitCost": "48.8443",
+     "expectedRequired": "4.285050"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-37-0",
+     "setup": "3.8",
+     "run": "0.026",
+     "scrap": "10",
+     "labor": "49.55",
+     "overhead": "13.46",
+     "expectedProcessQty": "8.641976"
+    },
+    {
+     "oper": 20,
+     "resource": "WC-37-1",
+     "setup": "2.6",
+     "run": "0.0034",
+     "scrap": "10",
+     "labor": "51.59",
+     "overhead": "19.88",
+     "expectedProcessQty": "7.777778"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "2.382",
+     "unitCost": null,
+     "expectedAmount": "102.01"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "3.48",
+     "expectedLabor": "172.43",
+     "expectedOverhead": "46.84"
+    },
+    {
+     "oper": 20,
+     "hours": "2.82",
+     "expectedLabor": "145.48",
+     "expectedOverhead": "56.06"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "334.9218",
+     "material": "585.1431",
+     "overhead": "106.3860"
+    },
+    "receipt": "293.27",
+    "wipBefore": "229.55",
+    "accounts": {
+     "1400": "-102.01",
+     "1410": "293.27",
+     "5510": "-317.91",
+     "5520": "-102.90"
+    },
+    "variancesExact": {
+     "lot-size/labor": "230.302857",
+     "lot-size/overhead": "73.454286",
+     "production-price/labor": "-0.007870",
+     "production-price/material": "-0.003189",
+     "production-price/overhead": "-0.002344",
+     "production-quantity/labor": "-8.076930",
+     "production-quantity/material": "-5.370468",
+     "production-quantity/overhead": "-0.947942",
+     "production-substitution/material": "-59.800086"
+    }
+   }
+  },
+  {
+   "name": "order 38 (partial, qty 333)",
+   "orderQty": "333",
+   "rafQty": "189",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-38-0",
+     "qtyPer": "2.99",
+     "series": "1",
+     "scrap": "12.5",
+     "roundUp": false,
+     "unitCost": "32.763",
+     "expectedRequired": "1120.128750"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-38-0",
+     "qtyPer": "2.708",
+     "series": "1",
+     "scrap": "2",
+     "roundUp": false,
+     "unitCost": "33.9859",
+     "expectedRequired": "919.799280"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-38-0",
+     "setup": "3.3",
+     "run": "0.0312",
+     "scrap": "0",
+     "labor": "44.44",
+     "overhead": "12.42",
+     "expectedProcessQty": "333.000000"
+    },
+    {
+     "oper": 20,
+     "resource": "WC-38-1",
+     "setup": "1.7",
+     "run": "0.0369",
+     "scrap": "0",
+     "labor": "56.85",
+     "overhead": "8.15",
+     "expectedProcessQty": "333.000000"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "654.821",
+     "unitCost": null,
+     "expectedAmount": "21453.90"
+    },
+    {
+     "lineNo": "20",
+     "qty": "569.033",
+     "unitCost": null,
+     "expectedAmount": "19339.10"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "11.31",
+     "expectedLabor": "502.62",
+     "expectedOverhead": "140.47"
+    },
+    {
+     "oper": 20,
+     "hours": "8.41",
+     "expectedLabor": "478.11",
+     "expectedOverhead": "68.54"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "1403.5665",
+     "material": "67958.9846",
+     "overhead": "284.0246"
+    },
+    "receipt": "39529.14",
+    "wipBefore": "2453.60",
+    "accounts": {
+     "1400": "-40793.00",
+     "1410": "39529.14",
+     "5510": "-980.73",
+     "5520": "-209.01"
+    },
+    "variancesExact": {
+     "lot-size/labor": "105.209514",
+     "lot-size/overhead": "23.715027",
+     "production-price/labor": "0.005147",
+     "production-price/material": "21.034560",
+     "production-price/overhead": "-0.001701",
+     "production-quantity/labor": "78.896515",
+     "production-quantity/material": "2200.649856",
+     "production-quantity/overhead": "24.093522"
+    }
+   }
+  },
+  {
+   "name": "order 39 (partial, qty 100)",
+   "orderQty": "100",
+   "rafQty": "49",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-39-0",
+     "qtyPer": "0.791",
+     "series": "1",
+     "scrap": "5",
+     "roundUp": false,
+     "unitCost": "47.4352",
+     "expectedRequired": "83.055000"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-39-1",
+     "qtyPer": "2.378",
+     "series": "3",
+     "scrap": "12.5",
+     "roundUp": false,
+     "unitCost": "17.3086",
+     "expectedRequired": "89.175000"
+    },
+    {
+     "lineNo": "30",
+     "item": "RM-39-2",
+     "qtyPer": "3.455",
+     "series": "1",
+     "scrap": "2",
+     "roundUp": false,
+     "unitCost": "31.5564",
+     "expectedRequired": "352.410000"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-39-0",
+     "setup": "1.4",
+     "run": "0.0486",
+     "scrap": "0",
+     "labor": "38.41",
+     "overhead": "10.91",
+     "expectedProcessQty": "100.000000"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "44.767",
+     "unitCost": "48.3839",
+     "expectedAmount": "2166.00"
+    },
+    {
+     "lineNo": "20",
+     "qty": "42.385",
+     "unitCost": "18.6933",
+     "expectedAmount": "792.32"
+    },
+    {
+     "lineNo": "30",
+     "qty": "165.774",
+     "unitCost": null,
+     "expectedAmount": "5231.23"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "3.14",
+     "expectedLabor": "120.61",
+     "expectedOverhead": "34.26"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "240.4466",
+     "material": "16604.0158",
+     "overhead": "68.2966"
+    },
+    "receipt": "8287.25",
+    "wipBefore": "57.17",
+    "accounts": {
+     "1400": "-8189.55",
+     "1410": "8287.25",
+     "5510": "-120.61",
+     "5520": "-34.26"
+    },
+    "variancesExact": {
+     "lot-size/labor": "27.424740",
+     "lot-size/overhead": "7.789740",
+     "production-price/labor": "0.002600",
+     "production-price/material": "101.162770",
+     "production-price/overhead": "0.002600",
+     "production-quantity/labor": "-24.636174",
+     "production-quantity/material": "-47.580512",
+     "production-quantity/overhead": "-6.997674"
+    }
+   }
+  },
+  {
+   "name": "order 40 (full, qty 500)",
+   "orderQty": "500",
+   "rafQty": "500",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-40-0",
+     "qtyPer": "2.359",
+     "series": "1",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "26.6576",
+     "expectedRequired": "1179.500000"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-40-0",
+     "setup": "2.7",
+     "run": "0.0383",
+     "scrap": "10",
+     "labor": "59.84",
+     "overhead": "5.76",
+     "expectedProcessQty": "555.555556"
+    }
+   ],
+   "picks": [],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "29.97",
+     "expectedLabor": "1793.40",
+     "expectedOverhead": "172.63"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "1434.8302",
+     "material": "31442.6392",
+     "overhead": "138.1120"
+    },
+    "receipt": "33015.58",
+    "wipBefore": "-31049.55",
+    "accounts": {
+     "1400": "0.00",
+     "1410": "33015.58",
+     "5510": "-1793.40",
+     "5520": "-172.63"
+    },
+    "variancesExact": {
+     "production-price/labor": "-0.004771",
+     "production-price/overhead": "0.002800",
+     "production-quantity/labor": "358.574571",
+     "production-quantity/overhead": "34.515200",
+     "production-substitution/material": "-31442.639200"
+    }
+   }
+  },
+  {
+   "name": "order 41 (zero, qty 40)",
+   "orderQty": "40",
+   "rafQty": "0",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-41-0",
+     "qtyPer": "3.458",
+     "series": "10",
+     "scrap": "20",
+     "roundUp": false,
+     "unitCost": "26.3553",
+     "expectedRequired": "16.598400"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-41-1",
+     "qtyPer": "3.413",
+     "series": "1",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "35.2723",
+     "expectedRequired": "136.520000"
+    },
+    {
+     "lineNo": "30",
+     "item": "RM-41-2",
+     "qtyPer": "2.698",
+     "series": "1",
+     "scrap": "2",
+     "roundUp": false,
+     "unitCost": "29.3048",
+     "expectedRequired": "110.078400"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-41-0",
+     "setup": "2.1",
+     "run": "0.026",
+     "scrap": "0",
+     "labor": "43.32",
+     "overhead": "5.21",
+     "expectedProcessQty": "40.000000"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "14.441",
+     "unitCost": null,
+     "expectedAmount": "380.60"
+    },
+    {
+     "lineNo": "20",
+     "qty": "111.646",
+     "unitCost": null,
+     "expectedAmount": "3938.01"
+    },
+    {
+     "lineNo": "30",
+     "qty": "98.641",
+     "unitCost": "30.1839",
+     "expectedAmount": "2977.37"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "3.64",
+     "expectedLabor": "157.68",
+     "expectedOverhead": "18.96"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "136.0248",
+     "material": "8478.6557",
+     "overhead": "16.3594"
+    },
+    "receipt": "0.00",
+    "wipBefore": "7472.62",
+    "accounts": {
+     "1400": "-7295.98",
+     "1410": "0.00",
+     "5510": "-157.68",
+     "5520": "-18.96"
+    },
+    "variancesExact": {
+     "lot-size/labor": "90.972000",
+     "lot-size/overhead": "10.941000",
+     "production-price/labor": "-0.004800",
+     "production-price/material": "86.717134",
+     "production-price/overhead": "-0.004400",
+     "production-quantity/labor": "66.712800",
+     "production-quantity/material": "7209.262866",
+     "production-quantity/overhead": "8.023400"
+    }
+   }
+  },
+  {
+   "name": "order 42 (full, qty 25)",
+   "orderQty": "25",
+   "rafQty": "25",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-42-0",
+     "qtyPer": "2.271",
+     "series": "1",
+     "scrap": "12.5",
+     "roundUp": false,
+     "unitCost": "44.13",
+     "expectedRequired": "63.871875"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-42-1",
+     "qtyPer": "3.89",
+     "series": "12",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "39.3858",
+     "expectedRequired": "8.104167"
+    },
+    {
+     "lineNo": "30",
+     "item": "RM-42-2",
+     "qtyPer": "0.123",
+     "series": "1",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "32.3222",
+     "expectedRequired": "3.075000"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-42-0",
+     "setup": "0.1",
+     "run": "0.0329",
+     "scrap": "0",
+     "labor": "47.99",
+     "overhead": "10.92",
+     "expectedProcessQty": "27.777778"
+    },
+    {
+     "oper": 20,
+     "resource": "WC-42-1",
+     "setup": "3.6",
+     "run": "0.027",
+     "scrap": "10",
+     "labor": "20.59",
+     "overhead": "10.74",
+     "expectedProcessQty": "27.777778"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "68.343",
+     "unitCost": null,
+     "expectedAmount": "3015.98"
+    },
+    {
+     "lineNo": "20",
+     "qty": "8.753",
+     "unitCost": "37.8104",
+     "expectedAmount": "330.95"
+    },
+    {
+     "lineNo": "30",
+     "qty": "3.413",
+     "unitCost": null,
+     "expectedAmount": "110.32"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "0.89",
+     "expectedLabor": "42.71",
+     "expectedOverhead": "9.72"
+    },
+    {
+     "oper": 20,
+     "hours": "4.31",
+     "expectedLabor": "88.74",
+     "expectedOverhead": "46.29"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "138.2230",
+     "material": "3237.2457",
+     "overhead": "57.7907"
+    },
+    "receipt": "3433.26",
+    "wipBefore": "211.45",
+    "accounts": {
+     "1400": "-3457.25",
+     "1410": "3433.26",
+     "5510": "-131.45",
+     "5520": "-56.01"
+    },
+    "variancesExact": {
+     "production-price/labor": "-0.003975",
+     "production-price/material": "-13.786157",
+     "production-price/overhead": "0.001771",
+     "production-quantity/labor": "-6.769025",
+     "production-quantity/material": "233.790457",
+     "production-quantity/overhead": "-1.782471"
+    }
+   }
+  },
+  {
+   "name": "order 43 (full, qty 250)",
+   "orderQty": "250",
+   "rafQty": "250",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-43-0",
+     "qtyPer": "2.639",
+     "series": "1",
+     "scrap": "20",
+     "roundUp": false,
+     "unitCost": "43.8691",
+     "expectedRequired": "791.700000"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-43-1",
+     "qtyPer": "2.901",
+     "series": "1",
+     "scrap": "12.5",
+     "roundUp": false,
+     "unitCost": "0.6674",
+     "expectedRequired": "815.906250"
+    },
+    {
+     "lineNo": "30",
+     "item": "RM-43-2",
+     "qtyPer": "1.293",
+     "series": "10",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "17.7025",
+     "expectedRequired": "32.325000"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-43-0",
+     "setup": "3.2",
+     "run": "0.0346",
+     "scrap": "0",
+     "labor": "59.7",
+     "overhead": "16.28",
+     "expectedProcessQty": "277.777778"
+    },
+    {
+     "oper": 20,
+     "resource": "WC-43-1",
+     "setup": "1",
+     "run": "0.0037",
+     "scrap": "10",
+     "labor": "40.28",
+     "overhead": "9.62",
+     "expectedProcessQty": "277.777778"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "775.866",
+     "unitCost": "48.6947",
+     "expectedAmount": "37780.56"
+    },
+    {
+     "lineNo": "20",
+     "qty": "799.588",
+     "unitCost": null,
+     "expectedAmount": "533.65"
+    },
+    {
+     "lineNo": "30",
+     "qty": "33.618",
+     "unitCost": null,
+     "expectedAmount": "595.12"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "13.2",
+     "expectedLabor": "788.04",
+     "expectedOverhead": "214.90"
+    },
+    {
+     "oper": 20,
+     "hours": "1.8",
+     "expectedLabor": "72.50",
+     "expectedOverhead": "17.32"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "846.5022",
+     "material": "35847.9356",
+     "overhead": "228.0721"
+    },
+    "receipt": "36922.51",
+    "wipBefore": "3079.58",
+    "accounts": {
+     "1400": "-38909.33",
+     "1410": "36922.51",
+     "5510": "-860.54",
+     "5520": "-232.22"
+    },
+    "variancesExact": {
+     "production-price/labor": "-0.003975",
+     "production-price/material": "3744.019197",
+     "production-price/overhead": "0.008008",
+     "production-quantity/labor": "14.041775",
+     "production-quantity/material": "-682.624797",
+     "production-quantity/overhead": "4.139892"
+    }
+   }
+  },
+  {
+   "name": "order 44 (partial, qty 500)",
+   "orderQty": "500",
+   "rafQty": "166",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-44-0",
+     "qtyPer": "2.446",
+     "series": "1",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "14.7491",
+     "expectedRequired": "1223.000000"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-44-0",
+     "setup": "1.8",
+     "run": "0.0292",
+     "scrap": "5",
+     "labor": "37.97",
+     "overhead": "10.66",
+     "expectedProcessQty": "526.315790"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "446.64",
+     "unitCost": null,
+     "expectedAmount": "6587.54"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "6.28",
+     "expectedLabor": "238.45",
+     "expectedOverhead": "66.94"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "651.8849",
+     "material": "18038.1493",
+     "overhead": "183.0154"
+    },
+    "receipt": "6265.85",
+    "wipBefore": "627.08",
+    "accounts": {
+     "1400": "-6587.54",
+     "1410": "6265.85",
+     "5510": "-238.45",
+     "5520": "-66.94"
+    },
+    "variancesExact": {
+     "lot-size/labor": "45.655128",
+     "lot-size/overhead": "12.817584",
+     "production-price/labor": "-0.001582",
+     "production-price/material": "0.001976",
+     "production-price/overhead": "-0.004811",
+     "production-quantity/labor": "-23.629332",
+     "production-quantity/material": "598.872456",
+     "production-quantity/overhead": "-6.633885"
+    }
+   }
+  },
+  {
+   "name": "order 45 (full, qty 7)",
+   "orderQty": "7",
+   "rafQty": "7",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-45-0",
+     "qtyPer": "2.689",
+     "series": "3",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "48.6784",
+     "expectedRequired": "6.274334"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-45-0",
+     "setup": "2.2",
+     "run": "0.0237",
+     "scrap": "0",
+     "labor": "50.31",
+     "overhead": "13.85",
+     "expectedProcessQty": "7.000000"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "6.839",
+     "unitCost": null,
+     "expectedAmount": "332.91"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "2.41",
+     "expectedLabor": "121.25",
+     "expectedOverhead": "33.38"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "119.0284",
+     "material": "305.4245",
+     "overhead": "32.7677"
+    },
+    "receipt": "457.22",
+    "wipBefore": "30.32",
+    "accounts": {
+     "1400": "-332.91",
+     "1410": "457.22",
+     "5510": "-121.25",
+     "5520": "-33.38"
+    },
+    "variancesExact": {
+     "production-price/labor": "0.002930",
+     "production-price/material": "-0.001534",
+     "production-price/overhead": "0.001515",
+     "production-quantity/labor": "2.218670",
+     "production-quantity/material": "27.487034",
+     "production-quantity/overhead": "0.610785"
+    }
+   }
+  },
+  {
+   "name": "order 46 (partial, qty 250)",
+   "orderQty": "250",
+   "rafQty": "65",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-46-0",
+     "qtyPer": "3.383",
+     "series": "12",
+     "scrap": "2",
+     "roundUp": false,
+     "unitCost": "25.8949",
+     "expectedRequired": "71.888750"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-46-0",
+     "setup": "0.9",
+     "run": "0.0208",
+     "scrap": "0",
+     "labor": "59.69",
+     "overhead": "10.82",
+     "expectedProcessQty": "250.000000"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "20.186",
+     "unitCost": null,
+     "expectedAmount": "522.71"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "2.3",
+     "expectedLabor": "137.29",
+     "expectedOverhead": "24.89"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "364.1090",
+     "material": "1861.5520",
+     "overhead": "66.0020"
+    },
+    "receipt": "595.83",
+    "wipBefore": "89.06",
+    "accounts": {
+     "1400": "-522.71",
+     "1410": "595.83",
+     "5510": "-137.29",
+     "5520": "-24.89"
+    },
+    "variancesExact": {
+     "lot-size/labor": "39.753540",
+     "lot-size/overhead": "7.206120",
+     "production-price/labor": "0.003000",
+     "production-price/material": "-0.004454",
+     "production-price/overhead": "0.004000",
+     "production-quantity/labor": "2.865120",
+     "production-quantity/material": "38.710934",
+     "production-quantity/overhead": "0.519360"
+    }
+   }
+  },
+  {
+   "name": "order 47 (full, qty 7)",
+   "orderQty": "7",
+   "rafQty": "7",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-47-0",
+     "qtyPer": "3.173",
+     "series": "1",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "11.2248",
+     "expectedRequired": "22.211000"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-47-0",
+     "qtyPer": "3.426",
+     "series": "1",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "33.9401",
+     "expectedRequired": "23.982000"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-47-0",
+     "setup": "1.9",
+     "run": "0.006",
+     "scrap": "10",
+     "labor": "22.54",
+     "overhead": "18.84",
+     "expectedProcessQty": "7.777778"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "23.322",
+     "unitCost": "11.786",
+     "expectedAmount": "274.87"
+    },
+    {
+     "lineNo": "20",
+     "qty": "22.543",
+     "unitCost": null,
+     "expectedAmount": "765.11"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "1.56",
+     "expectedLabor": "35.16",
+     "expectedOverhead": "29.39"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "43.8779",
+     "material": "1063.2655",
+     "overhead": "36.6752"
+    },
+    "receipt": "1143.82",
+    "wipBefore": "-39.29",
+    "accounts": {
+     "1400": "-1039.98",
+     "1410": "1143.82",
+     "5510": "-35.16",
+     "5520": "-29.39"
+    },
+    "variancesExact": {
+     "production-price/labor": "-0.002427",
+     "production-price/material": "-15.735631",
+     "production-price/overhead": "-0.000400",
+     "production-quantity/labor": "-8.715473",
+     "production-quantity/material": "-7.549869",
+     "production-quantity/overhead": "-7.284800"
+    }
+   }
+  },
+  {
+   "name": "order 48 (full, qty 1)",
+   "orderQty": "1",
+   "rafQty": "1",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-48-0",
+     "qtyPer": "3.389",
+     "series": "12",
+     "scrap": "20",
+     "roundUp": false,
+     "unitCost": "14.9763",
+     "expectedRequired": "0.338900"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-48-1",
+     "qtyPer": "3.256",
+     "series": "1",
+     "scrap": "20",
+     "roundUp": true,
+     "unitCost": "44.8862",
+     "expectedRequired": "4.000000"
+    },
+    {
+     "lineNo": "30",
+     "item": "RM-48-2",
+     "qtyPer": "0.797",
+     "series": "12",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "35.565",
+     "expectedRequired": "0.066417"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-48-0",
+     "setup": "3.5",
+     "run": "0.0419",
+     "scrap": "0",
+     "labor": "27.56",
+     "overhead": "16.66",
+     "expectedProcessQty": "1.000000"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "0.332",
+     "unitCost": "14.0777",
+     "expectedAmount": "4.67"
+    },
+    {
+     "lineNo": "30",
+     "qty": "0.071",
+     "unitCost": null,
+     "expectedAmount": "2.53"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "4.36",
+     "expectedLabor": "120.16",
+     "expectedOverhead": "72.64"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "97.6148",
+     "material": "186.9824",
+     "overhead": "59.0081"
+    },
+    "receipt": "343.61",
+    "wipBefore": "-143.61",
+    "accounts": {
+     "1400": "-7.20",
+     "1410": "343.61",
+     "5510": "-120.16",
+     "5520": "-72.64"
+    },
+    "variancesExact": {
+     "production-price/labor": "-0.001644",
+     "production-price/material": "-0.297256",
+     "production-price/overhead": "0.002343",
+     "production-quantity/labor": "22.546844",
+     "production-quantity/material": "0.059656",
+     "production-quantity/overhead": "13.629557",
+     "production-substitution/material": "-179.544800"
+    }
+   }
+  },
+  {
+   "name": "order 49 (partial, qty 10)",
+   "orderQty": "10",
+   "rafQty": "6",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-49-0",
+     "qtyPer": "1.394",
+     "series": "1",
+     "scrap": "0",
+     "roundUp": false,
+     "unitCost": "39.6691",
+     "expectedRequired": "13.940000"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-49-0",
+     "setup": "3.3",
+     "run": "0.0194",
+     "scrap": "5",
+     "labor": "36.84",
+     "overhead": "12.34",
+     "expectedProcessQty": "10.526316"
+    }
+   ],
+   "picks": [],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "4.21",
+     "expectedLabor": "155.10",
+     "expectedOverhead": "51.95"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "129.0951",
+     "material": "552.9873",
+     "overhead": "43.2420"
+    },
+    "receipt": "435.19",
+    "wipBefore": "-228.14",
+    "accounts": {
+     "1400": "0.00",
+     "1410": "435.19",
+     "5510": "-155.10",
+     "5520": "-51.95"
+    },
+    "variancesExact": {
+     "lot-size/labor": "48.628800",
+     "lot-size/overhead": "16.288800",
+     "production-price/labor": "0.003619",
+     "production-price/overhead": "-0.001451",
+     "production-quantity/labor": "29.010521",
+     "production-quantity/overhead": "9.717451",
+     "production-substitution/material": "-331.792380"
+    }
+   }
+  },
+  {
+   "name": "order 50 (full, qty 150)",
+   "orderQty": "150",
+   "rafQty": "150",
+   "lines": [
+    {
+     "lineNo": "10",
+     "item": "RM-50-0",
+     "qtyPer": "2.094",
+     "series": "10",
+     "scrap": "5",
+     "roundUp": false,
+     "unitCost": "48.4679",
+     "expectedRequired": "32.980500"
+    },
+    {
+     "lineNo": "20",
+     "item": "RM-50-1",
+     "qtyPer": "3.496",
+     "series": "3",
+     "scrap": "2",
+     "roundUp": false,
+     "unitCost": "15.1569",
+     "expectedRequired": "178.296000"
+    }
+   ],
+   "operations": [
+    {
+     "oper": 10,
+     "resource": "WC-50-0",
+     "setup": "1.5",
+     "run": "0.0337",
+     "scrap": "0",
+     "labor": "56.53",
+     "overhead": "9.13",
+     "expectedProcessQty": "157.894737"
+    },
+    {
+     "oper": 20,
+     "resource": "WC-50-1",
+     "setup": "2.5",
+     "run": "0.0131",
+     "scrap": "5",
+     "labor": "22.68",
+     "overhead": "7.59",
+     "expectedProcessQty": "157.894737"
+    }
+   ],
+   "picks": [
+    {
+     "lineNo": "10",
+     "qty": "36.279",
+     "unitCost": "51.8607",
+     "expectedAmount": "1881.45"
+    },
+    {
+     "lineNo": "20",
+     "qty": "197.909",
+     "unitCost": null,
+     "expectedAmount": "2999.69"
+    }
+   ],
+   "hours": [
+    {
+     "oper": 10,
+     "hours": "6.89",
+     "expectedLabor": "389.49",
+     "expectedOverhead": "62.91"
+    },
+    {
+     "oper": 20,
+     "hours": "4.16",
+     "expectedLabor": "94.35",
+     "expectedOverhead": "31.57"
+    }
+   ],
+   "expected": {
+    "plannedByGroup": {
+     "labor": "489.2059",
+     "material": "4300.9102",
+     "overhead": "96.9505"
+    },
+    "receipt": "4887.07",
+    "wipBefore": "572.39",
+    "accounts": {
+     "1400": "-4881.14",
+     "1410": "4887.07",
+     "5510": "-483.84",
+     "5520": "-94.48"
+    },
+    "variancesExact": {
+     "production-price/labor": "-0.000504",
+     "production-price/material": "123.086154",
+     "production-price/overhead": "-0.000075",
+     "production-quantity/labor": "-5.365396",
+     "production-quantity/material": "457.143646",
+     "production-quantity/overhead": "-2.470425"
+    }
+   }
+  }
+ ]
+}
