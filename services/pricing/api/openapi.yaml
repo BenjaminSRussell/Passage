@@ -518,6 +518,68 @@ paths:
         "401": {$ref: "#/components/responses/Problem"}
         "403": {$ref: "#/components/responses/Problem"}
         "404": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/rebates/agreements/{id}:revise:
+    post:
+      operationId: reviseRebateAgreement
+      summary: Change the name, end date or tiers of an ACTIVE rebate agreement (FR-26.11).
+      description: >
+        Send only the fields to change, with the version read. The end date may not fall before an
+        invoice already accrued (422 PRC-0048) and the tiers may not change once the agreement has
+        accruals (422 PRC-0049: close it and create a new one). 409 PRC-0031 when the agreement is CLOSED;
+        412 on a stale version. Writes dev.passage.pricing.rebateagreement.revised.v1 in the same
+        transaction; a repeated Idempotency-Key replays the first response.
+      x-passage-duty: pricing.rebate.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RebateAgreementRevision"}
+      responses:
+        "200":
+          description: The revised agreement; version incremented.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RebateAgreement"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
+  /v1/pricing/rebates/agreements/{id}:close:
+    post:
+      operationId: closeRebateAgreement
+      summary: End an ACTIVE rebate agreement early on a close date (FR-26.11).
+      description: >
+        validTo becomes the close date and the status CLOSED, so invoices dated later no longer accrue;
+        accruals already booked stay. The close date must lie within the validity and not before an invoice
+        already accrued (422 PRC-0048). 409 PRC-0031 when already closed; 412 on a stale version. Writes
+        dev.passage.pricing.rebateagreement.closed.v1 in the same transaction; a repeated Idempotency-Key
+        replays the first response.
+      x-passage-duty: pricing.rebate.maintain
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RebateAgreementClose"}
+      responses:
+        "200":
+          description: The closed agreement; version incremented.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RebateAgreement"}
+        "401": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+        "404": {$ref: "#/components/responses/Problem"}
+        "409": {$ref: "#/components/responses/Problem"}
+        "412": {$ref: "#/components/responses/Problem"}
+        "422": {$ref: "#/components/responses/Problem"}
   /v1/pricing/rebates/accruals:
     get:
       operationId: listRebateAccruals
@@ -2027,10 +2089,29 @@ components:
       allOf:
         - $ref: "#/components/schemas/RebateAgreementInput"
         - type: object
-          required: [id, partyRole, accrualAccount, expenseAccount, status]
+          required: [id, partyRole, accrualAccount, expenseAccount, status, version]
           properties:
             id: {type: string, format: uuid}
-            status: {type: string, enum: [ACTIVE]}
+            status: {type: string, enum: [ACTIVE, CLOSED]}
+            version: {type: integer, minimum: 1, description: "Optimistic lock: 1 on create, incremented by every revise and close."}
+    RebateAgreementRevision:
+      type: object
+      required: [version]
+      description: Send at least one of name, validTo or tiers.
+      properties:
+        version: {type: integer, minimum: 1}
+        name: {type: string, minLength: 1, maxLength: 120}
+        validTo: {type: string, format: date}
+        tiers:
+          type: array
+          minItems: 1
+          items: {$ref: "#/components/schemas/Tier"}
+    RebateAgreementClose:
+      type: object
+      required: [version, closeDate]
+      properties:
+        version: {type: integer, minimum: 1}
+        closeDate: {type: string, format: date, description: "Last day on which invoices accrue."}
     RebateAccrualInput:
       type: object
       required: [agreementId, invoiceLineId, invoiceDate, value, quantity, currency]

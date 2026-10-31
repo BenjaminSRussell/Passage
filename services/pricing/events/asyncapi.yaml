@@ -64,6 +64,14 @@ channels:
         $ref: "#/components/messages/FreeGoodsRuleCreated"
       freeGoodsRuleWithdrawn:
         $ref: "#/components/messages/FreeGoodsRuleWithdrawn"
+  rebateAgreement:
+    address: passage.pricing.rebateagreement
+    description: Rebate agreement revised or closed early (FR-26.11).
+    messages:
+      rebateAgreementRevised:
+        $ref: "#/components/messages/RebateAgreementRevised"
+      rebateAgreementClosed:
+        $ref: "#/components/messages/RebateAgreementClosed"
   procedure:
     address: passage.pricing.procedure
     description: Pricing procedure version activated (FR-26.1).
@@ -151,6 +159,18 @@ operations:
     summary: A free goods rule was withdrawn; it leaves the next resolve.
     messages:
       - {$ref: "#/channels/freeGoodsRule/messages/freeGoodsRuleWithdrawn"}
+  publishRebateAgreementRevised:
+    action: send
+    channel: {$ref: "#/channels/rebateAgreement"}
+    summary: A rebate agreement's name, end date or (before its first accrual) tiers changed; the version moved on.
+    messages:
+      - {$ref: "#/channels/rebateAgreement/messages/rebateAgreementRevised"}
+  publishRebateAgreementClosed:
+    action: send
+    channel: {$ref: "#/channels/rebateAgreement"}
+    summary: A rebate agreement was closed early; invoices dated after valid_to no longer accrue.
+    messages:
+      - {$ref: "#/channels/rebateAgreement/messages/rebateAgreementClosed"}
   publishVendorRebateClaimCreated:
     action: send
     channel: {$ref: "#/channels/vendorRebateClaim"}
@@ -328,6 +348,18 @@ components:
       contentType: application/cloudevents+json
       payload:
         $ref: "#/components/schemas/FreeGoodsRuleEvent"
+    RebateAgreementRevised:
+      name: dev.passage.pricing.rebateagreement.revised.v1
+      title: Rebate agreement revised
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/RebateAgreementEvent"
+    RebateAgreementClosed:
+      name: dev.passage.pricing.rebateagreement.closed.v1
+      title: Rebate agreement closed
+      contentType: application/cloudevents+json
+      payload:
+        $ref: "#/components/schemas/RebateAgreementEvent"
     ProcedureActivated:
       name: dev.passage.pricing.procedure.activated.v1
       title: Pricing procedure version activated
@@ -400,6 +432,21 @@ components:
         valid_from: {type: string, format: date}
         valid_to: {type: string, format: date}
         withdrawn: {type: boolean}
+        version: {type: integer, minimum: 1}
+    RebateAgreementEvent:
+      type: object
+      description: >
+        A rebate agreement after a revise (name, end date, tiers before the first accrual) or an early
+        close (FR-26.11). After a close, valid_to is the close date and no invoice dated later accrues.
+        Ids only.
+      required: [agreement_id, legal_entity_id, party_role, status, valid_from, valid_to, version]
+      properties:
+        agreement_id: {type: string, format: uuid}
+        legal_entity_id: {type: string, format: uuid}
+        party_role: {type: string, enum: [CUSTOMER, VENDOR]}
+        status: {type: string, enum: [ACTIVE, CLOSED]}
+        valid_from: {type: string, format: date}
+        valid_to: {type: string, format: date}
         version: {type: integer, minimum: 1}
     CampaignStatus:
       type: object

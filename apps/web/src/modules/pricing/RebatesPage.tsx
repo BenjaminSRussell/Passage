@@ -1,6 +1,6 @@
 import { Link, useNavigate } from "react-router-dom";
 import { useState } from "react";
-import { Alert, Badge, Button, buttonClassName, DataTable, FormField, PageHeader, Select, type DataTableColumn } from "../../shell/ui";
+import { Alert, Badge, Button, buttonClassName, DataTable, FormField, PageHeader, Select, StatusPill, type DataTableColumn } from "../../shell/ui";
 import { listRebateAgreements, type RebateAgreement, type RebatePartyRole } from "./api/client";
 import styles from "./pages.module.css";
 import { basisLabel, describeRebateCustomer, describeTiers, PARTY_LABELS, PERIOD_LABELS } from "./rebateFormat";
@@ -15,6 +15,7 @@ const columns: DataTableColumn<RebateAgreement>[] = [
   { key: "tiers", header: "Tiers", mono: true, render: describeTiers },
   { key: "currency", header: "Currency", mono: true },
   { key: "validFrom", header: "Validity", mono: true, render: (row) => `${row.validFrom} – ${row.validTo}` },
+  { key: "status", header: "Status", render: (row) => <StatusPill status={row.status.toLowerCase()} /> },
 ];
 
 /** Rebate agreements (PRD §5.26.6): customer rebates on posted sales invoices and vendor rebates (FR-26.15) on posted vendor invoices. */

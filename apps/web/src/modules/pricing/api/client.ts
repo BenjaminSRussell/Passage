@@ -364,7 +364,9 @@ export interface RebateAgreementInput {
 export interface RebateAgreement extends RebateAgreementInput {
   id: string;
   partyRole: RebatePartyRole;
-  status: "ACTIVE";
+  status: "ACTIVE" | "CLOSED";
+  /** Optimistic lock: 1 on create, incremented by every revise and close. */
+  version: number;
   accrualAccount: string;
   expenseAccount: string;
 }
@@ -394,6 +396,16 @@ export function getRebateAgreement(id: string, signal?: AbortSignal): Promise<Re
 
 export function createRebateAgreement(body: RebateAgreementInput, key: string = newKey()): Promise<RebateAgreement> {
   return post<RebateAgreement>("/rebates/agreements", body, key);
+}
+
+/** POST /rebates/agreements/{id}:revise - change the name, end date or (before any accrual) tiers of an ACTIVE agreement. */
+export function reviseRebateAgreement(id: string, body: { version: number; name?: string; validTo?: string; tiers?: RebateTier[] }, key: string = newKey()): Promise<RebateAgreement> {
+  return post<RebateAgreement>(`/rebates/agreements/${encodeURIComponent(id)}:revise`, body, key);
+}
+
+/** POST /rebates/agreements/{id}:close - end an ACTIVE agreement on closeDate (the last day invoices accrue). */
+export function closeRebateAgreement(id: string, version: number, closeDate: string, key: string = newKey()): Promise<RebateAgreement> {
+  return post<RebateAgreement>(`/rebates/agreements/${encodeURIComponent(id)}:close`, { version, closeDate }, key);
 }
 
 /** GET /rebates/accruals - accrual rows of an agreement, optionally for one period (2027-03, 2027-Q1, 2027). */

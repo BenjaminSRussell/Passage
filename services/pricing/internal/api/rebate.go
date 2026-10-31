@@ -72,6 +72,7 @@ type agreementView struct {
 	AccrualAccount  string    `json:"accrualAccount"`
 	ExpenseAccount  string    `json:"expenseAccount"`
 	Status          string    `json:"status"`
+	Version         int       `json:"version"`
 }
 
 // accrualRequest is one posted invoice line handed to pricing by the invoice.posted consumer
@@ -317,6 +318,7 @@ func (a *API) registerRebateRoutes(r chi.Router) {
 	r.With(authz.RequireDuty(dutyRebateMaintain)).Post(rebateAccrualsPath, a.accrueInvoiceLine)
 	r.With(authz.RequireDuty(dutyRebateView)).Get(rebateAccrualsPath, a.listAccruals)
 	r.With(authz.RequireDuty(dutyRebateMaintain)).Post(vendorAccrualsPath, a.accrueVendorInvoiceLine)
+	a.registerAgreementLifecycleRoutes(r)
 	a.registerVendorClaimRoutes(r)
 }
 
@@ -328,7 +330,7 @@ func agreementResponse(g domain.RebateAgreement) agreementView {
 	return agreementView{ID: g.ID, LegalEntityID: g.LegalEntityID, Name: g.Name, PartyRole: domain.PartyRoleOf(g), CustomerID: g.CustomerID,
 		CustomerGroupID: g.CustomerGroupID, VendorID: g.VendorID, Basis: g.Basis, Period: g.Period, Tiers: tiers, Currency: g.Currency,
 		ValidFrom: g.ValidFrom.Format(dateLayout), ValidTo: g.ValidTo.Format(dateLayout), AccrualAccount: g.AccrualAccount,
-		ExpenseAccount: g.ExpenseAccount, Status: "ACTIVE"}
+		ExpenseAccount: g.ExpenseAccount, Status: orDefault(g.Status, domain.AgreementActive), Version: max(g.Version, 1)}
 }
 
 func accrualResponse(a store.Accrual) accrualView {

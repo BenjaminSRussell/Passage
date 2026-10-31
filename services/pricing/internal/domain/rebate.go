@@ -36,7 +36,20 @@ type RebateAgreement struct {
 	ValidTo         time.Time
 	AccrualAccount  string
 	ExpenseAccount  string
+	// Status is ACTIVE or CLOSED; Version is the optimistic lock (1 on create, +1 per revise or close).
+	Status  string
+	Version int
 }
+
+// Rebate agreement statuses and the problem codes of the lifecycle (FR-26.11).
+const (
+	AgreementActive = "ACTIVE"
+	AgreementClosed = "CLOSED"
+	// CodeAgreementEndsEarly: the end date falls before an invoice already accrued.
+	CodeAgreementEndsEarly = "PRC-0048"
+	// CodeAgreementHasAccruals: tiers cannot change once the agreement has accruals.
+	CodeAgreementHasAccruals = "PRC-0049"
+)
 
 // ValidateAgreement checks an agreement before it is stored (FR-26.11, FR-26.15, BR-26.8).
 func ValidateAgreement(a RebateAgreement) *Error {

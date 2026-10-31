@@ -28,6 +28,7 @@ const billBack: RebateAgreement = {
   accrualAccount: "2160",
   expenseAccount: "5100",
   status: "ACTIVE",
+  version: 1,
 };
 
 function claim(patch: Partial<VendorClaim> = {}): VendorClaim {

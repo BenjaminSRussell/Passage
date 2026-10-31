@@ -85,7 +85,7 @@ func scanAccrual(row pgx.Row) (Accrual, error) {
 // ON CONFLICT so two concurrent requests with one key cannot both create an agreement.
 func (s *Postgres) CreateAgreement(ctx context.Context, a domain.RebateAgreement, idempotencyKey string) (domain.RebateAgreement, error) {
 	p, _ := tenant.FromContext(ctx)
-	tiers, err := json.Marshal(a.Tiers)
+	tiers, err := marshalTiers(a.Tiers)
 	if err != nil {
 		return a, err
 	}
@@ -118,6 +118,7 @@ func (s *Postgres) CreateAgreement(ctx context.Context, a domain.RebateAgreement
 		if err != nil {
 			return err
 		}
+		a.Status, a.Version = domain.AgreementActive, 1
 		out = a
 		return nil
 	})
@@ -143,13 +144,13 @@ func agreementNotFound(id string) error {
 
 const agreementColumns = `select id::text, legal_entity_id::text, name, party_role, coalesce(customer_id::text, ''),
 	coalesce(customer_group_id::text, ''), coalesce(vendor_id::text, ''), basis, period, tiers, currency::text, valid_from, valid_to,
-	accrual_account, expense_account from rebate_agreement `
+	accrual_account, expense_account, status, version from rebate_agreement `
 
 func scanAgreement(row pgx.Row) (domain.RebateAgreement, error) {
 	var a domain.RebateAgreement
 	var tiers []byte
 	if err := row.Scan(&a.ID, &a.LegalEntityID, &a.Name, &a.PartyRole, &a.CustomerID, &a.CustomerGroupID, &a.VendorID, &a.Basis,
-		&a.Period, &tiers, &a.Currency, &a.ValidFrom, &a.ValidTo, &a.AccrualAccount, &a.ExpenseAccount); err != nil {
+		&a.Period, &tiers, &a.Currency, &a.ValidFrom, &a.ValidTo, &a.AccrualAccount, &a.ExpenseAccount, &a.Status, &a.Version); err != nil {
 		return a, err
 	}
 	if err := json.Unmarshal(tiers, &a.Tiers); err != nil {
@@ -184,7 +185,10 @@ func (s *Postgres) AccrueInvoiceLine(ctx context.Context, in AccrualInput) (Accr
 	var out Accrual
 	created := false
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		a, err := loadAgreement(ctx, tx, `where id = $1`, in.AgreementID)
+		// FOR SHARE: accruals of one agreement run side by side, but a revise or close (FOR UPDATE)
+		// waits for them and they wait for it, so no invoice accrues past a close date or at
+		// tiers that a concurrent revise is replacing.
+		a, err := loadAgreement(ctx, tx, `where id = $1 for share`, in.AgreementID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return agreementNotFound(in.AgreementID)
 		}
@@ -317,4 +321,28 @@ func (s *Postgres) ListAgreements(ctx context.Context, f AgreementFilter) ([]dom
 // sameInvoiceLine reports whether a redelivered invoice line matches the one already accrued.
 func sameInvoiceLine(a Accrual, in AccrualInput) bool {
 	return dayStr(a.InvoiceDate) == dayStr(in.InvoiceDate) && a.BasisValue.Equal(in.Value) && a.BasisQty.Equal(in.Quantity)
+}
+
+func marshalTiers(t []domain.Tier) ([]byte, error) { return json.Marshal(t) }
+
+func tiersHash(t *[]domain.Tier) string {
+	if t == nil {
+		return "-"
+	}
+	b, _ := json.Marshal(*t)
+	return string(b)
+}
+
+func ptrStr(s *string) string {
+	if s == nil {
+		return "-"
+	}
+	return "=" + *s
+}
+
+func ptrDay(t *time.Time) string {
+	if t == nil {
+		return "-"
+	}
+	return dayStr(*t)
 }
