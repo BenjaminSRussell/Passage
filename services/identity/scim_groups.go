@@ -365,7 +365,14 @@ func (a *SCIMAPI) replaceGroup(w http.ResponseWriter, r *http.Request) {
 			next, err = groupFromBody(body)
 		}
 	}
-	a.saveGroup(w, r, id, err, func(scimGroup) (scimGroup, error) { return next, nil })
+	a.saveGroup(w, r, id, err, func(cur scimGroup) (scimGroup, error) {
+		// A response lists at most scimMemberLimit members, so a client that read a larger group and PUTs
+		// it back would silently drop the members it never saw. Such a group changes only by PATCH.
+		if len(cur.memberIDs) > scimMemberLimit {
+			return cur, badRequest("tooMany", "the group has more than "+strconv.Itoa(scimMemberLimit)+" members, more than a response lists; change its membership with PATCH")
+		}
+		return next, nil
+	})
 }
 
 func (a *SCIMAPI) patchGroup(w http.ResponseWriter, r *http.Request) {

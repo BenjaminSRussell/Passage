@@ -15,11 +15,13 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/identity"
 )
 
@@ -599,6 +601,46 @@ func TestSCIMGroups(t *testing.T) {
 	})
 }
 
+func TestSCIMGroupOverMemberCapRefusesPut(t *testing.T) {
+	f := newSCIMFixture(t)
+	do := f.as(f.tenantA)
+	ctx := context.Background()
+	group := testkit.TenantID(81)
+	for _, stmt := range []string{
+		`insert into identity_users (tenant_id, user_id, idp_subject, user_name) select $1, gen_random_uuid(), 'big-' || n, 'big-' || n from generate_series(1, 501) n`,
+		`insert into identity_scim_groups (tenant_id, group_id, display_name) values ($1, '` + group + `', 'Everyone')`,
+		`insert into identity_scim_group_members (tenant_id, group_id, user_id) select tenant_id, '` + group + `', user_id from identity_users where tenant_id = $1 and user_name like 'big-%'`,
+	} {
+		if _, err := f.admin.Exec(ctx, stmt, f.tenantA); err != nil {
+			t.Fatal(err)
+		}
+	}
+	members := func() int {
+		var n int
+		if err := f.admin.QueryRow(ctx, `select count(*) from identity_scim_group_members where tenant_id = $1 and group_id = $2`, f.tenantA, group).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	read := decode[scimGroupBody](t, do(http.MethodGet, "/scim/v2/Groups/"+group, nil), http.StatusOK)
+	if len(read.Members) != 500 {
+		t.Fatalf("a GET listed %d members, want the 500 cap", len(read.Members))
+	}
+	wantSCIMError(t, do(http.MethodPut, "/scim/v2/Groups/"+group, map[string]any{"displayName": "Everyone", "members": read.Members}), "400", "tooMany")
+	if got := members(); got != 501 {
+		t.Fatalf("a refused PUT left %d members, want 501", got)
+	}
+	dropped := read.Members[0].Value
+	decode[scimGroupBody](t, do(http.MethodPatch, "/scim/v2/Groups/"+group, patchBody(map[string]any{"op": "remove", "path": `members[value eq "` + dropped + `"]`})), http.StatusOK)
+	if got := members(); got != 500 {
+		t.Fatalf("PATCH left %d members, want 500", got)
+	}
+	got := decode[scimGroupBody](t, do(http.MethodPut, "/scim/v2/Groups/"+group, map[string]any{"displayName": "All staff", "members": read.Members[1:]}), http.StatusOK)
+	if got.DisplayName != "All staff" || len(got.Members) != 499 || members() != 499 {
+		t.Fatalf("a PUT at the cap = %s with %d members (%d stored)", got.DisplayName, len(got.Members), members())
+	}
+}
+
 func TestSCIMDiscovery(t *testing.T) {
 	f := newSCIMFixture(t)
 	do := f.as(f.tenantA)
@@ -653,6 +695,80 @@ func TestSCIMDeprovisionRefusesTheLastTenantAdmin(t *testing.T) {
 		t.Fatalf("with another admin the delete = %d %s", rec.Code, rec.Body.String())
 	}
 	wantSCIMError(t, do(http.MethodDelete, "/scim/v2/Users/"+second.ID, nil), "409", "")
+}
+
+// Ending a tenant.administer assignment and SCIM-deprovisioning its holder take the tenant-admin
+// advisory lock and the assignment row lock. Both must take the advisory lock first, or each can hold
+// what the other waits for and Postgres aborts one with 40P01.
+func TestAssignmentEndAndSCIMDeprovisionTakeLocksInOneOrder(t *testing.T) {
+	f := newSCIMFixture(t)
+	do := f.as(f.tenantA)
+	ctx := context.Background()
+	leaving, staying := f.createUser(t, do, "leaving"), f.createUser(t, do, "staying")
+	var assignment string
+	for _, id := range []string{staying.ID, leaving.ID} {
+		if err := f.admin.QueryRow(ctx, `insert into identity_role_assignments (tenant_id, assignment_id, user_id, role, valid_from) values ($1, gen_random_uuid(), $2, 'tenant.administer', now() - interval '1 day') returning assignment_id::text`, f.tenantA, id).Scan(&assignment); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waitForAdvisoryWaiters := func(want int) {
+		t.Helper()
+		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+			var n int
+			if err := f.admin.QueryRow(ctx, `select count(*) from pg_locks where locktype = 'advisory' and not granted and database = (select oid from pg_database where datname = current_database())`).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			if n == want {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("advisory lock waiters = %d, want %d", n, want)
+			}
+		}
+	}
+	holder, err := f.admin.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Rollback(ctx) }()
+	if _, err := holder.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1::text || ':tenant-admin', 0))`, f.tenantA); err != nil {
+		t.Fatal(err)
+	}
+
+	var endCode, scimCode int
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		endCode = f.do(f.adminOf(f.tenantA, dutyRoles), http.MethodDelete, "/v1/authz/assignments/"+assignment, nil).Code
+	}()
+	waitForAdvisoryWaiters(1)
+	probe, err := f.admin.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = probe.Exec(ctx, `select 1 from identity_role_assignments where assignment_id = $1 for update nowait`, assignment)
+	_ = probe.Rollback(ctx)
+	if err != nil {
+		t.Errorf("the end request locked the assignment row before the tenant-admin lock: %v", err)
+	}
+	go func() {
+		defer wg.Done()
+		scimCode = do(http.MethodDelete, "/scim/v2/Users/"+leaving.ID, nil).Code
+	}()
+	waitForAdvisoryWaiters(2)
+	if err := holder.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	wg.Wait()
+
+	if (endCode != http.StatusOK && endCode != http.StatusConflict) || scimCode != http.StatusNoContent {
+		t.Fatalf("end = %d, SCIM deprovision = %d; want 200 or 409 and 204", endCode, scimCode)
+	}
+	var active int
+	if err := f.admin.QueryRow(ctx, `select count(*) from identity_role_assignments where user_id = $1 and (valid_to is null or valid_to > clock_timestamp())`, leaving.ID).Scan(&active); err != nil || active != 0 {
+		t.Fatalf("the deprovisioned user keeps %d active assignments (%v)", active, err)
+	}
 }
 
 func TestSCIMGuardsAgainstUnintendedDeprovisioning(t *testing.T) {

@@ -288,6 +288,11 @@ func (a *RoleAssignmentsAPI) end(w http.ResponseWriter, r *http.Request) {
 
 	var result roleAssignmentResource
 	err := withAdminTx(r.Context(), a.pool, p, dutyMaintainSecurityRoles, func(tx pgx.Tx) error {
+		// The tenant-admin lock comes before the row lock, the order SCIM deprovisioning takes them in, so
+		// the two cannot deadlock on a tenant.administer assignment.
+		if err := lockTenantAdmins(r.Context(), tx, p.TenantID); err != nil {
+			return err
+		}
 		rows, err := tx.Query(r.Context(), `select `+assignmentColumns+` from identity_role_assignments where tenant_id = $1 and assignment_id = $2 for update`, p.TenantID, id)
 		if err != nil {
 			return err
@@ -362,10 +367,8 @@ func lockTenantAdmins(ctx context.Context, tx pgx.Tx, tenantID string) error {
 	return err
 }
 
+// requireOtherTenantAdmin expects the caller to hold lockTenantAdmins.
 func requireOtherTenantAdmin(ctx context.Context, tx pgx.Tx, tenantID, endingID string, validTo time.Time) error {
-	if err := lockTenantAdmins(ctx, tx, tenantID); err != nil {
-		return err
-	}
 	var others int
 	if err := tx.QueryRow(ctx, `select count(*) from identity_role_assignments a join identity_users u using (tenant_id, user_id)
 where a.tenant_id = $1 and a.role = $2 and a.legal_entity_id is null and a.assignment_id <> $3 and u.status = 'active'
