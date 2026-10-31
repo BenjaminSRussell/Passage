@@ -308,6 +308,10 @@ func (a *API) hireFromOffer(w http.ResponseWriter, r *http.Request, id string) {
 		httpx.Fail(w, r, err)
 		return
 	}
+	if req.CompPlanID != "" && !caller(r).HasDuty(dutyCompAdmin) {
+		forbidPay(w, r)
+		return
+	}
 	fields := map[string]string{}
 	if !ids.Valid(req.WorkerID) {
 		fields["workerId"] = "must be a UUID"

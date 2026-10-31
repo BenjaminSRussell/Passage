@@ -40,6 +40,7 @@ type Requisition struct {
 	ID                    string    `json:"id"`
 	RequisitionNumber     string    `json:"requisitionNumber"`
 	PositionID            string    `json:"positionId"`
+	LegalEntityID         string    `json:"legalEntityId"`
 	Headcount             int       `json:"headcount"`
 	HiringManagerWorkerID string    `json:"hiringManagerWorkerId"`
 	PlannedStartDate      string    `json:"plannedStartDate"`
@@ -49,14 +50,14 @@ type Requisition struct {
 	CreatedAt             time.Time `json:"createdAt"`
 }
 
-const requisitionSelect = `select r.id::text, r.requisition_number, r.position_id::text, r.headcount, r.hiring_manager_worker_id::text,
+const requisitionSelect = `select r.id::text, r.requisition_number, r.position_id::text, r.legal_entity_id::text, r.headcount, r.hiring_manager_worker_id::text,
 	to_char(r.planned_start_date, 'YYYY-MM-DD'), r.allow_overfill, r.status,
 	(select count(*) from hr_offer o where o.tenant_id = r.tenant_id and o.requisition_id = r.id and o.status = 'ACCEPTED')::int, r.created_at
 	from hr_requisition r`
 
 func scanRequisition(row pgx.Row) (Requisition, error) {
 	var r Requisition
-	err := row.Scan(&r.ID, &r.RequisitionNumber, &r.PositionID, &r.Headcount, &r.HiringManagerWorkerID, &r.PlannedStartDate, &r.AllowOverfill, &r.Status, &r.Filled, &r.CreatedAt)
+	err := row.Scan(&r.ID, &r.RequisitionNumber, &r.PositionID, &r.LegalEntityID, &r.Headcount, &r.HiringManagerWorkerID, &r.PlannedStartDate, &r.AllowOverfill, &r.Status, &r.Filled, &r.CreatedAt)
 	r.CreatedAt = utc(r.CreatedAt)
 	return r, err
 }
@@ -95,13 +96,15 @@ func (s *Postgres) CreateRequisition(ctx context.Context, in Requisition, idempo
 				return err
 			}
 		}
-		var exists bool
-		if err := tx.QueryRow(ctx, `select exists (select 1 from hr_position where tenant_id = $1 and id = $2)`, p.TenantID, in.PositionID).Scan(&exists); err != nil {
-			return err
-		}
-		if !exists {
+		var legalEntity string
+		err := tx.QueryRow(ctx, `select legal_entity_id::text from hr_position where tenant_id = $1 and id = $2`, p.TenantID, in.PositionID).Scan(&legalEntity)
+		if errors.Is(err, pgx.ErrNoRows) {
 			return problem(http.StatusNotFound, CodePositionNotFound, "position not found")
 		}
+		if err != nil {
+			return err
+		}
+		var exists bool
 		if err := tx.QueryRow(ctx, `select exists (select 1 from worker where tenant_id = $1 and id = $2)`, p.TenantID, in.HiringManagerWorkerID).Scan(&exists); err != nil {
 			return err
 		}
@@ -109,12 +112,11 @@ func (s *Postgres) CreateRequisition(ctx context.Context, in Requisition, idempo
 			return problem(http.StatusNotFound, CodeWorkerNotFound, "hiring manager not found")
 		}
 		id := ids.New()
-		if _, err := tx.Exec(ctx, `insert into hr_requisition (tenant_id, id, requisition_number, position_id, headcount, hiring_manager_worker_id, planned_start_date, allow_overfill, status, idempotency_key)
-			values ($1, $2, $3, $4, $5, $6, $7::date, $8, 'DRAFT', $9)`,
-			p.TenantID, id, in.RequisitionNumber, in.PositionID, in.Headcount, in.HiringManagerWorkerID, in.PlannedStartDate, in.AllowOverfill, key); err != nil {
+		if _, err := tx.Exec(ctx, `insert into hr_requisition (tenant_id, id, requisition_number, position_id, legal_entity_id, headcount, hiring_manager_worker_id, planned_start_date, allow_overfill, status, idempotency_key)
+			values ($1, $2, $3, $4, $10, $5, $6, $7::date, $8, 'DRAFT', $9)`,
+			p.TenantID, id, in.RequisitionNumber, in.PositionID, in.Headcount, in.HiringManagerWorkerID, in.PlannedStartDate, in.AllowOverfill, key, legalEntity); err != nil {
 			return err
 		}
-		var err error
 		if out, err = loadRequisition(ctx, tx, p.TenantID, id, false); err != nil {
 			return err
 		}
@@ -331,8 +333,8 @@ func (s *Postgres) CreateCandidate(ctx context.Context, in CandidateInput, idemp
 			}
 		}
 		id := ids.New()
-		if _, err := tx.Exec(ctx, `insert into hr_candidate (tenant_id, id, requisition_id, stage, source, full_name_sealed, email_sealed, phone_sealed, idempotency_key)
-			values ($1, $2, $3, 'APPLIED', $4, $5, $6, $7, $8)`, p.TenantID, id, in.RequisitionID, in.Source, name, email, phone, key); err != nil {
+		if _, err := tx.Exec(ctx, `insert into hr_candidate (tenant_id, id, requisition_id, legal_entity_id, stage, source, full_name_sealed, email_sealed, phone_sealed, idempotency_key)
+			values ($1, $2, $3, $9, 'APPLIED', $4, $5, $6, $7, $8)`, p.TenantID, id, in.RequisitionID, in.Source, name, email, phone, key, req.LegalEntityID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `insert into hr_consent_record (tenant_id, id, subject_type, subject_id, purpose, granted_by) values ($1, $2, 'CANDIDATE', $3, $4, $5)`,
@@ -429,7 +431,7 @@ func (s *Postgres) MoveCandidate(ctx context.Context, id, to string) (Candidate,
 		if err := domain.CandidateStageMove(stage, to); err != nil {
 			return problem(http.StatusConflict, domain.CodeCandidateMove, err.(*domain.Error).Detail)
 		}
-		if _, err := tx.Exec(ctx, `update hr_candidate set stage = $3, stage_changed_at = now() where tenant_id = $1 and id = $2`, p.TenantID, id, to); err != nil {
+		if _, err := tx.Exec(ctx, `update hr_candidate set stage = $3, stage_changed_at = $4 where tenant_id = $1 and id = $2`, p.TenantID, id, to, s.now()); err != nil {
 			return err
 		}
 		out, err = s.scanCandidate(p, tx.QueryRow(ctx, candidateSelect+` where tenant_id = $1 and id = $2`, p.TenantID, id))
@@ -665,10 +667,10 @@ func (s *Postgres) CreateOffer(ctx context.Context, in Offer, idempotencyKey str
 		if req.Status != "OPEN" {
 			return problem(http.StatusConflict, domain.CodeReqState, "offers can be made only on an OPEN requisition")
 		}
-		out, err = scanOffer(tx.QueryRow(ctx, `insert into hr_offer (tenant_id, id, candidate_id, requisition_id, amount, currency, start_date, status, idempotency_key)
-			values ($1, $2, $3, $4, $5::numeric, $6, $7::date, 'DRAFT', $8)
+		out, err = scanOffer(tx.QueryRow(ctx, `insert into hr_offer (tenant_id, id, candidate_id, requisition_id, legal_entity_id, amount, currency, start_date, status, idempotency_key)
+			values ($1, $2, $3, $4, $9, $5::numeric, $6, $7::date, 'DRAFT', $8)
 			returning id::text, candidate_id::text, requisition_id::text, amount::text, currency, to_char(start_date, 'YYYY-MM-DD'), status, hire_action_id::text`,
-			p.TenantID, ids.New(), in.CandidateID, reqID, in.Amount, in.Currency, in.StartDate, key))
+			p.TenantID, ids.New(), in.CandidateID, reqID, in.Amount, in.Currency, in.StartDate, key, req.LegalEntityID))
 		inserted = err == nil
 		return err
 	})
@@ -807,7 +809,7 @@ func (s *Postgres) HireFromOffer(ctx context.Context, id string, in HireInput) (
 		if _, err := tx.Exec(ctx, `update hr_offer set hire_action_id = $3, updated_at = now() where tenant_id = $1 and id = $2`, p.TenantID, id, out.ID); err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `update hr_candidate set stage = 'HIRED', stage_changed_at = now() where tenant_id = $1 and id = $2`, p.TenantID, offer.CandidateID)
+		_, err = tx.Exec(ctx, `update hr_candidate set stage = 'HIRED', stage_changed_at = $3 where tenant_id = $1 and id = $2`, p.TenantID, offer.CandidateID, s.now())
 		return err
 	})
 	return out, err

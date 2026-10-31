@@ -19,16 +19,17 @@ import (
 )
 
 const (
-	CodeActionNotFound   = "HCM-ACT-NOT-FOUND"
-	CodeActionTooFar     = "HCM-ACT-001"
-	CodeActionEmployment = "HCM-ACT-003"
-	CodeActionInactive   = "HCM-ACT-004"
-	CodeActionDateOrder  = "HCM-ACT-006"
-	CodeActionCompLater  = "HCM-ACT-007"
-	CodeActionState      = "HCM-ACT-STATE"
-	CodeTerminationDate  = "HCM-EMP-002"
-	CodeCompCurrency     = "HCM-CMP-004"
-	CodeCompOverlap      = "HCM-CMP-005"
+	CodeActionNotFound    = "HCM-ACT-NOT-FOUND"
+	CodeEmploymentMissing = "HCM-EMP-NOT-FOUND"
+	CodeActionTooFar      = "HCM-ACT-001"
+	CodeActionEmployment  = "HCM-ACT-003"
+	CodeActionInactive    = "HCM-ACT-004"
+	CodeActionDateOrder   = "HCM-ACT-006"
+	CodeActionCompLater   = "HCM-ACT-007"
+	CodeActionState       = "HCM-ACT-STATE"
+	CodeTerminationDate   = "HCM-EMP-002"
+	CodeCompCurrency      = "HCM-CMP-004"
+	CodeCompOverlap       = "HCM-CMP-005"
 
 	MaxFutureDays = 365
 
@@ -154,14 +155,20 @@ func (s *Postgres) submitActionTx(ctx context.Context, tx pgx.Tx, p tenant.Princ
 	if !exists {
 		return PersonnelAction{}, problem(http.StatusNotFound, CodeWorkerNotFound, "worker not found")
 	}
+	legalEntity := in.Payload.LegalEntityID
 	if in.ActionType != hrevents.ActionHire {
 		if in.EmploymentID == nil {
 			return PersonnelAction{}, problem(http.StatusUnprocessableEntity, CodeActionEmployment, "the action needs the worker's employment")
 		}
-		if err := tx.QueryRow(ctx, `select exists (select 1 from employment where tenant_id = $1 and id = $2 and worker_id = $3)`, p.TenantID, *in.EmploymentID, in.WorkerID).Scan(&exists); err != nil {
+		var employmentWorker string
+		err := tx.QueryRow(ctx, `select worker_id::text, legal_entity_id::text from employment where tenant_id = $1 and id = $2`, p.TenantID, *in.EmploymentID).Scan(&employmentWorker, &legalEntity)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return PersonnelAction{}, problem(http.StatusNotFound, CodeEmploymentMissing, "employment not found")
+		}
+		if err != nil {
 			return PersonnelAction{}, err
 		}
-		if !exists {
+		if employmentWorker != in.WorkerID {
 			return PersonnelAction{}, problem(http.StatusUnprocessableEntity, CodeActionEmployment, "the employment does not belong to this worker")
 		}
 	}
@@ -173,9 +180,9 @@ func (s *Postgres) submitActionTx(ctx context.Context, tx pgx.Tx, p tenant.Princ
 	if in.Reason != "" {
 		reason = &in.Reason
 	}
-	act, err := scanAction(tx.QueryRow(ctx, `insert into hr_personnel_action (tenant_id, id, action_type, worker_id, employment_id, effective_date, status, payload, reason, source_kind, source_id, submitted_by, idempotency_key)
-		values ($1, $2, $3, $4, $5, $6::date, 'PENDING', $7, $8, $9, $10, $11, $12) returning `+actionColumns,
-		p.TenantID, ids.New(), in.ActionType, in.WorkerID, in.EmploymentID, in.EffectiveDate, payload, reason, in.SourceKind, in.SourceID, p.UserID, key))
+	act, err := scanAction(tx.QueryRow(ctx, `insert into hr_personnel_action (tenant_id, id, action_type, worker_id, legal_entity_id, employment_id, effective_date, status, payload, reason, source_kind, source_id, submitted_by, idempotency_key)
+		values ($1, $2, $3, $4, $13, $5, $6::date, 'PENDING', $7, $8, $9, $10, $11, $12) returning `+actionColumns,
+		p.TenantID, ids.New(), in.ActionType, in.WorkerID, in.EmploymentID, in.EffectiveDate, payload, reason, in.SourceKind, in.SourceID, p.UserID, key, legalEntity))
 	if err != nil {
 		return PersonnelAction{}, err
 	}

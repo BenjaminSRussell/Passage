@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS hr_requisition (
   id uuid NOT NULL,
   requisition_number text NOT NULL CHECK (requisition_number ~ '^[A-Z0-9][A-Z0-9-]{0,19}$'),
   position_id uuid NOT NULL,
+  legal_entity_id uuid NOT NULL,
   headcount int NOT NULL CHECK (headcount BETWEEN 1 AND 500),
   hiring_manager_worker_id uuid NOT NULL,
   planned_start_date date NOT NULL,
@@ -22,6 +23,7 @@ CREATE TABLE IF NOT EXISTS hr_candidate (
   tenant_id uuid NOT NULL,
   id uuid NOT NULL,
   requisition_id uuid NOT NULL,
+  legal_entity_id uuid NOT NULL,
   stage text NOT NULL CHECK (stage IN ('APPLIED', 'SCREEN', 'INTERVIEW', 'OFFER', 'HIRED', 'REJECTED')),
   source text CHECK (source IS NULL OR length(source) BETWEEN 1 AND 60),
   full_name_sealed bytea,
@@ -68,6 +70,7 @@ CREATE TABLE IF NOT EXISTS hr_offer (
   id uuid NOT NULL,
   candidate_id uuid NOT NULL,
   requisition_id uuid NOT NULL,
+  legal_entity_id uuid NOT NULL,
   amount numeric(20, 6) NOT NULL CHECK (amount >= 0),
   currency char(3) NOT NULL CHECK (currency ~ '^[A-Z]{3}$'),
   start_date date NOT NULL,
@@ -120,6 +123,7 @@ CREATE TABLE IF NOT EXISTS hr_comp_worksheet_row (
   manager_worker_id uuid NOT NULL,
   employment_id uuid NOT NULL,
   department_id uuid NOT NULL,
+  legal_entity_id uuid NOT NULL,
   current_pay numeric(20, 6) NOT NULL,
   rating int NOT NULL CHECK (rating BETWEEN 1 AND 5),
   compa_ratio numeric(8, 2),
@@ -144,12 +148,18 @@ ALTER TABLE hr_requisition FORCE ROW LEVEL SECURITY;
 CREATE POLICY hr_requisition_tenant_access ON hr_requisition AS PERMISSIVE
   USING (tenant_id = current_setting('passage.tenant_id', true)::uuid)
   WITH CHECK (tenant_id = current_setting('passage.tenant_id', true)::uuid);
+CREATE POLICY hr_requisition_legal_entity_scope ON hr_requisition AS RESTRICTIVE
+  USING (current_setting('passage.legal_entity_scopes', true) = '*'
+         OR legal_entity_id::text = ANY(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));
 
 ALTER TABLE hr_candidate ENABLE ROW LEVEL SECURITY;
 ALTER TABLE hr_candidate FORCE ROW LEVEL SECURITY;
 CREATE POLICY hr_candidate_tenant_access ON hr_candidate AS PERMISSIVE
   USING (tenant_id = current_setting('passage.tenant_id', true)::uuid)
   WITH CHECK (tenant_id = current_setting('passage.tenant_id', true)::uuid);
+CREATE POLICY hr_candidate_legal_entity_scope ON hr_candidate AS RESTRICTIVE
+  USING (current_setting('passage.legal_entity_scopes', true) = '*'
+         OR legal_entity_id::text = ANY(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));
 
 ALTER TABLE hr_consent_record ENABLE ROW LEVEL SECURITY;
 ALTER TABLE hr_consent_record FORCE ROW LEVEL SECURITY;
@@ -168,6 +178,9 @@ ALTER TABLE hr_offer FORCE ROW LEVEL SECURITY;
 CREATE POLICY hr_offer_tenant_access ON hr_offer AS PERMISSIVE
   USING (tenant_id = current_setting('passage.tenant_id', true)::uuid)
   WITH CHECK (tenant_id = current_setting('passage.tenant_id', true)::uuid);
+CREATE POLICY hr_offer_legal_entity_scope ON hr_offer AS RESTRICTIVE
+  USING (current_setting('passage.legal_entity_scopes', true) = '*'
+         OR legal_entity_id::text = ANY(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));
 
 ALTER TABLE hr_comp_cycle ENABLE ROW LEVEL SECURITY;
 ALTER TABLE hr_comp_cycle FORCE ROW LEVEL SECURITY;
@@ -186,6 +199,9 @@ ALTER TABLE hr_comp_worksheet_row FORCE ROW LEVEL SECURITY;
 CREATE POLICY hr_comp_worksheet_row_tenant_access ON hr_comp_worksheet_row AS PERMISSIVE
   USING (tenant_id = current_setting('passage.tenant_id', true)::uuid)
   WITH CHECK (tenant_id = current_setting('passage.tenant_id', true)::uuid);
+CREATE POLICY hr_comp_worksheet_row_legal_entity_scope ON hr_comp_worksheet_row AS RESTRICTIVE
+  USING (current_setting('passage.legal_entity_scopes', true) = '*'
+         OR legal_entity_id::text = ANY(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));
 
 DO $$
 BEGIN

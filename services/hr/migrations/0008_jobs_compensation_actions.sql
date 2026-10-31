@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS hr_personnel_action (
   id uuid NOT NULL,
   action_type text NOT NULL CHECK (action_type IN ('HIRE', 'TRANSFER', 'TERMINATE', 'COMP_CHANGE')),
   worker_id uuid NOT NULL,
+  legal_entity_id uuid NOT NULL,
   employment_id uuid,
   effective_date date NOT NULL,
   status text NOT NULL CHECK (status IN ('PENDING', 'APPLIED', 'WITHDRAWN', 'FAILED')),
@@ -117,6 +118,9 @@ ALTER TABLE hr_personnel_action FORCE ROW LEVEL SECURITY;
 CREATE POLICY hr_personnel_action_tenant_access ON hr_personnel_action AS PERMISSIVE
   USING (tenant_id = current_setting('passage.tenant_id', true)::uuid)
   WITH CHECK (tenant_id = current_setting('passage.tenant_id', true)::uuid);
+CREATE POLICY hr_personnel_action_legal_entity_scope ON hr_personnel_action AS RESTRICTIVE
+  USING (current_setting('passage.legal_entity_scopes', true) = '*'
+         OR legal_entity_id::text = ANY(string_to_array(current_setting('passage.legal_entity_scopes', true), ',')));
 
 DO $$
 BEGIN

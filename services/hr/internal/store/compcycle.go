@@ -263,21 +263,21 @@ func (s *Postgres) GetWorksheet(ctx context.Context, cycleID, managerID string) 
 }
 
 type payFacts struct {
-	employmentID, departmentID, planID, jobCode string
-	pay                                         decimal.Decimal
+	employmentID, departmentID, planID, jobCode, legalEntityID string
+	pay                                                        decimal.Decimal
 }
 
 func workerPayFacts(ctx context.Context, tx pgx.Tx, tenantID, workerID string, c CompCycle, at time.Time) (payFacts, *domain.Error, error) {
 	var f payFacts
 	var amount, basis, currency string
-	err := tx.QueryRow(ctx, `select e.id::text, pos.department_id::text, pos.job_code, fc.plan_id::text, fc.amount::text, pl.pay_basis, fc.currency
+	err := tx.QueryRow(ctx, `select e.id::text, e.legal_entity_id::text, pos.department_id::text, pos.job_code, fc.plan_id::text, fc.amount::text, pl.pay_basis, fc.currency
 		from employment e
 		join position_assignment pa on pa.tenant_id = e.tenant_id and pa.employment_id = e.id and pa.is_primary and pa.validity @> $3::timestamptz
 		join hr_position pos on pos.tenant_id = pa.tenant_id and pos.id = pa.position_id
 		join hr_fixed_compensation fc on fc.tenant_id = e.tenant_id and fc.employment_id = e.id and fc.validity @> $3::timestamptz
 		join hr_compensation_plan pl on pl.tenant_id = fc.tenant_id and pl.id = fc.plan_id
 		where e.tenant_id = $1 and e.worker_id = $2 and e.assignment_kind = 'PRIMARY' and e.validity @> $3::timestamptz
-		order by e.valid_from limit 1`, tenantID, workerID, at).Scan(&f.employmentID, &f.departmentID, &f.jobCode, &f.planID, &amount, &basis, &currency)
+		order by e.valid_from limit 1`, tenantID, workerID, at).Scan(&f.employmentID, &f.legalEntityID, &f.departmentID, &f.jobCode, &f.planID, &amount, &basis, &currency)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return f, &domain.Error{Code: CodeCompNoEmploy, Detail: "worker " + workerID + " has no primary employment with a position and compensation on the effective date"}, nil
 	}
@@ -341,16 +341,16 @@ func (s *Postgres) SaveWorksheet(ctx context.Context, cycleID, managerID string,
 					}
 				}
 			}
-			tag, err := tx.Exec(ctx, `insert into hr_comp_worksheet_row (tenant_id, cycle_id, worker_id, manager_worker_id, employment_id, department_id, current_pay, rating, compa_ratio,
+			tag, err := tx.Exec(ctx, `insert into hr_comp_worksheet_row (tenant_id, cycle_id, worker_id, manager_worker_id, employment_id, department_id, legal_entity_id, current_pay, rating, compa_ratio,
 					guideline_pct_min, guideline_pct_max, proposed_pct, proposed_amount, justification, status)
-				values ($1, $2, $3, $4, $5, $6, $7::numeric, $8, $9::numeric, $10::numeric, $11::numeric, $12::numeric, $13::numeric, $14, 'DRAFT')
+				values ($1, $2, $3, $4, $5, $6, $15, $7::numeric, $8, $9::numeric, $10::numeric, $11::numeric, $12::numeric, $13::numeric, $14, 'DRAFT')
 				on conflict (tenant_id, cycle_id, worker_id) do update set manager_worker_id = excluded.manager_worker_id, employment_id = excluded.employment_id,
-					department_id = excluded.department_id, current_pay = excluded.current_pay, rating = excluded.rating, compa_ratio = excluded.compa_ratio,
+					department_id = excluded.department_id, legal_entity_id = excluded.legal_entity_id, current_pay = excluded.current_pay, rating = excluded.rating, compa_ratio = excluded.compa_ratio,
 					guideline_pct_min = excluded.guideline_pct_min, guideline_pct_max = excluded.guideline_pct_max, proposed_pct = excluded.proposed_pct,
 					proposed_amount = excluded.proposed_amount, justification = excluded.justification
 				where hr_comp_worksheet_row.status = 'DRAFT'`,
 				p.TenantID, cycleID, r.WorkerID, managerID, f.employmentID, f.departmentID, f.pay.String(), r.Rating, compa, lo, hi, pct.String(),
-				domain.ProposedAmount(f.pay, pct, places).String(), r.Justification)
+				domain.ProposedAmount(f.pay, pct, places).String(), r.Justification, f.legalEntityID)
 			if err != nil {
 				return err
 			}
@@ -450,6 +450,13 @@ func (s *Postgres) ApplyCompCycle(ctx context.Context, cycleID string) (CompCycl
 		}
 		if c.Status != cycleApproval {
 			return problem(http.StatusConflict, CodeCycleState, "a cycle is applied from APPROVAL; this one is "+c.Status)
+		}
+		var scopes string
+		if err := tx.QueryRow(ctx, `select coalesce(current_setting('passage.legal_entity_scopes', true), '')`).Scan(&scopes); err != nil {
+			return err
+		}
+		if scopes != "*" {
+			return problem(http.StatusForbidden, "AUTH-0003", "applying a cycle needs access to every legal entity")
 		}
 		at, err := time.Parse("2006-01-02", c.EffectiveDate)
 		if err != nil {

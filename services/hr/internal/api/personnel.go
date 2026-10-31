@@ -355,6 +355,14 @@ func validateAction(req actionRequest) (store.ActionInput, map[string]string) {
 	return in, fields
 }
 
+func touchesPay(actionType string, pl store.ActionPayload) bool {
+	return actionType == hrevents.ActionCompChange || pl.CompPlanID != "" || pl.Amount != "" || pl.Currency != ""
+}
+
+func forbidPay(w http.ResponseWriter, r *http.Request) {
+	httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, "AUTH-0003", "setting compensation needs the "+dutyCompAdmin+" duty"))
+}
+
 func (a *API) hidePay(r *http.Request, act store.PersonnelAction) store.PersonnelAction {
 	if caller(r).HasDuty(dutyCompAdmin) {
 		return act
@@ -369,6 +377,10 @@ func (a *API) submitAction(w http.ResponseWriter, r *http.Request) {
 	var req actionRequest
 	if err := httpx.Decode(r, &req); err != nil {
 		httpx.Fail(w, r, err)
+		return
+	}
+	if touchesPay(req.ActionType, req.Details) && !caller(r).HasDuty(dutyCompAdmin) {
+		forbidPay(w, r)
 		return
 	}
 	in, fields := validateAction(req)
