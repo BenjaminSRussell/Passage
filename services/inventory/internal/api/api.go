@@ -78,6 +78,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerCount(r)
 	a.registerTransfers(r)
 	a.registerReports(r)
+	a.registerWorkspace(r)
 	a.registerTags(r)
 	a.registerJournalWorkflow(r)
 	a.registerJournalNames(r)

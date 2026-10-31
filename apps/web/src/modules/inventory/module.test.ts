@@ -11,6 +11,7 @@ describe("inventory module", () => {
 
   it("guards reads with inventory.read and journal creation with inventory.journal.write", () => {
     expect(Object.fromEntries(inventory.nav.map((n) => [n.to, n.duty]))).toEqual({
+      "/inventory/workspace": "inventory.read",
       "/inventory/onhand": "inventory.read",
       "/inventory/journals": "inventory.read",
       "/inventory/journals/new": "inventory.journal.write",

@@ -1431,3 +1431,34 @@ export async function updateJournalName(id: string, version: number, patch: Jour
     })
   ).body;
 }
+
+export interface WorkspaceSummary {
+  journals: { draft: number; awaitingApproval: number };
+  negativeOnHandRows: number;
+  openCountSheets: number;
+  countSheetsCounted: number;
+  reconciliationDifferences: number;
+  /** When the latest reconciliation run in scope was computed; undefined when none has run. */
+  lastReconciliationAt?: string;
+  activeReservations: number;
+  transferOrdersByStatus: Partial<Record<TransferStatus, number>>;
+}
+
+/** Counts behind the inventory management workspace tiles, for the caller's legal entities or one of them. */
+export async function getWorkspaceSummary(legalEntityId = "", signal?: AbortSignal): Promise<WorkspaceSummary> {
+  const { body } = await send<Partial<Omit<WorkspaceSummary, "lastReconciliationAt">> & { lastReconciliationAt?: string | null }>(
+    `/workspace/summary${reportQuery({ legalEntityId })}`,
+    {},
+    signal,
+  );
+  return {
+    journals: { draft: body.journals?.draft ?? 0, awaitingApproval: body.journals?.awaitingApproval ?? 0 },
+    negativeOnHandRows: body.negativeOnHandRows ?? 0,
+    openCountSheets: body.openCountSheets ?? 0,
+    countSheetsCounted: body.countSheetsCounted ?? 0,
+    reconciliationDifferences: body.reconciliationDifferences ?? 0,
+    lastReconciliationAt: body.lastReconciliationAt ?? undefined,
+    activeReservations: body.activeReservations ?? 0,
+    transferOrdersByStatus: body.transferOrdersByStatus ?? {},
+  };
+}

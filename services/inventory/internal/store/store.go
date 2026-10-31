@@ -85,6 +85,7 @@ type Store interface {
 	ListTransferLines(ctx context.Context, f TransferLineFilter) ([]TransferLineRow, bool, error)
 	ListCountVariance(ctx context.Context, f CountVarianceFilter) ([]CountVarianceRow, bool, error)
 	ListNegativeOnHand(ctx context.Context, f NegativeOnHandFilter) ([]NegativeOnHandRow, bool, error)
+	WorkspaceSummary(ctx context.Context, legalEntityID string) (WorkspaceSummary, error)
 	TraceTracking(ctx context.Context, f TraceFilter) ([]TransactionRow, bool, error)
 	ListDimensionCombinations(ctx context.Context, f DimensionCombinationFilter) ([]DimensionCombinationRow, bool, error)
 	RunABC(ctx context.Context, in AbcRunInput) (domain.AbcRun, bool, error)

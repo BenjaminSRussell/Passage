@@ -1192,6 +1192,30 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
+  /v1/inventory/workspace/summary:
+    get:
+      operationId: getInventoryWorkspaceSummary
+      summary: Counts behind the inventory management workspace tiles
+      description: |
+        Open work counted for the caller's legal entities (or one legal entity): draft journals and journals
+        awaiting approval (SUBMITTED), stock rows with negative physical quantity, count sheets still open
+        (OPEN, COUNTED or APPROVED) and those counted but not yet approved or posted, legal-entity /
+        account / currency pairs whose latest reconciliation run shows a difference with the time of the last run,
+        active reservations, and
+        the number of transfer orders in every status (statuses without orders carry 0). Counts are read under
+        row-level security, so a legal entity the caller may not see contributes nothing.
+      x-passage-duty: inventory.read
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid }, description: Count one legal entity only }
+      responses:
+        '200':
+          description: Workspace counts
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkspaceSummary' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
   /v1/inventory/reports/tracking-trace:
     get:
       operationId: traceTrackingDimension
@@ -2807,6 +2831,33 @@ components:
         gainValue: { $ref: '#/components/schemas/Decimal' }
         lossValue: { $ref: '#/components/schemas/Decimal', description: Value of negative variances as a positive number }
         netValue: { $ref: '#/components/schemas/Decimal' }
+    WorkspaceSummary:
+      type: object
+      required: [journals, negativeOnHandRows, openCountSheets, countSheetsCounted, reconciliationDifferences, lastReconciliationAt, activeReservations, transferOrdersByStatus]
+      properties:
+        journals:
+          type: object
+          required: [draft, awaitingApproval]
+          properties:
+            draft: { type: integer, description: Journals in DRAFT }
+            awaitingApproval: { type: integer, description: Journals in SUBMITTED, waiting for an approver }
+        negativeOnHandRows: { type: integer, description: Stock rows whose physical quantity is below zero }
+        openCountSheets: { type: integer, description: Count sheets in OPEN, COUNTED or APPROVED }
+        countSheetsCounted: { type: integer, description: Count sheets in COUNTED }
+        reconciliationDifferences: { type: integer, description: Legal entity / account / currency pairs whose latest reconciliation run is DIFFERENCE }
+        lastReconciliationAt: { type: [string, 'null'], format: date-time, description: When the latest reconciliation run in scope was computed; null when none has run }
+        activeReservations: { type: integer, description: Reservations in ACTIVE }
+        transferOrdersByStatus:
+          type: object
+          description: Transfer order count per status
+          required: [CREATED, SHIPPED, PARTIALLY_RECEIVED, RECEIVED, CANCELLED]
+          additionalProperties: { type: integer }
+          properties:
+            CREATED: { type: integer }
+            SHIPPED: { type: integer }
+            PARTIALLY_RECEIVED: { type: integer }
+            RECEIVED: { type: integer }
+            CANCELLED: { type: integer }
     NegativeOnHandLine:
       type: object
       required: [legalEntityId, productId, dimensions, physicalInvent, shortfallQty, postedValue]

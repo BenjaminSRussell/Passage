@@ -135,6 +135,17 @@ per row), the new journal name form, and a journal name choice with its approval
 all with loading, empty and error states. The OpenAPI and AsyncAPI documents have no FAIL lines on the
 documentation gates.
 
+Slice 13 adds the inventory management workspace summary (PRD Deploy line, wave 16): `GET
+/v1/inventory/workspace/summary` (`inventory.read`, optional `legalEntityId`) counts draft journals and journals
+awaiting approval (SUBMITTED), stock rows with negative physical quantity, open count sheets and counted sheets,
+legal-entity / account / currency pairs whose latest reconciliation run is a DIFFERENCE with the time of the last
+run (the PRD tile's "last run"; null before any run), active reservations and transfer orders in every status (zero
+for a status without orders), all read under row-level security; a `legalEntityId` outside the caller's scope
+counts nothing. No new table, grant, duty or event. The web workspace page (`/inventory/workspace`, first nav item)
+shows the tiles with links to the pages that clear them, the last reconciliation run, a "nothing needs attention"
+note when the attention tiles are all zero, and the loading and error-with-retry states. The overview's
+orders-by-status counts (FR-16.15) are now served by this endpoint.
+
 Every other item in the ticket and PRD 3.16 is listed here.
 
 ## Ticket deliverables
@@ -220,7 +231,7 @@ Every other item in the ticket and PRD 3.16 is listed here.
 | FR-16.13 export and GL voucher drill-down | later slice of PSG-16 / handoff — wave 11 | Export is a web grid feature (wave 5 shell); `ledger_entry_id` stays null until the ledger Post exists. |
 | FR-16.14 opening balance load from AX / SAP extracts via wave 10 migration framework | handoff — wave 10 (migration framework) | Mapping rules belong to the migration pack; the OPENING_BALANCE journal it targets is built. |
 | FR-16.16 in-transit inquiry | built (slice 3) | `GET /transfers/in-transit` (see item 6). |
-| FR-16.15 transfer order overview report (3.16.14): orders-by-status counts, export and a scheduled late-shipment notification | later slice of PSG-16 / handoff — wave 15 (documents, export) | Slice 10 builds the cross-order line inquiry and the late overview (`GET /v1/inventory/transfer-order-lines`), with the overview's legal entity, date range and status filters. Lateness is derived: an unshipped order after its planned ship date, or a shipment in transit more than `lateReceiptDays` (default 7, not yet a legal-entity parameter); there is no planned receipt date on the order yet (see item 6), so a late receipt is measured from the ship date. The late summary on the page counts the lines listed; there is no orders-by-status aggregate, no export and no notification. |
+| FR-16.15 transfer order overview report (3.16.14): orders-by-status counts, export and a scheduled late-shipment notification | later slice of PSG-16 / handoff — wave 15 (documents, export) | Slice 10 builds the cross-order line inquiry and the late overview (`GET /v1/inventory/transfer-order-lines`), with the overview's legal entity, date range and status filters. Lateness is derived: an unshipped order after its planned ship date, or a shipment in transit more than `lateReceiptDays` (default 7, not yet a legal-entity parameter); there is no planned receipt date on the order yet (see item 6), so a late receipt is measured from the ship date. The late summary on the page counts the lines listed. The orders-by-status counts are served by the workspace summary (slice 13); there is no export and no notification. |
 | FR-16.17 customer consignment warehouse (`CUSTOMER_CONSIGNMENT`, `customer_id`, SAP MB58 report) | later slice of PSG-16 (documents in wave 27) | Warehouse type belongs to wave 6 master data; stock there stays legal-entity owned. |
 | FR-16.18 to FR-16.20 tag counting, ABC, segments | built (slices 3, 4, 5) | ABC classification by value (slice 3), tag counting (slice 4) and segments (slice 5) are built (item 8), with the gaps listed there. |
 | 3.16.1 valuation by product x site per item model group (running average across dimension sets) | handoff — wave 20 (costing) | Slice 1 values issues at the running average of the on-hand row being issued (one dimension set), the finest consistent level under the row lock. Wave 20 replaces it with the costing engine. |
@@ -276,10 +287,11 @@ Every other item in the ticket and PRD 3.16 is listed here.
 | Inventory-to-ledger reconciliation: runs (status filter), run reconciliation (legal entity, currency, optional ledger balance), run detail (difference alert, negative-stock warning, both sides and the ledger source) | built (slice 7) | Same primitives and states; vitest tests in `slice7.test.tsx`. The Run action is shown to every reader; the service answers 403 without `inventory.admin`, shown on the form (the shell has no duty hook for page actions). |
 | Count variance, negative on-hand, batch and serial trace and dimension combination reports (filters, totals per counter, estimate notice, empty / error states) | built (slice 11) | Same primitives and states; vitest tests in `slice11.test.tsx`. Nav items use `inventory.read`. |
 | Journal names (list with type / legal entity / state filters, require or drop approval, activate or deactivate, new journal name), journal name choice on the new journal form | built (slice 12) | Same primitives and states; vitest tests in `slice12.test.tsx`. The nav item uses `inventory.read` (see the `inventory.journal-name.write` handoff row). |
-| Journals-awaiting-approval tile, approver inbox | later slice of PSG-16 | The journal list filters by status SUBMITTED; the workspace tiles are listed below. |
+| Journals-awaiting-approval tile | built (slice 13) | Workspace page tile with a link to the journal list. |
+| Approver inbox (list of submitted journals for the approver, filter by status in the list URL) | later slice of PSG-16 | The journal list filters by status SUBMITTED in its form; the tile only shows the count. |
 | Printing tag strips | handoff — wave 15 (documents) | The tag list shows the numbers to print. |
 | Warehouse pickers on the transfer form, transfer documents (print), batch / serial selection at receipt | later slice of PSG-16 / handoff — wave 6 | The form takes warehouse and site codes; the receipt keeps the shipped dimensions. |
-| Inventory management workspace tiles (journals awaiting approval, negative on-hand, open count sheets, reconciliation diffs) | later slice of PSG-16 | Depend on the workspace tile layout; the data they count exists (journal statuses slice 5, reconciliation runs with status and negative rows slice 7). |
+| Inventory management workspace (tiles for journals awaiting approval, negative on-hand rows, reconciliation differences, counted sheets, draft journals, open count sheets, active reservations, transfer orders by status; legal-entity scope) | built (slice 13) | Same primitives and states; vitest tests in `slice13.test.tsx`. Nav item gated on `inventory.read`. The reconciliation tile shows the last run time. Not built: user-personalised tile layout and the wave 5 workspace tile framework, tile links that carry a status filter into the target list. |
 | Quarantine disposition choice in the release action | later slice of PSG-16 | The screen releases with RELEASE, the only disposition the service supports yet. |
 | Drill from on-hand to transactions, export, keyboard grid entry, column personalization | later slice of PSG-16 | Need the transaction inquiry and the wave 5 shell personalization. |
 | Product and legal-entity pickers | handoff — waves 6 / 8 screens | The forms take product and legal-entity ids; lookups come from the org and product modules. |

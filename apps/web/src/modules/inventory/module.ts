@@ -37,6 +37,7 @@ import { TransactionsPage } from "./TransactionsPage";
 import { TransferLinesPage } from "./TransferLinesPage";
 import { TransferOrderPage } from "./TransferOrderPage";
 import { TransferOrdersPage } from "./TransferOrdersPage";
+import { WorkspacePage } from "./WorkspacePage";
 
 const inventory: PassageModule = {
   id: "inventory",
@@ -45,6 +46,7 @@ const inventory: PassageModule = {
     "On-hand stock by any dimension, the journals that move it with their approval workflow, transactions with their status history and backward moves, reservations, blocking, cycle and tag counts, journal reversals, transfer orders, vendor consignment, ABC classification, the count variance, negative on-hand, batch and serial trace and dimension combination reports, and the daily inventory-to-ledger reconciliation.",
   routes: [
     { path: "/inventory", element: createElement(OnHandPage), handle: { title: "On-hand inquiry", duty: "inventory.read" } },
+    { path: "/inventory/workspace", element: createElement(WorkspacePage), handle: { title: "Inventory workspace" } },
     { path: "/inventory/onhand", element: createElement(OnHandPage) },
     { path: "/inventory/journals", element: createElement(JournalsPage) },
     { path: "/inventory/journals/new", element: createElement(NewJournalPage) },
@@ -84,6 +86,7 @@ const inventory: PassageModule = {
     { path: "/inventory/reconciliations/:id", element: createElement(ReconciliationPage), handle: { title: "Reconciliation run" } },
   ],
   nav: [
+    { label: "Workspace", to: "/inventory/workspace", duty: "inventory.read" },
     { label: "On-hand", to: "/inventory/onhand", duty: "inventory.read" },
     { label: "Journals", to: "/inventory/journals", duty: "inventory.read" },
     { label: "New journal", to: "/inventory/journals/new", duty: "inventory.journal.write" },

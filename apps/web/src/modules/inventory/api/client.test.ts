@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { addLines, createJournal, fetchOnHand, InventoryApiError, listJournals, onHandUrl, postJournal } from "./client";
+import { addLines, createJournal, fetchOnHand, getWorkspaceSummary, InventoryApiError, listJournals, onHandUrl, postJournal } from "./client";
 
 type Call = [string, RequestInit];
 
@@ -86,5 +86,21 @@ describe("inventory client", () => {
     const [url, init] = call(fetchMock);
     expect(url).toBe("/api/v1/inventory/journals/j1:post");
     expect(new Headers(init.headers).get("If-Match")).toBe('"3"');
+  });
+});
+
+describe("workspace summary", () => {
+  it("reads the counts and defaults the missing ones to zero", async () => {
+    const fetchMock = stubFetch(200, { journals: { awaitingApproval: 2 }, transferOrdersByStatus: { SHIPPED: 1 } });
+    const s = await getWorkspaceSummary("9e8d7c6b-0000-4000-8000-000000000003");
+    expect(call(fetchMock)[0]).toBe("/api/v1/inventory/workspace/summary?legalEntityId=9e8d7c6b-0000-4000-8000-000000000003");
+    expect(s.journals).toEqual({ draft: 0, awaitingApproval: 2 });
+    expect(s.negativeOnHandRows).toBe(0);
+    expect(s.lastReconciliationAt).toBeUndefined();
+  });
+
+  it("raises the service problem instead of returning zero counts", async () => {
+    stubFetch(403, { title: "Forbidden", status: 403, code: "AUTH-0003" });
+    await expect(getWorkspaceSummary()).rejects.toBeInstanceOf(InventoryApiError);
   });
 });
