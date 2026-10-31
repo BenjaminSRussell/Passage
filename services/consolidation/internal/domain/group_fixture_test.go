@@ -41,7 +41,7 @@ type groupFixture struct {
 
 func loadGroupFixture(t *testing.T) groupFixture {
 	t.Helper()
-	raw, err := os.ReadFile("testdata/consol-group-3.json")
+	raw, err := os.ReadFile("testdata/consol-group-3-interim.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,12 +52,13 @@ func loadGroupFixture(t *testing.T) groupFixture {
 	return f
 }
 
-// TestEliminate_ThreeEntityGroupFixture is the AC-40.8 proof: the accountant's
-// hand-computed elimination set for a three-entity group with intercompany
-// sales and inventory equals the engine output line by line.
+// TestEliminate_ThreeEntityGroupFixture checks a hand-computed (not yet
+// accountant-reviewed) elimination set for an interim three-entity group.
 func TestEliminate_ThreeEntityGroupFixture(t *testing.T) {
 	f := loadGroupFixture(t)
 	type key struct{ rule, account string }
+	debits := map[key]decimal.Decimal{}
+	credits := map[key]decimal.Decimal{}
 	net := map[key]decimal.Decimal{}
 	var order []key
 	var all []Entry
@@ -87,6 +88,8 @@ func TestEliminate_ThreeEntityGroupFixture(t *testing.T) {
 				order = append(order, k)
 			}
 			net[k] = net[k].Add(e.Debit.Sub(e.Credit))
+			debits[k] = debits[k].Add(e.Debit)
+			credits[k] = credits[k].Add(e.Credit)
 		}
 	}
 	if err := CheckBalanced(all); err != nil {
@@ -96,12 +99,13 @@ func TestEliminate_ThreeEntityGroupFixture(t *testing.T) {
 		t.Fatalf("got %d rule/account lines; want %d", len(order), len(f.Expected))
 	}
 	for _, w := range f.Expected {
-		got, ok := net[key{w.Rule, w.Account}]
-		if !ok {
+		k := key{w.Rule, w.Account}
+		if _, ok := net[k]; !ok {
 			t.Fatalf("missing %s %s", w.Rule, w.Account)
 		}
-		if !got.Equal(w.Debit.Sub(w.Credit)) {
-			t.Fatalf("%s %s net debit = %s; want %s", w.Rule, w.Account, got.StringFixed(2), w.Debit.Sub(w.Credit).StringFixed(2))
+		if !debits[k].Equal(w.Debit) || !credits[k].Equal(w.Credit) {
+			t.Fatalf("%s %s Dr %s Cr %s; want Dr %s Cr %s", w.Rule, w.Account,
+				debits[k].StringFixed(2), credits[k].StringFixed(2), w.Debit.StringFixed(2), w.Credit.StringFixed(2))
 		}
 	}
 }

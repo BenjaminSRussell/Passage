@@ -1,5 +1,6 @@
 {
-  "name": "consol-group-3: P (USD parent) with S1 (USD, 100%, downstream sale) and S2 (EUR, 80%, upstream sale)",
+  "name": "consol-group-3-interim: P (USD parent) with S1 (USD, 100%, downstream sale) and S2 (EUR, 80%, upstream sale)",
+  "note": "INTERIM, hand-computed. Differs from the PRD consol-group-3 (P USD, S1 EUR 80%, S2 USD 100%, plus loans and dividends/E6). Replace with the accountant workbook fixture.",
   "currency": "USD",
   "pairs": [
     {
