@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -57,9 +59,18 @@ type config struct {
 	scimIssuerBase   string
 	scimAudience     string
 	opaURL           string
+	bundleToken      string
+	bundleKeyPath    string
+	bundleKeyID      string
+	bundleRegoPath   string
+	bundleAddr       string
+	bundleTLSCert    string
+	bundleTLSKey     string
 }
 
 func (c config) scimEnabled() bool { return c.scimIssuerBase != "" }
+
+func (c config) bundleEnabled() bool { return c.bundleToken != "" }
 
 func configFrom(getenv func(string) string) (config, error) {
 	c := config{
@@ -72,6 +83,13 @@ func configFrom(getenv func(string) string) (config, error) {
 		scimIssuerBase:   getenv("IDENTITY_SCIM_ISSUER_BASE"),
 		scimAudience:     getenv("IDENTITY_SCIM_AUDIENCE"),
 		opaURL:           getenv("IDENTITY_OPA_URL"),
+		bundleToken:      getenv("IDENTITY_BUNDLE_TOKEN"),
+		bundleKeyPath:    getenv("IDENTITY_BUNDLE_SIGNING_KEY_PATH"),
+		bundleKeyID:      getenv("IDENTITY_BUNDLE_KEY_ID"),
+		bundleRegoPath:   getenv("IDENTITY_BUNDLE_REGO_PATH"),
+		bundleAddr:       getenv("IDENTITY_BUNDLE_ADDR"),
+		bundleTLSCert:    getenv("IDENTITY_BUNDLE_TLS_CERT_PATH"),
+		bundleTLSKey:     getenv("IDENTITY_BUNDLE_TLS_KEY_PATH"),
 	}
 	if c.databaseURL == "" {
 		return c, errors.New("DATABASE_URL is required")
@@ -91,6 +109,18 @@ func configFrom(getenv func(string) string) (config, error) {
 	}
 	if c.scimIssuerBase == "" && (c.scimAudience != "" || c.opaURL != "") {
 		return c, errors.New("IDENTITY_SCIM_AUDIENCE and IDENTITY_OPA_URL need IDENTITY_SCIM_ISSUER_BASE")
+	}
+	if c.bundleEnabled() && (c.operatorTenantID == "" || c.bundleKeyPath == "" || c.bundleKeyID == "" || c.bundleAddr == "" || c.bundleTLSCert == "" || c.bundleTLSKey == "") {
+		return c, errors.New("IDENTITY_BUNDLE_TOKEN needs IDENTITY_OPERATOR_TENANT_ID, IDENTITY_BUNDLE_SIGNING_KEY_PATH, IDENTITY_BUNDLE_KEY_ID, IDENTITY_BUNDLE_ADDR, IDENTITY_BUNDLE_TLS_CERT_PATH and IDENTITY_BUNDLE_TLS_KEY_PATH")
+	}
+	if !c.bundleEnabled() && (c.bundleKeyPath != "" || c.bundleKeyID != "" || c.bundleRegoPath != "" || c.bundleAddr != "" || c.bundleTLSCert != "" || c.bundleTLSKey != "") {
+		return c, errors.New("IDENTITY_BUNDLE_* settings need IDENTITY_BUNDLE_TOKEN")
+	}
+	if c.bundleEnabled() && (c.bundleAddr == c.httpAddr || (c.httpAddr == "" && c.bundleAddr == defaultHTTPAddr)) {
+		return c, errors.New("IDENTITY_BUNDLE_ADDR must differ from HTTP_ADDR so ingress never reaches the bundle")
+	}
+	if c.bundleRegoPath == "" {
+		c.bundleRegoPath = filepath.Join(filepath.Dir(c.cataloguePath), "authz.rego")
 	}
 	if c.httpAddr == "" {
 		c.httpAddr = defaultHTTPAddr
@@ -139,6 +169,51 @@ func newSCIM(pool *pgxpool.Pool, cfg config) (*identity.SCIMAPI, error) {
 	return identity.NewSCIMAPI(pool, verifiers, opa), nil
 }
 
+func newBundleAPI(pool *pgxpool.Pool, catalogue *identity.Catalogue, cfg config) (*identity.PolicyBundleAPI, error) {
+	if !cfg.bundleEnabled() {
+		slog.Info("policy bundle distribution is disabled: IDENTITY_BUNDLE_TOKEN is not set")
+		return nil, nil
+	}
+	catalogueRaw, err := os.ReadFile(cfg.cataloguePath)
+	if err != nil {
+		return nil, fmt.Errorf("read duty catalogue: %w", err)
+	}
+	rego, err := os.ReadFile(cfg.bundleRegoPath)
+	if err != nil {
+		return nil, fmt.Errorf("read authz policy: %w", err)
+	}
+	keyPEM, err := os.ReadFile(cfg.bundleKeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("read bundle signing key: %w", err)
+	}
+	signer, err := identity.NewBundleSigner(keyPEM, cfg.bundleKeyID)
+	if err != nil {
+		return nil, err
+	}
+	compiler, err := identity.NewPolicyBundleCompiler(pool, catalogue, catalogueRaw, rego, cfg.operatorTenantID, signer)
+	if err != nil {
+		return nil, err
+	}
+	return identity.NewPolicyBundleAPI(compiler, cfg.bundleToken)
+}
+
+func serveBundle(ctx context.Context, cfg config, bundle *identity.PolicyBundleAPI) error {
+	router := chi.NewRouter()
+	bundle.Register(router)
+	srv := &http.Server{Addr: cfg.bundleAddr, Handler: router, ReadHeaderTimeout: 10 * time.Second}
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.ListenAndServeTLS(cfg.bundleTLSCert, cfg.bundleTLSKey) }()
+	slog.Info("policy bundle listening", "addr", cfg.bundleAddr)
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		return srv.Shutdown(shutdownCtx)
+	}
+}
+
 func operatorRegistered(ctx context.Context, pool *pgxpool.Pool, operatorTenantID string) (bool, error) {
 	ctx = tenant.With(ctx, tenant.Principal{TenantID: operatorTenantID})
 	var rows int
@@ -185,7 +260,25 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err != nil {
 		return err
 	}
-	return httpx.Serve(ctx, cfg.httpAddr, newRouter(pool, catalogue, cfg.operatorTenantID, scim))
+	bundle, err := newBundleAPI(pool, catalogue, cfg)
+	if err != nil {
+		return err
+	}
+	router := newRouter(pool, catalogue, cfg.operatorTenantID, scim)
+	if bundle == nil {
+		return httpx.Serve(ctx, cfg.httpAddr, router)
+	}
+	ctx, stop := context.WithCancel(ctx)
+	defer stop()
+	bundleErr := make(chan error, 1)
+	go func() {
+		err := serveBundle(ctx, cfg, bundle)
+		bundleErr <- err
+		stop()
+	}()
+	serveErr := httpx.Serve(ctx, cfg.httpAddr, router)
+	stop()
+	return errors.Join(serveErr, <-bundleErr)
 }
 
 func migrate(ctx context.Context, cfg config) error {
