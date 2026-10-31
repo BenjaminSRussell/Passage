@@ -106,6 +106,7 @@ func (a *API) Register(r chi.Router) {
 func (a *API) Metrics() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		tenant.WriteReplayMetrics(w)
 		fmt.Fprint(w, "# HELP party_tax_validations_total Tax registration validations by resulting status.\n# TYPE party_tax_validations_total counter\n")
 		for _, s := range reportedStatuses {
 			fmt.Fprintf(w, "party_tax_validations_total{status=%q} %d\n", s, a.statuses[s].Load())

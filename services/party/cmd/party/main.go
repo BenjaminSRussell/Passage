@@ -50,6 +50,9 @@ func newLogger(w io.Writer) *slog.Logger {
 }
 
 func run(ctx context.Context, getenv func(string) string) error {
+	if err := tenant.ConfigureServiceVerifier(getenv); err != nil {
+		return err
+	}
 	databaseURL := getenv("DATABASE_URL")
 	if databaseURL == "" {
 		return errors.New("DATABASE_URL is required")
@@ -68,6 +71,9 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 		slog.Info("migrations applied")
+	}
+	if err := tenant.ShareReplayCache(ctx, pool); err != nil {
+		return err
 	}
 	var sequencer api.Sequencer = numbering.Unavailable{}
 	if url := getenv("NUMBERING_URL"); url != "" {

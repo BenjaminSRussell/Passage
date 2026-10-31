@@ -65,6 +65,9 @@ spec:
               value: {{ .Values.serviceIdentity.keyId | quote }}
 {{- end }}
 {{- end }}
+{{- if .Values.serviceIdentity.publicKeys }}
+            - { name: PASSAGE_SERVICE_PUBLIC_KEYS, value: {{ .Values.serviceIdentity.publicKeys | quote }} }
+{{- end }}
             - name: MIGRATE_ON_START
               value: {{ .Values.migrateOnStart | quote }}
             - name: NUMBERING_URL

@@ -7,7 +7,7 @@ import (
 )
 
 func TestServiceTokenReplayMigrationsMatchTheTemplate(t *testing.T) {
-	for _, service := range []string{"ledger", "close", "numbering", "purchasing", "inventory", "fx", "product", "payables"} {
+	for _, service := range []string{"ledger", "close", "numbering", "purchasing", "inventory", "fx", "product", "payables", "party"} {
 		files, err := filepath.Glob("../../../services/" + service + "/migrations/*_service_token_replay.sql")
 		if err != nil || len(files) != 1 {
 			t.Fatalf("%s: want exactly one service_token_replay migration, got %v (%v)", service, files, err)
