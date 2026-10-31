@@ -464,16 +464,20 @@ func TestPublishSpec_VersionsChecksumAndDuty(t *testing.T) {
 func TestPublishSpec_Rejections(t *testing.T) {
 	r := router(store.NewMem(), rowsExtractor{}, domain.NewMemLoader())
 	failing := `{"entity":"customer","version":1,"fields":[{"source":"Name","target":"name","type":"string","required":true}],"tests":[{"name":"uppercase","input":{"Name":"a"},"expect":{"name":"A"}}]}`
+	unknownOp := `{"entity":"customer","version":1,"fields":[{"source":"Name","target":"name","type":"string"}],"rejectWhen":[{"field":"name","op":"like","value":"x","code":"CUST-X"}],"tests":[{"name":"ok","input":{"Name":"a"},"expect":{"name":"a"}}]}`
+	rejectedByCondition := `{"entity":"customer","version":1,"fields":[{"source":"Name","target":"name","type":"string"}],"rejectWhen":[{"field":"name","op":"match","value":"^TMP","code":"CUST-TEMP"}],"tests":[{"name":"temp loads","input":{"Name":"TMP-1"},"expect":{"name":"TMP-1"}}]}`
 	for name, tc := range map[string]struct {
 		payload string
 		status  int
 		want    string
 	}{
-		"missing":      {`{}`, http.StatusBadRequest, `"mapping"`},
-		"malformed":    {`{`, http.StatusBadRequest, "COM-0001"},
-		"invalid":      {`{"mapping":{"entity":"x","version":0,"fields":[]}}`, http.StatusUnprocessableEntity, domain.CodeMapInvalid},
-		"failing test": {`{"mapping":` + failing + `}`, http.StatusUnprocessableEntity, domain.CodeMapTestFail},
-		"no tests":     {`{"mapping":` + mapping + `}`, http.StatusUnprocessableEntity, "at least one test case"},
+		"missing":               {`{}`, http.StatusBadRequest, `"mapping"`},
+		"malformed":             {`{`, http.StatusBadRequest, "COM-0001"},
+		"invalid":               {`{"mapping":{"entity":"x","version":0,"fields":[]}}`, http.StatusUnprocessableEntity, domain.CodeMapInvalid},
+		"failing test":          {`{"mapping":` + failing + `}`, http.StatusUnprocessableEntity, domain.CodeMapTestFail},
+		"no tests":              {`{"mapping":` + mapping + `}`, http.StatusUnprocessableEntity, "at least one test case"},
+		"unknown rejectWhen op": {`{"mapping":` + unknownOp + `}`, http.StatusUnprocessableEntity, domain.CodeMapUnknownFn},
+		"rejectWhen fails test": {`{"mapping":` + rejectedByCondition + `}`, http.StatusUnprocessableEntity, "temp loads"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			rec := do(r, http.MethodPost, specsPath, tc.payload, writeDuty, true)

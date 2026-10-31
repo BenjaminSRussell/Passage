@@ -54,6 +54,7 @@ Further field options:
 
 Mapping options:
 
+- `rejectWhen`: up to 50 conditions `{field, op, value | values, code}` evaluated on the mapped output once every field rule has succeeded (a row with a field reject gets only its field rejects). `field` must be a mapping target. `op` is `empty` (target absent or blank, no value), `eq`, `ne` (`value`), `in`, `notIn` (`values`, 1 to 200) or `match` (`value` is an RE2 pattern of at most 200 characters, compiled at parse). Comparisons use the string form of the mapped value (`true`, not `Yes`, after `ax_noyes`; the padded value after `sap_lead_zero`). `ne` and `notIn` also hit an absent target; `eq`, `in` and `match` do not. `code` is the reason shown in the exception queue: upper-case words joined by hyphens (`^[A-Z][A-Z0-9]*(-[A-Z0-9]+)+$`, at most 64 characters, for example `CUST-NO-GROUP`) and never starting with `MIG-`. Each matching condition adds `{field, code, "matched rejectWhen <op>"}`, in condition order, and `expectRejects` tests can assert the codes. An unknown op is `MIG-MAP-UNKNOWN-FN`; any other bad condition is `MIG-MAP-INVALID`.
 - `sourceTimezone`: IANA zone for the `ax_datetime` and `sap_dats` time sources; an unknown name rejects with `MIG-MAP-INVALID`.
 - `tests`: `[{name, input, expect | expectRejects}]`. `expect` is the exact mapped output as strings per target; `expectRejects` lists the reject codes. Each case has exactly one of the two; names are unique. `POST /v1/integration/migration-runs` runs the tests after parsing and before any backend call: a failing case answers 422 `MIG-MAP-TEST-FAIL` with each failed name in `errors`. A mapping without tests is accepted. `POST .../{id}:rerun` uses the stored mapping and does not re-run tests.
 
@@ -68,7 +69,7 @@ Warnings are reported per row in `warnings` and counted in `counts.warned` on th
 | MIG-MAP-COERCE | value not convertible to the declared type |
 | MIG-MAP-ENUM | value has no enum mapping |
 | MIG-MAP-RANGE | decimal scale above 6 (or above `scale`) or magnitude at or above 1e14 |
-| MIG-MAP-UNKNOWN-FN | unknown `rule` or `fn` in the mapping document (422) |
+| MIG-MAP-UNKNOWN-FN | unknown `rule`, `fn` or `rejectWhen` `op` in the mapping document (422) |
 | MIG-MAP-TEST-FAIL | one or more mapping tests failed; the failed names are in `errors` (422) |
 | MIG-MAP-ENUM-DEFAULT | warning: unmatched enum value mapped to `enumDefault`; the row is loaded |
 | MAP-PRECISION-LOSS | warning: decimal rounded to `scale`; the detail carries the absolute delta; the row is loaded |

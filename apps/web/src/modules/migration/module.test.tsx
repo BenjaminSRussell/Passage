@@ -231,6 +231,26 @@ describe("mapping specs", () => {
     expect(screen.queryByRole("link", { name: "Start run with this spec" })).not.toBeInTheDocument();
   });
 
+  it("lists the reject conditions of a spec with their reason codes", async () => {
+    const rejectWhen = [
+      { field: "group", op: "empty", code: "CUST-NO-GROUP" },
+      { field: "group", op: "notIn", values: ["10", "20"], code: "CUST-BAD-GROUP" },
+      { field: "id", op: "match", value: "^TMP", code: "CUST-TEMP" },
+    ];
+    handler = () => json(200, { ...spec, mapping: { entity: "customer", version: 1, rejectWhen } });
+    renderAt(`/migration/specs/${SPEC}`);
+    const table = await screen.findByRole("table", { name: "Reject conditions" });
+    const rows = within(table).getAllByRole("row").slice(1);
+    expect(rows.map((r) => r.textContent)).toEqual(["CUST-NO-GROUPgroupis empty", "CUST-BAD-GROUPgroupis not one of 10, 20", "CUST-TEMPidmatches ^TMP"]);
+  });
+
+  it("shows no reject conditions card for a spec without rejectWhen", async () => {
+    handler = () => json(200, spec);
+    renderAt(`/migration/specs/${SPEC}`);
+    expect(await screen.findByText("Checksum")).toBeInTheDocument();
+    expect(screen.queryByText("Reject conditions")).not.toBeInTheDocument();
+  });
+
   it("shows a spec with its mapping and a load error", async () => {
     handler = () => json(200, spec);
     const first = renderAt(`/migration/specs/${SPEC}`);

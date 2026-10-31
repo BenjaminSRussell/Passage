@@ -20,6 +20,32 @@ const columns: DataTableColumn<MappingSpec>[] = [
   { key: "createdAt", header: "Published", render: (row) => formatDateTime(row.createdAt) },
 ];
 
+interface RejectCondition {
+  field: string;
+  op: string;
+  value?: string;
+  values?: string[];
+  code: string;
+}
+
+const opText: Record<string, string> = { empty: "is empty", eq: "equals", ne: "does not equal", in: "is one of", notIn: "is not one of", match: "matches" };
+
+/** The mapping's rejectWhen conditions; the service validated them when the spec was published. */
+function rejectConditions(mapping: unknown): RejectCondition[] {
+  const list = (mapping as { rejectWhen?: unknown } | null | undefined)?.rejectWhen;
+  return Array.isArray(list) ? (list as RejectCondition[]) : [];
+}
+
+const rejectColumns: DataTableColumn<RejectCondition>[] = [
+  { key: "code", header: "Reason code", mono: true },
+  { key: "field", header: "Target", mono: true },
+  {
+    key: "op",
+    header: "Rejects when",
+    render: (c) => [opText[c.op] ?? c.op, c.values ? c.values.join(", ") : c.value].filter((part) => part !== undefined && part !== "").join(" "),
+  },
+];
+
 /** Published mapping versions; a version never changes once published. */
 export function SpecsPage() {
   const navigate = useNavigate();
@@ -167,6 +193,7 @@ export function SpecDetailPage() {
       </div>
     );
   }
+  const conditions = rejectConditions(spec.mapping);
   return (
     <div className={styles.stack}>
       <PageHeader
@@ -183,6 +210,11 @@ export function SpecDetailPage() {
       <Card title="Checksum">
         <code>{spec.checksum}</code>
       </Card>
+      {conditions.length > 0 ? (
+        <Card title="Reject conditions">
+          <DataTable label="Reject conditions" columns={rejectColumns} rows={conditions} getRowKey={(c) => `${c.code}-${c.field}-${c.op}-${c.value ?? (c.values ?? []).join("|")}`} />
+        </Card>
+      ) : null}
       <Card title="Mapping">
         <pre className={styles.code}>{JSON.stringify(spec.mapping, null, 2)}</pre>
       </Card>

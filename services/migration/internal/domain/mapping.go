@@ -64,6 +64,7 @@ type Mapping struct {
 	Version        int           `json:"version"`
 	SourceTimezone string        `json:"sourceTimezone,omitempty"`
 	Fields         []FieldRule   `json:"fields"`
+	RejectWhen     []RejectWhen  `json:"rejectWhen,omitempty"`
 	Tests          []MappingTest `json:"tests,omitempty"`
 	loc            *time.Location
 }
@@ -106,6 +107,9 @@ func ParseMapping(data []byte) (Mapping, error) {
 				return Mapping{}, &Error{CodeMapInvalid, "value for target " + f.Target + " does not satisfy its type"}
 			}
 		}
+	}
+	if e := m.checkRejectWhen(targets); e != nil {
+		return Mapping{}, e
 	}
 	if e := m.checkTests(); e != nil {
 		return Mapping{}, e
@@ -161,6 +165,9 @@ func (m Mapping) ApplyWithWarnings(row map[string]any) (map[string]any, []Warnin
 			warnings = append(warnings, *w)
 		}
 		out[f.Target] = v
+	}
+	if len(rejects) == 0 {
+		rejects = m.rejectConditions(out)
 	}
 	if len(rejects) > 0 {
 		return nil, nil, rejects

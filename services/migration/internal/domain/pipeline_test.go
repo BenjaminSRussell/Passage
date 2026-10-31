@@ -364,3 +364,17 @@ func TestPipeline_LoaderFailureIsLoggedWithCause(t *testing.T) {
 		}
 	}
 }
+
+func TestPipeline_RejectWhenQueuesRowWithReasonCodeAndLoadsTheRest(t *testing.T) {
+	m := parseMapping(t, `{"entity":"customer","version":1,"fields":[{"source":"id","target":"id","type":"string"}],
+	"rejectWhen":[{"field":"id","op":"match","value":"^TMP","code":"CUST-TEMP"}]}`)
+	rows := []domain.Record{{Key: "C1", Fields: map[string]any{"id": "C1"}}, {Key: "T1", Fields: map[string]any{"id": "TMP-1"}}}
+	p, _, loader := newPipeline(rows)
+	rep, err := p.Run(context.Background(), domain.RunSpec{SourceSystem: system, Entity: "customer", Mapping: m})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Created != 1 || len(loader.Rows) != 1 || len(rep.Rejects) != 1 || rep.Rejects[0].SourceKey != "T1" || rep.Rejects[0].Rejects[0].Code != "CUST-TEMP" {
+		t.Fatalf("created=%d rejects=%+v", rep.Created, rep.Rejects)
+	}
+}

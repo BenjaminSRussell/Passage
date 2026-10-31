@@ -96,7 +96,7 @@ paths:
         - { name: Idempotency-Key, in: header, schema: { type: string } }
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, additionalProperties: false, required: [mapping], properties: { mapping: { type: object, description: Mapping DSL document with entity, version, fields and at least one test. } } } } }
+        content: { application/json: { schema: { type: object, additionalProperties: false, required: [mapping], properties: { mapping: { type: object, description: Mapping DSL document with entity, version, fields, optional rejectWhen conditions (field, op, value or values, reason code) and at least one test. } } } } }
       responses:
         '201':
           description: A new spec version was stored.
