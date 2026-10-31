@@ -220,9 +220,12 @@ func (s *Postgres) CreateRegistrations(ctx context.Context, items []Registration
 					Message: fmt.Sprintf("Job %s was finished on the server while you were offline.", *in.JobID)})
 			}
 			if in.Kind == KindJobStart && in.JobID != nil {
-				if err := applyJobStart(ctx, tx, p.TenantID, in, jobStatus, &res); err != nil {
+				if err := applyJobStart(ctx, tx, p.TenantID, in, jobStatus, items, &res); err != nil {
 					return err
 				}
+			}
+			if err := supersedeAutoStop(ctx, tx, p.TenantID, in, items); err != nil {
+				return err
 			}
 			results[i] = res
 		}

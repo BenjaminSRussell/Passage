@@ -48,7 +48,13 @@ type SeqGap struct {
 type Classified struct {
 	// Accepted is in sequence order and every Seq is above the previous one.
 	Accepted []MachineEvent
-	// Dropped counts events with seq at or below the last seen seq, or older than MaxEventAge.
+	// Late lists events at or below lastSeq, in sequence order and once each.
+	// A seq at or below the last seen seq is not a duplicate by itself: a run
+	// reported as a gap is replayed below the high-water mark, and an earlier
+	// batch can commit after a later one. The store keeps a late event unless
+	// (machine, seq) is already stored, and counts it as dropped otherwise.
+	Late []MachineEvent
+	// Dropped counts events older than MaxEventAge and repeats of a seq within the batch.
 	Dropped int
 	// Stale counts the subset of Dropped that was too old.
 	Stale int
@@ -57,8 +63,11 @@ type Classified struct {
 }
 
 // Classify applies BR-25.4 to a machine batch given the last seq already stored.
-// Events are considered in seq order; duplicates and regressions are dropped.
-// A gap is reported only once a machine has a sequence history (lastSeq > 0).
+// Events are considered in seq order. Stale events and repeats within the batch
+// are dropped; events at or below lastSeq go to Late for the store to check
+// against what it holds (BR-25.4 "seq ≤ last seen" means already seen, and a
+// gap replay was never seen). A gap is reported only above lastSeq and only once
+// a machine has a sequence history (lastSeq > 0).
 func Classify(lastSeq int64, now time.Time, in []MachineEvent) Classified {
 	sorted := make([]MachineEvent, len(in))
 	copy(sorted, in)
@@ -69,6 +78,14 @@ func Classify(lastSeq int64, now time.Time, in []MachineEvent) Classified {
 		if now.Sub(e.At) > MaxEventAge {
 			c.Dropped++
 			c.Stale++
+			continue
+		}
+		if e.Seq <= lastSeq {
+			if n := len(c.Late); n > 0 && c.Late[n-1].Seq == e.Seq {
+				c.Dropped++
+				continue
+			}
+			c.Late = append(c.Late, e)
 			continue
 		}
 		if e.Seq <= last {
