@@ -88,6 +88,50 @@ func TestCompute_TimeZoneIndependent(t *testing.T) {
 	}
 }
 
+// TestAddInterval_MonthEnd: N months or years from a day the target month does
+// not have lands on that month's last day, keeping the time of day (BR-44.1 (a)
+// calendar.add). Go's AddDate normalises Jan 31 + 1 month to Mar 3, which
+// skipped February for a monthly plan and gave the Jan 31 completion a later
+// due date than the Feb 1 completion (Mar 1).
+func TestAddInterval_MonthEnd(t *testing.T) {
+	noon := func(y int, m time.Month, d int) time.Time { return time.Date(y, m, d, 12, 0, 0, 0, time.UTC) }
+	cases := []struct {
+		from time.Time
+		iv   Interval
+		want time.Time
+	}{
+		{noon(2026, 1, 31), Interval{1, "MONTHS"}, noon(2026, 2, 28)},
+		{noon(2026, 1, 29), Interval{1, "MONTHS"}, noon(2026, 2, 28)},
+		{noon(2028, 1, 31), Interval{1, "MONTHS"}, noon(2028, 2, 29)},
+		{noon(2025, 11, 30), Interval{3, "MONTHS"}, noon(2026, 2, 28)},
+		{noon(2025, 8, 31), Interval{6, "MONTHS"}, noon(2026, 2, 28)},
+		{noon(2026, 3, 31), Interval{1, "MONTHS"}, noon(2026, 4, 30)},
+		{noon(2025, 12, 31), Interval{2, "MONTHS"}, noon(2026, 2, 28)},
+		{noon(2026, 1, 31), Interval{13, "MONTHS"}, noon(2027, 2, 28)},
+		{noon(2024, 2, 29), Interval{2, "YEARS"}, noon(2026, 2, 28)},
+		{noon(2024, 2, 29), Interval{4, "YEARS"}, noon(2028, 2, 29)},
+		{noon(2026, 1, 15), Interval{1, "MONTHS"}, noon(2026, 2, 15)},
+		{noon(2026, 1, 31), Interval{30, "DAYS"}, noon(2026, 3, 2)},
+	}
+	for _, tc := range cases {
+		got, err := AddInterval(tc.from, tc.iv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !got.Equal(tc.want) {
+			t.Errorf("%s + %d %s = %s, want %s", tc.from.Format("2006-01-02"), tc.iv.N, tc.iv.Unit,
+				got.Format(time.RFC3339), tc.want.Format(time.RFC3339))
+		}
+	}
+	// A later completion never gives an earlier due date across a month end.
+	jan31, feb1 := day(2026, 1, 31), day(2026, 2, 1)
+	a, _ := AddInterval(jan31, Interval{1, "MONTHS"})
+	b, _ := AddInterval(feb1, Interval{1, "MONTHS"})
+	if b.Before(a) {
+		t.Fatalf("completion %s gave due %s, earlier than %s gave %s", feb1, b, jan31, a)
+	}
+}
+
 func TestCompute_InvalidLines(t *testing.T) {
 	now := day(2026, 1, 1)
 	for name, line := range map[string]PlanLine{

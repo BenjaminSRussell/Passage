@@ -29,7 +29,9 @@ NOT-IMPLEMENTED.md lists what the slices leave out and why.
   evaluated inside the reading transaction, so the request exists when the reading
   commits.
 - **Plans and the scheduler** (FR-44.4/44.5, BR-44.1): TIME, COUNTER, TIME_OR_COUNTER
-  and TIME_AND_COUNTER lines. Calendar arithmetic is in UTC; the counter forecast is
+  and TIME_AND_COUNTER lines. Calendar arithmetic is in UTC, and months and years
+  end on the target month's last day when it is shorter (Jan 31 + 1 month =
+  Feb 28); the counter forecast is
   whole days ahead, rounded up (the BR-44.1 example gives 2026-11-21). A line may carry
   its last completion over from a migrated plan (`lastCompletedAt`,
   `lastCompletedReading`). `domain.Compute` gives the next due date and reading;
@@ -186,7 +188,13 @@ Domain logic is pure (`internal/domain`) and table-tested, with property tests
 (`rapid`). Store integration tests are in `internal/store/store_test.go` and
 `internal/store/slice2_test.go`, `internal/store/permits_test.go` and
 `internal/store/locations_sequences_test.go` and `internal/store/rounds_test.go`
-(AC-44.9 end to end, and the slice 5 paths as `passage_app`); HTTP tests,
+(AC-44.9 end to end, and the slice 5 paths as `passage_app`). Wave proof fixtures:
+`internal/store/plans40_test.go` runs `testdata/eam-plans-40` over a simulated year
+against `reference_plans.py` (AC-44.2), `internal/store/wocost50_test.go` reconciles
+`testdata/eam-wo-cost-50` (AC-44.3, asset side) and
+`internal/api/iot_latency_test.go` replays IoT readings at 10/s (AC-44.4 latency,
+local stack); regenerate the expectations with `python3 -I` in each testdata
+directory. HTTP tests,
 including a check that `api/openapi.yaml` lists exactly the served routes, are in
 `internal/api`.
 

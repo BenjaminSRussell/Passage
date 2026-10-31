@@ -54,7 +54,11 @@ type Schedule struct {
 	Span time.Duration
 }
 
-// AddInterval adds a calendar interval to t.
+// AddInterval adds a calendar interval to t. Months and years land on the same
+// day of the target month, or on its last day when that month is shorter
+// (Jan 31 + 1 month = Feb 28, Feb 29 + 1 year = Feb 28), as calendar
+// arithmetic does in SAP, D365 and PostgreSQL; time.AddDate would roll over
+// into the next month instead (Jan 31 + 1 month = Mar 3).
 func AddInterval(t time.Time, iv Interval) (time.Time, error) {
 	if iv.N < 1 {
 		return t, ErrInvalidLine
@@ -65,11 +69,21 @@ func AddInterval(t time.Time, iv Interval) (time.Time, error) {
 	case "WEEKS":
 		return t.AddDate(0, 0, 7*iv.N), nil
 	case "MONTHS":
-		return t.AddDate(0, iv.N, 0), nil
+		return addMonths(t, iv.N), nil
 	case "YEARS":
-		return t.AddDate(iv.N, 0, 0), nil
+		return addMonths(t, 12*iv.N), nil
 	}
 	return t, fmt.Errorf("%w: unit %q", ErrInvalidLine, iv.Unit)
+}
+
+// addMonths adds n months to t, clamping the day to the target month's length.
+func addMonths(t time.Time, n int) time.Time {
+	y, m, d := t.Date()
+	first := time.Date(y, m+time.Month(n), 1, t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), t.Location())
+	if last := first.AddDate(0, 1, -1).Day(); d > last {
+		d = last
+	}
+	return first.AddDate(0, 0, d-1)
 }
 
 // Compute implements BR-44.1 (a)-(c): the time due T from the last completion
