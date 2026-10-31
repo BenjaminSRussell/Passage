@@ -1,0 +1,851 @@
+[
+ {
+  "name": "br243-tca",
+  "currency": "USD",
+  "batchCost": "10000.00",
+  "method": "tca",
+  "main": {
+   "standardCost": "40",
+   "rafQty": "200",
+   "percent": "70"
+  },
+  "coProducts": [
+   {
+    "standardCost": "20",
+    "rafQty": "100",
+    "percent": "30"
+   }
+  ],
+  "byProducts": [
+   {
+    "costType": "per-quantity",
+    "qty": "50",
+    "rate": "1.5"
+   }
+  ],
+  "expected": {
+   "main": {
+    "amount": "7940.0000",
+    "percent": "80.0000"
+   },
+   "coProducts": [
+    {
+     "amount": "1985.0000",
+     "percent": "20.0000"
+    }
+   ],
+   "burdens": [
+    "75.0000"
+   ]
+  }
+ },
+ {
+  "name": "thirds-quantity",
+  "currency": "USD",
+  "batchCost": "100.00",
+  "method": "quantity",
+  "main": {
+   "standardCost": "0",
+   "rafQty": "1",
+   "percent": "0"
+  },
+  "coProducts": [
+   {
+    "standardCost": "0",
+    "rafQty": "1",
+    "percent": "0"
+   },
+   {
+    "standardCost": "0",
+    "rafQty": "1",
+    "percent": "0"
+   }
+  ],
+  "byProducts": [],
+  "expected": {
+   "main": {
+    "amount": "33.3334",
+    "percent": "33.3334"
+   },
+   "coProducts": [
+    {
+     "amount": "33.3333",
+     "percent": "33.3333"
+    },
+    {
+     "amount": "33.3333",
+     "percent": "33.3333"
+    }
+   ],
+   "burdens": []
+  }
+ },
+ {
+  "name": "sevenths-manual",
+  "currency": "USD",
+  "batchCost": "1000.00",
+  "method": "manual",
+  "main": {
+   "standardCost": "0",
+   "rafQty": "1",
+   "percent": "42.8571"
+  },
+  "coProducts": [
+   {
+    "standardCost": "0",
+    "rafQty": "1",
+    "percent": "28.5714"
+   },
+   {
+    "standardCost": "0",
+    "rafQty": "1",
+    "percent": "28.5715"
+   }
+  ],
+  "byProducts": [],
+  "expected": {
+   "main": {
+    "amount": "428.5710",
+    "percent": "42.8571"
+   },
+   "coProducts": [
+    {
+     "amount": "285.7140",
+     "percent": "28.5714"
+    },
+    {
+     "amount": "285.7150",
+     "percent": "28.5715"
+    }
+   ],
+   "burdens": []
+  }
+ },
+ {
+  "name": "manual-two-decimal-thirds",
+  "currency": "USD",
+  "batchCost": "500.00",
+  "method": "manual",
+  "main": {
+   "standardCost": "0",
+   "rafQty": "1",
+   "percent": "33.33"
+  },
+  "coProducts": [
+   {
+    "standardCost": "0",
+    "rafQty": "1",
+    "percent": "33.33"
+   },
+   {
+    "standardCost": "0",
+    "rafQty": "1",
+    "percent": "33.34"
+   }
+  ],
+  "byProducts": [
+   {
+    "costType": "recycled",
+    "qty": "3",
+    "rate": "0.07"
+   }
+  ],
+  "expected": {
+   "main": {
+    "amount": "166.5800",
+    "percent": "33.3300"
+   },
+   "coProducts": [
+    {
+     "amount": "166.5800",
+     "percent": "33.3300"
+    },
+    {
+     "amount": "166.6300",
+     "percent": "33.3400"
+    }
+   ],
+   "burdens": [
+    "0.2100"
+   ]
+  }
+ },
+ {
+  "name": "tca-zero-main-overshoot",
+  "currency": "USD",
+  "batchCost": "0.05",
+  "method": "tca",
+  "main": {
+   "standardCost": "0",
+   "rafQty": "10",
+   "percent": "0"
+  },
+  "coProducts": [
+   {
+    "standardCost": "1",
+    "rafQty": "1",
+    "percent": "0"
+   },
+   {
+    "standardCost": "1",
+    "rafQty": "1",
+    "percent": "0"
+   },
+   {
+    "standardCost": "1",
+    "rafQty": "1",
+    "percent": "0"
+   }
+  ],
+  "byProducts": [],
+  "expected": {
+   "main": {
+    "amount": "0.0000",
+    "percent": "0.0001"
+   },
+   "coProducts": [
+    {
+     "amount": "0.0166",
+     "percent": "33.3333"
+    },
+    {
+     "amount": "0.0167",
+     "percent": "33.3333"
+    },
+    {
+     "amount": "0.0167",
+     "percent": "33.3333"
+    }
+   ],
+   "burdens": []
+  }
+ },
+ {
+  "name": "manual-zero-main-overshoot",
+  "currency": "USD",
+  "batchCost": "0.02",
+  "method": "manual",
+  "main": {
+   "standardCost": "0",
+   "rafQty": "1",
+   "percent": "0"
+  },
+  "coProducts": [
+   {
+    "standardCost": "0",
+    "rafQty": "1",
+    "percent": "1"
+   },
+   {
+    "standardCost": "0",
+    "rafQty": "1",
+    "percent": "1"
+   },
+   {
+    "standardCost": "0",
+    "rafQty": "1",
+    "percent": "1"
+   }
+  ],
+  "byProducts": [],
+  "expected": {
+   "main": {
+    "amount": "0.0000",
+    "percent": "0.0001"
+   },
+   "coProducts": [
+    {
+     "amount": "0.0066",
+     "percent": "33.3333"
+    },
+    {
+     "amount": "0.0067",
+     "percent": "33.3333"
+    },
+    {
+     "amount": "0.0067",
+     "percent": "33.3333"
+    }
+   ],
+   "burdens": []
+  }
+ },
+ {
+  "name": "tca-tiny-cost",
+  "currency": "USD",
+  "batchCost": "0.01",
+  "method": "tca",
+  "main": {
+   "standardCost": "1",
+   "rafQty": "1",
+   "percent": "0"
+  },
+  "coProducts": [
+   {
+    "standardCost": "1",
+    "rafQty": "1",
+    "percent": "0"
+   },
+   {
+    "standardCost": "1",
+    "rafQty": "1",
+    "percent": "0"
+   }
+  ],
+  "byProducts": [],
+  "expected": {
+   "main": {
+    "amount": "0.0034",
+    "percent": "33.3334"
+   },
+   "coProducts": [
+    {
+     "amount": "0.0033",
+     "percent": "33.3333"
+    },
+    {
+     "amount": "0.0033",
+     "percent": "33.3333"
+    }
+   ],
+   "burdens": []
+  }
+ },
+ {
+  "name": "burden-takes-all-per-series",
+  "currency": "USD",
+  "batchCost": "250.00",
+  "method": "quantity",
+  "main": {
+   "standardCost": "0",
+   "rafQty": "3",
+   "percent": "0"
+  },
+  "coProducts": [
+   {
+    "standardCost": "0",
+    "rafQty": "7",
+    "percent": "0"
+   }
+  ],
+  "byProducts": [
+   {
+    "costType": "per-series",
+    "qty": "1",
+    "rate": "250"
+   }
+  ],
+  "expected": {
+   "main": {
+    "amount": "0.0000",
+    "percent": "30.0000"
+   },
+   "coProducts": [
+    {
+     "amount": "0.0000",
+     "percent": "70.0000"
+    }
+   ],
+   "burdens": [
+    "250.0000"
+   ]
+  }
+ },
+ {
+  "name": "percent-burden-100",
+  "currency": "USD",
+  "batchCost": "77.77",
+  "method": "quantity",
+  "main": {
+   "standardCost": "0",
+   "rafQty": "1",
+   "percent": "0"
+  },
+  "coProducts": [
+   {
+    "standardCost": "0",
+    "rafQty": "2",
+    "percent": "0"
+   }
+  ],
+  "byProducts": [
+   {
+    "costType": "percent",
+    "qty": "1",
+    "rate": "100"
+   }
+  ],
+  "expected": {
+   "main": {
+    "amount": "0.0000",
+    "percent": "33.3333"
+   },
+   "coProducts": [
+    {
+     "amount": "0.0000",
+     "percent": "66.6667"
+    }
+   ],
+   "burdens": [
+    "77.7700"
+   ]
+  }
+ },
+ {
+  "name": "all-four-burden-types",
+  "currency": "USD",
+  "batchCost": "12345.67",
+  "method": "tca",
+  "main": {
+   "standardCost": "3.17",
+   "rafQty": "413",
+   "percent": "60"
+  },
+  "coProducts": [
+   {
+    "standardCost": "0.83",
+    "rafQty": "97",
+    "percent": "25"
+   },
+   {
+    "standardCost": "11.9",
+    "rafQty": "5",
+    "percent": "15"
+   }
+  ],
+  "byProducts": [
+   {
+    "costType": "percent",
+    "qty": "1",
+    "rate": "2.75"
+   },
+   {
+    "costType": "per-series",
+    "qty": "1",
+    "rate": "100"
+   },
+   {
+    "costType": "per-quantity",
+    "qty": "37",
+    "rate": "0.4375"
+   },
+   {
+    "costType": "recycled",
+    "qty": "12.5",
+    "rate": "1.1"
+   }
+  ],
+  "expected": {
+   "main": {
+    "amount": "10728.8573",
+    "percent": "90.3389"
+   },
+   "coProducts": [
+    {
+     "amount": "659.7722",
+     "percent": "5.5554"
+    },
+    {
+     "amount": "487.5971",
+     "percent": "4.1057"
+    }
+   ],
+   "burdens": [
+    "339.5059",
+    "100.0000",
+    "16.1875",
+    "13.7500"
+   ]
+  }
+ },
+ {
+  "name": "none-with-co-and-percent-burden",
+  "currency": "USD",
+  "batchCost": "999.99",
+  "method": "none",
+  "main": {
+   "standardCost": "5",
+   "rafQty": "10",
+   "percent": "50"
+  },
+  "coProducts": [
+   {
+    "standardCost": "5",
+    "rafQty": "10",
+    "percent": "50"
+   }
+  ],
+  "byProducts": [
+   {
+    "costType": "percent",
+    "qty": "1",
+    "rate": "33.33"
+   }
+  ],
+  "expected": {
+   "main": {
+    "amount": "666.6933",
+    "percent": "100.0000"
+   },
+   "coProducts": [
+    {
+     "amount": "0.0000",
+     "percent": "0.0000"
+    }
+   ],
+   "burdens": [
+    "333.2967"
+   ]
+  }
+ },
+ {
+  "name": "jpy-one-yen-thirds",
+  "currency": "JPY",
+  "batchCost": "1",
+  "method": "quantity",
+  "main": {
+   "standardCost": "0",
+   "rafQty": "1",
+   "percent": "0"
+  },
+  "coProducts": [
+   {
+    "standardCost": "0",
+    "rafQty": "1",
+    "percent": "0"
+   },
+   {
+    "standardCost": "0",
+    "rafQty": "1",
+    "percent": "0"
+   }
+  ],
+  "byProducts": [],
+  "expected": {
+   "main": {
+    "amount": "0.3334",
+    "percent": "33.3334"
+   },
+   "coProducts": [
+    {
+     "amount": "0.3333",
+     "percent": "33.3333"
+    },
+    {
+     "amount": "0.3333",
+     "percent": "33.3333"
+    }
+   ],
+   "burdens": []
+  }
+ },
+ {
+  "name": "kwd-fractional-raf",
+  "currency": "KWD",
+  "batchCost": "1234.567",
+  "method": "quantity",
+  "main": {
+   "standardCost": "0",
+   "rafQty": "0.333",
+   "percent": "0"
+  },
+  "coProducts": [
+   {
+    "standardCost": "0",
+    "rafQty": "0.667",
+    "percent": "0"
+   },
+   {
+    "standardCost": "0",
+    "rafQty": "0.001",
+    "percent": "0"
+   }
+  ],
+  "byProducts": [
+   {
+    "costType": "recycled",
+    "qty": "1",
+    "rate": "0.001"
+   }
+  ],
+  "expected": {
+   "main": {
+    "amount": "410.6998",
+    "percent": "33.2667"
+   },
+   "coProducts": [
+    {
+     "amount": "822.6329",
+     "percent": "66.6334"
+    },
+    {
+     "amount": "1.2333",
+     "percent": "0.0999"
+    }
+   ],
+   "burdens": [
+    "0.0010"
+   ]
+  }
+ },
+ {
+  "name": "large-cost-five-co-products",
+  "currency": "USD",
+  "batchCost": "9999999999.99",
+  "method": "tca",
+  "main": {
+   "standardCost": "17.31",
+   "rafQty": "1103",
+   "percent": "0"
+  },
+  "coProducts": [
+   {
+    "standardCost": "0.07",
+    "rafQty": "999999",
+    "percent": "0"
+   },
+   {
+    "standardCost": "3.33",
+    "rafQty": "3",
+    "percent": "0"
+   },
+   {
+    "standardCost": "123.45",
+    "rafQty": "77",
+    "percent": "0"
+   },
+   {
+    "standardCost": "0.01",
+    "rafQty": "1",
+    "percent": "0"
+   },
+   {
+    "standardCost": "9.99",
+    "rafQty": "4321",
+    "percent": "0"
+   }
+  ],
+  "byProducts": [
+   {
+    "costType": "per-quantity",
+    "qty": "1000",
+    "rate": "0.9999"
+   }
+  ],
+  "expected": {
+   "main": {
+    "amount": "1346703416.6655",
+    "percent": "13.4671"
+   },
+   "coProducts": [
+    {
+     "amount": "4937384932.3992",
+     "percent": "49.3739"
+    },
+    {
+     "amount": "704636.0686",
+     "percent": "0.0070"
+    },
+    {
+     "amount": "670472857.3680",
+     "percent": "6.7047"
+    },
+    {
+     "amount": "705.3414",
+     "percent": "0.0000"
+    },
+    {
+     "amount": "3044732452.2473",
+     "percent": "30.4473"
+    }
+   ],
+   "burdens": [
+    "999.9000"
+   ]
+  }
+ },
+ {
+  "name": "dominant-co-product",
+  "currency": "USD",
+  "batchCost": "1000.00",
+  "method": "quantity",
+  "main": {
+   "standardCost": "0",
+   "rafQty": "1",
+   "percent": "0"
+  },
+  "coProducts": [
+   {
+    "standardCost": "0",
+    "rafQty": "999999",
+    "percent": "0"
+   }
+  ],
+  "byProducts": [],
+  "expected": {
+   "main": {
+    "amount": "0.0010",
+    "percent": "0.0001"
+   },
+   "coProducts": [
+    {
+     "amount": "999.9990",
+     "percent": "99.9999"
+    }
+   ],
+   "burdens": []
+  }
+ },
+ {
+  "name": "percent-burdens-total-100-round-up",
+  "currency": "USD",
+  "batchCost": "0.01",
+  "method": "quantity",
+  "main": {
+   "standardCost": "0",
+   "rafQty": "1",
+   "percent": "0"
+  },
+  "coProducts": [
+   {
+    "standardCost": "0",
+    "rafQty": "1",
+    "percent": "0"
+   }
+  ],
+  "byProducts": [
+   {
+    "costType": "percent",
+    "qty": "1",
+    "rate": "50.5"
+   },
+   {
+    "costType": "percent",
+    "qty": "1",
+    "rate": "49.5"
+   }
+  ],
+  "expected": {
+   "main": {
+    "amount": "0.0000",
+    "percent": "50.0000"
+   },
+   "coProducts": [
+    {
+     "amount": "0.0000",
+     "percent": "50.0000"
+    }
+   ],
+   "burdens": [
+    "0.0050",
+    "0.0050"
+   ]
+  }
+ },
+ {
+  "name": "percent-burdens-overshoot-tie",
+  "currency": "USD",
+  "batchCost": "0.01",
+  "method": "quantity",
+  "main": {
+   "standardCost": "0",
+   "rafQty": "1",
+   "percent": "0"
+  },
+  "coProducts": [],
+  "byProducts": [
+   {
+    "costType": "percent",
+    "qty": "1",
+    "rate": "49.5"
+   },
+   {
+    "costType": "percent",
+    "qty": "1",
+    "rate": "49.5"
+   },
+   {
+    "costType": "percent",
+    "qty": "1",
+    "rate": "1"
+   }
+  ],
+  "expected": {
+   "main": {
+    "amount": "0.0000",
+    "percent": "100.0000"
+   },
+   "coProducts": [],
+   "burdens": [
+    "0.0049",
+    "0.0050",
+    "0.0001"
+   ]
+  }
+ },
+ {
+  "name": "refused-burden-above-cost",
+  "currency": "USD",
+  "batchCost": "100.00",
+  "method": "quantity",
+  "main": {
+   "standardCost": "0",
+   "rafQty": "1",
+   "percent": "0"
+  },
+  "coProducts": [],
+  "byProducts": [
+   {
+    "costType": "per-quantity",
+    "qty": "10",
+    "rate": "20"
+   }
+  ],
+  "expectedCode": "PMF-0021"
+ },
+ {
+  "name": "refused-zero-weights",
+  "currency": "USD",
+  "batchCost": "100.00",
+  "method": "tca",
+  "main": {
+   "standardCost": "0",
+   "rafQty": "5",
+   "percent": "0"
+  },
+  "coProducts": [
+   {
+    "standardCost": "0",
+    "rafQty": "5",
+    "percent": "0"
+   }
+  ],
+  "byProducts": [],
+  "expectedCode": "PMF-0021"
+ },
+ {
+  "name": "refused-percent-burdens-above-100",
+  "currency": "USD",
+  "batchCost": "100.00",
+  "method": "quantity",
+  "main": {
+   "standardCost": "0",
+   "rafQty": "1",
+   "percent": "0"
+  },
+  "coProducts": [],
+  "byProducts": [
+   {
+    "costType": "percent",
+    "qty": "1",
+    "rate": "60"
+   },
+   {
+    "costType": "percent",
+    "qty": "1",
+    "rate": "40.0001"
+   }
+  ],
+  "expectedCode": "PMF-0021"
+ }
+]

@@ -50,24 +50,36 @@ type AllocationResult struct {
 // manual: percentages; tca: standard cost × raf qty; quantity: raf qty), each
 // co-product is rounded to 4 places and the residual goes to the main product,
 // so the parts always add to the batch cost exactly. A residual that would be
-// negative (a weightless main product) comes off the largest co-product.
+// negative (a weightless main product) comes off the largest co-product. The
+// burdens are refused (PMF-0021) only when they exceed the cost both before and
+// after rounding; a rounding-only overshoot comes off the largest burden.
 func AllocateCost(batchCost decimal.Decimal, method AllocationMethod, main Product, coProducts []Product, byProducts []ByProduct) (AllocationResult, error) {
 	var res AllocationResult
 	cost := batchCost.Round(AmountPrecision)
 	if cost.IsNegative() {
 		return res, errorf(CodeInvalid, "batch cost must not be negative")
 	}
-	burdenTotal := decimal.Zero
+	burdenTotal, exactTotal := decimal.Zero, decimal.Zero
 	for _, bp := range byProducts {
-		amt, err := burden(cost, bp)
+		exact, err := burden(cost, bp)
 		if err != nil {
 			return res, err
 		}
+		amt := exact.Round(AmountPrecision)
 		res.Burdens = append(res.Burdens, Allocated{ItemID: bp.ItemID, Amount: amt})
 		burdenTotal = burdenTotal.Add(amt)
+		exactTotal = exactTotal.Add(exact)
 	}
 	if burdenTotal.GreaterThan(cost) {
-		return res, errorf(CodeAllocation, "by-product burden %s exceeds batch cost %s", burdenTotal.StringFixed(AmountPrecision), cost.StringFixed(AmountPrecision))
+		if exactTotal.GreaterThan(cost) {
+			return res, errorf(CodeAllocation, "by-product burden %s exceeds batch cost %s", burdenTotal.StringFixed(AmountPrecision), cost.StringFixed(AmountPrecision))
+		}
+		// Burdens that fit the cost exactly (percent burdens totalling 100 %, say)
+		// can exceed it by a few ten-thousandths once each is rounded; that
+		// overshoot comes off the largest burden, as for co-products below.
+		i := largest(res.Burdens, func(a Allocated) decimal.Decimal { return a.Amount })
+		res.Burdens[i].Amount = res.Burdens[i].Amount.Sub(burdenTotal.Sub(cost))
+		burdenTotal = cost
 	}
 	net := cost.Sub(burdenTotal)
 
@@ -142,18 +154,20 @@ func percentOf(w, total decimal.Decimal) decimal.Decimal {
 	return w.Mul(oneHundred()).DivRound(total, 24).Round(AmountPrecision)
 }
 
+// burden returns a by-product's burden before rounding (cost × rate / 100 is
+// exact in decimal, as is qty × rate).
 func burden(cost decimal.Decimal, bp ByProduct) (decimal.Decimal, error) {
 	switch bp.CostType {
 	case "percent":
 		if bp.Rate.IsNegative() || bp.Rate.GreaterThan(oneHundred()) {
 			return decimal.Zero, errorf(CodeInvalid, "by-product %s percent must be between 0 and 100", bp.ItemID)
 		}
-		return cost.Mul(bp.Rate).DivRound(oneHundred(), 24).Round(AmountPrecision), nil
+		return cost.Mul(bp.Rate).Shift(-2), nil
 	case "per-series", "per-quantity", "recycled":
 		if bp.Qty.IsNegative() || bp.Rate.IsNegative() {
 			return decimal.Zero, errorf(CodeInvalid, "by-product %s quantity and rate must not be negative", bp.ItemID)
 		}
-		return bp.Qty.Mul(bp.Rate).Round(AmountPrecision), nil
+		return bp.Qty.Mul(bp.Rate), nil
 	}
 	return decimal.Zero, errorf(CodeInvalid, "unknown by-product cost type %q", bp.CostType)
 }

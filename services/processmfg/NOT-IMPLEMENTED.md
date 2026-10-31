@@ -73,6 +73,14 @@ values, disposition form hidden without the duty, both histories) and the attrib
 page. The picking proposal and the other previews still take their batches as input; reading the
 stored batches into them is the row below.
 
+Wave 24 proof fixtures: `pmf-potency-adv-40.csv` and `pmf-coby-adv-20.json` under testdata/,
+written by the independent exact-rational references `gen_pmf_potency_adv.py` and
+`gen_pmf_coby_adv.py`; the co-product cases are also ended on batch orders in the store. Building
+them found that by-product burdens which fit the batch cost exactly (percent burdens totalling
+100 %) were refused with PMF-0021 when their 4-place rounding overshot the cost; the overshoot now
+comes off the largest burden, and burdens are refused only when they exceed the cost both exactly
+and rounded.
+
 | Deliverable or AC | Status | Reason |
 |---|---|---|
 | Deliverable 1: journals "as w21" on release, start, report and end (material issue, finished-goods receipt, WIP) | handoff | the status machine and the cost split are built here; posting issues, receipts and WIP journals is the wave-21 order engine (services/production) and the ledger, which consume `batchorder.statechanged` and `coproduct.allocated`. The `closed` status (period close) is not entered by this service; the batch cost is entered by the caller at End, because actual cost comes from wave-20 inventory costing and wave-21 WIP |
