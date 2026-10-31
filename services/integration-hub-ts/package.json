@@ -8,6 +8,6 @@
     "node": ">=24"
   },
   "scripts": {
-    "test": "node --test test/webhook.test.ts test/dispatch.test.ts test/quota.test.ts test/filter.test.ts test/plm.test.ts"
+    "test": "node --test test/webhook.test.ts test/dispatch.test.ts test/quota.test.ts test/filter.test.ts test/plm.test.ts test/dispatcher.test.ts"
   }
 }

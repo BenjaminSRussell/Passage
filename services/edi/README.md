@@ -142,6 +142,22 @@ database or publishes an event, so these routes also run without a store.
 - **Web**: "Punchout cart check", "Self-billing match" and "Peppol invoice" screens in
   `apps/web/src/modules/integration`.
 
+## Wave 35 proof
+
+- **Partner simulator round trip** (`internal/api/partnersim_test.go`, AC-35.1): the demo
+  distributor's translator, written independently of `internal/domain`, exchanges 850/997,
+  855, 856 and 810 with the engine and answers with 997s (A, E, R, group-only).
+- **peppol-invoices-50** (`testdata/peppol`, AC-35.2): 50 demo invoices and credit notes,
+  reference amounts from `gen_peppol50.py`, the engine's XML, and `schematron-report.json`
+  from `validate.py` (official Peppol BIS 3.0.21 schematron with Saxon-HE, UBL 2.1 XSD with
+  xmllint). Regenerate with `EDI_PEPPOL50_UPDATE=1 go test ./internal/api -run TestPeppol50`,
+  then run `validate.py` (instructions in its docstring).
+- **UBL builder**: refuses inputs the schematron rejects (endpoint check digits for 0088 and
+  0192, supplier VAT id with every category but O, category O alone and without VAT ids,
+  BR-CO-26, K without delivery date or country, the DE-R rules between German parties) and
+  writes `streetName`, `cityName`, `postalZone`, `legalId`, the seller contact and the
+  delivery date and country.
+
 Not built yet: see `NOT-IMPLEMENTED.md`.
 
 ## Layout

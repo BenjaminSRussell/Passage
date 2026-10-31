@@ -57,8 +57,23 @@ BR-35.16), pure like the rest:
 - `compareRevisions`: alpha revisions (A < Z < AA) and numeric revisions by value.
 - `validateSyncInterval`: `plm_sync_interval_min` must be an integer in 1..1440.
 
-Everything that touches the network, the database or Kafka is later work. See
-`NOT-IMPLEMENTED.md`.
+## Wave 35 proof: dispatcher
+
+`src/dispatcher.ts` is the webhook dispatcher over those rules (AC-35.3, AC-35.4):
+`Dispatcher.tick` sends each aggregate's lowest pending event when due, signed, as a
+CloudEvents JSON body over HTTP (`httpTransport`, fetch with a timeout; no response is
+`null`), applies `nextStep`, and records the outcome; an event leaves the pending set
+only after a 2xx was recorded, so delivery is at-least-once. After the 8th retry the
+event goes to the dead-letter list (HUB-0115); a 410 pauses the subscription until
+`resume`. `replay(archive, from, cap)` enqueues every `planReplay` page with
+`ce-passagereplay: true`. Storage is the `DeliveryStore` interface with an in-memory
+implementation. `test/dispatcher.test.ts` runs it against a real HTTP receiver on
+localhost that keeps an order projection (failures, a dropped connection, a lost 2xx,
+a crash before recording, dead-letter after 9 attempts on the BR-35.7 schedule,
+replay into an empty consumer and from a timestamp).
+
+The Postgres store, the outbox consumer, the `next_retry_at` poller and Kafka are
+later work. See `NOT-IMPLEMENTED.md`.
 
 ## Run and test
 

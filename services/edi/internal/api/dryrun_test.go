@@ -142,8 +142,8 @@ func TestPunchoutParse_UnreadableDocumentIsSyntax(t *testing.T) {
 
 const ublBody = `{"id":"INV-1","issueDate":"2026-10-01","dueDate":"2026-10-31","currency":"EUR",
  "buyerReference":"PO-9","iban":"DE89370400440532013000",
- "supplier":{"name":"Maker GmbH","endpointScheme":"0088","endpointId":"4006403333333","countryCode":"DE","vatId":"DE123456789"},
- "customer":{"name":"Buyer SAS","endpointScheme":"0088","endpointId":"4000001234567","countryCode":"FR"},
+ "supplier":{"name":"Maker GmbH","endpointScheme":"0088","endpointId":"4006403333338","countryCode":"DE","vatId":"DE123456789"},
+ "customer":{"name":"Buyer SAS","endpointScheme":"0088","endpointId":"4000001234561","countryCode":"FR"},
  "lines":[{"id":"1","name":"Widget","unitCode":"C62","quantity":"3","unitPrice":"10.00","category":"S","percent":"21"}]}`
 
 func TestUBLBuild_ValidInvoiceReturnsXML(t *testing.T) {

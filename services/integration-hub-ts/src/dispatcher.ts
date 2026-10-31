@@ -1,0 +1,240 @@
+// Webhook dispatcher (FR-35.9, BR-35.7, BR-35.9, AC-35.3, AC-35.4): delivers a
+// subscription's events over HTTPS with the signed CloudEvents body, applies the
+// dispatch state machine after every attempt, keeps per-aggregate order,
+// dead-letters after the retry schedule, and re-enqueues archived events for a
+// replay. Delivery is at-least-once: an event leaves the pending set only after
+// the receiver answered 2xx and that outcome was recorded, so a crash or a lost
+// response means the event is sent again, never dropped.
+//
+// The store is an interface; MemoryDeliveryStore backs the tests and a single
+// process. The Postgres store and the outbox consumer that feeds `enqueue` are
+// later work (NOT-IMPLEMENTED.md).
+
+import { nextStep, planReplay, replayHeaders, REPLAY_MAX_EVENTS, type ReplayCandidate } from "./dispatch.ts";
+import { deliverableHeads, sign } from "./webhook.ts";
+
+/** An event as archived by the hub: replay metadata plus the CloudEvents type and data. */
+export interface HubEvent extends ReplayCandidate {
+  type: string;
+  data: unknown;
+}
+
+export interface Subscription {
+  id: string;
+  url: string;
+  secret: string;
+}
+
+export interface PendingDelivery {
+  event: HubEvent;
+  retriesDone: number;
+  nextRetryAt: number;
+  replay: boolean;
+}
+
+/** HUB-0115: the retry schedule is exhausted. */
+export interface DeadLetter {
+  event: HubEvent;
+  attempts: number;
+  lastStatus: number | null;
+  code: "HUB-0115";
+}
+
+export interface DeliveryStore {
+  pending(subscriptionId: string): PendingDelivery[];
+  put(subscriptionId: string, delivery: PendingDelivery): void;
+  /** Removes a delivered or dead-lettered event from the pending set. */
+  remove(subscriptionId: string, eventId: string): void;
+  deadLetter(subscriptionId: string, letter: DeadLetter): void;
+  deadLetters(subscriptionId: string): DeadLetter[];
+  isPaused(subscriptionId: string): boolean;
+  setPaused(subscriptionId: string, paused: boolean): void;
+}
+
+export class MemoryDeliveryStore implements DeliveryStore {
+  #pending = new Map<string, Map<string, PendingDelivery>>();
+  #dead = new Map<string, DeadLetter[]>();
+  #paused = new Set<string>();
+
+  pending(subscriptionId: string): PendingDelivery[] {
+    return [...(this.#pending.get(subscriptionId)?.values() ?? [])].map((d) => ({ ...d }));
+  }
+  put(subscriptionId: string, delivery: PendingDelivery): void {
+    const map = this.#pending.get(subscriptionId) ?? new Map<string, PendingDelivery>();
+    map.set(delivery.event.eventId, { ...delivery });
+    this.#pending.set(subscriptionId, map);
+  }
+  remove(subscriptionId: string, eventId: string): void {
+    this.#pending.get(subscriptionId)?.delete(eventId);
+  }
+  deadLetter(subscriptionId: string, letter: DeadLetter): void {
+    this.#dead.set(subscriptionId, [...(this.#dead.get(subscriptionId) ?? []), letter]);
+  }
+  deadLetters(subscriptionId: string): DeadLetter[] {
+    return [...(this.#dead.get(subscriptionId) ?? [])];
+  }
+  isPaused(subscriptionId: string): boolean {
+    return this.#paused.has(subscriptionId);
+  }
+  setPaused(subscriptionId: string, paused: boolean): void {
+    if (paused) {
+      this.#paused.add(subscriptionId);
+    } else {
+      this.#paused.delete(subscriptionId);
+    }
+  }
+}
+
+/** Sends one request and returns the receiver's status, or null when no response arrived. */
+export type Transport = (url: string, headers: Record<string, string>, body: string) => Promise<number | null>;
+
+/** A fetch-based transport; a network error or a timeout is "no response". */
+export function httpTransport(timeoutMs = 10_000): Transport {
+  return async (url, headers, body) => {
+    try {
+      const res = await fetch(url, { method: "POST", headers, body, signal: AbortSignal.timeout(timeoutMs) });
+      await res.arrayBuffer();
+      return res.status;
+    } catch {
+      return null;
+    }
+  };
+}
+
+export interface DispatcherOptions {
+  subscription: Subscription;
+  store: DeliveryStore;
+  transport: Transport;
+  /** Unix seconds. */
+  clock: () => number;
+  source?: string;
+}
+
+export interface TickResult {
+  attempted: number;
+  delivered: number;
+  retried: number;
+  deadLettered: number;
+  paused: boolean;
+}
+
+export class Dispatcher {
+  readonly #o: DispatcherOptions;
+
+  constructor(options: DispatcherOptions) {
+    this.#o = options;
+  }
+
+  /** Adds an event to the subscription's pending deliveries, due now. An event already pending is kept as it is. */
+  enqueue(event: HubEvent, replay = false): void {
+    const { store, subscription, clock } = this.#o;
+    if (store.pending(subscription.id).some((d) => d.event.eventId === event.eventId)) {
+      return;
+    }
+    store.put(subscription.id, { event, retriesDone: 0, nextRetryAt: clock(), replay });
+  }
+
+  /**
+   * Replays the archive from `fromSeconds` (BR-35.9): every page of planReplay
+   * is enqueued as a replayed delivery, so receivers see ce-passagereplay: true.
+   * Returns the number of events enqueued.
+   */
+  replay(archive: readonly HubEvent[], fromSeconds: number, cap: number = REPLAY_MAX_EVENTS): number {
+    const byId = new Map(archive.map((e) => [e.eventId, e]));
+    let plan = planReplay(archive, fromSeconds, cap);
+    let count = 0;
+    for (;;) {
+      for (const candidate of plan.events) {
+        this.enqueue(byId.get(candidate.eventId) as HubEvent, true);
+        count += 1;
+      }
+      if (plan.next === null) {
+        return count;
+      }
+      plan = planReplay(archive, plan.next.fromSeconds, cap, plan.next.skip);
+    }
+  }
+
+  /** Clears a 410 pause (HUB-0114) once the receiver is back. */
+  resume(): void {
+    this.#o.store.setPaused(this.#o.subscription.id, false);
+  }
+
+  /** The earliest time an eligible head is due, or null when nothing is pending or the subscription is paused. */
+  nextDueAt(): number | null {
+    const { store, subscription } = this.#o;
+    if (store.isPaused(subscription.id)) {
+      return null;
+    }
+    const pending = store.pending(subscription.id);
+    const heads = new Set(deliverableHeads(pending.map((d) => d.event)).map((e) => e.eventId));
+    const due = pending.filter((d) => heads.has(d.event.eventId)).map((d) => d.nextRetryAt);
+    return due.length === 0 ? null : Math.min(...due);
+  }
+
+  /**
+   * One dispatch pass: each aggregate's lowest pending sequence is attempted when
+   * due; later events of that aggregate wait for it (BR-35.7).
+   */
+  async tick(): Promise<TickResult> {
+    const { store, subscription, transport, clock } = this.#o;
+    const result: TickResult = { attempted: 0, delivered: 0, retried: 0, deadLettered: 0, paused: false };
+    if (store.isPaused(subscription.id)) {
+      result.paused = true;
+      return result;
+    }
+    const pending = store.pending(subscription.id);
+    const byId = new Map(pending.map((d) => [d.event.eventId, d]));
+    for (const head of deliverableHeads(pending.map((d) => d.event))) {
+      const delivery = byId.get(head.eventId) as PendingDelivery;
+      const now = clock();
+      if (delivery.nextRetryAt > now) {
+        continue;
+      }
+      const { body, headers } = this.#request(delivery, now);
+      const status = await transport(subscription.url, headers, body);
+      const step = nextStep(delivery.retriesDone, status, clock());
+      result.attempted += 1;
+      switch (step.kind) {
+        case "delivered":
+          store.remove(subscription.id, head.eventId);
+          result.delivered += 1;
+          break;
+        case "retry":
+          store.put(subscription.id, { ...delivery, retriesDone: delivery.retriesDone + 1, nextRetryAt: step.nextRetryAt });
+          result.retried += 1;
+          break;
+        case "dead_letter":
+          store.deadLetter(subscription.id, { event: delivery.event, attempts: step.attempts, lastStatus: status, code: "HUB-0115" });
+          store.remove(subscription.id, head.eventId);
+          result.deadLettered += 1;
+          break;
+        case "paused":
+          store.setPaused(subscription.id, true);
+          result.paused = true;
+          return result;
+      }
+    }
+    return result;
+  }
+
+  #request(delivery: PendingDelivery, now: number): { body: string; headers: Record<string, string> } {
+    const e = delivery.event;
+    const body = JSON.stringify({
+      specversion: "1.0",
+      id: e.eventId,
+      source: this.#o.source ?? "/passage/integration-hub",
+      type: e.type,
+      time: new Date(e.occurredAt * 1000).toISOString(),
+      subject: e.aggregateId,
+      passagesequence: e.sequence,
+      data: e.data,
+    });
+    const headers: Record<string, string> = {
+      "content-type": "application/cloudevents+json",
+      "passage-signature": sign(this.#o.subscription.secret, now, body),
+      ...(delivery.replay ? replayHeaders() : {}),
+    };
+    return { body, headers };
+  }
+}
