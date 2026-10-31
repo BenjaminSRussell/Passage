@@ -8,7 +8,7 @@ release may change public APIs.
 
 ## [0.1.0] - 2026-10-31
 
-First tagged release of Passage, cut from `main` at `76f9a4f5`. It is a **source-only
+First tagged release of Passage, cut from `main` at `463096ba`. It is a **source-only
 pre-release**:
 
 - GitHub Actions is blocked by the repository owner's billing, so CI did not run on the
@@ -29,7 +29,7 @@ pre-release**:
 Most of the code came from Ben Russell's automated wave pipeline: one `PSG-NNxx` ticket per
 slice of the 50-wave roadmap (`roadmap/waves.json`), 357 slices across all 50 waves. Many of the
 later slices are marked "Haiku swarm draft, Opus review" in their commit subjects. Follow-up pull
-requests #154 to #352 then hardened, wired and proved those slices. Each was reviewed on its own
+requests #154 to #354 then hardened, wired and proved those slices. Each was reviewed on its own
 before it was merged.
 
 ### Security
@@ -185,6 +185,12 @@ extended that wave.
   the PO line (#96, #215, #327), subsequent debit and credit, invoicing-plan and consignment
   settlement (#98, #286), evaluated receipt settlement with stochastic audit weighting (#97,
   #304, #334), one-time payees (#330), observability (#169).
+  - #354 (#302): at posting (manual, ERS and audit release), receiving reads the vendor from
+    party (`GET /v1/party/vendors/{id}`, `party.read`) and puts `vendor_group_id` on
+    `invoice.posted` for payables' per-group aging.
+  - The lookup fails open: if party is down, refuses the call or does not know the vendor, the
+    invoice still posts without the field, and the failure is counted in
+    `receiving_vendor_group_lookups_failed_total`.
 - **Wave 19 - Accounts Payable, Settlement & Payments** (6 slices): ISO 20022 pain.001
   generation and pain.002 parsing with XSD conformance, NACHA ACH and returns, and payment-file
   previews. Follow-ups: metrics and settlement invariants (#167), preview and status endpoints
@@ -406,6 +412,8 @@ environment runs 0.1.0:
      - workflow-ts to payables;
      - close to ledger. Close also needs `ledgerUrl` (`LEDGER_URL`), and without it period
        registration returns 503.
+     - receiving to party (#354). The grant exists, but party cannot verify the token yet; see
+       Known limitations.
    - Give each caller an Ed25519 seed Secret (`serviceIdentity.signingKeySecret`, key
      `signing-key`) and a `serviceIdentity.keyId`. Give each target its callers' public keys in
      `serviceIdentity.publicKeys`.
@@ -455,7 +463,12 @@ environment runs 0.1.0:
 12. **SCIM (optional).** SCIM is mounted only when `IDENTITY_SCIM_ISSUER_BASE`,
     `IDENTITY_SCIM_AUDIENCE` and `IDENTITY_OPA_URL` are all set. Assign the duty `Provision
     users via SCIM` to the IdP's service account.
-13. **`RECEIVING_ALLOW_LEGACY_PO_LINE` is for dev only.** Chart value `allowLegacyPoLine`
+13. **Receiving `PARTY_URL`** (#354). Receiving reads vendor groups from party through
+    `PARTY_URL`. The chart sets it from `serviceUrls.party`, defaulting to
+    `http://party.<namespace>.svc:8080`, so set `serviceUrls.party` wherever party runs
+    elsewhere. With `PARTY_URL` empty, `vendor_group_id` is never sent and payables' per-group
+    aging gets no group.
+14. **`RECEIVING_ALLOW_LEGACY_PO_LINE` is for dev only.** Chart value `allowLegacyPoLine`
     defaults to false. When it is set, receiving trusts client-sent `poLineId`,
     `orderedRemaining` and `unitPrice` instead of resolving `poLineNo` against the purchase
     order. Never set it in stage or prod; it is removed in #340.
@@ -485,8 +498,14 @@ environment runs 0.1.0:
 - **Transitional umbrella grants.** The service grant tables keep `ledger.journal.post`,
   `ledger.journal.read` and `numbering.write` for this one release, until #341 removes them.
 - **Tax is not deployable yet.** The tax service has no Helm chart, Dockerfile or store (slice
-  B in `services/tax/NOT-IMPLEMENTED.md`). Tax and party do not verify service tokens yet, so
-  the seeded payables to tax and receiving or payables to party grants are not exercised.
+  B in `services/tax/NOT-IMPLEMENTED.md`). Tax does not verify service tokens yet, so the
+  seeded payables to tax grant is not exercised.
+- **Party does not verify service tokens yet.** No service-token verifier, public keys or
+  replay table are configured for party. A receiving build with a signing key therefore signs
+  its vendor lookup (#354), party rejects it, and every posted invoice goes out without
+  `vendor_group_id`; watch `receiving_vendor_group_lookups_failed_total`. The lookup only works
+  where receiving runs without a signing key and forwards the user's headers. Payables' vendor
+  bank reveal (#352) is not callable as a service for the same reason.
 - **Known vulnerability.** `apps/web` depends on `zod` 3.23.8 in production, which is affected
   by the high-severity advisory GHSA-mrhx-c7xc-m3w5 (CVE-2023-54404: memory exhaustion when
   validating oversized constrained collections). It is fixed in zod 4.6.6+, but that is a major
@@ -495,8 +514,7 @@ environment runs 0.1.0:
 - **Go and Python dependencies were not audited.** No `govulncheck` or `pip-audit` run was made
   for this release. Only the npm advisory above was checked.
 - **Not merged into 0.1.0:** #262 (platform-health release persistence and promote/rollback
-  recording, #75) and #354 (receiving puts `vendor_group_id` on `invoice.posted` from the party
-  vendor master, #302).
+  recording, #75).
 - **Open follow-up issues:**
   - #335: fieldcrypt follow-ups from #330 (hr legacy fallback, receiving idempotency hash).
   - #340: receiving web must send `poLineNo`, then `RECEIVING_ALLOW_LEGACY_PO_LINE` is dropped.
