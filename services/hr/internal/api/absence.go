@@ -403,6 +403,9 @@ func (a *API) listAbsenceRequests(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		f.OwnUserID = p.UserID
+	} else if !p.HasDuty(dutyAbsenceAdmin) {
+		a.listTeamAbsenceRequests(w, r, f, after, limit)
+		return
 	}
 	page, err := a.store.ListAbsenceRequests(r.Context(), f, after, limit)
 	if err != nil {
@@ -427,6 +430,9 @@ func (a *API) decideAbsenceRequest(w http.ResponseWriter, r *http.Request, id st
 	}
 	if !contains(absDecisions, req.Decision) {
 		validationFailed(w, r, map[string]string{"decision": "must be APPROVE or REJECT"})
+		return
+	}
+	if !a.allowTeamRequest(w, r, id) {
 		return
 	}
 	stored, changed, err := a.store.DecideAbsenceRequest(r.Context(), id, req.Decision)
@@ -468,6 +474,9 @@ func (a *API) absenceBalances(w http.ResponseWriter, r *http.Request, workerID s
 	}
 	asOf = time.Date(asOf.Year(), asOf.Month(), asOf.Day(), 0, 0, 0, 0, time.UTC)
 	p := caller(r)
+	if !a.allowTeamWorker(w, r, workerID, store.CodeWorkerNotFound, "worker not found") {
+		return
+	}
 	ownOnly := !p.HasDuty(dutyMssApprove) && !p.HasDuty(dutyAbsenceAdmin)
 	balances, err := a.store.Balances(r.Context(), workerID, asOf, ownOnly)
 	if err != nil {

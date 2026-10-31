@@ -789,6 +789,7 @@
       {"resource": "/v1/hr/absence/requests/*/cancel", "methods": ["POST"]},
       {"resource": "/v1/hr/workers/*/absence/balances", "methods": ["GET"]}
     ]},
+    "EssBase": {"permissions": [{"resource": "/v1/hr/me", "methods": ["GET"]}]},
     "EssBenefits": {"permissions": [
       {"resource": "/v1/hr/benefits/enrollments", "methods": ["POST"]},
       {"resource": "/v1/hr/benefits/life-events", "methods": ["POST"]},
@@ -930,6 +931,10 @@
     "MssApprove": {"permissions": [
       {"resource": "/v1/hr/absence/requests/*/decide", "methods": ["POST"]},
       {"resource": "/v1/hr/courses/registrations/*/approve", "methods": ["POST"]}
+    ]},
+    "MssBase": {"permissions": [
+      {"resource": "/v1/hr/me/team", "methods": ["GET"]},
+      {"resource": "/v1/hr/me/team/*", "methods": ["GET"]}
     ]},
     "PUR_REQUISITION_CREATE": {"permissions": [{"resource": "/edi/v1/punchout/returns:parse", "methods": ["POST"]}]},
     "PackagingFeeMaintain": {"permissions": [
