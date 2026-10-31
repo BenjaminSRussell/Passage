@@ -1,7 +1,6 @@
 package domain
 
 import (
-	"slices"
 	"strings"
 	"time"
 
@@ -221,9 +220,10 @@ func (r Rule) effectiveFor(rules []Rule, line Line) bool {
 	return true
 }
 
-// selects applies the category, receipt and attendee clauses.
+// selects applies the category (ignoring case, like the requisition gate),
+// receipt and attendee clauses.
 func (r Rule) selects(line Line) bool {
-	if len(r.Categories) > 0 && !slices.Contains(r.Categories, line.Category) {
+	if len(r.Categories) > 0 && !containsFold(r.Categories, line.Category) {
 		return false
 	}
 	if r.NoReceipt && line.HasReceipt {

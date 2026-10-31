@@ -77,8 +77,12 @@ previews:
   calendar days after the transaction date (`EXP-SUB-060`, BLOCK), duplicates of an
   earlier line's merchant, amount and date (`EXP-DUP-001`, BLOCK), meals over 75.00 a
   day without attendees need a justification (`EXP-MEAL-075` v3, PER_DAY,
-  REQUIRE_JUSTIFICATION). A report is submittable when no BLOCK applies and every
-  REQUIRE_* is satisfied.
+  REQUIRE_JUSTIFICATION). A rule's categories match the line's ignoring case, as the
+  requisition gate does (categories are free text until a category master exists). A
+  report is submittable when no BLOCK applies and every REQUIRE_* is satisfied.
+  `internal/domain/testdata/expense-policy-500.json` (500 reports, expected results from
+  the independent reference `gen_expense_policy_500.py`, run with `python3 -I`) pins the
+  outcomes exactly.
 - Travel requisition required by category (FR-43.16 parameter, `internal/domain/travel.go`):
   a line whose category the caller lists in `requisitionCategories` (ignoring case) is
   an `EXP-TR-002` BLOCK unless the report has an approved requisition
