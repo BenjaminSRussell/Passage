@@ -16,51 +16,54 @@ import (
 )
 
 var (
-	ErrRunNotFound       = errors.New("payment run not found")
-	ErrNotApproved       = errors.New("payment proposal is not approved")
-	ErrExecutorConflict  = errors.New("a payment run must be started by a user who neither created nor approved the proposal")
-	ErrRunState          = errors.New("payment run is no longer running")
-	ErrRunOutOfOrder     = errors.New("payment run step needs an earlier step to finish first")
-	ErrJournalRequested  = errors.New("the payment journal was requested; the run can only complete")
-	ErrUnsupportedMethod = errors.New("payment run supports TRANSFER and WIRE groups only")
-	ErrDiscountAccount   = errors.New("the proposal takes cash discounts; the run needs a discountAccount")
+	ErrRunNotFound        = errors.New("payment run not found")
+	ErrNotApproved        = errors.New("payment proposal is not approved")
+	ErrExecutorConflict   = errors.New("a payment run must be started by a user who neither created nor approved the proposal")
+	ErrRunState           = errors.New("payment run is no longer running")
+	ErrRunOutOfOrder      = errors.New("payment run step needs an earlier step to finish first")
+	ErrJournalRequested   = errors.New("the payment journal was requested; the run can only complete")
+	ErrUnsupportedMethod  = errors.New("payment run supports TRANSFER and WIRE groups only")
+	ErrDiscountAccount    = errors.New("the proposal takes cash discounts; the run needs a discountAccount")
+	ErrWithholdingAccount = errors.New("the proposal withholds tax; the run needs a withholdingAccount")
 )
 
 type PaymentRun struct {
-	ID               string              `json:"id"`
-	LegalEntityID    string              `json:"legalEntityId"`
-	ProposalID       string              `json:"proposalId"`
-	Status           string              `json:"status"`
-	RequestedBy      string              `json:"requestedBy"`
-	LedgerID         string              `json:"ledgerId"`
-	BankAccount      string              `json:"bankAccount"`
-	ControlAccount   string              `json:"controlAccount"`
-	DiscountAccount  *string             `json:"discountAccount,omitempty"`
-	FileNumber       *string             `json:"fileNumber,omitempty"`
-	FileSHA256       *string             `json:"fileSha256,omitempty"`
-	PaymentCount     *int                `json:"paymentCount,omitempty"`
-	FileGeneratedAt  *time.Time          `json:"fileGeneratedAt,omitempty"`
-	JournalRequested *time.Time          `json:"journalRequestedAt,omitempty"`
-	JournalRejected  *time.Time          `json:"journalRejectedAt,omitempty"`
-	JournalEntryID   *string             `json:"journalEntryId,omitempty"`
-	JournalPostedAt  *time.Time          `json:"journalPostedAt,omitempty"`
-	SettledAt        *time.Time          `json:"settledAt,omitempty"`
-	FailureReason    *string             `json:"failureReason,omitempty"`
-	CreatedAt        time.Time           `json:"createdAt"`
-	CompletedAt      *time.Time          `json:"completedAt,omitempty"`
-	Payments         []domain.RunPayment `json:"payments"`
+	ID                 string              `json:"id"`
+	LegalEntityID      string              `json:"legalEntityId"`
+	ProposalID         string              `json:"proposalId"`
+	Status             string              `json:"status"`
+	RequestedBy        string              `json:"requestedBy"`
+	LedgerID           string              `json:"ledgerId"`
+	BankAccount        string              `json:"bankAccount"`
+	ControlAccount     string              `json:"controlAccount"`
+	DiscountAccount    *string             `json:"discountAccount,omitempty"`
+	WithholdingAccount *string             `json:"withholdingAccount,omitempty"`
+	FileNumber         *string             `json:"fileNumber,omitempty"`
+	FileSHA256         *string             `json:"fileSha256,omitempty"`
+	PaymentCount       *int                `json:"paymentCount,omitempty"`
+	FileGeneratedAt    *time.Time          `json:"fileGeneratedAt,omitempty"`
+	JournalRequested   *time.Time          `json:"journalRequestedAt,omitempty"`
+	JournalRejected    *time.Time          `json:"journalRejectedAt,omitempty"`
+	JournalEntryID     *string             `json:"journalEntryId,omitempty"`
+	JournalPostedAt    *time.Time          `json:"journalPostedAt,omitempty"`
+	SettledAt          *time.Time          `json:"settledAt,omitempty"`
+	FailureReason      *string             `json:"failureReason,omitempty"`
+	CreatedAt          time.Time           `json:"createdAt"`
+	CompletedAt        *time.Time          `json:"completedAt,omitempty"`
+	Payments           []domain.RunPayment `json:"payments"`
 }
 
 type NewRun struct {
-	FileConfig      []byte
-	LegalEntityID   string
-	ProposalID      string
-	RequestedBy     string
-	Today           string
-	LedgerID        string
-	BankAccount     string
-	ControlAccount  string
-	DiscountAccount string
+	FileConfig         []byte
+	LegalEntityID      string
+	ProposalID         string
+	RequestedBy        string
+	Today              string
+	LedgerID           string
+	BankAccount        string
+	ControlAccount     string
+	DiscountAccount    string
+	WithholdingAccount string
 }
 
 type RunFile struct {
@@ -72,13 +75,13 @@ type RunFile struct {
 }
 
 const runColumns = `id::text, legal_entity_id::text, proposal_id::text, status, requested_by, ledger_id::text, bank_account, control_account,
-	discount_account, file_number, file_sha256, payment_count, file_generated_at, journal_requested_at, journal_rejected_at, journal_entry_id, journal_posted_at, settled_at,
+	discount_account, withholding_account, file_number, file_sha256, payment_count, file_generated_at, journal_requested_at, journal_rejected_at, journal_entry_id, journal_posted_at, settled_at,
 	failure_reason, created_at, completed_at`
 
 func scanRun(row pgx.Row) (PaymentRun, error) {
 	var r PaymentRun
 	err := row.Scan(&r.ID, &r.LegalEntityID, &r.ProposalID, &r.Status, &r.RequestedBy, &r.LedgerID, &r.BankAccount, &r.ControlAccount,
-		&r.DiscountAccount, &r.FileNumber, &r.FileSHA256, &r.PaymentCount, &r.FileGeneratedAt, &r.JournalRequested, &r.JournalRejected, &r.JournalEntryID, &r.JournalPostedAt, &r.SettledAt,
+		&r.DiscountAccount, &r.WithholdingAccount, &r.FileNumber, &r.FileSHA256, &r.PaymentCount, &r.FileGeneratedAt, &r.JournalRequested, &r.JournalRejected, &r.JournalEntryID, &r.JournalPostedAt, &r.SettledAt,
 		&r.FailureReason, &r.CreatedAt, &r.CompletedAt)
 	return r, err
 }
@@ -240,8 +243,8 @@ func (s *Postgres) StartRun(ctx context.Context, in NewRun) (PaymentRun, bool, e
 			return err
 		}
 		if _, err := tx.Exec(ctx, `insert into ap_payment_run (tenant_id, id, legal_entity_id, proposal_id, status, requested_by, ledger_id, bank_account,
-			control_account, discount_account, file_config_sealed) values ($1, $2::uuid, $3::uuid, $4::uuid, 'RUNNING', $5, $6::uuid, $7, $8, $9, $10)`,
-			p.TenantID, runID, in.LegalEntityID, in.ProposalID, in.RequestedBy, in.LedgerID, in.BankAccount, in.ControlAccount, nullable(in.DiscountAccount), config); err != nil {
+			control_account, discount_account, withholding_account, file_config_sealed) values ($1, $2::uuid, $3::uuid, $4::uuid, 'RUNNING', $5, $6::uuid, $7, $8, $9, $10, $11)`,
+			p.TenantID, runID, in.LegalEntityID, in.ProposalID, in.RequestedBy, in.LedgerID, in.BankAccount, in.ControlAccount, nullable(in.DiscountAccount), nullable(in.WithholdingAccount), config); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `update ap_payment_proposal set status = 'EXECUTING' where id = $1::uuid`, in.ProposalID); err != nil {
@@ -263,9 +266,10 @@ func (s *Postgres) StartRun(ctx context.Context, in NewRun) (PaymentRun, bool, e
 }
 
 func checkRunnable(ctx context.Context, tx pgx.Tx, in NewRun) error {
-	var unsupported, discounted bool
+	var unsupported, discounted, withheld bool
 	if err := tx.QueryRow(ctx, `select exists(select 1 from ap_payment_proposal_group where proposal_id = $1::uuid and payment_method not in ('TRANSFER', 'WIRE')),
-		exists(select 1 from ap_payment_proposal_line where proposal_id = $1::uuid and discount_amount > 0)`, in.ProposalID).Scan(&unsupported, &discounted); err != nil {
+		exists(select 1 from ap_payment_proposal_line where proposal_id = $1::uuid and discount_amount > 0),
+		exists(select 1 from ap_payment_proposal_line where proposal_id = $1::uuid and withheld_amount > 0)`, in.ProposalID).Scan(&unsupported, &discounted, &withheld); err != nil {
 		return err
 	}
 	if unsupported {
@@ -273,6 +277,9 @@ func checkRunnable(ctx context.Context, tx pgx.Tx, in NewRun) error {
 	}
 	if discounted && in.DiscountAccount == "" {
 		return ErrDiscountAccount
+	}
+	if withheld && in.WithholdingAccount == "" {
+		return ErrWithholdingAccount
 	}
 	return nil
 }

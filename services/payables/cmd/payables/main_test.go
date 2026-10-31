@@ -91,3 +91,32 @@ func TestLedgerPosterWiring(t *testing.T) {
 		t.Fatalf("a signed ledger client is the poster: %v %v", lp, err)
 	}
 }
+
+func TestVendorBanksAndWithholdingNeedASignedServiceClient(t *testing.T) {
+	seed := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{4}, 32))
+	signed := func(url string) func(string) string {
+		env := map[string]string{url: "http://svc", "PASSAGE_SERVICE_NAME": "payables", "PASSAGE_SERVICE_SIGNING_KEY": seed}
+		return func(k string) string { return env[k] }
+	}
+	unsigned := func(url string) func(string) string {
+		return func(k string) string { return map[string]string{url: "http://svc"}[k] }
+	}
+	if vb, err := vendorBanks(func(string) string { return "" }); vb != nil || err != nil {
+		t.Fatal("no PARTY_URL must leave file generation without bank details")
+	}
+	if vb, err := vendorBanks(unsigned("PARTY_URL")); vb != nil || err == nil {
+		t.Fatalf("bank details are never revealed with forwarded user headers: %v %v", vb, err)
+	}
+	if vb, err := vendorBanks(signed("PARTY_URL")); vb == nil || err != nil {
+		t.Fatalf("a signed party client reveals bank details: %v %v", vb, err)
+	}
+	if wt, err := withholdingTax(func(string) string { return "" }); wt != nil || err != nil {
+		t.Fatal("no TAX_URL must leave withholding disabled")
+	}
+	if wt, err := withholdingTax(unsigned("TAX_URL")); wt != nil || err == nil {
+		t.Fatalf("an unsigned tax client must not be used: %v %v", wt, err)
+	}
+	if wt, err := withholdingTax(signed("TAX_URL")); wt == nil || err != nil {
+		t.Fatalf("a signed tax client calculates withholding: %v %v", wt, err)
+	}
+}

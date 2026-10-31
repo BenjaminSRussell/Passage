@@ -45,6 +45,7 @@ type API struct {
 	aging            *agingDeps
 	proposals        *proposalDeps
 	runs             *runDeps
+	withholding      *withholdingDeps
 }
 
 type problemBody struct {
@@ -74,6 +75,8 @@ var unprocessableCodes = map[string]bool{
 	domain.CodeRunInvalid:  true,
 	domain.CodeFileInvalid: true,
 	domain.CodeRunConfig:   true,
+	domain.CodeRunPayee:    true,
+	domain.CodeWithholding: true,
 }
 
 func New(db Pinger, files FileValidator, now func() time.Time) *API {
@@ -195,6 +198,7 @@ func (a *API) Metrics() http.Handler {
 		a.writeAgingMetrics(w)
 		a.writeProposalMetrics(w)
 		a.writeRunMetrics(w)
+		a.writeWithholdingMetrics(w)
 		a.http.write(w)
 	})
 }

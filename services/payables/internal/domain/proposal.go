@@ -17,6 +17,7 @@ const (
 	CodeSegregation      = "AP-PRP-003"
 	CodeRunDatePassed    = "AP-PRP-004"
 	CodeNothingDue       = "AP-PRP-005"
+	CodeWithholding      = "AP-PRP-006"
 
 	ProposalDraft     = "DRAFT"
 	ProposalApproved  = "APPROVED"
@@ -54,6 +55,8 @@ type ProposalLine struct {
 	OpenAmount      decimal.Decimal `json:"openAmount"`
 	Discount        decimal.Decimal `json:"discount"`
 	Pay             decimal.Decimal `json:"pay"`
+	Withheld        decimal.Decimal `json:"withheld"`
+	WithholdingCode string          `json:"withholdingCode,omitempty"`
 	Rate            decimal.Decimal `json:"rate"`
 	Valued          decimal.Decimal `json:"valued"`
 }
@@ -65,6 +68,7 @@ type ProposalGroup struct {
 	Method   string          `json:"paymentMethod"`
 	Gross    decimal.Decimal `json:"gross"`
 	Discount decimal.Decimal `json:"discount"`
+	Withheld decimal.Decimal `json:"withheld"`
 	Net      decimal.Decimal `json:"net"`
 	Valued   decimal.Decimal `json:"valued"`
 	Lines    []ProposalLine  `json:"lines"`
@@ -116,4 +120,22 @@ func BuildProposal(in ProposalInput) ([]ProposalGroup, error) {
 		return cmp.Or(cmp.Compare(a.VendorID, b.VendorID), cmp.Compare(a.Currency, b.Currency), cmp.Compare(a.Method, b.Method))
 	})
 	return out, nil
+}
+
+func (g *ProposalGroup) Withhold(line int, code string, amount decimal.Decimal, minor int32) {
+	l := &g.Lines[line]
+	valued := l.Pay.Sub(amount).Mul(l.Rate).Round(minor)
+	g.Valued = g.Valued.Sub(l.Valued).Add(valued)
+	g.Net = g.Net.Sub(amount)
+	g.Withheld = g.Withheld.Add(amount)
+	l.Valued, l.Withheld, l.WithholdingCode = valued, amount, code
+}
+
+func HasWithholding(groups []ProposalGroup) bool {
+	for _, g := range groups {
+		if g.Withheld.IsPositive() {
+			return true
+		}
+	}
+	return false
 }

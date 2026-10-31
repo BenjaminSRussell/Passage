@@ -27,7 +27,9 @@ import (
 	"github.com/BenjaminSRussell/passage/services/payables/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/fx"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/ledger"
+	"github.com/BenjaminSRussell/passage/services/payables/internal/party"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/store"
+	"github.com/BenjaminSRussell/passage/services/payables/internal/tax"
 	"github.com/BenjaminSRussell/passage/services/payables/migrations"
 )
 
@@ -151,11 +153,61 @@ func (f *fakeJournalLedger) posted() int {
 	return len(f.entries)
 }
 
+type fakeParty struct {
+	mu       sync.Mutex
+	accounts map[string][]map[string]any
+	failures int
+	calls    []string
+	tokens   []string
+}
+
+func partyAccount(holder, number, routing, currency string) map[string]any {
+	return map[string]any{"id": "acct-" + number, "accountHolder": holder, "bankCountry": "US", "currencyCode": currency, "accountNumber": number, "routingNumber": routing}
+}
+
+func newFakeParty() *fakeParty {
+	return &fakeParty{accounts: map[string][]map[string]any{
+		vendorOne: {partyAccount("Acme Supply Co", "000111222333", "021000021", "USD")},
+		vendorTwo: {partyAccount("Example Widgets LLC", "000444555666", "011000015", "USD")},
+	}}
+}
+
+func (f *fakeParty) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.tokens = append(f.tokens, r.Header.Get(tenant.HeaderServiceToken))
+	vendor := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1/party/vendors/"), "/bank-accounts:reveal")
+	f.calls = append(f.calls, vendor)
+	if f.failures > 0 {
+		f.failures--
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	accounts, ok := f.accounts[vendor]
+	if !ok {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"bankAccounts": accounts})
+}
+
+func (f *fakeParty) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.calls)
+}
+
 type fixtureOptions struct {
 	validator api.FileValidator
 	foreign   bool
 	noKeys    bool
 	noProfile bool
+	noParty   bool
+
+	withholdingCodes     map[string]string
+	skipProposal         bool
+	noTax                bool
+	noWithholdingAccount bool
 }
 
 type runFixture struct {
@@ -163,6 +215,11 @@ type runFixture struct {
 	router   http.Handler
 	api      *api.API
 	ledger   *fakeJournalLedger
+	party    *fakeParty
+	tax      *fakeTax
+	signer   *tenant.ServiceSigner
+	verify   ed25519.PublicKey
+	partyURL string
 	pg       *store.Postgres
 	proposal string
 	erin     caller
@@ -173,17 +230,10 @@ type runFixture struct {
 	clock    *time.Time
 }
 
-func creditors() map[string]any {
-	return map[string]any{
-		vendorOne: map[string]any{"name": "Acme Supply Co", "address": map[string]any{"streetName": "100 Main Street", "postCode": "10001", "townName": "New York", "country": "US"}, "otherId": "000111222333", "routingNumber": "021000021"},
-		vendorTwo: map[string]any{"name": "Example Widgets LLC", "address": map[string]any{"streetName": "200 Main Street", "postCode": "10001", "townName": "New York", "country": "US"}, "otherId": "000444555666", "routingNumber": "011000015"},
-	}
-}
-
-func proposalWithCreditors(runID string, c map[string]any) string {
+func runProposalBody(runID string, withholdingCodes map[string]string) string {
 	body := map[string]any{"legalEntityId": entityA, "legalEntityCurrency": "USD", "runDate": "2026-01-10", "runId": runID, "paymentMethod": "TRANSFER"}
-	if c != nil {
-		body["creditors"] = c
+	if withholdingCodes != nil {
+		body["withholdingCodes"] = withholdingCodes
 	}
 	raw, _ := json.Marshal(body)
 	return string(raw)
@@ -191,7 +241,11 @@ func proposalWithCreditors(runID string, c map[string]any) string {
 
 func profiles() api.PostingProfiles {
 	return api.PostingProfiles{entityA: api.PostingProfile{
-		LedgerID: runLedgerID, BankAccount: "1010", ControlAccount: "2000", DiscountAccount: "4900",
+		LedgerID: runLedgerID, BankAccount: "1010", ControlAccount: "2000", DiscountAccount: "4900", WithholdingAccount: "2300",
+		WithholdingCodes: []tax.Code{
+			{Code: "WHT30", Jurisdiction: "US", IncomeType: "services", Rates: []tax.Rate{{ValidFrom: "2020-01-01", RatePct: "30"}}},
+			{Code: "WHT10T", Jurisdiction: "US", IncomeType: "royalties", Rates: []tax.Rate{{ValidFrom: "2020-01-01", RatePct: "10", Threshold: ptr("120")}}},
+		},
 		File: domain.RunFileConfig{
 			Debtor:        domain.PartyDTO{Name: "Passage Holding Inc", Address: domain.PostalAddressDTO{StreetName: "1 Market Street", PostCode: "94105", TownName: "San Francisco", Country: "US"}},
 			DebtorAccount: domain.AccountDTO{OtherID: "000123456789"}, DebtorBIC: "CHASUS33",
@@ -265,19 +319,40 @@ func newRunFixture(t *testing.T, opts fixtureOptions) *runFixture {
 	fl := &fakeJournalLedger{entries: map[string]string{}, entity: entityA, inflight: map[string]bool{}, entered: make(chan struct{}, 4)}
 	srv := httptest.NewServer(fl)
 	t.Cleanup(srv.Close)
-	_, signingKey, _ := ed25519.GenerateKey(nil)
+	verifyKey, signingKey, _ := ed25519.GenerateKey(nil)
 	signer, _ := tenant.NewServiceSigner("payables", signingKey)
 	runProfiles := profiles()
+	if opts.noWithholdingAccount {
+		p := runProfiles[entityA]
+		p.WithholdingAccount = ""
+		runProfiles[entityA] = p
+	}
 	if opts.noProfile {
 		runProfiles = nil
 	}
-	a := api.New(app, opts.validator, func() time.Time { return clock }).WithProposals(pg, fx.New(fxServer(t).URL, "", nil)).WithPaymentRuns(pg, ledger.New(srv.URL, nil).WithSigner(signer), runProfiles)
+	fp := newFakeParty()
+	partySrv := httptest.NewServer(fp)
+	t.Cleanup(partySrv.Close)
+	ft := newFakeTax()
+	taxSrv := httptest.NewServer(ft)
+	t.Cleanup(taxSrv.Close)
+	var banks api.VendorBanks
+	if !opts.noParty {
+		banks = party.New(partySrv.URL, nil).WithSigner(signer)
+	}
+	a := api.New(app, opts.validator, func() time.Time { return clock }).WithProposals(pg, fx.New(fxServer(t).URL, "", nil)).WithPaymentRuns(pg, ledger.New(srv.URL, nil).WithSigner(signer), runProfiles).WithVendorBanks(banks)
+	if !opts.noTax {
+		a.WithWithholding(tax.New(taxSrv.URL, nil).WithSigner(signer), pg, runProfiles)
+	}
 	router := httpx.NewRouter()
 	a.Register(router)
 
-	f := &runFixture{t: t, router: router, api: a, ledger: fl, pg: pg, itemA: itemA, clock: &clock,
+	f := &runFixture{t: t, router: router, api: a, ledger: fl, party: fp, tax: ft, signer: signer, verify: verifyKey, partyURL: partySrv.URL, pg: pg, itemA: itemA, clock: &clock,
 		erin: caller{duties: runDuties, user: "erin", entity: entityA}, alice: caller{duties: approveAll, user: "alice", entity: entityA}, bob: caller{duties: approveAll, user: "bob", entity: entityA}}
-	f.created = f.alice.send(router, http.MethodPost, "/v1/payables/payment-proposals", proposalWithCreditors("run-1", creditors()))
+	if opts.skipProposal {
+		return f
+	}
+	f.created = f.alice.send(router, http.MethodPost, "/v1/payables/payment-proposals", runProposalBody("run-1", opts.withholdingCodes))
 	if f.created.Code != http.StatusCreated {
 		t.Fatalf("create proposal: %d %s", f.created.Code, f.created.Body)
 	}
@@ -382,21 +457,113 @@ func TestPaymentRun_EndToEndWithRealXSDAndLedgerReplay(t *testing.T) {
 	}
 }
 
-func TestPaymentRun_BankDetailsAreProposalContentShownMaskedAndCoveredByTheRequestHash(t *testing.T) {
+func TestPaymentRun_ProposalNoLongerAcceptsBankDetailsFromItsCreator(t *testing.T) {
 	f := newRunFixture(t, fixtureOptions{})
-	body := f.created.Body.String()
-	if !strings.Contains(body, `"payees"`) || !strings.Contains(body, "Acme Supply Co") || !strings.Contains(body, "****2333") || !strings.Contains(body, "021000021") || strings.Contains(body, "000111222333") {
-		t.Fatalf("approver view must show names, bank identifiers and masked accounts only: %s", body)
+	if strings.Contains(f.created.Body.String(), "payees") || strings.Contains(f.created.Body.String(), "000111222333") {
+		t.Fatalf("a proposal carries no bank details: %s", f.created.Body)
 	}
-	replay := f.alice.send(f.router, http.MethodPost, "/v1/payables/payment-proposals", proposalWithCreditors("run-1", creditors()))
-	if replay.Code != http.StatusOK || replay.Header().Get("Idempotent-Replayed") != "true" {
-		t.Fatalf("identical replay: %d %s", replay.Code, replay.Body)
+	body := strings.TrimSuffix(runProposalBody("run-2", nil), "}") + `,"creditors":{"` + vendorOne + `":{"name":"Mallory","otherId":"1"}}}`
+	wantProblem(t, f.alice.send(f.router, http.MethodPost, "/v1/payables/payment-proposals", body), http.StatusBadRequest, "COM-0001")
+	if f.party.callCount() != 0 {
+		t.Fatalf("party was called %d times before file generation", f.party.callCount())
 	}
-	redirected := creditors()
-	redirected[vendorOne].(map[string]any)["otherId"] = "999999999999"
-	wantProblem(t, f.alice.send(f.router, http.MethodPost, "/v1/payables/payment-proposals", proposalWithCreditors("run-1", redirected)), http.StatusConflict, "AP-PRP-001")
-	badDetails := map[string]any{vendorOne: map[string]any{"name": "", "otherId": ""}}
-	wantProblem(t, f.alice.send(f.router, http.MethodPost, "/v1/payables/payment-proposals", proposalWithCreditors("run-2", badDetails)), http.StatusBadRequest, "COM-0001")
+}
+
+func TestPaymentRun_GenerateFileRevealsBankDetailsFromPartyWithASignedTokenAndStoresNoPlaintext(t *testing.T) {
+	f := newRunFixture(t, fixtureOptions{})
+	f.approve()
+	runID := f.start()["id"].(string)
+	if f.party.callCount() != 0 {
+		t.Fatal("run start must not fetch bank details")
+	}
+	if rec := f.step(f.erin, runID, "generate-file"); rec.Code != http.StatusOK {
+		t.Fatalf("generate-file: %d %s", rec.Code, rec.Body)
+	}
+	file := f.erin.send(f.router, http.MethodGet, runsPath+"/"+runID+"/file", "").Body.String()
+	if !strings.Contains(file, "000111222333") || !strings.Contains(file, "000444555666") || !strings.Contains(file, "Acme Supply Co") {
+		t.Fatalf("the file must carry the party bank details: %s", file)
+	}
+	f.party.mu.Lock()
+	calls, tokens := append([]string(nil), f.party.calls...), append([]string(nil), f.party.tokens...)
+	f.party.mu.Unlock()
+	if len(calls) != 2 {
+		t.Fatalf("party calls = %v, want one per vendor", calls)
+	}
+	verifier := tenant.NewServiceVerifier("party", map[string]ed25519.PublicKey{"payables": f.verify})
+	for _, token := range tokens {
+		claims, err := verifier.Verify(token)
+		if err != nil || claims.Aud != "party" || claims.Le != entityA || len(claims.Duties) != 1 || claims.Duties[0] != "party.vendor_bank.reveal" {
+			t.Fatalf("claims %+v err %v: the reveal needs a service token carrying only party.vendor_bank.reveal", claims, err)
+		}
+	}
+	for _, view := range []string{
+		f.alice.send(f.router, http.MethodGet, "/v1/payables/payment-proposals/"+f.proposal, "").Body.String(),
+		f.erin.send(f.router, http.MethodGet, runsPath+"/"+runID, "").Body.String(),
+	} {
+		if strings.Contains(view, "000111222333") || strings.Contains(view, "Acme Supply Co") {
+			t.Fatalf("bank details must not appear in proposal or run reads: %s", view)
+		}
+	}
+}
+
+func TestPaymentRun_PartyOutageIsARetryable502AndTheStepSucceedsOnRetry(t *testing.T) {
+	f := newRunFixture(t, fixtureOptions{})
+	f.approve()
+	runID := f.start()["id"].(string)
+	f.party.mu.Lock()
+	f.party.failures = 1
+	f.party.mu.Unlock()
+	rec := f.step(f.erin, runID, "generate-file")
+	wantProblem(t, rec, http.StatusBadGateway, "COM-0502")
+	if rec.Header().Get("Retry-After") == "" || !strings.Contains(scrape(f.api), "payables_payment_run_party_faults_total 1") {
+		t.Fatalf("retry-after %q, metrics:\n%s", rec.Header().Get("Retry-After"), scrape(f.api))
+	}
+	if got := decode(t, f.erin.send(f.router, http.MethodGet, runsPath+"/"+runID, "")); got["status"] != "RUNNING" || got["fileGeneratedAt"] != nil {
+		t.Fatalf("a party outage must leave the run untouched: %v", got)
+	}
+	if rec := f.step(f.erin, runID, "generate-file"); rec.Code != http.StatusOK {
+		t.Fatalf("retry: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestPaymentRun_VendorWithoutAUsableBankAccountIsRefusedWithAPCode(t *testing.T) {
+	cases := map[string]struct {
+		mutate func(f *fakeParty)
+		detail string
+	}{
+		"unknown vendor": {func(f *fakeParty) { delete(f.accounts, vendorTwo) }, "not in the party vendor master"},
+		"no accounts":    {func(f *fakeParty) { f.accounts[vendorTwo] = nil }, "has no USD bank account"},
+		"other currency": {func(f *fakeParty) {
+			f.accounts[vendorTwo] = []map[string]any{partyAccount("Widgets", "123456789", "011000015", "EUR")}
+		}, "has no USD bank account"},
+		"ambiguous": {func(f *fakeParty) {
+			f.accounts[vendorTwo] = append(f.accounts[vendorTwo], partyAccount("Widgets 2", "999888777", "011000015", "USD"))
+		}, "ambiguous"},
+		"no account holder": {func(f *fakeParty) {
+			f.accounts[vendorTwo] = []map[string]any{partyAccount("", "123456789", "011000015", "USD")}
+		}, "no account holder"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newRunFixture(t, fixtureOptions{})
+			f.approve()
+			runID := f.start()["id"].(string)
+			tc.mutate(f.party)
+			body := wantProblem(t, f.step(f.erin, runID, "generate-file"), http.StatusUnprocessableEntity, "AP-RUN-017")
+			if !strings.Contains(body["detail"].(string), tc.detail) || !strings.Contains(body["detail"].(string), vendorTwo) {
+				t.Fatalf("detail %q, want it to name the vendor and %q", body["detail"], tc.detail)
+			}
+			if got := decode(t, f.erin.send(f.router, http.MethodGet, runsPath+"/"+runID, "")); got["fileGeneratedAt"] != nil {
+				t.Fatalf("no file may be saved: %v", got)
+			}
+		})
+	}
+}
+
+func TestPaymentRun_PartyNotConfiguredRefusesStartAndFileGeneration(t *testing.T) {
+	f := newRunFixture(t, fixtureOptions{noParty: true})
+	f.approve()
+	wantProblem(t, f.erin.send(f.router, http.MethodPost, runsPath, f.startBody()), http.StatusUnprocessableEntity, "AP-RUN-013")
 }
 
 func TestPaymentRun_StartRefusesAnythingTheRequestCouldRedirect(t *testing.T) {
@@ -446,25 +613,6 @@ func TestPaymentRun_NeedsAPostingProfileAndFieldKeys(t *testing.T) {
 	wantProblem(t, bare.erin.send(bare.router, http.MethodPost, runsPath, bare.startBody()), http.StatusUnprocessableEntity, "AP-RUN-013")
 	if bare.proposalStatus() != "APPROVED" {
 		t.Fatalf("proposal = %s", bare.proposalStatus())
-	}
-}
-
-func TestPaymentRun_ProposalWithBankDetailsNeedsFieldEncryption(t *testing.T) {
-	admin, app := testkit.DBWithApp(t)
-	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
-		t.Fatal(err)
-	}
-	pg := store.New(app)
-	seedCtx := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), LegalEntityID: entityA, UserID: "seeder", Duties: testkit.ScopeDuties(entityA)})
-	if _, _, err := pg.CreateFromInvoice(seedCtx, store.OpenItem{LegalEntityID: entityA, VendorID: vendorOne, SourceInvoiceID: itemOne, InvoiceNumber: "INV-1", InvoiceDate: "2025-12-01", DueDate: "2026-01-05", Currency: "USD", Amount: decimal.RequireFromString("10.00")}); err != nil {
-		t.Fatal(err)
-	}
-	router := httpx.NewRouter()
-	api.New(app, fakeValidator{}, fixedNow).WithProposals(pg, nil).Register(router)
-	alice := caller{duties: approveAll, user: "alice", entity: entityA}
-	wantProblem(t, alice.send(router, http.MethodPost, "/v1/payables/payment-proposals", proposalWithCreditors("run-1", creditors())), http.StatusServiceUnavailable, "COM-0503")
-	if rec := alice.send(router, http.MethodPost, "/v1/payables/payment-proposals", proposalWithCreditors("run-1", nil)); rec.Code != http.StatusCreated {
-		t.Fatalf("a proposal without bank details needs no keys: %d %s", rec.Code, rec.Body)
 	}
 }
 
@@ -537,7 +685,7 @@ func TestPaymentRun_SlowFirstPostThenInProgressRetryNeverFailsTheRun(t *testing.
 	if f.proposalStatus() != "EXECUTING" {
 		t.Fatalf("proposal = %s: the lines must stay reserved while the first post is in flight", f.proposalStatus())
 	}
-	again := f.alice.send(f.router, http.MethodPost, "/v1/payables/payment-proposals", proposalWithCreditors("run-2", creditors()))
+	again := f.alice.send(f.router, http.MethodPost, "/v1/payables/payment-proposals", runProposalBody("run-2", nil))
 	wantProblem(t, again, http.StatusUnprocessableEntity, "AP-PRP-005")
 
 	close(f.ledger.gate)
@@ -568,7 +716,7 @@ func TestPaymentRun_LedgerRejectionIsTerminalAndFailReleasesItems(t *testing.T) 
 	}
 	wantProblem(t, f.step(f.erin, runID, "generate-file"), http.StatusConflict, "AP-RUN-011")
 	wantProblem(t, f.step(f.erin, runID, "post-journal"), http.StatusConflict, "AP-RUN-011")
-	again := f.alice.send(f.router, http.MethodPost, "/v1/payables/payment-proposals", proposalWithCreditors("run-2", creditors()))
+	again := f.alice.send(f.router, http.MethodPost, "/v1/payables/payment-proposals", runProposalBody("run-2", nil))
 	if got := decode(t, again); again.Code != http.StatusCreated || len(got["groups"].([]any)) != 2 {
 		t.Fatalf("a new proposal must pick the released items up again: %d %s", again.Code, again.Body)
 	}
@@ -855,7 +1003,7 @@ func TestPaymentRun_FileUsesTheProfileSnapshotTakenAtStart(t *testing.T) {
 	profile.File.DebtorBIC = "EVILUS33"
 	profile.BankAccount = "9999"
 	changed[entityA] = profile
-	f.api.WithPaymentRuns(f.pg, nil, changed)
+	f.api.WithPaymentRuns(f.pg, nil, changed).WithVendorBanks(party.New(f.partyURL, nil).WithSigner(f.signer))
 	f.step(f.erin, runID, "generate-file")
 	file := f.erin.send(f.router, http.MethodGet, runsPath+"/"+runID+"/file", "").Body.String()
 	if !strings.Contains(file, "CHASUS33") || strings.Contains(file, "EVILUS33") {
@@ -899,7 +1047,9 @@ func TestPaymentRun_MissingFieldKeysAre503NotAnInternalErrorAndNeverBlockTheExec
 	f.approve()
 	runID := f.start()["id"].(string)
 	f.pg.WithFieldCrypt(nil)
-	wantProblem(t, f.bob.send(f.router, http.MethodGet, "/v1/payables/payment-proposals/"+f.proposal, ""), http.StatusServiceUnavailable, "COM-0503")
+	if rec := f.bob.send(f.router, http.MethodGet, "/v1/payables/payment-proposals/"+f.proposal, ""); rec.Code != http.StatusOK {
+		t.Fatalf("a proposal read needs no field keys: %d %s", rec.Code, rec.Body)
+	}
 	executor := "payment-run.execute,payment-run.read"
 	wantProblem(t, f.step(caller{duties: executor, user: "alice", entity: entityA}, runID, "settle"), http.StatusForbidden, "AP-PRP-003")
 	wantProblem(t, f.step(f.erin, runID, "settle"), http.StatusConflict, "AP-RUN-012")

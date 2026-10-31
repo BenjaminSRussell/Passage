@@ -25,7 +25,7 @@ func twoGroups() []domain.ProposalGroup {
 }
 
 func TestRunJournal_BalancesGrossControlAgainstBankAndDiscount(t *testing.T) {
-	lines := domain.RunJournal("USD", twoGroups(), "2000", "1010", "4900")
+	lines := domain.RunJournal("USD", twoGroups(), "2000", "1010", "4900", "")
 	type row struct {
 		account string
 		credit  bool
@@ -52,7 +52,7 @@ func TestRunJournal_BalancesGrossControlAgainstBankAndDiscount(t *testing.T) {
 }
 
 func TestRunJournal_NoDiscountLineWithoutDiscount(t *testing.T) {
-	lines := domain.RunJournal("USD", twoGroups()[1:], "2000", "1010", "")
+	lines := domain.RunJournal("USD", twoGroups()[1:], "2000", "1010", "", "")
 	if len(lines) != 2 || lines[1].Account != "1010" {
 		t.Fatalf("lines = %+v", lines)
 	}
@@ -67,42 +67,49 @@ func TestPaymentAndFileNumbers_FitTheBankReferencePattern(t *testing.T) {
 	}
 }
 
-func TestCheckRunnable_RejectsMethodCurrencyAndMissingBankDetails(t *testing.T) {
+func TestCheckRunnable_RejectsMethodAndCurrency(t *testing.T) {
 	groups := twoGroups()
 	groups[0].Currency = "USD"
-	creditors := map[string]domain.CreditorDTO{groups[0].VendorID: {}, groups[1].VendorID: {}}
-	if err := domain.CheckRunnable("USD", groups, creditors); err != nil {
+	if err := domain.CheckRunnable("USD", groups); err != nil {
 		t.Fatal(err)
 	}
 	var de *domain.Error
-	if err := domain.CheckRunnable("USD", twoGroups(), creditors); !errors.As(err, &de) || de.Code != domain.CodeRunConfig || !strings.Contains(de.Detail, "EUR") || !strings.Contains(de.Detail, "realized FX") {
+	if err := domain.CheckRunnable("USD", twoGroups()); !errors.As(err, &de) || de.Code != domain.CodeRunConfig || !strings.Contains(de.Detail, "EUR") || !strings.Contains(de.Detail, "realized FX") {
 		t.Fatalf("a EUR group in a USD legal entity = %v", err)
 	}
-	delete(creditors, groups[1].VendorID)
-	if err := domain.CheckRunnable("USD", groups, creditors); !errors.As(err, &de) || !strings.Contains(de.Detail, groups[1].VendorID) {
-		t.Fatalf("missing creditor = %v", err)
-	}
-	creditors[groups[1].VendorID] = domain.CreditorDTO{}
 	groups[0].Method = "ACH"
-	if err := domain.CheckRunnable("USD", groups, creditors); !errors.As(err, &de) || !strings.Contains(de.Detail, "ACH") {
+	if err := domain.CheckRunnable("USD", groups); !errors.As(err, &de) || !strings.Contains(de.Detail, "ACH") {
 		t.Fatalf("ACH group = %v", err)
 	}
 }
 
-func TestValidateCreditorsAndMaskedSummary(t *testing.T) {
-	good := domain.CreditorDTO{PartyDTO: domain.PartyDTO{Name: "Acme"}, AccountDTO: domain.AccountDTO{IBAN: "DE89370400440532013000"}, BIC: "COBADEFF"}
-	if f := domain.ValidateCreditors(map[string]domain.CreditorDTO{groupOne: good}); len(f) != 0 {
-		t.Fatalf("valid creditor = %v", f)
+func TestBuildRunFile_RefusesAVendorWithoutBankDetails(t *testing.T) {
+	groups := twoGroups()
+	var de *domain.Error
+	_, _, err := domain.BuildRunFile(domain.RunFileConfig{}, map[string]domain.CreditorDTO{groups[0].VendorID: {}}, runUUID, time.Now(), time.Now(), groups, nil)
+	if !errors.As(err, &de) || de.Code != domain.CodeRunPayee || !strings.Contains(de.Detail, groups[1].VendorID) {
+		t.Fatalf("missing creditor = %v", err)
 	}
-	if f := domain.ValidateCreditors(map[string]domain.CreditorDTO{"x": good, groupTwo: {}}); len(f) != 2 {
-		t.Fatalf("bad key and empty details = %v", f)
+}
+
+func TestRunJournal_CreditsWithheldTaxAndStillBalances(t *testing.T) {
+	groups := twoGroups()[1:]
+	groups[0].Withhold(0, "WHT30", d("150"), 2)
+	lines := domain.RunJournal("USD", groups, "2000", "1010", "4900", "2300")
+	if len(lines) != 3 || lines[1].Account != "1010" || !lines[1].Amount.Equal(d("350")) || lines[2].Account != "2300" || !lines[2].Amount.Equal(d("150")) {
+		t.Fatalf("lines = %+v, want debit 500, bank credit 350, withholding credit 150", lines)
 	}
-	got := domain.SummarizePayee(groupOne, good)
-	if got.Account != "****3000" || got.Bank != "COBADEFF" || got.Name != "Acme" || strings.Contains(got.Account, "DE89") {
-		t.Fatalf("summary = %+v", got)
+}
+
+func TestWithhold_ReducesNetAndValuedPerLineAndGroup(t *testing.T) {
+	g := twoGroups()[0]
+	g.Withhold(0, "WHT30", d("3.13"), 2)
+	l := g.Lines[0]
+	if !g.Net.Equal(d("28.20")) || !g.Withheld.Equal(d("3.13")) || !l.Withheld.Equal(d("3.13")) || l.WithholdingCode != "WHT30" || !l.Valued.Equal(d("30.53")) || !g.Valued.Equal(d("30.53")) {
+		t.Fatalf("group %+v line %+v", g, l)
 	}
-	if domain.MaskBank("123") != "****" {
-		t.Fatal("short values are fully masked")
+	if !domain.HasWithholding([]domain.ProposalGroup{g}) || domain.HasWithholding(twoGroups()) {
+		t.Fatal("HasWithholding must follow the group totals")
 	}
 }
 

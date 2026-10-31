@@ -9,6 +9,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/domain"
+	"github.com/BenjaminSRussell/passage/services/payables/internal/tax"
 )
 
 const (
@@ -17,11 +18,13 @@ const (
 )
 
 type PostingProfile struct {
-	LedgerID        string               `json:"ledgerId"`
-	BankAccount     string               `json:"bankAccount"`
-	ControlAccount  string               `json:"controlAccount"`
-	DiscountAccount string               `json:"discountAccount"`
-	File            domain.RunFileConfig `json:"file"`
+	LedgerID           string               `json:"ledgerId"`
+	BankAccount        string               `json:"bankAccount"`
+	ControlAccount     string               `json:"controlAccount"`
+	DiscountAccount    string               `json:"discountAccount"`
+	WithholdingAccount string               `json:"withholdingAccount"`
+	WithholdingCodes   []tax.Code           `json:"withholdingCodes"`
+	File               domain.RunFileConfig `json:"file"`
 }
 
 type PostingProfiles map[string]PostingProfile
@@ -57,7 +60,7 @@ func LoadPostingProfiles(getenv func(string) string) (PostingProfiles, error) {
 	for le, p := range parsed {
 		canonical, ok := ids.Canonical(le)
 		if !ok || !ids.Valid(p.LedgerID) || p.BankAccount == "" || p.ControlAccount == "" ||
-			len(p.BankAccount) > maxAccountLen || len(p.ControlAccount) > maxAccountLen || len(p.DiscountAccount) > maxAccountLen {
+			len(p.BankAccount) > maxAccountLen || len(p.ControlAccount) > maxAccountLen || len(p.DiscountAccount) > maxAccountLen || len(p.WithholdingAccount) > maxAccountLen {
 			return nil, errors.New(EnvPostingProfiles + ": every legal entity needs a UUID key, a ledger UUID, a bank account and a control account of at most 20 characters")
 		}
 		out[canonical] = p

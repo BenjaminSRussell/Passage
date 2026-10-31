@@ -2,10 +2,7 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"maps"
-	"slices"
 	"strings"
 	"time"
 
@@ -40,6 +37,7 @@ type proposalEvent struct {
 	Actor         string `json:"actor"`
 	Currency      string `json:"currency,omitempty"`
 	TotalValued   string `json:"total_valued,omitempty"`
+	TotalWithheld string `json:"total_withheld,omitempty"`
 }
 
 var (
@@ -49,7 +47,7 @@ var (
 	ErrItemsChanged     = errors.New("open items changed, were held or were reserved while the proposal was built")
 	ErrTooManyItems     = errors.New("more open items are due than one proposal can hold")
 	ErrRunDateElapsed   = errors.New("the proposal's run date has passed")
-	ErrNoFieldCrypt     = errors.New("field encryption keys are not configured; bank details cannot be stored or read")
+	ErrNoFieldCrypt     = errors.New("field encryption keys are not configured; protected run fields cannot be stored or read")
 )
 
 type LinesChangedError struct{ OpenItemIDs []string }
@@ -77,8 +75,8 @@ type Proposal struct {
 	ExecutedAt          *time.Time             `json:"executedAt,omitempty"`
 	FailedAt            *time.Time             `json:"failedAt,omitempty"`
 	Groups              []domain.ProposalGroup `json:"groups"`
-	Payees              []domain.PayeeSummary  `json:"payees,omitempty"`
 	TotalValued         decimal.Decimal        `json:"totalValued"`
+	TotalWithheld       decimal.Decimal        `json:"totalWithheld"`
 	RequestHash         string                 `json:"-"`
 }
 
@@ -93,7 +91,6 @@ type NewProposal struct {
 	RequestHash         string
 	CreatedBy           string
 	Groups              []domain.ProposalGroup
-	Payees              map[string]domain.CreditorDTO
 }
 
 func (s *Postgres) Candidates(ctx context.Context, legalEntityID, dueBy string) ([]domain.ProposalCandidate, error) {
@@ -175,16 +172,14 @@ func (s *Postgres) CreateProposal(ctx context.Context, in NewProposal) (Proposal
 		if err := insertGroups(ctx, tx, p.TenantID, id, in); err != nil {
 			return err
 		}
-		if err := s.insertPayees(ctx, tx, p.TenantID, id, in); err != nil {
-			return err
-		}
-		total := decimal.Zero
+		total, withheld := decimal.Zero, decimal.Zero
 		for _, g := range in.Groups {
 			total = total.Add(g.Valued)
+			withheld = withheld.Add(g.Withheld)
 		}
 		return enqueueEvent(ctx, tx, ProposalCreatedType, "paymentproposal", id, p.TenantID, proposalEvent{
 			ProposalID: id, LegalEntityID: in.LegalEntityID, RunDate: in.RunDate, RunID: in.RunID, Status: domain.ProposalDraft, Actor: in.CreatedBy,
-			Currency: in.LegalEntityCurrency, TotalValued: total.String(),
+			Currency: in.LegalEntityCurrency, TotalValued: total.String(), TotalWithheld: withheld.String(),
 		})
 	})
 	if isUnique(err) {
@@ -211,17 +206,17 @@ func insertGroups(ctx context.Context, tx pgx.Tx, tenantID, proposalID string, i
 	lines := 0
 	for _, g := range in.Groups {
 		batch.Queue(`insert into ap_payment_proposal_group (tenant_id, id, proposal_id, legal_entity_id, vendor_id, currency, payment_method,
-			gross_amount, discount_amount, net_amount, valued_amount) values ($1, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, $7, $8, $9, $10, $11)`,
-			tenantID, g.ID, proposalID, in.LegalEntityID, g.VendorID, g.Currency, g.Method, g.Gross.String(), g.Discount.String(), g.Net.String(), g.Valued.String())
+			gross_amount, discount_amount, net_amount, valued_amount, withheld_amount) values ($1, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, $7, $8, $9, $10, $11, $12)`,
+			tenantID, g.ID, proposalID, in.LegalEntityID, g.VendorID, g.Currency, g.Method, g.Gross.String(), g.Discount.String(), g.Net.String(), g.Valued.String(), g.Withheld.String())
 	}
 	for _, g := range in.Groups {
 		for _, l := range g.Lines {
 			lines++
-			batch.Queue(`insert into ap_payment_proposal_line (tenant_id, open_item_id, proposal_id, group_id, legal_entity_id, item_version, open_amount, discount_amount, pay_amount, rate, valued_amount)
-				select i.tenant_id, i.id, $2::uuid, $3::uuid, i.legal_entity_id, i.version, $5::numeric, $6::numeric, $7::numeric, $8::numeric, $9::numeric from ap_open_item i
+			batch.Queue(`insert into ap_payment_proposal_line (tenant_id, open_item_id, proposal_id, group_id, legal_entity_id, item_version, open_amount, discount_amount, pay_amount, rate, valued_amount, withheld_amount, withholding_code)
+				select i.tenant_id, i.id, $2::uuid, $3::uuid, i.legal_entity_id, i.version, $5::numeric, $6::numeric, $7::numeric, $8::numeric, $9::numeric, $10::numeric, nullif($11, '') from ap_open_item i
 				where i.id = $1::uuid and i.version = $4 and i.open_amount = $5::numeric and not i.payment_hold
 				and not exists (select 1 from ap_vendor_block b where b.vendor_id = i.vendor_id and b.legal_entity_id = i.legal_entity_id)`,
-				l.OpenItemID, proposalID, g.ID, l.OpenItemVersion, l.OpenAmount.String(), l.Discount.String(), l.Pay.String(), l.Rate.String(), l.Valued.String())
+				l.OpenItemID, proposalID, g.ID, l.OpenItemVersion, l.OpenAmount.String(), l.Discount.String(), l.Pay.String(), l.Rate.String(), l.Valued.String(), l.Withheld.String(), l.WithholdingCode)
 		}
 	}
 	results := tx.SendBatch(ctx, batch)
@@ -260,18 +255,15 @@ func (s *Postgres) GetProposal(ctx context.Context, id string) (Proposal, error)
 		}
 		for _, g := range out.Groups {
 			out.TotalValued = out.TotalValued.Add(g.Valued)
+			out.TotalWithheld = out.TotalWithheld.Add(g.Withheld)
 		}
-		payees, err := s.openPayees(ctx, tx, out.ID)
-		for _, vendor := range slices.Sorted(maps.Keys(payees)) {
-			out.Payees = append(out.Payees, domain.SummarizePayee(vendor, payees[vendor]))
-		}
-		return err
+		return nil
 	})
 	return out, err
 }
 
 func loadGroups(ctx context.Context, tx pgx.Tx, proposalID string) ([]domain.ProposalGroup, error) {
-	rows, err := tx.Query(ctx, `select id::text, vendor_id::text, currency, payment_method, gross_amount::text, discount_amount::text, net_amount::text, valued_amount::text
+	rows, err := tx.Query(ctx, `select id::text, vendor_id::text, currency, payment_method, gross_amount::text, discount_amount::text, net_amount::text, valued_amount::text, withheld_amount::text
 		from ap_payment_proposal_group where proposal_id = $1::uuid order by vendor_id, currency, payment_method`, proposalID)
 	if err != nil {
 		return nil, err
@@ -280,12 +272,12 @@ func loadGroups(ctx context.Context, tx pgx.Tx, proposalID string) ([]domain.Pro
 	index := map[string]int{}
 	for rows.Next() {
 		var g domain.ProposalGroup
-		var gross, discount, net, valued string
-		if err := rows.Scan(&g.ID, &g.VendorID, &g.Currency, &g.Method, &gross, &discount, &net, &valued); err != nil {
+		var gross, discount, net, valued, withheld string
+		if err := rows.Scan(&g.ID, &g.VendorID, &g.Currency, &g.Method, &gross, &discount, &net, &valued, &withheld); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		if err := parseDecimals([]*decimal.Decimal{&g.Gross, &g.Discount, &g.Net, &g.Valued}, gross, discount, net, valued); err != nil {
+		if err := parseDecimals([]*decimal.Decimal{&g.Gross, &g.Discount, &g.Net, &g.Valued, &g.Withheld}, gross, discount, net, valued, withheld); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -297,7 +289,7 @@ func loadGroups(ctx context.Context, tx pgx.Tx, proposalID string) ([]domain.Pro
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	lines, err := tx.Query(ctx, `select l.group_id::text, l.open_item_id::text, l.open_amount::text, l.discount_amount::text, l.pay_amount::text, l.rate::text, l.valued_amount::text
+	lines, err := tx.Query(ctx, `select l.group_id::text, l.open_item_id::text, l.open_amount::text, l.discount_amount::text, l.pay_amount::text, l.rate::text, l.valued_amount::text, l.withheld_amount::text, coalesce(l.withholding_code, '')
 		from ap_payment_proposal_line l join ap_open_item i on i.tenant_id = l.tenant_id and i.id = l.open_item_id
 		where l.proposal_id = $1::uuid order by i.due_date, l.open_item_id`, proposalID)
 	if err != nil {
@@ -305,12 +297,12 @@ func loadGroups(ctx context.Context, tx pgx.Tx, proposalID string) ([]domain.Pro
 	}
 	defer lines.Close()
 	for lines.Next() {
-		var groupID, open, discount, pay, rate, valued string
+		var groupID, open, discount, pay, rate, valued, withheld string
 		var l domain.ProposalLine
-		if err := lines.Scan(&groupID, &l.OpenItemID, &open, &discount, &pay, &rate, &valued); err != nil {
+		if err := lines.Scan(&groupID, &l.OpenItemID, &open, &discount, &pay, &rate, &valued, &withheld, &l.WithholdingCode); err != nil {
 			return nil, err
 		}
-		if err := parseDecimals([]*decimal.Decimal{&l.OpenAmount, &l.Discount, &l.Pay, &l.Rate, &l.Valued}, open, discount, pay, rate, valued); err != nil {
+		if err := parseDecimals([]*decimal.Decimal{&l.OpenAmount, &l.Discount, &l.Pay, &l.Rate, &l.Valued, &l.Withheld}, open, discount, pay, rate, valued, withheld); err != nil {
 			return nil, err
 		}
 		g := &groups[index[groupID]]
@@ -491,70 +483,18 @@ func (s *Postgres) ListProposals(ctx context.Context, f ProposalFilter, limit in
 	return out, err
 }
 
-func payeeField(proposalID, vendorID string) string {
-	return "ap_payment_proposal_payee:" + proposalID + ":" + vendorID
-}
-
-func (s *Postgres) insertPayees(ctx context.Context, tx pgx.Tx, tenantID, proposalID string, in NewProposal) error {
-	if len(in.Payees) == 0 {
-		return nil
-	}
-	if s.crypt == nil {
-		return ErrNoFieldCrypt
-	}
-	for vendor, details := range in.Payees {
-		plain, err := json.Marshal(details)
-		if err != nil {
-			return err
-		}
-		sealed, err := s.crypt.Seal(tenantID, payeeField(proposalID, vendor), plain)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `insert into ap_payment_proposal_payee (tenant_id, proposal_id, vendor_id, legal_entity_id, sealed) values ($1, $2::uuid, $3::uuid, $4::uuid, $5)`,
-			tenantID, proposalID, vendor, in.LegalEntityID, sealed); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (s *Postgres) openPayees(ctx context.Context, tx pgx.Tx, proposalID string) (map[string]domain.CreditorDTO, error) {
-	p, _ := tenant.FromContext(ctx)
-	rows, err := tx.Query(ctx, `select vendor_id::text, sealed from ap_payment_proposal_payee where proposal_id = $1::uuid`, proposalID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := map[string]domain.CreditorDTO{}
-	for rows.Next() {
-		var vendor string
-		var sealed []byte
-		if err := rows.Scan(&vendor, &sealed); err != nil {
-			return nil, err
-		}
-		if s.crypt == nil {
-			return nil, ErrNoFieldCrypt
-		}
-		plain, err := s.crypt.Open(p.TenantID, payeeField(proposalID, vendor), sealed)
-		if err != nil {
-			return nil, err
-		}
-		var details domain.CreditorDTO
-		if err := json.Unmarshal(plain, &details); err != nil {
-			return nil, err
-		}
-		out[vendor] = details
-	}
-	return out, rows.Err()
-}
-
-func (s *Postgres) ProposalPayees(ctx context.Context, proposalID string) (map[string]domain.CreditorDTO, error) {
-	var out map[string]domain.CreditorDTO
+func (s *Postgres) PaidToDate(ctx context.Context, legalEntityID, vendorID, currency string, year int) (decimal.Decimal, error) {
+	var total string
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		var err error
-		out, err = s.openPayees(ctx, tx, proposalID)
-		return err
+		return tx.QueryRow(ctx, `select coalesce(sum(l.pay_amount), 0)::text
+			from ap_payment_proposal_line l
+			join ap_payment_proposal_group g on g.tenant_id = l.tenant_id and g.id = l.group_id
+			join ap_payment_proposal p on p.tenant_id = l.tenant_id and p.id = l.proposal_id
+			where p.legal_entity_id = $1::uuid and g.vendor_id = $2::uuid and g.currency = $3
+			and p.status in ('APPROVED', 'EXECUTING', 'EXECUTED') and extract(year from p.run_date) = $4`, legalEntityID, vendorID, currency, year).Scan(&total)
 	})
-	return out, err
+	if err != nil {
+		return decimal.Zero, err
+	}
+	return decimal.NewFromString(total)
 }
