@@ -20,6 +20,7 @@ import { NewProductListingPage, ProductListingsPage } from "./ProductListingsPag
 import { NewProposalRulePage, ProposalRulesPage } from "./ProposalRulesPage";
 import { ParametersPage } from "./ParametersPage";
 import { PromiseLinePage } from "./PromiseLinePage";
+import { SalesWorkspacePage } from "./SalesWorkspacePage";
 import { QuotationDetailPage } from "./QuotationDetailPage";
 import { NewQuotationPage, QuotationsPage } from "./QuotationsPage";
 import { ScheduleReleaseDetailPage } from "./ScheduleReleaseDetailPage";
@@ -31,9 +32,10 @@ const sales: PassageModule = {
   id: "sales",
   title: "Sales",
   description:
-    "Quote and convert to orders, enter, confirm, change and cancel sales orders, apply holds and work the release queue, maintain credit profiles, the per legal entity sales parameters, product listings, supplementary items, product proposals, allocation quotas and sales agreements, check available-to-promise, reconcile scheduling releases and store them against sales agreements, preview backorder runs and plan and commit them over the open order lines.",
+    "See the sales workspace and quotation pipeline, expire lapsed quotations, quote and convert to orders, enter, confirm, change and cancel sales orders, apply holds and work the release queue, maintain credit profiles, the per legal entity sales parameters, product listings, supplementary items, product proposals, allocation quotas and sales agreements, check available-to-promise, reconcile scheduling releases and store them against sales agreements, preview backorder runs and plan and commit them over the open order lines.",
   routes: [
     { path: "/sales", element: createElement(OrdersPage), handle: { title: "Sales orders", duty: "sales.order.read" } },
+    { path: "/sales/workspace", element: createElement(SalesWorkspacePage), handle: { title: "Sales workspace", duty: "sales.order.read" } },
     { path: "/sales/orders", element: createElement(OrdersPage) },
     { path: "/sales/orders/new", element: createElement(NewOrderPage), handle: { title: "New sales order" } },
     { path: "/sales/orders/:id", element: createElement(OrderDetailPage), handle: { title: "Sales order" } },
@@ -71,6 +73,7 @@ const sales: PassageModule = {
     { path: "/sales/product-proposals/new", element: createElement(NewProposalRulePage), handle: { title: "New product proposal rule" } },
   ],
   nav: [
+    { label: "Sales workspace", to: "/sales/workspace", duty: "sales.order.read" },
     { label: "Sales orders", to: "/sales/orders", duty: "sales.order.read" },
     { label: "New order", to: "/sales/orders/new", duty: "sales.order.write" },
     { label: "Quotations", to: "/sales/quotations", duty: "sales.order.read" },

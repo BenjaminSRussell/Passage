@@ -1208,6 +1208,47 @@ paths:
             application/problem+json:
               schema: {$ref: "#/components/schemas/Problem"}
         "428": {$ref: "#/components/responses/Problem"}
+  /v1/sales/quotations:expire:
+    post:
+      summary: Expire lapsed quotations - every DRAFT or SENT quotation past its validity becomes EXPIRED, up to 500 per run (FR-27.1)
+      description: >-
+        The run the hourly quotation-expiry job calls. It is state-based, so repeating it is harmless and it
+        takes no Idempotency-Key. Each quotation's version is bumped and quotation.expired is written in the
+        same transaction. When more is true the batch limit stopped the run; call it again.
+      operationId: expireQuotations
+      x-passage-duty: sales.quotation.maintain
+      parameters:
+        - $ref: "#/components/parameters/LegalEntityQuery"
+      responses:
+        "200":
+          description: the quotations expired by this run, possibly none
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ExpireResult"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
+  /v1/sales/summary:
+    get:
+      summary: Sales workspace tiles (active holds, backorder lines, quotations expiring) and the quotation pipeline KPIs
+      description: >-
+        The tiles and the conversion rate ignore the pipeline filters (status, minProbabilityPct,
+        expiringWithinDays), which narrow the pipeline only. Days are UTC calendar days.
+      operationId: getSalesSummary
+      x-passage-duty: sales.order.read
+      parameters:
+        - $ref: "#/components/parameters/LegalEntityQuery"
+        - {name: windowDays, in: query, description: Days over which the conversion rate is measured, schema: {type: integer, minimum: 1, maximum: 365, default: 90}}
+        - {name: status, in: query, description: Pipeline filter - only DRAFT or only SENT quotations (default both), schema: {type: string, enum: [DRAFT, SENT]}}
+        - {name: minProbabilityPct, in: query, description: Pipeline filter - only quotations whose win probability is at least this, schema: {type: integer, minimum: 0, maximum: 100, default: 0}}
+        - {name: expiringWithinDays, in: query, description: Pipeline filter - only quotations whose last valid day is today or within the next N-1 days (default any validity), schema: {type: integer, minimum: 1, maximum: 365}}
+      responses:
+        "200":
+          description: the counts and pipeline of the caller's legal entities
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/SalesSummary"}
+        "400": {$ref: "#/components/responses/Problem"}
+        "403": {$ref: "#/components/responses/Problem"}
   /v1/sales/holds:
     get:
       summary: Release queue - ACTIVE holds oldest first with the failed credit rule and the customer's limit (holdType=CREDIT is the credit release queue)
@@ -1611,6 +1652,54 @@ components:
         application/problem+json:
           schema: {$ref: "#/components/schemas/Problem"}
   schemas:
+    ExpiredQuotation:
+      type: object
+      required: [id, quotationNumber, legalEntityId, customerId, validUntil, previousStatus, version]
+      properties:
+        id: {type: string, format: uuid}
+        quotationNumber: {type: string, example: "SQ-0000001"}
+        legalEntityId: {type: string, format: uuid}
+        customerId: {type: string, format: uuid}
+        validUntil: {type: string, format: date}
+        previousStatus: {type: string, enum: [DRAFT, SENT]}
+        version: {type: integer, description: the quotation version after the expiry}
+    ExpireResult:
+      type: object
+      required: [expired, count, more]
+      properties:
+        expired:
+          type: array
+          items: {$ref: "#/components/schemas/ExpiredQuotation"}
+        count: {type: integer}
+        more: {type: boolean, description: true when the 500-quotation batch limit stopped the run}
+    PipelineCurrency:
+      type: object
+      required: [currency, openCount, openNet, weightedNet]
+      properties:
+        currency: {type: string, description: ISO 4217 alpha-3; currencies are never added together}
+        openCount: {type: integer}
+        openNet: {$ref: "#/components/schemas/Money"}
+        weightedNet: {allOf: [{$ref: "#/components/schemas/Money"}], description: sum of net total times win probability}
+    SalesSummary:
+      type: object
+      required: [activeHolds, backorderLines, quotationsExpiring, quotationsLapsed, pipeline, windowDays, won, lost, expired]
+      properties:
+        activeHolds: {type: integer, description: ACTIVE order holds of every type}
+        backorderLines: {type: integer, description: BACKORDER and UNPROMISED schedule lines of CONFIRMED orders}
+        quotationsExpiring: {type: integer, description: open quotations whose last valid day is today or one of the next 6 days}
+        quotationsLapsed: {type: integer, description: open quotations already past their validity that no expiry run has closed}
+        pipeline:
+          type: array
+          description: valid DRAFT and SENT quotations per currency, narrowed by the pipeline filters
+          items: {$ref: "#/components/schemas/PipelineCurrency"}
+        windowDays: {type: integer}
+        won: {type: integer, description: CONVERTED quotations last updated within the window}
+        lost: {type: integer, description: LOST quotations last updated within the window}
+        expired: {type: integer, description: EXPIRED quotations last updated within the window}
+        conversionRatePct:
+          type: string
+          description: won / (won + lost + expired) in percent at one place; absent when nothing closed in the window
+          example: "42.9"
     AllocationQuotaRequest:
       type: object
       required: [legalEntityId, productId, periodStart, periodEnd, quotaQty]

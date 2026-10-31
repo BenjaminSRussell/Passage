@@ -150,6 +150,8 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyQuotation)).Post(quotations+"/{id}:send", a.sendQuotation)
 	r.With(authz.RequireDuty(dutyQuotation)).Post(quotations+"/{id}:lose", a.loseQuotation)
 	r.With(authz.RequireDuty(dutyQuotation)).Post(quotations+"/{id}:convert", a.convertQuotation)
+	r.With(authz.RequireDuty(dutyQuotation)).Post(expirationRun, a.expireQuotations)
+	r.With(authz.RequireDuty(dutyRead)).Get(summaryPath, a.getSummary)
 	r.With(requireAny(dutyCreditRelease, dutyHold)).Get(holdQueue, a.listHolds)
 	r.With(authz.RequireDuty(dutyListing)).Post(suppRules, a.createSupplementaryRule)
 	r.With(authz.RequireDuty(dutyRead)).Get(suppRules, a.listSupplementaryRules)

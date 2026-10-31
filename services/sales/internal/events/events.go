@@ -17,6 +17,7 @@ var (
 	OrderCancelled       = events.Type(Context, "order", "cancelled", 1)
 	AgreementReleased    = events.Type(Context, "agreement", "released", 1)
 	QuotationConverted   = events.Type(Context, "quotation", "converted", 1)
+	QuotationExpired     = events.Type(Context, "quotation", "expired", 1)
 	AllocationQuotaSet   = events.Type(Context, "allocationquota", "created", 1)
 	AllocationQuotaMoved = events.Type(Context, "allocationquota", "changed", 1)
 	AllocationConsumed   = events.Type(Context, "allocation", "consumed", 1)
@@ -34,7 +35,7 @@ var (
 // All lists every event type this service publishes.
 func All() []string {
 	return []string{OrderConfirmed, OrderHoldApplied, OrderHoldReleased, CreditCheckEvaluated, OrderChanged, OrderCancelled, AgreementReleased,
-		QuotationConverted, AllocationQuotaSet, AllocationQuotaMoved, AllocationConsumed, AllocationReturned, ATPPromised,
+		QuotationConverted, QuotationExpired, AllocationQuotaSet, AllocationQuotaMoved, AllocationConsumed, AllocationReturned, ATPPromised,
 		ScheduleReleaseReceived, ScheduleReleaseResolved, ScheduleReleaseRecalculated, BackorderRunCommitted, ParametersChanged}
 }
 
@@ -113,6 +114,23 @@ type QuotationConvertedData struct {
 	OrderID         string `json:"order_id"`
 	OrderNumber     string `json:"order_number"`
 	Lines           []int  `json:"lines"`
+	Actor           string `json:"actor"`
+	Version         int    `json:"version"`
+}
+
+// QuotationExpiredData is the data member of quotation.expired.v1: a DRAFT or
+// SENT quotation whose validity had passed was moved to EXPIRED by the expiry
+// run (FR-27.1). net_total is a decimal string in currency.
+type QuotationExpiredData struct {
+	QuotationID     string `json:"quotation_id"`
+	QuotationNumber string `json:"quotation_number"`
+	LegalEntityID   string `json:"legal_entity_id"`
+	CustomerID      string `json:"customer_id"`
+	ValidUntil      string `json:"valid_until"`
+	PreviousStatus  string `json:"previous_status"`
+	ProbabilityPct  int    `json:"probability_pct"`
+	NetTotal        string `json:"net_total"`
+	Currency        string `json:"currency"`
 	Actor           string `json:"actor"`
 	Version         int    `json:"version"`
 }

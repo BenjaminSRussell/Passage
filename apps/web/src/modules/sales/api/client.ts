@@ -1278,3 +1278,66 @@ export function createBackorderRun(input: BackorderRunInput, key: string = newKe
 export function commitBackorderRun(id: string, etag: string): Promise<Versioned<BackorderRun>> {
   return versioned<BackorderRun>(`/backorder-runs/${encodeURIComponent(id)}:commit`, { method: "POST", headers: { "If-Match": etag } });
 }
+
+/** One quotation moved to EXPIRED by an expiry run. */
+export interface ExpiredQuotation {
+  id: string;
+  quotationNumber: string;
+  legalEntityId: string;
+  customerId: string;
+  validUntil: string;
+  previousStatus: "DRAFT" | "SENT";
+  version: number;
+}
+
+export interface ExpireResult {
+  expired: ExpiredQuotation[];
+  count: number;
+  /** True when the 500-quotation batch limit stopped the run; run it again. */
+  more: boolean;
+}
+
+/** Moves every DRAFT or SENT quotation past its validity to EXPIRED (FR-27.1). Repeating it is harmless. */
+export async function expireQuotations(legalEntityId = "", signal?: AbortSignal): Promise<ExpireResult> {
+  return json<ExpireResult>(`/quotations:expire${query({ legalEntityId })}`, { method: "POST" }, signal);
+}
+
+export interface PipelineCurrency {
+  currency: string;
+  openCount: number;
+  openNet: Decimal;
+  /** Sum of net total times win probability. */
+  weightedNet: Decimal;
+}
+
+/** Workspace tiles and quotation pipeline KPIs (PRD §5.27.14). */
+export interface SalesSummary {
+  activeHolds: number;
+  backorderLines: number;
+  quotationsExpiring: number;
+  quotationsLapsed: number;
+  pipeline: PipelineCurrency[];
+  windowDays: number;
+  won: number;
+  lost: number;
+  expired: number;
+  /** Percent at one place; absent when nothing closed in the window. */
+  conversionRatePct?: Decimal;
+}
+
+/** Workspace scope and the pipeline KPI filters (status, expiry window, probability; PRD §5.27.14). */
+export interface SalesSummaryFilter {
+  legalEntityId?: string;
+  windowDays?: number;
+  /** Pipeline only: DRAFT or SENT; both when absent. */
+  status?: "DRAFT" | "SENT";
+  /** Pipeline only: the lowest win probability included. */
+  minProbabilityPct?: number;
+  /** Pipeline only: last valid day within this many days from today. */
+  expiringWithinDays?: number;
+}
+
+export function getSalesSummary(filter: SalesSummaryFilter = {}, signal?: AbortSignal): Promise<SalesSummary> {
+  const { legalEntityId, windowDays, status, minProbabilityPct, expiringWithinDays } = filter;
+  return json<SalesSummary>(`/summary${query({ legalEntityId, windowDays, status, minProbabilityPct, expiringWithinDays })}`, {}, signal);
+}

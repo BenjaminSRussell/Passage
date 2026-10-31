@@ -17,7 +17,7 @@ Out of these slices (see `NOT-IMPLEMENTED.md`): amount-based agreements and
 scheduling releases driven by w28 shipments and EDI, the ATP projection and reservations,
 change approval and `:cancel-remainder`, the committed backorder run,
 allocation, consignment, OPTIONAL supplementary items prompted in an order-entry
-grid, w8 related products as a proposal source, quotation expiry job and PDF, the intake dedup window beyond the
+grid, w8 related products as a proposal source, the hourly scheduler for quotation expiry, the quotation PDF, the intake dedup window beyond the
 order's own key, and the Temporal release workflow.
 
 ## Run
@@ -120,6 +120,8 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
 | POST | `/v1/sales/quotations/{id}:lose` | `sales.quotation.maintain` | `If-Match`; `{reason}`; DRAFT or SENT to LOST |
 | POST | `/v1/sales/quotations/{id}:convert` | `sales.quotation.maintain` | `If-Match`; optional `{lineNos, listingOverrideReason}` (empty converts every open line); 201 with the CONVERTED quotation and one DRAFT order; emits `quotation.converted` |
 | GET | `/v1/sales/holds` | `sales.credit.release` or `sales.order.hold` | Release queue: ACTIVE holds oldest first (`legalEntityId`, `holdType`, `limit`) with the failed credit rule, the customer's credit limit and the order version for the release call |
+| POST | `/v1/sales/quotations:expire` | `sales.quotation.maintain` | Expiry run (`legalEntityId` optional): DRAFT and SENT quotations past their validity become EXPIRED, oldest first, up to 500 per run (`more` says to call again), each with a version bump and `quotation.expired` in the same transaction; state-based, so a repeat expires nothing twice |
+| GET | `/v1/sales/summary` | `sales.order.read` | Workspace tiles (ACTIVE holds, backorder schedule lines, quotations ending within 7 days, lapsed open quotations), the open pipeline per currency (count, net, probability-weighted net) narrowed by `status`, `minProbabilityPct` and `expiringWithinDays`, and won/lost/expired with the conversion rate over `windowDays` (default 90) |
 | GET / POST | `/v1/sales/supplementary-item-rules` | `sales.order.read` / `sales.listing.maintain` | List (`legalEntityId`, `parentProductId`, `limit`); create a rule (one per parent, customer or all customers, and item) |
 | DELETE | `/v1/sales/supplementary-item-rules/{id}` | `sales.listing.maintain` | Remove a rule |
 | POST | `/v1/sales/supplementary-items:evaluate` | `sales.order.read` | Stateless: the MANDATORY and OPTIONAL supplementary lines a parent product and quantity trigger for a customer |
@@ -190,8 +192,8 @@ Contract: `api/openapi.yaml`. Events: `events/asyncapi.yaml`.
   REDISTRIBUTE may move confirmed quantity to higher priority; FILL serves by
   requested date; LOSE may deconfirm only lines at or above `loseThreshold`
   (default 3). A run that cannot keep a protected confirmation is refused.
-- **FR-27.1 / BR-27.5** quotations: DRAFT → SENT → CONVERTED or LOST (EXPIRED
-  and CANCELLED exist as states; nothing sets them yet). A quotation is valid
+- **FR-27.1 / BR-27.5** quotations: DRAFT → SENT → CONVERTED or LOST (`POST /quotations:expire` sets EXPIRED
+  for quotations past validity; CANCELLED exists as a state nothing sets yet). A quotation is valid
   through its `validUntil` day (default +30 days, at most 365); an expired
   quotation can be neither sent nor converted (`SLS-0031`). `:convert` takes
   the quotation's row lock and, in one transaction, creates one DRAFT order

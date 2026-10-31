@@ -242,6 +242,8 @@ type Store interface {
 	SendQuotation(ctx context.Context, id string, version int, now time.Time) (Quotation, error)
 	LoseQuotation(ctx context.Context, id string, version int, reason string) (Quotation, error)
 	ConvertQuotation(ctx context.Context, id string, in ConvertRequest, now time.Time) (QuotationConversion, error)
+	ExpireQuotations(ctx context.Context, legalEntityID string, today time.Time, actor string) (ExpireResult, error)
+	Summary(ctx context.Context, f SummaryFilter) (Summary, error)
 	ListHolds(ctx context.Context, f HoldQueueFilter) ([]HoldQueueItem, error)
 	CreateSupplementaryRule(ctx context.Context, in domain.SupplementaryRule, actor string) (domain.SupplementaryRule, error)
 	ListSupplementaryRules(ctx context.Context, f SupplementaryRuleFilter) ([]domain.SupplementaryRule, error)
