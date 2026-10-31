@@ -19,6 +19,7 @@ info:
     operation.statuschanged reports an operation finished or reopened by its command (FR-21.6).
     orderchange.detected, .applied and .dismissed report order change management (FR-21.16): an
     open order whose BOM or route an ECO superseded, and what the planner did with the change.
+    parameters.saved reports the production parameters of a site created or replaced (PRD 4.21.13).
 channels:
   passage.production.order:
     address: passage.production.order
@@ -80,6 +81,12 @@ channels:
         $ref: '#/components/messages/orderChangeApplied'
       dismissed:
         $ref: '#/components/messages/orderChangeDismissed'
+  passage.production.parameters:
+    address: passage.production.parameters
+    description: Keyed by legal entity id (the outbox aggregate), so the changes of one legal entity's parameters stay ordered.
+    messages:
+      saved:
+        $ref: '#/components/messages/parametersSaved'
 operations:
   onOrderCreated:
     action: send
@@ -145,6 +152,10 @@ operations:
     action: send
     channel: { $ref: '#/channels/passage.production.orderchange' }
     messages: [{ $ref: '#/channels/passage.production.orderchange/messages/dismissed' }]
+  onParametersSaved:
+    action: send
+    channel: { $ref: '#/channels/passage.production.parameters' }
+    messages: [{ $ref: '#/channels/passage.production.parameters/messages/saved' }]
 components:
   messages:
     orderCreated:
@@ -512,6 +523,27 @@ components:
           actor: { type: string }
           occurredAt: { type: string, format: date-time }
       x-passage-type: dev.passage.production.orderchange.dismissed.v1
+    parametersSaved:
+      name: saved
+      title: Production parameters saved
+      description: 'Emitted in the transaction of `PUT /v1/production/parameters` when the parameters of a site (or All sites) of a legal entity are created or replaced (PRD 4.21.13). The payload is the row after the save. Consumers: audit, analytics.'
+      payload:
+        type: object
+        required: [legalEntityId, siteId, rafTolerancePct, overConsumptionPct, autoStartOnFeedback, estimateOnCreate, splitAllocation, triggerPointsEnabled, asBuiltRequired, version, actor, occurredAt]
+        properties:
+          legalEntityId: { type: string, format: uuid }
+          siteId: { type: string, description: A site UUID, or All. }
+          rafTolerancePct: { type: string, description: 'Over-delivery allowed on report as finished, 0 to 100.' }
+          overConsumptionPct: { type: string, description: 'Picking beyond the required quantity allowed without the over-consumption duty, 0 to 1000.' }
+          autoStartOnFeedback: { type: boolean }
+          estimateOnCreate: { type: boolean }
+          splitAllocation: { type: string, enum: [proportional, keep-on-original] }
+          triggerPointsEnabled: { type: boolean }
+          asBuiltRequired: { type: boolean }
+          version: { type: integer }
+          actor: { type: string }
+          occurredAt: { type: string, format: date-time }
+      x-passage-type: dev.passage.production.parameters.saved.v1
   schemas:
     reworkReference:
       type: object

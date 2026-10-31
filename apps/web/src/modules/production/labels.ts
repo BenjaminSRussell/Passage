@@ -4,6 +4,7 @@ import type {
   ChangeStatus,
   CoProductType,
   OCMMode,
+  SplitAllocation,
   CostGroup,
   EditOp,
   Flushing,
@@ -266,3 +267,10 @@ export function describeDelta(d: {
   add(d.operationsChanged, "operations changed");
   return parts.length > 0 ? parts.join(", ") : "No difference";
 }
+
+export const splitAllocationLabel: Record<SplitAllocation, string> = {
+  proportional: "Proportional (consumption, hours and WIP move with the quantity)",
+  "keep-on-original": "Keep on the original order",
+};
+
+export const yesNo = (value: boolean) => (value ? "Yes" : "No");

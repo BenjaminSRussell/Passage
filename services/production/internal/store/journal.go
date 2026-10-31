@@ -180,7 +180,11 @@ func (s *Postgres) CreateJournal(ctx context.Context, in NewJournal) (Journal, b
 		if err != nil {
 			return err
 		}
-		if !domain.JournalAllowed(in.Type, h.status, in.AutoStart) {
+		prm, err := orderParameters(ctx, tx, p.TenantID, h, domain.Parameters{AutoStartOnFeedback: in.AutoStart})
+		if err != nil {
+			return err
+		}
+		if !domain.JournalAllowed(in.Type, h.status, prm.AutoStartOnFeedback) {
 			return journalNotAllowed(in.Type, h.status)
 		}
 		if in.PostingDate == "" {
@@ -436,7 +440,12 @@ func (s *Postgres) PostJournal(ctx context.Context, r PostRequest) (Journal, boo
 		if j.Posted {
 			return httpx.NewProblem(http.StatusConflict, CodeJournalPosted, "the journal is already posted")
 		}
-		if !domain.JournalAllowed(j.Type, h.status, r.AutoStart) {
+		prm, err := orderParameters(ctx, tx, p.TenantID, h, domain.Parameters{AutoStartOnFeedback: r.AutoStart,
+			OverConsumptionPct: r.OverConsumptionPct, RAFTolerancePct: r.RAFTolerancePct})
+		if err != nil {
+			return err
+		}
+		if !domain.JournalAllowed(j.Type, h.status, prm.AutoStartOnFeedback) {
 			return journalNotAllowed(j.Type, h.status)
 		}
 		from := h.status
@@ -450,7 +459,7 @@ func (s *Postgres) PostJournal(ctx context.Context, r PostRequest) (Journal, boo
 			}
 			h.status = domain.Started
 		}
-		opts := postOptions{overDuty: r.OverConsumptionDuty, overPct: r.OverConsumptionPct, rafTolerancePct: r.RAFTolerancePct, actor: r.Actor, key: r.IdempotencyKey}
+		opts := postOptions{overDuty: r.OverConsumptionDuty, overPct: prm.OverConsumptionPct, rafTolerancePct: prm.RAFTolerancePct, actor: r.Actor, key: r.IdempotencyKey}
 		if err := postJournal(ctx, tx, p.TenantID, &h, &j, opts); err != nil {
 			return err
 		}

@@ -297,6 +297,10 @@ func fireTriggers(ctx context.Context, tx pgx.Tx, tenantID string, h orderHead, 
 	if err != nil || len(tps) == 0 {
 		return err
 	}
+	prm, err := orderParameters(ctx, tx, tenantID, h, domain.Parameters{})
+	if err != nil || !prm.TriggerPointsEnabled {
+		return err
+	}
 	defs := make([]domain.TriggerPoint, len(tps))
 	for i, tp := range tps {
 		defs[i] = tp.TriggerPoint

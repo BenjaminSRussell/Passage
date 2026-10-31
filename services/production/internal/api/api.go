@@ -149,6 +149,8 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutySetupWrite)).Post("/v1/production/orders/{id}/trigger-points", a.createTriggerPoint)
 	r.With(authz.RequireDuty(DutySetupWrite)).Delete("/v1/production/trigger-points/{id}", a.deleteTriggerPoint)
 	r.With(authz.RequireDuty(DutyJournalPost)).Post("/v1/production/orders/{id}/operations/{operCommand}", a.operationCommand)
+	r.With(authz.RequireDuty(DutySetupRead)).Get("/v1/production/parameters", a.listParameters)
+	r.With(authz.RequireDuty(DutySetupWrite)).Put("/v1/production/parameters", a.saveParameters)
 	r.With(authz.RequireDuty(DutySetupRead)).Get("/v1/production/ocm-profiles", a.listOCMProfiles)
 	r.With(authz.RequireDuty(DutySetupWrite)).Put("/v1/production/ocm-profiles", a.saveOCMProfile)
 	r.With(authz.RequireDuty(DutyWrite)).Post("/v1/production/order-changes:detect", a.detectChanges)

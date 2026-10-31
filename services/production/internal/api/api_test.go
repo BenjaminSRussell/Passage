@@ -72,7 +72,8 @@ type fakeStore struct {
 	operOutcome  store.OperationOutcome
 	operErr      error
 	// order change management (FR-21.16)
-	ocm ocmFake
+	ocm    ocmFake
+	params paramsFake
 }
 
 func (f *fakeStore) Ping(context.Context) error { return f.pingErr }

@@ -39,12 +39,15 @@ var (
 	OrderChangeDetected  = events.Type(Context, "orderchange", "detected", 1)
 	OrderChangeApplied   = events.Type(Context, "orderchange", "applied", 1)
 	OrderChangeDismissed = events.Type(Context, "orderchange", "dismissed", 1)
+	// ParametersSaved reports the production parameters of a site created or replaced
+	// (PRD 4.21.13); the aggregate is the legal entity.
+	ParametersSaved = events.Type(Context, "parameters", "saved", 1)
 )
 
 // All lists every event type this service publishes.
 func All() []string {
 	return []string{OrderCreated, OrderUpdated, OrderStatusChanged, OrderSettled, JournalPosted, AsBuiltAssigned, AsBuiltDetached, OrderBOMEdited, TriggerPointFired,
-		SubcontractPORequested, SubcontractPOChanged, SubcontractPOCancelled, OperationStatusChanged, OrderChangeDetected, OrderChangeApplied, OrderChangeDismissed}
+		SubcontractPORequested, SubcontractPOChanged, SubcontractPOCancelled, OperationStatusChanged, OrderChangeDetected, OrderChangeApplied, OrderChangeDismissed, ParametersSaved}
 }
 
 // OrderChangeData is the payload of orderchange.detected.v1, .applied.v1 and
@@ -332,4 +335,20 @@ type TriggerPointFiredData struct {
 	InsertedOperations []int           `json:"insertedOperations"`
 	ReworkOrderID      *string         `json:"reworkOrderId"`
 	Actor              string          `json:"actor"`
+}
+
+// ParametersSavedData is the payload of parameters.saved.v1: the parameters after the save.
+type ParametersSavedData struct {
+	LegalEntityID        string `json:"legalEntityId"`
+	SiteID               string `json:"siteId"`
+	RAFTolerancePct      string `json:"rafTolerancePct"`
+	OverConsumptionPct   string `json:"overConsumptionPct"`
+	AutoStartOnFeedback  bool   `json:"autoStartOnFeedback"`
+	EstimateOnCreate     bool   `json:"estimateOnCreate"`
+	SplitAllocation      string `json:"splitAllocation"`
+	TriggerPointsEnabled bool   `json:"triggerPointsEnabled"`
+	AsBuiltRequired      bool   `json:"asBuiltRequired"`
+	Version              int    `json:"version"`
+	Actor                string `json:"actor"`
+	OccurredAt           string `json:"occurredAt"`
 }

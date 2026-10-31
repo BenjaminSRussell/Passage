@@ -1472,3 +1472,45 @@ export function resetTargets(status: ProductionStatus): ProductionStatus[] {
   const at = order.indexOf(status);
   return at <= 0 ? [] : order.slice(0, at).reverse();
 }
+
+// ---- Production parameters (PRD 4.21.13) ----
+
+export const SPLIT_ALLOCATIONS: SplitAllocation[] = ["proportional", "keep-on-original"];
+
+export interface ProductionParametersInput {
+  /** A site id, or All. */
+  siteId: string;
+  rafTolerancePct: string;
+  overConsumptionPct: string;
+  autoStartOnFeedback: boolean;
+  estimateOnCreate: boolean;
+  splitAllocation: SplitAllocation;
+  triggerPointsEnabled: boolean;
+  asBuiltRequired: boolean;
+}
+
+export interface ProductionParameters extends ProductionParametersInput {
+  version: number;
+  updatedBy?: string;
+  updatedAt?: string;
+}
+
+/** The stored parameters of the caller's legal entity and the service defaults that apply to a site with none. */
+export interface ProductionParametersList {
+  items: ProductionParameters[];
+  defaults: ProductionParametersInput | null;
+}
+
+export async function listProductionParameters(signal?: AbortSignal): Promise<ProductionParametersList> {
+  const body = await requestAt<{ items?: ProductionParameters[]; defaults?: ProductionParametersInput }>(`${root}/parameters`, { signal });
+  return { items: Array.isArray(body.items) ? body.items : [], defaults: body.defaults ?? null };
+}
+
+/** Creates the parameters of a site (no version) or replaces them under If-Match. */
+export function saveProductionParameters(input: ProductionParametersInput, version?: number): Promise<ProductionParameters> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (version !== undefined) {
+    headers["If-Match"] = `"${version}"`;
+  }
+  return requestAt<ProductionParameters>(`${root}/parameters`, { method: "PUT", headers, body: JSON.stringify(input) });
+}

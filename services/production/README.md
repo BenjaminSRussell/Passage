@@ -6,7 +6,7 @@ as-built genealogy; slice 4 adds the bulk status update, and split and merge (sl
 order-specific BOM and route edits and the WIP balance and variance reports; slice 6 adds trigger
 points on operation feedback; slice 7 adds subcontract purchase requests; slice 9 adds the item's
 order quantity rules, estimate on create and the operation finish and reopen commands; slice 10 adds
-order change management (OCM profiles, ECO detection, change preview and cost, apply and dismiss).
+order change management (OCM profiles, ECO detection, change preview and cost, apply and dismiss); slice 16 adds the per-site production parameters.
 
 Slice 1:
 
@@ -440,3 +440,16 @@ Slice 15:
   `poCancelledAt` (migration `0012_subcontract_changes.sql`), so a later release or a switch back on
   requests afresh. The comparison is `domain.PlanSubcontractChanges`, run in the transaction of the
   change. The subcontract inquiry and the order's route tab show a withdrawn request.
+
+Slice 16:
+
+- Production parameters (PRD 4.21.13): `GET`/`PUT /v1/production/parameters` store, per legal entity ×
+  site (a site id, or `All`; a site's row wins), the RAF tolerance, over-consumption tolerance,
+  auto-start on feedback, estimate on create, split allocation default, trigger points enabled and
+  as-built required (migration `0013_parameters.sql`, `domain.ResolveParameters`). `PUT` replaces
+  under If-Match, needs every setting and enqueues `parameters.saved` in the same transaction. The
+  store resolves the order's legal entity and site inside each transaction: a stored row overrides
+  the service environment (`PRODUCTION_RAF_TOLERANCE_PCT` and the others, which stay the defaults
+  for a site with no row) on creating and posting journals, report as finished, create, split and
+  trigger evaluation. With as-built required, `:end` of an order that reported output without an
+  attached as-built record is refused with 422 `PRODUCTION_AS_BUILT_REQUIRED`.

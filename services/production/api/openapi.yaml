@@ -976,6 +976,40 @@ components:
       type: string
       enum: [automatic, manual, none]
       description: automatic applies the change at the order's next status command (except cancel) unless the order was edited by hand or the change is blocked, and lists it until then; manual lists it for the planner to apply; none ignores superseded versions.
+    ParameterValues:
+      type: object
+      properties:
+        siteId: { type: string, description: 'A site UUID, or All.' }
+        rafTolerancePct: { $ref: '#/components/schemas/Decimal', description: 'Over-delivery allowed on report as finished, 0 to 100, two decimals.' }
+        overConsumptionPct: { $ref: '#/components/schemas/Decimal', description: 'Picking beyond the required quantity allowed without the over-consumption duty, 0 to 1000, two decimals.' }
+        autoStartOnFeedback: { type: boolean, description: A route card on a Released order starts it. }
+        estimateOnCreate: { type: boolean, description: A new order is estimated in its create transaction. }
+        splitAllocation: { type: string, enum: [proportional, keep-on-original], description: Allocation of a split of a Started order that names none. }
+        triggerPointsEnabled: { type: boolean, description: Route-card feedback evaluates the order's trigger points. }
+        asBuiltRequired: { type: boolean, description: ':end is refused for an order that reported output without an as-built record.' }
+    ProductionParametersInput:
+      type: object
+      required: [rafTolerancePct, overConsumptionPct, autoStartOnFeedback, estimateOnCreate, splitAllocation, triggerPointsEnabled, asBuiltRequired]
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid, description: Defaults to the caller's legal entity. }
+        siteId: { type: string, description: 'A site UUID, or All (the default).' }
+        rafTolerancePct: { $ref: '#/components/schemas/Decimal' }
+        overConsumptionPct: { $ref: '#/components/schemas/Decimal' }
+        autoStartOnFeedback: { type: boolean }
+        estimateOnCreate: { type: boolean }
+        splitAllocation: { type: string, enum: [proportional, keep-on-original] }
+        triggerPointsEnabled: { type: boolean }
+        asBuiltRequired: { type: boolean }
+    ProductionParameters:
+      allOf:
+        - $ref: '#/components/schemas/ParameterValues'
+        - type: object
+          properties:
+            legalEntityId: { type: string, format: uuid }
+            version: { type: integer }
+            updatedBy: { type: string }
+            updatedAt: { type: string, format: date-time }
     OCMProfileInput:
       type: object
       required: [mode]
@@ -1370,7 +1404,7 @@ paths:
         '404': { description: Unknown order or command (PRODUCTION_ORDER_NOT_FOUND, PRODUCTION_UNKNOWN_ACTION), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '409': { description: 'PRODUCTION_ILLEGAL_TRANSITION (also a reset back before Started of an order that took part in a split transfer, BR-21.11); PRODUCTION_UNPOSTED_JOURNALS on end', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '412': { description: conflict_version, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
-        '422': { description: 'Guard failed (PRODUCTION_END_REQUIRES_RAF, PRODUCTION_ZERO_OUTPUT_NOT_PERMITTED, PRODUCTION_RAF_EXCEEDS_REMAINING, PRODUCTION_INVALID_INPUT, PRODUCTION_POSTING_PROFILE_MISSING, PRODUCTION_END_BEFORE_LAST_JOURNAL, PRODUCTION_POSTING_NOT_BALANCED) or key reused (idempotency_key_reuse)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { description: 'Guard failed (PRODUCTION_END_REQUIRES_RAF, PRODUCTION_ZERO_OUTPUT_NOT_PERMITTED, PRODUCTION_RAF_EXCEEDS_REMAINING, PRODUCTION_INVALID_INPUT, PRODUCTION_POSTING_PROFILE_MISSING, PRODUCTION_END_BEFORE_LAST_JOURNAL, PRODUCTION_POSTING_NOT_BALANCED, PRODUCTION_AS_BUILT_REQUIRED) or key reused (idempotency_key_reuse)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '428': { description: precondition_required, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/production/orders/{id}:split:
     post:
@@ -2071,6 +2105,77 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { description: PRODUCTION_TRIGGER_POINT_NOT_FOUND, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '409': { description: PRODUCTION_TRIGGER_POINT_FIRED, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /v1/production/parameters:
+    get:
+      operationId: listProductionParameters
+      summary: The production parameters of a legal entity, the service defaults, and the ones that apply to a site (PRD 4.21.13)
+      description: |
+        Parameters are stored per legal entity × site (a site UUID, or All for every site). A
+        site's row wins over the All row; with neither stored, the service defaults apply
+        (`defaults`, from the service environment). With siteId the response carries
+        `resolved` and whether a stored row decided it.
+      x-passage-duty: production.setup.read
+      parameters:
+        - { name: legalEntityId, in: query, description: Defaults to the caller's legal entity., schema: { type: string, format: uuid } }
+        - { name: siteId, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The stored parameters, the defaults and, with siteId, the resolved parameters.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  legalEntityId: { type: string, format: uuid }
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/ProductionParameters' }
+                  defaults: { $ref: '#/components/schemas/ParameterValues' }
+                  resolved:
+                    allOf:
+                      - $ref: '#/components/schemas/ParameterValues'
+                      - type: object
+                        properties:
+                          stored: { type: boolean, description: True when a stored row decided the values. }
+        '400': { description: COM-0001, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+    put:
+      operationId: saveProductionParameters
+      summary: Create or replace the production parameters of a legal entity × site
+      description: |
+        Creating takes no If-Match; replacing needs If-Match with the row version. Every setting
+        is required, so a missing one is refused rather than switching a flag off. The tolerances
+        apply to report as finished and picking (FR-21.5, FR-21.7), auto-start to route cards
+        (FR-21.6), estimate on create to new orders, the split allocation to a split that names
+        none (FR-21.15), trigger points enabled to route-card trigger evaluation (FR-21.17) and
+        asBuiltRequired to `:end` (FR-21.19, PRODUCTION_AS_BUILT_REQUIRED).
+      x-passage-duty: production.setup.write
+      parameters:
+        - { name: If-Match, in: header, required: false, description: 'The row version, quoted; required to replace.', schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductionParametersInput' }
+      responses:
+        '201':
+          description: Created.
+          headers:
+            ETag: { description: 'The row version, quoted.', schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductionParameters' }
+        '200':
+          description: Replaced.
+          headers:
+            ETag: { description: 'The row version, quoted.', schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductionParameters' }
+        '400': { description: COM-0001 (a missing or out-of-range setting), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '412': { description: 'conflict_version (stale If-Match, If-Match on parameters that do not exist, or a create that lost to a concurrent create of the same site)', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '428': { description: precondition_required (replacing without If-Match), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /v1/production/ocm-profiles:
     get:
       operationId: listProductionOCMProfiles

@@ -142,11 +142,9 @@ func (a *API) split(w http.ResponseWriter, r *http.Request, id string) {
 		checkQuantity("multiple", *req.Multiple, false, fields)
 		in.Multiple = *req.Multiple
 	}
+	// An empty allocation is resolved by the store from the site's split allocation default.
 	in.Allocation = domain.Allocation(req.Allocation)
-	if in.Allocation == "" {
-		in.Allocation = domain.AllocProportional
-	}
-	if !in.Allocation.Valid() {
+	if in.Allocation != "" && !in.Allocation.Valid() {
 		fields["allocation"] = "must be proportional or keep-on-original"
 	}
 	if len(fields) > 0 {

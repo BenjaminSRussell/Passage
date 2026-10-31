@@ -215,6 +215,8 @@ type Store interface {
 	JournalInquiry(ctx context.Context, f JournalFilter) (JournalInquiry, error)
 	KPIs(ctx context.Context, f KPIFilter) (KPIReport, error)
 	ApplyOperationCommand(ctx context.Context, c OperationCommand) (Order, OperationOutcome, error)
+	ListParameters(ctx context.Context, legalEntityID string) ([]StoredParameters, error)
+	SaveParameters(ctx context.Context, in ParametersSave) (StoredParameters, bool, error)
 	ListOCMProfiles(ctx context.Context, legalEntityID string) ([]OCMProfile, error)
 	SaveOCMProfile(ctx context.Context, in OCMProfileSave) (OCMProfile, bool, error)
 	DetectOrderChanges(ctx context.Context, in ChangeDetect) (ChangeDetectResult, error)
@@ -290,11 +292,15 @@ func (s *Postgres) CreateOrder(ctx context.Context, in NewOrder) (Order, bool, e
 				return err
 			}
 		}
+		prm, err := effectiveParameters(ctx, tx, p.TenantID, in.LegalEntityID, in.SiteID, domain.Parameters{EstimateOnCreate: in.EstimateOnCreate})
+		if err != nil {
+			return err
+		}
 		id, err := insertOrder(ctx, tx, p.TenantID, p.UserID, in)
 		if err != nil {
 			return err
 		}
-		if in.EstimateOnCreate {
+		if prm.EstimateOnCreate {
 			if err := estimateOnCreate(ctx, tx, p.TenantID, p.UserID, id, in); err != nil {
 				return err
 			}
@@ -724,10 +730,23 @@ func (s *Postgres) Transition(ctx context.Context, t Transition) (Order, bool, e
 				return err
 			}
 		}
+		prm, err := orderParameters(ctx, tx, p.TenantID, h, domain.Parameters{RAFTolerancePct: t.RAFTolerancePct})
+		if err != nil {
+			return err
+		}
 		switch t.Command {
 		case domain.CmdEnd:
 			if err := domain.CheckEnd(from, h.qtyRAF, t.ZeroOutputDuty); err != nil {
 				return domainProblem(err)
+			}
+			if prm.AsBuiltRequired {
+				n, err := countAttachedAsBuilt(ctx, tx, p.TenantID, h.id)
+				if err != nil {
+					return err
+				}
+				if err := domain.CheckAsBuiltRequired(true, h.qtyRAF, n); err != nil {
+					return domainProblem(err)
+				}
 			}
 			if err := settleOrder(ctx, tx, p.TenantID, h, t.Actor); err != nil {
 				return err
@@ -737,12 +756,12 @@ func (s *Postgres) Transition(ctx context.Context, t Transition) (Order, bool, e
 				return err
 			}
 		case domain.CmdReportFinished:
-			if err := domain.CheckReportFinished(h.quantity, h.qtyRAF, h.qtyError, t.Good, t.Error, t.RAFTolerancePct); err != nil {
+			if err := domain.CheckReportFinished(h.quantity, h.qtyRAF, h.qtyError, t.Good, t.Error, prm.RAFTolerancePct); err != nil {
 				return domainProblem(err)
 			}
 			raf := NewJournal{Type: domain.JournalReportFinished, Proposal: domain.ProposeProportional, QtyGood: t.Good, QtyError: t.Error,
 				CoProductsProportional: true}
-			if err := autoPost(ctx, tx, p.TenantID, &h, raf, t.Actor, "sys:raf:"+t.IdempotencyKey, t.RAFTolerancePct); err != nil {
+			if err := autoPost(ctx, tx, p.TenantID, &h, raf, t.Actor, "sys:raf:"+t.IdempotencyKey, prm.RAFTolerancePct); err != nil {
 				return err
 			}
 		case domain.CmdEstimate:

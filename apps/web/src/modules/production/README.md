@@ -51,6 +51,7 @@ tests render the module routes inside a stand-in shell frame and run the in-repo
 - `/production/ocm-profiles`: OCM profile setup (mode, fixed surcharge and percentage) per item group
   and site. Detecting a change is done by the ECO notice (`order-changes:detect`), which has no
   screen: wave 9 and the wave 4 consumer call it.
+- `/production/parameters`: production parameters per site or All (`ParametersPage.tsx`): RAF and over-consumption tolerance, auto-start, estimate on create, split allocation default, trigger points and as-built required; the table lists the stored rows (empty state names the service defaults), a row opens for editing and saves under If-Match (`GET`/`PUT /api/v1/production/parameters`); nav duty `production.setup.read`, saving needs `production.setup.write` (a 403 shows as the service's refusal).
 
 ## Needs
 

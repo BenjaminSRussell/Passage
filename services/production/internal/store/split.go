@@ -110,6 +110,13 @@ func (s *Postgres) SplitOrder(ctx context.Context, in Split) (SplitResult, error
 			return domainProblem(err)
 		}
 		var transfer domain.Transfer
+		if in.Allocation == "" {
+			prm, err := orderParameters(ctx, tx, p.TenantID, h, domain.Parameters{})
+			if err != nil {
+				return err
+			}
+			in.Allocation = prm.SplitAllocation
+		}
 		if h.status == domain.Started {
 			if err := checkStartedSplit(ctx, tx, p.TenantID, h); err != nil {
 				return err
