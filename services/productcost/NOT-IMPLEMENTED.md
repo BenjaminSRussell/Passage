@@ -52,9 +52,9 @@ one of `built`, `partial`, `later slice of PSG-39` or `handoff`.
 
 | AC | Status | Reason |
 |---|---|---|
-| AC1 Roll-up fixtures: 50 multi-level products match a reference workbook across cost components | handoff (Finance) | No reference workbook is in the repository and `services/productcost/testdata/` does not exist. The worked example (AC-39.1) is an exact test. The 50-product fixture waits for the workbook. |
+| AC1 Roll-up fixtures: 50 multi-level products match a reference workbook across cost components | built (Finance sign-off open) | `internal/domain/testdata/rollup-50/`: 50 products 2 to 5 manufactured levels deep (the FR-39.4 worked example plus 49 generated, with shared subassemblies, phantoms, BOM and route scrap, operation lot sizes and all four sheet node types) and `workbook.csv`, the unit cost per product and component to the cent from an independent exact-rational reference model (`refRoll` in `fixtures_test.go`, no engine code). `TestRollupFixtures_FiftyProductsMatchReferenceWorkbook` matches all 296 cells; `TestRollupWorkbook_ReproducedByReferenceAndAnchoredToSpec` checks the workbook is the reference's output, its FG-100 row equals the hand-derived 104.32 split, and six-decimal storage stays within 0.001 of exact. A Finance-supplied workbook can replace `workbook.csv` unchanged. |
 | AC2 Activation revalues inventory exactly and posts the revaluation to the GL | later slice of PSG-39 | The preview arithmetic is exact and tested (AC-39.4 shape: 1,000 × 0.50 = 500.00 Dr Inventory / Cr Cost change variance). Posting needs D6. |
-| AC3 Variance decomposition sums to total for 200 ended production orders | partial | Identity is exact and property-tested for the decomposition (the four types sum to total per component and per order). The 200 ended fixture orders (`variance-200`) are not in the repository. |
+| AC3 Variance decomposition sums to total for 200 ended production orders | built | `internal/domain/testdata/variance-200/`: 200 ended orders (AC-39.5 first; short, exact, over-reported and zero output; USD, EUR, JPY, KWD) and `expected.csv` from an independent exact-rational reference (`refVariance`). `TestVarianceFixtures_TwoHundredEndedOrdersDecomposeToTotal` checks LSV + QV + PV + SV = total per component and per order, and total, LSV, PV and SV equal the reference to the minor unit. It found PV rounding on the wrong side of an exact half cent (RAF ÷ Q_order was divided first); `Decompose` now divides once per cell (`TestDecompose_HalfMinorUnitRoundsOnTheExactValue`). |
 | AC4 Mass roll of 50k items in < 15 min | partial | `TestMassRoll_FiftyThousandItemsEightLevels` rolls 50,000 items over 8 levels with 4 workers in the domain and asserts < 15 min. Over HTTP the platform caps a request body at 4 MiB, so a 50,000-item selection does not fit in one stateless `POST /v1/costing/rolls`; the real mass roll reads the selection from stored BOMs (D5). The real BOM shape, the 2 GiB worker memory limit and the benchmark on the target cluster are not measured. |
 | AC5 Every deliverable has code or is listed here | built | This file lists every deliverable not built. |
 | AC6 `go vet` and `go test` pass; web vitest and tsc pass; OpenAPI/AsyncAPI match code; chart lints | built | `TestOpenAPI_MatchesRoutes` checks every served route and its duty against `api/openapi.yaml`; `TestMigrationsApplyWithRLS` applies the schema and checks RLS (with `PASSAGE_TEST_DATABASE_URL`). `TestAsyncAPI_ListsExactlyThePublishedEvents` checks that `events/asyncapi.yaml` names exactly the four slice-5 events and their topics. |
@@ -64,11 +64,11 @@ one of `built`, `partial`, `later slice of PSG-39` or `handoff`.
 | AC | Status | Reason |
 |---|---|---|
 | AC-39.1 worked SA-200 / FG-100 = 104.32, split 21.20 / 54.00 / 2.12 / 27.00 | built | Exact test in `internal/domain`. |
-| AC-39.2 50 fixture products match the workbook to the cent | handoff (Finance) | See AC1. |
+| AC-39.2 50 fixture products match the workbook to the cent | built (Finance sign-off open) | See AC1. |
 | AC-39.3 50k items across 8 levels, diagnostics for every error | partial | The run and the diagnostics are built and tested. Measurement on target hardware is pending. |
 | AC-39.4 Activation journal Dr Inventory 500.00 / Cr Cost change variance 500.00 and the value report ties | partial | The journal and its preview are built and tested. The value report tie-out needs D6 and D11. |
 | AC-39.5 Order variance: QV 40.00, SV 7.50, LSV 0.00, total 47.50 plus labor PV | built | Tested. The test order also has a labor price variance of 4.00 (total 51.50). The ticket's "plus any labor PV" is satisfied by the decomposition. |
-| AC-39.6 200 ended fixture orders, Σ types = total | partial | Identity is property-tested. The fixture orders are not in the repository (AC3). |
+| AC-39.6 200 ended fixture orders, Σ types = total | built | See AC3. |
 | AC-39.7 PPV 2.00 for 10 at 5.20 vs 5.00 posts to DM | partial | The price-difference preview returns Dr PPV-DM 2.00 / Cr PriceDifferenceClearing 2.00 (tested over HTTP). Posting is D7. |
 | AC-39.8 Cyclic BOM errors with the cycle path, the run continues | built | Tested in the planner tests and the mass-roll API test. |
 | AC-39.9 Σ on-hand × standard = GL inventory per site | partial | The reconciliation computation is tested over HTTP. The month-end run on stored data is D11. |
@@ -91,7 +91,7 @@ one of `built`, `partial`, `later slice of PSG-39` or `handoff`.
 | Helm: umbrella chart and Argo CD app | handoff (deploy/ owner) | `deploy/` is not owned by this wave. |
 | Event publication: six events in section 7.39.5 | later slice of PSG-39 | The six PRD events need stored calculations, runs, activations, variances, conversions and sales order estimates. Slice 5 publishes four events that are not in the PRD table (cost component and cost group created, version created and transitioned) for the master data it stores. |
 | Metrics on the admin port | built | Counters on `Metrics()`; the entrypoint wires the admin port. |
-| Reference workbook and fixture directory `testdata/` (rollup-50, variance-200, activation-demo) | handoff (Finance / test-infra owner) | The fixtures and reference workbook are not in the repository. |
+| Reference workbook and fixture directory `testdata/` (rollup-50, variance-200, activation-demo) | partial | `internal/domain/testdata/rollup-50` and `variance-200` are built (regenerate with `PRODUCTCOST_UPDATE_FIXTURES=1`), their expected values from the independent reference model. Finance review of the workbook and `activation-demo` (needs D6) are open. |
 | Legacy AX/SAP migration (section 7.39.11) | handoff (migration-framework) | D20. |
 
 ## Interpretations of the PRD (for the business owner)

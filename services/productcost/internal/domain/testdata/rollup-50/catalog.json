@@ -1,0 +1,6743 @@
+{
+ "products": [
+  "FG-100",
+  "FG-001",
+  "FG-002",
+  "FG-003",
+  "FG-004",
+  "FG-005",
+  "FG-006",
+  "FG-007",
+  "FG-008",
+  "FG-009",
+  "FG-010",
+  "FG-011",
+  "FG-012",
+  "FG-013",
+  "FG-014",
+  "FG-015",
+  "FG-016",
+  "FG-017",
+  "FG-018",
+  "FG-019",
+  "FG-020",
+  "FG-021",
+  "FG-022",
+  "FG-023",
+  "FG-024",
+  "FG-025",
+  "FG-026",
+  "FG-027",
+  "FG-028",
+  "FG-029",
+  "FG-030",
+  "FG-031",
+  "FG-032",
+  "FG-033",
+  "FG-034",
+  "FG-035",
+  "FG-036",
+  "FG-037",
+  "FG-038",
+  "FG-039",
+  "FG-040",
+  "FG-041",
+  "FG-042",
+  "FG-043",
+  "FG-044",
+  "FG-045",
+  "FG-046",
+  "FG-047",
+  "FG-048",
+  "FG-049"
+ ],
+ "catalog": {
+  "FG-001": {
+   "id": "FG-001",
+   "kind": "Manufactured",
+   "costingLot": "3",
+   "bom": [
+    {
+     "childId": "RM-034",
+     "qty": "0.29",
+     "scrapPct": "2.9"
+    },
+    {
+     "childId": "SA3-01",
+     "qty": "2.197",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA2-12",
+     "qty": "0.65",
+     "scrapPct": "3.7"
+    },
+    {
+     "childId": "SA1-04",
+     "qty": "0.471",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "1.43",
+     "runHours": "0.86",
+     "rate": "39.66",
+     "lotSize": "7",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "MACH",
+     "type": "Rate",
+     "component": "IND-LAB",
+     "percentage": "0",
+     "rate": "57.08",
+     "rateUnit": "Hour",
+     "includeRolled": false
+    },
+    {
+     "id": "PACK",
+     "type": "Rate",
+     "component": "IND-MAT",
+     "percentage": "0",
+     "rate": "0.13",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-002": {
+   "id": "FG-002",
+   "kind": "Manufactured",
+   "costingLot": "5",
+   "bom": [
+    {
+     "childId": "RM-037",
+     "qty": "1.948",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-022",
+     "qty": "3.04",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA2-06",
+     "qty": "2.8",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-04",
+     "qty": "1.294",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-16",
+     "qty": "0.983",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "1.16",
+     "runHours": "0.1",
+     "rate": "21.1",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "2.39",
+     "runHours": "0.93",
+     "rate": "49.19",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "MACH",
+     "type": "Rate",
+     "component": "IND-LAB",
+     "percentage": "0",
+     "rate": "32.65",
+     "rateUnit": "Hour",
+     "includeRolled": false
+    },
+    {
+     "id": "PACK",
+     "type": "Rate",
+     "component": "IND-MAT",
+     "percentage": "0",
+     "rate": "3.01",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-003": {
+   "id": "FG-003",
+   "kind": "Manufactured",
+   "costingLot": "5",
+   "bom": [
+    {
+     "childId": "RM-022",
+     "qty": "2.024",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA2-07",
+     "qty": "1.42",
+     "scrapPct": "9.4"
+    },
+    {
+     "childId": "SA2-14",
+     "qty": "0.76",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "1.49",
+     "runHours": "0.83",
+     "rate": "91.15",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "1.08",
+     "runHours": "1.8",
+     "rate": "48.79",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "B-MAT",
+     "type": "Basis",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": true
+    },
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basisRef": "B-MAT",
+     "percentage": "2.63",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "B-CONV",
+     "type": "Basis",
+     "basis": [
+      "DL",
+      "SUB"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "T",
+     "type": "Total",
+     "refs": [
+      "B-MAT",
+      "B-CONV"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-ADM",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basisRef": "T",
+     "percentage": "7.02",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-004": {
+   "id": "FG-004",
+   "kind": "Manufactured",
+   "costingLot": "1",
+   "bom": [
+    {
+     "childId": "RM-005",
+     "qty": "0.72",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-006",
+     "qty": "2.969",
+     "scrapPct": "10.3"
+    },
+    {
+     "childId": "SA1-19",
+     "qty": "3.61",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-13",
+     "qty": "2.19",
+     "scrapPct": "14.3"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "2.98",
+     "runHours": "1.49",
+     "rate": "63.32",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "2.62",
+     "runHours": "0.61",
+     "rate": "92.09",
+     "lotSize": "12",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "MACH",
+     "type": "Rate",
+     "component": "IND-LAB",
+     "percentage": "0",
+     "rate": "7.32",
+     "rateUnit": "Hour",
+     "includeRolled": false
+    },
+    {
+     "id": "PACK",
+     "type": "Rate",
+     "component": "IND-MAT",
+     "percentage": "0",
+     "rate": "3.48",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-005": {
+   "id": "FG-005",
+   "kind": "Manufactured",
+   "costingLot": "5",
+   "bom": [
+    {
+     "childId": "RM-035",
+     "qty": "1.57",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-005",
+     "qty": "1.36",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-06",
+     "qty": "3.67",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-15",
+     "qty": "2.139",
+     "scrapPct": "10.1"
+    }
+   ],
+   "operations": [
+    {
+     "component": "SUB",
+     "setupHours": "1.73",
+     "runHours": "1.2",
+     "rate": "39.21",
+     "lotSize": "0",
+     "scrapPct": "3.7"
+    },
+    {
+     "component": "SUB",
+     "setupHours": "0.8",
+     "runHours": "1.6",
+     "rate": "116.85",
+     "lotSize": "0",
+     "scrapPct": "0.1"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "B-MAT",
+     "type": "Basis",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": true
+    },
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basisRef": "B-MAT",
+     "percentage": "8.45",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "B-CONV",
+     "type": "Basis",
+     "basis": [
+      "DL",
+      "SUB"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "T",
+     "type": "Total",
+     "refs": [
+      "B-MAT",
+      "B-CONV"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-ADM",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basisRef": "T",
+     "percentage": "0.47",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-006": {
+   "id": "FG-006",
+   "kind": "Manufactured",
+   "costingLot": "3",
+   "bom": [
+    {
+     "childId": "RM-022",
+     "qty": "3.71",
+     "scrapPct": "9.4"
+    },
+    {
+     "childId": "SA2-05",
+     "qty": "3.74",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-02",
+     "qty": "1.44",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "2.09",
+     "runHours": "0.45",
+     "rate": "89.8",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "1.35",
+     "runHours": "0.94",
+     "rate": "91.35",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "B-MAT",
+     "type": "Basis",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": true
+    },
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basisRef": "B-MAT",
+     "percentage": "8.47",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "B-CONV",
+     "type": "Basis",
+     "basis": [
+      "DL",
+      "SUB"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "T",
+     "type": "Total",
+     "refs": [
+      "B-MAT",
+      "B-CONV"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-ADM",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basisRef": "T",
+     "percentage": "4.45",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-007": {
+   "id": "FG-007",
+   "kind": "Manufactured",
+   "costingLot": "7",
+   "bom": [
+    {
+     "childId": "RM-012",
+     "qty": "3.58",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA4-02",
+     "qty": "0.81",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-12",
+     "qty": "2.562",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA2-13",
+     "qty": "2.81",
+     "scrapPct": "2.3",
+     "phantom": true
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "1.63",
+     "runHours": "1.7",
+     "rate": "70.55",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "1.64",
+     "runHours": "0.72",
+     "rate": "86.71",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "component": "SUB",
+     "setupHours": "1.36",
+     "runHours": "1.44",
+     "rate": "20.13",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "11.12",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-LAB",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basis": [
+      "DL"
+     ],
+     "percentage": "58.43",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-008": {
+   "id": "FG-008",
+   "kind": "Manufactured",
+   "costingLot": "5",
+   "bom": [
+    {
+     "childId": "RM-030",
+     "qty": "2.43",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-005",
+     "qty": "2.559",
+     "scrapPct": "7.7"
+    },
+    {
+     "childId": "SA3-05",
+     "qty": "0.91",
+     "scrapPct": "6.2"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "0.91",
+     "runHours": "1.77",
+     "rate": "64.11",
+     "lotSize": "10",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "1.12",
+     "runHours": "1.28",
+     "rate": "87.96",
+     "lotSize": "0",
+     "scrapPct": "4.3"
+    }
+   ]
+  },
+  "FG-009": {
+   "id": "FG-009",
+   "kind": "Manufactured",
+   "costingLot": "10",
+   "bom": [
+    {
+     "childId": "RM-031",
+     "qty": "1.81",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-016",
+     "qty": "2.671",
+     "scrapPct": "6"
+    },
+    {
+     "childId": "SA4-01",
+     "qty": "1.94",
+     "scrapPct": "0",
+     "phantom": true
+    },
+    {
+     "childId": "SA1-05",
+     "qty": "0.128",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA3-04",
+     "qty": "0.283",
+     "scrapPct": "7"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "1.79",
+     "runHours": "0.66",
+     "rate": "63.42",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "2.3",
+     "runHours": "0.09",
+     "rate": "108.4",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "component": "SUB",
+     "setupHours": "2.48",
+     "runHours": "0.06",
+     "rate": "106.19",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "19.49",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-LAB",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basis": [
+      "DL"
+     ],
+     "percentage": "24.37",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-010": {
+   "id": "FG-010",
+   "kind": "Manufactured",
+   "costingLot": "25",
+   "bom": [
+    {
+     "childId": "RM-024",
+     "qty": "0.971",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-007",
+     "qty": "3.08",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA4-04",
+     "qty": "1.39",
+     "scrapPct": "5.1"
+    },
+    {
+     "childId": "SA3-06",
+     "qty": "2.46",
+     "scrapPct": "0",
+     "phantom": true
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "1.1",
+     "runHours": "1.65",
+     "rate": "62.87",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ]
+  },
+  "FG-011": {
+   "id": "FG-011",
+   "kind": "Manufactured",
+   "costingLot": "25",
+   "bom": [
+    {
+     "childId": "RM-031",
+     "qty": "2.91",
+     "scrapPct": "1.8"
+    },
+    {
+     "childId": "SA3-04",
+     "qty": "3.1",
+     "scrapPct": "0",
+     "phantom": true
+    }
+   ],
+   "operations": [
+    {
+     "component": "SUB",
+     "setupHours": "2.07",
+     "runHours": "0.57",
+     "rate": "49.35",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-ALL",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM",
+      "DL"
+     ],
+     "percentage": "8.88",
+     "rate": "0",
+     "includeRolled": true
+    }
+   ]
+  },
+  "FG-012": {
+   "id": "FG-012",
+   "kind": "Manufactured",
+   "costingLot": "25",
+   "bom": [
+    {
+     "childId": "RM-008",
+     "qty": "2.84",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-009",
+     "qty": "1.182",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA2-09",
+     "qty": "0.78",
+     "scrapPct": "3.2",
+     "phantom": true
+    },
+    {
+     "childId": "SA1-05",
+     "qty": "3.41",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-02",
+     "qty": "2.235",
+     "scrapPct": "13.7"
+    }
+   ],
+   "operations": [
+    {
+     "component": "SUB",
+     "setupHours": "0.79",
+     "runHours": "1.43",
+     "rate": "65.87",
+     "lotSize": "25",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "0.22",
+     "runHours": "0.3",
+     "rate": "115.71",
+     "lotSize": "10",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-ALL",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM",
+      "DL"
+     ],
+     "percentage": "12.25",
+     "rate": "0",
+     "includeRolled": true
+    }
+   ]
+  },
+  "FG-013": {
+   "id": "FG-013",
+   "kind": "Manufactured",
+   "costingLot": "25",
+   "bom": [
+    {
+     "childId": "RM-011",
+     "qty": "1.46",
+     "scrapPct": "9.2"
+    },
+    {
+     "childId": "SA2-09",
+     "qty": "3.92",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "1.81",
+     "runHours": "0.01",
+     "rate": "112.25",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "7.57",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-LAB",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basis": [
+      "DL"
+     ],
+     "percentage": "36.67",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-014": {
+   "id": "FG-014",
+   "kind": "Manufactured",
+   "costingLot": "12",
+   "bom": [
+    {
+     "childId": "RM-026",
+     "qty": "1.52",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA3-04",
+     "qty": "2.161",
+     "scrapPct": "10.8"
+    },
+    {
+     "childId": "SA3-06",
+     "qty": "2.98",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "2.19",
+     "runHours": "0.99",
+     "rate": "99.97",
+     "lotSize": "0",
+     "scrapPct": "3.7"
+    },
+    {
+     "setupHours": "2.6",
+     "runHours": "0.68",
+     "rate": "35.27",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "B-MAT",
+     "type": "Basis",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": true
+    },
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basisRef": "B-MAT",
+     "percentage": "4.09",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "B-CONV",
+     "type": "Basis",
+     "basis": [
+      "DL",
+      "SUB"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "T",
+     "type": "Total",
+     "refs": [
+      "B-MAT",
+      "B-CONV"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-ADM",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basisRef": "T",
+     "percentage": "4.09",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-015": {
+   "id": "FG-015",
+   "kind": "Manufactured",
+   "costingLot": "10",
+   "bom": [
+    {
+     "childId": "RM-030",
+     "qty": "0.26",
+     "scrapPct": "3.3"
+    },
+    {
+     "childId": "RM-021",
+     "qty": "0.55",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA4-01",
+     "qty": "2.31",
+     "scrapPct": "9"
+    },
+    {
+     "childId": "SA4-02",
+     "qty": "0.983",
+     "scrapPct": "13.7"
+    }
+   ],
+   "operations": [
+    {
+     "component": "SUB",
+     "setupHours": "1.06",
+     "runHours": "1.99",
+     "rate": "57.51",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "component": "SUB",
+     "setupHours": "2.78",
+     "runHours": "1.5",
+     "rate": "66.08",
+     "lotSize": "0",
+     "scrapPct": "0.9"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "B-MAT",
+     "type": "Basis",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": true
+    },
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basisRef": "B-MAT",
+     "percentage": "6.21",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "B-CONV",
+     "type": "Basis",
+     "basis": [
+      "DL",
+      "SUB"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "T",
+     "type": "Total",
+     "refs": [
+      "B-MAT",
+      "B-CONV"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-ADM",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basisRef": "T",
+     "percentage": "4.54",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-016": {
+   "id": "FG-016",
+   "kind": "Manufactured",
+   "costingLot": "5",
+   "bom": [
+    {
+     "childId": "RM-034",
+     "qty": "0.709",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-033",
+     "qty": "2.45",
+     "scrapPct": "13.3"
+    },
+    {
+     "childId": "SA3-01",
+     "qty": "0.88",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "2.42",
+     "runHours": "1.08",
+     "rate": "75.23",
+     "lotSize": "0",
+     "scrapPct": "3"
+    },
+    {
+     "component": "SUB",
+     "setupHours": "2.77",
+     "runHours": "0.97",
+     "rate": "61.51",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "24.02",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-LAB",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basis": [
+      "DL"
+     ],
+     "percentage": "83.55",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-017": {
+   "id": "FG-017",
+   "kind": "Manufactured",
+   "costingLot": "10",
+   "bom": [
+    {
+     "childId": "RM-029",
+     "qty": "3.42",
+     "scrapPct": "11.4"
+    },
+    {
+     "childId": "SA4-05",
+     "qty": "3.9",
+     "scrapPct": "5.3"
+    },
+    {
+     "childId": "SA3-09",
+     "qty": "1.45",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "component": "SUB",
+     "setupHours": "1.87",
+     "runHours": "0.18",
+     "rate": "114.48",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "13.47",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-LAB",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basis": [
+      "DL"
+     ],
+     "percentage": "77.34",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-018": {
+   "id": "FG-018",
+   "kind": "Manufactured",
+   "costingLot": "5",
+   "bom": [
+    {
+     "childId": "RM-023",
+     "qty": "1.32",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA3-04",
+     "qty": "3.63",
+     "scrapPct": "0.9"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "2.75",
+     "runHours": "1.08",
+     "rate": "93.21",
+     "lotSize": "0",
+     "scrapPct": "1"
+    },
+    {
+     "setupHours": "0.46",
+     "runHours": "1.61",
+     "rate": "118.59",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "1.04",
+     "runHours": "1.58",
+     "rate": "69.42",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ]
+  },
+  "FG-019": {
+   "id": "FG-019",
+   "kind": "Manufactured",
+   "costingLot": "5",
+   "bom": [
+    {
+     "childId": "RM-015",
+     "qty": "2.95",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-029",
+     "qty": "0.92",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA4-02",
+     "qty": "2.776",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA3-06",
+     "qty": "1.1",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "1.88",
+     "runHours": "1.77",
+     "rate": "87.65",
+     "lotSize": "7",
+     "scrapPct": "2.5"
+    },
+    {
+     "setupHours": "0.31",
+     "runHours": "1.03",
+     "rate": "117.08",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "MACH",
+     "type": "Rate",
+     "component": "IND-LAB",
+     "percentage": "0",
+     "rate": "49.33",
+     "rateUnit": "Hour",
+     "includeRolled": false
+    },
+    {
+     "id": "PACK",
+     "type": "Rate",
+     "component": "IND-MAT",
+     "percentage": "0",
+     "rate": "0.21",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-020": {
+   "id": "FG-020",
+   "kind": "Manufactured",
+   "costingLot": "10",
+   "bom": [
+    {
+     "childId": "RM-011",
+     "qty": "2.504",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA3-07",
+     "qty": "0.291",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-13",
+     "qty": "0.3",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA2-03",
+     "qty": "1.47",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "component": "SUB",
+     "setupHours": "0.19",
+     "runHours": "0.55",
+     "rate": "39.63",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "0.81",
+     "runHours": "0.57",
+     "rate": "41.82",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "2.1",
+     "runHours": "0.92",
+     "rate": "75.7",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "B-MAT",
+     "type": "Basis",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": true
+    },
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basisRef": "B-MAT",
+     "percentage": "5.76",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "B-CONV",
+     "type": "Basis",
+     "basis": [
+      "DL",
+      "SUB"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "T",
+     "type": "Total",
+     "refs": [
+      "B-MAT",
+      "B-CONV"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-ADM",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basisRef": "T",
+     "percentage": "6.9",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-021": {
+   "id": "FG-021",
+   "kind": "Manufactured",
+   "costingLot": "1",
+   "bom": [
+    {
+     "childId": "RM-027",
+     "qty": "1.6",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-026",
+     "qty": "2.514",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA4-01",
+     "qty": "2.53",
+     "scrapPct": "3.4"
+    },
+    {
+     "childId": "SA3-09",
+     "qty": "2.37",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA3-08",
+     "qty": "1.72",
+     "scrapPct": "7"
+    }
+   ],
+   "operations": [
+    {
+     "component": "SUB",
+     "setupHours": "1.84",
+     "runHours": "0.67",
+     "rate": "107.34",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "0.51",
+     "runHours": "0.74",
+     "rate": "60.32",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ]
+  },
+  "FG-022": {
+   "id": "FG-022",
+   "kind": "Manufactured",
+   "costingLot": "25",
+   "bom": [
+    {
+     "childId": "RM-029",
+     "qty": "2.541",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-010",
+     "qty": "2.415",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA2-08",
+     "qty": "2.04",
+     "scrapPct": "0",
+     "phantom": true
+    },
+    {
+     "childId": "SA2-05",
+     "qty": "1.23",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "1.77",
+     "runHours": "0.99",
+     "rate": "93.09",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "2.05",
+     "runHours": "1.06",
+     "rate": "66.51",
+     "lotSize": "0",
+     "scrapPct": "4.6"
+    },
+    {
+     "setupHours": "1.98",
+     "runHours": "0.57",
+     "rate": "61.7",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "B-MAT",
+     "type": "Basis",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": true
+    },
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basisRef": "B-MAT",
+     "percentage": "6.87",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "B-CONV",
+     "type": "Basis",
+     "basis": [
+      "DL",
+      "SUB"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "T",
+     "type": "Total",
+     "refs": [
+      "B-MAT",
+      "B-CONV"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-ADM",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basisRef": "T",
+     "percentage": "2.21",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-023": {
+   "id": "FG-023",
+   "kind": "Manufactured",
+   "costingLot": "3",
+   "bom": [
+    {
+     "childId": "RM-021",
+     "qty": "1.12",
+     "scrapPct": "0.4"
+    },
+    {
+     "childId": "SA2-07",
+     "qty": "1.865",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA2-10",
+     "qty": "2.24",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "2.72",
+     "runHours": "0.6",
+     "rate": "47.28",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "1.1",
+     "runHours": "0.2",
+     "rate": "62.41",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "7.44",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-LAB",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basis": [
+      "DL"
+     ],
+     "percentage": "13.61",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-024": {
+   "id": "FG-024",
+   "kind": "Manufactured",
+   "costingLot": "12",
+   "bom": [
+    {
+     "childId": "RM-004",
+     "qty": "0.994",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-023",
+     "qty": "3.19",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA4-01",
+     "qty": "2.89",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "0.75",
+     "runHours": "1.55",
+     "rate": "37.34",
+     "lotSize": "0",
+     "scrapPct": "4.2"
+    },
+    {
+     "component": "SUB",
+     "setupHours": "1.48",
+     "runHours": "1.24",
+     "rate": "63.52",
+     "lotSize": "0",
+     "scrapPct": "3.8"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "6.88",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-LAB",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basis": [
+      "DL"
+     ],
+     "percentage": "67.84",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-025": {
+   "id": "FG-025",
+   "kind": "Manufactured",
+   "costingLot": "12",
+   "bom": [
+    {
+     "childId": "RM-003",
+     "qty": "3.75",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-006",
+     "qty": "1.48",
+     "scrapPct": "3.2"
+    },
+    {
+     "childId": "SA1-20",
+     "qty": "2.604",
+     "scrapPct": "6"
+    },
+    {
+     "childId": "SA1-07",
+     "qty": "2.11",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "0.65",
+     "runHours": "0.49",
+     "rate": "31.84",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ]
+  },
+  "FG-026": {
+   "id": "FG-026",
+   "kind": "Manufactured",
+   "costingLot": "1",
+   "bom": [
+    {
+     "childId": "RM-019",
+     "qty": "0.62",
+     "scrapPct": "1.6"
+    },
+    {
+     "childId": "RM-009",
+     "qty": "1.11",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA2-01",
+     "qty": "1.03",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "component": "SUB",
+     "setupHours": "1.24",
+     "runHours": "0.55",
+     "rate": "76",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "B-MAT",
+     "type": "Basis",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": true
+    },
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basisRef": "B-MAT",
+     "percentage": "8.29",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "B-CONV",
+     "type": "Basis",
+     "basis": [
+      "DL",
+      "SUB"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "T",
+     "type": "Total",
+     "refs": [
+      "B-MAT",
+      "B-CONV"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-ADM",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basisRef": "T",
+     "percentage": "6.34",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-027": {
+   "id": "FG-027",
+   "kind": "Manufactured",
+   "costingLot": "25",
+   "bom": [
+    {
+     "childId": "RM-003",
+     "qty": "0.4",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA2-13",
+     "qty": "3.16",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "1.43",
+     "runHours": "1.61",
+     "rate": "39.28",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "1.66",
+     "runHours": "0.22",
+     "rate": "60.92",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "2.27",
+     "runHours": "0.53",
+     "rate": "50.39",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ]
+  },
+  "FG-028": {
+   "id": "FG-028",
+   "kind": "Manufactured",
+   "costingLot": "1",
+   "bom": [
+    {
+     "childId": "RM-031",
+     "qty": "2.751",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-04",
+     "qty": "1.15",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-02",
+     "qty": "0.47",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "1.68",
+     "runHours": "0.7",
+     "rate": "57.95",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "MACH",
+     "type": "Rate",
+     "component": "IND-LAB",
+     "percentage": "0",
+     "rate": "50.97",
+     "rateUnit": "Hour",
+     "includeRolled": false
+    },
+    {
+     "id": "PACK",
+     "type": "Rate",
+     "component": "IND-MAT",
+     "percentage": "0",
+     "rate": "1.95",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-029": {
+   "id": "FG-029",
+   "kind": "Manufactured",
+   "costingLot": "3",
+   "bom": [
+    {
+     "childId": "RM-022",
+     "qty": "2.8",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-010",
+     "qty": "2.8",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA4-03",
+     "qty": "3.75",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA2-01",
+     "qty": "2.531",
+     "scrapPct": "6.3"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "0.45",
+     "runHours": "1.08",
+     "rate": "89.3",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "0.67",
+     "runHours": "0.78",
+     "rate": "46.53",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "B-MAT",
+     "type": "Basis",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": true
+    },
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basisRef": "B-MAT",
+     "percentage": "11.99",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "B-CONV",
+     "type": "Basis",
+     "basis": [
+      "DL",
+      "SUB"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "T",
+     "type": "Total",
+     "refs": [
+      "B-MAT",
+      "B-CONV"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-ADM",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basisRef": "T",
+     "percentage": "0.37",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-030": {
+   "id": "FG-030",
+   "kind": "Manufactured",
+   "costingLot": "10",
+   "bom": [
+    {
+     "childId": "RM-016",
+     "qty": "0.73",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-033",
+     "qty": "0.226",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA3-08",
+     "qty": "3.91",
+     "scrapPct": "8.6"
+    },
+    {
+     "childId": "SA1-03",
+     "qty": "1.94",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "0.62",
+     "runHours": "1.96",
+     "rate": "82.28",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "2.7",
+     "runHours": "1.9",
+     "rate": "53.98",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "component": "SUB",
+     "setupHours": "0.8",
+     "runHours": "0.35",
+     "rate": "91.43",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ]
+  },
+  "FG-031": {
+   "id": "FG-031",
+   "kind": "Manufactured",
+   "costingLot": "7",
+   "bom": [
+    {
+     "childId": "RM-026",
+     "qty": "0.43",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-039",
+     "qty": "0.423",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-07",
+     "qty": "1.33",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-14",
+     "qty": "2.96",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "component": "SUB",
+     "setupHours": "1.68",
+     "runHours": "0.55",
+     "rate": "109.89",
+     "lotSize": "0",
+     "scrapPct": "4.6"
+    }
+   ]
+  },
+  "FG-032": {
+   "id": "FG-032",
+   "kind": "Manufactured",
+   "costingLot": "5",
+   "bom": [
+    {
+     "childId": "RM-031",
+     "qty": "0.7",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-04",
+     "qty": "0.64",
+     "scrapPct": "13.3",
+     "phantom": true
+    },
+    {
+     "childId": "SA1-06",
+     "qty": "3.66",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-01",
+     "qty": "2.432",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "2.7",
+     "runHours": "1.2",
+     "rate": "29.35",
+     "lotSize": "25",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-ALL",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM",
+      "DL"
+     ],
+     "percentage": "2.92",
+     "rate": "0",
+     "includeRolled": true
+    }
+   ]
+  },
+  "FG-033": {
+   "id": "FG-033",
+   "kind": "Manufactured",
+   "costingLot": "1",
+   "bom": [
+    {
+     "childId": "RM-022",
+     "qty": "0.64",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-005",
+     "qty": "1.06",
+     "scrapPct": "8.8"
+    },
+    {
+     "childId": "SA4-01",
+     "qty": "1.555",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA4-05",
+     "qty": "0.78",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-15",
+     "qty": "1.44",
+     "scrapPct": "0.1"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "1.83",
+     "runHours": "0.5",
+     "rate": "56.67",
+     "lotSize": "0",
+     "scrapPct": "1.3"
+    },
+    {
+     "setupHours": "0.89",
+     "runHours": "0.76",
+     "rate": "97.68",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "component": "SUB",
+     "setupHours": "2.65",
+     "runHours": "1.66",
+     "rate": "44.21",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ]
+  },
+  "FG-034": {
+   "id": "FG-034",
+   "kind": "Manufactured",
+   "costingLot": "5",
+   "bom": [
+    {
+     "childId": "RM-014",
+     "qty": "1.035",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA3-08",
+     "qty": "3.06",
+     "scrapPct": "11.5"
+    },
+    {
+     "childId": "SA3-07",
+     "qty": "0.42",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "0.13",
+     "runHours": "1.76",
+     "rate": "65.13",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "2.39",
+     "runHours": "1.02",
+     "rate": "57.37",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "MACH",
+     "type": "Rate",
+     "component": "IND-LAB",
+     "percentage": "0",
+     "rate": "15.7",
+     "rateUnit": "Hour",
+     "includeRolled": false
+    },
+    {
+     "id": "PACK",
+     "type": "Rate",
+     "component": "IND-MAT",
+     "percentage": "0",
+     "rate": "0.19",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-035": {
+   "id": "FG-035",
+   "kind": "Manufactured",
+   "costingLot": "10",
+   "bom": [
+    {
+     "childId": "RM-005",
+     "qty": "3.17",
+     "scrapPct": "9"
+    },
+    {
+     "childId": "SA1-07",
+     "qty": "1.47",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-11",
+     "qty": "1.77",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "1.29",
+     "runHours": "1.71",
+     "rate": "78.63",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-ALL",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM",
+      "DL"
+     ],
+     "percentage": "5.6",
+     "rate": "0",
+     "includeRolled": true
+    }
+   ]
+  },
+  "FG-036": {
+   "id": "FG-036",
+   "kind": "Manufactured",
+   "costingLot": "5",
+   "bom": [
+    {
+     "childId": "RM-025",
+     "qty": "1.7",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA3-01",
+     "qty": "0.344",
+     "scrapPct": "0",
+     "phantom": true
+    },
+    {
+     "childId": "SA3-09",
+     "qty": "2.31",
+     "scrapPct": "14.6",
+     "phantom": true
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "0.8",
+     "runHours": "0.02",
+     "rate": "91.74",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "1.66",
+     "runHours": "1.09",
+     "rate": "59.25",
+     "lotSize": "0",
+     "scrapPct": "0.8"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "B-MAT",
+     "type": "Basis",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": true
+    },
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basisRef": "B-MAT",
+     "percentage": "0.7",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "B-CONV",
+     "type": "Basis",
+     "basis": [
+      "DL",
+      "SUB"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "T",
+     "type": "Total",
+     "refs": [
+      "B-MAT",
+      "B-CONV"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-ADM",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basisRef": "T",
+     "percentage": "0.31",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-037": {
+   "id": "FG-037",
+   "kind": "Manufactured",
+   "costingLot": "7",
+   "bom": [
+    {
+     "childId": "RM-028",
+     "qty": "2.08",
+     "scrapPct": "14.8"
+    },
+    {
+     "childId": "RM-035",
+     "qty": "3.25",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA2-09",
+     "qty": "0.65",
+     "scrapPct": "10.1"
+    },
+    {
+     "childId": "SA1-11",
+     "qty": "2.77",
+     "scrapPct": "12.1",
+     "phantom": true
+    }
+   ],
+   "operations": [
+    {
+     "component": "SUB",
+     "setupHours": "2.26",
+     "runHours": "0.03",
+     "rate": "65.45",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "1.43",
+     "runHours": "0.86",
+     "rate": "108.17",
+     "lotSize": "1",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "6.61",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-LAB",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basis": [
+      "DL"
+     ],
+     "percentage": "25.59",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-038": {
+   "id": "FG-038",
+   "kind": "Manufactured",
+   "costingLot": "5",
+   "bom": [
+    {
+     "childId": "RM-012",
+     "qty": "1.18",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-029",
+     "qty": "0.34",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA4-02",
+     "qty": "3.82",
+     "scrapPct": "3.2"
+    },
+    {
+     "childId": "SA4-05",
+     "qty": "0.94",
+     "scrapPct": "10.2"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "1.12",
+     "runHours": "1.83",
+     "rate": "72.41",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "component": "SUB",
+     "setupHours": "1.07",
+     "runHours": "1.33",
+     "rate": "89.57",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "component": "SUB",
+     "setupHours": "2.75",
+     "runHours": "0.86",
+     "rate": "86.45",
+     "lotSize": "0",
+     "scrapPct": "1.9"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-ALL",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM",
+      "DL"
+     ],
+     "percentage": "8.76",
+     "rate": "0",
+     "includeRolled": true
+    }
+   ]
+  },
+  "FG-039": {
+   "id": "FG-039",
+   "kind": "Manufactured",
+   "costingLot": "10",
+   "bom": [
+    {
+     "childId": "RM-013",
+     "qty": "2.71",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-002",
+     "qty": "0.841",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-04",
+     "qty": "2.61",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-05",
+     "qty": "2.05",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-10",
+     "qty": "1.13",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "1.68",
+     "runHours": "0.85",
+     "rate": "36.5",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "component": "SUB",
+     "setupHours": "0.34",
+     "runHours": "0.5",
+     "rate": "55.73",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "1.95",
+     "runHours": "0.65",
+     "rate": "114.94",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "MACH",
+     "type": "Rate",
+     "component": "IND-LAB",
+     "percentage": "0",
+     "rate": "36.53",
+     "rateUnit": "Hour",
+     "includeRolled": false
+    },
+    {
+     "id": "PACK",
+     "type": "Rate",
+     "component": "IND-MAT",
+     "percentage": "0",
+     "rate": "2.4",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-040": {
+   "id": "FG-040",
+   "kind": "Manufactured",
+   "costingLot": "7",
+   "bom": [
+    {
+     "childId": "RM-030",
+     "qty": "0.656",
+     "scrapPct": "11.9"
+    },
+    {
+     "childId": "SA2-03",
+     "qty": "1.94",
+     "scrapPct": "12.9",
+     "phantom": true
+    },
+    {
+     "childId": "SA2-13",
+     "qty": "1.586",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "component": "SUB",
+     "setupHours": "1.5",
+     "runHours": "0.79",
+     "rate": "27.62",
+     "lotSize": "1",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "2.43",
+     "runHours": "0.32",
+     "rate": "109.72",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "B-MAT",
+     "type": "Basis",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": true
+    },
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basisRef": "B-MAT",
+     "percentage": "3.78",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "B-CONV",
+     "type": "Basis",
+     "basis": [
+      "DL",
+      "SUB"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "T",
+     "type": "Total",
+     "refs": [
+      "B-MAT",
+      "B-CONV"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-ADM",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basisRef": "T",
+     "percentage": "5.85",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-041": {
+   "id": "FG-041",
+   "kind": "Manufactured",
+   "costingLot": "3",
+   "bom": [
+    {
+     "childId": "RM-011",
+     "qty": "1.84",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA3-09",
+     "qty": "1.771",
+     "scrapPct": "8.3",
+     "phantom": true
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "1.43",
+     "runHours": "0.56",
+     "rate": "46.28",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "component": "SUB",
+     "setupHours": "1.6",
+     "runHours": "0.16",
+     "rate": "118.24",
+     "lotSize": "12",
+     "scrapPct": "1.9"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-ALL",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM",
+      "DL"
+     ],
+     "percentage": "13.59",
+     "rate": "0",
+     "includeRolled": true
+    }
+   ]
+  },
+  "FG-042": {
+   "id": "FG-042",
+   "kind": "Manufactured",
+   "costingLot": "12",
+   "bom": [
+    {
+     "childId": "RM-006",
+     "qty": "1.436",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-022",
+     "qty": "2.72",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA4-01",
+     "qty": "3.55",
+     "scrapPct": "1"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "0.12",
+     "runHours": "0.77",
+     "rate": "33.03",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "B-MAT",
+     "type": "Basis",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": true
+    },
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basisRef": "B-MAT",
+     "percentage": "11.26",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "B-CONV",
+     "type": "Basis",
+     "basis": [
+      "DL",
+      "SUB"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "T",
+     "type": "Total",
+     "refs": [
+      "B-MAT",
+      "B-CONV"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-ADM",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basisRef": "T",
+     "percentage": "0.21",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-043": {
+   "id": "FG-043",
+   "kind": "Manufactured",
+   "costingLot": "25",
+   "bom": [
+    {
+     "childId": "RM-040",
+     "qty": "3.1",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA3-02",
+     "qty": "2.18",
+     "scrapPct": "14.3"
+    },
+    {
+     "childId": "SA3-09",
+     "qty": "1.555",
+     "scrapPct": "7.5"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "1.03",
+     "runHours": "0.16",
+     "rate": "81.29",
+     "lotSize": "0",
+     "scrapPct": "4.5"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "1.49",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-LAB",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basis": [
+      "DL"
+     ],
+     "percentage": "12.16",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-044": {
+   "id": "FG-044",
+   "kind": "Manufactured",
+   "costingLot": "5",
+   "bom": [
+    {
+     "childId": "RM-008",
+     "qty": "2.233",
+     "scrapPct": "4.3"
+    },
+    {
+     "childId": "RM-010",
+     "qty": "3.08",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA3-02",
+     "qty": "1.566",
+     "scrapPct": "0",
+     "phantom": true
+    },
+    {
+     "childId": "SA3-05",
+     "qty": "2.673",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA3-04",
+     "qty": "1.74",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "component": "SUB",
+     "setupHours": "1.01",
+     "runHours": "1.03",
+     "rate": "69.39",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "component": "SUB",
+     "setupHours": "1.4",
+     "runHours": "0.17",
+     "rate": "103.63",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "2",
+     "runHours": "0.79",
+     "rate": "91.73",
+     "lotSize": "7",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "B-MAT",
+     "type": "Basis",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": true
+    },
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basisRef": "B-MAT",
+     "percentage": "6.71",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "B-CONV",
+     "type": "Basis",
+     "basis": [
+      "DL",
+      "SUB"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "T",
+     "type": "Total",
+     "refs": [
+      "B-MAT",
+      "B-CONV"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-ADM",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basisRef": "T",
+     "percentage": "7.16",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-045": {
+   "id": "FG-045",
+   "kind": "Manufactured",
+   "costingLot": "5",
+   "bom": [
+    {
+     "childId": "RM-029",
+     "qty": "1.89",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-007",
+     "qty": "1.17",
+     "scrapPct": "4.6"
+    },
+    {
+     "childId": "SA2-14",
+     "qty": "0.43",
+     "scrapPct": "10.2"
+    },
+    {
+     "childId": "SA2-12",
+     "qty": "3.47",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA2-06",
+     "qty": "2.658",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "2.08",
+     "runHours": "1.5",
+     "rate": "76.09",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "1.22",
+     "runHours": "0.78",
+     "rate": "30.5",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "0.25",
+     "runHours": "0.96",
+     "rate": "36.82",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ]
+  },
+  "FG-046": {
+   "id": "FG-046",
+   "kind": "Manufactured",
+   "costingLot": "12",
+   "bom": [
+    {
+     "childId": "RM-009",
+     "qty": "1.97",
+     "scrapPct": "2"
+    },
+    {
+     "childId": "SA4-05",
+     "qty": "1.109",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA4-03",
+     "qty": "2.89",
+     "scrapPct": "7"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "1.36",
+     "runHours": "1.02",
+     "rate": "36.74",
+     "lotSize": "7",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "1.3",
+     "runHours": "0.01",
+     "rate": "86.7",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ]
+  },
+  "FG-047": {
+   "id": "FG-047",
+   "kind": "Manufactured",
+   "costingLot": "12",
+   "bom": [
+    {
+     "childId": "RM-002",
+     "qty": "1.07",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-17",
+     "qty": "0.46",
+     "scrapPct": "0",
+     "phantom": true
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "2.17",
+     "runHours": "0.47",
+     "rate": "104.77",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "0.35",
+     "runHours": "0.36",
+     "rate": "89.09",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "10.86",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-LAB",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basis": [
+      "DL"
+     ],
+     "percentage": "44.71",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-048": {
+   "id": "FG-048",
+   "kind": "Manufactured",
+   "costingLot": "5",
+   "bom": [
+    {
+     "childId": "RM-008",
+     "qty": "3.81",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA3-04",
+     "qty": "2.87",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-17",
+     "qty": "0.633",
+     "scrapPct": "6"
+    },
+    {
+     "childId": "SA2-01",
+     "qty": "1.88",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "0.53",
+     "runHours": "1.96",
+     "rate": "36.52",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "24.53",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-LAB",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basis": [
+      "DL"
+     ],
+     "percentage": "5.49",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-049": {
+   "id": "FG-049",
+   "kind": "Manufactured",
+   "costingLot": "3",
+   "bom": [
+    {
+     "childId": "RM-012",
+     "qty": "1.68",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-07",
+     "qty": "2.84",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-18",
+     "qty": "2.45",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "component": "SUB",
+     "setupHours": "2.89",
+     "runHours": "1.74",
+     "rate": "114.13",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "2.08",
+     "runHours": "1.68",
+     "rate": "33.64",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "2.13",
+     "runHours": "0.68",
+     "rate": "39.77",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "MACH",
+     "type": "Rate",
+     "component": "IND-LAB",
+     "percentage": "0",
+     "rate": "19.97",
+     "rateUnit": "Hour",
+     "includeRolled": false
+    },
+    {
+     "id": "PACK",
+     "type": "Rate",
+     "component": "IND-MAT",
+     "percentage": "0",
+     "rate": "0.83",
+     "includeRolled": false
+    }
+   ]
+  },
+  "FG-100": {
+   "id": "FG-100",
+   "kind": "Manufactured",
+   "costingLot": "10",
+   "bom": [
+    {
+     "childId": "SA-200",
+     "qty": "2",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-300",
+     "qty": "1",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "1",
+     "runHours": "0.5",
+     "rate": "40",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "10",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-LAB",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basis": [
+      "DL"
+     ],
+     "percentage": "50",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "RM-001": {
+   "id": "RM-001",
+   "kind": "Purchased",
+   "price": "59.51",
+   "costingLot": "0"
+  },
+  "RM-002": {
+   "id": "RM-002",
+   "kind": "Purchased",
+   "price": "143.3",
+   "costingLot": "0"
+  },
+  "RM-003": {
+   "id": "RM-003",
+   "kind": "Purchased",
+   "price": "17.72",
+   "costingLot": "0"
+  },
+  "RM-004": {
+   "id": "RM-004",
+   "kind": "Purchased",
+   "price": "122.66",
+   "costingLot": "0"
+  },
+  "RM-005": {
+   "id": "RM-005",
+   "kind": "Purchased",
+   "price": "74.8",
+   "costingLot": "0"
+  },
+  "RM-006": {
+   "id": "RM-006",
+   "kind": "Purchased",
+   "price": "106.9",
+   "costingLot": "0"
+  },
+  "RM-007": {
+   "id": "RM-007",
+   "kind": "Purchased",
+   "price": "24.2257",
+   "costingLot": "0"
+  },
+  "RM-008": {
+   "id": "RM-008",
+   "kind": "Purchased",
+   "price": "164.92",
+   "costingLot": "0"
+  },
+  "RM-009": {
+   "id": "RM-009",
+   "kind": "Purchased",
+   "price": "93.9",
+   "costingLot": "0"
+  },
+  "RM-010": {
+   "id": "RM-010",
+   "kind": "Purchased",
+   "price": "72.96",
+   "costingLot": "0"
+  },
+  "RM-011": {
+   "id": "RM-011",
+   "kind": "Purchased",
+   "price": "188.51",
+   "costingLot": "0"
+  },
+  "RM-012": {
+   "id": "RM-012",
+   "kind": "Purchased",
+   "price": "71.1",
+   "costingLot": "0"
+  },
+  "RM-013": {
+   "id": "RM-013",
+   "kind": "Purchased",
+   "price": "42.57",
+   "costingLot": "0"
+  },
+  "RM-014": {
+   "id": "RM-014",
+   "kind": "Purchased",
+   "price": "12.3038",
+   "costingLot": "0"
+  },
+  "RM-015": {
+   "id": "RM-015",
+   "kind": "Purchased",
+   "price": "147.87",
+   "costingLot": "0"
+  },
+  "RM-016": {
+   "id": "RM-016",
+   "kind": "Purchased",
+   "price": "8.24",
+   "costingLot": "0"
+  },
+  "RM-017": {
+   "id": "RM-017",
+   "kind": "Purchased",
+   "price": "204.58",
+   "costingLot": "0"
+  },
+  "RM-018": {
+   "id": "RM-018",
+   "kind": "Purchased",
+   "price": "177.13",
+   "costingLot": "0"
+  },
+  "RM-019": {
+   "id": "RM-019",
+   "kind": "Purchased",
+   "price": "113.74",
+   "costingLot": "0"
+  },
+  "RM-020": {
+   "id": "RM-020",
+   "kind": "Purchased",
+   "price": "183.85",
+   "costingLot": "0"
+  },
+  "RM-021": {
+   "id": "RM-021",
+   "kind": "Purchased",
+   "price": "6.1072",
+   "costingLot": "0"
+  },
+  "RM-022": {
+   "id": "RM-022",
+   "kind": "Purchased",
+   "price": "242.03",
+   "costingLot": "0"
+  },
+  "RM-023": {
+   "id": "RM-023",
+   "kind": "Purchased",
+   "price": "197.61",
+   "costingLot": "0"
+  },
+  "RM-024": {
+   "id": "RM-024",
+   "kind": "Purchased",
+   "price": "238.66",
+   "costingLot": "0"
+  },
+  "RM-025": {
+   "id": "RM-025",
+   "kind": "Purchased",
+   "price": "161.09",
+   "costingLot": "0"
+  },
+  "RM-026": {
+   "id": "RM-026",
+   "kind": "Purchased",
+   "price": "141.07",
+   "costingLot": "0"
+  },
+  "RM-027": {
+   "id": "RM-027",
+   "kind": "Purchased",
+   "price": "54.06",
+   "costingLot": "0"
+  },
+  "RM-028": {
+   "id": "RM-028",
+   "kind": "Purchased",
+   "price": "7.8001",
+   "costingLot": "0"
+  },
+  "RM-029": {
+   "id": "RM-029",
+   "kind": "Purchased",
+   "price": "114.7",
+   "costingLot": "0"
+  },
+  "RM-030": {
+   "id": "RM-030",
+   "kind": "Purchased",
+   "price": "60.61",
+   "costingLot": "0"
+  },
+  "RM-031": {
+   "id": "RM-031",
+   "kind": "Purchased",
+   "price": "3.04",
+   "costingLot": "0"
+  },
+  "RM-032": {
+   "id": "RM-032",
+   "kind": "Purchased",
+   "price": "184.36",
+   "costingLot": "0"
+  },
+  "RM-033": {
+   "id": "RM-033",
+   "kind": "Purchased",
+   "price": "55.87",
+   "costingLot": "0"
+  },
+  "RM-034": {
+   "id": "RM-034",
+   "kind": "Purchased",
+   "price": "76.93",
+   "costingLot": "0"
+  },
+  "RM-035": {
+   "id": "RM-035",
+   "kind": "Purchased",
+   "price": "18.6628",
+   "costingLot": "0"
+  },
+  "RM-036": {
+   "id": "RM-036",
+   "kind": "Purchased",
+   "price": "147.47",
+   "costingLot": "0"
+  },
+  "RM-037": {
+   "id": "RM-037",
+   "kind": "Purchased",
+   "price": "241.48",
+   "costingLot": "0"
+  },
+  "RM-038": {
+   "id": "RM-038",
+   "kind": "Purchased",
+   "price": "151.17",
+   "costingLot": "0"
+  },
+  "RM-039": {
+   "id": "RM-039",
+   "kind": "Purchased",
+   "price": "50.33",
+   "costingLot": "0"
+  },
+  "RM-040": {
+   "id": "RM-040",
+   "kind": "Purchased",
+   "price": "14.85",
+   "costingLot": "0"
+  },
+  "RM-300": {
+   "id": "RM-300",
+   "kind": "Purchased",
+   "price": "4",
+   "costingLot": "0"
+  },
+  "RM-301": {
+   "id": "RM-301",
+   "kind": "Purchased",
+   "price": "2.5",
+   "costingLot": "0"
+  },
+  "RM-302": {
+   "id": "RM-302",
+   "kind": "Purchased",
+   "price": "1",
+   "costingLot": "0"
+  },
+  "SA-200": {
+   "id": "SA-200",
+   "kind": "Manufactured",
+   "costingLot": "1",
+   "bom": [
+    {
+     "childId": "RM-301",
+     "qty": "3",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-302",
+     "qty": "1",
+     "scrapPct": "10"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "0",
+     "runHours": "0.25",
+     "rate": "60",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "10",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-LAB",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basis": [
+      "DL"
+     ],
+     "percentage": "50",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "SA1-01": {
+   "id": "SA1-01",
+   "kind": "Manufactured",
+   "costingLot": "10",
+   "bom": [
+    {
+     "childId": "RM-016",
+     "qty": "0.41",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-019",
+     "qty": "0.574",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "2.09",
+     "runHours": "0.41",
+     "rate": "43.94",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "0.05",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-LAB",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basis": [
+      "DL"
+     ],
+     "percentage": "48.21",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "SA1-02": {
+   "id": "SA1-02",
+   "kind": "Manufactured",
+   "costingLot": "5",
+   "bom": [
+    {
+     "childId": "RM-038",
+     "qty": "1.449",
+     "scrapPct": "6.4"
+    },
+    {
+     "childId": "RM-032",
+     "qty": "2.691",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "2.26",
+     "runHours": "1.58",
+     "rate": "113.14",
+     "lotSize": "25",
+     "scrapPct": "0.7"
+    },
+    {
+     "setupHours": "1.51",
+     "runHours": "0.74",
+     "rate": "56.74",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ]
+  },
+  "SA1-03": {
+   "id": "SA1-03",
+   "kind": "Manufactured",
+   "costingLot": "10",
+   "bom": [
+    {
+     "childId": "RM-033",
+     "qty": "2.74",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-021",
+     "qty": "2.94",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "0.89",
+     "runHours": "1.81",
+     "rate": "95.06",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "1.92",
+     "runHours": "1.74",
+     "rate": "111.63",
+     "lotSize": "0",
+     "scrapPct": "4.2"
+    },
+    {
+     "component": "SUB",
+     "setupHours": "1.08",
+     "runHours": "0.63",
+     "rate": "33.3",
+     "lotSize": "0",
+     "scrapPct": "2.2"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "B-MAT",
+     "type": "Basis",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": true
+    },
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basisRef": "B-MAT",
+     "percentage": "11.29",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "B-CONV",
+     "type": "Basis",
+     "basis": [
+      "DL",
+      "SUB"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "T",
+     "type": "Total",
+     "refs": [
+      "B-MAT",
+      "B-CONV"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-ADM",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basisRef": "T",
+     "percentage": "3.93",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "SA1-04": {
+   "id": "SA1-04",
+   "kind": "Manufactured",
+   "costingLot": "12",
+   "bom": [
+    {
+     "childId": "RM-016",
+     "qty": "1.78",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "component": "SUB",
+     "setupHours": "2.04",
+     "runHours": "0.69",
+     "rate": "114.06",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "0.47",
+     "runHours": "0.02",
+     "rate": "92.41",
+     "lotSize": "0",
+     "scrapPct": "4.3"
+    },
+    {
+     "setupHours": "2.21",
+     "runHours": "1.44",
+     "rate": "26.86",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "MACH",
+     "type": "Rate",
+     "component": "IND-LAB",
+     "percentage": "0",
+     "rate": "36.7",
+     "rateUnit": "Hour",
+     "includeRolled": false
+    },
+    {
+     "id": "PACK",
+     "type": "Rate",
+     "component": "IND-MAT",
+     "percentage": "0",
+     "rate": "2.17",
+     "includeRolled": false
+    }
+   ]
+  },
+  "SA1-05": {
+   "id": "SA1-05",
+   "kind": "Manufactured",
+   "costingLot": "7",
+   "bom": [
+    {
+     "childId": "RM-005",
+     "qty": "1.99",
+     "scrapPct": "7.5"
+    },
+    {
+     "childId": "RM-025",
+     "qty": "1.03",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "2.99",
+     "runHours": "1.69",
+     "rate": "50.86",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "10.94",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-LAB",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basis": [
+      "DL"
+     ],
+     "percentage": "16.95",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "SA1-06": {
+   "id": "SA1-06",
+   "kind": "Manufactured",
+   "costingLot": "1",
+   "bom": [
+    {
+     "childId": "RM-031",
+     "qty": "0.66",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-003",
+     "qty": "2.668",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "0.23",
+     "runHours": "0.5",
+     "rate": "51.54",
+     "lotSize": "0",
+     "scrapPct": "4.8"
+    },
+    {
+     "setupHours": "2.99",
+     "runHours": "1.4",
+     "rate": "20.75",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "0.66",
+     "runHours": "0.38",
+     "rate": "22.78",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "11.86",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-LAB",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basis": [
+      "DL"
+     ],
+     "percentage": "87.54",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "SA1-07": {
+   "id": "SA1-07",
+   "kind": "Manufactured",
+   "costingLot": "5",
+   "bom": [
+    {
+     "childId": "RM-021",
+     "qty": "2.72",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-035",
+     "qty": "2.88",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "component": "SUB",
+     "setupHours": "0.16",
+     "runHours": "0.99",
+     "rate": "31.22",
+     "lotSize": "0",
+     "scrapPct": "3.7"
+    },
+    {
+     "setupHours": "0.68",
+     "runHours": "1.34",
+     "rate": "68.14",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "B-MAT",
+     "type": "Basis",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": true
+    },
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basisRef": "B-MAT",
+     "percentage": "6.85",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "B-CONV",
+     "type": "Basis",
+     "basis": [
+      "DL",
+      "SUB"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "T",
+     "type": "Total",
+     "refs": [
+      "B-MAT",
+      "B-CONV"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-ADM",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basisRef": "T",
+     "percentage": "5.98",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "SA1-08": {
+   "id": "SA1-08",
+   "kind": "Manufactured",
+   "costingLot": "3",
+   "bom": [
+    {
+     "childId": "RM-026",
+     "qty": "1.01",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "1.74",
+     "runHours": "1.35",
+     "rate": "54.8",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "1.78",
+     "runHours": "0.55",
+     "rate": "110.9",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "MACH",
+     "type": "Rate",
+     "component": "IND-LAB",
+     "percentage": "0",
+     "rate": "7.21",
+     "rateUnit": "Hour",
+     "includeRolled": false
+    },
+    {
+     "id": "PACK",
+     "type": "Rate",
+     "component": "IND-MAT",
+     "percentage": "0",
+     "rate": "3.01",
+     "includeRolled": false
+    }
+   ]
+  },
+  "SA1-09": {
+   "id": "SA1-09",
+   "kind": "Manufactured",
+   "costingLot": "12",
+   "bom": [
+    {
+     "childId": "RM-030",
+     "qty": "0.374",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "1.69",
+     "runHours": "1.8",
+     "rate": "70.62",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "component": "SUB",
+     "setupHours": "1.98",
+     "runHours": "1.86",
+     "rate": "50.81",
+     "lotSize": "0",
+     "scrapPct": "3.7"
+    },
+    {
+     "setupHours": "2.48",
+     "runHours": "0.95",
+     "rate": "82.46",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "17.17",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-LAB",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basis": [
+      "DL"
+     ],
+     "percentage": "40.41",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "SA1-10": {
+   "id": "SA1-10",
+   "kind": "Manufactured",
+   "costingLot": "7",
+   "bom": [
+    {
+     "childId": "RM-006",
+     "qty": "1.37",
+     "scrapPct": "6.1"
+    },
+    {
+     "childId": "RM-003",
+     "qty": "1.383",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-019",
+     "qty": "0.59",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "0.83",
+     "runHours": "1.34",
+     "rate": "67.51",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "component": "SUB",
+     "setupHours": "1.9",
+     "runHours": "0.26",
+     "rate": "43.18",
+     "lotSize": "10",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-ALL",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM",
+      "DL"
+     ],
+     "percentage": "5.28",
+     "rate": "0",
+     "includeRolled": true
+    }
+   ]
+  },
+  "SA1-11": {
+   "id": "SA1-11",
+   "kind": "Manufactured",
+   "costingLot": "5",
+   "bom": [
+    {
+     "childId": "RM-038",
+     "qty": "1.788",
+     "scrapPct": "6.5"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "1.73",
+     "runHours": "0.27",
+     "rate": "94.45",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "2.19",
+     "runHours": "1.04",
+     "rate": "94.38",
+     "lotSize": "0",
+     "scrapPct": "1.8"
+    },
+    {
+     "setupHours": "2.26",
+     "runHours": "1.1",
+     "rate": "22.35",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-ALL",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM",
+      "DL"
+     ],
+     "percentage": "7.11",
+     "rate": "0",
+     "includeRolled": true
+    }
+   ]
+  },
+  "SA1-12": {
+   "id": "SA1-12",
+   "kind": "Manufactured",
+   "costingLot": "12",
+   "bom": [
+    {
+     "childId": "RM-032",
+     "qty": "1.09",
+     "scrapPct": "8.8"
+    },
+    {
+     "childId": "RM-004",
+     "qty": "0.92",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-020",
+     "qty": "1.48",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "1.35",
+     "runHours": "1.13",
+     "rate": "36.66",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "2.52",
+     "runHours": "0.51",
+     "rate": "39.79",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "MACH",
+     "type": "Rate",
+     "component": "IND-LAB",
+     "percentage": "0",
+     "rate": "59.99",
+     "rateUnit": "Hour",
+     "includeRolled": false
+    },
+    {
+     "id": "PACK",
+     "type": "Rate",
+     "component": "IND-MAT",
+     "percentage": "0",
+     "rate": "2.17",
+     "includeRolled": false
+    }
+   ]
+  },
+  "SA1-13": {
+   "id": "SA1-13",
+   "kind": "Manufactured",
+   "costingLot": "5",
+   "bom": [
+    {
+     "childId": "RM-012",
+     "qty": "3.56",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-019",
+     "qty": "1.024",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "component": "SUB",
+     "setupHours": "1.56",
+     "runHours": "0.23",
+     "rate": "94.27",
+     "lotSize": "0",
+     "scrapPct": "4.7"
+    },
+    {
+     "setupHours": "1.66",
+     "runHours": "1.41",
+     "rate": "91.28",
+     "lotSize": "10",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "2.89",
+     "runHours": "0.89",
+     "rate": "26.58",
+     "lotSize": "7",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "9.05",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-LAB",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basis": [
+      "DL"
+     ],
+     "percentage": "68.18",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "SA1-14": {
+   "id": "SA1-14",
+   "kind": "Manufactured",
+   "costingLot": "12",
+   "bom": [
+    {
+     "childId": "RM-024",
+     "qty": "1.599",
+     "scrapPct": "10.7"
+    },
+    {
+     "childId": "RM-034",
+     "qty": "1.56",
+     "scrapPct": "5.1"
+    },
+    {
+     "childId": "RM-019",
+     "qty": "0.834",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "1.9",
+     "runHours": "0.39",
+     "rate": "80.21",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-ALL",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM",
+      "DL"
+     ],
+     "percentage": "14.85",
+     "rate": "0",
+     "includeRolled": true
+    }
+   ]
+  },
+  "SA1-15": {
+   "id": "SA1-15",
+   "kind": "Manufactured",
+   "costingLot": "5",
+   "bom": [
+    {
+     "childId": "RM-005",
+     "qty": "3.82",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-022",
+     "qty": "1.16",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "2.14",
+     "runHours": "0.52",
+     "rate": "80.14",
+     "lotSize": "1",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "B-MAT",
+     "type": "Basis",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": true
+    },
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basisRef": "B-MAT",
+     "percentage": "9.61",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "B-CONV",
+     "type": "Basis",
+     "basis": [
+      "DL",
+      "SUB"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "T",
+     "type": "Total",
+     "refs": [
+      "B-MAT",
+      "B-CONV"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-ADM",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basisRef": "T",
+     "percentage": "5.2",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "SA1-16": {
+   "id": "SA1-16",
+   "kind": "Manufactured",
+   "costingLot": "5",
+   "bom": [
+    {
+     "childId": "RM-009",
+     "qty": "0.322",
+     "scrapPct": "7.4"
+    },
+    {
+     "childId": "RM-014",
+     "qty": "1.05",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "2.83",
+     "runHours": "1.39",
+     "rate": "100.11",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "B-MAT",
+     "type": "Basis",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": true
+    },
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basisRef": "B-MAT",
+     "percentage": "3.1",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "B-CONV",
+     "type": "Basis",
+     "basis": [
+      "DL",
+      "SUB"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "T",
+     "type": "Total",
+     "refs": [
+      "B-MAT",
+      "B-CONV"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-ADM",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basisRef": "T",
+     "percentage": "0.96",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "SA1-17": {
+   "id": "SA1-17",
+   "kind": "Manufactured",
+   "costingLot": "12",
+   "bom": [
+    {
+     "childId": "RM-025",
+     "qty": "2.92",
+     "scrapPct": "9.4"
+    },
+    {
+     "childId": "RM-038",
+     "qty": "0.66",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-001",
+     "qty": "2.74",
+     "scrapPct": "7.3"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "1.63",
+     "runHours": "1.17",
+     "rate": "97.67",
+     "lotSize": "0",
+     "scrapPct": "2.2"
+    },
+    {
+     "setupHours": "2.05",
+     "runHours": "1.07",
+     "rate": "71.91",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "B-MAT",
+     "type": "Basis",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": true
+    },
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basisRef": "B-MAT",
+     "percentage": "0.73",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "B-CONV",
+     "type": "Basis",
+     "basis": [
+      "DL",
+      "SUB"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "T",
+     "type": "Total",
+     "refs": [
+      "B-MAT",
+      "B-CONV"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-ADM",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basisRef": "T",
+     "percentage": "2.32",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "SA1-18": {
+   "id": "SA1-18",
+   "kind": "Manufactured",
+   "costingLot": "7",
+   "bom": [
+    {
+     "childId": "RM-003",
+     "qty": "1.658",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-036",
+     "qty": "3.86",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-038",
+     "qty": "3.38",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "0.03",
+     "runHours": "0.08",
+     "rate": "99.11",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-ALL",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM",
+      "DL"
+     ],
+     "percentage": "11.43",
+     "rate": "0",
+     "includeRolled": true
+    }
+   ]
+  },
+  "SA1-19": {
+   "id": "SA1-19",
+   "kind": "Manufactured",
+   "costingLot": "7",
+   "bom": [
+    {
+     "childId": "RM-019",
+     "qty": "3.54",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "1.31",
+     "runHours": "0.61",
+     "rate": "87.25",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "0.76",
+     "runHours": "0.9",
+     "rate": "32.95",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "component": "SUB",
+     "setupHours": "0.9",
+     "runHours": "0.19",
+     "rate": "76.68",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "B-MAT",
+     "type": "Basis",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": true
+    },
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basisRef": "B-MAT",
+     "percentage": "3.1",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "B-CONV",
+     "type": "Basis",
+     "basis": [
+      "DL",
+      "SUB"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "T",
+     "type": "Total",
+     "refs": [
+      "B-MAT",
+      "B-CONV"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-ADM",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basisRef": "T",
+     "percentage": "5.24",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "SA1-20": {
+   "id": "SA1-20",
+   "kind": "Manufactured",
+   "costingLot": "7",
+   "bom": [
+    {
+     "childId": "RM-013",
+     "qty": "0.84",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-031",
+     "qty": "0.58",
+     "scrapPct": "2.2"
+    },
+    {
+     "childId": "RM-012",
+     "qty": "3.88",
+     "scrapPct": "5.5"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "2.58",
+     "runHours": "0.43",
+     "rate": "103.5",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "component": "SUB",
+     "setupHours": "0.6",
+     "runHours": "1.41",
+     "rate": "26.96",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "0.01",
+     "runHours": "1.37",
+     "rate": "72.75",
+     "lotSize": "0",
+     "scrapPct": "3.4"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-ALL",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM",
+      "DL"
+     ],
+     "percentage": "5.78",
+     "rate": "0",
+     "includeRolled": true
+    }
+   ]
+  },
+  "SA2-01": {
+   "id": "SA2-01",
+   "kind": "Manufactured",
+   "costingLot": "3",
+   "bom": [
+    {
+     "childId": "RM-025",
+     "qty": "0.645",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-019",
+     "qty": "3.86",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-19",
+     "qty": "0.695",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "2.82",
+     "runHours": "1.19",
+     "rate": "104.41",
+     "lotSize": "0",
+     "scrapPct": "3.3"
+    },
+    {
+     "setupHours": "0.68",
+     "runHours": "0.77",
+     "rate": "91.6",
+     "lotSize": "0",
+     "scrapPct": "0.1"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "11.24",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-LAB",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basis": [
+      "DL"
+     ],
+     "percentage": "77.87",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "SA2-02": {
+   "id": "SA2-02",
+   "kind": "Manufactured",
+   "costingLot": "25",
+   "bom": [
+    {
+     "childId": "RM-014",
+     "qty": "2.91",
+     "scrapPct": "13.8"
+    },
+    {
+     "childId": "SA1-07",
+     "qty": "1.3",
+     "scrapPct": "0",
+     "phantom": true
+    },
+    {
+     "childId": "SA1-02",
+     "qty": "0.39",
+     "scrapPct": "7.4"
+    }
+   ],
+   "operations": [
+    {
+     "component": "SUB",
+     "setupHours": "0.81",
+     "runHours": "1.26",
+     "rate": "101.24",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "B-MAT",
+     "type": "Basis",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": true
+    },
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basisRef": "B-MAT",
+     "percentage": "0.46",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "B-CONV",
+     "type": "Basis",
+     "basis": [
+      "DL",
+      "SUB"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "T",
+     "type": "Total",
+     "refs": [
+      "B-MAT",
+      "B-CONV"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-ADM",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basisRef": "T",
+     "percentage": "2.78",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "SA2-03": {
+   "id": "SA2-03",
+   "kind": "Manufactured",
+   "costingLot": "5",
+   "bom": [
+    {
+     "childId": "RM-008",
+     "qty": "2.12",
+     "scrapPct": "1.6"
+    },
+    {
+     "childId": "SA1-02",
+     "qty": "2.94",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-10",
+     "qty": "2.33",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "0.67",
+     "runHours": "0.78",
+     "rate": "81.26",
+     "lotSize": "0",
+     "scrapPct": "2.2"
+    },
+    {
+     "setupHours": "1.2",
+     "runHours": "0.68",
+     "rate": "48.71",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "B-MAT",
+     "type": "Basis",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": true
+    },
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basisRef": "B-MAT",
+     "percentage": "9.63",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "B-CONV",
+     "type": "Basis",
+     "basis": [
+      "DL",
+      "SUB"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "T",
+     "type": "Total",
+     "refs": [
+      "B-MAT",
+      "B-CONV"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-ADM",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basisRef": "T",
+     "percentage": "5.72",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "SA2-04": {
+   "id": "SA2-04",
+   "kind": "Manufactured",
+   "costingLot": "7",
+   "bom": [
+    {
+     "childId": "RM-027",
+     "qty": "2.8",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-14",
+     "qty": "2.63",
+     "scrapPct": "8.1"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "2.25",
+     "runHours": "2",
+     "rate": "75.12",
+     "lotSize": "12",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "MACH",
+     "type": "Rate",
+     "component": "IND-LAB",
+     "percentage": "0",
+     "rate": "8.87",
+     "rateUnit": "Hour",
+     "includeRolled": false
+    },
+    {
+     "id": "PACK",
+     "type": "Rate",
+     "component": "IND-MAT",
+     "percentage": "0",
+     "rate": "4.74",
+     "includeRolled": false
+    }
+   ]
+  },
+  "SA2-05": {
+   "id": "SA2-05",
+   "kind": "Manufactured",
+   "costingLot": "7",
+   "bom": [
+    {
+     "childId": "RM-001",
+     "qty": "0.8",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-024",
+     "qty": "0.52",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-19",
+     "qty": "1.77",
+     "scrapPct": "12.3"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "1.81",
+     "runHours": "1.36",
+     "rate": "83.66",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "1.06",
+     "runHours": "1.86",
+     "rate": "78",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-ALL",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM",
+      "DL"
+     ],
+     "percentage": "3.35",
+     "rate": "0",
+     "includeRolled": true
+    }
+   ]
+  },
+  "SA2-06": {
+   "id": "SA2-06",
+   "kind": "Manufactured",
+   "costingLot": "7",
+   "bom": [
+    {
+     "childId": "RM-029",
+     "qty": "1.165",
+     "scrapPct": "0.3"
+    },
+    {
+     "childId": "RM-019",
+     "qty": "1.64",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-18",
+     "qty": "3.9",
+     "scrapPct": "12.5"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "1.31",
+     "runHours": "1.49",
+     "rate": "87.88",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "component": "SUB",
+     "setupHours": "1.02",
+     "runHours": "0.06",
+     "rate": "86.69",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "0.62",
+     "runHours": "0.89",
+     "rate": "48.46",
+     "lotSize": "0",
+     "scrapPct": "4.7"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "B-MAT",
+     "type": "Basis",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": true
+    },
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basisRef": "B-MAT",
+     "percentage": "4.86",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "B-CONV",
+     "type": "Basis",
+     "basis": [
+      "DL",
+      "SUB"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "T",
+     "type": "Total",
+     "refs": [
+      "B-MAT",
+      "B-CONV"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-ADM",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basisRef": "T",
+     "percentage": "7.61",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "SA2-07": {
+   "id": "SA2-07",
+   "kind": "Manufactured",
+   "costingLot": "25",
+   "bom": [
+    {
+     "childId": "RM-004",
+     "qty": "0.228",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-15",
+     "qty": "0.95",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-07",
+     "qty": "2.54",
+     "scrapPct": "4.7"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "0.87",
+     "runHours": "0.01",
+     "rate": "104.05",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "B-MAT",
+     "type": "Basis",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": true
+    },
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basisRef": "B-MAT",
+     "percentage": "4.88",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "B-CONV",
+     "type": "Basis",
+     "basis": [
+      "DL",
+      "SUB"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "T",
+     "type": "Total",
+     "refs": [
+      "B-MAT",
+      "B-CONV"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-ADM",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basisRef": "T",
+     "percentage": "6.92",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "SA2-08": {
+   "id": "SA2-08",
+   "kind": "Manufactured",
+   "costingLot": "5",
+   "bom": [
+    {
+     "childId": "RM-023",
+     "qty": "3.93",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-014",
+     "qty": "1.704",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-13",
+     "qty": "3.78",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-05",
+     "qty": "1.72",
+     "scrapPct": "11.9"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "2.73",
+     "runHours": "1.42",
+     "rate": "71.94",
+     "lotSize": "3",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "0.35",
+     "runHours": "1.48",
+     "rate": "38.73",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ]
+  },
+  "SA2-09": {
+   "id": "SA2-09",
+   "kind": "Manufactured",
+   "costingLot": "7",
+   "bom": [
+    {
+     "childId": "RM-034",
+     "qty": "1.85",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-17",
+     "qty": "0.61",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "2.59",
+     "runHours": "0.19",
+     "rate": "36.71",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "B-MAT",
+     "type": "Basis",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": true
+    },
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basisRef": "B-MAT",
+     "percentage": "8.9",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "B-CONV",
+     "type": "Basis",
+     "basis": [
+      "DL",
+      "SUB"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "T",
+     "type": "Total",
+     "refs": [
+      "B-MAT",
+      "B-CONV"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-ADM",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basisRef": "T",
+     "percentage": "1.22",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "SA2-10": {
+   "id": "SA2-10",
+   "kind": "Manufactured",
+   "costingLot": "12",
+   "bom": [
+    {
+     "childId": "RM-015",
+     "qty": "0.584",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-005",
+     "qty": "2.117",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-06",
+     "qty": "0.99",
+     "scrapPct": "0.6"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "0.94",
+     "runHours": "0.24",
+     "rate": "20.86",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "1.16",
+     "runHours": "0.43",
+     "rate": "106.38",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "0.21",
+     "runHours": "0.34",
+     "rate": "42.77",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ]
+  },
+  "SA2-11": {
+   "id": "SA2-11",
+   "kind": "Manufactured",
+   "costingLot": "5",
+   "bom": [
+    {
+     "childId": "RM-029",
+     "qty": "2.908",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-022",
+     "qty": "1.623",
+     "scrapPct": "10.9"
+    },
+    {
+     "childId": "SA1-19",
+     "qty": "1.49",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-11",
+     "qty": "0.42",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "component": "SUB",
+     "setupHours": "0.18",
+     "runHours": "0.44",
+     "rate": "42.07",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "22.87",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-LAB",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basis": [
+      "DL"
+     ],
+     "percentage": "88.42",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "SA2-12": {
+   "id": "SA2-12",
+   "kind": "Manufactured",
+   "costingLot": "3",
+   "bom": [
+    {
+     "childId": "RM-029",
+     "qty": "0.31",
+     "scrapPct": "8.6"
+    },
+    {
+     "childId": "RM-033",
+     "qty": "2.258",
+     "scrapPct": "8.4"
+    },
+    {
+     "childId": "SA1-12",
+     "qty": "1.639",
+     "scrapPct": "13.5"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "2.35",
+     "runHours": "0.41",
+     "rate": "95.24",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "0.76",
+     "runHours": "1.13",
+     "rate": "45",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "2.29",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-LAB",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basis": [
+      "DL"
+     ],
+     "percentage": "6.49",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "SA2-13": {
+   "id": "SA2-13",
+   "kind": "Manufactured",
+   "costingLot": "3",
+   "bom": [
+    {
+     "childId": "RM-033",
+     "qty": "3.56",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-039",
+     "qty": "1.668",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-10",
+     "qty": "2.05",
+     "scrapPct": "13.1"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "2",
+     "runHours": "0.05",
+     "rate": "72.74",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "2.28",
+     "runHours": "1.33",
+     "rate": "74.57",
+     "lotSize": "0",
+     "scrapPct": "3.4"
+    }
+   ]
+  },
+  "SA2-14": {
+   "id": "SA2-14",
+   "kind": "Manufactured",
+   "costingLot": "12",
+   "bom": [
+    {
+     "childId": "RM-007",
+     "qty": "1.937",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-09",
+     "qty": "2.75",
+     "scrapPct": "6.5"
+    },
+    {
+     "childId": "SA1-16",
+     "qty": "1.22",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "0.37",
+     "runHours": "0.99",
+     "rate": "76.32",
+     "lotSize": "5",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "2.29",
+     "runHours": "0.45",
+     "rate": "51.28",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "B-MAT",
+     "type": "Basis",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": true
+    },
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basisRef": "B-MAT",
+     "percentage": "4.22",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "B-CONV",
+     "type": "Basis",
+     "basis": [
+      "DL",
+      "SUB"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "T",
+     "type": "Total",
+     "refs": [
+      "B-MAT",
+      "B-CONV"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-ADM",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basisRef": "T",
+     "percentage": "5.65",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "SA3-01": {
+   "id": "SA3-01",
+   "kind": "Manufactured",
+   "costingLot": "5",
+   "bom": [
+    {
+     "childId": "RM-032",
+     "qty": "0.866",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA2-05",
+     "qty": "2.13",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA2-08",
+     "qty": "1.77",
+     "scrapPct": "0",
+     "phantom": true
+    }
+   ],
+   "operations": [
+    {
+     "component": "SUB",
+     "setupHours": "1.37",
+     "runHours": "0.44",
+     "rate": "84.97",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "1.03",
+     "runHours": "0.36",
+     "rate": "107.8",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "0.78",
+     "runHours": "0.14",
+     "rate": "77.35",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ]
+  },
+  "SA3-02": {
+   "id": "SA3-02",
+   "kind": "Manufactured",
+   "costingLot": "7",
+   "bom": [
+    {
+     "childId": "RM-028",
+     "qty": "3.81",
+     "scrapPct": "9.4"
+    },
+    {
+     "childId": "RM-017",
+     "qty": "2.72",
+     "scrapPct": "13.9"
+    },
+    {
+     "childId": "SA2-14",
+     "qty": "1.61",
+     "scrapPct": "0",
+     "phantom": true
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "2.49",
+     "runHours": "0.88",
+     "rate": "107.21",
+     "lotSize": "25",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "B-MAT",
+     "type": "Basis",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": true
+    },
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basisRef": "B-MAT",
+     "percentage": "4.77",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "B-CONV",
+     "type": "Basis",
+     "basis": [
+      "DL",
+      "SUB"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "T",
+     "type": "Total",
+     "refs": [
+      "B-MAT",
+      "B-CONV"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-ADM",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basisRef": "T",
+     "percentage": "5.88",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "SA3-03": {
+   "id": "SA3-03",
+   "kind": "Manufactured",
+   "costingLot": "5",
+   "bom": [
+    {
+     "childId": "RM-010",
+     "qty": "3.26",
+     "scrapPct": "12.6"
+    },
+    {
+     "childId": "SA2-03",
+     "qty": "3.52",
+     "scrapPct": "0",
+     "phantom": true
+    }
+   ],
+   "operations": [
+    {
+     "component": "SUB",
+     "setupHours": "2.21",
+     "runHours": "1.87",
+     "rate": "105.16",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "1.17",
+     "runHours": "0.81",
+     "rate": "75.9",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "B-MAT",
+     "type": "Basis",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": true
+    },
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basisRef": "B-MAT",
+     "percentage": "5.56",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "B-CONV",
+     "type": "Basis",
+     "basis": [
+      "DL",
+      "SUB"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "T",
+     "type": "Total",
+     "refs": [
+      "B-MAT",
+      "B-CONV"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-ADM",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basisRef": "T",
+     "percentage": "5.77",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "SA3-04": {
+   "id": "SA3-04",
+   "kind": "Manufactured",
+   "costingLot": "25",
+   "bom": [
+    {
+     "childId": "RM-015",
+     "qty": "2.765",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA2-01",
+     "qty": "1.15",
+     "scrapPct": "11.9"
+    }
+   ],
+   "operations": [
+    {
+     "component": "SUB",
+     "setupHours": "1.18",
+     "runHours": "0.52",
+     "rate": "53.34",
+     "lotSize": "1",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "2.49",
+     "runHours": "0.34",
+     "rate": "33.1",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "2.06",
+     "runHours": "0.07",
+     "rate": "30.91",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-ALL",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM",
+      "DL"
+     ],
+     "percentage": "3.99",
+     "rate": "0",
+     "includeRolled": true
+    }
+   ]
+  },
+  "SA3-05": {
+   "id": "SA3-05",
+   "kind": "Manufactured",
+   "costingLot": "12",
+   "bom": [
+    {
+     "childId": "RM-003",
+     "qty": "0.709",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA2-07",
+     "qty": "1.3",
+     "scrapPct": "7.4"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "0.02",
+     "runHours": "1.03",
+     "rate": "43.45",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "2.45",
+     "runHours": "0.09",
+     "rate": "26.55",
+     "lotSize": "0",
+     "scrapPct": "1.8"
+    },
+    {
+     "setupHours": "2.48",
+     "runHours": "1.39",
+     "rate": "79.95",
+     "lotSize": "1",
+     "scrapPct": "1.6"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "9.14",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-LAB",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basis": [
+      "DL"
+     ],
+     "percentage": "8.2",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "SA3-06": {
+   "id": "SA3-06",
+   "kind": "Manufactured",
+   "costingLot": "12",
+   "bom": [
+    {
+     "childId": "RM-028",
+     "qty": "1.14",
+     "scrapPct": "1.7"
+    },
+    {
+     "childId": "RM-020",
+     "qty": "1.151",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA2-09",
+     "qty": "1.63",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-02",
+     "qty": "1.2",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "component": "SUB",
+     "setupHours": "2.04",
+     "runHours": "1.73",
+     "rate": "59.66",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "2.24",
+     "runHours": "0.29",
+     "rate": "40.61",
+     "lotSize": "0",
+     "scrapPct": "0.2"
+    },
+    {
+     "setupHours": "0.49",
+     "runHours": "0.39",
+     "rate": "105.13",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "B-MAT",
+     "type": "Basis",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": true
+    },
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basisRef": "B-MAT",
+     "percentage": "9.23",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "B-CONV",
+     "type": "Basis",
+     "basis": [
+      "DL",
+      "SUB"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "T",
+     "type": "Total",
+     "refs": [
+      "B-MAT",
+      "B-CONV"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-ADM",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basisRef": "T",
+     "percentage": "7.63",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "SA3-07": {
+   "id": "SA3-07",
+   "kind": "Manufactured",
+   "costingLot": "1",
+   "bom": [
+    {
+     "childId": "RM-040",
+     "qty": "3.1",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-018",
+     "qty": "3.91",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA2-09",
+     "qty": "0.639",
+     "scrapPct": "6.9"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "2.08",
+     "runHours": "1.86",
+     "rate": "96.52",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "0.92",
+     "runHours": "1.56",
+     "rate": "59.91",
+     "lotSize": "25",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "1.37",
+     "runHours": "0.21",
+     "rate": "109.15",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ]
+  },
+  "SA3-08": {
+   "id": "SA3-08",
+   "kind": "Manufactured",
+   "costingLot": "25",
+   "bom": [
+    {
+     "childId": "RM-004",
+     "qty": "3.71",
+     "scrapPct": "5.7"
+    },
+    {
+     "childId": "SA2-06",
+     "qty": "1.15",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "1.21",
+     "runHours": "1.9",
+     "rate": "117.78",
+     "lotSize": "0",
+     "scrapPct": "3.7"
+    },
+    {
+     "component": "SUB",
+     "setupHours": "0.04",
+     "runHours": "0.08",
+     "rate": "110.72",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "2.95",
+     "runHours": "0.82",
+     "rate": "59.85",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "B-MAT",
+     "type": "Basis",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": true
+    },
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basisRef": "B-MAT",
+     "percentage": "10.5",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "B-CONV",
+     "type": "Basis",
+     "basis": [
+      "DL",
+      "SUB"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "T",
+     "type": "Total",
+     "refs": [
+      "B-MAT",
+      "B-CONV"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-ADM",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basisRef": "T",
+     "percentage": "4.27",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "SA3-09": {
+   "id": "SA3-09",
+   "kind": "Manufactured",
+   "costingLot": "25",
+   "bom": [
+    {
+     "childId": "RM-039",
+     "qty": "1.22",
+     "scrapPct": "7.2"
+    },
+    {
+     "childId": "SA2-07",
+     "qty": "2.18",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA1-19",
+     "qty": "1.606",
+     "scrapPct": "0",
+     "phantom": true
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "0.12",
+     "runHours": "1.97",
+     "rate": "25.36",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "0.9",
+     "runHours": "1.37",
+     "rate": "75.56",
+     "lotSize": "0",
+     "scrapPct": "0.6"
+    },
+    {
+     "component": "SUB",
+     "setupHours": "1.38",
+     "runHours": "0.92",
+     "rate": "84.78",
+     "lotSize": "0",
+     "scrapPct": "0.1"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-ALL",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM",
+      "DL"
+     ],
+     "percentage": "9.55",
+     "rate": "0",
+     "includeRolled": true
+    }
+   ]
+  },
+  "SA4-01": {
+   "id": "SA4-01",
+   "kind": "Manufactured",
+   "costingLot": "5",
+   "bom": [
+    {
+     "childId": "RM-026",
+     "qty": "2.289",
+     "scrapPct": "8"
+    },
+    {
+     "childId": "RM-024",
+     "qty": "1.41",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA3-03",
+     "qty": "0.44",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "2.88",
+     "runHours": "0.69",
+     "rate": "117.69",
+     "lotSize": "0",
+     "scrapPct": "2.3"
+    },
+    {
+     "setupHours": "1.1",
+     "runHours": "1.54",
+     "rate": "107.34",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "0.23",
+     "runHours": "0.28",
+     "rate": "37.58",
+     "lotSize": "0",
+     "scrapPct": "4.9"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-ALL",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM",
+      "DL"
+     ],
+     "percentage": "2.97",
+     "rate": "0",
+     "includeRolled": true
+    }
+   ]
+  },
+  "SA4-02": {
+   "id": "SA4-02",
+   "kind": "Manufactured",
+   "costingLot": "10",
+   "bom": [
+    {
+     "childId": "RM-006",
+     "qty": "2.05",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "RM-028",
+     "qty": "0.3",
+     "scrapPct": "9.2"
+    },
+    {
+     "childId": "SA3-08",
+     "qty": "0.41",
+     "scrapPct": "9.8"
+    },
+    {
+     "childId": "SA3-02",
+     "qty": "0.5",
+     "scrapPct": "13.9"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "0.7",
+     "runHours": "1.4",
+     "rate": "29.83",
+     "lotSize": "12",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "1.95",
+     "runHours": "1.33",
+     "rate": "69.12",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "0.49",
+     "runHours": "0.44",
+     "rate": "43.64",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-ALL",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM",
+      "DL"
+     ],
+     "percentage": "4.81",
+     "rate": "0",
+     "includeRolled": true
+    }
+   ]
+  },
+  "SA4-03": {
+   "id": "SA4-03",
+   "kind": "Manufactured",
+   "costingLot": "12",
+   "bom": [
+    {
+     "childId": "RM-004",
+     "qty": "1.45",
+     "scrapPct": "12.6"
+    },
+    {
+     "childId": "SA3-03",
+     "qty": "3.42",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA3-02",
+     "qty": "0.366",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "1.31",
+     "runHours": "0.93",
+     "rate": "27.41",
+     "lotSize": "0",
+     "scrapPct": "1.5"
+    },
+    {
+     "setupHours": "0.15",
+     "runHours": "2",
+     "rate": "31.47",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "B-MAT",
+     "type": "Basis",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": true
+    },
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basisRef": "B-MAT",
+     "percentage": "4.75",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "B-CONV",
+     "type": "Basis",
+     "basis": [
+      "DL",
+      "SUB"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "T",
+     "type": "Total",
+     "refs": [
+      "B-MAT",
+      "B-CONV"
+     ],
+     "percentage": "0",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-ADM",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basisRef": "T",
+     "percentage": "5.96",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  },
+  "SA4-04": {
+   "id": "SA4-04",
+   "kind": "Manufactured",
+   "costingLot": "3",
+   "bom": [
+    {
+     "childId": "RM-023",
+     "qty": "2.02",
+     "scrapPct": "2.5"
+    },
+    {
+     "childId": "RM-039",
+     "qty": "0.49",
+     "scrapPct": "4"
+    },
+    {
+     "childId": "SA3-08",
+     "qty": "0.96",
+     "scrapPct": "7.7"
+    },
+    {
+     "childId": "SA2-14",
+     "qty": "3.19",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "2.83",
+     "runHours": "1.72",
+     "rate": "96.13",
+     "lotSize": "0",
+     "scrapPct": "0"
+    },
+    {
+     "setupHours": "2.88",
+     "runHours": "0.83",
+     "rate": "46.31",
+     "lotSize": "0",
+     "scrapPct": "0"
+    }
+   ]
+  },
+  "SA4-05": {
+   "id": "SA4-05",
+   "kind": "Manufactured",
+   "costingLot": "5",
+   "bom": [
+    {
+     "childId": "RM-004",
+     "qty": "0.88",
+     "scrapPct": "0"
+    },
+    {
+     "childId": "SA3-06",
+     "qty": "3.29",
+     "scrapPct": "0"
+    }
+   ],
+   "operations": [
+    {
+     "setupHours": "1.76",
+     "runHours": "0.75",
+     "rate": "86.91",
+     "lotSize": "3",
+     "scrapPct": "0"
+    }
+   ],
+   "sheet": [
+    {
+     "id": "OH-MAT",
+     "type": "Surcharge",
+     "component": "IND-MAT",
+     "basis": [
+      "DM"
+     ],
+     "percentage": "16.71",
+     "rate": "0",
+     "includeRolled": false
+    },
+    {
+     "id": "OH-LAB",
+     "type": "Surcharge",
+     "component": "IND-LAB",
+     "basis": [
+      "DL"
+     ],
+     "percentage": "24.14",
+     "rate": "0",
+     "includeRolled": false
+    }
+   ]
+  }
+ }
+}

@@ -83,9 +83,12 @@ type Decomposition struct {
 	Residual    decimal.Decimal     `json:"residual"`
 }
 
-// cell accumulates unrounded amounts for one component. The zero value is zero.
+// cell accumulates unrounded amounts for one component, each multiplied by
+// Q_order so that only multiplications happen per line and the one division
+// by Q_order is taken per cell before rounding (see Decompose). The zero value
+// is zero.
 type cell struct {
-	total, lot, qty, price, sub, stdCost decimal.Decimal
+	total, lot, qty, price, sub decimal.Decimal
 }
 
 // Decompose splits an order's variance into LSV, QV, PV and SV per component.
@@ -117,35 +120,39 @@ func Decompose(o Order) (Decomposition, error) {
 		}
 		return cells[c]
 	}
-	ratio := o.RAFQty.Div(o.PlannedQty)
+	// Every amount below is the line's amount times Q_order (qo), so a line only
+	// multiplies and each cell divides once: dividing RAF by Q_order first
+	// (a non-terminating ratio such as 55/76) shifted amounts that are exactly
+	// on a half minor unit to the wrong side of the rounding.
+	qo := o.PlannedQty
 	for _, ln := range o.Lines {
 		c := get(ln.Component)
-		actual := ln.ActualQty.Mul(ln.ActualUnitCost)
+		actual := ln.ActualQty.Mul(ln.ActualUnitCost).Mul(qo)
 		switch {
 		case ln.Planned && ln.Fixed:
-			est := ln.EstPerLot.Mul(ratio)
-			std := ln.StdUnitCost.Mul(o.RAFQty)
+			est := ln.EstPerLot.Mul(o.RAFQty)
+			std := ln.StdUnitCost.Mul(o.RAFQty).Mul(qo)
 			c.lot = c.lot.Add(est.Sub(std))
 			c.price = c.price.Add(actual.Sub(est))
-			c.stdCost = c.stdCost.Add(std)
+			c.total = c.total.Add(actual.Sub(std))
 		case ln.Planned:
-			sq := ln.PlannedQty.Mul(ratio)
-			std := sq.Mul(ln.StdUnitCost)
-			c.qty = c.qty.Add(ln.ActualQty.Sub(sq).Mul(ln.StdUnitCost))
-			c.price = c.price.Add(ln.ActualQty.Mul(ln.ActualUnitCost.Sub(ln.StdUnitCost)))
-			c.stdCost = c.stdCost.Add(std)
+			sq := ln.PlannedQty.Mul(o.RAFQty)
+			c.qty = c.qty.Add(ln.ActualQty.Mul(qo).Sub(sq).Mul(ln.StdUnitCost))
+			c.price = c.price.Add(ln.ActualQty.Mul(ln.ActualUnitCost.Sub(ln.StdUnitCost)).Mul(qo))
+			c.total = c.total.Add(actual.Sub(sq.Mul(ln.StdUnitCost)))
 		default:
 			c.sub = c.sub.Add(actual)
+			c.total = c.total.Add(actual)
 		}
-		c.total = c.total.Add(actual).Sub(stdOf(ln, o.RAFQty, ratio))
 	}
 
 	out := Decomposition{ByComponent: []ComponentVariance{}}
+	per := func(v decimal.Decimal) decimal.Decimal { return v.Div(qo).Round(scale) }
 	for _, comp := range sortedKeys(cells) {
 		c := cells[comp]
-		cv := ComponentVariance{Component: comp, Total: c.total.Round(scale), Types: Types{
-			LotSize: c.lot.Round(scale), Quantity: c.qty.Round(scale),
-			Price: c.price.Round(scale), Substitution: c.sub.Round(scale),
+		cv := ComponentVariance{Component: comp, Total: per(c.total), Types: Types{
+			LotSize: per(c.lot), Quantity: per(c.qty),
+			Price: per(c.price), Substitution: per(c.sub),
 		}}
 		out.ByComponent = append(out.ByComponent, cv)
 		out.Total = out.Total.Add(cv.Total)
@@ -173,16 +180,4 @@ func Decompose(o Order) (Decomposition, error) {
 		return Decomposition{}, &CodedError{Code: CodeVarianceIdentity, Detail: fmt.Sprintf("total %s differs from categories %s", out.Total, out.Types.Sum())}
 	}
 	return out, nil
-}
-
-// stdOf is the standard cost a line contributes for the reported output.
-func stdOf(ln OrderLine, raf, ratio decimal.Decimal) decimal.Decimal {
-	switch {
-	case ln.Planned && ln.Fixed:
-		return ln.StdUnitCost.Mul(raf)
-	case ln.Planned:
-		return ln.PlannedQty.Mul(ratio).Mul(ln.StdUnitCost)
-	default:
-		return decimal.Zero
-	}
 }
