@@ -58,7 +58,7 @@ function isBlockedIPv6(address: string): boolean {
   if ((g[0] & 0xe000) !== 0x2000) {
     return true;
   }
-  if (g[0] === 0x2001 && g[1] === 0) {
+  if (g[0] === 0x2001 && (g[1] < 0x200 || g[1] === 0x0db8)) {
     return true;
   }
   if (g[0] === 0x2002) {
@@ -69,7 +69,7 @@ function isBlockedIPv6(address: string): boolean {
 
 /** True for loopback, private, link-local, CGNAT, unspecified, multicast, reserved and metadata addresses, including IPv4 embedded in IPv6. */
 export function isBlockedAddress(address: string): boolean {
-  const family = isIP(address);
+  const family = address.includes("%") ? 0 : isIP(address);
   if (family === 0) {
     return true;
   }

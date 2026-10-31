@@ -107,9 +107,13 @@ export interface HttpTransportOptions extends GuardOptions {
 export function httpTransport(options: HttpTransportOptions = {}): Transport {
   const { timeoutMs = 10_000, validate = (url: string) => validateWebhookUrl(url, options) } = options;
   return async (url, headers, body) => {
+    const signal = AbortSignal.timeout(timeoutMs);
     let target: PinnedTarget;
     try {
-      target = await validate(url);
+      target = await Promise.race([
+        validate(url),
+        new Promise<never>((_, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true })),
+      ]);
     } catch {
       return null;
     }
@@ -120,7 +124,7 @@ export function httpTransport(options: HttpTransportOptions = {}): Transport {
         {
           method: "POST",
           headers: { ...headers, "content-length": String(Buffer.byteLength(body)) },
-          signal: AbortSignal.timeout(timeoutMs),
+          signal,
           lookup: (_host, lookupOptions, callback) => {
             if (lookupOptions.all) {
               (callback as unknown as (e: null, a: { address: string; family: number }[]) => void)(null, [
