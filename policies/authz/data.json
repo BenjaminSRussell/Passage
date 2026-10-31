@@ -346,6 +346,9 @@
       {"resource": "/v1/receiving/invoices/*:release-audit-block", "methods": ["POST"]},
       {"resource": "/v1/receiving/invoices/*:reject-audit-block", "methods": ["POST"]}
     ]},
+    "ErsPriceConfirm": {"permissions": [
+      {"resource": "/v1/receiving/receipts/*/lines/*/ers-price-confirmation", "methods": ["PUT"]}
+    ]},
     "APInquire": {"permissions": [{"resource": "/v1/receiving/grir", "methods": ["GET"]}]},
     "ReceivingAdmin": {"permissions": [
       {"resource": "/v1/receiving/pending-postings", "methods": ["GET"]},

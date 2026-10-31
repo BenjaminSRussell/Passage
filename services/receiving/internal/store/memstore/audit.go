@@ -2,12 +2,12 @@ package memstore
 
 import (
 	"context"
+	"fmt"
+	"github.com/shopspring/decimal"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
@@ -104,26 +104,30 @@ func (s *Store) ErsVendor(ctx context.Context, legalEntityID, vendorID string) (
 	return enabled, err
 }
 
-func (s *Store) SetAuditRate(ctx context.Context, legalEntityID string, ratePct decimal.Decimal, by string, fn store.AuditRateFunc) error {
+func (s *Store) SetAuditPolicy(ctx context.Context, legalEntityID string, policy domain.AuditPolicy, by string, fn store.AuditPolicyFunc) error {
 	return s.with(ctx, func(t *tenantData) error {
 		old := t.auditRates[legalEntityID]
-		evt, err := fn(old)
+		policy.RuleVersion = old.RuleVersion
+		if old.RuleVersion == 0 || !old.RatePct.Equal(policy.RatePct) || !old.Threshold.Equal(policy.Threshold) || old.ThresholdCurrency != policy.ThresholdCurrency {
+			policy.RuleVersion++
+		}
+		evt, err := fn(old, policy)
 		if err != nil {
 			return err
 		}
-		t.policyHistory = append(t.policyHistory, PolicyChange{Kind: "audit", LegalEntityID: legalEntityID, Old: old.String(), New: ratePct.String(), By: by})
-		t.auditRates[legalEntityID] = ratePct
+		t.policyHistory = append(t.policyHistory, PolicyChange{Kind: "audit", LegalEntityID: legalEntityID, Old: old.RatePct.String(), New: policy.RatePct.String(), By: by})
+		t.auditRates[legalEntityID] = policy
 		s.events = append(s.events, evt)
 		return nil
 	})
 }
 
-func (s *Store) AuditRate(ctx context.Context, legalEntityID string) (rate decimal.Decimal, err error) {
+func (s *Store) AuditPolicy(ctx context.Context, legalEntityID string) (policy domain.AuditPolicy, err error) {
 	err = s.with(ctx, func(t *tenantData) error {
-		rate = t.auditRates[legalEntityID]
+		policy = t.auditRates[legalEntityID]
 		return nil
 	})
-	return rate, err
+	return policy, err
 }
 
 func (s *Store) RejectedInvoiceCount(ctx context.Context, vendorID, number string) (n int, err error) {
@@ -147,6 +151,37 @@ type PolicyChange struct {
 func (s *Store) PolicyHistory(ctx context.Context) (out []PolicyChange, err error) {
 	err = s.with(ctx, func(t *tenantData) error {
 		out = slices.Clone(t.policyHistory)
+		return nil
+	})
+	return out, err
+}
+
+func (s *Store) ConfirmErsPrice(ctx context.Context, legalEntityID, receiptID string, lineNo int, price decimal.Decimal, _ string) error {
+	return s.with(ctx, func(t *tenantData) error {
+		rec, err := t.find(receiptID)
+		if err != nil || rec.LegalEntityID != legalEntityID || !slices.ContainsFunc(rec.Lines, func(l store.Line) bool { return l.LineNo == lineNo }) {
+			return store.ErrNotFound
+		}
+		if t.ersPrices == nil {
+			t.ersPrices = map[string]decimal.Decimal{}
+		}
+		t.ersPrices[fmt.Sprintf("%s|%d", rec.ID, lineNo)] = price
+		return nil
+	})
+}
+
+func (s *Store) ErsPriceConfirmations(ctx context.Context, receiptID string) (map[int]decimal.Decimal, error) {
+	out := map[int]decimal.Decimal{}
+	err := s.with(ctx, func(t *tenantData) error {
+		rec, err := t.find(receiptID)
+		if err != nil {
+			return nil
+		}
+		for _, l := range rec.Lines {
+			if price, ok := t.ersPrices[fmt.Sprintf("%s|%d", rec.ID, l.LineNo)]; ok {
+				out[l.LineNo] = price
+			}
+		}
 		return nil
 	})
 	return out, err

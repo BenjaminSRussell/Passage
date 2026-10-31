@@ -138,6 +138,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyInvoicePost)).Post("/v1/receiving/ers-settlements:run", a.idempotent(a.runErsSettlement))
 	r.With(authz.RequireDuty(dutyInvoiceAuditRelease)).Post("/v1/receiving/invoices/{id}:release-audit-block", a.idempotent(a.releaseAuditBlock))
 	r.With(authz.RequireDuty(dutyInvoiceAuditRelease)).Post("/v1/receiving/invoices/{id}:reject-audit-block", a.idempotent(a.rejectAuditBlock))
+	r.With(authz.RequireDuty(dutyErsPriceConfirm)).Put("/v1/receiving/receipts/{id}/lines/{lineNo}/ers-price-confirmation", a.confirmErsPrice)
 	r.With(authz.RequireDuty(dutyMatchingPolicy)).Put("/v1/receiving/audit-policy", a.setAuditPolicy)
 	r.With(authz.RequireDuty(dutyMatchingPolicy)).Put("/v1/receiving/ers-vendors/{vendorId}", a.setErsVendor)
 }

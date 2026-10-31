@@ -98,6 +98,7 @@ type settlementBody struct {
 type skippedBody struct {
 	SourceRef string `json:"sourceRef"`
 	Reason    string `json:"reason"`
+	Detail    string `json:"detail,omitempty"`
 }
 
 type settlementRunBody struct {

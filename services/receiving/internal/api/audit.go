@@ -2,10 +2,10 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -15,16 +15,26 @@ import (
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
 )
 
-const dutyInvoiceAuditRelease = "InvoiceAuditRelease"
+const (
+	dutyInvoiceAuditRelease = "InvoiceAuditRelease"
+	dutyErsPriceConfirm     = "ErsPriceConfirm"
+)
 
 type auditPolicyRequest struct {
 	LegalEntityID string        `json:"legalEntityId"`
 	SampleRatePct *fieldDecimal `json:"sampleRatePct"`
+
+	ThresholdAmount   *fieldDecimal `json:"thresholdAmount"`
+	ThresholdCurrency string        `json:"thresholdCurrency"`
 }
 
 type auditPolicyBody struct {
 	LegalEntityID string `json:"legalEntityId"`
 	SampleRatePct string `json:"sampleRatePct"`
+
+	ThresholdAmount   string `json:"thresholdAmount,omitempty"`
+	ThresholdCurrency string `json:"thresholdCurrency,omitempty"`
+	RuleVersion       int    `json:"ruleVersion"`
 }
 
 type ersVendorRequest struct {
@@ -78,6 +88,18 @@ func (a *API) setAuditPolicy(w http.ResponseWriter, r *http.Request) {
 	if present && !domain.ValidSampleRate(rate) {
 		fields["sampleRatePct"] = "must be from 0 to 100 with at most two decimals"
 	}
+	policy := domain.AuditPolicy{RatePct: rate}
+	if threshold, given := decimalField(fields, "thresholdAmount", req.ThresholdAmount, false); given {
+		if !threshold.IsPositive() {
+			fields["thresholdAmount"] = "must be greater than zero"
+		}
+		if len(req.ThresholdCurrency) != 3 || !isUpperAlpha(req.ThresholdCurrency) {
+			fields["thresholdCurrency"] = "is required with thresholdAmount as a 3-letter upper-case ISO 4217 code"
+		}
+		policy.Threshold, policy.ThresholdCurrency = threshold, req.ThresholdCurrency
+	} else if req.ThresholdCurrency != "" {
+		fields["thresholdAmount"] = "is required with thresholdCurrency"
+	}
 	if len(fields) > 0 {
 		httpx.Fail(w, r, validationProblem(fields))
 		return
@@ -86,14 +108,20 @@ func (a *API) setAuditPolicy(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	err := a.store.SetAuditRate(r.Context(), req.LegalEntityID, rate, p.UserID, func(old decimal.Decimal) (events.Event, error) {
-		return auditPolicyChangedEvent(p.TenantID, req.LegalEntityID, old, rate, p.UserID)
+	var saved domain.AuditPolicy
+	err := a.store.SetAuditPolicy(r.Context(), req.LegalEntityID, policy, p.UserID, func(old, next domain.AuditPolicy) (events.Event, error) {
+		saved = next
+		return auditPolicyChangedEvent(p.TenantID, req.LegalEntityID, old, next, p.UserID)
 	})
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, auditPolicyBody{LegalEntityID: req.LegalEntityID, SampleRatePct: rate.StringFixed(2)})
+	body := auditPolicyBody{LegalEntityID: req.LegalEntityID, SampleRatePct: saved.RatePct.StringFixed(2), RuleVersion: saved.RuleVersion}
+	if saved.Threshold.IsPositive() {
+		body.ThresholdAmount, body.ThresholdCurrency = saved.Threshold.String(), saved.ThresholdCurrency
+	}
+	httpx.JSON(w, http.StatusOK, body)
 }
 
 func (a *API) setErsVendor(w http.ResponseWriter, r *http.Request) {
@@ -215,4 +243,52 @@ func (a *API) rejectAuditBlock(w http.ResponseWriter, r *http.Request) {
 	}
 	a.auditRejected.Add(1)
 	httpx.JSON(w, http.StatusOK, toInvoiceBody(rejected))
+}
+
+type ersPriceRequest struct {
+	LegalEntityID string        `json:"legalEntityId"`
+	UnitPrice     *fieldDecimal `json:"unitPrice"`
+}
+
+type ersPriceBody struct {
+	ReceiptID string `json:"receiptId"`
+	LineNo    int    `json:"lineNo"`
+	UnitPrice string `json:"unitPrice"`
+}
+
+func (a *API) confirmErsPrice(w http.ResponseWriter, r *http.Request) {
+	p, ok := principalWithUser(w, r)
+	if !ok {
+		return
+	}
+	var req ersPriceRequest
+	if err := httpx.Decode(r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	id := chi.URLParam(r, "id")
+	lineNo, lineErr := strconv.Atoi(chi.URLParam(r, "lineNo"))
+	fields := map[string]string{}
+	checkUUID(fields, "id", id)
+	checkUUID(fields, "legalEntityId", req.LegalEntityID)
+	if lineErr != nil || lineNo < 1 {
+		fields["lineNo"] = "must be at least 1"
+	}
+	price, present := decimalField(fields, "unitPrice", req.UnitPrice, true)
+	if present && price.IsNegative() {
+		fields["unitPrice"] = "must not be negative"
+	}
+	if len(fields) > 0 {
+		httpx.Fail(w, r, validationProblem(fields))
+		return
+	}
+	if err := inScope(p, req.LegalEntityID); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if err := a.store.ConfirmErsPrice(r.Context(), req.LegalEntityID, id, lineNo, price, p.UserID); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, ersPriceBody{ReceiptID: id, LineNo: lineNo, UnitPrice: price.String()})
 }

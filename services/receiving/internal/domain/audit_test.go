@@ -111,3 +111,35 @@ func TestValidSampleRate(t *testing.T) {
 		}
 	}
 }
+
+func TestAuditPolicyWeightIsTotalOverThresholdCappedAtOne(t *testing.T) {
+	p := domain.AuditPolicy{RatePct: dec("50"), Threshold: dec("1000"), ThresholdCurrency: "USD", RuleVersion: 1}
+	for _, tc := range []struct {
+		total, currency, want string
+	}{
+		{"250", "USD", "0.25"}, {"1000", "USD", "1"}, {"5000", "USD", "1"}, {"0", "USD", "0"}, {"-5", "USD", "0"}, {"10", "EUR", "1"},
+	} {
+		if got := p.Weight(dec(tc.total), tc.currency); !got.Equal(dec(tc.want)) {
+			t.Errorf("weight(%s %s) = %s, want %s", tc.total, tc.currency, got, tc.want)
+		}
+	}
+	if got := (domain.AuditPolicy{RatePct: dec("50")}).Weight(dec("1"), "USD"); !got.Equal(dec("1")) {
+		t.Errorf("no threshold must weigh 1, got %s", got)
+	}
+}
+
+func TestSamplerDecisionDependsOnRuleVersion(t *testing.T) {
+	s, _ := domain.NewSampler([]byte("0123456789abcdef"))
+	differs := false
+	for i := range 200 {
+		id := fmt.Sprintf("00000000-0000-4000-8000-%012d", i)
+		v1 := s.Decide(id, domain.AuditPolicy{RatePct: dec("50"), RuleVersion: 1}, dec("0"), "")
+		if v1 != s.Decide(id, domain.AuditPolicy{RatePct: dec("50"), RuleVersion: 1}, dec("0"), "") {
+			t.Fatal("the same version must decide the same way")
+		}
+		differs = differs || v1 != s.Decide(id, domain.AuditPolicy{RatePct: dec("50"), RuleVersion: 2}, dec("0"), "")
+	}
+	if !differs {
+		t.Fatal("a new rule version must re-draw")
+	}
+}

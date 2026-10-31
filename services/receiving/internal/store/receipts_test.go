@@ -497,3 +497,33 @@ func TestRegisterSeesWhatOtherReceiptsTookFromThePOLine(t *testing.T) {
 		t.Fatalf("received on the order %v err %v", got, err)
 	}
 }
+
+func TestErsPriceConfirmationIsKeptPerReceiptLineAndScopedToTheEntity(t *testing.T) {
+	st := setup(t).st
+	p := principal(1)
+	r := registered(t, st, p, "PS-CONFIRM", "S1", "S2", "S3")
+
+	if err := st.ConfirmErsPrice(ctxOf(p), p.LegalEntityID, r.ID, 1, decimal.RequireFromString("2.6"), "buyer"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ConfirmErsPrice(ctxOf(p), p.LegalEntityID, r.ID, 1, decimal.RequireFromString("2.7"), "buyer"); err != nil {
+		t.Fatalf("a second confirmation must replace the first: %v", err)
+	}
+	got, err := st.ErsPriceConfirmations(ctxOf(p), r.ID)
+	if err != nil || len(got) != 1 || !got[1].Equal(decimal.RequireFromString("2.7")) {
+		t.Fatalf("confirmations %v err %v", got, err)
+	}
+	for name, err := range map[string]error{
+		"unknown line":  st.ConfirmErsPrice(ctxOf(p), p.LegalEntityID, r.ID, 9, decimal.NewFromInt(1), "buyer"),
+		"other entity":  st.ConfirmErsPrice(ctxOf(p), "99999999-9999-4999-8999-999999999990", r.ID, 1, decimal.NewFromInt(1), "buyer"),
+		"unknown order": st.ConfirmErsPrice(ctxOf(p), p.LegalEntityID, "99999999-9999-4999-8999-999999999991", 1, decimal.NewFromInt(1), "buyer"),
+		"other tenant":  st.ConfirmErsPrice(ctxOf(principal(2)), principal(2).LegalEntityID, r.ID, 1, decimal.NewFromInt(1), "buyer"),
+	} {
+		if !errors.Is(err, store.ErrNotFound) {
+			t.Errorf("%s: err %v, want ErrNotFound", name, err)
+		}
+	}
+	if other, _ := st.ErsPriceConfirmations(ctxOf(principal(2)), r.ID); len(other) != 0 {
+		t.Fatalf("another tenant sees %v", other)
+	}
+}

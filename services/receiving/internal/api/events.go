@@ -4,6 +4,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/events"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/store"
 )
 
@@ -93,6 +94,7 @@ type invoiceSampledData struct {
 	Currency      string `json:"currency"`
 	Total         string `json:"total"`
 	SampleRatePct string `json:"sample_rate_pct"`
+	RuleVersion   int    `json:"rule_version"`
 	Reason        string `json:"reason"`
 }
 
@@ -112,6 +114,9 @@ type auditPolicyChangedData struct {
 	LegalEntityID string `json:"legal_entity_id"`
 	OldRatePct    string `json:"old_rate_pct"`
 	NewRatePct    string `json:"new_rate_pct"`
+	Threshold     string `json:"threshold_amount,omitempty"`
+	ThresholdCcy  string `json:"threshold_currency,omitempty"`
+	RuleVersion   int    `json:"rule_version"`
 	ChangedBy     string `json:"changed_by"`
 }
 
@@ -194,7 +199,7 @@ func receiptCorrectedEvent(tenantID, kind string, r store.Receipt, seq int, ledg
 func invoiceSampledEvent(tenantID string, in store.Invoice, total, ratePct decimal.Decimal) (events.Event, error) {
 	return newEvent("payables", "invoice", "sampled", in.ID, tenantID, invoiceSampledData{
 		InvoiceID: in.ID, OneTimePayee: in.OneTimePayeeID, LegalEntityID: in.LegalEntityID, VendorID: in.VendorID, InvoiceNumber: in.InvoiceNumber, Source: in.Source,
-		Currency: in.Currency, Total: total.String(), SampleRatePct: ratePct.String(), Reason: in.AuditReason,
+		Currency: in.Currency, Total: total.String(), SampleRatePct: ratePct.String(), RuleVersion: in.AuditRuleVersion, Reason: in.AuditReason,
 	})
 }
 
@@ -205,10 +210,14 @@ func invoiceRejectedEvent(tenantID string, in store.Invoice, reason, by string) 
 	})
 }
 
-func auditPolicyChangedEvent(tenantID, legalEntityID string, oldRate, newRate decimal.Decimal, by string) (events.Event, error) {
-	return newEvent("receiving", "auditpolicy", "changed", legalEntityID, tenantID, auditPolicyChangedData{
-		LegalEntityID: legalEntityID, OldRatePct: oldRate.String(), NewRatePct: newRate.String(), ChangedBy: by,
-	})
+func auditPolicyChangedEvent(tenantID, legalEntityID string, oldPolicy, next domain.AuditPolicy, by string) (events.Event, error) {
+	data := auditPolicyChangedData{
+		LegalEntityID: legalEntityID, OldRatePct: oldPolicy.RatePct.String(), NewRatePct: next.RatePct.String(), RuleVersion: next.RuleVersion, ChangedBy: by,
+	}
+	if next.Threshold.IsPositive() {
+		data.Threshold, data.ThresholdCcy = next.Threshold.String(), next.ThresholdCurrency
+	}
+	return newEvent("receiving", "auditpolicy", "changed", legalEntityID, tenantID, data)
 }
 
 func ersVendorChangedEvent(tenantID, legalEntityID, vendorID string, oldEnabled, newEnabled bool, by string) (events.Event, error) {

@@ -1,6 +1,7 @@
 package memstore_test
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -52,8 +53,8 @@ func policyEvent(t *testing.T, p tenant.Principal) events.Event {
 
 func setRate(t *testing.T, b backend, p tenant.Principal, entity, rate, by string) (old decimal.Decimal) {
 	t.Helper()
-	err := b.st.SetAuditRate(ctxOf(p), entity, decimal.RequireFromString(rate), by, func(o decimal.Decimal) (events.Event, error) {
-		old = o
+	err := b.st.SetAuditPolicy(ctxOf(p), entity, domain.AuditPolicy{RatePct: decimal.RequireFromString(rate)}, by, func(o, _ domain.AuditPolicy) (events.Event, error) {
+		old = o.RatePct
 		return policyEvent(t, p), nil
 	})
 	if err != nil {
@@ -184,7 +185,7 @@ var auditCases = []struct {
 		if on, err := b.st.ErsVendor(ctx, p.LegalEntityID, vendorID); err != nil || on {
 			t.Fatalf("default ers=%v err=%v", on, err)
 		}
-		if rate, err := b.st.AuditRate(ctx, p.LegalEntityID); err != nil || !rate.IsZero() {
+		if rate, err := rateOf(b.st, ctx, p.LegalEntityID); err != nil || !rate.IsZero() {
 			t.Fatalf("default rate=%s err=%v", rate, err)
 		}
 		eventsBefore := b.events(p)
@@ -208,7 +209,7 @@ var auditCases = []struct {
 			{"other tenant", principal(2), p.LegalEntityID, vendorID, false, "0"},
 		} {
 			on, err := b.st.ErsVendor(ctxOf(tc.ctx), tc.entity, tc.vendor)
-			rate, rateErr := b.st.AuditRate(ctxOf(tc.ctx), tc.entity)
+			rate, rateErr := rateOf(b.st, ctxOf(tc.ctx), tc.entity)
 			if err != nil || rateErr != nil || on != tc.ers || !rate.Equal(decimal.RequireFromString(tc.rate)) {
 				t.Fatalf("%s: ers=%v (%v) rate=%s (%v)", tc.name, on, err, rate, rateErr)
 			}
@@ -225,7 +226,7 @@ var auditCases = []struct {
 		if on, _ := b.st.ErsVendor(ctx, p.LegalEntityID, vendorID); on {
 			t.Fatal("the flag was not turned off")
 		}
-		if rate, _ := b.st.AuditRate(ctx, p.LegalEntityID); !rate.IsZero() {
+		if rate, _ := rateOf(b.st, ctx, p.LegalEntityID); !rate.IsZero() {
 			t.Fatalf("rate %s after reset", rate)
 		}
 	}},
@@ -335,4 +336,9 @@ func TestAuditStoreParity(t *testing.T) {
 			t.Run(be.name+"/"+tc.name, func(t *testing.T) { tc.run(t, be.make(t)) })
 		}
 	}
+}
+
+func rateOf(st store.Store, ctx context.Context, entity string) (decimal.Decimal, error) {
+	policy, err := st.AuditPolicy(ctx, entity)
+	return policy.RatePct, err
 }

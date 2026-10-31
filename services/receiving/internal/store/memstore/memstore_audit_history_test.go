@@ -1,6 +1,7 @@
 package memstore_test
 
 import (
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -13,9 +14,9 @@ func TestMemstoreKeepsWhoAndOldAndNewForPolicyChanges(t *testing.T) {
 	st := memstore.New()
 	p := principal(1)
 	ctx := ctxOf(p)
-	evt := func(decimal.Decimal) (events.Event, error) { return policyEvent(t, p), nil }
+	evt := func(_, _ domain.AuditPolicy) (events.Event, error) { return policyEvent(t, p), nil }
 	for _, c := range []struct{ rate, by string }{{"5", "alice"}, {"7.5", "bob"}} {
-		if err := st.SetAuditRate(ctx, p.LegalEntityID, decimal.RequireFromString(c.rate), c.by, evt); err != nil {
+		if err := st.SetAuditPolicy(ctx, p.LegalEntityID, domain.AuditPolicy{RatePct: decimal.RequireFromString(c.rate)}, c.by, evt); err != nil {
 			t.Fatal(err)
 		}
 	}

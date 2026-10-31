@@ -7,13 +7,12 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/shopspring/decimal"
-
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/outbox"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
+	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
 )
 
 func notBlockedIfNoRow(err error, id string) error {
@@ -236,7 +235,7 @@ func (s *Postgres) ErsVendor(ctx context.Context, legalEntityID, vendorID string
 	return enabled, err
 }
 
-func (s *Postgres) SetAuditRate(ctx context.Context, legalEntityID string, ratePct decimal.Decimal, by string, fn AuditRateFunc) error {
+func (s *Postgres) SetAuditPolicy(ctx context.Context, legalEntityID string, policy domain.AuditPolicy, by string, fn AuditPolicyFunc) error {
 	tenantID, err := tenantOf(ctx)
 	if err != nil {
 		return err
@@ -245,40 +244,100 @@ func (s *Postgres) SetAuditRate(ctx context.Context, legalEntityID string, rateP
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, strings.ToLower(tenantID+"|auditrate|"+legalEntityID)); err != nil {
 			return err
 		}
-		old := decimal.Zero
-		err := tx.QueryRow(ctx, `SELECT sample_rate_pct FROM receiving_audit_policy WHERE tenant_id = $1 AND legal_entity_id = $2`, tenantID, legalEntityID).Scan(&old)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-		evt, err := fn(old)
+		old, err := loadAuditPolicy(ctx, tx, tenantID, legalEntityID)
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO receiving_audit_policy (tenant_id, legal_entity_id, sample_rate_pct, updated_by) VALUES ($1, $2, $3, $4)
-			ON CONFLICT (tenant_id, legal_entity_id) DO UPDATE SET sample_rate_pct = EXCLUDED.sample_rate_pct, updated_by = EXCLUDED.updated_by, updated_at = now()`,
-			tenantID, legalEntityID, ratePct, by); err != nil {
+		policy.RuleVersion = old.RuleVersion
+		if old.RuleVersion == 0 || !old.RatePct.Equal(policy.RatePct) || !old.Threshold.Equal(policy.Threshold) || old.ThresholdCurrency != policy.ThresholdCurrency {
+			policy.RuleVersion++
+		}
+		evt, err := fn(old, policy)
+		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO receiving_audit_policy_history (tenant_id, legal_entity_id, old_rate_pct, new_rate_pct, changed_by) VALUES ($1, $2, $3, $4, $5)`,
-			tenantID, legalEntityID, old, ratePct, by); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO receiving_audit_policy (tenant_id, legal_entity_id, sample_rate_pct, threshold_amount, threshold_currency, rule_version, updated_by)
+			VALUES ($1, $2, $3, NULLIF($4, 0), NULLIF($5, ''), $6, $7)
+			ON CONFLICT (tenant_id, legal_entity_id) DO UPDATE SET sample_rate_pct = EXCLUDED.sample_rate_pct, threshold_amount = EXCLUDED.threshold_amount,
+			threshold_currency = EXCLUDED.threshold_currency, rule_version = EXCLUDED.rule_version, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+			tenantID, legalEntityID, policy.RatePct, policy.Threshold, policy.ThresholdCurrency, policy.RuleVersion, by); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO receiving_audit_policy_history (tenant_id, legal_entity_id, old_rate_pct, new_rate_pct, changed_by, old_threshold_amount, new_threshold_amount, rule_version)
+			VALUES ($1, $2, $3, $4, $5, NULLIF($6, 0), NULLIF($7, 0), $8)`,
+			tenantID, legalEntityID, old.RatePct, policy.RatePct, by, old.Threshold, policy.Threshold, policy.RuleVersion); err != nil {
 			return err
 		}
 		return outbox.Enqueue(ctx, tx, "auditpolicy", legalEntityID, evt)
 	})
 }
 
-func (s *Postgres) AuditRate(ctx context.Context, legalEntityID string) (decimal.Decimal, error) {
+func loadAuditPolicy(ctx context.Context, tx pgx.Tx, tenantID, legalEntityID string) (domain.AuditPolicy, error) {
+	var p domain.AuditPolicy
+	err := tx.QueryRow(ctx, `SELECT sample_rate_pct, COALESCE(threshold_amount, 0), COALESCE(threshold_currency, ''), rule_version
+		FROM receiving_audit_policy WHERE tenant_id = $1 AND legal_entity_id = $2`, tenantID, legalEntityID).Scan(&p.RatePct, &p.Threshold, &p.ThresholdCurrency, &p.RuleVersion)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.AuditPolicy{}, nil
+	}
+	return p, err
+}
+
+func (s *Postgres) AuditPolicy(ctx context.Context, legalEntityID string) (domain.AuditPolicy, error) {
 	tenantID, err := tenantOf(ctx)
 	if err != nil {
-		return decimal.Zero, err
+		return domain.AuditPolicy{}, err
 	}
-	rate := decimal.Zero
+	var p domain.AuditPolicy
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `SELECT sample_rate_pct FROM receiving_audit_policy WHERE tenant_id = $1 AND legal_entity_id = $2`, tenantID, legalEntityID).Scan(&rate)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
-		}
+		var err error
+		p, err = loadAuditPolicy(ctx, tx, tenantID, legalEntityID)
 		return err
 	})
-	return rate, err
+	return p, err
+}
+
+func (s *Postgres) ConfirmErsPrice(ctx context.Context, legalEntityID, receiptID string, lineNo int, price decimal.Decimal, by string) error {
+	tenantID, err := tenantOf(ctx)
+	if err != nil {
+		return err
+	}
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `INSERT INTO receiving_ers_price_confirmation (tenant_id, legal_entity_id, receipt_id, line_no, confirmed_price, confirmed_by)
+			SELECT tenant_id, legal_entity_id, receipt_id, line_no, $5, $6 FROM receiving_receipt_line
+			WHERE tenant_id = $1 AND legal_entity_id = $2 AND receipt_id = $3 AND line_no = $4
+			ON CONFLICT (tenant_id, receipt_id, line_no) DO UPDATE SET confirmed_price = EXCLUDED.confirmed_price, confirmed_by = EXCLUDED.confirmed_by, confirmed_at = now()`,
+			tenantID, legalEntityID, receiptID, lineNo, price, by)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
+}
+
+func (s *Postgres) ErsPriceConfirmations(ctx context.Context, receiptID string) (map[int]decimal.Decimal, error) {
+	tenantID, err := tenantOf(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := map[int]decimal.Decimal{}
+	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT line_no, confirmed_price FROM receiving_ers_price_confirmation WHERE tenant_id = $1 AND receipt_id = $2`, tenantID, receiptID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var lineNo int
+			var price decimal.Decimal
+			if err := rows.Scan(&lineNo, &price); err != nil {
+				return err
+			}
+			out[lineNo] = price
+		}
+		return rows.Err()
+	})
+	return out, err
 }
