@@ -417,7 +417,8 @@ function RunScenarioCard({ scenario, today }: { scenario: Scenario; today: strin
             Count firmed orders as supply
           </label>
           <p id="sim-carry-hint" className={styles.summary}>
-            Adds the plan's firmed orders that are not yet delivered as receipts of their items, as a plan run with this option does.
+            Adds the plan's firmed orders that are not yet delivered, and its approved orders, as receipts of their items, as a plan run
+            with this option does. A simulation does not firm the approved orders.
           </p>
         </div>
         <div className={styles.formActions}>

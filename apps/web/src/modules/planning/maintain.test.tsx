@@ -98,7 +98,7 @@ describe("Planned order maintenance", () => {
     );
     renderAt(`/planning/planned-orders/${order.id}`);
     fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Order approved."));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Order approved. The next plan run firms it"));
     expect(JSON.parse(callsOf(fetchMock, "PATCH")[0][1]?.body as string)).toEqual({ status: "approved" });
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
   });

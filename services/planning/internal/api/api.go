@@ -151,8 +151,9 @@ type runRequest struct {
 	// it lead times and margins count calendar days.
 	Calendar *calendarDTO `json:"calendar,omitempty"`
 	// CarryForward adds the plan's firmed planned orders that are not yet
-	// delivered as scheduled receipts of the run (FR-22.1, FR-22.10), so a
-	// firmed order is supply and is not planned a second time.
+	// delivered, and the approved orders of the current version that the run
+	// firms (FR-22.11), as scheduled receipts of the run (FR-22.1, FR-22.10),
+	// so a firmed order is supply and is not planned a second time.
 	CarryForward bool      `json:"carryForward,omitempty"`
 	Items        []itemDTO `json:"items"`
 }

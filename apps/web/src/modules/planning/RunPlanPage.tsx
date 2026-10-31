@@ -174,6 +174,9 @@ export function RunPlanPage({ today = new Date().toISOString().slice(0, 10) }: {
         {result ? (
           <>
             {`${result.plannedOrders} planned orders and ${result.messages} messages from ${result.itemsPlanned} items. `}
+            {result.approvedFirmed
+              ? `${result.approvedFirmed} approved ${result.approvedFirmed === 1 ? "order" : "orders"} of the previous version ${result.approvedFirmed === 1 ? "was" : "were"} firmed. `
+              : null}
             <Link to={withPlan("/planning/planned-orders", result.planCode)}>View planned orders</Link>
           </>
         ) : null}
@@ -248,7 +251,8 @@ export function RunPlanPage({ today = new Date().toISOString().slice(0, 10) }: {
               Count firmed orders as supply
             </label>
             <p id="run-carry-hint" className={styles.summary}>
-              Adds this plan's firmed orders that are not yet delivered as receipts of their items, so they are not planned again.
+              Adds this plan's firmed orders that are not yet delivered, and the approved orders this run firms, as receipts of their
+              items, so they are not planned again.
               Leave it off when the target orders already arrive in the receipts below.
             </p>
           </div>

@@ -1871,7 +1871,7 @@ components:
         carryForward:
           type: boolean
           default: false
-          description: 'When true the plan''s firmed planned orders at the site whose delivery date is on or after asOf are added as scheduled receipts (refType planned-order, ref FP:<planned order id>) of their items, so a firmed order is supply of the run and is not planned a second time (FR-22.1, FR-22.10). Leave it false when the target orders already arrive in receipts. Orders of simulation versions are never carried.'
+          description: 'When true the plan''s firmed planned orders at the site whose delivery date is on or after asOf are added as scheduled receipts (refType planned-order, ref FP:<planned order id>) of their items, so a firmed order is supply of the run and is not planned a second time (FR-22.1, FR-22.10). The approved planned orders of the current version are carried the same way, since an operational run firms them (FR-22.11). Leave it false when the target orders already arrive in receipts. Orders of simulation versions are never carried.'
         items:
           type: array
           minItems: 1
@@ -1998,6 +1998,7 @@ components:
         asOf: {type: string, format: date}
         itemsPlanned: {type: integer}
         plannedOrders: {type: integer}
+        approvedFirmed: {type: integer, description: 'Planned orders approved in the previous version that this run firmed (FR-22.11), in one firming batch with one plannedorder.firmed.v1 each'}
         messages: {type: integer}
         durationMs: {type: integer, format: int64}
         planHash: {type: string, description: 'sha256 hex over orders, pegging and messages'}

@@ -79,6 +79,8 @@ export const PlanVersion = z.object({
   asOf: z.string(),
   itemsPlanned: z.number().int(),
   plannedOrders: z.number().int(),
+  /** Orders approved in the previous version that this run firmed (FR-22.11). */
+  approvedFirmed: z.number().int().optional(),
   messages: z.number().int(),
   durationMs: z.number(),
   planHash: z.string(),
