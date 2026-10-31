@@ -21,6 +21,7 @@ tags:
   - name: balances
   - name: structures
   - name: recurring
+  - name: clearing
   - name: ops
 components:
   parameters:
@@ -701,6 +702,126 @@ components:
           type: array
           description: Present on single-batch reads, absent in lists
           items: { $ref: "#/components/schemas/BatchLine" }
+    OpenItemAccountBody:
+      type: object
+      required: [enabled]
+      properties:
+        enabled: { type: boolean, description: Whether every line posted on the account in this ledger creates an open item }
+    OpenItemAccount:
+      type: object
+      required: [ledgerId, account, name, enabled, openItems, changedBy, changedAt]
+      properties:
+        ledgerId: { type: string, format: uuid }
+        account: { type: string }
+        name: { type: string }
+        enabled: { type: boolean }
+        openItems: { type: integer, description: Items still open or reset_open on the account }
+        changedBy: { type: string }
+        changedAt: { type: string, format: date-time }
+    ToleranceGroupBody:
+      type: object
+      required: [name, debitLimit, creditLimit, differenceAccount]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 60 }
+        debitLimit: { type: string, description: "Largest debit residual (debits exceed credits) that may be written off, decimal string with at most 6 decimals (BR-11.12 abs_debit)" }
+        creditLimit: { type: string, description: "Largest credit residual (credits exceed debits) that may be written off, decimal string with at most 6 decimals (BR-11.12 abs_credit)" }
+        percentLimit: { type: string, description: "Optional share (0 to 100) of the selection's absolute total (debit plus credit) the residual may not exceed; 0 or absent means no percentage limit" }
+        differenceAccount: { type: string, description: Postable account in the ledger's chart that receives the write-off }
+        active: { type: boolean, default: true }
+    ToleranceGroup:
+      type: object
+      required: [ledgerId, code, name, debitLimit, creditLimit, percentLimit, differenceAccount, active, version, createdAt, updatedAt]
+      properties:
+        ledgerId: { type: string, format: uuid }
+        code: { type: string, pattern: '^[A-Z0-9_]{1,10}$' }
+        name: { type: string }
+        debitLimit: { type: string }
+        creditLimit: { type: string }
+        percentLimit: { type: string }
+        differenceAccount: { type: string }
+        active: { type: boolean }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    OpenItem:
+      type: object
+      required: [id, ledgerId, account, accountName, dimensions, sourceType, amount, debitCredit, currency, postingDate, status]
+      properties:
+        id: { type: string, format: uuid }
+        ledgerId: { type: string, format: uuid }
+        account: { type: string }
+        accountName: { type: string }
+        dimensions: { type: object, additionalProperties: { type: string } }
+        sourceType: { type: string, enum: [gl_line, residual] }
+        amount: { type: string, description: Absolute amount in the ledger currency at its minor-unit scale }
+        debitCredit: { type: string, enum: [D, C] }
+        currency: { type: string }
+        assignment: { type: string, maxLength: 50, description: Matching key; starts as the first 50 characters of the line's sourceLineRef }
+        postingDate: { type: string, format: date }
+        status: { type: string, enum: [open, cleared, reset_open, voided] }
+        clearingDocumentId: { type: string, format: uuid }
+        residualOfItemId: { type: string, format: uuid }
+        entryId: { type: string, format: uuid, description: Journal entry of the source line; absent on residual items }
+        voucher: { type: string }
+        lineNumber: { type: integer }
+    OpenItemPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/OpenItem" } }
+        nextCursor: { type: string, description: Pass as cursor for the next page; absent on the last page }
+    ClearingRequest:
+      type: object
+      required: [ledgerId, itemIds, clearingDate]
+      properties:
+        ledgerId: { type: string, format: uuid }
+        itemIds: { type: array, minItems: 2, maxItems: 10000, uniqueItems: true, items: { type: string, format: uuid }, description: Open items of one open-item managed account }
+        clearingDate: { type: string, format: date, description: Posting date of a difference entry; not before the latest posting date of the items }
+        toleranceGroup: { type: string, description: Tolerance group whose limit may write off the residual }
+        residualItem: { type: boolean, default: false, description: When the residual is above tolerance, carry it as a new open item instead of refusing }
+    ClearingPreview:
+      type: object
+      required: [ledgerId, account, currency, itemCount, debit, credit, net, outcome, differenceAmount, residualAmount]
+      properties:
+        ledgerId: { type: string, format: uuid }
+        account: { type: string }
+        currency: { type: string }
+        itemCount: { type: integer }
+        debit: { type: string }
+        credit: { type: string }
+        net: { type: string, description: Debit minus credit of the selection }
+        toleranceGroup: { type: string }
+        outcome: { type: string, enum: [balanced, difference, residual, unbalanced], description: "balanced: net is zero; difference: written off to the difference account; residual: carried as a new item; unbalanced: a clearing would be refused" }
+        differenceAmount: { type: string }
+        residualAmount: { type: string }
+    ClearingDocument:
+      type: object
+      required: [id, ledgerId, account, clearingDate, mode, itemIds, differenceAmount, status, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        ledgerId: { type: string, format: uuid }
+        account: { type: string }
+        clearingDate: { type: string, format: date }
+        mode: { type: string, enum: [manual] }
+        itemIds: { type: array, items: { type: string, format: uuid }, description: The items the user selected }
+        toleranceGroup: { type: string }
+        differenceAmount: { type: string, description: Residual written off, debit minus credit; 0 when none }
+        differenceEntryId: { type: string, format: uuid }
+        residualItemId: { type: string, format: uuid }
+        status: { type: string, enum: [cleared, reset] }
+        resetReasonCode: { type: string }
+        resetComment: { type: string }
+        resetBy: { type: string }
+        resetAt: { type: string, format: date-time }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        items: { type: array, items: { $ref: "#/components/schemas/OpenItem" }, description: Set on single reads }
+    ResetClearingRequest:
+      type: object
+      required: [reasonCode]
+      properties:
+        reasonCode: { type: string, pattern: '^[A-Z0-9_]{1,10}$', description: "Active shared reason code that applies to ledger (FR-11.15); also the reason of the reversal of the difference entry when the clearing posted one" }
+        comment: { type: string, maxLength: 255 }
   responses:
     Problem400:
       description: Validation failed (COM-0001 with errors map)
@@ -723,7 +844,7 @@ components:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
     Problem409:
-      description: Idempotency conflict (LEDGER_IDEMPOTENCY_CONFLICT) or in-progress duplicate (LEDGER_IDEMPOTENCY_IN_PROGRESS, with Retry-After)
+      description: Idempotency conflict (LEDGER_IDEMPOTENCY_CONFLICT), in-progress duplicate (LEDGER_IDEMPOTENCY_IN_PROGRESS, with Retry-After) or, on a reversal, an entry whose open items are cleared (LEDGER_OPEN_ITEM_ALREADY_CLEARED)
       headers:
         Retry-After:
           description: Seconds to wait; set to 1 on LEDGER_IDEMPOTENCY_IN_PROGRESS only
@@ -761,6 +882,16 @@ components:
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/ViolationProblem" }
+    ClearingProblem409:
+      description: LEDGER_OPEN_ITEM_ALREADY_CLEARED, LEDGER_CLEARING_ALREADY_RESET, LEDGER_CLEARING_RESIDUAL_USED, LEDGER_OI_OPEN_ITEMS_EXIST or LEDGER_IDEMPOTENCY_CONFLICT; nothing changed
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    ClearingProblem422:
+      description: LEDGER_CLEARING_UNBALANCED, LEDGER_CLEARING_ACCOUNT_MIXED, LEDGER_CLEARING_DATE_INVALID, LEDGER_CLEARING_RESIDUAL_DEPTH, LEDGER_CLEARING_DIFFERENCE_ACCOUNT, LEDGER_OPEN_ITEM_ACCOUNT_REQUIRED, LEDGER_TOLERANCE_GROUP_INACTIVE, LEDGER_REASON_REQUIRED or LEDGER_REASON_INVALID_MODULE on a reset, LEDGER_OI_ACCOUNT_INVALID, LEDGER_OI_ACTIVATION_BALANCE or a posting or reversal rule violation of the difference entry; nothing changed
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/ViolationProblem" }
   headers:
     RecurringETag:
       description: The recurring journal version as an entity tag, for If-Match on the next change
@@ -768,6 +899,9 @@ components:
     BatchETag:
       description: The batch version as an entity tag, for If-Match on the next change
       schema: { type: string, example: '"3"' }
+    ToleranceETag:
+      description: The tolerance group version as an entity tag, for If-Match on the next change
+      schema: { type: string, example: '"2"' }
 paths:
   /v1/ledger/journal-names:
     get:
@@ -1575,7 +1709,9 @@ paths:
         reversal can itself be reversed to re-instate the original. The reversal date defaults to
         the original posting date and may not precede it (LEDGER_DATE_INVALID).
         Reversing an entry of a non-leading ledger of a ledger set also needs ledger.journal.postledger
-        (FB50L, 403 AUTH-0003).
+        (FB50L, 403 AUTH-0003). An entry with an open item in an active clearing document (including a
+        clearing's own difference entry) is refused with 409 LEDGER_OPEN_ITEM_ALREADY_CLEARED until that
+        clearing is reset.
         A reason code (FR-11.15) is required when the ledger's reversalReasonRequired is true; it must
         be active and apply to the ledger module, and a comment is required when the code says so. A
         code with alternativePostingDateAllowed = false refuses any date other than the original. A code
@@ -2147,3 +2283,348 @@ paths:
                 type: object
                 properties:
                   status: { type: string, enum: [unavailable] }
+  /v1/ledger/ledgers/{ledger}/open-item-accounts:
+    get:
+      tags: [clearing]
+      operationId: listOpenItemAccounts
+      summary: List open-item account settings of a ledger
+      x-passage-duty: ledger.journal.read
+      description: Every account that was switched on or off for open-item management in the ledger, with the count of its items still open.
+      parameters:
+        - name: ledger
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The settings by account number
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/OpenItemAccount" } }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+  /v1/ledger/ledgers/{ledger}/open-item-accounts/{account}:
+    put:
+      tags: [clearing]
+      operationId: putOpenItemAccount
+      summary: Switch open-item management of an account on or off
+      x-passage-duty: ledger.account.write
+      description: |
+        When on, every non-zero line posted on the account in this ledger creates an open item
+        (FR-11.19). Only postable balance-sheet accounts that are not customer or vendor
+        reconciliation accounts qualify (LEDGER_OI_ACCOUNT_INVALID, 422). Switching on an account
+        that has a non-zero balance in the ledger is refused with LEDGER_OI_ACTIVATION_BALANCE (422)
+        because that needs an activation run, which is not built yet. Switching off needs zero open
+        items (LEDGER_OI_OPEN_ITEMS_EXIST, 409). Setting the current value again is a no-op.
+      parameters:
+        - name: ledger
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: account
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[A-Za-z0-9._-]{1,20}$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OpenItemAccountBody" }
+      responses:
+        "200":
+          description: The account already had a setting; it now holds the requested value
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OpenItemAccount" }
+        "201":
+          description: First setting of the account in this ledger
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OpenItemAccount" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/ClearingProblem409" }
+        "422": { $ref: "#/components/responses/ClearingProblem422" }
+  /v1/ledger/ledgers/{ledger}/tolerance-groups:
+    get:
+      tags: [clearing]
+      operationId: listToleranceGroups
+      summary: List tolerance groups of a ledger
+      x-passage-duty: ledger.journal.read
+      parameters:
+        - name: ledger
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The tolerance groups by code
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/ToleranceGroup" } }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+  /v1/ledger/ledgers/{ledger}/tolerance-groups/{code}:
+    get:
+      tags: [clearing]
+      operationId: getToleranceGroup
+      summary: Get a tolerance group
+      x-passage-duty: ledger.journal.read
+      parameters:
+        - name: ledger
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: code
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[A-Z0-9_]{1,10}$' }
+      responses:
+        "200":
+          description: The tolerance group; its version is in the ETag header
+          headers:
+            ETag: { $ref: "#/components/headers/ToleranceETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ToleranceGroup" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+    put:
+      tags: [clearing]
+      operationId: putToleranceGroup
+      summary: Create or replace a tolerance group
+      x-passage-duty: ledger.clearing.rules
+      description: |
+        A tolerance group is the largest residual a manual clearing may write off to its difference
+        account (OBA0 semantics, BR-11.12): a debit residual up to the debit limit, a credit residual
+        up to the credit limit and, when a percentage limit is set, up to that share of the selection's
+        absolute total (debit plus credit). Groups are deactivated, never deleted. A
+        replace is checked against If-Match when sent (412 LEDGER_VERSION_CONFLICT).
+      parameters:
+        - name: ledger
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: code
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[A-Z0-9_]{1,10}$' }
+        - name: If-Match
+          in: header
+          required: false
+          description: The tolerance group version last read, as an entity tag ("3"); when sent and stale, 412 and nothing changes
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ToleranceGroupBody" }
+      responses:
+        "200":
+          description: Group replaced
+          headers:
+            ETag: { $ref: "#/components/headers/ToleranceETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ToleranceGroup" }
+        "201":
+          description: Group created
+          headers:
+            ETag: { $ref: "#/components/headers/ToleranceETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ToleranceGroup" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "412": { $ref: "#/components/responses/Problem412" }
+        "422": { $ref: "#/components/responses/ClearingProblem422" }
+  /v1/ledger/open-items:
+    get:
+      tags: [clearing]
+      operationId: listOpenItems
+      summary: List open items of a ledger
+      x-passage-duty: ledger.journal.read
+      description: |
+        Open items of open-item managed accounts, oldest first, one keyset page at a time. Status
+        open also returns reset_open items, which can be cleared again. Dimension filters are exact
+        matches written dim.{ATTRIBUTE}.
+      parameters:
+        - { name: ledger, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: account, in: query, required: false, schema: { type: string, pattern: '^[A-Za-z0-9._-]{1,20}$' } }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [open, cleared, reset_open, voided] } }
+        - { name: assignment, in: query, required: false, schema: { type: string, maxLength: 50 } }
+        - { name: cursor, in: query, required: false, description: The nextCursor of the previous page, schema: { type: string } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 1000, default: 100 } }
+      responses:
+        "200":
+          description: One page of open items
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OpenItemPage" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+  /v1/ledger/clearings:simulate:
+    post:
+      tags: [clearing]
+      operationId: simulateClearing
+      summary: Preview the residual and outcome of a clearing
+      x-passage-duty: ledger.clearing.write
+      description: Stateless. Applies the same checks as POST /clearings and reports the residual and what would happen to it, without writing anything.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ClearingRequest" }
+      responses:
+        "200":
+          description: The preview
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClearingPreview" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/ClearingProblem409" }
+        "422": { $ref: "#/components/responses/ClearingProblem422" }
+  /v1/ledger/clearings:
+    get:
+      tags: [clearing]
+      operationId: listClearings
+      summary: List clearing documents of a ledger
+      x-passage-duty: ledger.journal.read
+      description: Newest first, at most 200.
+      parameters:
+        - { name: ledger, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [cleared, reset] } }
+      responses:
+        "200":
+          description: The clearing documents
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/ClearingDocument" } }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+    post:
+      tags: [clearing]
+      operationId: createClearing
+      summary: Clear open items
+      x-passage-duty: ledger.clearing.write
+      description: |
+        Manual clearing (F-03 semantics) of 2 to 10,000 open items of one open-item managed account,
+        in one transaction. A zero net clears them. A residual within the named tolerance group (its
+        debit limit for a debit residual, its credit limit for a credit residual, and its percentage of
+        the selection's absolute total when set) is posted to its difference account and cleared with
+        them; the difference account may not itself be open-item managed
+        (LEDGER_CLEARING_DIFFERENCE_ACCOUNT). A residual above tolerance becomes a
+        new open item when residualItem is true and is otherwise refused (LEDGER_CLEARING_UNBALANCED,
+        422). An item already in a clearing is LEDGER_OPEN_ITEM_ALREADY_CLEARED (409). The clearing
+        date may not precede the latest posting date of the items. A repeated Idempotency-Key returns
+        the same document with 200. Emits dev.passage.ledger.openitem.cleared.v1.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Traceparent"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ClearingRequest" }
+      responses:
+        "200":
+          description: The Idempotency-Key was used before with the same request; the stored document
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClearingDocument" }
+        "201":
+          description: Items cleared
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClearingDocument" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/ClearingProblem409" }
+        "422": { $ref: "#/components/responses/ClearingProblem422" }
+  /v1/ledger/clearings/{id}:
+    get:
+      tags: [clearing]
+      operationId: getClearing
+      summary: Get a clearing document with its items
+      x-passage-duty: ledger.journal.read
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The clearing document and the items it holds
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClearingDocument" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+  /v1/ledger/clearings/{id}/reset:
+    post:
+      tags: [clearing]
+      operationId: resetClearing
+      summary: Reset a clearing document
+      x-passage-duty: ledger.clearing.reset
+      description: |
+        Resets the clearing as a whole (BR-11.13) with a required reason code: an active shared reason
+        code that applies to ledger (LEDGER_REASON_REQUIRED, 422, when unknown, inactive or missing a
+        required comment). Its items are reset_open and clearable again, the difference entry is
+        reversed with the reason code and its two items are voided, and a residual
+        item is voided, which needs it to be still open (LEDGER_CLEARING_RESIDUAL_USED, 409).
+        Resetting a reset document is LEDGER_CLEARING_ALREADY_RESET (409) unless the Idempotency-Key
+        is the one that reset it, which returns the document. Emits dev.passage.ledger.openitem.cleared.v1
+        with status reset.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Traceparent"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResetClearingRequest" }
+      responses:
+        "200":
+          description: The reset document
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClearingDocument" }
+        "400": { $ref: "#/components/responses/Problem400" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
+        "409": { $ref: "#/components/responses/ClearingProblem409" }
+        "422": { $ref: "#/components/responses/ClearingProblem422" }

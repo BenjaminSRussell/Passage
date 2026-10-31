@@ -43,7 +43,20 @@ channels:
     messages:
       recurringGenerated:
         $ref: "#/components/messages/RecurringGenerated"
+  openItemCleared:
+    address: passage.ledger.openitem
+    description: |
+      A clearing document (FR-11.19) was committed or reset, written to the outbox in the transaction
+      that changed it (aggregate type clearing). The PRD's open-item.cleared is spelled openitem
+      because the platform naming rule allows only letters and digits in the entity.
+    messages:
+      openItemCleared:
+        $ref: "#/components/messages/OpenItemCleared"
 operations:
+  publishOpenItemCleared:
+    action: send
+    channel: { $ref: "#/channels/openItemCleared" }
+    summary: Open items were cleared or a clearing was reset.
   publishRecurringGenerated:
     action: send
     channel: { $ref: "#/channels/recurringGenerated" }
@@ -175,6 +188,34 @@ components:
               journalName: { type: string }
               scheduledDate: { type: string, format: date, description: Run date, also the posting date of the draft batch }
               actor: { type: string, description: User who generated the batch }
+    OpenItemCleared:
+      name: dev.passage.ledger.openitem.cleared.v1
+      title: Open items cleared
+      summary: A clearing document was committed or reset.
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [type, source, tenantid, subject, data]
+        properties:
+          type: { const: dev.passage.ledger.openitem.cleared.v1 }
+          source: { const: /passage/ledger/ledger }
+          tenantid: { type: string, format: uuid }
+          subject: { type: string, format: uuid, description: Clearing document id }
+          data:
+            type: object
+            required: [clearingDocumentId, ledgerId, account, mode, itemIds, differenceAmount, status, actor]
+            properties:
+              clearingDocumentId: { type: string, format: uuid }
+              ledgerId: { type: string, format: uuid }
+              account: { type: string, description: Account number of the cleared items }
+              mode: { type: string, enum: [manual] }
+              itemIds: { type: array, items: { type: string, format: uuid }, description: The items the user selected }
+              differenceAmount: { type: string, description: Residual written off to the tolerance difference account, decimal string, signed (debit positive); 0 when none }
+              differenceEntryId: { type: string, format: uuid, description: Journal entry of the difference lines }
+              residualItemId: { type: string, format: uuid, description: New open item carrying a residual outside tolerance }
+              status: { type: string, enum: [cleared, reset] }
+              reasonCode: { type: string, description: Reset reason code }
+              actor: { type: string }
     BalanceRebuilt:
       name: dev.passage.ledger.balance.rebuilt.v1
       title: Balance projection rebuilt

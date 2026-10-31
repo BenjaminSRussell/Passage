@@ -114,6 +114,7 @@ func (a *API) Register(r chi.Router) {
 		a.registerBatches(r)
 		a.registerRecurring(r)
 		a.registerLedgerSets(r)
+		a.registerOpenItems(r)
 	})
 }
 

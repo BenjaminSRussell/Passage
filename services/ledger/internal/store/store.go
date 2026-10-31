@@ -74,6 +74,17 @@ type Store interface {
 	GetLedgerSet(ctx context.Context, id string) (LedgerSet, error)
 	CreateAccountMapping(ctx context.Context, in AccountMapping) (AccountMapping, error)
 	PostSetEntry(ctx context.Context, setID string, in PostInput) (EntryResult, error)
+	ListOpenItemAccounts(ctx context.Context, ledgerID string) ([]OpenItemAccount, error)
+	PutOpenItemAccount(ctx context.Context, ledgerID, number string, enabled bool) (OpenItemAccount, bool, error)
+	ListToleranceGroups(ctx context.Context, ledgerID string) ([]ToleranceGroup, error)
+	GetToleranceGroup(ctx context.Context, ledgerID, code string) (ToleranceGroup, error)
+	PutToleranceGroup(ctx context.Context, ledgerID, code string, version int, in ToleranceGroup) (ToleranceGroup, bool, error)
+	ListOpenItems(ctx context.Context, f OpenItemFilter) (OpenItemPage, error)
+	SimulateClearing(ctx context.Context, in ClearingInput) (ClearingPreview, error)
+	ClearItems(ctx context.Context, in ClearingInput) (ClearingDocument, bool, error)
+	ListClearings(ctx context.Context, ledgerID, status string) ([]ClearingDocument, error)
+	GetClearing(ctx context.Context, id string) (ClearingDocument, error)
+	ResetClearing(ctx context.Context, in ResetInput) (ClearingDocument, error)
 	Ping(ctx context.Context) error
 }
 
@@ -181,6 +192,10 @@ type ReverseInput struct {
 	Today         time.Time
 
 	CanPostLedgerSpecific bool
+
+	// clearingReset is set by ResetClearing, which reverses its own difference
+	// entry while that entry's open item is still cleared by the document.
+	clearingReset bool
 }
 
 // Idempotency reports the replay state of a keyed request.

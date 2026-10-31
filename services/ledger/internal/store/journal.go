@@ -139,96 +139,130 @@ func (s *Postgres) ReverseEntry(ctx context.Context, in ReverseInput) (EntryResu
 	}
 	var out EntryResult
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		var ledgerID string
-		err := tx.QueryRow(ctx, `select ledger_id from journal_entry where tenant_id = $1 and id = $2`, p.TenantID, in.EntryID).Scan(&ledgerID)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return httpx.NewProblem(http.StatusNotFound, "LEDGER_ENTRY_NOT_FOUND", "journal entry not found")
-		}
-		if err != nil {
-			return err
-		}
-		ledger, err := loadLedger(ctx, tx, p.TenantID, ledgerID, true)
-		if err != nil {
-			return err
-		}
-		if err := requireLedgerSpecific(ctx, tx, p.TenantID, ledger.ID, in.CanPostLedgerSpecific); err != nil {
-			return err
-		}
-		replayed, err := replayIdempotent(ctx, tx, p.TenantID, ledger.LegalEntityID, in.Key, in.Hash, &out)
-		if err != nil || replayed {
-			return err
-		}
-		var orig struct {
-			voucher, postingDate, documentID string
-		}
-		if err := tx.QueryRow(ctx, `select voucher, posting_date::text, document_id::text from journal_entry where tenant_id = $1 and id = $2`,
-			p.TenantID, in.EntryID).Scan(&orig.voucher, &orig.postingDate, &orig.documentID); err != nil {
-			return err
-		}
-		var reversingVoucher string
-		err = tx.QueryRow(ctx, `select voucher from journal_entry where tenant_id = $1 and reversal_of_entry_id = $2`,
-			p.TenantID, in.EntryID).Scan(&reversingVoucher)
-		if err == nil {
-			return &domain.RejectedError{Violations: []domain.Violation{{Code: "LEDGER_REVERSAL_ALREADY_REVERSED",
-				Field: "id", Message: fmt.Sprintf("entry %s was already reversed by %s", orig.voucher, reversingVoucher)}}}
-		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-		origDate, err := time.Parse(time.DateOnly, orig.postingDate)
-		if err != nil {
-			return err
-		}
-		postingDate := origDate
-		if in.PostingDate != nil {
-			postingDate = *in.PostingDate
-		}
-		v := domain.CheckReversalDate(ledger.Rules(), origDate, postingDate, in.Today)
-		reason, err := loadReason(ctx, tx, p.TenantID, in.ReasonCode)
-		if err != nil {
-			return err
-		}
-		policy := ledger.ReversalPolicy()
-		if !policy.ReasonRequired {
-			// A journal name can demand a reason for the entries its batches posted (FR-11.15).
-			if policy.ReasonRequired, err = journalNameRequiresReason(ctx, tx, p.TenantID, in.EntryID); err != nil {
-				return err
-			}
-		}
-		negative, reasonViolations := domain.CheckReversal(policy, reason, domain.ReversalRequest{
-			ReasonCode: in.ReasonCode, ReasonComment: in.ReasonComment, OriginalDate: origDate, ReversalDate: postingDate,
-		})
-		if v = append(v, reasonViolations...); len(v) > 0 {
-			return &domain.RejectedError{Violations: v}
-		}
-		lines, err := reversalLines(ctx, tx, p.TenantID, in.EntryID, negative)
-		if err != nil {
-			return err
-		}
-		description := in.Description
-		if description == "" {
-			description = "Reversal of " + orig.voucher
-		}
-		origID := in.EntryID
-		entry, err := writeEntry(ctx, tx, p.TenantID, newEntry{
-			ledger: ledger, documentID: orig.documentID, postingDate: postingDate, description: description,
-			source: ledgerevents.Source{System: "ledger", Type: "reversal", ID: orig.voucher, URI: "passage://ledger/journal-entries/" + origID},
-			key:    in.Key, hash: in.Hash, actor: in.Actor, traceID: in.TraceID, reversalOf: &origID, lines: lines,
-			reasonCode: in.ReasonCode, reasonComment: in.ReasonComment,
-		})
-		if err != nil {
-			return err
-		}
-		if err := enqueue(ctx, tx, origID, ledgerevents.JournalReversed, p.TenantID, ledgerevents.JournalReversedData{
-			OriginalEntryID: origID, ReversingEntryID: entry.ID, LedgerID: ledger.ID, PostingDate: entry.PostingDate,
-			ReasonCode: in.ReasonCode, ReasonComment: in.ReasonComment,
-		}); err != nil {
-			return err
-		}
-		out = EntryResult{Entries: []Entry{entry}, Idempotency: Idempotency{Key: in.Key}, TraceID: in.TraceID}
-		return storeIdempotent(ctx, tx, p.TenantID, ledger.LegalEntityID, in.Key, in.Hash, out)
+		out, err = reverseEntryTx(ctx, tx, p.TenantID, in)
+		return err
 	})
 	return out, idempotencyRace(err)
+}
+
+// refuseClearedItems stops the reversal of an entry whose open items are part of
+// an active clearing (BR-11.13, SAP FBRA before FB08): the reversal would leave
+// the clearing pointing at an item that no longer stands, so the clearing is
+// reset first. That also keeps a clearing's difference entry from being reversed
+// outside its reset.
+func refuseClearedItems(ctx context.Context, tx pgx.Tx, tenantID, entryID string) error {
+	var doc string
+	err := tx.QueryRow(ctx, `select i.clearing_document_id::text from open_item i
+		join journal_line l on l.tenant_id = i.tenant_id and l.id = i.journal_line_id
+		where i.tenant_id = $1 and l.entry_id = $2 and i.status = 'cleared' limit 1`, tenantID, entryID).Scan(&doc)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return httpx.NewProblem(http.StatusConflict, CodeOpenItemCleared,
+		"the entry has open items cleared by clearing document "+doc+"; reset that clearing before reversing the entry")
+}
+
+// reverseEntryTx is the reversal pipeline inside the caller's transaction, so a
+// clearing reset can reverse its difference entry in the same commit.
+func reverseEntryTx(ctx context.Context, tx pgx.Tx, tenantID string, in ReverseInput) (EntryResult, error) {
+	var out EntryResult
+	var ledgerID string
+	err := tx.QueryRow(ctx, `select ledger_id from journal_entry where tenant_id = $1 and id = $2`, tenantID, in.EntryID).Scan(&ledgerID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return out, httpx.NewProblem(http.StatusNotFound, "LEDGER_ENTRY_NOT_FOUND", "journal entry not found")
+	}
+	if err != nil {
+		return out, err
+	}
+	ledger, err := loadLedger(ctx, tx, tenantID, ledgerID, true)
+	if err != nil {
+		return out, err
+	}
+	if err := requireLedgerSpecific(ctx, tx, tenantID, ledger.ID, in.CanPostLedgerSpecific); err != nil {
+		return out, err
+	}
+	replayed, err := replayIdempotent(ctx, tx, tenantID, ledger.LegalEntityID, in.Key, in.Hash, &out)
+	if err != nil || replayed {
+		return out, err
+	}
+	if !in.clearingReset {
+		// Checked under the ledger lock that clearings take too.
+		if err := refuseClearedItems(ctx, tx, tenantID, in.EntryID); err != nil {
+			return out, err
+		}
+	}
+	var orig struct {
+		voucher, postingDate, documentID string
+	}
+	if err := tx.QueryRow(ctx, `select voucher, posting_date::text, document_id::text from journal_entry where tenant_id = $1 and id = $2`,
+		tenantID, in.EntryID).Scan(&orig.voucher, &orig.postingDate, &orig.documentID); err != nil {
+		return out, err
+	}
+	var reversingVoucher string
+	err = tx.QueryRow(ctx, `select voucher from journal_entry where tenant_id = $1 and reversal_of_entry_id = $2`,
+		tenantID, in.EntryID).Scan(&reversingVoucher)
+	if err == nil {
+		return out, &domain.RejectedError{Violations: []domain.Violation{{Code: "LEDGER_REVERSAL_ALREADY_REVERSED",
+			Field: "id", Message: fmt.Sprintf("entry %s was already reversed by %s", orig.voucher, reversingVoucher)}}}
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return out, err
+	}
+	origDate, err := time.Parse(time.DateOnly, orig.postingDate)
+	if err != nil {
+		return out, err
+	}
+	postingDate := origDate
+	if in.PostingDate != nil {
+		postingDate = *in.PostingDate
+	}
+	v := domain.CheckReversalDate(ledger.Rules(), origDate, postingDate, in.Today)
+	reason, err := loadReason(ctx, tx, tenantID, in.ReasonCode)
+	if err != nil {
+		return out, err
+	}
+	policy := ledger.ReversalPolicy()
+	if !policy.ReasonRequired {
+		// A journal name can demand a reason for the entries its batches posted (FR-11.15).
+		if policy.ReasonRequired, err = journalNameRequiresReason(ctx, tx, tenantID, in.EntryID); err != nil {
+			return out, err
+		}
+	}
+	negative, reasonViolations := domain.CheckReversal(policy, reason, domain.ReversalRequest{
+		ReasonCode: in.ReasonCode, ReasonComment: in.ReasonComment, OriginalDate: origDate, ReversalDate: postingDate,
+	})
+	if v = append(v, reasonViolations...); len(v) > 0 {
+		return out, &domain.RejectedError{Violations: v}
+	}
+	lines, err := reversalLines(ctx, tx, tenantID, in.EntryID, negative)
+	if err != nil {
+		return out, err
+	}
+	description := in.Description
+	if description == "" {
+		description = "Reversal of " + orig.voucher
+	}
+	origID := in.EntryID
+	entry, err := writeEntry(ctx, tx, tenantID, newEntry{
+		ledger: ledger, documentID: orig.documentID, postingDate: postingDate, description: description,
+		source: ledgerevents.Source{System: "ledger", Type: "reversal", ID: orig.voucher, URI: "passage://ledger/journal-entries/" + origID},
+		key:    in.Key, hash: in.Hash, actor: in.Actor, traceID: in.TraceID, reversalOf: &origID, lines: lines,
+		reasonCode: in.ReasonCode, reasonComment: in.ReasonComment,
+	})
+	if err != nil {
+		return out, err
+	}
+	if err := enqueue(ctx, tx, origID, ledgerevents.JournalReversed, tenantID, ledgerevents.JournalReversedData{
+		OriginalEntryID: origID, ReversingEntryID: entry.ID, LedgerID: ledger.ID, PostingDate: entry.PostingDate,
+		ReasonCode: in.ReasonCode, ReasonComment: in.ReasonComment,
+	}); err != nil {
+		return out, err
+	}
+	out = EntryResult{Entries: []Entry{entry}, Idempotency: Idempotency{Key: in.Key}, TraceID: in.TraceID}
+	return out, storeIdempotent(ctx, tx, tenantID, ledger.LegalEntityID, in.Key, in.Hash, out)
 }
 
 // reversalLines loads the original lines with swapped sides and the same
@@ -344,6 +378,9 @@ func writeEntry(ctx context.Context, tx pgx.Tx, tenantID string, ne newEntry) (E
 		if err := execBatch(ctx, tx, batch); err != nil {
 			return Entry{}, err
 		}
+	}
+	if err := createOpenItems(ctx, tx, tenantID, l, entryID, postingDate); err != nil {
+		return Entry{}, err
 	}
 
 	entry := Entry{

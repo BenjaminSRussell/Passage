@@ -821,3 +821,221 @@ export async function fetchRecurringRuns(id: string, fetchImpl: FetchLike = defa
   const body = await getJSON(`/api/v1/ledger/recurring-journals/${encodeURIComponent(id)}/runs`, recurringRunListSchema, fetchImpl);
   return body.items;
 }
+
+// --- open items and clearing (FR-11.19, FR-11.20) --------------------------------
+
+export const OPEN_ITEM_STATUSES = ["open", "cleared", "reset_open", "voided"] as const;
+export type OpenItemStatus = (typeof OPEN_ITEM_STATUSES)[number];
+
+/** One open item; amount is absolute, debitCredit says the side. */
+export const openItemSchema = z.object({
+  id: z.string(),
+  ledgerId: z.string(),
+  account: z.string(),
+  accountName: z.string(),
+  dimensions: z.record(z.string()),
+  sourceType: z.enum(["gl_line", "residual"]),
+  amount: z.string(),
+  debitCredit: z.enum(["D", "C"]),
+  currency: z.string(),
+  assignment: z.string().optional(),
+  postingDate: z.string(),
+  status: z.enum(OPEN_ITEM_STATUSES),
+  clearingDocumentId: z.string().optional(),
+  residualOfItemId: z.string().optional(),
+  entryId: z.string().optional(),
+  voucher: z.string().optional(),
+  lineNumber: z.number().optional(),
+});
+export type OpenItem = z.infer<typeof openItemSchema>;
+
+const openItemPageSchema = z.object({ items: z.array(openItemSchema), nextCursor: z.string().optional() });
+export type OpenItemPage = z.infer<typeof openItemPageSchema>;
+
+export interface OpenItemQuery {
+  ledgerId: string;
+  account?: string;
+  status?: string;
+  assignment?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+/** GET /api/v1/ledger/open-items, one keyset page. */
+export function fetchOpenItems(q: OpenItemQuery, fetchImpl: FetchLike = defaultFetch): Promise<OpenItemPage> {
+  const params = new URLSearchParams({ ledger: q.ledgerId });
+  if (q.account) params.set("account", q.account);
+  if (q.status) params.set("status", q.status);
+  if (q.assignment) params.set("assignment", q.assignment);
+  if (q.cursor) params.set("cursor", q.cursor);
+  if (q.limit) params.set("limit", String(q.limit));
+  return getJSON(`/api/v1/ledger/open-items?${params.toString()}`, openItemPageSchema, fetchImpl);
+}
+
+export const CLEARING_OUTCOMES = ["balanced", "difference", "residual", "unbalanced"] as const;
+
+export const clearingPreviewSchema = z.object({
+  ledgerId: z.string(),
+  account: z.string(),
+  currency: z.string(),
+  itemCount: z.number(),
+  debit: z.string(),
+  credit: z.string(),
+  net: z.string(),
+  toleranceGroup: z.string().optional(),
+  outcome: z.enum(CLEARING_OUTCOMES),
+  differenceAmount: z.string(),
+  residualAmount: z.string(),
+});
+export type ClearingPreview = z.infer<typeof clearingPreviewSchema>;
+
+export const clearingDocumentSchema = z.object({
+  id: z.string(),
+  ledgerId: z.string(),
+  account: z.string(),
+  clearingDate: z.string(),
+  mode: z.string(),
+  itemIds: z.array(z.string()),
+  toleranceGroup: z.string().optional(),
+  differenceAmount: z.string(),
+  differenceEntryId: z.string().optional(),
+  residualItemId: z.string().optional(),
+  status: z.enum(["cleared", "reset"]),
+  resetReasonCode: z.string().optional(),
+  resetComment: z.string().optional(),
+  resetBy: z.string().optional(),
+  resetAt: z.string().optional(),
+  createdBy: z.string(),
+  createdAt: z.string(),
+  items: z.array(openItemSchema).optional(),
+});
+export type ClearingDocument = z.infer<typeof clearingDocumentSchema>;
+
+export interface ClearingInput {
+  ledgerId: string;
+  itemIds: string[];
+  clearingDate: string;
+  toleranceGroup?: string;
+  residualItem?: boolean;
+}
+
+/** POST /api/v1/ledger/clearings:simulate: residual and outcome, nothing written. */
+export function simulateClearing(input: ClearingInput, fetchImpl: FetchLike = defaultFetch): Promise<ClearingPreview> {
+  return sendJSON("POST", "/api/v1/ledger/clearings:simulate", clearingPreviewSchema, fetchImpl, input);
+}
+
+/** POST /api/v1/ledger/clearings. One Idempotency-Key per user-intended clearing, so a retry replays. */
+export function createClearing(input: ClearingInput, idempotencyKey: string, fetchImpl: FetchLike = defaultFetch): Promise<ClearingDocument> {
+  return sendJSON("POST", "/api/v1/ledger/clearings", clearingDocumentSchema, fetchImpl, input, { "Idempotency-Key": idempotencyKey });
+}
+
+const clearingListSchema = z.object({ items: z.array(clearingDocumentSchema) });
+
+/** GET /api/v1/ledger/clearings, newest first, optionally only cleared or reset ones. */
+export async function fetchClearings(ledgerId: string, status = "", fetchImpl: FetchLike = defaultFetch): Promise<ClearingDocument[]> {
+  const params = new URLSearchParams({ ledger: ledgerId });
+  if (status) params.set("status", status);
+  return (await getJSON(`/api/v1/ledger/clearings?${params.toString()}`, clearingListSchema, fetchImpl)).items;
+}
+
+/** GET /api/v1/ledger/clearings/{id} with its items. */
+export function fetchClearing(id: string, fetchImpl: FetchLike = defaultFetch): Promise<ClearingDocument> {
+  return getJSON(`/api/v1/ledger/clearings/${encodeURIComponent(id)}`, clearingDocumentSchema, fetchImpl);
+}
+
+export interface ResetClearingInput {
+  reasonCode: string;
+  comment?: string;
+}
+
+/** POST /api/v1/ledger/clearings/{id}/reset: the whole document, with its own Idempotency-Key. */
+export function resetClearing(id: string, input: ResetClearingInput, idempotencyKey: string, fetchImpl: FetchLike = defaultFetch): Promise<ClearingDocument> {
+  return sendJSON("POST", `/api/v1/ledger/clearings/${encodeURIComponent(id)}/reset`, clearingDocumentSchema, fetchImpl, input, {
+    "Idempotency-Key": idempotencyKey,
+  });
+}
+
+export const TOLERANCE_CODE = /^[A-Z0-9_]{1,10}$/;
+
+export const toleranceGroupSchema = z.object({
+  ledgerId: z.string(),
+  code: z.string(),
+  name: z.string(),
+  debitLimit: z.string(),
+  creditLimit: z.string(),
+  percentLimit: z.string(),
+  differenceAccount: z.string(),
+  active: z.boolean(),
+  version: z.number(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type ToleranceGroup = z.infer<typeof toleranceGroupSchema>;
+
+export interface ToleranceGroupInput {
+  name: string;
+  debitLimit: string;
+  creditLimit: string;
+  percentLimit: string;
+  differenceAccount: string;
+  active: boolean;
+}
+
+const toleranceListSchema = z.object({ items: z.array(toleranceGroupSchema) });
+
+/** GET /api/v1/ledger/ledgers/{ledger}/tolerance-groups */
+export async function fetchToleranceGroups(ledgerId: string, fetchImpl: FetchLike = defaultFetch): Promise<ToleranceGroup[]> {
+  return (await getJSON(`/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/tolerance-groups`, toleranceListSchema, fetchImpl)).items;
+}
+
+/** GET /api/v1/ledger/ledgers/{ledger}/tolerance-groups/{code} */
+export function fetchToleranceGroup(ledgerId: string, code: string, fetchImpl: FetchLike = defaultFetch): Promise<ToleranceGroup> {
+  return getJSON(`/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/tolerance-groups/${encodeURIComponent(code)}`, toleranceGroupSchema, fetchImpl);
+}
+
+/** PUT .../tolerance-groups/{code}: creates, or replaces at `version` (If-Match) when given. */
+export function putToleranceGroup(
+  ledgerId: string,
+  code: string,
+  input: ToleranceGroupInput,
+  version?: number,
+  fetchImpl: FetchLike = defaultFetch,
+): Promise<ToleranceGroup> {
+  return sendJSON(
+    "PUT",
+    `/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/tolerance-groups/${encodeURIComponent(code)}`,
+    toleranceGroupSchema,
+    fetchImpl,
+    input,
+    version ? ifMatch(version) : {},
+  );
+}
+
+export const openItemAccountSchema = z.object({
+  ledgerId: z.string(),
+  account: z.string(),
+  name: z.string(),
+  enabled: z.boolean(),
+  openItems: z.number(),
+  changedBy: z.string(),
+  changedAt: z.string(),
+});
+export type OpenItemAccount = z.infer<typeof openItemAccountSchema>;
+
+const openItemAccountListSchema = z.object({ items: z.array(openItemAccountSchema) });
+
+/** GET /api/v1/ledger/ledgers/{ledger}/open-item-accounts */
+export async function fetchOpenItemAccounts(ledgerId: string, fetchImpl: FetchLike = defaultFetch): Promise<OpenItemAccount[]> {
+  return (await getJSON(`/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/open-item-accounts`, openItemAccountListSchema, fetchImpl)).items;
+}
+
+/** PUT .../open-item-accounts/{account}: switches open-item management on or off. */
+export function putOpenItemAccount(ledgerId: string, account: string, enabled: boolean, fetchImpl: FetchLike = defaultFetch): Promise<OpenItemAccount> {
+  return sendJSON(
+    "PUT",
+    `/api/v1/ledger/ledgers/${encodeURIComponent(ledgerId)}/open-item-accounts/${encodeURIComponent(account)}`,
+    openItemAccountSchema,
+    fetchImpl,
+    { enabled },
+  );
+}

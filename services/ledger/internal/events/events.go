@@ -17,7 +17,27 @@ const (
 	BatchStatusChanged = "dev.passage.ledger.batch.statuschanged.v1"
 	// RecurringGenerated is announced when a recurring journal (FR-11.10) creates a draft batch.
 	RecurringGenerated = "dev.passage.ledger.recurring.generated.v1"
+	// OpenItemCleared is announced when a clearing document is committed or reset
+	// (PRD name open-item.cleared; the naming rule allows only letters and digits
+	// in the entity, so it is written openitem).
+	OpenItemCleared = "dev.passage.ledger.openitem.cleared.v1"
 )
+
+// OpenItemClearedData is the payload of dev.passage.ledger.openitem.cleared.v1.
+// Status is cleared or reset; amounts are decimal strings in the ledger currency.
+type OpenItemClearedData struct {
+	ClearingDocumentID string   `json:"clearingDocumentId"`
+	LedgerID           string   `json:"ledgerId"`
+	Account            string   `json:"account"`
+	Mode               string   `json:"mode"`
+	ItemIDs            []string `json:"itemIds"`
+	DifferenceAmount   string   `json:"differenceAmount"`
+	DifferenceEntryID  string   `json:"differenceEntryId,omitempty"`
+	ResidualItemID     string   `json:"residualItemId,omitempty"`
+	Status             string   `json:"status"`
+	ReasonCode         string   `json:"reasonCode,omitempty"`
+	Actor              string   `json:"actor"`
+}
 
 // RecurringGeneratedData is the payload of dev.passage.ledger.recurring.generated.v1.
 // ScheduledDate is the run date, which is also the posting date of the draft batch.

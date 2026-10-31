@@ -29,6 +29,7 @@ const (
 // configured result or error.
 type fakeStore struct {
 	rec      recurringFake
+	oi       openItemFake
 	posted   []store.PostInput
 	reversed []store.ReverseInput
 	err      error

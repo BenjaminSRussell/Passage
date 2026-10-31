@@ -208,8 +208,8 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
 | Duty | Routes |
 |---|---|
 | `ledger.ledger.write` | `POST /ledgers` |
-| `ledger.account.write` | `PUT /charts/{chart}/accounts/{number}` |
-| `ledger.journal.read` | `GET /ledgers/{id}`, `GET /charts/{chart}/accounts`, `GET /journal-entries/{id}`, `GET /reason-codes[/{code}]`, `GET /ledgers/{ledger}/account-structures[/{id}]`, `GET /ledgers/{ledger}/dimension-values`, `GET /description-templates[/{id}]`, `GET /journal-names[/{code}]`, `GET /journal-batches[/{id}]`, `GET /journal-lines`, `GET /recurring-journals[/{id}[/runs]]` |
+| `ledger.account.write` | `PUT /charts/{chart}/accounts/{number}`, `PUT /ledgers/{ledger}/open-item-accounts/{account}` |
+| `ledger.journal.read` | `GET /ledgers/{id}`, `GET /charts/{chart}/accounts`, `GET /journal-entries/{id}`, `GET /reason-codes[/{code}]`, `GET /ledgers/{ledger}/account-structures[/{id}]`, `GET /ledgers/{ledger}/dimension-values`, `GET /description-templates[/{id}]`, `GET /journal-names[/{code}]`, `GET /journal-batches[/{id}]`, `GET /journal-lines`, `GET /recurring-journals[/{id}[/runs]]`, `GET /ledgers/{ledger}/open-item-accounts`, `GET /ledgers/{ledger}/tolerance-groups[/{code}]`, `GET /open-items`, `GET /clearings[/{id}]` |
 | `ledger.journal.post` | `POST /journal-entries`, `POST /validate`, `POST /journal-batches/{id}/post` (PRD "Post ledger journals") |
 | `ledger.journal.postledger` | Flag duty checked with `ledger.journal.post` on `POST /journal-entries` and `POST /journal-batches/{id}/post` when the entry's ledger is a non-leading member of a ledger set (FB50L, PRD "Post to ledger-specific ledger"); without it the post is refused 403 `AUTH-0003` |
 | `ledger.journal.postdirect` | Checked inside `POST /journal-batches/{id}/post` for a validated batch whose journal name has no workflow (PRD "Post ledger journals without approval") |
@@ -222,6 +222,9 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
 | `ledger.structure.write` | `PUT /ledgers/{ledger}/account-structures/{id}` (PRD duty "Maintain account structures") |
 | `ledger.dimension.write` | `PUT /ledgers/{ledger}/dimension-values/{attribute}/{value}` (PRD duty "Maintain financial dimensions") |
 | `ledger.setup.write` | `PUT /description-templates/{id}`, `PUT /journal-names/{code}` (PRD duty "Maintain ledger setup") |
+| `ledger.clearing.write` | `POST /clearings`, `POST /clearings:simulate` (PRD duty "Clear open items"; not yet in the policy bundle, issue #313) |
+| `ledger.clearing.reset` | `POST /clearings/{id}/reset` (PRD duty "Reset clearings"; issue #313) |
+| `ledger.clearing.rules` | `PUT /ledgers/{ledger}/tolerance-groups/{code}` (PRD duty "Maintain clearing rules"; issue #313) |
 
 ## Recurring journals (slice 7, FR-11.10)
 
@@ -239,6 +242,41 @@ mounted route and its duty is in `api/openapi.yaml`. Store tests use
   (runs skipped by a resume stay skipped); a changed schedule recomputes it from the last run.
 - The web batch screen has "Save as recurring journal", which opens the new recurring journal form
   filled from the batch (fixed amounts, its ledger, journal name, description and posting date).
+
+## Open items and manual clearing (slice 8, FR-11.19, BR-11.12, BR-11.13, BR-11.18)
+
+- `PUT /v1/ledger/ledgers/{ledger}/open-item-accounts/{account}` `{enabled}` switches open-item
+  management of an account in one ledger (`open_item_setting`). Only postable balance-sheet accounts
+  that are not customer or vendor reconciliation accounts qualify (`LEDGER_OI_ACCOUNT_INVALID`). An
+  account with a non-zero balance in the ledger is refused (`LEDGER_OI_ACTIVATION_BALANCE`) because
+  the activation run is not built. Switching off needs zero open items (`LEDGER_OI_OPEN_ITEMS_EXIST`).
+- While on, `writeEntry` creates one `open_item` per non-zero line of every posted entry on that
+  account, in the posting transaction: signed amount (debit positive) in the ledger currency, the
+  line's dimension combination and posting date, and `assignment` = the first 50 characters of the
+  line's `sourceLineRef`. `GET /open-items` lists them (ledger, account, status, assignment,
+  `dim.{ATTRIBUTE}`, keyset `cursor`/`limit`); status `open` includes `reset_open`.
+- `POST /clearings:simulate` and `POST /clearings` take 2 to 10,000 items of one account, a
+  `clearingDate` (not before the latest item posting date, `LEDGER_CLEARING_DATE_INVALID`), an optional
+  `toleranceGroup` and `residualItem`. Net zero clears. A residual within the group's limit (BR-11.12:
+  the debit limit for a debit residual, the credit limit for a credit residual, and the percentage of
+  the selection's absolute total Σ|amount| when set) is posted as an entry of source type
+  `clearing_difference` (a line on the item account that brings the selection to zero against a line
+  on the group's difference account) and its item is cleared with the selection. A larger residual
+  becomes a new `residual` open item (chain at most 20 deep) when `residualItem` is true, otherwise
+  `LEDGER_CLEARING_UNBALANCED`. Items already cleared give `LEDGER_OPEN_ITEM_ALREADY_CLEARED` (409). The
+  group's difference account may not be open-item managed (`LEDGER_CLEARING_DIFFERENCE_ACCOUNT`).
+  The `Idempotency-Key` is scoped to the ledger; a replay returns the document (200).
+- `POST /clearings/{id}/reset` resets the document as a whole and always needs an active ledger reason
+  code (`LEDGER_REASON_REQUIRED` otherwise): items become `reset_open`, the
+  difference entry is reversed with the given reason code (the ledger's reversal rules apply) and its
+  two items are voided, an open residual item is voided (`LEDGER_CLEARING_RESIDUAL_USED` if it was
+  cleared since). `GET /clearings[/{id}]` reads documents (the list returns the newest 200).
+- `POST /journal-entries/{id}/reverse` refuses an entry with an item in an active clearing, including a
+  clearing's own difference entry (409 `LEDGER_OPEN_ITEM_ALREADY_CLEARED`): reset the clearing first.
+- `PUT/GET /ledgers/{ledger}/tolerance-groups[/{code}]` maintain the groups (`ETag`, optional `If-Match`).
+- Event `dev.passage.ledger.openitem.cleared.v1` (status `cleared` or `reset`), aggregate type `clearing`.
+- Web: open items (filters, selection, preview, clear), clearing documents list and detail with
+  reset, tolerance group list and form, open-item account list with switch.
 
 ## Error codes
 
@@ -285,6 +323,22 @@ today:
 | `LEDGER_BATCH_APPROVAL_REQUIRED` | 409: posting a validated batch whose journal name now requires approval; submit it for approval |
 | `LEDGER_SELF_APPROVAL` | 403: the submitter approves a batch of a journal name that does not allow self-approval |
 | `LEDGER_VERSION_CONFLICT` | 412: `If-Match` names an older batch version |
+| `LEDGER_OI_ACCOUNT_INVALID` | 422: account cannot be open-item managed (BR-11.18) |
+| `LEDGER_OI_ACTIVATION_BALANCE` | 422: account has a balance; an activation run is needed (FR-11.19, LEDGER-0023) |
+| `LEDGER_OI_OPEN_ITEMS_EXIST` | 409: switching off an account that still has open items |
+| `LEDGER_OPEN_ITEM_NOT_FOUND` | 404: an item does not exist in the ledger |
+| `LEDGER_OPEN_ITEM_ALREADY_CLEARED` | 409: an item is already cleared or voided (BR-11.13, LEDGER-0021); also a reversal of an entry whose items are cleared |
+| `LEDGER_CLEARING_UNBALANCED` | 422: residual above tolerance and no residual item requested (BR-11.12, LEDGER-0020) |
+| `LEDGER_CLEARING_ACCOUNT_MIXED` | 422: selected items are on more than one account |
+| `LEDGER_CLEARING_DATE_INVALID` | 422: clearing date before the latest item posting date |
+| `LEDGER_CLEARING_RESIDUAL_DEPTH` | 422: the residual chain would exceed 20 items |
+| `LEDGER_CLEARING_DIFFERENCE_ACCOUNT` | 422: the tolerance group's difference account is open-item managed |
+| `LEDGER_OPEN_ITEM_ACCOUNT_REQUIRED` | 422: the items' account is no longer open-item managed |
+| `LEDGER_CLEARING_NOT_FOUND` | 404: clearing document does not exist or is outside the caller's scope |
+| `LEDGER_CLEARING_ALREADY_RESET` | 409: the document was reset by another request |
+| `LEDGER_CLEARING_RESIDUAL_USED` | 409: the residual item of the clearing is already cleared |
+| `LEDGER_TOLERANCE_GROUP_NOT_FOUND` | 404: tolerance group does not exist in the ledger |
+| `LEDGER_TOLERANCE_GROUP_INACTIVE` | 422: the named tolerance group is inactive |
 | `LEDGER_DESCRIPTION_TRUNCATED` | Info notice in `notices[]` of an accepted posting: the expanded default description was cut to 255 characters (FR-11.17, LEDGER-0031) |
 
 Platform codes: `AUTH-0001` (401, missing or malformed tenant), `AUTH-0003`

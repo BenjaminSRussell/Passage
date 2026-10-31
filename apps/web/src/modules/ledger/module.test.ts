@@ -37,6 +37,13 @@ describe("ledger module", () => {
       "/ledger/recurring-journals",
       "/ledger/recurring-journals/new",
       "/ledger/recurring-journals/:id",
+      "/ledger/open-items",
+      "/ledger/open-item-accounts",
+      "/ledger/clearings",
+      "/ledger/clearings/:id",
+      "/ledger/tolerance-groups",
+      "/ledger/tolerance-groups/new",
+      "/ledger/tolerance-groups/:code",
       "/ledger/trial-balance",
       "/ledger/transactions",
       "/ledger/entries/:id",
@@ -67,6 +74,10 @@ describe("ledger module", () => {
     expect(ledger.nav.find((n) => n.to === "/ledger/journal-names")?.duty).toBe("ledger.journal.read");
     // GET /api/v1/ledger/recurring-journals requires ledger.journal.read.
     expect(ledger.nav.find((n) => n.to === "/ledger/recurring-journals")?.duty).toBe("ledger.journal.read");
+    // GET /api/v1/ledger/open-items, /clearings, .../open-item-accounts and .../tolerance-groups require ledger.journal.read.
+    for (const to of ["/ledger/open-items", "/ledger/clearings", "/ledger/open-item-accounts", "/ledger/tolerance-groups"]) {
+      expect(ledger.nav.find((n) => n.to === to)?.duty).toBe("ledger.journal.read");
+    }
     // GET /api/v1/ledger/journal-lines requires ledger.journal.read.
     expect(ledger.nav.find((n) => n.to === "/ledger/transactions")?.duty).toBe("ledger.journal.read");
     // GET /api/v1/ledger/description-templates requires ledger.journal.read.

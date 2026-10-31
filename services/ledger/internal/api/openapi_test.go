@@ -112,6 +112,17 @@ func TestOpenAPI_MatchesRoutes(t *testing.T) {
 		"GET /v1/ledger/ledger-sets/{setId}":                                   dutyRead,
 		"POST /v1/ledger/ledger-sets/{setId}/journal-entries":                  dutyPost,
 		"POST /v1/ledger/ledgers/{id}/account-mappings":                        dutySetupWrite,
+		"GET /v1/ledger/ledgers/{ledger}/open-item-accounts":                   dutyRead,
+		"PUT /v1/ledger/ledgers/{ledger}/open-item-accounts/{account}":         dutyAccountWrite,
+		"GET /v1/ledger/ledgers/{ledger}/tolerance-groups":                     dutyRead,
+		"GET /v1/ledger/ledgers/{ledger}/tolerance-groups/{code}":              dutyRead,
+		"PUT /v1/ledger/ledgers/{ledger}/tolerance-groups/{code}":              dutyClearingRules,
+		"GET /v1/ledger/open-items":                                            dutyRead,
+		"POST /v1/ledger/clearings:simulate":                                   dutyClearingWrite,
+		"GET /v1/ledger/clearings":                                             dutyRead,
+		"POST /v1/ledger/clearings":                                            dutyClearingWrite,
+		"GET /v1/ledger/clearings/{id}":                                        dutyRead,
+		"POST /v1/ledger/clearings/{id}/reset":                                 dutyClearingReset,
 	}
 	for op, want := range duties {
 		if got := documented[op]; got != want {
