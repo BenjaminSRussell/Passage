@@ -176,9 +176,16 @@ paths:
       description: |
         Aggregates the on-hand projection with the FR-16.3 formulas. Every group is also split by
         currency so posted values never mix currencies. At most 10,000 groups are returned;
-        truncated is true when more matched.
+        truncated is true when more matched. With asOf the ledger is replayed up to that date
+        (inclusive): each transaction counts at the status it held on the date (from its status
+        changes; a journal-posted transaction at its status from its physical date), giving
+        physical quantity, posted value, blocked quantity and the negative flag. Value counts only
+        transactions at a financial status with a financial date on or before asOf. Availability,
+        ordered and reserved quantities are not kept per date: availPhysical, availOrdered and
+        reservedPhysical are omitted in a replay.
       x-passage-duty: inventory.read
       parameters:
+        - { name: asOf, in: query, description: 'Replay date (YYYY-MM-DD, inclusive); omit for the current projection', schema: { type: string, format: date } }
         - { name: product, in: query, schema: { type: string, format: uuid } }
         - { name: site, in: query, schema: { type: string } }
         - { name: warehouse, in: query, schema: { type: string } }
@@ -202,6 +209,7 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/OnHandItem' }
                   truncated: { type: boolean }
+                  asOf: { type: string, format: date, description: Replay date, present only when asOf was requested }
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
@@ -2409,14 +2417,14 @@ components:
             glEntry: { $ref: '#/components/schemas/GLEntry' }
     OnHandItem:
       type: object
-      required: [group, physicalInvent, availPhysical, availOrdered, postedValue, reservedPhysical, blocked, currency, negative]
+      required: [group, physicalInvent, postedValue, blocked, currency, negative]
       properties:
         group: { type: object, additionalProperties: { type: string } }
         physicalInvent: { $ref: '#/components/schemas/Decimal' }
-        availPhysical: { $ref: '#/components/schemas/Decimal' }
-        availOrdered: { $ref: '#/components/schemas/Decimal' }
+        availPhysical: { $ref: '#/components/schemas/Decimal', description: Present for the live projection; absent in an asOf replay }
+        availOrdered: { $ref: '#/components/schemas/Decimal', description: Present for the live projection; absent in an asOf replay }
         postedValue: { $ref: '#/components/schemas/Decimal' }
-        reservedPhysical: { $ref: '#/components/schemas/Decimal' }
+        reservedPhysical: { $ref: '#/components/schemas/Decimal', description: Present for the live projection; absent in an asOf replay }
         blocked: { $ref: '#/components/schemas/Decimal', description: 'Physical quantity with inventory_status BLOCKED or QUARANTINE; part of physicalInvent, left out of availPhysical and availOrdered (FR-16.8)' }
         currency: { type: string }
         negative: { type: boolean, description: True when any row in the group has negative physical stock }

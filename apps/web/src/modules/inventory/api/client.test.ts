@@ -26,6 +26,7 @@ describe("inventory client", () => {
   it("builds the on-hand URL with grouping and only the filters that are set", () => {
     expect(onHandUrl({ groupBy: ["product", "batch"], site: " S1 ", batch: "" })).toBe("/onhand?groupBy=product%2Cbatch&site=S1");
     expect(onHandUrl({ groupBy: [] })).toBe("/onhand");
+    expect(onHandUrl({ groupBy: [], asOf: " 2026-09-30 " })).toBe("/onhand?asOf=2026-09-30");
   });
 
   it("reads on-hand rows and the truncation flag", async () => {

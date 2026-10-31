@@ -167,13 +167,16 @@ type journalResponse struct {
 	GLEntry *glEntryResponse `json:"glEntry,omitempty"`
 }
 
+// onHandItem is one on-hand group. The availability and reservation figures
+// are nil in an as-of replay: they are not kept per date, and a zero would read
+// as "nothing available" (OpenAPI marks them absent with asOf).
 type onHandItem struct {
 	Group            map[string]string `json:"group"`
 	PhysicalInvent   string            `json:"physicalInvent"`
-	AvailPhysical    string            `json:"availPhysical"`
-	AvailOrdered     string            `json:"availOrdered"`
+	AvailPhysical    *string           `json:"availPhysical,omitempty"`
+	AvailOrdered     *string           `json:"availOrdered,omitempty"`
 	PostedValue      string            `json:"postedValue"`
-	ReservedPhysical string            `json:"reservedPhysical"`
+	ReservedPhysical *string           `json:"reservedPhysical,omitempty"`
 	Blocked          string            `json:"blocked"`
 	Currency         string            `json:"currency"`
 	Negative         bool              `json:"negative"`
@@ -441,8 +444,13 @@ func (a *API) onHand(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	f := store.OnHandFilter{ProductID: q.Get("product"), SiteID: q.Get("site"), WarehouseID: q.Get("warehouse"), BatchID: q.Get("batch"),
-		Owner: q.Get("owner"), Segment: q.Get("segment")}
+		Owner: q.Get("owner"), Segment: q.Get("segment"), AsOf: q.Get("asOf")}
 	fields := map[string]string{}
+	if f.AsOf != "" {
+		if _, err := time.Parse(time.DateOnly, f.AsOf); err != nil {
+			fields["asOf"] = "must be a date (YYYY-MM-DD)"
+		}
+	}
 	if f.ProductID != "" && !ids.Valid(f.ProductID) {
 		fields["product"] = "must be a UUID"
 	}
@@ -464,11 +472,19 @@ func (a *API) onHand(w http.ResponseWriter, r *http.Request) {
 	a.onhand.Add(1)
 	items := make([]onHandItem, 0, len(res.Rows))
 	for _, row := range res.Rows {
-		items = append(items, onHandItem{Group: row.Group, PhysicalInvent: row.PhysicalInvent.String(), AvailPhysical: row.AvailPhysical.String(),
-			AvailOrdered: row.AvailOrdered.String(), PostedValue: row.PostedValue.String(), ReservedPhysical: row.ReservedPhysical.String(),
-			Blocked: row.Blocked.String(), Currency: row.Currency, Negative: row.Negative})
+		item := onHandItem{Group: row.Group, PhysicalInvent: row.PhysicalInvent.String(), PostedValue: row.PostedValue.String(),
+			Blocked: row.Blocked.String(), Currency: row.Currency, Negative: row.Negative}
+		if res.AsOf == "" {
+			avail, ordered, reserved := row.AvailPhysical.String(), row.AvailOrdered.String(), row.ReservedPhysical.String()
+			item.AvailPhysical, item.AvailOrdered, item.ReservedPhysical = &avail, &ordered, &reserved
+		}
+		items = append(items, item)
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": items, "truncated": res.Truncated})
+	body := map[string]any{"items": items, "truncated": res.Truncated}
+	if res.AsOf != "" {
+		body["asOf"] = res.AsOf
+	}
+	httpx.JSON(w, http.StatusOK, body)
 }
 
 func splitList(raw string) []string {

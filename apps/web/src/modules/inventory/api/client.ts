@@ -102,10 +102,13 @@ export interface LineInput {
 export interface OnHandRow {
   group: Partial<Record<string, string>>;
   physicalInvent: string;
-  availPhysical: string;
-  availOrdered: string;
+  /** Absent in an as-of replay: availability is not kept per date. */
+  availPhysical?: string;
+  /** Absent in an as-of replay. */
+  availOrdered?: string;
   postedValue: string;
-  reservedPhysical: string;
+  /** Absent in an as-of replay. */
+  reservedPhysical?: string;
   /** Physical quantity held as BLOCKED or QUARANTINE; not in the available columns. */
   blocked: string;
   currency: string;
@@ -115,10 +118,14 @@ export interface OnHandRow {
 export interface OnHandResult {
   items: OnHandRow[];
   truncated: boolean;
+  /** Replay date (YYYY-MM-DD) when the rows are the stock on that date; absent for the live projection. */
+  asOf?: string;
 }
 
 export interface OnHandQuery {
   groupBy: readonly OnHandGroup[];
+  /** Replay the ledger up to this date (YYYY-MM-DD). */
+  asOf?: string;
   product?: string;
   site?: string;
   warehouse?: string;
@@ -189,7 +196,7 @@ function newKey(): string {
 export function onHandUrl(q: OnHandQuery): string {
   const params = new URLSearchParams();
   if (q.groupBy.length > 0) params.set("groupBy", q.groupBy.join(","));
-  for (const key of ["product", "site", "warehouse", "batch", "owner", "segment"] as const) {
+  for (const key of ["asOf", "product", "site", "warehouse", "batch", "owner", "segment"] as const) {
     const value = q[key]?.trim();
     if (value) params.set(key, value);
   }
@@ -202,7 +209,7 @@ export async function fetchOnHand(q: OnHandQuery, signal?: AbortSignal): Promise
   if (!Array.isArray(body.items)) {
     throw new InventoryApiError(0, "COM-0001", "The on-hand response has no items");
   }
-  return { items: body.items, truncated: body.truncated === true };
+  return { items: body.items, truncated: body.truncated === true, ...(body.asOf ? { asOf: body.asOf } : {}) };
 }
 
 export interface JournalQuery {

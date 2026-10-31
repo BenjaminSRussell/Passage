@@ -159,7 +159,7 @@ func (f *fakeStore) ListOnHand(_ context.Context, flt store.OnHandFilter) (store
 	f.onHand = flt
 	// The group total is positive but an underlying row is negative: the API
 	// must pass the store's flag through rather than recompute it from the total.
-	return store.OnHandResult{Truncated: true, Rows: []store.OnHandRow{{Group: map[string]string{"site": "S1"}, PhysicalInvent: decimal.NewFromInt(3),
+	return store.OnHandResult{Truncated: true, AsOf: flt.AsOf, Rows: []store.OnHandRow{{Group: map[string]string{"site": "S1"}, PhysicalInvent: decimal.NewFromInt(3),
 		AvailPhysical: decimal.NewFromInt(3), AvailOrdered: decimal.NewFromInt(3), PostedValue: decimal.Zero, Blocked: decimal.NewFromInt(2), Currency: "USD", Negative: true}}}, nil
 }
 
@@ -548,7 +548,7 @@ func TestListJournalsFiltersAndPages(t *testing.T) {
 
 func TestOnHandRejectsUnknownGrouping(t *testing.T) {
 	h := newServer(t, &fakeStore{})
-	for _, q := range []string{"groupBy=colour", "groupBy=project", "product=not-a-uuid"} {
+	for _, q := range []string{"groupBy=colour", "groupBy=project", "product=not-a-uuid", "asOf=2026-13-01", "asOf=yesterday"} {
 		if rec := do(t, h, http.MethodGet, "/v1/inventory/onhand?"+q, "", []string{"inventory.read"}, nil); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: status %d, want 400", q, rec.Code)
 		}
@@ -578,6 +578,28 @@ func TestOnHandGroupsByAnyDimensionSubset(t *testing.T) {
 	}
 	if len(out.Items) != 1 || !out.Items[0].Negative || out.Items[0].Currency != "USD" || out.Items[0].Blocked != "2" || !out.Truncated {
 		t.Fatalf("negative flag, currency, blocked quantity or truncation not passed through: %s", rec.Body.String())
+	}
+}
+
+func TestOnHandAsOfIsPassedToTheStoreAndEchoed(t *testing.T) {
+	fs := &fakeStore{}
+	h := newServer(t, fs)
+	rec := do(t, h, http.MethodGet, "/v1/inventory/onhand?asOf=2026-09-30", "", []string{"inventory.read"}, nil)
+	if rec.Code != http.StatusOK || fs.onHand.AsOf != "2026-09-30" || !strings.Contains(rec.Body.String(), `"asOf":"2026-09-30"`) {
+		t.Fatalf("status %d filter %+v body %s", rec.Code, fs.onHand, rec.Body.String())
+	}
+	live := do(t, h, http.MethodGet, "/v1/inventory/onhand", "", []string{"inventory.read"}, nil)
+	if strings.Contains(live.Body.String(), "asOf") || !strings.Contains(live.Body.String(), `"availPhysical":"3"`) {
+		t.Fatalf("a live inquiry carries availability and no asOf: %s", live.Body.String())
+	}
+	// A replay does not answer availability: the fields are absent, not zero.
+	for _, field := range []string{"availPhysical", "availOrdered", "reservedPhysical"} {
+		if strings.Contains(rec.Body.String(), field) {
+			t.Fatalf("a replay must omit %s: %s", field, rec.Body.String())
+		}
+	}
+	if !strings.Contains(rec.Body.String(), `"physicalInvent":"3"`) || !strings.Contains(rec.Body.String(), `"blocked":"2"`) {
+		t.Fatalf("a replay answers physical and blocked stock: %s", rec.Body.String())
 	}
 }
 

@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Alert, Badge, Button, Card, DataTable, FormField, Input, PageHeader, type DataTableColumn } from "../../shell/ui";
 import { fetchOnHand, ON_HAND_GROUPS, type OnHandGroup, type OnHandRow } from "./api/client";
-import { dash, UUID } from "./format";
+import { dash, isIsoDate, UUID } from "./format";
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 
@@ -19,6 +19,7 @@ export const GROUP_LABELS: Record<OnHandGroup, string> = {
 };
 
 interface Filters {
+  asOf: string;
   product: string;
   site: string;
   warehouse: string;
@@ -27,13 +28,16 @@ interface Filters {
   segment: string;
 }
 
-const noFilters: Filters = { product: "", site: "", warehouse: "", batch: "", owner: "", segment: "" };
+const noFilters: Filters = { asOf: "", product: "", site: "", warehouse: "", batch: "", owner: "", segment: "" };
 
+const physicalColumn: DataTableColumn<OnHandRow> = { key: "physicalInvent", header: "Physical", align: "end", mono: true };
+/** Availability and reservations are live figures: a date replay does not answer them. */
+const availabilityColumns: DataTableColumn<OnHandRow>[] = [
+  { key: "availPhysical", header: "Available physical", align: "end", mono: true, render: (row) => row.availPhysical ?? dash },
+  { key: "availOrdered", header: "Available ordered", align: "end", mono: true, render: (row) => row.availOrdered ?? dash },
+  { key: "reservedPhysical", header: "Reserved", align: "end", mono: true, render: (row) => row.reservedPhysical ?? dash },
+];
 const amountColumns: DataTableColumn<OnHandRow>[] = [
-  { key: "physicalInvent", header: "Physical", align: "end", mono: true },
-  { key: "availPhysical", header: "Available physical", align: "end", mono: true },
-  { key: "availOrdered", header: "Available ordered", align: "end", mono: true },
-  { key: "reservedPhysical", header: "Reserved", align: "end", mono: true },
   { key: "blocked", header: "Blocked", align: "end", mono: true, render: (row) => row.blocked ?? "0" },
   { key: "postedValue", header: "Posted value", align: "end", mono: true, render: (row) => `${row.postedValue} ${row.currency}`.trim() },
   {
@@ -49,6 +53,7 @@ export function OnHandPage() {
   const [draft, setDraft] = useState<Filters>(noFilters);
   const [filters, setFilters] = useState<Filters>(noFilters);
   const [productError, setProductError] = useState<string | undefined>();
+  const [dateError, setDateError] = useState<string | undefined>();
   const state = useLoad((signal) => fetchOnHand({ groupBy, ...filters }, signal), `${groupBy.join(",")}|${JSON.stringify(filters)}`);
 
   function toggle(group: OnHandGroup) {
@@ -58,16 +63,18 @@ export function OnHandPage() {
   function apply(event: FormEvent) {
     event.preventDefault();
     const product = draft.product.trim();
-    if (product !== "" && !UUID.test(product)) {
-      setProductError("Enter the product id (a UUID).");
-      return;
-    }
-    setProductError(undefined);
-    setFilters({ ...draft, product });
+    const asOf = draft.asOf.trim();
+    const badProduct = product !== "" && !UUID.test(product);
+    const badDate = asOf !== "" && !isIsoDate(asOf);
+    setProductError(badProduct ? "Enter the product id (a UUID)." : undefined);
+    setDateError(badDate ? "Enter a date as YYYY-MM-DD." : undefined);
+    if (badProduct || badDate) return;
+    setFilters({ ...draft, product, asOf });
   }
 
   function clear() {
     setProductError(undefined);
+    setDateError(undefined);
     setDraft(noFilters);
     setFilters(noFilters);
   }
@@ -85,6 +92,8 @@ export function OnHandPage() {
       mono: group === "product" || group === "legal_entity",
       render: (row: OnHandRow) => row.group[group] || dash,
     })),
+    physicalColumn,
+    ...(filters.asOf ? [] : availabilityColumns),
     ...amountColumns,
   ];
   const rows = state.data?.items ?? [];
@@ -93,10 +102,13 @@ export function OnHandPage() {
     <div className={styles.stack}>
       <PageHeader
         title="On-hand inquiry"
-        description="Physical and available stock by any combination of dimensions, straight from the posting ledger."
+        description="Physical and available stock by any combination of dimensions, now or on a past date, straight from the posting ledger."
       />
       <Card title="Filter and group">
         <form onSubmit={apply} noValidate className={styles.form}>
+          <FormField id="onhand-asof" label="As of date" optional error={dateError} hint="Stock and value at the end of that day. Leave empty for now.">
+            {(control) => <Input {...control} type="date" {...field("asOf")} />}
+          </FormField>
           <FormField id="onhand-product" label="Product" optional error={productError}>
             {(control) => <Input {...control} {...field("product")} placeholder="Product id" />}
           </FormField>
@@ -140,6 +152,11 @@ export function OnHandPage() {
           action={<Button size="sm" onClick={state.reload}>Try again</Button>}
         >
           {state.error.message} ({state.error.code})
+        </Alert>
+      ) : null}
+      {state.data?.asOf ? (
+        <Alert tone="info" title={`Stock as of ${state.data.asOf}`}>
+          Replayed from the ledger up to that date. Available, ordered and reserved quantities are not kept per date and are not shown.
         </Alert>
       ) : null}
       {state.data?.truncated ? (
