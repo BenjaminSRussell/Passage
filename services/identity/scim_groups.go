@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"maps"
+	"math"
 	"net/http"
 	"regexp"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -16,11 +19,26 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/ids"
 )
 
-const scimGroupSelect = `select g.group_id::text, g.display_name, coalesce(g.external_id, ''), g.created_at,
-  coalesce((select json_agg(json_build_object('value', m.user_id::text, 'display', u.display_name) order by m.user_id)
-    from identity_scim_group_members m join identity_users u on u.tenant_id = m.tenant_id and u.user_id = m.user_id
-    where m.tenant_id = g.tenant_id and m.group_id = g.group_id), '[]'::json)
+const scimMemberLimit = 500
+
+func groupSelect(memberLimit int) string {
+	return `select g.group_id::text, g.display_name, coalesce(g.external_id, ''), g.created_at,
+  coalesce((select json_agg(json_build_object('value', m.user_id::text, 'display', m.display_name) order by m.user_id)
+    from (select m.user_id, u.display_name from identity_scim_group_members m join identity_users u on u.tenant_id = m.tenant_id and u.user_id = m.user_id
+      where m.tenant_id = g.tenant_id and m.group_id = g.group_id order by m.user_id limit ` + strconv.Itoa(memberLimit) + `) m), '[]'::json)
 from identity_scim_groups g where g.tenant_id = $1`
+}
+
+// readMemberLimit caps the members a response lists (a group can hold thousands) and honours
+// excludedAttributes=members; writes always load the full membership so diffs stay correct.
+func readMemberLimit(r *http.Request) int {
+	for _, attr := range strings.Split(r.URL.Query().Get("excludedAttributes"), ",") {
+		if strings.EqualFold(strings.TrimSpace(attr), "members") {
+			return 0
+		}
+	}
+	return scimMemberLimit
+}
 
 type scimGroup struct {
 	ID          string
@@ -77,7 +95,13 @@ func parseMembers(raw json.RawMessage) ([]string, error) {
 		return nil, nil
 	}
 	if json.Unmarshal(raw, &entries) != nil {
-		return nil, badRequest("invalidValue", "members must be a list of {value} objects")
+		var one struct {
+			Value string `json:"value"`
+		}
+		if json.Unmarshal(raw, &one) != nil {
+			return nil, badRequest("invalidValue", "members must be a list of {value} objects")
+		}
+		entries = append(entries, one)
 	}
 	out := make([]string, 0, len(entries))
 	for _, e := range entries {
@@ -152,12 +176,19 @@ func groupFromBody(body map[string]json.RawMessage) (scimGroup, error) {
 var memberFilter = regexp.MustCompile(`(?i)^members\[\s*value\s+eq\s+"([^"]+)"\s*\]$`)
 
 func groupOperations(ops []patchOp) []patchOp {
-	out := slices.Clone(ops)
-	for i, op := range out {
-		if m := memberFilter.FindStringSubmatch(op.Path); m != nil {
-			raw, _ := json.Marshal([]map[string]string{{"value": m[1]}})
-			out[i].Path, out[i].Value = "members", raw
+	out := make([]patchOp, 0, len(ops))
+	for _, op := range ops {
+		m := memberFilter.FindStringSubmatch(op.Path)
+		if m == nil {
+			out = append(out, op)
+			continue
 		}
+		target, _ := json.Marshal([]map[string]string{{"value": m[1]}})
+		if op.Op == "replace" {
+			out = append(out, patchOp{Op: "remove", Path: "members", Value: target}, patchOp{Op: "add", Path: "members", Value: op.Value})
+			continue
+		}
+		out = append(out, patchOp{Op: op.Op, Path: "members", Value: target})
 	}
 	return out
 }
@@ -170,8 +201,8 @@ func scimGroupID(r *http.Request) (string, error) {
 	return id, nil
 }
 
-func loadScimGroup(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (scimGroup, error) {
-	query := scimGroupSelect + ` and g.group_id = $2`
+func loadScimGroup(ctx context.Context, tx pgx.Tx, tenantID, id string, memberLimit int, lock bool) (scimGroup, error) {
+	query := groupSelect(memberLimit) + ` and g.group_id = $2`
 	if lock {
 		query += ` for update of g`
 	}
@@ -184,13 +215,6 @@ func loadScimGroup(ctx context.Context, tx pgx.Tx, tenantID, id string, lock boo
 		return g, scimNotFound("group")
 	}
 	return g, err
-}
-
-func uniqueGroupName(err error) error {
-	if pgCode(err) == pgUnique {
-		return scimConflict("displayName is already in use")
-	}
-	return err
 }
 
 type groupEvent struct {
@@ -260,7 +284,7 @@ func (a *SCIMAPI) listGroups(w http.ResponseWriter, r *http.Request) {
 		if err := tx.QueryRow(r.Context(), `select count(*) from identity_scim_groups g where g.tenant_id = $1`+where, p.TenantID, attr, value).Scan(&total); err != nil {
 			return err
 		}
-		rows, err := tx.Query(r.Context(), scimGroupSelect+where+` order by g.group_id offset $4 limit $5`, p.TenantID, attr, value, start-1, count)
+		rows, err := tx.Query(r.Context(), groupSelect(readMemberLimit(r))+where+` order by g.group_id offset $4 limit $5`, p.TenantID, attr, value, start-1, count)
 		if err != nil {
 			return err
 		}
@@ -284,7 +308,7 @@ func (a *SCIMAPI) getGroup(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		err = a.inTx(r, func(tx pgx.Tx) error {
 			var loadErr error
-			g, loadErr = loadScimGroup(r.Context(), tx, scimPrincipal(r).TenantID, id, false)
+			g, loadErr = loadScimGroup(r.Context(), tx, scimPrincipal(r).TenantID, id, readMemberLimit(r), false)
 			return loadErr
 		})
 	}
@@ -311,7 +335,7 @@ func (a *SCIMAPI) createGroup(w http.ResponseWriter, r *http.Request) {
 	err = a.inTx(r, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(r.Context(), `insert into identity_scim_groups (tenant_id, group_id, display_name, external_id) values ($1, $2, $3, nullif($4, ''))`,
 			p.TenantID, g.ID, g.DisplayName, g.ExternalID); err != nil {
-			return uniqueGroupName(err)
+			return err
 		}
 		added, _ := memberDiff(nil, g.memberIDs)
 		if err := syncMembers(r.Context(), tx, p.TenantID, g.ID, added, nil); err != nil {
@@ -321,7 +345,7 @@ func (a *SCIMAPI) createGroup(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		var loadErr error
-		created, loadErr = loadScimGroup(r.Context(), tx, p.TenantID, g.ID, false)
+		created, loadErr = loadScimGroup(r.Context(), tx, p.TenantID, g.ID, readMemberLimit(r), false)
 		return loadErr
 	})
 	if err != nil {
@@ -367,7 +391,7 @@ func (a *SCIMAPI) saveGroup(w http.ResponseWriter, r *http.Request, id string, p
 	p := scimPrincipal(r)
 	var result scimGroup
 	err := a.inTx(r, func(tx pgx.Tx) error {
-		cur, err := loadScimGroup(r.Context(), tx, p.TenantID, id, true)
+		cur, err := loadScimGroup(r.Context(), tx, p.TenantID, id, math.MaxInt32, true)
 		if err != nil {
 			return err
 		}
@@ -380,7 +404,7 @@ func (a *SCIMAPI) saveGroup(w http.ResponseWriter, r *http.Request, id string, p
 		if cur.DisplayName != next.DisplayName || cur.ExternalID != next.ExternalID {
 			if _, err := tx.Exec(r.Context(), `update identity_scim_groups set display_name = $3, external_id = nullif($4, '') where tenant_id = $1 and group_id = $2`,
 				p.TenantID, id, next.DisplayName, next.ExternalID); err != nil {
-				return uniqueGroupName(err)
+				return err
 			}
 		}
 		if err := syncMembers(r.Context(), tx, p.TenantID, id, added, removed); err != nil {
@@ -391,7 +415,7 @@ func (a *SCIMAPI) saveGroup(w http.ResponseWriter, r *http.Request, id string, p
 				return err
 			}
 		}
-		result, err = loadScimGroup(r.Context(), tx, p.TenantID, id, false)
+		result, err = loadScimGroup(r.Context(), tx, p.TenantID, id, readMemberLimit(r), false)
 		return err
 	})
 	if err != nil {
@@ -409,7 +433,7 @@ func (a *SCIMAPI) deleteGroup(w http.ResponseWriter, r *http.Request) {
 	}
 	p := scimPrincipal(r)
 	err = a.inTx(r, func(tx pgx.Tx) error {
-		g, err := loadScimGroup(r.Context(), tx, p.TenantID, id, true)
+		g, err := loadScimGroup(r.Context(), tx, p.TenantID, id, math.MaxInt32, true)
 		if err != nil {
 			return err
 		}

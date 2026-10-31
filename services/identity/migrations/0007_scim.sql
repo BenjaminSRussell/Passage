@@ -12,7 +12,7 @@ create table identity_scim_groups (
   created_at timestamptz not null default now(),
   primary key (tenant_id, group_id)
 );
-create unique index identity_scim_groups_name_idx on identity_scim_groups (tenant_id, lower(display_name));
+create index identity_scim_groups_name_idx on identity_scim_groups (tenant_id, lower(display_name));
 
 create table identity_scim_group_members (
   tenant_id uuid not null,

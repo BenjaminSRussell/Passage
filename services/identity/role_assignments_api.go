@@ -142,7 +142,7 @@ func (a *RoleAssignmentsAPI) assign(w http.ResponseWriter, r *http.Request) {
 	created := roleAssignmentResource{}
 	err := withAdminTx(r.Context(), a.pool, p, dutyMaintainSecurityRoles, func(tx pgx.Tx) error {
 		var status, idpSubject string
-		err := tx.QueryRow(r.Context(), `select status, idp_subject from identity_users where tenant_id = $1 and user_id = $2`, p.TenantID, req.UserID).Scan(&status, &idpSubject)
+		err := tx.QueryRow(r.Context(), `select status, idp_subject from identity_users where tenant_id = $1 and user_id = $2 for share`, p.TenantID, req.UserID).Scan(&status, &idpSubject)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return httpx.NewProblem(http.StatusNotFound, codeUserNotFound, "user not found")
 		}
@@ -357,8 +357,13 @@ func (a *RoleAssignmentsAPI) end(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, result)
 }
 
+func lockTenantAdmins(ctx context.Context, tx pgx.Tx, tenantID string) error {
+	_, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1::text || ':tenant-admin', 0))`, tenantID)
+	return err
+}
+
 func requireOtherTenantAdmin(ctx context.Context, tx pgx.Tx, tenantID, endingID string, validTo time.Time) error {
-	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1::text || ':tenant-admin', 0))`, tenantID); err != nil {
+	if err := lockTenantAdmins(ctx, tx, tenantID); err != nil {
 		return err
 	}
 	var others int

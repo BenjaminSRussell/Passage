@@ -80,7 +80,7 @@ func testRouter(t *testing.T, withSCIM bool) http.Handler {
 	}
 	var scim *identity.SCIMAPI
 	if withSCIM {
-		verifiers, err := identity.NewTenantVerifiers(nil, "https://sso.test/realms", "passage", nil)
+		verifiers, err := identity.NewTenantVerifiers(nil, "https://sso.test/realms", "passage", nil, 0)
 		if err != nil {
 			t.Fatal(err)
 		}

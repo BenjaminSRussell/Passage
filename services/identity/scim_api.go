@@ -52,7 +52,7 @@ func NewSCIMAPI(pool *pgxpool.Pool, verifiers *TenantVerifiers, opa *OPAClient) 
 
 func (a *SCIMAPI) Register(r chi.Router) {
 	r.Route(scimBase, func(r chi.Router) {
-		r.Use(scimProblems, a.verifiers.Middleware, RequireOPAForRequest(a.opa), withProvisionDuty)
+		r.Use(scimProblems, a.verifiers.Middleware, RequireOPAForRequest(a.opa))
 		r.Get("/ServiceProviderConfig", func(w http.ResponseWriter, _ *http.Request) { writeSCIM(w, http.StatusOK, serviceProviderConfig) })
 		r.Get("/Schemas", listResources(schemaDefinitions))
 		r.Get("/Schemas/{id}", getResource(schemaDefinitions))
@@ -107,6 +107,9 @@ func scimFail(w http.ResponseWriter, r *http.Request, err error) {
 		slog.Error("scim request failed", "err", err, "path", r.URL.Path)
 		e = &scimError{status: http.StatusInternalServerError, detail: "internal error"}
 	}
+	if e.status == http.StatusUnauthorized {
+		w.Header().Set("WWW-Authenticate", "Bearer")
+	}
 	body := map[string]any{"schemas": []string{schemaError}, "status": strconv.Itoa(e.status), "detail": e.detail}
 	if e.scimType != "" {
 		body["scimType"] = e.scimType
@@ -114,8 +117,17 @@ func scimFail(w http.ResponseWriter, r *http.Request, err error) {
 	writeSCIM(w, e.status, body)
 }
 
+// inTx runs fn in a transaction for the verified caller's tenant with an explicit tenant-wide ('*') legal-entity
+// scope. Only the /scim/v2 routes reach it, behind the bearer and policy middleware; the SCIM principal is never
+// given the tenant.administer duty the admin APIs require.
 func (a *SCIMAPI) inTx(r *http.Request, fn func(tx pgx.Tx) error) error {
-	return withAdminTx(r.Context(), a.pool, scimPrincipal(r), dutyProvisionSCIM, fn)
+	tenantID := scimPrincipal(r).TenantID
+	return pgx.BeginFunc(r.Context(), a.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(r.Context(), `select set_config('passage.tenant_id', $1, true), set_config('passage.legal_entity_scopes', '*', true)`, tenantID); err != nil {
+			return err
+		}
+		return fn(tx)
+	})
 }
 
 func scimPrincipal(r *http.Request) tenant.Principal {
@@ -126,9 +138,17 @@ func scimPrincipal(r *http.Request) tenant.Principal {
 func decodeSCIMObject(w http.ResponseWriter, r *http.Request) (map[string]json.RawMessage, error) {
 	var body map[string]json.RawMessage
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, scimMaxBody)).Decode(&body); err != nil || body == nil {
-		return nil, badRequest("invalidSyntax", "the request body must be a JSON object")
+		return nil, bodyError(err, "the request body must be a JSON object")
 	}
 	return body, nil
+}
+
+func bodyError(err error, detail string) error {
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		return &scimError{status: http.StatusRequestEntityTooLarge, scimType: "tooLarge", detail: "the request body exceeds 1 MiB"}
+	}
+	return badRequest("invalidSyntax", detail)
 }
 
 type listResponse struct {
@@ -194,7 +214,7 @@ func decodePatch(w http.ResponseWriter, r *http.Request) ([]patchOp, error) {
 		Operations []patchOp `json:"Operations"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, scimMaxBody)).Decode(&req); err != nil {
-		return nil, badRequest("invalidSyntax", "the request body must be a SCIM PatchOp")
+		return nil, bodyError(err, "the request body must be a SCIM PatchOp")
 	}
 	if len(req.Operations) == 0 {
 		return nil, badRequest("invalidValue", "Operations must not be empty")

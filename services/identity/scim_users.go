@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 )
 
 const scimUserSelect = `select u.user_id::text, u.user_name, coalesce(u.external_id, ''), u.display_name, coalesce(u.email, ''), u.status = 'active', u.created_at,
@@ -70,7 +71,7 @@ func scanScimUser(row pgx.CollectableRow) (scimUser, error) {
 
 func parseActive(raw json.RawMessage) (bool, error) {
 	var b bool
-	if json.Unmarshal(raw, &b) == nil {
+	if string(raw) != "null" && json.Unmarshal(raw, &b) == nil {
 		return b, nil
 	}
 	var s string
@@ -375,6 +376,11 @@ func writeUserChange(ctx context.Context, tx pgx.Tx, tenantID, actor string, cur
 	if cur.UserName == next.UserName && cur.ExternalID == next.ExternalID && cur.DisplayName == next.DisplayName && cur.Email == next.Email && cur.Active == next.Active {
 		return nil
 	}
+	if cur.Active && !next.Active {
+		if err := requireOtherTenantAdminFor(ctx, tx, tenantID, next.ID); err != nil {
+			return err
+		}
+	}
 	status := "deprovisioned"
 	if next.Active {
 		status = "active"
@@ -409,6 +415,24 @@ where tenant_id = $1 and user_id = $2 and (valid_to is null or valid_to > greate
 		if err := record(ctx, tx, tenantID, actor, "roleassignment", a.AssignmentID, "ended", a); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func requireOtherTenantAdminFor(ctx context.Context, tx pgx.Tx, tenantID, userID string) error {
+	if err := lockTenantAdmins(ctx, tx, tenantID); err != nil {
+		return err
+	}
+	const active = `a.tenant_id = $1 and a.role = $3 and a.legal_entity_id is null and a.valid_from <= clock_timestamp() and (a.valid_to is null or a.valid_to > clock_timestamp())`
+	var holds bool
+	var others int
+	if err := tx.QueryRow(ctx, `select exists (select 1 from identity_role_assignments a where `+active+` and a.user_id = $2),
+  (select count(*) from identity_role_assignments a join identity_users u using (tenant_id, user_id) where `+active+` and a.user_id <> $2 and u.status = 'active')`,
+		tenantID, userID, tenant.DutyTenantAdmin).Scan(&holds, &others); err != nil {
+		return err
+	}
+	if holds && others == 0 {
+		return &scimError{status: http.StatusConflict, detail: codeLastTenantAdmin + ": the user holds the last active tenant.administer assignment of the tenant and cannot be deprovisioned"}
 	}
 	return nil
 }

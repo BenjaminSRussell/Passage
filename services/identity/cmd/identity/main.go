@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -23,6 +24,8 @@ import (
 const (
 	defaultHTTPAddr = ":8080"
 	uuidTextLength  = 36
+
+	scimRealmCacheTTL = 30 * time.Second
 )
 
 func main() {
@@ -125,7 +128,7 @@ func newSCIM(pool *pgxpool.Pool, cfg config) (*identity.SCIMAPI, error) {
 		slog.Info("SCIM provisioning is disabled: IDENTITY_SCIM_ISSUER_BASE is not set")
 		return nil, nil
 	}
-	verifiers, err := identity.NewTenantVerifiers(pool, cfg.scimIssuerBase, cfg.scimAudience, nil)
+	verifiers, err := identity.NewTenantVerifiers(pool, cfg.scimIssuerBase, cfg.scimAudience, nil, scimRealmCacheTTL)
 	if err != nil {
 		return nil, err
 	}

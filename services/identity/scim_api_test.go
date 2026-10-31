@@ -35,11 +35,17 @@ type scimFixture struct {
 	key        *rsa.PrivateKey
 	issuerBase string
 	opaSeen    []opaCall
+	opaFail    bool
 }
 
 type opaCall struct{ User, Action, Resource string }
 
 func newSCIMFixture(t *testing.T) *scimFixture {
+	t.Helper()
+	return newSCIMFixtureTTL(t, 0)
+}
+
+func newSCIMFixtureTTL(t *testing.T, ttl time.Duration) *scimFixture {
 	t.Helper()
 	f := &scimFixture{adminFixture: newAdminFixture(t)}
 	var err error
@@ -65,10 +71,14 @@ func newSCIMFixture(t *testing.T) *scimFixture {
 		}
 		_ = json.NewDecoder(r.Body).Decode(&in)
 		f.opaSeen = append(f.opaSeen, opaCall{in.Input.Subject.UserID, in.Input.Action, in.Input.Resource})
+		if f.opaFail {
+			http.Error(w, "down", http.StatusInternalServerError)
+			return
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"allow": in.Input.Subject.UserID == scimClient, "duty_missing": "Provision users via SCIM"}})
 	}))
 	t.Cleanup(opa.Close)
-	verifiers, err := identity.NewTenantVerifiers(f.app, f.issuerBase, "passage-api", jwks.Client())
+	verifiers, err := identity.NewTenantVerifiers(f.app, f.issuerBase, "passage-api", jwks.Client(), ttl)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,6 +216,14 @@ func TestSCIMAuthentication(t *testing.T) {
 		return map[string]any{"iss": f.issuerBase + "/realm-" + realmOf, "sub": sub, "tid": tid, "aud": "passage-api", "iat": now.Unix(), "exp": now.Add(5 * time.Minute).Unix()}
 	}
 
+	expired := func(c map[string]any) map[string]any {
+		c["iat"], c["exp"] = now.Add(-20*time.Minute).Unix(), now.Add(-10*time.Minute).Unix()
+		return c
+	}
+	withAudience := func(c map[string]any, aud string) map[string]any {
+		c["aud"] = aud
+		return c
+	}
 	for name, tc := range map[string]string{
 		"no token":                 "",
 		"garbage":                  "not.a.jwt",
@@ -213,9 +231,15 @@ func TestSCIMAuthentication(t *testing.T) {
 		"wrong signing key":        f.signed(claims(f.tenantA, f.tenantA, scimClient), other),
 		"tid of B with realm of A": f.signed(claims(f.tenantB, f.tenantA, scimClient), f.key),
 		"tid not a uuid":           f.signed(claims("tenant-a", f.tenantA, scimClient), f.key),
+		"expired":                  f.signed(expired(claims(f.tenantA, f.tenantA, scimClient)), f.key),
+		"wrong audience":           f.signed(withAudience(claims(f.tenantA, f.tenantA, scimClient), "other-api"), f.key),
 	} {
 		t.Run(name, func(t *testing.T) {
-			wantSCIMError(t, f.call(tc, http.MethodGet, "/scim/v2/Users", nil), "401", "")
+			rec := f.call(tc, http.MethodGet, "/scim/v2/Users", nil)
+			wantSCIMError(t, rec, "401", "")
+			if rec.Header().Get("WWW-Authenticate") != "Bearer" {
+				t.Fatalf("WWW-Authenticate = %q", rec.Header().Get("WWW-Authenticate"))
+			}
 		})
 	}
 
@@ -228,12 +252,14 @@ func TestSCIMAuthentication(t *testing.T) {
 
 	t.Run("policy decides on the request method and path", func(t *testing.T) {
 		f.opaSeen = nil
-		if rec := f.call(f.token(f.tenantA, "intruder"), http.MethodGet, "/scim/v2/Users", nil); rec.Code != http.StatusForbidden {
-			t.Fatalf("intruder = %d %s", rec.Code, rec.Body.String())
-		}
+		wantSCIMError(t, f.call(f.token(f.tenantA, "intruder"), http.MethodGet, "/scim/v2/Users", nil), "403", "")
 		if rec := f.as(f.tenantA)(http.MethodDelete, "/scim/v2/Users/"+userID, nil); rec.Code != http.StatusNotFound {
 			t.Fatalf("delete = %d", rec.Code)
 		}
+		f.opaFail = true
+		wantSCIMError(t, f.as(f.tenantA)(http.MethodGet, "/scim/v2/Users", nil), "503", "")
+		f.opaFail = false
+		f.opaSeen = f.opaSeen[:2]
 		want := []opaCall{{"intruder", "GET", "/scim/v2/Users"}, {scimClient, "DELETE", "/scim/v2/Users/" + userID}}
 		if !slices.Equal(f.opaSeen, want) {
 			t.Fatalf("policy saw %+v, want %+v", f.opaSeen, want)
@@ -473,7 +499,13 @@ func TestSCIMGroups(t *testing.T) {
 	}
 
 	t.Run("uniqueness and member validation", func(t *testing.T) {
-		wantSCIMError(t, do(http.MethodPost, "/scim/v2/Groups", map[string]any{"displayName": "engineering"}), "409", "uniqueness")
+		twin := decode[scimGroupBody](t, do(http.MethodPost, "/scim/v2/Groups", map[string]any{"displayName": "engineering"}), http.StatusCreated)
+		if twin.ID == g.ID {
+			t.Fatal("RFC 7643 displayName is not unique, a second group must be created")
+		}
+		if rec := do(http.MethodDelete, "/scim/v2/Groups/"+twin.ID, nil); rec.Code != http.StatusNoContent {
+			t.Fatalf("delete twin = %d", rec.Code)
+		}
 		wantSCIMError(t, do(http.MethodPost, "/scim/v2/Groups", map[string]any{"displayName": "Ghosts", "members": member(userID)}), "400", "invalidValue")
 		wantSCIMError(t, do(http.MethodPost, "/scim/v2/Groups", map[string]any{"displayName": "Bad", "members": member("nope")}), "400", "invalidValue")
 		wantSCIMError(t, do(http.MethodPost, "/scim/v2/Groups", map[string]any{"members": member(ada.ID)}), "400", "invalidValue")
@@ -500,6 +532,14 @@ func TestSCIMGroups(t *testing.T) {
 		)), http.StatusOK)
 		if got.DisplayName != "Platform" || !slices.Equal(ids(got), slices.Sorted(slices.Values([]string{ada.ID, cy.ID}))) {
 			t.Fatalf("patched = %+v", got)
+		}
+		swapped := decode[scimGroupBody](t, do(http.MethodPatch, "/scim/v2/Groups/"+g.ID, patchBody(map[string]any{"op": "replace", "path": `members[value eq "` + cy.ID + `"]`, "value": member(bob.ID)})), http.StatusOK)
+		if !slices.Equal(ids(swapped), slices.Sorted(slices.Values([]string{ada.ID, bob.ID}))) {
+			t.Fatalf("a filtered replace must swap only that member: %v", ids(swapped))
+		}
+		excluded := decode[scimGroupBody](t, do(http.MethodGet, "/scim/v2/Groups/"+g.ID+"?excludedAttributes=members", nil), http.StatusOK)
+		if len(excluded.Members) != 0 {
+			t.Fatalf("excludedAttributes=members still listed %+v", excluded.Members)
 		}
 		cleared := decode[scimGroupBody](t, do(http.MethodPatch, "/scim/v2/Groups/"+g.ID, patchBody(map[string]any{"op": "remove", "path": "members"})), http.StatusOK)
 		if len(cleared.Members) != 0 {
@@ -531,7 +571,7 @@ func TestSCIMGroups(t *testing.T) {
 			t.Fatalf("list = %+v", list)
 		}
 		other := decode[scimList[scimGroupBody]](t, f.as(f.tenantB)(http.MethodGet, "/scim/v2/Groups", nil), http.StatusOK)
-		if other.TotalResults != 0 {
+		if other.TotalResults != 1 || other.Resources[0].ID == g.ID {
 			t.Fatalf("tenant B sees %+v", other)
 		}
 		wantSCIMError(t, f.as(f.tenantB)(http.MethodDelete, "/scim/v2/Groups/"+g.ID, nil), "404", "")
@@ -543,8 +583,8 @@ func TestSCIMGroups(t *testing.T) {
 		}
 		wantSCIMError(t, do(http.MethodGet, "/scim/v2/Groups/"+g.ID, nil), "404", "")
 		var members int
-		if err := f.admin.QueryRow(ctx, `select count(*) from identity_scim_group_members`).Scan(&members); err != nil || members != 0 {
-			t.Fatalf("members left = %d %v", members, err)
+		if err := f.admin.QueryRow(ctx, `select count(*) from identity_scim_group_members where tenant_id = $1`, f.tenantA).Scan(&members); err != nil || members != 1 {
+			t.Fatalf("members left = %d, want only the seeded one: %v", members, err)
 		}
 		if got := decode[scimUserBody](t, do(http.MethodGet, "/scim/v2/Users/"+ada.ID, nil), http.StatusOK); len(got.Groups) != 0 {
 			t.Fatalf("groups = %+v", got.Groups)
@@ -583,4 +623,74 @@ func TestSCIMDiscovery(t *testing.T) {
 		t.Fatalf("types = %+v", types)
 	}
 	wantSCIMError(t, do(http.MethodGet, "/scim/v2/ResourceTypes/Nope", nil), "404", "")
+}
+
+func TestSCIMDeprovisionRefusesTheLastTenantAdmin(t *testing.T) {
+	f := newSCIMFixture(t)
+	do := f.as(f.tenantA)
+	ctx := context.Background()
+	first, second := f.createUser(t, do, "root1"), f.createUser(t, do, "root2")
+	grant := func(id string) {
+		if _, err := f.admin.Exec(ctx, `insert into identity_role_assignments (tenant_id, assignment_id, user_id, role, valid_from) values ($1, gen_random_uuid(), $2, 'tenant.administer', now() - interval '1 day')`, f.tenantA, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	activeGrants := func() int {
+		var n int
+		if err := f.admin.QueryRow(ctx, `select count(*) from identity_role_assignments where role = 'tenant.administer' and valid_to is null`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	grant(first.ID)
+	wantSCIMError(t, do(http.MethodDelete, "/scim/v2/Users/"+first.ID, nil), "409", "")
+	wantSCIMError(t, do(http.MethodPatch, "/scim/v2/Users/"+first.ID, patchBody(map[string]any{"op": "replace", "path": "active", "value": false})), "409", "")
+	if got := decode[scimUserBody](t, do(http.MethodGet, "/scim/v2/Users/"+first.ID, nil), http.StatusOK); !got.Active || activeGrants() != 1 {
+		t.Fatalf("a refused deprovision changed state: %+v grants=%d", got, activeGrants())
+	}
+	grant(second.ID)
+	if rec := do(http.MethodDelete, "/scim/v2/Users/"+first.ID, nil); rec.Code != http.StatusNoContent {
+		t.Fatalf("with another admin the delete = %d %s", rec.Code, rec.Body.String())
+	}
+	wantSCIMError(t, do(http.MethodDelete, "/scim/v2/Users/"+second.ID, nil), "409", "")
+}
+
+func TestSCIMGuardsAgainstUnintendedDeprovisioning(t *testing.T) {
+	f := newSCIMFixture(t)
+	do := f.as(f.tenantA)
+	u := f.createUser(t, do, "dana")
+	wantSCIMError(t, do(http.MethodPatch, "/scim/v2/Users/"+u.ID, patchBody(map[string]any{"op": "remove", "path": "active"})), "400", "invalidValue")
+	wantSCIMError(t, do(http.MethodPatch, "/scim/v2/Users/"+u.ID, patchBody(map[string]any{"op": "replace", "value": map[string]any{"active": nil}})), "400", "invalidValue")
+	wantSCIMError(t, do(http.MethodPut, "/scim/v2/Users/"+u.ID, `{"userName":"dana","active":null}`), "400", "invalidValue")
+	if got := decode[scimUserBody](t, do(http.MethodGet, "/scim/v2/Users/"+u.ID, nil), http.StatusOK); !got.Active {
+		t.Fatal("a malformed active deprovisioned the user")
+	}
+}
+
+func TestSCIMBodyAndPageLimits(t *testing.T) {
+	f := newSCIMFixture(t)
+	do := f.as(f.tenantA)
+	wantSCIMError(t, do(http.MethodPost, "/scim/v2/Users", `{"userName":"big","displayName":"`+strings.Repeat("x", 1<<20)+`"}`), "413", "tooLarge")
+	wantSCIMError(t, do(http.MethodPatch, "/scim/v2/Users/"+userID, `{"Operations":[{"op":"add","path":"displayName","value":"`+strings.Repeat("x", 1<<20)+`"}]}`), "413", "tooLarge")
+	if _, err := f.admin.Exec(context.Background(), `insert into identity_users (tenant_id, user_id, idp_subject, user_name) select $1, gen_random_uuid(), 'bulk-' || n, 'bulk-' || n from generate_series(1, 205) n`, f.tenantA); err != nil {
+		t.Fatal(err)
+	}
+	got := decode[scimList[scimUserBody]](t, do(http.MethodGet, "/scim/v2/Users?count=1000", nil), http.StatusOK)
+	if got.TotalResults != 205 || got.ItemsPerPage != 200 || len(got.Resources) != 200 {
+		t.Fatalf("count cap: total=%d perPage=%d returned=%d", got.TotalResults, got.ItemsPerPage, len(got.Resources))
+	}
+}
+
+func TestSCIMTenantLookupIsCached(t *testing.T) {
+	f := newSCIMFixtureTTL(t, time.Hour)
+	do := f.as(f.tenantA)
+	if rec := do(http.MethodGet, "/scim/v2/Users", nil); rec.Code != http.StatusOK {
+		t.Fatalf("first = %d", rec.Code)
+	}
+	if _, err := f.admin.Exec(context.Background(), `update identity_tenants set status = 'suspended' where tenant_id = $1`, f.tenantA); err != nil {
+		t.Fatal(err)
+	}
+	if rec := do(http.MethodGet, "/scim/v2/Users", nil); rec.Code != http.StatusOK {
+		t.Fatalf("within the cache window a suspension is not yet seen, got %d", rec.Code)
+	}
 }
