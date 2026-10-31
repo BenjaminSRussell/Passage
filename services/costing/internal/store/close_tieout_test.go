@@ -73,6 +73,9 @@ func settleAndTieOut(t *testing.T, products, txnsPerProduct int) closeRun {
 			ledger = ledger.Add(amount)
 			rows = append(rows, costRow(product+"/"+x.ID, le, product, site, domain.KindFinancial, qty.String(), amount.String(), x.FinancialDate.Format("2006-01-02")))
 		}
+		if !ledger.Equal(res.RemainingValue) {
+			t.Fatalf("product %d: ledger %s differs from the settled remaining value %s", p, ledger, res.RemainingValue)
+		}
 		gl = append(gl, domain.GLBalance{Dims: map[string]string{"product": product}, Balance: ledger})
 		if len(rows) >= MaxCostTransactionBatch*20 {
 			flush()

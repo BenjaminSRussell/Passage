@@ -41,6 +41,8 @@ const (
 	maxIdempotencyKey = 255
 	maxValuationType  = 64
 	maxCSVBytes       = 8 << 20
+	maxPPVDocumentID  = 80
+	maxPPVLineID      = 64
 )
 
 var (
@@ -518,9 +520,10 @@ type ppvRequest struct {
 	PoUnitPrice      string `json:"poUnitPrice"`
 	InvoiceUnitPrice string `json:"invoiceUnitPrice"`
 	SourceDocumentID string `json:"sourceDocumentId"`
-	// The four fields below are given together to also append the PPV
-	// CostTransaction (kind PPV, idempotent per source document); without them
-	// the hook only calculates.
+	// The five fields below are given together to also append the PPV
+	// CostTransaction (kind PPV, idempotent per legal entity, document and
+	// line); without them the hook only calculates.
+	SourceLineID  string `json:"sourceLineId"`
 	LegalEntityID string `json:"legalEntityId"`
 	ProductID     string `json:"productId"`
 	SiteID        string `json:"siteId"`
@@ -538,9 +541,10 @@ type ppvResponse struct {
 
 // postPPV calculates the purchase price variance for a STANDARD item at receipt
 // (PO price against standard) or at invoice (invoice price against PO price).
-// A positive amount is a debit. With legalEntityId, productId, siteId and
-// financialDate it also appends the PPV CostTransaction, keyed by kind and
-// source document, so the PPV analysis sees it and the inventory value does not.
+// A positive amount is a debit. With legalEntityId, productId, siteId,
+// financialDate and sourceLineId it also appends the PPV CostTransaction, keyed
+// by kind, legal entity, source document and line, so the PPV analysis sees it
+// and the inventory value does not.
 func (a *API) postPPV(w http.ResponseWriter, r *http.Request) {
 	if !validTenant(w, r) {
 		return
@@ -583,14 +587,26 @@ func (a *API) postPPV(w http.ResponseWriter, r *http.Request) {
 		}
 		amount = domain.InvoicePPV(qty, inv, po, scale)
 	}
-	persist := req.LegalEntityID != "" || req.ProductID != "" || req.SiteID != "" || req.FinancialDate != ""
+	persist := req.SourceLineID != "" || req.LegalEntityID != "" || req.ProductID != "" || req.SiteID != "" || req.FinancialDate != ""
 	var row store.CostTransaction
 	if persist {
 		ppvQty := "0"
 		if req.Kind == "RECEIPT" {
 			ppvQty = qty.String()
 		}
-		row = validateCostTransaction(fields, "ppv", costTransactionRequest{SourceKey: "ppv:" + req.Kind + ":" + req.SourceDocumentID,
+		if n := len(req.SourceLineID); n < 1 || n > maxPPVLineID {
+			fields["sourceLineId"] = fmt.Sprintf("must be 1 to %d characters", maxPPVLineID)
+		}
+		if len(req.SourceDocumentID) > maxPPVDocumentID {
+			fields["sourceDocumentId"] = fmt.Sprintf("must be at most %d characters", maxPPVDocumentID)
+		}
+		for name, v := range map[string]string{"sourceDocumentId": req.SourceDocumentID, "sourceLineId": req.SourceLineID} {
+			if strings.Contains(v, ":") {
+				fields[name] = "must not contain a colon"
+			}
+		}
+		row = validateCostTransaction(fields, "", costTransactionRequest{
+			SourceKey:     strings.Join([]string{"ppv", req.Kind, strings.ToLower(req.LegalEntityID), req.SourceDocumentID, req.SourceLineID}, ":"),
 			LegalEntityID: req.LegalEntityID, ProductID: req.ProductID, SiteID: req.SiteID, Kind: domain.KindPPV, Qty: ppvQty,
 			Amount: amount.StringFixed(scale), Currency: req.Currency, FinancialDate: req.FinancialDate})
 	}

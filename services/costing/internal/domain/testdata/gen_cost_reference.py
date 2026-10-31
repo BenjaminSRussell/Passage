@@ -1,22 +1,16 @@
 #!/usr/bin/env python3
 # Regenerates cost_reference.json: 100 receipt/issue sequences, each costed under all
 # seven methods with exact rational arithmetic (no shared code with the Go engine).
-# Rules: values round half-even to cents; the last unit taken from a layer or pool
+# Rules: exact half-cent ties round to even. Values round half-even to cents; the last unit taken from a layer or pool
 # carries its remaining value. Sequences are seeded, so the output is reproducible.
 import datetime
 import json
+import os
 import random
 from fractions import Fraction
 
 SCALE = 100
 METHODS = ["FIFO", "LIFO", "LIFO_DATE", "WEIGHTED_AVG_PERIODIC", "WEIGHTED_AVG_RUNNING", "MOVING_AVG", "STANDARD"]
-
-
-def terminating(den):
-    for p in (2, 5):
-        while den % p == 0:
-            den //= p
-    return den == 1
 
 
 def rnd(x):
@@ -26,16 +20,6 @@ def rnd(x):
     if r > Fraction(1, 2) or (r == Fraction(1, 2) and f % 2 == 1):
         f += 1
     return Fraction(f, SCALE)
-
-
-class Tie(Exception):
-    pass
-
-
-def rnd_checked(x, unit):
-    if (x * SCALE).denominator == 2 and not terminating(unit.denominator):
-        raise Tie()
-    return rnd(x)
 
 
 def month(t):
@@ -62,7 +46,7 @@ def run_layered(txns, method):
             if need == 0:
                 break
             take = min(need, l["qty"])
-            v = l["value"] if take == l["qty"] else rnd_checked(take * l["unit"], l["unit"])
+            v = l["value"] if take == l["qty"] else rnd(take * l["unit"])
             l["qty"] -= take
             l["value"] -= v
             total += v
@@ -84,7 +68,7 @@ def run_pool(txns, method, std):
             for t in txns:
                 if month(t) == m and t["kind"] == "I":
                     take = Fraction(t["qty"])
-                    v = val if take == qty else rnd_checked(take * val / qty, val / qty)
+                    v = val if take == qty else rnd(take * val / qty)
                     qty, val = qty - take, val - v
                     costs[t["id"]] = v
         return costs, qty, val
@@ -97,9 +81,9 @@ def run_pool(txns, method, std):
             if take == qty:
                 v = val
             elif method == "STANDARD":
-                v = rnd_checked(take * std, std)
+                v = rnd(take * std)
             else:
-                v = rnd_checked(take * val / qty, val / qty)
+                v = rnd(take * val / qty)
             qty, val = qty - take, val - v
             costs[t["id"]] = v
     return costs, qty, val
@@ -138,7 +122,7 @@ def build(rng, n):
                 else:
                     c, q, v = run_pool(txns, m, std)
                 out[m] = {"issues": {k: fmt(x) for k, x in c.items()}, "remainingQty": str(q), "remainingValue": fmt(v)}
-        except (Tie, AssertionError):
+        except AssertionError:
             continue
         return {"id": f"SEQ-{n:03d}", "standardUnitCost": fmt(std), "transactions": txns, "expected": out}
     raise SystemExit("no sequence")
@@ -168,6 +152,24 @@ def main():
                 {"id": "I3", "kind": "I", "qty": "1", "date": "2026-02-04"},
             ],
         },
+        {
+            "id": "SEQ-003",
+            "note": "6 units for 1.07, issue 3: exactly 0.535 rounds half-even up to 0.54 for every method but STANDARD (std 0.50: 1.50)",
+            "standardUnitCost": "0.50",
+            "transactions": [
+                {"id": "R1", "kind": "R", "qty": "6", "value": "1.07", "date": "2026-03-01"},
+                {"id": "I1", "kind": "I", "qty": "3", "date": "2026-03-02"},
+            ],
+        },
+        {
+            "id": "SEQ-004",
+            "note": "6 units for 1.05, issue 3: exactly 0.525 rounds half-even down to 0.52 for every method but STANDARD (std 0.50: 1.50)",
+            "standardUnitCost": "0.50",
+            "transactions": [
+                {"id": "R1", "kind": "R", "qty": "6", "value": "1.05", "date": "2026-03-01"},
+                {"id": "I1", "kind": "I", "qty": "3", "date": "2026-03-02"},
+            ],
+        },
     ]
     for s in seqs:
         std, out = Fraction(s["standardUnitCost"]), {}
@@ -178,9 +180,9 @@ def main():
                 c, q, v = run_pool(s["transactions"], m, std)
             out[m] = {"issues": {k: fmt(x) for k, x in c.items()}, "remainingQty": str(q), "remainingValue": fmt(v)}
         s["expected"] = out
-    while len(seqs) < 100:
+    while len(seqs) < 104:
         seqs.append(build(rng, len(seqs) + 1))
-    with open("cost_reference.json", "w") as f:
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "cost_reference.json"), "w") as f:
         json.dump({"scale": 2, "sequences": seqs}, f, indent=1)
         f.write("\n")
 

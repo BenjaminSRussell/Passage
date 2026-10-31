@@ -59,8 +59,8 @@ func TestSettle_ReferenceFixture(t *testing.T) {
 	if err := json.Unmarshal(raw, &fixture); err != nil {
 		t.Fatal(err)
 	}
-	if len(fixture.Sequences) != 100 {
-		t.Fatalf("fixture holds %d sequences, want 100", len(fixture.Sequences))
+	if len(fixture.Sequences) < 100 {
+		t.Fatalf("fixture holds %d sequences, want at least 100", len(fixture.Sequences))
 	}
 	methods := []Method{FIFO, LIFO, LIFODate, WeightedAvgPeriodic, WeightedAvgRunning, MovingAvg, Standard}
 	for _, seq := range fixture.Sequences {

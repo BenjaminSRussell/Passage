@@ -575,7 +575,7 @@ paths:
   /internal/v1/costing/ppv:
     post:
       operationId: calculatePpv
-      summary: Purchase price variance for a STANDARD item at receipt or invoice (internal hook, no persistence in slice 1)
+      summary: Purchase price variance for a STANDARD item at receipt or invoice (internal hook); with the reference fields it also appends the PPV cost transaction
       x-passage-duty: costing.ppv.post
       parameters:
         - $ref: "#/components/parameters/TenantHeader"
@@ -1676,8 +1676,9 @@ components:
         standardUnitCost: { $ref: "#/components/schemas/Decimal", description: "Required for RECEIPT: (PO price - standard) x qty." }
         poUnitPrice: { $ref: "#/components/schemas/Decimal", description: "PO unit price, required for both kinds." }
         invoiceUnitPrice: { $ref: "#/components/schemas/Decimal", description: "Required for INVOICE: (invoice price - PO price) x qty." }
-        sourceDocumentId: { type: string, maxLength: 188 }
-        legalEntityId: { type: string, format: uuid, description: "With productId, siteId and financialDate (all four or none), also appends the PPV cost transaction under source key ppv:<kind>:<sourceDocumentId>; a retry is a replay." }
+        sourceDocumentId: { type: string, maxLength: 80, description: "Must not contain a colon when the cost transaction is appended." }
+        sourceLineId: { type: string, minLength: 1, maxLength: 64, description: "The document line; must not contain a colon." }
+        legalEntityId: { type: string, format: uuid, description: "With productId, siteId, financialDate and sourceLineId (all five or none), also appends the PPV cost transaction under source key ppv:<kind>:<legalEntityId>:<sourceDocumentId>:<sourceLineId>; a retry is a replay, other content under the key is CST-CTX-001. A legal entity with no primary valuation ledger and no stock rows yet refuses the row (CST-CTX-002)." }
         productId: { type: string, format: uuid }
         siteId: { type: string, format: uuid }
         financialDate: { type: string, format: date }

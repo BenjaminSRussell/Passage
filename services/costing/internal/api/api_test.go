@@ -160,33 +160,52 @@ func TestPPV_AC204(t *testing.T) {
 
 func TestPPV_PostsCostTransactionOnReceiptAndInvoice(t *testing.T) {
 	h, f := server()
-	ref := `"legalEntityId":"` + testLE + `","productId":"22222222-2222-4222-8222-222222222222","siteId":"44444444-4444-4444-8444-444444444444","financialDate":"2026-03-05"`
-	receipt := `{"kind":"RECEIPT","currency":"EUR","qty":"100","standardUnitCost":"10.00","poUnitPrice":"10.50","sourceDocumentId":"GR-1",` + ref + `}`
-	invoice := `{"kind":"INVOICE","currency":"EUR","qty":"100","poUnitPrice":"10.50","invoiceUnitPrice":"10.80","sourceDocumentId":"INV-1",` + ref + `}`
-	for _, body := range []string{receipt, invoice, receipt} {
-		rec := call(h, http.MethodPost, "/internal/v1/costing/ppv", body, allDuties, nil)
+	const product, site = "22222222-2222-4222-8222-222222222222", "44444444-4444-4444-8444-444444444444"
+	ref := func(le, line string) string {
+		return `"legalEntityId":"` + le + `","productId":"` + product + `","siteId":"` + site + `","financialDate":"2026-03-05","sourceLineId":"` + line + `"`
+	}
+	receipt := func(le, line string) string {
+		return `{"kind":"RECEIPT","currency":"EUR","qty":"100","standardUnitCost":"10.00","poUnitPrice":"10.50","sourceDocumentId":"GR-1",` + ref(le, line) + `}`
+	}
+	invoice := `{"kind":"INVOICE","currency":"EUR","qty":"100","poUnitPrice":"10.50","invoiceUnitPrice":"10.80","sourceDocumentId":"INV-1",` + ref(testLE, "1") + `}`
+	otherLE := ids.New()
+	posts := []struct{ body, le string }{
+		{receipt(testLE, "1"), testLE}, {invoice, testLE}, {receipt(testLE, "1"), testLE},
+		{receipt(testLE, "2"), testLE}, {receipt(otherLE, "1"), otherLE},
+	}
+	for _, p := range posts {
+		rec := call(h, http.MethodPost, "/internal/v1/costing/ppv", p.body, allDuties, scopedTo(p.le))
 		if m, _ := decodeMap(rec); rec.Code != http.StatusOK || m["recorded"] != true {
 			t.Fatalf("status %d body %v, want recorded", rec.Code, m)
 		}
 	}
-	if len(f.costTxns) != 2 {
-		t.Fatalf("stored %d rows, want 2 (the replayed receipt is one source key)", len(f.costTxns))
+	if len(f.costTxns) != 4 {
+		t.Fatalf("stored %d rows, want 4 (the replayed receipt line is one source key; two lines and two entities are four)", len(f.costTxns))
 	}
-	if r := f.costTxns["ppv:RECEIPT:GR-1"]; r.Kind != "PPV" || r.Amount != "50" || r.Qty != "100" || r.Currency != "EUR" {
-		t.Errorf("receipt row = %+v, want PPV 50.00 on qty 100", r)
+	if r := f.costTxns["ppv:RECEIPT:"+testLE+":GR-1:1"]; r.Kind != "PPV" || r.Amount != "50" || r.Qty != "100" || r.Currency != "EUR" {
+		t.Errorf("receipt row = %+v, want PPV 50 on qty 100", r)
 	}
-	if r := f.costTxns["ppv:INVOICE:INV-1"]; r.Kind != "PPV" || r.Amount != "30" || r.Qty != "0" {
-		t.Errorf("invoice row = %+v, want PPV 30.00 on qty 0", r)
+	if r := f.costTxns["ppv:INVOICE:"+testLE+":INV-1:1"]; r.Kind != "PPV" || r.Amount != "30" || r.Qty != "0" {
+		t.Errorf("invoice row = %+v, want PPV 30 on qty 0", r)
 	}
-	partial := `{"kind":"RECEIPT","currency":"EUR","qty":"1","standardUnitCost":"1","poUnitPrice":"2","sourceDocumentId":"GR-2","productId":"22222222-2222-4222-8222-222222222222"}`
-	if rec := call(h, http.MethodPost, "/internal/v1/costing/ppv", partial, allDuties, nil); rec.Code != http.StatusBadRequest {
-		t.Errorf("partial reference status %d, want 400", rec.Code)
+	for _, key := range []string{"ppv:RECEIPT:" + testLE + ":GR-1:2", "ppv:RECEIPT:" + otherLE + ":GR-1:1"} {
+		if _, ok := f.costTxns[key]; !ok {
+			t.Errorf("no row under %s", key)
+		}
 	}
-	other := strings.Replace(receipt, testLE, ids.New(), 1)
-	if rec := call(h, http.MethodPost, "/internal/v1/costing/ppv", other, allDuties, nil); rec.Code != http.StatusForbidden {
+	partial := `{"kind":"RECEIPT","currency":"EUR","qty":"1","standardUnitCost":"1","poUnitPrice":"2","sourceDocumentId":"GR-2","productId":"` + product + `"}`
+	rec := call(h, http.MethodPost, "/internal/v1/costing/ppv", partial, allDuties, nil)
+	if m, _ := decodeMap(rec); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"legalEntityId"`) || strings.Contains(rec.Body.String(), "ppv.") {
+		t.Errorf("partial reference status %d body %v, want 400 naming the request's own fields", rec.Code, m)
+	}
+	noLine := strings.Replace(receipt(testLE, "1"), `,"sourceLineId":"1"`, "", 1)
+	if rec := call(h, http.MethodPost, "/internal/v1/costing/ppv", noLine, allDuties, nil); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "sourceLineId") {
+		t.Errorf("missing line status %d: %s, want 400 on sourceLineId", rec.Code, rec.Body.String())
+	}
+	if rec := call(h, http.MethodPost, "/internal/v1/costing/ppv", receipt(ids.New(), "1"), allDuties, nil); rec.Code != http.StatusForbidden {
 		t.Errorf("other legal entity status %d, want 403", rec.Code)
 	}
-	if len(f.costTxns) != 2 {
+	if len(f.costTxns) != 4 {
 		t.Errorf("refused calls stored rows: %d", len(f.costTxns))
 	}
 }

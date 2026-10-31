@@ -232,7 +232,7 @@ type mark struct {
 
 // reservation is the part of a receipt held for the issues that mark it.
 type reservation struct {
-	qty, value, unit decimal.Decimal
+	qty, value, receiptQty, receiptValue decimal.Decimal
 }
 
 // planMarks reserves, in settlement order, each marked issue's quantity on its
@@ -269,12 +269,11 @@ func (e *engine) carve(t Txn) (decimal.Decimal, decimal.Decimal) {
 	if !rq.IsPositive() {
 		return t.Qty, t.Value
 	}
-	unit := t.Value.Div(t.Qty)
 	rv := t.Value
 	if !rq.Equal(t.Qty) {
-		rv = e.round(rq.Mul(unit))
+		rv = e.round(rq.Mul(t.Value).Div(t.Qty))
 	}
-	e.reserved[t.ID] = &reservation{qty: rq, value: rv, unit: unit}
+	e.reserved[t.ID] = &reservation{qty: rq, value: rv, receiptQty: t.Qty, receiptValue: t.Value}
 	for _, issue := range e.waiting[t.ID] {
 		e.takeReserved(issue, e.marks[issue.ID])
 	}
@@ -305,7 +304,7 @@ func (e *engine) takeReserved(issue Txn, m mark) {
 	r := e.reserved[m.receiptID]
 	value := r.value
 	if !m.qty.Equal(r.qty) {
-		value = e.round(m.qty.Mul(r.unit))
+		value = e.round(m.qty.Mul(r.receiptValue).Div(r.receiptQty))
 	}
 	r.qty, r.value = r.qty.Sub(m.qty), r.value.Sub(value)
 	e.settle(issue, m.receiptID, "", m.qty, value)
@@ -351,13 +350,12 @@ func (e *engine) absorb(receiptID, pool string, qty, value decimal.Decimal) (dec
 	if len(e.backlog) == 0 || !qty.IsPositive() {
 		return qty, value
 	}
-	unit := value.Div(qty)
 	for len(e.backlog) > 0 && qty.IsPositive() {
 		s := e.backlog[0]
 		take := decimal.Min(s.qty, qty)
 		v := value
 		if !take.Equal(qty) {
-			v = e.round(take.Mul(unit))
+			v = e.round(take.Mul(value).Div(qty))
 		}
 		e.settle(s.issue, receiptID, pool, take, v)
 		s.qty, qty, value = s.qty.Sub(take), qty.Sub(take), value.Sub(v)
@@ -385,7 +383,6 @@ type layer struct {
 	txn   Txn
 	qty   decimal.Decimal
 	value decimal.Decimal
-	unit  decimal.Decimal
 }
 
 // layered settles FIFO, LIFO_DATE and LIFO over receipt layers in one pass.
@@ -397,7 +394,7 @@ func (e *engine) layered(seq []Txn) {
 	var all, open []*layer
 	stockQty, stockVal := decimal.Zero, decimal.Zero
 	push := func(t Txn) {
-		l := &layer{txn: t, unit: t.Value.Div(t.Qty)}
+		l := &layer{txn: t}
 		all = append(all, l)
 		l.qty, l.value = e.carve(t)
 		l.qty, l.value = e.absorb(t.ID, "", l.qty, l.value)
@@ -438,7 +435,7 @@ func (e *engine) layered(seq []Txn) {
 			take := decimal.Min(need, l.qty)
 			value := l.value
 			if !take.Equal(l.qty) {
-				value = e.round(take.Mul(l.unit))
+				value = e.round(take.Mul(l.txn.Value).Div(l.txn.Qty))
 			}
 			l.qty, l.value = l.qty.Sub(take), l.value.Sub(value)
 			stockQty, stockVal = stockQty.Sub(take), stockVal.Sub(value)
@@ -494,7 +491,7 @@ func (e *engine) running(seq []Txn) {
 			case fixed:
 				value = e.round(take.Mul(e.opt.Standard))
 			default:
-				value = e.round(take.Mul(onVal.Div(onQty)))
+				value = e.round(take.Mul(onVal).Div(onQty))
 			}
 			onQty, onVal = onQty.Sub(take), onVal.Sub(value)
 			e.settle(t, "", pool, take, value)
@@ -538,7 +535,7 @@ func (e *engine) periodic(seq []Txn) {
 		if take.IsPositive() {
 			value := availVal
 			if !take.Equal(availQty) {
-				value = e.round(take.Mul(availVal.Div(availQty)))
+				value = e.round(take.Mul(availVal).Div(availQty))
 			}
 			availQty, availVal = availQty.Sub(take), availVal.Sub(value)
 			e.settle(t, "", "AVG:"+curKey, take, value)

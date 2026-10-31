@@ -178,6 +178,148 @@
   },
   {
    "id": "SEQ-003",
+   "note": "6 units for 1.07, issue 3: exactly 0.535 rounds half-even up to 0.54 for every method but STANDARD (std 0.50: 1.50)",
+   "standardUnitCost": "0.50",
+   "transactions": [
+    {
+     "id": "R1",
+     "kind": "R",
+     "qty": "6",
+     "value": "1.07",
+     "date": "2026-03-01"
+    },
+    {
+     "id": "I1",
+     "kind": "I",
+     "qty": "3",
+     "date": "2026-03-02"
+    }
+   ],
+   "expected": {
+    "FIFO": {
+     "issues": {
+      "I1": "0.54"
+     },
+     "remainingQty": "3",
+     "remainingValue": "0.53"
+    },
+    "LIFO": {
+     "issues": {
+      "I1": "0.54"
+     },
+     "remainingQty": "3",
+     "remainingValue": "0.53"
+    },
+    "LIFO_DATE": {
+     "issues": {
+      "I1": "0.54"
+     },
+     "remainingQty": "3",
+     "remainingValue": "0.53"
+    },
+    "WEIGHTED_AVG_PERIODIC": {
+     "issues": {
+      "I1": "0.54"
+     },
+     "remainingQty": "3",
+     "remainingValue": "0.53"
+    },
+    "WEIGHTED_AVG_RUNNING": {
+     "issues": {
+      "I1": "0.54"
+     },
+     "remainingQty": "3",
+     "remainingValue": "0.53"
+    },
+    "MOVING_AVG": {
+     "issues": {
+      "I1": "0.54"
+     },
+     "remainingQty": "3",
+     "remainingValue": "0.53"
+    },
+    "STANDARD": {
+     "issues": {
+      "I1": "1.50"
+     },
+     "remainingQty": "3",
+     "remainingValue": "1.50"
+    }
+   }
+  },
+  {
+   "id": "SEQ-004",
+   "note": "6 units for 1.05, issue 3: exactly 0.525 rounds half-even down to 0.52 for every method but STANDARD (std 0.50: 1.50)",
+   "standardUnitCost": "0.50",
+   "transactions": [
+    {
+     "id": "R1",
+     "kind": "R",
+     "qty": "6",
+     "value": "1.05",
+     "date": "2026-03-01"
+    },
+    {
+     "id": "I1",
+     "kind": "I",
+     "qty": "3",
+     "date": "2026-03-02"
+    }
+   ],
+   "expected": {
+    "FIFO": {
+     "issues": {
+      "I1": "0.52"
+     },
+     "remainingQty": "3",
+     "remainingValue": "0.53"
+    },
+    "LIFO": {
+     "issues": {
+      "I1": "0.52"
+     },
+     "remainingQty": "3",
+     "remainingValue": "0.53"
+    },
+    "LIFO_DATE": {
+     "issues": {
+      "I1": "0.52"
+     },
+     "remainingQty": "3",
+     "remainingValue": "0.53"
+    },
+    "WEIGHTED_AVG_PERIODIC": {
+     "issues": {
+      "I1": "0.52"
+     },
+     "remainingQty": "3",
+     "remainingValue": "0.53"
+    },
+    "WEIGHTED_AVG_RUNNING": {
+     "issues": {
+      "I1": "0.52"
+     },
+     "remainingQty": "3",
+     "remainingValue": "0.53"
+    },
+    "MOVING_AVG": {
+     "issues": {
+      "I1": "0.52"
+     },
+     "remainingQty": "3",
+     "remainingValue": "0.53"
+    },
+    "STANDARD": {
+     "issues": {
+      "I1": "1.50"
+     },
+     "remainingQty": "3",
+     "remainingValue": "1.50"
+    }
+   }
+  },
+  {
+   "id": "SEQ-005",
    "standardUnitCost": "23.54",
    "transactions": [
     {
@@ -288,7 +430,7 @@
    }
   },
   {
-   "id": "SEQ-004",
+   "id": "SEQ-006",
    "standardUnitCost": "9.13",
    "transactions": [
     {
@@ -398,7 +540,7 @@
    }
   },
   {
-   "id": "SEQ-005",
+   "id": "SEQ-007",
    "standardUnitCost": "17.28",
    "transactions": [
     {
@@ -550,7 +692,7 @@
    }
   },
   {
-   "id": "SEQ-006",
+   "id": "SEQ-008",
    "standardUnitCost": "5.48",
    "transactions": [
     {
@@ -655,7 +797,7 @@
    }
   },
   {
-   "id": "SEQ-007",
+   "id": "SEQ-009",
    "standardUnitCost": "19.85",
    "transactions": [
     {
@@ -765,7 +907,144 @@
    }
   },
   {
-   "id": "SEQ-008",
+   "id": "SEQ-010",
+   "standardUnitCost": "10.68",
+   "transactions": [
+    {
+     "id": "T00",
+     "kind": "R",
+     "qty": "109",
+     "value": "1891.25",
+     "date": "2026-01-21"
+    },
+    {
+     "id": "T01",
+     "kind": "R",
+     "qty": "27",
+     "value": "1824.08",
+     "date": "2026-01-23"
+    },
+    {
+     "id": "T02",
+     "kind": "R",
+     "qty": "109",
+     "value": "6532.10",
+     "date": "2026-02-12"
+    },
+    {
+     "id": "T03",
+     "kind": "R",
+     "qty": "84",
+     "value": "1979.64",
+     "date": "2026-02-27"
+    },
+    {
+     "id": "T04",
+     "kind": "I",
+     "qty": "288",
+     "date": "2026-03-12"
+    },
+    {
+     "id": "T05",
+     "kind": "R",
+     "qty": "1",
+     "value": "75.42",
+     "date": "2026-03-25"
+    },
+    {
+     "id": "T06",
+     "kind": "I",
+     "qty": "21",
+     "date": "2026-04-13"
+    },
+    {
+     "id": "T07",
+     "kind": "I",
+     "qty": "10",
+     "date": "2026-04-21"
+    },
+    {
+     "id": "T08",
+     "kind": "I",
+     "qty": "6",
+     "date": "2026-05-06"
+    }
+   ],
+   "expected": {
+    "FIFO": {
+     "issues": {
+      "T04": "11260.82",
+      "T06": "494.91",
+      "T07": "235.67",
+      "T08": "141.40"
+     },
+     "remainingQty": "5",
+     "remainingValue": "169.69"
+    },
+    "LIFO": {
+     "issues": {
+      "T04": "11573.75",
+      "T06": "364.37",
+      "T07": "173.51",
+      "T08": "104.11"
+     },
+     "remainingQty": "5",
+     "remainingValue": "86.75"
+    },
+    "LIFO_DATE": {
+     "issues": {
+      "T04": "11515.68",
+      "T06": "422.44",
+      "T07": "173.51",
+      "T08": "104.11"
+     },
+     "remainingQty": "5",
+     "remainingValue": "86.75"
+    },
+    "WEIGHTED_AVG_PERIODIC": {
+     "issues": {
+      "T04": "10736.72",
+      "T06": "782.88",
+      "T07": "372.80",
+      "T08": "223.69"
+     },
+     "remainingQty": "5",
+     "remainingValue": "186.40"
+    },
+    "WEIGHTED_AVG_RUNNING": {
+     "issues": {
+      "T04": "10703.33",
+      "T06": "799.58",
+      "T07": "380.75",
+      "T08": "228.45"
+     },
+     "remainingQty": "5",
+     "remainingValue": "190.38"
+    },
+    "MOVING_AVG": {
+     "issues": {
+      "T04": "10703.33",
+      "T06": "799.58",
+      "T07": "380.75",
+      "T08": "228.45"
+     },
+     "remainingQty": "5",
+     "remainingValue": "190.38"
+    },
+    "STANDARD": {
+     "issues": {
+      "T04": "3075.84",
+      "T06": "224.28",
+      "T07": "106.80",
+      "T08": "64.08"
+     },
+     "remainingQty": "5",
+     "remainingValue": "53.40"
+    }
+   }
+  },
+  {
+   "id": "SEQ-011",
    "standardUnitCost": "12.78",
    "transactions": [
     {
@@ -889,7 +1168,7 @@
    }
   },
   {
-   "id": "SEQ-009",
+   "id": "SEQ-012",
    "standardUnitCost": "20.64",
    "transactions": [
     {
@@ -999,7 +1278,7 @@
    }
   },
   {
-   "id": "SEQ-010",
+   "id": "SEQ-013",
    "standardUnitCost": "13.00",
    "transactions": [
     {
@@ -1129,7 +1408,7 @@
    }
   },
   {
-   "id": "SEQ-011",
+   "id": "SEQ-014",
    "standardUnitCost": "19.59",
    "transactions": [
     {
@@ -1227,7 +1506,131 @@
    }
   },
   {
-   "id": "SEQ-012",
+   "id": "SEQ-015",
+   "standardUnitCost": "11.25",
+   "transactions": [
+    {
+     "id": "T00",
+     "kind": "R",
+     "qty": "37",
+     "value": "2678.28",
+     "date": "2026-01-18"
+    },
+    {
+     "id": "T01",
+     "kind": "R",
+     "qty": "32",
+     "value": "995.64",
+     "date": "2026-01-22"
+    },
+    {
+     "id": "T02",
+     "kind": "R",
+     "qty": "38",
+     "value": "976.01",
+     "date": "2026-02-10"
+    },
+    {
+     "id": "T03",
+     "kind": "I",
+     "qty": "19",
+     "date": "2026-02-21"
+    },
+    {
+     "id": "T04",
+     "kind": "I",
+     "qty": "17",
+     "date": "2026-03-03"
+    },
+    {
+     "id": "T05",
+     "kind": "R",
+     "qty": "77",
+     "value": "6437.54",
+     "date": "2026-03-20"
+    },
+    {
+     "id": "T06",
+     "kind": "R",
+     "qty": "36",
+     "value": "2499.57",
+     "date": "2026-03-22"
+    },
+    {
+     "id": "T07",
+     "kind": "I",
+     "qty": "155",
+     "date": "2026-03-25"
+    }
+   ],
+   "expected": {
+    "FIFO": {
+     "issues": {
+      "T03": "1375.33",
+      "T04": "1230.56",
+      "T07": "8967.61"
+     },
+     "remainingQty": "29",
+     "remainingValue": "2013.54"
+    },
+    "LIFO": {
+     "issues": {
+      "T03": "488.00",
+      "T04": "1180.35",
+      "T07": "9819.50"
+     },
+     "remainingQty": "29",
+     "remainingValue": "2099.19"
+    },
+    "LIFO_DATE": {
+     "issues": {
+      "T03": "488.00",
+      "T04": "436.64",
+      "T07": "10563.21"
+     },
+     "remainingQty": "29",
+     "remainingValue": "2099.19"
+    },
+    "WEIGHTED_AVG_PERIODIC": {
+     "issues": {
+      "T03": "825.69",
+      "T04": "1079.32",
+      "T07": "9840.84"
+     },
+     "remainingQty": "29",
+     "remainingValue": "1841.19"
+    },
+    "WEIGHTED_AVG_RUNNING": {
+     "issues": {
+      "T03": "825.69",
+      "T04": "738.77",
+      "T07": "10127.72"
+     },
+     "remainingQty": "29",
+     "remainingValue": "1894.86"
+    },
+    "MOVING_AVG": {
+     "issues": {
+      "T03": "825.69",
+      "T04": "738.77",
+      "T07": "10127.72"
+     },
+     "remainingQty": "29",
+     "remainingValue": "1894.86"
+    },
+    "STANDARD": {
+     "issues": {
+      "T03": "213.75",
+      "T04": "191.25",
+      "T07": "1743.75"
+     },
+     "remainingQty": "29",
+     "remainingValue": "326.25"
+    }
+   }
+  },
+  {
+   "id": "SEQ-016",
    "standardUnitCost": "22.14",
    "transactions": [
     {
@@ -1403,7 +1806,7 @@
    }
   },
   {
-   "id": "SEQ-013",
+   "id": "SEQ-017",
    "standardUnitCost": "8.22",
    "transactions": [
     {
@@ -1527,7 +1930,7 @@
    }
   },
   {
-   "id": "SEQ-014",
+   "id": "SEQ-018",
    "standardUnitCost": "6.06",
    "transactions": [
     {
@@ -1669,7 +2072,7 @@
    }
   },
   {
-   "id": "SEQ-015",
+   "id": "SEQ-019",
    "standardUnitCost": "16.32",
    "transactions": [
     {
@@ -1800,7 +2203,7 @@
    }
   },
   {
-   "id": "SEQ-016",
+   "id": "SEQ-020",
    "standardUnitCost": "6.44",
    "transactions": [
     {
@@ -1897,7 +2300,7 @@
    }
   },
   {
-   "id": "SEQ-017",
+   "id": "SEQ-021",
    "standardUnitCost": "5.24",
    "transactions": [
     {
@@ -2013,7 +2416,7 @@
    }
   },
   {
-   "id": "SEQ-018",
+   "id": "SEQ-022",
    "standardUnitCost": "23.46",
    "transactions": [
     {
@@ -2110,7 +2513,7 @@
    }
   },
   {
-   "id": "SEQ-019",
+   "id": "SEQ-023",
    "standardUnitCost": "14.34",
    "transactions": [
     {
@@ -2248,7 +2651,7 @@
    }
   },
   {
-   "id": "SEQ-020",
+   "id": "SEQ-024",
    "standardUnitCost": "9.17",
    "transactions": [
     {
@@ -2384,7 +2787,125 @@
    }
   },
   {
-   "id": "SEQ-021",
+   "id": "SEQ-025",
+   "standardUnitCost": "24.06",
+   "transactions": [
+    {
+     "id": "T00",
+     "kind": "R",
+     "qty": "68",
+     "value": "394.13",
+     "date": "2026-01-14"
+    },
+    {
+     "id": "T01",
+     "kind": "R",
+     "qty": "83",
+     "value": "7677.22",
+     "date": "2026-01-25"
+    },
+    {
+     "id": "T02",
+     "kind": "R",
+     "qty": "30",
+     "value": "2079.63",
+     "date": "2026-02-05"
+    },
+    {
+     "id": "T03",
+     "kind": "I",
+     "qty": "139",
+     "date": "2026-02-14"
+    },
+    {
+     "id": "T04",
+     "kind": "I",
+     "qty": "34",
+     "date": "2026-03-06"
+    },
+    {
+     "id": "T05",
+     "kind": "R",
+     "qty": "44",
+     "value": "3078.96",
+     "date": "2026-03-14"
+    },
+    {
+     "id": "T06",
+     "kind": "R",
+     "qty": "12",
+     "value": "790.66",
+     "date": "2026-03-26"
+    },
+    {
+     "id": "T07",
+     "kind": "R",
+     "qty": "10",
+     "value": "257.22",
+     "date": "2026-04-01"
+    }
+   ],
+   "expected": {
+    "FIFO": {
+     "issues": {
+      "T03": "6961.39",
+      "T04": "2635.02"
+     },
+     "remainingQty": "74",
+     "remainingValue": "4681.41"
+    },
+    "LIFO": {
+     "issues": {
+      "T03": "9907.55",
+      "T04": "2330.14"
+     },
+     "remainingQty": "74",
+     "remainingValue": "2040.13"
+    },
+    "LIFO_DATE": {
+     "issues": {
+      "T03": "9907.55",
+      "T04": "197.06"
+     },
+     "remainingQty": "74",
+     "remainingValue": "4173.21"
+    },
+    "WEIGHTED_AVG_PERIODIC": {
+     "issues": {
+      "T03": "7795.50",
+      "T04": "2159.73"
+     },
+     "remainingQty": "74",
+     "remainingValue": "4322.59"
+    },
+    "WEIGHTED_AVG_RUNNING": {
+     "issues": {
+      "T03": "7795.50",
+      "T04": "1906.82"
+     },
+     "remainingQty": "74",
+     "remainingValue": "4575.50"
+    },
+    "MOVING_AVG": {
+     "issues": {
+      "T03": "7795.50",
+      "T04": "1906.82"
+     },
+     "remainingQty": "74",
+     "remainingValue": "4575.50"
+    },
+    "STANDARD": {
+     "issues": {
+      "T03": "3344.34",
+      "T04": "818.04"
+     },
+     "remainingQty": "74",
+     "remainingValue": "1780.44"
+    }
+   }
+  },
+  {
+   "id": "SEQ-026",
    "standardUnitCost": "7.79",
    "transactions": [
     {
@@ -2514,7 +3035,7 @@
    }
   },
   {
-   "id": "SEQ-022",
+   "id": "SEQ-027",
    "standardUnitCost": "22.82",
    "transactions": [
     {
@@ -2638,7 +3159,7 @@
    }
   },
   {
-   "id": "SEQ-023",
+   "id": "SEQ-028",
    "standardUnitCost": "22.17",
    "transactions": [
     {
@@ -2742,7 +3263,7 @@
    }
   },
   {
-   "id": "SEQ-024",
+   "id": "SEQ-029",
    "standardUnitCost": "12.86",
    "transactions": [
     {
@@ -2880,7 +3401,7 @@
    }
   },
   {
-   "id": "SEQ-025",
+   "id": "SEQ-030",
    "standardUnitCost": "7.59",
    "transactions": [
     {
@@ -3022,7 +3543,7 @@
    }
   },
   {
-   "id": "SEQ-026",
+   "id": "SEQ-031",
    "standardUnitCost": "17.21",
    "transactions": [
     {
@@ -3178,7 +3699,7 @@
    }
   },
   {
-   "id": "SEQ-027",
+   "id": "SEQ-032",
    "standardUnitCost": "9.95",
    "transactions": [
     {
@@ -3328,7 +3849,7 @@
    }
   },
   {
-   "id": "SEQ-028",
+   "id": "SEQ-033",
    "standardUnitCost": "8.40",
    "transactions": [
     {
@@ -3454,7 +3975,7 @@
    }
   },
   {
-   "id": "SEQ-029",
+   "id": "SEQ-034",
    "standardUnitCost": "7.67",
    "transactions": [
     {
@@ -3551,7 +4072,7 @@
    }
   },
   {
-   "id": "SEQ-030",
+   "id": "SEQ-035",
    "standardUnitCost": "24.02",
    "transactions": [
     {
@@ -3715,7 +4236,7 @@
    }
   },
   {
-   "id": "SEQ-031",
+   "id": "SEQ-036",
    "standardUnitCost": "20.35",
    "transactions": [
     {
@@ -3846,7 +4367,7 @@
    }
   },
   {
-   "id": "SEQ-032",
+   "id": "SEQ-037",
    "standardUnitCost": "9.94",
    "transactions": [
     {
@@ -4003,7 +4524,7 @@
    }
   },
   {
-   "id": "SEQ-033",
+   "id": "SEQ-038",
    "standardUnitCost": "22.45",
    "transactions": [
     {
@@ -4153,7 +4674,7 @@
    }
   },
   {
-   "id": "SEQ-034",
+   "id": "SEQ-039",
    "standardUnitCost": "21.13",
    "transactions": [
     {
@@ -4256,7 +4777,7 @@
    }
   },
   {
-   "id": "SEQ-035",
+   "id": "SEQ-040",
    "standardUnitCost": "16.77",
    "transactions": [
     {
@@ -4386,7 +4907,7 @@
    }
   },
   {
-   "id": "SEQ-036",
+   "id": "SEQ-041",
    "standardUnitCost": "6.88",
    "transactions": [
     {
@@ -4490,7 +5011,7 @@
    }
   },
   {
-   "id": "SEQ-037",
+   "id": "SEQ-042",
    "standardUnitCost": "24.31",
    "transactions": [
     {
@@ -4614,7 +5135,7 @@
    }
   },
   {
-   "id": "SEQ-038",
+   "id": "SEQ-043",
    "standardUnitCost": "11.26",
    "transactions": [
     {
@@ -4778,7 +5299,7 @@
    }
   },
   {
-   "id": "SEQ-039",
+   "id": "SEQ-044",
    "standardUnitCost": "16.27",
    "transactions": [
     {
@@ -4928,7 +5449,7 @@
    }
   },
   {
-   "id": "SEQ-040",
+   "id": "SEQ-045",
    "standardUnitCost": "23.82",
    "transactions": [
     {
@@ -5046,7 +5567,150 @@
    }
   },
   {
-   "id": "SEQ-041",
+   "id": "SEQ-046",
+   "standardUnitCost": "19.16",
+   "transactions": [
+    {
+     "id": "T00",
+     "kind": "R",
+     "qty": "55",
+     "value": "1373.63",
+     "date": "2026-01-07"
+    },
+    {
+     "id": "T01",
+     "kind": "I",
+     "qty": "39",
+     "date": "2026-01-25"
+    },
+    {
+     "id": "T02",
+     "kind": "I",
+     "qty": "5",
+     "date": "2026-02-13"
+    },
+    {
+     "id": "T03",
+     "kind": "R",
+     "qty": "81",
+     "value": "4859.93",
+     "date": "2026-03-03"
+    },
+    {
+     "id": "T04",
+     "kind": "I",
+     "qty": "90",
+     "date": "2026-03-04"
+    },
+    {
+     "id": "T05",
+     "kind": "R",
+     "qty": "58",
+     "value": "1341.91",
+     "date": "2026-03-10"
+    },
+    {
+     "id": "T06",
+     "kind": "I",
+     "qty": "42",
+     "date": "2026-03-29"
+    },
+    {
+     "id": "T07",
+     "kind": "R",
+     "qty": "94",
+     "value": "8578.46",
+     "date": "2026-04-08"
+    },
+    {
+     "id": "T08",
+     "kind": "I",
+     "qty": "42",
+     "date": "2026-04-19"
+    }
+   ],
+   "expected": {
+    "FIFO": {
+     "issues": {
+      "T01": "974.03",
+      "T02": "124.88",
+      "T04": "5014.65",
+      "T06": "1045.46",
+      "T08": "2606.70"
+     },
+     "remainingQty": "70",
+     "remainingValue": "6388.21"
+    },
+    "LIFO": {
+     "issues": {
+      "T01": "974.03",
+      "T02": "124.88",
+      "T04": "3261.88",
+      "T06": "2519.96",
+      "T08": "3832.93"
+     },
+     "remainingQty": "70",
+     "remainingValue": "5440.25"
+    },
+    "LIFO_DATE": {
+     "issues": {
+      "T01": "974.03",
+      "T02": "124.88",
+      "T04": "5084.71",
+      "T06": "971.73",
+      "T08": "3832.93"
+     },
+     "remainingQty": "70",
+     "remainingValue": "5165.65"
+    },
+    "WEIGHTED_AVG_PERIODIC": {
+     "issues": {
+      "T01": "974.03",
+      "T02": "124.88",
+      "T04": "3885.94",
+      "T06": "1813.43",
+      "T08": "3508.37"
+     },
+     "remainingQty": "70",
+     "remainingValue": "5847.28"
+    },
+    "WEIGHTED_AVG_RUNNING": {
+     "issues": {
+      "T01": "974.03",
+      "T02": "124.88",
+      "T04": "5023.03",
+      "T06": "1017.47",
+      "T08": "3380.44"
+     },
+     "remainingQty": "70",
+     "remainingValue": "5634.08"
+    },
+    "MOVING_AVG": {
+     "issues": {
+      "T01": "974.03",
+      "T02": "124.88",
+      "T04": "5023.03",
+      "T06": "1017.47",
+      "T08": "3380.44"
+     },
+     "remainingQty": "70",
+     "remainingValue": "5634.08"
+    },
+    "STANDARD": {
+     "issues": {
+      "T01": "747.24",
+      "T02": "95.80",
+      "T04": "1724.40",
+      "T06": "804.72",
+      "T08": "804.72"
+     },
+     "remainingQty": "70",
+     "remainingValue": "1341.20"
+    }
+   }
+  },
+  {
+   "id": "SEQ-047",
    "standardUnitCost": "18.87",
    "transactions": [
     {
@@ -5156,7 +5820,7 @@
    }
   },
   {
-   "id": "SEQ-042",
+   "id": "SEQ-048",
    "standardUnitCost": "6.83",
    "transactions": [
     {
@@ -5247,7 +5911,7 @@
    }
   },
   {
-   "id": "SEQ-043",
+   "id": "SEQ-049",
    "standardUnitCost": "22.62",
    "transactions": [
     {
@@ -5365,7 +6029,7 @@
    }
   },
   {
-   "id": "SEQ-044",
+   "id": "SEQ-050",
    "standardUnitCost": "14.76",
    "transactions": [
     {
@@ -5495,7 +6159,7 @@
    }
   },
   {
-   "id": "SEQ-045",
+   "id": "SEQ-051",
    "standardUnitCost": "22.31",
    "transactions": [
     {
@@ -5645,7 +6309,7 @@
    }
   },
   {
-   "id": "SEQ-046",
+   "id": "SEQ-052",
    "standardUnitCost": "17.17",
    "transactions": [
     {
@@ -5763,7 +6427,7 @@
    }
   },
   {
-   "id": "SEQ-047",
+   "id": "SEQ-053",
    "standardUnitCost": "19.71",
    "transactions": [
     {
@@ -5932,7 +6596,7 @@
    }
   },
   {
-   "id": "SEQ-048",
+   "id": "SEQ-054",
    "standardUnitCost": "15.48",
    "transactions": [
     {
@@ -6090,7 +6754,7 @@
    }
   },
   {
-   "id": "SEQ-049",
+   "id": "SEQ-055",
    "standardUnitCost": "14.07",
    "transactions": [
     {
@@ -6220,7 +6884,7 @@
    }
   },
   {
-   "id": "SEQ-050",
+   "id": "SEQ-056",
    "standardUnitCost": "14.94",
    "transactions": [
     {
@@ -6349,7 +7013,7 @@
    }
   },
   {
-   "id": "SEQ-051",
+   "id": "SEQ-057",
    "standardUnitCost": "10.86",
    "transactions": [
     {
@@ -6486,7 +7150,7 @@
    }
   },
   {
-   "id": "SEQ-052",
+   "id": "SEQ-058",
    "standardUnitCost": "23.87",
    "transactions": [
     {
@@ -6643,7 +7307,7 @@
    }
   },
   {
-   "id": "SEQ-053",
+   "id": "SEQ-059",
    "standardUnitCost": "13.78",
    "transactions": [
     {
@@ -6813,7 +7477,7 @@
    }
   },
   {
-   "id": "SEQ-054",
+   "id": "SEQ-060",
    "standardUnitCost": "5.71",
    "transactions": [
     {
@@ -6958,7 +7622,7 @@
    }
   },
   {
-   "id": "SEQ-055",
+   "id": "SEQ-061",
    "standardUnitCost": "8.93",
    "transactions": [
     {
@@ -7081,7 +7745,7 @@
    }
   },
   {
-   "id": "SEQ-056",
+   "id": "SEQ-062",
    "standardUnitCost": "15.24",
    "transactions": [
     {
@@ -7219,7 +7883,7 @@
    }
   },
   {
-   "id": "SEQ-057",
+   "id": "SEQ-063",
    "standardUnitCost": "6.12",
    "transactions": [
     {
@@ -7322,7 +7986,7 @@
    }
   },
   {
-   "id": "SEQ-058",
+   "id": "SEQ-064",
    "standardUnitCost": "18.34",
    "transactions": [
     {
@@ -7453,7 +8117,7 @@
    }
   },
   {
-   "id": "SEQ-059",
+   "id": "SEQ-065",
    "standardUnitCost": "10.83",
    "transactions": [
     {
@@ -7603,7 +8267,157 @@
    }
   },
   {
-   "id": "SEQ-060",
+   "id": "SEQ-066",
+   "standardUnitCost": "16.16",
+   "transactions": [
+    {
+     "id": "T00",
+     "kind": "R",
+     "qty": "77",
+     "value": "2718.70",
+     "date": "2026-01-15"
+    },
+    {
+     "id": "T01",
+     "kind": "R",
+     "qty": "51",
+     "value": "1335.43",
+     "date": "2026-02-02"
+    },
+    {
+     "id": "T02",
+     "kind": "I",
+     "qty": "103",
+     "date": "2026-02-10"
+    },
+    {
+     "id": "T03",
+     "kind": "R",
+     "qty": "37",
+     "value": "2929.50",
+     "date": "2026-02-22"
+    },
+    {
+     "id": "T04",
+     "kind": "I",
+     "qty": "55",
+     "date": "2026-03-05"
+    },
+    {
+     "id": "T05",
+     "kind": "R",
+     "qty": "66",
+     "value": "309.57",
+     "date": "2026-03-24"
+    },
+    {
+     "id": "T06",
+     "kind": "R",
+     "qty": "87",
+     "value": "292.36",
+     "date": "2026-04-02"
+    },
+    {
+     "id": "T07",
+     "kind": "I",
+     "qty": "13",
+     "date": "2026-04-04"
+    },
+    {
+     "id": "T08",
+     "kind": "I",
+     "qty": "120",
+     "date": "2026-04-17"
+    },
+    {
+     "id": "T09",
+     "kind": "I",
+     "qty": "24",
+     "date": "2026-04-28"
+    }
+   ],
+   "expected": {
+    "FIFO": {
+     "issues": {
+      "T02": "3399.51",
+      "T04": "3029.89",
+      "T07": "582.37",
+      "T08": "483.06",
+      "T09": "80.65"
+     },
+     "remainingQty": "3",
+     "remainingValue": "10.08"
+    },
+    "LIFO": {
+     "issues": {
+      "T02": "4794.55",
+      "T04": "257.98",
+      "T07": "43.69",
+      "T08": "1536.03",
+      "T09": "847.39"
+     },
+     "remainingQty": "3",
+     "remainingValue": "105.92"
+    },
+    "LIFO_DATE": {
+     "issues": {
+      "T02": "3171.44",
+      "T04": "3565.04",
+      "T07": "43.69",
+      "T08": "464.43",
+      "T09": "235.04"
+     },
+     "remainingQty": "3",
+     "remainingValue": "105.92"
+    },
+    "WEIGHTED_AVG_PERIODIC": {
+     "issues": {
+      "T02": "4359.48",
+      "T04": "1260.58",
+      "T07": "159.70",
+      "T08": "1474.12",
+      "T09": "294.83"
+     },
+     "remainingQty": "3",
+     "remainingValue": "36.85"
+    },
+    "WEIGHTED_AVG_RUNNING": {
+     "issues": {
+      "T02": "3262.31",
+      "T04": "3301.17",
+      "T07": "83.04",
+      "T08": "766.56",
+      "T09": "153.32"
+     },
+     "remainingQty": "3",
+     "remainingValue": "19.16"
+    },
+    "MOVING_AVG": {
+     "issues": {
+      "T02": "3262.31",
+      "T04": "3301.17",
+      "T07": "83.04",
+      "T08": "766.56",
+      "T09": "153.32"
+     },
+     "remainingQty": "3",
+     "remainingValue": "19.16"
+    },
+    "STANDARD": {
+     "issues": {
+      "T02": "1664.48",
+      "T04": "888.80",
+      "T07": "210.08",
+      "T08": "1939.20",
+      "T09": "387.84"
+     },
+     "remainingQty": "3",
+     "remainingValue": "48.48"
+    }
+   }
+  },
+  {
+   "id": "SEQ-067",
    "standardUnitCost": "8.38",
    "transactions": [
     {
@@ -7741,7 +8555,7 @@
    }
   },
   {
-   "id": "SEQ-061",
+   "id": "SEQ-068",
    "standardUnitCost": "20.42",
    "transactions": [
     {
@@ -7885,7 +8699,7 @@
    }
   },
   {
-   "id": "SEQ-062",
+   "id": "SEQ-069",
    "standardUnitCost": "15.71",
    "transactions": [
     {
@@ -8036,7 +8850,7 @@
    }
   },
   {
-   "id": "SEQ-063",
+   "id": "SEQ-070",
    "standardUnitCost": "17.13",
    "transactions": [
     {
@@ -8139,7 +8953,7 @@
    }
   },
   {
-   "id": "SEQ-064",
+   "id": "SEQ-071",
    "standardUnitCost": "12.53",
    "transactions": [
     {
@@ -8255,7 +9069,7 @@
    }
   },
   {
-   "id": "SEQ-065",
+   "id": "SEQ-072",
    "standardUnitCost": "15.65",
    "transactions": [
     {
@@ -8352,7 +9166,7 @@
    }
   },
   {
-   "id": "SEQ-066",
+   "id": "SEQ-073",
    "standardUnitCost": "13.91",
    "transactions": [
     {
@@ -8488,7 +9302,7 @@
    }
   },
   {
-   "id": "SEQ-067",
+   "id": "SEQ-074",
    "standardUnitCost": "24.22",
    "transactions": [
     {
@@ -8625,7 +9439,7 @@
    }
   },
   {
-   "id": "SEQ-068",
+   "id": "SEQ-075",
    "standardUnitCost": "15.62",
    "transactions": [
     {
@@ -8782,7 +9596,7 @@
    }
   },
   {
-   "id": "SEQ-069",
+   "id": "SEQ-076",
    "standardUnitCost": "21.09",
    "transactions": [
     {
@@ -8879,7 +9693,7 @@
    }
   },
   {
-   "id": "SEQ-070",
+   "id": "SEQ-077",
    "standardUnitCost": "12.73",
    "transactions": [
     {
@@ -8982,7 +9796,7 @@
    }
   },
   {
-   "id": "SEQ-071",
+   "id": "SEQ-078",
    "standardUnitCost": "24.46",
    "transactions": [
     {
@@ -9079,7 +9893,7 @@
    }
   },
   {
-   "id": "SEQ-072",
+   "id": "SEQ-079",
    "standardUnitCost": "17.71",
    "transactions": [
     {
@@ -9183,7 +9997,7 @@
    }
   },
   {
-   "id": "SEQ-073",
+   "id": "SEQ-080",
    "standardUnitCost": "9.96",
    "transactions": [
     {
@@ -9301,7 +10115,7 @@
    }
   },
   {
-   "id": "SEQ-074",
+   "id": "SEQ-081",
    "standardUnitCost": "5.39",
    "transactions": [
     {
@@ -9405,7 +10219,7 @@
    }
   },
   {
-   "id": "SEQ-075",
+   "id": "SEQ-082",
    "standardUnitCost": "24.20",
    "transactions": [
     {
@@ -9562,7 +10376,7 @@
    }
   },
   {
-   "id": "SEQ-076",
+   "id": "SEQ-083",
    "standardUnitCost": "20.31",
    "transactions": [
     {
@@ -9673,7 +10487,7 @@
    }
   },
   {
-   "id": "SEQ-077",
+   "id": "SEQ-084",
    "standardUnitCost": "22.92",
    "transactions": [
     {
@@ -9797,7 +10611,7 @@
    }
   },
   {
-   "id": "SEQ-078",
+   "id": "SEQ-085",
    "standardUnitCost": "20.76",
    "transactions": [
     {
@@ -9934,7 +10748,7 @@
    }
   },
   {
-   "id": "SEQ-079",
+   "id": "SEQ-086",
    "standardUnitCost": "11.65",
    "transactions": [
     {
@@ -10083,7 +10897,7 @@
    }
   },
   {
-   "id": "SEQ-080",
+   "id": "SEQ-087",
    "standardUnitCost": "7.23",
    "transactions": [
     {
@@ -10233,7 +11047,7 @@
    }
   },
   {
-   "id": "SEQ-081",
+   "id": "SEQ-088",
    "standardUnitCost": "17.90",
    "transactions": [
     {
@@ -10384,7 +11198,7 @@
    }
   },
   {
-   "id": "SEQ-082",
+   "id": "SEQ-089",
    "standardUnitCost": "13.82",
    "transactions": [
     {
@@ -10520,7 +11334,7 @@
    }
   },
   {
-   "id": "SEQ-083",
+   "id": "SEQ-090",
    "standardUnitCost": "17.69",
    "transactions": [
     {
@@ -10670,7 +11484,7 @@
    }
   },
   {
-   "id": "SEQ-084",
+   "id": "SEQ-091",
    "standardUnitCost": "14.37",
    "transactions": [
     {
@@ -10820,7 +11634,7 @@
    }
   },
   {
-   "id": "SEQ-085",
+   "id": "SEQ-092",
    "standardUnitCost": "19.79",
    "transactions": [
     {
@@ -10950,7 +11764,7 @@
    }
   },
   {
-   "id": "SEQ-086",
+   "id": "SEQ-093",
    "standardUnitCost": "18.73",
    "transactions": [
     {
@@ -11047,7 +11861,7 @@
    }
   },
   {
-   "id": "SEQ-087",
+   "id": "SEQ-094",
    "standardUnitCost": "12.08",
    "transactions": [
     {
@@ -11151,7 +11965,7 @@
    }
   },
   {
-   "id": "SEQ-088",
+   "id": "SEQ-095",
    "standardUnitCost": "7.37",
    "transactions": [
     {
@@ -11308,7 +12122,7 @@
    }
   },
   {
-   "id": "SEQ-089",
+   "id": "SEQ-096",
    "standardUnitCost": "14.59",
    "transactions": [
     {
@@ -11459,7 +12273,104 @@
    }
   },
   {
-   "id": "SEQ-090",
+   "id": "SEQ-097",
+   "standardUnitCost": "20.67",
+   "transactions": [
+    {
+     "id": "T00",
+     "kind": "R",
+     "qty": "53",
+     "value": "4851.76",
+     "date": "2026-01-16"
+    },
+    {
+     "id": "T01",
+     "kind": "I",
+     "qty": "45",
+     "date": "2026-01-22"
+    },
+    {
+     "id": "T02",
+     "kind": "R",
+     "qty": "88",
+     "value": "5336.22",
+     "date": "2026-01-29"
+    },
+    {
+     "id": "T03",
+     "kind": "I",
+     "qty": "22",
+     "date": "2026-02-13"
+    },
+    {
+     "id": "T04",
+     "kind": "R",
+     "qty": "52",
+     "value": "4670.21",
+     "date": "2026-03-01"
+    }
+   ],
+   "expected": {
+    "FIFO": {
+     "issues": {
+      "T01": "4119.42",
+      "T03": "1581.28"
+     },
+     "remainingQty": "126",
+     "remainingValue": "9157.49"
+    },
+    "LIFO": {
+     "issues": {
+      "T01": "2728.75",
+      "T03": "1334.06"
+     },
+     "remainingQty": "126",
+     "remainingValue": "10795.38"
+    },
+    "LIFO_DATE": {
+     "issues": {
+      "T01": "4119.42",
+      "T03": "1334.06"
+     },
+     "remainingQty": "126",
+     "remainingValue": "9404.71"
+    },
+    "WEIGHTED_AVG_PERIODIC": {
+     "issues": {
+      "T01": "3251.48",
+      "T03": "1589.61"
+     },
+     "remainingQty": "126",
+     "remainingValue": "10017.10"
+    },
+    "WEIGHTED_AVG_RUNNING": {
+     "issues": {
+      "T01": "4119.42",
+      "T03": "1390.71"
+     },
+     "remainingQty": "126",
+     "remainingValue": "9348.06"
+    },
+    "MOVING_AVG": {
+     "issues": {
+      "T01": "4119.42",
+      "T03": "1390.71"
+     },
+     "remainingQty": "126",
+     "remainingValue": "9348.06"
+    },
+    "STANDARD": {
+     "issues": {
+      "T01": "930.15",
+      "T03": "454.74"
+     },
+     "remainingQty": "126",
+     "remainingValue": "2604.42"
+    }
+   }
+  },
+  {
+   "id": "SEQ-098",
    "standardUnitCost": "21.84",
    "transactions": [
     {
@@ -11550,7 +12461,7 @@
    }
   },
   {
-   "id": "SEQ-091",
+   "id": "SEQ-099",
    "standardUnitCost": "19.04",
    "transactions": [
     {
@@ -11726,7 +12637,7 @@
    }
   },
   {
-   "id": "SEQ-092",
+   "id": "SEQ-100",
    "standardUnitCost": "10.62",
    "transactions": [
     {
@@ -11823,7 +12734,7 @@
    }
   },
   {
-   "id": "SEQ-093",
+   "id": "SEQ-101",
    "standardUnitCost": "11.66",
    "transactions": [
     {
@@ -11960,7 +12871,7 @@
    }
   },
   {
-   "id": "SEQ-094",
+   "id": "SEQ-102",
    "standardUnitCost": "6.31",
    "transactions": [
     {
@@ -12090,7 +13001,7 @@
    }
   },
   {
-   "id": "SEQ-095",
+   "id": "SEQ-103",
    "standardUnitCost": "23.76",
    "transactions": [
     {
@@ -12221,7 +13132,7 @@
    }
   },
   {
-   "id": "SEQ-096",
+   "id": "SEQ-104",
    "standardUnitCost": "7.44",
    "transactions": [
     {
@@ -12342,580 +13253,6 @@
      },
      "remainingQty": "206",
      "remainingValue": "1532.64"
-    }
-   }
-  },
-  {
-   "id": "SEQ-097",
-   "standardUnitCost": "20.01",
-   "transactions": [
-    {
-     "id": "T00",
-     "kind": "R",
-     "qty": "66",
-     "value": "3785.36",
-     "date": "2026-01-07"
-    },
-    {
-     "id": "T01",
-     "kind": "R",
-     "qty": "18",
-     "value": "1335.21",
-     "date": "2026-01-14"
-    },
-    {
-     "id": "T02",
-     "kind": "R",
-     "qty": "48",
-     "value": "746.20",
-     "date": "2026-01-22"
-    },
-    {
-     "id": "T03",
-     "kind": "R",
-     "qty": "68",
-     "value": "879.68",
-     "date": "2026-02-02"
-    },
-    {
-     "id": "T04",
-     "kind": "R",
-     "qty": "55",
-     "value": "3174.69",
-     "date": "2026-02-14"
-    },
-    {
-     "id": "T05",
-     "kind": "I",
-     "qty": "228",
-     "date": "2026-02-26"
-    },
-    {
-     "id": "T06",
-     "kind": "R",
-     "qty": "102",
-     "value": "3807.57",
-     "date": "2026-03-18"
-    },
-    {
-     "id": "T07",
-     "kind": "I",
-     "qty": "37",
-     "date": "2026-03-27"
-    },
-    {
-     "id": "T08",
-     "kind": "R",
-     "qty": "39",
-     "value": "923.91",
-     "date": "2026-04-03"
-    },
-    {
-     "id": "T09",
-     "kind": "R",
-     "qty": "81",
-     "value": "444.14",
-     "date": "2026-04-15"
-    },
-    {
-     "id": "T10",
-     "kind": "I",
-     "qty": "106",
-     "date": "2026-05-04"
-    },
-    {
-     "id": "T11",
-     "kind": "I",
-     "qty": "70",
-     "date": "2026-05-17"
-    }
-   ],
-   "expected": {
-    "FIFO": {
-     "issues": {
-      "T05": "8362.66",
-      "T07": "1931.77",
-      "T10": "3765.94",
-      "T11": "838.99"
-     },
-     "remainingQty": "36",
-     "remainingValue": "197.40"
-    },
-    "LIFO": {
-     "issues": {
-      "T05": "8372.58",
-      "T07": "1381.18",
-      "T10": "1036.39",
-      "T11": "2422.09"
-     },
-     "remainingQty": "36",
-     "remainingValue": "1884.52"
-    },
-    "LIFO_DATE": {
-     "issues": {
-      "T05": "8372.58",
-      "T07": "1381.18",
-      "T10": "1036.39",
-      "T11": "2422.09"
-     },
-     "remainingQty": "36",
-     "remainingValue": "1884.52"
-    },
-    "WEIGHTED_AVG_PERIODIC": {
-     "issues": {
-      "T05": "8870.67",
-      "T07": "1393.39",
-      "T10": "2416.35",
-      "T11": "1595.70"
-     },
-     "remainingQty": "36",
-     "remainingValue": "820.65"
-    },
-    "WEIGHTED_AVG_RUNNING": {
-     "issues": {
-      "T05": "8870.67",
-      "T07": "1393.39",
-      "T10": "2416.35",
-      "T11": "1595.70"
-     },
-     "remainingQty": "36",
-     "remainingValue": "820.65"
-    },
-    "MOVING_AVG": {
-     "issues": {
-      "T05": "8870.67",
-      "T07": "1393.39",
-      "T10": "2416.35",
-      "T11": "1595.70"
-     },
-     "remainingQty": "36",
-     "remainingValue": "820.65"
-    },
-    "STANDARD": {
-     "issues": {
-      "T05": "4562.28",
-      "T07": "740.37",
-      "T10": "2121.06",
-      "T11": "1400.70"
-     },
-     "remainingQty": "36",
-     "remainingValue": "720.36"
-    }
-   }
-  },
-  {
-   "id": "SEQ-098",
-   "standardUnitCost": "13.36",
-   "transactions": [
-    {
-     "id": "T00",
-     "kind": "R",
-     "qty": "48",
-     "value": "2427.19",
-     "date": "2026-01-07"
-    },
-    {
-     "id": "T01",
-     "kind": "I",
-     "qty": "18",
-     "date": "2026-01-20"
-    },
-    {
-     "id": "T02",
-     "kind": "R",
-     "qty": "25",
-     "value": "2240.05",
-     "date": "2026-02-04"
-    },
-    {
-     "id": "T03",
-     "kind": "I",
-     "qty": "2",
-     "date": "2026-02-18"
-    },
-    {
-     "id": "T04",
-     "kind": "I",
-     "qty": "28",
-     "date": "2026-03-10"
-    },
-    {
-     "id": "T05",
-     "kind": "R",
-     "qty": "34",
-     "value": "497.80",
-     "date": "2026-03-22"
-    },
-    {
-     "id": "T06",
-     "kind": "R",
-     "qty": "33",
-     "value": "315.22",
-     "date": "2026-04-04"
-    }
-   ],
-   "expected": {
-    "FIFO": {
-     "issues": {
-      "T01": "910.20",
-      "T03": "101.13",
-      "T04": "1415.86"
-     },
-     "remainingQty": "92",
-     "remainingValue": "3053.07"
-    },
-    "LIFO": {
-     "issues": {
-      "T01": "910.20",
-      "T03": "179.20",
-      "T04": "409.95"
-     },
-     "remainingQty": "92",
-     "remainingValue": "3980.91"
-    },
-    "LIFO_DATE": {
-     "issues": {
-      "T01": "910.20",
-      "T03": "179.20",
-      "T04": "2313.68"
-     },
-     "remainingQty": "92",
-     "remainingValue": "2077.18"
-    },
-    "WEIGHTED_AVG_PERIODIC": {
-     "issues": {
-      "T01": "910.20",
-      "T03": "136.62",
-      "T04": "1325.40"
-     },
-     "remainingQty": "92",
-     "remainingValue": "3108.04"
-    },
-    "WEIGHTED_AVG_RUNNING": {
-     "issues": {
-      "T01": "910.20",
-      "T03": "136.62",
-      "T04": "1912.67"
-     },
-     "remainingQty": "92",
-     "remainingValue": "2520.77"
-    },
-    "MOVING_AVG": {
-     "issues": {
-      "T01": "910.20",
-      "T03": "136.62",
-      "T04": "1912.67"
-     },
-     "remainingQty": "92",
-     "remainingValue": "2520.77"
-    },
-    "STANDARD": {
-     "issues": {
-      "T01": "240.48",
-      "T03": "26.72",
-      "T04": "374.08"
-     },
-     "remainingQty": "92",
-     "remainingValue": "1229.12"
-    }
-   }
-  },
-  {
-   "id": "SEQ-099",
-   "standardUnitCost": "19.79",
-   "transactions": [
-    {
-     "id": "T00",
-     "kind": "R",
-     "qty": "26",
-     "value": "528.17",
-     "date": "2026-01-18"
-    },
-    {
-     "id": "T01",
-     "kind": "I",
-     "qty": "24",
-     "date": "2026-02-02"
-    },
-    {
-     "id": "T02",
-     "kind": "R",
-     "qty": "34",
-     "value": "1143.28",
-     "date": "2026-02-13"
-    },
-    {
-     "id": "T03",
-     "kind": "I",
-     "qty": "16",
-     "date": "2026-02-23"
-    },
-    {
-     "id": "T04",
-     "kind": "I",
-     "qty": "16",
-     "date": "2026-02-24"
-    },
-    {
-     "id": "T05",
-     "kind": "R",
-     "qty": "79",
-     "value": "4394.72",
-     "date": "2026-03-03"
-    },
-    {
-     "id": "T06",
-     "kind": "I",
-     "qty": "22",
-     "date": "2026-03-23"
-    },
-    {
-     "id": "T07",
-     "kind": "I",
-     "qty": "12",
-     "date": "2026-03-31"
-    },
-    {
-     "id": "T08",
-     "kind": "I",
-     "qty": "30",
-     "date": "2026-04-06"
-    }
-   ],
-   "expected": {
-    "FIFO": {
-     "issues": {
-      "T01": "487.54",
-      "T03": "511.39",
-      "T04": "538.01",
-      "T06": "1135.84",
-      "T07": "667.55",
-      "T08": "1668.88"
-     },
-     "remainingQty": "19",
-     "remainingValue": "1056.96"
-    },
-    "LIFO": {
-     "issues": {
-      "T01": "807.02",
-      "T03": "458.15",
-      "T04": "325.03",
-      "T06": "1223.85",
-      "T07": "667.55",
-      "T08": "1668.88"
-     },
-     "remainingQty": "19",
-     "remainingValue": "915.69"
-    },
-    "LIFO_DATE": {
-     "issues": {
-      "T01": "487.54",
-      "T03": "538.01",
-      "T04": "538.01",
-      "T06": "1223.85",
-      "T07": "667.55",
-      "T08": "1668.88"
-     },
-     "remainingQty": "19",
-     "remainingValue": "942.33"
-    },
-    "WEIGHTED_AVG_PERIODIC": {
-     "issues": {
-      "T01": "668.58",
-      "T03": "445.72",
-      "T04": "445.72",
-      "T06": "1194.40",
-      "T07": "651.49",
-      "T08": "1628.73"
-     },
-     "remainingQty": "19",
-     "remainingValue": "1031.53"
-    },
-    "WEIGHTED_AVG_RUNNING": {
-     "issues": {
-      "T01": "487.54",
-      "T03": "526.18",
-      "T04": "526.18",
-      "T06": "1199.73",
-      "T07": "654.40",
-      "T08": "1636.00"
-     },
-     "remainingQty": "19",
-     "remainingValue": "1036.14"
-    },
-    "MOVING_AVG": {
-     "issues": {
-      "T01": "487.54",
-      "T03": "526.18",
-      "T04": "526.18",
-      "T06": "1199.73",
-      "T07": "654.40",
-      "T08": "1636.00"
-     },
-     "remainingQty": "19",
-     "remainingValue": "1036.14"
-    },
-    "STANDARD": {
-     "issues": {
-      "T01": "474.96",
-      "T03": "316.64",
-      "T04": "316.64",
-      "T06": "435.38",
-      "T07": "237.48",
-      "T08": "593.70"
-     },
-     "remainingQty": "19",
-     "remainingValue": "376.01"
-    }
-   }
-  },
-  {
-   "id": "SEQ-100",
-   "standardUnitCost": "10.01",
-   "transactions": [
-    {
-     "id": "T00",
-     "kind": "R",
-     "qty": "1",
-     "value": "89.31",
-     "date": "2026-01-08"
-    },
-    {
-     "id": "T01",
-     "kind": "R",
-     "qty": "119",
-     "value": "8207.88",
-     "date": "2026-01-14"
-    },
-    {
-     "id": "T02",
-     "kind": "I",
-     "qty": "55",
-     "date": "2026-02-02"
-    },
-    {
-     "id": "T03",
-     "kind": "R",
-     "qty": "51",
-     "value": "2888.18",
-     "date": "2026-02-18"
-    },
-    {
-     "id": "T04",
-     "kind": "R",
-     "qty": "102",
-     "value": "583.50",
-     "date": "2026-02-21"
-    },
-    {
-     "id": "T05",
-     "kind": "I",
-     "qty": "129",
-     "date": "2026-02-22"
-    },
-    {
-     "id": "T06",
-     "kind": "I",
-     "qty": "15",
-     "date": "2026-03-05"
-    },
-    {
-     "id": "T07",
-     "kind": "R",
-     "qty": "16",
-     "value": "1295.10",
-     "date": "2026-03-17"
-    },
-    {
-     "id": "T08",
-     "kind": "I",
-     "qty": "79",
-     "date": "2026-04-06"
-    },
-    {
-     "id": "T09",
-     "kind": "I",
-     "qty": "7",
-     "date": "2026-04-14"
-    }
-   ],
-   "expected": {
-    "FIFO": {
-     "issues": {
-      "T02": "3813.89",
-      "T05": "7445.85",
-      "T06": "85.81",
-      "T08": "828.04",
-      "T09": "566.61"
-     },
-     "remainingQty": "4",
-     "remainingValue": "323.77"
-    },
-    "LIFO": {
-     "issues": {
-      "T02": "314.63",
-      "T05": "5295.24",
-      "T06": "1214.16",
-      "T08": "5460.89",
-      "T09": "482.82"
-     },
-     "remainingQty": "4",
-     "remainingValue": "296.23"
-    },
-    "LIFO_DATE": {
-     "issues": {
-      "T02": "3793.56",
-      "T05": "2112.54",
-      "T06": "849.46",
-      "T08": "5529.36",
-      "T09": "482.82"
-     },
-     "remainingQty": "4",
-     "remainingValue": "296.23"
-    },
-    "WEIGHTED_AVG_PERIODIC": {
-     "issues": {
-      "T02": "2371.02",
-      "T05": "5561.11",
-      "T06": "733.12",
-      "T08": "3861.10",
-      "T09": "342.12"
-     },
-     "remainingQty": "4",
-     "remainingValue": "195.50"
-    },
-    "WEIGHTED_AVG_RUNNING": {
-     "issues": {
-      "T02": "3802.88",
-      "T05": "4713.82",
-      "T06": "548.12",
-      "T08": "3510.36",
-      "T09": "311.05"
-     },
-     "remainingQty": "4",
-     "remainingValue": "177.74"
-    },
-    "MOVING_AVG": {
-     "issues": {
-      "T02": "3802.88",
-      "T05": "4713.82",
-      "T06": "548.12",
-      "T08": "3510.36",
-      "T09": "311.05"
-     },
-     "remainingQty": "4",
-     "remainingValue": "177.74"
-    },
-    "STANDARD": {
-     "issues": {
-      "T02": "550.55",
-      "T05": "1291.29",
-      "T06": "150.15",
-      "T08": "790.79",
-      "T09": "70.07"
-     },
-     "remainingQty": "4",
-     "remainingValue": "40.04"
     }
    }
   }
