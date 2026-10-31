@@ -426,16 +426,21 @@ func (v *ServiceVerifier) VerifyContext(ctx context.Context, token string) (Serv
 	return c, nil
 }
 
-// rememberShared reports false on a token id another replica already accepted.
-// A store outage is logged and leaves the per-process check as the only guard,
-// so an unreachable or unmigrated table never takes service-to-service calls down.
+// rememberShared reports false on a token id another replica already accepted,
+// and fails closed: a store error refuses the token (logged and counted), since
+// the store is the service's own database and a token that cannot be recorded
+// cannot be proven fresh.
 func (v *ServiceVerifier) rememberShared(ctx context.Context, c ServiceClaims) bool {
 	ctx, cancel := context.WithTimeout(ctx, sharedReplayTimeout)
 	defer cancel()
 	fresh, err := v.shared.Remember(ctx, c.Tid, c.Iss+":"+c.Jti, time.Unix(c.Exp, 0))
 	if err != nil {
-		slog.ErrorContext(ctx, "shared service token replay store unavailable; replay is checked per process only", "err", err, "service", c.Iss)
-		return true
+		replayStoreFailures.Add(1)
+		slog.ErrorContext(ctx, "shared service token replay store failed; token refused", "err", err, "service", c.Iss)
+		return false
+	}
+	if !fresh {
+		replaysRefused.Add(1)
 	}
 	return fresh
 }
@@ -474,11 +479,26 @@ var (
 
 // ShareReplayCache makes the process-wide verifier record accepted token ids in
 // the Postgres table service_token_replay (dbx.ServiceTokenReplayDDL) of pool.
-// It does nothing when no verifier is configured.
-func ShareReplayCache(pool *pgxpool.Pool) {
-	if v := currentServiceVerifier(); v != nil {
-		SetServiceVerifier(v.WithReplayStore(NewPostgresReplayStore(pool)))
+// It does nothing when no verifier is configured, and otherwise fails when pool
+// is nil or the table or its purge function is missing, so a service never
+// starts with service tokens enabled and no shared replay protection.
+func ShareReplayCache(ctx context.Context, pool *pgxpool.Pool) error {
+	v := currentServiceVerifier()
+	if v == nil {
+		return nil
 	}
+	if pool == nil {
+		return errors.New("service tokens are enabled but there is no database for the shared replay cache")
+	}
+	var present bool
+	if err := pool.QueryRow(ctx, `select to_regclass('service_token_replay') is not null and to_regprocedure('service_token_replay_purge()') is not null`).Scan(&present); err != nil {
+		return fmt.Errorf("check service_token_replay: %w", err)
+	}
+	if !present {
+		return errors.New("service tokens are enabled but table service_token_replay or function service_token_replay_purge() is missing; apply the service_token_replay migration first")
+	}
+	SetServiceVerifier(v.WithReplayStore(NewPostgresReplayStore(pool)))
+	return nil
 }
 
 // SetServiceVerifier replaces the verifier Middleware uses; nil makes every

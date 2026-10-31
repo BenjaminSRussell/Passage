@@ -1,11 +1,13 @@
 package tenant_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -46,14 +48,19 @@ func TestPostgresReplayStoreRefusesASecondSightPerTenantAndPurgesExpiredRows(t *
 		}
 	}
 
-	if fresh, err := first.Remember(ctx, tenantA, "receiving:expired", time.Now().Add(-time.Minute)); err != nil || !fresh {
-		t.Fatalf("expired row: %v %v", fresh, err)
+	for _, id := range []string{tenantA, tenantB} {
+		if fresh, err := first.Remember(ctx, id, "receiving:expired", time.Now().Add(-time.Minute)); err != nil || !fresh {
+			t.Fatalf("expired row: %v %v", fresh, err)
+		}
 	}
 	if fresh, err := another().Remember(ctx, tenantA, "receiving:jti-2", soon); err != nil || !fresh {
 		t.Fatalf("purging call: %v %v", fresh, err)
 	}
 	if fresh, err := another().Remember(ctx, tenantA, "receiving:expired", soon); err != nil || !fresh {
 		t.Fatalf("an expired id must have been purged by a later call: fresh %v err %v", fresh, err)
+	}
+	if fresh, err := another().Remember(ctx, tenantB, "receiving:expired", soon); err != nil || !fresh {
+		t.Fatalf("the purge must delete expired rows of every tenant: fresh %v err %v", fresh, err)
 	}
 	if fresh, err := another().Remember(ctx, tenantA, "receiving:jti-1", soon); err != nil || fresh {
 		t.Fatalf("a live id must survive the purge: fresh %v err %v", fresh, err)
@@ -93,24 +100,42 @@ func TestVerifierWithSharedStoreRefusesAReplayOnAnotherPod(t *testing.T) {
 	}
 }
 
-func TestVerifierKeepsServingWhenTheSharedStoreFailsButStillBlocksSamePodReplay(t *testing.T) {
+func TestVerifierFailsClosedWhenTheSharedStoreFailsAndCountsIt(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	signer, _ := tenant.NewServiceSigner("receiving", priv)
 	verifier := tenant.NewServiceVerifier("ledger", map[string]ed25519.PublicKey{"receiving": pub}).WithReplayStore(failingReplayStore{})
 	token, _ := signer.Mint("ledger", tenant.Principal{TenantID: validTenant, LegalEntityID: validLE, UserID: "u"}, "")
-	if _, err := verifier.Verify(token); err != nil {
-		t.Fatalf("a store outage must not reject valid tokens: %v", err)
-	}
+	var before, after bytes.Buffer
+	tenant.WriteReplayMetrics(&before)
 	if _, err := verifier.Verify(token); !errors.Is(err, tenant.ErrServiceToken) {
-		t.Fatalf("the per-process cache must still refuse a replay: %v", err)
+		t.Fatalf("a store failure must refuse the token: %v", err)
+	}
+	tenant.WriteReplayMetrics(&after)
+	if before.String() == after.String() || !strings.Contains(after.String(), "passage_service_token_replay_store_failures_total") {
+		t.Fatalf("the failure must be counted:\n%s", after.String())
 	}
 }
 
-func TestShareReplayCacheMakesTheMiddlewareRefuseAReplayAndIgnoresAnUnconfiguredVerifier(t *testing.T) {
+func TestShareReplayCacheFailsAtStartupWithoutPoolOrTableAndIgnoresAnUnconfiguredVerifier(t *testing.T) {
 	tenant.SetServiceVerifier(nil)
 	t.Cleanup(func() { tenant.SetServiceVerifier(nil) })
-	tenant.ShareReplayCache(nil)
+	if err := tenant.ShareReplayCache(context.Background(), nil); err != nil {
+		t.Fatalf("no verifier means nothing to share: %v", err)
+	}
+	pub, _, _ := ed25519.GenerateKey(nil)
+	tenant.SetServiceVerifier(tenant.NewServiceVerifier("ledger", map[string]ed25519.PublicKey{"receiving": pub}))
+	if err := tenant.ShareReplayCache(context.Background(), nil); err == nil {
+		t.Fatal("service tokens enabled without a pool must fail startup")
+	}
+	_, app := testkit.DBWithApp(t)
+	if err := tenant.ShareReplayCache(context.Background(), app); err == nil || !strings.Contains(err.Error(), "service_token_replay") {
+		t.Fatalf("a missing table must fail startup, got %v", err)
+	}
+}
 
+func TestShareReplayCacheMakesTheMiddlewareRefuseAReplay(t *testing.T) {
+	tenant.SetServiceVerifier(nil)
+	t.Cleanup(func() { tenant.SetServiceVerifier(nil) })
 	admin, app := testkit.DBWithApp(t)
 	if _, err := admin.Exec(context.Background(), dbx.ServiceTokenReplayDDL); err != nil {
 		t.Fatal(err)
@@ -118,7 +143,9 @@ func TestShareReplayCacheMakesTheMiddlewareRefuseAReplayAndIgnoresAnUnconfigured
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	signer, _ := tenant.NewServiceSigner("receiving", priv)
 	tenant.SetServiceVerifier(tenant.NewServiceVerifier("ledger", map[string]ed25519.PublicKey{"receiving": pub}))
-	tenant.ShareReplayCache(app)
+	if err := tenant.ShareReplayCache(context.Background(), app); err != nil {
+		t.Fatal(err)
+	}
 	token, _ := signer.Mint("ledger", tenant.Principal{TenantID: validTenant, LegalEntityID: validLE, UserID: "u"}, "")
 	handler := tenant.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
 	send := func() int {

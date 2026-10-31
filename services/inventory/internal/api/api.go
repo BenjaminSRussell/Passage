@@ -530,6 +530,7 @@ func (a *API) failed(w http.ResponseWriter, r *http.Request, op string, err erro
 // metrics serves the counters on the admin port.
 func (a *API) metrics(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+	tenant.WriteReplayMetrics(w)
 	fmt.Fprintf(w, "# HELP inventory_journals_posted_total Journals posted.\n# TYPE inventory_journals_posted_total counter\ninventory_journals_posted_total %d\n", a.posted.Load())
 	fmt.Fprintf(w, "# HELP inventory_onhand_queries_total On-hand inquiries answered.\n# TYPE inventory_onhand_queries_total counter\ninventory_onhand_queries_total %d\n", a.onhand.Load())
 	fmt.Fprintf(w, "# HELP inventory_requests_failed_total Requests answered with a failure.\n# TYPE inventory_requests_failed_total counter\ninventory_requests_failed_total %d\n", a.fail.Load())

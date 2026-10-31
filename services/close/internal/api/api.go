@@ -244,6 +244,7 @@ func validTenant(w http.ResponseWriter, r *http.Request) bool {
 func (a *API) Metrics() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		tenant.WriteReplayMetrics(w)
 		fmt.Fprintf(w, "# TYPE close_period_checks_total counter\nclose_period_checks_total %d\n", a.checks.Load())
 		fmt.Fprintf(w, "# TYPE close_period_rejections_total counter\nclose_period_rejections_total %d\n", a.rejections.Load())
 		fmt.Fprintf(w, "# TYPE close_period_check_failures_total counter\nclose_period_check_failures_total %d\n", a.failures.Load())

@@ -402,6 +402,14 @@ func (a *API) fillFromPurchaseOrder(ctx context.Context, req *evaluateRequest) (
 	if err != nil {
 		return nil, err
 	}
+	if req.LegalEntityID != "" {
+		named, _ := ids.Canonical(req.LegalEntityID)
+		owner, _ := ids.Canonical(po.LegalEntityID)
+		if named != owner {
+			fields["legalEntityId"] = "does not match the purchase order's legal entity"
+			return fields, nil
+		}
+	}
 	byNo := make(map[int]domain.PurchaseOrderLine, len(po.Lines))
 	for _, l := range po.Lines {
 		byNo[l.LineNo] = l

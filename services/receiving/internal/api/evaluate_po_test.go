@@ -318,6 +318,12 @@ func TestEvaluateSignsThePurchaseOrderReadWithTheNamedLegalEntity(t *testing.T) 
 	}
 
 	seen = nil
+	wrongOwner := strings.Replace(named, evalLE, otherLE, 1)
+	if rec := post(wrongOwner); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "purchase order's legal entity") {
+		t.Fatalf("an entity other than the purchase order's must be refused: %d %s", rec.Code, rec.Body)
+	}
+
+	seen = nil
 	if rec := post(poBody(`"poLineNo":1`)); rec.Code != http.StatusOK || seen.Get(tenant.HeaderServiceToken) != "" || seen.Get("X-Passage-User") != callerUser {
 		t.Fatalf("without a named entity a multi-entity user is forwarded: %d %v", rec.Code, seen)
 	}
