@@ -134,7 +134,7 @@ components:
     VendorBlocked:
       name: dev.passage.payables.vendor.blocked.v1
       summary: >-
-        A user blocked a vendor for payment (POST /v1/payables/vendors/{id}:block); the block spans the tenant. Re-blocking
+        A user blocked a vendor for payment in one legal entity (POST /v1/payables/vendors/{id}:block). Re-blocking
         replaces the reason and emits again.
       contentType: application/cloudevents+json
       payload:
@@ -200,12 +200,14 @@ components:
         legal_entity_id: { type: string, format: uuid }
         vendor_id: { type: string, format: uuid }
         payment_hold: { type: boolean, description: "the hold flag after this change" }
+        reason: { type: string, description: "why the item was held; held events only, absent when none was given" }
         actor: { type: string, description: "user who made the change" }
     VendorBlockData:
       type: object
-      required: [vendor_id, actor]
+      required: [vendor_id, legal_entity_id, actor]
       properties:
         vendor_id: { type: string, format: uuid }
+        legal_entity_id: { type: string, format: uuid }
         reason: { type: string, description: "present on blocked events only" }
         actor: { type: string, description: "user who made the change" }
     ProposalData:

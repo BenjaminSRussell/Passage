@@ -23,6 +23,7 @@ const (
 	dutyVendorBlock    = "vendor-block.manage"
 	pathVendors        = "/v1/payables/vendors"
 	maxBlockReasonSize = 500
+	codeItemClosed     = "AP-OPN-001"
 )
 
 type holdCounters struct {
@@ -53,6 +54,10 @@ func (a *API) identified(w http.ResponseWriter, r *http.Request, what string) (s
 	return caller.UserID, id, true
 }
 
+type holdRequest struct {
+	Reason string `json:"reason"`
+}
+
 func (a *API) setHold(held bool) http.HandlerFunc {
 	action, counter := "hold released", &a.proposals.holds.released
 	if held {
@@ -63,13 +68,28 @@ func (a *API) setHold(held bool) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		ctx := r.Context()
-		err := a.proposals.store.SetPaymentHold(ctx, id, held)
-		if errors.Is(err, store.ErrNotFound) {
-			a.problem(w, r, http.StatusNotFound, codeNotFound, "open item not found")
+		var req holdRequest
+		if r.ContentLength != 0 {
+			if err := httpx.Decode(r, &req); err != nil {
+				a.reject(w, r, err)
+				return
+			}
+		}
+		req.Reason = strings.TrimSpace(req.Reason)
+		if utf8.RuneCountInString(req.Reason) > maxBlockReasonSize {
+			a.invalid(w, r, map[string]string{"reason": "at most 500 characters"})
 			return
 		}
-		if err != nil {
+		ctx := r.Context()
+		changed, err := a.proposals.store.SetPaymentHold(ctx, id, held, req.Reason)
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			a.problem(w, r, http.StatusNotFound, codeNotFound, "open item not found")
+			return
+		case errors.Is(err, store.ErrItemClosed):
+			a.problem(w, r, http.StatusConflict, codeItemClosed, "a settled or reversed open item cannot be held or released")
+			return
+		case err != nil:
 			a.fault(w, r, "payment hold change failed", err)
 			return
 		}
@@ -78,20 +98,24 @@ func (a *API) setHold(held bool) http.HandlerFunc {
 			a.fault(w, r, "open item get failed", err)
 			return
 		}
-		counter.Add(1)
-		slog.Info("audit: open item "+action, "openItemId", id, "actor", user, "correlationId", middleware.GetReqID(ctx))
+		if changed {
+			counter.Add(1)
+			slog.Info("audit: open item "+action, "openItemId", id, "actor", user, "reason", req.Reason, "correlationId", middleware.GetReqID(ctx))
+		}
 		httpx.JSON(w, http.StatusOK, openItemBody{OpenItem: item})
 	}
 }
 
 type vendorBlockRequest struct {
-	Reason string `json:"reason"`
+	LegalEntityID string `json:"legalEntityId"`
+	Reason        string `json:"reason"`
 }
 
 type vendorBlockBody struct {
-	VendorID string `json:"vendorId"`
-	Blocked  bool   `json:"blocked"`
-	Reason   string `json:"reason,omitempty"`
+	VendorID      string `json:"vendorId"`
+	LegalEntityID string `json:"legalEntityId"`
+	Blocked       bool   `json:"blocked"`
+	Reason        string `json:"reason,omitempty"`
 }
 
 func (a *API) blockVendor(w http.ResponseWriter, r *http.Request) {
@@ -104,18 +128,22 @@ func (a *API) blockVendor(w http.ResponseWriter, r *http.Request) {
 		a.reject(w, r, err)
 		return
 	}
+	le, ok := a.resolveEntity(w, r, req.LegalEntityID)
+	if !ok {
+		return
+	}
 	req.Reason = strings.TrimSpace(req.Reason)
 	if req.Reason == "" || utf8.RuneCountInString(req.Reason) > maxBlockReasonSize {
 		a.invalid(w, r, map[string]string{"reason": "is required, at most 500 characters"})
 		return
 	}
-	if err := a.proposals.store.BlockVendor(r.Context(), id, req.Reason); err != nil {
+	if err := a.proposals.store.BlockVendor(r.Context(), le, id, req.Reason); err != nil {
 		a.fault(w, r, "vendor block failed", err)
 		return
 	}
 	a.proposals.holds.blocked.Add(1)
-	slog.Info("audit: vendor blocked for payment", "vendorId", id, "actor", user, "reason", req.Reason, "correlationId", middleware.GetReqID(r.Context()))
-	httpx.JSON(w, http.StatusOK, vendorBlockBody{VendorID: id, Blocked: true, Reason: req.Reason})
+	slog.Info("audit: vendor blocked for payment", "vendorId", id, "legalEntityId", le, "actor", user, "reason", req.Reason, "correlationId", middleware.GetReqID(r.Context()))
+	httpx.JSON(w, http.StatusOK, vendorBlockBody{VendorID: id, LegalEntityID: le, Blocked: true, Reason: req.Reason})
 }
 
 func (a *API) unblockVendor(w http.ResponseWriter, r *http.Request) {
@@ -123,9 +151,20 @@ func (a *API) unblockVendor(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	err := a.proposals.store.UnblockVendor(r.Context(), id)
+	var req vendorBlockRequest
+	if r.ContentLength != 0 {
+		if err := httpx.Decode(r, &req); err != nil {
+			a.reject(w, r, err)
+			return
+		}
+	}
+	le, ok := a.resolveEntity(w, r, req.LegalEntityID)
+	if !ok {
+		return
+	}
+	err := a.proposals.store.UnblockVendor(r.Context(), le, id)
 	if errors.Is(err, store.ErrNotFound) {
-		a.problem(w, r, http.StatusNotFound, codeNotFound, "vendor is not blocked")
+		a.problem(w, r, http.StatusNotFound, codeNotFound, "vendor is not blocked in this legal entity")
 		return
 	}
 	if err != nil {
@@ -133,6 +172,6 @@ func (a *API) unblockVendor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.proposals.holds.unblocked.Add(1)
-	slog.Info("audit: vendor unblocked for payment", "vendorId", id, "actor", user, "correlationId", middleware.GetReqID(r.Context()))
-	httpx.JSON(w, http.StatusOK, vendorBlockBody{VendorID: id})
+	slog.Info("audit: vendor unblocked for payment", "vendorId", id, "legalEntityId", le, "actor", user, "correlationId", middleware.GetReqID(r.Context()))
+	httpx.JSON(w, http.StatusOK, vendorBlockBody{VendorID: id, LegalEntityID: le})
 }

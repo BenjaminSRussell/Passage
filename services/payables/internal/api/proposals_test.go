@@ -70,6 +70,7 @@ type fakeStore struct {
 	propLimit   int
 
 	holdErr    error
+	holdNoop   bool
 	holdCalls  []string
 	blockErr   error
 	blockCalls []string
@@ -161,18 +162,18 @@ func (f *fakeStore) ListProposals(_ context.Context, filter store.ProposalFilter
 	return f.summaries[:min(limit, len(f.summaries))], f.listPropErr
 }
 
-func (f *fakeStore) SetPaymentHold(_ context.Context, id string, held bool) error {
-	f.holdCalls = append(f.holdCalls, fmt.Sprintf("%s:%t", id, held))
-	return f.holdErr
+func (f *fakeStore) SetPaymentHold(_ context.Context, id string, held bool, reason string) (bool, error) {
+	f.holdCalls = append(f.holdCalls, fmt.Sprintf("%s:%t:%s", id, held, reason))
+	return !f.holdNoop, f.holdErr
 }
 
-func (f *fakeStore) BlockVendor(_ context.Context, vendorID, reason string) error {
-	f.blockCalls = append(f.blockCalls, "block:"+vendorID+":"+reason)
+func (f *fakeStore) BlockVendor(_ context.Context, le, vendorID, reason string) error {
+	f.blockCalls = append(f.blockCalls, "block:"+le+":"+vendorID+":"+reason)
 	return f.blockErr
 }
 
-func (f *fakeStore) UnblockVendor(_ context.Context, vendorID string) error {
-	f.blockCalls = append(f.blockCalls, "unblock:"+vendorID)
+func (f *fakeStore) UnblockVendor(_ context.Context, le, vendorID string) error {
+	f.blockCalls = append(f.blockCalls, "unblock:"+le+":"+vendorID)
 	return f.blockErr
 }
 

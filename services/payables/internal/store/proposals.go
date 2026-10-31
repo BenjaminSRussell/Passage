@@ -102,7 +102,7 @@ func (s *Postgres) Candidates(ctx context.Context, legalEntityID, dueBy string) 
 		rows, err := tx.Query(ctx, `select i.id::text, i.vendor_id::text, i.currency, i.version, i.open_amount::text, i.discount_amount::text, i.discount_date, i.status = 'PARTIALLY_SETTLED'
 			from ap_open_item i
 			where i.legal_entity_id = $1::uuid and i.due_date <= $2::date and i.status in ('OPEN', 'PARTIALLY_SETTLED') and not i.payment_hold
-			and not exists (select 1 from ap_vendor_block b where b.vendor_id = i.vendor_id)
+			and not exists (select 1 from ap_vendor_block b where b.vendor_id = i.vendor_id and b.legal_entity_id = i.legal_entity_id)
 			and not exists (select 1 from ap_payment_proposal_line l where l.open_item_id = i.id and l.reserved)
 			order by i.due_date, i.id limit $3`, legalEntityID, dueBy, MaxProposalItems+1)
 		if err != nil {
@@ -220,7 +220,7 @@ func insertGroups(ctx context.Context, tx pgx.Tx, tenantID, proposalID string, i
 			batch.Queue(`insert into ap_payment_proposal_line (tenant_id, open_item_id, proposal_id, group_id, legal_entity_id, item_version, open_amount, discount_amount, pay_amount, rate, valued_amount)
 				select i.tenant_id, i.id, $2::uuid, $3::uuid, i.legal_entity_id, i.version, $5::numeric, $6::numeric, $7::numeric, $8::numeric, $9::numeric from ap_open_item i
 				where i.id = $1::uuid and i.version = $4 and i.open_amount = $5::numeric and not i.payment_hold
-				and not exists (select 1 from ap_vendor_block b where b.vendor_id = i.vendor_id)`,
+				and not exists (select 1 from ap_vendor_block b where b.vendor_id = i.vendor_id and b.legal_entity_id = i.legal_entity_id)`,
 				l.OpenItemID, proposalID, g.ID, l.OpenItemVersion, l.OpenAmount.String(), l.Discount.String(), l.Pay.String(), l.Rate.String(), l.Valued.String())
 		}
 	}
@@ -333,7 +333,7 @@ func parseDecimals(dst []*decimal.Decimal, raw ...string) error {
 func verifyLines(ctx context.Context, tx pgx.Tx, proposalID string) error {
 	rows, err := tx.Query(ctx, `select l.open_item_id::text,
 			(i.version <> l.item_version or i.open_amount <> l.open_amount or i.payment_hold or i.status not in ('OPEN', 'PARTIALLY_SETTLED')
-			 or exists (select 1 from ap_vendor_block b where b.vendor_id = i.vendor_id))
+			 or exists (select 1 from ap_vendor_block b where b.vendor_id = i.vendor_id and b.legal_entity_id = i.legal_entity_id))
 		from ap_payment_proposal_line l join ap_open_item i on i.tenant_id = l.tenant_id and i.id = l.open_item_id
 		where l.proposal_id = $1::uuid order by l.open_item_id for update of i`, proposalID)
 	if err != nil {

@@ -11,6 +11,8 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
+	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/domain"
 )
 
@@ -106,27 +108,36 @@ func TestHoldAndVendorBlock_EmitAuditedEventsOnlyOnChange(t *testing.T) {
 	ctx := ctxAs(1, leA, "hana")
 	item := seed(t, s, ctx, leA, vendor1, 1, "2027-03-01", "USD", "100.00")
 
-	for _, held := range []bool{true, true, false, false} {
-		if err := s.SetPaymentHold(ctx, item.ID, held); err != nil {
-			t.Fatal(err)
+	for i, held := range []bool{true, true, false, false} {
+		changed, err := s.SetPaymentHold(ctx, item.ID, held, "bank query")
+		if err != nil || changed != (i%2 == 0) {
+			t.Fatalf("hold %d: changed=%v err=%v", i, changed, err)
+		}
+		if i == 0 {
+			var reason, by string
+			if err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+				return tx.QueryRow(ctx, `select payment_hold_reason, payment_held_by from ap_open_item where id = $1::uuid`, item.ID).Scan(&reason, &by)
+			}); err != nil || reason != "bank query" || by != "hana" {
+				t.Fatalf("stored reason=%q by=%q err=%v", reason, by, err)
+			}
 		}
 	}
 	held, released := outboxPayloads(t, s, ctx, OpenItemHeldType), outboxPayloads(t, s, ctx, OpenItemReleasedType)
-	if len(held) != 1 || len(released) != 1 || held[0]["actor"] != "hana" || held[0]["payment_hold"] != true || released[0]["payment_hold"] != false || held[0]["vendor_id"] != vendor1 {
+	if len(held) != 1 || len(released) != 1 || held[0]["actor"] != "hana" || held[0]["payment_hold"] != true || held[0]["reason"] != "bank query" || released[0]["payment_hold"] != false || held[0]["vendor_id"] != vendor1 {
 		t.Fatalf("held=%v released=%v", held, released)
 	}
 
-	if err := s.BlockVendor(ctx, vendor1, "sanctions review"); err != nil {
+	if err := s.BlockVendor(ctx, leA, vendor1, "sanctions review"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.UnblockVendor(ctx, vendor1); err != nil {
+	if err := s.UnblockVendor(ctx, leA, vendor1); err != nil {
 		t.Fatal(err)
 	}
 	blocked, unblocked := outboxPayloads(t, s, ctx, VendorBlockedType), outboxPayloads(t, s, ctx, VendorUnblockedType)
-	if len(blocked) != 1 || blocked[0]["reason"] != "sanctions review" || blocked[0]["actor"] != "hana" || len(unblocked) != 1 || unblocked[0]["actor"] != "hana" {
+	if len(blocked) != 1 || blocked[0]["reason"] != "sanctions review" || blocked[0]["legal_entity_id"] != leA || blocked[0]["actor"] != "hana" || len(unblocked) != 1 || unblocked[0]["actor"] != "hana" {
 		t.Fatalf("blocked=%v unblocked=%v", blocked, unblocked)
 	}
-	if err := s.UnblockVendor(ctx, vendor1); !errors.Is(err, ErrNotFound) {
+	if err := s.UnblockVendor(ctx, leA, vendor1); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("second unblock = %v, want ErrNotFound", err)
 	}
 	if n := len(outboxPayloads(t, s, ctx, VendorUnblockedType)); n != 1 {
@@ -223,5 +234,46 @@ func TestMigration0009_DropsTheUnusedVendorGroupIndex(t *testing.T) {
 	err := s.pool.QueryRow(context.Background(), `select count(*) from pg_indexes where indexname = 'ap_open_item_entity_vendor_group'`).Scan(&n)
 	if err != nil || n != 0 {
 		t.Fatalf("index count = %d err=%v", n, err)
+	}
+}
+
+func TestSetPaymentHold_RefusesSettledItems(t *testing.T) {
+	s := setup(t)
+	ctx := ctxAs(1, leA, "hana")
+	item := seed(t, s, ctx, leA, vendor1, 1, "2027-03-01", "USD", "100.00")
+	if _, err := s.Settle(ctx, item.ID, item.Version, item.OpenAmount, "s1"); err != nil {
+		t.Fatal(err)
+	}
+	for _, held := range []bool{true, false} {
+		if _, err := s.SetPaymentHold(ctx, item.ID, held, ""); !errors.Is(err, ErrItemClosed) {
+			t.Fatalf("hold=%v on a settled item = %v, want ErrItemClosed", held, err)
+		}
+	}
+}
+
+func TestVendorBlock_IsPerLegalEntity(t *testing.T) {
+	s := setup(t)
+	ctx := ctxAs(1, "", "bo")
+	ctx = tenant.With(ctx, tenant.Principal{TenantID: testkit.TenantID(1), UserID: "bo", Duties: testkit.ScopeDuties("")})
+	seed(t, s, ctx, leA, vendor1, 1, "2027-03-01", "USD", "100.00")
+	seed(t, s, ctx, leB, vendor1, 2, "2027-03-01", "USD", "50.00")
+	if err := s.BlockVendor(ctx, leA, vendor1, "fraud"); err != nil {
+		t.Fatal(err)
+	}
+	if got := candidateIDs(t, s, ctx, leA, "2027-03-31"); len(got) != 0 {
+		t.Fatalf("blocked entity still selects %v", got)
+	}
+	if got := candidateIDs(t, s, ctx, leB, "2027-03-31"); len(got) != 1 {
+		t.Fatalf("a block in A must not exclude B's items, got %v", got)
+	}
+	if err := s.UnblockVendor(ctx, leB, vendor1); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unblock in B = %v, want ErrNotFound", err)
+	}
+	scopedB := ctxAs(1, leB, "eve")
+	if err := s.BlockVendor(scopedB, leA, vendor1, "x"); err == nil {
+		t.Fatal("a caller scoped to B wrote a block row for A")
+	}
+	if err := s.UnblockVendor(scopedB, leA, vendor1); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a caller scoped to B removed A's block: %v", err)
 	}
 }

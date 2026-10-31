@@ -261,7 +261,7 @@ func TestPaymentRun_VerifyRunLinesCatchesAHoldBeforeTheFileIsBuilt(t *testing.T)
 	if _, err := s.VerifyRunLines(erin, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetPaymentHold(erin, proposal.Groups[0].Lines[0].OpenItemID, true); err != nil {
+	if _, err := s.SetPaymentHold(erin, proposal.Groups[0].Lines[0].OpenItemID, true, ""); err != nil {
 		t.Fatal(err)
 	}
 	var changed *LinesChangedError
@@ -375,7 +375,7 @@ func withPayees(in NewProposal, payees map[string]domain.CreditorDTO) NewProposa
 func TestPaymentRun_HoldPlacedAfterApprovalFailsTheRunAndReleasesLines(t *testing.T) {
 	s := setup(t)
 	proposal, erin := approvedProposal(t, s, "run-1", threeItems(t, s))
-	if err := s.SetPaymentHold(erin, proposal.Groups[0].Lines[0].OpenItemID, true); err != nil {
+	if _, err := s.SetPaymentHold(erin, proposal.Groups[0].Lines[0].OpenItemID, true, ""); err != nil {
 		t.Fatal(err)
 	}
 	run, created, err := s.StartRun(erin, runInput(proposal.ID, leA))
@@ -582,13 +582,13 @@ func TestSetPaymentHold_DoesNotBumpVersionLikeAVendorBlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetPaymentHold(alice, item.ID, true); err != nil {
+	if _, err := s.SetPaymentHold(alice, item.ID, true, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.ApproveProposal(ctxAs(1, leA, "bob"), created.ID, "bob", runDay); err == nil {
 		t.Fatal("approval over a held item must fail")
 	}
-	if err := s.SetPaymentHold(alice, item.ID, false); err != nil {
+	if _, err := s.SetPaymentHold(alice, item.ID, false, ""); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := s.Get(alice, item.ID)
@@ -642,7 +642,7 @@ func TestPaymentRun_SaveRunFileRechecksHoldsUnderTheRunLock(t *testing.T) {
 	s := setup(t)
 	proposal, erin := approvedProposal(t, s, "run-1", threeItems(t, s))
 	run, _, _ := s.StartRun(erin, runInput(proposal.ID, leA))
-	if err := s.SetPaymentHold(erin, proposal.Groups[0].Lines[0].OpenItemID, true); err != nil {
+	if _, err := s.SetPaymentHold(erin, proposal.Groups[0].Lines[0].OpenItemID, true, ""); err != nil {
 		t.Fatal(err)
 	}
 	var changed *LinesChangedError

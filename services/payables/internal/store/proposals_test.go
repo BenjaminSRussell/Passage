@@ -81,10 +81,10 @@ func TestCandidates_SelectsDueUnheldUnblockedUnreserved(t *testing.T) {
 	settled := seed(t, s, ctx, leA, vendor1, 6, "2027-03-05", "USD", "100.00")
 	partial := seed(t, s, ctx, leA, vendor1, 7, "2027-03-05", "USD", "100.00")
 	seed(t, s, ctxFor(1, leB), leB, vendor1, 8, "2027-03-05", "USD", "100.00")
-	if err := s.SetPaymentHold(ctx, held.ID, true); err != nil {
+	if _, err := s.SetPaymentHold(ctx, held.ID, true, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.BlockVendor(ctx, vendor3, "sanctions review"); err != nil {
+	if err := s.BlockVendor(ctx, leA, vendor3, "sanctions review"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Settle(ctx, settled.ID, settled.Version, dec("100.00"), "s1"); err != nil {
@@ -105,19 +105,19 @@ func TestCandidates_SelectsDueUnheldUnblockedUnreserved(t *testing.T) {
 		t.Fatalf("partial flag / open amount wrong: %+v", got)
 	}
 
-	if err := s.SetPaymentHold(ctx, held.ID, false); err != nil {
+	if _, err := s.SetPaymentHold(ctx, held.ID, false, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.UnblockVendor(ctx, vendor3); err != nil {
+	if err := s.UnblockVendor(ctx, leA, vendor3); err != nil {
 		t.Fatal(err)
 	}
 	if n := len(candidateIDs(t, s, ctx, leA, runDay)); n != 5 {
 		t.Fatalf("after releasing the hold and the block: %d candidates, want 5", n)
 	}
-	if err := s.SetPaymentHold(ctx, "00000000-0000-0000-0000-00000000dead", true); !errors.Is(err, ErrNotFound) {
+	if _, err := s.SetPaymentHold(ctx, "00000000-0000-0000-0000-00000000dead", true, ""); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("hold on a missing item = %v, want ErrNotFound", err)
 	}
-	if err := s.UnblockVendor(ctx, vendor1); !errors.Is(err, ErrNotFound) {
+	if err := s.UnblockVendor(ctx, leA, vendor1); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unblock of an unblocked vendor = %v, want ErrNotFound", err)
 	}
 }
@@ -176,12 +176,12 @@ func TestCreateProposal_RejectsItemsChangedAfterSelection(t *testing.T) {
 			}
 		},
 		"held": func(t *testing.T, s *Postgres, ctx context.Context, item OpenItem) {
-			if err := s.SetPaymentHold(ctx, item.ID, true); err != nil {
+			if _, err := s.SetPaymentHold(ctx, item.ID, true, ""); err != nil {
 				t.Fatal(err)
 			}
 		},
 		"vendor blocked": func(t *testing.T, s *Postgres, ctx context.Context, item OpenItem) {
-			if err := s.BlockVendor(ctx, item.VendorID, "fraud"); err != nil {
+			if err := s.BlockVendor(ctx, leA, item.VendorID, "fraud"); err != nil {
 				t.Fatal(err)
 			}
 		},
@@ -362,7 +362,7 @@ func TestList_FiltersAndKeysetPagination(t *testing.T) {
 func TestApproveProposal_RechecksLinesAtApproval(t *testing.T) {
 	tests := map[string]func(t *testing.T, s *Postgres, ctx context.Context, item OpenItem){
 		"held": func(t *testing.T, s *Postgres, ctx context.Context, item OpenItem) {
-			if err := s.SetPaymentHold(ctx, item.ID, true); err != nil {
+			if _, err := s.SetPaymentHold(ctx, item.ID, true, ""); err != nil {
 				t.Fatal(err)
 			}
 		},
@@ -377,7 +377,7 @@ func TestApproveProposal_RechecksLinesAtApproval(t *testing.T) {
 			}
 		},
 		"vendor blocked": func(t *testing.T, s *Postgres, ctx context.Context, item OpenItem) {
-			if err := s.BlockVendor(ctx, item.VendorID, "fraud"); err != nil {
+			if err := s.BlockVendor(ctx, leA, item.VendorID, "fraud"); err != nil {
 				t.Fatal(err)
 			}
 		},
@@ -413,13 +413,13 @@ func TestApproveProposal_SucceedsWhenLinesUnchangedOrRestored(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.BlockVendor(ctx, item.VendorID, "review"); err != nil {
+	if err := s.BlockVendor(ctx, leA, item.VendorID, "review"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.ApproveProposal(ctx, created.ID, "bob", runDay); err == nil {
 		t.Fatal("approved with a blocked vendor")
 	}
-	if err := s.UnblockVendor(ctx, item.VendorID); err != nil {
+	if err := s.UnblockVendor(ctx, leA, item.VendorID); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := s.ApproveProposal(ctx, created.ID, "bob", runDay); err != nil || got.Status != domain.ProposalApproved {

@@ -31,8 +31,8 @@ func TestHoldRoutes_PlaceAndReleaseReturnTheItem(t *testing.T) {
 	s.items = []store.OpenItem{openItem(itemOne, vendorOne, "2026-02-01", "USD", "100.00")}
 	r, _ := proposalRouter(s, nil)
 	for path, want := range map[string]string{
-		"/v1/payables/open-items/" + itemOne + ":hold":    itemOne + ":true",
-		"/v1/payables/open-items/" + itemOne + ":release": itemOne + ":false",
+		"/v1/payables/open-items/" + itemOne + ":hold":    itemOne + ":true:",
+		"/v1/payables/open-items/" + itemOne + ":release": itemOne + ":false:",
 	} {
 		rec := holder.send(r, http.MethodPost, path, "")
 		if body := decode(t, rec); rec.Code != http.StatusOK || body["id"] != itemOne {
@@ -73,7 +73,7 @@ func TestVendorBlockRoutes(t *testing.T) {
 	if body := decode(t, rec); rec.Code != http.StatusOK || body["blocked"] != false {
 		t.Fatalf("unblock: %d %s", rec.Code, rec.Body)
 	}
-	if got := strings.Join(s.blockCalls, "|"); got != "block:"+vendorOne+":sanctions review|unblock:"+vendorOne {
+	if got := strings.Join(s.blockCalls, "|"); got != "block:"+entityA+":"+vendorOne+":sanctions review|unblock:"+entityA+":"+vendorOne {
 		t.Fatalf("store calls = %s", got)
 	}
 
@@ -172,4 +172,40 @@ func TestHoldAndBlockRoutes_RealStoreExcludeItemsFromProposals(t *testing.T) {
 	outsider := caller{duties: "payment-hold.manage", user: "mallory", entity: entityB}
 	wantProblem(t, outsider.send(router, http.MethodPost, "/v1/payables/open-items/"+items[0].ID+":hold", ""), http.StatusNotFound, "COM-0404")
 	wantProblem(t, all.send(router, http.MethodPost, "/v1/payables/vendors/"+vendorTwo+":unblock", ""), http.StatusNotFound, "COM-0404")
+}
+
+func TestVendorBlockRoutes_AreScopedToTheCallersLegalEntity(t *testing.T) {
+	s := newFakeStore()
+	r, _ := proposalRouter(s, nil)
+	block, unblock := "/v1/payables/vendors/"+vendorOne+":block", "/v1/payables/vendors/"+vendorOne+":unblock"
+	wantProblem(t, blocker.send(r, http.MethodPost, block, `{"legalEntityId":"`+entityB+`","reason":"x"}`), http.StatusForbidden, "AUTH-0003")
+	wantProblem(t, blocker.send(r, http.MethodPost, unblock, `{"legalEntityId":"`+entityB+`"}`), http.StatusForbidden, "AUTH-0003")
+	wantProblem(t, caller{duties: "vendor-block.manage", user: "bo", noScope: true}.send(r, http.MethodPost, block, `{"reason":"x"}`), http.StatusBadRequest, "COM-0001")
+	if len(s.blockCalls) != 0 {
+		t.Fatalf("store reached for a forbidden entity: %v", s.blockCalls)
+	}
+	if rec := blocker.send(r, http.MethodPost, block, `{"legalEntityId":"`+entityA+`","reason":"x"}`); rec.Code != http.StatusOK || decode(t, rec)["legalEntityId"] != entityA {
+		t.Fatalf("block in own entity: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestHoldRoutes_ReasonConflictAndNoop(t *testing.T) {
+	s := newFakeStore()
+	s.items = []store.OpenItem{openItem(itemOne, vendorOne, "2026-02-01", "USD", "100.00")}
+	r, a := proposalRouter(s, nil)
+	hold := "/v1/payables/open-items/" + itemOne + ":hold"
+	if rec := holder.send(r, http.MethodPost, hold, `{"reason":" bank query "}`); rec.Code != http.StatusOK || s.holdCalls[0] != itemOne+":true:bank query" {
+		t.Fatalf("hold with reason: %d %v", rec.Code, s.holdCalls)
+	}
+	wantProblem(t, holder.send(r, http.MethodPost, hold, `{"reason":"`+strings.Repeat("x", 501)+`"}`), http.StatusBadRequest, "COM-0001")
+	s.holdErr = store.ErrItemClosed
+	wantProblem(t, holder.send(r, http.MethodPost, hold, ""), http.StatusConflict, "AP-OPN-001")
+
+	s.holdErr, s.holdNoop = nil, true
+	holder.send(r, http.MethodPost, hold, "")
+	rec := httptest.NewRecorder()
+	a.Metrics().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(rec.Body.String(), `payables_payment_holds_total{outcome="held"} 1`) {
+		t.Fatalf("a no-op hold must not be counted: %s", rec.Body)
+	}
 }

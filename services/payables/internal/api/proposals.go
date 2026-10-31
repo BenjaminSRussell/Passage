@@ -64,9 +64,9 @@ type PayablesStore interface {
 	ApproveProposal(ctx context.Context, id, approver, today string) (store.Proposal, error)
 	CancelProposal(ctx context.Context, id, user string) (store.Proposal, error)
 	ListProposals(ctx context.Context, f store.ProposalFilter, limit int) ([]store.ProposalSummary, error)
-	SetPaymentHold(ctx context.Context, id string, held bool) error
-	BlockVendor(ctx context.Context, vendorID, reason string) error
-	UnblockVendor(ctx context.Context, vendorID string) error
+	SetPaymentHold(ctx context.Context, id string, held bool, reason string) (bool, error)
+	BlockVendor(ctx context.Context, legalEntityID, vendorID, reason string) error
+	UnblockVendor(ctx context.Context, legalEntityID, vendorID string) error
 }
 
 type RateSource interface {
