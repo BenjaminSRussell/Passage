@@ -64,14 +64,9 @@ func decimals(what string, named ...[2]string) ([]decimal.Decimal, error) {
 			out[i] = decimal.Zero
 			continue
 		}
-		d, err := decimal.NewFromString(raw)
+		d, err := parseMoney(raw)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %s %s %q is not a decimal", domain.ErrInvalid, what, n[0], n[1])
-		}
-		if !d.Equal(d.Round(6)) {
-			// Opening lines and control totals are numeric(28,6); a finer value would be stored
-			// rounded while the run reconciled the unrounded one.
-			return nil, fmt.Errorf("%w: %s %s %q has more than 6 decimal places", domain.ErrInvalid, what, n[0], n[1])
+			return nil, fmt.Errorf("%w: %s %s %q %s", domain.ErrInvalid, what, n[0], n[1], err)
 		}
 		out[i] = d
 	}

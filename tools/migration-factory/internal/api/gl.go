@@ -6,8 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shopspring/decimal"
-
 	"github.com/BenjaminSRussell/passage/platform/ids"
 
 	"github.com/BenjaminSRussell/passage/tools/migration-factory/internal/domain"
@@ -43,14 +41,9 @@ type glRunRequest struct {
 func toGLBalances(in []glBalanceDTO) ([]domain.GLBalance, error) {
 	out := make([]domain.GLBalance, 0, len(in))
 	for _, rec := range in {
-		amt, err := decimal.NewFromString(strings.TrimSpace(rec.Balance))
+		amt, err := parseMoney(rec.Balance)
 		if err != nil {
-			return nil, fmt.Errorf("%w: balance %q of %q is not a decimal", domain.ErrInvalid, rec.Balance, rec.LegacyID)
-		}
-		if !amt.Equal(amt.Round(6)) {
-			// gl_opening_balance holds numeric(28,6); a finer balance would be stored rounded
-			// while the run reconciled the unrounded value.
-			return nil, fmt.Errorf("%w: balance %q of %q has more than 6 decimal places", domain.ErrInvalid, rec.Balance, rec.LegacyID)
+			return nil, fmt.Errorf("%w: balance %q of %q %s", domain.ErrInvalid, rec.Balance, rec.LegacyID, err)
 		}
 		out = append(out, domain.GLBalance{LegacyID: strings.TrimSpace(rec.LegacyID), Account: strings.TrimSpace(rec.Account),
 			Dimensions: strings.TrimSpace(rec.Dimensions), Currency: strings.TrimSpace(rec.Currency), Balance: amt})
