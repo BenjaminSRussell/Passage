@@ -6,7 +6,7 @@ Wave 9 (PSG-9): engineering data for the `product` context: BOMs, routings, engi
 
 - `cmd/engineering/main.go`: wiring. Env: `DATABASE_URL` (required, from Secret `engineering-db`), `MIGRATE_ON_START=true` (dev only), `HTTP_ADDR` (default `:8080`), `ADMIN_ADDR` (default `:9090`, serves `/metrics`).
 - `internal/domain/bom.go`: as-of version resolution, multi-level explosion, implosion (where-used), cycle and overlap checks, cost roll-up skeleton.
-- `internal/domain/routing.go`: operation DAG validation and lead time (sequential sum, parallel branches take the max, efficiency).
+- `internal/domain/routing.go`: operation DAG validation and lead time (sequential sum, parallel branches take the max and a secondary starts with its primary, efficiency, overlap transfer batches).
 - `internal/domain/eco.go`: ECO state machine, `Approver` seam to the Temporal approval workflow, release plan (expire old at `release_date - 1`, activate new).
 - `internal/domain/calendar.go`, `resource.go`: shift validation, calendar day generation, resource validation, effective calendar, requirement matching.
 - `internal/store`: pgx repositories under `dbx.WithTenantTx`; `Catalog` loads only the BOM versions reachable from the requested products (recursive query, down for explosion, up for where-used) into a `Snapshot` that satisfies `domain.Catalog`. `ReleaseEco` applies a `ReleasePlan` and enqueues its events in one transaction. `resource.go` holds calendar, group, capability and resource persistence: `GenerateCalendar` upserts `calendar_day` rows and enqueues one `calendar.generated` per call; `CreateResource` checks group site, calendar and capabilities and enqueues one `resource.changed`.
@@ -15,7 +15,7 @@ Wave 9 (PSG-9): engineering data for the `product` context: BOMs, routings, engi
 - `migrations/0001_init.sql`: tables with `tenant_id` first, tenant RLS (enabled and forced), idempotency and outbox tables.
 - `migrations/0002_resources.sql`: `work_calendar`, `calendar_day`, `resource_group`, `capability`, `resource`, `resource_capability` with the same RLS and grants.
 - `api/openapi.yaml`, `events/asyncapi.yaml`, `charts/engineering`, `Dockerfile`.
-- `testdata/`: `bom-golden-7x2000.json` (7 levels, 2,000 BOM lines), `routing-leadtime.json` (12 fixtures).
+- `testdata/`: `bom-golden-7x2000.json` and `.csv` (7 levels, 2,000 BOM lines), `bom-dag-7x2000.json` and `.csv` (adversarial 7-level DAG), `routing-leadtime.json` (12 fixtures), `routing-leadtime-adversarial.json` (parallel start and overlap). Expected values come from the independent oracles `gen_bom_golden.py` and `gen_routing_leadtime.py` (`python3 -I`, exact fractions); `internal/golden` loads the BOM fixtures for tests.
 
 ## Routes and duties
 

@@ -610,6 +610,7 @@ components:
         queueAfter: { type: string }
         transit: { type: string }
         efficiencyPct: { type: string }
+        overlapQty: { type: string, description: 'transfer batch: the next operation may start once this many units are done; 0 or at least the quantity is no overlap' }
     LeadTimeRequest:
       type: object
       additionalProperties: false

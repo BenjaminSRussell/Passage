@@ -91,8 +91,8 @@ func (b routeVersionRequest) toDomain() (domain.RouteVersion, map[string]string)
 		}
 		op := domain.VersionOperation{
 			RouteOperation: domain.RouteOperation{No: o.No, NextNo: o.NextNo, Priority: o.Priority, SetupH: o.SetupH, RunH: o.RunH, ProcessQty: o.ProcessQty,
-				QueueBeforeH: o.QueueBeforeH, QueueAfterH: o.QueueAfterH, TransitH: o.TransitH, EfficiencyPct: o.EfficiencyPct},
-			OperationID: o.OperationID, LinkType: o.LinkType, OverlapQty: o.OverlapQty, ScrapPercent: o.ScrapPercent,
+				QueueBeforeH: o.QueueBeforeH, QueueAfterH: o.QueueAfterH, TransitH: o.TransitH, EfficiencyPct: o.EfficiencyPct, OverlapQty: o.OverlapQty},
+			OperationID: o.OperationID, LinkType: o.LinkType, ScrapPercent: o.ScrapPercent,
 		}
 		if op.ProcessQty.IsZero() {
 			op.ProcessQty = decimal.NewFromInt(1)
