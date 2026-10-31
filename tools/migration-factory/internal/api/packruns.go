@@ -139,6 +139,11 @@ func toRecords(in []recordDTO) ([]domain.Record, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%w: record %q amount %q is not a decimal", domain.ErrInvalid, r.LegacyID, r.Amount)
 		}
+		if !amt.Equal(amt.Round(6)) {
+			// legacy_xref.amount is numeric(28,6): a finer amount would be stored rounded while the
+			// run reconciled the unrounded value, and a re-run would then report MISMATCH.
+			return nil, fmt.Errorf("%w: record %q amount %q has more than 6 decimal places", domain.ErrInvalid, r.LegacyID, r.Amount)
+		}
 		out = append(out, domain.Record{LegacyID: strings.TrimSpace(r.LegacyID), Party: r.Party, Account: r.Account, Currency: r.Currency, Amount: amt})
 	}
 	return out, nil
