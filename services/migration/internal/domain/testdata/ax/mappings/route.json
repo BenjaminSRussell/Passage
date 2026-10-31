@@ -1,0 +1,6 @@
+{"entity":"route","version":1,"fields":[
+ {"source":"RouteId","target":"routeNumber","type":"string","required":true},
+ {"source":"DataAreaId","target":"legalEntity","type":"string","required":true,"enum":{"usmf":"USMF","demf":"DEMF","gbsi":"GBSI"}},
+ {"source":"Name","target":"name","type":"string","required":true,"fn":"codepage_normalize"},
+ {"source":"Approved","target":"approved","type":"bool","required":true,"fn":"ax_noyes"},
+ {"source":"ModifiedDateTime","target":"modifiedAt","type":"timestamp","fn":"ax_datetime"}]}

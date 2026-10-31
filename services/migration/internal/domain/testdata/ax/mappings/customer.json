@@ -1,0 +1,10 @@
+{"entity":"customer","version":1,"fields":[
+ {"source":"AccountNum","target":"accountNumber","type":"string","required":true},
+ {"source":"DataAreaId","target":"legalEntity","type":"string","required":true,"enum":{"usmf":"USMF","demf":"DEMF","gbsi":"GBSI"}},
+ {"source":"Party","target":"partyRecId","type":"int","required":true},
+ {"source":"CustGroup","target":"segment","type":"string","enum":{"10":"retail","20":"wholesale","30":"oem"},"enumDefault":"other"},
+ {"source":"Currency","target":"currency","type":"string","default":"USD"},
+ {"source":"CreditMax","target":"creditLimit","type":"decimal","scale":2,"default":"0"},
+ {"source":"Blocked","target":"blocked","type":"string","required":true,"enum":{"0":"none","1":"invoice","2":"all","3":"payment","4":"requisition","5":"never"}},
+ {"source":"ModifiedDateTime","target":"modifiedAt","type":"timestamp","fn":"ax_datetime"}],
+ "rejectWhen":[{"field":"currency","op":"notIn","values":["USD","EUR","CAD"],"code":"CUST-CURRENCY-UNKNOWN"}]}

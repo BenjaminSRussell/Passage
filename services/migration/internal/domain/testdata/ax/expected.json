@@ -1,0 +1,329 @@
+{
+ "demo": {
+  "bom": {
+   "extracted": 150,
+   "loaded": 147,
+   "rejectCodes": {
+    "MIG-MAP-COERCE": 3
+   },
+   "rejectDigest": "aa690fa64beed5fae2b8b03835a2122f7622393e50676283b5946cc263f07538",
+   "rejectedRows": 3,
+   "rejects": {
+    "demf|B000010": [
+     "MIG-MAP-COERCE"
+    ],
+    "usmf|B000051": [
+     "MIG-MAP-COERCE"
+    ],
+    "usmf|B000134": [
+     "MIG-MAP-COERCE"
+    ]
+   },
+   "targetDigest": "226b44efd1157a289787158463c0d7c4520d07c4bef77ecadac95bc658f2ace3",
+   "warnedRows": 0,
+   "warningCodes": {},
+   "warningDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "customer": {
+   "extracted": 400,
+   "loaded": 393,
+   "rejectCodes": {
+    "CUST-CURRENCY-UNKNOWN": 6,
+    "MIG-MAP-COERCE": 1
+   },
+   "rejectDigest": "82a3e267632a7e826288cf6789af19bc71ab59698e41d6c5520e2a6acab9cd03",
+   "rejectedRows": 7,
+   "rejects": {
+    "gbsi|C000000": [
+     "CUST-CURRENCY-UNKNOWN"
+    ],
+    "gbsi|C000116": [
+     "CUST-CURRENCY-UNKNOWN"
+    ],
+    "usmf|C000028": [
+     "CUST-CURRENCY-UNKNOWN"
+    ],
+    "usmf|C000059": [
+     "CUST-CURRENCY-UNKNOWN"
+    ],
+    "usmf|C000177": [
+     "CUST-CURRENCY-UNKNOWN"
+    ],
+    "usmf|C000285": [
+     "CUST-CURRENCY-UNKNOWN"
+    ],
+    "usmf|C000342": [
+     "MIG-MAP-COERCE"
+    ]
+   },
+   "targetDigest": "6da14bacbbc05e7be4e9ea5087341522e8b2a14a193fe0c8bc2ffb8d84f54478",
+   "warnedRows": 69,
+   "warningCodes": {
+    "MAP-PRECISION-LOSS": 39,
+    "MIG-MAP-ENUM-DEFAULT": 33
+   },
+   "warningDigest": "3d15463b4f1045b1e20692272cc071a54043ad0834cc9794ae8ab2adb0292937"
+  },
+  "item": {
+   "extracted": 800,
+   "loaded": 784,
+   "rejectCodes": {
+    "MIG-MAP-COERCE": 2,
+    "MIG-MAP-ENUM": 3,
+    "MIG-MAP-RANGE": 6,
+    "MIG-MAP-REQUIRED": 2,
+    "MIG-ROW-DUPLICATE-KEY": 3
+   },
+   "rejectDigest": "a6d9d6f89b4719619ff0d41caa42a593e75cc4dfb6921edd9e48fccd63509216",
+   "rejectedRows": 16,
+   "rejects": {
+    "demf|I000005": [
+     "MIG-MAP-RANGE"
+    ],
+    "demf|I000147": [
+     "MIG-ROW-DUPLICATE-KEY"
+    ],
+    "demf|I000360": [
+     "MIG-MAP-ENUM"
+    ],
+    "demf|I000438": [
+     "MIG-MAP-RANGE"
+    ],
+    "demf|I000649": [
+     "MIG-MAP-REQUIRED"
+    ],
+    "demf|I000707": [
+     "MIG-MAP-RANGE"
+    ],
+    "demf|I000711": [
+     "MIG-MAP-RANGE"
+    ],
+    "demf|I000792": [
+     "MIG-ROW-DUPLICATE-KEY"
+    ],
+    "usmf|I000132": [
+     "MIG-MAP-COERCE"
+    ],
+    "usmf|I000188": [
+     "MIG-MAP-COERCE"
+    ],
+    "usmf|I000219": [
+     "MIG-MAP-ENUM"
+    ],
+    "usmf|I000260": [
+     "MIG-MAP-REQUIRED"
+    ],
+    "usmf|I000383": [
+     "MIG-ROW-DUPLICATE-KEY"
+    ],
+    "usmf|I000481": [
+     "MIG-MAP-RANGE"
+    ],
+    "usmf|I000716": [
+     "MIG-MAP-ENUM"
+    ],
+    "usmf|I000799": [
+     "MIG-MAP-RANGE"
+    ]
+   },
+   "targetDigest": "548a223eaf05ded293dc191e73f29500f866a02331309383278f99f72de6b0b6",
+   "warnedRows": 0,
+   "warningCodes": {},
+   "warningDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "party": {
+   "extracted": 600,
+   "loaded": 598,
+   "rejectCodes": {
+    "MIG-MAP-COERCE": 1,
+    "MIG-MAP-REQUIRED": 1
+   },
+   "rejectDigest": "7a305deb9c535d623fd7f0f4d014b89cad86e741a4a62c4b9f0f58eebf6e8295",
+   "rejectedRows": 2,
+   "rejects": {
+    "000000487": [
+     "MIG-MAP-COERCE"
+    ],
+    "000000583": [
+     "MIG-MAP-REQUIRED"
+    ]
+   },
+   "targetDigest": "bd2b0cf969bfbd0c529a2384281e7412df3098a72d7f9e6aec2df290f6161204",
+   "warnedRows": 0,
+   "warningCodes": {},
+   "warningDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "product": {
+   "extracted": 800,
+   "loaded": 796,
+   "rejectCodes": {
+    "MIG-MAP-COERCE": 1,
+    "MIG-MAP-ENUM": 3
+   },
+   "rejectDigest": "c7ac99bf196bb564b1a78b794bacb77ba7d392a975ce7ff39cc9d9a56d09d584",
+   "rejectedRows": 4,
+   "rejects": {
+    "P-00017": [
+     "MIG-MAP-COERCE"
+    ],
+    "P-00136": [
+     "MIG-MAP-ENUM"
+    ],
+    "P-00476": [
+     "MIG-MAP-ENUM"
+    ],
+    "P-00639": [
+     "MIG-MAP-ENUM"
+    ]
+   },
+   "targetDigest": "534e5122ca9b0f8788f9caf39197a3100b6a71dac0f28be1439676a02f0cd074",
+   "warnedRows": 0,
+   "warningCodes": {},
+   "warningDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "route": {
+   "extracted": 100,
+   "loaded": 98,
+   "rejectCodes": {
+    "MIG-MAP-REQUIRED": 2
+   },
+   "rejectDigest": "fa94ff221b4aa0a69d30deb0e670c95a8c4d9af5f3857d0ac6b79653c5a04c0f",
+   "rejectedRows": 2,
+   "rejects": {
+    "demf|R000066": [
+     "MIG-MAP-REQUIRED"
+    ],
+    "usmf|R000061": [
+     "MIG-MAP-REQUIRED"
+    ]
+   },
+   "targetDigest": "9598fb0feb519885aab2d40da79093496e5676218c2b5828742d02a7c82cab08",
+   "warnedRows": 0,
+   "warningCodes": {},
+   "warningDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "vendor": {
+   "extracted": 200,
+   "loaded": 188,
+   "rejectCodes": {
+    "MIG-MAP-ENUM": 1,
+    "MIG-MAP-REQUIRED": 2,
+    "MIG-ROW-DUPLICATE-KEY": 2,
+    "VEND-INTERCOMPANY": 7
+   },
+   "rejectDigest": "fd2cdff7335d36c7da336cf5308a8e81fdb5912623db44506b931dac895d4484",
+   "rejectedRows": 12,
+   "rejects": {
+    "demf|V000069": [
+     "VEND-INTERCOMPANY"
+    ],
+    "demf|V000081": [
+     "MIG-MAP-REQUIRED"
+    ],
+    "demf|V000092": [
+     "VEND-INTERCOMPANY"
+    ],
+    "demf|V000100": [
+     "VEND-INTERCOMPANY"
+    ],
+    "gbsi|V000123": [
+     "VEND-INTERCOMPANY"
+    ],
+    "usmf|V000009": [
+     "MIG-ROW-DUPLICATE-KEY",
+     "MIG-ROW-DUPLICATE-KEY"
+    ],
+    "usmf|V000063": [
+     "VEND-INTERCOMPANY"
+    ],
+    "usmf|V000135": [
+     "MIG-MAP-REQUIRED"
+    ],
+    "usmf|V000151": [
+     "VEND-INTERCOMPANY"
+    ],
+    "usmf|V000152": [
+     "MIG-MAP-ENUM"
+    ],
+    "usmf|V000167": [
+     "VEND-INTERCOMPANY"
+    ]
+   },
+   "targetDigest": "cf7be3c30e548cb50d39060ee01ce2cbd8ff9c46abc7417fc7c626658d9ead7c",
+   "warnedRows": 0,
+   "warningCodes": {},
+   "warningDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+ },
+ "scale": {
+  "bom": {
+   "extracted": 10000,
+   "loaded": 9799,
+   "rejectCodes": {
+    "MIG-MAP-COERCE": 112,
+    "MIG-MAP-REQUIRED": 55,
+    "MIG-ROW-DUPLICATE-KEY": 34
+   },
+   "rejectDigest": "d9069e9cf4435d703a5e0ce11235005e96ba376d757012683543c465eed5579e",
+   "rejectedRows": 201,
+   "targetDigest": "fccb97b57f6cbf5b1909d2276d5ad9f4e9fa36dbe2588c080211d732bcd98ff7",
+   "warnedRows": 0,
+   "warningCodes": {},
+   "warningDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "customer": {
+   "extracted": 50000,
+   "loaded": 48014,
+   "rejectCodes": {
+    "CUST-CURRENCY-UNKNOWN": 954,
+    "MIG-MAP-COERCE": 247,
+    "MIG-MAP-ENUM": 234,
+    "MIG-MAP-RANGE": 101,
+    "MIG-ROW-DUPLICATE-KEY": 454
+   },
+   "rejectDigest": "358dc01770dd318642f63c6f86405a2b15978f757adfc8473b8506c83806fe93",
+   "rejectedRows": 1986,
+   "targetDigest": "9e2b9a5f0367000cd798d88845805f9f98be6acaadd319a2b7e7af5910136985",
+   "warnedRows": 9124,
+   "warningCodes": {
+    "MAP-PRECISION-LOSS": 4860,
+    "MIG-MAP-ENUM-DEFAULT": 4742
+   },
+   "warningDigest": "7860488229ca4e7295be217482209a69b084f15f66cbc4da3a1792a1869f2156"
+  },
+  "item": {
+   "extracted": 100000,
+   "loaded": 98547,
+   "rejectCodes": {
+    "MIG-MAP-COERCE": 191,
+    "MIG-MAP-ENUM": 373,
+    "MIG-MAP-RANGE": 194,
+    "MIG-MAP-REQUIRED": 284,
+    "MIG-ROW-DUPLICATE-KEY": 413
+   },
+   "rejectDigest": "715bbdaaca5b766698673e1ff5b9e566d9b8eeb529d5cd04e094d13f61b3b66c",
+   "rejectedRows": 1453,
+   "targetDigest": "c04914f69dd3120e755208aacd37ad798d490ea35fad5fdee2ae15da46fd533c",
+   "warnedRows": 0,
+   "warningCodes": {},
+   "warningDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "vendor": {
+   "extracted": 20000,
+   "loaded": 18932,
+   "rejectCodes": {
+    "MIG-MAP-COERCE": 35,
+    "MIG-MAP-ENUM": 116,
+    "MIG-MAP-REQUIRED": 190,
+    "MIG-ROW-DUPLICATE-KEY": 132,
+    "VEND-INTERCOMPANY": 595
+   },
+   "rejectDigest": "be38c408899132bedf411ce64199579aaf64de450fd5eff80b9fc6f92c09c179",
+   "rejectedRows": 1068,
+   "targetDigest": "67a36df3937bc2f41a9ae6a1526666185370a8d0164da30de16e2d1c35406a71",
+   "warnedRows": 0,
+   "warningCodes": {},
+   "warningDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+ }
+}

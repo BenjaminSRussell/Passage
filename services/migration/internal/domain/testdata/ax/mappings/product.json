@@ -1,0 +1,5 @@
+{"entity":"product","version":1,"fields":[
+ {"source":"DisplayProductNumber","target":"productNumber","type":"string","required":true},
+ {"source":"ProductType","target":"productType","type":"string","required":true,"enum":{"1":"item","2":"service"}},
+ {"source":"RecId","target":"recId","type":"int","required":true},
+ {"source":"ModifiedDateTime","target":"modifiedAt","type":"timestamp","fn":"ax_datetime"}]}

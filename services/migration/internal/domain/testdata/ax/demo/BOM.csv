@@ -1,0 +1,151 @@
+DataAreaId,BOMId,Name,Approved,ModifiedDateTime
+usmf,B000000,Café table – oak 0,Yes,2016-03-27 18:28:18
+usmf,B000001,Frame assembly 1,Yes,2020-08-22 14:05:03
+demf,B000002,Frame assembly 2,Yes,2015-09-23 05:41:08
+usmf,B000003,Frame assembly 3,1,2012-01-17 09:16:33
+demf,B000004,Gehäuse  Typ	B 4,1,2022-07-31 01:29:18
+demf,B000005,  Pump housing   5,1,2015-01-25 16:49:47
+usmf,B000006,Frame assembly 6,1,2017-01-21 18:58:08
+usmf,B000007,  Pump housing   7,0,2017-01-21 19:20:29
+usmf,B000008,Café table – oak 8,1,2019-02-08 13:04:42
+usmf,B000009,Café chair 9,1,2012-12-20 19:55:35
+demf,B000010,  Pump housing   10,2,2020-10-12 03:36:15
+usmf,B000011,Café table – oak 11,1,2013-08-04 01:56:50
+demf,B000012,Café chair 12,0,2022-09-21 11:33:37
+gbsi,B000013,Café chair 13,1,2015-11-11 14:32:52
+usmf,B000014,Café chair 14,0,2023-02-08 23:52:43
+usmf,B000015,Frame assembly 15,1,2021-04-05 08:25:50
+usmf,B000016,  Pump housing   16,1,2014-06-02 16:32:29
+usmf,B000017,  Pump housing   17,1,2013-02-03 21:21:36
+demf,B000018,Müller “Pro” kit 18,Yes,2023-08-25 22:12:39
+usmf,B000019,Gehäuse  Typ	B 19,1,2015-02-21 15:28:10
+gbsi,B000020,"Bracket, steel 20",1,2014-08-07 22:20:58
+usmf,B000021,Müller “Pro” kit 21,1,2017-09-09 17:32:07
+usmf,B000022,Gehäuse  Typ	B 22,1,2019-10-06 10:44:44
+demf,B000023,Café chair 23,0,2017-03-25 03:57:45
+usmf,B000024,Frame assembly 24,0,2015-12-07 11:37:58
+demf,B000025,Café table – oak 25,0,2018-12-09 11:05:23
+usmf,B000026,  Pump housing   26,0,2014-02-07 17:45:44
+demf,B000027,Gehäuse  Typ	B 27,1,1900-01-01 00:00:00
+demf,B000028,"Bracket, steel 28",1,2023-09-23 23:05:06
+usmf,B000029,Müller “Pro” kit 29,1,2016-02-19 23:21:19
+demf,B000030,"Bracket, steel 30",No,2012-06-05 01:47:41
+gbsi,B000031,  Pump housing   31,1,2023-02-08 15:40:48
+demf,B000032,Café chair 32,1,2021-02-12 18:11:55
+usmf,B000033,Gehäuse  Typ	B 33,1,2013-11-06 01:28:14
+demf,B000034,Müller “Pro” kit 34,0,2015-04-24 04:36:01
+usmf,B000035,"Bracket, steel 35",1,2021-10-11 07:03:16
+usmf,B000036,  Pump housing   36,0,2014-09-10 15:27:11
+gbsi,B000037,"Bracket, steel 37",0,2023-08-08 20:16:02
+usmf,B000038,  Pump housing   38,0,2013-01-23 23:23:49
+usmf,B000039,Café chair 39,1,2016-10-02 02:36:24
+gbsi,B000040,Gehäuse  Typ	B 40,0,1900-01-01 00:00:00
+usmf,B000041,Café table – oak 41,1,2020-06-03 23:48:21
+demf,B000042,Frame assembly 42,1,2021-11-04 23:28:54
+demf,B000043,Gehäuse  Typ	B 43,0,2015-08-17 10:36:03
+usmf,B000044,Frame assembly 44,0,2016-06-13 10:15:24
+usmf,B000045,Café table – oak 45,0,2023-02-22 20:28:09
+usmf,B000046,"Bracket, steel 46",Yes,2020-07-06 10:11:54
+usmf,B000047,  Pump housing   47,1,2014-05-18 17:02:47
+usmf,B000048,Gehäuse  Typ	B 48,0,2018-06-19 16:05:20
+usmf,B000049,Frame assembly 49,0,2022-07-25 22:55:57
+usmf,B000050,Müller “Pro” kit 50,1,2017-04-14 01:10:27
+usmf,B000051,Müller “Pro” kit 51,1,10.04.2014 21:03:34
+usmf,B000052,Café table – oak 52,0,2020-10-05 04:38:13
+demf,B000053,Müller “Pro” kit 53,1,2012-06-13 07:50:48
+demf,B000054,  Pump housing   54,No,2016-01-13 02:57:43
+usmf,B000055,Gehäuse  Typ	B 55,1,2012-12-11 12:26:02
+demf,B000056,Müller “Pro” kit 56,1,2012-10-19 06:23:05
+usmf,B000057,Café chair 57,1,2018-02-07 20:10:20
+usmf,B000058,Café chair 58,0,2018-02-18 04:31:23
+usmf,B000059,Frame assembly 59,1,2013-08-23 13:10:54
+usmf,B000060,Müller “Pro” kit 60,1,2018-12-24 17:40:30
+usmf,B000061,Café table – oak 61,0,2012-12-04 15:35:39
+usmf,B000062,"Bracket, steel 62",0,2014-11-30 13:04:32
+usmf,B000063,Müller “Pro” kit 63,0,2016-03-28 08:15:25
+gbsi,B000064,Frame assembly 64,1,2015-05-30 17:39:46
+demf,B000065,"Bracket, steel 65",1,2018-07-02 12:50:55
+gbsi,B000066,"Bracket, steel 66",0,2013-07-31 23:47:32
+demf,B000067,"Bracket, steel 67",1,2020-06-10 20:48:17
+gbsi,B000068,Café table – oak 68,1,2018-04-17 20:28:06
+demf,B000069,"Bracket, steel 69",1,2014-09-20 12:08:19
+usmf,B000070,Café chair 70,0,2013-02-09 20:54:25
+usmf,B000071,Café table – oak 71,1,2015-06-24 16:53:24
+demf,B000072,Café table – oak 72,0,2020-05-24 01:17:19
+usmf,B000073,"Bracket, steel 73",1,2017-04-21 06:06:10
+demf,B000074,Café table – oak 74,1,2018-02-19 01:21:17
+usmf,B000075,  Pump housing   75,1,2016-10-23 06:10:24
+usmf,B000076,Frame assembly 76,0,2014-10-27 04:02:03
+usmf,B000077,Café table – oak 77,1,2022-05-01 12:41:34
+usmf,B000078,  Pump housing   78,1,2021-06-27 05:53:45
+usmf,B000079,Frame assembly 79,1,2014-10-16 19:41:00
+usmf,B000080,Frame assembly 80,1,2023-11-25 23:42:20
+demf,B000081,Café table – oak 81,0,2020-01-20 16:29:45
+gbsi,B000082,"Bracket, steel 82",Yes,2017-06-03 06:13:30
+usmf,B000083,  Pump housing   83,0,2021-10-30 06:29:43
+usmf,B000084,  Pump housing   84,0,2016-12-05 06:17:44
+usmf,B000085,Frame assembly 85,1,2014-07-23 08:10:13
+usmf,B000086,Frame assembly 86,1,2018-10-02 19:30:30
+usmf,B000087,Gehäuse  Typ	B 87,No,2023-01-30 04:42:27
+usmf,B000088,Gehäuse  Typ	B 88,1,2014-01-15 22:49:56
+usmf,B000089,Gehäuse  Typ	B 89,No,2020-11-25 19:50:41
+usmf,B000090,Frame assembly 90,0,2023-09-22 23:35:35
+usmf,B000091,  Pump housing   91,1,2019-04-26 23:19:22
+demf,B000092,Müller “Pro” kit 92,0,2021-12-12 04:56:09
+demf,B000093,Café chair 93,0,2015-04-02 18:43:24
+usmf,B000094,Gehäuse  Typ	B 94,1,2012-12-21 17:08:51
+usmf,B000095,  Pump housing   95,1,2020-08-25 12:36:22
+usmf,B000096,Müller “Pro” kit 96,1,2019-03-25 12:55:49
+usmf,B000097,Café table – oak 97,0,2018-10-27 18:44:08
+usmf,B000098,Frame assembly 98,1,2020-11-08 00:19:43
+demf,B000099,Gehäuse  Typ	B 99,0,2017-10-06 05:08:34
+demf,B000100,Müller “Pro” kit 100,1,2023-09-27 05:55:27
+usmf,B000101,Frame assembly 101,1,2016-07-19 04:16:02
+usmf,B000102,Café table – oak 102,Yes,2012-05-09 19:04:17
+usmf,B000103,Frame assembly 103,1,2014-09-21 15:03:16
+demf,B000104,Café table – oak 104,No,2014-01-24 02:11:55
+gbsi,B000105,  Pump housing   105,1,2022-11-22 15:56:30
+usmf,B000106,Gehäuse  Typ	B 106,0,2021-06-21 16:15:57
+gbsi,B000107,"Bracket, steel 107",0,2016-01-19 23:40:48
+demf,B000108,"Bracket, steel 108",1,2013-04-13 05:43:19
+demf,B000109,"Bracket, steel 109",1,2018-02-06 22:26:50
+gbsi,B000110,Café chair 110,1,2013-01-24 00:28:52
+demf,B000111,Müller “Pro” kit 111,1,2022-09-13 09:09:21
+usmf,B000112,Café chair 112,1,2014-11-22 18:21:06
+usmf,B000113,"Bracket, steel 113",Yes,2019-04-19 13:57:51
+usmf,B000114,Gehäuse  Typ	B 114,0,2014-05-25 13:45:52
+demf,B000115,  Pump housing   115,1,2017-01-14 14:01:49
+usmf,B000116,"Bracket, steel 116",1,2021-03-27 01:22:06
+usmf,B000117,Café table – oak 117,1,2012-05-29 16:16:59
+usmf,B000118,Müller “Pro” kit 118,0,2013-09-12 13:01:00
+demf,B000119,Frame assembly 119,1,2020-05-23 23:13:45
+usmf,B000120,Gehäuse  Typ	B 120,1,2015-02-23 01:35:25
+usmf,B000121,Café table – oak 121,1,2012-07-03 01:19:28
+usmf,B000122,  Pump housing   122,0,2023-10-31 04:16:11
+demf,B000123,"Bracket, steel 123",0,2016-07-26 01:15:58
+usmf,B000124,Café table – oak 124,1,2018-01-11 04:23:45
+usmf,B000125,Müller “Pro” kit 125,Yes,2012-06-27 17:07:32
+demf,B000126,Frame assembly 126,0,2017-05-28 01:31:27
+usmf,B000127,  Pump housing   127,0,2012-12-30 01:15:14
+demf,B000128,Müller “Pro” kit 128,0,2023-09-08 21:22:45
+usmf,B000129,"Bracket, steel 129",1,2019-06-22 02:24:08
+gbsi,B000130,Gehäuse  Typ	B 130,1,2017-07-23 00:40:10
+usmf,B000131,Müller “Pro” kit 131,1,2023-06-04 07:31:03
+usmf,B000132,Café chair 132,0,2013-06-30 00:43:40
+demf,B000133,Frame assembly 133,0,2020-03-10 10:56:25
+usmf,B000134,Café chair 134,0,21.11.2018 13:57:10
+usmf,B000135,  Pump housing   135,1,2012-09-02 01:04:19
+usmf,B000136,  Pump housing   136,0,2019-11-03 12:24:08
+demf,B000137,  Pump housing   137,0,2017-06-20 14:16:37
+gbsi,B000138,Gehäuse  Typ	B 138,1,2014-09-09 06:03:46
+usmf,B000139,  Pump housing   139,Yes,2019-02-04 01:40:31
+demf,B000140,Gehäuse  Typ	B 140,1,2021-07-23 08:34:43
+demf,B000141,  Pump housing   141,1,2017-03-27 04:02:14
+usmf,B000142,Müller “Pro” kit 142,1,2015-10-25 04:21:41
+demf,B000143,Café table – oak 143,0,2015-05-29 10:10:00
+usmf,B000144,  Pump housing   144,0,2020-04-23 15:01:27
+usmf,B000145,  Pump housing   145,1,2015-11-26 14:45:14
+usmf,B000146,Müller “Pro” kit 146,0,2018-07-13 20:22:01
+gbsi,B000147,Café chair 147,0,2023-11-02 10:09:16
+demf,B000148,Café chair 148,Yes,2023-11-12 18:30:19
+usmf,B000149,  Pump housing   149,1,2015-04-11 20:41:34
