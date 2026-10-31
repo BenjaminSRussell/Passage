@@ -180,3 +180,23 @@ func TestSumLinesInvariant(t *testing.T) {
 		}
 	})
 }
+
+// Categories are free text on the line (no category master yet) and the
+// requisition gate already compares them ignoring case; a category-scoped rule
+// must too, or "alcohol" escapes the EXP-ALC-001 BLOCK and "Meals" the meal cap.
+func TestCategoryScopedRulesIgnoreCase(t *testing.T) {
+	rules := DefaultRules()
+	for _, cat := range []string{"alcohol", "Alcohol", "ALCOHOL"} {
+		got := Evaluate(rules, Line{ID: "L1", Category: cat, TxnDate: txn, Amount: amt("12"), HasReceipt: true}, Context{SubmitDate: submit})
+		if outcomes(got)["EXP-ALC-001"] != OutcomeBlock || Submittable(got) {
+			t.Errorf("category %q: results %+v, want the EXP-ALC-001 BLOCK", cat, got)
+		}
+	}
+	got := EvaluateReport(rules, []Line{
+		{ID: "L1", Category: "Meals", TxnDate: txn, Amount: amt("50"), HasReceipt: true},
+		{ID: "L2", Category: "meals", TxnDate: txn, Amount: amt("30"), HasReceipt: true},
+	}, Context{SubmitDate: submit})
+	if len(got) != 2 || got[0].RuleID != "EXP-MEAL-075" || got[1].RuleID != "EXP-MEAL-075" {
+		t.Fatalf("mixed-case meals of 80.00 in one day: results %+v, want EXP-MEAL-075 on both lines", got)
+	}
+}

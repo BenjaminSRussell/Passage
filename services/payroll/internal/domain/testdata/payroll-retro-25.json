@@ -1,0 +1,1389 @@
+[
+ {
+  "affected": [
+   {
+    "prior": {
+     "REGULAR": "2285.28"
+    },
+    "recalculated": {
+     "REGULAR": "2286.55"
+    }
+   }
+  ],
+  "current": {
+   "OVERTIME": "162.84",
+   "REGULAR": "2171.20"
+  },
+  "expected": {
+   "fedWH": "201.83",
+   "fedWages": "2335.31",
+   "gross": "2335.31",
+   "medicare": "33.86",
+   "net": "1954.83",
+   "retro": {
+    "RETRO_REGULAR": "1.27"
+   },
+   "ss": "144.79",
+   "state": "0.00"
+  },
+  "name": "rate-increase-1-periods-0",
+  "periods": 26,
+  "pretax401k": "0.00",
+  "pretaxS125": "0.00",
+  "state": "",
+  "w4": {
+   "allowances": 0,
+   "filing": "MARRIED_FILING_JOINTLY",
+   "legacy": false,
+   "step2": true,
+   "step3": "0.00",
+   "step4a": "0.00",
+   "step4b": "0.00",
+   "step4c": "0.00"
+  },
+  "ytdWages": "16338.28"
+ },
+ {
+  "affected": [
+   {
+    "prior": {
+     "OVERTIME": "104.97",
+     "REGULAR": "1599.60"
+    },
+    "recalculated": {
+     "OVERTIME": "110.75",
+     "REGULAR": "1687.60"
+    }
+   },
+   {
+    "prior": {
+     "REGULAR": "1599.60"
+    },
+    "recalculated": {
+     "REGULAR": "1687.60"
+    }
+   }
+  ],
+  "current": {
+   "OVERTIME": "126.57",
+   "REGULAR": "1687.60"
+  },
+  "expected": {
+   "fedWH": "45.67",
+   "fedWages": "1995.95",
+   "gross": "1995.95",
+   "medicare": "28.94",
+   "net": "1709.77",
+   "retro": {
+    "RETRO_OVERTIME": "5.78",
+    "RETRO_REGULAR": "176.00"
+   },
+   "ss": "123.75",
+   "state": "87.82"
+  },
+  "name": "rate-increase-2-periods-1",
+  "periods": 26,
+  "pretax401k": "0.00",
+  "pretaxS125": "0.00",
+  "state": "CO",
+  "w4": {
+   "allowances": 0,
+   "filing": "HEAD_OF_HOUSEHOLD",
+   "legacy": false,
+   "step2": false,
+   "step3": "2000.00",
+   "step4a": "0.00",
+   "step4b": "0.00",
+   "step4c": "0.00"
+  },
+  "ytdWages": "7256.68"
+ },
+ {
+  "affected": [
+   {
+    "prior": {
+     "REGULAR": "3175.20"
+    },
+    "recalculated": {
+     "REGULAR": "3343.18"
+    }
+   },
+   {
+    "prior": {
+     "REGULAR": "3528.00"
+    },
+    "recalculated": {
+     "REGULAR": "3714.64"
+    }
+   },
+   {
+    "prior": {
+     "OVERTIME": "231.53",
+     "REGULAR": "3528.00"
+    },
+    "recalculated": {
+     "OVERTIME": "243.77",
+     "REGULAR": "3714.64"
+    }
+   }
+  ],
+  "current": {
+   "OVERTIME": "278.60",
+   "REGULAR": "3714.64"
+  },
+  "expected": {
+   "fedWH": "622.74",
+   "fedWages": "4296.74",
+   "gross": "4546.74",
+   "medicare": "65.93",
+   "net": "3326.17",
+   "retro": {
+    "RETRO_OVERTIME": "12.24",
+    "RETRO_REGULAR": "541.26"
+   },
+   "ss": "281.90",
+   "state": "0.00"
+  },
+  "name": "rate-increase-3-periods-2",
+  "periods": 26,
+  "pretax401k": "250.00",
+  "pretaxS125": "0.00",
+  "state": "",
+  "w4": {
+   "allowances": 0,
+   "filing": "SINGLE",
+   "legacy": false,
+   "step2": false,
+   "step3": "0.00",
+   "step4a": "0.00",
+   "step4b": "0.00",
+   "step4c": "0.00"
+  },
+  "ytdWages": "59898.60"
+ },
+ {
+  "affected": [
+   {
+    "prior": {
+     "OVERTIME": "244.13",
+     "REGULAR": "2285.28"
+    },
+    "recalculated": {
+     "OVERTIME": "254.03",
+     "REGULAR": "2377.96"
+    }
+   },
+   {
+    "prior": {
+     "REGULAR": "2170.00"
+    },
+    "recalculated": {
+     "REGULAR": "2258.00"
+    }
+   },
+   {
+    "prior": {
+     "REGULAR": "1953.00"
+    },
+    "recalculated": {
+     "REGULAR": "2032.20"
+    }
+   },
+   {
+    "prior": {
+     "REGULAR": "2075.06"
+    },
+    "recalculated": {
+     "REGULAR": "2159.21"
+    }
+   }
+  ],
+  "current": {
+   "OVERTIME": "169.35",
+   "REGULAR": "2258.00"
+  },
+  "expected": {
+   "fedWH": "411.52",
+   "fedWages": "2576.28",
+   "gross": "2781.28",
+   "medicare": "39.10",
+   "net": "1958.49",
+   "retro": {
+    "RETRO_OVERTIME": "9.90",
+    "RETRO_REGULAR": "344.03"
+   },
+   "ss": "167.17",
+   "state": "0.00"
+  },
+  "name": "rate-increase-4-periods-3",
+  "periods": 26,
+  "pretax401k": "120.00",
+  "pretaxS125": "85.00",
+  "state": "",
+  "w4": {
+   "allowances": 0,
+   "filing": "SINGLE",
+   "legacy": false,
+   "step2": true,
+   "step3": "0.00",
+   "step4a": "0.00",
+   "step4b": "0.00",
+   "step4c": "0.00"
+  },
+  "ytdWages": "38837.60"
+ },
+ {
+  "affected": [
+   {
+    "prior": {
+     "OVERTIME": "179.96",
+     "REGULAR": "1599.60"
+    },
+    "recalculated": {
+     "OVERTIME": "180.09",
+     "REGULAR": "1600.80"
+    }
+   }
+  ],
+  "current": {
+   "REGULAR": "1600.80"
+  },
+  "expected": {
+   "fedWH": "48.67",
+   "fedWages": "1352.13",
+   "gross": "1602.13",
+   "medicare": "23.23",
+   "net": "1180.90",
+   "retro": {
+    "RETRO_OVERTIME": "0.13",
+    "RETRO_REGULAR": "1.20"
+   },
+   "ss": "99.33",
+   "state": "0.00"
+  },
+  "name": "rate-increase-1-periods-4",
+  "periods": 26,
+  "pretax401k": "250.00",
+  "pretaxS125": "0.00",
+  "state": "",
+  "w4": {
+   "allowances": 0,
+   "filing": "HEAD_OF_HOUSEHOLD",
+   "legacy": false,
+   "step2": false,
+   "step3": "0.00",
+   "step4a": "0.00",
+   "step4b": "0.00",
+   "step4c": "0.00"
+  },
+  "ytdWages": "4802.40"
+ },
+ {
+  "affected": [
+   {
+    "prior": {
+     "OVERTIME": "417.05",
+     "REGULAR": "1953.00"
+    },
+    "recalculated": {
+     "OVERTIME": "433.96",
+     "REGULAR": "2032.20"
+    }
+   },
+   {
+    "prior": {
+     "OVERTIME": "142.41",
+     "REGULAR": "2075.06"
+    },
+    "recalculated": {
+     "OVERTIME": "148.18",
+     "REGULAR": "2159.21"
+    }
+   }
+  ],
+  "current": {
+   "REGULAR": "2258.00"
+  },
+  "expected": {
+   "fedWH": "123.56",
+   "fedWages": "2324.03",
+   "gross": "2444.03",
+   "medicare": "35.44",
+   "net": "2013.50",
+   "retro": {
+    "RETRO_OVERTIME": "22.68",
+    "RETRO_REGULAR": "163.35"
+   },
+   "ss": "151.53",
+   "state": "0.00"
+  },
+  "name": "rate-increase-2-periods-5",
+  "periods": 26,
+  "pretax401k": "120.00",
+  "pretaxS125": "0.00",
+  "state": "",
+  "w4": {
+   "allowances": 0,
+   "filing": "SINGLE",
+   "legacy": false,
+   "step2": false,
+   "step3": "2000.00",
+   "step4a": "0.00",
+   "step4b": "0.00",
+   "step4c": "0.00"
+  },
+  "ytdWages": "24838.00"
+ },
+ {
+  "affected": [
+   {
+    "prior": {
+     "OVERTIME": "344.40",
+     "REGULAR": "1792.00"
+    },
+    "recalculated": {
+     "OVERTIME": "354.01",
+     "REGULAR": "1842.00"
+    }
+   },
+   {
+    "prior": {
+     "OVERTIME": "117.60",
+     "REGULAR": "1887.20"
+    },
+    "recalculated": {
+     "OVERTIME": "120.88",
+     "REGULAR": "1939.86"
+    }
+   },
+   {
+    "prior": {
+     "REGULAR": "1713.60"
+    },
+    "recalculated": {
+     "REGULAR": "1761.41"
+    }
+   }
+  ],
+  "current": {
+   "REGULAR": "1842.00"
+  },
+  "expected": {
+   "fedWH": "253.51",
+   "fedWages": "1885.36",
+   "gross": "2005.36",
+   "medicare": "29.08",
+   "net": "1395.48",
+   "retro": {
+    "RETRO_OVERTIME": "12.89",
+    "RETRO_REGULAR": "150.47"
+   },
+   "ss": "124.33",
+   "state": "82.96"
+  },
+  "name": "rate-increase-3-periods-6",
+  "periods": 26,
+  "pretax401k": "120.00",
+  "pretaxS125": "0.00",
+  "state": "CO",
+  "w4": {
+   "allowances": 0,
+   "filing": "SINGLE",
+   "legacy": false,
+   "step2": true,
+   "step3": "0.00",
+   "step4a": "0.00",
+   "step4b": "0.00",
+   "step4c": "0.00"
+  },
+  "ytdWages": "1842.00"
+ },
+ {
+  "affected": [
+   {
+    "prior": {
+     "OVERTIME": "344.40",
+     "REGULAR": "1792.00"
+    },
+    "recalculated": {
+     "OVERTIME": "361.31",
+     "REGULAR": "1880.00"
+    }
+   },
+   {
+    "prior": {
+     "OVERTIME": "201.60",
+     "REGULAR": "1887.20"
+    },
+    "recalculated": {
+     "OVERTIME": "211.50",
+     "REGULAR": "1979.88"
+    }
+   },
+   {
+    "prior": {
+     "REGULAR": "1887.20"
+    },
+    "recalculated": {
+     "REGULAR": "1979.88"
+    }
+   },
+   {
+    "prior": {
+     "REGULAR": "1792.00"
+    },
+    "recalculated": {
+     "REGULAR": "1880.00"
+    }
+   }
+  ],
+  "current": {
+   "OVERTIME": "141.00",
+   "REGULAR": "1880.00"
+  },
+  "expected": {
+   "fedWH": "172.18",
+   "fedWages": "2409.17",
+   "gross": "2409.17",
+   "medicare": "34.93",
+   "net": "1946.69",
+   "retro": {
+    "RETRO_OVERTIME": "26.81",
+    "RETRO_REGULAR": "361.36"
+   },
+   "ss": "149.37",
+   "state": "106.00"
+  },
+  "name": "rate-increase-4-periods-7",
+  "periods": 26,
+  "pretax401k": "0.00",
+  "pretaxS125": "0.00",
+  "state": "CO",
+  "w4": {
+   "allowances": 0,
+   "filing": "HEAD_OF_HOUSEHOLD",
+   "legacy": false,
+   "step2": false,
+   "step3": "0.00",
+   "step4a": "0.00",
+   "step4b": "0.00",
+   "step4c": "0.00"
+  },
+  "ytdWages": "2021.00"
+ },
+ {
+  "affected": [
+   {
+    "prior": {
+     "OVERTIME": "344.40",
+     "REGULAR": "1792.00"
+    },
+    "recalculated": {
+     "OVERTIME": "361.31",
+     "REGULAR": "1880.00"
+    }
+   }
+  ],
+  "current": {
+   "REGULAR": "1880.00"
+  },
+  "expected": {
+   "fedWH": "159.79",
+   "fedWages": "1984.91",
+   "gross": "1984.91",
+   "medicare": "28.78",
+   "net": "1673.28",
+   "retro": {
+    "RETRO_OVERTIME": "16.91",
+    "RETRO_REGULAR": "88.00"
+   },
+   "ss": "123.06",
+   "state": "0.00"
+  },
+  "name": "rate-increase-1-periods-8",
+  "periods": 26,
+  "pretax401k": "0.00",
+  "pretaxS125": "0.00",
+  "state": "",
+  "w4": {
+   "allowances": 0,
+   "filing": "SINGLE",
+   "legacy": false,
+   "step2": false,
+   "step3": "0.00",
+   "step4a": "0.00",
+   "step4b": "0.00",
+   "step4c": "0.00"
+  },
+  "ytdWages": "15040.00"
+ },
+ {
+  "affected": [
+   {
+    "prior": {
+     "OVERTIME": "244.13",
+     "REGULAR": "2170.00"
+    },
+    "recalculated": {
+     "OVERTIME": "254.03",
+     "REGULAR": "2258.00"
+    }
+   },
+   {
+    "prior": {
+     "REGULAR": "2285.28"
+    },
+    "recalculated": {
+     "REGULAR": "2377.96"
+    }
+   }
+  ],
+  "current": {
+   "REGULAR": "2258.00"
+  },
+  "expected": {
+   "fedWH": "124.10",
+   "fedWages": "2328.58",
+   "gross": "2448.58",
+   "medicare": "35.50",
+   "net": "2017.17",
+   "retro": {
+    "RETRO_OVERTIME": "9.90",
+    "RETRO_REGULAR": "180.68"
+   },
+   "ss": "151.81",
+   "state": "0.00"
+  },
+  "name": "rate-increase-2-periods-9",
+  "periods": 26,
+  "pretax401k": "120.00",
+  "pretaxS125": "0.00",
+  "state": "",
+  "w4": {
+   "allowances": 0,
+   "filing": "MARRIED_FILING_JOINTLY",
+   "legacy": false,
+   "step2": true,
+   "step3": "2000.00",
+   "step4a": "0.00",
+   "step4b": "0.00",
+   "step4c": "0.00"
+  },
+  "ytdWages": "13548.00"
+ },
+ {
+  "affected": [
+   {
+    "prior": {
+     "REGULAR": "4000.00"
+    },
+    "recalculated": {
+     "REGULAR": "4200.00"
+    }
+   },
+   {
+    "prior": {
+     "REGULAR": "4000.00"
+    },
+    "recalculated": {
+     "REGULAR": "4200.00"
+    }
+   }
+  ],
+  "current": {
+   "REGULAR": "4200.00"
+  },
+  "expected": {
+   "fedWH": "636.66",
+   "fedWages": "4360.00",
+   "gross": "4600.00",
+   "medicare": "66.70",
+   "net": "3179.60",
+   "retro": {
+    "RETRO_REGULAR": "400.00"
+   },
+   "ss": "285.20",
+   "state": "191.84"
+  },
+  "name": "ac-43.4-salary-two-periods",
+  "periods": 26,
+  "pretax401k": "240.00",
+  "pretaxS125": "0.00",
+  "state": "CO",
+  "w4": {
+   "allowances": 0,
+   "filing": "SINGLE",
+   "legacy": false,
+   "step2": false,
+   "step3": "0.00",
+   "step4a": "0.00",
+   "step4b": "0.00",
+   "step4c": "0.00"
+  },
+  "ytdWages": "40000.00"
+ },
+ {
+  "affected": [
+   {
+    "prior": {
+     "OVERTIME": "198.75",
+     "REGULAR": "1060.00"
+    },
+    "recalculated": {
+     "OVERTIME": "193.13",
+     "REGULAR": "1030.00"
+    }
+   },
+   {
+    "prior": {
+     "OVERTIME": "198.75",
+     "REGULAR": "1060.00"
+    },
+    "recalculated": {
+     "OVERTIME": "193.13",
+     "REGULAR": "1030.00"
+    }
+   },
+   {
+    "prior": {
+     "OVERTIME": "198.75",
+     "REGULAR": "1060.00"
+    },
+    "recalculated": {
+     "OVERTIME": "193.13",
+     "REGULAR": "1030.00"
+    }
+   }
+  ],
+  "current": {
+   "REGULAR": "1030.00"
+  },
+  "expected": {
+   "fedWH": "34.62",
+   "fedWages": "923.14",
+   "gross": "923.14",
+   "medicare": "13.39",
+   "net": "817.90",
+   "retro": {
+    "RETRO_OVERTIME": "-16.86",
+    "RETRO_REGULAR": "-90.00"
+   },
+   "ss": "57.23",
+   "state": "0.00"
+  },
+  "name": "rate-decrease-3-periods",
+  "periods": 52,
+  "pretax401k": "0.00",
+  "pretaxS125": "0.00",
+  "state": "",
+  "w4": {
+   "allowances": 0,
+   "filing": "MARRIED_FILING_JOINTLY",
+   "legacy": false,
+   "step2": false,
+   "step3": "0.00",
+   "step4a": "0.00",
+   "step4b": "0.00",
+   "step4c": "0.00"
+  },
+  "ytdWages": "18000.00"
+ },
+ {
+  "affected": [
+   {
+    "prior": {
+     "REGULAR": "725.80"
+    },
+    "recalculated": {
+     "REGULAR": "720.10"
+    }
+   },
+   {
+    "prior": {
+     "REGULAR": "725.80"
+    },
+    "recalculated": {
+     "REGULAR": "720.10"
+    }
+   }
+  ],
+  "current": {
+   "REGULAR": "758.00"
+  },
+  "expected": {
+   "fedWH": "54.31",
+   "fedWages": "696.60",
+   "gross": "746.60",
+   "medicare": "10.83",
+   "net": "554.52",
+   "retro": {
+    "RETRO_REGULAR": "-11.40"
+   },
+   "ss": "46.29",
+   "state": "30.65"
+  },
+  "name": "rate-decrease-weekly-legacy",
+  "periods": 52,
+  "pretax401k": "50.00",
+  "pretaxS125": "0.00",
+  "state": "CO",
+  "w4": {
+   "allowances": 1,
+   "filing": "SINGLE",
+   "legacy": true,
+   "step2": false,
+   "step3": "0.00",
+   "step4a": "0.00",
+   "step4b": "0.00",
+   "step4c": "0.00"
+  },
+  "ytdWages": "9000.00"
+ },
+ {
+  "affected": [
+   {
+    "prior": {
+     "REGULAR": "2400.00"
+    },
+    "recalculated": {
+     "OVERTIME": "348.75",
+     "REGULAR": "2400.00"
+    }
+   }
+  ],
+  "current": {
+   "REGULAR": "2400.00"
+  },
+  "expected": {
+   "fedWH": "282.19",
+   "fedWages": "2748.75",
+   "gross": "2748.75",
+   "medicare": "39.86",
+   "net": "2135.33",
+   "retro": {
+    "RETRO_OVERTIME": "348.75"
+   },
+   "ss": "170.42",
+   "state": "120.95"
+  },
+  "name": "hours-correction-overtime-added",
+  "periods": 26,
+  "pretax401k": "0.00",
+  "pretaxS125": "0.00",
+  "state": "CO",
+  "w4": {
+   "allowances": 0,
+   "filing": "SINGLE",
+   "legacy": false,
+   "step2": false,
+   "step3": "0.00",
+   "step4a": "0.00",
+   "step4b": "0.00",
+   "step4c": "0.00"
+  },
+  "ytdWages": "22000.00"
+ },
+ {
+  "affected": [
+   {
+    "prior": {
+     "OVERTIME": "255.60",
+     "REGULAR": "2461.43"
+    },
+    "recalculated": {
+     "REGULAR": "2461.43"
+    }
+   },
+   {
+    "prior": {
+     "OVERTIME": "85.20",
+     "REGULAR": "2461.43"
+    },
+    "recalculated": {
+     "REGULAR": "2461.43"
+    }
+   }
+  ],
+  "current": {
+   "REGULAR": "2461.43"
+  },
+  "expected": {
+   "fedWH": "115.81",
+   "fedWages": "2020.63",
+   "gross": "2120.63",
+   "medicare": "30.75",
+   "net": "1742.59",
+   "retro": {
+    "RETRO_OVERTIME": "-340.80"
+   },
+   "ss": "131.48",
+   "state": "0.00"
+  },
+  "name": "hours-correction-overtime-removed",
+  "periods": 24,
+  "pretax401k": "100.00",
+  "pretaxS125": "0.00",
+  "state": "",
+  "w4": {
+   "allowances": 0,
+   "filing": "HEAD_OF_HOUSEHOLD",
+   "legacy": false,
+   "step2": false,
+   "step3": "0.00",
+   "step4a": "0.00",
+   "step4b": "0.00",
+   "step4c": "0.00"
+  },
+  "ytdWages": "15000.00"
+ },
+ {
+  "affected": [
+   {
+    "prior": {
+     "REGULAR": "3296.00"
+    },
+    "recalculated": {
+     "REGULAR": "3151.80"
+    }
+   }
+  ],
+  "current": {
+   "REGULAR": "3296.00"
+  },
+  "expected": {
+   "fedWH": "357.66",
+   "fedWages": "3091.80",
+   "gross": "3151.80",
+   "medicare": "44.83",
+   "net": "2497.62",
+   "retro": {
+    "RETRO_REGULAR": "-144.20"
+   },
+   "ss": "191.69",
+   "state": "0.00"
+  },
+  "name": "hours-correction-regular-down",
+  "periods": 26,
+  "pretax401k": "0.00",
+  "pretaxS125": "60.00",
+  "state": "",
+  "w4": {
+   "allowances": 0,
+   "filing": "MARRIED_FILING_JOINTLY",
+   "legacy": false,
+   "step2": true,
+   "step3": "0.00",
+   "step4a": "0.00",
+   "step4b": "0.00",
+   "step4c": "0.00"
+  },
+  "ytdWages": "30000.00"
+ },
+ {
+  "affected": [
+   {
+    "prior": {
+     "REGULAR": "1920.00"
+    },
+    "recalculated": {
+     "REGULAR": "1920.00",
+     "SHIFT_DIFF": "44.40"
+    }
+   },
+   {
+    "prior": {
+     "REGULAR": "1920.00"
+    },
+    "recalculated": {
+     "REGULAR": "1920.00",
+     "SHIFT_DIFF": "59.20"
+    }
+   },
+   {
+    "prior": {
+     "REGULAR": "1920.00"
+    },
+    "recalculated": {
+     "REGULAR": "1920.00",
+     "SHIFT_DIFF": "30.53"
+    }
+   }
+  ],
+  "current": {
+   "REGULAR": "1920.00",
+   "SHIFT_DIFF": "44.40"
+  },
+  "expected": {
+   "fedWH": "173.42",
+   "fedWages": "2098.53",
+   "gross": "2098.53",
+   "medicare": "30.43",
+   "net": "1672.23",
+   "retro": {
+    "RETRO_SHIFT_DIFF": "134.13"
+   },
+   "ss": "130.11",
+   "state": "92.34"
+  },
+  "name": "new-code-shift-diff",
+  "periods": 26,
+  "pretax401k": "0.00",
+  "pretaxS125": "0.00",
+  "state": "CO",
+  "w4": {
+   "allowances": 0,
+   "filing": "SINGLE",
+   "legacy": false,
+   "step2": false,
+   "step3": "0.00",
+   "step4a": "0.00",
+   "step4b": "0.00",
+   "step4c": "0.00"
+  },
+  "ytdWages": "12000.00"
+ },
+ {
+  "affected": [
+   {
+    "prior": {
+     "OVERTIME": "399.60",
+     "REGULAR": "2664.00"
+    },
+    "recalculated": {
+     "REGULAR": "2930.40"
+    }
+   }
+  ],
+  "current": {
+   "REGULAR": "2664.00"
+  },
+  "expected": {
+   "fedWH": "234.24",
+   "fedWages": "2530.80",
+   "gross": "2530.80",
+   "medicare": "36.70",
+   "net": "2102.95",
+   "retro": {
+    "RETRO_OVERTIME": "-399.60",
+    "RETRO_REGULAR": "266.40"
+   },
+   "ss": "156.91",
+   "state": "0.00"
+  },
+  "name": "overtime-reclassified-to-regular",
+  "periods": 26,
+  "pretax401k": "0.00",
+  "pretaxS125": "0.00",
+  "state": "",
+  "w4": {
+   "allowances": 0,
+   "filing": "MARRIED_FILING_SEPARATELY",
+   "legacy": false,
+   "step2": false,
+   "step3": "0.00",
+   "step4a": "0.00",
+   "step4b": "0.00",
+   "step4c": "0.00"
+  },
+  "ytdWages": "8000.00"
+ },
+ {
+  "affected": [
+   {
+    "prior": {
+     "OVERTIME": "120.00",
+     "REGULAR": "1600.00"
+    },
+    "recalculated": {
+     "REGULAR": "1600.00"
+    }
+   },
+   {
+    "prior": {
+     "REGULAR": "1600.00"
+    },
+    "recalculated": {
+     "OVERTIME": "120.00",
+     "REGULAR": "1600.00"
+    }
+   }
+  ],
+  "current": {
+   "REGULAR": "1600.00"
+  },
+  "expected": {
+   "fedWH": "113.60",
+   "fedWages": "1600.00",
+   "gross": "1600.00",
+   "medicare": "23.20",
+   "net": "1364.00",
+   "retro": {},
+   "ss": "99.20",
+   "state": "0.00"
+  },
+  "name": "deltas-net-to-zero",
+  "periods": 26,
+  "pretax401k": "0.00",
+  "pretaxS125": "0.00",
+  "state": "",
+  "w4": {
+   "allowances": 0,
+   "filing": "SINGLE",
+   "legacy": false,
+   "step2": false,
+   "step3": "0.00",
+   "step4a": "0.00",
+   "step4b": "0.00",
+   "step4c": "0.00"
+  },
+  "ytdWages": "6000.00"
+ },
+ {
+  "affected": [
+   {
+    "prior": {
+     "REGULAR": "6500.00"
+    },
+    "recalculated": {
+     "REGULAR": "6900.00"
+    }
+   },
+   {
+    "prior": {
+     "REGULAR": "6500.00"
+    },
+    "recalculated": {
+     "REGULAR": "6900.00"
+    }
+   },
+   {
+    "prior": {
+     "REGULAR": "6500.00"
+    },
+    "recalculated": {
+     "REGULAR": "6900.00"
+    }
+   },
+   {
+    "prior": {
+     "REGULAR": "6500.00"
+    },
+    "recalculated": {
+     "REGULAR": "6900.00"
+    }
+   }
+  ],
+  "current": {
+   "REGULAR": "6900.00"
+  },
+  "expected": {
+   "fedWH": "1114.92",
+   "fedWages": "8000.00",
+   "gross": "8500.00",
+   "medicare": "123.25",
+   "net": "6248.63",
+   "retro": {
+    "RETRO_REGULAR": "1600.00"
+   },
+   "ss": "161.20",
+   "state": "352.00"
+  },
+  "name": "retro-crosses-ss-base",
+  "periods": 26,
+  "pretax401k": "500.00",
+  "pretaxS125": "0.00",
+  "state": "CO",
+  "w4": {
+   "allowances": 0,
+   "filing": "MARRIED_FILING_JOINTLY",
+   "legacy": false,
+   "step2": false,
+   "step3": "0.00",
+   "step4a": "0.00",
+   "step4b": "0.00",
+   "step4c": "0.00"
+  },
+  "ytdWages": "173500.00"
+ },
+ {
+  "affected": [
+   {
+    "prior": {
+     "REGULAR": "8333.33"
+    },
+    "recalculated": {
+     "REGULAR": "8750.00"
+    }
+   },
+   {
+    "prior": {
+     "REGULAR": "8333.33"
+    },
+    "recalculated": {
+     "REGULAR": "8750.00"
+    }
+   },
+   {
+    "prior": {
+     "REGULAR": "8333.33"
+    },
+    "recalculated": {
+     "REGULAR": "8750.00"
+    }
+   }
+  ],
+  "current": {
+   "REGULAR": "8750.00"
+  },
+  "expected": {
+   "fedWH": "1980.29",
+   "fedWages": "9800.01",
+   "gross": "10000.01",
+   "medicare": "198.80",
+   "net": "7620.92",
+   "retro": {
+    "RETRO_REGULAR": "1250.01"
+   },
+   "ss": "0.00",
+   "state": "0.00"
+  },
+  "name": "retro-crosses-addl-medicare",
+  "periods": 24,
+  "pretax401k": "0.00",
+  "pretaxS125": "200.00",
+  "state": "",
+  "w4": {
+   "allowances": 0,
+   "filing": "SINGLE",
+   "legacy": false,
+   "step2": false,
+   "step3": "0.00",
+   "step4a": "0.00",
+   "step4b": "0.00",
+   "step4c": "0.00"
+  },
+  "ytdWages": "196500.00"
+ },
+ {
+  "affected": [
+   {
+    "prior": {
+     "REGULAR": "9166.67"
+    },
+    "recalculated": {
+     "REGULAR": "9625.00"
+    }
+   },
+   {
+    "prior": {
+     "REGULAR": "9166.67"
+    },
+    "recalculated": {
+     "REGULAR": "9625.00"
+    }
+   },
+   {
+    "prior": {
+     "REGULAR": "9166.67"
+    },
+    "recalculated": {
+     "REGULAR": "9625.00"
+    }
+   },
+   {
+    "prior": {
+     "REGULAR": "9166.67"
+    },
+    "recalculated": {
+     "REGULAR": "9625.00"
+    }
+   }
+  ],
+  "current": {
+   "REGULAR": "9625.00"
+  },
+  "expected": {
+   "fedWH": "2300.95",
+   "fedWages": "10708.32",
+   "gross": "11458.32",
+   "medicare": "163.97",
+   "net": "7071.11",
+   "retro": {
+    "RETRO_REGULAR": "1833.32"
+   },
+   "ss": "701.12",
+   "state": "471.17"
+  },
+  "name": "monthly-raise-4-months",
+  "periods": 12,
+  "pretax401k": "600.00",
+  "pretaxS125": "150.00",
+  "state": "CO",
+  "w4": {
+   "allowances": 0,
+   "filing": "SINGLE",
+   "legacy": false,
+   "step2": true,
+   "step3": "0.00",
+   "step4a": "0.00",
+   "step4b": "0.00",
+   "step4c": "30.00"
+  },
+  "ytdWages": "40000.00"
+ },
+ {
+  "affected": [
+   {
+    "prior": {
+     "OVERTIME": "179.10",
+     "REGULAR": "2388.00"
+    },
+    "recalculated": {
+     "OVERTIME": "279.90",
+     "REGULAR": "2565.75"
+    }
+   },
+   {
+    "prior": {
+     "REGULAR": "2388.00"
+    },
+    "recalculated": {
+     "REGULAR": "2488.00"
+    }
+   }
+  ],
+  "current": {
+   "OVERTIME": "93.30",
+   "REGULAR": "2488.00"
+  },
+  "expected": {
+   "fedWH": "52.01",
+   "fedWages": "2689.85",
+   "gross": "2959.85",
+   "medicare": "41.54",
+   "net": "2300.33",
+   "retro": {
+    "RETRO_OVERTIME": "100.80",
+    "RETRO_REGULAR": "277.75"
+   },
+   "ss": "177.62",
+   "state": "118.35"
+  },
+  "name": "rate-and-hours-mixed",
+  "periods": 26,
+  "pretax401k": "175.00",
+  "pretaxS125": "95.00",
+  "state": "CO",
+  "w4": {
+   "allowances": 0,
+   "filing": "HEAD_OF_HOUSEHOLD",
+   "legacy": false,
+   "step2": false,
+   "step3": "4000.00",
+   "step4a": "0.00",
+   "step4b": "0.00",
+   "step4c": "0.00"
+  },
+  "ytdWages": "26000.00"
+ },
+ {
+  "affected": [
+   {
+    "prior": {
+     "OVERTIME": "170.00",
+     "REGULAR": "3274.13"
+    },
+    "recalculated": {
+     "OVERTIME": "175.52",
+     "REGULAR": "3380.48"
+    }
+   },
+   {
+    "prior": {
+     "OVERTIME": "170.00",
+     "REGULAR": "3274.13"
+    },
+    "recalculated": {
+     "OVERTIME": "175.52",
+     "REGULAR": "3380.48"
+    }
+   }
+  ],
+  "current": {
+   "OVERTIME": "175.52",
+   "REGULAR": "3380.48"
+  },
+  "expected": {
+   "fedWH": "283.69",
+   "fedWages": "3779.74",
+   "gross": "3779.74",
+   "medicare": "54.81",
+   "net": "3206.90",
+   "retro": {
+    "RETRO_OVERTIME": "11.04",
+    "RETRO_REGULAR": "212.70"
+   },
+   "ss": "234.34",
+   "state": "0.00"
+  },
+  "name": "semimonthly-legacy-raise",
+  "periods": 24,
+  "pretax401k": "0.00",
+  "pretaxS125": "0.00",
+  "state": "",
+  "w4": {
+   "allowances": 3,
+   "filing": "MARRIED_FILING_JOINTLY",
+   "legacy": true,
+   "step2": false,
+   "step3": "0.00",
+   "step4a": "0.00",
+   "step4b": "0.00",
+   "step4c": "0.00"
+  },
+  "ytdWages": "52000.00"
+ },
+ {
+  "affected": [
+   {
+    "prior": {
+     "REGULAR": "600.00"
+    },
+    "recalculated": {
+     "REGULAR": "600.40"
+    }
+   }
+  ],
+  "current": {
+   "REGULAR": "600.40"
+  },
+  "expected": {
+   "fedWH": "32.89",
+   "fedWages": "600.80",
+   "gross": "600.80",
+   "medicare": "8.71",
+   "net": "521.95",
+   "retro": {
+    "RETRO_REGULAR": "0.40"
+   },
+   "ss": "37.25",
+   "state": "0.00"
+  },
+  "name": "one-cent-rate-correction",
+  "periods": 52,
+  "pretax401k": "0.00",
+  "pretaxS125": "0.00",
+  "state": "",
+  "w4": {
+   "allowances": 0,
+   "filing": "SINGLE",
+   "legacy": false,
+   "step2": false,
+   "step3": "0.00",
+   "step4a": "0.00",
+   "step4b": "0.00",
+   "step4c": "0.00"
+  },
+  "ytdWages": "1500.00"
+ }
+]
