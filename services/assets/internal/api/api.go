@@ -59,7 +59,7 @@ var (
 	bookCode    = regexp.MustCompile(`^[A-Z0-9][A-Z0-9_-]{0,19}$`)
 	currency    = regexp.MustCompile(`^[A-Z]{3}$`)
 	validConv   = map[string]bool{"None": true, "FullMonth": true, "MidMonth15": true, "HalfYear": true, "MidQuarter": true}
-	validMeth   = map[string]bool{"StraightLine": true, "DecliningBalance": true}
+	validMeth   = map[string]bool{"StraightLine": true, "DecliningBalance": true, "MACRS": true}
 	validTiming = map[string]bool{"arrears": true, "advance": true}
 	validStatus = map[string]bool{"NotYetAcquired": true, "Open": true, "Sold": true, "Scrapped": true, "Transferred": true}
 )
@@ -400,7 +400,7 @@ func (a *API) addBook(w http.ResponseWriter, r *http.Request) {
 		fields["currency"] = "must be an ISO 4217 code"
 	}
 	if !validMeth[req.Method] {
-		fields["method"] = "must be StraightLine or DecliningBalance"
+		fields["method"] = "must be StraightLine, DecliningBalance or MACRS"
 	}
 	if !validConv[req.Convention] {
 		fields["convention"] = "must be None, FullMonth, MidMonth15, HalfYear or MidQuarter"
