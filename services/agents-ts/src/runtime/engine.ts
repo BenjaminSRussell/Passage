@@ -202,11 +202,11 @@ export async function runAgent(deps: RunDeps, req: RunRequest): Promise<RunResul
     committedEntityRef: string | null = null,
     why?: string,
   ): void => {
-    seq += 1;
+    // seq advances only when the row is built, so a refused row leaves no gap.
     actions.push(
       buildActionRecord({
         runId: req.runId,
-        seq,
+        seq: seq + 1,
         toolName: tool,
         inputRedacted,
         outputRedacted: pseudo.redact(JSON.stringify(output) ?? "null"),
@@ -217,6 +217,7 @@ export async function runAgent(deps: RunDeps, req: RunRequest): Promise<RunResul
         ...(why !== undefined ? { reason: why } : {}),
       }),
     );
+    seq += 1;
   };
   // AC-47.3: once the model has proposed an action, every way out of the run
   // leaves exactly one action row for it. `pending` holds what that row must
@@ -224,9 +225,15 @@ export async function runAgent(deps: RunDeps, req: RunRequest): Promise<RunResul
   // throws): DENIED with no approver until a decision exists, then the
   // decision and its approver, so a human approval is never lost.
   let pending: { tool: string; inputRedacted: string; decision: Decision; approver: string | null } | undefined;
+  // Set once the tool call has committed, so a row written after that names the commit.
+  let committed: { ref: string | null } | undefined;
   const closePending = (output: unknown, why: string): void => {
     if (pending === undefined || actions.length > 0) return;
-    record(pending.tool, pending.inputRedacted, output, pending.decision, pending.approver, null, why);
+    try {
+      record(pending.tool, pending.inputRedacted, output, pending.decision, pending.approver, committed?.ref ?? null, why);
+    } catch {
+      // The row itself was refused (AGT-0210: raw PII in the input); no lawful row exists.
+    }
   };
   const killed = (why: string): RunResult => {
     closePending({ killed: why }, "KILLED");
@@ -326,18 +333,21 @@ export async function runAgent(deps: RunDeps, req: RunRequest): Promise<RunResul
       record(p.tool, inputRedacted, { error: out.code }, decision, approver);
       return finish("FAILED", out.code, out.message);
     }
-    record(p.tool, inputRedacted, out.output, decision, approver, out.ref ?? null);
+    committed = { ref: out.ref ?? null };
+    record(p.tool, inputRedacted, out.output, decision, approver, committed.ref);
     return finish("COMMITTED");
   } catch (err) {
     // Once the run has started it always ends in a terminal status: a provider,
     // inbox or tool port that throws fails the run instead of leaving it open.
     if (isTerminal(current())) throw err;
-    // A fixed output: the error message is not scanned for PII and stays off the row.
-    try {
-      closePending({ error: "port_error" }, "run failed before the action was recorded");
-    } catch {
-      // The row itself was refused (AGT-0210: raw PII in the input); no lawful row exists.
+    // The tool call committed but its row was not written: the run is COMMITTED,
+    // and the fallback row carries the reference instead of the full output.
+    if (committed !== undefined) {
+      closePending({ committed: committed.ref }, "committed; tool output not recorded");
+      return finish("COMMITTED", undefined, "committed; tool output not recorded");
     }
+    // A fixed output: the error message is not scanned for PII and stays off the row.
+    closePending({ error: "port_error" }, "run failed before the action was recorded");
     if (err instanceof AgentError) return finish("FAILED", err.code, err.message);
     return finish("FAILED", undefined, err instanceof Error ? err.message : String(err));
   }

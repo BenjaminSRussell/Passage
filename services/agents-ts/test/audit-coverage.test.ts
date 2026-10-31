@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { Pseudonymizer } from "../src/domain/redaction.js";
 import type { ApprovalDecision, ApprovalPort, ToolDescriptor, ToolPort, ToolResult } from "../src/runtime/engine.js";
 import { runAgent } from "../src/runtime/engine.js";
 import { APPROVER, codingDescriptor, FakeApprovals, FakeTools, INVOKER, makeDeps, makeRequest, postDescriptor, proposal, REAL_IBAN, ScriptedProvider, usd } from "./fakes.js";
@@ -125,6 +126,60 @@ describe("audit row on every path that holds a proposal (AC3)", () => {
   });
 });
 
+describe("a refused audit row does not change how the run ends (#389)", () => {
+  const OUTPUT_MISS = "missed-by-redactor";
+  const realRedact = Pseudonymizer.prototype.redact;
+  /** A redaction miss: text matching `when` passes the redactor untouched, so the write-time scanner refuses it (AGT-0210). */
+  const missRedaction = (when: (text: string) => boolean) =>
+    vi.spyOn(Pseudonymizer.prototype, "redact").mockImplementation(function (this: Pseudonymizer, text: string) {
+      return when(text) ? text : realRedact.call(this, text);
+    });
+  const rawArgs = { invoiceId: "INV-7", remitTo: REAL_IBAN };
+  const noPiiPrompt = makeRequest({ prompt: "Code invoice INV-7 from Acme." });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("a kill whose closing row is refused still ends KILLED, with no row", async () => {
+    missRedaction(() => true);
+    const deps = makeDeps({ provider: new ScriptedProvider([proposal(0.8, "1200", POST, rawArgs)]), tools: tools(), approvals: approve() });
+    deps.killSwitch = killFromCheck(3);
+    const result = await runAgent(deps, noPiiPrompt);
+    expect(result).toMatchObject({ status: "KILLED", code: undefined, reason: "kill switch activated" });
+    expect(result.actions).toHaveLength(0);
+  });
+
+  it("a commit whose row is refused after the tool call stays COMMITTED and records the reference", async () => {
+    missRedaction((text) => text.includes(OUTPUT_MISS));
+    const t = tools({ ok: true, output: { postingId: "P-100", note: OUTPUT_MISS, remitTo: REAL_IBAN }, ref: "P-100" });
+    const result = await runAgent(makeDeps({ provider: new ScriptedProvider([proposal(0.8)]), tools: t, approvals: approve() }), makeRequest());
+    expect(t.calls).toHaveLength(1);
+    expect(result).toMatchObject({ status: "COMMITTED", code: undefined, reason: "committed; tool output not recorded" });
+    expect(result.actions).toEqual([
+      expect.objectContaining({
+        seq: 1,
+        toolName: POST,
+        inputJson: '{"invoiceId":"INV-7","remitTo":"[IBAN-1]"}',
+        outputJson: '{"committed":"P-100"}',
+        decision: "APPROVED",
+        approverUserId: APPROVER,
+        committedEntityRef: "P-100",
+        reason: "committed; tool output not recorded",
+      }),
+    ]);
+  });
+
+  it("a commit whose every row is refused still ends COMMITTED, not FAILED", async () => {
+    missRedaction(() => true);
+    const t = tools({ ok: true, output: { postingId: "P-100" }, ref: "P-100" });
+    const result = await runAgent(
+      makeDeps({ provider: new ScriptedProvider([proposal(0.8, "1200", POST, rawArgs)]), tools: t, approvals: approve() }),
+      noPiiPrompt,
+    );
+    expect(t.calls).toHaveLength(1);
+    expect(result).toMatchObject({ status: "COMMITTED", reason: "committed; tool output not recorded" });
+    expect(result.actions).toHaveLength(0);
+  });
+});
+
 /** mulberry32: a small seeded PRNG so the property run is the same on every machine. */
 function prng(seed: number): () => number {
   let a = seed >>> 0;
@@ -140,6 +195,7 @@ function prng(seed: number): () => number {
 describe("audit and authorization invariants over generated runs (AC2, AC3)", () => {
   const DUTIES = ["APInvoicePost", "ARCashApply", "LedgerPost", "APInvoiceRead"];
   const CASH = "passage.ar.cash.apply";
+  const OTHER_IBAN = "GB82WEST12345698765432";
   const LEDGER = "passage.ledger.journal.reverse";
   const descriptors: Record<string, ToolDescriptor> = {
     [POST]: postDescriptor,
@@ -154,7 +210,7 @@ describe("audit and authorization invariants over generated runs (AC2, AC3)", ()
 
   it("for 5,000 seeded runs: one row per proposal, no call beyond the user's duties, no lost approver", async () => {
     const r = prng(47);
-    const counts = { committed: 0, denied: 0, killed: 0, rejected: 0, failed: 0 };
+    const counts = { committed: 0, denied: 0, killed: 0, rejected: 0, failed: 0, rawArgs: 0 };
     for (let i = 0; i < 5000; i++) {
       const duties = new Set(DUTIES.filter(() => r() < 0.5));
       const tool = pick(r, [POST, CODING, CASH, READ, LEDGER, "passage.unknown.tool"]);
@@ -169,6 +225,13 @@ describe("audit and authorization invariants over generated runs (AC2, AC3)", ()
       ] as const);
       const toolOutcome = pick(r, ["ok", "error", "throw"] as const);
       const killAt = pick(r, [0, 0, 0, 2, 3, 4, 5]);
+      // Model args that echo a raw IBAN (the prompt's or a new one) must still reach the row redacted.
+      const args = pick(r, [
+        { invoiceId: `INV-${i}`, remitTo: "[IBAN-1]" },
+        { invoiceId: `INV-${i}`, remitTo: REAL_IBAN },
+        { invoiceId: `INV-${i}`, remitTo: OTHER_IBAN, note: `was ${REAL_IBAN}` },
+      ]);
+      const rawArgs = JSON.stringify(args).includes(REAL_IBAN);
 
       const approvalsSeen: ApprovalDecision[] = [];
       const approvals: ApprovalPort = {
@@ -187,7 +250,7 @@ describe("audit and authorization invariants over generated runs (AC2, AC3)", ()
           return toolOutcome === "ok" ? { ok: true, output: { id: `doc-${i}` }, ref: `doc-${i}` } : { ok: false, code: "AGT-0214", message: "409" };
         },
       };
-      const provider = new ScriptedProvider([proposal(confidence, amount, tool)]);
+      const provider = new ScriptedProvider([proposal(confidence, amount, tool, args)]);
       const deps = makeDeps({ provider, tools: port, approvals });
       if (killAt > 0) deps.killSwitch = killFromCheck(killAt);
       const res = await runAgent(deps, makeRequest({ agent, userDuties: duties, policy: r() < 0.5 ? autoPolicy : makeRequest().policy }));
@@ -204,8 +267,13 @@ describe("audit and authorization invariants over generated runs (AC2, AC3)", ()
       expect(res.actions, `run ${i}`).toHaveLength(1);
       const row = res.actions[0]!;
       expect(row.toolName).toBe(tool);
-      expect(row.inputJson).not.toContain(REAL_IBAN);
-      expect(row.inputJson.length).toBeGreaterThan(0);
+      expect(row.inputJson, `run ${i}`).not.toContain(REAL_IBAN);
+      expect(row.inputJson, `run ${i}`).not.toContain(OTHER_IBAN);
+      expect(row.inputJson).toContain(`"invoiceId":"INV-${i}"`);
+      if (rawArgs) {
+        expect(row.inputJson).toMatch(/"remitTo":"\[IBAN-\d\]"/);
+        counts.rawArgs++;
+      }
       expect(row.outputHash).toBe(createHash("sha256").update(row.outputJson).digest("hex"));
       expect(row.decidedAt).toBe("2026-10-21T00:00:00.000Z");
       // A human decision is on the row whenever the inbox returned one.
