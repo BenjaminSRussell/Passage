@@ -362,9 +362,9 @@ func requireOtherTenantAdmin(ctx context.Context, tx pgx.Tx, tenantID, endingID 
 		return err
 	}
 	var others int
-	if err := tx.QueryRow(ctx, `select count(*) from identity_role_assignments
-where tenant_id = $1 and role = $2 and legal_entity_id is null and assignment_id <> $3
-  and valid_from <= clock_timestamp() and (valid_to is null or valid_to > greatest($4::timestamptz, clock_timestamp()))`,
+	if err := tx.QueryRow(ctx, `select count(*) from identity_role_assignments a join identity_users u using (tenant_id, user_id)
+where a.tenant_id = $1 and a.role = $2 and a.legal_entity_id is null and a.assignment_id <> $3 and u.status = 'active'
+  and a.valid_from <= clock_timestamp() and (a.valid_to is null or a.valid_to > greatest($4::timestamptz, clock_timestamp()))`,
 		tenantID, tenant.DutyTenantAdmin, endingID, validTo).Scan(&others); err != nil {
 		return err
 	}

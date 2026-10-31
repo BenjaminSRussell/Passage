@@ -22,7 +22,9 @@ import (
 const (
 	codeTenantNotFound = "IDN-TENANT-NOT-FOUND"
 	codeTenantExists   = "IDN-TENANT-EXISTS"
+	codeTenantInactive = "IDN-TENANT-INACTIVE"
 	maxDisplayName     = 200
+	maxIdpSubject      = 255
 )
 
 var realmNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,62}$`)
@@ -112,6 +114,7 @@ func (a *TenantsAPI) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.DisplayName = strings.TrimSpace(req.DisplayName)
+	req.AdminIdpSubject = strings.TrimSpace(req.AdminIdpSubject)
 	fields := map[string]string{}
 	if !realmNamePattern.MatchString(req.RealmName) {
 		fields["realmName"] = "must be 2-63 lowercase letters, digits or hyphens, starting with a letter or digit"
@@ -121,6 +124,9 @@ func (a *TenantsAPI) create(w http.ResponseWriter, r *http.Request) {
 	}
 	if (req.AdminUserID == "") != (req.AdminIdpSubject == "") || (req.AdminUserID != "" && !validUUID(req.AdminUserID)) {
 		fields["adminUserId"] = "adminUserId (UUID) and adminIdpSubject are given together"
+	}
+	if len(req.AdminIdpSubject) > maxIdpSubject {
+		fields["adminIdpSubject"] = "must be at most 255 characters"
 	}
 	if len(fields) > 0 {
 		invalidFields(w, r, "invalid tenant", fields)
@@ -213,6 +219,15 @@ func (a *TenantsAPI) grantAdmin(w http.ResponseWriter, r *http.Request) {
 		var status, idpSubject string
 		if _, err := tx.Exec(r.Context(), `select set_config('passage.tenant_id', $1, true)`, id); err != nil {
 			return err
+		}
+		var tenantStatus string
+		if err := tx.QueryRow(r.Context(), `select status from identity_tenants where tenant_id = $1`, id).Scan(&tenantStatus); errors.Is(err, pgx.ErrNoRows) {
+			return httpx.NewProblem(http.StatusNotFound, codeTenantNotFound, "tenant not found")
+		} else if err != nil {
+			return err
+		}
+		if tenantStatus != "active" {
+			return httpx.NewProblem(http.StatusConflict, codeTenantInactive, "tenant is not active")
 		}
 		err := tx.QueryRow(r.Context(), `select status, idp_subject from identity_users where tenant_id = $1 and user_id = $2`, id, req.UserID).Scan(&status, &idpSubject)
 		if errors.Is(err, pgx.ErrNoRows) {

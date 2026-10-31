@@ -204,6 +204,30 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /v1/tenants/{id}/admins:
+    post:
+      operationId: grantTenantAdministrator
+      x-passage-duty: Maintain tenants
+      description: Operator only. Grants the tenant-wide tenant.administer duty to an active user of an active tenant other than the operator tenant, and never to the caller. Audited in the target and operator tenants.
+      security: [{ gatewayHeaders: [] }]
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/UserHeader'
+        - $ref: '#/components/parameters/Duties'
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GrantTenantAdministrator' }
+      responses:
+        '201': { description: Granted., content: { application/json: { schema: { $ref: '#/components/schemas/RoleAssignment' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /v1/legal-entities:
     post:
       operationId: createLegalEntity
@@ -477,6 +501,14 @@ components:
       properties:
         realmName: { type: string, pattern: '^[a-z0-9][a-z0-9-]{1,62}$' }
         displayName: { type: string, minLength: 1, maxLength: 200 }
+        adminUserId: { type: string, format: uuid, description: Initial tenant.administer holder; given together with adminIdpSubject. }
+        adminIdpSubject: { type: string, minLength: 1, maxLength: 255 }
+    GrantTenantAdministrator:
+      type: object
+      required: [userId, reason]
+      properties:
+        userId: { type: string, format: uuid }
+        reason: { type: string, minLength: 1, maxLength: 500 }
     Tenant:
       type: object
       required: [tenantId, realmName, displayName, status, createdAt]

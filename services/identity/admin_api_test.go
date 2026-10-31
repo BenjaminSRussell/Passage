@@ -879,6 +879,14 @@ func TestOperatorGrantsTenantAdministrator(t *testing.T) {
 		}
 	})
 
+	t.Run("an oversized subject and an inactive tenant are refused", func(t *testing.T) {
+		wantProblem(t, f.do(f.operatorCaller(), http.MethodPost, "/v1/tenants", map[string]string{"realmName": "long-co", "displayName": "Long", "adminUserId": adminUser, "adminIdpSubject": strings.Repeat("s", 256)}), http.StatusBadRequest, "COM-0001")
+		if _, err := f.admin.Exec(context.Background(), `update identity_tenants set status = 'suspended' where tenant_id = $1`, f.tenantB); err != nil {
+			t.Fatal(err)
+		}
+		wantProblem(t, f.do(f.operatorCaller(), http.MethodPost, "/v1/tenants/"+f.tenantB+"/admins", map[string]string{"userId": userID, "reason": "x"}), http.StatusConflict, "IDN-TENANT-INACTIVE")
+	})
+
 	t.Run("only the operator may grant it", func(t *testing.T) {
 		wantProblem(t, f.do(f.adminOf(f.tenantA, dutyTenants), http.MethodPost, "/v1/tenants/"+f.tenantA+"/admins", map[string]string{"userId": userID, "reason": "x"}), http.StatusForbidden, "AUTH-0003")
 	})
@@ -929,4 +937,18 @@ func TestConcurrentEndsKeepOneTenantAdministrator(t *testing.T) {
 	if err := f.admin.QueryRow(context.Background(), `select count(*) from identity_role_assignments where tenant_id = $1 and role = 'tenant.administer' and (valid_to is null or valid_to > clock_timestamp())`, f.tenantA).Scan(&active); err != nil || active != 1 {
 		t.Fatalf("active tenant administrators = %d (%v), want 1", active, err)
 	}
+}
+
+func TestDeprovisionedAdministratorDoesNotCountAsLast(t *testing.T) {
+	f := newAdminFixture(t)
+	admin := f.adminOf(f.tenantA, dutyRoles)
+	secondUser := testkit.TenantID(74)
+	if _, err := f.admin.Exec(context.Background(), `insert into identity_users (tenant_id, user_id, idp_subject, status) values ($1, $2, 'subject-gone', 'deprovisioned')`, f.tenantA, secondUser); err != nil {
+		t.Fatal(err)
+	}
+	live := decode[assignmentRow](t, f.do(admin, http.MethodPost, "/v1/authz/assignments", map[string]any{"userId": userID, "role": dutyTenantAdmin}), http.StatusCreated)
+	if _, err := f.admin.Exec(context.Background(), `insert into identity_role_assignments (tenant_id, assignment_id, user_id, role) values ($1, $2, $3, 'tenant.administer')`, f.tenantA, testkit.TenantID(75), secondUser); err != nil {
+		t.Fatal(err)
+	}
+	wantProblem(t, f.do(admin, http.MethodDelete, "/v1/authz/assignments/"+live.AssignmentID, nil), http.StatusConflict, "IDN-LAST-TENANT-ADMIN")
 }
