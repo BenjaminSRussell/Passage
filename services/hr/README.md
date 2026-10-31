@@ -206,8 +206,8 @@ Configuration is read from the environment and validated at startup:
 | Variable | Required | Meaning |
 |---|---|---|
 | `DATABASE_URL` | yes | Postgres as `passage_app` (no BYPASSRLS) |
-| `FIELDCRYPT_KEYS` / `FIELDCRYPT_KEYS_FILE`, `FIELDCRYPT_CURRENT_KEY_ID` | yes | `id=base64(32 bytes)` pairs and the key id new P3 values use (platform `fieldcrypt`); the service refuses to start without keys |
-| `HR_PII_KEY` | no | legacy base64 32-byte key; only opens P3 values written before fieldcrypt. Keep it until every row is re-sealed |
+| `FIELDCRYPT_KEYS` / `FIELDCRYPT_KEYS_FILE`, `FIELDCRYPT_CURRENT_KEY_ID` | yes | `id=base64(32 bytes)` pairs and the key id new P3 values use (platform `fieldcrypt`); the service refuses to start without keys. The chart mounts the keys as `FIELDCRYPT_KEYS_FILE` |
+| `HR_PII_KEY` | no | legacy base64 32-byte key; only opens P3 values written before fieldcrypt. Keep it until `hr reseal-pii` reports `rewritten=0` for every tenant |
 | `HR_MANAGER_MAX_DEPTH` | no | vacant-manager walk depth, 1–20, default 10 |
 | `MIGRATE_ON_START` | no | `true` applies migrations at start (dev only) |
 | `HTTP_ADDR`, `ADMIN_ADDR` | no | default `:8080` and `:9090` (`/metrics`) |
@@ -218,6 +218,31 @@ go run ./cmd/hr
 ```
 
 Health: `GET /healthz` (liveness), `GET /readyz` (Postgres ping, 500 ms).
+
+### Re-sealing P3 values (`hr reseal-pii`)
+
+`hr reseal-pii <tenant-id>...` runs with the service's own environment (same
+`DATABASE_URL`, fieldcrypt keys and optional `HR_PII_KEY`) and, per tenant,
+re-seals every `worker_pii` value that opens only through `HR_PII_KEY` or names
+an older fieldcrypt key id under `FIELDCRYPT_CURRENT_KEY_ID`. It walks rows in
+batches of 500, one transaction each, writes a `p3_change` audit row per
+rewritten worker (actor `hr-reseal-pii`, value unchanged) and logs
+`rewritten=<n>` per tenant. It is safe to re-run; a value that opens under
+neither key stops the run and names the worker. Migration `0007` grants
+`passage_app` UPDATE on the two sealed columns only.
+
+```sh
+go run ./cmd/hr reseal-pii <tenant-id> [<tenant-id>...]   # in a cluster: the hr binary with the pod's env
+```
+
+Use it after a fieldcrypt rotation (keep the old key configured until it reports
+`rewritten=0`) and to retire `HR_PII_KEY`: once every tenant reports
+`rewritten=0` and `hr_pii_legacy_opens_total` stays 0, remove `HR_PII_KEY`.
+
+Opens are observable on `/metrics`: `hr_pii_legacy_opens_total` counts values
+that needed `HR_PII_KEY`, `hr_pii_open_failures_total` values that opened under
+neither key. Each is also logged (WARN / ERROR) with the tenant, field, the key id
+the envelope names and which path failed, never the value.
 
 ## Test
 
@@ -408,7 +433,7 @@ internal/domain/   pure rules: effective dating, hierarchy, accrual, PII sealing
 internal/store/    pgx repositories, RLS-scoped transactions, outbox writes
 internal/api/      HTTP handlers, DTOs, validation, duties
 internal/events/   event type constants and payloads
-migrations/        0001_hr_core.sql, 0002_absence.sql, 0003_benefits.sql, 0004_grants.sql, 0005_skills.sql, 0006_courses.sql (applied in order by dbx.Migrate)
+migrations/        0001_hr_core.sql, 0002_absence.sql, 0003_benefits.sql, 0004_grants.sql, 0005_skills.sql, 0006_courses.sql, 0007_pii_reseal_grant.sql (applied in order by dbx.Migrate)
 testdata/          hr-benefit-100.json (AC-42.5 fixture)
 api/openapi.yaml   OpenAPI 3.1 for every endpoint above
 events/asyncapi.yaml  AsyncAPI 3 for the eight events published

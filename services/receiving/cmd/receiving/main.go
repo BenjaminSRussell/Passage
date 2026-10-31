@@ -76,6 +76,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err != nil {
 		return err
 	}
+	ports.FieldCrypt = keys
 	a := api.New(store.New(pool).WithPendingPool(pendingPool).WithFieldCrypt(keys), ports)
 	router := httpx.NewRouter()
 	a.Register(router)

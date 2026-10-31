@@ -111,11 +111,21 @@ func (k *Keys) Seal(tenantID, field string, plain []byte) ([]byte, error) {
 	return aead.Seal(out, nonce, plain, additional(tenantID, field)), nil
 }
 
-func (k *Keys) Open(tenantID, field string, sealed []byte) ([]byte, error) {
+// KeyID returns the master key id a sealed value's envelope names, or false when sealed is not a v1
+// envelope. It does not authenticate the value, so it only tells a re-seal job or a log line which key
+// a value claims.
+func KeyID(sealed []byte) (string, bool) {
 	if len(sealed) < 2 || sealed[0] != envelopeV1 || len(sealed) < 2+int(sealed[1]) {
+		return "", false
+	}
+	return string(sealed[2 : 2+int(sealed[1])]), true
+}
+
+func (k *Keys) Open(tenantID, field string, sealed []byte) ([]byte, error) {
+	keyID, ok := KeyID(sealed)
+	if !ok {
 		return nil, ErrOpen
 	}
-	keyID := string(sealed[2 : 2+int(sealed[1])])
 	aead, err := k.aead(keyID, tenantID)
 	if err != nil {
 		return nil, ErrOpen

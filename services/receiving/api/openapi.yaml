@@ -285,7 +285,7 @@ paths:
     post:
       operationId: createOneTimePayee
       x-passage-duty: VendorInvoicePost
-      description: Records the document-level payee of a vendor invoice for the legal entity's one-time vendor account (FR-18.19). Name, address, tax id, email and bank account are encrypted with platform fieldcrypt (a per-tenant data key derived from the service key in FIELDCRYPT_KEYS_FILE or FIELDCRYPT_KEYS, with tenant and field bound as additional data) before they reach the database; the payee is immutable once stored. The response, error bodies, logs and events carry the payee id, never its data: a validation error names the field and the rule, not the value. The bank account is validated like a vendor bank account (IBAN mod-97 or ABA checksum, AP-BNK-001). Reference the returned id as oneTimePayeeId on POST /v1/receiving/invoices:post. There is no read endpoint; payment (FR-19.23) needs a separate decrypting read.
+      description: Records the document-level payee of a vendor invoice for the legal entity's one-time vendor account (FR-18.19). Name, address, tax id, email and bank account are encrypted with platform fieldcrypt (a per-tenant data key derived from the service key in FIELDCRYPT_KEYS_FILE or FIELDCRYPT_KEYS, with tenant and field bound as additional data) before they reach the database; the payee is immutable once stored. The response, error bodies, logs and events carry the payee id, never its data: a validation error names the field and the rule, not the value. The bank account is validated like a vendor bank account (IBAN mod-97 and ISO 13616 per-country length, or ABA checksum, AP-BNK-001). With fieldcrypt keys the Idempotency-Key record stores an HMAC of the request under the tenant's key, not a plain digest of the payee data. Reference the returned id as oneTimePayeeId on POST /v1/receiving/invoices:post. There is no read endpoint; payment (FR-19.23) needs a separate decrypting read. There is no delete or retention endpoint either: erasure of a payee is not built (see NOT-IMPLEMENTED.md).
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -304,7 +304,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
         '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001 no authenticated user.' }
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
-        '422': { $ref: '#/components/responses/Problem', description: 'AP-BNK-001 the bank account failed its checksum or format check; COM-0409.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'AP-BNK-001 the bank account failed its checksum, IBAN country length or format check; COM-0409.' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
         '503': { $ref: '#/components/responses/Problem', description: 'RCV-CRY-001 no field encryption keys are configured.' }
   /v1/receiving/invoice-adjustments:post:

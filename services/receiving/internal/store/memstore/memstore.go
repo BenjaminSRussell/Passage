@@ -817,8 +817,9 @@ func (s *Store) CreateOneTimePayee(ctx context.Context, in store.OneTimePayee) (
 func (s *Store) PostInvoice(ctx context.Context, in store.Invoice, fn store.InvoiceFunc) (out store.Invoice, err error) {
 	err = s.with(ctx, func(t *tenantData) error {
 		if in.OneTimePayeeID != "" {
+			// Like the Postgres legal-entity RLS policy: a payee outside the caller's scope is not found.
 			payee, ok := t.payees[in.OneTimePayeeID]
-			if !ok {
+			if principal, _ := tenant.FromContext(ctx); !ok || !tenant.InLegalEntityScope(principal, payee.LegalEntityID) {
 				return store.ErrPayeeNotFound
 			}
 			if payee.LegalEntityID != in.LegalEntityID {

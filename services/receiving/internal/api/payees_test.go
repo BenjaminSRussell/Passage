@@ -174,7 +174,11 @@ func TestInvoice_PayeeMustExistAndBelongToTheInvoiceEntity(t *testing.T) {
 	}
 	elsewhere := decode[struct{ ID string }](t, rg.call(http.MethodPost, payeesPath, payeeJSON(map[string]any{"legalEntityId": ledgerID}),
 		duty("VendorInvoicePost", rg.key(), entityHeader, ledgerID)), http.StatusCreated)
-	problemCode(t, rg.call(http.MethodPost, invoicesPath, invoiceWithPayee("OT-1", r.ID, elsewhere.ID), rg.apPoster()), http.StatusUnprocessableEntity, "RCV-VAL-001")
+	// Outside the caller's legal-entity scope the payee is hidden (404), as under Postgres RLS (#335).
+	problemCode(t, rg.call(http.MethodPost, invoicesPath, invoiceWithPayee("OT-1", r.ID, elsewhere.ID), rg.apPoster()), http.StatusNotFound, "RCV-NF-006")
+	// In scope but of another entity than the invoice: a validation error.
+	problemCode(t, rg.call(http.MethodPost, invoicesPath, invoiceWithPayee("OT-1", r.ID, elsewhere.ID),
+		duty("VendorInvoicePost", rg.key(), entityHeader, legalEntityID+","+ledgerID)), http.StatusUnprocessableEntity, "RCV-VAL-001")
 }
 
 func TestInvoice_AuditHoldAndReleaseKeepThePayeeOnBothEvents(t *testing.T) {
