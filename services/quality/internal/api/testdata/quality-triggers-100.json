@@ -1,0 +1,2737 @@
+{
+ "associations": [
+  {
+   "itemRef": "e6968056-5e1c-5776-8354-557279707aac",
+   "itemScope": "ITEM",
+   "partyRef": null,
+   "partyScope": "ALL",
+   "samplingPlan": {
+    "aql": "2.5",
+    "method": "AQL"
+   },
+   "sequence": 10,
+   "siteRef": null,
+   "siteScope": "ALL",
+   "testGroup": "RCV-I1",
+   "trigger": "PURCHASE_RECEIPT"
+  },
+  {
+   "itemRef": "e6968056-5e1c-5776-8354-557279707aac",
+   "itemScope": "ITEM",
+   "partyRef": "83f3bc54-3680-5f79-8fbc-7be0e12b2900",
+   "partyScope": "PARTY",
+   "samplingPlan": {
+    "aql": "1.0",
+    "method": "AQL"
+   },
+   "sequence": 20,
+   "siteRef": null,
+   "siteScope": "ALL",
+   "testGroup": "RCV-I1-V1",
+   "trigger": "PURCHASE_RECEIPT"
+  },
+  {
+   "itemRef": "8eef131e-6f18-5918-bda4-3281ee473486",
+   "itemScope": "ITEM_GROUP",
+   "partyRef": null,
+   "partyScope": "ALL",
+   "samplingPlan": {
+    "fixedQty": "5",
+    "method": "FIXED"
+   },
+   "sequence": 5,
+   "siteRef": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+   "siteScope": "SITE",
+   "testGroup": "RCV-G1-S1",
+   "trigger": "PURCHASE_RECEIPT"
+  },
+  {
+   "itemRef": null,
+   "itemScope": "ALL",
+   "partyRef": "c7ea17d7-1ecc-5c0b-8b63-0cc4310fa3f2",
+   "partyScope": "PARTY",
+   "samplingPlan": {
+    "method": "PERCENT",
+    "percent": "10"
+   },
+   "sequence": 30,
+   "siteRef": null,
+   "siteScope": "ALL",
+   "testGroup": "RCV-V2",
+   "trigger": "PURCHASE_RECEIPT"
+  },
+  {
+   "itemRef": null,
+   "itemScope": "ALL",
+   "partyRef": null,
+   "partyScope": "ALL",
+   "samplingPlan": {
+    "aql": "4.0",
+    "method": "AQL"
+   },
+   "sequence": 40,
+   "siteRef": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+   "siteScope": "SITE",
+   "testGroup": "RCV-S2",
+   "trigger": "PURCHASE_RECEIPT"
+  },
+  {
+   "itemRef": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+   "itemScope": "ITEM_GROUP",
+   "partyRef": "c7ea17d7-1ecc-5c0b-8b63-0cc4310fa3f2",
+   "partyScope": "PARTY",
+   "samplingPlan": {
+    "aql": "2.5",
+    "method": "AQL"
+   },
+   "sequence": 1,
+   "siteRef": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+   "siteScope": "SITE",
+   "testGroup": "RCV-G2-V2-S2",
+   "trigger": "PURCHASE_RECEIPT"
+  },
+  {
+   "itemRef": "2b60ad93-e1d0-544b-958f-5a1b59d13590",
+   "itemScope": "ITEM",
+   "partyRef": null,
+   "partyScope": "ALL",
+   "samplingPlan": {
+    "method": "PERCENT",
+    "percent": "2.5"
+   },
+   "sequence": 60,
+   "siteRef": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+   "siteScope": "SITE",
+   "testGroup": "RCV-I4-S2",
+   "trigger": "PURCHASE_RECEIPT"
+  },
+  {
+   "itemRef": "51992f40-646c-5144-93b6-f75bdf1d7a17",
+   "itemScope": "ITEM",
+   "partyRef": "04b784d2-6053-57d7-810d-0351742a25cf",
+   "partyScope": "PARTY",
+   "samplingPlan": {
+    "fixedQty": "5",
+    "method": "FIXED"
+   },
+   "sequence": 70,
+   "siteRef": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+   "siteScope": "SITE",
+   "testGroup": "RCV-I2-V3-S1",
+   "trigger": "PURCHASE_RECEIPT"
+  },
+  {
+   "itemRef": "73d7b3e8-4231-5b6f-8ff4-d06951ca6c02",
+   "itemScope": "ITEM",
+   "partyRef": null,
+   "partyScope": "ALL",
+   "samplingPlan": {
+    "fixedQty": "5",
+    "method": "FIXED"
+   },
+   "sequence": 15,
+   "siteRef": null,
+   "siteScope": "ALL",
+   "testGroup": "RCV-I5-A",
+   "trigger": "PURCHASE_RECEIPT"
+  },
+  {
+   "itemRef": "73d7b3e8-4231-5b6f-8ff4-d06951ca6c02",
+   "itemScope": "ITEM",
+   "partyRef": null,
+   "partyScope": "ALL",
+   "samplingPlan": {
+    "aql": "1.0",
+    "method": "AQL"
+   },
+   "sequence": 12,
+   "siteRef": null,
+   "siteScope": "ALL",
+   "testGroup": "RCV-I5-B",
+   "trigger": "PURCHASE_RECEIPT"
+  },
+  {
+   "itemRef": "8eef131e-6f18-5918-bda4-3281ee473486",
+   "itemScope": "ITEM_GROUP",
+   "partyRef": null,
+   "partyScope": "ALL",
+   "samplingPlan": {
+    "aql": "2.5",
+    "method": "AQL"
+   },
+   "sequence": 10,
+   "siteRef": null,
+   "siteScope": "ALL",
+   "testGroup": "RAF-G1",
+   "trigger": "PRODUCTION_RAF"
+  },
+  {
+   "itemRef": "10d4d464-0da7-5253-9a0b-90bafa1b0994",
+   "itemScope": "ITEM",
+   "partyRef": null,
+   "partyScope": "ALL",
+   "samplingPlan": {
+    "fixedQty": "5",
+    "method": "FIXED"
+   },
+   "sequence": 20,
+   "siteRef": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+   "siteScope": "SITE",
+   "testGroup": "RAF-I3-S2",
+   "trigger": "PRODUCTION_RAF"
+  },
+  {
+   "itemRef": null,
+   "itemScope": "ALL",
+   "partyRef": null,
+   "partyScope": "ALL",
+   "samplingPlan": {
+    "method": "PERCENT",
+    "percent": "10"
+   },
+   "sequence": 30,
+   "siteRef": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+   "siteScope": "SITE",
+   "testGroup": "RAF-S1",
+   "trigger": "PRODUCTION_RAF"
+  },
+  {
+   "itemRef": "10d4d464-0da7-5253-9a0b-90bafa1b0994",
+   "itemScope": "ITEM",
+   "partyRef": null,
+   "partyScope": "ALL",
+   "samplingPlan": {
+    "aql": "4.0",
+    "method": "AQL"
+   },
+   "sequence": 25,
+   "siteRef": null,
+   "siteScope": "ALL",
+   "testGroup": "RAF-I3",
+   "trigger": "PRODUCTION_RAF"
+  },
+  {
+   "itemRef": "2b60ad93-e1d0-544b-958f-5a1b59d13590",
+   "itemScope": "ITEM",
+   "partyRef": null,
+   "partyScope": "ALL",
+   "samplingPlan": {
+    "aql": "1.0",
+    "method": "AQL"
+   },
+   "sequence": 50,
+   "siteRef": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+   "siteScope": "SITE",
+   "testGroup": "RAF-I4-S1",
+   "trigger": "PRODUCTION_RAF"
+  },
+  {
+   "itemRef": "29d3005b-f269-5282-b106-ab5d3b5c16f7",
+   "itemScope": "ITEM",
+   "partyRef": "83f3bc54-3680-5f79-8fbc-7be0e12b2900",
+   "partyScope": "PARTY",
+   "samplingPlan": {
+    "fixedQty": "5",
+    "method": "FIXED"
+   },
+   "sequence": 0,
+   "siteRef": null,
+   "siteScope": "ALL",
+   "testGroup": "RAF-I6-V1",
+   "trigger": "PRODUCTION_RAF"
+  },
+  {
+   "itemRef": null,
+   "itemScope": "ALL",
+   "partyRef": null,
+   "partyScope": "ALL",
+   "samplingPlan": {
+    "fixedQty": "5",
+    "method": "FIXED"
+   },
+   "sequence": 0,
+   "siteRef": null,
+   "siteScope": "ALL",
+   "testGroup": "PICK-ALL",
+   "trigger": "SALES_PICK"
+  },
+  {
+   "itemRef": null,
+   "itemScope": "ALL",
+   "partyRef": null,
+   "partyScope": "ALL",
+   "samplingPlan": {
+    "fixedQty": "5",
+    "method": "FIXED"
+   },
+   "sequence": 0,
+   "siteRef": null,
+   "siteScope": "ALL",
+   "testGroup": "XFER-ALL",
+   "trigger": "TRANSFER_RECEIPT"
+  }
+ ],
+ "events": [
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "e6968056-5e1c-5776-8354-557279707aac",
+    "lotQty": "5",
+    "partyId": "83f3bc54-3680-5f79-8fbc-7be0e12b2900",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "c06b5d2e-b951-54bc-a87d-e62af1df5e23",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "aca09e33-86cf-5e39-8383-5772be3a59ce",
+   "kind": "receipt",
+   "names": {
+    "item": "I1",
+    "party": "V1",
+    "site": "S1"
+   },
+   "seq": 1
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "e6968056-5e1c-5776-8354-557279707aac",
+    "lotQty": "50",
+    "partyId": "83f3bc54-3680-5f79-8fbc-7be0e12b2900",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "caf00a67-1204-5ab0-96a7-d9b9dbfecbe2",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "cff595d8-069b-5e19-b6d2-43bb8d65c85a",
+   "kind": "receipt",
+   "names": {
+    "item": "I1",
+    "party": "V1",
+    "site": "S2"
+   },
+   "seq": 2
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "e6968056-5e1c-5776-8354-557279707aac",
+    "lotQty": "51",
+    "partyId": "c7ea17d7-1ecc-5c0b-8b63-0cc4310fa3f2",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "3b86c820-bbf6-58f1-ae4a-88b44ebc9dfe",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "c9b7e2dc-b4c4-5abb-967b-7261e18fafe3",
+   "kind": "receipt",
+   "names": {
+    "item": "I1",
+    "party": "V2",
+    "site": "S1"
+   },
+   "seq": 3
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "e6968056-5e1c-5776-8354-557279707aac",
+    "lotQty": "120",
+    "partyId": "c7ea17d7-1ecc-5c0b-8b63-0cc4310fa3f2",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "c6733a84-76aa-5e18-b4d5-f7b68309fdf9",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "03f8ef0e-7288-5cb4-9cbc-cdde538e5a71",
+   "kind": "receipt",
+   "names": {
+    "item": "I1",
+    "party": "V2",
+    "site": "S2"
+   },
+   "seq": 4
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "e6968056-5e1c-5776-8354-557279707aac",
+    "lotQty": "500",
+    "partyId": "04b784d2-6053-57d7-810d-0351742a25cf",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "b60cd415-76ad-5c18-9c94-cb9ebab22e4a",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "030791b6-94c5-55c8-92fd-43928cd46259",
+   "kind": "receipt",
+   "names": {
+    "item": "I1",
+    "party": "V3",
+    "site": "S1"
+   },
+   "seq": 5
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "e6968056-5e1c-5776-8354-557279707aac",
+    "lotQty": "501",
+    "partyId": "04b784d2-6053-57d7-810d-0351742a25cf",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "2eb39693-c351-58b9-a89b-d53c0a1be09c",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "6bf64b3f-cf3d-52cd-87b8-8ea6cc5f412b",
+   "kind": "receipt",
+   "names": {
+    "item": "I1",
+    "party": "V3",
+    "site": "S2"
+   },
+   "seq": 6
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "51992f40-646c-5144-93b6-f75bdf1d7a17",
+    "lotQty": "1200",
+    "partyId": "83f3bc54-3680-5f79-8fbc-7be0e12b2900",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "d93cb1da-a145-5279-8b38-91239931f2a1",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "f8592386-d051-54e2-991e-8a032ca9c844",
+   "kind": "receipt",
+   "names": {
+    "item": "I2",
+    "party": "V1",
+    "site": "S1"
+   },
+   "seq": 7
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "51992f40-646c-5144-93b6-f75bdf1d7a17",
+    "lotQty": "3200",
+    "partyId": "83f3bc54-3680-5f79-8fbc-7be0e12b2900",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "20af4dbc-fe68-5d64-ba87-b83113d1713c",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "d4f878f2-dc2b-549d-b073-b4906c3782e7",
+   "kind": "receipt",
+   "names": {
+    "item": "I2",
+    "party": "V1",
+    "site": "S2"
+   },
+   "seq": 8
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "51992f40-646c-5144-93b6-f75bdf1d7a17",
+    "lotQty": "10001",
+    "partyId": "c7ea17d7-1ecc-5c0b-8b63-0cc4310fa3f2",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "d7cb2c04-062e-5a57-9066-caae500f8fda",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "aa116b7d-eef5-5739-997b-e2ee6cca8ed1",
+   "kind": "receipt",
+   "names": {
+    "item": "I2",
+    "party": "V2",
+    "site": "S1"
+   },
+   "seq": 9
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "51992f40-646c-5144-93b6-f75bdf1d7a17",
+    "lotQty": "35000",
+    "partyId": "c7ea17d7-1ecc-5c0b-8b63-0cc4310fa3f2",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "058d0796-2aaa-5085-b0a4-33e709a1b036",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "ab0bc453-cb43-56ac-8c41-57d6d622f081",
+   "kind": "receipt",
+   "names": {
+    "item": "I2",
+    "party": "V2",
+    "site": "S2"
+   },
+   "seq": 10
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "51992f40-646c-5144-93b6-f75bdf1d7a17",
+    "lotQty": "7",
+    "partyId": "04b784d2-6053-57d7-810d-0351742a25cf",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "b3b218f7-7f97-5a6f-a8f3-c7d1de61b442",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "64e77f7d-eb3a-5a8a-bac5-51e8dd7ec598",
+   "kind": "receipt",
+   "names": {
+    "item": "I2",
+    "party": "V3",
+    "site": "S1"
+   },
+   "seq": 11
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "51992f40-646c-5144-93b6-f75bdf1d7a17",
+    "lotQty": "26",
+    "partyId": "04b784d2-6053-57d7-810d-0351742a25cf",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "996a2601-cbd9-5b8e-8675-65ea445c5da9",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "17d55d75-962b-57b3-81cf-47c37b25a8e6",
+   "kind": "receipt",
+   "names": {
+    "item": "I2",
+    "party": "V3",
+    "site": "S2"
+   },
+   "seq": 12
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "10d4d464-0da7-5253-9a0b-90bafa1b0994",
+    "lotQty": "90",
+    "partyId": "83f3bc54-3680-5f79-8fbc-7be0e12b2900",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "1a7feb7e-58cd-51a8-a30a-e71201a2aabc",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "1960dcb5-bba5-5294-9be5-a76002bcdc1b",
+   "kind": "receipt",
+   "names": {
+    "item": "I3",
+    "party": "V1",
+    "site": "S1"
+   },
+   "seq": 13
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "10d4d464-0da7-5253-9a0b-90bafa1b0994",
+    "lotQty": "151",
+    "partyId": "83f3bc54-3680-5f79-8fbc-7be0e12b2900",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "c355702b-898a-50ad-8c8c-376598816cc4",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "8214172e-53e4-547d-aa4e-bc0e4f7e232c",
+   "kind": "receipt",
+   "names": {
+    "item": "I3",
+    "party": "V1",
+    "site": "S2"
+   },
+   "seq": 14
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "10d4d464-0da7-5253-9a0b-90bafa1b0994",
+    "lotQty": "280",
+    "partyId": "c7ea17d7-1ecc-5c0b-8b63-0cc4310fa3f2",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "c7d41c7a-77bf-5184-a58c-87e6cdd1a674",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "24dd3a0c-fe8a-5916-8e7a-1fbe9b9c024d",
+   "kind": "receipt",
+   "names": {
+    "item": "I3",
+    "party": "V2",
+    "site": "S1"
+   },
+   "seq": 15
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "10d4d464-0da7-5253-9a0b-90bafa1b0994",
+    "lotQty": "2",
+    "partyId": "c7ea17d7-1ecc-5c0b-8b63-0cc4310fa3f2",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "cc825baf-9711-58e5-8a67-6b42cfb351e1",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "b3937822-f58a-56cc-9ccc-a37717c0d371",
+   "kind": "receipt",
+   "names": {
+    "item": "I3",
+    "party": "V2",
+    "site": "S2"
+   },
+   "seq": 16
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "10d4d464-0da7-5253-9a0b-90bafa1b0994",
+    "lotQty": "15",
+    "partyId": "04b784d2-6053-57d7-810d-0351742a25cf",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "f10472a0-f076-53e4-b6e9-b86788cf1697",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "45ac660e-6229-57c0-a8dc-a81f6a939255",
+   "kind": "receipt",
+   "names": {
+    "item": "I3",
+    "party": "V3",
+    "site": "S1"
+   },
+   "seq": 17
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "10d4d464-0da7-5253-9a0b-90bafa1b0994",
+    "lotQty": "16",
+    "partyId": "04b784d2-6053-57d7-810d-0351742a25cf",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "cc1bc684-c083-55a7-8a4d-c314568e4a48",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "5903c8b1-9ffe-5c74-aba2-8fcff6c4c73b",
+   "kind": "receipt",
+   "names": {
+    "item": "I3",
+    "party": "V3",
+    "site": "S2"
+   },
+   "seq": 18
+  },
+  {
+   "body": {
+    "itemGroupId": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+    "itemId": "2b60ad93-e1d0-544b-958f-5a1b59d13590",
+    "lotQty": "1201",
+    "partyId": "83f3bc54-3680-5f79-8fbc-7be0e12b2900",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "f93710f3-dc0a-5974-9968-5f5f9d521c9e",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "f0c30c89-9dac-5d53-a375-2cba6a2f61f5",
+   "kind": "receipt",
+   "names": {
+    "item": "I4",
+    "party": "V1",
+    "site": "S1"
+   },
+   "seq": 19
+  },
+  {
+   "body": {
+    "itemGroupId": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+    "itemId": "2b60ad93-e1d0-544b-958f-5a1b59d13590",
+    "lotQty": "150001",
+    "partyId": "83f3bc54-3680-5f79-8fbc-7be0e12b2900",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "963d9171-e919-51bd-bb15-5ca7a8250933",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "c0093a3a-7412-531c-b3c4-185de2df7cc1",
+   "kind": "receipt",
+   "names": {
+    "item": "I4",
+    "party": "V1",
+    "site": "S2"
+   },
+   "seq": 20
+  },
+  {
+   "body": {
+    "itemGroupId": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+    "itemId": "2b60ad93-e1d0-544b-958f-5a1b59d13590",
+    "lotQty": "5",
+    "partyId": "c7ea17d7-1ecc-5c0b-8b63-0cc4310fa3f2",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "3852a092-e172-51b7-8e74-b005066144d6",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "2c5d52e2-e9f3-5da4-863e-904156894337",
+   "kind": "receipt",
+   "names": {
+    "item": "I4",
+    "party": "V2",
+    "site": "S1"
+   },
+   "seq": 21
+  },
+  {
+   "body": {
+    "itemGroupId": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+    "itemId": "2b60ad93-e1d0-544b-958f-5a1b59d13590",
+    "lotQty": "50",
+    "partyId": "c7ea17d7-1ecc-5c0b-8b63-0cc4310fa3f2",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "d489caee-53b7-59ac-91e1-5358681d0ad7",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "7510fa74-da3c-5bfc-a671-e6675fcb7415",
+   "kind": "receipt",
+   "names": {
+    "item": "I4",
+    "party": "V2",
+    "site": "S2"
+   },
+   "seq": 22
+  },
+  {
+   "body": {
+    "itemGroupId": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+    "itemId": "2b60ad93-e1d0-544b-958f-5a1b59d13590",
+    "lotQty": "51",
+    "partyId": "04b784d2-6053-57d7-810d-0351742a25cf",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "21531bb3-6d04-5e87-b4dc-bbed14858828",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "855993ba-cec8-53a7-9285-9159c1c6b5c7",
+   "kind": "receipt",
+   "names": {
+    "item": "I4",
+    "party": "V3",
+    "site": "S1"
+   },
+   "seq": 23
+  },
+  {
+   "body": {
+    "itemGroupId": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+    "itemId": "2b60ad93-e1d0-544b-958f-5a1b59d13590",
+    "lotQty": "120",
+    "partyId": "04b784d2-6053-57d7-810d-0351742a25cf",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "ecde21ab-cf9c-57af-9e30-179f2eb8cf67",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "6401c364-7f8b-51de-a7c9-2abb6c2d576f",
+   "kind": "receipt",
+   "names": {
+    "item": "I4",
+    "party": "V3",
+    "site": "S2"
+   },
+   "seq": 24
+  },
+  {
+   "body": {
+    "itemGroupId": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+    "itemId": "73d7b3e8-4231-5b6f-8ff4-d06951ca6c02",
+    "lotQty": "500",
+    "partyId": "83f3bc54-3680-5f79-8fbc-7be0e12b2900",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "9cddef4a-a180-55f8-b9c3-58b7053a6824",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "f3217908-bfbf-543f-bdbd-04246b065d67",
+   "kind": "receipt",
+   "names": {
+    "item": "I5",
+    "party": "V1",
+    "site": "S1"
+   },
+   "seq": 25
+  },
+  {
+   "body": {
+    "itemGroupId": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+    "itemId": "73d7b3e8-4231-5b6f-8ff4-d06951ca6c02",
+    "lotQty": "501",
+    "partyId": "83f3bc54-3680-5f79-8fbc-7be0e12b2900",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "303c59c5-29b4-5e3f-a62b-7b0ccb65ec75",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "8173d501-0a2d-52fc-8961-d202ffc622b3",
+   "kind": "receipt",
+   "names": {
+    "item": "I5",
+    "party": "V1",
+    "site": "S2"
+   },
+   "seq": 26
+  },
+  {
+   "body": {
+    "itemGroupId": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+    "itemId": "73d7b3e8-4231-5b6f-8ff4-d06951ca6c02",
+    "lotQty": "1200",
+    "partyId": "c7ea17d7-1ecc-5c0b-8b63-0cc4310fa3f2",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "56d9ac1e-45f7-5e3f-ac53-13ebea0b1687",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "94453ae9-98fb-51e1-8097-f9bd6111b6f0",
+   "kind": "receipt",
+   "names": {
+    "item": "I5",
+    "party": "V2",
+    "site": "S1"
+   },
+   "seq": 27
+  },
+  {
+   "body": {
+    "itemGroupId": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+    "itemId": "73d7b3e8-4231-5b6f-8ff4-d06951ca6c02",
+    "lotQty": "3200",
+    "partyId": "c7ea17d7-1ecc-5c0b-8b63-0cc4310fa3f2",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "65bb364b-2431-5c6b-a108-cd8fa4e822ff",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "dc72d0cd-dd43-571f-9437-6a6f17544461",
+   "kind": "receipt",
+   "names": {
+    "item": "I5",
+    "party": "V2",
+    "site": "S2"
+   },
+   "seq": 28
+  },
+  {
+   "body": {
+    "itemGroupId": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+    "itemId": "73d7b3e8-4231-5b6f-8ff4-d06951ca6c02",
+    "lotQty": "10001",
+    "partyId": "04b784d2-6053-57d7-810d-0351742a25cf",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "d6855ecd-a203-58f4-8720-9b05e51ef181",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "3d1127ce-0ded-57bf-bde9-f065cde9b795",
+   "kind": "receipt",
+   "names": {
+    "item": "I5",
+    "party": "V3",
+    "site": "S1"
+   },
+   "seq": 29
+  },
+  {
+   "body": {
+    "itemGroupId": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+    "itemId": "73d7b3e8-4231-5b6f-8ff4-d06951ca6c02",
+    "lotQty": "35000",
+    "partyId": "04b784d2-6053-57d7-810d-0351742a25cf",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "0548145c-90b3-5f7b-814c-659e2c0f2518",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "cd30a666-331b-5b2b-b92e-b2ecea2e19c3",
+   "kind": "receipt",
+   "names": {
+    "item": "I5",
+    "party": "V3",
+    "site": "S2"
+   },
+   "seq": 30
+  },
+  {
+   "body": {
+    "itemId": "29d3005b-f269-5282-b106-ab5d3b5c16f7",
+    "lotQty": "7",
+    "partyId": "83f3bc54-3680-5f79-8fbc-7be0e12b2900",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "18dbb27c-0a89-58a1-b04b-93268e3873e8",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "e3b75ac5-c6b2-5cc6-9975-bc984449c693",
+   "kind": "receipt",
+   "names": {
+    "item": "I6",
+    "party": "V1",
+    "site": "S1"
+   },
+   "seq": 31
+  },
+  {
+   "body": {
+    "itemId": "29d3005b-f269-5282-b106-ab5d3b5c16f7",
+    "lotQty": "26",
+    "partyId": "83f3bc54-3680-5f79-8fbc-7be0e12b2900",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "bf0cd031-cc8f-5fef-b972-362646aa0053",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "a562a41c-1ba1-5ed7-8b95-1903aaf18905",
+   "kind": "receipt",
+   "names": {
+    "item": "I6",
+    "party": "V1",
+    "site": "S2"
+   },
+   "seq": 32
+  },
+  {
+   "body": {
+    "itemId": "29d3005b-f269-5282-b106-ab5d3b5c16f7",
+    "lotQty": "90",
+    "partyId": "c7ea17d7-1ecc-5c0b-8b63-0cc4310fa3f2",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "b2bc2194-4114-5c49-9071-ae6fa03661d8",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "094ace35-00f4-558a-bb12-2eb907c39809",
+   "kind": "receipt",
+   "names": {
+    "item": "I6",
+    "party": "V2",
+    "site": "S1"
+   },
+   "seq": 33
+  },
+  {
+   "body": {
+    "itemId": "29d3005b-f269-5282-b106-ab5d3b5c16f7",
+    "lotQty": "151",
+    "partyId": "c7ea17d7-1ecc-5c0b-8b63-0cc4310fa3f2",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "23dca2cd-d550-5885-9ade-29537516046c",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "f681a8b2-c67d-5304-b966-4fc7161ab2f8",
+   "kind": "receipt",
+   "names": {
+    "item": "I6",
+    "party": "V2",
+    "site": "S2"
+   },
+   "seq": 34
+  },
+  {
+   "body": {
+    "itemId": "29d3005b-f269-5282-b106-ab5d3b5c16f7",
+    "lotQty": "280",
+    "partyId": "04b784d2-6053-57d7-810d-0351742a25cf",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "2cbd1b73-1a78-571d-a300-c28d4d1b12ec",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "7e21cf65-9295-584f-ae14-29ff3383e79f",
+   "kind": "receipt",
+   "names": {
+    "item": "I6",
+    "party": "V3",
+    "site": "S1"
+   },
+   "seq": 35
+  },
+  {
+   "body": {
+    "itemId": "29d3005b-f269-5282-b106-ab5d3b5c16f7",
+    "lotQty": "2",
+    "partyId": "04b784d2-6053-57d7-810d-0351742a25cf",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "3ffb9c4a-c092-5582-a29e-fda994360c5d",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "a97a988d-4521-5bb0-a5ae-0379dcfd1690",
+   "kind": "receipt",
+   "names": {
+    "item": "I6",
+    "party": "V3",
+    "site": "S2"
+   },
+   "seq": 36
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "e6968056-5e1c-5776-8354-557279707aac",
+    "lotQty": "15",
+    "partyId": "c7ea17d7-1ecc-5c0b-8b63-0cc4310fa3f2",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "c06b5d2e-b951-54bc-a87d-e62af1df5e23",
+     "line": "2",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "05bb0c0b-0722-5d28-96c0-9a5d50feba6b",
+   "kind": "receipt",
+   "names": {
+    "item": "I1",
+    "party": "V2",
+    "site": "S1"
+   },
+   "seq": 37
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "51992f40-646c-5144-93b6-f75bdf1d7a17",
+    "lotQty": "16",
+    "partyId": "83f3bc54-3680-5f79-8fbc-7be0e12b2900",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "c6733a84-76aa-5e18-b4d5-f7b68309fdf9",
+     "line": "2",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "4d708cc0-e522-5163-bf61-797b1ae52ab6",
+   "kind": "receipt",
+   "names": {
+    "item": "I2",
+    "party": "V1",
+    "site": "S2"
+   },
+   "seq": 38
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "10d4d464-0da7-5253-9a0b-90bafa1b0994",
+    "lotQty": "1201",
+    "partyId": "04b784d2-6053-57d7-810d-0351742a25cf",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "d93cb1da-a145-5279-8b38-91239931f2a1",
+     "line": "2",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "7a529545-8c30-5fbb-97c6-408c17467915",
+   "kind": "receipt",
+   "names": {
+    "item": "I3",
+    "party": "V3",
+    "site": "S1"
+   },
+   "seq": 39
+  },
+  {
+   "body": {
+    "itemGroupId": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+    "itemId": "2b60ad93-e1d0-544b-958f-5a1b59d13590",
+    "lotQty": "150001",
+    "partyId": "c7ea17d7-1ecc-5c0b-8b63-0cc4310fa3f2",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "058d0796-2aaa-5085-b0a4-33e709a1b036",
+     "line": "2",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "12e15404-5a9e-53ed-b2d8-f5ec4103e4f9",
+   "kind": "receipt",
+   "names": {
+    "item": "I4",
+    "party": "V2",
+    "site": "S2"
+   },
+   "seq": 40
+  },
+  {
+   "body": {
+    "itemGroupId": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+    "itemId": "73d7b3e8-4231-5b6f-8ff4-d06951ca6c02",
+    "lotQty": "5",
+    "partyId": "04b784d2-6053-57d7-810d-0351742a25cf",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "1a7feb7e-58cd-51a8-a30a-e71201a2aabc",
+     "line": "2",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "667eb24d-c6d1-554b-a888-39ccc11dcc1b",
+   "kind": "receipt",
+   "names": {
+    "item": "I5",
+    "party": "V3",
+    "site": "S1"
+   },
+   "seq": 41
+  },
+  {
+   "body": {
+    "itemId": "29d3005b-f269-5282-b106-ab5d3b5c16f7",
+    "lotQty": "50",
+    "partyId": "c7ea17d7-1ecc-5c0b-8b63-0cc4310fa3f2",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "cc825baf-9711-58e5-8a67-6b42cfb351e1",
+     "line": "2",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "02411be7-2c9b-52f5-84bf-de21022efed9",
+   "kind": "receipt",
+   "names": {
+    "item": "I6",
+    "party": "V2",
+    "site": "S1"
+   },
+   "seq": 42
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "e6968056-5e1c-5776-8354-557279707aac",
+    "lotQty": "51",
+    "partyId": "04b784d2-6053-57d7-810d-0351742a25cf",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "f93710f3-dc0a-5974-9968-5f5f9d521c9e",
+     "line": "2",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "7b759be8-b6f0-5d14-b000-38f253560476",
+   "kind": "receipt",
+   "names": {
+    "item": "I1",
+    "party": "V3",
+    "site": "S2"
+   },
+   "seq": 43
+  },
+  {
+   "body": {
+    "itemGroupId": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+    "itemId": "2b60ad93-e1d0-544b-958f-5a1b59d13590",
+    "lotQty": "120",
+    "partyId": "83f3bc54-3680-5f79-8fbc-7be0e12b2900",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "d489caee-53b7-59ac-91e1-5358681d0ad7",
+     "line": "2",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "5cb047d3-64e6-5deb-a691-072969930655",
+   "kind": "receipt",
+   "names": {
+    "item": "I4",
+    "party": "V1",
+    "site": "S1"
+   },
+   "seq": 44
+  },
+  {
+   "body": {
+    "itemId": "29d3005b-f269-5282-b106-ab5d3b5c16f7",
+    "lotQty": "500",
+    "partyId": "04b784d2-6053-57d7-810d-0351742a25cf",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "9cddef4a-a180-55f8-b9c3-58b7053a6824",
+     "line": "2",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "149dd09a-f4b1-5278-a6c4-ddddb793c6b5",
+   "kind": "receipt",
+   "names": {
+    "item": "I6",
+    "party": "V3",
+    "site": "S1"
+   },
+   "seq": 45
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "51992f40-646c-5144-93b6-f75bdf1d7a17",
+    "lotQty": "501",
+    "partyId": "04b784d2-6053-57d7-810d-0351742a25cf",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "65bb364b-2431-5c6b-a108-cd8fa4e822ff",
+     "line": "2",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "6d901027-3e80-5422-b700-a98b7c3ccf15",
+   "kind": "receipt",
+   "names": {
+    "item": "I2",
+    "party": "V3",
+    "site": "S1"
+   },
+   "seq": 46
+  },
+  {
+   "body": {
+    "itemGroupId": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+    "itemId": "73d7b3e8-4231-5b6f-8ff4-d06951ca6c02",
+    "lotQty": "1200",
+    "partyId": "83f3bc54-3680-5f79-8fbc-7be0e12b2900",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "18dbb27c-0a89-58a1-b04b-93268e3873e8",
+     "line": "2",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "e0b0f5e3-6c90-5a53-9ff1-43dd12a48176",
+   "kind": "receipt",
+   "names": {
+    "item": "I5",
+    "party": "V1",
+    "site": "S2"
+   },
+   "seq": 47
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "10d4d464-0da7-5253-9a0b-90bafa1b0994",
+    "lotQty": "3200",
+    "partyId": "c7ea17d7-1ecc-5c0b-8b63-0cc4310fa3f2",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "23dca2cd-d550-5885-9ade-29537516046c",
+     "line": "2",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "ae5ad094-3b3b-5f20-8d36-239b96703bd1",
+   "kind": "receipt",
+   "names": {
+    "item": "I3",
+    "party": "V2",
+    "site": "S2"
+   },
+   "seq": 48
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "e6968056-5e1c-5776-8354-557279707aac",
+    "lotQty": "10001",
+    "partyId": "83f3bc54-3680-5f79-8fbc-7be0e12b2900",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "0bf9abec-50ee-5bea-aad7-2002f7acf833",
+     "line": "2",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "1f9b88e9-4e80-587b-9037-6fe27e870547",
+   "kind": "receipt",
+   "names": {
+    "item": "I1",
+    "party": "V1",
+    "site": "S1"
+   },
+   "seq": 49
+  },
+  {
+   "body": {
+    "itemGroupId": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+    "itemId": "73d7b3e8-4231-5b6f-8ff4-d06951ca6c02",
+    "lotQty": "35000",
+    "partyId": "c7ea17d7-1ecc-5c0b-8b63-0cc4310fa3f2",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "3b39d54d-25db-506e-8dd8-0cd118d9d96b",
+     "line": "2",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "99f3e6be-3e0d-5dae-8e74-1306949f9944",
+   "kind": "receipt",
+   "names": {
+    "item": "I5",
+    "party": "V2",
+    "site": "S2"
+   },
+   "seq": 50
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "e6968056-5e1c-5776-8354-557279707aac",
+    "lotQty": "7",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "85514d36-0814-5da4-8483-9b05c6fed595",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "87a3234c-9592-5302-a301-6274446f8b09",
+   "kind": "receipt",
+   "names": {
+    "item": "I1",
+    "party": null,
+    "site": "S2"
+   },
+   "seq": 51
+  },
+  {
+   "body": {
+    "itemId": "29d3005b-f269-5282-b106-ab5d3b5c16f7",
+    "lotQty": "26",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "270a9497-a2fe-5fdf-97d9-b80347124fc7",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "eb95e2b7-1f16-53e4-ab6a-f22a53ddcb35",
+   "kind": "receipt",
+   "names": {
+    "item": "I6",
+    "party": null,
+    "site": "S1"
+   },
+   "seq": 52
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "10d4d464-0da7-5253-9a0b-90bafa1b0994",
+    "lotQty": "90",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "c5890519-46a1-56ca-af55-35e8359acbfe",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "302c73c4-71ee-5596-a8d8-b308d5712091",
+   "kind": "receipt",
+   "names": {
+    "item": "I3",
+    "party": null,
+    "site": "S1"
+   },
+   "seq": 53
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "e6968056-5e1c-5776-8354-557279707aac",
+    "lotQty": "5",
+    "partyId": "83f3bc54-3680-5f79-8fbc-7be0e12b2900",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "c06b5d2e-b951-54bc-a87d-e62af1df5e23",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "82ae6837-bd18-5887-a2e6-08d4585fa198",
+   "kind": "receipt",
+   "names": {
+    "item": "I1",
+    "party": "V1",
+    "site": "S1"
+   },
+   "seq": 54
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "51992f40-646c-5144-93b6-f75bdf1d7a17",
+    "lotQty": "3200",
+    "partyId": "83f3bc54-3680-5f79-8fbc-7be0e12b2900",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "20af4dbc-fe68-5d64-ba87-b83113d1713c",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "86bd6955-af3e-5b76-999c-dcb7a19b47af",
+   "kind": "receipt",
+   "names": {
+    "item": "I2",
+    "party": "V1",
+    "site": "S2"
+   },
+   "seq": 55
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "10d4d464-0da7-5253-9a0b-90bafa1b0994",
+    "lotQty": "280",
+    "partyId": "c7ea17d7-1ecc-5c0b-8b63-0cc4310fa3f2",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "c7d41c7a-77bf-5184-a58c-87e6cdd1a674",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "712b392a-9b75-5106-9368-8ccbea39f976",
+   "kind": "receipt",
+   "names": {
+    "item": "I3",
+    "party": "V2",
+    "site": "S1"
+   },
+   "seq": 56
+  },
+  {
+   "body": {
+    "itemGroupId": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+    "itemId": "2b60ad93-e1d0-544b-958f-5a1b59d13590",
+    "lotQty": "50",
+    "partyId": "c7ea17d7-1ecc-5c0b-8b63-0cc4310fa3f2",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "d489caee-53b7-59ac-91e1-5358681d0ad7",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "ba387c2c-59d5-5e51-bbe0-95e0eaee0f21",
+   "kind": "receipt",
+   "names": {
+    "item": "I4",
+    "party": "V2",
+    "site": "S2"
+   },
+   "seq": 57
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "e6968056-5e1c-5776-8354-557279707aac",
+    "lotQty": "51",
+    "partyId": "c7ea17d7-1ecc-5c0b-8b63-0cc4310fa3f2",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "3b86c820-bbf6-58f1-ae4a-88b44ebc9dfe",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "c9b7e2dc-b4c4-5abb-967b-7261e18fafe3",
+   "kind": "receipt",
+   "names": {
+    "item": "I1",
+    "party": "V2",
+    "site": "S1"
+   },
+   "seq": 58
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "51992f40-646c-5144-93b6-f75bdf1d7a17",
+    "lotQty": "35000",
+    "partyId": "c7ea17d7-1ecc-5c0b-8b63-0cc4310fa3f2",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "058d0796-2aaa-5085-b0a4-33e709a1b036",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "ab0bc453-cb43-56ac-8c41-57d6d622f081",
+   "kind": "receipt",
+   "names": {
+    "item": "I2",
+    "party": "V2",
+    "site": "S2"
+   },
+   "seq": 59
+  },
+  {
+   "body": {
+    "itemId": "29d3005b-f269-5282-b106-ab5d3b5c16f7",
+    "lotQty": "7",
+    "partyId": "83f3bc54-3680-5f79-8fbc-7be0e12b2900",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "18dbb27c-0a89-58a1-b04b-93268e3873e8",
+     "line": "1",
+     "type": "receipt_line"
+    },
+    "trigger": "PURCHASE_RECEIPT",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "e3b75ac5-c6b2-5cc6-9975-bc984449c693",
+   "kind": "receipt",
+   "names": {
+    "item": "I6",
+    "party": "V1",
+    "site": "S1"
+   },
+   "seq": 60
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "e6968056-5e1c-5776-8354-557279707aac",
+    "lotQty": "5",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "72a483a7-44f3-5fbf-bbc3-70fcc4b71bd2",
+     "line": "1",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "ba2b8e06-bd58-59c5-abb0-091d0fedf447",
+   "kind": "raf",
+   "names": {
+    "item": "I1",
+    "party": null,
+    "site": "S1"
+   },
+   "seq": 61
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "e6968056-5e1c-5776-8354-557279707aac",
+    "lotQty": "50",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "471ade82-f64f-58ab-bca1-bed80a2f3e24",
+     "line": "1",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "798e9c5e-5426-58ad-ac77-a47c9a39bf22",
+   "kind": "raf",
+   "names": {
+    "item": "I1",
+    "party": null,
+    "site": "S2"
+   },
+   "seq": 62
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "51992f40-646c-5144-93b6-f75bdf1d7a17",
+    "lotQty": "51",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "874f8d7b-477a-56e2-96ec-96514bbe3095",
+     "line": "1",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "4f6df5f7-5ad4-5c97-9203-56801eb04df1",
+   "kind": "raf",
+   "names": {
+    "item": "I2",
+    "party": null,
+    "site": "S1"
+   },
+   "seq": 63
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "51992f40-646c-5144-93b6-f75bdf1d7a17",
+    "lotQty": "120",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "82d7ac6d-05cc-5035-8186-bd6ac3ecccd7",
+     "line": "1",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "9aab8987-0afc-5a05-87a2-b94f3c3945ce",
+   "kind": "raf",
+   "names": {
+    "item": "I2",
+    "party": null,
+    "site": "S2"
+   },
+   "seq": 64
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "10d4d464-0da7-5253-9a0b-90bafa1b0994",
+    "lotQty": "500",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "ac047898-19f5-562e-a1fd-fcdd762ea583",
+     "line": "1",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "a00f3b6b-9a98-508e-8075-36df59ec250c",
+   "kind": "raf",
+   "names": {
+    "item": "I3",
+    "party": null,
+    "site": "S1"
+   },
+   "seq": 65
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "10d4d464-0da7-5253-9a0b-90bafa1b0994",
+    "lotQty": "501",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "a6d7bacf-d5c1-518b-8252-ba2268cf9df6",
+     "line": "1",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "3a7cb440-4b09-5714-bb6c-6b97e8c4f541",
+   "kind": "raf",
+   "names": {
+    "item": "I3",
+    "party": null,
+    "site": "S2"
+   },
+   "seq": 66
+  },
+  {
+   "body": {
+    "itemGroupId": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+    "itemId": "2b60ad93-e1d0-544b-958f-5a1b59d13590",
+    "lotQty": "1200",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "35bbc50e-213e-5cc6-9923-15ec27ad7ae8",
+     "line": "1",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "9c1feaaf-8e56-5ff8-b1b7-efc2fc4867c1",
+   "kind": "raf",
+   "names": {
+    "item": "I4",
+    "party": null,
+    "site": "S1"
+   },
+   "seq": 67
+  },
+  {
+   "body": {
+    "itemGroupId": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+    "itemId": "2b60ad93-e1d0-544b-958f-5a1b59d13590",
+    "lotQty": "3200",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "28ee30d8-09ce-5190-8c93-d03899947d7a",
+     "line": "1",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "1abfb590-2275-589f-923a-216cbca4b605",
+   "kind": "raf",
+   "names": {
+    "item": "I4",
+    "party": null,
+    "site": "S2"
+   },
+   "seq": 68
+  },
+  {
+   "body": {
+    "itemGroupId": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+    "itemId": "73d7b3e8-4231-5b6f-8ff4-d06951ca6c02",
+    "lotQty": "10001",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "be06ef04-38a2-50a6-9ff9-0ebe863be422",
+     "line": "1",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "062b9b9a-a58c-5441-8775-e9a6d8c648b8",
+   "kind": "raf",
+   "names": {
+    "item": "I5",
+    "party": null,
+    "site": "S1"
+   },
+   "seq": 69
+  },
+  {
+   "body": {
+    "itemGroupId": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+    "itemId": "73d7b3e8-4231-5b6f-8ff4-d06951ca6c02",
+    "lotQty": "35000",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "e786b0d7-5410-5186-9910-45f1ba194636",
+     "line": "1",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "0c2bdda6-5658-50d4-8a55-e63c093f89bf",
+   "kind": "raf",
+   "names": {
+    "item": "I5",
+    "party": null,
+    "site": "S2"
+   },
+   "seq": 70
+  },
+  {
+   "body": {
+    "itemId": "29d3005b-f269-5282-b106-ab5d3b5c16f7",
+    "lotQty": "7",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "91db1849-d9f0-5ae4-b040-8383b47ca0b1",
+     "line": "1",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "8a32d83a-ef59-589b-b705-1f1b031a297b",
+   "kind": "raf",
+   "names": {
+    "item": "I6",
+    "party": null,
+    "site": "S1"
+   },
+   "seq": 71
+  },
+  {
+   "body": {
+    "itemId": "29d3005b-f269-5282-b106-ab5d3b5c16f7",
+    "lotQty": "26",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "2d2c99aa-3b72-56a1-b965-bd0fc500fd93",
+     "line": "1",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "96908a43-bad9-54f2-a5ad-2a058e5c4d40",
+   "kind": "raf",
+   "names": {
+    "item": "I6",
+    "party": null,
+    "site": "S2"
+   },
+   "seq": 72
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "e6968056-5e1c-5776-8354-557279707aac",
+    "lotQty": "90",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "6c156e7a-38a1-5028-a073-ce0f485ecc4a",
+     "line": "1",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "bc5d6c7b-d714-55a9-bb91-dc5e4737c2d8",
+   "kind": "raf",
+   "names": {
+    "item": "I1",
+    "party": null,
+    "site": "S1"
+   },
+   "seq": 73
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "e6968056-5e1c-5776-8354-557279707aac",
+    "lotQty": "151",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "ae51c189-c561-5f83-ba32-d20fcdae90ec",
+     "line": "1",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "3abf1bb0-8b7f-5dc5-b245-3ac5ff0a1677",
+   "kind": "raf",
+   "names": {
+    "item": "I1",
+    "party": null,
+    "site": "S2"
+   },
+   "seq": 74
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "51992f40-646c-5144-93b6-f75bdf1d7a17",
+    "lotQty": "280",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "91333ed1-102c-562a-a5ff-cf6a59347486",
+     "line": "1",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "8e537588-dc80-50ce-b1de-3980cabafccb",
+   "kind": "raf",
+   "names": {
+    "item": "I2",
+    "party": null,
+    "site": "S1"
+   },
+   "seq": 75
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "51992f40-646c-5144-93b6-f75bdf1d7a17",
+    "lotQty": "2",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "e4ffa745-ca6a-5cd3-9cdc-86d5e9cc2f09",
+     "line": "1",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "ebaeb20d-76d9-5bee-82c2-81f11fe91470",
+   "kind": "raf",
+   "names": {
+    "item": "I2",
+    "party": null,
+    "site": "S2"
+   },
+   "seq": 76
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "10d4d464-0da7-5253-9a0b-90bafa1b0994",
+    "lotQty": "15",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "bad02f6f-0b40-59ea-a46b-17405f2ef727",
+     "line": "1",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "90f854db-af51-54db-8025-2807e34aa18b",
+   "kind": "raf",
+   "names": {
+    "item": "I3",
+    "party": null,
+    "site": "S1"
+   },
+   "seq": 77
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "10d4d464-0da7-5253-9a0b-90bafa1b0994",
+    "lotQty": "16",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "e2b9c2c5-6267-5841-b8f9-3b6956d3ba37",
+     "line": "1",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "a3bd0c63-58ff-522e-a21f-4d6ee89b9bab",
+   "kind": "raf",
+   "names": {
+    "item": "I3",
+    "party": null,
+    "site": "S2"
+   },
+   "seq": 78
+  },
+  {
+   "body": {
+    "itemGroupId": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+    "itemId": "2b60ad93-e1d0-544b-958f-5a1b59d13590",
+    "lotQty": "1201",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "b548ebf8-d69d-5e17-b0ee-0b6cd453fddc",
+     "line": "1",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "5e4ae36f-8d7b-5274-99ec-44718f221c30",
+   "kind": "raf",
+   "names": {
+    "item": "I4",
+    "party": null,
+    "site": "S1"
+   },
+   "seq": 79
+  },
+  {
+   "body": {
+    "itemGroupId": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+    "itemId": "2b60ad93-e1d0-544b-958f-5a1b59d13590",
+    "lotQty": "150001",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "7c86a694-372e-5d21-b5a9-9549eb684fad",
+     "line": "1",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "a993de78-c176-535e-9c2f-cd18f25d982b",
+   "kind": "raf",
+   "names": {
+    "item": "I4",
+    "party": null,
+    "site": "S2"
+   },
+   "seq": 80
+  },
+  {
+   "body": {
+    "itemGroupId": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+    "itemId": "73d7b3e8-4231-5b6f-8ff4-d06951ca6c02",
+    "lotQty": "5",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "57971e7f-6265-571c-9e70-500dd09a1321",
+     "line": "1",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "ebce6574-2558-589e-b65e-edf059b90f13",
+   "kind": "raf",
+   "names": {
+    "item": "I5",
+    "party": null,
+    "site": "S1"
+   },
+   "seq": 81
+  },
+  {
+   "body": {
+    "itemGroupId": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+    "itemId": "73d7b3e8-4231-5b6f-8ff4-d06951ca6c02",
+    "lotQty": "50",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "c9c89ee2-a831-5061-8172-871ac071da2e",
+     "line": "1",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "67c43c96-174f-57aa-9778-767aaee41568",
+   "kind": "raf",
+   "names": {
+    "item": "I5",
+    "party": null,
+    "site": "S2"
+   },
+   "seq": 82
+  },
+  {
+   "body": {
+    "itemId": "29d3005b-f269-5282-b106-ab5d3b5c16f7",
+    "lotQty": "51",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "56329b1e-6d2d-5295-90b3-4b00055a91ad",
+     "line": "1",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "d57b364b-ba87-5a9e-8e99-04565720cf8d",
+   "kind": "raf",
+   "names": {
+    "item": "I6",
+    "party": null,
+    "site": "S1"
+   },
+   "seq": 83
+  },
+  {
+   "body": {
+    "itemId": "29d3005b-f269-5282-b106-ab5d3b5c16f7",
+    "lotQty": "120",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "d9122d44-fc92-59d5-9674-427fb23df991",
+     "line": "1",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "9cc0b8dd-ebbb-509e-96c1-557fe22febbc",
+   "kind": "raf",
+   "names": {
+    "item": "I6",
+    "party": null,
+    "site": "S2"
+   },
+   "seq": 84
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "e6968056-5e1c-5776-8354-557279707aac",
+    "lotQty": "500",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "72a483a7-44f3-5fbf-bbc3-70fcc4b71bd2",
+     "line": "2",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "4636e94f-af32-5ee0-863d-312156fc265f",
+   "kind": "raf",
+   "names": {
+    "item": "I1",
+    "party": null,
+    "site": "S2"
+   },
+   "seq": 85
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "10d4d464-0da7-5253-9a0b-90bafa1b0994",
+    "lotQty": "501",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "471ade82-f64f-58ab-bca1-bed80a2f3e24",
+     "line": "2",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "944b6756-6c9f-56a6-a065-c39c65250f39",
+   "kind": "raf",
+   "names": {
+    "item": "I3",
+    "party": null,
+    "site": "S2"
+   },
+   "seq": 86
+  },
+  {
+   "body": {
+    "itemGroupId": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+    "itemId": "2b60ad93-e1d0-544b-958f-5a1b59d13590",
+    "lotQty": "1200",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "874f8d7b-477a-56e2-96ec-96514bbe3095",
+     "line": "2",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "891d7601-e74c-5aa1-a3db-fd346bd3cad5",
+   "kind": "raf",
+   "names": {
+    "item": "I4",
+    "party": null,
+    "site": "S1"
+   },
+   "seq": 87
+  },
+  {
+   "body": {
+    "itemId": "29d3005b-f269-5282-b106-ab5d3b5c16f7",
+    "lotQty": "3200",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "82d7ac6d-05cc-5035-8186-bd6ac3ecccd7",
+     "line": "2",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "1f966a72-ea23-5b5e-a0a3-501116917bf3",
+   "kind": "raf",
+   "names": {
+    "item": "I6",
+    "party": null,
+    "site": "S1"
+   },
+   "seq": 88
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "51992f40-646c-5144-93b6-f75bdf1d7a17",
+    "lotQty": "10001",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "ac047898-19f5-562e-a1fd-fcdd762ea583",
+     "line": "2",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "f3ed5538-1f45-51f4-8f7d-cc42c099fd94",
+   "kind": "raf",
+   "names": {
+    "item": "I2",
+    "party": null,
+    "site": "S1"
+   },
+   "seq": 89
+  },
+  {
+   "body": {
+    "itemGroupId": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+    "itemId": "73d7b3e8-4231-5b6f-8ff4-d06951ca6c02",
+    "lotQty": "35000",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "a6d7bacf-d5c1-518b-8252-ba2268cf9df6",
+     "line": "2",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "620ce05a-43ea-5bad-9572-5775aad67460",
+   "kind": "raf",
+   "names": {
+    "item": "I5",
+    "party": null,
+    "site": "S1"
+   },
+   "seq": 90
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "10d4d464-0da7-5253-9a0b-90bafa1b0994",
+    "lotQty": "7",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "35bbc50e-213e-5cc6-9923-15ec27ad7ae8",
+     "line": "2",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "dd2c236a-adb2-5672-a97d-97c4373a6f24",
+   "kind": "raf",
+   "names": {
+    "item": "I3",
+    "party": null,
+    "site": "S1"
+   },
+   "seq": 91
+  },
+  {
+   "body": {
+    "itemGroupId": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+    "itemId": "2b60ad93-e1d0-544b-958f-5a1b59d13590",
+    "lotQty": "26",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "28ee30d8-09ce-5190-8c93-d03899947d7a",
+     "line": "2",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "d70f4065-c96c-5bea-8882-4864fd6729d0",
+   "kind": "raf",
+   "names": {
+    "item": "I4",
+    "party": null,
+    "site": "S2"
+   },
+   "seq": 92
+  },
+  {
+   "body": {
+    "itemGroupId": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+    "itemId": "73d7b3e8-4231-5b6f-8ff4-d06951ca6c02",
+    "lotQty": "90",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "be06ef04-38a2-50a6-9ff9-0ebe863be422",
+     "line": "2",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "c4419b30-dba2-560c-b3cd-126f344a3aeb",
+   "kind": "raf",
+   "names": {
+    "item": "I5",
+    "party": null,
+    "site": "S1"
+   },
+   "seq": 93
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "e6968056-5e1c-5776-8354-557279707aac",
+    "lotQty": "151",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "e786b0d7-5410-5186-9910-45f1ba194636",
+     "line": "2",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "109b2b45-677d-5efd-a70f-05bea07f097d",
+   "kind": "raf",
+   "names": {
+    "item": "I1",
+    "party": null,
+    "site": "S1"
+   },
+   "seq": 94
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "e6968056-5e1c-5776-8354-557279707aac",
+    "lotQty": "50",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "471ade82-f64f-58ab-bca1-bed80a2f3e24",
+     "line": "1",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "b469b8f9-78d0-5050-923c-06a23ff9ec25",
+   "kind": "raf",
+   "names": {
+    "item": "I1",
+    "party": null,
+    "site": "S2"
+   },
+   "seq": 95
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "10d4d464-0da7-5253-9a0b-90bafa1b0994",
+    "lotQty": "500",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "ac047898-19f5-562e-a1fd-fcdd762ea583",
+     "line": "1",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "0a73c19b-ec23-5448-95bc-2184aea8c79a",
+   "kind": "raf",
+   "names": {
+    "item": "I3",
+    "party": null,
+    "site": "S1"
+   },
+   "seq": 96
+  },
+  {
+   "body": {
+    "itemId": "29d3005b-f269-5282-b106-ab5d3b5c16f7",
+    "lotQty": "7",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "91db1849-d9f0-5ae4-b040-8383b47ca0b1",
+     "line": "1",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "17afb178-2914-54f5-bf51-a052c671949e",
+   "kind": "raf",
+   "names": {
+    "item": "I6",
+    "party": null,
+    "site": "S1"
+   },
+   "seq": 97
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "51992f40-646c-5144-93b6-f75bdf1d7a17",
+    "lotQty": "120",
+    "siteId": "b578d486-a2ed-5819-b131-bcdf7b78d6c4",
+    "sourceRef": {
+     "id": "82d7ac6d-05cc-5035-8186-bd6ac3ecccd7",
+     "line": "1",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "d4c19e19-e681-5178-aac0-1d48cb6db1c9"
+   },
+   "key": "9aab8987-0afc-5a05-87a2-b94f3c3945ce",
+   "kind": "raf",
+   "names": {
+    "item": "I2",
+    "party": null,
+    "site": "S2"
+   },
+   "seq": 98
+  },
+  {
+   "body": {
+    "itemGroupId": "8eef131e-6f18-5918-bda4-3281ee473486",
+    "itemId": "e6968056-5e1c-5776-8354-557279707aac",
+    "lotQty": "90",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "6c156e7a-38a1-5028-a073-ce0f485ecc4a",
+     "line": "1",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "bc5d6c7b-d714-55a9-bb91-dc5e4737c2d8",
+   "kind": "raf",
+   "names": {
+    "item": "I1",
+    "party": null,
+    "site": "S1"
+   },
+   "seq": 99
+  },
+  {
+   "body": {
+    "itemGroupId": "aee94ded-2dd6-548d-8b79-ca263ea7c0d7",
+    "itemId": "73d7b3e8-4231-5b6f-8ff4-d06951ca6c02",
+    "lotQty": "5",
+    "siteId": "e28f46d9-0ec8-5079-baa6-b55f038a33b1",
+    "sourceRef": {
+     "id": "57971e7f-6265-571c-9e70-500dd09a1321",
+     "line": "1",
+     "type": "production_output"
+    },
+    "trigger": "PRODUCTION_RAF",
+    "uom": "EA",
+    "warehouseId": "b1b81eed-75ff-5750-9ee8-c41a69343b8a"
+   },
+   "key": "ebce6574-2558-589e-b65e-edf059b90f13",
+   "kind": "raf",
+   "names": {
+    "item": "I5",
+    "party": null,
+    "site": "S1"
+   },
+   "seq": 100
+  }
+ ],
+ "testGroups": [
+  "PICK-ALL",
+  "RAF-G1",
+  "RAF-I3",
+  "RAF-I3-S2",
+  "RAF-I4-S1",
+  "RAF-I6-V1",
+  "RAF-S1",
+  "RCV-G1-S1",
+  "RCV-G2-V2-S2",
+  "RCV-I1",
+  "RCV-I1-V1",
+  "RCV-I2-V3-S1",
+  "RCV-I4-S2",
+  "RCV-I5-A",
+  "RCV-I5-B",
+  "RCV-S2",
+  "RCV-V2",
+  "XFER-ALL"
+ ]
+}

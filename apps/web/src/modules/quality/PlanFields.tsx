@@ -73,7 +73,7 @@ export function PlanFields({
         )}
       </FormField>
       {values.method === "AQL" ? (
-        <FormField id={`${idPrefix}-aql`} label="AQL" hint="Normal inspection; tightened and reduced tables are not loaded yet." error={errors.aql}>
+        <FormField id={`${idPrefix}-aql`} label="AQL" hint="Normal inspection at level II; stored plans do not switch severity yet." error={errors.aql}>
           {(control) => (
             <Select {...control} value={values.aql} invalid={Boolean(errors.aql)} onChange={(event) => onChange({ aql: event.target.value })}>
               {AQL_VALUES.map((a) => (

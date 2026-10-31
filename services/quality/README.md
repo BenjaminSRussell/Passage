@@ -4,9 +4,13 @@ Passage quality management service. Wave 33 (ticket PSG-33), slices 1 to 5.
 
 ## What it does (slice 1)
 
-- **Sampling (FR-33.2, BR-33.1):** fixed, percent and ANSI/ASQ Z1.4 AQL sizing at
-  general inspection level II, normal inspection. Sample quantity is capped at lot
-  quantity. Switching (BR-33.2) is a pure state machine per (item, vendor, test group).
+- **Sampling (FR-33.2, BR-33.1):** fixed, percent and ANSI/ASQ Z1.4 AQL sizing. The
+  sizing function has Table I for every inspection level (S-1 to S-4, I to III) and
+  Tables II-A, II-B and II-C (normal, tightened, reduced) for every AQL column from
+  0.010 to 1000 (`internal/domain/z14.go`, checked cell by cell against
+  `testdata/z14-tables.json`); a plan stored on an association or manual order is
+  level II, NORMAL, AQL 1.0, 2.5 or 4.0. Sample quantity is capped at lot quantity.
+  Switching (BR-33.2) is a pure state machine per (item, vendor, test group).
 - **Quality associations (FR-33.3, BR-33.3):** specificity score
   `4·item + 2·party + 1·site` (item group counts as item weight 3); highest score wins,
   ties resolved by lowest `sequence`.

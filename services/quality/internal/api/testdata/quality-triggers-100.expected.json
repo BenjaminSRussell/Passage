@@ -1,0 +1,826 @@
+{
+ "events": [
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "5",
+   "score": 6,
+   "seq": 1,
+   "testGroup": "RCV-I1-V1"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "13",
+   "score": 6,
+   "seq": 2,
+   "testGroup": "RCV-I1-V1"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "5",
+   "score": 4,
+   "seq": 3,
+   "testGroup": "RCV-G1-S1"
+  },
+  {
+   "acceptNo": 1,
+   "outcome": "created",
+   "rejectNo": 2,
+   "sampleQty": "20",
+   "score": 4,
+   "seq": 4,
+   "testGroup": "RCV-I1"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "5",
+   "score": 4,
+   "seq": 5,
+   "testGroup": "RCV-G1-S1"
+  },
+  {
+   "acceptNo": 5,
+   "outcome": "created",
+   "rejectNo": 6,
+   "sampleQty": "80",
+   "score": 4,
+   "seq": 6,
+   "testGroup": "RCV-I1"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "5",
+   "score": 4,
+   "seq": 7,
+   "testGroup": "RCV-G1-S1"
+  },
+  {
+   "acceptNo": 10,
+   "outcome": "created",
+   "rejectNo": 11,
+   "sampleQty": "125",
+   "score": 1,
+   "seq": 8,
+   "testGroup": "RCV-S2"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "5",
+   "score": 4,
+   "seq": 9,
+   "testGroup": "RCV-G1-S1"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "3500",
+   "score": 2,
+   "seq": 10,
+   "testGroup": "RCV-V2"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "5",
+   "score": 7,
+   "seq": 11,
+   "testGroup": "RCV-I2-V3-S1"
+  },
+  {
+   "acceptNo": 1,
+   "outcome": "created",
+   "rejectNo": 2,
+   "sampleQty": "13",
+   "score": 1,
+   "seq": 12,
+   "testGroup": "RCV-S2"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "5",
+   "score": 4,
+   "seq": 13,
+   "testGroup": "RCV-G1-S1"
+  },
+  {
+   "acceptNo": 3,
+   "outcome": "created",
+   "rejectNo": 4,
+   "sampleQty": "32",
+   "score": 1,
+   "seq": 14,
+   "testGroup": "RCV-S2"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "5",
+   "score": 4,
+   "seq": 15,
+   "testGroup": "RCV-G1-S1"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "1",
+   "score": 2,
+   "seq": 16,
+   "testGroup": "RCV-V2"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "5",
+   "score": 4,
+   "seq": 17,
+   "testGroup": "RCV-G1-S1"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "3",
+   "score": 1,
+   "seq": 18,
+   "testGroup": "RCV-S2"
+  },
+  {
+   "code": "QM-0100",
+   "outcome": "no_association",
+   "seq": 19
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "3751",
+   "score": 5,
+   "seq": 20,
+   "testGroup": "RCV-I4-S2"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "1",
+   "score": 2,
+   "seq": 21,
+   "testGroup": "RCV-V2"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "5",
+   "score": 6,
+   "seq": 22,
+   "testGroup": "RCV-G2-V2-S2"
+  },
+  {
+   "code": "QM-0100",
+   "outcome": "no_association",
+   "seq": 23
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "3",
+   "score": 5,
+   "seq": 24,
+   "testGroup": "RCV-I4-S2"
+  },
+  {
+   "acceptNo": 1,
+   "outcome": "created",
+   "rejectNo": 2,
+   "sampleQty": "50",
+   "score": 4,
+   "seq": 25,
+   "testGroup": "RCV-I5-B"
+  },
+  {
+   "acceptNo": 2,
+   "outcome": "created",
+   "rejectNo": 3,
+   "sampleQty": "80",
+   "score": 4,
+   "seq": 26,
+   "testGroup": "RCV-I5-B"
+  },
+  {
+   "acceptNo": 2,
+   "outcome": "created",
+   "rejectNo": 3,
+   "sampleQty": "80",
+   "score": 4,
+   "seq": 27,
+   "testGroup": "RCV-I5-B"
+  },
+  {
+   "acceptNo": 7,
+   "outcome": "created",
+   "rejectNo": 8,
+   "sampleQty": "125",
+   "score": 6,
+   "seq": 28,
+   "testGroup": "RCV-G2-V2-S2"
+  },
+  {
+   "acceptNo": 7,
+   "outcome": "created",
+   "rejectNo": 8,
+   "sampleQty": "315",
+   "score": 4,
+   "seq": 29,
+   "testGroup": "RCV-I5-B"
+  },
+  {
+   "acceptNo": 7,
+   "outcome": "created",
+   "rejectNo": 8,
+   "sampleQty": "315",
+   "score": 4,
+   "seq": 30,
+   "testGroup": "RCV-I5-B"
+  },
+  {
+   "code": "QM-0100",
+   "outcome": "no_association",
+   "seq": 31
+  },
+  {
+   "acceptNo": 1,
+   "outcome": "created",
+   "rejectNo": 2,
+   "sampleQty": "13",
+   "score": 1,
+   "seq": 32,
+   "testGroup": "RCV-S2"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "9",
+   "score": 2,
+   "seq": 33,
+   "testGroup": "RCV-V2"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "16",
+   "score": 2,
+   "seq": 34,
+   "testGroup": "RCV-V2"
+  },
+  {
+   "code": "QM-0100",
+   "outcome": "no_association",
+   "seq": 35
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "2",
+   "score": 1,
+   "seq": 36,
+   "testGroup": "RCV-S2"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "5",
+   "score": 4,
+   "seq": 37,
+   "testGroup": "RCV-G1-S1"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "3",
+   "score": 1,
+   "seq": 38,
+   "testGroup": "RCV-S2"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "5",
+   "score": 4,
+   "seq": 39,
+   "testGroup": "RCV-G1-S1"
+  },
+  {
+   "acceptNo": 21,
+   "outcome": "created",
+   "rejectNo": 22,
+   "sampleQty": "500",
+   "score": 6,
+   "seq": 40,
+   "testGroup": "RCV-G2-V2-S2"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "5",
+   "score": 4,
+   "seq": 41,
+   "testGroup": "RCV-I5-B"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "5",
+   "score": 2,
+   "seq": 42,
+   "testGroup": "RCV-V2"
+  },
+  {
+   "acceptNo": 1,
+   "outcome": "created",
+   "rejectNo": 2,
+   "sampleQty": "20",
+   "score": 4,
+   "seq": 43,
+   "testGroup": "RCV-I1"
+  },
+  {
+   "code": "QM-0100",
+   "outcome": "no_association",
+   "seq": 44
+  },
+  {
+   "code": "QM-0100",
+   "outcome": "no_association",
+   "seq": 45
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "5",
+   "score": 7,
+   "seq": 46,
+   "testGroup": "RCV-I2-V3-S1"
+  },
+  {
+   "acceptNo": 2,
+   "outcome": "created",
+   "rejectNo": 3,
+   "sampleQty": "80",
+   "score": 4,
+   "seq": 47,
+   "testGroup": "RCV-I5-B"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "320",
+   "score": 2,
+   "seq": 48,
+   "testGroup": "RCV-V2"
+  },
+  {
+   "acceptNo": 7,
+   "outcome": "created",
+   "rejectNo": 8,
+   "sampleQty": "315",
+   "score": 6,
+   "seq": 49,
+   "testGroup": "RCV-I1-V1"
+  },
+  {
+   "acceptNo": 14,
+   "outcome": "created",
+   "rejectNo": 15,
+   "sampleQty": "315",
+   "score": 6,
+   "seq": 50,
+   "testGroup": "RCV-G2-V2-S2"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "5",
+   "score": 4,
+   "seq": 51,
+   "testGroup": "RCV-I1"
+  },
+  {
+   "code": "QM-0100",
+   "outcome": "no_association",
+   "seq": 52
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "5",
+   "score": 4,
+   "seq": 53,
+   "testGroup": "RCV-G1-S1"
+  },
+  {
+   "code": "QM-0116",
+   "lineOf": 1,
+   "outcome": "duplicate",
+   "seq": 54
+  },
+  {
+   "code": "QM-0116",
+   "lineOf": 8,
+   "outcome": "duplicate",
+   "seq": 55
+  },
+  {
+   "code": "QM-0116",
+   "lineOf": 15,
+   "outcome": "duplicate",
+   "seq": 56
+  },
+  {
+   "code": "QM-0116",
+   "lineOf": 22,
+   "outcome": "duplicate",
+   "seq": 57
+  },
+  {
+   "outcome": "replay",
+   "replayOf": 3,
+   "seq": 58
+  },
+  {
+   "outcome": "replay",
+   "replayOf": 10,
+   "seq": 59
+  },
+  {
+   "code": "QM-0100",
+   "outcome": "no_association",
+   "seq": 60
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "5",
+   "score": 3,
+   "seq": 61,
+   "testGroup": "RAF-G1"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "5",
+   "score": 3,
+   "seq": 62,
+   "testGroup": "RAF-G1"
+  },
+  {
+   "acceptNo": 1,
+   "outcome": "created",
+   "rejectNo": 2,
+   "sampleQty": "20",
+   "score": 3,
+   "seq": 63,
+   "testGroup": "RAF-G1"
+  },
+  {
+   "acceptNo": 1,
+   "outcome": "created",
+   "rejectNo": 2,
+   "sampleQty": "20",
+   "score": 3,
+   "seq": 64,
+   "testGroup": "RAF-G1"
+  },
+  {
+   "acceptNo": 5,
+   "outcome": "created",
+   "rejectNo": 6,
+   "sampleQty": "50",
+   "score": 4,
+   "seq": 65,
+   "testGroup": "RAF-I3"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "5",
+   "score": 5,
+   "seq": 66,
+   "testGroup": "RAF-I3-S2"
+  },
+  {
+   "acceptNo": 2,
+   "outcome": "created",
+   "rejectNo": 3,
+   "sampleQty": "80",
+   "score": 5,
+   "seq": 67,
+   "testGroup": "RAF-I4-S1"
+  },
+  {
+   "code": "QM-0100",
+   "outcome": "no_association",
+   "seq": 68
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "1001",
+   "score": 1,
+   "seq": 69,
+   "testGroup": "RAF-S1"
+  },
+  {
+   "code": "QM-0100",
+   "outcome": "no_association",
+   "seq": 70
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "1",
+   "score": 1,
+   "seq": 71,
+   "testGroup": "RAF-S1"
+  },
+  {
+   "code": "QM-0100",
+   "outcome": "no_association",
+   "seq": 72
+  },
+  {
+   "acceptNo": 1,
+   "outcome": "created",
+   "rejectNo": 2,
+   "sampleQty": "20",
+   "score": 3,
+   "seq": 73,
+   "testGroup": "RAF-G1"
+  },
+  {
+   "acceptNo": 2,
+   "outcome": "created",
+   "rejectNo": 3,
+   "sampleQty": "32",
+   "score": 3,
+   "seq": 74,
+   "testGroup": "RAF-G1"
+  },
+  {
+   "acceptNo": 2,
+   "outcome": "created",
+   "rejectNo": 3,
+   "sampleQty": "32",
+   "score": 3,
+   "seq": 75,
+   "testGroup": "RAF-G1"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "2",
+   "score": 3,
+   "seq": 76,
+   "testGroup": "RAF-G1"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "3",
+   "score": 4,
+   "seq": 77,
+   "testGroup": "RAF-I3"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "5",
+   "score": 5,
+   "seq": 78,
+   "testGroup": "RAF-I3-S2"
+  },
+  {
+   "acceptNo": 3,
+   "outcome": "created",
+   "rejectNo": 4,
+   "sampleQty": "125",
+   "score": 5,
+   "seq": 79,
+   "testGroup": "RAF-I4-S1"
+  },
+  {
+   "code": "QM-0100",
+   "outcome": "no_association",
+   "seq": 80
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "1",
+   "score": 1,
+   "seq": 81,
+   "testGroup": "RAF-S1"
+  },
+  {
+   "code": "QM-0100",
+   "outcome": "no_association",
+   "seq": 82
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "6",
+   "score": 1,
+   "seq": 83,
+   "testGroup": "RAF-S1"
+  },
+  {
+   "code": "QM-0100",
+   "outcome": "no_association",
+   "seq": 84
+  },
+  {
+   "acceptNo": 3,
+   "outcome": "created",
+   "rejectNo": 4,
+   "sampleQty": "50",
+   "score": 3,
+   "seq": 85,
+   "testGroup": "RAF-G1"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "5",
+   "score": 5,
+   "seq": 86,
+   "testGroup": "RAF-I3-S2"
+  },
+  {
+   "acceptNo": 2,
+   "outcome": "created",
+   "rejectNo": 3,
+   "sampleQty": "80",
+   "score": 5,
+   "seq": 87,
+   "testGroup": "RAF-I4-S1"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "320",
+   "score": 1,
+   "seq": 88,
+   "testGroup": "RAF-S1"
+  },
+  {
+   "acceptNo": 14,
+   "outcome": "created",
+   "rejectNo": 15,
+   "sampleQty": "315",
+   "score": 3,
+   "seq": 89,
+   "testGroup": "RAF-G1"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "3500",
+   "score": 1,
+   "seq": 90,
+   "testGroup": "RAF-S1"
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "3",
+   "score": 4,
+   "seq": 91,
+   "testGroup": "RAF-I3"
+  },
+  {
+   "code": "QM-0100",
+   "outcome": "no_association",
+   "seq": 92
+  },
+  {
+   "acceptNo": 0,
+   "outcome": "created",
+   "rejectNo": 1,
+   "sampleQty": "9",
+   "score": 1,
+   "seq": 93,
+   "testGroup": "RAF-S1"
+  },
+  {
+   "acceptNo": 2,
+   "outcome": "created",
+   "rejectNo": 3,
+   "sampleQty": "32",
+   "score": 3,
+   "seq": 94,
+   "testGroup": "RAF-G1"
+  },
+  {
+   "code": "QM-0116",
+   "lineOf": 62,
+   "outcome": "duplicate",
+   "seq": 95
+  },
+  {
+   "code": "QM-0116",
+   "lineOf": 65,
+   "outcome": "duplicate",
+   "seq": 96
+  },
+  {
+   "code": "QM-0116",
+   "lineOf": 71,
+   "outcome": "duplicate",
+   "seq": 97
+  },
+  {
+   "outcome": "replay",
+   "replayOf": 64,
+   "seq": 98
+  },
+  {
+   "outcome": "replay",
+   "replayOf": 73,
+   "seq": 99
+  },
+  {
+   "outcome": "replay",
+   "replayOf": 81,
+   "seq": 100
+  }
+ ],
+ "orders": 73,
+ "ordersByTestGroup": {
+  "RAF-G1": 11,
+  "RAF-I3": 3,
+  "RAF-I3-S2": 3,
+  "RAF-I4-S1": 3,
+  "RAF-S1": 7,
+  "RCV-G1-S1": 10,
+  "RCV-G2-V2-S2": 4,
+  "RCV-I1": 4,
+  "RCV-I1-V1": 3,
+  "RCV-I2-V3-S1": 2,
+  "RCV-I4-S2": 2,
+  "RCV-I5-B": 7,
+  "RCV-S2": 7,
+  "RCV-V2": 7
+ },
+ "tally": {
+  "created": 73,
+  "duplicate": 7,
+  "no_association": 15,
+  "replay": 5
+ }
+}

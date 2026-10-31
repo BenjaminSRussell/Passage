@@ -1047,21 +1047,23 @@ Interaction rules: results grid is keyboard-first (Tab/Enter down a sample colum
 
 | Lot size | Code | Sample n | AQL 1.0 Ac/Re | AQL 2.5 Ac/Re | AQL 4.0 Ac/Re |
 |---|---|---|---|---|---|
-| 2–8 | A | 2 | use E (13): 0/1 | use D (8): 0/1 | use C (5): 0/1 |
-| 9–15 | B | 3 | use E: 0/1 | use D: 0/1 | use C: 0/1 |
-| 16–25 | C | 5 | use E: 0/1 | use D: 0/1 | 0/1 |
-| 26–50 | D | 8 | use E: 0/1 | 0/1 | use E (13): 1/2 |
+| 2–8 | A | 2 | use E (13): 0/1 | use C (5): 0/1 | use B (3): 0/1 |
+| 9–15 | B | 3 | use E: 0/1 | use C: 0/1 | 0/1 |
+| 16–25 | C | 5 | use E: 0/1 | 0/1 | use B (3): 0/1 |
+| 26–50 | D | 8 | use E: 0/1 | use C (5): 0/1 | use E (13): 1/2 |
 | 51–90 | E | 13 | 0/1 | use F (20): 1/2 | 1/2 |
-| 91–150 | F | 20 | use G (32): 1/2 | 1/2 | 2/3 |
-| 151–280 | G | 32 | 1/2 | 2/3 | 3/4 |
-| 281–500 | H | 50 | 2/3 | 3/4 | 5/6 |
-| 501–1,200 | J | 80 | 3/4 | 5/6 | 7/8 |
-| 1,201–3,200 | K | 125 | 5/6 | 7/8 | 10/11 |
-| 3,201–10,000 | L | 200 | 7/8 | 10/11 | 14/15 |
-| 10,001–35,000 | M | 315 | 10/11 | 14/15 | 21/22 |
-| 35,001–150,000 | N | 500 | 14/15 | 21/22 | 21/22 |
-| 150,001–500,000 | P | 800 | 21/22 | 21/22 | 21/22 |
-| 500,001+ | Q | 1,250 | 21/22 | 21/22 | 21/22 |
+| 91–150 | F | 20 | use E (13): 0/1 | 1/2 | 2/3 |
+| 151–280 | G | 32 | use H (50): 1/2 | 2/3 | 3/4 |
+| 281–500 | H | 50 | 1/2 | 3/4 | 5/6 |
+| 501–1,200 | J | 80 | 2/3 | 5/6 | 7/8 |
+| 1,201–3,200 | K | 125 | 3/4 | 7/8 | 10/11 |
+| 3,201–10,000 | L | 200 | 5/6 | 10/11 | 14/15 |
+| 10,001–35,000 | M | 315 | 7/8 | 14/15 | 21/22 |
+| 35,001–150,000 | N | 500 | 10/11 | 21/22 | use M (315): 21/22 |
+| 150,001–500,000 | P | 800 | 14/15 | use N (500): 21/22 | use M (315): 21/22 |
+| 500,001+ | Q | 1,250 | 21/22 | use N (500): 21/22 | use M (315): 21/22 |
+
+(Corrected in the Wave 33 proof against the Z1.4 / MIL-STD-105D Table II-A master table: the earlier excerpt shifted the AQL 1.0 column from letter F down by one column and missed the arrows at the top of the 2.5 and 4.0 columns and at the bottom of both.)
 
 Arrow cells ("use X") follow the Z1.4 rule: when the table points to another sample size, use that sample size and its Ac/Re; if it exceeds lot size, inspect 100%. The full Table I (code letters for levels S-1…S-4, I–III) and Tables II-A/B/C (normal/tightened/reduced) are stored as versioned reference data `z14_table` and tested cell by cell.
 - **BR-33.2 Switching rules.** Normal → tightened when 2 of 5 consecutive lots are rejected; tightened → normal after 5 consecutive accepted; normal → reduced after 10 consecutive accepted (and switching enabled); reduced → normal on a rejection. Severity is tracked per (item, vendor, test group).
@@ -1085,7 +1087,7 @@ Arrow cells ("use X") follow the Z1.4 rule: when the table points to another sam
 ### 6.33.8 Acceptance criteria
 
 - **AC-33.1** (FR-33.3, BR-33.3) Given the trigger fixture of 60 receipts and 40 RAFs with overlapping associations, when posted, then exactly the expected 73 quality orders exist with the expected test groups.
-- **AC-33.2** (FR-33.2, BR-33.1) Given lot sizes {5, 50, 51, 500, 501, 3200, 10001, 600000} at AQL 2.5 normal level II, when sized, then sample sizes are {5, 8, 20, 50, 80, 125, 315, 1250} (lot 51 → code E, whose AQL 2.5 cell points down to F, n = 20) and Ac/Re are {0/1, 0/1, 1/2, 3/4, 5/6, 7/8, 14/15, 21/22}, matching the Z1.4 reference cells.
+- **AC-33.2** (FR-33.2, BR-33.1) Given lot sizes {5, 50, 51, 500, 501, 3200, 10001, 600000} at AQL 2.5 normal level II, when sized, then sample sizes are {5, 5, 20, 50, 80, 125, 315, 500} (lot 50 → code D, whose AQL 2.5 cell points up to C, n = 5; lot 51 → code E, whose AQL 2.5 cell points down to F, n = 20; lot 600,000 → code Q, whose cell points up to N, n = 500) and Ac/Re are {0/1, 0/1, 1/2, 3/4, 5/6, 7/8, 14/15, 21/22}, matching the Z1.4 reference cells.
 - **AC-33.3** (FR-33.5) Given 10,000 random attempts to pick, ship, consume or transfer quants with open quality orders, when executed, then every attempt fails with `QUALITY_HOLD` and no inventory transaction is written.
 - **AC-33.4** (FR-33.6, BR-33.7) Given a lot of 100 with results, when the decision is accept 90 / reject 10, then 90 are available, 10 sit in quarantine as REJECTED, and an NCR exists for 10.
 - **AC-33.5** (FR-33.8, BR-33.9) Given an NCR with a started 8D workflow, when D7 closes and 90 days elapse (Temporal time-skipping test), then an effectiveness-check task is created and the workflow completes on its approval.
