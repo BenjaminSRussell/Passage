@@ -315,6 +315,12 @@ Store tests use `platform/go/testkit` (`DBWithApp`): migrations run as the owner
 query runs as `passage_app` (NOSUPERUSER, NOBYPASSRLS), so row-level security is exercised.
 They skip without `PASSAGE_TEST_DATABASE_URL`. Domain property tests use `pgregory.net/rapid`.
 
+The Wave 16 proof tests (`internal/store/wave16_ac*_test.go`) cover the issue's acceptance
+criteria: 10,000 concurrent issues (AC1), rebuild-and-compare after N transactions (AC2;
+40,000 by default, `PASSAGE_INVENTORY_AC2_TXNS=1000000` for the issue's 1M), the GL entry of
+every journal type (AC3) and the `testdata/inv-fefo-100.json` FEFO fixture (AC4), whose
+expected picks come from `testdata/gen_fefo_100.py` (`python3 -I gen_fefo_100.py > inv-fefo-100.json`).
+
 ## Error codes
 
 | Code | Status | Meaning |

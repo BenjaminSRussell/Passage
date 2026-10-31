@@ -199,6 +199,37 @@ func upsertDimensionSet(ctx context.Context, tx pgx.Tx, tenantID string, dims do
 	return hash, raw, nil
 }
 
+// upsertDimensionSets stores every distinct dimension set of a request in
+// ascending hash order. Dimension sets are shared by all products of a tenant,
+// and a first insert holds its unique-index entry until commit, so two requests
+// inserting the same new sets in different orders deadlock (40P01). Callers run
+// it before any other lock of the request (serial advisory locks, on-hand rows);
+// the later per-row upserts then find their own rows and never wait.
+func upsertDimensionSets(ctx context.Context, tx pgx.Tx, tenantID string, sets ...domain.Dimensions) error {
+	byHash := map[string]domain.Dimensions{}
+	for _, d := range sets {
+		if d == nil {
+			continue
+		}
+		n, err := d.Normalize()
+		if err != nil {
+			return domainProblem(&domain.Error{Code: domain.CodeInvalid, Detail: err.Error()})
+		}
+		byHash[string(n.Hash())] = n
+	}
+	hashes := make([]string, 0, len(byHash))
+	for h := range byHash {
+		hashes = append(hashes, h)
+	}
+	slices.Sort(hashes)
+	for _, h := range hashes {
+		if _, _, err := upsertDimensionSet(ctx, tx, tenantID, byHash[h]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 const journalColumns = `id::text, legal_entity_id::text, journal_type, status, to_char(posting_date, 'YYYY-MM-DD'), coalesce(offset_account_id, ''),
 	currency::text, version, gl_entry, created_at, posted_at,
 	(select count(*) from inventory_journal_line l where l.tenant_id = j.tenant_id and l.journal_id = j.id),
@@ -403,6 +434,16 @@ func (s *Postgres) AddJournalLines(ctx context.Context, journalID string, lines 
 		}
 		if len(j.Lines)+len(fresh) > s.rules.MaxLines {
 			return domainProblem(&domain.Error{Code: domain.CodeJournalMax, Detail: fmt.Sprintf("journal exceeds %d lines", s.rules.MaxLines)})
+		}
+		sets := make([]domain.Dimensions, 0, 2*len(fresh))
+		for _, l := range fresh {
+			sets = append(sets, l.Dims)
+			if j.Type == domain.JournalTransfer {
+				sets = append(sets, l.ToDims)
+			}
+		}
+		if err := upsertDimensionSets(ctx, tx, p.TenantID, sets...); err != nil {
+			return err
 		}
 		next := len(j.Lines)
 		for _, l := range fresh {

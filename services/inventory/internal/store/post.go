@@ -146,6 +146,15 @@ func (s *Postgres) postLoaded(ctx context.Context, tx pgx.Tx, tenantID string, j
 	if err != nil {
 		return err
 	}
+	sets := make([]domain.Dimensions, 0, len(order))
+	for _, k := range order {
+		sets = append(sets, rows[k].dims)
+	}
+	// Shared dimension sets first, in hash order, before the serial and row
+	// locks (a first insert holds its index entry until commit).
+	if err := upsertDimensionSets(ctx, tx, tenantID, sets...); err != nil {
+		return err
+	}
 	if err := checkCountFreeze(ctx, tx, tenantID, j.LegalEntityID, countSheet, orderedRows(rows, order)); err != nil {
 		return err
 	}

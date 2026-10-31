@@ -1,0 +1,1996 @@
+{
+ "requiredDate": "2027-03-01",
+ "filterSite": "S1",
+ "rows": [
+  {
+   "batch": "LOT-32",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L32",
+   "qty": "8.5",
+   "receiptDate": "2026-08-07",
+   "laterReceipt": null,
+   "expiry": "2027-03-08",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-139",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L40",
+   "qty": "8",
+   "receiptDate": "2026-04-08",
+   "laterReceipt": null,
+   "expiry": "2027-03-07",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-68",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L25",
+   "qty": "8.5",
+   "receiptDate": "2026-04-29",
+   "laterReceipt": null,
+   "expiry": "2027-04-21",
+   "block": {
+    "qty": "4.25",
+    "target": "BLOCKED"
+   },
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-127",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L34",
+   "qty": "11",
+   "receiptDate": "2026-10-06",
+   "laterReceipt": null,
+   "expiry": null,
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-1",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L24",
+   "qty": "2",
+   "receiptDate": "2026-03-20",
+   "laterReceipt": null,
+   "expiry": "2027-08-01",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-44",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L17",
+   "qty": "4",
+   "receiptDate": "2026-08-17",
+   "laterReceipt": null,
+   "expiry": "2027-08-11",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-138",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L22",
+   "qty": "7.5",
+   "receiptDate": "2026-05-05",
+   "laterReceipt": null,
+   "expiry": "2027-10-27",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-38",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L34",
+   "qty": "2.25",
+   "receiptDate": "2026-02-22",
+   "laterReceipt": null,
+   "expiry": "2027-09-19",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-67",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L19",
+   "qty": "3.5",
+   "receiptDate": "2026-04-13",
+   "laterReceipt": null,
+   "expiry": null,
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-61",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L18",
+   "qty": "4.25",
+   "receiptDate": "2026-10-03",
+   "laterReceipt": null,
+   "expiry": "2028-02-25",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-45",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L18",
+   "qty": "10.75",
+   "receiptDate": "2026-08-18",
+   "laterReceipt": null,
+   "expiry": "2027-07-07",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-64",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L25",
+   "qty": "2",
+   "receiptDate": "2026-02-10",
+   "laterReceipt": {
+    "qty": "5.75",
+    "date": "2027-02-10"
+   },
+   "expiry": "2027-11-18",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-63",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L14",
+   "qty": "6",
+   "receiptDate": "2026-11-30",
+   "laterReceipt": {
+    "qty": "7.5",
+    "date": "2027-02-19"
+   },
+   "expiry": "2027-05-10",
+   "block": null,
+   "reservedBefore": "6",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-62",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L02",
+   "qty": "0.5",
+   "receiptDate": "2026-12-13",
+   "laterReceipt": {
+    "qty": "5.25",
+    "date": "2027-02-11"
+   },
+   "expiry": "2027-07-17",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-36",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L03",
+   "qty": "5",
+   "receiptDate": "2026-03-22",
+   "laterReceipt": null,
+   "expiry": null,
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": true
+  },
+  {
+   "batch": "LOT-52",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L01",
+   "qty": "6.75",
+   "receiptDate": "2026-04-13",
+   "laterReceipt": null,
+   "expiry": "2027-07-16",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-133",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L30",
+   "qty": "1.25",
+   "receiptDate": "2026-07-09",
+   "laterReceipt": null,
+   "expiry": "2028-03-31",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-51",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L03",
+   "qty": "11.25",
+   "receiptDate": "2026-06-05",
+   "laterReceipt": null,
+   "expiry": "2027-05-12",
+   "block": null,
+   "reservedBefore": "11.25",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "lot-54",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L37",
+   "qty": "6.75",
+   "receiptDate": "2026-08-14",
+   "laterReceipt": null,
+   "expiry": "2027-06-21",
+   "block": null,
+   "reservedBefore": "1.5",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-82",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L30",
+   "qty": "6.75",
+   "receiptDate": "2026-08-09",
+   "laterReceipt": null,
+   "expiry": "2028-02-28",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-46",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L33",
+   "qty": "9.25",
+   "receiptDate": "2026-05-08",
+   "laterReceipt": null,
+   "expiry": "2027-09-28",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-55",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L27",
+   "qty": "6.25",
+   "receiptDate": "2026-10-11",
+   "laterReceipt": null,
+   "expiry": "2027-02-22",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-34",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L31",
+   "qty": "7.5",
+   "receiptDate": "2026-10-18",
+   "laterReceipt": null,
+   "expiry": "2027-03-22",
+   "block": {
+    "qty": "7.5",
+    "target": "QUARANTINE"
+   },
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-5",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L19",
+   "qty": "11.25",
+   "receiptDate": "2026-08-18",
+   "laterReceipt": null,
+   "expiry": "2027-04-27",
+   "block": {
+    "qty": "5.5",
+    "target": "BLOCKED"
+   },
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-126",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L40",
+   "qty": "8.25",
+   "receiptDate": "2026-05-30",
+   "laterReceipt": {
+    "qty": "2.5",
+    "date": "2027-02-25"
+   },
+   "expiry": "2027-05-11",
+   "block": null,
+   "reservedBefore": "8.25",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-14",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L04",
+   "qty": "9",
+   "receiptDate": "2026-12-13",
+   "laterReceipt": null,
+   "expiry": "2027-10-17",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-3",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L16",
+   "qty": "10.25",
+   "receiptDate": "2026-11-21",
+   "laterReceipt": null,
+   "expiry": "2027-08-21",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-100",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L02",
+   "qty": "11.5",
+   "receiptDate": "2026-08-08",
+   "laterReceipt": null,
+   "expiry": "2028-02-26",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-110",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L28",
+   "qty": "8.5",
+   "receiptDate": "2026-10-18",
+   "laterReceipt": null,
+   "expiry": "2028-01-04",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-73",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L23",
+   "qty": "10.75",
+   "receiptDate": "2026-01-26",
+   "laterReceipt": null,
+   "expiry": "2027-05-30",
+   "block": null,
+   "reservedBefore": "2.5",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-106",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L23",
+   "qty": "8",
+   "receiptDate": "2026-05-13",
+   "laterReceipt": null,
+   "expiry": "2027-04-14",
+   "block": {
+    "qty": "8",
+    "target": "BLOCKED"
+   },
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-108",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L02",
+   "qty": "7.75",
+   "receiptDate": "2026-08-07",
+   "laterReceipt": null,
+   "expiry": "2027-02-24",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-39",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L29",
+   "qty": "8.5",
+   "receiptDate": "2026-08-06",
+   "laterReceipt": null,
+   "expiry": "2027-04-25",
+   "block": {
+    "qty": "4.25",
+    "target": "BLOCKED"
+   },
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-75",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L35",
+   "qty": "11.25",
+   "receiptDate": "2026-04-29",
+   "laterReceipt": null,
+   "expiry": "2027-04-21",
+   "block": {
+    "qty": "5.5",
+    "target": "BLOCKED"
+   },
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-130",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L03",
+   "qty": "6.5",
+   "receiptDate": "2026-07-27",
+   "laterReceipt": null,
+   "expiry": "2027-10-04",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-124",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L12",
+   "qty": "3",
+   "receiptDate": "2026-01-27",
+   "laterReceipt": null,
+   "expiry": "2028-03-21",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-117",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L35",
+   "qty": "2.5",
+   "receiptDate": "2026-04-09",
+   "laterReceipt": null,
+   "expiry": "2027-03-21",
+   "block": {
+    "qty": "2.5",
+    "target": "BLOCKED"
+   },
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-95",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L02",
+   "qty": "7.75",
+   "receiptDate": "2026-11-29",
+   "laterReceipt": {
+    "qty": "2.5",
+    "date": "2027-02-14"
+   },
+   "expiry": "2028-02-26",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-136",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L02",
+   "qty": "12",
+   "receiptDate": "2027-01-02",
+   "laterReceipt": null,
+   "expiry": "2027-10-28",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-8",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L32",
+   "qty": "2",
+   "receiptDate": "2026-04-12",
+   "laterReceipt": null,
+   "expiry": "2028-03-17",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-109",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L36",
+   "qty": "9.25",
+   "receiptDate": "2026-06-30",
+   "laterReceipt": null,
+   "expiry": "2027-11-26",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-74",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L39",
+   "qty": "6.5",
+   "receiptDate": "2026-08-18",
+   "laterReceipt": null,
+   "expiry": "2027-07-07",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-53",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L38",
+   "qty": "11.75",
+   "receiptDate": "2027-01-23",
+   "laterReceipt": null,
+   "expiry": "2027-12-29",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-128",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L25",
+   "qty": "1",
+   "receiptDate": "2026-08-30",
+   "laterReceipt": null,
+   "expiry": "2027-01-21",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-9",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L31",
+   "qty": "1",
+   "receiptDate": "2027-01-11",
+   "laterReceipt": null,
+   "expiry": "2027-06-21",
+   "block": null,
+   "reservedBefore": "0.25",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-116",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L17",
+   "qty": "3.25",
+   "receiptDate": "2026-11-28",
+   "laterReceipt": null,
+   "expiry": null,
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-96",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L01",
+   "qty": "2.75",
+   "receiptDate": "2027-01-12",
+   "laterReceipt": null,
+   "expiry": "2027-04-14",
+   "block": {
+    "qty": "2.75",
+    "target": "BLOCKED"
+   },
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-120",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L27",
+   "qty": "2.25",
+   "receiptDate": "2026-05-04",
+   "laterReceipt": null,
+   "expiry": "2027-04-23",
+   "block": {
+    "qty": "1",
+    "target": "BLOCKED"
+   },
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-20",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L26",
+   "qty": "4.25",
+   "receiptDate": "2026-06-12",
+   "laterReceipt": null,
+   "expiry": "2028-02-27",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-98",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L23",
+   "qty": "7",
+   "receiptDate": "2026-05-03",
+   "laterReceipt": null,
+   "expiry": "2027-11-08",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-79",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L05",
+   "qty": "8.25",
+   "receiptDate": "2026-07-08",
+   "laterReceipt": null,
+   "expiry": "2028-03-29",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-140",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L36",
+   "qty": "4",
+   "receiptDate": "2026-12-05",
+   "laterReceipt": null,
+   "expiry": "2027-04-19",
+   "block": {
+    "qty": "4",
+    "target": "QUARANTINE"
+   },
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-88",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L07",
+   "qty": "5.75",
+   "receiptDate": "2026-11-06",
+   "laterReceipt": null,
+   "expiry": "2027-03-29",
+   "block": {
+    "qty": "5.75",
+    "target": "BLOCKED"
+   },
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-94",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L11",
+   "qty": "5",
+   "receiptDate": "2026-07-07",
+   "laterReceipt": null,
+   "expiry": "2027-03-02",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "lot-89",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L34",
+   "qty": "11.75",
+   "receiptDate": "2026-04-13",
+   "laterReceipt": null,
+   "expiry": "2027-05-26",
+   "block": null,
+   "reservedBefore": "2.75",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-122",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L23",
+   "qty": "3.5",
+   "receiptDate": "2026-07-05",
+   "laterReceipt": null,
+   "expiry": "2027-05-21",
+   "block": null,
+   "reservedBefore": "0.75",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-104",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L17",
+   "qty": "3.25",
+   "receiptDate": "2026-08-01",
+   "laterReceipt": {
+    "qty": "10.5",
+    "date": "2027-02-21"
+   },
+   "expiry": "2027-12-07",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-76",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L02",
+   "qty": "1.75",
+   "receiptDate": "2026-05-23",
+   "laterReceipt": null,
+   "expiry": "2027-07-30",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "lot-121",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L25",
+   "qty": "9.5",
+   "receiptDate": "2026-05-09",
+   "laterReceipt": null,
+   "expiry": "2028-03-22",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-15",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L07",
+   "qty": "10",
+   "receiptDate": "2026-06-21",
+   "laterReceipt": null,
+   "expiry": "2027-03-08",
+   "block": {
+    "qty": "10",
+    "target": "QUARANTINE"
+   },
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-112",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L38",
+   "qty": "11.25",
+   "receiptDate": "2026-04-12",
+   "laterReceipt": null,
+   "expiry": "2027-12-08",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-7",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L11",
+   "qty": "5",
+   "receiptDate": "2026-06-02",
+   "laterReceipt": null,
+   "expiry": null,
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-4",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L20",
+   "qty": "8.25",
+   "receiptDate": "2026-07-10",
+   "laterReceipt": null,
+   "expiry": "2027-12-11",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-35",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L38",
+   "qty": "3",
+   "receiptDate": "2026-05-22",
+   "laterReceipt": null,
+   "expiry": null,
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": true
+  },
+  {
+   "batch": "LOT-22",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L27",
+   "qty": "7.75",
+   "receiptDate": "2026-05-18",
+   "laterReceipt": null,
+   "expiry": "2028-01-14",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-47",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L29",
+   "qty": "11.25",
+   "receiptDate": "2026-01-26",
+   "laterReceipt": {
+    "qty": "8.5",
+    "date": "2027-02-09"
+   },
+   "expiry": "2028-01-02",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "lot-10",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L28",
+   "qty": "1.25",
+   "receiptDate": "2026-12-14",
+   "laterReceipt": null,
+   "expiry": "2028-03-11",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-71",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L36",
+   "qty": "1.25",
+   "receiptDate": "2026-02-22",
+   "laterReceipt": null,
+   "expiry": "2027-09-19",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-69",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L20",
+   "qty": "8.25",
+   "receiptDate": "2026-05-07",
+   "laterReceipt": null,
+   "expiry": "2028-04-01",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-30",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L38",
+   "qty": "1",
+   "receiptDate": "2026-10-07",
+   "laterReceipt": null,
+   "expiry": "2027-08-25",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-114",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L29",
+   "qty": "0.75",
+   "receiptDate": "2026-09-26",
+   "laterReceipt": null,
+   "expiry": "2027-05-13",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-72",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L12",
+   "qty": "3",
+   "receiptDate": "2026-10-30",
+   "laterReceipt": null,
+   "expiry": "2027-10-24",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-99",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L08",
+   "qty": "6",
+   "receiptDate": "2026-02-25",
+   "laterReceipt": null,
+   "expiry": "2027-11-14",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-6",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L09",
+   "qty": "1.25",
+   "receiptDate": "2026-10-03",
+   "laterReceipt": null,
+   "expiry": "2027-11-26",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-134",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L16",
+   "qty": "9",
+   "receiptDate": "2027-01-03",
+   "laterReceipt": null,
+   "expiry": "2028-03-05",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-18",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L27",
+   "qty": "10",
+   "receiptDate": "2026-07-03",
+   "laterReceipt": null,
+   "expiry": "2027-06-21",
+   "block": null,
+   "reservedBefore": "2.5",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-70",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L05",
+   "qty": "7.25",
+   "receiptDate": "2026-05-26",
+   "laterReceipt": null,
+   "expiry": "2027-04-04",
+   "block": {
+    "qty": "7.25",
+    "target": "BLOCKED"
+   },
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-92",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L15",
+   "qty": "5.5",
+   "receiptDate": "2026-04-13",
+   "laterReceipt": {
+    "qty": "12",
+    "date": "2027-02-09"
+   },
+   "expiry": "2027-07-16",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-2",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L22",
+   "qty": "10",
+   "receiptDate": "2026-12-09",
+   "laterReceipt": null,
+   "expiry": "2028-03-06",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-33",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L16",
+   "qty": "8",
+   "receiptDate": "2026-10-20",
+   "laterReceipt": null,
+   "expiry": "2027-02-07",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-28",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L27",
+   "qty": "4",
+   "receiptDate": "2027-01-30",
+   "laterReceipt": null,
+   "expiry": "2028-02-20",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-137",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L16",
+   "qty": "5",
+   "receiptDate": "2026-04-12",
+   "laterReceipt": null,
+   "expiry": "2028-01-23",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-40",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L06",
+   "qty": "5.25",
+   "receiptDate": "2026-02-13",
+   "laterReceipt": null,
+   "expiry": null,
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-26",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L23",
+   "qty": "6.25",
+   "receiptDate": "2027-01-03",
+   "laterReceipt": null,
+   "expiry": "2027-06-25",
+   "block": null,
+   "reservedBefore": "1.5",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-111",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L22",
+   "qty": "7.75",
+   "receiptDate": "2026-10-02",
+   "laterReceipt": null,
+   "expiry": "2027-04-08",
+   "block": {
+    "qty": "7.75",
+    "target": "QUARANTINE"
+   },
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-37",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L06",
+   "qty": "3.25",
+   "receiptDate": "2026-06-23",
+   "laterReceipt": null,
+   "expiry": "2028-03-19",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-91",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L06",
+   "qty": "11.75",
+   "receiptDate": "2026-10-09",
+   "laterReceipt": null,
+   "expiry": null,
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-90",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L05",
+   "qty": "6",
+   "receiptDate": "2026-07-07",
+   "laterReceipt": null,
+   "expiry": "2027-02-14",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-25",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L25",
+   "qty": "6",
+   "receiptDate": "2026-05-05",
+   "laterReceipt": null,
+   "expiry": "2027-03-17",
+   "block": {
+    "qty": "6",
+    "target": "BLOCKED"
+   },
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-81",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L22",
+   "qty": "2.75",
+   "receiptDate": "2026-06-20",
+   "laterReceipt": null,
+   "expiry": "2028-02-18",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-78",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L05",
+   "qty": "11",
+   "receiptDate": "2026-08-02",
+   "laterReceipt": null,
+   "expiry": "2028-04-01",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-125",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L02",
+   "qty": "12",
+   "receiptDate": "2026-02-20",
+   "laterReceipt": null,
+   "expiry": "2028-01-14",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-17",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L34",
+   "qty": "2.5",
+   "receiptDate": "2026-12-09",
+   "laterReceipt": null,
+   "expiry": "2027-05-26",
+   "block": null,
+   "reservedBefore": "0.5",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-49",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L23",
+   "qty": "6.25",
+   "receiptDate": "2026-05-10",
+   "laterReceipt": null,
+   "expiry": "2028-03-14",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-97",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L15",
+   "qty": "0.75",
+   "receiptDate": "2026-05-05",
+   "laterReceipt": null,
+   "expiry": "2027-10-27",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-85",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L25",
+   "qty": "2",
+   "receiptDate": "2026-10-26",
+   "laterReceipt": null,
+   "expiry": "2027-10-07",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-66",
+   "site": "S1",
+   "warehouse": "W3",
+   "location": "L40",
+   "qty": "3",
+   "receiptDate": "2026-02-20",
+   "laterReceipt": null,
+   "expiry": "2028-01-23",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-131",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L17",
+   "qty": "10.5",
+   "receiptDate": "2026-06-16",
+   "laterReceipt": null,
+   "expiry": "2028-02-26",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-13",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L15",
+   "qty": "4.75",
+   "receiptDate": "2026-08-21",
+   "laterReceipt": null,
+   "expiry": "2027-08-08",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "LOT-80",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L26",
+   "qty": "6.75",
+   "receiptDate": "2027-01-30",
+   "laterReceipt": null,
+   "expiry": "2028-02-13",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "",
+   "site": "S1",
+   "warehouse": "W1",
+   "location": "L99",
+   "qty": "6.5",
+   "receiptDate": "2026-08-13",
+   "laterReceipt": null,
+   "expiry": null,
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "S2-LOT-0",
+   "site": "S2",
+   "warehouse": "W1",
+   "location": "L01",
+   "qty": "20",
+   "receiptDate": "2025-10-17",
+   "laterReceipt": null,
+   "expiry": "2027-03-09",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "S2-LOT-1",
+   "site": "S2",
+   "warehouse": "W1",
+   "location": "L01",
+   "qty": "20",
+   "receiptDate": "2025-10-17",
+   "laterReceipt": null,
+   "expiry": "2027-03-10",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "S2-LOT-2",
+   "site": "S2",
+   "warehouse": "W1",
+   "location": "L01",
+   "qty": "20",
+   "receiptDate": "2025-10-17",
+   "laterReceipt": null,
+   "expiry": "2027-03-11",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "S2-LOT-3",
+   "site": "S2",
+   "warehouse": "W1",
+   "location": "L01",
+   "qty": "20",
+   "receiptDate": "2025-10-17",
+   "laterReceipt": null,
+   "expiry": "2027-03-12",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "S2-LOT-4",
+   "site": "S2",
+   "warehouse": "W1",
+   "location": "L01",
+   "qty": "20",
+   "receiptDate": "2025-10-17",
+   "laterReceipt": null,
+   "expiry": "2027-03-13",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": null,
+   "expiryRowNull": false
+  },
+  {
+   "batch": "SEG-LOT-0",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L02",
+   "qty": "20",
+   "receiptDate": "2025-10-17",
+   "laterReceipt": null,
+   "expiry": "2027-03-09",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": "SALES_ORDER:SO-DEDICATED",
+   "expiryRowNull": false
+  },
+  {
+   "batch": "SEG-LOT-1",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L02",
+   "qty": "20",
+   "receiptDate": "2025-10-17",
+   "laterReceipt": null,
+   "expiry": "2027-03-10",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": "SALES_ORDER:SO-DEDICATED",
+   "expiryRowNull": false
+  },
+  {
+   "batch": "SEG-LOT-2",
+   "site": "S1",
+   "warehouse": "W2",
+   "location": "L02",
+   "qty": "20",
+   "receiptDate": "2025-10-17",
+   "laterReceipt": null,
+   "expiry": "2027-03-11",
+   "block": null,
+   "reservedBefore": "0",
+   "segment": "SALES_ORDER:SO-DEDICATED",
+   "expiryRowNull": false
+  }
+ ],
+ "reservations": [
+  {
+   "qty": "50",
+   "marginDays": 7,
+   "allowPartial": false
+  },
+  {
+   "qty": "37.5",
+   "marginDays": 60,
+   "allowPartial": false
+  },
+  {
+   "qty": "100000",
+   "marginDays": 0,
+   "allowPartial": true
+  },
+  {
+   "qty": "1",
+   "marginDays": 0,
+   "allowPartial": false
+  }
+ ],
+ "expected": [
+  {
+   "code": "",
+   "allocations": [
+    {
+     "batch": "LOT-32",
+     "qty": "8.5"
+    },
+    {
+     "batch": "LOT-68",
+     "qty": "4.25"
+    },
+    {
+     "batch": "LOT-75",
+     "qty": "5.75"
+    },
+    {
+     "batch": "LOT-120",
+     "qty": "1.25"
+    },
+    {
+     "batch": "LOT-39",
+     "qty": "4.25"
+    },
+    {
+     "batch": "LOT-5",
+     "qty": "5.75"
+    },
+    {
+     "batch": "LOT-63",
+     "qty": "7.5"
+    },
+    {
+     "batch": "LOT-126",
+     "qty": "2.50"
+    },
+    {
+     "batch": "LOT-114",
+     "qty": "0.75"
+    },
+    {
+     "batch": "LOT-122",
+     "qty": "2.75"
+    },
+    {
+     "batch": "lot-89",
+     "qty": "6.75"
+    }
+   ],
+   "shortfall": "0.00"
+  },
+  {
+   "code": "",
+   "allocations": [
+    {
+     "batch": "lot-89",
+     "qty": "2.25"
+    },
+    {
+     "batch": "LOT-17",
+     "qty": "2.0"
+    },
+    {
+     "batch": "LOT-73",
+     "qty": "8.25"
+    },
+    {
+     "batch": "LOT-18",
+     "qty": "7.5"
+    },
+    {
+     "batch": "lot-54",
+     "qty": "5.25"
+    },
+    {
+     "batch": "LOT-9",
+     "qty": "0.75"
+    },
+    {
+     "batch": "LOT-26",
+     "qty": "4.75"
+    },
+    {
+     "batch": "LOT-45",
+     "qty": "6.75"
+    }
+   ],
+   "shortfall": "0.00"
+  },
+  {
+   "code": "",
+   "allocations": [
+    {
+     "batch": "LOT-94",
+     "qty": "5"
+    },
+    {
+     "batch": "LOT-139",
+     "qty": "8"
+    },
+    {
+     "batch": "LOT-45",
+     "qty": "4.00"
+    },
+    {
+     "batch": "LOT-74",
+     "qty": "6.5"
+    },
+    {
+     "batch": "LOT-52",
+     "qty": "6.75"
+    },
+    {
+     "batch": "LOT-92",
+     "qty": "17.5"
+    },
+    {
+     "batch": "LOT-62",
+     "qty": "5.75"
+    },
+    {
+     "batch": "LOT-76",
+     "qty": "1.75"
+    },
+    {
+     "batch": "LOT-1",
+     "qty": "2"
+    },
+    {
+     "batch": "LOT-13",
+     "qty": "4.75"
+    },
+    {
+     "batch": "LOT-44",
+     "qty": "4"
+    },
+    {
+     "batch": "LOT-3",
+     "qty": "10.25"
+    },
+    {
+     "batch": "LOT-30",
+     "qty": "1"
+    },
+    {
+     "batch": "LOT-38",
+     "qty": "2.25"
+    },
+    {
+     "batch": "LOT-71",
+     "qty": "1.25"
+    },
+    {
+     "batch": "LOT-46",
+     "qty": "9.25"
+    },
+    {
+     "batch": "LOT-130",
+     "qty": "6.5"
+    },
+    {
+     "batch": "LOT-85",
+     "qty": "2"
+    },
+    {
+     "batch": "LOT-14",
+     "qty": "9"
+    },
+    {
+     "batch": "LOT-72",
+     "qty": "3"
+    },
+    {
+     "batch": "LOT-138",
+     "qty": "7.5"
+    },
+    {
+     "batch": "LOT-97",
+     "qty": "0.75"
+    },
+    {
+     "batch": "LOT-136",
+     "qty": "12"
+    },
+    {
+     "batch": "LOT-98",
+     "qty": "7"
+    },
+    {
+     "batch": "LOT-99",
+     "qty": "6"
+    },
+    {
+     "batch": "LOT-64",
+     "qty": "7.75"
+    },
+    {
+     "batch": "LOT-109",
+     "qty": "9.25"
+    },
+    {
+     "batch": "LOT-6",
+     "qty": "1.25"
+    },
+    {
+     "batch": "LOT-104",
+     "qty": "13.75"
+    },
+    {
+     "batch": "LOT-112",
+     "qty": "11.25"
+    },
+    {
+     "batch": "LOT-4",
+     "qty": "8.25"
+    },
+    {
+     "batch": "LOT-53",
+     "qty": "11.75"
+    },
+    {
+     "batch": "LOT-47",
+     "qty": "19.75"
+    },
+    {
+     "batch": "LOT-110",
+     "qty": "8.5"
+    },
+    {
+     "batch": "LOT-125",
+     "qty": "12"
+    },
+    {
+     "batch": "LOT-22",
+     "qty": "7.75"
+    },
+    {
+     "batch": "LOT-66",
+     "qty": "3"
+    },
+    {
+     "batch": "LOT-137",
+     "qty": "5"
+    },
+    {
+     "batch": "LOT-80",
+     "qty": "6.75"
+    },
+    {
+     "batch": "LOT-81",
+     "qty": "2.75"
+    },
+    {
+     "batch": "LOT-28",
+     "qty": "4"
+    },
+    {
+     "batch": "LOT-61",
+     "qty": "4.25"
+    },
+    {
+     "batch": "LOT-131",
+     "qty": "10.5"
+    },
+    {
+     "batch": "LOT-100",
+     "qty": "11.5"
+    },
+    {
+     "batch": "LOT-95",
+     "qty": "10.25"
+    },
+    {
+     "batch": "LOT-20",
+     "qty": "4.25"
+    },
+    {
+     "batch": "LOT-82",
+     "qty": "6.75"
+    },
+    {
+     "batch": "LOT-134",
+     "qty": "9"
+    },
+    {
+     "batch": "LOT-2",
+     "qty": "10"
+    },
+    {
+     "batch": "lot-10",
+     "qty": "1.25"
+    },
+    {
+     "batch": "LOT-49",
+     "qty": "6.25"
+    },
+    {
+     "batch": "LOT-8",
+     "qty": "2"
+    },
+    {
+     "batch": "LOT-37",
+     "qty": "3.25"
+    },
+    {
+     "batch": "LOT-124",
+     "qty": "3"
+    },
+    {
+     "batch": "lot-121",
+     "qty": "9.5"
+    },
+    {
+     "batch": "LOT-79",
+     "qty": "8.25"
+    },
+    {
+     "batch": "LOT-133",
+     "qty": "1.25"
+    },
+    {
+     "batch": "LOT-69",
+     "qty": "8.25"
+    },
+    {
+     "batch": "LOT-78",
+     "qty": "11"
+    },
+    {
+     "batch": "LOT-40",
+     "qty": "5.25"
+    },
+    {
+     "batch": "LOT-36",
+     "qty": "5"
+    },
+    {
+     "batch": "LOT-67",
+     "qty": "3.5"
+    },
+    {
+     "batch": "LOT-35",
+     "qty": "3"
+    },
+    {
+     "batch": "LOT-7",
+     "qty": "5"
+    },
+    {
+     "batch": "",
+     "qty": "6.5"
+    },
+    {
+     "batch": "LOT-127",
+     "qty": "11"
+    },
+    {
+     "batch": "LOT-91",
+     "qty": "11.75"
+    },
+    {
+     "batch": "LOT-116",
+     "qty": "3.25"
+    }
+   ],
+   "shortfall": "99548.75"
+  },
+  {
+   "code": "INV-RES-002",
+   "allocations": [],
+   "shortfall": "1"
+  }
+ ]
+}
