@@ -1,9 +1,9 @@
 // Client for the productcost service (services/productcost/api/openapi.yaml).
-// Browser calls use /api/v1/costing/..., which the web BFF rewrites to the
+// Browser calls use /api/v1/product-costing/..., which the web BFF rewrites to the
 // service and signs with the user's tenant and duties. Amounts are decimal
 // strings; the browser never does arithmetic on a float amount.
 
-export const base = "/api/v1/costing";
+export const base = "/api/v1/product-costing";
 
 /** Cost component code to amount, e.g. { DM: "21.2", DL: "54" }. */
 export type Split = Record<string, string>;

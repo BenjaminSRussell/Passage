@@ -73,7 +73,7 @@ func (a *API) transitionVersion(w http.ResponseWriter, r *http.Request) {
 	switch req.Action {
 	case domain.ActionBlock, domain.ActionUnblock, domain.ActionClose:
 	case domain.ActionActivate:
-		fields["action"] = "activate with POST /v1/costing/versions:activate (duty CostingActivate)"
+		fields["action"] = "activate with POST /v1/product-costing/versions:activate (duty CostingActivate)"
 	default:
 		fields["action"] = "must be block, unblock or close"
 	}

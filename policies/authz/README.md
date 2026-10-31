@@ -17,9 +17,9 @@ Each permission is a route template matched with `glob.match(pattern, ["/", ":"]
 - Seed one row per mounted method and route template, so a narrow duty cannot reach a verb route owned by another duty.
 - Routes that dispatch a `:verb` inside one handler (production order commands, down payments) are seeded as one `*:verb` row per verb on the duty that handler enforces.
 
-## Known collision: costing routes
+## Costing route prefixes
 
-`productcost` (`CostingView`, `CostingMaintain`) and `costing` (`costing.read`, `costing.reconcile`, `costing.version.write`) both mount `/v1/costing/reconciliations` and `/v1/costing/versions`. Both duty sets are seeded for those templates, so either family reaches either service's route. Fixing it needs distinct route prefixes in the routers; tracked in #342.
+`costing` (Wave 20 inventory costing, dotted `costing.*` duties) owns `/v1/costing/...`. `productcost` (Wave 39 product costing, `Costing*` duties) owns `/v1/product-costing/...`, so the two duty families never share a route template (#342). In the web dev proxy and at the gateway, `/api/v1/product-costing/...` resolves to `PASSAGE_SVC_PRODUCT_COSTING_URL`.
 
 ## Path input
 

@@ -133,7 +133,7 @@ describe("cost components page", () => {
   it("shows the empty state and adds a component with an Idempotency-Key", async () => {
     let stored: CostComponent[] = [];
     handler = (method, url, body) => {
-      if (url.pathname !== "/api/v1/costing/cost-components") return undefined;
+      if (url.pathname !== "/api/v1/product-costing/cost-components") return undefined;
       if (method === "GET") return { status: 200, body: { items: stored } };
       const created = { ...(body as CostComponent), id: dm.id, createdAt: dm.createdAt };
       stored = [created];
@@ -198,8 +198,8 @@ describe("cost groups page", () => {
   it("maps a new group to a stored component", async () => {
     let groups: CostGroup[] = [];
     handler = (method, url, body) => {
-      if (url.pathname === "/api/v1/costing/cost-components") return { status: 200, body: { items: [dm, dl] } };
-      if (url.pathname !== "/api/v1/costing/cost-groups") return undefined;
+      if (url.pathname === "/api/v1/product-costing/cost-components") return { status: 200, body: { items: [dm, dl] } };
+      if (url.pathname !== "/api/v1/product-costing/cost-groups") return undefined;
       if (method === "GET") return { status: 200, body: { items: groups } };
       const g = { ...(body as CostGroup), id: "0190f0c2-0000-7000-8000-0000000000c1", componentCode: "DL", createdAt: dm.createdAt };
       groups = [g];
@@ -238,15 +238,15 @@ describe("costing versions page", () => {
     let stored: StoredVersion[] = [];
     handler = (method, url, body) => {
       const p = url.pathname;
-      if (p === "/api/v1/costing/versions" && method === "GET") return { status: 200, body: { items: stored } };
-      if (p === "/api/v1/costing/versions") {
+      if (p === "/api/v1/product-costing/versions" && method === "GET") return { status: 200, body: { items: stored } };
+      if (p === "/api/v1/product-costing/versions") {
         const v = { ...std, ...(body as object) } as StoredVersion;
         stored = [v];
         return { status: 201, body: v };
       }
       const { version, action } = body as { version: number; action?: string };
-      if (p === `/api/v1/costing/versions/${std.id}/transition` && action === "block") return { status: 200, body: { ...stored[0], status: "Blocked", version: version + 1 } };
-      if (p === `/api/v1/costing/versions/${std.id}/activate`)
+      if (p === `/api/v1/product-costing/versions/${std.id}/transition` && action === "block") return { status: 200, body: { ...stored[0], status: "Blocked", version: version + 1 } };
+      if (p === `/api/v1/product-costing/versions/${std.id}/activate`)
         return { status: 200, body: { ...stored[0], status: "Active", version: version + 1, activatedAt: "2026-10-28T08:00:00Z" } };
       return undefined;
     };
@@ -259,7 +259,7 @@ describe("costing versions page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create version" }));
     expect(await findStatus()).toHaveTextContent("Version STD-2027 created, status Open.");
     const create = posts()[0];
-    expect(create.url.pathname).toBe("/api/v1/costing/versions");
+    expect(create.url.pathname).toBe("/api/v1/product-costing/versions");
     expect(create.body).toEqual({ legalEntityId: le, code: "STD-2027", type: "Standard", fallback: "Active" });
     expect(create.key).not.toBeNull();
 
@@ -270,7 +270,7 @@ describe("costing versions page", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Activate STD-2027" }));
     await waitFor(() => expect(within(table).getByRole("row", { name: /STD-2027/ })).toHaveTextContent("Active"));
-    expect(posts()[2].url.pathname).toBe(`/api/v1/costing/versions/${std.id}/activate`);
+    expect(posts()[2].url.pathname).toBe(`/api/v1/product-costing/versions/${std.id}/activate`);
     expect(posts()[2].body).toEqual({ version: 2 });
     expect(within(table).getByRole("row", { name: /STD-2027/ })).toHaveTextContent("2026-10-28");
     expect(screen.getByRole("button", { name: "Close STD-2027" })).toBeInTheDocument();

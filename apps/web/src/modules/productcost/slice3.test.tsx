@@ -97,7 +97,7 @@ const ac3910Report: ConversionReport = {
 
 describe("standard cost conversion page", () => {
   it("validates AC-39.10 and shows the 75.00 revaluation and its journal", async () => {
-    handler = (url) => (url.pathname === "/api/v1/costing/conversions:validate" ? { status: 200, body: ac3910Report } : undefined);
+    handler = (url) => (url.pathname === "/api/v1/product-costing/conversions:validate" ? { status: 200, body: ac3910Report } : undefined);
     const { container } = renderAt("/productcost/conversion");
     expect(screen.getByRole("heading", { name: "Not validated yet" })).toBeInTheDocument();
     expect(pageViolations(container)).toEqual([]);
@@ -115,7 +115,7 @@ describe("standard cost conversion page", () => {
 
   it("runs the checklist step by step and records who ran each step", async () => {
     handler = (url, body) => {
-      if (url.pathname !== "/api/v1/costing/conversions:advance") return undefined;
+      if (url.pathname !== "/api/v1/product-costing/conversions:advance") return undefined;
       const { run, step } = body as { run: ConversionRun; step: string };
       const checklist = [...run.checklist, { step, status: "Done", user: "alice", at: "2026-10-28T09:00:00Z" }];
       return { status: 200, body: { run: { status: "Draft", checklist }, report: ac3910Report } };
@@ -135,7 +135,7 @@ describe("standard cost conversion page", () => {
 
   it("shows a refused step with its code and keeps the checklist", async () => {
     handler = (url) =>
-      url.pathname === "/api/v1/costing/conversions:advance"
+      url.pathname === "/api/v1/product-costing/conversions:advance"
         ? { status: 422, body: { code: "CST-0736", detail: "step validate cannot run before select" } }
         : undefined;
     renderAt("/productcost/conversion");
@@ -150,7 +150,7 @@ describe("standard cost conversion page", () => {
       blocked: true,
       diagnostics: [{ code: "CST-0732", severity: "error", message: "negative physical on-hand blocks conversion", ref: "RM-301@PLANT-1" }],
     };
-    handler = (url) => (url.pathname === "/api/v1/costing/conversions:validate" ? { status: 200, body: blocked } : undefined);
+    handler = (url) => (url.pathname === "/api/v1/product-costing/conversions:validate" ? { status: 200, body: blocked } : undefined);
     renderAt("/productcost/conversion");
     fireEvent.click(screen.getByRole("button", { name: "Validate and preview" }));
     expect(await screen.findByText("The conversion is blocked")).toBeInTheDocument();
@@ -178,7 +178,7 @@ describe("cost roll-up page valuation view", () => {
       subtotals: { "B-DM": "100", T: "120" },
     };
     handler = (url) =>
-      url.pathname === "/api/v1/costing/calculations" ? { status: 200, body: { result, split: { DM: "100", DL: "20", IND: "12" } } } : undefined;
+      url.pathname === "/api/v1/product-costing/calculations" ? { status: 200, body: { result, split: { DM: "100", DL: "20", IND: "12" } } } : undefined;
     renderAt("/productcost/roll");
     fireEvent.change(screen.getByLabelText("Valuation view"), { target: { value: "Group" } });
     fireEvent.click(screen.getByRole("button", { name: "Roll item" }));

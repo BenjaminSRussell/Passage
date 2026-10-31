@@ -8,45 +8,45 @@ Bounded context `costing`, Postgres schema `costing` (per-context database).
 The service is **stateless** in slices 1 and 2. The caller sends the structure, prices and
 actuals in the request; the service computes and returns:
 
-- **Cost roll-up** (`POST /v1/costing/calculations`): one item rolled from its BOM and
+- **Cost roll-up** (`POST /v1/product-costing/calculations`): one item rolled from its BOM and
   routing. Returns the unit cost and the cost component split (own lines plus the split
   carried up from exploded children). Only the item's reachable subgraph is rolled.
-- **Mass roll** (`POST /v1/costing/rolls`): every item in the request, rolled by
+- **Mass roll** (`POST /v1/product-costing/rolls`): every item in the request, rolled by
   topological level with per-item diagnostics. Cycles, depth overruns and missing
   prices fail only the affected items; the run continues.
-- **Variance decomposition** (`POST /v1/costing/variances/compute`): an ended order's
+- **Variance decomposition** (`POST /v1/product-costing/variances/compute`): an ended order's
   total variance split into lot size, quantity, price and substitution, per component.
   The four types always sum to the total in the currency's minor unit; each component's
   rounding residual is assigned to its quantity variance, and a residual above two minor
   units fails with `CST-0720`.
-- **Activation preview** (`POST /v1/costing/activations:preview`): the on-hand
+- **Activation preview** (`POST /v1/product-costing/activations:preview`): the on-hand
   revaluation per line, the total and the balanced journal. Nothing is posted.
 
 Slice 2 adds:
 
-- **Mixed cost** (`POST /v1/costing/mixed-costs`, FR-39.14): each procurement alternative
+- **Mixed cost** (`POST /v1/product-costing/mixed-costs`, FR-39.14): each procurement alternative
   with a non-zero ratio is rolled with its own structure; the item cost and split are the
   ratio-weighted mix (AC-39.11). Ratios must total 100.00 (`CST-0741`, 422); a 0.00 ratio
   is reported as `Excluded` and left out (BR-39.12). An alternative that fails to roll fails
   the item unless fallback applies. Sources are unique per item. `DeriveRatios` (domain only)
   turns receipt quantities per source into ratios at 0.01%, the shortfall going to the
   largest remainders.
-- **COGS posting preview** (`POST /v1/costing/postings:cogs`, FR-39.15): Dr `COGS-<component>`
+- **COGS posting preview** (`POST /v1/product-costing/postings:cogs`, FR-39.15): Dr `COGS-<component>`
   per component of the unit split, Cr `Inventory` for the total. Components sum to the
   total; the rounding residual goes to DM (BR-39.13).
-- **Price difference posting preview** (`POST /v1/costing/postings:price-difference`,
+- **Price difference posting preview** (`POST /v1/product-costing/postings:price-difference`,
   FR-39.7, FR-39.15): the PPV `(receipt unit cost − standard) × quantity` split over the
   standard's components by their share, residual to the largest component; Dr (unfavourable)
   or Cr (favourable) `PPV-<component>`, offset to `PriceDifferenceClearing`.
-- **Sales order estimate** (`POST /v1/costing/sales-order-estimates`, FR-39.16): rolls the
+- **Sales order estimate** (`POST /v1/product-costing/sales-order-estimates`, FR-39.16): rolls the
   configured or make-to-order item at the order quantity (the order is the root's costing
   lot) and returns calculation type `SalesOrder`, the cost, its split (summing to the cost,
   residual to DM), margin = net − cost and margin % on the net amount (AC-39.13). Nothing is
   stored, so freezing at confirmation is not built (see NOT-IMPLEMENTED D16).
-- **Comparison** (`POST /v1/costing/comparisons`, FR-39.10): a baseline run and a candidate
+- **Comparison** (`POST /v1/product-costing/comparisons`, FR-39.10): a baseline run and a candidate
   (what-if) run item by item, with delta, delta % and component deltas. Items on one side
   only are reported; items in error on either side carry no delta.
-- **Standard reconciliation** (`POST /v1/costing/reconciliations`, FR-39.11, AC-39.9):
+- **Standard reconciliation** (`POST /v1/product-costing/reconciliations`, FR-39.11, AC-39.9):
   Σ on-hand × standard per site against the GL inventory balance; sites with a non-zero
   difference are counted in `differences` and in the
   `productcost_reconciliation_differences_total` metric (alert: difference ≠ 0).
@@ -94,14 +94,14 @@ subtotals named in `refs`). See slice 3 below.
 
 | Route | Duty (PRD 7.39.17) |
 |---|---|
-| `POST /v1/costing/calculations`, `/rolls`, `/mixed-costs`, `/sales-order-estimates`, `/sales-order-estimates:refresh`, `/sales-order-estimates:freeze`, `/estimates`, `/postings:cogs`, `/postings:price-difference` | `CostingCalculate` |
-| `POST /v1/costing/comparisons`, `/reconciliations` | `CostingView` |
-| `POST /v1/costing/variances/compute` | `CostingSystem` |
-| `POST /v1/costing/activations:preview`, `/versions:activate`, `/conversions:validate`, `/conversions:advance` | `CostingActivate` |
-| `POST /v1/costing/versions:transition` (block, unblock, close) | `CostingMaintain` |
-| `GET /v1/costing/cost-components`, `/cost-groups`, `/versions`, `/versions/{id}` | `CostingView` |
-| `POST /v1/costing/cost-components`, `/cost-groups`, `/versions`, `/versions/{id}/transition` | `CostingMaintain` |
-| `POST /v1/costing/versions/{id}/activate` | `CostingActivate` |
+| `POST /v1/product-costing/calculations`, `/rolls`, `/mixed-costs`, `/sales-order-estimates`, `/sales-order-estimates:refresh`, `/sales-order-estimates:freeze`, `/estimates`, `/postings:cogs`, `/postings:price-difference` | `CostingCalculate` |
+| `POST /v1/product-costing/comparisons`, `/reconciliations` | `CostingView` |
+| `POST /v1/product-costing/variances/compute` | `CostingSystem` |
+| `POST /v1/product-costing/activations:preview`, `/versions:activate`, `/conversions:validate`, `/conversions:advance` | `CostingActivate` |
+| `POST /v1/product-costing/versions:transition` (block, unblock, close) | `CostingMaintain` |
+| `GET /v1/product-costing/cost-components`, `/cost-groups`, `/versions`, `/versions/{id}` | `CostingView` |
+| `POST /v1/product-costing/cost-components`, `/cost-groups`, `/versions`, `/versions/{id}/transition` | `CostingMaintain` |
+| `POST /v1/product-costing/versions/{id}/activate` | `CostingActivate` |
 
 The comparison and the reconciliation compute an inquiry without changing anything, so they
 take the PRD's read duty `CostingView` (the PRD's `GET /costing/compare` and the inventory
@@ -142,15 +142,15 @@ session-only version list of slice 3.
   standard. Without `legalCost` the price applies and `CST-0761` warns (`groupCostUnknown`).
   `ProfitCenter` is built in slice 4 (below). A comparison can roll the same selection in
   different views (the valuation view comparison).
-- **Version lifecycle** (FR-39.3, BR-39.2): `POST /v1/costing/versions:transition`
+- **Version lifecycle** (FR-39.3, BR-39.2): `POST /v1/product-costing/versions:transition`
   (`CostingMaintain`) blocks, unblocks or closes a version: Open ⇄ Blocked, Active → Closed.
-  `POST /v1/costing/versions:activate` (`CostingActivate`) moves Open or Blocked to Active;
+  `POST /v1/product-costing/versions:activate` (`CostingActivate`) moves Open or Blocked to Active;
   the maintain route refuses `activate` because the two duties are segregated (section
   7.39.17). Simulation versions cannot activate (`CST-0711`). `SpecifiedVersion` fallback
   needs a fallback version other than the version itself (`CST-0716`). Other moves are
   `CST-0715`. CST-0715 and CST-0716 are new codes. Activation here changes the status only;
   the revaluation posting is still the preview (`/activations:preview`).
-- **Standard cost conversion checklist** (FR-39.12): `POST /v1/costing/conversions:validate`
+- **Standard cost conversion checklist** (FR-39.12): `POST /v1/product-costing/conversions:validate`
   returns the blockers and the revaluation preview per position
   (on-hand × standard − actual value, rounded to the currency's minor unit; the journal equals
   the sum of the rows, AC-39.10). Negative on-hand (`CST-0732`), open in-transit transfers
@@ -158,7 +158,7 @@ session-only version list of slice 3.
   `blockers` (all three when it is omitted, the parameter default) and warnings otherwise.
   The inventory close (`closeThrough` = the day before the conversion date, BR-39.11) is a
   later checklist step, so validation reports it as `closeComplete` with a `CST-0731`
-  warning. `POST /v1/costing/conversions:advance` records the next step (`select`, `roll`,
+  warning. `POST /v1/product-costing/conversions:advance` records the next step (`select`, `roll`,
   `validate`, `preview`, `close`, `activate`) for the calling user at the server's time:
   `validate` refuses a blocked report (`CST-0735`), `close` refuses a missing close
   (`CST-0731`), `activate` refuses either, and an out-of-order step is `CST-0736`. The
@@ -180,7 +180,7 @@ the next state. Nothing is stored and no event is published until the persistenc
   flag keep their price; the Legal and Group views ignore the flag. `profitCenterSource`,
   `transferPrice` and `costPlusPct` are only allowed on Purchased items, and an item cannot be
   both `intercompany` and `profitCenterSource`.
-- **Ad-hoc estimates** (`POST /v1/costing/estimates`, FR-39.13, `CostingCalculate`): a
+- **Ad-hoc estimates** (`POST /v1/product-costing/estimates`, FR-39.13, `CostingCalculate`): a
   costing model (`code`, `characteristics` with an optional `default`, and `lines` of type
   `Item`, `Activity`, `Subcontract` or `Overhead`) is priced for a `Quote`, `InternalOrder` or
   `ProjectTask`. Each line's `quantityFormula` and optional `priceFormula` are arithmetic over
@@ -195,14 +195,14 @@ the next state. Nothing is stored and no event is published until the persistenc
   quantity or price is `CST-0764` (new code, 422). The formula grammar is local to this
   service until the wave-38 grammar (FR-38.17) is shared.
 - **Sales order estimate versions** (FR-39.16, BR-39.14, `CostingCalculate`):
-  - `POST /v1/costing/sales-order-estimates:refresh` costs the line like
+  - `POST /v1/product-costing/sales-order-estimates:refresh` costs the line like
     `/sales-order-estimates` and versions the result against `configHash`. The current version
     is the highest that is not Superseded. The same (`lineId`, `configHash`), the PRD's
     idempotency key, returns it unchanged (`changed: false`). A new hash marks every Pending and
     Frozen version Superseded, appends a Pending version, and warns `CST-0751` when a version was
     superseded. A roll that fails is still versioned, so the line has no usable estimate until
     the next refresh.
-  - `POST /v1/costing/sales-order-estimates:freeze` freezes the current version at line
+  - `POST /v1/product-costing/sales-order-estimates:freeze` freezes the current version at line
     confirmation. Freezing a Frozen version returns it unchanged. No current version, or one
     whose roll failed, is `CST-0763` (new code, 422): the "estimate missing at confirmation"
     alert of the refresh job.
@@ -220,29 +220,29 @@ body: a repeated key with the same body returns the stored response with
 command, is `idempotency_key_reuse` (422). Every change writes its event to the outbox in the
 same transaction (see `events/asyncapi.yaml`).
 
-- **Cost components** (FR-39.1): `GET` and `POST /v1/costing/cost-components`. A code is 1–20
+- **Cost components** (FR-39.1): `GET` and `POST /v1/product-costing/cost-components`. A code is 1–20
   upper-case letters, digits or hyphens (`DM`, `IND-MAT`), with a name (≤ 120), a cost group
   type (`DirectMaterial`, `DirectManufacturing`, `Indirect`, `Undefined`) and a behaviour
   (`Fixed` or `Variable`, default `Variable`). At most 20 per tenant (`CST-0790`, checked under
   a per-tenant advisory lock so concurrent creates cannot exceed it); a duplicate code is
   `CST-0791` (409). Event `dev.passage.costing.costcomponent.created.v1`.
-- **Cost groups** (FR-39.1): `GET` and `POST /v1/costing/cost-groups`. Same code, name, type and
+- **Cost groups** (FR-39.1): `GET` and `POST /v1/product-costing/cost-groups`. Same code, name, type and
   behaviour rules, and `componentId`, the cost component the group's costs are split into
   (`CST-0794`, 422, when it is not a component of the tenant). At most 50 per tenant
   (`CST-0792`); a duplicate code is `CST-0793` (409). Event
   `dev.passage.costing.costgroup.created.v1`.
-- **Costing versions** (FR-39.3): `POST /v1/costing/versions` creates an Open version for a
+- **Costing versions** (FR-39.3): `POST /v1/product-costing/versions` creates an Open version for a
   legal entity with a code (≤ 30, unique per legal entity, `CST-0713`, 409), a type (default
   `Standard`, `costing.versionType`), a fallback principle (default `Active`,
   `costing.fallback`), the site scope (`siteIds`, unique, empty for every site) and
   `effectiveFrom`. `SpecifiedVersion` needs `fallbackVersionId`, a stored version of the same
   legal entity (`CST-0716`). A legal entity outside the caller's scope is `CST-0718` (403).
-  `GET /v1/costing/versions` pages in creation order (`limit` 1–500, default 100; `after` is
+  `GET /v1/product-costing/versions` pages in creation order (`limit` 1–500, default 100; `after` is
   the previous page's `next`) and filters by `legalEntityId`, `status` and `type`;
-  `GET /v1/costing/versions/{id}` reads one (`CST-0717`, 404). Event
+  `GET /v1/product-costing/versions/{id}` reads one (`CST-0717`, 404). Event
   `dev.passage.costing.version.created.v1`.
-- **Lifecycle** (BR-39.2): `POST /v1/costing/versions/{id}/transition` with `{action, version}`
-  blocks, unblocks or closes (CostingMaintain); `POST /v1/costing/versions/{id}/activate` with
+- **Lifecycle** (BR-39.2): `POST /v1/product-costing/versions/{id}/transition` with `{action, version}`
+  blocks, unblocks or closes (CostingMaintain); `POST /v1/product-costing/versions/{id}/activate` with
   `{version}` activates (CostingActivate, segregated). `version` is the counter the caller read;
   a stale one is `CST-0714` (409) and changes nothing. The rules are those of slice 3
   (`CST-0711`, `CST-0715`). Activation stamps `activatedAt`. No pending prices are stored yet,

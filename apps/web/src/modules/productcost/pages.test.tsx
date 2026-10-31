@@ -170,7 +170,7 @@ describe("helpers", () => {
 describe("cost roll-up page", () => {
   it("starts empty, then rolls the worked example and shows FG-100 with its split", async () => {
     handler = (url) =>
-      url.pathname === "/api/v1/costing/calculations"
+      url.pathname === "/api/v1/product-costing/calculations"
         ? { status: 200, body: { result: fg100, split: { DM: "21.2", DL: "54", "IND-MAT": "2.12", "IND-LAB": "27" } } }
         : undefined;
     const { container } = renderAt("/productcost/roll");
@@ -232,7 +232,7 @@ describe("cost roll-up page", () => {
       diagnostics: [{ code: "CST-0701", severity: "error", message: "cycle detected: LOOP -> LOOP", ref: "LOOP" }],
     };
     handler = (url) =>
-      url.pathname === "/api/v1/costing/rolls"
+      url.pathname === "/api/v1/product-costing/rolls"
         ? { status: 200, body: { itemCount: 2, errorCount: 1, durationMs: 3, results: [fg100, failed] } }
         : undefined;
     renderAt("/productcost/roll");
@@ -256,7 +256,7 @@ describe("cost roll-up page", () => {
 describe("production variance page", () => {
   it("sends the AC-39.5 order and shows the decomposition", async () => {
     handler = (url) =>
-      url.pathname === "/api/v1/costing/variances/compute"
+      url.pathname === "/api/v1/product-costing/variances/compute"
         ? {
             status: 200,
             body: {
@@ -315,7 +315,7 @@ describe("production variance page", () => {
 describe("activation preview page", () => {
   it("previews AC-39.4 and shows the total to confirm and the journal", async () => {
     handler = (url, body) =>
-      url.pathname === "/api/v1/costing/activations:preview"
+      url.pathname === "/api/v1/product-costing/activations:preview"
         ? {
             status: 200,
             body: {
@@ -416,7 +416,7 @@ describe("slice 2 helpers", () => {
 describe("cost roll-up page explosion modes", () => {
   it("sends the chosen explosion mode", async () => {
     handler = (url) =>
-      url.pathname === "/api/v1/costing/rolls" ? { status: 200, body: { itemCount: 1, errorCount: 0, durationMs: 1, results: [fg100] } } : undefined;
+      url.pathname === "/api/v1/product-costing/rolls" ? { status: 200, body: { itemCount: 1, errorCount: 0, durationMs: 1, results: [fg100] } } : undefined;
     renderAt("/productcost/roll");
     fireEvent.change(screen.getByLabelText("Explosion mode"), { target: { value: "MakeToOrder" } });
     fireEvent.click(screen.getByRole("button", { name: "Mass roll" }));
@@ -428,7 +428,7 @@ describe("cost roll-up page explosion modes", () => {
 describe("mixed cost page", () => {
   it("starts empty, then mixes AC-39.11 and shows 11.00 with the alternatives and split", async () => {
     handler = (url) =>
-      url.pathname === "/api/v1/costing/mixed-costs"
+      url.pathname === "/api/v1/product-costing/mixed-costs"
         ? {
             status: 200,
             body: {
@@ -484,7 +484,7 @@ describe("mixed cost page", () => {
 describe("sales order estimate page", () => {
   it("costs the AC-39.13 line and shows margin 540.00 (22.50%)", async () => {
     handler = (url) =>
-      url.pathname === "/api/v1/costing/sales-order-estimates"
+      url.pathname === "/api/v1/product-costing/sales-order-estimates"
         ? {
             status: 200,
             body: {
@@ -555,7 +555,7 @@ describe("sales order estimate page", () => {
 describe("estimate comparison page", () => {
   it("compares the what-if candidate and opens one item's component change", async () => {
     handler = (url) =>
-      url.pathname === "/api/v1/costing/comparisons"
+      url.pathname === "/api/v1/product-costing/comparisons"
         ? {
             status: 200,
             body: {
@@ -596,7 +596,7 @@ describe("estimate comparison page", () => {
 describe("component postings page", () => {
   it("previews the AC-39.12 COGS lines and the AC-39.7 price difference", async () => {
     handler = (url) => {
-      if (url.pathname === "/api/v1/costing/postings:cogs")
+      if (url.pathname === "/api/v1/product-costing/postings:cogs")
         return {
           status: 200,
           body: {
@@ -611,7 +611,7 @@ describe("component postings page", () => {
             ],
           },
         };
-      if (url.pathname === "/api/v1/costing/postings:price-difference")
+      if (url.pathname === "/api/v1/product-costing/postings:price-difference")
         return {
           status: 200,
           body: {
@@ -665,7 +665,7 @@ describe("component postings page", () => {
 describe("standard cost reconciliation page", () => {
   it("reconciles two sites and flags the one that does not tie", async () => {
     handler = (url) =>
-      url.pathname === "/api/v1/costing/reconciliations"
+      url.pathname === "/api/v1/product-costing/reconciliations"
         ? {
             status: 200,
             body: {

@@ -131,15 +131,15 @@ var componentBody = `{"code":" IND-MAT ","name":"Material overhead","costGroupTy
 func TestStoredRoutes_WithoutStoreAnswer503(t *testing.T) {
 	h := storedRouter(nil)
 	for _, c := range []call{
-		{http.MethodGet, "/v1/costing/cost-components", "", view, "", ""},
-		{http.MethodPost, "/v1/costing/cost-components", componentBody, maintain, "k", ""},
-		{http.MethodGet, "/v1/costing/cost-groups", "", view, "", ""},
-		{http.MethodPost, "/v1/costing/cost-groups", `{}`, maintain, "k", ""},
-		{http.MethodGet, "/v1/costing/versions", "", view, "", ""},
-		{http.MethodPost, "/v1/costing/versions", `{}`, maintain, "k", ""},
-		{http.MethodGet, "/v1/costing/versions/" + someID, "", view, "", ""},
-		{http.MethodPost, "/v1/costing/versions/" + someID + "/transition", `{"action":"block","version":1}`, maintain, "", ""},
-		{http.MethodPost, "/v1/costing/versions/" + someID + "/activate", `{"version":1}`, activate, "", ""},
+		{http.MethodGet, "/v1/product-costing/cost-components", "", view, "", ""},
+		{http.MethodPost, "/v1/product-costing/cost-components", componentBody, maintain, "k", ""},
+		{http.MethodGet, "/v1/product-costing/cost-groups", "", view, "", ""},
+		{http.MethodPost, "/v1/product-costing/cost-groups", `{}`, maintain, "k", ""},
+		{http.MethodGet, "/v1/product-costing/versions", "", view, "", ""},
+		{http.MethodPost, "/v1/product-costing/versions", `{}`, maintain, "k", ""},
+		{http.MethodGet, "/v1/product-costing/versions/" + someID, "", view, "", ""},
+		{http.MethodPost, "/v1/product-costing/versions/" + someID + "/transition", `{"action":"block","version":1}`, maintain, "", ""},
+		{http.MethodPost, "/v1/product-costing/versions/" + someID + "/activate", `{"version":1}`, activate, "", ""},
 	} {
 		rec := c.do(h)
 		if code, _ := problemCode(t, rec); rec.Code != http.StatusServiceUnavailable || code != codeStoreUnavailable {
@@ -152,13 +152,13 @@ func TestStoredRoutes_EnforceSegregatedDuties(t *testing.T) {
 	f := &fakeStore{}
 	h := storedRouter(f)
 	for _, c := range []call{
-		{http.MethodGet, "/v1/costing/versions", "", maintain, "", ""},
-		{http.MethodPost, "/v1/costing/cost-components", componentBody, view, "k", ""},
-		{http.MethodPost, "/v1/costing/cost-groups", `{}`, view + "," + activate, "k", ""},
-		{http.MethodPost, "/v1/costing/versions", `{}`, view + "," + activate, "k", ""},
+		{http.MethodGet, "/v1/product-costing/versions", "", maintain, "", ""},
+		{http.MethodPost, "/v1/product-costing/cost-components", componentBody, view, "k", ""},
+		{http.MethodPost, "/v1/product-costing/cost-groups", `{}`, view + "," + activate, "k", ""},
+		{http.MethodPost, "/v1/product-costing/versions", `{}`, view + "," + activate, "k", ""},
 		// Activation is CostingActivate only; the lifecycle moves are CostingMaintain only (PRD 7.39.17).
-		{http.MethodPost, "/v1/costing/versions/" + someID + "/activate", `{"version":1}`, maintain, "", ""},
-		{http.MethodPost, "/v1/costing/versions/" + someID + "/transition", `{"action":"block","version":1}`, activate, "", ""},
+		{http.MethodPost, "/v1/product-costing/versions/" + someID + "/activate", `{"version":1}`, maintain, "", ""},
+		{http.MethodPost, "/v1/product-costing/versions/" + someID + "/transition", `{"action":"block","version":1}`, activate, "", ""},
 	} {
 		if rec := c.do(h); rec.Code != http.StatusForbidden {
 			t.Errorf("%s %s with %s: %d, want 403", c.method, c.path, c.duties, rec.Code)
@@ -172,18 +172,18 @@ func TestStoredRoutes_EnforceSegregatedDuties(t *testing.T) {
 func TestCreateComponent_NormalisesAndNeedsAnIdempotencyKey(t *testing.T) {
 	f := &fakeStore{}
 	h := storedRouter(f)
-	rec := call{http.MethodPost, "/v1/costing/cost-components", componentBody, maintain, "", ""}.do(h)
+	rec := call{http.MethodPost, "/v1/product-costing/cost-components", componentBody, maintain, "", ""}.do(h)
 	if code, fields := problemCode(t, rec); rec.Code != http.StatusBadRequest || code != "COM-0001" || fields["Idempotency-Key"] == "" {
 		t.Fatalf("no key: %d %s %v", rec.Code, code, fields)
 	}
-	rec = call{http.MethodPost, "/v1/costing/cost-components", `{"code":"dm","name":"","costGroupType":"Labour","behaviour":"Mixed"}`, maintain, "k", ""}.do(h)
+	rec = call{http.MethodPost, "/v1/product-costing/cost-components", `{"code":"dm","name":"","costGroupType":"Labour","behaviour":"Mixed"}`, maintain, "k", ""}.do(h)
 	if _, fields := problemCode(t, rec); rec.Code != http.StatusBadRequest || len(fields) != 4 {
 		t.Fatalf("bad component: %d %v, want 4 field errors", rec.Code, fields)
 	}
 	if f.calls != 0 {
 		t.Fatalf("invalid requests reached the store")
 	}
-	rec = call{http.MethodPost, "/v1/costing/cost-components", componentBody, maintain, " key-1 ", ""}.do(h)
+	rec = call{http.MethodPost, "/v1/product-costing/cost-components", componentBody, maintain, " key-1 ", ""}.do(h)
 	if rec.Code != http.StatusCreated || rec.Header().Get("Idempotent-Replayed") != "" {
 		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
 	}
@@ -191,7 +191,7 @@ func TestCreateComponent_NormalisesAndNeedsAnIdempotencyKey(t *testing.T) {
 		t.Fatalf("store got key %q and %+v", f.key, f.component)
 	}
 	f.replayed = true
-	if rec = (call{http.MethodPost, "/v1/costing/cost-components", componentBody, maintain, "key-1", ""}).do(h); rec.Header().Get("Idempotent-Replayed") != "true" || rec.Code != http.StatusCreated {
+	if rec = (call{http.MethodPost, "/v1/product-costing/cost-components", componentBody, maintain, "key-1", ""}).do(h); rec.Header().Get("Idempotent-Replayed") != "true" || rec.Code != http.StatusCreated {
 		t.Fatalf("replay: %d, header %q", rec.Code, rec.Header().Get("Idempotent-Replayed"))
 	}
 }
@@ -209,7 +209,7 @@ func TestStoredRoutes_MapStoreErrors(t *testing.T) {
 	}
 	for _, tc := range tests {
 		h := storedRouter(&fakeStore{err: tc.err})
-		rec := call{http.MethodPost, "/v1/costing/cost-components", componentBody, maintain, "k", ""}.do(h)
+		rec := call{http.MethodPost, "/v1/product-costing/cost-components", componentBody, maintain, "k", ""}.do(h)
 		if code, _ := problemCode(t, rec); rec.Code != tc.status || code != tc.code {
 			t.Errorf("%s: %d %s, want %d %s", tc.name, rec.Code, code, tc.status, tc.code)
 		}
@@ -219,12 +219,12 @@ func TestStoredRoutes_MapStoreErrors(t *testing.T) {
 func TestCreateGroup_Validates(t *testing.T) {
 	f := &fakeStore{}
 	h := storedRouter(f)
-	rec := call{http.MethodPost, "/v1/costing/cost-groups", `{"code":"MACH","name":"Machining","type":"DirectManufacturing","componentId":"DL"}`, maintain, "k", ""}.do(h)
+	rec := call{http.MethodPost, "/v1/product-costing/cost-groups", `{"code":"MACH","name":"Machining","type":"DirectManufacturing","componentId":"DL"}`, maintain, "k", ""}.do(h)
 	if _, fields := problemCode(t, rec); rec.Code != http.StatusBadRequest || fields["componentId"] == "" {
 		t.Fatalf("component code instead of id: %d %v", rec.Code, fields)
 	}
 	body := `{"code":"MACH","name":"Machining","type":"DirectManufacturing","behaviour":"Fixed","componentId":"` + someID + `"}`
-	rec = call{http.MethodPost, "/v1/costing/cost-groups", body, maintain, "k", ""}.do(h)
+	rec = call{http.MethodPost, "/v1/product-costing/cost-groups", body, maintain, "k", ""}.do(h)
 	if rec.Code != http.StatusCreated || f.group.ComponentID != someID || f.group.Behaviour != domain.BehaviourFixed {
 		t.Fatalf("create: %d %+v", rec.Code, f.group)
 	}
@@ -238,7 +238,7 @@ func TestCreateVersion_ValidatesScopesAndNormalises(t *testing.T) {
 	f := &fakeStore{}
 	h := storedRouter(f)
 	post := func(body, scope string) *httptest.ResponseRecorder {
-		return call{http.MethodPost, "/v1/costing/versions", body, maintain, "key-v", scope}.do(h)
+		return call{http.MethodPost, "/v1/product-costing/versions", body, maintain, "key-v", scope}.do(h)
 	}
 	rec := post(`{"legalEntityId":"LE-1","code":"","type":"Budget","siteIds":["S1"]}`, "")
 	if _, fields := problemCode(t, rec); rec.Code != http.StatusBadRequest || fields["legalEntityId"] == "" || fields["code"] == "" || fields["type"] == "" || fields["siteIds[0]"] == "" {
@@ -273,15 +273,15 @@ func TestListVersions_PassesFiltersAndChecksThem(t *testing.T) {
 	f := &fakeStore{}
 	h := storedRouter(f)
 	le := ids.New()
-	rec := call{http.MethodGet, "/v1/costing/versions?legalEntityId=x&status=Draft&type=Budget&after=1&limit=501", "", view, "", ""}.do(h)
+	rec := call{http.MethodGet, "/v1/product-costing/versions?legalEntityId=x&status=Draft&type=Budget&after=1&limit=501", "", view, "", ""}.do(h)
 	if _, fields := problemCode(t, rec); rec.Code != http.StatusBadRequest || len(fields) != 5 {
 		t.Fatalf("bad query: %d %v", rec.Code, fields)
 	}
-	rec = call{http.MethodGet, "/v1/costing/versions?legalEntityId=" + le + "&status=Active&type=Planned&after=" + someID + "&limit=20", "", view, "", ""}.do(h)
+	rec = call{http.MethodGet, "/v1/product-costing/versions?legalEntityId=" + le + "&status=Active&type=Planned&after=" + someID + "&limit=20", "", view, "", ""}.do(h)
 	if rec.Code != http.StatusOK || f.filter != (store.VersionFilter{LegalEntityID: le, Status: "Active", Type: "Planned"}) || f.after != someID || f.limit != 20 {
 		t.Fatalf("list: %d filter %+v after %q limit %d", rec.Code, f.filter, f.after, f.limit)
 	}
-	if rec = (call{http.MethodGet, "/v1/costing/versions", "", view, "", ""}).do(h); f.limit != defaultPageSize || !strings.Contains(rec.Body.String(), `"items":[]`) {
+	if rec = (call{http.MethodGet, "/v1/product-costing/versions", "", view, "", ""}).do(h); f.limit != defaultPageSize || !strings.Contains(rec.Body.String(), `"items":[]`) {
 		t.Fatalf("default page: limit %d body %s", f.limit, rec.Body.String())
 	}
 }
@@ -289,7 +289,7 @@ func TestListVersions_PassesFiltersAndChecksThem(t *testing.T) {
 func TestStoredVersionMoves(t *testing.T) {
 	f := &fakeStore{}
 	h := storedRouter(f)
-	path := "/v1/costing/versions/" + someID
+	path := "/v1/product-costing/versions/" + someID
 	for _, c := range []struct {
 		body, field string
 	}{
@@ -303,7 +303,7 @@ func TestStoredVersionMoves(t *testing.T) {
 			t.Errorf("%s: %d %v, want a %s error", c.body, rec.Code, fields, c.field)
 		}
 	}
-	if rec := (call{http.MethodPost, "/v1/costing/versions/not-a-uuid/transition", `{"action":"block","version":1}`, maintain, "", ""}).do(h); rec.Code != http.StatusNotFound {
+	if rec := (call{http.MethodPost, "/v1/product-costing/versions/not-a-uuid/transition", `{"action":"block","version":1}`, maintain, "", ""}).do(h); rec.Code != http.StatusNotFound {
 		t.Fatalf("malformed id: %d", rec.Code)
 	}
 	if f.calls != 0 {
@@ -326,16 +326,16 @@ func TestStoredVersionMoves(t *testing.T) {
 	}
 }
 
-// The stored routes share the /v1/costing/versions prefix with the stateless
+// The stored routes share the /v1/product-costing/versions prefix with the stateless
 // slice-3 routes; both must still resolve.
 func TestStoredAndStatelessVersionRoutesCoexist(t *testing.T) {
 	f := &fakeStore{}
 	h := storedRouter(f)
-	if rec := (call{http.MethodGet, "/v1/costing/versions/" + someID, "", view, "", ""}).do(h); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), someID) {
+	if rec := (call{http.MethodGet, "/v1/product-costing/versions/" + someID, "", view, "", ""}).do(h); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), someID) {
 		t.Fatalf("get: %d %s", rec.Code, rec.Body.String())
 	}
 	stateless := `{"version":{"id":"v1","type":"Standard","status":"Open","fallback":"Active"},"action":"block"}`
-	if rec := (call{http.MethodPost, "/v1/costing/versions:transition", stateless, maintain, "", ""}).do(h); rec.Code != http.StatusOK {
+	if rec := (call{http.MethodPost, "/v1/product-costing/versions:transition", stateless, maintain, "", ""}).do(h); rec.Code != http.StatusOK {
 		t.Fatalf("stateless transition: %d %s", rec.Code, rec.Body.String())
 	}
 	if f.calls != 1 {
