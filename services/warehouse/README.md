@@ -218,7 +218,7 @@ table (100 inbound scenarios: 10 quantities × 10 occupancy layouts of the four
 demo locations, with the expected location, directive, line and action derived
 by hand from the demo directives). `internal/api` posts every scenario to the
 simulate endpoint and checks the answer and the trace's winning step.
-Outbound: `internal/domain/directive_outbound_test.go` holds 100 PICK scenarios. Wave release: `domain.ReleaseWave` / `Store.ReleaseWave` create one SALES_PICK work per order and min/max REPLENISHMENT work (priority 40, ahead of picking) in one transaction; `wave_test.go` files cover 500 orders and the 10k-lines/day simulation (`PASSAGE_WMS_SIM_10K=1` for the whole day). No route, wave record or migration yet.
+Outbound: `internal/domain/directive_outbound_test.go` holds 100 PICK scenarios. Wave release: `domain.ReleaseWave` / `Store.ReleaseWave` create one SALES_PICK work per order and min/max REPLENISHMENT work (priority 40, ahead of picking) in one transaction (unmet pick demand and open refills count toward the refill; the refill is cut to the destination's weight/volume room; the release locks the warehouse's locations); `wave_test.go` files cover 500 orders and the 10k-lines/day simulation (`PASSAGE_WMS_SIM_10K=1` for the whole day). No route, wave record or migration yet.
 Property test: `location_test.go` checks that a location never exceeds its
 capacity under random receive sequences (AC-31.9 for the capacity half).
 

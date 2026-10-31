@@ -108,6 +108,8 @@ type Location struct {
 	// inbound holds items that open PUT lines will bring (Reserve, planning
 	// only): they count as items for mixing, the item limit and emptiness.
 	inbound map[string]bool
+	// incoming is the quantity of each item that open PUT lines will bring.
+	incoming map[string]decimal.Decimal
 }
 
 // load returns the current usage with Items derived from the stock map.

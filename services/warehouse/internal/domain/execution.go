@@ -157,6 +157,7 @@ func CloneLocations(locs []Location) []Location {
 	for i, l := range locs {
 		l.Stock = maps.Clone(l.Stock)
 		l.inbound = maps.Clone(l.inbound)
+		l.incoming = maps.Clone(l.incoming)
 		out[i] = l
 	}
 	return out
@@ -189,6 +190,10 @@ func Reserve(locs []Location, lines []WorkLine) {
 				loc.inbound = map[string]bool{}
 			}
 			loc.inbound[l.ItemID] = true
+			if loc.incoming == nil {
+				loc.incoming = map[string]decimal.Decimal{}
+			}
+			loc.incoming[l.ItemID] = loc.incoming[l.ItemID].Add(l.Qty)
 			continue
 		}
 		rest := loc.Stock[l.ItemID].Sub(l.Qty)

@@ -6,6 +6,7 @@ import (
 	"os"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -132,11 +133,12 @@ func TestStore_ReleaseWave500Orders(t *testing.T) {
 }
 
 // TestStore_Simulation10kLinesPerDay is Proof AC2: a day of 10,000 pick lines
-// (10 waves of 50 orders of 20 lines) is released and worked by 10 concurrent
-// pickers. No call fails (a deadlock aborts a transaction with an error), every
-// work completes, the stock falls by exactly the lines' quantities, and the p95
-// of work assignment is under one second. The default run is a tenth of the
-// day; PASSAGE_WMS_SIM_10K=1 runs all of it.
+// (10 waves of 50 orders of 20 lines, with min/max replenishment) is released
+// while 10 concurrent pickers work the queue. Every call has a deadline, so a
+// lock hang fails fast; no call fails (a deadlock aborts a transaction with an
+// error), every pick and refill work completes, stock is conserved between the
+// forward and reserve locations, and the p95 of work assignment is under one
+// second. The default run is a tenth of the day; PASSAGE_WMS_SIM_10K=1 runs all of it.
 func TestStore_Simulation10kLinesPerDay(t *testing.T) {
 	waves := 1
 	if os.Getenv("PASSAGE_WMS_SIM_10K") == "1" {
@@ -144,14 +146,73 @@ func TestStore_Simulation10kLinesPerDay(t *testing.T) {
 	}
 	const ordersPerWave, linesPerOrder, pickers, skus = 50, 20, 10, 50
 	st, ctx, wh := setup(t)
+	call := func() (context.Context, context.CancelFunc) { return context.WithTimeout(ctx, 30*time.Second) }
 	var locs []domain.Location
+	var rules []domain.ReplenishRule
 	for s := range skus {
-		locs = append(locs, loc(fmt.Sprintf("F-%02d", s), "FWD", s, domain.Capacity{}))
+		locs = append(locs, loc(fmt.Sprintf("F-%02d", s), "FWD", s, domain.Capacity{}), loc(fmt.Sprintf("R-%02d", s), "RES", 100+s, domain.Capacity{}))
+		rules = append(rules, domain.ReplenishRule{ItemID: fmt.Sprintf("SKU-%02d", s), PickZone: "FWD", ReserveZone: "RES", MinQty: dq("1000"), MaxQty: dq("1500")})
 	}
 	mustLocations(t, st, ctx, wh, locs...)
 	mustDirective(t, st, ctx, pickDirective(wh))
 	for s := range skus {
-		seedStock(t, st, ctx, fmt.Sprintf("F-%02d", s), locs, fmt.Sprintf("SKU-%02d", s), "1000000")
+		seedStock(t, st, ctx, fmt.Sprintf("F-%02d", s), locs, fmt.Sprintf("SKU-%02d", s), "1020")
+		seedStock(t, st, ctx, fmt.Sprintf("R-%02d", s), locs, fmt.Sprintf("SKU-%02d", s), "1000000")
+	}
+
+	var (
+		mu        sync.Mutex
+		latencies []time.Duration
+		completed int
+		failures  []error
+		wg        sync.WaitGroup
+		released  atomic.Bool
+	)
+	fail := func(err error) {
+		mu.Lock()
+		failures = append(failures, err)
+		mu.Unlock()
+	}
+	for p := range pickers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			user := fmt.Sprintf("picker-%d", p)
+			for {
+				done := released.Load()
+				c, cancel := call()
+				started := time.Now()
+				a, _, err := st.AssignNext(c, key("assign-"+ids.New()), wh, user, 30*time.Minute, started)
+				took := time.Since(started)
+				cancel()
+				mu.Lock()
+				latencies = append(latencies, took)
+				mu.Unlock()
+				if err != nil {
+					fail(err)
+					return
+				}
+				if a.Work == nil {
+					if done {
+						return
+					}
+					time.Sleep(5 * time.Millisecond)
+					continue
+				}
+				for _, l := range a.Work.Lines {
+					c, cancel := call()
+					_, _, err := st.ConfirmLine(c, key("confirm-"+ids.New()), ConfirmInput{WorkID: a.Work.ID, LineNo: l.LineNo, Qty: l.Qty, User: user, Now: time.Now()})
+					cancel()
+					if err != nil {
+						fail(err)
+						return
+					}
+				}
+				mu.Lock()
+				completed++
+				mu.Unlock()
+			}
+		}()
 	}
 
 	picked := map[string]int{}
@@ -167,51 +228,16 @@ func TestStore_Simulation10kLinesPerDay(t *testing.T) {
 				orders[o].Lines = append(orders[o].Lines, domain.NewLine{ItemID: item, Direction: domain.DirectionPick, Qty: decimal.NewFromInt(int64(qty))})
 			}
 		}
-		if _, _, err := st.ReleaseWave(ctx, key("sim-wave-"+ids.New()), WaveInput{WarehouseID: wh, Orders: orders}); err != nil {
-			t.Fatalf("wave %d: %v", w, err)
+		c, cancel := call()
+		rel, _, err := st.ReleaseWave(c, key("sim-wave-"+ids.New()), WaveInput{WarehouseID: wh, Orders: orders, Rules: rules})
+		cancel()
+		if err != nil {
+			fail(err)
+			break
 		}
-		works += ordersPerWave
+		works += len(rel.Picks) + len(rel.Replenishment)
 	}
-
-	var (
-		mu        sync.Mutex
-		latencies []time.Duration
-		completed int
-		failures  []error
-		wg        sync.WaitGroup
-	)
-	for p := range pickers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			user := fmt.Sprintf("picker-%d", p)
-			for {
-				started := time.Now()
-				a, _, err := st.AssignNext(ctx, key("assign-"+ids.New()), wh, user, 30*time.Minute, started)
-				took := time.Since(started)
-				mu.Lock()
-				latencies = append(latencies, took)
-				if err != nil {
-					failures = append(failures, err)
-				}
-				mu.Unlock()
-				if err != nil || a.Work == nil {
-					return
-				}
-				for _, l := range a.Work.Lines {
-					if _, _, err := st.ConfirmLine(ctx, key("confirm-"+ids.New()), ConfirmInput{WorkID: a.Work.ID, LineNo: l.LineNo, Qty: l.Qty, User: user, Now: time.Now()}); err != nil {
-						mu.Lock()
-						failures = append(failures, err)
-						mu.Unlock()
-						return
-					}
-				}
-				mu.Lock()
-				completed++
-				mu.Unlock()
-			}
-		}()
-	}
+	released.Store(true)
 	wg.Wait()
 
 	if len(failures) > 0 {
@@ -222,14 +248,23 @@ func TestStore_Simulation10kLinesPerDay(t *testing.T) {
 	}
 	slices.Sort(latencies)
 	p95 := latencies[len(latencies)*95/100]
-	t.Logf("%d lines, %d works, %d assignments, assign p95 %s, max %s", works*linesPerOrder, works, len(latencies), p95, latencies[len(latencies)-1])
+	t.Logf("%d lines, %d works, %d assignments, assign p95 %s, max %s", waves*ordersPerWave*linesPerOrder, works, len(latencies), p95, latencies[len(latencies)-1])
 	if p95 >= time.Second {
 		t.Fatalf("assignment p95 = %s, want under 1s", p95)
 	}
+	refilled := false
 	for item, qty := range picked {
 		s := item[len("SKU-"):]
-		if got := stockAt(t, st, ctx, wh, "F-"+s, item); !got.Equal(decimal.NewFromInt(int64(1000000 - qty))) {
-			t.Errorf("%s stock = %s, want %d", item, got, 1000000-qty)
+		fwd, res := stockAt(t, st, ctx, wh, "F-"+s, item), stockAt(t, st, ctx, wh, "R-"+s, item)
+		if total := fwd.Add(res); !total.Equal(decimal.NewFromInt(int64(1001020 - qty))) {
+			t.Errorf("%s forward+reserve = %s, want %d", item, total, 1001020-qty)
 		}
+		if fwd.GreaterThan(dq("1500")) || fwd.LessThan(dq("1")) {
+			t.Errorf("%s forward = %s, outside 1..1500", item, fwd)
+		}
+		refilled = refilled || res.LessThan(dq("1000000"))
+	}
+	if !refilled {
+		t.Error("the day never triggered a replenishment")
 	}
 }

@@ -27,7 +27,9 @@ type Released struct {
 
 // ReleaseWave creates the pick work of every order and the replenishment the
 // picks need in one transaction, from one read of the directives, locations and
-// open lines (BR-31.2), and enqueues work.created for each work. It runs once
+// open lines (BR-31.2) taken under a per-warehouse advisory lock and share locks on the
+// warehouse's locations, so concurrent releases never promise the same stock
+// or room and no confirmation commits between the reads, and enqueues work.created for each work. It runs once
 // per Idempotency-Key.
 func (s *Store) ReleaseWave(ctx context.Context, idem Idem, in WaveInput) (Released, bool, error) {
 	var (
@@ -37,6 +39,12 @@ func (s *Store) ReleaseWave(ctx context.Context, idem Idem, in WaveInput) (Relea
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
 		var err error
 		out, replayed, err = once(ctx, tx, idem, http.StatusCreated, func() (Released, error) {
+			if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtext($1))`, tenantID(ctx)+"/wave/"+in.WarehouseID); err != nil {
+				return Released{}, err
+			}
+			if _, err := tx.Exec(ctx, `select id from location where warehouse_id = $1 order by id for share`, in.WarehouseID); err != nil {
+				return Released{}, err
+			}
 			dirs, err := loadDirectives(ctx, tx, in.WarehouseID, "SALES_PICK", "")
 			if err != nil {
 				return Released{}, err

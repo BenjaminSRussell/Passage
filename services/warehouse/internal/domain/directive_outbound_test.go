@@ -96,3 +96,52 @@ func TestEvaluate_OutboundPickFixture(t *testing.T) {
 		t.Fatalf("fixture has %d scenarios, want 100", count)
 	}
 }
+
+// TestEvaluate_OutboundPickLiterals pins expected locations as literals, with
+// several locations per zone so pick-sequence ordering and "holds the whole
+// quantity" decide the answer.
+func TestEvaluate_OutboundPickLiterals(t *testing.T) {
+	stock := func(l Location, qty string) Location {
+		l.Stock = map[string]decimal.Decimal{"BOLT-M8": dec(qty)}
+		return l
+	}
+	locs := []Location{
+		stock(loc("f2", "F-02", "FWD", 2), "500"),
+		stock(loc("f1", "F-01", "FWD", 1), "30"),
+		stock(loc("c1", "C-01", "CASE", 3), "400"),
+		stock(loc("c2", "C-02", "CASE", 4), "900"),
+		stock(loc("r1", "R-01", "RESERVE", 5), "5000"),
+	}
+	tests := []struct {
+		qty, loc, directive string
+	}{
+		{"10", "F-01", "DIR-P10"},
+		{"30", "F-01", "DIR-P10"},
+		{"31", "F-02", "DIR-P10"},
+		{"99", "F-02", "DIR-P10"},
+		{"100", "C-01", "DIR-P10"},
+		{"400", "C-01", "DIR-P10"},
+		{"401", "C-02", "DIR-P10"},
+		{"901", "R-01", "DIR-P10"},
+		{"1200", "R-01", "DIR-P10"},
+		{"5000", "R-01", "DIR-P10"},
+	}
+	for _, tc := range tests {
+		line := Line{ItemID: "BOLT-M8", WorkType: "SALES_PICK", Direction: DirectionPick, Warehouse: "WH1", Qty: dec(tc.qty),
+			Attributes: map[string]string{"item_group": "FASTENERS"}}
+		got := Evaluate(outboundDirectives(), line, locs)
+		if got.Blocked || got.Location.Name != tc.loc || got.Directive != tc.directive {
+			t.Errorf("qty %s: want %s via %s, got %+v", tc.qty, tc.loc, tc.directive, got)
+		}
+	}
+	line := Line{ItemID: "BOLT-M8", WorkType: "SALES_PICK", Direction: DirectionPick, Warehouse: "WH1", Qty: dec("5001"),
+		Attributes: map[string]string{"item_group": "FASTENERS"}}
+	if got := Evaluate(outboundDirectives(), line, locs); !got.Blocked || got.Code != CodeNoLocation {
+		t.Errorf("qty 5001 must be blocked, got %+v", got)
+	}
+	other := line
+	other.Qty, other.Attributes = dec("31"), nil
+	if got := Evaluate(outboundDirectives(), other, locs); got.Blocked || got.Location.Name != "F-02" || got.Directive != "DIR-P20" {
+		t.Errorf("a non-fastener falls to the catch-all and takes the first location by pick sequence that covers it (F-02), got %+v", got)
+	}
+}

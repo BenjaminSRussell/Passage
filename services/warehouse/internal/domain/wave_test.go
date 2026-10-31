@@ -197,12 +197,138 @@ func TestReleaseWave_NeverOverdrawsAnyLocation(t *testing.T) {
 			for k := range l.Stock {
 				item = k
 			}
-			if taken[l.ID].GreaterThan(l.Stock[item]) {
-				t.Fatalf("%s asked for %s of %s", l.ID, taken[l.ID], l.Stock[item])
+			if taken[l.ID].GreaterThan(l.Stock[item].Add(put[l.ID])) {
+				t.Fatalf("%s asked for %s of %s plus %s refilled", l.ID, taken[l.ID], l.Stock[item], put[l.ID])
 			}
 			if l.Zone == "FWD" && l.Stock[item].Sub(taken[l.ID]).Add(put[l.ID]).GreaterThan(dec("120")) && put[l.ID].IsPositive() {
 				t.Fatalf("%s ends above the maximum: %s", l.ID, l.Stock[item].Sub(taken[l.ID]).Add(put[l.ID]))
 			}
+		}
+	})
+}
+
+func pickOrder(item string, qty string) []WaveOrder {
+	return []WaveOrder{{ID: "SO", Lines: []NewLine{{ItemID: item, Direction: DirectionPick, Qty: dec(qty)}}}}
+}
+
+func minMaxRule(minQty, maxQty string) []ReplenishRule {
+	return []ReplenishRule{{ItemID: "A", PickZone: "FWD", ReserveZone: "RES", MinQty: dec(minQty), MaxQty: dec(maxQty), UnitWeight: dec("0"), UnitVolume: dec("0")}}
+}
+
+func putTotal(works []Work) decimal.Decimal {
+	total := decimal.Zero
+	for _, w := range works {
+		for _, l := range w.Lines {
+			if l.Direction == DirectionPut {
+				total = total.Add(l.Qty)
+			}
+		}
+	}
+	return total
+}
+
+func TestReleaseWave_UnmetPickDemandIsReplenishedAndTheBlockedPickGetsItsLocation(t *testing.T) {
+	locs := []Location{stocked("F", "FWD", 1, "A", "50"), stocked("R", "RES", 2, "A", "5000")}
+	rel, err := ReleaseWave(waveWarehouse, idSource(), pickOrder("A", "60"), minMaxRule("40", "150"), wavePickDirective(), locs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pick := rel.Picks[0]
+	if pick.Status != WorkOpen || pick.Lines[0].FromLocationID != "F" {
+		t.Fatalf("the 60 EA pick must be placed at F once F is refilled: %+v", pick)
+	}
+	if got := putTotal(rel.Replenishment); !got.Equal(dec("160")) {
+		t.Fatalf("refill = %s, want 160 (50 + 160 - 60 = 150)", got)
+	}
+}
+
+func TestReleaseWave_OpenRefillCountsAsIncomingStock(t *testing.T) {
+	locs := []Location{stocked("F", "FWD", 1, "A", "100"), stocked("R", "RES", 2, "A", "5000")}
+	first, err := ReleaseWave(waveWarehouse, idSource(), pickOrder("A", "70"), minMaxRule("40", "150"), wavePickDirective(), locs)
+	if err != nil || !putTotal(first.Replenishment).Equal(dec("120")) {
+		t.Fatalf("wave 1 refill = %s err=%v, want 120", putTotal(first.Replenishment), err)
+	}
+	after := CloneLocations(locs)
+	for _, w := range append(append([]Work{}, first.Picks...), first.Replenishment...) {
+		Reserve(after, w.Lines)
+	}
+	second, err := ReleaseWave(waveWarehouse, idSource(), pickOrder("A", "5"), minMaxRule("40", "150"), wavePickDirective(), after)
+	if err != nil || len(second.Replenishment) != 0 {
+		t.Fatalf("wave 2 must not refill again while 120 EA are on the way: %+v err=%v", second.Replenishment, err)
+	}
+}
+
+func TestReleaseWave_RefillIsCutToTheDestinationsRoom(t *testing.T) {
+	f := stocked("F", "FWD", 1, "A", "60")
+	f.Capacity.MaxWeight = decPtr("100")
+	f.Used.Weight = dec("60")
+	locs := []Location{f, stocked("R", "RES", 2, "A", "5000")}
+	rules := minMaxRule("40", "150")
+	rules[0].UnitWeight = dec("1")
+	rel, err := ReleaseWave(waveWarehouse, idSource(), pickOrder("A", "40"), rules, wavePickDirective(), locs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := putTotal(rel.Replenishment); !got.Equal(dec("40")) {
+		t.Fatalf("refill = %s, want 40 (100 kg limit, 60 kg used)", got)
+	}
+	for _, l := range rel.Replenishment[0].Lines {
+		if !l.Weight.Equal(dec("40")) {
+			t.Fatalf("line %d carries weight %s, want 40", l.LineNo, l.Weight)
+		}
+	}
+}
+
+func TestReleaseWave_RejectsBadRules(t *testing.T) {
+	order := pickOrder("A", "1")
+	same := minMaxRule("10", "20")
+	same[0].ReserveZone = "FWD"
+	dup := append(minMaxRule("10", "20"), minMaxRule("10", "20")...)
+	neg := minMaxRule("10", "20")
+	neg[0].UnitWeight = dec("-1")
+	for name, rules := range map[string][]ReplenishRule{"same zone": same, "duplicate item": dup, "negative unit": neg} {
+		if _, err := ReleaseWave(waveWarehouse, idSource(), order, rules, nil, nil); err == nil {
+			t.Errorf("%s must be refused", name)
+		}
+	}
+}
+
+// TestReleaseWave_ReplenishmentNeverExceedsCapacity is a property over random
+// waves with weight-limited forward locations: executing every refill and then
+// every pick through Location.Move, as confirmation does, is never refused.
+func TestReleaseWave_ReplenishmentNeverExceedsCapacity(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		maxW := rapid.IntRange(50, 300).Draw(t, "maxW")
+		fwd := rapid.IntRange(1, maxW).Draw(t, "fwd")
+		f := stocked("F", "FWD", 1, "A", strconv.Itoa(fwd))
+		f.Capacity.MaxWeight = decPtr(strconv.Itoa(maxW))
+		f.Used.Weight = decimal.NewFromInt(int64(fwd))
+		r := stocked("R", "RES", 2, "A", "400")
+		r.Used.Weight = dec("400")
+		rules := minMaxRule("30", "200")
+		rules[0].UnitWeight = dec("1")
+		var orders []WaveOrder
+		for range rapid.IntRange(1, 8).Draw(t, "orders") {
+			orders = append(orders, pickOrder("A", strconv.Itoa(rapid.IntRange(1, 60).Draw(t, "qty")))...)
+		}
+		rel, err := ReleaseWave(waveWarehouse, idSource(), orders, rules, wavePickDirective(), []Location{f, r})
+		if err != nil {
+			t.Fatal(err)
+		}
+		state := map[string]*Location{"F": &f, "R": &r}
+		for _, w := range append(append([]Work{}, rel.Replenishment...), rel.Picks...) {
+			if w.Status == WorkBlockedNoLocation {
+				continue
+			}
+			for _, l := range w.Lines {
+				u := Usage{Weight: l.Weight}
+				if reason, ok := state[l.LocationOf()].Move(l.Direction, l.ItemID, l.Qty, u); !ok {
+					t.Fatalf("%s %s %s refused: %s", w.WorkType, l.Direction, l.Qty, reason)
+				}
+			}
+		}
+		if f.Used.Weight.GreaterThan(decimal.NewFromInt(int64(maxW))) {
+			t.Fatalf("F weight %s above limit %d", f.Used.Weight, maxW)
 		}
 	})
 }
