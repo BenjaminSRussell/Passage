@@ -91,6 +91,7 @@ type Store interface {
 	Catalog(ctx context.Context, roots []string, up bool) (Snapshot, error)
 	CreateEco(ctx context.Context, e domain.Eco, idem Idem) (domain.Eco, error)
 	GetEco(ctx context.Context, id string) (EcoRecord, error)
+	ListEcos(ctx context.Context, state string, afterID string, limit int) (Page[domain.Eco], error)
 	ReleaseEco(ctx context.Context, e domain.Eco, prev domain.EcoState, plan domain.ReleasePlan) error
 	CreateCalendar(ctx context.Context, c Calendar, idem Idem) (Calendar, []string, error)
 	GenerateCalendar(ctx context.Context, id string, from, to time.Time) (CalendarGeneration, error)
@@ -537,6 +538,61 @@ func (s *Postgres) GetEco(ctx context.Context, id string) (EcoRecord, error) {
 		return err
 	})
 	return rec, err
+}
+
+// ListEcos pages through engineering change orders by id, optionally for one
+// state, each with its replacements.
+func (s *Postgres) ListEcos(ctx context.Context, state, afterID string, limit int) (Page[domain.Eco], error) {
+	p, _ := tenant.FromContext(ctx)
+	if afterID == "" {
+		afterID = ids.Nil
+	}
+	var items []domain.Eco
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select id::text, number, state, release_date, decided_by from eco
+			where tenant_id = $1 and id > $2::uuid and ($3 = '' or state = $3) order by id limit $4`, p.TenantID, afterID, state, limit+1)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		byID := map[string]int{}
+		var idList []string
+		for rows.Next() {
+			var e domain.Eco
+			var releaseDate *time.Time
+			if err := rows.Scan(&e.ID, &e.Number, &e.State, &releaseDate, &e.DecidedBy); err != nil {
+				return err
+			}
+			e.ReleaseDate = valueOrZero(releaseDate)
+			byID[e.ID] = len(items)
+			idList = append(idList, e.ID)
+			items = append(items, e)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		rows.Close()
+		if len(idList) == 0 {
+			return nil
+		}
+		reps, err := tx.Query(ctx, `select eco_id::text, old_version_id::text, new_version_id::text from eco_replacement
+			where tenant_id = $1 and eco_id = any($2::uuid[]) order by eco_id, new_version_id`, p.TenantID, idList)
+		if err != nil {
+			return err
+		}
+		defer reps.Close()
+		for reps.Next() {
+			var id string
+			var r domain.Replacement
+			if err := reps.Scan(&id, &r.OldVersionID, &r.NewVersionID); err != nil {
+				return err
+			}
+			i := byID[id]
+			items[i].Replaces = append(items[i].Replaces, r)
+		}
+		return reps.Err()
+	})
+	return trimPage(items, limit, func(e domain.Eco) string { return e.ID }), err
 }
 
 func transition(ctx context.Context, tx pgx.Tx, query string, args ...any) error {

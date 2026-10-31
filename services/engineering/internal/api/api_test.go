@@ -50,6 +50,8 @@ type fakeStore struct {
 	relErr     error
 	catalog    store.Snapshot
 	listed     []domain.BomVersion
+	ecoList    []domain.Eco
+	ecoState   string
 	lastFilter store.BomVersionFilter
 	record     store.EcoRecord
 	byKey      map[string]domain.BomVersion
@@ -110,6 +112,19 @@ func (f *fakeStore) CreateEco(_ context.Context, e domain.Eco, _ store.Idem) (do
 
 func (f *fakeStore) GetEco(context.Context, string) (store.EcoRecord, error) {
 	return f.record, f.err
+}
+
+func (f *fakeStore) ListEcos(_ context.Context, state, _ string, limit int) (store.Page[domain.Eco], error) {
+	if f.err != nil {
+		return store.Page[domain.Eco]{}, f.err
+	}
+	f.ecoState = state
+	page := store.Page[domain.Eco]{Items: f.ecoList}
+	if len(page.Items) > limit {
+		page.Items = page.Items[:limit]
+		page.NextID = page.Items[limit-1].ID
+	}
+	return page, nil
 }
 
 func (f *fakeStore) ReleaseEco(_ context.Context, e domain.Eco, prev domain.EcoState, plan domain.ReleasePlan) error {

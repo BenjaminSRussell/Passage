@@ -200,6 +200,34 @@ paths:
           description: ECO created in the submitted state, or the original ECO on an Idempotency-Key replay.
           content: { application/json: { schema: { $ref: '#/components/schemas/Eco' } } }
         default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listEcos
+      summary: List engineering change orders
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: state, in: query, schema: { type: string, enum: [draft, submitted, approved, scheduled, released, rejected, cancelled] } }
+      responses:
+        '200':
+          description: One page of ECOs ordered by id, each with its replacements. Pass nextCursor as cursor for the next page. A bad state, limit or cursor is 400 COM-0001.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Eco' } }, nextCursor: { type: string } } }
+        default: { $ref: '#/components/responses/Problem' }
+  /v1/engineering/ecos/{id}:
+    get:
+      operationId: getEco
+      summary: Get an engineering change order
+      x-passage-duty: engineering.read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The ECO with its state, release date, approver and the BOM version replacements.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Eco' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        default: { $ref: '#/components/responses/Problem' }
   /v1/engineering/ecos/{id}:release:
     post:
       operationId: releaseEco

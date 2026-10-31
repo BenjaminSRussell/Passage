@@ -6,6 +6,7 @@ import { CalendarDetailPage, CalendarsPage, CapabilityDetailPage, ResourceGroupD
 import { CalendarDaysPage, CapabilitiesPage, ResourceDetailPage, ResourceGroupsPage, ResourcesPage } from "./resources";
 import { BomVersionCreatePage, BomVersionPage, BomVersionsPage } from "./bom";
 import { RouteVersionPage, RouteVersionsPage } from "./screens";
+import { EcoCreatePage, EcoPage, EcosPage } from "./eco";
 import { RouteVersionCreatePage } from "./routeCreate";
 
 function EngineeringRoute() {
@@ -44,6 +45,32 @@ function BomVersionCreateRoute() {
   return createElement(BomVersionCreatePage, {
     onCreated: (id: string) => navigate(`/engineering/boms/${encodeURIComponent(id)}`),
     onCancel: () => navigate("/engineering/boms"),
+  });
+}
+
+function EcosRoute() {
+  const navigate = useNavigate();
+  return createElement(EcosPage, {
+    onOpen: (id: string) => navigate(`/engineering/ecos/${encodeURIComponent(id)}`),
+    onCreate: () => navigate("/engineering/ecos/new"),
+  });
+}
+
+function EcoRoute() {
+  const navigate = useNavigate();
+  const { id = "" } = useParams();
+  return createElement(EcoPage, {
+    id,
+    onBack: () => navigate("/engineering/ecos"),
+    onOpenBom: (versionId: string) => navigate(`/engineering/boms/${encodeURIComponent(versionId)}`),
+  });
+}
+
+function EcoCreateRoute() {
+  const navigate = useNavigate();
+  return createElement(EcoCreatePage, {
+    onCreated: (id: string) => navigate(`/engineering/ecos/${encodeURIComponent(id)}`),
+    onCancel: () => navigate("/engineering/ecos"),
   });
 }
 
@@ -125,6 +152,9 @@ const engineering: PassageModule = {
     { path: "/engineering/boms", element: createElement(BomVersionsRoute), handle: { title: "Bills of material" } },
     { path: "/engineering/boms/new", element: createElement(BomVersionCreateRoute), handle: { title: "New BOM version" } },
     { path: "/engineering/boms/:id", element: createElement(BomVersionRoute), handle: { title: "BOM version" } },
+    { path: "/engineering/ecos", element: createElement(EcosRoute), handle: { title: "Change orders" } },
+    { path: "/engineering/ecos/new", element: createElement(EcoCreateRoute), handle: { title: "New change order" } },
+    { path: "/engineering/ecos/:id", element: createElement(EcoRoute), handle: { title: "Change order" } },
     { path: "/engineering/routes", element: createElement(RouteVersionsRoute) },
     { path: "/engineering/routes/new", element: createElement(RouteVersionCreateRoute), handle: { title: "New route version" } },
     { path: "/engineering/routes/:id", element: createElement(RouteVersionRoute), handle: { title: "Route version" } },
@@ -141,6 +171,7 @@ const engineering: PassageModule = {
   nav: [
     { label: "Overview", to: "/engineering", duty: "engineering.read" },
     { label: "Bills of material", to: "/engineering/boms", duty: "engineering.read" },
+    { label: "Change orders", to: "/engineering/ecos", duty: "engineering.read" },
     { label: "Routings", to: "/engineering/routes", duty: "engineering.read" },
     { label: "Resources", to: "/engineering/resources", duty: "engineering.read" },
     { label: "Resource groups", to: "/engineering/resource-groups", duty: "engineering.read" },

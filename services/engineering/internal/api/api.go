@@ -88,6 +88,8 @@ func (a *API) Register(r chi.Router) {
 		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/boms:where-used", a.whereUsed)
 		r.With(authz.RequireDuty(dutyRead)).Post("/v1/engineering/routes:lead-time", a.leadTime)
 		r.With(authz.RequireDuty(dutyBomWrite)).Post("/v1/engineering/ecos", a.createEco)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/ecos", a.listEcos)
+		r.With(authz.RequireDuty(dutyRead)).Get("/v1/engineering/ecos/{id}", a.getEco)
 		r.With(authz.RequireDuty(dutyEcoApprove)).Post("/v1/engineering/ecos/{id}:release", a.releaseEco)
 		r.With(authz.RequireDuty(dutyResourceWrite)).Post("/v1/engineering/calendars", a.createCalendar)
 		r.With(authz.RequireDuty(dutyResourceWrite)).Post("/v1/engineering/calendars/{id}:generate", a.generateCalendar)

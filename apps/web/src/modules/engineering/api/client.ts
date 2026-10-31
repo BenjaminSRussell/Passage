@@ -326,3 +326,43 @@ export function createBomVersion(body: BomVersionInput, idempotencyKey: string):
     body: JSON.stringify(body),
   });
 }
+
+export interface EcoReplacement {
+  oldVersionId: string;
+  newVersionId: string;
+}
+
+export interface Eco {
+  id: string;
+  number: string;
+  state: string;
+  releaseDate?: string;
+  decidedBy?: string;
+  replaces: EcoReplacement[];
+}
+
+export interface EcoInput {
+  number: string;
+  releaseDate?: string;
+  replaces: EcoReplacement[];
+}
+
+export function listEcos(state: string, cursor?: string): Promise<Page<Eco>> {
+  return request(`/ecos${query({ state, cursor })}`);
+}
+
+export function getEco(id: string): Promise<Eco> {
+  return request(`/ecos/${encodeURIComponent(id)}`);
+}
+
+export function createEco(body: EcoInput, idempotencyKey: string): Promise<Eco> {
+  return request("/ecos", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(body),
+  });
+}
+
+export function releaseEco(id: string, idempotencyKey: string): Promise<Eco> {
+  return request(`/ecos/${encodeURIComponent(id)}:release`, { method: "POST", headers: { "Idempotency-Key": idempotencyKey } });
+}
