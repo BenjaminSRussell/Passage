@@ -120,7 +120,7 @@ export function httpTransport(options: HttpTransportOptions = {}): Transport {
         {
           method: "POST",
           headers: { ...headers, "content-length": String(Buffer.byteLength(body)) },
-          timeout: timeoutMs,
+          signal: AbortSignal.timeout(timeoutMs),
           lookup: (_host, lookupOptions, callback) => {
             if (lookupOptions.all) {
               (callback as unknown as (e: null, a: { address: string; family: number }[]) => void)(null, [
@@ -132,12 +132,10 @@ export function httpTransport(options: HttpTransportOptions = {}): Transport {
           },
         },
         (res) => {
-          res.resume();
-          res.on("end", () => resolve(res.statusCode ?? null));
-          res.on("error", () => resolve(null));
+          resolve(res.statusCode ?? null);
+          res.destroy();
         },
       );
-      req.on("timeout", () => req.destroy());
       req.on("error", () => resolve(null));
       req.end(body);
     });
