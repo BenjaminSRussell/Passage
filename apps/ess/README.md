@@ -1,6 +1,10 @@
 # apps/ess — Employee self-service (wave 42)
 
-Status: **not built in slice 1 of PSG-42** (later slice of PSG-42).
+Status: **partly built (#267).** The shell module has `/hr/my/profile` (EssBase), `/hr/my/team` and
+`/hr/my/team/:id` (MssBase). The service scopes them server-side: `GET /v1/hr/me`, `/v1/hr/me/team`,
+`/v1/hr/me/team/{id}`; MssApprove absence decide, list and balances are limited to direct reports.
+Still open: address change, pay statements, questionnaires, checklist tasks, team calendar,
+manager-scoped course approval.
 
 Decision (PRD 8.42.12, open question 2): ESS ships as a shell module under
 `apps/web/src/modules/hr/` rather than a separate PWA. The HR module built in

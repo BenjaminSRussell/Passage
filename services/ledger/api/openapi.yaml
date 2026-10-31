@@ -149,12 +149,15 @@ components:
           items: { $ref: "#/components/schemas/PostLine" }
     SetEntryRequest:
       type: object
-      required: [documentId, postingDate, source, lines]
+      required: [documentId, postingDate, source]
       description: |
         PostEntryRequest without ledgerId; the ledger set in the path chooses the ledgers. A ledgerId is rejected with 400.
         lines are the common lines, posted to every ledger of the set through that ledger's account mappings.
         ledgerLines add lines to single ledgers of the set (BR-12.6 ledger_lines): they are posted to that ledger
-        only, in that ledger's own accounts, with no mapping. lines may be empty when ledgerLines is present.
+        only, in that ledger's own accounts, with no mapping. lines may be omitted or empty when ledgerLines is present;
+        a request with neither is rejected with 400 (field lines). A ledger whose entry ends up with no lines, or only
+        zero-amount lines without text, is rejected with 422 LEDGER_LINE_EMPTY. The idempotency payload hash orders
+        ledgerLines groups by ledger id, so group order does not matter on a retry.
       properties:
         documentId: { type: string, format: uuid }
         postingDate: { type: string, format: date }
@@ -1773,6 +1776,24 @@ paths:
         "409": { $ref: "#/components/responses/Problem409" }
         "422": { $ref: "#/components/responses/Problem422" }
   /v1/ledger/ledger-sets:
+    get:
+      tags: [journal]
+      operationId: listLedgerSets
+      x-passage-duty: ledger.journal.read
+      description: Ledger sets visible to the caller's legal-entity scope, ordered by legal entity then code (at most 500).
+      responses:
+        "200":
+          description: Ledger sets with their member ledgers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/LedgerSet" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
     post:
       tags: [journal]
       operationId: createLedgerSet
@@ -1862,6 +1883,27 @@ paths:
         "409": { $ref: "#/components/responses/Problem409" }
         "422": { $ref: "#/components/responses/Problem422" }
   /v1/ledger/ledgers/{id}/account-mappings:
+    get:
+      tags: [journal]
+      operationId: listAccountMappings
+      x-passage-duty: ledger.journal.read
+      description: Every account mapping of this ledger, ordered by source account then effectiveFrom. 404 LEDGER_NOT_FOUND for a ledger outside the caller's scope.
+      parameters:
+        - $ref: "#/components/parameters/LedgerId"
+      responses:
+        "200":
+          description: Account mappings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/AccountMapping" }
+        "401": { $ref: "#/components/responses/Problem401" }
+        "403": { $ref: "#/components/responses/Problem403" }
+        "404": { $ref: "#/components/responses/Problem404" }
     post:
       tags: [journal]
       operationId: createAccountMapping

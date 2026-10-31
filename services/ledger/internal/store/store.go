@@ -72,6 +72,8 @@ type Store interface {
 	ListRecurringRuns(ctx context.Context, id string) ([]RecurringRun, error)
 	CreateLedgerSet(ctx context.Context, in LedgerSetInput) (LedgerSet, error)
 	GetLedgerSet(ctx context.Context, id string) (LedgerSet, error)
+	ListLedgerSets(ctx context.Context) ([]LedgerSet, error)
+	ListAccountMappings(ctx context.Context, ledgerID string) ([]AccountMapping, error)
 	CreateAccountMapping(ctx context.Context, in AccountMapping) (AccountMapping, error)
 	PostSetEntry(ctx context.Context, setID string, in PostInput) (EntryResult, error)
 	ListOpenItemAccounts(ctx context.Context, ledgerID string) ([]OpenItemAccount, error)

@@ -139,6 +139,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerPersonnel(r)
 	r.With(authz.RequireDuty(dutyMssApprove)).Post("/v1/hr/courses/registrations/{id}/approve", registrationRoute(a.approveRegistration))
 	r.With(authz.RequireDuty(dutyEssLearning)).Post("/v1/hr/courses/registrations/{id}/cancel", registrationRoute(a.cancelRegistration))
+	a.registerSelfService(r)
 }
 
 // ready replaces the kernel's static /readyz: it pings the database within

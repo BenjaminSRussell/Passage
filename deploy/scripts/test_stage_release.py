@@ -1,11 +1,14 @@
 import contextlib
+import http.server
 import io
+import json
 import os
 import re
 import shutil
 import stat
 import subprocess
 import tempfile
+import threading
 import time
 import unittest
 import unittest.mock
@@ -69,6 +72,11 @@ class StageReleaseTests(unittest.TestCase):
         )
         path_patch.start()
         self.addCleanup(path_patch.stop)
+        for variable in (stage_release.API_URL_VARIABLE, stage_release.API_TOKEN_VARIABLE):
+            environment_patch = unittest.mock.patch.dict(os.environ)
+            environment_patch.start()
+            self.addCleanup(environment_patch.stop)
+            os.environ.pop(variable, None)
 
     def install_cosign_stub(self, fail_on):
         stub = self.stub_dir / "cosign"
@@ -293,7 +301,7 @@ class StageReleaseTests(unittest.TestCase):
 
     @staticmethod
     def with_digest(text, digest):
-        return stage_release.DIGEST_LINE.sub(lambda m: m.group(1) + digest + m.group(3), text)
+        return stage_release.DIGEST_LINE.sub(lambda m: m.group(1) + m.group(2) + digest + m.group(2) + m.group(4), text)
 
     def prod_digest(self):
         return stage_release.read_digest((self.root / PROD_MANIFEST).read_text(encoding="utf-8"))
@@ -518,6 +526,469 @@ class StageReleaseTests(unittest.TestCase):
 
         self.assertEqual(result, 2)
         self.assertEqual(self.digest(), PROMOTED_DIGEST)
+
+    def start_release_api(self, status=201, body=None, registry=None, redirect_to=None, fail_post_number=None):
+        received = []
+        self.listings = []
+        registry = registry or []
+        reply = json.dumps(body if body is not None else {"id": "rel-1"}).encode()
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(handler):
+                length = int(handler.headers["Content-Length"])
+                received.append(
+                    {
+                        "path": handler.path,
+                        "headers": dict(handler.headers),
+                        "body": json.loads(handler.rfile.read(length)),
+                    }
+                )
+                handler.send_response(500 if len(received) == fail_post_number else status)
+                handler.send_header("Content-Type", "application/json")
+                handler.end_headers()
+                handler.wfile.write(reply)
+
+            def do_GET(handler):
+                self.listings.append({"path": handler.path, "headers": dict(handler.headers)})
+                if redirect_to:
+                    handler.send_response(302)
+                    handler.send_header("Location", redirect_to)
+                    handler.end_headers()
+                    return
+                handler.send_response(200)
+                handler.send_header("Content-Type", "application/json")
+                handler.end_headers()
+                handler.wfile.write(json.dumps(registry).encode())
+
+            def log_message(handler, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        os.environ[stage_release.API_URL_VARIABLE] = f"http://127.0.0.1:{server.server_port}"
+        return received
+
+    def record(self, env="stage", since=None):
+        argv = ["record", "--env", env] + (["--since", since] if since else [])
+        return self.run_cli(argv)
+
+    def test_promote_and_rollback_edits_record_nothing(self):
+        received = self.start_release_api()
+
+        self.run_cli(["promote", "--to", "stage", "--digest", PROMOTED_DIGEST])
+        self.commit("Promote hello-ledger to stage")
+        self.run_cli(["rollback", "--env", "stage"])
+
+        self.assertEqual(received, [])
+
+    def test_record_posts_the_merged_promotion(self):
+        received = self.start_release_api()
+        os.environ[stage_release.API_TOKEN_VARIABLE] = "secret-token"
+        self.publish_main(stage=PROMOTED_DIGEST)
+
+        result, _ = self.record()
+
+        self.assertEqual(result, 0)
+        self.assertEqual(len(received), 1)
+        self.assertEqual(received[0]["path"], "/v1/platform/releases")
+        self.assertEqual(received[0]["headers"]["Authorization"], "Bearer secret-token")
+        git_sha = self.run_git("rev-parse", "HEAD")
+        self.assertEqual(
+            received[0]["headers"]["Idempotency-Key"],
+            stage_release.idempotency_key("stage", "promote", PROMOTED_DIGEST, git_sha),
+        )
+        self.assertEqual(
+            received[0]["body"],
+            {
+                "service": "hello-ledger",
+                "environment": "stage",
+                "action": "promote",
+                "imageDigest": PROMOTED_DIGEST,
+                "previousDigest": INITIAL_DIGEST,
+                "gitSha": git_sha,
+                "signed": True,
+            },
+        )
+        self.assertEqual(len(self.cosign_calls()), 2)
+
+    def test_record_classifies_a_return_to_an_earlier_digest_as_rollback(self):
+        self.publish_main(stage=PROMOTED_DIGEST)
+        promoted = self.run_git("rev-parse", "HEAD")
+        self.publish_main(stage=INITIAL_DIGEST)
+        received = self.start_release_api(
+            registry=[{"gitSha": promoted, "action": "promote", "imageDigest": PROMOTED_DIGEST, "previousDigest": INITIAL_DIGEST}]
+        )
+
+        self.record()
+
+        body = received[0]["body"]
+        self.assertEqual((body["action"], body["imageDigest"], body["previousDigest"]), ("rollback", INITIAL_DIGEST, PROMOTED_DIGEST))
+
+    def test_record_covers_every_commit_since_the_given_revision(self):
+        received = self.start_release_api()
+        before = self.run_git("rev-parse", "HEAD")
+        self.publish_main(stage=PROMOTED_DIGEST)
+        self.publish_main(stage=PROMOTED_DIGEST, note="doc only")
+
+        self.record(since=before)
+
+        self.assertEqual(received[0]["body"]["previousDigest"], INITIAL_DIGEST)
+        self.assertEqual(received[0]["body"]["action"], "promote")
+
+    def test_record_resumes_from_the_newest_recorded_release_not_the_given_revision(self):
+        third = "sha256:" + "c" * 64
+        first = self.run_git("rev-parse", "HEAD")
+        self.publish_main(stage=PROMOTED_DIGEST)
+        recorded = self.run_git("rev-parse", "HEAD")
+        self.publish_main(stage=third)
+        received = self.start_release_api(registry=[{"gitSha": recorded, "imageDigest": PROMOTED_DIGEST}])
+
+        result, _ = self.record(since=self.run_git("rev-parse", "HEAD"))
+
+        self.assertEqual(result, 0)
+        self.assertTrue(self.listings[0]["path"].startswith("/v1/platform/releases?"))
+        self.assertIn("env=stage", self.listings[0]["path"])
+        posted = received[0]["body"]
+        self.assertEqual((posted["imageDigest"], posted["previousDigest"]), (third, PROMOTED_DIGEST))
+        self.assertNotEqual(first, recorded)
+
+    def publish_digests(self, *digests):
+        shas = []
+        for digest in digests:
+            self.publish_main(stage=digest)
+            shas.append(self.run_git("rev-parse", "HEAD"))
+        return shas
+
+    def test_record_posts_one_release_per_digest_change_in_order(self):
+        received = self.start_release_api()
+        third = "sha256:" + "c" * 64
+        cursor = self.run_git("rev-parse", "HEAD")
+        shas = self.publish_digests(PROMOTED_DIGEST, third, PROMOTED_DIGEST)
+
+        result, _ = self.record(since=cursor)
+
+        self.assertEqual(result, 0)
+        bodies = [item["body"] for item in received]
+        self.assertEqual([body["gitSha"] for body in bodies], shas)
+        self.assertEqual(
+            [(body["action"], body["previousDigest"], body["imageDigest"]) for body in bodies],
+            [
+                ("promote", INITIAL_DIGEST, PROMOTED_DIGEST),
+                ("promote", PROMOTED_DIGEST, third),
+                ("rollback", third, PROMOTED_DIGEST),
+            ],
+        )
+
+    def test_record_stops_at_a_failed_post_and_the_next_run_resumes_from_the_registry(self):
+        third = "sha256:" + "c" * 64
+        cursor = self.run_git("rev-parse", "HEAD")
+        shas = self.publish_digests(PROMOTED_DIGEST, third, INITIAL_DIGEST)
+        received = self.start_release_api(fail_post_number=2)
+
+        result, errors = self.record(since=cursor)
+
+        self.assertEqual(result, 3)
+        self.assertIn("answered 500", errors)
+        self.assertEqual([item["body"]["gitSha"] for item in received], shas[:2])
+
+        resumed = self.start_release_api(registry=[{"gitSha": shas[0]}])
+        result, _ = self.record(since=cursor)
+
+        self.assertEqual(result, 0)
+        self.assertEqual([item["body"]["gitSha"] for item in resumed], shas[1:])
+
+    def test_record_rejects_a_registry_sha_that_is_not_a_full_hex_commit_id(self):
+        self.publish_main(stage=PROMOTED_DIGEST)
+        for bad in ("--upload-pack=touch /tmp/pwned", "HEAD", "abc123", "A" * 40, "", None, 7):
+            received = self.start_release_api(registry=[{"gitSha": bad}])
+            result, errors = self.record()
+            self.assertEqual(result, 3, bad)
+            self.assertIn("release not recorded", errors)
+            self.assertEqual(received, [])
+
+    def test_record_rejects_a_registry_row_that_is_not_an_object(self):
+        self.publish_main(stage=PROMOTED_DIGEST)
+        received = self.start_release_api(registry=["not-an-object"])
+
+        result, errors = self.record()
+
+        self.assertEqual(result, 3)
+        self.assertIn("release not recorded", errors)
+        self.assertEqual(received, [])
+
+    def test_record_skips_registry_rows_that_are_not_on_main_when_choosing_the_cursor(self):
+        third = "sha256:" + "c" * 64
+        recorded, _ = self.publish_digests(PROMOTED_DIGEST, third)
+        orphan = self.run_git("commit-tree", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "-m", "elsewhere")
+        received = self.start_release_api(
+            registry=[{"gitSha": orphan}, {"gitSha": "d" * 40}, {"gitSha": "not-a-sha"}, {"gitSha": recorded}]
+        )
+
+        result, _ = self.record()
+
+        self.assertEqual(result, 0)
+        self.assertEqual([item["body"]["imageDigest"] for item in received], [third])
+
+    def test_record_skips_a_placeholder_commit_with_a_warning_and_continues(self):
+        third = "sha256:" + "c" * 64
+        cursor = self.run_git("rev-parse", "HEAD")
+        shas = self.publish_digests(PROMOTED_DIGEST, stage_release.PLACEHOLDER_DIGEST, third)
+        received = self.start_release_api()
+
+        result, errors = self.record(since=cursor)
+
+        self.assertEqual(result, 0)
+        self.assertIn(shas[1], errors)
+        self.assertEqual([item["body"]["gitSha"] for item in received], [shas[0], shas[2]])
+        self.assertEqual(received[1]["body"]["previousDigest"], stage_release.PLACEHOLDER_DIGEST)
+
+    def publish_unreadable_stage_then(self, digest):
+        template = self.manifest.read_text(encoding="utf-8")
+        self.run_git("checkout", "-q", "main")
+        self.manifest.write_text("digest: latest\n", encoding="utf-8")
+        self.run_git("add", str(STAGE_MANIFEST))
+        self.run_git("commit", "-q", "-m", "Break the stage manifest")
+        broken = self.run_git("rev-parse", "HEAD")
+        self.manifest.write_text(self.with_digest(template, digest), encoding="utf-8")
+        self.run_git("add", str(STAGE_MANIFEST))
+        self.run_git("commit", "-q", "-m", "Repair the stage manifest")
+        return broken, self.run_git("rev-parse", "HEAD")
+
+    def test_record_records_the_rest_and_exits_3_around_an_unreadable_commit(self):
+        third = "sha256:" + "c" * 64
+        cursor = self.run_git("rev-parse", "HEAD")
+        first, = self.publish_digests(PROMOTED_DIGEST)
+        broken, last = self.publish_unreadable_stage_then(third)
+        received = self.start_release_api()
+
+        result, errors = self.record(since=cursor)
+
+        self.assertEqual(result, 3)
+        self.assertIn(broken, errors)
+        self.assertEqual([item["body"]["gitSha"] for item in received], [first, last])
+        self.assertEqual(received[1]["body"]["previousDigest"], PROMOTED_DIGEST)
+
+    def test_record_exits_3_when_the_only_new_digest_change_is_an_unreadable_commit(self):
+        cursor = self.run_git("rev-parse", "HEAD")
+        broken, _ = self.publish_unreadable_stage_then(INITIAL_DIGEST)
+        received = self.start_release_api()
+
+        result, errors = self.record(since=cursor)
+
+        self.assertEqual(result, 3)
+        self.assertIn(broken, errors)
+        self.assertEqual(received, [])
+
+    def test_quoted_digests_are_read_and_rewritten_in_place(self):
+        for quote in ('"', "'"):
+            manifest = f"image:\n  digest: {quote}{INITIAL_DIGEST}{quote}\n"
+            self.assertEqual(stage_release.read_digest(manifest), INITIAL_DIGEST)
+            path = self.root / "quoted.yaml"
+            stage_release._write_digest(path, manifest, PROMOTED_DIGEST)
+            self.assertEqual(path.read_text(encoding="utf-8"), f"image:\n  digest: {quote}{PROMOTED_DIGEST}{quote}\n")
+        with self.assertRaises(stage_release.ReleaseError):
+            stage_release.read_digest(f"digest: \"{INITIAL_DIGEST}'\n")
+
+    def test_record_classifies_a_return_to_a_pre_registry_digest_as_promote(self):
+        third = "sha256:" + "c" * 64
+        cursor = self.run_git("rev-parse", "HEAD")
+        shas = self.publish_digests(PROMOTED_DIGEST, third)
+        registry = [{"gitSha": shas[1], "action": "promote", "imageDigest": third, "previousDigest": PROMOTED_DIGEST}]
+        self.publish_main(stage=INITIAL_DIGEST)
+        received = self.start_release_api(registry=registry)
+
+        result, _ = self.record(since=cursor)
+
+        self.assertEqual(result, 0)
+        body = received[0]["body"]
+        self.assertEqual((body["action"], body["imageDigest"], body["previousDigest"]), ("promote", INITIAL_DIGEST, third))
+
+    def test_record_classifies_a_return_to_a_registry_digest_as_rollback(self):
+        third = "sha256:" + "c" * 64
+        cursor = self.run_git("rev-parse", "HEAD")
+        shas = self.publish_digests(PROMOTED_DIGEST, third)
+        registry = [{"gitSha": shas[1], "action": "promote", "imageDigest": third, "previousDigest": PROMOTED_DIGEST}]
+        self.publish_main(stage=PROMOTED_DIGEST)
+        received = self.start_release_api(registry=registry)
+
+        self.record(since=cursor)
+
+        self.assertEqual(received[0]["body"]["action"], "rollback")
+
+    def test_record_exits_3_on_a_422_and_the_cursor_stays_on_the_rejected_commit(self):
+        cursor = self.run_git("rev-parse", "HEAD")
+        shas = self.publish_digests(PROMOTED_DIGEST, INITIAL_DIGEST)
+        received = self.start_release_api(status=422, body={"code": "PLH-0422"})
+
+        result, errors = self.record(since=cursor)
+
+        self.assertEqual(result, 3)
+        self.assertIn("answered 422", errors)
+        self.assertEqual([item["body"]["gitSha"] for item in received], [shas[0]])
+
+        retried = self.start_release_api(registry=[])
+        result, _ = self.record(since=cursor)
+
+        self.assertEqual(result, 0)
+        self.assertEqual([item["body"]["gitSha"] for item in retried], shas)
+
+    def test_record_refuses_a_registry_sha_unrelated_to_head(self):
+        self.publish_main(stage=PROMOTED_DIGEST)
+        unrelated = self.run_git("commit-tree", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "-m", "elsewhere")
+        received = self.start_release_api(registry=[{"gitSha": unrelated}])
+
+        result, errors = self.record()
+
+        self.assertEqual(result, 3)
+        self.assertIn("unrelated to HEAD", errors)
+        self.assertEqual(received, [])
+
+    def test_record_refuses_a_registry_sha_this_checkout_does_not_have(self):
+        self.publish_main(stage=PROMOTED_DIGEST)
+        received = self.start_release_api(registry=[{"gitSha": "d" * 40}])
+
+        result, _ = self.record()
+
+        self.assertEqual(result, 3)
+        self.assertEqual(received, [])
+
+    def test_rerunning_an_older_run_records_nothing_when_the_registry_is_ahead(self):
+        older, newer = self.publish_digests(PROMOTED_DIGEST, "sha256:" + "c" * 64)
+        self.run_git("checkout", "-q", older)
+        received = self.start_release_api(registry=[{"gitSha": newer}])
+
+        result, errors = self.record()
+
+        self.assertEqual(result, 0)
+        self.assertEqual(received, [])
+        self.assertNotIn("release not recorded", errors)
+
+    def test_record_is_a_no_op_when_the_registry_cursor_is_head(self):
+        head, = self.publish_digests(PROMOTED_DIGEST)
+        received = self.start_release_api(registry=[{"gitSha": head}])
+
+        result, _ = self.record()
+
+        self.assertEqual(result, 0)
+        self.assertEqual(received, [])
+
+    def test_cosign_runs_without_the_platform_api_token(self):
+        os.environ[stage_release.API_TOKEN_VARIABLE] = "secret-token"
+        os.environ["PASSAGE_UNRELATED_SETTING"] = "kept"
+        with unittest.mock.patch("stage_release.subprocess.run") as run:
+            stage_release.verify_image(PROMOTED_DIGEST)
+
+        self.assertEqual(run.call_count, 2)
+        for call in run.call_args_list:
+            env = call.kwargs["env"]
+            self.assertNotIn(stage_release.API_TOKEN_VARIABLE, env)
+            self.assertEqual(env["PASSAGE_UNRELATED_SETTING"], "kept")
+            self.assertEqual(env["PATH"], os.environ["PATH"])
+
+    def test_record_fails_closed_when_the_registry_cannot_be_read(self):
+        self.publish_main(stage=PROMOTED_DIGEST)
+        received = self.start_release_api(status=201, body=None)
+        os.environ[stage_release.API_URL_VARIABLE] = "http://127.0.0.1:1"
+
+        result, errors = self.record()
+
+        self.assertEqual(result, 3)
+        self.assertIn("release not recorded", errors)
+        self.assertEqual(received, [])
+
+    def test_record_never_follows_a_redirect_with_the_token(self):
+        target = self.start_release_api()
+        target_url = os.environ[stage_release.API_URL_VARIABLE]
+        os.environ[stage_release.API_TOKEN_VARIABLE] = "secret-token"
+        self.publish_main(stage=PROMOTED_DIGEST)
+        self.start_release_api(redirect_to=f"{target_url}/elsewhere")
+
+        result, errors = self.record()
+
+        self.assertEqual(result, 3)
+        self.assertIn("answered 302", errors)
+        self.assertEqual(len(self.listings), 1)
+        self.assertEqual(target, [])
+        self.assertNotIn("/elsewhere", [item["path"] for item in self.listings])
+
+    def test_record_prod_promotion(self):
+        received = self.start_release_api()
+        self.publish_main(stage=PROMOTED_DIGEST, prod=stage_release.PLACEHOLDER_DIGEST)
+        self.publish_main(prod=PROMOTED_DIGEST)
+
+        result, _ = self.record("prod")
+
+        self.assertEqual(result, 0)
+        self.assertEqual(received[0]["body"]["environment"], "prod")
+        self.assertEqual(received[0]["body"]["previousDigest"], stage_release.PLACEHOLDER_DIGEST)
+
+    def test_record_skips_when_the_digest_did_not_change(self):
+        received = self.start_release_api()
+        self.publish_main(stage=INITIAL_DIGEST, note="doc only")
+
+        result, _ = self.record()
+
+        self.assertEqual(result, 0)
+        self.assertEqual(received, [])
+
+    def test_record_marks_an_unverifiable_image_unsigned(self):
+        received = self.start_release_api()
+        self.publish_main(stage=PROMOTED_DIGEST)
+        self.install_cosign_stub(fail_on="verify")
+
+        result, errors = self.record()
+
+        self.assertEqual(result, 0)
+        self.assertIs(received[0]["body"]["signed"], False)
+        self.assertIn("unsigned", errors)
+
+    def test_record_fails_with_exit_3_when_the_api_rejects_or_is_unreachable(self):
+        self.publish_main(stage=PROMOTED_DIGEST)
+        self.start_release_api(status=400, body={"code": "COM-0001"})
+        result, errors = self.record()
+        self.assertEqual(result, 3)
+        self.assertIn("answered 400", errors)
+
+        os.environ[stage_release.API_URL_VARIABLE] = "http://127.0.0.1:1"
+        result, errors = self.record()
+        self.assertEqual(result, 3)
+        self.assertIn("release not recorded", errors)
+
+    def test_record_without_an_api_url_only_warns(self):
+        self.publish_main(stage=PROMOTED_DIGEST)
+
+        result, errors = self.record()
+
+        self.assertEqual(result, 0)
+        self.assertIn(f"{stage_release.API_URL_VARIABLE} is not set", errors)
+
+    def test_record_requires_https_except_for_localhost(self):
+        self.publish_main(stage=PROMOTED_DIGEST)
+        os.environ[stage_release.API_URL_VARIABLE] = "http://platform.example.com"
+        result, errors = self.record()
+        self.assertEqual(result, 2)
+        self.assertIn("must be https", errors)
+
+        for allowed in ("https://platform.example.com/", "http://localhost:8080", "http://127.0.0.1:8080"):
+            os.environ[stage_release.API_URL_VARIABLE] = allowed
+            self.assertEqual(stage_release._api_base(), allowed.rstrip("/"))
+        os.environ[stage_release.API_URL_VARIABLE] = "file:///etc/passwd"
+        with self.assertRaises(stage_release.ReleaseError):
+            stage_release._api_base()
+
+    def test_idempotency_key_is_deterministic_and_changes_with_every_input(self):
+        sha = "1" * 40
+        key = stage_release.idempotency_key("stage", "promote", PROMOTED_DIGEST, sha)
+        self.assertEqual(key, stage_release.idempotency_key("stage", "promote", PROMOTED_DIGEST, sha))
+        for other in (
+            ("prod", "promote", PROMOTED_DIGEST, sha),
+            ("stage", "rollback", PROMOTED_DIGEST, sha),
+            ("stage", "promote", INITIAL_DIGEST, sha),
+            ("stage", "promote", PROMOTED_DIGEST, "2" * 40),
+        ):
+            self.assertNotEqual(key, stage_release.idempotency_key(*other))
 
 
 if __name__ == "__main__":

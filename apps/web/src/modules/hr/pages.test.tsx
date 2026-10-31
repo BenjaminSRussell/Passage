@@ -114,6 +114,8 @@ describe("hr module", () => {
       { label: "Skill search", to: "/hr/skills/search", duty: "HcmOrgInquire" },
       { label: "Expiring certifications", to: "/hr/certifications/expiring", duty: "HcmWorkerInquire" },
       { label: "Courses", to: "/hr/courses", duty: "HcmLearningAdmin" },
+      { label: "My profile", to: "/hr/my/profile", duty: "EssBase" },
+      { label: "My team", to: "/hr/my/team", duty: "MssBase" },
     ]);
     expect(loadModules().map((m) => m.id)).toContain("hr");
   });

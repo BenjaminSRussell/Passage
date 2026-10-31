@@ -116,6 +116,75 @@ func TestPostgres_LedgerLinesRefuseALedgerOutsideTheSet(t *testing.T) {
 	}
 }
 
+func TestPostgres_LedgerLinesMembershipIsCheckedBeforeTheDutyEveryTime(t *testing.T) {
+	e := setupLedgerSet(t)
+	in := vendorInvoice("", "LL-ORDER", "100.00")
+	in.LedgerLines = map[string][]domain.LineInput{
+		e.local.ID: {ledgerLine("7010", domain.SideDebit, "1.00")},
+		e.tax.ID:   {ledgerLine("6010", domain.SideDebit, "1.00")},
+		ids.New():  {ledgerLine("6010", domain.SideDebit, "1.00")},
+	}
+	for i := range 30 {
+		_, err := e.store.PostSetEntry(e.ctx, e.set.ID, in)
+		var rej *domain.RejectedError
+		if !errors.As(err, &rej) || rej.Violations[0].Code != CodeLedgerLinesNotInSet {
+			t.Fatalf("attempt %d: a ledger outside the set must win over the missing duty: %v", i, err)
+		}
+	}
+}
+
+func TestPostgres_LedgerLinesReplayWithoutTheDutyIsStillForbidden(t *testing.T) {
+	e := setupLedgerSet(t)
+	in := vendorInvoice("", "LL-REPLAY-403", "100.00")
+	in.CanPostLedgerSpecific = true
+	in.LedgerLines = map[string][]domain.LineInput{e.tax.ID: {ledgerLine("6010", domain.SideDebit, "5.00"), ledgerLine("2100", domain.SideCredit, "5.00")}}
+	if _, err := e.store.PostSetEntry(e.ctx, e.set.ID, in); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	in.CanPostLedgerSpecific = false
+	if _, err := e.store.PostSetEntry(e.ctx, e.set.ID, in); !isProblem(err, http.StatusForbidden, "AUTH-0003") {
+		t.Fatalf("a replay by a caller without the duty must not return the stored result: %v", err)
+	}
+}
+
+func TestPostgres_LedgerLinesForOneLedgerOnlyLeaveTheOthersEmpty(t *testing.T) {
+	e := setupLedgerSet(t)
+	in := vendorInvoice("", "LL-PARTIAL", "100.00")
+	in.Lines = nil
+	in.CanPostLedgerSpecific = true
+	in.LedgerLines = map[string][]domain.LineInput{e.ledger.ID: {ledgerLine("6010", domain.SideDebit, "5.00"), ledgerLine("2100", domain.SideCredit, "5.00")}}
+	_, err := e.store.PostSetEntry(e.ctx, e.set.ID, in)
+	var rej *domain.RejectedError
+	if !errors.As(err, &rej) || rej.Violations[0].Code != "LEDGER_LINE_EMPTY" || !strings.HasPrefix(rej.Violations[0].Message, "ledger ") {
+		t.Fatalf("a ledger left without any line must be rejected naming it: %v", err)
+	}
+	if n := e.entryCount(t); n != 0 {
+		t.Fatalf("got %d entries", n)
+	}
+}
+
+func TestPostgres_ListLedgerSetsAndAccountMappingsRespectScope(t *testing.T) {
+	e := setupLedgerSet(t)
+	sets, err := e.store.ListLedgerSets(e.ctx)
+	if err != nil || len(sets) != 1 || sets[0].ID != e.set.ID || len(sets[0].LedgerIDs) != 3 {
+		t.Fatalf("sets: %+v %v", sets, err)
+	}
+	mappings, err := e.store.ListAccountMappings(e.ctx, e.local.ID)
+	if err != nil || len(mappings) != 1 || mappings[0].SourceAccount != "6010" || mappings[0].TargetAccount != "7010" || mappings[0].EffectiveFrom != "2026-01-01" {
+		t.Fatalf("mappings: %+v %v", mappings, err)
+	}
+	if none, err := e.store.ListAccountMappings(e.ctx, e.tax.ID); err != nil || len(none) != 0 {
+		t.Fatalf("a ledger without mappings: %+v %v", none, err)
+	}
+	other := principalCtx(e.tenant, ids.New())
+	if sets, err := e.store.ListLedgerSets(other); err != nil || len(sets) != 0 {
+		t.Errorf("another legal entity sees sets: %+v %v", sets, err)
+	}
+	if _, err := e.store.ListAccountMappings(other, e.local.ID); problemCode(err) != "LEDGER_NOT_FOUND" {
+		t.Errorf("another legal entity must get 404 for the mappings: %v", err)
+	}
+}
+
 func TestPostgres_LedgerLinesPostIsIdempotentAndRespectsLegalEntityScope(t *testing.T) {
 	e := setupLedgerSet(t)
 	in := vendorInvoice("", "LL-IDEM", "100.00")

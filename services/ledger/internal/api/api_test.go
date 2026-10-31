@@ -277,6 +277,14 @@ func (f *fakeStore) GetLedgerSet(_ context.Context, id string) (store.LedgerSet,
 	return store.LedgerSet{ID: id}, f.err
 }
 
+func (f *fakeStore) ListLedgerSets(context.Context) ([]store.LedgerSet, error) {
+	return []store.LedgerSet{{ID: testSet}}, f.err
+}
+
+func (f *fakeStore) ListAccountMappings(_ context.Context, ledgerID string) ([]store.AccountMapping, error) {
+	return []store.AccountMapping{{LedgerID: ledgerID}}, f.err
+}
+
 func (f *fakeStore) CreateAccountMapping(_ context.Context, in store.AccountMapping) (store.AccountMapping, error) {
 	f.mappings = append(f.mappings, in)
 	return in, f.err

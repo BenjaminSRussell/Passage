@@ -524,8 +524,8 @@ paths:
       summary: Absence requests by start date, oldest first (the approval queue)
       description: |
         A caller with only EssAbsence sees their own requests (the worker whose
-        sign-in user they are). MssApprove or HcmAbsenceAdmin see the tenant's;
-        narrowing a manager to their team is the OPA handoff.
+        sign-in user they are). With MssApprove the caller sees their own and
+        their direct reports' requests; HcmAbsenceAdmin sees the tenant's.
       x-passage-duty: EssAbsence
       parameters:
         - name: status
@@ -609,7 +609,9 @@ paths:
         CARRY_OVER first, and writes dev.passage.hr.absence.approved.v1 in the
         same transaction. Replaying the decision a request already has returns
         it unchanged. An approver cannot decide their own request
-        (HCM-ABS-SELF-APPROVAL, 403).
+        (HCM-ABS-SELF-APPROVAL, 403). A manager without HcmAbsenceAdmin can
+        decide only a direct report's request; any other request is 404
+        HCM-ABS-REQ-NOT-FOUND.
       x-passage-duty: MssApprove
       parameters:
         - $ref: "#/components/parameters/RequestId"
@@ -674,7 +676,9 @@ paths:
       summary: A worker's balances per plan for the plan year containing asOf
       description: |
         A caller with only EssAbsence reads their own worker (HCM-ABS-NOT-OWN
-        otherwise); MssApprove or HcmAbsenceAdmin read anyone's.
+        otherwise). With MssApprove the caller reads their own and their
+        direct reports' (any other worker is 404 HCM-WRK-NOT-FOUND);
+        HcmAbsenceAdmin reads anyone's.
       x-passage-duty: EssAbsence
       parameters:
         - $ref: "#/components/parameters/WorkerId"
@@ -1773,6 +1777,85 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+  /v1/hr/me:
+    get:
+      operationId: getMyProfile
+      summary: The signed-in employee's own worker record, PII masked, with today's position and manager
+      description: |
+        The worker is the one linked to the caller's sign-in; no worker id is
+        accepted, so the route cannot read another record. The read is audited
+        like any masked PII read. HCM-ESS-001 (404) when no worker is linked,
+        HCM-ESS-002 (409) when more than one is.
+      x-passage-duty: EssBase
+      responses:
+        "200":
+          description: The caller's worker record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyProfile"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/me/team:
+    get:
+      operationId: listMyTeam
+      summary: The signed-in manager's direct reports today, by id (no PII)
+      description: |
+        A direct report is a worker whose manager today is the caller's worker
+        (BR-42.1: the nearest occupied position up the reports-to line, vacant
+        positions skipped).
+      x-passage-duty: MssBase
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page of direct reports
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkerList"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+  /v1/hr/me/team/{id}:
+    get:
+      operationId: getMyTeamMember
+      summary: A direct report's record with today's position and manager (no PII)
+      description: |
+        Any worker who is not the caller's direct report, and any id that does
+        not exist, answers the same 404 HCM-WRK-NOT-FOUND.
+      x-passage-duty: MssBase
+      parameters:
+        - $ref: "#/components/parameters/WorkerId"
+      responses:
+        "200":
+          description: The direct report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamMember"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
   /v1/hr/jobs:
     post:
       operationId: createJob
@@ -3525,6 +3608,22 @@ components:
         updatedAt:
           type: string
           format: date-time
+    MyProfile:
+      allOf:
+        - $ref: "#/components/schemas/WorkerDetail"
+        - type: object
+          required: [asOf]
+          properties:
+            asOf:
+              $ref: "#/components/schemas/AsOfView"
+    TeamMember:
+      allOf:
+        - $ref: "#/components/schemas/Worker"
+        - type: object
+          required: [asOf]
+          properties:
+            asOf:
+              $ref: "#/components/schemas/AsOfView"
     WorkerDetail:
       allOf:
         - $ref: "#/components/schemas/Worker"

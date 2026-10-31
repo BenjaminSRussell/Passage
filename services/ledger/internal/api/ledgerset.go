@@ -3,6 +3,8 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"slices"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
@@ -18,7 +20,9 @@ const maxParallelLedgers = 20
 
 func (a *API) registerLedgerSets(r chi.Router) {
 	r.With(authz.RequireDuty(dutySetupWrite)).Post("/ledger-sets", a.createLedgerSet)
+	r.With(authz.RequireDuty(dutyRead)).Get("/ledger-sets", a.listLedgerSets)
 	r.With(authz.RequireDuty(dutyRead)).Get("/ledger-sets/{setId}", a.getLedgerSet)
+	r.With(authz.RequireDuty(dutyRead)).Get("/ledgers/{id}/account-mappings", a.listAccountMappings)
 	r.With(authz.RequireAnyDuty(dutyPost, dutySetPost)).Post("/ledger-sets/{setId}/journal-entries", a.postSetEntry)
 	r.With(authz.RequireDuty(dutySetupWrite)).Post("/ledgers/{id}/account-mappings", a.createAccountMapping)
 }
@@ -88,6 +92,35 @@ func (a *API) getLedgerSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, set)
+}
+
+func (a *API) listLedgerSets(w http.ResponseWriter, r *http.Request) {
+	if _, ok := principal(w, r); !ok {
+		return
+	}
+	sets, err := a.store.ListLedgerSets(r.Context())
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": sets})
+}
+
+func (a *API) listAccountMappings(w http.ResponseWriter, r *http.Request) {
+	if _, ok := principal(w, r); !ok {
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if !ids.Valid(id) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusNotFound, "LEDGER_NOT_FOUND", "ledger not found"))
+		return
+	}
+	mappings, err := a.store.ListAccountMappings(r.Context(), id)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": mappings})
 }
 
 type accountMappingRequest struct {
@@ -179,6 +212,17 @@ func ledgerLinesInput(body []ledgerLinesDTO, fields map[string]string) map[strin
 	return out
 }
 
+func canonicalGroups(groups []ledgerLinesDTO) []ledgerLinesDTO {
+	out := slices.Clone(groups)
+	for i := range out {
+		if id, ok := ids.Canonical(out[i].LedgerID); ok {
+			out[i].LedgerID = id
+		}
+	}
+	slices.SortFunc(out, func(x, y ledgerLinesDTO) int { return strings.Compare(x.LedgerID, y.LedgerID) })
+	return out
+}
+
 func (a *API) postSetEntry(w http.ResponseWriter, r *http.Request) {
 	p, ok := principal(w, r)
 	if !ok {
@@ -206,7 +250,7 @@ func (a *API) postSetEntry(w http.ResponseWriter, r *http.Request) {
 		validationFailed(w, r, fields)
 		return
 	}
-	hash, err := domain.HashPayload(setEntryPayload{postEntryRequest: req, LedgerLines: body.LedgerLines})
+	hash, err := domain.HashPayload(setEntryPayload{postEntryRequest: req, LedgerLines: canonicalGroups(body.LedgerLines)})
 	if err != nil {
 		httpx.Fail(w, r, err)
 		return

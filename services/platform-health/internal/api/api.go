@@ -26,25 +26,39 @@ const (
 	idempotencyKey   = "Idempotency-Key"
 	dutyWrite        = "hello.write"
 	dutyRead         = "hello.read"
+	dutyReleaseWrite = "Maintain platform releases"
+	dutyReleaseRead  = "View platform releases"
+	dutyApproveProd  = "Approve production promotion"
+	dutyRollback     = "Rollback environment"
 )
 
 type API struct {
-	store   store.Store
-	created atomic.Int64
-	failed  atomic.Int64
-	http    requestMetrics
+	store          store.Store
+	operatorTenant string
+	created        atomic.Int64
+	failed         atomic.Int64
+	http           requestMetrics
+
+	releasesRecorded atomic.Int64
+	releasesReplayed atomic.Int64
+	releasesFailed   atomic.Int64
+	chainBreaks      atomic.Int64
 }
 
 type createRequest struct {
 	Message string `json:"message"`
 }
 
-func New(s store.Store) *API { return &API{store: s, http: newRequestMetrics()} }
+func New(s store.Store, operatorTenant string) *API {
+	return &API{store: s, operatorTenant: operatorTenant, http: newRequestMetrics()}
+}
 
 func (a *API) Register(r chi.Router) {
 	r.Get("/readyz", a.ready)
 	r.With(authz.RequireDuty(dutyWrite)).Post("/v1/hello-ledger/entries", a.create)
 	r.With(authz.RequireDuty(dutyRead)).Get("/v1/hello-ledger/entries", a.list)
+	r.With(authz.RequireAnyDuty(dutyReleaseWrite, dutyApproveProd, dutyRollback)).Post("/v1/platform/releases", a.recordRelease)
+	r.With(authz.RequireDuty(dutyReleaseRead)).Get("/v1/platform/releases", a.listReleases)
 }
 
 func (a *API) Metrics() http.Handler {
@@ -52,6 +66,10 @@ func (a *API) Metrics() http.Handler {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		_, _ = fmt.Fprintf(w, "# HELP hello_ledger_entries_created_total Entries created.\n# TYPE hello_ledger_entries_created_total counter\nhello_ledger_entries_created_total %d\n", a.created.Load())
 		_, _ = fmt.Fprintf(w, "# HELP hello_ledger_entries_failed_total Entry creations that failed in the store.\n# TYPE hello_ledger_entries_failed_total counter\nhello_ledger_entries_failed_total %d\n", a.failed.Load())
+		_, _ = fmt.Fprintf(w, "# HELP hello_ledger_releases_recorded_total Release rows recorded.\n# TYPE hello_ledger_releases_recorded_total counter\nhello_ledger_releases_recorded_total %d\n", a.releasesRecorded.Load())
+		_, _ = fmt.Fprintf(w, "# HELP hello_ledger_releases_replayed_total Idempotent release replays answered without a new row.\n# TYPE hello_ledger_releases_replayed_total counter\nhello_ledger_releases_replayed_total %d\n", a.releasesReplayed.Load())
+		_, _ = fmt.Fprintf(w, "# HELP hello_ledger_releases_failed_total Release recordings that failed in the store.\n# TYPE hello_ledger_releases_failed_total counter\nhello_ledger_releases_failed_total %d\n", a.releasesFailed.Load())
+		_, _ = fmt.Fprintf(w, "# HELP hello_ledger_release_chain_breaks_total Recorded releases whose previousDigest differed from the newest recorded image for the service and environment.\n# TYPE hello_ledger_release_chain_breaks_total counter\nhello_ledger_release_chain_breaks_total %d\n", a.chainBreaks.Load())
 		a.http.write(w)
 	})
 }
@@ -106,14 +124,19 @@ func (a *API) list(w http.ResponseWriter, r *http.Request) {
 }
 
 func validTenant(w http.ResponseWriter, r *http.Request) bool {
+	_, ok := validPrincipal(w, r)
+	return ok
+}
+
+func validPrincipal(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) {
 	p, ok := tenant.FromContext(r.Context())
 	if !ok || !ids.Valid(p.TenantID) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusUnauthorized, "AUTH-0001", "missing or malformed tenant"))
-		return false
+		return p, false
 	}
 	if p.LegalEntityID != "" && !ids.Valid(p.LegalEntityID) {
 		httpx.Fail(w, r, httpx.NewProblem(http.StatusBadRequest, "COM-0001", "legal entity must be a single UUID"))
-		return false
+		return p, false
 	}
-	return true
+	return p, true
 }
