@@ -83,7 +83,12 @@ func optionalUUID(fields map[string]string, field, v string) string {
 // Quantities and amounts may be negative (issues, returns, reversals);
 // value-only kinds carry quantity 0.
 func validateCostTransaction(fields map[string]string, prefix string, c costTransactionRequest) store.CostTransaction {
-	field := func(name string) string { return prefix + "." + name }
+	field := func(name string) string {
+		if prefix == "" {
+			return name
+		}
+		return prefix + "." + name
+	}
 	if n := len(c.SourceKey); n < 1 || n > 200 {
 		fields[field("sourceKey")] = "must be 1 to 200 characters"
 	}

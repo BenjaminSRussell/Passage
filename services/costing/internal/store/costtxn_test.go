@@ -2,11 +2,14 @@ package store
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/testkit"
 	"github.com/BenjaminSRussell/passage/services/costing/internal/domain"
@@ -206,5 +209,44 @@ func TestPostgres_CostTransactionsAreAppendOnlyAndPaged(t *testing.T) {
 	}
 	if len(seen) != 4 || seen[0] != "2026-01-03" || seen[3] != "2026-01-01" {
 		t.Fatalf("paged dates = %v, want the four up to 2026-01-04, newest first", seen)
+	}
+}
+
+func problemStatus(err error) int {
+	var p *httpx.Problem
+	if errors.As(err, &p) {
+		return p.Status
+	}
+	return 0
+}
+
+func TestPostgres_PPVRowsFollowTheSameRules(t *testing.T) {
+	s, _ := setup(t)
+	ctx := scopedCtx(testkit.TenantID(7))
+	le, p, site := ids.New(), ids.New(), ids.New()
+	first := costRow("ppv:RECEIPT:"+le+":GR-1:1", le, p, site, "PPV", "100", "50.00", "2026-03-05")
+	if _, err := s.RecordCostTransactions(ctx, []CostTransaction{first}); problemCode(err) != CodeCostTxnCurrency {
+		t.Fatalf("PPV as the first row of an entity with no ledger or stock: %v, want %s", err, CodeCostTxnCurrency)
+	}
+	if _, err := s.RecordCostTransactions(ctx, []CostTransaction{costRow("gr", le, p, site, "FINANCIAL", "100", "1000.00", "2026-03-05")}); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.RecordCostTransactions(ctx, []CostTransaction{first}); err != nil || n != 1 {
+		t.Fatalf("PPV after stock inserted %d, err %v; want 1", n, err)
+	}
+	changed := first
+	changed.Amount = "51.00"
+	_, err := s.RecordCostTransactions(ctx, []CostTransaction{changed})
+	if problemCode(err) != CodeCostTxnConflict || problemStatus(err) != http.StatusUnprocessableEntity {
+		t.Fatalf("PPV replayed with another amount: %v (status %d), want %s and 422", err, problemStatus(err), CodeCostTxnConflict)
+	}
+	usd := costRow("ppv-usd", le, p, site, "PPV", "1", "1.00", "2026-03-05")
+	usd.Currency = "USD"
+	if _, err := s.RecordCostTransactions(ctx, []CostTransaction{usd}); problemCode(err) != CodeCostTxnCurrency {
+		t.Fatalf("USD PPV in a EUR valuation: %v, want %s", err, CodeCostTxnCurrency)
+	}
+	bal, err := s.ValueBalances(ctx, BalanceQuery{LegalEntityID: le, AsOf: "2026-03-31"})
+	if err != nil || len(bal) != 1 || bal[0].FinancialValue.String() != "1000" {
+		t.Fatalf("balances = %+v, err %v; want inventory 1000 with PPV left out", bal, err)
 	}
 }

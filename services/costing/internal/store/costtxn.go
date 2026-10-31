@@ -270,6 +270,10 @@ func resolveLedgers(ctx context.Context, tx pgx.Tx, tenantID string, rows []Cost
 			continue
 		}
 		cur, ok := want[c.LegalEntityID]
+		if !ok && c.Kind == domain.KindPPV {
+			fields[fmt.Sprintf("items[%d].kind", i)] = "a PPV row needs a primary valuation ledger or earlier stock rows to fix the currency"
+			continue
+		}
 		if !ok {
 			want[c.LegalEntityID] = c.Currency // the batch's first default row sets it
 			continue
