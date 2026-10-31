@@ -42,7 +42,7 @@ export default defineConfig({
   webServer: {
     command: `npx vite --port ${PORT} --strictPort`,
     url: `http://localhost:${PORT}`,
-    env: { PASSAGE_DEV_DUTIES: E2E_DUTIES },
+    env: { PASSAGE_DEV_DUTIES: E2E_DUTIES, PASSAGE_DEV_SHOW_ALL_NAV: "" },
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
   },

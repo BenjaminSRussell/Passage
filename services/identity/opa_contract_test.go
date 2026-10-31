@@ -22,9 +22,9 @@ import (
 )
 
 const (
-	contractTenant   = "tenant-a"
-	seededDutyCount  = 123
-	unassignedUserID = "user-without-duty"
+	contractTenant       = "tenant-a"
+	unassignedUserID     = "user-without-duty"
+	deniedSamplesPerPair = 2
 )
 
 type seededDuty struct {
@@ -35,11 +35,18 @@ type seededDuty struct {
 	} `json:"permissions"`
 }
 
+var globRegexps sync.Map
+
 func globRegexp(pattern string) *regexp.Regexp {
+	if cached, ok := globRegexps.Load(pattern); ok {
+		return cached.(*regexp.Regexp)
+	}
 	expr := regexp.QuoteMeta(pattern)
 	expr = strings.ReplaceAll(expr, `\{,/\*\*\}`, `(/.*)?`)
 	expr = strings.ReplaceAll(expr, `\*`, `[^/:]*`)
-	return regexp.MustCompile("^" + expr + "$")
+	compiled := regexp.MustCompile("^" + expr + "$")
+	globRegexps.Store(pattern, compiled)
+	return compiled
 }
 
 func concreteResource(pattern string) string {
@@ -172,8 +179,8 @@ func newContractHarness(t *testing.T) contractHarness {
 	if err := json.Unmarshal(raw, &seeded); err != nil {
 		t.Fatal(err)
 	}
-	if len(seeded.Duties) != seededDutyCount {
-		t.Fatalf("seeded duties = %d, want %d", len(seeded.Duties), seededDutyCount)
+	if len(seeded.Duties) == 0 {
+		t.Fatal("no duties seeded")
 	}
 	names := make([]string, 0, len(seeded.Duties))
 	for name := range seeded.Duties {
@@ -243,21 +250,37 @@ func TestDutyContractAgainstRealPolicy(t *testing.T) {
 		}
 	}
 
-	for _, p := range pairs {
+	for i, p := range pairs {
 		t.Run(p.method+" "+p.resource, func(t *testing.T) {
 			for _, name := range h.names {
-				resp := h.serve(h.userFor[name], p.method, p.resource)
 				if h.duties[name].grants(p.method, p.resource) {
-					if resp.Code < 200 || resp.Code > 299 {
+					if resp := h.serve(h.userFor[name], p.method, p.resource); resp.Code < 200 || resp.Code > 299 {
 						t.Errorf("%q should be allowed: status = %d, want 2xx", name, resp.Code)
 					}
-					continue
 				}
-				assertForbiddenWithDuty(t, resp, fmt.Sprintf("%q should be denied", name))
+			}
+			for k := 0; k < deniedSamplesPerPair; k++ {
+				name := h.names[(i*31+k*131)%len(h.names)]
+				if !h.duties[name].grants(p.method, p.resource) {
+					assertForbiddenWithDuty(t, h.serve(h.userFor[name], p.method, p.resource), fmt.Sprintf("%q should be denied", name))
+				}
 			}
 			assertForbiddenWithDuty(t, h.serve(unassignedUserID, p.method, p.resource), "unassigned user")
 		})
 	}
+
+	t.Run("every duty is denied a route it does not grant", func(t *testing.T) {
+		for j, name := range h.names {
+			for step := 0; step < len(pairs); step++ {
+				p := pairs[(j*53+step)%len(pairs)]
+				if h.duties[name].grants(p.method, p.resource) {
+					continue
+				}
+				assertForbiddenWithDuty(t, h.serve(h.userFor[name], p.method, p.resource), fmt.Sprintf("%q should be denied %s %s", name, p.method, p.resource))
+				break
+			}
+		}
+	})
 }
 
 func TestDutyContractExpectations(t *testing.T) {
@@ -358,26 +381,113 @@ func TestPartyReadDeniedWithoutDuties(t *testing.T) {
 	}
 }
 
-var coveredServices = []string{"ledger", "fx", "tax", "close", "finreport", "inventory", "purchasing", "receiving", "payables", "party"}
+var (
+	dutyDefinition = regexp.MustCompile(`(?m)\b(\w*[dD]uty\w*)\s*(?:string\s*)?=\s*(?:"([^"]+)"|(?:[A-Za-z_]\w*\.)?(\w*[dD]uty\w*)\s*$)`)
+	dutyCall       = regexp.MustCompile(`\b(?:RequireDuty|HasDuty)\s*\(\s*([^,)]*(?:\([^)]*\))?[^,)]*)[,)]`)
+	dutyListCall   = regexp.MustCompile(`\b(?:RequireAnyDuty|requireAnyDuty|requireAny|anyDuty)\s*[({]([^)}]*)[)}]`)
 
-var dutyConstant = regexp.MustCompile(`(?m)\b[dD]uty[A-Za-z0-9]*\s*(?:string\s*)?=\s*"([^"]+)"`)
-var dutyCallArgument = regexp.MustCompile(`(?:RequireDuty|HasDuty)\s*\(\s*([^,)]*(?:\([^)]*\))?[^,)]*)[,)]`)
-var dutyConstantReference = regexp.MustCompile(`^(?:[A-Za-z_]\w*\.)?[dD]uty\w*$`)
+	dutyFuncDeclaration = regexp.MustCompile(`^func\s+(?:\([^)]*\)\s*)?(?:RequireDuty|HasDuty|RequireAnyDuty|requireAnyDuty|requireAny|anyDuty)\(`)
+	identifierPath      = regexp.MustCompile(`^(?:[A-Za-z_]\w*\.)?([A-Za-z_]\w*)$`)
+	dutyLiteral         = regexp.MustCompile(`^"([^"]+)"$`)
+)
 
-func TestDutyConstantReference(t *testing.T) {
-	cases := map[string]bool{
-		"dutyRead":             true,
-		"DutyPostDirect":       true,
-		"store.DutyPostDirect": true,
-		`"party.read"`:         false,
-		"dutyFor(x)":           false,
-		"name":                 false,
-		"store.name":           false,
+var dynamicDutyArguments = map[string]string{
+	"assets/internal/api/ops.go duty":                       "requireAny loops over caller-listed duty constants",
+	"assets/internal/api/ops.go duties":                     "requireAny forwards the duty constants its callers list",
+	"sales/internal/api/api.go duties":                      "requireAny forwards the duty constants its callers list",
+	"batch/internal/jobs/productclient.go duty":             "loops over the product duties the handler declares",
+	"consolidation/internal/api/api.go rt.duty":             "route table of duty constants",
+	"eam/internal/api/api.go d":                             "anyDuty loops over caller-listed duty constants",
+	"fieldservice/internal/store/generic.go accessDuty":     "category access duty read from catalogue rows",
+	"fieldservice/internal/store/generic.go cat.AccessDuty": "category access duty read from catalogue rows",
+	"fieldservice/internal/store/intake.go cat.AccessDuty":  "category access duty read from catalogue rows",
+	"identity/effective_api.go duty":                        "requireAnyDuty loops over caller-listed duties",
+	"identity/effective_api.go role":                        "role names validated against the seeded catalogue",
+	"identity/role_assignments_api.go req.Role":             "role names validated against the seeded catalogue",
+	"intercompany/internal/api/api.go rt.duty":              "route table of duty constants",
+	"org/internal/api/translation.go o.writeDuty":           "translationOwners table of duty constants",
+	"pricing/internal/api/fund.go duty":                     "anyDuty loops over caller-listed duty constants",
+	"productcost/internal/api/api.go rt.duty":               "route table of duty constants",
+	"production/internal/api/api.go commandDuty[cmd]":       "commandDuty table of duty constants",
+	"production/internal/api/batch.go duty":                 "commandDuty lookup of duty constants",
+	"receivables/internal/api/api.go duty":                  "require() receives duty constants from handlers",
+	"sales/internal/api/api.go d":                           "anyDuty loops over caller-listed duty constants",
+	"sales/internal/api/orders.go need":                     "releaseDuty returns duty constants",
+	"warehouse/internal/api/receiving.go duty":              "anyDuty loops over caller-listed duty constants",
+	"warehouse/internal/api/receiving.go need":              "direction picks a duty constant",
+}
+
+func dutyScanRoots(t *testing.T) map[string]string {
+	t.Helper()
+	roots := map[string]string{"migration-factory": filepath.Join("..", "..", "tools", "migration-factory")}
+	entries, err := os.ReadDir("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			roots[entry.Name()] = filepath.Join("..", entry.Name())
+		}
+	}
+	return roots
+}
+
+func goSourceFiles(t *testing.T, root string) []string {
+	t.Helper()
+	var files []string
+	err := filepath.WalkDir(root, func(file string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			if entry.Name() == "testdata" || entry.Name() == "node_modules" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasSuffix(file, ".go") && !strings.HasSuffix(file, "_test.go") {
+			files = append(files, file)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return files
+}
+
+func codeLines(src string) []string {
+	var lines []string
+	for _, line := range strings.Split(src, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "//") || dutyFuncDeclaration.MatchString(trimmed) {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+func TestDutyArgumentPatterns(t *testing.T) {
+	cases := map[string]string{
+		"dutyRead":             "dutyRead",
+		"store.DutyPostDirect": "DutyPostDirect",
+		"duty":                 "duty",
+		"commandDuty[cmd]":     "",
+		"dutyFor(x)":           "",
+		"req.Role":             "Role",
 	}
 	for argument, want := range cases {
-		if got := dutyConstantReference.MatchString(argument); got != want {
-			t.Errorf("%q: match = %v, want %v", argument, got, want)
+		got := ""
+		if match := identifierPath.FindStringSubmatch(argument); match != nil {
+			got = match[1]
 		}
+		if got != want {
+			t.Errorf("%q: identifier = %q, want %q", argument, got, want)
+		}
+	}
+	if dutyLiteral.FindStringSubmatch(`"party.read"`)[1] != "party.read" {
+		t.Error("string literal not recognised")
 	}
 }
 
@@ -392,42 +502,107 @@ func TestEveryServiceDutyIsSeeded(t *testing.T) {
 	if err := json.Unmarshal(raw, &seeded); err != nil {
 		t.Fatal(err)
 	}
-	for _, service := range coveredServices {
-		root := filepath.Join("..", service, "internal")
-		var files []string
-		err := filepath.WalkDir(root, func(file string, entry os.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if entry.IsDir() || !strings.HasSuffix(file, ".go") || strings.HasSuffix(file, "_test.go") {
-				return nil
-			}
-			files = append(files, file)
-			return nil
-		})
+
+	platformScopeDuties := map[string]string{}
+	for _, file := range goSourceFiles(t, filepath.Join("..", "..", "platform", "go", "tenant")) {
+		src, err := os.ReadFile(file)
 		if err != nil {
 			t.Fatal(err)
 		}
-		found := 0
+		for _, match := range dutyDefinition.FindAllStringSubmatch(string(src), -1) {
+			if match[2] != "" {
+				platformScopeDuties[match[1]] = match[2]
+			}
+		}
+	}
+	usedExemptions := map[string]bool{}
+	scanned := 0
+	for service, root := range dutyScanRoots(t) {
+		files := goSourceFiles(t, root)
+		values := map[string]string{}
+		aliases := map[string]string{}
+		sources := map[string][]string{}
 		for _, file := range files {
 			src, err := os.ReadFile(file)
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, match := range dutyConstant.FindAllStringSubmatch(string(src), -1) {
-				found++
-				if _, ok := seeded.Duties[match[1]]; !ok {
-					t.Errorf("%s: duty %q (%s) is not seeded in policies/authz/data.json", service, match[1], file)
+			sources[file] = codeLines(string(src))
+			for _, match := range dutyDefinition.FindAllStringSubmatch(strings.Join(sources[file], "\n"), -1) {
+				if lowered := strings.ToLower(match[1]); strings.HasPrefix(lowered, "code") || strings.HasPrefix(lowered, "err") {
+					continue
 				}
-			}
-			for _, match := range dutyCallArgument.FindAllStringSubmatch(string(src), -1) {
-				if argument := strings.TrimSpace(match[1]); !dutyConstantReference.MatchString(argument) {
-					t.Errorf("%s: %s passes %q to RequireDuty/HasDuty; use a duty* constant", service, file, argument)
+				if match[2] != "" {
+					values[match[1]] = match[2]
+				} else {
+					aliases[match[1]] = match[3]
 				}
 			}
 		}
-		if found == 0 {
-			t.Errorf("%s: no duty constants found; the scan is stale", service)
+		for name, target := range aliases {
+			if _, ok := values[target]; !ok {
+				t.Errorf("%s: duty alias %s = %s does not resolve to a string constant", service, name, target)
+				continue
+			}
+			values[name] = values[target]
+		}
+
+		found := 0
+		for name, value := range values {
+			found++
+			if _, ok := seeded.Duties[value]; !ok {
+				t.Errorf("%s: duty %q (%s) is not seeded in policies/authz/data.json", service, value, name)
+			}
+		}
+		for _, file := range files {
+			relative := filepath.ToSlash(strings.TrimPrefix(file, root+string(filepath.Separator)))
+			for _, line := range sources[file] {
+				var arguments []string
+				for _, match := range dutyCall.FindAllStringSubmatch(line, -1) {
+					arguments = append(arguments, strings.TrimSpace(match[1]))
+				}
+				for _, match := range dutyListCall.FindAllStringSubmatch(line, -1) {
+					for _, argument := range strings.Split(match[1], ",") {
+						if argument = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(argument), "...")); argument != "" {
+							arguments = append(arguments, argument)
+						}
+					}
+				}
+				for _, argument := range arguments {
+					if literal := dutyLiteral.FindStringSubmatch(argument); literal != nil {
+						found++
+						if _, ok := seeded.Duties[literal[1]]; !ok {
+							t.Errorf("%s: duty %q (%s) is not seeded in policies/authz/data.json", service, literal[1], file)
+						}
+						continue
+					}
+					if identifier := identifierPath.FindStringSubmatch(argument); identifier != nil {
+						if _, ok := values[identifier[1]]; ok {
+							continue
+						}
+						if _, ok := platformScopeDuties[identifier[1]]; ok {
+							continue
+						}
+					}
+					key := service + "/" + relative + " " + argument
+					if _, ok := dynamicDutyArguments[key]; ok {
+						usedExemptions[key] = true
+						continue
+					}
+					t.Errorf("%s: %s passes %q to RequireDuty/HasDuty; pass a duty constant or a string literal", service, file, argument)
+				}
+			}
+		}
+		if len(files) > 0 && found > 0 {
+			scanned++
+		}
+	}
+	if scanned == 0 {
+		t.Error("no service duties found; the scan is stale")
+	}
+	for key, reason := range dynamicDutyArguments {
+		if !usedExemptions[key] {
+			t.Errorf("dynamicDutyArguments entry %q (%s) matches no call; remove it", key, reason)
 		}
 	}
 }

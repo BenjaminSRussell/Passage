@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import policyJson from "../../../../policies/authz/data.json?raw";
 import { hasEffectiveDutyScope, routeDuty } from "../shell/dutyGate";
 import { loadModules } from "./registry";
-import { UNSEEDED_DUTIES } from "./unseededDuties";
 
 describe("module registry", () => {
   it("discovers modules with unique ids and sorted titles", () => {
@@ -29,26 +28,45 @@ describe("module registry", () => {
       .filter((m) => m.nav.some((n) => n.duty !== undefined))
       .flatMap((m) =>
         m.routes
-          .filter((r) => r.path !== undefined && r.path !== "*" && routeDuty(r) === undefined && !hasEffectiveDutyScope(r.path, modules))
+          .filter(
+            (r) =>
+              r.path !== undefined &&
+              r.path !== "*" &&
+              routeDuty(r) === undefined &&
+              !hasEffectiveDutyScope(r.path, modules),
+          )
           .map((r) => `${m.id} ${r.path}`),
       );
     expect(unguarded).toEqual([]);
   });
 
-  describe("nav duties", () => {
+  describe("declared duties", () => {
     const policy = JSON.parse(policyJson) as {
-      duties: Record<string, unknown>;
+      duties: Record<string, { service_only?: boolean }>;
     };
-    const declared = new Set(loadModules().flatMap((m) => m.nav.flatMap((n) => (n.duty === undefined ? [] : [n.duty]))));
+    const modules = loadModules();
+    const navDuties = new Set(
+      modules.flatMap((m) =>
+        m.nav.flatMap((n) => (n.duty === undefined ? [] : [n.duty])),
+      ),
+    );
+    const routeDuties = new Set(
+      modules.flatMap((m) => m.routes.flatMap((r) => routeDuty(r) ?? [])),
+    );
 
-    it("are seeded in policies/authz/data.json unless listed as unseeded", () => {
-      const unknown = [...declared].filter((d) => !(d in policy.duties) && !UNSEEDED_DUTIES.includes(d));
-      expect(unknown).toEqual([]);
+    it("seed every nav duty in policies/authz/data.json", () => {
+      expect([...navDuties].filter((d) => !(d in policy.duties))).toEqual([]);
     });
 
-    it("keep the unseeded list honest", () => {
-      const stale = UNSEEDED_DUTIES.filter((d) => d in policy.duties || !declared.has(d));
-      expect(stale).toEqual([]);
+    it("seed every route handle duty in policies/authz/data.json", () => {
+      expect([...routeDuties].filter((d) => !(d in policy.duties))).toEqual([]);
+    });
+
+    it("never gate a nav item or route on a service_only duty", () => {
+      const gated = [...navDuties, ...routeDuties].filter(
+        (d) => policy.duties[d]?.service_only === true,
+      );
+      expect(gated).toEqual([]);
     });
   });
 });

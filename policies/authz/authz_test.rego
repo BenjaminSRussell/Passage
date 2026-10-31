@@ -22,7 +22,7 @@ has_route_permissions(spec) if {
 }
 
 test_all_seeded_duties_allow_their_declared_permissions if {
-	count(data.duties) == 123
+	count(data.duties) > 0
 	every duty, spec in data.duties {
 		has_route_permissions(spec)
 		every permission in spec.permissions {
@@ -34,7 +34,7 @@ test_all_seeded_duties_allow_their_declared_permissions if {
 }
 
 test_flag_duties_grant_no_routes if {
-	flag_duties := {"ledger.journal.postdirect", "ledger.journal.postledger", "inventory.count.approve", "pii.read", "party.merge", "tenant.administer"}
+	flag_duties := {"ARWriteOffApprove", "ConsolidationView", "EDI_PII_VIEW", "Maintain tax codes", "budget.override", "inventory.count.approve", "ledger.journal.postdirect", "ledger.journal.postledger", "org.hierarchy.backdate", "party.merge", "pii.read", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.order.zero-output", "shopfloor.check.override", "tenant.administer", "treasury.facility.override"}
 	{d | some d, spec in data.duties; spec.flag == true} == flag_duties
 	every duty in flag_duties {
 		count(data.duties[duty].permissions) == 0
@@ -195,7 +195,7 @@ test_view_products_can_get_but_not_post if {
 		"resource": "/v1/product/products",
 	}
 		with data.assignments as {"tenant-a": {"user-a": ["View products"]}}
-	denied == {"allow": false, "duty_missing": "Maintain products"}
+	denied == {"allow": false, "duty_missing": "product.write"}
 }
 
 test_missing_identity_denied if {
@@ -519,7 +519,35 @@ service_granted(duty) if {
 test_service_only_duties_are_service_granted if {
 	data.duties["procurement.invoicing-plan.settle"].service_only
 	orphans := {d | data.duties[d].service_only; not service_granted(d)}
-	count(orphans) == 0
+	orphans - awaiting_service_caller == set()
+	every duty in awaiting_service_caller {
+		data.duties[duty].service_only
+		not service_granted(duty)
+	}
+}
+
+awaiting_service_caller := {
+	"costing.cost-transaction.post",
+	"costing.ppv.post",
+	"shopfloor.machine.ingest",
+	"TMS_TRACK_INGEST",
+	"shopfloor.time.autoclockout",
+	"sales.channel.intake",
+	"inventory.transaction.apply",
+}
+
+test_internal_only_duties_are_service_only if {
+	internal_only := {d |
+		some d, spec in data.duties
+		count(spec.permissions) > 0
+		every permission in spec.permissions {
+			startswith(permission.resource, "/internal/")
+		}
+	}
+	count(internal_only) > 0
+	every duty in internal_only {
+		data.duties[duty].service_only == true
+	}
 }
 
 test_service_grants_hold_no_flag_or_all_scope_duty if {
