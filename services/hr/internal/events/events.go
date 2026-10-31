@@ -32,7 +32,10 @@ var (
 	// recorded ATTENDED with PASS and its skills and certificate are written
 	// (8.42.5, BR-42.9); wave-45 dispatch reads the skills, notifications the
 	// certificate.
-	CourseCompleted = events.Type(Context, "course", "completed", 1)
+	CourseCompleted          = events.Type(Context, "course", "completed", 1)
+	CompensationChanged      = events.Type(Context, "compensation", "changed", 1)
+	CompensationCycleApplied = events.Type(Context, "compensationcycle", "applied", 1)
+	RequisitionChanged       = events.Type(Context, "requisition", "changed", 1)
 	// IncidentChanged is written when an incident is reported or moves to
 	// UNDER_REVIEW or CLOSED (FR-42.16). It carries ids, codes and counts only:
 	// no worker name and none of the sealed medical details.
@@ -48,7 +51,8 @@ var (
 // All lists every event type the service publishes (asyncapi.yaml).
 func All() []string {
 	return []string{WorkerCreated, EmploymentChanged, PositionAssignmentChanged, AbsenceApproved, BenefitEnrollmentChanged,
-		WorkerSkillChanged, CertificationIssued, CourseCompleted, IncidentChanged, LoanedItemChanged, ChecklistChanged}
+		WorkerSkillChanged, CertificationIssued, CourseCompleted, CompensationChanged, CompensationCycleApplied, RequisitionChanged,
+		IncidentChanged, LoanedItemChanged, ChecklistChanged}
 }
 
 type IncidentChangedData struct {
@@ -84,9 +88,14 @@ type ChecklistChangedData struct {
 	TaskCount     int    `json:"task_count"`
 }
 
-// ActionHire is the employment.changed action for a new employment. Transfer,
-// termination and the other personnel actions arrive with FR-42.5.
-const ActionHire = "HIRE"
+// employment.changed actions: a new employment, a transfer between positions,
+// a termination, and a compensation change (FR-42.5).
+const (
+	ActionHire       = "HIRE"
+	ActionTransfer   = "TRANSFER"
+	ActionTerminate  = "TERMINATE"
+	ActionCompChange = "COMP_CHANGE"
+)
 
 // AbsenceApprovedData is the 8.42.5 contract (workerId, planId, from, to,
 // hours) in the kernel's snake_case payload style. The PRD's hours becomes
@@ -207,4 +216,29 @@ type CourseCompletedData struct {
 	CompletedOn     string             `json:"completed_on"`
 	Skills          []CourseSkillAward `json:"skills"`
 	CertificationID *string            `json:"certification_id"`
+}
+
+type CompensationChangedData struct {
+	ID           string  `json:"id"`
+	WorkerID     string  `json:"worker_id"`
+	EmploymentID string  `json:"employment_id"`
+	PlanID       string  `json:"plan_id"`
+	Amount       string  `json:"amount"`
+	Currency     string  `json:"currency"`
+	ValidFrom    string  `json:"valid_from"`
+	ValidTo      *string `json:"valid_to"`
+}
+
+type CompensationCycleAppliedData struct {
+	CycleID       string   `json:"cycle_id"`
+	EffectiveDate string   `json:"effective_date"`
+	ActionIDs     []string `json:"action_ids"`
+}
+
+type RequisitionChangedData struct {
+	ID         string `json:"id"`
+	PositionID string `json:"position_id"`
+	Headcount  int    `json:"headcount"`
+	Status     string `json:"status"`
+	Filled     int    `json:"filled"`
 }

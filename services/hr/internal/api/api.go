@@ -50,33 +50,34 @@ var (
 
 // API holds the store and the counters rendered at /metrics.
 type API struct {
-	store            *store.Postgres
-	workersCreated   atomic.Int64
-	employments      atomic.Int64
-	assignments      atomic.Int64
-	positionsCreated atomic.Int64
-	piiReveals       atomic.Int64
-	piiMaskedReads   atomic.Int64
-	asOfQueries      atomic.Int64
-	plansCreated     atomic.Int64
-	accrualRuns      atomic.Int64
-	requestsCreated  atomic.Int64
-	decisions        atomic.Int64
-	yearCloses       atomic.Int64
-	benefitPlans     atomic.Int64
-	simulations      atomic.Int64
-	enrollments      atomic.Int64
-	enrollmentsEnded atomic.Int64
-	skillsCreated    atomic.Int64
-	skillRatings     atomic.Int64
-	certsIssued      atomic.Int64
-	skillSearches    atomic.Int64
-	coursesCreated   atomic.Int64
-	sessionsCreated  atomic.Int64
-	registrations    atomic.Int64
-	cancellations    atomic.Int64
-	passes           atomic.Int64
-
+	store                *store.Postgres
+	workersCreated       atomic.Int64
+	employments          atomic.Int64
+	assignments          atomic.Int64
+	positionsCreated     atomic.Int64
+	piiReveals           atomic.Int64
+	piiMaskedReads       atomic.Int64
+	asOfQueries          atomic.Int64
+	plansCreated         atomic.Int64
+	accrualRuns          atomic.Int64
+	requestsCreated      atomic.Int64
+	decisions            atomic.Int64
+	yearCloses           atomic.Int64
+	benefitPlans         atomic.Int64
+	simulations          atomic.Int64
+	enrollments          atomic.Int64
+	enrollmentsEnded     atomic.Int64
+	skillsCreated        atomic.Int64
+	skillRatings         atomic.Int64
+	certsIssued          atomic.Int64
+	skillSearches        atomic.Int64
+	coursesCreated       atomic.Int64
+	sessionsCreated      atomic.Int64
+	registrations        atomic.Int64
+	cancellations        atomic.Int64
+	passes               atomic.Int64
+	personnel            personnelCounters
+	purgeEnabled         bool
 	incidentsReported    atomic.Int64
 	incidentTransitions  atomic.Int64
 	oshaExtracts         atomic.Int64
@@ -145,6 +146,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyLearningAdmin)).Get("/v1/hr/courses/sessions/{id}/registrations", sessionRoute(a.listRegistrations))
 	r.With(authz.RequireDuty(dutyEssLearning)).Post("/v1/hr/courses/sessions/{id}/registrations", sessionRoute(a.registerForSession))
 	r.With(authz.RequireDuty(dutyLearningAdmin)).Post("/v1/hr/courses/sessions/{id}/complete", sessionRoute(a.completeSession))
+	a.registerPersonnel(r)
 	r.With(authz.RequireDuty(dutyMssApprove)).Post("/v1/hr/courses/registrations/{id}/approve", registrationRoute(a.approveRegistration))
 	r.With(authz.RequireDuty(dutyEssLearning)).Post("/v1/hr/courses/registrations/{id}/cancel", registrationRoute(a.cancelRegistration))
 	r.With(authz.RequireDuty(dutyIncidentReport)).Post("/v1/hr/incidents", a.reportIncident)
@@ -222,6 +224,7 @@ func (a *API) Metrics() http.Handler {
 		counter("hr_course_registrations_total", "Course registrations placed (confirmed, waitlisted or requested); repeats are not counted.", a.registrations.Load())
 		counter("hr_course_cancellations_total", "Course registrations canceled; repeated cancels are not counted.", a.cancellations.Load())
 		counter("hr_course_passes_total", "Completions newly recorded with a PASS result.", a.passes.Load())
+		a.personnel.write(counter)
 		counter("hr_incidents_reported_total", "Incidents reported; idempotent replays are not counted.", a.incidentsReported.Load())
 		counter("hr_incident_transitions_total", "Incident status changes (review, close).", a.incidentTransitions.Load())
 		counter("hr_osha_extracts_total", "OSHA extracts produced.", a.oshaExtracts.Load())

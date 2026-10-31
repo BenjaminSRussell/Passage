@@ -26,6 +26,7 @@ const (
 	CodeNotInvited             = "HCM-QST-NOT-INVITED"
 	CodeAlreadyAnswered        = "HCM-QST-ANSWERED"
 	CodeResultsOpen            = "HCM-QST-NOT-CLOSED"
+	CodeQuestionnaireScope     = "HCM-QST-SCOPE"
 
 	maxSessions = 10000
 )
@@ -327,8 +328,9 @@ func eligibleEntity(emps []benEmployment, rule domain.Rule) *string {
 //
 // On an anonymous questionnaire the response marker and the answer session are
 // written in two separate transactions, and the session gets a random v4 id and
-// only a date, no worker id: nothing in the session row (xmin, id order, time)
-// links it to the marker. Answers are fully validated before the marker is
+// only a date, no worker id: this stops the application from linking them. Anyone
+// with raw database access can still pair them by xmin or ctid order; that is out
+// of scope (see NOT-IMPLEMENTED.md). Answers are fully validated before the marker is
 // written, so a failure between the two transactions needs a database outage;
 // the worker then cannot answer again (no delete grant), which is the safe side.
 func (s *Postgres) SubmitAnswers(ctx context.Context, scheduleID, workerID string, raw map[string]json.RawMessage) error {
@@ -442,6 +444,15 @@ func (s *Postgres) QuestionnaireResults(ctx context.Context, scheduleID string, 
 		v, err := s.loadScheduleView(ctx, tx, p.TenantID, scheduleID)
 		if err != nil {
 			return err
+		}
+		if v.Questionnaire.Anonymous {
+			all, err := scopeIsAll(ctx, tx)
+			if err != nil {
+				return err
+			}
+			if !all {
+				return problem(http.StatusForbidden, CodeQuestionnaireScope, "results of an anonymous questionnaire are shown only to callers with access to every legal entity, so entity-scoped views cannot be subtracted to expose a small group")
+			}
 		}
 		if v.Questionnaire.Anonymous && v.Status != "CLOSED" {
 			return problem(http.StatusConflict, CodeResultsOpen, "results of an anonymous questionnaire are released after it closes on "+v.ClosesAt.Format(time.RFC3339))

@@ -155,7 +155,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
-	a := api.New(store.New(pool, sealer, depth))
+	a := api.New(store.New(pool, sealer, depth)).EnableRetentionPurge(getenv("HR_RETENTION_PURGE_ENABLED") == "true")
 	router := httpx.NewRouter()
 	a.Register(router)
 	admin := http.NewServeMux()
