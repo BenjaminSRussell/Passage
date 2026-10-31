@@ -9,6 +9,8 @@ import { CourseDetailPage } from "./CourseDetailPage";
 import { CourseSessionPage } from "./CourseSessionPage";
 import { CoursesPage } from "./CoursesPage";
 import { ExpiringCertificationsPage } from "./ExpiringCertificationsPage";
+import { MyProfilePage } from "./MyProfilePage";
+import { MyTeamPage } from "./MyTeamPage";
 import { NewBenefitPlanPage } from "./NewBenefitPlanPage";
 import { NewAbsencePlanPage } from "./NewAbsencePlanPage";
 import { NewCoursePage } from "./NewCoursePage";
@@ -19,6 +21,7 @@ import { PositionDetailPage } from "./PositionDetailPage";
 import { PositionsPage } from "./PositionsPage";
 import { SkillSearchPage } from "./SkillSearchPage";
 import { SkillsPage } from "./SkillsPage";
+import { TeamMemberPage } from "./TeamMemberPage";
 import { WorkerDetailPage } from "./WorkerDetailPage";
 import { WorkersPage } from "./WorkersPage";
 
@@ -50,6 +53,9 @@ const hr: PassageModule = {
     { path: "/hr/courses/new", element: createElement(NewCoursePage), handle: { title: "New course" } },
     { path: "/hr/courses/sessions/:id", element: createElement(CourseSessionPage), handle: { title: "Course session" } },
     { path: "/hr/courses/:id", element: createElement(CourseDetailPage), handle: { title: "Course" } },
+    { path: "/hr/my/profile", element: createElement(MyProfilePage), handle: { title: "My profile", duty: "EssBase" } },
+    { path: "/hr/my/team", element: createElement(MyTeamPage), handle: { title: "My team", duty: "MssBase" } },
+    { path: "/hr/my/team/:id", element: createElement(TeamMemberPage), handle: { title: "Team member", duty: "MssBase" } },
   ],
   nav: [
     { label: "Workers", to: "/hr/workers", duty: "HcmWorkerInquire" },
@@ -61,6 +67,8 @@ const hr: PassageModule = {
     { label: "Skill search", to: "/hr/skills/search", duty: "HcmOrgInquire" },
     { label: "Expiring certifications", to: "/hr/certifications/expiring", duty: "HcmWorkerInquire" },
     { label: "Courses", to: "/hr/courses", duty: "HcmLearningAdmin" },
+    { label: "My profile", to: "/hr/my/profile", duty: "EssBase" },
+    { label: "My team", to: "/hr/my/team", duty: "MssBase" },
   ],
 };
 

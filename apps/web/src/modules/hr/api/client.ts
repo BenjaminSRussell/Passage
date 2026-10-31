@@ -169,7 +169,7 @@ async function toError(res: Response): Promise<HrApiError> {
   return new HrApiError(res.status, code, message, fields);
 }
 
-async function send<T>(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<T> {
+export async function send<T>(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
   if (init.body !== undefined) headers.set("Content-Type", "application/json");
@@ -178,7 +178,7 @@ async function send<T>(path: string, init: RequestInit = {}, signal?: AbortSigna
   return (await res.json()) as T;
 }
 
-async function page<T>(path: string, signal?: AbortSignal): Promise<Page<T>> {
+export async function page<T>(path: string, signal?: AbortSignal): Promise<Page<T>> {
   const body = await send<Page<T>>(path, {}, signal);
   if (!Array.isArray(body.items)) throw new HrApiError(0, "COM-0001", "The response has no items");
   return body;
