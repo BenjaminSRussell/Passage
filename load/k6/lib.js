@@ -1,4 +1,4 @@
-// Pure helpers for scenarios.js. No k6 imports, so `node --test load/k6` can
+// Pure helpers for scenarios.js. No k6 imports, so `node --test load/k6/*.test.mjs` can
 // exercise them (lib.test.mjs).
 
 // k6 thresholds from the SLO table. Latency SLOs map to tagged request metrics
@@ -38,6 +38,16 @@ export function soakFraction(slo, scale) {
   if (!slo.soak || !(slo.soak.fraction > 0)) throw new Error('slo.json has no soak profile');
   if (!(scale > 0)) throw new Error('LOAD_SCALE must be positive');
   return slo.soak.fraction * scale;
+}
+
+// Arrival rate of a constant-arrival-rate scenario at a load fraction (LOAD_SCALE,
+// or the soak fraction). perUnit is the full-load rate, already above the target.
+// Rounded up, never to nearest: rounding down (34 x 0.1 = 3.4 -> 3) would generate
+// less than the scaled target the checker applies (90k lines/h against 100k), so a
+// perfect backend would fail. The 1e-9 keeps float noise (17.000000000000004) from
+// adding an iteration.
+export function arrivalRate(perUnit, fraction) {
+  return Math.max(1, Math.ceil(perUnit * fraction - 1e-9));
 }
 
 export function uuid() {

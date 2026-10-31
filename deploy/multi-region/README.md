@@ -37,6 +37,14 @@ that mirrors every Passage topic into it. DNS fails over with a 60 s TTL. Active
   offsets are read from and the offsets command. Queries run through `psql` in read-only transactions with
   the libpq `PG*` environment. After failover, `--baseline baseline.json` reads the hash at each tenant's
   baseline sequence (`ledger.checkpoint_sql`), which `verify` needs. Tests: `gameday/test_collect.py`.
+- `gameday/score.py` — game-day step 7 as a gate (AC-50.3): RTO (fence to DNS verified) and RPO (target lag at
+  fence) from a timeline JSON against `failover.rtoTargetMinutes` / `failover.rpoTargetSeconds` of the chart
+  (optionally merged with a region file), plus the `baseline.py verify --report` result. Tests: `gameday/test_score.py`.
+- `gameday/local_drill.py` — the toolchain end to end on one machine: a real Postgres primary and streaming
+  standby (`--mode sync|async`), a hash-chain writer, `collect.py`/`baseline.py` baseline, immediate stop of
+  the primary as the fence, promotion, verify, `score.py`, and a count of acknowledged commits missing from the
+  new primary (`--cut-replication` stalls the link first). It is not a region failover: no CNPG, Kafka, MM2,
+  Temporal or DNS. Tests: `gameday/test_local_drill.py` (skipped without the PostgreSQL binaries).
 - `chaos/` — Chaos Mesh `PodChaos` experiments for the PRD 9.50.9 chaos row: one Kafka broker of
   `deploy/kafka`'s cluster, and the primary of this chart's CNPG cluster, each with a 5 min recovery budget
   and a runbook link. Run them in the PRIMARY region during a campaign; `chaos/test_chaos.py` checks the

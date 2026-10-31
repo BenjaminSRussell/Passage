@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -219,7 +220,13 @@ class TestRunSuite(unittest.TestCase):
             with self.subTest(process=p["id"]):
                 self.assertEqual(p["assertion"], "SKIPPED" if p["id"] in unrouted else "UNVERIFIED")
         sent = {c[1] for c in svc.calls}
-        self.assertNotIn("https://h/api/v1/payables/payment-runs", sent, "a step with no route was sent")
+        # No step marked unverified in the fixture was sent (placeholders match any one path segment).
+        unverified = [s["path"] for p in fixture()["processes"] for s in p["steps"] if "unverified" in s]
+        self.assertTrue(unverified, "fixture has no unverified step left; this check needs another example")
+        for path in unverified:
+            pattern = re.compile("https://h" + re.sub(r"\\\{[^}]*\\\}", "[^/]+", re.escape(path)))
+            with self.subTest(path=path):
+                self.assertFalse([u for u in sent if pattern.fullmatch(u)], "a step with no route was sent")
 
     def test_real_fixture_cannot_pass_while_routes_are_missing(self) -> None:
         fx = fixture()

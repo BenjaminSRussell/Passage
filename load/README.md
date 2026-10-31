@@ -53,7 +53,7 @@ k6 run --env BASE_URL=https://api.perf.passage.dev --env TOKEN="$TOKEN" --env PO
   --env CAMPAIGN_ID=c-2026-10 --summary-export=results/summary.json load/k6/scenarios.js
 python3 load/tools/check_campaign.py results/summary.json
 python3 -m unittest discover -s load/tools
-node --test load/k6
+node --test load/k6/*.test.mjs
 
 # soak, 24 h at 50% (memory series exported per service as timestamp,bytes CSV)
 k6 run --env BASE_URL=https://api.perf.passage.dev --env TOKEN="$TOKEN" --env POOL_FILE=/data/pool.json \
