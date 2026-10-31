@@ -347,11 +347,21 @@ func TestCurrencyRounding_DeleteRefusalsAndTenantIsolation(t *testing.T) {
 func TestCurrencyRounding_TenantAdminWithoutClaimWritesLegalEntityRows(t *testing.T) {
 	s, ctx, _ := lifecycleStore(t)
 	a := mustCreate(t, s, ctx, newEntity("EA"))
-	admin := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), UserID: "admin", Duties: map[string]struct{}{store.DutyReference: {}}})
+	admin := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), UserID: "admin", Duties: map[string]struct{}{store.DutyReference: {}, tenant.DutyTenantAdmin: {}}})
 	mustPut(t, s, admin, rule(t, "CHF", "cash", "1", "up", &a.ID))
 	assertRule(t, mustResolve(t, s, ctx, "CHF", "cash", a.ID), "1", domain.Up, store.RoundingSourceLegalEntity)
 	if err := s.DeleteCurrencyRounding(admin, "CHF", "cash", &a.ID); err != nil {
 		t.Fatal(err)
+	}
+	assertRule(t, mustResolve(t, s, ctx, "CHF", "cash", a.ID), "0.01", domain.HalfEven, store.RoundingSourceDefault)
+}
+
+func TestCurrencyRounding_NoClaimAndDutyWithoutTenantAdminCannotWriteLegalEntityRows(t *testing.T) {
+	s, ctx, _ := lifecycleStore(t)
+	a := mustCreate(t, s, ctx, newEntity("EB"))
+	noAdmin := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), UserID: "admin", Duties: map[string]struct{}{store.DutyReference: {}}})
+	if _, _, err := s.PutCurrencyRounding(noAdmin, rule(t, "CHF", "cash", "1", "up", &a.ID)); err == nil {
+		t.Fatal("a caller without tenant.administer wrote a legal-entity rounding row")
 	}
 	assertRule(t, mustResolve(t, s, ctx, "CHF", "cash", a.ID), "0.01", domain.HalfEven, store.RoundingSourceDefault)
 }

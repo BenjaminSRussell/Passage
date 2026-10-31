@@ -110,10 +110,11 @@ func (s *Postgres) GetDescriptionTemplate(ctx context.Context, id string) (Descr
 
 // mayWriteDescription is the fail-closed write rule: a legal-entity template
 // needs its entity inside the caller's scope; a tenant template is tenant-level
-// reference data and only a caller with no legal-entity claim may write it.
+// reference data and only a tenant administrator (no legal-entity claim and the
+// tenant.administer duty) may write it.
 func mayWriteDescription(p tenant.Principal, in DescriptionTemplate) bool {
 	if in.Scope == ScopeTenant {
-		return p.LegalEntityID == ""
+		return tenant.IsTenantAdmin(p)
 	}
 	return in.LegalEntityID != nil && tenant.InLegalEntityScope(p, *in.LegalEntityID)
 }

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -28,6 +29,7 @@ const (
 	dutyRoles         = "Maintain security roles"
 	dutyAllScope      = "org.switcher.all_scope"
 	dutyUsers         = "Maintain users"
+	dutyTenantAdmin   = "tenant.administer"
 )
 
 type caller struct {
@@ -102,7 +104,7 @@ func (f *adminFixture) operatorCaller() caller {
 }
 
 func (f *adminFixture) adminOf(tenantID string, duties ...string) caller {
-	return caller{tenantID: tenantID, user: "admin-1", duties: append([]string{dutyAllScope}, duties...)}
+	return caller{tenantID: tenantID, user: "admin-1", duties: append([]string{dutyAllScope, dutyTenantAdmin}, duties...)}
 }
 
 func decode[T any](t *testing.T, rec *httptest.ResponseRecorder, want int) T {
@@ -671,7 +673,7 @@ func TestRoleAssignmentGuards(t *testing.T) {
 
 	t.Run("Maintain tenants is grantable only in the operator tenant", func(t *testing.T) {
 		wantProblem(t, assign(c, map[string]any{"userId": userID, "role": dutyTenants}), http.StatusForbidden, "AUTH-0003")
-		operator := caller{tenantID: f.operator, user: "operator-1", duties: []string{dutyRoles, dutyAllScope}}
+		operator := caller{tenantID: f.operator, user: "operator-1", duties: []string{dutyRoles, dutyAllScope, dutyTenantAdmin}}
 		decode[assignmentRow](t, assign(operator, map[string]any{"userId": userID, "role": dutyTenants}), http.StatusCreated)
 	})
 
@@ -764,10 +766,167 @@ func TestRoleAssignmentGuards(t *testing.T) {
 	})
 }
 
+func TestTenantAdminDutyGatesTenantWideWrites(t *testing.T) {
+	f := newAdminFixture(t)
+	withoutAdmin := caller{tenantID: f.tenantA, user: "admin-1", duties: []string{dutyLegalEntities, dutyRoles}}
+	scopedWithBoth := caller{tenantID: f.tenantA, legalEntity: "10000000-0000-0000-0000-000000000001", user: "admin-1", duties: []string{dutyLegalEntities, dutyRoles, dutyTenantAdmin}}
+	tenantAdmin := f.adminOf(f.tenantA, dutyLegalEntities, dutyRoles)
+	newEntity := map[string]any{"code": "NEW-1", "displayName": "New"}
+	grant := func(role string) map[string]any { return map[string]any{"userId": userID, "role": role} }
+
+	t.Run("no claim and the specific duty without tenant.administer is refused", func(t *testing.T) {
+		wantProblem(t, f.do(withoutAdmin, http.MethodPost, "/v1/legal-entities", newEntity), http.StatusForbidden, "AUTH-0003")
+		rec := f.do(withoutAdmin, http.MethodPost, "/v1/authz/assignments", grant("View vendors"))
+		wantProblem(t, rec, http.StatusForbidden, "AUTH-0003")
+		if !strings.Contains(rec.Body.String(), dutyTenantAdmin) {
+			t.Fatalf("refusal does not name %s: %s", dutyTenantAdmin, rec.Body.String())
+		}
+	})
+
+	t.Run("tenant.administer with the specific duty works", func(t *testing.T) {
+		decode[map[string]any](t, f.do(tenantAdmin, http.MethodPost, "/v1/legal-entities", newEntity), http.StatusCreated)
+		decode[assignmentRow](t, f.do(tenantAdmin, http.MethodPost, "/v1/authz/assignments", grant("View vendors")), http.StatusCreated)
+	})
+
+	t.Run("a legal-entity-scoped caller holding both is refused", func(t *testing.T) {
+		wantProblem(t, f.do(scopedWithBoth, http.MethodPost, "/v1/legal-entities", map[string]any{"code": "NEW-2", "displayName": "New"}), http.StatusForbidden, "AUTH-0003")
+		wantProblem(t, f.do(scopedWithBoth, http.MethodPost, "/v1/authz/assignments", grant(dutyTenantAdmin)), http.StatusForbidden, "AUTH-0003")
+	})
+
+	t.Run("ending a tenant-wide or tenant.administer assignment needs tenant.administer, and never the last one", func(t *testing.T) {
+		scopedWithoutAdmin := caller{tenantID: f.tenantA, legalEntity: "10000000-0000-0000-0000-000000000001", user: "admin-1", duties: []string{dutyRoles}}
+		end := func(c caller, id string) *httptest.ResponseRecorder {
+			return f.do(c, http.MethodDelete, "/v1/authz/assignments/"+id, nil)
+		}
+		secondUser := testkit.TenantID(70)
+		if _, err := f.admin.Exec(context.Background(), `insert into identity_users (tenant_id, user_id, idp_subject) values ($1, $2, 'subject-second')`, f.tenantA, secondUser); err != nil {
+			t.Fatal(err)
+		}
+		first := decode[assignmentRow](t, f.do(tenantAdmin, http.MethodPost, "/v1/authz/assignments", grant(dutyTenantAdmin)), http.StatusCreated)
+		second := decode[assignmentRow](t, f.do(tenantAdmin, http.MethodPost, "/v1/authz/assignments", map[string]any{"userId": secondUser, "role": dutyTenantAdmin}), http.StatusCreated)
+		for _, c := range []caller{withoutAdmin, scopedWithBoth, scopedWithoutAdmin} {
+			wantProblem(t, end(c, first.AssignmentID), http.StatusNotFound, "IDN-ASSIGNMENT-NOT-FOUND")
+		}
+		decode[assignmentRow](t, end(tenantAdmin, first.AssignmentID), http.StatusOK)
+		wantProblem(t, end(tenantAdmin, second.AssignmentID), http.StatusConflict, "IDN-LAST-TENANT-ADMIN")
+	})
+
+	t.Run("tenant.administer is grantable only by a tenant administrator and is never legal-entity scoped", func(t *testing.T) {
+		scopedWithoutAdmin := caller{tenantID: f.tenantA, legalEntity: "10000000-0000-0000-0000-000000000001", user: "admin-1", duties: []string{dutyRoles}}
+		scoped := map[string]any{"userId": userID, "role": dutyTenantAdmin, "legalEntityId": scopedWithoutAdmin.legalEntity}
+		wantProblem(t, f.do(tenantAdmin, http.MethodPost, "/v1/authz/assignments", scoped), http.StatusBadRequest, "COM-0001")
+		rec := f.do(withoutAdmin, http.MethodPost, "/v1/authz/assignments", grant(dutyTenantAdmin))
+		wantProblem(t, rec, http.StatusForbidden, "AUTH-0003")
+		if !strings.Contains(rec.Body.String(), "only be granted by a tenant administrator") {
+			t.Fatalf("refusal does not explain the escalation rule: %s", rec.Body.String())
+		}
+		wantProblem(t, f.do(scopedWithoutAdmin, http.MethodPost, "/v1/authz/assignments", grant(dutyTenantAdmin)), http.StatusForbidden, "AUTH-0003")
+		if got := count(t, f.app, f.tenantA, "", `select count(*) from identity_role_assignments where role = 'tenant.administer' and legal_entity_id is not null`); got != 0 {
+			t.Fatalf("a refused grant left %d rows", got)
+		}
+	})
+}
+
+func TestOperatorGrantsTenantAdministrator(t *testing.T) {
+	f := newAdminFixture(t)
+	adminUser, subject := testkit.TenantID(71), "subject-initial-admin"
+	holders := func(tenantID string) (n int) {
+		if err := f.admin.QueryRow(context.Background(), `select count(*) from identity_role_assignments where tenant_id = $1 and role = 'tenant.administer' and legal_entity_id is null and valid_to is null`, tenantID).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	t.Run("creating a tenant seeds its initial administrator", func(t *testing.T) {
+		created := decode[tenantRow](t, f.do(f.operatorCaller(), http.MethodPost, "/v1/tenants", map[string]string{"realmName": "seeded-co", "displayName": "Seeded", "adminUserId": adminUser, "adminIdpSubject": subject}), http.StatusCreated)
+		if got := holders(created.TenantID); got != 1 {
+			t.Fatalf("new tenant has %d tenant administrators, want 1", got)
+		}
+		if got := count(t, f.app, f.operator, "", `select count(*) from identity_audit where entity_type = 'tenant' and entity_id = '`+created.TenantID+`' and action = 'tenant.created'`); got != 1 {
+			t.Fatalf("operator audit rows = %d, want 1", got)
+		}
+	})
+
+	t.Run("a half-given initial administrator is refused", func(t *testing.T) {
+		wantProblem(t, f.do(f.operatorCaller(), http.MethodPost, "/v1/tenants", map[string]string{"realmName": "half-co", "displayName": "Half", "adminUserId": adminUser}), http.StatusBadRequest, "COM-0001")
+	})
+
+	t.Run("the operator recovers an existing tenant", func(t *testing.T) {
+		path := "/v1/tenants/" + f.tenantA + "/admins"
+		body := map[string]string{"userId": userID, "reason": "rollout of tenant.administer"}
+		granted := decode[assignmentRow](t, f.do(f.operatorCaller(), http.MethodPost, path, body), http.StatusCreated)
+		if granted.Role != dutyTenantAdmin || granted.LegalEntityID != "" || holders(f.tenantA) != 1 {
+			t.Fatalf("granted = %+v", granted)
+		}
+		if got := count(t, f.app, f.operator, "", `select count(*) from identity_audit where action = 'tenant.administrator-granted' and entity_id = '`+f.tenantA+`'`); got != 1 {
+			t.Fatalf("operator audit rows = %d, want 1", got)
+		}
+		wantProblem(t, f.do(f.operatorCaller(), http.MethodPost, path, body), http.StatusConflict, "IDN-ASSIGNMENT-OVERLAP")
+		wantProblem(t, f.do(f.operatorCaller(), http.MethodPost, path, map[string]string{"userId": testkit.TenantID(72), "reason": "x"}), http.StatusNotFound, "IDN-USER-NOT-FOUND")
+		wantProblem(t, f.do(f.operatorCaller(), http.MethodPost, path, map[string]string{"userId": userID}), http.StatusBadRequest, "COM-0001")
+	})
+
+	t.Run("the operator cannot grant to itself or into the operator tenant", func(t *testing.T) {
+		path := "/v1/tenants/" + f.tenantB + "/admins"
+		body := map[string]string{"userId": userID, "reason": "x"}
+		byUserID := caller{tenantID: f.operator, user: userID, duties: []string{dutyTenants}}
+		bySubject := caller{tenantID: f.operator, user: "subject-" + f.tenantB, duties: []string{dutyTenants}}
+		wantProblem(t, f.do(byUserID, http.MethodPost, path, body), http.StatusForbidden, "IAM-0416")
+		wantProblem(t, f.do(bySubject, http.MethodPost, path, body), http.StatusForbidden, "IAM-0416")
+		wantProblem(t, f.do(f.operatorCaller(), http.MethodPost, "/v1/tenants/"+f.operator+"/admins", body), http.StatusForbidden, "AUTH-0003")
+		if got := holders(f.tenantB); got != 0 {
+			t.Fatalf("refused grants left %d rows", got)
+		}
+	})
+
+	t.Run("only the operator may grant it", func(t *testing.T) {
+		wantProblem(t, f.do(f.adminOf(f.tenantA, dutyTenants), http.MethodPost, "/v1/tenants/"+f.tenantA+"/admins", map[string]string{"userId": userID, "reason": "x"}), http.StatusForbidden, "AUTH-0003")
+	})
+}
+
 func pgCode(err error) string {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		return pgErr.Code
 	}
 	return ""
+}
+
+func TestConcurrentEndsKeepOneTenantAdministrator(t *testing.T) {
+	f := newAdminFixture(t)
+	admin := f.adminOf(f.tenantA, dutyRoles)
+	secondUser := testkit.TenantID(73)
+	if _, err := f.admin.Exec(context.Background(), `insert into identity_users (tenant_id, user_id, idp_subject) values ($1, $2, 'subject-concurrent')`, f.tenantA, secondUser); err != nil {
+		t.Fatal(err)
+	}
+	var rows []assignmentRow
+	for _, user := range []string{userID, secondUser} {
+		rows = append(rows, decode[assignmentRow](t, f.do(admin, http.MethodPost, "/v1/authz/assignments", map[string]any{"userId": user, "role": dutyTenantAdmin}), http.StatusCreated))
+	}
+	codes := make([]int, len(rows))
+	var wg sync.WaitGroup
+	for i, row := range rows {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			codes[i] = f.do(admin, http.MethodDelete, "/v1/authz/assignments/"+row.AssignmentID, nil).Code
+		}()
+	}
+	wg.Wait()
+	ok, conflict := 0, 0
+	for _, c := range codes {
+		switch c {
+		case http.StatusOK:
+			ok++
+		case http.StatusConflict:
+			conflict++
+		}
+	}
+	if ok != 1 || conflict != 1 {
+		t.Fatalf("concurrent ends returned %v, want one 200 and one 409", codes)
+	}
+	var active int
+	if err := f.admin.QueryRow(context.Background(), `select count(*) from identity_role_assignments where tenant_id = $1 and role = 'tenant.administer' and (valid_to is null or valid_to > clock_timestamp())`, f.tenantA).Scan(&active); err != nil || active != 1 {
+		t.Fatalf("active tenant administrators = %d (%v), want 1", active, err)
+	}
 }

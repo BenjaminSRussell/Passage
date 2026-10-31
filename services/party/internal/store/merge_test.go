@@ -26,7 +26,7 @@ type mergeFixture struct {
 }
 
 func mergerContext(tenantNumber int) context.Context {
-	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(tenantNumber), UserID: "merger", Duties: map[string]struct{}{store.DutyMerge: {}}})
+	return tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(tenantNumber), UserID: "merger", Duties: map[string]struct{}{store.DutyMerge: {}, tenant.DutyTenantAdmin: {}}})
 }
 
 func seedMerge(t *testing.T, loserLegalEntity string) mergeFixture {
@@ -199,10 +199,17 @@ func TestMerge_RejectsInvalidRequests(t *testing.T) {
 	if _, err := s.Merge(noDuty, store.MergeRequest{WinnerID: f.winner, LoserID: f.loser}); !errors.Is(err, store.ErrScopedPrincipal) {
 		t.Errorf("no claim and no merge duty = %v, want ErrScopedPrincipal", err)
 	}
+	mergeWithoutAdmin := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), UserID: "merger", Duties: map[string]struct{}{store.DutyMerge: {}}})
+	if _, err := s.Merge(mergeWithoutAdmin, store.MergeRequest{WinnerID: f.winner, LoserID: f.loser}); !errors.Is(err, store.ErrScopedPrincipal) {
+		t.Errorf("no claim and party.merge without tenant.administer = %v, want ErrScopedPrincipal", err)
+	}
+	if _, err := s.Audit(mergeWithoutAdmin); !errors.Is(err, store.ErrScopedPrincipal) {
+		t.Errorf("audit without tenant.administer = %v, want ErrScopedPrincipal", err)
+	}
 	if _, err := s.Merge(principalContext(1, legalEntityA), store.MergeRequest{WinnerID: f.winner, LoserID: f.loser}); !errors.Is(err, store.ErrScopedPrincipal) {
 		t.Errorf("scoped principal = %v, want ErrScopedPrincipal", err)
 	}
-	scopedMerger := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), UserID: "merger", LegalEntityID: legalEntityA, Duties: map[string]struct{}{store.DutyMerge: {}}})
+	scopedMerger := tenant.With(context.Background(), tenant.Principal{TenantID: testkit.TenantID(1), UserID: "merger", LegalEntityID: legalEntityA, Duties: map[string]struct{}{store.DutyMerge: {}, tenant.DutyTenantAdmin: {}}})
 	if _, err := s.Merge(scopedMerger, store.MergeRequest{WinnerID: f.winner, LoserID: f.loser}); !errors.Is(err, store.ErrScopedPrincipal) {
 		t.Errorf("legal-entity-scoped caller holding party.merge = %v, want ErrScopedPrincipal", err)
 	}

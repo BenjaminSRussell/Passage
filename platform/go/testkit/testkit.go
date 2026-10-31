@@ -94,11 +94,12 @@ func Ctx(tenantID string, duties ...string) context.Context {
 }
 
 // ScopeDuties returns the duties for a test principal in legalEntity: the
-// all-entity duty when legalEntity is empty, none otherwise.
+// all-entity and tenant-admin duties when legalEntity is empty, none otherwise.
 func ScopeDuties(legalEntity string) map[string]struct{} {
 	d := map[string]struct{}{}
 	if legalEntity == "" {
 		d[tenant.DutyAllScope] = struct{}{}
+		d[tenant.DutyTenantAdmin] = struct{}{}
 	}
 	return d
 }

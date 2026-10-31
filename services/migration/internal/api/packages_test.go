@@ -21,7 +21,7 @@ import (
 
 const (
 	pkgPath   = "/v1/integration/config-packages"
-	applyDuty = "migration.run,migration.package.apply"
+	applyDuty = "migration.run,migration.package.apply,tenant.administer"
 )
 
 var pkgSigner = domain.HMACSigner{Key: []byte("tenant-key")}

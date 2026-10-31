@@ -125,6 +125,12 @@ func canonicalLegalEntities(raw string) (string, bool) {
 
 const DutyAllScope = "org.switcher.all_scope"
 
+const DutyTenantAdmin = "tenant.administer"
+
+// IsTenantAdmin reports whether p may write tenant-level data: no legal-entity claim AND the
+// explicit tenant.administer duty. A missing claim alone never grants it.
+func IsTenantAdmin(p Principal) bool { return p.LegalEntityID == "" && p.HasDuty(DutyTenantAdmin) }
+
 type allScopeAskedKey struct{}
 
 type allScopeAsked struct{ tenantID, userID string }

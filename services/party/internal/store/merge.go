@@ -27,7 +27,7 @@ var (
 	ErrNotMergeable    = errors.New("parties cannot be merged: same party, different types, or already merged")
 	ErrRoleConflict    = errors.New("both parties hold a customer role in the same legal entity")
 	ErrInvalidID       = errors.New("party id must be a UUID")
-	ErrScopedPrincipal = errors.New("merge and audit need a principal that spans every legal entity")
+	ErrScopedPrincipal = errors.New("merge and audit need a tenant.administer principal that spans every legal entity")
 )
 
 type MergeRequest struct {

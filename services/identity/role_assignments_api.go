@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 )
 
 const (
@@ -23,6 +25,7 @@ const (
 	codeUserDeprovisioned   = "IDN-USER-DEPROVISIONED"
 	codeLegalEntityInactive = "IDN-LEGAL-ENTITY-INACTIVE"
 	codeSelfGrant           = "IAM-0416"
+	codeLastTenantAdmin     = "IDN-LAST-TENANT-ADMIN"
 
 	maxReason = 500
 )
@@ -101,6 +104,9 @@ func (a *RoleAssignmentsAPI) assign(w http.ResponseWriter, r *http.Request) {
 	} else if a.catalogue.ServiceOnly(req.Role) {
 		fields["role"] = "is held by a service grant only and cannot be assigned to a user"
 	}
+	if req.Role == tenant.DutyTenantAdmin && req.LegalEntityID != "" {
+		fields["legalEntityId"] = "must be empty: tenant.administer is tenant-wide"
+	}
 	now := time.Now()
 	if req.ValidFrom != nil && req.ValidFrom.Before(now.Add(-clockSkew)) {
 		fields["validFrom"] = "must not be in the past"
@@ -119,9 +125,13 @@ func (a *RoleAssignmentsAPI) assign(w http.ResponseWriter, r *http.Request) {
 		invalidFields(w, r, "invalid role assignment", fields)
 		return
 	}
+	if req.Role == tenant.DutyTenantAdmin && !tenant.IsTenantAdmin(p) {
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, codeForbidden, "tenant.administer can only be granted by a tenant administrator without a legal-entity scope"))
+		return
+	}
 	wide := dbx.TenantWide(p, dutyMaintainSecurityRoles)
 	if req.LegalEntityID == "" && !wide {
-		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, codeForbidden, "a tenant-wide assignment requires a tenant-level request without a legal-entity scope"))
+		httpx.Fail(w, r, httpx.NewProblem(http.StatusForbidden, codeForbidden, "a tenant-wide assignment requires the tenant.administer duty and a request without a legal-entity scope"))
 		return
 	}
 	if req.Role == dutyMaintainTenants && (a.operatorTenantID == "" || p.TenantID != a.operatorTenantID) {
@@ -289,6 +299,9 @@ func (a *RoleAssignmentsAPI) end(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		if current.LegalEntityID == "" && !dbx.TenantWide(p, dutyMaintainSecurityRoles) {
+			return httpx.NewProblem(http.StatusForbidden, codeForbidden, "ending a tenant-wide assignment requires the tenant.administer duty and a request without a legal-entity scope")
+		}
 		var now time.Time
 		if err := tx.QueryRow(r.Context(), `select now()`).Scan(&now); err != nil {
 			return err
@@ -322,6 +335,11 @@ func (a *RoleAssignmentsAPI) end(w http.ResponseWriter, r *http.Request) {
 			result = current
 			return nil
 		}
+		if current.Role == tenant.DutyTenantAdmin && !current.ValidFrom.After(now) {
+			if err := requireOtherTenantAdmin(r.Context(), tx, p.TenantID, id, validTo); err != nil {
+				return err
+			}
+		}
 		rows, err = tx.Query(r.Context(), `update identity_role_assignments set valid_to = $3 where tenant_id = $1 and assignment_id = $2 returning `+assignmentColumns,
 			p.TenantID, id, validTo)
 		if err != nil {
@@ -337,4 +355,21 @@ func (a *RoleAssignmentsAPI) end(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, result)
+}
+
+func requireOtherTenantAdmin(ctx context.Context, tx pgx.Tx, tenantID, endingID string, validTo time.Time) error {
+	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(hashtextextended($1::text || ':tenant-admin', 0))`, tenantID); err != nil {
+		return err
+	}
+	var others int
+	if err := tx.QueryRow(ctx, `select count(*) from identity_role_assignments
+where tenant_id = $1 and role = $2 and legal_entity_id is null and assignment_id <> $3
+  and valid_from <= clock_timestamp() and (valid_to is null or valid_to > greatest($4::timestamptz, clock_timestamp()))`,
+		tenantID, tenant.DutyTenantAdmin, endingID, validTo).Scan(&others); err != nil {
+		return err
+	}
+	if others == 0 {
+		return httpx.NewProblem(http.StatusConflict, codeLastTenantAdmin, "the last active tenant.administer assignment of a tenant cannot be ended")
+	}
+	return nil
 }

@@ -22,7 +22,7 @@ has_route_permissions(spec) if {
 }
 
 test_all_seeded_duties_allow_their_declared_permissions if {
-	count(data.duties) == 121
+	count(data.duties) == 122
 	every duty, spec in data.duties {
 		has_route_permissions(spec)
 		every permission in spec.permissions {
@@ -34,7 +34,7 @@ test_all_seeded_duties_allow_their_declared_permissions if {
 }
 
 test_flag_duties_grant_no_routes if {
-	flag_duties := {"ledger.journal.postdirect", "ledger.journal.postledger", "inventory.count.approve", "pii.read", "party.merge"}
+	flag_duties := {"ledger.journal.postdirect", "ledger.journal.postledger", "inventory.count.approve", "pii.read", "party.merge", "tenant.administer"}
 	{d | some d, spec in data.duties; spec.flag == true} == flag_duties
 	every duty in flag_duties {
 		count(data.duties[duty].permissions) == 0

@@ -90,13 +90,15 @@ func TestWithTenantTxLegalEntityVisibility(t *testing.T) {
 
 func TestTenantWidePredicate(t *testing.T) {
 	const duty = "x.maintain"
-	holds := map[string]struct{}{duty: {}}
+	holds := map[string]struct{}{duty: {}, tenant.DutyTenantAdmin: {}}
 	cases := []struct {
 		name string
 		p    tenant.Principal
 		want bool
 	}{
-		{"no claim and duty", tenant.Principal{Duties: holds}, true},
+		{"no claim, duty and tenant.administer", tenant.Principal{Duties: holds}, true},
+		{"no claim and duty without tenant.administer", tenant.Principal{Duties: map[string]struct{}{duty: {}}}, false},
+		{"no claim and tenant.administer without duty", tenant.Principal{Duties: map[string]struct{}{tenant.DutyTenantAdmin: {}}}, false},
 		{"claim and duty", tenant.Principal{LegalEntityID: testkit.TenantID(9), Duties: holds}, false},
 		{"no claim and no duty", tenant.Principal{}, false},
 		{"other duty only", tenant.Principal{Duties: map[string]struct{}{"y": {}}}, false},
