@@ -11,6 +11,7 @@ import (
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
+	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/hr/internal/domain"
 	hrevents "github.com/BenjaminSRussell/passage/services/hr/internal/events"
 )
@@ -634,48 +635,49 @@ func (s *Postgres) EndBenefitEnrollment(ctx context.Context, id string, lastDay 
 	p := principal(ctx)
 	var out BenefitEnrollment
 	changed := false
-	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		if !ids.Valid(id) {
-			return problem(http.StatusNotFound, CodeBenefitEnrollmentNotFound, "benefit enrollment not found")
-		}
-		if _, err := tx.Exec(ctx, `select 1 from benefit_enrollment where tenant_id = $1 and id = $2 for update`, p.TenantID, id); err != nil {
-			return err
-		}
-		cur, err := s.benLoadEnrollment(ctx, tx, p.TenantID, id)
-		if err != nil {
-			return err
-		}
-		validTo := domain.EnrollmentValidTo(lastDay, reason)
-		if cur.ValidTo != nil {
-			if cur.ValidTo.Equal(validTo) && benStr(cur.EndReason) == reason {
-				out = cur
-				return nil
-			}
-			return problem(http.StatusConflict, CodeBenefitEnded, "the enrollment has already ended on "+cur.ValidTo.Format(absDateLayout))
-		}
-		// The last covered day may not precede the start, whatever the reason:
-		// a termination before coverage began must not create a month of cover.
-		if domain.AsOfDay(lastDay).Before(cur.ValidFrom) || !validTo.After(cur.ValidFrom) {
-			return problem(http.StatusUnprocessableEntity, domain.CodeBenefitDateOrder, "the last covered day must be on or after the enrollment start "+cur.ValidFrom.Format(absDateLayout))
-		}
-		cobra := reason == domain.EndTermination && cobraPlanTypes[cur.PlanType]
-		if _, err := tx.Exec(ctx, `update benefit_enrollment set valid_to = $3, end_reason = $4, cobra_qualifying_event = $5,
-				ended_by = nullif($6, '')
-			where tenant_id = $1 and id = $2`, p.TenantID, id, validTo, reason, cobra, p.UserID); err != nil {
-			return err
-		}
-		loaded, err := s.benLoadEnrollment(ctx, tx, p.TenantID, id)
-		if err != nil {
-			return err
-		}
-		if err := enqueue(ctx, tx, "benefit_enrollment", id, hrevents.BenefitEnrollmentChanged, p.TenantID,
-			benEnrollmentEvent(loaded, hrevents.BenefitEnd)); err != nil {
-			return err
-		}
-		out, changed = loaded, true
-		return nil
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) (err error) {
+		out, changed, err = s.endEnrollmentTx(ctx, tx, p, id, lastDay, reason)
+		return err
 	})
 	return out, changed, err
+}
+
+func (s *Postgres) endEnrollmentTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string, lastDay time.Time, reason string) (BenefitEnrollment, bool, error) {
+	if !ids.Valid(id) {
+		return BenefitEnrollment{}, false, problem(http.StatusNotFound, CodeBenefitEnrollmentNotFound, "benefit enrollment not found")
+	}
+	if _, err := tx.Exec(ctx, `select 1 from benefit_enrollment where tenant_id = $1 and id = $2 for update`, p.TenantID, id); err != nil {
+		return BenefitEnrollment{}, false, err
+	}
+	cur, err := s.benLoadEnrollment(ctx, tx, p.TenantID, id)
+	if err != nil {
+		return BenefitEnrollment{}, false, err
+	}
+	validTo := domain.EnrollmentValidTo(lastDay, reason)
+	if cur.ValidTo != nil {
+		if cur.ValidTo.Equal(validTo) && benStr(cur.EndReason) == reason {
+			return cur, false, nil
+		}
+		return BenefitEnrollment{}, false, problem(http.StatusConflict, CodeBenefitEnded, "the enrollment has already ended on "+cur.ValidTo.Format(absDateLayout))
+	}
+	if domain.AsOfDay(lastDay).Before(cur.ValidFrom) || !validTo.After(cur.ValidFrom) {
+		return BenefitEnrollment{}, false, problem(http.StatusUnprocessableEntity, domain.CodeBenefitDateOrder, "the last covered day must be on or after the enrollment start "+cur.ValidFrom.Format(absDateLayout))
+	}
+	cobra := reason == domain.EndTermination && cobraPlanTypes[cur.PlanType]
+	if _, err := tx.Exec(ctx, `update benefit_enrollment set valid_to = $3, end_reason = $4, cobra_qualifying_event = $5,
+			ended_by = nullif($6, '')
+		where tenant_id = $1 and id = $2`, p.TenantID, id, validTo, reason, cobra, p.UserID); err != nil {
+		return BenefitEnrollment{}, false, err
+	}
+	loaded, err := s.benLoadEnrollment(ctx, tx, p.TenantID, id)
+	if err != nil {
+		return BenefitEnrollment{}, false, err
+	}
+	if err := enqueue(ctx, tx, "benefit_enrollment", id, hrevents.BenefitEnrollmentChanged, p.TenantID,
+		benEnrollmentEvent(loaded, hrevents.BenefitEnd)); err != nil {
+		return BenefitEnrollment{}, false, err
+	}
+	return loaded, true, nil
 }
 
 // WorkerBenefits is a worker's enrollments (oldest first) and life events

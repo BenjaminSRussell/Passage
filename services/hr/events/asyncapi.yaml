@@ -48,6 +48,21 @@ channels:
     messages:
       courseCompleted:
         $ref: "#/components/messages/CourseCompleted"
+  compensationChanged:
+    address: passage.hr.compensation
+    messages:
+      compensationChanged:
+        $ref: "#/components/messages/CompensationChanged"
+  compensationCycleApplied:
+    address: passage.hr.compensationcycle
+    messages:
+      compensationCycleApplied:
+        $ref: "#/components/messages/CompensationCycleApplied"
+  requisitionChanged:
+    address: passage.hr.requisition
+    messages:
+      requisitionChanged:
+        $ref: "#/components/messages/RequisitionChanged"
 operations:
   publishWorkerSkillChanged:
     action: send
@@ -97,8 +112,67 @@ operations:
       $ref: "#/channels/courseCompleted"
     messages:
       - $ref: "#/channels/courseCompleted/messages/courseCompleted"
+  publishCompensationChanged:
+    action: send
+    channel:
+      $ref: "#/channels/compensationChanged"
+    messages:
+      - $ref: "#/channels/compensationChanged/messages/compensationChanged"
+  publishCompensationCycleApplied:
+    action: send
+    channel:
+      $ref: "#/channels/compensationCycleApplied"
+    messages:
+      - $ref: "#/channels/compensationCycleApplied/messages/compensationCycleApplied"
+  publishRequisitionChanged:
+    action: send
+    channel:
+      $ref: "#/channels/requisitionChanged"
+    messages:
+      - $ref: "#/channels/requisitionChanged/messages/requisitionChanged"
 components:
   messages:
+    CompensationChanged:
+      name: dev.passage.hr.compensation.changed.v1
+      description: A worker's fixed compensation row opened from valid_from; payroll consumes it. Confidential amounts travel to payroll only.
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [id, worker_id, employment_id, plan_id, amount, currency, valid_from]
+        properties:
+          id: {type: string, format: uuid}
+          worker_id: {type: string, format: uuid}
+          employment_id: {type: string, format: uuid}
+          plan_id: {type: string, format: uuid}
+          amount: {type: string}
+          currency: {type: string}
+          valid_from: {type: string, format: date-time}
+          valid_to: {type: [string, "null"], format: date-time}
+    CompensationCycleApplied:
+      name: dev.passage.hr.compensationcycle.applied.v1
+      description: PRD name compensation.cycle.applied, collapsed to one entity segment like positionassignment.
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [cycle_id, effective_date, action_ids]
+        properties:
+          cycle_id: {type: string, format: uuid}
+          effective_date: {type: string, format: date}
+          action_ids:
+            type: array
+            items: {type: string, format: uuid}
+    RequisitionChanged:
+      name: dev.passage.hr.requisition.changed.v1
+      contentType: application/cloudevents+json
+      payload:
+        type: object
+        required: [id, position_id, headcount, status, filled]
+        properties:
+          id: {type: string, format: uuid}
+          position_id: {type: string, format: uuid}
+          headcount: {type: integer}
+          status: {type: string, enum: [DRAFT, APPROVED, OPEN, FILLED, CANCELED]}
+          filled: {type: integer}
     WorkerCreated:
       name: dev.passage.hr.worker.created.v1
       contentType: application/cloudevents+json

@@ -225,61 +225,13 @@ func (s *Postgres) CreateAssignment(ctx context.Context, positionID string, in P
 				return err
 			}
 		}
-		span := `tstzrange($3::timestamptz, $4::timestamptz, '[)')`
-		var fte, positionEntity string
-		var overfill, positionCovers bool
-		err := tx.QueryRow(ctx, `select fte::text, allow_overfill, legal_entity_id::text, validity @> `+span+` from hr_position
-			where tenant_id = $1 and id = $2 for update`, p.TenantID, positionID, in.ValidFrom, in.ValidTo).Scan(&fte, &overfill, &positionEntity, &positionCovers)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return problem(http.StatusNotFound, CodePositionNotFound, "position not found")
-		}
-		if err != nil {
-			return err
-		}
-		var employmentWorker, employmentEntity string
-		var employmentCovers bool
-		err = tx.QueryRow(ctx, `select worker_id::text, legal_entity_id::text, validity @> `+span+` from employment where tenant_id = $1 and id = $2`,
-			p.TenantID, in.EmploymentID, in.ValidFrom, in.ValidTo).Scan(&employmentWorker, &employmentEntity, &employmentCovers)
-		if errors.Is(err, pgx.ErrNoRows) || (err == nil && (employmentWorker != in.WorkerID || employmentEntity != positionEntity)) {
-			return problem(http.StatusUnprocessableEntity, CodeAssignmentMismatch, "the employment does not belong to this worker in the position's legal entity")
-		}
-		if err != nil {
-			return err
-		}
-		if !positionCovers || !employmentCovers {
-			return problem(http.StatusUnprocessableEntity, CodeAssignmentRange, "the assignment dates must lie inside both the position's and the employment's validity")
-		}
-		var existing string
-		if err := tx.QueryRow(ctx, `select coalesce(sum(fte_share), 0)::text from position_assignment
-			where tenant_id = $1 and position_id = $2 and validity && `+span,
-			p.TenantID, positionID, in.ValidFrom, in.ValidTo).Scan(&existing); err != nil {
-			return err
-		}
-		if err := domain.CheckFTE(decimal.RequireFromString(fte), overfill, decimal.RequireFromString(existing), decimal.RequireFromString(in.FTEShare)); err != nil {
-			var de *domain.Error
-			if errors.As(err, &de) {
-				return problem(http.StatusUnprocessableEntity, de.Code, de.Detail)
-			}
-			return err
-		}
-		out, err = scanAssignment(tx.QueryRow(ctx, `insert into position_assignment (tenant_id, id, position_id, worker_id, employment_id, fte_share, is_primary, valid_from, valid_to, idempotency_key)
-			values ($1, $2, $3, $4, $5, $6::numeric, $7, $8, $9, $10)
-			returning id::text, position_id::text, worker_id::text, employment_id::text, fte_share::text, is_primary, valid_from, valid_to`,
-			p.TenantID, ids.New(), positionID, in.WorkerID, in.EmploymentID, in.FTEShare, in.IsPrimary, in.ValidFrom, in.ValidTo, key))
+		var err error
+		out, err = assignTx(ctx, tx, p.TenantID, positionID, in, key)
 		if err != nil {
 			return err
 		}
 		inserted = true
-		var managerPosition *string
-		err = tx.QueryRow(ctx, `select parent_position_id::text from position_hierarchy
-			where tenant_id = $1 and child_position_id = $2 and validity @> $3::timestamptz`, p.TenantID, positionID, out.ValidFrom).Scan(&managerPosition)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-		return enqueue(ctx, tx, "positionassignment", out.ID, hrevents.PositionAssignmentChanged, p.TenantID, hrevents.PositionAssignmentChangedData{
-			ID: out.ID, WorkerID: out.WorkerID, PositionID: out.PositionID, ManagerPositionID: managerPosition, FTEShare: out.FTEShare,
-			IsPrimary: out.IsPrimary, ValidFrom: out.ValidFrom.UTC().Format(time.RFC3339), ValidTo: rfc3339Ptr(out.ValidTo),
-		})
+		return nil
 	})
 	if idempotencyRace(err) {
 		return PositionAssignment{}, false, idempotencyInFlight()
@@ -292,6 +244,64 @@ func (s *Postgres) CreateAssignment(ctx context.Context, positionID string, in P
 		return PositionAssignment{}, false, idempotencyReuse()
 	}
 	return out, inserted, err
+}
+
+func assignTx(ctx context.Context, tx pgx.Tx, tenantID, positionID string, in PositionAssignment, key *string) (PositionAssignment, error) {
+	var out PositionAssignment
+	span := `tstzrange($3::timestamptz, $4::timestamptz, '[)')`
+	var fte, positionEntity string
+	var overfill, positionCovers bool
+	err := tx.QueryRow(ctx, `select fte::text, allow_overfill, legal_entity_id::text, validity @> `+span+` from hr_position
+		where tenant_id = $1 and id = $2 for update`, tenantID, positionID, in.ValidFrom, in.ValidTo).Scan(&fte, &overfill, &positionEntity, &positionCovers)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return out, problem(http.StatusNotFound, CodePositionNotFound, "position not found")
+	}
+	if err != nil {
+		return out, err
+	}
+	var employmentWorker, employmentEntity string
+	var employmentCovers bool
+	err = tx.QueryRow(ctx, `select worker_id::text, legal_entity_id::text, validity @> `+span+` from employment where tenant_id = $1 and id = $2`,
+		tenantID, in.EmploymentID, in.ValidFrom, in.ValidTo).Scan(&employmentWorker, &employmentEntity, &employmentCovers)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && (employmentWorker != in.WorkerID || employmentEntity != positionEntity)) {
+		return out, problem(http.StatusUnprocessableEntity, CodeAssignmentMismatch, "the employment does not belong to this worker in the position's legal entity")
+	}
+	if err != nil {
+		return out, err
+	}
+	if !positionCovers || !employmentCovers {
+		return out, problem(http.StatusUnprocessableEntity, CodeAssignmentRange, "the assignment dates must lie inside both the position's and the employment's validity")
+	}
+	var existing string
+	if err := tx.QueryRow(ctx, `select coalesce(sum(fte_share), 0)::text from position_assignment
+		where tenant_id = $1 and position_id = $2 and validity && `+span,
+		tenantID, positionID, in.ValidFrom, in.ValidTo).Scan(&existing); err != nil {
+		return out, err
+	}
+	if err := domain.CheckFTE(decimal.RequireFromString(fte), overfill, decimal.RequireFromString(existing), decimal.RequireFromString(in.FTEShare)); err != nil {
+		var de *domain.Error
+		if errors.As(err, &de) {
+			return out, problem(http.StatusUnprocessableEntity, de.Code, de.Detail)
+		}
+		return out, err
+	}
+	out, err = scanAssignment(tx.QueryRow(ctx, `insert into position_assignment (tenant_id, id, position_id, worker_id, employment_id, fte_share, is_primary, valid_from, valid_to, idempotency_key)
+		values ($1, $2, $3, $4, $5, $6::numeric, $7, $8, $9, $10)
+		returning id::text, position_id::text, worker_id::text, employment_id::text, fte_share::text, is_primary, valid_from, valid_to`,
+		tenantID, ids.New(), positionID, in.WorkerID, in.EmploymentID, in.FTEShare, in.IsPrimary, in.ValidFrom, in.ValidTo, key))
+	if err != nil {
+		return out, err
+	}
+	var managerPosition *string
+	err = tx.QueryRow(ctx, `select parent_position_id::text from position_hierarchy
+		where tenant_id = $1 and child_position_id = $2 and validity @> $3::timestamptz`, tenantID, positionID, out.ValidFrom).Scan(&managerPosition)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return out, err
+	}
+	return out, enqueue(ctx, tx, "positionassignment", out.ID, hrevents.PositionAssignmentChanged, tenantID, hrevents.PositionAssignmentChangedData{
+		ID: out.ID, WorkerID: out.WorkerID, PositionID: out.PositionID, ManagerPositionID: managerPosition, FTEShare: out.FTEShare,
+		IsPrimary: out.IsPrimary, ValidFrom: out.ValidFrom.UTC().Format(time.RFC3339), ValidTo: rfc3339Ptr(out.ValidTo),
+	})
 }
 
 const assignmentSelect = "select id::text, position_id::text, worker_id::text, employment_id::text, fte_share::text, is_primary, valid_from, valid_to from position_assignment"

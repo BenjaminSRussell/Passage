@@ -76,6 +76,7 @@ type API struct {
 	registrations    atomic.Int64
 	cancellations    atomic.Int64
 	passes           atomic.Int64
+	personnel        personnelCounters
 }
 
 // New builds the API over a store.
@@ -135,6 +136,7 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(dutyLearningAdmin)).Get("/v1/hr/courses/sessions/{id}/registrations", sessionRoute(a.listRegistrations))
 	r.With(authz.RequireDuty(dutyEssLearning)).Post("/v1/hr/courses/sessions/{id}/registrations", sessionRoute(a.registerForSession))
 	r.With(authz.RequireDuty(dutyLearningAdmin)).Post("/v1/hr/courses/sessions/{id}/complete", sessionRoute(a.completeSession))
+	a.registerPersonnel(r)
 	r.With(authz.RequireDuty(dutyMssApprove)).Post("/v1/hr/courses/registrations/{id}/approve", registrationRoute(a.approveRegistration))
 	r.With(authz.RequireDuty(dutyEssLearning)).Post("/v1/hr/courses/registrations/{id}/cancel", registrationRoute(a.cancelRegistration))
 }
@@ -186,6 +188,7 @@ func (a *API) Metrics() http.Handler {
 		counter("hr_course_registrations_total", "Course registrations placed (confirmed, waitlisted or requested); repeats are not counted.", a.registrations.Load())
 		counter("hr_course_cancellations_total", "Course registrations canceled; repeated cancels are not counted.", a.cancellations.Load())
 		counter("hr_course_passes_total", "Completions newly recorded with a PASS result.", a.passes.Load())
+		a.personnel.write(counter)
 	})
 }
 

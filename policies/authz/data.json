@@ -808,7 +808,25 @@
       {"resource": "/v1/hr/absence/plans/*/carry-over-expiry", "methods": ["POST"]},
       {"resource": "/v1/hr/absence/plans/*/year-end", "methods": ["POST"]}
     ]},
-    "HcmActionMaintain": {"permissions": [{"resource": "/v1/hr/positions/*/assignments", "methods": ["POST"]}]},
+    "HcmActionMaintain": {"permissions": [
+      {"resource": "/v1/hr/actions", "methods": ["GET", "POST"]},
+      {"resource": "/v1/hr/actions/*", "methods": ["GET"]},
+      {"resource": "/v1/hr/actions/*/withdraw", "methods": ["POST"]},
+      {"resource": "/v1/hr/actions/apply-due", "methods": ["POST"]},
+      {"resource": "/v1/hr/offers/*/hire", "methods": ["POST"]},
+      {"resource": "/v1/hr/positions/*/assignments", "methods": ["POST"]}
+    ]},
+    "HcmCompAdmin": {"permissions": [
+      {"resource": "/v1/hr/compensation/cycles", "methods": ["GET", "POST"]},
+      {"resource": "/v1/hr/compensation/cycles/*", "methods": ["GET"]},
+      {"resource": "/v1/hr/compensation/cycles/*/advance", "methods": ["POST"]},
+      {"resource": "/v1/hr/compensation/cycles/*/apply", "methods": ["POST"]},
+      {"resource": "/v1/hr/compensation/cycles/*/worksheets/*", "methods": ["GET", "PUT"]},
+      {"resource": "/v1/hr/compensation/cycles/*/worksheets/*/submit", "methods": ["POST"]},
+      {"resource": "/v1/hr/compensation/plans", "methods": ["GET", "POST"]},
+      {"resource": "/v1/hr/jobs", "methods": ["POST"]},
+      {"resource": "/v1/hr/workers/*/compensation", "methods": ["GET"]}
+    ]},
     "HcmLearningAdmin": {"permissions": [
       {"resource": "/v1/hr/courses", "methods": ["POST"]},
       {"resource": "/v1/hr/courses/*/sessions", "methods": ["POST"]},
@@ -816,6 +834,8 @@
       {"resource": "/v1/hr/courses/sessions/*/registrations", "methods": ["GET"]}
     ]},
     "HcmOrgInquire": {"permissions": [
+      {"resource": "/v1/hr/jobs", "methods": ["GET"]},
+      {"resource": "/v1/hr/jobs/*", "methods": ["GET"]},
       {"resource": "/v1/hr/positions", "methods": ["GET"]},
       {"resource": "/v1/hr/positions/*", "methods": ["GET"]},
       {"resource": "/v1/hr/positions/*/skill-requirements", "methods": ["GET"]},
@@ -827,8 +847,24 @@
       {"resource": "/v1/hr/positions/*/skill-requirements", "methods": ["POST"]},
       {"resource": "/v1/hr/positions/*/skill-requirements/*", "methods": ["DELETE"]}
     ]},
+    "HcmRecruitMaintain": {"permissions": [
+      {"resource": "/v1/hr/candidates/*", "methods": ["GET"]},
+      {"resource": "/v1/hr/candidates/*/move", "methods": ["POST"]},
+      {"resource": "/v1/hr/candidates/*/offers", "methods": ["POST"]},
+      {"resource": "/v1/hr/consents", "methods": ["GET", "POST"]},
+      {"resource": "/v1/hr/consents/*/withdraw", "methods": ["POST"]},
+      {"resource": "/v1/hr/offers/*", "methods": ["GET"]},
+      {"resource": "/v1/hr/offers/*/transition", "methods": ["POST"]},
+      {"resource": "/v1/hr/requisitions", "methods": ["GET", "POST"]},
+      {"resource": "/v1/hr/requisitions/*", "methods": ["GET"]},
+      {"resource": "/v1/hr/requisitions/*/candidates", "methods": ["GET", "POST"]},
+      {"resource": "/v1/hr/requisitions/*/transition", "methods": ["POST"]}
+    ]},
     "HcmPIIRead": {"permissions": [{"resource": "/v1/hr/workers/*/pii", "methods": ["GET"]}]},
     "HcmSetupAdmin": {"permissions": [
+      {"resource": "/v1/hr/candidates/purge", "methods": ["POST"]},
+      {"resource": "/v1/hr/retention-policies", "methods": ["GET"]},
+      {"resource": "/v1/hr/retention-policies/*", "methods": ["PUT"]},
       {"resource": "/v1/hr/benefits/plans", "methods": ["POST"]},
       {"resource": "/v1/hr/benefits/plans/*/simulate", "methods": ["GET"]},
       {"resource": "/v1/hr/skills", "methods": ["POST"]}
