@@ -636,7 +636,7 @@
       {"resource": "/v1/costing/versions/*/transition", "methods": ["POST"]},
       {"resource": "/v1/costing/versions:transition", "methods": ["POST"]}
     ]},
-    "CostingSystem": {"service_only": true, "permissions": [{"resource": "/v1/costing/variances/compute", "methods": ["POST"]}]},
+    "CostingSystem": {"permissions": [{"resource": "/v1/costing/variances/compute", "methods": ["POST"]}]},
     "CostingView": {"permissions": [
       {"resource": "/v1/costing/comparisons", "methods": ["POST"]},
       {"resource": "/v1/costing/cost-components", "methods": ["GET"]},
@@ -2208,7 +2208,9 @@
       {"resource": "/v1/workflows/definitions", "methods": ["POST"]},
       {"resource": "/v1/workflows/instances", "methods": ["POST"]},
       {"resource": "/v1/workflows/instances/*/actions", "methods": ["POST"]}
-    ]}
+    ]},
+    "AgentInvoke": {"permissions": [{"resource": "/api/v1/agents/*/runs", "methods": ["POST"]}]},
+    "PlatformAdmin": {"permissions": [{"resource": "/api/v1/agents/kill-switch", "methods": ["GET", "POST"]}]}
   },
   "service_grants": {
     "batch": {

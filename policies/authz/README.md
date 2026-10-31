@@ -17,6 +17,10 @@ Each permission is a route template matched with `glob.match(pattern, ["/", ":"]
 - Seed one row per mounted method and route template, so a narrow duty cannot reach a verb route owned by another duty.
 - Routes that dispatch a `:verb` inside one handler (production order commands, down payments) are seeded as one `*:verb` row per verb on the duty that handler enforces.
 
+## Known collision: costing routes
+
+`productcost` (`CostingView`, `CostingMaintain`) and `costing` (`costing.read`, `costing.reconcile`, `costing.version.write`) both mount `/v1/costing/reconciliations` and `/v1/costing/versions`. Both duty sets are seeded for those templates, so either family reaches either service's route. Fixing it needs distinct route prefixes in the routers; the issue is tracked outside this file.
+
 ## Path input
 
 The PEP must pass the decoded `r.URL.Path` with no query string, or the route template (`/v1/vendors/*`). `*` matches an empty segment, so `/v1/vendors/` matches `/v1/vendors/*`, and an encoded `%3A` is not a `:` until it is decoded: a raw path can slip past a `*:verb` row or match a plain `*` row it should not.

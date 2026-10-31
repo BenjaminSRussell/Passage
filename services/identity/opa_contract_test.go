@@ -384,12 +384,17 @@ func TestPartyReadDeniedWithoutDuties(t *testing.T) {
 var (
 	dutyDefinition = regexp.MustCompile(`(?m)\b(\w*[dD]uty\w*)\s*(?:string\s*)?=\s*(?:"([^"]+)"|(?:[A-Za-z_]\w*\.)?(\w*[dD]uty\w*)\s*$)`)
 	dutyCall       = regexp.MustCompile(`\b(?:RequireDuty|HasDuty)\s*\(\s*([^,)]*(?:\([^)]*\))?[^,)]*)[,)]`)
-	identifierPath = regexp.MustCompile(`^(?:[A-Za-z_]\w*\.)?([A-Za-z_]\w*)$`)
-	dutyLiteral    = regexp.MustCompile(`^"([^"]+)"$`)
+	dutyListCall   = regexp.MustCompile(`\b(?:RequireAnyDuty|requireAnyDuty|requireAny|anyDuty)\s*[({]([^)}]*)[)}]`)
+
+	dutyFuncDeclaration = regexp.MustCompile(`^func\s+(?:\([^)]*\)\s*)?(?:RequireDuty|HasDuty|RequireAnyDuty|requireAnyDuty|requireAny|anyDuty)\(`)
+	identifierPath      = regexp.MustCompile(`^(?:[A-Za-z_]\w*\.)?([A-Za-z_]\w*)$`)
+	dutyLiteral         = regexp.MustCompile(`^"([^"]+)"$`)
 )
 
 var dynamicDutyArguments = map[string]string{
 	"assets/internal/api/ops.go duty":                       "requireAny loops over caller-listed duty constants",
+	"assets/internal/api/ops.go duties":                     "requireAny forwards the duty constants its callers list",
+	"sales/internal/api/api.go duties":                      "requireAny forwards the duty constants its callers list",
 	"batch/internal/jobs/productclient.go duty":             "loops over the product duties the handler declares",
 	"consolidation/internal/api/api.go rt.duty":             "route table of duty constants",
 	"eam/internal/api/api.go d":                             "anyDuty loops over caller-listed duty constants",
@@ -455,7 +460,7 @@ func codeLines(src string) []string {
 	var lines []string
 	for _, line := range strings.Split(src, "\n") {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "func ") {
+		if strings.HasPrefix(trimmed, "//") || dutyFuncDeclaration.MatchString(trimmed) {
 			continue
 		}
 		lines = append(lines, line)
@@ -552,8 +557,18 @@ func TestEveryServiceDutyIsSeeded(t *testing.T) {
 		for _, file := range files {
 			relative := filepath.ToSlash(strings.TrimPrefix(file, root+string(filepath.Separator)))
 			for _, line := range sources[file] {
+				var arguments []string
 				for _, match := range dutyCall.FindAllStringSubmatch(line, -1) {
-					argument := strings.TrimSpace(match[1])
+					arguments = append(arguments, strings.TrimSpace(match[1]))
+				}
+				for _, match := range dutyListCall.FindAllStringSubmatch(line, -1) {
+					for _, argument := range strings.Split(match[1], ",") {
+						if argument = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(argument), "...")); argument != "" {
+							arguments = append(arguments, argument)
+						}
+					}
+				}
+				for _, argument := range arguments {
 					if literal := dutyLiteral.FindStringSubmatch(argument); literal != nil {
 						found++
 						if _, ok := seeded.Duties[literal[1]]; !ok {

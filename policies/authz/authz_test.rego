@@ -34,9 +34,8 @@ test_all_seeded_duties_allow_their_declared_permissions if {
 }
 
 test_flag_duties_grant_no_routes if {
-	required_flags := {"ledger.journal.postdirect", "ledger.journal.postledger", "inventory.count.approve", "pii.read", "party.merge"}
-	flag_duties := {d | some d, spec in data.duties; spec.flag == true}
-	count(required_flags - flag_duties) == 0
+	flag_duties := {"ARWriteOffApprove", "ConsolidationView", "EDI_PII_VIEW", "Maintain tax codes", "budget.override", "inventory.count.approve", "ledger.journal.postdirect", "ledger.journal.postledger", "org.hierarchy.backdate", "party.merge", "pii.read", "production.batch.consume-expired", "production.journal.over-consume", "production.order.bom-after-release", "production.order.rework", "production.order.zero-output", "shopfloor.check.override", "tenant.administer", "treasury.facility.override"}
+	{d | some d, spec in data.duties; spec.flag == true} == flag_duties
 	every duty in flag_duties {
 		count(data.duties[duty].permissions) == 0
 		not allowed(duty, "POST", "/v1/ledger/journal-entries")
@@ -530,7 +529,6 @@ test_service_only_duties_are_service_granted if {
 awaiting_service_caller := {
 	"costing.cost-transaction.post",
 	"costing.ppv.post",
-	"CostingSystem",
 	"shopfloor.machine.ingest",
 	"TMS_TRACK_INGEST",
 	"shopfloor.time.autoclockout",
