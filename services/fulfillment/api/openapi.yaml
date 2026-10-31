@@ -152,6 +152,20 @@ components:
         pickConfirmed: { type: boolean }
         zone: { type: [string, "null"], description: "Pick zone, given at release (FR-28.13)." }
         shortPickReason: { type: [string, "null"], enum: [OUT_OF_STOCK, DAMAGED, NOT_FOUND, QUALITY_HOLD, OTHER, null], description: "Reason given for the latest short pick, if any." }
+        trackingRequired: { type: boolean, description: "The product carries a batch or serial tracking dimension (BR-28.10); the slip cannot post until the quantity it ships is covered by tracking entries (FUL-0006)." }
+        tracking:
+          type: array
+          description: Batch, serial and location entries captured at pick, oldest first.
+          items: { $ref: "#/components/schemas/TrackingEntry" }
+    TrackingEntry:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        batchNo: { type: [string, "null"] }
+        serialNo: { type: [string, "null"], description: "A serial entry is one unit; the serial is unique per product while its shipment is live." }
+        locationCode: { type: [string, "null"] }
+        qty: { $ref: "#/components/schemas/Decimal" }
+        packingSlipId: { type: [string, "null"], format: uuid, description: "The packing slip the quantity shipped on; null until it ships." }
     Container:
       type: object
       properties:
@@ -388,6 +402,7 @@ paths:
                       held: { type: boolean }
                       carrierCode: { type: string, pattern: '^[A-Za-z0-9_.-]{1,32}$', description: "The order's carrier; every line of one order names the same one." }
                       zone: { type: string, pattern: '^[A-Za-z0-9_.-]{1,32}$', description: The line's pick zone. }
+                      trackingRequired: { type: boolean, description: "The product is batch or serial tracked (BR-28.10)." }
       responses:
         "201":
           description: Shipments created (one per order, warehouse and ship date) and lines skipped
@@ -529,7 +544,7 @@ paths:
         "404": { description: "FUL-0020 shipment or FUL-0041 line not found", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "409": { description: FUL-0021 invalid move, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "422": { description: "FUL-0001 status, FUL-0004 over-pick, FUL-0030 negative, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 status, FUL-0004 over-pick, FUL-0030 negative, FUL-0035 below the captured batch and serial entries, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
   /v1/fulfillment/shipments/{id}/containers:
     post:
@@ -626,7 +641,7 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { description: FUL-0020, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "422": { description: "FUL-0001 not PACKED, FUL-0014 packaging fee rate missing for a shipped material, FUL-0042 cost missing, FUL-0044 nothing to ship, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 not PACKED, FUL-0006 a tracking-required line's open batch and serial entries do not cover exactly the quantity it ships, FUL-0014 packaging fee rate missing for a shipped material, FUL-0042 cost missing, FUL-0044 nothing to ship, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
   /v1/fulfillment/packing-slips/{id}:cancel:
     post:
@@ -1221,6 +1236,7 @@ paths:
         quantity that shipped (qtyClosed records what was given up), the backorder
         closes and the shipment becomes SHIPPED. shipment.closed tells inventory
         which reservation and which picked-but-unpacked stock to release.
+        Batch and serial entries that never shipped are dropped, freeing their serials.
       x-passage-duty: WarehouseRelease
       parameters:
         - { $ref: "#/components/parameters/ShipmentId" }
@@ -1267,6 +1283,60 @@ paths:
         "409": { description: "FUL-0021 shipment status does not allow unpacking, or the container already shipped", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "422": { description: idempotency_key_reuse, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+  /v1/fulfillment/shipments/{id}/lines/{lid}:capture-tracking:
+    post:
+      operationId: captureLineTracking
+      summary: Capture batch, serial and location for a picked shipment line (BR-28.10)
+      description: >
+        Replaces the line's entries that have not shipped yet; an empty list clears
+        them. Each entry names a batch or a serial number (a serial is one unit, and
+        unique per product while its shipment is live, FUL-0036) and optionally the
+        pick location. Entries, shipped and new together, cannot exceed the picked
+        quantity (FUL-0035). Allowed while the shipment is PICKING, PICKED, PACKED
+        or PARTIALLY_SHIPPED. A line released with trackingRequired posts only when
+        its entries cover the quantity the slip ships (FUL-0006). Publishes pick.tracked.
+      x-passage-duty: WarehousePick
+      parameters:
+        - { $ref: "#/components/parameters/ShipmentId" }
+        - { name: lid, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { $ref: "#/components/parameters/IfMatch" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [entries]
+              additionalProperties: false
+              properties:
+                entries:
+                  type: array
+                  maxItems: 500
+                  items:
+                    type: object
+                    required: [qty]
+                    additionalProperties: false
+                    properties:
+                      batchNo: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_./-]{0,63}$' }
+                      serialNo: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_./-]{0,63}$' }
+                      locationCode: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_./-]{0,63}$' }
+                      qty: { $ref: "#/components/schemas/Decimal" }
+      responses:
+        "200":
+          description: The shipment with the line's tracking entries; ETag carries the new version
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Shipment" }
+        "400": { $ref: "#/components/responses/Problem" }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { description: "FUL-0020 shipment, FUL-0041 line not on the shipment", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "409": { description: "FUL-0036 serial already assigned to another line of the product", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 shipment status does not allow capture, FUL-0035 entries exceed the picked quantity, FUL-0050 malformed entry, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "428": { description: precondition_required, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
   /v1/fulfillment/waves:preview:
     post:
@@ -1434,7 +1504,7 @@ paths:
         "403": { $ref: "#/components/responses/Problem" }
         "404": { description: "FUL-0052 wave or FUL-0041 line not in the wave", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "412": { description: conflict_version, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
-        "422": { description: "FUL-0001 status, FUL-0004 over-pick, FUL-0030 negative, FUL-0050 nothing left to pick or reason on a full pick, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "422": { description: "FUL-0001 status, FUL-0004 over-pick, FUL-0030 negative, FUL-0035 below the captured batch and serial entries, FUL-0050 nothing left to pick or reason on a full pick, idempotency_key_reuse", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
   /v1/fulfillment/shipments/{id}/tracking:
     get:
       operationId: listTracking

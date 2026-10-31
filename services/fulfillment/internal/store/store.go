@@ -122,6 +122,10 @@ type ShipmentLine struct {
 	Zone          *string         `json:"zone"`
 	// ShortPickReason is the reason given for the latest short pick, if any.
 	ShortPickReason *string `json:"shortPickReason"`
+	// TrackingRequired is set at release for a batch or serial tracked product
+	// (BR-28.10); Tracking lists the batch, serial and location entries.
+	TrackingRequired bool            `json:"trackingRequired"`
+	Tracking         []TrackingEntry `json:"tracking"`
 }
 
 // Container is a closed package with its SSCC (BR-28.5). Tare, returnable and
@@ -269,6 +273,7 @@ type Store interface {
 	PackingStore
 	WorkbenchStore
 	WavePickStore
+	TrackingStore
 	Ping(ctx context.Context) error
 }
 
@@ -609,9 +614,10 @@ func insertReleased(ctx context.Context, tx pgx.Tx, tenantID string, g domain.Re
 	refs := []fulevents.LineRef{}
 	for _, l := range g.Lines {
 		line := ShipmentLine{ID: ids.New(), OrderLineID: l.OrderLineID, ProductID: l.ProductID, Unit: l.Unit, Planned: l.Qty,
-			Picked: decimal.Zero, Packed: decimal.Zero, Shipped: decimal.Zero, Zone: optional(l.Zone)}
-		if _, err := tx.Exec(ctx, `insert into shipment_line (tenant_id, id, shipment_id, order_line_id, product_id, unit, qty_planned, zone_code)
-			values ($1, $2, $3, $4, $5, $6, $7, $8)`, tenantID, line.ID, sh.ID, line.OrderLineID, line.ProductID, line.Unit, line.Planned, line.Zone); err != nil {
+			Picked: decimal.Zero, Packed: decimal.Zero, Shipped: decimal.Zero, Zone: optional(l.Zone),
+			TrackingRequired: l.TrackingRequired, Tracking: []TrackingEntry{}}
+		if _, err := tx.Exec(ctx, `insert into shipment_line (tenant_id, id, shipment_id, order_line_id, product_id, unit, qty_planned, zone_code, tracking_required)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, tenantID, line.ID, sh.ID, line.OrderLineID, line.ProductID, line.Unit, line.Planned, line.Zone, l.TrackingRequired); err != nil {
 			return Shipment{}, err
 		}
 		sh.Lines = append(sh.Lines, line)
@@ -649,7 +655,7 @@ func loadShipment(ctx context.Context, tx pgx.Tx, id string) (Shipment, error) {
 	}
 	sh.Status = domain.ShipmentStatus(status)
 	sh.Lines = []ShipmentLine{}
-	rows, err := tx.Query(ctx, `select id, order_line_id, product_id, unit, qty_planned::text, qty_picked::text, qty_packed::text, qty_shipped::text, pick_confirmed, zone_code, qty_closed::text, short_pick_reason
+	rows, err := tx.Query(ctx, `select id, order_line_id, product_id, unit, qty_planned::text, qty_picked::text, qty_packed::text, qty_shipped::text, pick_confirmed, zone_code, qty_closed::text, short_pick_reason, tracking_required
 		from shipment_line where shipment_id = $1 order by id`, id)
 	if err != nil {
 		return sh, err
@@ -657,15 +663,19 @@ func loadShipment(ctx context.Context, tx pgx.Tx, id string) (Shipment, error) {
 	for rows.Next() {
 		var l ShipmentLine
 		var planned, picked, packed, shipped, closed string
-		if err := rows.Scan(&l.ID, &l.OrderLineID, &l.ProductID, &l.Unit, &planned, &picked, &packed, &shipped, &l.PickConfirmed, &l.Zone, &closed, &l.ShortPickReason); err != nil {
+		if err := rows.Scan(&l.ID, &l.OrderLineID, &l.ProductID, &l.Unit, &planned, &picked, &packed, &shipped, &l.PickConfirmed, &l.Zone, &closed, &l.ShortPickReason, &l.TrackingRequired); err != nil {
 			rows.Close()
 			return sh, err
 		}
 		l.Planned, l.Picked, l.Packed, l.Shipped, l.Closed = dec(planned), dec(picked), dec(packed), dec(shipped), dec(closed)
+		l.Tracking = []TrackingEntry{}
 		sh.Lines = append(sh.Lines, l)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
+		return sh, err
+	}
+	if err := loadTracking(ctx, tx, &sh); err != nil {
 		return sh, err
 	}
 	sh.Containers, err = loadContainers(ctx, tx, id)
@@ -773,6 +783,11 @@ func confirmPickTx(ctx context.Context, tx pgx.Tx, tenantID, waveID string, sh *
 		next, backorder, err := domain.ConfirmPick(lineQty(sh.Lines[idx]), pk.Picked)
 		if err != nil {
 			return mapDomain(err)
+		}
+		// A re-pick cannot drop below the batch and serial entries already
+		// captured for the line (FUL-0035); the entries are corrected first.
+		if err := domain.CheckTrackedWithinPicked(entryQty(sh.Lines[idx].Tracking), next.Picked); err != nil {
+			return mapTrackingErr(err)
 		}
 		if pk.Reason != "" && !backorder.IsPositive() {
 			return httpx.NewProblem(http.StatusUnprocessableEntity, CodeValidation, "a reason applies to a short pick only")
@@ -928,6 +943,10 @@ func (s *Postgres) PostPackingSlip(ctx context.Context, id string, version int, 
 			if err := insertSlip(ctx, tx, p.TenantID, sh.LegalEntityID, slip); err != nil {
 				return PackingSlip{}, err
 			}
+			tracked, err := stampTracking(ctx, tx, p.TenantID, slip.ID, sh, slip.Lines)
+			if err != nil {
+				return PackingSlip{}, err
+			}
 			if slip.PackagingFees, err = recordPackagingFees(ctx, tx, p.TenantID, sh, slip, in.CountryCode); err != nil {
 				return PackingSlip{}, err
 			}
@@ -962,7 +981,12 @@ func (s *Postgres) PostPackingSlip(ctx context.Context, id string, version int, 
 			if err := bumpShipment(ctx, tx, p.TenantID, &sh, target); err != nil {
 				return PackingSlip{}, err
 			}
-			if err := enqueue(ctx, tx, sh.ID, fulevents.PackingSlipPosted, p.TenantID, slipPostedData(slip, sh, returnables)); err != nil {
+			posted := slipPostedData(slip, sh, returnables)
+			for i, pl := range slip.Lines {
+				posted.Lines[i].ProductID = sh.Lines[lineIndex(sh, pl.ShipmentLineID)].ProductID
+				posted.Lines[i].Tracking = trackingEventEntries(tracked[pl.ShipmentLineID])
+			}
+			if err := enqueue(ctx, tx, sh.ID, fulevents.PackingSlipPosted, p.TenantID, posted); err != nil {
 				return PackingSlip{}, err
 			}
 			if in.EmitASN {
@@ -1048,6 +1072,11 @@ func (s *Postgres) CancelPackingSlip(ctx context.Context, slipID string, idem Id
 				return PackingSlip{}, err
 			}
 			if _, err := tx.Exec(ctx, `update container set status = 'CLOSED', packing_slip_id = null where tenant_id = $1 and packing_slip_id = $2`,
+				p.TenantID, orig.ID); err != nil {
+				return PackingSlip{}, err
+			}
+			// The entries that shipped on this slip go back to the pick.
+			if _, err := tx.Exec(ctx, `update pick_tracking set packing_slip_id = null where tenant_id = $1 and packing_slip_id = $2`,
 				p.TenantID, orig.ID); err != nil {
 				return PackingSlip{}, err
 			}

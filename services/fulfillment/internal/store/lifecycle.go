@@ -37,6 +37,10 @@ func (s *Postgres) CancelShipment(ctx context.Context, id string, version int, i
 			if err := bumpShipment(ctx, tx, p.TenantID, &sh, next); err != nil {
 				return sh, err
 			}
+			// A cancelled shipment frees the serial numbers it had taken.
+			if _, err := tx.Exec(ctx, `delete from pick_tracking where tenant_id = $1 and shipment_id = $2`, p.TenantID, sh.ID); err != nil {
+				return sh, err
+			}
 			refs := []fulevents.LineRef{}
 			for _, l := range sh.Lines {
 				refs = append(refs, fulevents.LineRef{OrderLineID: l.OrderLineID, Qty: l.Planned.String()})
@@ -149,6 +153,15 @@ func (s *Postgres) CloseRemainder(ctx context.Context, id string, version int, i
 				lines = append(lines, fulevents.ClosedLine{OrderLineID: l.OrderLineID, Qty: c.Closed.String(), PickedUnpacked: c.PickedUnpacked.String()})
 				l.Closed = l.Closed.Add(c.Closed)
 				l.Planned, l.Picked, l.Packed = l.Shipped, l.Shipped, l.Shipped
+			}
+			// Entries that never shipped go with the closed remainder: their
+			// serials are free again and the line keeps only what shipped.
+			if _, err := tx.Exec(ctx, `delete from pick_tracking where tenant_id = $1 and shipment_id = $2 and packing_slip_id is null`,
+				p.TenantID, sh.ID); err != nil {
+				return sh, err
+			}
+			for i := range sh.Lines {
+				sh.Lines[i].Tracking = shippedEntries(sh.Lines[i].Tracking)
 			}
 			if err := bumpShipment(ctx, tx, p.TenantID, &sh, next); err != nil {
 				return sh, err

@@ -19,6 +19,7 @@ interface LineValues {
   held: boolean;
   carrierCode: string;
   zone: string;
+  trackingRequired: boolean;
 }
 
 interface Values {
@@ -41,7 +42,7 @@ const ID_FIELDS = [
 ] as const;
 
 export function emptyLine(): LineValues {
-  return { orderId: "", orderLineId: "", customerId: "", legalEntityId: "", productId: "", unit: "EA", qty: "", confirmedShipDate: today(), atpOk: true, held: false, carrierCode: "", zone: "" };
+  return { orderId: "", orderLineId: "", customerId: "", legalEntityId: "", productId: "", unit: "EA", qty: "", confirmedShipDate: today(), atpOk: true, held: false, carrierCode: "", zone: "", trackingRequired: false };
 }
 
 /** Checks that mirror the service (FUL-0050), keyed like its field names, and the request to send. */
@@ -84,6 +85,7 @@ export function validateRelease(values: Values): { errors: Errors; input?: Relea
         held: l.held,
         ...(l.carrierCode.trim() ? { carrierCode: l.carrierCode.trim() } : {}),
         ...(l.zone.trim() ? { zone: l.zone.trim() } : {}),
+        ...(l.trackingRequired ? { trackingRequired: true } : {}),
       })),
     },
   };
@@ -177,6 +179,9 @@ export function ReleasePage() {
               </FormField>
               <FormField id={`release-lines-${i}-held`} label="On hold">
                 {(control) => <Input {...control} type="checkbox" checked={line.held} onChange={(event) => updateLine(i, { held: event.target.checked })} />}
+              </FormField>
+              <FormField id={`release-lines-${i}-trackingRequired`} label="Batch or serial tracked" hint="The packing slip posts only once batch or serial entries cover what it ships.">
+                {(control) => <Input {...control} type="checkbox" checked={line.trackingRequired} onChange={(event) => updateLine(i, { trackingRequired: event.target.checked })} />}
               </FormField>
               {values.lines.length > 1 ? (
                 <div className={styles.formActions}>

@@ -20,13 +20,14 @@ var (
 	WaveCreated          = events.Type(Context, "wave", "created", 1)
 	ASNIssued            = events.Type(Context, "asn", "issued", 1)
 	TrackingUpdated      = events.Type(Context, "tracking", "updated", 1)
+	PickTracked          = events.Type(Context, "pick", "tracked", 1)
 )
 
 // All lists every event type this service publishes, for the registry check.
 func All() []string {
 	return []string{
 		ShipmentReleased, PickConfirmed, PackingSlipPosted, PackingSlipCancelled,
-		ShipmentCancelled, ShipmentClosed, ContainerUnpacked, WaveCreated, ASNIssued, TrackingUpdated,
+		ShipmentCancelled, ShipmentClosed, ContainerUnpacked, WaveCreated, ASNIssued, TrackingUpdated, PickTracked,
 	}
 }
 
@@ -166,6 +167,35 @@ type SlipLine struct {
 	Qty            string `json:"qty"`
 	CostAmount     string `json:"cost_amount"`
 	CostSnapshotID string `json:"cost_snapshot_id"`
+	// ProductID and Tracking tell inventory which batches and serials to issue
+	// (BR-28.10). Tracking is empty for an untracked line and for reversals.
+	ProductID string          `json:"product_id,omitempty"`
+	Tracking  []TrackingEntry `json:"tracking,omitempty"`
+}
+
+// TrackingEntry is one batch or serial taken from one location.
+type TrackingEntry struct {
+	BatchNo      string `json:"batch_no,omitempty"`
+	SerialNo     string `json:"serial_no,omitempty"`
+	LocationCode string `json:"location_code,omitempty"`
+	Qty          string `json:"qty"`
+}
+
+// TrackedLine is the tracking captured for one shipment line.
+type TrackedLine struct {
+	OrderLineID string          `json:"order_line_id"`
+	ProductID   string          `json:"product_id"`
+	Entries     []TrackingEntry `json:"entries"`
+}
+
+// PickTrackedData is published when the batch, serial and location entries of
+// a shipment line are captured or replaced at pick (BR-28.10). Entries is the
+// full set of the line's entries not yet shipped.
+type PickTrackedData struct {
+	ShipmentID     string      `json:"shipment_id"`
+	ShipmentNumber string      `json:"shipment_number"`
+	WarehouseID    string      `json:"warehouse"`
+	Line           TrackedLine `json:"line"`
 }
 
 // PackagingFee is one statistical packaging fee line of a slip (BR-28.12). It

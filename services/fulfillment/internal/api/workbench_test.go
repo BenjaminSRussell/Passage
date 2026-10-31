@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/BenjaminSRussell/passage/platform/httpx"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/services/fulfillment/internal/domain"
@@ -19,6 +21,7 @@ type workbenchCalls struct {
 	waveReq     store.WaveRequest
 	waveFilter  store.WaveFilter
 	tracked     []store.TrackingEvent
+	captured    []domain.TrackingEntry
 	duplicate   bool
 	cancelCalls int
 }
@@ -38,6 +41,15 @@ func (f *fakeStore) CloseRemainder(_ context.Context, id string, version int, id
 		return store.Shipment{}, httpx.NewProblem(http.StatusPreconditionFailed, store.CodeVersion, "shipment version changed")
 	}
 	return store.Shipment{ID: id, Version: 4, Status: domain.StatusShipped}, nil
+}
+
+func (f *fakeStore) CaptureTracking(_ context.Context, id, _ string, version int, entries []domain.TrackingEntry, idem store.Idem) (store.Shipment, error) {
+	f.lastIdem = idem
+	if version != 3 {
+		return store.Shipment{}, httpx.NewProblem(http.StatusPreconditionFailed, store.CodeVersion, "shipment version changed")
+	}
+	f.workbench.captured = entries
+	return store.Shipment{ID: id, Version: 4, Status: domain.StatusPicked}, nil
 }
 
 func (f *fakeStore) UnpackContainer(_ context.Context, id string, version int, _ string, idem store.Idem) (store.Shipment, error) {
@@ -418,6 +430,51 @@ func TestConfirmWavePick_ValidationKeyAndDuty(t *testing.T) {
 	}
 	rec = do(t, h, http.MethodPost, path, good, map[string]string{"Idempotency-Key": "w-403", "X-Passage-Duties": "WarehouseView"})
 	if rec.Code != http.StatusForbidden {
+		t.Fatalf("viewer: status = %d, want 403", rec.Code)
+	}
+}
+
+func TestCaptureTracking_ValidatesAndEnforcesDuty(t *testing.T) {
+	fs := &fakeStore{}
+	h := newServer(t, fs)
+	path := "/v1/fulfillment/shipments/" + ids.New() + "/lines/" + ids.New() + ":capture-tracking"
+	hdr := func(key string) map[string]string {
+		return map[string]string{"Idempotency-Key": key, "If-Match": `"3"`}
+	}
+	body := `{"entries":[{"batchNo":"L-1","locationCode":"A-01","qty":"4.5"},{"serialNo":"SN-1","qty":"1"}]}`
+	if rec := do(t, h, http.MethodPost, path, body, map[string]string{"Idempotency-Key": "t-1"}); rec.Code != http.StatusPreconditionRequired {
+		t.Fatalf("no If-Match: status = %d, want 428", rec.Code)
+	}
+	if rec := do(t, h, http.MethodPost, path, body, map[string]string{"If-Match": `"3"`}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("no key: status = %d, want 400", rec.Code)
+	}
+	rec := do(t, h, http.MethodPost, path, body, hdr("t-2"))
+	if rec.Code != http.StatusOK || rec.Header().Get("ETag") != `"4"` {
+		t.Fatalf("status = %d etag = %q body = %s", rec.Code, rec.Header().Get("ETag"), rec.Body.String())
+	}
+	if len(fs.workbench.captured) != 2 || fs.workbench.captured[0].BatchNo != "L-1" || !fs.workbench.captured[0].Qty.Equal(decimal.RequireFromString("4.5")) || fs.workbench.captured[1].SerialNo != "SN-1" {
+		t.Fatalf("captured = %+v", fs.workbench.captured)
+	}
+	// An empty entry list clears the line's tracking.
+	if rec := do(t, h, http.MethodPost, path, `{"entries":[]}`, hdr("t-3")); rec.Code != http.StatusOK || len(fs.workbench.captured) != 0 {
+		t.Fatalf("clear: status = %d captured = %+v", rec.Code, fs.workbench.captured)
+	}
+	for name, bad := range map[string]string{
+		"zero qty":     `{"entries":[{"batchNo":"L-1","qty":"0"}]}`,
+		"not a number": `{"entries":[{"batchNo":"L-1","qty":"x"}]}`,
+		"unknown key":  `{"entries":[],"extra":1}`,
+	} {
+		if rec := do(t, h, http.MethodPost, path, bad, hdr("t-4")); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400", name, rec.Code)
+		}
+	}
+	badLine := "/v1/fulfillment/shipments/" + ids.New() + "/lines/not-a-uuid:capture-tracking"
+	if rec := do(t, h, http.MethodPost, badLine, body, hdr("t-5")); rec.Code != http.StatusNotFound {
+		t.Fatalf("bad line id: status = %d, want 404", rec.Code)
+	}
+	h2 := hdr("t-6")
+	h2["X-Passage-Duties"] = "WarehouseView"
+	if rec := do(t, h, http.MethodPost, path, body, h2); rec.Code != http.StatusForbidden {
 		t.Fatalf("viewer: status = %d, want 403", rec.Code)
 	}
 }

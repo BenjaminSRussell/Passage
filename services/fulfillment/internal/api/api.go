@@ -82,6 +82,7 @@ func (a *API) Routes(r chi.Router) {
 	a.routesPacking(r)
 	a.routesWorkbench(r)
 	a.routesInquiry(r)
+	a.routesTracking(r)
 }
 
 // ---- request and response DTOs -------------------------------------------
@@ -108,6 +109,8 @@ type releaseLine struct {
 	// picking workbench filters and groups by them (FR-28.13). Both optional.
 	CarrierCode string `json:"carrierCode"`
 	Zone        string `json:"zone"`
+	// TrackingRequired marks a batch or serial tracked product (BR-28.10).
+	TrackingRequired bool `json:"trackingRequired"`
 }
 
 type releaseResponse struct {
@@ -551,7 +554,8 @@ func toReleaseLines(req releaseRequest) ([]domain.ReleaseLine, error) {
 		}
 		out = append(out, domain.ReleaseLine{OrderID: l.OrderID, OrderLineID: l.OrderLineID, CustomerID: l.CustomerID,
 			LegalEntityID: l.LegalEntityID, WarehouseID: req.WarehouseID, ProductID: l.ProductID, Unit: l.Unit, Qty: qty,
-			ConfirmedShipDate: ship, ATPOK: l.ATPOK, Held: l.Held, CarrierCode: l.CarrierCode, Zone: l.Zone})
+			ConfirmedShipDate: ship, ATPOK: l.ATPOK, Held: l.Held, CarrierCode: l.CarrierCode, Zone: l.Zone,
+			TrackingRequired: l.TrackingRequired})
 	}
 	return out, nil
 }

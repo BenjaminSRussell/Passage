@@ -7,6 +7,7 @@ import { dash, formatDate, formatDateTime, formatMoney, shortId, SHORT_PICK_REAS
 import styles from "./pages.module.css";
 import { AutoPackForm, PackForm, PickForm, PostForm } from "./ShipmentActions";
 import { canCancelShipment, canCloseRemainder, CancelShipmentPanel, CloseRemainderPanel, canUnpack, LabelButton, LabelPanel, TrackingCard, UnpackButton } from "./ShipmentTracking";
+import { TrackingForm, trackableLines, trackingCover } from "./TrackingForm";
 import { useLoad } from "./useLoad";
 
 interface Detail {
@@ -25,6 +26,16 @@ const lineColumns: DataTableColumn<ShipmentLine>[] = [
   { key: "remaining", header: "To ship", align: "end", render: (row) => subtractDecimal(row.qtyPlanned, row.qtyShipped) },
   { key: "qtyClosed", header: "Closed", align: "end", render: (row) => row.qtyClosed ?? "0" },
   { key: "zone", header: "Zone", render: (row) => row.zone ?? dash },
+  {
+    key: "tracking",
+    header: "Batch / serial",
+    render: (row) => {
+      const entries = row.tracking ?? [];
+      if (entries.length === 0) return row.trackingRequired ? "Required" : dash;
+      const text = entries.map((e) => [e.serialNo ?? e.batchNo, e.locationCode ? `@${e.locationCode}` : "", e.serialNo ? "" : ` × ${e.qty}`].join("")).join(", ");
+      return row.trackingRequired ? `${text} (${trackingCover(row)})` : text;
+    },
+  },
   { key: "shortPickReason", header: "Short reason", render: (row) => (row.shortPickReason ? (SHORT_PICK_REASONS[row.shortPickReason] ?? row.shortPickReason) : dash) },
 ];
 
@@ -123,6 +134,7 @@ export function ShipmentDetailPage() {
         </Alert>
       ) : null}
       <DataTable label="Shipment lines" columns={lineColumns} rows={shipment.lines} getRowKey={(row) => row.id} />
+      {trackableLines(shipment).length > 0 ? <TrackingForm key={`tracking-${shipment.version}`} shipment={shipment} onDone={state.reload} /> : null}
       {canPick ? <PickForm key={`pick-${shipment.version}`} shipment={shipment} onDone={state.reload} /> : null}
       {autoPacked ? (
         <Alert tone={autoPacked.warnings.length > 0 ? "warning" : "success"} title={`Auto-pack closed ${autoPacked.containers.length} container${autoPacked.containers.length === 1 ? "" : "s"}`} live="status">

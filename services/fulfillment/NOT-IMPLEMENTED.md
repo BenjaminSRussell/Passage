@@ -139,6 +139,33 @@ short, only lines of shipments that still pick), the shipment pick form offers
 the reason on a short line, the shipment lines show it, and the backorders
 screen has a Reason column. The reason is optional and the latest one given
 for a line is kept.
+Slice 10 adds batch, serial and location capture at pick (BR-28.10, FUL-0006).
+A release line may carry `trackingRequired` (the caller knows the product's tracking
+dimension group); it is stored on the shipment line (migration 0011). `POST
+/shipments/{id}/lines/{lid}:capture-tracking` (`WarehousePick`, `If-Match`,
+`Idempotency-Key`) replaces the unshipped batch, serial and location entries of a
+picked line in the new `pick_tracking` table (tenant and legal-entity policies,
+granted in the same migration). A serial is one unit and unique per product while
+its shipment is live (FUL-0036; cancelling the shipment frees it), entries together
+with what already shipped cannot exceed the picked quantity (FUL-0035), and an
+entry without batch and serial is refused (FUL-0050). The packing-slip post refuses
+a tracking-required line whose entries do not cover exactly the quantity the slip
+ships (FUL-0006), stamps the entries with the slip, and `packingslip.posted` carries
+`product_id` and the `tracking` entries per line so inventory can issue the right
+batches and serials; cancelling the slip puts the entries back on the pick, so a
+partial shipment keeps the entries of the first slip and tracks the remainder
+separately. A re-pick cannot drop the picked quantity below the line's entries
+(FUL-0035), and closing the remainder drops the entries that never shipped, so their
+serials are free again. A shipped serial stays taken for its product (it cannot be
+picked again) until a return frees it, which is not built (see the handoff below). `dev.passage.fulfillment.pick.tracked.v1` is written through the outbox
+on every capture. Store tests against Postgres cover refusal at post with none and
+short entries, the replace and the version check, the event payload, the stamp and
+the cancel, serial uniqueness across shipments and its release on shipment cancel,
+the partial shipment, the re-pick guard and the close of the remainder, and tenant and
+legal-entity isolation. The shipment detail has
+a "Batch and serial tracking" card (line chooser, entry rows with batch, serial,
+location and quantity, the covered quantity) and a "Batch / serial" column on the
+lines; the release form has a "Batch or serial tracked" checkbox per line. No new duty is introduced (`WarehousePick`), so there is nothing new for #313.
 The OpenAPI and AsyncAPI have zero FAIL lines on the doc gates.
 
 ## Important gaps (read first)
@@ -163,7 +190,10 @@ The OpenAPI and AsyncAPI have zero FAIL lines on the doc gates.
 |---|---|---|---|
 | D1 | Order release rules (horizon, ATP, hold, one shipment per order × warehouse × date) | built (domain + `POST /releases:run` + release board screen) | A line already on a shipment that is not cancelled is skipped as `already_released`, and runs per warehouse are serialised. Release priority ordering and consolidation (BR-28.8, `fulfillment.consolidation`) are not built. The caller supplies the confirmed lines; reading them from sales (wave 27) is a later slice. |
 | D1 | Wave and batch picking, wave creation, wave pick-list print | partial | Built: waves from the picking workbench (see D6), the waves list and detail, shipments moved to PICKING, `wave.created`. Not built: batch picking, the pick list document (`WV-` PDF/ZPL), picker assignment, wave close (waves stay OPEN), and pick confirmation per wave (`/waves/{id}:confirm-pick`); picks are confirmed per shipment. |
-| D1 | Pick confirmation with batch/serial/location, `short_pick_action` | partial | Quantity confirmation is built. Batch, serial and location capture (BR-28.10) and the `short_pick_action` setting are not. |
+| D1 | Pick confirmation with batch/serial/location, `short_pick_action` | partial | Quantity confirmation is built; batch, serial and location capture per line with the FUL-0006 check at post is built (slice 10). Not built: the `short_pick_action` setting, capture inside the pick call itself and per wave (capture is its own command after the pick), batch and serial existence or on-hand checks against inventory (wave 16), and expiry or batch-status rules (handoff to inventory, wave 16). |
+| D1 | `trackingRequired` source | handoff to product (wave 8) and sales (wave 27) | The release caller supplies `trackingRequired` per line (the web release form has a checkbox for it); this service does not read the product's tracking dimension group, so a caller that omits it releases the line as untracked. |
+| D1 | Serial freed by a customer return | handoff to sales returns (wave 30) and inventory (wave 16) | A serial that shipped on a posted slip stays unique for its product in `pick_tracking`, so the same unit cannot be picked again. A return receipt must free it (or inventory must own serial status); until then a returned and resold serial is refused with FUL-0036. |
+| D1 | Inventory issue by batch and serial | handoff to inventory (wave 16) | `packingslip.posted` lines carry `product_id` and `tracking` (batch, serial, location, qty); `pick.tracked` carries the live set before shipping. Inventory must consume them. |
 | D1 | Packing with containers, nested pallet → carton, SSCC with mod-10 | partial | SSCC generation and container creation (manual and auto-pack) are built; a known container type gives the tare, returnable flag and material. Nesting (`parent_container_id`) is not. Containers are created CLOSED in the pack call; a separate `:close` action is not exposed. Container dimensions are not recorded. |
 | D1 | GS1-128 label rendering (PDF, ZPL) | partial | Built: `GET /shipments/{id}/containers/{cid}/label` renders ZPL with AI (00) and the SSCC after FNC1, after checking the check digit (FUL-0007), and the web shows it. Not built: the PDF label, the GTIN (01), batch (10), quantity (37), ship-to postal (420) and order reference fields of section 5.28.15, and label storage (`label_ref`); document rendering is wave 5 (docgen). |
 | D2 | Packing slip posting: inventory deduction and COGS journal | partial | Journal (both BR-28.1 stocked rows), `PS-` numbering gap-free per legal entity, containers marked SHIPPED, and the event are built. Inventory deduction is a handoff (see above). Ledger post is a handoff. |
@@ -245,7 +275,7 @@ slips to 5); the comparison with the ledger's GL 1405 is a handoff to ledger.
 | SSCC no reuse for 12 months (`sscc_no_reuse_months`) | deviation | `UNIQUE (tenant_id, sscc)` means an SSCC is never issued twice in a tenant, which is stricter than 12 months. The tenant setting `sscc_no_reuse_months` (12 to 60) is not stored: this service has no tenant settings yet, so the register's `noReuseUntil` always uses the default 12. |
 | SSCC register columns `printed_at` and "reused flag" (section 5.28.14) | deviation | Labels are rendered on request and not stored (`label_ref` is not built, see D1), so there is no print time; the register returns `issuedAt` instead. An SSCC cannot be reused (unique per tenant), so a reused flag would always be false; the register returns `noReuseUntil` instead. |
 | SSCC sequence check (nightly 00:30, alert on duplicates or check-digit failures) | later slice of PSG-28 | No scheduler is wired in this service. The database refuses duplicates and the label endpoint checks the check digit (FUL-0007). |
-| Period check (FUL-0002), negative on-hand (FUL-0003), tolerance (FUL-0005), tracking dims (FUL-0006) on post | later slice of PSG-28 | Period control is wave 14. Negative on-hand is wave 16. |
+| Period check (FUL-0002), negative on-hand (FUL-0003), tolerance (FUL-0005) on post (the tracking dims check, FUL-0006, is built in slice 10) | later slice of PSG-28 | Period control is wave 14. Negative on-hand is wave 16. |
 | Consolidation (BR-28.8, FUL-0011, `consolidation_enabled`, flag `fulfillment.consolidation`) | later slice of PSG-28 | A shipment holds one order (`order_id`), has no delivery address, and the order's `ship_separately` flag is not read from sales (wave 27). Consolidating needs multi-order shipments, the address on the shipment and the flag, so the FUL-0011 check is not built until release can use it. |
 | Shipment cancel of a packed shipment | built (unpack first, slice 8) | `POST /shipments/{id}:cancel` (slice 3) cancels from OPEN to PACKED while nothing has shipped and the shipment holds no container. A shipment with containers cannot cancel (FUL-0021) until they are unpacked one by one (slice 8, `:unpack`). |
 | DNI report (FR-28.12) | built | `GET /delivered-not-invoiced` (`WarehouseView`) and the web screen. It is computed from the slip journals on read, not from a stored projection. |

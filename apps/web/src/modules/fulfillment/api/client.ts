@@ -27,6 +27,27 @@ export interface ShipmentLine {
   zone: string | null;
   /** Reason given for the latest short pick; null or absent when none. */
   shortPickReason?: ShortPickReason | null;
+  /** The product is batch or serial tracked; the slip posts only with entries for what it ships (BR-28.10). */
+  trackingRequired?: boolean;
+  /** Batch, serial and location entries captured at pick. */
+  tracking?: TrackingEntry[];
+}
+
+export interface TrackingEntry {
+  id: string;
+  batchNo: string | null;
+  serialNo: string | null;
+  locationCode: string | null;
+  qty: string;
+  /** The packing slip the quantity shipped on; null until it ships. */
+  packingSlipId: string | null;
+}
+
+export interface TrackingEntryInput {
+  batchNo?: string;
+  serialNo?: string;
+  locationCode?: string;
+  qty: string;
 }
 
 export interface Container {
@@ -285,6 +306,8 @@ export interface ReleaseLineInput {
   carrierCode?: string;
   /** The line's pick zone. */
   zone?: string;
+  /** The product is batch or serial tracked (BR-28.10). */
+  trackingRequired?: boolean;
 }
 
 export interface ReleaseInput {
@@ -508,6 +531,11 @@ export function getShipment(id: string, signal?: AbortSignal): Promise<Shipment>
 
 export function confirmPick(id: string, version: number, picks: { shipmentLineId: string; picked: string; reason?: ShortPickReason }[], key: string): Promise<Shipment> {
   return command<Shipment>(`${shipmentPath(id)}:confirm-pick`, { picks }, key, version);
+}
+
+/** Replaces the unshipped batch, serial and location entries of a picked line (BR-28.10). */
+export function captureTracking(shipmentId: string, lineId: string, version: number, entries: TrackingEntryInput[], key: string): Promise<Shipment> {
+  return command<Shipment>(`${shipmentPath(shipmentId)}/lines/${encodeURIComponent(lineId)}:capture-tracking`, { entries }, key, version);
 }
 
 export function packContainer(

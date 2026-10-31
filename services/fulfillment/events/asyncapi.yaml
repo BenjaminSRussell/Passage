@@ -41,6 +41,11 @@ channels:
     messages:
       shipmentClosed:
         $ref: "#/components/messages/ShipmentClosed"
+  pickTracked:
+    address: passage.fulfillment.pick
+    messages:
+      pickTracked:
+        $ref: "#/components/messages/PickTracked"
   containerUnpacked:
     address: passage.fulfillment.container
     messages:
@@ -92,6 +97,11 @@ operations:
     channel: { $ref: "#/channels/shipmentClosed" }
     messages:
       - $ref: "#/channels/shipmentClosed/messages/shipmentClosed"
+  publishPickTracked:
+    action: send
+    channel: { $ref: "#/channels/pickTracked" }
+    messages:
+      - $ref: "#/channels/pickTracked/messages/pickTracked"
   publishContainerUnpacked:
     action: send
     channel: { $ref: "#/channels/containerUnpacked" }
@@ -266,6 +276,29 @@ components:
                 order_line_id: { type: string, format: uuid }
                 qty: { type: string, description: The planned quantity that will not ship. }
                 picked_unpacked: { type: string, description: The part of qty that was picked but never packed and goes back to stock. }
+    PickTracked:
+      name: dev.passage.fulfillment.pick.tracked.v1
+      title: Pick tracking captured
+      summary: >
+        The batch, serial and location entries of a shipment line were captured or
+        replaced at pick (BR-28.10). Entries is the full set not yet shipped on the line.
+      contentType: application/json
+      payload:
+        type: object
+        required: [shipment_id, shipment_number, warehouse, line]
+        properties:
+          shipment_id: { type: string, format: uuid }
+          shipment_number: { type: string }
+          warehouse: { type: string, format: uuid }
+          line:
+            type: object
+            required: [order_line_id, product_id, entries]
+            properties:
+              order_line_id: { type: string, format: uuid }
+              product_id: { type: string, format: uuid }
+              entries:
+                type: array
+                items: { $ref: "#/components/schemas/TrackingEntry" }
     ContainerUnpacked:
       name: dev.passage.fulfillment.container.unpacked.v1
       title: Container unpacked
@@ -372,6 +405,19 @@ components:
         qty: { type: string }
         cost_amount: { type: string }
         cost_snapshot_id: { type: string }
+        product_id: { type: string, format: uuid, description: Set on a posted slip line. }
+        tracking:
+          type: array
+          description: Batches and serials shipping on this line (BR-28.10); absent for an untracked line and for a reversal.
+          items: { $ref: "#/components/schemas/TrackingEntry" }
+    TrackingEntry:
+      type: object
+      required: [qty]
+      properties:
+        batch_no: { type: string }
+        serial_no: { type: string }
+        location_code: { type: string }
+        qty: { type: string }
     JournalEntry:
       type: object
       description: Signed amount; debits positive, credits negative.
