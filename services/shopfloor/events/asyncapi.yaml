@@ -653,6 +653,10 @@ components:
           type: string
         correctedBy:
           type: string
+          description: >-
+            The supervisor who corrected the registration, or
+            `system:offline-replay` when the server cancels its own auto-stop
+            (to 0 hours) because the kiosk's job-stop for the same start arrived.
     TimeProfileSavedData:
       type: object
       required: [profileId, code, name, active, version, savedBy]

@@ -196,7 +196,11 @@ paths:
         auto-stopped bundle's time is split by the good quantity on its starts,
         or equally (BR-25.1). Starts sharing the incoming `bundleId` stay open.
         A start older than an open unit (a late offline replay) is itself
-        closed at that unit's start. A unit open for more than 24 hours is
+        closed at that unit's start, or at the worker's next job-start after it
+        if earlier, unless its own `job-stop` is stored or in the same batch.
+        When that stop arrives in a later batch, the server's stop is corrected
+        to zero length (`registration.corrected`, correctedBy
+        `system:offline-replay`). A unit open for more than 24 hours is
         stopped at 24 hours with flag `auto-stop-capped`. A `job-start` for a
         job the server already finished is stored with flag
         `job-finished-conflict` and warning SF-0004, and the job stays finished

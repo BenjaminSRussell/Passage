@@ -58,9 +58,13 @@ agreement list shows the windows and the create form adds and removes them.
   runs from its earliest start and is split by the good quantity on its starts, or equally
   (BR-25.1, `domain.SplitBundleHours`). Starts sharing the incoming `bundleId` stay open,
   so a bundle starts in one batch. A start older than an open unit (a late offline replay)
-  is itself closed at that unit's start, unless its own job-stop (same job, starting at or
-  after it) is stored or in the same batch: then that stop carries its time and the server
-  writes none, so a replayed start and stop are not counted twice. A unit open for more than 24 hours is stopped at
+  is itself closed at that unit's start, or earlier at the worker's next job-start after
+  it, so it never overlaps work registered in between. A member of that unit with its own
+  job-stop (same job, starting at or after it and before the next start of that job) stored
+  or in the same batch is left out: the stop carries its time and the server writes none.
+  When the own stop arrives in a later batch, the server's stop is corrected to zero length
+  (`registration_correction` by `system:offline-replay`, `registration.corrected`), so a
+  replayed start and stop are never counted twice. A unit open for more than 24 hours is stopped at
   24 hours and also flagged `auto-stop-capped`. Each auto-stop emits
   `registration.posted` (kind `job-stop`, `hours`, `flags`) in the same transaction and
   comes back in the item's `autoStopped` with warning SF-0002. The worker row is locked

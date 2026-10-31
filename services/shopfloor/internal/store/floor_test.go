@@ -218,6 +218,52 @@ func TestFloor_LateBatchFillsGapNotDropped(t *testing.T) {
 	}
 }
 
+// Review of PR #368 (BR-25.4, BR-25.10): a late batch carrying state events. The
+// edge's newer batch (seq 4-7: RUNNING 08:12, counts 08:15 and 08:18, OFF 08:20)
+// commits first; the older one (seq 1-3: RUNNING 08:00, count 08:01, DOWN 08:02)
+// arrives late at 08:31. The late DOWN feeds OEE, as the events are the OEE
+// source, but does not open a downtime record or raise an andon, although it was
+// 29 minutes old on arrival: the downtime record follows the newest state, which
+// is OFF. By hand for 08:00-08:30: planned = RUNNING 2 + DOWN 10 + RUNNING 8 = 20
+// min, run = 10 min (no count gap reaches the 5-minute idle threshold), good 3.
+func TestFloor_LateStateEventsFeedOEENotDowntime(t *testing.T) {
+	s, _, _ := setup(t)
+	ctx := testkit.Ctx(testkit.TenantID(24))
+	resource := ids.New()
+	mustMachine(t, s, ctx, "M-301", resource)
+	t0 := time.Date(2026, 10, 21, 8, 0, 0, 0, time.UTC)
+	at := func(min int) time.Time { return t0.Add(time.Duration(min) * time.Minute) }
+	count := func(seq int64, min int) MachineEventIn {
+		return MachineEventIn{MachineCode: "M-301", Event: domain.MachineEvent{Seq: seq, Kind: "count", At: at(min), GoodCount: 1}}
+	}
+	newer := []MachineEventIn{floorEvent("M-301", 4, "state", at(12), domain.MachineRunning), count(5, 15), count(6, 18),
+		floorEvent("M-301", 7, "state", at(20), domain.MachineOff)}
+	older := []MachineEventIn{floorEvent("M-301", 1, "state", at(0), domain.MachineRunning), count(2, 1),
+		floorEvent("M-301", 3, "state", at(2), domain.MachineDown)}
+
+	if res, err := s.IngestMachineEvents(ctx, at(21), newer); err != nil || res.Accepted != 4 || res.DowntimesOpen != 0 {
+		t.Fatalf("newer batch = %+v, %v", res, err)
+	}
+	res, err := s.IngestMachineEvents(ctx, at(31), older)
+	if err != nil || res.Accepted != 3 || res.Dropped != 0 || res.DowntimesOpen != 0 || res.AndonsRaised != 0 {
+		t.Fatalf("late batch = %+v, %v (want 3 accepted, no downtime, no andon)", res, err)
+	}
+	if downs, err := s.ListDowntimes(ctx, DowntimeFilter{Limit: 10}); err != nil || len(downs) != 0 {
+		t.Fatalf("downtimes = %+v, %v", downs, err)
+	}
+	if open, err := s.OpenAndon(ctx, ""); err != nil || len(open) != 0 {
+		t.Fatalf("andon = %+v, %v", open, err)
+	}
+	streams, err := s.LoadOEEStreams(ctx, []string{resource}, t0, at(30))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := domain.BuildBuckets(streams[resource], t0, at(30), 30*time.Minute)
+	if err != nil || len(b) != 1 || b[0].GoodCount != 3 || !b[0].PlannedMinutes.Equal(decimal.NewFromInt(20)) || !b[0].RunMinutes.Equal(decimal.NewFromInt(10)) {
+		t.Fatalf("bucket = %+v, %v", b, err)
+	}
+}
+
 // FR-25.8: approved pay lines export once, with the batch id on every CSV row
 // and the lines in payday.exported; a second export with nothing new is
 // SF-0111; the batch is listed and its CSV can be read back unchanged.

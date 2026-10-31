@@ -27,9 +27,12 @@ type offlineAction struct {
 // at 07:40 (device 07:33). Meanwhile, online: the supervisor finishes job J3 at
 // 07:10, and W4 walks to kiosk K2 and starts J6 there at 07:20.
 //
-// K1 sends its queue as two chunks of 20 (device time order, each chunk reversed
-// to show the server orders by client time); the first answer is lost, so it
-// resends chunk 1, then chunk 2, then the whole queue once more from a second tab.
+// K1 sends its queue in three chunks (device time order, each chunk reversed to
+// show the server orders by client time) of 11, 8 and 21 actions. The chunk
+// boundaries fall inside two of W4's start/stop pairs (J5 start | J5 stop, and
+// J3 start | J3 stop), so a start reaches the server one request before its own
+// stop. The first answer is lost, so K1 resends chunk 1, then sends chunks 2 and
+// 3, then the whole queue once more from a second tab.
 //
 // Expected, derived by hand from the action table (true = device + 7 min; hours
 // are minutes / 60 to 0.01: 7 min 0.12, 3 min 0.05, 2 min 0.03, 10 min 0.17, 4 min 0.07):
@@ -37,12 +40,15 @@ type offlineAction struct {
 //   - every kiosk time is shifted by +420 s and records clockOffsetSeconds 420.
 //   - W1-W3 (i = 0, 1, 2), clocked 07:0i to 07:2(2+i): J1 0.12 h, J2 0.12 h,
 //     J7 0.05 h (auto-stopped by the J8 start, SF-0002), J8 0.03 h, J9 0.03 h.
-//   - W4: J5 0.17 h and J3 0.07 h from K1's own stops; the J3 start carries
-//     job-finished-conflict (SF-0004) and J3 stays finished; J4, started at 07:17
-//     and never stopped on K1, is closed at 07:20 by K2's J6 start (0.05 h,
-//     auto-stopped); J6 stays open (K2's work is newer than the replay). Before the
-//     fix in applyJobStart, the J5 and J3 starts were also closed at 07:20 by the
-//     server (0.28 h and 0.12 h more), counting their time twice.
+//   - W4: the J5 start (07:03, chunk 1) and the J3 start (07:13, chunk 2) are
+//     older than K2's open J6 and arrive without their stops, so the server closes
+//     each at 07:20 (SF-0002). When K1's own stops arrive in the next chunk, each
+//     server stop is corrected to zero length (07:03-07:03 and 07:13-07:13,
+//     0.00 h, still flagged auto-stopped), so J5 is 0.17 h and J3 0.07 h from K1's
+//     stops only. The J3 start carries job-finished-conflict (SF-0004) and J3 stays
+//     finished; J4, started at 07:17 and never stopped on K1, is closed at 07:20 by
+//     K2's J6 start (0.05 h, auto-stopped); J6 stays open (K2's work is newer than
+//     the replay). Before the fix J5 held 0.17 + 0.28 h and J3 0.07 + 0.12 h.
 func TestHTTP_Offline30MinReplayWithConflicts(t *testing.T) {
 	admin, app := testkit.DBWithApp(t)
 	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
@@ -151,16 +157,28 @@ func TestHTTP_Offline30MinReplayWithConflicts(t *testing.T) {
 		return m
 	}
 
-	first := send(queue[:20])
-	if s := status(first); s[store.StatusAccepted] != 20 {
-		t.Fatalf("chunk 1: %v", s)
+	// The boundaries must split W4's pairs; check that against the table rather
+	// than trusting the indices.
+	pairAt := func(i int, job string) bool {
+		a, b := queue[i-1], queue[i]
+		return a.worker == "W4" && a.kind == "job-start" && a.job == job && b.worker == "W4" && b.kind == "job-stop" && b.job == job
 	}
-	if s := status(send(queue[:20])); s[store.StatusDuplicate] != 20 {
-		t.Fatalf("chunk 1 resend: %v", s)
+	if !pairAt(11, "J5") || !pairAt(19, "J3") {
+		t.Fatalf("chunk boundaries 11 and 19 do not split W4's J5 and J3 pairs: %v | %v", queue[10:12], queue[18:20])
 	}
-	second := send(queue[20:])
-	if s := status(second); s[store.StatusAccepted] != 20 {
-		t.Fatalf("chunk 2: %v", s)
+	chunks := [][]offlineAction{queue[:11], queue[11:19], queue[19:]}
+	var deliveries []registrationResponse
+	for i, c := range chunks {
+		out := send(c)
+		if s := status(out); s[store.StatusAccepted] != len(c) {
+			t.Fatalf("chunk %d: %v", i+1, s)
+		}
+		deliveries = append(deliveries, out)
+		if i == 0 {
+			if s := status(send(c)); s[store.StatusDuplicate] != len(c) {
+				t.Fatalf("chunk 1 resend: %v", s)
+			}
+		}
 	}
 	if s := status(send(queue)); s[store.StatusDuplicate] != 40 {
 		t.Fatalf("full resend: %v", s)
@@ -174,18 +192,19 @@ func TestHTTP_Offline30MinReplayWithConflicts(t *testing.T) {
 		}
 		return out.Items
 	}
-	// Warnings across the two first deliveries: SF-0002 for each J7 stopped by a J8
-	// start (3) and for W4's J4 closed at K2's J6 start (1); SF-0004 for W4's J3 start.
+	// Warnings across the first deliveries: SF-0002 for each J7 stopped by a J8
+	// start (3), for W4's J5 and J3 closed at 07:20 before their own stops arrived
+	// (2) and for W4's J4 closed at K2's J6 start (1); SF-0004 for W4's J3 start.
 	warnings := map[string]int{}
-	for _, out := range []registrationResponse{first, second} {
+	for _, out := range deliveries {
 		for _, it := range out.Items {
 			for _, w := range it.Warnings {
 				warnings[w.Code]++
 			}
 		}
 	}
-	if warnings["SF-0002"] != 4 || warnings["SF-0004"] != 1 || len(warnings) != 2 {
-		t.Fatalf("warnings = %v, want SF-0002 x4 and SF-0004 x1", warnings)
+	if warnings["SF-0002"] != 6 || warnings["SF-0004"] != 1 || len(warnings) != 2 {
+		t.Fatalf("warnings = %v, want SF-0002 x6 and SF-0004 x1", warnings)
 	}
 
 	jobName := map[string]string{}
@@ -211,7 +230,8 @@ func TestHTTP_Offline30MinReplayWithConflicts(t *testing.T) {
 		return out
 	}
 	hm := func(m int) string { return time.Date(2026, 10, 21, 7, m, 0, 0, time.UTC).Format("15:04") }
-	// True times = device + 7 min. Rows come back oldest first (ties in insert order).
+	// True times = device + 7 min. Rows come back oldest first, ties by id (the
+	// kiosk ids sort before the server-written ones).
 	want := map[string][]row{}
 	for i, w := range []string{"W1", "W2", "W3"} {
 		want[w] = []row{
@@ -233,8 +253,10 @@ func TestHTTP_Offline30MinReplayWithConflicts(t *testing.T) {
 		{"clock-in", "", hm(0), "", "", ""},
 		{"job-start", "J5", hm(3), "", "", ""},
 		{"job-stop", "J5", hm(3), hm(13), "0.17", ""},
+		{"job-stop", "J5", hm(3), hm(3), "0.00", "auto-stopped"},
 		{"job-start", "J3", hm(13), "", "", "job-finished-conflict"},
 		{"job-stop", "J3", hm(13), hm(17), "0.07", ""},
+		{"job-stop", "J3", hm(13), hm(13), "0.00", "auto-stopped"},
 		{"job-start", "J4", hm(17), "", "", ""},
 		{"job-stop", "J4", hm(17), hm(20), "0.05", "auto-stopped"},
 		{"job-start", "J6", hm(20), "", "", ""},

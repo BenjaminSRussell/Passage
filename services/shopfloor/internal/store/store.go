@@ -224,6 +224,9 @@ func (s *Postgres) CreateRegistrations(ctx context.Context, items []Registration
 					return err
 				}
 			}
+			if err := supersedeAutoStop(ctx, tx, p.TenantID, in, items); err != nil {
+				return err
+			}
 			results[i] = res
 		}
 		return nil
