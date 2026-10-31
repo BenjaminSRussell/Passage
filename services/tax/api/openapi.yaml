@@ -24,3 +24,24 @@ paths:
           description: Caller lacks the Calculate tax duty
         "422":
           description: Tax rule problem (TAX-0001 to TAX-0008)
+  /v1/tax/withholding/calculate:
+    post:
+      operationId: calculateWithholding
+      x-passage-duty: Calculate withholding tax
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Taxable base, withholding amount and net payable with determination trace
+        "400":
+          description: Validation problem (COM-0001)
+        "401":
+          description: Missing or malformed tenant (AUTH-0001)
+        "403":
+          description: Caller lacks the Calculate withholding tax duty
+        "422":
+          description: Withholding rule problem (TAX-0001, TAX-0002, TAX-0003)
