@@ -6,7 +6,8 @@
 // the legal-entity column of EVERY cube the query touches (measures,
 // dimensions, time dimensions, segments and filter members, including nested
 // and/or filters), so joins, aggregations and totals never see other entities.
-// A query with no scope or any unmapped cube is rejected, never widened.
+// It also adds a tenant filter on every cube, for unrestricted callers too.
+// A query with no scope, no tenant or any unmapped cube is rejected, never widened.
 
 // Models that carry a legal-entity column. Mirrors modelScopeColumns in
 // services/analytics/internal/domain/scope.go; the Go contract test
@@ -16,6 +17,10 @@ const SCOPE_COLUMNS = {
   sales_line: "legal_entity_id",
   prod_resource_shift: "legal_entity_id",
 };
+
+// Every mart is keyed (tenant_id, id) and holds all tenants' rows; every
+// mapped model carries this column.
+const TENANT_COLUMN = "tenant_id";
 
 function filterMembers(filters) {
   const out = [];
@@ -49,8 +54,14 @@ function queryRewrite(query, { securityContext }) {
     throw new Error(`ANA-0103 model ${unmapped.join(", ")} has no security mapping (SCOPE_UNMAPPED)`);
   }
   const ctx = securityContext || {};
+  // The marts hold every tenant's rows, so the tenant filter is added on every
+  // cube for every caller, unrestricted ones included.
+  if (typeof ctx.tenantId !== "string" || ctx.tenantId === "") {
+    throw new Error("ANA-0102 security context names no tenant (NO_SCOPE)");
+  }
+  const tenantFilters = cubes.map((c) => ({ member: `${c}.${TENANT_COLUMN}`, operator: "equals", values: [ctx.tenantId] }));
   if (ctx.unrestricted === true) {
-    return query;
+    return { ...query, filters: [...(query.filters || []), ...tenantFilters] };
   }
   const ids = [...new Set((ctx.legalEntityIds || []).filter((id) => typeof id === "string" && id !== ""))].sort();
   if (ids.length === 0) {
@@ -61,6 +72,7 @@ function queryRewrite(query, { securityContext }) {
     ...query,
     filters: [
       ...(query.filters || []),
+      ...tenantFilters,
       ...cubes.map((c) => ({ member: `${c}.${SCOPE_COLUMNS[c]}`, operator: "equals", values: ids })),
     ],
   };

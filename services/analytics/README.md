@@ -142,6 +142,12 @@ PASSAGE_TEST_APP_DATABASE_URL=postgres://app-role@... # adds the RLS isolation t
 node --test ../../data/cube/                            # Cube queryRewrite RLS tests
 ```
 
+`internal/store/revenue_proof_test.go` (Wave 46 proof, AC2 and AC3) needs the
+database and `node`; it runs the dbt mart SQL, the Cube revenue measure and
+`cube.js` against `testdata/fx-gl-revenue-recon.json` and compares with the GL
+values of `testdata/gl_revenue_reference.py`. Regenerate those with
+`python3 -I testdata/gl_revenue_reference.py testdata/fx-gl-revenue-recon.json > testdata/fx-gl-revenue-recon.expected.json`.
+
 Domain and API tests run without a database. The OpenAPI file is checked
 against the mounted routes by `internal/api/openapi_test.go`.
 

@@ -8,6 +8,10 @@ cubes:
     sql_table: mart.fin_journal_line
 
     dimensions:
+      # tenant_id is the tenant filter cube.js adds to every query.
+      - name: tenant_id
+        sql: tenant_id
+        type: string
       - name: legal_entity_id
         sql: legal_entity_id
         type: string

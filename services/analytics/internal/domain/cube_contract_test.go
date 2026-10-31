@@ -77,6 +77,10 @@ func TestCubeContract_FinJournalLineMatchesCatalog(t *testing.T) {
 	if _, column := modelScopeColumns("fin_journal_line"); !column || !slices.Contains(dims, "legal_entity_id") {
 		t.Error("fin_journal_line must carry the legal_entity_id scope dimension")
 	}
+	// cube.js filters every cube on tenant_id; the mart holds every tenant.
+	if !slices.Contains(dims, "tenant_id") {
+		t.Error("fin_journal_line must carry the tenant_id dimension that cube.js filters on")
+	}
 }
 
 func TestCubeContract_ScopeColumnsMatchQueryRewrite(t *testing.T) {
