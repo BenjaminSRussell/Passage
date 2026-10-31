@@ -3,6 +3,8 @@ package store_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
 	"reflect"
 	"testing"
 
@@ -431,5 +433,39 @@ func TestBatchRunRowSecurityTreatsNullLegalEntityAsAllScopeOnly(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("inserting a run without a legal entity must be refused even at all scope")
+	}
+}
+
+func TestRetryMessageOnlyRequeuesFailedMessages(t *testing.T) {
+	pool := testkit.DB(t)
+	ctx := tenant.With(context.Background(), principal(1))
+	if err := dbx.Migrate(ctx, pool, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	s := store.New(pool)
+	msg, err := s.EnqueueMessage(ctx, store.Message{Channel: domain.ChannelEmail, RecipientAddr: "a@example.test", Subject: "Hi", Body: "body"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setStatus := func(status string) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `update notify_outbound_message set status = $2, attempts = 3 where id = $1`, msg.ID, status); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var problem *httpx.Problem
+	for _, status := range []string{domain.MsgQueued, domain.MsgSending, domain.MsgSent} {
+		setStatus(status)
+		if _, err := s.RetryMessage(ctx, msg.ID); !errors.As(err, &problem) || problem.Status != http.StatusConflict {
+			t.Fatalf("retry of %s message = %v, want 409", status, err)
+		}
+	}
+	setStatus(domain.MsgFailed)
+	got, err := s.RetryMessage(ctx, msg.ID)
+	if err != nil || got.Status != domain.MsgQueued || got.Attempts != 0 {
+		t.Fatalf("retry of failed message = %+v, %v", got, err)
+	}
+	if _, err := s.RetryMessage(ctx, testkit.TenantID(77)); !errors.As(err, &problem) || problem.Status != http.StatusNotFound {
+		t.Fatalf("unknown message = %v, want 404", err)
 	}
 }

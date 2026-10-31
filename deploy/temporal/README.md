@@ -7,8 +7,9 @@ history and visibility, with the architecture-fixed 512 history shards.
 helm repo add temporal https://go.temporal.io/helm-charts
 helm upgrade --install temporal temporal/temporal \
   --namespace temporal --create-namespace \
-  --values deploy/temporal/values.yaml
+  --version 0.74.0 --values deploy/temporal/values.yaml
 ```
 
-The `temporal-database` secret and CloudNativePG clusters are environment
-handoffs because `deploy/envs/dev/apps` is owned by Wave 01.
+`application.yaml` is the Argo CD Application for the same chart (`0.74.0`, the last release that accepts these values). It is not in `deploy/envs/dev/apps` on purpose: root-dev would sync it before its database exists. Strimzi, Kafka, Apicurio Registry and Debezium Connect are wired in `deploy/envs/dev/apps/event-backbone.yaml`.
+
+Before moving `application.yaml` into `deploy/envs/dev/apps`, provision the `temporal-database` secret and the CloudNativePG cluster `temporal-postgres` (service `temporal-postgres-rw.temporal.svc`, databases `temporal` and `temporal_visibility`) in namespace `temporal`; neither exists in any dev app yet.

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -64,6 +65,10 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err != nil {
 		return err
 	}
+	distributeInterval, err := durationEnv(getenv, "NOTIFY_DISTRIBUTE_INTERVAL", notifyout.DefaultDistributeInterval)
+	if err != nil {
+		return err
+	}
 	pool, err := dbx.Connect(ctx, databaseURL)
 	if err != nil {
 		return fmt.Errorf("connect database: %w", err)
@@ -81,21 +86,24 @@ func run(ctx context.Context, getenv func(string) string) error {
 	metrics := []http.Handler{a.Metrics()}
 
 	ctx, cancel := context.WithCancel(ctx)
-	dispatched := make(chan struct{})
+	var background sync.WaitGroup
 	defer func() {
 		cancel()
-		<-dispatched
+		background.Wait()
 	}()
 	if dispatch == nil {
 		slog.Warn("run dispatcher disabled: PRODUCT_URL is empty")
-		close(dispatched)
 	} else {
 		d := dispatch.dispatcher(pool)
 		metrics = append(metrics, d.Metrics())
-		go func() {
-			defer close(dispatched)
-			d.Run(ctx)
-		}()
+		background.Go(func() { d.Run(ctx) })
+	}
+	if senders := notifyout.SendersFor(notifyCfg); len(senders) == 0 {
+		slog.Warn("notify distributor disabled: no notify adapter is enabled")
+	} else {
+		n := &notifyout.Distributor{Pool: pool, Senders: senders, Interval: distributeInterval}
+		metrics = append(metrics, n.Metrics())
+		background.Go(func() { n.Run(ctx) })
 	}
 	admin.Handle("/metrics", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		for _, h := range metrics {

@@ -100,6 +100,8 @@ func TestLoadSMTPTLSModes(t *testing.T) {
 		{"none remote refused", map[string]string{"NOTIFY_SMTP_TLS": "none"}, "", true},
 		{"none remote with dev flag", map[string]string{"NOTIFY_SMTP_TLS": "none", "NOTIFY_ALLOW_INSECURE": "true"}, TLSNone, false},
 		{"none loopback", map[string]string{"NOTIFY_SMTP_TLS": "none", "NOTIFY_SMTP_HOST": "127.0.0.1"}, TLSNone, false},
+		{"none other loopback range refused", map[string]string{"NOTIFY_SMTP_TLS": "none", "NOTIFY_SMTP_HOST": "127.0.0.2"}, "", true},
+		{"none ipv6 loopback", map[string]string{"NOTIFY_SMTP_TLS": "none", "NOTIFY_SMTP_HOST": "::1"}, TLSNone, false},
 		{"none localhost", map[string]string{"NOTIFY_SMTP_TLS": "none", "NOTIFY_SMTP_HOST": "localhost"}, TLSNone, false},
 	}
 	for _, tc := range cases {
@@ -273,6 +275,12 @@ const (
 	modeStartTLSNotAdvertised
 	modeImplicitTLS
 	modeHang
+	modeDropOnQuit
+	modeRejectRcpt
+	modeTempRcpt
+	modeRejectAuth
+	modeRejectMail
+	modeRejectData
 )
 
 type fakeSMTP struct {
@@ -339,7 +347,11 @@ func (f *fakeSMTP) serve(conn net.Conn) {
 				f.data = data.String()
 				f.mu.Unlock()
 				inData = false
-				say("250 queued")
+				if f.mode == modeRejectData {
+					say("554 message rejected")
+				} else {
+					say("250 queued")
+				}
 				continue
 			}
 			data.WriteString(line + "\n")
@@ -366,19 +378,36 @@ func (f *fakeSMTP) serve(conn net.Conn) {
 			f.mu.Lock()
 			f.auth = strings.ReplaceAll(string(raw), "\x00", "|")
 			f.mu.Unlock()
-			say("235 ok")
+			if f.mode == modeRejectAuth {
+				say("535 authentication failed")
+			} else {
+				say("235 ok")
+			}
 		case strings.HasPrefix(line, "MAIL"):
-			say("250 ok")
+			if f.mode == modeRejectMail {
+				say("550 sender not allowed")
+			} else {
+				say("250 ok")
+			}
 		case strings.HasPrefix(line, "RCPT"):
 			f.mu.Lock()
 			f.rcpt = line
 			f.mu.Unlock()
-			say("250 ok")
+			switch f.mode {
+			case modeRejectRcpt:
+				say("550 no such user")
+			case modeTempRcpt:
+				say("451 try later")
+			default:
+				say("250 ok")
+			}
 		case line == "DATA":
 			inData = true
 			say("354 go")
 		case line == "QUIT":
-			say("221 bye")
+			if f.mode != modeDropOnQuit {
+				say("221 bye")
+			}
 			return
 		default:
 			say("250 ok")
@@ -428,18 +457,18 @@ func TestSMTPSenderStartTLSDelivers(t *testing.T) {
 }
 
 func TestSMTPSenderRefusesWhenStartTLSNotAdvertised(t *testing.T) {
-	f := startFakeSMTP(t, modeStartTLSNotAdvertised, nil)
 	for _, mode := range []string{TLSStartTLS, ""} {
+		f := startFakeSMTP(t, modeStartTLSNotAdvertised, nil)
 		err := NewSMTPSender(f.config(mode)).Send(context.Background(), Message{To: "to@example.test"})
 		if err == nil || !strings.Contains(err.Error(), "STARTTLS") {
 			t.Fatalf("mode=%q err=%v", mode, err)
 		}
-		f = startFakeSMTP(t, modeStartTLSNotAdvertised, nil)
-	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.auth != "" {
-		t.Fatalf("credentials sent in cleartext: %q", f.auth)
+		f.mu.Lock()
+		auth := f.auth
+		f.mu.Unlock()
+		if auth != "" {
+			t.Fatalf("mode=%q credentials sent in cleartext: %q", mode, auth)
+		}
 	}
 }
 
@@ -483,6 +512,39 @@ func TestSMTPSenderHonoursContextCancel(t *testing.T) {
 	err := NewSMTPSender(f.config(TLSNone)).Send(ctx, Message{To: "to@example.test"})
 	if !errors.Is(err, context.Canceled) || time.Since(start) > 3*time.Second {
 		t.Fatalf("err=%v elapsed=%s", err, time.Since(start))
+	}
+}
+
+func TestSMTPSenderAddsDateMessageIDAndTransferEncoding(t *testing.T) {
+	f := startFakeSMTP(t, modePlain, nil)
+	msg := Message{ID: "msg-123", To: "to@example.test", Subject: "s", Body: "Caf\u00e9 =\nline two"}
+	if err := NewSMTPSender(f.config(TLSNone)).Send(context.Background(), msg); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, want := range []string{"Date: ", "Message-ID: <msg-123@example.test>", "Content-Transfer-Encoding: quoted-printable", "Caf=C3=A9 =3D"} {
+		if !strings.Contains(f.data, want) {
+			t.Fatalf("missing %q in %q", want, f.data)
+		}
+	}
+}
+
+func TestSMTPSenderIgnoresQuitFailureAfterAcceptedData(t *testing.T) {
+	f := startFakeSMTP(t, modeDropOnQuit, nil)
+	if err := NewSMTPSender(f.config(TLSNone)).Send(context.Background(), Message{To: "to@example.test", Subject: "s", Body: "b"}); err != nil {
+		t.Fatalf("accepted message reported as failed: %v", err)
+	}
+}
+
+func TestWebhookSenderSendsIdempotencyKey(t *testing.T) {
+	var key string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key = r.Header.Get("Idempotency-Key")
+	}))
+	defer srv.Close()
+	if err := NewWebhookSender(WebhookConfig{URL: srv.URL, Token: "t"}, srv.Client()).Send(context.Background(), Message{ID: "m-1"}); err != nil || key != "m-1" {
+		t.Fatalf("key=%q err=%v", key, err)
 	}
 }
 
@@ -537,5 +599,37 @@ func TestSMTPSenderConnectionFailure(t *testing.T) {
 		Send(context.Background(), Message{To: "x@y.test"})
 	if err == nil || strings.Contains(err.Error(), "pw-secret") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestPermanentErrorClassification(t *testing.T) {
+	status := func(code int) error {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(code) }))
+		defer srv.Close()
+		return NewWebhookSender(WebhookConfig{URL: srv.URL, Token: "t"}, srv.Client()).Send(context.Background(), Message{})
+	}
+	for code, want := range map[int]bool{400: true, 410: true, 413: true, 422: true, 401: false, 403: false, 404: false, 408: false, 429: false, 500: false, 503: false} {
+		if got := IsPermanent(status(code)); got != want {
+			t.Fatalf("webhook %d permanent=%v want %v", code, got, want)
+		}
+	}
+	if err := NewSMTPSender(SMTPConfig{Host: "127.0.0.1", Port: 1, From: "a@b.test", TLS: TLSNone}).Send(context.Background(), Message{To: "nobody"}); !IsPermanent(err) {
+		t.Fatalf("invalid address not permanent: %v", err)
+	}
+	if IsPermanent(errors.New("connection refused")) {
+		t.Fatal("plain error is permanent")
+	}
+	if got := errorClass(status(404)); got != "http 404" {
+		t.Fatalf("class = %q", got)
+	}
+}
+
+func TestSMTPReplyCodesDecidePermanence(t *testing.T) {
+	for mode, want := range map[smtpMode]bool{modeRejectRcpt: true, modeTempRcpt: false, modeRejectData: true, modeRejectAuth: false, modeRejectMail: false} {
+		f := startFakeSMTP(t, mode, nil)
+		err := NewSMTPSender(f.config(TLSNone)).Send(context.Background(), Message{To: "to@example.test", Subject: "s"})
+		if err == nil || IsPermanent(err) != want || errorClass(err) == "send error" {
+			t.Fatalf("mode %d: err=%v permanent=%v class=%q", mode, err, IsPermanent(err), errorClass(err))
+		}
 	}
 }

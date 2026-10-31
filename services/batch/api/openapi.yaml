@@ -144,6 +144,8 @@ paths:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         '200': { description: Retry queued. }
+        '404': { description: Message not found. }
+        '409': { description: Only a failed message can be retried. }
   /v1/notify/preferences/me:
     put:
       operationId: putMyPreference

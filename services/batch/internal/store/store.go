@@ -611,9 +611,20 @@ func (s *Postgres) RetryMessage(ctx context.Context, id string) (Message, error)
 	}
 	var msg Message
 	err = dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `update notify_outbound_message set status='queued', attempts=0, next_attempt_at=now()
-			where tenant_id=$1 and id=$2 returning id, channel, coalesce(recipient_user_id::text,''), coalesce(recipient_address,''), coalesce(template_code,''), coalesce(subject,''), coalesce(body_text,''), status, attempts`,
+		err := tx.QueryRow(ctx, `update notify_outbound_message set status='queued', attempts=0, next_attempt_at=now(), claim_token=null
+			where tenant_id=$1 and id=$2 and status='failed' returning id, channel, coalesce(recipient_user_id::text,''), coalesce(recipient_address,''), coalesce(template_code,''), coalesce(subject,''), coalesce(body_text,''), status, attempts`,
 			p.TenantID, id).Scan(&msg.ID, &msg.Channel, &msg.RecipientUserID, &msg.RecipientAddr, &msg.TemplateCode, &msg.Subject, &msg.Body, &msg.Status, &msg.Attempts)
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		var exists bool
+		if err := tx.QueryRow(ctx, `select exists(select 1 from notify_outbound_message where tenant_id=$1 and id=$2)`, p.TenantID, id).Scan(&exists); err != nil {
+			return err
+		}
+		if exists {
+			return httpx.NewProblem(http.StatusConflict, domain.CodeUnknown, "only a failed message can be retried")
+		}
+		return pgx.ErrNoRows
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Message{}, httpx.NewProblem(http.StatusNotFound, domain.CodeUnknown, "message not found")
