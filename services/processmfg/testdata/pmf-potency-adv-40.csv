@@ -1,0 +1,41 @@
+planned,standard_potency,batch_potency,compensating_planned,expected_qty,expected_compensating,expected_code,note
+100,50,40,100,125.000000,75.000000,,BR-24.2 worked example
+100,50,30,100,166.666667,33.333333,,repeating 166.6666...
+100,50,70,100,71.428571,128.571429,,repeating 71.428571428...
+100,33.3333,66.6667,100,49.999925,150.000075,,potencies with decimals
+12.345678,47.5,52.25,87.654322,11.223344,88.776656,,planned at full precision
+0.000001,50,100,1,0.000001,1.000000,,7th decimal exactly 5 rounds up
+0.000003,1,2,1,0.000002,1.000001,,1.5 micro-units rounds up to 2
+0.000005,1,10,1,0.000001,1.000004,,half a micro-unit rounds up to 1
+0.000001,1,3,1,0.000000,1.000001,,a third of a micro-unit rounds to 0
+1,2,3,0,0.666667,0.333333,,"0.666666666... rounds up, filler grows from zero"
+2,1,3,0,0.666667,1.333333,,0.666666666... from a weaker standard
+1,1,7,5,0.142857,5.857143,,1/7 rounds down
+100,60,37.5,60,160.000000,0.000000,,filler lands on exactly zero
+100,60,37.5,59.999999,,,PMF-0002,filler one micro-unit below zero
+100,50,25,100,200.000000,0.000000,,filler exactly consumed
+100,50,24.999999,100,,,PMF-0002,batch a hair weaker than the zero point
+100,50,80,0,62.500000,37.500000,,stronger batch with no filler planned
+100,50,40,0,,,PMF-0002,weaker batch with no filler planned
+0,50,40,100,0.000000,100.000000,,nothing planned
+0,50,40,0,0.000000,0.000000,,"nothing planned, no filler"
+250,98.5,99.7,10,246.990973,13.009027,,high-purity API slightly stronger
+250,98.5,97.3,10,253.083248,6.916752,,high-purity API slightly weaker
+250,100,102.4,0,244.140625,5.859375,,assay above 100 %
+1000,0.5,0.4975,50,1005.025126,44.974874,,trace active at half a percent
+1000,0.0001,0.0003,1,333.333333,667.666667,,smallest potencies
+100,50,0.0001,1000000,,,PMF-0002,"tiny batch potency, huge consumption refused"
+999999.999999,33.3333,66.6667,1,499999.250000,500001.749999,,"planned at numeric(18,6) scale"
+999999.999999,66.6667,33.3333,1,,,PMF-0002,near-doubling of a huge line refused
+500000,40,39.99,200,500125.031258,74.968742,,0.025 % potency drift
+75.5,12.25,12.25,24.5,75.500000,24.500000,,equal potencies are the identity
+0.000007,45,90,0.000001,0.000004,0.000004,,half of 7 micro-units rounds up to 4
+0.000009,45,90,0,0.000005,0.000004,,"half of 9 micro-units, filler from zero"
+3,10,9,0.333333,3.333333,0.000000,,filler exactly consumed by a repeating qty
+3,10,9,0.333332,,,PMF-0002,filler one micro-unit short of a repeating qty
+100,0,40,100,,,COM-0001,zero standard potency is invalid
+100,50,0,100,,,COM-0001,zero batch potency is invalid
+100,50,-40,100,,,COM-0001,negative batch potency is invalid
+-1,50,40,100,,,COM-0001,negative planned is invalid
+100,50,40,-1,,,COM-0001,negative filler is invalid
+1,3,1,1.999999,,,PMF-0002,tripling one micro-unit short of the filler

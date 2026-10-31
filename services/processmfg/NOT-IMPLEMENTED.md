@@ -38,8 +38,8 @@ splits it with the BR-24.3 rule over the main item, the co-products and the by-p
 burdens, stores the shares in `batch_order_allocation` (migration 0002; the shares add up to the
 batch cost exactly, checked in the rule and again by the test against the stored rows; when the
 main item weighs nothing, as with a zero standard cost under TCA, the few ten-thousandths that
-rounding the co-products up can overshoot come off the largest co-product, so no share is
-negative), writes
+rounding the co-products up can overshoot are taken back one ten-thousandth at a time, largest
+co-product first, so no share is negative), writes
 `dev.passage.production.coproduct.allocated.v1` in the same transaction, and the order then
 carries its `allocation`. Rescale is refused from Started on (PMF-0105). The order detail screen
 gains the release, start, report and end steps and the cost split. Both AsyncAPI documents
@@ -72,6 +72,17 @@ the batch list, register form, batch detail (recording form per definition, curr
 values, disposition form hidden without the duty, both histories) and the attribute definitions
 page. The picking proposal and the other previews still take their batches as input; reading the
 stored batches into them is the row below.
+
+Wave 24 proof fixtures: `pmf-potency-adv-40.csv` and `pmf-coby-adv-23.json` under testdata/,
+written by the independent exact-rational references `gen_pmf_potency_adv.py` and
+`gen_pmf_coby_adv.py`; the co-product cases are also ended on batch orders in the store. Building
+them found that by-product burdens which fit the batch cost exactly (percent burdens totalling
+100 %) were refused with PMF-0021 when their 4-place rounding overshot the cost; the overshoot is
+now taken back off the burdens one ten-thousandth at a time, largest first, and burdens are
+refused only when they exceed the cost both exactly and rounded. Taking it all off the single
+largest share instead (burdens, and co-products under a weightless main item) went negative when
+many tiny shares rounded up (four CLF 0.0001 burdens on a cost of 0.0002); the three CLF cases
+at the end of the fixture cover that.
 
 | Deliverable or AC | Status | Reason |
 |---|---|---|
