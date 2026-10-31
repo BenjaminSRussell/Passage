@@ -11,6 +11,7 @@ notify:
   mountPath: /var/run/secrets/notify
   fsGroup: 65532
   reloader: false
+  distributeInterval: 5s
   smtp: { enabled: false, from: "", tls: starttls }
   webhook: { enabled: false, url: "" }
   externalSecret:

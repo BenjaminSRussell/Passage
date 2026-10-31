@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"mime"
+	"mime/quotedprintable"
 	"net"
 	"net/http"
 	"net/mail"
@@ -16,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/BenjaminSRussell/passage/platform/ids"
 )
 
 const (
@@ -24,6 +27,7 @@ const (
 )
 
 type Message struct {
+	ID      string
 	To      string
 	Subject string
 	Body    string
@@ -69,15 +73,39 @@ func (s *SMTPSender) Send(ctx context.Context, msg Message) error {
 	if err != nil {
 		return err
 	}
-	raw := "From: " + from + "\r\nTo: " + to + "\r\nSubject: " + mime.QEncoding.Encode("utf-8", msg.Subject) +
-		"\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n" + msg.Body
-	if err := s.deliver(ctx, from, to, []byte(raw)); err != nil {
+	raw, err := buildMessage(from, to, msg)
+	if err != nil {
+		return err
+	}
+	if err := s.deliver(ctx, from, to, raw); err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return fmt.Errorf("smtp send: %w", ctxErr)
 		}
 		return fmt.Errorf("smtp send: %w", err)
 	}
 	return nil
+}
+
+func buildMessage(from, to string, msg Message) ([]byte, error) {
+	id := msg.ID
+	if id == "" {
+		id = ids.New()
+	}
+	domain := from[strings.LastIndex(from, "@")+1:]
+	var raw bytes.Buffer
+	raw.WriteString("From: " + from + "\r\nTo: " + to +
+		"\r\nSubject: " + mime.QEncoding.Encode("utf-8", msg.Subject) +
+		"\r\nDate: " + time.Now().UTC().Format(time.RFC1123Z) +
+		"\r\nMessage-ID: <" + id + "@" + domain + ">" +
+		"\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n")
+	qp := quotedprintable.NewWriter(&raw)
+	if _, err := qp.Write([]byte(msg.Body)); err != nil {
+		return nil, fmt.Errorf("encode smtp body: %w", err)
+	}
+	if err := qp.Close(); err != nil {
+		return nil, fmt.Errorf("encode smtp body: %w", err)
+	}
+	return raw.Bytes(), nil
 }
 
 func (s *SMTPSender) clientTLSConfig() *tls.Config {
@@ -145,7 +173,8 @@ func (s *SMTPSender) deliver(ctx context.Context, from, to string, raw []byte) e
 	if err := w.Close(); err != nil {
 		return err
 	}
-	return client.Quit()
+	_ = client.Quit()
+	return nil
 }
 
 type WebhookSender struct {
@@ -186,6 +215,9 @@ func (w *WebhookSender) Send(ctx context.Context, msg Message) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+w.cfg.Token)
+	if msg.ID != "" {
+		req.Header.Set("Idempotency-Key", msg.ID)
+	}
 	resp, err := w.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("webhook send: %w", redactURLError(err))

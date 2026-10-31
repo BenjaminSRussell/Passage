@@ -3,7 +3,6 @@ package notifyout
 import (
 	"errors"
 	"fmt"
-	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -164,9 +163,5 @@ func loadWebhook(src secretSource, allowInsecure bool) (*WebhookConfig, error) {
 }
 
 func isLoopback(host string) bool {
-	if host == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }

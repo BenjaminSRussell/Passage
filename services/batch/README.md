@@ -22,10 +22,13 @@ Run: `DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/batch`. Tes
 | `NOTIFY_SMTP_ENABLED`, `NOTIFY_WEBHOOK_ENABLED` | `true` enables an adapter; startup fails if its credentials are missing |
 | `NOTIFY_SECRETS_DIR` | when set, credentials are read from files in it only (no env fallback); an empty file counts as missing |
 | `NOTIFY_SMTP_FROM`, `NOTIFY_WEBHOOK_URL` | non-secret settings; the webhook URL must be `https` |
-| `NOTIFY_SMTP_TLS` | `starttls` (default; refuses servers that do not advertise it), `implicit` (port 465), or `none` (loopback host only) |
-| `NOTIFY_ALLOW_INSECURE` | dev only: `true` permits `http` webhooks and `none` TLS to a non-loopback host |
+| `NOTIFY_SMTP_TLS` | `starttls` (default; refuses servers that do not advertise it), `implicit` (port 465), or `none` (host exactly `localhost`, `127.0.0.1` or `::1`) |
+| `NOTIFY_ALLOW_INSECURE` | dev only: `true` permits `http` webhooks and `none` TLS to any other host |
+| `NOTIFY_DISTRIBUTE_INTERVAL` | how often the distributor claims queued `email`/`webhook` messages (default `5s`); it runs only when an adapter is enabled |
 
-Secrets are read once at startup, so an ESO rotation needs a pod restart: set `notify.reloader=true` to add the `reloader.stakater.com/auto` annotation (requires Stakater Reloader in the cluster). The `ExternalSecret` uses `external-secrets.io/v1`, needs `notify.externalSecret.environment`, and reads `<pathPrefix>/<key>` with `property: value` from the `ClusterSecretStore` named by `notify.externalSecret.storeName`.
+Secrets are read once at startup, so an ESO rotation needs a pod restart: set `notify.reloader=true` to add the `reloader.stakater.com/auto` annotation to the Deployment (requires Stakater Reloader in the cluster). The `ExternalSecret` uses `external-secrets.io/v1`, needs `notify.externalSecret.environment`, and reads `<pathPrefix>/<key>` with `property: value` from the `ClusterSecretStore` named by `notify.externalSecret.storeName`.
+
+The distributor claims queued messages across tenants with `notify_claim_messages` (`FOR UPDATE SKIP LOCKED`, a 2 minute send lease), retries a failed send after 1m, 5m, 15m, 1h (five attempts in all, `domain.NextAttempt`), then marks it `failed`. The webhook gets the message id as `Idempotency-Key` and SMTP as the `Message-ID`, so a receiver can drop duplicates. If a send's lease expires with the outcome unrecorded, the message is failed as `delivery outcome unknown` and never resent automatically; `POST /v1/notify/messages/{id}/retry` re-queues it. Metrics are `notify_distribute_*` on the admin port. Like the run dispatcher, it needs the migrating role to be a superuser or BYPASSRLS (see `notify_distribute_can_scan`).
 
 ## API
 
