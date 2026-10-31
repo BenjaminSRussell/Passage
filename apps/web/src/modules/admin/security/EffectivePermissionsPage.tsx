@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useRef, useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Badge, Button, Card, DataTable, FormField, Input, PageHeader, Select, type DataTableColumn } from "../../../shell/ui";
 import { fetchEffectivePermissions, SecurityApiError, UUID, type Permission } from "./api";
 import styles from "./security.module.css";
@@ -39,9 +40,11 @@ function validate(values: Request): Errors {
 
 export function EffectivePermissionsPage() {
   const form = useRef<HTMLFormElement>(null);
-  const [values, setValues] = useState<Request>({ userId: "", legalEntityId: "" });
+  const linkedUser = useSearchParams()[0].get("userId")?.trim() ?? "";
+  const linked: Request | null = UUID.test(linkedUser) ? { userId: linkedUser, legalEntityId: "" } : null;
+  const [values, setValues] = useState<Request>(linked ?? { userId: "", legalEntityId: "" });
   const [errors, setErrors] = useState<Errors>({});
-  const [request, setRequest] = useState<Request | null>(null);
+  const [request, setRequest] = useState<Request | null>(linked);
   const [search, setSearch] = useState("");
   const [method, setMethod] = useState("");
   const [decision, setDecision] = useState("");
