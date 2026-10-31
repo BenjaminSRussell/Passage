@@ -12,7 +12,9 @@ info:
     threshold (BR-25.6), the OEE rollup that stores buckets, kiosk badge login
     and the "Who is clocked in" inquiry. Slice 7: the job dispatch projection
     and list, job detail, and operator feedback with quality checks (FR-25.3 to
-    FR-25.5). Commands that change state
+    FR-25.5). Slice 11: time profiles, pay agreements and the worker links the pay
+    calculation reads (FR-25.7); a replace takes `If-Match` with the version read.
+    Commands that change state
     (except the registration batch, idempotent per item id, process message
     creation, idempotent per source and sourceMessageId, job plans keyed by job id,
     job feedback idempotent per feedbackId, and the scheduler jobs
@@ -1497,8 +1499,355 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Status"
+  /v1/shopfloor/time-profiles:
+    post:
+      operationId: createTimeProfile
+      summary: Create a time profile with its day rules
+      description: |
+        Day rules per day type (weekday, saturday, sunday): shift window, unpaid breaks, rounding
+        and clock tolerances (FR-25.7, BR-25.2). A day type the profile does not define uses the
+        defaults (10 minutes before, 5 after, 1 minute rounding, no breaks). Publishes
+        `dev.passage.shopfloor.timeprofile.saved.v1`. A code already used is SF-0142.
+      x-passage-duty: shopfloor.setup.maintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewTimeProfile"
+      responses:
+        "201":
+          description: Created (or the stored outcome of a repeated key).
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TimeProfile"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+    get:
+      operationId: listTimeProfiles
+      summary: List time profiles by code
+      x-passage-duty: shopfloor.view
+      parameters:
+        - name: active
+          in: query
+          description: With true, only active rows.
+          schema:
+            type: boolean
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Time profiles.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TimeProfile"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/time-profiles/{id}:
+    get:
+      operationId: getTimeProfile
+      summary: Get one time profile
+      x-passage-duty: shopfloor.view
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The timeprofile with its version as ETag.
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TimeProfile"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: updateTimeProfile
+      summary: Replace the editable fields of a time profile
+      description: |
+        Replaces the name, status and days (the code does not change) and bumps the version.
+        `If-Match` carries the version you read; another change in between is SF-0143 (412).
+        Pay lines already calculated are not touched.
+      x-passage-duty: shopfloor.setup.maintain
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTimeProfile"
+      responses:
+        "200":
+          description: Updated; the new version is in the ETag header.
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TimeProfile"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/pay-agreements:
+    post:
+      operationId: createPayAgreement
+      summary: Create a pay agreement with overtime thresholds and multipliers
+      description: |
+        Daily and weekly overtime thresholds, the overtime and Sunday multipliers and the first
+        day of the pay week (FR-25.7, BR-25.8). Workers without an agreement use 8 h daily, 40 h
+        weekly, 1.5x overtime, 2.0x Sunday and a Monday week. Publishes
+        `dev.passage.shopfloor.payagreement.saved.v1`. A code already used is SF-0142.
+      x-passage-duty: shopfloor.setup.maintain
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewPayAgreement"
+      responses:
+        "201":
+          description: Created (or the stored outcome of a repeated key).
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayAgreement"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+    get:
+      operationId: listPayAgreements
+      summary: List pay agreements by code
+      x-passage-duty: shopfloor.view
+      parameters:
+        - name: active
+          in: query
+          description: With true, only active rows.
+          schema:
+            type: boolean
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Pay agreements.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PayAgreement"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/pay-agreements/{id}:
+    get:
+      operationId: getPayAgreement
+      summary: Get one pay agreement
+      x-passage-duty: shopfloor.view
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The payagreement with its version as ETag.
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayAgreement"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: updatePayAgreement
+      summary: Replace the editable fields of a pay agreement
+      description: |
+        Replaces the name, status and rules (the code does not change) and bumps the version.
+        `If-Match` carries the version you read; another change in between is SF-0143 (412).
+        Pay lines already calculated are not touched; recalculating a day uses the new rules.
+      x-passage-duty: shopfloor.setup.maintain
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePayAgreement"
+      responses:
+        "200":
+          description: Updated; the new version is in the ETag header.
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayAgreement"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+  /v1/shopfloor/workers/{id}:assign-setup:
+    post:
+      operationId: assignWorkerSetup
+      summary: Link a worker to a time profile and a pay agreement
+      description: |
+        Sets or clears (null) the worker's time profile and pay agreement, which the pay
+        calculation reads (FR-25.7). `If-Match` carries the worker version you read (SF-0143, 412).
+        A newly chosen profile or agreement must exist (SF-0140, SF-0141) and be active (SF-0144);
+        the one the worker already has may stay linked after it was deactivated.
+        Publishes `dev.passage.shopfloor.worker.assigned.v1`. Days already calculated keep their
+        pay lines until a supervisor recalculates them.
+      x-passage-duty: shopfloor.setup.maintain
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignWorkerSetup"
+      responses:
+        "200":
+          description: The worker with its new links (or the stored outcome of a repeated key).
+          headers:
+            ETag:
+              description: The version as an entity tag, for example "3"; send it back as If-Match on the next change.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Worker"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
 components:
   parameters:
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: The version you read, as an entity tag such as "3". A different current version is SF-0143 (412).
+      schema:
+        type: string
+        pattern: '^"[0-9]+"$'
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -1571,7 +1920,7 @@ components:
           pattern: "^[A-Z]{3}$"
     Worker:
       type: object
-      required: [id, partyId, name, badgeId, userId, costRate, currency, active, version, createdAt]
+      required: [id, partyId, name, badgeId, userId, costRate, currency, active, version, createdAt, profileId, payAgreementId]
       properties:
         id:
           type: string
@@ -1596,6 +1945,224 @@ components:
         createdAt:
           type: string
           format: date-time
+        profileId:
+          type: [string, "null"]
+          format: uuid
+          description: Time profile the worker's days are calculated with; null means the defaults.
+        payAgreementId:
+          type: [string, "null"]
+          format: uuid
+          description: Pay agreement the worker's overtime follows; null means the defaults.
+    BreakWindow:
+      type: object
+      required: [from, to]
+      properties:
+        from:
+          type: string
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+          description: Local time HH:MM.
+        to:
+          type: string
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+          description: Local time HH:MM, after from.
+    ProfileDay:
+      type: object
+      required: [dayType, shiftStart, shiftEnd, breaks, roundingMinutes, toleranceBeforeMin, toleranceAfterMin, flexAllowed]
+      properties:
+        dayType:
+          type: string
+          enum: [weekday, saturday, sunday]
+        shiftStart:
+          type: [string, "null"]
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+          description: Local HH:MM. Both ends or neither; a clock-in within the tolerance before it snaps to it (BR-25.2).
+        shiftEnd:
+          type: [string, "null"]
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+          description: Local HH:MM after shiftStart; a clock-out within the tolerance after it snaps to it.
+        breaks:
+          type: array
+          maxItems: 6
+          description: Unpaid breaks that must not overlap; the overlap with a segment comes off its hours.
+          items:
+            $ref: "#/components/schemas/BreakWindow"
+        roundingMinutes:
+          type: integer
+          minimum: 1
+          maximum: 15
+        toleranceBeforeMin:
+          type: integer
+          minimum: 0
+          maximum: 60
+        toleranceAfterMin:
+          type: integer
+          minimum: 0
+          maximum: 60
+        flexAllowed:
+          type: boolean
+          description: Stored for the flex balance, which is not calculated yet.
+    NewTimeProfile:
+      type: object
+      required: [code, name, days]
+      properties:
+        code:
+          type: string
+          minLength: 1
+          maxLength: 40
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        active:
+          type: boolean
+          default: true
+        days:
+          type: array
+          maxItems: 3
+          description: At most one entry per day type.
+          items:
+            $ref: "#/components/schemas/ProfileDay"
+    UpdateTimeProfile:
+      type: object
+      required: [name, days]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        active:
+          type: boolean
+          default: true
+        days:
+          type: array
+          maxItems: 3
+          items:
+            $ref: "#/components/schemas/ProfileDay"
+    TimeProfile:
+      type: object
+      required: [id, code, name, active, version, days, createdBy, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        active:
+          type: boolean
+        version:
+          type: integer
+        days:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProfileDay"
+        createdBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    NewPayAgreement:
+      type: object
+      required: [code, name, dailyThreshold, weeklyThreshold, overtimeMultiplier, sundayMultiplier, weekStart]
+      properties:
+        code:
+          type: string
+          minLength: 1
+          maxLength: 40
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        active:
+          type: boolean
+          default: true
+        dailyThreshold:
+          type: string
+          description: Hours per day before overtime, 0 to 24 with up to 2 decimals.
+        weeklyThreshold:
+          type: string
+          description: Base hours per pay week before overtime, 0 to 168 with up to 2 decimals.
+        overtimeMultiplier:
+          type: string
+          description: 1 to 5 with up to 4 decimals.
+        sundayMultiplier:
+          type: string
+          description: 1 to 5 with up to 4 decimals.
+        weekStart:
+          type: integer
+          minimum: 0
+          maximum: 6
+          description: First day of the pay week, 0 (Sunday) to 6 (Saturday).
+    UpdatePayAgreement:
+      type: object
+      required: [name, dailyThreshold, weeklyThreshold, overtimeMultiplier, sundayMultiplier, weekStart]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        active:
+          type: boolean
+          default: true
+        dailyThreshold:
+          type: string
+        weeklyThreshold:
+          type: string
+        overtimeMultiplier:
+          type: string
+        sundayMultiplier:
+          type: string
+        weekStart:
+          type: integer
+          minimum: 0
+          maximum: 6
+    PayAgreement:
+      type: object
+      required: [id, code, name, dailyThreshold, weeklyThreshold, overtimeMultiplier, sundayMultiplier, weekStart, active, version, createdBy, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        dailyThreshold:
+          type: string
+        weeklyThreshold:
+          type: string
+        overtimeMultiplier:
+          type: string
+        sundayMultiplier:
+          type: string
+        weekStart:
+          type: integer
+        active:
+          type: boolean
+        version:
+          type: integer
+        createdBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    AssignWorkerSetup:
+      type: object
+      required: [profileId, payAgreementId]
+      properties:
+        profileId:
+          type: [string, "null"]
+          format: uuid
+        payAgreementId:
+          type: [string, "null"]
+          format: uuid
     StoredRegistration:
       type: object
       required: [id, workerId, kind, jobId, bundleId, qtyGood, qtyScrap, scrapReasonId, startedAt, stoppedAt, hours, serverReceivedAt, deviceId, offline, note, clockOffsetSeconds, flags]

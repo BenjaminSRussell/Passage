@@ -70,11 +70,14 @@ type DayPay struct {
 // Calculation holds what one calculation run needs: the profile, the local
 // time zone, the pay rules and the worker's cost rate in the given currency.
 type Calculation struct {
-	Profile  Profile
-	Location *time.Location
-	Rules    Rules
-	Rate     decimal.Decimal
-	Currency string
+	Profile Profile
+	// ProfileFor, when set, picks the profile by local day (a worker's profile
+	// defines break windows per day type) and replaces Profile.
+	ProfileFor func(time.Time) Profile
+	Location   *time.Location
+	Rules      Rules
+	Rate       decimal.Decimal
+	Currency   string
 }
 
 // Run turns worker-days into pay lines. Days may span several pay weeks; the
@@ -99,7 +102,7 @@ func (c Calculation) Run(days []Day) ([]DayPay, error) {
 		hours := decimal.Zero
 		var sources []string
 		for _, s := range d.Segments {
-			hours = hours.Add(NetHours(s, c.Profile, c.Location))
+			hours = hours.Add(NetHours(s, c.profileAt(s.Start), c.Location))
 			sources = append(sources, s.Sources...)
 		}
 		if hours.GreaterThan(decimal.NewFromInt(MaxDailyHours)) {
@@ -126,6 +129,13 @@ func (c Calculation) Run(days []Day) ([]DayPay, error) {
 		out = append(out, dp)
 	}
 	return out, nil
+}
+
+func (c Calculation) profileAt(t time.Time) Profile {
+	if c.ProfileFor != nil {
+		return c.ProfileFor(t)
+	}
+	return c.Profile
 }
 
 func (c Calculation) line(typ string, hours, mult decimal.Decimal, sources []string) PayLine {

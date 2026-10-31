@@ -23,6 +23,10 @@ export interface Worker {
   active: boolean;
   version: number;
   createdAt: string;
+  /** Time profile the worker's days are calculated with; null means the defaults (FR-25.7). */
+  profileId: string | null;
+  /** Pay agreement the worker's overtime follows; null means the defaults. */
+  payAgreementId: string | null;
 }
 
 export interface NewWorker {
@@ -811,4 +815,109 @@ export function getJob(id: string, signal?: AbortSignal): Promise<Job> {
  */
 export function recordJobFeedback(jobId: string, input: JobFeedbackInput): Promise<JobFeedbackResult> {
   return post<JobFeedbackResult>(`/jobs/${encodeURIComponent(jobId)}:feedback`, input);
+}
+
+// --- Time profiles and pay agreements (slice 11, D2f) ---
+
+export type DayType = "weekday" | "saturday" | "sunday";
+
+export const DAY_TYPES: readonly DayType[] = ["weekday", "saturday", "sunday"];
+
+/** An unpaid break as local HH:MM times. */
+export interface BreakWindow {
+  from: string;
+  to: string;
+}
+
+/** The day rules of one day type (ProfileDay). Shift start and end are both set or both null. */
+export interface ProfileDay {
+  dayType: DayType;
+  shiftStart: string | null;
+  shiftEnd: string | null;
+  breaks: BreakWindow[];
+  roundingMinutes: number;
+  toleranceBeforeMin: number;
+  toleranceAfterMin: number;
+  flexAllowed: boolean;
+}
+
+export interface TimeProfile {
+  id: string;
+  code: string;
+  name: string;
+  active: boolean;
+  version: number;
+  days: ProfileDay[];
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewTimeProfile {
+  code: string;
+  name: string;
+  active?: boolean;
+  days: ProfileDay[];
+}
+
+/** Decimal fields are strings; weekStart is 0 (Sunday) to 6 (Saturday). */
+export interface PayAgreement {
+  id: string;
+  code: string;
+  name: string;
+  dailyThreshold: string;
+  weeklyThreshold: string;
+  overtimeMultiplier: string;
+  sundayMultiplier: string;
+  weekStart: number;
+  active: boolean;
+  version: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewPayAgreement {
+  code: string;
+  name: string;
+  active?: boolean;
+  dailyThreshold: string;
+  weeklyThreshold: string;
+  overtimeMultiplier: string;
+  sundayMultiplier: string;
+  weekStart: number;
+}
+
+export function listTimeProfiles(filter: { active?: boolean } = {}, signal?: AbortSignal): Promise<TimeProfile[]> {
+  return items<TimeProfile>(`/time-profiles${query({ active: filter.active })}`, signal);
+}
+
+/** Creates a profile; reuse one key per form so a retried submit cannot create two. */
+export function createTimeProfile(input: NewTimeProfile, key: string = newKey()): Promise<TimeProfile> {
+  return post<TimeProfile>("/time-profiles", input, key);
+}
+
+export function listPayAgreements(filter: { active?: boolean } = {}, signal?: AbortSignal): Promise<PayAgreement[]> {
+  return items<PayAgreement>(`/pay-agreements${query({ active: filter.active })}`, signal);
+}
+
+export function createPayAgreement(input: NewPayAgreement, key: string = newKey()): Promise<PayAgreement> {
+  return post<PayAgreement>("/pay-agreements", input, key);
+}
+
+/**
+ * Links a worker to a time profile and a pay agreement (null clears the link). The worker version
+ * is the If-Match entity tag; another change in between is SF-0143 (412).
+ */
+export function assignWorkerSetup(
+  workerId: string,
+  version: number,
+  input: { profileId: string | null; payAgreementId: string | null },
+  key: string = newKey(),
+): Promise<Worker> {
+  return send<Worker>(`/workers/${encodeURIComponent(workerId)}:assign-setup`, {
+    method: "POST",
+    headers: { "Idempotency-Key": key, "If-Match": `"${version}"` },
+    body: JSON.stringify(input),
+  });
 }

@@ -32,12 +32,17 @@ var (
 	// the w21 job-card consumer must learn that approved or posted time changed (FR-25.8, AC-25.8).
 	RegistrationCorrected = events.Type(Context, "registration", "corrected", 1)
 	PaydayRevised         = events.Type(Context, "payday", "revised", 1)
+	// TimeProfileSaved, PayAgreementSaved and WorkerAssigned are not in the PRD event table:
+	// payroll (w43) and reporting need the pay rules a worker's hours were calculated under.
+	TimeProfileSaved  = events.Type(Context, "timeprofile", "saved", 1)
+	PayAgreementSaved = events.Type(Context, "payagreement", "saved", 1)
+	WorkerAssigned    = events.Type(Context, "worker", "assigned", 1)
 )
 
 // All lists every event type the service publishes (used by the startup registry check).
 func All() []string {
 	return []string{RegistrationPosted, PaydayApproved, PaydayExported, AndonRaised, ProcessMessageReceived, ProcessMessageDelivered, ProcessMessageDeleted,
-		OEEBucketUpdated, OEEBucketRemoved, JobReported, RegistrationCorrected, PaydayRevised}
+		OEEBucketUpdated, OEEBucketRemoved, JobReported, RegistrationCorrected, PaydayRevised, TimeProfileSaved, PayAgreementSaved, WorkerAssigned}
 }
 
 // ProcessMessageReceivedData is the payload of dev.passage.shopfloor.processmessage.received.v1,
@@ -231,4 +236,42 @@ type PaydayRevisedData struct {
 	ReversedLines []PayLineData `json:"reversedLines"`
 	AddedLines    []PayLineData `json:"addedLines"`
 	RevisedBy     string        `json:"revisedBy"`
+}
+
+// TimeProfileSavedData is the payload of dev.passage.shopfloor.timeprofile.saved.v1,
+// published when a time profile is created or changed. Version is 1 for a new profile.
+type TimeProfileSavedData struct {
+	ProfileID string `json:"profileId"`
+	Code      string `json:"code"`
+	Name      string `json:"name"`
+	Active    bool   `json:"active"`
+	Version   int    `json:"version"`
+	SavedBy   string `json:"savedBy"`
+}
+
+// PayAgreementSavedData is the payload of dev.passage.shopfloor.payagreement.saved.v1,
+// published when a pay agreement is created or changed. Decimals are strings.
+type PayAgreementSavedData struct {
+	AgreementID        string `json:"agreementId"`
+	Code               string `json:"code"`
+	Name               string `json:"name"`
+	DailyThreshold     string `json:"dailyThreshold"`
+	WeeklyThreshold    string `json:"weeklyThreshold"`
+	OvertimeMultiplier string `json:"overtimeMultiplier"`
+	SundayMultiplier   string `json:"sundayMultiplier"`
+	WeekStart          int    `json:"weekStart"`
+	Active             bool   `json:"active"`
+	Version            int    `json:"version"`
+	SavedBy            string `json:"savedBy"`
+}
+
+// WorkerAssignedData is the payload of dev.passage.shopfloor.worker.assigned.v1,
+// published when a worker's time profile or pay agreement changes. A nil id means the
+// worker is calculated with the defaults. Days already calculated keep their pay lines
+// until a supervisor recalculates them.
+type WorkerAssignedData struct {
+	WorkerID       string  `json:"workerId"`
+	ProfileID      *string `json:"profileId"`
+	PayAgreementID *string `json:"payAgreementId"`
+	AssignedBy     string  `json:"assignedBy"`
 }

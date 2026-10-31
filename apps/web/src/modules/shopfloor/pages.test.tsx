@@ -76,6 +76,8 @@ const worker = (id: string, name: string, badge: string | null): Worker => ({
   active: true,
   version: 1,
   createdAt: "2026-10-01T08:00:00Z",
+  profileId: null,
+  payAgreementId: null,
 });
 const workers = [worker(ANA, "Ana Silva", "B-1"), worker(BEN, "Ben Ito", null)];
 

@@ -491,3 +491,82 @@ func TestHTTP_JobStartAutoStopAndFinishedConflict(t *testing.T) {
 		t.Fatalf("conflict %+v", conflict)
 	}
 }
+
+// A time profile and a pay agreement created over HTTP, linked to a worker with If-Match,
+// change what pay:calculate produces: the weekday break and a 10 h threshold turn
+// 09:00-19:30 into 10.00 h of base pay (FR-25.7). A stale version is 412 (SF-0143).
+func TestHTTP_ProfileAndAgreementDriveCalculation(t *testing.T) {
+	admin, app := testkit.DBWithApp(t)
+	if err := dbx.Migrate(context.Background(), admin, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	h := newRouter(store.New(app))
+	key := func(k string) map[string]string { return map[string]string{"Idempotency-Key": k} }
+	decode := func(rec interface{ Bytes() []byte }, into any) { _ = json.Unmarshal(rec.Bytes(), into) }
+
+	prof := callWith(t, h, http.MethodPost, "/v1/shopfloor/time-profiles", profileBody, allDuty, key("p-1"))
+	agr := callWith(t, h, http.MethodPost, "/v1/shopfloor/pay-agreements", strings.Replace(agreementBody, `"dailyThreshold":"8"`, `"dailyThreshold":"10"`, 1), allDuty, key("a-1"))
+	if prof.Code != http.StatusCreated || agr.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s / %d %s", prof.Code, prof.Body.String(), agr.Code, agr.Body.String())
+	}
+	var p store.TimeProfile
+	var a store.PayAgreement
+	decode(prof.Body, &p)
+	decode(agr.Body, &a)
+	if dup := callWith(t, h, http.MethodPost, "/v1/shopfloor/time-profiles", profileBody, allDuty, key("p-2")); dup.Code != http.StatusConflict || problemCode(t, dup) != store.CodeSetupCodeTaken {
+		t.Fatalf("duplicate code: %d %s", dup.Code, dup.Body.String())
+	}
+	if replay := callWith(t, h, http.MethodPost, "/v1/shopfloor/time-profiles", profileBody, allDuty, key("p-1")); replay.Header().Get("Idempotent-Replayed") != "true" {
+		t.Fatalf("replay: %d", replay.Code)
+	}
+
+	wr := callWith(t, h, http.MethodPost, "/v1/shopfloor/workers", `{"partyId":"`+jobID+`","name":"Ana Silva","badgeId":"B-9","costRate":"20","currency":"USD"}`, allDuty, key("w-9"))
+	var w store.Worker
+	decode(wr.Body, &w)
+	assign := "/v1/shopfloor/workers/" + w.ID + ":assign-setup"
+	body := `{"profileId":"` + p.ID + `","payAgreementId":"` + a.ID + `"}`
+	stale := callWith(t, h, http.MethodPost, assign, body, allDuty, map[string]string{"Idempotency-Key": "as-1", "If-Match": `"7"`})
+	if stale.Code != http.StatusPreconditionFailed || problemCode(t, stale) != store.CodeVersionMismatch {
+		t.Fatalf("stale: %d %s", stale.Code, stale.Body.String())
+	}
+	ok := callWith(t, h, http.MethodPost, assign, body, allDuty, map[string]string{"Idempotency-Key": "as-2", "If-Match": `"1"`})
+	if ok.Code != http.StatusOK || ok.Header().Get("ETag") != `"2"` {
+		t.Fatalf("assign: %d %s", ok.Code, ok.Body.String())
+	}
+
+	regs := fmt.Sprintf(`{"items":[{"id":"0195f0a0-0000-7000-8000-0000000000b1","workerId":%q,"kind":"clock-in","startedAt":"2026-10-20T09:00:00Z"},
+		{"id":"0195f0a0-0000-7000-8000-0000000000b2","workerId":%q,"kind":"clock-out","startedAt":"2026-10-20T19:30:00Z"}]}`, w.ID, w.ID)
+	if rec := call(t, h, http.MethodPost, "/v1/shopfloor/registrations", regs, allDuty); rec.Code != http.StatusOK {
+		t.Fatalf("registrations: %d %s", rec.Code, rec.Body.String())
+	}
+	rangeBody := fmt.Sprintf(`{"workerId":%q,"from":"2026-10-20","to":"2026-10-20"}`, w.ID)
+	rec := callWith(t, h, http.MethodPost, "/v1/shopfloor/pay:calculate", rangeBody, allDuty, key("c-9"))
+	var calc struct {
+		Days []struct {
+			PayLines []struct {
+				Type  string
+				Hours decimal.Decimal
+			}
+		}
+	}
+	decode(rec.Body, &calc)
+	if rec.Code != http.StatusOK || len(calc.Days) != 1 || len(calc.Days[0].PayLines) != 1 || calc.Days[0].PayLines[0].Type != "base" || calc.Days[0].PayLines[0].Hours.String() != "10" {
+		t.Fatalf("calculate: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// Replacing the agreement with a stale version fails; with the right one it is stored.
+	put := "/v1/shopfloor/pay-agreements/" + a.ID
+	upd := `{"name":"US 8h","dailyThreshold":"8","weeklyThreshold":"40","overtimeMultiplier":"1.5","sundayMultiplier":"2","weekStart":1}`
+	if rec := callWith(t, h, http.MethodPut, put, upd, allDuty, map[string]string{"If-Match": `"5"`}); rec.Code != http.StatusPreconditionFailed {
+		t.Fatalf("stale put: %d", rec.Code)
+	}
+	if rec := callWith(t, h, http.MethodPut, put, upd, allDuty, map[string]string{"If-Match": `"1"`}); rec.Code != http.StatusOK {
+		t.Fatalf("put: %d %s", rec.Code, rec.Body.String())
+	}
+	get := call(t, h, http.MethodGet, "/v1/shopfloor/workers/"+w.ID, "", allDuty)
+	var got store.Worker
+	decode(get.Body, &got)
+	if got.ProfileID == nil || *got.ProfileID != p.ID {
+		t.Fatalf("worker = %s", get.Body.String())
+	}
+}

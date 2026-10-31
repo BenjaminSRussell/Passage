@@ -30,6 +30,7 @@ import { addDays, browserZone, dash, daysBetween, fixed, formatDateTime, formatH
 import styles from "./pages.module.css";
 import { useLoad } from "./useLoad";
 import { dayColumns } from "./dayColumns";
+import { WorkerPaySetup } from "./WorkerPaySetup";
 
 /** Longest range GET registrations accepts, in days. */
 const MAX_LIST_DAYS = 31;
@@ -188,6 +189,7 @@ export function WorkerDetailPage() {
           </div>
         </dl>
       </Card>
+      <WorkerPaySetup key={worker.id} worker={worker} onSaved={state.reload} />
       <div className={styles.toolbar}>
         <FormField id="worker-from" label="From">
           {(control) => <Input {...control} type="date" value={from} onChange={(event) => setFrom(event.target.value)} />}

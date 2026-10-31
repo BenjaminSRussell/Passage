@@ -108,6 +108,12 @@ func Round(at time.Time, kind string, p Profile, loc *time.Location) time.Time {
 // is flagged orphan-clock-out. Segments that cross midnight belong to their
 // start day in this slice.
 func BuildDays(punches []Punch, loc *time.Location, p Profile) []Day {
+	return BuildDaysFor(punches, loc, func(time.Time) Profile { return p })
+}
+
+// BuildDaysFor is BuildDays with the profile chosen per local day: a segment is
+// rounded with the profile of the day its clock-in falls on (its pay day).
+func BuildDaysFor(punches []Punch, loc *time.Location, profileFor func(time.Time) Profile) []Day {
 	sorted := append([]Punch(nil), punches...)
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].At.Before(sorted[j].At) })
 	byDate := map[string]*Day{}
@@ -135,6 +141,7 @@ func BuildDays(punches []Punch, loc *time.Location, p Profile) []Day {
 				addFlag(dayOf(pu.At), FlagOrphanClockOut)
 				continue
 			}
+			p := profileFor(open.At)
 			start := Round(open.At, KindClockIn, p, loc)
 			end := Round(pu.At, KindClockOut, p, loc)
 			if end.After(start) {

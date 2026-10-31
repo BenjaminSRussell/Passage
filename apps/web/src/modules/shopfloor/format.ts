@@ -149,3 +149,6 @@ export function elapsed(start: string, now: number = Date.now()): string {
   const hours = Math.floor(minutes / 60);
   return hours > 0 ? `${hours} h ${String(minutes % 60).padStart(2, "0")} min` : `${minutes} min`;
 }
+
+/** Day names indexed like the service's weekStart: 0 is Sunday. */
+export const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;

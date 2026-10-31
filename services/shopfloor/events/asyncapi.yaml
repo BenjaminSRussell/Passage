@@ -8,7 +8,7 @@ info:
     change. Source is `shopfloor`; the Kafka key is the aggregate id
     (registration id, worker id for payday approvals, batch id for payroll
     exports, alert id for andon, message id for process messages, resource id
-    for OEE buckets).
+    for OEE buckets, profile id for time profiles, agreement id for pay agreements).
     Schema evolution is additive only.
 defaultContentType: application/cloudevents+json
 channels:
@@ -38,6 +38,24 @@ channels:
     messages:
       paydayRevised:
         $ref: "#/components/messages/PaydayRevised"
+  timeProfileSaved:
+    address: passage.shopfloor.timeprofile
+    description: A time profile was created or changed (FR-25.7). Not in the PRD event table.
+    messages:
+      timeProfileSaved:
+        $ref: "#/components/messages/TimeProfileSaved"
+  payAgreementSaved:
+    address: passage.shopfloor.payagreement
+    description: A pay agreement was created or changed (FR-25.7). Not in the PRD event table.
+    messages:
+      payAgreementSaved:
+        $ref: "#/components/messages/PayAgreementSaved"
+  workerAssigned:
+    address: passage.shopfloor.worker
+    description: A worker was linked to, or unlinked from, a time profile and a pay agreement. Not in the PRD event table.
+    messages:
+      workerAssigned:
+        $ref: "#/components/messages/WorkerAssigned"
   paydayExported:
     address: passage.shopfloor.pay-export
     messages:
@@ -168,6 +186,30 @@ operations:
       $ref: "#/channels/paydayApproved"
     messages:
       - $ref: "#/channels/paydayApproved/messages/paydayApproved"
+  publishTimeProfileSaved:
+    action: send
+    summary: Time profile saved
+    description: Sends the time profile saved event through the outbox.
+    channel:
+      $ref: "#/channels/timeProfileSaved"
+    messages:
+      - $ref: "#/channels/timeProfileSaved/messages/timeProfileSaved"
+  publishPayAgreementSaved:
+    action: send
+    summary: Pay agreement saved
+    description: Sends the pay agreement saved event through the outbox.
+    channel:
+      $ref: "#/channels/payAgreementSaved"
+    messages:
+      - $ref: "#/channels/payAgreementSaved/messages/payAgreementSaved"
+  publishWorkerAssigned:
+    action: send
+    summary: Worker assigned
+    description: Sends the worker assigned event through the outbox.
+    channel:
+      $ref: "#/channels/workerAssigned"
+    messages:
+      - $ref: "#/channels/workerAssigned/messages/workerAssigned"
 components:
   messages:
     JobReported:
@@ -202,6 +244,27 @@ components:
       description: Published once per supervisor correction of a registration, in the same transaction; hours is the new elapsed time of a closed registration. A supervisor's confirmation of an auto clock-out (BR-25.3) is published the same way with the new times equal to the old ones.
       payload:
         $ref: "#/components/schemas/RegistrationCorrectedData"
+    TimeProfileSaved:
+      name: dev.passage.shopfloor.timeprofile.saved.v1
+      contentType: application/cloudevents+json
+      summary: Time profile created or changed
+      description: Published in the transaction that creates or replaces a time profile; version is 1 for a new profile.
+      payload:
+        $ref: "#/components/schemas/TimeProfileSavedData"
+    PayAgreementSaved:
+      name: dev.passage.shopfloor.payagreement.saved.v1
+      contentType: application/cloudevents+json
+      summary: Pay agreement created or changed
+      description: Published in the transaction that creates or replaces a pay agreement; decimals are strings.
+      payload:
+        $ref: "#/components/schemas/PayAgreementSavedData"
+    WorkerAssigned:
+      name: dev.passage.shopfloor.worker.assigned.v1
+      contentType: application/cloudevents+json
+      summary: Worker linked to a time profile and pay agreement
+      description: Published when a worker's profile or agreement link changes; a null id means the defaults apply. Days already calculated keep their pay lines until recalculated.
+      payload:
+        $ref: "#/components/schemas/WorkerAssignedData"
     PaydayRevised:
       name: dev.passage.shopfloor.payday.revised.v1
       contentType: application/cloudevents+json
@@ -589,6 +652,72 @@ components:
         reason:
           type: string
         correctedBy:
+          type: string
+    TimeProfileSavedData:
+      type: object
+      required: [profileId, code, name, active, version, savedBy]
+      additionalProperties: false
+      properties:
+        profileId:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        active:
+          type: boolean
+        version:
+          type: integer
+          minimum: 1
+        savedBy:
+          type: string
+    PayAgreementSavedData:
+      type: object
+      required: [agreementId, code, name, dailyThreshold, weeklyThreshold, overtimeMultiplier, sundayMultiplier, weekStart, active, version, savedBy]
+      additionalProperties: false
+      properties:
+        agreementId:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        dailyThreshold:
+          type: string
+        weeklyThreshold:
+          type: string
+        overtimeMultiplier:
+          type: string
+        sundayMultiplier:
+          type: string
+        weekStart:
+          type: integer
+          minimum: 0
+          maximum: 6
+        active:
+          type: boolean
+        version:
+          type: integer
+          minimum: 1
+        savedBy:
+          type: string
+    WorkerAssignedData:
+      type: object
+      required: [workerId, profileId, payAgreementId, assignedBy]
+      additionalProperties: false
+      properties:
+        workerId:
+          type: string
+          format: uuid
+        profileId:
+          type: [string, "null"]
+          format: uuid
+        payAgreementId:
+          type: [string, "null"]
+          format: uuid
+        assignedBy:
           type: string
     PaydayRevisedData:
       type: object

@@ -29,14 +29,18 @@ type Worker struct {
 	Active    bool            `json:"active"`
 	Version   int             `json:"version"`
 	CreatedAt time.Time       `json:"createdAt"`
+	// ProfileID and PayAgreementID link the worker to a time profile and a pay
+	// agreement (FR-25.7); nil means the calculation defaults.
+	ProfileID      *string `json:"profileId"`
+	PayAgreementID *string `json:"payAgreementId"`
 }
 
-const workerColumns = `id::text, party_id::text, name, badge_id, user_id, cost_rate::text, currency, active, version, created_at`
+const workerColumns = `id::text, party_id::text, name, badge_id, user_id, cost_rate::text, currency, active, version, created_at, profile_id::text, pay_agreement_id::text`
 
 func scanWorker(row pgx.Row) (Worker, error) {
 	var w Worker
 	var rate string
-	if err := row.Scan(&w.ID, &w.PartyID, &w.Name, &w.BadgeID, &w.UserID, &rate, &w.Currency, &w.Active, &w.Version, &w.CreatedAt); err != nil {
+	if err := row.Scan(&w.ID, &w.PartyID, &w.Name, &w.BadgeID, &w.UserID, &rate, &w.Currency, &w.Active, &w.Version, &w.CreatedAt, &w.ProfileID, &w.PayAgreementID); err != nil {
 		return Worker{}, err
 	}
 	var err error

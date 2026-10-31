@@ -45,6 +45,12 @@ type fakeStore struct {
 	correctErr error
 	revised    *store.PayCalculation
 	revisedWhy string
+	// paySetup is what LoadPaySetup returns; the setup calls record their input.
+	paySetup      domain.PaySetup
+	profileIn     *store.TimeProfileInput
+	agreementIn   *store.PayAgreementInput
+	updateVersion int
+	assigned      *assignRequest
 }
 
 func (f *fakeStore) Ping(context.Context) error { return nil }

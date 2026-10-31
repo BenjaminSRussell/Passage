@@ -81,6 +81,16 @@ type Store interface {
 	ListRegistrations(ctx context.Context, workerID string, start, end time.Time, limit int) ([]store.RegistrationView, error)
 	ListBundleRegistrations(ctx context.Context, bundleID string, limit int) ([]store.RegistrationView, error)
 	LoadPunches(ctx context.Context, workerID string, start, end time.Time) (store.PunchInput, error)
+	LoadPaySetup(ctx context.Context, workerID string) (domain.PaySetup, error)
+	CreateTimeProfile(ctx context.Context, in store.TimeProfileInput, createdBy string, idem store.Idem) (store.TimeProfile, error)
+	UpdateTimeProfile(ctx context.Context, id string, version int, in store.TimeProfileInput, updatedBy string) (store.TimeProfile, error)
+	GetTimeProfile(ctx context.Context, id string) (store.TimeProfile, error)
+	ListTimeProfiles(ctx context.Context, activeOnly bool, limit int) ([]store.TimeProfile, error)
+	CreatePayAgreement(ctx context.Context, in store.PayAgreementInput, createdBy string, idem store.Idem) (store.PayAgreement, error)
+	UpdatePayAgreement(ctx context.Context, id string, version int, in store.PayAgreementInput, updatedBy string) (store.PayAgreement, error)
+	GetPayAgreement(ctx context.Context, id string) (store.PayAgreement, error)
+	ListPayAgreements(ctx context.Context, activeOnly bool, limit int) ([]store.PayAgreement, error)
+	AssignWorkerSetup(ctx context.Context, workerID string, version int, profileID, agreementID *string, assignedBy string, idem store.Idem) (store.Worker, error)
 	SavePay(ctx context.Context, calc store.PayCalculation, idem store.Idem, response any) error
 	CorrectRegistration(ctx context.Context, id string, req domain.CorrectionRequest, correctedBy string, idem store.Idem) (store.Correction, error)
 	ListCorrections(ctx context.Context, workerID string, from, to time.Time, limit int) ([]store.Correction, error)
@@ -250,6 +260,7 @@ func (a *API) Register(r chi.Router) {
 	a.registerJobs(r)
 	a.registerCorrections(r)
 	a.registerAutoClock(r)
+	a.registerSetup(r)
 }
 
 // Metrics serves the counters in Prometheus text format on the admin port.
@@ -852,14 +863,19 @@ func (a *API) calculatePay(w http.ResponseWriter, r *http.Request) {
 // recalculate builds the worker-days of a window from the stored clock registrations.
 // A rule violation (more than 24 hours in a day) comes back as a 422 problem.
 func (a *API) recalculate(ctx context.Context, win rangeWindow) ([]domain.DayPay, string, error) {
-	rules := domain.DefaultRules()
+	setup, err := a.store.LoadPaySetup(ctx, win.workerID)
+	if err != nil {
+		return nil, "", err
+	}
+	rules := setup.EffectiveRules()
 	loadFrom := domain.WeekStartOf(win.from, rules.WeekStart).AddDate(0, 0, -1)
 	in, err := a.store.LoadPunches(ctx, win.workerID, loadFrom, win.end.AddDate(0, 0, 1))
 	if err != nil {
 		return nil, "", err
 	}
-	calc := domain.Calculation{Profile: domain.DefaultProfile(), Location: win.loc, Rules: rules, Rate: in.Rate, Currency: in.Currency}
-	all, err := calc.Run(domain.BuildDays(in.Punches, win.loc, calc.Profile))
+	profileFor := func(t time.Time) domain.Profile { return setup.Profiles.For(t, win.loc) }
+	calc := domain.Calculation{ProfileFor: profileFor, Location: win.loc, Rules: rules, Rate: in.Rate, Currency: in.Currency}
+	all, err := calc.Run(domain.BuildDaysFor(in.Punches, win.loc, profileFor))
 	if err != nil {
 		var de *domain.Error
 		if errors.As(err, &de) {

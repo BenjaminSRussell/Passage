@@ -3,6 +3,35 @@
 Shop floor execution service. Wave reference: **PSG-25 / Wave 25**
 (Shop Floor Execution, Time Registration & IoT), PRD section 4.25.
 
+## Slice 11: time profiles, pay agreements and the worker link (FR-25.7, BR-25.2, BR-25.8)
+
+- `time-profiles` (`POST`, `GET`, `GET {id}`, `PUT {id}`): a profile holds one `days` entry per
+  day type (`weekday`, `saturday`, `sunday`) with `shiftStart`/`shiftEnd` ("HH:MM", both or
+  neither), unpaid `breaks`, `roundingMinutes` (1 to 15), `toleranceBeforeMin` and
+  `toleranceAfterMin` (0 to 60) and `flexAllowed` (stored; the flex balance is not calculated).
+  A day type the profile does not define uses `DefaultProfile` (10 before, 5 after, 1 minute
+  rounding, no breaks).
+- `pay-agreements` (same four routes): `dailyThreshold` (0 to 24 h), `weeklyThreshold` (0 to
+  168 h), `overtimeMultiplier` and `sundayMultiplier` (1 to 5), `weekStart` (0 Sunday to 6).
+  A worker without an agreement is calculated with `DefaultRules`.
+- `POST workers/{id}:assign-setup` links a worker to a profile and an agreement (null clears a
+  link). A newly chosen profile or agreement must exist (SF-0140, SF-0141) and be active
+  (SF-0144); the one the worker already has may stay linked after it was deactivated, so the
+  other link can still be changed.
+- Creates take an `Idempotency-Key`. `PUT` and the assignment take `If-Match` with the version
+  read as an entity tag (`"3"`); every read and write returns the new `ETag`, and a stale
+  version is SF-0143 (412). The code of a profile or agreement never changes (SF-0142 on a
+  duplicate at create).
+- `pay:calculate` and `pay:revise` read the worker's setup first: the week start decides which
+  earlier days the weekly threshold sees, the profile of the day a segment starts on rounds its
+  punches and takes its breaks off, and the agreement sets the thresholds and multipliers.
+  Deactivating a profile or agreement stops new assignments but keeps applying to workers
+  already linked, so pay never changes silently. Days already calculated keep their lines until
+  recalculated (an approved day through `pay:revise`).
+- Events `dev.passage.shopfloor.timeprofile.saved.v1`, `payagreement.saved.v1` and
+  `worker.assigned.v1` are written through the outbox in the same transaction.
+- Duty: `shopfloor.setup.maintain` writes, `shopfloor.view` reads (both exist already).
+
 ## Slice 8: job start and stop from registrations
 
 - Job-start dispatch (FR-25.3) in `POST registrations`: a new `job-start` for a job on the
@@ -347,6 +376,8 @@ OpenAPI and AsyncAPI files in step with the router and the published event types
 |---|---|
 | POST `/v1/shopfloor/workers` | `shopfloor.setup.maintain` (Maintain shop floor setup) |
 | GET `/v1/shopfloor/workers`, `/workers/{id}` | `shopfloor.view` (View shop floor) |
+| POST and PUT `/time-profiles`, `/pay-agreements`; POST `/workers/{id}:assign-setup` | `shopfloor.setup.maintain` |
+| GET `/time-profiles`, `/pay-agreements` and their `{id}` | `shopfloor.view` |
 | POST `/v1/shopfloor/registrations` | `shopfloor.time.register` (Register time) |
 | GET `/v1/shopfloor/registrations` | `shopfloor.view` |
 | POST `/v1/shopfloor/pay:calculate` | `shopfloor.pay.calculate` (Calculate time registrations) |
@@ -415,6 +446,11 @@ Problem details use `application/problem+json` with `type` `https://passage.dev/
 | `SF-0128` | 422 | The correction is invalid (no reason, stop before start, over 24 hours, or nothing changes; keeping the time is allowed once, to confirm an unreviewed auto clock-out) |
 | `SF-0129` | 422 | `pay:revise` found the recalculated pay equal to the stored pay in every day of the range |
 | `SF-0130` | 422 | `registrations:auto-clock-out` got `afterHours` outside 4 to 24 |
+| `SF-0140` | 404 or 422 | Time profile not found (422 when named by an assignment) |
+| `SF-0141` | 404 or 422 | Pay agreement not found (422 when named by an assignment) |
+| `SF-0142` | 409 | The profile or agreement code is already used |
+| `SF-0143` | 412 | `If-Match` is not the stored version of the profile, agreement or worker |
+| `SF-0144` | 422 | The profile or agreement newly chosen by an assignment is inactive |
 | `idempotency_key_reuse` | 422 | `Idempotency-Key` already used with a different request |
 
 Warnings on an accepted registration (`items[].warnings`, the request succeeds):

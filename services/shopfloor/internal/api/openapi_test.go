@@ -96,6 +96,15 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		"/v1/shopfloor/pay:revise post":                                            DutyPayRevise,
 		"/v1/shopfloor/registrations:auto-clock-out post":                          DutyAutoClockOut,
 		"/v1/shopfloor/auto-clock-outs get":                                        DutyView,
+		"/v1/shopfloor/time-profiles post":                                         DutySetup,
+		"/v1/shopfloor/time-profiles get":                                          DutyView,
+		"/v1/shopfloor/time-profiles/{id} get":                                     DutyView,
+		"/v1/shopfloor/time-profiles/{id} put":                                     DutySetup,
+		"/v1/shopfloor/pay-agreements post":                                        DutySetup,
+		"/v1/shopfloor/pay-agreements get":                                         DutyView,
+		"/v1/shopfloor/pay-agreements/{id} get":                                    DutyView,
+		"/v1/shopfloor/pay-agreements/{id} put":                                    DutySetup,
+		"/v1/shopfloor/workers/{id}:assign-setup post":                             DutySetup,
 	}
 	keyed := map[string]bool{
 		"/v1/shopfloor/workers post":                                               true,
@@ -109,6 +118,9 @@ func TestOpenAPIDocumentsEveryOperation(t *testing.T) {
 		"/v1/shopfloor/process-messages/{id}:delete post":                          true,
 		"/v1/shopfloor/registrations/{id}:correct post":                            true,
 		"/v1/shopfloor/pay:revise post":                                            true,
+		"/v1/shopfloor/time-profiles post":                                         true,
+		"/v1/shopfloor/pay-agreements post":                                        true,
+		"/v1/shopfloor/workers/{id}:assign-setup post":                             true,
 	}
 	for op := range served {
 		d, ok := declared[op]
