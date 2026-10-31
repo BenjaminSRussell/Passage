@@ -9,6 +9,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/events"
+	"github.com/BenjaminSRussell/passage/platform/fieldcrypt"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 )
 
@@ -153,6 +154,7 @@ type Invoice struct {
 	Source         string
 	Status         string
 	PostedBy       string
+	OneTimePayeeID string
 	AuditReason    string
 	ReleasedBy     string
 	ReleasedAt     *time.Time
@@ -259,6 +261,7 @@ type Store interface {
 	Post(ctx context.Context, id string, fn PostFunc) (Receipt, error)
 	Correct(ctx context.Context, id string, fn AdjustFunc) (Receipt, error)
 	Cancel(ctx context.Context, id string, fn AdjustFunc) (Receipt, error)
+	CreateOneTimePayee(ctx context.Context, in OneTimePayee) (OneTimePayee, error)
 	PostInvoice(ctx context.Context, in Invoice, fn InvoiceFunc) (Invoice, error)
 	ReleaseInvoice(ctx context.Context, id, legalEntityID, by string, fn ReleaseFunc) (Invoice, error)
 	RejectInvoice(ctx context.Context, id, legalEntityID, by, reason string, fn RejectFunc) (Invoice, error)
@@ -291,6 +294,7 @@ var _ Store = (*Postgres)(nil)
 type Postgres struct {
 	pool    *pgxpool.Pool
 	pending *pgxpool.Pool
+	crypt   *fieldcrypt.Keys
 }
 
 func New(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }

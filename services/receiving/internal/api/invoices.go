@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
+	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/money"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
@@ -39,6 +40,7 @@ type invoiceRequest struct {
 	Currency       string               `json:"currency"`
 	LedgerID       string               `json:"ledgerId"`
 	FiscalPeriodID string               `json:"fiscalPeriodId"`
+	OneTimePayeeID string               `json:"oneTimePayeeId"`
 	Lines          []invoiceLineRequest `json:"lines"`
 }
 
@@ -62,6 +64,7 @@ type invoiceBody struct {
 	Currency       string            `json:"currency"`
 	LedgerID       string            `json:"ledgerId"`
 	FiscalPeriodID string            `json:"fiscalPeriodId"`
+	OneTimePayeeID string            `json:"oneTimePayeeId,omitempty"`
 	Total          string            `json:"total"`
 	LedgerEntryID  string            `json:"ledgerEntryId"`
 	Source         string            `json:"source"`
@@ -93,6 +96,13 @@ func buildVendorInvoice(tenantID, ledgerID string, req invoiceRequest) (store.In
 	if req.FiscalPeriodID != "" {
 		checkUUID(fields, "fiscalPeriodId", req.FiscalPeriodID)
 	}
+	payeeID := ""
+	if req.OneTimePayeeID != "" {
+		var ok bool
+		if payeeID, ok = ids.Canonical(req.OneTimePayeeID); !ok {
+			fields["oneTimePayeeId"] = "must be a UUID"
+		}
+	}
 	number := strings.TrimSpace(req.InvoiceNumber)
 	if n := utf8.RuneCountInString(number); n < 1 || n > maxInvoiceNumber {
 		fields["invoiceNumber"] = fmt.Sprintf("must be 1 to %d characters", maxInvoiceNumber)
@@ -112,7 +122,7 @@ func buildVendorInvoice(tenantID, ledgerID string, req invoiceRequest) (store.In
 		fields["lines"] = fmt.Sprintf("must hold 1 to %d lines", maxLines)
 	}
 	in := store.Invoice{
-		ID: stableID(tenantID, req.VendorID, strings.ToLower(number)), LegalEntityID: req.LegalEntityID, VendorID: req.VendorID, InvoiceNumber: number,
+		ID: stableID(tenantID, req.VendorID, strings.ToLower(number)), LegalEntityID: req.LegalEntityID, VendorID: req.VendorID, InvoiceNumber: number, OneTimePayeeID: payeeID,
 		InvoiceDate: invoiceDate, PostingDate: postingDate, Currency: req.Currency, LedgerID: ledgerID,
 		Source: domain.InvoiceSourceManual, Lines: make([]store.InvoiceLine, 0, len(req.Lines)),
 	}
@@ -238,7 +248,7 @@ func toInvoiceBody(in store.Invoice) invoiceBody {
 	out := invoiceBody{
 		ID: in.ID, VendorID: in.VendorID, LegalEntityID: in.LegalEntityID, InvoiceNumber: in.InvoiceNumber, InvoiceDate: in.InvoiceDate.Format(dateLayout),
 		PostingDate: in.PostingDate.Format(dateLayout), Currency: in.Currency, LedgerID: in.LedgerID, FiscalPeriodID: in.FiscalPeriodID,
-		Total: in.Total.StringFixed(scale), LedgerEntryID: in.LedgerEntryID, Source: in.Source, Status: in.Status, AuditReason: in.AuditReason, ReleasedBy: in.ReleasedBy, RejectedBy: in.RejectedBy, RejectReason: in.RejectReason, CreatedAt: in.CreatedAt.UTC().Format(time.RFC3339), Lines: make([]invoiceLineBody, 0, len(in.Lines)),
+		OneTimePayeeID: in.OneTimePayeeID, Total: in.Total.StringFixed(scale), LedgerEntryID: in.LedgerEntryID, Source: in.Source, Status: in.Status, AuditReason: in.AuditReason, ReleasedBy: in.ReleasedBy, RejectedBy: in.RejectedBy, RejectReason: in.RejectReason, CreatedAt: in.CreatedAt.UTC().Format(time.RFC3339), Lines: make([]invoiceLineBody, 0, len(in.Lines)),
 	}
 	if in.ReleasedAt != nil {
 		out.ReleasedAt = in.ReleasedAt.UTC().Format(time.RFC3339)

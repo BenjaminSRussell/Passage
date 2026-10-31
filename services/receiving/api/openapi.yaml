@@ -277,10 +277,36 @@ paths:
         '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
         '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001' }
         '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
-        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-002 receipt line has no open GR/IR item.' }
+        '404': { $ref: '#/components/responses/Problem', description: 'RCV-NF-002 receipt line has no open GR/IR item; RCV-NF-006 oneTimePayeeId names no payee the caller can see.' }
         '409': { $ref: '#/components/responses/Problem', description: 'AP-DUP-001 invoice number already posted for the vendor; RCV-IDM-001 an earlier posting for this invoice is unfinished or differs; COM-0410.' }
-        '422': { $ref: '#/components/responses/Problem', description: 'PER-AP-001 closed AP period; AP-QTY-001 more than received and uninvoiced; AP-PLN-001 the PO line is settled by its invoicing plan; RCV-VAL-001 other vendor or entity; COM-0409.' }
+        '422': { $ref: '#/components/responses/Problem', description: 'PER-AP-001 closed AP period; AP-QTY-001 more than received and uninvoiced; AP-PLN-001 the PO line is settled by its invoicing plan; RCV-VAL-001 other vendor or entity, or a one-time payee of another legal entity; COM-0409.' }
         '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+  /v1/receiving/one-time-payees:
+    post:
+      operationId: createOneTimePayee
+      x-passage-duty: VendorInvoicePost
+      description: Records the document-level payee of a vendor invoice for the legal entity's one-time vendor account (FR-18.19). Name, address, tax id, email and bank account are encrypted with platform fieldcrypt (a per-tenant data key derived from the service key in FIELDCRYPT_KEYS_FILE or FIELDCRYPT_KEYS, with tenant and field bound as additional data) before they reach the database; the payee is immutable once stored. The response, error bodies, logs and events carry the payee id, never its data: a validation error names the field and the rule, not the value. The bank account is validated like a vendor bank account (IBAN mod-97 or ABA checksum, AP-BNK-001). Reference the returned id as oneTimePayeeId on POST /v1/receiving/invoices:post. There is no read endpoint; payment (FR-19.23) needs a separate decrypting read.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OneTimePayeeRequest' }
+      responses:
+        '201':
+          description: Payee recorded.
+          headers:
+            Idempotent-Replayed: { schema: { type: string, enum: ['true'] }, description: Present on replays only. }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OneTimePayee' }
+        '400': { $ref: '#/components/responses/Problem', description: 'COM-0001' }
+        '401': { $ref: '#/components/responses/Problem', description: 'AUTH-0001 no authenticated user.' }
+        '403': { $ref: '#/components/responses/Problem', description: 'AUTH-0003' }
+        '422': { $ref: '#/components/responses/Problem', description: 'AP-BNK-001 the bank account failed its checksum or format check; COM-0409.' }
+        '500': { $ref: '#/components/responses/Problem', description: 'COM-0500' }
+        '503': { $ref: '#/components/responses/Problem', description: 'RCV-CRY-001 no field encryption keys are configured.' }
   /v1/receiving/invoice-adjustments:post:
     post:
       operationId: postInvoiceAdjustment
@@ -891,6 +917,34 @@ components:
             count: { type: integer }
             openAmount: { type: array, items: { $ref: '#/components/schemas/Money' } }
         nextCursor: { type: string }
+    OneTimePayeeRequest:
+      type: object
+      additionalProperties: false
+      required: [legalEntityId, name, address, country]
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 140 }
+        address: { type: string, minLength: 1, maxLength: 300 }
+        country: { type: string, pattern: '^[A-Z]{2}$' }
+        taxId: { type: string, maxLength: 40 }
+        email: { type: string, maxLength: 254 }
+        bankAccount:
+          type: object
+          additionalProperties: false
+          description: Either iban (with an optional bic) or routingNumber with accountNumber.
+          properties:
+            iban: { type: string }
+            bic: { type: string }
+            routingNumber: { type: string, pattern: '^[0-9]{9}$' }
+            accountNumber: { type: string, pattern: '^[0-9]{4,17}$' }
+    OneTimePayee:
+      type: object
+      required: [id, legalEntityId, country, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        country: { type: string, pattern: '^[A-Z]{2}$' }
+        createdAt: { type: string, format: date-time }
     InvoiceRequest:
       type: object
       additionalProperties: false
@@ -904,6 +958,7 @@ components:
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         ledgerId: { type: string, format: uuid, description: Optional. The service posts to its configured ledger (POSTING_LEDGER_ID); a different value is refused with 422 RCV-VAL-001. }
         fiscalPeriodId: { type: string, format: uuid, deprecated: true, description: 'Optional, check only. The service resolves the fiscal period from legalEntityId, its ledger and postingDate through close (GET /v1/close/periods:resolve); a different value is refused with 422 PER-AP-002, as is a date no period or several periods cover.' }
+        oneTimePayeeId: { type: string, format: uuid, description: 'Optional. A payee recorded with POST /v1/receiving/one-time-payees in the same legal entity; vendorId is then the legal entity''s one-time vendor account (not checked: no parameter holds it yet). Unknown or invisible: 404 RCV-NF-006; another legal entity: 422 RCV-VAL-001.' }
         lines:
           type: array
           minItems: 1
@@ -923,6 +978,7 @@ components:
       required: [id, vendorId, legalEntityId, invoiceNumber, invoiceDate, postingDate, currency, ledgerId, fiscalPeriodId, total, ledgerEntryId, source, status, createdAt, lines]
       properties:
         source: { type: string, enum: [MANUAL, ERS] }
+        oneTimePayeeId: { type: string, format: uuid, description: The payee recorded for the invoice; its data is never returned. }
         auditReason: { type: string, enum: [stochastic sample, re-issue after audit rejection], description: Why an invoice is or was held for audit. }
         status: { type: string, enum: [POSTED, AUDIT_BLOCKED, AUDIT_REJECTED], description: 'AUDIT_BLOCKED invoices have an empty ledgerEntryId until released.' }
         releasedBy: { type: string, description: The user who released the audit block. }

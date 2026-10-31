@@ -36,3 +36,7 @@ alerts:
 serviceIdentity:
   signingKeySecret: ""
   keyId: ""
+
+fieldCrypt:
+  keysSecret: ""
+  currentKeyId: ""
