@@ -38,6 +38,7 @@
       {"resource": "/v1/numbering/sequences", "methods": ["POST"]},
       {"resource": "/v1/numbering/sequences/*/next", "methods": ["POST"]}
     ]},
+    "numbering.sequence.allocate": {"service_only": true, "permissions": [{"resource": "/v1/numbering/sequences/*/next", "methods": ["POST"]}]},
     "View audit log": {"permissions": [{"resource": "/v1/audit{,/**}", "methods": ["GET"]}]},
     "Record audit changes": {"permissions": [{"resource": "/v1/audit{,/**}", "methods": ["POST"]}]},
     "Import data": {"permissions": [{"resource": "/v1/imports{,/**}", "methods": ["GET", "POST"]}]},
@@ -101,6 +102,12 @@
       {"resource": "/v1/ledger/journal-batches/*/post", "methods": ["POST"]},
       {"resource": "/v1/ledger/ledger-sets/*/journal-entries", "methods": ["POST"]}
     ]},
+    "ledger.entry.post": {"service_only": true, "permissions": [{"resource": "/v1/ledger/journal-entries", "methods": ["POST"]}]},
+    "ledger.entry.validate": {"permissions": [{"resource": "/v1/ledger/validate", "methods": ["POST"]}]},
+    "ledger.batch.post": {"permissions": [{"resource": "/v1/ledger/journal-batches/*/post", "methods": ["POST"]}]},
+    "ledger.set.post": {"permissions": [{"resource": "/v1/ledger/ledger-sets/*/journal-entries", "methods": ["POST"]}]},
+    "ledger.entry.lookup": {"service_only": true, "permissions": [{"resource": "/v1/ledger/journal-lines", "methods": ["GET"]}]},
+    "ledger.ledger.lookup": {"service_only": true, "permissions": [{"resource": "/v1/ledger/ledgers/*", "methods": ["GET"]}]},
     "ledger.journal.postdirect": {"flag": true, "permissions": []},
     "ledger.journal.postledger": {"flag": true, "permissions": []},
     "ledger.journal.reverse": {"permissions": [{"resource": "/v1/ledger/journal-entries/*/reverse", "methods": ["POST"]}]},
@@ -2218,20 +2225,20 @@
       "product": ["product.variants.explode", "product.released.read", "product.jobs.write"]
     },
     "receiving": {
-      "ledger": ["ledger.journal.post", "ledger.journal.reverse"],
+      "ledger": ["ledger.entry.post", "ledger.journal.reverse", "ledger.journal.post"],
       "close": ["period.check"],
       "purchasing": ["procurement.invoicing-plan.settle", "procurement.purchase-order.lookup"],
       "inventory": ["inventory.ownership-change.read"]
     },
     "payables": {
-      "ledger": ["ledger.balance.read", "ledger.journal.read", "ledger.journal.post"],
+      "ledger": ["ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup", "ledger.entry.post", "ledger.journal.read", "ledger.journal.post"],
       "fx": ["fx.rate.lookup"]
     },
     "workflow-ts": {
       "payables": ["payment-run.execute"]
     },
     "party": {
-      "numbering": ["numbering.write"]
+      "numbering": ["numbering.sequence.allocate", "numbering.write"]
     }
   }
 }

@@ -55,6 +55,18 @@ segregation_denials := [
 	["ledger.journal.reverse", "POST", "/v1/ledger/journal-entries"],
 	["ledger.journal.postledger", "POST", "/v1/ledger/journal-entries"],
 	["ledger.journal.read", "POST", "/v1/ledger/ledger-sets/s1/journal-entries"],
+	["ledger.entry.post", "POST", "/v1/ledger/journal-batches/b1/post"],
+	["ledger.entry.post", "POST", "/v1/ledger/ledger-sets/s1/journal-entries"],
+	["ledger.entry.post", "POST", "/v1/ledger/validate"],
+	["ledger.entry.post", "POST", "/v1/ledger/journal-entries/e1/reverse"],
+	["ledger.entry.validate", "POST", "/v1/ledger/journal-entries"],
+	["ledger.batch.post", "POST", "/v1/ledger/journal-entries"],
+	["ledger.batch.post", "POST", "/v1/ledger/ledger-sets/s1/journal-entries"],
+	["ledger.set.post", "POST", "/v1/ledger/journal-batches/b1/post"],
+	["ledger.entry.lookup", "GET", "/v1/ledger/ledgers/l1"],
+	["ledger.entry.lookup", "GET", "/v1/ledger/journal-entries/e1"],
+	["ledger.ledger.lookup", "GET", "/v1/ledger/journal-lines"],
+	["numbering.sequence.allocate", "POST", "/v1/numbering/sequences"],
 	["ReceivingMaintain", "POST", "/v1/receiving/receipts/r1:post"],
 	["ReceivingMaintain", "POST", "/v1/receiving/receipts/r1:correct"],
 	["ReceivingMaintain", "POST", "/v1/receiving/receipts/r1:cancel"],
@@ -91,6 +103,15 @@ segregation_grants := [
 	["ledger.journal.post", "POST", "/v1/ledger/journal-batches/b1/post"],
 	["ledger.journal.reverse", "POST", "/v1/ledger/journal-entries/e1/reverse"],
 	["ledger.journal.post", "POST", "/v1/ledger/ledger-sets/s1/journal-entries"],
+	["ledger.journal.post", "POST", "/v1/ledger/journal-entries"],
+	["ledger.journal.post", "POST", "/v1/ledger/validate"],
+	["ledger.entry.post", "POST", "/v1/ledger/journal-entries"],
+	["ledger.entry.validate", "POST", "/v1/ledger/validate"],
+	["ledger.batch.post", "POST", "/v1/ledger/journal-batches/b1/post"],
+	["ledger.set.post", "POST", "/v1/ledger/ledger-sets/s1/journal-entries"],
+	["ledger.entry.lookup", "GET", "/v1/ledger/journal-lines"],
+	["ledger.ledger.lookup", "GET", "/v1/ledger/ledgers/l1"],
+	["numbering.sequence.allocate", "POST", "/v1/numbering/sequences/INV/next"],
 	["ledger.setup.write", "POST", "/v1/ledger/ledgers/l1/account-mappings"],
 	["ReceivingPost", "POST", "/v1/receiving/receipts/r1:post"],
 	["VendorInvoicePost", "POST", "/v1/receiving/invoice-adjustments:post"],
@@ -498,6 +519,14 @@ test_service_grants_allow_only_their_declared_routes if {
 		not allowed(duty, "POST", "/v1/ledger/journal-entries/je-1/reverse")
 		not allowed(duty, "POST", "/v1/ledger/ledgers")
 		not allowed(duty, "POST", "/v1/ledger/balances:rebuild")
+	}
+	transitional := {"ledger.journal.post", "ledger.journal.read"}
+	every grant in [data.service_grants.receiving.ledger, data.service_grants.payables.ledger] {
+		every duty in {d | some d in grant; not d in transitional} {
+			not allowed(duty, "POST", "/v1/ledger/validate")
+			not allowed(duty, "POST", "/v1/ledger/journal-batches/b1/post")
+			not allowed(duty, "POST", "/v1/ledger/ledger-sets/s1/journal-entries")
+		}
 	}
 	allowed("ledger.journal.post", "POST", "/v1/ledger/journal-entries")
 	not allowed("ledger.balance.read", "POST", "/v1/ledger/journal-entries")

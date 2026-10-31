@@ -73,7 +73,7 @@ func (c *Client) allocate(ctx context.Context, code, idempotencyKey string) (str
 		return "", err
 	}
 	p, _ := tenant.FromContext(ctx)
-	signed, err := c.signer.Apply(req, p, audience, "")
+	signed, err := c.signer.ApplyDuties(req, p, audience, "", []string{"numbering.sequence.allocate"})
 	if err != nil {
 		return "", err
 	}

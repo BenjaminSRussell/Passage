@@ -18,7 +18,7 @@ Run: `DATABASE_URL=postgres://... MIGRATE_ON_START=true go run ./cmd/numbering`.
 |---|---|
 | `POST /v1/numbering/sequences` (optional `Idempotency-Key`) | `numbering.write` |
 | `GET /v1/numbering/sequences/{code}` | `numbering.read` |
-| `POST /v1/numbering/sequences/{code}/next` (optional `Idempotency-Key`) | `numbering.write` |
+| `POST /v1/numbering/sequences/{code}/next` (optional `Idempotency-Key`) | `numbering.write` or `numbering.sequence.allocate` |
 | `GET /healthz`, `GET /readyz`, `GET /metrics` on the admin port | public |
 
 Contract: `api/openapi.yaml`. Event: `dev.passage.numbering.sequence.allocated.v1`. The legal-entity header is `X-Passage-Legal-Entity`.

@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -27,8 +28,10 @@ const (
 	balancesPath    = "/v1/ledger/balances"
 	ledgersPath     = "/v1/ledger/ledgers/"
 	entriesPath     = "/v1/ledger/journal-entries"
+	linesPath       = "/v1/ledger/journal-lines"
 	sourceSystem    = "payables"
 	maxResponseSize = 1 << 20
+	maxLookupPages  = 5
 )
 
 type Balance struct {
@@ -78,9 +81,14 @@ func (e *StatusError) Error() string { return fmt.Sprintf("ledger: unexpected st
 
 const CodeIdempotencyInProgress = "LEDGER_IDEMPOTENCY_IN_PROGRESS"
 
-var readDuties = []string{"ledger.balance.read", "ledger.journal.read"}
+const (
+	dutyBalanceRead  = "ledger.balance.read"
+	dutyLedgerLookup = "ledger.ledger.lookup"
+	dutyEntryLookup  = "ledger.entry.lookup"
+	dutyEntryPost    = "ledger.entry.post"
+)
 
-func (c *Client) get(ctx context.Context, legalEntityID, path string, q url.Values, subject string) ([]byte, error) {
+func (c *Client) get(ctx context.Context, legalEntityID, path string, q url.Values, subject, duty string) ([]byte, error) {
 	principal, ok := tenant.FromContext(ctx)
 	if !ok {
 		return nil, errors.New("ledger: no principal in context")
@@ -93,7 +101,7 @@ func (c *Client) get(ctx context.Context, legalEntityID, path string, q url.Valu
 	if err != nil {
 		return nil, fmt.Errorf("ledger: %w", err)
 	}
-	signed, err := c.signer.ApplyDuties(req, principal, audience, legalEntityID, readDuties)
+	signed, err := c.signer.ApplyDuties(req, principal, audience, legalEntityID, []string{duty})
 	if err != nil {
 		return nil, fmt.Errorf("ledger: %w", err)
 	}
@@ -120,7 +128,7 @@ func (c *Client) get(ctx context.Context, legalEntityID, path string, q url.Valu
 
 func (c *Client) AccountBalance(ctx context.Context, legalEntityID, ledgerID, account, periodTo string) (Balance, error) {
 	q := url.Values{"ledger": {ledgerID}, "period_to": {periodTo}, "account_from": {account}, "account_to": {account}}
-	raw, err := c.get(ctx, legalEntityID, balancesPath, q, account)
+	raw, err := c.get(ctx, legalEntityID, balancesPath, q, account, dutyBalanceRead)
 	if err != nil {
 		return Balance{}, err
 	}
@@ -128,7 +136,7 @@ func (c *Client) AccountBalance(ctx context.Context, legalEntityID, ledgerID, ac
 }
 
 func (c *Client) LegalEntity(ctx context.Context, legalEntityID, ledgerID string) (string, error) {
-	raw, err := c.get(ctx, legalEntityID, ledgersPath+url.PathEscape(ledgerID), nil, ledgerID)
+	raw, err := c.get(ctx, legalEntityID, ledgersPath+url.PathEscape(ledgerID), nil, ledgerID, dutyLedgerLookup)
 	if err != nil {
 		return "", err
 	}
@@ -139,6 +147,81 @@ func (c *Client) LegalEntity(ctx context.Context, legalEntityID, ledgerID string
 		return "", errors.New("ledger: response has no legalEntityId")
 	}
 	return body.LegalEntityID, nil
+}
+
+type lookedUpLine struct {
+	EntryID     string `json:"entryId"`
+	Account     string `json:"account"`
+	DebitCredit string `json:"debitCredit"`
+	Amount      string `json:"amount"`
+	Currency    string `json:"currency"`
+	SourceType  string `json:"sourceType"`
+	SourceID    string `json:"sourceId"`
+}
+
+// EntryForDocument returns the id of an entry this service already posted for e: same ledger, document id,
+// payables source and exactly e's lines. An entry that merely shares the document id is never returned.
+func (c *Client) EntryForDocument(ctx context.Context, e Entry) (string, error) {
+	var order []string
+	byEntry := map[string][]lookedUpLine{}
+	cursor := ""
+	for page := 0; page < maxLookupPages; page++ {
+		q := url.Values{"ledger": {e.LedgerID}, "documentId": {e.DocumentID}, "source_system": {sourceSystem}, "limit": {"1000"}}
+		if cursor != "" {
+			q.Set("cursor", cursor)
+		}
+		raw, err := c.get(ctx, e.LegalEntityID, linesPath, q, e.DocumentID, dutyEntryLookup)
+		if err != nil {
+			return "", err
+		}
+		var body struct {
+			Items      []lookedUpLine `json:"items"`
+			NextCursor string         `json:"nextCursor"`
+		}
+		if err := json.Unmarshal(raw, &body); err != nil {
+			return "", fmt.Errorf("ledger: entry lookup response unusable: %w", err)
+		}
+		for _, l := range body.Items {
+			if _, seen := byEntry[l.EntryID]; !seen {
+				order = append(order, l.EntryID)
+			}
+			byEntry[l.EntryID] = append(byEntry[l.EntryID], l)
+		}
+		if cursor = body.NextCursor; cursor == "" {
+			break
+		}
+	}
+	for _, id := range order {
+		if sameLines(e, byEntry[id]) {
+			return id, nil
+		}
+	}
+	return "", nil
+}
+
+func sameLines(e Entry, got []lookedUpLine) bool {
+	if len(got) != len(e.Lines) {
+		return false
+	}
+	want := make([]string, 0, len(e.Lines))
+	for _, l := range e.Lines {
+		want = append(want, lineKey(l.Account, l.Credit, l.Amount, e.Currency))
+	}
+	have := make([]string, 0, len(got))
+	for _, l := range got {
+		amount, err := decimal.NewFromString(l.Amount)
+		if err != nil || l.SourceType != e.SourceType || l.SourceID != e.DocumentID {
+			return false
+		}
+		have = append(have, lineKey(l.Account, l.DebitCredit == "C", amount, l.Currency))
+	}
+	slices.Sort(want)
+	slices.Sort(have)
+	return slices.Equal(want, have)
+}
+
+func lineKey(account string, credit bool, amount decimal.Decimal, currency string) string {
+	return fmt.Sprintf("%s|%t|%s|%s", account, credit, amount.String(), currency)
 }
 
 func parse(ctx context.Context, raw []byte, account string) (Balance, error) {
@@ -234,7 +317,7 @@ func (c *Client) Post(ctx context.Context, e Entry) (string, error) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Idempotency-Key", e.IdempotencyKey)
-	if _, err := c.signer.ApplyDuties(req, principal, audience, e.LegalEntityID, []string{"ledger.journal.post"}); err != nil {
+	if _, err := c.signer.ApplyDuties(req, principal, audience, e.LegalEntityID, []string{dutyEntryPost}); err != nil {
 		return "", fmt.Errorf("ledger: %w", err)
 	}
 	resp, err := c.http.Do(req)

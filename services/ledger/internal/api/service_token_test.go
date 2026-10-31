@@ -87,19 +87,19 @@ func TestServiceTokenCarriesOnlyTheServiceGrantNotForwardedUserDuties(t *testing
 
 func TestPayablesGrantPostsOnlyWithThePostingDutyAndNeverReversesOrCreatesLedgers(t *testing.T) {
 	rig := newTokenRig(t)
-	reads, _ := rig.payables.MintDuties("ledger", endUser(), "", []string{"ledger.balance.read", "ledger.journal.read"})
+	reads, _ := rig.payables.MintDuties("ledger", endUser(), "", []string{"ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup"})
 	rec := serviceCall(rig.handler, http.MethodPost, "/v1/ledger/journal-entries", entryBody, reads, nil)
 	if rec.Code != http.StatusForbidden || len(rig.store.posted) != 0 {
 		t.Fatalf("a payables read token must not post: %d %s", rec.Code, rec.Body.String())
 	}
-	post, _ := rig.payables.MintDuties("ledger", endUser(), "", []string{"ledger.journal.post"})
+	post, _ := rig.payables.MintDuties("ledger", endUser(), "", []string{"ledger.entry.post"})
 	if rec = serviceCall(rig.handler, http.MethodPost, "/v1/ledger/journal-entries", entryBody, post, nil); rec.Code != http.StatusCreated || len(rig.store.posted) != 1 {
 		t.Fatalf("payables posting token: %d %s", rec.Code, rec.Body.String())
 	}
 	if rig.store.posted[0].Actor != "warehouse-user" {
 		t.Fatalf("actor = %q, want the end user", rig.store.posted[0].Actor)
 	}
-	mints := map[string][]string{"reads": {"ledger.balance.read", "ledger.journal.read"}, "posting": {"ledger.journal.post"}, "whole grant": nil}
+	mints := map[string][]string{"reads": {"ledger.balance.read", "ledger.ledger.lookup", "ledger.entry.lookup"}, "posting": {"ledger.entry.post"}, "whole grant": nil}
 	for name, duties := range mints {
 		token, _ := rig.payables.MintDuties("ledger", endUser(), "", duties)
 		rec = serviceCall(rig.handler, http.MethodPost, "/v1/ledger/journal-entries/"+testEntry+"/reverse", `{"postingDate":"2026-03-31","description":"undo"}`, token, nil)
@@ -134,5 +134,67 @@ func TestServiceTokenRejectedWhenForgedOrMisaddressed(t *testing.T) {
 	}
 	if len(rig.store.posted) != 0 {
 		t.Fatal("a rejected token must never reach the store")
+	}
+}
+
+func TestNarrowServiceDutiesOpenOnlyTheirOwnRoute(t *testing.T) {
+	rig := newTokenRig(t)
+	routes := []struct {
+		method, path, body, duty string
+		wantOwn                  int
+	}{
+		{http.MethodPost, "/v1/ledger/journal-entries", entryBody, dutyEntryPost, http.StatusCreated},
+		{http.MethodGet, "/v1/ledger/journal-lines?ledger=" + testLedger + "&documentId=" + testDoc, "", dutyEntryLookup, http.StatusOK},
+		{http.MethodGet, "/v1/ledger/ledgers/" + testLedger, "", dutyLedgerLookup, http.StatusOK},
+	}
+	for _, own := range routes {
+		for _, other := range routes {
+			token, err := rig.payables.MintDuties("ledger", endUser(), "", []string{own.duty})
+			if err != nil {
+				t.Fatalf("%s: %v", own.duty, err)
+			}
+			rec := serviceCall(rig.handler, other.method, other.path, other.body, token, nil)
+			want := http.StatusForbidden
+			if own.duty == other.duty {
+				want = other.wantOwn
+			}
+			if rec.Code != want {
+				t.Errorf("%s on %s %s: status %d, want %d: %s", own.duty, other.method, other.path, rec.Code, want, rec.Body.String())
+			}
+		}
+	}
+	for _, duty := range []string{dutyEntryValidate, dutyBatchPost, dutySetPost} {
+		if _, err := rig.payables.MintDuties("ledger", endUser(), "", []string{duty}); err == nil {
+			t.Errorf("%s must not be in any service grant", duty)
+		}
+	}
+}
+
+func TestNarrowHumanPostDutiesEachOpenOneRoute(t *testing.T) {
+	keyed := map[string]string{"Idempotency-Key": "post-1", "If-Match": `"5"`}
+	cases := []struct {
+		duty, path, body string
+		headers          map[string]string
+		wantOwn          int
+	}{
+		{dutyEntryValidate, "/v1/ledger/validate", entryBody, nil, http.StatusOK},
+		{dutyBatchPost, "/v1/ledger/journal-batches/" + testEntry + "/post", "", keyed, http.StatusCreated},
+		{dutySetPost, "/v1/ledger/ledger-sets/" + testEntry + "/journal-entries", setEntryBody, keyed, http.StatusCreated},
+	}
+	for _, c := range cases {
+		for _, other := range cases {
+			want := http.StatusForbidden
+			if c.duty == other.duty {
+				want = c.wantOwn
+			}
+			rec := call(server(&fakeStore{}), http.MethodPost, other.path, other.body, c.duty, other.headers)
+			if rec.Code != want {
+				t.Errorf("%s on %s: status %d, want %d: %s", c.duty, other.path, rec.Code, want, rec.Body.String())
+			}
+		}
+		rec := call(server(&fakeStore{}), http.MethodPost, c.path, c.body, dutyPost, c.headers)
+		if rec.Code != c.wantOwn {
+			t.Errorf("umbrella %s on %s: status %d, want %d", dutyPost, c.path, rec.Code, c.wantOwn)
+		}
 	}
 }

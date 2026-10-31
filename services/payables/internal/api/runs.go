@@ -55,6 +55,7 @@ type RunStore interface {
 type LedgerPoster interface {
 	Post(ctx context.Context, e ledger.Entry) (string, error)
 	LegalEntity(ctx context.Context, legalEntityID, ledgerID string) (string, error)
+	EntryForDocument(ctx context.Context, e ledger.Entry) (string, error)
 }
 
 type runDeps struct {
@@ -148,10 +149,6 @@ func (a *API) startRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	payees, err := a.runs.store.ProposalPayees(ctx, req.ProposalID)
-	if errors.Is(err, store.ErrNoFieldCrypt) {
-		a.problem(w, r, http.StatusServiceUnavailable, codeRatesUnconfigured, err.Error())
-		return
-	}
 	if err != nil {
 		a.fault(w, r, "payment proposal payees failed", err)
 		return
@@ -185,8 +182,6 @@ func (a *API) startRun(w http.ResponseWriter, r *http.Request) {
 		a.problem(w, r, http.StatusForbidden, domain.CodeSegregation, err.Error())
 	case errors.Is(err, store.ErrUnsupportedMethod), errors.Is(err, store.ErrDiscountAccount):
 		a.problem(w, r, http.StatusUnprocessableEntity, domain.CodeRunConfig, err.Error())
-	case errors.Is(err, store.ErrNoFieldCrypt):
-		a.problem(w, r, http.StatusServiceUnavailable, codeRatesUnconfigured, err.Error())
 	case err != nil:
 		a.fault(w, r, "payment run start failed", err)
 	case !created:
@@ -442,7 +437,7 @@ func (a *API) postRunJournal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.runs.ledger == nil {
-		a.problem(w, r, http.StatusServiceUnavailable, codeRatesUnconfigured, "ledger is not configured")
+		a.problem(w, r, http.StatusServiceUnavailable, codeNotConfigured, "ledger is not configured")
 		return
 	}
 	if _, err := a.runs.store.BeginJournal(ctx, id); err != nil {
@@ -458,13 +453,24 @@ func (a *API) postRunJournal(w http.ResponseWriter, r *http.Request) {
 	if run.DiscountAccount != nil {
 		discountAccount = *run.DiscountAccount
 	}
-	entryID, err := a.runs.ledger.Post(ctx, ledger.Entry{
+	entry := ledger.Entry{
 		LegalEntityID: run.LegalEntityID, LedgerID: run.LedgerID, DocumentID: run.ID, PostingDate: proposal.RunDate, Currency: proposal.LegalEntityCurrency,
 		IdempotencyKey: runKeyPrefix + run.ID, SourceType: runSourceType,
 		Lines: domain.RunJournal(proposal.LegalEntityCurrency, proposal.Groups, run.ControlAccount, run.BankAccount, discountAccount),
-	})
+	}
+	entryID, err := a.runs.ledger.Post(ctx, entry)
 	if err != nil {
 		if ledgerRejected(err) {
+			existing, lookupErr := a.runs.ledger.EntryForDocument(ctx, entry)
+			if lookupErr != nil {
+				a.ledgerUnavailable(w, r, lookupErr)
+				return
+			}
+			if existing != "" {
+				recorded, recordErr := a.runs.store.RecordJournal(ctx, id, existing)
+				a.runResult(w, r, "post-journal", recorded, recordErr)
+				return
+			}
 			if _, rerr := a.runs.store.RejectJournal(ctx, id); rerr != nil {
 				a.fault(w, r, "payment run journal rejection not recorded", rerr)
 				return
@@ -488,6 +494,10 @@ func (a *API) runLedgerFailure(w http.ResponseWriter, r *http.Request, err error
 		a.problem(w, r, http.StatusUnprocessableEntity, domain.CodeRunLedger, fmt.Sprintf("the ledger rejected the request with status %d", se.Status))
 		return
 	}
+	a.ledgerUnavailable(w, r, err)
+}
+
+func (a *API) ledgerUnavailable(w http.ResponseWriter, r *http.Request, err error) {
 	a.runs.ledgerFaults.Add(1)
 	slog.Error("ledger unavailable", "err", err, "correlationId", middleware.GetReqID(r.Context()))
 	w.Header().Set("Retry-After", "1")
