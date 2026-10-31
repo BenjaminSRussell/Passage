@@ -361,8 +361,19 @@
       {"resource": "/v1/payables/open-items/*", "methods": ["GET"]}
     ]},
     "payment-proposal.write": {"permissions": [{"resource": "/v1/payables/payment-proposals", "methods": ["POST"]}, {"resource": "/v1/payables/payment-proposals/*:cancel", "methods": ["POST"]}]},
-    "payment-proposal.read": {"permissions": [{"resource": "/v1/payables/payment-proposals/*", "methods": ["GET"]}]},
+    "payment-proposal.read": {"permissions": [
+      {"resource": "/v1/payables/payment-proposals", "methods": ["GET"]},
+      {"resource": "/v1/payables/payment-proposals/*", "methods": ["GET"]}
+    ]},
     "payment-proposal.approve": {"permissions": [{"resource": "/v1/payables/payment-proposals/*:approve", "methods": ["POST"]}]},
+    "payment-hold.manage": {"permissions": [
+      {"resource": "/v1/payables/open-items/*:hold", "methods": ["POST"]},
+      {"resource": "/v1/payables/open-items/*:release", "methods": ["POST"]}
+    ]},
+    "vendor-block.manage": {"permissions": [
+      {"resource": "/v1/payables/vendors/*:block", "methods": ["POST"]},
+      {"resource": "/v1/payables/vendors/*:unblock", "methods": ["POST"]}
+    ]},
     "payment-run.execute": {"permissions": [
       {"resource": "/v1/payables/payment-runs", "methods": ["POST"]},
       {"resource": "/v1/payables/payment-runs/*:generate-file", "methods": ["POST"]},

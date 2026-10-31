@@ -14,6 +14,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/dbx"
+	"github.com/BenjaminSRussell/passage/platform/events"
 	"github.com/BenjaminSRussell/passage/platform/ids"
 	"github.com/BenjaminSRussell/passage/platform/tenant"
 	"github.com/BenjaminSRussell/passage/services/payables/internal/domain"
@@ -23,6 +24,23 @@ const (
 	MaxProposalItems = 5000
 	uniqueViolation  = "23505"
 )
+
+var (
+	ProposalCreatedType   = events.Type("payables", "paymentproposal", "created", 1)
+	ProposalApprovedType  = events.Type("payables", "paymentproposal", "approved", 1)
+	ProposalCancelledType = events.Type("payables", "paymentproposal", "cancelled", 1)
+)
+
+type proposalEvent struct {
+	ProposalID    string `json:"proposal_id"`
+	LegalEntityID string `json:"legal_entity_id"`
+	RunDate       string `json:"run_date"`
+	RunID         string `json:"run_id"`
+	Status        string `json:"status"`
+	Actor         string `json:"actor"`
+	Currency      string `json:"currency,omitempty"`
+	TotalValued   string `json:"total_valued,omitempty"`
+}
 
 var (
 	ErrProposalNotFound = errors.New("payment proposal not found")
@@ -157,7 +175,17 @@ func (s *Postgres) CreateProposal(ctx context.Context, in NewProposal) (Proposal
 		if err := insertGroups(ctx, tx, p.TenantID, id, in); err != nil {
 			return err
 		}
-		return s.insertPayees(ctx, tx, p.TenantID, id, in)
+		if err := s.insertPayees(ctx, tx, p.TenantID, id, in); err != nil {
+			return err
+		}
+		total := decimal.Zero
+		for _, g := range in.Groups {
+			total = total.Add(g.Valued)
+		}
+		return enqueueEvent(ctx, tx, ProposalCreatedType, "paymentproposal", id, p.TenantID, proposalEvent{
+			ProposalID: id, LegalEntityID: in.LegalEntityID, RunDate: in.RunDate, RunID: in.RunID, Status: domain.ProposalDraft, Actor: in.CreatedBy,
+			Currency: in.LegalEntityCurrency, TotalValued: total.String(),
+		})
 	})
 	if isUnique(err) {
 		return Proposal{}, false, ErrItemsChanged
@@ -333,10 +361,11 @@ func verifyLines(ctx context.Context, tx pgx.Tx, proposalID string) error {
 }
 
 func (s *Postgres) ApproveProposal(ctx context.Context, id, approver, today string) (Proposal, error) {
+	p, _ := tenant.FromContext(ctx)
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		var status, createdBy string
+		var status, createdBy, entity, runDate, runID string
 		var elapsed bool
-		err := tx.QueryRow(ctx, `select status, created_by, run_date < $2::date from ap_payment_proposal where id = $1::uuid for update`, id, today).Scan(&status, &createdBy, &elapsed)
+		err := tx.QueryRow(ctx, `select status, created_by, run_date < $2::date, legal_entity_id::text, run_date::text, run_id from ap_payment_proposal where id = $1::uuid for update`, id, today).Scan(&status, &createdBy, &elapsed, &entity, &runDate, &runID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrProposalNotFound
 		}
@@ -355,8 +384,12 @@ func (s *Postgres) ApproveProposal(ctx context.Context, id, approver, today stri
 		if err := verifyLines(ctx, tx, id); err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `update ap_payment_proposal set status = 'APPROVED', approved_by = $2, approved_at = now() where id = $1::uuid`, id, approver)
-		return err
+		if _, err = tx.Exec(ctx, `update ap_payment_proposal set status = 'APPROVED', approved_by = $2, approved_at = now() where id = $1::uuid`, id, approver); err != nil {
+			return err
+		}
+		return enqueueEvent(ctx, tx, ProposalApprovedType, "paymentproposal", id, p.TenantID, proposalEvent{
+			ProposalID: id, LegalEntityID: entity, RunDate: runDate, RunID: runID, Status: domain.ProposalApproved, Actor: approver,
+		})
 	})
 	if err != nil {
 		return Proposal{}, err
@@ -365,9 +398,10 @@ func (s *Postgres) ApproveProposal(ctx context.Context, id, approver, today stri
 }
 
 func (s *Postgres) CancelProposal(ctx context.Context, id, user string) (Proposal, error) {
+	p, _ := tenant.FromContext(ctx)
 	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		var status string
-		err := tx.QueryRow(ctx, `select status from ap_payment_proposal where id = $1::uuid for update`, id).Scan(&status)
+		var status, entity, runDate, runID string
+		err := tx.QueryRow(ctx, `select status, legal_entity_id::text, run_date::text, run_id from ap_payment_proposal where id = $1::uuid for update`, id).Scan(&status, &entity, &runDate, &runID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrProposalNotFound
 		}
@@ -380,13 +414,81 @@ func (s *Postgres) CancelProposal(ctx context.Context, id, user string) (Proposa
 		if _, err = tx.Exec(ctx, `update ap_payment_proposal set status = 'CANCELLED', cancelled_by = $2, cancelled_at = now() where id = $1::uuid`, id, user); err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `update ap_payment_proposal_line set reserved = false where proposal_id = $1::uuid`, id)
-		return err
+		if _, err = tx.Exec(ctx, `update ap_payment_proposal_line set reserved = false where proposal_id = $1::uuid`, id); err != nil {
+			return err
+		}
+		return enqueueEvent(ctx, tx, ProposalCancelledType, "paymentproposal", id, p.TenantID, proposalEvent{
+			ProposalID: id, LegalEntityID: entity, RunDate: runDate, RunID: runID, Status: domain.ProposalCancelled, Actor: user,
+		})
 	})
 	if err != nil {
 		return Proposal{}, err
 	}
 	return s.GetProposal(ctx, id)
+}
+
+type ProposalFilter struct {
+	LegalEntityID string
+	Status        string
+	RunFrom       string
+	RunTo         string
+	AfterRunDate  string
+	AfterID       string
+}
+
+type ProposalSummary struct {
+	ID                  string          `json:"id"`
+	LegalEntityID       string          `json:"legalEntityId"`
+	RunDate             string          `json:"runDate"`
+	RunID               string          `json:"runId"`
+	DueBy               string          `json:"dueBy"`
+	LegalEntityCurrency string          `json:"legalEntityCurrency"`
+	PaymentMethod       string          `json:"paymentMethod"`
+	Status              string          `json:"status"`
+	CreatedBy           string          `json:"createdBy"`
+	CreatedAt           time.Time       `json:"createdAt"`
+	ApprovedBy          *string         `json:"approvedBy,omitempty"`
+	ApprovedAt          *time.Time      `json:"approvedAt,omitempty"`
+	TotalValued         decimal.Decimal `json:"totalValued"`
+}
+
+func (s *Postgres) ListProposals(ctx context.Context, f ProposalFilter, limit int) ([]ProposalSummary, error) {
+	if limit <= 0 {
+		limit = defaultLimit
+	}
+	limit = min(limit, maxLimit)
+	out := []ProposalSummary{}
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `select p.id::text, p.legal_entity_id::text, p.run_date::text, p.run_id, p.due_by::text, p.legal_entity_currency, p.payment_method, p.status,
+				p.created_by, p.created_at, p.approved_by, p.approved_at,
+				coalesce((select sum(g.valued_amount) from ap_payment_proposal_group g where g.tenant_id = p.tenant_id and g.proposal_id = p.id), 0)::text
+			from ap_payment_proposal p
+			where p.legal_entity_id = $1::uuid
+			and ($2::text is null or p.status = $2::text)
+			and ($3::date is null or p.run_date >= $3::date)
+			and ($4::date is null or p.run_date <= $4::date)
+			and ($5::date is null or (p.run_date, p.id) < ($5::date, $6::uuid))
+			order by p.run_date desc, p.id desc limit $7`,
+			f.LegalEntityID, nullable(f.Status), nullable(f.RunFrom), nullable(f.RunTo), nullable(f.AfterRunDate), nullable(f.AfterID), limit)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var p ProposalSummary
+			var total string
+			if err := rows.Scan(&p.ID, &p.LegalEntityID, &p.RunDate, &p.RunID, &p.DueBy, &p.LegalEntityCurrency, &p.PaymentMethod, &p.Status,
+				&p.CreatedBy, &p.CreatedAt, &p.ApprovedBy, &p.ApprovedAt, &total); err != nil {
+				return err
+			}
+			if p.TotalValued, err = decimal.NewFromString(total); err != nil {
+				return err
+			}
+			out = append(out, p)
+		}
+		return rows.Err()
+	})
+	return out, err
 }
 
 func payeeField(proposalID, vendorID string) string {

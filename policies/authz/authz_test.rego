@@ -22,7 +22,7 @@ has_route_permissions(spec) if {
 }
 
 test_all_seeded_duties_allow_their_declared_permissions if {
-	count(data.duties) == 119
+	count(data.duties) == 121
 	every duty, spec in data.duties {
 		has_route_permissions(spec)
 		every permission in spec.permissions {
@@ -454,6 +454,22 @@ test_payment_proposal_duties_are_separate if {
 	allowed("payment-proposal.approve", "POST", "/v1/payables/payment-proposals/p1:approve")
 	not allowed("payment-proposal.approve", "POST", "/v1/payables/payment-proposals")
 	not allowed("payment-proposal.approve", "GET", "/v1/payables/payment-proposals/p1")
+	allowed("payment-proposal.read", "GET", "/v1/payables/payment-proposals")
+	not allowed("payment-proposal.write", "GET", "/v1/payables/payment-proposals")
+	not allowed("payment-proposal.read", "POST", "/v1/payables/payment-proposals")
+}
+
+test_payment_hold_and_vendor_block_duties_open_only_their_routes if {
+	allowed("payment-hold.manage", "POST", "/v1/payables/open-items/i1:hold")
+	allowed("payment-hold.manage", "POST", "/v1/payables/open-items/i1:release")
+	not allowed("payment-hold.manage", "GET", "/v1/payables/open-items/i1")
+	not allowed("payment-hold.manage", "POST", "/v1/payables/vendors/v1:block")
+	not allowed("open-item.read", "POST", "/v1/payables/open-items/i1:hold")
+	allowed("vendor-block.manage", "POST", "/v1/payables/vendors/v1:block")
+	allowed("vendor-block.manage", "POST", "/v1/payables/vendors/v1:unblock")
+	not allowed("vendor-block.manage", "POST", "/v1/payables/open-items/i1:hold")
+	not allowed("payment-proposal.write", "POST", "/v1/payables/vendors/v1:block")
+	not allowed("payment-proposal.approve", "POST", "/v1/payables/open-items/i1:release")
 }
 
 granted_duty_known(duty) if data.duties[duty]
