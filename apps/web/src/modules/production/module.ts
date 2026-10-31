@@ -4,7 +4,9 @@ import type { PassageModule } from "../registry";
 import type { ProductionOrder } from "./api/client";
 import { AsBuiltInquiryPage } from "./AsBuiltInquiryPage";
 import { CreateProductionOrderPage, type OrderValues } from "./CreateOrderPage";
+import { JournalInquiryPage } from "./JournalInquiryPage";
 import { OcmProfilesPage } from "./OcmProfilesPage";
+import { OperationsOverviewPage } from "./OperationsOverviewPage";
 import { OrderChangeDetailPage } from "./OrderChangeDetailPage";
 import { OrderChangesPage } from "./OrderChangesPage";
 import { ProductionOrderDetail } from "./OrderDetailPage";
@@ -82,6 +84,16 @@ function SubcontractRoute() {
   return createElement(SubcontractOperationsPage, { onOpenOrder: (orderId) => navigate(open(orderId)) });
 }
 
+function OperationsRoute() {
+  const navigate = useNavigate();
+  return createElement(OperationsOverviewPage, { onOpenOrder: (orderId) => navigate(open(orderId)) });
+}
+
+function JournalsRoute() {
+  const navigate = useNavigate();
+  return createElement(JournalInquiryPage, { onOpenOrder: (orderId) => navigate(open(orderId)) });
+}
+
 function ChangesRoute() {
   const navigate = useNavigate();
   return createElement(OrderChangesPage, { onOpenChange: (change) => navigate(`${list}/order-changes/${encodeURIComponent(change.id)}`) });
@@ -102,7 +114,7 @@ const production: PassageModule = {
   id: "production",
   title: "Production",
   description:
-    "Production orders: create, estimate, release, start, post picking lists, route cards and reports as finished, end with settlement; bulk status updates, split and merge, order-specific BOM and route edits; WIP balance and variance reports; subcontract operations with their vendor PO requests; order changes from engineering changes with preview, change cost, apply and dismiss; rework orders, as-built genealogy and posting profiles.",
+    "Production orders: create, estimate, release, start, post picking lists, route cards and reports as finished, end with settlement; bulk status updates, split and merge, order-specific BOM and route edits; WIP balance and variance reports; subcontract operations with their vendor PO requests; the operations overview and the production journals across orders; order changes from engineering changes with preview, change cost, apply and dismiss; rework orders, as-built genealogy and posting profiles.",
   routes: [
     { path: list, element: createElement(OrdersRoute) },
     { path: `${list}/new`, element: createElement(CreateRoute), handle: { title: "New production order" } },
@@ -111,6 +123,8 @@ const production: PassageModule = {
     { path: `${list}/wip-balances`, element: createElement(WIPRoute), handle: { title: "WIP balance by order" } },
     { path: `${list}/variances`, element: createElement(VariancesRoute), handle: { title: "Production variances" } },
     { path: `${list}/subcontract-operations`, element: createElement(SubcontractRoute), handle: { title: "Subcontract operations" } },
+    { path: `${list}/operations`, element: createElement(OperationsRoute), handle: { title: "Operations overview" } },
+    { path: `${list}/journals`, element: createElement(JournalsRoute), handle: { title: "Production journals" } },
     { path: `${list}/order-changes`, element: createElement(ChangesRoute), handle: { title: "Order changes" } },
     { path: `${list}/order-changes/:changeId`, element: createElement(ChangeDetailRoute), handle: { title: "Order change" } },
     { path: `${list}/ocm-profiles`, element: createElement(OcmProfilesPage), handle: { title: "Order change profiles" } },
@@ -123,6 +137,8 @@ const production: PassageModule = {
     { label: "WIP balance", to: `${list}/wip-balances`, duty: "production.cost.read" },
     { label: "Production variances", to: `${list}/variances`, duty: "production.cost.read" },
     { label: "Subcontract operations", to: `${list}/subcontract-operations`, duty: "production.order.read" },
+    { label: "Operations overview", to: `${list}/operations`, duty: "production.order.read" },
+    { label: "Production journals", to: `${list}/journals`, duty: "production.order.read" },
     { label: "Order changes", to: `${list}/order-changes`, duty: "production.order.read" },
     { label: "Order change profiles", to: `${list}/ocm-profiles`, duty: "production.setup.read" },
     { label: "Posting profiles", to: `${list}/posting-profiles`, duty: "production.setup.read" },

@@ -142,6 +142,8 @@ func (a *API) Register(r chi.Router) {
 	r.With(authz.RequireDuty(DutyCostRead)).Get("/v1/production/wip-balances", a.wipReport)
 	r.With(authz.RequireDuty(DutyCostRead)).Get("/v1/production/variances", a.varianceReport)
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/subcontract-operations", a.subcontractReport)
+	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/operations", a.operationsOverview)
+	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/journals", a.journalInquiry)
 	r.With(authz.RequireDuty(DutyRead)).Get("/v1/production/orders/{id}/trigger-points", a.listTriggerPoints)
 	r.With(authz.RequireDuty(DutySetupWrite)).Post("/v1/production/orders/{id}/trigger-points", a.createTriggerPoint)
 	r.With(authz.RequireDuty(DutySetupWrite)).Delete("/v1/production/trigger-points/{id}", a.deleteTriggerPoint)

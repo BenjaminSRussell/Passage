@@ -865,6 +865,72 @@ components:
               operations: { type: integer }
               amount: { $ref: '#/components/schemas/Decimal' }
         nextCursor: { type: string }
+    OperationsOverviewRow:
+      type: object
+      required: [orderId, orderNumber, orderStatus, legalEntityId, siteId, productId, dueDate, operNumber, resourceId, subcontract, processQty, plannedHours, hoursReported, qtyGood, qtyError, operStatus]
+      properties:
+        orderId: { type: string, format: uuid }
+        orderNumber: { type: string }
+        orderStatus: { $ref: '#/components/schemas/Status' }
+        legalEntityId: { type: string, format: uuid }
+        siteId: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        dueDate: { type: [string, 'null'], format: date }
+        operNumber: { type: integer }
+        resourceId: { type: string, format: uuid }
+        subcontract: { type: boolean }
+        processQty: { $ref: '#/components/schemas/Decimal' }
+        plannedHours: { $ref: '#/components/schemas/Decimal', description: Setup + run × process quantity, two places. }
+        hoursReported: { $ref: '#/components/schemas/Decimal', description: Hours posted by route cards, two places. }
+        qtyGood: { $ref: '#/components/schemas/Decimal' }
+        qtyError: { $ref: '#/components/schemas/Decimal' }
+        operStatus: { type: string, enum: [open, started, finished] }
+    OperationsOverview:
+      type: object
+      required: [items, totals]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/OperationsOverviewRow' } }
+        totals:
+          type: object
+          description: Over the whole filter.
+          properties:
+            operations: { type: integer }
+            open: { type: integer }
+            started: { type: integer }
+            finished: { type: integer }
+            plannedHours: { $ref: '#/components/schemas/Decimal' }
+            hoursReported: { $ref: '#/components/schemas/Decimal' }
+            qtyGood: { $ref: '#/components/schemas/Decimal' }
+            qtyError: { $ref: '#/components/schemas/Decimal' }
+        nextCursor: { type: string }
+    JournalInquiryRow:
+      type: object
+      required: [id, orderId, orderNumber, legalEntityId, type, journalNumber, postingDate, posted, postedAt, qtyGood, qtyError, reversalOf, journalEntryId, currency, lines, consumed, received]
+      properties:
+        id: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        orderNumber: { type: string }
+        legalEntityId: { type: string, format: uuid }
+        type: { type: string, enum: [picking-list, route-card, report-as-finished, split-transfer] }
+        journalNumber: { type: string }
+        postingDate: { type: string, format: date }
+        posted: { type: boolean }
+        postedAt: { type: [string, 'null'], format: date-time }
+        qtyGood: { $ref: '#/components/schemas/Decimal' }
+        qtyError: { $ref: '#/components/schemas/Decimal' }
+        reversalOf: { type: [string, 'null'], format: uuid }
+        journalEntryId: { type: [string, 'null'], format: uuid }
+        currency: { type: string }
+        lines: { type: integer }
+        consumed: { $ref: '#/components/schemas/Decimal', description: "Issue and hours lines, rounded to the currency's minor unit." }
+        received: { $ref: '#/components/schemas/Decimal', description: "Receipt and co-product lines, rounded to the currency's minor unit." }
+    JournalInquiry:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/JournalInquiryRow' } }
+        total: { type: integer }
+        nextCursor: { type: string, format: uuid }
     Problem:
       type: object
       description: RFC 9457 problem details, application/problem+json.
@@ -1746,6 +1812,69 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/SubcontractReport' }
+        '400': { description: COM-0001, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/production/operations:
+    get:
+      operationId: getProductionOperationsOverview
+      summary: Operations overview across orders (4.21.14)
+      description: |
+        Every operation of the caller's orders, ordered by order and operation, with the resource,
+        the process quantity, planned hours (setup + run × process quantity, the hours the estimate
+        costs labor and overhead on; a subcontract operation is costed at its price, so its hours are
+        the vendor's route time), the hours route cards reported, the good and error quantities and the operation's
+        feedback status. status filters the operation, orderStatus the order; dueFrom and dueTo
+        bound the due date, which is the order's delivery date until scheduling (wave 23).
+        Totals cover the whole filter, not only the page.
+      x-passage-duty: production.order.read
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+        - { name: siteId, in: query, schema: { type: string, format: uuid } }
+        - { name: resourceId, in: query, schema: { type: string, format: uuid } }
+        - { name: orderId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [open, started, finished] } }
+        - { name: orderStatus, in: query, schema: { $ref: '#/components/schemas/Status' } }
+        - { name: dueFrom, in: query, schema: { type: string, format: date } }
+        - { name: dueTo, in: query, schema: { type: string, format: date } }
+        - { name: cursor, in: query, description: 'The nextCursor of the previous page (order id:operation number).', schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 50 } }
+      responses:
+        '200':
+          description: One page and the totals.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperationsOverview' }
+        '400': { description: COM-0001, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/production/journals:
+    get:
+      operationId: getProductionJournalInquiry
+      summary: Production journal inquiry across orders (4.21.14)
+      description: |
+        Production journals of the caller's orders ordered by id: number, type, order, posting
+        date, whether posted, good and error quantities, line count, the journal entry id once the
+        ledger books it, and the values consumed (issue and hours lines) and received (receipt and
+        co-product lines) in the order currency, rounded to its minor unit and negative on a
+        reversal. Values are set when a journal posts. Filter by type, posted state, order (id, or
+        the exact order number, which is unique per legal entity) and posting date range. `total` counts every journal the filter
+        selects. The lines and postings of one journal are read with GET /v1/production/journals/{id}.
+      x-passage-duty: production.order.read
+      parameters:
+        - { name: legalEntityId, in: query, schema: { type: string, format: uuid } }
+        - { name: orderId, in: query, schema: { type: string, format: uuid } }
+        - { name: orderNumber, in: query, description: The exact order number., schema: { type: string, maxLength: 64 } }
+        - { name: type, in: query, schema: { type: string, enum: [picking-list, route-card, report-as-finished, split-transfer] } }
+        - { name: posted, in: query, schema: { type: string, enum: ['true', 'false'] } }
+        - { name: from, in: query, description: First posting date., schema: { type: string, format: date } }
+        - { name: to, in: query, description: Last posting date., schema: { type: string, format: date } }
+        - { name: cursor, in: query, description: The nextCursor of the previous page., schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 50 } }
+      responses:
+        '200':
+          description: One page and the count.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JournalInquiry' }
         '400': { description: COM-0001, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '403': { $ref: '#/components/responses/Problem' }
   /v1/production/orders/{id}/operations/{operNumber}:{command}:

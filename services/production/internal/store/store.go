@@ -211,6 +211,8 @@ type Store interface {
 	ListTriggerPoints(ctx context.Context, orderID string) ([]TriggerPoint, error)
 	DeleteTriggerPoint(ctx context.Context, id string) error
 	SubcontractOperations(ctx context.Context, f SubcontractFilter) (SubcontractReport, error)
+	OperationsOverview(ctx context.Context, f OperationFilter) (OperationsOverview, error)
+	JournalInquiry(ctx context.Context, f JournalFilter) (JournalInquiry, error)
 	ApplyOperationCommand(ctx context.Context, c OperationCommand) (Order, OperationOutcome, error)
 	ListOCMProfiles(ctx context.Context, legalEntityID string) ([]OCMProfile, error)
 	SaveOCMProfile(ctx context.Context, in OCMProfileSave) (OCMProfile, bool, error)

@@ -21,46 +21,50 @@ import (
 
 // fakeStore records what the handlers pass and answers with canned results.
 type fakeStore struct {
-	pingErr     error
-	created     []store.NewOrder
-	replayHash  map[string]string // idempotency key → request hash already stored
-	order       store.Order
-	getErr      error
-	listFilter  store.ListFilter
-	transitions []store.Transition
-	transErr    error
-	updates     []store.OrderUpdate
-	log         []store.StatusLogEntry
-	costs       store.CostSummary
-	journals    []store.NewJournal
-	posts       []store.PostRequest
-	journal     store.Journal
-	journalErr  error
-	deleted     []string
-	profiles    []store.PostingProfile
-	saved       []store.ProfileSave
-	assigned    []store.NewAsBuilt
-	asBuiltF    []store.AsBuiltFilter
-	detached    []string
-	asBuiltErr  error
-	splits      []store.Split
-	merges      []store.Merge
-	bulks       []store.Bulk
-	batchErr    error
-	edits       []store.OrderEdit
-	editErr     error
-	editLog     []store.OrderEditEntry
-	wipFilters  []store.WIPFilter
-	wip         store.WIPReport
-	varFilters  []store.VarianceFilter
-	variances   store.VarianceReport
-	triggers    []store.NewTriggerPoint
-	triggerList []store.TriggerPoint
-	triggerDel  []string
-	triggerErr  error
-	triggerOld  bool // CreateTriggerPoint answers as a replay
-	subFilters  []store.SubcontractFilter
-	subcontract store.SubcontractReport
+	pingErr        error
+	created        []store.NewOrder
+	replayHash     map[string]string // idempotency key → request hash already stored
+	order          store.Order
+	getErr         error
+	listFilter     store.ListFilter
+	transitions    []store.Transition
+	transErr       error
+	updates        []store.OrderUpdate
+	log            []store.StatusLogEntry
+	costs          store.CostSummary
+	journals       []store.NewJournal
+	posts          []store.PostRequest
+	journal        store.Journal
+	journalErr     error
+	deleted        []string
+	profiles       []store.PostingProfile
+	saved          []store.ProfileSave
+	assigned       []store.NewAsBuilt
+	asBuiltF       []store.AsBuiltFilter
+	detached       []string
+	asBuiltErr     error
+	splits         []store.Split
+	merges         []store.Merge
+	bulks          []store.Bulk
+	batchErr       error
+	edits          []store.OrderEdit
+	editErr        error
+	editLog        []store.OrderEditEntry
+	wipFilters     []store.WIPFilter
+	wip            store.WIPReport
+	varFilters     []store.VarianceFilter
+	variances      store.VarianceReport
+	triggers       []store.NewTriggerPoint
+	triggerList    []store.TriggerPoint
+	triggerDel     []string
+	triggerErr     error
+	triggerOld     bool // CreateTriggerPoint answers as a replay
+	subFilters     []store.SubcontractFilter
+	opFilters      []store.OperationFilter
+	opOverview     store.OperationsOverview
+	journalFilters []store.JournalFilter
+	journalPage    store.JournalInquiry
+	subcontract    store.SubcontractReport
 	// operation commands (FR-21.6)
 	operCommands []store.OperationCommand
 	operOutcome  store.OperationOutcome

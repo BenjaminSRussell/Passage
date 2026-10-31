@@ -320,7 +320,7 @@ drift-free RAF receipts and the variances clearing the posted WIP in every curre
 
 | Duty (PRD 4.21.17) | Key | Used by |
 |---|---|---|
-| View production orders | `production.order.read` | list, read, status log, BOM edit history, journal list and read, as-built and where-used, trigger points |
+| View production orders | `production.order.read` | list, read, status log, BOM edit history, journal list and read, the operations overview and journal inquiry across orders, as-built and where-used, trigger points |
 | View production costs | `production.cost.read` | `GET …/{id}/costs`, `GET /v1/production/wip-balances`, `GET /v1/production/variances` |
 | Maintain production orders | `production.order.write` | create, PATCH, `:estimate`, `:schedule`, `PATCH …/{id}/bom` |
 | Maintain order BOM after release | `production.order.bom-after-release` | `PATCH …/{id}/bom` on a Released order (with `production.order.write`) |
@@ -407,3 +407,16 @@ The stable PROD-00nn service codes are not yet carried in the problem body, beca
 PSG-21 (wave 21), slices PSG-2101 to PSG-2106. Depends on PSG-20 (costing). Later slices: job
 cards, subcontracting, the split of Started orders with the WIP transfer of BR-21.11 and order
 change management. See `NOT-IMPLEMENTED.md`.
+
+Slice 13 (read-only inquiries of 4.21.14, no migration):
+
+- Operations overview: `GET /v1/production/operations` with legal entity, site, resource, order,
+  operation status, order status and delivery-date range: each operation with its process
+  quantity, planned hours (setup + run × process quantity), hours reported by route cards, good and
+  error quantities and status, keyset-paged by order and operation, with totals (counts by status,
+  hours, quantities) over the whole filter (`production.order.read`).
+- Production journal inquiry: `GET /v1/production/journals` with legal entity, order (id or exact number), type
+  (including `split-transfer`), posted state and posting-date range: journal number, type, order,
+  posting date, posted, line count, the value consumed (issue and hours lines) and received
+  (receipt and co-product lines) in the order currency once posted, journal entry id, keyset-paged by id, with
+  the count over the whole filter (`production.order.read`).

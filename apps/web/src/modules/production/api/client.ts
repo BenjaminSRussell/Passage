@@ -708,6 +708,99 @@ export interface SubcontractQuery {
   limit?: number;
 }
 
+/** One operation of the operations overview (4.21.14). */
+export interface OperationOverviewRow {
+  orderId: string;
+  orderNumber: string;
+  orderStatus: ProductionStatus;
+  legalEntityId: string;
+  siteId: string;
+  productId: string;
+  /** The order's delivery date until scheduling dates the operation. */
+  dueDate: string | null;
+  operNumber: number;
+  resourceId: string;
+  subcontract: boolean;
+  processQty: string;
+  /** Setup + run × process quantity, two places. */
+  plannedHours: string;
+  /** Hours posted by route cards, two places. */
+  hoursReported: string;
+  qtyGood: string;
+  qtyError: string;
+  operStatus: OperStatus;
+}
+
+export interface OperationOverviewTotals {
+  operations: number;
+  open: number;
+  started: number;
+  finished: number;
+  plannedHours: string;
+  hoursReported: string;
+  qtyGood: string;
+  qtyError: string;
+}
+
+export interface OperationsOverview {
+  items: OperationOverviewRow[];
+  totals: OperationOverviewTotals;
+  nextCursor?: string;
+}
+
+export interface OperationsQuery {
+  status?: OperStatus | "";
+  orderStatus?: ProductionStatus | "";
+  resourceId?: string;
+  siteId?: string;
+  orderId?: string;
+  dueFrom?: string;
+  dueTo?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+/** One journal of the journal inquiry across orders (4.21.14). */
+export interface JournalInquiryRow {
+  id: string;
+  orderId: string;
+  orderNumber: string;
+  legalEntityId: string;
+  type: ListedJournalType;
+  journalNumber: string;
+  postingDate: string;
+  posted: boolean;
+  postedAt: string | null;
+  qtyGood: string;
+  qtyError: string;
+  reversalOf: string | null;
+  journalEntryId: string | null;
+  currency: string;
+  lines: number;
+  /** Issue and hours lines, rounded to the currency's minor unit, negative on a reversal; set when the journal posts. */
+  consumed: string;
+  /** Receipt and co-product lines, rounded to the currency's minor unit, negative on a reversal; set when the journal posts. */
+  received: string;
+}
+
+export interface JournalInquiry {
+  items: JournalInquiryRow[];
+  total: number;
+  nextCursor?: string;
+}
+
+export interface JournalInquiryQuery {
+  type?: ListedJournalType | "";
+  posted?: "true" | "false" | "";
+  orderId?: string;
+  /** The exact order number (unique per legal entity). */
+  orderNumber?: string;
+  from?: string;
+  to?: string;
+  cursor?: string;
+  limit?: number;
+}
+
 export interface Problem {
   status: number;
   code: string;
@@ -1093,6 +1186,27 @@ export async function getSubcontractOperations(
   return {
     items: Array.isArray(body.items) ? body.items : [],
     totals: Array.isArray(body.totals) ? body.totals : [],
+    nextCursor: body.nextCursor,
+  };
+}
+
+/** The operations of every order with planned and reported hours and quantities, totals over the filter (4.21.14). */
+export async function getOperationsOverview({ limit = 50, ...filter }: OperationsQuery = {}, signal?: AbortSignal): Promise<OperationsOverview> {
+  const body = await requestAt<Partial<OperationsOverview>>(`${root}/operations?${query({ ...filter, limit })}`, { signal });
+  const zero = "0.00";
+  return {
+    items: Array.isArray(body.items) ? body.items : [],
+    totals: body.totals ?? { operations: 0, open: 0, started: 0, finished: 0, plannedHours: zero, hoursReported: zero, qtyGood: "0", qtyError: "0" },
+    nextCursor: body.nextCursor,
+  };
+}
+
+/** The production journals across orders, newest ids last (4.21.14). */
+export async function getJournalInquiry({ limit = 50, ...filter }: JournalInquiryQuery = {}, signal?: AbortSignal): Promise<JournalInquiry> {
+  const body = await requestAt<Partial<JournalInquiry>>(`${root}/journals?${query({ ...filter, limit })}`, { signal });
+  return {
+    items: Array.isArray(body.items) ? body.items : [],
+    total: typeof body.total === "number" ? body.total : 0,
     nextCursor: body.nextCursor,
   };
 }
