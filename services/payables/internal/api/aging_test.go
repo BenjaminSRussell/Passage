@@ -305,13 +305,31 @@ func TestAging_ReportRejectsVendorGroupGrouping(t *testing.T) {
 
 func TestAging_ReconcileByVendorGroupNeedsExplicitEntityScope(t *testing.T) {
 	r := agingRouter(&fakeAgingStore{rows: groupedRows()}, &fakeLedger{}, "")
-	for name, rec := range map[string]*httptest.ResponseRecorder{
-		"entity outside scope":    get(r, reconcile+"&group_by=vendorGroup", "aging.reconcile", entityB),
-		"unscoped names a entity": getScoped(r, reconcile+"&group_by=vendorGroup", "aging.reconcile", ""),
-		"no entity at all":        get(r, "/v1/payables/aging:reconcile?ledger="+ledgerID+"&group_by=vendorGroup", "aging.reconcile", ""),
+	for name, c := range map[string]struct {
+		rec  *httptest.ResponseRecorder
+		want int
+	}{
+		"entity outside scope":    {get(r, reconcile+"&group_by=vendorGroup", "aging.reconcile", entityB), http.StatusForbidden},
+		"unscoped names a entity": {getScoped(r, reconcile+"&group_by=vendorGroup", "aging.reconcile", ""), http.StatusForbidden},
+		"no entity at all":        {get(r, "/v1/payables/aging:reconcile?ledger="+ledgerID+"&group_by=vendorGroup", "aging.reconcile", ""), http.StatusBadRequest},
 	} {
-		if rec.Code != http.StatusForbidden && rec.Code != http.StatusBadRequest {
-			t.Errorf("%s: got %d %s", name, rec.Code, rec.Body)
+		if c.rec.Code != c.want {
+			t.Errorf("%s: got %d, want %d: %s", name, c.rec.Code, c.want, c.rec.Body)
 		}
+	}
+}
+
+func TestAging_ReconcileByVendorGroupWithNoItemsReturnsEmptyArray(t *testing.T) {
+	l := &fakeLedger{bal: ledger.Balance{Currency: "USD"}}
+	rec := get(agingRouter(&fakeAgingStore{}, l, ""), reconcile+"&group_by=vendorGroup", "aging.reconcile", "")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"vendorGroups":[]`) {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestAging_ReconcileRejectsVendorGrouping(t *testing.T) {
+	rec := get(agingRouter(&fakeAgingStore{rows: groupedRows()}, &fakeLedger{}, ""), reconcile+"&group_by=vendor", "aging.reconcile", "")
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "group_by=vendor applies to aging only") {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
 	}
 }

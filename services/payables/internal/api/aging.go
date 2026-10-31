@@ -138,19 +138,23 @@ func (a *API) agingReport(w http.ResponseWriter, r *http.Request) {
 }
 
 type reconcileResponse struct {
-	AsOf           string                       `json:"asOf"`
-	LegalEntityID  string                       `json:"legalEntityId"`
-	LedgerID       string                       `json:"ledgerId"`
-	ControlAccount string                       `json:"controlAccount"`
-	LedgerPeriod   string                       `json:"ledgerPeriod"`
-	Currencies     []domain.Reconciliation      `json:"currencies"`
-	VendorGroups   []domain.GroupReconciliation `json:"vendorGroups,omitempty"`
-	Reconciled     bool                         `json:"reconciled"`
+	AsOf           string                        `json:"asOf"`
+	LegalEntityID  string                        `json:"legalEntityId"`
+	LedgerID       string                        `json:"ledgerId"`
+	ControlAccount string                        `json:"controlAccount"`
+	LedgerPeriod   string                        `json:"ledgerPeriod"`
+	Currencies     []domain.Reconciliation       `json:"currencies"`
+	VendorGroups   *[]domain.GroupReconciliation `json:"vendorGroups,omitempty"`
+	Reconciled     bool                          `json:"reconciled"`
 }
 
 func (a *API) agingReconcile(w http.ResponseWriter, r *http.Request) {
 	q, ok := a.parseAgingQuery(w, r)
 	if !ok {
+		return
+	}
+	if q.byVendor {
+		a.reject(w, r, &domain.Error{Code: domain.CodeValidation, Detail: "group_by=vendor applies to aging only; reconcile accepts vendorGroup or none"})
 		return
 	}
 	ledgerID := r.URL.Query().Get("ledger")
@@ -193,9 +197,10 @@ func (a *API) agingReconcile(w http.ResponseWriter, r *http.Request) {
 		a.aging.mismatched.Add(1)
 		slog.Warn("ap subledger does not reconcile to the control account", "legalEntityId", q.legalEntityID, "ledgerId", ledgerID, "asOf", q.asOf.Format(dateLayout), "correlationId", middleware.GetReqID(r.Context()))
 	}
-	var groups []domain.GroupReconciliation
+	var groups *[]domain.GroupReconciliation
 	if q.byVendorGroup {
-		groups = domain.GroupBreakdown(rows)
+		breakdown := append([]domain.GroupReconciliation{}, domain.GroupBreakdown(rows)...)
+		groups = &breakdown
 	}
 	httpx.JSON(w, http.StatusOK, reconcileResponse{
 		AsOf: q.asOf.Format(dateLayout), LegalEntityID: q.legalEntityID, LedgerID: ledgerID, ControlAccount: a.aging.controlAccount,

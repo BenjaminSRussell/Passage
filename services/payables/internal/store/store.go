@@ -26,8 +26,13 @@ const (
 )
 
 var (
-	OpenItemCreatedType = events.Type("payables", "openitem", "created", 1)
-	OpenItemSettledType = events.Type("payables", "openitem", "settled", 1)
+	OpenItemCreatedType  = events.Type("payables", "openitem", "created", 1)
+	OpenItemSettledType  = events.Type("payables", "openitem", "settled", 1)
+	OpenItemGroupedType  = events.Type("payables", "openitem", "grouped", 1)
+	OpenItemHeldType     = events.Type("payables", "openitem", "held", 1)
+	OpenItemReleasedType = events.Type("payables", "openitem", "released", 1)
+	VendorBlockedType    = events.Type("payables", "vendor", "blocked", 1)
+	VendorUnblockedType  = events.Type("payables", "vendor", "unblocked", 1)
 )
 
 var (
@@ -36,6 +41,7 @@ var (
 	ErrOverSettled       = errors.New("settlement exceeds the open amount")
 	ErrInvalidAmount     = errors.New("settlement amount must be positive")
 	ErrConflictingReplay = errors.New("source invoice already has an open item with different terms")
+	ErrItemClosed        = errors.New("open item is settled or reversed")
 )
 
 type OpenItem struct {
@@ -125,11 +131,7 @@ func enqueue(ctx context.Context, tx pgx.Tx, eventType string, o OpenItem, tenan
 	if eventType == OpenItemSettledType {
 		payload.SettledAmount = settled.String()
 	}
-	evt, err := events.New(eventType, eventSource, o.ID, tenantID, payload)
-	if err != nil {
-		return err
-	}
-	return outbox.Enqueue(ctx, tx, "openitem", o.ID, evt)
+	return enqueueEvent(ctx, tx, eventType, "openitem", o.ID, tenantID, payload)
 }
 
 func (s *Postgres) CreateFromInvoice(ctx context.Context, in OpenItem) (OpenItem, bool, error) {
@@ -157,7 +159,7 @@ func (s *Postgres) CreateFromInvoice(ctx context.Context, in OpenItem) (OpenItem
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		out, err = scan(tx.QueryRow(ctx, `select `+columns+` from ap_open_item where source_invoice_id = $1`, in.SourceInvoiceID))
+		out, err = reselectBySource(ctx, tx, in.SourceInvoiceID)
 		if err != nil {
 			return err
 		}
@@ -167,11 +169,23 @@ func (s *Postgres) CreateFromInvoice(ctx context.Context, in OpenItem) (OpenItem
 		if in.VendorGroupID == "" || out.VendorGroupID != "" {
 			return nil
 		}
-		out, err = scan(tx.QueryRow(ctx, `update ap_open_item set vendor_group_id = $2::uuid, updated_at = now()
+		grouped, err := scan(tx.QueryRow(ctx, `update ap_open_item set vendor_group_id = $2::uuid, updated_at = now()
 			where source_invoice_id = $1 and vendor_group_id is null returning `+columns, in.SourceInvoiceID, in.VendorGroupID))
-		return err
+		if errors.Is(err, pgx.ErrNoRows) {
+			out, err = reselectBySource(ctx, tx, in.SourceInvoiceID)
+			return err
+		}
+		if err != nil {
+			return err
+		}
+		out = grouped
+		return enqueue(ctx, tx, OpenItemGroupedType, out, p.TenantID, decimal.Zero, "")
 	})
 	return out, created, err
+}
+
+func reselectBySource(ctx context.Context, tx pgx.Tx, sourceInvoiceID string) (OpenItem, error) {
+	return scan(tx.QueryRow(ctx, `select `+columns+` from ap_open_item where source_invoice_id = $1`, sourceInvoiceID))
 }
 
 func nullable(s string) any {
@@ -229,27 +243,94 @@ func (s *Postgres) Get(ctx context.Context, id string) (OpenItem, error) {
 	return out, err
 }
 
-func (s *Postgres) SetPaymentHold(ctx context.Context, id string, held bool) error {
-	return s.exec(ctx, `update ap_open_item set payment_hold = $2, updated_at = now() where id = $1::uuid`, id, held)
+type holdEvent struct {
+	OpenItemID    string `json:"open_item_id"`
+	LegalEntityID string `json:"legal_entity_id"`
+	VendorID      string `json:"vendor_id"`
+	PaymentHold   bool   `json:"payment_hold"`
+	Reason        string `json:"reason,omitempty"`
+	Actor         string `json:"actor"`
 }
 
-func (s *Postgres) BlockVendor(ctx context.Context, vendorID, reason string) error {
+type vendorBlockEvent struct {
+	VendorID      string `json:"vendor_id"`
+	LegalEntityID string `json:"legal_entity_id"`
+	Reason        string `json:"reason,omitempty"`
+	Actor         string `json:"actor"`
+}
+
+func enqueueEvent(ctx context.Context, tx pgx.Tx, eventType, aggregate, aggregateID, tenantID string, payload any) error {
+	evt, err := events.New(eventType, eventSource, aggregateID, tenantID, payload)
+	if err != nil {
+		return err
+	}
+	return outbox.Enqueue(ctx, tx, aggregate, aggregateID, evt)
+}
+
+func (s *Postgres) SetPaymentHold(ctx context.Context, id string, held bool, reason string) (bool, error) {
 	p, _ := tenant.FromContext(ctx)
-	return s.exec(ctx, `insert into ap_vendor_block (tenant_id, vendor_id, reason) values ($1, $2::uuid, $3)
-		on conflict (tenant_id, vendor_id) do update set reason = excluded.reason`, p.TenantID, vendorID, reason)
-}
-
-func (s *Postgres) UnblockVendor(ctx context.Context, vendorID string) error {
-	return s.exec(ctx, `delete from ap_vendor_block where vendor_id = $1::uuid`, vendorID)
-}
-
-func (s *Postgres) exec(ctx context.Context, sql string, args ...any) error {
-	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, sql, args...)
-		if err == nil && tag.RowsAffected() == 0 {
+	changed := false
+	err := dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		cur, err := scan(tx.QueryRow(ctx, `select `+columns+` from ap_open_item where id = $1::uuid for update`, id))
+		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		if cur.Status == "SETTLED" || cur.Status == "REVERSED" {
+			return ErrItemClosed
+		}
+		if cur.PaymentHold == held {
+			return nil
+		}
+		if !held {
+			reason = ""
+		}
+		if _, err := tx.Exec(ctx, `update ap_open_item set payment_hold = $2, payment_hold_reason = $3, payment_held_by = $4, updated_at = now() where id = $1::uuid`,
+			id, held, nullable(reason), nullable(heldBy(held, p.UserID))); err != nil {
+			return err
+		}
+		changed = true
+		eventType := OpenItemReleasedType
+		if held {
+			eventType = OpenItemHeldType
+		}
+		return enqueueEvent(ctx, tx, eventType, "openitem", id, p.TenantID, holdEvent{OpenItemID: id, LegalEntityID: cur.LegalEntityID, VendorID: cur.VendorID, PaymentHold: held, Reason: reason, Actor: p.UserID})
+	})
+	return changed, err
+}
+
+func heldBy(held bool, user string) string {
+	if held {
+		return user
+	}
+	return ""
+}
+
+func (s *Postgres) BlockVendor(ctx context.Context, legalEntityID, vendorID, reason string) error {
+	p, _ := tenant.FromContext(ctx)
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `insert into ap_vendor_block (tenant_id, legal_entity_id, vendor_id, reason, blocked_by) values ($1, $2::uuid, $3::uuid, $4, $5)
+			on conflict (tenant_id, legal_entity_id, vendor_id) do update set reason = excluded.reason, blocked_by = excluded.blocked_by`,
+			p.TenantID, legalEntityID, vendorID, reason, p.UserID); err != nil {
+			return err
+		}
+		return enqueueEvent(ctx, tx, VendorBlockedType, "vendor", vendorID, p.TenantID, vendorBlockEvent{VendorID: vendorID, LegalEntityID: legalEntityID, Reason: reason, Actor: p.UserID})
+	})
+}
+
+func (s *Postgres) UnblockVendor(ctx context.Context, legalEntityID, vendorID string) error {
+	p, _ := tenant.FromContext(ctx)
+	return dbx.WithTenantTx(ctx, s.pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `delete from ap_vendor_block where legal_entity_id = $1::uuid and vendor_id = $2::uuid`, legalEntityID, vendorID)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+		return enqueueEvent(ctx, tx, VendorUnblockedType, "vendor", vendorID, p.TenantID, vendorBlockEvent{VendorID: vendorID, LegalEntityID: legalEntityID, Actor: p.UserID})
 	})
 }
 

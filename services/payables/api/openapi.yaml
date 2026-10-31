@@ -169,7 +169,121 @@ paths:
         '500': { $ref: '#/components/responses/Problem' }
         '502': { $ref: '#/components/responses/Problem' }
         '503': { $ref: '#/components/responses/Problem' }
+  /v1/payables/open-items/{id}:hold:
+    post:
+      operationId: setPaymentHold
+      x-passage-duty: payment-hold.manage
+      description: Places a payment hold on an open item, so proposals skip it and approval or run start refuse a proposal that still holds it. Optional body {reason} (at most 500 characters) is stored with the hold and the user who placed it (payment_hold_reason, payment_held_by) and carried in the event. Idempotent, so holding a held item emits no event, counts nothing and logs no audit line. A SETTLED or REVERSED item is a 409 (AP-OPN-001). The change is audited by a structured log line and a dev.passage.payables.openitem.held.v1 event carrying the actor. The version is not bumped. The caller needs an identified user (X-Passage-User); an item outside the caller's legal-entity scope is a 404.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PaymentHoldRequest' }
+      responses:
+        '200':
+          description: The open item with its current paymentHold.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpenItem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/payables/open-items/{id}:release:
+    post:
+      operationId: releasePaymentHold
+      x-passage-duty: payment-hold.manage
+      description: Releases the payment hold of an open item (dev.passage.payables.openitem.released.v1 when the hold changes). A proposal that was built before the hold stays valid. The caller needs an identified user (X-Passage-User).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PaymentHoldRequest' }
+      responses:
+        '200':
+          description: The open item with its current paymentHold.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpenItem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/payables/vendors/{id}:block:
+    post:
+      operationId: blockVendorPayments
+      x-passage-duty: vendor-block.manage
+      description: Blocks a vendor for payment in one legal entity (legalEntityId, defaulting to the caller's legal-entity scope; an entity outside the caller's scope is a 403), so proposals of that entity skip the vendor's items and approval or run start refuse a proposal that includes them; other legal entities are unaffected. Blocking again replaces the reason. The vendor id is not validated against a vendor master until the party service (wave 07) exists. Audited by a structured log line and a dev.passage.payables.vendor.blocked.v1 event carrying the actor and reason. The caller needs an identified user (X-Passage-User).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VendorBlockRequest' }
+      responses:
+        '200':
+          description: The vendor is blocked.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VendorBlock' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /v1/payables/vendors/{id}:unblock:
+    post:
+      operationId: unblockVendorPayments
+      x-passage-duty: vendor-block.manage
+      description: Removes the payment block of a vendor in one legal entity (optional body {legalEntityId}, default as for block; dev.passage.payables.vendor.unblocked.v1). A vendor that is not blocked in that entity is a 404. The caller needs an identified user (X-Passage-User).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VendorUnblockRequest' }
+      responses:
+        '200':
+          description: The vendor is no longer blocked.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VendorBlock' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /v1/payables/payment-proposals:
+    get:
+      operationId: listPaymentProposals
+      x-passage-duty: payment-proposal.read
+      description: Payment proposals of one legal entity without groups or lines, newest run date first (then id), with keyset pagination (limit 1 to 200, default 50; pass the previous nextCursor as cursor). legal_entity defaults to the caller's legal-entity scope and is required for an unscoped caller; naming an entity outside the caller's scope is a 403. totalValued is the sum of the group valuations in legalEntityCurrency. Fetch one proposal for its groups and lines.
+      parameters:
+        - { name: legal_entity, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [DRAFT, APPROVED, CANCELLED, EXECUTING, EXECUTED, FAILED] } }
+        - { name: run_from, in: query, required: false, description: Run date on or after., schema: { type: string, format: date } }
+        - { name: run_to, in: query, required: false, description: Run date on or before., schema: { type: string, format: date } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, required: false, description: The nextCursor of the previous page (opaque)., schema: { type: string } }
+      responses:
+        '200':
+          description: One page of proposal summaries.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentProposalPage' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/Problem' }
     post:
       operationId: createPaymentProposal
       x-passage-duty: payment-proposal.write
@@ -560,6 +674,57 @@ components:
         items:
           type: array
           items: { $ref: '#/components/schemas/OpenItem' }
+        nextCursor: { type: string, description: Absent on the last page. }
+    PaymentHoldRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason: { type: string, maxLength: 500, description: Why the item is held; ignored on release. }
+    VendorBlockRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        legalEntityId: { type: string, format: uuid, description: Defaults to the caller's legal-entity scope; required for an unscoped caller. }
+        reason: { type: string, minLength: 1, maxLength: 500, description: Why the vendor is blocked; trimmed. }
+    VendorUnblockRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        legalEntityId: { type: string, format: uuid }
+        reason: { type: string, description: Ignored. }
+    VendorBlock:
+      type: object
+      required: [vendorId, legalEntityId, blocked]
+      properties:
+        vendorId: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        blocked: { type: boolean }
+        reason: { type: string, description: Present when blocked. }
+    PaymentProposalSummary:
+      type: object
+      required: [id, legalEntityId, runDate, runId, dueBy, legalEntityCurrency, paymentMethod, status, createdBy, createdAt, totalValued]
+      properties:
+        id: { type: string, format: uuid }
+        legalEntityId: { type: string, format: uuid }
+        runDate: { type: string, format: date }
+        runId: { type: string }
+        dueBy: { type: string, format: date }
+        legalEntityCurrency: { type: string }
+        paymentMethod: { type: string }
+        status: { type: string, enum: [DRAFT, APPROVED, CANCELLED, EXECUTING, EXECUTED, FAILED] }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        approvedBy: { type: string }
+        approvedAt: { type: string, format: date-time }
+        totalValued: { type: string }
+    PaymentProposalPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/PaymentProposalSummary' }
         nextCursor: { type: string, description: Absent on the last page. }
     PaymentProposalRequest:
       type: object

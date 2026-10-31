@@ -63,6 +63,17 @@ type fakeStore struct {
 	approveDay string
 	cancelErr  error
 	canceller  string
+
+	summaries   []store.ProposalSummary
+	listPropErr error
+	propFilter  store.ProposalFilter
+	propLimit   int
+
+	holdErr    error
+	holdNoop   bool
+	holdCalls  []string
+	blockErr   error
+	blockCalls []string
 }
 
 func newFakeStore() *fakeStore { return &fakeStore{proposals: map[string]store.Proposal{}} }
@@ -144,6 +155,26 @@ func (f *fakeStore) ApproveProposal(_ context.Context, id, approver, today strin
 	p.Status = domain.ProposalApproved
 	p.ApprovedBy = &approver
 	return p, err
+}
+
+func (f *fakeStore) ListProposals(_ context.Context, filter store.ProposalFilter, limit int) ([]store.ProposalSummary, error) {
+	f.propFilter, f.propLimit = filter, limit
+	return f.summaries[:min(limit, len(f.summaries))], f.listPropErr
+}
+
+func (f *fakeStore) SetPaymentHold(_ context.Context, id string, held bool, reason string) (bool, error) {
+	f.holdCalls = append(f.holdCalls, fmt.Sprintf("%s:%t:%s", id, held, reason))
+	return !f.holdNoop, f.holdErr
+}
+
+func (f *fakeStore) BlockVendor(_ context.Context, le, vendorID, reason string) error {
+	f.blockCalls = append(f.blockCalls, "block:"+le+":"+vendorID+":"+reason)
+	return f.blockErr
+}
+
+func (f *fakeStore) UnblockVendor(_ context.Context, le, vendorID string) error {
+	f.blockCalls = append(f.blockCalls, "unblock:"+le+":"+vendorID)
+	return f.blockErr
 }
 
 type fakeRates struct {

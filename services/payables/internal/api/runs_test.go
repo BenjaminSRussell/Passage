@@ -563,7 +563,7 @@ func TestPaymentRun_HoldPlacedAfterStartIsCaughtBeforeTheFileIsBuilt(t *testing.
 	f := newRunFixture(t, fixtureOptions{})
 	f.approve()
 	runID := f.start()["id"].(string)
-	if err := f.pg.SetPaymentHold(f.ctx(), f.itemA.ID, true); err != nil {
+	if _, err := f.pg.SetPaymentHold(f.ctx(), f.itemA.ID, true, ""); err != nil {
 		t.Fatal(err)
 	}
 	body := wantProblem(t, f.step(f.erin, runID, "generate-file"), http.StatusConflict, "AP-RUN-015")
