@@ -1,0 +1,443 @@
+{
+ "E01": {
+  "agreement": "A-obj",
+  "profile": "CHI",
+  "resolutionDue": "2026-10-21T23:00:00Z",
+  "resolutionWarnAt": "2026-10-21T21:00:00Z",
+  "responseDue": "2026-10-21T17:00:00Z",
+  "responseWarnAt": "2026-10-21T16:30:00Z",
+  "specificity": 3
+ },
+ "E02": {
+  "agreement": "A-any",
+  "profile": "GOLD",
+  "resolutionDue": "2026-10-21T19:00:00Z",
+  "resolutionWarnAt": "2026-10-21T18:00:00Z",
+  "responseDue": "2026-10-21T16:00:00Z",
+  "responseWarnAt": "2026-10-21T15:45:00Z",
+  "specificity": 1
+ },
+ "E03": {
+  "agreement": "A-cat",
+  "profile": "CHI",
+  "resolutionDue": "2026-10-21T23:00:00Z",
+  "resolutionWarnAt": "2026-10-21T21:00:00Z",
+  "responseDue": "2026-10-21T17:00:00Z",
+  "responseWarnAt": "2026-10-21T16:30:00Z",
+  "specificity": 2
+ },
+ "E04": {
+  "agreement": "A-any",
+  "profile": "CHI",
+  "resolutionDue": "2026-10-21T23:00:00Z",
+  "resolutionWarnAt": "2026-10-21T21:00:00Z",
+  "responseDue": "2026-10-21T17:00:00Z",
+  "responseWarnAt": "2026-10-21T16:30:00Z",
+  "specificity": 1
+ },
+ "E05": {
+  "agreement": null,
+  "profile": "FB",
+  "resolutionDue": "2026-10-23T15:00:00Z",
+  "resolutionWarnAt": "2026-10-22T19:00:00Z",
+  "responseDue": "2026-10-21T19:00:00Z",
+  "responseWarnAt": "2026-10-21T18:00:00Z",
+  "specificity": 0
+ },
+ "E06": {
+  "agreement": "A-obj",
+  "profile": "CHI",
+  "resolutionDue": "2026-10-21T23:00:00Z",
+  "resolutionWarnAt": "2026-10-21T21:00:00Z",
+  "responseDue": "2026-10-21T17:00:00Z",
+  "responseWarnAt": "2026-10-21T16:30:00Z",
+  "specificity": 3
+ },
+ "E07": {
+  "agreement": "A-mixed",
+  "profile": "CHI",
+  "resolutionDue": "2026-10-21T23:00:00Z",
+  "resolutionWarnAt": "2026-10-21T21:00:00Z",
+  "responseDue": "2026-10-21T17:00:00Z",
+  "responseWarnAt": "2026-10-21T16:30:00Z",
+  "specificity": 3
+ },
+ "E08": {
+  "agreement": "A-any",
+  "profile": "CHI",
+  "resolutionDue": "2026-10-21T23:00:00Z",
+  "resolutionWarnAt": "2026-10-21T21:00:00Z",
+  "responseDue": "2026-10-21T17:00:00Z",
+  "responseWarnAt": "2026-10-21T16:30:00Z",
+  "specificity": 1
+ },
+ "E09": {
+  "error": "SVC-ENT-002"
+ },
+ "E10": {
+  "agreement": "A-p7",
+  "profile": "GOLD",
+  "resolutionDue": "2026-10-21T19:00:00Z",
+  "resolutionWarnAt": "2026-10-21T18:00:00Z",
+  "responseDue": "2026-10-21T16:00:00Z",
+  "responseWarnAt": "2026-10-21T15:45:00Z",
+  "specificity": 1
+ },
+ "E11": {
+  "agreement": "A-new",
+  "profile": "GOLD",
+  "resolutionDue": "2026-10-21T19:00:00Z",
+  "resolutionWarnAt": "2026-10-21T18:00:00Z",
+  "responseDue": "2026-10-21T16:00:00Z",
+  "responseWarnAt": "2026-10-21T15:45:00Z",
+  "specificity": 1
+ },
+ "E12": {
+  "agreement": "A-a",
+  "profile": "GOLD",
+  "resolutionDue": "2026-10-21T19:00:00Z",
+  "resolutionWarnAt": "2026-10-21T18:00:00Z",
+  "responseDue": "2026-10-21T16:00:00Z",
+  "responseWarnAt": "2026-10-21T15:45:00Z",
+  "specificity": 1
+ },
+ "E13": {
+  "agreement": "A-cur",
+  "profile": "CHI",
+  "resolutionDue": "2026-10-21T23:00:00Z",
+  "resolutionWarnAt": "2026-10-21T21:00:00Z",
+  "responseDue": "2026-10-21T17:00:00Z",
+  "responseWarnAt": "2026-10-21T16:30:00Z",
+  "specificity": 1
+ },
+ "E14": {
+  "agreement": "A-end",
+  "profile": "GOLD",
+  "resolutionDue": "2026-10-21T19:00:00Z",
+  "resolutionWarnAt": "2026-10-21T18:00:00Z",
+  "responseDue": "2026-10-21T16:00:00Z",
+  "responseWarnAt": "2026-10-21T15:45:00Z",
+  "specificity": 1
+ },
+ "E15": {
+  "agreement": "A-start",
+  "profile": "GOLD",
+  "resolutionDue": "2026-10-21T19:00:00Z",
+  "resolutionWarnAt": "2026-10-21T18:00:00Z",
+  "responseDue": "2026-10-21T16:00:00Z",
+  "responseWarnAt": "2026-10-21T15:45:00Z",
+  "specificity": 1
+ },
+ "E16": {
+  "agreement": "A-cur",
+  "profile": "CHI",
+  "resolutionDue": "2026-10-21T23:00:00Z",
+  "resolutionWarnAt": "2026-10-21T21:00:00Z",
+  "responseDue": "2026-10-21T17:00:00Z",
+  "responseWarnAt": "2026-10-21T16:30:00Z",
+  "specificity": 1
+ },
+ "E17": {
+  "agreement": "A-cur",
+  "profile": "CHI",
+  "resolutionDue": "2026-10-22T21:00:00Z",
+  "resolutionWarnAt": "2026-10-22T19:00:00Z",
+  "responseDue": "2026-10-22T15:00:00Z",
+  "responseWarnAt": "2026-10-22T14:30:00Z",
+  "specificity": 1
+ },
+ "E18": {
+  "agreement": "A-start",
+  "profile": "GOLD",
+  "resolutionDue": "2026-10-22T16:00:00Z",
+  "resolutionWarnAt": "2026-10-22T15:00:00Z",
+  "responseDue": "2026-10-22T13:00:00Z",
+  "responseWarnAt": "2026-10-22T12:45:00Z",
+  "specificity": 1
+ },
+ "E19": {
+  "agreement": "A-cur",
+  "profile": "CHI",
+  "resolutionDue": "2026-10-21T23:00:00Z",
+  "resolutionWarnAt": "2026-10-21T21:00:00Z",
+  "responseDue": "2026-10-21T17:00:00Z",
+  "responseWarnAt": "2026-10-21T16:30:00Z",
+  "specificity": 1
+ },
+ "E20": {
+  "agreement": "A-cur",
+  "profile": "CHI",
+  "resolutionDue": "2026-10-21T23:00:00Z",
+  "resolutionWarnAt": "2026-10-21T21:00:00Z",
+  "responseDue": "2026-10-21T17:00:00Z",
+  "responseWarnAt": "2026-10-21T16:30:00Z",
+  "specificity": 1
+ },
+ "E21": {
+  "agreement": null,
+  "profile": "FB",
+  "resolutionDue": "2026-10-23T15:00:00Z",
+  "resolutionWarnAt": "2026-10-22T19:00:00Z",
+  "responseDue": "2026-10-21T19:00:00Z",
+  "responseWarnAt": "2026-10-21T18:00:00Z",
+  "specificity": 0
+ },
+ "E22": {
+  "agreement": "A-cur",
+  "profile": "CHI",
+  "resolutionDue": "2026-10-21T23:00:00Z",
+  "resolutionWarnAt": "2026-10-21T21:00:00Z",
+  "responseDue": "2026-10-21T17:00:00Z",
+  "responseWarnAt": "2026-10-21T16:30:00Z",
+  "specificity": 1
+ },
+ "E23": {
+  "agreement": "A-cur",
+  "profile": "CHI",
+  "resolutionDue": "2026-10-21T23:00:00Z",
+  "resolutionWarnAt": "2026-10-21T21:00:00Z",
+  "responseDue": "2026-10-21T17:00:00Z",
+  "responseWarnAt": "2026-10-21T16:30:00Z",
+  "specificity": 1
+ },
+ "E24": {
+  "agreement": null,
+  "profile": "FB",
+  "resolutionDue": "2026-10-23T15:00:00Z",
+  "resolutionWarnAt": "2026-10-22T19:00:00Z",
+  "responseDue": "2026-10-21T19:00:00Z",
+  "responseWarnAt": "2026-10-21T18:00:00Z",
+  "specificity": 0
+ },
+ "E25": {
+  "agreement": "A-obj",
+  "profile": "CHI",
+  "resolutionDue": "2026-10-21T23:00:00Z",
+  "resolutionWarnAt": "2026-10-21T21:00:00Z",
+  "responseDue": "2026-10-21T17:00:00Z",
+  "responseWarnAt": "2026-10-21T16:30:00Z",
+  "specificity": 3
+ },
+ "E26": {
+  "agreement": "A-old",
+  "profile": "CHI",
+  "resolutionDue": "2026-10-21T23:00:00Z",
+  "resolutionWarnAt": "2026-10-21T21:00:00Z",
+  "responseDue": "2026-10-21T17:00:00Z",
+  "responseWarnAt": "2026-10-21T16:30:00Z",
+  "specificity": 1
+ },
+ "E27": {
+  "agreement": "A-any",
+  "profile": "CHI",
+  "resolutionDue": "2026-10-21T23:00:00Z",
+  "resolutionWarnAt": "2026-10-21T21:00:00Z",
+  "responseDue": "2026-10-21T17:00:00Z",
+  "responseWarnAt": "2026-10-21T16:30:00Z",
+  "specificity": 1
+ },
+ "E28": {
+  "agreement": "A-y",
+  "profile": "GOLD",
+  "resolutionDue": "2026-10-21T19:00:00Z",
+  "resolutionWarnAt": "2026-10-21T18:00:00Z",
+  "responseDue": "2026-10-21T16:00:00Z",
+  "responseWarnAt": "2026-10-21T15:45:00Z",
+  "specificity": 1
+ },
+ "E29": {
+  "agreement": "A-cur",
+  "profile": "GOLD",
+  "resolutionDue": "2026-10-21T19:00:00Z",
+  "resolutionWarnAt": "2026-10-21T18:00:00Z",
+  "responseDue": "2026-10-21T16:00:00Z",
+  "responseWarnAt": "2026-10-21T15:45:00Z",
+  "specificity": 1
+ },
+ "E30": {
+  "agreement": "A-ca",
+  "profile": "CHI",
+  "resolutionDue": "2026-10-21T23:00:00Z",
+  "resolutionWarnAt": "2026-10-21T21:00:00Z",
+  "responseDue": "2026-10-21T17:00:00Z",
+  "responseWarnAt": "2026-10-21T16:30:00Z",
+  "specificity": 1
+ },
+ "E31": {
+  "agreement": "A-cur",
+  "profile": "CHI",
+  "resolutionDue": "2026-10-26T19:00:00Z",
+  "resolutionWarnAt": "2026-10-26T17:00:00Z",
+  "responseDue": "2026-10-23T23:00:00Z",
+  "responseWarnAt": "2026-10-23T22:30:00Z",
+  "specificity": 1
+ },
+ "E32": {
+  "agreement": "A-cur",
+  "profile": "CHI",
+  "resolutionDue": "2026-10-26T17:00:00Z",
+  "resolutionWarnAt": "2026-10-26T16:00:00Z",
+  "responseDue": "2026-10-26T14:00:00Z",
+  "responseWarnAt": "2026-10-26T13:45:00Z",
+  "specificity": 1
+ },
+ "E33": {
+  "agreement": "A-cur",
+  "profile": "CHI",
+  "resolutionDue": "2026-10-21T17:00:00Z",
+  "resolutionWarnAt": "2026-10-21T16:00:00Z",
+  "responseDue": "2026-10-21T14:00:00Z",
+  "responseWarnAt": "2026-10-21T13:45:00Z",
+  "specificity": 1
+ },
+ "E34": {
+  "agreement": "A-cur",
+  "profile": "CHI",
+  "resolutionDue": "2026-10-22T17:00:00Z",
+  "resolutionWarnAt": "2026-10-22T16:00:00Z",
+  "responseDue": "2026-10-22T14:00:00Z",
+  "responseWarnAt": "2026-10-22T13:45:00Z",
+  "specificity": 1
+ },
+ "E35": {
+  "agreement": "A-cur",
+  "profile": "CHI",
+  "resolutionDue": "2026-11-02T21:00:00Z",
+  "resolutionWarnAt": "2026-11-02T19:00:00Z",
+  "responseDue": "2026-11-02T15:00:00Z",
+  "responseWarnAt": "2026-11-02T14:30:00Z",
+  "specificity": 1
+ },
+ "E36": {
+  "agreement": "A-cur",
+  "profile": "CHI",
+  "resolutionDue": "2026-11-30T21:00:00Z",
+  "resolutionWarnAt": "2026-11-30T19:00:00Z",
+  "responseDue": "2026-11-30T15:00:00Z",
+  "responseWarnAt": "2026-11-30T14:30:00Z",
+  "specificity": 1
+ },
+ "E37": {
+  "agreement": "A-cur",
+  "profile": "CHI",
+  "resolutionDue": "2026-11-30T18:00:00Z",
+  "resolutionWarnAt": "2026-11-30T17:00:00Z",
+  "responseDue": "2026-11-30T15:00:00Z",
+  "responseWarnAt": "2026-11-30T14:45:00Z",
+  "specificity": 1
+ },
+ "E38": {
+  "agreement": "A-cur",
+  "profile": "CHI",
+  "resolutionDue": "2026-10-22T23:00:00Z",
+  "resolutionWarnAt": "2026-10-21T23:00:00Z",
+  "responseDue": "2026-10-19T21:00:00Z",
+  "responseWarnAt": "2026-10-19T19:00:00Z",
+  "specificity": 1
+ },
+ "E39": {
+  "agreement": "A-cur",
+  "profile": "NY24",
+  "resolutionDue": "2026-11-01T11:00:00Z",
+  "resolutionWarnAt": "2026-11-01T09:00:00Z",
+  "responseDue": "2026-11-01T05:00:00Z",
+  "responseWarnAt": "2026-11-01T04:30:00Z",
+  "specificity": 1
+ },
+ "E40": {
+  "agreement": "A-cur",
+  "profile": "NY24",
+  "resolutionDue": "2026-12-26T03:00:00Z",
+  "resolutionWarnAt": "2026-12-25T21:00:00Z",
+  "responseDue": "2026-12-25T07:00:00Z",
+  "responseWarnAt": "2026-12-25T06:00:00Z",
+  "specificity": 1
+ },
+ "E41": {
+  "agreement": "A-cur",
+  "profile": "BER",
+  "resolutionDue": "2026-10-26T10:30:00Z",
+  "resolutionWarnAt": "2026-10-26T09:30:00Z",
+  "responseDue": "2026-10-23T15:00:00Z",
+  "responseWarnAt": "2026-10-23T14:45:00Z",
+  "specificity": 1
+ },
+ "E42": {
+  "agreement": "A-cur",
+  "profile": "BER",
+  "resolutionDue": "2026-12-29T15:00:00Z",
+  "resolutionWarnAt": "2026-12-29T11:00:00Z",
+  "responseDue": "2026-12-28T09:30:00Z",
+  "responseWarnAt": "2026-12-28T09:00:00Z",
+  "specificity": 1
+ },
+ "E43": {
+  "agreement": "A-cur",
+  "profile": "TOK",
+  "resolutionDue": "2026-11-04T07:00:00Z",
+  "resolutionWarnAt": "2026-11-04T05:00:00Z",
+  "responseDue": "2026-11-04T01:00:00Z",
+  "responseWarnAt": "2026-11-04T00:30:00Z",
+  "specificity": 1
+ },
+ "E44": {
+  "agreement": "A-cur",
+  "profile": "LATE",
+  "resolutionDue": "2026-11-03T03:30:00Z",
+  "resolutionWarnAt": "2026-11-03T02:30:00Z",
+  "responseDue": "2026-11-03T00:30:00Z",
+  "responseWarnAt": "2026-11-03T00:15:00Z",
+  "specificity": 1
+ },
+ "E45": {
+  "agreement": "A-cur",
+  "profile": "GOLD",
+  "resolutionDue": "2026-10-23T19:30:00Z",
+  "resolutionWarnAt": "2026-10-23T17:30:00Z",
+  "responseDue": "2026-10-23T13:30:00Z",
+  "responseWarnAt": "2026-10-23T13:00:00Z",
+  "specificity": 1
+ },
+ "E46": {
+  "agreement": null,
+  "profile": "FB",
+  "resolutionDue": "2026-10-23T15:00:00Z",
+  "resolutionWarnAt": "2026-10-22T19:00:00Z",
+  "responseDue": "2026-10-21T19:00:00Z",
+  "responseWarnAt": "2026-10-21T18:00:00Z",
+  "specificity": 0
+ },
+ "E47": {
+  "agreement": "A-cur",
+  "error": "SVC-SLA-003",
+  "profile": "NOP4",
+  "specificity": 1
+ },
+ "E48": {
+  "agreement": "A-cur",
+  "profile": "ODD",
+  "resolutionDue": "2026-10-22T13:08:00Z",
+  "resolutionWarnAt": "2026-10-22T13:05:00Z",
+  "responseDue": "2026-10-22T13:02:00Z",
+  "responseWarnAt": "2026-10-22T13:01:00Z",
+  "specificity": 1
+ },
+ "E49": {
+  "agreement": "A-cur",
+  "profile": "CHI",
+  "resolutionDue": "2026-10-21T18:59:30Z",
+  "resolutionWarnAt": "2026-10-21T17:59:30Z",
+  "responseDue": "2026-10-21T15:59:30Z",
+  "responseWarnAt": "2026-10-21T15:44:30Z",
+  "specificity": 1
+ },
+ "E50": {
+  "agreement": "A-cur",
+  "profile": "CHI",
+  "resolutionDue": "2026-12-28T19:00:00Z",
+  "resolutionWarnAt": "2026-12-28T17:00:00Z",
+  "responseDue": "2026-12-24T23:00:00Z",
+  "responseWarnAt": "2026-12-24T22:30:00Z",
+  "specificity": 1
+ }
+}

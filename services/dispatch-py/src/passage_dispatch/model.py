@@ -53,6 +53,12 @@ class Problem:
         n = len(self.travel)
         if any(len(row) != n for row in self.travel):
             raise ValueError("travel matrix must be square")
+        # Plans and routes are keyed by id; a repeated id would merge two
+        # technicians' routes or schedule one work order twice.
+        for kind, items in (("technician", self.technicians), ("work order", self.work_orders)):
+            ids = [x.id for x in items]
+            if len(set(ids)) != len(ids):
+                raise ValueError(f"duplicate {kind} id")
         for t in self.technicians:
             if not 0 <= t.home < n:
                 raise ValueError(f"technician {t.id} home outside matrix")

@@ -136,6 +136,9 @@ jobs:
           - package: scheduler-py
             ortools: true
             extras: dev
+          - package: dispatch-py
+            ortools: false
+            extras: dev
     defaults:
       run:
         working-directory: services/${{ matrix.package }}

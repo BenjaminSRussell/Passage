@@ -89,7 +89,7 @@ another owner, or lives outside my owned paths).
 | FR | Status | Reason |
 |---|---|---|
 | FR-45.1 Installed base | partial | See deliverable 1. |
-| FR-45.2 Warranties | partial | Parts, labor and travel flags and the duration from SHIP, INSTALL (starts when the installation is recorded) or REGISTRATION (the day the object is registered) are stored per object, and coverage is evaluated per work-order line on the completion day. Exclusions and warranty templates are not built. |
+| FR-45.2 Warranties | partial | Parts, labor and travel flags and the duration from SHIP, INSTALL (starts when the installation is recorded) or REGISTRATION (the day the object is registered) are stored per object, and coverage is evaluated per work-order line on the completion day. The term ends on the same day of the month, clamped to the end of a short month (31 Aug + 6 months = 28 Feb, `TestWarrantyEnd_ClampsToTheEndOfAShortMonth`). Exclusions and warranty templates are not built. |
 | FR-45.3 Service agreements | partial | Agreements and lines are stored and listed with consumed included hours; `billing_model` and `includedVisits` are recorded, but visit consumption, preventive visits, the status lifecycle after create, `price_list_id`/`discount_pct` and the subscription hand-off to wave 29 are not built. |
 | FR-45.4 SLA profiles | partial | Profiles, targets, Monday-to-Friday calendars with holiday dates, 24x7 and `pauseOnParts` are stored; calendars and holidays drive the clock arithmetic. Per-weekday hours, holidays from wave-8 calendars (handoff) and the warning threshold parameter (75 %) are not built. |
 | FR-45.5 Cases | partial | Open is built with entitlement and SLA clocks; channel is recorded. Status transitions, pause/resume, the monitor pass and the warning and breach events are built (slice 2). Not built: intake from portal and IoT sources (wave 44/25 events) and the case log/timeline. |
@@ -127,7 +127,7 @@ another owner, or lives outside my owned paths).
 
 | AC | Status | Reason |
 |---|---|---|
-| AC-45.1 Entitlement fixtures (50) | partial | Resolver unit tests exist. The 50-case fixture set under `testdata/` is not built. |
+| AC-45.1 Entitlement fixtures (50) | partial | `svc-entitlement-50` (`internal/domain/testdata/`, answers from the independent `reference_entitlement.py`): 50/50 resolve to the reference agreement, specificity, SLA profile and four clock instants in `TestResolve_SvcEntitlement50`, and the 46 that case open can express do so through `OpenCase` as passage_app in `TestStore_SvcEntitlement50OpensCases` (overlapping agreements, every status, validity edges, other customers and legal entities, fallback and refusals, holidays, US and EU DST ends, 24x7, a midnight close, Tokyo). Not covered: parent-party agreements (BR-45.1 parent match needs the party hierarchy, handoff), and category lines through case open (service objects carry no category; the four category and id-tie cases run in the domain test only). Validity is checked on the UTC day of `openedAt` (E17, E18); the PRD does not say which time zone a validity date is in. |
 | AC-45.2 Pause 120 min to 2026-10-27T12:00-05:00 | partial | The pause and resume are built and tested against Postgres (`TestStore_CaseTransitionPausesAndResumes`). Open question for the PRD owner: under the BR-45.2 example calendar (Mon–Fri 08:00–18:00) 480 + 120 business minutes from Fri 2026-10-23 16:00 end Mon 2026-10-26 16:00, not Tue 12:00 (Tue 12:00 needs 960 minutes). `sla_test.go` and the store test assert Mon 16:00; the AC text should be corrected or the example calendar stated. |
 | AC-45.3 Warning at 75 % and single breach event | built | Domain tests (`TestDueAlerts*`) and `TestStore_SLAMonitorWarnsOnceThenBreachesOnce` (one warning, then one breach, nothing on later passes). The 60 s schedule is not built (see scheduled jobs). |
 | AC-45.4 1,000 territory-days, p95 < 30 s | partial | Hypothesis property (300 examples) proves greedy feasibility. CP-SAT and the timing run are not built. |
@@ -142,9 +142,9 @@ another owner, or lives outside my owned paths).
 | AC-45.13 Supplier claim settlement | partial | `TestStore_SupplierClaimSettlesAC45_13` (as passage_app): a posted work order with a WARRANTY part of 180.00 and 1.5 WARRANTY labor hours claims 270.00 at a vendor rate of 60.00; the vendor accepts 250.00; the matched credit note makes the claim SETTLED with recovered 250.00 and writes the settled event with recoveredAmount 250.00. The credit of 250.00 to the warranty expense account is posted by the GL consumer of that event (handoff). |
 | AC-45.14 Email threading | built | `TestStore_EmailIntakeThreadsAC45_14` and `TestAPI_ClaimAndEmailIntakeFlow`: an email with no token from an unknown sender opens a case in the mailbox's default category with the acknowledgment; "Re: [CS-n] pump noise" on the open case is logged on it with no new case and no acknowledgment (200 with `CASE-MAIL-001`). |
 | AC-45.15 My activities | built | `TestStore_ActivitiesListCompleteAndReschedule`: a project task and a case task of one owner both appear with their records, and completing one sets DONE with its timestamp. The project is referenced by id; wave 41 is not called. |
-| Ticket AC1 entitlement fixtures | partial | See AC-45.1. |
-| Ticket AC2 dispatch feasibility (property) | partial | Greedy only (see AC-45.4). |
-| Ticket AC3 billable vs warranty posting | partial | See AC-45.6. |
+| Ticket AC1 entitlement fixtures | met (customer agreements) | See AC-45.1; parent-party fixtures wait for the party hierarchy. |
+| Ticket AC2 dispatch feasibility (property) | met for the greedy solver | `services/dispatch-py/tests/test_feasibility_proof.py` (derandomized Hypothesis, run in CI): greedy plans pass an oracle written from BR-45.3 on the original and an adversarial generator, `plan_violations` agrees with that oracle rule for rule on mutated plans, and nothing is left unassigned that an idle technician could serve. The CP-SAT model and the AC-45.4 scale and timing run are not built (see AC-45.4). |
+| Ticket AC3 billable vs warranty posting | met | `svc-billing-30` (`internal/domain/testdata/`, answers from the independent `reference_billing.py`): 30/30 orders post the reference lines and totals in `TestPost_SvcBilling30` and as real work orders through `PostWorkOrder` as passage_app in `TestStore_SvcBilling30PostsWorkOrders` (warranty term edges, warranty before agreement, FIFO hours across lines and across three orders, half-even per line in USD, JPY and KWD, the posted event's totals and billable lines). Invoices from the posted event are wave 29 (handoff). |
 | Ticket AC4 phase-8 exit | handoff | See AC-45.9. |
 | Ticket AC5 every deliverable has code or a row here | met | This file. |
 | Ticket AC6 vet/test, web tests, specs match, chart lints | met (slice 5 included) | Service `go vet`/`go test` pass; web module vitest and tsc pass; `api/openapi.yaml` and `events/asyncapi.yaml` match the handlers and events; chart lints (see README). |
@@ -154,10 +154,10 @@ another owner, or lives outside my owned paths).
 | Item | Status | Reason |
 |---|---|---|
 | `svc-installed-base` (2,000 objects) | later slice of PSG-45 | The installed base is built; the 2,000-object fixture is not. |
-| `svc-entitlement-50` | later slice of PSG-45 | Not yet in `testdata/`. |
+| `svc-entitlement-50` | built | `internal/domain/testdata/svc-entitlement-50` (see AC-45.1). |
 | `svc-dispatch-gen` | partial | Hypothesis generator in `services/dispatch-py/tests/test_properties.py`; seeded OSRM matrix not built. |
 | `svc-mobile-replay` | later slice of PSG-45 | Needs BR-45.6. |
-| `svc-billing-30` | later slice of PSG-45 | Not built. |
+| `svc-billing-30` | built (domain and store) | `internal/domain/testdata/svc-billing-30` (see Ticket AC3). The PRD's "contract against the invoicing API" waits for wave 29. |
 | Reconciliation: Σ posted billable = wave-29 invoices; Σ warranty = GL; truck issues = part actions | later slice of PSG-45 (and handoff for the wave-29 and GL sides) | Needs invoice creation, truck stock and warranty sourcing. |
 | PWA Playwright offline E2E | handoff | `apps/technician` not built. |
 | Breach monitor performance (100k cases < 60 s) | later slice of PSG-45 | The pass is built on the partial index `service_case_sla_running` and batches with `limit`; the 100k-case timing run is not. |

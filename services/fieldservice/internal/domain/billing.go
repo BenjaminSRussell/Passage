@@ -95,8 +95,20 @@ func WarrantyActive(start time.Time, months int, on time.Time, excluded bool) bo
 	if excluded || months <= 0 {
 		return false
 	}
-	end := start.AddDate(0, months, 0)
+	end := addMonthsClamped(start, months)
 	return !on.Before(start) && on.Before(end)
+}
+
+// addMonthsClamped adds whole months keeping the day of month, clamped to the
+// last day of the target month (31 Aug + 6 months = 28 Feb), as Postgres
+// date + interval does. time.AddDate would overflow into the next month.
+func addMonthsClamped(day time.Time, months int) time.Time {
+	y, m, d := day.Date()
+	first := time.Date(y, m+time.Month(months), 1, 0, 0, 0, 0, day.Location())
+	if last := first.AddDate(0, 1, -1).Day(); d > last {
+		d = last
+	}
+	return time.Date(first.Year(), first.Month(), d, day.Hour(), day.Minute(), day.Second(), day.Nanosecond(), day.Location())
 }
 
 // PostInput is everything the billing post needs.
