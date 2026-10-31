@@ -10,6 +10,7 @@ import (
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/inventory"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/ledger"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/party"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/periods"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/purchasing"
 )
@@ -59,6 +60,15 @@ func buildPorts(getenv func(string) string) (api.Ports, error) {
 		ports.OwnershipChanges = domain.FakeOwnershipChanges{}
 	default:
 		slog.Warn("INVENTORY_URL is empty: consignment settlement answers 503 until it is set")
+	}
+	switch url := getenv("PARTY_URL"); {
+	case url != "":
+		ports.VendorGroups = party.New(url, nil).WithSigner(signer)
+	case allowFakes:
+		slog.Warn("PARTY_URL is empty: invoice.posted carries no vendor_group_id", "flag", "PASSAGE_ALLOW_FAKES")
+		ports.VendorGroups = domain.FakeVendorGroups{}
+	default:
+		slog.Warn("PARTY_URL is empty: invoice.posted carries no vendor_group_id")
 	}
 	profile, err := buildProfile(getenv, allowFakes)
 	ports.Profile = profile

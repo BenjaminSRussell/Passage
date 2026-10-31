@@ -74,6 +74,7 @@ type invoicePostedData struct {
 	OneTimePayee  string                  `json:"one_time_payee_id,omitempty"`
 	LegalEntityID string                  `json:"legal_entity_id"`
 	VendorID      string                  `json:"vendor_id"`
+	VendorGroupID string                  `json:"vendor_group_id,omitempty"`
 	InvoiceNumber string                  `json:"invoice_number"`
 	Source        string                  `json:"source"`
 	InvoiceDate   string                  `json:"invoice_date"`
@@ -243,9 +244,9 @@ func ersVendorChangedEvent(tenantID, legalEntityID, vendorID string, oldEnabled,
 	})
 }
 
-func invoicePostedEvent(tenantID string, in store.Invoice, ledgerEntryID string, total decimal.Decimal, cleared []decimal.Decimal) (events.Event, error) {
+func invoicePostedEvent(tenantID string, in store.Invoice, vendorGroupID, ledgerEntryID string, total decimal.Decimal, cleared []decimal.Decimal) (events.Event, error) {
 	data := invoicePostedData{
-		InvoiceID: in.ID, OneTimePayee: in.OneTimePayeeID, LegalEntityID: in.LegalEntityID, VendorID: in.VendorID, InvoiceNumber: in.InvoiceNumber, Source: in.Source,
+		InvoiceID: in.ID, OneTimePayee: in.OneTimePayeeID, LegalEntityID: in.LegalEntityID, VendorID: in.VendorID, VendorGroupID: vendorGroupID, InvoiceNumber: in.InvoiceNumber, Source: in.Source,
 		InvoiceDate: in.InvoiceDate.Format(dateLayout), PostingDate: in.PostingDate.Format(dateLayout), Currency: in.Currency,
 		Total: total.String(), LedgerEntryID: ledgerEntryID, Lines: make([]invoicePostedLineData, 0, len(in.Lines)),
 	}

@@ -84,6 +84,8 @@ spec:
             {{- end }}
             - name: INVENTORY_URL
               value: {{ .Values.serviceUrls.inventory | default (printf "http://inventory.%s.svc:8080" .Release.Namespace) | quote }}
+            - name: PARTY_URL
+              value: {{ .Values.serviceUrls.party | default (printf "http://party.%s.svc:8080" .Release.Namespace) | quote }}
             - name: POSTING_LEDGER_ID
               value: {{ .Values.postingProfile.ledgerId | quote }}
             - name: POSTING_ACCOUNT_INVENTORY

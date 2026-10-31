@@ -12,6 +12,7 @@ import (
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/domain"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/inventory"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/ledger"
+	"github.com/BenjaminSRussell/passage/services/receiving/internal/party"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/periods"
 	"github.com/BenjaminSRussell/passage/services/receiving/internal/purchasing"
 )
@@ -178,7 +179,13 @@ func TestBuildPortsWiresPlanAndOwnershipLookups(t *testing.T) {
 		return ports
 	}
 
-	real := build(map[string]string{"INVENTORY_URL": "http://i"})
+	real := build(map[string]string{"INVENTORY_URL": "http://i", "PARTY_URL": "http://party"})
+	if _, ok := real.VendorGroups.(*party.Client); !ok {
+		t.Fatalf("vendor groups is %T despite PARTY_URL", real.VendorGroups)
+	}
+	if unset := build(nil); unset.VendorGroups != nil {
+		t.Fatalf("vendor groups is %T with PARTY_URL unset and no fakes", unset.VendorGroups)
+	}
 	if _, ok := real.OwnershipChanges.(*inventory.Client); !ok {
 		t.Fatalf("ownership changes is %T despite INVENTORY_URL", real.OwnershipChanges)
 	}

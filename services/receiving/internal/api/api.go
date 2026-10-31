@@ -52,6 +52,7 @@ type Ports struct {
 
 	PlanRowSettlements domain.PlanRowSettlements
 	OwnershipChanges   domain.OwnershipChanges
+	VendorGroups       domain.VendorGroups
 	AuditSampler       *domain.Sampler
 
 	ResolveMinAge time.Duration
@@ -79,6 +80,7 @@ type API struct {
 	auditReleased   atomic.Int64
 	auditRejected   atomic.Int64
 	payeesCreated   atomic.Int64
+	groupMissing    atomic.Int64
 
 	pendingPostings pendingTracker
 	http            requestMetrics
@@ -163,6 +165,7 @@ func (a *API) Metrics() http.Handler {
 		{"receiving_period_resolve_fallback_total", "Documents posted with the caller-supplied fiscal period because close has no dated period (temporary).", &a.resolveFallback},
 		{"receiving_one_time_payees_created_total", "One-time payees recorded for vendor invoices.", &a.payeesCreated},
 		{"receiving_invoices_audit_released_total", "Audit-blocked invoices released by an auditor and posted.", &a.auditReleased},
+		{"receiving_vendor_group_lookups_failed_total", "Invoices posted without vendor_group_id because party was unreachable, refused the lookup or does not know the vendor.", &a.groupMissing},
 		{"receiving_invoices_audit_rejected_total", "Audit-blocked invoices rejected by an auditor, freeing their GR/IR quantity.", &a.auditRejected},
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

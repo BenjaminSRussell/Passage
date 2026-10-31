@@ -11,6 +11,7 @@ serviceUrls:
   close: ""
   purchasing: ""
   inventory: ""
+  party: ""
 # postingProfile values are required outside dev: the pod exits at startup with "POSTING_LEDGER_ID is required" when ledgerId is empty.
 # serviceUrls.purchasing defaults to http://purchasing-purchasing.<namespace>.svc, the Service the purchasing chart renders for a release named "purchasing".
 postingProfile:

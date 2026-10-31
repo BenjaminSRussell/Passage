@@ -3,12 +3,15 @@ package api
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/shopspring/decimal"
 
 	"github.com/BenjaminSRussell/passage/platform/httpx"
@@ -212,6 +215,10 @@ func (a *API) submitInvoice(ctx context.Context, p tenant.Principal, in store.In
 		in.AuditRuleVersion = policy.RuleVersion
 	}
 	blocked := in.AuditReason != ""
+	vendorGroupID := ""
+	if !blocked {
+		vendorGroupID = a.vendorGroupID(ctx, in)
+	}
 	posted, err := a.store.PostInvoice(ctx, in, func(items []*domain.GrirItem) (store.InvoiceOutcome, error) {
 		lines := make([]domain.PostLine, len(in.Lines))
 		for i, l := range in.Lines {
@@ -235,7 +242,7 @@ func (a *API) submitInvoice(ctx context.Context, p tenant.Principal, in store.In
 			return store.InvoiceOutcome{}, err
 		}
 		total := entry.Lines[len(entry.Lines)-1].Amount.Value.Neg()
-		evt, err := invoicePostedEvent(p.TenantID, in, entry.LedgerEntryID, total, entry.GrirCleared)
+		evt, err := invoicePostedEvent(p.TenantID, in, vendorGroupID, entry.LedgerEntryID, total, entry.GrirCleared)
 		return store.InvoiceOutcome{LedgerEntryID: entry.LedgerEntryID, Total: total, Clearings: entry.GrirCleared, Event: evt}, err
 	})
 	if err != nil {
@@ -248,6 +255,19 @@ func (a *API) submitInvoice(ctx context.Context, p tenant.Principal, in store.In
 	a.pendingPostings.finish(invoiceSubjects(posted)...)
 	a.invoiced.Add(1)
 	return posted, nil
+}
+
+func (a *API) vendorGroupID(ctx context.Context, in store.Invoice) string {
+	if a.ports.VendorGroups == nil {
+		return ""
+	}
+	group, err := a.ports.VendorGroups.VendorGroupID(ctx, in.LegalEntityID, in.VendorID)
+	if err != nil {
+		a.groupMissing.Add(1)
+		slog.WarnContext(ctx, "invoice posts without vendor_group_id", "err", err, "invoiceId", in.ID, "vendorId", in.VendorID, "notFound", errors.Is(err, domain.ErrVendorNotFound), "correlationId", middleware.GetReqID(ctx))
+		return ""
+	}
+	return group
 }
 
 func invoiceAmount(in store.Invoice) decimal.Decimal {
